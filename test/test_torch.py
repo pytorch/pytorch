@@ -10885,26 +10885,26 @@ class TestTorchDeviceType(TestCase):
         device = torch.device('cpu')
         index = torch.tensor([[1], [2]], device=device, dtype=torch.long)
         test_data = [
-            (torch.zeros(4, 4, device=device),
+            (torch.zeros(4, 4, device=device, dtype=torch.float32),
              torch.ones(2, 2, device=device),
              torch.tensor([[0, 0, 0, 0],
                            [1, 0, 0, 0],
                            [1, 0, 0, 0],
                            [0, 0, 0, 0]],
                           device=device, dtype=torch.float32), "sum"),
-            (torch.zeros(4, 4, device=device),
+            (torch.zeros(4, 4, device=device, dtype=torch.float32),
              torch.ones(2, 2, device=device),
              torch.tensor([[0, 0, 0, 0],
                            [-1, 0, 0, 0],
                            [-1, 0, 0, 0],
                            [0, 0, 0, 0]], device=device, dtype=torch.float32), "subtract"),
-            (torch.tensor([2], device=device).repeat(4, 4),
+            (torch.tensor([2], device=device, dtype=torch.float32).repeat(4, 4),
              torch.tensor([2], device=device).repeat(2, 2),
              torch.tensor([[2, 2, 2, 2],
                            [4, 2, 2, 2],
                            [4, 2, 2, 2],
                            [2, 2, 2, 2]], device=device, dtype=torch.float32), "multiply"),
-            (torch.tensor([2], device=device).repeat(4, 4),
+            (torch.tensor([2], device=device, dtype=torch.float32).repeat(4, 4),
              torch.tensor([2], device=device).repeat(2, 2),
              torch.tensor([[2, 2, 2, 2],
                            [1, 2, 2, 2],
@@ -10920,23 +10920,23 @@ class TestTorchDeviceType(TestCase):
         device = torch.device('cpu')
         index = torch.tensor([[1], [2]], device=device, dtype=torch.long)
         test_data = [
-            (torch.zeros(4, 4, device=device), torch.tensor(1),
+            (torch.zeros(4, 4, device=device, dtype=torch.float32), torch.tensor(1),
              torch.tensor([[0, 0, 0, 0],
                            [1, 0, 0, 0],
                            [1, 0, 0, 0],
                            [0, 0, 0, 0]],
                           device=device, dtype=torch.float32), "sum"),
-            (torch.zeros(4, 4, device=device), torch.tensor(1),
+            (torch.zeros(4, 4, device=device, dtype=torch.float32), torch.tensor(1),
              torch.tensor([[0, 0, 0, 0],
                            [-1, 0, 0, 0],
                            [-1, 0, 0, 0],
                            [0, 0, 0, 0]], device=device, dtype=torch.float32), "subtract"),
-            (torch.tensor([2], device=device).repeat(4, 4), torch.tensor(2),
+            (torch.tensor([2], device=device, dtype=torch.float32).repeat(4, 4), torch.tensor(2),
              torch.tensor([[2, 2, 2, 2],
                            [4, 2, 2, 2],
                            [4, 2, 2, 2],
                            [2, 2, 2, 2]], device=device, dtype=torch.float32), "multiply"),
-            (torch.tensor([2], device=device).repeat(4, 4), torch.tensor(2),
+            (torch.tensor([2], device=device, dtype=torch.float32).repeat(4, 4), torch.tensor(2),
              torch.tensor([[2, 2, 2, 2],
                            [1, 2, 2, 2],
                            [1, 2, 2, 2],
@@ -10964,15 +10964,15 @@ class TestTorchDeviceType(TestCase):
         # restrict to CPU until CUDA implementation is done.
         device = torch.device('cpu')
         height = 2
-        width = 65536
+        width = 2
         index = torch.zeros(height, width, dtype=torch.long, device=device)
         test_data = [
-            (torch.ones(height, width, device=device),
-             torch.ones(height, width, device=device),
+            (torch.ones(height, width, device=device, dtype=torch.float32),
+             torch.ones(height, width, device=device, dtype=torch.float32),
              torch.tensor([[3], [1]], device=device, dtype=torch.float32).repeat(1, width), "sum"),
 
-            (torch.ones(height, width, device=device),
-             torch.ones(height, width, device=device),
+            (torch.ones(height, width, device=device, dtype=torch.float32),
+             torch.ones(height, width, device=device, dtype=torch.float32),
              torch.tensor([[-1], [1]], device=device,
                           dtype=torch.float32).repeat(1, width), "subtract"),
 
@@ -10988,7 +10988,11 @@ class TestTorchDeviceType(TestCase):
         ]
 
         for input, src, result, operation in test_data:
+            print("--src--")
+            print(src)
             input.scatter_(0, index, src, reduce=operation)
+            print(input)
+            print(result)
             self.assertEqual(input, result, operation)
 
     def test_scatter_bool(self, device):

@@ -8,21 +8,7 @@
 namespace at { namespace native {
 
 namespace {
-
-#define DEFINE_REDUCE_FUNCTOR(FUNCTOR_NAME, OPERATOR) class FUNCTOR_NAME { \
-public:                                                             \
- FUNCTOR_NAME() {};                                                 \
- template <typename T>                                              \
- void operator() (T* self_data, const T* src_data) {                \
-   *self_data OPERATOR *src_data;                                   \
- };};                                                               \
- FUNCTOR_NAME FUNCTOR_NAME##_func;
-
-DEFINE_REDUCE_FUNCTOR(ReduceSum, +=);
-DEFINE_REDUCE_FUNCTOR(ReduceSubtract, -=);
-DEFINE_REDUCE_FUNCTOR(ReduceMultiply, *=);
-DEFINE_REDUCE_FUNCTOR(ReduceDivide, /=);
-
+  
 static inline int64_t ensure_nonempty_dim(int64_t dim) {
   return std::max<int64_t>(dim, 1);
 }
@@ -314,13 +300,43 @@ void scatter_add_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, cons
     /*serial_exec=*/false);
 }
 
+  class ReduceFunctor {
+  public:
+    ReduceFunctor() {};
+    template <typename T, typename func_t>
+    void operator() (T* self_data, const T* src_data,
+                     func_t op) {
+      op(self_data, src_data);
+    }
+  };
+
+  ReduceFunctor reduce_fn;
+
+  auto reduce_sum = [](auto * self_data, const auto * src_data) {
+                      *self_data += *src_data;
+                    };
+
+  auto reduce_subtract = [](auto * self_data, const auto * src_data) {
+                           *self_data -= *src_data;
+                         };
+
+  auto reduce_multiply = [](auto * self_data, const auto * src_data) {
+                           *self_data *= *src_data;
+                         };
+
+  auto reduce_divide = [](auto * self_data, const auto * src_data) {
+                         std::cout << "self_data: " << *self_data << std::endl;
+                         std::cout << "src data: " << *src_data << std::endl;
+                         *self_data /= *src_data;
+                       };
+
 template <typename func_t>
 void cpu_scatter_gather_reduce_kernel(
   Tensor& self, int64_t dim,
   const Tensor& index, const Tensor& src,
   const std::string& method_name,
   const func_t& f,
-  const std::string& reduce,
+  const std::string reduce,
   bool serial_exec = true
 ) {
   auto index_sizes = ensure_nonempty_vec(index.sizes().vec());
@@ -356,12 +372,12 @@ void cpu_scatter_gather_reduce_kernel(
   AT_DISPATCH_ALL_TYPES_AND2(
     ScalarType::Bool, ScalarType::Half, iter.dtype(),
     method_name, [&] {
-      using reduce_fn = std::function<void(scalar_t*, const scalar_t*)>;
-      std::map<const std::string, reduce_fn> reduce_funcs = {
-          {"sum", ReduceSum_func},
-          {"subtract", ReduceSubtract_func},
-          {"multiply", ReduceMultiply_func},
-          {"divide", ReduceDivide_func}                                   
+      using reduce_func_t = std::function<void(scalar_t*, const scalar_t*)>;
+      std::map<const std::string, reduce_func_t> reduce_funcs = {
+          {"sum", reduce_sum},
+          {"subtract", reduce_subtract},
+          {"multiply", reduce_multiply},
+          {"divide", reduce_divide}
       };
       auto loop = [&](char** data, const int64_t* strides, int64_t n) {
         auto* self_data_bytes = data[0];
@@ -390,6 +406,7 @@ void cpu_scatter_gather_reduce_kernel(
   );
 }
 
+
 void scatter_reduce_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, const Tensor& src,
                                std::string& reduce) {
   if (index.numel() == 0) {
@@ -409,7 +426,7 @@ void scatter_reduce_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, c
       auto* self_data, auto self_dim_stride,
       const auto* index_data, auto index_dim_stride,
       const auto* src_data, auto src_dim_stride,
-      auto& reduce_funcs, const std::string& reduce
+      auto& reduce_funcs, const std::string reduce
     ) {                   
       for (int64_t i = 0; i < index_dim_size; ++i) {
         int64_t idx_dim = index_data[i * index_dim_stride];
@@ -419,8 +436,15 @@ void scatter_reduce_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, c
                     "index ", index_data[i * index_dim_stride],
                     " is out of bounds for dimension ", dim,
                     " with size ", self_dim_size);
-        reduce_funcs[reduce](&self_data[idx_dim * self_dim_stride],
-                             &src_data[i * src_dim_stride]);
+
+        std::cout << "inside src: " << src << std::endl;
+        std::cout << "s: " << self_data[idx_dim * self_dim_stride]
+                  << " sr: " << src_data[i * src_dim_stride] << std::endl;
+        reduce_fn(&self_data[idx_dim * self_dim_stride],
+                  &src_data[i * src_dim_stride],
+                  reduce_funcs[reduce]);
+        // reduce_funcs[reduce](&self_data[idx_dim * self_dim_stride],
+        //                      &src_data[i * src_dim_stride]);
       }
     },
     reduce,
