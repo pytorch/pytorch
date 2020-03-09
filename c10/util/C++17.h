@@ -13,15 +13,15 @@
 
 #if !defined(__clang__) && !defined(_MSC_VER) && defined(__GNUC__) && \
   __GNUC__ < 5
-#error "You're trying to build PyTorch with a too old version of GCC. We need GCC 5 or later."
+#error "You're trying to build PyTorch or its extensions with a too old version of GCC. We need GCC 5 or later."
 #endif
 
 #if defined(__clang__) && __clang_major__ < 4
-#error "You're trying to build PyTorch with a too old version of Clang. We need Clang 4 or later."
+#error "You're trying to build PyTorch or its extensions with a too old version of Clang. We need Clang 4 or later."
 #endif
 
 #if (defined(_MSC_VER) && (!defined(_MSVC_LANG) || _MSVC_LANG < 201402L)) || (!defined(_MSC_VER) && __cplusplus < 201402L)
-#error You need C++14 to compile PyTorch
+#error You need C++14 to compile PyTorch or its extensions
 #endif
 
 /*
