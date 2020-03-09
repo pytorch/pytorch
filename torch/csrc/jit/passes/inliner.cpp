@@ -31,6 +31,9 @@ void inlineCalls(Block* block) {
         const std::string& name = cur->s(attr::name);
         if (auto class_type = cur->input(0)->type()->cast<ClassType>()) {
           auto function = class_type->getMethod(name);
+          if (!function->isGraphFunction()) {
+            continue;
+          }
           GRAPH_UPDATE("Inlining method '", function->name(), "' to ", *cur);
           GRAPH_UPDATE("Function body: ", *function->optimized_graph());
           inlineCallTo(cur, function);
