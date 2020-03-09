@@ -6338,21 +6338,26 @@ class TestTorchDeviceType(TestCase):
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     def test_block_diag_scipy(self, device):
+        import scipy.linalg
         scipy_tensors = [
             1,
-            [2.],
+            [2],
             [],
             [3, 4, 5],
             [[], []],
-            [[6.], [7.]]
+            [[6], [7.3]]
         ]
         torch_tensors = [torch.tensor(t, device=device) for t in scipy_tensors]
-
-        from scipy.linalg import block_diag
-
-        scipy_result = block_diag(*scipy_tensors)
         torch_result = torch.block_diag(*torch_tensors)
-        self.assertEqual(torch_result, torch.tensor(scipy_result, device=device))
+        self.assertEqual(torch_result.dtype, torch.float32)
+
+        # Need to convert to 64-bit to compare with scipy
+        torch_result = torch_result.double()
+        scipy_result = torch.tensor(
+            scipy.linalg.block_diag(*scipy_tensors),
+            device=device
+        )
+        self.assertEqual(torch_result, scipy_result)
 
     def test_is_set_to(self, device):
         t1 = torch.empty(3, 4, 9, 10, device=device)
