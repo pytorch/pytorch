@@ -182,6 +182,9 @@ Examples::
   >>> y.requires_grad
   False
 
+.. autofunction:: no_grad
+.. autofunction:: enable_grad
+.. autofunction:: set_grad_enabled
 
 Math operations
 ----------------------------------

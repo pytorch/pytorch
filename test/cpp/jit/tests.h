@@ -27,6 +27,7 @@ namespace jit {
   _(FromQualString)                    \
   _(InternedStrings)                   \
   _(IValue)                            \
+  _(IValueFuture)                      \
   _(PassManagement)                    \
   _(Proto)                             \
   _(RegisterFusionCachesKernel)        \
@@ -83,7 +84,10 @@ namespace jit {
   _(AutogradSymbols)                   \
   _(MobileTypeParser)                  \
   _(LiteInterpreterPrim)               \
-  _(LiteInterpreterLoadOrigJit)
+  _(LiteInterpreterLoadOrigJit)        \
+  _(LiteInterpreterWrongMethodName)    \
+  _(LiteInterpreterParams)             \
+  _(LiteInterpreterSetState)
 
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \

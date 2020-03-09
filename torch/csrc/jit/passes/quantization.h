@@ -5,8 +5,8 @@
  */
 #pragma once
 
-#include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/script/module.h>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/api/module.h>
 
 namespace std {
 
@@ -89,6 +89,8 @@ TORCH_API script::Module InsertQuantDeQuant(
  *  quantization patterns
  */
 TORCH_API void ReplicateDeQuant(std::shared_ptr<Graph>& graph);
+
+TORCH_API void SwapDeQuant(std::shared_ptr<Graph>& graph);
 
 /** \brief Backend specific pass to fuse dequantize - op - quantize calls
  * as quantized_op calls.
