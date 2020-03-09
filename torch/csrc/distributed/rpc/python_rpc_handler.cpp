@@ -96,8 +96,8 @@ std::string PythonRpcHandler::generatePythonUDFResult(
     std::vector<torch::Tensor>& responseTensorTable) {
   PROFILE_GIL_SCOPED_ACQUIRE;
   auto pargs = py::bytes(serializedPyObj.payload_);
-  py::tuple pres = pySerialize_(
-      pyRunFunction_(pargs, serializedPyObj.tensors_));
+  py::tuple pres =
+      pySerialize_(pyRunFunction_(pargs, serializedPyObj.tensors_));
   responseTensorTable = pres[1].cast<std::vector<torch::Tensor>>();
   return pres[0].cast<std::string>();
 }
