@@ -44,7 +44,7 @@ class Value {
   Dtype dtype_;
   std::vector<int32> i32_values;
   std::vector<float> f32_values;
-  void* ptr;
+  void* ptr{};
 };
 
 template <>

@@ -1,6 +1,6 @@
 #include <torch/jit.h>
 
-#include <torch/csrc/jit/script/ir_emitter.h>
+#include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <ATen/core/stack.h>
 
 #include <memory>

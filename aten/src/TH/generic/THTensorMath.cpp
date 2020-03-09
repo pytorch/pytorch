@@ -271,10 +271,10 @@ void THTensor_(addr)(THTensor *r_, THTensor *t, THTensor *vec1, THTensor *vec2, 
   if(t->dim() != 2)
     THError("expected matrix, got %dD tensor for t", t->dim());
 
-  auto vec1_size = THTensor_sizeLegacyNoScalars(vec1, 0);
-  auto vec2_size = THTensor_sizeLegacyNoScalars(vec2, 0);
-  auto vec1_stride = THTensor_strideLegacyNoScalars(vec1, 0);
-  auto vec2_stride = THTensor_strideLegacyNoScalars(vec2, 0);
+  auto vec1_size = THTensor_(size)(vec1, 0);
+  auto vec2_size = THTensor_(size)(vec2, 0);
+  auto vec1_stride = THTensor_(stride)(vec1, 0);
+  auto vec2_stride = THTensor_(stride)(vec2, 0);
 
   if( (t->size(0) != vec1_size) || (t->size(1) != vec2_size) ) {
     THDescBuff bt  = THTensor_(sizeDesc)(t);
@@ -334,72 +334,6 @@ void THTensor_(addr)(THTensor *r_, THTensor *t, THTensor *vec1, THTensor *vec2, 
 // Should wrap if the value (a) has a different sign than the divisor (b), but is not 0.
 static inline bool modulo_wrap(scalar_t a, scalar_t b) {
   return (a != 0) && (a < 0) != (b < 0);
-}
-
-void THTensor_(cadd)(THTensor *r_, THTensor *t, scalar_t value, THTensor *src)
-{
-  THTensor_(resizeAs)(r_, t);
-  int64_t r_Size = THTensor_(nElement)(r_);
-  int64_t srcSize = THTensor_(nElement)(src);
-  int r_Contig = THTensor_(isContiguous)(r_);
-  int tContig = THTensor_(isContiguous)(t);
-  int srcContig = THTensor_(isContiguous)(src);
-  if (srcSize == r_Size) {
-    if (r_Contig && tContig && srcContig) {
-      if(r_ == t) {
-        THBlas_(axpy)(THTensor_(nElement)(t), value, src->data<scalar_t>(), 1, r_->data<scalar_t>(), 1);
-      } else {
-        TH_TENSOR_APPLY3_CONTIG(scalar_t, r_, scalar_t, t, scalar_t, src, THVector_(cadd)(r__data, t_data, src_data, value, r__len););
-      }
-    } else {
-      TH_TENSOR_APPLY3_PARALLEL(r_Size, r_Contig, tContig, srcContig, scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data + value * *src_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
-    }
-  } else {
-    TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data + value * *src_data;);
-  }
-}
-
-void THTensor_(csub)(THTensor *r_, THTensor *t, scalar_t value, THTensor *src)
-{
-  THTensor_(cadd)(r_, t, -value, src);
-}
-
-void THTensor_(cmul)(THTensor *r_, THTensor *t, THTensor *src)
-{
-  THTensor_(resizeAs)(r_, t);
-  int64_t r_Size = THTensor_(nElement)(r_);
-  int64_t srcSize = THTensor_(nElement)(src);
-  int r_Contig = THTensor_(isContiguous)(r_);
-  int tContig = THTensor_(isContiguous)(t);
-  int srcContig = THTensor_(isContiguous)(src);
-  if (srcSize == r_Size){
-    if (r_Contig && tContig && srcContig) {
-      TH_TENSOR_APPLY3_CONTIG(scalar_t, r_, scalar_t, t, scalar_t, src, THVector_(cmul)(r__data, t_data, src_data, r__len););
-    } else {
-      TH_TENSOR_APPLY3_PARALLEL(r_Size, r_Contig, tContig, srcContig, scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data * *src_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
-    }
-  } else {
-    TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data * *src_data;);
-  }
-}
-
-void THTensor_(cdiv)(THTensor *r_, THTensor *t, THTensor *src)
-{
-  THTensor_(resizeAs)(r_, t);
-  int64_t r_Size = THTensor_(nElement)(r_);
-  int64_t srcSize = THTensor_(nElement)(src);
-  int r_Contig = THTensor_(isContiguous)(r_);
-  int tContig = THTensor_(isContiguous)(t);
-  int srcContig = THTensor_(isContiguous)(src);
-  if (srcSize == r_Size){
-    if (r_Contig && tContig && srcContig) {
-      TH_TENSOR_APPLY3_CONTIG(scalar_t, r_, scalar_t, t, scalar_t, src, THVector_(cdiv)(r__data, t_data, src_data, r__len););
-    } else {
-      TH_TENSOR_APPLY3_PARALLEL(r_Size, r_Contig, tContig, srcContig, scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data / *src_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
-    }
-  } else {
-    TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data / *src_data;);
-  }
 }
 
 void THTensor_(cremainder)(THTensor *r_, THTensor *t, THTensor *src)

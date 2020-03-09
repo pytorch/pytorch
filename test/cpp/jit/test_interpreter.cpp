@@ -18,7 +18,7 @@ void testInterp() {
   auto w_hh = t_def(at::randn({4 * hidden_size, hidden_size}, at::kCUDA));
 
   auto lstm_g = build_lstm();
-  Code lstm_function(lstm_g);
+  Code lstm_function(lstm_g, "");
   InterpreterState lstm_interp(lstm_function);
   auto outputs = run(lstm_interp, {input[0], hx, cx, w_ih, w_hh});
   std::tie(hx, cx) = lstm(input[0], hx, cx, w_ih, w_hh);
