@@ -415,31 +415,29 @@ If the future completes with an error, an exception is thrown.
         // exception will be thrown in get_function() call; if args do not match
         // with function schema, exception will be thrown in
         // createStackForSchema() call.
+        c10::QualifiedName qualifiedName;
         {
           py::gil_scoped_acquire acquire;
-          c10::QualifiedName qualifiedName =
-              c10::QualifiedName(py::cast<std::string>(
-                  py::module::import("torch.jit")
-                      .attr("_qualified_name")(userCallable)));
+          qualifiedName = c10::QualifiedName(py::cast<std::string>(
+              py::module::import("torch.jit")
+                  .attr("_qualified_name")(userCallable)));
         }
-        c10::FunctionSchema functionSchema =
-            std::make_shared<c10::FunctionSchema>(
-                PythonRpcHandler::getInstance()
-                    .jitCompilationUnit()
-                    ->get_function(qualifiedName)
-                    .getSchema());
+        c10::FunctionSchema functionSchema = PythonRpcHandler::getInstance()
+                                                 .jitCompilationUnit()
+                                                 ->get_function(qualifiedName)
+                                                 .getSchema();
         Stack stack;
         {
           py::gil_scoped_acquire acquire;
           stack = torch::jit::createStackForSchema(
-              *functionSchemaPtr,
+              functionSchema,
               argsTuple.cast<py::args>(),
               kwargsDict.cast<py::kwargs>(),
               c10::nullopt);
         }
         DCHECK(!PyGILState_Check());
-        c10::intrusive_ptr<c10::ivalue::Future> fut = rpcTorchscript(
-            dstWorkerName, qualifiedName, *functionSchemaPtr, stack);
+        c10::intrusive_ptr<c10::ivalue::Future> fut =
+            rpcTorchscript(dstWorkerName, qualifiedName, functionSchema, stack);
         return PythonFutureWrapper(fut);
       },
       py::call_guard<py::gil_scoped_release>());
