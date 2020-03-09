@@ -191,7 +191,7 @@ struct ReadyQueue {
   // might set this to false.
   void push(NodeTask item, bool incrementOutstandingTasks = true);
   void pushShutdownTask();
-  NodeTask pop();
+  std::unique_ptr<NodeTask> pop();
   bool empty() const;
   size_t size() const;
 };
@@ -217,9 +217,10 @@ struct TORCH_API Engine {
   // Given a pre-populated GraphTask and GraphRoot, computes the backward pass
   // for the graph. This API should only be used by internal autograd specific
   // machinery and shouldn't be exposed to users in anyway.
-  virtual variable_list execute_with_graph_task(
+  virtual std::shared_ptr<FutureVariableList> execute_with_graph_task(
       const std::shared_ptr<GraphTask>& graph_task,
-      std::shared_ptr<Node> graph_root);
+      std::shared_ptr<Node> graph_root,
+      bool async_mode = false);
 
   // Enqueues a blocked task for execution on the CPU thread. A blocked task is
   // basically a task that isn't triggered automatically to be
@@ -246,7 +247,7 @@ struct TORCH_API Engine {
   // initialize the thread local ready queue with the ready queue that is created
   // elsewhere, i.e. thread_init, reentrant_thread_init, initialization in the
   // distributed autograd engine, etc.
-  void init_local_ready_queue(std::shared_ptr<ReadyQueue> ready_queue);
+  std::shared_ptr<ReadyQueue> init_local_ready_queue(std::shared_ptr<ReadyQueue> ready_queue = nullptr);
 
   size_t ready_queue_size(const std::shared_ptr<GraphTask>& graph_task, at::Device device);
 
@@ -312,9 +313,10 @@ struct TORCH_API Engine {
  std::shared_ptr<ThreadPoolShared> thread_pool_shared_;
 
 private:
+ void execute_node_task(const std::unique_ptr<NodeTask>& task);
  variable_list graph_task_exec_post_processing(
      const std::shared_ptr<GraphTask>& graph_task);
- void mark_graph_task_completed(std::shared_ptr<GraphTask>& graph_task);
+ void mark_graph_task_completed(const std::shared_ptr<GraphTask>& graph_task);
 };
 
 // allow python_engine to override the default engine when it loads

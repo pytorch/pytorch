@@ -196,12 +196,13 @@ size_t ReadyQueue::size() const {
   return heap_.size();
 }
 
-auto ReadyQueue::pop() -> NodeTask {
+auto ReadyQueue::pop() -> std::unique_ptr<NodeTask> {
   // Lock mutex for accesses to heap_
   std::unique_lock<std::mutex> lock(mutex_);
   not_empty_.wait(lock, [this]{ return !heap_.empty(); });
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-  auto task = std::move(const_cast<NodeTask&>(heap_.top())); heap_.pop();
+  auto task = make_unique<NodeTask>(std::move(const_cast<NodeTask&>(heap_.top())));
+  heap_.pop();
   return task;
 }
 
@@ -308,39 +309,15 @@ auto Engine::thread_main(
   // Why the test on graph_task->outstanding_tasks_?  See
   // Note [Reentrant backwards]
   while (!reentrant_thread || graph_task->outstanding_tasks_ > 0) {
-    NodeTask task = local_ready_queue->pop();
+    auto task = local_ready_queue->pop();
     // This will only work if the worker is running a non backward task
     // TODO Needs to be fixed this to work in all cases
-    if (task.isShutdownTask_) {
+    if (task->isShutdownTask_) {
       C10_LOG_API_USAGE_ONCE("torch.autograd.thread_shutdown");
       break;
     }
-
-    // local_graph_task represents the graph_task we retrieve from the queue.
-    // The outer graph_task represents the overall graph_task we need to execute
-    // for reentrant execution.
-    std::shared_ptr<GraphTask> local_graph_task;
-    if (!(local_graph_task = task.base_.lock())) {
-      // Reentrant thread's graph task should not expire since we hold a
-      // reference to it in this method.
-      TORCH_INTERNAL_ASSERT(!reentrant_thread);
-      LOG(INFO) << "GraphTask for function " << task.fn_->name()
-                << " is no longer valid, skipping execution";
-      continue;
-    }
-
-    if (task.fn_ && !local_graph_task->has_error_.load()) {
-      AutoGradMode grad_mode(local_graph_task->grad_mode_);
-      try {
-        evaluate_function(local_graph_task, task.fn_.get(), task.inputs_);
-      } catch (std::exception& e) {
-        thread_on_exception(local_graph_task, task.fn_, e);
-      }
-    }
-
-    // Decrement the outstanding tasks.
-    --local_graph_task->outstanding_tasks_;
-
+    execute_node_task(task);
+    std::shared_ptr<GraphTask> local_graph_task = task->base_.lock();
     // Check if we've completed execution.
     bool gt_completed = graph_task_completed(local_graph_task);
     if (gt_completed) {
@@ -734,7 +711,7 @@ auto Engine::execute(const edge_list& roots,
   bool is_reentrant_call = worker_device != NO_DEVICE;
   std::shared_ptr<ReadyQueue> memorized_cpu_ready_queue = nullptr;
 
-  if (is_reentrant_call || local_ready_queue) {
+  if (is_reentrant_call) {
     // Reentrant call will still use the parent thread ready_queue
     // While we can create separate cpu_ready_queue for each new reentrant
     // thread, but sharing the same cpu_ready_queue with parent thread is
@@ -747,7 +724,7 @@ auto Engine::execute(const edge_list& roots,
   } else {
     // A frech first time Engine::execute call should start on the CPU device,
     // initialize a new thread local ready queue on CPU and memorize it in GraphTask
-    init_local_ready_queue(std::make_shared<ReadyQueue>());
+    init_local_ready_queue();
     memorized_cpu_ready_queue = local_ready_queue;
   }
 
@@ -765,7 +742,7 @@ auto Engine::execute(const edge_list& roots,
     graph_task->init_to_execute(*graph_root, outputs);
   }
 
-  return execute_with_graph_task(graph_task, graph_root);
+  return execute_with_graph_task(graph_task, graph_root)->wait();
 }
 
 void Engine::initialize_device_threads_pool() {
@@ -787,9 +764,37 @@ void Engine::enqueue_blocked_task_on_cpu(NodeTask task) {
       std::move(task), /* incrementOutstandingTasks */ false);
 }
 
-variable_list Engine::execute_with_graph_task(
+void Engine::execute_node_task(const std::unique_ptr<NodeTask>& task) {
+  // local_graph_task represents the graph_task we retrieve from the queue.
+  // The outer graph_task represents the overall graph_task we need to execute
+  // for reentrant execution.
+  std::shared_ptr<GraphTask> local_graph_task;
+  if (!(local_graph_task = task->base_.lock())) {
+    // Reentrant thread's graph task should not expire since we hold a
+    // reference to it in this method.
+    LOG(INFO) << "GraphTask for function " << task->fn_->name()
+              << " is no longer valid, skipping execution";
+    return;
+  }
+
+  if (task->fn_ && !local_graph_task->has_error_.load()) {
+    AutoGradMode grad_mode(local_graph_task->grad_mode_);
+    try {
+      evaluate_function(local_graph_task, task->fn_.get(), task->inputs_);
+    } catch (std::exception& e) {
+      thread_on_exception(local_graph_task, task->fn_, e);
+    }
+  }
+
+  // Decrement the outstanding tasks.
+  --local_graph_task->outstanding_tasks_;
+
+}
+
+std::shared_ptr<FutureVariableList> Engine::execute_with_graph_task(
     const std::shared_ptr<GraphTask>& graph_task,
-    std::shared_ptr<Node> graph_root) {
+    std::shared_ptr<Node> graph_root,
+    bool async_mode) {
   initialize_device_threads_pool();
   // Lock mutex for GraphTask.
   std::unique_lock<std::mutex> lock(graph_task->mutex_);
@@ -818,8 +823,29 @@ variable_list Engine::execute_with_graph_task(
     // The owning thread start to drive the engine execution with the GraphTask
     // that has already been pushed to the current CPU thread's ready_queue
     lock.unlock();
-    thread_main(nullptr, false);
-
+    if (async_mode) {
+      std::function<void()> handle_work = [this, &graph_task, &handle_work]() {
+        while(!local_ready_queue->empty()) {
+          auto task = local_ready_queue->pop();
+          execute_node_task(task);
+        }
+        // Check if we've completed execution.
+        if (graph_task_completed(graph_task)) {
+          // We don't need to explicitly notify the owner thread, since
+          // 'mark_graph_task_completed' would mark the Future as completed and this
+          // would notify the owner thread that the task has been completed.
+          mark_graph_task_completed(graph_task);
+        } else {
+          // schedule a continuation
+          std::cout << "start scheduling a continuation" << std::endl;
+          at::launch(handle_work);
+        }
+      };
+      handle_work();
+    } else {
+      thread_main(nullptr, false);
+      TORCH_INTERNAL_ASSERT(graph_task->future_result_->completed());
+    }
     // reset the worker_device after the completion of the graph_task, this is so
     // that the initial state of the engine remains the same across every backward()
     // or grad() call, we don't need to reset local_ready_queue as we could possibly
@@ -857,10 +883,10 @@ variable_list Engine::execute_with_graph_task(
   }
   // graph_task_exec_post_processing is done when the Future is marked as
   // completed in mark_graph_task_completed.
-  return graph_task->future_result_->wait();
+  return graph_task->future_result_;
 }
 
-void Engine::mark_graph_task_completed(std::shared_ptr<GraphTask>& graph_task) {
+void Engine::mark_graph_task_completed(const std::shared_ptr<GraphTask>& graph_task) {
   std::unique_lock<std::mutex> lock(graph_task->mutex_);
   if (graph_task->future_result_->completed()) {
     // Future is already marked as completed.
@@ -939,9 +965,16 @@ bool Engine::is_checkpoint_valid() {
   return checkpoint_valid;
 }
 
-void Engine::init_local_ready_queue(std::shared_ptr<ReadyQueue> ready_queue) {
-  TORCH_INTERNAL_ASSERT(!local_ready_queue);
-  local_ready_queue = std::move(ready_queue);
+std::shared_ptr<ReadyQueue> Engine::init_local_ready_queue(std::shared_ptr<ReadyQueue> ready_queue) {
+  // if provided ready queue in the caller, use the caller's ready_queue to initialize local_ready_queue
+  if (ready_queue) {
+    TORCH_INTERNAL_ASSERT(!local_ready_queue);
+    local_ready_queue = std::move(ready_queue);
+  } else if (!local_ready_queue){
+    // otherwise if local_ready_queue not allocated, allocate a new ready_queue
+    local_ready_queue = std::make_shared<ReadyQueue>();
+  }
+  return local_ready_queue;
 }
 
 size_t Engine::ready_queue_size(const std::shared_ptr<GraphTask>& graph_task, at::Device device) {

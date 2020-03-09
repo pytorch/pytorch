@@ -78,8 +78,7 @@ void DistEngine::computeDependencies(
   // autograd engine, since Distributed Autograd Engine calls
   // Engine::execute_with_graph_task instead of Engine::execute, we
   // need to allocate our own CPU ReadyQueue for the GraphTask.
-  std::shared_ptr<ReadyQueue> cpu_ready_queue = std::make_shared<ReadyQueue>();
-  engine_.init_local_ready_queue(cpu_ready_queue);
+  auto cpu_ready_queue = engine_.init_local_ready_queue();
 
   // Build the graph task and graph root.
   auto graphTask = std::make_shared<GraphTask>(
@@ -193,9 +192,7 @@ std::shared_ptr<rpc::FutureMessage> DistEngine::runEngineAndAccumulateGradients(
     const std::shared_ptr<Node>& graphRoot,
     const edge_list& outputEdges) {
 
-  std::shared_ptr<FutureVariableList> futureGrads = std::make_shared<FutureVariableList>();
-  auto grads = engine_.execute_with_graph_task(autogradContext->retrieveGraphTask(), graphRoot);
-  futureGrads->markCompleted(grads);
+  auto futureGrads = engine_.execute_with_graph_task(autogradContext->retrieveGraphTask(), graphRoot, /*async_mode=*/true);
 
   // Build a future that waits for the callbacks to execute (since callbacks
   // execute after the original future is completed). This ensures we return a
@@ -208,7 +205,15 @@ std::shared_ptr<rpc::FutureMessage> DistEngine::runEngineAndAccumulateGradients(
           const c10::optional<torch::utils::FutureError>& error) {
         if (error) {
           // Don't accumulate gradients if we receive an error.
-          accumulateGradFuture->setError(error->what());
+          // We must add the node information here since DistEngine::execute
+          // waits on accumulateGradFuture and will throw an exception once we
+          // set the error below.
+          std::string errorMsg = c10::str(
+              "Error on Node ",
+              DistAutogradContainer::getInstance().getWorkerId(),
+              ": ",
+              error->what());
+          accumulateGradFuture->setError(errorMsg);
           return;
         }
 

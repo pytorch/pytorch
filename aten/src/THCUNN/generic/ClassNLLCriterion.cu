@@ -11,7 +11,7 @@ void THNN_(ClassNLLCriterion_updateOutput)(
            THCTensor *weights,
            THCTensor *total_weight,
            int64_t ignore_index) {
-  if (THCIndexTensor_(nDimensionLegacyNoScalars)(state, target) > 1) {
+  if (THCIndexTensor_(nDimension)(state, target) > 1) {
     THError("multi-target not supported");
   }
 
