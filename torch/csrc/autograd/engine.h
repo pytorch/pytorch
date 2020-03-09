@@ -48,7 +48,7 @@ struct GraphTask {
   bool grad_mode_;
 
   // To protect reads/writes to not_ready_, dependencies_, captured_vars_,
-  // has_error_ and future_result_.
+  // has_error_, future_result_ and leaf_streams.
   std::mutex mutex_;
   std::unordered_map<Node*, InputBuffer> not_ready_;
   std::unordered_map<Node*, int> dependencies_;
@@ -217,6 +217,7 @@ struct TORCH_API Engine {
   void reentrant_thread_init();
   void add_thread_pool_task(const std::weak_ptr<GraphTask>& graph_task);
   void set_device(int device);
+  void initialize_threads_pool();
 
   // Ensures ready_queues_ are initialized only once
   std::once_flag start_threads_flag_;

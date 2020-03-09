@@ -40,7 +40,7 @@ std::pair<tensor_list, tensor_list> runGradient(
     return fmap(stack, [](const IValue& i) { return i.toTensor(); });
   };
   ClearUndefinedness(grad_spec.df);
-  Code f_code{grad_spec.f}, df_code{grad_spec.df};
+  Code f_code{grad_spec.f, ""}, df_code{grad_spec.df, ""};
   InterpreterState f_interpreter{f_code}, df_interpreter{df_code};
 
   auto f_stack = fmap<IValue>(tensors_in);

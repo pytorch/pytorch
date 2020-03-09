@@ -69,17 +69,17 @@ enum pytorch_qnnp_status pytorch_qnnp_create_tanh_nc_q8(
 
   status = pytorch_qnnp_status_unsupported_parameter;
 
-  if (output_scale != 0x1.0p-8f) {
+  if (output_scale != 0x2.0p-8f) {  // [-1, 1] range in 8 bits = 2.0 / 256
     pytorch_qnnp_log_error(
-        "failed to create TanH operator with %.7g output scale: only output scale of 1/256 is supported",
+        "failed to create TanH operator with %.7g output scale: only output scale of 2/256 is supported",
         output_scale);
     goto error;
   }
 
-  if (output_zero_point != 0) {
+  if (output_zero_point != 128) {
     pytorch_qnnp_log_error(
         "failed to create TanH operator with %" PRIu8
-        " output zero point: only output zero point of 0 is supported",
+        " output zero point: only output zero point of 128 is supported",
         output_zero_point);
     goto error;
   }
@@ -107,8 +107,10 @@ enum pytorch_qnnp_status pytorch_qnnp_create_tanh_nc_q8(
   for (int32_t i = 0; i < 256; i++) {
     const float x =
         input_scale * (float)(i - (int32_t)(uint32_t)input_zero_point);
-    /* Scale tanh(x) by 1 / output scale = 256.0 */
-    float scaled_tanh_x = 256.0f * tanh(x);
+    /* Scale tanh(x) by 1 / output scale = 128.0
+       Also, offset by the zero_point from the scaled value, as we assume UINT8
+    */
+    float scaled_tanh_x = 128.0f * tanh(x) + 128.0f;
     if (scaled_tanh_x < scaled_min) {
       scaled_tanh_x = scaled_min;
     }

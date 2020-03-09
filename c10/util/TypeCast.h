@@ -149,16 +149,16 @@ C10_HOST_DEVICE inline void cast_and_store(const ScalarType dest_type, void *ptr
   ERROR_UNSUPPORTED_CAST
 }
 
-#define DEFINE_UNCASTABLE(T, scalartype_)                                         \
-template<>                                                                        \
+#define DEFINE_UNCASTABLE(T, scalartype_)                                                         \
+template<>                                                                                        \
 C10_HOST_DEVICE inline T fetch_and_cast<T>(const ScalarType src_type, const void *ptr) {          \
-  CUDA_KERNEL_ASSERT(ScalarType::scalartype_ == src_type);                                    \
-  return *(const T *)ptr;                                                         \
-}                                                                                 \
-template<>                                                                        \
+  CUDA_KERNEL_ASSERT(ScalarType::scalartype_ == src_type);                                        \
+  return *(const T *)ptr;                                                                         \
+}                                                                                                 \
+template<>                                                                                        \
 C10_HOST_DEVICE inline void cast_and_store<T>(const ScalarType dest_type, void *ptr, T value) {   \
-  CUDA_KERNEL_ASSERT(ScalarType::scalartype_ == dest_type);                                   \
-  *(T *)ptr = value;                                                              \
+  CUDA_KERNEL_ASSERT(ScalarType::scalartype_ == dest_type);                                       \
+  *(T *)ptr = value;                                                                              \
 }
 
 AT_FORALL_QINT_TYPES(DEFINE_UNCASTABLE)
@@ -167,5 +167,22 @@ AT_FORALL_QINT_TYPES(DEFINE_UNCASTABLE)
 #undef CAST_AND_STORE_CASE
 #undef DEFINE_UNCASTABLE
 #undef ERROR_UNSUPPORTED_CAST
+
+template <typename To, typename From>
+To convert(From f) {
+  return static_cast_with_inter_type<To, From>::apply(f);
+}
+
+template <typename To, typename From>
+To checked_convert(From f, const char* name) {
+  // Converting to bool can't overflow so we exclude this case from checking.
+  if (!std::is_same<To, bool>::value && overflows<To, From>(f)) {
+    std::ostringstream oss;
+    oss << "value cannot be converted to type " << name
+        << " without overflow: " << f;
+    throw std::domain_error(oss.str());
+  }
+  return convert<To, From>(f);
+}
 
 }  // namespace c10

@@ -38,7 +38,15 @@ std::shared_ptr<FutureMessage> RequestCallback::operator()(
   } catch (std::exception& e) {
     LOG(ERROR) << "Received error while processing request type "
                << request.type() << ": " << e.what();
-    return std::make_shared<FutureMessage>(createExceptionResponse(request, e));
+    // Adding node information to the error here since all processed RPC
+    // requests should be going through this function.
+    std::string errorMsg = c10::str(
+        "Error on Node ",
+        DistAutogradContainer::getInstance().getWorkerId(),
+        ": ",
+        e.what());
+    return std::make_shared<FutureMessage>(
+        createExceptionResponse(request, errorMsg));
   }
 }
 

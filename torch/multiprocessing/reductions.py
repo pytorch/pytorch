@@ -175,7 +175,7 @@ def reduce_tensor(tensor):
     # the old ones alives.
     # See [https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__DEVICE.html]
     #
-    # This is fine, because all we need to do is to save our position in the allocaiton,
+    # This is fine, because all we need to do is to save our position in the allocation,
     # and reconstruct storage and tensor from it.
     # 0xA000 ->  -------CUDA Allocation------
     #           |                            |

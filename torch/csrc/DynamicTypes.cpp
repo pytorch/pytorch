@@ -62,7 +62,7 @@ PyTypeObject* getPyTypeObject(const at::Storage& storage)
   at::ScalarType scalarType = at::typeMetaToScalarType(storage.dtype());
   at::TensorOptions options = at::TensorOptions(storage.device_type()).dtype(scalarType);
   auto attype = &at::getDeprecatedTypeProperties(
-      at::tensorTypeIdToBackend(at::computeTensorTypeId(options)),
+      at::dispatchKeyToBackend(at::computeDispatchKey(options)),
       scalarType);
   auto it = attype_to_py_storage_type.find(attype);
   if (it != attype_to_py_storage_type.end()) {

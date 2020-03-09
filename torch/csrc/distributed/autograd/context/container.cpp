@@ -59,8 +59,9 @@ DistAutogradContainer& DistAutogradContainer::getInstance() {
 }
 
 DistAutogradContainer& DistAutogradContainer::getInstanceInternal() {
-  static DistAutogradContainer container;
-  return container;
+  // Leaky singleton to avoid module destructor race.
+  static DistAutogradContainer* container = new DistAutogradContainer();
+  return *container;
 }
 
 int64_t DistAutogradContainer::newAutogradMessageId() {
@@ -159,7 +160,7 @@ void DistAutogradContainer::sendReleaseContextRpc(int64_t context_id) {
   // notify other workers to clean up their contexts.
   auto workerIds =
       autograd_context_.find(context_id)->second->getKnownWorkerIds();
-  auto agent = rpc::RpcAgent::getDefaultRpcAgent();
+  auto agent = rpc::RpcAgent::getCurrentRpcAgent();
   for (const auto& worker_id : workerIds) {
     agent->send(
         agent->getWorkerInfo(worker_id),
@@ -174,6 +175,14 @@ void DistAutogradContainer::eraseContextIdAndReset(int64_t context_id) {
     // Reset the thread_local current context id, since it is no longer valid.
     current_context_id_ = kInvalidContextId;
   }
+}
+
+void DistAutogradContainer::isValidContext(int64_t context_id) {
+  std::lock_guard<std::mutex> guard(autograd_context_lock_);
+  TORCH_CHECK(
+      autograd_context_.find(context_id) != autograd_context_.end(),
+      "Could not find autograd context with id: ",
+      context_id);
 }
 
 ContextPtr DistAutogradContainer::retrieveContext(int64_t context_id) {

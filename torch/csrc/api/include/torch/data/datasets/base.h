@@ -93,7 +93,7 @@ class Dataset : public BatchDataset<Self, std::vector<SingleExample>> {
   }
 };
 
-/// A `StreamDataset` reprsents a dataset that is a potentially infinite stream.
+/// A `StreamDataset` represents a dataset that is a potentially infinite stream.
 /// It takes as batch index only a number, which is the batch size, and yields
 /// that many elements from the stream.
 template <typename Self, typename Batch = std::vector<Example<>>>

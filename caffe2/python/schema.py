@@ -185,7 +185,7 @@ class Field(object):
         )
 
     def _pprint_impl(self, indent, str_buffer):
-        raise NotImplementedError('Field is an abstrct class.')
+        raise NotImplementedError('Field is an abstract class.')
 
     def __repr__(self):
         str_buffer = StringIO()

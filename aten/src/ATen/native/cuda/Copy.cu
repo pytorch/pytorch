@@ -58,7 +58,6 @@ void copy_device_to_device(TensorIterator& iter, bool non_blocking) {
         cudaMemcpyDeviceToDevice,
         copy_stream));
   } else {
-    iter.dynamic_cast_if(true);
     AT_DISPATCH_ALL_TYPES_AND3(kHalf, kBool, kBFloat16, iter.dtype(0), "copy_", [&] {
       gpu_kernel(iter, []GPU_LAMBDA(scalar_t x) { return x; });
     });
@@ -117,7 +116,7 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
   Device dst_device = iter.device(0);
   Device src_device = iter.device(1);
 
-  // Enable p2p access between devices. (No-op if it invovles the CPU)
+  // Enable p2p access between devices. (No-op if it involves the CPU)
   bool p2p_enabled = maybe_enable_p2p_access(dst_device, src_device);
 
   if (copy_requires_temporaries(iter, p2p_enabled)) {

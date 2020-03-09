@@ -7,7 +7,7 @@ import sys
 import time
 import unittest
 
-from common_utils import (PY3, TestCase, run_tests, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN)
+from torch.testing._internal.common_utils import (PY3, TestCase, run_tests, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN)
 import torch.multiprocessing as mp
 
 

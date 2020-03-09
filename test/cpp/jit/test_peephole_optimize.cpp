@@ -1,9 +1,9 @@
 #include <test/cpp/jit/test_base.h>
 #include <test/cpp/jit/test_utils.h>
 
-#include <torch/csrc/jit/irparser.h>
+#include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/passes/peephole.h>
-#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/ir/ir.h>
 
 namespace torch {
 namespace jit {
@@ -108,7 +108,8 @@ graph(%1 : Float(*, *, *)?):
         %3 : int = prim::Constant[value=1]()
         %4 : Tensor = aten::mm(%0, %1)
         %5 : Tensor = aten::add(%4, %2, %3)
-        return (%5)
+        %6 : Tensor = aten::add(%5, %2, %3)
+        return (%6)
         )IR", graph.get());
     PeepholeOptimize(graph, true);
     testing::FileCheck().check("addmm")->run(*graph);

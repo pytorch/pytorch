@@ -256,7 +256,7 @@ void copyParameters(torch::nn::ModuleHolder<Impl>& target, size_t t_i,
 
 // This test is a port of python code introduced here:
 // https://towardsdatascience.com/understanding-bidirectional-rnn-in-pytorch-5bd25a5dd66
-// Reverse forward of bidrectional GRU should act
+// Reverse forward of bidirectional GRU should act
 // as regular forward of unidirectional GRU
 void BidirectionalGRUReverseForward(bool cuda) {
   auto opt = torch::TensorOptions().dtype(torch::kFloat32).requires_grad(false)
@@ -307,7 +307,7 @@ TEST_F(RNNTest, BidirectionalGRUReverseForward_CUDA) {
   BidirectionalGRUReverseForward(true);
 }
 
-// Reverse forward of bidrectional LSTM should act
+// Reverse forward of bidirectional LSTM should act
 // as regular forward of unidirectional LSTM
 void BidirectionalLSTMReverseForwardTest(bool cuda) {
   auto opt = torch::TensorOptions().dtype(torch::kFloat32).requires_grad(false)

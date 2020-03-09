@@ -116,7 +116,7 @@ class FeatureSparseToDense(ModelLayer):
                 # we keep ranges blob to check input data later.
                 # Currently this schema with ranges and values is only for
                 # generic type enum 1. If new types are implemented, we need to
-                # modify the ParseGeneric operator, and this part accordinly
+                # modify the ParseGeneric operator, and this part accordingly
                 outputs.append(
                     (
                         field,
@@ -260,7 +260,7 @@ class FeatureSparseToDense(ModelLayer):
                 # Currently our implementation only supports
                 # generic type enum 1. If new types are implemented, we need to
                 # modify the ParseGeneric operator, the schema above,
-                # and this part accordinly to parse the generic feature strings
+                # and this part accordingly to parse the generic feature strings
                 # into input_record
 
                 ranges = net.LengthsToRanges(

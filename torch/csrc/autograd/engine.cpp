@@ -35,6 +35,24 @@
 
 namespace torch { namespace autograd {
 
+namespace {
+static bool in_bad_autograd_fork =
+    false; // True for children forked after engine's thread pool init
+
+// Called in the forked child if engine's thread pool has already been
+// initialized
+static void forked_autograd_child() { in_bad_autograd_fork = true; }
+
+// Should be called before unsafe for forks (thread pool) calls
+static void track_bad_autograd_forks() {
+#ifndef WIN32
+  static std::once_flag flag;
+  std::call_once(
+      flag, [&] { pthread_atfork(nullptr, nullptr, forked_autograd_child); });
+#endif
+}
+}
+
 // Threads spawned by the engine are assigned a constant 'worker_device'
 // specifying what device they process work for.  This variable is initialized
 // at thread creation time and is constant afterwards.  This is used when
@@ -154,8 +172,14 @@ struct ReadyQueue {
 
 int NodeTask::getReentrantDepth() const {
   std::shared_ptr<GraphTask> graph_task = base_.lock();
-  TORCH_INTERNAL_ASSERT(graph_task, "GraphTask is no longer valid!")
-  return graph_task->reentrant_depth_;
+  if (graph_task) {
+    return graph_task->reentrant_depth_;
+  } else {
+    // The graph task is no longer valid indicating an error. As a result, we
+    // try to move this to the front of the queue to ensure the autograd
+    // engine threads pick up this error soon.
+    return std::numeric_limits<int>::max();
+  }
 }
 
 bool graph_task_completed(const std::shared_ptr<GraphTask>& graph_task) {
@@ -302,16 +326,14 @@ auto Engine::thread_main(
     // for reentrant execution.
     std::shared_ptr<GraphTask> local_graph_task;
     if (!(local_graph_task = task.base_.lock())) {
-      // Reentrant thread's graph task should not expire since we hold a
-      // reference to it in this method.
-      TORCH_INTERNAL_ASSERT(!reentrant_thread);
+      // If the task's graph_task expired, just ignore the task.
       LOG(INFO) << "GraphTask for function " << task.fn_->name()
                 << " is no longer valid, skipping execution";
       continue;
     }
 
     if (task.fn_ && !local_graph_task->has_error_.load()) {
-      GradMode::set_enabled(local_graph_task->grad_mode_);
+      AutoGradMode grad_mode(local_graph_task->grad_mode_);
       try {
         evaluate_function(local_graph_task, task.fn_.get(), task.inputs_);
       } catch (std::exception& e) {
@@ -380,13 +402,23 @@ void Engine::thread_on_exception(
 void GraphTask::set_exception(
     std::exception& e,
     const std::shared_ptr<Node>& fn) {
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::unique_lock<std::mutex> lock(mutex_);
   if (!has_error_.load()) {
     if (AnomalyMode::is_enabled() && fn) {
       fn->metadata()->print_stack();
     }
     has_error_ = true;
-    future_result_->setError(e.what());
+    // Careful: setting the future_result_ can trigger DistAutogradContext to
+    // resetGraphTask(), sometimes deleting this underlying GraphTask.
+    // Don't touch *this after setError() below, and release the lock early, to
+    // avoid unlocking this->mutex_ after setting the future.
+    std::shared_ptr<FutureVariableList> future_result = future_result_;
+    lock.unlock();
+    if (!future_result->completed()) {
+      future_result->setError(e.what());
+    } else {
+      TORCH_INTERNAL_ASSERT(future_result->hasError());
+    }
   }
 }
 
@@ -558,6 +590,7 @@ void Engine::evaluate_function(
     // Records leaf stream (if applicable)
     // See note "Streaming backwards"
     if (opt_parent_stream) {
+      std::lock_guard<std::mutex> lock(graph_task->mutex_);
       graph_task->leaf_streams.emplace(*opt_parent_stream);
     }
     return;
@@ -711,8 +744,16 @@ auto Engine::execute(const edge_list& roots,
   return execute_with_graph_task(graph_task, graph_root)->wait();
 }
 
-void Engine::enqueue_blocked_task_on_cpu(NodeTask task) {
+void Engine::initialize_threads_pool() {
+  track_bad_autograd_forks();
+  TORCH_CHECK(!in_bad_autograd_fork,
+              "Unable to handle autograd's threading in combination with fork-based multiprocessing. "
+              "See https://github.com/pytorch/pytorch/wiki/Autograd-and-Fork");
   std::call_once(start_threads_flag_, &Engine::start_threads, this);
+}
+
+void Engine::enqueue_blocked_task_on_cpu(NodeTask task) {
+  initialize_threads_pool();
   ready_queue(at::kCPU).push(
       std::move(task), /* incrementOutstandingTasks */ false);
 }
@@ -720,7 +761,7 @@ void Engine::enqueue_blocked_task_on_cpu(NodeTask task) {
 std::shared_ptr<FutureVariableList> Engine::execute_with_graph_task(
     const std::shared_ptr<GraphTask>& graph_task,
     std::shared_ptr<Node> graph_root) {
-  std::call_once(start_threads_flag_, &Engine::start_threads, this);
+  initialize_threads_pool();
   // Lock mutex for GraphTask.
   std::unique_lock<std::mutex> lock(graph_task->mutex_);
 
@@ -756,12 +797,14 @@ std::shared_ptr<FutureVariableList> Engine::execute_with_graph_task(
       --current_depth;
       --total_depth;
 
-      // Check for errors, call callbacks and sync streams. We return a
-      // completed future here since 'thread_main' above is a call blocking an
-      // autograd engine thread and not the thread the user called
+      // The graph task should have completed and the associated future should
+      // be marked completed as well.
+      TORCH_INTERNAL_ASSERT(graph_task->future_result_->completed());
+
+      // We return a completed future here since 'thread_main' above is a call
+      // blocking an autograd engine thread and not the thread the user called
       // 'execute_with_graph_task' from.
-      return std::make_shared<FutureVariableList>(
-          graph_task_exec_post_processing(graph_task));
+      return graph_task->future_result_;
     }
   }
 }

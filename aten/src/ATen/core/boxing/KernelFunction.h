@@ -10,6 +10,13 @@ namespace c10 {
 
 class OperatorHandle;
 
+// This kernel implements the behavior of falling through to the next available
+// registered dispatch key.  The implementation of this function is FAST; it is
+// no overhead to fallthrough to the next key.  See cpp file for some more
+// implementation notes; notably, this does NOT actually go through the
+// boxing/unboxing codepath.
+CAFFE2_API void fallthrough_kernel(OperatorKernel*, const OperatorHandle&, Stack*);
+
 /**
  * KernelFunction is similar to std::function but stores a kernel function.
  * You can create a KernelFunction from a boxed or unboxed function/functor/lambda
@@ -26,6 +33,7 @@ public:
   KernelFunction();
 
   bool isValid() const;
+  bool isFallthrough() const;
 
   /**
    * Call the function in a boxed way.
@@ -187,6 +195,8 @@ public:
 
   template<class FuncType>
   static KernelFunction makeFromUnboxedOnlyRuntimeFunction(FuncType* func);
+
+  static KernelFunction makeFallthrough();
 
   /**
    * Create a KernelFunction from an unboxed lambda.

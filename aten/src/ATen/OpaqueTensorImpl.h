@@ -19,9 +19,9 @@ namespace at {
 template <typename OpaqueHandle>
 struct CAFFE2_API OpaqueTensorImpl : public TensorImpl {
   // public constructor for now...
-  OpaqueTensorImpl(at::TensorTypeSet type_set, const caffe2::TypeMeta& data_type, c10::Device device,
+  OpaqueTensorImpl(at::DispatchKeySet key_set, const caffe2::TypeMeta& data_type, c10::Device device,
                    OpaqueHandle opaque_handle, c10::IntArrayRef sizes)
-  :   TensorImpl(type_set, data_type, device),
+  :   TensorImpl(key_set, data_type, device),
       opaque_handle_(std::move(opaque_handle))
   {
     sizes_ = sizes.vec();
@@ -43,10 +43,6 @@ struct CAFFE2_API OpaqueTensorImpl : public TensorImpl {
 
   int64_t stride(int64_t d) const override {
     AT_ERROR("opaque tensors do not have strides");
-  }
-
-  void resize_dim(int64_t ndim) override {
-    AT_ERROR("opaque tensors do not have resize_dim");
   }
 
   void set_size(int64_t dim, int64_t new_size) override {
@@ -83,7 +79,7 @@ struct CAFFE2_API OpaqueTensorImpl : public TensorImpl {
       const c10::VariableVersion& version_counter,
       bool allow_tensor_metadata_change) const override {
     auto impl = c10::make_intrusive<OpaqueTensorImpl<OpaqueHandle>>(
-      type_set(), dtype(), device(), opaque_handle_, sizes_);
+      key_set(), dtype(), device(), opaque_handle_, sizes_);
     copy_tensor_metadata(
       /*src_impl=*/this,
       /*dest_impl=*/impl.get(),
@@ -100,7 +96,7 @@ struct CAFFE2_API OpaqueTensorImpl : public TensorImpl {
    * see NOTE [ TensorImpl Shallow-Copying ].
    */
   void shallow_copy_from(const c10::intrusive_ptr<TensorImpl>& impl) override {
-    AT_ASSERT(has_compatible_shallow_copy_type(impl->type_set()));
+    AT_ASSERT(has_compatible_shallow_copy_type(impl->key_set()));
     auto opaque_impl = static_cast<const OpaqueTensorImpl<OpaqueHandle>*>(impl.get());
     copy_tensor_metadata(
       /*src_impl=*/opaque_impl,

@@ -216,6 +216,8 @@ def load(f, map_location=None, _extra_files=DEFAULT_EXTRA_FILES_MAP):
     if isinstance(f, string_classes):
         if not os.path.exists(f):
             raise ValueError("The provided filename {} does not exist".format(f))
+        if os.path.isdir(f):
+            raise ValueError("The provided filename {} is a directory".format(f))
     if isinstance(map_location, string_classes):
         map_location = torch.device(map_location)
     elif not (map_location is None or
@@ -284,7 +286,7 @@ def _get_trace_graph(f, args=(), kwargs=None, _force_outplace=False,
 
 
 def _unique_state_dict(module, keep_vars=False):
-    # since Parameter.data always creates a new torch.Tensor instance,
+    # since Parameter.detach() always creates a new torch.Tensor instance,
     # id(v) doesn't work with it. So we always get the Parameter or Buffer
     # as values, and deduplicate the params using Parameters and Buffers
     state_dict = module.state_dict(keep_vars=True)
@@ -297,7 +299,7 @@ def _unique_state_dict(module, keep_vars=False):
         if keep_vars:
             filtered_dict[k] = v
         else:
-            filtered_dict[k] = v.data
+            filtered_dict[k] = v.detach()
     return filtered_dict
 
 
@@ -379,7 +381,7 @@ def _clone_inputs(args):
             return None
         elif isinstance(a, torch.Tensor):
             # TODO: figure out one liner to .clone() and set requires_grad
-            v = Variable(a.data.clone(memory_format=torch.preserve_format), requires_grad=a.requires_grad)
+            v = a.detach().clone(memory_format=torch.preserve_format).requires_grad_(a.requires_grad)
             if a.grad is not None:
                 v.grad = clone_input(v.grad)
             return v
@@ -390,24 +392,9 @@ def _clone_inputs(args):
 
 
 # This is purely for developer debugging.  We are not going to advertise it.
-_JIT_DUMP = os.environ.get('PYTORCH_JIT_DUMP', False)
 _JIT_TIME = os.environ.get('PYTORCH_JIT_TIME', False)  # CUDA-only timing
 _JIT_DISABLE = os.environ.get('PYTORCH_JIT_DISABLE', False)
 _JIT_STATS = os.environ.get('PYTORCH_JIT_STATS', False)
-
-
-def _dump_trace(trace_name, pass_name, input_key, trace):
-    if not _JIT_DUMP:
-        return
-
-    import torch.contrib._graph_vis as graph_vis
-
-    filename = "{}_{}".format(trace_name, pass_name)
-    # TODO: Also paste out the backtrace when the trace was compiled
-    # (and maybe also when it was run?)
-    with open(filename + ".ir", "w") as f:
-        f.write("Input key: {}\n\n{}".format(input_key, str(trace)))
-    graph_vis.write(trace.graph(), filename + ".html")
 
 
 @contextlib.contextmanager
@@ -490,11 +477,11 @@ def verify(model, args, loss_fn=torch.sum, devices=None):
             raise ValueError(("Model returns {} outputs, but default loss function "
                               "(torch.sum) can only handle a single output").format(len(out)))
         out_vars, _ = _flatten(out)
-        saved_outs = [v.data.clone(memory_format=torch.preserve_format) for v in out_vars]
+        saved_outs = [v.detach().clone(memory_format=torch.preserve_format) for v in out_vars]
         loss = loss_fn(*out)
         grads = torch.autograd.grad([loss], in_vars)
         # TODO: I'm not sure if the clone here is necessary but it is safer
-        saved_grads = [v.data.clone(memory_format=torch.preserve_format) for v in grads]
+        saved_grads = [v.detach().clone(memory_format=torch.preserve_format) for v in grads]
         return (saved_outs, saved_grads)
 
     with torch.random.fork_rng(devices, _caller="torch.jit.verify"):
@@ -668,6 +655,10 @@ def _check_trace(check_inputs, func, traced_func, check_tolerance,
             all_ok = True
             for i, (orig, ref) in enumerate(zip(original, reference)):
                 try:
+                    if orig.is_quantized:
+                        orig = orig.dequantize()
+                    if ref.is_quantized:
+                        ref = ref.dequantize()
                     torch.testing.assert_allclose(orig.double(), ref.double(), rtol=check_tolerance,
                                                   atol=torch.testing._get_default_tolerance(orig, ref)[1])
                 except AssertionError as e:
@@ -1637,6 +1628,15 @@ if _enabled:
             return self.forward.graph
 
         @property
+        def inlined_graph(self):
+            r"""
+            Returns a string representation of the internal graph for the
+            ``forward`` method. This graph will be preprocessed to inline all function and method calls.
+            See `Interpreting Graphs`_ for details.
+            """
+            return self.forward.inlined_graph
+
+        @property
         def code(self):
             r"""
             Returns a pretty-printed representation (as valid Python syntax) of
@@ -1652,6 +1652,20 @@ if _enabled:
             See :func:`torch.jit.save <torch.jit.save>` for details.
             """
             return self._c.save(*args, **kwargs)
+
+        def _save_for_lite_interpreter(self, *args, **kwargs):
+            r"""
+            _save_for_lite_interpreter(f)
+
+            Add (or update) the bytecode session to the script model. The updated model is used
+            in lite interpreter for mobile applications.
+
+            Arguments:
+                f: a string containing a file name.
+                _extra_files: Map from filename to contents which will be stored as part of 'f'.
+
+            """
+            return self._c._save_for_mobile(*args, **kwargs)
 
         def save_to_buffer(self, *args, **kwargs):
             return self._c.save_to_buffer(*args, **kwargs)
@@ -1856,6 +1870,9 @@ class TracedModule(ScriptModule):
             if buf is not None:
                 tmp_module._buffers[name] = buf
                 check_unique(buf)
+        for name, val in orig.__dict__.items():
+            if torch._C._jit_is_script_object(val) and name not in orig._parameters and name not in orig._buffers:
+                setattr(tmp_module, name, val)
 
         if orig._backward_hooks:
             raise ValueError("Modules that have backward hooks assigned can't be compiled: " + str(orig))
@@ -1973,8 +1990,7 @@ def _add_script_class(cls, name):
 def _get_script_class(name):
     global _script_classes
     if name not in _script_classes:
-        raise RuntimeError("Unknown reference to ScriptClass '{}'. "
-                           "Did you forget to import it?".format(name))
+        return None
     return _script_classes[name]
 
 # overloads are registered in _jit_internal and compiled here so that _overload
@@ -1990,7 +2006,7 @@ def _check_overload_defaults(impl_defaults, overload_defaults, loc):
 
 def _compile_function_with_overload(overload_fn, qual_name, impl_fn):
     overload_decl = torch.jit.get_jit_def(overload_fn).decl()
-    overload_signature = torch.jit.annotations.get_signature(overload_fn, None, None)
+    overload_signature = torch.jit.annotations.get_signature(overload_fn, None, None, inspect.ismethod(overload_fn))
     impl_ast = torch.jit.get_jit_def(impl_fn)
     overload_defaults = get_default_args(overload_fn)
     implementation_defaults = get_default_args(impl_fn)
@@ -2041,7 +2057,8 @@ def _get_named_tuple_properties(obj):
     has_annotations = hasattr(obj, '__annotations__')
     for field in fields:
         if has_annotations and field in obj.__annotations__:
-            annotations.append(torch.jit.annotations.ann_to_type(obj.__annotations__[field]))
+            the_type = torch.jit.annotations.ann_to_type(obj.__annotations__[field], _jit_internal.fake_range())
+            annotations.append(the_type)
         else:
             annotations.append(torch._C.TensorType.get())
     return type(obj).__name__, fields, annotations

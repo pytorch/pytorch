@@ -50,8 +50,8 @@
 #include <torch/csrc/MemoryFormat.h>
 #include <torch/csrc/QScheme.h>
 #include <torch/csrc/autograd/python_variable.h>
-#include <torch/csrc/jit/tracer.h>
-#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/frontend/tracer.h>
+#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/python_dimname.h>
 #include <torch/csrc/tensor/python_tensor.h>
 #include <torch/csrc/utils/numpy_stub.h>
@@ -98,9 +98,13 @@ struct PythonArgParser {
   template<int N>
   inline PythonArgs parse(PyObject* args, PyObject* kwargs, ParsedArgs<N>& dst);
 
+  // Formatted strings of non-hidden signatures
+  std::vector<std::string> get_signatures() const;
+
 private:
   [[noreturn]]
   void print_error(PyObject* args, PyObject* kwargs, PyObject* parsed_args[]);
+  void check_deprecated(const FunctionSignature & signature);
   PythonArgs raw_parse(PyObject* args, PyObject* kwargs, PyObject* parsed_args[]);
 
   std::vector<FunctionSignature> signatures_;
@@ -109,9 +113,27 @@ private:
   bool traceable;
 };
 
+struct PYBIND11_EXPORT FunctionSignature {
+  explicit FunctionSignature(const std::string& fmt, int index);
+
+  bool parse(PyObject* args, PyObject* kwargs, PyObject* dst[], bool raise_exception);
+
+  std::string toString() const;
+
+  std::string name;
+  std::vector<FunctionParameter> params;
+  std::vector<py::handle> overloaded_args;
+  ssize_t min_args;
+  ssize_t max_args;
+  ssize_t max_pos_args;
+  int index;
+  bool hidden;
+  bool deprecated;
+};
+
 struct PythonArgs {
-  PythonArgs(int idx, bool traceable, const FunctionSignature& signature, PyObject** args)
-    : idx(idx)
+  PythonArgs(bool traceable, const FunctionSignature& signature, PyObject** args)
+    : idx(signature.index)
     , traceable(traceable)
     , signature(signature)
     , args(args) {}
@@ -166,23 +188,6 @@ struct PythonArgs {
 private:
   at::Tensor tensor_slow(int i);
   at::Scalar scalar_slow(int i);
-};
-
-struct PYBIND11_EXPORT FunctionSignature {
-  explicit FunctionSignature(const std::string& fmt);
-
-  bool parse(PyObject* args, PyObject* kwargs, PyObject* dst[], bool raise_exception);
-
-  std::string toString() const;
-
-  std::string name;
-  std::vector<FunctionParameter> params;
-  std::vector<py::handle> overloaded_args;
-  ssize_t min_args;
-  ssize_t max_args;
-  ssize_t max_pos_args;
-  bool hidden;
-  bool deprecated;
 };
 
 struct FunctionParameter {
@@ -376,7 +381,7 @@ inline const THPLayout& PythonArgs::layoutWithDefault(int i, const THPLayout& de
 
 inline at::Device PythonArgs::device(int i) {
   if (!args[i]) {
-    return at::Device(backendToDeviceType(tensorTypeIdToBackend(torch::tensors::get_default_tensor_type_id())));
+    return at::Device(backendToDeviceType(dispatchKeyToBackend(torch::tensors::get_default_dispatch_key())));
   }
   if (THPDevice_Check(args[i])) {
     const auto device = reinterpret_cast<THPDevice*>(args[i]);
@@ -670,5 +675,48 @@ static auto check_has_torch_function(PyObject* obj) -> bool
   }
   return false;
 }
+
+/*
+ *
+ * Handle __torch_function__ overrides if we know that there are overloaded
+ * arguments.  All objects stored in r.overloaded_args must have a
+ * __torch_function__ implementation and the arguments must be ordered in order
+ * of precedence. Precedence goes from left to right in the order of the
+ * signature of the function the overloaded arguments were passed to, except
+ * subclasses are always considered before superclasses.
+ *
+ * If the result of calling __torch_function__ is NotImplemented, the
+ * next implementation in the precedence order is called. If all
+ * arguments return NotImplemented from their __torch_function__
+ * implementation, a TypeError is raised in Python.
+ *
+ * Assumes overloaded_args has at least one entry. All entries must have
+ * a __torch_function__ attribute that resolves to a callable that
+ * accepts a torch API function, a tuple of arguments, and a dict of
+ * keyword arguments for the torch API function.
+ *
+ * It is sufficient to call PythonArgs::has_torch_function before
+ * calling this function to verify that there are valid arguments
+ * present. If that is not done then special care must be taken to
+ * ensure there are arguments that are overloaded with
+ * __torch_function__.
+ *
+ * See torch._overrides.handle_torch_function for the equivalent
+ * code in the pure-python implementation.
+ *
+ * 'r' is a parsed PythonArgs instance, returned from
+ * PythonArgParser::parse.
+ *
+ * 'args' is a reference to the python tuple of arguments to the torch
+ * API function.
+ *
+ * 'kwargs' is a reference to the python dict of keyword arguments to
+ * the torch API function.
+ *
+ * 'torch_api' is a reference to a python torch API namespace.
+ *
+ */
+
+auto handle_torch_function(PythonArgs &r, PyObject* args, PyObject* kwargs, PyObject* torch_api, const char* module_name) -> PyObject*;
 
 } // namespace torch
