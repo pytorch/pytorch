@@ -1,10 +1,13 @@
-#include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
-#include <torch/csrc/jit/testing/hooks_for_testing.h>
-#include <torch/csrc/jit/runtime/interpreter.h>
+#include <torch/csrc/jit/api/function_impl.h>
+#include <torch/csrc/jit/frontend/canonicalize_modified_loop.h>
+#include <torch/csrc/jit/frontend/convert_to_ssa.h>
+#include <torch/csrc/jit/frontend/ir_emitter.h>
+#include <torch/csrc/jit/frontend/parser.h>
+#include <torch/csrc/jit/frontend/schema_matching.h>
+#include <torch/csrc/jit/frontend/script_type_parser.h>
 #include <torch/csrc/jit/ir/ir.h>
-#include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
@@ -13,11 +16,9 @@
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/lift_closures.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
-#include <torch/csrc/jit/frontend/canonicalize_modified_loop.h>
-#include <torch/csrc/jit/frontend/convert_to_ssa.h>
-#include <torch/csrc/jit/frontend/parser.h>
-#include <torch/csrc/jit/frontend/schema_matching.h>
-#include <torch/csrc/jit/frontend/script_type_parser.h>
+#include <torch/csrc/jit/runtime/interpreter.h>
+#include <torch/csrc/jit/runtime/operator.h>
+#include <torch/csrc/jit/testing/hooks_for_testing.h>
 
 #include <torch/csrc/jit/ir/constants.h>
 
@@ -469,7 +470,7 @@ struct Environment {
           {"all", std::make_shared<BuiltinFunction>(aten::all, at::nullopt)},
           {"divmod",
            std::make_shared<BuiltinFunction>(aten::divmod, at::nullopt)},
-          {"list", SpecialFormValue::create(prim::list)},
+          {"list", std::make_shared<BuiltinFunction>(aten::list, at::nullopt)},
           {"ord", std::make_shared<BuiltinFunction>(aten::ord, at::nullopt)},
           {"chr", std::make_shared<BuiltinFunction>(aten::chr, at::nullopt)},
           {"bin", std::make_shared<BuiltinFunction>(aten::bin, at::nullopt)},
@@ -2611,17 +2612,6 @@ struct to_ir {
         }
         return iterable_tree;
       }
-      case prim::list: {
-        // list(iter) desugars to [_elem for _elem in iter]
-        checkApplyNumInputs(apply, 1);
-        auto iter = apply.inputs()[0];
-        const std::string& elem_name = createTempName("$_elem");
-        auto ident =
-            Var::create(apply.range(), Ident::create(apply.range(), elem_name));
-        auto lc = ListComp::create(apply.range(), ident, ident, iter);
-        return std::make_shared<SimpleValue>(
-            emitListComprehension(lc, nullptr));
-      }
       default:
         TORCH_INTERNAL_ASSERT(false, "unknown special form: ", form);
     }
@@ -2670,6 +2660,9 @@ struct to_ir {
       case TK_APPLY: {
         auto apply = Apply(tree);
         return emitApplyExpr(apply, n_binders, type_hint);
+      } break;
+      case TK_SUBSCRIPT: {
+        return emitSubscript(Subscript(tree));
       } break;
       default:
         return std::make_shared<SimpleValue>(emitSimpleExpr(tree, type_hint));
@@ -2921,9 +2914,6 @@ struct to_ir {
       } break;
       case TK_NONE: {
         return graph->insertConstant(IValue(), tree->range());
-      } break;
-      case TK_SUBSCRIPT: {
-        return emitSubscript(Subscript(tree));
       } break;
       case TK_IF_EXPR: {
         return emitTernaryIf(TernaryIf(tree));
@@ -3404,18 +3394,18 @@ struct to_ir {
         ->output();
   }
 
-  Value* emitSubscript(const Subscript& subscript) {
+  std::shared_ptr<SugaredValue> emitSubscript(const Subscript& subscript) {
     const SugaredValuePtr sv = emitSugaredExpr(subscript.value(), 1);
     const List<Expr>& subscript_exprs = subscript.subscript_exprs();
     const SourceRange& range = subscript.range();
     const SourceRange& val_range = subscript.value().range();
     if (subscript_exprs.size() != 1) {
-      return emitMultidimSlicing(
-          range, sv->asValue(val_range, method), subscript_exprs);
+      return std::make_shared<SimpleValue>(emitMultidimSlicing(
+          range, sv->asValue(val_range, method), subscript_exprs));
     }
     if (subscript_exprs[0].kind() == TK_SLICE_EXPR) {
-      return emitBasicSlice(
-          range, sv->asValue(val_range, method), subscript_exprs);
+      return std::make_shared<SimpleValue>(emitBasicSlice(
+          range, sv->asValue(val_range, method), subscript_exprs));
     } else {
       // Desugars gather syntactic sugar foo[i]
       Value* idx = emitExpr(subscript_exprs[0]);
@@ -3423,11 +3413,13 @@ struct to_ir {
       AT_ASSERT(subscript_exprs.size() == 1);
 
       if (val->type()->cast<TupleType>()) {
-        return emitTupleIndex(range, sv->asValue(val_range, method), idx);
+        return std::make_shared<SimpleValue>(
+            emitTupleIndex(range, sv->asValue(val_range, method), idx));
       } else if (val->type()->isSubtypeOf(TensorType::get())) {
-        return emitMultidimSlicing(range, val, subscript_exprs);
+        return std::make_shared<SimpleValue>(
+            emitMultidimSlicing(range, val, subscript_exprs));
       } else {
-        return sv->getitem(range, method, idx)->asValue(range, method);
+        return sv->getitem(range, method, idx);
       }
     }
   }
@@ -3539,7 +3531,7 @@ std::unique_ptr<Function> CompilationUnit::define(
       name = mangle(name);
     }
   }
-  auto fn = torch::make_unique<Function>(
+  auto fn = torch::make_unique<GraphFunction>(
       std::move(name), std::make_shared<Graph>(), creator);
   if (self) {
     // Register this as a method on `self`'s type

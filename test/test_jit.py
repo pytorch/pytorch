@@ -102,6 +102,8 @@ import unittest
 import warnings
 import zipfile
 import re
+import string
+
 
 RUN_CUDA_HALF = RUN_CUDA
 if torch.cuda.is_available():
@@ -1191,6 +1193,100 @@ graph(%x : Tensor,
         assert conv1_observers == conv2_observers, \
             'Expect conv1 and conv2 to have same observers since the class type is shared'
 
+    def test_insert_observers_for_general_ops(self):
+        """ Make sure we skip observers for ops that doesn't require
+            observation, e.g. flatten
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 3).float()
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = torch.flatten(x)
+                return x
+
+        qconfig_dict = {'': script_qconfig(default_qconfig)}
+        m = torch.jit.script(M())
+        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
+        # input and output of conv
+        assert len(attrs_with_prefix(m, '_observer_')) == 2
+        FileCheck().check('Observer = prim::GetAttr[name="_observer_') \
+                   .check('prim::GetAttr[name="conv"]') \
+                   .check('prim::CallMethod') \
+                   .check('Observer = prim::GetAttr[name="_observer_') \
+                   .check('aten::flatten') \
+                   .check_not('Observer = prim::GetAttr[name="_observer_') \
+                   .run(m.graph)
+
+    # TODO: this is too long, split this to test_insert_observers.py and remove
+    # insrt_observers prefix
+    def test_insert_observers_propagate_observed(self):
+        """ Make sure we propagate observed property through general ops
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.conv1 = torch.nn.Conv2d(3, 3, 3).float()
+                self.conv2 = torch.nn.Conv2d(3, 3, 3).float()
+
+            def forward(self, x):
+                x = self.conv1(x)
+                x = torch.flatten(x)
+                # we don't want to insert observer for input of self.conv2
+                # because output of self.conv1 is already observed
+                x = self.conv2(x)
+                return x
+
+        qconfig_dict = {'': script_qconfig(default_qconfig)}
+        m = torch.jit.script(M())
+        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
+        # input and output of conv
+        assert len(attrs_with_prefix(m, '_observer_')) == 3
+        FileCheck().check('Observer = prim::GetAttr[name="_observer_') \
+                   .check('prim::GetAttr[name="conv1"]') \
+                   .check('prim::CallMethod') \
+                   .check('Observer = prim::GetAttr[name="_observer_') \
+                   .check('aten::flatten') \
+                   .check_not('Observer = prim::GetAttr[name="_observer_') \
+                   .check('prim::GetAttr[name="conv2"]') \
+                   .check('Observer = prim::GetAttr[name="_observer_') \
+                   .run(m.graph)
+
+    def test_insert_observers_propagate_observed_in_submodule(self):
+        """ Make sure we propagate observed property through general ops
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.conv1 = torch.nn.Conv2d(3, 3, 3).float()
+                self.conv2 = torch.nn.Conv2d(3, 3, 3).float()
+                self.avgpool = torch.nn.AdaptiveAvgPool2d((1, 1))
+
+            def forward(self, x):
+                x = self.conv1(x)
+                x = self.avgpool(x)
+                # we don't want to insert observer for input of self.conv2
+                # because output of self.conv1 is already observed
+                x = self.conv2(x)
+                return x
+
+        qconfig_dict = {'': script_qconfig(default_qconfig)}
+        m = torch.jit.script(M())
+        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
+        # input and output of conv
+        assert len(attrs_with_prefix(m, '_observer_')) == 3
+        FileCheck().check('Observer = prim::GetAttr[name="_observer_') \
+                   .check('prim::GetAttr[name="conv1"]') \
+                   .check('prim::CallMethod') \
+                   .check('Observer = prim::GetAttr[name="_observer_') \
+                   .check('prim::CallMethod') \
+                   .check_not('Observer = prim::GetAttr[name="_observer_') \
+                   .check('prim::GetAttr[name="conv2"]') \
+                   .check('Observer = prim::GetAttr[name="_observer_') \
+                   .run(m.graph)
+
     def test_insert_quant_dequant(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -1883,6 +1979,34 @@ graph(%input, %weight):
                    .check("aten::__upsample_nearest") \
                    .check("dequantize") \
                    .run(m.graph)
+
+    def test_swap_functional_linear(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+
+            def forward(self, x, weight, bias):
+                x = torch.dequantize(x)
+                weight = torch.dequantize(weight)
+                x = F.linear(x, weight, bias)
+                x = torch.quantize_per_tensor(x, scale=1.0, zero_point=0, dtype=torch.quint8)
+                return x
+
+        x = torch.rand((10, 5), dtype=torch.float)
+        x = torch.quantize_per_tensor(x, scale=0.5, zero_point=1, dtype=torch.quint8)
+        weight = torch.rand((5, 5), dtype=torch.float)
+        weight = torch.quantize_per_tensor(weight, scale=0.5, zero_point=1, dtype=torch.qint8)
+        bias = torch.rand((5), dtype=torch.float)
+        m = torch.jit.script(M())
+        ref_res = m(x, weight, bias)
+        FileCheck().check("CallFunction") \
+                   .run(m.graph)
+        torch._C._jit_pass_swap_functional_linear(m.graph)
+        FileCheck().check("aten::linear") \
+                   .check_not("CallFunction") \
+                   .run(m.graph)
+        res = m(x, weight, bias)
+        self.assertEqual(res, ref_res)
 
     def test_pattern_based_rewrite(self):
         # mul(mul(mul(mul(x,y),z),x),y) --> mul(mul(mulmul(x,y,z), x), y) -->
@@ -4907,6 +5031,15 @@ def foo(x):
                     'parameters': ['P'],
                     'parameters_r': ['P']}
         self.assertEqual(expected, result)
+
+    def test_parameter_order(self):
+        m = nn.Module()
+        for i, name in enumerate(string.ascii_letters):
+            setattr(m, name, nn.Parameter(torch.tensor([float(i)])))
+        ms = torch.jit.script(m)
+        print(torch.cat(list(m.parameters())))
+        print(torch.cat(list(ms.parameters())))
+        self.assertEqual(list(m.parameters()), list(ms.parameters()))
 
     def test_tracing_hooks(self):
         class Net(nn.Module):
@@ -10305,12 +10438,6 @@ a")
             self.checkModule(M(), (inp, name))
             self.checkModule(M2(), (inp, name))
 
-    def test_list_keyword(self):
-        def foo():
-            return list([1, 2, 3]), list(("a", "b")), list(range(5)), list("abcdefg")  # noqa: C410
-
-        self.checkScript(foo, ())
-
     def test_custom_container_forward(self):
         class Inner(torch.nn.Module):
             def forward(self, x):
@@ -10427,8 +10554,6 @@ a")
                 return thing - self.i
 
         class M(torch.nn.Module):
-            __constants__ = ['mods']
-
             def __init__(self):
                 super(M, self).__init__()
                 self.mods = nn.ModuleList([Sub(i) for i in range(10)])
@@ -10441,6 +10566,19 @@ a")
 
         x = torch.tensor(1)
         self.checkModule(M(), (x,))
+
+        class MForward(torch.nn.Module):
+            def __init__(self):
+                super(MForward, self).__init__()
+                self.mods = nn.ModuleList([Sub(i) for i in range(10)])
+
+            def forward(self, v):
+                v = self.mods[4](v)
+                v = self.mods[-1](v)
+                v = self.mods[-9](v)
+                return v
+
+        self.checkModule(MForward(), (torch.tensor(1),))
 
         class M2(M):
             def __init__(self):
