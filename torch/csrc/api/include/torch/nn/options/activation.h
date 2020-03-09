@@ -17,7 +17,6 @@ struct TORCH_API ELUOptions {
   TORCH_ARG(bool, inplace) = false;
 };
 
-/// Options for `torch::nn::functional::elu`. See `torch::nn::ELUOptions` for the arugments it accepts.
 TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(ELU, ELUFuncOptions)
 
 // ============================================================================

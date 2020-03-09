@@ -114,15 +114,13 @@ class ConvNdImpl : public torch::nn::Cloneable<Derived> {
 /// See https://pytorch.org/docs/master/nn.html#torch.nn.Conv1d to learn about
 /// the exact behavior of this module.
 ///
-/// yf225 TODO experiment:
+/// See the documentation for `torch::nn::Conv1dOptions` class to learn what
+/// constructor arguments are supported for this module.
 ///
 /// Example:
-/// ```
+/// ```cpp
 /// auto m = torch::nn::Conv1d(torch::nn::Conv1dOptions(1, 2, 3));
 /// ```
-///
-/// See `torch::nn::Conv1dOptions` or `Conv1dOptions` to learn what arguments
-/// are supported in `Conv1dOptions`
 class TORCH_API Conv1dImpl : public ConvNdImpl<1, Conv1dImpl> {
  public:
   Conv1dImpl(
@@ -137,7 +135,8 @@ class TORCH_API Conv1dImpl : public ConvNdImpl<1, Conv1dImpl> {
 
 /// A `ModuleHolder` subclass for `Conv1dImpl`.
 /// See the documentation for `Conv1dImpl` class to learn what methods it
-/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
+/// provides, and examples of how to use `Conv1d` with `torch::nn::Conv1dOptions`.
+/// See the documentation for `ModuleHolder` to learn about PyTorch's
 /// module storage semantics.
 TORCH_MODULE(Conv1d);
 
