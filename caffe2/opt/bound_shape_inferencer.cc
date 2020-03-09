@@ -89,6 +89,13 @@ void BoundShapeInferencer::InferOps(
     InferGivenTensorFill(op);
   } else if (op.type() == "Shape") {
     InferShape(op);
+  } else if (
+      op.type() == "FloatToFused8BitRowwiseQuantized" ||
+      op.type() == "HalfFloatToFused8BitRowwiseQuantized" ||
+      op.type() == "FloatToFused4BitRowwiseQuantized" ||
+      op.type() == "HalfToFused4BitRowwiseQuantized" ||
+      op.type() == "FloatToHalf" || op.type() == "FbGemmPack") {
+    InferQuantization(op);
   } else {
     InferCommonOp(op);
   }
@@ -309,8 +316,8 @@ void BoundShapeInferencer::InferSparseLengthsSum(const OperatorDef& op) {
     output_dim1 -= 8;
   }
   // If the op is SparseLengthsSumFused4BitRowwise, we need to extract 2 bytes
-  // for fp16 scale and 2 bytes for fp16 bias. Then we double it because we pack
-  // 2 entries into 1 uint8 element of the embedding table.
+  // for fp16 scale and 2 bytes for fp16 bias. Then we double it because we
+  // pack 2 entries into 1 uint8 element of the embedding table.
   // (https://fburl.com/diffusion/stmsyz74)
   else if (is4bit) {
     output_dim1 -= 4;
@@ -559,6 +566,17 @@ void BoundShapeInferencer::InferFC(const OperatorDef& op) {
       ConvertToVec(output_shapes[0].dims()),
       output_data_type,
       int8_fc ? true : false);
+}
+
+// Sometimes we need to do shape inference for quantization net -
+// a net with quantization ops that is executed after training and before
+// exporting to model file.
+// In this case, quantization ops are execued on CONSTANT blobs, such as
+// embedding tables. If we are doing quantization, current_dim_type_ should be
+// CONSTANT instead of BATCH (default value).
+void BoundShapeInferencer::InferQuantization(const OperatorDef& op) {
+  current_dim_type_ = TensorBoundShape_DimType_CONSTANT;
+  InferCommonOp(op);
 }
 
 void BoundShapeInferencer::InferCommonOp(const OperatorDef& op) {
