@@ -257,6 +257,8 @@ void ProcessGroupAgent::shutdown() {
       recvWork_->abort();
     }
   }
+  LOG(INFO) << "Worker " << RpcAgent::getWorkerInfo().id_
+            << " aborting pending sends to all dst ranks";
   // Abort any pending sends to any destination rank.
   {
     std::lock_guard<std::mutex> lock(pendingSendMutex_);
@@ -267,8 +269,14 @@ void ProcessGroupAgent::shutdown() {
       }
     }
   }
+  LOG(INFO) << "Worker " << RpcAgent::getWorkerInfo().id_
+            << " call into waitWorkComplete.";
   threadPool_.waitWorkComplete();
+  LOG(INFO) << "Worker " << RpcAgent::getWorkerInfo().id_
+            << " call into listener join.";
   listenerThread_.join();
+  LOG(INFO) << "Worker " << RpcAgent::getWorkerInfo().id_
+            << " shutdown complete.";
 }
 
 std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
@@ -412,14 +420,14 @@ void ProcessGroupAgent::handleSend(const SendWork& work) {
   }
   // Write pendingSends to a global map so that they can be interrupted by
   // ::shutdown().
-  std::unique_lock<std::mutex> guard(pendingSendMutex_);
+  std::unique_lock<std::mutex> pendingSendGuard(pendingSendMutex_);
 
   for (auto& p : pendingSends) {
-    currentPendingSends_[dst].push_back(p);
+    currentPendingSends_[dst].insert(p);
   }
 
   // Unlock to call into wait, otherwise shutdown() cannot interrupt here.
-  guard.unlock();
+  pendingSendGuard.unlock();
 
   for (auto& pendingSend : pendingSends) {
     if (!rpcRunning_.load() || !pendingSend->wait()) {
@@ -428,14 +436,13 @@ void ProcessGroupAgent::handleSend(const SendWork& work) {
     }
   }
 
-  // re-lock to erase
-  guard.lock();
+  // Erase the pending sends that we added since we have returned from wait.
+  pendingSendGuard.lock();
   // NB: We cannot just erase all of currentPendingSends[dst], since this might
   // preemptively remove sends from other threads.
-  auto& vec = currentPendingSends_[dst];
+  auto& set = currentPendingSends_[dst];
   for (auto& p : pendingSends) {
-    auto it = std::find(vec.begin(), vec.end(), p);
-    currentPendingSends_[dst].erase(it);
+    set.erase(p);
   }
 }
 

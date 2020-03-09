@@ -239,7 +239,7 @@ class ProcessGroupAgent : public RpcAgent {
   // waiting thread to be unblocked.
   std::unordered_map<
       worker_id_t,
-      std::vector<std::shared_ptr<c10d::ProcessGroup::Work>>>
+      std::set<std::shared_ptr<c10d::ProcessGroup::Work>>>
       currentPendingSends_;
   // Lock to serialize access to the above map.
   std::mutex pendingSendMutex_;

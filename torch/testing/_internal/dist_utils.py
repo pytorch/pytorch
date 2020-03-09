@@ -104,6 +104,8 @@ def wait_until_node_failure(rank, expected_error_regex=".*"):
         except Exception as e:
             if re.match(pattern=expected_error_regex, string=str(e)):
                 return str(e)
+            else:
+                print("wait until node failure - exception did not match, it was {}".format(str(e)))
 
 # Shutdown sequence is not well defined, so we may see any of the following errors
 # When running tests that simulate errors via a shutdown on the remote end.

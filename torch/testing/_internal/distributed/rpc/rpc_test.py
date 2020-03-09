@@ -1474,23 +1474,27 @@ class RpcTest(RpcAgentTestFixture):
             world_size=self.world_size,
             rpc_backend_options=self.rpc_backend_options,
         )
-        rpc._set_rpc_timeout(timedelta(milliseconds=5000))
+        rpc._set_rpc_timeout(timedelta(milliseconds=2000))
         # This barrier is needed to ensure that some workers do not exit before
         # others have been brought up, for non ProcessGroupAgent backends.
         initialize_pg(self.init_method, self.rank, self.world_size)
         dist.barrier()
-
         if self.rank == 1:
+            print("worker code")
             dst_rank = (self.rank + 1) % self.world_size
             dst_worker = worker_name(dst_rank)
             # allow destination worker to exit without joining
             error_str = get_shutdown_error_regex(dist_utils.TEST_CONFIG.rpc_backend_name)
-            wait_until_node_failure(dst_rank, error_str)
+            print("Worker 1 - calling wait_until_node_failure")
+            er = wait_until_node_failure(dst_rank, error_str)
+            assert "Encountered" in er
+            print("Got the match, sending future.")
             fut = rpc.rpc_async(dst_worker, torch.add, args=(torch.ones(1), 3))
             # Shutdown sequence is not very well defined and as a result
             # we can see any of the error messages defined in get_shutdown_error_regex.
             with self.assertRaisesRegex(RuntimeError, error_str):
                 fut.wait()
+            print("Rank 1 - done, verified.")
         # exit all workers non-gracefully.
         rpc.shutdown(graceful=False)
 
