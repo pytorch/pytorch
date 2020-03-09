@@ -10890,33 +10890,63 @@ class TestTorchDeviceType(TestCase):
              torch.tensor([[0, 0, 0, 0],
                            [1, 0, 0, 0],
                            [1, 0, 0, 0],
-                           [0, 0, 0, 0]], device=device), "sum"),
+                           [0, 0, 0, 0]],
+                          device=device, dtype=torch.float32), "sum"),
             (torch.zeros(4, 4, device=device),
              torch.ones(2, 2, device=device),
              torch.tensor([[0, 0, 0, 0],
                            [-1, 0, 0, 0],
                            [-1, 0, 0, 0],
-                           [0, 0, 0, 0]], device=device), "subtract"),
+                           [0, 0, 0, 0]], device=device, dtype=torch.float32), "subtract"),
             (torch.tensor([2], device=device).repeat(4, 4),
              torch.tensor([2], device=device).repeat(2, 2),
              torch.tensor([[2, 2, 2, 2],
                            [4, 2, 2, 2],
                            [4, 2, 2, 2],
-                           [2, 2, 2, 2]], device=device), "multiply"),
+                           [2, 2, 2, 2]], device=device, dtype=torch.float32), "multiply"),
             (torch.tensor([2], device=device).repeat(4, 4),
              torch.tensor([2], device=device).repeat(2, 2),
              torch.tensor([[2, 2, 2, 2],
                            [1, 2, 2, 2],
                            [1, 2, 2, 2],
-                           [2, 2, 2, 2]], device=device), "divide")
+                           [2, 2, 2, 2]], device=device, dtype=torch.float32), "divide")
         ]
 
         for input, src, result, operation in test_data:
             input.scatter_(0, index, src, reduce=operation)
             self.assertEqual(input, result, operation)
 
-    def test_scatter_reduce_scalar_tensor(self, device):
-        pass
+    def test_scatter_reduce_scalar(self, device):
+        device = torch.device('cpu')
+        index = torch.tensor([[1], [2]], device=device, dtype=torch.long)
+        test_data = [
+            (torch.zeros(4, 4, device=device), torch.tensor(1),
+             torch.tensor([[0, 0, 0, 0],
+                           [1, 0, 0, 0],
+                           [1, 0, 0, 0],
+                           [0, 0, 0, 0]],
+                          device=device, dtype=torch.float32), "sum"),
+            (torch.zeros(4, 4, device=device), torch.tensor(1),
+             torch.tensor([[0, 0, 0, 0],
+                           [-1, 0, 0, 0],
+                           [-1, 0, 0, 0],
+                           [0, 0, 0, 0]], device=device, dtype=torch.float32), "subtract"),
+            (torch.tensor([2], device=device).repeat(4, 4), torch.tensor(2),
+             torch.tensor([[2, 2, 2, 2],
+                           [4, 2, 2, 2],
+                           [4, 2, 2, 2],
+                           [2, 2, 2, 2]], device=device, dtype=torch.float32), "multiply"),
+            (torch.tensor([2], device=device).repeat(4, 4), torch.tensor(2),
+             torch.tensor([[2, 2, 2, 2],
+                           [1, 2, 2, 2],
+                           [1, 2, 2, 2],
+                           [2, 2, 2, 2]], device=device, dtype=torch.float32), "divide")
+        ]
+
+        for input, src, result, operation in test_data:
+            input.scatter_(0, index, src, reduce=operation)
+            self.assertEqual(input, result, operation)
+        
     # TODO: remove this after scatter_add_ is deprecated.
     def test_scatter_add_non_unique_index(self, device):
         height = 2
@@ -10927,7 +10957,8 @@ class TestTorchDeviceType(TestCase):
         input.scatter_add_(0, index, src)
 
         self.assertEqual(input,
-                         torch.tensor([[3], [1]], device=device).repeat(1, width))
+                         torch.tensor([[3], [1]], device=device,
+                                      dtype=torch.float32).repeat(1, width))
 
     def test_scatter_reduce_non_unique_index(self, device):
         # restrict to CPU until CUDA implementation is done.
@@ -10938,19 +10969,22 @@ class TestTorchDeviceType(TestCase):
         test_data = [
             (torch.ones(height, width, device=device),
              torch.ones(height, width, device=device),
-             torch.tensor([[3], [1]], device=device).repeat(1, width), "sum"),
+             torch.tensor([[3], [1]], device=device, dtype=torch.float32).repeat(1, width), "sum"),
 
             (torch.ones(height, width, device=device),
              torch.ones(height, width, device=device),
-             torch.tensor([[-1], [1]], device=device).repeat(1, width), "subtract"),
+             torch.tensor([[-1], [1]], device=device,
+                          dtype=torch.float32).repeat(1, width), "subtract"),
 
             (torch.tensor([2], device=device).repeat(height, width),
              torch.tensor([2], device=device).repeat(height, width),
-             torch.tensor([[8], [2]], device=device).repeat(1, width), "multiply"),
+             torch.tensor([[8], [2]], device=device,
+                          dtype=torch.float32).repeat(1, width), "multiply"),
 
             (torch.tensor([2], device=device).repeat(height, width),
              torch.tensor([2], device=device).repeat(height, width),
-             torch.tensor([[0.5], [2]], device=device).repeat(1, width), "divide"),
+             torch.tensor([[0.5], [2]], device=device,
+                          dtype=torch.float32).repeat(1, width), "divide"),
         ]
 
         for input, src, result, operation in test_data:
