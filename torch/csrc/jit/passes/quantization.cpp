@@ -1087,6 +1087,11 @@ InsertObserversHelper::insertObserversFor(
         }
         auto* subblock = m.get_method(n->s(attr::name)).graph()->block();
         insertObserversFor(subblock, n, module, block_inputs_outputs, values_to_observe, block_observed_values, n->inputs(), callee_observed_inputs);
+      } else if (n-<kind() == prim::If) {
+        for (Block* subblock : n->blocks()) {
+          std::unordered_set<Value*> subblock_observed_inputs;
+          insertObserversFor(subblock, n, module, block_inputs_outputs, values_to_observe, block_observed_values, n->inputs(), subblock_observed_inputs);
+        }
       } else {
         for (Value* v : n->outputs()) {
           propagateObservedProperty(v, block_observed_values);
@@ -1097,9 +1102,9 @@ InsertObserversHelper::insertObserversFor(
             }
           }
         }
-      }
-      for (Block* subblock : n->blocks()) {
-        blocks_to_visit.push(subblock);
+        for (Block* subblock : n->blocks()) {
+          blocks_to_visit.push(subblock);
+        }
       }
     }
   }
