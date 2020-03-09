@@ -10,15 +10,20 @@ class autocast(object):
     Instances of :class:`autocast` serve as context managers or decorators that
     allow regions of your script to run in mixed precision.
 
-    In autocast-enabled regions, the backend automatically chooses the precision
-    for GPU operations to improve performance while maintaining accuracy.
+    In these regions, CUDA ops run in an op-specific dtype chosen by autocast
+    to improve performance while maintaining accuracy.
+    See the :ref:`Autocast Op Reference<autocast-policies>` for details.
 
-    When entering an autocast-enabled region, Tensors may be any type.  It is not necessary or
-    recommended to call ``.half()`` on your model(s) or data to use autocasting.
+    When entering an autocast-enabled region, Tensors may be any type.
+    You should not call ``.half()`` on your model(s) or inputs when using autocasting.
 
-    :class:`autocast` should wrap the forward pass(es) of your network::
+    :class:`autocast` should wrap only the forward pass(es) of your network, including the loss
+    computation(s).  Backward passes under autocast are not recommended.
+    Backward ops run in the same type that autocast used for corresponding forward ops.
 
-        # Creates model and optimizer in default precision (float32)
+    Example::
+
+        # Creates model and optimizer in default precision
         model = Net().cuda()
         optimizer = optim.SGD(model.parameters(), ...)
 
@@ -31,10 +36,11 @@ class autocast(object):
                 loss = loss_fn(output, target)
 
             # Exits the context manager before backward()
-            # Backward passes under autocast are not necessary or recommended.
-            # Backward ops run in the same type that autocast used for corresponding forward ops.
             loss.backward()
             optimizer.step()
+
+    See the :ref:`Automatic Mixed Precision examples<amp-examples>` for usage (along with gradient scaling)
+    in more complex cases like gradient penalty and multiple models/losses.
 
     :class:`autocast` can also be used as a decorator, e.g., on the ``forward`` method of your model::
 
@@ -44,50 +50,63 @@ class autocast(object):
             def forward(self, input):
                 ...
 
-    :class:`autocast` is nestable.  If you want to force particular ops to run in ``float32``,
-    you can nest ``autocast(enabled=False)`` regions in a surrounding autocast-enabled region::
+    Floating-point Tensors produced in an autocast-enabled region may be ``float16``.
+    After returning to an autocast-disabled region, using them with floating-point
+    Tensors of different dtypes may cause type mismatch errors.  If so, cast the ``float16``
+    Tensors back to the default dtype (or other type if desired)::
 
-        mat0 = torch.rand((8, 8), device="cuda", dtype.torch.float32)
-        mat1 = torch.rand((8, 8), device="cuda", dtype.torch.float32)
-        mat2 = torch.rand((8, 8), device="cuda", dtype.torch.float32)
-        mat3_float16 = torch.rand((8, 8), device="cuda", dtype.torch.float16)
+        # Creates some tensors in default dtype (here assumed to be float32)
+        a_float32 = torch.rand((8, 8), device="cuda")
+        b_float32 = torch.rand((8, 8), device="cuda")
+        c_float32 = torch.rand((8, 8), device="cuda")
+        d_float32 = torch.rand((8, 8), device="cuda")
 
         with autocast():
-            # torch.mm is on autocast's list of ops that should run in float16..
+            # torch.mm is on autocast's list of ops that should run in float16.
             # Inputs are float32, but the op runs in float16 and produces float16 output.
             # No manual casts are required.
-            tmp_float16 = torch.mm(mat0, mat1)
+            e_float16 = torch.mm(a_float32, b_float32)
+            # Also handles mixed input types
+            f_float16 = torch.mm(d_float32, e_float16)
+
+        # After exiting autocast, calls f_float16.float() to use with d_float32
+        g_float32 = torch.mm(d_float32, f_float16.float())
+
+    Type mismatch errors *in* an autocast-enabled region are a bug; if this is what you observe,
+    please file an issue.
+
+    To force subregions to run in a particular ``dtype``, nest ``autocast(enabled=False)``
+    regions in a surrounding autocast-enabled region.  In the subregion, inputs from
+    the surrounding region should be cast to ``dtype`` before use.  The following example
+    shows a subregion with forced ``float32`` execution::
+
+        # Creates some tensors in default dtype (here assumed to be float32)
+        a_float32 = torch.rand((8, 8), device="cuda")
+        b_float32 = torch.rand((8, 8), device="cuda")
+        c_float32 = torch.rand((8, 8), device="cuda")
+        d_float32 = torch.rand((8, 8), device="cuda")
+
+        with autocast():
+            e_float16 = torch.mm(a_float32, b_float32)
 
             with autocast(enabled=False):
-                # Here torch.mm does not autocast.
-                # To force float32 execution, ensure the inputs are float32.
-                # The output type matches the input types.
-                tmp_float32 = torch.mm(tmp_float16.float(), mat2)
+                # Calls e_float16.float() to ensure float32 execution
+                # (necessary because e_float16 was produced in an autocasted region)
+                f_float32 = torch.mm(c_float32, e_float16.float())
 
             # No manual casts are required when re-entering the autocast-enabled region.
             # torch.mm again runs in float16 and produces float16 output, regardless of input types.
-            # Note that mixed input dtypes are transparently handled.
-            float16_result = torch.mm(tmp_float32, mat3_float16)
+            g_float16 = torch.mm(d_float32, f_float32)
+
+    The autocast state is thread-local.  If you want it enabled in a new thread, the context manager or decorator
+    must be invoked in that thread.  This affects :class:`torch.nn.DataParallel`
+    (see the :ref:`DataParallel example<amp-dataparallel>`).
 
     Arguments:
         enabled(bool, optional, default=True):  Whether autocasting should be enabled in this region.
 
     .. note::
-        Tensors produced in an autocast-enabled region may be ``float16``.  After returning to an
-        autocast-disabled region, using them along with ``float32`` tensors may cause type mismatch errors.
-        If so, simply call ``.float()`` on the offending tensor(s).
-
-        Type mismatch errors *in* an autocast-enabled region are a bug; if this is what you observe,
-        please file an issue.
-
-    .. note::
         Autocast only affects GPU operations (operations running on CUDA Tensors).
-
-    .. note::
-        The autocast state is thread-local.  If you want it enabled in a new thread, the context manager or decorator
-        must be invoked in that thread.  This affects :class:`torch.nn.DataParallel`, which spawns
-        new threads to run ``forward`` on each device.  See the :ref:`DataParallel example<amp-dataparallel>`
-        for best practices.
 
     .. note::
         Currently, autocast only affects out-of-place operations.  In-place ops still work in autocast-enabled
@@ -153,7 +172,8 @@ def custom_fwd(fwd=None, *, cast_inputs=None):
 
     Arguments:
         cast_inputs (:class:`torch.dtype` or None, optional, default=None):  If not ``None``, casts incoming
-            floating-point Tensors to the target dtype and causes ``forward`` to execute with autocast disabled.
+            floating-point Tensors to the target dtype (non-floating-point Tensors are not affected),
+            and causes ``forward`` to execute with autocast disabled.
             If ``None``, ``forward``'s internal ops execute with whatever autocast state surrounds the
             point-of-use.
     """

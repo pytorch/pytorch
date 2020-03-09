@@ -70,14 +70,14 @@ static PyObject * set_autocast_enabled(PyObject* _unused, PyObject *arg) {
   if (!PyBool_Check(arg)) {
     throw TypeError("enabled must be a bool (got %s)", Py_TYPE(arg)->tp_name);
   }
-  at::autocast::AutocastMode::set_enabled(arg == Py_True);
+  at::autocast::set_enabled(arg == Py_True);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject * is_autocast_enabled(PyObject* _unused, PyObject *arg) {
   HANDLE_TH_ERRORS
-  if (at::autocast::AutocastMode::is_enabled()) {
+  if (at::autocast::is_enabled()) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
@@ -87,20 +87,20 @@ static PyObject * is_autocast_enabled(PyObject* _unused, PyObject *arg) {
 
 static PyObject * clear_autocast_cache(PyObject* _unused, PyObject *arg) {
   HANDLE_TH_ERRORS
-  at::autocast::AutocastMode::clear_cache();
+  at::autocast::clear_cache();
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject * autocast_increment_nesting(PyObject* _unused, PyObject *arg) {
   HANDLE_TH_ERRORS
-  return THPUtils_packInt64(at::autocast::AutocastMode::increment_nesting());
+  return THPUtils_packInt64(at::autocast::increment_nesting());
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject * autocast_decrement_nesting(PyObject* _unused, PyObject *arg) {
   HANDLE_TH_ERRORS
-  return THPUtils_packInt64(at::autocast::AutocastMode::decrement_nesting());
+  return THPUtils_packInt64(at::autocast::decrement_nesting());
   END_HANDLE_TH_ERRORS
 }
 

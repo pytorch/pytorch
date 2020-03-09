@@ -46,8 +46,40 @@ invokes a backward pass on the scaled loss(es).  Gradients flowing backward thro
 then scaled by the same factor.  In other words, gradient values have a larger magnitude,
 so they don't flush to zero.
 
-The parameters' gradient (``.grad`` attributes) should be unscaled before the optimizer uses them
-to update the parameters, so the scale factor does not interfere with the learning rate.
+Each parameter's gradient (``.grad`` attribute) should be unscaled before the optimizer
+updates the parameters, so the scale factor does not interfere with the learning rate.
 
 .. autoclass:: GradScaler
     :members:
+
+.. _autocast-policies:
+
+Autocast Op Reference
+^^^^^^^^^^^^^^^^^^^^^
+
+For ops listed below, autocast explicitly
+chooses a precision in autocast-enabled regions.
+
+Autocast only affects CUDA ops.
+Autocast affects only out-of-place ops and Tensor methods.
+for each CUDA operation in an autocasted-enabled region
+Some ops cast internally to the kernel.
+Some ops natively promote.
+
+Unlisted ops do not receive explicit autocasting.  They run in whatever dtype
+their input(s) happen to be, and the output dtype matches the input dtype.
+An exception is is
+
+Ops that run in `float32`
+-------------------------
+
+Ops that run in `float16`
+-------------------------
+CUDA ops on this list are faster in ``float16`` without sacrificing stability.
+Autocast calls ``.half()`` on their inputs to ensure they run in ``float16``.
+Their output will always
+
+Ops that run in the widest input type
+-------------------------------------
+These don't require a particular precision for stability, but take multiple inputs
+and require that the inputs' dtypes match.  Because autocast may change the input

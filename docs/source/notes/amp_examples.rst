@@ -17,8 +17,7 @@ gradient scaling conveniently.  Gradient scaling improves convergence for networ
 gradients by minimizing gradient underflow, as explained :ref:`here<gradient-scaling>`.
 
 :class:`torch.cuda.amp.autocast` and :class:`torch.cuda.amp.GradScaler` are modular.
-When combining them, there are no gotchas.  In the samples below, each is used as its
-individual documentation suggests.
+In the samples below, each is used as its individual documentation suggests.
 
 .. contents:: :local:
 
@@ -27,7 +26,7 @@ Typical Mixed Precision Training
 
 ::
 
-    # Creates model and optimizer in default precision (float32)
+    # Creates model and optimizer in default precision
     model = Net().cuda()
     optimizer = optim.SGD(model.parameters(), ...)
 
@@ -120,7 +119,7 @@ For some operations, you may need to work with scaled gradients in a setting whe
 Gradient penalty
 ----------------
 
-A gradient penalty implementation commonly creates gradients out-of-place using
+A gradient penalty implementation commonly creates gradients using
 :func:`torch.autograd.grad`, combines them to create the penalty value,
 and adds the penalty value to the loss.
 
@@ -132,7 +131,7 @@ Here's an ordinary example of an L2 penalty without gradient scaling or autocast
             output = model(input)
             loss = loss_fn(output, target)
 
-            # Creates some gradients out-of-place
+            # Creates gradients
             grad_params = torch.autograd.grad(loss, model.parameters(), create_graph=True)
 
             # Computes the penalty term and adds it to the loss
@@ -146,12 +145,12 @@ Here's an ordinary example of an L2 penalty without gradient scaling or autocast
             optimizer.step()
 
 To implement a gradient penalty *with* gradient scaling, the loss passed to
-:func:`torch.autograd.grad` should be scaled.  The resulting out-of-place gradients
+:func:`torch.autograd.grad` should be scaled.  The resulting gradients
 will therefore be scaled, and should be unscaled before being combined to create the
 penalty value.
 
-Also, the penalty term computation is part of the forward pass, and therefore should
-receive autocasting.
+Also, the penalty term computation is part of the forward pass, and therefore should be
+inside an :class:`autocast` context manager.
 
 Here's how that looks for the same L2 penalty::
 
@@ -164,7 +163,7 @@ Here's how that looks for the same L2 penalty::
                 output = model(input)
                 loss = loss_fn(output, target)
 
-            # Scales the loss for the out-of-place backward pass, resulting in scaled grad_params
+            # Scales the loss for autograd.grad's backward pass, resulting in scaled grad_params
             scaled_grad_params = torch.autograd.grad(scaler.scale(loss), model.parameters(), create_graph=True)
 
             # Unscales grad_params before computing the penalty.  grad_params are not owned
@@ -223,23 +222,23 @@ after all optimizers used this iteration have been stepped::
 
             scaler.update()
 
-Each optimizer independently checks its gradients for infs/NaNs, and makes an independent decision
+Each optimizer checks its gradients for infs/NaNs and makes an independent decision
 whether or not to skip the step.  This may result in one optimizer skipping the step
 while the other one does not.  Since step skipping occurs rarely (every several hundred iterations)
 this should not impede convergence.  If you observe poor convergence after adding gradient scaling
-to a multiple-optimizer model, please file an issue.
+to a multiple-optimizer model, please file a bug report.
 
 Working with Multiple GPUs
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-The gotchas described here only affect :class:`autocast`.  :class:`GradScaler`\ 's usage is unchanged.
+The issues described here only affect :class:`autocast`.  :class:`GradScaler`\ 's usage is unchanged.
 
 .. _amp-dataparallel:
 
 DataParallel within a single process
 ------------------------------------
 
-:class:`torch.nn.DataParallel` spawns side threads to run the forward pass on each device.
+:class:`torch.nn.DataParallel` spawns threads to run the forward pass on each device.
 The autocast state is thread local, so the following will not work::
 
     model = MyModel()
@@ -247,7 +246,7 @@ The autocast state is thread local, so the following will not work::
 
     # Sets autocast in the main thread
     with autocast():
-        # dp_model's internal side threads won't autocast.  The main thread's autocast state has no effect.
+        # dp_model's internal threads won't autocast.  The main thread's autocast state has no effect.
         output = dp_model(input)
         # loss_fn still autocasts, but it's too late...
         loss = loss_fn(output)
@@ -267,7 +266,7 @@ The fix is simple.  Enable autocast as part of ``MyModel.forward``::
             with autocast():
                 ...
 
-The following now autocasts in ``dp_model``'s side threads (which execute ``forward``) and the main thread
+The following now autocasts in ``dp_model``'s threads (which execute ``forward``) and the main thread
 (which executes ``loss_fn``)::
 
     model = MyModel()
@@ -281,15 +280,15 @@ DistributedDataParallel, one GPU per process
 --------------------------------------------
 
 :class:`torch.nn.parallel.DistributedDataParallel`'s documentation recommends one GPU per process for best
-performance.  In this case, usages of :class:`autocast` and :class:`GradScaler` are not affected.
-No gotchas (side-thread-related or otherwise) apply.
+performance.  In this case, ``DistributedDataParallel`` does not spawn threads internally,
+so usages of :class:`autocast` and :class:`GradScaler` are not affected.
 
 DistributedDataParallel, multiple GPUs per process
 --------------------------------------------------
 
 Here :class:`torch.nn.parallel.DistributedDataParallel` may spawn a side thread to run the forward pass on each
 device, like :class:`torch.nn.DataParallel`.  :ref:`The fix is the same<amp-dataparallel>`:
-apply autocast as part of your model's ``forward`` method to ensure it's enabled in side threads.
+apply autocast as part of your model's ``forward`` method to ensure it's enabled in threads.
 
 .. _amp-custom-examples:
 
@@ -297,9 +296,13 @@ Autocast and Custom Autograd Functions
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 If your network uses :ref:`custom autograd functions<extending-autograd>`
-(subclasses of :class:`torch.autograd.Function`), :class:`autocast` may work out of the box,
-depending what internal operations your function(s) execute.
-However, you should double-check if they match one of the special cases below.
+(subclasses of :class:`torch.autograd.Function`), :class:`autocast` may work out of the box.
+
+However, if any of the following is true
+* Your function takes multiple floating-point Tensor inputs
+
+* Your function wraps any of the ops :ref:`Autocast Op Reference<autocast-policies>`
+* You want to ensure the function runs in a particular dtype.
 
 Functions that should allow autocasting
 ---------------------------------------
@@ -320,8 +323,8 @@ ensure that ``forward`` executes with whatever autocast state surrounds the poin
             a, b = ctx.saved_tensors
             return grad.mm(b.t()), a.t().mm(grad)
 
-Functions that need a particular datatype
------------------------------------------
+Functions that need a particular dtype
+--------------------------------------
 
 If you know your function requires a certain precision, or if it wraps a backend with limited datatype support,
 you may want it to disallow autocasting.
