@@ -29,8 +29,7 @@ HTML_OUTPUT            = doxygen_html
 # {repo_root}/docs/cpp/source/../../.. -> {repo_root}
 STRIP_FROM_PATH        = ../../..
 # What folders / files Doxygen should process.
-INPUT                  = ../../../torch/csrc/api/include \
-                         ../../../torch/csrc/api/src
+INPUT                  = ../../../torch/csrc/api/include/torch/nn
 # Don't include .cpp files!
 FILE_PATTERNS          = *.h
 # If you need this to be YES, exhale will probably break.
