@@ -84,8 +84,8 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
             pythonRpcHandler.serialize(
                 pythonRpcHandler.runPythonUdf(std::move(pythonUdf))));
       }
-      return
-          wrap(std::move(PythonResp(std::move(*serializedPyObj))).toMessage());
+      return wrap(
+          std::move(PythonResp(std::move(*serializedPyObj))).toMessage());
     }
     case MessageType::SCRIPT_REMOTE_CALL: {
       auto& scriptRemoteCall = static_cast<ScriptRemoteCall&>(rpc);
