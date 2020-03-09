@@ -87,7 +87,7 @@ __global__ void max_pool_forward_nhwc(const scalar_t* bottom_data, const int nba
                                    scalar_t* top_data, int64_t* top_mask) {
   extern __shared__ int smem[];
   int *out_mask_cached = smem;
-  scalar_t *out_cached = reinterpret_cast<scalar_t*>(&out_mask_cached[kernel_stride_C*blockDim.x*blockDim.y*blockDim.z]);
+  scalar_t *out_cached = reinterpret_cast<scalar_t*>(&out_mask_cached[kernel_size_C*blockDim.x*blockDim.y*blockDim.z]);
 
   // flattening cta for pre-computation & smem initialization;
   int thread_id = threadIdx.x + blockDim.x * (threadIdx.y + blockDim.y * threadIdx.z);
@@ -121,10 +121,10 @@ __global__ void max_pool_forward_nhwc(const scalar_t* bottom_data, const int nba
   int oendW = ::min(ostartW+oW, pooled_width);
 
   for (int oh = ostartH; oh < oendH; oh+=blockDim.z) {
+    int hstart = oh * stride_h - pad_h;
+    int hend = min(hstart + (kernel_h - 1) * dilation_h + 1, height);
     for (int ow = ostartW; ow < oendW; ow+=blockDim.y) {
-      int hstart = oh * stride_h - pad_h;
       int wstart = ow * stride_w - pad_w;
-      int hend = min(hstart + (kernel_h - 1) * dilation_h + 1, height);
       int wend = min(wstart + (kernel_w - 1) * dilation_w + 1, width);
       while(hstart < 0)
         hstart += dilation_h;
@@ -402,6 +402,7 @@ void max_pool2d_with_indices_out_cuda_template(
             printf("%d %d %d\n", grid_x, grid_y, grid_z); 
             printf("%d %d %d\n", block_x, block_y, block_z); 
             printf("%ld %d %d %zu\n", nInputPlane, kernel_stride_C, kernel_size_C, shmem_size); 
+
 
             max_pool_forward_nhwc<scalar_t, scalar_t>
             <<<grid, block, shmem_size, at::cuda::getCurrentCUDAStream()>>>(
