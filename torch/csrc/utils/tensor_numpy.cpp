@@ -129,8 +129,19 @@ at::Tensor tensor_from_numpy(PyObject* obj) {
   if (!PyArray_Check(obj)) {
     throw TypeError("expected np.ndarray (got %s)", Py_TYPE(obj)->tp_name);
   }
-
   auto array = (PyArrayObject*)obj;
+
+  if (!PyArray_ISWRITEABLE(array)) {
+    TORCH_WARN_ONCE(
+      "The given NumPy array is not writeable, and PyTorch does "
+      "not support non-writeable tensors. This means you can write to the "
+      "underlying (supposedly non-writeable) NumPy array using the tensor. "
+      "You may want to copy the array to protect its data or make it writeable "
+      "before converting it to a tensor. This type of warning will be "
+      "suppressed for the rest of this program.");
+
+  }
+
   int ndim = PyArray_NDIM(array);
   auto sizes = to_aten_shape(ndim, PyArray_DIMS(array));
   auto strides = to_aten_shape(ndim, PyArray_STRIDES(array));

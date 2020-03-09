@@ -216,6 +216,7 @@ RegisterOperators reg({
           return 0;
         },
         aliasAnalysisFromSchema()),
+    // not currently being generated, here for BC
     Operator(
         "aten::list_with_default(int[] list, int[] defaults) -> int[]",
         [](Stack& stack) {
