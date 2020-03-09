@@ -1,5 +1,8 @@
 #include <torch/csrc/jit/fuser/common/fusion.h>
+#include <torch/csrc/jit/fuser/common/iriostream.h>
 #include <torch/csrc/jit/fuser/common/transform_replay.h>
+
+#include <sstream>
 
 // For debug:
 /*
@@ -44,12 +47,16 @@ std::ostream& operator<<(std::ostream& os, std::vector<int> vec) {
  */
 void TransformReplay::replayBackward(Split* expr) {
   int axis = expr->axis();
+  TORCH_INTERNAL_ASSERT(axis+1 < influence.size(),
+  "Error during replay backwards, influence is not sized correctly.");
   influence[axis] = influence[axis] | influence[axis + 1];
   influence.erase(influence.begin() + axis + 1);
 }
 
 void TransformReplay::replayBackward(Merge* expr) {
   int axis = expr->axis();
+  TORCH_INTERNAL_ASSERT(axis < influence.size(),
+  "Error during replay backwards, influence is not sized correctly.");
   influence.insert(influence.begin() + axis + 1, influence[axis]);
 }
 
@@ -61,6 +68,8 @@ void TransformReplay::replayBackward(Reorder* expr) {
   for (decltype(pos2axis.size()) i = 0; i < pos2axis.size(); i++) {
     int new_pos = i;
     int old_pos = pos2axis[i];
+    TORCH_INTERNAL_ASSERT(new_pos < influence.size() && old_pos < reorder_influence.size(),
+      "Error during replay backwards, influence is not sized correctly.");
     reorder_influence[old_pos] = influence[new_pos];
   }
 
@@ -68,7 +77,9 @@ void TransformReplay::replayBackward(Reorder* expr) {
 }
 
 // Entry for backward influence propagation on td following record
-TensorDomain* TransformReplay::replayBackward(TensorDomain* td, bool create_record) {
+TensorDomain* TransformReplay::replayBackward(
+    TensorDomain* td,
+    bool create_record) {
   influence = std::vector<bool>(td->size(), false);
   for (int i = 0; i < compute_at_axis; i++)
     influence[i] = true;
@@ -86,8 +97,9 @@ TensorView* TransformReplay::replay(Split* expr, TensorView* tv) {
   if (influence[axis]) {
     // Make sure split axis is real.
     int real_axis = axis_map[expr->axis()];
-    TORCH_INTERNAL_ASSERT(real_axis != -1,
-    "During transformation replay attempted to split an imaginary axis.");
+    TORCH_INTERNAL_ASSERT(
+        real_axis != -1,
+        "During transformation replay attempted to split an imaginary axis.");
     // Replay split
     split(tv, real_axis, *(expr->factor()->value()));
     // Inserted a real axis, push everything in axis_map over to the right
@@ -114,8 +126,9 @@ TensorView* TransformReplay::replay(Merge* expr, TensorView* tv) {
 
   if (influence[axis] || influence[axis + 1]) {
     // Make sure both merge axes are real.
-    TORCH_INTERNAL_ASSERT(axis_map[axis] != -1 && axis_map[axis + 1] != -1,
-    "During transformation replay attempted to merge an imaginary axis.");
+    TORCH_INTERNAL_ASSERT(
+        axis_map[axis] != -1 && axis_map[axis + 1] != -1,
+        "During transformation replay attempted to merge an imaginary axis.");
     // Replay merge
     merge(tv, axis_map[axis]);
   } else {
@@ -243,23 +256,21 @@ TensorView* TransformReplay::runReplay(
     TensorView* replay_ref,
     TensorView* replay_target,
     int compute_at_axis) {
-
   if (compute_at_axis < 0)
     compute_at_axis += replay_ref->domain()->size() + 1;
 
-  TORCH_CHECK(compute_at_axis >= 0 && compute_at_axis < replay_ref->domain()->size() + 1,
-    "Transform replay cannot be performed as the compute_at_axis is not in the valid range.");
+  TORCH_CHECK(
+      compute_at_axis >= 0 &&
+          compute_at_axis < replay_ref->domain()->size() + 1,
+      "Transform replay cannot be performed as the compute_at_axis is not in the valid range.");
 
   this->compute_at_axis = compute_at_axis;
-  
-  /* STEP 1 */
-  // Trace back to the root TensorDomain's of ref and target
-  TensorDomain* target_root = TransformIter::runBackward(replay_target->domain(), false);
 
+  /* STEP 1 */
   // Reset the tensor domain of the target, this is the only way we can be
   // certain That we can actually replay the ops of ref.
-
-  replay_target->setDomain(target_root);
+  // Trace back to the root TensorDomain's of ref and target
+  replay_target->resetView();
 
   /* STEP 2 */
   // Mark compute_at_axis and below as "influenced", trace back through
@@ -280,13 +291,27 @@ TensorView* TransformReplay::runReplay(
       axis_map.push_back(i);
 
   // Domain sizes must match at root for replay.
-  TORCH_CHECK(axis_map.size() == ref_root->size(),
-    "Transforms cannot be replayed as source and destinations do not have the same root sizes.");
-  for (decltype(axis_map.size()) i{0}; i < axis_map.size(); i++) {
-    TORCH_CHECK(ref_root->axis(i)->size()->same_as(target_root->axis(axis_map[i])->size()),
-    "Transforms cannot be replayed as source and destinations do not have the same root sizes.");
+  if (axis_map.size() != ref_root->size()) {
+    std::stringstream err_msg;
+    err_msg
+        << "Transforms cannot be replayed as source and destinations do not have the same root sizes."
+        << " " << ref_root << " vs " << replay_target->domain() << std::endl;
+    TORCH_CHECK(false, err_msg.str());
   }
 
+  /*
+   * TODO: Decide if the following check is reasonable, when we're parsing the
+   * JIT graph, we are using symbolic sizes for each tensor individually, so
+   * they won't all have the same size.
+   */
+  
+  // for (decltype(axis_map.size()) i{0}; i < axis_map.size(); i++) {
+  //   TORCH_CHECK(
+  //       ref_root->axis(i)->size()->same_as(
+  //           target_root->axis(axis_map[i])->size()),
+  //       "Transforms cannot be replayed as source and destinations do not have the same root sizes.");
+  // }
+  
   /* STEP 3 */
   // Replay operations while forward propagating influence. The resulting
   // influence can be different in forward propagation, than in backward
@@ -300,7 +325,8 @@ TensorView* TransformReplay::runReplay(
 
   for (decltype(replayed->domain()->size()) i{0}; i < compute_at_axis; i++)
     if (replayed->domain()->axis(i)->isReduction())
-      TORCH_CHECK(false,
+      TORCH_CHECK(
+          false,
           "Generated a compute_at dependency where a reduction would be used before computed.");
 
   return replayed;
