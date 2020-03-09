@@ -510,16 +510,18 @@ namespace {
         // we will need to restrict out shared memory usage and adjust the launch
         // config;
         AT_ASSERT(input_.numel() < std::numeric_limits<int32_t>::max());
-        AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+        AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16,
             input_.scalar_type(), "adaptive_avg_pool2d_nhwc_cuda", [&] {
-              size_t shmem_size = (kernel_size_C * block_x * block_y * block_z) * sizeof(scalar_t);
-              AT_ASSERT(shmem_size <= sharedMemPerBlock);
-              adaptive_average_pool_nhwc<int32_t><<<grid, block, shmem_size, at::cuda::getCurrentCUDAStream()>>> (
-                input_.data_ptr<scalar_t>(),
-                output.data_ptr<scalar_t>(),
-                sizeB, sizeC, isizeH, isizeW, osizeH, osizeW,
-                kernel_stride_C, kernel_size_C,
-                istrideB, istrideC, istrideH, istrideW);
+              AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "adaptive_avg_pool2d_nhwc_cuda", [&] {
+                size_t shmem_size = (kernel_size_C * block_x * block_y * block_z) * sizeof(scalar_t);
+                AT_ASSERT(shmem_size <= sharedMemPerBlock);
+                adaptive_average_pool_nhwc<int32_t><<<grid, block, shmem_size, at::cuda::getCurrentCUDAStream()>>> (
+                  input_.data_ptr<scalar_t>(),
+                  output.data_ptr<scalar_t>(),
+                  sizeB, sizeC, isizeH, isizeW, osizeH, osizeW,
+                  kernel_stride_C, kernel_size_C,
+                  istrideB, istrideC, istrideH, istrideW);
+                });
               }
           );
         break;
@@ -547,21 +549,23 @@ namespace {
         } else {
            output.resize_({sizeD, osizeH, osizeW});
         }
-        AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+        AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16,
             input_.scalar_type(), "adaptive_avg_pool2d_cuda", [&] {
-              scalar_t *input_data = input_.data_ptr<scalar_t>();
-              scalar_t *output_data = output.data_ptr<scalar_t>();
+              AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "adaptive_avg_pool2d_cuda", [&] {
+                scalar_t *input_data = input_.data_ptr<scalar_t>();
+                scalar_t *output_data = output.data_ptr<scalar_t>();
 
-              // cuda blocks & threads:
-              int blocksH = std::max<int64_t>((int)(16L / sizeD), 1);
-              dim3 blocks(grid_x, blocksH);
-              dim3 threads(32, 8);
+                // cuda blocks & threads:
+                int blocksH = std::max<int64_t>((int)(16L / sizeD), 1);
+                dim3 blocks(grid_x, blocksH);
+                dim3 threads(32, 8);
 
-              // run averagepool kernel
-              adaptive_average_pool <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>> (
-                input_data, output_data,
-                isizeH, isizeW, osizeH, osizeW,
-                istrideD, istrideH, istrideW);
+                // run averagepool kernel
+                adaptive_average_pool <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>> (
+                  input_data, output_data,
+                  isizeH, isizeW, osizeH, osizeW,
+                  istrideD, istrideH, istrideW);
+                });
               }
           );
         break;
@@ -655,16 +659,18 @@ namespace {
         // we will need to restrict out shared memory usage and adjust the launch
         // config;
         AT_ASSERT(input.numel() < std::numeric_limits<int32_t>::max());
-        AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+        AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16,
             input.scalar_type(), "adaptive_avg_pool2d_backward_nhwc_cuda", [&] {
-              size_t shmem_size = (kernel_size_C * block_x * block_y * block_z + osizeH + osizeW) * sizeof(scalar_t) + 2 * isizeW * sizeof(int32_t);
-              AT_ASSERT(shmem_size <= sharedMemPerBlock);
-              adaptive_average_gradinput_nhwc<int32_t><<<grid, block, shmem_size, at::cuda::getCurrentCUDAStream()>>> (
-                gradInput.data_ptr<scalar_t>(),
-                gradOutput.data_ptr<scalar_t>(),
-                sizeB, sizeC, isizeH, isizeW, osizeH, osizeW,
-                kernel_stride_C, kernel_size_C,
-                ostrideB, ostrideC, ostrideH, ostrideW);
+              AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "adaptive_avg_pool2d_backward_nhwc_cuda", [&] {
+                size_t shmem_size = (kernel_size_C * block_x * block_y * block_z + osizeH + osizeW) * sizeof(scalar_t) + 2 * isizeW * sizeof(int32_t);
+                AT_ASSERT(shmem_size <= sharedMemPerBlock);
+                adaptive_average_gradinput_nhwc<int32_t><<<grid, block, shmem_size, at::cuda::getCurrentCUDAStream()>>> (
+                  gradInput.data_ptr<scalar_t>(),
+                  gradOutput.data_ptr<scalar_t>(),
+                  sizeB, sizeC, isizeH, isizeW, osizeH, osizeW,
+                  kernel_stride_C, kernel_size_C,
+                  ostrideB, ostrideC, ostrideH, ostrideW);
+                });
               }
           );
         break;
@@ -685,30 +691,32 @@ namespace {
         if (input.ndimension() == 4) grid_x *= input.size(-4);
 
           //bool atomic = (isizeW%osizeW != 0) || (isizeH%osizeH != 0);
-        AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+        AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16,
             input.scalar_type(), "adaptive_avg_pool2d_backward_cuda", [&] {
-              scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
-              scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
+              AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "adaptive_avg_pool2d_backward_cuda", [&] {
+                scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
+                scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
 
-              // cuda blocks & threads:
-              int blocksH = std::max((int)(16L / sizeD), 1);
-              dim3 blocks(grid_x, blocksH);
-              dim3 threads(32, 8);
+                // cuda blocks & threads:
+                int blocksH = std::max((int)(16L / sizeD), 1);
+                dim3 blocks(grid_x, blocksH);
+                dim3 threads(32, 8);
 
-              if(atomic)
-              {
-                // run updateGradInput kernel, accumulate gradients atomically
-                atomic_adaptive_average_gradinput <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>> (
-                  gradInput_data, gradOutput_data,
-                  isizeH, isizeW, osizeH, osizeW);
-              }
-              else
-              {
-                // run updateGradInput kernel
-                adaptive_average_gradinput <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>> (
-                  gradInput_data, gradOutput_data,
-                  isizeH, isizeW, osizeH, osizeW);
-              }
+                if(atomic)
+                {
+                  // run updateGradInput kernel, accumulate gradients atomically
+                  atomic_adaptive_average_gradinput <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>> (
+                    gradInput_data, gradOutput_data,
+                    isizeH, isizeW, osizeH, osizeW);
+                }
+                else
+                {
+                  // run updateGradInput kernel
+                  adaptive_average_gradinput <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>> (
+                    gradInput_data, gradOutput_data,
+                    isizeH, isizeW, osizeH, osizeW);
+                }
+              });
             }
           );
         break;
