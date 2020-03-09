@@ -279,10 +279,11 @@ inline std::string if_empty_then(std::string x, std::string y) {
 #ifdef NDEBUG
 // Optimized version - generates no code.
 #define TORCH_INTERNAL_ASSERT_DEBUG_ONLY(...) \
-  while (false)           \
-  TORCH_INTERNAL_ASSERT(__VA_ARGS__)
+  while (false)                               \
+  C10_EXPAND_MSVC_WORKAROUND(TORCH_INTERNAL_ASSERT(__VA_ARGS__))
 #else
-#define TORCH_INTERNAL_ASSERT_DEBUG_ONLY(...) C10_EXPAND_MSVC_WORKAROUND(TORCH_INTERNAL_ASSERT(__VA_ARGS__))
+#define TORCH_INTERNAL_ASSERT_DEBUG_ONLY(...) \
+  C10_EXPAND_MSVC_WORKAROUND(TORCH_INTERNAL_ASSERT(__VA_ARGS__))
 #endif
 
 // TODO: We're going to get a lot of similar looking string literals

@@ -1,6 +1,6 @@
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
-#include <torch/csrc/jit/pybind_utils.h>
+#include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/python_compat.h>
 
 namespace torch {
@@ -30,7 +30,7 @@ namespace {
 struct PythonTypeResolver : public jit::script::Resolver {
   std::shared_ptr<jit::script::SugaredValue> resolveValue(
       const std::string& /* unused */,
-      Function& /* unused */,
+      torch::jit::Function& /* unused */,
       const jit::SourceRange& /* unused */) override {
     TORCH_INTERNAL_ASSERT(
         false, "RPC Type resolver does not need to resolve value");

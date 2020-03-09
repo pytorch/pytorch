@@ -1,6 +1,6 @@
 #include <torch/csrc/distributed/rpc/rref_proto.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
-#include <torch/csrc/jit/pickle.h>
+#include <torch/csrc/jit/serialization/pickle.h>
 
 #include <limits>
 

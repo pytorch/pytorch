@@ -1,7 +1,7 @@
 #include <torch/csrc/utils/throughput_benchmark.h>
 
 #include <pybind11/pybind11.h>
-#include <torch/csrc/jit/pybind_utils.h>
+#include <torch/csrc/jit/python/pybind_utils.h>
 
 namespace torch {
 namespace throughput_benchmark {

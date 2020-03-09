@@ -638,6 +638,7 @@ class TestCase(expecttest.TestCase):
     maxDiff = None
     _do_cuda_memory_leak_check = False
     _do_cuda_non_default_stream = False
+    exact_dtype = False
 
     def __init__(self, method_name='runTest'):
         super(TestCase, self).__init__(method_name)
@@ -776,7 +777,10 @@ class TestCase(expecttest.TestCase):
 
         return tg
 
-    def assertEqual(self, x, y, prec=None, message='', allow_inf=False):
+    def assertEqual(self, x, y, prec=None, message='', allow_inf=False, exact_dtype=None):
+        if exact_dtype is None:
+            exact_dtype = self.exact_dtype
+
         if isinstance(prec, str) and message == '':
             message = prec
             prec = None
@@ -785,19 +789,21 @@ class TestCase(expecttest.TestCase):
 
         if isinstance(x, torch.Tensor) and isinstance(y, Number):
             self.assertEqual(x.item(), y, prec=prec, message=message,
-                             allow_inf=allow_inf)
+                             allow_inf=allow_inf, exact_dtype=exact_dtype)
         elif isinstance(y, torch.Tensor) and isinstance(x, Number):
             self.assertEqual(x, y.item(), prec=prec, message=message,
-                             allow_inf=allow_inf)
+                             allow_inf=allow_inf, exact_dtype=exact_dtype)
         elif isinstance(x, torch.Tensor) and isinstance(y, numpy.bool_):
             self.assertEqual(x.item(), y, prec=prec, message=message,
-                             allow_inf=allow_inf)
+                             allow_inf=allow_inf, exact_dtype=exact_dtype)
         elif isinstance(y, torch.Tensor) and isinstance(x, numpy.bool_):
             self.assertEqual(x, y.item(), prec=prec, message=message,
-                             allow_inf=allow_inf)
+                             allow_inf=allow_inf, exact_dtype=exact_dtype)
         elif isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
             def assertTensorsEqual(a, b):
                 super(TestCase, self).assertEqual(a.size(), b.size(), message)
+                if exact_dtype:
+                    self.assertEqual(a.dtype, b.dtype)
                 if a.numel() > 0:
                     if (a.device.type == 'cpu' and (a.dtype == torch.float16 or a.dtype == torch.bfloat16)):
                         # CPU half and bfloat16 tensors don't have the methods we need below
@@ -817,7 +823,7 @@ class TestCase(expecttest.TestCase):
                             b = b.to(torch.int)
 
                         diff = a - b
-                        if a.is_floating_point():
+                        if a.dtype.is_complex or a.dtype.is_floating_point:
                             # check that NaNs are in the same locations
                             nan_mask = torch.isnan(a)
                             self.assertTrue(torch.equal(nan_mask, torch.isnan(b)), message)
@@ -829,8 +835,15 @@ class TestCase(expecttest.TestCase):
                                 self.assertTrue(torch.equal(inf_sign, torch.isinf(b).sign()), message)
                                 diff[inf_mask] = 0
                         # TODO: implement abs on CharTensor (int8)
+                        # TODO: modify abs to return float/double for ComplexFloat/ComplexDouble
                         if diff.is_signed() and diff.dtype != torch.int8:
                             diff = diff.abs()
+                            # if diff is complex, the imaginary component for diff will be 0
+                            # from the previous step, hence converting it to float and double is fine.
+                            if diff.dtype == torch.complex64:
+                                diff = diff.to(torch.float)
+                            elif diff.dtype == torch.complex128:
+                                diff = diff.to(torch.double)
                         max_err = diff.max()
                         self.assertLessEqual(max_err, prec, message)
             super(TestCase, self).assertEqual(x.is_sparse, y.is_sparse, message)
@@ -842,25 +855,29 @@ class TestCase(expecttest.TestCase):
                 assertTensorsEqual(x._values(), y._values())
             elif x.is_quantized and y.is_quantized:
                 self.assertEqual(x.qscheme(), y.qscheme(), prec=prec,
-                                 message=message, allow_inf=allow_inf)
+                                 message=message, allow_inf=allow_inf,
+                                 exact_dtype=exact_dtype)
                 if x.qscheme() == torch.per_tensor_affine:
                     self.assertEqual(x.q_scale(), y.q_scale(), prec=prec,
-                                     message=message, allow_inf=allow_inf)
+                                     message=message, allow_inf=allow_inf,
+                                     exact_dtype=exact_dtype)
                     self.assertEqual(x.q_zero_point(), y.q_zero_point(),
                                      prec=prec, message=message,
-                                     allow_inf=allow_inf)
+                                     allow_inf=allow_inf, exact_dtype=exact_dtype)
                 elif x.qscheme() == torch.per_channel_affine:
                     self.assertEqual(x.q_per_channel_scales(), y.q_per_channel_scales(), prec=prec,
-                                     message=message, allow_inf=allow_inf)
+                                     message=message, allow_inf=allow_inf,
+                                     exact_dtype=exact_dtype)
                     self.assertEqual(x.q_per_channel_zero_points(), y.q_per_channel_zero_points(),
                                      prec=prec, message=message,
-                                     allow_inf=allow_inf)
+                                     allow_inf=allow_inf, exact_dtype=exact_dtype)
                     self.assertEqual(x.q_per_channel_axis(), y.q_per_channel_axis(),
                                      prec=prec, message=message)
                 self.assertEqual(x.dtype, y.dtype)
                 self.assertEqual(x.int_repr().to(torch.int32),
                                  y.int_repr().to(torch.int32), prec=prec,
-                                 message=message, allow_inf=allow_inf)
+                                 message=message, allow_inf=allow_inf,
+                                 exact_dtype=exact_dtype)
             else:
                 assertTensorsEqual(x, y)
         elif isinstance(x, string_classes) and isinstance(y, string_classes):
@@ -870,20 +887,22 @@ class TestCase(expecttest.TestCase):
         elif isinstance(x, dict) and isinstance(y, dict):
             if isinstance(x, OrderedDict) and isinstance(y, OrderedDict):
                 self.assertEqual(x.items(), y.items(), prec=prec,
-                                 message=message, allow_inf=allow_inf)
+                                 message=message, allow_inf=allow_inf,
+                                 exact_dtype=exact_dtype)
             else:
                 self.assertEqual(set(x.keys()), set(y.keys()), prec=prec,
-                                 message=message, allow_inf=allow_inf)
+                                 message=message, allow_inf=allow_inf,
+                                 exact_dtype=exact_dtype)
                 key_list = list(x.keys())
                 self.assertEqual([x[k] for k in key_list],
                                  [y[k] for k in key_list],
                                  prec=prec, message=message,
-                                 allow_inf=allow_inf)
+                                 allow_inf=allow_inf, exact_dtype=exact_dtype)
         elif is_iterable(x) and is_iterable(y):
             super(TestCase, self).assertEqual(len(x), len(y), message)
             for x_, y_ in zip(x, y):
                 self.assertEqual(x_, y_, prec=prec, message=message,
-                                 allow_inf=allow_inf)
+                                 allow_inf=allow_inf, exact_dtype=exact_dtype)
         elif isinstance(x, bool) and isinstance(y, bool):
             super(TestCase, self).assertEqual(x, y, message)
         elif isinstance(x, Number) and isinstance(y, Number):

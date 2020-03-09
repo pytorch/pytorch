@@ -122,6 +122,34 @@ class TestMkldnn(TestCase):
                 self._test_serialization(mkldnn_conv2d, (x.to_mkldnn(),))
                 self._test_tracing(mkldnn_conv2d, (x.to_mkldnn(),))
 
+    def test_conv2d_legacy_jit_model(self):
+        """
+        MKLDNN integration used to serialize models with 5d weight for grouped
+        convolutions, we'd like to preserve this behavior
+        """
+        g = 4
+        conv2d = torch.nn.Conv2d(16, 16, 3, groups=g)
+        conv2d_mkldnn = torch.utils.mkldnn.to_mkldnn(conv2d)
+
+        # contrive legacy conv2d module with a 5-d weight
+        o, i, h, w = conv2d.weight.shape
+        weight_5d = conv2d.weight.reshape((g, o // g, i, h, w))
+        conv2d_mkldnn.weight = weight_5d.to_mkldnn()
+
+        x = torch.randn(1, 16, 8, 8)
+
+        with TemporaryFileName() as fname:
+            torch.jit.save(conv2d_mkldnn, fname)
+            conv2d_loaded = torch.jit.load(fname)
+
+            self.assertEqual(conv2d_mkldnn.weight.ndimension(), 5)
+            # with DNNL upgrade we should switch to no-reordering,
+            # but for now we keep the 5d tensor
+            # self.assertEqual(conv2d_loaded.weight.ndimension(), 4)
+            self.assertEqual(
+                conv2d(x),
+                conv2d_loaded(x.to_mkldnn()).to_dense())
+
     def test_relu(self):
         x = torch.randn((4, 5), dtype=torch.float32) * 10
         self.assertEqual(torch.relu(x), torch.relu(x.to_mkldnn()).to_dense())
