@@ -7,9 +7,9 @@
 #include <torch/csrc/jit/fuser/common/predicate_compute.h>
 #include <torch/csrc/jit/fuser/common/transform_iter.h>
 
+#include <map>
 #include <ostream>
 #include <stack>
-#include <map>
 
 namespace torch {
 namespace jit {
@@ -29,8 +29,8 @@ std::ostream& operator<<(std::ostream& os, std::vector<Int*> vec) {
 }
 */
 
-//Run through and grab all values that ar eused in this fusion based on
-//the registered outputs.
+// Run through and grab all values that ar eused in this fusion based on
+// the registered outputs.
 struct FindUsedVals : public IterVisitor {
   std::set<Val*> used_vals;
 
@@ -44,81 +44,79 @@ struct FindUsedVals : public IterVisitor {
     finder.traverse(FusionGuard::getCurFusion(), true);
     return finder.used_vals;
   }
-
 };
 
 struct TORCH_API CodeWrite : public IRPrinter {
  private:
-  //Check if expr is a TensorView operation we can print
+  // Check if expr is a TensorView operation we can print
   bool isTVOp(const Expr* expr);
 
-
   /*****PRINTING FUNCTIONS****/
-  //Print the indexing into a TensorView
+  // Print the indexing into a TensorView
   void printIndexInto(std::vector<Int*> indices, const TensorView* const);
-  //Compute and print the predicate based on accessing a specific TensorView
+  // Compute and print the predicate based on accessing a specific TensorView
   bool print_predicate(const TensorView* const);
 
-  //Print the allocation of a register space
+  // Print the allocation of a register space
   void printAlloc(TensorView*);
   // Print lhs of uop/bop, returns if predicate was needed
   bool printConsumer(TensorView*);
-  //Printing functions for TensorView ops
+  // Printing functions for TensorView ops
   void handle(const TensorView* const);
-  //Check overrides before printing a value
+  // Check overrides before printing a value
   void handle(const Val* const);
   void handle(const UnaryOp* const);
   void handle(const BinaryOp* const);
 
-  //Ignore split/merge/reorder operations,
-  //we don't want to print them directly
+  // Ignore split/merge/reorder operations,
+  // we don't want to print them directly
   void handle(const Split* const) {}
   void handle(const Merge* const) {}
   void handle(const Reorder* const) {}
 
-  //Indent the generated code
+  // Indent the generated code
   void indent();
 
-  //Update the for loop structure based on provided TensorView
+  // Update the for loop structure based on provided TensorView
   void updateView(TensorView*);
 
-  //Grab all the indices used in the current for loop structure
+  // Grab all the indices used in the current for loop structure
   std::vector<Int*> getLoopIndices();
-  //Open a new inner most for loop
+  // Open a new inner most for loop
   void openFor(IterDomain*);
-  //Close the inner most for loop
+  // Close the inner most for loop
   void closeFor();
-  //Close all for loops
+  // Close all for loops
   void resetFors();
-  //Clear out the last recorded computeAtView
+  // Clear out the last recorded computeAtView
   void clearActiveView();
 
-  //Mark if the TensorView I'm printing is a producer
+  // Mark if the TensorView I'm printing is a producer
   bool producer = false;
-  //Track the TensorView that is consuming the current producer
+  // Track the TensorView that is consuming the current producer
   TensorView* consumer = nullptr;
 
-  //Track the for loops
+  // Track the for loops
   std::vector<const ForLoop*> fors;
-  //Track the indentation size for pretty printing
+  // Track the indentation size for pretty printing
   int indent_size = 0;
 
-  //Track the last computeAt TensorView and axis
+  // Track the last computeAt TensorView and axis
   const TensorView* active_view = nullptr;
   int active_view_axis = 0;
 
-  //Mark if I want to reset all fors next time I call updateView
+  // Mark if I want to reset all fors next time I call updateView
   bool reset_fors = false;
 
-  //Track all 
+  // Track all
   std::set<IterDomain*> bound_iters;
 
-  //Print std::string instead of Val
+  // Print std::string instead of Val
   std::map<const Val* const, std::string> overrides;
 
-  //Set override for thread/block axes
+  // Set override for thread/block axes
   void bind(IterDomain* id, Val* iterator);
-  
+
   // Grab all values that are used. Look for Tensors
   // to set Int* -> Tensor->size(i)
   // Grab all IterDoms that are used. Look for any
@@ -126,24 +124,23 @@ struct TORCH_API CodeWrite : public IRPrinter {
   // Add them to bound_iters
   void setupOverrides();
 
-  //wrapper for overrides.find on non-const vals
-  std::map<const Val* const, std::string>::iterator
-    overrides_find(Val* val){
-      return overrides.find(const_cast<const Val* const>(val));
-    }
-  //wrapper for override.emplace on non-const vals
-  void overrides_emplace(Val* val, std::string str){
+  // wrapper for overrides.find on non-const vals
+  std::map<const Val* const, std::string>::iterator overrides_find(Val* val) {
+    return overrides.find(const_cast<const Val* const>(val));
+  }
+  // wrapper for override.emplace on non-const vals
+  void overrides_emplace(Val* val, std::string str) {
     overrides[const_cast<const Val* const>(val)] = str;
   }
 
-  //Print the header of the kernel
+  // Print the header of the kernel
   void header();
 
  public:
-  //Init printer on ostream
+  // Init printer on ostream
   CodeWrite(std::ostream& _os) : IRPrinter(_os) {}
 
-  //print generated code to ostream
+  // print generated code to ostream
   void traverse(Fusion* fusion);
 };
 
