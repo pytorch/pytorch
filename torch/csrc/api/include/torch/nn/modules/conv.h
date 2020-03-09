@@ -118,7 +118,7 @@ class ConvNdImpl : public torch::nn::Cloneable<Derived> {
 /// constructor arguments are supported for this module.
 ///
 /// Example:
-/// ```cpp
+/// ```
 /// auto m = torch::nn::Conv1d(torch::nn::Conv1dOptions(1, 2, 3));
 /// ```
 class TORCH_API Conv1dImpl : public ConvNdImpl<1, Conv1dImpl> {
