@@ -95,7 +95,7 @@ class RNNBase(torch.nn.Module):
                         # weights and pack parameters in this order:
                         #
                         #   packed_ih, packed_hh, b_ih, b_hh
-                        packed_weight = torch.fbgemm_pack_gemm_matrix_fp16(
+                        packed_weight = torch.ops.quantized.linear_prepack_fp16(
                             qweight)
 
                         params = [packed_weight, bias]
