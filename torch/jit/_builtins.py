@@ -81,6 +81,7 @@ _builtin_ops = [
     (torch.nn.init._no_grad_uniform_, "aten::_no_grad_uniform_"),
     (torch.nn.init._no_grad_zero_, "aten::_no_grad_zero_"),
     (torch._C._get_tracing_state, "aten::_get_tracing_state"),
+    (torch.nn.functional.assert_int_or_pair, "aten::_assert_int_or_pair"),
     (warnings.warn, "aten::warn"),
     (torch._VF.stft, "aten::stft"),
     (torch._VF.cdist, "aten::cdist"),
