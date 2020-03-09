@@ -415,12 +415,13 @@ If the future completes with an error, an exception is thrown.
         // exception will be thrown in get_function() call; if args do not match
         // with function schema, exception will be thrown in
         // createStackForSchema() call.
+        auto& pythonRpcHandler = PythonRpcHandler::getInstance();
         c10::QualifiedName qualifiedName =
-            PythonRpcHandler::getInstance().getQualifiedName(userCallable);
-        c10::FunctionSchema functionSchema = PythonRpcHandler::getInstance()
-                                                 .jitCompilationUnit()
-                                                 ->get_function(qualifiedName)
-                                                 .getSchema();
+            pythonRpcHandler.getQualifiedName(userCallable);
+        c10::FunctionSchema functionSchema =
+            pythonRpcHandler.jitCompilationUnit()
+                ->get_function(qualifiedName)
+                .getSchema();
         Stack stack;
         {
           py::gil_scoped_acquire acquire;
