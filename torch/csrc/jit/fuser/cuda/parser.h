@@ -1,6 +1,5 @@
 #pragma once
 #include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/fuser/common/tensor.h>
 #include <torch/csrc/jit/fuser/common/fusion.h>
 
 namespace torch {
