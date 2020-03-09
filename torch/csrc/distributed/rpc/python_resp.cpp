@@ -25,6 +25,10 @@ std::unique_ptr<PythonResp> PythonResp::fromMessage(const Message& message) {
   return std::make_unique<PythonResp>(std::move(serializedPyObj));
 }
 
+const SerializedPyObj& PythonResp::serializedPyObj() const {
+  return serializedPyObj_;
+}
+
 const std::string& PythonResp::pickledPayload() const {
   return serializedPyObj_.payload_;
 }

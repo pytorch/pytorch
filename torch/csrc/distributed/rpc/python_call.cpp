@@ -25,6 +25,10 @@ std::unique_ptr<PythonCall> PythonCall::fromMessage(const Message& message) {
   return std::make_unique<PythonCall>(std::move(serializedPyObj));
 }
 
+const SerializedPyObj& PythonCall::serializedPyObj() const {
+  return serializedPyObj_;
+}
+
 const std::string& PythonCall::pickledPayload() const {
   return serializedPyObj_.payload_;
 }
