@@ -10526,8 +10526,6 @@ a")
                 return thing - self.i
 
         class M(torch.nn.Module):
-            __constants__ = ['mods']
-
             def __init__(self):
                 super(M, self).__init__()
                 self.mods = nn.ModuleList([Sub(i) for i in range(10)])
@@ -10540,6 +10538,19 @@ a")
 
         x = torch.tensor(1)
         self.checkModule(M(), (x,))
+
+        class MForward(torch.nn.Module):
+            def __init__(self):
+                super(MForward, self).__init__()
+                self.mods = nn.ModuleList([Sub(i) for i in range(10)])
+
+            def forward(self, v):
+                v = self.mods[4](v)
+                v = self.mods[-1](v)
+                v = self.mods[-9](v)
+                return v
+
+        self.checkModule(MForward(), (torch.tensor(1),))
 
         class M2(M):
             def __init__(self):
