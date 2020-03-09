@@ -12,8 +12,6 @@
 #include <ATen/native/cuda/LaunchUtils.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 
-#include <iostream>
-
 namespace at {
 namespace native {
 namespace {
