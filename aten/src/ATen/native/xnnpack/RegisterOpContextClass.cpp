@@ -13,7 +13,6 @@ namespace xnnpack {
 
 namespace {
 torch::jit::class_<XNNPackLinearOpContext> register_xnnpack_linear_op_context_class() {
-  static int custom_class_handler = torch::jit::register_custom_class_handler();
   static auto register_linear_op_context_class =
       torch::jit::class_<XNNPackLinearOpContext>("XNNPackLinearOpContext")
           .def_pickle(
@@ -41,7 +40,6 @@ torch::jit::class_<XNNPackLinearOpContext> register_xnnpack_linear_op_context_cl
 }
 
 torch::jit::class_<XNNPackConv2dOpContext> register_xnnpack_conv2d_op_context_class() {
-  static int custom_class_handler = torch::jit::register_custom_class_handler();
   static auto register_conv2d_op_context_class =
       torch::jit::class_<XNNPackConv2dOpContext>("XNNPackConv2dOpContext")
           .def_pickle(
