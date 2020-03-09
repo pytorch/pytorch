@@ -8,7 +8,7 @@ struct Node {};
 // ```
 // void NotLeakingSymbolsFromTorchAutogradNamespace_test_func(Node *node) {}
 //                                                            ^
-// error: reference to ‘Node’ is ambiguous
+// error: reference to `Node` is ambiguous
 // ```
 void NotLeakingSymbolsFromTorchAutogradNamespace_test_func(Node *node) {}
 
