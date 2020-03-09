@@ -72,7 +72,6 @@ _builtin_ops = [
     (torch.autograd.backward, "aten::backward"),
     (torch._C._infer_size, "aten::_infer_size"),
     (torch.nn.functional._no_grad_embedding_renorm_, "aten::_no_grad_embedding_renorm_"),
-    (torch.nn.functional.assert_int_or_pair, "aten::_assert_int_or_pair"),
     (torch.nn.functional.interpolate, "aten::__interpolate"),
     (torch.nn.functional.upsample_bilinear, "aten::__upsample_bilinear"),
     (torch.nn.functional.upsample_nearest, "aten::__upsample_nearest"),
@@ -90,14 +89,14 @@ _builtin_ops = [
     (torch._VF.frobenius_norm, "aten::frobenius_norm"),
 ]
 
-# ops in torch.functional are bound to torch 
-# in these cases, we want to resolve the function to their python implementation 
+# ops in torch.functional are bound to torch
+# in these cases, we want to resolve the function to their python implementation
 # instead looking up a builtin "aten::" schema
 
 def _gen_torch_functional_registered_ops():
-    # eventually ops should encompass all of torch/functional.py, (torch.functional.__all__) 
-    # but we are currently only able to compile some of the functions. additionally, 
-    # some functions directly map to their aten:: implementations. 
+    # eventually ops should encompass all of torch/functional.py, (torch.functional.__all__)
+    # but we are currently only able to compile some of the functions. additionally,
+    # some functions directly map to their aten:: implementations.
     # TODO: add support for more ops
     ops = ["stft", "lu", "lu_unpack", "cdist", "norm"]
     return set(getattr(torch.functional, name) for name in ops)
