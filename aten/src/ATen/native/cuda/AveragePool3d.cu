@@ -401,48 +401,50 @@ void avg_pool3d_out_cuda_template(
     work_output = work_output.reshape({nbatch * nslices, otime, oheight, owidth});
   }
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16,
     input.scalar_type(),
     "avg_pool3d_out_cuda",
     [&] {
-      using accscalar_t = acc_type<scalar_t, true>;
-      int64_t totalZ = otime * nslices * nbatch;
-      int64_t offsetZ = 0;
-      dim3 block(32, 8);
+      AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "avg_pool3d_out_cuda", [&] {
+        using accscalar_t = acc_type<scalar_t, true>;
+        int64_t totalZ = otime * nslices * nbatch;
+        int64_t offsetZ = 0;
+        dim3 block(32, 8);
 
-      while (totalZ > 0) {
-        dim3 grid(cuda::ATenCeilDiv(owidth, static_cast<int64_t>(block.x)),
-                  cuda::ATenCeilDiv(oheight, static_cast<int64_t>(block.y)),
-                  totalZ > 65535 ? 65535 : totalZ);
+        while (totalZ > 0) {
+          dim3 grid(cuda::ATenCeilDiv(owidth, static_cast<int64_t>(block.x)),
+                    cuda::ATenCeilDiv(oheight, static_cast<int64_t>(block.y)),
+                    totalZ > 65535 ? 65535 : totalZ);
 
-        switch (kW) {
-          LAUNCH_UPDATE_OUTPUT_KERNEL_WIDTH(1);
-          LAUNCH_UPDATE_OUTPUT_KERNEL_WIDTH(2);
-          LAUNCH_UPDATE_OUTPUT_KERNEL_WIDTH(3);
-          LAUNCH_UPDATE_OUTPUT_KERNEL_WIDTH(4);
-          LAUNCH_UPDATE_OUTPUT_KERNEL_WIDTH(5);
-          LAUNCH_UPDATE_OUTPUT_KERNEL_WIDTH(6);
-          LAUNCH_UPDATE_OUTPUT_KERNEL_WIDTH(7);
-        default:
-          avg_pool3d_cuda_update_output<scalar_t, accscalar_t>
-            <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
-               work_input.packed_accessor64<scalar_t, 4>(),
-               work_output.packed_accessor64<scalar_t, 4>(),
-               kT, kH, kW,
-               dT, dH, dW,
-               padT, padH, padW,
-               count_include_pad,
-               offsetZ, divisor);
-            break;
+          switch (kW) {
+            LAUNCH_UPDATE_OUTPUT_KERNEL_WIDTH(1);
+            LAUNCH_UPDATE_OUTPUT_KERNEL_WIDTH(2);
+            LAUNCH_UPDATE_OUTPUT_KERNEL_WIDTH(3);
+            LAUNCH_UPDATE_OUTPUT_KERNEL_WIDTH(4);
+            LAUNCH_UPDATE_OUTPUT_KERNEL_WIDTH(5);
+            LAUNCH_UPDATE_OUTPUT_KERNEL_WIDTH(6);
+            LAUNCH_UPDATE_OUTPUT_KERNEL_WIDTH(7);
+          default:
+            avg_pool3d_cuda_update_output<scalar_t, accscalar_t>
+              <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
+                 work_input.packed_accessor64<scalar_t, 4>(),
+                 work_output.packed_accessor64<scalar_t, 4>(),
+                 kT, kH, kW,
+                 dT, dH, dW,
+                 padT, padH, padW,
+                 count_include_pad,
+                 offsetZ, divisor);
+              break;
+          }
+
+          TORCH_CHECK(cudaGetLastError() == cudaSuccess,
+            "avg_pool3d_out_cuda failed with error code ",
+            cudaGetLastError());
+
+          totalZ -= 65535;
+          offsetZ += 65535;
         }
-
-        TORCH_CHECK(cudaGetLastError() == cudaSuccess,
-          "avg_pool3d_out_cuda failed with error code ",
-          cudaGetLastError());
-
-        totalZ -= 65535;
-        offsetZ += 65535;
-      }
+      });
     }
   );
 }
@@ -546,88 +548,92 @@ void avg_pool3d_backward_out_cuda_template(
   // specialization yields 3x speedup over the gpuAtomicAdd implementation.
   // Padding must be 0, otherwise, pool size may change.
   if (dT == 1 && dH == 1 && dW == 1 && padT == 0 && padH == 0 && padW == 0) {
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(),
+    AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(),
       "avg_pool3d_backward_out_frame_stride1",
       [&] {
-        using accscalar_t = acc_type<scalar_t, true>;
-        int64_t totalZ = itime * nslices * nbatch;
-        int64_t offsetZ = 0;
-        dim3 block(32, 8);
+        AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "avg_pool3d_backward_out_frame_stride1", [&] {
+          using accscalar_t = acc_type<scalar_t, true>;
+          int64_t totalZ = itime * nslices * nbatch;
+          int64_t offsetZ = 0;
+          dim3 block(32, 8);
 
-        accscalar_t divide_factor;
-        if (divisor) {
-          divide_factor = static_cast<accscalar_t>(divisor);
-        } else {
-          divide_factor = static_cast<accscalar_t>(kT * kH * kW);
-        }
+          accscalar_t divide_factor;
+          if (divisor) {
+            divide_factor = static_cast<accscalar_t>(divisor);
+          } else {
+            divide_factor = static_cast<accscalar_t>(kT * kH * kW);
+          }
 
-        while (totalZ > 0) {
-          dim3 grid(cuda::ATenCeilDiv(iwidth, static_cast<int64_t>(block.x)),
-                    cuda::ATenCeilDiv(iheight, static_cast<int64_t>(block.y)),
-                    totalZ > 65535 ? 65535 : totalZ);
+          while (totalZ > 0) {
+            dim3 grid(cuda::ATenCeilDiv(iwidth, static_cast<int64_t>(block.x)),
+                      cuda::ATenCeilDiv(iheight, static_cast<int64_t>(block.y)),
+                      totalZ > 65535 ? 65535 : totalZ);
 
-          avg_pool3d_single_backward_out_frame_stride1<scalar_t, accscalar_t>
-            <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
-              work_grad_output.packed_accessor64<scalar_t, 4>(),
-              work_grad_input.packed_accessor64<scalar_t, 4>(),
-              kT, kH, kW,
-              1.0f/divide_factor,
-              offsetZ);
+            avg_pool3d_single_backward_out_frame_stride1<scalar_t, accscalar_t>
+              <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
+                work_grad_output.packed_accessor64<scalar_t, 4>(),
+                work_grad_input.packed_accessor64<scalar_t, 4>(),
+                kT, kH, kW,
+                1.0f/divide_factor,
+                offsetZ);
 
-          TORCH_CHECK(cudaGetLastError() == cudaSuccess,
-            "avg_pool3d_backward_out_frame failed with error code ",
-            cudaGetLastError());
+            TORCH_CHECK(cudaGetLastError() == cudaSuccess,
+              "avg_pool3d_backward_out_frame failed with error code ",
+              cudaGetLastError());
 
-          totalZ -= 65535;
-          offsetZ += 65535;
-        }
+            totalZ -= 65535;
+            offsetZ += 65535;
+          }
+        });
       }
     );
   }
   else {
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(),
+    AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(),
       "avg_pool3d_backward_out_frame",
       [&] {
-        using accscalar_t = acc_type<scalar_t, true>;
-        int64_t totalZ = otime * nslices * nbatch;
-        int64_t offsetZ = 0;
-        dim3 block(32, 8);
+        AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "avg_pool3d_backward_out_frame", [&] {
+          using accscalar_t = acc_type<scalar_t, true>;
+          int64_t totalZ = otime * nslices * nbatch;
+          int64_t offsetZ = 0;
+          dim3 block(32, 8);
 
-        while (totalZ > 0) {
-          dim3 grid(cuda::ATenCeilDiv(owidth, static_cast<int64_t>(block.x)),
-                    cuda::ATenCeilDiv(oheight, static_cast<int64_t>(block.y)),
-                    totalZ > 65535 ? 65535 : totalZ);
+          while (totalZ > 0) {
+            dim3 grid(cuda::ATenCeilDiv(owidth, static_cast<int64_t>(block.x)),
+                      cuda::ATenCeilDiv(oheight, static_cast<int64_t>(block.y)),
+                      totalZ > 65535 ? 65535 : totalZ);
 
-          if (kernelsOverlap) {
-            avg_pool3d_cuda_update_grad_input_atomic<scalar_t, accscalar_t>
-              <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
-                 work_grad_output.packed_accessor64<scalar_t, 4>(),
-                 work_grad_input.packed_accessor64<scalar_t, 4>(),
-                 kT, kH, kW,
-                 dT, dH, dW,
-                 padT, padH, padW,
-                 count_include_pad,
-                 offsetZ, divisor);
+            if (kernelsOverlap) {
+              avg_pool3d_cuda_update_grad_input_atomic<scalar_t, accscalar_t>
+                <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
+                   work_grad_output.packed_accessor64<scalar_t, 4>(),
+                   work_grad_input.packed_accessor64<scalar_t, 4>(),
+                   kT, kH, kW,
+                   dT, dH, dW,
+                   padT, padH, padW,
+                   count_include_pad,
+                   offsetZ, divisor);
+            }
+            else {
+              avg_pool3d_cuda_update_grad_input<scalar_t, accscalar_t>
+                <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
+                   work_grad_output.packed_accessor64<scalar_t, 4>(),
+                   work_grad_input.packed_accessor64<scalar_t, 4>(),
+                   kT, kH, kW,
+                   dT, dH, dW,
+                   padT, padH, padW,
+                   count_include_pad,
+                   offsetZ, divisor);
+            }
+
+            TORCH_CHECK(cudaGetLastError() == cudaSuccess,
+              "avg_pool3d_backward_out_frame failed with error code ",
+              cudaGetLastError());
+
+            totalZ -= 65535;
+            offsetZ += 65535;
           }
-          else {
-            avg_pool3d_cuda_update_grad_input<scalar_t, accscalar_t>
-              <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
-                 work_grad_output.packed_accessor64<scalar_t, 4>(),
-                 work_grad_input.packed_accessor64<scalar_t, 4>(),
-                 kT, kH, kW,
-                 dT, dH, dW,
-                 padT, padH, padW,
-                 count_include_pad,
-                 offsetZ, divisor);
-          }
-
-          TORCH_CHECK(cudaGetLastError() == cudaSuccess,
-            "avg_pool3d_backward_out_frame failed with error code ",
-            cudaGetLastError());
-
-          totalZ -= 65535;
-          offsetZ += 65535;
-        }
+        });
       }
     );
   }

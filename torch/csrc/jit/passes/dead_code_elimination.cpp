@@ -1,8 +1,8 @@
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 
-#include <torch/csrc/jit/ir_views.h>
+#include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/passes/alias_analysis.h>
+#include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/utils/memory.h>
 
 #include <unordered_map>

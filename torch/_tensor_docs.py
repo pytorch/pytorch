@@ -184,16 +184,22 @@ In-place version of :meth:`~Tensor.acos`
 
 add_docstr_all('add',
                r"""
-add(value) -> Tensor
-add(other, *, value=1) -> Tensor
+add(other, *, alpha=1) -> Tensor
+
+Add a scalar or tensor to :attr:`self` tensor. If both :attr:`alpha`
+and :attr:`other` are specified, each element of :attr:`other` is scaled by
+:attr:`alpha` before being used.
+
+When :attr:`other` is a tensor, the shape of :attr:`other` must be
+:ref:`broadcastable <broadcasting-semantics>` with the shape of the underlying
+tensor
 
 See :func:`torch.add`
 """)
 
 add_docstr_all('add_',
                r"""
-add_(value) -> Tensor
-add_(other, *, value=1) -> Tensor
+add_(other, *, alpha=1) -> Tensor
 
 In-place version of :meth:`~Tensor.add`
 """)
@@ -2734,7 +2740,7 @@ tensor.
 
 add_docstr_all('sub_',
                r"""
-sub_(x, *, alpha=1) -> Tensor
+sub_(other, *, alpha=1) -> Tensor
 
 In-place version of :meth:`~Tensor.sub`
 """)

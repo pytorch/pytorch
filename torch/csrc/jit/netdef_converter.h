@@ -1,6 +1,6 @@
 #pragma once
 #include <caffe2/proto/caffe2_pb.h>
-#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/ir/ir.h>
 #include <unordered_map>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 

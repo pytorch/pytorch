@@ -753,6 +753,12 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
             # if not a tarfile, reset file offset and proceed
             f.seek(0)
 
+    if not hasattr(f, 'readinto') and (3, 8, 0) <= sys.version_info < (3, 8, 2):
+        raise RuntimeError(
+            "torch.load does not work with file-like objects that do not implement readinto on Python 3.8.0 and 3.8.1. "
+            "Received object of type \"{}\". Please update to Python 3.8.2 or newer to restore this "
+            "functionality.".format(type(f)))
+
     magic_number = pickle_module.load(f, **pickle_load_args)
     if magic_number != MAGIC_NUMBER:
         raise RuntimeError("Invalid magic number; corrupt file?")

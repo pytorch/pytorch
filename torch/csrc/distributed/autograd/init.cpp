@@ -1,7 +1,7 @@
 #include <torch/csrc/autograd/python_cpp_function.h>
 #include <torch/csrc/distributed/autograd/context/container.h>
 #include <torch/csrc/distributed/autograd/engine/dist_engine.h>
-#include <torch/csrc/jit/pybind_utils.h>
+#include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/pybind.h>
@@ -78,6 +78,13 @@ PyObject* dist_autograd_init(PyObject* /* unused */) {
   });
 
   module.def(
+      "_is_valid_context",
+      [](int64_t worker_id) {
+        DistAutogradContainer::getInstance().isValidContext(worker_id);
+      },
+      py::call_guard<py::gil_scoped_release>());
+
+  module.def(
       "_retrieve_context",
       [](int64_t context_id) -> const ContextPtr {
         return DistAutogradContainer::getInstance().retrieveContext(context_id);
@@ -106,20 +113,22 @@ PyObject* dist_autograd_init(PyObject* /* unused */) {
 
   module.def(
       "backward",
-      [](const std::vector<torch::Tensor>& roots, bool retainGraph = false) {
+      [](int64_t contextId,
+         const std::vector<torch::Tensor>& roots,
+         bool retainGraph = false) {
         torch::autograd::variable_list variables;
         for (const auto& root : roots) {
           variables.emplace_back(root);
         }
         try {
-          DistEngine::getInstance().execute(variables, retainGraph);
-        } catch (python_error & e) {
+          DistEngine::getInstance().execute(contextId, variables, retainGraph);
+        } catch (python_error& e) {
           // FIXME: crashes if exception type is not RuntimeError
           throw std::runtime_error(e.what());
         }
       },
       R"(
-backward(roots: List[Tensor], retain_graph = False) -> None
+backward(context_id: int, roots: List[Tensor], retain_graph = False) -> None
 
 Kicks off the distributed backward pass using the provided roots. This
 currently implements the :ref:`fast-mode-algorithm` which
@@ -138,6 +147,7 @@ autograd context, we throw an error. You can retrieve the accumulated
 gradients using the :meth:`~torch.distributed.autograd.get_gradients` API.
 
 Arguments:
+    context_id (int): The autograd context id for which we should retrieve the gradients.
     roots (list): Tensors which represent the roots of the autograd
                   computation. All the tensors should be scalars.
     retain_graph(bool, optional): If False, the graph used to compute the grad
@@ -152,8 +162,9 @@ Example::
     >> with dist_autograd.context() as context_id:
     >>      pred = model.forward()
     >>      loss = loss_func(pred, loss)
-    >>      dist_autograd.backward(loss)
+    >>      dist_autograd.backward(context_id, loss)
 )",
+      py::arg("contextId"),
       py::arg("roots"),
       py::arg("retain_graph") = false,
       py::call_guard<py::gil_scoped_release>());
@@ -186,7 +197,7 @@ Example::
     >>      t1 = torch.rand((3, 3), requires_grad=True)
     >>      t2 = torch.rand((3, 3), requires_grad=True)
     >>      loss = t1 + t2
-    >>      dist_autograd.backward([loss.sum()])
+    >>      dist_autograd.backward(context_id, [loss.sum()])
     >>      grads = dist_autograd.get_gradients(context_id)
     >>      print (grads[t1])
     >>      print (grads[t2])

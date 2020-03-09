@@ -9,6 +9,10 @@
 namespace at {
 namespace native {
 
+// Use REGISTER_DISPATCH to run CPU and CUDA backend.
+DEFINE_DISPATCH(fake_quant_per_channel_stub);
+DEFINE_DISPATCH(fake_quant_grad_per_channel_stub);
+
 /* Per channel fake-quantizes the 'inputs' tensor.
 Args:
   X: Forward input tensor.
@@ -55,20 +59,19 @@ Tensor fake_quantize_per_channel_affine(
       "`axis` must be between 0 and number of dimensions of input");
 
   auto Y = at::empty_like(self, self.options(), MemoryFormat::Preserve);
-  for (int i = 0; i < self.size(axis); i++) {
-    auto input_slice = self.slice(axis, i, i + 1);
-    auto output_slice = Y.slice(axis, i, i + 1);
-    float sc = scale[i].item().toFloat();
-    int64_t z_point = zero_point[i].item().toLong();
-    fake_quant_slice_stub(
-        self.device().type(),
-        output_slice,
-        input_slice,
-        sc,
-        z_point,
-        quant_min,
-        quant_max);
-  }
+
+  std::vector<int64_t> expected_shape(self.dim(), 1);
+  expected_shape[axis] = self.size(axis);
+
+  TensorIterator iter;
+  iter.dont_compute_common_dtype();
+  iter.add_output(Y);
+  iter.add_input(self);
+  iter.add_input(native::_unsafe_view(scale, expected_shape));
+  iter.add_input(native::_unsafe_view(zero_point, expected_shape));
+  iter.build();
+
+  fake_quant_per_channel_stub(iter.device_type(), iter, quant_min, quant_max);
 
   return Y;
 }
@@ -133,22 +136,19 @@ Tensor fake_quantize_per_channel_affine_backward(
 
   auto dX = at::empty_like(X, X.options(), MemoryFormat::Preserve);
 
-  for (int i = 0; i < X.size(axis); i++) {
-    auto X_slice = X.slice(axis, i, i + 1);
-    auto dY_slice = dY.slice(axis, i, i + 1);
-    auto dX_slice = dX.slice(axis, i, i + 1);
-    float sc = scale[i].item().toFloat();
-    int64_t z_point = zero_point[i].item().toLong();
-    fake_quant_grad_slice_stub(
-        X.device().type(),
-        dX_slice,
-        X_slice,
-        dY_slice,
-        sc,
-        z_point,
-        quant_min,
-        quant_max);
-  }
+  std::vector<int64_t> expected_shape(X.dim(), 1);
+  expected_shape[axis] = X.size(axis);
+
+  TensorIterator iter;
+  iter.dont_compute_common_dtype();
+  iter.add_output(dX);
+  iter.add_input(X);
+  iter.add_input(dY);
+  iter.add_input(native::_unsafe_view(scale, expected_shape));
+  iter.add_input(native::_unsafe_view(zero_point, expected_shape));
+  iter.build();
+
+  fake_quant_grad_per_channel_stub(iter.device_type(), iter, quant_min, quant_max);
 
   return dX;
 }
