@@ -178,7 +178,7 @@ struct TORCH_API Module : public Object {
     train(/*on=*/false);
   }
   /// True if the module is in training mode.
-  bool is_training() {
+  bool is_training() const {
     return attr("training", true).toBool();
   }
 

@@ -29,17 +29,11 @@ void initPythonCustomClassBindings(PyObject* module) {
   // directly, we need a wrapper that at least returns the instance
   // rather than the None return value from __init__
   m.def("_get_custom_class_python_wrapper", [](const std::string& qualname) {
-    auto cu = classCU();
     std::string full_qualname = "__torch__.torch.classes." + qualname;
-    c10::NamedTypePtr named_type = cu->get_type(full_qualname);
-    if (!named_type || !named_type->cast<ClassType>()) {
-      std::stringstream err;
-      err << "Class " << qualname << " not registered!";
-      throw std::runtime_error(err.str());
-    }
+    auto named_type = getCustomClass(full_qualname);
     c10::ClassTypePtr class_type = named_type->cast<ClassType>();
-    return ScriptClass(
-        c10::StrongTypePtr(std::move(cu), std::move(class_type)));
+    return ScriptClass(c10::StrongTypePtr(
+        std::shared_ptr<script::CompilationUnit>(), std::move(class_type)));
   });
 }
 

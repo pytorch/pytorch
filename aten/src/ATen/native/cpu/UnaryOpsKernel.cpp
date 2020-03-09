@@ -440,7 +440,40 @@ void normal_fill(Tensor& self, const scalar_t mean, const scalar_t std, Generato
   }
 }
 
+std::vector<int64_t> computeStrideForComplex(IntArrayRef oldstride) {
+  auto res = oldstride.vec();
+  for(size_t i = 0; i < res.size(); i++) {
+    res[i] = res[i] * 2;
+  }
+  res.emplace_back(1);
+  return res;
+}
+
+// expects as input a complex tensor and returns back a float tensor
+// containing the complex values in the last two dimensions
+Tensor view_complex_as_float(const Tensor& self) {
+  TORCH_INTERNAL_ASSERT(self.is_complex());
+  auto new_sizes = self.sizes().vec();
+  // last dimension will always have two elements containing the real and imag vals
+  new_sizes.emplace_back(2);
+  auto new_strides = computeStrideForComplex(self.strides());
+  if(self.scalar_type() == at::kComplexFloat) {
+    float* data = reinterpret_cast<float*>(self.data_ptr<std::complex<float>>());
+    return at::from_blob(data, new_sizes, new_strides, dtype(at::kFloat));
+  } else {
+    double* data = reinterpret_cast<double*>(self.data_ptr<std::complex<double>>());
+    return at::from_blob(data, new_sizes, new_strides, dtype(at::kDouble));
+  }
+}
+
 void normal_kernel(Tensor& self, double mean, double std, Generator* gen) {
+  if(self.is_complex()) {
+    // note: float_tensor lives only as long as the self tensor lives
+    auto float_tensor = at::native::view_complex_as_float(self);
+    // variance for normal distribution of the real and imaginary values
+    // is half of the input variance
+    return normal_kernel(float_tensor, mean, std/(std::sqrt(2)), gen);
+  }
   auto size = self.numel();
   if (self.scalar_type() == ScalarType::Float && size >= 16 && self.is_contiguous()) {
 #ifdef __AVX2__

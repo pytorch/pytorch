@@ -83,11 +83,11 @@ def _process_group_construct_rpc_backend_options_handler(
 ):
     from . import ProcessGroupRpcBackendOptions
 
-    rpc_backend_options = ProcessGroupRpcBackendOptions()
-    rpc_backend_options.rpc_timeout = rpc_timeout
-    rpc_backend_options.init_method = init_method
-    rpc_backend_options.num_send_recv_threads = num_send_recv_threads
-    return rpc_backend_options
+    return ProcessGroupRpcBackendOptions(
+        rpc_timeout=rpc_timeout,
+        init_method=init_method,
+        num_send_recv_threads=num_send_recv_threads
+    )
 
 
 def _process_group_init_backend_handler(

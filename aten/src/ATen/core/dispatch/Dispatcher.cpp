@@ -144,14 +144,9 @@ void Dispatcher::deregisterBackendFallbackKernel_(DispatchKey dispatchKey) {
   TORCH_INTERNAL_ASSERT(result == impl::KernelFunctionTable::RemoveKernelIfExistsResult::REMOVED_KERNEL, "Tried to deregister a backend fallback kernel for ", dispatchKey, " but there was none registered.");
 }
 
-RegistrationHandleRAII Dispatcher::registerKernel(const OperatorHandle& op, DispatchKey dispatch_key, KernelFunction kernel) {
+RegistrationHandleRAII Dispatcher::registerKernel(const OperatorHandle& op, c10::optional<DispatchKey> dispatch_key, KernelFunction kernel) {
   // note: this doesn't need the mutex to protect the iterator because write operations on the list keep iterators intact.
-  return op.operatorIterator_->op.registerKernel(std::move(dispatch_key), std::move(kernel));
-}
-
-RegistrationHandleRAII Dispatcher::registerCatchallKernel(const OperatorHandle& op, KernelFunction kernel) {
-  // note: this doesn't need the mutex to protect the iterator because write operations on the list keep iterators intact.
-  return op.operatorIterator_->op.registerCatchallKernel(std::move(kernel));
+  return op.operatorIterator_->op.registerKernel(dispatch_key, std::move(kernel));
 }
 
 void Dispatcher::addRegistrationListener(std::unique_ptr<OpRegistrationListener> listener) {

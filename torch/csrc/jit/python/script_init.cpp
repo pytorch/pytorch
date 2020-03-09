@@ -99,16 +99,9 @@ struct PythonResolver : public Resolver {
         py::hasattr(obj, "_fields");
   }
 
-  TypePtr resolveType(const std::string& name, const SourceRange& loc)
-      override {
-    if (classType_ && name == classname_) {
-      return classType_;
-    }
-    pybind11::gil_scoped_acquire ag;
-    py::object obj = rcb_(name);
-    if (obj.is(py::none())) {
-      return nullptr;
-    }
+  TypePtr resolveTypeFromObject(
+      const py::object& obj,
+      const SourceRange& loc) {
 
     if (py::isinstance<ScriptClass>(obj)) {
       auto script_class = py::cast<ScriptClass>(obj);
@@ -166,6 +159,26 @@ struct PythonResolver : public Resolver {
       return tt;
     }
     return get_python_cu()->get_type(qualifiedName);
+  }
+
+  TypePtr resolveType(const std::string& name, const SourceRange& loc)
+      override {
+    if (classType_ && name == classname_) {
+      return classType_;
+    }
+
+    pybind11::gil_scoped_acquire ag;
+    py::object obj = rcb_(name);
+    if (obj.is(py::none())) {
+      return nullptr;
+    }
+
+    auto annotation_type = py::module::import("torch.jit.annotations")
+                               .attr("try_ann_to_type")(obj, loc);
+    if (!annotation_type.is_none()) {
+      return py::cast<TypePtr>(annotation_type);
+    }
+    return resolveTypeFromObject(obj, loc);
   }
 
  private:
@@ -766,7 +779,7 @@ void initJitScriptBindings(PyObject* module) {
             py::object state;
             std::string qualname;
             std::tie(state, qualname) = state_tup;
-            auto class_type = classCU()->get_class(qualname);
+            auto class_type = getCustomClass(qualname);
             TORCH_CHECK(
                 class_type,
                 "Tried to deserialize class ",
@@ -776,7 +789,10 @@ void initJitScriptBindings(PyObject* module) {
                 "sure the appropriate code is linked.");
 
             auto self = script::Object(c10::ivalue::Object::create(
-                c10::StrongTypePtr(classCU(), class_type), 1));
+                c10::StrongTypePtr(
+                    std::shared_ptr<torch::jit::script::CompilationUnit>(),
+                    class_type),
+                1));
             if (auto setstate_method = self.find_method("__setstate__")) {
               auto setstate_schema = setstate_method->function().getSchema();
               TORCH_INTERNAL_ASSERT(
@@ -1377,6 +1393,11 @@ void initJitScriptBindings(PyObject* module) {
       "_resolve_type",
       [](const std::string& name, SourceRange range, ResolutionCallback rcb) {
         return pythonResolver(rcb)->resolveType(name, range);
+      });
+  m.def(
+      "_resolve_type_from_object",
+      [](const py::object& obj, SourceRange range, ResolutionCallback rcb) {
+        return pythonResolver(rcb)->resolveTypeFromObject(obj, range);
       });
 
   m.def(

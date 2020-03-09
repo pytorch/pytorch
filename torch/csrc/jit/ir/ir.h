@@ -1128,6 +1128,10 @@ struct Graph {
 
   TORCH_API Value* insertUncheckedCast(Value* v, TypePtr type);
 
+  // Insert a ToList operator with argument \p v and output type \p type.
+  // \returns the output of the operation.
+  TORCH_API Value* insertToList(Value* v, TypePtr type);
+
   TORCH_API Value* insertFunctionCall(
       Function* callee,
       const script::MatchedSchema& matched);

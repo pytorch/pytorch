@@ -98,13 +98,6 @@ THCTensor *THCTensor_(newWithStorage1d)(THCState *state, THCStorage *storage, pt
   return THCTensor_(newWithStorage)(state, storage, storageOffset, {size0}, {stride0});
 }
 
-THCTensor *THCTensor_(newWithStorage2d)(THCState *state, THCStorage *storage, ptrdiff_t storageOffset,
-                               int64_t size0, int64_t stride0,
-                               int64_t size1, int64_t stride1)
-{
-  return THCTensor_(newWithStorage)(state, storage, storageOffset, {size0, size1}, {stride0, stride1});
-}
-
 THCTensor *THCTensor_(newWithSize)(THCState *state, at::IntArrayRef size, at::IntArrayRef stride)
 {
   return THCTensor_(newWithStorage)(state, NULL, 0, size, stride);

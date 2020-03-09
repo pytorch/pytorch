@@ -1,10 +1,13 @@
-#include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
-#include <torch/csrc/jit/testing/hooks_for_testing.h>
-#include <torch/csrc/jit/runtime/interpreter.h>
+#include <torch/csrc/jit/api/function_impl.h>
+#include <torch/csrc/jit/frontend/canonicalize_modified_loop.h>
+#include <torch/csrc/jit/frontend/convert_to_ssa.h>
+#include <torch/csrc/jit/frontend/ir_emitter.h>
+#include <torch/csrc/jit/frontend/parser.h>
+#include <torch/csrc/jit/frontend/schema_matching.h>
+#include <torch/csrc/jit/frontend/script_type_parser.h>
 #include <torch/csrc/jit/ir/ir.h>
-#include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
@@ -13,11 +16,9 @@
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/lift_closures.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
-#include <torch/csrc/jit/frontend/canonicalize_modified_loop.h>
-#include <torch/csrc/jit/frontend/convert_to_ssa.h>
-#include <torch/csrc/jit/frontend/parser.h>
-#include <torch/csrc/jit/frontend/schema_matching.h>
-#include <torch/csrc/jit/frontend/script_type_parser.h>
+#include <torch/csrc/jit/runtime/interpreter.h>
+#include <torch/csrc/jit/runtime/operator.h>
+#include <torch/csrc/jit/testing/hooks_for_testing.h>
 
 #include <torch/csrc/jit/ir/constants.h>
 
@@ -2387,11 +2388,14 @@ struct to_ir {
     }
   }
 
-  std::shared_ptr<SugaredValue> emitApplyExpr(Apply& apply, size_t n_binders) {
+  std::shared_ptr<SugaredValue> emitApplyExpr(
+      Apply& apply,
+      size_t n_binders,
+      const TypePtr& type_hint = nullptr) {
     auto sv = emitSugaredExpr(apply.callee(), 1);
     auto loc = apply.callee().range();
     if (auto special_form = dynamic_cast<SpecialFormValue*>(sv.get())) {
-      return emitApplySpecialForm(special_form->form(), apply);
+      return emitApplySpecialForm(special_form->form(), apply, type_hint);
     }
     auto inputs = getNamedValues(apply.inputs(), true);
     auto attributes = emitAttributes(apply.attributes());
@@ -2405,7 +2409,8 @@ struct to_ir {
   // evaluation order.
   std::shared_ptr<SugaredValue> emitApplySpecialForm(
       Symbol form,
-      Apply& apply) {
+      Apply& apply,
+      const TypePtr& type_hint = nullptr) {
     switch (form) {
       case prim::fork: {
         auto& trees = apply.inputs().tree()->trees();
@@ -2451,6 +2456,9 @@ struct to_ir {
 
         return std::make_shared<SimpleValue>(expr);
       }
+      case prim::rpc_async: {
+        return emitRpcAsyncExpr(apply);
+      }
       case prim::unchecked_cast: {
         checkApplyNumInputs(apply, 2);
         TypePtr type = typeParser_.parseTypeFromExpr(apply.inputs()[0]);
@@ -2494,6 +2502,19 @@ struct to_ir {
         checkApplyNumInputs(apply, 2);
         auto result = emitIsInstance(apply.inputs()[0], apply.inputs()[1]);
         return std::make_shared<SimpleValue>(result.value());
+      }
+      case prim::tolist: {
+        auto select = Select(apply.callee());
+        auto value = select.value();
+        auto operand = emitSugaredExpr(value, 1);
+
+        if (!type_hint) {
+          throw ErrorReport(apply)
+              << "Expected type hint for result of tolist()";
+        }
+
+        return std::make_shared<SimpleValue>(graph->insertToList(
+            operand->asValue(value.range(), method), type_hint));
       }
       case prim::HasAttr: {
         checkApplyNumInputs(apply, 2);
@@ -2638,7 +2659,7 @@ struct to_ir {
       }
       case TK_APPLY: {
         auto apply = Apply(tree);
-        return emitApplyExpr(apply, n_binders);
+        return emitApplyExpr(apply, n_binders, type_hint);
       } break;
       default:
         return std::make_shared<SimpleValue>(emitSimpleExpr(tree, type_hint));
@@ -2708,6 +2729,114 @@ struct to_ir {
     Value* node_output =
         fork_node->output()->setType(FutureType::create(out_type));
     return std::make_shared<SimpleValue>(node_output);
+  }
+
+  std::shared_ptr<SugaredValue> emitRpcAsyncExpr(const Apply& apply) {
+    // TODO: This is a temporary apporoach to enable calling user fucntion
+    // through RPC in TorchScript,
+    // Ideally, function value in JIT IR is first-class citizen and
+    // The RPC C++ entry API can take c10::Function directly.
+    if (apply.inputs().size() < 2 || apply.inputs().size() > 4) {
+      throw ErrorReport(apply)
+          << "Possible forms of call to rpc_async(..) are\n"
+          << "rpc_async(dst_worker_name, user_callable, args, kwargs)\n"
+          << "rpc_async(dst_worker_name, user_callable, args)\n"
+          << "rpc_async(dst_worker_name, user_callable)\n"
+          << "Now the number of arguments is " << apply.inputs().size();
+    }
+    if (apply.attributes().size() != 0) {
+      throw ErrorReport(apply)
+          << "rpc_async(dst_worker_name, user_callable, args, kwargs)"
+          << "does not support kwargs yet";
+    }
+    // TODO: Make rpc_async(..) support taking kwargs,
+    // like rpc_async(to="worker1", func=my_func, args=(), kwargs={})
+
+    auto& input_trees = apply.inputs().tree()->trees();
+    Value* dst_worker_name_value = emitExpr(Expr(input_trees[0]));
+    std::shared_ptr<SugaredValue> user_callable_sugared_value =
+        emitSugaredExpr(Expr(input_trees[1]), 1);
+    TORCH_CHECK(
+        user_callable_sugared_value->kind() == "function",
+        "user_callable should be a FunctionValue, it's now a ",
+        user_callable_sugared_value->kind())
+    // NB: This should be done using `std::dynamic_pointer_cast`
+    // and assert `user_callable_function_value != nullptr`. But somehow on
+    // macos std::dynamic_pointer_cast always returns
+    // `user_callable_function_value` as a `nullptr`, even if
+    // `user_callable_sugared_value->kind() == "function"`.
+    std::shared_ptr<FunctionValue> user_callable_function_value =
+        std::static_pointer_cast<FunctionValue>(user_callable_sugared_value);
+    // If `kwargs` is an empty dict, users are allowed to not pass `kwargs`.
+    // If `args` and `kwargs` are an empty tuple and an empty dict,
+    // respectively, users are allowed to not pass `args` and `kwargs`.
+    TreeList args_kwargs_trees(input_trees.begin() + 2, input_trees.end());
+
+    // Get user callable.
+    const auto& callablePtrs = user_callable_function_value->callees();
+    TORCH_INTERNAL_ASSERT(
+        callablePtrs.size() == 1,
+        "User-provided callable size should be 1. Now it's",
+        callablePtrs.size())
+    Function* callablePtr = callablePtrs.at(0);
+
+    const auto& functionSchema = callablePtr->getSchema();
+    const SourceRange& loc = apply.range();
+    auto graphPtr = method.graph();
+
+    // Match FunctionSchema.
+    std::vector<NamedValue> args;
+    std::vector<NamedValue> kwargs;
+    // Get args and kwargs as `NamedValue`s.
+    // Similar to getNamedValues(..) and emitAttributes(..).
+    if (args_kwargs_trees.size() >= 1) {
+      // Unroll args from a Var that is known to be a Tuple.
+      auto& args_tree = args_kwargs_trees[0];
+      auto entry_sugared_values = emitSugaredExpr(Expr(args_tree), 1)
+                                       ->asTuple(args_tree->range(), method);
+      args.reserve(entry_sugared_values.size());
+      for (const auto& entrie_sugared_value : entry_sugared_values) {
+        args.emplace_back(
+            args_tree->range(),
+            entrie_sugared_value->asValue(args_tree->range(), method));
+      }
+      // NB: Can't do schema check on kwargs, given the async RPC API is
+      // rpc_async(to, user_callable, args, kwargs),
+      // users can construct kwargs = {"first" + "_arg" : 1}.
+      // Notice the key is determined at run time.
+      // We can do it at compile time, unless one day the RPC API is
+      // rpc_async(to, user_callable, arg_0, arg_1, kwarg_0="foo", kwarg_1="bar")
+    }
+    matchSchema(functionSchema, loc, *graphPtr, args, kwargs);
+
+    // Graph insert the QualifiedName as an constant input IR Value.
+    const auto& qualname = callablePtr->qualname();
+    IValue userCallableQualNameIValue(qualname.qualifiedName());
+    Value* userCallableQualNameValue =
+        graphPtr->insertConstant(userCallableQualNameIValue, loc);
+
+    // Graph insert a Node, prim::rpc_async jit::Operator, to the Graph.
+    Node* rpc_async_node =
+        graphPtr->insertNode(graphPtr->create(prim::rpc_async, 1))
+            ->setSourceRange(loc);
+    {
+      WithInsertPoint insert(rpc_async_node);
+      rpc_async_node->addInput(dst_worker_name_value);
+      rpc_async_node->addInput(userCallableQualNameValue);
+
+      for (const auto& tree : args_kwargs_trees) {
+        rpc_async_node->addInput(emitExpr(Expr(tree)));
+      }
+    }
+    Value* rpc_async_node_output = rpc_async_node->output();
+
+    // Set output type from FunctionSchema.
+    const std::vector<Argument>& returns = functionSchema.returns();
+    TORCH_INTERNAL_ASSERT(returns.size() == 1);
+    auto output_type = returns[0].type();
+    rpc_async_node_output->setType(FutureType::create(output_type));
+
+    return std::make_shared<SimpleValue>(rpc_async_node_output);
   }
 
   Value* emitSimpleExpr(
@@ -3400,7 +3529,7 @@ std::unique_ptr<Function> CompilationUnit::define(
       name = mangle(name);
     }
   }
-  auto fn = torch::make_unique<Function>(
+  auto fn = torch::make_unique<GraphFunction>(
       std::move(name), std::make_shared<Graph>(), creator);
   if (self) {
     // Register this as a method on `self`'s type

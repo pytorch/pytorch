@@ -1,9 +1,10 @@
 #pragma once
 #include <c10/util/Exception.h>
-#include <torch/csrc/jit/api/function.h>
-#include <torch/csrc/jit/runtime/graph_executor.h>
-#include <torch/csrc/jit/ir/ir.h>
+#include <ATen/core/function.h>
+#include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/frontend/source_range.h>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/runtime/graph_executor.h>
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/utils/memory.h>
@@ -117,7 +118,7 @@ struct TORCH_API CompilationUnit {
     if (shouldMangle) {
       name = mangle(name);
     }
-    auto fn = torch::make_unique<Function>(
+    auto fn = torch::make_unique<GraphFunction>(
         std::move(name), std::move(graph), nullptr);
     auto ret = fn.get();
     register_function(std::move(fn));
@@ -221,6 +222,19 @@ struct TORCH_API CompilationUnit {
     }
     classes_.clear();
     classDict_.clear();
+  }
+
+  // [Internal Only] Remove method.
+  // Note Used for freezing.
+  void unsafeRemoveMethod(const c10::QualifiedName& method_name) {
+    auto it = dict_.find(method_name);
+    TORCH_CHECK(
+        it != dict_.end(),
+        "method '",
+        method_name.qualifiedName(),
+        "' does not exist.");
+    functions_[it->second] = nullptr;
+    dict_.erase(it);
   }
 
   // [name mangling] All code objects must have a unique qualified name in a
