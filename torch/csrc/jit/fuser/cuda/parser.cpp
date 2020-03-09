@@ -1,6 +1,10 @@
 #include <torch/csrc/jit/fuser/cuda/parser.h>
 #include <torch/csrc/jit/constants.h>
 
+#include <torch/csrc/jit/fuser/common/tensor.h>
+#include <torch/csrc/jit/fuser/common/iriostream.h>
+#include <torch/csrc/jit/fuser/common/iter_visitor.h>
+
 #include <unordered_map>
 
 namespace torch {
@@ -38,10 +42,40 @@ public:
     }
 
     // mark output;
-    for (auto jit_output : block->outputs()) {
-      printf("add output!\n");
-      fusion_->addOutput(value_maps_[jit_output->unique()]);
+    for (auto jit_input : block->inputs()) {
+      fusion_->addInput(value_maps_[jit_input->unique()]);
     }
+
+    // mark output;
+    for (auto jit_output : block->outputs()) {
+      TensorView* out = static_cast<TensorView*>(value_maps_[jit_output->unique()]);
+      fusion_->addOutput(out);
+      
+      //Merge all dimensions because we're only supporting pointwise
+      while(out->domain()->size() > 1)
+        merge(out, 0);
+      //Split into 128 so we can map blocks/threads
+      split(out, 0, 128);
+
+      //Map blocks/threads
+      out->domain()->axis(0)->parallelize(ParallelType::BIDx);
+      out->domain()->axis(-1)->parallelize(ParallelType::TIDx);
+      
+    }
+
+    std::cout << fusion_ << std::endl;
+    
+    for (auto jit_input : block->inputs()) {
+      TensorView* inp = static_cast<TensorView*>(value_maps_[jit_input->unique()]);
+      for (auto jit_output : block->outputs()) {
+        TensorView* out = static_cast<TensorView*>(value_maps_[jit_output->unique()]);
+        if(DependencyCheck::isDependencyOf(inp, out)){
+          inp->computeAt(out, -1);
+          break;
+        }
+      }
+    }
+
     std::cout << fusion_ << std::endl;
   }
 
@@ -78,17 +112,14 @@ protected:
     if (val->isCompleteTensor()) {
       // TODO: make this a static function in Tensor class;
       // create tensor;
-      printf("register tensor\n");
-      cg_val = new Tensor(val->type()->cast<TensorType>());
-    } else if (val->type()->isSubtypeOf(FloatType::get())) {
-      printf("register float\n");
+      cg_val = new TensorView(new Tensor(val->type()->cast<TensorType>()));
+    } else if (val->type()->isSubtypeOf(static_cast<c10::TypePtr>(FloatType::get()))) {
       if (auto ival = toIValue(val)) {
         cg_val = new Float(ival.value().to<float>());
       } else {
         cg_val = new Float();
       }
-    } else if (val->type()->isSubtypeOf(IntType::get())) {
-      printf("register int\n");
+    } else if (val->type()->isSubtypeOf(static_cast<c10::TypePtr>(IntType::get()))) {
       if (auto ival = toIValue(val)) {
         cg_val = new Int(ival.value().to<int>());
       } else {
