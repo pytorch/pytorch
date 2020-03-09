@@ -404,14 +404,38 @@ void normal_fill_AVX2(Tensor& self, const float mean, const float std, Generator
 #endif
 
 template <typename scalar_t>
-static void normal_fill_16(scalar_t *data, const scalar_t mean, const scalar_t std) {
-  for (int j = 0; j < 8; ++j) {
-    const scalar_t u1 = 1 - data[j]; // [0, 1) -> (0, 1] for log.
-    const scalar_t u2 = data[j + 8];
-    const scalar_t radius = std::sqrt(-2 * std::log(u1));
-    const scalar_t theta = 2.0f * M_PI * u2;
-    data[j] = radius * std::cos(theta) * std + mean;
-    data[j + 8] = radius * std::sin(theta) * std + mean;
+static void normal_fill_16(scalar_t *data, const scalar_t mean, const scalar_t std, at::CPUGenerator* gen) {
+  if (std::is_same<scalar_t, c10::BFloat16>::value) {
+    std::vector<float> tmp(16);
+    for (int j = 0; j < 16; ++j) {
+      at::uniform_real_distribution<float> uniform(0, 1);
+      tmp[j] = uniform(gen);
+    }
+    for (int j = 0; j < 8; ++j) {
+      const float u1 = 1 - tmp[j]; // [0, 1) -> (0, 1] for log.
+      const float u2 = tmp[j + 8];
+
+      const float radius = std::sqrt(-2 * std::log(u1));
+      const float theta = 2.0f * M_PI * u2;
+
+      data[j] = radius * std::cos(theta) * std + mean;
+      data[j + 8] = radius * std::sin(theta) * std + mean;
+    } 
+  } else {
+    for (int j = 0; j < 16; ++j) {
+      at::uniform_real_distribution<scalar_t> uniform(0, 1);
+      data[j] = uniform(gen);
+    }
+    for (int j = 0; j < 8; ++j) {
+      const scalar_t u1 = 1 - data[j]; // [0, 1) -> (0, 1] for log.
+      const scalar_t u2 = data[j + 8];
+
+      const scalar_t radius = std::sqrt(-2 * std::log(u1));
+      const scalar_t theta = 2.0f * M_PI * u2;
+
+      data[j] = radius * std::cos(theta) * std + mean;
+      data[j + 8] = radius * std::sin(theta) * std + mean;
+    }
   }
 }
 
@@ -421,22 +445,18 @@ void normal_fill(Tensor& self, const scalar_t mean, const scalar_t std, Generato
   auto size = self.numel();
   CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
   std::lock_guard<std::mutex> lock(generator->mutex_);
-  for (int64_t i = 0; i < size; ++i) {
-    at::uniform_real_distribution<scalar_t> uniform(0, 1);
-    data[i] = uniform(generator);
-  }
 
   for (int64_t i = 0; i < size - 15; i += 16) {
-    normal_fill_16<scalar_t>(data + i, mean, std);
+    normal_fill_16<scalar_t>(data + i, mean, std, generator);
   }
   if (size % 16 != 0) {
     // Recompute the last 16 values.
-    data = data + size - 16;
-    for (int64_t i = 0; i < 16; ++i) {
+    for (int64_t i = size - size % 16; i < size; ++i) {
       at::uniform_real_distribution<scalar_t> uniform(0, 1);
       data[i] = uniform(generator);
     }
-    normal_fill_16<scalar_t>(data, mean, std);
+    data = data + size - 16;
+    normal_fill_16<scalar_t>(data, mean, std, generator);
   }
 }
 
@@ -449,7 +469,7 @@ void normal_kernel(Tensor& self, double mean, double std, Generator* gen) {
     normal_fill(self, static_cast<float>(mean), static_cast<float>(std), gen);
 #endif
   } else {
-    AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "norma_cpu", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, self.scalar_type(), "norma_cpu", [&] {
       if (size >= 16 && self.is_contiguous()) {
         normal_fill<scalar_t>(self, static_cast<scalar_t>(mean), static_cast<scalar_t>(std), gen);
       } else {
