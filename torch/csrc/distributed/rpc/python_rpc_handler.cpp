@@ -97,9 +97,8 @@ std::string PythonRpcHandler::generatePythonUDFResult(
   PROFILE_GIL_SCOPED_ACQUIRE;
   auto pythonUdf = deserialize(serializedPyObj);
   py::tuple pres = pySerialize_(pyRunFunction_(std::move(pythonUdf)));
-  const auto& presStr = pres[0].cast<std::string>();
   responseTensorTable = pres[1].cast<std::vector<torch::Tensor>>();
-  return std::move(presStr);
+  return pres[0].cast<std::string>();
 }
 
 py::object PythonRpcHandler::runPythonUDF(
