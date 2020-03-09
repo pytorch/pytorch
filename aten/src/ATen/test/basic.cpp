@@ -3,6 +3,7 @@
 #include <ATen/ATen.h>
 #include <ATen/core/Reduction.h>
 #include <torch/cuda.h>
+#include "test_assert.h"
 
 // for TH compat test only...
 struct THFloatTensor;
@@ -405,6 +406,7 @@ TEST(BasicTest, FactoryMethodsTest) {
     ASSERT_EQ(tensor1.dtype(), at::kHalf);
     ASSERT_EQ(tensor1.layout(), at::kSparse);
     ASSERT_TRUE(tensor1.device().is_cuda());
+    ASSERT_THROWS(tensor1.nbytes());
 
     // This is a bug
     // Issue https://github.com/pytorch/pytorch/issues/30405

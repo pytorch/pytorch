@@ -24,7 +24,7 @@ TupleTypePtr Tuple::type() const {
 } // namespace ivalue
 
 TypePtr IValue::type() const {
-  switch(tag) {
+  switch (tag) {
     case Tag::None:
       return NoneType::get();
     case Tag::Tensor:
@@ -48,7 +48,7 @@ TypePtr IValue::type() const {
     case Tag::Future:
       return toFuture()->type();
     case Tag::RRef:
-      return toRRef()->type();
+      return RRefType::create(toRRef()->type());
     case Tag::Device:
       return DeviceObjType::get();
     case Tag::Object:
@@ -65,6 +65,60 @@ TypePtr IValue::type() const {
   // switch above is complete but this silences compiler warnings
   TORCH_INTERNAL_ASSERT(false, "unhandled case in IValue::type()");
 }
+
+void IValue::getSubValues(HashAliasedIValues& subValues) const {
+  switch (this->tag) {
+    case Tag::Tensor:
+      subValues.insert(*this);
+      return;
+    case Tag::Tuple:
+    case Tag::GenericList: {
+      subValues.insert(*this);
+      c10::ArrayRef<IValue> elems;
+      if (isTuple()) {
+        elems = this->toTuple()->elements();
+      } else {
+        elems = this->toListRef();
+      }
+      for (auto& elem : elems) {
+        elem.getSubValues(subValues);
+      }
+      break;
+    }
+    case Tag::GenericDict:
+      subValues.insert(*this);
+      for (const auto& pair : this->toGenericDict()) {
+        pair.value().getSubValues(subValues);
+        pair.key().getSubValues(subValues);
+      }
+      break;
+    case Tag::Future:
+    case Tag::Device:
+    case Tag::Object:
+    case Tag::PyObject:
+    case Tag::Uninitialized:
+    case Tag::Capsule:
+      TORCH_INTERNAL_ASSERT(
+          false, "sub ivalue is nat enabled for: ", this->tagKind());
+      // Fall through
+    default:
+      // don't record scalars.
+      break;
+  }
+}
+
+bool IValue::overlaps(const IValue& rhs) const {
+  HashAliasedIValues rhsSubValues, thisSubValues;
+  rhs.getSubValues(rhsSubValues);
+  getSubValues(thisSubValues);
+  for (auto& sub : thisSubValues) {
+    if (rhsSubValues.count(sub)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 namespace {
 
 using IValueFormatter = std::function<void(std::ostream&, const IValue&)>;
@@ -78,7 +132,7 @@ std::ostream& printList(
     IValueFormatter formatter) {
   out << start;
   for (size_t i = 0; i < list.size(); ++i) {
-    if (i > 0){
+    if (i > 0) {
       out << ", ";
     }
     formatter(out, IValue(list[i]));
@@ -313,14 +367,10 @@ StrongTypePtr::StrongTypePtr(
   cu_ = std::move(cu);
   type_ = type;
   TORCH_INTERNAL_ASSERT(type_);
-  if (type_->cast<ClassType>()) {
-    TORCH_INTERNAL_ASSERT(
-        cu_, "class type's owning compilation unit is nullptr");
-  }
 }
 
-std::unordered_map<std::string, c10::StrongTypePtr>& getCustomClassTypeMap() {
-    static std::unordered_map<std::string, c10::StrongTypePtr> tmap;
+std::unordered_map<std::string, c10::ClassTypePtr>& getCustomClassTypeMap() {
+    static std::unordered_map<std::string, c10::ClassTypePtr> tmap;
     return tmap;
 }
 

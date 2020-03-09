@@ -91,13 +91,6 @@ THTensor *THTensor_(newWithStorage1d)(THStorage *storage, ptrdiff_t storageOffse
   return THTensor_(newWithStorage)(storage, storageOffset, {size0}, {stride0});
 }
 
-THTensor *THTensor_(newWithStorage2d)(THStorage *storage, ptrdiff_t storageOffset,
-                               int64_t size0, int64_t stride0,
-                               int64_t size1, int64_t stride1)
-{
-  return THTensor_(newWithStorage)(storage, storageOffset, {size0, size1}, {stride0, stride1});
-}
-
 THTensor *THTensor_(newWithSize)(at::IntArrayRef size, at::IntArrayRef stride)
 {
   return THTensor_(newWithStorage)(NULL, 0, size, stride);

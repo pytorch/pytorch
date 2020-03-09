@@ -852,8 +852,6 @@ if __name__ == '__main__':
                 'include/THH/*.cuh',
                 'include/THH/*.h*',
                 'include/THH/generic/*.h',
-                'include/THNN/*.h',
-                'include/THNN/generic/*.h',
                 'share/cmake/ATen/*.cmake',
                 'share/cmake/Caffe2/*.cmake',
                 'share/cmake/Caffe2/public/*.cmake',

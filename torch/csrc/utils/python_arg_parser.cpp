@@ -516,16 +516,17 @@ std::string FunctionSignature::toString() const {
 
 [[noreturn]]
 static void extra_args(const FunctionSignature& signature, ssize_t nargs) {
-  auto max_pos_args = signature.max_pos_args;
-  auto min_args = signature.min_args;
+  const long max_pos_args = signature.max_pos_args;
+  const long min_args = signature.min_args;
+  const long nargs_ = nargs;
   if (min_args != max_pos_args) {
-    throw TypeError("%s() takes from %d to %d positional arguments but %d were given",
-        signature.name.c_str(), min_args, max_pos_args, nargs);
+    throw TypeError("%s() takes from %ld to %ld positional arguments but %ld were given",
+        signature.name.c_str(), min_args, max_pos_args, nargs_);
   }
-  throw TypeError("%s() takes %d positional argument%s but %d %s given",
+  throw TypeError("%s() takes %ld positional argument%s but %ld %s given",
       signature.name.c_str(),
       max_pos_args, max_pos_args == 1 ? "" : "s",
-      nargs, nargs == 1 ? "was" : "were");
+      nargs_, nargs == 1 ? "was" : "were");
 }
 
 [[noreturn]]
@@ -671,8 +672,8 @@ bool FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
             Py_TYPE(obj)->tp_name);
       } else {
         // foo(): argument 'other' (position 2) must be str, not int
-        throw TypeError("%s(): argument '%s' (position %d) must be %s, not %s",
-            name.c_str(), param.name.c_str(), arg_pos + 1,
+        throw TypeError("%s(): argument '%s' (position %ld) must be %s, not %s",
+            name.c_str(), param.name.c_str(), static_cast<long>(arg_pos + 1),
             param.type_name().c_str(), Py_TYPE(obj)->tp_name);
       }
     } else {

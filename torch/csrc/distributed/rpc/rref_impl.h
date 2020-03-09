@@ -44,7 +44,6 @@ struct TORCH_API RRefForkData {
       std::string typeStr);
 };
 
-
 // Note [RRef Protocol]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~
 //
@@ -210,7 +209,7 @@ class TORCH_API RRef : public RRefInterface {
   inline bool isPyObj() {
     return type_ == PyObjectType::get();
   }
-  inline const TypePtr type() const override{
+  inline const TypePtr type() const override {
     return type_;
   }
 
@@ -240,7 +239,11 @@ class TORCH_API UserRRef final : public RRef {
   UserRRef& operator=(const UserRRef& other) = delete;
   UserRRef& operator=(UserRRef&& other) = delete;
 
-  UserRRef(worker_id_t ownerId, const RRefId& rrefId, const ForkId& forkId, TypePtr type);
+  UserRRef(
+      worker_id_t ownerId,
+      const RRefId& rrefId,
+      const ForkId& forkId,
+      TypePtr type);
 
   inline bool isOwner() const override {
     return false;
@@ -274,11 +277,14 @@ class TORCH_API OwnerRRef final : public RRef {
   OwnerRRef(worker_id_t ownerId, const RRefId& rrefId, TypePtr type)
       : OwnerRRef(ownerId, rrefId, type, {}) {}
 
-  OwnerRRef(worker_id_t ownerId, const RRefId& rrefId, TypePtr type, c10::optional<IValue> value)
+  OwnerRRef(
+      worker_id_t ownerId,
+      const RRefId& rrefId,
+      TypePtr type,
+      c10::optional<IValue> value)
       : RRef(ownerId, rrefId, std::move(type)) {
     value_ = std::move(value);
   }
-
 
   inline bool isOwner() const override {
     return true;
