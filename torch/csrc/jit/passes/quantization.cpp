@@ -473,6 +473,19 @@ class InsertObserversHelper {
       bool is_entry_point = false);
 
  private:
+
+void insertObserversFor(
+      Block* subblock,
+      Node* n,
+      script::Module& module,
+      /* caller data */
+      const std::unordered_set<Value*>& block_inputs_outputs,
+      std::unordered_map<Value*, script::Module>& values_to_observe,
+      std::unordered_set<Value*>& block_observed_values,
+      at::ArrayRef<Value*> subblock_inputs,
+      /* subblock data */
+      std::unordered_set<Value*> subblock_observed_values);
+
   ModuleMethodVector getInvokedMethods(
       script::Module& module,
       const std::string& method_name);
@@ -1068,30 +1081,16 @@ InsertObserversHelper::insertObserversFor(
         auto m = getInvokedModule(module, n, self);
         std::unordered_set<Value*> callee_observed_inputs;
         for (auto i = 0; i < n->inputs().size(); ++i) {
-          if (block_observed_values.count(n->inputs()[i])) {
-            callee_observed_inputs.insert(caller_to_callee_[n->inputs()[i]]);
+          if (block_observed_values.count(n->input(i))) {
+            callee_observed_inputs.insert(caller_to_callee_[n->input(i)]);
           }
         }
-        auto info_from_callee = insertObservers(m, n->s(attr::name), false, callee_observed_inputs);
-        auto input_observers = std::get<0>(info_from_callee);
-        auto output_observers = std::get<1>(info_from_callee);
-        auto callee_observed_outputs = std::get<2>(info_from_callee);
-        for (auto idx : callee_observed_outputs) {
-          block_observed_values.insert(n->outputs()[idx]);
-        }
-        for (auto i = 0; i < n->inputs().size(); ++i) {
-          if (input_observers[i] && !block_inputs_outputs.count(n->inputs()[i])
-              && !block_observed_values.count(n->inputs()[i])) {
-            values_to_observe[n->inputs()[i]] = *input_observers[i];
-            block_observed_values.insert(n->inputs()[i]);
-          }
-        }
-        for (auto i = 0; i < n->outputs().size(); ++i) {
-          if (output_observers[i] && !block_inputs_outputs.count(n->outputs()[i])
-              && !block_observed_values.count(n->outputs()[i])) {
-            values_to_observe[n->outputs()[i]] = *output_observers[i];
-            block_observed_values.insert(n->outputs()[i]);
-          }
+        auto* subblock = m.get_method(n->s(attr::name)).graph()->block();
+        insertObserversFor(subblock, n, module, block_inputs_outputs, values_to_observe, block_observed_values, n->inputs(), callee_observed_inputs);
+      } else if (n-<kind() == prim::If) {
+        for (Block* subblock : n->blocks()) {
+          std::unordered_set<Value*> subblock_observed_inputs;
+          insertObserversFor(subblock, n, module, block_inputs_outputs, values_to_observe, block_observed_values, n->inputs(), subblock_observed_inputs);
         }
       } else {
         for (Value* v : n->outputs()) {
@@ -1103,9 +1102,9 @@ InsertObserversHelper::insertObserversFor(
             }
           }
         }
-      }
-      for (Block* subblock : n->blocks()) {
-        blocks_to_visit.push(subblock);
+        for (Block* subblock : n->blocks()) {
+          blocks_to_visit.push(subblock);
+        }
       }
     }
   }
@@ -1128,6 +1127,41 @@ InsertObserversHelper::insertObserversFor(
   }
   return std::make_tuple(block_input_observers, block_output_observers, output_idxs);
 }
+
+void InsertObserversHelper::insertObserversFor(
+      Block* subblock,
+      Node* n,
+      script::Module& module,
+      /* caller data */
+      const std::unordered_set<Value*>& block_inputs_outputs,
+      std::unordered_map<Value*, script::Module>& values_to_observe,
+      std::unordered_set<Value*>& block_observed_values,
+      at::ArrayRef<Value*> subblock_inputs,
+      /* subblock data */
+      std::unordered_set<Value*> subblock_observed_values) {
+  auto info_from_subblock = insertObserversFor(subblock, module, subblock_observed_values, false);
+  auto input_observers = std::get<0>(info_from_subblock);
+  auto output_observers = std::get<1>(info_from_subblock);
+  auto subblock_observed_outputs = std::get<2>(info_from_subblock);
+  for (auto idx : subblock_observed_outputs) {
+    block_observed_values.insert(n->output(idx));
+  }
+  for (auto i = 0; i < subblock_inputs.size(); ++i) {
+    if (input_observers[i] && !block_inputs_outputs.count(subblock_inputs[i])
+        && !block_observed_values.count(subblock_inputs[i])) {
+      values_to_observe[n->input(i)] = *input_observers[i];
+      block_observed_values.insert(subblock_inputs[i]);
+    }
+  }
+  for (auto i = 0; i < n->outputs().size(); ++i) {
+    if (output_observers[i] && !block_inputs_outputs.count(n->output(i))
+        && !block_observed_values.count(n->output(i))) {
+      values_to_observe[n->output(i)] = *output_observers[i];
+      block_observed_values.insert(n->output(i));
+    }
+  }
+}
+
 
 void InsertObserversHelper::propagateObservedProperty(
     Value* output, std::unordered_set<Value*>& block_observed_values) {
