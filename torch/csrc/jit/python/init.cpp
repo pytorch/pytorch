@@ -215,6 +215,14 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_dedup_module_uses", &DedupModuleUses)
       .def("_jit_pass_replicate_dequantize", &ReplicateDeQuant)
       .def("_jit_pass_swap_dequantize", &SwapDeQuant)
+      .def("_jit_pass_swap_functional_linear",
+           [](std::shared_ptr<Graph>& graph) {
+             SwapFunctionalLinear(graph);
+           })
+      .def("_jit_pass_swap_functional_linear",
+           [](script::Module& module) {
+             SwapFunctionalLinear(module);
+           })
       .def(
           "_jit_pass_pattern_based_rewrite",
           [](const script::Module& m) { return PatternBasedRewrite(m); })
@@ -412,9 +420,9 @@ void initJITBindings(PyObject* module) {
             return insertXNNPACKOps(module);
           })
       .def(
-          "_jit_pass_remove_xnnpack_prepack_ops",
+          "_jit_pass_fold_prepack_ops",
           [](script::Module& module) {
-            return removePrePackingOps(module);
+            return FoldPrePackingOps(module);
           })
       .def(
           "_jit_pass_onnx_unpack_quantized_weights",

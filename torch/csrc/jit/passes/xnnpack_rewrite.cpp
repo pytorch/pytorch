@@ -21,13 +21,22 @@ namespace {
 using at::native::xnnpack::XNNPackLinearOpContext;
 using at::native::xnnpack::XNNPackConv2dOpContext;
 
+std::unordered_set<std::string>* getFoldablePackingOps() {
+  static std::unordered_set<std::string> foldable_packing_ops(
+      {
+      "xnnpack::linear_prepack",
+      "xnnpack::conv2d_prepack"
+      }
+      );
+  return &foldable_packing_ops;
+}
+
 bool nodeMatchesPackingOps(Node* n) {
-  return ((n->kind() == Symbol::fromQualString("xnnpack::linear_prepack")) ||
-      n->kind() == Symbol::fromQualString("xnnpack::conv2d_prepack"));
+  return (getFoldablePackingOps()->count(n->kind().toQualString()) != 0);
 }
 
 // Must run this pass after constant folding.
-void removePrePackingOps_(script::Module& m) {
+void FoldPrePackingOps_(script::Module& m) {
   auto method = m.get_method("forward");
   auto graph = method.graph();
   std::stack<Block*> blocks_to_visit;
@@ -149,8 +158,8 @@ void insertXNNPACKOps(script::Module& module) {
   }
 }
 
-void removePrePackingOps(script::Module& m) {
-  removePrePackingOps_(m);
+void FoldPrePackingOps(script::Module& m) {
+  FoldPrePackingOps_(m);
 }
 
 #else
@@ -163,7 +172,7 @@ void insertXNNPACKOps(script::Module& module) {
   TORCH_INTERNAL_ASSERT("XNNPACK is not enabled. Please build with USE_XNNPACK=1");
 }
 
-void removePrePackingOps(script::Module& m) {
+void FoldPrePackingOps(script::Module& m) {
   TORCH_INTERNAL_ASSERT("XNNPACK is not enabled. Please build with USE_XNNPACK=1");
 }
 
