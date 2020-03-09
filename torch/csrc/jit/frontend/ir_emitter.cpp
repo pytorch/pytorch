@@ -2279,6 +2279,10 @@ struct to_ir {
         return aten::__not__;
       case TK_FLOOR_DIV:
         return aten::floordiv;
+      case TK_LSHIFT:
+        return aten::leftshift;
+      case TK_RSHIFT:
+        return aten::rightshift;
       case '&':
         return aten::__and__;
       case '|':
@@ -2330,6 +2334,10 @@ struct to_ir {
         return "__xor__";
       case TK_IN:
         return "__contains__";
+      case TK_LSHIFT:
+        return "<<";
+      case TK_RSHIFT:
+        return ">>";
       default:
         throw std::runtime_error("unknown kind " + c10::to_string(kind));
     }
@@ -2866,7 +2874,9 @@ struct to_ir {
       case '%':
       case '&':
       case '|':
-      case '^': {
+      case '^':
+      case TK_LSHIFT:
+      case TK_RSHIFT: {
         const auto& inputs = tree->trees();
         auto kind = getNodeKind(tree->kind(), inputs.size());
         auto overload = getOperatorOverload(tree->kind(), inputs.size());

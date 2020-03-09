@@ -2749,6 +2749,8 @@ RegisterOperators reg2({
     DEFINE_INT_OP(aten::__and__, a& b),
     DEFINE_INT_OP(aten::__or__, a | b),
     DEFINE_INT_OP(aten::__xor__, a ^ b),
+    DEFINE_INT_OP(aten::leftshift, a << b),
+    DEFINE_INT_OP(aten::rightshift, a >> b),
 
     DEFINE_UNARY_OP(aten::floor, floor(a), int, int),
     DEFINE_UNARY_OP(aten::ceil, ceil(a), int, int),

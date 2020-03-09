@@ -73,6 +73,8 @@ namespace script {
   _(TK_AND, "and", "and")                        \
   _(TK_OR, "or", "or")                           \
   _(TK_NOT, "not", "not")                        \
+  _(TK_LSHIFT, "<<", "<<")                       \
+  _(TK_RSHIFT, ">>", ">>")                       \
   _(TK_CAST, "cast", "")                         \
   _(TK_PLUS_EQ, "+=", "+=")                      \
   _(TK_MINUS_EQ, "-=", "-=")                     \
