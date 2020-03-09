@@ -97,6 +97,12 @@ void __is__kernel(const c10::OperatorHandle& op, Stack* stack) {
   push(*stack, self.isSameIdentity(obj));
 }
 
+void __isnot__kernel(const c10::OperatorHandle& op, Stack* stack) {
+  c10::IValue self, obj;
+  pop(*stack, self, obj);
+  push(*stack, !self.isSameIdentity(obj));
+}
+
 void log_softmax_kernel(const c10::OperatorHandle& op, Stack* stack) {
   auto result_ = at::log_softmax(
     (std::move(peek(*stack, 0, 3))).toTensor(),
@@ -162,6 +168,40 @@ void format_kernel(const c10::OperatorHandle& op, Stack* stack) {
 
   drop(*stack, num_inputs);
   push(*stack, ss.str());
+}
+
+void to_dtype_kernel(const c10::OperatorHandle& op, Stack* stack) {
+  auto result_ = ((std::move(peek(*stack, 0, 5))).toTensor()).to(
+     (std::move(peek(*stack, 1, 5))).toScalarType(),
+     (std::move(peek(*stack, 2, 5))).toBool(),
+     (std::move(peek(*stack, 3, 5))).toBool(),
+     (std::move(peek(*stack, 4, 5))).toOptional<c10::MemoryFormat>()
+  );
+  drop(*stack, 5);
+  pack(*stack, std::move(result_));
+}
+
+int64_t normalizeIndex(int64_t idx, int64_t list_size) {
+  if (idx < 0) {
+    // Handle negative indexing
+    idx = list_size + idx;
+  }
+  return idx;
+}
+
+void TupleIndex_kernel(const c10::OperatorHandle& op, Stack* stack) {
+   int64_t index = pop(*stack).toInt();
+   auto tuple = pop(*stack).toTuple();
+   auto norm_index = normalizeIndex(index, tuple->elements().size());
+   if (norm_index < 0 ||
+       norm_index > static_cast<int64_t>(tuple->elements().size())) {
+     throw std::out_of_range("Tuple list index out of range");
+   }
+   pack(*stack, tuple->elements()[norm_index]);
+}
+
+void pop_kernel(const c10::OperatorHandle& op, Stack* stack) {
+  pop(*stack);
 }
 
 template <typename T>
@@ -380,6 +420,12 @@ static auto registry = torch::RegisterOperators().op(
      return at::dropout(input, p, train);
   })
 ).op(
+  "_aten::feature_dropout(Tensor input, float p, bool train) -> Tensor",
+  torch::RegisterOperators::options().kernel(c10::DispatchKey::CPUTensorId,
+  [](const Tensor & input, double p, bool train) {
+     return at::feature_dropout(input, p, train);
+  })
+).op(
   "_aten::permute(Tensor(a) self, int[] dims) -> Tensor(a)",
   torch::RegisterOperators::options()
     .kernel<&permute_kernel>(c10::DispatchKey::CPUTensorId)
@@ -417,6 +463,9 @@ static auto registry = torch::RegisterOperators().op(
 ).op(
   "_aten::__is__(t1 self, t2 obj) -> bool",
   torch::RegisterOperators::options().catchAllKernel<&__is__kernel>()
+).op(
+  "_aten::__isnot__(t1 self, t2 obj) -> bool",
+  torch::RegisterOperators::options().catchAllKernel<&__isnot__kernel>()
 ).op(
   "_aten::log_softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor",
   torch::RegisterOperators::options().kernel<&log_softmax_kernel>(c10::DispatchKey::CPUTensorId)
@@ -462,6 +511,16 @@ static auto registry = torch::RegisterOperators().op(
   [](const Tensor & self) {
      return at::sigmoid(self);
   })
-);
-
+).op(torch::RegisterOperators::options()
+    .schema("_aten::to.dtype(Tensor self, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor")
+    .kernel<&to_dtype_kernel>(c10::DispatchKey::CPUTensorId)
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+.op(torch::RegisterOperators::options()
+    .schema("_prim::TupleIndex(any self, int index) -> any")
+    .catchAllKernel<&TupleIndex_kernel>())
+.op(torch::RegisterOperators::options()
+    .schema("_prim::RaiseException(str msg) -> ()")
+    .kernel<&pop_kernel>(c10::DispatchKey::CPUTensorId)
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+    ;
 }

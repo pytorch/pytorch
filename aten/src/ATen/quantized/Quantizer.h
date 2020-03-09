@@ -252,7 +252,7 @@ CAFFE2_API DST_T requantize_val(double, int64_t, double, int64_t, SRC_T src);
 // make_per_tensor_affine_quantizer function for the usage of int64_t
 template <typename DST_T>
 CAFFE2_API DST_T
-requantize_val(double multiplier, int64_t zero_point, int64_t src);
+requantize_from_int(double multiplier, int64_t zero_point, int64_t src);
 
 // double and int64_t are because of the native function API, we only have these
 // argument types right now in native functions

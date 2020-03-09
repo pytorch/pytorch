@@ -284,7 +284,7 @@ struct Vec256<c10::qint32> : public Vec256qi {
 #endif
     }
 
-    int_vec_return_type subtract(Vec256<c10::qint32> b) const {
+    int_vec_return_type widening_subtract(Vec256<c10::qint32> b) const {
 #ifdef __AVX2__
       return {_mm256_sub_epi32(vals, b)};
 #else
@@ -300,7 +300,7 @@ struct Vec256<c10::qint32> : public Vec256qi {
 #endif
     }
 
-    static Vec256<c10::qint32> requantize(
+    static Vec256<c10::qint32> requantize_from_int(
         const int_vec_return_type& inp,
         float multiplier,
         int32_t zero_point) {
@@ -584,7 +584,7 @@ struct Vec256<c10::qint8> : public Vec256qi {
 #endif
     }
 
-    int_vec_return_type subtract(Vec256<c10::qint8> b) const {
+    int_vec_return_type widening_subtract(Vec256<c10::qint8> b) const {
 #ifdef __AVX2__
       __m128i int_val0 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 0));
       __m128i int_val1 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 1));
@@ -636,7 +636,7 @@ struct Vec256<c10::qint8> : public Vec256qi {
 #endif
     }
 
-    static Vec256<c10::qint8> requantize(
+    static Vec256<c10::qint8> requantize_from_int(
         const int_vec_return_type& inp,
         float multiplier,
         int32_t zero_point) {
@@ -855,7 +855,7 @@ struct Vec256<c10::quint8> : public Vec256qi {
 #endif
     }
 
-    int_vec_return_type subtract(Vec256<c10::quint8> b) const {
+    int_vec_return_type widening_subtract(Vec256<c10::quint8> b) const {
 #ifdef __AVX2__
       __m128i int_val0 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 0));
       __m128i int_val1 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 1));
@@ -906,7 +906,7 @@ struct Vec256<c10::quint8> : public Vec256qi {
 #endif
     }
 
-    static Vec256<c10::quint8> requantize(
+    static Vec256<c10::quint8> requantize_from_int(
         const int_vec_return_type& inp,
         float multiplier,
         int32_t zero_point) {
@@ -1111,7 +1111,7 @@ struct Vec256<c10::qint32> : public Vec256QuantizedConverter<
     return retval;
   }
 
-  int_vec_return_type subtract(Vec256<c10::qint32> b) const {
+  int_vec_return_type widening_subtract(Vec256<c10::qint32> b) const {
     int_vec_return_type retval;
     for (size_t i = 0; i < size(); ++i) {
       retval[0].vals[i] = vals[i] - b.vals[i];
@@ -1119,7 +1119,7 @@ struct Vec256<c10::qint32> : public Vec256QuantizedConverter<
     return retval;
   }
 
-  static Vec256<c10::qint32> requantize(
+  static Vec256<c10::qint32> requantize_from_int(
       const int_vec_return_type& inp,
       float multiplier,
       int32_t zero_point) {
@@ -1231,7 +1231,7 @@ struct Vec256<c10::qint8> : public Vec256QuantizedConverter<
     return retval;
   }
 
-  int_vec_return_type subtract(Vec256<c10::qint8> b) const {
+  int_vec_return_type widening_subtract(Vec256<c10::qint8> b) const {
     int_vec_return_type retval;
     constexpr int elem_per_int_vec = size() / int_num_vecs();
     for (size_t i = 0; i < int_num_vecs(); ++i) {
@@ -1243,7 +1243,7 @@ struct Vec256<c10::qint8> : public Vec256QuantizedConverter<
     }
     return retval;
   }
-  static Vec256<c10::qint8> requantize(
+  static Vec256<c10::qint8> requantize_from_int(
       const int_vec_return_type& inp,
       float multiplier,
       int32_t zero_point) {
@@ -1352,7 +1352,7 @@ struct Vec256<c10::quint8> : public Vec256QuantizedConverter<
     return retval;
   }
 
-  int_vec_return_type subtract(Vec256<c10::quint8> b) const {
+  int_vec_return_type widening_subtract(Vec256<c10::quint8> b) const {
     int_vec_return_type retval;
     constexpr int elem_per_int_vec = size() / int_num_vecs();
     for (size_t i = 0; i < int_num_vecs(); ++i) {
@@ -1364,7 +1364,7 @@ struct Vec256<c10::quint8> : public Vec256QuantizedConverter<
     }
     return retval;
   }
-  static Vec256<c10::quint8> requantize(
+  static Vec256<c10::quint8> requantize_from_int(
       const int_vec_return_type& inp,
       float multiplier,
       int32_t zero_point) {

@@ -354,7 +354,7 @@ DST_T requantize_val(double src_scale, int64_t src_zero_point,
 }
 
 template <typename DST_T>
-DST_T requantize_val(double multiplier, int64_t zero_point, int64_t src) {
+DST_T requantize_from_int(double multiplier, int64_t zero_point, int64_t src) {
   int64_t quantize_down =
       zero_point + lrintf(src * static_cast<float>(multiplier));
   int32_t min = std::numeric_limits<typename DST_T::underlying>::min();
@@ -390,9 +390,11 @@ template CAFFE2_API qint8 requantize_val<qint32, qint8>(double, int64_t, double,
 template CAFFE2_API quint8 requantize_val<qint32, quint8>(double, int64_t, double, int64_t, qint32);
 template CAFFE2_API qint32 requantize_val<qint32, qint32>(double, int64_t, double, int64_t, qint32);
 
-template CAFFE2_API qint8 requantize_val<qint8>(double, int64_t, int64_t);
-template CAFFE2_API quint8 requantize_val<quint8>(double, int64_t, int64_t);
-template CAFFE2_API qint32 requantize_val<qint32>(double, int64_t, int64_t);
+template CAFFE2_API qint8 requantize_from_int<qint8>(double, int64_t, int64_t);
+template CAFFE2_API quint8
+requantize_from_int<quint8>(double, int64_t, int64_t);
+template CAFFE2_API qint32
+requantize_from_int<qint32>(double, int64_t, int64_t);
 
 // TODO: add fbgemm for per channel
 template <typename T>
