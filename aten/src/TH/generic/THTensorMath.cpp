@@ -271,10 +271,10 @@ void THTensor_(addr)(THTensor *r_, THTensor *t, THTensor *vec1, THTensor *vec2, 
   if(t->dim() != 2)
     THError("expected matrix, got %dD tensor for t", t->dim());
 
-  auto vec1_size = THTensor_sizeLegacyNoScalars(vec1, 0);
-  auto vec2_size = THTensor_sizeLegacyNoScalars(vec2, 0);
-  auto vec1_stride = THTensor_strideLegacyNoScalars(vec1, 0);
-  auto vec2_stride = THTensor_strideLegacyNoScalars(vec2, 0);
+  auto vec1_size = THTensor_(size)(vec1, 0);
+  auto vec2_size = THTensor_(size)(vec2, 0);
+  auto vec1_stride = THTensor_(stride)(vec1, 0);
+  auto vec2_stride = THTensor_(stride)(vec2, 0);
 
   if( (t->size(0) != vec1_size) || (t->size(1) != vec2_size) ) {
     THDescBuff bt  = THTensor_(sizeDesc)(t);
