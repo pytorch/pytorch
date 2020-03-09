@@ -284,6 +284,8 @@ TensorView* TensorView::computeAt(TensorView* consumer, int axis) {
    *
    * Compute at modifies this, not consumer.
    */
+  TORCH_CHECK(!this->same_as(consumer), 
+    "Cannot call this->computeAt(this, ...)");
   if(axis < 0)
     //Compute at is funny where size is the maximum acceptable value instead of size-1
     axis +=  consumer->domain()->size() + 1;
@@ -331,9 +333,9 @@ TensorView* TensorView::computeAt(TensorView* consumer, int axis) {
       if (DependencyCheck::isDependencyOf(running_consumer, other_consumer)) {
         // There seem to be two choices here, either running_consumer or consumer
         // I believe they end up being equivelent, but uncertain they actually are.
-        consumer->computeAt(other_consumer, axis);
+        running_consumer->computeAt(other_consumer, axis);
       } else {
-        other_consumer->computeAt(consumer, axis);
+        other_consumer->computeAt(running_consumer, axis);
       }
     }
   }
@@ -348,7 +350,6 @@ TensorView* TensorView::computeAt(TensorView* consumer, int axis) {
 
   this->compute_at_view_ = nullptr;
   this->compute_at_axis_ = -1;
-
   TransformReplay::replay(running_consumer, this, axis);
   this->compute_at_view_ = running_consumer;
   this->compute_at_axis_ = axis;
