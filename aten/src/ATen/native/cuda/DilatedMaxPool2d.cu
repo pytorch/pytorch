@@ -248,9 +248,9 @@ __global__ void max_pool_backward_nhwc(const int nthreads, const scalar_t* top_d
   int iendW = ::min(istartW+iW, width);
 
   for (int ih = istartH; ih < iendH; ih+=blockDim.z) {
+    int phstart = p_start(ih, pad_h, kernel_h, dilation_h, stride_h);
+    int phend = p_end(ih, pad_h, pooled_height, stride_h);
     for (int iw = istartW; iw < iendW; iw+=blockDim.y) {
-      int phstart = p_start(ih, pad_h, kernel_h, dilation_h, stride_h);
-      int phend = p_end(ih, pad_h, pooled_height, stride_h);
       int pwstart = p_start(iw, pad_w, kernel_w, dilation_w, stride_w);
       int pwend = p_end(iw, pad_w, pooled_width, stride_w);
       if ((phstart + 1 != phend) || (pwstart + 1 != pwend)) {
