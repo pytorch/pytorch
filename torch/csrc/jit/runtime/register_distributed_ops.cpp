@@ -94,7 +94,7 @@ RegisterOperators reg_rpc_ops({
              // Get FunctionSchema for qualifiedName.
              auto qualifiedName =
                  c10::QualifiedName(qualifiedNameIValue.toStringRef());
-             std::shared_ptr<script::CompilationUnit> cuPtr;
+             std::shared_ptr<CompilationUnit> cuPtr;
              {
                py::gil_scoped_acquire acquire;
                cuPtr = get_python_cu();

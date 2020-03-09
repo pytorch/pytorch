@@ -11,10 +11,8 @@ namespace jit {
 class CustomClassHolder : public c10::intrusive_ptr_target {};
 
 struct Function;
-namespace script {
 struct CompilationUnit;
 struct Module;
-}
 } // namespace jit
 } // namespace torch
 namespace c10 {
@@ -356,7 +354,7 @@ struct CAFFE2_API IValue final {
   c10::intrusive_ptr<ivalue::Object> toObject() const & ;
   const ivalue::Object& toObjectRef() const;
 
-  torch::jit::script::Module toModule() const;
+  torch::jit::Module toModule() const;
   bool isModule() const;
 
   // PyObject
@@ -692,10 +690,10 @@ private:
 // guaranteed to stay alive as long as we hold this object.
 struct TORCH_API StrongTypePtr {
   StrongTypePtr(
-      std::shared_ptr<torch::jit::script::CompilationUnit> cu,
+      std::shared_ptr<torch::jit::CompilationUnit> cu,
       std::shared_ptr<Type> type);
 
-  std::shared_ptr<torch::jit::script::CompilationUnit> cu_;
+  std::shared_ptr<torch::jit::CompilationUnit> cu_;
   std::shared_ptr<Type> type_;
 };
 

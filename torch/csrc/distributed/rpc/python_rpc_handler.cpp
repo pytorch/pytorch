@@ -27,8 +27,8 @@ namespace {
 
 // PythonTypeResolver that inherits from Script::Resolver to
 // support resolving types together with ScriptTypeParser.
-struct PythonTypeResolver : public jit::script::Resolver {
-  std::shared_ptr<jit::script::SugaredValue> resolveValue(
+struct PythonTypeResolver : public jit::Resolver {
+  std::shared_ptr<jit::SugaredValue> resolveValue(
       const std::string& /* unused */,
       torch::jit::Function& /* unused */,
       const jit::SourceRange& /* unused */) override {
@@ -66,7 +66,7 @@ PythonRpcHandler::PythonRpcHandler() {
   pySerialize_ = getFunction(module, "serialize");
   pyHandleException_ = getFunction(module, "_handle_exception");
   jitCompilationUnit_ = torch::jit::get_python_cu();
-  typeParser_ = std::make_shared<jit::script::ScriptTypeParser>(
+  typeParser_ = std::make_shared<jit::ScriptTypeParser>(
       std::make_shared<PythonTypeResolver>());
 }
 
@@ -86,7 +86,7 @@ PythonRpcHandler& PythonRpcHandler::getInstance() {
   return *handler;
 }
 
-std::shared_ptr<torch::jit::script::CompilationUnit> PythonRpcHandler::
+std::shared_ptr<torch::jit::CompilationUnit> PythonRpcHandler::
     jitCompilationUnit() {
   return jitCompilationUnit_;
 }

@@ -23,7 +23,7 @@ void testSchemaMatching() {
                 return 0;
             }),
     });
-    script::Module m("m");
+    Module m("m");
     m.define(R"(
       def test(self):
         a = (1.0, 2.0)
@@ -59,7 +59,7 @@ void testSchemaMatching() {
               return 0;
             }),
     });
-    script::Module m("m");
+    Module m("m");
     m.define(R"JIT(
       def test(self):
           a = (1.0, 2.0)

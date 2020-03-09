@@ -58,7 +58,7 @@ class MemoryReadAdapter final : public caffe2::serialize::ReadAdapterInterface {
 class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
  private:
   friend HybridBase;
-  torch::jit::script::Module module_;
+  torch::jit::Module module_;
 
  public:
   constexpr static auto kJavaDescriptor = "Lorg/pytorch/NativePeer;";

@@ -370,7 +370,7 @@ void testCustomFusion() {
       %3 : Tensor = aten::mul(%2, %0)
       return (%3))IR";
   auto g = std::make_shared<Graph>();
-  torch::jit::script::parseIR(graph_string, g.get());
+  torch::jit::parseIR(graph_string, g.get());
 
   torch::jit::overrideCanFuseOnCPU(true);
   CustomFuseGraph(
@@ -414,7 +414,7 @@ void testCustomFusionNestedBlocks() {
     %9 : Tensor = aten::add(%4, %2, %3)
     return (%4))IR";
   auto g = std::make_shared<Graph>();
-  torch::jit::script::parseIR(graph_string, g.get());
+  torch::jit::parseIR(graph_string, g.get());
 
   CustomFuseGraph(
       g,
@@ -491,7 +491,7 @@ void testEvalModeForLoadedModule() {
   if (isSandcastle())
     return; // The module file to load is not generated in Sandcastle
   std::string module_path = "dropout_model.pt";
-  torch::jit::script::Module module = torch::jit::load(module_path);
+  torch::jit::Module module = torch::jit::load(module_path);
   AT_ASSERT(module.attr("dropout").toModule().is_training());
   module.eval();
   AT_ASSERT(!module.attr("dropout").toModule().is_training());
@@ -975,7 +975,7 @@ void testNoneSchemaMatch() {
 }
 
 void testModuleDefine() {
-  script::Module m("m");
+  Module m("m");
   m.register_parameter("foo", torch::ones({}), false);
   m.define(R"(
     def add_it(self, x, b : int = 4):
@@ -986,7 +986,7 @@ void testModuleDefine() {
 }
 
 void testModuleConversion() {
-  script::Module m("test");
+  Module m("test");
   {
     // test cuda to cpu for params and buffers
     m.register_parameter("foo", torch::ones({}, at::kCUDA), false);
@@ -1018,7 +1018,7 @@ RegisterPass p(fakePass);
 
 void testPassManagement() {
   std::shared_ptr<Graph> graph = std::make_shared<Graph>();
-  script::parseIR(
+  parseIR(
       R"IR(
 graph(%a):
   return (%a))IR",

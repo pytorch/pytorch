@@ -397,7 +397,7 @@ void testAliasAnalysis() {
     {
       auto graph = std::make_shared<Graph>();
       std::unordered_map<std::string, Value*> vmap;
-      script::parseIR(
+      parseIR(
           R"IR(
     graph():
       %opt : Tensor? = prim::Constant()
@@ -417,7 +417,7 @@ void testAliasAnalysis() {
   {
     auto graph = std::make_shared<Graph>();
     std::unordered_map<std::string, Value*> vmap;
-    script::parseIR(
+    parseIR(
         R"IR(
   graph(%x : Tensor):
       %3 : int = prim::Constant[value=1]()
@@ -493,7 +493,7 @@ void testWriteTracking() {
   }
   {
     auto graph = std::make_shared<Graph>();
-    script::parseIR(
+    parseIR(
         R"IR(
   graph(%x: Tensor):
     %b : Tensor = aten::relu_(%x)
@@ -507,7 +507,7 @@ void testWriteTracking() {
   }
   {
     auto graph = std::make_shared<Graph>();
-    script::parseIR(
+    parseIR(
         R"IR(
   graph(%x: Tensor, %y : Tensor):
     %b : Tensor = aten::mul(%x, %y)
@@ -522,7 +522,7 @@ void testWriteTracking() {
   {
     auto graph = std::make_shared<Graph>();
     std::unordered_map<std::string, Value*> vmap;
-    script::parseIR(
+    parseIR(
         R"IR(
   graph(%x: Tensor, %y : Tensor):
     %c1 : int = prim::Constant[value=1]()
@@ -542,7 +542,7 @@ void testContainerAliasing() {
   {
     auto graph = std::make_shared<Graph>();
     std::unordered_map<std::string, Value*> vmap;
-    script::parseIR(
+    parseIR(
         R"IR(
   graph(%inp: Tensor[]):
     %x : str = prim::Constant[value="a"]()
@@ -576,7 +576,7 @@ void testContainerAliasing() {
 
   {
     auto graph = std::make_shared<Graph>();
-    script::parseIR(
+    parseIR(
         R"IR(
   graph():
     %x : str = prim::Constant[value="a"]()
@@ -603,7 +603,7 @@ void testContainerAliasing() {
   // Test input aliasing
   {
     auto graph = std::make_shared<Graph>();
-    script::parseIR(
+    parseIR(
         R"IR(
   graph(%x: Tensor, %y: Tensor):
     %a : (Tensor) = prim::TupleConstruct(%x)
@@ -624,7 +624,7 @@ void testContainerAliasing() {
   // Test tuple that doesn't come from construct
   {
     auto graph = std::make_shared<Graph>();
-    script::parseIR(
+    parseIR(
         R"IR(
 graph(%x : int,
       %y : Tensor,
@@ -656,7 +656,7 @@ graph(%x : int,
   // test nested types
   {
     auto graph = std::make_shared<Graph>();
-    script::parseIR(
+    parseIR(
         R"IR(
 graph():
   %4 : Device? = prim::Constant()
@@ -687,7 +687,7 @@ graph():
   // simple example
   {
     auto graph = std::make_shared<Graph>();
-    script::parseIR(
+    parseIR(
         R"IR(
 graph():
   %0 : Tensor = prim::Constant()
@@ -717,7 +717,7 @@ graph():
   {
     auto graph = std::make_shared<Graph>();
     std::unordered_map<std::string, Value*> vmap;
-    script::parseIR(
+    parseIR(
         R"IR(
   graph():
     %x : str = prim::Constant[value="a"]()
@@ -743,7 +743,7 @@ graph():
     // Test list container aliasing
     auto graph = std::make_shared<Graph>();
     std::unordered_map<std::string, Value*> vmap;
-    script::parseIR(
+    parseIR(
         R"IR(
 graph():
   %10 : bool? = prim::Constant()
@@ -788,7 +788,7 @@ graph():
 
     auto graph = std::make_shared<Graph>();
     std::unordered_map<std::string, Value*> vmap;
-    script::parseIR(
+    parseIR(
         R"IR(
 graph():
   %10 : bool? = prim::Constant()
@@ -822,7 +822,7 @@ graph():
     // print across it.
     auto graph = std::make_shared<Graph>();
     std::unordered_map<std::string, Value*> vmap;
-    script::parseIR(
+    parseIR(
         R"IR(
 graph():
   %35 : int = prim::Constant[value=1]()
@@ -864,7 +864,7 @@ graph():
     // print across it.
     auto graph = std::make_shared<Graph>();
     std::unordered_map<std::string, Value*> vmap;
-    script::parseIR(
+    parseIR(
         R"IR(
 graph():
   %38 : int = prim::Constant[value=1]()
@@ -953,7 +953,7 @@ void testWildcards() {
   {
     auto graph = std::make_shared<Graph>();
     std::unordered_map<std::string, Value*> vmap;
-    script::parseIR(
+    parseIR(
         R"IR(
   graph(%ten_list : Tensor[], %int_list : int[], %opt_ten_list : Tensor[]?):
     %ten : Tensor = prim::Constant()
@@ -989,7 +989,7 @@ void testWildcards() {
   {
     auto graph = std::make_shared<Graph>();
     std::unordered_map<std::string, Value*> vmap;
-    script::parseIR(
+    parseIR(
         R"IR(
   graph(%ten_list : Tensor[], %ten_opt_list : Tensor?[]):
     %ten : Tensor = prim::Constant()
@@ -1010,7 +1010,7 @@ void testWildcards() {
   {
     auto graph = std::make_shared<Graph>();
     std::unordered_map<std::string, Value*> vmap;
-    script::parseIR(
+    parseIR(
         R"IR(
   graph(%float_3D : Float(*, *, *), %float_2D : Float(*, *)):
     return ()
@@ -1024,7 +1024,7 @@ void testWildcards() {
   {
     auto graph = std::make_shared<Graph>();
     std::unordered_map<std::string, Value*> vmap;
-    script::parseIR(
+    parseIR(
         R"IR(
   graph(%float_3D_list : Float(*, *, *)[], %float_2D_list : Float(*, *)[], %ten: Tensor):
     return ()

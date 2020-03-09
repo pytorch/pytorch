@@ -9,7 +9,6 @@
 
 namespace torch {
 namespace jit {
-namespace script {
 
 enum class IterableModuleKind { NONE, LIST, DICT };
 class ConcreteModuleType;
@@ -228,6 +227,5 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
   TypePtr jitType_;
 };
 
-} // namespace script
 } // namespace jit
 } // namespace torch

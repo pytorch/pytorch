@@ -17,9 +17,7 @@
 struct ClassType;
 namespace torch {
 namespace jit {
-namespace script {
 struct CompilationUnit;
-}
 } // namespace jit
 } // namespace torch
 
@@ -1490,7 +1488,7 @@ CAFFE2_API TypePtr tryEvalTypeVariables(TypePtr type, TypeEnv& type_env);
 
 struct ClassType;
 using ClassTypePtr = std::shared_ptr<ClassType>;
-using ::torch::jit::script::CompilationUnit;
+using ::torch::jit::CompilationUnit;
 
 // This represents a class in TorchScript.
 struct CAFFE2_API ClassType : public NamedType {
@@ -1800,7 +1798,7 @@ struct CAFFE2_API ClassType : public NamedType {
 
 struct InterfaceType;
 using InterfaceTypePtr = std::shared_ptr<InterfaceType>;
-using ::torch::jit::script::CompilationUnit;
+using ::torch::jit::CompilationUnit;
 
 // Interfaces are a list of abstract methods that a class might meet.
 // If a class provides those methods, it implicitly meets the interface.

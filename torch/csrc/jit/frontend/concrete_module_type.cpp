@@ -3,7 +3,6 @@
 
 namespace torch {
 namespace jit {
-namespace script {
 
 ClassTypePtr ConcreteModuleTypeBuilder::createTypeFromThis() const {
   auto cu = get_python_cu();
@@ -303,6 +302,5 @@ ConcreteModuleType::getModulesPy() const {
   return ret;
 }
 
-} // namespace script
 } // namespace jit
 } // namespace torch

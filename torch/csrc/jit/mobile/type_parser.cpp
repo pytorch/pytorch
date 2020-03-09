@@ -4,14 +4,12 @@
 
 namespace torch {
 namespace jit {
-namespace script {
 const std::unordered_map<std::string, c10::TypePtr> &string_to_type_lut();
 }
 }
-}
 
-using torch::jit::script::string_to_type_lut;
-using torch::jit::script::valid_single_char_tokens;
+using torch::jit::string_to_type_lut;
+using torch::jit::valid_single_char_tokens;
 
 namespace c10 {
 namespace {

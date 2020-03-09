@@ -14,7 +14,6 @@
 
 namespace torch {
 namespace jit {
-namespace script {
 
 std::string typeString(py::handle h) {
   return py::str(h.get_type().attr("__name__"));
@@ -368,7 +367,7 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
     const SourceRange& loc,
     Function& m,
     const std::string& field) {
-  // 1. Look inside script::Module object for the field.
+  // 1. Look inside Module object for the field.
   const auto& selfType_ = concreteType_->getJitType();
   if (selfType_->cast<InterfaceType>()) {
     return std::make_shared<SimpleValue>(self_)->attr(loc, m, field);
@@ -728,6 +727,5 @@ std::shared_ptr<SugaredValue> toSugaredValue(
 
   return std::make_shared<PythonValue>(obj);
 }
-} // namespace script
 } // namespace jit
 } // namespace torch

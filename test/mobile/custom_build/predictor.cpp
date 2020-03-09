@@ -28,7 +28,7 @@ void init() {
   at::globalContext().setQEngine(at::QEngine::QNNPACK);
 }
 
-torch::jit::script::Module loadModel(const std::string& path) {
+torch::jit::Module loadModel(const std::string& path) {
   MobileCallGuard guard;
   auto module = torch::jit::load(path);
   module.eval();

@@ -9,7 +9,7 @@ struct CustomObjectProxy;
 
 py::object ScriptClass::__call__(py::args args, py::kwargs kwargs) {
   auto instance =
-      script::Object(at::ivalue::Object::create(class_type_, /*numSlots=*/1));
+      Object(at::ivalue::Object::create(class_type_, /*numSlots=*/1));
   return invokeScriptMethodFromPython(
       instance, "__init__", std::move(args), std::move(kwargs));
 }
@@ -33,7 +33,7 @@ void initPythonCustomClassBindings(PyObject* module) {
     auto named_type = getCustomClass(full_qualname);
     c10::ClassTypePtr class_type = named_type->cast<ClassType>();
     return ScriptClass(c10::StrongTypePtr(
-        std::shared_ptr<script::CompilationUnit>(), std::move(class_type)));
+        std::shared_ptr<CompilationUnit>(), std::move(class_type)));
   });
 }
 

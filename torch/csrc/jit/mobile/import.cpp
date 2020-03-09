@@ -125,14 +125,14 @@ class BytecodeDeserializer final {
  private:
   c10::IValue readArchive(const std::string& archive_name,
     std::shared_ptr<mobile::CompilationUnit> mcu);
-  std::shared_ptr<script::CompilationUnit> compilation_unit_;
+  std::shared_ptr<CompilationUnit> compilation_unit_;
   std::unordered_set<std::string> imported_libs_;
   std::unique_ptr<PyTorchStreamReader> reader_;
   c10::optional<at::Device> device_;
 };
 
 BytecodeDeserializer::BytecodeDeserializer(std::unique_ptr<PyTorchStreamReader> reader)
-    : compilation_unit_(std::make_shared<script::CompilationUnit>()), reader_(std::move(reader)) {}
+    : compilation_unit_(std::make_shared<CompilationUnit>()), reader_(std::move(reader)) {}
 
 mobile::Module BytecodeDeserializer::deserialize(c10::optional<at::Device> device) {
   device_ = device;
