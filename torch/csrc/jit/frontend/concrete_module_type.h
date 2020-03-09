@@ -149,7 +149,7 @@ class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
   // The value of any constants defined by the module.
   std::unordered_map<std::string, Constant> constants_;
   // The types of any attributes
-  std::unordered_map<std::string, Attribute> attributes_;
+  OrderedDict<std::string, Attribute> attributes_;
   // Overloads, in the same format as `__overloads__` in Python
   std::unordered_map<std::string, std::vector<std::string>> overloads_;
   // Any attributes we failed to convert to TorchScript, along with a hint as to

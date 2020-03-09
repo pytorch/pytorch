@@ -45,6 +45,7 @@ from torch.nn.quantized.modules.linear import LinearPackedParams
 from torch.quantization import QConfig
 from torch.quantization._quantize_script import ConvPackedParams
 from torch.quantization._quantize_script import script_qconfig
+from torch.quantization._quantize_script import quantize_script
 from torch.quantization import default_observer
 from torch.quantization import default_weight_observer
 from torch.quantization import default_per_channel_weight_observer
@@ -83,6 +84,7 @@ from collections import namedtuple, OrderedDict
 from copy import deepcopy
 from functools import wraps
 from itertools import product, chain
+import itertools
 from textwrap import dedent
 from typing import List, Dict, Optional, Tuple, Union
 import copy
@@ -102,6 +104,8 @@ import unittest
 import warnings
 import zipfile
 import re
+import string
+
 
 RUN_CUDA_HALF = RUN_CUDA
 if torch.cuda.is_available():
@@ -2006,6 +2010,39 @@ graph(%input, %weight):
         res = m(x, weight, bias)
         self.assertEqual(res, ref_res)
 
+    def test_finalize_for_conv2d(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 3).float()
+
+            def forward(self, x):
+                return self.conv(x)
+
+        data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        qconfig_dict = {'': default_qconfig}
+        model = torch.jit.script(M()).eval()
+        model = quantize_script(model, qconfig_dict, _test_only_eval_fn, [data], inplace=False)
+        FileCheck().check("quantized::conv2d") \
+                   .run(model.graph)
+
+    def test_finalize_debug(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 3).float()
+
+            def forward(self, x):
+                return self.conv(x)
+
+        data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        qconfig_dict = {'': default_qconfig}
+        model = torch.jit.script(M()).eval()
+        model = quantize_script(model, qconfig_dict, _test_only_eval_fn, [data], inplace=False, debug=True)
+        FileCheck().check_not("quantized::conv2d") \
+                   .check("CallMethod") \
+                   .run(model.graph)
+
     def test_pattern_based_rewrite(self):
         # mul(mul(mul(mul(x,y),z),x),y) --> mul(mul(mulmul(x,y,z), x), y) -->
         # --> mulmul(mulmul(x,y,z), x, y)
@@ -3589,10 +3626,25 @@ graph(%Ra, %Rb):
         for constant in constants:
             check_constant(constant)
 
+        for key_type in ["str", "int", "float"]:
+            for value_type in ["Tensor", "bool", "str", "int", "float"]:
+                check_constant("torch.jit.annotate(Dict[ " + key_type + ", " + value_type + "], {})")
+                check_constant("torch.jit.annotate(Dict[ " + key_type + ", Optional[" + value_type + "]], {})")
+
         for i in range(len(constants)):
             for j in range(i + 1, len(constants)):
                 tup_constant = constants[i] + ", " + constants[j]
                 check_constant(tup_constant)
+
+        for i in range(len(constants)):
+            # check_constant constructs the second dict with another Tensor
+            # which fails the comparison
+            if isinstance(eval(constants[i]), (list, bool, Tensor)) or eval(constants[i]) is None:
+                continue
+            for j in range(len(constants)):
+                dict_constant = "{ " + constants[i] + ": " + constants[j] + "}"
+                check_constant(dict_constant)
+
 
         # testing node hashing
         funcs_template = dedent('''
@@ -3621,8 +3673,17 @@ graph(%Ra, %Rb):
             print(b)
         ''')
 
-        # test that equal tuples correctly work with node hashing
-        for tup in map(lambda x: "(" + x + ",)", constants):
+        # generate dicts with built-in types (excluding torch.Tensor)
+        xprod = itertools.product(constants, constants)
+
+        def keys_pred(t):
+            return isinstance(eval(t[0]), (list, bool)) or eval(t[0]) is None
+
+        filt = [x for x in xprod if not keys_pred(x)]
+        dict_strs = map(lambda t: '{' + t[0] + ':' + t[1] + '}', filt)
+
+        # test that equal tuples and dicts correctly work with node hashing
+        for tup in chain(map(lambda x: "(" + x + ",)", constants), dict_strs):
             funcs_str = funcs_template.format(constant_constructor=tup)
             scope = {}
             execWrapper(funcs_str, globals(), scope)
@@ -5029,6 +5090,15 @@ def foo(x):
                     'parameters': ['P'],
                     'parameters_r': ['P']}
         self.assertEqual(expected, result)
+
+    def test_parameter_order(self):
+        m = nn.Module()
+        for i, name in enumerate(string.ascii_letters):
+            setattr(m, name, nn.Parameter(torch.tensor([float(i)])))
+        ms = torch.jit.script(m)
+        print(torch.cat(list(m.parameters())))
+        print(torch.cat(list(ms.parameters())))
+        self.assertEqual(list(m.parameters()), list(ms.parameters()))
 
     def test_tracing_hooks(self):
         class Net(nn.Module):
@@ -10543,8 +10613,6 @@ a")
                 return thing - self.i
 
         class M(torch.nn.Module):
-            __constants__ = ['mods']
-
             def __init__(self):
                 super(M, self).__init__()
                 self.mods = nn.ModuleList([Sub(i) for i in range(10)])
@@ -10557,6 +10625,19 @@ a")
 
         x = torch.tensor(1)
         self.checkModule(M(), (x,))
+
+        class MForward(torch.nn.Module):
+            def __init__(self):
+                super(MForward, self).__init__()
+                self.mods = nn.ModuleList([Sub(i) for i in range(10)])
+
+            def forward(self, v):
+                v = self.mods[4](v)
+                v = self.mods[-1](v)
+                v = self.mods[-9](v)
+                return v
+
+        self.checkModule(MForward(), (torch.tensor(1),))
 
         class M2(M):
             def __init__(self):
