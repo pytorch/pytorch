@@ -24,7 +24,98 @@ namespace {
 ExportModuleExtraFilesHook& GetExtraFilesHook() {
   static ExportModuleExtraFilesHook func = nullptr;
   return func;
-};
+}
+
+static IValue Tup(std::vector<IValue> ivalues) {
+  return c10::ivalue::Tuple::create(std::move(ivalues));
+}
+
+static IValue Table(const std::vector<std::pair<std::string, IValue>>& entries) {
+  std::vector<IValue> ivalue_entries;
+  for (const auto& e : entries) {
+    ivalue_entries.push_back(Tup({e.first, e.second}));
+  }
+  return Tup(std::move(ivalue_entries));
+}
+
+c10::IValue getFunctionTuple(const Function& func) {
+  auto graph = func.graph()->copy();
+  Inline(*graph);
+  torch::jit::Code code(graph, func.name());
+
+  // operator names
+  std::vector<c10::OperatorName> opnames;
+  for (size_t i = 0; i < code.instructions().size(); ++i) {
+    Instruction ins = code.instructions()[i];
+    if (ins.op == OP || ins.op == OPN) {
+      auto node = code.instructions_source()[i];
+      opnames.emplace_back(node->schema().operator_name());
+    }
+  }
+
+  // instructions
+  std::vector<IValue> instructions;
+  instructions.reserve(code.instructions().size());
+  for (Instruction ins : code.instructions()) {
+    instructions.emplace_back(Tup({toString(ins.op), ins.X, ins.N}));
+  }
+
+  // operators
+  std::vector<IValue> operators;
+  operators.reserve(opnames.size());
+  for (const auto& opname : opnames) {
+    operators.emplace_back(Tup({opname.name, opname.overload_name}));
+  }
+
+  // constants
+  const auto& constants = code.constant_table();
+
+  // types
+  std::vector<IValue> types;
+  types.reserve(code.type_table().size());
+  for (const TypePtr& t : code.type_table()) {
+    types.emplace_back(t->python_str());
+  }
+
+  // since the register location is embedded into the bytecode, pass the register size
+  auto register_size = static_cast<int>(code.register_size());
+
+  auto table = Table({{"instructions", Tup(instructions)},
+                      {"operators", Tup(operators)},
+                      {"constants", Tup(constants)},
+                      {"types", Tup(types)},
+                      {"register_size", register_size}});
+
+  return Tup({func.qualname().qualifiedName(), table});
+}
+
+void setstateTuple(const IValue& ivalue, std::vector<c10::IValue>& elements) {
+  if (!ivalue.isObject()) return;
+  auto obj = ivalue.toObject();
+  auto type = obj->type();
+  if (checkHasValidSetGetState(type)) {
+    Function *setstate = type->getMethod("__setstate__");
+    elements.push_back(getFunctionTuple(*setstate));
+  }
+  else {
+    for (size_t i = 0, n = type->numAttributes(); i < n; ++i) {
+      setstateTuple(obj->getSlot(i), elements);
+    }
+  }
+}
+
+void moduleMethodsTuple(const script::Module& module,
+    std::vector<c10::IValue>& elements) {
+  auto methods = module.get_methods();
+  // top level methods
+  for (const auto& method : methods) {
+    elements.push_back(getFunctionTuple(method.function()));
+  }
+
+  // __setstate__ of all components
+  setstateTuple(module._ivalue(), elements);
+}
+
 }
 
 void SetExportModuleExtraFilesHook(ExportModuleExtraFilesHook hook) {
@@ -144,69 +235,11 @@ class ScriptModuleSerializer {
     }
   }
 
-  static IValue Tup(std::vector<IValue> ivalues) {
-    return c10::ivalue::Tuple::create(std::move(ivalues));
-  }
-  static IValue Table(std::vector<std::pair<std::string, IValue>> entries) {
-    std::vector<IValue> ivalue_entries;
-    for (const auto& e : entries) {
-      ivalue_entries.push_back(Tup({e.first, e.second}));
-    }
-    return Tup(std::move(ivalue_entries));
-  }
-
   void writeByteCode(const script::Module& module) {
-    auto methods = module.get_methods();
     std::vector<c10::IValue> elements;
-    for (const auto& method : methods) {
-      const auto& func = method.function();
-      auto graph = func.graph()->copy();
-      Inline(*graph);
-      torch::jit::Code code(graph, "<mobile interpreter>");
-
-      // operator names
-      std::vector<c10::OperatorName> opnames;
-      for (size_t i = 0; i < code.instructions().size(); ++i) {
-        Instruction ins = code.instructions()[i];
-        if (ins.op == OP || ins.op == OPN) {
-          auto node = code.instructions_source()[i];
-          opnames.emplace_back(node->schema().operator_name());
-        }
-      }
-
-      // instructions
-      std::vector<IValue> instructions;
-      for (Instruction ins : code.instructions()) {
-        instructions.emplace_back(Tup({toString(ins.op), ins.X, ins.N}));
-      }
-
-      // operators
-      std::vector<IValue> operators;
-      for (const auto& opname : opnames) {
-        operators.emplace_back(c10::ivalue::Tuple::create({opname.name, opname.overload_name}));
-      }
-
-      // constants
-      auto constants = code.constant_table();
-
-      // types
-      std::vector<IValue> types;
-      for (const TypePtr& t : code.type_table()) {
-        types.push_back(t->python_str());
-      }
-
-      // since the register location is embedded into the bytecode, pass the register size
-      auto register_size = static_cast<int>(code.register_size());
-
-      auto table = Table({{"instructions", Tup(instructions)},
-                          {"operators", Tup(operators)},
-                          {"constants", Tup(constants)},
-                          {"types", Tup(types)},
-                          {"register_size", register_size}});
-
-      elements.push_back(Tup({func.qualname().qualifiedName(), table}));
-    }
-    writeArchive("bytecode", Tup(std::move(elements)));
+    moduleMethodsTuple(module, elements);
+    auto telements = Tup(std::move(elements));
+    writeArchive("bytecode", telements);
   }
 
   void convertNamedType(const c10::NamedTypePtr& class_type) {

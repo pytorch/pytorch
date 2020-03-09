@@ -1354,6 +1354,14 @@ def zeros_like(g, input, dtype=None, layout=None, device=None, pin_memory=False,
                 value_t=torch.tensor([0], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
 
 
+@parse_args('v', 'v', 'i', 'v', 'v', 'v')
+def new_zeros(g, self, sizes, dtype, layout, device, pin_memory=False):
+    if dtype is None:
+        dtype = self.type().scalarType()
+        dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
+    return zeros(g, sizes, dtype, layout, device, pin_memory)
+
+
 @parse_args('v', 'i', 'v', 'v', 'v')
 def ones(g, sizes, dtype, layout, device, pin_memory=False):
     if dtype is None:
@@ -1752,15 +1760,27 @@ def _pad_packed_sequence(g, data, batch_sizes, batch_first, padding_value, total
     return data, lengths
 
 
-def randn(g, *shapes):
-    shapes_list = list(shapes)
-    shape = sym_help._get_const(shapes_list[0], "is", "randn")
+def randn(g, shapes, dtype, *options):
+    dtype = sym_help._get_const(dtype, 'i', 'dtype')
+    if dtype is None:
+        dtype = 6  # float
+    if sym_help._is_packed_list(shapes):
+        shape_const = g.op("ConstantOfShape", shapes,
+                           value_t=torch.tensor([0], dtype=sym_help.scalar_type_to_pytorch_type[6]))
+        return g.op('RandomNormalLike', shape_const, dtype_i=sym_help.scalar_type_to_onnx[dtype])
+    shape = sym_help._get_const(shapes, "is", "randn")
     return g.op('RandomNormal', shape_i=shape)
 
 
-def rand(g, *shapes):
-    shapes_list = list(shapes)
-    shape = sym_help._get_const(shapes_list[0], "is", "rand")
+def rand(g, shapes, dtype, *options):
+    dtype = sym_help._get_const(dtype, 'i', 'dtype')
+    if dtype is None:
+        dtype = 6  # float
+    if sym_help._is_packed_list(shapes):
+        shape_const = g.op("ConstantOfShape", shapes,
+                           value_t=torch.tensor([0], dtype=sym_help.scalar_type_to_pytorch_type[6]))
+        return g.op('RandomUniformLike', shape_const, dtype_i=sym_help.scalar_type_to_onnx[dtype])
+    shape = sym_help._get_const(shapes, "is", "rand")
     return g.op('RandomUniform', shape_i=shape)
 
 
