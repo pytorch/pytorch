@@ -61,7 +61,7 @@ if (NOT MSVC)
   ENDIF()
   if (NOT (INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE))
     set_source_files_properties(
-        utils/threadpool/pthreadpool_new_if_impl.c PROPERTIES COMPILE_FLAGS -fno-openmp) 
+        utils/threadpool/pthreadpool_new_if_impl.c PROPERTIES COMPILE_FLAGS -fno-openmp)
   endif()
 endif()
 
@@ -366,7 +366,6 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/runtime/autodiff.cpp
     ${TORCH_SRC_DIR}/csrc/jit/ir/attributes.cpp
     ${TORCH_SRC_DIR}/csrc/jit/runtime/argument_spec.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/api/custom_class.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/pass_manager.cpp
     ${TORCH_SRC_DIR}/csrc/jit/serialization/pickler.cpp
     ${TORCH_SRC_DIR}/csrc/jit/serialization/unpickler.cpp
@@ -449,7 +448,6 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/frontend/schema_matching.cpp
     ${TORCH_SRC_DIR}/csrc/jit/frontend/script_type_parser.cpp
     ${TORCH_SRC_DIR}/csrc/jit/frontend/sugared_value.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/ir/class_type.cpp
     ${TORCH_SRC_DIR}/csrc/jit/frontend/parser.cpp
     ${TORCH_SRC_DIR}/csrc/jit/frontend/builtin_functions.cpp
     ${TORCH_SRC_DIR}/csrc/jit/frontend/canonicalize_modified_loop.cpp
@@ -469,7 +467,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/codegen/fuser/executor.cpp
     ${TORCH_SRC_DIR}/csrc/jit/codegen/fuser/codegen.cpp
     ${TORCH_SRC_DIR}/csrc/jit/codegen/fuser/fallback.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/api/function.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/api/function_impl.cpp
     ${TORCH_SRC_DIR}/csrc/jit/runtime/vararg_functions.cpp
 
     ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/codegen.cpp
@@ -489,7 +487,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/mobile/type_parser.cpp
     )
 
-  if (NOT INTERN_DISABLE_MOBILE_INTERP AND BUILD_CAFFE2_MOBILE)
+  if (NOT INTERN_DISABLE_MOBILE_INTERP)
     set (MOBILE_SRCS
         ${TORCH_SRC_DIR}/csrc/jit/mobile/function.cpp
         ${TORCH_SRC_DIR}/csrc/jit/mobile/import.cpp
