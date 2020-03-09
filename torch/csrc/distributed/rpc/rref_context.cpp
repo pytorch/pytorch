@@ -7,6 +7,10 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+thread_local std::vector<std::shared_ptr<RRefContext::PendingUserState>>
+    RRefContext::userTable_;
+thread_local bool RRefContext::recording = false;
+
 namespace callback {
 void confirmPendingUser(
     const rpc::Message& message,
@@ -373,11 +377,26 @@ void RRefContext::addPendingUser(
     const c10::intrusive_ptr<RRef>& rref) {
   TORCH_INTERNAL_ASSERT(
       !rref->isOwner(), "Attempt to add an OwnerRRef as a pending User.");
+
+  auto state = std::make_shared<PendingUserState>(rref);
+  if (recording) {
+    // adding and waiting for pending users are guaranteed to be called from the
+    // same thread, but deleting pending users will be called from another
+    // thread. As the delPendingUser will not be able to access the same
+    // thread_local variable, we cannot address this problem by making
+    // pendingUsers_ thread_local.
+    userTable_.push_back(state);
+  }
+
   std::lock_guard<std::mutex> lock(mutex_);
   TORCH_INTERNAL_ASSERT(
       pendingUsers_.find(forkId) == pendingUsers_.end(),
       "Inconsistent states: attempt to add the same UserRRef twice.");
-  pendingUsers_[forkId] = rref;
+
+  pendingUsers_.emplace(
+      std::piecewise_construct,
+      std::forward_as_tuple(forkId),
+      std::forward_as_tuple(state));
 }
 
 void RRefContext::delPendingUser(const ForkId& forkId) {
@@ -386,7 +405,13 @@ void RRefContext::delPendingUser(const ForkId& forkId) {
   TORCH_INTERNAL_ASSERT(
       iter != pendingUsers_.end(),
       "Inconsistent states: attempt to delete a non-exist UserRRef.");
+  iter->second->notifyAll();
   pendingUsers_.erase(iter);
+}
+
+bool RRefContext::hasPendingUser(const ForkId& forkId) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return pendingUsers_.find(forkId) != pendingUsers_.end();
 }
 
 void RRefContext::finishForkRequest(const ForkId& forkId, worker_id_t parent) {

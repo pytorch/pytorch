@@ -257,6 +257,9 @@ def clear_global_rref():
     global_rref = None
 
 
+def check_rref_confirmed(rref):
+    return rref.is_confirmed()
+
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -1651,3 +1654,20 @@ class RpcTest(RpcAgentTestFixture):
                 AttributeError, "RPC pickler does not serialize"
             ):
                 rpc.rpc_sync(callee_worker, foo_add, args=())
+
+
+    @dist_init
+    def test_user_rrefs_confirmed(self):
+        dst_rank = (self.rank + 1) % self.world_size
+        owner_rank = (self.rank + 2) % self.world_size
+        rref = rpc.remote(
+            "worker{}".format(owner_rank),
+            torch.add,
+            args=(torch.zeros(2, 2), 1)
+        )
+        ret = rpc.rpc_sync(
+            "worker{}".format(dst_rank),
+            check_rref_confirmed,
+            args=(rref,)
+        )
+        self.assertEqual(ret, True)

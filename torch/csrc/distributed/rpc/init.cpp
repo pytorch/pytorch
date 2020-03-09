@@ -161,6 +161,14 @@ PyObject* rpc_init(PyObject* /* unused */) {
                   Returns whether or not the current node is the owner of this
                   ``RRef``.
               )")
+          .def (
+              "is_confirmed",
+              &PyRRef::isConfirmed,
+              R"(
+                  Returns whether this ``RRef`` has been confirmed by the owner.
+                  ``OwnerRRef`` always returns true, while ``UserRRef`` only
+                  returns true when the owner knowns about this ``UserRRef``.
+              )")
           .def(
               // not releasing GIL here to avoid context switch on getters
               "owner",
@@ -520,6 +528,24 @@ If the future completes with an error, an exception is thrown.
           Set the timeout for all RPCs. If an RPC is not completed within this
           time, an exception indicating it has timed out will be raised.
       )");
+
+  // hold GIL on light function to avoid ctx switch
+  module.def(
+      "_record_user_rref",
+      []() {
+        RRefContext::getInstance().recordThreadLocalPendingUsers();
+      }
+  );
+
+  // release GIL as this function can take a while before getting the
+  // confirmation
+  module.def(
+      "_wait_for_user_rref",
+      []() {
+        RRefContext::getInstance().waitForThreadLocalPendingUsers();
+      },
+      py::call_guard<py::gil_scoped_release>()
+  );
 
   Py_RETURN_TRUE;
 }

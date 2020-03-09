@@ -8,6 +8,11 @@ import traceback
 
 import torch
 
+from . import (
+    _record_user_rref,
+    _wait_for_user_rref
+)
+
 
 # Thread local tensor tables to store tensors while pickling torch.Tensor
 # objects

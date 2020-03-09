@@ -71,6 +71,13 @@ MessageType Message::type() const {
   return type_;
 }
 
+bool Message::hasUserFunction() const {
+  return MessageType::SCRIPT_CALL == type_ ||
+      MessageType::PYTHON_CALL == type_ ||
+      MessageType::SCRIPT_REMOTE_CALL == type_ ||
+      MessageType::PYTHON_REMOTE_CALL == type_;
+}
+
 bool Message::isRequest() const {
   return MessageType::SCRIPT_CALL == type_ || // dist.rpc on builtin ops
       MessageType::PYTHON_CALL == type_ || // dist.rpc on Python UDFs

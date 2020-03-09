@@ -50,6 +50,7 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
 
       // scriptCall is only alive within this block, use reference to avoid copy
       auto& stack = scriptCall.stackRef();
+      RRefContext::getInstance().waitForThreadLocalPendingUsers();
       if (scriptCall.hasOp()) {
         scriptCall.op()->getOperation()(stack);
       } else {
@@ -75,6 +76,10 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
       {
         pybind11::gil_scoped_acquire ag;
         auto pythonUdf = pythonRpcHandler.deserialize(pyCall.serializedPyObj());
+        {
+          pybind11::gil_scoped_release rg;
+          RRefContext::getInstance().waitForThreadLocalPendingUsers();
+        }
         serializedPyObj = std::make_shared<SerializedPyObj>(
             pythonRpcHandler.serialize(
                 pythonRpcHandler.runPythonUdf(std::move(pythonUdf))));
@@ -107,6 +112,7 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
       // scriptRemoteCall is only alive within this block, use reference to
       // avoid copy
       auto& stack = scriptRemoteCall.stackRef();
+      RRefContext::getInstance().waitForThreadLocalPendingUsers();
       if (scriptRemoteCall.hasOp()) {
         scriptRemoteCall.op()->getOperation()(stack);
       } else {
@@ -151,6 +157,10 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
       {
         pybind11::gil_scoped_acquire ag;
         auto pythonUdf = pythonRpcHandler.deserialize(prc.serializedPyObj());
+        {
+          pybind11::gil_scoped_release rg;
+          ctx.waitForThreadLocalPendingUsers();
+        }
         py_ivalue = jit::toIValue(
             PythonRpcHandler::getInstance().runPythonUdf(std::move(pythonUdf)),
             PyObjectType::get());
@@ -369,6 +379,9 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
 
 std::shared_ptr<FutureMessage> RequestCallbackImpl::processMessage(
     Message& request) const {
+  if (request.hasUserFunction()) {
+    RRefContext::getInstance().recordThreadLocalPendingUsers();
+  }
   std::unique_ptr<RpcCommandBase> rpc = deserializeRequest(request);
   return processRpc(*rpc, request.type(), request.id());
 }

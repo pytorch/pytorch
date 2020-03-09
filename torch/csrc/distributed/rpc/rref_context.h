@@ -146,6 +146,21 @@ class TORCH_API RRefContext {
       const ForkId& forkId,
       const c10::intrusive_ptr<RRef>& rref);
   void delPendingUser(const ForkId& forkId);
+  bool hasPendingUser(const ForkId& forkId);
+
+  void recordThreadLocalPendingUsers() {
+    TORCH_INTERNAL_ASSERT(
+        userTable_.empty(),
+        "User RRef Table should be empty when start recording");
+    recording = true;
+  }
+  void waitForThreadLocalPendingUsers() {
+    for (auto& state: userTable_) {
+      state->wait();
+    }
+    userTable_.clear();
+    recording = false;
+  }
 
   void delUser(
       const worker_id_t owner,
@@ -155,6 +170,24 @@ class TORCH_API RRefContext {
   std::unordered_map<std::string, std::string> getDebugInfo();
 
  private:
+
+  struct PendingUserState {
+    PendingUserState(c10::intrusive_ptr<RRef> rref) : rref_(std::move(rref)) {}
+
+    void wait() {
+      std::unique_lock<std::mutex> lock(mutex_);
+      cv_.wait(lock);
+    }
+
+    void notifyAll() {
+      cv_.notify_all();
+    }
+
+    c10::intrusive_ptr<RRef> rref_;
+    std::mutex mutex_;
+    std::condition_variable cv_;
+  };
+
   RRefContext(std::shared_ptr<RpcAgent>);
 
   c10::intrusive_ptr<UserRRef> createUserRRef(
@@ -204,7 +237,7 @@ class TORCH_API RRefContext {
   //     It can be used or shared, but cannot be deleted, and hence kept alive
   //     in this map. A message of type RREF_USER_ACCEPT will remove the
   //     corresponding RRef from this map.
-  std::unordered_map<ForkId, c10::intrusive_ptr<RRef>, ForkId::Hash>
+  std::unordered_map<ForkId, std::shared_ptr<PendingUserState>, ForkId::Hash>
       pendingUsers_;
 
   // (2) A UserRRef has forked a child UserRRef which has not been accepted by
@@ -218,6 +251,9 @@ class TORCH_API RRefContext {
 
   std::mutex destroyedMutex_;
   bool destroyed_;
+
+  static thread_local std::vector<std::shared_ptr<PendingUserState>> userTable_;
+  static thread_local bool recording;
 };
 
 } // namespace rpc

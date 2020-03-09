@@ -98,6 +98,7 @@ class TORCH_API Message final {
   const std::vector<torch::Tensor>& tensors() const;
   MessageType type() const;
 
+  bool hasUserFunction() const;
   bool isRequest() const;
   bool isResponse() const;
   bool isShutdown() const;

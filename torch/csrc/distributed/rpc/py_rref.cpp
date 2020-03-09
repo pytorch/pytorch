@@ -113,6 +113,15 @@ bool PyRRef::isOwner() const {
   return rref_->isOwner();
 }
 
+bool PyRRef::isConfirmed() const {
+  if (isOwner()) {
+    return true;
+  } else {
+    return !RRefContext::getInstance().hasPendingUser(
+        c10::static_intrusive_pointer_cast<UserRRef>(rref_)->forkId());
+  }
+}
+
 WorkerInfo PyRRef::owner() const {
   return RRefContext::getInstance().agent()->getWorkerInfo(rref_->owner());
 }
