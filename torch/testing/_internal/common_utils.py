@@ -536,7 +536,7 @@ class CudaMemoryLeakCheck():
         for i, (before, after) in enumerate(zip(self.befores, afters)):
             if not TEST_WITH_ROCM:
                 self.testcase.assertEqual(
-                    before, after, '{} leaked {} bytes CUDA memory on device {}'.format(
+                    before, after, message='{} leaked {} bytes CUDA memory on device {}'.format(
                         self.name, after - before, i))
             else:
                 # TODO: Investigate ROCm memory leaking.
@@ -807,7 +807,12 @@ class TestCase(expecttest.TestCase):
         b_tol = self.get_default_tolerance(b)
         return (max(a_tol[0], b_tol[0]), max(a_tol[1], b_tol[1]))
 
-    def assertEqual(self, x, y, message='', rtol=None, atol=None, allow_inf=False, exact_dtype=None):
+    def assertEqual(self, x, y, **kwargs):
+        message = kwargs.get('message', '')
+        rtol = kwargs.get('rtol', None)
+        atol = kwargs.get('atol', None)
+        allow_inf = kwargs.get('allow_inf', False)
+        exact_dtype = kwargs.get('exact_dtype', None)
         # we allow setting an absolute tolerance as a positional arg for BC with legacy testing behavior.
         if isinstance(message, Number):
             self.assertIsNone(atol, "don't combine positional prec and atol")
@@ -892,7 +897,7 @@ class TestCase(expecttest.TestCase):
                 if x.qscheme() == torch.per_tensor_affine:
                     self.assertEqual(x.q_scale(), y.q_scale(), atol=atol, rtol=rtol,
                                      message=message, allow_inf=allow_inf, exact_dtype=exact_dtype)
-                    self.assertEqual(x.q_zero_point(), y.q_zero_point(), 
+                    self.assertEqual(x.q_zero_point(), y.q_zero_point(),
                                      atol=atol, rtol=rtol, message=message,
                                      allow_inf=allow_inf, exact_dtype=exact_dtype)
                 elif x.qscheme() == torch.per_channel_affine:
