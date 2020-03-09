@@ -119,7 +119,7 @@ class ConvNdImpl : public torch::nn::Cloneable<Derived> {
 ///
 /// Example:
 /// ```
-/// auto m = torch::nn::Conv1d(torch::nn::Conv1dOptions(1, 2, 3));
+/// Conv1d model(Conv1dOptions(3, 2, 3).stride(1).bias(false));
 /// ```
 class TORCH_API Conv1dImpl : public ConvNdImpl<1, Conv1dImpl> {
  public:

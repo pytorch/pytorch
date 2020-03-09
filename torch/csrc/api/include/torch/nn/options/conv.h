@@ -141,6 +141,11 @@ struct ConvOptions {
 };
 
 /// `ConvOptions` specialized for 1-D convolution.
+///
+/// Example:
+/// ```
+/// Conv1d model(Conv1dOptions(3, 2, 3).stride(1).bias(false));
+/// ```
 using Conv1dOptions = ConvOptions<1>;
 
 /// `ConvOptions` specialized for 2-D convolution.
