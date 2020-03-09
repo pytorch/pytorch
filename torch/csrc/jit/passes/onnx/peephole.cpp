@@ -815,6 +815,8 @@ void removeMaxPoolUnusedOutput(Block* b) {
   }
 }
 
+// This optimization fuses LogSoftmax and NegativeLogLikelihoodLoss operators into
+// one operator: SoftmaxCrossEntropyLoss.
 static void fuseLogSoftmaxNllLoss(Block* b) {
   for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
     for (auto* child_block : it->blocks()) {
