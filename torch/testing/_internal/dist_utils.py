@@ -94,7 +94,7 @@ def wait_until_node_failure(rank, expected_error_regex=".*"):
     indicate that the node has failed in unit tests.
     Args:
     rank (int) - Rank of the node expected to fail
-    expected_error_regex (optional, str): Regex of exception message expected. Useful to ensure a specific failure 
+    expected_error_regex (optional, str): Regex of exception message expected. Useful to ensure a specific failure
     occurs, not just any.
     '''
     while True:
@@ -109,7 +109,7 @@ def wait_until_node_failure(rank, expected_error_regex=".*"):
 # When running tests that simulate errors via a shutdown on the remote end.
 def get_shutdown_error_regex(rpc_backend):
     """
-    Return various error message we may see from RPC agents while running tests that check for failures. This function 
+    Return various error message we may see from RPC agents while running tests that check for failures. This function
     is used to match against possible errors to ensure failures were raised properly.
     """
     if rpc_backend == "PROCESS_GROUP":
@@ -154,3 +154,6 @@ def initialize_pg(init_method, rank, world_size):
             rank=rank,
             world_size=world_size,
         )
+
+def worker_name(rank):
+    return "worker{}".format(rank)
