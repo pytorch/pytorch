@@ -10727,61 +10727,48 @@ class TestNNDeviceType(NNTestCase):
         self.assertRaises(RuntimeError,
                           lambda: nn.functional.multi_margin_loss(torch.randn(5, device=device),
                                                                   torch.zeros(3, device=device)))
+    def _test_bfloat16_ops(self, op, device, inp_dims=(), prec=1e-2):
+        # fp32 compute
+        input1 = torch.randn(inp_dims, dtype=torch.float32, device=device, requires_grad=True)
+        out1 = op(input1)
+        grad_input1 = torch.randn_like(out1, device=device)
+        out1.backward(grad_input1)
+
+        # bfloat16 compute
+        op_bfp16 = op.bfloat16()
+        input2 = input1.detach().bfloat16().requires_grad_()
+        grad_input2 = grad_input1.bfloat16()
+        out2 = op_bfp16(input2)
+        out2.backward(grad_input2)
+
+        self.assertEqual(out1, out2, prec=prec)
+        self.assertEqual(input1.grad.data, input2.grad.data, prec=prec)
 
     @onlyCUDA
     @skipCUDAIfNotRocm
     def test_activations_bfloat16(self, device):
-        def test(activation):
-            # fp32 compute
-            input1 = torch.randn(5, dtype=torch.float32, device=device, requires_grad=True)
-            grad_input1 = torch.randn(5, device=device)
-            out1 = activation(input1)
-            out1.backward(grad_input1)
-
-            # bfloat16 compute
-            activation2 = activation.bfloat16()
-            input2 = input1.detach().bfloat16().requires_grad_()
-            grad_input2 = grad_input1.bfloat16()
-            out2 = activation2(input2)
-            out2.backward(grad_input2)
-
-            self.assertEqual(out1, out2, prec=1e-2)
-            self.assertEqual(input1.grad.data, input2.grad.data, prec=1e-2)
-
-        test(torch.nn.ReLU())
-        test(torch.nn.Threshold(0.1, 20))
-        test(torch.nn.ELU())
-        test(torch.nn.Softplus())
-        test(torch.nn.Hardshrink())
-        test(torch.nn.Softshrink())
-        test(torch.nn.LeakyReLU())
+        self._test_bfloat16_ops(torch.nn.ReLU(), device, inp_dims=(5), prec=1e-2)
+        self._test_bfloat16_ops(torch.nn.Threshold(0.1, 20), device, inp_dims=(5), prec=1e-2)
+        self._test_bfloat16_ops(torch.nn.ELU(), device, inp_dims=(5), prec=1e-2)
+        self._test_bfloat16_ops(torch.nn.Softplus(), device, inp_dims=(5), prec=1e-2)
+        self._test_bfloat16_ops(torch.nn.Hardshrink(), device, inp_dims=(5), prec=1e-2)
+        self._test_bfloat16_ops(torch.nn.Softshrink(), device, inp_dims=(5), prec=1e-2)
+        self._test_bfloat16_ops(torch.nn.LeakyReLU(), device, inp_dims=(5), prec=1e-2)
 
     @onlyCUDA
     @skipCUDAIfNotRocm
     def test_pooling_bfloat16(self, device):
-        def test(pool_func, inp_dims):
-            # fp32 compute
-            input1 = torch.randn(inp_dims, dtype=torch.float32, device=device, requires_grad=True)
-            out1 = pool_func(input1)
-            grad_input1 = torch.randn_like(out1, device=device)
-            out1.backward(grad_input1)
+        self._test_bfloat16_ops(torch.nn.AvgPool1d(3, stride=2), device, inp_dims=(8, 4, 16), prec=0.05)
+        self._test_bfloat16_ops(torch.nn.AvgPool2d(3, stride=2), device, inp_dims=(8, 4, 16, 16), prec=0.05)
+        self._test_bfloat16_ops(torch.nn.AvgPool3d(3, stride=2), device, inp_dims=(8, 4, 16, 16, 16), prec=0.05)
+        self._test_bfloat16_ops(torch.nn.AdaptiveAvgPool1d(3), device, inp_dims=(8, 4, 16), prec=0.05)
+        self._test_bfloat16_ops(torch.nn.AdaptiveAvgPool2d((3, 5)), device, inp_dims=(8, 4, 16, 16), prec=0.05)
+        self._test_bfloat16_ops(torch.nn.AdaptiveAvgPool3d((3, 5, 7)), device, inp_dims=(8, 4, 16, 16, 16), prec=0.05)
 
-            # bfloat16 compute
-            pool_func2 = pool_func.bfloat16()
-            input2 = input1.detach().bfloat16().requires_grad_()
-            grad_input2 = grad_input1.bfloat16()
-            out2 = pool_func(input2)
-            out2.backward(grad_input2)
-
-            self.assertEqual(out1, out2, prec=0.05)
-            self.assertEqual(input1.grad.data, input2.grad.data, prec=0.05)
-
-        test(torch.nn.AvgPool1d(3, stride=2), inp_dims=(8, 4, 16))
-        test(torch.nn.AvgPool2d(3, stride=2), inp_dims=(8, 4, 16, 16))
-        test(torch.nn.AvgPool3d(3, stride=2), inp_dims=(8, 4, 16, 16, 16))
-        test(torch.nn.AdaptiveAvgPool1d(3), inp_dims=(8, 4, 16))
-        test(torch.nn.AdaptiveAvgPool2d((3, 5)), inp_dims=(8, 4, 16, 16))
-        test(torch.nn.AdaptiveAvgPool3d((3, 5, 7)), inp_dims=(8, 4, 16, 16, 16))
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    def test_softmax_bfloat16(self, device):
+        self._test_bfloat16_ops(torch.nn.Softmax(dim=1), device, inp_dims=(16, 32), prec=1e-2)
 
     @onlyCUDA    
     @skipCUDAIfRocm
