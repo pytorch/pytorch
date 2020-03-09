@@ -98,9 +98,8 @@ std::string PythonRpcHandler::generatePythonUDFResult(
   auto pargs = py::bytes(serializedPyObj.payload_);
   py::tuple pres = pySerialize_(
       pyRunFunction_(pargs, serializedPyObj.tensors_));
-  const auto& presStr = pres[0].cast<std::string>();
   responseTensorTable = pres[1].cast<std::vector<torch::Tensor>>();
-  return std::move(presStr);
+  return pres[0].cast<std::string>();
 }
 
 py::object PythonRpcHandler::runPythonUDF(
