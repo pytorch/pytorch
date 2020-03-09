@@ -11,6 +11,8 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
+//Flattens the indices from the for loops into a single
+//vector. This useful for poassing to IndexCompute.
 std::vector<Int*> CodeWrite::getLoopIndices() {
   std::vector<Int*> inds;
   for (auto loop : fors)
@@ -18,6 +20,10 @@ std::vector<Int*> CodeWrite::getLoopIndices() {
   return inds;
 }
 
+
+//Final indexing into a TensorView. This is computes the mapping
+//from logical indexing into an N-D transformed TensorView back
+//into it's original M-D form.
 void CodeWrite::printIndexInto(
     std::vector<Int*> indices,
     const TensorView* const tv) {
@@ -71,6 +77,9 @@ void CodeWrite::printIndexInto(
   os << "]";
 }
 
+//Prints TensorView producers. These are values consumed in
+//a TensorView Expr. We use the consumer (left hand side of 
+//the =) to compute the indexing into the consumer.
 void CodeWrite::handle(const TensorView* const tv) {
   TensorDomain* td = tv->domain();
 
@@ -94,6 +103,9 @@ void CodeWrite::handle(const TensorView* const tv) {
   printIndexInto(indices, tv);
 }
 
+//If the val provided is in overrides, prints the string
+//provided in overrides instead of the val name. This is done for
+//things like "threadIDx.x", or "T0.size[0]"
 void CodeWrite::handle(const Val* const val) {
   if (*(val->getValType()) == ValType::TensorView)
     handle(static_cast<const TensorView* const>(val));
@@ -103,6 +115,7 @@ void CodeWrite::handle(const Val* const val) {
     IRPrinter::handle(val);
 }
 
+//Uses the provided TensorView to compute a predicate and print it.
 bool CodeWrite::print_predicate(const TensorView* const pred_tv) {
   std::vector<Int*> indices =
       IndexCompute::computeIndices(pred_tv, getLoopIndices());
@@ -131,7 +144,9 @@ bool CodeWrite::print_predicate(const TensorView* const pred_tv) {
   return true;
 }
 
-bool CodeWrite::printLHS(TensorView* tv) {
+//Prints the consumer of a TensorView Expr. This will update the base view,
+//print a predicate, then print the TensorView.
+bool CodeWrite::printConsumer(TensorView* tv) {
   updateView(tv);
   indent();
 
@@ -149,7 +164,7 @@ bool CodeWrite::printLHS(TensorView* tv) {
   return predicated;
 }
 
-// Already filtered so output is a TensorView
+//The UnaryOps captured here will have a TensorView as an output
 void CodeWrite::handle(const UnaryOp* const uop) {
   if (!isTVOp(uop)) {
     if (print_inline_)
@@ -157,7 +172,7 @@ void CodeWrite::handle(const UnaryOp* const uop) {
     return;
   }
 
-  bool predicated = printLHS(static_cast<TensorView*>(uop->out()));
+  bool predicated = printConsumer(static_cast<TensorView*>(uop->out()));
 
   if (auto inline_uop = inline_op_str(uop->type())) {
     os << inline_uop.value();
@@ -180,6 +195,7 @@ void CodeWrite::handle(const UnaryOp* const uop) {
   }
 }
 
+//The BinaryOps captured here will have a TensorView as an output
 void CodeWrite::handle(const BinaryOp* const bop) {
   if (!isTVOp(bop)) {
     if (print_inline_)
@@ -187,7 +203,7 @@ void CodeWrite::handle(const BinaryOp* const bop) {
     return;
   }
 
-  bool predicated = printLHS(static_cast<TensorView*>(bop->out()));
+  bool predicated = printConsumer(static_cast<TensorView*>(bop->out()));
 
   if (auto inline_bop = inline_op_str(bop->type())) {
     handle(bop->lhs());
@@ -220,10 +236,12 @@ void CodeWrite::indent() {
     os << "  ";
 }
 
+//Pop the inner most for loop
 void CodeWrite::closeFor() {
   IterDomain* id = fors.back()->range();
   Val* iterator = fors.back()->index();
   fors.pop_back();
+  //Clear overrides associated with this for loop
   if (id->parallel_method() != ParallelType::Serial) {
     auto it = overrides_find(iterator);
     if (it != overrides.end())
@@ -236,7 +254,6 @@ void CodeWrite::closeFor() {
   os << "}" << std::endl;
 }
 
-//TODO: Should move stringify to type.cpp/h
 void CodeWrite::bind(IterDomain* id, Val* iterator) {
 
   if(id->isThread()){
@@ -252,6 +269,7 @@ void CodeWrite::bind(IterDomain* id, Val* iterator) {
 
 }
 
+//Push Back a new for loop scope based on the IterDomain
 void CodeWrite::openFor(IterDomain* id) {
   fors.push_back(new ForLoop(new Int(), id, {}));
 
@@ -274,11 +292,13 @@ void CodeWrite::openFor(IterDomain* id) {
   os << " ) {" << std::endl;
 }
 
+//Clear out the last active computeAt view
 void CodeWrite::clearActiveView() {
   active_view_axis = 0;
   active_view = nullptr;
 }
 
+//Pop back all for loops.
 void CodeWrite::resetFors() {
   while (!fors.empty())
     closeFor();
@@ -287,6 +307,7 @@ void CodeWrite::resetFors() {
   clearActiveView();
 }
 
+//Print register allocation of a TensorView
 void CodeWrite::printAlloc(TensorView* tv) {
   if (FusionGuard::getCurFusion()->isInput(tv) ||
       FusionGuard::getCurFusion()->isOutput(tv))
@@ -349,6 +370,7 @@ void CodeWrite::updateView(TensorView* tv) {
   }
 }
 
+//Check if we're a TensorView op that we can generate code for.
 bool CodeWrite::isTVOp(const Expr* expr) {
   if (expr->nOutputs() == 1 &&
       expr->output(0)->getValType().value() == ValType::TensorView)
@@ -358,8 +380,13 @@ bool CodeWrite::isTVOp(const Expr* expr) {
   return false;
 }
 
+//Setup the map from values to strings.
 void CodeWrite::setupOverrides() {
+  //Grab all the values used in the fusion (based on traversing
+  //backwards from outputs)
   std::set<Val*> used_vals = FindUsedVals::find();
+  //If the value is a TensorView, we're going to grab it's root domain
+  //and map the size used for the root domain to T.size[...]
   for (Val* val : used_vals) {
     if (val->getValType().value() == ValType::TensorView) {
       TensorView* tv = static_cast<TensorView*>(val);
@@ -379,6 +406,7 @@ void CodeWrite::setupOverrides() {
   }
 }
 
+//Print the header for the kernel, the inputs/outputs
 void CodeWrite::header() {
   os << "__global__ void kernel(";
 
@@ -420,11 +448,8 @@ void CodeWrite::header() {
   indent_size++;
 }
 
-void CodeWrite::traverse(
-    Fusion* fusion,
-    bool from_outputs_only,
-    bool breadth_first,
-    std::unordered_set<ValType> val_types) {
+//Traverse through the fusion and print CUDA code associated with it
+void CodeWrite::traverse(Fusion* fusion) {
   FusionGuard fg(fusion);
   // reset state.
   producer = false;
@@ -441,7 +466,7 @@ void CodeWrite::traverse(
 
   setupOverrides();
   // IterVisitor::traverse(fusion, from_outputs_only, breadth_first, val_types);
-  std::vector<Expr*> exprs = FusionGuard::getCurFusion()->exprs();
+  std::vector<Expr*> exprs = FusionGuard::getCurFusion()->exprs(true);
 
   header();
   for (auto* expr : exprs)
