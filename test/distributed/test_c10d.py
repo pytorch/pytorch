@@ -1980,7 +1980,8 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
         def update_parameters(model):
             for param in model.parameters():
-                param.data -= param.grad
+                with torch.no_grad():
+                    param -= param.grad
                 param.grad = None
 
         # check two model parameters over 2 iterations
@@ -2777,6 +2778,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             torch.manual_seed(1337 + iteration)
             input = input[torch.randperm(global_batch_size)]
 
+    @requires_gloo()
     def test_ignored_output(self):
         """
         Test that the output of a model can be ignored and that there is no
@@ -2818,6 +2820,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             loss = criterion(output, target)
             loss.backward()
 
+    @requires_gloo()
     def test_ignored_output_with_unused_parameters(self):
         """
         Test that the output of a model can be ignored and that there is no

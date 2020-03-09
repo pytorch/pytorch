@@ -14,7 +14,7 @@
 #include <torch/csrc/distributed/rpc/script_remote_call.h>
 #include <torch/csrc/distributed/rpc/script_resp.h>
 #include <torch/csrc/distributed/rpc/utils.h>
-#include <torch/csrc/jit/pybind_utils.h>
+#include <torch/csrc/jit/python/pybind_utils.h>
 
 namespace torch {
 namespace distributed {
@@ -64,7 +64,7 @@ std::shared_ptr<FutureMessage> sendPythonRemoteCall(
     SerializedPyObj serializedPyObj,
     const IValue& rrefId,
     const IValue& forkId,
-    const std::shared_ptr<torch::autograd::profiler::RecordFunctionAsync>& rf) {
+    const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf) {
   auto pythonRemoteCall = std::make_unique<PythonRemoteCall>(
       std::move(serializedPyObj), rrefId, forkId);
 
@@ -118,7 +118,7 @@ py::object toPyObj(const Message& message) {
 std::shared_ptr<FutureMessage> pyRpcBuiltin(
     const WorkerInfo& dst,
     const std::string& opName,
-    const std::shared_ptr<torch::autograd::profiler::RecordFunctionAsync>& rf,
+    const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf,
     const py::args& args,
     const py::kwargs& kwargs) {
   Stack stack;
@@ -134,7 +134,7 @@ std::shared_ptr<FutureMessage> pyRpcBuiltin(
 PyRRef pyRemoteBuiltin(
     const WorkerInfo& dst,
     const std::string& opName,
-    const std::shared_ptr<torch::autograd::profiler::RecordFunctionAsync>& rf,
+    const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf,
     const py::args& args,
     const py::kwargs& kwargs) {
   Stack stack;
@@ -166,7 +166,7 @@ std::shared_ptr<FutureMessage> pyRpcPythonUdf(
     const WorkerInfo& dst,
     std::string& pickledPythonUDF,
     std::vector<torch::Tensor>& tensors,
-    const std::shared_ptr<torch::autograd::profiler::RecordFunctionAsync>& rf) {
+    const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf) {
   auto pythonCall = std::make_unique<PythonCall>(
       std::vector<char>(pickledPythonUDF.begin(), pickledPythonUDF.end()),
       tensors);
@@ -184,7 +184,7 @@ PyRRef pyRemotePythonUdf(
     const WorkerInfo& dst,
     std::string& pickledPythonUDF,
     std::vector<torch::Tensor>& tensors,
-    const std::shared_ptr<torch::autograd::profiler::RecordFunctionAsync>& rf) {
+    const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf) {
   auto& ctx = RRefContext::getInstance();
   auto serializedPyObj =
       SerializedPyObj(std::move(pickledPythonUDF), std::move(tensors));
