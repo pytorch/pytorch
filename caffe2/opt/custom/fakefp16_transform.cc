@@ -38,7 +38,7 @@ std::unordered_map<std::string, std::string> getFakeFp16OpMapping(
        "SparseLengthsMeanFused8BitRowwiseFakeFP16AccFP16"},
       {"BatchMatMul", "BatchMatMulFP16Acc32Fake"},
       {"Sigmoid", "SigmoidFakeFp16"},
-      {"SpatialBN", "SpatialBNFakeLoweredFp16NNPI"},
+      {"SpatialBN", "SpatialBNFakeFp16NNPI"},
       {"Tanh", "TanhFakeFp16"},
       {"Relu", "ReluFakeFp16"},
       {"Add", "AddFakeFp16"},

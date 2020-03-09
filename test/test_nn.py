@@ -104,7 +104,10 @@ class PackedSequenceTest(TestCase):
         """Create ordered list of random sequences"""
         seqs = [tensor_type(random.randint(1, self.max_length))
                 for _ in range(self.batch_size)]
-        seqs = [s.random_(-128, 128) for s in seqs]
+        if tensor_type == torch.ByteTensor:
+            seqs = [s.random_(0, 256) for s in seqs]
+        else:
+            seqs = [s.random_(-128, 128) for s in seqs]
         ordered = sorted(seqs, key=len, reverse=True)
         return ordered
 
@@ -8884,22 +8887,26 @@ def _buildEquivalentAffineTransforms3d(device, input_size, output_size, angle_ra
 
 
 class TestNNDeviceType(NNTestCase):
-    def _test_dropout(self, cls, device, input):
+    def _test_dropout(self, cls, device, input, memory_format=torch.contiguous_format):
         p = 0.2
         input = input.to(device).fill_(1 - p)
 
         module = cls(p)
-        input_var = input.clone().requires_grad_()
+        input_var = input.clone(memory_format=memory_format).requires_grad_()
         output = module(input_var)
+        self.assertTrue(output.is_contiguous(memory_format=memory_format))
         self.assertLess(abs(output.data.mean() - (1 - p)), 0.05)
         output.backward(input)
+        self.assertTrue(input_var.grad.is_contiguous(memory_format=memory_format))
         self.assertLess(abs(input_var.grad.data.mean() - (1 - p)), 0.05)
 
         module = cls(p, True)
-        input_var = input.clone().requires_grad_()
+        input_var = input.clone(memory_format=memory_format).requires_grad_()
         output = module(input_var + 0)
+        self.assertTrue(output.is_contiguous(memory_format=memory_format))
         self.assertLess(abs(output.data.mean() - (1 - p)), 0.05)
         output.backward(input)
+        self.assertTrue(input_var.grad.is_contiguous(memory_format=memory_format))
         self.assertLess(abs(input_var.grad.data.mean() - (1 - p)), 0.05)
 
         # check eval mode doesn't change anything
@@ -9112,6 +9119,7 @@ class TestNNDeviceType(NNTestCase):
         num_features = 1000
         input = torch.Tensor(num_features, b, w, h)
         self._test_dropout(nn.Dropout2d, device, input)
+        self._test_dropout(nn.Dropout2d, device, input, memory_format=torch.channels_last)
 
     def test_Dropout3d(self, device):
         b = random.randint(1, 5)
@@ -9535,7 +9543,7 @@ class TestNNDeviceType(NNTestCase):
             out2 = conv1(input_c)
             self.assertEqual(out1, out2)
 
-    @largeCUDATensorTest('32GB')
+    @largeCUDATensorTest('12GB')
     def test_conv_transposed_large(self, device):
         dtype = torch.half if self.device_type == 'cuda' else torch.float
         conv = nn.ConvTranspose2d(1, 1, 1, 1, bias=False).to(device).to(dtype)
@@ -9552,7 +9560,7 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(maxdiff3, 0)
 
     @skipIfRocm
-    @largeCUDATensorTest('32GB')
+    @largeCUDATensorTest('12GB')
     def test_conv_large(self, device):
         dtype = torch.half if self.device_type == 'cuda' else torch.float
         conv = nn.Conv2d(2, 2, 8, 8, bias=False).to(device).to(dtype)
@@ -10498,37 +10506,37 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(output[0, 0, 0, 0], float("-inf"), allow_inf=True)
         self.assertEqual(indices[0, 0, 0, 0], 0)
 
-    @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @dtypesIfCUDA(*ALL_TENSORTYPES2)
     @dtypes(torch.float)
     def test_MaxPool1d_indices(self, device, dtype):
         self._test_maxpool_indices(1, device=device, dtype=dtype)
 
-    @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @dtypesIfCUDA(*ALL_TENSORTYPES2)
     @dtypes(torch.float)
     def test_MaxPool2d_indices(self, device, dtype):
         self._test_maxpool_indices(2, device=device, dtype=dtype)
 
-    @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @dtypesIfCUDA(*ALL_TENSORTYPES2)
     @dtypes(torch.float)
     def test_MaxPool3d_indices(self, device, dtype):
         self._test_maxpool_indices(3, device=device, dtype=dtype)
 
-    @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @dtypesIfCUDA(*ALL_TENSORTYPES2)
     @dtypes(torch.float)
     def test_AdaptiveMaxPool1d_indices(self, device, dtype):
         self._test_maxpool_indices(1, adaptive=True, device=device, dtype=dtype)
 
-    @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @dtypesIfCUDA(*ALL_TENSORTYPES2)
     @dtypes(torch.float)
     def test_AdaptiveMaxPool2d_indices(self, device, dtype):
         self._test_maxpool_indices(2, adaptive=True, device=device, dtype=dtype)
 
-    @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @dtypesIfCUDA(*ALL_TENSORTYPES2)
     @dtypes(torch.float)
     def test_AdaptiveMaxPool3d_indices(self, device, dtype):
         self._test_maxpool_indices(3, adaptive=True, device=device, dtype=dtype)
 
-    @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @dtypesIfCUDA(*ALL_TENSORTYPES2)
     @dtypes(torch.float)
     def test_max_pool_nan(self, device, dtype):
         for adaptive in ['', 'adaptive_']:
@@ -10539,7 +10547,7 @@ class TestNNDeviceType(NNTestCase):
                 res = fn(x, 1 if adaptive else 3)
                 self.assertTrue(math.isnan(res.item()))
 
-    @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @dtypesIfCUDA(*ALL_TENSORTYPES2)
     @dtypes(torch.float)
     def test_pool_large_size(self, device, dtype):
         for op in ('max', 'avg'):
@@ -10553,7 +10561,7 @@ class TestNNDeviceType(NNTestCase):
                 # check if the output shape was still computed correctly
                 self.assertEqual(x.shape[2], res.shape[2])
 
-    @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @dtypesIfCUDA(*ALL_TENSORTYPES2)
     @dtypes(torch.float)
     def test_pool_invalid_size(self, device, dtype):
         for op in ('max', 'avg'):
@@ -10741,6 +10749,33 @@ class TestNNDeviceType(NNTestCase):
         test(torch.nn.Softshrink())
         test(torch.nn.LeakyReLU())
 
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    def test_pooling_bfloat16(self, device):
+        def test(pool_func, inp_dims):
+            # fp32 compute
+            input1 = torch.randn(inp_dims, dtype=torch.float32, device=device, requires_grad=True)
+            out1 = pool_func(input1)
+            grad_input1 = torch.randn_like(out1, device=device)
+            out1.backward(grad_input1)
+
+            # bfloat16 compute
+            pool_func2 = pool_func.bfloat16()
+            input2 = input1.detach().bfloat16().requires_grad_()
+            grad_input2 = grad_input1.bfloat16()
+            out2 = pool_func(input2)
+            out2.backward(grad_input2)
+
+            self.assertEqual(out1, out2, prec=0.05)
+            self.assertEqual(input1.grad.data, input2.grad.data, prec=0.05)
+
+        test(torch.nn.AvgPool1d(3, stride=2), inp_dims=(8, 4, 16))
+        test(torch.nn.AvgPool2d(3, stride=2), inp_dims=(8, 4, 16, 16))
+        test(torch.nn.AvgPool3d(3, stride=2), inp_dims=(8, 4, 16, 16, 16))
+        test(torch.nn.AdaptiveAvgPool1d(3), inp_dims=(8, 4, 16))
+        test(torch.nn.AdaptiveAvgPool2d((3, 5)), inp_dims=(8, 4, 16, 16))
+        test(torch.nn.AdaptiveAvgPool3d((3, 5, 7)), inp_dims=(8, 4, 16, 16, 16))
+
     @onlyCUDA    
     @skipCUDAIfRocm
     @skipCUDAIfCudnnVersionLessThan(7603)
@@ -10834,6 +10869,22 @@ class TestNNDeviceType(NNTestCase):
         for n, c, h, w, k, filter_size in configs:
             self._test_conv_cudnn_nhwc_nchw(nn.Conv2d, n, c, h, w, k, filter_size, device)
             self._test_conv_cudnn_nhwc_nchw(nn.ConvTranspose2d, n, c, h, w, k, filter_size, device)
+
+    # torch.half is erroring out on Windows with CUDA 10.1 + cuDNN 7.6.4
+    # returning CUDNN_STATUS_BAD_PARAM
+    # Disabling that specific test for now [see issue # 33918]
+    @onlyCUDA
+    @skipCUDAIfRocm
+    @skipCUDAIfNoCudnn
+    @dtypes(torch.float, torch.double)
+    def test_conv_cudnn_nhwc_support(self, device, dtype):
+        input = torch.randn((1, 16, 1, 1), dtype=dtype, device="cuda", requires_grad=True)
+        weight = torch.randn((8, 16, 3, 3), dtype=dtype, device="cuda", requires_grad=True)
+        weight = weight.to(memory_format=torch.channels_last)
+        o = torch.conv2d(input, weight, None, (2, 1), (1, 1), (1, 1), 1)
+        self.assertTrue(o.is_contiguous(memory_format=torch.channels_last))
+        o.sum().backward()
+
 
     @onlyCUDA
     @skipCUDAIfRocm

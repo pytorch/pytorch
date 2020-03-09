@@ -186,19 +186,6 @@
     - bool accumulate
 ]]
 [[
-  name: _th_index_add_
-  cname: indexAdd
-  variants: function
-  backends:
-    - CUDA
-  return: argument 0
-  arguments:
-    - THTensor* self
-    - long dim
-    - THIndexTensor* index
-    - THTensor* source
-]]
-[[
   name: _th_index_fill_
   cpu_bool: True
   cuda_bool: True
@@ -869,24 +856,6 @@
     - THTensor* vec2
     - real beta
     - real alpha
-]]
-[[
-  name: _th_ger
-  cname: addr
-  cpu_bfloat16: True
-  cuda_bfloat16: True
-  variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-      resize: [ [self,0], [vec2,0] ]
-      resize_scalar: True
-    - argument 0
-    - THTensor* self
-    - THTensor* vec2
-    - CONSTANT AS_REAL(0)
-    - CONSTANT AS_REAL(1)
 ]]
 [[
   name: _th_mv

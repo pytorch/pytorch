@@ -348,7 +348,7 @@ def init_process_group(backend,
         group_name (str, optional, deprecated): Group name.
 
     To enable ``backend == Backend.MPI``, PyTorch needs to built from source
-    on a system that supports MPI. The same applies to NCCL as well.
+    on a system that supports MPI.
 
     """
     global _pg_group_ranks

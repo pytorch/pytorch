@@ -4,7 +4,7 @@
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/ir/ir.h>
 
 namespace torch {
 namespace jit {

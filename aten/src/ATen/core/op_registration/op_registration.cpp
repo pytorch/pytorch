@@ -1,6 +1,6 @@
 #include <ATen/core/op_registration/op_registration.h>
 #if !defined(CAFFE2_IS_XPLAT_BUILD)
-#include <torch/csrc/jit/script/function_schema_parser.h>
+#include <torch/csrc/jit/frontend/function_schema_parser.h>
 #endif
 
 namespace c10 {
@@ -16,11 +16,7 @@ public:
   : op_(Dispatcher::singleton().registerSchema(std::move(schema), std::move(operatorOptions))), kernel_registration_handle_(c10::nullopt) {
     if (kernel.has_value()) {
       TORCH_INTERNAL_ASSERT(kernel->isValid());
-      if (dispatch_key.has_value()) {
-        kernel_registration_handle_ = Dispatcher::singleton().registerKernel(op_.second, *dispatch_key, std::move(*kernel));
-      } else {
-        kernel_registration_handle_ = Dispatcher::singleton().registerCatchallKernel(op_.second, std::move(*kernel));
-      }
+      kernel_registration_handle_ = Dispatcher::singleton().registerKernel(op_.second, dispatch_key, std::move(*kernel));
     }
   }
 
