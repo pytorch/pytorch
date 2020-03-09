@@ -14,7 +14,7 @@ Message PythonResp::toMessage() && {
       serializedPyObj_.payload_.begin(), serializedPyObj_.payload_.end());
   return Message(
       std::move(payload),
-      std::move(std::move(serializedPyObj_.tensors_)),
+      std::move(serializedPyObj_.tensors_),
       MessageType::PYTHON_RET);
 }
 
