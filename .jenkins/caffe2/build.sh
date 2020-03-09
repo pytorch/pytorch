@@ -104,7 +104,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
   build_args+=("BUILD_TEST=ON")
   build_args+=("USE_OBSERVERS=ON")
   build_args+=("USE_ZSTD=ON")
-  "${ROOT_DIR}/scripts/build_android.sh" $(build_to_cmake ${build_args[@]}) "$@"
+  BUILD_CAFFE2_MOBILE=1 "${ROOT_DIR}/scripts/build_android.sh" $(build_to_cmake ${build_args[@]}) "$@"
   exit 0
 fi
 

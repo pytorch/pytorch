@@ -1073,7 +1073,7 @@ class TestONNXRuntime(unittest.TestCase):
     def test_random(self):
         class RandN(torch.nn.Module):
             def forward(self, x):
-                return torch.mul(x, (torch.rand(2, 3, 4) + x).size(0))
+                return torch.mul(x, (torch.randn(2, 3, 4) + x).size(0))
 
         x = torch.randn(2, 3, 4)
         self.run_test(RandN(), x)
@@ -1081,6 +1081,22 @@ class TestONNXRuntime(unittest.TestCase):
         class Rand(torch.nn.Module):
             def forward(self, x):
                 return torch.mul(x, (torch.rand(2, 3, 4) + x).size(0))
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(Rand(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_random_dynamic_size(self):
+        class RandN(torch.nn.Module):
+            def forward(self, x):
+                return torch.mul(x, torch.randn(x.size()).size(1))
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(RandN(), x)
+
+        class Rand(torch.nn.Module):
+            def forward(self, x):
+                return torch.mul(x, torch.rand(x.size()).size(1))
 
         x = torch.randn(2, 3, 4)
         self.run_test(Rand(), x)
@@ -2158,6 +2174,15 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(Zero_(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
+    def test_new_zero(self):
+        class Zero_(torch.nn.Module):
+            def forward(self, x):
+                return x.new_zeros(x.shape[2:])
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(Zero_(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_inplace_fill(self):
         class Fill_(torch.nn.Module):
             def forward(self, x):
@@ -2689,6 +2714,138 @@ class TestONNXRuntime(unittest.TestCase):
                 return out
         x = torch.randn(1, 2, 3, requires_grad=True)
         self.run_test(EmptyBranchModel(), x)
+
+    @unittest.skip("Enable this once ORT version is updated")
+    @skipIfUnsupportedMinOpsetVersion(12)
+    def test_nllloss(self):
+        class NLLModel(torch.nn.Module):
+            def __init__(self):
+                super(NLLModel, self).__init__()
+                self.loss = torch.nn.NLLLoss(reduction='none')
+                self.m = torch.nn.LogSoftmax(dim=1)
+
+            def forward(self, input, target):
+                output = self.loss(self.m(2 * input), target)
+                return output
+
+        N, C = 5, 4
+        input = torch.randn(N, 16)
+        target = torch.empty(N, dtype=torch.long).random_(0, C)
+        self.run_test(NLLModel(), (input, target))
+
+    @unittest.skip("Enable this once ORT version is updated")
+    @skipIfUnsupportedMinOpsetVersion(12)
+    def test_nllloss_2d_none(self):
+        class NLLModel(torch.nn.Module):
+            def __init__(self):
+                super(NLLModel, self).__init__()
+                self.loss = torch.nn.NLLLoss(reduction='none')
+                self.conv = torch.nn.Conv2d(16, C, (3, 3))
+                self.m = torch.nn.LogSoftmax(dim=1)
+
+            def forward(self, input, target):
+                output = self.loss(self.m(self.conv(input)), target)
+                return output
+
+        N, C = 5, 4
+        input = torch.randn(N, 16, 10, 10)
+        target = torch.empty(N, 8, 8, dtype=torch.long).random_(0, C)
+        self.run_test(NLLModel(), (input, target))
+
+    @unittest.skip("Enable this once ORT version is updated")
+    @skipIfUnsupportedMinOpsetVersion(12)
+    def test_nllloss_2d_mean(self):
+        class NLLModel(torch.nn.Module):
+            def __init__(self):
+                super(NLLModel, self).__init__()
+                self.loss = torch.nn.NLLLoss(reduction='mean')
+                self.conv = torch.nn.Conv2d(16, C, (3, 3))
+                self.m = torch.nn.LogSoftmax(dim=1)
+
+            def forward(self, input, target):
+                output = self.loss(self.m(self.conv(input)), target)
+                return output
+
+        N, C = 5, 4
+        input = torch.randn(N, 16, 10, 10)
+        target = torch.empty(N, 8, 8, dtype=torch.long).random_(0, C)
+        self.run_test(NLLModel(), (input, target))
+
+    @unittest.skip("Enable this once ORT version is updated")
+    @skipIfUnsupportedMinOpsetVersion(12)
+    def test_nllloss_2d_sum(self):
+        class NLLModel(torch.nn.Module):
+            def __init__(self):
+                super(NLLModel, self).__init__()
+                self.loss = torch.nn.NLLLoss(reduction='sum')
+                self.conv = torch.nn.Conv2d(16, C, (3, 3))
+                self.m = torch.nn.LogSoftmax(dim=1)
+
+            def forward(self, input, target):
+                output = self.loss(self.m(self.conv(input)), target)
+                return output
+
+        N, C = 5, 4
+        input = torch.randn(N, 16, 10, 10)
+        target = torch.empty(N, 8, 8, dtype=torch.long).random_(0, C)
+        self.run_test(NLLModel(), (input, target))
+
+    @unittest.skip("Enable this once ORT version is updated")
+    @skipIfUnsupportedMinOpsetVersion(12)
+    def test_nllloss_2d_mean_weights(self):
+        class NLLModel(torch.nn.Module):
+            def __init__(self):
+                super(NLLModel, self).__init__()
+                self.loss = torch.nn.NLLLoss(reduction='mean', weight=torch.randn(C))
+                self.conv = torch.nn.Conv2d(16, C, (3, 3))
+                self.m = torch.nn.LogSoftmax(dim=1)
+
+            def forward(self, input, target):
+                output = self.loss(self.m(self.conv(input)), target)
+                return output
+
+        N, C = 5, 4
+        input = torch.randn(N, 16, 10, 10)
+        target = torch.empty(N, 8, 8, dtype=torch.long).random_(0, C)
+        self.run_test(NLLModel(), (input, target))
+
+    @unittest.skip("Enable this once ORT version is updated")
+    @skipIfUnsupportedMinOpsetVersion(12)
+    def test_nllloss_2d_mean_ignore_index(self):
+        class NLLModel(torch.nn.Module):
+            def __init__(self):
+                super(NLLModel, self).__init__()
+                self.loss = torch.nn.NLLLoss(reduction='mean', ignore_index=1)
+                self.conv = torch.nn.Conv2d(16, C, (3, 3))
+                self.m = torch.nn.LogSoftmax(dim=1)
+
+            def forward(self, input, target):
+                output = self.loss(self.m(self.conv(input)), target)
+                return output
+
+        N, C = 5, 4
+        input = torch.randn(N, 16, 10, 10)
+        target = torch.empty(N, 8, 8, dtype=torch.long).random_(0, C)
+        self.run_test(NLLModel(), (input, target))
+
+    @unittest.skip("Enable this once ORT version is updated")
+    @skipIfUnsupportedMinOpsetVersion(12)
+    def test_nllloss_2d_mean_ignore_index_weights(self):
+        class NLLModel(torch.nn.Module):
+            def __init__(self):
+                super(NLLModel, self).__init__()
+                self.loss = torch.nn.NLLLoss(reduction='mean', weight=torch.randn(C), ignore_index=1)
+                self.conv = torch.nn.Conv2d(16, C, (3, 3))
+                self.m = torch.nn.LogSoftmax(dim=1)
+
+            def forward(self, input, target):
+                output = self.loss(self.m(self.conv(input)), target)
+                return output
+
+        N, C = 5, 4
+        input = torch.randn(N, 16, 10, 10)
+        target = torch.empty(N, 8, 8, dtype=torch.long).random_(0, C)
+        self.run_test(NLLModel(), (input, target))
 
     def test_onnx_proto_checker(self):
         class Model(torch.nn.Module):
