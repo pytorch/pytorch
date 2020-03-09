@@ -56,6 +56,7 @@ void AdagradParamState::serialize(torch::serialize::InputArchive& archive) {
 /// Adapted from
 /// https://github.com/pytorch/pytorch/blob/master/torch/optim/adagrad.py
 void Adagrad::step() {
+  NoGradGuard no_grad;
   for (auto& group : param_groups_) {
     for (auto& p : group.params()) {
       if (!p.grad().defined()) {

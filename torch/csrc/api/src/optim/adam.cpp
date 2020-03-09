@@ -62,6 +62,7 @@ void AdamParamState::serialize(torch::serialize::InputArchive& archive) {
 }
 
 void Adam::step() {
+  NoGradGuard no_grad;
   for (auto& group : param_groups_) {
     for (auto& p : group.params()) {
       if (!p.grad().defined()) {
@@ -103,7 +104,6 @@ void Adam::step() {
         grad = grad.add(p, options.weight_decay());
       }
 
-      NoGradGuard no_grad;
       // Decay the first and second moment running average coefficient
       exp_avg.mul_(beta1).add_(grad, 1 - beta1);
       exp_avg_sq.mul_(beta2).addcmul_(grad, grad, 1 - beta2);
@@ -168,10 +168,8 @@ void Adam::load(serialize::InputArchive& archive) {
       state->step(step_buffers.at(idx));
       state->exp_avg(exp_average_buffers.at(idx));
       state->exp_avg_sq(exp_average_sq_buffers.at(idx));
-      if(idx < max_exp_average_sq_buffers.size()) {
+      if (idx < max_exp_average_sq_buffers.size()) {
         state->max_exp_avg_sq(max_exp_average_sq_buffers.at(idx));
-      } else {
-        state->max_exp_avg_sq({});
       }
       state_[c10::guts::to_string(params.at(idx).unsafeGetTensorImpl())] = std::move(state);
     }

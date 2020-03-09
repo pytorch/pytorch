@@ -44,8 +44,12 @@ void RMSpropOptions::serialize(torch::serialize::InputArchive& archive) {
 bool operator==(const RMSpropParamState& lhs, const RMSpropParamState& rhs) {
   return (lhs.step() == rhs.step()) &&
          torch::equal(lhs.square_avg(), rhs.square_avg()) &&
-         torch::equal(lhs.momentum_buffer(), rhs.momentum_buffer()) &&
-         torch::equal(lhs.grad_avg(), rhs.grad_avg());
+         ((!lhs.momentum_buffer().defined() && !rhs.momentum_buffer().defined()) ||
+          (lhs.momentum_buffer().defined() && rhs.momentum_buffer().defined() &&
+          torch::equal(lhs.momentum_buffer(), rhs.momentum_buffer()))) &&
+         ((!lhs.grad_avg().defined() && !rhs.grad_avg().defined()) ||
+           (lhs.grad_avg().defined() && rhs.grad_avg().defined() &&
+           torch::equal(lhs.grad_avg(), rhs.grad_avg())));
 }
 
 void RMSpropParamState::serialize(torch::serialize::OutputArchive& archive) const {
@@ -64,8 +68,8 @@ void RMSpropParamState::serialize(torch::serialize::InputArchive& archive) {
 
 /// Adapted from
 /// https://github.com/pytorch/pytorch/blob/master/torch/optim/rmsprop.py
-//check where Nograd should be used
 void RMSprop::step() {
+  NoGradGuard no_grad;
   for (auto& group : param_groups_) {
     for (auto& p : group.params()) {
       if (!p.grad().defined()) {
@@ -76,21 +80,22 @@ void RMSprop::step() {
       auto param_state = state_.find(c10::guts::to_string(p.unsafeGetTensorImpl()));
       auto& options = static_cast<RMSpropOptions&>(group.options());
 
-      if(param_state == state_.end()) {
+      // State initialization
+      if (param_state == state_.end()) {
         auto state = std::make_unique<RMSpropParamState>();
         state->step(0);
         state->square_avg(torch::zeros_like(p.data(), MemoryFormat::Preserve));
-        if(options.momentum() > 0) {
+        if (options.momentum() > 0) {
           state->momentum_buffer(torch::zeros_like(p.data(), MemoryFormat::Preserve));
         }
-        if(options.centered()) {
+        if (options.centered()) {
           state->grad_avg(torch::zeros_like(p.data(), MemoryFormat::Preserve));
         }
         state_[c10::guts::to_string(p.unsafeGetTensorImpl())] = std::move(state);
       }
 
-      auto state = static_cast<RMSpropParamState&>(*state_[c10::guts::to_string(p.unsafeGetTensorImpl())]);
-      auto square_avg = state.square_avg();
+      auto& state = static_cast<RMSpropParamState&>(*state_[c10::guts::to_string(p.unsafeGetTensorImpl())]);
+      auto& square_avg = state.square_avg();
       auto alpha = options.alpha();
 
       state.step()+=1;
@@ -99,23 +104,24 @@ void RMSprop::step() {
         grad = grad.add(p.data(), options.weight_decay());
       }
 
-      NoGradGuard no_grad;
       square_avg.mul_(alpha).addcmul_(grad, grad, 1 - alpha);
 
       Tensor avg;
-      if(options.centered()) {
-        auto grad_avg = state.grad_avg();
+      if (options.centered()) {
+        auto& grad_avg = state.grad_avg();
         grad_avg.mul_(alpha).add_(grad, 1-alpha);
         avg = square_avg.addcmul(grad_avg, grad_avg, -1).sqrt_().add_(options.eps());
       } else {
         avg = square_avg.sqrt().add_(options.eps());
       }
 
-      if(options.momentum() > 0) {
-        auto buf = state.momentum_buffer();
+      if (options.momentum() > 0) {
+        auto& buf = state.momentum_buffer();
         buf.mul_(options.momentum()).addcdiv_(grad, avg);
+        // Need to avoid version tracking for parameter.
         p.data().add_(buf, -options.lr());
       } else {
+        // Need to avoid version tracking for parameter.
         p.data().addcdiv_(grad, avg, -options.lr());
       }
     }
@@ -150,6 +156,7 @@ void RMSprop::load(serialize::InputArchive& archive) {
   else { // deserializing archives saved in old format (prior to version 1.5.0)
     TORCH_WARN(
       "Your serialized RMSprop optimizer is still using the old serialization format. "
+      "The step value in state will be set to 0 because the old RMSprop optimizer didn't track the step value."
       "You should re-save your RMSprop optimizer to use the new serialization format.");
     std::vector<Tensor> square_average_buffers;
     std::vector<Tensor> momentum_buffers;
@@ -162,8 +169,12 @@ void RMSprop::load(serialize::InputArchive& archive) {
     for (size_t idx = 0; idx < square_average_buffers.size(); idx++) {
       auto state = std::make_unique<RMSpropParamState>();
       state->square_avg(square_average_buffers[idx]);
-      state->momentum_buffer(momentum_buffers[idx]);
-      state->grad_avg(grad_average_buffers[idx]);
+      if(idx < momentum_buffers.size()) {
+        state->momentum_buffer(momentum_buffers.at(idx));
+      }
+      if(idx < grad_average_buffers.size()) {
+        state->grad_avg(grad_average_buffers.at(idx));
+      }
       state_[c10::guts::to_string(params[idx].unsafeGetTensorImpl())] = std::move(state);
     }
   }

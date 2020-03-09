@@ -202,14 +202,14 @@ TEST(OptimTest, XORConvergence_Adagrad) {
       AdagradOptions(1.0).weight_decay(1e-6).lr_decay(1e-3)));
 }
 
-// TEST(OptimTest, XORConvergence_RMSprop) {
-//   ASSERT_TRUE(test_optimizer_xor<RMSprop>(RMSpropOptions(0.1).centered(true)));
-// }
-//
-// TEST(OptimTest, XORConvergence_RMSpropWithMomentum) {
-//   ASSERT_TRUE(test_optimizer_xor<RMSprop>(
-//       RMSpropOptions(0.1).momentum(0.9).weight_decay(1e-6)));
-// }
+TEST(OptimTest, XORConvergence_RMSprop) {
+  ASSERT_TRUE(test_optimizer_xor<RMSprop>(RMSpropOptions(0.1).centered(true)));
+}
+
+TEST(OptimTest, XORConvergence_RMSpropWithMomentum) {
+  ASSERT_TRUE(test_optimizer_xor<RMSprop>(
+      RMSpropOptions(0.1).momentum(0.9).weight_decay(1e-6)));
+}
 
 TEST(OptimTest, XORConvergence_Adam) {
   ASSERT_TRUE(test_optimizer_xor<Adam>(AdamOptions(0.1).weight_decay(1e-6)));
@@ -253,31 +253,31 @@ TEST(OptimTest, ProducesPyTorchValues_AdagradWithWeightDecayAndLRDecay) {
       expected_parameters::Adagrad_with_weight_decay_and_lr_decay());
 }
 
-// TEST(OptimTest, ProducesPyTorchValues_RMSprop) {
-//   check_exact_values<RMSprop>(
-//       RMSpropOptions(0.1), expected_parameters::RMSprop());
-// }
-//
-// TEST(OptimTest, ProducesPyTorchValues_RMSpropWithWeightDecay) {
-//   check_exact_values<RMSprop>(
-//       RMSpropOptions(0.1).weight_decay(1e-2),
-//       expected_parameters::RMSprop_with_weight_decay());
-// }
-//
-// TEST(OptimTest, ProducesPyTorchValues_RMSpropWithWeightDecayAndCentered) {
-//   check_exact_values<RMSprop>(
-//       RMSpropOptions(0.1).weight_decay(1e-6).centered(true),
-//       expected_parameters::RMSprop_with_weight_decay_and_centered());
-// }
-//
-// TEST(
-//     OptimTest,
-//     ProducesPyTorchValues_RMSpropWithWeightDecayAndCenteredAndMomentum) {
-//   check_exact_values<RMSprop>(
-//       RMSpropOptions(0.1).weight_decay(1e-6).centered(true).momentum(0.9),
-//       expected_parameters::
-//           RMSprop_with_weight_decay_and_centered_and_momentum());
-// }
+TEST(OptimTest, ProducesPyTorchValues_RMSprop) {
+  check_exact_values<RMSprop>(
+      RMSpropOptions(0.1), expected_parameters::RMSprop());
+}
+
+TEST(OptimTest, ProducesPyTorchValues_RMSpropWithWeightDecay) {
+  check_exact_values<RMSprop>(
+      RMSpropOptions(0.1).weight_decay(1e-2),
+      expected_parameters::RMSprop_with_weight_decay());
+}
+
+TEST(OptimTest, ProducesPyTorchValues_RMSpropWithWeightDecayAndCentered) {
+  check_exact_values<RMSprop>(
+      RMSpropOptions(0.1).weight_decay(1e-6).centered(true),
+      expected_parameters::RMSprop_with_weight_decay_and_centered());
+}
+
+TEST(
+    OptimTest,
+    ProducesPyTorchValues_RMSpropWithWeightDecayAndCenteredAndMomentum) {
+  check_exact_values<RMSprop>(
+      RMSpropOptions(0.1).weight_decay(1e-6).centered(true).momentum(0.9),
+      expected_parameters::
+          RMSprop_with_weight_decay_and_centered_and_momentum());
+}
 
 TEST(OptimTest, ProducesPyTorchValues_SGD) {
   check_exact_values<SGD>(SGDOptions(0.1), expected_parameters::SGD());
