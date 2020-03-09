@@ -411,9 +411,19 @@ void RRefContext::delPendingUser(const ForkId& forkId) {
   pendingUsers_.erase(iter);
 }
 
-bool RRefContext::hasPendingUser(const ForkId& forkId) {
-  std::lock_guard<std::mutex> lock(mutex_);
-  return pendingUsers_.find(forkId) != pendingUsers_.end();
+void RRefContext::recordThreadLocalPendingUsers() {
+  TORCH_INTERNAL_ASSERT(
+      userTable_.empty(),
+      "User RRef Table should be empty when start recording");
+  recording = true;
+}
+
+void RRefContext::waitForThreadLocalPendingUsers() {
+  for (auto& state: userTable_) {
+    state->future_.wait();
+  }
+  userTable_.clear();
+  recording = false;
 }
 
 void RRefContext::finishForkRequest(const ForkId& forkId, worker_id_t parent) {

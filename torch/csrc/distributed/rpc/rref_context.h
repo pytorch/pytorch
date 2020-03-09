@@ -147,21 +147,14 @@ class TORCH_API RRefContext {
       const ForkId& forkId,
       const c10::intrusive_ptr<RRef>& rref);
   void delPendingUser(const ForkId& forkId);
-  bool hasPendingUser(const ForkId& forkId);
 
-  void recordThreadLocalPendingUsers() {
-    TORCH_INTERNAL_ASSERT(
-        userTable_.empty(),
-        "User RRef Table should be empty when start recording");
-    recording = true;
-  }
-  void waitForThreadLocalPendingUsers() {
-    for (auto& state: userTable_) {
-      state->future_.wait();
-    }
-    userTable_.clear();
-    recording = false;
-  }
+  // Start recroding new pending UserRRefs. All pending UserRRefs introduced
+  // after this point will be put into the thread_local userTable_.
+  void recordThreadLocalPendingUsers();
+  // Wait until all pending UserRRefs in userTable_ are confirmed by their
+  // owners and then clear the userTable_. This is invoked to make sure RRefs
+  // in user function args are confirmed before launching user code.
+  void waitForThreadLocalPendingUsers();
 
   void delUser(
       const worker_id_t owner,
@@ -251,6 +244,8 @@ class TORCH_API RRefContext {
   std::mutex destroyedMutex_;
   bool destroyed_;
 
+  // Thread local states to keep UserRRefs deserialized from user function
+  // arguments.
   static thread_local std::vector<std::shared_ptr<PendingUserState>> userTable_;
   static thread_local bool recording;
 };

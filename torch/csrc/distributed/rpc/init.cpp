@@ -529,24 +529,6 @@ If the future completes with an error, an exception is thrown.
           time, an exception indicating it has timed out will be raised.
       )");
 
-  // hold GIL on light function to avoid ctx switch
-  module.def(
-      "_record_user_rref",
-      []() {
-        RRefContext::getInstance().recordThreadLocalPendingUsers();
-      }
-  );
-
-  // release GIL as this function can take a while before getting the
-  // confirmation
-  module.def(
-      "_wait_for_user_rref",
-      []() {
-        RRefContext::getInstance().waitForThreadLocalPendingUsers();
-      },
-      py::call_guard<py::gil_scoped_release>()
-  );
-
   Py_RETURN_TRUE;
 }
 
