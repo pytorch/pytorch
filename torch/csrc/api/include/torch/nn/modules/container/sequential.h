@@ -33,7 +33,7 @@ namespace nn {
 ///
 ///   torch::nn::Sequential seq(
 ///     torch::nn::Linear(3, 4),
-///     torch::nn::BatchNorm(4),
+///     torch::nn::BatchNorm1d(4),
 ///     torch::nn::Dropout(0.5)
 ///   );
 ///
@@ -68,7 +68,7 @@ namespace nn {
 ///
 ///   torch::nn::Sequential seq(
 ///     torch::nn::Linear(3, 4),
-///     torch::nn::BatchNorm(4),
+///     torch::nn::BatchNorm1d(4),
 ///     torch::nn::Dropout(0.5)
 ///   );
 ///
