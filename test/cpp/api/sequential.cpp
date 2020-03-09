@@ -94,22 +94,6 @@ TEST_F(SequentialTest, ConstructsFromModuleHolder) {
   ASSERT_EQ(sequential->size(), 3);
 }
 
-TEST_F(SequentialTest, LegacyBuilderForOrderedDictOfNamedModules) {
-  std::stringstream buffer;
-  CerrRedirect cerr_redirect(buffer.rdbuf());
-
-  Sequential sequential_named(modules_ordered_dict({
-    {"m1", Linear(3, 4)},
-    {"m2", ReLU()},
-    {"m3", BatchNorm1d(3)}
-  }));
-  ASSERT_EQ(sequential_named->size(), 3);
-
-  ASSERT_EQ(
-    count_substr_occurrences(buffer.str(), "`torch::nn::modules_ordered_dict` is deprecated"),
-    1);
-}
-
 TEST_F(SequentialTest, PushBackAddsAnElement) {
   struct M : torch::nn::Module {
     explicit M(int value_) : value(value_) {}
