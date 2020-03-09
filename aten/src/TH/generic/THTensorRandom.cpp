@@ -20,7 +20,7 @@
 #define TH_REAL_MIN DBL_MIN
 #endif
 
-void THTensor_(uniform)(THTensor *self, double a, double b, at::Generator *_generator)
+void THTensor_(uniform)(THTensor *self, double a, double b, at::GeneratorHolder _generator)
 {
   auto gen = at::get_generator_or_default<at::CPUGenerator>(_generator, at::detail::getDefaultCPUGenerator());
   // See Note [Acquire lock when using random generators]
@@ -127,7 +127,7 @@ void THTensor_(multinomialAliasSetup)(THTensor *probs, THLongTensor *J, THTensor
   THLongTensor_free(smaller);
   THLongTensor_free(larger);
 }
-void THTensor_(multinomialAliasDraw)(THLongTensor *self, THTensor *q, THLongTensor *J, int n_sample, at::Generator *_generator)
+void THTensor_(multinomialAliasDraw)(THLongTensor *self, THTensor *q, THLongTensor *J, int n_sample, at::GeneratorHolder _generator)
 {
   THArgCheck(q->dim() == 1, 1,
              "expected 1-D probability table, got %d-D probability table instead",
@@ -164,7 +164,7 @@ void THTensor_(multinomialAliasDraw)(THLongTensor *self, THTensor *q, THLongTens
 #endif
 
 #if defined(TH_REAL_IS_BYTE)
-void THTensor_(getRNGState)(at::Generator *_generator, THTensor *self)
+void THTensor_(getRNGState)(at::GeneratorHolder _generator, THTensor *self)
 {
   // See Note [Acquire lock when using random generators]
   std::lock_guard<std::mutex> lock(_generator->mutex_);
@@ -204,7 +204,7 @@ void THTensor_(getRNGState)(at::Generator *_generator, THTensor *self)
   memcpy(rng_state, accum_state.get(), size);
 }
 
-void THTensor_(setRNGState)(at::Generator *_generator, THTensor *self)
+void THTensor_(setRNGState)(at::GeneratorHolder _generator, THTensor *self)
 {
   // See Note [Acquire lock when using random generators]
   std::lock_guard<std::mutex> lock(_generator->mutex_);

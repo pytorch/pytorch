@@ -26,19 +26,19 @@ struct TestCPUGenerator : public Generator {
   uint64_t value_;
 };
 
-Tensor& random_(Tensor& self, Generator* generator) {
-  return at::native::templates::random_impl<native::templates::cpu::RandomKernel, TestCPUGenerator>(self, generator);
+Tensor& random_(Tensor& self, GeneratorHolder generator) {
+  return at::native::templates::random_impl<native::templates::cpu::RandomKernel, TestCPUGenerator*>(self, generator);
 }
 
-Tensor& random_from_to(Tensor& self, int64_t from, optional<int64_t> to, Generator* generator) {
-  return at::native::templates::random_from_to_impl<native::templates::cpu::RandomFromToKernel, TestCPUGenerator>(self, from, to, generator);
+Tensor& random_from_to(Tensor& self, int64_t from, optional<int64_t> to, GeneratorHolder generator) {
+  return at::native::templates::random_from_to_impl<native::templates::cpu::RandomFromToKernel, TestCPUGenerator*>(self, from, to, generator);
 }
 
-Tensor& random_to(Tensor& self, int64_t to, Generator* generator) {
+Tensor& random_to(Tensor& self, int64_t to, GeneratorHolder generator) {
   return random_from_to(self, 0, to, generator);
 }
 
-Tensor& custom_rng_cauchy_(Tensor& self, double median, double sigma, Generator * generator) {
+Tensor& custom_rng_cauchy_(Tensor& self, double median, double sigma, GeneratorHolder generator) {
   auto gen = (TestCPUGenerator*)generator;
   auto iter = TensorIterator::nullary_op(self);
   native::templates::cpu::cauchy_kernel(iter, median, sigma, gen);

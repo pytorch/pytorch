@@ -198,7 +198,7 @@ int get_vector_size(at::Tensor self, at::Tensor ret, at::Tensor mask) {
 } //anonymous namespace
 
 std::tuple<Tensor,Tensor>
-fused_dropout_cuda(const Tensor& self, double p, Generator * gen_){
+fused_dropout_cuda(const Tensor& self, double p, GeneratorHolder gen_){
   auto gen = get_generator_or_default<CUDAGenerator>(gen_, cuda::detail::getDefaultCUDAGenerator());
   Tensor ret = at::empty_like(self, self.suggest_memory_format());
   Tensor mask = at::empty(self.sizes(), self.options().dtype(kByte), self.suggest_memory_format());

@@ -24,7 +24,7 @@ using namespace torch;
 
 PyObject *THPGeneratorClass = nullptr;
 
-PyObject * THPGenerator_initDefaultGenerator(at::Generator* cdata)
+PyObject * THPGenerator_initDefaultGenerator(at::GeneratorHolder cdata)
 {
   auto type = (PyTypeObject*)THPGeneratorClass;
   auto self = THPObjectPtr{type->tp_alloc(type, 0)};

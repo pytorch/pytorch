@@ -11,7 +11,7 @@
 
 #include <ATen/CUDAGenerator.h>
 
-THC_API void THCRandom_getRNGState(at::Generator *gen_, THByteTensor *rng_state);
-THC_API void THCRandom_setRNGState(at::Generator *gen_, THByteTensor *rng_state);
+THC_API void THCRandom_getRNGState(at::GeneratorHolder gen_, THByteTensor *rng_state);
+THC_API void THCRandom_setRNGState(at::GeneratorHolder gen_, THByteTensor *rng_state);
 
 #endif

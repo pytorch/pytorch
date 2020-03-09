@@ -7,14 +7,14 @@
 
 struct THPGenerator {
   PyObject_HEAD
-  at::Generator *cdata;
+  at::GeneratorHolder cdata;
   bool owner;  // if true, frees cdata in destructor
 };
 
 // Creates a new Python object wrapping the default at::Generator. The reference is
 // borrowed. The caller should ensure that the THGenerator* object lifetime
 // last at least as long as the Python wrapper.
-THP_API PyObject * THPGenerator_initDefaultGenerator(at::Generator* cdata);
+THP_API PyObject * THPGenerator_initDefaultGenerator(at::GeneratorHolder cdata);
 
 #define THPGenerator_Check(obj) \
   PyObject_IsInstance(obj, THPGeneratorClass)

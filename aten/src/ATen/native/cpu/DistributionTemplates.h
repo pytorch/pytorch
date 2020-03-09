@@ -13,7 +13,7 @@ namespace templates {
 namespace cpu {
 
 template<typename RNG>
-void random_from_to_kernel(TensorIterator& iter, uint64_t range, int64_t base, RNG* generator) {
+void random_from_to_kernel(TensorIterator& iter, uint64_t range, int64_t base, RNG generator) {
   AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Bool, at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "random_from_to_kernel_cpu", [&] {
     std::lock_guard<std::mutex> lock(generator->mutex_);
     if ((
@@ -37,7 +37,7 @@ void random_from_to_kernel(TensorIterator& iter, uint64_t range, int64_t base, R
 // from(inclusive) = std::numeric_limits<int64_t>::lowest()
 // to(exclusive) = None (= std::numeric_limits<int64_t>::max() + 1)
 template<typename RNG>
-void random_full_64_bits_range_kernel(TensorIterator& iter, RNG* generator) {
+void random_full_64_bits_range_kernel(TensorIterator& iter, RNG generator) {
   AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::BFloat16, iter.dtype(), "random_full_64_bits_range_kernel_cpu", [&] {
     std::lock_guard<std::mutex> lock(generator->mutex_);
     if (std::is_same<scalar_t, int64_t>::value ||
@@ -55,16 +55,16 @@ void random_full_64_bits_range_kernel(TensorIterator& iter, RNG* generator) {
 
 template<typename RNG>
 struct RandomFromToKernel {
-  void operator()(TensorIterator& iter, uint64_t range, int64_t base, RNG* gen) {
+  void operator()(TensorIterator& iter, uint64_t range, int64_t base, RNG gen) {
     random_from_to_kernel(iter, range, base, gen);
   }
-  void operator()(TensorIterator& iter, RNG* gen) {
+  void operator()(TensorIterator& iter, RNG gen) {
     random_full_64_bits_range_kernel(iter, gen);
   }
 };
 
 template<typename RNG>
-void random_kernel(TensorIterator& iter, RNG* generator) {
+void random_kernel(TensorIterator& iter, RNG generator) {
   std::lock_guard<std::mutex> lock(generator->mutex_);
   if (isFloatingType(iter.dtype())) {
     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "random_kernel_fp_cpu", [&] {
@@ -101,13 +101,13 @@ void random_kernel(TensorIterator& iter, RNG* generator) {
 
 template<typename RNG>
 struct RandomKernel {
-  void operator()(TensorIterator& iter, RNG* gen) {
+  void operator()(TensorIterator& iter, RNG gen) {
     random_kernel(iter, gen);
   }
 };
 
 template<typename RNG>
-void cauchy_kernel(TensorIterator& iter, double median, double sigma, RNG* generator) {
+void cauchy_kernel(TensorIterator& iter, double median, double sigma, RNG generator) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "cauchy_cpu", [&]() {
     std::lock_guard<std::mutex> lock(generator->mutex_);
     cpu_serial_kernel(iter, [median, sigma, generator]() -> scalar_t {

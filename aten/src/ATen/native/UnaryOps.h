@@ -54,18 +54,18 @@ DECLARE_DISPATCH(unary_fn, trigamma_stub);
 DECLARE_DISPATCH(unary_fn, trunc_stub);
 DECLARE_DISPATCH(unary_fn, lgamma_stub);
 
-DECLARE_DISPATCH(void(*)(Tensor&, const double, Generator *), bernoulli_mkl_stub);
-DECLARE_DISPATCH(void(*)(TensorIterator&, const double, const double, Generator *), cauchy_stub);
-DECLARE_DISPATCH(void(*)(TensorIterator&, const double, Generator *), exponential_stub);
-DECLARE_DISPATCH(void(*)(TensorIterator&, const double, Generator *), geometric_stub);
-DECLARE_DISPATCH(void(*)(TensorIterator&, const double, const double, Generator *), log_normal_stub);
-DECLARE_DISPATCH(void(*)(Tensor&, const double, const double, Generator *), normal_stub);
-DECLARE_DISPATCH(void(*)(TensorIterator&, const uint64_t, const int64_t, Generator *), random_from_to_stub);
-DECLARE_DISPATCH(void(*)(TensorIterator&, Generator *), random_full_64_bits_range_stub);
-DECLARE_DISPATCH(void(*)(TensorIterator&, Generator *), random_stub);
+DECLARE_DISPATCH(void(*)(Tensor&, const double, GeneratorHolder), bernoulli_mkl_stub);
+DECLARE_DISPATCH(void(*)(TensorIterator&, const double, const double, GeneratorHolder), cauchy_stub);
+DECLARE_DISPATCH(void(*)(TensorIterator&, const double, GeneratorHolder), exponential_stub);
+DECLARE_DISPATCH(void(*)(TensorIterator&, const double, GeneratorHolder), geometric_stub);
+DECLARE_DISPATCH(void(*)(TensorIterator&, const double, const double, GeneratorHolder), log_normal_stub);
+DECLARE_DISPATCH(void(*)(Tensor&, const double, const double, GeneratorHolder), normal_stub);
+DECLARE_DISPATCH(void(*)(TensorIterator&, const uint64_t, const int64_t, GeneratorHolder), random_from_to_stub);
+DECLARE_DISPATCH(void(*)(TensorIterator&, GeneratorHolder), random_full_64_bits_range_stub);
+DECLARE_DISPATCH(void(*)(TensorIterator&, GeneratorHolder), random_stub);
 DECLARE_DISPATCH(void(*)(TensorIterator&, const int64_t), polygamma_stub);
 DECLARE_DISPATCH(void(*)(TensorIterator&, Scalar a, Scalar b), clamp_stub);
-DECLARE_DISPATCH(void(*)(Tensor&, const Tensor&, int64_t, bool, Generator *), multinomial_stub);
+DECLARE_DISPATCH(void(*)(Tensor&, const Tensor&, int64_t, bool, GeneratorHolder), multinomial_stub);
 
 // Missing unary functions
 // digamma

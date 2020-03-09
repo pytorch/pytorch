@@ -141,7 +141,7 @@ inline void _rrelu_with_noise_train(
     const Tensor& noise,
     Scalar lower_,
     Scalar upper_,
-    Generator* generator) {
+    GeneratorHolder generator) {
   scalar_t lower = lower_.to<scalar_t>();
   scalar_t upper = upper_.to<scalar_t>();
   Tensor tmp_tensor = output.contiguous();
@@ -173,7 +173,7 @@ Tensor& rrelu_with_noise_out_cpu(
     Scalar lower,
     Scalar upper,
     bool training,
-    Generator* generator) {
+    GeneratorHolder generator) {
   if (training) {
     AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "rrelu_with_noise_out_cpu", [&] {
       _rrelu_with_noise_train<scalar_t>(output, self.contiguous(), noise, lower, upper, generator);
@@ -194,7 +194,7 @@ Tensor rrelu_with_noise_cpu(
     Scalar lower,
     Scalar upper,
     bool training,
-    Generator* generator) {
+    GeneratorHolder generator) {
   auto output = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   return at::native::rrelu_with_noise_out_cpu(output, self, noise, lower, upper, training, generator);
 }
@@ -205,7 +205,7 @@ Tensor& rrelu_with_noise_cpu_(
     Scalar lower,
     Scalar upper,
     bool training,
-    Generator* generator) {
+    GeneratorHolder generator) {
   return at::native::rrelu_with_noise_out_cpu(self, self, noise, lower, upper, training, generator);
 }
 
@@ -228,11 +228,11 @@ Tensor rrelu_with_noise_backward(
   }
 }
 
-Tensor rrelu(const Tensor & self, Scalar lower, Scalar upper, bool training, Generator* generator) {
+Tensor rrelu(const Tensor & self, Scalar lower, Scalar upper, bool training, GeneratorHolder generator) {
   return at::rrelu_with_noise(self, at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT), lower, upper, training, generator);
 }
 
-Tensor & rrelu_(Tensor & self, Scalar lower, Scalar upper, bool training, Generator* generator) {
+Tensor & rrelu_(Tensor & self, Scalar lower, Scalar upper, bool training, GeneratorHolder generator) {
   return at::rrelu_with_noise_(self, at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT), lower, upper, training, generator);
 }
 
