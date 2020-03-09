@@ -415,13 +415,8 @@ If the future completes with an error, an exception is thrown.
         // exception will be thrown in get_function() call; if args do not match
         // with function schema, exception will be thrown in
         // createStackForSchema() call.
-        c10::QualifiedName qualifiedName;
-        {
-          py::gil_scoped_acquire acquire;
-          qualifiedName = c10::QualifiedName(py::cast<std::string>(
-              py::module::import("torch.jit")
-                  .attr("_qualified_name")(userCallable)));
-        }
+        c10::QualifiedName qualifiedName =
+            PythonRpcHandler::getInstance().getQualifiedName(userCallable);
         c10::FunctionSchema functionSchema = PythonRpcHandler::getInstance()
                                                  .jitCompilationUnit()
                                                  ->get_function(qualifiedName)
