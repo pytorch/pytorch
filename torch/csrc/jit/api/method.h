@@ -1,7 +1,8 @@
 
 #include <ATen/core/ivalue.h>
 #include <ATen/core/stack.h>
-#include <torch/csrc/jit/api/function.h>
+#include <ATen/core/function.h>
+#include <torch/csrc/jit/api/function_impl.h>
 
 namespace torch {
 namespace jit {
