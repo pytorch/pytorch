@@ -210,7 +210,6 @@ struct RangeEventList {
                     std::make_move_iterator(block.begin()),
                     std::make_move_iterator(block.end()));
     }
-    blocks.clear();
     return result;
   }
 
