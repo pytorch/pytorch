@@ -81,6 +81,15 @@ void PythonRpcHandler::cleanup() {
 }
 
 PythonRpcHandler& PythonRpcHandler::getInstance() {
+  // A thread could hold GIL when calling PythonRpcHandler::getInstance(),
+  // meantime another thread could have been doing static data
+  // initialization by calling `new PythonRpcHandler()`, inside of which GIL is
+  // also required. Static data initialization is thread-safe, so the thread
+  // holding the GIL will wait for the other thread to finish static data
+  // initializating before going forward. Because the initialization can't
+  // proceed without GIL, there is a deadlock. We ask the calling thread to
+  // release GIL to avoid this situation.
+  TORCH_INTERNAL_ASSERT(!PyGILState_Check());
   // Leaky singleton to avoid module destructor race.
   static PythonRpcHandler* handler = new PythonRpcHandler();
   return *handler;

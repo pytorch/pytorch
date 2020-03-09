@@ -342,9 +342,10 @@ If the future completes with an error, an exception is thrown.
     return RRefContext::getInstance().getDebugInfo();
   });
 
-  module.def("_cleanup_python_rpc_handler", []() {
-    PythonRpcHandler::getInstance().cleanup();
-  });
+  module.def(
+      "_cleanup_python_rpc_handler",
+      []() { PythonRpcHandler::getInstance().cleanup(); },
+      py::call_guard<py::gil_scoped_release>());
 
   module.def(
       "_invoke_rpc_builtin",
@@ -409,31 +410,40 @@ If the future completes with an error, an exception is thrown.
          const py::object& userCallable,
          const py::tuple& argsTuple,
          const py::dict& kwargsDict) {
-        DCHECK(PyGILState_Check());
+        DCHECK(!PyGILState_Check());
         // No need to catch exception here, if function can not be found,
         // exception will be thrown in get_function() call; if args do not match
         // with function schema, exception will be thrown in
         // createStackForSchema() call.
-        auto qualifiedNameStr = c10::QualifiedName(
-            py::cast<std::string>(py::module::import("torch.jit")
-                                      .attr("_qualified_name")(userCallable)));
-        auto qualifiedName = c10::QualifiedName(qualifiedNameStr);
-        auto functionSchema = PythonRpcHandler::getInstance()
-                                  .jitCompilationUnit()
-                                  ->get_function(qualifiedName)
-                                  .getSchema();
-        Stack stack = torch::jit::createStackForSchema(
-            functionSchema,
-            argsTuple.cast<py::args>(),
-            kwargsDict.cast<py::kwargs>(),
-            c10::nullopt);
-        py::gil_scoped_release release;
+        {
+          py::gil_scoped_acquire acquire;
+          c10::QualifiedName qualifiedName =
+              c10::QualifiedName(py::cast<std::string>(
+                  py::module::import("torch.jit")
+                      .attr("_qualified_name")(userCallable)));
+        }
+        c10::FunctionSchema functionSchema =
+            std::make_shared<c10::FunctionSchema>(
+                PythonRpcHandler::getInstance()
+                    .jitCompilationUnit()
+                    ->get_function(qualifiedName)
+                    .getSchema());
+        Stack stack;
+        {
+          py::gil_scoped_acquire acquire;
+          stack = torch::jit::createStackForSchema(
+              *functionSchemaPtr,
+              argsTuple.cast<py::args>(),
+              kwargsDict.cast<py::kwargs>(),
+              c10::nullopt);
+        }
         DCHECK(!PyGILState_Check());
-        c10::intrusive_ptr<c10::ivalue::Future> fut =
-            rpcTorchscript(dstWorkerName, qualifiedName, functionSchema, stack);
+        c10::intrusive_ptr<c10::ivalue::Future> fut = rpcTorchscript(
+            dstWorkerName, qualifiedName, *functionSchemaPtr, stack);
+        LOG(ERROR) << "User thread exiting _invoke_rpc_torchscript.";
         return PythonFutureWrapper(fut);
       },
-      py::call_guard<py::gil_scoped_acquire>());
+      py::call_guard<py::gil_scoped_release>());
 
   module.def(
       "_invoke_remote_builtin",
