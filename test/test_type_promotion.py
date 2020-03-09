@@ -4,7 +4,8 @@ import torch
 import itertools
 
 from torch.testing._internal.common_utils import TestCase, run_tests, load_tests
-from torch.testing._internal.common_device_type import instantiate_device_type_tests, onlyOnCPUAndCUDA
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests, onlyOnCPUAndCUDA, dtypes)
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -187,6 +188,7 @@ class TestTypePromotion(TestCase):
                 tensor[tensor == 0] = 5
         return tensor
 
+    # TODO: see inline TODO about re-enabling integer division with div
     # verifies that torch.<op>(first, second) is the same as
     # torch.<op>(first.to(common_dtype), second.to(common_dtype)) in cases where that should hold.
     @float_double_default_dtype
@@ -204,6 +206,9 @@ class TestTypePromotion(TestCase):
                 if op == torch.sub and common_dtype != torch.bool:
                     # Subtraction, the `-` operator, with a bool tensor is not supported.
                     continue
+                # TODO: skip this short-circuit was integer division is re-enabled for div
+                if op == torch.div and common_dtype not in (torch.half, torch.float, torch.double):
+                    return
                 first = self._get_test_tensor(device, dt1)
                 second = self._get_test_tensor(device, dt2, op == torch.div)
                 # test ops with non-contiguous tensors
@@ -537,8 +542,13 @@ class TestTypePromotion(TestCase):
             # "mul_cpu" / "div_cpu" not implemented for 'Half'
             self.assertRaises(RuntimeError, lambda: op(s1, d2.view(d2.numel())[0].item()))
 
-    def _run_all_tests_for_sparse_op(self, op_name, device):
+    def _run_all_tests_for_sparse_op(self, op_name, device, floating_only=False):
         dtypes = torch.testing.get_all_math_dtypes(device)
+        if floating_only and self.device_type == 'cuda':
+            dtypes = [torch.half, torch.float, torch.double]
+        elif floating_only:
+            dtypes = [torch.float, torch.double]
+
         for dtype1, dtype2 in itertools.product(dtypes, dtypes):
             for inplace, coalesced in itertools.product([True, False], [True, False]):
                 self._test_sparse_op(op_name, inplace, dtype1, dtype2, device, coalesced)
@@ -551,13 +561,33 @@ class TestTypePromotion(TestCase):
     def test_sparse_mul(self, device):
         self._run_all_tests_for_sparse_op('mul', device)
 
+    #TODO: re-enable for integral types one div is re-enabled on integral tensors
     @onlyOnCPUAndCUDA
     def test_sparse_div(self, device):
-        self._run_all_tests_for_sparse_op('div', device)
+        self._run_all_tests_for_sparse_op('div', device, floating_only=True)
 
     @onlyOnCPUAndCUDA
     def test_sparse_sub(self, device):
         self._run_all_tests_for_sparse_op('sub', device)
+
+    # TODO: remove this test when true division is enabled
+    @dtypes(torch.bool, torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64)
+    def test_no_integer_div(self, device, dtype):
+        a = torch.tensor(1, device=device, dtype=dtype)
+        b = torch.tensor(1, device=device, dtype=dtype)
+        o = torch.empty(1, device=device, dtype=dtype)
+
+        with self.assertRaises(RuntimeError):
+            c = a / b
+        with self.assertRaises(RuntimeError):
+            c = torch.div(a, b)
+        with self.assertRaises(RuntimeError):
+            torch.div(a, b, out=o)
+        with self.assertRaises(RuntimeError):
+            torch.addcdiv(a, b, b)
+        with self.assertRaises(RuntimeError):
+            torch.reciprocal(a)
+
 
 instantiate_device_type_tests(TestTypePromotion, globals())
 

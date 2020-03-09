@@ -58,6 +58,12 @@ Tensor& add_(Tensor& self, const Tensor& other, Scalar alpha) {
 }
 
 Tensor& div_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  TORCH_CHECK(!isIntegralType(result.scalar_type(), /*includeBool=*/ true),
+    "Integer division of tensors using div or / is temporarily disabled. ",
+    "In a future release div and / will ",
+    "perform 'true' division like Python 3. Instead, use true_divide, which ",
+    "performs true division, or floor_divide, which performs ",
+    "integer division when given integral inputs.");
   auto iter = TensorIterator::binary_op(result, self, other,
     /*check_mem_overlap=*/true);
   div_stub(iter.device_type(), iter);
@@ -65,6 +71,13 @@ Tensor& div_out(Tensor& result, const Tensor& self, const Tensor& other) {
 }
 
 Tensor div(const Tensor& self, const Tensor& other) {
+  TORCH_CHECK(!(isIntegralType(self.scalar_type(), /*includeBool=*/ true)
+                && isIntegralType(other.scalar_type(), /*includeBool=*/ true)),
+    "Integer division of tensors using div or / is temporarily disabled. ",
+    "In a future release div and / will ",
+    "perform 'true' division like Python 3. Instead, use true_divide, which ",
+    "performs true division, or floor_divide, which performs ",
+    "integer division when given integral inputs.");
   Tensor result;
   auto iter = TensorIterator::binary_op(result, self, other);
   div_stub(iter.device_type(), iter);
@@ -75,21 +88,33 @@ Tensor& div_(Tensor& self, const Tensor& other) {
   return native::div_out(self, self, other);
 }
 
-Tensor truncate(const Tensor& tensor) {
-  if (tensor.is_floating_point()) {
-    return tensor.trunc();
+Tensor& floor_divide_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  auto iter = TensorIterator::binary_op(result, self, other,
+    /*check_mem_overlap=*/true);
+  div_stub(iter.device_type(), iter);
+
+  if (result.is_floating_point()) {
+    result.trunc_();
   }
-  return tensor;
+
+  return result;
 }
 
-Tensor floor_divide(const Tensor& input, const Tensor& other) {
-  Tensor out = input / other;
-  return truncate(out);
+Tensor floor_divide(const Tensor& self, const Tensor& other) {
+  Tensor result;
+  auto iter = TensorIterator::binary_op(result, self, other,
+    /*check_mem_overlap=*/true);
+  div_stub(iter.device_type(), iter);
+
+  auto out = iter.output();
+  if (out.is_floating_point()) {
+    return out.trunc();
+  }
+  return out;
 }
 
-Tensor floor_divide(const Tensor& input, Scalar other) {
-  Tensor out = input / other;
-  return truncate(out);
+Tensor& floor_divide_(Tensor& self, const Tensor& other) {
+  return native::floor_divide_out(self, self, other);
 }
 
 Tensor& mul_out(Tensor& result, const Tensor& self, const Tensor& other) {
@@ -390,7 +415,7 @@ Tensor __lshift__(const Tensor& self, const Tensor& other) {
   return iter.output();
 }
 
-Tensor __lshift__(const Tensor& self, Scalar other) { 
+Tensor __lshift__(const Tensor& self, Scalar other) {
   Tensor result;
   auto wrapper = wrapped_scalar_tensor(other).toType(self.scalar_type());
   auto iter = TensorIterator::binary_op(result, self, wrapper);
@@ -418,7 +443,7 @@ Tensor __rshift__(const Tensor& self, const Tensor& other) {
   return iter.output();
 }
 
-Tensor __rshift__(const Tensor& self, Scalar other) { 
+Tensor __rshift__(const Tensor& self, Scalar other) {
   Tensor result;
   auto wrapper = wrapped_scalar_tensor(other).toType(self.scalar_type());
   auto iter = TensorIterator::binary_op(result, self, wrapper);
@@ -587,6 +612,14 @@ Tensor min(const Tensor& self, const Tensor& other) {
 }
 
 Tensor& min_(Tensor& self, const Tensor& other) { return at::min_out(self, self, other); }
+
+Tensor floor_divide(const Tensor& self, Scalar other) {
+  return at::floor_divide(self, wrapped_scalar_tensor(other));
+}
+
+Tensor& floor_divide_(Tensor& self, Scalar other) {
+  return at::floor_divide_out(self, self, wrapped_scalar_tensor(other));
+}
 
 Tensor& fmod_out(Tensor & result, const Tensor& self, const Tensor& other) {
   auto iter = TensorIterator::binary_op(result, self, other,

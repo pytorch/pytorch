@@ -261,6 +261,13 @@ addcdiv(input, tensor1, tensor2, *, value=1, out=None) -> Tensor
 Performs the element-wise division of :attr:`tensor1` by :attr:`tensor2`,
 multiply the result by the scalar :attr:`value` and add it to :attr:`input`.
 
+.. warning::
+    Using integral tensors for both tensor1 and tensor2 is temporarily disabled.
+    In a future PyTorch release addcdiv will perform a 'true' division of
+    tensor1 and tensor2. You can implement your own addcdiv using
+    :func:`torch.floor_divide` or :func:`torch.true_divide` to explicitly
+    control the division behavior.
+
 .. math::
     \text{out}_i = \text{input}_i + \text{value} \times \frac{\text{tensor1}_i}{\text{tensor2}_i}
 """ + r"""
@@ -1789,6 +1796,13 @@ described in the type promotion :ref:`documentation <type-promotion-doc>`. If
 ``out`` is specified, the result must be :ref:`castable <type-promotion-doc>`
 to the :class:`torch.dtype` of the specified output tensor. Integral division
 by zero leads to undefined behavior.
+
+.. warning::
+    Using integral tensors for both input and other tensors or as the out tensor
+    is temporarily disabled. In a future PyTorch release div will perform a
+    'true' division of input and other, analogous to Python 3's division
+    operator. Use :func:`torch.floor_divide` or :func:`torch.true_divide` to
+    specify the division behavior you want when working with integral tensors.
 
 Args:
     {input}

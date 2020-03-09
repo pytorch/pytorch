@@ -69,6 +69,12 @@ Tensor& addcdiv_out(
     const Tensor& tensor1,
     const Tensor& tensor2,
     Scalar value) {
+  TORCH_CHECK(!(isIntegralType(tensor1.scalar_type(), /*includeBool=*/ true)
+              && isIntegralType(tensor2.scalar_type(), /*includeBool=*/ true)),
+    "Division of integral tensors by addcdiv is temporarily disabled. ",
+    "In a future release addcdiv will perform a 'true' division of tensors 1 ",
+    "and 2. You can workaround this issue by implementing your own addcdiv ",
+    "with true_divide or floor_divide.");
   checkBackend("addcdiv_cpu", result, self.options().backend());
   auto iter = at::TensorIterator();
   iter.set_check_mem_overlap(true);
