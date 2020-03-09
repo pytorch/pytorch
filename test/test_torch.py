@@ -2050,11 +2050,11 @@ class _TestTorchMixin(object):
     def test_narrow_tensor(self):
         x = torch.Tensor([[0, 1, 2], [3, 4, 5], [6, 7, 8]])
         self.assertEqual(x.narrow(0, torch.tensor(0), 1), torch.Tensor([[0, 1, 2]]))
-        with self.assertRaises(TypeError):
-            x.narrow(0, torch.tensor(0, dtype=torch.float), 1)
-        with self.assertRaises(TypeError):
+        with self.assertRaises(Exception):
+            x.narrow(0, torch.tensor(0.), 1)
+        with self.assertRaises(Exception):
             x.narrow(0, torch.tensor([0]), 1)
-        with self.assertRaises(TypeError):
+        with self.assertRaises(Exception):
             x.narrow(0, torch.tensor([0, 1]), 1)
 
     def test_stack(self):
