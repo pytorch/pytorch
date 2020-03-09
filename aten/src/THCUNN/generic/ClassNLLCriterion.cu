@@ -14,7 +14,7 @@ void THNN_(ClassNLLCriterion_updateOutput)(
   #if defined(THC_REAL_IS_BFLOAT16) && !defined(__HIP_PLATFORM_HCC__)
   TORCH_CHECK(false, "ClassNLLCriterion_updateOutput not suppported with BFloat16");
   #else
-  if (THCIndexTensor_(nDimensionLegacyNoScalars)(state, target) > 1) {
+  if (THCIndexTensor_(nDimension)(state, target) > 1) {
     THError("multi-target not supported");
   }
 
