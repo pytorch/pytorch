@@ -88,7 +88,15 @@ THTensor *THTensor_(newWithStorage)(THStorage *storage, ptrdiff_t storageOffset,
 THTensor *THTensor_(newWithStorage1d)(THStorage *storage, ptrdiff_t storageOffset,
                                int64_t size0, int64_t stride0)
 {
-  return THTensor_(newWithStorage)(storage, storageOffset, {size0}, {stride0});
+  THStorage *new_storage = THStorage_(new)();
+  THTensor *self = c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
+    c10::intrusive_ptr<at::StorageImpl>::reclaim(new_storage),
+    at::DispatchKey::CPUTensorId
+  ).release();
+  THTensor_(setStorageNd)(self, storage, storageOffset, 1,
+                          &size0, &stride0);
+
+  return self;
 }
 
 THTensor *THTensor_(newWithSize)(at::IntArrayRef size, at::IntArrayRef stride)
@@ -99,21 +107,6 @@ THTensor *THTensor_(newWithSize)(at::IntArrayRef size, at::IntArrayRef stride)
 THTensor *THTensor_(newWithSize1d)(int64_t size0)
 {
   return THTensor_(newWithSize)({size0}, {});
-}
-
-THTensor *THTensor_(newWithSize2d)(int64_t size0, int64_t size1)
-{
-  return THTensor_(newWithSize)({size0, size1}, {});
-}
-
-THTensor *THTensor_(newWithSize3d)(int64_t size0, int64_t size1, int64_t size2)
-{
-  return THTensor_(newWithSize)({size0, size1, size2}, {});
-}
-
-THTensor *THTensor_(newWithSize4d)(int64_t size0, int64_t size1, int64_t size2, int64_t size3)
-{
-  return THTensor_(newWithSize)({size0, size1, size2, size3}, {});
 }
 
 THTensor *THTensor_(newClone)(THTensor *self)
