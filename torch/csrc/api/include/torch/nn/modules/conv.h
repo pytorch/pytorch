@@ -113,6 +113,16 @@ class ConvNdImpl : public torch::nn::Cloneable<Derived> {
 /// Applies convolution over a 1-D input.
 /// See https://pytorch.org/docs/master/nn.html#torch.nn.Conv1d to learn about
 /// the exact behavior of this module.
+///
+/// yf225 TODO experiment:
+///
+/// Example:
+/// ```
+/// auto m = torch::nn::Conv1d(torch::nn::Conv1dOptions(1, 2, 3));
+/// ```
+///
+/// See `torch::nn::Conv1dOptions` or `Conv1dOptions` to learn what arguments
+/// are supported in `Conv1dOptions`
 class TORCH_API Conv1dImpl : public ConvNdImpl<1, Conv1dImpl> {
  public:
   Conv1dImpl(
