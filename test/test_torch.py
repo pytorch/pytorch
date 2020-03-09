@@ -10976,13 +10976,13 @@ class TestTorchDeviceType(TestCase):
              torch.tensor([[-1], [1]], device=device,
                           dtype=torch.float32).repeat(1, width), "subtract"),
 
-            (torch.tensor([2], device=device).repeat(height, width),
-             torch.tensor([2], device=device).repeat(height, width),
+            (torch.tensor([2], device=device, dtype=torch.float32).repeat(height, width),
+             torch.tensor([2], device=device, dtype=torch.float32).repeat(height, width),
              torch.tensor([[8], [2]], device=device,
                           dtype=torch.float32).repeat(1, width), "multiply"),
 
-            (torch.tensor([2], device=device).repeat(height, width),
-             torch.tensor([2], device=device).repeat(height, width),
+            (torch.tensor([2], device=device, dtype=torch.float32).repeat(height, width),
+             torch.tensor([2], device=device, dtype=torch.float32).repeat(height, width),
              torch.tensor([[0.5], [2]], device=device,
                           dtype=torch.float32).repeat(1, width), "divide"),
         ]
