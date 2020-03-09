@@ -23,7 +23,6 @@ inline void reduce_all_impl(
   using Vec = Vec256<scalar_t>;
   int64_t input_numel = input.numel();
   auto input_data = input.data_ptr<scalar_t>();
-  auto output_data = output.data_ptr<scalar_t>();
   scalar_t result = at::parallel_reduce(0, input_numel, internal::GRAIN_SIZE, ident_v, 
     [&](int64_t start, int64_t end, scalar_t ident) -> scalar_t {
       scalar_t partial_out = vec256::reduce_all<scalar_t>(
@@ -32,7 +31,7 @@ inline void reduce_all_impl(
         end - start);
       return partial_out;
     }, op);
-  output_data[0] = result;
+  output.fill_(result);
 }
 
 static void min_all_kernel_impl(Tensor& result, const Tensor& input) {
