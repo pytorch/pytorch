@@ -189,20 +189,6 @@ struct RangeEventList {
                 "num_block_elements is calculated incorrectly");
   using block_type = std::vector<Event>;
 
-// allocBlock() assumes that mutex_ is held when called, in order to prevent
-  // multiple threads' block writes stomping over each other.
-  void allocBlock() {
-    blocks.emplace_front();
-    auto & new_block = blocks.front();
-    new_block.reserve(num_block_elements);
-    // Materialize all pages in the new block to release jitter when recording events.
-    const char * const end_ptr = reinterpret_cast<char*>(new_block.data() + num_block_elements);
-    for (volatile const char * ptr = reinterpret_cast<char*>(new_block.data());
-         ptr < end_ptr; ptr += 4 * 1024) {
-      (*ptr);
-    }
-  }
-
   template<typename... Args>
   void record(Args&&... args) {
     std::lock_guard<std::mutex> guard(mutex_);
@@ -225,6 +211,20 @@ struct RangeEventList {
   }
 
   std::forward_list<block_type> blocks;
+  private:
+     // allocBlock() assumes that mutex_ is held when called, in order to prevent
+    // multiple threads' block writes stomping over each other.
+    void allocBlock() {
+      blocks.emplace_front();
+      auto & new_block = blocks.front();
+      new_block.reserve(num_block_elements);
+      // Materialize all pages in the new block to release jitter when recording events.
+      const char * const end_ptr = reinterpret_cast<char*>(new_block.data() + num_block_elements);
+      for (volatile const char * ptr = reinterpret_cast<char*>(new_block.data());
+          ptr < end_ptr; ptr += 4 * 1024) {
+        (*ptr);
+      }
+    }
 };
 
 TORCH_API RangeEventList& getEventList();
