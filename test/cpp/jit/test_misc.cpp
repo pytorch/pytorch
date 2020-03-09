@@ -736,12 +736,12 @@ void checkTracedInputs(const TracedTestInputs& inputs) {
       found_test = true;
       TORCH_CHECK(sizes.size() == 1);
       TORCH_CHECK(sizes[0] == std::vector<int64_t>({1, 2, 3}));
-    } else if (fn == "test::pow") {
+    } else if (fn == "pow") {
       found_pow = true;
       TORCH_CHECK(sizes.size() == 2);
       TORCH_CHECK(sizes[0] == std::vector<int64_t>({1, 2, 3}));
       TORCH_CHECK(sizes[1].empty());
-    } else if (fn.find("::mul") != std::string::npos) {
+    } else if (fn == "mul") {
       found_mul = true;
       TORCH_CHECK(sizes.size() > 1);
       TORCH_CHECK(sizes[0] == std::vector<int64_t>({1, 2, 3}));
@@ -750,19 +750,6 @@ void checkTracedInputs(const TracedTestInputs& inputs) {
   TORCH_CHECK(found_test);
   TORCH_CHECK(found_pow);
   TORCH_CHECK(found_mul);
-}
-
-std::string getFullName(const autograd::profiler::RecordFunction* fn_ptr) {
-  std::string full_name = "";
-  while (fn_ptr != nullptr) {
-    if (!full_name.empty()) {
-      full_name = std::string(fn_ptr->name().str()) + "::" + full_name;
-    } else {
-      full_name = fn_ptr->name().str();
-    }
-    fn_ptr = fn_ptr->parent();
-  }
-  return full_name;
 }
 
 void testRecordFunction() {
@@ -780,7 +767,7 @@ void testRecordFunction() {
           }
         }
         traced_inputs.push_back(
-            std::make_tuple(std::string(getFullName(&fn)), sizes));
+            std::make_tuple(fn.name().str(), sizes));
       },
       [](const autograd::profiler::RecordFunction&) {},
       /* needs_inputs */ true);
