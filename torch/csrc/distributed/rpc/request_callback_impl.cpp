@@ -75,8 +75,8 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
           pyCall.serializedPyObj(), responseTensorTable);
       SerializedPyObj serializedPyObj(
           std::move(payload), std::move(responseTensorTable));
-      return
-          wrap(std::move(PythonResp(std::move(serializedPyObj))).toMessage());
+      return wrap(
+          std::move(PythonResp(std::move(serializedPyObj))).toMessage());
     }
     case MessageType::SCRIPT_REMOTE_CALL: {
       auto& scriptRemoteCall = static_cast<ScriptRemoteCall&>(rpc);
