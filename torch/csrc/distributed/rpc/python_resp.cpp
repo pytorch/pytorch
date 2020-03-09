@@ -29,14 +29,6 @@ const SerializedPyObj& PythonResp::serializedPyObj() const {
   return serializedPyObj_;
 }
 
-const std::string& PythonResp::pickledPayload() const {
-  return serializedPyObj_.payload_;
-}
-
-const std::vector<torch::Tensor>& PythonResp::tensors() const {
-  return serializedPyObj_.tensors_;
-}
-
 } // namespace rpc
 } // namespace distributed
 } // namespace torch

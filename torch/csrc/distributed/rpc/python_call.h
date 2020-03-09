@@ -18,10 +18,6 @@ class TORCH_API PythonCall final : public RpcCommandBase {
 
   const SerializedPyObj& serializedPyObj() const;
 
-  const std::string& pickledPayload() const;
-
-  const std::vector<torch::Tensor>& tensors() const;
-
  private:
   SerializedPyObj serializedPyObj_;
 };
