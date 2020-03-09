@@ -199,9 +199,13 @@ struct RangeEventList {
   }
 
   std::vector<Event> consolidate() {
-    std::lock_guard<std::mutex> guard(mutex_);
+    std::unique_lock<std::mutex> guard(mutex_);
+    std::forward_list<block_type> localBlocks;
+    localBlocks.swap(blocks);
+    guard.unlock();
     std::vector<Event> result;
-    for (auto & block : blocks) {
+
+    for (auto & block : localBlocks) {
       result.insert(result.begin(),
                     std::make_move_iterator(block.begin()),
                     std::make_move_iterator(block.end()));
