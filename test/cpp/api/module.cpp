@@ -1000,7 +1000,6 @@ TEST_F(ModuleTest, PrettyPrint) {
     float y_;
   };
 
-  using namespace torch::nn;
 
   ASSERT_EQ(c10::str(EmptyModule{}), "EmptyModule");
   ASSERT_EQ(c10::str(TestModule(1, 3.14)), "TestModule(x=1, y=3.14)");

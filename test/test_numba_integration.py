@@ -1,9 +1,9 @@
 import unittest
 import sys
 
-import common_utils as common
-from common_utils import TEST_NUMBA, TEST_NUMPY
-from common_cuda import TEST_NUMBA_CUDA, TEST_CUDA, TEST_MULTIGPU
+import torch.testing._internal.common_utils as common
+from torch.testing._internal.common_utils import TEST_NUMBA, TEST_NUMPY
+from torch.testing._internal.common_cuda import TEST_NUMBA_CUDA, TEST_CUDA, TEST_MULTIGPU
 
 import torch
 
@@ -299,7 +299,7 @@ class TestNumbaIntegration(common.TestCase):
                 torch_ary += 42
                 self.assertEqual(torch_ary.data.numpy(), numpy.asarray(numba_ary) + 42)
 
-            # Explict-copy when using `torch.tensor()`
+            # Explicit-copy when using `torch.tensor()`
             for numpy_ary in numpy_arys:
                 numba_ary = numba.cuda.to_device(numpy_ary)
                 torch_ary = torch.tensor(numba_ary, device="cuda")

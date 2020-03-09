@@ -3,11 +3,11 @@
 
 #include "ThreadPoolCommon.h"
 
+#include <atomic>
 #include <functional>
 #include <memory>
 #include <mutex>
 #include <vector>
-#include <atomic>
 
 #include "caffe2/core/common.h"
 
@@ -43,7 +43,9 @@ class CAFFE2_API /*alignas(kCacheLineSize)*/ ThreadPool {
   // threadpool; work sizes smaller than this will just be run on the
   // main (calling) thread
   void setMinWorkSize(size_t size);
-  size_t getMinWorkSize() const { return minWorkSize_; }
+  size_t getMinWorkSize() const {
+    return minWorkSize_;
+  }
   void run(const std::function<void(int, size_t)>& fn, size_t range);
 
   // Run an arbitrary function in a thread-safe manner accessing the Workers
@@ -51,6 +53,7 @@ class CAFFE2_API /*alignas(kCacheLineSize)*/ ThreadPool {
   void withPool(const std::function<void(WorkersPool*)>& fn);
 
  private:
+  static size_t defaultNumThreads_;
   mutable std::mutex executionMutex_;
   size_t minWorkSize_;
   std::atomic_size_t numThreads_;

@@ -3,10 +3,10 @@ from functools import wraps
 import torch
 import itertools
 
-from common_utils import TestCase, run_tests, load_tests
-from common_device_type import instantiate_device_type_tests, onlyOnCPUAndCUDA
+from torch.testing._internal.common_utils import TestCase, run_tests, load_tests
+from torch.testing._internal.common_device_type import instantiate_device_type_tests, onlyOnCPUAndCUDA
 
-# load_tests from common_utils is used to automatically filter tests for
+# load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
 
@@ -388,7 +388,7 @@ class TestTypePromotion(TestCase):
             self.assertTrue(actual, expected)
             self.assertTrue(actual.dtype == torch.bool)
 
-            actual = x < torch.tensor(0.5)
+            actual = x < torch.tensor(0.5, device=device)
             self.assertTrue(actual, expected)
             self.assertTrue(actual.dtype == torch.bool)
 
@@ -398,7 +398,7 @@ class TestTypePromotion(TestCase):
             self.assertTrue(actual, expected)
             self.assertTrue(actual.dtype == torch.bool)
 
-            actual = x < torch.tensor(0.5)
+            actual = x < torch.tensor(0.5, device=device)
             self.assertTrue(actual, expected)
             self.assertTrue(actual.dtype == torch.bool)
 

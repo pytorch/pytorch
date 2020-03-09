@@ -63,7 +63,7 @@ C10_DEFINE_string(
     "Report the conversion stage time to screen. "
     "The format of the string is <type>|<identifier>. "
     "The valid type is 'json'. "
-    "The valid identifier is nothing or an identifer that prefix every line");
+    "The valid identifier is nothing or an identifier that prefix every line");
 C10_DEFINE_string(
     scale,
     "-1,-1",

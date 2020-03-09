@@ -1076,6 +1076,13 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
 
 // TODO: I am not sure if we actually need the 'dropout' and 'train' parameters
 // to initialize just the state tensor
+//
+// NB: You can have any color you like, as long as it's a CUDA byte
+// tensor.  Why does this function take a TensorOptions at all in that case?
+// This is a factory function: it produces tensors but takes no tensors
+// as input.  The codegen currently assumes that ALL factory functions
+// take TensorOptions, so it's just a lot easier for this function to
+// be bound if it also does it.
 Tensor _cudnn_init_dropout_state(double dropout, bool train, int64_t dropout_seed, const TensorOptions& options) {
   auto handle = getCudnnHandle();
   DropoutDescriptor dropout_desc;
@@ -1119,7 +1126,7 @@ std::tuple<Tensor, Tensor> pack_hidden<std::tuple<Tensor, Tensor>>(const Tensor&
 struct DropoutState {
   // Both buffer and event are lazily instantiated when a dropout state is needed
   // for the first time. Note that in this case needed != used, as we don't need
-  // a bufer to e.g. run RNNs in test mode.
+  // a buffer to e.g. run RNNs in test mode.
   at::Tensor buffer;
   c10::optional<cuda::CUDAEvent> event;
   std::mutex mutex;

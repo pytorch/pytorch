@@ -317,7 +317,7 @@ def embedding(g, weight, indices, padding_idx, scale_grad_by_freq, sparse):
     return g.op("Gather", weight, indices)
 
 
-@parse_args('v', 'v', 'v', 'i', 'i', 'i', 'v')
+@parse_args('v', 'v', 'v', 'i', 'i', 'i', 'v', 'i')
 def embedding_bag(g,
                   embedding_matrix,
                   indices,
@@ -325,7 +325,8 @@ def embedding_bag(g,
                   scale_grad_by_freq,
                   mode,
                   sparse,
-                  per_sample_weights):
+                  per_sample_weights,
+                  include_last_offset):
     if not sym_help._is_none(per_sample_weights):
         raise RuntimeError('Unsupported: ONNX export of embedding_bag '
                            'with per_sample_weights')
@@ -337,7 +338,8 @@ def embedding_bag(g,
                 outputs=4,
                 scale_grad_by_freq_i=scale_grad_by_freq,
                 mode_i=mode,
-                sparse_i=sparse)
+                sparse_i=sparse,
+                include_last_offset_i=include_last_offset)
 
 
 def size(g, self, dim):
@@ -651,6 +653,8 @@ def _avg_pool(name, tuple_fn):
     def symbolic_fn(g, input, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override=None):
         if ceil_mode and not input.isCompleteTensor():
             return _unimplemented(name, "input size not accessible")
+        if not stride:
+            stride = kernel_size
         padding = sym_help._avgpool_helper(tuple_fn, padding, kernel_size, stride, divisor_override, name)
         if ceil_mode:
             padding_ceil = get_pool_ceil_padding(input, kernel_size, stride, padding)
@@ -793,6 +797,12 @@ def __interpolate(g, input, size, scale_factor, mode , align_corners, recompute_
     scales, mode = sym_help._interpolate_get_scales_and_mode(g, input, size, scale_factor,
                                                              mode , align_corners)
     return g.op("Upsample", input, scales, mode_s=mode)
+
+@parse_args('v')
+def bitwise_not(g, inp):
+    if inp.type().scalarType() != 'Bool':
+        return _unimplemented("bitwise_not", "non-bool tensor")
+    return g.op("Not", inp)
 
 
 def wrap_logical_op_with_cast_to(to_type):
@@ -1341,6 +1351,14 @@ def zeros_like(g, input, dtype=None, layout=None, device=None, pin_memory=False,
                 value_t=torch.tensor([0], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
 
 
+@parse_args('v', 'v', 'i', 'v', 'v', 'v')
+def new_zeros(g, self, sizes, dtype, layout, device, pin_memory=False):
+    if dtype is None:
+        dtype = self.type().scalarType()
+        dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
+    return zeros(g, sizes, dtype, layout, device, pin_memory)
+
+
 @parse_args('v', 'i', 'v', 'v', 'v')
 def ones(g, sizes, dtype, layout, device, pin_memory=False):
     if dtype is None:
@@ -1739,26 +1757,38 @@ def _pad_packed_sequence(g, data, batch_sizes, batch_first, padding_value, total
     return data, lengths
 
 
-def randn(g, *shapes):
-    shapes_list = list(shapes)
-    shape = sym_help._get_const(shapes_list[0], "is", "randn")
+def randn(g, shapes, dtype, *options):
+    dtype = sym_help._get_const(dtype, 'i', 'dtype')
+    if dtype is None:
+        dtype = 6  # float
+    if sym_help._is_packed_list(shapes):
+        shape_const = g.op("ConstantOfShape", shapes,
+                           value_t=torch.tensor([0], dtype=sym_help.scalar_type_to_pytorch_type[6]))
+        return g.op('RandomNormalLike', shape_const, dtype_i=sym_help.scalar_type_to_onnx[dtype])
+    shape = sym_help._get_const(shapes, "is", "randn")
     return g.op('RandomNormal', shape_i=shape)
 
 
-def rand(g, *shapes):
-    shapes_list = list(shapes)
-    shape = sym_help._get_const(shapes_list[0], "is", "rand")
+def rand(g, shapes, dtype, *options):
+    dtype = sym_help._get_const(dtype, 'i', 'dtype')
+    if dtype is None:
+        dtype = 6  # float
+    if sym_help._is_packed_list(shapes):
+        shape_const = g.op("ConstantOfShape", shapes,
+                           value_t=torch.tensor([0], dtype=sym_help.scalar_type_to_pytorch_type[6]))
+        return g.op('RandomUniformLike', shape_const, dtype_i=sym_help.scalar_type_to_onnx[dtype])
+    shape = sym_help._get_const(shapes, "is", "rand")
     return g.op('RandomUniform', shape_i=shape)
 
 
-def randn_like(g, self, dtype, layout, device, pin_memory=False, memory_format=None):
+def randn_like(g, self, dtype, layout=None, device=None, pin_memory=False, memory_format=None):
     dtype = sym_help._get_const(dtype, 'i', 'dtype')
     if dtype is None:
         dtype = 6  # float
     return g.op('RandomNormalLike', self, dtype_i=sym_help.scalar_type_to_onnx[dtype])
 
 
-def rand_like(g, self, dtype, layout, device, pin_memory=False, memory_format=None):
+def rand_like(g, self, dtype, layout=None, device=None, pin_memory=False, memory_format=None):
     dtype = sym_help._get_const(dtype, 'i', 'dtype')
     if dtype is None:
         dtype = 6  # float
@@ -1982,7 +2012,9 @@ def index(g, self, index):
         indices = [index]
 
     def try_mask_to_index(index):
-        if not sym_help._is_none(index) and index.type().scalarType() == "Byte":
+        if not sym_help._is_none(index) and (index.type().scalarType() == "Byte" or index.type().scalarType() == "Bool"):
+            if sym_help._export_onnx_opset_version < 9:
+                raise RuntimeError("Exporting masked indices are only supported after ONNX opset 9.")
             warnings.warn("Exporting aten::index operator with indices of type Byte. "
                           "Only 1-D indices are supported. In any other case, "
                           "this will produce an incorrect ONNX graph.")
@@ -2170,7 +2202,7 @@ def group_norm(g, input, num_groups, weight, bias, eps, cudnn_enabled):
         bias = g.op("Constant", value_t=bias_value)
 
     # Norm has shape [N, C, *] so we reshape weight and bias to [C, *]
-    axes = [i for i in range(1, len(input_sizes) - 1)]
+    axes = list(range(1, len(input_sizes) - 1))
     return add(g, mul(g, norm, g.op("Unsqueeze", weight, axes_i=axes)), g.op("Unsqueeze", bias, axes_i=axes))
 
 
@@ -2194,3 +2226,18 @@ def _weight_norm(g, weight_v, weight_g, dim):
         return g.op("Mul", div, weight_g)
     else:
         return g.op("ATen", weight_v, weight_g, dim_i=dim, operator_s="_weight_norm")
+
+def dim(g, self):
+    '''Implement the dim functionality available for a pytorch tensor in ONNX'''
+    # ONNX does not support dim directly in this opset so we can use 2 ops to get the info
+    shape = g.op('Shape', self)
+    return g.op('Size', shape)
+
+def __getitem_(g, self, i):
+    return select(g, self, g.op("Constant", value_t=torch.tensor([0])), i)
+
+def take(g, self, index):
+    self_flattened = g.op('Reshape', self, g.op("Constant", value_t=torch.tensor([-1], dtype=torch.int64)))
+    out = index_select(g, self_flattened, 0, index)
+    out = reshape_as(g, out, index)
+    return out

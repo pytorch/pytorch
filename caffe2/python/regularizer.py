@@ -150,7 +150,7 @@ class L0ApproxNorm(Regularizer):
         reg_lambda: parameter to scale regularization by
 
         alpha:      hyper parameter to tune that is only used in the calculation
-                    of approxiamte L0 norm
+                    of approximate L0 norm
 
         budget:     desired number of features. If the number of features is greater
                     than the budget amount, then the least important features will

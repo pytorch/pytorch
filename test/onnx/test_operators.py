@@ -14,7 +14,7 @@ import inspect
 import glob
 import os
 import shutil
-import common_utils as common
+import torch.testing._internal.common_utils as common
 
 
 '''Usage: python test/onnx/test_operators.py [--no-onnx] [--produce-onnx-test-data]
@@ -851,6 +851,10 @@ class TestOperators(TestCase):
     def test_round(self):
         x = torch.tensor([0.9920, -1.0362, -1.5000, 2.5000], requires_grad=True)
         self.assertONNX(lambda x: torch.round(x), x, opset_version=11)
+
+    def test_dim(self):
+        x = torch.ones((2, 2), requires_grad=True)
+        self.assertONNX(lambda x: torch.scalar_tensor(x.dim()), x)
 
     @skipIfNoLapack
     def test_det(self):

@@ -15,6 +15,15 @@ _triple = _ntuple(3)
 _quadruple = _ntuple(4)
 
 
+def _repeat_tuple(t, n):
+    r"""Repeat each element of `t` for `n` times.
+
+    This can be used to translate padding arg used by Conv and Pooling modules
+    to the ones used by `F.pad`.
+    """
+    return tuple(x for x in t for _ in range(n))
+
+
 def _list_with_default(out_size, defaults):
     if isinstance(out_size, int):
         return out_size

@@ -300,7 +300,7 @@ class alignas(kGEMMLOWPCacheLineSize) Worker {
     return nullptr;
   }
 
-  // Called by the master thead to give this worker work to do.
+  // Called by the master thread to give this worker work to do.
   // It is only legal to call this if the worker
   void StartWork(Task* task) {
     DCHECK(!task_.load());

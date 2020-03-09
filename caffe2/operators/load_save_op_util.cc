@@ -27,7 +27,7 @@ void ProcessBlob(
   auto& blob_states = *blob_states_ptr;
   if (blob_states.count(key) == 0) {
     // We reset the blob so that any existing content is destroyed. This
-    // is to guaranee correct device placement: if we are deserializing
+    // is to guarantee correct device placement: if we are deserializing
     // into a TensorCUDA, without explicit Reset we might be loading data
     // into an existing TensorCUDA that has pre-allocated memory on a
     // different GPU.

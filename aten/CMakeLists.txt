@@ -49,7 +49,6 @@ set(TH_CPU_INCLUDE
   ${CMAKE_BINARY_DIR}/aten/src)
 list(APPEND ATen_CPU_INCLUDE ${TH_CPU_INCLUDE})
 
-add_subdirectory(src/THNN)
 
 # Find the HIP package, set the HIP paths, load the HIP CMake.
 IF(USE_ROCM)

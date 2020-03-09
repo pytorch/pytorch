@@ -8,7 +8,7 @@ python %SCRIPT_HELPERS_DIR%\run_python_nn_smoketests.py
 if ERRORLEVEL 1 exit /b 1
 
 echo Run nn tests
-python run_test.py --include nn --verbose
+python run_test.py --include test_nn --verbose --determine-from="%1"
 if ERRORLEVEL 1 exit /b 1
 
 popd

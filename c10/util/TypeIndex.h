@@ -10,13 +10,45 @@
 namespace c10 {
 namespace util {
 
-#if (defined(_MSC_VER) && defined(__CUDACC__)) || (!defined(__clang__) && !defined(_MSC_VER) && defined(__GNUC__) && __GNUC__ < 9)
-// GCC<9 has issues with our implementation for constexpr typenames.
-// So does nvcc on Windows.
-// Any version of MSVC or Clang and GCC 9 are fine with it.
 // TODO Make it work for more compilers
+
+// Clang works
+#if defined(__clang__)
+
+// except for NVCC
+#if defined(__CUDACC__)
 #define C10_TYPENAME_SUPPORTS_CONSTEXPR 0
 #define C10_TYPENAME_CONSTEXPR
+#else
+#define C10_TYPENAME_SUPPORTS_CONSTEXPR 1
+#define C10_TYPENAME_CONSTEXPR constexpr
+#endif
+
+// Windows works
+#elif defined(_MSC_VER)
+
+// except for NVCC
+#if defined(__CUDACC__)
+#define C10_TYPENAME_SUPPORTS_CONSTEXPR 0
+#define C10_TYPENAME_CONSTEXPR
+#else
+#define C10_TYPENAME_SUPPORTS_CONSTEXPR 1
+#define C10_TYPENAME_CONSTEXPR constexpr
+#endif
+
+// GCC works
+#elif defined(__GNUC__)
+
+// except when gcc < 9
+#if (__GNUC__ < 9)
+#define C10_TYPENAME_SUPPORTS_CONSTEXPR 0
+#define C10_TYPENAME_CONSTEXPR
+#else
+#define C10_TYPENAME_SUPPORTS_CONSTEXPR 1
+#define C10_TYPENAME_CONSTEXPR constexpr
+#endif
+
+// some other compiler we don't know about
 #else
 #define C10_TYPENAME_SUPPORTS_CONSTEXPR 1
 #define C10_TYPENAME_CONSTEXPR constexpr
@@ -86,9 +118,9 @@ inline C10_TYPENAME_CONSTEXPR c10::string_view fully_qualified_type_name_impl() 
 #endif
 }
 
+#if !defined(__CUDA_ARCH__)
 template <typename T>
 inline constexpr uint64_t type_index_impl() {
-#if !defined(__CUDA_ARCH__)
 // Idea: __PRETTY_FUNCTION__ (or __FUNCSIG__ on msvc) contains a qualified name
 // of this function, including its template parameter, i.e. including the
 // type we want an id for. We use this name and run crc64 on it to get a type
@@ -100,10 +132,8 @@ inline constexpr uint64_t type_index_impl() {
 #elif defined(__GNUC__)
   return crc64(__PRETTY_FUNCTION__, sizeof(__PRETTY_FUNCTION__)).checksum();
 #endif
-#else
-  throw std::logic_error("This should not be called on device code");
-#endif
 }
+#endif
 
 } // namespace detail
 

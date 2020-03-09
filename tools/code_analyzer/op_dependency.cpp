@@ -727,12 +727,12 @@ private:
       if (it == graph.end() || it->second.empty()) {
         continue;
       }
-      out << "    '" << demangle(K) << "': [" << std::endl;
+      out << "    \"" << demangle(K) << "\": [" << std::endl;
       for (const auto& value : it->second) {
         if (value == K) { // skip itself
           continue;
         }
-        out << "        '" << demangle(value) << "'," << std::endl;
+        out << "        \"" << demangle(value) << "\"," << std::endl;
       }
       out << "    ]," << std::endl;
     }
