@@ -42,7 +42,7 @@ struct TORCH_API StringView {
 
 struct TORCH_API RecordFunction {
   // Default constructor is used with before function called afterwards
-  RecordFunction() = default;
+  RecordFunction() {}
 
   RecordFunction(const RecordFunction&) = delete;
   RecordFunction& operator=(const RecordFunction&) = delete;
@@ -52,9 +52,9 @@ struct TORCH_API RecordFunction {
 
   // before function initializes RecordFunction members and calls
   // start callbacks
-  virtual void before(const char* name, int64_t sequence_nr = -1);
-  virtual void before(std::string name, int64_t sequence_nr = -1);
-  virtual void before(Node* fn, int64_t sequence_nr = -1);
+  void before(const char* name, int64_t sequence_nr = -1);
+  void before(std::string name, int64_t sequence_nr = -1);
+  void before(Node* fn, int64_t sequence_nr = -1);
 
   template<typename F>
   void before(
@@ -93,74 +93,57 @@ struct TORCH_API RecordFunction {
     return inputs_;
   }
 
-  inline const RecordFunction* parent() const {
-    return parent_;
-  }
-
   bool active() const {
     return initialized_;
   }
 
-  void setRunSampled(bool run_sampled) {
+  // Internal, only for the use within RECORD_FUNCTION macro;
+  // enables this record function to run sampled callbacks
+  void _setRunSampled(bool run_sampled) {
     run_sampled_ = run_sampled;
   }
 
-  virtual void end();
+  // Internal, only for the use within RECORD_FUNCTION macro;
+  // sets this function as the current() thread local function;
+  // original value of current() is restored in destructor
+  void _setCurrent();
 
-  // Retrieves the thread_id that this RecordFunction was created with. Useful
-  // if we need to access Events created by the original thread in a different
-  // thread. The threadId_ should only be set (via setThreadId) in cases where
-  // RecordFunction::end is called in a different thread.
-  inline uint16_t getThreadId() const {
+  // Executes end callbacks
+  void end();
+
+  // Retrieves the thread_id that this RecordFunction ran start callbacks with.
+  // Useful for writing thread safe end callbacks that may be potentially
+  // executed in a different thread (async ops)
+  inline uint16_t getStartCallbacksThreadId() const {
     return threadId_;
   }
 
- protected:
+  // Get logical thread_id for the current thread
+  static uint16_t getCurrentThreadId();
+
+ private:
   void processCallbacks();
-  // Runs the end callbacks that were pushed to the callback manager. Throws if
-  // the current RecordFunction is not initialized.
-  void runEndCallbacks();
 
   Node* fn_ = nullptr;
   StringView name_;
   int64_t sequence_nr_ = -1;
   std::vector<c10::IValue> inputs_;
-  // parent_ points to the parent RecordFunction and must out live this.
+  // parent_ points to the parent RecordFunction and must out live this;
+  // only to be used together with RECORD_FUNCTION macro
   RecordFunction* parent_ = nullptr;
 
   bool initialized_ = false;
   bool run_sampled_ = false;
-  // The thread_id that this RecordFunction was created with. If 0, this means
-  // that it was not set with setThreadId() and this RecordFunction's callbacks
-  // cannot be invoked from a separate thread.
+
+  // is_current_ true means that this record function updates thread local
+  // current record function pointer;
+  // true only in case of scope-based record functions, i.e.
+  // RECORD_FUNCTION macro
+  bool is_current_ = false;
+
+  // The logical thread_id that this RecordFunction was created with.
   uint16_t threadId_ = 0;
 };
-
-struct TORCH_API RecordFunctionAsync : public RecordFunction {
-  // Default constructor should be used in conjunction with
-  // RecordFunctionAsync::before.
-  RecordFunctionAsync() = default;
-  // Override run ::before to run starting callbacks, and set the thread_id on
-  // this RecordFunctionAsync so we can properly record this function in the
-  // profiler.
-  void before(const char* name, int64_t sequence_nr = -1) override;
-  void before(std::string name, int64_t sequence_nr = -1) override;
-  void before(Node* fn, int64_t sequence_nr = -1) override;
-  // Reset the currently active RecordFunction to be the parent. Needed to
-  // ensure that scopes created with the record_function decorator work with
-  // RecordFunctionAsync.
-  void exitScope();
-  // Run the end callbacks with this RecordFunctionAsync.
-  void end() override;
-  // Saves the thread_id that this RecordFunctionAsync was created with. This is
-  // needed so that we can access Events created by the original thread in a
-  // different thread, since they are thread-local. This should be used to call
-  // RecordFunctionAsync::end() in a different thread.
-  void setThreadId();
-  ~RecordFunctionAsync();
-};
-
-
 
 TORCH_API bool hasCallbacks();
 TORCH_API bool needsInputs();
@@ -182,7 +165,8 @@ TORCH_API void runBeforeCallbacks(
   if (torch::autograd::profiler::hasCallbacks()) { \
     auto run_sampled = torch::autograd::profiler::shouldRunSampledCallbacks(); \
     if (run_sampled || torch::autograd::profiler::hasNonSampledCallbacks()) { \
-      guard.setRunSampled(run_sampled); \
+      guard._setCurrent(); \
+      guard._setRunSampled(run_sampled); \
       if (torch::autograd::profiler::needsInputs()) { \
         guard.before(fn, inputs, ##__VA_ARGS__); \
       } else { \

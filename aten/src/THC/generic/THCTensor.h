@@ -41,18 +41,6 @@ THC_API THCTensor *THCTensor_(new)(THCState *state);
 THC_API THCTensor *THCTensor_(newWithTensor)(THCState *state, THCTensor *tensor);
 THC_API THCTensor *THCTensor_(newWithStorage1d)(THCState *state, THCStorage *storage_, ptrdiff_t storageOffset_,
                                 int64_t size0_, int64_t stride0_);
-THC_API THCTensor *THCTensor_(newWithStorage2d)(THCState *state, THCStorage *storage_, ptrdiff_t storageOffset_,
-                                int64_t size0_, int64_t stride0_,
-                                int64_t size1_, int64_t stride1_);
-THC_API THCTensor *THCTensor_(newWithStorage3d)(THCState *state, THCStorage *storage_, ptrdiff_t storageOffset_,
-                                int64_t size0_, int64_t stride0_,
-                                int64_t size1_, int64_t stride1_,
-                                int64_t size2_, int64_t stride2_);
-THC_API THCTensor *THCTensor_(newWithStorage4d)(THCState *state, THCStorage *storage_, ptrdiff_t storageOffset_,
-                                int64_t size0_, int64_t stride0_,
-                                int64_t size1_, int64_t stride1_,
-                                int64_t size2_, int64_t stride2_,
-                                int64_t size3_, int64_t stride3_);
 
 /* stride might be NULL */
 THC_API THCTensor *THCTensor_(newWithSize1d)(THCState *state, int64_t size0_);

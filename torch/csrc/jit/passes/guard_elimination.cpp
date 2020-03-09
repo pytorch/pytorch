@@ -1,7 +1,7 @@
 #include <memory>
-#include <torch/csrc/jit/graph_executor.h>
+#include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/passes/alias_analysis.h>
+#include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/guard_elimination.h>
 #include <torch/csrc/jit/passes/peephole.h>

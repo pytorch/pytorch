@@ -1,6 +1,6 @@
 #include <torch/csrc/distributed/autograd/rpc_messages/propagate_gradients_req.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
-#include <torch/csrc/jit/pickle.h>
+#include <torch/csrc/jit/serialization/pickle.h>
 
 namespace torch {
 namespace distributed {
