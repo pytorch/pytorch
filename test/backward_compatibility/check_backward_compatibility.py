@@ -66,6 +66,7 @@ white_list = [
     ('aten::ones_like', datetime.date(2020, 3, 15)),
     ('aten::randint_like', datetime.date(2020, 3, 15)),
     ('aten::zeros_like', datetime.date(2020, 3, 15)),
+    ('aten::is_confirmed', datetime.date(2020, 3, 15)),
     ('_aten', datetime.date(2020, 4, 1)),
 ]
 

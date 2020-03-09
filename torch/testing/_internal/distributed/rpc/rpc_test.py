@@ -1655,19 +1655,32 @@ class RpcTest(RpcAgentTestFixture):
             ):
                 rpc.rpc_sync(callee_worker, foo_add, args=())
 
-
-    @dist_init
-    def test_user_rrefs_confirmed(self):
-        dst_rank = (self.rank + 1) % self.world_size
+    def _create_rref(self):
         owner_rank = (self.rank + 2) % self.world_size
-        rref = rpc.remote(
+        return rpc.remote(
             "worker{}".format(owner_rank),
             torch.add,
             args=(torch.zeros(2, 2), 1)
         )
+
+    @dist_init
+    def test_user_rrefs_confirmed(self):
+        dst_rank = (self.rank + 1) % self.world_size
+        rref = self._create_rref()
         ret = rpc.rpc_sync(
             "worker{}".format(dst_rank),
             check_rref_confirmed,
             args=(rref,)
         )
         self.assertEqual(ret, True)
+
+    @dist_init
+    def test_user_rrefs_confirmed_remote(self):
+        dst_rank = (self.rank + 1) % self.world_size
+        rref = self._create_rref()
+        ret_rref = rpc.remote(
+            "worker{}".format(dst_rank),
+            check_rref_confirmed,
+            args=(rref,)
+        )
+        self.assertEqual(ret_rref.to_here(), True)

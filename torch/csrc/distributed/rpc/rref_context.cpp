@@ -384,7 +384,8 @@ void RRefContext::addPendingUser(
     // same thread, but deleting pending users will be called from another
     // thread. As the delPendingUser will not be able to access the same
     // thread_local variable, we cannot address this problem by making
-    // pendingUsers_ thread_local.
+    // pendingUsers_ thread_local. Instead, pendingUsers_ and userTable_ share
+    // the same PendingUserState shared_ptr.
     userTable_.push_back(state);
   }
 
@@ -405,7 +406,8 @@ void RRefContext::delPendingUser(const ForkId& forkId) {
   TORCH_INTERNAL_ASSERT(
       iter != pendingUsers_.end(),
       "Inconsistent states: attempt to delete a non-exist UserRRef.");
-  iter->second->notifyAll();
+  // unblock pending user functions
+  iter->second->confirm();
   pendingUsers_.erase(iter);
 }
 

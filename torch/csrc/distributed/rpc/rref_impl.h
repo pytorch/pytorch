@@ -249,6 +249,14 @@ class TORCH_API UserRRef final : public RRef {
     return false;
   }
 
+  inline bool isConfirmed() const override {
+    return confirmed_;
+  }
+
+  inline void confirm() {
+    confirmed_ = true;
+  }
+
   // Returns the globally unique ForkId of this RRef
   const ForkId& forkId() const;
 
@@ -263,6 +271,7 @@ class TORCH_API UserRRef final : public RRef {
   friend class RRefContext;
 
   const ForkId forkId_;
+  std::atomic<bool> confirmed_;
 };
 
 // Keep the template only on the derived class because ``RRefContext`` needs to
@@ -287,6 +296,10 @@ class TORCH_API OwnerRRef final : public RRef {
   }
 
   inline bool isOwner() const override {
+    return true;
+  }
+
+  inline bool isConfirmed() const override {
     return true;
   }
 

@@ -5,6 +5,7 @@
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/rref_impl.h>
 #include <torch/csrc/distributed/rpc/types.h>
+#include <torch/csrc/utils/future.h>
 
 #include <atomic>
 
@@ -156,7 +157,7 @@ class TORCH_API RRefContext {
   }
   void waitForThreadLocalPendingUsers() {
     for (auto& state: userTable_) {
-      state->wait();
+      state->future_.wait();
     }
     userTable_.clear();
     recording = false;
@@ -172,20 +173,18 @@ class TORCH_API RRefContext {
  private:
 
   struct PendingUserState {
-    PendingUserState(c10::intrusive_ptr<RRef> rref) : rref_(std::move(rref)) {}
+    PendingUserState(c10::intrusive_ptr<RRef> rref)
+        : rref_(std::move(rref)) {}
 
-    void wait() {
-      std::unique_lock<std::mutex> lock(mutex_);
-      cv_.wait(lock);
-    }
-
-    void notifyAll() {
-      cv_.notify_all();
+    inline void confirm() {
+      c10::static_intrusive_pointer_cast<UserRRef>(rref_)->confirm();
+      future_.markCompleted(true);
     }
 
     c10::intrusive_ptr<RRef> rref_;
-    std::mutex mutex_;
-    std::condition_variable cv_;
+    // Use Future.wait() and Future.markCompleted() to block and unblock user
+    // functions. The bool value wrapped by the future_ is not used.
+    torch::utils::Future<bool> future_;
   };
 
   RRefContext(std::shared_ptr<RpcAgent>);

@@ -97,7 +97,7 @@ class LocalRRefTest(RpcAgentTestFixture):
             return
 
         # Create a local RRef<MyModuleInterface>.
-        rref_script_module = rpc.RRef(MyScriptModule(self.rank), MyModuleInterface) 
+        rref_script_module = rpc.RRef(MyScriptModule(self.rank), MyModuleInterface)
         ret = rref_script_module.to_here().forward()
         self.assertEqual(ret, torch.ones(self.rank))
 
@@ -535,6 +535,11 @@ def rref_script_annotation(rref_var):
     return rref_python_annotation(rref_var).to_here()
 
 
+@torch.jit.script
+def script_check_rref_confirmed(rref):
+    # type: (RRef[Tensor]) -> bool
+    return rref.is_confirmed()
+
 @unittest.skipIf(
     not torch._six.PY3, "Pytorch distributed rpc package does not support python2"
 )
@@ -673,3 +678,34 @@ class JitRpcTest(LocalRRefTest, JitRpcAsyncOpTest, RpcAgentTestFixture):
 
         res = rref_script_annotation(rref_var)
         self.assertEqual(res, torch.ones(2, 2) + 1)
+
+
+    def _create_rref(self):
+        owner_rank = (self.rank + 2) % self.world_size
+        return rpc.remote(
+            "worker{}".format(owner_rank),
+            torch.add,
+            args=(torch.zeros(2, 2), 1)
+        )
+
+    @dist_init
+    def test_user_rrefs_confirmed(self):
+        dst_rank = (self.rank + 1) % self.world_size
+        rref = self._create_rref()
+        ret = rpc.rpc_sync(
+            "worker{}".format(dst_rank),
+            script_check_rref_confirmed,
+            args=(rref,)
+        )
+        self.assertEqual(ret, True)
+
+    @dist_init
+    def test_user_rrefs_confirmed_remote(self):
+        dst_rank = (self.rank + 1) % self.world_size
+        rref = self._create_rref()
+        ret_rref = rpc.remote(
+            "worker{}".format(dst_rank),
+            script_check_rref_confirmed,
+            args=(rref,)
+        )
+        self.assertEqual(ret_rref.to_here(), True)

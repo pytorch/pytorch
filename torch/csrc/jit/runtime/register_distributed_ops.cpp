@@ -68,6 +68,14 @@ RegisterOperators reg_rpc_ops({
         },
         aliasAnalysisFromSchema()),
      Operator(
+         "aten::is_confirmed(RRef(t) self) -> bool",
+         [](Stack& stack) {
+           auto rref = pop(stack).toRRef();
+           push(stack, rref->isConfirmed());
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
          prim::rpc_async,
          [](const Node* node) -> Operation {
            int num_inputs = node->inputs().size();
