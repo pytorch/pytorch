@@ -53,7 +53,7 @@ Tensor kl_div_backward_cuda(const Tensor& grad, const Tensor& input, const Tenso
     gpu_kernel(iter,
       [inv] GPU_LAMBDA (scalar_t target_val, scalar_t grad_val) {
         return (target_val > 0) ? scalar_t(-target_val * grad_val * inv) : scalar_t(0.0);
-    });
+      });
   });
   return grad_input;
 }

@@ -3218,7 +3218,7 @@ new_criterion_tests = [
         constructor_args=(torch.rand(()),),
         input_fn=lambda: torch.rand(()).clamp_(1e-2, 1 - 1e-2),
         target_fn=lambda: torch.randn(()).gt(0).double(),
-        desc='scalar_weights',
+        desc='scalar_weights'
     ),
     dict(
         module_name='NLLLoss',

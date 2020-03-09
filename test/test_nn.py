@@ -10727,6 +10727,7 @@ class TestNNDeviceType(NNTestCase):
         self.assertRaises(RuntimeError,
                           lambda: nn.functional.multi_margin_loss(torch.randn(5, device=device),
                                                                   torch.zeros(3, device=device)))
+
     def _test_bfloat16_ops(self, op, device, inp_dims=(), prec=1e-2):
         # fp32 compute
         input1 = torch.randn(inp_dims, dtype=torch.float32, device=device, requires_grad=True)
