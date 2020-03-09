@@ -18,7 +18,7 @@ TEST(TensorIndexingTest, Slice) {
 
 TEST(TensorIndexingTest, TensorIndex) {
   {
-    std::vector<TensorIndex> indices = {None, "...", Ellipsis, 0, true, {1, None, 2}, torch::tensor({1, 2})};
+    std::vector<TensorIndex> indices = {None, "...", Ellipsis, 0, true, Slice(1, None, 2), torch::tensor({1, 2})};
     ASSERT_TRUE(indices[0].is_none());
     ASSERT_TRUE(indices[1].is_ellipsis());
     ASSERT_TRUE(indices[2].is_ellipsis());
@@ -38,42 +38,8 @@ TEST(TensorIndexingTest, TensorIndex) {
     TensorIndex(".."),
     "Expected \"...\" to represent an ellipsis index, but got \"..\"");
 
-  // NOTE: Some compilers such as Clang and MSVC always treat `TensorIndex({1})` the same as
-  // `TensorIndex(1)`. This is in violation of the C++ standard
-  // (`https://en.cppreference.com/w/cpp/language/list_initialization`), which says:
-  // ```
-  // copy-list-initialization:
-  //
-  // U( { arg1, arg2, ... } )
-  //
-  // functional cast expression or other constructor invocations, where braced-init-list is used
-  // in place of a constructor argument. Copy-list-initialization initializes the constructor's parameter
-  // (note; the type U in this example is not the type that's being list-initialized; U's constructor's parameter is)
-  // ```
-  // When we call `TensorIndex({1})`, `TensorIndex`'s constructor's parameter is being list-initialized with {1}.
-  // And since we have the `TensorIndex(std::initializer_list<c10::optional<int64_t>>)` constructor, the following
-  // rule in the standard applies:
-  // ```
-  // The effects of list initialization of an object of type T are:
-  //
-  // if T is a specialization of std::initializer_list, the T object is direct-initialized or copy-initialized,
-  // depending on context, from a prvalue of the same type initialized from the braced-init-list.
-  // ```
-  // Therefore, if the compiler strictly follows the standard, it should treat `TensorIndex({1})` as
-  // `TensorIndex(std::initializer_list<c10::optional<int64_t>>({1}))`. However, this is not the case for
-  // compilers such as Clang and MSVC, and hence we skip this test for those compilers.
-#if !defined(__clang__) && !defined(_MSC_VER)
-  ASSERT_THROWS_WITH(
-    TensorIndex({1}),
-    "Expected 0 / 2 / 3 elements in the braced-init-list to represent a slice index, but got 1 element(s)");
-#endif
-
-  ASSERT_THROWS_WITH(
-    TensorIndex({1, 2, 3, 4}),
-    "Expected 0 / 2 / 3 elements in the braced-init-list to represent a slice index, but got 4 element(s)");
-
   {
-    std::vector<TensorIndex> indices = {None, "...", Ellipsis, 0, true, {1, None, 2}};
+    std::vector<TensorIndex> indices = {None, "...", Ellipsis, 0, true, Slice(1, None, 2)};
     ASSERT_EQ(c10::str(indices), c10::str("(None, ..., ..., 0, true, 1:", INDEX_MAX, ":2)"));
     ASSERT_EQ(c10::str(indices[0]), "None");
     ASSERT_EQ(c10::str(indices[1]), "...");
@@ -83,24 +49,24 @@ TEST(TensorIndexingTest, TensorIndex) {
     ASSERT_EQ(c10::str(indices[5]), c10::str("1:", INDEX_MAX, ":2"));
   }
 
-  ASSERT_EQ(c10::str(std::vector<TensorIndex>({{}})), c10::str("(0:", INDEX_MAX, ":1)"));
-  ASSERT_EQ(c10::str(std::vector<TensorIndex>({{None, None}})), c10::str("(0:", INDEX_MAX, ":1)"));
-  ASSERT_EQ(c10::str(std::vector<TensorIndex>({{None, None, None}})), c10::str("(0:", INDEX_MAX, ":1)"));
+  ASSERT_EQ(c10::str(std::vector<TensorIndex>({Slice()})), c10::str("(0:", INDEX_MAX, ":1)"));
+  ASSERT_EQ(c10::str(std::vector<TensorIndex>({Slice(None, None)})), c10::str("(0:", INDEX_MAX, ":1)"));
+  ASSERT_EQ(c10::str(std::vector<TensorIndex>({Slice(None, None, None)})), c10::str("(0:", INDEX_MAX, ":1)"));
 
-  ASSERT_EQ(c10::str(std::vector<TensorIndex>({{1, None}})), c10::str("(1:", INDEX_MAX, ":1)"));
-  ASSERT_EQ(c10::str(std::vector<TensorIndex>({{1, None, None}})), c10::str("(1:", INDEX_MAX, ":1)"));
-  ASSERT_EQ(c10::str(std::vector<TensorIndex>({{None, 3}})), c10::str("(0:3:1)"));
-  ASSERT_EQ(c10::str(std::vector<TensorIndex>({{None, 3, None}})), c10::str("(0:3:1)"));
-  ASSERT_EQ(c10::str(std::vector<TensorIndex>({{None, None, 2}})), c10::str("(0:", INDEX_MAX, ":2)"));
-  ASSERT_EQ(c10::str(std::vector<TensorIndex>({{None, None, -1}})), c10::str("(", INDEX_MAX, ":", INDEX_MIN, ":-1)"));
+  ASSERT_EQ(c10::str(std::vector<TensorIndex>({Slice(1, None)})), c10::str("(1:", INDEX_MAX, ":1)"));
+  ASSERT_EQ(c10::str(std::vector<TensorIndex>({Slice(1, None, None)})), c10::str("(1:", INDEX_MAX, ":1)"));
+  ASSERT_EQ(c10::str(std::vector<TensorIndex>({Slice(None, 3)})), c10::str("(0:3:1)"));
+  ASSERT_EQ(c10::str(std::vector<TensorIndex>({Slice(None, 3, None)})), c10::str("(0:3:1)"));
+  ASSERT_EQ(c10::str(std::vector<TensorIndex>({Slice(None, None, 2)})), c10::str("(0:", INDEX_MAX, ":2)"));
+  ASSERT_EQ(c10::str(std::vector<TensorIndex>({Slice(None, None, -1)})), c10::str("(", INDEX_MAX, ":", INDEX_MIN, ":-1)"));
 
-  ASSERT_EQ(c10::str(std::vector<TensorIndex>({{1, 3}})), c10::str("(1:3:1)"));
-  ASSERT_EQ(c10::str(std::vector<TensorIndex>({{1, None, 2}})), c10::str("(1:", INDEX_MAX, ":2)"));
-  ASSERT_EQ(c10::str(std::vector<TensorIndex>({{1, None, -1}})), c10::str("(1:", INDEX_MIN, ":-1)"));
-  ASSERT_EQ(c10::str(std::vector<TensorIndex>({{None, 3, 2}})), c10::str("(0:3:2)"));
-  ASSERT_EQ(c10::str(std::vector<TensorIndex>({{None, 3, -1}})), c10::str("(", INDEX_MAX, ":3:-1)"));
+  ASSERT_EQ(c10::str(std::vector<TensorIndex>({Slice(1, 3)})), c10::str("(1:3:1)"));
+  ASSERT_EQ(c10::str(std::vector<TensorIndex>({Slice(1, None, 2)})), c10::str("(1:", INDEX_MAX, ":2)"));
+  ASSERT_EQ(c10::str(std::vector<TensorIndex>({Slice(1, None, -1)})), c10::str("(1:", INDEX_MIN, ":-1)"));
+  ASSERT_EQ(c10::str(std::vector<TensorIndex>({Slice(None, 3, 2)})), c10::str("(0:3:2)"));
+  ASSERT_EQ(c10::str(std::vector<TensorIndex>({Slice(None, 3, -1)})), c10::str("(", INDEX_MAX, ":3:-1)"));
 
-  ASSERT_EQ(c10::str(std::vector<TensorIndex>({{1, 3, 2}})), c10::str("(1:3:2)"));
+  ASSERT_EQ(c10::str(std::vector<TensorIndex>({Slice(1, 3, 2)})), c10::str("(1:3:2)"));
 }
 
 TEST(TensorIndexingTest, TestNoIndices) {
@@ -149,7 +115,7 @@ TEST(TensorIndexingTest, TestSingleInt) {
 TEST(TensorIndexingTest, TestMultipleInt) {
   auto v = torch::randn({5, 7, 3});
   ASSERT_EQ(v.index({4}).sizes(), torch::IntArrayRef({7, 3}));
-  ASSERT_EQ(v.index({4, {}, 1}).sizes(), torch::IntArrayRef({7}));
+  ASSERT_EQ(v.index({4, Slice(), 1}).sizes(), torch::IntArrayRef({7}));
 
   // To show that `.index_put_` works
   v.index_put_({4, 3, 1}, 0);
@@ -159,25 +125,25 @@ TEST(TensorIndexingTest, TestMultipleInt) {
 TEST(TensorIndexingTest, TestNone) {
   auto v = torch::randn({5, 7, 3});
   ASSERT_EQ(v.index({None}).sizes(), torch::IntArrayRef({1, 5, 7, 3}));
-  ASSERT_EQ(v.index({{}, None}).sizes(), torch::IntArrayRef({5, 1, 7, 3}));
-  ASSERT_EQ(v.index({{}, None, None}).sizes(), torch::IntArrayRef({5, 1, 1, 7, 3}));
+  ASSERT_EQ(v.index({Slice(), None}).sizes(), torch::IntArrayRef({5, 1, 7, 3}));
+  ASSERT_EQ(v.index({Slice(), None, None}).sizes(), torch::IntArrayRef({5, 1, 1, 7, 3}));
   ASSERT_EQ(v.index({"...", None}).sizes(), torch::IntArrayRef({5, 7, 3, 1}));
 }
 
 TEST(TensorIndexingTest, TestStep) {
   auto v = torch::arange(10);
-  assert_tensor_equal(v.index({{None, None, 1}}), v);
-  assert_tensor_equal(v.index({{None, None, 2}}), torch::tensor({0, 2, 4, 6, 8}));
-  assert_tensor_equal(v.index({{None, None, 3}}), torch::tensor({0, 3, 6, 9}));
-  assert_tensor_equal(v.index({{None, None, 11}}), torch::tensor({0}));
-  assert_tensor_equal(v.index({{1, 6, 2}}), torch::tensor({1, 3, 5}));
+  assert_tensor_equal(v.index({Slice(None, None, 1)}), v);
+  assert_tensor_equal(v.index({Slice(None, None, 2)}), torch::tensor({0, 2, 4, 6, 8}));
+  assert_tensor_equal(v.index({Slice(None, None, 3)}), torch::tensor({0, 3, 6, 9}));
+  assert_tensor_equal(v.index({Slice(None, None, 11)}), torch::tensor({0}));
+  assert_tensor_equal(v.index({Slice(1, 6, 2)}), torch::tensor({1, 3, 5}));
 }
 
 TEST(TensorIndexingTest, TestStepAssignment) {
   auto v = torch::zeros({4, 4});
-  v.index_put_({0, {1, None, 2}}, torch::tensor({3., 4.}));
+  v.index_put_({0, Slice(1, None, 2)}, torch::tensor({3., 4.}));
   assert_tensor_equal(v.index({0}), torch::tensor({0., 3., 0., 4.}));
-  assert_tensor_equal(v.index({{1, None}}).sum(), torch::tensor(0));
+  assert_tensor_equal(v.index({Slice(1, None)}).sum(), torch::tensor(0));
 }
 
 TEST(TensorIndexingTest, TestBoolIndices) {
@@ -218,7 +184,7 @@ TEST(TensorIndexingTest, TestMultipleBoolIndices) {
   // note: these broadcast together and are transposed to the first dim
   auto mask1 = torch::tensor({1, 0, 1, 1, 0}, torch::kBool);
   auto mask2 = torch::tensor({1, 1, 1}, torch::kBool);
-  ASSERT_EQ(v.index({mask1, {}, mask2}).sizes(), torch::IntArrayRef({3, 7}));
+  ASSERT_EQ(v.index({mask1, Slice(), mask2}).sizes(), torch::IntArrayRef({3, 7}));
 }
 
 TEST(TensorIndexingTest, TestByteMask) {
@@ -264,7 +230,7 @@ TEST(TensorIndexingTest, TestMultipleByteMask) {
     std::stringstream buffer;
     CerrRedirect cerr_redirect(buffer.rdbuf());
 
-    ASSERT_EQ(v.index({mask1, {}, mask2}).sizes(), torch::IntArrayRef({3, 7}));
+    ASSERT_EQ(v.index({mask1, Slice(), mask2}).sizes(), torch::IntArrayRef({3, 7}));
 
     ASSERT_EQ(count_substr_occurrences(buffer.str(), "indexing with dtype torch.uint8 is now deprecated"), 2);
   }
@@ -281,8 +247,8 @@ TEST(TensorIndexingTest, TestByteMask2d) {
 TEST(TensorIndexingTest, TestIntIndices) {
   auto v = torch::randn({5, 7, 3});
   ASSERT_EQ(v.index({torch::tensor({0, 4, 2})}).sizes(), torch::IntArrayRef({3, 7, 3}));
-  ASSERT_EQ(v.index({{}, torch::tensor({0, 4, 2})}).sizes(), torch::IntArrayRef({5, 3, 3}));
-  ASSERT_EQ(v.index({{}, torch::tensor({{0, 1}, {4, 3}})}).sizes(), torch::IntArrayRef({5, 2, 2, 3}));
+  ASSERT_EQ(v.index({Slice(), torch::tensor({0, 4, 2})}).sizes(), torch::IntArrayRef({5, 3, 3}));
+  ASSERT_EQ(v.index({Slice(), torch::tensor({{0, 1}, {4, 3}})}).sizes(), torch::IntArrayRef({5, 2, 2, 3}));
 }
 
 
@@ -299,7 +265,7 @@ TEST(TensorIndexingTest, TestIntIndicesBroadcast) {
   auto x = torch::arange(0, 12, torch::kLong).view({4, 3});
   auto rows = torch::tensor({0, 3});
   auto columns = torch::tensor({0, 2});
-  auto result = x.index({rows.index({{}, None}), columns});
+  auto result = x.index({rows.index({Slice(), None}), columns});
   assert_tensor_equal(result, torch::tensor({{0, 2}, {9, 11}}));
 }
 
@@ -330,13 +296,13 @@ TEST(TensorIndexingTest, TestEmptyNdimIndex) {
     auto x = torch::randn({2, 3, 4, 5}, device);
     assert_tensor_equal(
       torch::empty({2, 0, 6, 4, 5}, device),
-      x.index({{}, torch::empty({0, 6}, torch::TensorOptions(torch::kInt64).device(device))}));
+      x.index({Slice(), torch::empty({0, 6}, torch::TensorOptions(torch::kInt64).device(device))}));
   }
   {
     auto x = torch::empty({10, 0});
     ASSERT_EQ(x.index({torch::tensor({1, 2})}).sizes(), torch::IntArrayRef({2, 0}));
     ASSERT_EQ(x.index({torch::tensor({}, torch::kLong), torch::tensor({}, torch::kLong)}).sizes(), torch::IntArrayRef({0}));
-    ASSERT_THROWS_WITH(x.index({{}, torch::tensor({0, 1})}), "for dimension with size 0");
+    ASSERT_THROWS_WITH(x.index({Slice(), torch::tensor({0, 1})}), "for dimension with size 0");
   }
 }
 
@@ -352,7 +318,7 @@ TEST(TensorIndexingTest, TestEmptyNdimIndex_CUDA) {
     auto x = torch::randn({2, 3, 4, 5}, device);
     assert_tensor_equal(
       torch::empty({2, 0, 6, 4, 5}, device),
-      x.index({{}, torch::empty({0, 6}, torch::TensorOptions(torch::kInt64).device(device))}));
+      x.index({Slice(), torch::empty({0, 6}, torch::TensorOptions(torch::kInt64).device(device))}));
   }
 }
 
@@ -371,8 +337,8 @@ TEST(TensorIndexingTest, TestEmptyNdimIndexBool_CUDA) {
 TEST(TensorIndexingTest, TestEmptySlice) {
   torch::Device device(torch::kCPU);
   auto x = torch::randn({2, 3, 4, 5}, device);
-  auto y = x.index({{}, {}, {}, 1});
-  auto z = y.index({{}, {1, 1}, {}});
+  auto y = x.index({Slice(), Slice(), Slice(), 1});
+  auto z = y.index({Slice(), Slice(1, 1), Slice()});
   ASSERT_EQ(z.sizes(), torch::IntArrayRef({2, 0, 4}));
   // this isn't technically necessary, but matches NumPy stride calculations.
   ASSERT_EQ(z.strides(), torch::IntArrayRef({60, 20, 5}));
@@ -382,8 +348,8 @@ TEST(TensorIndexingTest, TestEmptySlice) {
 TEST(TensorIndexingTest, TestEmptySlice_CUDA) {
   torch::Device device(torch::kCUDA);
   auto x = torch::randn({2, 3, 4, 5}, device);
-  auto y = x.index({{}, {}, {}, 1});
-  auto z = y.index({{}, {1, 1}, {}});
+  auto y = x.index({Slice(), Slice(), Slice(), 1});
+  auto z = y.index({Slice(), Slice(1, 1), Slice()});
   ASSERT_EQ(z.sizes(), torch::IntArrayRef({2, 0, 4}));
   // this isn't technically necessary, but matches NumPy stride calculations.
   ASSERT_EQ(z.strides(), torch::IntArrayRef({60, 20, 5}));
@@ -438,7 +404,7 @@ TEST(TensorIndexingTest, TestIndexSetitemBoolsSlices) {
     a.index_put_({"..."}, neg_ones_expanded * 4);
     assert_tensor_equal(a, neg_ones * 4);
     if (a.dim() == 0) {
-      ASSERT_THROW(a.index_put_({{}}, neg_ones_expanded * 5), c10::Error);
+      ASSERT_THROW(a.index_put_({Slice()}, neg_ones_expanded * 5), c10::Error);
     }
   }
 }
@@ -504,7 +470,7 @@ TEST(TensorIndexingTest, TestGetitemScalars) {
 
   // scalar indexed with scalar
   auto r = torch::randn({});
-  ASSERT_THROW(r.index({{}}), c10::Error);
+  ASSERT_THROW(r.index({Slice()}), c10::Error);
   ASSERT_THROW(r.index({zero}), c10::Error);
   assert_tensor_equal(r, r.index({"..."}));
 }
@@ -526,7 +492,7 @@ TEST(TensorIndexingTest, TestSetitemScalars) {
 
   // scalar indexed with scalars
   auto r = torch::randn({});
-  ASSERT_THROW(r.index_put_({{}}, 8.8), c10::Error);
+  ASSERT_THROW(r.index_put_({Slice()}, 8.8), c10::Error);
   ASSERT_THROW(r.index_put_({zero}, 8.8), c10::Error);
   r.index_put_({"..."}, 9.9);
   ASSERT_TRUE(r.allclose(torch::tensor(9.9)));
@@ -535,20 +501,20 @@ TEST(TensorIndexingTest, TestSetitemScalars) {
 TEST(TensorIndexingTest, TestBasicAdvancedCombined) {
   // From the NumPy indexing example
   auto x = torch::arange(0, 12).to(torch::kLong).view({4, 3});
-  assert_tensor_equal(x.index({{1, 2}, {1, 3}}), x.index({{1, 2}, torch::tensor({1, 2})}));
-  assert_tensor_equal(x.index({{1, 2}, {1, 3}}), torch::tensor({{4, 5}}));
+  assert_tensor_equal(x.index({Slice(1, 2), Slice(1, 3)}), x.index({Slice(1, 2), torch::tensor({1, 2})}));
+  assert_tensor_equal(x.index({Slice(1, 2), Slice(1, 3)}), torch::tensor({{4, 5}}));
 
   // Check that it is a copy
   {
     auto unmodified = x.clone();
-    x.index({{1, 2}, torch::tensor({1, 2})}).zero_();
+    x.index({Slice(1, 2), torch::tensor({1, 2})}).zero_();
     assert_tensor_equal(x, unmodified);
   }
 
   // But assignment should modify the original
   {
     auto unmodified = x.clone();
-    x.index_put_({{1, 2}, torch::tensor({1, 2})}, 0);
+    x.index_put_({Slice(1, 2), torch::tensor({1, 2})}, 0);
     assert_tensor_not_equal(x, unmodified);
   }
 }
@@ -592,7 +558,7 @@ TEST(TensorIndexingTest, TestVariableSlicing) {
   auto indices = torch::tensor({0, 1}, torch::kInt);
   int i = indices[0].item<int>();
   int j = indices[1].item<int>();
-  assert_tensor_equal(x.index({{i, j}}), x.index({{0, 1}}));
+  assert_tensor_equal(x.index({Slice(i, j)}), x.index({Slice(0, 1)}));
 }
 
 TEST(TensorIndexingTest, TestEllipsisTensor) {
@@ -610,7 +576,7 @@ TEST(TensorIndexingTest, TestOutOfBoundIndex) {
   ASSERT_THROWS_WITH(x.index({0, 5}), "index 5 is out of bounds for dimension 1 with size 5");
   ASSERT_THROWS_WITH(x.index({4, 5}), "index 4 is out of bounds for dimension 0 with size 2");
   ASSERT_THROWS_WITH(x.index({0, 1, 15}), "index 15 is out of bounds for dimension 2 with size 10");
-  ASSERT_THROWS_WITH(x.index({{}, {}, 12}), "index 12 is out of bounds for dimension 2 with size 10");
+  ASSERT_THROWS_WITH(x.index({Slice(), Slice(), 12}), "index 12 is out of bounds for dimension 2 with size 10");
 }
 
 TEST(TensorIndexingTest, TestZeroDimIndex) {
@@ -688,42 +654,8 @@ TEST(NumpyTests, TestEllipsisIndex) {
   // Slicing with ellipsis can skip an
   // arbitrary number of dimensions
   assert_tensor_equal(a.index({0, "..."}), a.index({0}));
-#if !defined(__clang__)
-  // NOTE: `a.index({0, {}})` and `a.index({{}, 0})` fail to compile with Clang:
-  // ```
-  // ../test/cpp/api/tensor_indexing.cpp:694:46: error: call to member function 'index' is ambiguous
-  //   assert_tensor_equal(a.index({0, "..."}), a.index({0, {}}));
-  //                                            ~~^~~~~
-  // aten/src/ATen/core/TensorBody.h:400:10: note: candidate function
-  //   Tensor index(std::initializer_list<at::indexing::TensorIndex> indices) const;
-  //          ^
-  // aten/src/ATen/core/TensorBody.h:399:10: note: candidate function
-  //   Tensor index(ArrayRef<at::indexing::TensorIndex> indices) const;
-  //          ^
-  // aten/src/ATen/core/TensorMethods.h:1386:23: note: candidate function
-  // inline Tensor Tensor::index(TensorList indices) const {
-  //                       ^
-  // ../test/cpp/api/tensor_indexing.cpp:695:46: error: call to member function 'index' is ambiguous
-  //   assert_tensor_equal(a.index({"...", 0}), a.index({{}, 0}));
-  //                                            ~~^~~~~
-  // aten/src/ATen/core/TensorBody.h:400:10: note: candidate function
-  //   Tensor index(std::initializer_list<at::indexing::TensorIndex> indices) const;
-  //          ^
-  // aten/src/ATen/core/TensorBody.h:399:10: note: candidate function
-  //   Tensor index(ArrayRef<at::indexing::TensorIndex> indices) const;
-  //          ^
-  // aten/src/ATen/core/TensorMethods.h:1386:23: note: candidate function
-  // inline Tensor Tensor::index(TensorList indices) const {
-  //                       ^
-  // ```
-  // To get around this problem, we explicitly require Clang users to use `Slice()`
-  // instead of `{}` to represent an empty slice.
-  assert_tensor_equal(a.index({0, "..."}), a.index({0, {}}));
-  assert_tensor_equal(a.index({"...", 0}), a.index({{}, 0}));
-#else
   assert_tensor_equal(a.index({0, "..."}), a.index({0, Slice()}));
   assert_tensor_equal(a.index({"...", 0}), a.index({Slice(), 0}));
-#endif
 
   // In NumPy, slicing with ellipsis results in a 0-dim array. In PyTorch
   // we don't have separate 0-dim arrays and scalars.
@@ -760,7 +692,7 @@ TEST(NumpyTests, TestSingleBoolIndex) {
                    {7, 8, 9}});
 
   assert_tensor_equal(a.index({true}), a.index({None}));
-  assert_tensor_equal(a.index({false}), a.index({None}).index({{0, 0}}));
+  assert_tensor_equal(a.index({false}), a.index({None}).index({Slice(0, 0)}));
 }
 
 TEST(NumpyTests, TestBooleanShapeMismatch) {
@@ -778,7 +710,7 @@ TEST(NumpyTests, TestBooleanShapeMismatch) {
 
     index = torch::empty({4, 4}, torch::kByte).zero_();
     ASSERT_THROWS_WITH(arr.index({index}), "mask");
-    ASSERT_THROWS_WITH(arr.index({{}, index}), "mask");
+    ASSERT_THROWS_WITH(arr.index({Slice(), index}), "mask");
 
     ASSERT_EQ(count_substr_occurrences(buffer.str(), "indexing with dtype torch.uint8 is now deprecated"), 2);
   }
@@ -806,7 +738,7 @@ TEST(NumpyTests, TestBooleanAssignmentValueMismatch) {
 
   ASSERT_THROWS_WITH(f(a, {}), "shape mismatch");
   ASSERT_THROWS_WITH(f(a, {1, 2, 3}), "shape mismatch");
-  ASSERT_THROWS_WITH(f(a.index({{None, 1}}), {1, 2, 3}), "shape mismatch");
+  ASSERT_THROWS_WITH(f(a.index({Slice(None, 1)}), {1, 2, 3}), "shape mismatch");
 }
 
 TEST(NumpyTests, TestBooleanIndexingTwodim) {
@@ -873,7 +805,7 @@ TEST(NumpyTests, TestEverythingReturnsViews) {
   auto a = torch::tensor({5});
 
   ASSERT_FALSE(a.is_same(a.index({"..."})));
-  ASSERT_FALSE(a.is_same(a.index({{}})));
+  ASSERT_FALSE(a.is_same(a.index({Slice()})));
 }
 
 TEST(NumpyTests, TestBroaderrorsIndexing) {
@@ -899,12 +831,12 @@ TEST(NumpyTests, TestIndexIsLarger) {
   auto a = torch::zeros({5, 5});
   a.index_put_({torch::tensor({{0}, {1}, {2}}), torch::tensor({0, 1, 2})}, torch::tensor({2., 3., 4.}));
 
-  ASSERT_TRUE((a.index({{None, 3}, {None, 3}}) == torch::tensor({2., 3., 4.})).all().item<bool>());
+  ASSERT_TRUE((a.index({Slice(None, 3), Slice(None, 3)}) == torch::tensor({2., 3., 4.})).all().item<bool>());
 }
 
 TEST(NumpyTests, TestBroadcastSubspace) {
   auto a = torch::zeros({100, 100});
-  auto v = torch::arange(0., 100).index({{}, None});
+  auto v = torch::arange(0., 100).index({Slice(), None});
   auto b = torch::arange(99, -1, -1).to(torch::kLong);
   a.index_put_({b}, v);
   auto expected = b.to(torch::kDouble).unsqueeze(1).expand({100, 100});
