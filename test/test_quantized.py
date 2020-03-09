@@ -755,6 +755,122 @@ class TestQuantizedOps(TestCase):
                              message=error_message.format(name + '.zero_point', scale,
                              X_hat.q_zero_point()))
 
+    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=5,
+                                              min_side=5, max_side=10),
+                       qparams=hu.qparams(dtypes=torch.quint8)),
+           kernel=st.sampled_from((3, 5)),
+           stride=st.sampled_from((None, 1, 2)),
+           padding=st.integers(0, 2),
+           ceil_mode=st.sampled_from((True, False)),
+           count_include_pad=st.sampled_from((True, False)),
+           divisor_override=st.sampled_from((None, None)))
+    def test_avg_pool3d(self, X, kernel, stride, padding, ceil_mode, count_include_pad, divisor_override):
+        """
+        Note: we currently cannot test the divisor_override, because quantized op will clamp the result
+        within range. However, the float op will not.
+        """
+        X, (scale, zero_point, torch_type) = X
+
+        assume(kernel // 2 >= padding)  # Kernel cannot be overhanging!
+        iD, iH, iW = X.shape[-3:]
+        oD = pool_output_shape(iD, kernel, padding, stride, dilation=1)
+        assume(oD > 0)
+        oH = pool_output_shape(iH, kernel, padding, stride, dilation=1)
+        assume(oH > 0)
+        oW = pool_output_shape(iW, kernel, padding, stride, dilation=1)
+        assume(oW > 0)
+
+        X = torch.from_numpy(X)
+        qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
+                                       dtype=torch_type)
+        X = qX.dequantize()
+        # Run reference on float tensor and then quantize the result for comparison
+        X_ref = torch.nn.functional.avg_pool3d(
+            X, kernel_size=kernel, stride=stride, padding=padding,
+            ceil_mode=ceil_mode, count_include_pad=count_include_pad, divisor_override=divisor_override)
+        ops_under_test = {
+            "nn.functional": torch.nn.functional.avg_pool3d,
+            "nn.quantized.functional": torch.nn.quantized.functional.avg_pool3d
+        }
+        error_message = r"Results are off for {}:\n\tExpected:\n{}\n\tGot:\n{}"
+        for name, op in ops_under_test.items():
+            qX_hat = op(qX, kernel_size=kernel, stride=stride, padding=padding, ceil_mode=ceil_mode,
+                        count_include_pad=count_include_pad, divisor_override=divisor_override)
+            qX_ref = torch.quantize_per_tensor(X_ref, scale=qX_hat.q_scale(), zero_point=qX_hat.q_zero_point(),
+                                               dtype=torch_type)
+
+            self.assertEqual(qX_ref.int_repr().to(torch.double), qX_hat.int_repr().to(torch.double), prec=1.0,
+                             message=error_message.format(name, qX_hat.int_repr(), qX_ref.int_repr()))
+            self.assertEqual(scale, qX_hat.q_scale(),
+                             message=error_message.format(name + '.scale', scale, qX_hat.q_scale()))
+            self.assertEqual(zero_point, qX_hat.q_zero_point(),
+                             message=error_message.format(name + '.zero_point', scale,
+                                                          qX_hat.q_zero_point()))
+
+    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=5, max_dims=5,
+                                              min_side=5, max_side=10),
+                       qparams=hu.qparams(dtypes=torch.qint8)),
+           kernel=st.sampled_from((4, 5)),
+           stride=st.sampled_from((None, 1, 2)),
+           padding=st.integers(0, 2),
+           ceil_mode=st.sampled_from((True, False)),
+           count_include_pad=st.sampled_from((True, False)),
+           divisor_override=st.sampled_from((None, None)))
+    def test_avg_pool3d_nhwc(self, X, kernel, stride, padding, ceil_mode, count_include_pad, divisor_override):
+        """
+        Note: 1) we currently cannot test the divisor_override, because quantized op will clamp the result
+        within range. However, the float op will not.
+        2) we cannot test the qint32, since the float point precision is much lower than int32 for big number,
+        which will make the test be very flaky.
+        """
+        X, (scale, zero_point, torch_type) = X
+        D, H, W = X.shape[-3:]
+
+
+        if X.shape[1] < 176:
+            X = np.repeat(X, 176 / X.shape[1], 1)
+
+        assume(kernel // 2 >= padding)  # Kernel cannot be overhanging!
+        iD, iH, iW = X.shape[-3:]
+        oD = pool_output_shape(iD, kernel, padding, stride, dilation=1)
+        assume(oD > 0)
+        oH = pool_output_shape(iH, kernel, padding, stride, dilation=1)
+        assume(oH > 0)
+        oW = pool_output_shape(iW, kernel, padding, stride, dilation=1)
+        assume(oW > 0)
+
+        X_nchw = np.ascontiguousarray(X.transpose([0, 2, 3, 4, 1]))
+
+        qX = torch.quantize_per_tensor(torch.from_numpy(X_nchw), scale=scale,
+                                       zero_point=zero_point, dtype=torch_type).permute([0, 4, 1, 2, 3])
+        X = qX.dequantize()
+
+        # Run reference on int_repr + round to avoid double rounding error.
+        X_ref = torch.nn.functional.avg_pool3d(
+            X, kernel_size=kernel, stride=stride, padding=padding,
+            ceil_mode=ceil_mode, count_include_pad=count_include_pad, divisor_override=divisor_override)
+
+        self.assertTrue(qX.stride() != sorted(qX.stride()))
+        ops_under_test = {
+            "nn.functional": torch.nn.functional.avg_pool3d,
+            "nn.quantized.functional": torch.nn.quantized.functional.avg_pool3d
+        }
+        error_message = r"Results are off for {}:\n\tExpected:\n{}\n\tGot:\n{}"
+        for name, op in ops_under_test.items():
+            X_hat = op(qX, kernel_size=kernel, stride=stride, padding=padding, ceil_mode=ceil_mode,
+                       count_include_pad=count_include_pad, divisor_override=divisor_override)
+            self.assertTrue(X_hat.stride() != sorted(X_hat.stride()))
+            qX_ref = torch.quantize_per_tensor(X_ref, scale=X_hat.q_scale(), zero_point=X_hat.q_zero_point(),
+                                               dtype=torch_type)
+
+            self.assertEqual(qX_ref.int_repr().to(torch.double), X_hat.int_repr().to(torch.double), prec=1.0,
+                             message=error_message.format(name, X_hat.int_repr(), qX_ref.int_repr()))
+            self.assertEqual(scale, X_hat.q_scale(),
+                             message=error_message.format(name + '.scale', scale, X_hat.q_scale()))
+            self.assertEqual(zero_point, X_hat.q_zero_point(),
+                             message=error_message.format(name + '.zero_point', scale,
+                             X_hat.q_zero_point()))
+
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
                                               min_side=1, max_side=10),
                        qparams=hu.qparams(dtypes=torch.quint8)),
