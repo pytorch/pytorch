@@ -882,8 +882,8 @@ class TestSparse(TestCase):
             alpha = random.random()
             beta = random.random()
 
-            res = torch.addmm(alpha, t, beta, x, y)
-            expected = torch.addmm(alpha, t, beta, self.safeToDense(x), y)
+            res = torch.addmm(t, x, y, beta=beta, alpha=alpha)
+            expected = torch.addmm(t, self.safeToDense(x), y, beta=beta, alpha=alpha)
             self.assertEqual(res, expected)
 
             res = torch.addmm(t, x, y)
@@ -911,8 +911,8 @@ class TestSparse(TestCase):
             alpha = random.random()
             beta = random.random()
 
-            res = torch.saddmm(alpha, t, beta, x, y)
-            expected = torch.addmm(alpha, self.safeToDense(t), beta, self.safeToDense(x), y)
+            res = torch.saddmm(t, x, y, beta=beta, alpha=alpha)
+            expected = torch.addmm(self.safeToDense(t), self.safeToDense(x), y, beta=beta, alpha=alpha)
             self.assertEqual(self.safeToDense(res), expected)
 
             res = torch.saddmm(t, x, y)
@@ -1009,7 +1009,7 @@ class TestSparse(TestCase):
         y = self.randn(*shape)
         r = random.random()
 
-        res = torch.add(y, r, x)
+        res = torch.add(y, x, alpha=r)
         expected = y + r * self.safeToDense(x)
 
         self.assertEqual(res, expected)
@@ -1022,7 +1022,7 @@ class TestSparse(TestCase):
         y.transpose_(0, len(s) - 1)
         r = random.random()
 
-        res = torch.add(y, r, x)
+        res = torch.add(y, x, alpha=r)
         expected = y + r * self.safeToDense(x)
 
         self.assertEqual(res, expected)
@@ -1032,19 +1032,19 @@ class TestSparse(TestCase):
 
         # Non contiguous sparse indices tensor
         x_ = self.sparse_tensor(i[:, ::2], v[:int(nnz / 2)], x.shape)
-        res = torch.add(y, r, x_)
+        res = torch.add(y, x_, alpha=r)
         expected = y + r * self.safeToDense(x_)
         self.assertEqual(res, expected)
 
         # Non contiguous sparse values tensor
         x_ = self.sparse_tensor(i[:, :int(nnz / 2)], v[::2], x.shape)
-        res = torch.add(y, r, x_)
+        res = torch.add(y, x_, alpha=r)
         expected = y + r * self.safeToDense(x_)
         self.assertEqual(res, expected)
 
         # Non contiguous sparse indices and values tensors
         x_ = self.sparse_tensor(i[:, 1::2], v[1::2], x.shape)
-        res = torch.add(y, r, x_)
+        res = torch.add(y, x_, alpha=r)
         expected = y + r * self.safeToDense(x_)
         self.assertEqual(res, expected)
 
