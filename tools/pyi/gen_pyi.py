@@ -110,7 +110,7 @@ def type_to_python(typename, size=None):
 
     typename = {
         'Device': 'Union[_device, str, None]',
-        'Generator*': 'Generator',
+        'GeneratorHolder': 'GeneratorHolder',
         'IntegerTensor': 'Tensor',
         'Scalar': 'Number',
         'ScalarType': '_dtype',

@@ -26,6 +26,7 @@ struct TensorOptions;
 }
 namespace at {
 struct Generator;
+typedef std::shared_ptr<Generator> GeneratorHolder;struct Generator;
 struct Type;
 class DeprecatedTypeProperties;
 class Tensor;

@@ -66,7 +66,7 @@ TYPE_MAP = {
     'double?': 'float?',
     'bool': 'bool',
     'bool?': 'bool?',
-    'Generator': 'Generator?',
+    'GeneratorHolder': 'GeneratorHolder?',
 }
 
 
@@ -126,7 +126,7 @@ FROM_IVALUE = {
     'int64_t': '{}.toInt()',
     'int64_t?': '{}.toOptional<int64_t>()',
     'std::string': '{}.toStringRef()',
-    'Generator': 'nullptr',
+    'GeneratorHolder': 'nullptr',
     'std::array<bool,2>': 'as_bool_array<2>({}.toBoolList())',
     'std::array<bool,3>': 'as_bool_array<3>({}.toBoolList())',
     'std::array<bool,4>': 'as_bool_array<4>({}.toBoolList())',

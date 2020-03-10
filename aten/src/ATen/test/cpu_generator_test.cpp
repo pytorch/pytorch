@@ -116,7 +116,7 @@ TEST(CPUGenerator, TestRNGForking) {
   auto target_value = at::randn({1000});
   // Dramatically alter the internal state of the main generator
   auto x = at::randn({100000});
-  auto forked_value = at::randn({1000}, current_gen.get());
+  auto forked_value = at::randn({1000}, current_gen);
   ASSERT_EQ(target_value.sum().item<double>(), forked_value.sum().item<double>());
 }
 

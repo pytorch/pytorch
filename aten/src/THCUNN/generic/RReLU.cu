@@ -14,7 +14,7 @@ void THNN_(RReLU_updateOutput)(
            double upper,
            bool train,
            bool inplace,
-           void *generator)
+           at::GeneratorHolder generator)
 {
   THCUNN_assertSameGPU(state, 3, input, output, noise);
   auto gen = at::cuda::detail::getDefaultCUDAGenerator();

@@ -18,6 +18,7 @@ class Scalar;
 }
 namespace at {
 struct Generator;
+typedef std::shared_ptr<Generator> GeneratorHolder;
 class Tensor;
 struct Type;
 } // namespace at

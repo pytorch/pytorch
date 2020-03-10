@@ -163,7 +163,7 @@
   use_c10_dispatcher: full
   variants: function
 
-- func: _fused_dropout(Tensor self, float p, Generator? generator=None) -> (Tensor, Tensor)
+- func: _fused_dropout(Tensor self, float p, GeneratorHolder? generator=None) -> (Tensor, Tensor)
   variants: function
   dispatch:
      CUDA: fused_dropout_cuda
@@ -495,22 +495,22 @@
 - func: _batch_norm_impl_index_backward(int impl_index, Tensor input, Tensor grad_output, Tensor? weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_var_transform, bool train, float eps, bool[3] output_mask, Tensor reservedSpace) -> (Tensor, Tensor, Tensor)
 
 # Sample bernoulli with values in `self` as probability.
-- func: bernoulli(Tensor self, *, Generator? generator=None) -> Tensor
+- func: bernoulli(Tensor self, *, GeneratorHolder? generator=None) -> Tensor
   variants: function, method
   supports_named_tensor: True
 
-- func: bernoulli.out(Tensor self, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
+- func: bernoulli.out(Tensor self, *, GeneratorHolder? generator=None, Tensor(a!) out) -> Tensor(a!)
   variants: function
   supports_named_tensor: True
 
-- func: bernoulli_.Tensor(Tensor(a!) self, Tensor p, *, Generator? generator=None) -> Tensor(a!)
+- func: bernoulli_.Tensor(Tensor(a!) self, Tensor p, *, GeneratorHolder? generator=None) -> Tensor(a!)
   variants: method
   dispatch:
     CPU: bernoulli_tensor_cpu_
     CUDA: bernoulli_tensor_cuda_
   supports_named_tensor: True
 
-- func: bernoulli_.float(Tensor(a!) self, float p=0.5, *, Generator? generator=None) -> Tensor(a!)
+- func: bernoulli_.float(Tensor(a!) self, float p=0.5, *, GeneratorHolder? generator=None) -> Tensor(a!)
   variants: method
   dispatch:
     CPU: bernoulli_scalar_cpu_
@@ -519,8 +519,8 @@
 
 # This out-of-place version isn't used explicitly, but needed by jit.
 # There is no default valid on `p` here because it would introduce ambiguity
-# with `bernoulli(Tensor self, *, Generator? generator=None)` declaration.
-- func: bernoulli.p(Tensor self, float p, *, Generator? generator=None) -> Tensor
+# with `bernoulli(Tensor self, *, GeneratorHolder? generator=None)` declaration.
+- func: bernoulli.p(Tensor self, float p, *, GeneratorHolder? generator=None) -> Tensor
   variants: function, method
 
 - func: bilinear(Tensor input1, Tensor input2, Tensor weight, Tensor? bias) -> Tensor
@@ -2182,35 +2182,35 @@
 - func: rand.names(int[] size, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   device_guard: False
 
-- func: rand.generator_with_names(int[] size, *, Generator? generator, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: rand.generator_with_names(int[] size, *, GeneratorHolder? generator, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   device_guard: False
 
 - func: rand(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
-- func: rand.generator(int[] size, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: rand.generator(int[] size, *, GeneratorHolder? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
 - func: rand.out(int[] size, *, Tensor(a!) out) -> Tensor(a!)
 
-- func: rand.generator_out(int[] size, *, Generator? generator, Tensor(a!) out) -> Tensor(a!)
+- func: rand.generator_out(int[] size, *, GeneratorHolder? generator, Tensor(a!) out) -> Tensor(a!)
 
 - func: rand_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   supports_named_tensor: True
 
 - func: randint(int high, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
-- func: randint.generator(int high, int[] size, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: randint.generator(int high, int[] size, *, GeneratorHolder? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
 - func: randint.low(int low, int high, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
-- func: randint.low_generator(int low, int high, int[] size, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: randint.low_generator(int low, int high, int[] size, *, GeneratorHolder? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
 - func: randint.out(int high, int[] size, *, Tensor(a!) out) -> Tensor(a!)
 
-- func: randint.generator_out(int high, int[] size, *, Generator? generator, Tensor(a!) out) -> Tensor(a!)
+- func: randint.generator_out(int high, int[] size, *, GeneratorHolder? generator, Tensor(a!) out) -> Tensor(a!)
 
 - func: randint.low_out(int low, int high, int[] size, *, Tensor(a!) out) -> Tensor(a!)
 
-- func: randint.low_generator_out(int low, int high, int[] size, *, Generator? generator, Tensor(a!) out) -> Tensor(a!)
+- func: randint.low_generator_out(int low, int high, int[] size, *, GeneratorHolder? generator, Tensor(a!) out) -> Tensor(a!)
 
 - func: randint_like(Tensor self, int high, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
 
@@ -2218,28 +2218,28 @@
 
 - func: randn(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
-- func: randn.generator(int[] size, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: randn.generator(int[] size, *, GeneratorHolder? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
 - func: randn.names(int[] size, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   device_guard: False
 
-- func: randn.generator_with_names(int[] size, *, Generator? generator, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: randn.generator_with_names(int[] size, *, GeneratorHolder? generator, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   device_guard: False
 
 - func: randn.out(int[] size, *, Tensor(a!) out) -> Tensor(a!)
 
-- func: randn.generator_out(int[] size, *, Generator? generator, Tensor(a!) out) -> Tensor(a!)
+- func: randn.generator_out(int[] size, *, GeneratorHolder? generator, Tensor(a!) out) -> Tensor(a!)
 
 - func: randn_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   supports_named_tensor: True
 
 - func: randperm(int n, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
-- func: randperm.generator(int n, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: randperm.generator(int n, *, GeneratorHolder? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
 - func: randperm.out(int n, *, Tensor(a!) out) -> Tensor(a!)
 
-- func: randperm.generator_out(int n, *, Generator? generator, Tensor(a!) out) -> Tensor(a!)
+- func: randperm.generator_out(int n, *, GeneratorHolder? generator, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: randperm_out_cpu
     CUDA: randperm_out_cuda
@@ -2329,9 +2329,9 @@
     CPU: round_out
     CUDA: round_out
 
-- func: rrelu(Tensor self, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor
+- func: rrelu(Tensor self, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, GeneratorHolder? generator=None) -> Tensor
 
-- func: rrelu_(Tensor(a!) self, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor(a!)
+- func: rrelu_(Tensor(a!) self, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, GeneratorHolder? generator=None) -> Tensor(a!)
 
 - func: relu(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -3024,7 +3024,7 @@
     CPU: _standard_gamma_grad_cpu
     CUDA: _standard_gamma_grad_cuda
 
-- func: _standard_gamma(Tensor self, Generator? generator=None) -> Tensor
+- func: _standard_gamma(Tensor self, GeneratorHolder? generator=None) -> Tensor
   variants: function
   dispatch:
     CPU: _s_gamma_cpu
@@ -3036,13 +3036,13 @@
     CPU: _dirichlet_grad_cpu
     CUDA: _dirichlet_grad_cuda
 
-- func: _sample_dirichlet(Tensor self, Generator? generator=None) -> Tensor
+- func: _sample_dirichlet(Tensor self, GeneratorHolder? generator=None) -> Tensor
   variants: function
   dispatch:
     CPU: _s_dirichlet_cpu
     CUDA: _s_dirichlet_cuda
 
-- func: poisson(Tensor self, Generator? generator=None) -> Tensor
+- func: poisson(Tensor self, GeneratorHolder? generator=None) -> Tensor
   dispatch:
     CPU: _s_poisson_cpu
     CUDA: _s_poisson_cuda
@@ -4307,38 +4307,38 @@
   variants: method
   supports_named_tensor: True
 
-- func: random_.from(Tensor(a!) self, int from, int? to, *, Generator? generator=None) -> Tensor(a!)
+- func: random_.from(Tensor(a!) self, int from, int? to, *, GeneratorHolder? generator=None) -> Tensor(a!)
   variants: method
   supports_named_tensor: True
 
-- func: random_.to(Tensor(a!) self, int to, *, Generator? generator=None) -> Tensor(a!)
+- func: random_.to(Tensor(a!) self, int to, *, GeneratorHolder? generator=None) -> Tensor(a!)
   variants: method
   supports_named_tensor: True
 
-- func: random_(Tensor(a!) self, *, Generator? generator=None) -> Tensor(a!)
+- func: random_(Tensor(a!) self, *, GeneratorHolder? generator=None) -> Tensor(a!)
   variants: method
   supports_named_tensor: True
 
-- func: uniform_(Tensor(a!) self, float from=0, float to=1, *, Generator? generator=None) -> Tensor(a!)
+- func: uniform_(Tensor(a!) self, float from=0, float to=1, *, GeneratorHolder? generator=None) -> Tensor(a!)
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_uniform_
     CUDA: uniform_cuda_
   supports_named_tensor: True
 
-- func: cauchy_(Tensor(a!) self, float median=0, float sigma=1, *, Generator? generator=None) -> Tensor(a!)
+- func: cauchy_(Tensor(a!) self, float median=0, float sigma=1, *, GeneratorHolder? generator=None) -> Tensor(a!)
   variants: method
   supports_named_tensor: True
 
-- func: log_normal_(Tensor(a!) self, float mean=1, float std=2, *, Generator? generator=None) -> Tensor(a!)
+- func: log_normal_(Tensor(a!) self, float mean=1, float std=2, *, GeneratorHolder? generator=None) -> Tensor(a!)
   variants: method
   supports_named_tensor: True
 
-- func: exponential_(Tensor(a!) self, float lambd=1, *, Generator? generator=None) -> Tensor(a!)
+- func: exponential_(Tensor(a!) self, float lambd=1, *, GeneratorHolder? generator=None) -> Tensor(a!)
   variants: method
   supports_named_tensor: True
 
-- func: geometric_(Tensor(a!) self, float p, *, Generator? generator=None) -> Tensor(a!)
+- func: geometric_(Tensor(a!) self, float p, *, GeneratorHolder? generator=None) -> Tensor(a!)
   variants: method
   supports_named_tensor: True
 
@@ -4855,12 +4855,12 @@
     CUDA: _lu_solve_helper_cuda
 
 # TODO: remove dispatch section when porting TH CUDA to ATen
-- func: multinomial.out(Tensor self, int num_samples, bool replacement=False, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
+- func: multinomial.out(Tensor self, int num_samples, bool replacement=False, *, GeneratorHolder? generator=None, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: multinomial_out
     CUDA: multinomial_out
 
-- func: multinomial(Tensor self, int num_samples, bool replacement=False, *, Generator? generator=None) -> Tensor
+- func: multinomial(Tensor self, int num_samples, bool replacement=False, *, GeneratorHolder? generator=None) -> Tensor
   variants: method, function
   dispatch:
     CPU: multinomial
@@ -4872,7 +4872,7 @@
     CPU: legacy::cpu::_th_multinomial_alias_setup
     CUDA: legacy::cuda::_th_multinomial_alias_setup
 
-- func: _multinomial_alias_draw(Tensor J, Tensor q, int num_samples, *, Generator? generator=None) -> Tensor
+- func: _multinomial_alias_draw(Tensor J, Tensor q, int num_samples, *, GeneratorHolder? generator=None) -> Tensor
   variants: function
   dispatch:
     CPU: legacy::cpu::_th_multinomial_alias_draw
@@ -5183,46 +5183,46 @@
     CPU: pow
     CUDA: pow
 
-- func: normal_(Tensor(a!) self, float mean=0, float std=1, *, Generator? generator=None) -> Tensor(a!)
+- func: normal_(Tensor(a!) self, float mean=0, float std=1, *, GeneratorHolder? generator=None) -> Tensor(a!)
   variants: method
   dispatch:
     CPU: normal_cpu_
     CUDA: normal_cuda_
   supports_named_tensor: True
 
-- func: normal.Tensor_float_out(Tensor mean, float std=1, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
+- func: normal.Tensor_float_out(Tensor mean, float std=1, *, GeneratorHolder? generator=None, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: normal_out_cpu
     CUDA: normal_out_cuda
 
-- func: normal.Tensor_float(Tensor mean, float std=1, *, Generator? generator=None) -> Tensor
+- func: normal.Tensor_float(Tensor mean, float std=1, *, GeneratorHolder? generator=None) -> Tensor
   dispatch:
     CPU: normal_cpu
     CUDA: normal_cuda
 
-- func: normal.float_Tensor_out(float mean, Tensor std, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
+- func: normal.float_Tensor_out(float mean, Tensor std, *, GeneratorHolder? generator=None, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: normal_out_cpu
     CUDA: normal_out_cuda
 
-- func: normal.float_Tensor(float mean, Tensor std, *, Generator? generator=None) -> Tensor
+- func: normal.float_Tensor(float mean, Tensor std, *, GeneratorHolder? generator=None) -> Tensor
   dispatch:
     CPU: normal_cpu
     CUDA: normal_cuda
 
-- func: normal.Tensor_Tensor_out(Tensor mean, Tensor std, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
+- func: normal.Tensor_Tensor_out(Tensor mean, Tensor std, *, GeneratorHolder? generator=None, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: normal_out_cpu
     CUDA: normal_out_cuda
 
-- func: normal.Tensor_Tensor(Tensor mean, Tensor std, *, Generator? generator=None) -> Tensor
+- func: normal.Tensor_Tensor(Tensor mean, Tensor std, *, GeneratorHolder? generator=None) -> Tensor
   dispatch:
     CPU: normal_cpu
     CUDA: normal_cuda
 
-- func: normal.float_float(float mean, float std, int[] size, *, Generator? generator=None, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: normal.float_float(float mean, float std, int[] size, *, GeneratorHolder? generator=None, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
-- func: normal.float_float_out(float mean, float std, int[] size, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
+- func: normal.float_float_out(float mean, float std, int[] size, *, GeneratorHolder? generator=None, Tensor(a!) out) -> Tensor(a!)
 
 - func: alias(Tensor(a) self) -> Tensor(a)
   variants: method, function
@@ -5650,13 +5650,13 @@
     CPU: log_sigmoid_backward_cpu
     CUDA: legacy::cuda::_thnn_log_sigmoid_backward
 
-- func: rrelu_with_noise.out(Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None, *, Tensor(a!) out) -> Tensor(a!)
+- func: rrelu_with_noise.out(Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, GeneratorHolder? generator=None, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
   dispatch:
     CPU: rrelu_with_noise_out_cpu
     CUDA: legacy::cuda::_thnn_rrelu_with_noise_forward_out
 
-- func: rrelu_with_noise(Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor
+- func: rrelu_with_noise(Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, GeneratorHolder? generator=None) -> Tensor
   python_module: nn
   dispatch:
     CPU: rrelu_with_noise_cpu
@@ -5666,7 +5666,7 @@
   use_c10_dispatcher: full
   python_module: nn
 
-- func: rrelu_with_noise_(Tensor(a!) self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor(a!)
+- func: rrelu_with_noise_(Tensor(a!) self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, GeneratorHolder? generator=None) -> Tensor(a!)
   python_module: nn
   dispatch:
     CPU: rrelu_with_noise_cpu_

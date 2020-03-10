@@ -79,7 +79,7 @@ void THCTensor_(multinomialAliasDraw)(THCState *state, THCudaLongTensor *self, T
   THArgCheck(n_sample > 0, 3, "cannot sample <= 0 samples");
   THAssert(THCTensor_(isContiguous)(state, _q));
   THAssert(THCudaLongTensor_isContiguous(state, _J));
-  auto gen = at::get_generator_or_default<at::CUDAGenerator>(gen_, at::cuda::detail::getDefaultCUDAGenerator());
+  // auto gen = at::get_generator_or_default<at::CUDAGenerator>(gen_, at::cuda::detail::getDefaultCUDAGenerator());
   int64_t K = THCudaLongTensor_nElement(state, _J);
   THCudaLongTensor_resize1d(state, self, n_sample);
   ptrdiff_t size = THCudaLongTensor_nElement(state, self);
@@ -89,8 +89,8 @@ void THCTensor_(multinomialAliasDraw)(THCState *state, THCudaLongTensor *self, T
 
   auto out_uniform = THTensor_wrap(uniform);
   auto out_bernoulli = THTensor_wrap(bernoulli);
-  at::native::uniform_cuda_(out_uniform, 0, K, gen);
-  at::native::uniform_cuda_(out_bernoulli, 0, 1, gen);
+  at::native::uniform_cuda_(out_uniform, 0, K, gen_);
+  at::native::uniform_cuda_(out_bernoulli, 0, 1, gen_);
 
   multinomialAliasDrawKernel
     <<<THCCeilDiv((int)n_sample+BLOCK_SIZE-1, BLOCK_SIZE), BLOCK_SIZE, 0, c10::cuda::getCurrentCUDAStream()>>>(

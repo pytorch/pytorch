@@ -145,12 +145,12 @@ inline int64_t prod_intlist(ArrayRef<int64_t> list) {
  * the backend generator type (CPU/CUDAGenerator etc.)
  */
 template <typename T>
-static inline T * get_generator_or_default(Generator * expr, Generator * defaultValue) {
+static inline T * get_generator_or_default(GeneratorHolder expr, Generator * defaultValue) {
   if (!expr) {
-    expr = defaultValue;
+    expr.reset(defaultValue);
   }
   if (T::device_type() == expr->device().type()) {
-    return static_cast<T*>(expr);
+    return static_cast<T*>(expr.get());
   }
   AT_ERROR("Expected a '", T::device_type(), "' device type for generator but found '", expr->device().type(), "'");
 }
@@ -160,9 +160,9 @@ static inline T * get_generator_or_default(Generator * expr, Generator * default
  * the backend generator type (CPU/CUDAGenerator etc.)
  */
 template <typename T>
-static inline T * check_generator(Generator * expr) {
+static inline T * check_generator(GeneratorHolder expr) {
   if (T::device_type() == expr->device().type()) {
-    return static_cast<T*>(expr);
+    return static_cast<T*>(expr.get());
   }
   AT_ERROR("Expected a '", T::device_type(), "' device type for generator but found '", expr->device().type(), "'");
 }

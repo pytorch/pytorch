@@ -24,22 +24,22 @@ using namespace torch;
 
 PyObject *THPGeneratorClass = nullptr;
 
-PyObject * THPGenerator_initDefaultGenerator(at::GeneratorHolder cdata)
+PyObject * THPGenerator_initDefaultGenerator(at::Generator* cdata)
 {
   auto type = (PyTypeObject*)THPGeneratorClass;
   auto self = THPObjectPtr{type->tp_alloc(type, 0)};
   if (!self) throw python_error();
   auto self_ = reinterpret_cast<THPGenerator*>(self.get());
-  self_->cdata = cdata;
+  self_->cdata = std::shared_ptr<at::Generator>(cdata);
   self_->owner = false;
   return self.release();
 }
 
 static void THPGenerator_dealloc(THPGenerator* self)
 {
-  if (self->owner) {
-    delete self->cdata;
-  }
+  // if (self->owner) {
+  //   delete self->cdata;
+  // }
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
@@ -56,9 +56,9 @@ static PyObject * THPGenerator_pynew(PyTypeObject *type, PyObject *args, PyObjec
   THPGeneratorPtr self((THPGenerator *)type->tp_alloc(type, 0));
 #ifdef USE_CUDA
   if (device.type() == at::kCPU) {
-    self->cdata = new CPUGenerator();
+    self->cdata = std::make_shared<CPUGenerator>();
   } else if (device.type() == at::kCUDA){
-    self->cdata = new CUDAGenerator(device.index());
+    self->cdata = std::make_shared<CUDAGenerator>(device.index());
   } else {
     AT_ERROR("Device type ", c10::DeviceTypeName(device.type()),
              " is not supported for torch.Generator() api.");
@@ -67,7 +67,7 @@ static PyObject * THPGenerator_pynew(PyTypeObject *type, PyObject *args, PyObjec
   TORCH_CHECK(device.type() == at::kCPU,
               "Device type ", c10::DeviceTypeName(device.type()),
               " is not supported for torch.Generator() api.");
-  self->cdata = new CPUGenerator();
+  self->cdata = std::make_shared<CPUGenerator>();
 #endif
   self->owner = true;
   return (PyObject*)self.release();

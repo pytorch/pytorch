@@ -39,7 +39,7 @@ Tensor& random_to(Tensor& self, int64_t to, GeneratorHolder generator) {
 }
 
 Tensor& custom_rng_cauchy_(Tensor& self, double median, double sigma, GeneratorHolder generator) {
-  auto gen = (TestCPUGenerator*)generator;
+  auto gen = (TestCPUGenerator*)(generator.get());
   auto iter = TensorIterator::nullary_op(self);
   native::templates::cpu::cauchy_kernel(iter, median, sigma, gen);
   return self;
@@ -50,16 +50,16 @@ class RNGTest : public ::testing::Test {
   void SetUp() override {
     static auto registry = torch::RegisterOperators()
       .op(torch::RegisterOperators::options()
-        .schema("aten::random_.from(Tensor(a!) self, int from, int? to, *, Generator? generator=None) -> Tensor(a!)")
+        .schema("aten::random_.from(Tensor(a!) self, int from, int? to, *, GeneratorHolder? generator=None) -> Tensor(a!)")
         .impl_unboxedOnlyKernel<decltype(random_from_to), &random_from_to>(DispatchKey::CustomRNGKeyId))
       .op(torch::RegisterOperators::options()
-        .schema("aten::random_.to(Tensor(a!) self, int to, *, Generator? generator=None) -> Tensor(a!)")
+        .schema("aten::random_.to(Tensor(a!) self, int to, *, GeneratorHolder? generator=None) -> Tensor(a!)")
         .impl_unboxedOnlyKernel<decltype(random_to), &random_to>(DispatchKey::CustomRNGKeyId))
       .op(torch::RegisterOperators::options()
-        .schema("aten::random_(Tensor(a!) self, *, Generator? generator=None) -> Tensor(a!)")
+        .schema("aten::random_(Tensor(a!) self, *, GeneratorHolder? generator=None) -> Tensor(a!)")
         .impl_unboxedOnlyKernel<decltype(random_), &random_>(DispatchKey::CustomRNGKeyId))
       .op(torch::RegisterOperators::options()
-        .schema("aten::cauchy_(Tensor(a!) self, float median=0, float sigma=1, *, Generator? generator=None) -> Tensor(a!)")
+        .schema("aten::cauchy_(Tensor(a!) self, float median=0, float sigma=1, *, GeneratorHolder? generator=None) -> Tensor(a!)")
         .impl_unboxedOnlyKernel<decltype(custom_rng_cauchy_), &custom_rng_cauchy_>(DispatchKey::CustomRNGKeyId));
   }
 };
@@ -91,7 +91,7 @@ TEST_F(RNGTest, Random) {
 // This test proves that Tensor.random_() distribution is able to generate unsigned 64 bit max value(64 ones)
 // https://github.com/pytorch/pytorch/issues/33299
 TEST_F(RNGTest, Random64bits) {
-  auto gen = new TestCPUGenerator(std::numeric_limits<uint64_t>::max());
+  auto gen = std::make_shared<TestCPUGenerator>(std::numeric_limits<uint64_t>::max());
   auto actual = torch::empty({1}, torch::kInt64);
   actual.random_(std::numeric_limits<int64_t>::min(), c10::nullopt, gen);
   ASSERT_EQ(static_cast<uint64_t>(actual[0].item<int64_t>()), std::numeric_limits<uint64_t>::max());
@@ -100,14 +100,14 @@ TEST_F(RNGTest, Random64bits) {
 TEST_F(RNGTest, Cauchy) {
   const auto median = 123.45;
   const auto sigma = 67.89;
-  auto gen = new TestCPUGenerator(42.0);
+  auto gen = std::make_shared<TestCPUGenerator>(42.0);
 
   auto actual = torch::empty({3, 3});
   actual.cauchy_(median, sigma, gen);
 
   auto expected = torch::empty_like(actual);
   auto iter = TensorIterator::nullary_op(expected);
-  native::templates::cpu::cauchy_kernel(iter, median, sigma, gen);
+  native::templates::cpu::cauchy_kernel(iter, median, sigma, gen.get());
 
   ASSERT_TRUE(torch::allclose(actual, expected));
 }

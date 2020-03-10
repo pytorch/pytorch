@@ -35,7 +35,7 @@ namespace script {
 
 TypePtr SchemaTypeParser::parseBaseType() {
   static std::unordered_map<std::string, TypePtr> type_map = {
-      {"Generator", GeneratorType::get()},
+      {"GeneratorHolder", GeneratorType::get()},
       {"Dimname", StringType::get()},
       {"ScalarType", IntType::get()},
       {"Layout", IntType::get()},

@@ -58,7 +58,7 @@ int64_t update_to(int64_t to) {
 
 template<template<typename> class random_kernel, typename RNG>
 at::Tensor& random_impl(at::Tensor& self, at::GeneratorHolder generator) {
-  auto gen = (RNG)generator;
+  auto gen = (RNG)(generator.get());
   auto iter = at::TensorIterator::nullary_op(self);
   random_kernel<RNG>()(iter, gen);
   return self;
@@ -94,7 +94,7 @@ static void check_from_to_in_range(int64_t from, int64_t to_inc, caffe2::TypeMet
 
 template<template<typename> class random_from_to_kernel, typename RNG>
 at::Tensor& random_from_to_impl(at::Tensor& self, int64_t from, c10::optional<int64_t> to_opt, at::GeneratorHolder generator) {
-  auto gen = (RNG)generator;
+  auto gen = (RNG)(generator.get());
   uint64_t range = 0;
   auto iter = at::TensorIterator::nullary_op(self);
   if (to_opt.has_value()) {

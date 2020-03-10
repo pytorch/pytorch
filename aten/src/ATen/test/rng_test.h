@@ -72,7 +72,7 @@ void test_random_from_to(const at::Device& device) {
     for (const c10::optional<int64_t> to : tos) {
       if (!to.has_value() || from < *to) {
         for (const uint64_t val : vals) {
-          auto gen = new RNG(val);
+          auto gen = std::make_shared<RNG>(val);
 
           auto actual = torch::empty({3, 3}, torch::TensorOptions().dtype(S).device(device));
           actual.random_(from, to, gen);
@@ -132,7 +132,7 @@ void test_random(const at::Device& device) {
   };
 
   for (const uint64_t val : vals) {
-    auto gen = new RNG(val);
+    auto gen = std::make_shared<RNG>(val);
 
     auto actual = torch::empty({3, 3}, torch::TensorOptions().dtype(S).device(device));
     actual.random_(gen);

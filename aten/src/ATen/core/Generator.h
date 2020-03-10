@@ -12,6 +12,7 @@
 #include <c10/util/C++17.h>
 #include <c10/core/Device.h>
 #include <c10/core/DispatchKeySet.h>
+// #include <c10/util/intrusive_ptr.h>
 
 /**
  * Note [Generator]
@@ -83,7 +84,7 @@ struct CAFFE2_API Generator {
     virtual Generator* clone_impl() const = 0;
 };
 
-typedef Generator* GeneratorHolder;
+typedef std::shared_ptr<Generator> GeneratorHolder;
 
 namespace detail {
 

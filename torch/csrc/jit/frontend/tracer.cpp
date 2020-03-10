@@ -515,7 +515,7 @@ void addInputs(Node* n, const char* name, const std::string& value) {
 void addInputs(Node* n, const char* name, const at::Tensor& value) {
   n->addInput(getValueTrace(value));
 }
-void addInputs(Node* n, const char* name, at::Generator* value) {
+void addInputs(Node* n, const char* name, at::GeneratorHolder value) {
   if (value) {
     detail::badArgType(value);
   }

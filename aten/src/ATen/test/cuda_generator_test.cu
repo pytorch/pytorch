@@ -238,7 +238,7 @@ TEST(CUDAGenerator, TestRNGForking) {
   auto target_value = at::randn({1000}, at::kCUDA);
   // Dramatically alter the internal state of the main generator
   auto x = at::randn({100000}, at::kCUDA);
-  auto forked_value = at::randn({1000}, current_gen.get(), at::kCUDA);
+  auto forked_value = at::randn({1000}, current_gen, at::kCUDA);
   ASSERT_EQ(target_value.sum().item<double>(), forked_value.sum().item<double>());
 }
 

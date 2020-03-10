@@ -14,6 +14,7 @@ using at::Tensor;
 using at::Scalar;
 using at::MemoryFormat;
 using at::Generator;
+using at::GeneratorHolder;
 using at::IntArrayRef;
 
 using namespace torch::autograd::utils;

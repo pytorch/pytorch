@@ -215,7 +215,7 @@ def create_python_bindings(python_functions, is_python_method, module):
 UNPACK_METHODS = {
     'const Tensor &': 'tensor',
     'Tensor &': 'tensor',
-    'Generator *': 'generator',
+    'GeneratorHolder': 'generator',
     'Storage': 'storage',
     'Storage &': 'storage',
     'const ScalarType &': 'scalartype',
