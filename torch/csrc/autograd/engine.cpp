@@ -407,7 +407,7 @@ void GraphTask::set_exception_without_signal(const std::shared_ptr<Node>& fn) {
   std::unique_lock<std::mutex> lock(mutex_);
   if (!has_error_.load()) {
     if (AnomalyMode::is_enabled() && fn) {
-      fn->metadata()->print_stack();
+      fn->metadata()->print_stack(fn->name());
     }
     has_error_ = true;
   }
