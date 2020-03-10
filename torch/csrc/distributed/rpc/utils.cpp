@@ -241,8 +241,10 @@ std::string wireSerialize(
   for (const auto& tensor : tensors) {
     TORCH_CHECK(
         tensor.device().is_cpu(),
-        "ProcessGroup RPC backend only supports CPU tensors, please move",
-        " your tensors to CPU before sending them over RPC");
+        "ProcessGroup RPC backend only supports",
+        " CPU tensors, please move your tensors to CPU before sending ",
+        "them over RPC. Found tensor on device: ",
+        tensor.device());
   }
 
   struct Ent {

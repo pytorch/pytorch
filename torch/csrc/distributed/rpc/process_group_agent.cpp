@@ -438,7 +438,8 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
                   errorMsg = c10::str(
                       "ProcessGroup RPC backend only supports",
                       " CPU tensors, please move your tensors to CPU before sending ",
-                      "them over RPC");
+                      "them over RPC. Found tensor on device: ",
+                      tensor.device());
                   break;
                 }
               }
