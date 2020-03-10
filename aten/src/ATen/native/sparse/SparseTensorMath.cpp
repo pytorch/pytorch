@@ -1422,31 +1422,43 @@ Tensor bmm_sparse_cpu(const SparseTensor& self, const Tensor& mat2) {
   return bmm_out_sparse_cpu(result, self, mat2);
 }
 
-// Search a sorted array for the rightmost instance of a value.
+// Search a sorted strided array for the rightmost instance of a value.
 // Array must be sorted from lowest to highest
 template<typename scalar_t>
-scalar_t binary_search_rightmost(scalar_t search_val, scalar_t* sorted_arr, int64_t length, bool* found) {
+scalar_t binary_search_strided_rightmost(scalar_t search_val, scalar_t* sorted_arr, int64_t sorted_arr_stride, int64_t length, bool* found) {
   if (length == 0) {
     *found = false;
     return -1;
   }
-  // Since upper_bound finds the first value greater than our
-  // target value, we need to subtract its result by 1 to get
-  // the value we actually want
-  scalar_t* val_ptr = std::upper_bound(sorted_arr, sorted_arr+length, search_val) - 1;
 
-  // If our pointer is now less than the array pointer, then
-  // the first value encountered was too large, and the array
-  // does not contain the target. Or if upper_bound reached the
-  // end without finding the value, our pointer will not be
-  // pointing to the target value.
-  if ((val_ptr < sorted_arr) || (*val_ptr != search_val)) {
-    *found = false;
-    return -1;
-  } else {
-    *found = true;
-    return (val_ptr - sorted_arr);
+  int64_t left_ind = 0;
+  int64_t right_ind = length - 1;
+  int64_t mid_ind;
+  bool done_searching = false;
+
+  while (!done_searching) {
+    mid_ind = (left_ind+right_ind) >> 1;
+    scalar_t mid_val = sorted_arr[mid_ind*sorted_arr_stride];
+
+    if (mid_val > search_val) {
+      right_ind = mid_ind-1;
+    } else if((mid_val == search_val) && (
+      (mid_ind == length - 1) || (sorted_arr[(mid_ind+1)*sorted_arr_stride] != search_val)
+    )) {
+      done_searching = true;
+      *found = true;
+    } else {
+      left_ind = mid_ind+1;
+    }
+
+    if (left_ind > right_ind) {
+      done_searching = true;
+      *found = false;
+      mid_ind = -1;
+    }
   }
+
+  return mid_ind;
 }
 
 Tensor& bmm_out_sparse_cpu(Tensor& result, const SparseTensor& self, const Tensor& mat2) {
@@ -1480,7 +1492,9 @@ Tensor& bmm_out_sparse_cpu(Tensor& result, const SparseTensor& self, const Tenso
   LongTensor indices = self_coalesced._indices();
   Tensor values =      self_coalesced._values();
 
-  int64_t* indices_dim0 = &(indices.accessor<int64_t, 2>()[0][0]);
+  LongTensor indices_dim0 = indices[0];
+  int64_t indices_dim0_stride = indices_dim0.stride(0);
+  int64_t* indices_dim0_ptr = indices_dim0.data_ptr<int64_t>();
   LongTensor indices_dim1_dim2 = indices.slice(0, 1, 3);
 
   int64_t dim_i = self_coalesced.size(1);
@@ -1497,7 +1511,7 @@ Tensor& bmm_out_sparse_cpu(Tensor& result, const SparseTensor& self, const Tenso
 
   // Iterate through each set of 2D matrices within the 3D
   // tensor inputs, performing a matrix multiply with each one.
-  int64_t start_mat_num = indices_dim0[0];
+  int64_t start_mat_num = indices_dim0_ptr[0];
   for (int64_t cur_mat_num = 0;
     (cur_mat_num < num_matrices);
     cur_mat_num++
@@ -1515,9 +1529,10 @@ Tensor& bmm_out_sparse_cpu(Tensor& result, const SparseTensor& self, const Tenso
     // the end. The search excludes everything to the left of
     // the starting point, for best performance
     bool mat_end_found;
-    int64_t mat_el_end_idx = binary_search_rightmost(
+    int64_t mat_el_end_idx = binary_search_strided_rightmost(
       cur_mat_num,
-      indices_dim0+mat_el_begin_idx,
+      indices_dim0_ptr+(mat_el_begin_idx*indices_dim0_stride),
+      indices_dim0_stride,
       nnz-mat_el_begin_idx,
       &mat_end_found
     ) + mat_el_begin_idx;

@@ -947,6 +947,25 @@ class TestSparse(TestCase):
         test_shape(10, 10, 100, 0, 20)
         test_shape(10, 10, 100, 0, 20)
 
+        a = torch.rand([10, 23, 32])
+        a[3] = torch.zeros(23, 32)
+        a[6] = torch.zeros(23, 32)
+        a = a.to_sparse()
+        b = torch.rand([10, 32, 10])
+        b[4] = torch.zeros(32, 10)
+        b[6] = torch.zeros(32, 10)
+        if self.is_cuda:
+            a = a.cuda()
+            b = b.cuda()
+        ab = a.bmm(b)
+        for mat_idx in range(ab.size(0)):
+            ab_mat = ab[mat_idx]
+            ab_mat_check = a[mat_idx].mm(b[mat_idx])
+            self.assertEqual(ab_mat, ab_mat_check)
+
+        ab_traspose_check = b.transpose(1,2).to_sparse().bmm(a.transpose(1,2).to_dense()).transpose(1,2)
+        self.assertEqual(ab, ab_traspose_check)
+
     @cuda_only
     def test_bmm_deterministic(self):
         def test_shape(num_mats, dim_i, dim_j, dim_k, nnz):
