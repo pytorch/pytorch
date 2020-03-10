@@ -10,7 +10,7 @@ namespace jit {
 
 // Must run this pass after constant folding.
 void FoldPrePackingOps(script::Module& m,
-    PrePackingOpsFilterFn is_foldable_op) {
+    const PrePackingOpsFilterFn& is_foldable_op) {
   // Since this pass can be called by quantization or other passes as well,
   // we need to make sure we generate a unique "packed_weight_\d+"
   // Thus static uid.
