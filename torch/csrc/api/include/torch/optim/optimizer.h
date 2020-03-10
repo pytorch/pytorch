@@ -81,23 +81,20 @@ class TORCH_API OptimizerParamGroup {
   std::unique_ptr<OptimizerOptions> options_;
 };
 
-namespace detail {
-
 /// Base class for all optimizers, that does not yet define a `step()`
 /// mechanism. All it specifies is that optimizers must be supplied with a
 /// vector of parameters. It also defines certain methods that all optimizers
 /// shall have, such as `zero_grad`.
-class TORCH_API OptimizerBase {
+class TORCH_API Optimizer {
  public:
-  // The copy constructor is deleted, because the user should use the
-  // `state_dict` / `load_state_dict` API to copy an optimizer instead.
-  OptimizerBase(const OptimizerBase& optimizer_base) = delete;
-  OptimizerBase(OptimizerBase&& optimizer_base) = default;
-
+   // The copy constructor is deleted, because the user should use the
+   // `state_dict` / `load_state_dict` API to copy an optimizer instead.
+   Optimizer(const Optimizer& optimizer) = delete;
+   Optimizer(Optimizer&& optimizer) = default;
   /// Constructs the `Optimizer` from a vector of parameters.
-  explicit OptimizerBase(std::vector<Tensor> parameters);
+  explicit Optimizer(std::vector<Tensor> parameters);
 
-  explicit OptimizerBase(std::vector<OptimizerParamGroup> param_groups, std::unique_ptr<OptimizerOptions> defaults) : defaults_(std::move(defaults)) {
+  explicit Optimizer(std::vector<OptimizerParamGroup> param_groups, std::unique_ptr<OptimizerOptions> defaults) : defaults_(std::move(defaults)) {
     for (const auto& param_group : param_groups) {
       add_param_group(param_group);
     }
@@ -106,7 +103,7 @@ class TORCH_API OptimizerBase {
   /// Adds the given param_group to the optimizer's param_group list.
   void add_param_group(const OptimizerParamGroup& param_group);
 
-  virtual ~OptimizerBase() = default;
+  virtual ~Optimizer() = default;
 
   // TODO: when all optimizers use the new design, we can devirtualize some of the following methods
   // such as add_parameters() / parameters() / size()
@@ -144,6 +141,9 @@ class TORCH_API OptimizerBase {
   /// Provides a const reference to the param_groups this optimizer holds.
   const std::vector<OptimizerParamGroup>& param_groups() const noexcept;
 
+  using LossClosure = std::function<Tensor()>;
+  virtual Tensor step(LossClosure closure = nullptr) = 0;
+
   /// Provides a reference to the state this optimizer holds
   ska::flat_hash_map<std::string, std::unique_ptr<OptimizerParamState>>& state() noexcept;
 
@@ -160,7 +160,7 @@ class TORCH_API OptimizerBase {
    std::vector<OptimizerParamGroup> param_groups_;
    ska::flat_hash_map<std::string, std::unique_ptr<OptimizerParamState>> state_;
    std::unique_ptr<OptimizerOptions> defaults_;
-   OptimizerBase() = default;
+   Optimizer() = default;
 
   /// Accesses a buffer at the given index.
   /// Additionally, zeros out the buffers when this is called on the index
@@ -183,14 +183,15 @@ class TORCH_API OptimizerBase {
   std::vector<Tensor> parameters_;
 };
 
-/// Serializes an `OptimizerBase` into an `OutputArchive`.
+/// Serializes an `Optimizer` into an `OutputArchive`.
 TORCH_API serialize::OutputArchive& operator<<(
     serialize::OutputArchive& archive,
-    const OptimizerBase& optimizer);
+    const Optimizer& optimizer);
 
 /// Deserializes a `Tensor` from an `InputArchive`.
 TORCH_API serialize::InputArchive& operator>>(
     serialize::InputArchive& archive,
+<<<<<<< HEAD
     OptimizerBase& optimizer);
 } // namespace detail
 
@@ -216,6 +217,9 @@ class LossClosureOptimizer : public detail::OptimizerBase {
   using detail::OptimizerBase::OptimizerBase;
   virtual Tensor step(LossClosure closure) = 0;
 };
+=======
+    Optimizer& optimizer);
+>>>>>>> added closure
 
 } // namespace optim
 } // namespace torch

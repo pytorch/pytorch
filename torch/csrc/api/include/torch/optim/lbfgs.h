@@ -22,7 +22,7 @@ struct TORCH_API LBFGSOptions : public OptimizerCloneableOptions<LBFGSOptions> {
   TORCH_ARG(double, tolerance_grad) = 1e-7;
   TORCH_ARG(double, tolerance_change) = 1e-9;
   TORCH_ARG(size_t, history_size) = 100;
-  TORCH_ARG(c10::optional<std::function<Tensor()>>, line_search_fn) = c10::nullopt;
+  TORCH_ARG(c10::optional<std::string>, line_search_fn) = c10::nullopt;
 public:
   //void serialize(torch::serialize::InputArchive& archive) override;
   //void serialize(torch::serialize::OutputArchive& archive) const override;
@@ -35,7 +35,7 @@ struct TORCH_API LBFGSParamState : public OptimizerCloneableParamState<LBFGSPara
   TORCH_ARG(double, t);
   TORCH_ARG(std::deque<Tensor>, old_dirs);
   TORCH_ARG(std::deque<Tensor>, old_stps);
-  TORCH_ARG(std::deque<Tensor>, ro) = {};
+  TORCH_ARG(std::deque<Tensor>, ro);
   TORCH_ARG(torch::Tensor, H_diag) = {};
   TORCH_ARG(torch::Tensor, prev_flat_grad) = {};
   TORCH_ARG(torch::Tensor, prev_loss) = {};
@@ -54,12 +54,12 @@ class TORCH_API LBFGS : public Optimizer {
  public:
    explicit LBFGS(std::vector<OptimizerParamGroup> param_groups,
        LBFGSOptions defaults) : Optimizer(std::move(param_groups), std::make_unique<LBFGSOptions>(defaults)) {
-      TORCH_CHECK(param_groups_.size() == 0, "LBFGS doesn't support per-parameter options (parameter groups)");
+      TORCH_CHECK(param_groups_.size() == 1, "LBFGS doesn't support per-parameter options (parameter groups)");
       _params = param_groups_[0].params();
       _numel_cache = c10::nullopt;
    }
 
-  void step() override;
+  Tensor step(LossClosure closure) override;
 
   void save(serialize::OutputArchive& archive) const override;
   void load(serialize::InputArchive& archive) override;

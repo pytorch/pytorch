@@ -22,7 +22,7 @@ namespace torch {
 namespace optim {
 
 struct TORCH_API SGDOptions : public OptimizerCloneableOptions<SGDOptions> {
-  /* implicit */ SGDOptions(double lr);
+  SGDOptions(double lr);
   TORCH_ARG(double, lr);
   TORCH_ARG(double, momentum) = 0;
   TORCH_ARG(double, dampening) = 0;
