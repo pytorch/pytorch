@@ -86,7 +86,7 @@ protected:
       auto lhs = value_maps_[node->inputs()[0]->unique()];
       auto rhs = value_maps_[node->inputs()[1]->unique()];
 
-      auto out = binary_op(binary_op_mapping[node->kind()], lhs, rhs);
+      auto out = binaryOp(binary_op_mapping[node->kind()], lhs, rhs);
       value_maps_.emplace(node->output()->unique(), out);
 
     } else if (node->kind() == prim::Constant) {
