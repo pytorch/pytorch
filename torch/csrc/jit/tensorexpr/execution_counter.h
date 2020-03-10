@@ -109,7 +109,7 @@ class ExecutionCounter {
   int start_value_ = 0;
 };
 
-#define DEFINE_TRIGGER(name) TORCH_API ExecutionTrigger name(#name)
+#define DEFINE_TRIGGER(name) ExecutionTrigger name(#name)
 #define DECLARE_TRIGGER(name) TORCH_API extern ExecutionTrigger name
 #define USE_TRIGGER(name) (name).trigger()
 
