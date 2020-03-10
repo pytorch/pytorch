@@ -561,7 +561,7 @@ class TestTypePromotion(TestCase):
     def test_sparse_mul(self, device):
         self._run_all_tests_for_sparse_op('mul', device)
 
-    #TODO: re-enable for integral types one div is re-enabled on integral tensors
+    # TODO: re-enable for integral types one div is re-enabled on integral tensors
     @onlyOnCPUAndCUDA
     def test_sparse_div(self, device):
         self._run_all_tests_for_sparse_op('div', device, floating_only=True)
