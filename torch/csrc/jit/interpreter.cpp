@@ -17,6 +17,7 @@
 #include <torch/csrc/jit/passes/bailout_graph.h>
 #include <torch/csrc/jit/script/compilation_unit.h>
 #include <torch/csrc/jit/script/jit_exception.h>
+#include <torch/csrc/jit/profiling_record.h>
 
 #include <exception>
 #include <iostream>
@@ -840,7 +841,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     Function** functions;
     std::function<void(std::vector<IValue>&)>* profile_functions;
     TypePtr* types;
-    std::map<int64_t, size_t> symbols2dims;
+    ShapeSymbolTable symbols2dims;
 
     ActiveFrame(const Frame& frame)
         : pc(frame.pc),
@@ -887,34 +888,33 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     }
   }
 
-  std::vector<c10::optional<int64_t>> bindSymbolicShapes(
+  c10::optional<std::vector<c10::ShapeSymbol>> bindSymbolicShapes(
       ActiveFrame& af,
       at::IntArrayRef new_sizes,
-      const c10::VaryingShape& sym_shapes) {
-    std::vector<c10::optional<int64_t>> new_symbols;
-    if (new_sizes.size() == sym_shapes.size()) {
+      const c10::optional<std::vector<c10::ShapeSymbol>>& sym_shapes) {
+    c10::optional<std::vector<c10::ShapeSymbol>> result;
+    if (sym_shapes.has_value() && new_sizes.size() == (*sym_shapes).size()) {
+      std::vector<c10::ShapeSymbol> new_symbols;
+      c10::ShapeSymbol undefined_symbol(-1, false);
       for (size_t i = 0; i < new_sizes.size(); i++) {
-        auto symbol = sym_shapes[i];
-        if (!symbol.has_value()) {
-          TORCH_INTERNAL_ASSERT("shouldn't be dynamic");
-          new_symbols.push_back(c10::nullopt);
-        } else {
-          if (*symbol > 0) {
+        auto symbol = (*sym_shapes)[i];    
+          if (symbol.statik_) {
             new_symbols.push_back(
-                *symbol == new_sizes[i] ? symbol : c10::nullopt);
-          } else if (af.symbols2dims.count(symbol.value()) == 0) {
-            af.symbols2dims[*symbol] = new_sizes[i];
-            new_symbols.push_back(*symbol);
+                symbol == c10::ShapeSymbol(new_sizes[i], true) ? symbol : undefined_symbol);
+          } else if (!af.symbols2dims.isBound(symbol)) {
+            af.symbols2dims.assign(symbol, c10::ShapeSymbol(new_sizes[i], true));
+            new_symbols.push_back(symbol);
           } else {
             new_symbols.push_back(
-                (af.symbols2dims[symbol.value()] == new_sizes[i])
+                (af.symbols2dims.getValue(symbol) == c10::ShapeSymbol(new_sizes[i], true))
                     ? symbol
-                    : c10::nullopt);
+                    : undefined_symbol);
           }
-        }
+        
       }
+      result = {new_symbols};
     }
-    return new_symbols;
+    return result;
   }
 
   bool runImpl(Stack& stack) {
@@ -1141,9 +1141,9 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             auto bound_type = pttp;
             if (t.defined()) {
               auto bound_symbols =
-                  bindSymbolicShapes(af, t.sizes(), expected_type->sizes());
+                  bindSymbolicShapes(af, t.sizes(), expected_type->symbolic_sizes());
               auto bound_type =
-                  pttp->withSymbolicShapes(c10::VaryingShape{bound_symbols});
+                  pttp->withSymbolicShapes(bound_symbols);
             }
             // auto bound_type = expected_type->merge(t, af.symbols2dims);
             push(stack, *expected_type == *bound_type);

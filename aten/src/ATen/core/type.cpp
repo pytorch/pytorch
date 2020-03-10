@@ -528,6 +528,18 @@ std::string TensorType::str() const {
   return "Tensor";
 }
 
+template <typename T>
+VaryingShape2<T> VaryingShape2<T>::merge(const VaryingShape2<T>& other) const {
+  if (!dims_ || !other.dims_ || dims_->size() != other.dims_->size()) {
+    return VaryingShape2<T>();
+  }
+  ListOfOptionalElements dims;
+  for (size_t i = 0, n = dims_->size(); i < n; i++) {
+    dims.push_back(merge_primitive((*dims_)[i], (*other.dims_)[i]));
+  }
+  return VaryingShape2<T>(std::move(dims));
+}
+
 VaryingShape VaryingShape::merge(const VaryingShape& other) const {
   if (!dims_ || !other.dims_ || dims_->size() != other.dims_->size()) {
     return VaryingShape();
@@ -539,15 +551,28 @@ VaryingShape VaryingShape::merge(const VaryingShape& other) const {
   return VaryingShape(std::move(dims));
 }
 
+//TODO: convert this to concrete_sizes
+VaryingShape TensorType::sizes() const {
+  if (!sizes_.has_value()) {
+    return VaryingShape();
+  }
+
+  // for (auto s : *sizes_) {
+  //   TORCH_INTERNAL_ASSERT(s.statik_ && s.value_ > 0);
+  // }
+
+  return VaryingShape(fmap(*sizes_, [](ShapeSymbol ss) {return ss.value_; }));
+}
+
 TensorTypePtr TensorType::merge(TensorTypePtr other) const {
   auto scalar_type = merge_primitive(scalarType(), other->scalarType());
   auto dev = merge_primitive(device(), other->device());
-  auto sz = sizes().merge(other->sizes());
+  //auto sz = sizes().merge(other->sizes());
   auto srs = strides().merge(other->strides());
   auto conts = contiguity().merge(other->contiguity());
   auto gr = merge_primitive(requiresGrad(), other->requiresGrad());
   auto undef = merge_primitive(undefined(), other->undefined());
-  return TensorType::create(scalar_type, dev, sz, srs, conts, gr, undef);
+  return TensorType::create(scalar_type, dev, VaryingShape(), srs, conts, gr, undef);
 }
 
 bool TensorType::operator==(const c10::Type& rhs) const {
@@ -738,25 +763,92 @@ std::tuple<std::vector<int64_t>, std::vector<int64_t>> TensorType::
   return std::make_tuple(contiguity, stride_indices);
 }
 
-TensorType::TensorType(const at::Tensor& tensor)
-    : Type(TypeKind::TensorType),
-      scalar_type_(tensor.scalar_type()),
-      device_(tensor.device()),
-      sizes_(tensor.sizes().size()),
-      strides_(tensor.sizes().size()),
-      requires_grad_(tensor.requires_grad()),
-      undefined_(!tensor.defined()) {
-  // any updates to `isSubtypeOf`, TensorType c-tor or
-  // `isCompatibleWithInCurrentExecutionContext` need to maintain the
-  // following `TensorType::create(actual_tensor)->isSubtypeOf(expected_type)
-  //  == expected_type->isCompatibleWithInCurrentExecutionContext(t)`
-  if (!tensor.is_mkldnn() && !tensor.is_sparse()) {
-    auto contNstrides =
-        contiguityStrideIndices(tensor.sizes().vec(), tensor.strides().vec());
-    sizes_ = tensor.sizes().vec();
-    contiguity_ = VaryingStrides(std::get<0>(contNstrides));
-    strides_ = VaryingStrides(std::get<1>(contNstrides));
+  template struct VaryingShape2<c10::ShapeSymbol>;
+  template struct VaryingShape2<bool>;
+  template struct VaryingShape2<size_t>;
+
+
+  TensorType::TensorType(
+      c10::optional<at::ScalarType> scalar_type,
+      c10::optional<Device> device,
+      const c10::optional<std::vector<ShapeSymbol>>& sizes,
+      const VaryingStrides& strides,
+      const VaryingStrides& contiguity,
+      c10::optional<bool> requires_grad,
+      c10::optional<bool> undefined)
+      : Type(TypeKind::TensorType),
+        scalar_type_(scalar_type),
+        device_(device),
+        sizes_(sizes),
+        strides_(strides),
+        contiguity_(contiguity),
+        requires_grad_(requires_grad),
+        undefined_(undefined) {}
+
+
+  TensorTypePtr TensorType::create(const at::Tensor& t) {
+    VaryingStrides contiguity;
+    VaryingStrides strides;
+    VaryingShape sizes;
+    if (!t.is_mkldnn() && !t.is_sparse()) {
+      auto contNstrides =
+          contiguityStrideIndices(t.sizes().vec(), t.strides().vec());
+      sizes = t.sizes().vec();
+      contiguity = VaryingStrides(std::get<0>(contNstrides));
+      strides = VaryingStrides(std::get<1>(contNstrides));
+    }
+
+    return TensorType::create(t.scalar_type(), t.device(), sizes, strides, contiguity, t.requires_grad(), false); 
   }
+
+//TODO switch VaryingShape sizes to std::vector<size_t>
+  TensorTypePtr TensorType::create(
+      c10::optional<at::ScalarType> scalar_type,
+      c10::optional<Device> device,
+      const VaryingShape& sizes,
+      const VaryingStrides& strides,
+      const VaryingStrides& contiguity,
+      c10::optional<bool> requires_grad,
+      c10::optional<bool> undefined) {
+
+      c10::optional<std::vector<ShapeSymbol>> new_sizes;
+      if (sizes.size().has_value()) {
+
+        std::vector<ShapeSymbol> vss;
+        //TODO: implement an iterator for VaryingShape
+        for (size_t i = 0; i < *sizes.size(); i++) {
+          TORCH_INTERNAL_ASSERT(*sizes[i] && *sizes[i] > 0);
+          vss.push_back(ShapeSymbol(*sizes[i], true));
+        }
+        new_sizes = {vss};
+      }
+
+        return TensorType::create(scalar_type, device, new_sizes, strides, contiguity, requires_grad, undefined);     
+  }
+
+TensorTypePtr TensorType::create(
+    c10::optional<at::ScalarType> scalar_type,
+    c10::optional<Device> device,
+    const c10::optional<std::vector<ShapeSymbol>>& sizes,
+    const VaryingStrides& strides,
+    const VaryingStrides& contiguity,
+    c10::optional<bool> requires_grad,
+    c10::optional<bool> undefined) {
+  return TensorTypePtr(new TensorType(
+      scalar_type,
+      device,
+      sizes,
+      strides,
+      contiguity,
+      requires_grad,
+      undefined));
+}
+
+c10::optional<std::vector<ShapeSymbol>> TensorType::symbolic_sizes() const {
+  if (!sizes().size().has_value()) {
+    return c10::nullopt;
+  }
+  return fmap(*sizes().concrete_sizes(), [](const int64_t v) { return ShapeSymbol(v, v > 0); });
 }
 
 bool TensorType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {

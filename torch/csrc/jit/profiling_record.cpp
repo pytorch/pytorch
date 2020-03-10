@@ -21,35 +21,6 @@ ProfileOp* ProfilingRecord::createProfileNode(
   return pn;
 }
 
-static void insertExpand(Value* input, Value* target, Node* parent, size_t i) {
-  auto ea = parent->owningGraph()->create(prim::inflate, {input, target});
-  ea->insertBefore(parent);
-  parent->replaceInput(i, ea->output());
-}
-
-static void insertExpands(Block* b) {
-  for (auto n : b->nodes()) {
-    switch (n->kind()) {
-      case aten::add:
-      case aten::sub:
-      case aten::mul:
-      case aten::div: {
-        auto x = n->input(0);
-        auto y = n->input(1);
-        insertExpand(x, y, n, 0);
-        insertExpand(y, x, n, 1);
-        break;
-      }
-      default:
-        break;
-    }
-
-    for (auto ib : n->blocks()) {
-      insertExpands(b);
-    }
-  }
-}
-
 static void unprofileGraphInputs(const std::shared_ptr<Graph> &graph) {
   for (auto i : graph->inputs()) {
     if (i->type()->isSubtypeOf(TensorType::get())) {
@@ -77,11 +48,11 @@ static void unprofileBlock(Block* start_block) {
   }
 }
 
-int64_t ProfilingRecord::toSymbol(
-    int64_t val,
-    std::map<int64_t, int64_t>& dims2symbols) {
-  if (dims2symbols.count(val) == 0 /*|| val == 1*/) {
-    int64_t new_sym = getNewSymbol();
+c10::ShapeSymbol ProfilingRecord::toSymbol(
+    c10::ShapeSymbol val,
+    std::map<c10::ShapeSymbol, c10::ShapeSymbol>& dims2symbols) {
+  if (dims2symbols.count(val) == 0) {
+    auto new_sym = getNewSymbol();
     dims2symbols[val] = new_sym;
     return new_sym;
   }
@@ -89,50 +60,64 @@ int64_t ProfilingRecord::toSymbol(
   return dims2symbols[val];
 }
 
-std::vector<int64_t> ProfilingRecord::mergeSymbolicShapes(
-    at::IntArrayRef new_sizes,
-    c10::VaryingShape sym_shapes,
-    std::map<int64_t, int64_t>& dims2symbols,
-    std::map<int64_t, int64_t>& symbols2dims,
-    std::map<int64_t, std::map<int64_t, int64_t>> split_symbols) {
-  std::vector<int64_t> new_symbols;
-  if (new_sizes.size() == sym_shapes.size()) {
+// struct SymbolShape {
+//   SymbolShape(int64_t v, bool statik = false): value_(v), statik_(statik) {};
+//   int64_t value_;
+//   bool statik_;
+// };
+
+//getNewSymbolInNamespace
+//getNewSymbolInGlobalNamespace
+//geGlobalNamespace
+//getNamespaceForSymbol
+
+std::vector<c10::ShapeSymbol> ProfilingRecord::mergeSymbolicShapes(
+    const std::vector<c10::ShapeSymbol>& new_sizes,
+    c10::optional<std::vector<c10::ShapeSymbol>> sym_shapes,
+    ShapeSymbolSets& symbol_sets,
+    ShapeSymbolTable& symbol_table) {
+  std::vector<c10::ShapeSymbol> new_symbols;
+  if (sym_shapes.has_value() && new_sizes.size() == (*sym_shapes).size()) {
     for (size_t i = 0; i < new_sizes.size(); i++) {
-      auto symbol = sym_shapes[i];
-      TORCH_INTERNAL_ASSERT(
-          symbol.has_value(), "should always have some symbol");
-      if (*symbol >= 0) {
-        if (*symbol == new_sizes[i]) {
+      auto symbol = (*sym_shapes)[i];
+      if (symbol.statik_) {
+        if (symbol == new_sizes[i]) {
           new_symbols.push_back(new_sizes[i]);
         } else {
-          // also works for symbols from previous runs
-          // in which case we are renaming a symbol from previous run
-          // to a symbol in the current run
+          auto& dims2symbols = symbol_sets.getGlobalSet();
           auto new_sym = toSymbol(new_sizes[i], dims2symbols);
           new_symbols.push_back(new_sym);
         }
-      } else if (symbols2dims.count(symbol.value()) == 0) {
-        symbols2dims[symbol.value()] = new_sizes[i];
-        new_symbols.push_back(*symbol);
+      } else if (!symbol_table.isBound(symbol)) {
+        symbol_table.assign(symbol, new_sizes[i]);
+        new_symbols.push_back(symbol);
       } else {
-        if (symbols2dims[symbol.value()] == new_sizes[i]) {
-          new_symbols.push_back(*symbol);
+        if (symbol_table.getValue(symbol) == new_sizes[i]) {
+          new_symbols.push_back(symbol);
         } else {
-          auto& symbol_subsets = split_symbols[symbol.value()];
-          if (symbol_subsets.count(new_sizes[i])) {
-            new_symbols.push_back(symbol_subsets[new_sizes[i]]);
-          } else {
-            int64_t new_sym = getNewSymbol();
-            symbol_subsets.insert({new_sizes[i], new_sym});
-            new_symbols.push_back(new_sym);
-          }
+          auto& dims2symbols = symbol_sets.getSetForSymbol(symbol);
+          auto new_sym = toSymbol(new_sizes[i], dims2symbols);
+          new_symbols.push_back(new_sym);
         }
       }
     }
   }
-
   return new_symbols;
 }
+
+// if we create Symbols that are just dims they are unique in global namespace for just the first run
+// but in the next runs they are only unique in SymbolNamespace
+// split_symbols_ create a set relationship immediately without a need for an intermediate DimCell
+
+// DimCell doesn't eliminate the need for DimCell -> Symbol mapping
+// and doesn't simplify splitting because the new symbol is only valid in the namespace of the old set
+
+
+// within one run
+// static shapes assign symbols can be static shapes 
+// bind symbols, via a symbol table
+// resolve conflicts
+// SymbolNamespace 
 
 void ProfilingRecord::insertShapeProfile(Node *n, Value *i) {
 
@@ -144,49 +129,48 @@ void ProfilingRecord::insertShapeProfile(Node *n, Value *i) {
                                                    Stack& stack) mutable {
     int64_t frame_id;
     pop(stack, frame_id);
-    IValue t;
-    pop(stack, t);
-    if (t.isTensor()) {
+    IValue v;
+    pop(stack, v);
+    if (v.isTensor()) {
       std::lock_guard<std::mutex> lock(this->mutex_);
-      auto& record = profiling_records_[frame_id];
-      if (t.toTensor().defined()) {
-        auto pttp = tensorTypeInCurrentExecutionContext(t.toTensor());
+      auto& profiled_types = profiled_types_per_frame_[frame_id];
+      auto t = v.toTensor();
+      if (t.defined()) {
+        auto pttp = tensorTypeInCurrentExecutionContext(t);
+        GRAPH_DEBUG(
+          "In run ",
+          frame_id,
+          " annotating %",
+          pno->debugName(),
+          " with ",
+          *pttp);
         if (first) {
           first = false;
-          record.symbolic_shapes_.insert({pno, pttp});
-          GRAPH_DEBUG(
-              "In run ",
-              frame_id,
-              " annotating %",
-              pno->debugName(),
-              " with ",
-              *pttp);
+          profiled_types.insert({pno, pttp});
         } else {
-          auto type = record.symbolic_shapes_.at(pno);
+          auto type = profiled_types.at(pno);
+          GRAPH_DEBUG("Existing type for %", pno->debugName(), " ", *type);
+          auto& frame_symbols = symbols_per_frame_[frame_id];
+          auto sizes = fmap(t.sizes(), [](int64_t s){return c10::ShapeSymbol(s, true); });
           auto new_sym_shapes = this->mergeSymbolicShapes(
-              t.toTensor().sizes(),
-              type->sizes(),
-              record.dims2symbols_,
-              record.symbols2dims_,
-              record.split_symbols_);
-          pttp = type->merge(pttp)->withSymbolicShapes(
-              c10::VaryingShape{new_sym_shapes});
-
+              sizes,
+              type->symbolic_sizes(),
+              frame_symbols.symbol_sets_,
+              frame_symbols.symbol_table_);
+          pttp = type->merge(pttp)->withSymbolicShapes(new_sym_shapes);
           GRAPH_DEBUG(
-              "In run ",
-              frame_id,
-              "merging for %",
+              "Result for %",
               pno->debugName(),
-              " into ",
+              " ",
               *pttp);
-          record.symbolic_shapes_[pno] = pttp;
+          profiled_types[pno] = pttp;
         }
       } else {
-        record.symbolic_shapes_[pno] = TensorType::get()->withUndefined();
+        profiled_types[pno] = TensorType::get()->withUndefined();
       }
     }
     // passing t through
-    push(stack, t);
+    push(stack, v);
   };
 
   pn->setCallback(shape_profiler);
@@ -219,11 +203,6 @@ std::unique_ptr<ProfilingRecord> ProfilingRecord::instrumentGraph(
   auto raw_pr = pr.get();
   unprofileGraphInputs(new_g);
   unprofileBlock(new_g->block());
-  static auto const INSERT_EXPANDS = std::getenv("PYTORCH_EXPANDS");
-  if (INSERT_EXPANDS) {
-    insertExpands(new_g->block());
-  }
-
   pr->instrumentBlock(new_g->block());
 
   for (auto i : new_g->return_node()->inputs()) {
@@ -235,70 +214,71 @@ std::unique_ptr<ProfilingRecord> ProfilingRecord::instrumentGraph(
     int64_t frame_id;
     pop(stack, frame_id);
 
-    // const auto& it_dims2symbols = *it.dims2symbols_;
-    // const auto& it_symbols2dims = *it.symbols_2dims;
     std::lock_guard<std::mutex> lock(raw_pr->mutex_);
 
     if (raw_pr->profiling_count_ > 0) {
       raw_pr->profiling_count_--;
     }
 
+    // merge profiling information from all runs
     if (raw_pr->profiling_count_ == 0) {
-      // merge profiling information from all runs
+      GRAPH_DEBUG("Collected ", raw_pr->profiled_types_per_frame_.size(), " records for run ", frame_id);
 
-      GRAPH_DEBUG("Collected ", raw_pr->profiling_records_.size(), " records");
-      auto it = raw_pr->profiling_records_.begin();
-      auto first_run = it->second;
-      it++;
+      auto profiled_types_iter = raw_pr->profiled_types_per_frame_.begin();
+      // scratch symbol table and symbol sets for merging profiling information
+      // from multiple runs
+      auto frame_id = profiled_types_iter->first;
+      auto merged_profiled_types = profiled_types_iter->second;
+      auto merged_symbol_sets = raw_pr->symbols_per_frame_[frame_id].symbol_sets_;
+      auto merged_symbol_table = raw_pr->symbols_per_frame_[frame_id].symbol_table_;
+      profiled_types_iter++;
+
       // merge profiling information from next runs into the first one
-      for (; it != raw_pr->profiling_records_.end(); it++) {
-        first_run.symbols2dims_.clear();
-        first_run.dims2symbols_.clear();
-        first_run.split_symbols_.clear();
-        for (auto e : it->second.symbolic_shapes_) {
-          if (first_run.symbolic_shapes_.count(e.first) == 0) {
-            first_run.symbolic_shapes_[e.first] = e.second;
-            auto type = first_run.symbolic_shapes_[e.first];
-            if (e.second->sizes().size().has_value()) {
-              std::vector<int64_t> new_symbols;
-              for (size_t i = 0; i < e.second->sizes().size(); i++) {
-                auto old_symbol = type->sizes()[i];
+      for (; profiled_types_iter != raw_pr->profiled_types_per_frame_.end(); profiled_types_iter++) {
+        merged_symbol_sets.reset();
+        merged_symbol_table.reset();
+        for (auto val_type_pair : profiled_types_iter->second) {
+          if (merged_profiled_types.count(val_type_pair.first) == 0) {
+            merged_profiled_types[val_type_pair.first] = val_type_pair.second;
+            auto type = merged_profiled_types[val_type_pair.first];
+            if (type->symbolic_sizes().has_value()) {
+              std::vector<c10::ShapeSymbol> new_symbols;
+              for (size_t i = 0; i < (*type->symbolic_sizes()).size(); i++) {
+                auto old_symbol = (*type->symbolic_sizes())[i];
                 new_symbols.push_back(
-                    raw_pr->toSymbol(*old_symbol, first_run.dims2symbols_));
+                    raw_pr->toSymbol(old_symbol, merged_symbol_sets.getGlobalSet()));
               }
-              GRAPH_DEBUG(
-                  "Merging ",
-                  *e.second,
-                  " of run ",
-                  it->first,
-                  " into ",
-                  *type);
               auto new_type =
-                  type->withSymbolicShapes(c10::VaryingShape{new_symbols});
-              GRAPH_DEBUG("Result (if type absent) : ", *new_type);
-              first_run.symbolic_shapes_[e.first] = new_type;
+                  type->withSymbolicShapes(new_symbols);
+              GRAPH_DEBUG(
+                  "(Absent merged type) Merging ",
+                  *type,
+                  " of run ",
+                  profiled_types_iter->first,
+                  " into ",
+                  *new_type);
+              merged_profiled_types[val_type_pair.first] = new_type;
             }
           } else {
-            auto concrete_sizes = e.second->sizes().concrete_sizes();
+            const auto& concrete_sizes = val_type_pair.second->symbolic_sizes();
             if (concrete_sizes.has_value()) {
-              auto type = first_run.symbolic_shapes_[e.first];
+              auto type = merged_profiled_types[val_type_pair.first];
               auto new_shape = raw_pr->mergeSymbolicShapes(
                   *concrete_sizes,
-                  type->sizes(),
-                  first_run.dims2symbols_,
-                  first_run.symbols2dims_,
-                  first_run.split_symbols_);
+                  type->symbolic_sizes(),
+                  merged_symbol_sets,
+                  merged_symbol_table);
               GRAPH_DEBUG(
                   "Merging ",
-                  *e.second,
+                  *val_type_pair.second,
                   " of run ",
-                  it->first,
+                  profiled_types_iter->first,
                   " into ",
                   *type);
-              type = type->merge(e.second);
-              type = type->withSymbolicShapes(c10::VaryingShape(new_shape));
+              type = type->merge(val_type_pair.second);
+              type = type->withSymbolicShapes(new_shape);
               GRAPH_DEBUG("Result : ", *type);
-              first_run.symbolic_shapes_[e.first] = type;
+              merged_profiled_types[val_type_pair.first] = type;
             } else {
               TORCH_INTERNAL_ASSERT(false, "NYI");
             }
@@ -307,8 +287,8 @@ std::unique_ptr<ProfilingRecord> ProfilingRecord::instrumentGraph(
       }
 
       // update types in the graph
-      for (auto e : first_run.symbolic_shapes_) {
-        e.first->setType(e.second);
+      for (auto val_type_pair : merged_profiled_types) {
+        val_type_pair.first->setType(val_type_pair.second);
       }
     }
   };
