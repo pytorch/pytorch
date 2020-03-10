@@ -75,8 +75,8 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
       {
         pybind11::gil_scoped_acquire ag;
         auto pythonUdf = pythonRpcHandler.deserialize(pyCall.serializedPyObj());
-        serializedPyObj = std::make_shared<SerializedPyObj>(
-            pythonRpcHandler.serialize(
+        serializedPyObj =
+            std::make_shared<SerializedPyObj>(pythonRpcHandler.serialize(
                 pythonRpcHandler.runPythonUdf(std::move(pythonUdf))));
       }
       return wrap(
