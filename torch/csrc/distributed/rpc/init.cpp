@@ -149,7 +149,10 @@ PyObject* rpc_init(PyObject* /* unused */) {
               >>> # count is automatically updated.
               >>> rpc.rpc_sync("worker1", f, args(rref,))
           )")
-          .def(py::init<const py::object&>())
+          .def(
+              py::init<const py::object&, const py::object&>(),
+              py::arg("value"),
+              py::arg("type_hint") = py::none())
           .def(
               // not releasing GIL here to avoid context switch on getters
               "is_owner",
