@@ -240,7 +240,7 @@ void normal_kernel(Tensor& self, double mean, double std, RNG* generator) {
     normal_fill(self, static_cast<float>(mean), static_cast<float>(std), generator);
 #endif
   } else {
-    AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "normal_kernel_cpu", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "normal_kernel_cpu", [&] {
       if (size >= 16 && self.is_contiguous()) {
         normal_fill<scalar_t>(self, static_cast<scalar_t>(mean), static_cast<scalar_t>(std), generator);
       } else {

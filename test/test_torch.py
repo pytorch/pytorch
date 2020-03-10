@@ -9563,8 +9563,13 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(1, len(z))
         self.assertEqual(torch.empty(0, dtype=torch.long), z[0])
 
-    def test_normal(self, device):
-        q = torch.empty(100, 100, device=device).normal_()
+    @dtypes(torch.float, torch.double)
+    # torch.bfloat16: nan not less than or equal to 0.2
+    # torch.half: "sum_cpu" not implemented for 'Half'
+    @dtypesIfCUDA(torch.float, torch.double, torch.half)
+    # torch.bfloat16: "mean_cuda" not implemented for 'BFloat16'
+    def test_normal(self, device, dtype):
+        q = torch.empty(100, 100, dtype=dtype, device=device).normal_()
         self.assertEqual(q.mean(), 0, 0.2)
         self.assertEqual(q.std(), 1, 0.2)
 
@@ -9572,15 +9577,15 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(q.mean(), 2, 0.3)
         self.assertEqual(q.std(), 3, 0.3)
 
-        q = torch.empty(100, 100, device=device)
+        q = torch.empty(100, 100, dtype=dtype, device=device)
         q_row1 = q[0:1].clone()
         q[99:100].normal_()
         self.assertEqual(q[99:100].mean(), 0, 0.2)
         self.assertEqual(q[99:100].std(), 1, 0.2)
         self.assertEqual(q[0:1].clone(), q_row1)
 
-        mean = torch.empty(100, 100, device=device)
-        std = torch.empty(100, 100, device=device)
+        mean = torch.empty(100, 100, dtype=dtype, device=device)
+        std = torch.empty(100, 100, dtype=dtype, device=device)
         mean[:50] = 0
         mean[50:] = 1
         std[:, :50] = 4
@@ -9610,6 +9615,26 @@ class TestTorchDeviceType(TestCase):
         r = torch.normal(2, 3, (100, 100))
         self.assertEqual(r.mean(), 2, 0.2)
         self.assertEqual(r.std(), 3, 0.2)
+
+    @dtypes(torch.float, torch.double, torch.bfloat16)
+    # torch.half: "add_cpu/sub_cpu" not implemented for 'Half'
+    @dtypesIfCUDA(torch.float, torch.double, torch.half, torch.bfloat16)
+    def test_normal_2(self, device, dtype):
+        for size in [10, 1000]:
+            t = torch.empty(size, dtype=dtype, device=device)
+            t.normal_()
+            t.normal_(42.0)
+            t.normal_(24.0, 42.0)
+
+            torch.normal(2, 3, size=(size,), out=t)
+            torch.normal(mean=torch.full_like(t, 42.0), out=t)
+            torch.normal(mean=24.0, std=torch.full_like(t, 42.0), out=t)
+            torch.normal(mean=torch.full_like(t, 24.0), std=torch.full_like(t, 42.0), out=t)
+
+            t = torch.normal(2, 3, size=(size,), dtype=dtype, device=device)
+            t = torch.normal(mean=torch.full_like(t, 42.0))
+            t = torch.normal(mean=24.0, std=torch.full_like(t, 42.0))
+            t = torch.normal(mean=torch.full_like(t, 24.0), std=torch.full_like(t, 42.0))
 
     def test_empty_strided(self, device):
         for shape in [(2, 3, 4), (0, 2, 0)]:
@@ -11292,7 +11317,6 @@ class TestTorchDeviceType(TestCase):
             self._pdist_single((1000, 2), device, 2, dtype, trans=False, grad_check=False)
 
     @slowTest
-    @skipIfRocm
     def test_pdist_norm_backward(self, device):
         for shape in [(4, 5), (3, 2), (2, 1), (1500, 1)]:
             for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
