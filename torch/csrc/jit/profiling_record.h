@@ -30,14 +30,8 @@ struct ProfilingRunRecord {
 // using ShapeValue = int64_t;
 // using c10::ShapeSymbol = int64_t;
 
-struct ShapeSymbolTable {
-  bool isBound(c10::ShapeSymbol s) { return data_.count(s) != 0; }
-  void reset() { data_.clear(); };
 
-  c10::ShapeSymbol getValue(c10::ShapeSymbol s) { return data_[s]; }
-  void assign(c10::ShapeSymbol s, c10::ShapeSymbol v) { data_[s] = v; }
-  std::map<c10::ShapeSymbol, c10::ShapeSymbol> data_;
-};
+struct ProfilingRecord;
 
 struct ShapeSymbolSets {
 
@@ -54,6 +48,48 @@ struct ShapeSymbolSets {
 
 };
 
+struct ShapeSymbolTable {
+  bool isBound(c10::ShapeSymbol s) { 
+    if (s.statik_) {
+      return true;
+    }
+    return data_.count(s) != 0; 
+  }
+  void reset() { 
+    data_.clear(); 
+    sets_.reset();
+  };
+
+  c10::ShapeSymbol getValue(c10::ShapeSymbol s) { 
+    if (s.statik_) {
+      return s;
+    }
+    return data_[s]; 
+  }
+  void assign(c10::ShapeSymbol s, c10::ShapeSymbol v) { 
+    TORCH_INTERNAL_ASSERT(!s.statik_);
+    data_[s] = v; 
+    auto&  dims2symbols = sets_.getGlobalSet();
+    // consistently resolve the scenario where the same dimension
+    // maps to more than one set of symbols
+    // this is only relevant when merging information from
+    // two profiling runs where in one of them a particular
+    // use was profiled and in another one, the same use wasn't
+    // profiled
+    // we can do a bit better, but it will be more complex
+    // and require more book-keeping 
+    if (dims2symbols.count(v) == 0 || dims2symbols[v] < s) {
+      dims2symbols[v] = s;
+    }    
+  }
+  std::map<c10::ShapeSymbol, c10::ShapeSymbol> data_;
+  ShapeSymbolSets sets_;
+  ProfilingRecord* pr_;
+
+  c10::ShapeSymbol GetSymbolInSet(c10::ShapeSymbol new_size, c10::ShapeSymbol set, ProfilingRecord* pr);
+  c10::ShapeSymbol toSymbol(c10::ShapeSymbol, std::map<c10::ShapeSymbol, c10::ShapeSymbol>& dims2symbols, ProfilingRecord* pr);
+
+};
 
 struct FrameSymbols {
   ShapeSymbolSets symbol_sets_;
@@ -74,7 +110,7 @@ struct ProfilingRecord {
   size_t profiling_count_;
   std::map<int64_t, ProfilingRunRecord> profiling_records_;
   std::map<int64_t, std::map<Value*, TensorTypePtr>> profiled_types_per_frame_;
-  std::map<int64_t, FrameSymbols> symbols_per_frame_;
+  std::map<int64_t, ShapeSymbolTable> symbols_per_frame_;
   size_t num_symbols = 1; // -1 is special to denote the global set of all symbols for a run
 
   c10::ShapeSymbol getNewSymbol() {
@@ -85,10 +121,8 @@ struct ProfilingRecord {
   std::vector<c10::ShapeSymbol> mergeSymbolicShapes(
     const std::vector<c10::ShapeSymbol>& new_sizes,
     c10::optional<std::vector<c10::ShapeSymbol>> sym_shapes,
-    ShapeSymbolSets& symbol_sets,
     ShapeSymbolTable& symbol_table);
 
-  c10::ShapeSymbol toSymbol(c10::ShapeSymbol, std::map<c10::ShapeSymbol, c10::ShapeSymbol>& dims2symbols);
   bool ready() const {
     return profiling_count_ == 0;
   }

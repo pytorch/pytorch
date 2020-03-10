@@ -308,7 +308,7 @@ struct CAFFE2_API ShapeSymbol {
     bool statik_;  
     bool operator ==(const ShapeSymbol &b) const { return value_ == b.value_ && statik_ == b.statik_; }
     // dynamic shapes are typically negative
-    bool operator <(const ShapeSymbol &b) const { return static_cast<int>(statik_) < static_cast<int>(b.statik_) && value_ < b.value_; }
+    bool operator <(const ShapeSymbol &b) const { return static_cast<int>(statik_) < static_cast<int>(b.statik_) || value_ < b.value_; }
 };
 
 template <typename T>

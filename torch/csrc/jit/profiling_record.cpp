@@ -3,9 +3,39 @@
 #include <torch/csrc/jit/interpreter.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/jit_log.h>
+#include <ostream>
+
+namespace c10 {
+
+std::ostream& operator<<(std::ostream& os, const c10::ShapeSymbol& s)
+{
+    os << "ShapeSymbol(" << s.value_ << ',' << s.statik_ << ')';
+    return os;
+}
+
+}
 
 namespace torch {
 namespace jit {
+
+c10::ShapeSymbol ShapeSymbolTable::toSymbol(
+    c10::ShapeSymbol val,
+    std::map<c10::ShapeSymbol, c10::ShapeSymbol>& dims2symbols,
+    ProfilingRecord* pr) {
+  if (dims2symbols.count(val) == 0) {
+    auto new_sym = pr->getNewSymbol();
+    dims2symbols[val] = new_sym;
+    return new_sym;
+  }
+
+  return dims2symbols[val];
+}
+
+c10::ShapeSymbol ShapeSymbolTable::GetSymbolInSet(c10::ShapeSymbol new_size, c10::ShapeSymbol set, ProfilingRecord* pr) {
+  auto& dims2symbols = sets_.getSetForSymbol(set);
+  auto new_sym = toSymbol(new_size, dims2symbols, pr);
+  return new_sym;
+}
 
 ProfilingRecord::ProfilingRecord(std::shared_ptr<Graph> g)
     : profiled_graph_(std::move(g)), profiling_count_(getNumProfiledRuns()) {}
@@ -48,17 +78,7 @@ static void unprofileBlock(Block* start_block) {
   }
 }
 
-c10::ShapeSymbol ProfilingRecord::toSymbol(
-    c10::ShapeSymbol val,
-    std::map<c10::ShapeSymbol, c10::ShapeSymbol>& dims2symbols) {
-  if (dims2symbols.count(val) == 0) {
-    auto new_sym = getNewSymbol();
-    dims2symbols[val] = new_sym;
-    return new_sym;
-  }
 
-  return dims2symbols[val];
-}
 
 // struct SymbolShape {
 //   SymbolShape(int64_t v, bool statik = false): value_(v), statik_(statik) {};
@@ -74,29 +94,23 @@ c10::ShapeSymbol ProfilingRecord::toSymbol(
 std::vector<c10::ShapeSymbol> ProfilingRecord::mergeSymbolicShapes(
     const std::vector<c10::ShapeSymbol>& new_sizes,
     c10::optional<std::vector<c10::ShapeSymbol>> sym_shapes,
-    ShapeSymbolSets& symbol_sets,
     ShapeSymbolTable& symbol_table) {
   std::vector<c10::ShapeSymbol> new_symbols;
   if (sym_shapes.has_value() && new_sizes.size() == (*sym_shapes).size()) {
     for (size_t i = 0; i < new_sizes.size(); i++) {
       auto symbol = (*sym_shapes)[i];
-      if (symbol.statik_) {
-        if (symbol == new_sizes[i]) {
-          new_symbols.push_back(new_sizes[i]);
-        } else {
-          auto& dims2symbols = symbol_sets.getGlobalSet();
-          auto new_sym = toSymbol(new_sizes[i], dims2symbols);
-          new_symbols.push_back(new_sym);
-        }
-      } else if (!symbol_table.isBound(symbol)) {
+      GRAPH_DEBUG("Merging symbol ", symbol);
+      if (!symbol_table.isBound(symbol)) {
         symbol_table.assign(symbol, new_sizes[i]);
+        GRAPH_DEBUG(symbol, " is now bound to ", new_sizes[i]);
         new_symbols.push_back(symbol);
       } else {
         if (symbol_table.getValue(symbol) == new_sizes[i]) {
+          GRAPH_DEBUG("Reusing symbol ", symbol);
           new_symbols.push_back(symbol);
         } else {
-          auto& dims2symbols = symbol_sets.getSetForSymbol(symbol);
-          auto new_sym = toSymbol(new_sizes[i], dims2symbols);
+          auto new_sym = symbol_table.GetSymbolInSet(new_sizes[i], symbol, this);
+          GRAPH_DEBUG(symbol, " is already bound to ", symbol_table.getValue(symbol), " assigning ", new_sizes[i], " a new symbol ", new_sym);
           new_symbols.push_back(new_sym);
         }
       }
@@ -150,13 +164,12 @@ void ProfilingRecord::insertShapeProfile(Node *n, Value *i) {
         } else {
           auto type = profiled_types.at(pno);
           GRAPH_DEBUG("Existing type for %", pno->debugName(), " ", *type);
-          auto& frame_symbols = symbols_per_frame_[frame_id];
+          auto& symbol_table = symbols_per_frame_[frame_id];
           auto sizes = fmap(t.sizes(), [](int64_t s){return c10::ShapeSymbol(s, true); });
           auto new_sym_shapes = this->mergeSymbolicShapes(
               sizes,
               type->symbolic_sizes(),
-              frame_symbols.symbol_sets_,
-              frame_symbols.symbol_table_);
+              symbol_table);
           pttp = type->merge(pttp)->withSymbolicShapes(new_sym_shapes);
           GRAPH_DEBUG(
               "Result for %",
@@ -229,13 +242,11 @@ std::unique_ptr<ProfilingRecord> ProfilingRecord::instrumentGraph(
       // from multiple runs
       auto frame_id = profiled_types_iter->first;
       auto merged_profiled_types = profiled_types_iter->second;
-      auto merged_symbol_sets = raw_pr->symbols_per_frame_[frame_id].symbol_sets_;
-      auto merged_symbol_table = raw_pr->symbols_per_frame_[frame_id].symbol_table_;
+      auto merged_symbol_table = raw_pr->symbols_per_frame_[frame_id];
       profiled_types_iter++;
 
       // merge profiling information from next runs into the first one
       for (; profiled_types_iter != raw_pr->profiled_types_per_frame_.end(); profiled_types_iter++) {
-        merged_symbol_sets.reset();
         merged_symbol_table.reset();
         for (auto val_type_pair : profiled_types_iter->second) {
           if (merged_profiled_types.count(val_type_pair.first) == 0) {
@@ -245,8 +256,13 @@ std::unique_ptr<ProfilingRecord> ProfilingRecord::instrumentGraph(
               std::vector<c10::ShapeSymbol> new_symbols;
               for (size_t i = 0; i < (*type->symbolic_sizes()).size(); i++) {
                 auto old_symbol = (*type->symbolic_sizes())[i];
-                new_symbols.push_back(
-                    raw_pr->toSymbol(old_symbol, merged_symbol_sets.getGlobalSet()));
+                if (old_symbol.statik_) {
+                  new_symbols.push_back(old_symbol);
+                }
+                else {
+                  new_symbols.push_back(
+                    merged_symbol_table.GetSymbolInSet(old_symbol, c10::ShapeSymbol::getInvalidSymbol(), raw_pr));
+                }
               }
               auto new_type =
                   type->withSymbolicShapes(new_symbols);
@@ -266,7 +282,6 @@ std::unique_ptr<ProfilingRecord> ProfilingRecord::instrumentGraph(
               auto new_shape = raw_pr->mergeSymbolicShapes(
                   *concrete_sizes,
                   type->symbolic_sizes(),
-                  merged_symbol_sets,
                   merged_symbol_table);
               GRAPH_DEBUG(
                   "Merging ",
@@ -280,7 +295,11 @@ std::unique_ptr<ProfilingRecord> ProfilingRecord::instrumentGraph(
               GRAPH_DEBUG("Result : ", *type);
               merged_profiled_types[val_type_pair.first] = type;
             } else {
-              TORCH_INTERNAL_ASSERT(false, "NYI");
+              // reset symbolic shapes when ranks are different
+              auto type = merged_profiled_types[val_type_pair.first];
+              type = type->merge(val_type_pair.second);
+              type = type->withSymbolicShapes(c10::nullopt);
+              merged_profiled_types[val_type_pair.first] = type;
             }
           }
         }

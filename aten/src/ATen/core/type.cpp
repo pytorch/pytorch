@@ -823,7 +823,7 @@ std::tuple<std::vector<int64_t>, std::vector<int64_t>> TensorType::
         new_sizes = {vss};
       }
 
-        return TensorType::create(scalar_type, device, new_sizes, strides, contiguity, requires_grad, undefined);     
+      return TensorType::create(scalar_type, device, new_sizes, strides, contiguity, requires_grad, undefined);     
   }
 
 TensorTypePtr TensorType::create(
