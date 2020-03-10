@@ -11800,9 +11800,9 @@ class TestTorchDeviceType(TestCase):
     @skipCUDAIfRocm
     def test_blas_empty(self, device):
 
-        def fn(torchfn, *args):
+        def fn(torchfn, *args, **kwargs):
             return torchfn(*tuple(torch.randn(shape, device=device) if isinstance(shape, tuple) else shape
-                                  for shape in args))
+                                  for shape in args), **kwargs)
 
         # mm, addmm
         self.assertEqual((0, 0), fn(torch.mm, (0, 0), (0, 0)).shape)
