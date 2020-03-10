@@ -10,9 +10,11 @@
 #include <c10/core/TensorImpl.h>
 #include <c10/core/ScalarType.h>
 #include <c10/core/UndefinedTensorImpl.h>
+#include <c10/core/MemoryFormat.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/util/typeid.h>
 #include <c10/util/intrusive_ptr.h>
+#include <c10/util/Optional.h>
 
 #include <THC/THC.h>
 
@@ -240,6 +242,27 @@ Tensor cat_cuda(TensorList inputs, int64_t dimension) {
   return out;
 }
 
+inline c10::MemoryFormat compute_output_memory_format(const TensorList &inputs) {
+  c10::optional<c10::MemoryFormat> format = c10::nullopt;
+  for (auto &t : inputs) {
+    auto f = t.suggest_memory_format();
+    if (!format.has_value()) {
+      format = f;
+      continue;
+    }
+    if (format.value() == f) {
+      continue;
+    }
+    if (format.value() == c10::MemoryFormat::Contiguous || f == c10::MemoryFormat::Contiguous) {
+      return c10::MemoryFormat::Contiguous;
+    }
+    if (format.value() != f) {
+      return c10::MemoryFormat::Contiguous;
+    }
+  }
+  return format.value();
+}
+
 Tensor& cat_out_cuda(Tensor& out, TensorList inputs, int64_t dimension) {
 
   // previously, size [0] tensors were the only possible empty tensors; thus, it
@@ -284,6 +307,8 @@ Tensor& cat_out_cuda(Tensor& out, TensorList inputs, int64_t dimension) {
   TORCH_CHECK(inputs.size() > 0, "invalid number of inputs ", inputs.size());
   TORCH_CHECK(dimension >= 0, "invalid dimension ", dimension);
 
+  c10::MemoryFormat memory_format = compute_output_memory_format(inputs);
+
   std::vector<int64_t> size(notSkippedTensor->sizes().vec());
 
   // Compute size of the result in the cat dimension
@@ -299,7 +324,7 @@ Tensor& cat_out_cuda(Tensor& out, TensorList inputs, int64_t dimension) {
 
   // Compute the size of the result
   size[dimension] = cat_dim_size;
-  out.resize_(size);
+  out.resize_(size, memory_format);
   if (out.numel() == 0) {
     return out;
   }
