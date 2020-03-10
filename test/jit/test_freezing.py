@@ -47,7 +47,7 @@ class TestFreezing(JitTestCase):
                 self.e = [1.0, 1.1]  # folded
                 self.f = ["hello", "world"]  # folded
                 self.g = ([1, 2], 3.2, "4.4", torch.tensor([5.5], requires_grad=True))     # folded
-                self.h = {"layer" : "dict"}   # not folded. dictionary not yet supported
+                self.h = {"layer" : "dict"}
                 self.t = torch.tensor([1.2, 2.4], requires_grad=True)  # folded
                 self.ts = [torch.tensor([1.0, 2.0], requires_grad=True), torch.tensor([3.0, 4.0], requires_grad=True)]  # folded
                 self.tt = [[torch.tensor([3.3, 2.3], requires_grad=True), None]]  # not folded. Generic list not yet folded
@@ -69,7 +69,7 @@ class TestFreezing(JitTestCase):
         self.assertFalse(m._c.hasattr('e'))
         self.assertFalse(m._c.hasattr('f'))
         self.assertFalse(m._c.hasattr('g'))
-        self.assertTrue(m._c.hasattr('h'))
+        self.assertFalse(m._c.hasattr('h'))
         self.assertFalse(m._c.hasattr('t'))
         self.assertFalse(m._c.hasattr('ts'))
         self.assertTrue(m._c.hasattr('tt'))
@@ -226,7 +226,7 @@ class TestFreezing(JitTestCase):
         m_f = torch._C._freeze_module(m_s._c)
         m.a["layer2"] += "2"
         m_s.modify_a(t)
-        self.assertTrue(m_f.hasattr('a'))
+        self.assertFalse(m_f.hasattr('a'))
         out = m_f.forward(t)
         expected = {"layer" : "411", "layer2" : "3"}
         self.assertEqual(out, expected)
