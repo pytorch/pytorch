@@ -229,10 +229,17 @@ class TestSparse(TestCase):
             x.to_dense()
             x.to_dense()
             # We dont have to_dense for half types, so we don't request 
-            # exact_dtype when testing. We allow to_dense to convert dtype
-            # to torch.float64
-            self.assertEqual(res, x.to_dense(), exact_dtype=False)
-            self.assertEqual(res, self.safeToDense(x), exact_dtype=False)
+            # exact_dtype if res.type is torch.float16.
+            dense_x = x.to_dense()
+            safe_dense_x = self.safeToDense(x)
+            if (res.dtype == torch.float16):
+                exact_dtype = False
+            else:
+                exact_dtype = True
+                dense_x = dense_x.to(res.dtype)
+                safe_dense_x = safe_dense_x.to(res.dtype)
+            self.assertEqual(res, dense_x, exact_dtype=exact_dtype)
+            self.assertEqual(res, safe_dense_x, exact_dtype=exact_dtype)
 
             def fn(x):
                 return x.to_dense()
@@ -246,8 +253,7 @@ class TestSparse(TestCase):
         ])
         # we don't have to_dense for half types on CPU because it is implemented
         # with a slower add_ operation
-        for dtype in [torch.float16, torch.float64] if self.device != 'cpu' else [torch.float64]:
-
+        for dtype in [torch.float16, torch.float32, torch.float64] if self.device != 'cpu' else [torch.float32, torch.float64]:
             v = self.value_tensor([2, 1, 3, 4]).to(dtype=dtype)
             x = self.sparse_tensor(i, v, torch.Size([3, 4, 5]))
             res = self.value_tensor([
