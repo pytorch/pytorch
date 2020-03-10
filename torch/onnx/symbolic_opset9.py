@@ -1938,6 +1938,13 @@ def prim_shape(g, self):
     return g.op('Shape', self)
 
 
+@parse_args('v', 'i')
+def one_hot(g, self, num_classes):
+    values = g.op("Constant", value_t=torch.LongTensor([0, 1]))
+    depth = g.op("Constant", value_t=torch.LongTensor([num_classes]))
+    return g.op("OneHot", self, depth, values, axis_i=-1)
+
+
 @parse_args('v', 'i', 'v', 'v')
 def gather(g, self, dim, index, sparse_grad=False):
     if sym_help._maybe_get_const(sparse_grad, 'i'):
