@@ -1,13 +1,15 @@
 #include <torch/csrc/jit/ir/ir.h>
 
+#include <ATen/core/builtin_function.h>
+#include <ATen/core/function.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
+#include <torch/csrc/jit/api/function_impl.h>
+#include <torch/csrc/jit/frontend/error_report.h>
+#include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/ir/constants.h>
-#include <torch/csrc/jit/api/function.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/serialization/python_print.h>
-#include <torch/csrc/jit/frontend/schema_matching.h>
-#include <torch/csrc/jit/frontend/error_report.h>
 
 #include <algorithm>
 #include <iostream>
@@ -1821,6 +1823,7 @@ at::ArrayRef<Value*> createTupleUnpack(Value* v) {
 
 std::vector<Value*> inlineCallTo(Node* to_replace, Function* callee) {
   WithInsertPoint guard(to_replace);
+  TORCH_INTERNAL_ASSERT(callee->isGraphFunction());
   std::unordered_map<Value*, Value*> value_map;
   auto new_outputs = insertGraph(
       *to_replace->owningGraph(),

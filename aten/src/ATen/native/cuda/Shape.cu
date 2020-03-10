@@ -1,18 +1,8 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/DeviceGuard.h>
-#include <ATen/Context.h>
-#include <ATen/Utils.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/Dispatch.h>
-
-#include <c10/core/TensorImpl.h>
-#include <c10/core/ScalarType.h>
-#include <c10/core/UndefinedTensorImpl.h>
-#include <c10/cuda/CUDACachingAllocator.h>
-#include <c10/util/typeid.h>
-#include <c10/util/intrusive_ptr.h>
 
 #include <THC/THC.h>
 
