@@ -76,7 +76,7 @@ def nll_loss2d(g, self, target, weight, reduction, ignore_index):
 # implementation of broadcast_tensors.
 def broadcast_tensors(g, tensor_list):
     tensors = sym_help._unpack_list(tensor_list)
-    if (tensors[0].type().dim() != 2 and tensors[0].type().sizes() != tensors[1].type().sizes()):
+    if (tensors[0].type().dim() != 2 or tensors[0].type().sizes() != tensors[1].type().sizes()):
         return _unimplemented("broadcast_tensors", "broadcast for tensors")
     return tensor_list
 
