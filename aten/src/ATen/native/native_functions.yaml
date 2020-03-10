@@ -140,6 +140,9 @@
   dispatch:
     CUDA: _cudnn_ctc_loss
 
+- func: _use_cudnn_rnn_flatten_weight() -> bool
+  use_c10_dispatcher: full
+
 - func: _cudnn_rnn_flatten_weight(Tensor[] weight_arr, int weight_stride0, int input_size, int mode, int hidden_size, int num_layers, bool batch_first, bool bidirectional) -> Tensor
   dispatch:
     CUDA: _cudnn_rnn_flatten_weight
@@ -2841,6 +2844,29 @@
 
 - func: triplet_margin_loss(Tensor anchor, Tensor positive, Tensor negative, float margin=1.0, float p=2, float eps=1e-06, bool swap=False, int reduction=Mean) -> Tensor
   use_c10_dispatcher: full
+
+- func: true_divide.Tensor(Tensor self, Tensor other) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+  dispatch:
+    CPU: true_divide
+    CUDA: true_divide
+    SparseCPU: true_divide_sparse
+    SparseCUDA: true_divide_sparse
+  supports_named_tensor: True
+
+- func: true_divide.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: true_divide_out
+    CUDA: true_divide_out
+    SparseCPU: true_divide_out_sparse_zerodim
+    SparseCUDA: true_divide_out_sparse_zerodim
+  supports_named_tensor: True
+
+- func: true_divide.Scalar(Tensor self, Scalar other) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+  supports_named_tensor: True
 
 - func: trunc(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -5837,6 +5863,7 @@
   dispatch:
     CPU: avg_pool3d_cpu
     CUDA: avg_pool3d_cuda
+    QuantizedCPU: quantized_avg_pool3d
 
 - func: avg_pool3d_backward.grad_input(Tensor grad_output, Tensor self, int[3] kernel_size, int[3] stride, int[3] padding, bool ceil_mode, bool count_include_pad, int? divisor_override, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn

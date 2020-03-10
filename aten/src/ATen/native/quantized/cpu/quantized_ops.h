@@ -17,7 +17,7 @@ using qclamp_fn = void (*)(
 using qtanh_fn = void (*)(const at::Tensor& /*qx*/, at::Tensor& /*qy*/);
 using qelu_fn = void(*)(
     const at::Tensor& /*qx*/,
-    Scalar alpha,
+    Scalar /*alpha*/,
     at::Tensor& /*qy*/);
 using qadd_fn =
     void (*)(Tensor& /*out*/, const Tensor& /*self*/, const Tensor& /*other*/);
@@ -41,13 +41,13 @@ using qadaptive_avg_pool2d_fn = void (*)(
     const Tensor& qx,
     Tensor& qy,
     int64_t b,
-    int64_t sizeD,
+    int64_t sizeC,
     int64_t isizeH,
     int64_t isizeW,
     int64_t osizeH,
     int64_t osizeW,
     int64_t istrideB,
-    int64_t istrideD,
+    int64_t istrideC,
     int64_t istrideH,
     int64_t istrideW);
 
@@ -66,6 +66,29 @@ using qavg_pool2d_fn = void (*)(
     int dH,
     int padW,
     int padH,
+    bool count_include_pad,
+    c10::optional<int64_t> divisor_override);
+
+using qavg_pool3d_fn = void (*)(
+    const Tensor& qx,
+    Tensor& qy,
+    int64_t b,
+    int64_t nInputPlane,
+    int64_t inputWidth,
+    int64_t inputHeight,
+    int64_t inputDepth,
+    int64_t outputWidth,
+    int64_t outputHeight,
+    int64_t outputDepth,
+    int kW,
+    int kH,
+    int kD,
+    int dW,
+    int dH,
+    int dD,
+    int padW,
+    int padH,
+    int padD,
     bool count_include_pad,
     c10::optional<int64_t> divisor_override);
 
@@ -89,7 +112,7 @@ using qcat_nhwc_fn = Tensor (*)(
     int64_t zero_point);
 using qtopk_fn = void(*)(Tensor&, Tensor&, const Tensor&, int64_t, int64_t, bool, bool);
 
-using qbatch_norm_fn = void(*)(int64_t, int64_t, int64_t, const int64_t, const int64_t, const Tensor&, const Tensor&, const Tensor&, Tensor&);
+using qbatch_norm_fn = void(*)(int64_t, int64_t, int64_t, int64_t, int64_t, const Tensor&, const Tensor&, const Tensor&, Tensor&);
 
 // using qavg_pool2d_fn
 DECLARE_DISPATCH(qrelu_fn, qrelu_stub);
@@ -104,6 +127,7 @@ DECLARE_DISPATCH(qadd_fn, qadd_relu_stub);
 DECLARE_DISPATCH(qmaxpool_2d_fn, qmaxpool_2d_nhwc_stub);
 DECLARE_DISPATCH(qadaptive_avg_pool2d_fn, qadaptive_avg_pool2d_nhwc_stub);
 DECLARE_DISPATCH(qavg_pool2d_fn, qavg_pool2d_nhwc_stub);
+DECLARE_DISPATCH(qavg_pool3d_fn, qavg_pool3d_nhwc_stub);
 DECLARE_DISPATCH(qupsample_bilinear2d_fn, qupsample_bilinear2d_nhwc_stub);
 DECLARE_DISPATCH(qcat_nhwc_fn, qcat_nhwc_stub);
 DECLARE_DISPATCH(qcat_nhwc_fn, qcat_relu_nhwc_stub);
