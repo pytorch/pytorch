@@ -53,5 +53,5 @@ def get_source_lines_and_file(obj):
 
 
 TEST_MASTER_ADDR = '127.0.0.1'
-TEST_MASTER_PORT = 29500
+TEST_MASTER_PORT = 0
 USE_RTLD_GLOBAL_WITH_LIBTORCH = False
