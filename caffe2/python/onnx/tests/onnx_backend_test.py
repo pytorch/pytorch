@@ -107,6 +107,7 @@ backend_test.exclude(r'(test_hardsigmoid'  # Does not support Hardsigmoid.
                      '|test_inverse.*'
                      '|test_softmax_cross_entropy.*'
                      '|test_mean_square_distance.*'
+                     '|test_unfoldtodepth.*'
                      ')')
 
 # Quick patch to unbreak master CI, is working on the debugging.
