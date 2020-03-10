@@ -7,11 +7,7 @@
 
 namespace c10 {
 
-std::ostream& operator<<(std::ostream& os, const c10::ShapeSymbol& s)
-{
-    os << "ShapeSymbol(" << s.value_ << ',' << s.statik_ << ')';
-    return os;
-}
+
 
 }
 
@@ -78,19 +74,6 @@ static void unprofileBlock(Block* start_block) {
   }
 }
 
-
-
-// struct SymbolShape {
-//   SymbolShape(int64_t v, bool statik = false): value_(v), statik_(statik) {};
-//   int64_t value_;
-//   bool statik_;
-// };
-
-//getNewSymbolInNamespace
-//getNewSymbolInGlobalNamespace
-//geGlobalNamespace
-//getNamespaceForSymbol
-
 std::vector<c10::ShapeSymbol> ProfilingRecord::mergeSymbolicShapes(
     const std::vector<c10::ShapeSymbol>& new_sizes,
     c10::optional<std::vector<c10::ShapeSymbol>> sym_shapes,
@@ -118,20 +101,6 @@ std::vector<c10::ShapeSymbol> ProfilingRecord::mergeSymbolicShapes(
   }
   return new_symbols;
 }
-
-// if we create Symbols that are just dims they are unique in global namespace for just the first run
-// but in the next runs they are only unique in SymbolNamespace
-// split_symbols_ create a set relationship immediately without a need for an intermediate DimCell
-
-// DimCell doesn't eliminate the need for DimCell -> Symbol mapping
-// and doesn't simplify splitting because the new symbol is only valid in the namespace of the old set
-
-
-// within one run
-// static shapes assign symbols can be static shapes 
-// bind symbols, via a symbol table
-// resolve conflicts
-// SymbolNamespace 
 
 void ProfilingRecord::insertShapeProfile(Node *n, Value *i) {
 

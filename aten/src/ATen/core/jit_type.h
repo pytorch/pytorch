@@ -1353,6 +1353,7 @@ private:
 
 CAFFE2_API std::ostream& operator<<(std::ostream& out, const Type& t);
 CAFFE2_API std::ostream& operator<<(std::ostream& out, const VaryingShape& t);
+CAFFE2_API std::ostream& operator<<(std::ostream& os, const ShapeSymbol& s);
 // what is the type, ignoring extra size/shape information?
 // e.g. Tensor(2x3) -> Dynamic, and Tuple(Tensor(2x3),...) -> Tuple(Dynamic,...)
 

@@ -613,6 +613,12 @@ std::ostream& operator<<(std::ostream & out, const VaryingShape & vs) {
     return out;
 }
 
+std::ostream& operator<<(std::ostream& os, const ShapeSymbol& s)
+{
+    os << "ShapeSymbol(" << s.value_ << ',' << s.statik_ << ')';
+    return os;
+}
+
 TupleTypePtr TupleType::createNamed(
     const c10::optional<c10::QualifiedName>& qualName,
     const std::vector<std::string>& field_names,
