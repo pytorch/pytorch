@@ -15,9 +15,9 @@
 namespace torch {
 namespace jit {
 
-namespace {
-
 #ifdef USE_XNNPACK
+
+namespace {
 using at::native::xnnpack::XNNPackLinearOpContext;
 using at::native::xnnpack::XNNPackConv2dOpContext;
 
