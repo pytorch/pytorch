@@ -856,6 +856,20 @@ class TestOperators(TestCase):
         x = torch.ones((2, 2), requires_grad=True)
         self.assertONNX(lambda x: torch.scalar_tensor(x.dim()), x)
 
+    def test_mse_loss(self):
+        x = torch.randn(3, 5, requires_grad=True)
+        y = torch.randn(3, 5, requires_grad=True)
+        # this will produce different graph then when requires_grad=False
+        # instead of mse operator there will be 2 operators: ReduceMean and
+        # Pow because mse implemetation in PyTorch takes different path when
+        # requires_grad is set to True.
+        self.assertONNX(torch.nn.MSELoss(), (x, y), opset_version=12)
+
+    def test_mse_loss_no_grad(self):
+        x = torch.randn(3, 5)
+        y = torch.randn(3, 5)
+        self.assertONNX(torch.nn.MSELoss(), (x, y), opset_version=12)
+
     @skipIfNoLapack
     def test_det(self):
         x = torch.randn(2, 3, 5, 5, device=torch.device('cpu'))
