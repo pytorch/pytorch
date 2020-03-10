@@ -374,7 +374,7 @@ class TestXNNPACKRewritePass(TestCase):
             torch._C._jit_pass_insert_xnnpack_ops(scripted_model._c)
             if (prepack_removal):
                 scripted_model._c = torch._C._freeze_module(scripted_model._c)
-                torch._C._jit_pass_fold_prepack_ops(scripted_model._c)
+                torch._C._jit_pass_fold_xnnpack_prepack_ops(scripted_model._c)
 
             buffer = io.BytesIO()
             torch.jit.save(scripted_model, buffer)

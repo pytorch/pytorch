@@ -420,9 +420,9 @@ void initJITBindings(PyObject* module) {
             return insertXNNPACKOps(module);
           })
       .def(
-          "_jit_pass_fold_prepack_ops",
+          "_jit_pass_fold_xnnpack_prepack_ops",
           [](script::Module& module) {
-            return FoldPrePackingOps(module);
+            return FoldXNNPACKPrePackingOps(module);
           })
       .def(
           "_jit_pass_onnx_unpack_quantized_weights",

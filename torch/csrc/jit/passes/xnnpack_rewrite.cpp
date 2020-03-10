@@ -1,4 +1,3 @@
-#include <stack>
 
 #include <ATen/core/jit_type.h>
 #include <ATen/native/xnnpack/OpContext.h>
@@ -8,6 +7,7 @@
 #include <torch/csrc/jit/passes/xnnpack_rewrite.h>
 #include <torch/csrc/jit/passes/fuse_linear.h>
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
+#include <torch/csrc/jit/passes/prepack_folding.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -18,9 +18,6 @@ namespace jit {
 #ifdef USE_XNNPACK
 
 namespace {
-using at::native::xnnpack::XNNPackLinearOpContext;
-using at::native::xnnpack::XNNPackConv2dOpContext;
-
 std::unordered_set<std::string>* getFoldablePackingOps() {
   static std::unordered_set<std::string> foldable_packing_ops(
       {
@@ -29,53 +26,6 @@ std::unordered_set<std::string>* getFoldablePackingOps() {
       }
       );
   return &foldable_packing_ops;
-}
-
-bool nodeMatchesPackingOps(Node* n) {
-  return (getFoldablePackingOps()->count(n->kind().toQualString()) != 0);
-}
-
-// Must run this pass after constant folding.
-void FoldPrePackingOps_(script::Module& m) {
-  auto method = m.get_method("forward");
-  auto graph = method.graph();
-  std::stack<Block*> blocks_to_visit;
-  std::unordered_set<Node*> nodes_to_delete;
-  blocks_to_visit.push(graph->block());
-  int64_t uid = 0;
-  std::string attr_name_base("packed_weight_");
-  while (!blocks_to_visit.empty()) {
-    Block* b = blocks_to_visit.top();
-    blocks_to_visit.pop();
-    for (Node* n : b->nodes()) {
-      if (nodeMatchesPackingOps(n)) {
-        auto optional_outputs = runNodeIfInputsAreConstant(n);
-        if (optional_outputs) {
-          auto outputs = optional_outputs.value();
-          TORCH_CHECK(outputs.size() == 1, "Prepack ops have single output");
-          auto attr_name = attr_name_base + c10::to_string(uid++);
-          m.register_attribute(attr_name, n->outputs()[0]->type(), outputs[0]);
-          Value* prepack_op_value = n->outputs()[0];
-          WithInsertPoint ins(prepack_op_value->node());
-          Value* packed_weight_attr =
-            graph->insertGetAttr(graph->inputs()[0], attr_name)
-                  ->setType(n->outputs()[0]->type());
-          prepack_op_value->replaceAllUsesWith(packed_weight_attr);
-          //n->removeAllInputs(); //Cannot do this for conv because it will remove constant nodes?
-          nodes_to_delete.insert(n);
-        }
-      }
-      for (Block* subblock : n->blocks()) {
-        blocks_to_visit.push(subblock);
-      }
-    }
-  }
-  for (auto n : nodes_to_delete) {
-    n->removeAllInputs();
-  }
-  for (auto n : nodes_to_delete) {
-    n->destroy();
-  }
 }
 
 void insertXNNPACKLinearOp(std::shared_ptr<Graph>& graph) {
@@ -158,8 +108,8 @@ void insertXNNPACKOps(script::Module& module) {
   }
 }
 
-void FoldPrePackingOps(script::Module& m) {
-  FoldPrePackingOps_(m);
+void FoldXNNPACKPrePackingOps(script::Module& m) {
+  FoldPrePackingOps(m, *(getFoldablePackingOps()));
 }
 
 #else
@@ -172,7 +122,7 @@ void insertXNNPACKOps(script::Module& module) {
   TORCH_INTERNAL_ASSERT("XNNPACK is not enabled. Please build with USE_XNNPACK=1");
 }
 
-void FoldPrePackingOps(script::Module& m) {
+void FoldXNNPACKPrePackingOps(script::Module& m) {
   TORCH_INTERNAL_ASSERT("XNNPACK is not enabled. Please build with USE_XNNPACK=1");
 }
 
