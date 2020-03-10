@@ -170,7 +170,7 @@ void parallel_cat(Tensor &out, const TensorList &inputs, int64_t dimension,
       param.outputSize[i] = at::native::size(out, i);
       param.outputStride[i] = out.stride(i);
     }
-  } else {
+  } else if (memory_format == c10::MemoryFormat::ChannelsLast || memory_format == c10::MemoryFormat::ChannelsLast3d) {
     // permute the semantics of dims from NCHW to NHWC so that the input
     // tensor is now contiguous
     param.outputSize[0] = at::native::size(out, 0);
@@ -181,6 +181,8 @@ void parallel_cat(Tensor &out, const TensorList &inputs, int64_t dimension,
     }
     param.outputSize[nDims - 1] = at::native::size(out, 1);
     param.outputStride[nDims - 1] = out.stride(1);
+  } else {
+    TORCH_CHECK(false, "unsupported memory format");
   }
 
   at::cuda::CUDAStream stream = at::cuda::getCurrentCUDAStream();
@@ -281,10 +283,8 @@ inline c10::MemoryFormat compute_output_memory_format(const TensorList &inputs) 
     if (format.value() == f) {
       continue;
     }
-    if (format.value() == c10::MemoryFormat::Contiguous || f == c10::MemoryFormat::Contiguous) {
-      return c10::MemoryFormat::Contiguous;
-    }
-    if (format.value() != f) {
+    bool contiguous = (format.value() == c10::MemoryFormat::Contiguous || f == c10::MemoryFormat::Contiguous || format.value() != f);
+    if (contiguous) {
       return c10::MemoryFormat::Contiguous;
     }
   }
