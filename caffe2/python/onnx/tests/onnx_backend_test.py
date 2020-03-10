@@ -99,6 +99,13 @@ backend_test.exclude(r'(test_hardsigmoid'  # Does not support Hardsigmoid.
                      '|test_gradient_of_add_and_mul_cpu'  # cannot translate Gradient op
                      '|test_celu_cpu'  # cannot translate Celu op
                      '|test_celu_expanded_cpu'
+                     '|test_gradient_of_add_cpu' # cannot translate Gradient op
+                     '|test_greater_equal_bcast_cpu'
+                     '|test_min_float32_cpu'
+                     '|test_less_equal_expanded_cpu'
+                     '|test_less_equal_bcast_expanded_cpu'
+                     '|test_greater_equal_expanded_cpu'
+                     '|test_greater_equal_bcast_expanded_cpu'
                      ')')
 
 # Quick patch to unbreak master CI, is working on the debugging.
