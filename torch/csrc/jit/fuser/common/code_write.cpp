@@ -321,6 +321,7 @@ void CodeWrite::printAlloc(TensorView* tv) {
   for (auto i = tv->getComputeAtAxis(); i < tv->domain()->size(); i++) {
     size = static_cast<Int*>(mul(size, tv->domain()->axis(i)->size()));
   }
+
   indent();
   os << tv->getDataType().value() << " T" << tv->name() << "[";
   print_inline(size);
@@ -393,6 +394,10 @@ void CodeWrite::setupOverrides() {
   // and map the size used for the root domain to T.size[...]
   for (Val* val : used_vals) {
     if (val->getValType().value() == ValType::TensorView) {
+      if(!(
+        FusionGuard::getCurFusion()->isInput(val)
+      ||FusionGuard::getCurFusion()->isOutput(val)
+      )) continue;
       TensorView* tv = static_cast<TensorView*>(val);
       TensorDomain* td = tv->domain();
       if (tv->tensor() == nullptr)
