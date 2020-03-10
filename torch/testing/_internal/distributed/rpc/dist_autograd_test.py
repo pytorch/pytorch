@@ -1186,6 +1186,12 @@ class DistAutogradTest(RpcAgentTestFixture):
 
             # Kill all odd rank nodes.
             if self.rank % 2 == 0:
+                # HACK: Adding a sleep here to wait for the RPC server
+                # to die. See T63741594 for details on why shutting
+                # down the RPC server is a problem with inflight requests
+                # (ex: wait_until_node_failure below).
+                time.sleep(5)
+
                 # Wait for all other nodes to die.
                 for rank in range(self.world_size):
                     if rank % 2 != 0:
