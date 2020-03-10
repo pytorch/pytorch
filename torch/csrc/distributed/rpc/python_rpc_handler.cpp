@@ -30,7 +30,7 @@ namespace {
 struct PythonTypeResolver : public jit::script::Resolver {
   std::shared_ptr<jit::script::SugaredValue> resolveValue(
       const std::string& /* unused */,
-      Function& /* unused */,
+      torch::jit::Function& /* unused */,
       const jit::SourceRange& /* unused */) override {
     TORCH_INTERNAL_ASSERT(
         false, "RPC Type resolver does not need to resolve value");
@@ -62,8 +62,8 @@ PythonRpcHandler::PythonRpcHandler() {
   PROFILE_GIL_SCOPED_ACQUIRE;
   py::object module = py::module::import("torch.distributed.rpc.internal");
   pyRunFunction_ = getFunction(module, "_run_function");
-  pyLoadReturnValue_ = getFunction(module, "_load_return_value");
   pySerialize_ = getFunction(module, "serialize");
+  pyDeserialize_ = getFunction(module, "deserialize");
   pyHandleException_ = getFunction(module, "_handle_exception");
   jitCompilationUnit_ = torch::jit::get_python_cu();
   typeParser_ = std::make_shared<jit::script::ScriptTypeParser>(
@@ -73,8 +73,8 @@ PythonRpcHandler::PythonRpcHandler() {
 void PythonRpcHandler::cleanup() {
   PROFILE_GIL_SCOPED_ACQUIRE;
   pyRunFunction_ = py::none();
-  pyLoadReturnValue_ = py::none();
   pySerialize_ = py::none();
+  pyDeserialize_ = py::none();
   pyHandleException_ = py::none();
   jitCompilationUnit_ = nullptr;
   typeParser_ = nullptr;
@@ -91,32 +91,18 @@ std::shared_ptr<torch::jit::script::CompilationUnit> PythonRpcHandler::
   return jitCompilationUnit_;
 }
 
-std::vector<char> PythonRpcHandler::generatePythonUDFResult(
-    const std::vector<char>& pickledPayload,
-    const std::vector<torch::Tensor>& requestTensorTable,
-    std::vector<torch::Tensor>& responseTensorTable) {
+SerializedPyObj PythonRpcHandler::generatePythonUDFResult(
+    const SerializedPyObj& serializedPyObj) {
   PROFILE_GIL_SCOPED_ACQUIRE;
-  auto pargs = py::bytes(pickledPayload.data(), pickledPayload.size());
-  py::tuple pres = pySerialize_(pyRunFunction_(pargs, requestTensorTable));
-  const auto& presStr = pres[0].cast<std::string>();
-  responseTensorTable = pres[1].cast<std::vector<torch::Tensor>>();
-  std::vector<char> payload(presStr.begin(), presStr.end());
-  return payload;
-}
-
-py::object PythonRpcHandler::loadPythonUDFResult(
-    const std::vector<char>& pickledPayload,
-    const std::vector<torch::Tensor>& tensorTable) {
-  PROFILE_GIL_SCOPED_ACQUIRE;
-  auto pargs = py::bytes(pickledPayload.data(), pickledPayload.size());
-  return pyLoadReturnValue_(pargs, tensorTable);
+  auto pythonUdf = deserialize(serializedPyObj);
+  return serialize(pyRunFunction_(std::move(pythonUdf)));
 }
 
 py::object PythonRpcHandler::runPythonUDF(
-    const SerializedPyObj& serializedObj) {
+    const SerializedPyObj& serializedPyObj) {
   PROFILE_GIL_SCOPED_ACQUIRE;
-  return pyRunFunction_(
-      py::bytes(serializedObj.payload_), serializedObj.tensors_);
+  auto pythonUdf = deserialize(serializedPyObj);
+  return pyRunFunction_(std::move(pythonUdf));
 }
 
 SerializedPyObj PythonRpcHandler::serialize(const py::object& obj) {
@@ -128,7 +114,10 @@ SerializedPyObj PythonRpcHandler::serialize(const py::object& obj) {
 
 py::object PythonRpcHandler::deserialize(const SerializedPyObj& serializedObj) {
   PROFILE_GIL_SCOPED_ACQUIRE;
-  return pyLoadReturnValue_(
+  // NB: pyDeserialize_ can return an AttributeError if the deserialize() Python
+  // function fails. Functions consuming the result needs to handle such error
+  // properly.
+  return pyDeserialize_(
       py::bytes(serializedObj.payload_), serializedObj.tensors_);
 }
 

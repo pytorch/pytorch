@@ -98,7 +98,7 @@ class _InternalRPCPickler:
             except_str = str(e) + """ Default RPC pickler does not serialize
             function code. Ensure that UDFs are defined on both caller and
             callee modules."""
-            raise AttributeError(except_str)
+            ret = AttributeError(except_str)
 
         # restore _thread_local_tensor_tables.recv_tables if return
         # from nested call, otherwise clean up the table
@@ -118,7 +118,11 @@ def serialize(obj):
     return _internal_rpc_pickler.serialize(obj)
 
 
-def _run_function(binary_data, tensor_table):
+def deserialize(binary_data, tensor_table):
+    return _internal_rpc_pickler.deserialize(binary_data, tensor_table)
+
+
+def _run_function(python_udf):
     r"""
     This function is exclusively called from C++.
     See ``torch/csrc/distributed/rpc/python_rpc_handler.cpp``.
@@ -127,7 +131,8 @@ def _run_function(binary_data, tensor_table):
     Wraps any exception in ``RemoteException`` if the function raises.
     """
     try:
-        python_udf = _internal_rpc_pickler.deserialize(binary_data, tensor_table)
+        if isinstance(python_udf, AttributeError):
+            raise python_udf
         result = python_udf.func(*python_udf.args, **python_udf.kwargs)
     except Exception as e:
         # except str = exception info + traceback string
@@ -139,19 +144,6 @@ def _run_function(binary_data, tensor_table):
 def _handle_exception(result):
     if isinstance(result, RemoteException):
         raise result.exception_type(result.msg)
-
-
-def _load_return_value(binary_data, tensor_table):
-    r"""
-    This function is exclusively called from C++.
-    See ``torch/csrc/distributed/rpc/python_rpc_handler.cpp``.
-
-    Processes the return value of a Python function.
-    Raises exception if the return value is a wrapped exception.
-    """
-    result = _internal_rpc_pickler.deserialize(binary_data, tensor_table)
-    _handle_exception(result)
-    return result
 
 
 def _start_record_function(exec_type, func_name, current_worker_name, dest_worker_name):
