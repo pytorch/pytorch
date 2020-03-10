@@ -118,6 +118,10 @@ def serialize(obj):
     return _internal_rpc_pickler.serialize(obj)
 
 
+def deserialize(binary_data, tensor_table):
+    return _internal_rpc_pickler.deserialize(binary_data, tensor_table)
+
+
 def _run_function(binary_data, tensor_table):
     r"""
     This function is exclusively called from C++.
@@ -139,19 +143,6 @@ def _run_function(binary_data, tensor_table):
 def _handle_exception(result):
     if isinstance(result, RemoteException):
         raise result.exception_type(result.msg)
-
-
-def _load_return_value(binary_data, tensor_table):
-    r"""
-    This function is exclusively called from C++.
-    See ``torch/csrc/distributed/rpc/python_rpc_handler.cpp``.
-
-    Processes the return value of a Python function.
-    Raises exception if the return value is a wrapped exception.
-    """
-    result = _internal_rpc_pickler.deserialize(binary_data, tensor_table)
-    _handle_exception(result)
-    return result
 
 
 def _start_record_function(exec_type, func_name, current_worker_name, dest_worker_name):

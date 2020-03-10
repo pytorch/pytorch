@@ -16,6 +16,8 @@ class TORCH_API PythonResp final : public RpcCommandBase {
 
   static std::unique_ptr<PythonResp> fromMessage(const Message& message);
 
+  const SerializedPyObj& serializedPyObj() const;
+
   const std::string& pickledPayload() const;
 
   const std::vector<torch::Tensor>& tensors() const;
