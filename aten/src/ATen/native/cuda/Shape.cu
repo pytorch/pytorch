@@ -49,7 +49,7 @@ struct CatArrIndexToOffset {
     // linearIndex is not really linear index, but instead the offset in
     // input tensor. If the input tensor is contiguous, then this offset
     // is the linear index, but if the input tensor is channels last, then
-    // further care is the linear index of the permuted contiguous tensor
+    // it is the linear index of the permuted contiguous tensor
     IndexType offset = 0;
 
 #pragma unroll
