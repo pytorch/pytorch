@@ -19,14 +19,15 @@ void Function::append_instruction(OpCode op, int X, int N) {
   code_->instructions_.emplace_back(op, X, N);
 }
 
-void Function::append_operator(const std::string& name,
+bool Function::append_operator(const std::string& name,
                                const std::string& overload_name) {
   // Keep the original opname in code_
   code_->op_names_.emplace_back(name, overload_name);
   auto opname = code_->op_names_.back();
   // Add "_" prefix to work around the double registration both of jit/generated
   // and here. TODO: remove it when we have separate build for lite interpreter.
-//  if (opname.name != "aten::Int") {
+
+  //  if (opname.name != "aten::Int") {
 //    opname.name = "_" + opname.name;
 //  }
 
@@ -45,6 +46,7 @@ void Function::append_operator(const std::string& name,
 //    c10::Dispatcher::singleton().callBoxed(*op, &stack);
 //  };
   code_->operators_.emplace_back(fn);
+  return true;
 }
 
 void Function::append_constant(const c10::IValue& constant) {

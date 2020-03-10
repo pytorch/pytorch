@@ -191,7 +191,8 @@ void recurseThroughNestedModules(
     std::vector<SugaredValuePtr>& keys,
     std::vector<SugaredValuePtr>& values,
     std::shared_ptr<ModuleValue> self,
-    const std::string& prefix);
+    const std::string& prefix,
+    const std::string& field);
 
 // Used to support named_modules()
 struct VISIBILITY_HIDDEN SugaredModuleDict : public SugaredValue {

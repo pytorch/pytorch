@@ -214,6 +214,14 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_dedup_module_uses", &DedupModuleUses)
       .def("_jit_pass_replicate_dequantize", &ReplicateDeQuant)
       .def("_jit_pass_swap_dequantize", &SwapDeQuant)
+      .def("_jit_pass_swap_functional_linear",
+           [](std::shared_ptr<Graph>& graph) {
+             SwapFunctionalLinear(graph);
+           })
+      .def("_jit_pass_swap_functional_linear",
+           [](script::Module& module) {
+             SwapFunctionalLinear(module);
+           })
       .def(
           "_jit_pass_pattern_based_rewrite",
           [](const script::Module& m) { return PatternBasedRewrite(m); })
