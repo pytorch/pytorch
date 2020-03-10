@@ -19,11 +19,11 @@ static void linspace_kernel(TensorIterator& iter, Scalar scalar_start, Scalar sc
     int64_t idx(0);
     scalar_t start = scalar_start.to<scalar_t>();
     scalar_t end = scalar_end.to<scalar_t>();
-    step_t step = (end - start) / static_cast<step_t>(steps - 1);
+    step_t step = static_cast<step_t>(end - start) / (steps - 1);
     cpu_serial_kernel(
         iter,
         [start, step, &idx]() -> scalar_t {
-          return start + static_cast<scalar_t>(step * (idx ++));
+          return start + step * (idx ++);
         });
   });
 }
