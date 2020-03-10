@@ -1,7 +1,7 @@
 #pragma once
 
 #include <torch/csrc/utils/future.h>
-#include <torch/serialize.h>
+#include <torch/types.h>
 #include <vector>
 
 namespace torch {

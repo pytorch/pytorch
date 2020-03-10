@@ -14,11 +14,14 @@
 #include <vector>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/native/cpu/CatKernel.h>
 #include <ATen/native/Copy.h>
 #include <ATen/MemoryOverlap.h>
 
 namespace at {
 namespace native {
+
+DEFINE_DISPATCH(cat_serial_stub);
 
 Tensor _reshape_from_tensor(const Tensor& self, const Tensor& shape_tensor) {
   TORCH_CHECK(shape_tensor.dim() == 1);
@@ -83,6 +86,7 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
   // size (i.e. other empty sizes are not skipped).
   // FIXME: warn if this is the case
   bool allSkipped = true;
+  bool allContiguous = true;
   Tensor notSkippedTensor;
 
   // Inputs cannot alias the output tensor
@@ -119,10 +123,16 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
   int64_t cat_dim_size = 0;
   for (auto const &tensor : tensors) {
     if (should_skip(tensor)) {
+      // don't use fast path for empty tensor
+      allContiguous = false;
       continue;
     }
     check_cat_shape_except_dim(notSkippedTensor, tensor, dim);
     cat_dim_size += tensor.size(dim);
+
+    if (!tensor.is_contiguous()) {
+      allContiguous = false;
+    }
 
     if (tensor.sizes() != notSkippedTensor.sizes() ||
         tensor.strides() != notSkippedTensor.strides()) {
@@ -134,6 +144,15 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
   auto result_size = notSkippedTensor.sizes().vec();
   result_size[dim] = cat_dim_size;
   result.resize_(result_size);
+
+  // fast path for single thread when both inputs and result are contiguous and not empty
+  bool use_serial_kernel = result.numel() < at::internal::GRAIN_SIZE || at::get_num_threads() == 1;
+  allContiguous = allContiguous && result.is_contiguous();
+  ScalarType dtype = notSkippedTensor.scalar_type();
+  if (use_serial_kernel && allContiguous && (dtype == ScalarType::Double || dtype == ScalarType::Float)) {
+    cat_serial_stub(kCPU, result, tensors, dim);
+    return result;
+  }
 
   int64_t offset = 0;
   if (reuse_iterator && result.is_contiguous()) {

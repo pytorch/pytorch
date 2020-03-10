@@ -19,8 +19,8 @@ namespace nn {
 ///     torch::nn::Dropout(0.5)
 ///   );
 ///
-///   for (const auto &module : mlist) {
-///     module.pretty_print();
+///   for (const auto &module : *mlist) {
+///     module->pretty_print(std::cout);
 ///   }
 ///
 /// \endrst

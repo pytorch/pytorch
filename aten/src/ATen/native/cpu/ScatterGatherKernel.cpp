@@ -1,30 +1,11 @@
 #include <ATen/native/ScatterGatherShapeChecks.h>
+#include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/Parallel.h>
 
 namespace at { namespace native {
 
 namespace {
-
-static inline int64_t ensure_nonempty_dim(int64_t dim) {
-  return std::max<int64_t>(dim, 1);
-}
-
-static inline int64_t ensure_nonempty_size(const Tensor& t, int64_t dim) {
-  return t.dim() == 0 ? 1 : t.size(dim);
-}
-
-static inline int64_t ensure_nonempty_stride(const Tensor& t, int64_t dim) {
-  return t.dim() == 0 ? 1 : t.stride(dim);
-}
-
-using IdxVec = std::vector<int64_t>;
-static inline IdxVec ensure_nonempty_vec(IdxVec vec) {
-  if (vec.size() == 0) {
-    vec.push_back(1);
-  }
-  return vec;
-}
 
 // Used for `gather`-like methods
 // Test:
@@ -97,15 +78,6 @@ void scatter_shape_check(
       " apart from dimension ", dim
     );
   }
-}
-
-static Tensor restride_dim(
-  const Tensor& src, int64_t dim,
-  IntArrayRef replacement_shape
-) {
-  auto strides = ensure_nonempty_vec(src.strides().vec());
-  strides[dim] = 0;
-  return src.as_strided(replacement_shape, strides);
 }
 
 template <typename func_t>

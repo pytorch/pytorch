@@ -184,16 +184,22 @@ In-place version of :meth:`~Tensor.acos`
 
 add_docstr_all('add',
                r"""
-add(value) -> Tensor
-add(other, *, value=1) -> Tensor
+add(other, *, alpha=1) -> Tensor
+
+Add a scalar or tensor to :attr:`self` tensor. If both :attr:`alpha`
+and :attr:`other` are specified, each element of :attr:`other` is scaled by
+:attr:`alpha` before being used.
+
+When :attr:`other` is a tensor, the shape of :attr:`other` must be
+:ref:`broadcastable <broadcasting-semantics>` with the shape of the underlying
+tensor
 
 See :func:`torch.add`
 """)
 
 add_docstr_all('add_',
                r"""
-add_(value) -> Tensor
-add_(other, *, value=1) -> Tensor
+add_(other, *, alpha=1) -> Tensor
 
 In-place version of :meth:`~Tensor.add`
 """)
@@ -1427,7 +1433,7 @@ the indices specified in :attr:`indices` (which is a tuple of Tensors). The
 expression ``tensor.index_put_(indices, value)`` is equivalent to
 ``tensor[indices] = value``. Returns :attr:`self`.
 
-If :attr:`accumulate` is ``True``, the elements in :attr:`tensor` are added to
+If :attr:`accumulate` is ``True``, the elements in :attr:`value` are added to
 :attr:`self`. If accumulate is ``False``, the behavior is undefined if indices
 contain duplicate elements.
 
@@ -2432,23 +2438,23 @@ Example::
 
 add_docstr_all('scatter_add_',
                r"""
-scatter_add_(dim, index, other) -> Tensor
+scatter_add_(dim, index, src) -> Tensor
 
 Adds all values from the tensor :attr:`other` into :attr:`self` at the indices
 specified in the :attr:`index` tensor in a similar fashion as
-:meth:`~torch.Tensor.scatter_`. For each value in :attr:`other`, it is added to
-an index in :attr:`self` which is specified by its index in :attr:`other`
+:meth:`~torch.Tensor.scatter_`. For each value in :attr:`src`, it is added to
+an index in :attr:`self` which is specified by its index in :attr:`src`
 for ``dimension != dim`` and by the corresponding value in :attr:`index` for
 ``dimension = dim``.
 
 For a 3-D tensor, :attr:`self` is updated as::
 
-    self[index[i][j][k]][j][k] += other[i][j][k]  # if dim == 0
-    self[i][index[i][j][k]][k] += other[i][j][k]  # if dim == 1
-    self[i][j][index[i][j][k]] += other[i][j][k]  # if dim == 2
+    self[index[i][j][k]][j][k] += src[i][j][k]  # if dim == 0
+    self[i][index[i][j][k]][k] += src[i][j][k]  # if dim == 1
+    self[i][j][index[i][j][k]] += src[i][j][k]  # if dim == 2
 
-:attr:`self`, :attr:`index` and :attr:`other` should have same number of
-dimensions. It is also required that ``index.size(d) <= other.size(d)`` for all
+:attr:`self`, :attr:`index` and :attr:`src` should have same number of
+dimensions. It is also required that ``index.size(d) <= src.size(d)`` for all
 dimensions ``d``, and that ``index.size(d) <= self.size(d)`` for all dimensions
 ``d != dim``.
 
@@ -2459,7 +2465,7 @@ Args:
     index (LongTensor): the indices of elements to scatter and add,
       can be either empty or the same size of src.
       When empty, the operation returns identity.
-    other (Tensor): the source elements to scatter and add
+    src (Tensor): the source elements to scatter and add
 
 Example::
 
@@ -2734,7 +2740,7 @@ tensor.
 
 add_docstr_all('sub_',
                r"""
-sub_(x, *, alpha=1) -> Tensor
+sub_(other, *, alpha=1) -> Tensor
 
 In-place version of :meth:`~Tensor.sub`
 """)
@@ -3455,7 +3461,7 @@ Out-of-place version of :meth:`torch.Tensor.scatter_`
 
 add_docstr_all('scatter_add',
                r"""
-scatter_add(dim, index, source) -> Tensor
+scatter_add(dim, index, src) -> Tensor
 
 Out-of-place version of :meth:`torch.Tensor.scatter_add_`
 """)

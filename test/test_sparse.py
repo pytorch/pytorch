@@ -10,7 +10,7 @@ import random
 import sys
 import unittest
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
-    do_test_empty_full, load_tests
+    do_test_empty_full, load_tests, TEST_NUMPY
 from torch.testing._internal.common_cuda import TEST_CUDA
 from numbers import Number
 from torch.autograd.gradcheck import gradcheck
@@ -882,8 +882,8 @@ class TestSparse(TestCase):
             alpha = random.random()
             beta = random.random()
 
-            res = torch.addmm(alpha, t, beta, x, y)
-            expected = torch.addmm(alpha, t, beta, self.safeToDense(x), y)
+            res = torch.addmm(t, x, y, beta=beta, alpha=alpha)
+            expected = torch.addmm(t, self.safeToDense(x), y, beta=beta, alpha=alpha)
             self.assertEqual(res, expected)
 
             res = torch.addmm(t, x, y)
@@ -911,8 +911,8 @@ class TestSparse(TestCase):
             alpha = random.random()
             beta = random.random()
 
-            res = torch.saddmm(alpha, t, beta, x, y)
-            expected = torch.addmm(alpha, self.safeToDense(t), beta, self.safeToDense(x), y)
+            res = torch.saddmm(t, x, y, beta=beta, alpha=alpha)
+            expected = torch.addmm(self.safeToDense(t), self.safeToDense(x), y, beta=beta, alpha=alpha)
             self.assertEqual(self.safeToDense(res), expected)
 
             res = torch.saddmm(t, x, y)
@@ -1009,7 +1009,7 @@ class TestSparse(TestCase):
         y = self.randn(*shape)
         r = random.random()
 
-        res = torch.add(y, r, x)
+        res = torch.add(y, x, alpha=r)
         expected = y + r * self.safeToDense(x)
 
         self.assertEqual(res, expected)
@@ -1022,7 +1022,7 @@ class TestSparse(TestCase):
         y.transpose_(0, len(s) - 1)
         r = random.random()
 
-        res = torch.add(y, r, x)
+        res = torch.add(y, x, alpha=r)
         expected = y + r * self.safeToDense(x)
 
         self.assertEqual(res, expected)
@@ -1032,19 +1032,19 @@ class TestSparse(TestCase):
 
         # Non contiguous sparse indices tensor
         x_ = self.sparse_tensor(i[:, ::2], v[:int(nnz / 2)], x.shape)
-        res = torch.add(y, r, x_)
+        res = torch.add(y, x_, alpha=r)
         expected = y + r * self.safeToDense(x_)
         self.assertEqual(res, expected)
 
         # Non contiguous sparse values tensor
         x_ = self.sparse_tensor(i[:, :int(nnz / 2)], v[::2], x.shape)
-        res = torch.add(y, r, x_)
+        res = torch.add(y, x_, alpha=r)
         expected = y + r * self.safeToDense(x_)
         self.assertEqual(res, expected)
 
         # Non contiguous sparse indices and values tensors
         x_ = self.sparse_tensor(i[:, 1::2], v[1::2], x.shape)
-        res = torch.add(y, r, x_)
+        res = torch.add(y, x_, alpha=r)
         expected = y + r * self.safeToDense(x_)
         self.assertEqual(res, expected)
 
@@ -1884,14 +1884,14 @@ class TestSparse(TestCase):
 
     @cpu_only  # not really, but we only really want to run this once
     def test_dtypes(self):
-        all_sparse_dtypes = [dtype for dtype in torch.testing.get_all_dtypes()]
+        all_sparse_dtypes = torch.testing.get_all_dtypes()
         do_test_dtypes(self, all_sparse_dtypes, torch.sparse_coo, torch.device('cpu'))
         if torch.cuda.is_available():
             do_test_dtypes(self, all_sparse_dtypes, torch.sparse_coo, torch.device('cuda:0'))
 
     @cpu_only  # not really, but we only really want to run this once
     def test_empty_full(self):
-        all_sparse_dtypes = [dtype for dtype in torch.testing.get_all_dtypes()]
+        all_sparse_dtypes = torch.testing.get_all_dtypes()
         do_test_empty_full(self, all_sparse_dtypes, torch.sparse_coo, torch.device('cpu'))
         if torch.cuda.device_count() > 0:
             do_test_empty_full(self, all_sparse_dtypes, torch.sparse_coo, None)
@@ -2135,6 +2135,11 @@ class TestSparse(TestCase):
         self.assertRaisesRegex(RuntimeError, 'A Sparse Tensor can only be divided',
                                lambda: torch.tensor(1., device=self.device).to_sparse()
                                / torch.tensor(1., device=self.device).to_sparse())
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_sparse_to_numpy(self):
+        t = torch.sparse_coo_tensor(torch.tensor(([0, 0], [2, 0])), torch.tensor([1, 4]))
+        self.assertRaises(TypeError, lambda: t.numpy())
 
 
 class TestUncoalescedSparse(TestSparse):

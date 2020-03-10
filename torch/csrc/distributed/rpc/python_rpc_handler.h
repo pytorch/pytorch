@@ -2,7 +2,7 @@
 
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/types.h>
-#include <torch/csrc/jit/script/script_type_parser.h>
+#include <torch/csrc/jit/frontend/script_type_parser.h>
 #include <torch/csrc/utils/pybind.h>
 
 namespace torch {
@@ -77,22 +77,6 @@ class PYBIND11_EXPORT PythonRpcHandler {
   PythonRpcHandler();
   ~PythonRpcHandler() = default;
 
-// A macro that grabs the GIL, profiling the acquisition time. The average GIL
-// acquisition time will be recorded in RpcAgent's getMetrics().
-#define PROFILE_GIL_SCOPED_ACQUIRE                                       \
-  std::chrono::time_point<std::chrono::high_resolution_clock> startTime; \
-  auto shouldProfileGIL =                                                \
-      RpcAgent::getCurrentRpcAgent()->isGILProfilingEnabled();           \
-  if (shouldProfileGIL) {                                                \
-    startTime = std::chrono::high_resolution_clock::now();               \
-  }                                                                      \
-  pybind11::gil_scoped_acquire ag;                                       \
-  if (shouldProfileGIL) {                                                \
-    auto dur = std::chrono::duration_cast<std::chrono::microseconds>(    \
-        std::chrono::high_resolution_clock::now() - startTime);          \
-    RpcAgent::getCurrentRpcAgent()->addGilWaitTime(dur);                 \
-  }
-
   PythonRpcHandler(const PythonRpcHandler&) = delete;
   PythonRpcHandler& operator=(const PythonRpcHandler&) = delete;
   PythonRpcHandler(PythonRpcHandler&&) = delete;
@@ -112,9 +96,9 @@ class PYBIND11_EXPORT PythonRpcHandler {
 
   // Shared ptr to python compilation unit in jit, it is constructed in python
   // side (see _python_cu = torch._C.CompilationUnit() in jit/__init__.py)
-  // and imported in C++ (see get_python_cu() in csrc/jit/pybind_utils.h).
-  // We import the compilation unit here only once for less cost and thread
-  // safety.
+  // and imported in C++ (see get_python_cu() in
+  // csrc/jit/python/pybind_utils.h). We import the compilation unit here only
+  // once for less cost and thread safety.
   std::shared_ptr<torch::jit::script::CompilationUnit> jitCompilationUnit_;
 
   // jit type parser to parse type_str back to TypePtr for RRef type

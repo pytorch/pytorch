@@ -1,5 +1,5 @@
-#include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/irparser.h>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/testing/file_check.h>

@@ -311,6 +311,15 @@ Probability distributions - torch.distributions
     :undoc-members:
     :show-inheritance:
 
+:hidden:`VonMises`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: torch.distributions.von_mises
+.. autoclass:: VonMises
+    :members:
+    :undoc-members:
+    :show-inheritance:
+    
 :hidden:`Weibull`
 ~~~~~~~~~~~~~~~~~~~~~~~
 
