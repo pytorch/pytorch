@@ -899,6 +899,15 @@
 - name: triu(Tensor self, int diagonal=0) -> Tensor
   self: grad.triu(diagonal)
 
+  # Note: true_divide uses the division operator for backward
+  # since grad is always a floating tensor.
+- name: true_divide.Tensor(Tensor self, Tensor other) -> Tensor
+  self: grad / other
+  other: -grad * self / (other * other)
+
+- name: true_divide.Scalar(Tensor self, Scalar other) -> Tensor
+  self: grad / other
+
 - name: trunc(Tensor self) -> Tensor
   self: zeros_like(grad, at::MemoryFormat::Preserve)
 
