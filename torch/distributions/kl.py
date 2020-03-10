@@ -525,8 +525,9 @@ def _kl_continuous_bernoulli_normal(p, q):
 @register_kl(ContinuousBernoulli, Uniform)
 def _kl_continuous_bernoulli_uniform(p, q):
     result = -p.entropy() + (q.high - q.low).log()
-    result[(q.low > p.support.lower_bound) | (q.high < p.support.upper_bound)] = inf
-    return result
+    return torch.where(torch.max(torch.ge(q.low, p.support.lower_bound),
+                                 torch.le(q.high, p.support.upper_bound)),
+                       torch.ones_like(result) * inf, result)
 
 
 @register_kl(Exponential, Beta)
@@ -734,8 +735,9 @@ def _kl_uniform_beta(p, q):
 @register_kl(Uniform, ContinuousBernoulli)
 def _kl_uniform_continuous_bernoulli(p, q):
     result = -p.entropy() - p.mean * q.logits - torch.log1p(-q.probs) - q._cont_bern_log_norm()
-    result[(p.high > q.support.upper_bound) | (p.low < q.support.lower_bound)] = inf
-    return result
+    return torch.where(torch.max(torch.ge(p.high, q.support.upper_bound),
+                                 torch.le(p.low, q.support.lower_bound)),
+                       torch.ones_like(result) * inf, result)
 
 
 @register_kl(Uniform, Exponential)

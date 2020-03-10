@@ -3825,39 +3825,81 @@ class TestNumericalStability(TestCase):
             self.assertEqual(log_pdf_prob_0.item(), -inf, allow_inf=True)
 
     def test_continuous_bernoulli_gradient(self):
+
+        def expec_val(x, probs=None, logits=None):
+            assert not (probs is None and logits is None)
+            if logits is not None:
+                probs = 1. / (1. + math.exp(-logits))
+            bern_log_lik = x * math.log(probs) + (1. - x) * math.log1p(-probs)
+            if probs < 0.499 or probs > 0.501: # using default values of lims here
+                log_norm_const = math.log(math.fabs(math.atanh(1. - 2. * probs))) \
+                                 - math.log(math.fabs(1. - 2. * probs)) + math.log(2.)
+            else:
+                aux = math.pow(probs - 0.5, 2)
+                log_norm_const = math.log(2.0) + (4.0 / 3.0 + 104.0 / 45.0 * aux) * aux
+            log_lik = bern_log_lik + log_norm_const
+            return log_lik
+
+        def expec_grad(x, probs=None, logits=None):
+            assert not (probs is None and logits is None)
+            if logits is not None:
+                probs = 1. / (1. + math.exp(-logits))
+            grad_bern_log_lik = x / probs - (1. - x) / (1. - probs)
+            if probs < 0.499 or probs > 0.501: # using default values of lims here
+                grad_log_c = (2. * probs - 4. * (probs - 1.) * probs * math.atanh(1. - 2. * probs) - 1.)\
+                             / (2. * (probs - 1.) * probs * (2. * probs - 1.) * math.atanh(1. - 2. * probs))
+            else:
+                grad_log_c = 8. / 3. * (probs - 0.5) + 416. / 45. * math.pow(probs - 0.5, 3)
+            grad = grad_bern_log_lik + grad_log_c
+            if logits is not None:
+                grad *= 1. / (1. + math.exp(logits)) - 1. / math.pow(1. + math.exp(logits), 2)
+            return grad
+
         for tensor_type in [torch.FloatTensor, torch.DoubleTensor]:
             self._test_pdf_score(dist_class=ContinuousBernoulli,
                                  probs=tensor_type([0.1]),
                                  x=tensor_type([0.1]),
-                                 expected_value=tensor_type([0.685256]),
-                                 expected_gradient=tensor_type([-2.55688]))
+                                 expected_value=tensor_type([expec_val(0.1, probs=0.1)]),
+                                 expected_gradient=tensor_type([expec_grad(0.1, probs=0.1)]))
 
             self._test_pdf_score(dist_class=ContinuousBernoulli,
                                  probs=tensor_type([0.1]),
                                  x=tensor_type([1.]),
-                                 expected_value=tensor_type([-1.29225]),
-                                 expected_gradient=tensor_type([7.44312]))
+                                 expected_value=tensor_type([expec_val(1., probs=0.1)]),
+                                 expected_gradient=tensor_type([expec_grad(1., probs=0.1)]))
+
+            self._test_pdf_score(dist_class=ContinuousBernoulli,
+                                 probs=tensor_type([0.4999]),
+                                 x=tensor_type([0.9]),
+                                 expected_value=tensor_type([expec_val(0.9, probs=0.4999)]),
+                                 expected_gradient=tensor_type([expec_grad(0.9, probs=0.4999)]))
 
             self._test_pdf_score(dist_class=ContinuousBernoulli,
                                  probs=tensor_type([1e-4]),
                                  x=tensor_type([1]),
-                                 expected_value=tensor_type([-6.98982]),
-                                 expected_gradient=tensor_type([8916.1436]),
+                                 expected_value=tensor_type([expec_val(1, probs=1e-4)]),
+                                 expected_gradient=tensor_type(tensor_type([expec_grad(1, probs=1e-4)])),
                                  prec=1e-3)
 
             self._test_pdf_score(dist_class=ContinuousBernoulli,
                                  probs=tensor_type([1 - 1e-4]),
                                  x=tensor_type([0.1]),
-                                 expected_value=tensor_type([-6.0688]),
-                                 expected_gradient=tensor_type([-7916.04]),
+                                 expected_value=tensor_type([expec_val(0.1, probs=1-1e-4)]),
+                                 expected_gradient=tensor_type([expec_grad(0.1, probs=1-1e-4)]),
                                  prec=2)
 
             self._test_pdf_score(dist_class=ContinuousBernoulli,
                                  logits=tensor_type([math.log(9999)]),
                                  x=tensor_type([0]),
-                                 expected_value=tensor_type([-6.98982]),
-                                 expected_gradient=tensor_type([-0.8915]),
+                                 expected_value=tensor_type([expec_val(0, logits=math.log(9999))]),
+                                 expected_gradient=tensor_type([expec_grad(0, logits=math.log(9999))]),
                                  prec=1e-3)
+
+            self._test_pdf_score(dist_class=ContinuousBernoulli,
+                                 logits=tensor_type([0.001]),
+                                 x=tensor_type([0.5]),
+                                 expected_value=tensor_type([expec_val(0.5, logits=0.001)]),
+                                 expected_gradient=tensor_type([expec_grad(0.5, logits=0.001)]))
 
     def test_continuous_bernoulli_with_logits_underflow(self):
         for tensor_type, lim, expected in ([(torch.FloatTensor, -1e38, 2.76898),

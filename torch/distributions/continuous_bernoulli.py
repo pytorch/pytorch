@@ -26,8 +26,8 @@ class ContinuousBernoulli(ExponentialFamily):
         tensor([ 0.2538])
 
     Args:
-        probs (Number, Tensor): the probability of sampling `1`
-        logits (Number, Tensor): the log-odds of sampling `1`
+        probs (Number, Tensor): (0,1) valued parameters
+        logits (Number, Tensor): real valued parameters whose sigmoid matches 'probs'
 
     [1] The continuous Bernoulli: fixing a pervasive error in variational
     autoencoders, Loaiza-Ganem G and Cunningham JP, NeurIPS 2019.
@@ -39,7 +39,7 @@ class ContinuousBernoulli(ExponentialFamily):
     _mean_carrier_measure = 0
     has_rsample = True
 
-    def __init__(self, probs=None, logits=None, lims=[0.499, 0.501], validate_args=None):
+    def __init__(self, probs=None, logits=None, lims=(0.499, 0.501), validate_args=None):
         if (probs is None) == (logits is None):
             raise ValueError("Either `probs` or `logits` must be specified, but not both.")
         if probs is not None:
