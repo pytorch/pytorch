@@ -33,8 +33,9 @@ public:
 
     // register all inputs;
     for (auto val : block->inputs()) {
-      registerInput(val);
+      assert(registerValue(val));
       fusion_->addInput(value_maps_[val->unique()]);
+      std::cout << "==== add fusion input: " << value_maps_[val->unique()] << std::endl;
     }
 
     // compose nodes in topo order;
@@ -46,6 +47,7 @@ public:
     for (auto jit_output : block->outputs()) {
       TensorView* out = static_cast<TensorView*>(value_maps_[jit_output->unique()]);
       fusion_->addOutput(out);
+      std::cout << "==== add fusion output: " << out << std::endl;
       
       //Merge all dimensions because we're only supporting pointwise
       while(out->domain()->size() > 1)
@@ -91,34 +93,50 @@ protected:
 
     } else if (node->kind() == prim::Constant) {
       // we should just ignore constant node;
+      for (auto output : node->outputs()) {
+        assert(registerScalar(output));
+      }
     } else {
       assert(false);
     }
   }
 
-  void registerInput(const JitValue* val) {
+  bool registerValue(const JitValue* val) {
+    return registerTensor(val) || registerScalar(val);
+  }
+
+  bool registerScalar(const JitValue* val) {
+    CgValue* cg_val;
+    if (val->type()->isSubtypeOf(static_cast<c10::TypePtr>(FloatType::get()))) {
+      if (auto ival = constant_as<float>(val)) {
+        cg_val = new Float(ival.value());
+      } else {
+        cg_val = new Float();
+      }
+    } else if (val->type()->isSubtypeOf(static_cast<c10::TypePtr>(IntType::get()))) {
+      if (auto ival = constant_as<int>(val)) {
+        cg_val = new Float(ival.value());
+      } else {
+        cg_val = new Int();
+      }
+    } else {
+      return false;
+    }
+    value_maps_.emplace(val->unique(), cg_val);
+    return true;
+  }
+
+  bool registerTensor(const JitValue* val) {
     CgValue* cg_val;
     if (val->isCompleteTensor()) {
       // TODO: make this a static function in Tensor class;
       // create tensor;
       cg_val = new TensorView(new Tensor(val->type()->cast<TensorType>()));
-    } else if (val->type()->isSubtypeOf(static_cast<c10::TypePtr>(FloatType::get()))) {
-      if (auto ival = toIValue(val)) {
-        cg_val = new Float(ival.value().to<float>());
-      } else {
-        cg_val = new Float();
-      }
-    } else if (val->type()->isSubtypeOf(static_cast<c10::TypePtr>(IntType::get()))) {
-      if (auto ival = toIValue(val)) {
-        cg_val = new Int(ival.value().to<int>());
-      } else {
-        cg_val = new Int();
-      }
     } else {
-      // error out!
-      assert(false);
+      return false;
     }
     value_maps_.emplace(val->unique(), cg_val);
+    return true;
   }
 
   std::shared_ptr<Graph> graph_;
