@@ -210,6 +210,9 @@ class DispatchTable final {
         kernel.setManuallyBoxedKernel_(func);
       }
     }
+    if (catchallKernel_.isValid()) {
+      catchallKernel_.setManuallyBoxedKernel_(func);
+    }
   }
 
 private:
