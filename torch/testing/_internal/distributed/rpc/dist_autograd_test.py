@@ -865,7 +865,7 @@ class DistAutogradTest(RpcAgentTestFixture):
             self.assertIsNone(t1.grad)
             self.assertIsNone(t2.grad)
 
-            # Now populate .grad with local autograd engine and 
+            # Now populate .grad with local autograd engine and
             # verify dist autograd doesn't mess with it.
             loss_local = torch.add(t1, t2).sum()
             loss_local.backward()
@@ -1936,3 +1936,77 @@ class DistAutogradTest(RpcAgentTestFixture):
             # both should be copied.
             self.assertFalse(grads[a].data_ptr() == MyFunc.static_grad_ptr)
             self.assertFalse(grads[b].data_ptr() == MyFunc.static_grad_ptr)
+
+    @dist_init
+    def test_no_grad_copy_sparse(self):
+        # create autograd function that saves grad pointer as class static
+        class MyFunc(Function):
+            static_grad_ptr = None
+
+            @staticmethod
+            def forward(ctx, inp):
+                return inp
+
+            @staticmethod
+            def backward(ctx, grad):
+                MyFunc.static_grad_ptr = grad._values().data_ptr()
+                return grad
+
+        class NonContGradFunc(Function):
+            static_grad_ptr = None
+
+            @staticmethod
+            def forward(ctx, inp1, inp2):
+                return inp1 + inp2
+
+            @staticmethod
+            def backward(ctx, grad):
+                # Create a sparse tensor with non-contigous indices and values
+                # and return as grad.
+                v = torch.rand(1, 3)
+                i = torch.ones(1, 1, dtype=torch.long)
+                nv = v.expand(8, 3)
+                ni = i.expand(1, 8)
+                ngrad = torch.sparse.FloatTensor(ni, nv, torch.Size([10, 3]))
+                NonContGradFunc.static_grad_ptr = ngrad._values().data_ptr()
+                return ngrad, ngrad
+
+        a = torch.randn(10, 3, requires_grad=True)
+        b = torch.randn(10, 3, requires_grad=True)
+        input = torch.tensor([1, 2, 4, 5, 4, 3, 2, 9])
+        offsets = torch.tensor([0, 4])
+        import torch.nn.functional as F
+
+        # test case that should trigger no copy for a.
+        with dist_autograd.context() as context_id:
+            emb_matrix = MyFunc.apply(a)
+            loss = F.embedding_bag(emb_matrix, input, offsets, sparse=True).sum()
+            dist_autograd.backward(context_id, [loss], retain_graph=True)
+            grads = dist_autograd.get_gradients(context_id)
+            p_g = MyFunc.static_grad_ptr
+            p_a = grads[a]._values().data_ptr()
+            # check a uses the same buffer
+            self.assertTrue(p_a == p_g)
+
+            # Run backwards multiple times.
+            for i in range(10):
+                dist_autograd.backward(context_id, [loss], retain_graph=True)
+
+        # non-contiguous indices and value, we should trigger a copy.
+        with dist_autograd.context() as context_id:
+            emb_matrix = NonContGradFunc.apply(a, b)
+            loss = F.embedding_bag(emb_matrix, input, offsets, sparse=True).sum()
+            dist_autograd.backward(context_id, [loss], retain_graph=True)
+            grads = dist_autograd.get_gradients(context_id)
+            p_g = NonContGradFunc.static_grad_ptr
+            p_a = grads[a]._values().data_ptr()
+            p_b = grads[b]._values().data_ptr()
+            # check a,b uses different grad buffer
+            self.assertFalse(p_a == p_b)
+            # Verify we cloned both grads.
+            self.assertFalse(p_a == p_g)
+            self.assertFalse(p_b == p_g)
+
+            # Run backwards multiple times to verify accumulation.
+            for i in range(10):
+                dist_autograd.backward(context_id, [loss], retain_graph=True)
