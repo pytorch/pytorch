@@ -820,7 +820,7 @@ void testGPU_FusionCodeGen() {
   << ":::::::" << std::endl;
 
   std::stringstream ref;
-  ref << "__global__ void kernel(Tensor T2){\n";
+  ref << "__global__ void kernel(Tensor<float> T2){\n";
   ref << "  float T0[( ( ( 1 * ( ceilDiv(T0.size[0], 4) ) ) * T0.size[2] ) * T0.size[3] )];\n";
   ref << "  for( size_t i27 = 0; i27 < ( 4 * T0.size[1] ); ++i27 ) {\n";
   ref << "    for( size_t i29 = 0; i29 < ( ceilDiv(T0.size[0], 4) ); ++i29 ) {\n";
@@ -937,7 +937,7 @@ void testGPU_FusionCodeGen2() {
   << "::::::::::::" << std::endl;
   
   std::stringstream ref;
-  ref << "__global__ void kernel(Tensor T0, Tensor T1, Tensor T3){\n";
+  ref << "__global__ void kernel(Tensor<float> T0, Tensor<float> T1, Tensor<float> T3){\n";
   ref << "  float T2[( ( ( 1 * 4 ) * T0.size[1] ) * T0.size[2] )];\n";
   ref << "  for( size_t i15 = 0; i15 < 4; ++i15 ) {\n";
   ref << "    for( size_t i17 = 0; i17 < T0.size[1]; ++i17 ) {\n";
