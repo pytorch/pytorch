@@ -445,16 +445,13 @@ class InsertObserversHelper {
    * property of a value through CallMethods, because we should skip inserting
    * observers for ops that don't require observation
    */
-<<<<<<< HEAD
   std::tuple<OptionalModuleVector, OptionalModuleVector, std::vector<size_t>>
-  insertObservers(script::Module& module,
-=======
-  std::tuple<OptionalModuleVector, OptionalModuleVector>
-  insertObservers(Module& module,
->>>>>>> 43c59bbb1b... [jit] kill script namespace
-                  const std::string& method_name,
-                  bool is_entry_point = false,
-                  std::unordered_set<Value*> graph_observed_values = std::unordered_set<Value*>());
+  insertObservers(
+      Module& module,
+      const std::string& method_name,
+      bool is_entry_point = false,
+      std::unordered_set<Value*> graph_observed_values =
+          std::unordered_set<Value*>());
 
  private:
   ModuleMethodVector getInvokedMethods(
