@@ -20,15 +20,15 @@ class PYBIND11_EXPORT PythonRpcHandler {
   static PythonRpcHandler& getInstance();
 
   // Deserialize Python function, run it, and serialize its return value.
-  std::vector<char> generatePythonUDFResult(
-      const std::vector<char>& pickledPayload,
+  std::string generatePythonUDFResult(
+      const std::string& pickledPayload,
       const std::vector<torch::Tensor>& requestTensorTable,
       std::vector<torch::Tensor>& responseTensorTable);
 
   // Returned python UDF result is pickled binary string, so run python
   // function to unpickle the python UDF result and return py::object to user
   py::object loadPythonUDFResult(
-      const std::vector<char>& pickledPayload,
+      const std::string& pickledPayload,
       const std::vector<torch::Tensor>& tensorTable);
 
   // Run a pickled Python UDF and return the result py::object

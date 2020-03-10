@@ -91,24 +91,22 @@ std::shared_ptr<torch::jit::script::CompilationUnit> PythonRpcHandler::
   return jitCompilationUnit_;
 }
 
-std::vector<char> PythonRpcHandler::generatePythonUDFResult(
-    const std::vector<char>& pickledPayload,
+std::string PythonRpcHandler::generatePythonUDFResult(
+    const std::string& pickledPayload,
     const std::vector<torch::Tensor>& requestTensorTable,
     std::vector<torch::Tensor>& responseTensorTable) {
   PROFILE_GIL_SCOPED_ACQUIRE;
-  auto pargs = py::bytes(pickledPayload.data(), pickledPayload.size());
+  auto pargs = py::bytes(pickledPayload);
   py::tuple pres = pySerialize_(pyRunFunction_(pargs, requestTensorTable));
-  const auto& presStr = pres[0].cast<std::string>();
   responseTensorTable = pres[1].cast<std::vector<torch::Tensor>>();
-  std::vector<char> payload(presStr.begin(), presStr.end());
-  return payload;
+  return pres[0].cast<std::string>();
 }
 
 py::object PythonRpcHandler::loadPythonUDFResult(
-    const std::vector<char>& pickledPayload,
+    const std::string& pickledPayload,
     const std::vector<torch::Tensor>& tensorTable) {
   PROFILE_GIL_SCOPED_ACQUIRE;
-  auto pargs = py::bytes(pickledPayload.data(), pickledPayload.size());
+  auto pargs = py::bytes(pickledPayload);
   return pyLoadReturnValue_(pargs, tensorTable);
 }
 
