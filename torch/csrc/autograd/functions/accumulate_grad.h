@@ -28,7 +28,7 @@ struct TORCH_API AccumulateGrad : public Node {
   template <typename T>
   static void accumulateGradAndCallHooks(
       const Variable& variable,
-      at::Tensor variable_grad,
+      at::Tensor& variable_grad,
       at::Tensor new_grad,
       size_t num_expected_refs,
       const T& update_grad) {
@@ -65,6 +65,7 @@ struct TORCH_API AccumulateGrad : public Node {
         // for backward compatiblity reasons. Since without this optimization,
         // earlier we would clone the entire SparseTensor which cloned indices
         // and values.
+        // For details see https://github.com/pytorch/pytorch/issues/34375.
         update_grad(at::sparse_coo_tensor(
             new_grad._indices(),
             new_grad._values(),

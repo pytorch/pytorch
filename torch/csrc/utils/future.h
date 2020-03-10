@@ -124,14 +124,12 @@ class TORCH_API Future final {
       std::string errorMsg,
       std::unique_lock<std::mutex>& lock) {
     TORCH_CHECK(!completed_);
-    // Set error first as completed_ is accessed without lock
     error_ = FutureError(std::move(errorMsg));
     completed_ = true;
 
     // Move callbacks to a vector on the stack so we can access it without
     // holding a lock
-    std::vector<Callback> cbs;
-    cbs.swap(callbacks_);
+    std::vector<Callback> cbs(std::move(callbacks_));
     lock.unlock();
     finished_cv_.notify_all();
     // There is no need to protect callbacks_ with the lock.
