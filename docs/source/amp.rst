@@ -57,6 +57,8 @@ updates the parameters, so the scale factor does not interfere with the learning
 Autocast Op Reference
 ^^^^^^^^^^^^^^^^^^^^^
 
+The following lists detail the behavior of particular ops in autocast-enabled regions.
+
 Autocast affects only CUDA ops.
 
 Autocast affects only out-of-place ops and Tensor methods.
@@ -75,17 +77,51 @@ If an op is unlisted, we assume it's safe to run in ``float16``` without impairi
 convergence.  If you encounter an unlisted op that causes convergence problems
 in ``float16``, please file an issue.
 
-Ops that run in `float32`
--------------------------
-
 Ops that run in `float16`
 -------------------------
-CUDA ops on this list are faster in ``float16`` without sacrificing stability.
-In autocast-enabled regions, they always execute in ``float16`` and produce ``float16`` output.
+In autocast-enabled regions, these always execute in ``float16`` and produce ``float16`` output.
+
+In module ``torch``
+"""""""""""""""""""
+.. currentmodule:: torch
+:class:`Tensor` methods with the same name, if present, are autocasted equivalently.
+
+In module ``torch.nn.functional``
+"""""""""""""""""""""""""""""""""
+:func:`linear`
+
+Ops that run in ``float32``
+---------------------------
+In autocast-enabled regions, these always execute in ``float32`` and produce ``float32`` output.
+
+``torch`` functions
+"""""""""""""""""""
+.. currentmodule:: torch
+:class:`Tensor` methods with the same name, if present, are autocasted equivalently.
+
+``torch.nn.functional`` functions
+"""""""""""""""""""""""""""""""""
+.. currentmodule:: torch.nn.functional
 
 Ops that run in the widest input type
 -------------------------------------
-CUDA ops on this list don't require a particular dtype for stability, but take multiple inputs
+These ops don't require a particular dtype for stability, but take multiple inputs
 and require that the inputs' dtypes match.  In autocast-enabled regions, all inputs are automatically
-casted to match the widest dtype among the inputs.  The op is executes and produces output with that
+casted to match the widest dtype among the inputs.  The op executes and produces output with that
 widest dtype.
+
+In module ``torch``
+"""""""""""""""""""
+.. currentmodule:: torch
+:class:`Tensor` methods with the same name, if present, are autocasted equivalently.
+
+:func:`addcdiv`,
+:func:`addcmul`,
+:func:`atan2`,
+:func:`bilinear`,
+:func:`cat`,
+:func:`cross`,
+:func:`dot`,
+:func:`equal`,
+:func:`stack`,
+:func:`tensordot`
