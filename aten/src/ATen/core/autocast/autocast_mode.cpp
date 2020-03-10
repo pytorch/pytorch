@@ -12,11 +12,11 @@
 namespace at {
 namespace autocast {
 
-bool AutocastMode::is_enabled() {
+bool is_enabled() {
   return c10::impl::tls_is_dispatch_key_included(DispatchKey::AutocastTensorId);
 }
 
-void AutocastMode::set_enabled(bool new_enabled) {
+void set_enabled(bool new_enabled) {
   c10::impl::tls_set_dispatch_key_included(DispatchKey::AutocastTensorId, new_enabled);
 }
 

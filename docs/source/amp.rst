@@ -57,18 +57,23 @@ updates the parameters, so the scale factor does not interfere with the learning
 Autocast Op Reference
 ^^^^^^^^^^^^^^^^^^^^^
 
-For ops listed below, autocast explicitly
-chooses a precision in autocast-enabled regions.
+Autocast affects only CUDA ops.
 
-Autocast only affects CUDA ops.
 Autocast affects only out-of-place ops and Tensor methods.
-for each CUDA operation in an autocasted-enabled region
-Some ops cast internally to the kernel.
-Some ops natively promote.
+In-place variants and calls that explicitly supply an `out=...` Tensor
+are allowed in autocast-enabled regions, but won't receive autocasting.
+For example, in an autocast-enabled region `a.addmm(b, c)` is guaranteed to run
+in ``float16``, but `a.addmm_(b, c)` and `a.addmm(b, c, out=d)` may not.
+For best performance and stability, prefer out-of-place ops in autocast-enabled
+regions.
 
-Unlisted ops do not receive explicit autocasting.  They run in whatever dtype
-their input(s) happen to be, and the output dtype matches the input dtype.
-An exception is is
+Ops not listed below do not receive autocasting.  They run in the type
+defined by their inputs.  However, autocasting may still change the type
+in which unlisted ops run if they're downstream from autocasted ops.
+
+If an op is unlisted, we assume it's safe to run in ``float16``` without impairing
+convergence.  If you encounter an unlisted op that causes convergence problems
+in ``float16``, please file an issue.
 
 Ops that run in `float32`
 -------------------------
@@ -76,10 +81,11 @@ Ops that run in `float32`
 Ops that run in `float16`
 -------------------------
 CUDA ops on this list are faster in ``float16`` without sacrificing stability.
-Autocast calls ``.half()`` on their inputs to ensure they run in ``float16``.
-Their output will always
+In autocast-enabled regions, they always execute in ``float16`` and produce ``float16`` output.
 
 Ops that run in the widest input type
 -------------------------------------
-These don't require a particular precision for stability, but take multiple inputs
-and require that the inputs' dtypes match.  Because autocast may change the input
+CUDA ops on this list don't require a particular dtype for stability, but take multiple inputs
+and require that the inputs' dtypes match.  In autocast-enabled regions, all inputs are automatically
+casted to match the widest dtype among the inputs.  The op is executes and produces output with that
+widest dtype.
