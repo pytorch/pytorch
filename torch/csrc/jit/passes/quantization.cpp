@@ -476,14 +476,9 @@ class InsertObserversHelper {
   // and insert a call to observer forward function
   void insertObserverFor(
       Value* v,
-<<<<<<< HEAD
-      script::Module& module,
-      const script::Module& observer_module,
-      NameModuleVector& observer_name_and_modules);
-=======
       Module& module,
-      const Module& observer_module);
->>>>>>> 43c59bbb1b... [jit] kill script namespace
+      const Module& observer_module,
+      NameModuleVector& observer_name_and_modules);
 
   c10::optional<Module> getObserverFor(Value* v);
 
@@ -507,12 +502,8 @@ class InsertObserversHelper {
   // the output value of conv in the conv - relu pattern
   std::unordered_set<Value*> values_to_skip_;
   std::unordered_set<Graph*> visited_graph_of_observer_map_;
-<<<<<<< HEAD
-  std::unordered_map<Value*, script::Module> observer_for_value_;
-  std::unordered_map<Value*, Value*> caller_to_callee_;
-=======
   std::unordered_map<Value*, Module> observer_for_value_;
->>>>>>> 43c59bbb1b... [jit] kill script namespace
+  std::unordered_map<Value*, Value*> caller_to_callee_;
   // Map from values from callsite into the values in the CallMethod graph
   std::unordered_map<Value*, std::unordered_set<Value*>> boundary_value_map_;
   std::unordered_set<Value*> observed_values_;
@@ -534,14 +525,7 @@ class InsertObserversHelper {
   std::unordered_set<Node*> observer_nodes_;
   // Map from graph to a vector of observer name and observer modules we
   // want to add to the module instance that has the graph
-<<<<<<< HEAD
   std::unordered_map<Graph*, NameModuleVector> graph_observer_map_;
-=======
-  std::unordered_map<
-      Graph*,
-      std::vector<std::tuple<std::string, Module>>>
-      graph_observer_map_;
->>>>>>> 43c59bbb1b... [jit] kill script namespace
 
   // These are the IR patterns we match to skip inserting observers.
   // They are compiled once on construction and used repeatedly within
@@ -746,14 +730,9 @@ ModuleMethodVector InsertObserversHelper::getInvokedMethods(
 
 void InsertObserversHelper::insertObserverFor(
     Value* v,
-<<<<<<< HEAD
-    script::Module& module,
+    Module& module,
     const script::Module& observer_module,
     NameModuleVector& observer_name_and_modules) {
-=======
-    Module& module,
-    const Module& observer_module) {
->>>>>>> 43c59bbb1b... [jit] kill script namespace
   if (observed_values_.count(v)) {
     return;
   }
@@ -984,13 +963,8 @@ InsertObserversHelper::getObserverFor(Value* v) {
   return result;
 }
 
-<<<<<<< HEAD
 std::tuple<OptionalModuleVector, OptionalModuleVector, std::vector<size_t>> InsertObserversHelper::insertObservers(
-    script::Module& module,
-=======
-std::tuple<OptionalModuleVector, OptionalModuleVector> InsertObserversHelper::insertObservers(
     Module& module,
->>>>>>> 43c59bbb1b... [jit] kill script namespace
     const std::string& method_name,
     bool is_entry_point,
     std::unordered_set<Value*> graph_observed_values) {
