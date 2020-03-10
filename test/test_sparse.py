@@ -963,7 +963,9 @@ class TestSparse(TestCase):
             ab_mat_check = a[mat_idx].mm(b[mat_idx])
             self.assertEqual(ab_mat, ab_mat_check)
 
-        ab_traspose_check = b.transpose(1,2).to_sparse().bmm(a.transpose(1,2).to_dense()).transpose(1,2)
+        ab_traspose_check = b.transpose(1, 2).to_sparse().bmm(
+            a.transpose(1, 2).to_dense()
+        ).transpose(1, 2)
         self.assertEqual(ab, ab_traspose_check)
 
     @cuda_only
