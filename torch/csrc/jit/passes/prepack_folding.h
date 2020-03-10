@@ -5,8 +5,9 @@
 namespace torch {
 namespace jit {
 
-void FoldPrePackingOps(script::Module& m,
-    const std::unordered_set<std::string>& foldable_prepacking_ops);
+using PrePackingOpsFilterFn = std::function<bool(Node*)>;
+
+void FoldPrePackingOps(script::Module& m, PrePackingOpsFilterFn is_foldable_op);
 
 } // namespace jit
 } // namespace torch

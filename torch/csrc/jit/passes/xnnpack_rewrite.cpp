@@ -109,7 +109,12 @@ void insertXNNPACKOps(script::Module& module) {
 }
 
 void FoldXNNPACKPrePackingOps(script::Module& m) {
-  FoldPrePackingOps(m, *(getFoldablePackingOps()));
+  const auto& foldable_prepacking_ops = *(getFoldablePackingOps());
+  PrePackingOpsFilterFn filter_fn =
+    [&foldable_prepacking_ops](const Node* n) -> bool {
+      return (foldable_prepacking_ops.count(n->kind().toQualString()) != 0);
+    };
+  FoldPrePackingOps(m, filter_fn);
 }
 
 #else

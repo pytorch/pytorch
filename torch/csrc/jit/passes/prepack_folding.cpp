@@ -8,16 +8,9 @@
 namespace torch {
 namespace jit {
 
-namespace {
-bool nodeMatchesPackingOps(Node* n,
-    const std::unordered_set<std::string>& op_white_list) {
-  return (op_white_list.count(n->kind().toQualString()) != 0);
-}
-} // namespace
-
 // Must run this pass after constant folding.
 void FoldPrePackingOps(script::Module& m,
-    const std::unordered_set<std::string>& foldable_prepacking_ops) {
+    PrePackingOpsFilterFn is_foldable_op) {
   // Since this pass can be called by quantization or other passes as well,
   // we need to make sure we generate a unique "packed_weight_\d+"
   // Thus static uid.
@@ -33,7 +26,7 @@ void FoldPrePackingOps(script::Module& m,
     Block* b = blocks_to_visit.top();
     blocks_to_visit.pop();
     for (Node* n : b->nodes()) {
-      if (foldable_prepacking_ops.count(n->kind().toQualString()) != 0) {
+      if (is_foldable_op(n)) {
         auto optional_outputs = runNodeIfInputsAreConstant(n);
         if (optional_outputs) {
           auto outputs = optional_outputs.value();
@@ -46,7 +39,6 @@ void FoldPrePackingOps(script::Module& m,
             graph->insertGetAttr(graph->inputs()[0], attr_name)
                   ->setType(n->output(0)->type());
           prepack_op_value->replaceAllUsesWith(packed_weight_attr);
-          //n->removeAllInputs(); //Cannot do this for conv because it will remove constant nodes?
           nodes_to_delete.insert(n);
         }
       }
