@@ -136,20 +136,16 @@ bool isFunctionNode(Node* n,
 // the quantization parameters for output given inputs
 std::vector<size_t> getGeneralOpTensorInputIndexes(Node* n) {
   std::vector<std::string> single_input_aten_funcs = {
-    "adaptive_avg_pool2d",
-    "max_pool2d",
-    "avg_pool2d",
-    "flatten",
-    "max",
-    "min",
-    "mean",
-    // TODO: sort returns a tuple of Tensors, we have
-    // to extend the API to support that
-    // "sort",
-    "__interpolate",
-    "__upsample",
-    "__upsample_bilinear",
-    "__upsample_nearest",
+      "adaptive_avg_pool2d",
+      "max_pool2d",
+      "avg_pool2d",
+      "flatten",
+      "max",
+      "min",
+      "mean",
+      // TODO: sort returns a tuple of Tensors, we have
+      // to extend the API to support that
+      // "sort",
   };
   std::vector<std::string> single_input_call_funcs = {
     "adaptive_avg_pool2d",

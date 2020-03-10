@@ -1864,10 +1864,6 @@ graph(%input, %weight):
                    .check("aten::max") \
                    .check("aten::min") \
                    .check("aten::mean") \
-                   .check("aten::__interpolate") \
-                   .check("aten::__upsample") \
-                   .check("aten::__upsample_bilinear") \
-                   .check("aten::__upsample_nearest") \
                    .run(m.graph)
         torch._C._jit_pass_swap_dequantize(m.graph)
         FileCheck().check("aten::max_pool2d") \
@@ -1877,10 +1873,6 @@ graph(%input, %weight):
                    .check("aten::max") \
                    .check("aten::min") \
                    .check("aten::mean") \
-                   .check("aten::__interpolate") \
-                   .check("aten::__upsample") \
-                   .check("aten::__upsample_bilinear") \
-                   .check("aten::__upsample_nearest") \
                    .check("dequantize") \
                    .run(m.graph)
 
