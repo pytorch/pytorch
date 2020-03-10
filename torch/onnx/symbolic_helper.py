@@ -419,9 +419,9 @@ def assert_training_mode(op_mode, op_name):
     if op_mode != _training_mode:
         op_mode = "training " if op_mode else "inference"
         training_mode = "training " if _training_mode else "inference"
-        raise RuntimeError("ONNX export mode is set to " + training_mode +
-                           " mode, but operator " + op_name + " is exporting in " +
-                           op_mode + " mode.")
+        warnings.warn("ONNX export mode is set to " + training_mode +
+                      " mode, but operator " + op_name + " is exporting in " +
+                      op_mode + " mode.")
 
 # ---------------------------------------------------------------------
 # ONNX operator version
