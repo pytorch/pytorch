@@ -797,7 +797,10 @@ class TestCase(expecttest.TestCase):
             elif isinstance(a, torch.dtype):
                 dtype = a
             elif TEST_NUMPY and isinstance(a, numpy.ndarray):
-                dtype = torch.from_numpy(a).dtype
+                if numpy.issubdtype(a.dtype, numpy.dtype('U')):
+                    dtype = torch.float
+                else:
+                    dtype = torch.from_numpy(a).dtype
 
             # todo: set 0-tolerance for integral type.
             dtype = str(dtype).split('.')[-1]
