@@ -25,6 +25,10 @@ struct ClassType;
 struct Type;
 class RRefInterface;
 using TypePtr = std::shared_ptr<Type>;
+
+struct ClassType;
+using ClassTypePtr = std::shared_ptr<ClassType>;
+
 namespace ivalue {
 struct Tuple;
 struct Future;
@@ -697,12 +701,10 @@ struct TORCH_API StrongTypePtr {
   std::shared_ptr<Type> type_;
 };
 
-TORCH_API std::unordered_map<std::string, c10::StrongTypePtr>& getCustomClassTypeMap();
-
-#ifndef C10_MOBILE
+TORCH_API std::unordered_map<std::string, c10::ClassTypePtr>& getCustomClassTypeMap();
 
 template<typename T>
-c10::StrongTypePtr getCustomClassType() {
+c10::ClassTypePtr getCustomClassType() {
   auto tmap = c10::getCustomClassTypeMap();
   auto res = tmap.find(typeid(T).name());
   if (res == tmap.end()) {
@@ -716,20 +718,6 @@ inline bool isCustomClassRegistered() {
   auto tmap = c10::getCustomClassTypeMap();
   return tmap.find(typeid(T).name()) != tmap.end();
 }
-
-#else  // C10_MOBILE
-
-template<typename T>
-c10::StrongTypePtr getCustomClassType() {
-  throw c10::Error("Custom class is not supported on mobile.", "");
-}
-
-template<typename T>
-inline bool isCustomClassRegistered() {
-  return false;
-}
-
-#endif  // C10_MOBILE
 
 TORCH_API std::unordered_map<std::string, std::function<PyObject*(void*)>>&
 getClassConverter();
