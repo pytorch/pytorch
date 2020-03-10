@@ -7820,35 +7820,38 @@ a")
 
         self.checkScript(not_test, (torch.tensor([2, 4]), ))
 
-    def test_all(self):
+    def test_any(self):
         @torch.jit.script
-        def test_all_tensor(x):
-            return all(x)
-        self.assertFalse(test_all_tensor(torch.tensor([1, 0, 3], dtype=torch.uint8)))
-        self.assertTrue(test_all_tensor(torch.tensor([3.14, 3, 99], dtype=torch.uint8)))
-        self.assertTrue(test_all_tensor(torch.tensor([True, True], dtype=torch.uint8)))
-        self.assertFalse(test_all_tensor(torch.tensor([True, False], dtype=torch.uint8)))
+        def test_any_tensor(x):
+            return any(x)
+        self.assertTrue(test_any_tensor(torch.tensor([1, 0, 3], dtype=torch.uint8)))
+        self.assertTrue(test_any_tensor(torch.tensor([3.14, 3, 99], dtype=torch.uint8)))
+        self.assertFalse(test_any_tensor(torch.tensor([False, False], dtype=torch.uint8)))
 
         @torch.jit.script
-        def test_all_bool_list(x: List[bool]):
-            return all(x)
-        self.assertTrue(test_all_bool_list([True, True]))
-        self.assertTrue(test_all_bool_list([True, 1]))
-        self.assertFalse(test_all_bool_list([True, False]))
-        self.assertFalse(test_all_bool_list([True, 0]))
-        self.assertFalse(test_all_bool_list([False, 0]))
+        def test_any_bool_list(x: List[bool]):
+            return any(x)
+        self.assertTrue(test_any_bool_list([True, True]))
+        self.assertTrue(test_any_bool_list([True, 1]))
+        self.assertTrue(test_any_bool_list([True, 0]))
+        self.assertTrue(test_any_bool_list([False, False, True]))
+        self.assertFalse(test_any_bool_list([False, 0]))
+        self.assertFalse(test_any_bool_list([False, False]))
+        self.assertFalse(test_any_bool_list([]))
 
         @torch.jit.script
-        def test_all_int_list(x: List[int]):
-            return all(x)
-        self.assertTrue(test_all_int_list([3, 6]))
-        self.assertFalse(test_all_int_list([2, 0]))
+        def test_any_int_list(x: List[int]):
+            return any(x)
+        self.assertTrue(test_any_int_list([3, 6]))
+        self.assertFalse(test_any_int_list([0, 0]))
+        self.assertTrue(test_any_int_list([0, 0, 1]))
 
         @torch.jit.script
-        def test_all_float_list(x: List[float]):
-            return all(x)
-        self.assertTrue(test_all_float_list([3.14, 8.1]))
-        self.assertFalse(test_all_float_list([3.14, 0, 8.9]))
+        def test_any_float_list(x: List[float]):
+            return any(x)
+        self.assertTrue(test_any_float_list([3.14, 8.1]))
+        self.assertTrue(test_any_float_list([3.14, 0, 8.9]))
+        self.assertFalse(test_any_float_list([0, 0, 0]))
 
     def test_number_math(self):
         ops_template = dedent('''

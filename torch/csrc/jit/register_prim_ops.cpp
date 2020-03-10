@@ -3021,53 +3021,44 @@ RegisterOperators reg2({
         },
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::all(int[] self) -> bool",
+        "aten::any(int[] self) -> bool",
         [](Stack& stack) {
           c10::List<int64_t> l = pop(stack).toIntList();
-          push(stack, std::move(l));
-          for(int i = 0; i < l.size(); i++){
-            if(l[i] == 0){
-              push(stack, false);
-              break;
-            }
-            else{
+          for(const auto& elem: l) {
+            if(elem){
               push(stack, true);
+              return 0;
             }
           }
+          push(stack, false);
           return 0;
         },
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::all(float[] self) -> bool",
+        "aten::any(float[] self) -> bool",
         [](Stack& stack) {
           c10::List<double> l = pop(stack).toDoubleList();
-          push(stack, std::move(l));
-          for(int i = 0; i < l.size(); i++){
-            if(l[i] == 0){
-              push(stack, false);
-              break;
-            }
-            else{
+          for(const auto& elem: l) {
+            if(elem){
               push(stack, true);
+              return 0;
             }
           }
+          push(stack, false);
           return 0;
         },
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::all(bool[] self) -> bool",
+        "aten::any(bool[] self) -> bool",
         [](Stack& stack) {
           c10::List<bool> l = pop(stack).toBoolList();
-          push(stack, std::move(l));
-          for(int i = 0; i < l.size(); i++){
-            if(l[i] == 0){
-              push(stack, false);
-              break;
-            }
-            else{
+          for(const auto& elem: l) {
+            if(elem){
               push(stack, true);
+              return 0;
             }
           }
+          push(stack, false);
           return 0;
         },
         aliasAnalysisFromSchema()),
