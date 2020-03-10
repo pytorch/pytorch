@@ -1072,7 +1072,8 @@ InsertObserversHelper::insertObserversFor(
             callee_observed_inputs.insert(caller_to_callee_[n->inputs()[i]]);
           }
         }
-        auto info_from_callee = insertObservers(m, n->s(attr::name), false, callee_observed_inputs);
+        auto* subblock = m.get_method(n->s(attr::name)).graph()->block();
+        auto info_from_callee = insertObserversFor(subblock, m, callee_observed_inputs);
         auto input_observers = std::get<0>(info_from_callee);
         auto output_observers = std::get<1>(info_from_callee);
         auto callee_observed_outputs = std::get<2>(info_from_callee);
