@@ -70,11 +70,9 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
     }
     case MessageType::PYTHON_CALL: {
       auto& pyCall = static_cast<PythonCall&>(rpc);
-      std::vector<torch::Tensor> responseTensorTable;
-      auto payload = PythonRpcHandler::getInstance().generatePythonUDFResult(
-          pyCall.serializedPyObj(), responseTensorTable);
-      SerializedPyObj serializedPyObj(
-          std::move(payload), std::move(responseTensorTable));
+      auto serializedPyObj =
+          PythonRpcHandler::getInstance().generatePythonUDFResult(
+              pyCall.serializedPyObj());
       return wrap(
           std::move(PythonResp(std::move(serializedPyObj))).toMessage());
     }

@@ -91,14 +91,11 @@ std::shared_ptr<torch::jit::script::CompilationUnit> PythonRpcHandler::
   return jitCompilationUnit_;
 }
 
-std::string PythonRpcHandler::generatePythonUDFResult(
-    const SerializedPyObj& serializedPyObj,
-    std::vector<torch::Tensor>& responseTensorTable) {
+SerializedPyObj PythonRpcHandler::generatePythonUDFResult(
+    const SerializedPyObj& serializedPyObj) {
   PROFILE_GIL_SCOPED_ACQUIRE;
   auto pythonUdf = deserialize(serializedPyObj);
-  py::tuple pres = pySerialize_(pyRunFunction_(std::move(pythonUdf)));
-  responseTensorTable = pres[1].cast<std::vector<torch::Tensor>>();
-  return pres[0].cast<std::string>();
+  return serialize(pyRunFunction_(std::move(pythonUdf)));
 }
 
 py::object PythonRpcHandler::runPythonUDF(
