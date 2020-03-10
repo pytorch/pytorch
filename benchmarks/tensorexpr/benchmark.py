@@ -44,6 +44,10 @@ Works only with Python3.\n A few examples:
 
     args = parser.parse_args()
 
+    if args.cuda_fuser == 'te':
+        import torch
+        torch._C._jit_register_tensorexpr_fuser()
+
     def set_global_threads(num_threads):
         os.environ['OMP_NUM_THREADS'] = str(num_threads)
         os.environ['MKL_NUM_THREADS'] = str(num_threads)

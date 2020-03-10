@@ -72,7 +72,10 @@ class LetStmt : public StmtNode<LetStmt> {
     return body_;
   }
 
-  static Stmt* make(const VarHandle& var, const ExprHandle& value, Stmt* body) {
+  static LetStmt* make(
+      const VarHandle& var,
+      const ExprHandle& value,
+      Stmt* body) {
     CHECK(!body->get_parent());
     return new LetStmt(var.node(), value.node(), body);
   }
@@ -88,7 +91,7 @@ class LetStmt : public StmtNode<LetStmt> {
 
 class Block : public StmtNode<Block> {
  public:
-  static Stmt* make(const std::vector<Stmt*>& stmts) {
+  static Block* make(const std::vector<Stmt*>& stmts) {
     std::vector<Stmt*> valid_stmts;
     for (size_t i = 0; i < stmts.size(); i++) {
       if (!stmts[i]) {
@@ -154,7 +157,7 @@ class TORCH_API Store : public StmtNode<Store> {
     return mask_;
   }
 
-  static Stmt* make(
+  static Store* make(
       const Buffer& buffer,
       const ExprHandle& index,
       const ExprHandle& value,
@@ -162,7 +165,7 @@ class TORCH_API Store : public StmtNode<Store> {
     return new Store(buffer, index.node(), value.node(), mask.node());
   }
 
-  static Stmt* make(
+  static Store* make(
       const VarHandle& base_handle,
       const ExprHandle& index,
       const ExprHandle& value,
@@ -171,7 +174,7 @@ class TORCH_API Store : public StmtNode<Store> {
         base_handle.node(), index.node(), value.node(), mask.node());
   }
 
-  static Stmt* make(
+  static Store* make(
       const VarHandle& base_handle,
       const ExprHandle& index,
       const ExprHandle& value) {
@@ -210,7 +213,7 @@ class TORCH_API Store : public StmtNode<Store> {
 // explicitly freed. An unfreed memory is likely considered an error.
 class Allocate : public StmtNode<Allocate> {
  public:
-  static Stmt* make(
+  static Allocate* make(
       const VarHandle& buffer_var,
       Dtype dtype,
       const std::vector<ExprHandle>& dims) {
@@ -249,7 +252,7 @@ class Allocate : public StmtNode<Allocate> {
 // Free the specific buffer. It is an error.
 class Free : public StmtNode<Free> {
  public:
-  static Stmt* make(const VarHandle& buffer_var) {
+  static Free* make(const VarHandle& buffer_var) {
     return new Free(buffer_var.node());
   }
 
@@ -265,7 +268,7 @@ class Free : public StmtNode<Free> {
 
 class Cond : public StmtNode<Cond> {
  public:
-  static Stmt* make(
+  static Cond* make(
       const ExprHandle& condition,
       Stmt* true_stmt,
       Stmt* false_stmt) {
@@ -276,11 +279,11 @@ class Cond : public StmtNode<Cond> {
     return condition_;
   }
 
-  Stmt* true_stmt() const {
+  Block* true_stmt() const {
     return true_stmt_;
   }
 
-  Stmt* false_stmt() const {
+  Block* false_stmt() const {
     return false_stmt_;
   }
 
@@ -400,10 +403,10 @@ class For : public StmtNode<For> {
   const Expr* stop() const {
     return stop_;
   }
-  Stmt* body() const {
+  Block* body() const {
     return body_;
   }
-  static Stmt* make(
+  static For* make(
       const VarHandle& var,
       const ExprHandle& start,
       const ExprHandle& stop,
@@ -413,7 +416,7 @@ class For : public StmtNode<For> {
     }
     return new For(var.node(), start.node(), stop.node(), body);
   }
-  static Stmt* make(
+  static For* make(
       const VarHandle& var,
       const ExprHandle& start,
       const ExprHandle& stop,

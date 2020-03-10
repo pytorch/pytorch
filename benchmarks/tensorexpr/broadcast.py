@@ -222,6 +222,7 @@ def register_broadcast_ops():
     ]
 
     unary_op_list = [
+        ["erf", lambda x: torch.erf(x), lambda x: np.erf(x)],
         ["exp", lambda x: torch.exp(x), lambda x: np.exp(x)],
         ["sin", lambda x: torch.sin(x), lambda x: np.sin(x)],
         ["cos", lambda x: torch.cos(x), lambda x: np.cos(x)],
@@ -261,4 +262,3 @@ def register_broadcast_ops():
                 
     
 register_broadcast_ops()
-

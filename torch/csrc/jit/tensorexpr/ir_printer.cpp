@@ -153,6 +153,21 @@ void IRPrinter::visit(const CompareSelect* v) {
   if (rhs_prec >= self_prec) {
     os() << ")";
   }
+  os() << " ? ";
+
+  auto withParens = [&](const Expr* e) {
+    auto prec = getPrecedence(e->expr_type());
+    if (prec >= self_prec) {
+      os() << "(";
+    }
+    e->accept(this);
+    if (prec >= self_prec) {
+      os() << "(";
+    }
+  };
+  withParens(v->ret_val1());
+  os() << " : ";
+  withParens(v->ret_val2());
 }
 
 static void formatFPSuffix(std::ostream& os, double v) {
@@ -240,8 +255,7 @@ void IRPrinter::visit(const LetStmt* v) {
 }
 
 void IRPrinter::visit(const Ramp* v) {
-  emitIndent();
-  os() << "Ramp(" << v->base() << ", " << v->stride() << ", " << v->lanes()
+  os() << "Ramp(" << *v->base() << ", " << *v->stride() << ", " << v->lanes()
        << ")";
 }
 
@@ -285,7 +299,7 @@ void IRPrinter::visit(const Store* v) {
 }
 
 void IRPrinter::visit(const Broadcast* v) {
-  os() << "Broadcast(" << v->value() << ", " << v->lanes() << ")";
+  os() << "Broadcast(" << *v->value() << ", " << v->lanes() << ")";
 }
 
 void IRPrinter::visit(const IfThenElse* v) {

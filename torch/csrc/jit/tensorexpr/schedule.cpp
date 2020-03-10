@@ -282,14 +282,28 @@ class Vectorizer : public IRMutator {
   const Expr* start_ = nullptr;
 };
 
-Stmt* Vectorize(const Stmt* stmt) {
-  const For* f = dynamic_cast<const For*>(stmt);
+void LoopNest::Vectorize(Stmt* stmt) {
+  For* f = dynamic_cast<For*>(stmt);
   if (!f) {
-    throw std::runtime_error("Statement is not a For loop!");
+    return;
+  }
+
+  Block* b = dynamic_cast<Block*>(f->get_parent());
+  if (!b) {
+    return;
   }
 
   Vectorizer v;
-  return v.vectorize(f);
+  Stmt* old_f = Stmt::clone(f);
+  Stmt* new_f = nullptr;
+  try {
+    new_f = v.vectorize(f);
+  } catch (std::runtime_error& e) {
+    // Partial vectorization may have corrupted f
+    new_f = old_f;
+  }
+
+  b->replace_stmt(f, new_f);
 }
 
 class Flattener : public IRMutator {
@@ -544,13 +558,12 @@ void LoopNest::ApplyInlines() {
 }
 
 void LoopNest::SplitWithTail(
-    Stmt* s,
+    For* f,
     int factor,
-    Stmt** outer,
-    Stmt** inner,
-    Stmt** tail) {
-  Block* p = dynamic_cast<Block*>(s->get_parent());
-  For* f = dynamic_cast<For*>(s);
+    For** outer,
+    For** inner,
+    For** tail) {
+  Block* p = dynamic_cast<Block*>(f->get_parent());
   CHECK(f && p);
 
   bool tail_is_needed = true;
@@ -578,35 +591,34 @@ void LoopNest::SplitWithTail(
   // x -> x.outer * inner.size + x.inner
   auto combined_index1 = i_outer * factor + i_inner;
 
-  Stmt* body_inner = Substitute(Stmt::clone(f->body()), {{f->var(), combined_index1}});
+  Stmt* body_inner =
+      Substitute(Stmt::clone(f->body()), {{f->var(), combined_index1}});
 
   *inner = For::make(i_inner, 0, factor, body_inner);
   *outer = For::make(i_outer, 0, split_count, *inner);
 
   // TODO: cleanup API for adding/removing statements
-  p->replace_stmt(s, *outer);
+  p->replace_stmt(f, *outer);
 
   if (tail_is_needed) {
     VarHandle i_tail(loop_var_name + "_tail", loop_var_dtype);
     // x -> x.tail + outer.size * inner.size
     auto combined_index2 = i_tail + split_count * factor;
 
-    Stmt* body_tail = Substitute(Stmt::clone(f->body()), {{f->var(), combined_index2}});
+    Stmt* body_tail =
+        Substitute(Stmt::clone(f->body()), {{f->var(), combined_index2}});
     *tail = For::make(i_tail, 0, tail_size, body_tail);
 
     p->append_stmt(*tail);
+  } else {
+    *tail = nullptr;
   }
 
   // TODO: record history of transformations
 }
 
-void LoopNest::SplitWithMask(Stmt* s, int factor, Stmt** outer, Stmt** inner) {
-  Block* p = dynamic_cast<Block*>(s->get_parent());
-  For* f = dynamic_cast<For*>(s);
-  if (!f) {
-    std::cerr << "Stmt is not a For loop!\n";
-    return;
-  }
+void LoopNest::SplitWithMask(For* f, int factor, For** outer, For** inner) {
+  Block* p = dynamic_cast<Block*>(f->get_parent());
   if (!p) {
     std::cerr << "Parent is not a Block!\n";
     return;
@@ -654,38 +666,28 @@ void LoopNest::SplitWithMask(Stmt* s, int factor, Stmt** outer, Stmt** inner) {
   *outer = For::make(i_outer, 0, split_count, *inner);
 
   // TODO: cleanup API for adding/removing statements
-  p->replace_stmt(s, *outer);
+  p->replace_stmt(f, *outer);
 
   // TODO: record history of transformations
 }
 
-std::vector<Stmt*> LoopNest::getLoopStmtsFor(Tensor* t) const {
-  std::vector<Stmt*> result;
+std::vector<For*> LoopNest::getLoopStmtsFor(Tensor* t) const {
+  std::vector<For*> result;
   Stmt* cur_stmt = tensor_to_stmt_.at(t);
   while (cur_stmt) {
     if (auto* loop = dynamic_cast<For*>(cur_stmt)) {
-      result.push_back(cur_stmt);
+      result.push_back(loop);
     }
     cur_stmt = cur_stmt->get_parent();
   }
-  return std::vector<Stmt*>(result.rbegin(), result.rend());
+  return std::vector<For*>(result.rbegin(), result.rend());
 }
 
-void LoopNest::SetGPUBlockIndex(Stmt* s, int block_index) {
-  For* f = dynamic_cast<For*>(s);
-  if (!f) {
-    std::cerr << "Stmt is not a For loop!\n";
-    return;
-  }
+void LoopNest::SetGPUBlockIndex(For* f, int block_index) {
   f->set_gpu_block_index(block_index);
 }
 
-void LoopNest::SetGPUThreadIndex(Stmt* s, int thread_index) {
-  For* f = dynamic_cast<For*>(s);
-  if (!f) {
-    std::cerr << "Stmt is not a For loop!\n";
-    return;
-  }
+void LoopNest::SetGPUThreadIndex(For* f, int thread_index) {
   f->set_gpu_thread_index(thread_index);
 }
 

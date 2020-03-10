@@ -339,28 +339,25 @@ INTRINSICS_TEST(kFloat, lgamma, 8)
 void testLLVMVectorizerLoadStoreTest() {
   KernelScope kernel_scope;
   Buffer a(VarHandle("A", kHandle), kInt, {1});
-  Buffer b(VarHandle("B", kHandle), kInt, {1});
-  std::vector<int32_t> a_buffer = {1, 1, 1, 1};
-  std::vector<int32_t> b_buffer = {2, 2, 2, 2};
 
-  auto mask = IntImm::make(1);
-  VarHandle i("i", kInt);
-  auto expr =
-      For::make(i, 0, 4, Store::make(b, i, Load::make(a, i, mask), mask));
-  auto vectorized = Vectorize(expr);
-  EXPECT_TRUE(dynamic_cast<For*>(vectorized) == nullptr);
+  Tensor* c = Compute("c", {{4, "i"}}, [&](const VarHandle& i) {
+    return Load::make(a, i, 1);
+  });
 
-  LLVMCodeGen cg(vectorized, {a, b});
-  std::vector<void*> args({a_buffer.data(), b_buffer.data()});
-  EXPECT_EQ(cg.value<int>(args), 0);
-  EXPECT_EQ(a_buffer[0], 1);
-  EXPECT_EQ(a_buffer[1], 1);
-  EXPECT_EQ(a_buffer[2], 1);
-  EXPECT_EQ(a_buffer[3], 1);
-  EXPECT_EQ(b_buffer[0], 1);
-  EXPECT_EQ(b_buffer[1], 1);
-  EXPECT_EQ(b_buffer[2], 1);
-  EXPECT_EQ(b_buffer[3], 1);
+  Buffer c_buf(VarHandle(c->func_var()), kInt, {4});
+  LoopNest l({c});
+  Stmt* s = l.root_stmt();
+  l.Vectorize(*dynamic_cast<Block*>(s)->stmts().begin());
+
+  EXPECT_TRUE(dynamic_cast<For*>(*dynamic_cast<Block*>(s)->stmts().begin()) == nullptr);
+
+  LLVMCodeGen cg(s, {a, c_buf});
+
+  std::vector<int> a_vec(4, 21);
+  std::vector<int> c_vec(4, 0);
+  std::vector<void*> args({a_vec.data(), c_vec.data()});
+  ASSERT_EQ(cg.value<int>(args), 0);
+  assertAllEqual(c_vec, 21);
 }
 
 void testLLVMMemcpyTest() {

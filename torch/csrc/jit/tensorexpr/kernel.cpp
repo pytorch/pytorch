@@ -542,11 +542,16 @@ Tensor* TensorExprKernel::ComputeValue(const torch::jit::Value* v) {
             if (no_min && no_max) {
               return in;
             } else if (no_min) {
-              return Min::make(in, max, false);
+              return CompareSelect::make(in, max, max, in, kGT);
             } else if (no_max) {
-              return Max::make(in, min, false);
+              return CompareSelect::make(in, min, min, in, kLT);
             } else {
-              return Max::make(Min::make(in, max, false), min, false);
+              return CompareSelect::make(
+                  in,
+                  min,
+                  min,
+                  CompareSelect::make(in, max, max, in, kGT),
+                  kLT);
             }
           });
     } break;
@@ -990,27 +995,27 @@ void TensorExprKernel::LowerToBackend(BackendType backend_type) {
       int block_size = GetTECudaPointwiseBlockSize();
 
       if (loop_levels == 2) {
-        Stmt* outer;
-        Stmt* inner;
+        For* outer;
+        For* inner;
         const int kDefaultBlockSize = 512;
         if (block_size < 0) {
           block_size = kDefaultBlockSize;
         }
-        std::vector<Stmt*> loops = l.getLoopStmtsFor(tensor);
+        std::vector<For*> loops = l.getLoopStmtsFor(tensor);
         l.SplitWithMask(loops[0], block_size, &outer, &inner);
         l.SetGPUBlockIndex(outer, 0);
         l.SetGPUThreadIndex(inner, 0);
       } else if (loop_levels == 3) {
-        Stmt* outer;
-        Stmt* inner;
-        Stmt* inner_1;
-        Stmt* inner_2;
+        For* outer;
+        For* inner;
+        For* inner_1;
+        For* inner_2;
         // TODO: change the number of microprocessors
         const int kDefaultBlockCount = 1280;
         const int kDefaultBlockSize = 256;
         block_count = (block_count > 0) ? block_count : kDefaultBlockCount;
         block_size = (block_size > 0) ? block_size : kDefaultBlockSize;
-        std::vector<Stmt*> loops = l.getLoopStmtsFor(tensor);
+        std::vector<For*> loops = l.getLoopStmtsFor(tensor);
         l.SplitWithMask(loops[0], block_count * block_size, &outer, &inner);
         l.SplitWithMask(inner, block_size, &inner_1, &inner_2);
         l.SetGPUBlockIndex(inner_1, 0);
@@ -1018,6 +1023,69 @@ void TensorExprKernel::LowerToBackend(BackendType backend_type) {
       } else {
         throw std::runtime_error(
             "Invalid loop-level: " + std::to_string(loop_levels));
+      }
+    }
+  } else if (backend_type == kLLVMCodeGen) {
+    l.ApplyInlines();
+
+    std::vector<For*> inner_loops;
+    std::vector<For*> worklist;
+
+    // Find outer-most For loops
+    if (For* root_f = dynamic_cast<For*>(l.root_stmt())) {
+      worklist.push_back(root_f);
+    } else if (Block* body = dynamic_cast<Block*>(l.root_stmt())) {
+      std::vector<Block*> blocks = {body};
+      while (blocks.size()) {
+        Block *b = blocks.back();
+        blocks.pop_back();
+
+        for (Stmt* s : b->stmts()) {
+          if (For* f = dynamic_cast<For*>(s)) {
+            worklist.push_back(f);
+          } else if (Block* b2 = dynamic_cast<Block*>(s)) {
+            blocks.push_back(b2);
+          }
+        }
+      }
+    }
+
+    // Traverse the For loop nest find inner-most loops, which are
+    // vectorization candidates.
+    while (worklist.size()) {
+      For* f = worklist.back();
+      worklist.pop_back();
+
+      bool contains_subloops = false;
+      if (Block* body = dynamic_cast<Block*>(f->body())) {
+        for (Stmt* s2 : body->stmts()) {
+          if (For* f2 = dynamic_cast<For*>(s2)) {
+            contains_subloops = true;
+            worklist.push_back(f2);
+          }
+        }
+      }
+
+      if (!contains_subloops) {
+        inner_loops.push_back(f);
+      }
+    }
+
+    // Vectorize inner loops.
+    for (For* loop : inner_loops) {
+      For* outer1;
+      For* split1;
+      For* tail1;
+
+      l.SplitWithTail(loop, 8, &outer1, &split1, &tail1);
+      l.Vectorize(split1);
+
+      if (tail1) {
+        For* outer2;
+        For* split2;
+        For* tail2;
+        l.SplitWithTail(tail1, 4, &outer2, &split2, &tail2);
+        l.Vectorize(split2);
       }
     }
   }

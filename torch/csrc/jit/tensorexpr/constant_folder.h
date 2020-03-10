@@ -15,19 +15,173 @@ namespace tensorexpr {
 class ConstantFolder : public IRMutator {
  public:
   const Expr* mutate(const Add* v) override {
-    return mutateBinaryOp(v, this);
+    const Expr* lhs = v->lhs()->accept_mutator(this);
+    const Expr* rhs = v->rhs()->accept_mutator(this);
+
+    if (const IntImm* I = dynamic_cast<const IntImm*>(lhs)) {
+      if (I->value() == 0) {
+        return rhs;
+      }
+    }
+
+    if (const IntImm* I = dynamic_cast<const IntImm*>(rhs)) {
+      if (I->value() == 0) {
+        return lhs;
+      }
+    }
+
+    if (const Broadcast* b = dynamic_cast<const Broadcast*>(lhs)) {
+      if (const IntImm* I = dynamic_cast<const IntImm*>(b->value())) {
+        if (I->value() == 0) {
+          return rhs;
+        }
+      }
+
+      if (const Ramp* r = dynamic_cast<const Ramp*>(rhs)) {
+        const Expr* ret = Ramp::make(
+                              ExprHandle(b->value()) + ExprHandle(r->base()),
+                              ExprHandle(r->stride()),
+                              r->lanes())
+                              .node();
+        return ret->accept_mutator(this);
+      }
+    }
+
+    if (const Broadcast* b = dynamic_cast<const Broadcast*>(rhs)) {
+      if (const IntImm* I = dynamic_cast<const IntImm*>(b->value())) {
+        if (I->value() == 0) {
+          return lhs;
+        }
+      }
+
+      if (const Ramp* r = dynamic_cast<const Ramp*>(lhs)) {
+        const Expr* ret = Ramp::make(
+                              ExprHandle(b->value()) + ExprHandle(r->base()),
+                              ExprHandle(r->stride()),
+                              r->lanes())
+                              .node();
+        return ret->accept_mutator(this);
+      }
+    }
+
+    const Expr* node = v;
+
+    if (lhs != v->lhs() || rhs != v->rhs()) {
+      node = newBinaryOpOfType(v->expr_type(), lhs, rhs, false);
+    }
+
+    // Can only fold if both sides are constant.
+    if (!lhs->isConstant() || !rhs->isConstant()) {
+      return node;
+    }
+
+    return evaluateOp(node);
   }
 
   const Expr* mutate(const Sub* v) override {
-    return mutateBinaryOp(v, this);
+    const Expr* lhs = v->lhs()->accept_mutator(this);
+    const Expr* rhs = v->rhs()->accept_mutator(this);
+
+    if (const IntImm* I = dynamic_cast<const IntImm*>(rhs)) {
+      if (I->value() == 0) {
+        return lhs;
+      }
+    }
+
+    const Expr* node = v;
+
+    if (lhs != v->lhs() || rhs != v->rhs()) {
+      node = newBinaryOpOfType(v->expr_type(), lhs, rhs, false);
+    }
+
+    // Can only fold if both sides are constant.
+    if (!lhs->isConstant() || !rhs->isConstant()) {
+      return node;
+    }
+
+    return evaluateOp(node);
   }
 
   const Expr* mutate(const Mul* v) override {
-    return mutateBinaryOp(v, this);
+    const Expr* lhs = v->lhs()->accept_mutator(this);
+    const Expr* rhs = v->rhs()->accept_mutator(this);
+
+    if (const IntImm* I = dynamic_cast<const IntImm*>(lhs)) {
+      if (I->value() == 1) {
+        return rhs;
+      }
+    }
+
+    if (const IntImm* I = dynamic_cast<const IntImm*>(rhs)) {
+      if (I->value() == 1) {
+        return lhs;
+      }
+    }
+
+    if (const FloatImm* I = dynamic_cast<const FloatImm*>(lhs)) {
+      if (I->value() == 1.0f) {
+        return rhs;
+      }
+    }
+
+    if (const FloatImm* I = dynamic_cast<const FloatImm*>(rhs)) {
+      if (I->value() == 1.0f) {
+        return lhs;
+      }
+    }
+
+    if (const Broadcast* b = dynamic_cast<const Broadcast*>(lhs)) {
+      if (const IntImm* I = dynamic_cast<const IntImm*>(b->value())) {
+        if (I->value() == 1) {
+          return rhs;
+        }
+      }
+    }
+
+    if (const Broadcast* b = dynamic_cast<const Broadcast*>(rhs)) {
+      if (const IntImm* I = dynamic_cast<const IntImm*>(b->value())) {
+        if (I->value() == 1) {
+          return lhs;
+        }
+      }
+    }
+
+    const Expr* node = v;
+
+    if (lhs != v->lhs() || rhs != v->rhs()) {
+      node = newBinaryOpOfType(v->expr_type(), lhs, rhs, false);
+    }
+
+    // Can only fold if both sides are constant.
+    if (!lhs->isConstant() || !rhs->isConstant()) {
+      return node;
+    }
+
+    return evaluateOp(node);
   }
 
   const Expr* mutate(const Div* v) override {
-    return mutateBinaryOp(v, this);
+    const Expr* lhs = v->lhs()->accept_mutator(this);
+    const Expr* rhs = v->rhs()->accept_mutator(this);
+
+    if (const IntImm* I = dynamic_cast<const IntImm*>(rhs)) {
+      if (I->value() == 1) {
+        return lhs;
+      }
+    }
+
+    const Expr* node = v;
+
+    if (lhs != v->lhs() || rhs != v->rhs()) {
+      node = newBinaryOpOfType(v->expr_type(), lhs, rhs, false);
+    }
+
+    // Can only fold if both sides are constant.
+    if (!lhs->isConstant() || !rhs->isConstant()) {
+      return node;
+    }
+
+    return evaluateOp(node);
   }
 
   const Expr* mutate(const Mod* v) override {
@@ -58,12 +212,20 @@ class ConstantFolder : public IRMutator {
     return mutateBinaryOp(v, this, v->propagate_nans());
   }
 
+  const Expr* mutate(const Cast* v) override {
+    if (v->src_value()->isConstant()) {
+      return evaluateOp(v);
+    }
+
+    return v;
+  }
+
   const Expr* mutate(const Intrinsics* v) override {
     std::vector<const Expr*> new_params;
     bool changed = false;
     bool allConstant = true;
     for (const auto* p : v->params()) {
-      const Expr* new_child =  p->accept_mutator(this);
+      const Expr* new_child = p->accept_mutator(this);
       new_params.push_back(new_child);
 
       changed |= p != new_child;
@@ -75,11 +237,32 @@ class ConstantFolder : public IRMutator {
       node = new Intrinsics(v->op_type(), new_params);
     }
 
-    if (!allConstant) {
+    if (!allConstant || !v->isPure()) {
       return node;
     }
 
     return evaluateOp(node);
+  }
+
+  const Expr* mutate(const Load* v) override {
+    Dtype dt = v->dtype();
+    const Var* base_handle = v->base_handle();
+    const Expr* index = v->index();
+    const Expr* mask = v->mask();
+
+    const Expr* new_index = index->accept_mutator(this);
+    const Expr* new_mask = mask->accept_mutator(this);
+
+    if (new_index == index && new_mask == mask) {
+      return v;
+    }
+
+    return Load::make(
+               dt,
+               VarHandle(base_handle),
+               ExprHandle(new_index),
+               ExprHandle(new_mask))
+        .node();
   }
 
  private:

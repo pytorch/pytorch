@@ -13,8 +13,6 @@ namespace jit {
 namespace tensorexpr {
 namespace schedule {
 
-TORCH_API Stmt* Vectorize(const Stmt*);
-
 class TORCH_API LoopNest {
  public:
   LoopNest(const std::vector<Tensor*>& output_tensors);
@@ -22,22 +20,18 @@ class TORCH_API LoopNest {
     return root_stmt_;
   }
 
-  std::vector<Stmt*> getLoopStmtsFor(Tensor*) const;
+  std::vector<For*> getLoopStmtsFor(Tensor*) const;
   Stmt* getLoopBodyFor(Tensor*) const;
   std::unordered_map<Tensor*, Stmt*> tensor_to_stmt_;
 
+  void Vectorize(Stmt*);
   void ComputeInline(Stmt* s);
   void ApplyInlines();
-  void SplitWithTail(
-      Stmt* s,
-      int factor,
-      Stmt** outer,
-      Stmt** inner,
-      Stmt** tail);
-  void SplitWithMask(Stmt* s, int factor, Stmt** outer, Stmt** inner);
+  void SplitWithTail(For* f, int factor, For** outer, For** inner, For** tail);
+  void SplitWithMask(For* f, int factor, For** outer, For** inner);
 
-  void SetGPUBlockIndex(Stmt* s, int idx);
-  void SetGPUThreadIndex(Stmt* s, int idx);
+  void SetGPUBlockIndex(For* f, int idx);
+  void SetGPUThreadIndex(For* f, int idx);
 
  private:
   std::vector<Tensor*> FindAllNeededTensors(
