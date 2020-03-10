@@ -95,18 +95,17 @@ std::string PythonRpcHandler::generatePythonUDFResult(
     const SerializedPyObj& serializedPyObj,
     std::vector<torch::Tensor>& responseTensorTable) {
   PROFILE_GIL_SCOPED_ACQUIRE;
-  auto pargs = py::bytes(serializedPyObj.payload_);
-  py::tuple pres =
-      pySerialize_(pyRunFunction_(pargs, serializedPyObj.tensors_));
+  auto pythonUdf = deserialize(serializedPyObj);
+  py::tuple pres = pySerialize_(pyRunFunction_(std::move(pythonUdf)));
   responseTensorTable = pres[1].cast<std::vector<torch::Tensor>>();
   return pres[0].cast<std::string>();
 }
 
 py::object PythonRpcHandler::runPythonUDF(
-    const SerializedPyObj& serializedObj) {
+    const SerializedPyObj& serializedPyObj) {
   PROFILE_GIL_SCOPED_ACQUIRE;
-  return pyRunFunction_(
-      py::bytes(serializedObj.payload_), serializedObj.tensors_);
+  auto pythonUdf = deserialize(serializedPyObj);
+  return pyRunFunction_(std::move(pythonUdf));
 }
 
 SerializedPyObj PythonRpcHandler::serialize(const py::object& obj) {
@@ -118,6 +117,9 @@ SerializedPyObj PythonRpcHandler::serialize(const py::object& obj) {
 
 py::object PythonRpcHandler::deserialize(const SerializedPyObj& serializedObj) {
   PROFILE_GIL_SCOPED_ACQUIRE;
+  // NB: pyDeserialize_ can return an AttributeError if the deserialize() Python
+  // function fails. Functions consuming the result needs to handle such error
+  // properly.
   return pyDeserialize_(
       py::bytes(serializedObj.payload_), serializedObj.tensors_);
 }
