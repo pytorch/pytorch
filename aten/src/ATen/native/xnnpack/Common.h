@@ -9,6 +9,53 @@
 namespace at {
 namespace native {
 namespace xnnpack {
+
+struct Deleter final {
+  void operator()(const xnn_operator_t op) const {
+    xnn_delete_operator(op);
+  }
+};
+
+using Operator = std::unique_ptr<xnn_operator, Deleter>;
+
+struct ContextBase {
+  Operator op;
+
+  static constexpr float kMin = -std::numeric_limits<float>::infinity();
+  static constexpr float kMax = std::numeric_limits<float>::infinity();
+};
+
+struct ContextLinear final : public ContextBase {
+  int64_t output_channels;
+
+  ContextLinear() = default;
+
+  ContextLinear(Operator&& o, int64_t o_channels) {
+    op = std::move(o);
+    output_channels = o_channels;
+  }
+};
+
+struct ContextConv2D final : public ContextBase {
+  std::vector<int64_t> weight_size;
+  std::vector<int64_t> padding;
+  std::vector<int64_t> stride;
+  std::vector<int64_t> dilation;
+
+  ContextConv2D() = default;
+
+  ContextConv2D(Operator&& o, std::vector<int64_t> w_size,
+      std::vector<int64_t> padding_,
+      std::vector<int64_t> stride_,
+      std::vector<int64_t> dilation_) {
+    op = std::move(o);
+    weight_size = std::move(w_size);
+    padding = std::move(padding_);
+    stride = std::move(stride_);
+    dilation = std::move(dilation_);
+  }
+};
+
 namespace internal {
 
 struct Layout final {
@@ -31,7 +78,7 @@ struct Layout final {
       }
 
       // Handle the case where batch size is zero.
-      int64_t batch = std::max<int64_t>(1, tensor[0]);
+      int64_t batch = tensor[0];
 
       for (size_t index = 1u; index < (tensor.size() - 1u); ++index) {
         batch *= tensor[index];
@@ -63,14 +110,6 @@ struct Layout final {
     static constexpr size_t width = 1u;
   };
 };
-
-struct Deleter final {
-  void operator()(const xnn_operator_t op) const {
-    xnn_delete_operator(op);
-  }
-};
-
-using Operator = std::unique_ptr<xnn_operator, Deleter>;
 
 bool available();
 
