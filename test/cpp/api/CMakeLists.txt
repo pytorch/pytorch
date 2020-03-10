@@ -15,6 +15,7 @@ set(TORCH_API_TEST_SOURCES
   ${TORCH_API_TEST_DIR}/module.cpp
   ${TORCH_API_TEST_DIR}/modulelist.cpp
   ${TORCH_API_TEST_DIR}/modules.cpp
+  ${TORCH_API_TEST_DIR}/namespace.cpp
   ${TORCH_API_TEST_DIR}/nn_utils.cpp
   ${TORCH_API_TEST_DIR}/optim.cpp
   ${TORCH_API_TEST_DIR}/ordered_dict.cpp
