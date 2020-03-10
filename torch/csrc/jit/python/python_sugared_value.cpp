@@ -227,7 +227,7 @@ SugaredValuePtr ModuleValue::getitem(
     return getSugaredModuleDict(loc, m)->getModules()->getitem(loc, m, idx);
   }
   throw ErrorReport(loc)
-      << "Only ModuleLists, Sequentials, and ModuleDict Modules are subscriptable";
+      << "Only ModuleList, Sequential, and ModuleDict modules are subscriptable";
 }
 
 void checkInterface(
