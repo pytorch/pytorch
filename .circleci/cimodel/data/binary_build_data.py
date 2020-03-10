@@ -33,14 +33,14 @@ def get_processor_arch_name(cuda_version):
 
 
 LINUX_PACKAGE_VARIANTS = OrderedDict(
-    manywheel=[
-        "2.7m",
-        "2.7mu",
-        "3.5m",
-        "3.6m",
-        "3.7m",
-    ],
-    conda=dimensions.STANDARD_PYTHON_VERSIONS,
+    # manywheel=[
+        # "2.7m",
+        # "2.7mu",
+        # "3.5m",
+        # "3.6m",
+        # "3.7m",
+    # ],
+    # conda=dimensions.STANDARD_PYTHON_VERSIONS,
     libtorch=[
         "2.7m",
     ],
@@ -49,8 +49,8 @@ LINUX_PACKAGE_VARIANTS = OrderedDict(
 CONFIG_TREE_DATA = OrderedDict(
     linux=(dimensions.CUDA_VERSIONS, LINUX_PACKAGE_VARIANTS),
     macos=([None], OrderedDict(
-        wheel=dimensions.STANDARD_PYTHON_VERSIONS,
-        conda=dimensions.STANDARD_PYTHON_VERSIONS,
+        # wheel=dimensions.STANDARD_PYTHON_VERSIONS,
+        # conda=dimensions.STANDARD_PYTHON_VERSIONS,
         libtorch=[
             "2.7",
         ],
@@ -65,8 +65,8 @@ CONFIG_TREE_DATA = OrderedDict(
 #
 # Libtorch with new gcc ABI is built with gcc 5.4 on Ubuntu 16.04.
 LINUX_GCC_CONFIG_VARIANTS = OrderedDict(
-    manywheel=['devtoolset7'],
-    conda=['devtoolset7'],
+    # manywheel=['devtoolset7'],
+    # conda=['devtoolset7'],
     libtorch=[
         "devtoolset7",
         "gcc5.4_cxx11-abi",
