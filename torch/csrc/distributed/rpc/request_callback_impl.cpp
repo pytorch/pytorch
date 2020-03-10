@@ -199,7 +199,8 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
         }
         SerializedPyObj result =
             PythonRpcHandler::getInstance().serialize(pyValue);
-        return wrap(PythonRRefFetchRet(result.toIValues()).toMessage());
+        return wrap(
+            PythonRRefFetchRet(std::move(result).toIValues()).toMessage());
       }
 
       auto whenValueSet = rref->getFuture();
@@ -219,7 +220,8 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
               }
               SerializedPyObj result =
                   PythonRpcHandler::getInstance().serialize(pyValue);
-              Message m = PythonRRefFetchRet(result.toIValues()).toMessage();
+              Message m =
+                  PythonRRefFetchRet(std::move(result).toIValues()).toMessage();
               m.setId(messageId);
               responseFuture->markCompleted(std::move(m));
             } else {
