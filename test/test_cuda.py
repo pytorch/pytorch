@@ -2665,6 +2665,31 @@ t2.start()
                     getattr(module, op)(*args)
 
     @skipIfRocm
+    def test_autocast_ignores_double(self):
+        with torch.cuda.amp.autocast():
+            a_64 = torch.randn((8, 8), dtype=torch.float64, device="cuda:0")
+            b_64 = torch.randn((8, 8), dtype=torch.float64, device="cuda:0")
+            c_16 = torch.randn((8, 8), dtype=torch.float16, device="cuda:0")
+
+            # Tests if CastPolicy::fp16 ops ignore double
+            with self.assertRaises(RuntimeError):
+                torch.mm(a_64, c_16)
+            self.assertTrue(torch.mm(a_64, b_64).dtype is torch.float64)
+
+            # Tests if CastPolicy::fp32 ops ignore double
+            self.assertTrue(torch.acos(a_64).dtype is torch.float64)
+
+            # Tests if CastPolicy::fp32_set_opt_dtype ops ignore double
+            self.assertTrue(torch.softmax(a_64, 0).dtype is torch.float64)
+
+            # Tests if CastPolicy::fp32_append_dtype ops ignore double
+            self.assertTrue(torch.norm(a_64).dtype is torch.float64)
+
+            # Tests if CastPolicy::promote ops ignore double
+            with self.assertRaises(RuntimeError):
+                torch.cat((a_64, c_16))
+
+    @skipIfRocm
     def test_autocast_custom_enabled(self):
         class MyMM(torch.autograd.Function):
             @staticmethod

@@ -3,11 +3,11 @@
 namespace at {
 namespace autocast {
 
-bool is_enabled();
-void set_enabled(bool enabled);
-void clear_cache();
-int increment_nesting();
-int decrement_nesting();
+TORCH_API bool is_enabled();
+TORCH_API void set_enabled(bool enabled);
+TORCH_API void clear_cache();
+TORCH_API int increment_nesting();
+TORCH_API int decrement_nesting();
 
 } // namespace autocast
 } // namespace at

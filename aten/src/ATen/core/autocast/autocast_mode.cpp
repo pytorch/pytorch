@@ -88,12 +88,15 @@ Logic to extract the promote type from any Tensor or TensorList args.
 inline at::ScalarType
 prioritize(at::ScalarType current, const Tensor& nextArg) {
   if (nextArg.is_cuda() && nextArg.is_floating_point()) {
+    if (current == at::kDouble) {
+      AT_ERROR("promote type is double in at::autocast::prioritize");
+      return current;
+    }
     auto next = nextArg.scalar_type();
-    // For promotion purposes, prioritize double, then float, then half.
-    if (current == at::kDouble || next == at::kDouble) {
-      return at::kDouble;
+    if (next == at::kDouble) {
+      return current; // ignores double tensors
     } else if (current == at::kFloat || next == at::kFloat) {
-      return at::kFloat;
+      return at::kFloat; // prioritizes float over half
     } else if (current == at::kHalf && next == at::kHalf) {
       return at::kHalf;
     } else {
@@ -127,7 +130,7 @@ promote_type(at::ScalarType current) {
   return current;
 }
 
-// Unpack args and pick the widest floating-point dtype among Tensors to use for promotion.
+// Unpack args and determine if incoming float16 tensors need to be promoted to float32.
 // Non-Tensor arguments are ignored.
 template<typename Arg0, typename... Args> inline at::ScalarType
 promote_type(at::ScalarType current, Arg0 arg0, Args... args) {
@@ -142,7 +145,10 @@ Logic to apply cached casting to any Tensor argument.
 // Overload to catch Tensor args
 inline Tensor
 cached_cast(at::ScalarType to_type, const Tensor& arg) {
-  if (arg.is_cuda() && arg.is_floating_point() && arg.scalar_type() != to_type) {
+  if (arg.is_cuda() &&
+      arg.is_floating_point() &&
+      arg.scalar_type() != at::kDouble &&
+      arg.scalar_type() != to_type) {
     // Heuristic:  Do what Apex does, and cache fp16 casts of fp32 model weights (leaves).
     // See cached_casts declaration above for detailed strategy.
     bool can_try_cache = (to_type == at::kHalf && arg.scalar_type() == at::kFloat && arg.requires_grad() && arg.is_leaf());
@@ -200,6 +206,13 @@ inline T set_opt_dtype(at::ScalarType to_type, T arg) {
   return arg;
 }
 
+// Checks if the first arg is float64.
+// Intended only for functions with the right signature, so only one overload.
+template<typename... Args>
+inline bool firstarg_is_double(const Tensor& arg, Args... args) {
+  return (arg.scalar_type() == at::kDouble);
+}
+
 /********************************************************************************************************
 Templates to provide wrapper functions
 
@@ -237,7 +250,11 @@ template<class Redispatch, Redispatch* F, class Ret, class... Args>
 struct WrapFunction_<CastPolicy::fp32_set_opt_dtype, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
     c10::impl::ExcludeDispatchKeyGuard no_autocasting(DispatchKey::AutocastTensorId);
-    return (*F)(set_opt_dtype(at::kFloat, args)...);
+    if (firstarg_is_double(args...)) {
+      return (*F)(args...);
+    } else {
+      return (*F)(set_opt_dtype(at::kFloat, args)...);
+    }
   }
 };
 
@@ -246,7 +263,8 @@ template<class Redispatch, Redispatch* F, class Ret, class... Args>
 struct WrapFunction_<CastPolicy::fp32_append_dtype, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
     c10::impl::ExcludeDispatchKeyGuard no_autocasting(DispatchKey::AutocastTensorId);
-    return (*F)(args..., at::kFloat);
+    at::ScalarType out_type = (firstarg_is_double(args...) ? at::kDouble : at::kFloat);
+    return (*F)(args..., out_type);
   }
 };
 
