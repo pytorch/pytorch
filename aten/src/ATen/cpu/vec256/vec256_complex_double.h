@@ -56,7 +56,8 @@ public:
     return _mm256_blendv_pd(a.values, b.values, mask_);
 
   }
-  static Vec256<std::complex<double>> arange(std::complex<double> base = 0., std::complex<double> step = 1.) {
+  template<typename step_t>
+  static Vec256<std::complex<double>> arange(std::complex<double> base = 0., step_t step = static_cast<step_t>(1)) {
     return Vec256<std::complex<double>>(base,
                                         base + step);
   }
