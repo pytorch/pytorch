@@ -56,7 +56,7 @@ def assert_allclose(actual, expected, rtol=None, atol=None, equal_nan=True):
 
     raise AssertionError(msg.format(
         rtol, atol, list(index), actual[index].item(), expected[index].item(),
-        count - 1, 100 * count / actual.numel()))
+        count - 1, 100. * count / actual.numel()))
 
 def make_non_contiguous(tensor):
     if tensor.numel() <= 1:  # can't make non-contiguous
