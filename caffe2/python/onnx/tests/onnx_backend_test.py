@@ -107,6 +107,7 @@ backend_test.exclude(r'(test_hardsigmoid'  # Does not support Hardsigmoid.
                      '|test_greater_equal_expanded_cpu'
                      '|test_greater_equal_bcast_expanded_cpu'
                      '|test_greater_equal_cpu'
+                     '|test_inverse_batched_cpu'
                      ')')
 
 # Quick patch to unbreak master CI, is working on the debugging.
