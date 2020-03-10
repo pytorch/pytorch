@@ -141,6 +141,7 @@ void runCudaFusionGroup(const Node* const fusion_node, Stack& stack) {
 
     auto tensor = at::empty_strided(sizes, strides, options);
     outputs.push_back(tensor);
+    printf("=== output ptr :%p\n", tensor.data_ptr());
   }
 
   CudaFusionManager::getManager().runFusionNode(kernel_id, inputs, outputs);

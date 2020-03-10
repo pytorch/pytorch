@@ -412,7 +412,7 @@ void CodeWrite::setupOverrides() {
 
 // Print the header for the kernel, the inputs/outputs
 void CodeWrite::header() {
-  os << "__global__ void kernel(";
+  os << "__global__ void " << kernel_name_ << "(";
 
   std::deque<Val*> vals;
   Fusion* fusion = FusionGuard::getCurFusion();
@@ -424,7 +424,18 @@ void CodeWrite::header() {
   for (Val* val : vals) {
     switch (val->getValType().value()) {
       case (ValType::TensorView):
-        os << "Tensor T";
+        switch (val->getDataType().value()) {
+          case (DataType::Float):
+            os << "Tensor<float> T";
+            break;
+          case (DataType::Int):
+            os << "Tensor<int> T";
+            break;
+          default:
+            TORCH_CHECK(
+                false,
+                "CodeWrite::header() found an input to the fusion of unexpected val type.");
+        }
         break;
       case (ValType::Scalar):
         switch (val->getDataType().value()) {
