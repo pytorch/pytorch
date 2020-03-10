@@ -455,6 +455,7 @@ void CodeWrite::header() {
                 false,
                 "CodeWrite::header() found an input to the fusion of unexpected val type.");
         }
+        break;
       default:
         TORCH_CHECK(
             false,
