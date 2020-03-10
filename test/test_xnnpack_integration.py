@@ -5,6 +5,7 @@ import unittest
 import torch
 import torch.backends.xnnpack
 from torch.nn import functional as F
+from torch.testing import FileCheck
 import torch.testing._internal.hypothesis_utils as hu
 from torch.testing._internal.common_utils import TestCase, run_tests
 from hypothesis import given, assume
@@ -68,10 +69,10 @@ class TestXNNPACKOps(TestCase):
         strides = (stride_h, stride_w)
         paddings = (pad_h, pad_w)
         dilations = (dilation, dilation)
-        assume(height + 2 * paddings[0]
-               >= dilations[0] * (kernels[0] - 1) + 1)
-        assume(width + 2 * paddings[1]
-               >= dilations[1] * (kernels[1] - 1) + 1)
+        assume(height + 2 * paddings[0] >=
+               dilations[0] * (kernels[0] - 1) + 1)
+        assume(width + 2 * paddings[1] >=
+               dilations[1] * (kernels[1] - 1) + 1)
 
         input_data = torch.rand((batch_size, input_channels, height, width))
         weight = torch.rand((output_channels, input_channels_per_group, kernel_h, kernel_w))
@@ -198,10 +199,10 @@ class TestXNNPACKSerDes(TestCase):
         strides = (stride_h, stride_w)
         paddings = (pad_h, pad_w)
         dilations = (dilation, dilation)
-        assume(height + 2 * paddings[0]
-               >= dilations[0] * (kernels[0] - 1) + 1)
-        assume(width + 2 * paddings[1]
-               >= dilations[1] * (kernels[1] - 1) + 1)
+        assume(height + 2 * paddings[0] >=
+               dilations[0] * (kernels[0] - 1) + 1)
+        assume(width + 2 * paddings[1] >=
+               dilations[1] * (kernels[1] - 1) + 1)
 
         input_data = torch.rand((batch_size, input_channels, height, width))
         weight = torch.rand((output_channels, input_channels_per_group, kernel_h, kernel_w))
@@ -304,10 +305,10 @@ class TestXNNPACKSerDes(TestCase):
         strides = (stride_h, stride_w)
         paddings = (pad_h, pad_w)
         dilations = (dilation, dilation)
-        assume(height + 2 * paddings[0]
-               >= dilations[0] * (kernels[0] - 1) + 1)
-        assume(width + 2 * paddings[1]
-               >= dilations[1] * (kernels[1] - 1) + 1)
+        assume(height + 2 * paddings[0] >=
+               dilations[0] * (kernels[0] - 1) + 1)
+        assume(width + 2 * paddings[1] >=
+               dilations[1] * (kernels[1] - 1) + 1)
 
         input_data = torch.rand((batch_size, input_channels, height, width))
         conv_weight = torch.rand((output_channels, input_channels_per_group, kernel_h, kernel_w))
@@ -358,6 +359,137 @@ class TestXNNPACKSerDes(TestCase):
         ref_result = deserialized_m(input_data)
         xnnpack_result = deserialized_m_prepacked(input_data)
         torch.testing.assert_allclose(ref_result, xnnpack_result, rtol=1e-2, atol=1e-3)
+
+
+@unittest.skipUnless(torch.backends.xnnpack.enabled,
+                     " XNNPACK must be enabled for these tests."
+                     " Please build with USE_XNNPACK=1.")
+class TestXNNPACKRewritePass(TestCase):
+    def test_linear(self):
+        def validate_transformed_module(module_name, pattern_count_map, data_shape):
+            scripted_model = torch.jit.script(module_name())
+            input_data = torch.rand(data_shape)
+            ref_result = scripted_model(input_data)
+            torch._C._jit_pass_insert_xnnpack_ops(scripted_model._c)
+
+            buffer = io.BytesIO()
+            torch.jit.save(scripted_model, buffer)
+            buffer.seek(0)
+            deserialized_scripted_model = torch.jit.load(buffer)
+            file_check = FileCheck()
+            for pattern, v in pattern_count_map.items():
+                if (v == 0):
+                    file_check.check(pattern)
+                elif (v == -1):
+                    file_check.check_not(pattern)
+                else:
+                    file_check.check_count(pattern, v, exactly=True)
+            file_check.run(deserialized_scripted_model.graph)
+            xnnpack_result = deserialized_scripted_model(input_data)
+            torch.testing.assert_allclose(ref_result, xnnpack_result, rtol=1e-2, atol=1e-3)
+
+        data_shape = [2, 3, 32]
+        weight_output_dim = 24
+        weight_shape = (weight_output_dim, data_shape[-1])
+
+        class Linear(torch.nn.Module):
+            def __init__(self):
+                super(Linear, self).__init__()
+                self.weight = torch.nn.Parameter(torch.Tensor(torch.rand(weight_shape)))
+                self.bias = torch.nn.Parameter(torch.Tensor(torch.rand((weight_output_dim))))
+
+            def forward(self, x):
+                return F.linear(x, self.weight, self.bias)
+
+        class LinearNoBias(torch.nn.Module):
+            def __init__(self):
+                super(LinearNoBias, self).__init__()
+                self.weight = torch.nn.Parameter(torch.Tensor(torch.rand(weight_shape)))
+
+            def forward(self, x):
+                return F.linear(x, self.weight, None)
+
+        # Linear with bias pattern.
+        pattern_count_map = {"Tensor = prim::CallFunction": -1,
+                             "xnnpack::linear_prepack": 1,
+                             "xnnpack::linear_packed": 1}
+        validate_transformed_module(Linear, pattern_count_map, data_shape)
+        validate_transformed_module(LinearNoBias, pattern_count_map, data_shape)
+
+        # Conv params
+        batch_size = 2
+        input_channels_per_group = 6
+        height = 16
+        width = 16
+        output_channels_per_group = 6
+        groups = 4
+        kernel_h = kernel_w = 3
+        stride_h = stride_w = 1
+        pad_h = pad_w = 1
+        dilation = 1
+        input_channels = input_channels_per_group * groups
+        output_channels = output_channels_per_group * groups
+        kernels = (kernel_h, kernel_w)
+        strides = (stride_h, stride_w)
+        paddings = (pad_h, pad_w)
+        dilations = (dilation, dilation)
+        conv_weight_shape = (output_channels, input_channels_per_group, kernel_h, kernel_w)
+        conv_bias_shape = (output_channels)
+
+        class Conv2D(torch.nn.Module):
+            def __init__(self):
+                super(Conv2D, self).__init__()
+                self.weight = torch.nn.Parameter(torch.Tensor(torch.rand(conv_weight_shape)))
+                self.bias = torch.nn.Parameter(torch.Tensor(torch.rand(conv_bias_shape)))
+                self.strides = strides
+                self.paddings = paddings
+                self.dilations = dilations
+                self.groups = groups
+
+            def forward(self, x):
+                return F.conv2d(x, self.weight, self.bias,
+                                self.strides, self.paddings, self.dilations, self.groups)
+
+        data_shape = (batch_size, input_channels, height, width)
+        pattern_count_map = {"Tensor = aten::conv2d": -1,
+                             "xnnpack::conv2d_prepack": 1,
+                             "xnnpack::conv2d_packed": 1}
+        validate_transformed_module(Conv2D, pattern_count_map, data_shape)
+
+        input_data = torch.rand((batch_size, input_channels, height, width))
+        conv_weight = torch.rand((output_channels, input_channels_per_group, kernel_h, kernel_w))
+        conv_bias = torch.rand((output_channels))
+        result = F.conv2d(input_data, conv_weight, conv_bias,
+                          strides, paddings, dilations, groups)
+        linear_input_shape = result.shape[1]
+        linear_weight_shape = (weight_output_dim, linear_input_shape)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.conv_weight = torch.nn.Parameter(torch.Tensor(torch.rand(conv_weight_shape)))
+                self.conv_bias = torch.nn.Parameter(torch.Tensor(torch.rand((conv_bias_shape))))
+                self.linear_weight = torch.nn.Parameter(torch.Tensor(torch.rand(linear_weight_shape)))
+                self.linear_bias = torch.nn.Parameter(torch.Tensor(torch.rand((weight_output_dim))))
+                self.strides = strides
+                self.paddings = paddings
+                self.dilations = dilations
+                self.groups = groups
+
+            def forward(self, x):
+                o = F.conv2d(x, self.conv_weight, self.conv_bias,
+                             self.strides, self.paddings, self.dilations, self.groups)
+                o = o.permute([0, 2, 3, 1])
+                o = F.linear(o, self.linear_weight, self.linear_bias)
+                return F.relu(o)
+
+        pattern_count_map = {"Tensor = aten::conv2d": -1,
+                             "xnnpack::conv2d_prepack": 1,
+                             "xnnpack::conv2d_packed": 1,
+                             "Tensor = prim::CallFunction": -1,
+                             "xnnpack::linear_prepack": 1,
+                             "xnnpack::linear_packed": 1}
+        validate_transformed_module(M, pattern_count_map, data_shape)
 
 
 if __name__ == "__main__":
