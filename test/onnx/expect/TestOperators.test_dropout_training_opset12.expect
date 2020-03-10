@@ -19,12 +19,13 @@ graph {
     input: "x"
     input: "1"
     output: "2"
+    output: "3"
     name: "Dropout_1"
     op_type: "Dropout"
   }
   node {
     input: "2"
-    output: "3"
+    output: "4"
     name: "ReduceMax_2"
     op_type: "ReduceMax"
     attribute {
@@ -51,7 +52,7 @@ graph {
     }
   }
   output {
-    name: "3"
+    name: "4"
     type {
       tensor_type {
         elem_type: 1
