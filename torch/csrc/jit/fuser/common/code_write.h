@@ -138,10 +138,12 @@ struct TORCH_API CodeWrite : public IRPrinter {
 
  public:
   // Init printer on ostream
-  CodeWrite(std::ostream& _os) : IRPrinter(_os) {}
+  CodeWrite(std::ostream& _os, std::string kernel_name="kernel")
+      : IRPrinter(_os), kernel_name_(kernel_name) {}
 
   // print generated code to ostream
   void traverse(Fusion* fusion);
+  std::string kernel_name_;
 };
 
 } // namespace fuser

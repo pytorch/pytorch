@@ -2,6 +2,9 @@
 #include <torch/csrc/jit/fuser/common/code_write.h>
 #include <iostream>
 
+#include <ATen/cuda/CUDAContext.h>
+#include <c10/cuda/CUDACachingAllocator.h>
+#include <torch/csrc/jit/resource_guard.h>
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 
 namespace torch {
@@ -9,6 +12,7 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
+#define CG_NAMESPACE "CudaCodeGen"
 #define KERNEL_NAME "kernel"
 
 namespace {
@@ -17,26 +21,61 @@ static const at::cuda::NVRTC& nvrtc() {
   return at::globalContext().getNVRTC();
 }
 
-std::string codeGeneration(Fusion& fusion) {
-  std::stringstream str_stream;
-  CodeWrite cw(str_stream);
-  cw.traverse(&fusion);
-  
-  return str_stream.str();
-  /*
-  std::string kernel_name = "";
-  std::string kernel_string = "namespace Fuser {\n";
-  kernel_string += Fuser::typeinfo + std::string("\n");
-  kernel_string += Fuser::saxpy_codegen(kernel_name);
-  kernel_string += std::string("\n}");
+static int ceilDiv(const int a, const int b) {
+  return (a + b - 1) / b;
+}
 
-  std::cout << "---------------------" << std::endl;
-  std::cout << kernel_string << std::endl;
-  std::cout << "---------------------" << std::endl;
-  auto func_name = "Fuser::" + kernel_name + "<" +
-      Fuser::getTypeName<Fuser::IO_struct<float, int32_t, 4>>() + ">";
-  std::cout << func_name << std::endl;
-   */
+std::pair<std::string, std::string> codeGeneration(Fusion& fusion) {
+  std::stringstream str_stream;
+  
+  std::cout << "data structure:" << std::endl;
+  std::cout << typeinfo << std::endl;
+  str_stream << "namespace " << CG_NAMESPACE << " {\n" << typeinfo << "\n";
+  CodeWrite cw(str_stream, KERNEL_NAME);
+  cw.traverse(&fusion);
+  str_stream << "\n}";
+
+  std::string func_name = std::string(CG_NAMESPACE) + "::" + KERNEL_NAME;
+
+  return std::make_pair(func_name, str_stream.str());
+};
+
+void prepare_argument(
+    std::vector<void*>& arguments,
+    std::vector<Tensor<float>>& tensor_args,
+    const at::Tensor& val) {
+  tensor_args.emplace_back();
+  Tensor<float>& t = tensor_args.back();
+  // passing address, type doesn't really matter here;
+  t.data = static_cast<float*>(val.data_ptr());
+  std::cout << "### tensor_args size: " << tensor_args.size();
+  std::cout << " set input: (";
+  for (int i = 0; i < val.dim(); i++) {
+    std::cout << val.sizes()[i] << ", ";
+    t.size[i] = val.sizes()[i];
+    t.stride[i] = val.strides()[i];
+  }
+  std::cout << ")" << std::endl;
+  arguments.push_back(&(tensor_args.back()));
+};
+
+void prepare_argument(
+    std::vector<void*>& arguments,
+    std::vector<Tensor<float>>& tensor_args,
+    std::vector<int>& int_args,
+    std::vector<float>& float_args,
+    const IValue& val) {
+  if (val.isTensor()) {
+    prepare_argument(arguments, tensor_args, val.toTensor());
+  } else if (val.isDouble()) {
+    float_args.push_back(val.to<float>());
+    arguments.push_back(&(float_args.back()));
+  } else if (val.isInt()) {
+    int_args.push_back(val.to<int>());
+    arguments.push_back(&(int_args.back()));
+  } else {
+    assert(false);
+  }
 };
 
 } // namespace
@@ -45,15 +84,16 @@ void compileKernel(Fusion& fusion, CudaKernel& entry) {
   std::cout << "compiling kernel" << std::endl;
 
   // generating cuda code;
-  std::string code = codeGeneration(fusion);
+  std::string code;
+  std::string func_name;
+  std::tie(func_name, code) = codeGeneration(fusion);
 
+  std::cout << "function name: " << std::endl;
+  std::cout << func_name << std::endl;
+  std::cout << "kernel string: " << std::endl;
   std::cout << code << std::endl;
 
-  std::cout << "data structure:" << std::endl;
-  std::cout << typeinfo << std::endl;
-
-  // vvv COMPILATION vvv 
-  /*
+  // vvv NVRTC COMPILATION vvv 
 
   // lazily construct context if non-existing yet;
   CUcontext pctx = 0;
@@ -83,6 +123,9 @@ void compileKernel(Fusion& fusion, CudaKernel& entry) {
   nvrtcProgram program;
   AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcCreateProgram(
       &program, code.c_str(), nullptr, 0, nullptr, nullptr));
+  ResourceGuard holdProgram(
+      [&] { AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcDestroyProgram(&program)); });
+
   const std::string compute = "--gpu-architecture=compute_" +
       std::to_string(major) + std::to_string(minor);
   const std::vector<const char*> args = {
@@ -103,8 +146,6 @@ void compileKernel(Fusion& fusion, CudaKernel& entry) {
   const char *lowered_kernel_name;
   nvrtc().nvrtcGetLoweredName(program, func_name.c_str(), &lowered_kernel_name);
 
-  ResourceGuard holdProgram(
-      [&] { AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcDestroyProgram(&program)); });
   AT_CUDA_NVRTC_CHECK(result);
   size_t ptx_size;
   AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcGetPTXSize(program, &ptx_size));
@@ -114,11 +155,10 @@ void compileKernel(Fusion& fusion, CudaKernel& entry) {
 
   AT_CUDA_DRIVER_CHECK(nvrtc().cuModuleLoadData(&(entry.module_), ptx.data()));
   AT_CUDA_DRIVER_CHECK(
-      nvrtc().cuModuleGetFunction(&(entry.function_), entry.module_, lowered_kernel_    name));
+      nvrtc().cuModuleGetFunction(&(entry.function_), entry.module_, lowered_kernel_name));
   AT_CUDA_DRIVER_CHECK(nvrtc().cuOccupancyMaxActiveBlocksPerMultiprocessor(
-      &entry.maxBlocks_, entry.function_, 128, 0));
-  entry.maxBlocks_ *= prop->multiProcessorCount;
-  */
+      &entry.max_blocks_, entry.function_, 128, 0));
+  entry.max_blocks_ *= prop->multiProcessorCount;
 }
 
 TORCH_API void runKernel(
@@ -126,9 +166,63 @@ TORCH_API void runKernel(
     const at::ArrayRef<IValue>& inputs,
     std::vector<at::Tensor>& outputs) {
 
+  const auto prior_device = at::cuda::current_device();
+  at::cuda::set_device(entry.device_);
+  auto stream = at::cuda::getCurrentCUDAStream();
+
+  // TODO: Proper API to establish reasonable launch configurations;
+  // Naive launch config;
+  size_t numel = outputs[0].numel();
+  const auto nBlocks = std::min(entry.max_blocks_, ceilDiv(numel, 128));
+
+  // TODO: Proper API to tranform JIT I/O Tensor to CodeGen I/O Tensor
+  std::vector<void*> arguments;
+
+  // TODO: There are better ways to do this;
+  // argument holder;
+  // host code, `T` in `Tensor<T>` doesn't really matter, as we only interact
+  // with the address; Just put a float here to simply the argument holder.
+  int max_capacity = inputs.size() + outputs.size();
+  std::vector<Tensor<float>> tensor_args;
+  std::vector<int> int_args;
+  std::vector<float> float_args;
+  tensor_args.reserve(max_capacity);
+  int_args.reserve(max_capacity);
+  float_args.reserve(max_capacity);
+
+  // Naive I/O setup, I'm ignoring all the potential transformation (i.e. I/O
+  // allocated here from the subgraph could be, and very likely are, different
+  // from I/O expected by the generated CUDA kernel.
+  for (auto& input : inputs) {
+    prepare_argument(arguments, tensor_args, int_args, float_args, input);
+  }
+  for (auto& output : outputs) {
+    prepare_argument(arguments, tensor_args, output);
+  }
+  
+  // launch kernel;
+  AT_CUDA_DRIVER_CHECK(nvrtc().cuLaunchKernel(
+      entry.function_,
+      nBlocks,
+      1,
+      1,
+      128,
+      1,
+      1,
+      0,
+      stream,
+      arguments.data(),
+      nullptr));
+
+  // Resets device (see at::DeviceGuard notes above)
+  at::cuda::set_device(prior_device); 
+
+
+/*
   for (auto& output : outputs) {
     output.fill_(0.24);
   }
+ */
 }
 
 }}}} // namespace torch::jit::fuser::cuda

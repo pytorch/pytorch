@@ -3,14 +3,14 @@
 
 #include <ATen/cuda/CUDAContext.h>
 
-#define STRINGIFY(...) __VA_ARGS__
-#include <torch/csrc/jit/fuser/cuda/data_struct_str.h>
-#undef STRINGIFY
-
 namespace torch {
 namespace jit {
 namespace fuser {
 namespace cuda {
+
+#define STRINGIFY(...) __VA_ARGS__
+#include <torch/csrc/jit/fuser/cuda/data_struct_str.h>
+#undef STRINGIFY
 
 class CudaKernel{
 public:
@@ -24,7 +24,6 @@ public:
     return function_;
   }
 
-protected:
   int16_t device_;
   CUmodule module_;
   CUfunction function_;
