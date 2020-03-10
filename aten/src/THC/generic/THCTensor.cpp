@@ -96,7 +96,7 @@ THCTensor *THCTensor_(newWithSize1d)(THCState *state, int64_t size0)
     c10::intrusive_ptr<at::StorageImpl>::reclaim(new_storage),
     at::DispatchKey::CUDATensorId
   ).release();
-  THCTensor_(setStorage)(state, self, 0, {size0}, {});
+  THCTensor_(setStorage)(state, self, new_storage, 0, {size0}, {});
 
   return self;
 }
