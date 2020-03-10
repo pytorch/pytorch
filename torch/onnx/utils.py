@@ -60,17 +60,12 @@ def select_model_mode_for_export(model, mode):
 
         from torch.onnx.symbolic_helper import _set_training_mode
         _set_training_mode(is_export_training)
-
-        if is_originally_training != is_export_training:
-            assert mode != TrainingMode.PRESERVE
-            model.train(is_export_training)
+        model.train(is_export_training)
     try:
         yield
     finally:
         if not isinstance(model, torch.jit.ScriptFunction):
-            if is_originally_training != is_export_training:
-                assert mode != TrainingMode.PRESERVE
-                model.train(is_originally_training)
+            model.train(is_originally_training)
 
 
 def export(model, args, f, export_params=True, verbose=False, training=None,
