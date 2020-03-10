@@ -1554,6 +1554,19 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(ScatterModel(), input=(input, indices, values))
 
     @skipIfUnsupportedMinOpsetVersion(9)
+    def test_one_hot(self):
+        class OneHot(torch.nn.Module):
+            def __init__(self, num_classes):
+                super().__init__()
+                self.num_classes = num_classes
+
+            def forward(self, x):
+                return torch.nn.functional.one_hot(x, self.num_classes)
+
+        x = torch.arange(10)
+        self.run_test(OneHot(15), (x))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_gather(self):
         class GatherModel(torch.nn.Module):
             def forward(self, input, indices):
