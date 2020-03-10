@@ -472,6 +472,20 @@ CAFFE2_API TypePtr tryEvalTypeVariables(TypePtr type, std::unordered_map<std::st
   }
 }
 
+CAFFE2_API bool elementTypeCanBeInferredFromMembers(const TypePtr& elem_type) {
+  if (elem_type->kind() == OptionalType::Kind) {
+    // it is possible that we are constructing an optional list, but all
+    // elements are present
+    return false;
+  }
+  if (elem_type->kind() == InterfaceType::Kind) {
+    // since classes can be members of multiple interfaces, we cannot
+    // construct which interface the list holds from the members alone
+    return false;
+  }
+  return true;
+}
+
 const char * typeKindToString(TypeKind kind) {
 #define CASE_TYPE(T) case TypeKind::T: return #T;
   switch(kind) {
