@@ -168,12 +168,14 @@ Module&& Module::def(const char* name_or_schema_str, CppFunction&& f) && {
     if (name_or_schema.is_right()) {
       // it's a schema
       FunctionSchema schema = std::move(name_or_schema).right();
-      // check that the schemas match
-      auto diff = findSchemaDifferences(schema, *f.schema_);
-      TORCH_CHECK(!diff.has_value(),
-          "Module::def(): explicitly specified schema [", toString(schema),
-          "] doesn't match inferred schema [", toString(*f.schema_),
-          "]. ", *diff);
+      // check that the schemas match, if possible
+      if (f.schema_) {
+        auto diff = findSchemaDifferences(schema, *f.schema_);
+        TORCH_CHECK(!diff.has_value(),
+            "Module::def(): explicitly specified schema [", toString(schema),
+            "] doesn't match inferred schema [", toString(*f.schema_),
+            "]. ", *diff);
+      }
       return schema;
     } else {
       // it's a name; use the inferred schema
