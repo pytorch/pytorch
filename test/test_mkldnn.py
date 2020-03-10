@@ -549,6 +549,18 @@ class TestMkldnn(TestCase):
         torch.sigmoid_(mkldnn_x)
         self.assertEqual(x, mkldnn_x.to_dense())
 
+    def test_sigmoid_backward(self):
+        x = torch.randn(4, 5, dtype=torch.float32) * 10
+        dense_x = x.clone().requires_grad_()
+        mkldnn_x1 = x.clone().to_mkldnn().requires_grad_()
+        dense_y = torch.sigmoid(dense_x)
+        dense_y1 = torch.sigmoid(mkldnn_x1).to_dense()
+        self.assertEqual(dense_y, dense_y1)
+
+        dense_y.sum().backward()
+        dense_y1.sum().backward()
+        #self.assertEqual(dense_x.grad, mkldnn_x1.grad.to_dense())
+
     def _test_serialization(self, module, inputs):
         with TemporaryFileName() as fname:
             torch.jit.save(module, fname)
