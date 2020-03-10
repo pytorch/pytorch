@@ -95,7 +95,7 @@ void IRPrinter::handle(const Float* const f) {
   if (f->isSymbolic()) {
     os << "f" << f->name();
   } else {
-    os << *(f->value()) << "f";
+    os << "float(" << *(f->value()) << ")";
   }
 }
 
