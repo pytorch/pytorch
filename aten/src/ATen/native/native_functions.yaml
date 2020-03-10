@@ -6357,10 +6357,15 @@
   dispatch:
     CPU: sigmoid_backward_out
     CUDA: sigmoid_backward_out
+    MkldnnCPU: mkldnn_sigmoid_backward_out
 
 - func: sigmoid_backward(Tensor grad_output, Tensor output) -> Tensor
   use_c10_dispatcher: full
   python_module: nn
+  dispatch:
+    CPU: sigmoid_backward
+    CUDA: sigmoid_backward
+    MkldnnCPU: mkldnn_sigmoid_backward
 
 - func: tanh_backward.grad_input(Tensor grad_output, Tensor output, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
