@@ -2349,6 +2349,20 @@ RegisterOperators reg2({
           listMax<value_type>,                                                      \
           aliasAnalysisFromSchema()),                                               \
       Operator(                                                                     \
+          "aten::len(" decl_type "[] a) -> int",                                    \
+          listLen<value_type>,                                                      \
+          aliasAnalysisFromSchema()),                                               \
+      Operator(                                                                     \
+          "aten::add(" decl_type "[] a, " decl_type "[] b) -> " decl_type           \
+          "[]",                                                                     \
+          listAdd<value_type>,                                                      \
+          aliasAnalysisFromSchema()),                                               \
+      Operator(                                                                     \
+          "aten::add_(" decl_type "[](a!) self, " decl_type                         \
+          "[] b) -> " decl_type "[]",                                               \
+          listInplaceAdd<value_type>,                                               \
+          aliasAnalysisFromSchema()),                                               \
+      Operator(                                                                     \
           "aten::slice(" decl_type                                                  \
           "[] l, int start, int end=9223372036854775807, int step=1) -> " decl_type \
           "[]",                                                                     \
