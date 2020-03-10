@@ -1783,6 +1783,14 @@
 - name: _thnn_fused_gru_cell(Tensor input_gates, Tensor hidden_gates, Tensor hx, Tensor? input_bias=None, Tensor? hidden_bias=None) -> (Tensor, Tensor)
   input_gates, hidden_gates, hx, input_bias, hidden_bias: "grad.defined() ? (GradMode::is_enabled() ? _thnn_differentiable_gru_cell_backward(grad, input_gates, hidden_gates, hx, input_bias, hidden_bias) : _thnn_fused_gru_cell_backward(grad, result1, input_bias.defined())) : std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor>()"
 
+# _fused_lstm_cell outputs: (hy, cy, workspace)
+- name: _fused_lstm_cell(Tensor input_gates, Tensor hidden_gates, Tensor cx) -> (Tensor, Tensor, Tensor)
+  output_differentiability: [True, True, False]
+  input_gates, hidden_gates, cx: "GradMode::is_enabled() ? _differentiable_fused_lstm_cell_backward(grads[0], grads[1], input_gates, hidden_gates, cx, result1) : _fused_lstm_cell_backward(grads[0], grads[1], cx, result1, result2)"
+
+- name: _fused_gru_cell(Tensor input_gates, Tensor hidden_gates, Tensor hx) -> (Tensor, Tensor)
+  input_gates, hidden_gates, hx: "grad.defined() ? (GradMode::is_enabled() ? _differentiable_fused_gru_cell_backward(grad, input_gates, hidden_gates, hx) : _fused_gru_cell_backward(grad, result1)) : std::tuple<Tensor, Tensor, Tensor>()"
+
 # PackedSequence helpers
 - name: _pack_padded_sequence(Tensor input, Tensor lengths, bool batch_first) -> (Tensor, Tensor)
   input: _pack_padded_sequence_backward(grad, input.sizes(), result1, batch_first)

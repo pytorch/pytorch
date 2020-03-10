@@ -9,6 +9,10 @@ using lstm_fn = void(*)(Tensor&, Tensor&, Tensor&, const Tensor&, TensorList, Te
 using rnn_fn = void(*)(Tensor&, Tensor&, const Tensor&, const Tensor&, TensorList, bool, int64_t, double, bool, bool, bool);
 using lstm_packed_fn = void(*)(Tensor&, Tensor&, Tensor&, const Tensor&, const Tensor&, TensorList, TensorList, bool, int64_t, double, bool, bool);
 using rnn_packed_fn = void(*)(Tensor&, Tensor&, const Tensor&, const Tensor&, const Tensor&, TensorList, bool, int64_t, double, bool, bool);
+using fused_lstm_cell_fn = void(*)(Tensor&, Tensor&, Tensor&, const Tensor&, const Tensor&, const Tensor&);
+using fused_lstm_cell_backward_fn = void(*)(Tensor&, Tensor&, const Tensor&, const Tensor&, const Tensor&, const Tensor&, const Tensor&);
+using fused_gru_cell_fn = void(*)(Tensor&, Tensor&, const Tensor&, const Tensor&, const Tensor&);
+using fused_gru_cell_backward_fn = void(*)(Tensor&, Tensor&, Tensor&, const Tensor&, const Tensor&);
 
 DECLARE_DISPATCH(lstm_fn, lstm_cudnn_stub);
 DECLARE_DISPATCH(lstm_fn, lstm_miopen_stub);
@@ -26,6 +30,10 @@ DECLARE_DISPATCH(rnn_packed_fn, rnn_tanh_packed_cudnn_stub);
 DECLARE_DISPATCH(rnn_packed_fn, rnn_tanh_packed_miopen_stub);
 DECLARE_DISPATCH(rnn_packed_fn, rnn_relu_packed_cudnn_stub);
 DECLARE_DISPATCH(rnn_packed_fn, rnn_relu_packed_miopen_stub);
+DECLARE_DISPATCH(fused_lstm_cell_fn, fused_lstm_cell_stub);
+DECLARE_DISPATCH(fused_lstm_cell_backward_fn, fused_lstm_cell_backward_stub);
+DECLARE_DISPATCH(fused_gru_cell_fn, fused_gru_cell_stub);
+DECLARE_DISPATCH(fused_gru_cell_backward_fn, fused_gru_cell_backward_stub);
 
 inline void check_attributes(const Tensor& input, const TensorList& params, const TensorList& hiddens, bool check_dtype=false) {
   auto input_device = input.device();

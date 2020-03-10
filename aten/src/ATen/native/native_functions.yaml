@@ -4161,6 +4161,27 @@
 - func: _thnn_differentiable_gru_cell_backward(Tensor grad_hy, Tensor input_gates, Tensor hidden_gates, Tensor hx, Tensor? input_bias, Tensor? hidden_bias) -> (Tensor, Tensor, Tensor, Tensor, Tensor)
   use_c10_dispatcher: full
 
+# Fused RNN kernels with pre compute input
+- func: _fused_lstm_cell(Tensor input_gates, Tensor hidden_gates, Tensor cx) -> (Tensor, Tensor, Tensor)
+  dispatch:
+    CPU: _fused_lstm_cell_cpu
+
+- func: _fused_lstm_cell_backward(Tensor? grad_hy, Tensor? grad_cy, Tensor cx, Tensor cy, Tensor workspace) -> (Tensor, Tensor, Tensor)
+  dispatch:
+    CPU: _fused_lstm_cell_backward_cpu
+
+- func: _differentiable_fused_lstm_cell_backward(Tensor? grad_hy, Tensor? grad_cy, Tensor input_gates, Tensor hidden_gates, Tensor cx, Tensor cy) -> (Tensor, Tensor, Tensor)
+
+- func: _fused_gru_cell(Tensor input_gates, Tensor hidden_gates, Tensor hx) -> (Tensor, Tensor)
+  dispatch:
+    CPU: _fused_gru_cell_cpu
+
+- func: _fused_gru_cell_backward(Tensor grad_hy, Tensor workspace) -> (Tensor, Tensor, Tensor)
+  dispatch:
+    CPU: _fused_gru_cell_backward_cpu
+
+- func: _differentiable_fused_gru_cell_backward(Tensor grad_hy, Tensor input_gates, Tensor hidden_gates, Tensor hx) -> (Tensor, Tensor, Tensor)
+
 # RNN cells and layers
 - func: lstm.input(Tensor input, Tensor[] hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor, Tensor)
   use_c10_dispatcher: full

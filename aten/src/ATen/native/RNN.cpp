@@ -704,9 +704,14 @@ struct LSTMCell : Cell<std::tuple<Tensor, Tensor>, cell_params> {
       // Slice off the workspace argument (it's needed only for AD).
       return std::make_tuple(std::move(std::get<0>(result)), std::move(std::get<1>(result)));
     }
-
-    const auto gates = params.linear_hh(hx).add_(
-        pre_compute_input ? input : params.linear_ih(input));
+    if (pre_compute_input) {
+      TORCH_CHECK(input.device().is_cpu());
+      auto igates = input;
+      auto hgates = params.linear_hh(hx);
+      auto result = at::_fused_lstm_cell(igates, hgates, cx);
+      return std::make_tuple(std::move(std::get<0>(result)), std::move(std::get<1>(result)));
+    }
+    const auto gates = params.linear_hh(hx).add_(params.linear_ih(input));
     auto chunked_gates = gates.unsafe_chunk(4, 1);
     auto ingate = chunked_gates[0].sigmoid_();
     auto forgetgate = chunked_gates[1].sigmoid_();
@@ -716,7 +721,6 @@ struct LSTMCell : Cell<std::tuple<Tensor, Tensor>, cell_params> {
     auto hy = outgate * cy.tanh();
     return std::make_tuple(std::move(hy), std::move(cy));
   }
-
 };
 
 template <typename cell_params>
@@ -737,9 +741,13 @@ struct GRUCell : Cell<Tensor, cell_params> {
       // Slice off the workspace argument (it's needed only for AD).
       return std::move(std::get<0>(result));
     }
-    const auto chunked_igates = pre_compute_input
-        ? input.unsafe_chunk(3, 1)
-        : params.linear_ih(input).unsafe_chunk(3, 1);
+    if (pre_compute_input) {
+      auto igates = input;
+      auto hgates = params.linear_hh(hidden);
+      auto result = at::_fused_gru_cell(igates, hgates, hidden);
+      return std::move(std::get<0>(result));
+    }
+    const auto chunked_igates = params.linear_ih(input).unsafe_chunk(3, 1);
     auto chunked_hgates = params.linear_hh(hidden).unsafe_chunk(3, 1);
     const auto reset_gate =
         chunked_hgates[0].add_(chunked_igates[0]).sigmoid_();
@@ -1457,26 +1465,64 @@ std::tuple<Tensor, Tensor> lstm_cell(
   return LSTMCell<CellParams>{}(input, std::make_tuple(hx[0], hx[1]), CellParams{w_ih, w_hh, b_ih, b_hh});
 }
 
-std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor>
-_thnn_differentiable_lstm_cell_backward(
-    const Tensor& grad_hy,
-    const Tensor& grad_cy,
-    const Tensor& input_gates,
-    const Tensor& hidden_gates,
-    const Tensor& input_bias,
-    const Tensor& hidden_bias,
-    const Tensor& cx,
-    const Tensor& cy) {
+std::tuple<Tensor, Tensor, Tensor>
+_fused_lstm_cell_cpu(
+    const Tensor& input_gates, const Tensor& hidden_gates,
+    const Tensor& cx) {
+  auto workspace = at::empty({cx.size(0), cx.size(1) * 4}, cx.options());
+  auto hy = at::empty(cx.sizes(), cx.options());
+  auto cy = at::empty(cx.sizes(), cx.options());
+  fused_lstm_cell_stub(kCPU, hy, cy, workspace, input_gates, hidden_gates, cx);
+  return std::make_tuple(hy, cy, workspace);
+}
+
+std::tuple<Tensor, Tensor, Tensor>
+_fused_lstm_cell_backward_cpu(
+    const Tensor& grad_hy, const Tensor& grad_cy,
+    const Tensor& cx, const Tensor& cy,
+    const Tensor& workspace) {
   if (!grad_hy.defined() && !grad_cy.defined()) {
-    return std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor>();
+    return std::tuple<Tensor, Tensor, Tensor>();
   }
+  auto grad_gates = at::empty(workspace.sizes(), cx.options());
+  auto grad_cx = at::empty(cx.sizes(), cx.options());
+  fused_lstm_cell_backward_stub(kCPU, grad_gates, grad_cx, grad_hy, grad_cy, cx, cy, workspace);
+  return std::make_tuple(grad_gates, grad_gates, grad_cx);
+}
+
+std::tuple<Tensor, Tensor>
+_fused_gru_cell_cpu(
+    const Tensor& input_gates, const Tensor& hidden_gates,
+    const Tensor& hx) {
+   auto workspace = at::empty({hx.size(0), hx.size(1) * 5}, hx.options());
+   auto hy = at::empty(hx.sizes(), hx.options());
+   fused_gru_cell_stub(kCPU, hy, workspace, input_gates, hidden_gates, hx);
+   return std::make_tuple(hy, workspace);
+}
+
+std::tuple<Tensor, Tensor, Tensor>
+_fused_gru_cell_backward_cpu(
+    const Tensor& grad_hy, const Tensor& workspace) {
+  int64_t batch_size = grad_hy.size(0);
+  int64_t hidden_size = grad_hy.size(1);
+  auto grad_input_gates = at::empty({batch_size, hidden_size * 3}, grad_hy.options());
+  auto grad_hidden_gates = at::empty({batch_size, hidden_size * 3}, grad_hy.options());
+  auto grad_hx = at::empty(grad_hy.sizes(), grad_hy.options());
+  fused_gru_cell_backward_stub(kCPU, grad_input_gates, grad_hidden_gates, grad_hx, grad_hy, workspace);
+  return std::make_tuple(grad_input_gates, grad_hidden_gates, grad_hx);
+}
+
+DEFINE_DISPATCH(fused_lstm_cell_stub);
+DEFINE_DISPATCH(fused_lstm_cell_backward_stub);
+DEFINE_DISPATCH(fused_gru_cell_stub);
+DEFINE_DISPATCH(fused_gru_cell_backward_stub);
+
+static inline std::tuple<Tensor, Tensor>
+_differentiable_lstm_cell_backward_impl(
+    const Tensor& grad_hy, const Tensor& grad_cy,
+    const Tensor& input_gates, const Tensor& hidden_gates,
+    const Tensor& cx, const Tensor& cy) {
   Tensor gates = input_gates + hidden_gates;
-  if (input_bias.defined()) {
-    gates = gates + input_bias;
-  }
-  if (hidden_bias.defined()) {
-    gates = gates + hidden_bias;
-  }
   auto chunked_gates = gates.unsafe_chunk(4, 1);
   Tensor i = chunked_gates[0].sigmoid();
   Tensor f = chunked_gates[1].sigmoid();
@@ -1485,7 +1531,6 @@ _thnn_differentiable_lstm_cell_backward(
 
   Tensor gcx = cy.tanh();
   Tensor gog;
-  TORCH_INTERNAL_ASSERT((grad_hy.defined() || grad_cy.defined()),"either gradient with respect to hy or cy should be defined");
   if (grad_hy.defined()) {
     gog = grad_hy * gcx;
     gog = at::sigmoid_backward(gog, o);
@@ -1494,7 +1539,7 @@ _thnn_differentiable_lstm_cell_backward(
       gcx = gcx + grad_cy;
     }
   } else if (grad_cy.defined()) {
-    gog = at::zeros_like(cx, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    gog = at::zeros_like(cx, cx.options(), at::MemoryFormat::Contiguous);
     gcx = grad_cy;
   }
   Tensor gig = gcx * c;
@@ -1505,30 +1550,34 @@ _thnn_differentiable_lstm_cell_backward(
   gfg = at::sigmoid_backward(gfg, f);
   gcg = at::tanh_backward(gcg, c);
   Tensor grad_gates = at::cat({gig, gfg, gcg, gog}, 1);
-  Tensor grad_bias = input_bias.defined() ? grad_gates.sum(0, /*keepdim=*/false) : at::Tensor{};
-  return std::make_tuple(grad_gates, grad_gates, std::move(gcx), grad_bias, grad_bias);
+  return std::make_tuple(std::move(grad_gates), std::move(gcx));
 }
 
-std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_differentiable_gru_cell_backward(
+std::tuple<Tensor, Tensor, Tensor>
+_differentiable_fused_lstm_cell_backward(
+    const Tensor& grad_hy, const Tensor& grad_cy,
+    const Tensor& input_gates, const Tensor& hidden_gates,
+    const Tensor& cx, const Tensor& cy) {
+  if (!grad_hy.defined() && !grad_cy.defined()) {
+    return std::tuple<Tensor, Tensor, Tensor>();
+  }
+  auto results = _differentiable_lstm_cell_backward_impl(
+      grad_hy, grad_cy, input_gates, hidden_gates, cx, cy);
+  auto grad_gates = std::get<0>(results);
+  auto gcx = std::get<1>(results);
+  return std::make_tuple(grad_gates, grad_gates, std::move(gcx));
+}
+
+static inline std::tuple<Tensor, Tensor, Tensor>
+_differentiable_gru_cell_backward_impl(
     const Tensor& grad_hy,
-    const Tensor& input_gates,
-    const Tensor& hidden_gates,
-    const Tensor& hx,
-    const Tensor& input_bias,
-    const Tensor& hidden_bias){
-  Tensor in_g = input_gates;
-  Tensor h_g = hidden_gates;
-  if (input_bias.defined()){
-    in_g = in_g+input_bias;
-  }
-  if (hidden_bias.defined()){
-    h_g = h_g + hidden_bias;
-  }
-  auto chunked_input_gates = in_g.unsafe_chunk(3, 1);
+    const Tensor& input_gates, const Tensor& hidden_gates,
+    const Tensor& hx) {
+  auto chunked_input_gates = input_gates.unsafe_chunk(3, 1);
   Tensor ir = chunked_input_gates[0];
   Tensor ii = chunked_input_gates[1];
   Tensor in = chunked_input_gates[2];
-  auto chunked_hidden_gates = h_g.unsafe_chunk(3, 1);
+  auto chunked_hidden_gates = hidden_gates.unsafe_chunk(3, 1);
   Tensor hr = chunked_hidden_gates[0];
   Tensor hi = chunked_hidden_gates[1];
   Tensor hn = chunked_hidden_gates[2];
@@ -1542,10 +1591,54 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_differentiable_gru_cell
   Tensor grg = at::sigmoid_backward(gin * hn, rg);
   Tensor grad_input_gates = at::cat({grg,gig,gin}, 1);
   Tensor grad_hidden_gates = at::cat({grg,gig,ghn}, 1);
-  Tensor grad_input_bias = input_bias.defined() ? grad_input_gates.sum(0, /*keepdim=*/false) : at::Tensor{};
-  Tensor grad_hidden_bias = input_bias.defined() ? grad_hidden_gates.sum(0, /*keepdim=*/false) : at::Tensor{};
   return std::make_tuple(std::move(grad_input_gates), std::move(grad_hidden_gates),
-                         std::move(grad_hx), std::move(grad_input_bias), std::move(grad_hidden_bias));
+                         std::move(grad_hx));
+}
+
+std::tuple<Tensor, Tensor, Tensor>
+_differentiable_fused_gru_cell_backward(
+    const Tensor& grad_hy,
+    const Tensor& input_gates, const Tensor& hidden_gates,
+    const Tensor& hx) {
+  return _differentiable_gru_cell_backward_impl(
+      grad_hy, input_gates, hidden_gates, hx);
+}
+
+std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor>
+_thnn_differentiable_lstm_cell_backward(
+    const Tensor& grad_hy, const Tensor& grad_cy,
+    const Tensor& input_gates, const Tensor& hidden_gates,
+    const Tensor& input_bias, const Tensor& hidden_bias,
+    const Tensor& cx, const Tensor& cy) {
+  if (!grad_hy.defined() && !grad_cy.defined()) {
+    return std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor>();
+  }
+  auto igates = input_bias.defined() ? input_gates + input_bias : input_gates;
+  auto hgates = hidden_bias.defined() ? hidden_gates + hidden_bias : hidden_gates;
+  auto results = _differentiable_lstm_cell_backward_impl(
+      grad_hy, grad_cy, igates, hgates, cx, cy);
+  auto grad_gates = std::get<0>(results);
+  auto gcx = std::get<1>(results);
+  auto grad_bias = input_bias.defined() ? grad_gates.sum(0, /*keepdim=*/false) : at::Tensor{};
+  return std::make_tuple(grad_gates, grad_gates, std::move(gcx), grad_bias, grad_bias);
+}
+
+std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor>
+_thnn_differentiable_gru_cell_backward(
+    const Tensor& grad_hy,
+    const Tensor& input_gates, const Tensor& hidden_gates,
+    const Tensor& hx,
+    const Tensor& input_bias, const Tensor& hidden_bias){
+  auto igates = input_bias.defined() ? input_gates + input_bias : input_gates;
+  auto hgates = hidden_bias.defined() ? hidden_gates + hidden_bias : hidden_gates;
+  auto results = _differentiable_gru_cell_backward_impl(grad_hy, igates, hgates, hx);
+  auto grad_igates = std::get<0>(results);
+  auto grad_hgates = std::get<1>(results);
+  auto grad_hx = std::get<2>(results);
+  auto grad_ibias = input_bias.defined() ? grad_igates.sum(0, /*keepdim=*/false) : at::Tensor{};
+  auto grad_hbias = hidden_bias.defined() ? grad_hgates.sum(0, /*keepdim=*/false) : at::Tensor{};
+  return std::make_tuple(std::move(grad_igates), std::move(grad_hgates),
+      std::move(grad_hx), std::move(grad_ibias), std::move(grad_hbias));
 }
 
 Tensor gru_cell(
