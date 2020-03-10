@@ -47,9 +47,8 @@ void testGPU_FusionSimpleArith() {
 
   Float* f1 = new Float(1.f);
   Float* f2 = new Float{2.f};
-  Float* f3 = new Float();
 
-  BinaryOp* an_add = new BinaryOp(BinaryOpType::Add, f3, f1, f2);
+  auto f3 = add(f1, f2);
   std::cout << "Explicit add construction of 1.f + 2.f: " << fusion
             << std::endl;
 }
@@ -69,7 +68,7 @@ void testGPU_FusionContainer() {
     FusionGuard fg2(&fusion2);
     Float* f3 = new Float(1.f);
     Float* f4 = new Float(2.f);
-    auto f5 = binary_op(BinaryOpType::Add, f3, f4);
+    auto f5 = add(f3, f4);
     TORCH_CHECK(FusionGuard::getCurFusion() == &fusion2);
   }
 
@@ -82,7 +81,7 @@ void testGPU_FusionSimpleTypePromote() {
 
   Float* f4 = new Float{4.f};
   Int* i1 = new Int{3};
-  auto f5 = binary_op(BinaryOpType::Add, f4, i1);
+  auto f5 = add(f4, i1);
 
   TORCH_CHECK(f5->getDataType() == DataType::Float);
 }
@@ -93,7 +92,7 @@ void testGPU_FusionCastOp() {
 
   Float* f3_test = new Float{3.f};
   Int* i3 = new Int{3};
-  auto f3 = cast_op(DataType::Float, i3);
+  auto f3 = castOp(DataType::Float, i3);
 
   TORCH_CHECK(f3->getDataType().value() == f3_test->getDataType().value());
 }
@@ -117,7 +116,7 @@ void testGPU_FusionMutator() {
 
   Float* f4 = new Float{1.f};
   Int* i1 = new Int{3};
-  Val* f5 = binary_op(BinaryOpType::Add, f4, i1);
+  Val* f5 = binaryOp(BinaryOpType::Add, f4, i1);
   
   ZeroMutator mutator;
   mutator.mutate(&fusion);
@@ -134,8 +133,8 @@ void testGPU_FusionRegister() {
   FusionGuard fg(&fusion);
   Float* v1 = new Float{1.f};
   Float* v2 = new Float{2.f};
-  Val* v3 = binary_op(BinaryOpType::Add, v1, v2);
-  Val* v4 = binary_op(BinaryOpType::Add, v1, v2);
+  Val* v3 = binaryOp(BinaryOpType::Add, v1, v2);
+  Val* v4 = binaryOp(BinaryOpType::Add, v1, v2);
   TORCH_CHECK(v1->name() + 1 == v2->name());
   TORCH_CHECK(v2->name() + 1 == v3->name());
   TORCH_CHECK(v3->name() + 1 == v4->name());
