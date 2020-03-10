@@ -814,5 +814,23 @@ class ModuleAPITest(QuantizationTestCase):
         # JIT Testing
         self.checkScriptable(pool_under_test, list(zip([X], [qX_expect])))
 
+    def test_batch_norm(self):
+        """Tests the correctness of the batchnorm2d module.
+        The correctness is defined against the functional implementation.
+        """
+        x = torch.randn((2, 4, 6, 8), dtype=torch.float)
+        float_mod = torch.nn.BatchNorm2d(4)
+        float_mod.training = False
+
+        y_ref = float_mod(x)
+        quant_ref = torch.quantize_per_tensor(y_ref, 1.0, 0, dtype=torch.quint8)
+
+        quant_mod = nnq.BatchNorm2d(4)
+        qx = torch.quantize_per_tensor(x, 1.0, 0, dtype=torch.quint8)
+        qy = quant_mod(qx)
+
+        self.assertEqual(quant_ref.int_repr().numpy(), qy.int_repr().numpy(),
+                         message="BatchNorm2d module API failed")
+
 if __name__ == '__main__':
     run_tests()

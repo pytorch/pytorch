@@ -7,7 +7,7 @@ from .. import functional as F
 from .. import init
 from .module import Module
 from .utils import _single, _pair, _triple, _repeat_tuple
-from ..._jit_internal import List
+from ..._jit_internal import List, Optional
 
 
 class _ConvNd(Module):
@@ -15,6 +15,7 @@ class _ConvNd(Module):
     __constants__ = ['stride', 'padding', 'dilation', 'groups',
                      'padding_mode', 'output_padding', 'in_channels',
                      'out_channels', 'kernel_size']
+    __annotations__ = {'bias': Optional[torch.Tensor]}
 
     def __init__(self, in_channels, out_channels, kernel_size, stride,
                  padding, dilation, transposed, output_padding,

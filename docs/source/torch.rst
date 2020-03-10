@@ -6,6 +6,7 @@ Tensors
 ----------------------------------
 .. autofunction:: is_tensor
 .. autofunction:: is_storage
+.. autofunction:: is_complex
 .. autofunction:: is_floating_point
 .. autofunction:: set_default_dtype
 .. autofunction:: get_default_dtype
@@ -181,6 +182,9 @@ Examples::
   >>> y.requires_grad
   False
 
+.. autofunction:: no_grad
+.. autofunction:: enable_grad
+.. autofunction:: set_grad_enabled
 
 Math operations
 ----------------------------------

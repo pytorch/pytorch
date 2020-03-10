@@ -1,5 +1,5 @@
-#include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/irparser.h>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/testing/file_check.h>
@@ -67,7 +67,7 @@ graph():
   %y : Tensor = aten::tensor(%3, %10, %7, %15)
   %9 : int[] = prim::ListConstruct(%1, %2)
   %z : Tensor = aten::tensor(%9, %10, %7, %15)
-  %f = prim::Print(%x, %y, %z)
+  prim::Print(%x, %y, %z)
   return (%1)
   )IR",
         &*graph);

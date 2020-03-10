@@ -134,7 +134,6 @@ class _LRScheduler(object):
 
             def __exit__(self, type, value, traceback):
                 self.o._get_lr_called_within_step = False
-                return self
 
         with _enable_get_lr_call(self):
             if epoch is None:
@@ -219,6 +218,9 @@ class LambdaLR(_LRScheduler):
         warnings.warn(SAVE_STATE_WARNING, UserWarning)
         lr_lambdas = state_dict.pop('lr_lambdas')
         self.__dict__.update(state_dict)
+        # Restore state_dict keys in order to prevent side effects
+        # https://github.com/pytorch/pytorch/issues/32756
+        state_dict['lr_lambdas'] = lr_lambdas
 
         for idx, fn in enumerate(lr_lambdas):
             if fn is not None:
@@ -245,9 +247,8 @@ class MultiplicativeLR(_LRScheduler):
         last_epoch (int): The index of last epoch. Default: -1.
 
     Example:
-        >>> # Assuming optimizer has two groups.
         >>> lmbda = lambda epoch: 0.95
-        >>> scheduler = LambdaLR(optimizer, lr_lambda=lmbda)
+        >>> scheduler = MultiplicativeLR(optimizer, lr_lambda=lmbda)
         >>> for epoch in range(100):
         >>>     train(...)
         >>>     validate(...)
@@ -293,6 +294,9 @@ class MultiplicativeLR(_LRScheduler):
         """
         lr_lambdas = state_dict.pop('lr_lambdas')
         self.__dict__.update(state_dict)
+        # Restore state_dict keys in order to prevent side effects
+        # https://github.com/pytorch/pytorch/issues/32756
+        state_dict['lr_lambdas'] = lr_lambdas
 
         for idx, fn in enumerate(lr_lambdas):
             if fn is not None:
@@ -307,7 +311,7 @@ class MultiplicativeLR(_LRScheduler):
             return [group['lr'] * lmbda(self.last_epoch)
                     for lmbda, group in zip(self.lr_lambdas, self.optimizer.param_groups)]
         else:
-            return [base_lr for base_lr in self.base_lrs]
+            return list(self.base_lrs)
 
 
 class StepLR(_LRScheduler):

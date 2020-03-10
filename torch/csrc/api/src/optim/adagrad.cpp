@@ -103,23 +103,19 @@ void Adagrad::step() {
 }
 
 void Adagrad::add_parameters(const std::vector<Tensor>& parameters) {
-  param_groups_.emplace_back(OptimizerParamGroup(parameters, defaults_->clone()));
+  return _add_parameters_new_design(parameters);
 }
 
 const std::vector<Tensor>& Adagrad::parameters() const noexcept {
-  return param_groups_.at(0).params();
+  return _parameters_new_design();
 }
 
 std::vector<Tensor>& Adagrad::parameters() noexcept {
-  return param_groups_.at(0).params();
+  return _parameters_new_design();
 }
 
 size_t Adagrad::size() const noexcept {
-  size_t count = 0;
-  for (const auto& group : param_groups_) {
-    count += group.params().size();
-  }
-  return count;
+  return _size_new_design();
 }
 
 void Adagrad::save(serialize::OutputArchive& archive) const {
