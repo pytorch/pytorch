@@ -63,8 +63,6 @@ public:
       
     }
 
-    std::cout << fusion_ << std::endl;
-    
     for (auto jit_input : block->inputs()) {
       TensorView* inp = static_cast<TensorView*>(value_maps_[jit_input->unique()]);
       for (auto jit_output : block->outputs()) {
@@ -76,7 +74,6 @@ public:
       }
     }
 
-    std::cout << fusion_ << std::endl;
   }
 
 protected:
