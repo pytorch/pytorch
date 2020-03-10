@@ -224,14 +224,17 @@ std::tuple<Tensor,Tensor> mkldnn_convolution_backward_weights(
       groups,
       bias_defined);
 
+  // Extract device info from weight and data type info from input.
+  // since for current BF16 design, input is BF16 tensor while weight is FP32 tensor.  
+  auto options = weight.options().dtype(input.scalar_type());
   if (weight.is_mkldnn()) {
     return std::tuple<Tensor, Tensor>{
-        new_with_itensor_mkldnn(std::move(mkldnn_grad_weight), weight.options()),
-        new_with_itensor_mkldnn(std::move(mkldnn_grad_bias), weight.options())};
+        new_with_itensor_mkldnn(std::move(mkldnn_grad_weight), options),
+        new_with_itensor_mkldnn(std::move(mkldnn_grad_bias), options)};
   } else {
     return std::tuple<Tensor, Tensor>{
-        mkldnn_to_dense(new_with_itensor_mkldnn(std::move(mkldnn_grad_weight), weight.options()), weight.scalar_type()),
-        mkldnn_to_dense(new_with_itensor_mkldnn(std::move(mkldnn_grad_bias), weight.options()), weight.scalar_type())};
+        mkldnn_to_dense(new_with_itensor_mkldnn(std::move(mkldnn_grad_weight), options), weight.scalar_type()),
+        mkldnn_to_dense(new_with_itensor_mkldnn(std::move(mkldnn_grad_bias), options), weight.scalar_type())};
   }
 }
 

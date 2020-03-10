@@ -108,14 +108,17 @@ std::tuple<Tensor, Tensor> mkldnn_linear_backward_weights(
     ideep::inner_product_backward_weights::compute(x, grady, gradw);
   }
 
+  // Extract device info from weight and data type info from input.
+  // since for current BF16 design, input is BF16 tensor while weight is FP32 tensor.  
+  auto options = weight.options().dtype(input.scalar_type());
   if (weight.is_mkldnn()) {
     return std::tuple<Tensor, Tensor>{
-      new_with_itensor_mkldnn(std::move(gradw), weight.options()),
-      new_with_itensor_mkldnn(std::move(gradb), weight.options())};
+      new_with_itensor_mkldnn(std::move(gradw), options),
+      new_with_itensor_mkldnn(std::move(gradb), options)};
   } else {
     return std::tuple<Tensor, Tensor>{
-      mkldnn_to_dense(new_with_itensor_mkldnn(std::move(gradw), weight.options()), weight.scalar_type()),
-      mkldnn_to_dense(new_with_itensor_mkldnn(std::move(gradb), weight.options()), weight.scalar_type())};
+      mkldnn_to_dense(new_with_itensor_mkldnn(std::move(gradw), options), weight.scalar_type()),
+      mkldnn_to_dense(new_with_itensor_mkldnn(std::move(gradb), options), weight.scalar_type())};
   }
 }
 
