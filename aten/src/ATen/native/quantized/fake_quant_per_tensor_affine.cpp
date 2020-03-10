@@ -10,8 +10,8 @@ namespace at {
 namespace native {
 
 // Use REGISTER_DISPATCH to run CPU and CUDA backend.
-DEFINE_DISPATCH(fake_quant_slice_stub);
-DEFINE_DISPATCH(fake_quant_grad_slice_stub);
+DEFINE_DISPATCH(fake_quant_tensor_stub);
+DEFINE_DISPATCH(fake_quant_grad_tensor_stub);
 
 /* Fake-quantizes the 'inputs' tensor.
 Args:
@@ -41,7 +41,7 @@ Tensor fake_quantize_per_tensor_affine(
       "`zero_point` must be between `quant_min` and `quant_max`.");
 
   auto Y = at::empty_like(self, self.options(), MemoryFormat::Preserve);
-  fake_quant_slice_stub(
+  fake_quant_tensor_stub(
       self.device().type(), Y, self, scale, zero_point, quant_min, quant_max);
   return Y;
 }
@@ -89,7 +89,7 @@ Tensor fake_quantize_per_tensor_affine_backward(
   }
 
   auto dX = at::empty_like(X, X.options(), MemoryFormat::Preserve);
-  fake_quant_grad_slice_stub(
+  fake_quant_grad_tensor_stub(
       X.device().type(), dX, X, dY, scale, zero_point, quant_min, quant_max);
   return dX;
 }

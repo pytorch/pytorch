@@ -94,17 +94,7 @@ public:
    * @return A RAII object that manages the lifetime of the registration.
    *         Once that object is destructed, the kernel will be deregistered.
    */
-  RegistrationHandleRAII registerKernel(const OperatorHandle& op, DispatchKey dispatch_key, KernelFunction kernel);
-
-  /**
-   * Register a fallback kernel for an operator.
-   * After this, when trying to lookup a kernel for an unknown dispatch key,
-   * it will not fail anymore, but return the fallback kernel instead.
-   *
-   * @return A RAII object that manages the lifetime of the registration.
-   *         Once that object is destructed, the kernel will be deregistered.
-   */
-  RegistrationHandleRAII registerCatchallKernel(const OperatorHandle& op, KernelFunction kernel);
+  RegistrationHandleRAII registerKernel(const OperatorHandle& op, c10::optional<DispatchKey> dispatch_key, KernelFunction kernel);
 
   /**
    * Register a fallback kernel for a backend.

@@ -20,12 +20,12 @@
 ]]
 [[
   name: _th_masked_fill_
-  cpu_bool: True
   cuda_bool: True
-  cpu_bfloat16: True
   cuda_bfloat16: True
   cname: maskedFill
   variants: function
+  backends:
+    - CUDA
   return: self
   options:
     - arguments:
@@ -35,12 +35,12 @@
 ]]
 [[
   name: _th_masked_fill_bool_
-  cpu_bool: True
   cuda_bool: True
-  cpu_bfloat16: True
   cuda_bfloat16: True
   cname: maskedFillBool
   variants: function
+  backends:
+    - CUDA
   return: self
   options:
     - arguments:
@@ -184,19 +184,6 @@
     - THIndexTensor* index
     - THTensor* source
     - bool accumulate
-]]
-[[
-  name: _th_index_add_
-  cname: indexAdd
-  variants: function
-  backends:
-    - CUDA
-  return: argument 0
-  arguments:
-    - THTensor* self
-    - long dim
-    - THIndexTensor* index
-    - THTensor* source
 ]]
 [[
   name: _th_index_fill_
@@ -582,7 +569,8 @@
 [[
   name: _th_cumsum
   cname: cumsum
-  cpu_bool: True
+  backends:
+    - CUDA
   cuda_bool: True
   variants: function
   return: argument 0
@@ -595,7 +583,8 @@
 [[
   name: _th_cumprod
   cname: cumprod
-  cpu_bool: True
+  backends:
+    - CUDA
   cuda_bool: True
   variants: function
   return: argument 0
@@ -619,6 +608,8 @@
   return: argument 0
   variants:
     - function
+  backends:
+    - CUDA
   options:
     - cname: fmod
       arguments:
@@ -638,6 +629,8 @@
   name: _th_fmod_
   return: argument 0
   variants: function
+  backends:
+    - CUDA
   options:
     - cname: fmod
       arguments:
@@ -865,24 +858,6 @@
     - real alpha
 ]]
 [[
-  name: _th_ger
-  cname: addr
-  cpu_bfloat16: True
-  cuda_bfloat16: True
-  variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-      resize: [ [self,0], [vec2,0] ]
-      resize_scalar: True
-    - argument 0
-    - THTensor* self
-    - THTensor* vec2
-    - CONSTANT AS_REAL(0)
-    - CONSTANT AS_REAL(1)
-]]
-[[
   name: _th_mv
   cuda_bfloat16: True
   cname: addmv
@@ -1101,30 +1076,6 @@
     - THTensor* input3
     - bool left
     - bool transpose
-]]
-[[
-  name: _th_random_
-  backends:
-    - CPU
-  return: self
-  variants: function
-  cpu_bool: True
-  options:
-    - cname: random
-      arguments:
-        - THTensor* self
-        - THGenerator* generator
-    - cname: cappedRandom
-      arguments:
-        - THTensor* self
-        - int64_t to
-        - THGenerator* generator
-    - cname: clampedRandom
-      arguments:
-        - THTensor* self
-        - int64_t from
-        - int64_t to
-        - THGenerator* generator
 ]]
 [[
   name: _th_multinomial_alias_setup
