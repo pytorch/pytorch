@@ -798,11 +798,7 @@ void testGPU_FusionCodeGen() {
   //[I0i{4}*I1, I0o, I2i{2}, I2o]
   fusion.addOutput(tv2);
 
-  std::cout << "\nCA0: ------------------------------------------------------------\n";
-  std::cout << fusion;
   tv0->computeAt(tv2, 1);
-  std::cout << "\nCA1: ------------------------------------------------------------\n";
-  std::cout << fusion;
   
   //std::cout<<fusion<<std::endl;
 
@@ -815,56 +811,56 @@ void testGPU_FusionCodeGen() {
 
   std::stringstream ref;
   ref << "__global__ void kernel(Tensor<float> T2){\n";
-  ref << "  float T0[( ( ( 1 * ( ceilDiv(T0.size[0], 4) ) ) * T0.size[2] ) * T0.size[3] )];\n";
-  ref << "  for( size_t i27 = 0; i27 < ( 4 * T0.size[1] ); ++i27 ) {\n";
-  ref << "    for( size_t i29 = 0; i29 < ( ceilDiv(T0.size[0], 4) ); ++i29 ) {\n";
-  ref << "      for( size_t i31 = 0; i31 < T0.size[2]; ++i31 ) {\n";
-  ref << "        for( size_t i33 = 0; i33 < T0.size[3]; ++i33 ) {\n";
-  ref << "          if( ( ( ( i29 * 4 ) + ( i27 / T0.size[1] ) ) < T0.size[0] ) && ( ( i27 % T0.size[1] ) < T0.size[1] ) ) {\n";
-  ref << "            T0[i29 * T0.size[2] * T0.size[3] + i31 * T0.size[3] + i33]\n";
+  ref << "  float T0[( ( ( 1 * ( ceilDiv(T2.size[0], 4) ) ) * T2.size[2] ) * i3 )];\n";
+  ref << "  for( size_t i27 = 0; i27 < ( 4 * T2.size[1] ); ++i27 ) {\n";
+  ref << "    for( size_t i29 = 0; i29 < ( ceilDiv(T2.size[0], 4) ); ++i29 ) {\n";
+  ref << "      for( size_t i31 = 0; i31 < T2.size[2]; ++i31 ) {\n";
+  ref << "        for( size_t i33 = 0; i33 < i3; ++i33 ) {\n";
+  ref << "          if( ( ( ( i29 * 4 ) + ( i27 / T2.size[1] ) ) < T2.size[0] ) && ( ( i27 % T2.size[1] ) < T2.size[1] ) ) {\n";
+  ref << "            T0[i29 * T2.size[2] * i3 + i31 * i3 + i33]\n";
   ref << "              = 0f\n";
   ref << "              + 1f;\n";
   ref << "          }\n";
   ref << "        }\n";
   ref << "      }\n";
   ref << "    }\n";
-  ref << "    float T1[( ( 1 * ( ceilDiv(T0.size[0], 4) ) ) * T0.size[2] )];\n";
-  ref << "    for( size_t i54 = 0; i54 < ( ceilDiv(T0.size[0], 4) ); ++i54 ) {\n";
-  ref << "      for( size_t i56 = 0; i56 < T0.size[2]; ++i56 ) {\n";
-  ref << "        if( ( ( ( i54 * 4 ) + ( i27 / T0.size[1] ) ) < T0.size[0] ) && ( ( i27 % T0.size[1] ) < T0.size[1] ) ) {\n";
-  ref << "          T1[i54 * T0.size[2] + i56]\n";
-  ref << "            = T0[i54 * T0.size[2] + i56]\n";
+  ref << "    float T1[( ( 1 * ( ceilDiv(T2.size[0], 4) ) ) * T2.size[2] )];\n";
+  ref << "    for( size_t i54 = 0; i54 < ( ceilDiv(T2.size[0], 4) ); ++i54 ) {\n";
+  ref << "      for( size_t i56 = 0; i56 < T2.size[2]; ++i56 ) {\n";
+  ref << "        if( ( ( ( i54 * 4 ) + ( i27 / T2.size[1] ) ) < T2.size[0] ) && ( ( i27 % T2.size[1] ) < T2.size[1] ) ) {\n";
+  ref << "          T1[i54 * T2.size[2] + i56]\n";
+  ref << "            = T0[i54 * T2.size[2] + i56]\n";
   ref << "            + 2f;\n";
   ref << "        }\n";
-  ref << "      }\n";
-  ref << "    }\n";
-  ref << "    for( size_t i81 = 0; i81 < ( ceilDiv(T0.size[0], 4) ); ++i81 ) {\n";
+  ref << "      }\n"; 
+  ref << "    }\n"; 
+  ref << "    for( size_t i81 = 0; i81 < ( ceilDiv(T2.size[0], 4) ); ++i81 ) {\n";
   ref << "      for( size_t i83 = 0; i83 < 2; ++i83 ) {\n";
-  ref << "        for( size_t i85 = 0; i85 < ( ceilDiv(T0.size[2], 2) ); ++i85 ) {\n";
-  ref << "          if( ( ( ( i81 * 4 ) + ( i27 / T0.size[1] ) ) < T0.size[0] ) && ( ( i27 % T0.size[1] ) < T0.size[1] ) && ( ( ( i85 * 2 ) + i83 ) < T0.size[2] ) ) {\n";
-  ref << "            T2[( ( i81 * 4 ) + ( i27 / T0.size[1] ) ) * T2.stride[0] + ( i27 % T0.size[1] ) * T2.stride[1] + ( ( i85 * 2 ) + i83 ) * T2.stride[2]]\n";
-  ref << "              = T1[i81 * 2 * ( ceilDiv(T0.size[2], 2) ) + i83 * ( ceilDiv(T0.size[2], 2) ) + i85]\n";
+  ref << "        for( size_t i85 = 0; i85 < ( ceilDiv(T2.size[2], 2) ); ++i85 ) {\n";
+  ref << "          if( ( ( ( i81 * 4 ) + ( i27 / T2.size[1] ) ) < T2.size[0] ) && ( ( i27 % T2.size[1] ) < T2.size[1] ) && ( ( ( i85 * 2 ) + i83 ) < T2.size[2] ) ) {\n";
+  ref << "            T2[( ( i81 * 4 ) + ( i27 / T2.size[1] ) ) * T2.stride[0] + ( i27 % T2.size[1] ) * T2.stride[1] + ( ( i85 * 2 ) + i83 ) * T2.stride[2]]\n";
+  ref << "              = T1[i81 * 2 * ( ceilDiv(T2.size[2], 2) ) + i83 * ( ceilDiv(T2.size[2], 2) ) + i85]\n";
   ref << "              + 3f;\n";
-  ref << "          }\n";
-  ref << "        }\n";
-  ref << "      }\n";
-  ref << "    }\n";
-  ref << "  }\n";
-  ref << "}\n";
+  ref << "          }\n";   
+  ref << "        }\n"; 
+  ref << "      }\n"; 
+  ref << "    }\n"; 
+  ref << "  }\n"; 
+  ref << "}\n"; 
 
-  std::cout << "\nREF: ------------------------------------------------------------\n";
+  std::cout << "\nREFERENCE: ------------------------------------------------------------\n";
   std::cout << ref.str();
 
   //Generate the kernel, it gets sent to what ever stream you give it
-  std::cout << "\nCDG: ------------------------------------------------------------\n";
+  std::cout << "\nCODEGEN:   ------------------------------------------------------------\n";
   std::stringstream cdg;
   CodeWrite cw(cdg);
   cw.traverse(&fusion);
   std::cout << cdg.str();
 
   TORCH_CHECK(ref.str().size() == cdg.str().size());
-  /*** Start Debug code ****
-  std::cout << "SIZE: " << ref.str().size() << " " << cdg.str().size() << "\n";
+  /**** Start Debug code ****/
+  //std::cout << "SIZE: " << ref.str().size() << " " << cdg.str().size() << "\n";
 
   for(int i = 0; i < ref.str().size(); i++) {
 	if(ref.str()[i] != cdg.str()[i]) {
@@ -876,12 +872,11 @@ void testGPU_FusionCodeGen() {
   if(mismatch != 0) {
 	std::cout << "MISMATCH! " << mismatch << std::endl;
   }
-  &*** End   Debug code ****/
+  /**** End   Debug code ****/
 
   // TODO: enable when non-deterministic Tensor size usage is fixed.
-  //TORCH_CHECK(ref.str().compare(cdg.str()) == 0);
-
- }
+  TORCH_CHECK(ref.str().compare(cdg.str()) == 0);
+}
 
 void testGPU_FusionCodeGen2() {
   Fusion fusion;
@@ -910,14 +905,8 @@ void testGPU_FusionCodeGen2() {
   //I0o, I0i{4}, I1, I2]
 
 
-  std::cout << "\nCA0: ------------------------------------------------------------\n";
-  std::cout << fusion;
   tv0->computeAt(tv3, 1);
-  std::cout << "\nCA1: ------------------------------------------------------------\n";
-  std::cout << fusion;
   tv1->computeAt(tv3, 1);
-  std::cout << "\nCA2: ------------------------------------------------------------\n";
-  std::cout << fusion;
   
   tv3->domain()->axis(0)->parallelize(ParallelType::BIDx);
   tv2->domain()->axis(-1)->parallelize(ParallelType::TIDx);
@@ -932,40 +921,41 @@ void testGPU_FusionCodeGen2() {
   
   std::stringstream ref;
   ref << "__global__ void kernel(Tensor<float> T0, Tensor<float> T1, Tensor<float> T3){\n";
-  ref << "  float T2[( ( ( 1 * 4 ) * T0.size[1] ) * T0.size[2] )];\n";
+  ref << "  float T2[( ( ( 1 * 4 ) * T1.size[1] ) * T1.size[2] )];\n";
   ref << "  for( size_t i15 = 0; i15 < 4; ++i15 ) {\n";
-  ref << "    for( size_t i17 = 0; i17 < T0.size[1]; ++i17 ) {\n";
-  ref << "      if( ( ( ( blockIdx.x * 4 ) + i15 ) < T0.size[0] ) ) {\n";
-  ref << "        T2[i15 * T0.size[1] + i17]\n";
+  ref << "    for( size_t i17 = 0; i17 < T1.size[1]; ++i17 ) {\n";
+  ref << "      if( ( ( ( blockIdx.x * 4 ) + i15 ) < T1.size[0] ) ) {\n";
+  ref << "        T2[i15 * T1.size[1] + i17]\n";
   ref << "          = T1[( ( blockIdx.x * 4 ) + i15 ) * T1.stride[0] + i17 * T1.stride[1] + threadIdx.x * T1.stride[2]]\n";
   ref << "          + 2f;\n";
   ref << "      }\n";
   ref << "    }\n";
   ref << "  }\n";
   ref << "  for( size_t i35 = 0; i35 < 4; ++i35 ) {\n";
-  ref << "    for( size_t i37 = 0; i37 < T0.size[1]; ++i37 ) {\n";
-  ref << "      if( ( ( ( blockIdx.x * 4 ) + i35 ) < T0.size[0] ) ) {\n";
+  ref << "    for( size_t i37 = 0; i37 < T1.size[1]; ++i37 ) {\n";
+  ref << "      if( ( ( ( blockIdx.x * 4 ) + i35 ) < T1.size[0] ) ) {\n";
   ref << "        T3[( ( blockIdx.x * 4 ) + i35 ) * T3.stride[0] + i37 * T3.stride[1] + threadIdx.x * T3.stride[2]]\n";
   ref << "          = T0[( ( blockIdx.x * 4 ) + i35 ) * T0.stride[0] + i37 * T0.stride[1] + threadIdx.x * T0.stride[2]]\n";
-  ref << "          + T2[i35 * T0.size[1] + i37];\n";
+  ref << "          + T2[i35 * T1.size[1] + i37];\n";
   ref << "      }\n";
-  ref << "    }\n";
-  ref << "  }\n";
-  ref << "}\n";
+  ref << "    }\n"; 
+  ref << "  }\n"; 
+  ref << "}\n"; 
 
-  std::cout << "\nREF: ------------------------------------------------------------\n";
+
+  std::cout << "\nREFERENCE: ------------------------------------------------------------\n";
   std::cout << ref.str();
 
   //Generate the kernel, it gets sent to what ever stream you give it
-  std::cout << "\nCDG: ------------------------------------------------------------\n";
+  std::cout << "\nCODEGEN:   ------------------------------------------------------------\n";
   std::stringstream cdg;
   CodeWrite cw(cdg);
   cw.traverse(&fusion);
   std::cout << cdg.str();
 
   TORCH_CHECK(ref.str().size() == cdg.str().size());
-  /*** Start Debug code ****
-  std::cout << "SIZE: " << ref.str().size() << " " << cdg.str().size() << "\n";
+  /**** Start Debug code ****/
+  //std::cout << "SIZE: " << ref.str().size() << " " << cdg.str().size() << "\n";
   
   for(int i = 0; i < ref.str().size(); i++) {
 	if(ref.str()[i] != cdg.str()[i]) {
@@ -977,11 +967,10 @@ void testGPU_FusionCodeGen2() {
   if(mismatch != 0) {
 	std::cout << "MISMATCH! " << mismatch << std::endl;
   }
-  **** End   Debug code ****/
+  /**** End   Debug code ****/
   
-  // TODO: enable when non-deterministic Tensor size usage is fixed.
-  //TORCH_CHECK(ref.str() == cdg.str()); 
- }
+  TORCH_CHECK(ref.str() == cdg.str()); 
+}
 
 
 void testGPU_FusionSimplePWise() {
