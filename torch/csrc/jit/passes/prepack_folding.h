@@ -7,7 +7,8 @@ namespace jit {
 
 using PrePackingOpsFilterFn = std::function<bool(Node*)>;
 
-void FoldPrePackingOps(script::Module& m, PrePackingOpsFilterFn is_foldable_op);
+void FoldPrePackingOps(script::Module& m,
+    const PrePackingOpsFilterFn& is_foldable_op);
 
 } // namespace jit
 } // namespace torch

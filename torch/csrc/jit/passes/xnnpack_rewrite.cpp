@@ -18,15 +18,6 @@ namespace jit {
 #ifdef USE_XNNPACK
 
 namespace {
-std::unordered_set<std::string>* getFoldablePackingOps() {
-  static std::unordered_set<std::string> foldable_packing_ops(
-      {
-      "xnnpack::linear_prepack",
-      "xnnpack::conv2d_prepack"
-      }
-      );
-  return &foldable_packing_ops;
-}
 
 void insertXNNPACKLinearOp(std::shared_ptr<Graph>& graph) {
   std::string linear_before_inline = R"(
@@ -109,10 +100,11 @@ void insertXNNPACKOps(script::Module& module) {
 }
 
 void FoldXNNPACKPrePackingOps(script::Module& m) {
-  const auto& foldable_prepacking_ops = *(getFoldablePackingOps());
   PrePackingOpsFilterFn filter_fn =
-    [&foldable_prepacking_ops](const Node* n) -> bool {
-      return (foldable_prepacking_ops.count(n->kind().toQualString()) != 0);
+    [](const Node* n) -> bool {
+      return ((n->kind() == Symbol::fromQualString("xnnpack::linear_prepack")) ||
+          n->kind() == Symbol::fromQualString("xnnpack::conv2d_prepack"));
+
     };
   FoldPrePackingOps(m, filter_fn);
 }
