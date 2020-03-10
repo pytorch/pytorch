@@ -32,7 +32,7 @@ inline bool getCatGrid(ptrdiff_t nTensors, dim3& grid) {
   //X dim of grid for cat array cooperates on a single tensor in the cat.
   //Given half of the GPU, full utilization will always occur.
   grid = dim3( 2LL * numSM, (long long) nTensors );
-             
+
   return true;
 }
 
@@ -46,6 +46,10 @@ struct CatArrIndexToOffset {
       const IndexType dimSize,
       const unsigned int concatDim,
       IndexType linearIndex) {
+    // linearIndex is not really linear index, but instead the offset in
+    // input tensor. If the input tensor is contiguous, then this offset
+    // is the linear index, but if the input tensor is channels last, then
+    // further care is the linear index of the permuted contiguous tensor
     IndexType offset = 0;
 
 #pragma unroll
@@ -105,7 +109,7 @@ __global__ void CatArrayBatchedCopy(
     IndexType nElements = inputs[blockIdx.y].nElements;
 
     if(tid >= nElements) return;
-    
+
     T* data = inputs[blockIdx.y].input;
     IndexType offset = inputs[blockIdx.y].offset;
     IndexType dimSize = inputs[blockIdx.y].dimSize;
@@ -145,7 +149,7 @@ void check_shape_except_dim(const Tensor &first, const Tensor &second,
 
 template <typename scalar_t>
 void parallel_cat(Tensor &out, const TensorList &inputs, int64_t dimension,
-                  int nDims) {
+                  int nDims, c10::MemoryFormat memory_format) {
   // First, let's set up our kernel parameters. We start with a raw pointer to
   // the storage for the output Tensor.
   scalar_t *data = out.data_ptr<scalar_t>();
@@ -161,9 +165,22 @@ void parallel_cat(Tensor &out, const TensorList &inputs, int64_t dimension,
   OutputTensorSizeStride<unsigned int, CAT_ARRAY_MAX_INPUT_DIMS> param;
 
   // Next, let's initialize the size, stride arrays for the output Tensor.
-  for (int i = 0; i < nDims; ++i) {
-    param.outputSize[i] = at::native::size(out, i);
-    param.outputStride[i] = out.stride(i);
+  if (memory_format == c10::MemoryFormat::Contiguous) {
+    for (int i = 0; i < nDims; ++i) {
+      param.outputSize[i] = at::native::size(out, i);
+      param.outputStride[i] = out.stride(i);
+    }
+  } else {
+    // permute the semantics of dims from NCHW to NHWC so that the input
+    // tensor is now contiguous
+    param.outputSize[0] = at::native::size(out, 0);
+    param.outputStride[0] = out.stride(0);
+    for (int i = 1; i < nDims - 1; ++i) {
+      param.outputSize[i] = at::native::size(out, i + 1);
+      param.outputStride[i] = out.stride(i + 1);
+    }
+    param.outputSize[nDims - 1] = at::native::size(out, 1);
+    param.outputStride[nDims - 1] = out.stride(1);
   }
 
   at::cuda::CUDAStream stream = at::cuda::getCurrentCUDAStream();
@@ -210,6 +227,17 @@ void parallel_cat(Tensor &out, const TensorList &inputs, int64_t dimension,
     getCatGrid(batchCounter, catGrid);
 
 
+    if (memory_format != c10::MemoryFormat::Contiguous) {
+      switch (dimension) {
+      case 0:
+        break;
+      case 1:
+        dimension = nDims - dimension;
+        break;
+      default:
+        dimension--;
+      }
+    }
     // Template Declarations for dim = 1, 2, 3, 4
 #define HANDLE_CASE(DIMS) \
     CatArrayBatchedCopy<scalar_t, unsigned int, DIMS><<<\
@@ -349,8 +377,8 @@ Tensor& cat_out_cuda(Tensor& out, TensorList inputs, int64_t dimension) {
       return t.device() == firstDevice;
     });
   const bool allContiguous = std::all_of(inputs.begin(), inputs.end(),
-    [](const Tensor& t) {
-      return !t.defined() || t.is_contiguous();
+    [=](const Tensor& t) {
+      return !t.defined() || t.is_contiguous(memory_format);
     });
   if (inputs.size() > 1 &&
       !hasSkippedInput &&
@@ -363,7 +391,7 @@ Tensor& cat_out_cuda(Tensor& out, TensorList inputs, int64_t dimension) {
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
         at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
         out.scalar_type(), "cat_cuda", [&]() {
-      parallel_cat<scalar_t>(out, inputs, dimension, nDims);
+      parallel_cat<scalar_t>(out, inputs, dimension, nDims, memory_format);
     });
 
   } else {
