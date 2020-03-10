@@ -2801,8 +2801,10 @@ def _interp_output_size(dim, closed_over_args):
 
 def _interp_output_size(dim, closed_over_args):  # noqa: F811
     input, size, scale_factor, recompute_scale_factor = closed_over_args
-    if (size is None and scale_factor is None) or (size is not None and scale_factor is not None):
+    if size is None and scale_factor is None:
         raise ValueError('either size or scale_factor should be defined')
+    if size is not None and scale_factor is not None:
+        raise ValueError('only one of size or scale_factor should be defined')    
     if scale_factor is not None and isinstance(scale_factor, (list, tuple))\
             and len(scale_factor) != dim:
         raise ValueError('scale_factor shape must match input shape. '
@@ -2813,36 +2815,36 @@ def _interp_output_size(dim, closed_over_args):  # noqa: F811
             return size
         else:
             return [size for i in range(dim)]
+
+    assert scale_factor is not None
+    if isinstance(scale_factor, (list, tuple)):
+        scale_factors = scale_factor
     else:
-        assert scale_factor is not None
-        if isinstance(scale_factor, (list, tuple)):
-            scale_factors = scale_factor
-        else:
-            scale_factors = [scale_factor for _ in range(dim)]
+        scale_factors = [scale_factor for _ in range(dim)]
 
-        if recompute_scale_factor is None:
-            # only warn when the scales have floating values since
-            # the result for ints is the same with/without recompute_scale_factor
+    if recompute_scale_factor is None:
+        # only warn when the scales have floating values since
+        # the result for ints is the same with/without recompute_scale_factor
 
-            is_float_scale_factor = False
-            for scale in scale_factors:
-                is_float_scale_factor = math.floor(scale) == scale
-                if is_float_scale_factor:
-                    break
-
+        is_float_scale_factor = False
+        for scale in scale_factors:
+            is_float_scale_factor = math.floor(scale) == scale
             if is_float_scale_factor:
-                warnings.warn("The default behavior for interpolate/upsample with float scale_factor will change "
-                              "in 1.6.0 to align with other frameworks/libraries, and use scale_factor directly, "
-                              "instead of relying on the computed output size. "
-                              "If you wish to keep the old behavior, please set recompute_scale_factor=True. "
-                              "See the documentation of nn.Upsample for details. ")
+                break
 
-        if not torch.jit.is_scripting():
-            # make scale_factor a tensor in tracing so constant doesn't get baked in
-            if torch._C._get_tracing_state():
-                return [(torch.floor((input.size(i + 2).float() * torch.tensor(scale_factors[i],
-                        dtype=torch.float32)).float())) for i in range(dim)]
-        return [int(math.floor(float(input.size(i + 2)) * scale_factors[i])) for i in range(dim)]
+        if is_float_scale_factor:
+            warnings.warn("The default behavior for interpolate/upsample with float scale_factor will change "
+                          "in 1.6.0 to align with other frameworks/libraries, and use scale_factor directly, "
+                          "instead of relying on the computed output size. "
+                          "If you wish to keep the old behavior, please set recompute_scale_factor=True. "
+                          "See the documentation of nn.Upsample for details. ")
+
+    if not torch.jit.is_scripting():
+        # make scale_factor a tensor in tracing so constant doesn't get baked in
+        if torch._C._get_tracing_state():
+            return [(torch.floor((input.size(i + 2).float() * torch.tensor(scale_factors[i],
+                    dtype=torch.float32)).float())) for i in range(dim)]
+    return [int(math.floor(float(input.size(i + 2)) * scale_factors[i])) for i in range(dim)]
 
 @overload  # noqa: F811
 def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corners=None, recompute_scale_factor=None):
