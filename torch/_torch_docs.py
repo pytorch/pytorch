@@ -258,15 +258,15 @@ add_docstr(torch.addcdiv,
            r"""
 addcdiv(input, tensor1, tensor2, *, value=1, out=None) -> Tensor
 
-Performs the element-wise division of :attr:`tensor1` by :attr:`tensor2`,
-multiply the result by the scalar :attr:`value` and add it to :attr:`input`.
+Performs an element-wise true division of :attr:`tensor1` by :attr:`tensor2`,
+then multiplies the result by the scalar :attr:`value` and adds it
+to :attr:`input`.
 
 .. warning::
     Using integral tensors for both tensor1 and tensor2 is temporarily disabled.
-    In a future PyTorch release addcdiv will perform a 'true' division of
-    tensor1 and tensor2. You can implement your own addcdiv using
-    :func:`torch.floor_divide` or :func:`torch.true_divide` to explicitly
-    control the division behavior.
+    Historically, addcdiv would perform integral division in this case, but
+    in a future PyTorch release it will always perform a true division of
+    tensor1 and tensor2.
 
 .. math::
     \text{out}_i = \text{input}_i + \text{value} \times \frac{\text{tensor1}_i}{\text{tensor2}_i}
@@ -1784,8 +1784,8 @@ add_docstr(torch.div,
            r"""
 .. function:: div(input, other, out=None) -> Tensor
 
-Divides each element of the input ``input`` with the scalar ``other`` and
-returns a new resulting tensor.
+Divides each element of ``input'' by the scalar ``other'' and returns the
+result.
 
 .. math::
     \text{{out}}_i = \frac{{\text{{input}}_i}}{{\text{{other}}}}
@@ -1794,15 +1794,14 @@ If the :class:`torch.dtype` of ``input`` and ``other`` differ, the
 :class:`torch.dtype` of the result tensor is determined following rules
 described in the type promotion :ref:`documentation <type-promotion-doc>`. If
 ``out`` is specified, the result must be :ref:`castable <type-promotion-doc>`
-to the :class:`torch.dtype` of the specified output tensor. Integral division
-by zero leads to undefined behavior.
+to the :class:`torch.dtype` of the specified output tensor.
 
 .. warning::
-    Using integral tensors for both input and other tensors or as the out tensor
-    is temporarily disabled. In a future PyTorch release div will perform a
-    'true' division of input and other, analogous to Python 3's division
-    operator. Use :func:`torch.floor_divide` or :func:`torch.true_divide` to
-    specify the division behavior you want when working with integral tensors.
+    Division of an integral tensor by an integer scalar is temporarily disabled.
+    In previous PyTorch releases this performed integer division, but in a
+    future PyTorch release it will perform true division, analogous to
+    Python 3's division operator. See :func:`torch.floor_divide` or
+    :func:`torch.true_divide` which can specify the type of division desired.
 
 Args:
     {input}
@@ -1821,8 +1820,15 @@ Example::
 
 .. function:: div(input, other, out=None) -> Tensor
 
-Each element of the tensor ``input`` is divided by each element of the tensor
-``other``. The resulting tensor is returned.
+Performs an element-wise true division of ``input'' by ``other'' and returns
+the (floating point) result.
+
+.. warning::
+    Element-wise division of one integral tensor by another is temporarily
+    disabled. In previous PyTorch releases this performed integer division,
+    but in a future PyTorch release it will perform true division, analogous to
+    Python 3's division operator. See :func:`torch.floor_divide` or
+    :func:`torch.true_divide` which can specify the type of division desired.
 
 .. math::
     \text{{out}}_i = \frac{{\text{{input}}_i}}{{\text{{other}}_i}}
@@ -1833,7 +1839,7 @@ The shapes of ``input`` and ``other`` must be :ref:`broadcastable
 following rules described in the type promotion :ref:`documentation
 <type-promotion-doc>`. If ``out`` is specified, the result must be
 :ref:`castable <type-promotion-doc>` to the :class:`torch.dtype` of the
-specified output tensor. Integral division by zero leads to undefined behavior.
+specified output tensor.
 
 Args:
     input (Tensor): the numerator tensor
@@ -6181,10 +6187,8 @@ add_docstr(torch.true_divide,
            r"""
 true_divide(dividend, divisor) -> Tensor
 
-Performs "true division" that always computes the division
-in floating point. Analogous to division in Python 3 and equivalent to
-:func:`torch.div` except when both inputs have bool or integer scalar types,
-in which case they are cast to the default (floating) scalar type before the division.
+Performs an element-wise true division of ``dividend'' by ``divisor'' and returns
+the (floating point) result.
 
 .. math::
     \text{{out}}_i = \frac{{\text{{dividend}}_i}}{{\text{{divisor}}}}
