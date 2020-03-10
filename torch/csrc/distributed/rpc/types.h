@@ -44,11 +44,11 @@ struct TORCH_API SerializedPyObj final {
   SerializedPyObj(std::string&& payload, std::vector<at::Tensor>&& tensors)
       : payload_(std::move(payload)), tensors_(std::move(tensors)) {}
 
-  std::vector<at::IValue> toIValues() const;
+  std::vector<at::IValue> toIValues() &&;
   static SerializedPyObj fromIValues(std::vector<at::IValue> value);
 
-  const std::string payload_;
-  const std::vector<at::Tensor> tensors_;
+  std::string payload_;
+  std::vector<at::Tensor> tensors_;
 };
 
 } // namespace rpc
