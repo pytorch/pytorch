@@ -75,7 +75,7 @@ void RMSprop::step() {
       if (!p.grad().defined()) {
         continue;
       }
-      auto grad = p.grad().data();
+      auto grad = p.grad();
       TORCH_CHECK(!grad.is_sparse(), "RMSprop does not support sparse gradients");
       auto param_state = state_.find(c10::guts::to_string(p.unsafeGetTensorImpl()));
       auto& options = static_cast<RMSpropOptions&>(group.options());
@@ -84,12 +84,12 @@ void RMSprop::step() {
       if (param_state == state_.end()) {
         auto state = std::make_unique<RMSpropParamState>();
         state->step(0);
-        state->square_avg(torch::zeros_like(p.data(), MemoryFormat::Preserve));
+        state->square_avg(torch::zeros_like(p, MemoryFormat::Preserve));
         if (options.momentum() > 0) {
-          state->momentum_buffer(torch::zeros_like(p.data(), MemoryFormat::Preserve));
+          state->momentum_buffer(torch::zeros_like(p, MemoryFormat::Preserve));
         }
         if (options.centered()) {
-          state->grad_avg(torch::zeros_like(p.data(), MemoryFormat::Preserve));
+          state->grad_avg(torch::zeros_like(p, MemoryFormat::Preserve));
         }
         state_[c10::guts::to_string(p.unsafeGetTensorImpl())] = std::move(state);
       }
@@ -98,10 +98,10 @@ void RMSprop::step() {
       auto& square_avg = state.square_avg();
       auto alpha = options.alpha();
 
-      state.step()+=1;
+      state.step(state.step() + 1);
 
       if (options.weight_decay() != 0) {
-        grad = grad.add(p.data(), options.weight_decay());
+        grad = grad.add(p, options.weight_decay());
       }
 
       square_avg.mul_(alpha).addcmul_(grad, grad, 1 - alpha);
@@ -119,10 +119,10 @@ void RMSprop::step() {
         auto& buf = state.momentum_buffer();
         buf.mul_(options.momentum()).addcdiv_(grad, avg);
         // Need to avoid version tracking for parameter.
-        p.data().add_(buf, -options.lr());
+        p.add_(buf, -options.lr());
       } else {
         // Need to avoid version tracking for parameter.
-        p.data().addcdiv_(grad, avg, -options.lr());
+        p.addcdiv_(grad, avg, -options.lr());
       }
     }
   }

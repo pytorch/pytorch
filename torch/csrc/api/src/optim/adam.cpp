@@ -68,7 +68,7 @@ void Adam::step() {
       if (!p.grad().defined()) {
         continue;
       }
-      auto grad = p.grad().data();
+      auto grad = p.grad();
       TORCH_CHECK(!grad.is_sparse(), "Adam does not support sparse gradients"/*, please consider SparseAdam instead*/);
       auto param_state = state_.find(c10::guts::to_string(p.unsafeGetTensorImpl()));
       auto& options = static_cast<AdamOptions&>(group.options());
@@ -78,12 +78,12 @@ void Adam::step() {
         auto state = std::make_unique<AdamParamState>();
         state->step(0);
         // Exponential moving average of gradient values
-        state->exp_avg(torch::zeros_like(p.data(), MemoryFormat::Preserve));
+        state->exp_avg(torch::zeros_like(p, MemoryFormat::Preserve));
         // Exponential moving average of squared gradient values
-        state->exp_avg_sq(torch::zeros_like(p.data(), MemoryFormat::Preserve));
+        state->exp_avg_sq(torch::zeros_like(p, MemoryFormat::Preserve));
         if(options.amsgrad()) {
           // Maintains max of all exp. moving avg. of sq. grad. values
-          state->max_exp_avg_sq(torch::zeros_like(p.data(), MemoryFormat::Preserve));
+          state->max_exp_avg_sq(torch::zeros_like(p, MemoryFormat::Preserve));
         }
         state_[c10::guts::to_string(p.unsafeGetTensorImpl())] = std::move(state);
       }
@@ -119,7 +119,7 @@ void Adam::step() {
       }
 
       auto step_size = options.lr() / bias_correction1;
-      p.data().addcdiv_(exp_avg, denom, -step_size);
+      p.addcdiv_(exp_avg, denom, -step_size);
     }
   }
 }

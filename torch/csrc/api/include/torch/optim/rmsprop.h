@@ -23,7 +23,7 @@ namespace torch {
 namespace optim {
 
 struct TORCH_API RMSpropOptions : public OptimizerCloneableOptions<RMSpropOptions> {
-  RMSpropOptions(double lr);
+  RMSpropOptions(double lr = 1e-2);
   TORCH_ARG(double, lr) = 1e-2;
   TORCH_ARG(double, alpha) = 0.99;
   TORCH_ARG(double, eps) = 1e-8;
@@ -31,7 +31,7 @@ struct TORCH_API RMSpropOptions : public OptimizerCloneableOptions<RMSpropOption
   TORCH_ARG(double, momentum) = 0;
   TORCH_ARG(bool, centered) = false;
 
-public:
+ public:
   void serialize(torch::serialize::InputArchive& archive) override;
   void serialize(torch::serialize::OutputArchive& archive) const override;
   TORCH_API friend bool operator==(const RMSpropOptions& lhs, const RMSpropOptions& rhs);
@@ -39,12 +39,12 @@ public:
 };
 
 struct TORCH_API RMSpropParamState : public OptimizerCloneableParamState<RMSpropParamState> {
-  TORCH_ARG(int64_t, step);
+  TORCH_ARG(int64_t, step) = 0;
   TORCH_ARG(torch::Tensor, square_avg);
   TORCH_ARG(torch::Tensor, momentum_buffer) = {};
   TORCH_ARG(torch::Tensor, grad_avg) = {};
 
-public:
+ public:
   void serialize(torch::serialize::InputArchive& archive) override;
   void serialize(torch::serialize::OutputArchive& archive) const override;
   TORCH_API friend bool operator==(const RMSpropParamState& lhs, const RMSpropParamState& rhs);
