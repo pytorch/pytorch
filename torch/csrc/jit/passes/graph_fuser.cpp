@@ -249,14 +249,7 @@ struct CudaGraphFuser {
         // an output of the fusion group.
         aliasDb_->moveBeforeTopologicallyValid(producer->node(), consumer);
 
-    auto group = consumer;
-    if (consumer->kind() != kind_) {
-      group = createSingletonFusionGroup(consumer);
-    }
-
     if (!shouldFuse) {
-      if (group != consumer)
-        return group;
       return at::nullopt;
     }
 
@@ -264,6 +257,11 @@ struct CudaGraphFuser {
          producer->node()->inputs().size() +
          producer->node()->outputs().size()) > subgraph_arg_limit_) {
       return at::nullopt;
+    }
+
+    auto group = consumer;
+    if (consumer->kind() != kind_) {
+      group = createSingletonFusionGroup(consumer);
     }
 
     if (producer->node()->kind() == kind_) {
