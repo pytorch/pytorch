@@ -9,9 +9,9 @@
 namespace torch {
 namespace jit {
 
-namespace {
-
 #ifdef USE_XNNPACK
+
+namespace {
 
 void insertXNNPACKLinearOp(std::shared_ptr<Graph>& graph) {
   std::string linear_before_inline = R"(
