@@ -4,8 +4,8 @@ import torch
 import itertools
 
 from torch.testing._internal.common_utils import TestCase, run_tests, load_tests
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests, onlyOnCPUAndCUDA, dtypes)
+from torch.testing._internal.common_device_type import (instantiate_device_type_tests, onlyOnCPUAndCUDA,
+                                                        dtypes)
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -443,6 +443,29 @@ class TestTypePromotion(TestCase):
         a = torch.tensor([[True, True], [False, True]], device=device)
         self.assertEqual(a.t() == 0, a.t() == False)  # noqa: E712
 
+    @dtypes(torch.bool, torch.short, torch.uint8, torch.int, torch.long)
+    @float_double_default_dtype
+    def test_true_divide(self, device, dtype):
+        dividend = torch.randn(5, device=device).to(dtype)
+        divisor = torch.arange(1, 6, device=device).to(dtype)
+        casting_result = dividend.to(torch.get_default_dtype()) / divisor.to(torch.get_default_dtype())
+        self.assertEqual(casting_result, torch.true_divide(dividend, divisor))
+
+    @dtypes(torch.bool, torch.short, torch.uint8, torch.int, torch.long)
+    def test_true_divide_out(self, device, dtype):
+        dividend = torch.randn(5, device=device).to(dtype)
+        divisor = torch.arange(1, 6, device=device).to(dtype)
+
+        # Tests that requests for an integer quotient fail
+        integral_quotient = torch.empty(5, device=device, dtype=dtype)
+        with self.assertRaises(RuntimeError):
+            torch.true_divide(dividend, divisor, out=integral_quotient)
+
+        # Tests that requests for a floating quotient succeed
+        floating_quotient = torch.empty(5, device=device, dtype=torch.get_default_dtype())
+        casting_result = dividend.to(torch.get_default_dtype()) / divisor.to(torch.get_default_dtype())
+        self.assertEqual(casting_result, torch.true_divide(dividend, divisor, out=floating_quotient))
+
     def _test_sparse_op_input_tensors(self, device, dtype, coalesced, zeros=True):
         t = self._get_test_tensor(device, dtype, not zeros)
         if zeros and dtype != torch.bool:
@@ -587,6 +610,16 @@ class TestTypePromotion(TestCase):
             torch.addcdiv(a, b, b)
         with self.assertRaises(RuntimeError):
             torch.reciprocal(a)
+
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.bool, torch.short, torch.uint8, torch.int, torch.long)
+    @float_double_default_dtype
+    def test_sparse_true_divide(self, device, dtype):
+        dividend = torch.randn(5, device=device).to(dtype)
+        divisor = 2
+        dividend_sparse = dividend.to_sparse()
+        casting_result = dividend.to(torch.get_default_dtype()) / 2
+        self.assertEqual(casting_result, torch.true_divide(dividend_sparse, 2).to_dense())
 
 
 instantiate_device_type_tests(TestTypePromotion, globals())

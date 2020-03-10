@@ -74,8 +74,7 @@ class Adadelta(Optimizer):
                 square_avg.mul_(rho).addcmul_(grad, grad, value=1 - rho)
                 std = square_avg.add(eps).sqrt_()
                 delta = acc_delta.add(eps).sqrt_().div_(std).mul_(grad)
-                # Need to avoid version tracking for parameter.
-                p.data.add_(delta, alpha=-group['lr'])
+                p.add_(delta, alpha=-group['lr'])
                 acc_delta.mul_(rho).addcmul_(delta, delta, value=1 - rho)
 
         return loss
