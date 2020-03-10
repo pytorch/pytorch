@@ -265,6 +265,7 @@ TensorView* TensorView::newForOutput(DataType dtype) const {
     if(this->domain()->axis(i)->isReduction())
       continue;
     domain_copy.push_back(new IterDomain(this->domain()->axis(i)->size()));
+    
   }
   TensorDomain *td = new TensorDomain(domain_copy);
   return new TensorView(td, dtype);
