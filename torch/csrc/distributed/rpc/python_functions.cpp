@@ -99,9 +99,10 @@ py::object toPyObjInternal(RpcCommandBase& rpc, MessageType messageType) {
     case MessageType::PYTHON_RET: {
       // TODO: Try to avoid a copy here.
       auto& resp = static_cast<PythonResp&>(rpc);
-
-      return PythonRpcHandler::getInstance().loadPythonUDFResult(
-          resp.pickledPayload(), resp.tensors());
+      auto& pythonRpcHandler = PythonRpcHandler::getInstance();
+      py::object ret = pythonRpcHandler.deserialize(resp.serializedPyObj());
+      pythonRpcHandler.handleException(ret);
+      return ret;
     }
     default: {
       TORCH_CHECK(false, "Unrecognized response message type ", messageType);
