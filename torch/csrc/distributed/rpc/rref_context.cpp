@@ -419,7 +419,7 @@ void RRefContext::recordThreadLocalPendingUsers() {
 }
 
 void RRefContext::waitForThreadLocalPendingUsers() {
-  for (auto& state: userTable_) {
+  for (auto& state : userTable_) {
     state->future_.wait();
   }
   userTable_.clear();

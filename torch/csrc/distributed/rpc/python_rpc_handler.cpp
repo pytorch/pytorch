@@ -91,8 +91,7 @@ std::shared_ptr<torch::jit::script::CompilationUnit> PythonRpcHandler::
   return jitCompilationUnit_;
 }
 
-py::object PythonRpcHandler::runPythonUdf(
-    py::object&& pythonUdf) {
+py::object PythonRpcHandler::runPythonUdf(py::object&& pythonUdf) {
   PROFILE_GIL_SCOPED_ACQUIRE;
   return pyRunFunction_(std::move(pythonUdf));
 }

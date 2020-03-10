@@ -80,8 +80,8 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
           pybind11::gil_scoped_release rg;
           RRefContext::getInstance().waitForThreadLocalPendingUsers();
         }
-        serializedPyObj = std::make_shared<SerializedPyObj>(
-            pythonRpcHandler.serialize(
+        serializedPyObj =
+            std::make_shared<SerializedPyObj>(pythonRpcHandler.serialize(
                 pythonRpcHandler.runPythonUdf(std::move(pythonUdf))));
       }
       return wrap(

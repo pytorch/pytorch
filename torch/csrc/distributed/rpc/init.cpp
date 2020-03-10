@@ -161,7 +161,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
                   Returns whether or not the current node is the owner of this
                   ``RRef``.
               )")
-          .def (
+          .def(
               "is_confirmed",
               &PyRRef::isConfirmed,
               R"(
