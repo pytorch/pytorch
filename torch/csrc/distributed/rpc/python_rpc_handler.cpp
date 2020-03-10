@@ -92,12 +92,12 @@ std::shared_ptr<torch::jit::script::CompilationUnit> PythonRpcHandler::
 }
 
 std::string PythonRpcHandler::generatePythonUDFResult(
-    const std::string& pickledPayload,
-    const std::vector<torch::Tensor>& requestTensorTable,
+    const SerializedPyObj& serializedPyObj,
     std::vector<torch::Tensor>& responseTensorTable) {
   PROFILE_GIL_SCOPED_ACQUIRE;
-  auto pargs = py::bytes(pickledPayload);
-  py::tuple pres = pySerialize_(pyRunFunction_(pargs, requestTensorTable));
+  auto pargs = py::bytes(serializedPyObj.payload_);
+  py::tuple pres =
+      pySerialize_(pyRunFunction_(pargs, serializedPyObj.tensors_));
   responseTensorTable = pres[1].cast<std::vector<torch::Tensor>>();
   return pres[0].cast<std::string>();
 }
