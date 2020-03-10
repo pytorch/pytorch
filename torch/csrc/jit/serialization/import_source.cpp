@@ -1,11 +1,11 @@
 #include "import_source.h"
 
 #include <ATen/core/qualified_name.h>
-#include <torch/csrc/jit/api/custom_class.h>
-#include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/frontend/parser.h>
 #include <torch/csrc/jit/frontend/resolver.h>
 #include <torch/csrc/jit/frontend/script_type_parser.h>
+#include <torch/csrc/jit/serialization/export.h>
+#include <torch/custom_class.h>
 
 namespace torch {
 namespace jit {

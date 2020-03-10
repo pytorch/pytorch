@@ -28,7 +28,7 @@ struct TORCH_API AccumulateGrad : public Node {
   template <typename T>
   static void accumulateGradAndCallHooks(
       const Variable& variable,
-      at::Tensor variable_grad,
+      at::Tensor& variable_grad,
       at::Tensor new_grad,
       size_t num_expected_refs,
       const T& update_grad) {

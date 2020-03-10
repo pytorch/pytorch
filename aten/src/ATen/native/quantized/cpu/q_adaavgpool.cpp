@@ -40,15 +40,15 @@ template <typename scalar_t>
 static void adaptive_avg_pool2d_single_out_frame(
     scalar_t* input_p,
     scalar_t* output_p,
-    int64_t sizeD,
+    int64_t sizeC,
     int64_t isizeH,
     int64_t isizeW,
     int64_t osizeH,
     int64_t osizeW,
-    int64_t istrideD,
+    int64_t istrideC,
     int64_t istrideH,
     int64_t istrideW) {
-  at::parallel_for(0, sizeD, 0, [&](int64_t start, int64_t end) {
+  at::parallel_for(0, sizeC, 0, [&](int64_t start, int64_t end) {
     for (auto d = start; d < end; d++) {
       /* loop over output */
       int64_t oh, ow;
@@ -66,7 +66,7 @@ static void adaptive_avg_pool2d_single_out_frame(
 
           /* local pointers */
           scalar_t* ip =
-              input_p + d * istrideD + istartH * istrideH + istartW * istrideW;
+              input_p + d * istrideC + istartH * istrideH + istartW * istrideW;
           scalar_t* op = output_p + d * osizeH * osizeW + oh * osizeW + ow;
 
           /* compute local average: */
@@ -108,7 +108,7 @@ std::vector<int64_t> get_output_shape(
       "non-empty 3D or 4D (batch mode) tensor expected for input");
 
   /* sizes */
-  int64_t sizeD = input.size(-3);
+  int64_t sizeC = input.size(-3);
   const auto osizeH = output_size[0];
   const auto osizeW = output_size[1];
 
@@ -116,10 +116,10 @@ std::vector<int64_t> get_output_shape(
   std::vector<int64_t> output_shape;
   int64_t sizeB = 0;
   if (input.dim() == 3) {
-    output_shape = {sizeD, osizeH, osizeW};
+    output_shape = {sizeC, osizeH, osizeW};
   } else {
     sizeB = input.size(-4);
-    output_shape = {sizeB, sizeD, osizeH, osizeW};
+    output_shape = {sizeB, sizeC, osizeH, osizeW};
   }
 
   return output_shape;
@@ -130,11 +130,11 @@ Tensor q_adaptive_avg_pool2d(const Tensor& input, IntArrayRef output_size) {
   Tensor output;
   const auto output_shape = get_output_shape(input, output_size);
   /* sizes */
-  int64_t sizeD = input.size(-3);
+  int64_t sizeC = input.size(-3);
   int64_t isizeH = input.size(-2);
   int64_t isizeW = input.size(-1);
   /* strides */
-  int64_t istrideD = input.stride(-3);
+  int64_t istrideC = input.stride(-3);
   int64_t istrideH = input.stride(-2);
   int64_t istrideW = input.stride(-1);
 
@@ -156,13 +156,13 @@ Tensor q_adaptive_avg_pool2d(const Tensor& input, IntArrayRef output_size) {
           input,
           output,
           0,
-          sizeD,
+          sizeC,
           isizeH,
           isizeW,
           osizeH,
           osizeW,
           0,
-          istrideD,
+          istrideC,
           istrideH,
           istrideW);
     } else {
@@ -174,13 +174,13 @@ Tensor q_adaptive_avg_pool2d(const Tensor& input, IntArrayRef output_size) {
               input,
               output,
               b,
-              sizeD,
+              sizeC,
               isizeH,
               isizeW,
               osizeH,
               osizeW,
               istrideB,
-              istrideD,
+              istrideC,
               istrideH,
               istrideW);
         }
@@ -198,12 +198,12 @@ Tensor q_adaptive_avg_pool2d(const Tensor& input, IntArrayRef output_size) {
       adaptive_avg_pool2d_single_out_frame<scalar_t>(
           input_data,
           output_data,
-          sizeD,
+          sizeC,
           isizeH,
           isizeW,
           osizeH,
           osizeW,
-          istrideD,
+          istrideC,
           istrideH,
           istrideW);
     } else {
@@ -212,13 +212,13 @@ Tensor q_adaptive_avg_pool2d(const Tensor& input, IntArrayRef output_size) {
         for (auto b = start; b < end; b++) {
           adaptive_avg_pool2d_single_out_frame<scalar_t>(
               input_data + b * istrideB,
-              output_data + b * sizeD * osizeH * osizeW,
-              sizeD,
+              output_data + b * sizeC * osizeH * osizeW,
+              sizeC,
               isizeH,
               isizeW,
               osizeH,
               osizeW,
-              istrideD,
+              istrideC,
               istrideH,
               istrideW);
         }
