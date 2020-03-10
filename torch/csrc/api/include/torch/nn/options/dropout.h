@@ -24,9 +24,6 @@ using Dropout2dOptions = DropoutOptions;
 /// Options for `Dropout3d` module.
 using Dropout3dOptions = DropoutOptions;
 
-/// Options for `FeatureDropout` module.
-using FeatureDropoutOptions = DropoutOptions;
-
 /// Options for `AlphaDropout` module.
 using AlphaDropoutOptions = DropoutOptions;
 
