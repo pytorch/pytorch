@@ -314,6 +314,65 @@ void GeluBackwardKernelImpl(TensorIterator& it) {
   }
 }
 
+void hardsigmoid_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "hardsigmoid_cpu", [&] {
+    const scalar_t zero(0.0f);
+    const scalar_t three(3.0f);
+    const scalar_t six(6.0f);
+    using Vec = vec256::Vec256<scalar_t>;
+    const Vec kZeroVec(0);
+    const Vec kThreeVec(3);
+    const Vec kSixVec(6);
+    cpu_kernel_vec(
+        iter,
+        [&](scalar_t self_val) {
+          scalar_t val_plus_three = self_val + three;
+          scalar_t val_plus_three_gt_zero = val_plus_three > zero
+            ? val_plus_three
+            : zero;
+          return (
+            val_plus_three_gt_zero < six ? val_plus_three_gt_zero : six
+          ) / six;
+        },
+        [&](Vec self_val) {
+          const Vec valPlusThree = self_val + kThreeVec;
+          const Vec valPlusThreeGTZero = Vec::blendv(
+            kZeroVec,
+            valPlusThree,
+            valPlusThree > kZeroVec
+          );
+          return Vec::blendv(
+            valPlusThreeGTZero,
+            kSixVec,
+            valPlusThreeGTZero > kSixVec
+          ) / kSixVec;
+        });
+  });
+}
+
+void hardsigmoid_backward_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "hardsigmoid_backward", [&] {
+    auto zero = scalar_t(0.0f);
+    auto one = scalar_t(1.0f);
+    using Vec = Vec256<scalar_t>;
+    Vec kZeroVec(0.0f);
+    Vec kOneSixthVec(1.0f / 6.0f);
+    cpu_kernel_vec(
+        iter,
+        [=](scalar_t grad_val, scalar_t self_val) {
+          // TODO: verify this is correct, since first time working on this area
+          return (self_val >= zero && self_val <= one)
+            ? grad_val / 6.0f
+            : scalar_t(0);
+        },
+        [=](Vec grad_val, Vec self_val) {
+          // TODO: verify this is correct, since first time working on this area
+          Vec gradNonZeroMask = (self_val > zero) & (self_val < one);
+          return Vec::blendv(kZeroVec, grad_val * kOneSixthVec, gradNonZeroMask);
+        });
+  });
+}
+
 void hardshrink_kernel(TensorIterator& iter, Scalar lambd) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "hardshrink_cpu", [&] {
     auto lambd_val = lambd.to<scalar_t>();
@@ -492,6 +551,8 @@ REGISTER_DISPATCH(elu_backward_stub, &elu_backward_kernel);
 REGISTER_DISPATCH(GeluKernel, &GeluKernelImpl);
 REGISTER_DISPATCH(GeluBackwardKernel, &GeluBackwardKernelImpl);
 REGISTER_DISPATCH(hardtanh_backward_stub, &hardtanh_backward_kernel);
+REGISTER_DISPATCH(hardsigmoid_stub, &hardsigmoid_kernel);
+REGISTER_DISPATCH(hardsigmoid_backward_stub, &hardsigmoid_backward_kernel);
 REGISTER_DISPATCH(hardshrink_stub, &hardshrink_kernel);
 REGISTER_DISPATCH(softshrink_stub, &softshrink_kernel);
 REGISTER_DISPATCH(shrink_backward_stub, &shrink_backward_kernel);

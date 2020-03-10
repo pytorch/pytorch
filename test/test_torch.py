@@ -13659,6 +13659,24 @@ class TestTorchDeviceType(TestCase):
                          torch.tensor(expectedOutput, dtype=dtype, device=device), precision_4dps)
 
     @onlyCPU
+    @dtypes(torch.float, torch.double)
+    def test_hardsigmoid(self, device, dtype):
+        inputValues = [-1000, -4, -3, -2, 0, 2, 3, 4, 1000]
+        expectedOutput = [0.0, 0.0, 0.0, 0.1667, 0.5, 0.8333, 1.0, 1.0, 1.0]
+
+        inputTensor = torch.tensor(inputValues, dtype=dtype, device=device)
+        precision_4dps = 0.0002
+
+        # normal
+        self.assertEqual(torch.nn.functional.hardsigmoid(inputTensor),
+                         torch.tensor(expectedOutput, dtype=dtype, device=device), precision_4dps)
+
+        # inplace
+        inputTensorCpy = inputTensor.clone().detach()
+        self.assertEqual(torch.nn.functional.hardsigmoid(inputTensorCpy, inplace=True),
+                         torch.tensor(expectedOutput, dtype=dtype, device=device), precision_4dps)
+
+    @onlyCPU
     @dtypes(torch.float)
     def test_diag_embed(self, device, dtype):
         x = torch.arange(3 * 4, dtype=dtype, device=device).view(3, 4)
