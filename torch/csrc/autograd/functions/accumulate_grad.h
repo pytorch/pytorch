@@ -50,6 +50,27 @@ struct TORCH_API AccumulateGrad : public Node {
         // holding references to the Tensor and that is fine since these are not
         // exposed to the user.
         update_grad(new_grad.detach());
+      } else if (
+          !GradMode::is_enabled() && new_grad.is_sparse() &&
+          new_grad._indices().is_contiguous() &&
+          new_grad._values().is_contiguous() &&
+          new_grad._indices().use_count() <= num_expected_refs &&
+          new_grad._values().use_count() <= num_expected_refs &&
+          new_grad.use_count() <= num_expected_refs) {
+        // Can't detach sparse tensor (since metadata changes are not allowed
+        // after detach), so just create a new one for the grad which is a
+        // shallow copy. We need a shallow copy so that modifying the original
+        // grad tensor doesn't modify the grad we accumulate.
+        // We only skip clone if indices and values themselves are contiguous
+        // for backward compatiblity reasons. Since without this optimization,
+        // earlier we would clone the entire SparseTensor which cloned indices
+        // and values.
+        // For details see https://github.com/pytorch/pytorch/issues/34375.
+        update_grad(at::sparse_coo_tensor(
+            new_grad._indices(),
+            new_grad._values(),
+            new_grad.sizes(),
+            new_grad.options()));
       } else {
         if (new_grad.is_sparse()) {
           update_grad(new_grad.clone());
@@ -61,9 +82,9 @@ struct TORCH_API AccumulateGrad : public Node {
       // This case is not strictly necessary, but it makes the first-order only
       // case slightly more efficient.
       if (variable_grad.is_sparse() && !new_grad.is_sparse()) {
-        // If `grad_variable` is sparse and `new_grad` is not sparse, their
+        // If `variable_grad` is sparse and `new_grad` is not sparse, their
         // sum is not sparse, and we must change the TensorImpl type of
-        // `grad_variable` for it to store the result. However, changing the
+        // `variable_grad` for it to store the result. However, changing the
         // TensorImpl type of a tensor requires changing the tensor itself, and
         // thus in this case we have to change the grad tensor.
         update_grad(new_grad + variable_grad);
@@ -71,13 +92,13 @@ struct TORCH_API AccumulateGrad : public Node {
         // In this case we can avoid changing the grad tensor. There are three
         // scenarios when we'll hit this case:
         //
-        // 1. `grad_variable` is sparse, and `new_grad` is sparse.
-        // 2. `grad_variable` is dense, and `new_grad` is sparse.
-        // 3. `grad_variable` is dense, and `new_grad` is dense.
+        // 1. `variable_grad` is sparse, and `new_grad` is sparse.
+        // 2. `variable_grad` is dense, and `new_grad` is sparse.
+        // 3. `variable_grad` is dense, and `new_grad` is dense.
         //
-        // In all of these three cases, `grad_variable += new_grad` is a
-        // valid operation which adds `new_grad` to `grad_variable` in
-        // place. `grad_variable` is thus still referring to the same tensor
+        // In all of these three cases, `variable_grad += new_grad` is a
+        // valid operation which adds `new_grad` to `variable_grad` in
+        // place. `variable_grad` is thus still referring to the same tensor
         // after the operation.
         variable_grad += new_grad;
       }
