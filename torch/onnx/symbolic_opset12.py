@@ -71,6 +71,9 @@ def nll_loss(g, self, target, weight, reduction, ignore_index):
 def nll_loss2d(g, self, target, weight, reduction, ignore_index):
     return nll_loss(g, self, target, weight, reduction, ignore_index)
 
+# This implementation of broadcast_tensors only covers the case when there are only 2 tensors
+# of the same size. This is needed for the export of mse_loss function and is only a partial
+# implementation of broadcast_tensors.
 def broadcast_tensors(g, tensor_list):
     tensors = sym_help._unpack_list(tensor_list)
     if (tensors[0].type().dim() != 2 and tensors[0].type().sizes() != tensors[1].type().sizes()):
