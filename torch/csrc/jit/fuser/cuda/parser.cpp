@@ -1,9 +1,9 @@
 #include <torch/csrc/jit/fuser/cuda/parser.h>
 #include <torch/csrc/jit/constants.h>
 
+#include <torch/csrc/jit/fuser/common/arith.h>
 #include <torch/csrc/jit/fuser/common/tensor.h>
 #include <torch/csrc/jit/fuser/common/iriostream.h>
-#include <torch/csrc/jit/fuser/common/iter_visitor.h>
 
 #include <unordered_map>
 
@@ -33,17 +33,13 @@ public:
 
     // register all inputs;
     for (auto val : block->inputs()) {
-      registerValue(val);
+      registerInput(val);
+      fusion_->addInput(value_maps_[val->unique()]);
     }
 
     // compose nodes in topo order;
     for (const JitOp* node : block->nodes()) {
       processJitNode(node);
-    }
-
-    // mark output;
-    for (auto jit_input : block->inputs()) {
-      fusion_->addInput(value_maps_[jit_input->unique()]);
     }
 
     // mark output;
@@ -79,12 +75,6 @@ public:
 protected:
 
   void processJitNode(const JitOp* node) {
-    // register outputs;
-    for (auto val : node->outputs()) {
-      registerValue(val);
-    }
-
-    CgOp* cg_op;
 
     static std::unordered_map<Symbol, BinaryOpType> binary_op_mapping({
       {aten::add, BinaryOpType::Add},
@@ -95,8 +85,10 @@ protected:
     if (binary_op_mapping.count(node->kind()) != 0) {
       auto lhs = value_maps_[node->inputs()[0]->unique()];
       auto rhs = value_maps_[node->inputs()[1]->unique()];
-      auto out = value_maps_[node->output()->unique()];
-      cg_op = new BinaryOp(binary_op_mapping[node->kind()], out, lhs, rhs);
+
+      auto out = binary_op(binary_op_mapping[node->kind()], lhs, rhs);
+      value_maps_.emplace(node->output()->unique(), out);
+
     } else if (node->kind() == prim::Constant) {
       // we should just ignore constant node;
     } else {
@@ -104,7 +96,7 @@ protected:
     }
   }
 
-  void registerValue(const JitValue* val) {
+  void registerInput(const JitValue* val) {
     CgValue* cg_val;
     if (val->isCompleteTensor()) {
       // TODO: make this a static function in Tensor class;

@@ -18,7 +18,6 @@ namespace jit{
 namespace fuser{
 
 //Return new value of type that v1 and v2 promotes to
-TORCH_API Val* new_val(ValType type);
 TORCH_API Val* promote_new(Val* v1, Val* v2);
 
 TORCH_API Val* cast_op(DataType dtype, Val* v1);
