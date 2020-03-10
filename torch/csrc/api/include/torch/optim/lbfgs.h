@@ -21,25 +21,25 @@ struct TORCH_API LBFGSOptions : public OptimizerCloneableOptions<LBFGSOptions> {
   TORCH_ARG(c10::optional<int64_t>, max_eval) = c10::nullopt;
   TORCH_ARG(double, tolerance_grad) = 1e-7;
   TORCH_ARG(double, tolerance_change) = 1e-9;
-  TORCH_ARG(size_t, history_size) = 100;
+  TORCH_ARG(int64_t, history_size) = 100;
   TORCH_ARG(c10::optional<std::string>, line_search_fn) = c10::nullopt;
 public:
-  //void serialize(torch::serialize::InputArchive& archive) override;
-  //void serialize(torch::serialize::OutputArchive& archive) const override;
-  //TORCH_API friend bool operator==(const LBFGSOptions& lhs, const LBFGSOptions& rhs);
+  void serialize(torch::serialize::InputArchive& archive) override;
+  void serialize(torch::serialize::OutputArchive& archive) const override;
+  TORCH_API friend bool operator==(const LBFGSOptions& lhs, const LBFGSOptions& rhs);
   ~LBFGSOptions() = default;
 };
 
 struct TORCH_API LBFGSParamState : public OptimizerCloneableParamState<LBFGSParamState> {
-  TORCH_ARG(torch::Tensor, d) = {};
+  TORCH_ARG(Tensor, d) = {};
   TORCH_ARG(double, t);
   TORCH_ARG(std::deque<Tensor>, old_dirs);
   TORCH_ARG(std::deque<Tensor>, old_stps);
   TORCH_ARG(std::deque<Tensor>, ro);
-  TORCH_ARG(torch::Tensor, H_diag) = {};
-  TORCH_ARG(torch::Tensor, prev_flat_grad) = {};
-  TORCH_ARG(torch::Tensor, prev_loss) = {};
-  TORCH_ARG(std::vector<torch::Tensor>, al);
+  TORCH_ARG(Tensor, H_diag) = {};
+  TORCH_ARG(Tensor, prev_flat_grad) = {};
+  TORCH_ARG(Tensor, prev_loss) = {};
+  TORCH_ARG(std::vector<Tensor>, al);
   TORCH_ARG(int64_t, func_evals) = 0;
   TORCH_ARG(int64_t, n_iter) = 0;
 
@@ -69,10 +69,10 @@ class TORCH_API LBFGS : public Optimizer {
   c10::optional<int64_t> _numel_cache;
   int64_t _numel();
   Tensor _gather_flat_grad();
-  void add_grad(const torch::Tensor& step_size, const Tensor& update);
+  void _add_grad(const double step_size, const Tensor& update);
   template <typename Self, typename Archive>
   static void serialize(Self& self, Archive& archive) {
-    //something
+    //_TORCH_OPTIM_SERIALIZE_WITH_TEMPLATE_ARG(LBGFS);
   }
 };
 } // namespace optim
