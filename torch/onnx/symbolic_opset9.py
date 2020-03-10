@@ -135,6 +135,41 @@ def floor_divide(g, self, other):
     return out
 
 
+# Division where both inputs are cast to floating types
+# If both inputs are floating, performs div as usual
+# If only one input is a floating type, the other input is cast to its type
+# If neither input is a floating type, both inputs are cast to the default scalar type
+def true_divide(g, self, other):
+    # Case 1: both values are floating
+    # Performs div as usual
+    if sym_help._is_fp(self) and sym_help._is_fp(other):
+        return div(g, self, other)
+
+    # Case 2: self is floating, other is not
+    # Casts other to self's dtype
+    if sym_help._is_fp(self):
+        g.op("Cast", other, to_i=sym_help.cast_pytorch_to_onnx[self.type().scalarType()])
+        return div(g, self, other)
+
+    # Case 3: other is floating, self is not
+    # Casts self to other's dtype
+    if sym_help._is_fp(other):
+        g.op("Cast", other, to_i=sym_help.cast_pytorch_to_onnx[other.type().scalarType()])
+        return div(g, self, other)
+
+    # Case 4: neither is floating
+    # Casts both inputs to the default scalar type
+    scalar_type = torch.get_default_dtype()
+    onnx_scalar_type = sym_help.cast_pytorch_to_onnx['Float']
+    assert scalar_type is torch.float or scalar_type is torch.double
+    if torch.get_default_dtype() is torch.double:
+        onnx_scalar_type = sym_help.cast_pytorch_to_onnx['Double']
+
+    g.op("Cast", self, to_i=onnx_scalar_type)
+    g.op("Cast", other, to_i=onnx_scalar_type)
+    return div(g, self, other)
+
+
 def reciprocal(g, self):
     return g.op("Div", torch.ones(1), self)
 
