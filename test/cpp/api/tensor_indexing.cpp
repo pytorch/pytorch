@@ -535,7 +535,7 @@ TEST(TensorIndexingTest, TestIntAssignment) {
 
 TEST(TensorIndexingTest, TestByteTensorAssignment) {
   auto x = torch::arange(0., 16).to(torch::kFloat).view({4, 4});
-  auto b = torch::tensor({true, false, true, false}, torch::kByte);
+  auto b = torch::tensor({true, false, true, false}, torch::kBool);
   auto value = torch::tensor({3., 4., 5., 6.});
 
   {
