@@ -98,7 +98,7 @@ private:
 } // namespace
 
 void compileCudaFusionGroup(Node* fusion_node) {
-  assert(fusion_node->kind() == prim::FusionGroup);
+  assert(fusion_node->kind() == prim::CudaFusionGroup);
   if (fusion_node->hasAttribute(attr::cache_id)) {
     // TODO: maybe we should error out here;
     AT_WARN("Double registration of CudaFusionGroup on CudaFusionManager");
@@ -109,7 +109,7 @@ void compileCudaFusionGroup(Node* fusion_node) {
 }
 
 void runCudaFusionGroup(const Node* const fusion_node, Stack& stack) {
-  assert(fusion_node->kind() == prim::FusionGroup);
+  assert(fusion_node->kind() == prim::CudaFusionGroup);
   // TODO: should we support runtime compilation with updated dynamic shape;
   //       shape inference would be needed so we can allocate output;
   assert(fusion_node->hasAttribute(attr::cache_id));

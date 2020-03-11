@@ -36,7 +36,7 @@ struct CudaGraphFuser {
   Block* block_;
   std::unique_ptr<AliasDb> aliasDb_;
   std::shared_ptr<Graph> graph_;
-  Symbol kind_ = prim::FusionGroup;
+  Symbol kind_ = prim::CudaFusionGroup;
 
   // nvrtc has a limit on the number of arguments allowed in a CUDA kernel.
   // The specific limit is a function of constant memory size, amount available
@@ -287,7 +287,7 @@ struct CudaGraphFuser {
   }
 
   c10::optional<Node*> findFusedChunk(Node* group, Value* input) {
-    AT_ASSERT(group->kind() == prim::FusionGroup);
+    AT_ASSERT(group->kind() == kind_);
     auto it = std::find(group->inputs().begin(), group->inputs().end(), input);
     if (it == group->inputs().end()) {
       return c10::nullopt;
@@ -411,7 +411,7 @@ struct CudaGraphFuser {
   // Let's say we have:
   // %z = aten::mul(%x, %y)
   // %z.1, %z.2 = aten::chunk(%z, ...)
-  // ... = prim::FusionGroup(%z.1, %z.2, ...)
+  // ... = prim::CudaFusionGroup(%z.1, %z.2, ...)
   // It's possible that %x and %y do not have the same size as %z and
   // need to be expanded first so that they can be chunked like %z
   //
@@ -740,7 +740,7 @@ struct CudaGraphFuser {
   }
 
   void removeOutputsUsedOnlyInSize(Node* fusion_group) {
-    if (fusion_group->kind() != prim::FusionGroup)
+    if (fusion_group->kind() != prim::CudaFusionGroup)
       return;
     auto subgraph = fusion_group->g(attr::Subgraph);
 
@@ -773,7 +773,7 @@ struct CudaGraphFuser {
 
   void optimizeFusedGraphs() {
     for (Node* node : block_->nodes()) {
-      if (node->kind() != prim::FusionGroup) {
+      if (node->kind() != kind_) {
         continue;
       }
       auto subgraph = node->g(attr::Subgraph);

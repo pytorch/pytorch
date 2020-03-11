@@ -61,7 +61,7 @@ static OperatorSet fusible_ops = {
 
 inline bool isFusibleNode(const Node* const node)  {
   // TODO: update code base so we can use `node->is_MemberOf(fusible_ops)`
-  return ((node->isMemberOf(fusible_ops)) || node->kind() == prim::FusionGroup);
+  return ((node->isMemberOf(fusible_ops)) || node->kind() == prim::CudaFusionGroup);
 }
 
 } // namespace
