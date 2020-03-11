@@ -55,8 +55,8 @@ cd $BUILD_ROOT
 
 CMAKE_ARGS=()
 
-if [ -n "${BUILD_PYTORCH_MOBILE:-}" ]; then
-  CMAKE_ARGS+=("-DBUILD_CAFFE2_MOBILE=OFF")
+if [ -z "${BUILD_CAFFE2_MOBILE:-}" ]; then
+  # Build PyTorch mobile
   CMAKE_ARGS+=("-DUSE_STATIC_DISPATCH=ON")
   CMAKE_ARGS+=("-DCMAKE_PREFIX_PATH=$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')")
   CMAKE_ARGS+=("-DPYTHON_EXECUTABLE=$(python -c 'import sys; print(sys.executable)')")
@@ -66,6 +66,8 @@ if [ -n "${BUILD_PYTORCH_MOBILE:-}" ]; then
     CMAKE_ARGS+=("-DSELECTED_OP_LIST=${SELECTED_OP_LIST}")
   fi
 else
+  # Build Caffe2 mobile
+  CMAKE_ARGS+=("-DBUILD_CAFFE2_MOBILE=ON")
   # Build protobuf from third_party so we have a host protoc binary.
   echo "Building protoc"
   $CAFFE2_ROOT/scripts/build_host_protoc.sh
