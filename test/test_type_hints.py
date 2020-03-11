@@ -183,5 +183,3 @@ class TestTypeHints(TestCase):
 
 if __name__ == '__main__':
     run_tests()
-    #test_type_hint_examples()
-    #run_tests
