@@ -9,19 +9,17 @@ namespace torch {
 namespace jit {
 
 // Must run this pass after constant folding.
-void FoldPrePackingOps(script::Module& m,
+void FoldPrePackingOps(
+    script::Module& m,
     const PrePackingOpsFilterFn& is_foldable_op) {
-  // Since this pass can be called by quantization or other passes as well,
-  // we need to make sure we generate a unique "packed_weight_\d+"
-  // Thus static uid.
-  static int64_t uid = 0;
-
+  int64_t uid = 0;
+  const std::string& module_name = m.type()->name()->qualifiedName();
   auto method = m.get_method("forward");
   auto graph = method.graph();
   std::stack<Block*> blocks_to_visit;
   std::unordered_set<Node*> nodes_to_delete;
   blocks_to_visit.push(graph->block());
-  std::string attr_name_base("packed_weight_");
+  std::string attr_name_base = module_name + ".packed_weight_";
   while (!blocks_to_visit.empty()) {
     Block* b = blocks_to_visit.top();
     blocks_to_visit.pop();
@@ -32,11 +30,20 @@ void FoldPrePackingOps(script::Module& m,
           auto outputs = optional_outputs.value();
           TORCH_CHECK(outputs.size() == 1, "Prepack ops have single output");
           auto attr_name = attr_name_base + c10::to_string(uid++);
+          TORCH_CHECK(
+              !(m.type()->findAttributeSlot(attr_name)),
+              "Attribute name ",
+              attr_name,
+              " already exist in",
+              " module of type:",
+              module_name,
+              ". Please make sure that",
+              " FoldPrePackingOps is run at the top level module only.");
           m.register_attribute(attr_name, n->output(0)->type(), outputs[0]);
           Value* prepack_op_value = n->output(0);
           WithInsertPoint ins(prepack_op_value->node());
           Value* packed_weight_attr =
-            graph->insertGetAttr(graph->inputs()[0], attr_name)
+              graph->insertGetAttr(graph->inputs()[0], attr_name)
                   ->setType(n->output(0)->type());
           prepack_op_value->replaceAllUsesWith(packed_weight_attr);
           nodes_to_delete.insert(n);
