@@ -25,7 +25,7 @@ struct PeepholeOptimizeImpl {
       : aliasDb_(nullptr),
         graph_(graph),
         changed_(true),
-        addmm_fusion_enabled_(addmm_fusion_enabled) {
+        onnx_export_(addmm_fusion_enabled) {
     run(graph->block());
   }
 
@@ -83,7 +83,7 @@ struct PeepholeOptimizeImpl {
         // doesn't even result in fewer reads, because mm won't even load C
         // (because beta
         // == 0 for it).
-        if (addmm_fusion_enabled_ &&
+        if (onnx_export_ &&
             node->get<at::Scalar>(attr::alpha).value().toDouble() == 1.) {
           // Look for mm from both sides of the add
           for (size_t mm_side = 0; mm_side < 2; mm_side++) {
@@ -360,7 +360,9 @@ struct PeepholeOptimizeImpl {
           node->output()->replaceAllUsesWith(output);
           changed_ = true;
         }
-      } else if (node->matches("aten::dim(Tensor self) -> int")) {
+        // disabled in onnx export to not constantify shape info
+      } else if (
+          node->matches("aten::dim(Tensor self) -> int") && !onnx_export_) {
         auto ptt = node->input()->type()->expect<TensorType>();
         if (auto dim = ptt->sizes().size()) {
           WithInsertPoint guard(node);
@@ -462,7 +464,7 @@ struct PeepholeOptimizeImpl {
   std::unique_ptr<AliasDb> aliasDb_ = nullptr;
   std::shared_ptr<Graph> graph_;
   bool changed_;
-  bool addmm_fusion_enabled_;
+  bool onnx_export_;
 };
 
 void PeepholeOptimize(
