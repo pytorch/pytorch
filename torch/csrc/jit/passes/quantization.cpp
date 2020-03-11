@@ -197,6 +197,7 @@ bool nodeQuantizable(Node* n) {
       "addmm",
       "matmul",
       "add_",
+      "add",
       "cat",
     });
 }
@@ -469,7 +470,10 @@ class InsertObserversHelper {
   std::tuple<OptionalModuleVector, OptionalModuleVector, std::vector<size_t>> insertObserversFor(
       Block* block,
       script::Module& module,
-      std::unordered_set<Value*> block_observed_values,
+      // this is a reference because when we insert observer for a value
+      // in one block it is also observed in another block, we don't want to
+      // insert multiple observers for the same value
+      std::unordered_set<Value*>& block_observed_values,
       bool is_entry_point = false);
 
  private:
@@ -788,8 +792,8 @@ void InsertObserversHelper::insertObserverFor(
     // the correct value
     call->replaceInput(1, v);
     observer_nodes_.emplace(call);
+    observed_values_.insert(call->output());
   }
-  observed_values_.insert(v);
 }
 
 void InsertObserversHelper::skipValuesInPattern(
@@ -995,7 +999,7 @@ std::tuple<OptionalModuleVector, OptionalModuleVector, std::vector<size_t>>
 InsertObserversHelper::insertObserversFor(
       Block* block,
       script::Module& module,
-      std::unordered_set<Value*> block_observed_values,
+      std::unordered_set<Value*>& block_observed_values,
       bool is_entry_point) {
   // block input/output values, used to skip inserting observers
   // for input and output of the block, we have to insert the observers
@@ -1041,7 +1045,7 @@ InsertObserversHelper::insertObserversFor(
 
   std::stack<Block*> blocks_to_visit;
   blocks_to_visit.push(block);
-  auto* self = block->inputs()[0];
+  auto* self = block->owningGraph()->inputs()[0];
   // We first construct a map from value to the module, then
   // insert observers for them later, this is to avoid interference
   // of the inserted observers with the analysis to decide where
@@ -1081,15 +1085,17 @@ InsertObserversHelper::insertObserversFor(
           block_observed_values.insert(n->outputs()[idx]);
         }
         for (auto i = 0; i < n->inputs().size(); ++i) {
-          if (input_observers[i] && !block_inputs_outputs.count(n->inputs()[i])
-              && !block_observed_values.count(n->inputs()[i])) {
+          if (input_observers[i] && !block_inputs_outputs.count(n->input(i))
+              && !block_observed_values.count(n->input(i))
+              && observed_values_.count(n->input(i))) {
             values_to_observe[n->inputs()[i]] = *input_observers[i];
             block_observed_values.insert(n->inputs()[i]);
           }
         }
         for (auto i = 0; i < n->outputs().size(); ++i) {
-          if (output_observers[i] && !block_inputs_outputs.count(n->outputs()[i])
-              && !block_observed_values.count(n->outputs()[i])) {
+          if (output_observers[i] && !block_inputs_outputs.count(n->output(i))
+              && !block_observed_values.count(n->output(i))
+              && !observed_values_.count(n->output(i))) {
             values_to_observe[n->outputs()[i]] = *output_observers[i];
             block_observed_values.insert(n->outputs()[i]);
           }
@@ -1101,22 +1107,18 @@ InsertObserversHelper::insertObserversFor(
           // subblock has access to all the values in the scope of prim::If,
           // so subblock_observed_values == block_observed_values
           auto info_from_subblock = insertObserversFor(subblock, module, block_observed_values);
-          auto input_observers = std::get<0>(info_from_subblock);
           auto output_observers = std::get<1>(info_from_subblock);
           auto subblock_observed_outputs = std::get<2>(info_from_subblock);
-          for (auto i = 0; i < n->inputs().size(); ++i) {
-            if (input_observers[i] && !block_inputs_outputs.count(n->inputs()[i])
-                && !block_observed_values.count(n->inputs()[i])) {
-              values_to_observe[n->input(i)] = *input_observers[i];
-              block_observed_values.insert(n->input(i));
-            }
-          }
+          // subblock for prim::If doesn't have inputs
           if (aggregated_observed_outputs.size() > 0) {
             TORCH_CHECK(aggregated_observed_outputs == subblock_observed_outputs,
                         "quantization doesn't work for the case where branches "
                         "of `if` doesn't both return quantized/non-quantized "
                         "values");
           } else {
+            for (auto idx : subblock_observed_outputs) {
+              block_observed_values.insert(n->output(idx));
+            }
             aggregated_observed_outputs = subblock_observed_outputs;
           }
           if (aggregated_output_observers.size() > 0) {
@@ -1125,23 +1127,23 @@ InsertObserversHelper::insertObserversFor(
                         "of `if` doesn't both return values quantized the same "
                         "way");
           } else {
+            for (auto i = 0; i < n->outputs().size(); ++i) {
+              if (output_observers[i] && !block_inputs_outputs.count(n->output(i))
+                  && !block_observed_values.count(n->output(i))
+                  && !observed_values_.count(n->output(i))) {
+                values_to_observe[n->output(i)] = *output_observers[i];
+                block_observed_values.insert(n->output(i));
+              }
+            }
             aggregated_output_observers = output_observers;
-          }
-        }
-        for (auto idx : aggregated_observed_outputs) {
-          block_observed_values.insert(n->output(idx));
-        }
-        for (auto i = 0; i < n->outputs().size(); ++i) {
-          if (aggregated_output_observers[i] && !block_inputs_outputs.count(n->output(i))
-              && !block_observed_values.count(n->outputs()[i])) {
-            values_to_observe[n->output(i)] = *aggregated_output_observers[i];
-            block_observed_values.insert(n->output(i));
           }
         }
       } else {
         for (Value* v : n->outputs()) {
           propagateObservedProperty(v, block_observed_values);
-          if (!block_inputs_outputs.count(v) && !block_observed_values.count(v)) {
+          if (!block_inputs_outputs.count(v) &&
+              !block_observed_values.count(v) &&
+              !observed_values_.count(v)) {
             if (auto observer_opt = getObserverFor(v)) {
               values_to_observe[v] = *observer_opt;
               block_observed_values.insert(v);
