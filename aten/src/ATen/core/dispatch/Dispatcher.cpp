@@ -200,7 +200,9 @@ void Dispatcher::addRegistrationListener(std::unique_ptr<OpRegistrationListener>
   std::lock_guard<std::mutex> lock(mutex_);
 
   for (auto iter = operators_.begin(); iter != operators_.end(); ++iter) {
-    listener->onOperatorRegistered(OperatorHandle(iter));
+    if (iter->def_count > 0) {
+      listener->onOperatorRegistered(OperatorHandle(iter));
+    }
   }
 
   listeners_->addListener(std::move(listener));

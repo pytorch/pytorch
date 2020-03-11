@@ -113,18 +113,20 @@ SCHEMA_REGISTRATION = CodeTemplate("""\
 """)
 
 DEFAULT_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
-.def("${schema_string}", CppFunction::makeUnboxedOnly(TypeDefault::${type_wrapper_name}))
+.impl("${operator_name_with_overload}",
+      CppFunction::makeUnboxedOnly(TypeDefault::${type_wrapper_name}))
 """)
 BACKEND_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
-.def("${schema_string}", torch::dispatch(
+.impl("${operator_name_with_overload}", torch::dispatch(
     DispatchKey::${Backend}TensorId,
     CppFunction::makeUnboxedOnly(${Type}::${type_wrapper_name})))
 """)
 DEFAULT_FUNCTION_REGISTRATION = CodeTemplate("""\
-.def("${schema_string}", &TypeDefault::${type_wrapper_name})
+.impl("${operator_name_with_overload}", &TypeDefault::${type_wrapper_name})
 """)
 BACKEND_FUNCTION_REGISTRATION = CodeTemplate("""\
-.def("${schema_string}", torch::dispatch(DispatchKey::${Backend}TensorId, &${Type}::${type_wrapper_name}))
+.impl("${operator_name_with_overload}",
+      torch::dispatch(DispatchKey::${Backend}TensorId, &${Type}::${type_wrapper_name}))
 """)
 
 # add non-virtual declaration to TensorBody.h
@@ -1203,6 +1205,9 @@ def create_generic(top_env, declarations):
         # we just implement it in the base Type.  This is exposed
         # in Declarations.yaml via a field named 'abstract'.
         abstract = False
+        op_registrations.append(OpRegistration(
+            operator_name=OPERATOR_NAME.substitute(option),
+            registration_code=SCHEMA_REGISTRATION.substitute(option)))
         if isinstance(type_method_dispatch, dict):
             abstract = True
             # Having manual_kernel_registration for an abstract method doesn't make sense.
@@ -1210,9 +1215,6 @@ def create_generic(top_env, declarations):
         else:
             top_env['type_method_declarations'].append(NATIVE_DISPATCH_DECLARATION.substitute(option))
             top_env['type_method_definitions'].append(NATIVE_DISPATCH_DEFINITION_DEFAULT.substitute(option))
-            op_registrations.append(OpRegistration(
-                operator_name=OPERATOR_NAME.substitute(option),
-                registration_code=SCHEMA_REGISTRATION.substitute(option)))
             if not option['manual_kernel_registration']:
                 if option['use_c10_dispatcher'] == 'full':
                     op_registrations.append(OpRegistration(

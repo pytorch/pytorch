@@ -1297,12 +1297,11 @@ TEST(NewOperatorRegistrationTest, testBasics) {
     // a schema string or name and then set FROM_SCHEMA or CONSERVATIVE based
     // on this information
     // .def("dummy4", [](const Tensor& self, const Tensor& other) { return other; })
-    // TODO: skip having to specify schema string redundantly here
-    .impl("dummy(Tensor self) -> Tensor", c10::dispatch(c10::DeviceType::CPU, [](const Tensor& self) { return self; }))
-    .impl("dummy(Tensor self) -> Tensor", c10::dispatch(c10::DeviceType::XLA, [](const Tensor& self) { return self; }))
+    .impl("dummy", c10::dispatch(c10::DeviceType::CPU, [](const Tensor& self) { return self; }))
+    .impl("dummy", c10::dispatch(c10::DeviceType::XLA, [](const Tensor& self) { return self; }))
     // Internal API
-    .impl("dummy2(Tensor self) -> Tensor", c10::dispatch(c10::DispatchKey::CPUTensorId, [](const Tensor& self) { return self; }))
-    .impl("dummy2(Tensor self) -> Tensor", c10::dispatch(c10::DispatchKey::XLATensorId, [](const Tensor& self) { return self; }));
+    .impl("dummy2", c10::dispatch(c10::DispatchKey::CPUTensorId, [](const Tensor& self) { return self; }))
+    .impl("dummy2", c10::dispatch(c10::DispatchKey::XLATensorId, [](const Tensor& self) { return self; }));
 
   auto registrar2 = c10::import()
     .def("_test::dummy5(Tensor self) -> Tensor");

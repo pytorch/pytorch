@@ -155,14 +155,14 @@ namespace {
 
 // TODO: add overloads that take FunctionSchema directly
 Module&& Module::def(const char* schema_str) && {
-  auto schema = torch::jit::parseSchema(schema_str);
+  auto schema = torch::jit::parseSchema(addNamespace(ns_, schema_str));
   schema.setAliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA); // TODO: clean this up
   registrars_.emplace_back(Dispatcher::singleton().registerDef(std::move(schema)));
   return std::move(*this);
 }
 
 Module&& Module::def(const char* name_or_schema_str, CppFunction&& f) && {
-  auto name_or_schema = torch::jit::parseSchemaOrName(name_or_schema_str);
+  auto name_or_schema = torch::jit::parseSchemaOrName(addNamespace(ns_, name_or_schema_str));
   FunctionSchema schema = [&] {
     // TODO: schema matching shouldn't happen here
     if (name_or_schema.is_right()) {
@@ -194,7 +194,7 @@ Module&& Module::def(const char* name_or_schema_str, CppFunction&& f) && {
 }
 
 Module&& Module::impl(const char* name_str, CppFunction&& f) && {
-  auto name = torch::jit::parseName(name_str);
+  auto name = torch::jit::parseName(addNamespace(ns_, name_str));
   // TODO: check that inferred schema matches real schema
   registrars_.emplace_back(Dispatcher::singleton().registerImpl(name, f.dispatch_key_, std::move(f.func_)));
   return std::move(*this);
