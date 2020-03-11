@@ -13,5 +13,6 @@ THC_API void THCTensor_(setStorage)(THCState *state, THCTensor *self, THCStorage
 THC_API THCTensor *THCTensor_(newView)(THCState *state, THCTensor *tensor, at::IntArrayRef size);
 
 THC_API void THCTensor_(resize)(THCState *state, THCTensor *self, at::IntArrayRef size, at::IntArrayRef stride);
+THC_API THCTensor *THCTensor_(newWithSize)(THCState *state, at::IntArrayRef size, at::IntArrayRef stride);
 
 #endif
