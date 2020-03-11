@@ -30,6 +30,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
             op=op,
             inputs=[X],
             reference=abs_ref,
+            ensure_outputs_are_inferred=True,
         )
         self.assertDeviceChecks(dc, op, [X], [0])
         self.assertGradientChecks(gc, op, [X], 0, [0])
@@ -50,6 +51,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
             op=op,
             inputs=[X],
             reference=exp_ref,
+            ensure_outputs_are_inferred=True,
         )
         self.assertDeviceChecks(dc, op, [X], [0])
         self.assertGradientChecks(gc, op, [X], 0, [0])
@@ -74,6 +76,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
             op=op,
             inputs=[X],
             reference=log_op,
+            ensure_outputs_are_inferred=True,
         )
 
         self.assertGradientChecks(
@@ -106,7 +109,8 @@ class TestElementwiseOps(hu.HypothesisTestCase):
                                    inputs=[X, Y],
                                    reference=powt_op,
                                    output_to_grad="Z",
-                                   grad_reference=powt_grad)
+                                   grad_reference=powt_grad,
+                                   ensure_outputs_are_inferred=True)
 
     @given(n=st.integers(0, 6), m=st.integers(4, 6),
            seed=st.integers(0, 1000), **hu.gcs)
@@ -128,6 +132,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
             op=op,
             inputs=[X],
             reference=sqr_op,
+            ensure_outputs_are_inferred=True,
         )
 
         self.assertGradientChecks(
@@ -156,6 +161,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
             op=op,
             inputs=[X],
             reference=sqrt_op,
+            ensure_outputs_are_inferred=True,
         )
         self.assertDeviceChecks(dc, op, [X], [0])
         # stepsize need to be smaller than the possible minimum X, so the
@@ -179,6 +185,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
             op=op,
             inputs=[X],
             reference=softsign_ref,
+            ensure_outputs_are_inferred=True,
         )
         self.assertDeviceChecks(dc, op, [X], [0])
         if not inplace:
@@ -201,6 +208,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
             op=op,
             inputs=[X],
             reference=rsqrt_ref,
+            ensure_outputs_are_inferred=True,
         )
         self.assertDeviceChecks(dc, op, [X], [0])
         self.assertGradientChecks(gc, op, [X], 0, [0], stepsize=5e-3)
@@ -228,6 +236,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
             reference=cube_ref,
             output_to_grad="Y",
             grad_reference=cube_grad_ref,
+            ensure_outputs_are_inferred=True,
         )
         self.assertDeviceChecks(dc, op, [X], [0])
 
@@ -247,6 +256,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
             op=op,
             inputs=[X],
             reference=cbrt_ref,
+            ensure_outputs_are_inferred=True,
         )
 
     @given(X=hu.tensor(elements=st.floats(1.0, 10.0), dtype=np.float32),
@@ -281,6 +291,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
             op=op,
             inputs=[X],
             reference=swish,
+            ensure_outputs_are_inferred=True,
         )
 
         self.assertGradientChecks(
@@ -331,6 +342,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
             op=op,
             inputs=[X],
             reference=sigmoid_ref,
+            ensure_outputs_are_inferred=True,
         )
         self.assertDeviceChecks(dc, op, [X], [0])
         self.assertGradientChecks(gc, op, [X], 0, [0])
@@ -370,6 +382,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
             op=op,
             inputs=[X],
             reference=hard_sigmoid_ref,
+            ensure_outputs_are_inferred=True,
         )
         self.assertDeviceChecks(dc, op, [X], [0])
         self.assertGradientChecks(
@@ -390,6 +403,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
             op=op,
             inputs=[X, Y],
             reference=eq,
+            ensure_outputs_are_inferred=True,
         )
 
         workspace.FeedBlob('X', X)
@@ -419,6 +433,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
             op=op,
             inputs=[X, Y],
             reference=eq,
+            ensure_outputs_are_inferred=True,
         )
 
         workspace.FeedBlob('X', X)
@@ -446,6 +461,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
             op=op,
             inputs=inputs,
             reference=ref,
+            ensure_outputs_are_inferred=True,
         )
         self.assertDeviceChecks(dc, op, inputs, [0])
         if test_grad:
@@ -459,7 +475,8 @@ class TestElementwiseOps(hu.HypothesisTestCase):
                 op=op,
                 inputs=inputs,
                 reference=ref,
-            )
+                ensure_outputs_are_inferred=True,
+           )
             self.assertDeviceChecks(dc, op, inputs, [0])
             if test_grad:
                 for i in range(len(inputs)):
@@ -667,10 +684,31 @@ class TestElementwiseOps(hu.HypothesisTestCase):
             op=op,
             inputs=[X],
             reference=reciprocal_op,
+            ensure_outputs_are_inferred=True,
         )
         self.assertDeviceChecks(dc, op, [X], [0])
         self.assertGradientChecks(
             gc, op, [X], 0, [0], stepsize=1e-3, threshold=0.05)
+
+    @given(X=hu.tensor(dtype=np.bool), **hu.gcs)
+    def test_not(self, X, gc, dc):
+        def not_op(X):
+            return [np.logical_not(X)]
+
+        op = core.CreateOperator(
+            "Not",
+            ["X"],
+            ["Y"],
+        )
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[X],
+            reference=not_op,
+            ensure_outputs_are_inferred=True,
+        )
+        self.assertDeviceChecks(dc, op, [X], [0])
 
 
 if __name__ == "__main__":

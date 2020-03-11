@@ -98,7 +98,14 @@ Tensor _dim_arange(const Tensor& like, int64_t dim) {
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ empty ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Tensor empty_cpu(IntArrayRef size, const TensorOptions& options, c10::optional<c10::MemoryFormat> optional_memory_format) {
+Tensor empty_cpu(IntArrayRef size, const TensorOptions& options_, c10::optional<c10::MemoryFormat> optional_memory_format) {
+
+  TORCH_CHECK(
+    !(options_.has_memory_format() && optional_memory_format.has_value()),
+    "Cannot set memory_format both in TensorOptions and explicit argument; please delete "
+    "the redundant setter.");
+  TensorOptions options = options_.merge_in(TensorOptions().memory_format(optional_memory_format));
+
   AT_ASSERT(options.device().type() == DeviceType::CPU);
   TORCH_INTERNAL_ASSERT(impl::variable_excluded_from_dispatch());
   check_size_nonnegative(size);
@@ -125,7 +132,7 @@ Tensor empty_cpu(IntArrayRef size, const TensorOptions& options, c10::optional<c
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
   }
 
-  auto memory_format = optional_memory_format.value_or(MemoryFormat::Contiguous);
+  auto memory_format = options.memory_format_opt().value_or(MemoryFormat::Contiguous);
   tensor.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
   return tensor;
 }
@@ -190,14 +197,18 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, DEFINE_CAST_OP)
 
 Tensor empty_like(
     const Tensor& self,
+    const TensorOptions& options_,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
-  return native::empty_like(self, self.options(), optional_memory_format);
-}
 
-Tensor empty_like(
-    const Tensor& self,
-    const TensorOptions& options,
-    c10::optional<c10::MemoryFormat> optional_memory_format) {
+  TORCH_CHECK(
+    !(options_.has_memory_format() && optional_memory_format.has_value()),
+    "Cannot set memory_format both in TensorOptions and explicit argument; please delete "
+    "the redundant setter.");
+
+  TensorOptions options =
+      self.options()
+          .merge_in(options_)
+          .merge_in(TensorOptions().memory_format(optional_memory_format));
 
   TORCH_CHECK(
       !(options.layout() != kStrided &&
@@ -210,10 +221,9 @@ Tensor empty_like(
     return result;
   }
 
-  if (self.is_quantized()) {
+  auto memory_format = options.memory_format_opt().value_or(MemoryFormat::Preserve);
 
-    auto memory_format =
-        optional_memory_format.value_or(MemoryFormat::Preserve);
+  if (self.is_quantized()) {
 
     // TODO: To support all features of MemoryFormat::Preserve we need to add
     // _empty_affine_quantized_strided function and use it similarly to
@@ -223,6 +233,19 @@ Tensor empty_like(
       memory_format = self.suggest_memory_format();
     }
 
+
+    // Note [Explicit nullopt MemoryFormat argument]
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Some functions which we call default the OPTIONAL MemoryFormat
+    // argument to something that's not nullopt.  If we pass the
+    // MemoryFormat via TensorOptions, we must explicitly disable this
+    // defaulting process, by explicitly passing nullopt for the MemoryFormat
+    // argument.  When codegen is adjusted so we can delete this argument from
+    // the method signature, the argument will just disappear entirely.
+    //
+    // BTW, there are a few places where the optional MemoryFormat is None,
+    // but I still pass in nullopt for robustness.
+
     // We could check if dtype is still quantized?  But then should we shift/scale
     // the q_zero_point / q_scale or not?
     TORCH_CHECK(!options.has_dtype() || options.dtype() == self.dtype(),
@@ -231,10 +254,11 @@ Tensor empty_like(
                 " Input tensor's dtype: ", self.dtype());
     auto qscheme = self.qscheme();
     if (qscheme == kPerTensorAffine) {
-      return at::_empty_affine_quantized(self.sizes(), options,
+      return at::_empty_affine_quantized(self.sizes(), options.memory_format(memory_format),
                                          self.q_scale(),
                                          self.q_zero_point(),
-                                         memory_format);
+                                         // See Note [Explicit nullopt MemoryFormat argument]
+                                         c10::nullopt);
     } else if (qscheme == kPerChannelAffine) {
       // Copy the tensors with channels to avoid accidental overrides
       return at::_empty_per_channel_affine_quantized(
@@ -242,8 +266,9 @@ Tensor empty_like(
           self.q_per_channel_scales().clone(at::MemoryFormat::Preserve),
           self.q_per_channel_zero_points().clone(at::MemoryFormat::Preserve),
           self.q_per_channel_axis(),
-          options,
-          memory_format);
+          options.memory_format(memory_format),
+          // See Note [Explicit nullopt MemoryFormat argument]
+          c10::nullopt);
     } else {
       TORCH_CHECK(false, "Unsupported qscheme: ", toString(qscheme));
     }
@@ -251,16 +276,16 @@ Tensor empty_like(
 
   Tensor result;
 
-  auto memory_format =
-      optional_memory_format.value_or(MemoryFormat::Preserve);
   if (memory_format == MemoryFormat::Preserve) {
     if (self.is_non_overlapping_and_dense()) {
-      result = at::empty_strided(self.sizes(), self.strides(), options);
+      result = at::empty_strided(self.sizes(), self.strides(), options.memory_format(c10::nullopt));
     } else {
-      result = at::empty(self.sizes(), options, self.suggest_memory_format());
+      // See Note [Explicit nullopt MemoryFormat argument]
+      result = at::empty(self.sizes(), options.memory_format(self.suggest_memory_format()), c10::nullopt);
     }
   } else {
-    result = at::empty(self.sizes(), options, memory_format);
+    // See Note [Explicit nullopt MemoryFormat argument]
+    result = at::empty(self.sizes(), options.memory_format(memory_format), c10::nullopt);
   }
 
   if (self.opt_names()) {
@@ -336,14 +361,6 @@ Tensor& full_out(Tensor& result, IntArrayRef size, Scalar fill_value) {
 Tensor full_like(
     const Tensor& self,
     Scalar fill_value,
-    c10::optional<c10::MemoryFormat> optional_memory_format) {
-  return native::full_like(
-      self, fill_value, self.options(), optional_memory_format);
-}
-
-Tensor full_like(
-    const Tensor& self,
-    Scalar fill_value,
     const TensorOptions& options,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
   auto result = at::empty_like(self, options, optional_memory_format);
@@ -402,13 +419,6 @@ Tensor ones_like(
   return result.fill_(1);
 }
 
-Tensor ones_like(
-    const Tensor& self,
-    c10::optional<c10::MemoryFormat> optional_memory_format) {
-  return native::ones_like(
-      self, self.options(), optional_memory_format);
-}
-
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ scalar_tensor ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor scalar_tensor(Scalar s, const TensorOptions& options) {
@@ -445,12 +455,6 @@ Tensor& rand_out(Tensor& result, IntArrayRef size) {
 Tensor& rand_out(Tensor& result, IntArrayRef size, Generator* generator) {
   result.resize_(size);
   return result.uniform_(0, 1, generator);
-}
-
-Tensor rand_like(
-    const Tensor& self,
-    c10::optional<c10::MemoryFormat> optional_memory_format) {
-  return native::rand_like(self, self.options(), optional_memory_format);
 }
 
 Tensor rand_like(
@@ -523,28 +527,10 @@ Tensor& randint_out(
 Tensor randint_like(
     const Tensor& self,
     int64_t high,
-    c10::optional<c10::MemoryFormat> optional_memory_format) {
-  return native::randint_like(
-      self, high, self.options(), optional_memory_format);
-}
-
-Tensor randint_like(
-    const Tensor& self,
-    int64_t low,
-    int64_t high,
-    c10::optional<c10::MemoryFormat> optional_memory_format) {
-  return native::randint_like(
-      self, low, high, self.options(), optional_memory_format);
-}
-
-Tensor randint_like(
-    const Tensor& self,
-    int64_t high,
     const TensorOptions& options,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
   auto result = at::empty_like(self, options, optional_memory_format);
   return result.random_(0, high, nullptr);
-  return native::randint(high, self.sizes(), nullptr, options);
 }
 
 Tensor randint_like(
@@ -587,12 +573,6 @@ Tensor& normal_out(Tensor& result, double mean, double std,
                    IntArrayRef size, Generator* generator) {
   result.resize_(size);
   return result.normal_(mean, std, generator);
-}
-
-Tensor randn_like(
-    const Tensor& self,
-    c10::optional<c10::MemoryFormat> optional_memory_format) {
-  return native::randn_like(self, self.options(), optional_memory_format);
 }
 
 Tensor randn_like(
@@ -677,10 +657,7 @@ Tensor range(
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triangle ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor tril_indices_cpu(
-    int64_t row, int64_t col, int64_t offset, const TensorOptions& options_) {
-
-  TensorOptions options = options_.dtype(options_.dtype_opt().value_or(scalarTypeToTypeMeta(kLong)));
-
+    int64_t row, int64_t col, int64_t offset, const TensorOptions& options) {
   check_args(row, col, options);
 
   auto tril_size = get_tril_size(row, col, offset);
@@ -725,10 +702,7 @@ Tensor tril_indices_cpu(
 }
 
 Tensor triu_indices_cpu(
-    int64_t row, int64_t col, int64_t offset, const TensorOptions& options_) {
-
-  TensorOptions options = options_.dtype(options_.dtype_opt().value_or(scalarTypeToTypeMeta(kLong)));
-
+    int64_t row, int64_t col, int64_t offset, const TensorOptions& options) {
   check_args(row, col, options);
 
   auto triu_size = row * col - get_tril_size(row, col, offset - 1);
@@ -778,12 +752,6 @@ Tensor& zeros_out(Tensor& result, IntArrayRef size) {
     result.resize_(size);
   }
   return result.zero_();
-}
-
-Tensor zeros_like(
-    const Tensor& self,
-    c10::optional<c10::MemoryFormat> optional_memory_format) {
-  return native::zeros_like(self, self.options(), optional_memory_format);
 }
 
 Tensor zeros_like(

@@ -136,7 +136,7 @@ class TORCH_API RNNImpl : public detail::RNNImplBase<RNNImpl> {
   RNNOutput forward(const Tensor& input, Tensor state = {});
  protected:
   FORWARD_HAS_DEFAULT_ARGS({1, AnyValue(Tensor())})
-
+ public:
   RNNOptions options;
 };
 

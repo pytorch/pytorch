@@ -892,6 +892,181 @@ class TestList(JitTestCase):
             check_list(min_floatlist, float_li)
             check_list(max_floatlist, float_li)
 
+    def test_to_list(self):
+        """Unit tests for Tensor.tolist() function."""
+
+        """
+        Boolean dtype unit tests.
+        """
+        def to_list_bool_0D(x):
+            # type: (torch.Tensor) -> bool
+            li = torch.jit.annotate(bool, x.tolist())
+            return li
+
+        def to_list_bool_1D(x):
+            # type: (torch.Tensor) -> List[bool]
+            li = torch.jit.annotate(List[bool], x.tolist())
+            return li
+
+        def to_list_bool_2D(x):
+            # type: (torch.Tensor) -> List[List[bool]]
+            li = torch.jit.annotate(List[List[bool]], x.tolist())
+            return li
+
+        def to_list_bool_3D(x):
+            # type: (torch.Tensor) -> List[List[List[bool]]]
+            li = torch.jit.annotate(List[List[List[bool]]], x.tolist())
+            return li
+
+        self.checkScript(to_list_bool_0D, (torch.tensor(False, dtype=torch.bool),))
+        bool_input_1D = torch.tensor([True, False, True, False], dtype=torch.bool)
+        self.checkScript(to_list_bool_1D, (bool_input_1D,))
+        bool_input_2D = torch.tensor(
+            [[True, True, False], [False, True, False]], dtype=torch.bool
+        )
+        self.checkScript(to_list_bool_2D, (bool_input_2D,))
+        bool_input_3D = torch.tensor(
+            [[[True, False], [False, True]], [[True, False], [False, False]]],
+            dtype=torch.bool,
+        )
+        self.checkScript(to_list_bool_3D, (bool_input_3D,))
+        bool_input_noncontiguous = torch.tensor(
+            [[[True, False], [False, True]], [[True, False], [False, False]]],
+            dtype=torch.bool,
+        ).transpose(0, 1)
+        self.checkScript(to_list_bool_3D, (bool_input_noncontiguous,))
+
+        """
+        Int dtype unit tests.
+        """
+        def to_list_int_0D(x):
+            # type: (torch.Tensor) -> int
+            li = torch.jit.annotate(int, x.tolist())
+            return li
+
+        def to_list_int_1D(x):
+            # type: (torch.Tensor) -> List[int]
+            li = torch.jit.annotate(List[int], x.tolist())
+            return li
+
+        def to_list_int_2D(x):
+            # type: (torch.Tensor) -> List[List[int]]
+            li = torch.jit.annotate(List[List[int]], x.tolist())
+            return li
+
+        def to_list_int_3D(x):
+            # type: (torch.Tensor) -> List[List[List[int]]]
+            li = torch.jit.annotate(List[List[List[int]]], x.tolist())
+            return li
+
+        self.checkScript(to_list_int_0D, (torch.tensor(1, dtype=torch.long),))
+        int_input_1D = torch.tensor([1, 2, 3, 4], dtype=torch.long)
+        self.checkScript(to_list_int_1D, (int_input_1D,))
+        int_input_2D = torch.tensor([[1, 2, 3], [3, 4, 5]], dtype=torch.long)
+        self.checkScript(to_list_int_2D, (int_input_2D,))
+        int_input_3D = torch.tensor(
+            [[[1, 2], [3, 4]], [[5, 6], [7, 8]]], dtype=torch.long
+        )
+        self.checkScript(to_list_int_3D, (int_input_3D,))
+        int_input_noncontiguous = torch.tensor(
+            [[[1, 2], [3, 4]], [[5, 6], [7, 8]]], dtype=torch.long
+        ).transpose(0, 1)
+        self.checkScript(to_list_int_3D, (int_input_noncontiguous,))
+
+        """
+        Float dtype unit tests.
+        """
+        def to_list_float_0D(x):
+            # type: (torch.Tensor) -> float
+            li = torch.jit.annotate(float, x.tolist())
+            return li
+
+        def to_list_float_1D(x):
+            # type: (torch.Tensor) -> List[float]
+            li = torch.jit.annotate(List[float], x.tolist())
+            return li
+
+        def to_list_float_2D(x):
+            # type: (torch.Tensor) -> List[List[float]]
+            li = torch.jit.annotate(List[List[float]], x.tolist())
+            return li
+
+        def to_list_float_3D(x):
+            # type: (torch.Tensor) -> List[List[List[float]]]
+            li = torch.jit.annotate(List[List[List[float]]], x.tolist())
+            return li
+
+        self.checkScript(to_list_float_0D, (torch.randn(5, dtype=torch.double)[0],))
+        self.checkScript(to_list_float_1D, (torch.randn(5, dtype=torch.double),))
+        self.checkScript(to_list_float_2D, (torch.randn(5, 6, dtype=torch.double),))
+        self.checkScript(to_list_float_3D, (torch.randn(5, 6, 7, dtype=torch.double),))
+        self.checkScript(to_list_float_3D, (torch.randn(5, 6, 7, dtype=torch.double).transpose(0, 1),))
+
+        """
+        Non-happy path tests:
+            - missing type annotation
+            - mismatch between type annotation and input
+            - type annotation with unsupported type
+            - type annotation with the wrong dimension
+            - type annotation with scalar type that doesn't match the input scalar type
+        """
+        def to_list_missing_type_annotation(x):
+            # type: (torch.Tensor) -> List[float]
+            li = x.tolist()
+            return li
+
+        def to_list_incorrect_type_annotation(x):
+            # type: (torch.Tensor) -> List[float]
+            li = torch.jit.annotate(float, x.tolist())
+            return li
+
+        def to_list_unsupported_type_annotation(x):
+            # type: (torch.Tensor) -> List[float]
+            li = torch.jit.annotate(List[str], x.tolist())
+            return li
+
+        def to_list_type_annotation_wrong_dim(x):
+            # type: (torch.Tensor) -> List[List[float]]
+            li = torch.jit.annotate(List[List[float]], x.tolist())
+            return li
+
+        def to_list_type_annotation_incorrect_scalar_type(x):
+            # type: (torch.Tensor) -> List[float]
+            li = torch.jit.annotate(List[float], x.tolist())
+            return li
+
+        with self.assertRaisesRegex(
+            RuntimeError, r"Expected type hint for result of tolist()"
+        ):
+            self.checkScript(to_list_missing_type_annotation, (torch.randn(5),))
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"Return value was annotated as having type List\[float\] but is actually of type float",
+        ):
+            self.checkScript(to_list_incorrect_type_annotation, (torch.randn(5),))
+
+        with self.assertRaisesRegex(
+            RuntimeError, r"str is not one of the supported element types for tolist"
+        ):
+            self.checkScript(to_list_unsupported_type_annotation, (torch.randn(5),))
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"Output annotation list dimension and runtime tensor dimension must match",
+        ):
+            self.checkScript(to_list_type_annotation_wrong_dim, (torch.randn(5, dtype=torch.double),))
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"Output annotation element type and runtime tensor element type must match",
+        ):
+            self.checkScript(
+                to_list_type_annotation_incorrect_scalar_type,
+                (torch.ones(5, dtype=torch.long),),
+            )
+
+
 class TestDict(JitTestCase):
     def dict(self):
         return {u'a': torch.ones(1), u'b': torch.ones(1) + 1, u'c': torch.ones(1) + 2}

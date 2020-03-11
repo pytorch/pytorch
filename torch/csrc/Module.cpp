@@ -40,9 +40,9 @@
 #include <torch/csrc/utils/tensor_memoryformats.h>
 #include <torch/csrc/utils/tensor_qschemes.h>
 #include <torch/csrc/utils/tensor_numpy.h>
-#include <torch/csrc/jit/python_tracer.h>
-#include <torch/csrc/jit/init.h>
-#include <torch/csrc/jit/python_ir.h>
+#include <torch/csrc/jit/python/python_tracer.h>
+#include <torch/csrc/jit/python/init.h>
+#include <torch/csrc/jit/python/python_ir.h>
 #include <torch/csrc/onnx/init.h>
 #include <torch/csrc/utils/init.h>
 #include <torch/csrc/api/include/torch/python/init.h>

@@ -173,6 +173,34 @@ PyObject * THCPModule_cudaHostAllocator(PyObject *_unused, PyObject *noargs)
   END_HANDLE_TH_ERRORS
 }
 
+PyObject * THCPModule_cudaCachingAllocator_raw_alloc(PyObject *_unused, PyObject *args){
+  HANDLE_TH_ERRORS
+  PyObject* size_o = nullptr;
+  PyObject* stream_o = nullptr;
+  if(!PyArg_ParseTuple(args, "OO", &size_o, &stream_o)) {
+    THPUtils_invalidArguments(
+        args,
+        nullptr,
+        "caching_allocator_alloc",
+        1,
+        "(ssize_t size, intptr_t stream);");
+    return nullptr;
+  }
+  ssize_t size = PyLong_AsSsize_t(size_o);
+  cudaStream_t stream = static_cast<cudaStream_t>(PyLong_AsVoidPtr(stream_o));
+  void* mem = c10::cuda::CUDACachingAllocator::raw_alloc_with_stream(size, stream);
+  return PyLong_FromVoidPtr(mem);
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject * THCPModule_cudaCachingAllocator_raw_delete(PyObject *_unused, PyObject *obj){
+  HANDLE_TH_ERRORS
+  void* mem_ptr = PyLong_AsVoidPtr(obj);
+  c10::cuda::CUDACachingAllocator::raw_delete(mem_ptr);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject * THCPModule_cudaSynchronize(PyObject *_unused, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
@@ -487,6 +515,8 @@ static struct PyMethodDef _THCPModule_methods[] = {
   {"_cuda_resetPeakMemoryStats", (PyCFunction) THCPModule_resetPeakMemoryStats, METH_O,  nullptr},
   {"_cuda_memorySnapshot", (PyCFunction) THCPModule_memorySnapshot, METH_NOARGS, nullptr},
   {"_cuda_cudaHostAllocator", (PyCFunction)THCPModule_cudaHostAllocator, METH_NOARGS, nullptr},
+  {"_cuda_cudaCachingAllocator_raw_alloc", (PyCFunction)THCPModule_cudaCachingAllocator_raw_alloc, METH_VARARGS, nullptr},
+  {"_cuda_cudaCachingAllocator_raw_delete", (PyCFunction)THCPModule_cudaCachingAllocator_raw_delete, METH_O, nullptr},
   {"_cuda_synchronize", (PyCFunction)THCPModule_cudaSynchronize, METH_NOARGS, nullptr},
   {"_cuda_ipc_collect", (PyCFunction)THCPModule_cudaIPCCollect, METH_NOARGS, nullptr},
   {"_cuda_sleep", (PyCFunction)THCPModule_cudaSleep, METH_O, nullptr},

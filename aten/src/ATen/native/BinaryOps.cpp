@@ -33,6 +33,8 @@ DEFINE_DISPATCH(sigmoid_backward_stub);
 DEFINE_DISPATCH(tanh_backward_stub);
 DEFINE_DISPATCH(max_elementwise_stub);
 DEFINE_DISPATCH(min_elementwise_stub);
+DEFINE_DISPATCH(fmod_stub);
+DEFINE_DISPATCH(fmod_scalar_stub);
 
 Tensor& add_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
   auto iter = TensorIterator::binary_op(result, self, other,
@@ -78,6 +80,36 @@ Tensor truncate(const Tensor& tensor) {
     return tensor.trunc();
   }
   return tensor;
+}
+
+Tensor& true_divide_out(Tensor& result, const Tensor& self, const Tensor& divisor) {
+  TORCH_CHECK(!isIntegralType(result.scalar_type(), /*includeBool=*/ true),
+            "True division requires a floating output type, but got ",
+            result.scalar_type());
+  auto iter = TensorIterator::binary_op(result, self, divisor, /*check_mem_overlap=*/ true);
+  div_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor true_divide(const Tensor& self, const Tensor& divisor) {
+  // If both inputs have integral (or bool) types, sets the output to have
+  // the default (floating) scalar type
+  if (isIntegralType(self.scalar_type(), /*includeBool=*/ true)
+   && isIntegralType(divisor.scalar_type(), /*includeBool=*/ true)) {
+    const auto scalar_type = typeMetaToScalarType(c10::get_default_dtype());
+    Tensor result = at::empty({0}, self.options().dtype(scalar_type));
+
+    auto iter = TensorIterator::binary_op(result, self, divisor);
+    div_stub(iter.device_type(), iter);
+    return result;
+  }
+
+  // If at least one input is non-integral (or bool) participates in
+  // type promotion like other binary ufuncs
+  Tensor result;
+  auto iter = TensorIterator::binary_op(result, self, divisor);
+  div_stub(iter.device_type(), iter);
+  return iter.output();
 }
 
 Tensor floor_divide(const Tensor& input, const Tensor& other) {
@@ -388,7 +420,7 @@ Tensor __lshift__(const Tensor& self, const Tensor& other) {
   return iter.output();
 }
 
-Tensor __lshift__(const Tensor& self, Scalar other) { 
+Tensor __lshift__(const Tensor& self, Scalar other) {
   Tensor result;
   auto wrapper = wrapped_scalar_tensor(other).toType(self.scalar_type());
   auto iter = TensorIterator::binary_op(result, self, wrapper);
@@ -416,7 +448,7 @@ Tensor __rshift__(const Tensor& self, const Tensor& other) {
   return iter.output();
 }
 
-Tensor __rshift__(const Tensor& self, Scalar other) { 
+Tensor __rshift__(const Tensor& self, Scalar other) {
   Tensor result;
   auto wrapper = wrapped_scalar_tensor(other).toType(self.scalar_type());
   auto iter = TensorIterator::binary_op(result, self, wrapper);
@@ -585,6 +617,44 @@ Tensor min(const Tensor& self, const Tensor& other) {
 }
 
 Tensor& min_(Tensor& self, const Tensor& other) { return at::min_out(self, self, other); }
+
+Tensor& fmod_out(Tensor & result, const Tensor& self, const Tensor& other) {
+  auto iter = TensorIterator::binary_op(result, self, other,
+                                        /*check_mem_overlap=*/true);
+  TORCH_CHECK(iter.device_type() == at::kCPU, "Native fmod only supports CPU");
+  fmod_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor& fmod_out(Tensor & result, const Tensor& self, Scalar other) {
+  auto iter = TensorIterator::unary_op(result, self,
+                                       /*check_mem_overlap=*/true);
+  TORCH_CHECK(iter.device_type() == at::kCPU, "Native fmod only supports CPU");
+  fmod_scalar_stub(iter.device_type(), iter, other);
+  return result;
+}
+
+Tensor fmod(const Tensor& self, const Tensor & other) {
+  Tensor result = at::empty({0}, self.options());
+  return at::fmod_out(result, self, other);
+}
+
+Tensor fmod(const Tensor& self, Scalar other) {
+  Tensor result = at::empty({0}, self.options());
+  return at::fmod_out(result, self, other);
+}
+
+Tensor& fmod_(Tensor& self, const Tensor& other) {
+  return at::fmod_out(self, self, other);
+}
+
+Tensor& fmod_(Tensor& self, Scalar other) {
+  return at::fmod_out(self, self, other);
+}
+
+Tensor true_divide(const Tensor& self, Scalar divisor) {
+  return at::true_divide(self, wrapped_scalar_tensor(divisor)); // redispatch!
+}
 
 }
 }  // namespace at

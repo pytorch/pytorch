@@ -109,30 +109,22 @@ ${return_type} ${type_wrapper_name}(${type_method_formals}) {
 # better to do it once at a schema registration so that we don't have to
 # repeat ourselves everywhere else.
 SCHEMA_REGISTRATION = CodeTemplate("""\
-.op(torch::RegisterOperators::options()
-  .schema("${schema_string}")
-  .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+.def("${schema_string}")
 """)
 
 DEFAULT_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
-.op(torch::RegisterOperators::options()
-  .schema("${schema_string}")
-  .impl_unboxedOnlyCatchAllKernel<decltype(TypeDefault::${type_wrapper_name}), &TypeDefault::${type_wrapper_name}>())
+.def("${schema_string}", CppFunction::makeUnboxedOnly(TypeDefault::${type_wrapper_name}))
 """)
 BACKEND_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
-.op(torch::RegisterOperators::options()
-  .schema("${schema_string}")
-  .impl_unboxedOnlyKernel<decltype(${Type}::${type_wrapper_name}), &${Type}::${type_wrapper_name}>(DispatchKey::${Backend}TensorId))
+.def("${schema_string}", torch::dispatch(
+    DispatchKey::${Backend}TensorId,
+    CppFunction::makeUnboxedOnly(${Type}::${type_wrapper_name})))
 """)
 DEFAULT_FUNCTION_REGISTRATION = CodeTemplate("""\
-.op(torch::RegisterOperators::options()
-  .schema("${schema_string}")
-  .catchAllKernel(&TypeDefault::${type_wrapper_name}))
+.def("${schema_string}", &TypeDefault::${type_wrapper_name})
 """)
 BACKEND_FUNCTION_REGISTRATION = CodeTemplate("""\
-.op(torch::RegisterOperators::options()
-  .schema("${schema_string}")
-  .kernel(DispatchKey::${Backend}TensorId, &${Type}::${type_wrapper_name}))
+.def("${schema_string}", torch::dispatch(DispatchKey::${Backend}TensorId, &${Type}::${type_wrapper_name}))
 """)
 
 # add non-virtual declaration to TensorBody.h
@@ -432,7 +424,6 @@ THFormal = TypedDict('THFormal', {
     # Broadcast is originally a str but gets unwrapped to a List or Dict in-place
     'broadcast': Any,
     'resize': str,
-    'cpu_zero': bool,
     'zero': bool,
 }, total=False)
 
@@ -623,10 +614,7 @@ def named_guard(option, tensors, tensorlists):
         named_conditions.append('at::has_names({})'.format(tensorlist))
     return ("""\
 if ({named_conditions}) {{
-    AT_ERROR(
-        "{op} is not yet supported with named tensors. Please drop names via "
-        "`tensor = tensor.rename(None)`, call the op with an unnamed tensor, "
-        "and set names on the result of the operation.");
+    AT_ERROR("{op}", named_tensors_unsupported_error);
 }}""".format(named_conditions=' || '.join(named_conditions), op=option['name']))
 
 
@@ -1395,11 +1383,7 @@ def create_derived(backend_type_env, declarations):
         if isinstance(resize, str):
             return "{}.resize_({}.sizes());".format(arg['name'], resize)
         else:
-            resize_scalar = arg.get('resize_scalar', False)
-            if resize_scalar:
-                dims = ['{}.dim() == 0 ? 1 : {}.size({})'.format(name, name, dim) for name, dim in resize]
-            else:
-                dims = ['{}.size({})'.format(name, dim) for name, dim in resize]
+            dims = ['{}.size({})'.format(name, dim) for name, dim in resize]
             return "{}.resize_({{ {} }});".format(arg['name'], ','.join(dims))
 
     def handle_call(env, option, cimpl):
@@ -1493,7 +1477,7 @@ def create_derived(backend_type_env, declarations):
                             initializers.append(resize_arg(arg))
 
                         # also special handling where we zero some outputs.
-                        if arg.get('zero', False) or (arg.get('cpu_zero', False) and not is_cuda):
+                        if arg.get('zero', False):
                             initializers.append("{}.zero_();".format(arg['name']))
 
                         # only initialize non-null arguments

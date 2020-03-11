@@ -103,8 +103,11 @@ A tensor can be created with :attr:`requires_grad=True` so that
             [ 2.0000,  2.0000]])
 
 Each tensor has an associated :class:`torch.Storage`, which holds its data.
-The tensor class provides multi-dimensional, `strided <https://en.wikipedia.org/wiki/Stride_of_an_array>`_
+The tensor class also provides multi-dimensional, `strided <https://en.wikipedia.org/wiki/Stride_of_an_array>`_
 view of a storage and defines numeric operations on it.
+
+.. note::
+   For more information on tensor views, see :ref:`tensor-view-doc`.
 
 .. note::
    For more information on the :class:`torch.dtype`, :class:`torch.device`, and
