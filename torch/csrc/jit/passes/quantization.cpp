@@ -788,8 +788,8 @@ void InsertObserversHelper::insertObserverFor(
     // the correct value
     call->replaceInput(1, v);
     observer_nodes_.emplace(call);
+    observed_values_.insert(call->output());
   }
-  observed_values_.insert(v);
 }
 
 void InsertObserversHelper::skipValuesInPattern(
@@ -1081,15 +1081,17 @@ InsertObserversHelper::insertObserversFor(
           block_observed_values.insert(n->outputs()[idx]);
         }
         for (auto i = 0; i < n->inputs().size(); ++i) {
-          if (input_observers[i] && !block_inputs_outputs.count(n->inputs()[i])
-              && !block_observed_values.count(n->inputs()[i])) {
+          if (input_observers[i] && !block_inputs_outputs.count(n->input(i))
+              && !block_observed_values.count(n->input(i))
+              && observed_values_.count(n->input(i)) {
             values_to_observe[n->inputs()[i]] = *input_observers[i];
             block_observed_values.insert(n->inputs()[i]);
           }
         }
         for (auto i = 0; i < n->outputs().size(); ++i) {
-          if (output_observers[i] && !block_inputs_outputs.count(n->outputs()[i])
-              && !block_observed_values.count(n->outputs()[i])) {
+          if (output_observers[i] && !block_inputs_outputs.count(n->output(i))
+              && !block_observed_values.count(n->output(i))
+              && !observed_values_.count(n->output(i))) {
             values_to_observe[n->outputs()[i]] = *output_observers[i];
             block_observed_values.insert(n->outputs()[i]);
           }
@@ -1097,7 +1099,9 @@ InsertObserversHelper::insertObserversFor(
       } else {
         for (Value* v : n->outputs()) {
           propagateObservedProperty(v, block_observed_values);
-          if (!block_inputs_outputs.count(v) && !block_observed_values.count(v)) {
+          if (!block_inputs_outputs.count(v) &&
+              !block_observed_values.count(v) &&
+              !observed_values_.count(v)) {
             if (auto observer_opt = getObserverFor(v)) {
               values_to_observe[v] = *observer_opt;
               block_observed_values.insert(v);
