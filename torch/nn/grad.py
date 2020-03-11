@@ -15,7 +15,7 @@ def _grad_input_padding(grad_output, input_size, stride, padding, kernel_size, d
                          .format(k + 2, len(input_size)))
 
     def dim_size(d):
-        return ((grad_output.size(d + 2) - 1) * stride[d] - 2 * padding[d] + 1 
+        return ((grad_output.size(d + 2) - 1) * stride[d] - 2 * padding[d] + 1
                 + dilation[d] * (kernel_size[d] - 1))
 
     min_sizes = [dim_size(d) for d in range(k)]
