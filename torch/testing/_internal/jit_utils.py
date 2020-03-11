@@ -385,7 +385,9 @@ class JitTestCase(TestCase):
                         source,
                         inputs,
                         script.__name__,
-                        capture_output,
+                        optimize=optimize,
+                        inputs_requires_grad=inputs_requires_grad,
+                        capture_output=capture_output,
                         profiling=profiling,
                         frames_up=2)
 
@@ -632,3 +634,7 @@ def get_forward_graph(c):
 
 def get_module_method(m, module, method):
     return m._c.getattr(module)._get_method(method)
+
+def attrs_with_prefix(module, prefix):
+    return [x for x, _ in module._modules._c.items()
+            if x.startswith(prefix)]

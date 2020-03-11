@@ -1,4 +1,5 @@
 #include <limits>
+#include <utility>
 
 #include "caffe2/core/logging.h"
 #include "caffe2/opt/converter.h"
@@ -606,7 +607,7 @@ void injectDataEdgeIndicators(caffe2::NetDef* net) {
     caffe2::OperatorDef op;
     op.set_type("Export");
     op.add_input(output);
-    *net->add_op() = op;
+    *net->add_op() = std::move(op);
   }
   net->clear_external_input();
   net->clear_external_output();
