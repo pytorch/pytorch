@@ -443,21 +443,21 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/frontend/ir_emitter.cpp
     ${TORCH_SRC_DIR}/csrc/jit/print_handler.cpp
     ${TORCH_SRC_DIR}/csrc/jit/fuser/interface.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/fuser/common/arith.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/fuser/common/code_write.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/fuser/common/dispatch.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/fuser/common/fusion.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/fuser/common/ir.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/fuser/common/iriostream.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/fuser/common/iter_visitor.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/fuser/common/management.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/fuser/common/mutator.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/fuser/common/tensor.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/fuser/common/tensor_meta.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/fuser/common/transform_iter.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/fuser/common/transform_replay.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/fuser/common/type.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/fuser/common/utils.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/arith.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/code_write.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/dispatch.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/fusion.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/ir.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/iriostream.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/iter_visitor.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/management.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/mutator.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/tensor.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/tensor_meta.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/transform_iter.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/transform_replay.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/type.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/utils.cpp
     ${TORCH_SRC_DIR}/csrc/jit/register_prim_ops.cpp
     ${TORCH_SRC_DIR}/csrc/jit/register_string_ops.cpp
     ${TORCH_SRC_DIR}/csrc/jit/register_special_ops.cpp
@@ -568,11 +568,11 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
 
   if (USE_CUDA)
     list(APPEND Caffe2_GPU_SRCS
-      ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/interface.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/parser.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/partition.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/kernel.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/manager.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/interface.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/parser.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/partition.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/kernel.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/manager.cpp
       ${TORCH_SRC_DIR}/csrc/autograd/profiler_cuda.cpp
       ${TORCH_SRC_DIR}/csrc/autograd/functions/comm.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp
@@ -589,11 +589,11 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
 
   if (USE_ROCM)
     list(APPEND Caffe2_HIP_SRCS
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/fuser/cuda/fused_kernel.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/parser.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/partition.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/kernel.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/manager.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/interface.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/parser.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/partition.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/kernel.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/manager.cpp
       ${TORCH_SRC_DIR}/csrc/autograd/profiler_cuda.cpp
       ${TORCH_SRC_DIR}/csrc/autograd/functions/comm.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp
