@@ -3,6 +3,7 @@
 #include <torch/nn/cloneable.h>
 #include <torch/nn/options/activation.h>
 #include <torch/nn/functional/activation.h>
+#include <torch/nn/modules/common.h>
 #include <torch/nn/modules/linear.h>
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
@@ -523,7 +524,10 @@ class TORCH_API MultiheadAttentionImpl
   std::tuple<Tensor, Tensor> forward(const Tensor& query, const Tensor& key,
                  const Tensor& value, const Tensor& key_padding_mask = {},
                  bool need_weights = true, const Tensor& attn_mask = {});
+ protected:
+  FORWARD_HAS_DEFAULT_ARGS({3, AnyValue(Tensor())}, {4, AnyValue(true)}, {5, AnyValue(Tensor())})
 
+ public:
   void reset() override;
 
   void _reset_parameters();

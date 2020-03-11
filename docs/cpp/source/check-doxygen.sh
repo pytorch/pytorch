@@ -19,7 +19,6 @@ python aten/src/ATen/gen.py \
   -s aten/src/ATen \
   -d build/aten/src/ATen \
   aten/src/ATen/Declarations.cwrap \
-  aten/src/THNN/generic/THNN.h \
   aten/src/THCUNN/generic/THCUNN.h \
   aten/src/ATen/nn.yaml \
   aten/src/ATen/native/native_functions.yaml

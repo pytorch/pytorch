@@ -7,7 +7,7 @@
 #include <ATen/core/boxing/test_helpers.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/core/Tensor.h>
-#include <torch/csrc/jit/script/function_schema_parser.h>
+#include <torch/csrc/jit/frontend/function_schema_parser.h>
 
 /**
  * This file tests the legacy function-based API for registering kernels.

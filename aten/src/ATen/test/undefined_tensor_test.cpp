@@ -31,7 +31,7 @@ TEST(TestUndefined, UndefinedTest) {
   ASSERT_ANY_THROW(und.variable_data());
   ASSERT_ANY_THROW(und.tensor_data());
   ASSERT_ANY_THROW(und.is_view());
-  ASSERT_ANY_THROW(und.base());
+  ASSERT_ANY_THROW(und._base());
   ASSERT_ANY_THROW(und.name());
   ASSERT_ANY_THROW(und.grad_fn());
   ASSERT_ANY_THROW(und.remove_hook(0));

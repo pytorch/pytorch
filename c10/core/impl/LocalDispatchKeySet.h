@@ -61,6 +61,10 @@ C10_API LocalDispatchKeySet tls_local_dispatch_key_set();
 class C10_API IncludeDispatchKeyGuard {
 public:
   IncludeDispatchKeyGuard(DispatchKey);
+  IncludeDispatchKeyGuard(const IncludeDispatchKeyGuard&) = delete;
+  IncludeDispatchKeyGuard operator=(const IncludeDispatchKeyGuard&) = delete;
+  IncludeDispatchKeyGuard(IncludeDispatchKeyGuard&&) = delete;
+  IncludeDispatchKeyGuard operator=(IncludeDispatchKeyGuard&&) = delete;
   ~IncludeDispatchKeyGuard();
 private:
   // A little micro-optimization to save us from tls_get_addr call
@@ -73,6 +77,10 @@ private:
 class C10_API ExcludeDispatchKeyGuard {
 public:
   ExcludeDispatchKeyGuard(DispatchKey);
+  ExcludeDispatchKeyGuard(const ExcludeDispatchKeyGuard&) = delete;
+  ExcludeDispatchKeyGuard operator=(const ExcludeDispatchKeyGuard&) = delete;
+  ExcludeDispatchKeyGuard(ExcludeDispatchKeyGuard&&) = delete;
+  ExcludeDispatchKeyGuard operator=(ExcludeDispatchKeyGuard&&) = delete;
   ~ExcludeDispatchKeyGuard();
 private:
   // A little micro-optimization to save us from tls_get_addr call
@@ -95,9 +103,9 @@ private:
 // The non-RAII API is less efficient than the RAII guards because both the
 // getter and setter will do a tls_getaddr lookup (the RAII struct only needs one!)
 
-bool tls_is_dispatch_key_excluded(DispatchKey x);
-void tls_set_dispatch_key_excluded(DispatchKey x, bool desired_state);
-bool tls_is_dispatch_key_included(DispatchKey x);
-void tls_set_dispatch_key_included(DispatchKey x, bool desired_state);
+C10_API bool tls_is_dispatch_key_excluded(DispatchKey x);
+C10_API void tls_set_dispatch_key_excluded(DispatchKey x, bool desired_state);
+C10_API bool tls_is_dispatch_key_included(DispatchKey x);
+C10_API void tls_set_dispatch_key_included(DispatchKey x, bool desired_state);
 
 }} // namespace c10::impl

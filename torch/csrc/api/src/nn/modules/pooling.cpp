@@ -290,7 +290,7 @@ void FractionalMaxPool2dImpl::reset() {
     TORCH_CHECK(false, "only one of output_size and output_ratio may be specified");
   }
   if (options.output_ratio() != c10::nullopt) {
-    at::IntArrayRef output_ratio = at::IntArrayRef(options.output_ratio().value());
+    at::ArrayRef<double> output_ratio = at::ArrayRef<double>(options.output_ratio().value());
     if (!(0 < output_ratio[0] && output_ratio[0] < 1 &&
           0 < output_ratio[1] && output_ratio[1] < 1)) {
       TORCH_CHECK(false, "output_ratio must be between 0 and 1 (got ", output_ratio, ")");
@@ -331,7 +331,7 @@ void FractionalMaxPool3dImpl::reset() {
     TORCH_CHECK(false, "only one of output_size and output_ratio may be specified");
   }
   if (options.output_ratio() != c10::nullopt) {
-    at::IntArrayRef output_ratio = at::IntArrayRef(options.output_ratio().value());
+    at::ArrayRef<double> output_ratio = at::ArrayRef<double>(options.output_ratio().value());
     if (!(0 < output_ratio[0] && output_ratio[0] < 1 && 
           0 < output_ratio[1] && output_ratio[1] < 1 &&
           0 < output_ratio[2] && output_ratio[2] < 1)) {

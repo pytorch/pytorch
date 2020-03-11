@@ -661,6 +661,45 @@ static void fuseUnbindListUnpack(Block *b) {
   }
 }
 
+// Traced Split with list of sizes is being converted to ONNX as SplitToSequence + SequenceAt.
+// Example IR
+//  %2 : Tensor[] = onnx::SplitToSequence[axis=0](%input, %split_list)
+//  %3 : Float(), %4 : Float() = prim::ListUnpack(%2)
+//
+// Translates to ONNX:
+//  %2 : Tensor[] = onnx::SplitToSequence[axis=0](%input, %split_list)
+//  %3 : Tensor = onnx::Constant[value={1}]()
+//  %4 : Float() = onnx::SequenceAt(%2, %3)
+//  %5 : Tensor = onnx::Constant[value={0}]()
+//  %6 : Float() = onnx::SequenceAt(%2, %5)
+static void fuseSplitToSequenceListUnpack(Block *b) {
+  for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
+    for (auto* child_block : it->blocks()) {
+      fuseSplitToSequenceListUnpack(child_block);
+    }
+    if (it->kind() == prim::ListUnpack &&
+        it->input()->node()->kind() == onnx::SplitToSequence) {
+      Node* orig_split_to_sequence_node = it->input()->node();
+      for (size_t i = 0; i < it->outputs().size(); ++i) {
+        Node* split_const_node =  b->owningGraph()->create(onnx::Constant, 1);
+        auto tensor = at::empty(1, c10::kLong);
+        int64_t* data = tensor.data_ptr<int64_t>();
+        *data = i;
+        split_const_node->t_(
+          attr::value,
+          autograd::make_variable(tensor));
+        split_const_node->insertAfter(orig_split_to_sequence_node);
+        Node* seq_at_node =  b->owningGraph()->create(onnx::SequenceAt, {it->input(), split_const_node->output()});
+        seq_at_node->output()->copyMetadata(it->output(i));
+        it->output(i)->replaceAllUsesWith(seq_at_node->output());
+        seq_at_node->insertAfter(split_const_node);
+      }
+      it->removeAllInputs();
+      it.destroyCurrent();
+    }
+  }
+}
+
 // For ops such as meshgrid where output is a list of Tensors
 // (returns prim::ListConstruct), we need to unpack the list
 // before the pass which deletes ListConstruct.
@@ -734,7 +773,6 @@ static void convertSplitToDynamic(Block *b, int opset_version) {
     for (auto* child_block : it->blocks()) {
       convertSplitToDynamic(child_block, opset_version);
     }
-
     if (it->kind() == onnx::Split) {
       if (it->outputs().size() == 1 && it->output()->type()->kind() == TypeKind::ListType) {
         auto dim = it->i(attr::axis);
@@ -813,6 +851,7 @@ void PeepholeOptimizeONNX(std::shared_ptr<Graph>& graph, int opset_version, bool
   fuseTransposeIntoGemm(graph->block());
   speculateOps(graph->block());
   fuseListConstructListUnpack(graph->block());
+  fuseSplitToSequenceListUnpack(graph->block());
   fuseSplitListUnpack(graph->block());
   convertUnbindToSplit(graph->block(), opset_version);
   convertSplitToDynamic(graph->block(), opset_version);
