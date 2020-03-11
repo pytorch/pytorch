@@ -5,216 +5,101 @@
 #include <torch/csrc/jit/codegen/fuser/fallback.h>
 #include <torch/csrc/jit/codegen/fuser/kernel_cache.h>
 
-#include <iterator>
+#include <stdexcept>
 
 namespace torch {
 namespace jit {
 
-using namespace torch::jit::fuser;
+namespace detail {
 
-// Defines pure virtual destructor
-FusionBackend::~FusionBackend() { }
+// Note: CPU fusion is currently disabled due to test flakiness
+bool cpu_fuser_enabled = false;
 
-namespace {
+bool gpu_fuser_enabled = true;
 
-// TODO: ensure tensors are not sparse (for now)
-// TODO: ensure tensors are float tensors (for now)
-// Returns true iff:
-//  - There is at least one input and one output
-//  - All inputs are complete tensors or scalars
-//  - All outputs are complete tensors
-//  - All tensors are on the same device
-bool validateNode(const Node* const node) {
-  const auto inputs = node->inputs();
-  const auto outputs = node->outputs();
+} // namespace detail
 
-  if (inputs.size() == 0 || outputs.size() == 0) {
-    return false;
+int64_t registerFusion(const Node* fusion_group) {
+  return fuser::registerFusion(fusion_group);
+}
+
+void runFusion(const int64_t key, Stack& stack) {
+  const auto result = fuser::runFusion(key, stack);
+  if (!result)
+    fuser::runFallback(key, stack);
+}
+
+bool canFuseOnCPU() {
+  return fuser::hasFusionBackend(at::DeviceType::CPU) &&
+      detail::cpu_fuser_enabled;
+}
+
+bool canFuseOnGPU() {
+  return fuser::hasFusionBackend(at::DeviceType::CUDA) &&
+      detail::gpu_fuser_enabled;
+}
+
+void overrideCanFuseOnCPU(bool value) {
+  detail::cpu_fuser_enabled = value;
+}
+
+void overrideCanFuseOnGPU(bool value) {
+  detail::gpu_fuser_enabled = value;
+}
+
+// Uses the above interface by stuffing the graph into a node and treating that
+// node as a fusion group.
+std::vector<at::Tensor> debugLaunchGraph(
+    Graph& graph,
+    at::ArrayRef<at::Tensor> inputs) {
+  // Creates a fusion group node
+  auto wrapper_graph = std::make_shared<Graph>();
+  Node* fusion_group = wrapper_graph->insertNode(
+      wrapper_graph->createWithSubgraph(prim::FusionGroup));
+  fusion_group->g_(attr::Subgraph, graph.copy());
+  for (size_t i = 0; i < graph.inputs().size(); ++i) {
+    fusion_group->addInput(wrapper_graph->addInput());
+  }
+  for (size_t i = 0; i < graph.outputs().size(); ++i) {
+    wrapper_graph->registerOutput(fusion_group->addOutput());
   }
 
-  const auto device = getFusionDevice(node);
-
-  auto lambda = [device](
-    const at::ArrayRef<const Value*> values
-  , const bool allow_scalars) {
-    for (const auto* const val : values) {
-      if (val->isCompleteTensor()) {
-        const auto cur_device = *(val->type()->expect<TensorType>()->device());
-        if (device != cur_device) {
-          return false;
-        }
-      } else if (!allow_scalars || !isScalar(val)) {
-        return false;
-      }
-    }
-
-    return true;
-  };
-
-  return (lambda(inputs, true) && lambda(outputs, false));
+  // Creates the stack, registers and runs the fusion
+  Stack stack = fmap<IValue>(inputs);
+  const auto key = fuser::registerFusion(fusion_group);
+  fuser::runFusion(key, stack);
+  return fmap(stack, [](const IValue& iv) { return iv.toTensor(); });
 }
 
-std::mutex& fusionBackendLock() {
-  static std::mutex fusion_backends_lock_{};
-  return fusion_backends_lock_;
-}
-
-static std::unordered_map<at::Device::Type, FusionBackend*>&
-getFusionBackendsEx() {
-  static std::unordered_map<at::Device::Type, FusionBackend*> fusion_backends;
-  return fusion_backends;
-}
-
-} // namespace
-
-void registerFusionBackendEx(
-    at::Device::Type backend_type,
-    FusionBackend* backend) {
-  std::lock_guard<std::mutex> guard(fusionBackendLock());
-  getFusionBackendsEx()[backend_type] = backend;
-}
-
-bool hasFusionBackendEx(at::Device::Type backend_type) {
-  std::lock_guard<std::mutex> guard(fusionBackendLock());
-  return (getFusionBackendsEx().count(backend_type) > 0);
-}
-
-RegisterFusionBackendEx::RegisterFusionBackendEx(
-  at::Device::Type backend_type
-, FusionBackend* backend) {
-  registerFusionBackendEx(backend_type, backend);
-}
-
-// Returns true iff the node is fusible
-bool isFusible(const Node* const node) {
-  const auto device_type = c10::kCUDA;
-  return (getFusionBackendsEx().count(device_type) > 0) &&
-      getFusionBackendsEx()[device_type]->isFusible(node);
-
-  //if (!validateNode(node)) {
-    //return false;
-  //}
-
-  //const auto device_type = getFusionDeviceType(node);
-  //switch (device_type) {
-  //  case c10::kCPU:
-  //  case c10::kCUDA:
-  //    return (getFusionBackendsEx().count(device_type) > 0) &&
-  //      getFusionBackendsEx()[device_type]->isFusible(node);
-  //  default:
-  //    return false;
-  //}
-
-  //TORCH_CHECK(false, "End of non-void function");
-}
-
-bool isFusible(
-    const Node* const fusion,
-    const Node* const node) {
-  const auto device_type = c10::kCUDA;
-  return (getFusionBackendsEx().count(device_type) > 0) &&
-      getFusionBackendsEx()[device_type]->isFusible(fusion, node);
-}
-
-// Returns the key corresponding to the fusion
-int fuse(const Node* const node) {
-  TORCH_CHECK(isFusible(node), "Asked to create an impossible fusion!");
-
-  const auto device_type = getFusionDeviceType(node);
-
-  switch (device_type) {
-    case c10::kCPU:
-    case c10::kCUDA:
-      TORCH_CHECK((getFusionBackendsEx().count(device_type) > 0),
-          "Trying to fuse on device type without register FusionBackend!");
-      return getFusionBackendsEx()[device_type]->fuse(node);
-    default:
-      TORCH_CHECK(false, "Trying to fuse on device type that doesn't support fusion!");
+std::string debugGetFusedKernelCode(
+    Graph& graph,
+    at::ArrayRef<at::Tensor> inputs) {
+  // Creates a fusion group node
+  auto wrapper_graph = std::make_shared<Graph>();
+  Node* fusion_group =
+      wrapper_graph->insertNode(wrapper_graph->createWithSubgraph(prim::FusionGroup));
+  fusion_group->g_(attr::Subgraph, graph.copy());
+  for (size_t i = 0; i < graph.inputs().size(); ++i) {
+    fusion_group->addInput(wrapper_graph->addInput());
+  }
+  for (size_t i = 0; i < graph.outputs().size(); ++i) {
+    wrapper_graph->registerOutput(fusion_group->addOutput());
   }
 
-  TORCH_CHECK(false, "End of non-void function");
+  // Creates the stack, registers and runs the fusion
+  Stack stack = fmap<IValue>(inputs);
+  const auto key = fuser::registerFusion(fusion_group);
+
+  std::string code;
+  if (!fuser::runFusion(key, stack, &code)) {
+    throw std::runtime_error("Could not run fusion for graph");
+  }
+
+  return code;
 }
 
-void compileFusion(Node* fusion) {
-  const auto device_type = c10::kCUDA;
-  assert(getFusionBackendsEx().count(device_type) > 0);
-  return getFusionBackendsEx()[device_type]->compileFusion(fusion);
-  /*
-  const auto device_type = getFusionDeviceType(fusion);
-
-  switch (device_type) {
-    case c10::kCPU:
-    case c10::kCUDA:
-      TORCH_CHECK((getFusionBackendsEx().count(device_type) > 0),
-          "Trying to compile fusion on device type without register FusionBackend!");
-      return getFusionBackendsEx()[device_type]->compileFusion(fusion);
-    default:
-      TORCH_CHECK(false, "Trying to fuse on device type that doesn't support fusion!");
-  }
-
-  TORCH_CHECK(false, "End of function should not be reached!");
-   */
-}
-
-// Acquires inputs, allocates outputs, and calls fusion
-// TODO: outputs should be preallocated in the graph (see fusion pass)
-void callFusion(const Node* const fusion, Stack& stack) {
-  const auto device_type = c10::kCUDA;
-  assert(getFusionBackendsEx().count(device_type) > 0);
-  return getFusionBackendsEx()[device_type]->callFusion(fusion, stack);
-  /*
-  // Acquires inputs
-  const Graph& graph = *fusion->g(attr::Subgraph);
-  const auto nInputs = graph.inputs().size();
-  at::ArrayRef<IValue> inputs = last(stack, nInputs);
-  //Life time issue, can't drop inputs from stack yet, as inputs are `ArrayRef`
-  //drop(stack, nInputs);
-
-  // Constructs output
-  std::vector<at::Tensor> outputs;
-  for (const auto* const output : graph.outputs()) {
-    auto type = output->type()->expect<TensorType>();
-
-    const auto device = *(type->device());
-    const auto scalar_type = *(type->scalarType());
-
-    auto options = at::TensorOptions()
-      .dtype(scalar_type)
-      .layout(at::kStrided)
-      .device(device)
-      .requires_grad(type->requires_grad());
-
-    const auto sizes = extractSizes(type);
-
-    //auto tensor = at::empty({10, 7, 3, 5}, options);
-    auto tensor = at::empty(sizes, options);
-    outputs.push_back(tensor);
-  }
-
-  // Adds outputs to stack
-  stack.insert(
-    stack.end()
-  , outputs.begin()
-  , outputs.end());
-  // Life time issue, can't remove outputs from stack yet, as outputs is used
-  // later in callFusionOnXXX;
-  //, std::make_move_iterator(outputs.begin())
-  //, std::make_move_iterator(outputs.end()));
-
-  // Calls fusion
-  const auto device = *(graph.outputs()[0]->type()->expect<TensorType>()->device());
-  switch(device.type()) {
-    case c10::kCPU:
-    case c10::kCUDA:
-      TORCH_CHECK((getFusionBackendsEx().count(device.type()) > 0),
-          "Trying to run fusion on device type without register FusionBackend!");
-      return getFusionBackendsEx()[device.type()]->callFusion(fusion, outputs, inputs);
-    default:
-      TORCH_CHECK(false, "Acquired an unknown fusion device type!");
-  }
-  // TODO: I probably messed up here, since I just pushed outputs to stack.
-  drop(stack, nInputs);
-  */
+size_t nCompiledKernels() {
+  return fuser::nCompiledKernels();
 }
 
 } // namespace jit
