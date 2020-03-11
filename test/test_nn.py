@@ -9381,7 +9381,7 @@ class TestNNDeviceType(NNTestCase):
             self.assertTrue(ref_out.is_contiguous())
             self.assertTrue(torch.allclose(out, ref_out))
             self.assertTrue(torch.allclose(input.grad, ref_input.grad))
-        
+
         helper(4, 8, 8, 8, 7)
         helper(200, 512, 28, 28, 2)
 
