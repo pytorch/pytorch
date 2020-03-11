@@ -2780,22 +2780,22 @@ def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=
     return interpolate(input, size, scale_factor, mode, align_corners)
 
 @overload  # noqa: F811
-def _interp_output_size(dim, closed_over_args):
+def _interp_output_size(dim, closed_over_args):  # noqa: F811
     # type: (int, Tuple[Tensor, Optional[int], Optional[List[float]], Optional[bool]]) -> List[int]
     pass
 
 @overload  # noqa: F811
-def _interp_output_size(dim, closed_over_args):
+def _interp_output_size(dim, closed_over_args):  # noqa: F811
     # type: (int, Tuple[Tensor, Optional[List[int]], Optional[List[float]], Optional[bool]]) -> List[int]
     pass
 
 @overload  # noqa: F811
-def _interp_output_size(dim, closed_over_args):
+def _interp_output_size(dim, closed_over_args):  # noqa: F811
     # type: (int, Tuple[Tensor, Optional[int], Optional[float], Optional[bool]]) -> List[int]
     pass
 
 @overload  # noqa: F811
-def _interp_output_size(dim, closed_over_args):
+def _interp_output_size(dim, closed_over_args):  # noqa: F811
     # type: (int, Tuple[Tensor, Optional[List[int]], Optional[float], Optional[bool]]) -> List[int]
     pass
 
@@ -2847,22 +2847,22 @@ def _interp_output_size(dim, closed_over_args):  # noqa: F811
     return [int(math.floor(float(input.size(i + 2)) * scale_factors[i])) for i in range(dim)]
 
 @overload  # noqa: F811
-def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corners=None, recompute_scale_factor=None):
+def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corners=None, recompute_scale_factor=None):  # noqa: F811
     # type: (Tensor, Optional[int], Optional[List[float]], str, Optional[bool], Optional[bool]) -> Tensor
     pass
 
 @overload  # noqa: F811
-def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corners=None, recompute_scale_factor=None):
+def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corners=None, recompute_scale_factor=None):  # noqa: F811
     # type: (Tensor, Optional[List[int]], Optional[List[float]], str, Optional[bool], Optional[bool]) -> Tensor
     pass
 
 @overload  # noqa: F811
-def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corners=None, recompute_scale_factor=None):
+def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corners=None, recompute_scale_factor=None):  # noqa: F811
     # type: (Tensor, Optional[int], Optional[float], str, Optional[bool], Optional[bool]) -> Tensor
     pass
 
 @overload  # noqa: F811
-def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corners=None, recompute_scale_factor=None):
+def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corners=None, recompute_scale_factor=None):  # noqa: F811
     # type: (Tensor, Optional[List[int]], Optional[float], str, Optional[bool], Optional[bool]) -> Tensor
     pass
 
@@ -3013,12 +3013,12 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
                                   " (got {})".format(input.dim(), mode))
 
 @overload  # noqa: F811
-def upsample_nearest(input, size=None, scale_factor=None):
+def upsample_nearest(input, size=None, scale_factor=None):  # noqa: F811
     # type: (Tensor, Optional[int], Optional[float]) -> Tensor
     pass
 
 @overload  # noqa: F811
-def upsample_nearest(input, size=None, scale_factor=None):
+def upsample_nearest(input, size=None, scale_factor=None):  # noqa: F811
     # type: (Tensor, Optional[List[int]], Optional[float]) -> Tensor
     pass
 
@@ -3045,22 +3045,22 @@ def upsample_nearest(input, size=None, scale_factor=None):  # noqa: F811
     return interpolate(input, size, scale_factor, mode='nearest')
 
 @overload  # noqa: F811
-def upsample_bilinear(input, size=None, scale_factor=None):
+def upsample_bilinear(input, size=None, scale_factor=None):  # noqa: F811
     # type: (Tensor, Optional[int], Optional[float]) -> Tensor
     pass
 
 @overload  # noqa: F811
-def upsample_bilinear(input, size=None, scale_factor=None):
+def upsample_bilinear(input, size=None, scale_factor=None):  # noqa: F811
     # type: (Tensor, Optional[List[int]], Optional[float]) -> Tensor
     pass
 
 @overload  # noqa: F811
-def upsample_bilinear(input, size=None, scale_factor=None):
+def upsample_bilinear(input, size=None, scale_factor=None):  # noqa: F811
     # type: (Tensor, Optional[int], Optional[List[float]]) -> Tensor
     pass
 
 @overload  # noqa: F811
-def upsample_bilinear(input, size=None, scale_factor=None):
+def upsample_bilinear(input, size=None, scale_factor=None):  # noqa: F811
     # type: (Tensor, Optional[List[int]], Optional[List[float]]) -> Tensor
     pass
 
