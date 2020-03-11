@@ -48,17 +48,12 @@ void OperatorEntry::prepareForDeregistration() {
 }
 
 namespace {
-  void checkSchema(const OperatorName& name, const FunctionSchema& expected, const FunctionSchema& actual) {
-    if (!actual.isDefaultAliasAnalysisKind()) {
-      TORCH_CHECK(expected.aliasAnalysis() == actual.aliasAnalysis(),
-          "In ", toString(name) , " registration: Specified alias analysis kind [", toString(expected.aliasAnalysis()),
-          "] doesn't match actual alias analysis kind [", toString(actual.aliasAnalysis()), "]");
-    }
-    c10::optional<std::string> schema_difference = findSchemaDifferences(expected, actual);
+  void checkSchema(const OperatorName& name, const FunctionSchema& from_def, const FunctionSchema& inferred) {
+    c10::optional<std::string> schema_difference = findSchemaDifferences(inferred, from_def);
     if (schema_difference.has_value()) {
       TORCH_CHECK(false,
-        "In operator registration: Specified function schema [", toString(expected), "] ",
-        "doesn't match inferred function schema [", toString(actual), "]. ",
+        "In registration for ", toString(name), ": the inferred function schema \"", toString(inferred), "\" ",
+        "doesn't schema for this operator \"", toString(from_def), "\". ",
         *schema_difference);
     }
   }

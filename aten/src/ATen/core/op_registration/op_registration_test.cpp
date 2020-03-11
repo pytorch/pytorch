@@ -42,19 +42,15 @@ private:
 TEST(OperatorRegistrationTest, whenRegisteringSameSchemaWithAliasAnalysisAfterRegisteringWithoutAliasAnalysis_thenCanBeCalled) {
   {
     auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<DummyKernel>(c10::DispatchKey::CPUTensorId));
-    auto registrar2 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<DummyKernel>(c10::DispatchKey::XLATensorId).aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION));
-
-    auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
-    ASSERT_TRUE(op.has_value());
-    EXPECT_EQ(op->schema().aliasAnalysis(), at::AliasAnalysisKind::PURE_FUNCTION);
+    expectThrows<c10::Error>([&] {
+      auto registrar2 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<DummyKernel>(c10::DispatchKey::XLATensorId).aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION));
+    }, "Tried to define the schema for _test::dummy multiple times without providing an explicit alias analysis kind");
   }
   {
     auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<DummyKernel>(c10::DispatchKey::XLATensorId).aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION));
-    auto registrar2 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<DummyKernel>(c10::DispatchKey::CPUTensorId));
-
-    auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
-    ASSERT_TRUE(op.has_value());
-    EXPECT_EQ(op->schema().aliasAnalysis(), at::AliasAnalysisKind::PURE_FUNCTION);
+    expectThrows<c10::Error>([&] {
+      auto registrar2 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<DummyKernel>(c10::DispatchKey::CPUTensorId));
+    }, "Tried to define the schema for _test::dummy multiple times without providing an explicit alias analysis kind");
   }
 }
 
@@ -78,10 +74,10 @@ TEST(OperatorRegistrationTest, whenRegisteringSameSchemaWithNoAliasAnalysis_then
 }
 
 TEST(OperatorRegistrationTest, whenRegisteringSameSchemaWithDifferentAliasAnalysis_thenShouldThrow) {
+  auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<DummyKernel>(c10::DispatchKey::CPUTensorId).aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION));
   expectThrows<c10::Error>([] {
-    auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<DummyKernel>(c10::DispatchKey::CPUTensorId).aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION));
     auto registrar2 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<DummyKernel>(c10::DispatchKey::XLATensorId).aliasAnalysis(at::AliasAnalysisKind::CONSERVATIVE));
-  }, "Tried to register multiple operators with the same schema but different alias analysis kind:");
+  }, "Tried to define the schema for _test::dummy with different alias analysis kind");
 }
 
 TEST(OperatorRegistrationTest, whenRegisteringWithSchemaBeforeKernelInOptionsObject_thenCanBeCalled) {
@@ -692,7 +688,7 @@ TEST(OperatorRegistrationTest, whenRegisteringMismatchingKernelsInSameOpCall_the
     auto registrar1 = c10::RegisterOperators().op("_test::dummy", c10::RegisterOperators::options()
       .kernel<DummyKernelWithIntParam>(c10::DispatchKey::CPUTensorId)
       .kernel<MockKernel>(c10::DispatchKey::CUDATensorId, &called_kernel));
-  }, "Tried to register kernels for same operator that infer a different function schema");
+  }, "In registration for _test::dummy: the inferred function schema");
 }
 
 void backend_fallback_kernel(const c10::OperatorHandle& op, c10::Stack* stack) {

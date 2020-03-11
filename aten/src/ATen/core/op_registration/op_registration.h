@@ -727,6 +727,12 @@ inline CppFunction dispatch(DeviceType type, Func&& raw_f) {
   return dispatch(deviceTypeToDispatchKey(type), std::forward<Func>(raw_f));
 }
 
+// Convenience for overriding autograd functionality
+template <typename Func>
+inline CppFunction dispatch_autograd(Func&& raw_f) {
+  return dispatch(c10::DispatchKey::VariableTensorId, std::forward<Func>(raw_f));
+}
+
 // Represents a namespace in which we can define operators.  Conventionally
 // constructed using "torch::import".  This object lets you avoid repeatedly
 // having to specify a namespace, instead you specify it once with:
@@ -821,5 +827,6 @@ namespace torch {
 
   // New-style API
   using c10::dispatch;
+  using c10::dispatch_autograd;
   using c10::import;
 }

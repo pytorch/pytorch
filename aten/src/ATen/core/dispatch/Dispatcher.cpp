@@ -102,6 +102,23 @@ RegistrationHandleRAII Dispatcher::registerDef(FunctionSchema schema) {
         op.operatorIterator_->op.registerSchema(std::move(schema));
       } else {
         TORCH_CHECK(op.schema() == schema, "Tried to register multiple operators with the same name and the same overload name but different schemas: ", schema, " vs ", op.schema());
+        // We broke BC in the case of DefaultAliasAnalysisKind; give a more
+        // detailed error message if this is a situation that previously
+        // would have worked
+        if (op.schema().isDefaultAliasAnalysisKind() || schema.isDefaultAliasAnalysisKind()) {
+          TORCH_CHECK(op.schema().aliasAnalysis() == schema.aliasAnalysis(),
+            "Tried to define the schema for ", toString(op_name),
+            " multiple times without providing an explicit alias analysis kind at each registration site.  "
+            "This was previously permitted, but is now not allowed.  You should either explicitly specify the "
+            "correct alias analysis kind at each site [",
+            toString(op.schema().isDefaultAliasAnalysisKind() ? schema.aliasAnalysis() : op.schema().aliasAnalysis()),
+            "], or use the new Module::impl() API, which permits you to omit the schema entirely when "
+            "specifying further implementations of an operator");
+        } else {
+          TORCH_CHECK(op.schema().aliasAnalysis() == schema.aliasAnalysis(),
+            "Tried to define the schema for ", toString(op_name), " with different alias analysis kinds: ",
+            toString(op.schema().aliasAnalysis()), " vs ", toString(schema.aliasAnalysis()));
+        }
       }
       return op;
     }

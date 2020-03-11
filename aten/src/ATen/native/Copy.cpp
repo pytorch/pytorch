@@ -163,11 +163,7 @@ Tensor& copy_(Tensor& self, const Tensor& src, bool non_blocking) {
   return self;
 }
 
-static auto registry = torch::RegisterOperators()
-  .op(torch::RegisterOperators::options()
-    .schema("aten::copy_(Tensor(a!) self, Tensor src, bool non_blocking=False) -> Tensor(a!)")
-    .impl_unboxedOnlyCatchAllKernel<decltype(copy_), &copy_>())
-  ;
+static auto registry = torch::import("aten").impl("copy_", CppFunction::makeUnboxedOnly(copy_));
 
 DEFINE_DISPATCH(copy_stub);
 
