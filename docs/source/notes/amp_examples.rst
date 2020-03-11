@@ -299,17 +299,19 @@ If your network uses :ref:`custom autograd functions<extending-autograd>`
 (subclasses of :class:`torch.autograd.Function`), :class:`autocast` may work out of the box.
 
 However, if any of the following is true
-* Your function takes multiple floating-point Tensor inputs
 
-* Your function wraps any of the ops :ref:`Autocast Op Reference<autocast-policies>`
+* Your function takes multiple floating-point Tensor inputs
+* Your function wraps any of the ops in the :ref:`Autocast Op Reference<autocast-policies>`
 * You want to ensure the function runs in a particular dtype.
+
+you ay
 
 Functions that should allow autocasting
 ---------------------------------------
 
 The :func:`torch.cuda.amp.custom_fwd` and :func:`torch.cuda.amp.custom_bwd` decorators (with no arguments)
-ensure that ``forward`` executes with whatever autocast state surrounds the point of use, and that
-``backward`` executes with the same autocast state as ``forward`` (which can prevent type mismatch errors)::
+ensure that ``forward`` executes with the current autocast state, and that ``backward`` executes with the
+same autocast state as ``forward`` (which can prevent type mismatch errors)::
 
     class MyMM(torch.autograd.Function):
         @staticmethod
@@ -326,8 +328,7 @@ ensure that ``forward`` executes with whatever autocast state surrounds the poin
 Functions that need a particular dtype
 --------------------------------------
 
-If you know your function requires a certain precision, or if it wraps a backend with limited datatype support,
-you may want it to disallow autocasting.
+If you know your function requires a certain precision, you may want it to disallow autocasting.
 
 Consider a custom autograd function wrapping
 `CUDA extensions <https://pytorch.org/tutorials/advanced/cpp_extension.html>`_

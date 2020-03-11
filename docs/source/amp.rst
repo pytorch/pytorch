@@ -77,7 +77,7 @@ Op-Specific Behavior
 
 The following lists describe the behavior of eligible ops in autocast-enabled regions.
 Some are ``torch`` functions, some are ``torch.nn.functional`` functions,
-and some are :class:`Tensor` methods.  Some are available in more than one of those
+and some are :class:`torch.Tensor` methods.  Some are available in more than one of those
 three namespaces.  Some are called by the forward method of :class:`torch.nn.Module`\ s.
 Autocasting occurs in the C++ backend, so any listed op may be called however it's available
 in Python and still receive autocasting.
@@ -86,7 +86,7 @@ Ops not listed below do not receive autocasting.  They run in the type
 defined by their inputs.  However, autocasting may still change the type
 in which unlisted ops run if they're downstream from autocasted ops.
 
-If an op is unlisted, we assume it's safe to run in ``float16``` without impairing
+If an op is unlisted, we assume it's safe to run in ``float16`` without impairing
 convergence.  If you encounter an unlisted op that causes convergence problems
 in ``float16``, please file an issue.
 
@@ -99,7 +99,7 @@ These ops (if eligible) execute in ``float16`` and produce ``float16`` output.
 ``addmm``,
 ``addmv``,
 ``addr``,
-``baddbmm`,
+``baddbmm``,
 ``bmm``,
 ``chain_matmul``,
 ``conv1d``,
@@ -188,7 +188,7 @@ autocast casts all inputs to ``float32`` and runs the op in ``float32``.
 ``dot``,
 ``equal``,
 ``stack``,
-``tensordot``,
+``tensordot``
 
 Some ops not listed here (e.g., binary ops like ``add``) natively promote to the widest
 input type without autocasting's intervention.  If inputs are a mixture of ``float16``

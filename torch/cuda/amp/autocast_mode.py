@@ -76,9 +76,10 @@ class autocast(object):
     please file an issue.
 
     ``autocast(enabled=False)`` subregions can be nested in autocast-enabled regions.
-    This can be useful, for example, if you want to force subregions to run in a particular ``dtype``.
-    In the subregion, inputs from the surrounding region should be cast to ``dtype`` before use.
-    The following example shows a subregion with forced ``float32`` execution::
+    Locally disabling autocast can be useful, for example, if you want to force a subregion
+    to run in a particular ``dtype``.  In the subregion, inputs from the surrounding region
+    should be cast to ``dtype`` before use.  The following example shows a subregion with
+    forced ``float32`` execution::
 
         # Creates some tensors in default dtype (here assumed to be float32)
         a_float32 = torch.rand((8, 8), device="cuda")
@@ -91,7 +92,7 @@ class autocast(object):
 
             with autocast(enabled=False):
                 # Calls e_float16.float() to ensure float32 execution
-                # (necessary because e_float16 was produced in an autocasted region)
+                # (necessary because e_float16 was created in an autocasted region)
                 f_float32 = torch.mm(c_float32, e_float16.float())
 
             # No manual casts are required when re-entering the autocast-enabled region.
@@ -166,8 +167,7 @@ def custom_fwd(fwd=None, *, cast_inputs=None):
         cast_inputs (:class:`torch.dtype` or None, optional, default=None):  If not ``None``, casts incoming
             floating-point Tensors to the target dtype (non-floating-point Tensors are not affected),
             and causes ``forward`` to execute with autocast disabled.
-            If ``None``, ``forward``'s internal ops execute with whatever autocast state surrounds the
-            point-of-use.
+            If ``None``, ``forward``'s internal ops execute with the current autocast state.
     """
     if fwd is None:
         return functools.partial(custom_fwd, cast_inputs=cast_inputs)
