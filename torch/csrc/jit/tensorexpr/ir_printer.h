@@ -83,25 +83,27 @@ TORCH_API std::ostream& operator<<(std::ostream& stream, const ExprHandle&);
 TORCH_API std::ostream& operator<<(std::ostream& stream, const Stmt&);
 TORCH_API std::ostream& operator<<(std::ostream& stream, Stmt*);
 
+TORCH_API void print(const Expr* expr);
+TORCH_API void print(const Stmt* stmt);
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
 
 namespace std {
 
-using torch::jit::tensorexpr::ExprHandle;
+using torch::jit::tensorexpr::Expr;
 using torch::jit::tensorexpr::Stmt;
 
-inline std::string to_string(const ExprHandle& expr) {
+inline std::string to_string(const Expr* expr) {
   std::ostringstream oss;
-  oss << expr;
+  oss << *expr;
   return oss.str();
 }
 
 inline std::string to_string(Stmt* stmt) {
   std::ostringstream oss;
-  oss << stmt;
+  oss << *stmt;
   return oss.str();
 }
-
-}; // namespace std
+} // namespace std

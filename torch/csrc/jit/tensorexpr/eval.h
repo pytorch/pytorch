@@ -848,9 +848,9 @@ class ExprEval {
   Value ret_value_;
 };
 
-inline ExprHandle Substitute(ExprHandle* expr, const VarMapping& var_mapping) {
+inline const Expr* Substitute(const Expr* expr, const VarMapping& var_mapping) {
   VarSubMutator var_sub(var_mapping);
-  return ExprHandle(expr->node()->accept_mutator(&var_sub));
+  return expr->accept_mutator(&var_sub);
 }
 
 inline Stmt* Substitute(Stmt* stmt, const VarMapping& var_mapping) {

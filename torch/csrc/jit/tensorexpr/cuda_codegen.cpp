@@ -3,6 +3,7 @@
 
 #include "ATen/CUDAGenerator.h"
 #include "c10/cuda/CUDAFunctions.h"
+#include "torch/csrc/jit/tensorexpr/analysis.h"
 #include "torch/csrc/jit/tensorexpr/cuda_random.h"
 #include "torch/csrc/jit/tensorexpr/eval.h"
 #include "torch/csrc/jit/tensorexpr/execution_counter.h"
@@ -103,7 +104,7 @@ void CudaPrinter::visit(const For* v) {
     if (!is_zero(v->start())) {
       throw std::runtime_error(
           "start must be zero for gpu_block_index: " +
-          std::to_string(ExprHandle(v->start())));
+          std::to_string(v->start()));
     }
     gpu_block_extents_[gpu_block_index] = v->stop();
   } else if (loop_options.is_gpu_thread_index()) {
@@ -117,7 +118,7 @@ void CudaPrinter::visit(const For* v) {
     if (!is_zero(v->start())) {
       throw std::runtime_error(
           "start must be zero for gpu_block_index: " +
-          std::to_string(ExprHandle(v->start())));
+          std::to_string(v->start()));
     }
     gpu_thread_extents_[gpu_thread_index] = v->stop();
   } else {
@@ -386,28 +387,6 @@ class PrioritizeLoad : public IRMutator {
   // }
   // int v2 = v + 2;
   int nested_if_then_else_ = 0;
-};
-
-class HasRand : public IRVisitor {
- public:
-  HasRand(Stmt* stmt) : stmt_(stmt) {
-    stmt_->accept(this);
-  }
-
-  bool has_rand() const {
-    return has_rand_;
-  }
-
- private:
-  void visit(const Intrinsics* v) override {
-    if (v->op_type() == IntrinsicsOp::kRand) {
-      has_rand_ = true;
-    } else {
-      IRVisitor::visit(v);
-    }
-  }
-  Stmt* stmt_;
-  bool has_rand_ = false;
 };
 
 std::string CudaCodeGen::GetUniqueFuncName(const std::string& func_prefix) {

@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/tensorexpr/kernel.h>
-#include <torch/csrc/jit/tensorexpr/constant_folder.h>
 #include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/tensorexpr/analysis.h>
+#include <torch/csrc/jit/tensorexpr/constant_folder.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/schedule.h>
 
@@ -980,7 +981,15 @@ void TensorExprKernel::LowerToBackend(BackendType backend_type) {
 
   // Compute non-output tensors_ inline
   for (auto& p : tensors_) {
-    l.ComputeInline(l.getLoopBodyFor(p.second));
+    if (!l.hasLoopBodyFor(p.second)) {
+      continue;
+    }
+    Stmt* loop = l.getLoopBodyFor(p.second);
+    if (torch::jit::tensorexpr::HasRand(loop).has_rand()) {
+      l.ComputeInlineWithRandom(loop);
+    } else {
+      l.ComputeInline(loop);
+    }
   }
   if (backend_type == kCudaCodeGen) {
     for (size_t i = 0; i < tensor_outputs_.size(); i++) {

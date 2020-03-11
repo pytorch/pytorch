@@ -1170,6 +1170,7 @@ class TestTensorExprFuser(BaseTestClass):
             # np.testing.assert_allclose(res.cpu().numpy(), xn * yn * zn)
             # assert cuda.elapsed_value() == 1
 
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     def test_guard_fails(self):
         @torch.jit.script
         def test(x, y, z):
@@ -1225,6 +1226,29 @@ class TestTensorExprFuser(BaseTestClass):
         y = run_where(a, b)
         np.testing.assert_allclose(x.numpy(), y.numpy())
 
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    def test_unused(self):
+        def test(x, y):
+            return x * x + torch.rand_like(y)
+        a = torch.rand(1, device="cuda")
+        b = torch.rand(1, device="cuda")
+        scripted = torch.jit.script(test, (a, b))
+        scripted(a, b)
+        cx = CudaCodeGenExecuted()
+        scripted(a, b)
+        assert cx.elapsed_value() == 1
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    def test_multi_rand(self):
+        def test(x):
+            y = torch.rand_like(x)
+            return (x + y) - (y - x)
+        a = torch.rand(4, device="cuda")
+        scripted = torch.jit.script(test, (a))
+        scripted(a)
+        cx = CudaCodeGenExecuted()
+        assert torch.allclose(scripted(a), 2 * a)
+        assert cx.elapsed_value() == 1
 
 if __name__ == '__main__':
     unittest.main()

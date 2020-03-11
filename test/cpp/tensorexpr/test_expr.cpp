@@ -274,7 +274,7 @@ void testExprSubstitute01() {
   ExprHandle e = (x - 1.0f) * (x + y + 2.0f);
 
   ExprHandle z = Var::make("z", kFloat);
-  ExprHandle e2 = Substitute(&e, {{x, z + 1.0f}});
+  ExprHandle e2(Substitute(e.node(), {{x, z + 1.0f}}));
   ExprHandle e2_ref = ((z + 1.0f) - 1.0f) * ((z + 1.0f) + y + 2.0f);
   std::ostringstream oss;
   oss << e2;

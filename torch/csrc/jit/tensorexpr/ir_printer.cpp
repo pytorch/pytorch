@@ -408,6 +408,24 @@ std::ostream& operator<<(std::ostream& stream, const Stmt& stmt) {
   return stream;
 }
 
+void print(const Expr* expr) {
+  if (expr) {
+    IRPrinter p(std::cout);
+    p.print(*expr);
+  } else {
+    std::cout << "(null expr)";
+  }
+}
+
+void print(const Stmt* stmt) {
+  if (stmt) {
+    IRPrinter p(std::cout);
+    p.print(*stmt);
+  } else {
+    std::cout << "(null stmt)\n";
+  }
+}
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
