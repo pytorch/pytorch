@@ -91,7 +91,7 @@ namespace detail {
       }
       serialize::InputArchive param_group_options_archive;
       param_group_archive.read("options", param_group_options_archive);
-      DerivedOptimizerParamOptions param_group_options;
+      DerivedOptimizerParamOptions param_group_options(0);
       param_group_options.serialize(param_group_options_archive);
       param_groups.emplace_back(std::make_pair(params, std::make_unique<DerivedOptimizerParamOptions>(param_group_options)));
     }
@@ -164,11 +164,14 @@ void serialize(
     // update state
     TORCH_CHECK(saved_param_groups.size() == optimizer.param_groups().size(), "loaded state dict has a different number of parameter groups");
     for (size_t i = 0; i < saved_param_groups.size(); i++) {
-      std::vector<std::string> saved_group_keys = saved_param_groups[i].first;
+      std::vector<std::string> param_group_old_keys = saved_param_groups[i].first;
       std::vector<Tensor> params = optimizer.param_groups()[i].params();
-      TORCH_CHECK(saved_group_keys.size() == params.size(), "loaded state dict contains a parameter group that has a different size than the optimizer's parameter group");
+      TORCH_CHECK(param_group_old_keys.size() == params.size(), "loaded state dict contains a parameter group that has a different size than the optimizer's parameter group");
+
       for (size_t idx = 0; idx < params.size(); idx++) {
-        optimizer.state()[c10::guts::to_string(params[idx].unsafeGetTensorImpl())] = std::move(saved_state[saved_group_keys[idx]]);
+        if(saved_state.find(param_group_old_keys[idx]) != saved_state.end()) {
+          optimizer.state()[c10::guts::to_string(params[idx].unsafeGetTensorImpl())] = std::move(saved_state[param_group_old_keys[idx]]);
+        }
       }
     }
 }
@@ -211,13 +214,20 @@ void serialize(
   torch::optim::serialize<OptimizerName##ParamState, OptimizerName##Options>(archive, self)
 
 #define _TORCH_OPTIM_SERIALIZE_TORCH_ARG(name) \
-  archive.write(#name, IValue(name()))
+{ \
+  auto ivalue = torch::IValue(name()); \
+  /* do not serialize if name is an undefined tensor*/ \
+  if (!(ivalue.isTensor() && ivalue.unsafeToTensorImpl() == at::UndefinedTensorImpl::singleton())) { \
+    archive.write(#name, ivalue); \
+  } \
+}
 
 #define _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(T, name) \
 { \
   c10::IValue ivalue; \
-  archive.read(#name, ivalue); \
-  name(ivalue.to<T>()); \
+  bool exists = archive.try_read(#name, ivalue); \
+  if (exists) \
+    name(ivalue.to<T>()); \
 }
 } // namespace optim
 } // namespace torch

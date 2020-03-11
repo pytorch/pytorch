@@ -1,5 +1,5 @@
-#include "torch/csrc/jit/operator.h"
-#include "torch/csrc/jit/custom_operator.h"
+#include "torch/csrc/jit/runtime/operator.h"
+#include "torch/csrc/jit/runtime/custom_operator.h"
 
 #include "torch/csrc/autograd/profiler.h"
 #include "torch/csrc/autograd/generated/variable_factories.h"

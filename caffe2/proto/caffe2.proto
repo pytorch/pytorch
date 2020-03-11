@@ -316,6 +316,20 @@ message OperatorDef {
   optional int64 op_version = 12;
 }
 
+// Partition definition.
+message PartitionInfo {
+  // Name of the partition.
+  required string name = 1;
+
+  // A list of logic device ID, indicating which devices this partition 
+  // can be executed on. If empty, it means the partition won't run on 
+  // device but on host CPU instead.
+  repeated int32 device_id = 2;
+
+  // Extra debug info.
+  optional string extra_info = 3;
+}
+
 // Network definition.
 message NetDef {
   optional string name = 1; // the network's name
@@ -356,7 +370,11 @@ message NetDef {
   // blobs' contents may be overwritten.
   repeated string external_input = 7;
   repeated string external_output = 8;
+
+  // Partitioning info, indexed by partition names.
+  repeated PartitionInfo partition_info = 9;
 }
+
 
 // ExecutionStep is actually a sort-of-hacky way we simulate iteration right
 // now.

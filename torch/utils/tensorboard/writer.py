@@ -505,8 +505,8 @@ class SummaryWriter(object):
         Shape:
             img_tensor: Default is :math:`(3, H, W)`. You can use ``torchvision.utils.make_grid()`` to
             convert a batch of tensor into 3xHxW format or call ``add_images`` and let us do the job.
-            Tensor with :math:`(1, H, W)`, :math:`(H, W)`, :math:`(H, W, 3)` is also suitible as long as
-            corresponding ``dataformats`` argument is passed. e.g. CHW, HWC, HW.
+            Tensor with :math:`(1, H, W)`, :math:`(H, W)`, :math:`(H, W, 3)` is also suitable as long as
+            corresponding ``dataformats`` argument is passed, e.g. ``CHW``, ``HWC``, ``HW``.
 
         Examples::
 

@@ -1,6 +1,8 @@
 // define constants like M_PI and C keywords for MSVC
 #ifdef _MSC_VER
+#ifndef _USE_MATH_DEFINES
 #define _USE_MATH_DEFINES
+#endif
 #include <math.h>
 #endif
 #include <ATen/ATen.h>
@@ -13,9 +15,6 @@
 #include <ATen/native/cpu/Loops.h>
 
 constexpr float EPSILON = 1e-12;
-#define _USE_MATH_DEFINES
-
-
 
 namespace {
   static inline at::Tensor apply_loss_reduction(const at::Tensor& unreduced, int64_t reduction) {
@@ -118,7 +117,7 @@ Tensor& binary_cross_entropy_out_cpu(Tensor& loss, const Tensor& input, const Te
     iter.add_input(at::squeeze(target));
     iter.build();
 
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(loss.scalar_type(), "binary_cross_entropy", [&] {
+    AT_DISPATCH_FLOATING_TYPES(loss.scalar_type(), "binary_cross_entropy", [&] {
         at::native::cpu_kernel(
             iter,
             [] (scalar_t input_val, scalar_t target_val) {
@@ -130,7 +129,7 @@ Tensor& binary_cross_entropy_out_cpu(Tensor& loss, const Tensor& input, const Te
                 // Binary cross entropy tensor is defined by the equation:
                 // L = -w (y ln(x) + (1-y) ln(1-x))
                 return (target_val - scalar_t(1))
-                    * std::max(scalar_t(std::log(scalar_t(1) - input_val)), scalar_t(-100)) 
+                    * std::max(scalar_t(std::log(scalar_t(1) - input_val)), scalar_t(-100))
                     - target_val * std::max(scalar_t(std::log(input_val)), scalar_t(-100));
             }
         );
@@ -160,7 +159,7 @@ Tensor& binary_cross_entropy_backward_out_cpu(Tensor& grad_input, const Tensor& 
     iter.add_input(at::squeeze(target));
     iter.build();
 
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad_input.scalar_type(), "binary_cross_entropy_backward", [&] {
+    AT_DISPATCH_FLOATING_TYPES(grad_input.scalar_type(), "binary_cross_entropy_backward", [&] {
         at::native::cpu_kernel(
             iter,
             [] (scalar_t grad_val, scalar_t input_val, scalar_t target_val) {

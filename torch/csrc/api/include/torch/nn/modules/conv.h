@@ -3,6 +3,7 @@
 #include <torch/expanding_array.h>
 #include <torch/nn/cloneable.h>
 #include <torch/nn/init.h>
+#include <torch/nn/modules/common.h>
 #include <torch/nn/options/conv.h>
 #include <torch/nn/pimpl.h>
 #include <torch/types.h>
@@ -257,6 +258,8 @@ class TORCH_API ConvTranspose1dImpl : public ConvTransposeNdImpl<1, ConvTranspos
   explicit ConvTranspose1dImpl(ConvTranspose1dOptions options_);
   Tensor forward(const Tensor& input,
                  const c10::optional<at::IntArrayRef>& output_size = c10::nullopt);
+ protected:
+  FORWARD_HAS_DEFAULT_ARGS({1, AnyValue(c10::optional<at::IntArrayRef>())})
 };
 
 TORCH_MODULE(ConvTranspose1d);
@@ -299,6 +302,8 @@ class TORCH_API ConvTranspose2dImpl : public ConvTransposeNdImpl<2, ConvTranspos
   explicit ConvTranspose2dImpl(ConvTranspose2dOptions options_);
   Tensor forward(const Tensor& input,
                  const c10::optional<at::IntArrayRef>& output_size = c10::nullopt);
+ protected:
+  FORWARD_HAS_DEFAULT_ARGS({1, AnyValue(c10::optional<at::IntArrayRef>())})
 };
 
 TORCH_MODULE(ConvTranspose2d);
@@ -341,6 +346,8 @@ class TORCH_API ConvTranspose3dImpl : public ConvTransposeNdImpl<3, ConvTranspos
   explicit ConvTranspose3dImpl(ConvTranspose3dOptions options_);
   Tensor forward(const Tensor& input,
                  const c10::optional<at::IntArrayRef>& output_size = c10::nullopt);
+ protected:
+  FORWARD_HAS_DEFAULT_ARGS({1, AnyValue(c10::optional<at::IntArrayRef>())})
 };
 
 TORCH_MODULE(ConvTranspose3d);

@@ -1,4 +1,5 @@
 #include <torch/custom_class.h>
+#include <torch/script.h>
 
 #include <iostream>
 #include <string>
@@ -119,6 +120,22 @@ static auto testPickle =
           self->vals.pop_back();
           return val;
         });
+
+at::Tensor take_an_instance(const c10::intrusive_ptr<PickleTester>& instance) {
+  return torch::zeros({instance->vals.back(), 4});
+}
+
+torch::RegisterOperators& register_take_instance() {
+  static auto instance_registry = torch::RegisterOperators().op(
+  torch::RegisterOperators::options()
+      .schema(
+          "_TorchScriptTesting::take_an_instance(__torch__.torch.classes._TorchScriptTesting_PickleTester x) -> Tensor Y")
+      .catchAllKernel<decltype(take_an_instance), &take_an_instance>());
+  return instance_registry;
+}
+
+static auto& ensure_take_instance_registered = register_take_instance();
+
 
 } // namespace
 

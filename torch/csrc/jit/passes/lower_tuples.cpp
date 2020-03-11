@@ -2,7 +2,7 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
-#include <torch/csrc/jit/constants.h>
+#include <torch/csrc/jit/ir/constants.h>
 
 namespace torch {
 namespace jit {

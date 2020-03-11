@@ -7,7 +7,7 @@
 #include <fbjni/fbjni.h>
 
 #include <torch/csrc/autograd/record_function.h>
-#include <torch/csrc/jit/print_handler.h>
+#include <torch/csrc/jit/runtime/print_handler.h>
 #include <torch/script.h>
 #include "caffe2/serialize/read_adapter_interface.h"
 

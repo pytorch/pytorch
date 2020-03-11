@@ -14,7 +14,7 @@
 #include <torch/csrc/distributed/rpc/script_remote_call.h>
 #include <torch/csrc/distributed/rpc/script_resp.h>
 #include <torch/csrc/distributed/rpc/utils.h>
-#include <torch/csrc/jit/pybind_utils.h>
+#include <torch/csrc/jit/python/pybind_utils.h>
 
 namespace torch {
 namespace distributed {
@@ -59,22 +59,6 @@ std::shared_ptr<Operator> matchBuiltinOp(
       ") to a builtin operator");
 }
 
-void finishCreatingOwnerRRef(
-    const Message& message,
-    const c10::optional<utils::FutureError>& futErr) {
-  RRefContext::handleException(futErr);
-  auto rr = RemoteRet::fromMessage(message);
-  TORCH_INTERNAL_ASSERT(
-      rr->rrefId() == rr->forkId(),
-      "Expecting an OwnerRRef as RemoteRet but got a fork.");
-  auto& ctx = RRefContext::getInstance();
-  auto deletedRRef = ctx.delForkOfOwner(rr->rrefId(), rr->rrefId());
-  if (deletedRRef && deletedRRef->isPyObj()) {
-    pybind11::gil_scoped_acquire ag;
-    deletedRRef.reset();
-  }
-}
-
 std::shared_ptr<FutureMessage> sendPythonRemoteCall(
     const WorkerInfo& dst,
     SerializedPyObj serializedPyObj,
@@ -115,9 +99,10 @@ py::object toPyObjInternal(RpcCommandBase& rpc, MessageType messageType) {
     case MessageType::PYTHON_RET: {
       // TODO: Try to avoid a copy here.
       auto& resp = static_cast<PythonResp&>(rpc);
-
-      return PythonRpcHandler::getInstance().loadPythonUDFResult(
-          resp.pickledPayload(), resp.tensors());
+      auto& pythonRpcHandler = PythonRpcHandler::getInstance();
+      py::object ret = pythonRpcHandler.deserialize(resp.serializedPyObj());
+      pythonRpcHandler.handleException(ret);
+      return ret;
     }
     default: {
       TORCH_CHECK(false, "Unrecognized response message type ", messageType);
@@ -139,6 +124,8 @@ std::shared_ptr<FutureMessage> pyRpcBuiltin(
     const py::kwargs& kwargs) {
   Stack stack;
   auto op = matchBuiltinOp(opName, args, kwargs, stack);
+  // Release GIL since args and kwargs processing is done.
+  py::gil_scoped_release release;
   auto scriptCall = std::make_unique<ScriptCall>(op, std::move(stack));
   auto agent = RpcAgent::getCurrentRpcAgent();
   return sendMessageWithAutograd(
@@ -153,6 +140,8 @@ PyRRef pyRemoteBuiltin(
     const py::kwargs& kwargs) {
   Stack stack;
   auto op = matchBuiltinOp(opName, args, kwargs, stack);
+  // Release GIL since args and kwargs processing is done.
+  py::gil_scoped_release release;
   TypePtr returnType = op->schema().returns()[0].type();
 
   auto& ctx = RRefContext::getInstance();
@@ -179,9 +168,9 @@ std::shared_ptr<FutureMessage> pyRpcPythonUdf(
     std::string& pickledPythonUDF,
     std::vector<torch::Tensor>& tensors,
     const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf) {
-  auto pythonCall = std::make_unique<PythonCall>(
-      std::vector<char>(pickledPythonUDF.begin(), pickledPythonUDF.end()),
-      tensors);
+  auto serializedPyObj =
+      SerializedPyObj(std::move(pickledPythonUDF), std::move(tensors));
+  auto pythonCall = std::make_unique<PythonCall>(std::move(serializedPyObj));
 
   auto agent = RpcAgent::getCurrentRpcAgent();
   return sendMessageWithAutograd(
@@ -223,7 +212,14 @@ PyRRef pyRemotePythonUdf(
         ownerRRef->rrefId().toIValue(),
         rf);
 
-    fm->addCallback(finishCreatingOwnerRRef);
+    fm->addCallback([](const Message& message,
+                       const c10::optional<utils::FutureError>& futErr) {
+      auto deletedRRef = callback::finishCreatingOwnerRRef(message, futErr);
+      if (deletedRRef && deletedRRef->isPyObj()) {
+        pybind11::gil_scoped_acquire ag;
+        deletedRRef.reset();
+      }
+    });
     return PyRRef(ownerRRef);
   }
 }

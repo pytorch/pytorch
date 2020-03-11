@@ -59,7 +59,7 @@ bool Tensor::is_view() const {
   return impl::GetVariableHooks()->is_view(*this);
 }
 
-const Tensor& Tensor::base() const {
+const Tensor& Tensor::_base() const {
   return impl::GetVariableHooks()->base(*this);
 }
 

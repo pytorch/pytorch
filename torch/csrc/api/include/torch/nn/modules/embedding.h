@@ -3,6 +3,7 @@
 #include <torch/nn/cloneable.h>
 #include <torch/nn/options/embedding.h>
 #include <torch/nn/functional/embedding.h>
+#include <torch/nn/modules/common.h>
 #include <torch/nn/pimpl.h>
 #include <torch/types.h>
 
@@ -78,12 +79,14 @@ class TORCH_API EmbeddingBagImpl : public torch::nn::Cloneable<EmbeddingBagImpl>
   /// Pretty prints the `EmbeddingBag` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;
 
-  Tensor forward(const Tensor& input, const Tensor& offsets = {}, const Tensor& per_sample_weights = {});
-
   /// The `Options` used to configure this `EmbeddingBag` module.
   EmbeddingBagOptions options;
   /// The embedding table.
   Tensor weight;
+
+  Tensor forward(const Tensor& input, const Tensor& offsets = {}, const Tensor& per_sample_weights = {});
+ protected:
+  FORWARD_HAS_DEFAULT_ARGS({1, AnyValue(Tensor())}, {2, AnyValue(Tensor())})
 };
 
 /// A `ModuleHolder` subclass for `EmbeddingBagImpl`.

@@ -102,6 +102,11 @@ struct WelfordOps {
 #endif
     return results;
   }
+
+  static C10_DEVICE acc_t translate_idx(acc_t acc, int64_t /*base_idx*/) {
+    return acc;
+  }
+
 #if defined(__CUDACC__) || defined(__HIPCC__)
   inline __device__ acc_t warp_shfl_down(acc_t acc, int offset) const {
     return {
@@ -133,6 +138,10 @@ struct MeanOps {
     return a * factor;
   }
 
+  static C10_DEVICE acc_t translate_idx(acc_t acc, int64_t /*base_idx*/) {
+    return acc;
+  }
+
 #if defined(__CUDACC__) || defined(__HIPCC__)
   inline C10_DEVICE acc_t warp_shfl_down(acc_t data, int offset) const {
     return WARP_SHFL_DOWN(data, offset);
@@ -158,6 +167,10 @@ struct AbsMinOps {
     return a;
   }
 
+  static C10_DEVICE acc_t translate_idx(acc_t acc, int64_t /*base_idx*/) {
+    return acc;
+  }
+
 #if defined(__CUDACC__) || defined(__HIPCC__)
   inline C10_DEVICE acc_t warp_shfl_down(acc_t data, int offset) const {
     return WARP_SHFL_DOWN(data, offset);
@@ -178,6 +191,10 @@ struct AbsMaxOps {
 
   inline C10_DEVICE acc_t project(acc_t a) const {
     return a;
+  }
+
+  static C10_DEVICE acc_t translate_idx(acc_t acc, int64_t /*base_idx*/) {
+    return acc;
   }
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
@@ -201,6 +218,10 @@ struct NormOps {
 
   inline C10_DEVICE acc_t project(acc_t a) const {
     return compat_pow(a, acc_t(1.0)/norm_);
+  }
+
+  static C10_DEVICE acc_t translate_idx(acc_t acc, int64_t /*base_idx*/) {
+    return acc;
   }
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
@@ -227,6 +248,11 @@ struct NormZeroOps {
     return a;
   }
 
+  static C10_DEVICE acc_t translate_idx(acc_t acc, int64_t /*base_idx*/) {
+    return acc;
+  }
+
+
 #if defined(__CUDACC__) || defined(__HIPCC__)
   inline C10_DEVICE acc_t warp_shfl_down(acc_t data, int offset) const {
     return WARP_SHFL_DOWN(data, offset);
@@ -248,6 +274,10 @@ struct NormOneOps {
     return a;
   }
 
+  static C10_DEVICE acc_t translate_idx(acc_t acc, int64_t /*base_idx*/) {
+    return acc;
+  }
+
 #if defined(__CUDACC__) || defined(__HIPCC__)
   inline C10_DEVICE acc_t warp_shfl_down(acc_t data, int offset) const {
     return WARP_SHFL_DOWN(data, offset);
@@ -267,6 +297,10 @@ struct NormTwoOps {
 
   inline C10_DEVICE acc_t project(acc_t a) const {
     return device_sqrt(a);
+  }
+
+  static C10_DEVICE acc_t translate_idx(acc_t acc, int64_t /*base_idx*/) {
+    return acc;
   }
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
@@ -314,6 +348,10 @@ struct ArgReductionOps {
 
   static C10_DEVICE arg_t combine(arg_t a, arg_t b) {
     return comp_t{}(a.first, b.first) ? a : b;
+  }
+
+  static C10_DEVICE arg_t translate_idx(arg_t a, int64_t base_idx) {
+    return {a.first, a.second + base_idx};
   }
 
 #if defined(__CUDACC__) || defined(__HIPCC__)

@@ -1,9 +1,12 @@
+#include <chrono>
+
 #include <c10d/FileStore.hpp>
 #include <c10d/ProcessGroupNCCL.hpp>
 #include <c10d/test/CUDATest.hpp>
 #include <c10d/test/TestUtils.hpp>
-#include <gtest/gtest.h>
 #include <torch/csrc/cuda/nccl.h>
+
+#include <gtest/gtest.h>
 
 using namespace c10d::test;
 
@@ -34,8 +37,9 @@ class ProcessGroupNCCLSimulateErrors : public c10d::ProcessGroupNCCL {
   ProcessGroupNCCLSimulateErrors(
       const std::shared_ptr<c10d::Store>& store,
       int rank,
-      int size)
-      : ProcessGroupNCCL(store, rank, size), simulate_error_(false) {}
+      int size,
+      std::chrono::milliseconds timeout)
+      : ProcessGroupNCCL(store, rank, size, timeout), simulate_error_(false) {}
 
   std::exception_ptr checkForNCCLErrors(
       const std::vector<std::shared_ptr<c10d::NCCLComm>>& ncclComms) override {
@@ -95,8 +99,9 @@ class ProcessGroupNCCLTimedOutErrors : public ProcessGroupNCCLSimulateErrors {
   ProcessGroupNCCLTimedOutErrors(
       const std::shared_ptr<c10d::Store>& store,
       int rank,
-      int size)
-      : ProcessGroupNCCLSimulateErrors(store, rank, size),
+      int size,
+      std::chrono::milliseconds timeout)
+      : ProcessGroupNCCLSimulateErrors(store, rank, size, timeout),
         set_timedout_error_(false) {}
 
   std::shared_ptr<ProcessGroupNCCL::WorkNCCL> initWork(
@@ -163,7 +168,8 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsBlocking) {
   }
 
   ASSERT_TRUE(setenv(c10d::NCCL_BLOCKING_WAIT, "1", 1) == 0);
-  ProcessGroupNCCLSimulateErrors pg(store_, 0, 1);
+  ProcessGroupNCCLSimulateErrors pg(
+      store_, 0, 1, std::chrono::milliseconds(1000));
 
   auto work = pg.allreduce(tensors_);
   work->wait();
@@ -180,17 +186,9 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsBlocking) {
   EXPECT_FALSE(work->isSuccess());
   EXPECT_THROW(work->wait(), std::runtime_error);
 
-  // Should remove the nccl communicators which hit errors from the cache.
-  std::this_thread::sleep_for(2 * pg.getWatchdogSleepInterval());
-  EXPECT_EQ(0, pg.getNCCLCommCacheSize());
-
-  // Verify we can recover from errors.
-  pg.reset_error();
-  work = pg.allreduce(tensors_);
-  work->wait();
-  EXPECT_TRUE(work->isSuccess());
-  EXPECT_EQ(1, pg.getNCCLCommCacheSize());
+  // Communicators might be aborted here, further operations would fail.
 }
+
 TEST_F(ProcessGroupNCCLErrorsTest, testNCCLTimedoutErrorsBlocking) {
   bool skip;
   std::string skipReason;
@@ -201,7 +199,8 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLTimedoutErrorsBlocking) {
   }
 
   ASSERT_TRUE(setenv(c10d::NCCL_BLOCKING_WAIT, "1", 1) == 0);
-  ProcessGroupNCCLTimedOutErrors pg(store_, 0, 1);
+  ProcessGroupNCCLTimedOutErrors pg(
+      store_, 0, 1, std::chrono::milliseconds(3000));
 
   auto work = pg.allreduce(tensors_);
   work->wait();
@@ -213,16 +212,7 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLTimedoutErrorsBlocking) {
   work = pg.allreduce(tensors_);
   EXPECT_THROW(work->wait(), std::runtime_error);
 
-  // Should remove the nccl communicators which hit errors from the cache.
-  std::this_thread::sleep_for(2 * pg.getWatchdogSleepInterval());
-  EXPECT_EQ(0, pg.getNCCLCommCacheSize());
-
-  // Verify we can recover from errors.
-  pg.reset_timedout_error();
-  work = pg.allreduce(tensors_);
-  work->wait();
-  EXPECT_TRUE(work->isSuccess());
-  EXPECT_EQ(1, pg.getNCCLCommCacheSize());
+  // Communicators might be aborted here, further operations would fail.
 }
 
 TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNonBlocking) {
@@ -234,7 +224,8 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNonBlocking) {
     return;
   }
 
-  ProcessGroupNCCLSimulateErrors pg(store_, 0, 1);
+  ProcessGroupNCCLSimulateErrors pg(
+      store_, 0, 1, std::chrono::milliseconds(3000));
 
   auto work = pg.allreduce(tensors_);
   pg.barrier()->wait();
@@ -253,14 +244,5 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNonBlocking) {
   EXPECT_TRUE(work->isCompleted());
   EXPECT_FALSE(work->isSuccess());
 
-  // Should remove the nccl communicators which hit errors from the cache.
-  std::this_thread::sleep_for(2 * pg.getWatchdogSleepInterval());
-  EXPECT_EQ(0, pg.getNCCLCommCacheSize());
-
-  // Verify we can recover from errors.
-  pg.reset_error();
-  work = pg.allreduce(tensors_);
-  pg.barrier()->wait();
-  EXPECT_TRUE(work->isSuccess());
-  EXPECT_EQ(1, pg.getNCCLCommCacheSize());
+  // Communicators might be aborted here, further operations would fail.
 }
