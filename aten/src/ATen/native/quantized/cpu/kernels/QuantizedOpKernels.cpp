@@ -211,7 +211,7 @@ static void leaky_qrelu_out_kernel(Tensor& out, const Tensor& qx,
   float negval = negval_.to<float>();
 
   AT_DISPATCH_QINT_TYPES(out.scalar_type(), "leaky_qrelu", [&] {
-    using Vec = Vec256<float>;  // Naïve implementation uses dequant/quant loop.
+    using Vec = Vec256<float>;  // Naive implementation uses dequant/quant loop.
     using qVec = Vec256<scalar_t>;
     Vec zero_vec = Vec(0.0f);
     Vec one_vec = Vec(1.0f);
@@ -453,6 +453,58 @@ void qadd_kernel(Tensor& out, const Tensor& self, const Tensor& other) {
           // inlineable. This could help with interleaving as suggested by the
           // TensorIterator implementations
           auto rv = Vec::quantize(retvals, scale, zero_point, inv_scale);
+          return rv;
+        });
+  });
+}
+
+// Note: out is assumed to be the same size as self and other.
+// Note: Multiplication is only supported when self, other, out are of the same
+// dtype.
+template <bool ReLUFused = false>
+void qmul_kernel(Tensor& out, const Tensor& self, const Tensor& other) {
+  int64_t zero_point = out.q_zero_point();
+  float scale = out.q_scale();
+  float inv_scale = 1.0f / scale;
+  int64_t self_zero_point = self.q_zero_point();
+  float self_scale = self.q_scale();
+  int64_t other_zero_point = other.q_zero_point();
+  float other_scale = other.q_scale();
+
+  float multiplier = self_scale * other_scale * inv_scale;
+
+  auto iter = TensorIterator::binary_op(out, self, other);
+
+  AT_DISPATCH_QINT_TYPES(out.scalar_type(), "qmul", [&]() {
+    using Vec = Vec256<scalar_t>;
+    cpu_kernel_vec(
+        iter,
+        [&](scalar_t a, scalar_t b) -> scalar_t {
+          int32_t a_sub_z = static_cast<int32_t>(a.val_) -
+              static_cast<int32_t>(self_zero_point);
+          int32_t b_sub_z = static_cast<int32_t>(b.val_) -
+              static_cast<int32_t>(other_zero_point);
+          int32_t c = a_sub_z * b_sub_z;
+          scalar_t res =
+              at::requantize_from_int<scalar_t>(multiplier, zero_point, c);
+          if (ReLUFused) {
+            res.val_ = std::max<scalar_t::underlying>(res.val_, zero_point);
+          }
+          return res;
+        },
+        [&](Vec a, Vec b) -> Vec {
+          Vec::int_vec_return_type a_sub_zp =
+              a.widening_subtract(Vec(static_cast<scalar_t>(self_zero_point)));
+          Vec::int_vec_return_type b_sub_zp =
+              b.widening_subtract(Vec(static_cast<scalar_t>(other_zero_point)));
+          Vec::int_vec_return_type c;
+          for (int i = 0; i < Vec::int_num_vecs(); ++i) {
+            c[i] = a_sub_zp[i] * b_sub_zp[i];
+          }
+          Vec rv = Vec::requantize_from_int(c, multiplier, zero_point);
+          if (ReLUFused) {
+            rv = rv.maximum(Vec(static_cast<scalar_t>(zero_point)));
+          }
           return rv;
         });
   });
@@ -1277,6 +1329,8 @@ REGISTER_DISPATCH(qclamp_stub, &qclamp_kernel);
 REGISTER_DISPATCH(qtanh_stub, &qtanh_kernel);
 REGISTER_DISPATCH(qadd_relu_stub, &qadd_kernel<true>);
 REGISTER_DISPATCH(qadd_stub, &qadd_kernel<false>);
+REGISTER_DISPATCH(qmul_relu_stub, &qmul_kernel<true>);
+REGISTER_DISPATCH(qmul_stub, &qmul_kernel<false>);
 REGISTER_DISPATCH(qmaxpool_2d_nhwc_stub, &qmaxpool_2d_nhwc_kernel);
 REGISTER_DISPATCH(
     qadaptive_avg_pool2d_nhwc_stub,

@@ -30,7 +30,7 @@ void div_kernel_cuda(TensorIterator& iter) {
     // optimization for floating-point types: if the second operand is a CPU
     // scalar, compute a * reciprocal(b). Note that this may lose one bit of
     // precision compared to computing the division.
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf, iter.common_dtype(), "div_cuda", [&]() {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, iter.common_dtype(), "div_cuda", [&]() {
       using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
       auto inv_b = thrust_t(1.0) / thrust_t(iter.scalar_value<scalar_t>(2));
       iter.remove_operand(2);
