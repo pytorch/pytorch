@@ -309,15 +309,28 @@ auto Engine::thread_main(
   // Why the test on graph_task->outstanding_tasks_?  See
   // Note [Reentrant backwards]
   while (!reentrant_thread || graph_task->outstanding_tasks_ > 0) {
-    auto task = local_ready_queue->pop();
-    // This will only work if the worker is running a non backward task
-    // TODO Needs to be fixed this to work in all cases
-    if (task->isShutdownTask_) {
-      C10_LOG_API_USAGE_ONCE("torch.autograd.thread_shutdown");
-      break;
+    // local_graph_task represents the graph_task we retrieve from the queue.
+    // The outer graph_task represents the overall graph_task we need to execute
+    // for reentrant execution.
+    std::shared_ptr<GraphTask> local_graph_task;
+    {
+      // Scope this block of execution since NodeTask is not needed after this
+      // block and can be deallocated (release any references to grad tensors
+      // as part of inputs_).
+      auto task = local_ready_queue->pop();
+      // This will only work if the worker is running a non backward task
+      // TODO Needs to be fixed this to work in all cases
+      if (task->isShutdownTask_) {
+        C10_LOG_API_USAGE_ONCE("torch.autograd.thread_shutdown");
+        break;
+      }
+      local_graph_task = execute_node_task(task);
+      if (!local_graph_task) {
+        // GraphTask for function is no longer valid, skipping further execution.
+        continue;
+      }
     }
-    execute_node_task(task);
-    std::shared_ptr<GraphTask> local_graph_task = task->base_.lock();
+
     // Check if we've completed execution.
     bool gt_completed = graph_task_completed(local_graph_task);
     if (gt_completed) {
@@ -373,33 +386,27 @@ void Engine::reentrant_thread_init(const std::shared_ptr<ReadyQueue>& parent_rea
 }
 
 void Engine::thread_on_exception(
-    std::shared_ptr<GraphTask>& graph_task,
+    std::shared_ptr<GraphTask> graph_task,
     const std::shared_ptr<Node>& fn,
     std::exception& e) {
   graph_task->set_exception(e, fn);
 }
 
-void GraphTask::set_exception(
-    std::exception& e,
-    const std::shared_ptr<Node>& fn) {
+void GraphTask::set_exception_without_signal(const std::shared_ptr<Node>& fn) {
   std::unique_lock<std::mutex> lock(mutex_);
   if (!has_error_.load()) {
     if (AnomalyMode::is_enabled() && fn) {
-      fn->metadata()->print_stack();
+      fn->metadata()->print_stack(fn->name());
     }
     has_error_ = true;
-    // Careful: setting the future_result_ can trigger DistAutogradContext to
-    // resetGraphTask(), sometimes deleting this underlying GraphTask.
-    // Don't touch *this after setError() below, and release the lock early, to
-    // avoid unlocking this->mutex_ after setting the future.
-    std::shared_ptr<FutureVariableList> future_result = future_result_;
-    lock.unlock();
-    if (!future_result->completed()) {
-      future_result->setError(e.what());
-    } else {
-      TORCH_INTERNAL_ASSERT(future_result->hasError());
-    }
   }
+}
+
+void GraphTask::set_exception(
+    std::exception& e,
+    const std::shared_ptr<Node>& fn) {
+  set_exception_without_signal(fn);
+  future_result_->setErrorIfNeeded(e.what());
 }
 
 static variable_list call_pre_hooks(Node& fn, variable_list inputs) {
@@ -762,9 +769,11 @@ void Engine::enqueue_blocked_task_on_cpu(NodeTask task) {
   TORCH_INTERNAL_ASSERT(graph_task, "GraphTask is no longer valid!");
   ready_queue(graph_task, at::kCPU).push(
       std::move(task), /* incrementOutstandingTasks */ false);
+  std::unique_lock<std::mutex> lock(print_mutex_);
+  LOG(INFO)<<"enqueued blocked task on CPU ready queue for graphTask: "<< graph_task;
 }
 
-void Engine::execute_node_task(const std::unique_ptr<NodeTask>& task) {
+std::shared_ptr<GraphTask> Engine::execute_node_task(const std::unique_ptr<NodeTask>& task) {
   // local_graph_task represents the graph_task we retrieve from the queue.
   // The outer graph_task represents the overall graph_task we need to execute
   // for reentrant execution.
@@ -774,7 +783,7 @@ void Engine::execute_node_task(const std::unique_ptr<NodeTask>& task) {
     // reference to it in this method.
     LOG(INFO) << "GraphTask for function " << task->fn_->name()
               << " is no longer valid, skipping execution";
-    return;
+    return local_graph_task;
   }
 
   if (task->fn_ && !local_graph_task->has_error_.load()) {
@@ -788,6 +797,34 @@ void Engine::execute_node_task(const std::unique_ptr<NodeTask>& task) {
 
   // Decrement the outstanding tasks.
   --local_graph_task->outstanding_tasks_;
+
+  return local_graph_task;
+}
+
+void Engine::execute_until_ready_queue_empty(const std::shared_ptr<GraphTask>& graph_task) {
+  std::unique_lock<std::mutex> lock(print_mutex_);
+  std::shared_ptr<ReadyQueue> graph_task_rq = graph_task->cpu_ready_queue_;
+  while(!graph_task_rq->empty()) {
+    auto task = graph_task_rq->pop();
+    execute_node_task(task);
+    LOG(INFO)<<"executed task fn: " << task->fn_->name()<< " instance: "<< task->fn_
+      << ", for graph_task: " << graph_task << " with outstanding task num:" << graph_task->outstanding_tasks_.load();
+  }
+  // Check if we've completed execution.
+  if (graph_task_completed(graph_task)) {
+    // We don't need to explicitly notify the owner thread, since
+    // 'mark_graph_task_completed' would mark the Future as completed and this
+    // would notify the owner thread that the task has been completed.
+    mark_graph_task_completed(graph_task);
+    LOG(INFO) <<"finished graph_task: " << graph_task;
+  } else {
+    // schedule a continuation
+    at::launch([this, &graph_task]() {
+        execute_until_ready_queue_empty(graph_task);
+    });
+    LOG(INFO) << "scheduled a continuation on graph_task: "  << graph_task
+      << " with outstanding task num:" << graph_task->outstanding_tasks_.load();
+  }
 
 }
 
@@ -824,24 +861,10 @@ std::shared_ptr<FutureVariableList> Engine::execute_with_graph_task(
     // that has already been pushed to the current CPU thread's ready_queue
     lock.unlock();
     if (async_mode) {
-      std::function<void()> handle_work = [this, &graph_task, &handle_work]() {
-        while(!local_ready_queue->empty()) {
-          auto task = local_ready_queue->pop();
-          execute_node_task(task);
-        }
-        // Check if we've completed execution.
-        if (graph_task_completed(graph_task)) {
-          // We don't need to explicitly notify the owner thread, since
-          // 'mark_graph_task_completed' would mark the Future as completed and this
-          // would notify the owner thread that the task has been completed.
-          mark_graph_task_completed(graph_task);
-        } else {
-          // schedule a continuation
-          std::cout << "start scheduling a continuation" << std::endl;
-          at::launch(handle_work);
-        }
-      };
-      handle_work();
+      // std::function<void()> handle_work = [this, &graph_task, &handle_work]() {
+      // };
+      // handle_work();
+      execute_until_ready_queue_empty(graph_task);
     } else {
       thread_main(nullptr, false);
       TORCH_INTERNAL_ASSERT(graph_task->future_result_->completed());
@@ -894,14 +917,16 @@ void Engine::mark_graph_task_completed(const std::shared_ptr<GraphTask>& graph_t
   }
 
   try {
-    auto val = graph_task_exec_post_processing(graph_task);
-    graph_task->future_result_->markCompleted(val);
+    // Run post processing, before marking the future as complete.
+    graph_task_exec_post_processing(graph_task);
+    graph_task->future_result_->markCompleted(
+        std::move(graph_task->captured_vars_));
   } catch (std::exception& e) {
     graph_task->future_result_->setError(e.what());
   }
 }
 
-variable_list Engine::graph_task_exec_post_processing(
+void Engine::graph_task_exec_post_processing(
     const std::shared_ptr<GraphTask>& graph_task) {
   if (!graph_task->not_ready_.empty()) {
     throw std::runtime_error("could not compute gradients for some functions");
@@ -932,10 +957,7 @@ variable_list Engine::graph_task_exec_post_processing(
       default_stream.wait(event);
     }
   }
-
-  return graph_task->captured_vars_;
 }
-
 
 // note that when python is present, this base engine will be overriden
 // with a PythonEngine. Because this typically happens before get_default_engine

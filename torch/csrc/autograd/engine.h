@@ -75,6 +75,9 @@ struct GraphTask {
   // means it's .backward(), otherwise it's .grad(). exec_info_ is safe to read
   // without synchronization
   std::unordered_map<Node*, ExecInfo> exec_info_;
+  // Captures variables are grads captured that we return to the user. After
+  // execution of the GraphTask is completed, the captured_vars_ are moved
+  // out of the GraphTask and are no longer valid.
   std::vector<Variable> captured_vars_;
   std::shared_ptr<at::ThreadLocalDebugInfoBase> debug_info_ =
       at::getThreadLocalDebugInfo();
@@ -96,6 +99,12 @@ struct GraphTask {
   // Set an appropriate exception on this graph_task which was encountered while
   // running the provided function.
   void set_exception(std::exception& e, const std::shared_ptr<Node>& fn);
+
+  // Set an appropriate exception on this graph_task which was encountered while
+  // running the provided function. But doesn't signal completion on
+  // 'future_result_' right away. The user needs to explicitly mark
+  // 'future_result_' completed with an appropriate exception.
+  void set_exception_without_signal(const std::shared_ptr<Node>& fn);
 
   // Whether or not to stop execution for this GraphTask when an error is
   // encountered. When set to true, this would cause Engine::execute() to throw
@@ -268,7 +277,7 @@ struct TORCH_API Engine {
   void start_device_threads();
   virtual void thread_init(int device, const std::shared_ptr<ReadyQueue>& ready_queue);
   virtual void thread_on_exception(
-      std::shared_ptr<GraphTask>& graph_task,
+      std::shared_ptr<GraphTask> graph_task,
       const std::shared_ptr<Node>& fn,
       std::exception& e);
   virtual void thread_main(
@@ -286,6 +295,8 @@ struct TORCH_API Engine {
   std::vector<std::function<void()>> final_callbacks_;
   // To protect reads and writes to final_callbacks_
   std::mutex post_callbacks_lock_;
+
+  std::mutex print_mutex_;
   // How many nested reentrant calls are allowed until a new thread is used
   int max_recursion_depth_;
 
@@ -313,8 +324,9 @@ struct TORCH_API Engine {
  std::shared_ptr<ThreadPoolShared> thread_pool_shared_;
 
 private:
- void execute_node_task(const std::unique_ptr<NodeTask>& task);
- variable_list graph_task_exec_post_processing(
+ std::shared_ptr<GraphTask> execute_node_task(const std::unique_ptr<NodeTask>& task);
+ void execute_until_ready_queue_empty(const std::shared_ptr<GraphTask>& graph_task);
+ void graph_task_exec_post_processing(
      const std::shared_ptr<GraphTask>& graph_task);
  void mark_graph_task_completed(const std::shared_ptr<GraphTask>& graph_task);
 };

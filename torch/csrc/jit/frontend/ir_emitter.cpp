@@ -2661,6 +2661,9 @@ struct to_ir {
         auto apply = Apply(tree);
         return emitApplyExpr(apply, n_binders, type_hint);
       } break;
+      case TK_SUBSCRIPT: {
+        return emitSubscript(Subscript(tree));
+      } break;
       default:
         return std::make_shared<SimpleValue>(emitSimpleExpr(tree, type_hint));
     }
@@ -2911,9 +2914,6 @@ struct to_ir {
       } break;
       case TK_NONE: {
         return graph->insertConstant(IValue(), tree->range());
-      } break;
-      case TK_SUBSCRIPT: {
-        return emitSubscript(Subscript(tree));
       } break;
       case TK_IF_EXPR: {
         return emitTernaryIf(TernaryIf(tree));
@@ -3394,18 +3394,18 @@ struct to_ir {
         ->output();
   }
 
-  Value* emitSubscript(const Subscript& subscript) {
+  std::shared_ptr<SugaredValue> emitSubscript(const Subscript& subscript) {
     const SugaredValuePtr sv = emitSugaredExpr(subscript.value(), 1);
     const List<Expr>& subscript_exprs = subscript.subscript_exprs();
     const SourceRange& range = subscript.range();
     const SourceRange& val_range = subscript.value().range();
     if (subscript_exprs.size() != 1) {
-      return emitMultidimSlicing(
-          range, sv->asValue(val_range, method), subscript_exprs);
+      return std::make_shared<SimpleValue>(emitMultidimSlicing(
+          range, sv->asValue(val_range, method), subscript_exprs));
     }
     if (subscript_exprs[0].kind() == TK_SLICE_EXPR) {
-      return emitBasicSlice(
-          range, sv->asValue(val_range, method), subscript_exprs);
+      return std::make_shared<SimpleValue>(emitBasicSlice(
+          range, sv->asValue(val_range, method), subscript_exprs));
     } else {
       // Desugars gather syntactic sugar foo[i]
       Value* idx = emitExpr(subscript_exprs[0]);
@@ -3413,11 +3413,13 @@ struct to_ir {
       AT_ASSERT(subscript_exprs.size() == 1);
 
       if (val->type()->cast<TupleType>()) {
-        return emitTupleIndex(range, sv->asValue(val_range, method), idx);
+        return std::make_shared<SimpleValue>(
+            emitTupleIndex(range, sv->asValue(val_range, method), idx));
       } else if (val->type()->isSubtypeOf(TensorType::get())) {
-        return emitMultidimSlicing(range, val, subscript_exprs);
+        return std::make_shared<SimpleValue>(
+            emitMultidimSlicing(range, val, subscript_exprs));
       } else {
-        return sv->getitem(range, method, idx)->asValue(range, method);
+        return sv->getitem(range, method, idx);
       }
     }
   }
