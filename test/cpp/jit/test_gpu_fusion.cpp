@@ -62,13 +62,18 @@ void testGPU_FusionContainer() {
   auto f3 = add(f1, f2);
   std::cout << "Implicit add construction of 1.f + 2.f : " << fusion1
             << std::endl;
-
+  
   Fusion fusion2;
   {
     FusionGuard fg2(&fusion2);
     Float* f3 = new Float(1.f);
     Float* f4 = new Float(2.f);
     auto f5 = add(f3, f4);
+    TORCH_CHECK(
+       FusionGuard::getCurFusion()->used(f3)
+    && FusionGuard::getCurFusion()->used(f4)
+    && !FusionGuard::getCurFusion()->used(f5));
+
     TORCH_CHECK(FusionGuard::getCurFusion() == &fusion2);
   }
 
