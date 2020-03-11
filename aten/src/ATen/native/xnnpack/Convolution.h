@@ -13,7 +13,7 @@ namespace internal {
 namespace convolution2d {
 
 class Conv2dPrePack final : public torch::OperatorKernel {
-  public:
+ public:
   c10::intrusive_ptr<xnnpack::XNNPackConv2dOpContext> operator()(
       Tensor weight,
       c10::optional<Tensor> bias,
@@ -24,7 +24,7 @@ class Conv2dPrePack final : public torch::OperatorKernel {
 };
 
 class Conv2dPacked final : public torch::OperatorKernel {
-  public:
+ public:
   Tensor operator()(
       const Tensor& input,
       const c10::intrusive_ptr<xnnpack::XNNPackConv2dOpContext>& op_context);
@@ -40,7 +40,7 @@ ContextConv2D create(
     const float output_min,
     const float output_max);
 
-} // namespace linear
+} // namespace convolution2d
 } // namespace internal
 } // namespace xnnpack
 } // namespace native

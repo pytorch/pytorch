@@ -18,42 +18,42 @@ struct Deleter final {
 
 using Operator = std::unique_ptr<xnn_operator, Deleter>;
 
-struct ContextBase {
+struct ContextLinear final {
   Operator op;
-
-  static constexpr float kMin = -std::numeric_limits<float>::infinity();
-  static constexpr float kMax = std::numeric_limits<float>::infinity();
-};
-
-struct ContextLinear final : public ContextBase {
   int64_t output_channels;
 
-  ContextLinear() = default;
+  ContextLinear() = delete;
 
   ContextLinear(Operator&& o, int64_t o_channels) {
     op = std::move(o);
     output_channels = o_channels;
   }
+  static constexpr float kMin = -std::numeric_limits<float>::infinity();
+  static constexpr float kMax = std::numeric_limits<float>::infinity();
 };
 
-struct ContextConv2D final : public ContextBase {
-  std::vector<int64_t> weight_size;
-  std::vector<int64_t> padding;
-  std::vector<int64_t> stride;
-  std::vector<int64_t> dilation;
+struct ContextConv2D final {
+  Operator op;
+  std::array<int64_t, 4> weight_size_;
+  std::array<int64_t, 2> padding_;
+  std::array<int64_t, 2> stride_;
+  std::array<int64_t, 2> dilation_;
 
-  ContextConv2D() = default;
+  ContextConv2D() = delete;
 
-  ContextConv2D(Operator&& o, std::vector<int64_t> w_size,
-      std::vector<int64_t> padding_,
-      std::vector<int64_t> stride_,
-      std::vector<int64_t> dilation_) {
-    op = std::move(o);
-    weight_size = std::move(w_size);
-    padding = std::move(padding_);
-    stride = std::move(stride_);
-    dilation = std::move(dilation_);
-  }
+  ContextConv2D(
+      Operator&& o,
+      std::array<int64_t, 4> weight_size,
+      std::array<int64_t, 2> padding,
+      std::array<int64_t, 2> stride,
+      std::array<int64_t, 2> dilation)
+      :  op(std::move(o)),
+         weight_size_(weight_size),
+         padding_(padding),
+         stride_(stride),
+         dilation_(dilation) {}
+  static constexpr float kMin = -std::numeric_limits<float>::infinity();
+  static constexpr float kMax = std::numeric_limits<float>::infinity();
 };
 
 namespace internal {

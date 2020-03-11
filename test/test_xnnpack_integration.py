@@ -29,8 +29,8 @@ class TestXNNPACKOps(TestCase):
         else:
             bias = None
         ref_result = F.linear(input_data, weight, bias)
-        packed_weight_bias = torch.ops.xnnpack.linear_prepack(weight, bias)
-        output_linear_xnnpack = torch.ops.xnnpack.linear_packed(input_data, packed_weight_bias)
+        packed_weight_bias = torch.ops._xnnpack.linear_prepack(weight, bias)
+        output_linear_xnnpack = torch.ops._xnnpack.linear_packed(input_data, packed_weight_bias)
         torch.testing.assert_allclose(ref_result, output_linear_xnnpack, rtol=1e-2, atol=1e-3)
 
     @given(batch_size=st.integers(0, 3),
@@ -81,9 +81,9 @@ class TestXNNPACKOps(TestCase):
 
         ref_result = F.conv2d(input_data, weight, bias,
                               strides, paddings, dilations, groups)
-        packed_weight_bias = torch.ops.xnnpack.conv2d_prepack(weight, bias,
-                                                              strides, paddings, dilations, groups)
-        xnnpack_result = torch.ops.xnnpack.conv2d_packed(input_data, packed_weight_bias)
+        packed_weight_bias = torch.ops._xnnpack.conv2d_prepack(weight, bias,
+                                                               strides, paddings, dilations, groups)
+        xnnpack_result = torch.ops._xnnpack.conv2d_packed(input_data, packed_weight_bias)
         torch.testing.assert_allclose(ref_result, xnnpack_result, rtol=1e-2, atol=1e-3)
 
 
@@ -108,10 +108,10 @@ class TestXNNPACKSerDes(TestCase):
         class LinearPrePacked(torch.nn.Module):
             def __init__(self, weight, bias=None):
                 super(LinearPrePacked, self).__init__()
-                self.packed_weight_bias = torch.ops.xnnpack.linear_prepack(weight, bias)
+                self.packed_weight_bias = torch.ops._xnnpack.linear_prepack(weight, bias)
 
             def forward(self, x):
-                return torch.ops.xnnpack.linear_packed(x, self.packed_weight_bias)
+                return torch.ops._xnnpack.linear_packed(x, self.packed_weight_bias)
 
         data_shape = [batch_size] + list(data_shape)
         weight = torch.rand((weight_output_dim, data_shape[-1]))
@@ -186,11 +186,11 @@ class TestXNNPACKSerDes(TestCase):
         class Conv2DPrePacked(torch.nn.Module):
             def __init__(self, weight, bias, strides, paddings, dilations, groups):
                 super(Conv2DPrePacked, self).__init__()
-                self.packed_weight_bias = torch.ops.xnnpack.conv2d_prepack(weight, bias,
+                self.packed_weight_bias = torch.ops._xnnpack.conv2d_prepack(weight, bias,
                                                                            strides, paddings, dilations, groups)
 
             def forward(self, x):
-                return torch.ops.xnnpack.conv2d_packed(x, self.packed_weight_bias)
+                return torch.ops._xnnpack.conv2d_packed(x, self.packed_weight_bias)
 
         input_channels = input_channels_per_group * groups
         output_channels = output_channels_per_group * groups
@@ -287,15 +287,15 @@ class TestXNNPACKSerDes(TestCase):
                          strides, paddings, dilations, groups):
                 super(MPrePacked, self).__init__()
                 self.conv2d_packed_weight_bias = \
-                    torch.ops.xnnpack.conv2d_prepack(conv_weight, conv_bias,
+                    torch.ops._xnnpack.conv2d_prepack(conv_weight, conv_bias,
                                                      strides, paddings, dilations, groups)
                 self.linear_packed_weight_bias = \
-                    torch.ops.xnnpack.linear_prepack(linear_weight, linear_bias)
+                    torch.ops._xnnpack.linear_prepack(linear_weight, linear_bias)
 
             def forward(self, x):
-                o = torch.ops.xnnpack.conv2d_packed(x, self.conv2d_packed_weight_bias)
+                o = torch.ops._xnnpack.conv2d_packed(x, self.conv2d_packed_weight_bias)
                 o = o.permute([0, 2, 3, 1])
-                o = torch.ops.xnnpack.linear_packed(o, self.linear_packed_weight_bias)
+                o = torch.ops._xnnpack.linear_packed(o, self.linear_packed_weight_bias)
                 return F.relu(o)
 
         input_channels = input_channels_per_group * groups

@@ -23,13 +23,12 @@ class XNNPackLinearOpContext : public torch::jit::CustomClassHolder {
 
   public:
     XNNPackLinearOpContext(Tensor&& weight,
-        c10::optional<Tensor>&& bias) {
-      orig_weight_ = std::move(weight);
-      orig_bias_ = std::move(bias);
-    }
-    //XNNPackLinearOpContext(const XNNPackLinearOpContext&) = delete; // Copy constructor
-    //XNNPackLinearContext& operator=(const XNNPackLinearOpContext&) = delete; // Assign
-    //Move construct and move assign?
+        c10::optional<Tensor>&& bias,
+        ContextLinear&& op_context) :
+      orig_weight_(std::move(weight)),
+      orig_bias_(std::move(bias)),
+      op_context_(std::move(op_context)) {}
+
     const ContextLinear& get_context() const {
       return op_context_;
     }
@@ -60,18 +59,17 @@ class XNNPackConv2dOpContext : public torch::jit::CustomClassHolder {
         std::vector<int64_t>&& padding,
         std::vector<int64_t>&& stride,
         std::vector<int64_t>&& dilation,
-        uint64_t groups
-        ) {
-      orig_weight_ = std::move(weight);
-      orig_bias_ = std::move(bias);
-      padding_ = std::move(padding);
-      stride_ = std::move(stride);
-      dilation_ = std::move(dilation);
-      groups_ = groups;
-    }
-    //XNNPackLinearOpContext(const XNNPackLinearOpContext&) = delete; // Copy constructor
-    //XNNPackLinearContext& operator=(const XNNPackLinearOpContext&) = delete; // Assign
-    //Need to define Move construct and move assign?
+        uint64_t groups,
+        ContextConv2D&& op_context
+        ) :
+        orig_weight_(std::move(weight)),
+        orig_bias_(std::move(bias)),
+        padding_(std::move(padding)),
+        stride_(std::move(stride)),
+        dilation_(std::move(dilation)),
+        groups_(groups),
+        op_context_(std::move(op_context)) {}
+
     const ContextConv2D& get_context() const {
       return op_context_;
     }
