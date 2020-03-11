@@ -6,14 +6,9 @@
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/core/Array.h>
 #include <ATen/ExpandUtils.h>
-
-
-// #include <THC/THCDeviceUtils.cuh>
-// #include <THC/THCThrustAllocator.cuh>
 #include <thrust/scan.h>
 #include <thrust/execution_policy.h>
 #include <thrust/device_ptr.h>
-// #include <thrust/unique.h>
 
 namespace at { namespace native {
 
@@ -26,7 +21,6 @@ static OffsetCalculator<N> index_make_offset_calculator(const TensorIterator& it
   }
   return OffsetCalculator<N>(iter.ndim(), iter.shape().data(), strides.data());
 }
-
 
 template <typename func_t>
 void gpu_index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride, const func_t& f) {
@@ -212,7 +206,6 @@ static Tensor & masked_select_out_cuda_impl(Tensor & result, const Tensor & self
 
   return result;
 }
-
 
 Tensor masked_select_cuda(const Tensor & self, const Tensor & mask) {
   namedinference::compute_broadcast_outnames(self, mask);
