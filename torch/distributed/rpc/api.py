@@ -1,26 +1,44 @@
+import collections
+import contextlib
+import functools
+import logging
+import numbers
+import sys
+import threading
+from datetime import timedelta
+
+import torch
+import torch.distributed as dist
+
 from . import (
     RpcBackendOptions,
     WorkerInfo,
     _cleanup_python_rpc_handler,
     _destroy_rref_context,
+    _get_current_rpc_agent,
     _invoke_remote_builtin,
     _invoke_remote_python_udf,
+    _invoke_remote_torchscript,
     _invoke_rpc_builtin,
     _invoke_rpc_python_udf,
-    _start_rpc_agent,
+    _invoke_rpc_torchscript,
+    _is_current_rpc_agent_set,
+    _reset_current_rpc_agent,
+    _set_and_start_rpc_agent,
+    _set_rpc_timeout,
     backend_registry,
 )
-from .internal import _internal_rpc_pickler, PythonUDF
-
-import contextlib
-import functools
-import numbers
-import sys
-import torch
-import torch.distributed as dist
+from .internal import (
+    PythonUDF,
+    RPCExecMode,
+    _internal_rpc_pickler,
+    _start_record_function,
+)
 
 
-_agent = None
+logging.basicConfig()
+logger = logging.getLogger(__name__)
+
 # NB: Ignoring RRef leaks during shutdown. Without this, applications have to
 # make sure there is no references to any RRef in the application code and
 # Python GC has done its job to delete those RRefs. This is could result in bad
@@ -32,6 +50,7 @@ _agent = None
 # To enable RRef leak checking, set this _ignore_rref_leak to False
 _ignore_rref_leak = True
 _default_pickler = _internal_rpc_pickler
+
 
 @contextlib.contextmanager
 def _use_rpc_pickler(rpc_pickler):
@@ -49,15 +68,69 @@ def _use_rpc_pickler(rpc_pickler):
 def _require_initialized(func):
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
-        if _agent is None:
+        if not _is_current_rpc_agent_set():
             raise RuntimeError(
                 "RPC has not been initialized. Call "
                 "torch.distributed.rpc.init_rpc first."
             )
         return func(*args, **kwargs)
+
     return wrapper
 
 
+class WaitAllWorkersStates(object):
+    def __init__(self):
+        # Each `intent_worker_names` is an empty set at beginning.
+        # It's only used by leader worker. Leader worker is user-specified or
+        # elected as the first worker in a sorted worker name list.
+        # Whenever there is a worker showing shutdown intention to the leader, by
+        # calling `_wait_all_workers()`, the leader adds this worker's name to the set.
+        # The leader also adds itself's name to the set on calling
+        # `_wait_all_workers()`. We need this because, we confine `_wait_all_workers()`
+        # to be called only once, by examing if leader's name has been added to the set.
+        self.intent_worker_names = set()
+        # Once `intent_worker_names == _ALL_WORKER_NAMES`,
+        # we flip `_SHUTDOWN_PROCEED_SIGNAL` on the leader, and leader will send RPCs
+        # to follower workers to flip their `_SHUTDOWN_PROCEED_SIGNAL`s.
+        self.proceed_signal = threading.Event()
+
+
+# States used by `def _wait_all_workers()`.
+# `_ALL_WORKER_NAMES` is initialized on initiaizing RPC layer.
+_ALL_WORKER_NAMES = None
+_wait_all_workers_dict_lock = threading.Lock()
+_wait_all_workers_sequence_id = 0
+_wait_all_workers_sequence_id_to_states = collections.defaultdict(WaitAllWorkersStates)
+
+
+def _on_leader_follower_report_shutdown_intent(sequence_id, worker_name):
+    assert (
+        worker_name in _ALL_WORKER_NAMES
+    ), "{worker_name} is not expected by leader.".format(worker_name=worker_name)
+    intent_worker_names = _wait_all_workers_sequence_id_to_states[
+        sequence_id
+    ].intent_worker_names
+    assert (
+        worker_name not in intent_worker_names
+    ), "{worker_name} reported intent sequence id {sequence_id} twice. ".format(
+        worker_name=worker_name, sequence_id=sequence_id
+    )
+    intent_worker_names.add(worker_name)
+    if _ALL_WORKER_NAMES == intent_worker_names:
+        _set_proceed_shutdown_signal(sequence_id)
+
+
+def _set_proceed_shutdown_signal(sequence_id):
+    proceed_signal = _wait_all_workers_sequence_id_to_states[sequence_id].proceed_signal
+    assert (
+        not proceed_signal.is_set()
+    ), "Termination signal sequence id {} got set twice.".format(
+        sequence_id=sequence_id
+    )
+    proceed_signal.set()
+
+
+@_require_initialized
 def _wait_all_workers():
     r"""
     Block until all local and remote RPC processes reach this method and wait
@@ -66,11 +139,59 @@ def _wait_all_workers():
     terminate the RPC framework, and there is no guarantee that the RPC
     framework will work after this method returns.
     """
-    global _agent
+    assert (
+        _ALL_WORKER_NAMES is not None
+    ), "`_ALL_WORKER_NAMES` is not initialized for `def _wait_all_workers`."
+    leader_worker_name = sorted(_ALL_WORKER_NAMES)[0]
 
-    if _agent:
-        _agent.join()
+    self_worker_name = _get_current_rpc_agent().get_worker_info().name
 
+    global _wait_all_workers_sequence_id
+    with _wait_all_workers_dict_lock:
+        sequence_id = _wait_all_workers_sequence_id
+        _wait_all_workers_sequence_id += 1
+
+    is_leader_worker = leader_worker_name == self_worker_name
+
+    # Phase 1: Followers send intents.
+    # All followers report intents to the leader.
+    if is_leader_worker:
+        _on_leader_follower_report_shutdown_intent(sequence_id, self_worker_name)
+    else:
+        rpc_sync(
+            leader_worker_name,
+            _on_leader_follower_report_shutdown_intent,
+            args=(sequence_id, self_worker_name,),
+        )
+
+    proceed_signal = _wait_all_workers_sequence_id_to_states[
+        sequence_id
+    ].proceed_signal
+    proceed_signal.wait()
+
+    # Phase 2: Leader asks followers to proceed.
+    # Leader's signal is the first to be unblocked,
+    # after receiving all followers' intents.
+    if is_leader_worker:
+        # The leader sends out proceeed signals to all followers.
+        timeout = timedelta(seconds=5)
+        _set_rpc_timeout(timeout)
+        worker_name_to_response_future_dict = dict()
+        for follower_worker_name in _ALL_WORKER_NAMES - {leader_worker_name}:
+            fut = rpc_async(follower_worker_name, _set_proceed_shutdown_signal, args=(sequence_id,))
+            worker_name_to_response_future_dict[follower_worker_name] = fut
+        for follower_worker_name, fut in worker_name_to_response_future_dict.items():
+            try:
+                fut.wait()
+            except RuntimeError as ex:
+                logger.error(
+                    "{worker_name} failed to respond to 'Shutdown Proceed.' request in {timeout}".format(
+                        worker_name=follower_worker_name, timeout=timeout
+                    )
+                )
+
+
+@_require_initialized
 def shutdown(graceful=True):
     r"""
     Perform a shutdown of the RPC agent, and then destroy the RPC agent. This
@@ -88,8 +209,17 @@ def shutdown(graceful=True):
                          outstanding work to complete.
 
     Example::
+        Make sure that ``MASTER_ADDRESS`` and ``MASTER_PORT`` are set properly
+        on both workers. Refer to :meth:`~torch.distributed.init_process_group`
+        API for more details. For example,
 
-        On worker 0:
+        >>> export MASTER_ADDRESS=localhost
+        >>> export MASTER_port=5678
+
+        Then run the following code in two different processes:
+
+        >>> # On worker 0:
+        >>> import torch
         >>> import torch.distributed.rpc as rpc
         >>> rpc.init_rpc("worker0", rank=0, world_size=2)
         >>> # do some work
@@ -97,24 +227,29 @@ def shutdown(graceful=True):
         >>> # ready to shutdown
         >>> rpc.shutdown()
 
-        On worker 1:
+        >>> # On worker 1:
         >>> import torch.distributed.rpc as rpc
         >>> rpc.init_rpc("worker1", rank=1, world_size=2)
         >>> # wait for worker 0 to finish work, and then shutdown.
         >>> rpc.shutdown()
     """
-    global _agent
-    if _agent:
-        if graceful:
-            _wait_all_workers()
+    if graceful:
+        _wait_all_workers()
+        _get_current_rpc_agent().join()
+    try:
+        # This raises a `TORCH_CHECK()` exception on RRef leak detected.
         _destroy_rref_context(_ignore_rref_leak)
-        _agent.shutdown()
+    finally:
+        _get_current_rpc_agent().shutdown()
         # clean up python rpc handler in shutdown(), see comments in
         # PythonRpcHandler::cleanup(), call it in python API because the
         # cleanup() function has python dependency, it assumes python
-        # interpreter exists
+        # interpreter exists.
+        # No matter if RRef leak exception is raised, this clean-up code
+        # must run to avoid destruction segfault in Python 3.5.
         _cleanup_python_rpc_handler()
-        _agent = None
+        _reset_current_rpc_agent()
+
 
 # TODO: add a context manager to wrap _init_rpc_backend and shutdown
 def _init_rpc_backend(
@@ -131,13 +266,11 @@ def _init_rpc_backend(
 
     _validate_rpc_args(backend, store, name, rank, world_size, rpc_backend_options)
 
-    global _agent
-
-    if _agent:
+    if _is_current_rpc_agent_set():
         raise RuntimeError("RPC is already initialized")
 
     # Initialize RPC.
-    _agent = backend_registry.init_backend(
+    rpc_agent = backend_registry.init_backend(
         backend,
         store=store,
         name=name,
@@ -145,7 +278,12 @@ def _init_rpc_backend(
         world_size=world_size,
         rpc_backend_options=rpc_backend_options,
     )
-    _start_rpc_agent(_agent)
+
+    worker_infos = rpc_agent.get_worker_infos()
+    global _ALL_WORKER_NAMES
+    _ALL_WORKER_NAMES = {worker_info.name for worker_info in worker_infos}
+
+    _set_and_start_rpc_agent(rpc_agent)
 
 
 @_require_initialized
@@ -165,9 +303,9 @@ def get_worker_info(worker_name=None):
         current worker if ``worker_name`` is ``None``.
     """
     if worker_name:
-        return _agent.get_worker_info(worker_name)
+        return _get_current_rpc_agent().get_worker_info(worker_name)
     else:
-        return _agent.get_worker_info()
+        return _get_current_rpc_agent().get_worker_info()
 
 
 def _to_worker_info(name_or_info):
@@ -176,7 +314,8 @@ def _to_worker_info(name_or_info):
     elif isinstance(name_or_info, str):
         return get_worker_info(name_or_info)
     else:
-        raise ValueError("Cannot get WorkerInfo from name".format(name_or_info))
+        raise ValueError("Cannot get WorkerInfo from name {}".format(name_or_info))
+
 
 def _validate_rpc_args(backend, store, name, rank, world_size, rpc_backend_options):
     type_mapping = {
@@ -210,7 +349,8 @@ def remote(to, func, args=None, kwargs=None):
 
     Arguments:
         to (str or WorkerInfo): id or name of the destination worker.
-        func (callable): builtin functions (like :meth:`torch.add`).
+        func (callable): any callable function. python callable, builtin or annotated TorchScript
+                         functions (like meth:`torch.add`) can be sent over RPC more efficiently.
         args (tuple): the argument tuple for the ``func`` invocation.
         kwargs (dict): is a dictionary of keyword arguments for the ``func``
                        invocation.
@@ -221,8 +361,17 @@ def remote(to, func, args=None, kwargs=None):
         to retrieve the result value locally.
 
     Example::
+        Make sure that ``MASTER_ADDRESS`` and ``MASTER_PORT`` are set properly
+        on both workers. Refer to :meth:`~torch.distributed.init_process_group`
+        API for more details. For example,
 
-        On worker 0:
+        >>> export MASTER_ADDRESS=localhost
+        >>> export MASTER_port=5678
+
+        Then run the following code in two different processes:
+
+        >>> # On worker 0:
+        >>> import torch
         >>> import torch.distributed.rpc as rpc
         >>> rpc.init_rpc("worker0", rank=0, world_size=2)
         >>> rref1 = rpc.remote("worker1", torch.add, args=(torch.ones(2), 3))
@@ -230,46 +379,88 @@ def remote(to, func, args=None, kwargs=None):
         >>> x = rref1.to_here() + rref2.to_here()
         >>> rpc.shutdown()
 
-        On worker 1:
+        >>> # On worker 1:
+        >>> import torch.distributed.rpc as rpc
+        >>> rpc.init_rpc("worker1", rank=1, world_size=2)
+        >>> rpc.shutdown()
+
+        If invoking an annotated TorchScript function, then run the following
+        code in two different processes:
+
+        >>> # On worker 0:
+        >>> @torch.jit.script
+        >>> def my_script_add(t1, t2):
+        >>>    return torch.add(t1, t2)
+        >>> import torch.distributed.rpc as rpc
+        >>> rpc.init_rpc("worker0", rank=0, world_size=2)
+        >>> rref = rpc.remote("worker1", my_script_add, args=(torch.ones(2), 3))
+        >>> rref.to_here()
+        >>> rpc.shutdown()
+
+        >>> # On worker 1:
         >>> import torch.distributed.rpc as rpc
         >>> rpc.init_rpc("worker1", rank=1, world_size=2)
         >>> rpc.shutdown()
     """
     qualified_name = torch.jit._find_builtin(func)
+    dst_worker_info = _to_worker_info(to)
+
+    # If profiling is enabled, kick off the timer and retrieve back a
+    # RecordFunction instance.
+    rf = None
+    if torch.autograd._profiler_enabled():
+        rf = _start_record_function(
+            RPCExecMode.REMOTE,
+            str(qualified_name) if qualified_name is not None else func.__qualname__,
+            get_worker_info().name,
+            dst_worker_info.name,
+        )
 
     args = args if args else ()
     kwargs = kwargs if kwargs else {}
 
-    info = _to_worker_info(to)
     if qualified_name is not None:
-        return _invoke_remote_builtin(
-            _agent, info, qualified_name, *args, **kwargs)
+        return _invoke_remote_builtin(dst_worker_info, qualified_name, rf, *args, **kwargs)
+    elif isinstance(func, torch.jit.ScriptFunction):
+        return _invoke_remote_torchscript(
+            dst_worker_info.name, torch._jit_internal._qualified_name(func), *args, **kwargs
+        )
     else:
         (pickled_python_udf, tensors) = _default_pickler.serialize(
-            PythonUDF(func, args, kwargs))
-        return _invoke_remote_python_udf(
-            _agent, info, pickled_python_udf, tensors)
+            PythonUDF(func, args, kwargs)
+        )
+        return _invoke_remote_python_udf(dst_worker_info, pickled_python_udf, tensors, rf)
 
 
-def _invoke_rpc(to, func, args=None, kwargs=None):
+def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None):
     if not callable(func):
         raise TypeError("function should be callable.")
 
     qualified_name = torch.jit._find_builtin(func)
+    dst_worker_info = _to_worker_info(to)
+    # If profiling is enabled, kick off the timer and retrieve back a
+    # RecordFunction instance.
+    rf = None
+    if torch.autograd._profiler_enabled():
+        rf = _start_record_function(
+            rpc_type,
+            str(qualified_name) if qualified_name is not None else func.__qualname__,
+            get_worker_info().name,
+            dst_worker_info.name,
+        )
 
     args = args if args else ()
     kwargs = kwargs if kwargs else {}
 
-    info = _to_worker_info(to)
     if qualified_name is not None:
-        fut = _invoke_rpc_builtin(
-            _agent, info, qualified_name, *args, **kwargs
-        )
+        fut = _invoke_rpc_builtin(dst_worker_info, qualified_name, rf, *args, **kwargs)
+    elif isinstance(func, torch.jit.ScriptFunction):
+        fut = _invoke_rpc_torchscript(dst_worker_info.name, func, args, kwargs)
     else:
         (pickled_python_udf, tensors) = _default_pickler.serialize(
-            PythonUDF(func, args, kwargs))
-        fut = _invoke_rpc_python_udf(
-            _agent, info, pickled_python_udf, tensors)
+            PythonUDF(func, args, kwargs)
+        )
+        fut = _invoke_rpc_python_udf(dst_worker_info, pickled_python_udf, tensors, rf)
     return fut
 
 
@@ -282,8 +473,8 @@ def rpc_sync(to, func, args=None, kwargs=None):
 
     Arguments:
         to (str or WorkerInfo): id or name of the destination worker.
-        func (callable): any callable function. builtin functions (like
-                         :meth:`torch.add`) can be sent over RPC more efficiently.
+        func (callable): any callable function. python callable, builtin or annotated TorchScript
+                         functions (like meth:`torch.add`) can be sent over RPC more efficiently.
         args (tuple): the argument tuple for the ``func`` invocation.
         kwargs (dict): is a dictionary of keyword arguments for the ``func``
                        invocation.
@@ -292,19 +483,46 @@ def rpc_sync(to, func, args=None, kwargs=None):
         Returns the result of running ``func`` on ``args`` and ``kwargs``.
 
     Example::
+        Make sure that ``MASTER_ADDRESS`` and ``MASTER_PORT`` are set properly
+        on both workers. Refer to :meth:`~torch.distributed.init_process_group`
+        API for more details. For example,
 
-        On worker 0:
+        >>> export MASTER_ADDRESS=localhost
+        >>> export MASTER_port=5678
+
+        Then run the following code in two different processes:
+
+        >>> # On worker 0:
+        >>> import torch
         >>> import torch.distributed.rpc as rpc
         >>> rpc.init_rpc("worker0", rank=0, world_size=2)
         >>> ret = rpc.rpc_sync("worker1", torch.add, args=(torch.ones(2), 3))
         >>> rpc.shutdown()
 
-        On worker 1:
+        >>> # On worker 1:
         >>> import torch.distributed.rpc as rpc
         >>> rpc.init_rpc("worker1", rank=1, world_size=2)
         >>> rpc.shutdown()
+
+        If invoking an annotated TorchScript function, then run the following
+        code in two different processes:
+
+        >>> # On worker 0:
+        >>> @torch.jit.script
+        >>> def my_script_add(t1, t2):
+        >>>    return torch.add(t1, t2)
+        >>> import torch.distributed.rpc as rpc
+        >>> rpc.init_rpc("worker0", rank=0, world_size=2)
+        >>> ret = rpc.rpc_sync("worker1", my_script_add, args=(torch.ones(2), 3))
+        >>> rpc.shutdown()
+
+        >>> # On worker 1:
+        >>> import torch.distributed.rpc as rpc
+        >>> rpc.init_rpc("worker1", rank=1, world_size=2)
+        >>> rpc.shutdown()
+
     """
-    fut = _invoke_rpc(to, func, args, kwargs)
+    fut = _invoke_rpc(to, func, RPCExecMode.SYNC, args, kwargs)
     return fut.wait()
 
 
@@ -314,24 +532,33 @@ def rpc_async(to, func, args=None, kwargs=None):
     Make a non-blocking RPC call to run function ``func`` on worker ``to``. RPC
     messages are sent and received in parallel to execution of Python code. This
     method is thread-safe. This method will immediately return a
-    ``torch.distributed.FutureMessage`` that can be awaited on.
+    Future that can be awaited on.
 
     Arguments:
         to (str or WorkerInfo): id or name of the destination worker.
-        func (callable): any callable function. builtin functions (like
-                         :meth:`torch.add`) can be sent over RPC more efficiently.
+        func (callable): any callable function. python callable, builtin or annotated TorchScript
+                         functions (like meth:`torch.add`) can be sent over RPC more efficiently.
         args (tuple): the argument tuple for the ``func`` invocation.
         kwargs (dict): is a dictionary of keyword arguments for the ``func``
                        invocation.
 
     Returns:
-        Returns a ``torch.distributed.FutureMessage`` object that can be waited
+        Returns a Future object that can be waited
         on. When completed, the return value of ``func`` on ``args`` and
-        ``kwargs`` can be retrieved from the ``FutureMessage`` object.
+        ``kwargs`` can be retrieved from the Future object.
 
     Example::
+        Make sure that ``MASTER_ADDRESS`` and ``MASTER_PORT`` are set properly
+        on both workers. Refer to :meth:`~torch.distributed.init_process_group`
+        API for more details. For example,
 
-        On worker 0:
+        >>> export MASTER_ADDRESS=localhost
+        >>> export MASTER_port=5678
+
+        Then run the following code in two different processes:
+
+        >>> # On worker 0:
+        >>> import torch
         >>> import torch.distributed.rpc as rpc
         >>> rpc.init_rpc("worker0", rank=0, world_size=2)
         >>> fut1 = rpc.rpc_async("worker1", torch.add, args=(torch.ones(2), 3))
@@ -339,10 +566,27 @@ def rpc_async(to, func, args=None, kwargs=None):
         >>> result = fut1.wait() + fut2.wait()
         >>> rpc.shutdown()
 
-        On worker 1:
+        >>> # On worker 1:
+        >>> import torch.distributed.rpc as rpc
+        >>> rpc.init_rpc("worker1", rank=1, world_size=2)
+        >>> rpc.shutdown()
+
+        If invoking an annotated TorchScript function, then run the following
+        code in two different processes:
+
+        >>> # On worker 0:
+        >>> @torch.jit.script
+        >>> def my_script_add(t1, t2):
+        >>>    return torch.add(t1, t2)
+        >>> import torch.distributed.rpc as rpc
+        >>> rpc.init_rpc("worker0", rank=0, world_size=2)
+        >>> fut = rpc.rpc_async("worker1", my_script_add, args=(torch.ones(2), 3))
+        >>> ret = fut.wait()
+        >>> rpc.shutdown()
+
+        >>> # On worker 1:
         >>> import torch.distributed.rpc as rpc
         >>> rpc.init_rpc("worker1", rank=1, world_size=2)
         >>> rpc.shutdown()
     """
-    fut = _invoke_rpc(to, func, args, kwargs)
-    return fut
+    return _invoke_rpc(to, func, RPCExecMode.ASYNC, args, kwargs)

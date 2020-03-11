@@ -2,9 +2,59 @@
 
 #include <ATen/ATen.h>
 #include <ATen/TensorUtils.h>
+#include <ATen/native/DispatchStub.h>
+
+
+/**
+ * Note [compute_scales_value]
+ * Note [area_pixel_compute_scale]
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ * Interpolate with scale_factor can have different behaviors
+ * depending on the value of recompute_scale_factor:
+ *
+ * - With recompute_scale_factor = True (current default behavior):
+ * the scale_factor, when provided by the user, are used to calculate
+ * the output size. The input size and the computed output_size
+ * are then used to infer new values for the scales which are
+ * used in the interpolation.  Because floating-point math is not exact,
+ * this may be a different value from the user-supplied scales.
+ *
+ * - With recompute_scale_factor = False (which will be the default
+ * behavior starting 1.5.0):
+ * the behavior follows opencv logic, and the scales provided by
+ * the user are the ones used in the interpolation calculations.
+ *
+ * If the scales are not provided or if they are provided but
+ * recompute_scale_factor is set to True (default behavior), the scales
+ * are computed from the input and the output size;
+ *
+ *
+ * When the scales are inferred from the input and output sizes,
+ * we view each pixel as an area, idx + 0.5 as its center index.
+ * Here is an example formula in 1D case.
+ * if align_corners: center of two corner pixel areas are preserved,
+ *     (0.5, 0.5) -> (0.5, 0.5),
+ *     (input_size - 0.5, 0.5) -> (output_size - 0.5)
+ *     scale = (input_size - 0.5 - 0.5) / (output_size - 0.5 - 0.5)
+ *     src_index + 0.5 - 0.5 = scale * (dst_index + 0.5 - 0.5)
+ * if not align_corners: the whole range is scaled accordingly
+ *     scale = input_size / output_size
+ *     src_idx + 0.5 = scale * (dst_index + 0.5)
+ */
 
 namespace at {
 namespace native {
+
+using scale_t = c10::optional<double>;
+using upsampling_1d = void(*)(Tensor& output, const Tensor& input, scale_t scales_w);
+using upsampling_2d = void(*)(Tensor& output, const Tensor& input, scale_t scales_h, scale_t scales_w);
+using upsampling_3d = void(*)(Tensor& output, const Tensor& input, scale_t scales_d, scale_t scales_h, scale_t scales_w);
+DECLARE_DISPATCH(upsampling_1d, upsample_nearest1d_kernel);
+DECLARE_DISPATCH(upsampling_2d, upsample_nearest2d_kernel);
+DECLARE_DISPATCH(upsampling_3d, upsample_nearest3d_kernel);
+DECLARE_DISPATCH(upsampling_1d, upsample_nearest1d_backward_kernel);
+DECLARE_DISPATCH(upsampling_2d, upsample_nearest2d_backward_kernel);
+DECLARE_DISPATCH(upsampling_3d, upsample_nearest3d_backward_kernel);
 
 static inline void upsample_1d_shape_check(
     const Tensor& input,
@@ -22,10 +72,11 @@ static inline void upsample_1d_shape_check(
       ")");
 
   if (input.defined()) {
+    // Allow for empty batch size but not other dimensions
     TORCH_CHECK(
-        input.numel() != 0 && input.dim() == 3,
-        "Non-empty 3D data tensor expected but got a tensor with sizes ",
-        input.sizes());
+                (input.size(1) != 0 && input.size(2) != 0) && input.dim() == 3,
+                "Non-empty 3D data tensor expected but got a tensor with sizes ",
+                input.sizes());
   } else if (grad_output.defined()) {
     check_dim_size(grad_output, 3, 0, nbatch);
     check_dim_size(grad_output, 3, 1, nchannels);
@@ -57,10 +108,14 @@ static inline void upsample_2d_shape_check(
       ")");
 
   if (input.defined()) {
+    // Allow for empty batch size but not other dimensions
     TORCH_CHECK(
-        input.numel() != 0 && input.dim() == 4,
-        "Non-empty 4D data tensor expected but got a tensor with sizes ",
-        input.sizes());
+                (input.numel() != 0 ||
+                 (input.size(1) != 0 && input.size(2) != 0 && input.size(3) != 0)
+                 ) &&
+                input.dim() == 4,
+                "Non-empty 4D data tensor expected but got a tensor with sizes ",
+                input.sizes());
   } else if (grad_output.defined()) {
     check_dim_size(grad_output, 4, 0, nbatch);
     check_dim_size(grad_output, 4, 1, nchannels);
@@ -98,10 +153,13 @@ static inline void upsample_3d_shape_check(
       ")");
 
   if (input.defined()) {
+    // Allow for empty batch size but not other dimensions
+    bool valid_empty = input.size(0) == 0 && input.size(1) != 0 &&
+      input.size(2) != 0 && input.size(3) != 0 && input.size(4) != 0;
     TORCH_CHECK(
-        input.numel() != 0 && input.dim() == 5,
-        "Non-empty 5D data tensor expected but got a tensor with sizes ",
-        input.sizes());
+                (input.numel() != 0 || valid_empty) && input.dim() == 5,
+                "Non-empty 5D data tensor expected but got a tensor with sizes ",
+                input.sizes());
   } else if (grad_output.defined()) {
     check_dim_size(grad_output, 5, 0, nbatch);
     check_dim_size(grad_output, 5, 1, nchannels);
@@ -112,25 +170,28 @@ static inline void upsample_3d_shape_check(
 }
 
 template <typename scalar_t>
+static inline scalar_t compute_scales_value(
+    const c10::optional<double> scale,
+    int64_t input_size,
+    int64_t output_size) {
+      // see Note [compute_scales_value]
+      // FIXME: remove magic > 0 after we ensure no models were serialized with -1 defaults.
+      return (scale.has_value() && scale.value() > 0.)
+          ? static_cast<scalar_t>(1.0 / scale.value())
+          : (static_cast<scalar_t>(input_size) / output_size);
+}
+
+template <typename scalar_t>
 static inline scalar_t area_pixel_compute_scale(
     int64_t input_size,
     int64_t output_size,
-    bool align_corners) {
-  /* We view each pixel as an area, idx + 0.5 as its center index.
-   * Here is an example formula in 1D case.
-   * if align_corners: center of two corner pixel areas are preserved,
-   *     (0.5, 0.5) -> (0.5, 0.5),
-   *     (input_size - 0.5, 0.5) -> (output_size - 0.5)
-   *     scale = (input_size - 0.5 - 0.5) / (output_size - 0.5 - 0.5)
-   *     src_index + 0.5 - 0.5 = scale * (dst_index + 0.5 - 0.5)
-   * if not align_corners: the whole range is scaled accordingly
-   *     scale = input_size / output_size
-   *     src_idx + 0.5 = scale * (dst_index + 0.5)
-   */
+    bool align_corners,
+    const c10::optional<double> scale) {
+  // see Note [area_pixel_compute_scale]
   if (output_size > 1) {
     return align_corners
         ? static_cast<scalar_t>(input_size - 1) / (output_size - 1)
-        : static_cast<scalar_t>(input_size) / output_size;
+        : compute_scales_value<scalar_t>(scale, input_size, output_size);
   } else {
     return scalar_t(0);
   }

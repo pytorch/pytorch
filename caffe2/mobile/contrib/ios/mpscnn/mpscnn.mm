@@ -2347,10 +2347,6 @@ class MPSCNNGenerateProposalsCPPOp final : public Operator<CPUContext> {
   bool legacy_plus_one_{true};
   // threads per thread group, used in nms
   ushort maxThreadsPerThreadgroup{32};
-
- private:
-  id<MTLBuffer> out_rois_{nullptr};
-  id<MTLBuffer> out_rois_probs_{nullptr};
 };
 
 REGISTER_CPU_OPERATOR(MPSCNNGenerateProposalsCPP, MPSCNNGenerateProposalsCPPOp);

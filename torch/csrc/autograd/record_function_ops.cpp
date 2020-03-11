@@ -1,9 +1,10 @@
 #include <ATen/cpp_custom_type_hack.h>
 #include <torch/csrc/autograd/record_function.h>
-#include <torch/csrc/jit/custom_operator.h>
+#include <torch/csrc/jit/runtime/custom_operator.h>
 
 namespace caffe2 {
 // Required for cpp_custom_type_hack to work
+// NOLINTNEXTLINE(bugprone-exception-escape)
 CAFFE_KNOWN_TYPE(torch::autograd::profiler::RecordFunction);
 } // namespace caffe2
 
@@ -12,7 +13,7 @@ namespace autograd {
 namespace profiler {
 
 at::Tensor record_function_enter(const std::string& name) {
-  auto rec = at::guts::make_unique<RecordFunction>();
+  auto rec = std::make_unique<RecordFunction>();
   // Only add new scope if profiling is enabled.
   if (auto* current = RecordFunction::current()) {
     AT_ASSERT(
@@ -23,7 +24,7 @@ at::Tensor record_function_enter(const std::string& name) {
     // a direct child of the parent RecordFunction.
     current->end();
 
-    rec->before(name);
+    runBeforeCallbacks(rec.get(), name);
   }
   return at::cpp_custom_type_hack::create(std::move(rec), at::TensorOptions());
 }
@@ -33,9 +34,10 @@ void record_function_exit(const at::Tensor& handle) {
   // lifetime until now.
   auto& rec = at::cpp_custom_type_hack::cast<RecordFunction>(handle);
   if (auto* current = RecordFunction::current()) {
-    AT_ASSERT(current->parent() == &rec, "rec must be parent");
-    AT_ASSERT(current->name() == StringView("profiler::_record_function_exit"));
-    current->end();
+    AT_ASSERT(
+        current->name() == StringView("profiler::_record_function_exit"));
+  }
+  if (rec.active()) {
     rec.end();
   }
 }

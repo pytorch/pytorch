@@ -101,7 +101,7 @@ def _maybe_get_scalar(value):
 
 
 def _get_const(value, desc, arg_name):
-    if _is_value(value) and value.node().kind() != 'onnx::Constant':
+    if _is_value(value) and value.node().kind() not in ('onnx::Constant', 'prim::Constant'):
         raise RuntimeError("ONNX symbolic expected a constant value of the {} argument, got `{}`".format(arg_name, value))
     return _parse_arg(value, desc)
 
@@ -213,16 +213,13 @@ def _sort_helper(g, input, dim, decending=True, out=None):
     if out is not None:
         _unimplemented("Sort", "Out parameter is not supported")
     shape_ = g.op("Shape", input)
-    axis = g.op("Constant", value_t=torch.tensor(0, dtype=torch.int64))
-    start = g.op("Constant", value_t=torch.tensor(dim, dtype=torch.int64))
-    end = g.op("Constant", value_t=torch.tensor(dim + 1, dtype=torch.int64))
-    slice_ = _slice_helper(g, shape_, axes=axis, starts=start, ends=end, steps=None, dynamic_slice=True)
+    dim_size_ = g.op("Gather", shape_, g.op("Constant", value_t=torch.tensor([dim], dtype=torch.int64)))
     if _export_onnx_opset_version <= 10:
         if not decending:
             _unimplemented("Sort", "Ascending is not supported")
-        return g.op("TopK", input, slice_, axis_i=dim, outputs=2)
+        return g.op("TopK", input, dim_size_, axis_i=dim, outputs=2)
     else:
-        return g.op("TopK", input, slice_, axis_i=dim, largest_i=decending, outputs=2)
+        return g.op("TopK", input, dim_size_, axis_i=dim, largest_i=decending, outputs=2)
 
 
 def _topk_helper(g, input, k, dim, largest=True, sorted=False, out=None):
@@ -250,6 +247,9 @@ def _interpolate_warning(interpolate_mode):
                   "to support Pytorch's behavior (like coordinate_transformation_mode and nearest_mode).\n"
                   "We recommend using opset 11 and above for models using this operator. ")
 
+def _unsqueeze_helper(g, input, dim):
+    from torch.onnx.symbolic_opset9 import unsqueeze
+    return unsqueeze(g, input, dim)
 
 def _interpolate_size_to_scales(g, input, output_size, dim):
     output_size = _maybe_get_const(output_size, 'is')
@@ -269,19 +269,40 @@ def _interpolate_size_to_scales(g, input, output_size, dim):
     return scales
 
 
-def _interpolate_get_scales(g, scale_factor, dim):
-    from torch.onnx.symbolic_opset9 import unsqueeze
+def _interpolate_get_scales_if_available(g, scales):
+    available_scales = _maybe_get_const(scales[0], 'f') != -1 and not _is_none(scales[0])
 
+    if not available_scales:
+        return None
+
+    scales_list = []
+    for scale in scales:
+        unsqueezed_scale = _unsqueeze_helper(g, scale, 0)
+        # ONNX only supports float for the scales. double -> float.
+        unsqueezed_scale = g.op("Cast", unsqueezed_scale,
+                                to_i=cast_pytorch_to_onnx["Float"])
+        scales_list.append(unsqueezed_scale)
     offsets = g.op("Constant", value_t=torch.ones(2, dtype=torch.float32))
-    if _is_packed_list(scale_factor):
-        scale_factor = _unpack_list(scale_factor)
-        scales = []
-        for dim_scale_factor in scale_factor:
-            dim_scale_factor = unsqueeze(g, dim_scale_factor, 0)
-            dim_scale_factor = g.op("Cast", dim_scale_factor, to_i=cast_pytorch_to_onnx["Float"])
-            scales.append(dim_scale_factor)
+    scales = g.op("Concat", offsets, *scales_list, axis_i=0)
+    return scales
+
+
+def _get_interpolate_attributes(g, mode, args):
+    if mode == 'nearest':
+        align_corners = None
+        scales = args[0:]
     else:
-        scale_factor = unsqueeze(g, scale_factor, 0)
+        align_corners = args[0]
+        scales = args[1:]
+    scales = _interpolate_get_scales_if_available(g, scales)
+    return scales, align_corners
+
+def _interpolate_get_scales(g, scale_factor, dim):
+    offsets = g.op("Constant", value_t=torch.ones(2, dtype=torch.float32))
+    if isinstance(scale_factor.type(), torch._C.ListType):
+        return g.op("Concat", offsets, scale_factor, axis_i=0)
+    else:
+        scale_factor = _unsqueeze_helper(g, scale_factor, 0)
         scale_factor = g.op("Cast", scale_factor, to_i=cast_pytorch_to_onnx["Float"])
         scales = [scale_factor for i in range(dim - 2)]
     scale_factor = g.op("Concat", offsets, *scales, axis_i=0)
@@ -289,7 +310,6 @@ def _interpolate_get_scales(g, scale_factor, dim):
 
 
 def _interpolate_get_scales_and_mode(g, input, size, scale_factor, mode , align_corners):
-    from torch.onnx.symbolic_opset9 import unsqueeze
     mode = _maybe_get_const(mode, 's')
     if 'linear' in mode:
         mode = 'linear'
@@ -311,7 +331,7 @@ def _interpolate_get_scales_and_mode(g, input, size, scale_factor, mode , align_
         if not _is_packed_list(size):
             is_scalar = ((_maybe_get_const(size, 't').dim() == 0))
             if is_scalar:
-                size = unsqueeze(g, size, 0)
+                size = _unsqueeze_helper(g, size, 0)
                 size = [size for i in range(dim - 2)]
                 size = g.op("Concat", *size, axis_i=0)
         scale_factor = _interpolate_size_to_scales(g, input, size, dim)
@@ -422,7 +442,7 @@ def _avgpool_helper(tuple_fn, padding, kernel_size, stride, divisor_override, na
 
 _default_onnx_opset_version = 9
 _onnx_master_opset = 10
-_onnx_stable_opsets = [7, 8, 9, 10, 11]
+_onnx_stable_opsets = [7, 8, 9, 10, 11, 12]
 _export_onnx_opset_version = _default_onnx_opset_version
 
 

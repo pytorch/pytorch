@@ -9,8 +9,6 @@
 
 #include <cstdint>
 
-namespace F = torch::nn::functional;
-
 namespace torch {
 namespace nn {
 
@@ -97,8 +95,8 @@ class NormImplBase : public torch::nn::Cloneable<Derived> {
       weight = this->register_parameter("weight", torch::empty({options.num_features()}));
       bias = this->register_parameter("bias", torch::empty({options.num_features()}));
     } else {
-      weight = this->register_parameter("weight", Tensor());
-      bias = this->register_parameter("bias", Tensor());
+      weight = this->register_parameter("weight", Tensor(), /*requires_grad=*/false);
+      bias = this->register_parameter("bias", Tensor(), /*requires_grad=*/false);
     }
     if (options.track_running_stats()) {
       running_mean = this->register_buffer("running_mean", torch::zeros({options.num_features()}));
@@ -178,7 +176,7 @@ class BatchNormImplBase : public NormImplBase<D, Derived, BatchNormOptions> {
       }
     }
 
-    return F::detail::batch_norm(
+    return torch::nn::functional::detail::batch_norm(
         input,
         this->running_mean,
         this->running_var,

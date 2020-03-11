@@ -40,6 +40,9 @@ for test in $(find "$cpp_test_dir" -executable -type f); do
         LD_LIBRARY_PATH="$ld_library_path" "$test"
       fi
       ;;
+    */*_benchmark)
+      LD_LIBRARY_PATH="$ld_library_path" "$test" --benchmark_color=false
+      ;;
     *)
       # Currently, we use a mixture of gtest (caffe2) and Catch2 (ATen). While
       # planning to migrate to gtest as the common PyTorch c++ test suite, we
@@ -64,7 +67,7 @@ if [[ "$BUILD_ENVIRONMENT" == *cmake* ]]; then
   exit 0
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *ubuntu14.04* ]]; then
+# if [[ "$BUILD_ENVIRONMENT" == *ubuntu14.04* ]]; then
   # Hotfix, use hypothesis 3.44.6 on Ubuntu 14.04
   # See comments on
   # https://github.com/HypothesisWorks/hypothesis-python/commit/eadd62e467d6cee6216e71b391951ec25b4f5830
@@ -74,15 +77,15 @@ if [[ "$BUILD_ENVIRONMENT" == *ubuntu14.04* ]]; then
   sudo pip -q install attrs==18.1.0 -f https://s3.amazonaws.com/ossci-linux/wheels/attrs-18.1.0-py2.py3-none-any.whl
   sudo pip -q install coverage==4.5.1 -f https://s3.amazonaws.com/ossci-linux/wheels/coverage-4.5.1-cp36-cp36m-macosx_10_12_x86_64.whl
   sudo pip -q install hypothesis==3.44.6 -f https://s3.amazonaws.com/ossci-linux/wheels/hypothesis-3.44.6-py3-none-any.whl
-else
-  pip install --user --no-cache-dir hypothesis==3.59.0
-fi
+# else
+#   pip install --user --no-cache-dir hypothesis==3.59.0
+# fi
 
 # Collect additional tests to run (outside caffe2/python)
 EXTRA_TESTS=()
 
 # CUDA builds always include NCCL support
-if [[ "$BUILD_ENVIRONMENT" == *-cuda* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *-cuda* ]] || [[ "$BUILD_ENVIRONMENT" == *-rocm* ]]; then
   EXTRA_TESTS+=("$caffe2_pypath/contrib/nccl")
 fi
 
@@ -133,7 +136,7 @@ pip install --user pytest-sugar
 # torchvision tests #
 #####################
 if [[ "$BUILD_ENVIRONMENT" == *onnx* ]]; then
-  pip install -q --user git+https://github.com/pytorch/vision.git
+  pip install -q --user git+https://github.com/pytorch/vision.git@v0.5.0
   pip install -q --user ninja
   # JIT C++ extensions require ninja, so put it into PATH.
   export PATH="/var/lib/jenkins/.local/bin:$PATH"
@@ -141,7 +144,7 @@ if [[ "$BUILD_ENVIRONMENT" == *onnx* ]]; then
     # default pip version is too old(9.0.2), unable to support tag `manylinux2010`.
     # Fix the pip error: Couldn't find a version that satisfies the requirement
     sudo pip install --upgrade pip
-    pip install -q --user -i https://test.pypi.org/simple/ ort-nightly==1.0.0.dev1104
+    pip install -q --user -i https://test.pypi.org/simple/ ort-nightly==1.1.0.dev1228
   fi
   "$ROOT_DIR/scripts/onnx/test.sh"
 fi

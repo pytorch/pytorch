@@ -3,7 +3,6 @@
 #else
 
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/core/EnableNamedTensor.h>
 
 
 void THCTensor_(maskedFill)(THCState* state,
@@ -42,7 +41,7 @@ void THCTensor_(maskedFillByte)(THCState* state,
                                 THCTensor *tensor, THByteTensor *mask, scalar_t value)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, tensor));
-  THCudaByteTensor* maskCuda = THCudaByteTensor_newWithSize(state, mask->sizes(), {});
+  THCudaByteTensor* maskCuda = THTensor_wrap(mask).cuda().unsafeReleaseTensorImpl();
   THCTensor_(copy)(state, maskCuda, mask);
   THCTensor_(maskedFill)(state, tensor, maskCuda, value);
   THCudaByteTensor_free(state, maskCuda);
@@ -89,7 +88,7 @@ void THCTensor_(maskedCopy)(THCState* state,
 
   thrust::exclusive_scan(
 #if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
-    thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
+    thrust::cuda::par(thrustAlloc).on(c10::cuda::getCurrentCUDAStream()),
 #endif
     maskData,
     maskData + THCudaLongTensor_nElement(state, maskLong),
@@ -155,7 +154,7 @@ void THCTensor_(maskedCopyBool)(THCState* state,
 
   thrust::exclusive_scan(
 #if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
-    thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
+    thrust::cuda::par(thrustAlloc).on(c10::cuda::getCurrentCUDAStream()),
 #endif
     maskData,
     maskData + THCudaLongTensor_nElement(state, maskLong),
@@ -183,7 +182,7 @@ void THCTensor_(maskedCopyBool)(THCState* state,
 void THCTensor_(maskedCopyByte)(THCState* state,
                                 THCTensor *tensor, THByteTensor *mask, THCTensor *src) {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, tensor, src));
-  THCudaByteTensor* maskCuda = THCudaByteTensor_newWithSize(state, mask->sizes(), {});
+  THCudaByteTensor* maskCuda = THTensor_wrap(mask).cuda().unsafeReleaseTensorImpl();
   THCTensor_(copy)(state, maskCuda, mask);
   THCTensor_(maskedCopy)(state, tensor, maskCuda, src);
   THCudaByteTensor_free(state, maskCuda);
@@ -191,9 +190,7 @@ void THCTensor_(maskedCopyByte)(THCState* state,
 
 void THCTensor_(maskedSelect)(THCState* state,
                               THCTensor* tensor, THCTensor* src, THCudaByteTensor* mask) {
-#ifdef BUILD_NAMEDTENSOR
   at::NoNamesGuard guard;
-#endif
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, tensor, src, mask));
   THArgCheck(THCudaByteTensor_nElement(state, mask) ==
              THCTensor_(nElement)(state, src),
@@ -228,7 +225,7 @@ void THCTensor_(maskedSelect)(THCState* state,
 
   thrust::exclusive_scan(
 #if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
-    thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
+    thrust::cuda::par(thrustAlloc).on(c10::cuda::getCurrentCUDAStream()),
 #endif
     maskData,
     maskData + THCudaLongTensor_nElement(state, maskLong),
@@ -255,9 +252,7 @@ void THCTensor_(maskedSelect)(THCState* state,
 
 void THCTensor_(maskedSelectBool)(THCState* state,
                                    THCTensor* tensor, THCTensor* src, THCudaBoolTensor* mask) {
-#ifdef BUILD_NAMEDTENSOR
   at::NoNamesGuard guard;
-#endif
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, tensor, src, mask));
   THArgCheck(THCudaBoolTensor_nElement(state, mask) ==
              THCTensor_(nElement)(state, src),
@@ -292,7 +287,7 @@ void THCTensor_(maskedSelectBool)(THCState* state,
 
   thrust::exclusive_scan(
 #if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
-    thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
+    thrust::cuda::par(thrustAlloc).on(c10::cuda::getCurrentCUDAStream()),
 #endif
     maskData,
     maskData + THCudaLongTensor_nElement(state, maskLong),
@@ -322,7 +317,7 @@ void THCTensor_(maskedSelectByte)(THCState* state,
                                   THCTensor *tensor, THCTensor *src, THByteTensor *mask)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, tensor, src));
-  THCudaByteTensor* maskCuda = THCudaByteTensor_newWithSize(state, mask->sizes(), {});
+  THCudaByteTensor* maskCuda = THTensor_wrap(mask).cuda().unsafeReleaseTensorImpl();
   THCTensor_(copy)(state, maskCuda, mask);
   THCTensor_(maskedSelect)(state, tensor, src, maskCuda);
   THCudaByteTensor_free(state, maskCuda);

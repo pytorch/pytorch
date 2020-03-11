@@ -10,19 +10,20 @@ import torch
 import torch.nn as nn
 import torch.utils.data
 import torch.cuda
+from torch._six import PY2
 from torch.utils.checkpoint import checkpoint, checkpoint_sequential
 import torch.hub as hub
 from torch.autograd._functions.utils import check_onnx_broadcast
 from torch.onnx.symbolic_opset9 import _prepare_onnx_paddings
-from common_utils import skipIfRocm, load_tests, IS_SANDCASTLE
+from torch.testing._internal.common_utils import skipIfRocm, load_tests, IS_SANDCASTLE
 
-# load_tests from common_utils is used to automatically filter tests for
+# load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
 
 HAS_CUDA = torch.cuda.is_available()
 
-from common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests
 
 
 class RandomDatasetMock(object):
@@ -44,41 +45,37 @@ class TestCheckpoint(TestCase):
         model,
         module_lists_to_compare,
         num_chunks,
-        *inputs
+        input,
     ):
 
         # not checkpointed
-        if not isinstance(inputs, tuple):
-            inputs = (inputs,)
-        out = model(*inputs)
-        out_not_checkpointed = out.data.clone()
+        out = model(input)
+        out_not_checkpointed = out.detach().clone()
         model.zero_grad()
         out.sum().backward()
         grad_not_checkpointed = {
-            name: param.grad.data.clone()
+            name: param.grad.detach().clone()
             for name, param in model.named_parameters()
         }
-        input_grad_not_checkpointed = [i.grad.data.clone() for i in inputs]
+        input_grad_not_checkpointed = input.grad.detach().clone()
         for model_to_compare in module_lists_to_compare:
             # checkpointed model by passing list of modules
-            detached_inputs = [i.detach() for i in inputs]
-            for detached in detached_inputs:
-                detached.requires_grad = True
+            detached = input.detach()
+            detached.requires_grad = True
 
             # pass list of modules to checkpoint
-            out = checkpoint_sequential(model_to_compare, num_chunks, *detached_inputs)
-            out_checkpointed = out.data.clone()
+            out = checkpoint_sequential(model_to_compare, num_chunks, detached)
+            out_checkpointed = out.detach().clone()
             model.zero_grad()
             out.sum().backward()
             grad_checkpointed = {
-                name: param.grad.data.clone()
+                name: param.grad.detach().clone()
                 for name, param in model.named_parameters()
             }
-            input_grad_checkpointed = [d.grad.data.clone() for d in detached_inputs]
+            input_grad_checkpointed = detached.grad.detach().clone()
             # compare outputs as well as the gradients of input and parameters
             self.assertEqual(out_checkpointed, out_not_checkpointed)
-            for i, j in zip(input_grad_not_checkpointed, input_grad_checkpointed):
-                self.assertEqual(i, j)
+            self.assertEqual(input_grad_not_checkpointed, input_grad_checkpointed)
             for name in grad_checkpointed:
                 self.assertEqual(grad_checkpointed[name], grad_not_checkpointed[name])
 
@@ -126,7 +123,8 @@ class TestCheckpoint(TestCase):
         chunks = 2
         modules = list(model.children())
         out = checkpoint_sequential(modules, chunks, input_var)
-        with self.assertRaisesRegex(RuntimeError, "Checkpointing is not compatible"):
+        # python_error in case of py2_7_9.
+        with self.assertRaisesRegex(RuntimeError, "(Checkpointing is not compatible)|(python_error)"):
             torch.autograd.grad(
                 outputs=[out], grad_outputs=[torch.ones(1, 5)], inputs=[input_var], create_graph=True
             )
@@ -152,12 +150,12 @@ class TestCheckpoint(TestCase):
             torch.randn(1, 100, requires_grad=True)
         )
 
-    def test_checkpoint_module_list_multiple_args(self):
+    def test_checkpoint_module_list(self):
         class ModuleListNet(nn.Module):
             def __init__(self):
                 super(ModuleListNet, self).__init__()
                 module_list = [
-                    nn.Bilinear(100, 60, 50),
+                    nn.Linear(100, 50),
                     nn.ReLU(),
                     nn.Linear(50, 20),
                     nn.ReLU(),
@@ -166,26 +164,19 @@ class TestCheckpoint(TestCase):
                 ]
                 self.module_list = nn.ModuleList(module_list)
 
-            def forward(self, *inputs):
+            def forward(self, input):
                 for layer in self.module_list:
-                    if isinstance(inputs, tuple):
-                        inputs = layer(*inputs)
-                    else:
-                        inputs = layer(inputs)
-                return inputs
+                    input = layer(input)
+                return input
 
         model = ModuleListNet()
 
-        # Compare uncheckpointed model with its checkpointed counterparts
-        # In addition to running checkpoint_sequential on the nn.ModuleList
-        # instance, we also run the function on the list of functions within
-        # the ModuleList.
+        # Compare uncheckpointed model with its checkpointed counterparts.
         self._check_checkpoint_sequential(
             model,
             [list(model.module_list.children()), model.module_list],
             2,
             torch.randn(1, 100, requires_grad=True),
-            torch.randn(1, 60, requires_grad=True)
         )
 
     def test_checkpoint_sequential_deprecated_multiple_args(self):
@@ -197,11 +188,8 @@ class TestCheckpoint(TestCase):
         a = torch.randn(1, 100, requires_grad=True)
         b = torch.randn(1, 100, requires_grad=True)
 
-        self.assertWarnsRegex(
-            lambda: checkpoint_sequential(model, 1, a, b),
-            'deprecated',
-            'checkpoint_sequential with multiple args should be deprecated',
-        )
+        with self.assertRaises(TypeError):
+            checkpoint_sequential(model, 1, a, b)
 
     def test_checkpoint_sequential_deprecated_no_args(self):
         class Noop(nn.Module):
@@ -210,11 +198,8 @@ class TestCheckpoint(TestCase):
 
         model = nn.Sequential(Noop())
 
-        self.assertWarnsRegex(
-            lambda: checkpoint_sequential(model, 1),
-            'deprecated',
-            'checkpoint_sequential with no args should be deprecated',
-        )
+        with self.assertRaises(TypeError):
+            checkpoint_sequential(model, 1)
 
     def test_checkpoint_rng_cpu(self):
         for _ in range(5):
@@ -350,7 +335,7 @@ class TestBottleneck(TestCase):
     def _run(self, command):
         """Returns (return-code, stdout, stderr)"""
         import subprocess
-        from common_utils import PY3
+        from torch.testing._internal.common_utils import PY3
 
         p = subprocess.Popen(command, stdout=subprocess.PIPE,  # noqa
                              stderr=subprocess.PIPE, shell=True)
@@ -372,11 +357,11 @@ class TestBottleneck(TestCase):
 
     def _check_run_args(self):
         # Check that this fails due to missing args
-        rc, out, err = self._run_bottleneck('bottleneck/test_args.py')
+        rc, out, err = self._run_bottleneck('bottleneck_test/test_args.py')
         self.assertEqual(rc, 2, None, self._fail_msg('Missing args should error', out + err))
 
         # This should succeed
-        rc, out, err = self._run_bottleneck('bottleneck/test_args.py', '--foo foo --bar bar')
+        rc, out, err = self._run_bottleneck('bottleneck_test/test_args.py', '--foo foo --bar bar')
         self.assertEqual(rc, 0, None, self._fail_msg('Should pass args to script', out + err))
 
     def _fail_msg(self, msg, output):
@@ -384,7 +369,7 @@ class TestBottleneck(TestCase):
 
     def _check_environment_summary(self, output):
         results = re.search('Environment Summary', output)
-        self.assertIsNotNone(results, self._fail_msg('Should have Enviroment Summary', output))
+        self.assertIsNotNone(results, self._fail_msg('Should have Environment Summary', output))
 
         # Up to five lines away from the heading, there should be the version number
         results = re.search(r'Environment Summary.*(\n.*){,5}\nPyTorch \d+\.\d+', output)
@@ -420,7 +405,7 @@ class TestBottleneck(TestCase):
 
     @unittest.skipIf(HAS_CUDA, 'CPU-only test')
     def test_bottleneck_cpu_only(self):
-        rc, out, err = self._run_bottleneck('bottleneck/test.py')
+        rc, out, err = self._run_bottleneck('bottleneck_test/test.py')
         self.assertEqual(rc, 0, 'Run failed with\n{}'.format(err))
 
         self._check_run_args()
@@ -432,7 +417,7 @@ class TestBottleneck(TestCase):
     @unittest.skipIf(not HAS_CUDA, 'No CUDA')
     @skipIfRocm
     def test_bottleneck_cuda(self):
-        rc, out, err = self._run_bottleneck('bottleneck/test_cuda.py')
+        rc, out, err = self._run_bottleneck('bottleneck_test/test_cuda.py')
         self.assertEqual(rc, 0, 'Run failed with\n{}'.format(err))
 
         self._check_run_args()
@@ -577,6 +562,12 @@ class TestHub(TestCase):
             verbose=False)
         self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
                          SUM_OF_HUB_EXAMPLE)
+
+    @unittest.skipIf(PY2, "Requires python 3")
+    def test_hub_dir(self):
+        with tempfile.TemporaryDirectory('hub_dir') as dirname:
+            torch.hub.set_dir(dirname)
+            self.assertEqual(torch.hub._get_torch_home(), dirname)
 
 
 class TestHipify(TestCase):

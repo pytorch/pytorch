@@ -6,17 +6,25 @@ from threading import Lock
 
 
 class _LocalOptimizer:
+    # Ideally we would only need to share a lock for instances of
+    # _LocalOptimizer that deal with the same parameters. We are
+    # making a simplifying assumption here that if there is more
+    # than one instance of _LocalOptimizer per worker, they will
+    # be optimizing the same parameters (e.g. each data parallel
+    # trainer will create its own instance of _LocalOptimizer but
+    # they will all optimize the same parameters on each worker)
+    global_lock = Lock()
+
     def __init__(self, optim_cls, local_params_rref, *args, **kwargs):
         self.optim = optim_cls(
             [rref.local_value() for rref in local_params_rref],
             *args,
             **kwargs)
-        self.lock = Lock()
 
     def step(self, autograd_ctx_id):
         all_local_grads = dist_autograd.get_gradients(autograd_ctx_id)
 
-        with self.lock:
+        with _LocalOptimizer.global_lock:
             for param, grad in all_local_grads.items():
                 param.grad = grad
             self.optim.step()
@@ -87,7 +95,7 @@ class DistributedOptimizer:
         >>   loss = rref1.to_here() + rref2.to_here()
         >>
         >>   # Backward pass.
-        >>   dist_autograd.backward([loss.sum()])
+        >>   dist_autograd.backward(context_id, [loss.sum()])
         >>
         >>   # Optimizer.
         >>   dist_optim = DistributedOptimizer(
@@ -95,7 +103,7 @@ class DistributedOptimizer:
         >>      [rref1, rref2],
         >>      lr=0.05,
         >>   )
-        >>   dist_optim.step()
+        >>   dist_optim.step(context_id)
     """
     def __init__(self, optimizer_class, params_rref, *args, **kwargs):
         per_worker_params_rref = defaultdict(list)
@@ -114,7 +122,7 @@ class DistributedOptimizer:
 
         self.remote_optimizers = _wait_for_all(remote_optim_futs)
 
-    def step(self):
+    def step(self, context_id):
         """
         Performs a single optimization step.
 
@@ -122,13 +130,17 @@ class DistributedOptimizer:
         containing parameters to be optimized, and will block until all workers
         return. The current distributed autograd
         :class:`~torch.distributed.autograd.context` will be used globally.
+
+        Args:
+            context_id: the autograd context id for which we should run the
+                optimizer step.
         """
-        autograd_ctx_id = dist_autograd._current_context()._context_id()
+        dist_autograd._is_valid_context(context_id)
         rpc_futs = []
         for optim in self.remote_optimizers:
             rpc_futs.append(rpc.rpc_async(
                 optim.owner(),
                 _local_optimizer_step,
-                args=(optim, autograd_ctx_id),
+                args=(optim, context_id),
             ))
         _wait_for_all(rpc_futs)

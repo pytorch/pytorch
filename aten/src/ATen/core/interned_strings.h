@@ -33,6 +33,7 @@ namespace c10 {
   _(prim, Eval)                      \
   _(prim, Expand) /* onnx */         \
   _(prim, FusionGroup)               \
+  _(prim, CudaFusionGroup)           \
   _(prim, DifferentiableGraph)       \
   _(prim, If)                        \
   _(prim, Jump) /* debug */          \
@@ -66,15 +67,19 @@ namespace c10 {
   _(prim, StringIndex)               \
   _(prim, NumToTensor)               \
   _(prim, Uninitialized)             \
-  _(prim, ImplicitTensorToNum)       \
   _(aten, Bool)                      \
   _(aten, Int)                       \
+  _(aten, FloatImplicit)             \
+  _(aten, IntImplicit)               \
+  _(aten, ScalarImplicit)            \
   _(aten, Float)                     \
   _(aten, str)                       \
+  _(aten, Delete)                    \
   _(prim, device)                    \
   _(prim, dtype)                     \
   _(prim, shape)                     \
   _(prim, requires_grad)             \
+  _(prim, MakeTestTensor) /* test */ \
   _(prim, AutogradAdd)               \
   _(prim, GradOf)                    \
   _(aten, grad)                      \
@@ -94,6 +99,7 @@ namespace c10 {
   _(prim, range)                     \
   _(prim, rangelist)                 \
   _(prim, isinstance)                \
+  _(prim, tolist)                    \
   _(prim, unchecked_cast)            \
   _(aten, _grad_sum_to_size)         \
   _(aten, _size_if_not_equal)        \
@@ -104,6 +110,7 @@ namespace c10 {
   _(aten, __range_length)            \
   _(aten, __derive_index)            \
   _(aten, __round_to_zero_floordiv)  \
+  _(aten, is_scripting)              \
   _(aten, _unwrap_optional)          \
   _(prim, fork)                      \
   _(prim, forkClosure)               \
@@ -123,6 +130,7 @@ namespace c10 {
   _(prim, TracedModuleForward)       \
   _(prim, TracedFork)                \
   _(prim, TracedAttr)                \
+  _(prim, rpc_async)                 \
   _(aten, append)                    \
   _(aten, item)                      \
   _(aten, format)                    \
@@ -165,6 +173,8 @@ namespace c10 {
   _(aten, clear)                     \
   _(aten, setdefault)                \
   _(aten, bin)                       \
+  _(aten, pop)                       \
+  _(aten, insert)                    \
   _(prim, unchecked_unwrap_optional) \
   _(aten, __contains__)              \
   _(prim, BailoutTemplate)           \
@@ -203,9 +213,14 @@ namespace c10 {
   _(onnx, ConstantOfShape)           \
   _(onnx, Cast)                      \
   _(onnx, Mod)                       \
+  _(onnx, Sqrt)                      \
   _(onnx, SplitToSequence)           \
+  _(onnx, SequenceAt)                \
   _(onnx, SequenceConstruct)         \
   _(onnx, SequenceEmpty)             \
+  _(onnx, SequenceInsert)            \
+  _(onnx, ConcatFromSequence)        \
+  _(onnx, Identity)                  \
   FORALL_ATTR_BASE_SYMBOLS(_)        \
   _(attr, Subgraph)                  \
   _(attr, ReverseSubgraph)           \
@@ -238,7 +253,8 @@ namespace c10 {
   _(attr, types)                     \
   _(attr, scope)                     \
   _(attr, keepdims)                  \
-  _(attr, cache_id)
+  _(attr, cache_id)                  \
+  _(attr, new_axis)
 #else
 #define FORALL_NS_SYMBOLS(_) \
   _(namespaces, prim)              \

@@ -1,6 +1,6 @@
 #pragma once
-#include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/fuser/interface.h>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/codegen/fuser/interface.h>
 
 namespace torch {
 namespace jit {

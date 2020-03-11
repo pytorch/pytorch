@@ -1,15 +1,12 @@
 package org.pytorch.torchvision;
 
-import android.graphics.Bitmap;
+import static org.junit.Assert.assertArrayEquals;
 
-import org.junit.Before;
+import android.graphics.Bitmap;
+import androidx.test.ext.junit.runners.AndroidJUnit4;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.pytorch.Tensor;
-
-import androidx.test.ext.junit.runners.AndroidJUnit4;
-
-import static org.junit.Assert.assertArrayEquals;
 
 @RunWith(AndroidJUnit4.class)
 public class TorchVisionInstrumentedTests {

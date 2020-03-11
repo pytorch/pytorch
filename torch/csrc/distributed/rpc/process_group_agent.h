@@ -2,7 +2,6 @@
 
 #include <c10/core/thread_pool.h>
 #include <c10d/ProcessGroup.hpp>
-#include <torch/csrc/distributed/rpc/future_message.h>
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 
@@ -13,8 +12,22 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+constexpr auto kDefaultNumSendRecvThreads = 4;
+
 struct ProcessGroupRpcBackendOptions : public RpcBackendOptions {
-  ProcessGroupRpcBackendOptions() = default;
+  ProcessGroupRpcBackendOptions(
+      int num_send_recv_threads,
+      std::chrono::milliseconds rpc_timeout,
+      std::string init_method)
+      : RpcBackendOptions(rpc_timeout, init_method),
+        numSendRecvThreads(num_send_recv_threads) {
+    TORCH_CHECK(
+        num_send_recv_threads > 0,
+        "Cannot create ProcessGroup RPC backend with ",
+        num_send_recv_threads,
+        " threads in the thread-pool.");
+  }
+
   int numSendRecvThreads;
 };
 
@@ -66,6 +79,10 @@ class ProcessGroupAgent : public RpcAgent {
 
   void shutdown() override;
 
+  ~ProcessGroupAgent() override;
+
+  std::unordered_map<std::string, std::string> getMetrics() override;
+
  protected:
   // This method wraps the destination information and the message into a
   // SendWork object, and put the SendWork into a queue. Another thread will
@@ -74,6 +91,11 @@ class ProcessGroupAgent : public RpcAgent {
       override;
 
  private:
+  using steady_clock_time_point =
+      std::chrono::time_point<std::chrono::steady_clock>;
+
+  static const steady_clock_time_point kInfiniteTimeoutTimePoint;
+
   class MessageCounter {
    public:
     explicit MessageCounter(int worldSize);
@@ -85,33 +107,60 @@ class ProcessGroupAgent : public RpcAgent {
     std::mutex mutex_;
   };
 
+  // TODO: this class should inherit from a MetricsTracker, and can be extended
+  // to track num_sends, recvs, average size of messages, etc.
+  struct AverageMetricsTracker {
+    std::string key_;
+    uint64_t currentSum_;
+    uint64_t currentCount_;
+
+    explicit AverageMetricsTracker(
+        std::string key,
+        uint64_t currentSum = 0,
+        uint64_t currentCount = 0);
+
+    void addData(uint64_t dataPoint);
+    double computeAverage();
+  };
+
   // The FutureInfo struct stores a shared_ptr to the future, as well as
   // additional information to manage timeouts and destination information,
   // which is needed for termination detection.
   struct FutureInfo {
     std::shared_ptr<FutureMessage> future_;
-    std::chrono::milliseconds startTime_;
+    steady_clock_time_point endTime_;
     int dstRank_;
     std::chrono::milliseconds timeout_;
     FutureInfo(
         const std::shared_ptr<FutureMessage>& future,
-        const std::chrono::milliseconds& startTime,
+        const steady_clock_time_point& endTime,
         int dstRank,
         const std::chrono::milliseconds timeout)
         : future_(future),
-          startTime_(startTime),
+          endTime_(endTime),
           dstRank_(dstRank),
           timeout_(timeout) {}
-    FutureInfo() {}
+    FutureInfo() = delete;
   };
 
   void collectNames();
   // put SendWork into a queue and notify the worker thread
   void enqueueSend(SendWork work);
+  // handle a SendWork request. This serializes the payload inside the work
+  // object, and sends the message to the receiver using the underlying
+  // ProcessGroup.
+  void handleSend(const SendWork& work);
   // put RecvWork into a queue and notify the worker thread
   void enqueueRecv(RecvWork work);
-  // receiving messages
+  // Loop for receiving messages. Calls listenLoopInternal and handles errors
+  // such as timeouts on the process group.
+  virtual void listenLoopInternal();
+  // Main function for receiving messages
   void listenLoop();
+  // exception_pointer correspnding to an exception raised in listenLoop (if
+  // there is one), and lock to guard access.
+  std::exception_ptr listenLoopException_;
+  std::mutex listenLoopExceptionMutex_;
   // poll for timed out RPCs
   void pollTimedOutRPCs();
   // process timed out futures
@@ -119,11 +168,12 @@ class ProcessGroupAgent : public RpcAgent {
   // compute the remaining time for an RPC, given its end time.
   const std::chrono::milliseconds getRPCRemainingTime(
       const std::chrono::milliseconds& rpcEndTime) const;
-  // compute the time an RPC will time out with millisecond level precision.
-  // This helper function can be used to key into the futureTimeouts_ map, and
-  // it returns INFINITE_TIMEOUT to indicate that an RPC has no timeout.
-  const std::chrono::milliseconds getRPCEndTime(
-      const FutureInfo& futureInfo) const;
+
+  // a helper function to mark a future in the futures_ map with a message. The
+  // future is marked with the passed in message, and then removed from the
+  // futures_ map. It is also removed from the futureTimeouts_ map since these
+  // maps are kept in sync.
+  void markFutureWithError(Message& message);
 
   // Note [Termination Detection]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -196,14 +246,28 @@ class ProcessGroupAgent : public RpcAgent {
   // A map to keep track of when futures time out. The map is keyed by the time
   // (millisecond level precision) the future will expire. This is so that timed
   // out futures can be efficiently cleaned up, and we can quickly exit if we
-  // find a future that has not timed out. The values correspond to a vector of
-  // future ids that started at that time. This map must be kept in sync with
-  // the above futures_ map.
-  std::map<std::chrono::milliseconds, std::vector<int64_t>> futureTimeouts_;
+  // find a future that has not timed out. The values correspond to an
+  // unordered_set of future ids that started at that time. This map must be
+  // kept in sync with the above futures_ map.
+  std::map<steady_clock_time_point, std::unordered_set<int64_t>>
+      futureTimeouts_;
   mutable std::mutex futureMutex_;
   mutable std::condition_variable futureCV_;
   // CV to wake up watchdog thread that watches for timed out futures.
   std::condition_variable futureTimeoutCV_;
+  // Metrics tracked for ProcessGroupAgent.
+  enum ProcessGroupAgentMetrics {
+    GIL_WAIT_TIME = 0,
+
+    N_METRICS,
+  };
+  std::mutex metricsMutex_;
+  std::vector<std::unique_ptr<AverageMetricsTracker>> metrics_;
+  void addGilWaitTime(const std::chrono::microseconds gilWaitTime) override;
+
+  std::atomic<int32_t> clientActiveCalls_{0};
+  std::atomic<int32_t> serverActiveCalls_{0};
+  std::atomic<int32_t> serverActiveAsyncCalls_{0};
 };
 
 } // namespace rpc

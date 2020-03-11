@@ -1,0 +1,28 @@
+  ecr_gc:
+    triggers:
+      - schedule:
+          cron: "45 * * * *"
+          filters:
+            branches:
+              only:
+                - master
+    jobs:
+      - ecr_gc_job:
+            name: ecr_gc_job_for_pytorch
+            project: pytorch
+            tags_to_keep: "271,262,256,278,282,291,300,323,327,347,389,401,402,403,405,a8006f9a-272d-4478-b137-d121c6f05c83,6e7b11da-a919-49e5-b2ba-da66e3d4bb0a,f990c76a-a798-42bb-852f-5be5006f8026"
+      - ecr_gc_job:
+            name: ecr_gc_job_for_caffe2
+            project: caffe2
+            tags_to_keep: "348,345,336,325,324,315,306,301,287,283,276,273,266,253,248,238,230,213"
+      - ecr_gc_job:
+            name: ecr_gc_job_for_translate
+            project: translate
+            tags_to_keep: "8"
+      - ecr_gc_job:
+            name: ecr_gc_job_for_tensorcomp
+            project: tensorcomp
+            tags_to_keep: "34"
+      - docker_hub_index_job
+
+

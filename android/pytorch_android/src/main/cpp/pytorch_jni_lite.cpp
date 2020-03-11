@@ -99,6 +99,8 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
 } // namespace pytorch_jni
 
 JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void*) {
-  return facebook::jni::initialize(
-      vm, [] { pytorch_jni::PytorchJni::registerNatives(); });
+  return facebook::jni::initialize(vm, [] {
+    pytorch_jni::common_registerNatives();
+    pytorch_jni::PytorchJni::registerNatives();
+  });
 }

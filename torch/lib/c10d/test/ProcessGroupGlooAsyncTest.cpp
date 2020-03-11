@@ -244,6 +244,10 @@ void runAsyncBroadcastTest(
 }
 
 int main(int argc, char** argv) {
+  if (!at::cuda::is_available()) {
+    LOG(INFO) << "CUDA not available, skipping test";
+    return EXIT_SUCCESS;
+  }
   {
     TemporaryFile file;
     runAsyncAllreduceTest(file.path, 4, 2);
@@ -253,5 +257,5 @@ int main(int argc, char** argv) {
     TemporaryFile file;
     runAsyncBroadcastTest(file.path, 4, 1);
   }
-  std::cout << "Test successful" << std::endl;
+  LOG(INFO) << "Test successful";
 }

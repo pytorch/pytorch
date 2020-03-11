@@ -1,5 +1,5 @@
-#include "torch/csrc/jit/operator.h"
-#include "torch/csrc/jit/custom_operator.h"
+#include "torch/csrc/jit/runtime/operator.h"
+#include "torch/csrc/jit/runtime/custom_operator.h"
 
 #include "torch/csrc/autograd/profiler.h"
 #include "torch/csrc/autograd/generated/variable_factories.h"
@@ -63,7 +63,7 @@ at::Tensor toOptionalTensor(const IValue& v) {
 // tensor type in interpreter, it should only be used in this file
 std::vector<Tensor> toListOfOptionalTensor(const IValue& v) {
   // v is a list of optional tensor, loop over as generic list
-  auto vlist = v.toGenericListRef();
+  auto vlist = v.toListRef();
   std::vector<Tensor> res;
 
   for (const IValue &v: vlist) {

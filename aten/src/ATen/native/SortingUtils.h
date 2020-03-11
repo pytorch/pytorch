@@ -55,7 +55,7 @@ inline void _reduction_with_indices_allocate_or_resize_output(
   }
   if (values.defined()) {
     TORCH_CHECK(
-        self.type() == values.type(),
+        self.options().type_equal(values.options()),
         "output values must be of same type as input");
     if (!keepdim && values.dim() == self.dim() - 1) {
       // unsqueeze to preserve passed in noncontiguous tensor in resize
@@ -95,7 +95,7 @@ inline void _allocate_or_resize_output_with_indices(
   }
   if (values.defined()) {
     TORCH_CHECK(
-        self.type() == values.type(),
+        self.options().type_equal(values.options()),
         "output values must be of same type as input");
     values.resize_(result_sizes);
   } else {

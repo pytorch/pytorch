@@ -99,6 +99,8 @@ unary_ops_list = op_bench.op_list(
         ['sinh', torch.sinh],
         ['sqrt', torch.sqrt],
         ['sqrt_', torch.sqrt_],
+        ['square', torch.square],
+        ['square_', torch.square_],
         ['tan', torch.tan],
         ['tan_', torch.tan_],
         ['tanh', torch.tanh],

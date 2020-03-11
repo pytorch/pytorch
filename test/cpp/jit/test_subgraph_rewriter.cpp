@@ -1,6 +1,6 @@
 #include <test/cpp/jit/test_base.h>
 #include <test/cpp/jit/test_utils.h>
-#include <torch/csrc/jit/subgraph_matcher.h>
+#include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <torch/csrc/jit/testing/file_check.h>
 

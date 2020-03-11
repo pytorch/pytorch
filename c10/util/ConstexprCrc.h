@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/util/IdWrapper.h>
+#include <c10/util/string_view.h>
 #include <cstddef>
 #include <cstdint>
 
@@ -99,23 +100,11 @@ constexpr uint64_t crc64_table[] = {
 
 inline C10_HOST_CONSTEXPR uint64_t
 crc64impl(uint64_t accumulator, const char* data, size_t size) {
-#if __cpp_constexpr >= 201304
-  // if we are in C++14, just use a for loop. This compiles faster.
   for (size_t i = 0; i < size; ++i) {
     accumulator =
         crc64_table[(accumulator ^ data[i]) & 0xFF] ^ (accumulator >> 8);
   }
   return accumulator;
-#else
-  // if we are in C++11, we need to do it recursively because of constexpr
-  // restrictions.
-  return (size == 0)
-      ? accumulator
-      : crc64impl(
-            crc64_table[(accumulator ^ *data) & 0xFF] ^ (accumulator >> 8),
-            data + 1,
-            size - 1);
-#endif
 }
 } // namespace detail
 
@@ -127,8 +116,12 @@ struct crc64_t final : IdWrapper<crc64_t, uint64_t> {
 };
 
 // CRC64 with Jones coefficients and an init value of 0.
-inline C10_HOST_CONSTEXPR crc64_t crc64(const char* data, size_t size) {
-  return crc64_t{detail::crc64impl(0, data, size)};
+inline C10_HOST_CONSTEXPR crc64_t crc64(const char* str, size_t size) {
+  return crc64_t{detail::crc64impl(0, str, size)};
+}
+
+inline C10_HOST_CONSTEXPR crc64_t crc64(c10::string_view str) {
+  return crc64(str.data(), str.size());
 }
 } // namespace util
 } // namespace c10

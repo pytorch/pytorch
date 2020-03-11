@@ -25,12 +25,13 @@ namespace torch {
 namespace autograd {
 
 
-DifferentiableViewMeta::DifferentiableViewMeta(at::TensorImpl* self_impl, Variable base)
-    : AutogradMeta(self_impl, false) {
+DifferentiableViewMeta::DifferentiableViewMeta(at::TensorImpl* self_impl, Variable base,
+  CreationMeta creation_meta)
+    : AutogradMeta(self_impl), creation_meta(creation_meta) {
   base_ = std::move(base);
   TORCH_CHECK(base_.defined(), "base is undefined");
   if (base_.is_view()) {
-    base_ = base_.base();
+    base_ = base_._base();
   }
   is_view_ = true;
   self_impl->set_version_counter(impl::version_counter(base_));
@@ -47,7 +48,7 @@ at::Tensor singleton_undefined_tensor;
 
 struct ConcreteAutogradMetaFactory : public c10::impl::AutogradMetaFactory {
   std::unique_ptr<c10::AutogradMetaInterface> make() const override {
-    return c10::guts::make_unique<AutogradMeta>();
+    return std::make_unique<AutogradMeta>();
   }
   const at::Tensor& undefined_tensor() const override {
     return singleton_undefined_tensor;
@@ -66,18 +67,21 @@ namespace impl {
     TORCH_CHECK(self.defined(), "cannot call materialize_autograd_meta() on undefined tensor");
     auto p = self.unsafeGetTensorImpl();
     if (!p->autograd_meta()) {
-      p->set_autograd_meta(c10::guts::make_unique<AutogradMeta>());
+      p->set_autograd_meta(std::make_unique<AutogradMeta>());
     }
     return get_autograd_meta(self);
   }
 
   void rebase_history(const Variable& self, Edge gradient_edge) {
-    AT_ASSERT(gradient_edge.function != nullptr);
+    TORCH_INTERNAL_ASSERT(gradient_edge.function != nullptr);
     if (self.is_view()) {
       // NB: is_view() ==> get_autograd_meta()
       auto diff_view_meta = static_cast<DifferentiableViewMeta*>(get_autograd_meta(self));
-      AT_ASSERT(gradient_edge.input_nr == 0);
-      AT_ASSERT(gradient_edge.function);
+      // Do not use handle_view_on_rebase here as check_inplace should have been called before this
+      // and either throw an error or clear the warning
+      TORCH_INTERNAL_ASSERT(diff_view_meta->creation_meta == CreationMeta::DEFAULT);
+      TORCH_INTERNAL_ASSERT(gradient_edge.input_nr == 0);
+      TORCH_INTERNAL_ASSERT(gradient_edge.function);
       TORCH_CHECK(
           gradient_edge.function->num_inputs() == 1,
           "Functions which modify views in-place must return a single Variable");
@@ -323,7 +327,9 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(const Tenso
     }
     auto current_version = self._version();
     if (diff_view_meta->attr_version != current_version) {
-      AT_ASSERT(diff_view_meta->output_nr_ == 0);
+      // This is an indirect rebase_history due to another view or the base being modified inplace
+      handle_view_on_rebase(diff_view_meta, /* indirect */ true);
+      TORCH_INTERNAL_ASSERT(diff_view_meta->output_nr_ == 0);
       auto fn = std::make_shared<torch::autograd::generated::AsStridedBackward>();
       fn->self_geometry = at::TensorGeometry(diff_view_meta->base_);
       fn->size = self.sizes().vec();
@@ -331,7 +337,7 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(const Tenso
       fn->storage_offset = self.storage_offset();
       fn->set_next_edges(torch::autograd::collect_next_edges(diff_view_meta->base_));
       fn->add_input_metadata(
-        diff_view_meta->base_.type()
+        diff_view_meta->base_.options()
       , self.sizes() // Note: sizes(), not base_.sizes(), is intentional
       , diff_view_meta->base_.device());
       diff_view_meta->grad_fn_ = std::move(fn);
@@ -365,6 +371,62 @@ unsigned VariableHooks::_register_hook(const Tensor& self, std::function<Tensor(
   unsigned idx = list->size();
   list->push_back(hook);
   return idx;
+}
+
+void handle_view_on_rebase(DifferentiableViewMeta* diff_view_meta, bool indirect) {
+  /// See NOTE [ View + Inplace detection ] for justification of the logic below
+  if (diff_view_meta->creation_meta != CreationMeta::DEFAULT) {
+    auto grad_fn = diff_view_meta->grad_fn_.get();
+    std::string msg;
+    std::string modified_obj;
+    // Create the header for the error message.
+    if (indirect) {
+      modified_obj = "its base or another view of its base has been";
+    } else {
+      modified_obj = "is being";
+    }
+    if (grad_fn) {
+      msg = c10::str("Output ", diff_view_meta->output_nr_, " of ", grad_fn->name(), " is a view and ",
+                     modified_obj, " modified inplace.");
+    } else {
+      msg = c10::str("A view was created in no_grad mode and ", modified_obj, " modified inplace with grad mode enabled.");
+    }
+
+    if (diff_view_meta->creation_meta == CreationMeta::MULTI_OUTPUT_NODE) {
+      TORCH_CHECK(false, msg, " This view is the output of a function that returns multiple views. Such functions do not"
+                         " allow the output views to be modified inplace. You should replace the inplace operation by an"
+                         " out-of-place one.");
+    } else {
+      if (diff_view_meta->creation_meta == CreationMeta::NO_GRAD_MODE) {
+        TORCH_INTERNAL_ASSERT(!grad_fn);
+        msg = c10::str(msg, " Given that this use case is ambiguous and error-prone, it is deprecated and will be forbidden"
+                       "  starting 1.6 (see https://github.com/pytorch/pytorch/pull/32839 for more details about this). You"
+                       " can clarify your code and remove this warning by moving both the view and the inplace either both"
+                       " inside the no_grad block (if you don't want the inplace to be tracked) or both outside (if you want"
+                       " the inplace to be tracked).");
+      } else if (diff_view_meta->creation_meta == CreationMeta::IN_CUSTOM_FUNCTION) {
+        msg = c10::str(msg, " This view was created inside a custom Function (or because an input was returned as-is) and the"
+                       " autograd logic to handle view+inplace would override the custom backward associated with the custom"
+                       " Function, leading to incorrect gradients. This behavior is deprecated and will be forbidden starting"
+                       " version 1.6. You can remove this warning by cloning the output of the custom Function.");
+      } else {
+        TORCH_INTERNAL_ASSERT(false, "Invalid CreationMeta state");
+      }
+
+      if (!indirect && !grad_fn) {
+        // This view is (wrongly) detected as a leaf that requires grad and would raise the surprising: "a leaf Variable that
+        // requires grad is being used in an in-place operation." after the warning. So we make the warning an error directly.
+        TORCH_CHECK(false, msg);
+      } else {
+        TORCH_WARN(msg);
+      }
+    }
+
+    // We warn only once per view
+    // Note that if a Tensor is modified inplace from two threads at the same time, this is not thread safe and can warn
+    // multiple time. This is ok as it should be a rare event.
+    diff_view_meta->creation_meta = CreationMeta::DEFAULT;
+  }
 }
 
 }} // namespace torch::autograd

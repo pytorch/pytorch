@@ -27,7 +27,7 @@ namespace at { namespace native {
             const Tensor& input, TensorList weight, int64_t weight_stride0, const Tensor& weight_buf, const Tensor& hx, const Tensor& cx,
             const Tensor& output, const Tensor& grad_output_r, const Tensor& grad_hy_r,
             const Tensor& grad_cy_r, int64_t mode, int64_t hidden_size, int64_t num_layers, bool batch_first,
-            double dropout, bool train, bool bidirectional, IntArrayRef batch_sizes, const Tensor& dropout_state, 
+            double dropout, bool train, bool bidirectional, IntArrayRef batch_sizes, const Tensor& dropout_state,
             const Tensor& reserve, std::array<bool, 4> output_mask
             ) {
         AT_ERROR("miopen_rnn_backward: ATen not compiled with MIOpen support.");
@@ -37,7 +37,7 @@ namespace at { namespace native {
 
 #else // AT_ROCM_ENABLED()
 
-#include <THH/THH.h>
+#include <aten/src/THH/THH.h>
 
 #include <ATen/miopen/miopen-wrapper.h>
 #include <ATen/miopen/Descriptors.h>
@@ -509,7 +509,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> miopen_rnn(
         size_t reserver_size;
         MIOPEN_CHECK(miopenGetRNNTrainingReserveSize(handle, descs.rnn_desc.desc(), fn.tensors.seq_length, x_descs_arr.data(), &reserver_size));
         reserve = at::empty(reserver_size, input.options().dtype(kByte));
-
+        setMIOpenStreamToCurrent();
         MIOPEN_CHECK(miopenRNNForwardTraining(handle, descs.rnn_desc.desc(), fn.tensors.seq_length,
                 x_descs_arr.data(), x.data_ptr(),
                 descs.hx_desc.desc(), hx.data_ptr(),
@@ -517,10 +517,11 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> miopen_rnn(
                 w_desc.desc(), weight_buf.data_ptr(),
                 y_descs_arr.data(), y.data_ptr(),
                 descs.hy_desc.desc(), hy.data_ptr(),
-                descs.cy_desc.desc(), cy.defined() ? cy.data_ptr() : nullptr, 
+                descs.cy_desc.desc(), cy.defined() ? cy.data_ptr() : nullptr,
                 workspace.data_ptr(), workspace_size, reserve.data_ptr(), reserver_size ));
     } else { //Inference.
         reserve = at::empty({0}, input.options().dtype(kByte));
+        setMIOpenStreamToCurrent();
         MIOPEN_CHECK(miopenRNNForwardInference(handle, descs.rnn_desc.desc(), fn.tensors.seq_length,
                 x_descs_arr.data(), x.data_ptr(),
                 descs.hx_desc.desc(), hx.data_ptr(),
@@ -629,6 +630,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> miopen_rnn_backward_input(
         ));
     auto workspace = at::empty(workspace_size, input.options().dtype(kByte));
 
+    setMIOpenStreamToCurrent();
     MIOPEN_CHECK(miopenRNNBackwardData(
         handle,
         descs.rnn_desc.desc(),
@@ -713,6 +715,7 @@ std::vector<Tensor> miopen_rnn_backward_weight(
     auto x_descs_arr = descs.get_x_descs();
     auto y_descs_arr = descs.get_y_descs();
 
+    setMIOpenStreamToCurrent();
     MIOPEN_CHECK(miopenRNNBackwardWeights(
         handle,
         descs.rnn_desc.desc(),
@@ -748,7 +751,7 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> miopen_rnn_backward(
         const Tensor& input, TensorList weight, int64_t weight_stride0, const Tensor& weight_buf, const Tensor& hx, const Tensor& cx,
         const Tensor& output, const Tensor& grad_output_r, const Tensor& grad_hy_r,
         const Tensor& grad_cy_r, int64_t mode, int64_t hidden_size, int64_t num_layers, bool batch_first,
-        double dropout, bool train, bool bidirectional, IntArrayRef batch_sizes, const Tensor& dropout_state, 
+        double dropout, bool train, bool bidirectional, IntArrayRef batch_sizes, const Tensor& dropout_state,
         const Tensor& reserve, std::array<bool, 4> output_mask
         ) {
     auto grad_output = grad_output_r.defined() ? grad_output_r : at::zeros_like(output, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
@@ -891,4 +894,4 @@ REGISTER_CUDA_DISPATCH(lstm_packed_miopen_stub, &lstm_packed_miopen);
 } // anonymous namepsace
 }} //namespace native.
 
-#endif 
+#endif

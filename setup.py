@@ -181,7 +181,7 @@ import glob
 import importlib
 
 from tools.build_pytorch_libs import build_caffe2
-from tools.setup_helpers.env import (IS_WINDOWS, IS_DARWIN,
+from tools.setup_helpers.env import (IS_WINDOWS, IS_DARWIN, IS_LINUX,
                                      check_env_flag, build_type)
 from tools.setup_helpers.cmake import CMake
 
@@ -245,7 +245,7 @@ if IS_WINDOWS:
     cmake_python_library = "{}/libs/python{}.lib".format(
         distutils.sysconfig.get_config_var("prefix"),
         distutils.sysconfig.get_config_var("VERSION"))
-    # Fix virtualenv builds 
+    # Fix virtualenv builds
     # TODO: Fix for python < 3.3
     if not os.path.exists(cmake_python_library):
         cmake_python_library = "{}/libs/python{}.lib".format(
@@ -412,6 +412,12 @@ class build_ext(setuptools.command.build_ext.build_ext):
                 report('-- Building with distributed package ')
         else:
             report('-- Building without distributed package')
+
+        # Do not use clang to compile exensions if `-fstack-clash-protection` is defined
+        # in system CFLAGS
+        system_c_flags = distutils.sysconfig.get_config_var('CFLAGS')
+        if IS_LINUX and '-fstack-clash-protection' in system_c_flags and 'clang' in os.environ.get('CC', ''):
+            os.environ['CC'] = distutils.sysconfig.get_config_var('CC')
 
         # It's an old-style class in Python 2.7...
         setuptools.command.build_ext.build_ext.run(self)
@@ -586,7 +592,7 @@ def configure_extension_build():
     else:
         extra_link_args = []
         extra_compile_args = [
-            '-std=c++11',
+            '-std=c++14',
             '-Wall',
             '-Wextra',
             '-Wno-strict-overflow',
@@ -610,28 +616,10 @@ def configure_extension_build():
 
     library_dirs.append(lib_path)
 
-    # we specify exact lib names to avoid conflict with lua-torch installs
-    CAFFE2_LIBS = []
-
     main_compile_args = []
     main_libraries = ['shm', 'torch_python']
     main_link_args = []
     main_sources = ["torch/csrc/stub.cpp"]
-
-    # Before the introduction of stub.cpp, _C.so and libcaffe2.so defined
-    # some of the same symbols, and it was important for _C.so to be
-    # loaded before libcaffe2.so so that the versions in _C.so got
-    # used. This happened automatically because we loaded _C.so directly,
-    # and libcaffe2.so was brought in as a dependency (though I suspect it
-    # may have been possible to break by importing caffe2 first in the
-    # same process).
-    #
-    # Now, libtorch_python.so and libcaffe2.so define some of the same
-    # symbols. We directly load the _C.so stub, which brings both of these
-    # in as dependencies. We have to make sure that symbols continue to be
-    # looked up in libtorch_python.so first, by making sure it comes
-    # before libcaffe2.so in the linker command.
-    main_link_args.extend(CAFFE2_LIBS)
 
     if cmake_cache_vars['USE_CUDA']:
         library_dirs.append(
@@ -795,7 +783,14 @@ if __name__ == '__main__':
                 'include/ATen/cuda/detail/*.cuh',
                 'include/ATen/cuda/detail/*.h',
                 'include/ATen/cudnn/*.h',
+                'include/ATen/hip/*.cuh',
+                'include/ATen/hip/*.h',
+                'include/ATen/hip/detail/*.cuh',
+                'include/ATen/hip/detail/*.h',
+                'include/ATen/hip/impl/*.h',
                 'include/ATen/detail/*.h',
+                'include/ATen/native/*.h',
+                'include/ATen/native/cpu/*.h',
                 'include/ATen/native/quantized/*.h',
                 'include/ATen/native/quantized/cpu/*.h',
                 'include/caffe2/utils/*.h',
@@ -842,7 +837,12 @@ if __name__ == '__main__':
                 'include/torch/csrc/jit/generated/*.h',
                 'include/torch/csrc/jit/passes/*.h',
                 'include/torch/csrc/jit/passes/utils/*.h',
-                'include/torch/csrc/jit/script/*.h',
+                'include/torch/csrc/jit/runtime/*.h',
+                'include/torch/csrc/jit/ir/*.h',
+                'include/torch/csrc/jit/frontend/*.h',
+                'include/torch/csrc/jit/api/*.h',
+                'include/torch/csrc/jit/serialization/*.h',
+                'include/torch/csrc/jit/python/*.h',
                 'include/torch/csrc/jit/testing/*.h',
                 'include/torch/csrc/onnx/*.h',
                 'include/torch/csrc/utils/*.h',
@@ -855,8 +855,9 @@ if __name__ == '__main__':
                 'include/THC/generic/*.h',
                 'include/THCUNN/*.cuh',
                 'include/THCUNN/generic/*.h',
-                'include/THNN/*.h',
-                'include/THNN/generic/*.h',
+                'include/THH/*.cuh',
+                'include/THH/*.h*',
+                'include/THH/generic/*.h',
                 'share/cmake/ATen/*.cmake',
                 'share/cmake/Caffe2/*.cmake',
                 'share/cmake/Caffe2/public/*.cmake',
@@ -868,7 +869,7 @@ if __name__ == '__main__':
             ],
             'caffe2': [
                 'python/serialized_test/data/operator_test/*.zip',
-            ]
+            ],
         },
         url='https://pytorch.org/',
         download_url='https://github.com/pytorch/pytorch/tags',

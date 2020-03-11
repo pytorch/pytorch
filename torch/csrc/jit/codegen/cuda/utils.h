@@ -6,7 +6,7 @@
 #include <c10/util/Optional.h>
 
 #include <aten/src/ATen/core/jit_type.h>
-#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/ir/ir.h>
 
 namespace torch {
 namespace jit {

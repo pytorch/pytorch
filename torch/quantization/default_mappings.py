@@ -17,6 +17,7 @@ DEFAULT_MODULE_MAPPING = {
     nn.ReLU6: nnq.ReLU6,
     nn.Conv2d: nnq.Conv2d,
     nn.Conv3d: nnq.Conv3d,
+    nn.BatchNorm2d: nnq.BatchNorm2d,
     QuantStub: nnq.Quantize,
     DeQuantStub: nnq.DeQuantize,
     # Wrapper Modules:
@@ -60,9 +61,9 @@ _INCLUDE_QCONFIG_PROPAGATE_LIST = {
 }
 
 DEFAULT_QCONFIG_PROPAGATE_WHITE_LIST = (
-    set(DEFAULT_MODULE_MAPPING.keys()) |
-    set(DEFAULT_QAT_MODULE_MAPPING.keys()) |
-    set(DEFAULT_DYNAMIC_MODULE_MAPPING.keys()) |
-    _INCLUDE_QCONFIG_PROPAGATE_LIST -
+    (set(DEFAULT_MODULE_MAPPING.keys()) |
+     set(DEFAULT_QAT_MODULE_MAPPING.keys()) |
+     set(DEFAULT_DYNAMIC_MODULE_MAPPING.keys()) |
+     _INCLUDE_QCONFIG_PROPAGATE_LIST) -
     _EXCLUDE_QCONFIG_PROPAGATE_LIST
 )

@@ -35,7 +35,8 @@ TEST_F(DistAutogradTest, TestSendFunctionInvalidInputs) {
   std::vector<torch::Tensor> tensors = {in1, in2};
   rpc::worker_id_t worker_id = 1;
   addSendRpcBackward(
-      autogradContext, AutogradMetadata(1, 1), tensors, worker_id);
+      autogradContext, AutogradMetadata(1, 1), tensors);
+  autogradContext->addKnownWorkerId(worker_id);
   auto send_function = autogradContext->sendFunctions()[1];
 
   // ensure that the worker_ids are recorded
@@ -55,6 +56,7 @@ TEST_F(DistAutogradTest, TestSendFunctionInvalidInputs) {
 
 TEST_F(DistAutogradTest, TestInitializedContextCleanup) {
   autogradContainer_->newContext();
+  auto contextId = autogradContainer_->currentContext()->contextId();
   auto& engine = DistEngine::getInstance();
   ASSERT_EQ(0, engine.numBackwardPasses());
 
@@ -66,7 +68,7 @@ TEST_F(DistAutogradTest, TestInitializedContextCleanup) {
   ASSERT_NE(nullptr, t.grad_fn());
 
   // Execute engine.
-  engine.execute({t});
+  engine.execute(contextId, {t}, /* retainGraph */ false);
 
   // Validate appropriate cleanup.
   ASSERT_EQ(0, engine.numBackwardPasses());
@@ -83,13 +85,15 @@ TEST_F(DistAutogradTest, TestInitializedContextCleanupSendFunction) {
   auto t = torch::ones({1}, options);
   auto tensors = std::vector<torch::Tensor>{t};
   addSendRpcBackward(
-      context, AutogradMetadata(context->contextId(), 0), tensors, 0);
+      context, AutogradMetadata(context->contextId(), 0), tensors);
 
   auto sendFunction = context->retrieveSendFunction(0);
   sendFunction->setGrads({t});
 
   // Execute engine.
-  engine.executeSendFunction(context, sendFunction);
+  engine
+      .executeSendFunctionAsync(context, sendFunction, /*retrainGraph*/ false)
+      ->wait();
 
   // Validate appropriate cleanup.
   ASSERT_EQ(0, engine.numBackwardPasses());

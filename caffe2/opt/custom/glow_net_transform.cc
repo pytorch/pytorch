@@ -5,15 +5,22 @@
 
 #include <unordered_set>
 
-C10_DEFINE_bool(
-    onnxifi_debug_mode,
-    false,
-    "Enable onnxifi debug mode.");
+C10_DEFINE_bool(onnxifi_debug_mode, false, "Enable onnxifi debug mode.");
 
 C10_DEFINE_bool(
     onnxifi_adjust_batch,
     true,
     "Attach AdjustBatch ops at input/outputs of the Onnxifi ops");
+
+C10_DEFINE_bool(
+    onnxifi_loop_test_mode,
+    false,
+    "For test purpose only. Build a dummy net just to test the functionality");
+
+C10_DEFINE_bool(
+    merge_fp32_inputs_into_fp16,
+    false,
+    "Merge all the fp32 input tensors into one, convert it to fp16 and split it back");
 
 C10_DEFINE_int32(
     onnxifi_min_ops,
@@ -40,7 +47,7 @@ C10_DEFINE_string(
 C10_DEFINE_string(
     onnxifi_input_output_observe_list,
     "",
-    "A list of net positins whose corresponding op's inputs and outputs will be"
+    "A list of net positions whose corresponding op's inputs and outputs will be"
     " observed. ");
 
 namespace caffe2 {
@@ -91,10 +98,11 @@ void onnxifi(
     const std::vector<std::string>& output_names,
     const std::vector<std::string>& weight_names,
     const std::unordered_set<int>& blacklist,
-    const std::unordered_map<std::string, TensorShape>& shape_hints,
+    const ShapeInfoMap& shape_hints,
     bool use_onnx,
     size_t max_batch_size,
-    size_t max_seq_size) {
+    size_t max_seq_size,
+    bool load_model_by_blob) {
   // Clean up the external input/output of the net
   net->mutable_external_input()->Clear();
   net->mutable_external_output()->Clear();
@@ -116,6 +124,9 @@ void onnxifi(
   opts.debug = FLAGS_onnxifi_debug_mode;
   opts.adjust_batch = FLAGS_onnxifi_adjust_batch;
   opts.min_ops = FLAGS_onnxifi_min_ops;
+  opts.load_model_by_blob = load_model_by_blob;
+  opts.merge_fp32_inputs_into_fp16 = FLAGS_merge_fp32_inputs_into_fp16;
+  opts.loop_test = FLAGS_onnxifi_loop_test_mode;
 
   auto more_shape_hints = shape_hints;
   if (!FLAGS_onnxifi_shape_hints.empty()) {
@@ -134,13 +145,14 @@ void onnxifi(
         for (const auto& d : dims) {
           try {
             input.add_dims(std::stoi(d));
-          } catch (const std::exception &e) {
+          } catch (const std::exception& e) {
             valid = false;
             CAFFE_THROW("Cannot parse shape hint: ", hint);
           }
         }
         if (valid) {
-          more_shape_hints.emplace(kv.front(), input);
+          more_shape_hints.emplace(
+              kv.front(), constructShapeInfoWithDefaultDimType(input));
         }
       } else {
         CAFFE_THROW("Cannot parse shape hint: ", hint);

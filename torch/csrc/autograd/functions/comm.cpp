@@ -77,7 +77,7 @@ variable_list Gather::apply(variable_list&& inputs) {
     TORCH_CHECK(
         input.is_cuda(),
         "All inputs to Gather must be CUDA tensors, got ",
-        input.type());
+        input.toString());
     if (input.dim() > 0) {
       all_are_zero_dim = false;
     }

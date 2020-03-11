@@ -16,9 +16,10 @@
 
 namespace at {
 namespace native {
-namespace {
 
 DEFINE_DISPATCH(qmaxpool_2d_nhwc_stub);
+
+namespace {
 
 /* Computes the spatial 2D max pooling with dilation.
 
@@ -417,7 +418,7 @@ static auto registry = torch::RegisterOperators().op(
     "int[] dilation,"
     "bool ceil_mode) -> Tensor",
     torch::RegisterOperators::options().kernel<QMaxPool2D_arr_args>(
-        TensorTypeId::QuantizedCPUTensorId));
+        DispatchKey::QuantizedCPUTensorId));
 
 } // namespace
 } // namespace native

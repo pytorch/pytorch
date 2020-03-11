@@ -8,20 +8,20 @@
 
 #include <Python.h>
 
-#include "python_torch_functions_dispatch.h"
-
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
 #include "torch/csrc/Dtype.h"
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/Exceptions.h"
+#include "torch/csrc/utils/pybind.h"
 #include "torch/csrc/utils/python_arg_parser.h"
 #include "torch/csrc/utils/tensor_layouts.h"
 #include "torch/csrc/utils/tensor_new.h"
 #include "torch/csrc/utils/tensor_numpy.h"
-#include "torch/csrc/jit/tracer.h"
+#include "torch/csrc/jit/frontend/tracer.h"
 #include "torch/csrc/autograd/generated/variable_factories.h"
 #include "torch/csrc/utils/structseq.h"
+#include "torch/csrc/utils/cuda_lazy_init.h"
 
 #include <ATen/ATen.h>
 
@@ -38,6 +38,11 @@ using at::Backend;
 using at::OptionalDeviceGuard;
 using at::DeviceGuard;
 using at::TensorOptions;
+using at::IntArrayRef;
+using at::Generator;
+using at::TensorList;
+using at::Dimname;
+using at::DimnameList;
 
 using namespace torch::autograd::utils;
 
@@ -294,7 +299,7 @@ static PyObject * THPVariable_as_tensor(PyObject* self, PyObject* args, PyObject
 {
   HANDLE_TH_ERRORS
   jit::tracer::warn("torch.as_tensor", jit::tracer::WARN_CONSTRUCTOR);
-  return THPVariable_Wrap(torch::utils::as_tensor(torch::tensors::get_default_tensor_type_id(), torch::tensors::get_default_scalar_type(), args, kwargs));
+  return THPVariable_Wrap(torch::utils::as_tensor(torch::tensors::get_default_dispatch_key(), torch::tensors::get_default_scalar_type(), args, kwargs));
   END_HANDLE_TH_ERRORS
 }
 
@@ -326,36 +331,13 @@ static std::vector<Tensor> dispatch_nonzero_numpy(const Tensor & self) {
   return self.nonzero_numpy();
 }
 
-static PyObject * THPVariable_nonzero(PyObject* self, PyObject* args, PyObject* kwargs)
-{
-  HANDLE_TH_ERRORS
-  static PythonArgParser parser({
-    "nonzero(Tensor input, *, Tensor out=None)|deprecated",
-    "nonzero(Tensor input, *, bool as_tuple)",
-  });
-  ParsedArgs<2> parsed_args;
-  auto r = parser.parse(args, kwargs, parsed_args);
-  if (r.idx == 0) {
-    if (r.isNone(1)) {
-      return wrap(dispatch_nonzero(r.tensor(0)));
-    } else {
-      return wrap(dispatch_nonzero(r.tensor(0), r.tensor(1)));
-    }
-  } else {
-    if (r.toBool(1)) {
-      return wrap(dispatch_nonzero_numpy(r.tensor(0)));
-    } else {
-      return wrap(dispatch_nonzero(r.tensor(0)));
-    }
-  }
-  END_HANDLE_TH_ERRORS
-}
+static PyObject * THPVariable_nonzero(PyObject* self, PyObject* args, PyObject* kwargs);
 
 static PyObject * THPVariable_sparse_coo_tensor(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
   jit::tracer::warn("torch.sparse_coo_tensor", jit::tracer::WARN_CONSTRUCTOR);
-  return THPVariable_Wrap(torch::utils::sparse_coo_tensor_ctor(torch::tensors::get_default_tensor_type_id(), torch::tensors::get_default_scalar_type(), args, kwargs));
+  return THPVariable_Wrap(torch::utils::sparse_coo_tensor_ctor(torch::tensors::get_default_dispatch_key(), torch::tensors::get_default_scalar_type(), args, kwargs));
   END_HANDLE_TH_ERRORS
 }
 
@@ -365,7 +347,7 @@ static PyObject * THPVariable_tensor(PyObject* self, PyObject* args, PyObject* k
 {
   HANDLE_TH_ERRORS
   jit::tracer::warn("torch.tensor", jit::tracer::WARN_CONSTRUCTOR);
-  return THPVariable_Wrap(torch::utils::tensor_ctor(torch::tensors::get_default_tensor_type_id(), torch::tensors::get_default_scalar_type(), args, kwargs));
+  return THPVariable_Wrap(torch::utils::tensor_ctor(torch::tensors::get_default_dispatch_key(), torch::tensors::get_default_scalar_type(), args, kwargs));
   END_HANDLE_TH_ERRORS
 }
 
@@ -378,6 +360,7 @@ static PyObject * THPVariable_get_device(PyObject* self_, PyObject* args, PyObje
 
   ParsedArgs<1> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
+
   if (r.idx == 0) {
     return wrap(r.tensor(0).get_device());
   }
@@ -385,22 +368,11 @@ static PyObject * THPVariable_get_device(PyObject* self_, PyObject* args, PyObje
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPVariable_numel(PyObject* self_, PyObject* args, PyObject* kwargs)
-{
-  HANDLE_TH_ERRORS
-  static PythonArgParser parser({
-    "numel(Tensor input)",
-  }, /*traceable=*/false);
+static PyObject * THPVariable_numel(PyObject* self_, PyObject* args, PyObject* kwargs);
 
-  ParsedArgs<1> parsed_args;
-  auto r = parser.parse(args, kwargs, parsed_args);
+// generated forward declarations start here
 
-  if (r.idx == 0) {
-    return wrap(r.tensor(0).numel());
-  }
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
+${py_forwards}
 
 // Wrapper converts a raised TypeError into returning NotImplemented
 // Used to implement binary arithmetic operators
@@ -414,10 +386,6 @@ static PyObject * TypeError_to_NotImplemented_(PyObject* self, PyObject* args, P
   }
   return ret;
 }
-
-// generated methods start here
-
-${py_methods}
 
 // XXX: ops that are bound here are not exposed to the C++ api nor the JIT.
 // Any new ops added here should be accompanied with a comment why they are not
@@ -482,14 +450,73 @@ static PyTypeObject THPVariableFunctions = {
   0                                      /* tp_new */
 };
 
+static PyObject* THPVariableFunctionsModule = NULL;
+
 void initTorchFunctions(PyObject* module) {
   if (PyType_Ready(&THPVariableFunctions) < 0) {
     throw python_error();
   }
   Py_INCREF(&THPVariableFunctions);
-  if (PyModule_AddObject(module, "_VariableFunctions", (PyObject*)&THPVariableFunctions) < 0) {
+  // PyType_GenericNew returns a new reference
+  THPVariableFunctionsModule = PyType_GenericNew(&THPVariableFunctions, Py_None, Py_None);
+  // PyModule_AddObject steals a reference
+  if (PyModule_AddObject(module, "_VariableFunctions", THPVariableFunctionsModule) < 0) {
     throw python_error();
   }
 }
 
+// generated methods start here
+
+${py_methods}
+
+static PyObject * THPVariable_nonzero(PyObject* self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "nonzero(Tensor input, *, Tensor out=None)|deprecated",
+    "nonzero(Tensor input, *, bool as_tuple)",
+  });
+  ParsedArgs<2> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+
+  if(r.has_torch_function()){
+    return handle_torch_function(r, args, kwargs, THPVariableFunctionsModule, "torch");
+  }
+
+  if (r.idx == 0) {
+    if (r.isNone(1)) {
+      return wrap(dispatch_nonzero(r.tensor(0)));
+    } else {
+      return wrap(dispatch_nonzero(r.tensor(0), r.tensor(1)));
+    }
+  } else {
+    if (r.toBool(1)) {
+      return wrap(dispatch_nonzero_numpy(r.tensor(0)));
+    } else {
+      return wrap(dispatch_nonzero(r.tensor(0)));
+    }
+  }
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPVariable_numel(PyObject* self_, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "numel(Tensor input)",
+  }, /*traceable=*/false);
+
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+
+  if(r.has_torch_function()){
+    return handle_torch_function(r, args, kwargs, THPVariableFunctionsModule, "torch");
+  }
+
+  if (r.idx == 0) {
+    return wrap(r.tensor(0).numel());
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
 }} // namespace torch::autograd

@@ -46,7 +46,7 @@ OPERATOR_SCHEMA(BisectPercentile)
     R_2 = [0.3, 1.2];
     We will build R = [0.1, 0.4, 0.5, 0.3, 1.2]; besides, we have
     lengths = [3, 2]
-    to indicate the boundries of the percentile information.
+    to indicate the boundaries of the percentile information.
 
 )DOC")
     .Arg(

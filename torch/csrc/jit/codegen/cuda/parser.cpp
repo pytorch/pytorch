@@ -1,5 +1,5 @@
 #include <torch/csrc/jit/codegen/cuda/parser.h>
-#include <torch/csrc/jit/constants.h>
+#include <torch/csrc/jit/ir/constants.h>
 
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/tensor.h>

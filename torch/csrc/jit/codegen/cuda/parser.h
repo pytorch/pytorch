@@ -1,5 +1,5 @@
 #pragma once
-#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 
 namespace torch {

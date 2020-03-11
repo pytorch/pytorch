@@ -1,7 +1,5 @@
 #pragma once
-#include <ATen/core/EnableNamedTensor.h>
 
-#ifdef BUILD_NAMEDTENSOR
 #include <ATen/core/interned_strings.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Optional.h>
@@ -48,4 +46,3 @@ inline bool operator!=(const Dimname& lhs, const Dimname& rhs) {
 }
 
 } // namespace at
-#endif

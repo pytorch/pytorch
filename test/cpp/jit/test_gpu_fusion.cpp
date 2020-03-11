@@ -13,7 +13,7 @@
 
 // fuser and IR parser
 #include <torch/csrc/jit/codegen/cuda/parser.h>
-#include "torch/csrc/jit/irparser.h"
+#include <torch/csrc/jit/ir/irparser.h>
 
 #include <iostream>
 

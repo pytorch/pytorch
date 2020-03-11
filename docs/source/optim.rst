@@ -130,7 +130,7 @@ Algorithms
 .. autoclass:: SGD
     :members:
 
-How to adjust Learning Rate
+How to adjust learning rate
 ---------------------------
 
 :mod:`torch.optim.lr_scheduler` provides several methods to adjust the learning

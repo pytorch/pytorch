@@ -8,7 +8,7 @@ namespace c10 {
 namespace detail {
   // WrapRuntimeKernelFunctor: Wraps any runtime functor into a functor that
   // inherits from c10::OperatorKernel, so it can be used as a c10 kernel.
-  // This can, for example, be used for lamdas, functors or even function pointers.
+  // This can, for example, be used for lambdas, functors or even function pointers.
   // In the case of function pointers, since it is a runtime function pointer,
   // there is an overhead for calling it whenever the kernel is invoked.
   template<class FuncType, class ReturnType, class ParameterList> class WrapRuntimeKernelFunctor_ {};
