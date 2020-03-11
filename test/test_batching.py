@@ -57,7 +57,26 @@ class TestBatching(TestCase):
         jacobian = torch._unwrap_batched(result[0], 0)
         self.assertEqual(jacobian, torch.diagflat(y3))
 
+    def test_conv2d_accepts_3d_tensors(self):
+        img = torch.randn(3, 5, 5)
+        weight = torch.randn(3, 3, 2, 2)
+        output = F.conv2d(img, weight)
+        self.assertEqual(output, F.conv2d(img.unsqueeze(0), weight).squeeze(0))
+
     def test_conv2d(self):
+        imgs = torch.randn(7, 3, 5, 5)
+        weight = torch.randn(3, 3, 2, 2)
+        expected = F.conv2d(imgs, weight)
+        output = vmap(F.conv2d, (0, None))(imgs, weight)
+        self.assertEqual(output, expected)
+
+        imgs = torch.randn(3, 7, 5, 5)
+        weight = torch.randn(3, 3, 2, 2)
+        expected = F.conv2d(imgs.transpose(0, 1), weight)
+        output = vmap(F.conv2d, (1, None))(imgs, weight)
+        self.assertEqual(output, expected)
+
+    def test_conv2d_two_batch_dims(self):
         y25739 = torch.randn(2, 5, 7, 3, 9)
         weight = torch.randn(13, 7, 2, 2, requires_grad=True)
         bias = torch.randn(13, requires_grad=True)
@@ -65,16 +84,6 @@ class TestBatching(TestCase):
         output = vmap(F.conv2d, (0, None, None))(y25739, weight, bias)
         expected = F.conv2d(y25739.view(10, 7, 3, 9), weight, bias).view(2, 5, 13, 2, 8)
         self.assertEqual(output, expected)
-
-    def test_conv2d_not_front_batch(self):
-        y75B39 = torch.randn(7, 5, 2, 3, 9)
-        weight = torch.randn(13, 7, 2, 2, requires_grad=True)
-        bias = torch.randn(13, requires_grad=True)
-
-        output = vmap(F.conv2d, (2, None, None))(y75B39, weight, bias)
-        expected = F.conv2d(y75B39.transpose(0, 2).reshape(10, 7, 3, 9), weight, bias).view(2, 5, 13, 2, 8)
-        self.assertEqual(output, expected)
-
 
 
 if __name__ == '__main__':

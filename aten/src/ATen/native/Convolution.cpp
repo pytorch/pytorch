@@ -504,8 +504,21 @@ at::Tensor conv1d(
 at::Tensor conv2d(
     const Tensor& input, const Tensor& weight, const Tensor& bias,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, int64_t groups) {
-  return at::convolution(input, weight, bias, stride, padding, dilation,
-                         false, {{0, 0}}, groups);
+  // Support 3D inputs (single images) to conv2d.
+  bool was_input_3d = input.dim() == 3;
+  Tensor input_;
+  if (was_input_3d) {
+    input_ = input.unsqueeze(0);
+  } else {
+    input_ = input;
+  }
+  auto result = at::convolution(input_, weight, bias, stride, padding, dilation,
+                                false, {{0, 0}}, groups);
+  if (was_input_3d) {
+    return result.squeeze(0);
+  } else {
+    return result;
+  } 
 }
 
 at::Tensor conv3d(

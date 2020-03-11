@@ -1,6 +1,6 @@
 #include <ATen/Batching.h>
 #include <ATen/core/op_registration/op_registration.h>
-#include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/runtime/operator.h>
 #include <ATen/WrapDimUtils.h>
 
 namespace at {
@@ -154,8 +154,13 @@ std::pair<Tensor,optional<int64_t>> conv2d_batching_rule(
   }
   auto result_dim = minRequiredDim(self, self_bdim);
   auto self_ = moveBatchDimToFront(self, self_bdim, result_dim);
-  auto self_sizes = self_.sizes(); 
-
+  if (self_.dim() == 4) {
+    // User used vmap over a batch of 3D tensors.
+    return { at::conv2d(self_, weight, bias, stride, padding, dilation), 0 };
+  }
+  // self_ either has dim 5 or a user passed in a tensor that is too small.
+  TORCH_INTERNAL_ASSERT(self_.dim() <= 5);
+  auto self_sizes = self_.sizes();
   auto self_4d = self_.flatten(0, 1);
   auto result_4d = at::conv2d(
       self_4d, weight, bias, stride, padding, dilation);
