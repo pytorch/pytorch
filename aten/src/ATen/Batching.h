@@ -4,8 +4,7 @@
 
 namespace at {
 
-// TODO: use a real key
-constexpr auto BatchTensorKey = DispatchKey::TESTING_ONLY_GenericWrapperTensorId;
+constexpr auto BatchTensorKey = DispatchKey::BatchedTensorId;
 
 struct BatchTensorImpl : public c10::TensorImpl {
   explicit BatchTensorImpl(
