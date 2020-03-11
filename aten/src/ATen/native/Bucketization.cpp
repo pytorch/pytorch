@@ -24,6 +24,9 @@ namespace native {
 
 namespace {
 
+// minimal size for searchsorted_cpu_contiguous to run parallel (multithread)
+constexpr int64_t SEARCHSORTED_GRAIN_SIZE = 200;
+
 template<typename input_t, typename output_t>
 void searchsorted_cpu_contiguous(Tensor& result, const Tensor& input, const Tensor& boundaries, const bool& right) {
   bool is_1d_boundaries = boundaries.dim() == 1;
@@ -36,7 +39,7 @@ void searchsorted_cpu_contiguous(Tensor& result, const Tensor& input, const Tens
   output_t *data_out = result.data_ptr<output_t>();
 
   int64_t numel_in = input.numel();
-  at::parallel_for(0, numel_in, 0, [&](int64_t start, int64_t end) {
+  at::parallel_for(0, numel_in, SEARCHSORTED_GRAIN_SIZE, [&](int64_t start, int64_t end) {
     for (int64_t i = start; i < end; ++i) {
       // If boundaries tensor is 1d, we always search the entire boundary tensor
       int64_t start_bd = is_1d_boundaries ? 0 : i / idim_in * idim_bd;

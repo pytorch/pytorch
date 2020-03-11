@@ -9,6 +9,11 @@ namespace torch {
 namespace nn {
 
 /// Options for the PixelShuffle module.
+///
+/// Example:
+/// ```
+/// PixelShuffle model(PixelShuffleOptions(5));
+/// ```
 struct TORCH_API PixelShuffleOptions {
   PixelShuffleOptions(int64_t upscale_factor)
       : upscale_factor_(upscale_factor) {}
