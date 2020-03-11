@@ -1216,6 +1216,7 @@ class RpcTest(RpcAgentTestFixture):
 
         self.assertEqual(result, sum(vals))
 
+    """
     def _test_rref_leak(self, ignore_leak):
         rpc.init_rpc(
             name=worker_name(self.rank),
@@ -1252,6 +1253,7 @@ class RpcTest(RpcAgentTestFixture):
     @dist_init(setup_rpc=False)
     def test_ignore_rref_leak(self):
         self._test_rref_leak(ignore_leak=True)
+    """
 
     @dist_init
     def test_rref_str(self):

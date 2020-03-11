@@ -88,14 +88,8 @@ void UserRRef::tryDel() {
       LOG(ERROR) << "Error occurred when deleting UserRRef instance, "
                  << "RRefId = " << rrefId_ << ", ForkId = " << forkId_ << " : "
                  << ex.what();
-      std::cout << "++++ Error occurred when deleting UserRRef instance, "
-                 << "RRefId = " << rrefId_ << ", ForkId = " << forkId_ << " : "
-                 << ex.what();
     } catch (...) {
       LOG(ERROR) << "Error occurred when deleting UserRRef instance, "
-                 << "RRefId = " << rrefId_ << ", ForkId = " << forkId_ << " : "
-                 << "unknown error";
-      std::cout  << "+++++ Error occurred when deleting UserRRef instance, "
                  << "RRefId = " << rrefId_ << ", ForkId = " << forkId_ << " : "
                  << "unknown error";
     }

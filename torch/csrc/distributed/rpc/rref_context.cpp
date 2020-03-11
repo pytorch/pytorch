@@ -160,32 +160,22 @@ void RRefContext::delUser(
   {
     std::lock_guard<std::mutex> lock(destroyedMutex_);
     if (!destroyed_) {
-      std::cout << agent_->getWorkerInfo().id_ << " -- " << forkId << " aaaaaaa\n" << std::flush;
       auto fm = agent_->send(
           agent_->getWorkerInfo(owner),
           RRefUserDelete(rrefId, forkId).toMessage());
-      std::cout << agent_->getWorkerInfo().id_ << " -- " << forkId << " bbbbbbb\n" << std::flush;
 
       fm->addCallback([](const Message& /* unused */,
                          const c10::optional<utils::FutureError>& futErr) {
         handleException(futErr);
       });
-      std::cout << agent_->getWorkerInfo().id_ << " -- " << forkId << " ccccccc\n" << std::flush;
-
-
-      std::cout << agent_->getWorkerInfo().id_ << " -- " << forkId << " ddddddd\n" << std::flush;
-
     }
   }
 
   std::lock_guard<std::mutex> lock(mutex_);
-  std::cout << agent_->getWorkerInfo().id_ << " -- " << forkId << " eeeeeee\n" << std::flush;
-
   confirmedUsers_.erase(forkId);
 }
 
 void RRefContext::delAllUsers(std::chrono::milliseconds timeoutMillis) {
-  std::cout << "=== " << agent_->getWorkerInfo().id_ << " entering delAllsers\n" << std::flush;
   // First, wait for all pending UserRRefs to be confirmed,
   // one kind is pendingUsers_, which are shared from Owner,
   // the other kind pendingChildren_, which are shared from another User.
@@ -199,7 +189,6 @@ void RRefContext::delAllUsers(std::chrono::milliseconds timeoutMillis) {
     LOG(ERROR)
         << "Timed out waiting for pending UserRRefs to be confirmed by owner and parent.";
   }
-  std::cout << "=== " << agent_->getWorkerInfo().id_ << " 11111\n" << std::flush;
 
   // Start sending UserRRef delete messages, after all pendings are confirmed.
   // Note, there should be no new forkings in between, because it's assumed that
@@ -215,7 +204,6 @@ void RRefContext::delAllUsers(std::chrono::milliseconds timeoutMillis) {
     rref_ptr->tryDel();
   }
   temp.clear();
-  std::cout << "=== " << agent_->getWorkerInfo().id_ << " 2222222\n" << std::flush;
 
   lock.lock();
   noPending =
@@ -227,9 +215,6 @@ void RRefContext::delAllUsers(std::chrono::milliseconds timeoutMillis) {
     LOG(ERROR)
         << "Timed out waiting for pending OwnerRRefs to be deleted.";
   }
-
-  std::cout << "=== " << agent_->getWorkerInfo().id_ << " leaving delAllsers\n" << std::flush;
-
 }
 
 c10::intrusive_ptr<RRef> RRefContext::getOrCreateRRef(
@@ -270,9 +255,7 @@ c10::intrusive_ptr<RRef> RRefContext::getOrCreateRRef(
 c10::intrusive_ptr<OwnerRRef> RRefContext::getOrCreateOwnerRRef(
     const RRefId& rrefId,
     const TypePtr& type) {
-  std::cout << "==== acquiring lock for " << rrefId << std::endl << std::flush;
   std::unique_lock<std::mutex> lock(mutex_);
-  std::cout << "==== got lock for " << rrefId << std::endl << std::flush;
 
   const auto iter = owners_.find(rrefId);
   if (iter == owners_.end()) {
@@ -420,13 +403,11 @@ void RRefContext::addPendingChild(
   TORCH_INTERNAL_ASSERT(
       !rref->isOwner(), "OwnerRRef should not have a pending child.");
   std::lock_guard<std::mutex> lock(mutex_);
-  std::cout << "=== " << forkId << " got lock in addPendingChild" << std::endl << std::flush;
 
   TORCH_INTERNAL_ASSERT(
       pendingChildren_.find(forkId) == pendingChildren_.end(),
       "Inconsistent states: attempt to add the same child fork twice.");
   pendingChildren_[forkId] = rref;
-  std::cout << "=== " << forkId << " release lock in addPendingChild" << std::endl << std::flush;
 
 }
 
@@ -434,7 +415,6 @@ void RRefContext::delPendingChild(const ForkId& forkId) {
   c10::intrusive_ptr<RRef> deletedUser;
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    std::cout << "=== " << forkId << " got lock in delPendingChild" << std::endl << std::flush;
 
     auto iter = pendingChildren_.find(forkId);
     TORCH_INTERNAL_ASSERT(
@@ -442,7 +422,6 @@ void RRefContext::delPendingChild(const ForkId& forkId) {
         "Inconsistent states: attempt to delete a non-exist child fork.");
     deletedUser = iter->second;
     pendingChildren_.erase(iter);
-    std::cout << "=== " << forkId << " release lock in delPendingChild" << std::endl << std::flush;
   }
   pendingReducedCV_.notify_all();
 }
@@ -463,7 +442,6 @@ void RRefContext::delPendingUser(const ForkId& forkId) {
   c10::intrusive_ptr<RRef> deletedUser;
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    std::cout << "=== " << forkId << " got lock in delPendingUser" << std::endl << std::flush;
     auto iter = pendingUsers_.find(forkId);
     TORCH_INTERNAL_ASSERT(
         iter != pendingUsers_.end(),
@@ -477,7 +455,6 @@ void RRefContext::delPendingUser(const ForkId& forkId) {
         std::forward_as_tuple(forkId),
         std::forward_as_tuple(iter->second));
     pendingUsers_.erase(iter);
-    std::cout << "=== " << forkId << " release lock in delPendingUser" << std::endl << std::flush;
 
   }
   pendingReducedCV_.notify_all();
@@ -496,7 +473,6 @@ void RRefContext::finishForkRequest(const ForkId& forkId, worker_id_t parent) {
 
 void RRefContext::addSelfAsFork(c10::intrusive_ptr<OwnerRRef>& rref) {
   std::lock_guard<std::mutex> lock(mutex_);
-  std::cout << "=== " << rref->rrefId() << " got lock in delPendingUser" << std::endl << std::flush;
 
   const auto& rrefId = rref->rrefId();
   owners_[rrefId] = rref;
@@ -506,7 +482,6 @@ void RRefContext::addSelfAsFork(c10::intrusive_ptr<OwnerRRef>& rref) {
       "Attempt to add self as fork twice ",
       rrefId);
   rrefForks.insert(rrefId);
-  std::cout << "=== " << rref->rrefId() << " release lock in delPendingUser" << std::endl << std::flush;
 
 }
 
@@ -527,7 +502,6 @@ c10::intrusive_ptr<RRef> RRefContext::delForkOfOwner(
   bool ownerReduced = false;
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    std::cout << "=== " << forkId << " got lock in delForkOfOwner" << std::endl << std::flush;
 
     auto rrefIter = forks_.find(rrefId);
     TORCH_INTERNAL_ASSERT(
@@ -548,13 +522,10 @@ c10::intrusive_ptr<RRef> RRefContext::delForkOfOwner(
         deletedRRef = ownerIter->second;
         owners_.erase(ownerIter);
         auto owner_ptr = c10::static_intrusive_pointer_cast<OwnerRRef>(deletedRRef);
-        std::cout << "==== deleted owner " << rrefId << ", has data? " << owner_ptr->value_.has_value() << std::endl << std::flush;
         ownerReduced = true;
       }
       forks_.erase(rrefIter);
     }
-    std::cout << "=== " << forkId << " release lock in delForkOfOwner" << std::endl << std::flush;
-
   }
   if (ownerReduced) {
     pendingReducedCV_.notify_all();

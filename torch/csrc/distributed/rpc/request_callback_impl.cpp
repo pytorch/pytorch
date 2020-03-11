@@ -138,20 +138,13 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
       auto forkId = ForkId::fromIValue(prc.retForkId());
       auto& ctx = RRefContext::getInstance();
 
-      std::cout << "--- creating RRef " << rrefId << std::endl << std::flush;
-
       auto ownerRRef = ctx.getOrCreateOwnerRRef(rrefId, PyObjectType::get());
-      std::cout << "--- got RRef " << rrefId << std::endl << std::flush;
-
 
       IValue py_ivalue = jit::toIValue(
           PythonRpcHandler::getInstance().runPythonUDF(prc.serializedPyObj()),
           PyObjectType::get());
 
-      std::cout << "--- before settiing value for RRef " << rrefId << std::endl << std::flush;
       ownerRRef->setValue(std::move(py_ivalue));
-      std::cout << "--- value set for RRef " << rrefId << std::endl << std::flush;
-
 
       if (rrefId != forkId) {
         // Caller is a user and callee is the owner, add fork
@@ -194,10 +187,8 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
     case MessageType::PYTHON_RREF_FETCH_CALL: {
 
       auto& prf = static_cast<PythonRRefFetchCall&>(rpc);
-      std::cout << "==== ini PYTHON_RREF_FETCH_CALL " << prf.rrefId() << std::endl  << std::flush;
       auto& ctx = RRefContext::getInstance();
       c10::intrusive_ptr<OwnerRRef> rref = ctx.getOwnerRRef(prf.rrefId());
-      std::cout << "==== processing python fetch " << rref->rrefId() << std::endl << std::flush;
       if (rref->hasValue()) { // optional fast-path
         auto value = rref->getValue();
         py::object pyValue;
@@ -207,7 +198,6 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
         }
         SerializedPyObj result =
             PythonRpcHandler::getInstance().serialize(pyValue);
-        std::cout << "==== finish python fetch " << rref->rrefId()  << std::endl << std::flush;
 
         return wrap(
             PythonRRefFetchRet(std::move(result).toIValues()).toMessage());
@@ -216,14 +206,12 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
       auto whenValueSet = rref->getFuture();
       auto responseFuture = std::make_shared<FutureMessage>();
 
-      std::cout << "====== wait for value of " << rref->rrefId() << std::endl << std::flush;
 
       // Our response is satisfied when the rpcs come back.
       whenValueSet->addCallback(
           [responseFuture, messageId, rref](
               const rpc::Message& /* unused */,
               const c10::optional<utils::FutureError>& error) {
-            std::cout << "====== value ready for " << rref->rrefId() << std::endl << std::flush;
 
             if (!error) {
               auto value = rref->getValue();
@@ -242,7 +230,6 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
               responseFuture->setError(error->what());
             }
           });
-      std::cout << "==== finish python fetch " << rref->rrefId()  << std::endl << std::flush;
       return responseFuture;
     }
     case MessageType::RREF_USER_DELETE: {
