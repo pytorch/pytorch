@@ -40,7 +40,7 @@ class autocast(object):
             optimizer.step()
 
     See the :ref:`Automatic Mixed Precision examples<amp-examples>` for usage (along with gradient scaling)
-    in more complex cases like gradient penalty and multiple models/losses.
+    in more complex scenarios (e.g., gradient penalty, multiple models/losses, custom autograd functions).
 
     :class:`autocast` can also be used as a decorator, e.g., on the ``forward`` method of your model::
 
@@ -104,14 +104,6 @@ class autocast(object):
 
     Arguments:
         enabled(bool, optional, default=True):  Whether autocasting should be enabled in this region.
-
-    .. note::
-        Autocast only affects GPU operations (operations running on CUDA Tensors).
-
-    .. note::
-        Currently, autocast only affects out-of-place operations.  In-place ops still work in autocast-enabled
-        regions, but won't be autocasted (e.g., ``a.addmm(b, c)`` is guaranteed to run in ``float16``, but
-        ``a.addmm_(b, c)`` may not).  For best performance and stability, prefer out-of-place ops if possible.
     """
     def __init__(self, enabled=True):
         if enabled and not torch.cuda.is_available():
