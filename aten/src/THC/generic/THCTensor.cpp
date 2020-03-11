@@ -105,6 +105,11 @@ THCTensor *THCTensor_(newWithStorage1d)(THCState *state, THCStorage *storage, pt
   return self;
 }
 
+THCTensor *THCTensor_(newWithSize)(THCState *state, at::IntArrayRef size, at::IntArrayRef stride)
+{
+  TORCH_INTERNAL_ASSERT(false, "this function should not be called and is in the process of being removed");
+}
+
 THCTensor *THCTensor_(newWithSize1d)(THCState *state, int64_t size0)
 {
   THCStorage *new_storage = THCStorage_(new)(state);
