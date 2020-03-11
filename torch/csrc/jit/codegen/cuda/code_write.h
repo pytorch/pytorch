@@ -29,7 +29,7 @@ std::ostream& operator<<(std::ostream& os, std::vector<Int*> vec) {
 }
 */
 
-// Run through and grab all values that ar eused in this fusion based on
+// Run through and grab all values that are used in this fusion based on
 // the registered outputs.
 struct FindUsedVals : public IterVisitor {
   std::set<Val*> used_vals;
@@ -48,10 +48,10 @@ struct FindUsedVals : public IterVisitor {
 
 struct TORCH_API CodeWrite : public IRPrinter {
  private:
-  // Check if expr is a TensorView operation we can print
+  // Check if expr has a TensorView as an output
   bool isTVOp(const Expr* expr);
 
-  /*****PRINTING FUNCTIONS****/
+  /*****CODE PRINTING FUNCTIONS****/
   // Print the indexing into a TensorView
   void printIndexInto(std::vector<Int*> indices, const TensorView* const);
   // Compute and print the predicate based on accessing a specific TensorView
@@ -68,8 +68,10 @@ struct TORCH_API CodeWrite : public IRPrinter {
   void handle(const UnaryOp* const);
   void handle(const BinaryOp* const);
 
+  /****END CODE PRINTING FUNCTIONS****/
+
   // Ignore split/merge/reorder operations,
-  // we don't want to print them directly
+  // we don't want to print them.
   void handle(const Split* const) {}
   void handle(const Merge* const) {}
   void handle(const Reorder* const) {}
@@ -77,7 +79,7 @@ struct TORCH_API CodeWrite : public IRPrinter {
   // Indent the generated code
   void indent();
 
-  // Update the for loop structure based on provided TensorView
+  // Update the for loop structure based on provided TensorView output
   void updateView(TensorView*);
 
   // Grab all the indices used in the current for loop structure
@@ -108,7 +110,7 @@ struct TORCH_API CodeWrite : public IRPrinter {
   // Mark if I want to reset all fors next time I call updateView
   bool reset_fors = false;
 
-  // Track all
+  // Track all bound iter domains
   std::set<IterDomain*> bound_iters;
 
   // Print std::string instead of Val
@@ -117,11 +119,9 @@ struct TORCH_API CodeWrite : public IRPrinter {
   // Set override for thread/block axes
   void bind(IterDomain* id, Val* iterator);
 
-  // Grab all values that are used. Look for Tensors
-  // to set Int* -> Tensor->size(i)
-  // Grab all IterDoms that are used. Look for any
-  // mappings to threadIdx.x / blockIdx.x
-  // Add them to bound_iters
+  // Grab all values that are used. Look for TensorViews setting the overrides
+  // maps for Int* -> Tensor->size(i) Grab all IterDoms that are used. Look for
+  // any mappings to threadIdx.x / blockIdx.x add them to bound_iters
   void setupOverrides();
 
   // wrapper for overrides.find on non-const vals
@@ -138,7 +138,7 @@ struct TORCH_API CodeWrite : public IRPrinter {
 
  public:
   // Init printer on ostream
-  CodeWrite(std::ostream& _os, std::string kernel_name="kernel")
+  CodeWrite(std::ostream& _os, std::string kernel_name = "kernel")
       : IRPrinter(_os), kernel_name_(kernel_name) {}
 
   // print generated code to ostream
