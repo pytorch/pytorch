@@ -37,6 +37,9 @@ class PYBIND11_EXPORT PythonRpcHandler {
   // Alternative if the caller is already holding the GIL.
   void handleExceptionGILHeld(const py::object& obj);
 
+  // Get QualifiedName string of a py::object.
+  c10::QualifiedName getQualifiedName(const py::object& obj);
+
   // Explicitly clean up py::objects to avoid segment faults when
   // py::objects with CPython are cleaned up later at program exit
   // See similar issues reported https://github.com/pybind/pybind11/issues/1598
@@ -85,6 +88,9 @@ class PYBIND11_EXPORT PythonRpcHandler {
 
   // Ref to 'torch.distributed.rpc.internal._handle_exception'
   py::object pyHandleException_;
+
+  // Ref to 'torch.jit._qualified_name'
+  py::object pyGetQualifiedName_;
 
   // Shared ptr to python compilation unit in jit, it is constructed in python
   // side (see _python_cu = torch._C.CompilationUnit() in jit/__init__.py)
