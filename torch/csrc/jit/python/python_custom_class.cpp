@@ -31,6 +31,13 @@ void initPythonCustomClassBindings(PyObject* module) {
   m.def("_get_custom_class_python_wrapper", [](const std::string& qualname) {
     std::string full_qualname = "__torch__.torch.classes." + qualname;
     auto named_type = getCustomClass(full_qualname);
+    TORCH_CHECK(
+        named_type,
+        "Tried to instantiate class ",
+        qualname,
+        " but it"
+        " does not exist! Ensure that it is registered via torch::jit"
+        "::class_");
     c10::ClassTypePtr class_type = named_type->cast<ClassType>();
     return ScriptClass(c10::StrongTypePtr(
         std::shared_ptr<script::CompilationUnit>(), std::move(class_type)));
