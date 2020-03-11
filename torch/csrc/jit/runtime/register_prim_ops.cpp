@@ -1073,6 +1073,11 @@ RegisterOperators reg(
              pop(stack, dim_val);
              pop(stack, t);
 
+             // If the Tensor is not on the CPU, transfer it.
+             if (!t.device().is_cpu()) {
+               t = t.cpu();
+             }
+
              // Rebuild the output type using elem_ty_val and dim_val. Start
              // with the element type corresponding to elem_ty_val.
              TypePtr out_ty;
