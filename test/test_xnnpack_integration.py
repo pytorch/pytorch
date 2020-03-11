@@ -188,7 +188,7 @@ class TestXNNPACKSerDes(TestCase):
             def __init__(self, weight, bias, strides, paddings, dilations, groups):
                 super(Conv2DPrePacked, self).__init__()
                 self.packed_weight_bias = torch.ops._xnnpack.conv2d_prepack(weight, bias,
-                                                                           strides, paddings, dilations, groups)
+                                                                            strides, paddings, dilations, groups)
 
             def forward(self, x):
                 return torch.ops._xnnpack.conv2d_packed(x, self.packed_weight_bias)
@@ -289,7 +289,7 @@ class TestXNNPACKSerDes(TestCase):
                 super(MPrePacked, self).__init__()
                 self.conv2d_packed_weight_bias = \
                     torch.ops._xnnpack.conv2d_prepack(conv_weight, conv_bias,
-                                                     strides, paddings, dilations, groups)
+                                                      strides, paddings, dilations, groups)
                 self.linear_packed_weight_bias = \
                     torch.ops._xnnpack.linear_prepack(linear_weight, linear_bias)
 
