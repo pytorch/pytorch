@@ -37,6 +37,7 @@ fi
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # TODO: Move this to Docker
+  sudo apt-get -qq install --no-install-recommends apt-transport-https ca-certificates
   sudo apt-get -qq update
   sudo apt-get -qq install --no-install-recommends libsndfile1
 fi
@@ -117,7 +118,7 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     # Increase stack size, because ASAN red zones use more stack
     ulimit -s 81920
 
-    (cd test && python -c "import torch")
+    (cd test && python -c "import torch; print(torch.__version__, torch.version.git_version)")
     echo "The next three invocations are expected to crash; if they don't that means ASAN/UBSAN is misconfigured"
     (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_csrc_asan(3)")
     (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_csrc_ubsan(0)")

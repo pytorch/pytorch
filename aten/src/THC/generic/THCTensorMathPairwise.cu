@@ -18,7 +18,7 @@ static int THCTensor_(equalImpl)(THCState *state, THCTensor *self_, THCTensor *s
   // Both tensors are empty
   if(THTensor_(nElement)(self_) == 0) return true;
 
-  THCudaByteTensor *buf = THCudaByteTensor_newWithSize(state, self_->sizes(), {});
+  THCudaByteTensor *buf = at::empty_like(THTensor_wrap(self_), at::kByte).unsafeReleaseTensorImpl();
 
   if (!THC_pointwiseApply3<uint8_t, scalar_t, scalar_t>(state, buf, self_, src_, TensorEQOp<scalar_t, unsigned char>())) {
     THArgCheck(false, 2, CUTORCH_DIM_WARNING);
@@ -90,24 +90,6 @@ void THCTensor_(fmod)(THCState *state, THCTensor *self_, THCTensor *src_, scalar
     THCTensor_(resizeAs)(state, self_, src_);
 
     if (!THC_pointwiseApply2<scalar_t, scalar_t>(state, self_, src_, TensorFmodOp<scalar_t>(value))) {
-      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-    }
-  }
-
-  THCudaCheck(cudaGetLastError());
-}
-
-void THCTensor_(remainder)(THCState *state, THCTensor *self_, THCTensor *src_, scalar_t value)
-{
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src_));
-  if (self_ == src_) {
-    if (!THC_pointwiseApply1<scalar_t>(state, self_, TensorRemainderOp<scalar_t>(value))) {
-      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-    }
-  } else {
-    THCTensor_(resizeAs)(state, self_, src_);
-
-    if (!THC_pointwiseApply2<scalar_t, scalar_t>(state, self_, src_, TensorRemainderOp<scalar_t>(value))) {
       THArgCheck(false, 2, CUTORCH_DIM_WARNING);
     }
   }

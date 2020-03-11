@@ -104,11 +104,6 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
     }();
     ((void)once);
 
-    auto qengines = at::globalContext().supportedQEngines();
-    if (std::find(qengines.begin(), qengines.end(), at::QEngine::QNNPACK) !=
-        qengines.end()) {
-      at::globalContext().setQEngine(at::QEngine::QNNPACK);
-    }
 #ifdef TRACE_ENABLED
     torch::autograd::profiler::pushCallback(
         &onFunctionEnter,
