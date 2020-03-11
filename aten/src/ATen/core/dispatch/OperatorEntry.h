@@ -16,7 +16,7 @@ namespace impl {
 // and its dispatch table. This is not part of the public API.
 class OperatorEntry final {
 public:
-  explicit OperatorEntry(FunctionSchema&& schema);
+  explicit OperatorEntry(FunctionSchema&& schema, OperatorOptions&& options);
 
   OperatorEntry(const OperatorEntry&) = delete;
   OperatorEntry(OperatorEntry&&) noexcept = delete;
@@ -35,8 +35,12 @@ public:
 
   RegistrationHandleRAII registerKernel(c10::optional<DispatchKey> dispatch_key, KernelFunction kernel);
 
-  void updateSchemaAliasAnalysis(AliasAnalysisKind a) {
-    schema_.setAliasAnalysis(a);
+  const OperatorOptions& options() {
+    return options_;
+  }
+
+  void updateOptionsAliasAnalysis(AliasAnalysisKind a) {
+    options_.setAliasAnalysis(a);
   }
 
 private:
@@ -79,6 +83,9 @@ private:
   // is already registered, but that's a lot of effort to implement and
   // currently not high-pri.
   ska::flat_hash_map<c10::optional<DispatchKey>, std::list<KernelFunction>> kernels_;
+
+  // Some metadata about the operator
+  OperatorOptions options_;
 
   std::mutex kernelsMutex_; // protects kernels_
 

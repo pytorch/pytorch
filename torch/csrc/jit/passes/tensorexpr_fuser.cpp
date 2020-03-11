@@ -128,8 +128,10 @@ Operation createTensorExprOp(const Node* node) {
   };
 }
 
-c10::AliasAnalysisKind getAliasAnalysisOption(AliasAnalysisKind k) {
-  return k;
+c10::OperatorOptions getAliasAnalysisOption(AliasAnalysisKind k) {
+  auto options = c10::OperatorOptions();
+  options.setAliasAnalysis(k);
+  return options;
 }
 
 RegisterOperators TensorExprOps({
