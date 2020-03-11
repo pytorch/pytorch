@@ -10,7 +10,7 @@ namespace at {
 /////////////////////////////////////////////////////////////
 
 bool isBatchTensor(const Tensor& tensor) {
-  return tensor.unsafeGetTensorImpl()->key_set().has(BatchTensorKey);
+  return tensor.defined() && tensor.unsafeGetTensorImpl()->key_set().has(BatchTensorKey);
 }
 
 int64_t maxLevel(const std::vector<Tensor>& maybeBatchTensors) {
@@ -170,6 +170,50 @@ std::pair<Tensor,optional<int64_t>> conv2d_batching_rule(
   };
 }
 
+std::pair<Tensor,optional<int64_t>> batch_norm_batching_rule(
+    const Tensor& input, optional<int64_t> input_bdim,
+    const Tensor& weight /* optional */, optional<int64_t> weight_bdim,
+    const Tensor& bias /* optional */, optional<int64_t> bias_bdim,
+    const Tensor& running_mean /* optional */, optional<int64_t> running_mean_bdim,
+    const Tensor& running_var /* optional */, optional<int64_t> running_var_bdim,
+    bool training, double momentum, double eps, bool cudnn_enabled) {
+  if (weight_bdim.has_value()) {
+    TORCH_CHECK(false, "NYI: batch_norm_batching_rule for batched weight");
+  }
+  if (weight_bdim.has_value()) {
+    TORCH_CHECK(false, "NYI: batch_norm_batching_rule for batched weight");
+  }
+  if (bias_bdim.has_value()) {
+    TORCH_CHECK(false, "NYI: batch_norm_batching_rule for batched bias");
+  }
+  if (running_mean_bdim.has_value()) {
+    TORCH_CHECK(false, "NYI: batch_norm_batching_rule for batched running_mean");
+  }
+  if (running_var_bdim.has_value()) {
+    TORCH_CHECK(false, "NYI: batch_norm_batching_rule for batched running_var");
+  }
+  if (!input_bdim.has_value()) {
+    // devolves to regular batchnorm
+    return {
+      at::batch_norm(
+        input, weight, bias, running_mean, running_var,
+        training, momentum, eps, cudnn_enabled),
+      /*result_bdim=*/nullopt
+    };
+  }
+  auto result_dim = minRequiredDim(input, input_bdim);
+  auto self_ = moveBatchDimToFront(input, input_bdim, result_dim);
+  auto self_sizes = self_.sizes();
+  self_ = self_.flatten(0, 1);
+  auto result = at::batch_norm(
+      self_, weight, bias, running_mean, running_var,
+      training, momentum, eps, cudnn_enabled);
+  return {
+    result.unflatten(0, {self_sizes.begin(), self_sizes.begin() + 2}),
+    /*result_bdim=*/0
+  };
+}
+
 /////////////////////////////////////////////////////////////
 // --------------------[ FALLBACK IMPLEMENTATION ]-----------
 /////////////////////////////////////////////////////////////
@@ -202,6 +246,31 @@ Tensor BatchedTensor_conv2d(const Tensor& input, const Tensor& weight,
       bias_and_bdim.first,
       bias_and_bdim.second,
       stride, padding, dilation, groups);
+  return makeBatched(
+      result_and_bdim.first,
+      result_and_bdim.second,
+      cur_level);
+}
+
+Tensor BatchedTensor_batch_norm(
+    const Tensor& input, const Tensor& weight /* optional */, const Tensor& bias /* optional */,
+    const Tensor& running_mean /* optional */, const Tensor& running_var /* optional */,
+    bool training, double momentum, double eps, bool cudnn_enabled) {
+  // The following lines need to happen in each kernel
+  auto cur_level = maxLevel({input, weight, bias, running_mean, running_var});
+  auto input_and_bdim = unwrapAtLevel(input, cur_level);
+  auto weight_and_bdim = unwrapAtLevel(weight, cur_level);
+  auto bias_and_bdim = unwrapAtLevel(bias, cur_level);
+  auto running_mean_and_bdim = unwrapAtLevel(running_mean, cur_level);
+  auto running_var_and_bdim = unwrapAtLevel(running_var, cur_level);
+
+  auto result_and_bdim = batch_norm_batching_rule(
+      input_and_bdim.first, input_and_bdim.second,
+      weight_and_bdim.first, weight_and_bdim.second,
+      bias_and_bdim.first, bias_and_bdim.second,
+      running_mean_and_bdim.first, running_mean_and_bdim.second,
+      running_var_and_bdim.first, running_var_and_bdim.second,
+      training, momentum, eps, cudnn_enabled);
   return makeBatched(
       result_and_bdim.first,
       result_and_bdim.second,
@@ -307,6 +376,9 @@ static auto registry2 = torch::RegisterOperators()
   .op(torch::RegisterOperators::options()
       .schema("aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor")
       .impl_unboxedOnlyKernel<Tensor (const Tensor&, const Tensor&, const Tensor&, IntArrayRef, IntArrayRef, IntArrayRef, int64_t), &BatchedTensor_conv2d>(BatchTensorKey))
+  .op(torch::RegisterOperators::options()
+      .schema("aten::batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor")
+      .impl_unboxedOnlyKernel<Tensor (const Tensor&, const Tensor&, const Tensor&, const Tensor&, const Tensor&, bool, double, double, bool), &BatchedTensor_batch_norm>(BatchTensorKey))
   ;
 
 }

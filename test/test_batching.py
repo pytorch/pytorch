@@ -85,6 +85,15 @@ class TestBatching(TestCase):
         expected = F.conv2d(y25739.view(10, 7, 3, 9), weight, bias).view(2, 5, 13, 2, 8)
         self.assertEqual(output, expected)
 
+    def test_batch_norm(self):
+        N, C, H, W = (7, 3, 5, 5)
+        imgs = torch.randn(N, C, H, W)
+        running_mean = torch.randn(C)
+        running_var = torch.randn(C)
+        # NB: Using "None" because we're not vectorizing over a dimension.
+        output = vmap(F.batch_norm, (None, None, None))(imgs, running_mean, running_var)
+        self.assertEqual(output, F.batch_norm(imgs, running_mean, running_var))
+
 
 if __name__ == '__main__':
     run_tests()
