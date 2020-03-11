@@ -86,8 +86,16 @@ class TORCH_API RNNImplBase : public torch::nn::Cloneable<Derived> {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ RNN ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// A multi-layer Elman RNN module with Tanh or ReLU activation.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.RNN to learn about the
-/// exact behavior of this module.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.RNN to learn
+/// about the exact behavior of this module.
+///
+/// See the documentation for `torch::nn::RNNOptions` class to learn what
+/// constructor arguments are supported for this module.
+///
+/// Example:
+/// ```
+/// RNN model(RNNOptions(128, 64).num_layers(3).dropout(0.2).nonlinearity(torch::kTanh));
+/// ```
 class TORCH_API RNNImpl : public detail::RNNImplBase<RNNImpl> {
  public:
   RNNImpl(int64_t input_size, int64_t hidden_size)
@@ -113,16 +121,25 @@ class TORCH_API RNNImpl : public detail::RNNImplBase<RNNImpl> {
 };
 
 /// A `ModuleHolder` subclass for `RNNImpl`.
-/// See the documentation for `RNNImpl` class to learn what methods it provides,
-/// or the documentation for `ModuleHolder` to learn about PyTorch's module
-/// storage semantics.
+/// See the documentation for `RNNImpl` class to learn what methods it
+/// provides, and examples of how to use `RNN` with `torch::nn::RNNOptions`.
+/// See the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
 TORCH_MODULE(RNN);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ LSTM ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// A multi-layer long-short-term-memory (LSTM) module.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.LSTM to learn about the
-/// exact behavior of this module.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.LSTM to learn
+/// about the exact behavior of this module.
+///
+/// See the documentation for `torch::nn::LSTMOptions` class to learn what
+/// constructor arguments are supported for this module.
+///
+/// Example:
+/// ```
+/// LSTM model(LSTMOptions(2, 4).num_layers(3).batch_first(false).bidirectional(true));
+/// ```
 class TORCH_API LSTMImpl : public detail::RNNImplBase<LSTMImpl> {
  public:
   LSTMImpl(int64_t input_size, int64_t hidden_size)
@@ -155,15 +172,24 @@ class TORCH_API LSTMImpl : public detail::RNNImplBase<LSTMImpl> {
 
 /// A `ModuleHolder` subclass for `LSTMImpl`.
 /// See the documentation for `LSTMImpl` class to learn what methods it
-/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
+/// provides, and examples of how to use `LSTM` with `torch::nn::LSTMOptions`.
+/// See the documentation for `ModuleHolder` to learn about PyTorch's
 /// module storage semantics.
 TORCH_MODULE(LSTM);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ GRU ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// A multi-layer gated recurrent unit (GRU) module.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.GRU to learn about the
-/// exact behavior of this module.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.GRU to learn
+/// about the exact behavior of this module.
+///
+/// See the documentation for `torch::nn::GRUOptions` class to learn what
+/// constructor arguments are supported for this module.
+///
+/// Example:
+/// ```
+/// GRU model(GRUOptions(2, 4).num_layers(3).batch_first(false).bidirectional(true));
+/// ```
 class TORCH_API GRUImpl : public detail::RNNImplBase<GRUImpl> {
  public:
   GRUImpl(int64_t input_size, int64_t hidden_size)
@@ -189,9 +215,10 @@ class TORCH_API GRUImpl : public detail::RNNImplBase<GRUImpl> {
 };
 
 /// A `ModuleHolder` subclass for `GRUImpl`.
-/// See the documentation for `GRUImpl` class to learn what methods it provides,
-/// or the documentation for `ModuleHolder` to learn about PyTorch's module
-/// storage semantics.
+/// See the documentation for `GRUImpl` class to learn what methods it
+/// provides, and examples of how to use `GRU` with `torch::nn::GRUOptions`.
+/// See the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
 TORCH_MODULE(GRU);
 
 } // namespace nn

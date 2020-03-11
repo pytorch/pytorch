@@ -44,6 +44,11 @@ struct TORCH_API RNNOptionsBase {
 } // namespace detail
 
 /// Options for RNN modules.
+///
+/// Example:
+/// ```
+/// RNN model(RNNOptions(128, 64).num_layers(3).dropout(0.2).nonlinearity(torch::kTanh));
+/// ```
 struct TORCH_API RNNOptions {
   typedef c10::variant<enumtype::kTanh, enumtype::kReLU> nonlinearity_t;
 
@@ -74,6 +79,12 @@ struct TORCH_API RNNOptions {
   TORCH_ARG(bool, bidirectional) = false;
 };
 
+/// Options for LSTM modules.
+///
+/// Example:
+/// ```
+/// LSTM model(LSTMOptions(2, 4).num_layers(3).batch_first(false).bidirectional(true));
+/// ```
 struct TORCH_API LSTMOptions {
   LSTMOptions(int64_t input_size, int64_t hidden_size);
 
@@ -100,6 +111,12 @@ struct TORCH_API LSTMOptions {
   TORCH_ARG(bool, bidirectional) = false;
 };
 
+/// Options for GRU modules.
+///
+/// Example:
+/// ```
+/// GRU model(GRUOptions(2, 4).num_layers(3).batch_first(false).bidirectional(true));
+/// ```
 struct TORCH_API GRUOptions {
   GRUOptions(int64_t input_size, int64_t hidden_size);
 
