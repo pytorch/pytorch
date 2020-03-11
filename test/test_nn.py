@@ -9365,7 +9365,7 @@ class TestNNDeviceType(NNTestCase):
         def helper(n, c, h, w, kernel_size):
             input = torch.randn(n, c, h, w, dtype=dtypes, device="cuda")
             input = input.contiguous(memory_format=torch.channels_last).requires_grad_()
-            grad = torch.randn(n, c, h//kernel_size, w//kernel_size, dtype=dtypes, device="cuda")
+            grad = torch.randn(n, c, h // kernel_size, w // kernel_size, dtype=dtypes, device="cuda")
             pool = torch.nn.MaxPool2d(kernel_size).cuda()
 
             ref_input = input.detach().clone().contiguous().requires_grad_(True)
