@@ -39,8 +39,7 @@ double getScaleFromInput(Node* input_node) {
                                                  "aten::slice",
                                                  "aten::avg_pool2d",
                                                  "quantized::cat",
-                                                 "prim::ListConstruct"
-                                                 };
+                                                 "prim::ListConstruct"};
   if (input_name == "aten::quantize_per_tensor") {
     TORCH_CHECK(
         input_node->inputs().size() > 1,

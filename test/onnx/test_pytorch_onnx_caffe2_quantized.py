@@ -42,7 +42,7 @@ class TestQuantizedOps(unittest.TestCase):
         self.generic_test(QModule(op), (x,), input_names=["x"])
 
     def generic_model_test(self, model, sample_inputs, input_names=None):
-        torch.backends.quantized.engine = "fbgemm"
+        torch.backends.quantized.engine = "qnnpack"
         pt_inputs = tuple(torch.from_numpy(x) for x in sample_inputs)
         model.qconfig = torch.quantization.default_qconfig
         q_model = torch.quantization.prepare(model, inplace=False)
