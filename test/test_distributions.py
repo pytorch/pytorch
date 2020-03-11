@@ -3895,8 +3895,8 @@ class TestNumericalStability(TestCase):
                 probs = 1. / (1. + math.exp(-logits))
             grad_bern_log_lik = x / probs - (1. - x) / (1. - probs)
             if probs < 0.499 or probs > 0.501:  # using default values of lims here
-                grad_log_c = (2. * probs - 4. * (probs - 1.) * probs * math.atanh(1. - 2. * probs) - 1.) / (
-                        2. * (probs - 1.) * probs * (2. * probs - 1.) * math.atanh(1. - 2. * probs))
+                grad_log_c = 2. * probs - 4. * (probs - 1.) * probs * math.atanh(1. - 2. * probs) - 1.
+                grad_log_c /= 2. * (probs - 1.) * probs * (2. * probs - 1.) * math.atanh(1. - 2. * probs)
             else:
                 grad_log_c = 8. / 3. * (probs - 0.5) + 416. / 45. * math.pow(probs - 0.5, 3)
             grad = grad_bern_log_lik + grad_log_c
