@@ -849,6 +849,7 @@ TENSOR_LIKE_TORCH_IMPLEMENTATIONS = (
      reduce=None, reduction='mean': -1),
     (torch.triu, lambda input, diagonal=0, out=None: -1),
     (torch.triu_indices, lambda row, col, offset=0, dtype=torch.long, device='cpu', layout=torch.strided: -1),
+    (torch.true_divide, lambda input, other: -1),
     (torch.trunc, lambda input, out=None: -1),
     (torch.unbind, lambda input, dim=0: -1),
     (torch.unique, lambda input, sorted=True, return_inverse=False, return_counts=False, dim=None: -1),
