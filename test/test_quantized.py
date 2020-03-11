@@ -184,7 +184,7 @@ class TestQuantizedOps(TestCase):
         # calculate GT
         dqX = qX.dequantize()
         # GELU
-        dqY_hat = dqX * 0.5 * (1.0 + (dqX / math.sqrt(2)).erf())
+        dqY_hat = F.gelu(dqX)
         qY_hat = torch.quantize_per_tensor(dqY_hat, scale=scale,
                                            zero_point=zero_point,
                                            dtype=torch_type)
