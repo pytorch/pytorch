@@ -163,9 +163,7 @@ struct PythonArgs {
   inline c10::optional<int64_t> toInt64Optional(int i);
   inline c10::optional<bool> toBoolOptional(int i);
   inline c10::optional<double> toDoubleOptional(int i);
-  // inline const at::Layout& layout(int i);
   inline at::Layout layout(int i);
-  // inline const at::Layout& layoutWithDefault(int i, const at::Layout& default_layout);
   inline at::Layout layoutWithDefault(int i, at::Layout default_layout);
   inline c10::optional<at::Layout> layoutOptional(int i);
   inline at::Device device(int i);

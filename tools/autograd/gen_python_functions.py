@@ -248,8 +248,8 @@ UNPACK_WITH_SIZE_METHODS = {
 
 UNPACK_WITH_DEFAULT_METHODS = {
     'const ScalarType &': 'scalartypeWithDefault',
-    'const THPLayout &': 'layoutWithDefault',
     'const Device &': 'deviceWithDefault',
+    'c10::optional<Layout>': 'layoutWithDefault',
 }
 
 def parsed_arg_expr(arg, arg_index):
@@ -1359,13 +1359,15 @@ def make_python_binding_args(declaration):
         python_binding_arguments.append(dtype_arg)
 
     if is_factory_function or is_like_or_new_function_with_options:
+        py_default_layout = '{layout_from_backend(self.options().backend())}' if is_like_or_new_function_with_options else None
         layout_arg = {
-            'default': 'None',
+            'default': 'torch.strided',
             'dynamic_type': 'c10::optional<Layout>',
             'kwarg_only': True,
             'name': 'layout',
             'type': 'c10::optional<Layout>',
             'simple_type': 'Layout',
+            'python_default_init': py_default_layout,
         }
         python_binding_arguments.append(layout_arg)
         py_default_device = 'self.device()' if is_like_or_new_function_with_options else None
