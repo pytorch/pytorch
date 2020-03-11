@@ -69,12 +69,14 @@ scalar_t clip_coordinates(scalar_t in, int clip_limit) {
 template <typename scalar_t>
 static __forceinline__ __device__
 scalar_t clip_coordinates_set_grad(scalar_t in, int clip_limit, scalar_t *grad_in) {
-  if (in < static_cast<scalar_t>(0)) {
+  // Note that it is important for the gradient calculation that borders
+  // are considered out of bounds.
+  if (in <= static_cast<scalar_t>(0)) {
     *grad_in = static_cast<scalar_t>(0);
     return static_cast<scalar_t>(0);
   } else {
     scalar_t max = static_cast<scalar_t>(clip_limit - 1);
-    if (in > max) {
+    if (in >= max) {
       *grad_in = static_cast<scalar_t>(0);
       return max;
     } else {
@@ -158,9 +160,9 @@ scalar_t grid_sampler_compute_source_index(
       coord = reflect_coordinates(coord, 0, 2*(size - 1));
     } else {
       coord = reflect_coordinates(coord, -1, 2*size - 1);
-      // when align_corners=False, reflection does not auto clip coords
-      coord = clip_coordinates(coord, size);
     }
+    // clip coordinates to image borders
+    coord = clip_coordinates(coord, size);
   }
   return coord;
 }
@@ -187,13 +189,12 @@ scalar_t grid_sampler_compute_source_index_set_grad(
     // reflect coordinates by image borders
     if (align_corners) {
       coord = reflect_coordinates_set_grad(coord, 0, 2*(size - 1), &grad_refl);
-      *grad_in = (*grad_in) * grad_refl;
     } else {
       coord = reflect_coordinates_set_grad(coord, -1, 2*size - 1, &grad_refl);
-      // when align_corners=False, reflection does not auto clip coords
-      coord = clip_coordinates_set_grad(coord, size, &grad_clip);
-      *grad_in = (*grad_in) * grad_refl * grad_clip;
     }
+    // clip coordinates to image borders
+    coord = clip_coordinates_set_grad(coord, size, &grad_clip);
+    *grad_in = (*grad_in) * grad_refl * grad_clip;
   }
   return coord;
 }

@@ -193,10 +193,10 @@ TEST_F(IntegrationTest, CartPole) {
     std::vector<torch::Tensor> policy_loss;
     std::vector<torch::Tensor> value_loss;
     for (auto i = 0U; i < saved_log_probs.size(); i++) {
-      auto r = rewards[i] - saved_values[i].item<float>();
-      policy_loss.push_back(-r * saved_log_probs[i]);
+      auto advantage = r_t[i] - saved_values[i].item<float>();
+      policy_loss.push_back(-advantage * saved_log_probs[i]);
       value_loss.push_back(
-          torch::smooth_l1_loss(saved_values[i], torch::ones(1) * rewards[i]));
+          torch::smooth_l1_loss(saved_values[i], torch::ones(1) * r_t[i]));
     }
 
     auto loss =

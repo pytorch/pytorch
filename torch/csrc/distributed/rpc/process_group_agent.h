@@ -12,8 +12,22 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+constexpr auto kDefaultNumSendRecvThreads = 4;
+
 struct ProcessGroupRpcBackendOptions : public RpcBackendOptions {
-  ProcessGroupRpcBackendOptions() = default;
+  ProcessGroupRpcBackendOptions(
+      int num_send_recv_threads,
+      std::chrono::milliseconds rpc_timeout,
+      std::string init_method)
+      : RpcBackendOptions(rpc_timeout, init_method),
+        numSendRecvThreads(num_send_recv_threads) {
+    TORCH_CHECK(
+        num_send_recv_threads > 0,
+        "Cannot create ProcessGroup RPC backend with ",
+        num_send_recv_threads,
+        " threads in the thread-pool.");
+  }
+
   int numSendRecvThreads;
 };
 
@@ -138,8 +152,15 @@ class ProcessGroupAgent : public RpcAgent {
   void handleSend(const SendWork& work);
   // put RecvWork into a queue and notify the worker thread
   void enqueueRecv(RecvWork work);
-  // receiving messages
+  // Loop for receiving messages. Calls listenLoopInternal and handles errors
+  // such as timeouts on the process group.
+  virtual void listenLoopInternal();
+  // Main function for receiving messages
   void listenLoop();
+  // exception_pointer correspnding to an exception raised in listenLoop (if
+  // there is one), and lock to guard access.
+  std::exception_ptr listenLoopException_;
+  std::mutex listenLoopExceptionMutex_;
   // poll for timed out RPCs
   void pollTimedOutRPCs();
   // process timed out futures
@@ -243,6 +264,10 @@ class ProcessGroupAgent : public RpcAgent {
   std::mutex metricsMutex_;
   std::vector<std::unique_ptr<AverageMetricsTracker>> metrics_;
   void addGilWaitTime(const std::chrono::microseconds gilWaitTime) override;
+
+  std::atomic<int32_t> clientActiveCalls_{0};
+  std::atomic<int32_t> serverActiveCalls_{0};
+  std::atomic<int32_t> serverActiveAsyncCalls_{0};
 };
 
 } // namespace rpc

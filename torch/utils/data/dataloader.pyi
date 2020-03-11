@@ -10,6 +10,8 @@ _worker_init_fn_t = Callable[[int], None]
 # See https://github.com/python/mypy/issues/3737.
 _collate_fn_t = Callable[[List[T]], Any]
 
+def default_collate(batch: List[T]) -> Any: ...
+
 class DataLoader(Generic[T_co]):
     dataset: Dataset[T_co]
     batch_size: int

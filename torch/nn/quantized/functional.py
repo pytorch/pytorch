@@ -43,6 +43,36 @@ def avg_pool2d(input, kernel_size, stride=None, padding=0, ceil_mode=False,
                                           ceil_mode, count_include_pad,
                                           divisor_override)
 
+def avg_pool3d(input, kernel_size, stride=None, padding=0, ceil_mode=False,
+               count_include_pad=True, divisor_override=None):
+    r"""
+    Applies 3D average-pooling operation in :math:`kD \ times kH \times kW` regions by step size
+    :math:`sD \times sH \times sW` steps. The number of output features is equal to the number of
+    input planes.
+
+    .. note:: The input quantization parameters propagate to the output.
+
+    Args:
+        input: quantized input tensor :math:`(\text{minibatch} , \text{in\_channels} , iH , iW)`
+        kernel_size: size of the pooling region. Can be a single number or a
+          tuple `(kD, kH, kW)`
+        stride: stride of the pooling operation. Can be a single number or a
+          tuple `(sD, sH, sW)`. Default: :attr:`kernel_size`
+        padding: implicit zero paddings on both sides of the input. Can be a
+          single number or a tuple `(padD, padH, padW)`. Default: 0
+        ceil_mode: when True, will use `ceil` instead of `floor` in the formula
+            to compute the output shape. Default: ``False``
+        count_include_pad: when True, will include the zero-padding in the
+            averaging calculation. Default: ``True``
+        divisor_override: if specified, it will be used as divisor, otherwise
+             size of the pooling region will be used. Default: None
+    """
+    if not input.is_quantized:
+        raise ValueError("Input to 'quantized.avg_pool3d' must be quantized!")
+    return torch.nn.functional.avg_pool3d(input, kernel_size, stride, padding,
+                                          ceil_mode, count_include_pad,
+                                          divisor_override)
+
 def adaptive_avg_pool2d(input, output_size):
     # type: (Tensor, BroadcastingList2[int]) -> Tensor
     r"""
@@ -227,7 +257,7 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
                                            align_corners)
 
 def linear(input, weight, bias=None, scale=None, zero_point=None):
-    # type: (Tensor, Tensor, Optional[Tensor]) -> Tensor
+    # type: (Tensor, Tensor, Optional[Tensor], Optional[float], Optional[int]) -> Tensor
     r"""
     Applies a linear transformation to the incoming quantized data:
     :math:`y = xA^T + b`.
@@ -292,6 +322,36 @@ def relu(input, inplace=False):
         return torch.relu_(input)
     else:
         return torch.relu(input)
+
+def leaky_relu(input, negative_slope=0.01, inplace=False,
+               scale=None, zero_point=None):
+    # type: (Tensor, float, bool, float, int) -> Tensor
+    r"""
+    Quantized version of the.
+    leaky_relu(input, negative_slope=0.01, inplace=False, scale, zero_point) -> Tensor
+
+    Applies element-wise,
+    :math:`\text{LeakyReLU}(x) = \max(0, x) + \text{negative\_slope} * \min(0, x)`
+
+    Args:
+        input: Quaintized input
+        negative_slope: The slope of the negative input
+        inplace: Inplace modification of the input tensor
+        scale, zero_point: Scale and zero point of thhe output tensor.
+
+    See :class:`~torch.nn.LeakyReLU` for more details.
+    """
+    if scale is not None and zero_point is not None:
+        assert not inplace, "Cannot rescale with `inplace`"
+        output = torch.quantize_per_tensor(torch.zeros(input.shape),
+                                           scale, int(zero_point), input.dtype)
+        torch._C._nn.leaky_relu(input, negative_slope, out=output)
+        return output
+    if inplace:
+        result = torch._C._nn.leaky_relu_(input, negative_slope)
+    else:
+        result = torch._C._nn.leaky_relu(input, negative_slope)
+    return result
 
 def clamp(input, min_, max_):
     # type: (Tensor, float, float) -> Tensor

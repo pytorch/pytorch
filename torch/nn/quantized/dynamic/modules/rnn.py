@@ -3,7 +3,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import torch
 import torch.nn as nn
 from torch import Tensor  # noqa: F401
-from torch.nn import _VF
+from torch import _VF
 from torch._jit_internal import Tuple, Optional, List  # noqa: F401
 from torch.nn.utils.rnn import PackedSequence
 import numbers
@@ -95,7 +95,7 @@ class RNNBase(torch.nn.Module):
                         # weights and pack parameters in this order:
                         #
                         #   packed_ih, packed_hh, b_ih, b_hh
-                        packed_weight = torch.fbgemm_pack_gemm_matrix_fp16(
+                        packed_weight = torch.ops.quantized.linear_prepack_fp16(
                             qweight)
 
                         params = [packed_weight, bias]
