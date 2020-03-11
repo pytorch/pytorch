@@ -1,10 +1,13 @@
 #pragma once
 
+#include <c10/macros/Macros.h>
 #include <string>
 #include <utility>
+#include <ostream>
 
 namespace c10 {
 
+// TODO: consider storing namespace separately too
 struct OperatorName final {
   std::string name;
   std::string overload_name;
@@ -20,15 +23,10 @@ inline bool operator!=(const OperatorName& lhs, const OperatorName& rhs) {
   return !operator==(lhs, rhs);
 }
 
-inline std::string toString(const OperatorName& opName) {
-  std::string result = opName.name;
-  if (opName.overload_name.size() != 0) {
-    result += "." + opName.overload_name;
-  }
-  return result;
-}
+CAFFE2_API std::string toString(const OperatorName& opName);
+CAFFE2_API std::ostream& operator<<(std::ostream&, const OperatorName&);
 
-}
+} // namespace c10
 
 namespace std {
   template <>

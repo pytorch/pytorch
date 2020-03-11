@@ -87,17 +87,16 @@ class DispatchTable final {
   : kernels_()
   , catchallKernel_()
   , dispatchKeyExtractor_(DispatchKeyExtractor::make(schema))
-  , operatorName_(toString(schema.operator_name())) {}
+  , operatorName_(schema.operator_name()) {}
 
   // a dispatch table may be default constructed with only an
   // operator name.  Such a dispatch table is not callable until
   // the schema is provided
-  DispatchTable(const OperatorName& op_name)
+  DispatchTable(OperatorName op_name)
   : kernels_()
   , catchallKernel_()
   , dispatchKeyExtractor_(DispatchKeyExtractor::makeUninitialized())
-  // TODO: this toString call is a travesty
-  , operatorName_(toString(op_name)) {}
+  , operatorName_(std::move(op_name)) {}
 
   /**
    * Register a kernel in the table at some dispatch key.
@@ -108,7 +107,7 @@ class DispatchTable final {
     auto result = kernels_.setKernel(dispatchKey, std::move(kernel));
     dispatchKeyExtractor_.setOperatorHasKernelForBackend(dispatchKey, true);
     if (result == impl::KernelFunctionTable::SetKernelResult::OVERWROTE_EXISTING_KERNEL) {
-      TORCH_WARN("Registered a kernel for operator ", operatorName_, " with dispatch key ", toString(dispatchKey), " that overwrote a previously registered kernel with the same dispatch key for the same operator.");
+      TORCH_WARN("Registered a kernel for operator ", operatorName_, " with dispatch key ", dispatchKey, " that overwrote a previously registered kernel with the same dispatch key for the same operator.");
     }
   }
 
@@ -159,7 +158,7 @@ class DispatchTable final {
       if (has_kernels) {
         str << ", ";
       }
-      str << toString(static_cast<DispatchKey>(iter));
+      str << static_cast<DispatchKey>(iter);
       has_kernels = true;
     }
 
@@ -196,7 +195,7 @@ class DispatchTable final {
     return dispatchKeyExtractor_;
   }
 
-  const std::string& operatorName() const {
+  OperatorName operatorName() const {
     return operatorName_;
   }
 
@@ -213,7 +212,7 @@ private:
   impl::KernelFunctionTable kernels_;
   KernelFunction catchallKernel_;
   DispatchKeyExtractor dispatchKeyExtractor_;
-  std::string operatorName_;
+  OperatorName operatorName_;
 };
 
 } // namespace c10
