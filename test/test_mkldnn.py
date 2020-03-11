@@ -645,6 +645,26 @@ class TestMkldnn(TestCase):
         model = torchvision.models.resnet.resnext50_32x4d(pretrained=False)
         self._test_imagenet_model(model)
 
+    def test_dropout(self):
+        p = 0.2
+        input = torch.randn(1000, dtype=torch.float32)
+        input = input.fill_(1 - p)
+        module = torch.nn.Dropout(p)
+        input_var = input.clone().to_mkldnn().requires_grad_()
+        output = module(input_var)
+        self.assertLess(abs(output.to_dense().data.mean() - (1 - p)), 0.05)
+        output.backward(input_var)
+        self.assertLess(abs(input_var.grad.to_dense().data.mean() - (1 - p)), 0.05)
+
+        # check eval mode doesn't change anything
+        for inplace in [True, False]:
+            module = torch.nn.Dropout(p, inplace).eval()
+            self.assertEqual(input_var.to_dense(), module(input_var).to_dense())
+
+        # Check that these don't raise errors
+        module.__repr__()
+        str(module)
+
     def test_cat(self):
         x = torch.randn(4, 5, dtype=torch.float32) * 10
         mkldnn_x = x.to_mkldnn()

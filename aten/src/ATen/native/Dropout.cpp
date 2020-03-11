@@ -25,6 +25,10 @@ bool is_fused_kernel_acceptable(const Tensor& input, double p) {
   return input.is_cuda() && p > 0 && p < 1 && input.numel() > 0;
 }
 
+bool is_mkldnn_acceptable(const Tensor& input, double p) {
+  return input.is_mkldnn() && p > 0 && p < 1 && input.numel() > 0;
+}
+
 // NB: sure, we could have used different overloads here, but I would feel insecure
 // knowing that this dispatch depends only on the constness of the references
 template<bool inplace>
@@ -85,6 +89,9 @@ ALIAS_SPECIALIZATION(_feature_alpha_dropout, true,  true )
 Tensor dropout(const Tensor& input, double p, bool train) {
   auto result = [&]() {
     NoNamesGuard guard;
+    if (train && is_mkldnn_acceptable(input, p)) {
+      return std::get<0>(at::mkldnn_dropout(input, p));
+    }
     if (train && is_fused_kernel_acceptable(input, p)) {
       return std::get<0>(at::_fused_dropout(input, 1 - p));
     }
