@@ -77,8 +77,9 @@ Tensor margin_ranking_loss(const Tensor& input1, const Tensor& input2, const Ten
 }
 
 Tensor kl_div(const Tensor& input, const Tensor& target, int64_t reduction, bool log_target) {
-  auto&& target_orig_space = log_target ? at::exp(target) : target;
-  auto&& target_log_space = log_target ? target : at::log(target);
+  auto&& target_transformed = log_target ? at::exp(target) : at::log(target);
+  auto&& target_orig_space = log_target ? target_transformed : target;
+  auto&& target_log_space = log_target ? target : target_transformed;
   auto output_pos = target_orig_space * (target_log_space - input);
   auto zeros = at::zeros_like(output_pos, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   auto output = at::where(target > 0, output_pos, zeros);
