@@ -158,7 +158,7 @@ pip install --no-cache-dir \
     protobuf \
     pytest \
     pyyaml \
-    scipy==0.19.1 \
+    scipy==1.1.0 \
     scikit-image \
     tabulate \
     virtualenv \
