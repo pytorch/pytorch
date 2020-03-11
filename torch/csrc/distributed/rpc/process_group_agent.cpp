@@ -54,6 +54,9 @@ const std::string kNumPendingRequests = "agent.num_pending_requests";
 const std::string kThreadPoolSize = "agent.thread_pool_size";
 const std::string kNumIdleThreads = "agent.num_idle_threads";
 const std::string kGilAverageWaitTime = "agent.gil_average_wait_time_us";
+const std::string kClientActiveCalls = "agent.client_active_calls";
+const std::string kServerActiveCalls = "agent.server_active_calls";
+const std::string kServerActiveAsyncCalls = "agent.server_active_async_calls";
 
 void ProcessGroupAgent::collectNames() {
   const std::string& workerName = workerInfo_.name_;
@@ -257,26 +260,21 @@ void ProcessGroupAgent::shutdown() {
       recvWork_->abort();
     }
   }
-  LOG(INFO) << "Worker " << RpcAgent::getWorkerInfo().id_
-            << " aborting pending sends to all dst ranks";
   // Abort any pending sends to any destination rank.
   {
     std::lock_guard<std::mutex> lock(pendingSendMutex_);
     for (auto& it : currentPendingSends_) {
       const auto& pendingSends = it.second;
+      const auto dst = it.first;
       for (auto send : pendingSends) {
+        LOG(INFO) << "Worker " << RpcAgent::getWorkerInfo().id_
+                  << " aborting pending send to destination rank " << dst;
         send->abort();
       }
     }
   }
-  LOG(INFO) << "Worker " << RpcAgent::getWorkerInfo().id_
-            << " call into waitWorkComplete.";
   threadPool_.waitWorkComplete();
-  LOG(INFO) << "Worker " << RpcAgent::getWorkerInfo().id_
-            << " call into listener join.";
   listenerThread_.join();
-  LOG(INFO) << "Worker " << RpcAgent::getWorkerInfo().id_
-            << " shutdown complete.";
 }
 
 std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
@@ -345,6 +343,7 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
       futureTimeoutCV_.notify_one();
     }
     message.setId(requestId);
+    ++clientActiveCalls_;
   } else {
     future->markCompleted(Message());
   }
@@ -543,8 +542,6 @@ void ProcessGroupAgent::handleRecv(RecvWork& work) {
     // TODO: pass the error back to the caller instead of crashing here.
     TORCH_INTERNAL_ASSERT(false, "unrecognized message type ", message.type());
   }
-
-  recvCounts_.increment(work.from_.id_);
 }
 
 void ProcessGroupAgent::enqueueRecv(RecvWork work) {
@@ -567,6 +564,7 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
               e.what());
           LOG(INFO) << err;
         }
+        recvCounts_.increment(work.from_.id_);
       },
       std::move(work)));
 }
@@ -603,6 +601,7 @@ void ProcessGroupAgent::markFutureWithError(Message& message) {
     }
   }
 
+  --clientActiveCalls_;
   fm->setError(std::string(message.payload().begin(), message.payload().end()));
   futureCV_.notify_all();
 }
@@ -726,7 +725,8 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
       // This is a dummy response that's not send over RPC, so the ID field is
       // not used for any request/response matching.
       const auto exceptionMsg = createExceptionResponse(err, -1);
-      if (!timedOutFuture.future_->hasError()) {
+      if (!timedOutFuture.future->hasError()) {
+        --clientActiveCalls_;
         timedOutFuture.future_->setError(std::string(
             exceptionMsg.payload().begin(), exceptionMsg.payload().end()));
       }
@@ -776,6 +776,10 @@ std::unordered_map<std::string, std::string> ProcessGroupAgent::getMetrics() {
   }
   metrics[kThreadPoolSize] = c10::to_string(threadPool_.size());
   metrics[kNumIdleThreads] = c10::to_string(threadPool_.numAvailable());
+  metrics[kClientActiveCalls] = c10::to_string(clientActiveCalls_.load());
+  metrics[kServerActiveCalls] = c10::to_string(serverActiveCalls_.load());
+  metrics[kServerActiveAsyncCalls] =
+      c10::to_string(serverActiveAsyncCalls_.load());
   if (isGILProfilingEnabled()) {
     // Add time-series based metrics, just GIL wait times for now.
     {

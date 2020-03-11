@@ -1462,7 +1462,7 @@ class RpcTest(RpcAgentTestFixture):
     @dist_init(setup_rpc=False)
     @unittest.skipIf(
         IS_MACOS,
-        "Test is flaky on MacOS, see https://github.com/pytorch/pytorch/issues/32019",
+        "Test is flaky on MacOS since libuv error handling is not as robust as TCP",
     )
     def test_handle_send_exceptions(self):
         # test that if a callee node has gone down, we raise an appropriate
@@ -1474,7 +1474,7 @@ class RpcTest(RpcAgentTestFixture):
             world_size=self.world_size,
             rpc_backend_options=self.rpc_backend_options,
         )
-        rpc._set_rpc_timeout(timedelta(milliseconds=2000))
+        rpc._set_rpc_timeout(timedelta(seconds=10))
         # This barrier is needed to ensure that some workers do not exit before
         # others have been brought up, for non ProcessGroupAgent backends.
         initialize_pg(self.init_method, self.rank, self.world_size)
