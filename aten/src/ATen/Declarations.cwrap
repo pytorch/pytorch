@@ -645,43 +645,6 @@
         - THTensor* other
 ]]
 [[
-  name: _th_remainder
-  return: argument 0
-  variants:
-    - function
-  options:
-    - cname: remainder
-      arguments:
-        - arg: THTensor* result
-          output: True
-        - THTensor* self
-        - real other
-    - cname: cremainder
-      arguments:
-        - arg: THTensor* result
-          output: True
-        - arg: THTensor* self
-          broadcast: other fallback
-        - arg: THTensor* other
-]]
-[[
-  name: _th_remainder_
-  return: argument 0
-  variants: function
-  options:
-    - cname: remainder
-      arguments:
-        - THTensor* self
-        - THTensor* self
-        - real other
-    - cname: cremainder
-      arguments:
-        - THTensor* self
-        - arg: THTensor* self
-          broadcast: other inplace fallback
-        - THTensor* other
-]]
-[[
   name: _th_clamp
   cname: clamp
   variants: function
