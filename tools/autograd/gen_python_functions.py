@@ -1359,7 +1359,7 @@ def make_python_binding_args(declaration):
         python_binding_arguments.append(dtype_arg)
 
     if is_factory_function or is_like_or_new_function_with_options:
-        py_default_layout = '{layout_from_backend(self.options().backend())}' if is_like_or_new_function_with_options else None
+        py_default_layout = 'layout_from_backend(self.options().backend())' if is_like_or_new_function_with_options else None
         layout_arg = {
             'default': 'torch.strided',
             'dynamic_type': 'c10::optional<Layout>',
