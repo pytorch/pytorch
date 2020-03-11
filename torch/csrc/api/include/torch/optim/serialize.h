@@ -214,20 +214,12 @@ void serialize(
   torch::optim::serialize<OptimizerName##ParamState, OptimizerName##Options>(archive, self)
 
 #define _TORCH_OPTIM_SERIALIZE_TORCH_ARG(name) \
-{ \
-  auto ivalue = torch::IValue(name()); \
-  /* do not serialize if name is an undefined tensor*/ \
-  if (!(ivalue.isTensor() && ivalue.unsafeToTensorImpl() == at::UndefinedTensorImpl::singleton())) { \
-    archive.write(#name, ivalue); \
-  } \
-}
+  archive.write(#name, torch::IValue(name())); \
 
 #define _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(T, name) \
 { \
   c10::IValue ivalue; \
-  bool exists = archive.try_read(#name, ivalue); \
-  if (exists) \
-    name(ivalue.to<T>()); \
+  name(ivalue.to<T>()); \
 }
 } // namespace optim
 } // namespace torch

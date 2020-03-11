@@ -23,7 +23,7 @@ struct TORCH_API LBFGSOptions : public OptimizerCloneableOptions<LBFGSOptions> {
   TORCH_ARG(double, tolerance_change) = 1e-9;
   TORCH_ARG(int64_t, history_size) = 100;
   TORCH_ARG(c10::optional<std::string>, line_search_fn) = c10::nullopt;
-public:
+ public:
   void serialize(torch::serialize::InputArchive& archive) override;
   void serialize(torch::serialize::OutputArchive& archive) const override;
   TORCH_API friend bool operator==(const LBFGSOptions& lhs, const LBFGSOptions& rhs);
@@ -43,10 +43,10 @@ struct TORCH_API LBFGSParamState : public OptimizerCloneableParamState<LBFGSPara
   TORCH_ARG(int64_t, func_evals) = 0;
   TORCH_ARG(int64_t, n_iter) = 0;
 
-public:
-//   void serialize(torch::serialize::InputArchive& archive) override;
-//   void serialize(torch::serialize::OutputArchive& archive) const override;
-//   TORCH_API friend bool operator==(const LBFGSParamState& lhs, const LBFGSParamState& rhs);
+ public:
+  void serialize(torch::serialize::InputArchive& archive) override;
+  void serialize(torch::serialize::OutputArchive& archive) const override;
+  TORCH_API friend bool operator==(const LBFGSParamState& lhs, const LBFGSParamState& rhs);
   ~LBFGSParamState() = default;
 };
 
@@ -60,7 +60,6 @@ class TORCH_API LBFGS : public Optimizer {
    }
 
   Tensor step(LossClosure closure) override;
-
   void save(serialize::OutputArchive& archive) const override;
   void load(serialize::InputArchive& archive) override;
 
@@ -70,6 +69,9 @@ class TORCH_API LBFGS : public Optimizer {
   int64_t _numel();
   Tensor _gather_flat_grad();
   void _add_grad(const double step_size, const Tensor& update);
+  std::tuple<Tensor, Tensor> _directional_evaluate(
+    LossClosure closure, const Tensor& x, double t, const Tensor& d);
+  void _set_param(const Tensor& params_data);
   template <typename Self, typename Archive>
   static void serialize(Self& self, Archive& archive) {
     //_TORCH_OPTIM_SERIALIZE_WITH_TEMPLATE_ARG(LBGFS);

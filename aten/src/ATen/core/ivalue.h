@@ -313,6 +313,7 @@ struct CAFFE2_API IValue final {
   c10::List<at::Tensor> toTensorList() &&;
   c10::List<at::Tensor> toTensorList() const &;
   std::vector<at::Tensor> toTensorVector() const;
+  std::deque<at::Tensor> toTensorDeque() const;
 
   //GenericList
   IValue(c10::List<IValue> v);
@@ -327,6 +328,8 @@ struct CAFFE2_API IValue final {
   IValue(at::ArrayRef<T> v);
   template<class T>
   IValue(const std::vector<T>& v);
+  template<class T>
+  IValue(const std::deque<T>& v);
 
   // GenericDict
   IValue(c10::Dict<IValue, IValue> v);
