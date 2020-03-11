@@ -732,11 +732,7 @@ Tensor _bmm_sparse_cuda(const SparseTensor& self, const Tensor& mat2, bool deter
   return _bmm_out_sparse_cuda(result, self, mat2, deterministic);
 }
 
-// Tensor bmm_sparse_cuda(const SparseTensor& self, const Tensor& mat2) {
-//   Tensor result = at::empty({self.size(0), mat2.size(2), self.size(1)}, mat2.options(), at::MemoryFormat::Contiguous);
-//   return bmm_out_sparse_cuda(result, self, mat2, false);
-// }
-
+#ifndef __HIP_PLATFORM_HCC__
 __global__ void search_end_matrix_indices_cuda_kernel(
   int64_t* mat_el_end_indices,
   int64_t num_matrices,
@@ -812,16 +808,17 @@ cudaDataType getTensorCudaDataType(Tensor self) {
   }
   return cuda_data_type;
 }
-
-// Tensor& bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tensor& mat2) {
-//   return bmm_out_sparse_cuda(result, self, mat2, false);
-// }
+#endif
 
 Tensor& bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tensor& mat2) {
   return _bmm_out_sparse_cuda(result, self, mat2, false);
 }
 
 Tensor& _bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tensor& mat2, bool deterministic) {
+#ifdef __HIP_PLATFORM_HCC__
+  TORCH_CHECK(false, "bmm sparse-dense is not supported on HIP")
+#else
+
   TORCH_CHECK(!mat2.is_sparse(), "bmm_sparse: Tensor 'mat2' must be dense");
   TORCH_CHECK(self.dense_dim() == 0, "bmm_sparse: Tensor 'self' must have 0 dense dims, but has ", self.dense_dim());
   TORCH_CHECK(self.sparse_dim() == 3, "bmm_sparse: Tensor 'self' must have 3 sparse dims, but has ", self.sparse_dim());
@@ -1005,6 +1002,9 @@ Tensor& _bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Ten
   }
   delete [] workspace_buffers;
   delete [] workspace_buffer_sizes;
+
+#endif
+
   return result;
 }
 
