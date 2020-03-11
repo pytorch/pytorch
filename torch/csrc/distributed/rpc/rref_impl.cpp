@@ -79,11 +79,14 @@ UserRRef::UserRRef(
 }
 
 void UserRRef::tryDel() {
-  std::lock_guard<std::mutex> lockGuard(sentDelUserMutex_);
-  if (!sentDelUser_) {
+  std::lock_guard<std::mutex> lockGuard(deletedOnOwnerMutex_);
+  if (!deletedOnOwner_) {
     try {
-      RRefContext::getInstance().delUser(ownerId_, rrefId_, forkId_);
-      sentDelUser_ = true;
+      auto responseMessageFuturePtr =
+          RRefContext::getInstance().delUser(ownerId_, rrefId_, forkId_);
+      TORCH_INTERNAL_ASSERT(responseMessageFuturePtr != nullptr);
+      responseMessageFuturePtr->wait(); // Could throw exception.
+      deletedOnOwner_ = true;
     } catch (const std::exception& ex) {
       LOG(ERROR) << "Error occurred when deleting UserRRef instance, "
                  << "RRefId = " << rrefId_ << ", ForkId = " << forkId_ << " : "

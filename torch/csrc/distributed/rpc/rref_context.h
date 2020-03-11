@@ -147,7 +147,7 @@ class TORCH_API RRefContext {
       const c10::intrusive_ptr<RRef>& rref);
   void delPendingUser(const ForkId& forkId);
 
-  void delUser(
+  std::shared_ptr<FutureMessage> delUser(
       const worker_id_t owner,
       const RRefId& rrefId,
       const ForkId& forkId);

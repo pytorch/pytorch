@@ -279,8 +279,8 @@ class TORCH_API UserRRef final : public RRef {
   // Note, thread safety is needed because delete message could be sent by
   // either the destructor called by Python garbage collection or RRefContext
   // proactive cleanup on RPC graceful shutdown.
-  std::mutex sentDelUserMutex_;
-  bool sentDelUser_{false};
+  std::mutex deletedOnOwnerMutex_;
+  bool deletedOnOwner_{false};
 };
 
 // Keep the template only on the derived class because ``RRefContext`` needs to
