@@ -170,6 +170,17 @@ class TestTypeHints(TestCase):
             except subprocess.CalledProcessError as e:
                 raise AssertionError("mypy failed.  Look above this error for mypy's output.")
 
+def test_type_hint_examples():
+    """
+    Runs mypy over all the test examples present in
+    type_hint_tests directory
+    """
+    examples = os.listdir('type_hint_tests')
+    for i in examples:
+        process = subprocess.Popen(['mypy', os.getcwd()+'/type_hint_tests/'+i], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        stdout, stderr = process.communicate()
+        print(stdout)
 
 if __name__ == '__main__':
-    run_tests()
+    test_type_hint_examples()
+    run_tests
