@@ -572,6 +572,11 @@ static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self,
   TORCH_CHECK(self.scalar_type() == result.scalar_type(),
               "masked_select(): self and result must have the same scalar type");
 
+  if (mask.dtype() == at::ScalarType::Byte) {
+    AT_WARN("masked_select received a mask with dtype torch.uint8, this behavior is now deprecated," \
+            "please use a mask with dtype torch.bool instead.");
+  }
+
   Tensor _mask, _self;
   std::tie(_mask, _self) = expand_outplace(mask, self);
 
@@ -612,10 +617,6 @@ static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self,
 
 Tensor masked_select_cpu(const Tensor & self, const Tensor & mask) {
   namedinference::compute_broadcast_outnames(self, mask);
-  if (mask.dtype() == at::ScalarType::Byte) {
-    AT_WARN("masked_select received a mask with dtype torch.uint8, this behavior is now deprecated," \
-            "please use a mask with dtype torch.bool instead.");
-  }
   Tensor result = at::empty({0}, self.options());
   return masked_select_out_impl_cpu(result, self, mask);
 }

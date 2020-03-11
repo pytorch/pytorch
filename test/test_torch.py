@@ -10833,7 +10833,7 @@ class TestTorchDeviceType(TestCase):
                     torch.masked_select(src, mask, out=dst3)
                     self.assertEqual(dst3, torch.Tensor(dst2), 0)
                     if maskType is torch.uint8:
-                        self.assertEqual(len(w), 1)
+                        self.assertEqual(len(w), 2)
                         self.assertEqual(str(w[0].message)[0:53], str(warn))
 
     def test_masked_fill_bool_tensor(self, device):
