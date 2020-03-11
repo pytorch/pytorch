@@ -134,10 +134,6 @@ int main(int argc, char** argv) {
     inputs[0].push_back(stensor);
   }
 
-  auto qengines = at::globalContext().supportedQEngines();
-  if (std::find(qengines.begin(), qengines.end(), at::QEngine::QNNPACK) != qengines.end()) {
-    at::globalContext().setQEngine(at::QEngine::QNNPACK);
-  }
   torch::autograd::AutoGradMode guard(false);
   torch::jit::GraphOptimizerEnabledGuard no_optimizer_guard(false);
   auto module = torch::jit::load(FLAGS_model);

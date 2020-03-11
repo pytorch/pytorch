@@ -153,28 +153,26 @@ c10::intrusive_ptr<UserRRef> RRefContext::createUserRRef(
   return c10::make_intrusive<UserRRef>(ownerId, rrefId, forkId, type);
 }
 
-std::shared_ptr<FutureMessage> RRefContext::delUser(
+void RRefContext::delUser(
     const worker_id_t owner,
     const RRefId& rrefId,
     const ForkId& forkId) {
-  std::lock_guard<std::mutex> lock(destroyedMutex_);
-  if (!destroyed_) {
-    auto responseMessageFuturePtr = agent_->send(
-        agent_->getWorkerInfo(owner),
-        RRefUserDelete(rrefId, forkId).toMessage());
+  {
+    std::lock_guard<std::mutex> lock(destroyedMutex_);
+    if (!destroyed_) {
+      auto fm = agent_->send(
+          agent_->getWorkerInfo(owner),
+          RRefUserDelete(rrefId, forkId).toMessage());
 
-    responseMessageFuturePtr->addCallback(
-        [this, forkId](
-            const Message& /* unused */,
-            const c10::optional<utils::FutureError>& futErr) {
-          handleException(futErr);
-          std::lock_guard<std::mutex> lock(mutex_);
-          confirmedUsers_.erase(forkId);
-        });
-
-    return responseMessageFuturePtr;
+      fm->addCallback([](const Message& /* unused */,
+                         const c10::optional<utils::FutureError>& futErr) {
+        handleException(futErr);
+      });
+    }
   }
-  return nullptr;
+
+  std::lock_guard<std::mutex> lock(mutex_);
+  confirmedUsers_.erase(forkId);
 }
 
 void RRefContext::delAllUsers(std::chrono::milliseconds timeoutMillis) {
@@ -182,7 +180,7 @@ void RRefContext::delAllUsers(std::chrono::milliseconds timeoutMillis) {
   // one kind is pendingUsers_, which are shared from Owner,
   // the other kind pendingChildren_, which are shared from another User.
   std::unique_lock<std::mutex> lock(mutex_);
-  bool noPending = pendingReducedCV_.wait_for(lock, timeoutMillis, [this]() {
+  bool noPending = deleteAllUsersCV_.wait_for(lock, timeoutMillis, [this]() {
     return pendingUsers_.size() == 0 && pendingChildren_.size() == 0;
   });
   if (!noPending) {
@@ -194,15 +192,24 @@ void RRefContext::delAllUsers(std::chrono::milliseconds timeoutMillis) {
   // Note, there should be no new forkings in between, because it's assumed that
   // this utility is called during graceful shutdown, where no new user RPCs can
   // not be initiaited anymore.
-  std::unordered_map<ForkId, c10::weak_intrusive_ptr<RRef>, ForkId::Hash>
-      confirmedUsers(confirmedUsers_);
+  auto tempConfirmedUsers = confirmedUsers_;
   lock.unlock();
-  for (const auto& user : confirmedUsers) {
+  for (const auto& user : tempConfirmedUsers) {
     c10::intrusive_ptr<RRef> rref_ptr = user.second.lock();
     if (!rref_ptr) {
       continue;
     }
+    // tryDel() will acqreuie lock, must release lock here.
     rref_ptr->tryDel();
+  }
+  tempConfirmedUsers.clear();
+
+  // Wait for Owners to process all delete UserRRef messages.
+  lock.lock();
+  noPending = deleteAllUsersCV_.wait_for(
+      lock, timeoutMillis, [this]() { return owners_.size() == 0; });
+  if (!noPending) {
+    LOG(ERROR) << "Timed out waiting for pending OwnerRRefs to be deleted.";
   }
 }
 
@@ -244,7 +251,7 @@ c10::intrusive_ptr<RRef> RRefContext::getOrCreateRRef(
 c10::intrusive_ptr<OwnerRRef> RRefContext::getOrCreateOwnerRRef(
     const RRefId& rrefId,
     const TypePtr& type) {
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::unique_lock<std::mutex> lock(mutex_);
   const auto iter = owners_.find(rrefId);
   if (iter == owners_.end()) {
     // Scenario (1) the first time this owner knows about this RRef
@@ -253,12 +260,14 @@ c10::intrusive_ptr<OwnerRRef> RRefContext::getOrCreateOwnerRRef(
     // private.
     auto rref = c10::make_intrusive<OwnerRRef>(getWorkerId(), rrefId, type);
     owners_[rref->rrefId()] = rref;
+    lock.unlock();
     ownerCV_.notify_all();
     return rref;
   } else {
     // Scenario (2) retrieving an existing RRef
     auto ownerRRef =
         c10::static_intrusive_pointer_cast<OwnerRRef>(iter->second);
+    lock.unlock();
     TORCH_INTERNAL_ASSERT(ownerRRef->type() == type);
     return ownerRRef;
   }
@@ -404,7 +413,7 @@ void RRefContext::delPendingChild(const ForkId& forkId) {
         "Inconsistent states: attempt to delete a non-exist child fork.");
     pendingChildren_.erase(iter);
   }
-  pendingReducedCV_.notify_all();
+  deleteAllUsersCV_.notify_all();
 }
 
 void RRefContext::addPendingUser(
@@ -432,7 +441,7 @@ void RRefContext::delPendingUser(const ForkId& forkId) {
         std::forward_as_tuple(iter->second));
     pendingUsers_.erase(iter);
   }
-  pendingReducedCV_.notify_all();
+  deleteAllUsersCV_.notify_all();
 }
 
 void RRefContext::finishForkRequest(const ForkId& forkId, worker_id_t parent) {
@@ -472,27 +481,34 @@ c10::intrusive_ptr<RRef> RRefContext::delForkOfOwner(
     const RRefId& rrefId,
     const ForkId& forkId) {
   c10::intrusive_ptr<RRef> deletedRRef;
-  std::lock_guard<std::mutex> lock(mutex_);
-  auto rrefIter = forks_.find(rrefId);
-  TORCH_INTERNAL_ASSERT(
-      rrefIter != forks_.end(),
-      "Inconsistent states, deleting a fork before the owner knows it.");
-  auto& rrefForks = rrefIter->second;
-  auto forkIter = rrefForks.find(forkId);
-  TORCH_INTERNAL_ASSERT(
-      forkIter != rrefForks.end(),
-      "Attempt to delete a non-exist fork ",
-      forkId);
+  bool ownerReduced = false;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto rrefIter = forks_.find(rrefId);
+    TORCH_INTERNAL_ASSERT(
+        rrefIter != forks_.end(),
+        "Inconsistent states, deleting a fork before the owner knows it.");
+    auto& rrefForks = rrefIter->second;
+    auto forkIter = rrefForks.find(forkId);
+    TORCH_INTERNAL_ASSERT(
+        forkIter != rrefForks.end(),
+        "Attempt to delete a non-exist fork ",
+        forkId);
 
-  rrefForks.erase(forkId);
+    rrefForks.erase(forkId);
 
-  if (rrefForks.empty()) {
-    auto ownerIter = owners_.find(rrefId);
-    if (ownerIter != owners_.end()) {
-      deletedRRef = ownerIter->second;
-      owners_.erase(ownerIter);
+    if (rrefForks.empty()) {
+      auto ownerIter = owners_.find(rrefId);
+      if (ownerIter != owners_.end()) {
+        deletedRRef = ownerIter->second;
+        owners_.erase(ownerIter);
+        ownerReduced = true;
+      }
+      forks_.erase(rrefIter);
     }
-    forks_.erase(rrefIter);
+  }
+  if (ownerReduced) {
+    deleteAllUsersCV_.notify_all();
   }
   return deletedRRef;
 }

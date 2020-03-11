@@ -1,6 +1,8 @@
 #pragma once
 
 #include "pickler.h"
+#include <ATen/core/ivalue.h>
+#include <caffe2/serialize/inline_container.h>
 
 namespace torch {
 namespace jit {
@@ -30,7 +32,8 @@ class Unpickler {
       const std::vector<at::Tensor>* tensor_table)
       : reader_(reader),
         tensor_table_(tensor_table),
-        type_resolver_(std::move(type_resolver)) {}
+        type_resolver_(std::move(type_resolver)),
+        version_(caffe2::serialize::kProducedFileFormatVersion) {}
 
   // tensors inside the pickle contain meta-data, the raw tensor
   // dead is retrieved by calling `read_record`.
@@ -45,7 +48,8 @@ class Unpickler {
         type_resolver_(std::move(type_resolver)),
         obj_loader_(std::move(obj_loader)),
         read_record_(std::move(read_record)),
-        device_(std::move(device)) {}
+        device_(std::move(device)),
+        version_(caffe2::serialize::kProducedFileFormatVersion) {}
 
   // consume the pickle stream, producing an IValue from the contents.
   // Type Tags: the pickler will restore the type tags on
@@ -54,6 +58,18 @@ class Unpickler {
   // If you know the type of the ivalue, tags can be restored with
   // restoreAccurateTypeTags
   IValue parse_ivalue();
+
+  // [type tag serialization]
+  // This is used to determine whether to restore type tags be recursively
+  // descending into the returned stack object (if version_number <= 2), or
+  // if version_number >= 3, to use the type strings included in the pickle
+  // archive for container types. By default this is set to
+  // `kProducedFileFormatVersion` so unless you're loading a pickle file
+  // from alongside a corresponding `version` file, you don't need to set
+  // the version manually.
+  void set_version(uint64_t version_number) {
+    version_ = version_number;
+  }
 
  private:
   // No arguments ensures that a template argument must be specified
@@ -109,13 +125,23 @@ class Unpickler {
   std::vector<size_t> marks_;
   const std::vector<at::Tensor>* tensor_table_;
 
+  // When deserializing types on lists and dicts, cache the type here
+  // so we don't have to parse the same type multiple times. Strings
+  // are already de-duplicated and replaced with BINGETs in the
+  // pickler, so we can just use the actual data pointer of each string.
+  std::unordered_map<std::string, c10::TypePtr> type_cache_;
+
   // optionally nullptr, needs to be present for creating classes
   TypeResolver type_resolver_;
   ObjLoader obj_loader_;
   IValue empty_tuple_;
 
+
   std::function<at::DataPtr(const std::string&)> read_record_;
   c10::optional<at::Device> device_;
+
+  // See [type tag serialization]
+  uint64_t version_;
 };
 
 void restoreAccurateTypeTags(const IValue& root, const c10::TypePtr& type_tag);

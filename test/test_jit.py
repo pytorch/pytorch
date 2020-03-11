@@ -5451,6 +5451,12 @@ def foo(x):
         for exp in [7, 3, 3, 1]:
             self.assertEqual(nt_loaded.pop(), exp)
 
+    @skipIfRocm
+    @unittest.skipIf(IS_WINDOWS, "TODO: Fix this test case")
+    def test_torchbind_instantiate_missing_class(self):
+        with self.assertRaisesRegex(RuntimeError, 'Tried to instantiate class IDontExist but it does not exist!'):
+            torch.classes.IDontExist(3, 4, 5)
+
     def test_jitter_bug(self):
         @torch.jit.script
         def fn2(input, kernel_size):
@@ -13310,7 +13316,7 @@ a")
 
         self.checkModule(Mod(), (torch.tensor(.5),))
 
-        # variable lenghth, modulelist
+        # variable length, modulelist
         class Mod2(Mod):
             def forward(self, x):
                 for val, mod in zip(range(int(x)), self.mods):
