@@ -345,7 +345,7 @@ std::tuple<Tensor,Tensor> mkldnn_convolution_backward_weights(
   const ideep::tensor mkldnn_input = itensor_from_tensor(input);
 
   ideep::tensor mkldnn_grad_weight, mkldnn_grad_bias;
-  std::tie(mkldnn_grad_weight, mkldnn_grad_bias) =_mkldnn_conv2d_backward_weights(
+  std::tie(mkldnn_grad_weight, mkldnn_grad_bias) = _mkldnn_conv2d_backward_weights(
       weight.sizes(),
       mkldnn_grad_output,
       mkldnn_input,
@@ -359,13 +359,13 @@ std::tuple<Tensor,Tensor> mkldnn_convolution_backward_weights(
   // since for current BF16 design, input is BF16 tensor while weight is FP32 tensor.  
   auto options = weight.options().dtype(input.scalar_type());
   if (weight.is_mkldnn()) {
-    return std::tuple<Tensor, Tensor>{
+    return std::make_tuple(
         new_with_itensor_mkldnn(std::move(mkldnn_grad_weight), options),
-        new_with_itensor_mkldnn(std::move(mkldnn_grad_bias), options)};
+        new_with_itensor_mkldnn(std::move(mkldnn_grad_bias), options));
   } else {
-    return std::tuple<Tensor, Tensor>{
+    return std::make_tuple(
         mkldnn_to_dense(new_with_itensor_mkldnn(std::move(mkldnn_grad_weight), options), weight.scalar_type()),
-        mkldnn_to_dense(new_with_itensor_mkldnn(std::move(mkldnn_grad_bias), options), weight.scalar_type())};
+        mkldnn_to_dense(new_with_itensor_mkldnn(std::move(mkldnn_grad_bias), options), weight.scalar_type()));
   }
 }
 
@@ -453,7 +453,7 @@ std::tuple<Tensor,Tensor> mkldnn_convolution_transpose_backward_weights(
   auto mkldnn_grad_output = itensor_from_tensor(grad_output);
   auto mkldnn_input = itensor_from_tensor(input);
   ideep::tensor mkldnn_grad_weight, mkldnn_grad_bias;
-  std::tie(mkldnn_grad_weight, mkldnn_grad_bias) =_mkldnn_convolution_transpose_backward_weights(
+  std::tie(mkldnn_grad_weight, mkldnn_grad_bias) = _mkldnn_convolution_transpose_backward_weights(
       weight.sizes(),
       mkldnn_grad_output,
       mkldnn_input,
@@ -462,14 +462,18 @@ std::tuple<Tensor,Tensor> mkldnn_convolution_transpose_backward_weights(
       dilation,
       groups,
       bias_defined);
+
+  // Extract device info from weight and data type info from input.
+  // since for current BF16 design, input is BF16 tensor while weight is FP32 tensor.  
+  auto options = weight.options().dtype(input.scalar_type());
   if (weight.is_mkldnn()) {
     return std::make_tuple(
-        new_with_itensor_mkldnn(std::move(mkldnn_grad_weight), grad_output.options()),
-        new_with_itensor_mkldnn(std::move(mkldnn_grad_bias), grad_output.options()));
+        new_with_itensor_mkldnn(std::move(mkldnn_grad_weight), options),
+        new_with_itensor_mkldnn(std::move(mkldnn_grad_bias), options));
   } else {
     return std::make_tuple(
-        mkldnn_to_dense(new_with_itensor_mkldnn(std::move(mkldnn_grad_weight), grad_output.options())),
-        mkldnn_to_dense(new_with_itensor_mkldnn(std::move(mkldnn_grad_bias), grad_output.options())));
+        mkldnn_to_dense(new_with_itensor_mkldnn(std::move(mkldnn_grad_weight), options), weight.scalar_type()),
+        mkldnn_to_dense(new_with_itensor_mkldnn(std::move(mkldnn_grad_bias), options), weight.scalar_type()));
   }
 }
 
