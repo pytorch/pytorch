@@ -258,6 +258,9 @@ def clear_global_rref():
     global_rref = None
 
 
+def check_rref_confirmed(rref):
+    return rref.is_confirmed()
+
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -983,12 +986,7 @@ class RpcTest(RpcAgentTestFixture):
             nested_rref,
             args=(worker_name(dst_rank2),),
         )
-
-        # Say C has 2 OwnerRRefs.
-        # B has 2 UserRRefs to those 2 OwnerRRefs, respectively.
-        # This call is effectively A asking B to share it's 2 UserRRefs.
         rrefs = rref_of_rrefs.to_here()
-
         self.assertEqual(len(rrefs), 2)
         self.assertEqual(rrefs[0].to_here(), torch.ones(2, 2) + 1)
         self.assertEqual(rrefs[1].to_here(), torch.ones(2, 2) + 2)
@@ -1064,12 +1062,15 @@ class RpcTest(RpcAgentTestFixture):
 
         ret_rref = rref_forward_chain(dst_rank, self.world_size, rref, ttl)
 
+        print(self.rank, " in loop ", flush=True)
         for i in range(ttl):
             self.assertEqual(len(ret_rref), 1)
             ret_rref = ret_rref[0].to_here()
+        print(self.rank, " out loop ", flush=True)
 
         ret = ret_rref
         self.assertEqual(ret, torch.add(torch.ones(n, n), 1))
+        print(self.rank, " finishing test! ", flush=True)
 
     @dist_init
     def test_local_rref_no_fork(self):
@@ -1215,11 +1216,7 @@ class RpcTest(RpcAgentTestFixture):
 
         self.assertEqual(result, sum(vals))
 
-    # Notice `rpc.api.shutdown()` accesses `_delete_all_user_rrefs`
-    # through `torch.distributed.rpc.api`, so patching
-    # `torch.distributed.rpc._delete_all_user_rrefs` will not help.
-    @mock.patch.object(torch.distributed.rpc.api, "_delete_all_user_rrefs")
-    def _test_rref_leak(self, _mock_delete_all_user_rrefs, ignore_leak):
+    def _test_rref_leak(self, ignore_leak):
         rpc.init_rpc(
             name=worker_name(self.rank),
             backend=self.rpc_backend,
@@ -1661,3 +1658,33 @@ class RpcTest(RpcAgentTestFixture):
                 AttributeError, "RPC pickler does not serialize"
             ):
                 rpc.rpc_sync(callee_worker, foo_add, args=())
+
+    def _create_rref(self):
+        owner_rank = (self.rank + 2) % self.world_size
+        return rpc.remote(
+            "worker{}".format(owner_rank),
+            torch.add,
+            args=(torch.zeros(2, 2), 1)
+        )
+
+    @dist_init
+    def test_user_rrefs_confirmed(self):
+        dst_rank = (self.rank + 1) % self.world_size
+        rref = self._create_rref()
+        ret = rpc.rpc_sync(
+            "worker{}".format(dst_rank),
+            check_rref_confirmed,
+            args=(rref,)
+        )
+        self.assertEqual(ret, True)
+
+    @dist_init
+    def test_user_rrefs_confirmed_remote(self):
+        dst_rank = (self.rank + 1) % self.world_size
+        rref = self._create_rref()
+        ret_rref = rpc.remote(
+            "worker{}".format(dst_rank),
+            check_rref_confirmed,
+            args=(rref,)
+        )
+        self.assertEqual(ret_rref.to_here(), True)

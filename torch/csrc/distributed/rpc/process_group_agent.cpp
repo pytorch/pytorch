@@ -164,12 +164,15 @@ std::vector<WorkerInfo> ProcessGroupAgent::getWorkerInfos() const {
 }
 
 void ProcessGroupAgent::join() {
+  std::cout << "=== " << pg_->getRank() << "entering join\n" << std::flush;
+
   sync();
   std::unique_lock<std::mutex> lock(futureMutex_);
   futureCV_.wait(
       lock, [this] { return futures_.empty() && futureTimeouts_.empty(); });
   lock.unlock();
   pg_->barrier()->wait();
+  std::cout << "=== " << pg_->getRank() << "leaving join\n" << std::flush;
 }
 
 bool ProcessGroupAgent::hasPendingMessage() {
