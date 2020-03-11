@@ -6351,12 +6351,15 @@ class TestTorchDeviceType(TestCase):
         torch_result = torch.block_diag(*torch_tensors)
         self.assertEqual(torch_result.dtype, torch.float32)
 
-        # Need to convert to 64-bit to compare with scipy
-        torch_result = torch_result.double()
         scipy_result = torch.tensor(
             scipy.linalg.block_diag(*scipy_tensors),
             device=device
         )
+
+        if scipy_result.dtype == torch.float64:
+            # Need to convert to 64-bit to compare with scipy
+            torch_result = torch_result.double()
+
         self.assertEqual(torch_result, scipy_result)
 
     def test_is_set_to(self, device):
