@@ -8,7 +8,7 @@
 
 // New fuser includes
 #include <torch/csrc/jit/fuser/interface.h>
-#include <torch/csrc/jit/fuser/common/utils.h>
+#include <torch/csrc/jit/codegen/cuda/utils.h>
 
 
 #include <iterator>

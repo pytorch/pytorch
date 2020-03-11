@@ -1,4 +1,4 @@
-#include <torch/csrc/jit/fuser/cuda/partition.h>
+#include <torch/csrc/jit/codegen/cuda/partition.h>
 
 namespace torch {
 namespace jit {

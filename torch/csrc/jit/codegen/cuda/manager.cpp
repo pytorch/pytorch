@@ -1,10 +1,10 @@
-#include <torch/csrc/jit/fuser/cuda/manager.h>
-#include <torch/csrc/jit/fuser/cuda/parser.h>
-#include <torch/csrc/jit/fuser/cuda/kernel.h>
+#include <torch/csrc/jit/codegen/cuda/manager.h>
+#include <torch/csrc/jit/codegen/cuda/parser.h>
+#include <torch/csrc/jit/codegen/cuda/kernel.h>
 
-#include <torch/csrc/jit/fuser/common/tensor.h>
-#include <torch/csrc/jit/fuser/common/fusion.h>
-#include <torch/csrc/jit/fuser/common/utils.h>
+#include <torch/csrc/jit/codegen/cuda/tensor.h>
+#include <torch/csrc/jit/codegen/cuda/fusion.h>
+#include <torch/csrc/jit/codegen/cuda/utils.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 
 #include <unordered_map>

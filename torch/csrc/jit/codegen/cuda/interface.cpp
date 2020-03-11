@@ -1,9 +1,9 @@
-#include <torch/csrc/jit/fuser/cuda/interface.h>
-#include <torch/csrc/jit/fuser/cuda/partition.h>
-#include <torch/csrc/jit/fuser/cuda/manager.h>
+#include <torch/csrc/jit/codegen/cuda/interface.h>
+#include <torch/csrc/jit/codegen/cuda/partition.h>
+#include <torch/csrc/jit/codegen/cuda/manager.h>
 
 
-#include <torch/csrc/jit/fuser/common/management.h>
+#include <torch/csrc/jit/codegen/cuda/management.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <ATen/CUDAGenerator.h>
@@ -13,8 +13,6 @@
 #include <torch/csrc/utils/memory.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
-
-#include <torch/csrc/jit/fuser/cuda/cs_ir/test.h>
 
 // #include "../common/ir.h"
 // #include "../common/ir_printer.h"

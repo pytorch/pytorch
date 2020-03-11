@@ -1,4 +1,4 @@
-#include <torch/csrc/jit/fuser/common/type.h>
+#include <torch/csrc/jit/codegen/cuda/type.h>
 
 #include <stdexcept>
 #include <unordered_map>

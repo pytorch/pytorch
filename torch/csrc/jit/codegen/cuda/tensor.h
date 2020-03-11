@@ -1,7 +1,7 @@
 #pragma once
 
-#include <torch/csrc/jit/fuser/common/ir.h>
-#include <torch/csrc/jit/fuser/common/tensor_meta.h>
+#include <torch/csrc/jit/codegen/cuda/ir.h>
+#include <torch/csrc/jit/codegen/cuda/tensor_meta.h>
 
 /*
  * TODO: improve implementation bool IterDomain::same_as(const IterDomain*) const 

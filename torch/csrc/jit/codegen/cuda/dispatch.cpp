@@ -1,8 +1,8 @@
-#include <torch/csrc/jit/fuser/common/ir.h>
-#include <torch/csrc/jit/fuser/common/tensor.h>
-#include <torch/csrc/jit/fuser/common/type.h>
+#include <torch/csrc/jit/codegen/cuda/ir.h>
+#include <torch/csrc/jit/codegen/cuda/tensor.h>
+#include <torch/csrc/jit/codegen/cuda/type.h>
 
-#include <torch/csrc/jit/fuser/common/dispatch.h>
+#include <torch/csrc/jit/codegen/cuda/dispatch.h>
 
 namespace torch {
 namespace jit {

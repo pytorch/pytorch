@@ -1,7 +1,7 @@
 #pragma once
 
-#include <torch/csrc/jit/fuser/common/arith.h>
-#include <torch/csrc/jit/fuser/common/transform_iter.h>
+#include <torch/csrc/jit/codegen/cuda/arith.h>
+#include <torch/csrc/jit/codegen/cuda/transform_iter.h>
 
 #include <vector>
 

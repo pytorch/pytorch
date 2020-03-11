@@ -1,4 +1,4 @@
-#include <torch/csrc/jit/fuser/common/tensor_meta.h>
+#include <torch/csrc/jit/codegen/cuda/tensor_meta.h>
 #include <algorithm>
 #include <numeric>
 

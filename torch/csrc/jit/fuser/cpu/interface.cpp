@@ -1,8 +1,8 @@
 #include <torch/csrc/jit/fuser/interface.h>
 #include <torch/csrc/jit/fuser/cpu/interface.h>
-#include <torch/csrc/jit/fuser/common/utils.h>
-#include <torch/csrc/jit/fuser/common/tensor_meta.h>
-#include <torch/csrc/jit/fuser/common/management.h>
+#include <torch/csrc/jit/codegen/cuda/utils.h>
+#include <torch/csrc/jit/codegen/cuda/tensor_meta.h>
+#include <torch/csrc/jit/codegen/cuda/management.h>
 
 #include <c10/util/Exception.h>
 

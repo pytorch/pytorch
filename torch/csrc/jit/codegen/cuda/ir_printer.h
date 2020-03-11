@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/jit/fuser/common/iriostream.h>
+#include <torch/csrc/jit/codegen/cuda/iriostream.h>
 
 #include <iostream>
 

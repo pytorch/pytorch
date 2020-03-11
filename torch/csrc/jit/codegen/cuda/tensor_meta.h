@@ -5,7 +5,7 @@
 #include <c10/core/DeviceType.h>
 #include <c10/util/Exception.h>
 
-#include <torch/csrc/jit/fuser/common/utils.h>
+#include <torch/csrc/jit/codegen/cuda/utils.h>
 
 #include <vector>
 #include <cstdint>

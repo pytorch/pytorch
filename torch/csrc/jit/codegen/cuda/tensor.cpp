@@ -1,11 +1,11 @@
-#include <torch/csrc/jit/fuser/common/arith.h>
-#include <torch/csrc/jit/fuser/common/fusion.h>
-#include <torch/csrc/jit/fuser/common/iter_visitor.h>
-#include <torch/csrc/jit/fuser/common/mutator.h>
-#include <torch/csrc/jit/fuser/common/tensor.h>
-#include <torch/csrc/jit/fuser/common/transform_replay.h>
+#include <torch/csrc/jit/codegen/cuda/arith.h>
+#include <torch/csrc/jit/codegen/cuda/fusion.h>
+#include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
+#include <torch/csrc/jit/codegen/cuda/mutator.h>
+#include <torch/csrc/jit/codegen/cuda/tensor.h>
+#include <torch/csrc/jit/codegen/cuda/transform_replay.h>
 
-#include <torch/csrc/jit/fuser/common/iriostream.h>
+#include <torch/csrc/jit/codegen/cuda/iriostream.h>
 
 namespace torch {
 namespace jit {

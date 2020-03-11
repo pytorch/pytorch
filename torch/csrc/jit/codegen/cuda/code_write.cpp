@@ -1,11 +1,11 @@
-#include <torch/csrc/jit/fuser/common/fusion.h>
-#include <torch/csrc/jit/fuser/common/ir.h>
-#include <torch/csrc/jit/fuser/common/iriostream.h>
-#include <torch/csrc/jit/fuser/common/tensor.h>
-#include <torch/csrc/jit/fuser/common/transform_replay.h>
-#include <torch/csrc/jit/fuser/common/type.h>
+#include <torch/csrc/jit/codegen/cuda/fusion.h>
+#include <torch/csrc/jit/codegen/cuda/ir.h>
+#include <torch/csrc/jit/codegen/cuda/iriostream.h>
+#include <torch/csrc/jit/codegen/cuda/tensor.h>
+#include <torch/csrc/jit/codegen/cuda/transform_replay.h>
+#include <torch/csrc/jit/codegen/cuda/type.h>
 
-#include <torch/csrc/jit/fuser/common/code_write.h>
+#include <torch/csrc/jit/codegen/cuda/code_write.h>
 
 namespace torch {
 namespace jit {
