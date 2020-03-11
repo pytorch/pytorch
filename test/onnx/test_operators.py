@@ -549,6 +549,10 @@ class TestOperators(TestCase):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.assertONNX(nn.ELU(), x)
 
+    def test_celu(self):
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        self.assertONNX(nn.CELU(), x)
+
     def test_selu(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.assertONNX(nn.SELU(), x)

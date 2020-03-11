@@ -2434,7 +2434,7 @@ class TestONNXRuntime(unittest.TestCase):
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_celu(self):
         x = torch.randn(6, 4, 3, 3)
-        self.run_test(Celu(), x)
+        self.run_test(torch.nn.CELU(), x)
         
     def test_add_inplace(self):
         class InplaceAddModel(torch.nn.Module):
