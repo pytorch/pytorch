@@ -11,8 +11,7 @@ from .modules import utils
 from .modules.utils import _single, _pair, _triple, _list_with_default
 from . import grad  # noqa: F401
 from torch import _VF
-from .._jit_internal import boolean_dispatch, List, Optional
-from .._jit_internal import _overload as overload
+from .._jit_internal import boolean_dispatch, List, Optional, _overload
 from .._overrides import has_torch_function, handle_torch_function
 
 
@@ -2709,12 +2708,12 @@ Examples::
     torch.Size([1, 1, 12, 12])
 """)
 
-@overload  # noqa: F811
+@_overload  # noqa: F811
 def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=None):  # noqa: F811
     # type: (Tensor, Optional[int], Optional[float], str, Optional[bool]) -> Tensor
     pass
 
-@overload  # noqa: F811
+@_overload  # noqa: F811
 def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=None):  # noqa: F811
     # type: (Tensor, Optional[List[int]], Optional[float], str, Optional[bool]) -> Tensor
     pass
@@ -2779,22 +2778,22 @@ def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=
     warnings.warn("nn.functional.upsample is deprecated. Use nn.functional.interpolate instead.")
     return interpolate(input, size, scale_factor, mode, align_corners)
 
-@overload  # noqa: F811
+@_overload  # noqa: F811
 def _interp_output_size(dim, closed_over_args):  # noqa: F811
     # type: (int, Tuple[Tensor, Optional[int], Optional[List[float]], Optional[bool]]) -> List[int]
     pass
 
-@overload  # noqa: F811
+@_overload  # noqa: F811
 def _interp_output_size(dim, closed_over_args):  # noqa: F811
     # type: (int, Tuple[Tensor, Optional[List[int]], Optional[List[float]], Optional[bool]]) -> List[int]
     pass
 
-@overload  # noqa: F811
+@_overload  # noqa: F811
 def _interp_output_size(dim, closed_over_args):  # noqa: F811
     # type: (int, Tuple[Tensor, Optional[int], Optional[float], Optional[bool]]) -> List[int]
     pass
 
-@overload  # noqa: F811
+@_overload  # noqa: F811
 def _interp_output_size(dim, closed_over_args):  # noqa: F811
     # type: (int, Tuple[Tensor, Optional[List[int]], Optional[float], Optional[bool]]) -> List[int]
     pass
@@ -2846,22 +2845,22 @@ def _interp_output_size(dim, closed_over_args):  # noqa: F811
                     dtype=torch.float32)).float())) for i in range(dim)]
     return [int(math.floor(float(input.size(i + 2)) * scale_factors[i])) for i in range(dim)]
 
-@overload  # noqa: F811
+@_overload  # noqa: F811
 def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corners=None, recompute_scale_factor=None):  # noqa: F811
     # type: (Tensor, Optional[int], Optional[List[float]], str, Optional[bool], Optional[bool]) -> Tensor
     pass
 
-@overload  # noqa: F811
+@_overload  # noqa: F811
 def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corners=None, recompute_scale_factor=None):  # noqa: F811
     # type: (Tensor, Optional[List[int]], Optional[List[float]], str, Optional[bool], Optional[bool]) -> Tensor
     pass
 
-@overload  # noqa: F811
+@_overload  # noqa: F811
 def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corners=None, recompute_scale_factor=None):  # noqa: F811
     # type: (Tensor, Optional[int], Optional[float], str, Optional[bool], Optional[bool]) -> Tensor
     pass
 
-@overload  # noqa: F811
+@_overload  # noqa: F811
 def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corners=None, recompute_scale_factor=None):  # noqa: F811
     # type: (Tensor, Optional[List[int]], Optional[float], str, Optional[bool], Optional[bool]) -> Tensor
     pass
@@ -3012,12 +3011,12 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
                                   " (got {}D) for the modes: nearest | linear | bilinear | bicubic | trilinear"
                                   " (got {})".format(input.dim(), mode))
 
-@overload  # noqa: F811
+@_overload  # noqa: F811
 def upsample_nearest(input, size=None, scale_factor=None):  # noqa: F811
     # type: (Tensor, Optional[int], Optional[float]) -> Tensor
     pass
 
-@overload  # noqa: F811
+@_overload  # noqa: F811
 def upsample_nearest(input, size=None, scale_factor=None):  # noqa: F811
     # type: (Tensor, Optional[List[int]], Optional[float]) -> Tensor
     pass
@@ -3044,22 +3043,22 @@ def upsample_nearest(input, size=None, scale_factor=None):  # noqa: F811
     warnings.warn("nn.functional.upsample_nearest is deprecated. Use nn.functional.interpolate instead.")
     return interpolate(input, size, scale_factor, mode='nearest')
 
-@overload  # noqa: F811
+@_overload  # noqa: F811
 def upsample_bilinear(input, size=None, scale_factor=None):  # noqa: F811
     # type: (Tensor, Optional[int], Optional[float]) -> Tensor
     pass
 
-@overload  # noqa: F811
+@_overload  # noqa: F811
 def upsample_bilinear(input, size=None, scale_factor=None):  # noqa: F811
     # type: (Tensor, Optional[List[int]], Optional[float]) -> Tensor
     pass
 
-@overload  # noqa: F811
+@_overload  # noqa: F811
 def upsample_bilinear(input, size=None, scale_factor=None):  # noqa: F811
     # type: (Tensor, Optional[int], Optional[List[float]]) -> Tensor
     pass
 
-@overload  # noqa: F811
+@_overload  # noqa: F811
 def upsample_bilinear(input, size=None, scale_factor=None):  # noqa: F811
     # type: (Tensor, Optional[List[int]], Optional[List[float]]) -> Tensor
     pass
