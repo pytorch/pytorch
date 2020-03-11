@@ -725,7 +725,7 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
       // This is a dummy response that's not send over RPC, so the ID field is
       // not used for any request/response matching.
       const auto exceptionMsg = createExceptionResponse(err, -1);
-      if (!timedOutFuture.future->hasError()) {
+      if (!timedOutFuture.future_->hasError()) {
         --clientActiveCalls_;
         timedOutFuture.future_->setError(std::string(
             exceptionMsg.payload().begin(), exceptionMsg.payload().end()));
