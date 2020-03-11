@@ -87,11 +87,11 @@ Logic to extract the promote type from any Tensor or TensorList args.
 // current best guess for the promote type, and update if necessary.
 inline at::ScalarType
 prioritize(at::ScalarType current, const Tensor& nextArg) {
+  if (current == at::kDouble) {
+    AT_ERROR("promote type is double in at::autocast::prioritize");
+    return current;
+  }
   if (nextArg.is_cuda() && nextArg.is_floating_point()) {
-    if (current == at::kDouble) {
-      AT_ERROR("promote type is double in at::autocast::prioritize");
-      return current;
-    }
     auto next = nextArg.scalar_type();
     if (next == at::kDouble) {
       return current; // ignores double tensors

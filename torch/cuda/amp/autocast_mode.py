@@ -75,10 +75,10 @@ class autocast(object):
     Type mismatch errors *in* an autocast-enabled region are a bug; if this is what you observe,
     please file an issue.
 
-    To force subregions to run in a particular ``dtype``, nest ``autocast(enabled=False)``
-    regions in a surrounding autocast-enabled region.  In the subregion, inputs from
-    the surrounding region should be cast to ``dtype`` before use.  The following example
-    shows a subregion with forced ``float32`` execution::
+    ``autocast(enabled=False)`` subregions can be nested in autocast-enabled regions.
+    This can be useful, for example, if you want to force subregions to run in a particular ``dtype``.
+    In the subregion, inputs from the surrounding region should be cast to ``dtype`` before use.
+    The following example shows a subregion with forced ``float32`` execution::
 
         # Creates some tensors in default dtype (here assumed to be float32)
         a_float32 = torch.rand((8, 8), device="cuda")
@@ -103,7 +103,7 @@ class autocast(object):
     (see the :ref:`DataParallel example<amp-dataparallel>`).
 
     Arguments:
-        enabled(bool, optional, default=True):  Whether autocasting should be enabled in this region.
+        enabled(bool, optional, default=True):  Whether autocasting should be enabled in the region.
     """
     def __init__(self, enabled=True):
         if enabled and not torch.cuda.is_available():
