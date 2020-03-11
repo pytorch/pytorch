@@ -183,7 +183,7 @@ class TestTypeHints(TestCase):
                                    stdout=subprocess.PIPE,
                                    stderr=subprocess.PIPE)
         (stdout, stderr) = process.communicate()
-    print(stdout)
+        print(stdout)
 
 if __name__ == '__main__':
     run_tests()
