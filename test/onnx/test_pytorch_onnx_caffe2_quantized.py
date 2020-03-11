@@ -3,6 +3,7 @@ from __future__ import print_function
 import numpy as np
 import unittest
 import torch.onnx
+import torch.nn as nn
 import io
 
 import onnx
@@ -39,6 +40,30 @@ class TestQuantizedOps(unittest.TestCase):
 
         x = np.random.random((1, 2)).astype("float32")
         self.generic_test(QModule(op), (x,), input_names=["x"])
+
+    def generic_model_test(self, model, sample_inputs, input_names=None):
+        torch.backends.quantized.engine = "fbgemm"
+        pt_inputs = tuple(torch.from_numpy(x) for x in sample_inputs)
+        model.qconfig = torch.quantization.default_qconfig
+        q_model = torch.quantization.prepare(model, inplace=False)
+        q_model = torch.quantization.convert(q_model, inplace=False)
+
+        traced_model = torch.jit.trace(q_model, *pt_inputs)
+        buf = io.BytesIO()
+        torch.jit.save(traced_model, buf)
+        buf.seek(0)
+        q_model = torch.jit.load(buf)
+
+        q_model.eval()
+        output = q_model(*pt_inputs)
+
+        f = io.BytesIO()
+        torch.onnx.export(q_model, pt_inputs, f, input_names=input_names, example_outputs=output,
+                          operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
+        f.seek(0)
+        onnx_model = onnx.load(f)
+        caffe_res = c2.run_model(onnx_model, dict(zip(input_names, sample_inputs)))[0]
+        np.testing.assert_almost_equal(output.detach().numpy(), caffe_res, decimal=3)
 
     def test_quantized_add(self):
         class QAddModule(torch.nn.Module):
@@ -217,6 +242,34 @@ class TestQuantizedOps(unittest.TestCase):
 
         x = np.random.rand(1, 2, 8, 8).astype("float32")
         self.generic_test(QMaxPool2dModule(), (x,), input_names=["x"])
+
+    def test_quantized_sigmoid(self):
+        self.generic_unary_test(torch.nn.Sigmoid())
+
+    def test_small_model(self):
+        class SimpleModel(torch.nn.Module):
+            def __init__(self):
+                super(SimpleModel, self).__init__()
+                self.quant = torch.quantization.QuantStub()
+                self.dequant = torch.quantization.DeQuantStub()
+                self.conv1 = nn.Conv2d(3, 2, 5, bias=None).to(dtype=torch.float)
+                self.act1 = nn.Sigmoid()
+                self.conv2 = nn.Conv2d(2, 2, 1, bias=None).to(dtype=torch.float)
+                self.fc = nn.Linear(72, 10).to(dtype=torch.float)
+                self.fc.qconfig = None
+
+            def forward(self, x):
+                x = self.quant(x)
+                x = self.conv1(x)
+                x = self.act1(x)
+                x = self.conv2(x)
+                x = self.dequant(x)
+                x = x.view(-1, 72).contiguous()
+                x = self.fc(x)
+                return x
+
+        x = np.random.rand(2, 3, 10, 10).astype("float32")
+        self.generic_model_test(SimpleModel(), (x,), input_names=["x"])
 
 if __name__ == '__main__':
     unittest.main()

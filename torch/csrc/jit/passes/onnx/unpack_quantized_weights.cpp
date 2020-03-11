@@ -39,7 +39,8 @@ double getScaleFromInput(Node* input_node) {
                                                  "aten::slice",
                                                  "aten::avg_pool2d",
                                                  "quantized::cat",
-                                                 "prim::ListConstruct"};
+                                                 "prim::ListConstruct"
+                                                 };
   if (input_name == "aten::quantize_per_tensor") {
     TORCH_CHECK(
         input_node->inputs().size() > 1,
@@ -79,6 +80,10 @@ double getScaleFromInput(Node* input_node) {
         "quantized::add expected scale to be 3rd input");
     scale = toIValue(input_node->inputs()[2]);
     return scale.value().toDouble();
+  } else if (input_name == "aten::sigmoid") {
+    // For the _caffe2::Int8Sigmoid op output scale is 1.0/256
+    // And output zero_point is set to 0 (quint8 type).
+    return 1.0 / 256;
   }
   // For the ops below the scale is not part of the op signature, so we traverse
   // up the graph to get the scale from its input when defined in the graph.
