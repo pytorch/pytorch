@@ -1483,6 +1483,7 @@ matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type_env);
 // does not appear in `type_env`
 CAFFE2_API TypePtr tryEvalTypeVariables(TypePtr type, TypeEnv& type_env);
 
+CAFFE2_API bool elementTypeCanBeInferredFromMembers(const TypePtr& elem_type);
 
 /**
  * User Defined Types
