@@ -436,7 +436,7 @@ If the future completes with an error, an exception is thrown.
             rpcTorchscript(dstWorkerName, qualifiedName, functionSchema, stack);
         return PythonFutureWrapper(fut);
       },
-      py::call_guard<py::gil_scoped_release>());
+      py::call_guard<py::gil_scoped_acquire>());
 
   module.def(
       "_invoke_remote_builtin",
