@@ -52,7 +52,7 @@ updates the parameters, so the scale factor does not interfere with the learning
 .. autoclass:: GradScaler
     :members:
 
-.. _autocast-policies:
+.. _autocast-op-reference:
 
 Autocast Op Reference
 ^^^^^^^^^^^^^^^^^^^^^

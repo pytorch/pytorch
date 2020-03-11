@@ -43,7 +43,7 @@ Typical Mixed Precision Training
                 loss = loss_fn(output, target)
 
             # Scales loss.  Calls backward() on scaled loss to create scaled gradients.
-            # Backward passes under autocast are not necessary or recommended.
+            # Backward passes under autocast are not recommended.
             # Backward ops run in the same precision that autocast used for corresponding forward ops.
             scaler.scale(loss).backward()
 
@@ -105,16 +105,21 @@ Calling ``scaler.unscale_(optimizer)`` before clipping enables you to clip unsca
 this iteration, so ``scaler.step(optimizer)`` knows not to redundantly unscale gradients before
 (internally) calling ``optimizer.step()``.
 
+.. currentmodule:: torch.cuda.amp.GradScaler
+
 .. warning::
     :meth:`unscale_` should only be called once per optimizer per :meth:`step` call,
     and only after all gradients for that optimizer's assigned parameters have been accumulated.
     Calling :meth:`unscale_` twice for a given optimizer between each :meth:`step` triggers a RuntimeError.
 
+
 Working with Scaled Gradients
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 For some operations, you may need to work with scaled gradients in a setting where
-``scaler.unscale_`` is unsuitable.
+:meth:`unscale_` is unsuitable.
+
+.. currentmodule:: torch.cuda.amp
 
 Gradient penalty
 ----------------
@@ -150,7 +155,7 @@ will therefore be scaled, and should be unscaled before being combined to create
 penalty value.
 
 Also, the penalty term computation is part of the forward pass, and therefore should be
-inside an :class:`autocast` context manager.
+inside an :class:`autocast` context.
 
 Here's how that looks for the same L2 penalty::
 
@@ -166,10 +171,10 @@ Here's how that looks for the same L2 penalty::
             # Scales the loss for autograd.grad's backward pass, resulting in scaled grad_params
             scaled_grad_params = torch.autograd.grad(scaler.scale(loss), model.parameters(), create_graph=True)
 
-            # Unscales grad_params before computing the penalty.  grad_params are not owned
-            # by any optimizer, so ordinary division is used instead of scaler.unscale_:
+            # Creates unscaled grad_params before computing the penalty. scaled_grad_params are
+            # not owned by any optimizer, so ordinary division is used instead of scaler.unscale_:
             inv_scale = 1./scaler.get_scale()
-            grad_params = [p*inv_scale for p in scaled_grad_params]
+            grad_params = [p * inv_scale for p in scaled_grad_params]
 
             # Computes the penalty term and adds it to the loss
             with autocast():
@@ -188,14 +193,16 @@ Here's how that looks for the same L2 penalty::
             scaler.update()
 
 
-Working with Multiple Losses and Optimizers
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Working with Multiple Models, Losses, and Optimizers
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-If your network has multiple losses, you must call ``scaler.scale`` on each of them individually.
-If your network has multiple optimizers, you may call ``scaler.unscale_`` on any of them individually,
-and you must call ``scaler.step`` on each of them individually.
+.. currentmodule:: torch.cuda.amp.GradScaler
 
-However, ``scaler.update()`` should only be called once,
+If your network has multiple losses, you must call :meth:`scaler.scale<scale>` on each of them individually.
+If your network has multiple optimizers, you may call :meth:`scaler.unscale_<unscale_>` on any of them individually,
+and you must call :meth:`scaler.step<step>` on each of them individually.
+
+However, :meth:`scaler.update<update>` should only be called once,
 after all optimizers used this iteration have been stepped::
 
     scaler = torch.cuda.amp.GradScaler()
@@ -226,7 +233,11 @@ Each optimizer checks its gradients for infs/NaNs and makes an independent decis
 whether or not to skip the step.  This may result in one optimizer skipping the step
 while the other one does not.  Since step skipping occurs rarely (every several hundred iterations)
 this should not impede convergence.  If you observe poor convergence after adding gradient scaling
-to a multiple-optimizer model, please file a bug report.
+to a multiple-optimizer model, please report a bug.
+
+.. currentmodule:: torch.cuda.amp
+
+.. _amp-multigpu:
 
 Working with Multiple GPUs
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -235,8 +246,8 @@ The issues described here only affect :class:`autocast`.  :class:`GradScaler`\ '
 
 .. _amp-dataparallel:
 
-DataParallel within a single process
-------------------------------------
+DataParallel in a single process
+--------------------------------
 
 :class:`torch.nn.DataParallel` spawns threads to run the forward pass on each device.
 The autocast state is thread local, so the following will not work::
@@ -288,7 +299,7 @@ DistributedDataParallel, multiple GPUs per process
 
 Here :class:`torch.nn.parallel.DistributedDataParallel` may spawn a side thread to run the forward pass on each
 device, like :class:`torch.nn.DataParallel`.  :ref:`The fix is the same<amp-dataparallel>`:
-apply autocast as part of your model's ``forward`` method to ensure it's enabled in threads.
+apply autocast as part of your model's ``forward`` method to ensure it's enabled in side threads.
 
 .. _amp-custom-examples:
 
@@ -296,21 +307,28 @@ Autocast and Custom Autograd Functions
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 If your network uses :ref:`custom autograd functions<extending-autograd>`
-(subclasses of :class:`torch.autograd.Function`), :class:`autocast` may work out of the box.
+(subclasses of :class:`torch.autograd.Function`), changes are required for
+autocast compatibility if any function
 
-However, if any of the following is true
+* takes multiple floating-point Tensor inputs,
+* wraps any autocastable op (see the :ref:`Autocast Op Reference<autocast-op-reference>`), or
+* needs a particular dtype.
 
-* Your function takes multiple floating-point Tensor inputs
-* Your function wraps any of the ops in the :ref:`Autocast Op Reference<autocast-policies>`
-* You want to ensure the function runs in a particular dtype.
+Functions with multiple inputs or autocastable ops
+--------------------------------------------------
 
-you ay
+If you're importing the function from a library and can't alter its definition,
+disable autocast and force ``float32`` execution at any point(s) of use where errors occur::
 
-Functions that should allow autocasting
----------------------------------------
+    with autocast():
+        ...
+        with autocast(enabled=False):
+            output = imported_function(input1.float(), input2.float())
 
-The :func:`torch.cuda.amp.custom_fwd` and :func:`torch.cuda.amp.custom_bwd` decorators (with no arguments)
-ensure that ``forward`` executes with the current autocast state, and that ``backward`` executes with the
+If you're the function's author (or can alter its definition) apply
+:func:`torch.cuda.amp.custom_fwd` and :func:`torch.cuda.amp.custom_bwd` decorators
+(with no arguments) to ``forward`` and ``backward`` respectively.  These ensure
+``forward`` executes with the current autocast state and ``backward`` executes with the
 same autocast state as ``forward`` (which can prevent type mismatch errors)::
 
     class MyMM(torch.autograd.Function):
@@ -325,26 +343,37 @@ same autocast state as ``forward`` (which can prevent type mismatch errors)::
             a, b = ctx.saved_tensors
             return grad.mm(b.t()), a.t().mm(grad)
 
+Now ``MyMM`` can be invoked anywhere, without manually casting or disabling autocast::
+
+    mymm = MyMM.apply
+
+    with autocast():
+        output = mymm(input1, input2)
+
 Functions that need a particular dtype
 --------------------------------------
 
-If you know your function requires a certain precision, you may want it to disallow autocasting.
+If a custom function requires a certain precision, it should not receive autocasting.
 
-Consider a custom autograd function wrapping
+Consider, for example, a custom function wrapping
 `CUDA extensions <https://pytorch.org/tutorials/advanced/cpp_extension.html>`_
-that were only compiled for ``float32``.  You can force the function to run in ``float32`` at the point of use,
-as you would for any explicitly ``float32`` subregion::
+that were only compiled for ``float32``.
+
+If you're importing the function from a library and can't alter its definition,
+disable autocast and force ``float32`` execution at the point of use::
 
     with autocast():
         ...
         with autocast(enabled=False):
-            output = float32_function(input.float())
+            output = imported_float32_function(input.float())
 
-Alternatively, you can use the :func:`custom_fwd` decorator with ``cast_inputs=torch.float32`` in the function's
-definition.  The ``cast_inputs=torch.float32`` argument locally disables autocast in ``forward`` and ``backward``,
-and casts incoming floating-point CUDA Tensors to ``float32``::
+If you're the function's author (or can alter its definition),
+apply :func:`@custom_fwd(cast_inputs=torch.float32)<custom_fwd>` to ``forward``
+and :func:`@custom_bwd<custom_bwd>` (with no arguments) to ``backward``.
+With ``cast_inputs=torch.float32``, these disable autocast in ``forward`` and ``backward``,
+and ``forward`` casts incoming floating-point CUDA Tensors to ``float32``::
 
-    class Float32Function(torch.autograd.Function):
+    class MyFloat32Func(torch.autograd.Function):
         @staticmethod
         @custom_fwd(cast_inputs=torch.float32)
         def forward(ctx, input):
@@ -356,9 +385,9 @@ and casts incoming floating-point CUDA Tensors to ``float32``::
         def backward(ctx, grad):
             ...
 
-Now ``Float32Function`` can be invoked anywhere, without disabling autocast at the point of use::
+Now ``MyFloat32Func`` can be invoked anywhere, without manually casting or disabling autocast::
 
-    func = Float32Function.apply
+    func = MyFloat32Func.apply
 
     with autocast():
         # func will run in float32, regardless of the surrounding autocast state

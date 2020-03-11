@@ -12,7 +12,7 @@ class autocast(object):
 
     In these regions, CUDA ops run in an op-specific dtype chosen by autocast
     to improve performance while maintaining accuracy.
-    See the :ref:`Autocast Op Reference<autocast-policies>` for details.
+    See the :ref:`Autocast Op Reference<autocast-op-reference>` for details.
 
     When entering an autocast-enabled region, Tensors may be any type.
     You should not call ``.half()`` on your model(s) or inputs when using autocasting.
@@ -100,8 +100,9 @@ class autocast(object):
             g_float16 = torch.mm(d_float32, f_float32)
 
     The autocast state is thread-local.  If you want it enabled in a new thread, the context manager or decorator
-    must be invoked in that thread.  This affects :class:`torch.nn.DataParallel`
-    (see the :ref:`DataParallel example<amp-dataparallel>`).
+    must be invoked in that thread.  This affects :class:`torch.nn.DataParallel` and
+    :class:`torch.nn.parallel.DistributedDataParallel` when used with more than one GPU per process
+    (see :ref:`Working with Multiple GPUs<amp-multigpu>`).
 
     Arguments:
         enabled(bool, optional, default=True):  Whether autocasting should be enabled in the region.
