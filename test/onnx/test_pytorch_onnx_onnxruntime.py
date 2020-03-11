@@ -2431,6 +2431,11 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 4, 5, 6, requires_grad=True)
         self.run_test(GeluModel(), x)
 
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_celu(self):
+        x = torch.randn(6, 4, 3, 3)
+        self.run_test(Celu(), x)
+        
     def test_add_inplace(self):
         class InplaceAddModel(torch.nn.Module):
             def forward(self, x):
