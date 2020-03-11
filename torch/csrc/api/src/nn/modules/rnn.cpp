@@ -179,15 +179,17 @@ void RNNImplBase<Derived>::flatten_parameters() {
     // an inplace operation on self.flat_weights_
     {
       torch::NoGradGuard no_grad;
-      torch::_cudnn_rnn_flatten_weight(
-            flat_weights_,
-            options_base.bias() ? 4 : 2,
-            options_base.input_size(),
-            static_cast<int64_t>(get_cudnn_mode_for_rnn(options_base.mode())),
-            options_base.hidden_size(),
-            options_base.num_layers(),
-            options_base.batch_first(), 
-            options_base.bidirectional());
+      if (torch::_use_cudnn_rnn_flatten_weight()) {
+        torch::_cudnn_rnn_flatten_weight(
+              flat_weights_,
+              options_base.bias() ? 4 : 2,
+              options_base.input_size(),
+              static_cast<int64_t>(get_cudnn_mode_for_rnn(options_base.mode())),
+              options_base.hidden_size(),
+              options_base.num_layers(),
+              options_base.batch_first(), 
+              options_base.bidirectional());
+      }
     }
   }
 }

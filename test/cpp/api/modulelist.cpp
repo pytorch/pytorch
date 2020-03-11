@@ -286,3 +286,16 @@ TEST_F(ModuleListTest, PrettyPrintModuleList) {
       "  (5): torch::nn::LSTM(input_size=4, hidden_size=5, num_layers=1, bias=true, batch_first=false, dropout=0, bidirectional=false)\n"
       ")");
 }
+
+TEST_F(ModuleListTest, RangeBasedForLoop) {
+  torch::nn::ModuleList mlist(
+    torch::nn::Linear(3, 4),
+    torch::nn::BatchNorm(4),
+    torch::nn::Dropout(0.5)
+  );
+
+  std::stringstream buffer;
+  for (const auto &module : *mlist) {
+    module->pretty_print(buffer);
+  }
+}

@@ -155,6 +155,18 @@ TEST_F(SequentialTest, PushBackAddsAnElement) {
   sequential_named->push_back(std::string("m2"), M(1));
   ASSERT_EQ(sequential_named->size(), 6);
   ASSERT_EQ(sequential_named->named_children()[5].key(), "m2");
+
+  // named and unnamed AnyModule's
+  Sequential sequential_any;
+  auto a=torch::nn::AnyModule(torch::nn::Linear(1,2));
+  ASSERT_EQ(sequential_any->size(), 0);
+  ASSERT_TRUE(sequential_any->is_empty());
+  sequential_any->push_back(a);
+  ASSERT_EQ(sequential_any->size(), 1);
+  ASSERT_EQ(sequential_any->named_children()[0].key(), "0");
+  sequential_any->push_back("fc", a);
+  ASSERT_EQ(sequential_any->size(), 2);
+  ASSERT_EQ(sequential_any->named_children()[1].key(), "fc");
 }
 
 TEST_F(SequentialTest, AccessWithAt) {
