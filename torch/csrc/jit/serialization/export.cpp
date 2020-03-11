@@ -602,7 +602,7 @@ GraphEncoder::GraphEncoder(
 
   for (auto const& custom_opset : custom_opsets){
     if (!std::count(domains_.begin(), domains_.end(), custom_opset.first)) {
-      AT_WARN("Custom opset domain: '", custom_opset.first, "' provided is not used in the model. ",
+      TORCH_WARN("Custom opset domain: '", custom_opset.first, "' provided is not used in the model. ",
       "Please verify custom opset domain names.");
     }
   }

@@ -1219,7 +1219,7 @@ Tensor try_get_weight_buf(
   return weight_buf;
 }
 
-const char * WEIGHT_FORMAT_WARN = "RNN module weights are not part of single contiguous "
+const char * WEIGHT_FORMTORCH_WARN = "RNN module weights are not part of single contiguous "
                                   "chunk of memory. This means they need to be compacted "
                                   "at every call, possibly greatly increasing memory usage. "
                                   "To compact weights again call flatten_parameters().";
@@ -1236,7 +1236,7 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
   auto weight_buf = try_get_weight_buf(
       input, params, has_biases, mode, hidden_size, num_layers, bidirectional);
   if (!weight_buf.defined()) {
-    AT_WARN(WEIGHT_FORMAT_WARN);
+    TORCH_WARN(WEIGHT_FORMTORCH_WARN);
   }
 
   TORCH_CHECK(_batch_sizes.dim() == 1, "batch_sizes tensor should be 1D");
@@ -1266,7 +1266,7 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
   auto weight_buf = try_get_weight_buf(
       input, params, has_biases, mode, hidden_size, num_layers, bidirectional);
   if (!weight_buf.defined()) {
-    AT_WARN(WEIGHT_FORMAT_WARN);
+    TORCH_WARN(WEIGHT_FORMTORCH_WARN);
   }
 
   auto & dropout_state = get_dropout_state(dropout_p, train, input.options());

@@ -97,13 +97,13 @@ struct TORCH_API Module : public Object {
   ~Module() {}
 
   void set_optimized(bool o) {
-    AT_WARN(
+    TORCH_WARN(
         "Module::set_optimized() is deprecated and has no effect. "
         "Please use setGraphExecutorOptimize()");
   }
 
   bool is_optimized() const {
-    AT_WARN(
+    TORCH_WARN(
         "Module::is_optimized() is deprecated and always returns true. "
         "Please use getGraphExecutorOptimize()");
     return true;
