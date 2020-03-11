@@ -68,10 +68,10 @@ class TestXNNPACKOps(TestCase):
         strides = (stride_h, stride_w)
         paddings = (pad_h, pad_w)
         dilations = (dilation, dilation)
-        assume(height + 2 * paddings[0]
-               >= dilations[0] * (kernels[0] - 1) + 1)
-        assume(width + 2 * paddings[1]
-               >= dilations[1] * (kernels[1] - 1) + 1)
+        assume(height + 2 * paddings[0] >=
+               dilations[0] * (kernels[0] - 1) + 1)
+        assume(width + 2 * paddings[1] >=
+               dilations[1] * (kernels[1] - 1) + 1)
 
         input_data = torch.rand((batch_size, input_channels, height, width))
         weight = torch.rand((output_channels, input_channels_per_group, kernel_h, kernel_w))
@@ -187,7 +187,7 @@ class TestXNNPACKSerDes(TestCase):
             def __init__(self, weight, bias, strides, paddings, dilations, groups):
                 super(Conv2DPrePacked, self).__init__()
                 self.packed_weight_bias = torch.ops._xnnpack.conv2d_prepack(weight, bias,
-                                                                           strides, paddings, dilations, groups)
+                                                                            strides, paddings, dilations, groups)
 
             def forward(self, x):
                 return torch.ops._xnnpack.conv2d_packed(x, self.packed_weight_bias)
@@ -198,10 +198,10 @@ class TestXNNPACKSerDes(TestCase):
         strides = (stride_h, stride_w)
         paddings = (pad_h, pad_w)
         dilations = (dilation, dilation)
-        assume(height + 2 * paddings[0]
-               >= dilations[0] * (kernels[0] - 1) + 1)
-        assume(width + 2 * paddings[1]
-               >= dilations[1] * (kernels[1] - 1) + 1)
+        assume(height + 2 * paddings[0] >=
+               dilations[0] * (kernels[0] - 1) + 1)
+        assume(width + 2 * paddings[1] >=
+               dilations[1] * (kernels[1] - 1) + 1)
 
         input_data = torch.rand((batch_size, input_channels, height, width))
         weight = torch.rand((output_channels, input_channels_per_group, kernel_h, kernel_w))
@@ -288,7 +288,7 @@ class TestXNNPACKSerDes(TestCase):
                 super(MPrePacked, self).__init__()
                 self.conv2d_packed_weight_bias = \
                     torch.ops._xnnpack.conv2d_prepack(conv_weight, conv_bias,
-                                                     strides, paddings, dilations, groups)
+                                                      strides, paddings, dilations, groups)
                 self.linear_packed_weight_bias = \
                     torch.ops._xnnpack.linear_prepack(linear_weight, linear_bias)
 
@@ -304,10 +304,10 @@ class TestXNNPACKSerDes(TestCase):
         strides = (stride_h, stride_w)
         paddings = (pad_h, pad_w)
         dilations = (dilation, dilation)
-        assume(height + 2 * paddings[0]
-               >= dilations[0] * (kernels[0] - 1) + 1)
-        assume(width + 2 * paddings[1]
-               >= dilations[1] * (kernels[1] - 1) + 1)
+        assume(height + 2 * paddings[0] >=
+               dilations[0] * (kernels[0] - 1) + 1)
+        assume(width + 2 * paddings[1] >=
+               dilations[1] * (kernels[1] - 1) + 1)
 
         input_data = torch.rand((batch_size, input_channels, height, width))
         conv_weight = torch.rand((output_channels, input_channels_per_group, kernel_h, kernel_w))
