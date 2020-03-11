@@ -61,7 +61,7 @@ if (NOT MSVC)
   ENDIF()
   if (NOT (INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE))
     set_source_files_properties(
-        utils/threadpool/pthreadpool_new_if_impl.c PROPERTIES COMPILE_FLAGS -fno-openmp) 
+        utils/threadpool/pthreadpool_new_if_impl.c PROPERTIES COMPILE_FLAGS -fno-openmp)
   endif()
 endif()
 
@@ -366,7 +366,6 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/runtime/autodiff.cpp
     ${TORCH_SRC_DIR}/csrc/jit/ir/attributes.cpp
     ${TORCH_SRC_DIR}/csrc/jit/runtime/argument_spec.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/api/custom_class.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/pass_manager.cpp
     ${TORCH_SRC_DIR}/csrc/jit/serialization/pickler.cpp
     ${TORCH_SRC_DIR}/csrc/jit/serialization/unpickler.cpp
@@ -411,6 +410,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/passes/fixup_trace_scope_blocks.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/inline_fork_wait.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/graph_fuser.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/cuda_graph_fuser.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/guard_elimination.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/inplace_check.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/liveness.cpp
@@ -448,7 +448,6 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/frontend/schema_matching.cpp
     ${TORCH_SRC_DIR}/csrc/jit/frontend/script_type_parser.cpp
     ${TORCH_SRC_DIR}/csrc/jit/frontend/sugared_value.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/ir/class_type.cpp
     ${TORCH_SRC_DIR}/csrc/jit/frontend/parser.cpp
     ${TORCH_SRC_DIR}/csrc/jit/frontend/builtin_functions.cpp
     ${TORCH_SRC_DIR}/csrc/jit/frontend/canonicalize_modified_loop.cpp
@@ -468,7 +467,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/codegen/fuser/executor.cpp
     ${TORCH_SRC_DIR}/csrc/jit/codegen/fuser/codegen.cpp
     ${TORCH_SRC_DIR}/csrc/jit/codegen/fuser/fallback.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/api/function.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/api/function_impl.cpp
     ${TORCH_SRC_DIR}/csrc/jit/runtime/vararg_functions.cpp
 
     ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/mem_arena.cpp
@@ -481,6 +480,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/ir_printer.cpp
     ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/ir_mutator.cpp
     ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/unique_name_manager.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/mobile/type_parser.cpp
     )
 
   if (NOT INTERN_DISABLE_MOBILE_INTERP)
@@ -489,8 +489,8 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
         ${TORCH_SRC_DIR}/csrc/jit/mobile/import.cpp
         ${TORCH_SRC_DIR}/csrc/jit/mobile/module.cpp
         ${TORCH_SRC_DIR}/csrc/jit/mobile/register_mobile_ops.cpp
+        ${TORCH_SRC_DIR}/csrc/jit/mobile/register_mobile_autograd.cpp
         ${TORCH_SRC_DIR}/csrc/jit/mobile/interpreter.cpp
-        ${TORCH_SRC_DIR}/csrc/jit/mobile/type_parser.cpp
         )
     list (APPEND TORCH_SRCS ${MOBILE_SRCS})
   endif()
@@ -507,7 +507,6 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/jit/serialization/export.cpp
       ${TORCH_SRC_DIR}/csrc/jit/serialization/export_module.cpp
       ${TORCH_SRC_DIR}/csrc/jit/serialization/import_legacy.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/netdef_converter.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/fuser/cpu/fused_kernel.cpp
       ${TORCH_SRC_DIR}/csrc/jit/api/module_save.cpp
       ${TORCH_SRC_DIR}/csrc/utils/byte_order.cpp
@@ -541,7 +540,6 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/script_resp.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/types.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/utils.cpp
-        ${TORCH_SRC_DIR}/csrc/jit/runtime/register_distributed_ops.cpp
       )
     endif()
   endif()

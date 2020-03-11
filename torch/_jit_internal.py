@@ -744,6 +744,15 @@ for i in range(2, 7):
 
 # Retrieves a fully-qualified name (module hierarchy + classname) for a given obj.
 def _qualified_name(obj):
+    # This special case allows us to override the qualified name on a type.
+    # It's currently used in conjunction with tracing, where we create a
+    # fake module to filter only supported attributes. However, since this
+    # new type is defined as a local class, we need a mechanism to override
+    # its qualname so it appears correctly in the TorchScript system. This,
+    # we set '_jit_override_qualname' with the original traced module's
+    # qualified name, which is picked up here
+    if hasattr(obj, '_jit_override_qualname'):
+        return obj._jit_override_qualname
     # short-circuit in cases where the object already has a known qualified name
     if isinstance(obj, torch._C.ScriptFunction):
         return obj.qualified_name

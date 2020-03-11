@@ -148,7 +148,7 @@ static inline Variable applySlicing(
           if (is_tracing) {
             recordSliceTrace(obj);
           }
-          return at::indexing::TensorIndex({start, stop, step});
+          return at::indexing::TensorIndex(at::indexing::Slice(start, stop, step));
         } else if (obj == Py_Ellipsis) {
           return at::indexing::TensorIndex(at::indexing::Ellipsis);
         } else if (obj == Py_None) {
@@ -281,7 +281,7 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
       recordSliceTrace(index);
     }
     return THPVariable_Wrap(
-      at::indexing::get_item(self_, {at::indexing::TensorIndex({start, stop, step})}));
+      at::indexing::get_item(self_, {at::indexing::TensorIndex(at::indexing::Slice(start, stop, step))}));
   } else if (index == Py_False || index == Py_True) {
     return THPVariable_Wrap(([&]() {
       pybind11::gil_scoped_release no_gil;
@@ -371,7 +371,7 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
     }
     // See NOTE [ Setting `disable_slice_optimization` when calling C++ tensor indexing functions from Python ]
     at::indexing::set_item(
-      self_, {at::indexing::TensorIndex({start, stop, step})}, value, /*disable_slice_optimization=*/is_tracing);
+      self_, {at::indexing::TensorIndex(at::indexing::Slice(start, stop, step))}, value, /*disable_slice_optimization=*/is_tracing);
     return 0;
   }
 

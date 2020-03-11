@@ -33,8 +33,7 @@ public:
 
   void prepareForDeregistration();
 
-  RegistrationHandleRAII registerKernel(DispatchKey dispatch_key, KernelFunction kernel);
-  RegistrationHandleRAII registerCatchallKernel(KernelFunction kernel);
+  RegistrationHandleRAII registerKernel(c10::optional<DispatchKey> dispatch_key, KernelFunction kernel);
 
   const OperatorOptions& options() {
     return options_;
@@ -45,8 +44,7 @@ public:
   }
 
 private:
-  void deregisterKernel_(DispatchKey dispatch_key, std::list<KernelFunction>::iterator kernel);
-  void deregisterCatchallKernel_(std::list<KernelFunction>::iterator kernel);
+  void deregisterKernel_(c10::optional<DispatchKey> dispatch_key, std::list<KernelFunction>::iterator kernel);
 
   FunctionSchema schema_;
 
@@ -72,7 +70,6 @@ private:
   //    kernels_[dispatch_key] does not exist
   //  - If kernels_[dispatch_key] exists, then it has elements.
   //    It is never an empty list.
-  // Analogous invariants for catchAllKernels_.
   //
   // Why do we do that?
   // -----
@@ -85,8 +82,7 @@ private:
   // re-executed and then only allow one kernel here, i.e. error if a kernel
   // is already registered, but that's a lot of effort to implement and
   // currently not high-pri.
-  ska::flat_hash_map<DispatchKey, std::list<KernelFunction>> kernels_;
-  std::list<KernelFunction> catchAllKernels_;
+  ska::flat_hash_map<c10::optional<DispatchKey>, std::list<KernelFunction>> kernels_;
 
   // Some metadata about the operator
   OperatorOptions options_;
@@ -95,8 +91,7 @@ private:
 
   // This function re-establishes the invariant that dispatchTable
   // contains the front element from the kernels list for a given dispatch key.
-  void updateDispatchTable_(DispatchKey dispatch_key);
-  void updateCatchallDispatchTable_();
+  void updateDispatchTable_(c10::optional<DispatchKey> dispatch_key);
 };
 
 }
