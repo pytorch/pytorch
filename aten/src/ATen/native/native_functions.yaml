@@ -2044,6 +2044,11 @@
   device_guard: False
   supports_named_tensor: True
 
+- func: narrow.Tensor(Tensor(a) self, int dim, Tensor start, int length) -> Tensor(a)
+  variants: function, method
+  device_guard: False
+  supports_named_tensor: True
+
 - func: native_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)
   dispatch:
     CPU: batch_norm_cpu
