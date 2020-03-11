@@ -49,3 +49,12 @@ TEST(WireSerialize, RecopySparseTensors) {
   EXPECT_TRUE(torch::equal(tiny, deser.second[0]));
   EXPECT_LT(ser.size(), (tiny.element_size() * k1K) + k1K);
 }
+
+// Enable this once JIT Pickler supports sparse tensors.
+TEST(WireSerialize, DISABLED_Sparse) {
+  at::Tensor main =
+      at::empty({2, 3}, at::dtype<float>().layout(at::kSparse));
+  auto ser = torch::distributed::rpc::wireSerialize({}, {main.to(at::kSparse)});
+  auto deser = torch::distributed::rpc::wireDeserialize(ser.data(), ser.size());
+  EXPECT_TRUE(torch::equal(main, deser.second[0]));
+}
