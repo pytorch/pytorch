@@ -92,10 +92,7 @@ TH_API void THTensor_(indexFill)(THTensor *tensor, int dim, THLongTensor *index,
 
 TH_API accreal THTensor_(dot)(THTensor *t, THTensor *src);
 
-TH_API void THTensor_(remainder)(THTensor *r_, THTensor *t, scalar_t value);
 TH_API void THTensor_(clamp)(THTensor *r_, THTensor *t, scalar_t min_value, scalar_t max_value);
-
-TH_API void THTensor_(cremainder)(THTensor *r_, THTensor *t, THTensor *src);
 
 TH_API void THTensor_(addbmm)(THTensor *r_, THTensor *t, THTensor *batch1, THTensor *batch2, scalar_t beta, scalar_t alpha);
 TH_API void THTensor_(baddbmm)(THTensor *r_, THTensor *t, THTensor *batch1, THTensor *batch2, scalar_t beta, scalar_t alpha);
