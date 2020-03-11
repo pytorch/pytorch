@@ -13,7 +13,7 @@ namespace {
     }
   }
 
-  std::string listAllDispatchKeys(const ska::flat_hash_map<c10::optional<DispatchKey>, std::list<KernelFunction>>& kernels) {
+  std::string listAllDispatchKeys(const ska::flat_hash_map<c10::optional<DispatchKey>, std::list<OperatorEntry::ListEntry>>& kernels) {
     if (kernels.size() == 0) {
       return "";
     }
@@ -47,10 +47,32 @@ void OperatorEntry::prepareForDeregistration() {
   TORCH_INTERNAL_ASSERT(kernels_.size() == 0, "If the dispatch table is empty, then the invariant says there can't be any kernels but we still have kernels for dispatch keys ", listAllDispatchKeys(kernels_), ". The operator is ", toString(name_));
 }
 
+namespace {
+  void checkSchema(const FunctionSchema& expected, const FunctionSchema& actual) {
+    TORCH_CHECK(expected.aliasAnalysis() != actual.aliasAnalysis(),
+        "In operator registration: Specified alias analysis kind [", toString(expected.aliasAnalysis()),
+        "] doesn't match actual alias analysis kind [", toString(actual.aliasAnalysis()), "]");
+    c10::optional<std::string> schema_difference = findSchemaDifferences(expected, actual);
+    if (schema_difference.has_value()) {
+      TORCH_CHECK(false,
+        "In operator registration: Specified function schema [", toString(expected), "] ",
+        "doesn't match inferred function schema [", toString(actual), "]. ",
+        *schema_difference);
+    }
+  }
+}
+
 void OperatorEntry::registerSchema(FunctionSchema&& schema) {
   TORCH_INTERNAL_ASSERT(!schema_.has_value());
   schema_ = std::move(schema);
   dispatchTable_.registerSchema(*schema_);
+  for (auto i = kernels_.begin(); i != kernels_.end(); ++i) {
+    for (auto j = i->second.begin(); j != i->second.end(); ++j) {
+      if (j->inferred_function_schema) {
+        checkSchema(*schema_, *j->inferred_function_schema);
+      }
+    }
+  }
 }
 
 void OperatorEntry::deregisterSchema() {
@@ -59,21 +81,25 @@ void OperatorEntry::deregisterSchema() {
   dispatchTable_.deregisterSchema();
 }
 
-std::list<KernelFunction>::iterator OperatorEntry::registerKernel(c10::optional<DispatchKey> dispatch_key, KernelFunction kernel) {
+std::list<OperatorEntry::ListEntry>::iterator OperatorEntry::registerKernel(c10::optional<DispatchKey> dispatch_key, KernelFunction kernel, std::unique_ptr<FunctionSchema> inferred_function_schema) {
   std::unique_lock<std::mutex> lock(kernelsMutex_);
+
+  if (schema_ && inferred_function_schema) {
+    checkSchema(*schema_, *inferred_function_schema);
+  }
 
   // Add the kernel to the kernels list,
   // possibly creating the list if this is the first kernel.
   auto& k = kernels_[dispatch_key];
-  k.push_front(std::move(kernel));
-  std::list<KernelFunction>::iterator inserted = k.begin();
+  k.emplace_front(std::move(kernel), std::move(inferred_function_schema));
+  std::list<OperatorEntry::ListEntry>::iterator inserted = k.begin();
   // update the dispatch table, i.e. re-establish the invariant
   // that the dispatch table points to the newest kernel
   updateDispatchTable_(dispatch_key);
   return inserted;
 }
 
-void OperatorEntry::deregisterKernel_(c10::optional<DispatchKey> dispatch_key, std::list<KernelFunction>::iterator kernel) {
+void OperatorEntry::deregisterKernel_(c10::optional<DispatchKey> dispatch_key, std::list<OperatorEntry::ListEntry>::iterator kernel) {
   std::unique_lock<std::mutex> lock(kernelsMutex_);
 
   auto found = kernels_.find(dispatch_key);
@@ -96,13 +122,13 @@ void OperatorEntry::updateDispatchTable_(c10::optional<DispatchKey> dispatch_key
     if (k == kernels_.end()) {
       dispatchTable_.removeKernelIfExists(*dispatch_key);
     } else {
-      dispatchTable_.setKernel(*dispatch_key, k->second.front());
+      dispatchTable_.setKernel(*dispatch_key, k->second.front().kernel);
     }
   } else {
     if (k == kernels_.end()) {
       dispatchTable_.removeCatchallKernel();
     } else {
-      dispatchTable_.setCatchallKernel(k->second.front());
+      dispatchTable_.setCatchallKernel(k->second.front().kernel);
     }
   }
 }

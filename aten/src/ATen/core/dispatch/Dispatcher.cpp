@@ -143,12 +143,12 @@ void Dispatcher::deregisterDef_(const OperatorHandle& op, const OperatorName& op
   }
 }
 
-RegistrationHandleRAII Dispatcher::registerImpl(OperatorName op_name, c10::optional<DispatchKey> dispatch_key, KernelFunction kernel) {
+RegistrationHandleRAII Dispatcher::registerImpl(OperatorName op_name, c10::optional<DispatchKey> dispatch_key, KernelFunction kernel, std::unique_ptr<FunctionSchema> inferred_function_schema) {
   std::lock_guard<std::mutex> lock(mutex_);
 
   auto op = findOrRegisterName_(op_name);
 
-  auto kernel_handle = op.operatorIterator_->op.registerKernel(dispatch_key, std::move(kernel));
+  auto kernel_handle = op.operatorIterator_->op.registerKernel(dispatch_key, std::move(kernel), std::move(inferred_function_schema));
 
   ++op.operatorIterator_->def_and_impl_count;
 

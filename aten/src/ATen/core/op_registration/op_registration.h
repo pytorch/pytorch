@@ -662,6 +662,23 @@ public:
     );
   }
 
+  // TODO: more user friendly API
+  static CppFunction makeFallthrough() {
+    return CppFunction(
+      c10::KernelFunction::makeFallthrough(),
+      /* schema */ nullptr
+    );
+  }
+
+  // TODO: more user friendly API
+  template<KernelFunction::BoxedKernelFunction* func>
+  static CppFunction makeFromBoxedFunction() {
+    return CppFunction(
+      c10::KernelFunction::makeFromBoxedFunction<func>(),
+      /* schema */ nullptr
+    );
+  }
+
 private:
   c10::optional<c10::DispatchKey> dispatch_key_;
   c10::KernelFunction func_;
@@ -766,15 +783,22 @@ public:
   // implementations for a single operator at different dispatch keys
   // (see torch::dispatch).  Implementations must have a corresponding
   // declaration (from def), otherwise they are invalid.
-  //
-  // TODO: Make it possible to impl without providing a full schema.  Right
-  // now, if you have a def() with full schema, you can't impl() with only
-  // the name.
   Module&& impl(const char* name, CppFunction&& f) &&;
   template <typename Func>
   Module&& impl(const char* name, Func&& raw_f) && {
     CppFunction f(std::forward<Func>(raw_f));
     return std::move(*this).impl(name, std::move(f));
+  }
+
+  // Register a fallback implementation for all operators which will be used
+  // if there is not a specific implementation for an operator available.
+  // At the moment, you must specify a dispatch key (see torch::dispatch) for
+  // your fallback.
+  Module&& fallback(CppFunction&& f) &&;
+  template <typename Func>
+  Module&& fallback(Func&& raw_f) && {
+    CppFunction f(std::forward<Func>(raw_f));
+    return std::move(*this).fallback(std::move(f));
   }
 };
 

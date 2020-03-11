@@ -138,7 +138,9 @@ public:
    * @return A RAII object that manages the lifetime of the registration.
    *         Once that object is destructed, the kernel will be deregistered.
    */
-  RegistrationHandleRAII registerImpl(OperatorName op_name, c10::optional<DispatchKey> dispatch_key, KernelFunction kernel);
+  // NB: steals the inferred function schema, as we may need to hold on to
+  // it for a bit until the real schema turns up
+  RegistrationHandleRAII registerImpl(OperatorName op_name, c10::optional<DispatchKey> dispatch_key, KernelFunction kernel, std::unique_ptr<FunctionSchema> inferred_function_schema);
 
   /**
    * Register a fallback kernel for a backend.

@@ -16,6 +16,15 @@ namespace impl {
 // and its dispatch table. This is not part of the public API.
 class OperatorEntry final {
 public:
+  struct ListEntry {
+    ListEntry(KernelFunction k, std::unique_ptr<FunctionSchema> s)
+      : kernel(std::move(k))
+      , inferred_function_schema(std::move(s))
+      {}
+    KernelFunction kernel;
+    std::unique_ptr<FunctionSchema> inferred_function_schema;
+  };
+
   explicit OperatorEntry(FunctionSchema&& schema);
   explicit OperatorEntry(OperatorName&& operator_name);
 
@@ -62,8 +71,8 @@ public:
   void prepareForDeregistration();
 
   // Postcondition: caller is responsible for disposing of the kernel
-  std::list<KernelFunction>::iterator registerKernel(c10::optional<DispatchKey> dispatch_key, KernelFunction kernel);
-  void deregisterKernel_(c10::optional<DispatchKey> dispatch_key, std::list<KernelFunction>::iterator kernel);
+  std::list<ListEntry>::iterator registerKernel(c10::optional<DispatchKey> dispatch_key, KernelFunction kernel, std::unique_ptr<FunctionSchema> inferred_function_schema);
+  void deregisterKernel_(c10::optional<DispatchKey> dispatch_key, std::list<ListEntry>::iterator kernel);
 
 private:
 
@@ -104,7 +113,7 @@ private:
   // re-executed and then only allow one kernel here, i.e. error if a kernel
   // is already registered, but that's a lot of effort to implement and
   // currently not high-pri.
-  ska::flat_hash_map<c10::optional<DispatchKey>, std::list<KernelFunction>> kernels_;
+  ska::flat_hash_map<c10::optional<DispatchKey>, std::list<ListEntry>> kernels_;
 
   std::mutex kernelsMutex_; // protects kernels_
 

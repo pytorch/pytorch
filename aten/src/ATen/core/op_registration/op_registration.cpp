@@ -15,17 +15,6 @@ void RegisterOperators::checkSchemaAndRegisterOp_(Options&& options) {
 
     const FunctionSchema& schema = options.schemaOrName_->right();
 
-    for (auto& kernel : options.kernels) {
-      if (nullptr != kernel.inferred_function_schema.get()) {
-        c10::optional<std::string> schema_difference = findSchemaDifferences(schema, *kernel.inferred_function_schema);
-        if (schema_difference.has_value()) {
-          TORCH_CHECK(false, "In operator registration: Specified function schema [", toString(schema), "] ",
-                   "doesn't match inferred function schema [", toString(*kernel.inferred_function_schema), "]. ",
-                   *schema_difference);
-        }
-      }
-    }
-
     checkNoDuplicateKernels_(options);
 
     registerOp_(std::move(options));
@@ -65,14 +54,7 @@ c10::FunctionSchema RegisterOperators::inferSchemaFromKernels_(const OperatorNam
   c10::optional<FunctionSchema> inferred_schema = c10::nullopt;
   for (const auto& kernel : options.kernels) {
     if (nullptr != kernel.inferred_function_schema.get()) {
-      if (inferred_schema.has_value()) {
-        c10::optional<std::string> schema_difference = findSchemaDifferences(*inferred_schema, *kernel.inferred_function_schema);
-        if (schema_difference.has_value()) {
-          TORCH_CHECK(false, "In operator registration: Tried to register kernels for same operator that infer a different function schema: [", toString(*inferred_schema), "] ",
-                   "doesn't match [", toString(*kernel.inferred_function_schema), "]. ",
-                   *schema_difference);
-        }
-      } else {
+      if (!inferred_schema.has_value()) {
         inferred_schema = *kernel.inferred_function_schema;
       }
     }
@@ -114,7 +96,7 @@ void RegisterOperators::registerOp_(Options&& options) {
 
   for (auto& kernel : options.kernels) {
     registrars_.emplace_back(
-      Dispatcher::singleton().registerImpl(op_name, kernel.dispatch_key, std::move(kernel.func))
+      Dispatcher::singleton().registerImpl(op_name, kernel.dispatch_key, std::move(kernel.func), std::move(kernel.inferred_function_schema))
     );
   }
 }
@@ -164,19 +146,8 @@ Module&& Module::def(const char* schema_str) && {
 Module&& Module::def(const char* name_or_schema_str, CppFunction&& f) && {
   auto name_or_schema = torch::jit::parseSchemaOrName(addNamespace(ns_, name_or_schema_str));
   FunctionSchema schema = [&] {
-    // TODO: schema matching shouldn't happen here
     if (name_or_schema.is_right()) {
-      // it's a schema
-      FunctionSchema schema = std::move(name_or_schema).right();
-      // check that the schemas match, if possible
-      if (f.schema_) {
-        auto diff = findSchemaDifferences(schema, *f.schema_);
-        TORCH_CHECK(!diff.has_value(),
-            "Module::def(): explicitly specified schema [", toString(schema),
-            "] doesn't match inferred schema [", toString(*f.schema_),
-            "]. ", *diff);
-      }
-      return schema;
+      return std::move(name_or_schema).right();
     } else {
       // it's a name; use the inferred schema
       TORCH_CHECK(f.schema_, "Module::def(): schema was not specified, and we "
@@ -189,14 +160,20 @@ Module&& Module::def(const char* name_or_schema_str, CppFunction&& f) && {
   OperatorName name = schema.operator_name();
   schema.setAliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA); // TODO: clean this up
   registrars_.emplace_back(Dispatcher::singleton().registerDef(std::move(schema)));
-  registrars_.emplace_back(Dispatcher::singleton().registerImpl(name, f.dispatch_key_, std::move(f.func_)));
+  registrars_.emplace_back(Dispatcher::singleton().registerImpl(name, f.dispatch_key_, std::move(f.func_), std::move(f.schema_)));
   return std::move(*this);
 }
 
 Module&& Module::impl(const char* name_str, CppFunction&& f) && {
   auto name = torch::jit::parseName(addNamespace(ns_, name_str));
-  // TODO: check that inferred schema matches real schema
-  registrars_.emplace_back(Dispatcher::singleton().registerImpl(name, f.dispatch_key_, std::move(f.func_)));
+  registrars_.emplace_back(Dispatcher::singleton().registerImpl(name, f.dispatch_key_, std::move(f.func_), std::move(f.schema_)));
+  return std::move(*this);
+}
+
+Module&& Module::fallback(CppFunction&& f) && {
+  TORCH_CHECK(!ns_, "Cannot define fallbacks from namespaces, use c10::import().fallback() instead");
+  TORCH_CHECK(f.dispatch_key_, "Fallback for catch all function not supported");
+  registrars_.emplace_back(Dispatcher::singleton().registerFallback(*f.dispatch_key_, std::move(f.func_)));
   return std::move(*this);
 }
 
