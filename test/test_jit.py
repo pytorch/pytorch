@@ -13310,7 +13310,7 @@ a")
 
         self.checkModule(Mod(), (torch.tensor(.5),))
 
-        # variable lenghth, modulelist
+        # variable length, modulelist
         class Mod2(Mod):
             def forward(self, x):
                 for val, mod in zip(range(int(x)), self.mods):
