@@ -879,8 +879,8 @@ Tensor infinitely_differentiable_gelu_backward(
   return cdf.addcmul_(self, pdf, kAlpha).mul_(grad);
 }
 
-Tensor kl_div_double_backward_grad_output(const Tensor & grad, const Tensor & input, const Tensor & target, int64_t reduction) {
-  auto result = kl_div_backward(grad, input, target, at::Reduction::None);
+Tensor kl_div_double_backward_grad_output(const Tensor & grad, const Tensor & input, const Tensor & target, int64_t reduction, bool log_target) {
+  auto result = kl_div_backward(grad, input, target, at::Reduction::None, log_target);
   if (reduction == at::Reduction::Mean) {
     return result.mean();
   } else if (reduction == at::Reduction::Sum) {
@@ -890,8 +890,7 @@ Tensor kl_div_double_backward_grad_output(const Tensor & grad, const Tensor & in
 }
 
 // Compute derivatives for targets.
-// Assume targets are given as probabilities (i.e. without taking the logarithm).
-Tensor kl_div_target_backward(Tensor grad_output, Tensor self, Tensor target, int64_t reduction) {
+Tensor kl_div_target_backward(Tensor grad_output, Tensor self, Tensor target, int64_t reduction, bool log_target) {
   if (reduction == at::Reduction::None) {
     return grad_output.mul(target.log().add_(1).sub_(self)).masked_fill_(target == 0, 0.);
   }

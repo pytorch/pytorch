@@ -44,7 +44,7 @@ void binary_cross_entropy_backward_out_kernel(Tensor& grad_input, const Tensor& 
 
 namespace at { namespace native {
 
-Tensor kl_div_backward_cuda(const Tensor& grad, const Tensor& input, const Tensor& target, int64_t reduction) {
+Tensor kl_div_backward_cuda(const Tensor& grad, const Tensor& input, const Tensor& target, int64_t reduction, bool log_target) {
   auto grad_input = at::empty_like(input);
   TensorIterator iter;
   iter.add_output(grad_input);
