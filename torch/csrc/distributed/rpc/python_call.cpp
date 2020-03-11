@@ -6,29 +6,27 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-PythonCall::PythonCall(
-    std::vector<char> pickledPayload,
-    std::vector<torch::Tensor> tensors)
-    : pickledPayload_(std::move(pickledPayload)),
-      tensors_(std::move(tensors)) {}
+PythonCall::PythonCall(SerializedPyObj&& serializedPyObj)
+    : serializedPyObj_(std::move(serializedPyObj)) {}
 
 Message PythonCall::toMessage() && {
+  auto payload = std::vector<char>(
+      serializedPyObj_.payload_.begin(), serializedPyObj_.payload_.end());
   return Message(
-      std::move(pickledPayload_),
-      std::move(tensors_),
+      std::move(payload),
+      std::move(serializedPyObj_.tensors_),
       MessageType::PYTHON_CALL);
 }
 
 std::unique_ptr<PythonCall> PythonCall::fromMessage(const Message& message) {
-  return std::make_unique<PythonCall>(message.payload(), message.tensors());
+  std::string payload(message.payload().begin(), message.payload().end());
+  std::vector<Tensor> tensors = message.tensors();
+  SerializedPyObj serializedPyObj(std::move(payload), std::move(tensors));
+  return std::make_unique<PythonCall>(std::move(serializedPyObj));
 }
 
-const std::vector<char>& PythonCall::pickledPayload() const {
-  return pickledPayload_;
-}
-
-const std::vector<torch::Tensor>& PythonCall::tensors() const {
-  return tensors_;
+const SerializedPyObj& PythonCall::serializedPyObj() const {
+  return serializedPyObj_;
 }
 
 } // namespace rpc
