@@ -2427,9 +2427,8 @@ class TestDistributions(TestCase):
 
         def ref_log_prob(idx, val, log_prob):
             prob = p[idx]
-            if prob > 0.499 and prob < 0.501: # using default value of lim here
-                log_norm_const = math.log(2.) + 4. / 3. * math.pow(prob - 0.5, 2) +\
-                                 104. / 45. * math.pow(prob - 0.5, 4)
+            if prob > 0.499 and prob < 0.501:  # using default value of lim here
+                log_norm_const = math.log(2.) + 4. / 3. * math.pow(prob - 0.5, 2) + 104. / 45. * math.pow(prob - 0.5, 4)
             else:
                 log_norm_const = math.log(2. * math.atanh(1. - 2. * prob) / (1. - 2.0 * prob))
             res = val * math.log(prob) + (1. - val) * math.log1p(-prob) + log_norm_const
@@ -3881,9 +3880,9 @@ class TestNumericalStability(TestCase):
             if logits is not None:
                 probs = 1. / (1. + math.exp(-logits))
             bern_log_lik = x * math.log(probs) + (1. - x) * math.log1p(-probs)
-            if probs < 0.499 or probs > 0.501: # using default values of lims here
-                log_norm_const = math.log(math.fabs(math.atanh(1. - 2. * probs))) \
-                                 - math.log(math.fabs(1. - 2. * probs)) + math.log(2.)
+            if probs < 0.499 or probs > 0.501:  # using default values of lims here
+                log_norm_const = math.log(
+                    math.fabs(math.atanh(1. - 2. * probs))) - math.log(math.fabs(1. - 2. * probs)) + math.log(2.)
             else:
                 aux = math.pow(probs - 0.5, 2)
                 log_norm_const = math.log(2.0) + (4.0 / 3.0 + 104.0 / 45.0 * aux) * aux
@@ -3895,9 +3894,9 @@ class TestNumericalStability(TestCase):
             if logits is not None:
                 probs = 1. / (1. + math.exp(-logits))
             grad_bern_log_lik = x / probs - (1. - x) / (1. - probs)
-            if probs < 0.499 or probs > 0.501: # using default values of lims here
-                grad_log_c = (2. * probs - 4. * (probs - 1.) * probs * math.atanh(1. - 2. * probs) - 1.)\
-                             / (2. * (probs - 1.) * probs * (2. * probs - 1.) * math.atanh(1. - 2. * probs))
+            if probs < 0.499 or probs > 0.501:  # using default values of lims here
+                grad_log_c = (2. * probs - 4. * (probs - 1.) * probs * math.atanh(1. - 2. * probs) - 1.) / (
+                        2. * (probs - 1.) * probs * (2. * probs - 1.) * math.atanh(1. - 2. * probs))
             else:
                 grad_log_c = 8. / 3. * (probs - 0.5) + 416. / 45. * math.pow(probs - 0.5, 3)
             grad = grad_bern_log_lik + grad_log_c
@@ -3934,8 +3933,8 @@ class TestNumericalStability(TestCase):
             self._test_pdf_score(dist_class=ContinuousBernoulli,
                                  probs=tensor_type([1 - 1e-4]),
                                  x=tensor_type([0.1]),
-                                 expected_value=tensor_type([expec_val(0.1, probs=1-1e-4)]),
-                                 expected_gradient=tensor_type([expec_grad(0.1, probs=1-1e-4)]),
+                                 expected_value=tensor_type([expec_val(0.1, probs=1 - 1e-4)]),
+                                 expected_gradient=tensor_type([expec_grad(0.1, probs=1 - 1e-4)]),
                                  prec=2)
 
             self._test_pdf_score(dist_class=ContinuousBernoulli,

@@ -97,10 +97,10 @@ class ContinuousBernoulli(ExponentialFamily):
         cut_probs_above_half = torch.where(torch.ge(cut_probs, 0.5),
                                            cut_probs,
                                            torch.ones_like(cut_probs))
-        log_norm = torch.log(torch.abs(torch.log1p(-cut_probs) - torch.log(cut_probs)))\
-                   - torch.where(torch.le(cut_probs, 0.5),
-                                 torch.log1p(-2.0 * cut_probs_below_half),
-                                 torch.log(2.0 * cut_probs_above_half - 1.0))
+        log_norm = torch.log(torch.abs(torch.log1p(-cut_probs) - torch.log(cut_probs))) - torch.where(
+            torch.le(cut_probs, 0.5),
+            torch.log1p(-2.0 * cut_probs_below_half),
+            torch.log(2.0 * cut_probs_above_half - 1.0))
         x = torch.pow(self.probs - 0.5, 2)
         taylor = math.log(2.0) + (4.0 / 3.0 + 104.0 / 45.0 * x) * x
         return torch.where(self._outside_unstable_region(), log_norm, taylor)
@@ -108,8 +108,7 @@ class ContinuousBernoulli(ExponentialFamily):
     @property
     def mean(self):
         cut_probs = self._cut_probs()
-        mus = cut_probs / (2.0 * cut_probs - 1.0)\
-              + 1.0 / (torch.log1p(-cut_probs) - torch.log(cut_probs))
+        mus = cut_probs / (2.0 * cut_probs - 1.0) + 1.0 / (torch.log1p(-cut_probs) - torch.log(cut_probs))
         x = self.probs - 0.5
         taylor = 0.5 + (1.0 / 3.0 + 16.0 / 45.0 * torch.pow(x, 2)) * x
         return torch.where(self._outside_unstable_region(), mus, taylor)
@@ -121,8 +120,8 @@ class ContinuousBernoulli(ExponentialFamily):
     @property
     def variance(self):
         cut_probs = self._cut_probs()
-        vars = cut_probs * (cut_probs - 1.0) / torch.pow(1.0 - 2.0 * cut_probs, 2)\
-               + 1.0 / torch.pow(torch.log1p(-cut_probs) - torch.log(cut_probs), 2)
+        vars = cut_probs * (cut_probs - 1.0) / torch.pow(1.0 - 2.0 * cut_probs, 2) + 1.0 / torch.pow(
+            torch.log1p(-cut_probs) - torch.log(cut_probs), 2)
         x = torch.pow(self.probs - 0.5, 2)
         taylor = 1.0 / 12.0 - (1.0 / 15.0 - 128. / 945.0 * x) * x
         return torch.where(self._outside_unstable_region(), vars, taylor)
@@ -154,8 +153,7 @@ class ContinuousBernoulli(ExponentialFamily):
         if self._validate_args:
             self._validate_sample(value)
         logits, value = broadcast_all(self.logits, value)
-        return -binary_cross_entropy_with_logits(logits, value, reduction='none')\
-               + self._cont_bern_log_norm()
+        return -binary_cross_entropy_with_logits(logits, value, reduction='none') + self._cont_bern_log_norm()
 
     def cdf(self, value):
         if self._validate_args:
@@ -182,8 +180,7 @@ class ContinuousBernoulli(ExponentialFamily):
     def entropy(self):
         log_probs0 = torch.log1p(-self.probs)
         log_probs1 = torch.log(self.probs)
-        return self.mean * (log_probs0 - log_probs1) \
-               - self._cont_bern_log_norm() - log_probs0
+        return self.mean * (log_probs0 - log_probs1) - self._cont_bern_log_norm() - log_probs0
 
     @property
     def _natural_params(self):
@@ -196,7 +193,6 @@ class ContinuousBernoulli(ExponentialFamily):
         cut_nat_params = torch.where(out_unst_reg,
                                      x,
                                      (self._lims[0] - 0.5) * torch.ones_like(x))
-        log_norm = torch.log(torch.abs(torch.exp(cut_nat_params) - 1.0))\
-                   - torch.log(torch.abs(cut_nat_params))
+        log_norm = torch.log(torch.abs(torch.exp(cut_nat_params) - 1.0)) - torch.log(torch.abs(cut_nat_params))
         taylor = 0.5 * x + torch.pow(x, 2) / 24.0 - torch.pow(x, 4) / 2880.0
         return torch.where(out_unst_reg, log_norm, taylor)
