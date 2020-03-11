@@ -13754,7 +13754,7 @@ class TestTorchDeviceType(TestCase):
 
             # classical eigenvalue problem, smallest eigenvalues
             E, V = lobpcg(A, k=k, n=n, largest=False)
-            self.assertEqual(E, e_smallest)            
+            self.assertEqual(E, e_smallest)
             self.assertEqual(matmul(A, V), mm(V, E.diag_embed()), prec=prec)
 
             # classical eigenvalue problem, largest eigenvalues
@@ -14134,9 +14134,10 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
     @onlyCPU
     @dtypes(torch.float, torch.double)
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_hardsigmoid(self, device, dtype):
         inputValues = [-1000, -4, -3, -2, 0, 2, 3, 4, 1000]
-        expectedOutput = [0.0, 0.0, 0.0, 0.1667, 0.5, 0.8333, 1.0, 1.0, 1.0]
+        expectedOutput = np.minimum(np.maximum((np.add(inputValues, 3)), 0), 6) / 6.0
 
         inputTensor = torch.tensor(inputValues, dtype=dtype, device=device)
         precision_4dps = 0.0002

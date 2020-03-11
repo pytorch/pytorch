@@ -320,31 +320,18 @@ void hardsigmoid_kernel(TensorIterator& iter) {
     const scalar_t three(3.0f);
     const scalar_t six(6.0f);
     using Vec = vec256::Vec256<scalar_t>;
-    const Vec kZeroVec(0);
-    const Vec kThreeVec(3);
-    const Vec kSixVec(6);
+    const Vec kZeroVec(zero);
+    const Vec kThreeVec(three);
+    const Vec kSixVec(six);
     cpu_kernel_vec(
         iter,
         [&](scalar_t self_val) {
-          scalar_t val_plus_three = self_val + three;
-          scalar_t val_plus_three_gt_zero = val_plus_three > zero
-            ? val_plus_three
-            : zero;
-          return (
-            val_plus_three_gt_zero < six ? val_plus_three_gt_zero : six
-          ) / six;
+          return std::min(std::max(self_val + three, zero), six) / six;
         },
         [&](Vec self_val) {
-          const Vec valPlusThree = self_val + kThreeVec;
-          const Vec valPlusThreeGTZero = Vec::blendv(
-            kZeroVec,
-            valPlusThree,
-            valPlusThree > kZeroVec
-          );
-          return Vec::blendv(
-            valPlusThreeGTZero,
-            kSixVec,
-            valPlusThreeGTZero > kSixVec
+          return vec256::minimum(
+            vec256::maximum(self_val + kThreeVec, kZeroVec),
+            kSixVec
           ) / kSixVec;
         });
   });
