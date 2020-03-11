@@ -561,7 +561,6 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
 
   if (USE_CUDA)
     list(APPEND Caffe2_GPU_SRCS
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/interface.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/parser.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/partition.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/kernel.cpp
@@ -583,7 +582,6 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
 
   if (USE_ROCM)
     list(APPEND Caffe2_HIP_SRCS
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/interface.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/parser.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/partition.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/kernel.cpp

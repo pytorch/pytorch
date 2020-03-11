@@ -48,7 +48,7 @@ static bool isFusibleDevice(const Node* node) {
 }
 
 // TODO: fusible_ops should be a registry unordered_map<Node,Expr>
-static OperatorSet fusible_ops{{
+static OperatorSet fusible_ops = {
     "aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
     "aten::add(Tensor self, Scalar other, Scalar alpha) -> Tensor",
     "aten::sub(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
@@ -57,11 +57,11 @@ static OperatorSet fusible_ops{{
     "aten::div(Tensor self, Scalar other) -> Tensor",
     "aten::mul(Tensor self, Tensor other) -> Tensor",
     "aten::mul(Tensor self, Scalar other) -> Tensor"
-}};
+};
 
 inline bool isFusibleNode(const Node* const node)  {
   // TODO: update code base so we can use `node->is_MemberOf(fusible_ops)`
-  return ((fusible_ops.find(node)) || node->kind() == prim::FusionGroup);
+  return ((node->isMemberOf(fusible_ops)) || node->kind() == prim::FusionGroup);
 }
 
 } // namespace
