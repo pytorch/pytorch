@@ -150,6 +150,11 @@ test_python_ge_config_legacy() {
   assert_git_not_dirty
 }
 
+test_python_ge_config_bailouts() {
+  time python test_jit_bailouts.py --verbose
+  assert_git_not_dirty
+}
+
 test_python_all_except_nn() {
   time python test/run_test.py --exclude test_nn test_jit_simple test_jit_legacy test_jit_fuser_legacy --verbose --bring-to-front test_quantization test_quantized test_quantized_tensor test_quantized_nn_mods --determine-from="$DETERMINE_FROM"
   assert_git_not_dirty
@@ -283,4 +288,7 @@ else
   test_aten
   test_libtorch
   test_custom_script_ops
+  if [[ "${BUILD_ENVIRONMENT}" == *pynightly_test* ]]; then
+    test_python_ge_config_bailouts
+  fi
 fi
