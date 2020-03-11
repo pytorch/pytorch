@@ -26,10 +26,11 @@ namespace {
   }
 }
 
-OperatorEntry::OperatorEntry(FunctionSchema&& schema)
+OperatorEntry::OperatorEntry(FunctionSchema&& schema, OperatorOptions&& options)
 : schema_(std::move(schema))
 , dispatchTable_(schema_)
-, kernels_() {
+, kernels_()
+, options_(std::move(options)) {
 }
 
 void OperatorEntry::prepareForDeregistration() {

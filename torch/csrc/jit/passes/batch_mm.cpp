@@ -17,8 +17,10 @@ namespace torch {
 namespace jit {
 
 namespace {
-c10::AliasAnalysisKind aliasAnalysisIsSpecialCase() {
-  return AliasAnalysisKind::INTERNAL_SPECIAL_CASE;
+c10::OperatorOptions aliasAnalysisIsSpecialCase() {
+  c10::OperatorOptions options;
+  options.setAliasAnalysis(AliasAnalysisKind::INTERNAL_SPECIAL_CASE);
+  return options;
 }
 } // namespace
 

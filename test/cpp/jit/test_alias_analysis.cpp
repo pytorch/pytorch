@@ -9,8 +9,10 @@
 namespace torch {
 namespace jit {
 
-inline c10::AliasAnalysisKind aliasAnalysisFromSchema() {
-  return c10::AliasAnalysisKind::FROM_SCHEMA;
+inline c10::OperatorOptions aliasAnalysisFromSchema() {
+  c10::OperatorOptions result;
+  result.setAliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA);
+  return result;
 }
 
 // Fixture to set up a graph and make assertions clearer

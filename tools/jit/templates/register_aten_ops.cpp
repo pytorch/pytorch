@@ -80,8 +80,10 @@ std::array<bool, N> as_bool_array(const c10::List<bool>& list) {
   return res;
 }
 
-c10::AliasAnalysisKind atenOperatorOptions() {
-  return c10::AliasAnalysisKind::FROM_SCHEMA;
+c10::OperatorOptions atenOperatorOptions() {
+  c10::OperatorOptions result;
+  result.setAliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA);
+  return result;
 }
 
 int (*DUMMY_OPERATION)(Stack&) = [](Stack& stack) -> int {
