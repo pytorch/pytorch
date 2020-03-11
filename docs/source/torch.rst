@@ -250,6 +250,7 @@ Pointwise Ops
 .. autofunction:: square
 .. autofunction:: tan
 .. autofunction:: tanh
+.. autofunction:: true_divide
 .. autofunction:: trunc
 
 
@@ -376,9 +377,13 @@ BLAS and LAPACK Operations
 .. autofunction:: qr
 .. autofunction:: solve
 .. autofunction:: svd
+.. autofunction:: svd_lowrank
+.. autofunction:: pca_lowrank
 .. autofunction:: symeig
+.. autofunction:: lobpcg
 .. autofunction:: trapz
 .. autofunction:: triangular_solve
+
 
 Utilities
 ----------------------------------
