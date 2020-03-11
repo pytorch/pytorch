@@ -41,15 +41,15 @@ void test_overflow() {
   ASSERT_EQ(s1.toFloat(), 100000.0);
   ASSERT_EQ(s1.toInt(), 100000);
 
-  ASSERT_THROW(s1.toHalf(), std::domain_error);
+  ASSERT_THROW(s1.toHalf(), std::runtime_error);
 
   s1 = Scalar(NAN);
   ASSERT_TRUE(std::isnan(s1.toFloat()));
-  ASSERT_THROW(s1.toInt(), std::domain_error);
+  ASSERT_THROW(s1.toInt(), std::runtime_error);
 
   s1 = Scalar(INFINITY);
   ASSERT_TRUE(std::isinf(s1.toFloat()));
-  ASSERT_THROW(s1.toInt(), std::domain_error);
+  ASSERT_THROW(s1.toInt(), std::runtime_error);
 }
 
 TEST(TestScalar, TestScalar) {
