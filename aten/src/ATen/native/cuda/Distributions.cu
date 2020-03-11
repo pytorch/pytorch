@@ -85,7 +85,7 @@ void binomial_cuda_kernel(
           seeds.second,
           &state);
 
-      auto uniform_lambda = [&state] __device__ () {
+      auto uniform_lambda = [&state] GPU_LAMBDA () {
         return curand_uniform(&state);
       };
       BaseSampler<accscalar_t, decltype(uniform_lambda)> standard_uniform(uniform_lambda);
