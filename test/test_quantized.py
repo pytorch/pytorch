@@ -19,6 +19,12 @@ from torch.testing._internal.common_utils import TEST_WITH_UBSAN, TestCase, run_
 from torch.testing._internal.common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams, \
     override_quantized_engine
 
+np_dtype = {
+    torch.quint8 : np.uint8,
+    torch.qint8 : np.int8,
+    torch.qint32 : np.int32
+}
+
 # Make sure we won't have overflows from vpmaddubsw instruction used in FBGEMM.
 # On the current Intel x86 architecture, we need to utilize vpmaddubsw instruction
 # for the 8-bit int multiplication. This instruction vertically multiplies each
@@ -252,6 +258,44 @@ class TestQuantizedOps(TestCase):
             qY_hat = op(qX, min_val, max_val)
             self.assertEqual(qY, qY_hat, message="{} qclamp failed".format(name))
 
+    """Tests the correctness of the quantized::hardtanh op."""
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 8, 1, 8),
+                       elements=hu.floats(-1e6, 1e6, allow_nan=False, allow_infinity=False),
+                       qparams=hu.qparams()),
+           min_val=hu.floats(-1e6, 1e6, allow_nan=False, allow_infinity=False),
+           max_val=hu.floats(-1e6, 1e6, allow_nan=False, allow_infinity=False))
+    def test_hardtanh(self, X, min_val, max_val):
+        X, (scale, zero_point, torch_type) = X
+
+        assume(min_val <= max_val)
+        Y = X.copy()
+        Y[Y < min_val] = min_val
+        Y[Y > max_val] = max_val
+        qY = torch.quantize_per_tensor(torch.from_numpy(Y), scale=scale,
+                                       zero_point=zero_point, dtype=torch_type)
+        X = torch.from_numpy(X)
+        qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
+                                       dtype=torch_type)
+
+        ops_under_test = {
+            'nn.quantized.functional.hardtanh':
+                torch.nn.quantized.functional.hardtanh,
+        }
+
+        for name, op in ops_under_test.items():
+            qY_hat = op(qX, min_val, max_val)
+            self.assertEqual(qY, qY_hat, message="{} hardtanh failed".format(name))
+
+        ops_under_test_inplace = {
+            'inplace nn.quantized.functional.hardtanh':
+                torch.nn.quantized.functional.hardtanh,
+        }
+
+        for name, op_ in ops_under_test_inplace.items():
+            qY_hat = qX.clone()
+            op_(qY_hat, min_val, max_val, inplace=True)
+            self.assertEqual(qY, qY_hat, message="{} hardtanh failed".format(name))
+
     """Tests the correctness of the scalar addition."""
     @given(A=hu.tensor(shapes=hu.array_shapes(1, 4, 1, 5),
                        elements=hu.floats(-1e6, 1e6, allow_nan=False),
@@ -305,11 +349,6 @@ class TestQuantizedOps(TestCase):
 
             # Add ReLU ground truth
             C = (qA.dequantize() + qB.dequantize()).numpy()
-            np_dtype = {
-                torch.quint8 : np.uint8,
-                torch.qint8 : np.int8,
-                torch.qint32 : np.int32
-            }
             qC = _quantize(C, scale, zero_point, dtype=np_dtype[dtype])
             qC_hat = add(qA, qB, scale=scale, zero_point=zero_point)
             np.testing.assert_equal(qC, qC_hat.int_repr(),
@@ -365,11 +404,6 @@ class TestQuantizedOps(TestCase):
 
             # Add ground truth
             C = (qA.dequantize() + qB.dequantize()).numpy()
-            np_dtype = {
-                torch.quint8 : np.uint8,
-                torch.qint8 : np.int8,
-                torch.qint32 : np.int32
-            }
             qC = _quantize(C, scale_C, zero_point_C, dtype=np_dtype[dtype])
             qC_hat = add(qA, qB, scale=scale_C, zero_point=zero_point_C)
             np.testing.assert_equal(qC, qC_hat.int_repr(),
@@ -398,112 +432,114 @@ class TestQuantizedOps(TestCase):
 
     """Tests the correctness of the mul and mul_relu op."""
     def test_qmul_relu_same_qparams(self):
-        mul_relu = torch.ops.quantized.mul_relu
-        mul = torch.ops.quantized.mul
-        mul_out = torch.ops.quantized.mul_out
-        mul_relu_out = torch.ops.quantized.mul_relu_out
+        for dtype in [torch.quint8, torch.qint8, torch.qint32]:
+            mul_relu = torch.ops.quantized.mul_relu
+            mul = torch.ops.quantized.mul
+            mul_out = torch.ops.quantized.mul_out
+            mul_relu_out = torch.ops.quantized.mul_relu_out
 
-        A = torch.arange(-25, 25, dtype=torch.float)
-        B = torch.arange(-25, 25, dtype=torch.float)
-        scale = 2.0
-        zero_point = 127
-        qA = torch.quantize_per_tensor(A, scale=scale, zero_point=zero_point,
-                                       dtype=torch.quint8)
-        qB = torch.quantize_per_tensor(B, scale=scale, zero_point=zero_point,
-                                       dtype=torch.quint8)
+            A = torch.arange(-100, 100, dtype=torch.float)
+            B = torch.arange(-100, 100, dtype=torch.float)
+            scale = 2.0
+            zero_point = 127
+            qA = torch.quantize_per_tensor(A, scale=scale, zero_point=zero_point,
+                                           dtype=dtype)
+            qB = torch.quantize_per_tensor(B, scale=scale, zero_point=zero_point,
+                                           dtype=dtype)
 
-        # mul ReLU ground truth
-        C = (qA.dequantize() * qB.dequantize()).numpy()
-        qC = _quantize(C, scale, zero_point)
-        qC_hat = mul(qA, qB, scale=scale, zero_point=zero_point)
-        np.testing.assert_equal(qC, qC_hat.int_repr(),
-                                "Quantized mulition failed.")
-        qC_out_hat = torch._empty_affine_quantized(qC.shape,
-                                                   scale=scale,
-                                                   zero_point=zero_point,
-                                                   dtype=torch.quint8)
-        mul_out(qA, qB, out=qC_out_hat)
-        self.assertEqual(qC_hat, qC_out_hat, message="mul.out failed")
-
-        # mul + ReLU ground truth
-        Crelu = C.copy()
-        Crelu[C < 0] = 0
-        qCrelu = _quantize(Crelu, scale, zero_point)
-        qCrelu_hat = mul_relu(qA, qB, scale=scale, zero_point=zero_point)
-        np.testing.assert_equal(qCrelu, qCrelu_hat.int_repr(),
-                                "Quantized mulition with ReLU failed.")
-        qCrelu_out_hat = torch._empty_affine_quantized(qCrelu.shape,
+            # mul ReLU ground truth
+            C = (qA.dequantize() * qB.dequantize()).numpy()
+            qC = _quantize(C, scale, zero_point, dtype=np_dtype[dtype])
+            qC_hat = mul(qA, qB, scale=scale, zero_point=zero_point)
+            np.testing.assert_equal(qC, qC_hat.int_repr(),
+                                    "Quantized mulition failed.")
+            qC_out_hat = torch._empty_affine_quantized(qC.shape,
                                                        scale=scale,
                                                        zero_point=zero_point,
-                                                       dtype=torch.quint8)
-        mul_relu_out(qA, qB, out=qCrelu_out_hat)
-        self.assertEqual(qCrelu_hat, qCrelu_out_hat,
-                         message="mulReLU.out failed")
+                                                       dtype=dtype)
+            mul_out(qA, qB, out=qC_out_hat)
+            self.assertEqual(qC_hat, qC_out_hat, message="mul.out failed")
 
-        # Scalar multiplication
-        for b in B:
-            C_ref = qA.dequantize().numpy() * b.item()
-            qC_hat = torch.ops.quantized.mul_scalar(qA, b.item())
+            # mul + ReLU ground truth
+            Crelu = C.copy()
+            Crelu[C < 0] = 0
+            qCrelu = _quantize(Crelu, scale, zero_point, dtype=np_dtype[dtype])
+            qCrelu_hat = mul_relu(qA, qB, scale=scale, zero_point=zero_point)
+            np.testing.assert_equal(qCrelu, qCrelu_hat.int_repr(),
+                                    "Quantized mulition with ReLU failed.")
+            qCrelu_out_hat = torch._empty_affine_quantized(qCrelu.shape,
+                                                           scale=scale,
+                                                           zero_point=zero_point,
+                                                           dtype=dtype)
+            mul_relu_out(qA, qB, out=qCrelu_out_hat)
+            self.assertEqual(qCrelu_hat, qCrelu_out_hat,
+                             message="mulReLU.out failed")
 
-            self.assertEqual(C_ref, qC_hat.dequantize())
+            # Scalar multiplication
+            for b in B:
+                C_ref = qA.dequantize().numpy() * b.item()
+                qC_hat = torch.ops.quantized.mul_scalar(qA, b.item())
 
-        # Scalar multiplication + relu
-        for b in B:
-            C_ref = qA.dequantize().numpy() * b.item()
-            C_ref[C_ref < 0] = 0
-            qC_hat = torch.ops.quantized.mul_scalar_relu(qA, b.item())
+                self.assertEqual(C_ref, qC_hat.dequantize())
 
-            self.assertEqual(C_ref, qC_hat.dequantize())
+            # Scalar multiplication + relu
+            for b in B:
+                C_ref = qA.dequantize().numpy() * b.item()
+                C_ref[C_ref < 0] = 0
+                qC_hat = torch.ops.quantized.mul_scalar_relu(qA, b.item())
+
+                self.assertEqual(C_ref, qC_hat.dequantize())
 
     """Tests the correctness of the mul and mul_relu op."""
     def test_qmul_relu_different_qparams(self):
-        mul_relu = torch.ops.quantized.mul_relu
-        mul = torch.ops.quantized.mul
-        mul_out = torch.ops.quantized.mul_out
-        mul_relu_out = torch.ops.quantized.mul_relu_out
+        for dtype in [torch.quint8, torch.qint8, torch.qint32]:
+            mul_relu = torch.ops.quantized.mul_relu
+            mul = torch.ops.quantized.mul
+            mul_out = torch.ops.quantized.mul_out
+            mul_relu_out = torch.ops.quantized.mul_relu_out
 
-        A = torch.arange(-25, 25, dtype=torch.float)
-        B = torch.arange(-25, 25, dtype=torch.float)
-        scale_A = 3.0
-        zero_point_A = 7
-        scale_B = 5.0
-        zero_point_B = 127
+            A = torch.arange(-100, 100, dtype=torch.float)
+            B = torch.arange(-100, 100, dtype=torch.float)
+            scale_A = 3.0
+            zero_point_A = 7
+            scale_B = 5.0
+            zero_point_B = 127
 
-        scale_C = 0.5
-        zero_point_C = 5
+            scale_C = 0.5
+            zero_point_C = 5
 
-        qA = torch.quantize_per_tensor(A, scale=scale_A, zero_point=zero_point_A,
-                                       dtype=torch.quint8)
-        qB = torch.quantize_per_tensor(B, scale=scale_B, zero_point=zero_point_B,
-                                       dtype=torch.quint8)
+            qA = torch.quantize_per_tensor(A, scale=scale_A, zero_point=zero_point_A,
+                                           dtype=dtype)
+            qB = torch.quantize_per_tensor(B, scale=scale_B, zero_point=zero_point_B,
+                                           dtype=dtype)
 
-        # mul ground truth
-        C = (qA.dequantize() * qB.dequantize()).numpy()
-        qC = _quantize(C, scale_C, zero_point_C)
-        qC_hat = mul(qA, qB, scale=scale_C, zero_point=zero_point_C)
-        np.testing.assert_equal(qC, qC_hat.int_repr(),
-                                "Quantized multiplication failed.")
-        qC_out_hat = torch._empty_affine_quantized(qC.shape,
-                                                   scale=scale_C,
-                                                   zero_point=zero_point_C,
-                                                   dtype=torch.quint8)
-        mul_out(qA, qB, out=qC_out_hat)
-        self.assertEqual(qC_hat, qC_out_hat, message="mul.out failed")
-
-        # mul + ReLU ground truth
-        Crelu = C.copy()
-        Crelu[C < 0] = 0
-        qCrelu = _quantize(Crelu, scale_C, zero_point_C)
-        qCrelu_hat = mul_relu(qA, qB, scale=scale_C, zero_point=zero_point_C)
-        np.testing.assert_equal(qCrelu, qCrelu_hat.int_repr(),
-                                "Quantized multiplication with ReLU failed.")
-        qCrelu_out_hat = torch._empty_affine_quantized(qCrelu.shape,
+            # mul ground truth
+            C = (qA.dequantize() * qB.dequantize()).numpy()
+            qC = _quantize(C, scale_C, zero_point_C, dtype=np_dtype[dtype])
+            qC_hat = mul(qA, qB, scale=scale_C, zero_point=zero_point_C)
+            np.testing.assert_equal(qC, qC_hat.int_repr(),
+                                    "Quantized multiplication failed.")
+            qC_out_hat = torch._empty_affine_quantized(qC.shape,
                                                        scale=scale_C,
                                                        zero_point=zero_point_C,
-                                                       dtype=torch.quint8)
-        mul_relu_out(qA, qB, out=qCrelu_out_hat)
-        self.assertEqual(qCrelu_hat, qCrelu_out_hat,
-                         message="mulReLU.out failed")
+                                                       dtype=dtype)
+            mul_out(qA, qB, out=qC_out_hat)
+            self.assertEqual(qC_hat, qC_out_hat, message="mul.out failed")
+
+            # mul + ReLU ground truth
+            Crelu = C.copy()
+            Crelu[C < 0] = 0
+            qCrelu = _quantize(Crelu, scale_C, zero_point_C, dtype=np_dtype[dtype])
+            qCrelu_hat = mul_relu(qA, qB, scale=scale_C, zero_point=zero_point_C)
+            np.testing.assert_equal(qCrelu, qCrelu_hat.int_repr(),
+                                    "Quantized multiplication with ReLU failed.")
+            qCrelu_out_hat = torch._empty_affine_quantized(qCrelu.shape,
+                                                           scale=scale_C,
+                                                           zero_point=zero_point_C,
+                                                           dtype=dtype)
+            mul_relu_out(qA, qB, out=qCrelu_out_hat)
+            self.assertEqual(qCrelu_hat, qCrelu_out_hat,
+                             message="mulReLU.out failed")
 
     """Tests the correctness of the mul and mul_relu op."""
     def test_qmul_broadcast(self):
