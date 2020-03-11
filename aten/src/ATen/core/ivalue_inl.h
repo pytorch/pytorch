@@ -10,6 +10,7 @@
 #include <c10/core/UndefinedTensorImpl.h>
 #include <ATen/core/Dict.h>
 #include <ATen/core/List.h>
+#include <ATen/core/rref_interface.h>
 
 namespace torch {
 namespace jit {
@@ -58,6 +59,11 @@ intrusive_ptr<T> static_intrusive_pointer_cast(intrusive_ptr<U> r) {
   return intrusive_ptr<T>::reclaim(static_cast<T*>(r.release()));
 }
 
+template<class T, class U>
+intrusive_ptr<T> dynamic_intrusive_pointer_cast(intrusive_ptr<U> r) {
+  return intrusive_ptr<T>::reclaim(dynamic_cast<T*>(r.release()));
+}
+
 inline c10::intrusive_ptr<ivalue::Future> IValue::toFuture() && {
   AT_ASSERT(isFuture(), "Expected Future but got ", tagKind());
   return moveToIntrusivePtr<ivalue::Future>();
@@ -65,6 +71,14 @@ inline c10::intrusive_ptr<ivalue::Future> IValue::toFuture() && {
 inline c10::intrusive_ptr<ivalue::Future> IValue::toFuture() const & {
   AT_ASSERT(isFuture(), "Expected Future but got ", tagKind());
   return toIntrusivePtr<ivalue::Future>();
+}
+inline c10::intrusive_ptr<c10::RRefInterface> IValue::toRRef() && {
+  AT_ASSERT(isRRef(), "Expected RRef but got ", tagKind());
+  return moveToIntrusivePtr<c10::RRefInterface>();
+}
+inline c10::intrusive_ptr<c10::RRefInterface> IValue::toRRef() const & {
+  AT_ASSERT(isRRef(), "Expected RRef but got ", tagKind());
+  return toIntrusivePtr<c10::RRefInterface>();
 }
 inline c10::intrusive_ptr<ivalue::ConstantString> IValue::toString() && {
   AT_ASSERT(isString(), "Expected String but got ", tagKind());
@@ -238,31 +252,43 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     completed_ = true;
     value_ = std::move(value);
 
-    fireCallbacks();
+    std::vector<std::function<void(void)>> cbs;
+    cbs.swap(callbacks_);
+    lock.unlock();
+
     finished_cv_.notify_all();
+    for (auto& callback : cbs) {
+      callback();
+    }
   }
 
   void markCompleted() {
     markCompleted(IValue {});
   }
 
-  void markCompleted(FutureError&& error_) {
+  void markCompleted(FutureError&& error) {
     std::unique_lock<std::mutex> lock(mutex_);
     AT_ASSERT(!completed());
     completed_ = true;
-    has_error = true;
-    error = std::move(error_);
+    has_error_ = true;
+    error_ = std::move(error);
 
-    fireCallbacks();
+    std::vector<std::function<void(void)>> cbs;
+    cbs.swap(callbacks_);
+    lock.unlock();
+
     finished_cv_.notify_all();
+    for (auto& callback : cbs) {
+      callback();
+    }
   }
 
   // Get the result of the current future.
   IValue value() {
     std::unique_lock<std::mutex> lock(mutex_);
     AT_ASSERT(completed());
-    if (has_error) {
-      throw error;
+    if (has_error_) {
+      throw error_;
     }
     return value_;
   }
@@ -280,7 +306,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
       callback();
       return;
     }
-    callbacks.push_back(callback);
+    callbacks_.push_back(callback);
   }
 
   // Check if the current future has completed
@@ -297,25 +323,15 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   }
 
  private:
-  void fireCallbacks() {
-    AT_ASSERT(completed());
-    // There is no need to protect callbacks with the lock.
-    // Once completed_ is set to true, no one can add new callback to the list.
-    for (auto& callback : callbacks) {
-      callback();
-    }
-    callbacks.clear();
-  }
-
   std::mutex mutex_;
   std::atomic_bool completed_ = {false}; // is this future complete
   std::condition_variable finished_cv_;
 
   IValue value_; // when finished the value
   TypePtr type_;
-  std::vector<std::function<void(void)>> callbacks;
-  bool has_error = false;
-  FutureError error;
+  std::vector<std::function<void(void)>> callbacks_;
+  bool has_error_ = false;
+  FutureError error_;
 };
 
 // User-defined object.
@@ -346,11 +362,14 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
       // the slots to the right size
       resizeObject(slot);
     }
-    slots_[slot] = v;
+    slots_[slot] = std::move(v);
   }
 
   const IValue& getSlot(size_t slot) const {
-    return slots_.at(slot);
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(slot < slots_.size());
+    // NOTE: This lookup is fairly hot, so we use unchecked access to the
+    // vector.  Errors should still be detectable with ASan.
+    return slots_[slot];
   }
 
   void unsafeRemoveSlot(size_t slot) {
@@ -385,9 +404,7 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
   const std::vector<IValue>& slots() const {
     return slots_;
   }
-  std::shared_ptr<ClassType> type() const {
-    return type_.type_;
-  }
+  std::shared_ptr<ClassType> type() const;
 
   std::shared_ptr<torch::jit::script::CompilationUnit> compilation_unit() {
     return type_.cu_;
@@ -469,6 +486,7 @@ DEFINE_TO(c10::impl::GenericDict, toGenericDict)
 DEFINE_TO(c10::intrusive_ptr<ivalue::Tuple>, toTuple)
 DEFINE_TO(std::string, toStringRef)
 DEFINE_TO(c10::intrusive_ptr<ivalue::Future>, toFuture)
+DEFINE_TO(c10::intrusive_ptr<c10::RRefInterface>, toRRef)
 DEFINE_TO(IValue, toIValue)
 DEFINE_TO(c10::Device, toDevice)
 DEFINE_TO(at::ScalarType, toScalarType)
@@ -510,7 +528,7 @@ T generic_to(
     IValue ivalue,
     _fake_type<T>) {
     using ElemType = typename std::remove_pointer<T>::type::element_type;
-    auto obj = ivalue.toObject();
+    auto obj = std::move(ivalue).toObject();
     auto capsule = obj->getSlot(0);
     return c10::static_intrusive_pointer_cast<ElemType>(capsule.toCapsule());
 }
@@ -519,7 +537,7 @@ template <typename T>
 tagged_capsule<T> generic_to(
     IValue ivalue,
     _fake_type<tagged_capsule<T>>) {
-    return tagged_capsule<T>{ivalue};
+    return tagged_capsule<T>{std::move(ivalue)};
 }
 
 template <typename Elem>
@@ -767,6 +785,10 @@ inline IValue::IValue(c10::intrusive_ptr<ivalue::Future> v)
   payload.as_intrusive_ptr = v.release();
 }
 
+inline IValue::IValue(c10::intrusive_ptr<c10::RRefInterface> v)
+: tag(Tag::RRef), is_intrusive_ptr(true) {
+  payload.as_intrusive_ptr = v.release();
+}
 inline const std::string& IValue::toStringRef() const {
   return toString()->string();
 }
@@ -835,7 +857,7 @@ template<class T> struct has_constructor<
 
 template <typename T>
 IValue from_(T x, std::true_type) {
-  return IValue(x);
+  return IValue(std::move(x));
 }
 template <typename T>
 IValue from_(c10::intrusive_ptr<T> x, std::false_type) {
@@ -844,10 +866,14 @@ IValue from_(c10::intrusive_ptr<T> x, std::false_type) {
     throw c10::Error("Trying to return a class that we don't support and isn't a registered custom class.", "");
   }
   auto res = getCustomClassType<inputType>();
-  auto retObject = ivalue::Object::create(res, 1);
-  auto objPtr = c10::static_intrusive_pointer_cast<torch::jit::CustomClassHolder>(x);
+  auto retObject = ivalue::Object::create(
+    StrongTypePtr(
+      std::shared_ptr<torch::jit::script::CompilationUnit>(),
+      std::move(res)),
+    1);
+  auto objPtr = c10::static_intrusive_pointer_cast<torch::jit::CustomClassHolder>(std::move(x));
 
-  retObject->setSlot(0, IValue(objPtr));
+  retObject->setSlot(0, IValue(std::move(objPtr)));
   auto resIVal = IValue(std::move(retObject));
   return resIVal;
 }
@@ -860,7 +886,7 @@ IValue from_(T x, std::false_type) {
 
 template <typename T>
 IValue from(T x) {
-  return detail::from_(x, detail::has_constructor<T>{});
+  return detail::from_(std::move(x), detail::has_constructor<T>{});
 }
 
 }

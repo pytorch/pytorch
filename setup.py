@@ -181,7 +181,7 @@ import glob
 import importlib
 
 from tools.build_pytorch_libs import build_caffe2
-from tools.setup_helpers.env import (IS_WINDOWS, IS_DARWIN,
+from tools.setup_helpers.env import (IS_WINDOWS, IS_DARWIN, IS_LINUX,
                                      check_env_flag, build_type)
 from tools.setup_helpers.cmake import CMake
 
@@ -412,6 +412,12 @@ class build_ext(setuptools.command.build_ext.build_ext):
                 report('-- Building with distributed package ')
         else:
             report('-- Building without distributed package')
+
+        # Do not use clang to compile exensions if `-fstack-clash-protection` is defined
+        # in system CFLAGS
+        system_c_flags = distutils.sysconfig.get_config_var('CFLAGS')
+        if IS_LINUX and '-fstack-clash-protection' in system_c_flags and 'clang' in os.environ.get('CC', ''):
+            os.environ['CC'] = distutils.sysconfig.get_config_var('CC')
 
         # It's an old-style class in Python 2.7...
         setuptools.command.build_ext.build_ext.run(self)
@@ -784,6 +790,7 @@ if __name__ == '__main__':
                 'include/ATen/hip/impl/*.h',
                 'include/ATen/detail/*.h',
                 'include/ATen/native/*.h',
+                'include/ATen/native/cpu/*.h',
                 'include/ATen/native/quantized/*.h',
                 'include/ATen/native/quantized/cpu/*.h',
                 'include/caffe2/utils/*.h',
@@ -830,7 +837,12 @@ if __name__ == '__main__':
                 'include/torch/csrc/jit/generated/*.h',
                 'include/torch/csrc/jit/passes/*.h',
                 'include/torch/csrc/jit/passes/utils/*.h',
-                'include/torch/csrc/jit/script/*.h',
+                'include/torch/csrc/jit/runtime/*.h',
+                'include/torch/csrc/jit/ir/*.h',
+                'include/torch/csrc/jit/frontend/*.h',
+                'include/torch/csrc/jit/api/*.h',
+                'include/torch/csrc/jit/serialization/*.h',
+                'include/torch/csrc/jit/python/*.h',
                 'include/torch/csrc/jit/testing/*.h',
                 'include/torch/csrc/onnx/*.h',
                 'include/torch/csrc/utils/*.h',
@@ -846,8 +858,6 @@ if __name__ == '__main__':
                 'include/THH/*.cuh',
                 'include/THH/*.h*',
                 'include/THH/generic/*.h',
-                'include/THNN/*.h',
-                'include/THNN/generic/*.h',
                 'share/cmake/ATen/*.cmake',
                 'share/cmake/Caffe2/*.cmake',
                 'share/cmake/Caffe2/public/*.cmake',

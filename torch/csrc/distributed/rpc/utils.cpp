@@ -13,8 +13,8 @@
 #include <torch/csrc/distributed/rpc/script_call.h>
 #include <torch/csrc/distributed/rpc/script_remote_call.h>
 #include <torch/csrc/distributed/rpc/script_resp.h>
-#include <torch/csrc/jit/pickler.h>
-#include <torch/csrc/jit/unpickler.h>
+#include <torch/csrc/jit/serialization/pickler.h>
+#include <torch/csrc/jit/serialization/unpickler.h>
 
 namespace torch {
 namespace distributed {
@@ -331,6 +331,8 @@ std::pair<std::vector<char>, std::vector<at::Tensor>> wireDeserialize(
       return dptr;
     };
 
+    // No need to pass typeResolver here, as it always processes string and
+    // tensors only
     torch::jit::Unpickler unpickler(
         metaDataReadFunc, nullptr, nullptr, sectionReadFunc, {});
     auto ival = unpickler.parse_ivalue();

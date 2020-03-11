@@ -11,6 +11,7 @@ void THCTensor_(topk)(THCState* state,
                       int64_t k, int dim, int dir, int sorted) {
   THAssert(topK != NULL && indices != NULL && input_ != NULL);
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, topK, indices, input_));
+  dim = at::maybe_wrap_dim(dim, input_);
   THArgCheck(THCTensor_(nDimension)(state, topK) <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
   THArgCheck(THCudaLongTensor_nDimension(state, indices) <= MAX_CUTORCH_DIMS, 3, CUTORCH_DIM_WARNING);
   int numDims = THCTensor_(nDimensionLegacyNoScalars)(state, input_);
@@ -37,7 +38,7 @@ void THCTensor_(topk)(THCState* state,
 
 #define RUN_K(INDEX_T, DIM, DIR)                                        \
   gatherTopK<scalar_t, INDEX_T, DIM, DIR>                                   \
-    <<<grid, block, 0, THCState_getCurrentStream(state)>>>(             \
+    <<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(             \
       inputInfo,                                                        \
       static_cast<INDEX_T>(sliceSize),                                  \
       static_cast<INDEX_T>(k),                                          \

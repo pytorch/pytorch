@@ -2,29 +2,32 @@
 
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
 #include <torch/csrc/distributed/autograd/utils.h>
-#include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/rref_proto.h>
 #include <torch/csrc/distributed/rpc/utils.h>
-#include <torch/csrc/jit/pybind_utils.h>
+
+namespace {
+// If the type is subtype of named type, return its qualifiedname, otherwise
+// return its type str.
+std::string getTypeStr(const c10::TypePtr& type) {
+  switch (type->kind()) {
+    case c10::TypeKind::FunctionType:
+      return type->cast<c10::FunctionType>()->name()->qualifiedName();
+    case c10::TypeKind::TupleType:
+      return type->cast<c10::TupleType>()->name()->qualifiedName();
+    case c10::TypeKind::ClassType:
+      return type->cast<c10::ClassType>()->name()->qualifiedName();
+    case c10::TypeKind::InterfaceType:
+      return type->cast<c10::InterfaceType>()->name()->qualifiedName();
+    default:
+      return type->str();
+  }
+}
+} // namespace
 
 namespace torch {
 namespace distributed {
 namespace rpc {
-
-namespace {
-
-constexpr int OWNER_IDX = 0; // index of ownerId in the tuple
-constexpr int RREFID_ON_IDX = 1; // index of RRefId.createdOn_ in the tuple
-constexpr int RREFID_ID_IDX = 2; // index of RRefId.localId_ in the tuple
-constexpr int FORKID_ON_IDX = 3; // index of ForkId.createdOn_ in the tuple
-constexpr int FORKID_ID_IDX = 4; // index of ForkId.localId_ in the tuple
-constexpr int PARENT_IDX = 5; // index of parent in the tuple
-constexpr int TYPE_IDX = 6; // index of parent in the tuple
-
-// NB: if more fields are added, make sure this field is also bumped
-constexpr int RFD_TUPLE_SIZE = 7; // number of RRefForkData fields in py::tuple
-} // namespace
 
 std::atomic<local_id_t> RRefContext::nextLocalId_{0};
 
@@ -35,42 +38,12 @@ RRefForkData::RRefForkData(
     const RRefId& rrefId,
     const ForkId& forkId,
     worker_id_t parent,
-    std::string type_str)
+    std::string typeStr)
     : ownerId_(ownerId),
       rrefId_(rrefId),
       forkId_(forkId),
       parent_(parent),
-      type_str_(std::move(type_str)) {}
-
-py::tuple RRefForkData::toPyTuple() const {
-  return py::make_tuple(
-      ownerId_,
-      rrefId_.createdOn_,
-      rrefId_.localId_,
-      forkId_.createdOn_,
-      forkId_.localId_,
-      parent_,
-      type_str_);
-}
-
-RRefForkData RRefForkData::fromPyTuple(const py::tuple& t) {
-  TORCH_INTERNAL_ASSERT(
-      t.size() == RFD_TUPLE_SIZE,
-      "Pickled RRefForkData must contain 6 numbers.");
-  worker_id_t ownerId = t[OWNER_IDX].cast<worker_id_t>();
-  // const reference will extend the lifetime of the temporary variable
-  const RRefId& rrefId = RRefId(
-      t[RREFID_ON_IDX].cast<worker_id_t>(),
-      t[RREFID_ID_IDX].cast<local_id_t>());
-  const RRefId& forkId = RRefId(
-      t[FORKID_ON_IDX].cast<worker_id_t>(),
-      t[FORKID_ID_IDX].cast<local_id_t>());
-
-  worker_id_t parent = t[PARENT_IDX].cast<worker_id_t>();
-  const std::string& typeStr = t[TYPE_IDX].cast<std::string>();
-
-  return RRefForkData(ownerId, rrefId, forkId, parent, typeStr);
-}
+      typeStr_(std::move(typeStr)) {}
 
 //////////////////////////////  RRef  /////////////////////////////////////
 
@@ -87,7 +60,7 @@ RRefForkData RRef::fork() const {
       rrefId_,
       ctx.genGloballyUniqueId(),
       ctx.getWorkerId(),
-      type_->str());
+      getTypeStr(type_));
 }
 
 //////////////////////////  UserRRef  /////////////////////////////////////
@@ -152,15 +125,13 @@ IValue UserRRef::toHere() {
       "Message type should either be SCRIPT_RREF_FETCH_RET "
       "or PYTHON_RREF_FETCH_RET");
   RpcCommandBase& rpc = *response;
+  auto& rrefFetchRet = static_cast<RRefFetchRet&>(rpc);
   if (isPyObj()) {
-    auto& rfr = static_cast<PythonRRefFetchRet&>(rpc);
-    return jit::toIValue(
-        PythonRpcHandler::getInstance().deserialize(
-            SerializedPyObj::fromIValues(rfr.values())),
-        PyObjectType::get());
+    // wrap python serialized vector of ivalues into tuple, this
+    // made the C++ toHere interface to return single IValue
+    return ivalue::Tuple::create(rrefFetchRet.values());
   } else {
-    auto& rfr = static_cast<ScriptRRefFetchRet&>(rpc);
-    return rfr.values().front();
+    return rrefFetchRet.values().front();
   }
 }
 

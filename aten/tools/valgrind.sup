@@ -9,3 +9,17 @@
    fun:handle_ld_preload
    ...
 }
+
+{
+   Cond_cuda
+   Memcheck:Cond
+   obj:*libcuda.so*
+   ...
+}
+
+{
+   Value8_cuda
+   Memcheck:Value8
+   obj:*libcuda.so*
+   ...
+}
