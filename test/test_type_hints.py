@@ -175,11 +175,15 @@ class TestTypeHints(TestCase):
         Runs mypy over all the test examples present in
         type_hint_tests directory
         """
-        examples = os.listdir(os.getcwd()+'/test/type_hint_tests/')
-        for i in examples:
-            process = subprocess.Popen(['mypy', os.getcwd()+'/test/type_hint_tests/'+i], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            stdout, stderr = process.communicate()
-        print(stdout)
+
+    examples = os.listdir(os.getcwd() + '/test/type_hint_tests/')
+    for i in examples:
+        process = subprocess.Popen(['mypy', os.getcwd()
+                                   + '/test/type_hint_tests/' + i],
+                                   stdout=subprocess.PIPE,
+                                   stderr=subprocess.PIPE)
+        (stdout, stderr) = process.communicate()
+    print(stdout)
 
 if __name__ == '__main__':
     run_tests()
