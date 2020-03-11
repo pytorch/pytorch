@@ -6,17 +6,19 @@
 
 #include <sstream>
 
-namespace torch{
-namespace jit{
-namespace fuser{
+namespace torch {
+namespace jit {
+namespace fuser {
 
-
-TORCH_API Val* newValLike(const Val* const val, DataType dtype){
+// Will return a new value of type val with the DataType dtype, if it's a
+// tensorview it will propagate the shape information from val.
+TORCH_API Val* newValLike(const Val* const val, DataType dtype) {
   switch (val->getValType().value()) {
     case (ValType::Tensor):
-      TORCH_CHECK(false,
-        "Tensors cannot be intermediate values in this IR, must use TensorViews.");
-    case(ValType::TensorView):
+      TORCH_CHECK(
+          false,
+          "Tensors cannot be intermediate values in this IR, must use TensorViews.");
+    case (ValType::TensorView):
       return static_cast<const TensorView* const>(val)->newForOutput(dtype);
     case (ValType::Scalar):
       switch (dtype) {
@@ -31,14 +33,13 @@ TORCH_API Val* newValLike(const Val* const val, DataType dtype){
       break;
   }
   std::stringstream err_msg;
-  err_msg 
-  << "Could not generate a new value of type " 
-  << val->getValType().value() << " with data type " << val->getDataType().value()
-  << std::endl;
+  err_msg << "Could not generate a new value of type "
+          << val->getValType().value() << " with data type "
+          << val->getDataType().value() << std::endl;
   TORCH_CHECK(false, err_msg.str());
 }
 
-TORCH_API Val* newValLike(const Val* const val){
+TORCH_API Val* newValLike(const Val* const val) {
   return newValLike(val, val->getDataType().value());
 }
 
@@ -55,68 +56,69 @@ TORCH_API Val* promoteNew(Val* v1, Val* v2) {
   DataType out_dtype =
       promote_type(v1->getDataType().value(), v2->getDataType().value());
 
-  if(out_vtype == v2->getValType().value())
+  if (out_vtype == v2->getValType().value())
     return newValLike(v2, out_dtype);
 
   return newValLike(v1, out_dtype);
-
 }
 
-TORCH_API Val* castOp(DataType dtype, Val* v1){
-  if( !is_cast_legal(v1->getDataType().value(), dtype) ) {
-	std::stringstream err;
-	err << "Illegal Cast value from  DataType: " << v1->getDataType().value() << " to DataType: " << dtype;
+TORCH_API Val* castOp(DataType dtype, Val* v1) {
+  if (v1->getDataType().value() == dtype)
+    return v1;
+
+  if (!is_cast_legal(v1->getDataType().value(), dtype)) {
+    std::stringstream err;
+    err << "Illegal Cast value from  DataType: " << v1->getDataType().value()
+        << " to DataType: " << dtype;
     TORCH_CHECK(false, err.str());
   }
+
   Val* out = newValLike(v1, dtype);
   Statement* expr = new UnaryOp(UnaryOpType::Cast, out, v1);
   return out;
 }
 
-TORCH_API Val* unaryOp(UnaryOpType type, Val* v1){
+TORCH_API Val* unaryOp(UnaryOpType type, Val* v1) {
   Val* out = newValLike(v1);
   Statement* expr = new UnaryOp(type, out, v1);
   return out;
 }
 
-//Mod, CeilDiv, and LT are considered Int only output operations
-//TODO: Should also support Bool only output operations
-TORCH_API Val* binaryOp(BinaryOpType type, Val* v1, Val* v2){
+TORCH_API Val* binaryOp(BinaryOpType type, Val* v1, Val* v2) {
   Val* out = promoteNew(v1, v2);
-  if(type >= BinaryOpType::Mod){
-    if(out->getDataType().value() != DataType::Int)
+  if (type >= BinaryOpType::Mod) {
+    if (out->getDataType().value() != DataType::Int)
       out = newValLike(out, DataType::Int);
   }
   Statement* expr = new BinaryOp(type, out, v1, v2);
   return out;
 }
 
-TORCH_API Val* add(Val* v1, Val* v2){
+TORCH_API Val* add(Val* v1, Val* v2) {
   return binaryOp(BinaryOpType::Add, v1, v2);
 }
 
-TORCH_API Val* sub(Val* v1, Val* v2){
+TORCH_API Val* sub(Val* v1, Val* v2) {
   return binaryOp(BinaryOpType::Sub, v1, v2);
 }
 
-TORCH_API Val* mul(Val* v1, Val* v2){
+TORCH_API Val* mul(Val* v1, Val* v2) {
   return binaryOp(BinaryOpType::Mul, v1, v2);
 }
 
-TORCH_API Val* div(Val* v1, Val* v2){
+TORCH_API Val* div(Val* v1, Val* v2) {
   return binaryOp(BinaryOpType::Div, v1, v2);
 }
 
-TORCH_API Val* mod(Val* v1, Val* v2){
+TORCH_API Val* mod(Val* v1, Val* v2) {
   return binaryOp(BinaryOpType::Mod, v1, v2);
 }
 
-TORCH_API Val* lt(Val* v1, Val* v2){
+TORCH_API Val* lt(Val* v1, Val* v2) {
   return binaryOp(BinaryOpType::LT, v1, v2);
 }
 
-TORCH_API Val* ceilDiv(Val* v1, Val* v2){
-  
+TORCH_API Val* ceilDiv(Val* v1, Val* v2) {
   return binaryOp(BinaryOpType::CeilDiv, v1, v2);
 }
 
