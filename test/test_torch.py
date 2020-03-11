@@ -29,7 +29,7 @@ from torch.testing._internal.common_utils import TestCase, iter_indices, TEST_NU
     BytesIOContext, skipIfRocm
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
-    skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm, onlyCUDA, onlyCPU, \
+    skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm, skipCUDAIfNotRocm, onlyCUDA, onlyCPU, \
     dtypes, dtypesIfCUDA, deviceCountAtLeast, skipCUDAIf, precisionOverride, \
     PYTORCH_CUDA_MEMCHECK, largeCUDATensorTest
 import torch.backends.quantized
@@ -14681,6 +14681,34 @@ class TestDevicePrecision(TestCase):
         device_tensor = torch.arange(0, 10, dtype=dtype, device=device)
         self.assertEqual(cpu_tensor, device_tensor)
 
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    def test_arange_bfloat16(self, device):
+        ref_tensor = torch.tensor([0, 1, 2, 3], dtype=torch.bfloat16, device=device)
+        bfloat16_tensor = torch.arange(0, 4, dtype=torch.bfloat16, device=device)
+        self.assertEqual(ref_tensor, bfloat16_tensor)
+
+        #step=2
+        ref_tensor = torch.tensor([0, 2, 4], dtype=torch.bfloat16, device=device)
+        bfloat16_tensor = torch.arange(0, 6, step=2, dtype=torch.bfloat16, device=device)
+        self.assertEqual(ref_tensor, bfloat16_tensor)
+
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    def test_index_add_bfloat16(self, device):
+        inp_tensor = torch.randn(5,3, device='cpu').bfloat16()
+        t = torch.tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]], dtype=torch.bfloat16, device='cpu')
+        index = torch.tensor([0, 4, 2], device='cpu')
+        out_cpu = inp_tensor.index_add(0, index, t)
+
+        inp_tensor = inp_tensor.to(device=device)
+        t = t.to(device=device)
+        index = index.to(device=device)
+        out_gpu = inp_tensor.index_add(0, index, t)
+
+        self.assertEqual(out_cpu, out_gpu, prec=1e-2)
+
+
     @skipCUDAIfRocm
     @dtypes(torch.double)
     def test_sum_noncontig(self, device, dtype):
@@ -15201,7 +15229,7 @@ _float_types_no_half = [torch.float, torch.double]
 
 # _float_types2 adds bfloat16 type to _float_types only on ROCm. Should eventually be unified
 # with _float_types when bfloat16 bringup is complete on all platforms
-_float_types2 = _float_types + [ torch.bfloat16] if TEST_WITH_ROCM else _float_types
+_float_types2 = _float_types + [torch.bfloat16] if TEST_WITH_ROCM else _float_types
 
 _signed_types = [
     torch.half, torch.float, torch.double,
@@ -15232,9 +15260,9 @@ def _number(floating, integer, dtype):
         return floating
     return integer
 
-# Converts half dtype to float when device is cpu
+# Converts half/bfloat16 dtype to float when device is cpu
 def _convert_t(dtype, device):
-    if device == 'cpu' and dtype == torch.half:
+    if device == 'cpu' and dtype in {torch.half, torch.bfloat16}:
         return torch.float
     return dtype
 
@@ -15327,8 +15355,8 @@ def _wrap_maybe_warns(regex):
 # - torch.half precision (=1e-5)
 # - torch.bfloat16 precision (=1e-5)
 # - precision (=1e-5), precision to use for all other dtypes
-# - make_inplace_variant (=True), if true the inplace version of the op (op_) is also tested
 # - dtype_list (=_types), a list of torch dtypes to test the op(s) with
+# - make_inplace_variant (=True), if true the inplace version of the op (op_) is also tested
 # - decorators (=[]), a list of decorators to apply to the test
 tensor_op_tests = [
     ('add', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-2),
@@ -15439,10 +15467,10 @@ tensor_op_tests = [
     ('dot', '', _medium_1d, lambda t, d: [_medium_1d(t, d)],
         1e-2, 1e-5, 1e-5, _float_types, False, [skipCUDAIfRocm]),
     ('element_size', '', _medium_1d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _float_types_no_half, False),
-    ('eq', '', _small_3d_ones, lambda t, d: [_small_3d(t, d)],),
-    ('eq', 'equal', _small_3d_ones, lambda t, d: [_small_3d_ones(t, d)]),
-    ('ne', '', _small_3d_ones, lambda t, d: [_small_3d(t, d)],),
-    ('ne', 'equal', _small_3d_ones, lambda t, d: [_small_3d_ones(t, d)]),
+    ('eq', '', _small_3d_ones, lambda t, d: [_small_3d(t, d)], 1e-5, 1e-5, 1e-5, _types2),
+    ('eq', 'equal', _small_3d_ones, lambda t, d: [_small_3d_ones(t, d)], 1e-5, 1e-5, 1e-5, _types2),
+    ('ne', '', _small_3d_ones, lambda t, d: [_small_3d(t, d)], 1e-5, 1e-5, 1e-5, _types2),
+    ('ne', 'equal', _small_3d_ones, lambda t, d: [_small_3d_ones(t, d)], 1e-5, 1e-5, 1e-5, _types2),
     ('equal', 'equal', _small_3d_ones, lambda t, d: [_small_3d_ones(t, d)],
         1e-5, 1e-5, 1e-5, _types, False),
     ('equal', '', _small_3d_ones, lambda t, d: [_small_3d(t, d)], 1e-5, 1e-5, 1e-5, _types, False),
@@ -15450,10 +15478,10 @@ tensor_op_tests = [
     ('expand_as', '', _new_t((_M, 1, _M)), lambda t, d: [_new_t((_M, 4, _M))(t, d)],
         1e-5, 1e-5, 1e-5, _types, False),
     ('fill_', '', _medium_2d, lambda t, d: [_number(3.14, 3, t)], 1e-3, 1e-5, 1e-5, _types, False),
-    ('ge', '', _medium_2d, lambda t, d: [_medium_2d(t, d)],),
-    ('le', '', _medium_2d, lambda t, d: [_medium_2d(t, d)],),
-    ('gt', '', _medium_2d, lambda t, d: [_medium_2d(t, d)],),
-    ('lt', '', _medium_2d, lambda t, d: [_medium_2d(t, d)],),
+    ('ge', '', _medium_2d, lambda t, d: [_medium_2d(t, d)], 1e-5, 1e-5, 1e-5, _types2),
+    ('le', '', _medium_2d, lambda t, d: [_medium_2d(t, d)], 1e-5, 1e-5, 1e-5, _types2),
+    ('gt', '', _medium_2d, lambda t, d: [_medium_2d(t, d)], 1e-5, 1e-5, 1e-5, _types2),
+    ('lt', '', _medium_2d, lambda t, d: [_medium_2d(t, d)], 1e-5, 1e-5, 1e-5, _types2),
     ('is_contiguous', '', _medium_2d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, False),
     # TODO: can't check negative case - cross-device copy is contiguous
     ('is_same_size', 'negative', _medium_2d, lambda t, d: [_small_3d(t, d)],
