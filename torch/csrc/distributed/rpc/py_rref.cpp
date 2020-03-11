@@ -128,8 +128,11 @@ py::object PyRRef::toHere() {
     if (rref_->isPyObj()) {
       // python_rpc_handler deserialization will acquires GIL.
       auto rfr_values = value.toTuple()->elements();
-      return PythonRpcHandler::getInstance().deserialize(
+      auto& pythonRpcHandler = PythonRpcHandler::getInstance();
+      auto ret = pythonRpcHandler.deserialize(
           SerializedPyObj::fromIValues(rfr_values));
+      pythonRpcHandler.handleException(ret);
+      return ret;
     } else {
       // acquiring GIL as torch::jit::toPyObject creates new py::object
       // without grabbing the GIL.
