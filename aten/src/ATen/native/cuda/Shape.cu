@@ -228,7 +228,7 @@ void parallel_cat(Tensor &out, const TensorList &inputs, int64_t dimension,
         break;
     }
 #undef HANDLE_CASE
-    THCudaCheck(cudaGetLastError());
+    AT_CUDA_CHECK(cudaGetLastError());
   }
 }
 

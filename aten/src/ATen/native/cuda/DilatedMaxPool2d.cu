@@ -441,7 +441,7 @@ void max_pool2d_with_indices_out_cuda_template(
     }
   );
 
-  THCudaCheck(cudaGetLastError()); 
+  AT_CUDA_CHECK(cudaGetLastError()); 
 
   if(input.ndimension() == 3) {
     output.resize_({nInputPlane, outputHeight, outputWidth});
@@ -624,7 +624,7 @@ void max_pool2d_with_indices_backward_out_cuda_template(
     }
   );
 
-  THCudaCheck(cudaGetLastError());
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 } // namespace

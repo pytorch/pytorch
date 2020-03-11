@@ -261,7 +261,7 @@ Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indice
             static_cast<int>(padding_idx));
        });
 
-    THCudaCheck(cudaGetLastError());
+    AT_CUDA_CHECK(cudaGetLastError());
     return grad_weight;
   }
 
@@ -365,7 +365,7 @@ Tensor & embedding_renorm_cuda_(Tensor & self, const Tensor & indices,
       static_cast<accscalar_t>(norm_type),
       dim, self.stride(0), self.stride(1));
   });
-  THCudaCheck(cudaGetLastError());
+  AT_CUDA_CHECK(cudaGetLastError());
 
   return self;
 }
