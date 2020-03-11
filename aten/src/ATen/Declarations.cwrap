@@ -77,40 +77,6 @@
     - THTensor* source
 ]]
 [[
-  name: _th_masked_select
-  cname: maskedSelect
-  cuda_bool: True
-  cuda_bfloat16: True
-  variants:
-    - function
-  backends:
-    - CUDA
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - arg: THTensor* self
-      broadcast: mask fallback types:Byte
-    - THByteTensor* mask
-]]
-[[
-  name: _th_masked_select_bool
-  cname: maskedSelectBool
-  cuda_bool: True
-  cuda_bfloat16: True
-  variants:
-    - function
-  backends:
-    - CUDA
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - arg: THTensor* self
-      broadcast: mask fallback types:Bool
-    - THBoolTensor* mask
-]]
-[[
   name: _th_nonzero
   cname: nonzero
   cpu_half: True
