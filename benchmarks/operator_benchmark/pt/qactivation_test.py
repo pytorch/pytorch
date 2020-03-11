@@ -45,6 +45,7 @@ qactivation_ops = op_bench.op_list(
         ('relu', nnq.ReLU),
         ('relu6', nnq.ReLU6),
         ('functional.hardtanh', nnq.functional.hardtanh),
+        ('functional.hardsigmoid', nnq.functional.hardsigmoid),
     ),
     attr_names=('op_name', 'op_func'),
 )

@@ -368,6 +368,17 @@ def hardtanh(input, min_val=-1., max_val=1., inplace=False):
         return torch._C._nn.hardtanh_(input, min_val, max_val)
     return torch._C._nn.hardtanh(input, min_val, max_val)
 
+def hardsigmoid(input):
+    # type: (Tensor, float, float, bool) -> Tensor
+    r"""
+    Applies the quantized element-wise function :math:`\text{Hardsigmoid}(x) = \frac{ReLU6(x + 3)}{6}`
+
+    See :class:`~torch.nn.Hardsigmoid` for more details.
+    """
+    if not input.is_quantized:
+        raise ValueError("Input to 'quantized.hardsigmoid' must be quantized!")
+    return torch._C._nn.hardsigmoid(input)
+
 def clamp(input, min_, max_):
     # type: (Tensor, float, float) -> Tensor
     r"""float(input, min_, max_) -> Tensor

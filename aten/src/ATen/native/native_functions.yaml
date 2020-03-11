@@ -5583,6 +5583,9 @@
 - func: hardsigmoid(Tensor self) -> Tensor
   use_c10_dispatcher: full
   python_module: nn
+  dispatch:
+    CPU: hardsigmoid
+    QuantizedCPU: quantized_hardsigmoid
 
 - func: hardsigmoid_(Tensor(a!) self) -> Tensor(a!)
   python_module: nn
