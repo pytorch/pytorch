@@ -33,6 +33,7 @@ def print_inputs(args, indent=''):
 
 def check_wrapper(fn):
     name = fn.__name__
+    
     def check_cl(*args, **kwargs):
         was_cl = contains_cl(args)
         try:
