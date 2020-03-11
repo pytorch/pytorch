@@ -31,6 +31,8 @@ class SchemaRegistrationHandleRAII;
 
 /**
  * Top-level dispatch interface for dispatching via the dynamic dispatcher.
+ * Most end users shouldn't use this directly; if you're trying to register
+ * ops look in op_registration
  */
 class CAFFE2_API Dispatcher final {
 private:
@@ -52,18 +54,11 @@ public:
 
   static Dispatcher& singleton();
 
-  /**
-   * Register a new operator schema.
-   *
-   * If a schema with the same operator name and overload name already exists,
-   * this function will check that both schemas are exactly identical.
-   *
-   * @return An OperatorHandle for the registered schema which can be used to
-   *         register kernels for the operator and a RegistrationHandleRAII RAII
-   *         object that manages the lifetime of the registration. Once that
-   *         object is destructed, the kernel will be deregistered.
-   */
-  std::pair<RegistrationHandleRAII, OperatorHandle> registerSchema(FunctionSchema schema, OperatorOptions options);
+  // ------------------------------------------------------------------------
+  //
+  // Accessing operators by schema
+  //
+  // ------------------------------------------------------------------------
 
   /**
    * Looks for an operator schema with the given name and overload name
@@ -87,6 +82,42 @@ public:
    */
   OperatorHandle findSchemaOrThrow(const char* name, const char* overload_name);
 
+  // ------------------------------------------------------------------------
+  //
+  // Invoking operators
+  //
+  // ------------------------------------------------------------------------
+
+  template<class Return, class... Args>
+  Return callUnboxed(const OperatorHandle& op, Args... args) const;
+
+  // Like callUnboxed, but override the default DispatchKey calculation code,
+  // instead dispatching straight to the provided DispatchKey
+  template<class Return, class... Args>
+  Return callUnboxedWithDispatchKey(const OperatorHandle& op, DispatchKey dispatchKey, Args... args) const;
+
+  // Invoke an operator via the boxed calling convention using an IValue stack
+  void callBoxed(const OperatorHandle& op, Stack* stack) const;
+
+  // ------------------------------------------------------------------------
+  //
+  // Performing registrations (NON user public; use op_registration)
+  //
+  // ------------------------------------------------------------------------
+
+  /**
+   * Register a new operator schema.
+   *
+   * If a schema with the same operator name and overload name already exists,
+   * this function will check that both schemas are exactly identical.
+   *
+   * @return An OperatorHandle for the registered schema which can be used to
+   *         register kernels for the operator and a RegistrationHandleRAII RAII
+   *         object that manages the lifetime of the registration. Once that
+   *         object is destructed, the kernel will be deregistered.
+   */
+  std::pair<RegistrationHandleRAII, OperatorHandle> registerSchema(FunctionSchema schema, OperatorOptions options);
+
   /**
    * Register a kernel to the dispatch table for an operator.
    * If dispatch_key is nullopt, then this registers a fallback kernel.
@@ -104,13 +135,11 @@ public:
    */
   RegistrationHandleRAII registerBackendFallbackKernel(DispatchKey dispatch_key, KernelFunction kernel);
 
-  template<class Return, class... Args>
-  Return callUnboxed(const OperatorHandle& op, Args... args) const;
-
-  template<class Return, class... Args>
-  Return callUnboxedWithDispatchKey(const OperatorHandle& op, DispatchKey dispatchKey, Args... args) const;
-
-  void callBoxed(const OperatorHandle& op, Stack* stack) const;
+  // ------------------------------------------------------------------------
+  //
+  // Listeners on registrations
+  //
+  // ------------------------------------------------------------------------
 
   /**
    * Add a listener that gets called whenever a new op is registered or an existing

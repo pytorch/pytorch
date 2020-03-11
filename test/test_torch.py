@@ -2047,6 +2047,16 @@ class _TestTorchMixin(object):
         self.assertEqual(x.narrow(-1, -1, 1), torch.Tensor([[2], [5], [8]]))
         self.assertEqual(x.narrow(-2, -1, 1), torch.Tensor([[6, 7, 8]]))
 
+    def test_narrow_tensor(self):
+        x = torch.Tensor([[0, 1, 2], [3, 4, 5], [6, 7, 8]])
+        self.assertEqual(x.narrow(0, torch.tensor(0), 1), torch.Tensor([[0, 1, 2]]))
+        with self.assertRaises(Exception):
+            x.narrow(0, torch.tensor(0.), 1)
+        with self.assertRaises(Exception):
+            x.narrow(0, torch.tensor([0]), 1)
+        with self.assertRaises(Exception):
+            x.narrow(0, torch.tensor([0, 1]), 1)
+
     def test_stack(self):
         for dtype in (torch.half, torch.double, torch.int):
             x = torch.randint(low=-100, high=100, size=(2, 3, 4)).to(dtype)
@@ -6544,6 +6554,15 @@ class TestTorchDeviceType(TestCase):
         z = res1.clone().contiguous(memory_format=torch.channels_last)
         res2 = torch.cat((x, y), out=z)
         self.assertEqual(res1, res2)
+
+    @onlyCUDA
+    def test_cat_preserve_channels_last(self, device):
+        x = torch.randn((4, 3, 8, 8), device=device)
+        y = torch.randn(x.shape, device=device)
+        res1 = torch.cat((x, y))
+        res2 = torch.cat((x.contiguous(memory_format=torch.channels_last), y.contiguous(memory_format=torch.channels_last)))
+        self.assertEqual(res1, res2)
+        self.assertTrue(res2.is_contiguous(memory_format=torch.channels_last))
 
     def test_is_set_to(self, device):
         t1 = torch.empty(3, 4, 9, 10, device=device)
@@ -13842,6 +13861,49 @@ class TestTorchDeviceType(TestCase):
                 # Divisor is a tensor case
                 long_res1 = long_m1.clone()
                 long_res1.remainder_(long_qs.unsqueeze(0).expand_as(long_res1))
+
+    @dtypes(torch.int64, torch.float64)
+    def test_remainder_edge_cases(self, device, dtype):
+        # Test variations of negative values used as input
+        a = torch.tensor([6, -6, -6, 6, 27, -27, -27, 27], dtype=dtype, device=device)
+        b = torch.tensor([-3, 3, -3, 3, -5, 5, -5, 5], dtype=dtype, device=device)
+        r = a.remainder(b)
+        r_expected = torch.tensor([0, 0, 0, 0, -3, 3, -2, 2], dtype=dtype, device=device)
+        self.assertEqual(r, r_expected)
+
+        if dtype == torch.float64:
+            # Test cases where result should be nan
+            a = torch.tensor([-34, 0, 34], dtype=dtype, device=device)
+            b = torch.zeros(3, dtype=dtype, device=device)
+            self.assertTrue(torch.isnan(a.remainder(b)).all())
+
+            # Need to test a fairly large tensor with float cpu to run
+            # the Vec256 implementation
+            if device == 'cpu':
+                a = torch.tensor([6, -6, -6, 6, 27, -27, -27, 27] * 10000, dtype=dtype, device=device)
+                b = torch.tensor([-3, 3, -3, 3, -5, 5, -5, 5] * 10000, dtype=dtype, device=device)
+                r = a.remainder(b)
+                r_expected = torch.tensor([0, 0, 0, 0, -3, 3, -2, 2] * 10000, dtype=dtype, device=device)
+                self.assertEqual(r, r_expected)
+
+                # Test nan cases
+                a = torch.tensor([-34, 0, 34] * 20000, dtype=dtype, device=device)
+                b = torch.zeros(3 * 20000, dtype=dtype, device=device)
+                self.assertTrue(torch.isnan(a.remainder(b)).all())
+
+        elif dtype == torch.int64:
+            if device == 'cpu':
+                # Test int divide by zero causes an exception
+                a = torch.ones(1000, dtype=dtype, device=device)
+                b = torch.ones(1000, dtype=dtype, device=device)
+                b[500] = 0
+                self.assertRaises(RuntimeError, lambda: a.remainder(b))
+
+        # Check scalar type is promoted to match tensor
+        a = torch.ones(1, dtype=dtype, device=device)
+        b = 1.0 if dtype == torch.int64 else 1
+        r = a.remainder(b)
+        self.assertEqual(r.dtype, a.dtype)
 
     @slowTest
     @onlyCPU
