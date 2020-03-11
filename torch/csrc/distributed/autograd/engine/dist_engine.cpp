@@ -197,6 +197,7 @@ std::shared_ptr<rpc::FutureMessage> DistEngine::runEngineAndAccumulateGradients(
   // passes ran into errors.
   autogradContext->clearOutstandingRpcs();
 
+  // LOG(ERROR) << "DistEngine::runEngineAndAccumulateGradients graphTask: " << autogradContext->retrieveGraphTask();
   auto futureGrads = engine_.execute_with_graph_task(autogradContext->retrieveGraphTask(), graphRoot, /*async_mode=*/true);
 
   // Build a future that waits for the callbacks to execute (since callbacks
@@ -241,7 +242,7 @@ std::shared_ptr<rpc::FutureMessage> DistEngine::runEngineAndAccumulateGradients(
         }
 
         accumulateGradFuture->markCompleted(rpc::Message());
-        LOG(ERROR) <<"accumulateGradFuture is marked as completed";
+        LOG(INFO) <<"accumulateGradFuture is marked as completed";
       });
 
   return accumulateGradFuture;
@@ -264,10 +265,10 @@ std::shared_ptr<rpc::FutureMessage> DistEngine::executeSendFunctionAsync(
     initializedContextIds_.insert(autogradContext->contextId());
     lock.unlock();
 
-    LOG(ERROR)<<"ExecuteSendFunctionAsync on autograd context: " << autogradContext->contextId();
 
     // Enqueue the current send function.
     auto graphTask = autogradContext->retrieveGraphTask();
+    LOG(INFO)<<"ExecuteSendFunctionAsync on autograd context: " << autogradContext->contextId() << " with graphTask:" << graphTask;
     engine_.enqueue_blocked_task_on_cpu(torch::autograd::NodeTask(
         graphTask, sendFunction, torch::autograd::InputBuffer(0)));
 
@@ -312,7 +313,7 @@ std::shared_ptr<rpc::FutureMessage> DistEngine::executeSendFunctionAsync(
               });
         });
 
-    LOG(ERROR)<<"ExecuteSendFunctionAsync futureGrads added callback on autograd context: " << autogradContext->contextId();
+    LOG(INFO)<<"ExecuteSendFunctionAsync futureGrads added callback on autograd context: " << autogradContext->contextId();
 
     // Return the future which waits for all async processing to be done.
     return callbackFuture;
@@ -334,7 +335,7 @@ void DistEngine::execute(
   auto autogradContext =
       DistAutogradContainer::getInstance().retrieveContext(contextId);
 
-  LOG(ERROR)<<"Dist engine execute on autograd context: " << autogradContext->contextId();
+  LOG(INFO)<<"Dist engine execute on autograd context: " << autogradContext->contextId();
   // Perform initial pre-processing.
   edge_list rootEdges;
   variable_list grads;

@@ -770,7 +770,7 @@ void Engine::enqueue_blocked_task_on_cpu(NodeTask task) {
   ready_queue(graph_task, at::kCPU).push(
       std::move(task), /* incrementOutstandingTasks */ false);
   std::unique_lock<std::mutex> lock(print_mutex_);
-  LOG(ERROR)<<"enqueued blocked task on CPU ready queue for graphTask: "<< graph_task;
+  LOG(INFO)<<"enqueued blocked task on CPU ready queue for graphTask: "<< graph_task;
 }
 
 std::shared_ptr<GraphTask> Engine::execute_node_task(const std::unique_ptr<NodeTask>& task) {
@@ -804,10 +804,11 @@ std::shared_ptr<GraphTask> Engine::execute_node_task(const std::unique_ptr<NodeT
 void Engine::execute_until_ready_queue_empty(const std::shared_ptr<GraphTask>& graph_task) {
   std::unique_lock<std::mutex> lock(print_mutex_);
   std::shared_ptr<ReadyQueue> graph_task_rq = graph_task->cpu_ready_queue_;
+  // LOG(ERROR) << "Engine::execute_until_ready_queue_empty on graphTask: " << graph_task;
   while(!graph_task_rq->empty()) {
     auto task = graph_task_rq->pop();
     execute_node_task(task);
-    LOG(ERROR)<<"executed task fn: " << task->fn_->name()<< " instance: "<< task->fn_
+    LOG(INFO)<<"executed task fn: " << task->fn_->name()<< " instance: "<< task->fn_
       << ", for graph_task: " << graph_task << " with outstanding task num:" << graph_task->outstanding_tasks_.load();
   }
   // Check if we've completed execution.
@@ -816,13 +817,13 @@ void Engine::execute_until_ready_queue_empty(const std::shared_ptr<GraphTask>& g
     // 'mark_graph_task_completed' would mark the Future as completed and this
     // would notify the owner thread that the task has been completed.
     mark_graph_task_completed(graph_task);
-    LOG(ERROR) <<"finished graph_task: " << graph_task;
+    LOG(INFO) <<"finished graph_task: " << graph_task;
   } else {
     // schedule a continuation
-    at::launch([this, &graph_task]() {
+    at::launch([this, graph_task]() {
         execute_until_ready_queue_empty(graph_task);
     });
-    LOG(ERROR) << "scheduled a continuation on graph_task: "  << graph_task
+    LOG(INFO) << "scheduled a continuation on graph_task: "  << graph_task
       << " with outstanding task num:" << graph_task->outstanding_tasks_.load();
   }
 

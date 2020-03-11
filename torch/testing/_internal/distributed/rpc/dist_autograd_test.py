@@ -1726,11 +1726,11 @@ class DistAutogradTest(RpcAgentTestFixture):
         t2 = torch.rand((3, 3), requires_grad=True)
         with dist_autograd.context() as context_id:
             t3 = rpc.rpc_sync("worker0", torch.add, args=(t1, t2))
-            # t4 = rpc.rpc_sync("worker0", torch.mul, args=(t2, t3))
-            # t5 = rpc.rpc_sync("worker0", torch.matmul, args=(t3, t4))
-            # t6 = rpc.rpc_sync("worker0", torch.add, args=(t4, t5))
+            t4 = rpc.rpc_sync("worker0", torch.mul, args=(t2, t3))
+            t5 = rpc.rpc_sync("worker0", torch.matmul, args=(t3, t4))
+            t6 = rpc.rpc_sync("worker0", torch.add, args=(t4, t5))
 
-            dist_autograd.backward(context_id, [t3.sum()])
+            dist_autograd.backward(context_id, [t6.sum()])
 
     @dist_init
     def test_async_dist_autograd(self):
@@ -1744,7 +1744,7 @@ class DistAutogradTest(RpcAgentTestFixture):
         if self.rank != 0:
             # All other ranks schedule work on rank 0.
             threads = []
-            for i in range(1):
+            for i in range(20):
                 t = threading.Thread(target=DistAutogradTest._workload_thread)
                 t.start()
                 threads.append(t)
