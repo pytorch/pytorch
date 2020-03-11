@@ -46,8 +46,10 @@ void PythonEngine::thread_on_exception(
     std::exception& e) {
   auto python_err = dynamic_cast<python_error*>(&e);
   if (python_err) {
+    LOG(ERROR) << "PythonEngine::thead_on_exception is python_error, is there type?" << python_err->type << " what's the value??" << python_err->value;
     python_err->persist();
   }
+  LOG(ERROR) << "PythonEngine::thead_on_exception: " << e.what();
   Engine::thread_on_exception(graph_task, fn, e);
 }
 

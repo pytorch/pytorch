@@ -324,12 +324,26 @@ auto Engine::thread_main(
         C10_LOG_API_USAGE_ONCE("torch.autograd.thread_shutdown");
         break;
       }
-      local_graph_task = execute_node_task(task);
-      if (!local_graph_task) {
-        // GraphTask for function is no longer valid, skipping further execution.
+
+      if (!(local_graph_task = task->base_.lock())) {
+        // Reentrant thread's graph task should not expire since we hold a
+        // reference to it in this method.
         continue;
       }
+
+      if (task->fn_ && !local_graph_task->has_error_.load()) {
+        AutoGradMode grad_mode(local_graph_task->grad_mode_);
+        try {
+          evaluate_function(local_graph_task, task->fn_.get(), task->inputs_);
+        } catch (std::exception& e) {
+          LOG(ERROR) << "****evaluating function name: " << task->fn_->name() <<" thread on exception: " << e.what() << " for graphTask: " << local_graph_task;
+          thread_on_exception(local_graph_task, task->fn_, e);
+        }
+      }
     }
+
+    // Decrement the outstanding tasks.
+    --local_graph_task->outstanding_tasks_;
 
     // Check if we've completed execution.
     bool gt_completed = graph_task_completed(local_graph_task);
@@ -389,6 +403,7 @@ void Engine::thread_on_exception(
     std::shared_ptr<GraphTask> graph_task,
     const std::shared_ptr<Node>& fn,
     std::exception& e) {
+  LOG(ERROR) << "Engine::thread_on_exception: " << e.what();
   graph_task->set_exception(e, fn);
 }
 
@@ -406,6 +421,7 @@ void GraphTask::set_exception(
     std::exception& e,
     const std::shared_ptr<Node>& fn) {
   set_exception_without_signal(fn);
+  LOG(ERROR) << "GraphTask set_exception: " << e.what();
   future_result_->setErrorIfNeeded(e.what());
 }
 
@@ -769,47 +785,31 @@ void Engine::enqueue_blocked_task_on_cpu(NodeTask task) {
   TORCH_INTERNAL_ASSERT(graph_task, "GraphTask is no longer valid!");
   ready_queue(graph_task, at::kCPU).push(
       std::move(task), /* incrementOutstandingTasks */ false);
-  std::unique_lock<std::mutex> lock(print_mutex_);
-  LOG(INFO)<<"enqueued blocked task on CPU ready queue for graphTask: "<< graph_task;
-}
-
-std::shared_ptr<GraphTask> Engine::execute_node_task(const std::unique_ptr<NodeTask>& task) {
-  // local_graph_task represents the graph_task we retrieve from the queue.
-  // The outer graph_task represents the overall graph_task we need to execute
-  // for reentrant execution.
-  std::shared_ptr<GraphTask> local_graph_task;
-  if (!(local_graph_task = task->base_.lock())) {
-    // Reentrant thread's graph task should not expire since we hold a
-    // reference to it in this method.
-    LOG(INFO) << "GraphTask for function " << task->fn_->name()
-              << " is no longer valid, skipping execution";
-    return local_graph_task;
-  }
-
-  if (task->fn_ && !local_graph_task->has_error_.load()) {
-    AutoGradMode grad_mode(local_graph_task->grad_mode_);
-    try {
-      evaluate_function(local_graph_task, task->fn_.get(), task->inputs_);
-    } catch (std::exception& e) {
-      thread_on_exception(local_graph_task, task->fn_, e);
-    }
-  }
-
-  // Decrement the outstanding tasks.
-  --local_graph_task->outstanding_tasks_;
-
-  return local_graph_task;
 }
 
 void Engine::execute_until_ready_queue_empty(const std::shared_ptr<GraphTask>& graph_task) {
-  std::unique_lock<std::mutex> lock(print_mutex_);
   std::shared_ptr<ReadyQueue> graph_task_rq = graph_task->cpu_ready_queue_;
-  // LOG(ERROR) << "Engine::execute_until_ready_queue_empty on graphTask: " << graph_task;
   while(!graph_task_rq->empty()) {
     auto task = graph_task_rq->pop();
-    execute_node_task(task);
-    LOG(INFO)<<"executed task fn: " << task->fn_->name()<< " instance: "<< task->fn_
-      << ", for graph_task: " << graph_task << " with outstanding task num:" << graph_task->outstanding_tasks_.load();
+    std::shared_ptr<GraphTask> local_graph_task;
+    if (!(local_graph_task = task->base_.lock())) {
+      continue;
+    }
+    if (task->fn_ && !local_graph_task->has_error_.load()) {
+      AutoGradMode grad_mode(local_graph_task->grad_mode_);
+      try {
+        LOG(ERROR) << "****evaluating function name: " << task->fn_->name() << " for graphTask: " << graph_task;
+        evaluate_function(local_graph_task, task->fn_.get(), task->inputs_);
+      } catch (std::exception& e) {
+        LOG(ERROR) << "****evaluating function name: " << task->fn_->name() <<" thread on exception: " << e.what() << " for graphTask: " << graph_task;
+        thread_on_exception(local_graph_task, task->fn_, e);
+        // early return in error so that we immediately stop the execution
+        // of this GraphTask and return the future with proper ErrorMessage
+        return;
+      }
+    }
+    // Decrement the outstanding task.
+    --local_graph_task->outstanding_tasks_;
   }
   // Check if we've completed execution.
   if (graph_task_completed(graph_task)) {
@@ -817,14 +817,11 @@ void Engine::execute_until_ready_queue_empty(const std::shared_ptr<GraphTask>& g
     // 'mark_graph_task_completed' would mark the Future as completed and this
     // would notify the owner thread that the task has been completed.
     mark_graph_task_completed(graph_task);
-    LOG(INFO) <<"finished graph_task: " << graph_task;
   } else {
     // schedule a continuation
     at::launch([this, graph_task]() {
         execute_until_ready_queue_empty(graph_task);
     });
-    LOG(INFO) << "scheduled a continuation on graph_task: "  << graph_task
-      << " with outstanding task num:" << graph_task->outstanding_tasks_.load();
   }
 
 }

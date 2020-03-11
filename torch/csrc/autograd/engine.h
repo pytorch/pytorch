@@ -296,7 +296,6 @@ struct TORCH_API Engine {
   // To protect reads and writes to final_callbacks_
   std::mutex post_callbacks_lock_;
 
-  std::mutex print_mutex_;
   // How many nested reentrant calls are allowed until a new thread is used
   int max_recursion_depth_;
 
@@ -324,7 +323,6 @@ struct TORCH_API Engine {
  std::shared_ptr<ThreadPoolShared> thread_pool_shared_;
 
 private:
- std::shared_ptr<GraphTask> execute_node_task(const std::unique_ptr<NodeTask>& task);
  void execute_until_ready_queue_empty(const std::shared_ptr<GraphTask>& graph_task);
  void graph_task_exec_post_processing(
      const std::shared_ptr<GraphTask>& graph_task);

@@ -5,6 +5,7 @@
 #include <memory>
 #include <queue>
 #include <mutex>
+#include <iostream>
 
 #include <c10/util/Exception.h>
 #include <pybind11/pybind11.h>
@@ -166,6 +167,7 @@ struct python_error : public std::exception {
       TORCH_INTERNAL_ASSERT(Py_REFCNT(value) > 0);
 
       PyObject* pyStr = PyObject_Str(value);
+      std::cout<<"python_error build messsage value: " << value << std::endl;
       if (pyStr != nullptr) {
         PyObject* encodedString =
             PyUnicode_AsEncodedString(pyStr, "utf-8", "strict");
@@ -192,9 +194,11 @@ struct python_error : public std::exception {
     // PyErr_Fetch overwrites the pointers
     pybind11::gil_scoped_acquire gil;
     Py_XDECREF(type);
+    std::cout<<"---pyerror value refcount:" << std::endl;
     Py_XDECREF(value);
     Py_XDECREF(traceback);
     PyErr_Fetch(&type, &value, &traceback);
+    // std::cout<<"---pyerror fetch succes??" << value << std::endl;
     build_message();
   }
 
