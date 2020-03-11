@@ -48,10 +48,12 @@ void OperatorEntry::prepareForDeregistration() {
 }
 
 namespace {
-  void checkSchema(const FunctionSchema& expected, const FunctionSchema& actual) {
-    TORCH_CHECK(expected.aliasAnalysis() != actual.aliasAnalysis(),
-        "In operator registration: Specified alias analysis kind [", toString(expected.aliasAnalysis()),
-        "] doesn't match actual alias analysis kind [", toString(actual.aliasAnalysis()), "]");
+  void checkSchema(const OperatorName& name, const FunctionSchema& expected, const FunctionSchema& actual) {
+    if (!actual.isDefaultAliasAnalysisKind()) {
+      TORCH_CHECK(expected.aliasAnalysis() == actual.aliasAnalysis(),
+          "In ", toString(name) , " registration: Specified alias analysis kind [", toString(expected.aliasAnalysis()),
+          "] doesn't match actual alias analysis kind [", toString(actual.aliasAnalysis()), "]");
+    }
     c10::optional<std::string> schema_difference = findSchemaDifferences(expected, actual);
     if (schema_difference.has_value()) {
       TORCH_CHECK(false,
@@ -69,7 +71,7 @@ void OperatorEntry::registerSchema(FunctionSchema&& schema) {
   for (auto i = kernels_.begin(); i != kernels_.end(); ++i) {
     for (auto j = i->second.begin(); j != i->second.end(); ++j) {
       if (j->inferred_function_schema) {
-        checkSchema(*schema_, *j->inferred_function_schema);
+        checkSchema(name_, *schema_, *j->inferred_function_schema);
       }
     }
   }
@@ -85,7 +87,7 @@ std::list<OperatorEntry::ListEntry>::iterator OperatorEntry::registerKernel(c10:
   std::unique_lock<std::mutex> lock(kernelsMutex_);
 
   if (schema_ && inferred_function_schema) {
-    checkSchema(*schema_, *inferred_function_schema);
+    checkSchema(name_, *schema_, *inferred_function_schema);
   }
 
   // Add the kernel to the kernels list,
