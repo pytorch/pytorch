@@ -70,13 +70,11 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
     }
     case MessageType::PYTHON_CALL: {
       auto& pyCall = static_cast<PythonCall&>(rpc);
-      std::vector<torch::Tensor> responseTensorTable;
-      auto payload = PythonRpcHandler::getInstance().generatePythonUDFResult(
-          pyCall.pickledPayload(), pyCall.tensors(), responseTensorTable);
+      auto serializedPyObj =
+          PythonRpcHandler::getInstance().generatePythonUDFResult(
+              pyCall.serializedPyObj());
       return wrap(
-          std::move(
-              PythonResp(std::move(payload), std::move(responseTensorTable)))
-              .toMessage());
+          std::move(PythonResp(std::move(serializedPyObj))).toMessage());
     }
     case MessageType::SCRIPT_REMOTE_CALL: {
       auto& scriptRemoteCall = static_cast<ScriptRemoteCall&>(rpc);
@@ -199,7 +197,8 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
         }
         SerializedPyObj result =
             PythonRpcHandler::getInstance().serialize(pyValue);
-        return wrap(PythonRRefFetchRet(result.toIValues()).toMessage());
+        return wrap(
+            PythonRRefFetchRet(std::move(result).toIValues()).toMessage());
       }
 
       auto whenValueSet = rref->getFuture();
@@ -219,7 +218,8 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
               }
               SerializedPyObj result =
                   PythonRpcHandler::getInstance().serialize(pyValue);
-              Message m = PythonRRefFetchRet(result.toIValues()).toMessage();
+              Message m =
+                  PythonRRefFetchRet(std::move(result).toIValues()).toMessage();
               m.setId(messageId);
               responseFuture->markCompleted(std::move(m));
             } else {

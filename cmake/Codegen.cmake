@@ -151,14 +151,14 @@ if (INTERN_BUILD_ATEN_OPS)
     set(GEN_ROCM_FLAG --rocm)
   endif()
 
-  set(CUSTOM_BUILD_FLAG)
+  set(CUSTOM_BUILD_FLAGS)
 
   if(INTERN_BUILD_MOBILE)
-    list(APPEND CUSTOM_BUILD_FLAG --backend_whitelist CPU QuantizedCPU)
+    list(APPEND CUSTOM_BUILD_FLAGS --backend_whitelist CPU QuantizedCPU)
   endif()
 
   if(INTERN_DISABLE_AUTOGRAD)
-    list(APPEND CUSTOM_BUILD_FLAG --disable-autograd)
+    list(APPEND CUSTOM_BUILD_FLAGS --disable-autograd)
   endif()
 
   if (SELECTED_OP_LIST)
@@ -174,7 +174,8 @@ if (INTERN_BUILD_ATEN_OPS)
     )
     separate_arguments(OP_REGISTRATION_WHITELIST)
     message(STATUS "Custom build with op registration whitelist: ${OP_REGISTRATION_WHITELIST}")
-    list(APPEND CUSTOM_BUILD_FLAG
+    list(APPEND CUSTOM_BUILD_FLAGS
+      --force_schema_registration
       --op_registration_whitelist ${OP_REGISTRATION_WHITELIST})
   endif()
 
@@ -184,7 +185,7 @@ if (INTERN_BUILD_ATEN_OPS)
       --install_dir ${CMAKE_BINARY_DIR}/aten/src/ATen
       ${GEN_ROCM_FLAG}
       ${cwrap_files}
-      ${CUSTOM_BUILD_FLAG}
+      ${CUSTOM_BUILD_FLAGS}
   )
 
   EXECUTE_PROCESS(
