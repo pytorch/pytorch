@@ -73,7 +73,7 @@ Tensor& addcdiv_out(
       && isIntegralType(tensor2.scalar_type(), /*includeBool=*/ true)) {
     TORCH_WARN_ONCE(
       "Integer division with addcdiv is deprecated. ",
-      "In a future release addcdiv will perform a 'true' division of ",
+      "In a future release addcdiv will perform a true division of ",
       "tensor1 and tensor2.");
   }
   checkBackend("addcdiv_cpu", result, self.options().backend());

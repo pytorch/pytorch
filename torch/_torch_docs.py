@@ -263,7 +263,7 @@ multiply the result by the scalar :attr:`value` and add it to :attr:`input`.
 
 .. warning::
     Integer division with addcdiv is deprecated and will be removed in a future
-    release. In an even later release it will be changed to perform a 'true'
+    release. In an even later release it will be changed to perform a true
     division.
 
 .. math::
@@ -1787,7 +1787,7 @@ returns a new resulting tensor.
 
 .. warning::
     Integer division using div is deprecated and will be removed in a future
-    release. In an even later release div will be changed to  perform true
+    release. In an even later release div will be changed to perform true
     division like :func:`torch.true_divide`.
 
 .. math::

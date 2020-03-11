@@ -62,7 +62,7 @@ Tensor& div_out(Tensor& result, const Tensor& self, const Tensor& other) {
     TORCH_WARN_ONCE(
       "Integer division of tensors using div or / is deprecated. ",
       "In a future release div and / will ",
-      "perform 'true' division as in Python 3. Use true_divide or ",
+      "perform true division as in Python 3. Use true_divide or ",
       "floor_divide instead.");
   }
 
@@ -78,7 +78,7 @@ Tensor div(const Tensor& self, const Tensor& other) {
     TORCH_WARN_ONCE(
       "Integer division of tensors using div or / is deprecated. ",
       "In a future release div and / will ",
-      "perform 'true' division as in Python 3. Use true_divide or ",
+      "perform true division as in Python 3. Use true_divide or ",
       "floor_divide instead.");
   }
   Tensor result;
