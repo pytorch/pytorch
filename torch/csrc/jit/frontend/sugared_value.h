@@ -237,16 +237,16 @@ struct TORCH_API SugaredTupleValue : public SugaredValue {
 
   SugaredValuePtr getitem(const SourceRange& loc, Function& m, Value* idx)
       override {
-    TORCH_INTERNAL_ASSERT(
-        idx->type()->cast<IntType>() && toIValue(idx),
-        loc,
-        "Expected integer literal for Sugared Tuple");
+    if (!(idx->type()->cast<IntType>() && toIValue(idx))) {
+      throw ErrorReport(loc) << "Expected integer literal for index";
+    }
     auto index = toIValue(idx)->toInt();
-    TORCH_INTERNAL_ASSERT(
-        index >= 0 && index < static_cast<int64_t>(tup_.size()),
-        loc,
-        "Index out of range of Sugared Tuple");
-    return tup_.at(index);
+    int64_t adj_index = (index < 0) ? index + static_cast<int64_t>(tup_.size()) : index;
+    if (!(adj_index >= 0 && adj_index < static_cast<int64_t>(tup_.size()))) {
+      throw ErrorReport(loc)
+          << "Index " << index << " out of range of length " << tup_.size();
+    }
+    return tup_.at(adj_index);
   }
 
   // This function is called when a SugaredValue is used to convert a
@@ -377,6 +377,10 @@ struct FunctionValue : public SugaredValue {
     output->node()->setSourceRange(loc);
     return std::make_shared<SimpleValue>(output);
   }
+
+ const std::vector<Function*>& callees() {
+   return callees_;
+ }
 
  private:
   std::vector<Function*> callees_;

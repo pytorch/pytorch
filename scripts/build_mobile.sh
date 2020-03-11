@@ -8,7 +8,7 @@
 
 set -e
 
-export PYTORCH_BUILD_MOBILE=1
+export BUILD_PYTORCH_MOBILE_WITH_HOST_TOOLCHAIN=1
 CAFFE2_ROOT="$( cd "$(dirname "$0")"/.. ; pwd -P)"
 
 echo "Bash: $(/bin/bash --version | head -1)"
@@ -21,7 +21,6 @@ mkdir -p $BUILD_ROOT
 cd $BUILD_ROOT
 
 CMAKE_ARGS=()
-CMAKE_ARGS+=("-DBUILD_CAFFE2_MOBILE=OFF")
 CMAKE_ARGS+=("-DUSE_STATIC_DISPATCH=ON")
 CMAKE_ARGS+=("-DCMAKE_PREFIX_PATH=$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')")
 CMAKE_ARGS+=("-DPYTHON_EXECUTABLE=$(python -c 'import sys; print(sys.executable)')")
@@ -38,6 +37,7 @@ if [ -x "$(command -v ninja)" ]; then
 fi
 
 # Disable unused dependencies
+CMAKE_ARGS+=("-DUSE_ROCM=OFF")
 CMAKE_ARGS+=("-DUSE_CUDA=OFF")
 CMAKE_ARGS+=("-DUSE_GFLAGS=OFF")
 CMAKE_ARGS+=("-DUSE_OPENCV=OFF")
