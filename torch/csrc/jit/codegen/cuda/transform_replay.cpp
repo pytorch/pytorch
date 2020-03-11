@@ -1,12 +1,12 @@
-#include <torch/csrc/jit/fuser/common/fusion.h>
-#include <torch/csrc/jit/fuser/common/iriostream.h>
-#include <torch/csrc/jit/fuser/common/transform_replay.h>
+#include <torch/csrc/jit/codegen/cuda/fusion.h>
+#include <torch/csrc/jit/codegen/cuda/iriostream.h>
+#include <torch/csrc/jit/codegen/cuda/transform_replay.h>
 
 #include <sstream>
 
 // For debug:
 /*
-#include <torch/csrc/jit/fuser/common/iriostream.h>
+#include <torch/csrc/jit/codegen/cuda/iriostream.h>
 */
 namespace torch {
 namespace jit {

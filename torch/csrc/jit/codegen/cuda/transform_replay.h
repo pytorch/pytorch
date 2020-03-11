@@ -1,15 +1,15 @@
 #pragma once
 
-#include <torch/csrc/jit/fuser/common/ir.h>
-#include <torch/csrc/jit/fuser/common/transform_iter.h>
-#include <torch/csrc/jit/fuser/common/tensor.h>
+#include <torch/csrc/jit/codegen/cuda/ir.h>
+#include <torch/csrc/jit/codegen/cuda/transform_iter.h>
+#include <torch/csrc/jit/codegen/cuda/tensor.h>
 
 #include <algorithm>
 #include <vector>
 
 // For debug:
 /*
-#include <torch/csrc/jit/fuser/common/iriostream.h>
+#include <torch/csrc/jit/codegen/cuda/iriostream.h>
 */
 namespace torch {
 namespace jit {

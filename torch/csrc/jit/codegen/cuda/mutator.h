@@ -1,9 +1,9 @@
 #pragma once
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/csrc/jit/fuser/common/ir.h>
-#include <torch/csrc/jit/fuser/common/tensor.h>
-#include <torch/csrc/jit/fuser/common/dispatch.h>
+#include <torch/csrc/jit/codegen/cuda/ir.h>
+#include <torch/csrc/jit/codegen/cuda/tensor.h>
+#include <torch/csrc/jit/codegen/cuda/dispatch.h>
 #include <iostream>
 
 namespace torch {

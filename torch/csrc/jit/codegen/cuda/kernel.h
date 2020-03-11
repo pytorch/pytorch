@@ -1,5 +1,5 @@
 #pragma once
-#include <torch/csrc/jit/fuser/common/fusion.h>
+#include <torch/csrc/jit/codegen/cuda/fusion.h>
 
 #include <ATen/cuda/CUDAContext.h>
 
@@ -9,7 +9,7 @@ namespace fuser {
 namespace cuda {
 
 #define STRINGIFY(...) __VA_ARGS__
-#include <torch/csrc/jit/fuser/cuda/data_struct_str.h>
+#include <torch/csrc/jit/codegen/cuda/data_struct_str.h>
 #undef STRINGIFY
 
 class CudaKernel{

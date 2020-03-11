@@ -1,9 +1,9 @@
-#include <torch/csrc/jit/fuser/cuda/parser.h>
+#include <torch/csrc/jit/codegen/cuda/parser.h>
 #include <torch/csrc/jit/constants.h>
 
-#include <torch/csrc/jit/fuser/common/arith.h>
-#include <torch/csrc/jit/fuser/common/tensor.h>
-#include <torch/csrc/jit/fuser/common/iriostream.h>
+#include <torch/csrc/jit/codegen/cuda/arith.h>
+#include <torch/csrc/jit/codegen/cuda/tensor.h>
+#include <torch/csrc/jit/codegen/cuda/iriostream.h>
 
 #include <unordered_map>
 

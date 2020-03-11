@@ -1,9 +1,9 @@
 #pragma once
 
-#include <torch/csrc/jit/fuser/common/ir.h>
-#include <torch/csrc/jit/fuser/common/iter_visitor.h>
-#include <torch/csrc/jit/fuser/common/iriostream.h>
-#include <torch/csrc/jit/fuser/common/ir_printer.h>
+#include <torch/csrc/jit/codegen/cuda/ir.h>
+#include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
+#include <torch/csrc/jit/codegen/cuda/iriostream.h>
+#include <torch/csrc/jit/codegen/cuda/ir_printer.h>
 
 #include <c10/util/Exception.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>

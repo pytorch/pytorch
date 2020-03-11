@@ -1,12 +1,12 @@
-#include <torch/csrc/jit/fuser/common/fusion.h>
-#include <torch/csrc/jit/fuser/common/ir.h>
-#include <torch/csrc/jit/fuser/common/iter_visitor.h>
-#include <torch/csrc/jit/fuser/common/type.h>
+#include <torch/csrc/jit/codegen/cuda/fusion.h>
+#include <torch/csrc/jit/codegen/cuda/ir.h>
+#include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
+#include <torch/csrc/jit/codegen/cuda/type.h>
 #include <queue>
 #include <deque>
 #include <iostream>
 
-#include <torch/csrc/jit/fuser/common/iriostream.h>
+#include <torch/csrc/jit/codegen/cuda/iriostream.h>
 
 namespace torch {
 namespace jit {

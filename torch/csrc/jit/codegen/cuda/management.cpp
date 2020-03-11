@@ -1,4 +1,4 @@
-#include <torch/csrc/jit/fuser/common/management.h>
+#include <torch/csrc/jit/codegen/cuda/management.h>
 
 #include <c10/core/Device.h>
 

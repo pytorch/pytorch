@@ -1,11 +1,11 @@
-#include <torch/csrc/jit/fuser/common/fusion.h>
-#include <torch/csrc/jit/fuser/common/ir.h>
+#include <torch/csrc/jit/codegen/cuda/fusion.h>
+#include <torch/csrc/jit/codegen/cuda/ir.h>
 
-#include <torch/csrc/jit/fuser/common/ir_printer.h>
-#include <torch/csrc/jit/fuser/common/mutator.h>
-#include <torch/csrc/jit/fuser/common/tensor.h>
+#include <torch/csrc/jit/codegen/cuda/ir_printer.h>
+#include <torch/csrc/jit/codegen/cuda/mutator.h>
+#include <torch/csrc/jit/codegen/cuda/tensor.h>
 
-#include <torch/csrc/jit/fuser/common/dispatch.h>
+#include <torch/csrc/jit/codegen/cuda/dispatch.h>
 
 #include <torch/csrc/jit/ir.h>
 

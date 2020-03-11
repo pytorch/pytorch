@@ -1,11 +1,11 @@
 #pragma once
 
-#include <torch/csrc/jit/fuser/common/arith.h>
-#include <torch/csrc/jit/fuser/common/index_compute.h>
-#include <torch/csrc/jit/fuser/common/iriostream.h>
-#include <torch/csrc/jit/fuser/common/iter_visitor.h>
-#include <torch/csrc/jit/fuser/common/predicate_compute.h>
-#include <torch/csrc/jit/fuser/common/transform_iter.h>
+#include <torch/csrc/jit/codegen/cuda/arith.h>
+#include <torch/csrc/jit/codegen/cuda/index_compute.h>
+#include <torch/csrc/jit/codegen/cuda/iriostream.h>
+#include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
+#include <torch/csrc/jit/codegen/cuda/predicate_compute.h>
+#include <torch/csrc/jit/codegen/cuda/transform_iter.h>
 
 #include <map>
 #include <ostream>

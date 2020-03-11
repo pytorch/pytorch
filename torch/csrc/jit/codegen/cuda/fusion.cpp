@@ -1,4 +1,4 @@
-#include <torch/csrc/jit/fuser/common/fusion.h>
+#include <torch/csrc/jit/codegen/cuda/fusion.h>
 
 namespace torch {
 namespace jit {
