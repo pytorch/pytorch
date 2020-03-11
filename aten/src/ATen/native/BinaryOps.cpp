@@ -58,6 +58,14 @@ Tensor& add_(Tensor& self, const Tensor& other, Scalar alpha) {
 }
 
 Tensor& div_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  if (isIntegralType(result.scalar_type(), /*includeBool=*/ true)) {
+    TORCH_WARN_ONCE(
+      "Integer division of tensors using div or / is deprecated. ",
+      "In a future release div and / will ",
+      "perform 'true' division as in Python 3. Use true_divide or ",
+      "floor_divide instead.");
+  }
+
   auto iter = TensorIterator::binary_op(result, self, other,
     /*check_mem_overlap=*/true);
   div_stub(iter.device_type(), iter);
@@ -65,6 +73,14 @@ Tensor& div_out(Tensor& result, const Tensor& self, const Tensor& other) {
 }
 
 Tensor div(const Tensor& self, const Tensor& other) {
+  if (isIntegralType(self.scalar_type(), /*includeBool=*/ true)
+      && isIntegralType(other.scalar_type(), /*includeBool=*/ true)) {
+    TORCH_WARN_ONCE(
+      "Integer division of tensors using div or / is deprecated. ",
+      "In a future release div and / will ",
+      "perform 'true' division as in Python 3. Use true_divide or ",
+      "floor_divide instead.");
+  }
   Tensor result;
   auto iter = TensorIterator::binary_op(result, self, other);
   div_stub(iter.device_type(), iter);

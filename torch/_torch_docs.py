@@ -261,6 +261,11 @@ addcdiv(input, tensor1, tensor2, *, value=1, out=None) -> Tensor
 Performs the element-wise division of :attr:`tensor1` by :attr:`tensor2`,
 multiply the result by the scalar :attr:`value` and add it to :attr:`input`.
 
+.. warning::
+    Integer division with addcdiv is deprecated and will be removed in a future
+    release. In an even later release it will be changed to perform a 'true'
+    division.
+
 .. math::
     \text{out}_i = \text{input}_i + \text{value} \times \frac{\text{tensor1}_i}{\text{tensor2}_i}
 """ + r"""
@@ -1779,6 +1784,11 @@ add_docstr(torch.div,
 
 Divides each element of the input ``input`` with the scalar ``other`` and
 returns a new resulting tensor.
+
+.. warning::
+    Integer division using div is deprecated and will be removed in a future
+    release. In an even later release div will be changed to  perform true
+    division like :func:`torch.true_divide`.
 
 .. math::
     \text{{out}}_i = \frac{{\text{{input}}_i}}{{\text{{other}}}}

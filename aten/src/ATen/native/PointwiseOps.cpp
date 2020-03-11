@@ -69,6 +69,13 @@ Tensor& addcdiv_out(
     const Tensor& tensor1,
     const Tensor& tensor2,
     Scalar value) {
+  if (isIntegralType(tensor1.scalar_type(), /*includeBool=*/ true)
+      && isIntegralType(tensor2.scalar_type(), /*includeBool=*/ true)) {
+    TORCH_WARN_ONCE(
+      "Integer division with addcdiv is deprecated. ",
+      "In a future release addcdiv will perform a 'true' division of ",
+      "tensor1 and tensor2.");
+  }
   checkBackend("addcdiv_cpu", result, self.options().backend());
   auto iter = at::TensorIterator();
   iter.set_check_mem_overlap(true);
