@@ -55,6 +55,9 @@ TORCH_API Val* promoteNew(Val* v1, Val* v2) {
   DataType out_dtype =
       promote_type(v1->getDataType().value(), v2->getDataType().value());
 
+  if(out_vtype == v2->getValType().value())
+    return newValLike(v2, out_dtype);
+
   return newValLike(v1, out_dtype);
 
 }
