@@ -51,7 +51,6 @@ void IterVisitor::traverseFrom(
     outputs_to_visit.emplace(entry);
 
   while (!outputs_to_visit.empty()) {
-
     if(stopCondition())
       break;
 
@@ -90,27 +89,23 @@ void IterVisitor::traverse(
     , bool from_outputs_only
     , bool breadth_first) {
   FusionGuard fg(fusion);
-
   if (breadth_first)
     TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
   std::set<Statement*> visited;
   std::deque<Statement*> to_visit;
 
   std::vector<Val*> outputs_to_visit;
-
   if (from_outputs_only) {
     for (Val* out : fusion->outputs()) {
       outputs_to_visit.push_back(out);
     }
   // Search for Vals with no uses (output edges)
   } else
-    for (Val* it : fusion->vals()) {
-      const std::set<Expr*>& uses = fusion->uses(it);
-      if (uses.empty()) {
-        outputs_to_visit.push_back(it);
-	    // Traverse from Specific Value Types
-      }
+    for (Val* val : fusion->vals()) {
+      if(!fusion->used(val))
+        outputs_to_visit.push_back(val);
     }
+    
 
   traverseFrom(fusion, outputs_to_visit);
 }
