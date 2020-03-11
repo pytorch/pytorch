@@ -72,27 +72,28 @@ void binomial_cuda_kernel(
     const at::Tensor& prob,
     std::pair<uint64_t, uint64_t> seeds) {
   using accscalar_t = at::acc_type<scalar_t, true>;
-  at::cuda::CUDA_tensor_apply3<scalar_t, scalar_t, scalar_t>(
-      ret,
-      count,
-      prob,
-      [seeds] __device__(
-          scalar_t & ret_val, const scalar_t& count, const scalar_t& prob) {
-        curandStatePhilox4_32_10_t state;
-        curand_init(
-            seeds.first,
-            blockIdx.x * blockDim.x + threadIdx.x,
-            seeds.second,
-            &state);
+  at::TensorIterator iter;
+  iter.add_output(ret);
+  iter.add_input(count);
+  iter.add_input(prob);
+  at::native::gpu_kernel(iter,
+    [seeds] GPU_LAMBDA (scalar_t count, scalar_t prob) {
+      curandStatePhilox4_32_10_t state;
+      curand_init(
+          seeds.first,
+          blockIdx.x * blockDim.x + threadIdx.x,
+          seeds.second,
+          &state);
 
-        auto uniform_lambda = [&state] __device__ () {
-          return curand_uniform(&state);
-        };
-        BaseSampler<accscalar_t, decltype(uniform_lambda)> standard_uniform(uniform_lambda);
+      auto uniform_lambda = [&state] __device__ () {
+        return curand_uniform(&state);
+      };
+      BaseSampler<accscalar_t, decltype(uniform_lambda)> standard_uniform(uniform_lambda);
 
-        auto sample = sample_binomial<scalar_t, accscalar_t, decltype(uniform_lambda)>(count, prob, standard_uniform);
-        ret_val = static_cast<scalar_t>(sample);
-      });
+      auto sample = sample_binomial<scalar_t, accscalar_t, decltype(uniform_lambda)>(count, prob, standard_uniform);
+      return static_cast<scalar_t>(sample);
+    }
+  );
 }
 
 template <typename scalar_t>
