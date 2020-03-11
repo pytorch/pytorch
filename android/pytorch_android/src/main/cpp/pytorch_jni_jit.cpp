@@ -7,7 +7,7 @@
 #include <fbjni/fbjni.h>
 
 #include <torch/csrc/autograd/record_function.h>
-#include <torch/csrc/jit/print_handler.h>
+#include <torch/csrc/jit/runtime/print_handler.h>
 #include <torch/script.h>
 #include "caffe2/serialize/read_adapter_interface.h"
 
@@ -104,11 +104,6 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
     }();
     ((void)once);
 
-    auto qengines = at::globalContext().supportedQEngines();
-    if (std::find(qengines.begin(), qengines.end(), at::QEngine::QNNPACK) !=
-        qengines.end()) {
-      at::globalContext().setQEngine(at::QEngine::QNNPACK);
-    }
 #ifdef TRACE_ENABLED
     torch::autograd::profiler::pushCallback(
         &onFunctionEnter,

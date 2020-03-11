@@ -68,7 +68,7 @@ set(TORCH_PYTHON_SRCS
     ${TORCH_SRC_DIR}/csrc/autograd/python_legacy_variable.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/python_variable.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/python_variable_indexing.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/init.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/python/init.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/onnx.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/fixup_onnx_conditionals.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/fixup_onnx_loop.cpp
@@ -80,15 +80,15 @@ set(TORCH_PYTHON_SRCS
     ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/scalar_type_analysis.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/unpack_quantized_weights.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/prepare_inplace_ops_for_onnx.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/python_arg_flatten.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/python_custom_class.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/python_interpreter.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/python_ir.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/python_tracer.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/script/init.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/script/python_sugared_value.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/script/concrete_module_type.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/script/python_tree_views.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/python/python_arg_flatten.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/python/python_custom_class.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/python/python_interpreter.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/python/python_ir.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/python/python_tracer.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/python/script_init.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/python/python_sugared_value.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/frontend/concrete_module_type.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/python/python_tree_views.cpp
     ${TORCH_SRC_DIR}/csrc/multiprocessing/init.cpp
     ${TORCH_SRC_DIR}/csrc/onnx/init.cpp
     ${TORCH_SRC_DIR}/csrc/utils/init.cpp
@@ -181,6 +181,8 @@ if (USE_CUDA)
       ${TORCH_SRC_DIR}/csrc/cuda/utils.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/python_comm.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/serialization.cpp
+      ${TORCH_SRC_DIR}/csrc/cuda/shared/cudart.cpp
+      ${TORCH_SRC_DIR}/csrc/cuda/shared/nvtx.cpp
       ${GENERATED_THNN_CXX_CUDA}
       )
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_CUDA)
@@ -207,6 +209,9 @@ if (USE_CUDNN)
     # we're not careful.
     list(INSERT 0 TORCH_PYTHON_LINK_LIBRARIES ${CUDNN_LIBRARY_PATH})
     list(INSERT 0 TORCH_PYTHON_INCLUDE_DIRECTORIES ${CUDNN_INCLUDE_PATH})
+    list(APPEND TORCH_PYTHON_SRCS
+      ${TORCH_SRC_DIR}/csrc/cuda/shared/cudnn.cpp
+      )
 endif()
 
 if (USE_NUMPY)
@@ -222,6 +227,9 @@ if (USE_ROCM)
       ${TORCH_SRC_DIR}/csrc/cuda/utils.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/python_comm.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/serialization.cpp
+      ${TORCH_SRC_DIR}/csrc/cuda/shared/cudart.cpp
+      ${TORCH_SRC_DIR}/csrc/cuda/shared/cudnn.cpp
+      ${TORCH_SRC_DIR}/csrc/cuda/shared/nvtx.cpp
       ${GENERATED_THNN_CXX_CUDA}
       )
 
@@ -229,6 +237,8 @@ if (USE_ROCM)
       USE_ROCM
       __HIP_PLATFORM_HCC__
       )
+    list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${ROCM_ROCTX_LIB})
+    list(APPEND TORCH_PYTHON_INCLUDE_DIRECTORIES ${roctracer_INCLUDE_DIRS})
 endif()
 
 if (USE_DISTRIBUTED)
@@ -245,6 +255,7 @@ if (USE_DISTRIBUTED)
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_functions.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_rpc_handler.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/request_callback_impl.cpp
+        ${TORCH_SRC_DIR}/csrc/jit/runtime/register_distributed_ops.cpp
         )
       list(APPEND TORCH_PYTHON_LINK_LIBRARIES c10d)
       list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10D)

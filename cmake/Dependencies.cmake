@@ -289,6 +289,56 @@ if(INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE AND (USE_QNNPACK OR USE_NNPAC
   ENDIF()
 endif()
 
+# XNNPACK has not option of like QNNPACK_CUSTOM_THREADPOOL
+# that allows us to hijack pthreadpool interface.
+# Thus not doing this ends up building pthreadpool as well as
+# the internal implemenation of pthreadpool which results in symbol conflicts.
+if (USE_XNNPACK)
+  if(NOT DEFINED PTHREADPOOL_SOURCE_DIR)
+    set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
+    set(PTHREADPOOL_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/pthreadpool" CACHE STRING "pthreadpool source directory")
+  endif()
+
+  IF(NOT TARGET pthreadpool)
+    SET(PTHREADPOOL_BUILD_TESTS OFF CACHE BOOL "")
+    SET(PTHREADPOOL_BUILD_BENCHMARKS OFF CACHE BOOL "")
+    ADD_SUBDIRECTORY(
+      "${PTHREADPOOL_SOURCE_DIR}"
+      "${CONFU_DEPENDENCIES_BINARY_DIR}/pthreadpool"
+      EXCLUDE_FROM_ALL)
+  ENDIF()
+endif()
+
+# ---[ Caffe2 uses cpuinfo library in the thread pool
+if (NOT TARGET cpuinfo)
+  if (NOT DEFINED CPUINFO_SOURCE_DIR)
+    set(CPUINFO_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/../third_party/cpuinfo" CACHE STRING "cpuinfo source directory")
+  endif()
+
+  set(CPUINFO_BUILD_TOOLS OFF CACHE BOOL "")
+  set(CPUINFO_BUILD_UNIT_TESTS OFF CACHE BOOL "")
+  set(CPUINFO_BUILD_MOCK_TESTS OFF CACHE BOOL "")
+  set(CPUINFO_BUILD_BENCHMARKS OFF CACHE BOOL "")
+  set(CPUINFO_LIBRARY_TYPE "static" CACHE STRING "")
+  set(CPUINFO_LOG_LEVEL "error" CACHE STRING "")
+  if(MSVC)
+    if (CAFFE2_USE_MSVC_STATIC_RUNTIME)
+      set(CPUINFO_RUNTIME_TYPE "static" CACHE STRING "")
+    else()
+      set(CPUINFO_RUNTIME_TYPE "shared" CACHE STRING "")
+    endif()
+  endif()
+  add_subdirectory(
+    "${CPUINFO_SOURCE_DIR}"
+    "${CONFU_DEPENDENCIES_BINARY_DIR}/cpuinfo")
+  # We build static version of cpuinfo but link
+  # them into a shared library for Caffe2, so they need PIC.
+  set_property(TARGET cpuinfo PROPERTY POSITION_INDEPENDENT_CODE ON)
+  # Need to set this to avoid conflict with XNNPACK's clog external project
+  set(CLOG_SOURCE_DIR "${CPUINFO_SOURCE_DIR}/deps/clog")
+endif()
+list(APPEND Caffe2_DEPENDENCY_LIBS cpuinfo)
+
 # ---[ QNNPACK
 if(USE_QNNPACK)
   set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
@@ -389,34 +439,6 @@ if(USE_XNNPACK)
   include_directories(SYSTEM ${XNNPACK_INCLUDE_DIR})
   list(APPEND Caffe2_DEPENDENCY_LIBS XNNPACK)
 endif()
-
-# ---[ Caffe2 uses cpuinfo library in the thread pool
-if (NOT TARGET cpuinfo)
-  if (NOT DEFINED CPUINFO_SOURCE_DIR)
-    set(CPUINFO_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/../third_party/cpuinfo" CACHE STRING "cpuinfo source directory")
-  endif()
-
-  set(CPUINFO_BUILD_TOOLS OFF CACHE BOOL "")
-  set(CPUINFO_BUILD_UNIT_TESTS OFF CACHE BOOL "")
-  set(CPUINFO_BUILD_MOCK_TESTS OFF CACHE BOOL "")
-  set(CPUINFO_BUILD_BENCHMARKS OFF CACHE BOOL "")
-  set(CPUINFO_LIBRARY_TYPE "static" CACHE STRING "")
-  set(CPUINFO_LOG_LEVEL "error" CACHE STRING "")
-  if(MSVC)
-    if (CAFFE2_USE_MSVC_STATIC_RUNTIME)
-      set(CPUINFO_RUNTIME_TYPE "static" CACHE STRING "")
-    else()
-      set(CPUINFO_RUNTIME_TYPE "shared" CACHE STRING "")
-    endif()
-  endif()
-  add_subdirectory(
-    "${CPUINFO_SOURCE_DIR}"
-    "${CONFU_DEPENDENCIES_BINARY_DIR}/cpuinfo")
-  # We build static version of cpuinfo but link
-  # them into a shared library for Caffe2, so they need PIC.
-  set_property(TARGET cpuinfo PROPERTY POSITION_INDEPENDENT_CODE ON)
-endif()
-list(APPEND Caffe2_DEPENDENCY_LIBS cpuinfo)
 
 # ---[ gflags
 if(USE_GFLAGS)
@@ -1257,16 +1279,21 @@ if (NOT INTERN_BUILD_MOBILE)
     MESSAGE(STATUS "Could not find CUDA with FP16 support, compiling without torch.CudaHalfTensor")
   ENDIF()
 
-  OPTION(NDEBUG "disable asserts (WARNING: this may result in silent UB e.g. with out-of-bound indices)")
-  IF (NOT NDEBUG)
-    MESSAGE(STATUS "Removing -DNDEBUG from compile flags")
-    STRING(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_C_FLAGS "" ${CMAKE_C_FLAGS})
-    STRING(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_C_FLAGS_DEBUG "" ${CMAKE_C_FLAGS_DEBUG})
-    STRING(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_C_FLAGS_RELEASE "" ${CMAKE_C_FLAGS_RELEASE})
-    STRING(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_CXX_FLAGS "" ${CMAKE_CXX_FLAGS})
-    STRING(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_CXX_FLAGS_DEBUG "" ${CMAKE_CXX_FLAGS_DEBUG})
-    STRING(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_CXX_FLAGS_RELEASE "" ${CMAKE_CXX_FLAGS_RELEASE})
+  STRING(APPEND CMAKE_C_FLAGS_RELEASE " -DNDEBUG")
+  STRING(APPEND CMAKE_CXX_FLAGS_RELEASE " -DNDEBUG")
+  IF (NOT GENERATOR_IS_MULTI_CONFIG)
+    IF (${CMAKE_BUILD_TYPE} STREQUAL "Release")
+      MESSAGE(STATUS "Adding -DNDEBUG to compile flags")
+      STRING(APPEND CMAKE_C_FLAGS " -DNDEBUG")
+      STRING(APPEND CMAKE_CXX_FLAGS " -DNDEBUG")
+    ELSE()
+      MESSAGE(STATUS "Removing -DNDEBUG from compile flags")
+      STRING(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_C_FLAGS "" ${CMAKE_C_FLAGS})
+      STRING(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_CXX_FLAGS "" ${CMAKE_CXX_FLAGS})
+    ENDIF()
   ENDIF()
+  STRING(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_C_FLAGS_DEBUG "" ${CMAKE_C_FLAGS_DEBUG})
+  STRING(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_CXX_FLAGS_DEBUG "" ${CMAKE_CXX_FLAGS_DEBUG})
 
   SET(CUDA_ATTACH_VS_BUILD_RULE_TO_CUDA_FILE OFF)
 

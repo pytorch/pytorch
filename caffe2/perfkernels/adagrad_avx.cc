@@ -114,22 +114,4 @@ void adagrad_fp16_update_prefetch__avx_f16c(
   }
 }
 
-void rowwise_adagrad_update__avx_f16c(
-    int N,
-    float* w,
-    float* w_n, // prefetch ptr
-
-    const float* g,
-
-    float* h,
-    float* h_n, // prefetch ptr
-
-    float epsilon,
-    float lr) {
-  internal::rowwise_adagrad_update_inlined(N, w, w_n, g, h, h_n, epsilon, lr);
-}
-
-SPARSE_ADAGRAD_SPECIALIZATION(int32_t, avx_f16c);
-SPARSE_ADAGRAD_SPECIALIZATION(int64_t, avx_f16c);
-
 } // namespace caffe2

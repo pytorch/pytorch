@@ -73,7 +73,7 @@ def value_is_tensor_type(v):
 # for each aten type, how do we handle a return value of that type?
 RETURN_MAP = {
     'Tensor': 'assignTo(Output(${offset}),${output});',
-    'Scalar': 'assignTo(Output(${offset}),self.scalar_type(), ${output});',
+    'Scalar': 'assignTo(Output(${offset}),${output}.type(), ${output});',
     'bool': 'assignToValue<int64_t>(Output(${offset}),${output});',
     'int64_t': 'assignToValue<int64_t>(Output(${offset}),${output});',
     'std::vector<Tensor>': 'assignListStartingAt(${offset}, ${output});',
