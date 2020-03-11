@@ -630,6 +630,7 @@ void testGPU_FusionComputeAt3() {
 }
 
 void testGPU_FusionParser() {
+  /*
   auto g = std::make_shared<Graph>();
   const auto graph0_string = R"IR(
     graph(%0 : Float(2, 3, 4),
@@ -657,6 +658,7 @@ void testGPU_FusionParser() {
   
   CodeWrite cw(std::cout);
   cw.traverse(&fusion);
+  */
 }
 
 void testGPU_FusionDependency() {

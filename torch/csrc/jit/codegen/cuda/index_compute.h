@@ -1,115 +1,48 @@
 #pragma once
 
-#include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/transform_iter.h>
 
 #include <vector>
+
+/*
+ * Index compute takes in a list of indices typically generated from the
+ * surrounding for loop nest. The number of indicies are intended to match the
+ * number of dimensions of the incomming TensorView which may have less or more
+ * dimensions than its root due to split/merge/reorder operations.
+ * Split/merge/reorder operations are then replayed backwards produce resulting
+ * indices (based on input indices) that match the root dimension.
+ *
+ * For example:
+ * TV[I, J]
+ * TV[Io, Ii{4}, J] = TV.split(I, factor=4)
+ * indexCompute(TV, {i, j, k}) -> {i * 4 + j, k}
+ *
+ * These indices can then be flattened later based on strides.
+ */
 
 namespace torch {
 namespace jit {
 namespace fuser {
 
-//Play split/merge/reorder operations backwards to compute indexing into original tensor.
+// Play split/merge/reorder operations backwards to compute indexing into
+// original tensor.
 struct IndexCompute : public TransformIter {
  protected:
-  
-  void replayBackward(Split* expr) override {
-    int ax = expr->axis();
-    TORCH_INTERNAL_ASSERT(ax >= 0 && ax + 1 < indices.size(),
-      "Hit an invalid Split transformation during IndexCompute, axis is not within bounds.");
-    indices[ax] = static_cast<Int*>(
-      add( mul(indices[ax], expr->factor()), indices[ax + 1])
-    );
-    indices.erase(indices.begin() + ax + 1);
-  }
 
-  void replayBackward(Merge* expr) override {
-    int ax = expr->axis();
-    TORCH_INTERNAL_ASSERT(ax >= 0 && ax < indices.size(),
-      "Hit an invalid MERGE transformation during IndexCompute, axis is not within bounds.");
+  // Replay overrides which modify indices
+  void replayBackward(Split* expr) override;
+  void replayBackward(Merge* expr) override;
+  void replayBackward(Reorder* expr) override;
 
-    Int* I = expr->in()->axis(ax + 1)->size();
-    Int* ind = indices[ax];
-    indices[ax] = static_cast<Int*>(div(ind, I));
-    indices.insert(indices.begin() + ax + 1, static_cast<Int*>(mod(ind, I)));
-  }
-
-  void replayBackward(Reorder* expr) override {
-    // pos2axis[new_pos] = old_pos Generate new axis2pos map
-    const std::vector<int>& pos2axis = expr->pos2axis();
-
-    std::vector<Int*> reordered_indices;
-
-    // Reverse the map so we can simply push back into reordered_indices
-    // axis2pos[old_pos] = new_pos
-    std::vector<int> axis2pos(pos2axis.size(), -1);
-
-    for (decltype(pos2axis.size()) i = 0; i < pos2axis.size(); i++) {
-      int new_pos = i;
-      int old_pos = pos2axis[i];
-      TORCH_INTERNAL_ASSERT(
-          new_pos >= 0 && new_pos < indices.size() && old_pos >= 0 &&
-          old_pos < indices.size(),
-          "Hit an invalid reorder transformation during IndexCompute,"
-          " at least one move position is not within bounds.");
-      axis2pos[old_pos] = new_pos;
-    }
-    for (decltype(axis2pos.size()) i = 0; i < axis2pos.size(); i++) {
-      int new_pos = axis2pos[i];
-      int old_pos = i;
-      // reordered_indices[old_pos] = indices[new_pos];
-      reordered_indices.push_back(indices[new_pos]);
-    }
-
-    indices = reordered_indices;
-  }
-
-  std::vector<int> axis_map;
+  //Axis_map for
   std::vector<Int*> indices;
 
+  IndexCompute(const TensorView* tv, std::vector<Int*> _indices);
+
  public:
-  IndexCompute(const TensorView* tv, std::vector<Int*> _indices) {
-    indices = _indices;
-
-    TensorDomain* td = tv->domain();
-
-    bool exclude_reduction = td->size() > indices.size();
-    TORCH_CHECK(td->size() >= indices.size(),
-      "For IndexCompute the number of axis should match the number of dimensions"
-      " in the TensorView.");
-
-    // If we need to ignore the reduction dimensions because a tensor is
-    // being consumed, not produced, then insert dummy dimensions in the
-    // indices for bookkeeping while replaying split/merge/reorder operations. 
-    if (exclude_reduction)
-      for (decltype(td->size()) i{0}; i < td->size(); i++)
-        if (td->axis(i)->isReduction())
-          indices.insert(indices.begin() + i, new Int(-1));
-
-    // Run the split/merge/reorder operations backwards. This will
-    // Modify std::vector<Int*> indices so it can be used to index
-    // the root TensorDomain which should now match the physical axes.
-    TensorDomain* root = TransformIter::runBackward(td, true);
-
-    TORCH_INTERNAL_ASSERT(root->size() == indices.size(),
-      "Error during IndexCompute. The number of indices generated"
-      " after running the transformations backwards should match" 
-      " the number of dimensions of the root TensorView.");
-
-    // Remove indices associated with reduction axes, we had them just for
-    // bookkeeping. 
-    if (exclude_reduction) {
-      for (int i = root->size() - 1; i >= 0; i--)
-        if (root->axis(i)->isReduction())
-          indices.erase(indices.begin() + i);
-    }
-  }
   static std::vector<Int*> computeIndices(
       const TensorView* tv,
-      std::vector<Int*> _indices) {
-    IndexCompute ic(tv, _indices);
-    return ic.indices;
-  }
+      std::vector<Int*> _indices);
 };
 
 } // namespace fuser

@@ -1,43 +1,48 @@
 #pragma once
 
-#include <torch/csrc/jit/codegen/cuda/index_compute.h>
+#include <torch/csrc/jit/codegen/cuda/tensor.h>
+
+/*
+ * Predicate compute takes a TensorView and set of indices. The number of
+ * indices and the root of the TensorView are required to have the same number
+ * of dimensions. Predicate compute should be run after index compute, and the
+ * result of index compute should be used for the indices entry.
+ *
+ * A vector of Int values are returned which are the output of the operation
+ * index[i] < get_root(TV)->domain()->axis(i)->size()
+ *
+ * It is assumed that no predicate is required if index[i] is an index directly
+ * from a for loop. This will not catch all cases if we actually have static
+ * size information for example:
+ *
+ * TV[I].split(4)
+ * would produce the code:
+ * for(i : I/4)
+ *   for(j : 4)
+ *     if( i * 4 + j < TV.size(0))
+ *       TV[i * 4 + j]...
+ *
+ * However if we had TV.size[0] = 16 at "compile time" then we wouldn't need the
+ * predicate. However we will still generate: for(i : 4) for(j : 4) if( i * 4 +
+ * j < TV.size(0)) TV[i * 4 + j]...
+ *
+ */
 
 namespace torch {
 namespace jit {
 namespace fuser {
 
 struct PredicateCompute {
-  static bool hasPredicates(const TensorView* tv, const std::vector<Int*> _indices) {
-    std::vector<Int*> preds;
-    for (auto ind : _indices)
-      if (FusionGuard::getCurFusion()->origin(ind) != nullptr)
-        return true;
-    return false;
-  }
+  // Return if there are any predicates
+  static bool hasPredicates(
+      const TensorView* tv,
+      const std::vector<Int*> _indices);
 
+  // Return the series of predicates, if an axis doesn't have a predicate
+  // reutrns 1
   static std::vector<Int*> computePredicates(
       const TensorView* tv,
-      const std::vector<Int*> _indices) {
-    std::vector<Int*> preds;
-    if (!hasPredicates(tv, _indices))
-      return preds;
-
-    TensorDomain* root = TransformIter::getRoot(tv->domain());
-    TORCH_CHECK(root->size() == _indices.size());
-    for (decltype(_indices.size()) i{0}; i < _indices.size(); i++)
-
-      if (FusionGuard::getCurFusion()->origin(_indices[i]) != nullptr) {
-        Val* pred = lt(_indices[i], root->axis(i)->size());
-        TORCH_CHECK(
-            pred->getValType().value() == ValType::Scalar &&
-            pred->getDataType().value() == DataType::Int);
-        preds.push_back(static_cast<Int*>(pred));
-      } else {
-        preds.push_back(new Int(1));
-      }
-
-    return preds;
-  }
+      const std::vector<Int*> _indices);
 };
 
 } // namespace fuser
