@@ -27,7 +27,7 @@ def argument_to_declaration(param, func=None):
         arg['type'] = 'THIndexTensor*'
     elif arg['type'] == 'Scalar':
         arg['type'] = 'accreal'
-    elif arg['type'] == 'Generator*':
+    elif arg['type'] == 'GeneratorHolder':
         arg['type'] = 'THGenerator*'
 
     match = re.match(r'IntArrayRef\[(\d+)\]', arg['type'])

@@ -242,8 +242,8 @@ static PyObject * THPVariable_randint(PyObject* self_, PyObject* args, PyObject*
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "randint(int64_t high, IntArrayRef size, *, Generator generator=None, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool requires_grad=False)",
-    "randint(int64_t low, int64_t high, IntArrayRef size, *, Generator generator=None, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool requires_grad=False)",
+    "randint(int64_t high, IntArrayRef size, *, GeneratorHolder generator=None, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool requires_grad=False)",
+    "randint(int64_t low, int64_t high, IntArrayRef size, *, GeneratorHolder generator=None, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool requires_grad=False)",
   }, /*traceable=*/false);
 
   ParsedArgs<9> parsed_args;

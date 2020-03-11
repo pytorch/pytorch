@@ -104,8 +104,8 @@ def type_argument_translations(arg):
         size = int(match.group(1))
 
     # Legacy type sanitization. TODO: Do we really need this?
-    if t == 'Generator*':
-        t = 'Generator *'
+    if t == 'GeneratorHolder':
+        t = 'GeneratorHolder'
 
     if not default:
         pass

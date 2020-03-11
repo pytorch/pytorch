@@ -24,7 +24,7 @@ static std::unordered_map<std::string, ParameterType> type_map = {
   {"complex", ParameterType::COMPLEX},
   {"TensorList", ParameterType::TENSOR_LIST},
   {"IntArrayRef", ParameterType::INT_LIST},
-  {"Generator", ParameterType::GENERATOR},
+  {"GeneratorHolder", ParameterType::GENERATOR},
   {"bool", ParameterType::BOOL},
   {"Storage", ParameterType::STORAGE},
   {"PyObject*", ParameterType::PYOBJECT},
@@ -318,7 +318,7 @@ std::string FunctionParameter::type_name() const {
     case ParameterType::COMPLEX: return "complex";
     case ParameterType::TENSOR_LIST: return "tuple of Tensors";
     case ParameterType::INT_LIST: return "tuple of ints";
-    case ParameterType::GENERATOR: return "torch.Generator";
+    case ParameterType::GENERATOR: return "torch.GeneratorHolder";
     case ParameterType::BOOL: return "bool";
     case ParameterType::STORAGE: return "torch.Storage";
     case ParameterType::PYOBJECT: return "object";

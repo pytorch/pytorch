@@ -145,14 +145,15 @@ inline int64_t prod_intlist(ArrayRef<int64_t> list) {
  * the backend generator type (CPU/CUDAGenerator etc.)
  */
 template <typename T>
-static inline T * get_generator_or_default(GeneratorHolder expr, Generator * defaultValue) {
-  if (!expr) {
-    expr.reset(defaultValue);
+static inline T* get_generator_or_default(GeneratorHolder expr, Generator* defaultValue) {
+  T* result = static_cast<T*>(expr ? expr.get() : defaultValue);
+  if (result == nullptr) {
+    AT_ERROR("Expected a '", T::device_type(), "' device type for generator but found 'nullptr'");
   }
-  if (T::device_type() == expr->device().type()) {
-    return static_cast<T*>(expr.get());
+  if (T::device_type() != result->device().type()) {
+    AT_ERROR("Expected a '", T::device_type(), "' device type for generator but found '", result->device().type(), "'");
   }
-  AT_ERROR("Expected a '", T::device_type(), "' device type for generator but found '", expr->device().type(), "'");
+  return result;
 }
 
 /**
