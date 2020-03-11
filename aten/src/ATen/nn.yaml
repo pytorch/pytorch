@@ -6,6 +6,9 @@
 - name: _thnn_multilabel_margin_loss(Tensor self, LongTensor target, int64_t reduction=at::Reduction::Mean)
   cname: MultiLabelMarginCriterion
   buffers: [is_target]
+  CUDA:
+    forward_scalar_types: ['Float', 'Double', 'Half', 'BFloat16']
+    backward_scalar_types: ['Float', 'Double', 'Half', 'BFloat16']
 
 - name: _thnn_nll_loss(Tensor self, LongTensor target, Tensor? weight, int64_t reduction, int64_t ignore_index)
   cname: ClassNLLCriterion
@@ -13,10 +16,16 @@
   CPU:
     forward_scalar_types: ['Float', 'Double', 'Half', 'BFloat16']
     backward_scalar_types: ['Float', 'Double', 'Half', 'BFloat16']
+  CUDA:
+    forward_scalar_types: ['Float', 'Double', 'Half', 'BFloat16']
+    backward_scalar_types: ['Float', 'Double', 'Half', 'BFloat16']
 
 - name: _thnn_nll_loss2d(Tensor self, LongTensor target, Tensor? weight, int64_t reduction, int64_t ignore_index)
   cname: SpatialClassNLLCriterion
   buffers: [total_weight]
+  CUDA:
+    forward_scalar_types: ['Float', 'Double', 'Half', 'BFloat16']
+    backward_scalar_types: ['Float', 'Double', 'Half', 'BFloat16']
 
 # Activation functions
 
