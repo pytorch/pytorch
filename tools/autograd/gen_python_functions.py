@@ -1362,7 +1362,7 @@ def make_python_binding_args(declaration):
         py_default_layout = 'layout_from_backend(self.options().backend())' if is_like_or_new_function_with_options else None
         layout_arg = {
             'default': 'torch.strided',
-            'dynamic_type': 'c10::optional<Layout>',
+            'dynamic_type': 'Layout',
             'kwarg_only': True,
             'name': 'layout',
             'type': 'c10::optional<Layout>',

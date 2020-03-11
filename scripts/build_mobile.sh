@@ -37,6 +37,7 @@ if [ -x "$(command -v ninja)" ]; then
 fi
 
 # Disable unused dependencies
+CMAKE_ARGS+=("-DUSE_ROCM=OFF")
 CMAKE_ARGS+=("-DUSE_CUDA=OFF")
 CMAKE_ARGS+=("-DUSE_GFLAGS=OFF")
 CMAKE_ARGS+=("-DUSE_OPENCV=OFF")
