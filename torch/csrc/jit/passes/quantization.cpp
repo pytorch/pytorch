@@ -731,7 +731,7 @@ ModuleMethodVector InsertObserversHelper::getInvokedMethods(
 void InsertObserversHelper::insertObserverFor(
     Value* v,
     Module& module,
-    const script::Module& observer_module,
+    const Module& observer_module,
     NameModuleVector& observer_name_and_modules) {
   if (observed_values_.count(v)) {
     return;
@@ -2007,12 +2007,12 @@ void FoldQuantNodesIntoInputsOutputs(std::shared_ptr<Graph>& graph) {
   throw std::runtime_error("Pass not implemented yet!");
 }
 
-void SwapFunctionalLinear(script::Module& module) {
+void SwapFunctionalLinear(Module& module) {
   for (auto& method : module.get_methods()) {
     std::shared_ptr<Graph> g = method.graph();
     SwapFunctionalLinear(g);
   }
-  for (script::Module m : module.children()) {
+  for (Module m : module.children()) {
     SwapFunctionalLinear(m);
   }
 }

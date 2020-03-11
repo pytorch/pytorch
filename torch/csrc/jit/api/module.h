@@ -556,7 +556,12 @@ TORCH_API bool& getInlineEverythingMode();
 namespace script {
 // We once had a `script::` namespace that was deleted. This is for backcompat
 // of the public API; new code should not use this type alias.
-using Module = ::torch::jit::Module;
+using Module C10_DEPRECATED_MESSAGE(
+    "torch::jit::script namespace is deprecated, "
+    "use just torch::jit instead") = ::torch::jit::Module;
+using ExtraFilesMap C10_DEPRECATED_MESSAGE(
+    "torch::jit::script namespace is deprecated, "
+    "use just torch::jit instead") = ::torch::jit::ExtraFilesMap;
 }
 
 } // namespace jit
