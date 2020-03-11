@@ -277,7 +277,7 @@ class TestOptim(TestCase):
 
     def test_sgd_sparse(self):
         self._test_rosenbrock_sparse(
-            lambda params: optim.SGD(params, lr=5e-3)
+            lambda params: optim.SGD(params, lr=4.8e-3)
         )
         self._test_rosenbrock_sparse(
             lambda params: optim.SGD(params, lr=0.0048),
