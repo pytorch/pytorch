@@ -184,10 +184,14 @@ pytorch_params: &pytorch_params
     use_cuda_docker_runtime:
       type: string
       default: ""
+    build_only:
+      type: string
+      default: ""
   environment:
     BUILD_ENVIRONMENT: << parameters.build_environment >>
     DOCKER_IMAGE: << parameters.docker_image >>
     USE_CUDA_DOCKER_RUNTIME: << parameters.use_cuda_docker_runtime >>
+    BUILD_ONLY: << parameters.build_only >>
   resource_class: << parameters.resource_class >>
 
 pytorch_ios_params: &pytorch_ios_params
@@ -1233,54 +1237,6 @@ jobs:
       - store_test_results:
           path: test/test-reports
 
-  pytorch_macos_10_13_cuda10_0_cudnn7_py3_build:
-    environment:
-      BUILD_ENVIRONMENT: pytorch-macos-10.13-cuda10.0-cudnn7-py3-build
-    macos:
-      xcode: "9.4.1"
-    steps:
-      # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-      - should_run_job
-      - checkout
-      - run_brew_for_macos_build
-      - run:
-          name: Build
-          no_output_timeout: "1h"
-          command: |
-            set -e
-
-            export IN_CIRCLECI=1
-
-            # Install CUDA 10.0
-            sudo rm -rf ~/CUDAMacOSXInstaller.app || true
-            curl --retry 3 https://s3.amazonaws.com/ossci-macos/cuda_10.0.130_mac_installer.zip -o ~/cuda_10.0.130_mac_installer.zip
-            unzip ~/cuda_10.0.130_mac_installer.zip -d ~/
-            sudo ~/CUDAMacOSXInstaller.app/Contents/MacOS/CUDAMacOSXInstaller --accept-eula --no-window
-            sudo cp /usr/local/cuda/lib/libcuda.dylib /Developer/NVIDIA/CUDA-10.0/lib/libcuda.dylib
-            sudo rm -rf /usr/local/cuda || true
-
-            # Install cuDNN 7.6.5 for CUDA 10.0
-            curl --retry 3 https://s3.amazonaws.com/ossci-macos/cudnn-10.0-osx-x64-v7.6.5.32.tgz -o ~/cudnn-10.0-osx-x64-v7.6.5.32.tgz
-            rm -rf ~/cudnn-10.0-osx-x64-v7.6.5.32 && mkdir ~/cudnn-10.0-osx-x64-v7.6.5.32
-            tar -xzvf ~/cudnn-10.0-osx-x64-v7.6.5.32.tgz -C ~/cudnn-10.0-osx-x64-v7.6.5.32
-            sudo cp ~/cudnn-10.0-osx-x64-v7.6.5.32/cuda/include/cudnn.h /Developer/NVIDIA/CUDA-10.0/include/
-            sudo cp ~/cudnn-10.0-osx-x64-v7.6.5.32/cuda/lib/libcudnn* /Developer/NVIDIA/CUDA-10.0/lib/
-            sudo chmod a+r /Developer/NVIDIA/CUDA-10.0/include/cudnn.h /Developer/NVIDIA/CUDA-10.0/lib/libcudnn*
-
-            # Install sccache
-            sudo curl --retry 3 https://s3.amazonaws.com/ossci-macos/sccache --output /usr/local/bin/sccache
-            sudo chmod +x /usr/local/bin/sccache
-            export SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2
-            # This IAM user allows write access to S3 bucket for sccache
-            set +x
-            export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V4}
-            export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V4}
-            set -x
-
-            git submodule sync && git submodule update -q --init --recursive
-            chmod a+x .jenkins/pytorch/macos-build.sh
-            unbuffer .jenkins/pytorch/macos-build.sh 2>&1 | ts
-
   pytorch_android_gradle_build:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build
@@ -1522,7 +1478,6 @@ jobs:
             if [ -n "${SELECTED_OP_LIST}" ]; then
                 export SELECTED_OP_LIST="${PROJ_ROOT}/ios/TestApp/custom_build/${SELECTED_OP_LIST}"
             fi
-            export BUILD_PYTORCH_MOBILE=1
             export IOS_ARCH=${IOS_ARCH}
             export IOS_PLATFORM=${IOS_PLATFORM}
             unbuffer ${PROJ_ROOT}/scripts/build_ios.sh 2>&1 | ts
@@ -1539,7 +1494,11 @@ jobs:
               exit 1
             fi
             echo ${IOS_DEV_TEAM_ID}
-            ruby ${PROJ_ROOT}/scripts/xcode_build.rb -i ${PROJ_ROOT}/build_ios/install -x ${PROJ_ROOT}/ios/TestApp/TestApp.xcodeproj -p ${IOS_PLATFORM} -c ${PROFILE} -t ${IOS_DEV_TEAM_ID}
+            if [ ${IOS_PLATFORM} != "SIMULATOR" ]; then
+              ruby ${PROJ_ROOT}/scripts/xcode_build.rb -i ${PROJ_ROOT}/build_ios/install -x ${PROJ_ROOT}/ios/TestApp/TestApp.xcodeproj -p ${IOS_PLATFORM} -c ${PROFILE} -t ${IOS_DEV_TEAM_ID}
+            else
+              ruby ${PROJ_ROOT}/scripts/xcode_build.rb -i ${PROJ_ROOT}/build_ios/install -x ${PROJ_ROOT}/ios/TestApp/TestApp.xcodeproj -p ${IOS_PLATFORM}
+            fi
             if ! [ "$?" -eq "0" ]; then
               echo 'xcodebuild failed!'
               exit 1
@@ -2290,9 +2249,6 @@ workflows:
           requires:
             - setup
             - pytorch_macos_10_13_py3_build
-      - pytorch_macos_10_13_cuda10_0_cudnn7_py3_build:
-          requires:
-            - setup
       - pytorch_android_gradle_build-x86_32:
           name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build-x86_32
           requires:
@@ -2308,7 +2264,6 @@ workflows:
       # Pytorch iOS PR builds
       - pytorch_ios_build:
           name: pytorch_ios_11_2_1_x86_64_build
-          context: org-member
           build_environment: "pytorch-ios-11.2.1-x86_64_build"
           ios_arch: "x86_64"
           ios_platform: "SIMULATOR"
@@ -2338,18 +2293,21 @@ workflows:
           requires:
             - setup
           build_environment: "pytorch-linux-xenial-py3-clang5-mobile-build"
+          build_only: "1"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-asan:f990c76a-a798-42bb-852f-5be5006f8026"
       - pytorch_linux_build:
           name: pytorch_linux_xenial_py3_clang5_mobile_custom_build_static
           requires:
             - setup
           build_environment: "pytorch-linux-xenial-py3-clang5-mobile-custom-build-static"
+          build_only: "1"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-asan:f990c76a-a798-42bb-852f-5be5006f8026"
       - pytorch_linux_build:
           name: pytorch_linux_xenial_py3_clang5_mobile_custom_build_dynamic
           requires:
             - setup
           build_environment: "pytorch-linux-xenial-py3-clang5-mobile-custom-build-dynamic"
+          build_only: "1"
           # Use LLVM-DEV toolchain in android-ndk-r19c docker image
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:f990c76a-a798-42bb-852f-5be5006f8026"
       - pytorch_linux_build:
@@ -2363,6 +2321,7 @@ workflows:
                 - master
                 - /ci-all\/.*/
           build_environment: "pytorch-linux-xenial-py3-clang5-mobile-code-analysis"
+          build_only: "1"
           # Use LLVM-DEV toolchain in android-ndk-r19c docker image
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:f990c76a-a798-42bb-852f-5be5006f8026"
       - pytorch_linux_test:
@@ -2437,13 +2396,13 @@ workflows:
           build_environment: "manywheel 2.7mu cpu devtoolset7"
           requires:
             - setup
-          docker_image: "pytorch/manylinux-cuda100"
+          docker_image: "pytorch/manylinux-cuda102"
       - binary_linux_build:
-          name: binary_linux_manywheel_3_7m_cu100_devtoolset7_build
-          build_environment: "manywheel 3.7m cu100 devtoolset7"
+          name: binary_linux_manywheel_3_7m_cu102_devtoolset7_build
+          build_environment: "manywheel 3.7m cu102 devtoolset7"
           requires:
             - setup
-          docker_image: "pytorch/manylinux-cuda100"
+          docker_image: "pytorch/manylinux-cuda102"
       - binary_linux_build:
           name: binary_linux_conda_2_7_cpu_devtoolset7_build
           build_environment: "conda 2.7 cpu devtoolset7"
@@ -2458,7 +2417,7 @@ workflows:
           requires:
             - setup
           libtorch_variant: "shared-with-deps"
-          docker_image: "pytorch/manylinux-cuda100"
+          docker_image: "pytorch/manylinux-cuda102"
       - binary_linux_build:
           name: binary_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_shared-with-deps_build
           build_environment: "libtorch 2.7m cpu gcc5.4_cxx11-abi"
@@ -2495,14 +2454,14 @@ workflows:
           requires:
             - setup
             - binary_linux_manywheel_2_7mu_cpu_devtoolset7_build
-          docker_image: "pytorch/manylinux-cuda100"
+          docker_image: "pytorch/manylinux-cuda102"
       - binary_linux_test:
-          name: binary_linux_manywheel_3_7m_cu100_devtoolset7_test
-          build_environment: "manywheel 3.7m cu100 devtoolset7"
+          name: binary_linux_manywheel_3_7m_cu102_devtoolset7_test
+          build_environment: "manywheel 3.7m cu102 devtoolset7"
           requires:
             - setup
-            - binary_linux_manywheel_3_7m_cu100_devtoolset7_build
-          docker_image: "pytorch/manylinux-cuda100"
+            - binary_linux_manywheel_3_7m_cu102_devtoolset7_build
+          docker_image: "pytorch/manylinux-cuda102"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
@@ -2521,7 +2480,7 @@ workflows:
             - setup
             - binary_linux_libtorch_2_7m_cpu_devtoolset7_shared-with-deps_build
           libtorch_variant: "shared-with-deps"
-          docker_image: "pytorch/manylinux-cuda100"
+          docker_image: "pytorch/manylinux-cuda102"
       - binary_linux_test:
           name: binary_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_shared-with-deps_test
           build_environment: "libtorch 2.7m cpu gcc5.4_cxx11-abi"
