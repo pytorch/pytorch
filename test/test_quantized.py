@@ -1,7 +1,6 @@
 from __future__ import division
 from builtins import round
 
-import math
 import numpy as np
 import unittest
 
