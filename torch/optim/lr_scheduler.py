@@ -401,7 +401,8 @@ class MultiStepLR(_LRScheduler):
                 for group in self.optimizer.param_groups]
 
     def _get_closed_form_lr(self):
-        return [base_lr * self.gamma ** bisect_right(self.milestones, self.last_epoch)
+        milestones = list(sorted(self.milestones.elements()))
+        return [base_lr * self.gamma ** bisect_right(milestones, self.last_epoch)
                 for base_lr in self.base_lrs]
 
 

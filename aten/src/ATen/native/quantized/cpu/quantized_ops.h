@@ -19,7 +19,7 @@ using qelu_fn = void(*)(
     const at::Tensor& /*qx*/,
     Scalar /*alpha*/,
     at::Tensor& /*qy*/);
-using qadd_fn =
+using qbinary_fn =
     void (*)(Tensor& /*out*/, const Tensor& /*self*/, const Tensor& /*other*/);
 using qmaxpool_2d_fn = void (*)(
     const Tensor& qx,
@@ -121,9 +121,11 @@ DECLARE_DISPATCH(qrelu_leaky_fn, qrelu_leaky_stub);
 DECLARE_DISPATCH(qsigmoid_fn, qsigmoid_stub);
 DECLARE_DISPATCH(qclamp_fn, qclamp_stub);
 DECLARE_DISPATCH(qtanh_fn, qtanh_stub);
+DECLARE_DISPATCH(qbinary_fn, qadd_stub);
+DECLARE_DISPATCH(qbinary_fn, qadd_relu_stub);
+DECLARE_DISPATCH(qbinary_fn, qmul_stub);
+DECLARE_DISPATCH(qbinary_fn, qmul_relu_stub);
 DECLARE_DISPATCH(qelu_fn, qelu_stub);
-DECLARE_DISPATCH(qadd_fn, qadd_stub);
-DECLARE_DISPATCH(qadd_fn, qadd_relu_stub);
 DECLARE_DISPATCH(qmaxpool_2d_fn, qmaxpool_2d_nhwc_stub);
 DECLARE_DISPATCH(qadaptive_avg_pool2d_fn, qadaptive_avg_pool2d_nhwc_stub);
 DECLARE_DISPATCH(qavg_pool2d_fn, qavg_pool2d_nhwc_stub);
