@@ -241,7 +241,7 @@ std::shared_ptr<rpc::FutureMessage> DistEngine::runEngineAndAccumulateGradients(
         }
 
         accumulateGradFuture->markCompleted(rpc::Message());
-        LOG(INFO) <<"accumulateGradFuture is marked as completed";
+        LOG(ERROR) <<"accumulateGradFuture is marked as completed";
       });
 
   return accumulateGradFuture;
@@ -264,7 +264,7 @@ std::shared_ptr<rpc::FutureMessage> DistEngine::executeSendFunctionAsync(
     initializedContextIds_.insert(autogradContext->contextId());
     lock.unlock();
 
-    LOG(INFO)<<"ExecuteSendFunctionAsync on autograd context: " << autogradContext->contextId();
+    LOG(ERROR)<<"ExecuteSendFunctionAsync on autograd context: " << autogradContext->contextId();
 
     // Enqueue the current send function.
     auto graphTask = autogradContext->retrieveGraphTask();
@@ -312,7 +312,7 @@ std::shared_ptr<rpc::FutureMessage> DistEngine::executeSendFunctionAsync(
               });
         });
 
-    LOG(INFO)<<"ExecuteSendFunctionAsync futureGrads added callback on autograd context: " << autogradContext->contextId();
+    LOG(ERROR)<<"ExecuteSendFunctionAsync futureGrads added callback on autograd context: " << autogradContext->contextId();
 
     // Return the future which waits for all async processing to be done.
     return callbackFuture;
@@ -334,7 +334,7 @@ void DistEngine::execute(
   auto autogradContext =
       DistAutogradContainer::getInstance().retrieveContext(contextId);
 
-  LOG(INFO)<<"Dist engine execute on autograd context: " << autogradContext->contextId();
+  LOG(ERROR)<<"Dist engine execute on autograd context: " << autogradContext->contextId();
   // Perform initial pre-processing.
   edge_list rootEdges;
   variable_list grads;
