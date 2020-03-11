@@ -1034,7 +1034,7 @@
   indices: non_differentiable
   self: not_implemented("embedding_renorm")
 
-- name: kl_div(Tensor self, Tensor target, int reduction=Mean) -> Tensor
+- name: kl_div(Tensor self, Tensor target, int reduction=Mean, bool is_target_log_space=False) -> Tensor
   self: kl_div_backward(grad, self, target, reduction)
   target: kl_div_target_backward(grad, self, target, reduction)
 
