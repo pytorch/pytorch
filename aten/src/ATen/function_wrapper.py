@@ -587,6 +587,7 @@ FunctionCode = NamedTuple('FunctionCode', [
 OpRegistration = NamedTuple('OpRegistration', [
     ('operator_name', str),
     ('registration_code', str),
+    ('schema_registration_code', str),
 ])
 
 
@@ -1212,17 +1213,20 @@ def create_generic(top_env, declarations):
             top_env['type_method_definitions'].append(NATIVE_DISPATCH_DEFINITION_DEFAULT.substitute(option))
             op_registrations.append(OpRegistration(
                 operator_name=OPERATOR_NAME.substitute(option),
-                registration_code=SCHEMA_REGISTRATION.substitute(option)))
+                registration_code=SCHEMA_REGISTRATION.substitute(option),
+                schema_registration_code=SCHEMA_REGISTRATION.substitute(option)))
             if not option['manual_kernel_registration']:
                 if option['use_c10_dispatcher'] == 'full':
                     op_registrations.append(OpRegistration(
                         operator_name=OPERATOR_NAME.substitute(option),
-                        registration_code=DEFAULT_FUNCTION_REGISTRATION.substitute(option)))
+                        registration_code=DEFAULT_FUNCTION_REGISTRATION.substitute(option),
+                        schema_registration_code=SCHEMA_REGISTRATION.substitute(option)))
                 else:
                     assert option['use_c10_dispatcher'] == 'unboxed_only'
                     op_registrations.append(OpRegistration(
                         operator_name=OPERATOR_NAME.substitute(option),
-                        registration_code=DEFAULT_UNBOXEDONLY_FUNCTION_REGISTRATION.substitute(option)))
+                        registration_code=DEFAULT_UNBOXEDONLY_FUNCTION_REGISTRATION.substitute(option),
+                        schema_registration_code=SCHEMA_REGISTRATION.substitute(option)))
 
         # generate the at::native function declarations (i.e. what the user will implement)
         if isinstance(type_method_dispatch, dict):
@@ -1570,12 +1574,14 @@ def create_derived(backend_type_env, declarations):
                     if option['use_c10_dispatcher'] == 'full':
                         op_registrations.append(OpRegistration(
                             operator_name=OPERATOR_NAME.substitute(option),
-                            registration_code=BACKEND_FUNCTION_REGISTRATION.substitute(env)))
+                            registration_code=BACKEND_FUNCTION_REGISTRATION.substitute(env),
+                            schema_registration_code=SCHEMA_REGISTRATION.substitute(option)))
                     else:
                         assert option['use_c10_dispatcher'] == 'unboxed_only'
                         op_registrations.append(OpRegistration(
                             operator_name=OPERATOR_NAME.substitute(option),
-                            registration_code=BACKEND_UNBOXEDONLY_FUNCTION_REGISTRATION.substitute(env)))
+                            registration_code=BACKEND_UNBOXEDONLY_FUNCTION_REGISTRATION.substitute(env),
+                            schema_registration_code=SCHEMA_REGISTRATION.substitute(option)))
 
     for declaration in declarations:
         for option in declaration['options']:
