@@ -1,5 +1,6 @@
 #pragma once
 
+#include <torch/csrc/jit/codegen/cuda/dispatch.h>
 #include <iostream>
 
 namespace torch {
