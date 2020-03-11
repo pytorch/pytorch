@@ -164,8 +164,9 @@ std::shared_ptr<FutureMessage> RRefContext::delUser(
         RRefUserDelete(rrefId, forkId).toMessage());
 
     responseMessageFuturePtr->addCallback(
-        [](const Message& /* unused */,
-           const c10::optional<utils::FutureError>& futErr) {
+        [this, forkId](
+            const Message& /* unused */,
+            const c10::optional<utils::FutureError>& futErr) {
           handleException(futErr);
           std::lock_guard<std::mutex> lock(mutex_);
           confirmedUsers_.erase(forkId);
@@ -193,7 +194,10 @@ void RRefContext::delAllUsers(std::chrono::milliseconds timeoutMillis) {
   // Note, there should be no new forkings in between, because it's assumed that
   // this utility is called during graceful shutdown, where no new user RPCs can
   // not be initiaited anymore.
-  for (const auto& user : confirmedUsers_) {
+  std::unordered_map<ForkId, c10::weak_intrusive_ptr<RRef>, ForkId::Hash>
+      confirmedUsers(confirmedUsers_);
+  lock.unlock();
+  for (const auto& user : confirmedUsers) {
     c10::intrusive_ptr<RRef> rref_ptr = user.second.lock();
     if (!rref_ptr) {
       continue;
