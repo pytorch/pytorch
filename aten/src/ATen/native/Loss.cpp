@@ -76,14 +76,24 @@ Tensor margin_ranking_loss(const Tensor& input1, const Tensor& input2, const Ten
   return apply_loss_reduction(output, reduction);
 }
 
-Tensor kl_div(const Tensor& input, const Tensor& target, int64_t reduction, bool log_target) {
-  auto&& target_transformed = log_target ? at::exp(target) : at::log(target);
-  auto&& target_orig_space = log_target ? target_transformed : target;
-  auto&& target_log_space = log_target ? target : target_transformed;
-  auto output_pos = target_orig_space * (target_log_space - input);
+Tensor _kl_div_log_target(const Tensor& input, const Tensor& target, int64_t reduction) {
+  auto exp_target = at::exp(target);
+  auto output_pos = exp_target * (target - input);
+  auto zeros = at::zeros_like(output_pos, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto output = at::where(exp_target > 0, output_pos, zeros);
+  return apply_loss_reduction(output, reduction);
+}
+
+Tensor _kl_div_non_log_target(const Tensor& input, const Tensor& target, int64_t reduction) {
+  auto output_pos = target * (at::log(target) - input);
   auto zeros = at::zeros_like(output_pos, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   auto output = at::where(target > 0, output_pos, zeros);
   return apply_loss_reduction(output, reduction);
+}
+
+Tensor kl_div(const Tensor& input, const Tensor& target, int64_t reduction, bool log_target) {
+  return log_target ? _kl_div_log_target(input, target, reduction)
+                    : _kl_div_non_log_target(input, target, reduction);
 }
 
 Tensor kl_div_backward_cpu(const Tensor& grad, const Tensor& input, const Tensor& target, int64_t reduction, bool log_target) {
