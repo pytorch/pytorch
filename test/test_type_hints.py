@@ -179,8 +179,7 @@ class TestTypeHints(TestCase):
         for i in examples:
             process = subprocess.Popen(['mypy', os.getcwd()+'/test/type_hint_tests/'+i], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             stdout, stderr = process.communicate()
-        print(process)
-        print(stdout, stderr)
+        print(stdout)
 
 if __name__ == '__main__':
     run_tests()
