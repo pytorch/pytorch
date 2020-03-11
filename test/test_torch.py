@@ -5475,6 +5475,56 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             model.weight.data = weight
             out = model(input)
 
+    def test_bucketization(self):
+        for device in ['cpu', 'cuda']:
+            values_1d = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8, 9], device=device)
+            values_3d = torch.tensor([[[1, 3, 5], [2, 4, 6]], [[1, 2, 3], [4, 5, 6]]], device=device)
+
+            # regular case 3d boundary and 3d input value
+            boundaries = torch.tensor([[[1, 2, 3, 4], [3, 4, 5, 6]], [[1, 3, 5, 7], [2, 4, 6, 8]]], device=device)
+            result = torch.tensor([[[0, 2, 4], [0, 1, 3]], [[0, 1, 1], [1, 2, 2]]], device=device)
+            self.assertEqual(torch.equal(torch.searchsorted(boundaries, values_3d), result), True)
+            result = torch.tensor([[[1, 3, 4], [0, 2, 4]], [[1, 1, 2], [2, 2, 3]]], device=device)
+            self.assertEqual(torch.equal(torch.searchsorted(boundaries, values_3d, right=True), result), True)
+
+            # simple 1d boundary and 3d input value
+            boundaries = torch.tensor([1, 2, 3, 4, 5, 6], device=device)
+            result = torch.tensor([[[0, 2, 4], [1, 3, 5]], [[0, 1, 2], [3, 4, 5]]], device=device)
+            self.assertEqual(torch.equal(torch.searchsorted(boundaries, values_3d), result), True)
+            self.assertEqual(torch.equal(torch.bucketize(values_3d, boundaries), result), True)
+            result = torch.tensor([[[1, 3, 5], [2, 4, 6]], [[1, 2, 3], [4, 5, 6]]], device=device)
+            self.assertEqual(torch.equal(torch.searchsorted(boundaries, values_3d, right=True), result), True)
+            self.assertEqual(torch.equal(torch.bucketize(values_3d, boundaries, right=True), result), True)
+
+            # simple float 1d boundary and 1d input with output int32 type
+            values_1d_float = values_1d.to(torch.float32)
+            boundaries = torch.tensor([0.9, 1, 2, 2, 3, 3, 4, 4.1, 9, 9], device=device, dtype=torch.float32)
+            result = torch.tensor([1, 2, 4, 6, 8, 8, 8, 8, 8], device=device, dtype=torch.int32)
+            self.assertEqual(torch.equal(torch.searchsorted(boundaries, values_1d_float, out_int32=True), result), True)
+            self.assertEqual(torch.equal(torch.bucketize(values_1d_float, boundaries, out_int32=True), result), True)
+
+            # multiple dimension input with 0 elements
+            boundaries = torch.tensor([1, 2, 3, 4, 5, 6], device=device, dtype=torch.int64)
+            values_0_el = torch.tensor([[[]]], device=device, dtype=torch.int64)
+            result = values_0_el.to(torch.int64)
+            self.assertEqual(torch.equal(torch.searchsorted(boundaries, values_0_el), result), True)
+            self.assertEqual(torch.equal(torch.bucketize(values_0_el, boundaries), result), True)
+
+            # different dtype input tensors
+            values_1d_float = values_1d.to(torch.float32)
+            boundaries = torch.tensor([0.9, 1, 2, 2, 3], device=device, dtype=torch.int32)
+            with self.assertRaisesRegex(RuntimeError, "tensors should have same dtype"):
+                torch.searchsorted(boundaries, values_1d_float)
+
+            # invalid input dimensions
+            boundaries = torch.tensor([[1, 2, 3], [4, 5, 6]], device=device)
+            with self.assertRaisesRegex(
+                    RuntimeError, "first N-1 dimensions of boundaries tensor and input value tensor must match"):
+                torch.searchsorted(boundaries, values_3d)
+            with self.assertRaisesRegex(
+                    RuntimeError, "boundaries tensor must be 1 dimension"):
+                torch.bucketize(values_3d, boundaries)
+
 # Functions to test negative dimension wrapping
 METHOD = 1
 INPLACE_METHOD = 2
