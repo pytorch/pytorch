@@ -3,7 +3,6 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 import torch
 from torch import tensor
 import unittest
-import warnings
 
 class TestIndexing(TestCase):
     def test_single_int(self, device):
