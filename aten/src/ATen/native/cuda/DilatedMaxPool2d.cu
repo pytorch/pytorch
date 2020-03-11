@@ -253,13 +253,14 @@ __global__ void max_pool_backward_nhwc(const int nthreads, const scalar_t* top_d
     for (int iw = istartW; iw < iendW; iw+=blockDim.y) {
       int pwstart = p_start(iw, pad_w, kernel_w, dilation_w, stride_w);
       int pwend = p_end(iw, pad_w, pooled_width, stride_w);
+      int index_shift = ih * width + iw; 
       if ((phstart + 1 != phend) || (pwstart + 1 != pwend)) {
         for(int oh = phstart; oh < phend; ++oh) {
           for(int ow = pwstart; ow < pwend; ++ow) {
             int cached_index = threadIdx.x; 
             const int64_t* ptr_top_mask = top_mask + oh * out_stride_h + ow * out_stride_w;
             for (int c = channel_offset; c < channels; c += blockDim.x*kernel_stride_C) {
-              if (ptr_top_mask[c*out_stride_c] == ih * width + iw) {
+              if (ptr_top_mask[c*out_stride_c] == index_shift) {
                 out_cached[cached_index] += 
                   scalar_cast<scalar_t>(top_diff[oh * out_stride_h + ow * out_stride_w + c*out_stride_c]);
               }
@@ -267,7 +268,7 @@ __global__ void max_pool_backward_nhwc(const int nthreads, const scalar_t* top_d
             }
           }
         }
-        scalar_t *ptr_bottom_diff = bottom_diff + (ih * width + iw) * channels;
+        scalar_t *ptr_bottom_diff = bottom_diff + index_shift * channels;
         int cached_index = threadIdx.x; 
         for (int c = channel_offset; c < channels; c += blockDim.x*kernel_stride_C) {
           ptr_bottom_diff[c] = out_cached[cached_index];
@@ -276,10 +277,10 @@ __global__ void max_pool_backward_nhwc(const int nthreads, const scalar_t* top_d
         }
       } else {
         const int64_t* ptr_top_mask = top_mask + phstart * out_stride_h + pwstart * out_stride_w;
-        scalar_t *ptr_bottom_diff = bottom_diff + (ih * width + iw) * channels;
+        scalar_t *ptr_bottom_diff = bottom_diff + index_shift * channels;
         int cached_index = threadIdx.x; 
         for (int c = channel_offset; c < channels; c += blockDim.x*kernel_stride_C) {
-          if (ptr_top_mask[c*out_stride_c] == ih * width + iw) {
+          if (ptr_top_mask[c*out_stride_c] == index_shift) {
             ptr_bottom_diff[c] = 
               scalar_cast<scalar_t>(top_diff[phstart * out_stride_h + pwstart * out_stride_w + c*out_stride_c]);
           }
@@ -576,6 +577,9 @@ void max_pool2d_with_indices_backward_out_cuda_template(
             size_t shmem_size = (kernel_size_C * block_x*block_y*block_z) * sizeof(scalar_t);
             AT_ASSERT(shmem_size <= at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock); 
 
+            // The backward kernel is launched on input instead output. 
+            // If it is launched on output layer, atomic_add would not provide much benefit on FP16. 
+            // Please check comments at https://github.com/pytorch/pytorch/pull/34519. 
             max_pool_backward_nhwc<scalar_t, accscalar_t>
             <<<grid, block, shmem_size, at::cuda::getCurrentCUDAStream()>>>(
                 count,
