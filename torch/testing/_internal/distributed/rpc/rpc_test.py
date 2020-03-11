@@ -1694,37 +1694,3 @@ class RpcTest(RpcAgentTestFixture):
         # cuda tensors as a list of return value fails
         with self.assertRaisesRegex(RuntimeError, "RPC backend only supports CPU tensors.*Found tensor on device: cuda:0"):
             rpc.rpc_sync(dst, RpcTest._return_gpu_tensor_list, args=())
-
-
-@unittest.skipIf(
-    sys.version_info < (3, 0),
-    "Pytorch distributed rpc package " "does not support python2",
-)
-class RpcJitTest(RpcAgentTestFixture):
-    @dist_init
-    def test_rref_as_arg(self):
-        n = self.rank + 1
-        dst_rank = n % self.world_size
-        rref_var = rpc_return_rref("worker{}".format(dst_rank))
-
-        @torch.jit.script
-        def rref_tensor_to_here(rref_var):
-            # type: (RRef[Tensor]) -> Tensor
-            return rref_var.to_here()
-
-        res = rref_tensor_to_here(rref_var)
-        self.assertEqual(res, torch.ones(2, 2) + 1)
-
-    @dist_init
-    def test_rref_is_owner(self):
-        n = self.rank + 1
-        dst_rank = n % self.world_size
-        rref_var = rpc_return_rref("worker{}".format(dst_rank))
-
-        @torch.jit.script
-        def rref_tensor_is_owner(rref_var):
-            # type: (RRef[Tensor]) -> bool
-            return rref_var.is_owner()
-
-        res = rref_tensor_is_owner(rref_var)
-        self.assertEqual(res, False)
