@@ -86,6 +86,11 @@ struct TORCH_API RNNCellOptionsBase {
 } // namespace detail
 
 /// Options for RNNCell modules.
+///
+/// Example:
+/// ```
+/// RNNCell model(RNNCellOptions(20, 10).bias(false).nonlinearity(torch::kReLU));
+/// ```
 struct TORCH_API RNNCellOptions {
   typedef c10::variant<enumtype::kTanh, enumtype::kReLU> nonlinearity_t;
 
@@ -103,6 +108,11 @@ struct TORCH_API RNNCellOptions {
 };
 
 /// Options for LSTMCell modules.
+///
+/// Example:
+/// ```
+/// LSTMCell model(LSTMCellOptions(20, 10).bias(false));
+/// ```
 struct TORCH_API LSTMCellOptions {
   LSTMCellOptions(int64_t input_size, int64_t hidden_size);
 
@@ -116,6 +126,11 @@ struct TORCH_API LSTMCellOptions {
 };
 
 /// Options for GRUCell modules.
+///
+/// Example:
+/// ```
+/// GRUCell model(GRUCellOptions(20, 10).bias(false));
+/// ```
 struct TORCH_API GRUCellOptions {
   GRUCellOptions(int64_t input_size, int64_t hidden_size);
 
