@@ -97,8 +97,7 @@ backend_test.exclude(r'(test_hardsigmoid'  # Does not support Hardsigmoid.
                      '|test_argmax_.*select_last_index.*'  # unsupported case
                      '|test_argmin_.*select_last_index_.*'  # unsupported case
                      '|test_gradient_of_add_and_mul_cpu'  # cannot translate Gradient op
-                     '|test_celu_cpu'  # cannot translate Celu op
-                     '|test_celu_expanded_cpu'
+                     '|test_celu.*'  # cannot translate Celu op
                      '|test_gradient_of_add_cpu' # cannot translate Gradient op
                      '|test_greater_equal.*'
                      '|test_min_.*_cpu'  # Tensor type mismatch
