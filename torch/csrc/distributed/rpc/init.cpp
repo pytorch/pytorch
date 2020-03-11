@@ -23,6 +23,8 @@ namespace rpc {
 
 namespace {
 
+constexpr std::chrono::milliseconds kDeleteAllUsersTimeout(100000);
+
 template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
 
@@ -335,7 +337,7 @@ If the future completes with an error, an exception is thrown.
       [](std::chrono::milliseconds timeoutMillis) {
         RRefContext::getInstance().delAllUsers(timeoutMillis);
       },
-      py::arg("timeout") = std::chrono::milliseconds(10000));
+      py::arg("timeout") = kDeleteAllUsersTimeout);
 
   module.def("_destroy_rref_context", [](bool ignoreRRefLeak) {
     // NB: do not release GIL in the function. The destroyInstance() method

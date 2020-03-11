@@ -268,7 +268,7 @@ class TORCH_API UserRRef final : public RRef {
   // https://github.com/pytorch/pytorch/blob/9116f02bebf3a5260feef5732d36c54ecb3b4033/c10/util/intrusive_ptr.h#L204
   // This is called on destructing the wrapping intrusive_ptr_target instance
   // and it's data members. We don't need to implement anything here.
-  ~UserRRef() override;
+  ~UserRRef() = default;
 
  private:
   friend class RRefContext;

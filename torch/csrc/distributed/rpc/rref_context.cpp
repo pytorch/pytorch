@@ -14,7 +14,7 @@ void confirmPendingUser(
   RRefContext::handleException(futErr);
   auto rr = RemoteRet::fromMessage(message);
   auto& ctx = RRefContext::getInstance();
-  ctx.confirmPendingUser(rr->forkId());
+  ctx.delPendingUser(rr->forkId());
 }
 
 c10::intrusive_ptr<RRef> finishCreatingOwnerRRef(
@@ -177,10 +177,12 @@ void RRefContext::delAllUsers(std::chrono::milliseconds timeoutMillis) {
   // one kind is pendingUsers_, which are shared from Owner,
   // the other kind pendingChildren_, which are shared from another User.
   std::unique_lock<std::mutex> lock(mutex_);
-  bool noPending = pendingReduceCV_.wait_for(lock, timeoutMillis, [this]() {
-    return pendingUsers_.size() == 0 && pendingChildren_.size() == 0;
-  });
-  if (!noPending) {
+  bool noPendingAndOwner =
+      pendingReducedCV_.wait_for(lock, timeoutMillis, [this]() {
+        return pendingUsers_.size() == 0 && pendingChildren_.size() == 0 &&
+            owners_.size() == 0;
+      });
+  if (!noPendingAndOwner) {
     LOG(ERROR)
         << "Timed out waiting for pending UserRRefs to be confirmed by owner and parent.";
   }
@@ -396,7 +398,7 @@ void RRefContext::delPendingChild(const ForkId& forkId) {
         "Inconsistent states: attempt to delete a non-exist child fork.");
     pendingChildren_.erase(iter);
   }
-  pendingReduceCV_.notify_all();
+  pendingReducedCV_.notify_all();
 }
 
 void RRefContext::addPendingUser(
@@ -411,7 +413,7 @@ void RRefContext::addPendingUser(
   pendingUsers_[forkId] = rref;
 }
 
-void RRefContext::confirmPendingUser(const ForkId& forkId) {
+void RRefContext::delPendingUser(const ForkId& forkId) {
   {
     std::lock_guard<std::mutex> lock(mutex_);
     auto iter = pendingUsers_.find(forkId);
@@ -424,11 +426,11 @@ void RRefContext::confirmPendingUser(const ForkId& forkId) {
         std::forward_as_tuple(iter->second));
     pendingUsers_.erase(iter);
   }
-  pendingReduceCV_.notify_all();
+  pendingReducedCV_.notify_all();
 }
 
 void RRefContext::finishForkRequest(const ForkId& forkId, worker_id_t parent) {
-  confirmPendingUser(forkId);
+  delPendingUser(forkId);
   auto fm = agent_->send(
       agent_->getWorkerInfo(parent), RRefChildAccept(forkId).toMessage());
 
@@ -464,6 +466,7 @@ c10::intrusive_ptr<RRef> RRefContext::delForkOfOwner(
     const RRefId& rrefId,
     const ForkId& forkId) {
   c10::intrusive_ptr<RRef> deletedRRef;
+  bool ownerReduced = false;
   {
     std::lock_guard<std::mutex> lock(mutex_);
     auto rrefIter = forks_.find(rrefId);
@@ -484,9 +487,13 @@ c10::intrusive_ptr<RRef> RRefContext::delForkOfOwner(
       if (ownerIter != owners_.end()) {
         deletedRRef = ownerIter->second;
         owners_.erase(ownerIter);
+        ownerReduced = true;
       }
       forks_.erase(rrefIter);
     }
+  }
+  if (ownerReduced) {
+    pendingReducedCV_.notify_all();
   }
   return deletedRRef;
 }

@@ -145,7 +145,7 @@ class TORCH_API RRefContext {
   void addPendingUser(
       const ForkId& forkId,
       const c10::intrusive_ptr<RRef>& rref);
-  void confirmPendingUser(const ForkId& forkId);
+  void delPendingUser(const ForkId& forkId);
 
   void delUser(
       const worker_id_t owner,
@@ -196,7 +196,7 @@ class TORCH_API RRefContext {
       RRefId::Hash>
       forks_;
 
-  std::condition_variable pendingReduceCV_;
+  std::condition_variable pendingReducedCV_;
   // The follow 3 maps keep UserRRefs alive by holding a intrusive_ptr to the
   // RRef instances. A UserRRef must be added into this map if any of the
   // following two conditions is true:

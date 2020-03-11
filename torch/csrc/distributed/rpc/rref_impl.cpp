@@ -100,8 +100,6 @@ void UserRRef::release_resources() {
   tryDel();
 }
 
-UserRRef::~UserRRef() {}
-
 const ForkId& UserRRef::forkId() const {
   return forkId_;
 }
