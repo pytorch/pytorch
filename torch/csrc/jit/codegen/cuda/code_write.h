@@ -32,14 +32,14 @@ std::ostream& operator<<(std::ostream& os, std::vector<Int*> vec) {
 // Run through and grab all values that are used in this fusion based on
 // the registered outputs.
 struct FindUsedVals : public IterVisitor {
-  std::set<Val*> used_vals;
+  std::vector<Val*> used_vals;
 
   void handle(Val* v) {
-    used_vals.emplace(v);
+    used_vals.emplace_back(v);
   }
 
  public:
-  static std::set<Val*> find() {
+  static std::vector<Val*> find() {
     FindUsedVals finder;
     finder.traverse(FusionGuard::getCurFusion(), true);
     return finder.used_vals;

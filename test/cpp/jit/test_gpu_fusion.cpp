@@ -823,8 +823,8 @@ void testGPU_FusionCodeGen() {
   ref << "        for( size_t i33 = 0; i33 < i3; ++i33 ) {\n";
   ref << "          if( ( ( ( i29 * 4 ) + ( i27 / T2.size[1] ) ) < T2.size[0] ) && ( ( i27 % T2.size[1] ) < T2.size[1] ) ) {\n";
   ref << "            T0[i29 * T2.size[2] * i3 + i31 * i3 + i33]\n";
-  ref << "              = 0f\n";
-  ref << "              + 1f;\n";
+  ref << "              = float(0)\n";
+  ref << "              + float(1);\n";
   ref << "          }\n";
   ref << "        }\n";
   ref << "      }\n";
@@ -835,23 +835,23 @@ void testGPU_FusionCodeGen() {
   ref << "        if( ( ( ( i54 * 4 ) + ( i27 / T2.size[1] ) ) < T2.size[0] ) && ( ( i27 % T2.size[1] ) < T2.size[1] ) ) {\n";
   ref << "          T1[i54 * T2.size[2] + i56]\n";
   ref << "            = T0[i54 * T2.size[2] + i56]\n";
-  ref << "            + 2f;\n";
+  ref << "            + float(2);\n";
   ref << "        }\n";
-  ref << "      }\n"; 
-  ref << "    }\n"; 
+  ref << "      }\n";
+  ref << "    }\n";
   ref << "    for( size_t i81 = 0; i81 < ( ceilDiv(T2.size[0], 4) ); ++i81 ) {\n";
   ref << "      for( size_t i83 = 0; i83 < 2; ++i83 ) {\n";
   ref << "        for( size_t i85 = 0; i85 < ( ceilDiv(T2.size[2], 2) ); ++i85 ) {\n";
   ref << "          if( ( ( ( i81 * 4 ) + ( i27 / T2.size[1] ) ) < T2.size[0] ) && ( ( i27 % T2.size[1] ) < T2.size[1] ) && ( ( ( i85 * 2 ) + i83 ) < T2.size[2] ) ) {\n";
   ref << "            T2[( ( i81 * 4 ) + ( i27 / T2.size[1] ) ) * T2.stride[0] + ( i27 % T2.size[1] ) * T2.stride[1] + ( ( i85 * 2 ) + i83 ) * T2.stride[2]]\n";
   ref << "              = T1[i81 * 2 * ( ceilDiv(T2.size[2], 2) ) + i83 * ( ceilDiv(T2.size[2], 2) ) + i85]\n";
-  ref << "              + 3f;\n";
-  ref << "          }\n";   
-  ref << "        }\n"; 
-  ref << "      }\n"; 
-  ref << "    }\n"; 
-  ref << "  }\n"; 
-  ref << "}\n"; 
+  ref << "              + float(3);\n";
+  ref << "          }\n";
+  ref << "        }\n";
+  ref << "      }\n";
+  ref << "    }\n";
+  ref << "  }\n";
+  ref << "}\n";
 
   std::cout << "\nREFERENCE: ------------------------------------------------------------\n";
   std::cout << ref.str();
@@ -863,9 +863,9 @@ void testGPU_FusionCodeGen() {
   cw.traverse(&fusion);
   std::cout << cdg.str();
 
+  std::cout << "SIZE: " << ref.str().size() << " " << cdg.str().size() << "\n";
   TORCH_CHECK(ref.str().size() == cdg.str().size());
   /**** Start Debug code ****/
-  //std::cout << "SIZE: " << ref.str().size() << " " << cdg.str().size() << "\n";
 
   for(int i = 0; i < ref.str().size(); i++) {
 	if(ref.str()[i] != cdg.str()[i]) {
@@ -926,27 +926,26 @@ void testGPU_FusionCodeGen2() {
   
   std::stringstream ref;
   ref << "__global__ void kernel(Tensor<float> T0, Tensor<float> T1, Tensor<float> T3){\n";
-  ref << "  float T2[( ( ( 1 * 4 ) * T1.size[1] ) * T1.size[2] )];\n";
+  ref << "  float T2[( ( ( 1 * 4 ) * T0.size[1] ) * T0.size[2] )];\n";
   ref << "  for( size_t i15 = 0; i15 < 4; ++i15 ) {\n";
-  ref << "    for( size_t i17 = 0; i17 < T1.size[1]; ++i17 ) {\n";
-  ref << "      if( ( ( ( blockIdx.x * 4 ) + i15 ) < T1.size[0] ) ) {\n";
-  ref << "        T2[i15 * T1.size[1] + i17]\n";
+  ref << "    for( size_t i17 = 0; i17 < T0.size[1]; ++i17 ) {\n";
+  ref << "      if( ( ( ( blockIdx.x * 4 ) + i15 ) < T0.size[0] ) ) {\n";
+  ref << "        T2[i15 * T0.size[1] + i17]\n";
   ref << "          = T1[( ( blockIdx.x * 4 ) + i15 ) * T1.stride[0] + i17 * T1.stride[1] + threadIdx.x * T1.stride[2]]\n";
-  ref << "          + 2f;\n";
+  ref << "          + float(2);\n";
   ref << "      }\n";
   ref << "    }\n";
   ref << "  }\n";
   ref << "  for( size_t i35 = 0; i35 < 4; ++i35 ) {\n";
-  ref << "    for( size_t i37 = 0; i37 < T1.size[1]; ++i37 ) {\n";
-  ref << "      if( ( ( ( blockIdx.x * 4 ) + i35 ) < T1.size[0] ) ) {\n";
+  ref << "    for( size_t i37 = 0; i37 < T0.size[1]; ++i37 ) {\n";
+  ref << "      if( ( ( ( blockIdx.x * 4 ) + i35 ) < T0.size[0] ) ) {\n";
   ref << "        T3[( ( blockIdx.x * 4 ) + i35 ) * T3.stride[0] + i37 * T3.stride[1] + threadIdx.x * T3.stride[2]]\n";
   ref << "          = T0[( ( blockIdx.x * 4 ) + i35 ) * T0.stride[0] + i37 * T0.stride[1] + threadIdx.x * T0.stride[2]]\n";
-  ref << "          + T2[i35 * T1.size[1] + i37];\n";
+  ref << "          + T2[i35 * T0.size[1] + i37];\n";
   ref << "      }\n";
-  ref << "    }\n"; 
-  ref << "  }\n"; 
-  ref << "}\n"; 
-
+  ref << "    }\n";
+  ref << "  }\n";
+  ref << "}\n";
 
   std::cout << "\nREFERENCE: ------------------------------------------------------------\n";
   std::cout << ref.str();
@@ -958,9 +957,9 @@ void testGPU_FusionCodeGen2() {
   cw.traverse(&fusion);
   std::cout << cdg.str();
 
+  std::cout << "SIZE: " << ref.str().size() << " " << cdg.str().size() << "\n";
   TORCH_CHECK(ref.str().size() == cdg.str().size());
   /**** Start Debug code ****/
-  //std::cout << "SIZE: " << ref.str().size() << " " << cdg.str().size() << "\n";
   
   for(int i = 0; i < ref.str().size(); i++) {
 	if(ref.str()[i] != cdg.str()[i]) {

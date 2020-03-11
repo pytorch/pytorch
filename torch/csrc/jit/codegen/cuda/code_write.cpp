@@ -389,7 +389,7 @@ bool CodeWrite::isTVOp(const Expr* expr) {
 void CodeWrite::setupOverrides() {
   // Grab all the values used in the fusion (based on traversing
   // backwards from outputs)
-  std::set<Val*> used_vals = FindUsedVals::find();
+  std::vector<Val*> used_vals = FindUsedVals::find();
   // If the value is a TensorView, we're going to grab it's root domain
   // and map the size used for the root domain to T.size[...]
   for (Val* val : used_vals) {
