@@ -73,7 +73,13 @@ using namespace ::c10::aten;
 }
 
 struct Function;
+<<<<<<< HEAD
 struct MatchedSchema;
+=======
+namespace script {
+struct MatchedSchema;
+} // namespace script
+>>>>>>> Prepare for rebase to upstream/master: replace some files with upstream version
 
 // Graph represents one "function" of computation.
 // It uses a simple ownership model where the graph owns all the nodes inside
@@ -733,11 +739,7 @@ struct TORCH_API Node {
   CREATE_ACCESSOR(Graphs, gs)
   CREATE_ACCESSOR(Type, ty)
   CREATE_ACCESSOR(Types, tys)
-<<<<<<< HEAD:torch/csrc/jit/ir/ir.h
   CREATE_ACCESSOR(IValue, ival)
-=======
-  CREATE_ACCESSOR(Void, v)
->>>>>>> init:torch/csrc/jit/ir.h
 
 #undef CREATE_ACCESSOR
 
@@ -1136,10 +1138,17 @@ struct Graph {
 
   TORCH_API Value* insertFunctionCall(
       Function* callee,
+<<<<<<< HEAD
       const MatchedSchema& matched);
   TORCH_API Value* insertMethodCall(
       std::string method_name,
       const MatchedSchema& matched);
+=======
+      const script::MatchedSchema& matched);
+  TORCH_API Value* insertMethodCall(
+      std::string method_name,
+      const script::MatchedSchema& matched);
+>>>>>>> Prepare for rebase to upstream/master: replace some files with upstream version
 
   // Note: defined in python_ir.cpp and can be used only in python extension
   Node* createPythonOp(
