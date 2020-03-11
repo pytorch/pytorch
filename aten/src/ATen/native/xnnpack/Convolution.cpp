@@ -96,21 +96,21 @@ Tensor run(
   Tensor output = empty_with_tail_padding(
       conv_output_size(
           padded_input_nhwc.sizes(),
-          context.weight_size,
-          context.padding,
-          context.stride,
-          context.dilation),
+          context.weight_size_,
+          context.padding_,
+          context.stride_,
+          context.dilation_),
       padded_input_nhwc.options().dtype(),
       MemoryFormat::ChannelsLast);
 
   const xnn_status setup_status = xnn_setup_convolution2d_nhwc_f32(
-      context.op.get(),                               // operator
+      context.op.get(),                                      // operator
       padded_input_nhwc.size(Layout::Activation4D::batch),   // batch_size
       padded_input_nhwc.size(Layout::Activation4D::height),  // input_height
       padded_input_nhwc.size(Layout::Activation4D::width),   // input_width
       padded_input_nhwc.data_ptr<float>(),                   // input
-      output.data_ptr<float>(),                       // output
-      nullptr);                                       // threadpool
+      output.data_ptr<float>(),                              // output
+      nullptr);                                              // threadpool
 
   TORCH_CHECK(
       xnn_status_success == setup_status,
@@ -209,13 +209,14 @@ ContextConv2D create(
       xnn_status_success == create_status,
       "xnn_create_convolution2d_nhwc_f32 failed!");
 
-  return ContextConv2D(
+  return ContextConv2D{
       Operator(convolution_op),
-      weight_nhwc.sizes().vec(),
-      padding_expanded,
-      stride_expanded,
-      dilation_expanded
-  );
+      {weight_nhwc.sizes()[0], weight_nhwc.sizes()[1],
+          weight_nhwc.sizes()[2], weight_nhwc.sizes()[3]},
+      {padding_expanded[0], padding_expanded[1]},
+      {stride_expanded[0], stride_expanded[1]},
+      {dilation_expanded[0], dilation_expanded[1]}
+  };
 }
 
 c10::intrusive_ptr<xnnpack::XNNPackConv2dOpContext> Conv2dPrePack::operator()(
