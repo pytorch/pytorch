@@ -15,18 +15,19 @@ namespace torch {
 namespace jit {
 
 using ::c10::TensorTypePtr;
+using Dimension = int64_t;
 
 struct ProfilingRecord;
 struct ShapeSymbolSets {
 
   void reset() { sets_.clear(); };
-  std::map<c10::ShapeSymbol, std::map<c10::ShapeSymbol, c10::ShapeSymbol>> sets_;
+  std::map<c10::ShapeSymbol, std::map<Dimension, c10::ShapeSymbol>> sets_;
   
-  std::map <c10::ShapeSymbol, c10::ShapeSymbol>& getGlobalSet() {
+  std::map <Dimension, c10::ShapeSymbol>& getGlobalSet() {
     return getSetForSymbol(c10::ShapeSymbol(-1));
   }
 
-  std::map<c10::ShapeSymbol, c10::ShapeSymbol>& getSetForSymbol(c10::ShapeSymbol s) {
+  std::map<Dimension, c10::ShapeSymbol>& getSetForSymbol(c10::ShapeSymbol s) {
     return sets_[s];
   }
 };
@@ -49,18 +50,18 @@ struct ShapeSymbolTable {
     }
     return data_[s]; 
   }
-  void assign(c10::ShapeSymbol s, c10::ShapeSymbol v) { 
+  void assign(c10::ShapeSymbol s, Dimension v) { 
     TORCH_INTERNAL_ASSERT(!s.statik_);
     data_[s] = v; 
     auto&  dims2symbols = sets_.getGlobalSet();
     dims2symbols[v] = s;
   }
-  std::map<c10::ShapeSymbol, c10::ShapeSymbol> data_;
+  std::map<c10::ShapeSymbol, Dimension> data_;
   ShapeSymbolSets sets_;
   ProfilingRecord* pr_;
 
-  c10::ShapeSymbol GetSymbolInSet(c10::ShapeSymbol new_size, c10::ShapeSymbol set, ProfilingRecord* pr);
-  c10::ShapeSymbol toSymbol(c10::ShapeSymbol, std::map<c10::ShapeSymbol, c10::ShapeSymbol>& dims2symbols, ProfilingRecord* pr);
+  c10::ShapeSymbol GetSymbolInSet(Dimension, c10::ShapeSymbol set, ProfilingRecord* pr);
+  c10::ShapeSymbol toSymbol(Dimension, std::map<Dimension, c10::ShapeSymbol>& dims2symbols, ProfilingRecord* pr);
 
 };
 
@@ -114,7 +115,7 @@ struct ProfilingRecord {
   // we do a reverse search to find which set the ShapeSymbol belongs. Ideally, we would like to put it in the biggest set to be optimal
   // but currently for simplicity we put in a set whose ShapeSymbol was mapped to it the latest.
   std::vector<c10::ShapeSymbol> mergeSymbolicShapes(
-    const std::vector<c10::ShapeSymbol>& new_sizes,
+    c10::IntArrayRef new_sizes,
     c10::optional<std::vector<c10::ShapeSymbol>> sym_shapes,
     ShapeSymbolTable& symbol_table);
 

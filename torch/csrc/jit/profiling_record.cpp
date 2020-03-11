@@ -15,8 +15,8 @@ namespace torch {
 namespace jit {
 
 c10::ShapeSymbol ShapeSymbolTable::toSymbol(
-    c10::ShapeSymbol val,
-    std::map<c10::ShapeSymbol, c10::ShapeSymbol>& dims2symbols,
+    Dimension val,
+    std::map<Dimension, c10::ShapeSymbol>& dims2symbols,
     ProfilingRecord* pr) {
   if (dims2symbols.count(val) == 0) {
     auto new_sym = pr->getNewSymbol();
@@ -27,7 +27,7 @@ c10::ShapeSymbol ShapeSymbolTable::toSymbol(
   return dims2symbols[val];
 }
 
-c10::ShapeSymbol ShapeSymbolTable::GetSymbolInSet(c10::ShapeSymbol new_size, c10::ShapeSymbol set, ProfilingRecord* pr) {
+c10::ShapeSymbol ShapeSymbolTable::GetSymbolInSet(Dimension new_size, c10::ShapeSymbol set, ProfilingRecord* pr) {
   auto& dims2symbols = sets_.getSetForSymbol(set);
   auto new_sym = toSymbol(new_size, dims2symbols, pr);
   return new_sym;
@@ -75,7 +75,7 @@ static void unprofileBlock(Block* start_block) {
 }
 
 std::vector<c10::ShapeSymbol> ProfilingRecord::mergeSymbolicShapes(
-    const std::vector<c10::ShapeSymbol>& new_sizes,
+    c10::IntArrayRef new_sizes,
     c10::optional<std::vector<c10::ShapeSymbol>> sym_shapes,
     ShapeSymbolTable& symbol_table) {
   std::vector<c10::ShapeSymbol> new_symbols;
@@ -134,9 +134,8 @@ void ProfilingRecord::insertShapeProfile(Node *n, Value *i) {
           auto type = profiled_types.at(pno);
           GRAPH_DEBUG("Existing type for %", pno->debugName(), " ", *type);
           auto& symbol_table = symbols_per_frame_[frame_id];
-          auto sizes = fmap(t.sizes(), [](int64_t s){return c10::ShapeSymbol(s, true); });
           auto new_sym_shapes = this->mergeSymbolicShapes(
-              sizes,
+              t.sizes(),
               type->symbolic_sizes(),
               symbol_table);
           pttp = type->merge(pttp)->withSymbolicShapes(new_sym_shapes);
@@ -230,7 +229,7 @@ std::unique_ptr<ProfilingRecord> ProfilingRecord::instrumentGraph(
                 }
                 else {
                   new_symbols.push_back(
-                    merged_symbol_table.GetSymbolInSet(old_symbol, c10::ShapeSymbol::getInvalidSymbol(), raw_pr));
+                    merged_symbol_table.GetSymbolInSet(old_symbol.value_, c10::ShapeSymbol::getInvalidSymbol(), raw_pr));
                 }
               }
               auto new_type =
@@ -247,9 +246,10 @@ std::unique_ptr<ProfilingRecord> ProfilingRecord::instrumentGraph(
           } else {
             const auto& concrete_sizes = val_type_pair.second->symbolic_sizes();
             if (concrete_sizes.has_value()) {
+              std::vector<Dimension> observed_sizes = fmap(*concrete_sizes, [](c10::ShapeSymbol s) {return s.value_; });
               auto type = merged_profiled_types[val_type_pair.first];
               auto new_shape = raw_pr->mergeSymbolicShapes(
-                  *concrete_sizes,
+                  observed_sizes,
                   type->symbolic_sizes(),
                   merged_symbol_table);
               GRAPH_DEBUG(

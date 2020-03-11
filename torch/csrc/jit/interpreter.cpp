@@ -902,11 +902,11 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             new_symbols.push_back(
                 symbol == c10::ShapeSymbol(new_sizes[i], true) ? symbol : undefined_symbol);
           } else if (!af.symbols2dims.isBound(symbol)) {
-            af.symbols2dims.assign(symbol, c10::ShapeSymbol(new_sizes[i], true));
+            af.symbols2dims.assign(symbol, new_sizes[i]);
             new_symbols.push_back(symbol);
           } else {
             new_symbols.push_back(
-                (af.symbols2dims.getValue(symbol) == c10::ShapeSymbol(new_sizes[i], true))
+                (af.symbols2dims.getValue(symbol) == new_sizes[i])
                     ? symbol
                     : undefined_symbol);
           }
