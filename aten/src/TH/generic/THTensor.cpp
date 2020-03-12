@@ -72,9 +72,9 @@ THTensor *THTensor_(newWithTensor)(THTensor *tensor)
 THTensor *THTensor_(newWithStorage1d)(THStorage *storage, ptrdiff_t storageOffset,
                                int64_t size0, int64_t stride0)
 {
-  THStorage *new_storage = THStorage_(new)();
+  c10::raw::intrusive_ptr::incref(storage);
   THTensor *self = c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
-    c10::intrusive_ptr<at::StorageImpl>::reclaim(new_storage),
+    c10::intrusive_ptr<at::StorageImpl>::reclaim(storage),
     at::DispatchKey::CPUTensorId
   ).release();
   THTensor_(setStorageNd)(self, storage, storageOffset, 1,
