@@ -33,7 +33,7 @@ struct AvgPoolOptions {
   TORCH_ARG(c10::optional<int64_t>, divisor_override) = c10::nullopt;
 };
 
-/// Options for the `AvgPool1d` module.
+/// `AvgPoolOptions` specialized for the `AvgPool1d` module.
 ///
 /// Example:
 /// ```
@@ -41,7 +41,7 @@ struct AvgPoolOptions {
 /// ```
 using AvgPool1dOptions = AvgPoolOptions<1>;
 
-/// Options for the `AvgPool2d` module.
+/// `AvgPoolOptions` specialized for the `AvgPool2d` module.
 ///
 /// Example:
 /// ```
@@ -49,7 +49,7 @@ using AvgPool1dOptions = AvgPoolOptions<1>;
 /// ```
 using AvgPool2dOptions = AvgPoolOptions<2>;
 
-/// Options for the `AvgPool3d` module.
+/// `AvgPoolOptions` specialized for the `AvgPool3d` module.
 ///
 /// Example:
 /// ```
@@ -114,7 +114,7 @@ struct MaxPoolOptions {
   TORCH_ARG(bool, ceil_mode) = false;
 };
 
-/// Options for the `MaxPool1d` module.
+/// `MaxPoolOptions` specialized for the `MaxPool1d` module.
 ///
 /// Example:
 /// ```
@@ -122,7 +122,7 @@ struct MaxPoolOptions {
 /// ```
 using MaxPool1dOptions = MaxPoolOptions<1>;
 
-/// Options for the `MaxPool2d` module.
+/// `MaxPoolOptions` specialized for the `MaxPool2d` module.
 ///
 /// Example:
 /// ```
@@ -130,7 +130,7 @@ using MaxPool1dOptions = MaxPoolOptions<1>;
 /// ```
 using MaxPool2dOptions = MaxPoolOptions<2>;
 
-/// Options for the `MaxPool3d` module.
+/// `MaxPoolOptions` specialized for the `MaxPool3d` module.
 ///
 /// Example:
 /// ```
@@ -183,7 +183,7 @@ struct AdaptiveMaxPoolOptions {
   TORCH_ARG(ExpandingArray<D>, output_size);
 };
 
-/// Options for the `AdaptiveMaxPool1d` module.
+/// `AdaptiveMaxPoolOptions` specialized for the `AdaptiveMaxPool1d` module.
 ///
 /// Example:
 /// ```
@@ -191,7 +191,7 @@ struct AdaptiveMaxPoolOptions {
 /// ```
 using AdaptiveMaxPool1dOptions = AdaptiveMaxPoolOptions<1>;
 
-/// Options for the `AdaptiveMaxPool2d` module.
+/// `AdaptiveMaxPoolOptions` specialized for the `AdaptiveMaxPool2d` module.
 ///
 /// Example:
 /// ```
@@ -199,7 +199,7 @@ using AdaptiveMaxPool1dOptions = AdaptiveMaxPoolOptions<1>;
 /// ```
 using AdaptiveMaxPool2dOptions = AdaptiveMaxPoolOptions<2>;
 
-/// Options for the `AdaptiveMaxPool3d` module.
+/// `AdaptiveMaxPoolOptions` specialized for the `AdaptiveMaxPool3d` module.
 ///
 /// Example:
 /// ```
@@ -252,7 +252,7 @@ struct AdaptiveAvgPoolOptions {
   TORCH_ARG(ExpandingArray<D>, output_size);
 };
 
-/// Options for the `AdaptiveAvgPool1d` module.
+/// `AdaptiveAvgPoolOptions` specialized for the `AdaptiveAvgPool1d` module.
 ///
 /// Example:
 /// ```
@@ -260,7 +260,7 @@ struct AdaptiveAvgPoolOptions {
 /// ```
 using AdaptiveAvgPool1dOptions = AdaptiveAvgPoolOptions<1>;
 
-/// Options for the `AdaptiveAvgPool2d` module.
+/// `AdaptiveAvgPoolOptions` specialized for the `AdaptiveAvgPool2d` module.
 ///
 /// Example:
 /// ```
@@ -268,7 +268,7 @@ using AdaptiveAvgPool1dOptions = AdaptiveAvgPoolOptions<1>;
 /// ```
 using AdaptiveAvgPool2dOptions = AdaptiveAvgPoolOptions<2>;
 
-/// Options for the `AdaptiveAvgPool3d` module.
+/// `AdaptiveAvgPoolOptions` specialized for the `AdaptiveAvgPool3d` module.
 ///
 /// Example:
 /// ```
@@ -327,7 +327,7 @@ struct MaxUnpoolOptions {
   TORCH_ARG(ExpandingArray<D>, padding) = 0;
 };
 
-/// Options for the `MaxUnpool1d` module.
+/// `MaxUnpoolOptions` specialized for the `MaxUnpool1d` module.
 ///
 /// Example:
 /// ```
@@ -335,7 +335,7 @@ struct MaxUnpoolOptions {
 /// ```
 using MaxUnpool1dOptions = MaxUnpoolOptions<1>;
 
-/// Options for the `MaxUnpool2d` module.
+/// `MaxUnpoolOptions` specialized for the `MaxUnpool2d` module.
 ///
 /// Example:
 /// ```
@@ -343,7 +343,7 @@ using MaxUnpool1dOptions = MaxUnpoolOptions<1>;
 /// ```
 using MaxUnpool2dOptions = MaxUnpoolOptions<2>;
 
-/// Options for the `MaxUnpool3d` module.
+/// `MaxUnpoolOptions` specialized for the `MaxUnpool3d` module.
 ///
 /// Example:
 /// ```
@@ -374,7 +374,7 @@ struct MaxUnpoolFuncOptions {
   TORCH_ARG(c10::optional<std::vector<int64_t>>, output_size) = c10::nullopt;
 };
 
-/// Options for `torch::nn::functional::max_unpool1d`.
+/// `MaxUnpoolFuncOptions` specialized for `torch::nn::functional::max_unpool1d`.
 ///
 /// Example:
 /// ```
@@ -383,7 +383,7 @@ struct MaxUnpoolFuncOptions {
 /// ```
 using MaxUnpool1dFuncOptions = MaxUnpoolFuncOptions<1>;
 
-/// Options for `torch::nn::functional::max_unpool2d`.
+/// `MaxUnpoolFuncOptions` specialized for `torch::nn::functional::max_unpool2d`.
 ///
 /// Example:
 /// ```
@@ -392,7 +392,7 @@ using MaxUnpool1dFuncOptions = MaxUnpoolFuncOptions<1>;
 /// ```
 using MaxUnpool2dFuncOptions = MaxUnpoolFuncOptions<2>;
 
-/// Options for `torch::nn::functional::max_unpool3d`.
+/// `MaxUnpoolFuncOptions` specialized for `torch::nn::functional::max_unpool3d`.
 ///
 /// Example:
 /// ```
@@ -425,7 +425,7 @@ struct FractionalMaxPoolOptions {
   TORCH_ARG(torch::Tensor, _random_samples) = Tensor();
 };
 
-/// Options for the `FractionalMaxPool2d` module.
+/// `FractionalMaxPoolOptions` specialized for the `FractionalMaxPool2d` module.
 ///
 /// Example:
 /// ```
@@ -433,7 +433,7 @@ struct FractionalMaxPoolOptions {
 /// ```
 using FractionalMaxPool2dOptions = FractionalMaxPoolOptions<2>;
 
-/// Options for the `FractionalMaxPool3d` module.
+/// `FractionalMaxPoolOptions` specialized for the `FractionalMaxPool3d` module.
 ///
 /// Example:
 /// ```
@@ -483,7 +483,7 @@ struct LPPoolOptions {
   TORCH_ARG(bool, ceil_mode) = false;
 };
 
-/// Options for the `LPPool1d` module.
+/// `LPPoolOptions` specialized for the `LPPool1d` module.
 ///
 /// Example:
 /// ```
@@ -491,7 +491,7 @@ struct LPPoolOptions {
 /// ```
 using LPPool1dOptions = LPPoolOptions<1>;
 
-/// Options for the `LPPool2d` module.
+/// `LPPoolOptions` specialized for the `LPPool2d` module.
 ///
 /// Example:
 /// ```
