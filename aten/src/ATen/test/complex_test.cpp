@@ -14,7 +14,6 @@ static void TestIntegerOp(T real, T img, iT i) {
   ASSERT_EQ(i / c, std::complex<T>(i / real, i / img));
 }
 
-template<typename Op>
 static void TestIntegerOpAllTypes(float real, float img, int8_t i) {
   TestIntegerOp<float, int8_t>(real, img, i, op);
   TestIntegerOp<double, int8_t>(real, img, i, op);
