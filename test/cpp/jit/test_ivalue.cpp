@@ -7,8 +7,6 @@
 namespace torch {
 namespace jit {
 
-using namespace torch::jit::script;
-
 void testIValue() {
   c10::List<int64_t> foo({3, 4, 5});
   ASSERT_EQ(foo.use_count(), 1);
