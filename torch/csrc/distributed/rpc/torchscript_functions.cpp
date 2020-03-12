@@ -15,7 +15,8 @@ c10::intrusive_ptr<c10::ivalue::Future> rpcTorchscript(
     const std::string& dstWorkerName,
     const c10::QualifiedName& qualifiedName,
     const c10::FunctionSchema& functionSchema,
-    std::vector<c10::IValue>& stack) {
+    std::vector<c10::IValue>& stack,
+    const std::chrono::milliseconds& rpcTimeout) {
   auto scriptCall =
       std::make_unique<ScriptCall>(qualifiedName, std::move(stack));
   auto rpcAgentPtr = RpcAgent::getCurrentRpcAgent();
@@ -23,7 +24,9 @@ c10::intrusive_ptr<c10::ivalue::Future> rpcTorchscript(
       *rpcAgentPtr,
       rpcAgentPtr->getWorkerInfo(dstWorkerName),
       std::move(*scriptCall).toMessage(),
-      true /*forceGradRecording*/);
+      true /*forceGradRecording*/,
+      nullptr /* RecordFunction */,
+      rpcTimeout);
 
   // Get function return type to construct c10::ivalue::Future.
   auto returns = functionSchema.returns();

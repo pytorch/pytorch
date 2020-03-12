@@ -16,13 +16,15 @@ std::shared_ptr<FutureMessage> pyRpcBuiltin(
     const std::string& opName,
     const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf,
     const py::args& args,
-    const py::kwargs& kwargs);
+    const py::kwargs& kwargs,
+    const std::chrono::milliseconds& rpcTimeout);
 
 std::shared_ptr<FutureMessage> pyRpcPythonUdf(
     const WorkerInfo& dst,
     std::string& pickledPythonUDF,
     std::vector<torch::Tensor>& tensors,
-    const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf);
+    const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf,
+    const std::chrono::milliseconds& rpcTimeout);
 
 PyRRef pyRemoteBuiltin(
     const WorkerInfo& dst,

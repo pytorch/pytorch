@@ -111,6 +111,18 @@ def get_shutdown_error_regex():
     error_regex = "".join(["({})|".format(error_str) for error_str in error_regexes])
     return error_regex
 
+def get_timeout_error_regex(rpc_backend_name):
+    """
+    Given an RPC backend name, returns a partial string indicating the error we
+    should receive when an RPC has timed out. Useful for use with
+    assertRaisesRegex() to ensure we have the right errors during timeout.
+    """
+    if rpc_backend_name == "PROCESS_GROUP":
+        return "RPC ran for"
+    else:
+        return "(Timed out)|(Task expired)"
+
+
 def wait_until_pending_users_flushed():
     '''
     The RRef protocol holds forkIds of rrefs in a map until those forks are

@@ -25,7 +25,6 @@ from . import (
     _is_current_rpc_agent_set,
     _reset_current_rpc_agent,
     _set_and_start_rpc_agent,
-    _set_rpc_timeout,
     backend_registry,
 )
 from .internal import (
@@ -34,6 +33,8 @@ from .internal import (
     _internal_rpc_pickler,
     _start_record_function,
 )
+
+from .constants import UNSET_RPC_TIMEOUT
 
 
 logging.basicConfig()
@@ -175,10 +176,10 @@ def _wait_all_workers():
     if is_leader_worker:
         # The leader sends out proceeed signals to all followers.
         timeout = timedelta(seconds=5)
-        _set_rpc_timeout(timeout)
         worker_name_to_response_future_dict = dict()
         for follower_worker_name in _ALL_WORKER_NAMES - {leader_worker_name}:
-            fut = rpc_async(follower_worker_name, _set_proceed_shutdown_signal, args=(sequence_id,))
+            fut = rpc_async(follower_worker_name, _set_proceed_shutdown_signal,
+                            args=(sequence_id,), timeout=timeout)
             worker_name_to_response_future_dict[follower_worker_name] = fut
         for follower_worker_name, fut in worker_name_to_response_future_dict.items():
             try:
@@ -432,7 +433,7 @@ def remote(to, func, args=None, kwargs=None):
         return _invoke_remote_python_udf(dst_worker_info, pickled_python_udf, tensors, rf)
 
 
-def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None):
+def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None, rpc_timeout=UNSET_RPC_TIMEOUT):
     if not callable(func):
         raise TypeError("function should be callable.")
 
@@ -453,19 +454,19 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None):
     kwargs = kwargs if kwargs else {}
 
     if qualified_name is not None:
-        fut = _invoke_rpc_builtin(dst_worker_info, qualified_name, rf, *args, **kwargs)
+        fut = _invoke_rpc_builtin(dst_worker_info, qualified_name, rf, rpc_timeout, *args, **kwargs)
     elif isinstance(func, torch.jit.ScriptFunction):
-        fut = _invoke_rpc_torchscript(dst_worker_info.name, func, args, kwargs)
+        fut = _invoke_rpc_torchscript(dst_worker_info.name, func, args, kwargs, rpc_timeout)
     else:
         (pickled_python_udf, tensors) = _default_pickler.serialize(
             PythonUDF(func, args, kwargs)
         )
-        fut = _invoke_rpc_python_udf(dst_worker_info, pickled_python_udf, tensors, rf)
+        fut = _invoke_rpc_python_udf(dst_worker_info, pickled_python_udf, tensors, rf, rpc_timeout)
     return fut
 
 
 @_require_initialized
-def rpc_sync(to, func, args=None, kwargs=None):
+def rpc_sync(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
     r"""
     Make a blocking RPC call to run function ``func`` on worker ``to``. RPC
     messages are sent and received in parallel to execution of Python code. This
@@ -478,6 +479,13 @@ def rpc_sync(to, func, args=None, kwargs=None):
         args (tuple): the argument tuple for the ``func`` invocation.
         kwargs (dict): is a dictionary of keyword arguments for the ``func``
                        invocation.
+        timeout (Optional[datetime.timedelta]): timeout to use for this RPC. If the RPC
+                                                does not complete in this amount of
+                                                time, an exception indicating it has
+                                                timed out will be raised. If not
+                                                provided, the default value set during
+                                                initialization or with _set_rpc_timeout
+                                                is used.
 
     Returns:
         Returns the result of running ``func`` on ``args`` and ``kwargs``.
@@ -522,12 +530,12 @@ def rpc_sync(to, func, args=None, kwargs=None):
         >>> rpc.shutdown()
 
     """
-    fut = _invoke_rpc(to, func, RPCExecMode.SYNC, args, kwargs)
+    fut = _invoke_rpc(to, func, RPCExecMode.SYNC, args, kwargs, timeout)
     return fut.wait()
 
 
 @_require_initialized
-def rpc_async(to, func, args=None, kwargs=None):
+def rpc_async(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
     r"""
     Make a non-blocking RPC call to run function ``func`` on worker ``to``. RPC
     messages are sent and received in parallel to execution of Python code. This
@@ -541,6 +549,14 @@ def rpc_async(to, func, args=None, kwargs=None):
         args (tuple): the argument tuple for the ``func`` invocation.
         kwargs (dict): is a dictionary of keyword arguments for the ``func``
                        invocation.
+        timeout (Optional[datetime.timedelta]): timeout to use for this RPC. If the RPC
+                                                does not complete in this amount of
+                                                time, an exception indicating it has
+                                                timed out will be raised. If not
+                                                provided, the default value set during
+                                                initialization or with _set_rpc_timeout
+                                                is used.
+
 
     Returns:
         Returns a Future object that can be waited
@@ -589,4 +605,4 @@ def rpc_async(to, func, args=None, kwargs=None):
         >>> rpc.init_rpc("worker1", rank=1, world_size=2)
         >>> rpc.shutdown()
     """
-    return _invoke_rpc(to, func, RPCExecMode.ASYNC, args, kwargs)
+    return _invoke_rpc(to, func, RPCExecMode.ASYNC, args, kwargs, timeout)

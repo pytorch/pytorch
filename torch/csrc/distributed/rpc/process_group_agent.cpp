@@ -266,7 +266,8 @@ void ProcessGroupAgent::shutdown() {
 
 std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
     const WorkerInfo& to,
-    Message&& message) {
+    Message&& message,
+    const std::chrono::milliseconds& rpcTimeout) {
   // Throw if we previously encountered an exception in ::listenLoop.
   {
     std::unique_lock<std::mutex> guard(listenLoopExceptionMutex_);
@@ -287,9 +288,12 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
   if (message.isRequest()) {
     // millisecond level precision of when request started.
     auto futureStartTime = std::chrono::steady_clock::now();
-    // Prepare endTime from timeout.
-    auto timeout = rpcTimeout_.load();
-    // Set infinite timeout if specified.
+    // if passed in timeout is unset, then use the currently set default timeout
+    // for all RPCs.
+    auto& timeout =
+        rpcTimeout == kUnsetRpcTimeout ? getRpcTimeout() : rpcTimeout;
+    // Prepare endTime from timeout. Set infinite timeout if
+    // specified.
     steady_clock_time_point endTime = timeout.count() == 0
         ? kInfiniteTimeoutTimePoint
         : futureStartTime + timeout;

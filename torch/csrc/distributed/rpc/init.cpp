@@ -57,6 +57,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
                 Default is ``env://``)");
 
   module.attr("_DEFAULT_RPC_TIMEOUT") = py::cast(kDefaultRpcTimeout);
+  module.attr("_UNSET_RPC_TIMEOUT") = py::cast(kUnsetRpcTimeout);
   module.attr("_DEFAULT_INIT_METHOD") = py::cast(kDefaultInitMethod);
 
   auto workerInfo =
@@ -224,8 +225,10 @@ If the future completes with an error, an exception is thrown.
           Arguments:
               num_send_recv_threads (int, optional): The number of threads in
                   the thread-pool used by ``ProcessGroupAgent`` (default: 4).
-              rpc_timeout (datetime.timedelta, optional): The timeout for RPC
-                  requests (default: ``timedelta(seconds=60)``).
+              rpc_timeout (datetime.timedelta, optional): The default timeout
+                  for RPC requests (default: ``timedelta(seconds=60)``). If the
+                  RPC has not completed in this timeframe, an exception
+                  indicating so will be raised.
               init_method (str, optional): The URL to initialize
                   ``ProcessGroupGloo`` (default: ``env://``).
 
@@ -352,10 +355,11 @@ If the future completes with an error, an exception is thrown.
       [](const WorkerInfo& dst,
          const std::string& opName,
          const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf,
+         const std::chrono::milliseconds& rpcTimeout,
          const py::args& args,
          const py::kwargs& kwargs) {
         DCHECK(PyGILState_Check());
-        return pyRpcBuiltin(dst, opName, rf, args, kwargs);
+        return pyRpcBuiltin(dst, opName, rf, args, kwargs, rpcTimeout);
       },
       py::call_guard<py::gil_scoped_acquire>());
 
@@ -364,15 +368,17 @@ If the future completes with an error, an exception is thrown.
       [](const WorkerInfo& dst,
          std::string& pickledPythonUDF,
          std::vector<torch::Tensor>& tensors,
-         const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf) {
+         const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf,
+         const std::chrono::milliseconds& rpcTimeout) {
         DCHECK(!PyGILState_Check());
-        return pyRpcPythonUdf(dst, pickledPythonUDF, tensors, rf);
+        return pyRpcPythonUdf(dst, pickledPythonUDF, tensors, rf, rpcTimeout);
       },
       py::call_guard<py::gil_scoped_release>(),
       py::arg("dst"),
       py::arg("pickledPythonUDF"),
       py::arg("tensors"),
-      py::arg("rf") = nullptr);
+      py::arg("rf"),
+      py::arg("rpc_timeout"));
 
   // TODO This python future wrapper wraps c10::ivalue::Future.
   // Will merge with JIT PythonFutureWrapper while merging generic Future with
@@ -409,7 +415,8 @@ If the future completes with an error, an exception is thrown.
       [](const std::string& dstWorkerName,
          const py::object& userCallable,
          const py::tuple& argsTuple,
-         const py::dict& kwargsDict) {
+         const py::dict& kwargsDict,
+         const std::chrono::milliseconds& rpcTimeout) {
         DCHECK(!PyGILState_Check());
         // No need to catch exception here, if function can not be found,
         // exception will be thrown in get_function() call; if args do not match
@@ -432,8 +439,8 @@ If the future completes with an error, an exception is thrown.
               c10::nullopt);
         }
         DCHECK(!PyGILState_Check());
-        c10::intrusive_ptr<c10::ivalue::Future> fut =
-            rpcTorchscript(dstWorkerName, qualifiedName, functionSchema, stack);
+        c10::intrusive_ptr<c10::ivalue::Future> fut = rpcTorchscript(
+            dstWorkerName, qualifiedName, functionSchema, stack, rpcTimeout);
         return PythonFutureWrapper(fut);
       },
       py::call_guard<py::gil_scoped_release>());
