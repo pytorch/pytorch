@@ -529,7 +529,7 @@ struct PythonPrintImpl {
 
     auto loop_type = stmt.loopType();
     if (loop_type == LoopView::ModifiedLoop) {
-      throw script::ErrorReport(stmt.node()->sourceRange())
+      throw ErrorReport(stmt.node()->sourceRange())
           << "loop cannot be printed as python "
           << "because it has gone through an optimization "
           << "that combined while and for loops. File a bug";
@@ -685,7 +685,7 @@ struct PythonPrintImpl {
     switch (node->kind()) {
       case prim::Return:
         if (enforce_importable_ && node->inputs().size() != 1) {
-          throw script::ErrorReport(node->sourceRange())
+          throw ErrorReport(node->sourceRange())
               << "Exportable methods must have a single return value. "
               << "Normal use of ScriptMethods should enforce this";
         }
@@ -740,7 +740,7 @@ struct PythonPrintImpl {
       } break;
       case prim::Function: {
         if (enforce_importable_) {
-          throw script::ErrorReport(node->sourceRange())
+          throw ErrorReport(node->sourceRange())
               << "closures are not exportable";
         }
         assignValuesToTheirUniqueNames(node->outputs());
@@ -796,20 +796,6 @@ struct PythonPrintImpl {
     stmt << ss.str();
   }
 
-  static bool elementTypeCanBeInferredFromMembers(const TypePtr& elem_type) {
-    if (elem_type->kind() == OptionalType::Kind) {
-      // it is possible that we are constructing an optional list, but all
-      // elements are present
-      return false;
-    }
-    if (elem_type->kind() == InterfaceType::Kind) {
-      // since classes can be members of multiple interfaces, we cannot
-      // construct which interface the list holds from the members alone
-      return false;
-    }
-    return true;
-  }
-
   void printOpName(TaggedStringStream& stmt, Symbol kind) {
     // Special overriding ops set that requires serializing differently to
     // preserve the original code semantics.
@@ -839,7 +825,7 @@ struct PythonPrintImpl {
       case prim::PythonOp: {
         auto value = static_cast<const PythonOp*>(node);
         if (enforce_importable_) {
-          throw script::ErrorReport(node->sourceRange())
+          throw ErrorReport(node->sourceRange())
               << "Could not export Python function call '" << value->name()
               << "'. Remove calls to Python functions before export. "
               << "Did you forget add @script or @script_method annotation? "

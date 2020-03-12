@@ -10,6 +10,11 @@ namespace torch {
 namespace nn {
 
 /// Options for a L1 loss module.
+///
+/// Example:
+/// ```
+/// L1Loss model(L1LossOptions(torch::kNone));
+/// ```
 struct TORCH_API L1LossOptions {
   typedef c10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum> reduction_t;
 
@@ -24,6 +29,11 @@ TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(L1Loss, L1LossFuncOptions)
 // ============================================================================
 
 /// Options for a KLDiv loss module.
+///
+/// Example:
+/// ```
+/// KLDivLoss model(KLDivLossOptions(torch::kNone));
+/// ```
 struct TORCH_API KLDivLossOptions {
   typedef c10::variant<enumtype::kNone, enumtype::kBatchMean, enumtype::kSum, enumtype::kMean> reduction_t;
 
@@ -39,6 +49,11 @@ TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(KLDivLoss, KLDivFuncOptions)
 // ============================================================================
 
 /// Options for a MSE loss module.
+///
+/// Example:
+/// ```
+/// MSELoss model(MSELossOptions(torch::kNone));
+/// ```
 struct TORCH_API MSELossOptions {
   typedef c10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum> reduction_t;
 
@@ -54,6 +69,11 @@ TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(MSELoss, MSELossFuncOptions)
 // ============================================================================
 
 /// Options for a BCE loss module.
+///
+/// Example:
+/// ```
+/// BCELoss model(BCELossOptions().reduction(torch::kNone).weight(weight));
+/// ```
 struct TORCH_API BCELossOptions {
   typedef c10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum> reduction_t;
 
@@ -69,6 +89,11 @@ TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(BCELoss, BinaryCrossEntropyFuncOptions)
 // ============================================================================
 
 /// Options for a Hinge Embedding loss functional and module.
+///
+/// Example:
+/// ```
+/// HingeEmbeddingLoss model(HingeEmbeddingLossOptions().margin(4).reduction(torch::kNone));
+/// ```
 struct TORCH_API HingeEmbeddingLossOptions {
   typedef c10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum> reduction_t;
 
@@ -84,6 +109,11 @@ TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(HingeEmbeddingLoss, HingeEmbeddingLossFun
 // ============================================================================
 
 /// Options for a multi-margin loss functional and module.
+///
+/// Example:
+/// ```
+/// MultiMarginLoss model(MultiMarginLossOptions().margin(2).weight(weight));
+/// ```
 struct TORCH_API MultiMarginLossOptions {
   typedef c10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum> reduction_t;
 
@@ -107,7 +137,12 @@ TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(MultiMarginLoss, MultiMarginLossFuncOptio
 
 // ============================================================================
 
-/// Options for a Hinge Embedding loss functional and module.
+/// Options for a Cosine Embedding loss functional and module.
+///
+/// Example:
+/// ```
+/// CosineEmbeddingLoss model(CosineEmbeddingLossOptions().margin(0.5));
+/// ```
 struct TORCH_API CosineEmbeddingLossOptions {
   typedef c10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum> reduction_t;
 
@@ -124,6 +159,11 @@ TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(CosineEmbeddingLoss, CosineEmbeddingLossF
 // ============================================================================
 
 /// Options for a multi-label margin loss functional and module.
+///
+/// Example:
+/// ```
+/// MultiLabelMarginLoss model(MultiLabelMarginLossOptions(torch::kNone));
+/// ```
 struct TORCH_API MultiLabelMarginLossOptions {
   typedef c10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum> reduction_t;
 
@@ -141,6 +181,11 @@ TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(MultiLabelMarginLoss, MultiLabelMarginLos
 // ============================================================================
 
 /// Options for a soft margin loss functional and module.
+///
+/// Example:
+/// ```
+/// SoftMarginLoss model(SoftMarginLossOptions(torch::kNone));
+/// ```
 struct TORCH_API SoftMarginLossOptions {
   typedef c10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum> reduction_t;
 
@@ -158,6 +203,11 @@ TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(SoftMarginLoss, SoftMarginLossFuncOptions
 // ============================================================================
 
 /// Options for a multi-label soft margin loss functional and module.
+///
+/// Example:
+/// ```
+/// MultiLabelSoftMarginLoss model(MultiLabelSoftMarginLossOptions().reduction(torch::kNone).weight(weight));
+/// ```
 struct TORCH_API MultiLabelSoftMarginLossOptions {
   typedef c10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum> reduction_t;
 
@@ -178,6 +228,11 @@ TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(MultiLabelSoftMarginLoss, MultiLabelSoftM
 // ============================================================================
 
 /// Options for a triplet-margin-Loss functional and module.
+///
+/// Example:
+/// ```
+/// TripletMarginLoss model(TripletMarginLossOptions().margin(3).p(2).eps(1e-06).swap(false));
+/// ```
 struct TORCH_API TripletMarginLossOptions {
   typedef c10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum> reduction_t;
 
@@ -200,6 +255,11 @@ TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(TripletMarginLoss, TripletMarginLossFuncO
 // ============================================================================
 
 /// Options for The Connectionist Temporal Classification loss functional and module.
+///
+/// Example:
+/// ```
+/// CTCLoss model(CTCLossOptions().blank(42).zero_infinity(false).reduction(torch::kSum));
+/// ```
 struct TORCH_API CTCLossOptions {
   typedef c10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum> reduction_t;
 
@@ -218,6 +278,11 @@ TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(CTCLoss, CTCLossFuncOptions)
 // ============================================================================
 
 /// Options for a smooth L1 loss functional and module.
+///
+/// Example:
+/// ```
+/// SmoothL1Loss model(SmoothL1LossOptions(torch::kNone));
+/// ```
 struct TORCH_API SmoothL1LossOptions {
   typedef c10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum> reduction_t;
 
@@ -235,6 +300,11 @@ TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(SmoothL1Loss, SmoothL1LossFuncOptions)
 // ============================================================================
 
 /// Options for PoissonNLLLoss functional and module.
+///
+/// Example:
+/// ```
+/// PoissonNLLLoss model(PoissonNLLLossOptions().log_input(false).full(true).eps(0.42).reduction(torch::kSum));
+/// ```
 struct TORCH_API PoissonNLLLossOptions {
   typedef c10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum> reduction_t;
 
@@ -256,6 +326,11 @@ TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(PoissonNLLLoss, PoissonNLLLossFuncOptions
 // ============================================================================
 
 /// Options for MarginRankingLoss functional and module.
+///
+/// Example:
+/// ```
+/// MarginRankingLoss model(MarginRankingLossOptions().margin(0.5).reduction(torch::kSum));
+/// ```
 struct TORCH_API MarginRankingLossOptions {
   typedef c10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum> reduction_t;
 
@@ -270,6 +345,11 @@ TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(MarginRankingLoss, MarginRankingLossFuncO
 // ============================================================================
 
 /// Options for an nll-loss functional and module.
+///
+/// Example:
+/// ```
+/// NLLLoss model(NLLLossOptions().ignore_index(-100).reduction(torch::kMean));
+/// ```
 struct TORCH_API NLLLossOptions {
   typedef c10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum> reduction_t;
 
@@ -289,6 +369,11 @@ TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(NLLLoss, NLLLossFuncOptions)
 // ============================================================================
 
 /// Options for a cross-entropy-Loss functional and module.
+///
+/// Example:
+/// ```
+/// CrossEntropyLoss model(CrossEntropyLossOptions().ignore_index(-100).reduction(torch::kMean));
+/// ```
 struct TORCH_API CrossEntropyLossOptions {
   typedef c10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum> reduction_t;
 
@@ -307,6 +392,11 @@ TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(CrossEntropyLoss, CrossEntropyFuncOptions
 // ============================================================================
 
 /// Options for BCEWithLogitsLoss functional and module.
+///
+/// Example:
+/// ```
+/// BCEWithLogitsLoss model(BCEWithLogitsLossOptions().reduction(torch::kNone).weight(weight));
+/// ```
 struct TORCH_API BCEWithLogitsLossOptions {
   typedef c10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum> reduction_t;
   /// A manual rescaling weight given to the loss of each batch element.
