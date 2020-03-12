@@ -1661,3 +1661,21 @@ class RpcTest(RpcAgentTestFixture):
                 AttributeError, "RPC pickler does not serialize"
             ):
                 rpc.rpc_sync(callee_worker, foo_add, args=())
+
+    @dist_init
+    def test_non_garbage_collected_user_rref_due_to_local_circular_dependency(self):
+        dst_worker_name = worker_name((self.rank + 1) % self.world_size)
+
+        a = MyClass(1)
+        b = MyClass(2)
+
+        # This is to make Python not garbage collect a and b.
+        a.other = b
+        b.other = a
+
+        n = self.rank
+        a.rref = rpc.remote(
+            dst_worker_name,
+            torch.add,
+            args=(torch.ones(n, n), 2)
+        )

@@ -213,6 +213,12 @@ class TORCH_API RRef : public RRefInterface {
     return type_;
   }
 
+  // Send delete UserRRef request to Owner,
+  // if the request hasn't been sent yet.
+  // There are 2 cases to call it,
+  // 1, Python GC decides end of UserRRef lifetime, calling destructor.
+  // 2, RPC module graceful shutdown calls it on all UserRRefs tracked
+  //    in the RRefContext.
   virtual void tryDel() {}
 
  protected:
