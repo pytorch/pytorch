@@ -49,11 +49,11 @@ void OperatorEntry::prepareForDeregistration() {
 
 namespace {
   void checkSchema(const OperatorName& name, const FunctionSchema& from_def, const FunctionSchema& inferred) {
-    c10::optional<std::string> schema_difference = findSchemaDifferences(inferred, from_def);
+    c10::optional<std::string> schema_difference = findSchemaDifferences(from_def, inferred);
     if (schema_difference.has_value()) {
       TORCH_CHECK(false,
-        "In registration for ", toString(name), ": the inferred function schema \"", toString(inferred), "\" ",
-        "doesn't schema for this operator \"", toString(from_def), "\". ",
+        "In registration for ", toString(name), ": expected schema of operator to be \"", toString(from_def), "\", ",
+        "but got inferred schema \"", toString(inferred), "\". ",
         *schema_difference);
     }
   }
