@@ -6,6 +6,7 @@ namespace torch {
 namespace nn {
 namespace functional {
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor cosine_similarity(
     const Tensor& x1,
@@ -19,6 +20,7 @@ inline Tensor cosine_similarity(
       eps);
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor cosine_similarity(
     const Tensor& x1,
@@ -29,6 +31,7 @@ inline Tensor cosine_similarity(
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor pairwise_distance(
     const Tensor& x1,
@@ -44,6 +47,7 @@ inline Tensor pairwise_distance(
       keepdim);
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor pairwise_distance(
     const Tensor& x1,

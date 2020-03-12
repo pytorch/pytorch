@@ -49,6 +49,7 @@ inline Tensor affine_grid(
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor grid_sample(
     const Tensor& input,
@@ -83,6 +84,7 @@ inline Tensor grid_sample(
   return torch::grid_sampler(input, grid, mode_enum, padding_mode_enum, align_corners.value());
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor grid_sample(
     const Tensor& input,

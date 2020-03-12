@@ -7,6 +7,7 @@ namespace torch {
 namespace nn {
 namespace functional {
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor conv1d(
     const Tensor& input,
@@ -26,6 +27,7 @@ inline Tensor conv1d(
     groups);
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor conv1d(
     const Tensor& input,
@@ -41,6 +43,7 @@ inline Tensor conv1d(
     options.groups());
 }
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor conv2d(
     const Tensor& input,
@@ -60,6 +63,7 @@ inline Tensor conv2d(
     groups);
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor conv2d(
     const Tensor& input,
@@ -75,6 +79,7 @@ inline Tensor conv2d(
     options.groups());
 }
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor conv3d(
     const Tensor& input,
@@ -94,6 +99,7 @@ inline Tensor conv3d(
     groups);
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor conv3d(
     const Tensor& input,
@@ -111,6 +117,7 @@ inline Tensor conv3d(
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor conv_transpose1d(const Tensor& input, const Tensor& weight,
                                const Tensor& bias, IntArrayRef stride,
@@ -120,6 +127,7 @@ inline Tensor conv_transpose1d(const Tensor& input, const Tensor& weight,
     input, weight, bias, stride, padding, output_padding, groups, dilation);
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor conv_transpose1d(const Tensor& input, const Tensor& weight,
                                const ConvTranspose1dFuncOptions& options = {}) {
@@ -130,6 +138,7 @@ inline Tensor conv_transpose1d(const Tensor& input, const Tensor& weight,
     options.groups(), options.dilation());
 }
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor conv_transpose2d(const Tensor& input, const Tensor& weight,
                                const Tensor& bias, IntArrayRef stride,
@@ -139,6 +148,7 @@ inline Tensor conv_transpose2d(const Tensor& input, const Tensor& weight,
     input, weight, bias, stride, padding, output_padding, groups, dilation);
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor conv_transpose2d(const Tensor& input, const Tensor& weight,
                                const ConvTranspose2dFuncOptions& options = {}) {
@@ -149,6 +159,7 @@ inline Tensor conv_transpose2d(const Tensor& input, const Tensor& weight,
     options.groups(), options.dilation());
 }
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor conv_transpose3d(const Tensor& input, const Tensor& weight,
                                const Tensor& bias, IntArrayRef stride,
@@ -158,6 +169,7 @@ inline Tensor conv_transpose3d(const Tensor& input, const Tensor& weight,
     input, weight, bias, stride, padding, output_padding, groups, dilation);
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor conv_transpose3d(const Tensor& input, const Tensor& weight,
                                const ConvTranspose3dFuncOptions& options = {}) {

@@ -8,6 +8,7 @@ namespace torch {
 namespace nn {
 namespace functional {
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor l1_loss(
     const Tensor& input,
@@ -19,6 +20,7 @@ inline Tensor l1_loss(
     enumtype::reduction_get_enum(reduction));
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor l1_loss(
     const Tensor& input,
@@ -29,6 +31,7 @@ inline Tensor l1_loss(
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor kl_div(
     const Tensor& input,
@@ -58,6 +61,7 @@ inline Tensor kl_div(
   return reduced;
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor kl_div(
     const Tensor& input,
@@ -68,6 +72,7 @@ inline Tensor kl_div(
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor mse_loss(
     const Tensor& input,
@@ -97,6 +102,7 @@ inline Tensor mse_loss(
   return ret;
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor mse_loss(
     const Tensor& input,
@@ -107,6 +113,7 @@ inline Tensor mse_loss(
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor binary_cross_entropy(
     const Tensor& input,
@@ -136,6 +143,7 @@ inline Tensor binary_cross_entropy(
   return torch::binary_cross_entropy(input, target, weight_, reduction_enum);
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor binary_cross_entropy(
     const Tensor& input,
@@ -146,6 +154,7 @@ inline Tensor binary_cross_entropy(
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor hinge_embedding_loss(
     const Tensor& input,
@@ -159,6 +168,7 @@ inline Tensor hinge_embedding_loss(
       enumtype::reduction_get_enum(reduction));
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor hinge_embedding_loss(
     const Tensor& input,
@@ -169,6 +179,7 @@ inline Tensor hinge_embedding_loss(
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor multi_margin_loss(
     const Tensor& input,
@@ -192,6 +203,7 @@ inline Tensor multi_margin_loss(
   );
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor multi_margin_loss(
     const Tensor& input,
@@ -202,6 +214,7 @@ inline Tensor multi_margin_loss(
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor cosine_embedding_loss(
     const Tensor& input1,
@@ -217,6 +230,7 @@ inline Tensor cosine_embedding_loss(
     enumtype::reduction_get_enum(reduction));
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor cosine_embedding_loss(
     const Tensor& input1,
@@ -233,6 +247,7 @@ inline Tensor _smooth_l1_loss(const Tensor& input, const Tensor& target) {
     return torch::where(t < 1, 0.5 * torch::pow(t, 2), t - 0.5);
 }
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor smooth_l1_loss(
     const Tensor& input,
@@ -258,6 +273,7 @@ inline Tensor smooth_l1_loss(
   return ret;
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor smooth_l1_loss(
     const Tensor& input,
@@ -268,6 +284,7 @@ inline Tensor smooth_l1_loss(
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor multilabel_margin_loss(
     const Tensor& input,
@@ -279,6 +296,7 @@ inline Tensor multilabel_margin_loss(
     enumtype::reduction_get_enum(reduction));
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor multilabel_margin_loss(
     const Tensor& input,
@@ -289,6 +307,7 @@ inline Tensor multilabel_margin_loss(
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor soft_margin_loss(
     const Tensor& input,
@@ -300,6 +319,7 @@ inline Tensor soft_margin_loss(
     enumtype::reduction_get_enum(reduction));
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor soft_margin_loss(
     const Tensor& input,
@@ -310,6 +330,7 @@ inline Tensor soft_margin_loss(
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor multilabel_soft_margin_loss(
     const Tensor& input,
@@ -341,6 +362,7 @@ inline Tensor multilabel_soft_margin_loss(
   return ret;
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor multilabel_soft_margin_loss(
     const Tensor& input,
@@ -351,6 +373,7 @@ inline Tensor multilabel_soft_margin_loss(
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor triplet_margin_loss(
     const Tensor& anchor,
@@ -372,6 +395,7 @@ inline Tensor triplet_margin_loss(
       enumtype::reduction_get_enum(reduction));
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor triplet_margin_loss(
     const Tensor& anchor,
@@ -391,6 +415,7 @@ inline Tensor triplet_margin_loss(
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor ctc_loss(const Tensor& log_probs,
                        const Tensor& targets,
@@ -409,6 +434,7 @@ inline Tensor ctc_loss(const Tensor& log_probs,
     zero_infinity);
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor ctc_loss(const Tensor& log_probs,
                        const Tensor& targets,
@@ -427,6 +453,7 @@ inline Tensor ctc_loss(const Tensor& log_probs,
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor poisson_nll_loss(const Tensor& input,
                                const Tensor& target,
@@ -439,6 +466,7 @@ inline Tensor poisson_nll_loss(const Tensor& input,
     log_input, full, eps, enumtype::reduction_get_enum(reduction));
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor poisson_nll_loss(const Tensor& input, const Tensor& target,
                                const PoissonNLLLossFuncOptions& options = {}) {
@@ -449,6 +477,7 @@ inline Tensor poisson_nll_loss(const Tensor& input, const Tensor& target,
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor margin_ranking_loss(const Tensor& input1,
                                   const Tensor& input2,
@@ -464,6 +493,7 @@ inline Tensor margin_ranking_loss(const Tensor& input1,
     enumtype::reduction_get_enum(reduction));
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor margin_ranking_loss(const Tensor& input1, const Tensor& input2,
   const Tensor& target, const MarginRankingLossFuncOptions& options = {}) {
@@ -472,6 +502,7 @@ inline Tensor margin_ranking_loss(const Tensor& input1, const Tensor& input2,
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor nll_loss(
     const Tensor& input,
@@ -537,6 +568,7 @@ inline Tensor nll_loss(
   return ret;
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor nll_loss(
     const Tensor& input,
@@ -552,6 +584,7 @@ inline Tensor nll_loss(
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor cross_entropy(
     const Tensor& input,
@@ -580,6 +613,7 @@ inline Tensor cross_entropy(
     reduction_);
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor cross_entropy(
     const Tensor& input,
@@ -595,6 +629,7 @@ inline Tensor cross_entropy(
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor binary_cross_entropy_with_logits(
   const Tensor& input, const Tensor& target, const Tensor& weight,
@@ -610,6 +645,7 @@ inline Tensor binary_cross_entropy_with_logits(
     weight, pos_weight, enumtype::reduction_get_enum(reduction));
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor binary_cross_entropy_with_logits(
   const Tensor& input, const Tensor& target,

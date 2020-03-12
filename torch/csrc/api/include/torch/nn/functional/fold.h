@@ -6,6 +6,7 @@ namespace torch {
 namespace nn {
 namespace functional {
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor fold(const Tensor& input,
                    ExpandingArray<2> output_size,
@@ -29,6 +30,7 @@ inline Tensor fold(const Tensor& input,
   }
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor fold(const Tensor& input, const FoldFuncOptions& options) {
   return detail::fold(
@@ -42,6 +44,7 @@ inline Tensor fold(const Tensor& input, const FoldFuncOptions& options) {
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor unfold(const Tensor& input,
                      ExpandingArray<2> kernel_size,
@@ -63,6 +66,7 @@ inline Tensor unfold(const Tensor& input,
   }
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor unfold(const Tensor& input, const UnfoldFuncOptions& options) {
   return detail::unfold(input, options.kernel_size(), options.dilation(), options.padding(), options.stride());

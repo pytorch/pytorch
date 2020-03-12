@@ -6,6 +6,7 @@ namespace torch {
 namespace nn {
 namespace functional {
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 
 inline Tensor dropout(Tensor& input, double p, bool training, bool inplace) {
@@ -21,6 +22,7 @@ inline Tensor dropout(Tensor& input, double p, bool training, bool inplace) {
 }
 
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor dropout(Tensor input,
     const DropoutFuncOptions& options = {}) {
@@ -30,6 +32,7 @@ inline Tensor dropout(Tensor input,
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 
 inline Tensor dropout2d(Tensor& input, double p, bool training, bool inplace) {
@@ -45,6 +48,7 @@ inline Tensor dropout2d(Tensor& input, double p, bool training, bool inplace) {
 }
 
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor dropout2d(Tensor input,
     const Dropout2dFuncOptions& options = {}) {
@@ -54,6 +58,7 @@ inline Tensor dropout2d(Tensor input,
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 
 inline Tensor dropout3d(Tensor& input, double p, bool training, bool inplace) {
@@ -69,6 +74,7 @@ inline Tensor dropout3d(Tensor& input, double p, bool training, bool inplace) {
 }
 
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor dropout3d(Tensor input,
     const Dropout3dFuncOptions& options = {}) {
@@ -78,6 +84,7 @@ inline Tensor dropout3d(Tensor input,
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 
 inline Tensor alpha_dropout(Tensor input, double p, bool training, bool inplace) {
@@ -88,6 +95,7 @@ inline Tensor alpha_dropout(Tensor input, double p, bool training, bool inplace)
 }
 
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor alpha_dropout(Tensor input, const AlphaDropoutFuncOptions& options = {}) {
   return detail::alpha_dropout(input, options.p(), options.training(), options.inplace());
@@ -95,6 +103,7 @@ inline Tensor alpha_dropout(Tensor input, const AlphaDropoutFuncOptions& options
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 
 inline Tensor feature_alpha_dropout(Tensor input, double p, bool training, bool inplace) {
@@ -105,6 +114,7 @@ inline Tensor feature_alpha_dropout(Tensor input, double p, bool training, bool 
 }
 
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor feature_alpha_dropout(Tensor input, const FeatureAlphaDropoutFuncOptions& options = {}) {
   return detail::feature_alpha_dropout(input, options.p(), options.training(), options.inplace());

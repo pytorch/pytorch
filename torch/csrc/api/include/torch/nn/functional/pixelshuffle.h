@@ -6,6 +6,7 @@ namespace torch {
 namespace nn {
 namespace functional {
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor pixel_shuffle(
     const Tensor& input,
@@ -16,6 +17,7 @@ inline Tensor pixel_shuffle(
   );
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor pixel_shuffle(
     const Tensor& input,

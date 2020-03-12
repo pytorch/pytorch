@@ -9,6 +9,7 @@ namespace torch {
 namespace nn {
 namespace functional {
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor normalize(
     const Tensor& input,
@@ -25,6 +26,7 @@ inline Tensor normalize(
     }
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor normalize(
     const Tensor& input,
@@ -34,6 +36,7 @@ inline Tensor normalize(
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor layer_norm(const Tensor& input,
                          const std::vector<int64_t>& normalized_shape,
@@ -43,6 +46,7 @@ inline Tensor layer_norm(const Tensor& input,
     return torch::layer_norm(input, normalized_shape, weight, bias, eps);
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor layer_norm(const Tensor& input,
     const LayerNormFuncOptions& options) {
@@ -51,6 +55,7 @@ inline Tensor layer_norm(const Tensor& input,
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor local_response_norm(
     const Tensor& input,
@@ -89,6 +94,7 @@ inline Tensor local_response_norm(
     return input / div;
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor local_response_norm(
     const Tensor& input,
@@ -98,6 +104,7 @@ inline Tensor local_response_norm(
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor group_norm(
     const Tensor& input,
@@ -109,6 +116,7 @@ inline Tensor group_norm(
                            at::globalContext().userEnabledCuDNN());
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor group_norm(
     const Tensor& input,

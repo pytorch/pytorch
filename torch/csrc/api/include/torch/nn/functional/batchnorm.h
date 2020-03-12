@@ -7,6 +7,7 @@ namespace torch {
 namespace nn {
 namespace functional {
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor batch_norm(const Tensor& input,
                          const Tensor& running_mean,
@@ -38,6 +39,7 @@ inline Tensor batch_norm(const Tensor& input,
     at::globalContext().userEnabledCuDNN());
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor batch_norm(const Tensor& input, const Tensor& running_mean,
                          const Tensor& running_var, const BatchNormFuncOptions& options = {}) {

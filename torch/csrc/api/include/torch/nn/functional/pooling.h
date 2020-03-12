@@ -7,6 +7,7 @@ namespace torch {
 namespace nn {
 namespace functional {
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor avg_pool1d(const Tensor& input,
                          ExpandingArray<1> kernel_size,
@@ -23,6 +24,7 @@ inline Tensor avg_pool1d(const Tensor& input,
       count_include_pad);
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor avg_pool1d(const Tensor& input, const AvgPool1dFuncOptions& options) {
   return avg_pool1d(
@@ -34,6 +36,7 @@ inline Tensor avg_pool1d(const Tensor& input, const AvgPool1dFuncOptions& option
     options.count_include_pad());
 }
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor avg_pool2d(const Tensor& input,
                          ExpandingArray<2> kernel_size,
@@ -52,6 +55,7 @@ inline Tensor avg_pool2d(const Tensor& input,
       divisor_override);
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor avg_pool2d(const Tensor& input, const AvgPool2dFuncOptions& options) {
   return detail::avg_pool2d(
@@ -64,6 +68,7 @@ inline Tensor avg_pool2d(const Tensor& input, const AvgPool2dFuncOptions& option
     options.divisor_override());
 }
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor avg_pool3d(const Tensor& input,
                          ExpandingArray<3> kernel_size,
@@ -82,6 +87,7 @@ inline Tensor avg_pool3d(const Tensor& input,
       divisor_override);
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor avg_pool3d(const Tensor& input, const AvgPool3dFuncOptions& options) {
   return detail::avg_pool3d(
@@ -96,6 +102,7 @@ inline Tensor avg_pool3d(const Tensor& input, const AvgPool3dFuncOptions& option
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor max_pool1d(const Tensor& input,
                          ExpandingArray<1> kernel_size,
@@ -112,6 +119,7 @@ inline Tensor max_pool1d(const Tensor& input,
       ceil_mode);
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor max_pool1d(const Tensor& input, const MaxPool1dFuncOptions& options) {
    return detail::max_pool1d(
@@ -123,6 +131,7 @@ inline Tensor max_pool1d(const Tensor& input, const MaxPool1dFuncOptions& option
       options.ceil_mode());
 }
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline std::tuple<Tensor, Tensor> max_pool1d_with_indices(
   const Tensor& input,
@@ -140,6 +149,7 @@ inline std::tuple<Tensor, Tensor> max_pool1d_with_indices(
       ceil_mode);
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline std::tuple<Tensor, Tensor> max_pool1d_with_indices(const Tensor& input, const MaxPool1dFuncOptions& options) {
   return detail::max_pool1d_with_indices(
@@ -151,6 +161,7 @@ inline std::tuple<Tensor, Tensor> max_pool1d_with_indices(const Tensor& input, c
       options.ceil_mode());
 }
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor max_pool2d(const Tensor& input,
                          ExpandingArray<2> kernel_size,
@@ -167,6 +178,7 @@ inline Tensor max_pool2d(const Tensor& input,
       ceil_mode);
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor max_pool2d(const Tensor& input, const MaxPool2dFuncOptions& options) {
   return detail::max_pool2d(
@@ -178,6 +190,7 @@ inline Tensor max_pool2d(const Tensor& input, const MaxPool2dFuncOptions& option
       options.ceil_mode());
 }
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline std::tuple<Tensor, Tensor> max_pool2d_with_indices(
   const Tensor& input,
@@ -195,6 +208,7 @@ inline std::tuple<Tensor, Tensor> max_pool2d_with_indices(
       ceil_mode);
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline std::tuple<Tensor, Tensor> max_pool2d_with_indices(const Tensor& input, const MaxPool2dFuncOptions& options) {
   return detail::max_pool2d_with_indices(
@@ -206,6 +220,7 @@ inline std::tuple<Tensor, Tensor> max_pool2d_with_indices(const Tensor& input, c
       options.ceil_mode());
 }
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor max_pool3d(const Tensor& input,
                          ExpandingArray<3> kernel_size,
@@ -222,6 +237,7 @@ inline Tensor max_pool3d(const Tensor& input,
       ceil_mode);
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor max_pool3d(const Tensor& input, const MaxPool3dFuncOptions& options) {
   return detail::max_pool3d(
@@ -233,6 +249,7 @@ inline Tensor max_pool3d(const Tensor& input, const MaxPool3dFuncOptions& option
       options.ceil_mode());
 }
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline std::tuple<Tensor, Tensor> max_pool3d_with_indices(
   const Tensor& input,
@@ -250,6 +267,7 @@ inline std::tuple<Tensor, Tensor> max_pool3d_with_indices(
       ceil_mode);
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline std::tuple<Tensor, Tensor> max_pool3d_with_indices(const Tensor& input, const MaxPool3dFuncOptions& options) {
   return detail::max_pool3d_with_indices(
@@ -263,72 +281,84 @@ inline std::tuple<Tensor, Tensor> max_pool3d_with_indices(const Tensor& input, c
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor adaptive_max_pool1d(const Tensor& input,
   ExpandingArray<1> output_size) {
    return std::get<0>(torch::adaptive_max_pool1d(input, output_size));
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor adaptive_max_pool1d(const Tensor& input,
   const AdaptiveMaxPool1dFuncOptions& options) {
    return detail::adaptive_max_pool1d(input, options.output_size());
 }
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline std::tuple<Tensor, Tensor> adaptive_max_pool1d_with_indices(
   const Tensor& input, ExpandingArray<1> output_size) {
    return torch::adaptive_max_pool1d(input, output_size);
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline std::tuple<Tensor, Tensor> adaptive_max_pool1d_with_indices(
   const Tensor& input, const AdaptiveMaxPool1dFuncOptions& options) {
    return detail::adaptive_max_pool1d_with_indices(input, options.output_size());
 }
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor adaptive_max_pool2d(const Tensor& input,
   ExpandingArray<2> output_size) {
    return std::get<0>(torch::adaptive_max_pool2d(input, output_size));
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor adaptive_max_pool2d(const Tensor& input,
   const AdaptiveMaxPool2dFuncOptions& options) {
    return detail::adaptive_max_pool2d(input, options.output_size());
 }
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline std::tuple<Tensor, Tensor> adaptive_max_pool2d_with_indices(
   const Tensor& input, ExpandingArray<2> output_size) {
    return torch::adaptive_max_pool2d(input, output_size);
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline std::tuple<Tensor, Tensor> adaptive_max_pool2d_with_indices(
   const Tensor& input, const AdaptiveMaxPool2dFuncOptions& options) {
    return detail::adaptive_max_pool2d_with_indices(input, options.output_size());
 }
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor adaptive_max_pool3d(const Tensor& input,
   ExpandingArray<3> output_size) {
    return std::get<0>(torch::adaptive_max_pool3d(input, output_size));
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor adaptive_max_pool3d(const Tensor& input,
   const AdaptiveMaxPool3dFuncOptions& options) {
    return detail::adaptive_max_pool3d(input, options.output_size());
 }
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline std::tuple<Tensor, Tensor> adaptive_max_pool3d_with_indices(
   const Tensor& input, ExpandingArray<3> output_size) {
    return torch::adaptive_max_pool3d(input, output_size);
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline std::tuple<Tensor, Tensor> adaptive_max_pool3d_with_indices(
   const Tensor& input, const AdaptiveMaxPool3dFuncOptions& options) {
@@ -337,36 +367,42 @@ inline std::tuple<Tensor, Tensor> adaptive_max_pool3d_with_indices(
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor adaptive_avg_pool1d(const Tensor& input,
   ExpandingArray<1> output_size) {
    return torch::adaptive_avg_pool1d(input, output_size);
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor adaptive_avg_pool1d(const Tensor& input,
   const AdaptiveAvgPool1dFuncOptions& options) {
    return detail::adaptive_avg_pool1d(input, options.output_size());
 }
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor adaptive_avg_pool2d(const Tensor& input,
   ExpandingArray<2> output_size) {
    return torch::adaptive_avg_pool2d(input, output_size);
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor adaptive_avg_pool2d(const Tensor& input,
   const AdaptiveAvgPool2dFuncOptions& options) {
    return detail::adaptive_avg_pool2d(input, options.output_size());
 }
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor adaptive_avg_pool3d(const Tensor& input,
   ExpandingArray<3> output_size) {
    return torch::adaptive_avg_pool3d(input, output_size);
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor adaptive_avg_pool3d(const Tensor& input,
   const AdaptiveAvgPool3dFuncOptions& options) {
@@ -409,6 +445,7 @@ inline std::vector<int64_t> _unpool_output_size(const Tensor& input,
   }
 }
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor max_unpool1d(
     const Tensor& input,
@@ -425,6 +462,7 @@ inline Tensor max_unpool1d(
                              output_size_).squeeze(3);
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor max_unpool1d(const Tensor& input, const Tensor& indices,
     const MaxUnpool1dFuncOptions& options) {
@@ -437,6 +475,7 @@ inline Tensor max_unpool1d(const Tensor& input, const Tensor& indices,
     options.output_size());
 }
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor max_unpool2d(
   const Tensor& input,
@@ -452,6 +491,7 @@ inline Tensor max_unpool2d(
   return torch::max_unpool2d(input, indices, output_size_);
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor max_unpool2d(const Tensor& input, const Tensor& indices,
   const MaxUnpool2dFuncOptions& options) {
@@ -464,6 +504,7 @@ inline Tensor max_unpool2d(const Tensor& input, const Tensor& indices,
     options.output_size());
 }
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor max_unpool3d(
   const Tensor& input,
@@ -480,6 +521,7 @@ inline Tensor max_unpool3d(
                              stride, padding);
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor max_unpool3d(const Tensor& input, const Tensor& indices,
   const MaxUnpool3dFuncOptions& options) {
@@ -494,6 +536,7 @@ inline Tensor max_unpool3d(const Tensor& input, const Tensor& indices,
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline std::tuple<Tensor, Tensor> fractional_max_pool2d_with_indices(
     const Tensor& input,
@@ -522,6 +565,7 @@ inline std::tuple<Tensor, Tensor> fractional_max_pool2d_with_indices(
   return torch::fractional_max_pool2d(input, kernel_size, *output_size_, _random_samples_);
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline std::tuple<Tensor, Tensor> fractional_max_pool2d_with_indices(const Tensor& input, const FractionalMaxPool2dFuncOptions& options) {
   return detail::fractional_max_pool2d_with_indices(
@@ -532,6 +576,7 @@ inline std::tuple<Tensor, Tensor> fractional_max_pool2d_with_indices(const Tenso
       options._random_samples());
 }
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor fractional_max_pool2d(const Tensor& input,
                                     ExpandingArray<2> kernel_size,
@@ -542,6 +587,7 @@ inline Tensor fractional_max_pool2d(const Tensor& input,
                                                         output_ratio, _random_samples));
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor fractional_max_pool2d(const Tensor& input, const FractionalMaxPool2dFuncOptions& options) {
   return detail::fractional_max_pool2d(
@@ -552,6 +598,7 @@ inline Tensor fractional_max_pool2d(const Tensor& input, const FractionalMaxPool
       options._random_samples());
 }
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline std::tuple<Tensor, Tensor> fractional_max_pool3d_with_indices(
     const Tensor& input,
@@ -581,6 +628,7 @@ inline std::tuple<Tensor, Tensor> fractional_max_pool3d_with_indices(
   return torch::fractional_max_pool3d(input, kernel_size, *output_size, _random_samples_);
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline std::tuple<Tensor, Tensor> fractional_max_pool3d_with_indices(const Tensor& input, const FractionalMaxPool3dFuncOptions& options) {
   return detail::fractional_max_pool3d_with_indices(
@@ -591,6 +639,7 @@ inline std::tuple<Tensor, Tensor> fractional_max_pool3d_with_indices(const Tenso
       options._random_samples());
 }
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor fractional_max_pool3d(const Tensor& input,
                                     ExpandingArray<3> kernel_size,
@@ -601,6 +650,7 @@ inline Tensor fractional_max_pool3d(const Tensor& input,
                                                         output_ratio, _random_samples));
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor fractional_max_pool3d(const Tensor& input, const FractionalMaxPool3dFuncOptions& options) {
   return detail::fractional_max_pool3d(
@@ -613,6 +663,7 @@ inline Tensor fractional_max_pool3d(const Tensor& input, const FractionalMaxPool
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor lp_pool1d(
   const Tensor& input,
@@ -631,6 +682,7 @@ inline Tensor lp_pool1d(
   return (torch::sign(out) * relu(torch::abs(out))).mul((*kernel_size)[0]).pow(1. / norm_type);
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor lp_pool1d(const Tensor& input, const LPPool1dFuncOptions& options) {
   return detail::lp_pool1d(
@@ -641,6 +693,7 @@ inline Tensor lp_pool1d(const Tensor& input, const LPPool1dFuncOptions& options)
     options.ceil_mode());
 }
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor lp_pool2d(
   const Tensor& input,
@@ -662,6 +715,7 @@ inline Tensor lp_pool2d(
   return (torch::sign(out) * relu(torch::abs(out))).mul(kw * kh).pow(1. / norm_type);
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor lp_pool2d(const Tensor& input, const LPPool2dFuncOptions& options) {
   return detail::lp_pool2d(

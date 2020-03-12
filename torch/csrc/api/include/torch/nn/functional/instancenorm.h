@@ -6,6 +6,7 @@ namespace torch {
 namespace nn {
 namespace functional {
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor instance_norm(const Tensor& input, const Tensor& running_mean,
     const Tensor& running_var, const Tensor& weight, const Tensor& bias,
@@ -17,6 +18,7 @@ inline Tensor instance_norm(const Tensor& input, const Tensor& running_mean,
   );
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor instance_norm(const Tensor& input, const InstanceNormFuncOptions& options = {}) {
   return detail::instance_norm(

@@ -13,6 +13,7 @@ namespace torch {
 namespace nn {
 namespace functional {
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor elu(Tensor& input, double alpha, bool inplace) {
   if (inplace) {
@@ -22,6 +23,7 @@ inline Tensor elu(Tensor& input, double alpha, bool inplace) {
   }
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor elu(Tensor input, const ELUFuncOptions& options = {}) {
   return detail::elu(input, options.alpha(), options.inplace());
@@ -29,6 +31,7 @@ inline Tensor elu(Tensor input, const ELUFuncOptions& options = {}) {
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor selu(Tensor& input, bool inplace) {
   if (inplace) {
@@ -38,6 +41,7 @@ inline Tensor selu(Tensor& input, bool inplace) {
   }
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor selu(Tensor input, const SELUFuncOptions& options = {}) {
   return detail::selu(input, options.inplace());
@@ -45,12 +49,14 @@ inline Tensor selu(Tensor input, const SELUFuncOptions& options = {}) {
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor hardshrink(const Tensor& input,
                          double lambda) {
   return torch::hardshrink(input, lambda);
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor hardshrink(const Tensor& input,
                          const HardshrinkFuncOptions& options = {}) {
@@ -59,6 +65,7 @@ inline Tensor hardshrink(const Tensor& input,
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor hardtanh(Tensor& input,
                        double min_val,
@@ -71,6 +78,7 @@ inline Tensor hardtanh(Tensor& input,
   }
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor hardtanh(Tensor input, const HardtanhFuncOptions& options = {}) {
   return detail::hardtanh(input, options.min_val(), options.max_val(), options.inplace());
@@ -78,6 +86,7 @@ inline Tensor hardtanh(Tensor input, const HardtanhFuncOptions& options = {}) {
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor leaky_relu(Tensor& input,
                          double negative_slope,
@@ -89,6 +98,7 @@ inline Tensor leaky_relu(Tensor& input,
   }
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.leaky_relu
 /// about the exact behavior of this functional.
@@ -113,6 +123,7 @@ inline Tensor logsigmoid(const Tensor& input) {
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor gumbel_softmax(const Tensor& logits,
                              double tau,
@@ -134,6 +145,7 @@ inline Tensor gumbel_softmax(const Tensor& logits,
   return ret;
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor gumbel_softmax(const Tensor& logits, const GumbelSoftmaxFuncOptions& options = {}) {
   return detail::gumbel_softmax(logits, options.tau(), options.hard(), options.dim());
@@ -141,6 +153,7 @@ inline Tensor gumbel_softmax(const Tensor& logits, const GumbelSoftmaxFuncOption
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor softmax(const Tensor& input, int64_t dim,
                       c10::optional<torch::Dtype> dtype) {
@@ -155,6 +168,7 @@ inline Tensor softmax(const Tensor& input, int64_t dim,
   return ret;
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor softmax(const Tensor& input, const SoftmaxFuncOptions& options) {
   return detail::softmax(input, options.dim(), options.dtype());
@@ -162,6 +176,7 @@ inline Tensor softmax(const Tensor& input, const SoftmaxFuncOptions& options) {
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor softmin(const Tensor& input, int64_t dim,
                       c10::optional<torch::Dtype> dtype) {
@@ -176,6 +191,7 @@ inline Tensor softmin(const Tensor& input, int64_t dim,
   return ret;
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor softmin(const Tensor& input, const SoftminFuncOptions& options) {
   return detail::softmin(input, options.dim(), options.dtype());
@@ -183,6 +199,7 @@ inline Tensor softmin(const Tensor& input, const SoftminFuncOptions& options) {
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor log_softmax(const Tensor& input, int64_t dim,
                           c10::optional<torch::Dtype> dtype) {
@@ -197,6 +214,7 @@ inline Tensor log_softmax(const Tensor& input, int64_t dim,
   return ret;
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor log_softmax(const Tensor& input, const LogSoftmaxFuncOptions& options) {
   return detail::log_softmax(input, options.dim(), options.dtype());
@@ -204,12 +222,14 @@ inline Tensor log_softmax(const Tensor& input, const LogSoftmaxFuncOptions& opti
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor glu(const Tensor& input, int64_t dim) {
   TORCH_CHECK(input.dim() != 0, "glu does not suppport scalars because halving size must be even");
   return torch::glu(input, dim);
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor glu(const Tensor& input, const GLUFuncOptions& options = {}) {
   return detail::glu(input, options.dim());
@@ -229,6 +249,7 @@ inline Tensor prelu(const Tensor& input, const Tensor& weight) {
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor relu(Tensor& input, bool inplace) {
   if (inplace) {
@@ -238,6 +259,7 @@ inline Tensor relu(Tensor& input, bool inplace) {
   }
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor relu(Tensor input, const ReLUFuncOptions& options = {}) {
   return detail::relu(input, options.inplace());
@@ -245,11 +267,13 @@ inline Tensor relu(Tensor input, const ReLUFuncOptions& options = {}) {
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor relu6(Tensor& input, bool inplace) {
   return detail::hardtanh(input, /*min_val=*/0, /*max_val=*/6, /*inplace=*/inplace);
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor relu6(Tensor input, const ReLU6FuncOptions& options = {}) {
   return detail::relu6(input, options.inplace());
@@ -257,6 +281,7 @@ inline Tensor relu6(Tensor input, const ReLU6FuncOptions& options = {}) {
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor rrelu(Tensor& input,
                     double lower,
@@ -270,6 +295,7 @@ inline Tensor rrelu(Tensor& input,
   }
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor rrelu(Tensor input, const RReLUFuncOptions& options = {}) {
   return detail::rrelu(input, options.lower(), options.upper(), options.training(), options.inplace());
@@ -277,6 +303,7 @@ inline Tensor rrelu(Tensor input, const RReLUFuncOptions& options = {}) {
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor celu(Tensor& input,
                    double alpha,
@@ -288,6 +315,7 @@ inline Tensor celu(Tensor& input,
   }
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor celu(Tensor input, const CELUFuncOptions& options = {}) {
   return detail::celu(input, options.alpha(), options.inplace());
@@ -295,6 +323,7 @@ inline Tensor celu(Tensor input, const CELUFuncOptions& options = {}) {
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor softplus(const Tensor& input,
                        double beta,
@@ -302,6 +331,7 @@ inline Tensor softplus(const Tensor& input,
   return torch::softplus(input, beta, threshold);
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor softplus(const Tensor& input,
                        const SoftplusFuncOptions& options = {}) {
@@ -311,12 +341,14 @@ inline Tensor softplus(const Tensor& input,
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor softshrink(const Tensor& input,
                          double lambda) {
   return torch::softshrink(input, lambda);
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor softshrink(const Tensor& input,
                          const SoftshrinkFuncOptions& options = {}) {
@@ -337,6 +369,7 @@ inline Tensor tanhshrink(const Tensor& input) {
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor threshold(Tensor& input,
                         double threshold,
@@ -349,6 +382,7 @@ inline Tensor threshold(Tensor& input,
   }
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor threshold(Tensor input, const ThresholdFuncOptions& options) {
   return detail::threshold(input, options.threshold(), options.value(), options.inplace());
@@ -356,6 +390,7 @@ inline Tensor threshold(Tensor input, const ThresholdFuncOptions& options) {
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
   const Tensor& query,
@@ -619,6 +654,7 @@ inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
   }
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
   const Tensor& query, const Tensor& key, const Tensor& value,

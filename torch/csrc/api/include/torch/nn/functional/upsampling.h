@@ -9,6 +9,7 @@ namespace torch {
 namespace nn {
 namespace functional {
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor interpolate(
   const Tensor& input,
@@ -108,6 +109,7 @@ inline Tensor interpolate(
   }
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline Tensor interpolate(const Tensor& input, const InterpolateFuncOptions& options = {}) {
   return detail::interpolate(
