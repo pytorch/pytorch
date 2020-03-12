@@ -14,11 +14,15 @@ import torch
 import torch.jit
 import torch.backends.mkldnn
 from torch.utils import mkldnn as mkldnn_utils
-from torch.testing._internal.common_utils import TestCase, run_tests, TemporaryFileName
+from torch.testing._internal.common_utils import TestCase, run_tests, \
+    TemporaryFileName, TEST_NUMPY
 
 from torch.autograd.gradcheck import gradgradcheck, gradcheck
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
+
+if TEST_NUMPY:
+    import numpy as np
 
 dtype2prec = {torch.float: 1e-5, torch.bfloat16: 1e-2}
 
@@ -107,7 +111,108 @@ class TestMkldnn(TestCase):
         self.assertTrue("layout=torch._mkldnn" in str(torch.randn((1, 2, 3, 4),
                                                                   dtype=torch.float, device=torch.device('cpu')).to_mkldnn()))
 
+    def _test_conv_base(self, func):
+        if func is torch.nn.Conv2d:
+            ndims = 2
+            transpose = False
+        elif func is torch.nn.Conv3d:
+            ndims = 3
+            transpose = False
+        elif func is torch.nn.ConvTranspose2d:
+            ndims = 2
+            transpose = True
+        elif func is torch.nn.ConvTranspose3d:
+            ndims = 3
+            transpose = True
+        else:
+            raise RuntimeError(str(func) + ' is not supported')
+
+        @settings(deadline=None)
+        @given(
+            batch=st.integers(1, 10),
+            height=st.integers(8, 32),
+            width=st.integers(8, 32),
+            depth=st.integers(8, 32),
+            in_channels_per_group=st.sampled_from([2, 4, 7, 8, 16, 32]),
+            out_channels_per_group=st.sampled_from([2, 4, 7, 8, 16, 32]),
+            groups=st.integers(1, 4),
+            kernel=st.integers(1, 5),
+            stride=st.integers(2, 3),
+            pad=st.integers(0, 2),
+            opad=st.integers(0, 1),
+            dilation=st.integers(1, 2),
+            use_bias=st.booleans())
+        def _test_conv(
+            batch,
+            height,
+            width,
+            depth,
+            in_channels_per_group,
+            out_channels_per_group,
+            groups,
+            kernel,
+            stride,
+            pad,
+            opad,
+            dilation,
+            use_bias
+        ):
+            ic = in_channels_per_group * groups
+            oc = out_channels_per_group * groups
+            if ndims == 2:
+                x = torch.randn(batch, ic, height, width)
+            elif ndims == 3:
+                x = torch.randn(batch, ic, depth, height, width)
+            
+            kwargs = {
+                'in_channels': ic,
+                'out_channels': oc,
+                'kernel_size': kernel,
+                'stride': stride,
+                'padding': pad,
+                'bias': use_bias,
+                'dilation': dilation,
+                'groups': groups,
+            }
+            if transpose:
+                kwargs['output_padding'] = opad
+            
+            module = func(**kwargs).float()
+            module_mkldnn = copy.deepcopy(module)
+
+            x_aten = x.clone().requires_grad_()
+            x_mkldnn = x.clone().to_mkldnn().requires_grad_()
+
+            with torch.backends.mkldnn.flags(enabled=False):
+                y_aten = module(x_aten)
+                y_aten.sum().backward()
+
+            y_mkldnn = module_mkldnn(x_mkldnn).to_dense()
+            y_mkldnn.sum().backward()
+
+            np.testing.assert_allclose(
+                y_aten.detach(), y_mkldnn.detach(), rtol=1e-5, atol=1e-5)
+            np.testing.assert_allclose(
+                module.weight.grad, module_mkldnn.weight.grad, rtol=1e-3, atol=1e-3)
+            self.assertEqual(x_aten.grad, x_mkldnn.grad.to_dense())
+            if use_bias:
+                self.assertEqual(module.bias.grad, module_mkldnn.bias.grad)
+
+        _test_conv()
+
     def test_conv2d(self):
+        self._test_conv_base(torch.nn.Conv2d)
+
+    def test_conv3d(self):
+        self._test_conv_base(torch.nn.Conv3d)
+
+    def test_deconv2d(self):
+        self._test_conv_base(torch.nn.ConvTranspose2d)
+
+    def test_deconv3d(self):
+        self._test_conv_base(torch.nn.ConvTranspose3d)
+
+    def test_conv2d_jit(self):
         for groups in [1, 4]:
             N = torch.randint(3, 10, (1,)).item()
             C = torch.randint(1, 3, (1,)).item() * groups
@@ -122,11 +227,6 @@ class TestMkldnn(TestCase):
                                          bias=bias,
                                          groups=groups).float()
                 mkldnn_conv2d = mkldnn_utils.to_mkldnn(copy.deepcopy(conv2d))
-                with torch.backends.mkldnn.flags(enabled=False):
-                    y_aten = conv2d(x)
-                y_mkldnn = mkldnn_conv2d(x.to_mkldnn()).to_dense()
-                self.assertEqual(y_aten, y_mkldnn)
-
                 self._test_serialization(mkldnn_conv2d, (x.to_mkldnn(),))
                 self._test_tracing(mkldnn_conv2d, (x.to_mkldnn(),))
 
@@ -151,34 +251,6 @@ class TestMkldnn(TestCase):
             self.assertEqual(
                 conv2d(x),
                 conv2d_loaded(x.to_mkldnn()).to_dense())
-
-    def test_conv2d_backward(self):
-        for groups in [1, 4]:
-            N = 64
-            C = 3 * groups
-            M = 3 * groups
-            x = torch.randn(N, C, 224, 224, dtype=torch.float32)
-            for bias in [False]:
-                conv2d = torch.nn.Conv2d(in_channels=C,
-                                         out_channels=M,
-                                         kernel_size=3,
-                                         stride=2,
-                                         padding=1,
-                                         bias=bias,
-                                         groups=groups).float()
-                mkldnn_conv2d = copy.deepcopy(conv2d)
-                x1 = x.clone().requires_grad_()
-                x2 = x.clone().to_mkldnn().requires_grad_()
-                with torch.backends.mkldnn.flags(enabled=False):
-                    y1 = conv2d(x1).sum()
-                y2 = mkldnn_conv2d(x2).to_dense().sum()
-                y1.backward()
-                y2.backward()
-                self.assertEqual(x1.grad, x2.grad.to_dense())
-                self.assertEqual(conv2d.weight.grad, mkldnn_conv2d.weight.grad,
-                                 0.01) # TODO: maybe use torch.allclose instead?
-                if bias:
-                    self.assertEqual(conv2d.bias.grad, mkldnn_conv2d.bias.grad)
 
     def test_relu(self):
         x = torch.randn((4, 5), dtype=torch.float32) * 10
