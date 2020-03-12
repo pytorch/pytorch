@@ -74,6 +74,13 @@ struct TORCH_API GLUOptions {
 };
 
 namespace functional {
+/// Options for `torch::nn::functional::glu`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::glu(input, GLUFuncOptions(1));
+/// ```
 using GLUFuncOptions = GLUOptions;
 } // namespace functional
 
@@ -93,6 +100,13 @@ struct TORCH_API HardshrinkOptions {
 };
 
 namespace functional {
+/// Options for `torch::nn::functional::hardshrink`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::hardshrink(x, F::HardshrinkFuncOptions().lambda(0.42));
+/// ```
 using HardshrinkFuncOptions = HardshrinkOptions;
 } // namespace functional
 
@@ -116,6 +130,13 @@ struct TORCH_API HardtanhOptions {
 };
 
 namespace functional {
+/// Options for `torch::nn::functional::hardtanh`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::hardtanh(x, F::HardtanhFuncOptions().min_val(-1.0).max_val(1.0).inplace(true));
+/// ```
 using HardtanhFuncOptions = HardtanhOptions;
 } // namespace functional
 
@@ -136,8 +157,6 @@ struct TORCH_API LeakyReLUOptions {
 };
 
 namespace functional {
-/// yf225TODO
-///
 /// Options for `torch::nn::functional::leaky_relu`.
 ///
 /// Example:
@@ -150,7 +169,7 @@ using LeakyReLUFuncOptions = LeakyReLUOptions;
 
 // ============================================================================
 
-/// Options for the Softmax module.
+/// Options for the `Softmax` module.
 ///
 /// Example:
 /// ```
@@ -167,6 +186,13 @@ struct TORCH_API SoftmaxOptions {
 
 namespace functional {
 
+/// Options for `torch::nn::functional::softmax`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::softmax(input, F::SoftmaxFuncOptions(1));
+/// ```
 struct TORCH_API SoftmaxFuncOptions {
   SoftmaxFuncOptions(int64_t dim);
 
@@ -183,7 +209,7 @@ struct TORCH_API SoftmaxFuncOptions {
 
 // ============================================================================
 
-/// Options for the Softmin module.
+/// Options for the `Softmin` module.
 ///
 /// Example:
 /// ```
@@ -200,6 +226,13 @@ struct TORCH_API SoftminOptions {
 
 namespace functional {
 
+/// Options for `torch::nn::functional::softmin`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::softmin(input, F::SoftminFuncOptions(1));
+/// ```
 struct TORCH_API SoftminFuncOptions {
   SoftminFuncOptions(int64_t dim);
 
@@ -216,7 +249,7 @@ struct TORCH_API SoftminFuncOptions {
 
 // ============================================================================
 
-/// Options for the LogSoftmax module.
+/// Options for the `LogSoftmax` module.
 ///
 /// Example:
 /// ```
@@ -233,6 +266,13 @@ struct TORCH_API LogSoftmaxOptions {
 
 namespace functional {
 
+/// Options for `torch::nn::functional::log_softmax`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::log_softmax(input, LogSoftmaxFuncOptions(1));
+/// ```
 struct TORCH_API LogSoftmaxFuncOptions {
   LogSoftmaxFuncOptions(int64_t dim);
 
@@ -284,6 +324,13 @@ struct TORCH_API ReLUOptions {
 };
 
 namespace functional {
+/// Options for `torch::nn::functional::relu`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::relu(x, F::ReLUFuncOptions().inplace(true));
+/// ```
 using ReLUFuncOptions = ReLUOptions;
 } // namespace functional
 
@@ -303,6 +350,13 @@ struct TORCH_API ReLU6Options {
 };
 
 namespace functional {
+/// Options for `torch::nn::functional::relu6`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::relu6(x, F::ReLU6FuncOptions().inplace(true));
+/// ```
 using ReLU6FuncOptions = ReLU6Options;
 } // namespace functional
 
@@ -329,6 +383,13 @@ struct TORCH_API RReLUOptions {
 
 namespace functional {
 
+/// Options for `torch::nn::functional::rrelu`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::rrelu(x, F::RReLUFuncOptions().lower(0.1).upper(0.4).inplace(true));
+/// ```
 struct TORCH_API RReLUFuncOptions {
   /// lower bound of the uniform distribution. Default: 1/8
   TORCH_ARG(double, lower) = 1.0 / 8.0;
@@ -361,6 +422,13 @@ struct TORCH_API CELUOptions {
 };
 
 namespace functional {
+/// Options for `torch::nn::functional::celu`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::celu(x, F::CELUFuncOptions().alpha(0.42).inplace(true));
+/// ```
 using CELUFuncOptions = CELUOptions;
 } // namespace functional
 
@@ -381,6 +449,13 @@ struct TORCH_API SoftplusOptions {
 };
 
 namespace functional {
+/// Options for `torch::nn::functional::softplus`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::softplus(x, F::SoftplusFuncOptions().beta(0.5).threshold(3.0));
+/// ```
 using SoftplusFuncOptions = SoftplusOptions;
 } // namespace functional
 
@@ -400,6 +475,13 @@ struct TORCH_API SoftshrinkOptions {
 };
 
 namespace functional {
+/// Options for `torch::nn::functional::softshrink`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::softshrink(x, F::SoftshrinkFuncOptions(0.42));
+/// ```
 using SoftshrinkFuncOptions = SoftshrinkOptions;
 } // namespace functional
 
@@ -426,6 +508,13 @@ struct TORCH_API ThresholdOptions {
 };
 
 namespace functional {
+/// Options for `torch::nn::functional::threshold`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::threshold(x, F::ThresholdFuncOptions(0.5, 0.5).inplace(true));
+/// ```
 using ThresholdFuncOptions = ThresholdOptions;
 } // namespace functional
 
@@ -433,7 +522,13 @@ using ThresholdFuncOptions = ThresholdOptions;
 
 namespace functional {
 
-/// Options for Gumbel Softmax functional.
+/// Options for `torch::nn::functional::gumbel_softmax`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::gumbel_softmax(logits, F::GumbelSoftmaxFuncOptions().hard(true).dim(-1));
+/// ```
 struct TORCH_API GumbelSoftmaxFuncOptions {
   /// non-negative scalar temperature
   TORCH_ARG(double, tau) = 1.0;

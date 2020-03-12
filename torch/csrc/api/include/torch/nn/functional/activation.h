@@ -80,6 +80,17 @@ inline Tensor hardshrink(const Tensor& input,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.hardshrink
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::HardshrinkFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::hardshrink(x, F::HardshrinkFuncOptions().lambda(0.42));
+/// ```
 inline Tensor hardshrink(const Tensor& input,
                          const HardshrinkFuncOptions& options = {}) {
   return detail::hardshrink(input, options.lambda());
@@ -102,6 +113,17 @@ inline Tensor hardtanh(Tensor& input,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.hardtanh
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::HardtanhFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::hardtanh(x, F::HardtanhFuncOptions().min_val(-1.0).max_val(1.0).inplace(true));
+/// ```
 inline Tensor hardtanh(Tensor input, const HardtanhFuncOptions& options = {}) {
   return detail::hardtanh(input, options.min_val(), options.max_val(), options.inplace());
 }
@@ -169,6 +191,17 @@ inline Tensor gumbel_softmax(const Tensor& logits,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.gumbel_softmax
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::GumbelSoftmaxFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::gumbel_softmax(logits, F::GumbelSoftmaxFuncOptions().hard(true).dim(-1));
+/// ```
 inline Tensor gumbel_softmax(const Tensor& logits, const GumbelSoftmaxFuncOptions& options = {}) {
   return detail::gumbel_softmax(logits, options.tau(), options.hard(), options.dim());
 }
@@ -192,6 +225,17 @@ inline Tensor softmax(const Tensor& input, int64_t dim,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.softmax
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::SoftmaxFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::softmax(input, F::SoftmaxFuncOptions(1));
+/// ```
 inline Tensor softmax(const Tensor& input, const SoftmaxFuncOptions& options) {
   return detail::softmax(input, options.dim(), options.dtype());
 }
@@ -215,6 +259,17 @@ inline Tensor softmin(const Tensor& input, int64_t dim,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.softmin
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::SoftminFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::softmin(input, F::SoftminFuncOptions(1));
+/// ```
 inline Tensor softmin(const Tensor& input, const SoftminFuncOptions& options) {
   return detail::softmin(input, options.dim(), options.dtype());
 }
@@ -238,6 +293,17 @@ inline Tensor log_softmax(const Tensor& input, int64_t dim,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.log_softmax
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::LogSoftmaxFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::log_softmax(input, LogSoftmaxFuncOptions(1));
+/// ```
 inline Tensor log_softmax(const Tensor& input, const LogSoftmaxFuncOptions& options) {
   return detail::log_softmax(input, options.dim(), options.dtype());
 }
@@ -253,6 +319,17 @@ inline Tensor glu(const Tensor& input, int64_t dim) {
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.glu
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::GLUFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::glu(input, GLUFuncOptions(1));
+/// ```
 inline Tensor glu(const Tensor& input, const GLUFuncOptions& options = {}) {
   return detail::glu(input, options.dim());
 }
@@ -283,6 +360,17 @@ inline Tensor relu(Tensor& input, bool inplace) {
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.relu
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::ReLUFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::relu(x, F::ReLUFuncOptions().inplace(true));
+/// ```
 inline Tensor relu(Tensor input, const ReLUFuncOptions& options = {}) {
   return detail::relu(input, options.inplace());
 }
@@ -297,6 +385,17 @@ inline Tensor relu6(Tensor& input, bool inplace) {
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.relu6
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::ReLU6FuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::relu6(x, F::ReLU6FuncOptions().inplace(true));
+/// ```
 inline Tensor relu6(Tensor input, const ReLU6FuncOptions& options = {}) {
   return detail::relu6(input, options.inplace());
 }
@@ -319,6 +418,17 @@ inline Tensor rrelu(Tensor& input,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.rrelu
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::RReLUFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::rrelu(x, F::RReLUFuncOptions().lower(0.1).upper(0.4).inplace(true));
+/// ```
 inline Tensor rrelu(Tensor input, const RReLUFuncOptions& options = {}) {
   return detail::rrelu(input, options.lower(), options.upper(), options.training(), options.inplace());
 }
@@ -339,6 +449,17 @@ inline Tensor celu(Tensor& input,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.celu
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::CELUFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::celu(x, F::CELUFuncOptions().alpha(0.42).inplace(true));
+/// ```
 inline Tensor celu(Tensor input, const CELUFuncOptions& options = {}) {
   return detail::celu(input, options.alpha(), options.inplace());
 }
@@ -355,6 +476,17 @@ inline Tensor softplus(const Tensor& input,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.softplus
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::SoftplusFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::softplus(x, F::SoftplusFuncOptions().beta(0.5).threshold(3.0));
+/// ```
 inline Tensor softplus(const Tensor& input,
                        const SoftplusFuncOptions& options = {}) {
   return detail::softplus(input, options.beta(), options.threshold());
@@ -372,6 +504,17 @@ inline Tensor softshrink(const Tensor& input,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.softshrink
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::SoftshrinkFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::softshrink(x, F::SoftshrinkFuncOptions(0.42));
+/// ```
 inline Tensor softshrink(const Tensor& input,
                          const SoftshrinkFuncOptions& options = {}) {
   return detail::softshrink(input, options.lambda());
@@ -406,6 +549,17 @@ inline Tensor threshold(Tensor& input,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.threshold
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::ThresholdFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::threshold(x, F::ThresholdFuncOptions(0.5, 0.5).inplace(true));
+/// ```
 inline Tensor threshold(Tensor input, const ThresholdFuncOptions& options) {
   return detail::threshold(input, options.threshold(), options.value(), options.inplace());
 }
