@@ -123,7 +123,7 @@ Tensor AdaptiveLogSoftmaxWithLossImpl::_get_full_log_prob(const Tensor& input, c
     int64_t stop_idx = cutoffs[i+1];
     const Tensor cluster_output = tail[i]->as<Sequential>()->forward(input);
     const Tensor cluster_logprob = F::log_softmax(cluster_output, /*dim=*/1);
-    auto output_logprob = cluster_logprob + head_logprob.index({Slice(), shortlist_size + i}).unsqueeze(1);
+    auto output_logprob = cluster_logprob + head_logprob.index({Slice(), static_cast<int64_t>(shortlist_size + i)}).unsqueeze(1);
 
     out.index_put_({Slice(), Slice(start_idx, stop_idx)}, output_logprob);
   }
