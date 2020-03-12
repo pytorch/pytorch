@@ -170,20 +170,23 @@ class TestTypeHints(TestCase):
             except subprocess.CalledProcessError as e:
                 raise AssertionError("mypy failed.  Look above this error for mypy's output.")
 
+    @unittest.skipIf(sys.version_info[0] == 2, "no type hints for Python 2")
+    @unittest.skipIf(not HAVE_MYPY, "need mypy")
     def test_type_hint_examples(self):
         """
         Runs mypy over all the test examples present in
         type_hint_tests directory
         """
-
-    examples = os.listdir(os.getcwd() + '/test/type_hint_tests/')
+    test_path = os.path.dirname(os.path.realpath(__file__))
+    examples_folder = os.path.join(test_path, "type_hint_tests")
+    examples = os.listdir(examples_folder)
     for i in examples:
-        process = subprocess.Popen(['mypy', os.getcwd()
-                                   + '/test/type_hint_tests/' + i],
-                                   stdout=subprocess.PIPE,
-                                   stderr=subprocess.PIPE)
+        example_path = os.path.join(os.path.dirname(os.path.realpath(__file__)),
+                                    "type_hint_tests", i)
+        process = subprocess.Popen(['mypy', example_path], stdout=subprocess.PIPE)
         (stdout, stderr) = process.communicate()
-        print(stdout)
+        if stdout:
+            raise AssertionError('Type hint tests not passed in ', i)
 
 if __name__ == '__main__':
     run_tests()
