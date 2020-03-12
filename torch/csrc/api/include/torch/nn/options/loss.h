@@ -24,6 +24,13 @@ struct TORCH_API L1LossOptions {
 };
 
 namespace functional {
+/// Options for `torch::nn::functional::l1_loss`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::l1_loss(input, target, F::L1LossFuncOptions(torch::kNone));
+/// ```
 using L1LossFuncOptions = L1LossOptions;
 } // namespace functional
 
@@ -46,6 +53,13 @@ struct TORCH_API KLDivLossOptions {
 };
 
 namespace functional {
+/// Options for `torch::nn::functional::kl_div`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::kl_div(input, target, F::KLDivFuncOptions(torch::kNone));
+/// ```
 using KLDivFuncOptions = KLDivLossOptions;
 } // namespace functional
 
@@ -68,6 +82,13 @@ struct TORCH_API MSELossOptions {
 };
 
 namespace functional {
+/// Options for `torch::nn::functional::mse_loss`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::mse_loss(input, target, F::MSELossFuncOptions(torch::kNone));
+/// ```
 using MSELossFuncOptions = MSELossOptions;
 } // namespace functional
 
@@ -90,6 +111,13 @@ struct TORCH_API BCELossOptions {
 };
 
 namespace functional {
+/// Options for `torch::nn::functional::binary_cross_entropy`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::binary_cross_entropy(input, target, F::BinaryCrossEntropyFuncOptions().weight(weight));
+/// ```
 using BinaryCrossEntropyFuncOptions = BCELossOptions;
 } // namespace functional
 
@@ -112,6 +140,13 @@ struct TORCH_API HingeEmbeddingLossOptions {
 };
 
 namespace functional {
+/// Options for `torch::nn::functional::hinge_embedding_loss`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::hinge_embedding_loss(input, target, F::HingeEmbeddingLossFuncOptions().margin(2));
+/// ```
 using HingeEmbeddingLossFuncOptions = HingeEmbeddingLossOptions;
 } // namespace functional
 
@@ -143,6 +178,13 @@ struct TORCH_API MultiMarginLossOptions {
 };
 
 namespace functional {
+/// Options for `torch::nn::functional::multi_margin_loss`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::multi_margin_loss(input, target, F::MultiMarginLossFuncOptions().margin(2).weight(weight));
+/// ```
 using MultiMarginLossFuncOptions = MultiMarginLossOptions;
 } // namespace functional
 
@@ -166,6 +208,13 @@ struct TORCH_API CosineEmbeddingLossOptions {
 };
 
 namespace functional {
+/// Options for `torch::nn::functional::cosine_embedding_loss`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::cosine_embedding_loss(input1, input2, target, F::CosineEmbeddingLossFuncOptions().margin(0.5));
+/// ```
 using CosineEmbeddingLossFuncOptions = CosineEmbeddingLossOptions;
 } // namespace functional
 
@@ -190,6 +239,13 @@ struct TORCH_API MultiLabelMarginLossOptions {
 };
 
 namespace functional {
+/// Options for `torch::nn::functional::multilabel_margin_loss`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::multilabel_margin_loss(input, target, F::MultiLabelMarginLossFuncOptions(torch::kNone));
+/// ```
 using MultiLabelMarginLossFuncOptions = MultiLabelMarginLossOptions;
 } // namespace functional
 
@@ -214,6 +270,13 @@ struct TORCH_API SoftMarginLossOptions {
 };
 
 namespace functional {
+/// Options for `torch::nn::functional::soft_margin_loss`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::soft_margin_loss(input, target, F::SoftMarginLossFuncOptions(torch::kNone));
+/// ```
 using SoftMarginLossFuncOptions = SoftMarginLossOptions;
 } // namespace functional
 
@@ -241,6 +304,13 @@ struct TORCH_API MultiLabelSoftMarginLossOptions {
 };
 
 namespace functional {
+/// Options for `torch::nn::functional::multilabel_soft_margin_loss`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::multilabel_soft_margin_loss(input, target, F::MultiLabelSoftMarginLossFuncOptions().reduction(torch::kNone).weight(weight));
+/// ```
 using MultiLabelSoftMarginLossFuncOptions = MultiLabelSoftMarginLossOptions;
 } // namespace functional
 
@@ -270,6 +340,13 @@ struct TORCH_API TripletMarginLossOptions {
 };
 
 namespace functional {
+/// Options for `torch::nn::functional::triplet_margin_loss`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::triplet_margin_loss(anchor, positive, negative, F::TripletMarginLossFuncOptions().margin(1.0));
+/// ```
 using TripletMarginLossFuncOptions = TripletMarginLossOptions;
 } // namespace functional
 
@@ -295,6 +372,13 @@ struct TORCH_API CTCLossOptions {
 };
 
 namespace functional {
+/// Options for `torch::nn::functional::ctc_loss`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::ctc_loss(log_probs, targets, input_lengths, target_lengths, F::CTCLossFuncOptions().reduction(torch::kNone));
+/// ```
 using CTCLossFuncOptions = CTCLossOptions;
 } // namespace functional
 
@@ -319,6 +403,13 @@ struct TORCH_API SmoothL1LossOptions {
 };
 
 namespace functional {
+/// Options for `torch::nn::functional::smooth_l1_loss`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::smooth_l1_loss(input, target, F::SmoothL1LossFuncOptions(torch::kNone));
+/// ```
 using SmoothL1LossFuncOptions = SmoothL1LossOptions;
 } // namespace functional
 
@@ -347,6 +438,13 @@ struct TORCH_API PoissonNLLLossOptions {
 };
 
 namespace functional {
+/// Options for `torch::nn::functional::poisson_nll_loss`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::poisson_nll_loss(input, target, F::PoissonNLLLossFuncOptions().reduction(torch::kNone));
+/// ```
 using PoissonNLLLossFuncOptions = PoissonNLLLossOptions;
 } // namespace functional
 
@@ -368,6 +466,13 @@ struct TORCH_API MarginRankingLossOptions {
 };
 
 namespace functional {
+/// Options for `torch::nn::functional::margin_ranking_loss`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::margin_ranking_loss(input1, input2, target, F::MarginRankingLossFuncOptions().margin(0.5).reduction(torch::kSum));
+/// ```
 using MarginRankingLossFuncOptions = MarginRankingLossOptions;
 } // namespace functional
 
@@ -394,6 +499,13 @@ struct TORCH_API NLLLossOptions {
 };
 
 namespace functional {
+/// Options for `torch::nn::functional::nll_loss`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::nll_loss(input, target, F::NLLLossFuncOptions().ignore_index(-100).reduction(torch::kMean));
+/// ```
 using NLLLossFuncOptions = NLLLossOptions;
 } // namespace functional
 
@@ -419,6 +531,13 @@ struct TORCH_API CrossEntropyLossOptions {
 };
 
 namespace functional {
+/// Options for `torch::nn::functional::cross_entropy`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::cross_entropy(input, target, F::CrossEntropyFuncOptions().ignore_index(-100).reduction(torch::kMean));
+/// ```
 using CrossEntropyFuncOptions = CrossEntropyLossOptions;
 } // namespace functional
 
@@ -443,6 +562,13 @@ struct TORCH_API BCEWithLogitsLossOptions {
 };
 
 namespace functional {
+/// Options for `torch::nn::functional::binary_cross_entropy_with_logits`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::binary_cross_entropy_with_logits(input, target, F::BinaryCrossEntropyWithLogitsFuncOptions().pos_weight(pos_weight).reduction(torch::kSum));
+/// ```
 using BinaryCrossEntropyWithLogitsFuncOptions = BCEWithLogitsLossOptions;
 } // namespace functional
 
