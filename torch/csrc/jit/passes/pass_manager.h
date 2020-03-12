@@ -21,19 +21,19 @@ namespace torch {
 namespace jit {
 
 // A pass modifies a Graph in place.
-using Pass = std::function<void(std::shared_ptr<Graph>&)>;
+using GraphPass = std::function<void(std::shared_ptr<Graph>&)>;
 
-TORCH_API std::vector<Pass>& getCustomPostFusionPasses();
-TORCH_API std::vector<Pass>& getCustomPreFusionPasses();
+TORCH_API std::vector<GraphPass>& getCustomPostFusionPasses();
+TORCH_API std::vector<GraphPass>& getCustomPreFusionPasses();
 
 struct TORCH_API RegisterPostFusionPass {
-  RegisterPostFusionPass(Pass p);
+  RegisterPostFusionPass(GraphPass p);
 };
 
 using RegisterPass = RegisterPostFusionPass;
 
 struct TORCH_API RegisterPreFusionPass {
-  RegisterPreFusionPass(Pass p);
+  RegisterPreFusionPass(GraphPass p);
 };
 
 } // namespace jit

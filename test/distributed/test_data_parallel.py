@@ -52,7 +52,7 @@ class TestDataParallel(TestCase):
                 return self.rnn(x)
 
         def step(model):
-            opt = torch.optim.SGD(model.parameters(), lr=0.1)
+            opt = torch.optim.SGD(model.parameters(), lr=10)
             input = torch.ones(4, 4, 300).to(0)
             output = model(input)
             loss = F.mse_loss(output[0], torch.zeros_like(output[0]))
@@ -71,7 +71,7 @@ class TestDataParallel(TestCase):
         step(model_dp)
 
         for p1, p2 in zip(model.parameters(), model_dp.parameters()):
-            p1.allclose(p2)
+            self.assertTrue(p1.allclose(p2))
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_parallel_apply(self):
