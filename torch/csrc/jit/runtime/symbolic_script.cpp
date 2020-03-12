@@ -1488,7 +1488,7 @@ std::unordered_map<std::string, GradientPair> schema_to_graphs;
 std::unordered_map<const FunctionSchema*, GradientPair> cached_gradient_pairs;
 
 // CompilationUnit that holds all these Functions and keeps them alive.
-script::CompilationUnit compilation_unit;
+CompilationUnit compilation_unit;
 } // anonymous namespace
 
 std::pair<std::shared_ptr<Graph>, Value*> extractClosure(Value* closure) {
@@ -1538,7 +1538,7 @@ bool isHelperFunction(const std::string& method_name) {
   return method_name.compare(0, helper_prefix.length(), helper_prefix) == 0;
 }
 
-void loadModule(const script::CompilationUnit& module) {
+void loadModule(const CompilationUnit& module) {
   for (const auto& method : module.get_functions()) {
     if (isHelperFunction(method->name()))
       continue;
@@ -1550,7 +1550,7 @@ void loadModule(const script::CompilationUnit& module) {
     Node* forward_tuple = pair.forward->outputs().at(0)->node();
 
     if (forward_tuple->kind() != prim::TupleConstruct) {
-      throw script::ErrorReport(forward_tuple->sourceRange())
+      throw ErrorReport(forward_tuple->sourceRange())
           << "gradient must return literal a tuple";
     }
 
@@ -1591,7 +1591,7 @@ void loadModule(const script::CompilationUnit& module) {
 
 void loadFunctions() {
   for (const std::string& str : functions) {
-    compilation_unit.define(c10::nullopt, str, script::nativeResolver(), nullptr);
+    compilation_unit.define(c10::nullopt, str, nativeResolver(), nullptr);
   }
   loadModule(compilation_unit);
 }

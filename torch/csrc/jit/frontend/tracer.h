@@ -21,10 +21,7 @@ namespace jit {
 struct Node;
 struct Value;
 struct Graph;
-
-namespace script {
-  struct Module;
-}
+struct Module;
 
 namespace tracer {
 
@@ -210,7 +207,7 @@ TORCH_API std::pair<std::shared_ptr<TracingState>, Stack> trace(
     const std::function<Stack(Stack)>& traced_fn,
     std::function<std::string(const Variable&)> var_name_lookup_fn,
     bool force_outplace = false,
-    script::Module* self = nullptr);
+    Module* self = nullptr);
 
 TORCH_API void abandon();
 
