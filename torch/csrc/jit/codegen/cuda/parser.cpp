@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/codegen/cuda/parser.h>
 #include <torch/csrc/jit/constants.h>
 
+#include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/tensor.h>
 #include <torch/csrc/jit/codegen/cuda/iriostream.h>
@@ -20,6 +21,8 @@ namespace {
 
 typedef Val CgValue;
 typedef Expr CgOp;
+
+typedef void (*ParseFuncPtr)(const Node* const, std::unordered_map<size_t, CgValue*>);
 
 class IrParser {
 public:
@@ -74,29 +77,103 @@ public:
 
   }
 
+  static bool canParseNode(const Node* const node) {
+    static bool init_registry = true;
+    if (init_registry) {
+      registerJitOperator();
+      init_registry = false;
+    }
+
+    // match signature.
+    auto iter = jit_operator_registry_.find(node->kind());
+    if (iter == jit_operator_registry_.end()) {
+      return false;
+    }
+    for (auto& pair_op_func : iter->second) {
+      if (node->matches(pair_op_func.first->schema())) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  static bool registerParseRule(std::shared_ptr<Operator>& op, ParseFuncPtr fn) {
+    jit_operator_registry_[Symbol::fromQualString(op->schema().name())].push_back(std::make_pair(op, fn));
+  }
+
 protected:
 
-  void processJitNode(const JitOp* node) {
-
-    static std::unordered_map<Symbol, BinaryOpType> binary_op_mapping({
+  static void parseBinaryOpWithAlpha(const Node* const node, std::unordered_map<size_t, CgValue*>& value_maps) {
+    static std::unordered_map<Symbol, BinaryOpType> op_mapping({
       {aten::add, BinaryOpType::Add},
       {aten::sub, BinaryOpType::Sub},
+    });
+    auto lhs = value_maps[node->inputs()[0]->unique()];
+    auto rhs = value_maps[node->inputs()[1]->unique()];
+
+    auto out = binaryOp(op_mapping[node->kind()], lhs, rhs);
+    value_maps.emplace(node->output()->unique(), out);
+  }
+
+  static void parseBinaryOp(const Node* const node, std::unordered_map<size_t, CgValue*>& value_maps) {
+    static std::unordered_map<Symbol, BinaryOpType> op_mapping({
       {aten::mul, BinaryOpType::Mul},
       {aten::div, BinaryOpType::Div},
     });
-    if (binary_op_mapping.count(node->kind()) != 0) {
-      auto lhs = value_maps_[node->inputs()[0]->unique()];
-      auto rhs = value_maps_[node->inputs()[1]->unique()];
+    auto lhs = value_maps[node->inputs()[0]->unique()];
+    auto rhs = value_maps[node->inputs()[1]->unique()];
 
-      auto out = binaryOp(binary_op_mapping[node->kind()], lhs, rhs);
-      value_maps_.emplace(node->output()->unique(), out);
+    auto out = binaryOp(op_mapping[node->kind()], lhs, rhs);
+    value_maps.emplace(node->output()->unique(), out);
+  }
 
-    } else if (node->kind() == prim::Constant) {
-      // we should just ignore constant node;
+  static void registerJitOperator() {
+
+    // Register parse-function for each JIT operator;
+    // This is a one-time look up, our hash registry indexes on the pointer in
+    // OperatorRegistry.
+    const char* BinaryOpWithAlpha[4] = {
+        "aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
+        "aten::add(Tensor self, Scalar other, Scalar alpha) -> Tensor",
+        "aten::sub(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
+        "aten::sub(Tensor self, Scalar other, Scalar alpha) -> Tensor"
+    };
+    for (auto signature : BinaryOpWithAlpha) {
+      auto ptr_op = getOperatorForLiteral(signature);
+      //assert(registerParseRule(ptr_op, &parseBinaryOpWithAlpha));
+    }
+
+/*
+    const char* BinaryOp[4] = {
+        "aten::div(Tensor self, Tensor other) -> Tensor",
+        "aten::div(Tensor self, Scalar other) -> Tensor",
+        "aten::mul(Tensor self, Tensor other) -> Tensor",
+        "aten::mul(Tensor self, Scalar other) -> Tensor"
+    };
+    for (auto signature : BinaryOp) {
+      auto ptr_op = getOperatorForLiteral(signature);
+      assert(registerParseRule(ptr_op, &parseBinaryOp));
+    }
+ */
+  }
+
+  void processJitNode(const JitOp* node) {
+    if (node->kind() == prim::Constant) {
+      // partition doesn't take constant node explicitly, but it does and copy
+      // constant into subgraph. So we need to register constants in codegen IR;
       for (auto output : node->outputs()) {
         assert(registerScalar(output));
       }
     } else {
+      auto iter = IrParser::jit_operator_registry_.find(node->kind());
+      // make sure we have a parser for the op;
+      assert(iter != IrParser::jit_operator_registry_.end());
+      for (auto& pair_op_func : iter->second) {
+        if (node->matches(pair_op_func.first->schema())) {
+          pair_op_func.second(node, value_maps_);
+          return;
+        }
+      }
       assert(false);
     }
   }
@@ -144,9 +221,16 @@ protected:
 
   // maps from JitValue::unique() to fusion Val;
   std::unordered_map<size_t, CgValue*> value_maps_;
+
+  static std::unordered_map<Symbol, std::vector<std::pair<std::shared_ptr<Operator>, ParseFuncPtr>>> jit_operator_registry_;
 };
 
+std::unordered_map<Symbol, std::vector<std::pair<std::shared_ptr<Operator>, ParseFuncPtr>>> IrParser::jit_operator_registry_;
 } // namespace
+
+bool isNodeParsible(const Node* const node) {
+  return IrParser::canParseNode(node);
+}
 
 void parseJitIR(std::shared_ptr<Graph>& graph, Fusion& fusion) {
   IrParser parser(graph, fusion);

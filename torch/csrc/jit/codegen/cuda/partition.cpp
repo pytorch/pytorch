@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/codegen/cuda/partition.h>
+#include <torch/csrc/jit/codegen/cuda/parser.h>
 
 namespace torch {
 namespace jit {
@@ -47,21 +48,8 @@ static bool isFusibleDevice(const Node* node) {
   return isFusibleDevice(node, device.value());
 }
 
-// TODO: fusible_ops should be a registry unordered_map<Node,Expr>
-static OperatorSet fusible_ops = {
-    // "aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
-    // "aten::add(Tensor self, Scalar other, Scalar alpha) -> Tensor",
-    // "aten::sub(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
-    // "aten::sub(Tensor self, Scalar other, Scalar alpha) -> Tensor",
-    // "aten::div(Tensor self, Tensor other) -> Tensor",
-    // "aten::div(Tensor self, Scalar other) -> Tensor",
-    // "aten::mul(Tensor self, Tensor other) -> Tensor",
-    // "aten::mul(Tensor self, Scalar other) -> Tensor"
-};
-
 inline bool isFusibleNode(const Node* const node)  {
-  // TODO: update code base so we can use `node->is_MemberOf(fusible_ops)`
-  return ((node->isMemberOf(fusible_ops)) || node->kind() == prim::CudaFusionGroup);
+  return (isNodeParsible(node) || node->kind() == prim::CudaFusionGroup);
 }
 
 } // namespace
