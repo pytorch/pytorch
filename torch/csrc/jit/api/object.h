@@ -6,7 +6,6 @@
 
 namespace torch {
 namespace jit {
-namespace script {
 
 struct Resolver;
 using ResolverPtr = std::shared_ptr<Resolver>;
@@ -132,6 +131,10 @@ struct TORCH_API Object {
   mutable ObjectPtr _ivalue_;
 };
 
-} // namespace script
+namespace script {
+// We once had a `script::` namespace that was deleted. This is for backcompat
+// of the public API; new code should not use this type alias.
+using Object = ::torch::jit::Object;
+}
 } // namespace jit
 } // namespace torch
