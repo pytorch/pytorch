@@ -162,7 +162,7 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
           ctx.waitForThreadLocalPendingUsers();
         }
         py_ivalue = jit::toIValue(
-            PythonRpcHandler::getInstance().runPythonUdf(std::move(pythonUdf)),
+            pythonRpcHandler.runPythonUdf(std::move(pythonUdf)),
             PyObjectType::get());
       }
 

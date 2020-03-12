@@ -247,6 +247,13 @@ CAFFE2_API Tensor dequantize_tensor(Tensor qtensor, Tensor rtensor, double scale
 template <typename SRC_T, typename DST_T>
 CAFFE2_API DST_T requantize_val(double, int64_t, double, int64_t, SRC_T src);
 
+// Given a multiplier and a zero_point, requantize int32_t computed values back
+// to quantized values. See comment above
+// make_per_tensor_affine_quantizer function for the usage of int64_t
+template <typename DST_T>
+CAFFE2_API DST_T
+requantize_from_int(double multiplier, int64_t zero_point, int64_t src);
+
 // double and int64_t are because of the native function API, we only have these
 // argument types right now in native functions
 CAFFE2_API QuantizerPtr

@@ -11,8 +11,6 @@
 namespace torch {
 namespace jit {
 
-using namespace torch::jit::script;
-
 static const std::vector<std::string> subMethodSrcs = {R"JIT(
 def one(self, x: Tensor, y: Tensor) -> Tensor:
     return x + y + 1
