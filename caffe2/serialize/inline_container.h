@@ -92,7 +92,7 @@ namespace serialize {
 
 constexpr uint64_t kMinSupportedFileFormatVersion = 0x1L;
 constexpr uint64_t kMaxSupportedFileFormatVersion = 0x3L;
-constexpr uint64_t kProducedFileFormatVersion = 0x3L;
+constexpr uint64_t kProducedFileFormatVersion = 0x2L;
 
 // Writer-specific constants
 constexpr uint64_t kFieldAlignment = 64;

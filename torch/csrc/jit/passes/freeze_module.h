@@ -19,7 +19,7 @@
 namespace torch {
 namespace jit {
 
-TORCH_API script::Module freeze_module(const script::Module& module);
+TORCH_API Module freeze_module(const Module& module);
 
 } // namespace jit
 } // namespace torch
