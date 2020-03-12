@@ -138,9 +138,7 @@ void testLiteInterpreterTuple() {
 }
 
 void testLiteInterpreterPrimOverload() {
-  /*
-  // temporarily disabled
-  script::Module m("m");
+  Module m("m");
   m.define(R"JIT(
   def forward(self, x):
       result = [1, 2]
@@ -153,7 +151,6 @@ void testLiteInterpreterPrimOverload() {
   std::vector<torch::jit::IValue> inputs({torch::ones({})});
   auto output = bc.run_method("forward", inputs);
   AT_ASSERT(output.toIntList()[2] == 3);
-  */
 }
 
 void testLiteInterpreterPrim() {
