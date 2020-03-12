@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/jit/codegen/cuda/ir_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
 #include <torch/csrc/jit/codegen/cuda/tensor.h>
 

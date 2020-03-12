@@ -2,8 +2,9 @@
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
-#include <torch/csrc/jit/codegen/cuda/ir_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/type.h>
+
+struct Val;
 
 /*
  * The operations defined in this header is intended as user facing functions.

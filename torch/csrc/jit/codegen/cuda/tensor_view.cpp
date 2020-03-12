@@ -1,11 +1,9 @@
+#include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
 #include <torch/csrc/jit/codegen/cuda/mutator.h>
-#include <torch/csrc/jit/codegen/cuda/tensor.h>
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
-
-#include <torch/csrc/jit/codegen/cuda/iriostream.h>
 
 namespace torch {
 namespace jit {
@@ -29,10 +27,6 @@ c10::optional<TensorContiguity> infer_contiguity_from_tensor_type(
 }
 
 } // namespace
-
-/*
- * Tensor member definitions
- */
 
 Tensor::Tensor(const std::shared_ptr<c10::TensorType>& tensor_type)
     : Val(ValType::Tensor, aten_opt_type_map(tensor_type->scalarType())),
@@ -219,6 +213,19 @@ TensorView* reorder_(TensorView* tv, std::unordered_map<int, int> axis2pos) {
   return tv;
 }
 
+TensorView::TensorView(Tensor* _tensor, TensorDomain* _domain)
+    : Val(ValType::TensorView, _tensor->getDataType().value()),
+      tensor_(_tensor),
+      domain_(_domain) {
+  if (_domain == nullptr)
+    copyDomain(_tensor->domain());
+}
+
+TensorView::TensorView(TensorDomain* _domain, DataType dtype)
+    : Val(ValType::TensorView, dtype),
+      tensor_(new Tensor(dtype, _domain)),
+      domain_(_domain) {}
+
 TensorView* TensorView::clone() const {
   TensorView* new_view = new TensorView(tensor_, domain_);
   new_view->compute_at_view_ = compute_at_view_;
@@ -228,13 +235,12 @@ TensorView* TensorView::clone() const {
 
 TensorView* TensorView::newForOutput(DataType dtype) const {
   std::vector<IterDomain*> domain_copy;
-  for (decltype(this->domain()->size()) i = 0; i < this->domain()->size();
-       i++) {
+  for (decltype(this->nDims()) i = 0; i < this->nDims(); i++) {
     // If reduction axis, don't copy it over. Reduction axes are owned by
     // consumers and we're copying over a producer.
-    if (this->domain()->axis(i)->isReduction())
+    if (this->axis(i)->isReduction())
       continue;
-    domain_copy.push_back(new IterDomain(this->domain()->axis(i)->size()));
+    domain_copy.push_back(new IterDomain(this->axis(i)->size()));
   }
   TensorDomain* td = new TensorDomain(domain_copy);
   return new TensorView(td, dtype);
@@ -244,6 +250,21 @@ void TensorView::resetView() {
   setDomain(TransformIter::getRoot(this->domain()));
   compute_at_view_ = nullptr;
   compute_at_axis_ = 0;
+}
+
+std::vector<IterDomain*>::size_type TensorView::nDims() const {
+  return domain()->size();
+}
+
+IterDomain* TensorView::axis(int pos) const {
+  return domain()->axis(pos);
+}
+
+void TensorView::copyDomain(const TensorDomain* td) {
+  std::vector<IterDomain*> idv;
+  for (decltype(td->size()) i = 0; i < td->size(); i++)
+    idv.push_back(td->axis(i));
+  setDomain(new TensorDomain(idv));
 }
 
 bool TensorView::sameAs(const TensorView* const other) const {
@@ -268,10 +289,10 @@ TensorView* TensorView::computeAt(TensorView* consumer, int axis) {
   if (axis < 0)
     // Compute at is funny where size is the maximum acceptable value instead of
     // size-1
-    axis += consumer->domain()->size() + 1;
+    axis += consumer->nDims() + 1;
 
   TORCH_CHECK(
-      axis >= 0 && axis < consumer->domain()->size() + 1,
+      axis >= 0 && axis < consumer->nDims() + 1,
       "Compute at called on an axis outside valid range.");
 
   std::stack<Val*> dep_chain =

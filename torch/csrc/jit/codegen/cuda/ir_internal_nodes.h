@@ -1,9 +1,15 @@
 #pragma once
 
 
-#include <torch/csrc/jit/codegen/cuda/ir_base.h>
+#include <torch/csrc/jit/codegen/cuda/ir_base_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/tensor_meta.h>
+
+/*
+ * Nodes in here should generally not be used by users. They should be behind
+ * the scenes and users shouldn't have to be aware of what they do to use the
+ * code generator.
+ */
 
 namespace torch {
 namespace jit {
@@ -13,73 +19,6 @@ namespace fuser {
  * TODO: improve implementation bool IterDomain::sameAs(const IterDomain*) const 
  * TODO: Add testing of sameAs functions for these nodes
  */
-
-/*
- * A Float32 value. For now we don't have any other type besides Float32. This
- * value can be a symbolic value (defined after the kernel is compiled) or a
- * constant value (inlined into the kernel definition).
- */
-struct TORCH_API Float : public Val {
-  ~Float() = default;
-
-  Float() : Val(ValType::Scalar, DataType::Float), maybe_value_{c10::nullopt} {}
-
-  Float(float _value)
-      : Val(ValType::Scalar, DataType::Float), maybe_value_{_value} {}
-
-  Float(const Float& other) = delete;
-  Float& operator=(const Float& other) = delete;
-
-  Float(Float&& other) = delete;
-  Float& operator=(Float&& other) = delete;
-
-  bool isSymbolic() const {
-    return !(maybe_value_.has_value());
-  }
-  bool isConst() const {
-    return maybe_value_.has_value();
-  }
-  c10::optional<float> value() const noexcept {
-    return maybe_value_;
-  }
-
-  bool sameAs(const Float* const other) const;
-
- private:
-  const c10::optional<float> maybe_value_;
-};
-
-
-// An Int64 value. If used for indexing it's set as size_t. Otherwise it's an
-// inlined literal in the kernel.
-struct TORCH_API Int : public Val {
-  ~Int() = default;
-
-  Int() : Val(ValType::Scalar, DataType::Int), maybe_value_{c10::nullopt} {}
-
-  Int(int _value) : Val(ValType::Scalar, DataType::Int), maybe_value_{_value} {}
-
-  Int(const Int& other) = delete;
-  Int& operator=(const Int& other) = delete;
-
-  Int(Int&& other) = delete;
-  Int& operator=(Int&& other) = delete;
-
-  bool isSymbolic() const {
-    return !(maybe_value_.has_value());
-  }
-  bool isConst() const {
-    return maybe_value_.has_value();
-  }
-  c10::optional<int> value() const noexcept {
-    return maybe_value_;
-  }
-
-  bool sameAs(const Int* const other) const;
-
- private:
-  const c10::optional<int> maybe_value_;
-};
 
 /*
  * A specialization for Unary operations. Unary operations take in a single

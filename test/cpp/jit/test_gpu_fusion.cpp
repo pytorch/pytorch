@@ -1,9 +1,9 @@
 #include <test/cpp/jit/test_base.h>
 
 // #include <torch/csrc/jit/fuser/interface.h>
+#include <torch/csrc/jit/codegen/cuda/ir_interface_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
-#include <torch/csrc/jit/codegen/cuda/ir_base.h>
 #include <torch/csrc/jit/codegen/cuda/iriostream.h>
 #include <torch/csrc/jit/codegen/cuda/mutator.h>
 #include <torch/csrc/jit/codegen/cuda/tensor.h>

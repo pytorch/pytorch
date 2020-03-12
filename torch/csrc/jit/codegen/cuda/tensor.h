@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/jit/codegen/cuda/ir_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/tensor_meta.h>
 
 /* 
@@ -56,109 +56,6 @@ struct TensorView;
 TORCH_API TensorView* split_(TensorView*, int axis, int factor);
 TORCH_API TensorView* merge_(TensorView*, int axis);
 TORCH_API TensorView* reorder_(TensorView*, std::unordered_map<int, int>);
-
-/*
- * TensorView is our primitive Tensor Type used in code generation. It can be
- * thought of as representing physical memory, however, its dimensionality is
- * modifed as split/merge/reorder/computeAt functions are called. The history of
- * these transformations are kept and used for generating actual code referncing
- * physical memory. Generally when users are thinking of code generation in
- * reference to a Tensor, this is the class they should be interacting with.
- */
-struct TORCH_API TensorView : public Val {
-  ~TensorView() = default;
-
-  TensorView(const TensorView& other) = delete;
-  TensorView& operator=(const TensorView& other) = delete;
-
-  TensorView(TensorView&& other) = delete;
-  TensorView& operator=(TensorView&& other) = delete;
-
-  TensorView(Tensor* _tensor, TensorDomain* _domain = nullptr)
-      : Val(ValType::TensorView, _tensor->getDataType().value())
-      , tensor_(_tensor)
-      , domain_(_domain) {
-        if(_domain == nullptr)
-          copyDomain(_tensor->domain());
-      }
-
-  TensorView(TensorDomain* _domain, DataType dtype)
-      : Val(ValType::TensorView, dtype)
-      , tensor_(new Tensor(dtype, _domain))
-      , domain_(_domain) {}
-
-  // Make a new tensor with the given dtype, and the same domain as this tensor
-  // (minus reduction IterDomains).
-  TensorView* newForOutput(DataType dtype) const;
-
-  // Make an exact copy of this tensor with the same dtype and same domain
-  TensorView* clone() const;
-
-  Tensor* tensor() const noexcept { return tensor_; }
-  TensorDomain* domain() const noexcept { return domain_; }
-
-  // Check if another TensorView is the same as this one.
-  bool sameAs(const TensorView* const other) const;
-
-  // Is there an active computeAt TensorView/Axis
-  bool hasComputeAt() const { return compute_at_view_ != nullptr; }
-
-  // Return the TensorView we're computing at
-  const TensorView* getComputeAtView() const noexcept { return compute_at_view_; }
-  
-  auto nDims() const { return domain()->size(); }
-
-  IterDomain* axis(int pos){ return domain()->axis(pos); }
-
-  // Will check if an axis is inside computeAtAxis and will fetch the reference
-  // to be used in code generation.
-  IterDomain* getComputeAtAxis(int pos){
-    if(! hasComputeAt()
-      || getComputeAtAxis() <= pos)
-      return axis(pos);
-    return compute_at_view_->getComputeAtAxis(pos);
-  }
-
-  int getComputeAtAxis() const noexcept { return compute_at_axis_; }
-  
-  TensorView* computeAt(TensorView* consumer, int axis);
-
-  void resetView();
-
-  TensorView* split(int axis, int factor){
-    return split_(this, axis, factor);
-  }
-
-  TensorView* merge(int axis){
-    return merge_(this, axis);
-  }
-
-  TensorView* reorder(std::unordered_map<int, int> map){
-    return reorder_(this, map);
-  }
-
-  friend TensorView* split_(TensorView*, int axis, int factor);
-  friend TensorView* merge_(TensorView*, int axis);
-  friend TensorView* reorder_(TensorView*, std::unordered_map<int, int>);
-  friend TransformReplay;
-
-protected:
-  void setDomain(TensorDomain* td){domain_ = td;}
-  
-private:
-  Tensor* const tensor_;
-  TensorDomain* domain_;
-  TensorView* compute_at_view_ = nullptr;
-  int compute_at_axis_ = 0;
-
-  void copyDomain(const TensorDomain* td){
-    std::vector<IterDomain*> idv;
-    for(decltype(td->size()) i = 0; i <td->size(); i++)
-      idv.push_back(td->axis(i));
-    setDomain(new TensorDomain(idv));
-  }
-
-};
 
 } // namespace fuser
 } // namespace jit

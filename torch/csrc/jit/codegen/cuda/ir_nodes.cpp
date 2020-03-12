@@ -1,5 +1,5 @@
 
-#include <torch/csrc/jit/codegen/cuda/ir_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/ir_interface_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/tensor.h>
 
 namespace torch {

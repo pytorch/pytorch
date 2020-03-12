@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/jit/codegen/cuda/ir_base.h>
+#include <torch/csrc/jit/codegen/cuda/ir_base_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
 
 #include <c10/util/Exception.h>
