@@ -1246,15 +1246,15 @@ class TestNN(NNTestCase):
                 return self.something_that_doesnt_exist
 
         model = Model()
-        with self.assertRaises(nn.module.ModuleAttributeError) as mae:
+        with self.assertRaises(nn.modules.ModuleAttributeError) as mae:
             check = model.shouldnt_exist
             self.assertIn("shouldnt_exist", mae)
 
-        # Before using nn.ModuleAttributeError, if an AttributeError
+        # Before using nn.modules.ModuleAttributeError, if an AttributeError
         # was raised in a property. The AttributeError was raised on the
         # property itself. This checks that some_property is not in the
         # expection.
-        with self.assertRaises(nn.module.ModuleAttributeError) as mae:
+        with self.assertRaises(nn.modules.ModuleAttributeError) as mae:
             check = model.some_property
             self.assertIn("something_that_doesnt_exist", mae)
             self.assertNotIn("some_propery", mae)
