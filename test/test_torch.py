@@ -14688,7 +14688,7 @@ class TestDevicePrecision(TestCase):
         bfloat16_tensor = torch.arange(0, 4, dtype=torch.bfloat16, device=device)
         self.assertEqual(ref_tensor, bfloat16_tensor)
 
-        #step=2
+        # step=2
         ref_tensor = torch.tensor([0, 2, 4], dtype=torch.bfloat16, device=device)
         bfloat16_tensor = torch.arange(0, 6, step=2, dtype=torch.bfloat16, device=device)
         self.assertEqual(ref_tensor, bfloat16_tensor)
@@ -14696,7 +14696,7 @@ class TestDevicePrecision(TestCase):
     @onlyCUDA
     @skipCUDAIfNotRocm
     def test_index_add_bfloat16(self, device):
-        inp_tensor = torch.randn(5,3, device='cpu').bfloat16()
+        inp_tensor = torch.randn(5, 3, device='cpu').bfloat16()
         t = torch.tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]], dtype=torch.bfloat16, device='cpu')
         index = torch.tensor([0, 4, 2], device='cpu')
         out_cpu = inp_tensor.index_add(0, index, t)
