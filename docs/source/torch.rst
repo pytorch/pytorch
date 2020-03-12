@@ -250,6 +250,7 @@ Pointwise Ops
 .. autofunction:: square
 .. autofunction:: tan
 .. autofunction:: tanh
+.. autofunction:: true_divide
 .. autofunction:: trunc
 
 
