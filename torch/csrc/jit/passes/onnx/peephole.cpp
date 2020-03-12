@@ -109,6 +109,9 @@ void fuseBroadcast(Block* b) {
     }
 
     for (size_t position : broadcast_positions) {
+      if (position >= n->inputs().size()) {
+        break;
+      }
       auto* expand_node = n->input(position)->node();
 
       // Confirm it is expand node.
