@@ -270,7 +270,7 @@ Tensor normal_cpu(const Tensor& mean, const Tensor& std, GeneratorHolder gen) {
 
 template<typename RNG>
 struct RandomStub {
-  void operator()(TensorIterator& iter, RNG gen) {
+  void operator()(TensorIterator& iter, at::GeneratorHolder gen) {
     random_stub(iter.device_type(), iter, gen);
   }
 };
@@ -281,10 +281,10 @@ Tensor& random_(Tensor& self, GeneratorHolder gen) {
 
 template<typename RNG>
 struct RandomFromToStub {
-  void operator()(TensorIterator& iter, uint64_t range, int64_t from, RNG gen) {
+  void operator()(TensorIterator& iter, uint64_t range, int64_t from, at::GeneratorHolder gen) {
     random_from_to_stub(iter.device_type(), iter, range, from, gen);
   }
-  void operator()(TensorIterator& iter, RNG gen) {
+  void operator()(TensorIterator& iter, at::GeneratorHolder gen) {
     random_full_64_bits_range_stub(iter.device_type(), iter, gen);
   }
 };
