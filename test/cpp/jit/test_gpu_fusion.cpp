@@ -10,6 +10,7 @@
 #include <torch/csrc/jit/codegen/cuda/tensor_meta.h>
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
 #include <torch/csrc/jit/codegen/cuda/code_write.h>
+#include <torch/csrc/jit/codegen/cuda/kernel.h>
 
 // fuser and IR parser
 #include <torch/csrc/jit/codegen/cuda/parser.h>
@@ -1031,6 +1032,61 @@ void testGPU_FusionSimplePWise() {
 
   CodeWrite cw(std::cout);
   cw.traverse(&fusion);
+}
+
+void testGPU_FusionExecKernel() {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+  //dimensionality of the problem
+  int nDims = 2; 
+
+  //Set up symbolic sizes for the axes should be dimensionality of the problem
+  std::vector<IterDomain*> dom;
+  for(int i=0; i<nDims; i++)
+    dom.push_back(new IterDomain(new Int()));
+
+  //Set up your input tensor views
+  TensorView* tv0 = new TensorView(new TensorDomain(dom), DataType::Float);
+  TensorView* tv1 = new TensorView(new TensorDomain(dom), DataType::Float);
+
+  //Register your inputs
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+
+  //Do math with it, it returns a `Val*` but can be static_casted back to TensorView
+  TensorView* tv2 = static_cast<TensorView*>(add(tv1, new Float(2.0)));
+  TensorView* tv3 = static_cast<TensorView*>(add(tv0, tv2));
+
+  //Register your outputs
+  fusion.addOutput(tv3);
+
+  //For all inputs, computeAt the output inline, temporaries should be squeezed between them
+  tv0->computeAt(tv3, -1);
+  tv1->computeAt(tv3, -1);
+
+  //Parallelize TV3  
+  tv3->domain()->axis(0)->parallelize(ParallelType::BIDx);
+  tv3->domain()->axis(-1)->parallelize(ParallelType::TIDx);
+  
+  torch::jit::fuser::cuda::CudaKernel prog;
+  prog.device_ = 0;
+
+  auto options =
+  at::TensorOptions()
+    .dtype(at::kFloat)
+    .device(at::kCUDA, 0);
+
+  at::Tensor input1 = at::ones({1,128}, options);
+  at::Tensor input2 = at::ones_like(input1);;
+  at::Tensor output = at::empty_like(input1);
+  std::vector<at::Tensor> inputs{{input1, input2}};
+  std::vector<at::Tensor> outputs{{output}};
+
+  torch::jit::fuser::cuda::compileKernel(fusion, prog);
+  torch::jit::fuser::cuda::runKernel(prog, inputs, outputs);
+  
+  at::Tensor check = at::full({1,128}, 4, options);;
+  TORCH_CHECK(output.equal(check));
 }
 
 void testGPU_FusionForLoop() {

@@ -43,4 +43,9 @@ TORCH_API void runKernel(
     const at::ArrayRef<IValue>& inputs,
     std::vector<at::Tensor>& outputs);
 
+TORCH_API void runKernel(
+    CudaKernel& entry,
+    const std::vector<at::Tensor>& inputs,
+    std::vector<at::Tensor>& outputs);
+
 }}}} // namespace torch::jit::fuser::cuda

@@ -225,4 +225,68 @@ TORCH_API void runKernel(
  */
 }
 
+TORCH_API void runKernel(
+    CudaKernel& entry,
+    const std::vector<at::Tensor>& inputs,
+    std::vector<at::Tensor>& outputs) {
+
+  const auto prior_device = at::cuda::current_device();
+  at::cuda::set_device(entry.device_);
+  auto stream = at::cuda::getCurrentCUDAStream();
+
+  // TODO: Proper API to establish reasonable launch configurations;
+  // Naive launch config;
+  size_t numel = outputs[0].numel();
+  const auto nBlocks = std::min(entry.max_blocks_, ceilDiv(numel, 128));
+
+  // TODO: Proper API to tranform JIT I/O Tensor to CodeGen I/O Tensor
+  std::vector<void*> arguments;
+
+  // TODO: There are better ways to do this;
+  // argument holder;
+  // host code, `T` in `Tensor<T>` doesn't really matter, as we only interact
+  // with the address; Just put a float here to simply the argument holder.
+  int max_capacity = inputs.size() + outputs.size();
+  std::vector<Tensor<float>> tensor_args;
+  std::vector<int> int_args;
+  std::vector<float> float_args;
+  tensor_args.reserve(max_capacity);
+  int_args.reserve(max_capacity);
+  float_args.reserve(max_capacity);
+
+  // Naive I/O setup, I'm ignoring all the potential transformation (i.e. I/O
+  // allocated here from the subgraph could be, and very likely are, different
+  // from I/O expected by the generated CUDA kernel.
+  for (auto& input : inputs) {
+    prepare_argument(arguments, tensor_args, input);
+  }
+  for (auto& output : outputs) {
+    prepare_argument(arguments, tensor_args, output);
+  }
+  
+  // launch kernel;
+  AT_CUDA_DRIVER_CHECK(nvrtc().cuLaunchKernel(
+      entry.function_,
+      nBlocks,
+      1,
+      1,
+      128,
+      1,
+      1,
+      0,
+      stream,
+      arguments.data(),
+      nullptr));
+
+  // Resets device (see at::DeviceGuard notes above)
+  at::cuda::set_device(prior_device); 
+
+
+/*
+  for (auto& output : outputs) {
+    output.fill_(0.24);
+  }
+ */
+}
+
 }}}} // namespace torch::jit::fuser::cuda
