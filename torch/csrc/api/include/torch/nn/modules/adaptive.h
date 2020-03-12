@@ -10,47 +10,25 @@
 
 namespace torch {
 namespace nn {
-  /// Classifier list for least frequent labels
 
 /// The output of a single invocation of an AdaptiveLogSoftmaxWithLoss
 /// module's `forward()` method.
 struct TORCH_API ASMoutput {
   ASMoutput(const Tensor& output_, const double& loss_);
-  // Tensor containing computed target log probabilities for each example
+
+  /// Tensor containing computed target log probabilities for each example
   Tensor output;
 
-  //Scalar representing the computed negative log likelihood loss
+  /// Scalar representing the computed negative log likelihood loss
   double loss;
 };
 
-/// Efficient softmax approximation as described in
-/// Efficient softmax approximation for GPUs`_ by Edouard Grave, Armand Joulin,
-/// Moustapha Cissé, David Grangier, and Hervé Jégou.
-///
-/// Adaptive softmax is an approximate strategy for training models with large
-/// output spaces. It is most effective when the label distribution is highly
-/// imbalanced, for example in natural language modelling, where the word
-/// frequency distribution approximately follows the `Zipf's law`_.
-///
-/// Adaptive softmax partitions the labels into several clusters, according to
-/// their frequency. These clusters may contain different number of targets
-/// each.
-/// Additionally, clusters containing less frequent labels assign lower
-/// dimensional embeddings to those labels, which speeds up the computation.
-/// For each minibatch, only clusters for which at least one target is
-/// present are evaluated.
-///
-/// The idea is that the clusters which are accessed frequently
-/// (like the first one, containing most frequent labels), should also be cheap
-/// to compute -- that is, contain a small number of assigned labels.
-///
-/// We highly recommend taking a look at the original paper for more details.
-/// _Efficient softmax approximation for GPUs:
-/// https://arxiv.org/abs/1609.04309
-///
-/// _Zipf's law:
-/// https://en.wikipedia.org/wiki/Zipf%27s_law
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ AdaptiveLogSoftmaxWithLoss ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+/// Efficient softmax approximation as described in
+/// `Efficient softmax approximation for GPUs`_ by Edouard Grave, Armand Joulin,
+/// Moustapha Cissé, David Grangier, and Hervé Jégou.
+// yf225 TODO: fill out doc
 class TORCH_API AdaptiveLogSoftmaxWithLossImpl : public Cloneable<AdaptiveLogSoftmaxWithLossImpl> {
  public:
    AdaptiveLogSoftmaxWithLossImpl(int64_t in_features, int64_t n_classes, std::vector<int64_t> cutoffs)
@@ -64,7 +42,7 @@ class TORCH_API AdaptiveLogSoftmaxWithLossImpl : public Cloneable<AdaptiveLogSof
 
   void reset_parameters();
 
-  /// Pretty prints the `LocalResponseNormImpl` module into the given `stream`.
+  /// Pretty prints the `AdaptiveLogSoftmaxWithLoss` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;
 
   /// Given input tensor, and output of `head`, computes the log of the full distribution
@@ -96,6 +74,7 @@ class TORCH_API AdaptiveLogSoftmaxWithLossImpl : public Cloneable<AdaptiveLogSof
   ModuleList tail;
 };
 
+// yf225 TODO: fill out doc
 TORCH_MODULE(AdaptiveLogSoftmaxWithLoss);
 
 } // namespace nn

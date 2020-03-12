@@ -4,6 +4,8 @@
 
 namespace F = torch::nn::functional;
 
+using namespace torch::indexing;
+
 namespace torch {
 namespace nn {
 
@@ -29,10 +31,11 @@ void AdaptiveLogSoftmaxWithLossImpl::reset() {
   n_clusters = cutoffs.size() - 1;
   head_size = shortlist_size + n_clusters;
 
-  head = Linear(LinearOptions(options.in_features(), head_size).bias(options.head_bias()));
-  tail = ModuleList();
-  for (size_t i = 0; i < n_clusters; i++) {
-    int64_t hsz = int64_t(options.in_features() / (std::pow(options.div_value(), (i + 1))));
+  head = this->register_module("head", Linear(LinearOptions(options.in_features(), head_size).bias(options.head_bias())));
+  tail = this->register_module("tail", ModuleList());
+
+  for (int64_t i = 0; i < n_clusters; i++) {
+    int64_t hsz = options.in_features() / static_cast<int64_t>(std::pow(options.div_value(), (i + 1)));
     int64_t osz = cutoffs[i + 1] - cutoffs[i];
 
     Sequential projection(
@@ -40,7 +43,6 @@ void AdaptiveLogSoftmaxWithLossImpl::reset() {
         Linear(LinearOptions(hsz, osz).bias(false)));
     tail->push_back(projection);
   }
-  reset_parameters();
 }
 
 void AdaptiveLogSoftmaxWithLossImpl::reset_parameters() {
@@ -78,47 +80,52 @@ ASMoutput AdaptiveLogSoftmaxWithLossImpl::forward(const Tensor& input, const Ten
     }
 
     if (i == 0) {
-      gather_inds = gather_inds.index_copy(0, row_indices, target.index_select(0, row_indices));
-    }
-    else {
-      Tensor relative_target = target.index_select(0, row_indices) - low_idx;
+      gather_inds.index_copy_(0, row_indices, target.index({target_mask}));
+    } else {
+      Tensor relative_target = target.index({target_mask}) - low_idx;
       Tensor input_subset = input.index_select(0, row_indices);
 
       const Tensor cluster_output = tail[i - 1]->as<Sequential>()->forward(input_subset);
       int64_t cluster_index = shortlist_size + i - 1;
+
       gather_inds.index_fill_(0, row_indices, cluster_index);
 
-      const Tensor cluster_logprob = F::log_softmax(cluster_output, 1);
+      const Tensor cluster_logprob = F::log_softmax(cluster_output, /*dim=*/1);
       const Tensor local_logprob = cluster_logprob.gather(1, relative_target.unsqueeze(1));
-      output = output.index_copy_(0, row_indices, local_logprob.squeeze(1));
+      output.index_copy_(0, row_indices, local_logprob.squeeze(1));
     }
-    used_rows += row_indices.numel();
- }
 
-  TORCH_CHECK(used_rows == batch_size, "Target values should be in [0, ", options.n_classes() - 1,"],\
-   but values in range [",target.min().item().toDouble(),", ",target.max().item().toDouble(),"] were found. ");
+    used_rows += row_indices.numel();
+  }
+
+  TORCH_CHECK(
+    used_rows == batch_size,
+    "Target values should be in [0, ", options.n_classes() - 1, "], "
+    "but values in range [", target.min().item().toDouble(), ", ", target.max().item().toDouble(), "] "
+    "were found. ");
 
   const Tensor head_output = head(input);
-  const Tensor head_logprob = F::log_softmax(head_output, 1);
+  const Tensor head_logprob = F::log_softmax(head_output, /*dim=*/1);
   output += head_logprob.gather(1, gather_inds.unsqueeze(1)).squeeze();
   const double loss = (-output).mean().item().toDouble();
+
   return ASMoutput(output, loss);
 }
 
 Tensor AdaptiveLogSoftmaxWithLossImpl::_get_full_log_prob(const Tensor& input, const Tensor& head_output) {
   Tensor out = input.new_empty({head_output.size(0), options.n_classes()});
-  const Tensor head_logprob = F::log_softmax(head_output, 1);
-  auto shotlisted_head_logprob = head_logprob.narrow(1, 0, shortlist_size);
-  auto indices = torch::arange(0, shortlist_size, torch::kLong);
-  out = out.index_copy_(1, indices, shotlisted_head_logprob);
-  
+  const Tensor head_logprob = F::log_softmax(head_output, /*dim=*/1);
+
+  out.index_put_({Slice(), Slice(None, shortlist_size)}, head_logprob.index({Slice(), Slice(None, shortlist_size)}));
+
   for (size_t i = 0; i < cutoffs.size() - 1; ++i) {
     int64_t start_idx = cutoffs[i];
     int64_t stop_idx = cutoffs[i+1];
     const Tensor cluster_output = tail[i]->as<Sequential>()->forward(input);
-    const Tensor cluster_logprob = F::log_softmax(cluster_output, 1);
-    auto output_logprob = cluster_logprob + head_logprob.narrow(1, shortlist_size + i, 1);
-    out = out.index_copy_(1, torch::arange(start_idx, stop_idx, torch::kLong), output_logprob);
+    const Tensor cluster_logprob = F::log_softmax(cluster_output, /*dim=*/1);
+    auto output_logprob = cluster_logprob + head_logprob.index({Slice(), shortlist_size + i}).unsqueeze(1);
+
+    out.index_put_({Slice(), Slice(start_idx, stop_idx)}, output_logprob);
   }
   return out;
 }
@@ -128,31 +135,28 @@ Tensor AdaptiveLogSoftmaxWithLossImpl::AdaptiveLogSoftmaxWithLossImpl::log_prob(
   return _get_full_log_prob(input, head_output);
 }
 
-Tensor  AdaptiveLogSoftmaxWithLossImpl::predict(const Tensor& input) {
+Tensor AdaptiveLogSoftmaxWithLossImpl::predict(const Tensor& input) {
   const Tensor head_output = head(input);
-  Tensor output = torch::argmax(head_output, 1);
+  Tensor output = torch::argmax(head_output, /*dim=*/1);
   auto not_in_shortlist = (output >= shortlist_size);
   auto all_in_shortlist = bitwise_not(not_in_shortlist.any());
 
-  if(all_in_shortlist.item().toBool()) {
+  if (all_in_shortlist.item().toBool()) {
     return output;
-  }
-  else if (not_in_shortlist.all().item().toBool()) {
+  } else if (not_in_shortlist.all().item().toBool()) {
     const Tensor log_prob = _get_full_log_prob(input, head_output);
-    return torch::argmax(log_prob, 1);
-  }
-  else {
-    auto not_in_shortlist_idices = not_in_shortlist.nonzero().squeeze();
+    return torch::argmax(log_prob, /*dim=*/1);
+  } else {
     const Tensor log_prob = _get_full_log_prob(
-                        input.index_select(0, not_in_shortlist_idices),
-                        head_output.index_select(0, not_in_shortlist_idices));
-    output = output.index_copy_(0, not_in_shortlist.nonzero().squeeze(), torch::argmax(log_prob, 1));
+      input.index({not_in_shortlist}),
+      head_output.index({not_in_shortlist}));
+    output.index_put_({not_in_shortlist}, torch::argmax(log_prob, /*dim=*/1));
     return output;
   }
 }
 
 void AdaptiveLogSoftmaxWithLossImpl::pretty_print(std::ostream& stream) const {
-  //stream << "torch::nn::AdaptiveLogSoftmaxWithLoss()"; 
+  stream << "torch::nn::AdaptiveLogSoftmaxWithLoss"; 
 }
 
 } // namespace nn
