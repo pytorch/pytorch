@@ -327,13 +327,19 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
   // to our receiving queue.
   if (to.id_ == (worker_id_t)pg_->getRank()) {
     threadPool_.run(std::bind(
-        [this](const Message& message) {
+        [this, future](const Message& message) {
           sendCounts_.increment(pg_->getRank());
           // Unlike the other cases, need to add a tensor deleter, since the
           // data outlives the scope of this function. It's shared_ptr<> due
           // to c++11 lambda capture limitations with unique_ptr<>.
-          auto payload = std::make_unique<std::string>(
+          std::unique_ptr<std::string> payload;
+          try {
+            payload = std::make_unique<std::string>(
               wireSerialize(message.payload(), message.tensors()));
+          } catch (std::exception& e) {
+            future->setError(e.what());
+            return;
+          }
           const char* data = payload->data();
           size_t len = payload->length();
           std::string* delete_when_done = payload.release();
@@ -404,13 +410,16 @@ void ProcessGroupAgent::enqueueSend(SendWork work) {
         try {
           handleSend(work);
         } catch (std::exception& e) {
+          std::ostringstream ss;
+          ss << "Encountered exception in ProcessGroupAgent::enqueueSend: "
+             << e.what();
+          auto exceptionMsg =
+            rpc::createExceptionResponse(work.message_, ss.str());
           if (work.message_.isRequest()) {
-            std::ostringstream ss;
-            ss << "Encountered exception in ProcessGroupAgent::enqueueSend: "
-               << e.what();
-            auto exceptionMsg =
-                rpc::createExceptionResponse(work.message_, ss.str());
             markFutureWithError(exceptionMsg);
+          } else if (work.message_.isResponse()) {
+            // Try sending the error along.
+            handleSend(SendWork(work.to_, std::move(exceptionMsg)));
           }
         }
       },
@@ -439,28 +448,7 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
           if (futureResponse->completed()) {
             --serverActiveCalls_;
             if (!futureResponse->hasError()) {
-              // Hack: Check for device type here since throwing an exception in
-              // the send() below is not handled by enqueueRecv yet. Should be
-              // fixed as part of
-              // https://github.com/pytorch/pytorch/issues/25516.
-              const auto& respMessage = futureResponse->wait();
-              std::string errorMsg;
-              for (const auto& tensor : respMessage.tensors()) {
-                if (!tensor.device().is_cpu()) {
-                  errorMsg = c10::str(
-                      "ProcessGroup RPC backend only supports",
-                      " CPU tensors, please move your tensors to CPU before sending ",
-                      "them over RPC. Found tensor on device: ",
-                      tensor.device());
-                  break;
-                }
-              }
-
-              if (errorMsg.empty()) {
-                send(work.from_, std::move(*futureResponse).moveValue());
-              } else {
-                send(work.from_, createExceptionResponse(message, errorMsg));
-              }
+              send(work.from_, std::move(*futureResponse).moveValue());
             } else {
               send(
                   work.from_,

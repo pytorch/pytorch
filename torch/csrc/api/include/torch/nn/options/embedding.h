@@ -9,6 +9,11 @@ namespace torch {
 namespace nn {
 
 /// Options for the `Embedding` module.
+///
+/// Example:
+/// ```
+/// Embedding model(EmbeddingOptions(10, 2).padding_idx(3).max_norm(2).norm_type(2.5).scale_grad_by_freq(true).sparse(true));
+/// ```
 struct TORCH_API EmbeddingOptions {
   EmbeddingOptions(int64_t num_embeddings, int64_t embedding_dim);
 
@@ -73,6 +78,11 @@ struct TORCH_API EmbeddingFuncOptions {
 typedef c10::variant<enumtype::kSum, enumtype::kMean, enumtype::kMax> EmbeddingBagMode;
 
 /// Options for the `EmbeddingBag` module.
+///
+/// Example:
+/// ```
+/// EmbeddingBag model(EmbeddingBagOptions(10, 2).max_norm(2).norm_type(2.5).scale_grad_by_freq(true).sparse(true).mode(torch::kSum));
+/// ```
 struct TORCH_API EmbeddingBagOptions {
   EmbeddingBagOptions(int64_t num_embeddings, int64_t embedding_dim);
 

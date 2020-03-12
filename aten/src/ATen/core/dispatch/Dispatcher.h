@@ -37,8 +37,8 @@ class SchemaRegistrationHandleRAII;
 class CAFFE2_API Dispatcher final {
 private:
   struct OperatorDef final {
-    explicit OperatorDef(FunctionSchema&& schema, OperatorOptions&& options)
-    : op(std::move(schema), std::move(options)), refcount(0) {}
+    explicit OperatorDef(FunctionSchema&& schema)
+    : op(std::move(schema)), refcount(0) {}
 
     impl::OperatorEntry op;
     size_t refcount;
@@ -116,7 +116,7 @@ public:
    *         object that manages the lifetime of the registration. Once that
    *         object is destructed, the kernel will be deregistered.
    */
-  std::pair<RegistrationHandleRAII, OperatorHandle> registerSchema(FunctionSchema schema, OperatorOptions options);
+  std::pair<RegistrationHandleRAII, OperatorHandle> registerSchema(FunctionSchema schema);
 
   /**
    * Register a kernel to the dispatch table for an operator.
@@ -152,7 +152,7 @@ public:
 private:
   Dispatcher();
 
-  OperatorHandle findOrRegisterSchema_(FunctionSchema&& schema, OperatorOptions&& options);
+  OperatorHandle findOrRegisterSchema_(FunctionSchema&& schema);
 
   void deregisterSchema_(const OperatorHandle& op, const OperatorName& op_name);
   void deregisterBackendFallbackKernel_(DispatchKey dispatchKey);
@@ -185,10 +185,6 @@ public:
 
   const FunctionSchema& schema() const {
     return operatorIterator_->op.schema();
-  }
-
-  const OperatorOptions& options() const {
-    return operatorIterator_->op.options();
   }
 
   template<class Return, class... Args>

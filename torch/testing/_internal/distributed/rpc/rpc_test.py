@@ -1670,7 +1670,7 @@ class RpcTest(RpcAgentTestFixture):
     @skip_if_lt_x_gpu(2)
     @dist_init
     def test_cuda(self):
-        dst = "worker{}".format((self.rank + 1) % self.world_size)
+        dst = worker_name((self.rank + 1) % self.world_size)
         t1 = torch.rand(3, 3).cuda(0)
         t2 = torch.rand(3, 3).cuda(1)
         t3 = torch.rand(3, 3)
@@ -1694,3 +1694,7 @@ class RpcTest(RpcAgentTestFixture):
         # cuda tensors as a list of return value fails
         with self.assertRaisesRegex(RuntimeError, "RPC backend only supports CPU tensors.*Found tensor on device: cuda:0"):
             rpc.rpc_sync(dst, RpcTest._return_gpu_tensor_list, args=())
+
+        # Sending to self should fail too.
+        with self.assertRaisesRegex(RuntimeError, "RPC backend only supports CPU tensors.*Found tensor on device: cuda:0"):
+            rpc.rpc_sync(worker_name(self.rank), torch.add, args=(t1, t2))
