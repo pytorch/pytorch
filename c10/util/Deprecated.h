@@ -32,8 +32,8 @@
 # define C10_DEPRECATED_MESSAGE(message) __attribute__((deprecated))
 
 #elif defined(_MSC_VER)
-# define C10_DEPRECATED __declspec(deprecated)
-# define C10_DEPRECATED_MESSAGE(message) __declspec(deprecated(message))
+# define C10_DEPRECATED [[deprecated]]
+# define C10_DEPRECATED_MESSAGE(message) [[deprecated(message)]]
 #else
 # warning "You need to implement C10_DEPRECATED for this compiler"
 # define C10_DEPRECATED
