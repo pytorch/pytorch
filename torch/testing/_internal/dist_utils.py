@@ -118,7 +118,7 @@ def get_timeout_error_regex(rpc_backend_name):
     assertRaisesRegex() to ensure we have the right errors during timeout.
     """
     if rpc_backend_name == "PROCESS_GROUP":
-        return "RPC ran for"
+        return "RPC ran for more than"
     else:
         return "(Timed out)|(Task expired)"
 

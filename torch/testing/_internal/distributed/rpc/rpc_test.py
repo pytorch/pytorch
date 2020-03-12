@@ -1565,7 +1565,6 @@ class RpcTest(RpcAgentTestFixture):
         rpc.shutdown()
 
     @dist_init
-    @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
     def test_default_timeout_used(self):
         """
         Tests that if no timeout is passed into rpc_async and rpc_sync, then the
@@ -1578,8 +1577,9 @@ class RpcTest(RpcAgentTestFixture):
             rpc.rpc_async(worker_name(dst_rank), my_sleep_func, args=())
             for _ in range(10)
         ]
+        expected_error = get_timeout_error_regex(dist_utils.TEST_CONFIG.rpc_backend_name)
         for fut in futs:
-            with self.assertRaisesRegex(RuntimeError, "RPC ran for more than"):
+            with self.assertRaisesRegex(RuntimeError, expected_error):
                 fut.wait()
 
         # ensure that if a new timeout is set old futures don't time out but new ones do.
@@ -1588,13 +1588,13 @@ class RpcTest(RpcAgentTestFixture):
         fut1 = rpc.rpc_async(worker_name(dst_rank), my_sleep_func, args=(1,))
         # now, set a short timeout.
         rpc._set_rpc_timeout(timedelta(milliseconds=1))
-        # f2 should time out, f should not.
+        # fut2 should time out, fut1 should not.
         fut2 = rpc.rpc_async(worker_name(dst_rank), my_sleep_func, args=(1,))
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, expected_error):
             fut2.wait()
         fut1.wait()
 
-        # future should run to completion if the timeout is zero.
+        # Zero timeout means infinity, so future should ru to completion.
         rpc._set_rpc_timeout(timedelta(seconds=0))
         rpc.rpc_async(worker_name(dst_rank), my_sleep_func, args=()).wait()
 
