@@ -56,7 +56,13 @@ using InstanceNorm3dOptions = InstanceNormOptions;
 
 namespace functional {
 
-/// Options for the `InstanceNorm` functional.
+/// Options for `torch::nn::functional::instance_norm`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::instance_norm(input, F::InstanceNormFuncOptions().running_mean(mean).running_var(variance).weight(weight).bias(bias).momentum(0.1).eps(1e-5));
+/// ```
 struct TORCH_API InstanceNormFuncOptions {
   TORCH_ARG(Tensor, running_mean) = Tensor();
 

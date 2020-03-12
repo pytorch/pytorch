@@ -40,6 +40,13 @@ struct TORCH_API FoldOptions {
 };
 
 namespace functional {
+/// Options for `torch::nn::functional::fold`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::fold(input, F::FoldFuncOptions({3, 2}, {2, 2}));
+/// ```
 using FoldFuncOptions = FoldOptions;
 } // namespace functional
 
@@ -71,6 +78,13 @@ struct TORCH_API UnfoldOptions {
 };
 
 namespace functional {
+/// Options for `torch::nn::functional::unfold`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::unfold(input, F::UnfoldFuncOptions({2, 2}).padding(1).stride(2));
+/// ```
 using UnfoldFuncOptions = UnfoldOptions;
 } // namespace functional
 
