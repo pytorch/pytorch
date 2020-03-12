@@ -287,6 +287,9 @@ class DeadCodeEliminator {
 
   bool hasUntrackedMutation(Node* node) {
     if (!aliasDb_) {
+      // If we don't have alias information, all mutable ops have unknown
+      // effects and can't be considered for elimination.
+      
       // onnx export calls EliminateDeadCode but sometimes passes invalid
       // aten operators. So we call maybeSchema so we handle the cases when
       // there is no valid schema for a node
