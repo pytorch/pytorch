@@ -61,13 +61,13 @@ std::ostream& operator<<(std::ostream& os, GloballyUniqueId const& globalId) {
 
 ///////////////////////////  SerializedPyObj   ///////////////////////////
 
-std::vector<at::IValue> SerializedPyObj::toIValues() const {
+std::vector<at::IValue> SerializedPyObj::toIValues() && {
   std::vector<at::IValue> ivalues;
   ivalues.reserve(tensors_.size() + 1);
   for (auto& tensor : tensors_) {
-    ivalues.emplace_back(tensor);
+    ivalues.emplace_back(std::move(tensor));
   }
-  ivalues.emplace_back(payload_);
+  ivalues.emplace_back(std::move(payload_));
   return ivalues;
 }
 
