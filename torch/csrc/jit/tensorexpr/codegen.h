@@ -11,7 +11,7 @@ namespace tensorexpr {
 template <typename T>
 class PaddedBuffer;
 
-class CodeGen {
+class TORCH_API CodeGen {
  public:
   class BufferArg;
   class CallArg;
@@ -37,7 +37,7 @@ class CodeGen {
     return buffer_args_;
   }
 
-  TORCH_API virtual void call(const std::vector<CallArg>& args) {
+  virtual void call(const std::vector<CallArg>& args) {
     LOG(FATAL) << "unimplemented call";
   }
 

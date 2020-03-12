@@ -213,7 +213,7 @@ void testDifferentiateWithRequiresGrad() {
       %7 : Tensor = aten::add(%6, %1, %2)
       return (%4, %7))IR";
   auto g = std::make_shared<Graph>();
-  torch::jit::script::parseIR(graph_string, g.get());
+  torch::jit::parseIR(graph_string, g.get());
 
   auto a_var = autograd::make_variable(
       at::empty_strided(2, 2, at::CPU(at::kFloat).options()), true);

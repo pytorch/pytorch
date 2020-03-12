@@ -16,7 +16,6 @@
 
 namespace torch {
 namespace jit {
-namespace script {
 
 // single character tokens are just the character itself '+'
 // multi-character tokens need an entry here
@@ -180,7 +179,7 @@ struct CAFFE2_API SharedParserData {
       return false;
     const char* startptr = str.c_str() + start;
     char* endptr;
-    torch::jit::script::strtod_c(startptr, &endptr);
+    torch::jit::strtod_c(startptr, &endptr);
     *len = endptr - startptr;
     return *len > 0;
   }
@@ -515,6 +514,5 @@ struct Lexer {
   std::vector<Token> next_tokens;
   SharedParserData& shared;
 };
-} // namespace script
 } // namespace jit
 } // namespace torch
