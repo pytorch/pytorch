@@ -22,6 +22,12 @@ struct TORCH_API ELUOptions {
   TORCH_ARG(bool, inplace) = false;
 };
 
+/// Options for `torch::nn::functional::elu`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// ```
 TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(ELU, ELUFuncOptions)
 
 // ============================================================================
@@ -112,7 +118,18 @@ struct TORCH_API LeakyReLUOptions {
   TORCH_ARG(bool, inplace) = false;
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(LeakyReLU, LeakyReLUFuncOptions)
+namespace functional {
+/// yf225TODO
+///
+/// Options for `torch::nn::functional::leaky_relu`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::leaky_relu(x, F::LeakyReLUFuncOptions().negative_slope(0.42).inplace(true));
+/// ```
+using LeakyReLUFuncOptions = LeakyReLUOptions;
+}
 
 // ============================================================================
 

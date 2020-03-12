@@ -90,6 +90,17 @@ inline Tensor leaky_relu(Tensor& input,
 }
 } // namespace detail
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.leaky_relu
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::LeakyReLUFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::leaky_relu(x, F::LeakyReLUFuncOptions().negative_slope(0.42).inplace(true));
+/// ```
 inline Tensor leaky_relu(Tensor input, const LeakyReLUFuncOptions& options = {}) {
   return detail::leaky_relu(input, options.negative_slope(), options.inplace());
 }
