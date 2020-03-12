@@ -194,13 +194,31 @@ struct ConvFuncOptions {
   TORCH_ARG(int64_t, groups) = 1;
 };
 
-/// `ConvFuncOptions` specialized for 1-D convolution.
+/// Options for `torch::nn::functional::conv1d`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::conv1d(x, weight, F::Conv1dFuncOptions().stride(1));
+/// ```
 using Conv1dFuncOptions = ConvFuncOptions<1>;
 
-/// `ConvFuncOptions` specialized for 2-D convolution.
+/// Options for `torch::nn::functional::conv2d`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::conv2d(x, weight, F::Conv2dFuncOptions().stride(1));
+/// ```
 using Conv2dFuncOptions = ConvFuncOptions<2>;
 
-/// `ConvFuncOptions` specialized for 3-D convolution.
+/// Options for `torch::nn::functional::conv3d`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::conv3d(x, weight, F::Conv3dFuncOptions().stride(1));
+/// ```
 using Conv3dFuncOptions = ConvFuncOptions<3>;
 
 } // namespace functional
@@ -326,13 +344,31 @@ struct ConvTransposeFuncOptions {
   TORCH_ARG(ExpandingArray<D>, dilation) = 1;
 };
 
-/// `ConvTransposeFuncOptions` specialized for 1-D convolution transpose.
+/// Options for `torch::nn::functional::conv_transpose1d`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::conv_transpose1d(x, weight, F::ConvTranspose1dFuncOptions().stride(1));
+/// ```
 using ConvTranspose1dFuncOptions = ConvTransposeFuncOptions<1>;
 
-/// `ConvTransposeFuncOptions` specialized for 2-D convolution transpose.
+/// Options for `torch::nn::functional::conv_transpose2d`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::conv_transpose2d(x, weight, F::ConvTranspose2dFuncOptions().stride(1));
+/// ```
 using ConvTranspose2dFuncOptions = ConvTransposeFuncOptions<2>;
 
-/// `ConvTransposeFuncOptions` specialized for 3-D convolution transpose.
+/// Options for `torch::nn::functional::conv_transpose3d`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::conv_transpose3d(x, weight, F::ConvTranspose3dFuncOptions().stride(1));
+/// ```
 using ConvTranspose3dFuncOptions = ConvTransposeFuncOptions<3>;
 
 } // namespace functional

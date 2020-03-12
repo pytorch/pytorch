@@ -29,6 +29,17 @@ inline Tensor conv1d(
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.conv1d
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::Conv1dFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::conv1d(x, weight, F::Conv1dFuncOptions().stride(1));
+/// ```
 inline Tensor conv1d(
     const Tensor& input,
     const Tensor& weight,
@@ -65,6 +76,17 @@ inline Tensor conv2d(
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.conv2d
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::Conv2dFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::conv2d(x, weight, F::Conv2dFuncOptions().stride(1));
+/// ```
 inline Tensor conv2d(
     const Tensor& input,
     const Tensor& weight,
@@ -101,6 +123,17 @@ inline Tensor conv3d(
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.conv3d
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::Conv3dFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::conv3d(x, weight, F::Conv3dFuncOptions().stride(1));
+/// ```
 inline Tensor conv3d(
     const Tensor& input,
     const Tensor& weight,
@@ -129,6 +162,17 @@ inline Tensor conv_transpose1d(const Tensor& input, const Tensor& weight,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.conv_transpose1d
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::ConvTranspose1dFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::conv_transpose1d(x, weight, F::ConvTranspose1dFuncOptions().stride(1));
+/// ```
 inline Tensor conv_transpose1d(const Tensor& input, const Tensor& weight,
                                const ConvTranspose1dFuncOptions& options = {}) {
   return detail::conv_transpose1d(
@@ -150,6 +194,17 @@ inline Tensor conv_transpose2d(const Tensor& input, const Tensor& weight,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.conv_transpose2d
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::ConvTranspose2dFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::conv_transpose2d(x, weight, F::ConvTranspose2dFuncOptions().stride(1));
+/// ```
 inline Tensor conv_transpose2d(const Tensor& input, const Tensor& weight,
                                const ConvTranspose2dFuncOptions& options = {}) {
   return detail::conv_transpose2d(
@@ -171,6 +226,17 @@ inline Tensor conv_transpose3d(const Tensor& input, const Tensor& weight,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.conv_transpose3d
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::ConvTranspose3dFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::conv_transpose3d(x, weight, F::ConvTranspose3dFuncOptions().stride(1));
+/// ```
 inline Tensor conv_transpose3d(const Tensor& input, const Tensor& weight,
                                const ConvTranspose3dFuncOptions& options = {}) {
   return detail::conv_transpose3d(
