@@ -9,7 +9,6 @@
 
 namespace torch {
 namespace jit {
-namespace script {
 
 struct OpsValue : public SugaredValue {
   OpsValue(size_t version) : version_(version) {}
@@ -177,7 +176,7 @@ struct SourceImporterImpl : public Resolver,
   }
 
   void LEGACY_import_methods(
-      const script::Module& mod,
+      const Module& mod,
       const std::shared_ptr<Source>& src) {
     auto self = SimpleSelf(mod.type());
     c10::QualifiedName prefix = *mod.type()->name();
@@ -484,12 +483,11 @@ TypePtr SourceImporter::loadNamedType(const QualifiedName& name) const {
 }
 
 void SourceImporter::LEGACY_import_methods(
-    const script::Module& mod,
+    const Module& mod,
     const std::shared_ptr<Source>& src) {
   pImpl->LEGACY_import_methods(mod, src);
 }
 SourceImporter::~SourceImporter() = default;
 
-} // namespace script
 } // namespace jit
 } // namespace torch
