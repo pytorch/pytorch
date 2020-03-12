@@ -10,6 +10,11 @@ namespace torch {
 namespace nn {
 
 /// Options for a fold module.
+///
+/// Example:
+/// ```
+/// Fold model(FoldOptions({8, 8}, {3, 3}).dilation(2).padding({2, 1}).stride(2));
+/// ```
 struct TORCH_API FoldOptions {
   FoldOptions(ExpandingArray<2> output_size, ExpandingArray<2> kernel_size)
       : output_size_(std::move(output_size)),
@@ -40,6 +45,11 @@ TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(Fold, FoldFuncOptions)
 // ============================================================================
 
 /// Options for an Unfold functional and module.
+///
+/// Example:
+/// ```
+/// Unfold model(UnfoldOptions({2, 4}).dilation(2).padding({2, 1}).stride(2));
+/// ```
 struct TORCH_API UnfoldOptions {
   UnfoldOptions(ExpandingArray<2> kernel_size)
       : kernel_size_(std::move(kernel_size)) {}

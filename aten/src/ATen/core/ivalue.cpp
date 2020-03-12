@@ -178,6 +178,22 @@ std::ostream& printDict(
 }
 }
 
+// Properly disambiguate the type of an empty dict
+std::ostream& printMaybeAnnotatedDict(
+    std::ostream& out,
+    const IValue& the_dict,
+    IValueFormatter formatter) {
+  auto value_type = the_dict.type()->cast<DictType>()->getValueType();
+  if (the_dict.toGenericDict().size() == 0 ||
+      !elementTypeCanBeInferredFromMembers(value_type)) {
+    out << "annotate(" << the_dict.type()->python_str() << ",";
+    printDict(out, the_dict.toGenericDict(), formatter) << ")";
+  } else {
+    return printDict(out, the_dict.toGenericDict(), formatter);
+  }
+  return out;
+}
+
 std::ostream& IValue::repr(
     std::ostream& out,
     std::function<bool(std::ostream&, const IValue& v)>
@@ -231,7 +247,7 @@ std::ostream& IValue::repr(
       return out << ")";
     }
     case IValue::Tag::GenericDict:
-      return printDict(out, v.toGenericDict(), formatter);
+      return printMaybeAnnotatedDict(out, v, formatter);
     default:
       TORCH_INTERNAL_ASSERT(false, "repr() not defined on: ", v.tagKind());
   }
@@ -362,19 +378,15 @@ std::vector<std::pair<IValue, IValue>> iterationOrder(const c10::Dict<IValue, IV
 }
 
 StrongTypePtr::StrongTypePtr(
-    std::shared_ptr<torch::jit::script::CompilationUnit> cu,
+    std::shared_ptr<torch::jit::CompilationUnit> cu,
     std::shared_ptr<Type> type) {
   cu_ = std::move(cu);
   type_ = type;
   TORCH_INTERNAL_ASSERT(type_);
-  if (type_->cast<ClassType>()) {
-    TORCH_INTERNAL_ASSERT(
-        cu_, "class type's owning compilation unit is nullptr");
-  }
 }
 
-std::unordered_map<std::string, c10::StrongTypePtr>& getCustomClassTypeMap() {
-    static std::unordered_map<std::string, c10::StrongTypePtr> tmap;
+std::unordered_map<std::string, c10::ClassTypePtr>& getCustomClassTypeMap() {
+    static std::unordered_map<std::string, c10::ClassTypePtr> tmap;
     return tmap;
 }
 

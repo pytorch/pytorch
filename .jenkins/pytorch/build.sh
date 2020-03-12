@@ -105,7 +105,6 @@ if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
   elif [[ "${BUILD_ENVIRONMENT}" == *-x86_64* ]]; then
     build_args+=("-DANDROID_ABI=x86_64")
   fi
-  export BUILD_PYTORCH_MOBILE=1
   exec ./scripts/build_android.sh "${build_args[@]}" "$@"
 fi
 

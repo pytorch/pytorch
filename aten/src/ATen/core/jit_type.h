@@ -17,10 +17,7 @@
 struct ClassType;
 namespace torch {
 namespace jit {
-struct Function;
-namespace script {
 struct CompilationUnit;
-}
 } // namespace jit
 } // namespace torch
 
@@ -828,7 +825,6 @@ struct CAFFE2_API RRefType
 };
 
 
-using ::torch::jit::Function;
 struct NamedType;
 using NamedTypePtr = std::shared_ptr<NamedType>;
 
@@ -1060,9 +1056,8 @@ struct CAFFE2_API StringType : public Type {
 
 struct FunctionType;
 using FunctionTypePtr = std::shared_ptr<FunctionType>;
-using ::torch::jit::Function;
 struct CAFFE2_API FunctionType : public NamedType {
-  static FunctionTypePtr create(Function* function) {
+  static FunctionTypePtr create(torch::jit::Function* function) {
     return FunctionTypePtr(
         new FunctionType(function)); // NOLINT(modernize-make-shared)
   }
@@ -1079,14 +1074,14 @@ struct CAFFE2_API FunctionType : public NamedType {
   std::string python_str() const override {
     return "Function";
   }
-  Function* function() const {
+  torch::jit::Function* function() const {
     return function_;
   }
   static const TypeKind Kind = TypeKind::FunctionType;
 
  private:
-  FunctionType(Function* function);
-  Function* function_;
+  FunctionType(torch::jit::Function* function);
+  torch::jit::Function* function_;
 };
 
 struct NoneType;
@@ -1320,7 +1315,7 @@ struct getTypePtr_ final {
       throw c10::Error("Type could not be converted to any of the known types.", "");
     }
     auto res = getCustomClassType<T>();
-    return std::dynamic_pointer_cast<Type>(std::move(res.type_));
+    return std::dynamic_pointer_cast<Type>(std::move(res));
   }
 };
 
@@ -1439,6 +1434,12 @@ struct getTypePtr_<std::tuple<Contained...>> final {
     return TupleType::create(std::move(contained_types));
   }
 };
+template <>
+struct getTypePtr_<void> final {
+  static TypePtr call() {
+    return NoneType::get();
+  }
+};
 } // namespace detail
 template <class T>
 inline TypePtr getTypePtr() {
@@ -1480,6 +1481,7 @@ matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type_env);
 // does not appear in `type_env`
 CAFFE2_API TypePtr tryEvalTypeVariables(TypePtr type, TypeEnv& type_env);
 
+CAFFE2_API bool elementTypeCanBeInferredFromMembers(const TypePtr& elem_type);
 
 /**
  * User Defined Types
@@ -1487,7 +1489,7 @@ CAFFE2_API TypePtr tryEvalTypeVariables(TypePtr type, TypeEnv& type_env);
 
 struct ClassType;
 using ClassTypePtr = std::shared_ptr<ClassType>;
-using ::torch::jit::script::CompilationUnit;
+using ::torch::jit::CompilationUnit;
 
 // This represents a class in TorchScript.
 struct CAFFE2_API ClassType : public NamedType {
@@ -1516,7 +1518,7 @@ struct CAFFE2_API ClassType : public NamedType {
     return n.qualifiedName();
   }
 
-  const std::vector<Function*>& methods() const;
+  const std::vector<torch::jit::Function*>& methods() const;
 
   TypePtr findAttribute(const std::string& name) const {
     TORCH_INTERNAL_ASSERT(attributeNames_.size() == attributeTypes_.size());
@@ -1655,9 +1657,7 @@ struct CAFFE2_API ClassType : public NamedType {
         constantNames_.cend();
   }
 
-  size_t addConstant(
-      const std::string& name,
-      const IValue& value);
+  size_t addConstant(const std::string& name, const IValue& value);
 
   c10::optional<size_t> findConstantSlot(const std::string& name) const {
     TORCH_CHECK(constantNames_.size() == constantValues_.size());
@@ -1689,8 +1689,11 @@ struct CAFFE2_API ClassType : public NamedType {
     return constantNames_[slot];
   }
 
+
   IValue getConstant(const std::string& name) const;
+
   IValue getConstant(size_t slot) const;
+
   c10::optional<IValue> findConstant(const std::string& name) const;
 
   size_t numConstants() const {
@@ -1737,8 +1740,8 @@ struct CAFFE2_API ClassType : public NamedType {
     return parameterSlots_->at(slot);
   }
 
-  void addMethod(Function* method);
-  Function* getMethod(const std::string& name) const;
+  void addMethod(torch::jit::Function* method);
+  torch::jit::Function* getMethod(const std::string& name) const;
 
   // [Internal Only] Remove method from the ClassType
   // caller is responsible to make sure the modification is safe:
@@ -1750,6 +1753,7 @@ struct CAFFE2_API ClassType : public NamedType {
   void unsafeRemoveMethod(const std::string& name);
 
   std::shared_ptr<CompilationUnit> compilation_unit();
+
   std::shared_ptr<const CompilationUnit> compilation_unit() const;
 
   // generate a refined version of this class.
@@ -1789,14 +1793,13 @@ struct CAFFE2_API ClassType : public NamedType {
   std::shared_ptr<std::vector<bool>> parameterSlots_;
 
   // List of methods associated with this class.
-  std::vector<Function*> methods_;
+  std::vector<torch::jit::Function*> methods_;
 
 };
 
 struct InterfaceType;
 using InterfaceTypePtr = std::shared_ptr<InterfaceType>;
-using ::torch::jit::script::CompilationUnit;
-using ::torch::jit::Function;
+using ::torch::jit::CompilationUnit;
 
 // Interfaces are a list of abstract methods that a class might meet.
 // If a class provides those methods, it implicitly meets the interface.

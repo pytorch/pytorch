@@ -9,6 +9,11 @@ namespace torch {
 namespace nn {
 
 /// Options for the `CosineSimilarity` module.
+///
+/// Example:
+/// ```
+/// CosineSimilarity model(CosineSimilarityOptions().dim(0).eps(0.5));
+/// ```
 struct TORCH_API CosineSimilarityOptions {
   /// Dimension where cosine similarity is computed. Default: 1
   TORCH_ARG(int64_t, dim) = 1;
@@ -21,6 +26,11 @@ TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(CosineSimilarity, CosineSimilarityFuncOpt
 // ============================================================================
 
 /// Options for the `PairwiseDistance` module.
+///
+/// Example:
+/// ```
+/// PairwiseDistance model(PairwiseDistanceOptions().p(3).eps(0.5).keepdim(true));
+/// ```
 struct TORCH_API PairwiseDistanceOptions {
   /// The norm degree. Default: 2
   TORCH_ARG(double, p) = 2.0;
