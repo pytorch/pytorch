@@ -22,7 +22,7 @@ struct TORCH_API ReflectionPadOptions {
   TORCH_ARG(ExpandingArray<D*2>, padding);
 };
 
-/// Options for the `ReflectionPad1d` module.
+/// `ReflectionPadOptions` specialized for the `ReflectionPad1d` module.
 ///
 /// Example:
 /// ```
@@ -30,7 +30,7 @@ struct TORCH_API ReflectionPadOptions {
 /// ```
 using ReflectionPad1dOptions = ReflectionPadOptions<1>;
 
-/// Options for the `ReflectionPad2d` module.
+/// `ReflectionPadOptions` specialized for the `ReflectionPad2d` module.
 ///
 /// Example:
 /// ```
@@ -54,7 +54,7 @@ struct TORCH_API ReplicationPadOptions {
   TORCH_ARG(ExpandingArray<D*2>, padding);
 };
 
-/// Options for the `ReplicationPad1d` module.
+/// `ReplicationPadOptions` specialized for the `ReplicationPad1d` module.
 ///
 /// Example:
 /// ```
@@ -62,7 +62,7 @@ struct TORCH_API ReplicationPadOptions {
 /// ```
 using ReplicationPad1dOptions = ReplicationPadOptions<1>;
 
-/// Options for the `ReplicationPad2d` module.
+/// `ReplicationPadOptions` specialized for the `ReplicationPad2d` module.
 ///
 /// Example:
 /// ```
@@ -70,7 +70,7 @@ using ReplicationPad1dOptions = ReplicationPadOptions<1>;
 /// ```
 using ReplicationPad2dOptions = ReplicationPadOptions<2>;
 
-/// Options for the `ReplicationPad3d` module.
+/// `ReplicationPadOptions` specialized for the `ReplicationPad3d` module.
 ///
 /// Example:
 /// ```
@@ -114,7 +114,7 @@ struct TORCH_API ConstantPadOptions {
   TORCH_ARG(double, value);
 };
 
-/// Options for the `ConstantPad1d` module.
+/// `ConstantPadOptions` specialized for the `ConstantPad1d` module.
 ///
 /// Example:
 /// ```
@@ -122,7 +122,7 @@ struct TORCH_API ConstantPadOptions {
 /// ```
 using ConstantPad1dOptions = ConstantPadOptions<1>;
 
-/// Options for the `ConstantPad2d` module.
+/// `ConstantPadOptions` specialized for the `ConstantPad2d` module.
 ///
 /// Example:
 /// ```
@@ -130,7 +130,7 @@ using ConstantPad1dOptions = ConstantPadOptions<1>;
 /// ```
 using ConstantPad2dOptions = ConstantPadOptions<2>;
 
-/// Options for the `ConstantPad3d` module.
+/// `ConstantPadOptions` specialized for the `ConstantPad3d` module.
 ///
 /// Example:
 /// ```
