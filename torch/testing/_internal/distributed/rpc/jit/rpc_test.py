@@ -8,6 +8,7 @@ from torch.testing._internal.dist_utils import dist_init, worker_name
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
 )
+from torch.testing._internal.common_utils import TemporaryFileName
 
 
 def rpc_return_rref(dst):
@@ -535,6 +536,11 @@ def rref_script_annotation(rref_var):
     return rref_python_annotation(rref_var).to_here()
 
 
+@torch.jit.script
+def save_rref(rref_var, fname):
+    # type: (RRef[Tensor], str) -> None
+    torch.save(rref_var, fname)
+
 @unittest.skipIf(
     not torch._six.PY3, "Pytorch distributed rpc package does not support python2"
 )
@@ -673,3 +679,12 @@ class JitRpcTest(LocalRRefTest, JitRpcAsyncOpTest, RpcAgentTestFixture):
 
         res = rref_script_annotation(rref_var)
         self.assertEqual(res, torch.ones(2, 2) + 1)
+
+    @dist_init
+    def test_rref_jit_pickle_not_supported(self):
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        rref_var = rpc_return_rref(worker_name(dst_rank))
+        with TemporaryFileName() as fname:
+            with self.assertRaisesRegex(RuntimeError, "RRef jit pickling is only allowed inside RPC calls"):
+                save_rref(rref_var, fname)

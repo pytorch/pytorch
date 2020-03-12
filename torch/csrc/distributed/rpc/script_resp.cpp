@@ -23,9 +23,10 @@ const at::IValue& ScriptResp::value() {
 }
 
 Message ScriptResp::toMessage() && {
+  isInRpcCall = true;
   std::vector<torch::Tensor> tensor_table;
   auto payload = jit::pickle(value_, &tensor_table);
-  ;
+  isInRpcCall = false;
   return Message(
       std::move(payload), std::move(tensor_table), MessageType::SCRIPT_RET);
 }

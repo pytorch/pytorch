@@ -50,6 +50,7 @@ RpcWithAutograd::RpcWithAutograd(
 }
 
 Message RpcWithAutograd::toMessage() && {
+  rpc::isInRpcCall = true;
   auto messageId = wrappedMessage_.id();
   auto messageType = wrappedMessage_.type();
 
@@ -65,6 +66,8 @@ Message RpcWithAutograd::toMessage() && {
   std::vector<torch::Tensor> tensorTable;
   std::vector<char> additionalPayload =
       jit::pickle(c10::ivalue::Tuple::create(std::move(ivalues)), &tensorTable);
+
+  rpc::isInRpcCall = false;
 
   // We shouldn't have any tensors!
   TORCH_INTERNAL_ASSERT(tensorTable.empty());

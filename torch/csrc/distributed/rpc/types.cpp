@@ -4,6 +4,9 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+// It is declared in torch/csrc/distributed/rpc/types.h
+thread_local bool isInRpcCall = false;
+
 static_assert(
     std::numeric_limits<local_id_t>::max() <=
         std::numeric_limits<int64_t>::max(),

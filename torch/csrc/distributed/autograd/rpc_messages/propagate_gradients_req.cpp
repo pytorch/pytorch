@@ -19,6 +19,7 @@ PropagateGradientsReq::PropagateGradientsReq(
       retainGraph_(retainGraph) {}
 
 Message PropagateGradientsReq::toMessage() && {
+  rpc::isInRpcCall = true;
   std::vector<at::IValue> ivalues;
   // Add all the grad tensors.
   for (const auto& grad : grads_) {
@@ -37,6 +38,7 @@ Message PropagateGradientsReq::toMessage() && {
   std::vector<char> payload =
       jit::pickle(c10::ivalue::Tuple::create(std::move(ivalues)), &tensorTable);
 
+  rpc::isInRpcCall = false;
   return Message(
       std::move(payload),
       std::move(tensorTable),

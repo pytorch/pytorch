@@ -101,12 +101,15 @@ std::unique_ptr<ScriptCall> ScriptCall::fromIValues(
 }
 
 Message ScriptCall::toMessage() && {
+  isInRpcCall = true;
   std::vector<IValue> ivalues;
   toIValues(ivalues);
 
   std::vector<torch::Tensor> tensor_table;
   auto payload = jit::pickle(
       c10::ivalue::Tuple::create(std::move(ivalues)), &tensor_table);
+
+  isInRpcCall = false;
 
   return Message(
       std::move(payload), std::move(tensor_table), MessageType::SCRIPT_CALL);

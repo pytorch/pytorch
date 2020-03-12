@@ -10,6 +10,12 @@ namespace rpc {
 using worker_id_t = int16_t;
 using local_id_t = int64_t;
 
+// Thread local flag to indicate that thread is in the scope of an rpc call or
+// not, it can help enforce rref JIT pickling to be allowed only in the scope of an
+// rpc call. For other scopes like when model is saved by calling torch.save(),
+// rref is not allowed to be pickled directly.
+extern thread_local bool isInRpcCall;
+
 struct TORCH_API GloballyUniqueId final {
   GloballyUniqueId(worker_id_t createdOn, local_id_t localId);
   GloballyUniqueId(const GloballyUniqueId& other) = default;

@@ -14,10 +14,12 @@ int64_t CleanupAutogradContextReq::getContextId() {
 }
 
 rpc::Message CleanupAutogradContextReq::toMessage() && {
+  rpc::isInRpcCall = true;
   // pickle context_id using JIT pickler.
   std::vector<torch::Tensor> tensorTable;
   std::vector<char> payload =
       jit::pickle(at::IValue(context_id_), &tensorTable);
+  rpc::isInRpcCall = false;
   return rpc::Message(
       std::move(payload),
       std::move(tensorTable),

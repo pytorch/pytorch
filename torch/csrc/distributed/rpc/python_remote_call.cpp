@@ -15,6 +15,7 @@ PythonRemoteCall::PythonRemoteCall(
       retForkId_(std::move(retForkId)) {}
 
 Message PythonRemoteCall::toMessage() && {
+  isInRpcCall = true;
   std::vector<IValue> ivalues = std::move(serializedPyObj_).toIValues();
   ivalues.emplace_back(retRRefId_);
   ivalues.emplace_back(retForkId_);
@@ -23,6 +24,7 @@ Message PythonRemoteCall::toMessage() && {
   auto payload =
       jit::pickle(c10::ivalue::Tuple::create(ivalues), &tensor_table);
 
+  isInRpcCall = false;
   return Message(
       std::move(payload),
       std::move(tensor_table),
