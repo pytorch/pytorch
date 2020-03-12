@@ -422,17 +422,17 @@ void testGPU_FusionTVReorder() {
   TensorView* tv = new TensorView(dummyTensor);
 
   TensorView* s_leftl = tv->reorder(shift_left);
-  for (int i = 0; i < tv->domain()->size(); i++)
+  for (int i = 0; i < tv->nDims(); i++)
     TORCH_CHECK(ref->axis(i) == s_leftl->axis(i - 1));
 
   tv = new TensorView(dummyTensor);
   TensorView* s_left2 = tv->reorder(shift_left);
-  for (int i = 0; i < tv->domain()->size(); i++)
+  for (int i = 0; i < tv->nDims(); i++)
     TORCH_CHECK(ref->axis(i) == s_left2->axis(i - 1));
 
   tv = new TensorView(dummyTensor);
   TensorView* s_right = tv->reorder(shift_right);
-  for (int i = 0; i < tv->domain()->size(); i++)
+  for (int i = 0; i < tv->nDims(); i++)
     TORCH_CHECK(ref->axis(i - 1) == s_right->axis(i));
 
   tv = new TensorView(dummyTensor);

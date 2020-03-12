@@ -160,7 +160,7 @@ TensorView* TransformReplay::replay(Reorder* expr, TensorView* tv) {
     axis2pos[entry.first] = axis++;
   }
 
-  for (int i = 0; i < tv->domain()->size(); i++) {
+  for (int i = 0; i < tv->nDims(); i++) {
     if (axis2pos.find(i) == axis2pos.end())
       axis2pos[i] = axis++;
   }
@@ -223,11 +223,11 @@ TensorView* TransformReplay::runReplay(
     TensorView* replay_target,
     int compute_at_axis) {
   if (compute_at_axis < 0)
-    compute_at_axis += replay_ref->domain()->size() + 1;
+    compute_at_axis += replay_ref->nDims() + 1;
 
   TORCH_CHECK(
       compute_at_axis >= 0 &&
-          compute_at_axis < replay_ref->domain()->size() + 1,
+          compute_at_axis < replay_ref->nDims() + 1,
       "Transform replay cannot be performed as the compute_at_axis is not in the valid range.");
 
   this->compute_at_axis = compute_at_axis;
@@ -251,9 +251,9 @@ TensorView* TransformReplay::runReplay(
 
   // Remove isReduction from the axis_map of a producer
   // isReduction is only impactful when its on a consumer
-  auto init_size = replay_target->domain()->size();
+  auto init_size = replay_target->nDims();
   for (decltype(init_size) i = 0; i < init_size; i++)
-    if (!replay_target->domain()->axis(i)->isReduction())
+    if (!replay_target->axis(i)->isReduction())
       axis_map.push_back(i);
 
   // Domain sizes must match at root for replay.
@@ -289,8 +289,8 @@ TensorView* TransformReplay::runReplay(
   // as they're relative to the "full" replay that produced the reference.
   TensorView* replayed = TransformIter::runReplay(replay_target);
 
-  for (decltype(replayed->domain()->size()) i{0}; i < compute_at_axis; i++)
-    if (replayed->domain()->axis(i)->isReduction())
+  for (decltype(replayed->nDims()) i{0}; i < compute_at_axis; i++)
+    if (replayed->axis(i)->isReduction())
       TORCH_CHECK(
           false,
           "Generated a compute_at dependency where a reduction would be used before computed.");

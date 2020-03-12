@@ -68,14 +68,14 @@ public:
       std::cout << "==== add fusion output: " << out << std::endl;
       
       //Merge all dimensions because we're only supporting pointwise
-      while(out->domain()->size() > 1)
+      while(out->nDims() > 1)
         out->merge(0);
       //Split into 128 so we can map blocks/threads
       out->split(0, 128);
 
       //Map blocks/threads
-      out->domain()->axis(0)->parallelize(ParallelType::BIDx);
-      out->domain()->axis(-1)->parallelize(ParallelType::TIDx);
+      out->axis(0)->parallelize(ParallelType::BIDx);
+      out->axis(-1)->parallelize(ParallelType::TIDx);
       
     }
 
