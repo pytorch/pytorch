@@ -219,7 +219,7 @@ void initJITBindings(PyObject* module) {
              SwapFunctionalLinear(graph);
            })
       .def("_jit_pass_swap_functional_linear",
-           [](script::Module& module) {
+           [](Module& module) {
              SwapFunctionalLinear(module);
            })
       .def(
