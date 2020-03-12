@@ -227,7 +227,7 @@ void index_put_accum_kernel(Tensor & self, TensorList indices, const Tensor & va
 
       AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
       value_.scalar_type(), "indexing_backward", [&] {
-      AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "indeing_backward", [&] {
+      AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "indexing_backward", [&] {
       indexing_backward_kernel<scalar_t, UNROLL><<<grid, block, 0, stream>>>(
         sorted_indices.data_ptr<int64_t>(),
         orig_indices.data_ptr<int64_t>(),
