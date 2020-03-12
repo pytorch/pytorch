@@ -3,8 +3,8 @@
 #include <torch/types.h>
 #include <torch/utils.h>
 
-#include <torch/csrc/jit/import.h>
-#include <torch/csrc/jit/script/module.h>
+#include <torch/csrc/jit/serialization/import.h>
+#include <torch/csrc/jit/api/module.h>
 #include <caffe2/serialize/read_adapter_interface.h>
 #include <c10/util/Exception.h>
 
@@ -20,6 +20,16 @@ InputArchive::InputArchive() : module_("Module", std::make_shared<jit::script::C
 
 void InputArchive::read(const std::string& key, c10::IValue& ivalue) {
   ivalue = module_.attr(key);
+}
+
+bool InputArchive::try_read(
+    const std::string& key,
+    c10::IValue& ivalue) {
+  if (!module_.hasattr(key)) {
+    return false;
+  }
+  ivalue = module_.attr(key);
+  return true;
 }
 
 bool InputArchive::try_read(
@@ -145,6 +155,17 @@ void InputArchive::load_from(
   };
   std::unique_ptr<OurAdapter> adapter(new OurAdapter(read_func, size_func));
   module_ = torch::jit::load(std::move(adapter), std::move(device));
+}
+
+std::vector<std::string> InputArchive::keys() {
+  std::vector<std::string> all_keys;
+  all_keys.reserve(module_.named_attributes(/*recurse=*/false).size());
+
+  for (const torch::jit::script::NameValue& s : module_.named_attributes(/*recurse=*/false)) {
+    all_keys.push_back(s.name);
+  }
+
+  return all_keys;
 }
 
 } // namespace serialize

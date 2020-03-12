@@ -19,11 +19,11 @@ PyTorch is an optimized tensor library for deep learning using GPUs and CPUs.
    PyTorch on XLA Devices <http://pytorch.org/xla/>
 
 .. toctree::
-  :glob:
-  :maxdepth: 1
-  :caption: Community
+   :maxdepth: 1
+   :caption: Language Bindings
 
-  community/*
+   C++ API <https://pytorch.org/cppdocs/>
+   packages
 
 .. toctree::
    :maxdepth: 1
@@ -34,8 +34,10 @@ PyTorch is an optimized tensor library for deep learning using GPUs and CPUs.
    nn.functional
    tensors
    tensor_attributes
+   tensor_view
    torch.autograd <autograd>
    cuda
+   torch.cuda.amp <amp>
    torch.distributed <distributed>
    torch.distributions <distributions>
    torch.hub <hub>
@@ -80,11 +82,11 @@ PyTorch is an optimized tensor library for deep learning using GPUs and CPUs.
    torchtext <https://pytorch.org/text>
 
 .. toctree::
+   :glob:
    :maxdepth: 1
-   :caption: Other Languages
+   :caption: Community
 
-   C++ API <https://pytorch.org/cppdocs/>
-   packages
+   community/*
 
 Indices and tables
 ==================

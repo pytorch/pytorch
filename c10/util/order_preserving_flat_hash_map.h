@@ -838,7 +838,7 @@ private:
 
     EntryPointer initSentinel() {
       // needs to be a pointer so that hash map can be used with forward declared types
-      sentinel_val = c10::guts::make_unique<sherwood_v3_entry<T>>();
+      sentinel_val = std::make_unique<sherwood_v3_entry<T>>();
       sentinel = sentinel_val.get();
       reset_list();
       return sentinel;

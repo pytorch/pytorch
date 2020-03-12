@@ -119,7 +119,7 @@ def GetPydotGraph(
             graph.add_edge(pydot.Edge(input_node, op_node))
         for output_name in op.output:
             if output_name in pydot_nodes:
-                # we are overwriting an existing blob. need to updat the count.
+                # we are overwriting an existing blob. need to update the count.
                 pydot_node_counts[output_name] += 1
             output_node = blob_node_producer(
                 _escape_label(

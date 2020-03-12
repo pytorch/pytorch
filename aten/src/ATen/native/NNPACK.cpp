@@ -57,6 +57,7 @@ bool _nnpack_available() {
 #include "nnpack.h"
 
 #include "caffe2/utils/threadpool/ThreadPoolMobile.h"
+#include <ATen/native/ConvUtils.h>
 
 namespace at {
 namespace native {
@@ -143,40 +144,6 @@ static inline void allocate_workspace() {
   posix_memalign(&workspace, nnpack_memory_alignment_boundary, workspace_size);
 }
 
-static std::vector<int64_t> conv_output_size(
-    const IntArrayRef input_size,
-    const IntArrayRef weight_size,
-    const IntArrayRef stride,
-    const IntArrayRef padding) {
-  constexpr size_t input_batch_size_dim = 0;
-  constexpr size_t input_height_dim = 2;
-  constexpr size_t input_width_dim = 3;
-  constexpr size_t output_batch_size_dim = 0;
-  constexpr size_t output_channels_dim = 1;
-  constexpr size_t output_height_dim = 2;
-  constexpr size_t output_width_dim = 3;
-  constexpr size_t weight_output_channels_dim = 0;
-  constexpr size_t weight_height_dim = 2;
-  constexpr size_t weight_width_dim = 3;
-
-  const auto calc_output_dimension = [](
-    const int64_t input, const int64_t kernel, const int64_t stride, const int64_t padding) {
-    return 1 + (input - kernel + 2 * padding) / stride;
-  };
-
-  const auto dim = input_size.size();
-  std::vector<int64_t> output_size(dim);
-
-  output_size[output_batch_size_dim] = input_size[input_batch_size_dim];
-  output_size[output_channels_dim] = weight_size[weight_output_channels_dim];
-  output_size[output_height_dim] = calc_output_dimension(
-    input_size[input_height_dim], weight_size[weight_height_dim], stride[0], padding[0]);
-  output_size[output_width_dim] = calc_output_dimension(
-    input_size[input_width_dim], weight_size[weight_width_dim], stride[1], padding[1]);
-
-  return output_size;
-}
-
 Tensor _nnpack_spatial_convolution(
     const at::Tensor& input,
     const at::Tensor& weight,
@@ -184,7 +151,7 @@ Tensor _nnpack_spatial_convolution(
     const IntArrayRef padding,
     const IntArrayRef stride) {
   at::Tensor output = at::empty(
-      conv_output_size(input.sizes(), weight.sizes(), stride, padding),
+      conv_output_size(input.sizes(), weight.sizes(), padding, stride),
       input.options());
 
   // Our input Tensor must be in the form N,C,H,W

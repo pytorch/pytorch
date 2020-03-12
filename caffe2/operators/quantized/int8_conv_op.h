@@ -88,7 +88,7 @@ class Int8ConvOp final : public ConvPoolOpBase<CPUContext> {
             X.scale,
             W.zero_point,
             W.scale,
-#ifndef _MSC_VER
+#if !defined(_MSC_VER) || defined(__clang__)
             W.t.template data<uint8_t>(),
             B.t.template data<int32_t>(),
 #else

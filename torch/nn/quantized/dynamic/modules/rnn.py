@@ -3,7 +3,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import torch
 import torch.nn as nn
 from torch import Tensor  # noqa: F401
-from torch.nn import _VF
+from torch import _VF
 from torch._jit_internal import Tuple, Optional, List  # noqa: F401
 from torch.nn.utils.rnn import PackedSequence
 import numbers
@@ -108,12 +108,10 @@ class RNNBase(torch.nn.Module):
                         [gate_size, layer_input_size], scale=1, zero_point=0, dtype=torch.qint8)
                     w_hh = torch._empty_affine_quantized(
                         [gate_size, hidden_size], scale=1, zero_point=0, dtype=torch.qint8)
-                    b_ih = torch._empty_affine_quantized(
-                        [gate_size], scale=1, zero_point=0, dtype=torch.qint32)
+                    b_ih = torch.empty([gate_size], dtype=torch.float)
                     # Second bias vector included for CuDNN compatibility. Only one
                     # bias vector is needed in standard definition.
-                    b_hh = torch._empty_affine_quantized(
-                        [gate_size], scale=1, zero_point=0, dtype=torch.qint32)
+                    b_hh = torch.empty([gate_size], dtype=torch.float)
 
                 else:
                     w_ih = torch.Tensor(gate_size, layer_input_size).float()

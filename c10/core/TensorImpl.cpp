@@ -2,7 +2,7 @@
 
 #include <c10/core/Backend.h>
 #include <c10/core/WrapDimMinimal.h>
-#include <c10/core/impl/LocalTensorTypeSet.h>
+#include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/util/Optional.h>
 
 C10_DEFINE_bool(
@@ -44,13 +44,13 @@ const at::Tensor& TensorImpl::grad() const {
   return autograd_meta_->grad();
 }
 
-TensorImpl::TensorImpl(Storage&& storage, TensorTypeSet type_set)
-    : TensorImpl(std::move(storage), type_set, storage.dtype(), storage.device()) {}
+TensorImpl::TensorImpl(Storage&& storage, DispatchKeySet key_set)
+    : TensorImpl(std::move(storage), key_set, storage.dtype(), storage.device()) {}
 
-TensorImpl::TensorImpl(TensorTypeSet type_set, const caffe2::TypeMeta& data_type, c10::optional<c10::Device> device_opt)
-    : TensorImpl({}, type_set, data_type, std::move(device_opt)) {}
+TensorImpl::TensorImpl(DispatchKeySet key_set, const caffe2::TypeMeta& data_type, c10::optional<c10::Device> device_opt)
+    : TensorImpl({}, key_set, data_type, std::move(device_opt)) {}
 
-TensorImpl::TensorImpl(Storage&& storage, TensorTypeSet type_set, const caffe2::TypeMeta& data_type,
+TensorImpl::TensorImpl(Storage&& storage, DispatchKeySet key_set, const caffe2::TypeMeta& data_type,
                        c10::optional<c10::Device> device_opt)
     : storage_(std::move(storage)),
       sizes_{0},
@@ -58,8 +58,8 @@ TensorImpl::TensorImpl(Storage&& storage, TensorTypeSet type_set, const caffe2::
       numel_(0),
       data_type_(data_type),
       device_opt_(device_opt),
-      type_set_(type_set.add(TensorTypeId::VariableTensorId)) {
-  if (!type_set.empty()) {
+      key_set_(key_set) {
+  if (!key_set.empty()) {
     AT_ASSERT(data_type.id() ==  caffe2::TypeIdentifier::uninitialized() ||
               device_opt_.has_value());
     // UndefinedTensorImpl is a singleton, so we skip logging it
@@ -96,38 +96,62 @@ bool TensorImpl::compute_contiguous() const {
   return is_contiguous;
 }
 
-bool TensorImpl::compute_channels_last_contiguous() const {
-  if (sizes_.size() == 4) {
-    int64_t expected = 1;
-    for (auto& d : {1, 3, 2, 0}) {
-      if (sizes_[d] != 1) {
-        if (strides_[d] == expected) {
-          expected *= sizes_[d];
-        } else {
-          return false;
+bool TensorImpl::compute_channels_last_contiguous_2d() const {
+  // Please don't combine these code, constant array is used here to let
+  // compiler fully unroll the loop to get better performance
+  switch (sizes_.size()) {
+    case 4:
+      {
+        int64_t expected = 1;
+        for (auto& d : {1, 3, 2, 0}) {
+          if (sizes_[d] != 1) {
+            if (strides_[d] != expected) {
+              return false;
+            }
+            expected *= sizes_[d];
+          }
         }
+        return true;
       }
-    }
-    return true;
+    case 3:
+      // TODO dim == 3 case will be enabled once it is fully tested
+      return false;
+    default:
+      return false;
   }
-  return false;
 }
 
-bool TensorImpl::compute_strides_like_channels_last() const {
-  if (sizes_.size() == 4) {
-    int64_t min = 0;
-    for (auto& d : {1, 3, 2, 0}) {
-      if (sizes_[d] != 1) {
-        if (strides_[d] > min) {
-          min = strides_[d];
-        } else {
-          return false;
+bool TensorImpl::compute_channels_last_contiguous_3d() const {
+  // Please don't combine these code, constant array is used here to let
+  // compiler fully unroll the loop to get better performance
+  switch (sizes_.size()) {
+    case 5:
+      {
+        int64_t expected = 1;
+        for (auto& d : {1, 4, 3, 2, 0}) {
+          if (sizes_[d] != 1) {
+            if (strides_[d] != expected) {
+              return false;
+            }
+            expected *= sizes_[d];
+          }
         }
+        return true;
       }
-    }
-    return true;
+    case 4:
+      // TODO dim == 4 case will be enabled once it is fully tested
+      return false;
+    default:
+      return false;
   }
-  return false;
+}
+
+bool TensorImpl::compute_strides_like_channels_last_2d() const {
+  return is_channels_last_strides_2d(sizes_, strides_);
+}
+
+bool TensorImpl::compute_strides_like_channels_last_3d() const {
+  return is_channels_last_strides_3d(sizes_, strides_);
 }
 
 bool TensorImpl::compute_non_overlapping_and_dense() const {
@@ -192,6 +216,9 @@ bool TensorImpl::is_contiguous(at::MemoryFormat memory_format) const {
 #endif
   if (memory_format == at::MemoryFormat::ChannelsLast) {
       return is_channels_last_contiguous_;
+  }
+  else if (memory_format == at::MemoryFormat::ChannelsLast3d) {
+      return is_channels_last_3d_contiguous_;
   }
   return is_contiguous_;
 }
@@ -260,10 +287,12 @@ void TensorImpl::copy_tensor_metadata(
   dest_impl->storage_offset_ = src_impl->storage_offset_;
   dest_impl->data_type_ = src_impl->data_type_;
   dest_impl->device_opt_ = src_impl->device_opt_;
-  dest_impl->type_set_ = src_impl->type_set_;
+  dest_impl->key_set_ = src_impl->key_set_;
   dest_impl->is_contiguous_ = src_impl->is_contiguous_;
   dest_impl->is_channels_last_contiguous_ = src_impl->is_channels_last_contiguous_;
+  dest_impl->is_channels_last_3d_contiguous_ = src_impl->is_channels_last_3d_contiguous_;
   dest_impl->is_channels_last_ = src_impl->is_channels_last_;
+  dest_impl->is_channels_last_3d_ = src_impl->is_channels_last_3d_;
   dest_impl->is_non_overlapping_and_dense_ = src_impl->is_non_overlapping_and_dense_;
   dest_impl->is_wrapped_number_ = src_impl->is_wrapped_number_;
   dest_impl->reserved_ = src_impl->reserved_;

@@ -39,7 +39,9 @@ cusparseHandle_t getCurrentCUDASparseHandle() {
   if (!myPoolWindow)
     myPoolWindow.reset(pool.newPoolWindow());
 
-  return myPoolWindow->reserve(device);
+  auto handle = myPoolWindow->reserve(device);
+  cusparseSetStream(handle, c10::cuda::getCurrentCUDAStream());
+  return handle;
 }
 
 }} // namespace at::cuda

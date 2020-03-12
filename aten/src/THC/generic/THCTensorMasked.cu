@@ -88,7 +88,7 @@ void THCTensor_(maskedCopy)(THCState* state,
 
   thrust::exclusive_scan(
 #if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
-    thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
+    thrust::cuda::par(thrustAlloc).on(c10::cuda::getCurrentCUDAStream()),
 #endif
     maskData,
     maskData + THCudaLongTensor_nElement(state, maskLong),
@@ -154,7 +154,7 @@ void THCTensor_(maskedCopyBool)(THCState* state,
 
   thrust::exclusive_scan(
 #if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
-    thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
+    thrust::cuda::par(thrustAlloc).on(c10::cuda::getCurrentCUDAStream()),
 #endif
     maskData,
     maskData + THCudaLongTensor_nElement(state, maskLong),
@@ -225,7 +225,7 @@ void THCTensor_(maskedSelect)(THCState* state,
 
   thrust::exclusive_scan(
 #if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
-    thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
+    thrust::cuda::par(thrustAlloc).on(c10::cuda::getCurrentCUDAStream()),
 #endif
     maskData,
     maskData + THCudaLongTensor_nElement(state, maskLong),
@@ -287,7 +287,7 @@ void THCTensor_(maskedSelectBool)(THCState* state,
 
   thrust::exclusive_scan(
 #if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
-    thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
+    thrust::cuda::par(thrustAlloc).on(c10::cuda::getCurrentCUDAStream()),
 #endif
     maskData,
     maskData + THCudaLongTensor_nElement(state, maskLong),

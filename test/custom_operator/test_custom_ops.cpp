@@ -18,29 +18,63 @@ void check_all_parameters(
     AT_ASSERT(predicate(parameter));
   }
 }
+
+template<class Result, class... Args>
+Result get_operator_from_registry_and_execute(const char* op_name, Args&&... args) {
+  auto& ops = torch::jit::getAllOperatorsFor(
+      torch::jit::Symbol::fromQualString(op_name));
+  TORCH_INTERNAL_ASSERT(ops.size() == 1);
+
+  auto& op = ops.front();
+  TORCH_INTERNAL_ASSERT(op->schema().name() == op_name);
+
+  torch::jit::Stack stack;
+  torch::jit::push(stack, std::forward<Args>(args)...);
+  op->getOperation()(stack);
+
+  TORCH_INTERNAL_ASSERT(1 == stack.size());
+  return torch::jit::pop(stack).to<Result>();
+}
 } // namespace helpers
 
 void get_operator_from_registry_and_execute() {
-  auto& ops = torch::jit::getAllOperatorsFor(
-      torch::jit::Symbol::fromQualString("custom::op"));
-  AT_ASSERT(ops.size() == 1);
-
-  auto& op = ops.front();
-  AT_ASSERT(op->schema().name() == "custom::op");
-
-  torch::jit::Stack stack;
-  torch::jit::push(stack, torch::ones(5), 2.0, 3);
-  op->getOperation()(stack);
-  std::vector<torch::Tensor> output;
-  torch::jit::pop(stack, output);
+  std::vector<torch::Tensor> output =
+    helpers::get_operator_from_registry_and_execute<std::vector<torch::Tensor>>("custom::op", torch::ones(5), 2.0, 3);
 
   const auto manual = custom_op(torch::ones(5), 2.0, 3);
 
-  AT_ASSERT(output.size() == 3);
+  TORCH_INTERNAL_ASSERT(output.size() == 3);
   for (size_t i = 0; i < output.size(); ++i) {
-    AT_ASSERT(output[i].allclose(torch::ones(5) * 2));
-    AT_ASSERT(output[i].allclose(manual[i]));
+    TORCH_INTERNAL_ASSERT(output[i].allclose(torch::ones(5) * 2));
+    TORCH_INTERNAL_ASSERT(output[i].allclose(manual[i]));
   }
+}
+
+void get_autograd_operator_from_registry_and_execute() {
+  torch::Tensor x = torch::randn({5,5}, torch::requires_grad());
+  torch::Tensor y = torch::randn({5,5}, torch::requires_grad());
+
+  torch::Tensor output =
+    helpers::get_operator_from_registry_and_execute<torch::Tensor>("custom::op_with_autograd", x, 2, y);
+
+  TORCH_INTERNAL_ASSERT(output.allclose(x + 2*y + x*y));
+  auto go = torch::ones({}, torch::requires_grad());
+  output.sum().backward(go, false, true);
+
+  TORCH_INTERNAL_ASSERT(torch::allclose(x.grad(), y + torch::ones({5,5})));
+  TORCH_INTERNAL_ASSERT(torch::allclose(y.grad(), x + torch::ones({5,5})*2));
+}
+
+void get_autograd_operator_from_registry_and_execute_in_nograd_mode() {
+  at::AutoNonVariableTypeMode _var_guard(true);
+
+  torch::Tensor x = torch::randn({5,5}, torch::requires_grad());
+  torch::Tensor y = torch::randn({5,5}, torch::requires_grad());
+
+  torch::Tensor output =
+    helpers::get_operator_from_registry_and_execute<torch::Tensor>("custom::op_with_autograd", x, 2, y);
+
+  TORCH_INTERNAL_ASSERT(output.allclose(x + 2*y + x*y));
 }
 
 void load_serialized_module_with_custom_op_and_execute(
@@ -135,6 +169,8 @@ int main(int argc, const char* argv[]) {
   const std::string path_to_exported_script_module = argv[1];
 
   get_operator_from_registry_and_execute();
+  get_autograd_operator_from_registry_and_execute();
+  get_autograd_operator_from_registry_and_execute_in_nograd_mode();
   load_serialized_module_with_custom_op_and_execute(
       path_to_exported_script_module);
   test_argument_checking_for_serialized_modules(path_to_exported_script_module);

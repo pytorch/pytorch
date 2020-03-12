@@ -15,7 +15,7 @@ Each inference thread invokes a JIT interpreter that executes the ops
 of a model inline, one by one. A model can utilize a ``fork`` TorchScript
 primitive to launch an asynchronous task. Forking several operations at once
 results in a task that is executed in parallel. The ``fork`` operator returns a
-``future`` object which can be used to synchronize on later, for example:
+``Future`` object which can be used to synchronize on later, for example:
 
 .. code-block:: python
 
@@ -58,11 +58,6 @@ following parallelization libraries to implement it:
 
 OpenMP historically has been used by a large number of libraries. It is known
 for a relative ease of use and support for loop-based parallelism and other primitives.
-At the same time OpenMP is not known for a good interoperability with other threading
-libraries used by the application. In particular, OpenMP does not guarantee that a single per-process intra-op thread
-pool is going to be used in the application. On the contrary, two different inter-op
-threads will likely use different OpenMP thread pools for intra-op work.
-This might result in a large number of threads used by the application.
 
 TBB is used to a lesser extent in external libraries, but, at the same time,
 is optimized for the concurrent environments. PyTorch's TBB backend guarantees that
@@ -85,7 +80,7 @@ libraries at the build time with the following build options:
 | MKL-DNN    | ``MKLDNN_THREADING``  | (same)                      | To enable MKL-DNN use ``USE_MKLDNN=1`` |
 +------------+-----------------------+-----------------------------+----------------------------------------+
 
-It is strongly recommended not to mix OpenMP and TBB within one build.
+It is recommended not to mix OpenMP and TBB within one build.
 
 Any of the ``TBB`` values above require ``USE_TBB=1`` build setting (default: OFF).
 A separate setting ``USE_OPENMP=1`` (default: ON) is required for OpenMP parallelism.
@@ -98,10 +93,10 @@ The following API is used to control thread settings:
 +------------------------+-----------------------------------------------------------+---------------------------------------------------------+
 | Type of parallelism    | Settings                                                  | Notes                                                   |
 +========================+===========================================================+=========================================================+
-| Inter-op parallelism   | ``at::set_num_interop_threads``,                          | ``set*`` functions can only be called once and only     |
-|                        | ``at::get_num_interop_threads`` (C++)                     | during the startup, before the actual operators running;|
+| Inter-op parallelism   | ``at::set_num_interop_threads``,                          | Default number of threads: number of CPU cores.         |
+|                        | ``at::get_num_interop_threads`` (C++)                     |                                                         |
 |                        |                                                           |                                                         |
-|                        | ``set_num_interop_threads``,                              | Default number of threads: number of CPU cores.         |
+|                        | ``set_num_interop_threads``,                              |                                                         |
 |                        | ``get_num_interop_threads`` (Python, :mod:`torch` module) |                                                         |
 +------------------------+-----------------------------------------------------------+                                                         |
 | Intra-op parallelism   | ``at::set_num_threads``,                                  |                                                         |
@@ -115,6 +110,47 @@ The following API is used to control thread settings:
 
 For the intra-op parallelism settings, ``at::set_num_threads``, ``torch.set_num_threads`` always take precedence
 over environment variables, ``MKL_NUM_THREADS`` variable takes precedence over ``OMP_NUM_THREADS``.
+
+Tuning the number of threads
+----------------------------
+
+The following simple script shows how a runtime of matrix multiplication changes with the number of threads:
+
+.. code-block:: python
+
+    import timeit
+    runtimes = []
+    threads = [1] + [t for t in range(2, 49, 2)]
+    for t in threads:
+        torch.set_num_threads(t)
+        r = timeit.timeit(setup = "import torch; x = torch.randn(1024, 1024); y = torch.randn(1024, 1024)", stmt="torch.mm(x, y)", number=100)
+        runtimes.append(r)
+    # ... plotting (threads, runtimes) ...
+
+Running the script on a system with 24 physical CPU cores (Xeon E5-2680, MKL and OpenMP based build) results in the following runtimes:
+
+.. image:: cpu_threading_runtimes.svg
+   :width: 75%
+
+The following considerations should be taken into account when tuning the number of intra- and inter-op threads:
+
+* When choosing the number of threads one needs to avoid `oversubscription` (using too many threads, leads to performance degradation). For example, in an application that uses a large application thread pool or heavily relies on
+  inter-op parallelism, one might find disabling intra-op parallelism as a possible option (i.e. by calling ``set_num_threads(1)``);
+
+* In a typical application one might encounter a trade off between `latency` (time spent on processing an inference request) and `throughput` (amount of work done per unit of time). Tuning the number of threads can be a useful
+  tool to adjust this trade off in one way or another. For example, in latency critical applications one might want to increase the number of intra-op threads to process each request as fast as possible. At the same time, parallel implementations
+  of ops may add an extra overhead that increases amount work done per single request and thus reduces the overall throughput.
+
+.. warning::
+    OpenMP does not guarantee that a single per-process intra-op thread
+    pool is going to be used in the application. On the contrary, two different application or inter-op
+    threads may use different OpenMP thread pools for intra-op work.
+    This might result in a large number of threads used by the application.
+    Extra care in tuning the number of threads is needed to avoid
+    oversubscription in multi-threaded applications in OpenMP case.
+
+.. note::
+    Pre-built PyTorch releases are compiled with OpenMP support.
 
 .. note::
     ``parallel_info`` utility prints information about thread settings and can be used for debugging.

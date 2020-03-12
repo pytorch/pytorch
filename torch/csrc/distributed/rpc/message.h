@@ -1,7 +1,7 @@
 #pragma once
 
 #include <torch/csrc/utils/future.h>
-#include <torch/serialize.h>
+#include <torch/types.h>
 #include <vector>
 
 namespace torch {
@@ -45,7 +45,6 @@ enum MessageType {
   CLEANUP_AUTOGRAD_CONTEXT_RESP = 20,
 
   // Other internal message types
-  SHUTDOWN = 50,
   EXCEPTION = 55,
   UNKNOWN = 60
 };

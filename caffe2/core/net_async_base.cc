@@ -68,7 +68,7 @@ AsyncNetBase::AsyncNetBase(
     Workspace* ws)
     : NetBase(net_def, ws), options_(net_def), counters_(net_def) {
   operator_nodes_ = dag_utils::prepareOperatorNodes(net_def, ws);
-  helper_ = caffe2::make_unique<AsyncNetExecutorHelper>(this);
+  helper_ = std::make_unique<AsyncNetExecutorHelper>(this);
   operators_.reserve(operator_nodes_.size());
   for (const auto& node : operator_nodes_) {
     auto op_ptr = node.operator_.get();

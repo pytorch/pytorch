@@ -101,6 +101,12 @@ std::string show_config() {
   }
 #endif
 
+#if defined(__cplusplus)
+  {
+    ss << "  - C++ Version: " << __cplusplus << "\n";
+  }
+#endif
+
 #if defined(__clang_major__)
   {
     ss << "  - clang " << __clang_major__ << "." << __clang_minor__ << "." << __clang_patchlevel__ << "\n";

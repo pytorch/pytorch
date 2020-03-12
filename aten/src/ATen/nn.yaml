@@ -1,17 +1,5 @@
 # Loss functions
 
-- name: _thnn_binary_cross_entropy(Tensor self, Tensor target, Tensor? weight, int64_t reduction)
-  cname: BCECriterion
-  # Using this section you can specify what scalar types should be used for each backend
-  # to generate backward and forward methods
-  # If not specified, ['Float', 'Double', 'Half'] will be used
-  CPU:
-    forward_scalar_types: ['Float', 'Double', 'Half']
-    backward_scalar_types: ['Float', 'Double', 'Half']
-  CUDA:
-    forward_scalar_types: ['Float', 'Double', 'Half']
-    backward_scalar_types: ['Float', 'Double', 'Half']
-
 - name: _thnn_multi_margin_loss(Tensor self, LongTensor target, Scalar p, Scalar margin, Tensor? weight, int64_t reduction)
   cname: MultiMarginCriterion
 
@@ -30,19 +18,10 @@
   cname: SpatialClassNLLCriterion
   buffers: [total_weight]
 
-- name: _thnn_soft_margin_loss(Tensor self, Tensor target, int64_t reduction)
-  cname: SoftMarginCriterion
-
 # Activation functions
 
 - name: _thnn_glu(Tensor self, int64_t dim)
   cname: GatedLinear
-  wrap_dim:
-    dim: self
-
-- name: _thnn_leaky_relu(Tensor self, Scalar negative_slope)
-  cname: LeakyReLU
-  has_inplace: True
 
 - name: _thnn_log_sigmoid(Tensor self)
   cname: LogSigmoid
@@ -54,9 +33,6 @@
   cname: RReLU
   has_inplace: True
 
-- name: _thnn_softplus(Tensor self, Scalar beta, Scalar threshold)
-  cname: SoftPlus
-
 # Convolutions
 
 - name: _thnn_conv2d(Tensor self, Tensor weight, IntArrayRef[2] kernel_size, Tensor? bias, IntArrayRef[2] stride, IntArrayRef[2] padding)
@@ -65,7 +41,13 @@
   CPU:
     forward_scalar_types: ['Float', 'Double', 'Long', 'BFloat16']
     backward_scalar_types: ['Float', 'Double', 'BFloat16']
+  CUDA:
+    forward_scalar_types: ['Float', 'Double', 'Half', 'BFloat16']
+    backward_scalar_types: ['Float', 'Double', 'Half', 'BFloat16']
 
 - name: _thnn_conv_depthwise2d(Tensor self, Tensor weight, IntArrayRef[2] kernel_size, Tensor? bias, IntArrayRef[2] stride, IntArrayRef[2] padding, IntArrayRef[2] dilation)
   cname: SpatialDepthwiseConvolution
   buffers: []
+  CUDA:
+    forward_scalar_types: ['Float', 'Double', 'Half', 'BFloat16']
+    backward_scalar_types: ['Float', 'Double', 'Half', 'BFloat16']

@@ -52,12 +52,6 @@ THC_API c10::Allocator* THCState_getCudaHostAllocator(THCState* state);
 
 THC_API void THCMagma_init(THCState *state);
 
-/* State manipulators and accessors */
-THC_API int THCState_getNumDevices(THCState* state);
-
-THC_API cudaStream_t THCState_getCurrentStreamOnDevice(THCState *state, int device);
-THC_API cudaStream_t THCState_getCurrentStream(THCState *state);
-
 /* For the current device and stream, returns the allocated scratch space */
 THC_API size_t THCState_getCurrentDeviceScratchSpaceSize(THCState* state);
 
