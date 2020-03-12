@@ -23,7 +23,7 @@ namespace {
 typedef Val CgValue;
 typedef Expr CgOp;
 
-typedef void (*ParseFuncPtr)(const Node* const, std::unordered_map<size_t, CgValue*>);
+typedef void (*ParseFuncPtr)(const Node* const, std::unordered_map<size_t, CgValue*>&);
 
 // Need to double check this. Current WAR to because `getOperatorForLiteral` is
 // not exposed;
@@ -32,7 +32,7 @@ std::shared_ptr<Operator> getOperatorForLiteral_local(const char* signature) {
   auto ops_vec = getAllOperatorsFor(Symbol::fromQualString(schema.name()));
 
   for (auto s_ptr_op : ops_vec) {
-    if (s_ptr_op->schema().overload_name() == schema.overload_name()) {
+    if (strcmp(canonicalSchemaString(s_ptr_op->schema()).c_str(),signature)==0) {
       return s_ptr_op;
     }
   }
@@ -53,7 +53,6 @@ public:
     for (auto val : block->inputs()) {
       assert(registerValue(val));
       fusion_->addInput(value_maps_[val->unique()]);
-      std::cout << "==== add fusion input: " << value_maps_[val->unique()] << std::endl;
     }
 
     // compose nodes in topo order;
@@ -65,7 +64,6 @@ public:
     for (auto jit_output : block->outputs()) {
       TensorView* out = static_cast<TensorView*>(value_maps_[jit_output->unique()]);
       fusion_->addOutput(out);
-      std::cout << "==== add fusion output: " << out << std::endl;
       
       //Merge all dimensions because we're only supporting pointwise
       while(out->nDims() > 1)
@@ -99,6 +97,7 @@ public:
       init_registry = false;
     }
 
+    
     // match signature.
     auto iter = jit_operator_registry_.find(node->kind());
     if (iter == jit_operator_registry_.end()) {
@@ -112,7 +111,7 @@ public:
     return false;
   }
 
-  static bool registerParseRule(std::shared_ptr<Operator>& op, ParseFuncPtr fn) {
+  static void registerParseRule(std::shared_ptr<Operator>& op, ParseFuncPtr fn) {
     jit_operator_registry_[Symbol::fromQualString(op->schema().name())].push_back(std::make_pair(op, fn));
   }
 
@@ -156,7 +155,7 @@ protected:
     };
     for (auto signature : BinaryOpWithAlpha) {
       auto ptr_op = getOperatorForLiteral_local(signature);
-      assert(registerParseRule(ptr_op, &parseBinaryOpWithAlpha));
+      registerParseRule(ptr_op, &parseBinaryOpWithAlpha);
     }
 
     const char* BinaryOp[4] = {
@@ -167,7 +166,7 @@ protected:
     };
     for (auto signature : BinaryOp) {
       auto ptr_op = getOperatorForLiteral_local(signature);
-      assert(registerParseRule(ptr_op, &parseBinaryOp));
+      registerParseRule(ptr_op, &parseBinaryOp);
     }
   }
 
