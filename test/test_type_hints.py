@@ -180,13 +180,25 @@ class TestTypeHints(TestCase):
     test_path = os.path.dirname(os.path.realpath(__file__))
     examples_folder = os.path.join(test_path, "type_hint_tests")
     examples = os.listdir(examples_folder)
-    for i in examples:
+    for example in examples:
         example_path = os.path.join(os.path.dirname(os.path.realpath(__file__)),
-                                    "type_hint_tests", i)
-        process = subprocess.Popen(['mypy', example_path], stdout=subprocess.PIPE)
-        (stdout, stderr) = process.communicate()
-        if stdout:
-            raise AssertionError('Type hint tests not passed in ', i)
+                                    "type_hint_tests", example)
+        try: 
+            example_path = os.path.join(examples_folder, example)
+            subprocess.run([ 
+                sys.executable, 
+                '-mmypy', 
+                '--follow-imports', 'silent', 
+                '--check-untyped-defs', 
+                example_path],  
+                check=True) 
+        except subprocess.CalledProcessError as e: 
+            raise AssertionError("mypy failed for example {}.  Look above this error for mypy's output.".format(example))
+
+    # process = subprocess.Popen(['mypy', example_path], stdout=subprocess.PIPE)
+        # (stdout, stderr) = process.communicate()
+        # if stdout:
+        #    raise AssertionError('Type hint tests not passed in ', i)
 
 if __name__ == '__main__':
     run_tests()
