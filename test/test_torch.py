@@ -10776,15 +10776,6 @@ class TestTorchDeviceType(TestCase):
                 # in this test
                 continue
 
-            if self.device_type == 'cuda' and dt == torch.bfloat16:
-                self.assertRaises(RuntimeError, lambda: x > b)
-                self.assertRaises(RuntimeError, lambda: x < b)
-                self.assertRaises(RuntimeError, lambda: x == b)
-                self.assertRaises(RuntimeError, lambda: x != b)
-                self.assertRaises(RuntimeError, lambda: x >= b)
-                self.assertRaises(RuntimeError, lambda: x <= b)
-                continue
-
             self.assertEqual(x.lt(2), torch.tensor([True, False, False, False]))
             self.assertEqual(x.le(2), torch.tensor([True, True, False, False]))
             self.assertEqual(x.ge(2), torch.tensor([False, True, True, True]))
