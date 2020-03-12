@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
 #include "c10/util/Complex.h"
 
-template<typename T, typename iT>
-static void TestIntegerOp(T real, T img, iT i) {
+template<typename T, typename int_t>
+static void TestIntegerOp(T real, T img, int_t i) {
   std::complex<T> c(real, img);
   ASSERT_EQ(c + i, std::complex<T>(real + i, img + i));
   ASSERT_EQ(i + c, std::complex<T>(i + real, i + img));

@@ -137,6 +137,7 @@ libtorch_sources = [
     "torch/csrc/jit/serialization/python_print.cpp",
     "torch/csrc/jit/passes/quantization.cpp",
     "torch/csrc/jit/passes/fuse_linear.cpp",
+    "torch/csrc/jit/passes/freeze_module.cpp",
     "torch/csrc/jit/passes/remove_expands.cpp",
     "torch/csrc/jit/passes/requires_grad_analysis.cpp",
     "torch/csrc/jit/passes/shape_analysis.cpp",
