@@ -11,8 +11,8 @@
 namespace std {
 
 template <>
-struct hash<torch::jit::script::Module> {
-  inline size_t operator()(const torch::jit::script::Module& arg) const {
+struct hash<torch::jit::Module> {
+  inline size_t operator()(const torch::jit::Module& arg) const {
     return std::hash<c10::intrusive_ptr<c10::ivalue::Object>>()(arg._ivalue());
   }
 };
@@ -22,17 +22,17 @@ struct hash<torch::jit::script::Module> {
 namespace torch {
 namespace jit {
 
-using QConfig = std::tuple<script::Module, script::Module>;
+using QConfig = std::tuple<Module, Module>;
 using QConfigDict = std::unordered_map<std::string, QConfig>;
 using ModuleQConfigMap =
-    std::unordered_map<script::ModulePtr, c10::optional<QConfig>>;
+    std::unordered_map<ModulePtr, c10::optional<QConfig>>;
 
 struct OptionalQConfigHash {
   inline size_t operator()(const c10::optional<QConfig>& qconfig_opt) const {
     if (qconfig_opt.has_value()) {
       const auto& m1 = std::get<0>(*qconfig_opt);
       const auto& m2 = std::get<1>(*qconfig_opt);
-      return std::hash<script::Module>()(m1) + 7 * std::hash<script::Module>()(m2);
+      return std::hash<Module>()(m1) + 7 * std::hash<Module>()(m2);
     }
     return 0;
   }
@@ -61,12 +61,12 @@ TORCH_API void FoldQuantNodesIntoInputsOutputs(std::shared_ptr<Graph>& graph);
  * \param inplace whether we want to do inplace modification to the input module
  * or clone the module
  */
-TORCH_API script::Module InsertObservers(
-    script::Module& module,
+TORCH_API Module InsertObservers(
+    Module& module,
     const std::string& method_name,
     const std::unordered_map<
         std::string,
-        std::tuple<script::Module, script::Module>>& qconfig_dict,
+        std::tuple<Module, Module>>& qconfig_dict,
     bool inplace = false);
 
 /** \brief Insert quantize - int_repr - dequantize calls to the Tensors
@@ -80,8 +80,8 @@ TORCH_API script::Module InsertObservers(
  * \param module the input module
  * \param method_name the method we want to insert quantization calls for
  */
-TORCH_API script::Module InsertQuantDeQuant(
-    script::Module& module,
+TORCH_API Module InsertQuantDeQuant(
+    Module& module,
     const std::string& method_name,
     bool inplace = false);
 
@@ -126,7 +126,7 @@ TORCH_API void QuantFusion(std::shared_ptr<Graph>& graph);
  * The weight and bias of the Conv2d are correspondingly updated. Should only be
  * used on modules in eval mode.
  */
-TORCH_API script::Module FoldConvBatchNorm2d(const script::Module& module);
+TORCH_API Module FoldConvBatchNorm2d(const Module& module);
 
 /** \brief Fold quantize function call into module
  *
@@ -138,7 +138,7 @@ TORCH_API script::Module FoldConvBatchNorm2d(const script::Module& module);
  *  "_quantized_weight".
  */
 TORCH_API void FoldQuantizeCallIntoBuffer(
-    script::Module& module,
+    Module& module,
     const std::string& method_name);
 
 /** \brief Insert prepack and unpack function in graph
@@ -158,7 +158,7 @@ TORCH_API void InsertPrepackUnpack(std::shared_ptr<Graph>& graph);
  *   Go through graphs of all the methods of all child modules
  *   and call InsertPrepackUnpack on the graph.
  */
-TORCH_API void InsertPrepackUnpack(script::Module& module);
+TORCH_API void InsertPrepackUnpack(Module& module);
 
 /** \brief Fold prepack function call into module
  *
@@ -175,9 +175,9 @@ TORCH_API void InsertPrepackUnpack(script::Module& module);
  *
  */
 TORCH_API void FoldPrepackedWeightIntoModule(
-    script::Module& module,
-    const script::Module& linear_params_module,
-    const script::Module& conv_params_module);
+    Module& module,
+    const Module& linear_params_module,
+    const Module& conv_params_module);
 
 /** Recursively deduplicate multiple uses of the same module by
  *  creating an instance clone for each use of the module, which means
@@ -185,7 +185,7 @@ TORCH_API void FoldPrepackedWeightIntoModule(
  *  copied, then we'll change the use of the original module to the use
  *  of cloned module in the Graph.
  */
-TORCH_API void DedupModuleUses(script::Module& module);
+TORCH_API void DedupModuleUses(Module& module);
 
 } // namespace jit
 } // namespace torch
