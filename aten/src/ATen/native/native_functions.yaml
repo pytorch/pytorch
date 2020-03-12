@@ -5533,10 +5533,18 @@
 
 - func: elu.out(Tensor self, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: elu_out
+    CUDA: elu_out
+    QuantizedCPU: quantized_elu_out
 
 - func: elu(Tensor self, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1) -> Tensor
   use_c10_dispatcher: full
   python_module: nn
+  dispatch:
+    CPU: elu
+    CUDA: elu
+    QuantizedCPU: quantized_elu
 
 - func: elu_backward.grad_input(Tensor grad_output, Scalar alpha, Scalar scale, Scalar input_scale, Tensor output, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
@@ -5550,6 +5558,10 @@
 
 - func: elu_(Tensor(a!) self, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: elu_
+    CUDA: elu_
+    QuantizedCPU: quantized_elu_
 
 - func: glu.out(Tensor self, int dim=-1, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
