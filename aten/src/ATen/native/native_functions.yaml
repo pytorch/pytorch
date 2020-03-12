@@ -4281,14 +4281,14 @@
 - func: remainder_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
   dispatch:
-    CPU: legacy::cpu::_th_remainder_
-    CUDA: legacy::cuda::_th_remainder_
+    CPU: remainder_
+    CUDA: remainder_
 
 - func: remainder_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
   dispatch:
-    CPU: legacy::cpu::_th_remainder_
-    CUDA: legacy::cuda::_th_remainder_
+    CPU: remainder_
+    CUDA: remainder_
 
 - func: addbmm_(Tensor(a!) self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
   variants: method
@@ -5022,27 +5022,27 @@
 
 - func: remainder.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_remainder_out
-    CUDA: legacy::cuda::_th_remainder_out
+    CPU: remainder_out
+    CUDA: remainder_out
 
 - func: remainder.Scalar(Tensor self, Scalar other) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_remainder
-    CUDA: legacy::cuda::_th_remainder
+    CPU: remainder
+    CUDA: remainder
 
 - func: remainder.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_remainder_out
-    CUDA: legacy::cuda::_th_remainder_out
+    CPU: remainder_out
+    CUDA: remainder_out
 
 - func: remainder.Tensor(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_remainder
-    CUDA: legacy::cuda::_th_remainder
+    CPU: remainder
+    CUDA: remainder
 
 - func: min.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
 
