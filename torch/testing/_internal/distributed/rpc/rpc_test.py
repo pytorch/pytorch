@@ -1682,7 +1682,6 @@ class RpcTest(RpcAgentTestFixture):
 
     @dist_init(setup_rpc=False)
     def test_use_rref_after_shutdown(self):
-        # test that we can start RPC, send RPCs, and then run local shutdown.
         rpc.init_rpc(
             name="worker%d" % self.rank,
             backend=self.rpc_backend,
@@ -1697,7 +1696,7 @@ class RpcTest(RpcAgentTestFixture):
             torch.add,
             args=(torch.ones(n, n), torch.ones(n, n)),
         )
-        # pass in graceful=False to ensure that we don't wait for other workers.
+        # pass in graceful=True to ensure that local UserRRefs are deleted.
         rpc.shutdown(graceful=True)
 
         with self.assertRaisesRegex(
