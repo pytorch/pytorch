@@ -2804,10 +2804,10 @@ def _interp_output_size(dim, closed_over_args):  # noqa: F811
         raise ValueError('either size or scale_factor should be defined')
     if size is not None and scale_factor is not None:
         raise ValueError('only one of size or scale_factor should be defined')    
-    if scale_factor is not None and isinstance(scale_factor, (list, tuple))\
-            and len(scale_factor) != dim:
-        raise ValueError('scale_factor shape must match input shape. '
-                         'Input is {}D, scale_factor size is {}'.format(dim, len(scale_factor)))
+    if scale_factor is not None and isinstance(scale_factor, (list, tuple)):
+        if len(scale_factor) != dim:
+            raise ValueError('scale_factor shape must match input shape. '
+                            'Input is {}D, scale_factor size is {}'.format(dim, len(scale_factor)))
 
     if size is not None:
         if isinstance(size, (list, tuple)):
