@@ -24,7 +24,7 @@ struct MobileCallGuard {
   torch::jit::GraphOptimizerEnabledGuard no_optimizer_guard{false};
 };
 
-torch::jit::script::Module loadModel(const std::string& path) {
+torch::jit::Module loadModel(const std::string& path) {
   MobileCallGuard guard;
   auto module = torch::jit::load(path);
   module.eval();
