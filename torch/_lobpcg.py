@@ -26,6 +26,8 @@ def lobpcg(A,                   # type: Tensor
            ortho_fparams=None,  # type: Optional[Dict[str, float]]
            ortho_bparams=None,  # type: Optional[Dict[str, bool]]
            ):
+    # type: (...) -> Tuple[Tensor, Tensor]
+
     """Find the k largest (or smallest) eigenvalues and the corresponding
     eigenvectors of a symmetric positive defined generalized
     eigenvalue problem using matrix-free LOBPCG methods.
@@ -158,7 +160,6 @@ def lobpcg(A,                   # type: Tensor
       `https://epubs.siam.org/doi/abs/10.1137/17M1129830`_
 
     """
-    # type: (...) -> Tuple[Tensor, Tensor]
 
     if not torch.jit.is_scripting():
         tensor_ops = (A, B, X, iK)
@@ -558,6 +559,7 @@ class LOBPCG(object):
                   drop,  # bool
                   tau    # float
                   ):
+        # type: (Tensor, bool, float) -> Tensor
         """Return B-orthonormal U.
 
         .. note:: When `drop` is `False` then `svqb` is based on the
@@ -579,7 +581,6 @@ class LOBPCG(object):
                        otherwise `n1 <= n`.
 
         """
-        # type: (Tensor, bool, float) -> Tensor
         if torch.numel(U) == 0:
             return U
         UBU = _utils.qform(self.B, U)
