@@ -172,8 +172,8 @@ RRefForkData UserRRef::fork() const {
   //    pendingChildren_ map, but up to this point, nothing prevents X from
   //    deleting this RRef even if it shouldn't do so due to the state change
   //    in pendingChildren_. We might be able to get it right for now by locking
-  //    and checking pendingChildren_ in X, but the complexity does not seem to
-  //    worth the gain.
+  //    and checking pendingChildren_ in X, but the gain does not seem to
+  //    worth the complexity.
   TORCH_CHECK(
       !deletedOnOwner_,
       "User RRef with RRefId=",
