@@ -255,8 +255,7 @@ c10::intrusive_ptr<RRef> RRefContext::getOrCreateRRef(
 c10::intrusive_ptr<OwnerRRef> RRefContext::getOrCreateOwnerRRef(
     const RRefId& rrefId,
     const TypePtr& type) {
-  std::unique_lock<std::mutex> lock(mutex_);
-
+  std::lock_guard<std::mutex> lock(mutex_);
   const auto iter = owners_.find(rrefId);
   if (iter == owners_.end()) {
     // Scenario (1) the first time this owner knows about this RRef
@@ -265,14 +264,12 @@ c10::intrusive_ptr<OwnerRRef> RRefContext::getOrCreateOwnerRRef(
     // private.
     auto rref = c10::make_intrusive<OwnerRRef>(getWorkerId(), rrefId, type);
     owners_[rref->rrefId()] = rref;
-    lock.unlock();
     ownerCV_.notify_all();
     return rref;
   } else {
     // Scenario (2) retrieving an existing RRef
     auto ownerRRef =
         c10::static_intrusive_pointer_cast<OwnerRRef>(iter->second);
-    lock.unlock();
     TORCH_INTERNAL_ASSERT(ownerRRef->type() == type);
     return ownerRRef;
   }
