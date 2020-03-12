@@ -983,7 +983,12 @@ class RpcTest(RpcAgentTestFixture):
             nested_rref,
             args=(worker_name(dst_rank2),),
         )
+
+        # Say C has 2 OwnerRRefs.
+        # B has 2 UserRRefs to those 2 OwnerRRefs, respectively.
+        # This call is effectively A asking B to share it's 2 UserRRefs.
         rrefs = rref_of_rrefs.to_here()
+
         self.assertEqual(len(rrefs), 2)
         self.assertEqual(rrefs[0].to_here(), torch.ones(2, 2) + 1)
         self.assertEqual(rrefs[1].to_here(), torch.ones(2, 2) + 2)
@@ -1210,7 +1215,11 @@ class RpcTest(RpcAgentTestFixture):
 
         self.assertEqual(result, sum(vals))
 
-    def _test_rref_leak(self, ignore_leak):
+    # Notice `rpc.api.shutdown()` accesses `_delete_all_user_rrefs`
+    # through `torch.distributed.rpc.api`, so patching
+    # `torch.distributed.rpc._delete_all_user_rrefs` will not help.
+    @mock.patch.object(torch.distributed.rpc.api, "_delete_all_user_rrefs")
+    def _test_rref_leak(self, _mock_delete_all_user_rrefs, ignore_leak):
         rpc.init_rpc(
             name=worker_name(self.rank),
             backend=self.rpc_backend,
@@ -1652,3 +1661,21 @@ class RpcTest(RpcAgentTestFixture):
                 AttributeError, "RPC pickler does not serialize"
             ):
                 rpc.rpc_sync(callee_worker, foo_add, args=())
+
+    @dist_init
+    def test_non_garbage_collected_user_rref_due_to_local_circular_dependency(self):
+        dst_worker_name = worker_name((self.rank + 1) % self.world_size)
+
+        a = MyClass(1)
+        b = MyClass(2)
+
+        # This is to make Python not garbage collect a and b.
+        a.other = b
+        b.other = a
+
+        n = self.rank
+        a.rref = rpc.remote(
+            dst_worker_name,
+            torch.add,
+            args=(torch.ones(n, n), 2)
+        )
