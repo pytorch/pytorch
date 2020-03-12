@@ -25,7 +25,7 @@ class CAFFE2_API Context {
  public:
   Context();
 
-  Generator & defaultGenerator(Device device) {
+  GeneratorImpl & defaultGenerator(Device device) {
     DeviceType device_type = device.type();
     initCUDAIfNeeded(device_type);
     initHIPIfNeeded(device_type);

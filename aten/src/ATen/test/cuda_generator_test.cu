@@ -160,7 +160,7 @@ TEST(CUDAGenerator, TestPhiloxEngineIndex) {
 TEST(CUDAGenerator, TestGeneratorDynamicCast) {
   //  Test Description: Check dynamic cast for CUDA
   if (!at::cuda::is_available()) return;
-  std::shared_ptr<Generator> foo = at::cuda::detail::createCUDAGenerator();
+  std::shared_ptr<GeneratorImpl> foo = at::cuda::detail::createCUDAGenerator();
   auto result = dynamic_cast<at::CUDAGenerator*>(foo.get());
   ASSERT_EQ(typeid(at::CUDAGenerator*).hash_code(), typeid(result).hash_code());
 }

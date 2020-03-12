@@ -10,8 +10,8 @@ namespace c10 {
 class Scalar;
 }
 namespace at {
-struct Generator;
-typedef std::shared_ptr<Generator> GeneratorHolder;
+struct GeneratorImpl;
+typedef std::shared_ptr<GeneratorImpl> GeneratorHolder;
 class Tensor;
 struct Type;
 } // namespace at

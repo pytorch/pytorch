@@ -30,8 +30,28 @@ struct TORCH_API InstanceNormOptions {
   TORCH_ARG(bool, track_running_stats) = false;
 };
 
+/// Options for `InstanceNorm1d` module.
+///
+/// Example:
+/// ```
+/// InstanceNorm1d model(InstanceNorm1dOptions(4).eps(0.5).momentum(0.1).affine(false).track_running_stats(true));
+/// ```
 using InstanceNorm1dOptions = InstanceNormOptions;
+
+/// Options for `InstanceNorm2d` module.
+///
+/// Example:
+/// ```
+/// InstanceNorm2d model(InstanceNorm2dOptions(4).eps(0.5).momentum(0.1).affine(false).track_running_stats(true));
+/// ```
 using InstanceNorm2dOptions = InstanceNormOptions;
+
+/// Options for `InstanceNorm3d` module.
+///
+/// Example:
+/// ```
+/// InstanceNorm3d model(InstanceNorm3dOptions(4).eps(0.5).momentum(0.1).affine(false).track_running_stats(true));
+/// ```
 using InstanceNorm3dOptions = InstanceNormOptions;
 
 namespace functional {

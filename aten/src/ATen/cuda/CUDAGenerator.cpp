@@ -73,7 +73,7 @@ std::shared_ptr<CUDAGenerator> createCUDAGenerator(DeviceIndex device_index) {
  * CUDAGenerator class implementation
  */
 CUDAGenerator::CUDAGenerator(DeviceIndex device_index)
-  : Generator{Device(DeviceType::CUDA, device_index),
+  : GeneratorImpl{Device(DeviceType::CUDA, device_index),
               DispatchKeySet(c10::DispatchKey::CUDATensorId)} { }
 
 /**

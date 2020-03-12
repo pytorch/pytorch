@@ -145,7 +145,7 @@ inline int64_t prod_intlist(ArrayRef<int64_t> list) {
  * the backend generator type (CPU/CUDAGenerator etc.)
  */
 template <typename T>
-static inline T* get_generator_or_default(GeneratorHolder expr, Generator* defaultValue) {
+static inline T* get_generator_or_default(GeneratorHolder expr, GeneratorImpl* defaultValue) {
   T* result = static_cast<T*>(expr ? expr.get() : defaultValue);
   if (result == nullptr) {
     AT_ERROR("Expected a '", T::device_type(), "' device type for generator but found 'nullptr'");

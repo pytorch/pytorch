@@ -219,10 +219,10 @@ UNPACK_METHODS = {
     'Storage': 'storage',
     'Storage &': 'storage',
     'const ScalarType &': 'scalartype',
-    'const THPLayout &': 'layout',
     'const Device &': 'device',
     'c10::optional<DimnameList>': 'toDimnameListOptional',
     'c10::optional<ScalarType>': 'scalartypeOptional',
+    'c10::optional<Layout>': 'layoutOptional',
     'c10::optional<MemoryFormat>': 'memoryformatOptional',
     'c10::optional<Scalar>': 'scalarOptional',
     'c10::optional<int64_t>': 'toInt64Optional',
@@ -248,8 +248,8 @@ UNPACK_WITH_SIZE_METHODS = {
 
 UNPACK_WITH_DEFAULT_METHODS = {
     'const ScalarType &': 'scalartypeWithDefault',
-    'const THPLayout &': 'layoutWithDefault',
     'const Device &': 'deviceWithDefault',
+    'c10::optional<Layout>': 'layoutWithDefault',
 }
 
 def parsed_arg_expr(arg, arg_index):
@@ -425,7 +425,7 @@ TENSOR_OPTIONS_DECL = CodeTemplate("""\
 const auto ${name} = TensorOptions()
     .dtype(${dtype})
     .device(${device})
-    .layout(${layout}.layout)
+    .layout(${layout})
     .requires_grad(${requires_grad})
     .pinned_memory(${pin_memory});
 """)
@@ -434,8 +434,8 @@ const auto ${name} = TensorOptions()
 # (if present) are checked against properties of a tensor output param
 # TODO remove hardcoding, use unpack logic from emit_single_dispatch
 PY_VARIABLE_CHECK_OUT_TYPE_HACK = CodeTemplate("""\
-check_out_type_matches(_r.tensor(${out_idx}), _r.scalartype(${type_idx}), _r.isNone(${type_idx}),
-                       _r.layout(${layout_idx}), _r.isNone(${layout_idx}),
+check_out_type_matches(_r.tensor(${out_idx}), _r.scalartype(${type_idx}),
+                       _r.isNone(${type_idx}), _r.layoutOptional(${layout_idx}),
                        _r.device(${device_idx}), _r.isNone(${device_idx}));
 """)
 
@@ -1359,13 +1359,13 @@ def make_python_binding_args(declaration):
         python_binding_arguments.append(dtype_arg)
 
     if is_factory_function or is_like_or_new_function_with_options:
-        py_default_layout = '*torch::getLayout(self.options().backend())' if is_like_or_new_function_with_options else None
+        py_default_layout = 'layout_from_backend(self.options().backend())' if is_like_or_new_function_with_options else None
         layout_arg = {
             'default': 'torch.strided',
             'dynamic_type': 'Layout',
             'kwarg_only': True,
             'name': 'layout',
-            'type': 'const THPLayout &',
+            'type': 'c10::optional<Layout>',
             'simple_type': 'Layout',
             'python_default_init': py_default_layout,
         }

@@ -24,13 +24,13 @@ using namespace torch;
 
 PyObject *THPGeneratorClass = nullptr;
 
-PyObject * THPGenerator_initDefaultGenerator(at::Generator* cdata)
+PyObject * THPGenerator_initDefaultGenerator(at::GeneratorImpl* cdata)
 {
   auto type = (PyTypeObject*)THPGeneratorClass;
   auto self = THPObjectPtr{type->tp_alloc(type, 0)};
   if (!self) throw python_error();
   auto self_ = reinterpret_cast<THPGenerator*>(self.get());
-  self_->cdata = std::shared_ptr<at::Generator>(cdata);
+  self_->cdata = std::shared_ptr<at::GeneratorImpl>(cdata);
   // self_->owner = false;
   return self.release();
 }

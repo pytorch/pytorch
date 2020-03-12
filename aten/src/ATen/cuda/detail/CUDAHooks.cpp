@@ -57,7 +57,7 @@ std::unique_ptr<THCState, void (*)(THCState*)> CUDAHooks::initCUDA() const {
       });
 }
 
-Generator* CUDAHooks::getDefaultCUDAGenerator(DeviceIndex device_index) const {
+GeneratorImpl* CUDAHooks::getDefaultCUDAGenerator(DeviceIndex device_index) const {
   return at::cuda::detail::getDefaultCUDAGenerator(device_index);
 }
 

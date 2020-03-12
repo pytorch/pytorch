@@ -54,18 +54,18 @@ namespace at {
 // with good distribution of 0s and 1s in bit representation
 constexpr uint64_t default_rng_seed_val = 67280421310721;
 
-struct CAFFE2_API Generator {
+struct CAFFE2_API GeneratorImpl {
   // Constructors
-  Generator(Device device_in, DispatchKeySet key_set);
+  GeneratorImpl(Device device_in, DispatchKeySet key_set);
 
   // Delete all copy and move assignment in favor of clone()
   // method
-  Generator(const Generator& other) = delete;
-  Generator(Generator&& other) = delete;
-  Generator& operator=(const Generator& other) = delete;
+  GeneratorImpl(const GeneratorImpl& other) = delete;
+  GeneratorImpl(GeneratorImpl&& other) = delete;
+  GeneratorImpl& operator=(const GeneratorImpl& other) = delete;
 
-  virtual ~Generator() = default;
-  std::shared_ptr<Generator> clone() const;
+  virtual ~GeneratorImpl() = default;
+  std::shared_ptr<GeneratorImpl> clone() const;
 
   // Common methods for all generators
   virtual void set_current_seed(uint64_t seed) = 0;
@@ -81,10 +81,10 @@ struct CAFFE2_API Generator {
   private:
     Device device_;
     DispatchKeySet key_set_;
-    virtual Generator* clone_impl() const = 0;
+    virtual GeneratorImpl* clone_impl() const = 0;
 };
 
-typedef std::shared_ptr<Generator> GeneratorHolder;
+typedef std::shared_ptr<GeneratorImpl> GeneratorHolder;
 
 namespace detail {
 

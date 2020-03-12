@@ -6,7 +6,7 @@
 
 namespace at {
 
-struct TORCH_CUDA_API CUDAGenerator : public Generator {
+struct TORCH_CUDA_API CUDAGenerator : public GeneratorImpl {
   // Constructors
   CUDAGenerator(DeviceIndex device_index = -1);
   ~CUDAGenerator() = default;

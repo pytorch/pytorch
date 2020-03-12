@@ -63,7 +63,7 @@ struct CAFFE2_API CUDAHooksInterface {
     TORCH_CHECK(false, "Cannot initialize CUDA without ATen_cuda library. ", CUDA_HELP);
   }
 
-  virtual Generator* getDefaultCUDAGenerator(DeviceIndex device_index = -1) const {
+  virtual GeneratorImpl* getDefaultCUDAGenerator(DeviceIndex device_index = -1) const {
     TORCH_CHECK(false, "Cannot get default CUDA generator without ATen_cuda library. ", CUDA_HELP);
   }
 

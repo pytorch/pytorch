@@ -13,8 +13,8 @@ using namespace at;
 
 namespace {
 
-struct TestCPUGenerator : public Generator {
-  TestCPUGenerator(uint64_t value) : Generator{Device(DeviceType::CPU), DispatchKeySet(DispatchKey::CustomRNGKeyId)}, value_(value) { }
+struct TestCPUGenerator : public GeneratorImpl {
+  TestCPUGenerator(uint64_t value) : GeneratorImpl{Device(DeviceType::CPU), DispatchKeySet(DispatchKey::CustomRNGKeyId)}, value_(value) { }
   ~TestCPUGenerator() = default;
   uint32_t random() { return value_; }
   uint64_t random64() { return value_; }

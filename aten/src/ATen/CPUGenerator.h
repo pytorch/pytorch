@@ -6,7 +6,7 @@
 
 namespace at {
 
-struct CAFFE2_API CPUGenerator : public Generator {
+struct CAFFE2_API CPUGenerator : public GeneratorImpl {
   // Constructors
   CPUGenerator(uint64_t seed_in = default_rng_seed_val);
   ~CPUGenerator() = default;
