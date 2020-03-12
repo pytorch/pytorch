@@ -93,7 +93,7 @@ def wait_until_node_failure(rank, expected_error_regex=".*"):
     Loops until an RPC to the given rank fails. This is used to
     indicate that the node has failed in unit tests.
     Args:
-    rank (int) - Rank of the node expected to fail
+    rank (int): Rank of the node expected to fail
     expected_error_regex (optional, str): Regex of exception message expected. Useful to ensure a specific failure
     occurs, not just any.
     '''

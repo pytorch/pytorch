@@ -30,7 +30,6 @@
 
 namespace torch {
 namespace jit {
-namespace script {
 
 using FunctionTable = std::unordered_map<std::string, Function&>;
 using ValueTable = std::unordered_map<std::string, SugaredValuePtr>;
@@ -491,7 +490,7 @@ struct Environment {
     if (!retval) {
       if (auto type = resolver->resolveType(ident, range)) {
         if (auto tuple_type = type->cast<TupleType>()) {
-          retval = std::make_shared<script::NamedTupleConstructor>(tuple_type);
+          retval = std::make_shared<NamedTupleConstructor>(tuple_type);
         }
       }
     }
@@ -503,7 +502,7 @@ struct Environment {
     if (!retval) {
       if (auto type = resolver->resolveType(ident, range)) {
         if (auto class_type = type->cast<ClassType>()) {
-          retval = std::make_shared<script::ClassValue>(class_type);
+          retval = std::make_shared<ClassValue>(class_type);
         }
       }
     }
@@ -3598,7 +3597,7 @@ std::vector<Function*> CompilationUnit::define(
 void runCleanupPasses(std::shared_ptr<Graph>& to_clean) {
   liftClosures(to_clean);
   inlineForkedClosures(to_clean);
-  if (script::getInlineEverythingMode()) {
+  if (getInlineEverythingMode()) {
     Inline(*to_clean);
   }
   // remove any uses of tuples that we inserted that are not needed
@@ -3669,6 +3668,5 @@ void CompilationUnit::define_interface(
   this->register_type(iface);
 }
 
-} // namespace script
 } // namespace jit
 } // namespace torch
