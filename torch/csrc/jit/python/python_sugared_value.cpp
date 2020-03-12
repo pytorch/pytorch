@@ -14,7 +14,6 @@
 
 namespace torch {
 namespace jit {
-namespace script {
 
 std::string typeString(py::handle h) {
   return py::str(h.get_type().attr("__name__"));
@@ -227,7 +226,19 @@ SugaredValuePtr ModuleValue::getitem(
     return getSugaredModuleDict(loc, m)->getModules()->getitem(loc, m, idx);
   }
   throw ErrorReport(loc)
-      << "Only ModuleLists, Sequentials, and ModuleDict Modules are subscriptable";
+      << "Only ModuleList, Sequential, and ModuleDict modules are subscriptable";
+}
+
+void checkInterface(
+    const SourceRange& loc,
+    Function& m,
+    std::shared_ptr<ModuleValue> self,
+    const std::string& field) {
+  if (self->asValue(loc, m)->type()->cast<InterfaceType>()) {
+    throw ErrorReport(loc)
+        << "Could not compile " << field
+        << "() because module is an interface type. Please file issue.";
+  }
 }
 
 void recurseThroughNestedModules(
@@ -236,13 +247,15 @@ void recurseThroughNestedModules(
     std::vector<SugaredValuePtr>& keys,
     std::vector<SugaredValuePtr>& values,
     std::shared_ptr<ModuleValue> self,
-    const std::string& prefix) {
+    const std::string& prefix,
+    const std::string& field) {
   auto prefix_value =
       std::make_shared<SimpleValue>(insertConstant(*m.graph(), prefix));
 
   keys.push_back(prefix_value);
   values.push_back(self);
 
+  checkInterface(loc, m, self, field);
   auto module_dict = self->getSugaredModuleDict(loc, m);
   auto keys_iter = module_dict->keys_;
   auto module_values_iter = module_dict->modules_;
@@ -260,7 +273,7 @@ void recurseThroughNestedModules(
     }
     submodule_prefix = submodule_prefix + key_string;
     recurseThroughNestedModules(
-        loc, m, keys, values, module_value, submodule_prefix);
+        loc, m, keys, values, module_value, submodule_prefix, field);
   };
 }
 
@@ -299,24 +312,33 @@ std::shared_ptr<SugaredValue> SugaredModuleDict::attr(
     const SourceRange& loc,
     Function& m,
     const std::string& field) {
+  // Recursive compilation does not maintain module aliasing,
+  // so we do not add uniqueness checks on
+  // "children"/"named_children"/"modules"/"named_modules"
+  checkInterface(loc, m, self_, field);
   if (field == "keys") {
     return std::make_shared<ModuleDictMethod>(keys_, "keys");
-  } else if (field == "values") {
-    return std::make_shared<ModuleDictMethod>(modules_, "values");
-  } else if (field == "items") {
+  } else if (field == "values" || field == "children") {
+    return std::make_shared<ModuleDictMethod>(modules_, field);
+  } else if (field == "items" || field == "named_children") {
     auto iterator = std::make_shared<IterableTree>();
     iterator->addChild(loc, m, keys_);
     iterator->addChild(loc, m, modules_);
-    return std::make_shared<ModuleDictMethod>(iterator, "items");
-  } else if (field == "named_modules") {
-    auto iterator = std::make_shared<IterableTree>();
+    return std::make_shared<ModuleDictMethod>(iterator, field);
+  } else if (field == "named_modules" || field == "modules") {
     std::vector<SugaredValuePtr> keys;
     std::vector<SugaredValuePtr> values;
-    recurseThroughNestedModules(loc, m, keys, values, self_, "");
-    iterator->addChild(loc, m, std::make_shared<SugaredTupleValue>(keys));
-    iterator->addChild(loc, m, std::make_shared<SugaredTupleValue>(values));
-    return std::make_shared<ModuleDictMethod>(iterator, "named_modules");
-  };
+    recurseThroughNestedModules(loc, m, keys, values, self_, "", field);
+    if (field == "modules") {
+      return std::make_shared<ModuleDictMethod>(
+          std::make_shared<SugaredTupleValue>(values), field);
+    } else {
+      auto iterator = std::make_shared<IterableTree>();
+      iterator->addChild(loc, m, std::make_shared<SugaredTupleValue>(keys));
+      iterator->addChild(loc, m, std::make_shared<SugaredTupleValue>(values));
+      return std::make_shared<ModuleDictMethod>(iterator, field);
+    }
+  }
   TORCH_INTERNAL_ASSERT(false);
 }
 
@@ -345,7 +367,7 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
     const SourceRange& loc,
     Function& m,
     const std::string& field) {
-  // 1. Look inside script::Module object for the field.
+  // 1. Look inside Module object for the field.
   const auto& selfType_ = concreteType_->getJitType();
   if (selfType_->cast<InterfaceType>()) {
     return std::make_shared<SimpleValue>(self_)->attr(loc, m, field);
@@ -376,8 +398,9 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
     }
   }
 
-  if (field == "named_modules") {
-    return getSugaredModuleDict(loc, m)->attr(loc, m, "named_modules");
+  if (field == "named_modules" || field == "modules" || field == "children" ||
+      field == "named_children") {
+    return getSugaredModuleDict(loc, m)->attr(loc, m, field);
   }
 
   // 3. Check if this is the name of an overloaded method.
@@ -704,6 +727,5 @@ std::shared_ptr<SugaredValue> toSugaredValue(
 
   return std::make_shared<PythonValue>(obj);
 }
-} // namespace script
 } // namespace jit
 } // namespace torch

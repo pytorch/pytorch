@@ -26,3 +26,7 @@
 /torch/distributed/rpc @mrshenli @pritamdamania87 @zhaojuanmao
 /torch/distributed/autograd @mrshenli @pritamdamania87 @zhaojuanmao
 /torch/distributed/optim @mrshenli @pritamdamania87 @zhaojuanmao @aazzolini
+
+# Distributed tests
+/test/distributed @mrshenli @pritamdamania87 @zhaojuanmao
+/torch/testing/_internal/distributed @mrshenli @pritamdamania87 @zhaojuanmao
