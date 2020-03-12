@@ -76,51 +76,34 @@ THCTensor *THCTensor_(newWithTensor)(THCState *state, THCTensor *tensor)
   return at::native::alias(THTensor_wrap(tensor)).unsafeReleaseTensorImpl();
 }
 
-/* Storage init */
-THCTensor *THCTensor_(newWithStorage)(THCState *state, THCStorage *storage, ptrdiff_t storageOffset, at::IntArrayRef sizes, at::IntArrayRef strides) {
-  if (strides.data()) {
-    TORCH_CHECK(sizes.size() == strides.size(), "number of sizes and strides must match");
-  }
+THCTensor *THCTensor_(newWithStorage1d)(THCState *state, THCStorage *storage, ptrdiff_t storageOffset,
+                               int64_t size0, int64_t stride0)
+{
+  c10::raw::intrusive_ptr::incref(storage);
+  THTensor *self = c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
+    c10::intrusive_ptr<at::StorageImpl>::reclaim(storage),
+    at::DispatchKey::CUDATensorId
+  ).release();
+  THCTensor_(setStorageNd)(state, self, storage, storageOffset, 1, &size0, &stride0);
+
+  return self;
+}
+
+THCTensor *THCTensor_(newWithSize)(THCState *state, at::IntArrayRef size, at::IntArrayRef stride)
+{
+  TORCH_INTERNAL_ASSERT(false, "this function should not be called and is in the process of being removed");
+}
+
+THCTensor *THCTensor_(newWithSize1d)(THCState *state, int64_t size0)
+{
   THCStorage *new_storage = THCStorage_(new)(state);
   THCTensor *self = c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
     c10::intrusive_ptr<at::StorageImpl>::reclaim(new_storage),
     at::DispatchKey::CUDATensorId
   ).release();
-  THCTensor_(setStorageNd)(state, self, storage != nullptr ? storage : new_storage, storageOffset, sizes.size(),
-                           const_cast<int64_t*>(sizes.data()), const_cast<int64_t*>(strides.data()));
+  THCTensor_(setStorageNd)(state, self, new_storage, 0, 1, &size0, nullptr);
 
   return self;
-}
-
-THCTensor *THCTensor_(newWithStorage1d)(THCState *state, THCStorage *storage, ptrdiff_t storageOffset,
-                               int64_t size0, int64_t stride0)
-{
-  return THCTensor_(newWithStorage)(state, storage, storageOffset, {size0}, {stride0});
-}
-
-THCTensor *THCTensor_(newWithSize)(THCState *state, at::IntArrayRef size, at::IntArrayRef stride)
-{
-  return THCTensor_(newWithStorage)(state, NULL, 0, size, stride);
-}
-
-THCTensor *THCTensor_(newWithSize1d)(THCState *state, int64_t size0)
-{
-  return THCTensor_(newWithSize)(state, {size0}, {});
-}
-
-THCTensor *THCTensor_(newWithSize2d)(THCState *state, int64_t size0, int64_t size1)
-{
-  return THCTensor_(newWithSize)(state, {size0, size1}, {});
-}
-
-THCTensor *THCTensor_(newWithSize3d)(THCState *state, int64_t size0, int64_t size1, int64_t size2)
-{
-  return THCTensor_(newWithSize)(state, {size0, size1, size2}, {});
-}
-
-THCTensor *THCTensor_(newWithSize4d)(THCState *state, int64_t size0, int64_t size1, int64_t size2, int64_t size3)
-{
-  return THCTensor_(newWithSize)(state, {size0, size1, size2, size3}, {});
 }
 
 THCTensor *THCTensor_(newClone)(THCState *state, THCTensor *self)

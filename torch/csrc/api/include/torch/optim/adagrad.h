@@ -35,7 +35,7 @@ public:
 
 struct TORCH_API AdagradParamState : public OptimizerCloneableParamState<AdagradParamState> {
   TORCH_ARG(torch::Tensor, sum);
-  TORCH_ARG(int64_t, step);
+  TORCH_ARG(int64_t, step) = 0;
 
 public:
   void serialize(torch::serialize::InputArchive& archive) override;

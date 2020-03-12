@@ -131,7 +131,7 @@ void unpackQuantizedWeightsHelper(
     const std::string& unpack_fn) {
   Graph pattern_graph;
   std::unordered_map<std::string, Value*> vmap;
-  script::parseIR(pattern, &pattern_graph, vmap);
+  parseIR(pattern, &pattern_graph, vmap);
   const auto& matches = findPatternMatches(pattern_graph, *graph);
 
   for (const auto& match : matches) {
@@ -262,7 +262,7 @@ void insertPermutesHelper(
     const std::string& pattern) {
   Graph pattern_graph;
   std::unordered_map<std::string, Value*> vmap;
-  script::parseIR(pattern, &pattern_graph, vmap);
+  parseIR(pattern, &pattern_graph, vmap);
 
   const auto& matches = findPatternMatches(pattern_graph, *graph);
 
