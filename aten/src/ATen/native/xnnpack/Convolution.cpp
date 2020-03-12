@@ -151,7 +151,7 @@ bool usable(const Tensor& input) {
   return (4 == input.ndimension()) &&
          (c10::DeviceType::CPU == input.device().type()) &&
          (kFloat == input.scalar_type()) &&
-         (input.size(Layout::Activation4D::batch) > 0) &&
+         (input.size(Layout::Activation4D::batch) >= 0) &&
          (input.size(Layout::Activation4D::channels) > 0) &&
          (input.size(Layout::Activation4D::height) > 0) &&
          (input.size(Layout::Activation4D::width) > 0) &&
