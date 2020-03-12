@@ -443,44 +443,6 @@ accreal THTensor_(dot)(THTensor *tensor, THTensor *src)
   return sum;
 }
 
-// Should wrap if the value (a) has a different sign than the divisor (b), but is not 0.
-static inline bool modulo_wrap(scalar_t a, scalar_t b) {
-  return (a != 0) && (a < 0) != (b < 0);
-}
-
-void THTensor_(remainder)(THTensor *r_, THTensor *t, scalar_t value)
-{
-  THTensor_(resizeAs)(r_, t);
-  int64_t r_Size = THTensor_(nElement)(r_);
-  int r_Contig = THTensor_(isContiguous)(r_);
-  int tContig = THTensor_(isContiguous)(t);
-  if (r_Contig && tContig) {
-    scalar_t *tp = t->data<scalar_t>();
-    scalar_t *rp = r_->data<scalar_t>();
-    at::parallel_for(0, r_Size, TH_OMP_OVERHEAD_THRESHOLD,
-        [&](size_t start, size_t end) {
-      for (auto i = start; i < end; i++) {
-#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-        rp[i] = (value == 0)? NAN : tp[i] - value * floor(tp[i] / value);
-#else
-        // There is no NAN for integers
-        rp[i] = tp[i] % value;
-        if (modulo_wrap(rp[i], value))
-          rp[i] += value;
-#endif
-      }
-    });
-  } else {
-#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-    TH_TENSOR_APPLY2_PARALLEL(r_Size, r_Contig, tContig, scalar_t, r_, scalar_t, t, *r__data = (value == 0)? NAN : *t_data - value * floor(*t_data / value);, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
-#else
-    // There is no NAN for integers
-    TH_TENSOR_APPLY2_PARALLEL(r_Size, r_Contig, tContig, scalar_t, r_, scalar_t, t, *r__data = *t_data % value;
-        if (modulo_wrap(*r__data, value)) *r__data += value;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
-#endif
-  }
-}
-
 #endif
 
 #endif

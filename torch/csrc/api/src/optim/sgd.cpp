@@ -53,6 +53,7 @@ void SGDParamState::serialize(torch::serialize::InputArchive& archive) {
 }
 
 void SGD::step() {
+  NoGradGuard no_grad;
   for (auto& group : param_groups_) {
     auto& options = static_cast<SGDOptions&>(group.options());
     auto weight_decay = options.weight_decay();
