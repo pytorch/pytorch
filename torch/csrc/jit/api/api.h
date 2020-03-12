@@ -109,13 +109,9 @@ struct ClassType : public Type {
   iterable<Field<Type>> attributes();
 };
 
-struct SingleElementType : public Type {
-  SingleElementType(Type element);
-  Type element() const;
-};
-
-struct ListType : public SingleElementType {
+struct ListType : public Type {
   ListType(Type element);
+  Type element() const;
 };
 
 struct DictType : public Type {
@@ -130,16 +126,30 @@ struct TupleType : public Type {
   const std::vector<Type>& elements() const;
 };
 
-struct OptionalType : public SingleElementType {
+struct OptionalType : public Type {
   OptionalType(Type element);
+  Type element() const;
 };
 
 // All the methods that go on a Value get defined here. This makes it easy for
 // accessor objects, used to represent the LHS of assignments to also have these
 // methods through inheritance. This design is adapted from pybind11
-using jit::TypePtr;
-template <typename Derived>
-struct ValueAPI {
+struct Value {
+  template <typename T>
+  Value(T&& value) : ivalue_(std::forward<T>(value)) {}
+  Value(Value& value);
+  Value(Value&& value);
+  Value(const Value& value);
+
+  Type type() const;
+
+  std::ostream& operator<<(std::ostream& o);
+
+  /// Escape hatch to internal type
+  const IValue& ivalue() const {
+    return ivalue_;
+  }
+
   bool isinstance(const Type& t);
 
   template <typename T>
@@ -182,19 +192,12 @@ struct ValueAPI {
   bool isObject() const;
   Object toObject() const;
 
-
-  Type type() const;
-
-  friend std::ostream& operator<<(std::ostream& o, const ValueAPI& v);
-
  private:
-  const jit::IValue& derived() const {
-    return static_cast<const Derived&>(*this).ivalue();
-  }
+  IValue ivalue_;
 };
 
 template <typename Policy>
-struct Accessor : public ValueAPI {
+struct Accessor : public Value {
   using key_type = typename Policy::key_type;
 
   Accessor(jit::IValue obj, key_type key);
@@ -211,71 +214,39 @@ struct Accessor : public ValueAPI {
   key_type key_;
 };
 
-struct ListPolicy {
-  using key_type = size_t;
-  static jit::IValue get(const jit::IValue& obj, const key_type& key);
-  static void set(
-      const jit::IValue& obj,
-      const key_type& key,
-      const jit::IValue value);
-};
-using ListAccessor = Accessor<ListPolicy>;
+namespace detail {
+  struct ListPolicy {
+    using key_type = size_t;
+    static jit::IValue get(const jit::IValue& obj, const key_type& key);
+    static void set(
+        const jit::IValue& obj,
+        const key_type& key,
+        const jit::IValue value);
+  };
 
-struct DictAccessorPolicy {
-  using key_type = jit::IValue;
-  static jit::IValue get(const jit::IValue& obj, const key_type& key) {
-    return obj.toGenericDict().at(key);
-  }
-  static void set(
-      const jit::IValue& obj,
-      const key_type& key,
-      const jit::IValue value);
-};
-using DictAccessor = Accessor<DictAccessorPolicy>;
+  struct DictAccessorPolicy {
+    using key_type = jit::IValue;
+    static jit::IValue get(const jit::IValue& obj, const key_type& key) {
+      return obj.toGenericDict().at(key);
+    }
+    static void set(
+        const jit::IValue& obj,
+        const key_type& key,
+        const jit::IValue value);
+  };
 
-struct AttrPolicy {
-  using key_type = std::string;
-  static jit::IValue get(const jit::IValue& obj, const key_type& key);
-  static void set(
-      const jit::IValue& obj,
-      const key_type& key,
-      const jit::IValue value);
-};
-using AttrAccessor = Accessor<AttrPolicy>;
+  struct AttrPolicy {
+    using key_type = std::string;
+    static jit::IValue get(const jit::IValue& obj, const key_type& key);
+    static void set(
+        const jit::IValue& obj,
+        const key_type& key,
+        const jit::IValue value);
+  };
+}
 
-
-struct Value {
-  template <typename T>
-  Value(T&& value) : value_(std::forward<T>(value)) {}
-  Value(Value& value);
-  Value(Value&& value);
-  Value(const Value& value);
-
-  const jit::IValue& ivalue() const {
-    return value_;
-  }
-
- protected:
-  jit::IValue value_;
-};
-
-
-
-
-struct Object : public Value {
-  bool hasattr(const std::string& name);
-  AttrAccessor attr(const std::string& name);
-  Value attr(const std::string& name, const Value& or_else);
-
-  // Value v = obj.call("forward", 3, 4);
-  template <typename... Args>
-  Value call(const std::string& method_name, Args... args);
-  Value call(const std::string& method_name,
-      std::vector<Value> args,
-      std::vector<Field<Value>> kwargs);
-  iterable<Field<Value>> begin() const;
-  iterable<Field<Value>> end() const;
-};
+using ListAccessor = Accessor<detail::ListPolicy>;
+using DictAccessor = Accessor<detail::DictAccessorPolicy>;
 
 struct List : public Value {
   List(TypePtr type, std::initializer_list<Value> = {});
@@ -297,8 +268,6 @@ struct Tuple : public Value {
   iterator<Value> end();
 };
 
-
-
 struct DictEntry {
   Value key;
   Value value;
@@ -314,7 +283,21 @@ struct Dict : public Value {
   iterator<DictEntry> end();
 };
 
-struct NamedModule;
+using AttrAccessor = Accessor<detail::AttrPolicy>;
+
+struct Object : public Value {
+  bool hasattr(const std::string& name);
+  AttrAccessor attr(const std::string& name);
+  Value attr(const std::string& name, const Value& or_else);
+
+  template <typename... Args>
+  Value call(const std::string& method_name, Args... args);
+  Value call(const std::string& method_name,
+      std::vector<Value> args,
+      std::vector<Field<Value>> kwargs);
+  iterable<Field<Value>> begin() const;
+  iterable<Field<Value>> end() const;
+};
 
 struct Module : public Object {
   // Module is an object, but also exposes the nn.Module API:
@@ -368,21 +351,7 @@ struct Module : public Object {
 };
 
 Module load(const std::string& path);
-// struct Value {
 
-// };
-
-// struct Type {
-
-// };
-
-// struct Object {
-
-// };
-
-// struct Module {
-
-// };
 
 }
 } // namespace jit
