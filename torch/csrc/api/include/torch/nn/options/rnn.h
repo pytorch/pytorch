@@ -43,7 +43,7 @@ struct TORCH_API RNNOptionsBase {
 
 } // namespace detail
 
-/// Options for RNN modules.
+/// Options for the `RNN` module.
 ///
 /// Example:
 /// ```
@@ -79,7 +79,7 @@ struct TORCH_API RNNOptions {
   TORCH_ARG(bool, bidirectional) = false;
 };
 
-/// Options for LSTM modules.
+/// Options for the `LSTM` module.
 ///
 /// Example:
 /// ```
@@ -111,7 +111,7 @@ struct TORCH_API LSTMOptions {
   TORCH_ARG(bool, bidirectional) = false;
 };
 
-/// Options for GRU modules.
+/// Options for the `GRU` module.
 ///
 /// Example:
 /// ```
