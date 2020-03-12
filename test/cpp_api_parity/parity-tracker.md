@@ -69,7 +69,7 @@ torch::nn::Softmin|Yes|No
 torch::nn::Softmax|Yes|No
 torch::nn::Softmax2d|Yes|No
 torch::nn::LogSoftmax|Yes|No
-torch::nn::AdaptiveLogSoftmaxWithLoss|No|No
+torch::nn::AdaptiveLogSoftmaxWithLoss|Yes|No
 torch::nn::BatchNorm1d|Yes|No
 torch::nn::BatchNorm2d|Yes|No
 torch::nn::BatchNorm3d|Yes|No
