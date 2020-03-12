@@ -23,4 +23,18 @@ Tensor& bmm_out_cuda(Tensor &result, const Tensor& batch1, const Tensor& batch2)
   return legacy::cuda::_th_bmm_out(result, batch1, batch2);
 }
 
+Tensor& addmm_out_impl(Tensor& result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, Scalar beta, Scalar alpha) {
+  return legacy::cuda::_th_addmm_out(result, self, mat1, mat2, beta, alpha);
+}
+
+Tensor& mm_out_cuda(Tensor& result, const Tensor& self, const Tensor& mat2) {
+  result.resize_({ self.size(0), mat2.size(1) });
+  return addmm_out_impl(result, result, self, mat2, 0, 1);
+}
+
+Tensor mm_cuda(const Tensor& self, const Tensor& mat2) {
+  Tensor result = at::empty({ self.size(0), mat2.size(1) }, self.options());
+  return addmm_out_impl(result, result, self, mat2, 0, 1);
+}
+
 } }
