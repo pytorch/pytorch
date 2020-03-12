@@ -141,7 +141,7 @@ autograd computation is done.
 
 We accumulate the gradients in the appropriate
 :class:`torch.distributed.autograd.context` on each of the nodes. The autograd
-context to be used is looked up given context_id that is passed in when
+context to be used is looked up given the ``context_id`` that is passed in when
 :meth:`torch.distributed.autograd.backward` is called. If there is no valid
 autograd context corresponding to the given ID, we throw an error. You can
 retrieve the accumulated gradients using the
