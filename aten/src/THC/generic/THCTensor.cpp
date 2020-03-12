@@ -100,20 +100,26 @@ THCTensor *THCTensor_(newWithStorage1d)(THCState *state, THCStorage *storage, pt
     c10::intrusive_ptr<at::StorageImpl>::reclaim(new_storage),
     at::DispatchKey::CUDATensorId
   ).release();
-  THTensor_(setStorageNd)(self, storage, storageOffset, 1,
-                          &size0, &stride0);
+  THCTensor_(setStorageNd)(state, self, storage, storageOffset, 1, &size0, &stride0);
 
   return self;
 }
 
 THCTensor *THCTensor_(newWithSize)(THCState *state, at::IntArrayRef size, at::IntArrayRef stride)
 {
-  return THCTensor_(newWithStorage)(state, NULL, 0, size, stride);
+  TORCH_INTERNAL_ASSERT(false, "this function should not be called and is in the process of being removed");
 }
 
 THCTensor *THCTensor_(newWithSize1d)(THCState *state, int64_t size0)
 {
-  return THCTensor_(newWithSize)(state, {size0}, {});
+  THCStorage *new_storage = THCStorage_(new)(state);
+  THCTensor *self = c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
+    c10::intrusive_ptr<at::StorageImpl>::reclaim(new_storage),
+    at::DispatchKey::CUDATensorId
+  ).release();
+  THCTensor_(setStorageNd)(state, self, new_storage, 0, 1, &size0, nullptr);
+
+  return self;
 }
 
 THCTensor *THCTensor_(newClone)(THCState *state, THCTensor *self)
