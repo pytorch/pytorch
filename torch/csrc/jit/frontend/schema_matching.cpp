@@ -6,7 +6,6 @@
 
 namespace torch {
 namespace jit {
-namespace script {
 
 static inline TypePtr unwrapOptional(TypePtr opt_type) {
   if (auto unwrap_list_type = opt_type->cast<OptionalType>()) {
@@ -612,6 +611,5 @@ Value* emitBuiltinCall(
   }
 }
 
-} // namespace script
 } // namespace jit
 } // namespace torch
