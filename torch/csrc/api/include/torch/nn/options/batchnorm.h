@@ -35,8 +35,28 @@ struct TORCH_API BatchNormOptions {
   TORCH_ARG(bool, track_running_stats) = true;
 };
 
+/// Options for the `BatchNorm1d` module.
+///
+/// Example:
+/// ```
+/// BatchNorm1d model(BatchNorm1dOptions(4).eps(0.5).momentum(0.1).affine(false).track_running_stats(true));
+/// ```
 using BatchNorm1dOptions = BatchNormOptions;
+
+/// Options for the `BatchNorm2d` module.
+///
+/// Example:
+/// ```
+/// BatchNorm2d model(BatchNorm2dOptions(4).eps(0.5).momentum(0.1).affine(false).track_running_stats(true));
+/// ```
 using BatchNorm2dOptions = BatchNormOptions;
+
+/// Options for the `BatchNorm3d` module.
+///
+/// Example:
+/// ```
+/// BatchNorm3d model(BatchNorm3dOptions(4).eps(0.5).momentum(0.1).affine(false).track_running_stats(true));
+/// ```
 using BatchNorm3dOptions = BatchNormOptions;
 
 // ============================================================================

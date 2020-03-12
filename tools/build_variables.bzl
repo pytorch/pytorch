@@ -287,6 +287,9 @@ libtorch_python_cuda_sources = [
     "torch/csrc/cuda/python_nccl.cpp",
     "torch/csrc/cuda/serialization.cpp",
     "torch/csrc/cuda/utils.cpp",
+    "torch/csrc/cuda/shared/cudart.cpp",
+    "torch/csrc/cuda/shared/cudnn.cpp",
+    "torch/csrc/cuda/shared/nvtx.cpp",
     "torch/csrc/distributed/c10d/ddp.cpp",
 ]
 
