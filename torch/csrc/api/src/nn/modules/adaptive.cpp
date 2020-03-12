@@ -9,10 +9,10 @@ using namespace torch::indexing;
 namespace torch {
 namespace nn {
 
-ASMoutput::ASMoutput(const Tensor& output_, const double& loss_): output(output_), loss(loss_) {}
+ASMoutput::ASMoutput(Tensor output_, double loss_): output(std::move(output_)), loss(loss_) {}
 
-AdaptiveLogSoftmaxWithLossImpl::AdaptiveLogSoftmaxWithLossImpl(const AdaptiveLogSoftmaxWithLossOptions& options_)
-    : options(options_) {
+AdaptiveLogSoftmaxWithLossImpl::AdaptiveLogSoftmaxWithLossImpl(AdaptiveLogSoftmaxWithLossOptions options_)
+    : options(std::move(options_)) {
   reset();
 }
 
@@ -90,7 +90,7 @@ ASMoutput AdaptiveLogSoftmaxWithLossImpl::forward(const Tensor& input, const Ten
 
       gather_inds.index_fill_(0, row_indices, cluster_index);
 
-      const Tensor cluster_logprob = F::log_softmax(cluster_output, /*dim=*/1);
+      const Tensor cluster_logprob = F::log_softmax(cluster_output, 1);
       const Tensor local_logprob = cluster_logprob.gather(1, relative_target.unsqueeze(1));
       output.index_copy_(0, row_indices, local_logprob.squeeze(1));
     }
@@ -105,7 +105,7 @@ ASMoutput AdaptiveLogSoftmaxWithLossImpl::forward(const Tensor& input, const Ten
     "were found. ");
 
   const Tensor head_output = head(input);
-  const Tensor head_logprob = F::log_softmax(head_output, /*dim=*/1);
+  const Tensor head_logprob = F::log_softmax(head_output, 1);
   output += head_logprob.gather(1, gather_inds.unsqueeze(1)).squeeze();
   const double loss = (-output).mean().item().toDouble();
 
@@ -114,7 +114,7 @@ ASMoutput AdaptiveLogSoftmaxWithLossImpl::forward(const Tensor& input, const Ten
 
 Tensor AdaptiveLogSoftmaxWithLossImpl::_get_full_log_prob(const Tensor& input, const Tensor& head_output) {
   Tensor out = input.new_empty({head_output.size(0), options.n_classes()});
-  const Tensor head_logprob = F::log_softmax(head_output, /*dim=*/1);
+  const Tensor head_logprob = F::log_softmax(head_output, 1);
 
   out.index_put_({Slice(), Slice(None, shortlist_size)}, head_logprob.index({Slice(), Slice(None, shortlist_size)}));
 
@@ -122,7 +122,7 @@ Tensor AdaptiveLogSoftmaxWithLossImpl::_get_full_log_prob(const Tensor& input, c
     int64_t start_idx = cutoffs[i];
     int64_t stop_idx = cutoffs[i+1];
     const Tensor cluster_output = tail[i]->as<Sequential>()->forward(input);
-    const Tensor cluster_logprob = F::log_softmax(cluster_output, /*dim=*/1);
+    const Tensor cluster_logprob = F::log_softmax(cluster_output, 1);
     auto output_logprob = cluster_logprob + head_logprob.index({Slice(), static_cast<int64_t>(shortlist_size + i)}).unsqueeze(1);
 
     out.index_put_({Slice(), Slice(start_idx, stop_idx)}, output_logprob);
@@ -137,7 +137,7 @@ Tensor AdaptiveLogSoftmaxWithLossImpl::AdaptiveLogSoftmaxWithLossImpl::log_prob(
 
 Tensor AdaptiveLogSoftmaxWithLossImpl::predict(const Tensor& input) {
   const Tensor head_output = head(input);
-  Tensor output = torch::argmax(head_output, /*dim=*/1);
+  Tensor output = torch::argmax(head_output, 1);
   auto not_in_shortlist = (output >= shortlist_size);
   auto all_in_shortlist = bitwise_not(not_in_shortlist.any());
 
@@ -145,12 +145,12 @@ Tensor AdaptiveLogSoftmaxWithLossImpl::predict(const Tensor& input) {
     return output;
   } else if (not_in_shortlist.all().item().toBool()) {
     const Tensor log_prob = _get_full_log_prob(input, head_output);
-    return torch::argmax(log_prob, /*dim=*/1);
+    return torch::argmax(log_prob, 1);
   } else {
     const Tensor log_prob = _get_full_log_prob(
       input.index({not_in_shortlist}),
       head_output.index({not_in_shortlist}));
-    output.index_put_({not_in_shortlist}, torch::argmax(log_prob, /*dim=*/1));
+    output.index_put_({not_in_shortlist}, torch::argmax(log_prob, 1));
     return output;
   }
 }

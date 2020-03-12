@@ -14,7 +14,7 @@ namespace nn {
 /// The output of a single invocation of an AdaptiveLogSoftmaxWithLoss
 /// module's `forward()` method.
 struct TORCH_API ASMoutput {
-  ASMoutput(const Tensor& output_, const double& loss_);
+  ASMoutput(Tensor output_, double loss_);
 
   /// Tensor containing computed target log probabilities for each example
   Tensor output;
@@ -43,7 +43,7 @@ class TORCH_API AdaptiveLogSoftmaxWithLossImpl : public Cloneable<AdaptiveLogSof
    AdaptiveLogSoftmaxWithLossImpl(int64_t in_features, int64_t n_classes, std::vector<int64_t> cutoffs)
       : AdaptiveLogSoftmaxWithLossImpl(AdaptiveLogSoftmaxWithLossOptions(in_features, n_classes, cutoffs)) {}
      
-  explicit AdaptiveLogSoftmaxWithLossImpl(const AdaptiveLogSoftmaxWithLossOptions& options_);
+  explicit AdaptiveLogSoftmaxWithLossImpl(AdaptiveLogSoftmaxWithLossOptions options_);
 
   ASMoutput forward(const Tensor& input, const Tensor& target);
 
