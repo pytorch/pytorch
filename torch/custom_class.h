@@ -101,7 +101,7 @@ class class_ {
     static_assert(
         c10::guts::is_stateless_lambda<std::decay_t<GetStateFn>>::value &&
             c10::guts::is_stateless_lambda<std::decay_t<SetStateFn>>::value,
-        "torch::jit::pickle_ currently only supports lambdas as "
+        "def_pickle() currently only supports lambdas as "
         "__getstate__ and __setstate__ arguments.");
     def("__getstate__", std::forward<GetStateFn>(get_state));
 
@@ -189,6 +189,25 @@ class class_ {
     classTypePtr->addMethod(method.get());
   }
 };
+
+template <typename CurClass, typename... CtorArgs>
+IValue make_custom_class(CtorArgs&&... args) {
+  if (!c10::isCustomClassRegistered<c10::intrusive_ptr<CurClass>>()) {
+    throw c10::Error(
+        "Trying to instantiate a class that isn't a registered custom class.",
+        "");
+  }
+  auto classType = c10::getCustomClassType<c10::intrusive_ptr<CurClass>>();
+  auto ivalue_obj = c10::ivalue::Object::create(
+      c10::StrongTypePtr(nullptr, classType), /*num_slots=*/1);
+  auto userClassInstance =
+      c10::make_intrusive<CurClass>(std::forward<CtorArgs...>(args)...);
+  ivalue_obj->setAttr(
+      "capsule",
+      c10::static_intrusive_pointer_cast<torch::jit::CustomClassHolder>(
+          userClassInstance));
+  return ivalue_obj;
+}
 
 } // namespace jit
 

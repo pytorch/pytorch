@@ -126,7 +126,7 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
         err << " " << qualname->qualifiedName();
       }
     }
-    err << ". Please define serialization methods via torch::jit::pickle_ for "
+    err << ". Please define serialization methods via def_pickle() for "
            "this class.";
     AT_ERROR(err.str());
   } else if (ivalue.isRRef()) {

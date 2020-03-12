@@ -1,10 +1,11 @@
 #include "import.h"
 #include <ATen/core/ivalue.h>
-#include <torch/csrc/jit/api/compilation_unit.h>
-#include <torch/csrc/jit/serialization/unpickler.h>
 #include <caffe2/serialize/inline_container.h>
-#include <torch/csrc/jit/runtime/instruction.h>
+#include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/mobile/type_parser.h>
+#include <torch/csrc/jit/runtime/instruction.h>
+#include <torch/csrc/jit/serialization/unpickler.h>
+#include <torch/custom_class.h>
 
 #include <fstream>
 #include <string>
@@ -61,7 +62,24 @@ void print_unsupported_ops_and_throw(const std::unordered_set<std::string>& unsu
   TORCH_CHECK(false, "Following ops cannot be found:", error_message);
 }
 
-void parseMethods(const std::vector<IValue>& vals, mobile::CompilationUnit& mcu) {
+void print_unsupported_fns_and_throw(
+    const std::unordered_set<std::string>& unsupported_fns) {
+  std::string error_message("{");
+  for (const auto& op_name : unsupported_fns) {
+    error_message += op_name + ", ";
+  }
+  error_message += "}";
+  TORCH_CHECK(
+      false,
+      "The following custom C++ methods could not be found:",
+      error_message,
+      " Ensure the appropriate custom class registration (torch::jit::class_)"
+      " code is linked into your binary.");
+}
+
+void parseMethods(
+    const std::vector<IValue>& vals,
+    mobile::CompilationUnit& mcu) {
   for (const auto& element : vals) {
     const auto& m_tuple = element.toTuple()->elements();
     const std::string& function_name = m_tuple[0].toStringRef();
@@ -75,6 +93,9 @@ void parseMethods(const std::vector<IValue>& vals, mobile::CompilationUnit& mcu)
     const auto& consts_list = expect_field(table, "constants", 2).toTuple()->elements();
     const auto& types_list = expect_field(table, "types", 3).toTuple()->elements();
     const auto& register_size = expect_field(table, "register_size", 4).toInt();
+    // TODO: backward compatiblity? Can this be optional?
+    const auto& fn_names =
+        expect_field(table, "fn_names", 5).toTuple()->elements();
 
     for (const auto& ins : ins_list) {
       auto ins_item = ins.toTuple()->elements();
@@ -101,6 +122,19 @@ void parseMethods(const std::vector<IValue>& vals, mobile::CompilationUnit& mcu)
     if (!unsupported_op_names.empty()) {
       print_unsupported_ops_and_throw(unsupported_op_names);
     };
+
+    std::unordered_set<std::string> unsupported_fn_names;
+    for (const auto& fn : fn_names) {
+      std::string fn_qualname_str = fn.toStringRef();
+      bool fn_found = function->append_builtin_function(fn_qualname_str);
+      if (!fn_found) {
+        unsupported_fn_names.emplace(std::move(fn_qualname_str));
+      }
+    }
+
+    if (!unsupported_fn_names.empty()) {
+      print_unsupported_fns_and_throw(unsupported_fn_names);
+    }
 
     for (const auto& constant : consts_list) {
       function->append_constant(constant);
@@ -179,13 +213,29 @@ c10::IValue BytecodeDeserializer::readArchive(const std::string& archive_name,
     auto qn = cls->name();
     c10::QualifiedName method_name(qn.value(), "__setstate__");
     auto setstate = mcu->find_function(method_name);
+    auto find_custom_class_setstate =
+        [&method_name]() -> torch::jit::Function* {
+      for (auto& fn : customClassMethods()) {
+        if (fn->qualname() == method_name) {
+          return fn.get();
+        }
+      }
+      return nullptr;
+    };
     if (setstate) {
       auto obj = c10::ivalue::Object::create(type, 0);
       Stack stack({obj, input});
       setstate->run(stack);
       return obj;
-    }
-    else {
+    } else if (auto custom_class_setstate = find_custom_class_setstate()) {
+      auto custom_class_type = torch::jit::getCustomClass(qn->qualifiedName());
+      TORCH_INTERNAL_ASSERT(custom_class_type);
+      auto obj = c10::ivalue::Object::create(
+          c10::StrongTypePtr(nullptr, custom_class_type), 1);
+      Stack stack({obj, input});
+      custom_class_setstate->run(stack);
+      return obj;
+    } else {
       auto dict = std::move(input).toGenericDict();
       size_t ndict = dict.size();
       auto obj = c10::ivalue::Object::create(type, ndict);

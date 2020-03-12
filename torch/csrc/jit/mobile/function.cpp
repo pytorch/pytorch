@@ -1,8 +1,9 @@
 #include "function.h"
-#include "interpreter.h"
+#include <ATen/core/op_registration/op_registration.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
-#include <ATen/core/op_registration/op_registration.h>
+#include <torch/custom_class_detail.h>
+#include "interpreter.h"
 
 namespace torch{
 namespace jit{
@@ -38,6 +39,22 @@ bool Function::append_operator(const std::string& name,
     c10::Dispatcher::singleton().callBoxed(*op, &stack);
   };
   code_->operators_.emplace_back(fn);
+  return true;
+}
+
+bool Function::append_builtin_function(const std::string& qualname) {
+  std::shared_ptr<torch::jit::Function> found_function;
+  auto qualname_ = c10::QualifiedName(qualname);
+  for (const auto& fn : customClassMethods()) {
+    if (fn->qualname() == qualname_) {
+      found_function = fn;
+    }
+  }
+  if (!found_function) {
+    return false;
+  }
+
+  code_->custom_class_fns_.emplace_back(std::move(found_function));
   return true;
 }
 

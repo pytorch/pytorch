@@ -45,11 +45,32 @@ c10::IValue getFunctionTuple(const Function& func) {
 
   // operator names
   std::vector<c10::OperatorName> opnames;
+  std::vector<IValue> fn_names;
   for (size_t i = 0; i < code.instructions().size(); ++i) {
     Instruction ins = code.instructions()[i];
     if (ins.op == OP || ins.op == OPN) {
       auto node = code.instructions_source()[i];
       opnames.emplace_back(node->schema().operator_name());
+    }
+    // Emit qualified names for built-in Functions
+    // (i.e. Function instances for which isGraphFunction() returns false)
+    if (ins.op == CALL) {
+      auto node = code.instructions_source()[i];
+      if (node->kind() == prim::CallMethod) {
+        if (auto class_type = node->inputs().at(0)->type()->cast<ClassType>()) {
+          fn_names.emplace_back(class_type->getMethod(node->s(attr::name))
+                                    ->qualname()
+                                    .qualifiedName());
+        } else {
+          TORCH_CHECK(false, "Interface call not supported on mobile");
+        }
+      } else if (node->kind() == prim::CallFunction) {
+        auto* fn =
+            node->inputs().at(0)->type()->expect<FunctionType>()->function();
+        fn_names.emplace_back(fn->qualname().qualifiedName());
+      } else {
+        TORCH_INTERNAL_ASSERT(false, "Unknown node kind on CALL opcode");
+      }
     }
   }
 
@@ -84,7 +105,8 @@ c10::IValue getFunctionTuple(const Function& func) {
                       {"operators", Tup(operators)},
                       {"constants", Tup(constants)},
                       {"types", Tup(types)},
-                      {"register_size", register_size}});
+                      {"register_size", register_size},
+                      {"fn_names", Tup(fn_names)}});
 
   return Tup({func.qualname().qualifiedName(), table});
 }
@@ -95,9 +117,10 @@ void setstateTuple(const IValue& ivalue, std::vector<c10::IValue>& elements) {
   auto type = obj->type();
   if (checkHasValidSetGetState(type)) {
     Function *setstate = type->getMethod("__setstate__");
-    elements.push_back(getFunctionTuple(*setstate));
-  }
-  else {
+    if (setstate->isGraphFunction()) {
+      elements.push_back(getFunctionTuple(*setstate));
+    }
+  } else {
     for (size_t i = 0, n = type->numAttributes(); i < n; ++i) {
       setstateTuple(obj->getSlot(i), elements);
     }
