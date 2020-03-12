@@ -616,8 +616,8 @@ class LSTM(RNNBase):
         self.check_forward_args(input, hx, batch_sizes)
         if batch_sizes is None:
             result = _VF.lstm(input, hx, self._flat_weights, self.bias, self.num_layers,
-                              self.dropout, self.training, self.bidirectional, self.batch_first,
-                              self.cat_layer_fwd_bwd_states)
+                              self.dropout, self.training, self.bidirectional,
+                              self.cat_layer_fwd_bwd_states, self.batch_first)
         else:
             result = _VF.lstm(input, batch_sizes, hx, self._flat_weights, self.bias,
                               self.num_layers, self.dropout, self.training, self.bidirectional,
