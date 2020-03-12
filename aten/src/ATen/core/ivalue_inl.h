@@ -15,9 +15,7 @@
 namespace torch {
 namespace jit {
 struct Function;
-namespace script {
 struct CompilationUnit;
-}
 } // namespace jit
 } // namespace torch
 namespace c10 {
@@ -406,7 +404,7 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
   }
   std::shared_ptr<ClassType> type() const;
 
-  std::shared_ptr<torch::jit::script::CompilationUnit> compilation_unit() {
+  std::shared_ptr<torch::jit::CompilationUnit> compilation_unit() {
     return type_.cu_;
   }
 
@@ -868,7 +866,7 @@ IValue from_(c10::intrusive_ptr<T> x, std::false_type) {
   auto res = getCustomClassType<inputType>();
   auto retObject = ivalue::Object::create(
     StrongTypePtr(
-      std::shared_ptr<torch::jit::script::CompilationUnit>(),
+      std::shared_ptr<torch::jit::CompilationUnit>(),
       std::move(res)),
     1);
   auto objPtr = c10::static_intrusive_pointer_cast<torch::jit::CustomClassHolder>(std::move(x));

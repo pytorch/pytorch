@@ -5,8 +5,6 @@
 namespace torch {
 namespace jit {
 
-using namespace torch::jit::script;
-
 void testModuleClone() {
   auto cu = std::make_shared<CompilationUnit>();
   auto parent = ClassType::create("parent", cu, true);
