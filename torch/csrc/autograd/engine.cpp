@@ -407,7 +407,7 @@ void GraphTask::set_exception_without_signal(const std::shared_ptr<Node>& fn) {
   std::unique_lock<std::mutex> lock(mutex_);
   if (!has_error_.load()) {
     if (AnomalyMode::is_enabled() && fn) {
-      fn->metadata()->print_stack();
+      fn->metadata()->print_stack(fn->name());
     }
     has_error_ = true;
   }
@@ -860,12 +860,12 @@ void Engine::graph_task_exec_post_processing(
 // note that when python is present, this base engine will be overriden
 // with a PythonEngine. Because this typically happens before get_default_engine
 // is called, this base engine will never be created.
-static Engine& get_base_engine() {
+Engine& Engine::get_base_engine() {
   static Engine engine;
   return engine;
 }
 
-std::atomic<EngineStub> engine_stub(get_base_engine);
+std::atomic<EngineStub> engine_stub(Engine::get_base_engine);
 
 void set_default_engine_stub(EngineStub stub) {
   engine_stub.store(stub);

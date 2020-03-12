@@ -166,13 +166,13 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "_jit_pass_insert_observers",
-          [](script::Module& module,
+          [](Module& module,
              const std::string& method_name,
              const py::dict& qconfig_dict,
              bool inplace) {
             auto dict = py::cast<std::unordered_map<
                 std::string,
-                std::tuple<script::Module, script::Module>>>(qconfig_dict);
+                std::tuple<Module, Module>>>(qconfig_dict);
             return InsertObservers(module, method_name, dict, inplace);
           },
           py::arg("module"),
@@ -181,7 +181,7 @@ void initJITBindings(PyObject* module) {
           py::arg("inplace") = false)
       .def(
           "_jit_pass_insert_quant_dequant",
-          [](script::Module& module,
+          [](Module& module,
              const std::string& method_name,
              bool inplace) {
             return InsertQuantDeQuant(module, method_name, inplace);
@@ -194,20 +194,20 @@ void initJITBindings(PyObject* module) {
           [](std::shared_ptr<Graph>& g) { return InsertPrepackUnpack(g); })
       .def(
           "_jit_pass_insert_prepack_unpack",
-          [](script::Module& module) { return InsertPrepackUnpack(module); })
+          [](Module& module) { return InsertPrepackUnpack(module); })
       .def(
           "_jit_pass_quant_fusion",
           [](std::shared_ptr<Graph>& g) { return QuantFusion(g); })
       .def("_jit_pass_fold_convbn", &FoldConvBatchNorm2d)
       .def("_freeze_module",
-          [](script::Module& module) {
+          [](Module& module) {
             return freeze_module(module);
           },
           py::arg("module"))
       .def("_jit_pass_fuse_linear", &FuseLinear)
       .def(
           "_jit_pass_fold_quantize",
-          [](script::Module& module, const std::string& method_name) {
+          [](Module& module, const std::string& method_name) {
             FoldQuantizeCallIntoBuffer(module, method_name);
           })
       .def("_jit_pass_fold_prepack", &FoldPrepackedWeightIntoModule)
@@ -224,12 +224,12 @@ void initJITBindings(PyObject* module) {
            })
       .def(
           "_jit_pass_pattern_based_rewrite",
-          [](const script::Module& m) { return PatternBasedRewrite(m); })
+          [](const Module& m) { return PatternBasedRewrite(m); })
       .def(
           "_jit_pass_custom_pattern_based_rewrite",
           [](const std::string& pattern,
              const std::string& fused_node_name,
-             const script::Module& m) {
+             const Module& m) {
             SubgraphRewriter subgraph_rewriter;
             subgraph_rewriter.RegisterRewritePattern(pattern, fused_node_name);
             subgraph_rewriter.runOnModule(m);
@@ -292,7 +292,7 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_prepare_division_for_onnx", PrepareDivisionForONNX)
       .def(
           "_jit_pass_lower_graph",
-          [](std::shared_ptr<Graph>& graph, const script::Module& self) {
+          [](std::shared_ptr<Graph>& graph, const Module& self) {
             return LowerGraph(*graph, self._ivalue());
           })
       .def("_jit_pass_loop_unrolling", UnrollLoops)
@@ -390,10 +390,10 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "_jit_set_inline_everything_mode",
-          [](bool enabled) { script::getInlineEverythingMode() = enabled; })
+          [](bool enabled) { getInlineEverythingMode() = enabled; })
       .def(
           "_jit_get_inline_everything_mode",
-          []() { return script::getInlineEverythingMode(); })
+          []() { return getInlineEverythingMode(); })
       .def(
           "_jit_try_infer_type",
           [](py::object obj) -> TypePtr {
@@ -618,7 +618,7 @@ void initJITBindings(PyObject* module) {
 
   m.def("parse_ir", [](const std::string& input) {
     auto graph = std::make_shared<Graph>();
-    script::parseIR(input, &*graph);
+    parseIR(input, &*graph);
     return graph;
   });
   m.def("parse_schema", parseSchema);
@@ -756,8 +756,8 @@ void initJITBindings(PyObject* module) {
   initPythonCustomClassBindings(module);
   initPythonIRBindings(module);
   tracer::initPythonTracerBindings(module);
-  script::initTreeViewBindings(module);
-  script::initJitScriptBindings(module);
+  initTreeViewBindings(module);
+  initJitScriptBindings(module);
 
   setPrintHandler([](const std::string& str) {
     py::gil_scoped_acquire acquire;
