@@ -13786,11 +13786,9 @@ class TestTorchDeviceType(TestCase):
                              0.01)
             self.assertEqual(a1.div(a2), a1 / a2)
 
+    @dtypesIfCUDA(*torch.testing.get_all_math_dtypes('cuda'))
     @dtypes(*torch.testing.get_all_math_dtypes('cpu'))
     def test_floor_divide_tensor(self, device, dtype):
-        if dtype == torch.half and self.device_type == 'cpu':
-            return
-
         x = torch.randn(10, device=device).mul(30).to(dtype)
         y = torch.arange(1, 11, dtype=dtype, device=device)
 
@@ -13800,11 +13798,9 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(z.dtype, x.dtype)
         self.assertEqual(z, z_alt)
 
+    @dtypesIfCUDA(*torch.testing.get_all_math_dtypes('cuda'))
     @dtypes(*torch.testing.get_all_math_dtypes('cpu'))
     def test_floor_divide_scalar(self, device, dtype):
-        if dtype == torch.half and self.device_type == 'cpu':
-            return
-
         x = torch.randn(100, device=device).mul(10).to(dtype)
 
         z = x // 3
