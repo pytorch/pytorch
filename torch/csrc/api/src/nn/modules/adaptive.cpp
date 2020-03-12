@@ -12,7 +12,10 @@ namespace nn {
 ASMoutput::ASMoutput(Tensor output_, double loss_): output(std::move(output_)), loss(loss_) {}
 
 AdaptiveLogSoftmaxWithLossImpl::AdaptiveLogSoftmaxWithLossImpl(AdaptiveLogSoftmaxWithLossOptions options_)
-    : options(std::move(options_)) {
+    : options(std::move(options_)),
+      shortlist_size(0),
+      n_clusters(0),
+      head_size(0) {
   reset();
 }
 
