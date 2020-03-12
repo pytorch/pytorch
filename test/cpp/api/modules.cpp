@@ -4603,7 +4603,7 @@ TEST_F(ModulesTest, PrettyPrintAdaptiveLogSoftmaxWithLoss) {
       "      (1): torch::nn::Linear(in_features=4, out_features=2, bias=false)\n"
       "    )\n"
       "  )\n"
-      ")\n");
+      ")");
   }
   {
     AdaptiveLogSoftmaxWithLoss asfm(AdaptiveLogSoftmaxWithLossOptions(8, 10, {4, 8}).div_value(2.).head_bias(true));
@@ -4621,6 +4621,6 @@ TEST_F(ModulesTest, PrettyPrintAdaptiveLogSoftmaxWithLoss) {
       "      (1): torch::nn::Linear(in_features=2, out_features=2, bias=false)\n"
       "    )\n"
       "  )\n"
-      ")\n");
+      ")");
   }
 }
