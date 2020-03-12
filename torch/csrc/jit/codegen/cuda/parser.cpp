@@ -2,6 +2,7 @@
 #include <torch/csrc/jit/constants.h>
 
 #include <torch/csrc/jit/ir/constants.h>
+#include <torch/csrc/jit/frontend/function_schema_parser.h>
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/tensor.h>
 #include <torch/csrc/jit/codegen/cuda/iriostream.h>
@@ -23,6 +24,20 @@ typedef Val CgValue;
 typedef Expr CgOp;
 
 typedef void (*ParseFuncPtr)(const Node* const, std::unordered_map<size_t, CgValue*>);
+
+// Need to double check this. Current WAR to because `getOperatorForLiteral` is
+// not exposed;
+std::shared_ptr<Operator> getOperatorForLiteral_local(const char* signature) {
+  auto schema = parseSchema(signature);
+  auto ops_vec = getAllOperatorsFor(Symbol::fromQualString(schema.name()));
+
+  for (auto s_ptr_op : ops_vec) {
+    if (s_ptr_op->schema().overload_name() == schema.overload_name()) {
+      return s_ptr_op;
+    }
+  }
+  assert(false);
+};
 
 class IrParser {
 public:
@@ -132,7 +147,7 @@ protected:
     // Register parse-function for each JIT operator;
     // This is a one-time look up, our hash registry indexes on the pointer in
     // OperatorRegistry.
-/*
+
     const char* BinaryOpWithAlpha[4] = {
         "aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
         "aten::add(Tensor self, Scalar other, Scalar alpha) -> Tensor",
@@ -140,8 +155,8 @@ protected:
         "aten::sub(Tensor self, Scalar other, Scalar alpha) -> Tensor"
     };
     for (auto signature : BinaryOpWithAlpha) {
-      auto ptr_op = getOperatorForLiteral(signature);
-      //assert(registerParseRule(ptr_op, &parseBinaryOpWithAlpha));
+      auto ptr_op = getOperatorForLiteral_local(signature);
+      assert(registerParseRule(ptr_op, &parseBinaryOpWithAlpha));
     }
 
     const char* BinaryOp[4] = {
@@ -151,10 +166,9 @@ protected:
         "aten::mul(Tensor self, Scalar other) -> Tensor"
     };
     for (auto signature : BinaryOp) {
-      auto ptr_op = getOperatorForLiteral(signature);
+      auto ptr_op = getOperatorForLiteral_local(signature);
       assert(registerParseRule(ptr_op, &parseBinaryOp));
     }
- */
   }
 
   void processJitNode(const JitOp* node) {
@@ -226,6 +240,7 @@ protected:
 };
 
 std::unordered_map<Symbol, std::vector<std::pair<std::shared_ptr<Operator>, ParseFuncPtr>>> IrParser::jit_operator_registry_;
+
 } // namespace
 
 bool isNodeParsible(const Node* const node) {
