@@ -19,6 +19,17 @@ inline Tensor pixel_shuffle(
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.pixel_shuffle
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::PixelShuffleFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::pixel_shuffle(x, F::PixelShuffleFuncOptions(2));
+/// ```
 inline Tensor pixel_shuffle(
     const Tensor& input,
     const PixelShuffleFuncOptions& options) {

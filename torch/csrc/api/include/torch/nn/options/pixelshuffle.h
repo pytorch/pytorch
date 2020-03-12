@@ -22,6 +22,13 @@ struct TORCH_API PixelShuffleOptions {
 };
 
 namespace functional {
+/// Options for `torch::nn::functional::pixel_shuffle`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::pixel_shuffle(x, F::PixelShuffleFuncOptions(2));
+/// ```
 using PixelShuffleFuncOptions = PixelShuffleOptions;
 } // namespace functional
 
