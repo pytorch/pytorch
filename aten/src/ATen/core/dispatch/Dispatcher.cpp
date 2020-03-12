@@ -102,10 +102,20 @@ RegistrationHandleRAII Dispatcher::registerDef(FunctionSchema schema) {
         op.operatorIterator_->op.registerSchema(std::move(schema));
       } else {
         TORCH_CHECK(op.schema() == schema, "Tried to register multiple operators with the same name and the same overload name but different schemas: ", schema, " vs ", op.schema());
-        // We broke BC in the case of DefaultAliasAnalysisKind; give a more
-        // detailed error message if this is a situation that previously
-        // would have worked
-        if (op.schema().isDefaultAliasAnalysisKind() || schema.isDefaultAliasAnalysisKind()) {
+        // If the *new* schema is the default alias analysis kind, for BC, we
+        // will accept it.  If we don't accept it, most extensions that override
+        // existing operators will stop working (as they generally did not
+        // specify alias information).  Remove this BC smoothing ASAP, because
+        // if the two incompatible registrations live in the same compilation
+        // unit, the order their static initializers run is unspecified, which
+        // means that you may nondeterministically fail the subsequent test.
+        if (schema.isDefaultAliasAnalysisKind()) {
+          // OK
+        // If you POST-FACTO specify a non-default alias analysis kind after
+        // we already have a schema for a function, complain loudly about it
+        // (because this new implementation doesn't support merging in this
+        // way).
+        } else if (op.schema().isDefaultAliasAnalysisKind()) {
           TORCH_CHECK(op.schema().aliasAnalysis() == schema.aliasAnalysis(),
             "Tried to define the schema for ", toString(op_name),
             " multiple times without providing an explicit alias analysis kind at each registration site.  "
