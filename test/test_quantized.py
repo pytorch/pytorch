@@ -2481,6 +2481,11 @@ class TestComparatorOps(TestCase):
             self.assertEqual(result_ref, result,
                              "'tensor.{}(scalar)'' failed".format(op))
 
+# NOT FOR REVIEW OR COMMIT - vasiliy testing ghstack behavior
+#
+# commit 1
+# a
+#
 
 if __name__ == "__main__":
     run_tests()
