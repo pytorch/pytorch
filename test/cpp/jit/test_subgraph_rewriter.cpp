@@ -11,7 +11,7 @@ using namespace testing;
 void testFilterMatch() {
   auto graph = std::make_shared<Graph>();
 
-  script::parseIR(
+  parseIR(
       R"IR(
 graph(%0):
   %a = a::aaa(%0)
@@ -27,7 +27,7 @@ graph(%a, %b):
   Graph pattern_graph;
   std::unordered_map<std::string, Value*> vmap;
 
-  script::parseIR(
+  parseIR(
       pattern,
       &pattern_graph,
       vmap);
@@ -55,7 +55,7 @@ graph(%a, %b):
 
 void testFilterNoMatch() {
   auto graph = std::make_shared<Graph>();
-  script::parseIR(
+  parseIR(
       R"IR(
 graph(%0):
   %a = a::aaa(%0)
@@ -71,7 +71,7 @@ graph(%a, %b):
   Graph pattern_graph;
   std::unordered_map<std::string, Value*> vmap;
 
-  script::parseIR(
+  parseIR(
       pattern,
       &pattern_graph,
       vmap);
