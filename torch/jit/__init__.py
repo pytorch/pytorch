@@ -1345,7 +1345,7 @@ def script_method(fn):
 
 
 # These OrderedDictWrapper classes replace the actual OrderedDicts in
-# module with versions that get/set properties inside of script::Module.
+# module with versions that get/set properties inside of Module.
 # This allows us to reuse most of nn.Module while still storing the
 # data in C++.
 # Each OrderedDict needs to support:
@@ -1398,7 +1398,7 @@ class OrderedModuleDict(OrderedDictWrapper):
         # contains _both_ script modules and non-script python-only modules
 
         # because script modules are subclassed in python and the
-        # C++ script::Module class will not hold references to them,
+        # C++ Module class will not hold references to them,
         # to ensure that you always get the same python value here
         # we store it in the python dict as well
         self._python_modules = python_dict
@@ -1504,7 +1504,7 @@ if _enabled:
 
     class ScriptModule(with_metaclass(ScriptMeta, Module)):
         """
-        ``ScriptModule``s wrap a C++ ``torch::jit::script::Module``. ``ScriptModule``s
+        ``ScriptModule``s wrap a C++ ``torch::jit::Module``. ``ScriptModule``s
         contain methods, attributes, parameters, and
         constants. These can be accessed the same as on a normal ``nn.Module``.
         """
@@ -1604,7 +1604,7 @@ if _enabled:
             control of how the RecursiveScriptModule instance is created).
 
             Arguments:
-                cpp_module:  The C++ script::Module that will hold the actual state of
+                cpp_module:  The C++ Module that will hold the actual state of
                              this RecursiveScriptModule instance.
                 init_fn:  Lambda that initializes the RecursiveScriptModule passed to it.
             """

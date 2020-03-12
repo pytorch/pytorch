@@ -12,7 +12,7 @@ namespace torch {
 namespace jit {
 
 void testLiteInterpreterUpsampleNearest2d() {
-  script::Module m("m");
+  Module m("m");
   m.define(R"(
     def forward(self, input: Tensor, scale:float):
       return torch.upsample_nearest2d(input, [1, 1], float(scale), float(scale))
@@ -35,7 +35,7 @@ void testLiteInterpreterUpsampleNearest2d() {
 }
 
 void testLiteInterpreterAdd() {
-  script::Module m("m");
+  Module m("m");
   m.register_parameter("foo", torch::ones({}), false);
   // TODO: support default param val, which was pushed in
   // function schema's checkAndNormalizeInputs()
@@ -75,7 +75,7 @@ void testLiteInterpreterConv() {
 
   std::vector<torch::jit::IValue> inputs;
 
-  script::Module m("m");
+  Module m("m");
   m.register_parameter("weight", torch::ones({20, 1, 5, 5}), false);
   m.register_parameter("bias", torch::ones({20}), false);
   m.define(R"(
@@ -100,7 +100,7 @@ void testLiteInterpreterConv() {
 }
 
 void testLiteInterpreterInline() {
-  script::Module m("m");
+  Module m("m");
   m.define(R"JIT(
   def foo1(self, x):
       return x + 1
@@ -120,7 +120,7 @@ void testLiteInterpreterInline() {
 }
 
 void testLiteInterpreterTuple() {
-  script::Module m("m");
+  Module m("m");
   m.define(R"JIT(
   def foo(self, x):
       return (1, 2, x + 3)
@@ -157,7 +157,7 @@ void testLiteInterpreterPrimOverload() {
 }
 
 void testLiteInterpreterPrim() {
-  script::Module m("m");
+  Module m("m");
   m.define(R"JIT(
         def forward(self, x):
             return int(x)
@@ -183,7 +183,7 @@ void testLiteInterpreterPrim() {
 }
 
 void testLiteInterpreterLoadOrigJit() {
-  script::Module m("m");
+  Module m("m");
   m.register_parameter("foo", torch::ones({}), false);
   m.define(R"(
     def forward(self, x):
@@ -196,7 +196,7 @@ void testLiteInterpreterLoadOrigJit() {
 }
 
 void testLiteInterpreterWrongMethodName() {
-  script::Module m("m");
+  Module m("m");
   m.register_parameter("foo", torch::ones({}), false);
   m.define(R"(
     def add(self, x):
@@ -213,7 +213,7 @@ void testLiteInterpreterWrongMethodName() {
 }
 
 void testLiteInterpreterParams() {
-  script::Module m("m");
+  Module m("m");
   m.register_parameter("foo", torch::ones({1}, at::requires_grad()), false);
   m.define(R"(
     def forward(self, x):
@@ -272,7 +272,7 @@ void testLiteInterpreterParams() {
 }
 
 void testLiteInterpreterSetState() {
-  script::Module m("m");
+  Module m("m");
   m.register_parameter("foo", torch::ones({}), false);
   m.define(R"(
     def __getstate__(self):
