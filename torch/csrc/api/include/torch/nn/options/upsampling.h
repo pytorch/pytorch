@@ -44,7 +44,13 @@ struct TORCH_API UpsampleOptions {
 
 namespace functional {
 
-/// Options for the interpolate functional.
+/// Options for `torch::nn::functional::interpolate`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::interpolate(input, F::InterpolateFuncOptions().size({4}).mode(torch::kNearest));
+/// ```
 struct TORCH_API InterpolateFuncOptions {
   typedef c10::variant<
       enumtype::kNearest,
