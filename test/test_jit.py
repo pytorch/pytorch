@@ -8290,29 +8290,17 @@ a")
 
     def test_operator_precedence(self):
         def double(x):
+            # type: (int) -> int
             return 2 * x
 
         def complicated_arithmetic_operation():
+            # TODO we need to test exponent operator '**' and bitwise not
+            # operator '~' once they are properly supported.
             list = [0, 1, 2, 3]
-            result = list[1:3][0] + 3 ** 2 - double(4) + (-3 + 4) * 6 // 2 % 2 << 2 + 1 >> 1 & 4 ^ 2 + 1 | 13 + ~4
-            # result = list[1:3][0] + 3 ** 2 - double(4) + 1 * 6 // 2 % 2 << 2 + 1 >> 1 & 4 ^ 2 + 1 | 13 + ~4
-            # result = list[1:3][0] + 3 ** 2 - 8 + 1 * 6 // 2 % 2 << 2 + 1 >> 1 & 4 ^ 2 + 1 | 13 + ~4
-            # result = [1, 2][0] + 3 ** 2 - 8 + 1 * 6 // 2 % 2 << 2 + 1 >> 1 & 4 ^ 2 + 1 | 13 + ~4
-            # result = 1 + 3 ** 2 - 8 + 1 * 6 // 2 % 2 << 2 + 1 >> 1 & 4 ^ 2 + 1 | 13 + ~4
-            # result = 1 + 9 - 8 + 1 * 6 // 2 % 2 << 2 + 1 >> 1 & 4 ^ 2 + 1 | 13 + ~4
-            # result = 1 + 9 - 8 + 1 * 6 // 2 % 2 << 2 + 1 >> 1 & 4 ^ 2 + 1 | 13 + -5
-            # result = 1 + 9 - 8 + 6 // 2 % 2 << 2 + 1 >> 1 & 4 ^ 2 + 1 | 13 + -5
-            # result = 1 + 9 - 8 + 3 % 2 << 2 + 1 >> 1 & 4 ^ 2 + 1 | 13 + -5
-            # result = 1 + 9 - 8 + 1 << 2 + 1 >> 1 & 4 ^ 2 + 1 | 13 + -5
-            # result = 3 << 3 >> 1 & 4 ^ 3 | 8
-            # result = 24 >> 1 & 4 ^ 3 | 8
-            # result = 12 & 4 ^ 3 | 8
-            # result = 4 ^ 3 | 8
-            # result = 7 | 8
-            # result = 15
+            result = list[1:3][0] + double(4)  + (-3 + 8) * 6 // 2 % 4 << 2 + 1 >> 1 | 23 & 16 + 3 ^ 4
             return result
 
-        self.assertEqual(complicated_arithmetic_operation(), 15)
+        self.checkScript(complicated_arithmetic_operation, ())
 
     def test_bitwise_ops(self):
 
