@@ -1579,7 +1579,6 @@ def hardsigmoid(input, inplace=False):
 
     See :class:`~torch.nn.Hardsigmoid` for more details.
     """
-    # TODO: question for reviewers, is this JIT portion correct?
     if not torch.jit.is_scripting():
         if type(input) is not Tensor and has_torch_function((input,)):
             return handle_torch_function(hardsigmoid, (input,), input, inplace=inplace)
