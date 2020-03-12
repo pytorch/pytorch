@@ -8,6 +8,11 @@ namespace torch {
 namespace nn {
 
 /// Options for `Dropout` module.
+///
+/// Example:
+/// ```
+/// Dropout model(DropoutOptions().p(0.42).inplace(true));
+/// ```
 struct TORCH_API DropoutOptions {
   /* implicit */ DropoutOptions(double p = 0.5);
 
@@ -19,18 +24,35 @@ struct TORCH_API DropoutOptions {
 };
 
 /// Options for `Dropout2d` module.
+///
+/// Example:
+/// ```
+/// Dropout2d model(Dropout2dOptions().p(0.42).inplace(true));
+/// ```
 using Dropout2dOptions = DropoutOptions;
 
 /// Options for `Dropout3d` module.
+///
+/// Example:
+/// ```
+/// Dropout3d model(Dropout3dOptions().p(0.42).inplace(true));
+/// ```
 using Dropout3dOptions = DropoutOptions;
 
-/// Options for `FeatureDropout` module.
-using FeatureDropoutOptions = DropoutOptions;
-
 /// Options for `AlphaDropout` module.
+///
+/// Example:
+/// ```
+/// AlphaDropout model(AlphaDropoutOptions(0.2).inplace(true));
+/// ```
 using AlphaDropoutOptions = DropoutOptions;
 
 /// Options for `FeatureAlphaDropout` module.
+///
+/// Example:
+/// ```
+/// FeatureAlphaDropout model(FeatureAlphaDropoutOptions(0.2).inplace(true));
+/// ```
 using FeatureAlphaDropoutOptions = DropoutOptions;
 
 namespace functional {
