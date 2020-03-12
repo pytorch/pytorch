@@ -194,6 +194,14 @@ class BatchNormImplBase : public NormImplBase<D, Derived, BatchNormOptions> {
 /// Applies the BatchNorm1d function.
 /// See https://pytorch.org/docs/master/nn.html#torch.nn.BatchNorm1d to learn
 /// about the exact behavior of this module.
+///
+/// See the documentation for `torch::nn::BatchNorm1dOptions` class to learn what
+/// constructor arguments are supported for this module.
+///
+/// Example:
+/// ```
+/// BatchNorm1d model(BatchNorm1dOptions(4).eps(0.5).momentum(0.1).affine(false).track_running_stats(true));
+/// ```
 class TORCH_API BatchNorm1dImpl : public BatchNormImplBase<1, BatchNorm1dImpl> {
  protected:
   virtual void _check_input_dim(const Tensor& input) override;
@@ -202,11 +210,24 @@ class TORCH_API BatchNorm1dImpl : public BatchNormImplBase<1, BatchNorm1dImpl> {
   using BatchNormImplBase<1, BatchNorm1dImpl>::BatchNormImplBase;
 };
 
+/// A `ModuleHolder` subclass for `BatchNorm1dImpl`.
+/// See the documentation for `BatchNorm1dImpl` class to learn what methods it
+/// provides, and examples of how to use `BatchNorm1d` with `torch::nn::BatchNorm1dOptions`.
+/// See the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
 TORCH_MODULE(BatchNorm1d);
 
 /// Applies the BatchNorm2d function.
 /// See https://pytorch.org/docs/master/nn.html#torch.nn.BatchNorm2d to learn
 /// about the exact behavior of this module.
+///
+/// See the documentation for `torch::nn::BatchNorm2dOptions` class to learn what
+/// constructor arguments are supported for this module.
+///
+/// Example:
+/// ```
+/// BatchNorm2d model(BatchNorm2dOptions(4).eps(0.5).momentum(0.1).affine(false).track_running_stats(true));
+/// ```
 class TORCH_API BatchNorm2dImpl : public BatchNormImplBase<2, BatchNorm2dImpl> {
  protected:
   virtual void _check_input_dim(const Tensor& input) override;
@@ -215,11 +236,24 @@ class TORCH_API BatchNorm2dImpl : public BatchNormImplBase<2, BatchNorm2dImpl> {
   using BatchNormImplBase<2, BatchNorm2dImpl>::BatchNormImplBase;
 };
 
+/// A `ModuleHolder` subclass for `BatchNorm2dImpl`.
+/// See the documentation for `BatchNorm2dImpl` class to learn what methods it
+/// provides, and examples of how to use `BatchNorm2d` with `torch::nn::BatchNorm2dOptions`.
+/// See the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
 TORCH_MODULE(BatchNorm2d);
 
 /// Applies the BatchNorm3d function.
 /// See https://pytorch.org/docs/master/nn.html#torch.nn.BatchNorm3d to learn
 /// about the exact behavior of this module.
+///
+/// See the documentation for `torch::nn::BatchNorm3dOptions` class to learn what
+/// constructor arguments are supported for this module.
+///
+/// Example:
+/// ```
+/// BatchNorm3d model(BatchNorm3dOptions(4).eps(0.5).momentum(0.1).affine(false).track_running_stats(true));
+/// ```
 class TORCH_API BatchNorm3dImpl : public BatchNormImplBase<3, BatchNorm3dImpl> {
  protected:
   virtual void _check_input_dim(const Tensor& input) override;
@@ -228,6 +262,11 @@ class TORCH_API BatchNorm3dImpl : public BatchNormImplBase<3, BatchNorm3dImpl> {
   using BatchNormImplBase<3, BatchNorm3dImpl>::BatchNormImplBase;
 };
 
+/// A `ModuleHolder` subclass for `BatchNorm3dImpl`.
+/// See the documentation for `BatchNorm3dImpl` class to learn what methods it
+/// provides, and examples of how to use `BatchNorm3d` with `torch::nn::BatchNorm3dOptions`.
+/// See the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
 TORCH_MODULE(BatchNorm3d);
 
 } // namespace nn
