@@ -15,7 +15,7 @@ void IRPrinter::handle(Fusion* fusion) {
   }
 }
 
-TORCH_API void IRPrinter::handle(const TensorDomain* const td) {
+void IRPrinter::handle(const TensorDomain* const td) {
   os << "[ ";
   for (std::vector<const IterDomain*>::size_type i = 0; i < td->size(); i++) {
     handle(td->axis(i));
@@ -25,7 +25,7 @@ TORCH_API void IRPrinter::handle(const TensorDomain* const td) {
   os << " ]";
 }
 
-TORCH_API void IRPrinter::handle(const TensorView* const tv) {
+void IRPrinter::handle(const TensorView* const tv) {
   if (tv->tensor() != nullptr){
     os << "T" << tv->tensor()->name();
     handle(tv->domain());
@@ -43,7 +43,7 @@ TORCH_API void IRPrinter::handle(const TensorView* const tv) {
   }
 }
 
-TORCH_API void IRPrinter::handle(const IterDomain* const id) {
+void IRPrinter::handle(const IterDomain* const id) {
   if (id->isReduction())
     os << "r";
   else
@@ -66,7 +66,7 @@ TORCH_API void IRPrinter::handle(const IterDomain* const id) {
   os << "}";
 }
 
-TORCH_API void IRPrinter::handle(const TensorIndex* const ti) {
+void IRPrinter::handle(const TensorIndex* const ti) {
   os << "[ ";
   for(decltype(ti->size()) i{0}; i < ti->size(); i++){
     print_inline(ti->axis(i));
@@ -120,6 +120,7 @@ void IRPrinter::handle(const Int* const i) {
   }
 }
 namespace{
+// Make sure we can inline something, before we attempt to.
 void check_inlineable(const IRInputOutput* const irio) {
   for (auto inp : irio->inputs())
     TORCH_CHECK(inp->getValType().value() == ValType::Scalar,
