@@ -2335,9 +2335,9 @@ struct to_ir {
       case TK_IN:
         return "__contains__";
       case TK_LSHIFT:
-        return "<<";
+        return "__lshift__";
       case TK_RSHIFT:
-        return ">>";
+        return "__rshift__";
       default:
         throw std::runtime_error("unknown kind " + c10::to_string(kind));
     }
