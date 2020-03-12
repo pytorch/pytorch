@@ -365,19 +365,6 @@ class TestCppExtensionJIT(common.TestCase):
         z = module.tanh_add(x, y).cpu()
         self.assertEqual(z, x.tanh() + y.tanh())
 
-    def test_complex_registration(self):
-        module = torch.utils.cpp_extension.load(
-            name="complex_registration_extension",
-            sources="cpp_extensions/complex_registration_extension.cpp",
-            verbose=True,
-        )
-
-        # Make sure that the empty tensor is of the desired shape and type
-        # Refer to https://github.com/pytorch/pytorch/issues/14829
-        t = torch.empty(2, 2, dtype=torch.complex64)
-        self.assertEqual(t.size(), torch.Size([2, 2]))
-        self.assertEqual(t.type(), 'torch.ComplexFloatTensor')
-
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_half_support(self):
         """
