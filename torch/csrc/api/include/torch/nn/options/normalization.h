@@ -30,7 +30,13 @@ struct TORCH_API LayerNormOptions {
 
 namespace functional {
 
-/// Options for the `LayerNorm` functional.
+/// Options for `torch::nn::functional::layer_norm`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::layer_norm(input, F::LayerNormFuncOptions({2, 2}).eps(2e-5));
+/// ```
 struct TORCH_API LayerNormFuncOptions {
   /* implicit */ LayerNormFuncOptions(std::vector<int64_t> normalized_shape);
   /// input shape from an expected input.
@@ -70,6 +76,13 @@ struct TORCH_API LocalResponseNormOptions {
 };
 
 namespace functional {
+/// Options for `torch::nn::functional::local_response_norm`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::local_response_norm(x, F::LocalResponseNormFuncOptions(2));
+/// ```
 using LocalResponseNormFuncOptions = LocalResponseNormOptions;
 } // namespace functional
 
@@ -98,7 +111,13 @@ struct TORCH_API CrossMapLRN2dOptions {
 
 namespace functional {
 
-/// Options for the `normalize` functional.
+/// Options for `torch::nn::functional::normalize`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::normalize(input, F::NormalizeFuncOptions().p(1).dim(-1));
+/// ```
 struct TORCH_API NormalizeFuncOptions {
   /// The exponent value in the norm formulation. Default: 2.0
   TORCH_ARG(double, p) = 2.0;
@@ -140,7 +159,13 @@ struct TORCH_API GroupNormOptions {
 
 namespace functional {
 
-/// Options for the `GroupNorm` functional.
+/// Options for `torch::nn::functional::group_norm`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::group_norm(input, F::GroupNormFuncOptions(2).eps(2e-5));
+/// ```
 struct TORCH_API GroupNormFuncOptions {
   /* implicit */ GroupNormFuncOptions(int64_t num_groups);
 
