@@ -17,7 +17,7 @@ namespace jit {
  */
 static void checkRoundtrip(const std::string& s) {
   auto graph = std::make_shared<Graph>();
-  script::parseIR(s, &*graph);
+  parseIR(s, &*graph);
   std::ostringstream ss;
   ss << *graph;
   std::string parsed = ss.str();
@@ -42,7 +42,7 @@ void testIRParser() {
   {
     auto graph = std::make_shared<Graph>();
     std::unordered_map<std::string, Value*> vmap;
-    script::parseIR(
+    parseIR(
         R"IR(
 graph(%0 : Tensor, %1 : Tensor):
   %2 : Tensor = foo::add(%0, %1)
@@ -117,7 +117,7 @@ graph(%0 : Tensor,
   }
   {
     auto graph = std::make_shared<Graph>();
-    script::parseIR(
+    parseIR(
         R"IR(
 graph(%a):
   return (%a))IR",
@@ -127,7 +127,7 @@ graph(%a):
   {
     // Check that parser correctly handles values reusing the same name.
     auto graph = std::make_shared<Graph>();
-    script::parseIR(
+    parseIR(
         R"IR(
 graph(%x):
   %x = a::a(%x)
@@ -239,7 +239,7 @@ graph(%0 : Tensor,
     # CHECK: return
       return (%a))IR";
 
-    script::parseIR(text, &*graph);
+    parseIR(text, &*graph);
     AT_ASSERT(graph->inputs()[0]->type()->isSubtypeOf(TensorType::get()));
     torch::jit::testing::FileCheck().run(text, *graph);
   }
