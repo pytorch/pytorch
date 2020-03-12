@@ -99,14 +99,16 @@ THTensor *THTensor_(newWithStorage1d)(THStorage *storage, ptrdiff_t storageOffse
   return self;
 }
 
-THTensor *THTensor_(newWithSize)(at::IntArrayRef size, at::IntArrayRef stride)
-{
-  return THTensor_(newWithStorage)(NULL, 0, size, stride);
-}
-
 THTensor *THTensor_(newWithSize1d)(int64_t size0)
 {
-  return THTensor_(newWithSize)({size0}, {});
+  THStorage *new_storage = THStorage_(new)();
+  THTensor *self = c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
+    c10::intrusive_ptr<at::StorageImpl>::reclaim(new_storage),
+    at::DispatchKey::CPUTensorId
+  ).release();
+  THTensor_(setStorageNd)(self, new_storage, 0, 1, &size0, nullptr);
+
+  return self;
 }
 
 THTensor *THTensor_(newClone)(THTensor *self)
