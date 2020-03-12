@@ -2,7 +2,6 @@
 
 #include <torch/arg.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/nn/options/common.h>
 #include <torch/types.h>
 #include <vector>
 
@@ -70,7 +69,9 @@ struct TORCH_API LocalResponseNormOptions {
   TORCH_ARG(double, k) = 1.;
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(LocalResponseNorm, LocalResponseNormFuncOptions)
+namespace functional {
+using LocalResponseNormFuncOptions = LocalResponseNormOptions;
+} // namespace functional
 
 // ============================================================================
 

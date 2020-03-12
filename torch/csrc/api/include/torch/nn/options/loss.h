@@ -3,7 +3,6 @@
 #include <torch/arg.h>
 #include <torch/enum.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/nn/options/common.h>
 #include <torch/types.h>
 
 namespace torch {
@@ -24,7 +23,9 @@ struct TORCH_API L1LossOptions {
   TORCH_ARG(reduction_t, reduction) = torch::kMean;
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(L1Loss, L1LossFuncOptions)
+namespace functional {
+using L1LossFuncOptions = L1LossOptions;
+} // namespace functional
 
 // ============================================================================
 
@@ -44,7 +45,9 @@ struct TORCH_API KLDivLossOptions {
   TORCH_ARG(reduction_t, reduction) = torch::kMean;
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(KLDivLoss, KLDivFuncOptions)
+namespace functional {
+using KLDivFuncOptions = KLDivLossOptions;
+} // namespace functional
 
 // ============================================================================
 
@@ -64,7 +67,9 @@ struct TORCH_API MSELossOptions {
   TORCH_ARG(reduction_t, reduction) = torch::kMean;
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(MSELoss, MSELossFuncOptions)
+namespace functional {
+using MSELossFuncOptions = MSELossOptions;
+} // namespace functional
 
 // ============================================================================
 
@@ -84,7 +89,9 @@ struct TORCH_API BCELossOptions {
   TORCH_ARG(reduction_t, reduction) = torch::kMean;
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(BCELoss, BinaryCrossEntropyFuncOptions)
+namespace functional {
+using BinaryCrossEntropyFuncOptions = BCELossOptions;
+} // namespace functional
 
 // ============================================================================
 
@@ -104,7 +111,9 @@ struct TORCH_API HingeEmbeddingLossOptions {
   TORCH_ARG(reduction_t, reduction) = torch::kMean;
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(HingeEmbeddingLoss, HingeEmbeddingLossFuncOptions)
+namespace functional {
+using HingeEmbeddingLossFuncOptions = HingeEmbeddingLossOptions;
+} // namespace functional
 
 // ============================================================================
 
@@ -133,7 +142,9 @@ struct TORCH_API MultiMarginLossOptions {
   TORCH_ARG(reduction_t, reduction) = torch::kMean;
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(MultiMarginLoss, MultiMarginLossFuncOptions)
+namespace functional {
+using MultiMarginLossFuncOptions = MultiMarginLossOptions;
+} // namespace functional
 
 // ============================================================================
 
@@ -154,7 +165,9 @@ struct TORCH_API CosineEmbeddingLossOptions {
   TORCH_ARG(reduction_t, reduction) = torch::kMean;
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(CosineEmbeddingLoss, CosineEmbeddingLossFuncOptions)
+namespace functional {
+using CosineEmbeddingLossFuncOptions = CosineEmbeddingLossOptions;
+} // namespace functional
 
 // ============================================================================
 
@@ -176,7 +189,9 @@ struct TORCH_API MultiLabelMarginLossOptions {
   TORCH_ARG(reduction_t, reduction) = torch::kMean;
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(MultiLabelMarginLoss, MultiLabelMarginLossFuncOptions)
+namespace functional {
+using MultiLabelMarginLossFuncOptions = MultiLabelMarginLossOptions;
+} // namespace functional
 
 // ============================================================================
 
@@ -198,7 +213,9 @@ struct TORCH_API SoftMarginLossOptions {
   TORCH_ARG(reduction_t, reduction) = torch::kMean;
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(SoftMarginLoss, SoftMarginLossFuncOptions)
+namespace functional {
+using SoftMarginLossFuncOptions = SoftMarginLossOptions;
+} // namespace functional
 
 // ============================================================================
 
@@ -223,7 +240,9 @@ struct TORCH_API MultiLabelSoftMarginLossOptions {
   TORCH_ARG(reduction_t, reduction) = torch::kMean;
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(MultiLabelSoftMarginLoss, MultiLabelSoftMarginLossFuncOptions)
+namespace functional {
+using MultiLabelSoftMarginLossFuncOptions = MultiLabelSoftMarginLossOptions;
+} // namespace functional
 
 // ============================================================================
 
@@ -250,7 +269,9 @@ struct TORCH_API TripletMarginLossOptions {
   TORCH_ARG(reduction_t, reduction) = torch::kMean;
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(TripletMarginLoss, TripletMarginLossFuncOptions)
+namespace functional {
+using TripletMarginLossFuncOptions = TripletMarginLossOptions;
+} // namespace functional
 
 // ============================================================================
 
@@ -273,7 +294,9 @@ struct TORCH_API CTCLossOptions {
   TORCH_ARG(bool, zero_infinity) = false;
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(CTCLoss, CTCLossFuncOptions)
+namespace functional {
+using CTCLossFuncOptions = CTCLossOptions;
+} // namespace functional
 
 // ============================================================================
 
@@ -295,7 +318,9 @@ struct TORCH_API SmoothL1LossOptions {
   TORCH_ARG(reduction_t, reduction) = torch::kMean;
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(SmoothL1Loss, SmoothL1LossFuncOptions)
+namespace functional {
+using SmoothL1LossFuncOptions = SmoothL1LossOptions;
+} // namespace functional
 
 // ============================================================================
 
@@ -321,7 +346,9 @@ struct TORCH_API PoissonNLLLossOptions {
   TORCH_ARG(reduction_t, reduction) = torch::kMean;
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(PoissonNLLLoss, PoissonNLLLossFuncOptions)
+namespace functional {
+using PoissonNLLLossFuncOptions = PoissonNLLLossOptions;
+} // namespace functional
 
 // ============================================================================
 
@@ -340,7 +367,9 @@ struct TORCH_API MarginRankingLossOptions {
   TORCH_ARG(reduction_t, reduction) = torch::kMean;
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(MarginRankingLoss, MarginRankingLossFuncOptions)
+namespace functional {
+using MarginRankingLossFuncOptions = MarginRankingLossOptions;
+} // namespace functional
 
 // ============================================================================
 
@@ -364,7 +393,9 @@ struct TORCH_API NLLLossOptions {
   TORCH_ARG(reduction_t, reduction) = torch::kMean;
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(NLLLoss, NLLLossFuncOptions)
+namespace functional {
+using NLLLossFuncOptions = NLLLossOptions;
+} // namespace functional
 
 // ============================================================================
 
@@ -387,7 +418,9 @@ struct TORCH_API CrossEntropyLossOptions {
   TORCH_ARG(reduction_t, reduction) = torch::kMean;
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(CrossEntropyLoss, CrossEntropyFuncOptions)
+namespace functional {
+using CrossEntropyFuncOptions = CrossEntropyLossOptions;
+} // namespace functional
 
 // ============================================================================
 
@@ -409,7 +442,9 @@ struct TORCH_API BCEWithLogitsLossOptions {
   TORCH_ARG(Tensor, pos_weight) = {};
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(BCEWithLogitsLoss, BinaryCrossEntropyWithLogitsFuncOptions)
+namespace functional {
+using BinaryCrossEntropyWithLogitsFuncOptions = BCEWithLogitsLossOptions;
+} // namespace functional
 
 } // namespace nn
 } // namespace torch

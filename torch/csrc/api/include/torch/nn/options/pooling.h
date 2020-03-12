@@ -3,7 +3,6 @@
 #include <torch/arg.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/expanding_array.h>
-#include <torch/nn/options/common.h>
 #include <torch/types.h>
 
 namespace torch {
@@ -58,9 +57,15 @@ using AvgPool2dOptions = AvgPoolOptions<2>;
 /// ```
 using AvgPool3dOptions = AvgPoolOptions<3>;
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(AvgPool1d, AvgPool1dFuncOptions)
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(AvgPool2d, AvgPool2dFuncOptions)
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(AvgPool3d, AvgPool3dFuncOptions)
+namespace functional {
+using AvgPool1dFuncOptions = AvgPool1dOptions;
+} // namespace functional
+namespace functional {
+using AvgPool2dFuncOptions = AvgPool2dOptions;
+} // namespace functional
+namespace functional {
+using AvgPool3dFuncOptions = AvgPool3dOptions;
+} // namespace functional
 
 // ============================================================================
 
@@ -110,9 +115,15 @@ using MaxPool2dOptions = MaxPoolOptions<2>;
 /// ```
 using MaxPool3dOptions = MaxPoolOptions<3>;
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(MaxPool1d, MaxPool1dFuncOptions)
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(MaxPool2d, MaxPool2dFuncOptions)
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(MaxPool3d, MaxPool3dFuncOptions)
+namespace functional {
+using MaxPool1dFuncOptions = MaxPool1dOptions;
+} // namespace functional
+namespace functional {
+using MaxPool2dFuncOptions = MaxPool2dOptions;
+} // namespace functional
+namespace functional {
+using MaxPool3dFuncOptions = MaxPool3dOptions;
+} // namespace functional
 
 // ============================================================================
 
@@ -150,9 +161,15 @@ using AdaptiveMaxPool2dOptions = AdaptiveMaxPoolOptions<2>;
 /// ```
 using AdaptiveMaxPool3dOptions = AdaptiveMaxPoolOptions<3>;
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(AdaptiveMaxPool1d, AdaptiveMaxPool1dFuncOptions)
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(AdaptiveMaxPool2d, AdaptiveMaxPool2dFuncOptions)
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(AdaptiveMaxPool3d, AdaptiveMaxPool3dFuncOptions)
+namespace functional {
+using AdaptiveMaxPool1dFuncOptions = AdaptiveMaxPool1dOptions;
+} // namespace functional
+namespace functional {
+using AdaptiveMaxPool2dFuncOptions = AdaptiveMaxPool2dOptions;
+} // namespace functional
+namespace functional {
+using AdaptiveMaxPool3dFuncOptions = AdaptiveMaxPool3dOptions;
+} // namespace functional
 
 // ============================================================================
 
@@ -190,9 +207,15 @@ using AdaptiveAvgPool2dOptions = AdaptiveAvgPoolOptions<2>;
 /// ```
 using AdaptiveAvgPool3dOptions = AdaptiveAvgPoolOptions<3>;
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(AdaptiveAvgPool1d, AdaptiveAvgPool1dFuncOptions)
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(AdaptiveAvgPool2d, AdaptiveAvgPool2dFuncOptions)
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(AdaptiveAvgPool3d, AdaptiveAvgPool3dFuncOptions)
+namespace functional {
+using AdaptiveAvgPool1dFuncOptions = AdaptiveAvgPool1dOptions;
+} // namespace functional
+namespace functional {
+using AdaptiveAvgPool2dFuncOptions = AdaptiveAvgPool2dOptions;
+} // namespace functional
+namespace functional {
+using AdaptiveAvgPool3dFuncOptions = AdaptiveAvgPool3dOptions;
+} // namespace functional
 
 // ============================================================================
 
@@ -308,8 +331,12 @@ using FractionalMaxPool2dOptions = FractionalMaxPoolOptions<2>;
 /// ```
 using FractionalMaxPool3dOptions = FractionalMaxPoolOptions<3>;
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(FractionalMaxPool2d, FractionalMaxPool2dFuncOptions)
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(FractionalMaxPool3d, FractionalMaxPool3dFuncOptions)
+namespace functional {
+using FractionalMaxPool2dFuncOptions = FractionalMaxPool2dOptions;
+} // namespace functional
+namespace functional {
+using FractionalMaxPool3dFuncOptions = FractionalMaxPool3dOptions;
+} // namespace functional
 
 // ============================================================================
 
@@ -347,8 +374,12 @@ using LPPool1dOptions = LPPoolOptions<1>;
 /// ```
 using LPPool2dOptions = LPPoolOptions<2>;
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(LPPool1d, LPPool1dFuncOptions)
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(LPPool2d, LPPool2dFuncOptions)
+namespace functional {
+using LPPool1dFuncOptions = LPPool1dOptions;
+} // namespace functional
+namespace functional {
+using LPPool2dFuncOptions = LPPool2dOptions;
+} // namespace functional
 
 } // namespace nn
 } // namespace torch

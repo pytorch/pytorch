@@ -2,7 +2,6 @@
 
 #include <torch/arg.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/nn/options/common.h>
 #include <torch/types.h>
 
 namespace torch {
@@ -21,7 +20,9 @@ struct TORCH_API CosineSimilarityOptions {
   TORCH_ARG(double, eps) = 1e-8;
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(CosineSimilarity, CosineSimilarityFuncOptions)
+namespace functional {
+using CosineSimilarityFuncOptions = CosineSimilarityOptions;
+} // namespace functional
 
 // ============================================================================
 
@@ -40,7 +41,9 @@ struct TORCH_API PairwiseDistanceOptions {
   TORCH_ARG(bool, keepdim) = false;
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(PairwiseDistance, PairwiseDistanceFuncOptions)
+namespace functional {
+using PairwiseDistanceFuncOptions = PairwiseDistanceOptions;
+} // namespace functional
 
 } // namespace nn
 } // namespace torch

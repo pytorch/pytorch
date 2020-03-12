@@ -3,7 +3,6 @@
 #include <torch/arg.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/expanding_array.h>
-#include <torch/nn/options/common.h>
 #include <torch/types.h>
 
 namespace torch {
@@ -40,7 +39,9 @@ struct TORCH_API FoldOptions {
   TORCH_ARG(ExpandingArray<2>, stride) = 1;
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(Fold, FoldFuncOptions)
+namespace functional {
+using FoldFuncOptions = FoldOptions;
+} // namespace functional
 
 // ============================================================================
 
@@ -69,7 +70,9 @@ struct TORCH_API UnfoldOptions {
   TORCH_ARG(ExpandingArray<2>, stride) = 1;
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(Unfold, UnfoldFuncOptions)
+namespace functional {
+using UnfoldFuncOptions = UnfoldOptions;
+} // namespace functional
 
 } // namespace nn
 } // namespace torch

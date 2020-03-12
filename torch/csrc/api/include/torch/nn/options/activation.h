@@ -2,7 +2,6 @@
 
 #include <torch/arg.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/nn/options/common.h>
 #include <torch/types.h>
 
 namespace torch {
@@ -28,7 +27,9 @@ struct TORCH_API ELUOptions {
 /// ```
 /// namespace F = torch::nn::functional;
 /// ```
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(ELU, ELUFuncOptions)
+namespace functional {
+using ELUFuncOptions = ELUOptions;
+} // namespace functional
 
 // ============================================================================
 
@@ -45,7 +46,9 @@ struct TORCH_API SELUOptions {
   TORCH_ARG(bool, inplace);
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(SELU, SELUFuncOptions)
+namespace functional {
+using SELUFuncOptions = SELUOptions;
+} // namespace functional
 
 // ============================================================================
 
@@ -62,7 +65,9 @@ struct TORCH_API GLUOptions {
   TORCH_ARG(int64_t, dim);
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(GLU, GLUFuncOptions)
+namespace functional {
+using GLUFuncOptions = GLUOptions;
+} // namespace functional
 
 // ============================================================================
 
@@ -79,7 +84,9 @@ struct TORCH_API HardshrinkOptions {
   TORCH_ARG(double, lambda);
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(Hardshrink, HardshrinkFuncOptions)
+namespace functional {
+using HardshrinkFuncOptions = HardshrinkOptions;
+} // namespace functional
 
 // ============================================================================
 
@@ -100,7 +107,9 @@ struct TORCH_API HardtanhOptions {
   TORCH_ARG(bool, inplace) = false;
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(Hardtanh, HardtanhFuncOptions)
+namespace functional {
+using HardtanhFuncOptions = HardtanhOptions;
+} // namespace functional
 
 // ============================================================================
 
@@ -247,7 +256,9 @@ struct TORCH_API PReLUOptions {
   TORCH_ARG(double, init) = 0.25;
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(PReLU, PReLUFuncOptions)
+namespace functional {
+using PReLUFuncOptions = PReLUOptions;
+} // namespace functional
 
 // ============================================================================
 
@@ -264,7 +275,9 @@ struct TORCH_API ReLUOptions {
   TORCH_ARG(bool, inplace);
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(ReLU, ReLUFuncOptions)
+namespace functional {
+using ReLUFuncOptions = ReLUOptions;
+} // namespace functional
 
 // ============================================================================
 
@@ -281,7 +294,9 @@ struct TORCH_API ReLU6Options {
   TORCH_ARG(bool, inplace);
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(ReLU6, ReLU6FuncOptions)
+namespace functional {
+using ReLU6FuncOptions = ReLU6Options;
+} // namespace functional
 
 // ============================================================================
 
@@ -337,7 +352,9 @@ struct TORCH_API CELUOptions {
   TORCH_ARG(bool, inplace) = false;
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(CELU, CELUFuncOptions)
+namespace functional {
+using CELUFuncOptions = CELUOptions;
+} // namespace functional
 
 // ============================================================================
 
@@ -355,7 +372,9 @@ struct TORCH_API SoftplusOptions {
   TORCH_ARG(double, threshold) = 20.0;
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(Softplus, SoftplusFuncOptions)
+namespace functional {
+using SoftplusFuncOptions = SoftplusOptions;
+} // namespace functional
 
 // ============================================================================
 
@@ -372,7 +391,9 @@ struct TORCH_API SoftshrinkOptions {
   TORCH_ARG(double, lambda);
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(Softshrink, SoftshrinkFuncOptions)
+namespace functional {
+using SoftshrinkFuncOptions = SoftshrinkOptions;
+} // namespace functional
 
 // ============================================================================
 
@@ -396,7 +417,9 @@ struct TORCH_API ThresholdOptions {
   TORCH_ARG(bool, inplace) = false;
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(Threshold, ThresholdFuncOptions)
+namespace functional {
+using ThresholdFuncOptions = ThresholdOptions;
+} // namespace functional
 
 // ============================================================================
 

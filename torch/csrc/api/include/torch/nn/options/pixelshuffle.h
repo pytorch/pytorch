@@ -2,7 +2,6 @@
 
 #include <torch/arg.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/nn/options/common.h>
 #include <torch/types.h>
 
 namespace torch {
@@ -22,7 +21,9 @@ struct TORCH_API PixelShuffleOptions {
   TORCH_ARG(int64_t, upscale_factor);
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(PixelShuffle, PixelShuffleFuncOptions)
+namespace functional {
+using PixelShuffleFuncOptions = PixelShuffleOptions;
+} // namespace functional
 
 } // namespace nn
 } // namespace torch
