@@ -140,7 +140,7 @@ struct ConvOptions {
   TORCH_ARG(padding_mode_t, padding_mode) = torch::kZeros;
 };
 
-/// Options for the `Conv1d` module.
+/// `ConvOptions` specialized for the `Conv1d` module.
 ///
 /// Example:
 /// ```
@@ -148,7 +148,7 @@ struct ConvOptions {
 /// ```
 using Conv1dOptions = ConvOptions<1>;
 
-/// Options for the `Conv2d` module.
+/// `ConvOptions` specialized for the `Conv2d` module.
 ///
 /// Example:
 /// ```
@@ -156,7 +156,7 @@ using Conv1dOptions = ConvOptions<1>;
 /// ```
 using Conv2dOptions = ConvOptions<2>;
 
-/// Options for the `Conv3d` module.
+/// `ConvOptions` specialized for the `Conv3d` module.
 ///
 /// Example:
 /// ```
@@ -194,7 +194,7 @@ struct ConvFuncOptions {
   TORCH_ARG(int64_t, groups) = 1;
 };
 
-/// Options for `torch::nn::functional::conv1d`.
+/// `ConvFuncOptions` specialized for `torch::nn::functional::conv1d`.
 ///
 /// Example:
 /// ```
@@ -203,7 +203,7 @@ struct ConvFuncOptions {
 /// ```
 using Conv1dFuncOptions = ConvFuncOptions<1>;
 
-/// Options for `torch::nn::functional::conv2d`.
+/// `ConvFuncOptions` specialized for `torch::nn::functional::conv2d`.
 ///
 /// Example:
 /// ```
@@ -212,7 +212,7 @@ using Conv1dFuncOptions = ConvFuncOptions<1>;
 /// ```
 using Conv2dFuncOptions = ConvFuncOptions<2>;
 
-/// Options for `torch::nn::functional::conv3d`.
+/// `ConvFuncOptions` specialized for `torch::nn::functional::conv3d`.
 ///
 /// Example:
 /// ```
@@ -287,7 +287,7 @@ struct ConvTransposeOptions {
   TORCH_ARG(padding_mode_t, padding_mode) = torch::kZeros;
 };
 
-/// Options for the `ConvTranspose1d` module.
+/// `ConvTransposeOptions` specialized for the `ConvTranspose1d` module.
 ///
 /// Example:
 /// ```
@@ -295,7 +295,7 @@ struct ConvTransposeOptions {
 /// ```
 using ConvTranspose1dOptions = ConvTransposeOptions<1>;
 
-/// Options for the `ConvTranspose2d` module.
+/// `ConvTransposeOptions` specialized for the `ConvTranspose2d` module.
 ///
 /// Example:
 /// ```
@@ -303,7 +303,7 @@ using ConvTranspose1dOptions = ConvTransposeOptions<1>;
 /// ```
 using ConvTranspose2dOptions = ConvTransposeOptions<2>;
 
-/// Options for the `ConvTranspose3d` module.
+/// `ConvTransposeOptions` specialized for the `ConvTranspose3d` module.
 ///
 /// Example:
 /// ```
@@ -344,7 +344,7 @@ struct ConvTransposeFuncOptions {
   TORCH_ARG(ExpandingArray<D>, dilation) = 1;
 };
 
-/// Options for `torch::nn::functional::conv_transpose1d`.
+/// `ConvTransposeFuncOptions` specialized for `torch::nn::functional::conv_transpose1d`.
 ///
 /// Example:
 /// ```
@@ -353,7 +353,7 @@ struct ConvTransposeFuncOptions {
 /// ```
 using ConvTranspose1dFuncOptions = ConvTransposeFuncOptions<1>;
 
-/// Options for `torch::nn::functional::conv_transpose2d`.
+/// `ConvTransposeFuncOptions` specialized for `torch::nn::functional::conv_transpose2d`.
 ///
 /// Example:
 /// ```
@@ -362,7 +362,7 @@ using ConvTranspose1dFuncOptions = ConvTransposeFuncOptions<1>;
 /// ```
 using ConvTranspose2dFuncOptions = ConvTransposeFuncOptions<2>;
 
-/// Options for `torch::nn::functional::conv_transpose3d`.
+/// `ConvTransposeFuncOptions` specialized for `torch::nn::functional::conv_transpose3d`.
 ///
 /// Example:
 /// ```
