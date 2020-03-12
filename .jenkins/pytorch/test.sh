@@ -37,6 +37,7 @@ fi
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # TODO: Move this to Docker
+  sudo apt-get -qq install --no-install-recommends apt-transport-https ca-certificates
   sudo apt-get -qq update
   sudo apt-get -qq install --no-install-recommends libsndfile1
 fi

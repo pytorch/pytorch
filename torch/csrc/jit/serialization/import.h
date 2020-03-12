@@ -16,54 +16,54 @@ class ReadAdapterInterface;
 namespace torch {
 namespace jit {
 
-static script::ExtraFilesMap default_extra_files;
+static ExtraFilesMap default_extra_files;
 
-TORCH_API script::Module import_ir_module(
-    std::shared_ptr<script::CompilationUnit> cu,
+TORCH_API Module import_ir_module(
+    std::shared_ptr<CompilationUnit> cu,
     const std::string& filename,
     c10::optional<c10::Device> device = c10::nullopt,
-    script::ExtraFilesMap& extra_files = default_extra_files);
+    ExtraFilesMap& extra_files = default_extra_files);
 
-TORCH_API script::Module import_ir_module(
-    std::shared_ptr<script::CompilationUnit> cu,
+TORCH_API Module import_ir_module(
+    std::shared_ptr<CompilationUnit> cu,
     std::istream& in,
     c10::optional<c10::Device> device = c10::nullopt,
-    script::ExtraFilesMap& extra_files = default_extra_files);
+    ExtraFilesMap& extra_files = default_extra_files);
 
-TORCH_API script::Module import_ir_module(
-    std::shared_ptr<script::CompilationUnit> cu,
+TORCH_API Module import_ir_module(
+    std::shared_ptr<CompilationUnit> cu,
     std::unique_ptr<caffe2::serialize::ReadAdapterInterface> rai,
     c10::optional<c10::Device> device = c10::nullopt,
-    script::ExtraFilesMap& extra_files = default_extra_files);
+    ExtraFilesMap& extra_files = default_extra_files);
 
-/// Loads a serialized `script::Module` from the given `istream`.
+/// Loads a serialized `Module` from the given `istream`.
 ///
-/// The istream must contain a serialized `script::Module`, exported via
+/// The istream must contain a serialized `Module`, exported via
 /// `torch::jit::ExportModule` in C++.
-TORCH_API script::Module load(
+TORCH_API Module load(
     std::istream& in,
     c10::optional<c10::Device> device = c10::nullopt,
-    script::ExtraFilesMap& extra_files = default_extra_files);
+    ExtraFilesMap& extra_files = default_extra_files);
 
-/// Loads a serialized `script::Module` from the given `filename`.
+/// Loads a serialized `Module` from the given `filename`.
 ///
 /// The file stored at the location given in `filename` must contain a
-/// serialized `script::Module`, exported either via `ScriptModule.save()` in
+/// serialized `Module`, exported either via `ScriptModule.save()` in
 /// Python or `torch::jit::ExportModule` in C++.
-TORCH_API script::Module load(
+TORCH_API Module load(
     const std::string& filename,
     c10::optional<c10::Device> device = c10::nullopt,
-    script::ExtraFilesMap& extra_files = default_extra_files);
+    ExtraFilesMap& extra_files = default_extra_files);
 
-/// Loads a serialized `script::Module` from the given `rai`.
+/// Loads a serialized `Module` from the given `rai`.
 ///
 /// The reader adapter, which is for customized input stream, must contain a
-/// serialized `script::Module`, exported either via `ScriptModule.save()` in
+/// serialized `Module`, exported either via `ScriptModule.save()` in
 /// Python or `torch::jit::ExportModule` in C++.
-TORCH_API script::Module load(
+TORCH_API Module load(
     std::unique_ptr<caffe2::serialize::ReadAdapterInterface> rai,
     c10::optional<c10::Device> device = c10::nullopt,
-    script::ExtraFilesMap& extra_files = default_extra_files);
+    ExtraFilesMap& extra_files = default_extra_files);
 
 TORCH_API IValue readArchiveAndTensors(
     const std::string& archive_name,
