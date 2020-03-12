@@ -18,7 +18,7 @@ static int THCTensor_(equalImpl)(THCState *state, THCTensor *self_, THCTensor *s
   // Both tensors are empty
   if(THTensor_(nElement)(self_) == 0) return true;
 
-  THCudaByteTensor *buf = THCudaByteTensor_newWithSize(state, self_->sizes(), {});
+  THCudaByteTensor *buf = at::empty_like(THTensor_wrap(self_), at::kByte).unsafeReleaseTensorImpl();
 
   if (!THC_pointwiseApply3<uint8_t, scalar_t, scalar_t>(state, buf, self_, src_, TensorEQOp<scalar_t, unsigned char>())) {
     THArgCheck(false, 2, CUTORCH_DIM_WARNING);
