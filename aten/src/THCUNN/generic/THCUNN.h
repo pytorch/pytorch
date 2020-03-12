@@ -189,7 +189,7 @@ THC_API void THNN_(RReLU_updateOutput)(
                   double upper,
                   bool train,
                   bool inplace,
-                  at::GeneratorHolder generator);
+                  at::Generator generator);
 
 THC_API void THNN_(RReLU_updateGradInput)(
                   THCState *state,

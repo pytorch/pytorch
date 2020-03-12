@@ -1123,7 +1123,7 @@ struct CAFFE2_API GeneratorType : public Type {
     return rhs.kind() == kind();
   }
   std::string str() const override {
-    return "GeneratorHolder";
+    return "Generator";
   }
   static const TypeKind Kind = TypeKind::GeneratorType;
   // global singleton
@@ -1363,7 +1363,7 @@ struct getTypePtr_<c10::QScheme> final {
   }
 };
 template <>
-struct getTypePtr_<at::GeneratorHolder> final {
+struct getTypePtr_<at::Generator> final {
   static TypePtr call() {
     return OptionalType::create(GeneratorType::get());
   }

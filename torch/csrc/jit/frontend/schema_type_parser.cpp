@@ -34,7 +34,7 @@ namespace jit {
 
 TypePtr SchemaTypeParser::parseBaseType() {
   static std::unordered_map<std::string, TypePtr> type_map = {
-      {"GeneratorHolder", GeneratorType::get()},
+      {"Generator", GeneratorType::get()},
       {"Dimname", StringType::get()},
       {"ScalarType", IntType::get()},
       {"Layout", IntType::get()},

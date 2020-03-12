@@ -178,7 +178,7 @@ static struct PyMemberDef THPGenerator_members[] = {
 
 PyTypeObject THPGeneratorType = {
   PyVarObject_HEAD_INIT(nullptr, 0)
-  "torch._C.GeneratorHolder",                   /* tp_name */
+  "torch._C.Generator",                   /* tp_name */
   sizeof(THPGenerator),                        /* tp_basicsize */
   0,                                           /* tp_itemsize */
   (destructor)THPGenerator_dealloc,            /* tp_dealloc */

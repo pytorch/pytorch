@@ -39,19 +39,19 @@ def type_argument_translations(arg):
         annotation = match.group(2)
 
     # XXX: is_nullable flag can only annotate entire type as optional type,
-    # need to special case GeneratorHolder? logic to make ? only available in jit
+    # need to special case Generator? logic to make ? only available in jit
     # TODO: deprecate is_nullable global flag, and parse the type
     # to support annotating complicated types with optional annotation
-    nullable = (t != 'GeneratorHolder?' and '?' in t)
+    nullable = (t != 'Generator?' and '?' in t)
 
-    # This enables "GeneratorHolder? x = None and translates to legacy
-    # "GeneratorHolder x = nullptr". See [temp translations].
-    if t == 'GeneratorHolder?' and default == 'None':
-        t = 'GeneratorHolder'
+    # This enables "Generator? x = None and translates to legacy
+    # "Generator x = nullptr". See [temp translations].
+    if t == 'Generator?' and default == 'None':
+        t = 'Generator'
         default = 'nullptr'
-    # Enables GeneratorHolder? by translating to legacy Generator*.
-    elif t == "GeneratorHolder?":
-        t = 'GeneratorHolder'
+    # Enables Generator? by translating to legacy Generator*.
+    elif t == "Generator?":
+        t = 'Generator'
     # Enables Tensor[] by translating to legacy TensorList.
     elif t == 'Tensor[]' or t == 'Tensor?[]':
         t = 'TensorList'
@@ -104,8 +104,8 @@ def type_argument_translations(arg):
         size = int(match.group(1))
 
     # Legacy type sanitization. TODO: Do we really need this?
-    if t == 'GeneratorHolder':
-        t = 'GeneratorHolder'
+    if t == 'Generator':
+        t = 'Generator'
 
     if not default:
         pass

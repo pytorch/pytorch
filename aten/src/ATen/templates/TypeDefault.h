@@ -22,7 +22,7 @@ using TensorList = ArrayRef<Tensor>;
 
 class Context;
 struct GeneratorImpl;
-typedef std::shared_ptr<GeneratorImpl> GeneratorHolder;
+typedef std::shared_ptr<GeneratorImpl> Generator;
 
 struct Quantizer;
 // This is temporary typedef to enable Quantizer in aten native function API

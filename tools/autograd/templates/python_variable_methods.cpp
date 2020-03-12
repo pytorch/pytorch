@@ -40,7 +40,7 @@ using at::Backend;
 using at::Scalar;
 using at::ScalarType;
 using at::Tensor;
-using at::GeneratorHolder;
+using at::Generator;
 using namespace torch::autograd::utils;
 
 namespace torch { namespace autograd {

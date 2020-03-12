@@ -84,7 +84,7 @@ struct CAFFE2_API GeneratorImpl {
     virtual GeneratorImpl* clone_impl() const = 0;
 };
 
-typedef std::shared_ptr<GeneratorImpl> GeneratorHolder;
+typedef std::shared_ptr<GeneratorImpl> Generator;
 
 namespace detail {
 

@@ -26,19 +26,19 @@ struct TestCPUGenerator : public GeneratorImpl {
   uint64_t value_;
 };
 
-Tensor& random_(Tensor& self, GeneratorHolder generator) {
+Tensor& random_(Tensor& self, Generator generator) {
   return at::native::templates::random_impl<native::templates::cpu::RandomKernel, TestCPUGenerator*>(self, generator);
 }
 
-Tensor& random_from_to(Tensor& self, int64_t from, optional<int64_t> to, GeneratorHolder generator) {
+Tensor& random_from_to(Tensor& self, int64_t from, optional<int64_t> to, Generator generator) {
   return at::native::templates::random_from_to_impl<native::templates::cpu::RandomFromToKernel, TestCPUGenerator*>(self, from, to, generator);
 }
 
-Tensor& random_to(Tensor& self, int64_t to, GeneratorHolder generator) {
+Tensor& random_to(Tensor& self, int64_t to, Generator generator) {
   return random_from_to(self, 0, to, generator);
 }
 
-Tensor& custom_rng_cauchy_(Tensor& self, double median, double sigma, GeneratorHolder generator) {
+Tensor& custom_rng_cauchy_(Tensor& self, double median, double sigma, Generator generator) {
   auto gen = (TestCPUGenerator*)(generator.get());
   auto iter = TensorIterator::nullary_op(self);
   native::templates::cpu::cauchy_kernel(iter, median, sigma, gen);
@@ -50,16 +50,16 @@ class RNGTest : public ::testing::Test {
   void SetUp() override {
     static auto registry = torch::RegisterOperators()
       .op(torch::RegisterOperators::options()
-        .schema("aten::random_.from(Tensor(a!) self, int from, int? to, *, GeneratorHolder? generator=None) -> Tensor(a!)")
+        .schema("aten::random_.from(Tensor(a!) self, int from, int? to, *, Generator? generator=None) -> Tensor(a!)")
         .impl_unboxedOnlyKernel<decltype(random_from_to), &random_from_to>(DispatchKey::CustomRNGKeyId))
       .op(torch::RegisterOperators::options()
-        .schema("aten::random_.to(Tensor(a!) self, int to, *, GeneratorHolder? generator=None) -> Tensor(a!)")
+        .schema("aten::random_.to(Tensor(a!) self, int to, *, Generator? generator=None) -> Tensor(a!)")
         .impl_unboxedOnlyKernel<decltype(random_to), &random_to>(DispatchKey::CustomRNGKeyId))
       .op(torch::RegisterOperators::options()
-        .schema("aten::random_(Tensor(a!) self, *, GeneratorHolder? generator=None) -> Tensor(a!)")
+        .schema("aten::random_(Tensor(a!) self, *, Generator? generator=None) -> Tensor(a!)")
         .impl_unboxedOnlyKernel<decltype(random_), &random_>(DispatchKey::CustomRNGKeyId))
       .op(torch::RegisterOperators::options()
-        .schema("aten::cauchy_(Tensor(a!) self, float median=0, float sigma=1, *, GeneratorHolder? generator=None) -> Tensor(a!)")
+        .schema("aten::cauchy_(Tensor(a!) self, float median=0, float sigma=1, *, Generator? generator=None) -> Tensor(a!)")
         .impl_unboxedOnlyKernel<decltype(custom_rng_cauchy_), &custom_rng_cauchy_>(DispatchKey::CustomRNGKeyId));
   }
 };
