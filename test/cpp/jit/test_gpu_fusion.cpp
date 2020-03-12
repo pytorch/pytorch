@@ -388,7 +388,7 @@ void testGPU_FusionTVSplit() {
 
   TensorView* tv = new TensorView(Tensor::MakeDummyTensor(3));
 
-  tv = split(tv, 2, 2);
+  tv = tv->split(2, 2);
   std::cout << "Split: " << tv << std::endl;
 
   std::cout << "Split fusion output: " << fusion << std::endl;
@@ -400,7 +400,7 @@ void testGPU_FusionTVMerge() {
 
   TensorView* tv = new TensorView(Tensor::MakeDummyTensor(3));
 
-  tv = merge(tv, 1);
+  tv = tv->merge(1);
 
   std::cout << "Merge fusion output: " << fusion << std::endl;
 }
@@ -421,25 +421,25 @@ void testGPU_FusionTVReorder() {
   TensorView* ref = new TensorView(dummyTensor);
   TensorView* tv = new TensorView(dummyTensor);
 
-  TensorView* s_leftl = reorder(tv, shift_left);
+  TensorView* s_leftl = tv->reorder(shift_left);
   for (int i = 0; i < tv->domain()->size(); i++)
-    TORCH_CHECK(ref->domain()->axis(i) == s_leftl->domain()->axis(i - 1));
+    TORCH_CHECK(ref->axis(i) == s_leftl->axis(i - 1));
 
   tv = new TensorView(dummyTensor);
-  TensorView* s_left2 = reorder(tv, shift_left);
+  TensorView* s_left2 = tv->reorder(shift_left);
   for (int i = 0; i < tv->domain()->size(); i++)
-    TORCH_CHECK(ref->domain()->axis(i) == s_left2->domain()->axis(i - 1));
+    TORCH_CHECK(ref->axis(i) == s_left2->axis(i - 1));
 
   tv = new TensorView(dummyTensor);
-  TensorView* s_right = reorder(tv, shift_right);
+  TensorView* s_right = tv->reorder(shift_right);
   for (int i = 0; i < tv->domain()->size(); i++)
-    TORCH_CHECK(ref->domain()->axis(i - 1) == s_right->domain()->axis(i));
+    TORCH_CHECK(ref->axis(i - 1) == s_right->axis(i));
 
   tv = new TensorView(dummyTensor);
-  TensorView* rswap = reorder(tv, swap);
-  TORCH_CHECK(ref->domain()->axis(0) == rswap->domain()->axis(2));
-  TORCH_CHECK(ref->domain()->axis(2) == rswap->domain()->axis(0));
-  TORCH_CHECK(ref->domain()->axis(1) == rswap->domain()->axis(1));
+  TensorView* rswap = tv->reorder(swap);
+  TORCH_CHECK(ref->axis(0) == rswap->axis(2));
+  TORCH_CHECK(ref->axis(2) == rswap->axis(0));
+  TORCH_CHECK(ref->axis(1) == rswap->axis(1));
 }
 
 void testGPU_FusionEquality() {
@@ -532,13 +532,13 @@ void testGPU_FusionComputeAt() {
   ASSERT_ANY_THROW(tv0->computeAt(tv2, 3));
 
   //[I0, I1, I3]
-  tv2 = split(tv2, 0, 4);
+  tv2 = tv2->split(0, 4);
   //[I0o, I0i{4}, I1, I3]
-  tv2 = merge(tv2, 1);
+  tv2 = tv2->merge(1);
   //[I0o, I0i{4}*I1, I3]
-  tv2 = split(tv2, -1, 2);
+  tv2 = tv2->split(-1, 2);
   //[I0o, I0i{4}*I1, I3o, I3i{2}]
-  tv2 = reorder(tv2, {{0, 1}, {1, 0}, {3, 2}});
+  tv2 = tv2->reorder({{0, 1}, {1, 0}, {3, 2}});
   //[I0i{4}*I1, I0o, I3i, I3o{2}]
   std::cout << "Replaying: " << td << "\n-> " << tv2 << "\n on " << tv0
             << " and " << tv1 << "\nwith \'compute_at(2)\' produces:\n"
@@ -567,14 +567,13 @@ void testGPU_FusionComputeAt2() {
   TensorView* tv1 = static_cast<TensorView*>(add(tv0, new Float(1.0)));
   
   //[I0, I1, I2, I3]
-  tv1 = split(tv1, -1, 4);
+  tv1 = tv1->split(-1, 4);
   //[I0, I1, I2, I3o, I3i{4}]
-  tv1 = reorder(tv1, {{3, 0}, {0, 3}, {1, 4}, {4, 1}});
+  tv1 = tv1->reorder({{3, 0}, {0, 3}, {1, 4}, {4, 1}});
   //[I3o, I3i{4}, I2, I0, I1]
-  tv1 = split(tv1, 3, 2);
+  tv1 = tv1->split(3, 2);
   //[I3o, I3i{4}, I2, I0o, I0i{2}, I1]
-  tv1 = reorder(
-      tv1,
+  tv1 = tv1->reorder(
       {
           {3, 0}, {4, 1}, {5, 2}, {2, 3}
           //{0, 4} //doesn't need to be specified
@@ -612,15 +611,13 @@ void testGPU_FusionComputeAt3() {
   //tv3 = tv2 + 4
   std::cout << "Replaying " << tv3 << "->";
   //[I0, I1]
-  tv3 = split(tv3, 0, 4);
+  tv3 = tv3->split(0, 4);
   //[I0o, I0i{4}, I1]
-  tv3 = reorder(tv3, {{2, 0}});
+  tv3 = tv3->reorder({{2, 0}});
   //[I1, I0o, I0i{4}]
-  tv3 = split(tv3, 0, 2);
+  tv3 = tv3->split(0, 2);
   //[I1o, I1i{2} I0o, I0i{4}]
-  tv3 = reorder(
-      tv3,
-      { {0, 2}, {1, 3} });
+  tv3 = tv3->reorder( { {0, 2}, {1, 3} } );
   //[I0o, I0i{4}, I1o, I1i{2}]
 
   std::cout << tv3 <<std::endl;
@@ -768,9 +765,9 @@ void testGPU_FusionTwoAdds() {
   /**** Tensor Expressions   ****/ 
  
   // [x] -> [16/4=4, 4]
-  TV4 = split(TV4, -1, 4);
+  TV4 = TV4->split(-1, 4);
   // [x/4, 4] -> [16/4=4, 4/2=2, 2]
-  TV4 = split(TV4, -1, 2); 
+  TV4 = TV4->split(-1, 2); 
 
   // Compute T3 at inner loop of T4 but allow vectorization.
   TV3->computeAt(TV4, 1);
@@ -796,13 +793,13 @@ void testGPU_FusionCodeGen() {
   TensorView* tv2 = static_cast<TensorView*>(add(tv1, new Float(3.0)));
 
   //[I0, I1, I2]
-  tv2 = split(tv2, 0, 4);
+  tv2 = tv2->split(0, 4);
   //[I0o, I0i{4}, I1, I2]
-  tv2 = merge(tv2, 1);
+  tv2 = tv2->merge(1);
   //[I0o, I0i{4}*I1, I2]
-  tv2 = split(tv2, -1, 2);
+  tv2 = tv2->split(-1, 2);
   //[I0o, I0i{4}*I1, I2o, I2i{2}]
-  tv2 = reorder(tv2, {{0, 1}, {1, 0}, {3, 2}});
+  tv2 = tv2->reorder( {{0, 1}, {1, 0}, {3, 2}} );
   //[I0i{4}*I1, I0o, I2i{2}, I2o]
   fusion.addOutput(tv2);
 
@@ -905,20 +902,20 @@ void testGPU_FusionCodeGen2() {
   fusion.addOutput(tv3);
 
   //[I0, I1, I2]
-  reorder(tv3, {{0, 2}, {2, 0}});
+  tv3->reorder({{0, 2}, {2, 0}});
   //[I2, I1, I0]
-  split(tv3, -1, 4);
+  tv3->split(-1, 4);
   //[I2, I1, I0o, I0i{4}]
-  reorder(tv3, {{2, 0}, {3, 1}, {0, 3}});
+  tv3->reorder({{2, 0}, {3, 1}, {0, 3}});
   //I0o, I0i{4}, I1, I2]
 
 
   tv0->computeAt(tv3, 1);
   tv1->computeAt(tv3, 1);
   
-  tv3->domain()->axis(0)->parallelize(ParallelType::BIDx);
-  tv2->domain()->axis(-1)->parallelize(ParallelType::TIDx);
-  tv3->domain()->axis(-1)->parallelize(ParallelType::TIDx);
+  tv3->axis(0)->parallelize(ParallelType::BIDx);
+  tv2->axis(-1)->parallelize(ParallelType::TIDx);
+  tv3->axis(-1)->parallelize(ParallelType::TIDx);
   
 
   //std::cout<<fusion<<std::endl;
@@ -1008,21 +1005,21 @@ void testGPU_FusionSimplePWise() {
 
   // Do transformations, remember, transformations are outputs to inputs
   // This doesn't have to be in this order
-  merge(tv3, 1);
-  merge(tv3, 0);
+  tv3->merge(1);
+  tv3->merge(0);
   
   // Split by n_threads
-  split(tv3, -1, 128*2);
-  split(tv3, -1, 128);
+  tv3->split(-1, 128*2);
+  tv3->split(-1, 128);
 
   //For all inputs, computeAt the output inline, temporaries should be squeezed between them
   tv0->computeAt(tv3, -1);
   tv1->computeAt(tv3, -1);
 
   //Parallelize TV3  
-  tv3->domain()->axis(0)->parallelize(ParallelType::BIDx);
-  tv3->domain()->axis(-2)->parallelize(ParallelType::TIDy);
-  tv3->domain()->axis(-1)->parallelize(ParallelType::TIDx);
+  tv3->axis(0)->parallelize(ParallelType::BIDx);
+  tv3->axis(-2)->parallelize(ParallelType::TIDy);
+  tv3->axis(-1)->parallelize(ParallelType::TIDx);
   
 
   std::cout
@@ -1065,8 +1062,8 @@ void testGPU_FusionExecKernel() {
   tv1->computeAt(tv3, -1);
 
   //Parallelize TV3  
-  tv3->domain()->axis(0)->parallelize(ParallelType::BIDx);
-  tv3->domain()->axis(-1)->parallelize(ParallelType::TIDx);
+  tv3->axis(0)->parallelize(ParallelType::BIDx);
+  tv3->axis(-1)->parallelize(ParallelType::TIDx);
   
   torch::jit::fuser::cuda::CudaKernel prog;
   prog.device_ = 0;

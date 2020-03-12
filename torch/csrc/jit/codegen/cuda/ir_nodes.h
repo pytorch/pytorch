@@ -325,13 +325,7 @@ struct TORCH_API Merge : public Expr {
   TensorDomain* in() const noexcept { return in_; }
   int axis() const noexcept { return axis_; }
 
-  bool sameAs(const Merge* const other) const{
-    return(
-         out()->sameAs(other->out())
-      && in()->sameAs(other->in())
-      && axis() == other->axis()
-    );
-  }
+  bool sameAs(const Merge* const other) const;
 
  private:
   TensorDomain* const out_;

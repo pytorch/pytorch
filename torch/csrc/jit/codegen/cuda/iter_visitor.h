@@ -19,6 +19,20 @@ struct Fusion;
 
 enum class ValType;
 
+/*
+ * IterVisitor walks a Fusion topologically ordered from outputs of the fusion.
+ * By default outputs are any leaf Vars that don't have uses, but can be set to
+ * registered outputs of the Fusion. On every node handle(NodeType*) will be
+ * called (topologically ordered).
+ *
+ * stopCondition can be overridden if it is desired to stop the traversal at any
+ * particular point. toVisitCallback can also be overridden and will be called
+ * when a node is added to the to_visit queue. The use of these two functions
+ * can be seen in DependencyCheck which uses them to find if a value is in the
+ * dependency chain of another value. stopCondition is called when the value is
+ * found to stop traversal. toVisitCallback is used to maintain a dependency
+ * stack.
+ */
 struct TORCH_API IterVisitor : public OptOutDispatch{
   virtual ~IterVisitor() = default;
 

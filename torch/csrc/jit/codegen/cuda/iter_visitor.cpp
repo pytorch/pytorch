@@ -12,10 +12,6 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
-/*
- * Base IterVisitor calls
- */ 
-
 std::vector<Statement*> IterVisitor::next(
     Statement* statement) {
   if (statement->isVal())
@@ -110,19 +106,6 @@ void IterVisitor::traverse(
   traverseFrom(fusion, outputs_to_visit);
 }
 
-//Debug function
-/*
-std::ostream& operator<<(std::ostream& os, std::stack<Val*> vals) {
-  os<<"<";
-  while(!vals.empty()){
-    os<<vals.top();
-    vals.pop();
-    if(!vals.empty())
-      os<<", ";
-  }
-  return os<<">";
-}
-*/
 void DependencyCheck::handle(Val* val){
   //Debug dependency chain
   if(val->sameAs(dependency_))

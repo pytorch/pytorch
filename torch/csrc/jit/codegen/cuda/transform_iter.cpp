@@ -77,18 +77,18 @@ TensorDomain* TransformIter::runBackward(
 }
 
 TensorView* TransformIter::replay(Split* expr, TensorView* tv) {
-  return split(tv, expr->axis(), static_cast<Int*>(expr->factor())->value().value());
+  return tv->split(expr->axis(), static_cast<Int*>(expr->factor())->value().value());
 }
 
 TensorView* TransformIter::replay(Merge* expr, TensorView* tv) {
-  return merge(tv, expr->axis());
+  return tv->merge(expr->axis());
 }
 
 TensorView* TransformIter::replay(Reorder* expr, TensorView* tv) {
   std::unordered_map<int, int> axis2pos;
   for(decltype(expr->pos2axis().size()) i{0}; i<expr->pos2axis().size(); i++)
     axis2pos[expr->pos2axis()[i]] = i;
-  return reorder(tv, axis2pos);
+  return tv->reorder(axis2pos);
 }
 
 TensorView* TransformIter::replay(Expr* expr, TensorView* tv) {

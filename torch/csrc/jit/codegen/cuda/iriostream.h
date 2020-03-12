@@ -41,7 +41,7 @@ struct Add;
  * Define pretty printing functions for all nodes. handle is used so we can take
  * advantage of OptInConstDispatch. Where we will throw an error if a print
  * function is not defined for a node. Stream operator << is also provided for
- * Fusion&/* and Statement* which allow us to print any node through stream
+ * Fusion&, Fusion* and Statement* which allow us to print any node through stream
  * operator <<.
  */
 

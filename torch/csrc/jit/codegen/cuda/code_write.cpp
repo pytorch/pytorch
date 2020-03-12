@@ -319,7 +319,7 @@ void CodeWrite::printAlloc(TensorView* tv) {
 
   Int* size = new Int(1);
   for (auto i = tv->getComputeAtAxis(); i < tv->domain()->size(); i++) {
-    size = static_cast<Int*>(mul(size, tv->domain()->axis(i)->size()));
+    size = static_cast<Int*>(mul(size, tv->axis(i)->size()));
   }
 
   indent();
@@ -358,7 +358,7 @@ void CodeWrite::updateView(TensorView* tv) {
     printAlloc(tv);
 
     for (int i = fors.size(); i < tv->domain()->size(); i++)
-      openFor(tv->getAxis(i));
+      openFor(tv->getComputeAtAxis(i));
     reset_fors = true;
 
   } else {
@@ -371,7 +371,7 @@ void CodeWrite::updateView(TensorView* tv) {
     // Allocate tv if not input/output
     printAlloc(tv);
     for (int i = fors.size(); i < tv->domain()->size(); i++)
-      openFor(tv->getAxis(i));
+      openFor(tv->getComputeAtAxis(i));
   }
 }
 

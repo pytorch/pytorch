@@ -67,7 +67,7 @@ TensorView* TransformReplay::replay(Split* expr, TensorView* tv) {
         real_axis != -1,
         "During transformation replay attempted to split an imaginary axis.");
     // Replay split
-    split(tv, real_axis, *(expr->factor()->value()));
+    tv->split(real_axis, *(expr->factor()->value()));
     // Inserted a real axis, push everything in axis_map over to the right
     // after this inserted axis
     for (int i = 0; i < axis_map.size(); i++)
@@ -96,7 +96,7 @@ TensorView* TransformReplay::replay(Merge* expr, TensorView* tv) {
         axis_map[axis] != -1 && axis_map[axis + 1] != -1,
         "During transformation replay attempted to merge an imaginary axis.");
     // Replay merge
-    merge(tv, axis_map[axis]);
+    tv->merge(axis_map[axis]);
   } else {
     // If we aren't applying the merge, we won't change any following axis
     // Doesn't matter which axis we propagate for the merge in the axis_map
@@ -166,7 +166,7 @@ TensorView* TransformReplay::replay(Reorder* expr, TensorView* tv) {
   }
 
   // replay reorder
-  reorder(tv, axis2pos);
+  tv->reorder(axis2pos);
 
   // Fake transform:
   for (decltype(pos2axis.size()) i = 0; i < pos2axis.size(); i++) {

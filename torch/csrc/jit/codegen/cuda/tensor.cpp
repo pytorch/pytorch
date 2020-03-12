@@ -55,7 +55,7 @@ const c10::optional<TensorContiguity>& Tensor::getContiguityInfo() const {
   return contiguity_;
 }
 
-TensorView* split(TensorView* tv, int axis, int factor) {
+TensorView* split_(TensorView* tv, int axis, int factor) {
   TensorDomain* td = tv->domain();
 
   if (axis < 0)
@@ -66,7 +66,8 @@ TensorView* split(TensorView* tv, int axis, int factor) {
   IterDomain* id = td->axis(axis);
 
   if (id->parallel_method() != ParallelType::Serial)
-    TORCH_CHECK(false,
+    TORCH_CHECK(
+        false,
         "Splitting an axis of non-Serial iteration is not supported at this time."
         " Parallelization strategy must be set after calling split.");
 
@@ -104,9 +105,9 @@ TensorView* split(TensorView* tv, int axis, int factor) {
   return tv;
 }
 
-TensorView* merge(TensorView* tv, int axis) {
+TensorView* merge_(TensorView* tv, int axis) {
   TensorDomain* td = tv->domain();
-  
+
   if (axis < 0)
     axis += td->size();
 
@@ -146,7 +147,7 @@ TensorView* merge(TensorView* tv, int axis) {
  * Takes axis2pos map, axis2pos[old_pos] = new_pos, to modify the ordering of
  * the iter axes.
  */
-TensorView* reorder(TensorView* tv, std::unordered_map<int, int> axis2pos) {
+TensorView* reorder_(TensorView* tv, std::unordered_map<int, int> axis2pos) {
   TensorDomain* td = tv->domain();
   auto ndims = td->size();
   // Map to save from previous order, to new order.
@@ -174,7 +175,8 @@ TensorView* reorder(TensorView* tv, std::unordered_map<int, int> axis2pos) {
   old_positions.erase(-1);
 
   if (old_positions.size() != axis2pos.size())
-    TORCH_INTERNAL_ASSERT(false, "Reorder found duplicate destination positions.");
+    TORCH_INTERNAL_ASSERT(
+        false, "Reorder found duplicate destination positions.");
 
   std::set<int> all_positions;
   for (int i = 0; i < ndims; i++)
@@ -202,8 +204,7 @@ TensorView* reorder(TensorView* tv, std::unordered_map<int, int> axis2pos) {
   if (tv->getComputeAtView() != nullptr) {
     for (int i = 0; i < tv->getComputeAtAxis(); i++) {
       if (pos2axis[i] != i)
-        TORCH_CHECK(false, 
-            "Cannot reorder axis within compute at range.");
+        TORCH_CHECK(false, "Cannot reorder axis within compute at range.");
     }
   }
 
@@ -219,30 +220,39 @@ TensorView* reorder(TensorView* tv, std::unordered_map<int, int> axis2pos) {
 }
 
 TensorView* TensorView::clone() const {
-    TensorView* new_view = new TensorView(tensor_, domain_);
-    new_view->compute_at_view_ = compute_at_view_;
-    new_view->compute_at_axis_ = compute_at_axis_;
-    return new_view;
-  }
+  TensorView* new_view = new TensorView(tensor_, domain_);
+  new_view->compute_at_view_ = compute_at_view_;
+  new_view->compute_at_axis_ = compute_at_axis_;
+  return new_view;
+}
 
 TensorView* TensorView::newForOutput(DataType dtype) const {
   std::vector<IterDomain*> domain_copy;
-  for(decltype(this->domain()->size()) i = 0; i<this->domain()->size(); i++){
-    //If reduction axis, don't copy it over. Reduction axes are owned by consumers
-    //and we're copying over a producer.
-    if(this->domain()->axis(i)->isReduction())
+  for (decltype(this->domain()->size()) i = 0; i < this->domain()->size();
+       i++) {
+    // If reduction axis, don't copy it over. Reduction axes are owned by
+    // consumers and we're copying over a producer.
+    if (this->domain()->axis(i)->isReduction())
       continue;
     domain_copy.push_back(new IterDomain(this->domain()->axis(i)->size()));
-    
   }
-  TensorDomain *td = new TensorDomain(domain_copy);
+  TensorDomain* td = new TensorDomain(domain_copy);
   return new TensorView(td, dtype);
 };
 
-void TensorView::resetView(){
+void TensorView::resetView() {
   setDomain(TransformIter::getRoot(this->domain()));
   compute_at_view_ = nullptr;
   compute_at_axis_ = 0;
+}
+
+bool TensorView::sameAs(const TensorView* const other) const {
+  bool same_tensor = tensor() == nullptr || other->tensor() == nullptr
+      ? tensor() == nullptr && other->tensor() == nullptr
+      : tensor()->sameAs(other->tensor());
+  return (
+      same_tensor && domain()->sameAs(other->domain()) &&
+      getDataType().value() == other->getDataType().value());
 }
 
 TensorView* TensorView::computeAt(TensorView* consumer, int axis) {
@@ -253,14 +263,16 @@ TensorView* TensorView::computeAt(TensorView* consumer, int axis) {
    *
    * Compute at modifies this, not consumer.
    */
-  TORCH_CHECK(!this->sameAs(consumer), 
-    "Cannot call this->computeAt(this, ...)");
-  if(axis < 0)
-    //Compute at is funny where size is the maximum acceptable value instead of size-1
-    axis +=  consumer->domain()->size() + 1;
+  TORCH_CHECK(
+      !this->sameAs(consumer), "Cannot call this->computeAt(this, ...)");
+  if (axis < 0)
+    // Compute at is funny where size is the maximum acceptable value instead of
+    // size-1
+    axis += consumer->domain()->size() + 1;
 
-  TORCH_CHECK(axis >= 0 && axis < consumer->domain()->size() + 1,
-    "Compute at called on an axis outside valid range.");
+  TORCH_CHECK(
+      axis >= 0 && axis < consumer->domain()->size() + 1,
+      "Compute at called on an axis outside valid range.");
 
   std::stack<Val*> dep_chain =
       DependencyCheck::getDependencyChain(this, consumer);
@@ -275,8 +287,9 @@ TensorView* TensorView::computeAt(TensorView* consumer, int axis) {
   while (!dep_chain.empty()) {
     Val* val = dep_chain.top();
     dep_chain.pop();
-    TORCH_INTERNAL_ASSERT(val->getValType() == ValType::TensorView,
-    "When following the transform dependency chain, an invalid value was found.");
+    TORCH_INTERNAL_ASSERT(
+        val->getValType() == ValType::TensorView,
+        "When following the transform dependency chain, an invalid value was found.");
     TensorView* tv = static_cast<TensorView*>(val);
     if (tv->sameAs(consumer))
       continue;
@@ -300,8 +313,9 @@ TensorView* TensorView::computeAt(TensorView* consumer, int axis) {
         continue;
 
       if (DependencyCheck::isDependencyOf(running_consumer, other_consumer)) {
-        // There seem to be two choices here, either running_consumer or consumer
-        // I believe they end up being equivelent, but uncertain they actually are.
+        // There seem to be two choices here, either running_consumer or
+        // consumer I believe they end up being equivelent, but uncertain they
+        // actually are.
         running_consumer->computeAt(other_consumer, axis);
       } else {
         other_consumer->computeAt(running_consumer, axis);

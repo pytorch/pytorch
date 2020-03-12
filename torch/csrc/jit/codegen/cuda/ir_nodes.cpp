@@ -55,8 +55,8 @@ bool BinaryOp::sameAs(const BinaryOp* other) const {
 
 IterDomain::IterDomain(
     Int* _size,
-    ParallelType _parallel_method = ParallelType::Serial,
-    bool _reduction_domain = false)
+    ParallelType _parallel_method,
+    bool _reduction_domain)
     : Val(ValType::IterDomain, DataType::Int),
       size_(_size),
       parallel_method_(_parallel_method),
@@ -64,8 +64,8 @@ IterDomain::IterDomain(
 
 IterDomain::IterDomain(
     Val* int_size,
-    ParallelType _parallel_method = ParallelType::Serial,
-    bool _reduction_domain = false)
+    ParallelType _parallel_method,
+    bool _reduction_domain)
     : Val(ValType::IterDomain, DataType::Int),
       size_(static_cast<Int*>(int_size)),
       parallel_method_(_parallel_method),

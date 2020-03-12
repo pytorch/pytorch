@@ -69,9 +69,9 @@ public:
       
       //Merge all dimensions because we're only supporting pointwise
       while(out->domain()->size() > 1)
-        merge(out, 0);
+        out->merge(0);
       //Split into 128 so we can map blocks/threads
-      split(out, 0, 128);
+      out->split(0, 128);
 
       //Map blocks/threads
       out->domain()->axis(0)->parallelize(ParallelType::BIDx);
