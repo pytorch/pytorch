@@ -2487,7 +2487,7 @@ class TestComparatorOps(TestCase):
 # a
 #
 # commit 2
-# a
+# a, updated to b
 #
 # commit 3
 # a
