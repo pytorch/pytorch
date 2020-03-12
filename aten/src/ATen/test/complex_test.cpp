@@ -2,32 +2,27 @@
 #include "c10/util/Complex.h"
 
 template<typename T, typename int_t>
-static void TestIntegerOp(T real, T img, int_t i) {
+static void TestBinaryOpForIntType(T real, T img, int_t num) {
   std::complex<T> c(real, img);
-  ASSERT_EQ(c + i, std::complex<T>(real + i, img + i));
-  ASSERT_EQ(i + c, std::complex<T>(i + real, i + img));
-  ASSERT_EQ(c - i, std::complex<T>(real - i, img - i));
-  ASSERT_EQ(i - c, std::complex<T>(i - real, i - img));
-  ASSERT_EQ(c * i, std::complex<T>(real * i, img * i));
-  ASSERT_EQ(i * c, std::complex<T>(i * real, i * img));
-  ASSERT_EQ(c / i, std::complex<T>(real / i, img / i));
-  ASSERT_EQ(i / c, std::complex<T>(i / real, i / img));
+  ASSERT_EQ(c + num, std::complex<T>(real + num, img + num));
+  ASSERT_EQ(num + c, std::complex<T>(num + real, num + img));
+  ASSERT_EQ(c - num, std::complex<T>(real - num, num - num));
+  ASSERT_EQ(num - c, std::complex<T>(num - real, num - img));
+  ASSERT_EQ(c * num, std::complex<T>(real * num, img * num));
+  ASSERT_EQ(num * c, std::complex<T>(num * real, num * img));
+  ASSERT_EQ(c / num, std::complex<T>(real / num, img / num));
+  ASSERT_EQ(num / c, std::complex<T>(num / real, num / img));
 }
 
-static void TestIntegerOpAllTypes(float real, float img, int8_t i) {
-  TestIntegerOp<float, int8_t>(real, img, i, op);
-  TestIntegerOp<double, int8_t>(real, img, i, op);
-  TestIntegerOp<float, int16_t>(real, img, i, op);
-  TestIntegerOp<double, int16_t>(real, img, i, op);
-  TestIntegerOp<float, int32_t>(real, img, i, op);
-  TestIntegerOp<double, int32_t>(real, img, i, op);
-  TestIntegerOp<float, int64_t>(real, img, i, op);
-  TestIntegerOp<double, int64_t>(real, img, i, op);
+template<typename T>
+static void TestBinaryOpForAllIntTypes(T real, T img, int8_t i) {
+  TestBinaryOpForIntType<T, int8_t>(real, img, i, op);
+  TestBinaryOpForIntType<T, int16_t>(real, img, i, op);
+  TestBinaryOpForIntType<T, int32_t>(real, img, i, op);
+  TestBinaryOpForIntType<T, int64_t>(real, img, i, op);
 }
 
 TEST(ComplexTest, Integer) {
-  TestIntegerOpAllTypes(1.0, 0.1, 1);
-  TestIntegerOpAllTypes(-1.3, -0.2, -2);
-  TestIntegerOpAllTypes(1.1, -0.1, 3);
-  TestIntegerOpAllTypes(-1.2, 10.1, -4);
+  TestBinaryOpForAllIntTypes<float>(1.0, 0.1, 1);
+  TestBinaryOpForAllIntTypes<double>(-1.3, -0.2, -2);
 }
