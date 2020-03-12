@@ -140,7 +140,7 @@ struct ConvOptions {
   TORCH_ARG(padding_mode_t, padding_mode) = torch::kZeros;
 };
 
-/// `ConvOptions` specialized for 1-D convolution.
+/// Options for the `Conv1d` module.
 ///
 /// Example:
 /// ```
@@ -148,7 +148,7 @@ struct ConvOptions {
 /// ```
 using Conv1dOptions = ConvOptions<1>;
 
-/// `ConvOptions` specialized for 2-D convolution.
+/// Options for the `Conv2d` module.
 ///
 /// Example:
 /// ```
@@ -156,7 +156,7 @@ using Conv1dOptions = ConvOptions<1>;
 /// ```
 using Conv2dOptions = ConvOptions<2>;
 
-/// `ConvOptions` specialized for 3-D convolution.
+/// Options for the `Conv3d` module.
 ///
 /// Example:
 /// ```
@@ -269,7 +269,7 @@ struct ConvTransposeOptions {
   TORCH_ARG(padding_mode_t, padding_mode) = torch::kZeros;
 };
 
-/// `ConvTransposeOptions` specialized for 1-D convolution.
+/// Options for the `ConvTranspose1d` module.
 ///
 /// Example:
 /// ```
@@ -277,7 +277,7 @@ struct ConvTransposeOptions {
 /// ```
 using ConvTranspose1dOptions = ConvTransposeOptions<1>;
 
-/// `ConvTransposeOptions` specialized for 2-D convolution.
+/// Options for the `ConvTranspose2d` module.
 ///
 /// Example:
 /// ```
@@ -285,7 +285,7 @@ using ConvTranspose1dOptions = ConvTransposeOptions<1>;
 /// ```
 using ConvTranspose2dOptions = ConvTransposeOptions<2>;
 
-/// `ConvTransposeOptions` specialized for 3-D convolution.
+/// Options for the `ConvTranspose3d` module.
 ///
 /// Example:
 /// ```

@@ -48,7 +48,7 @@ struct TORCH_API LayerNormFuncOptions {
 
 // ============================================================================
 
-/// Options for LocalResponseNorm functional and module.
+/// Options for the `LocalResponseNorm` module.
 ///
 /// Example:
 /// ```
@@ -75,7 +75,7 @@ using LocalResponseNormFuncOptions = LocalResponseNormOptions;
 
 // ============================================================================
 
-/// Options for the CrossMapLRN2d module.
+/// Options for the `CrossMapLRN2d` module.
 ///
 /// Example:
 /// ```

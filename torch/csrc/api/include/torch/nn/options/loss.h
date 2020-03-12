@@ -8,7 +8,7 @@
 namespace torch {
 namespace nn {
 
-/// Options for a L1 loss module.
+/// Options for the `L1Loss` module.
 ///
 /// Example:
 /// ```
@@ -29,7 +29,7 @@ using L1LossFuncOptions = L1LossOptions;
 
 // ============================================================================
 
-/// Options for a KLDiv loss module.
+/// Options for the `KLDivLoss` module.
 ///
 /// Example:
 /// ```
@@ -51,7 +51,7 @@ using KLDivFuncOptions = KLDivLossOptions;
 
 // ============================================================================
 
-/// Options for a MSE loss module.
+/// Options for the `MSELoss` module.
 ///
 /// Example:
 /// ```
@@ -73,7 +73,7 @@ using MSELossFuncOptions = MSELossOptions;
 
 // ============================================================================
 
-/// Options for a BCE loss module.
+/// Options for the `BCELoss` module.
 ///
 /// Example:
 /// ```
@@ -95,7 +95,7 @@ using BinaryCrossEntropyFuncOptions = BCELossOptions;
 
 // ============================================================================
 
-/// Options for a Hinge Embedding loss functional and module.
+/// Options for the `HingeEmbeddingLoss` module.
 ///
 /// Example:
 /// ```
@@ -117,7 +117,7 @@ using HingeEmbeddingLossFuncOptions = HingeEmbeddingLossOptions;
 
 // ============================================================================
 
-/// Options for a multi-margin loss functional and module.
+/// Options for the `MultiMarginLoss` module.
 ///
 /// Example:
 /// ```
@@ -148,7 +148,7 @@ using MultiMarginLossFuncOptions = MultiMarginLossOptions;
 
 // ============================================================================
 
-/// Options for a Cosine Embedding loss functional and module.
+/// Options for the `CosineEmbeddingLoss` module.
 ///
 /// Example:
 /// ```
@@ -171,7 +171,7 @@ using CosineEmbeddingLossFuncOptions = CosineEmbeddingLossOptions;
 
 // ============================================================================
 
-/// Options for a multi-label margin loss functional and module.
+/// Options for the `MultiLabelMarginLoss` module.
 ///
 /// Example:
 /// ```
@@ -195,7 +195,7 @@ using MultiLabelMarginLossFuncOptions = MultiLabelMarginLossOptions;
 
 // ============================================================================
 
-/// Options for a soft margin loss functional and module.
+/// Options for the `SoftMarginLoss` module.
 ///
 /// Example:
 /// ```
@@ -219,7 +219,7 @@ using SoftMarginLossFuncOptions = SoftMarginLossOptions;
 
 // ============================================================================
 
-/// Options for a multi-label soft margin loss functional and module.
+/// Options for the `MultiLabelSoftMarginLoss` module.
 ///
 /// Example:
 /// ```
@@ -246,7 +246,7 @@ using MultiLabelSoftMarginLossFuncOptions = MultiLabelSoftMarginLossOptions;
 
 // ============================================================================
 
-/// Options for a triplet-margin-Loss functional and module.
+/// Options for the `TripletMarginLoss` module.
 ///
 /// Example:
 /// ```
@@ -275,7 +275,7 @@ using TripletMarginLossFuncOptions = TripletMarginLossOptions;
 
 // ============================================================================
 
-/// Options for The Connectionist Temporal Classification loss functional and module.
+/// Options for the `CTCLoss` module.
 ///
 /// Example:
 /// ```
@@ -300,7 +300,7 @@ using CTCLossFuncOptions = CTCLossOptions;
 
 // ============================================================================
 
-/// Options for a smooth L1 loss functional and module.
+/// Options for the `SmoothL1Loss` module.
 ///
 /// Example:
 /// ```
@@ -324,7 +324,7 @@ using SmoothL1LossFuncOptions = SmoothL1LossOptions;
 
 // ============================================================================
 
-/// Options for PoissonNLLLoss functional and module.
+/// Options for the `PoissonNLLLoss` module.
 ///
 /// Example:
 /// ```
@@ -352,7 +352,7 @@ using PoissonNLLLossFuncOptions = PoissonNLLLossOptions;
 
 // ============================================================================
 
-/// Options for MarginRankingLoss functional and module.
+/// Options for the `MarginRankingLoss` module.
 ///
 /// Example:
 /// ```
@@ -373,7 +373,7 @@ using MarginRankingLossFuncOptions = MarginRankingLossOptions;
 
 // ============================================================================
 
-/// Options for an nll-loss functional and module.
+/// Options for the `NLLLoss` module.
 ///
 /// Example:
 /// ```
@@ -399,7 +399,7 @@ using NLLLossFuncOptions = NLLLossOptions;
 
 // ============================================================================
 
-/// Options for a cross-entropy-Loss functional and module.
+/// Options for the `CrossEntropyLoss` module.
 ///
 /// Example:
 /// ```
@@ -424,7 +424,7 @@ using CrossEntropyFuncOptions = CrossEntropyLossOptions;
 
 // ============================================================================
 
-/// Options for BCEWithLogitsLoss functional and module.
+/// Options for the `BCEWithLogitsLoss` module.
 ///
 /// Example:
 /// ```

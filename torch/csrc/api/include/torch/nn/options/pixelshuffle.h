@@ -7,7 +7,7 @@
 namespace torch {
 namespace nn {
 
-/// Options for the PixelShuffle module.
+/// Options for the `PixelShuffle` module.
 ///
 /// Example:
 /// ```

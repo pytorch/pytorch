@@ -8,7 +8,7 @@
 namespace torch {
 namespace nn {
 
-/// Options for a `D`-dimensional avgpool functional and module.
+/// Options for a `D`-dimensional avgpool module.
 template <size_t D>
 struct AvgPoolOptions {
   AvgPoolOptions(ExpandingArray<D> kernel_size)
@@ -33,7 +33,7 @@ struct AvgPoolOptions {
   TORCH_ARG(c10::optional<int64_t>, divisor_override) = c10::nullopt;
 };
 
-/// `AvgPoolOptions` specialized for 1-D avgpool.
+/// Options for the `AvgPool1d` module.
 ///
 /// Example:
 /// ```
@@ -41,7 +41,7 @@ struct AvgPoolOptions {
 /// ```
 using AvgPool1dOptions = AvgPoolOptions<1>;
 
-/// `AvgPoolOptions` specialized for 2-D avgpool.
+/// Options for the `AvgPool2d` module.
 ///
 /// Example:
 /// ```
@@ -49,7 +49,7 @@ using AvgPool1dOptions = AvgPoolOptions<1>;
 /// ```
 using AvgPool2dOptions = AvgPoolOptions<2>;
 
-/// `AvgPoolOptions` specialized for 3-D avgpool.
+/// Options for the `AvgPool3d` module.
 ///
 /// Example:
 /// ```
@@ -69,7 +69,7 @@ using AvgPool3dFuncOptions = AvgPool3dOptions;
 
 // ============================================================================
 
-/// Options for a `D`-dimensional maxpool functional and module.
+/// Options for a `D`-dimensional maxpool module.
 template <size_t D>
 struct MaxPoolOptions {
   MaxPoolOptions(ExpandingArray<D> kernel_size)
@@ -91,7 +91,7 @@ struct MaxPoolOptions {
   TORCH_ARG(bool, ceil_mode) = false;
 };
 
-/// `MaxPoolOptions` specialized for 1-D maxpool.
+/// Options for the `MaxPool1d` module.
 ///
 /// Example:
 /// ```
@@ -99,7 +99,7 @@ struct MaxPoolOptions {
 /// ```
 using MaxPool1dOptions = MaxPoolOptions<1>;
 
-/// `MaxPoolOptions` specialized for 2-D maxpool.
+/// Options for the `MaxPool2d` module.
 ///
 /// Example:
 /// ```
@@ -107,7 +107,7 @@ using MaxPool1dOptions = MaxPoolOptions<1>;
 /// ```
 using MaxPool2dOptions = MaxPoolOptions<2>;
 
-/// `MaxPoolOptions` specialized for 3-D maxpool.
+/// Options for the `MaxPool3d` module.
 ///
 /// Example:
 /// ```
@@ -127,7 +127,7 @@ using MaxPool3dFuncOptions = MaxPool3dOptions;
 
 // ============================================================================
 
-/// Options for a `D`-dimensional adaptive maxpool functional and module.
+/// Options for a `D`-dimensional adaptive maxpool module.
 template <size_t D>
 struct AdaptiveMaxPoolOptions {
   AdaptiveMaxPoolOptions(ExpandingArray<D> output_size)
@@ -137,7 +137,7 @@ struct AdaptiveMaxPoolOptions {
   TORCH_ARG(ExpandingArray<D>, output_size);
 };
 
-/// `AdaptiveMaxPoolOptions` specialized for 1-D maxpool.
+/// Options for the `AdaptiveMaxPool1d` module.
 ///
 /// Example:
 /// ```
@@ -145,7 +145,7 @@ struct AdaptiveMaxPoolOptions {
 /// ```
 using AdaptiveMaxPool1dOptions = AdaptiveMaxPoolOptions<1>;
 
-/// `AdaptiveMaxPoolOptions` specialized for 2-D adaptive maxpool.
+/// Options for the `AdaptiveMaxPool2d` module.
 ///
 /// Example:
 /// ```
@@ -153,7 +153,7 @@ using AdaptiveMaxPool1dOptions = AdaptiveMaxPoolOptions<1>;
 /// ```
 using AdaptiveMaxPool2dOptions = AdaptiveMaxPoolOptions<2>;
 
-/// `AdaptiveMaxPoolOptions` specialized for 3-D adaptive maxpool.
+/// Options for the `AdaptiveMaxPool3d` module.
 ///
 /// Example:
 /// ```
@@ -173,7 +173,7 @@ using AdaptiveMaxPool3dFuncOptions = AdaptiveMaxPool3dOptions;
 
 // ============================================================================
 
-/// Options for a `D`-dimensional adaptive avgpool functional and module.
+/// Options for a `D`-dimensional adaptive avgpool module.
 template <size_t D>
 struct AdaptiveAvgPoolOptions {
   AdaptiveAvgPoolOptions(ExpandingArray<D> output_size)
@@ -183,7 +183,7 @@ struct AdaptiveAvgPoolOptions {
   TORCH_ARG(ExpandingArray<D>, output_size);
 };
 
-/// `AdaptiveAvgPoolOptions` specialized for 1-D adaptive avgpool.
+/// Options for the `AdaptiveAvgPool1d` module.
 ///
 /// Example:
 /// ```
@@ -191,7 +191,7 @@ struct AdaptiveAvgPoolOptions {
 /// ```
 using AdaptiveAvgPool1dOptions = AdaptiveAvgPoolOptions<1>;
 
-/// `AdaptiveAvgPoolOptions` specialized for 2-D adaptive avgpool.
+/// Options for the `AdaptiveAvgPool2d` module.
 ///
 /// Example:
 /// ```
@@ -199,7 +199,7 @@ using AdaptiveAvgPool1dOptions = AdaptiveAvgPoolOptions<1>;
 /// ```
 using AdaptiveAvgPool2dOptions = AdaptiveAvgPoolOptions<2>;
 
-/// `AdaptiveAvgPoolOptions` specialized for 3-D adaptive avgpool.
+/// Options for the `AdaptiveAvgPool3d` module.
 ///
 /// Example:
 /// ```
@@ -235,7 +235,7 @@ struct MaxUnpoolOptions {
   TORCH_ARG(ExpandingArray<D>, padding) = 0;
 };
 
-/// `MaxUnpoolOptions` specialized for 1-D maxunpool.
+/// Options for the `MaxUnpool1d` module.
 ///
 /// Example:
 /// ```
@@ -243,7 +243,7 @@ struct MaxUnpoolOptions {
 /// ```
 using MaxUnpool1dOptions = MaxUnpoolOptions<1>;
 
-/// `MaxUnpoolOptions` specialized for 2-D maxunpool.
+/// Options for the `MaxUnpool2d` module.
 ///
 /// Example:
 /// ```
@@ -251,7 +251,7 @@ using MaxUnpool1dOptions = MaxUnpoolOptions<1>;
 /// ```
 using MaxUnpool2dOptions = MaxUnpoolOptions<2>;
 
-/// `MaxUnpoolOptions` specialized for 3-D maxunpool.
+/// Options for the `MaxUnpool3d` module.
 ///
 /// Example:
 /// ```
@@ -295,7 +295,7 @@ using MaxUnpool3dFuncOptions = MaxUnpoolFuncOptions<3>;
 
 // ============================================================================
 
-/// Options for a `D`-dimensional fractional maxpool functional and module.
+/// Options for a `D`-dimensional fractional maxpool module.
 template <size_t D>
 struct FractionalMaxPoolOptions {
   FractionalMaxPoolOptions(ExpandingArray<D> kernel_size)
@@ -315,7 +315,7 @@ struct FractionalMaxPoolOptions {
   TORCH_ARG(torch::Tensor, _random_samples) = Tensor();
 };
 
-/// `FractionalMaxPoolOptions` specialized for 2-D maxpool.
+/// Options for the `FractionalMaxPool2d` module.
 ///
 /// Example:
 /// ```
@@ -323,7 +323,7 @@ struct FractionalMaxPoolOptions {
 /// ```
 using FractionalMaxPool2dOptions = FractionalMaxPoolOptions<2>;
 
-/// `FractionalMaxPoolOptions` specialized for 3-D maxpool.
+/// Options for the `FractionalMaxPool3d` module.
 ///
 /// Example:
 /// ```
@@ -340,7 +340,7 @@ using FractionalMaxPool3dFuncOptions = FractionalMaxPool3dOptions;
 
 // ============================================================================
 
-/// Options for a `D`-dimensional lppool functional and module.
+/// Options for a `D`-dimensional lppool module.
 template <size_t D>
 struct LPPoolOptions {
   LPPoolOptions(double norm_type, ExpandingArray<D> kernel_size)
@@ -358,7 +358,7 @@ struct LPPoolOptions {
   TORCH_ARG(bool, ceil_mode) = false;
 };
 
-/// `LPPoolOptions` specialized for 1-D lppool.
+/// Options for the `LPPool1d` module.
 ///
 /// Example:
 /// ```
@@ -366,7 +366,7 @@ struct LPPoolOptions {
 /// ```
 using LPPool1dOptions = LPPoolOptions<1>;
 
-/// `LPPoolOptions` specialized for 2-D lppool.
+/// Options for the `LPPool2d` module.
 ///
 /// Example:
 /// ```

@@ -7,7 +7,7 @@
 namespace torch {
 namespace nn {
 
-/// Options for ELU functional and module.
+/// Options for the `ELU` module.
 ///
 /// Example:
 /// ```
@@ -21,19 +21,20 @@ struct TORCH_API ELUOptions {
   TORCH_ARG(bool, inplace) = false;
 };
 
+namespace functional {
 /// Options for `torch::nn::functional::elu`.
 ///
 /// Example:
 /// ```
 /// namespace F = torch::nn::functional;
+/// F::elu(x, F::ELUFuncOptions().alpha(0.42).inplace(true));
 /// ```
-namespace functional {
 using ELUFuncOptions = ELUOptions;
 } // namespace functional
 
 // ============================================================================
 
-/// Options for SELU functional and module.
+/// Options for the `SELU` module.
 ///
 /// Example:
 /// ```
@@ -47,12 +48,19 @@ struct TORCH_API SELUOptions {
 };
 
 namespace functional {
+/// Options for `torch::nn::functional::selu`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::selu(input, F::SELUFuncOptions(false));
+/// ```
 using SELUFuncOptions = SELUOptions;
 } // namespace functional
 
 // ============================================================================
 
-/// Options for GLU functional and module.
+/// Options for the `GLU` module.
 ///
 /// Example:
 /// ```
@@ -71,7 +79,7 @@ using GLUFuncOptions = GLUOptions;
 
 // ============================================================================
 
-/// Options for Hardshrink functional and module.
+/// Options for the `Hardshrink` module.
 ///
 /// Example:
 /// ```
@@ -90,7 +98,7 @@ using HardshrinkFuncOptions = HardshrinkOptions;
 
 // ============================================================================
 
-/// Options for Hardtanh functional and module.
+/// Options for the `Hardtanh` module.
 ///
 /// Example:
 /// ```
@@ -113,7 +121,7 @@ using HardtanhFuncOptions = HardtanhOptions;
 
 // ============================================================================
 
-/// Options for LeakyReLU functional and module.
+/// Options for the `LeakyReLU` module.
 ///
 /// Example:
 /// ```
@@ -142,7 +150,7 @@ using LeakyReLUFuncOptions = LeakyReLUOptions;
 
 // ============================================================================
 
-/// Options for the Softmax functional and module.
+/// Options for the Softmax module.
 ///
 /// Example:
 /// ```
@@ -175,7 +183,7 @@ struct TORCH_API SoftmaxFuncOptions {
 
 // ============================================================================
 
-/// Options for the Softmin functional and module.
+/// Options for the Softmin module.
 ///
 /// Example:
 /// ```
@@ -208,7 +216,7 @@ struct TORCH_API SoftminFuncOptions {
 
 // ============================================================================
 
-/// Options for the LogSoftmax functional and module.
+/// Options for the LogSoftmax module.
 ///
 /// Example:
 /// ```
@@ -241,7 +249,7 @@ struct TORCH_API LogSoftmaxFuncOptions {
 
 // ============================================================================
 
-/// Options for PReLU functional and module.
+/// Options for the `PReLU` module.
 ///
 /// Example:
 /// ```
@@ -262,7 +270,7 @@ using PReLUFuncOptions = PReLUOptions;
 
 // ============================================================================
 
-/// Options for ReLU functional and module.
+/// Options for the `ReLU` module.
 ///
 /// Example:
 /// ```
@@ -281,7 +289,7 @@ using ReLUFuncOptions = ReLUOptions;
 
 // ============================================================================
 
-/// Options for ReLU6 functional and module.
+/// Options for the `ReLU6` module.
 ///
 /// Example:
 /// ```
@@ -300,7 +308,7 @@ using ReLU6FuncOptions = ReLU6Options;
 
 // ============================================================================
 
-/// Options for RReLU functional and module.
+/// Options for the `RReLU` module.
 ///
 /// Example:
 /// ```
@@ -338,7 +346,7 @@ struct TORCH_API RReLUFuncOptions {
 
 // ============================================================================
 
-/// Options for CELU functional and module.
+/// Options for the `CELU` module.
 ///
 /// Example:
 /// ```
@@ -358,7 +366,7 @@ using CELUFuncOptions = CELUOptions;
 
 // ============================================================================
 
-/// Options for Softplus functional and module.
+/// Options for the `Softplus` module.
 ///
 /// Example:
 /// ```
@@ -378,7 +386,7 @@ using SoftplusFuncOptions = SoftplusOptions;
 
 // ============================================================================
 
-/// Options for Softshrink functional and module.
+/// Options for the `Softshrink` module.
 ///
 /// Example:
 /// ```
@@ -397,7 +405,7 @@ using SoftshrinkFuncOptions = SoftshrinkOptions;
 
 // ============================================================================
 
-/// Options for Threshold functional and module.
+/// Options for the `Threshold` module.
 ///
 /// Example:
 /// ```
@@ -442,7 +450,7 @@ struct TORCH_API GumbelSoftmaxFuncOptions {
 
 // ============================================================================
 
-/// Options for MultiheadAttention functional and module.
+/// Options for the `MultiheadAttention` module.
 ///
 /// Example:
 /// ```

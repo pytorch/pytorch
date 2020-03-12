@@ -8,7 +8,7 @@
 namespace torch {
 namespace nn {
 
-/// Options for a fold module.
+/// Options for the `Fold` module.
 ///
 /// Example:
 /// ```
@@ -45,7 +45,7 @@ using FoldFuncOptions = FoldOptions;
 
 // ============================================================================
 
-/// Options for an Unfold functional and module.
+/// Options for the `Unfold` module.
 ///
 /// Example:
 /// ```

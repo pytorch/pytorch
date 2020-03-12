@@ -12,7 +12,7 @@
 namespace torch {
 namespace nn {
 
-/// Options for a `D`-dimensional Upsample module.
+/// Options for the `Upsample` module.
 ///
 /// Example:
 /// ```
@@ -44,7 +44,7 @@ struct TORCH_API UpsampleOptions {
 
 namespace functional {
 
-/// Options for a `D`-dimensional interpolate functional.
+/// Options for the interpolate functional.
 struct TORCH_API InterpolateFuncOptions {
   typedef c10::variant<
       enumtype::kNearest,

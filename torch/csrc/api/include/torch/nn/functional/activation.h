@@ -25,6 +25,17 @@ inline Tensor elu(Tensor& input, double alpha, bool inplace) {
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.elu
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::ELUFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::elu(x, F::ELUFuncOptions().alpha(0.42).inplace(true));
+/// ```
 inline Tensor elu(Tensor input, const ELUFuncOptions& options = {}) {
   return detail::elu(input, options.alpha(), options.inplace());
 }
@@ -43,6 +54,17 @@ inline Tensor selu(Tensor& input, bool inplace) {
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.selu
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::SELUFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::selu(input, F::SELUFuncOptions(false));
+/// ```
 inline Tensor selu(Tensor input, const SELUFuncOptions& options = {}) {
   return detail::selu(input, options.inplace());
 }

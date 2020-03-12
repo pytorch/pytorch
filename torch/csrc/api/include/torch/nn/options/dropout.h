@@ -7,7 +7,7 @@
 namespace torch {
 namespace nn {
 
-/// Options for `Dropout` module.
+/// Options for the `Dropout` module.
 ///
 /// Example:
 /// ```
@@ -23,7 +23,7 @@ struct TORCH_API DropoutOptions {
   TORCH_ARG(bool, inplace) = false;
 };
 
-/// Options for `Dropout2d` module.
+/// Options for the `Dropout2d` module.
 ///
 /// Example:
 /// ```
@@ -31,7 +31,7 @@ struct TORCH_API DropoutOptions {
 /// ```
 using Dropout2dOptions = DropoutOptions;
 
-/// Options for `Dropout3d` module.
+/// Options for the `Dropout3d` module.
 ///
 /// Example:
 /// ```
@@ -39,10 +39,10 @@ using Dropout2dOptions = DropoutOptions;
 /// ```
 using Dropout3dOptions = DropoutOptions;
 
-/// Options for `FeatureDropout` module.
+/// Options for the `FeatureDropout` module.
 using FeatureDropoutOptions = DropoutOptions;
 
-/// Options for `AlphaDropout` module.
+/// Options for the `AlphaDropout` module.
 ///
 /// Example:
 /// ```
@@ -50,7 +50,7 @@ using FeatureDropoutOptions = DropoutOptions;
 /// ```
 using AlphaDropoutOptions = DropoutOptions;
 
-/// Options for `FeatureAlphaDropout` module.
+/// Options for the `FeatureAlphaDropout` module.
 ///
 /// Example:
 /// ```
