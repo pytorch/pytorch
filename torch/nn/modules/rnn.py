@@ -151,23 +151,32 @@ class RNNBase(Module):
             else:
                 # Rearrange weights in order to have them in
                 # (forward_weights, backward_weights) order
-                fwd_weights = [self._flat_weights[i]
-                               for i in range(len(self._flat_weights))
+                offset = 4 if self.bias else 2
+                weight_groups = zip(*(iter(self._flat_weights),) * offset)
+                weight_names = zip(*(iter(self._flat_weights_names),) * offset)
+                weight_groups = list(weight_groups)
+                weight_names = list(weight_names)
+                fwd_weights = [weight_groups[i]
+                               for i in range(len(weight_groups))
                                if i % 2 == 0]
-                fwd_names = [self._flat_weights_names[i]
-                             for i in range(len(self._flat_weights))
+                fwd_names = [weight_names[i]
+                             for i in range(len(weight_groups))
                              if i % 2 == 0]
-                bwd_weights = [self._flat_weights[i]
-                               for i in range(len(self._flat_weights))
+                bwd_weights = [weight_groups[i]
+                               for i in range(len(weight_groups))
                                if i % 2 != 0]
-                bwd_names = [self._flat_weights_names[i]
-                             for i in range(len(self._flat_weights))
+                bwd_names = [weight_names[i]
+                             for i in range(len(weight_groups))
                              if i % 2 != 0]
+                fwd_weights = [y for y in x for x in fwd_weights]
+                bwd_weights = [y for y in x for x in bwd_weights]
+                fwd_names = [y for y in x for x in fwd_names]
+                bwd_names = [y for y in x for x in bwd_names]
                 # See above note regarding gradient disabling
                 with torch.no_grad():
                     for weight_pack in (fwd_weights, bwd_weights):
                         torch._cudnn_rnn_flatten_weight(
-                            weight_pack, (4 if self.bias else 2),
+                            weight_pack, offset,
                             self.input_size, rnn.get_cudnn_mode(self.mode),
                             self.hidden_size, self.num_layers,
                             self.batch_first, False,
