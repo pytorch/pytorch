@@ -15,5 +15,7 @@ THC_API THCTensor *THCTensor_(newWithStorage)(THCState *state, THCStorage *stora
                                               at::IntArrayRef sizes, at::IntArrayRef strides);
 
 THC_API void THCTensor_(resize)(THCState *state, THCTensor *self, at::IntArrayRef size, at::IntArrayRef stride);
+// this is not an actual function, but removing it seems to cause compilationproblems on Windows + CUDA.
+THC_API THCTensor *THCTensor_(newWithSize)(THCState *state);
 
 #endif
