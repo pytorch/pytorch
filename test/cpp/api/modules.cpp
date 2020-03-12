@@ -2407,6 +2407,50 @@ TEST_F(ModulesTest, LogSoftmax) {
   }
 }
 
+TEST_F(ModulesTest, AdaptiveLogSoftmaxWithLoss) {
+  {
+    // log_probs actually returns log_proba
+    AdaptiveLogSoftmaxWithLoss asfm(AdaptiveLogSoftmaxWithLossOptions(8, 4, {2}).div_value(2.));
+    auto x = torch::randn({4, 8});
+    auto logprob_out = asfm->log_prob(x);
+    ASSERT_TRUE(torch::allclose(torch::exp(logprob_out).data().sum(1), torch::ones(4)));
+  }
+  {
+    // test predict
+    AdaptiveLogSoftmaxWithLoss asfm(AdaptiveLogSoftmaxWithLossOptions(8, 10, {4, 8}).div_value(2.).head_bias(true));
+    auto x = torch::randn({64, 8});
+    auto logprob_out = asfm->log_prob(x);
+    auto predict_out = asfm->predict(x);
+    ASSERT_TRUE(torch::allclose(predict_out, logprob_out.argmax(1)));
+  }
+  {
+    // cluster sizes
+    AdaptiveLogSoftmaxWithLoss asfm(AdaptiveLogSoftmaxWithLossOptions(16, 20, {4, 10, 15}).div_value(2.));
+    auto x = torch::arange(100, 132, torch::kFloat).reshape({2, 16});
+    auto y = torch::tensor({0, 17}, torch::kLong);
+    auto asm_out = asfm(x, y);
+    ASSERT_EQ(asm_out.output.sizes(), std::vector<int64_t>({2}));
+  }
+  {
+    // forward returns the same thing as log_probs
+    AdaptiveLogSoftmaxWithLoss asfm(AdaptiveLogSoftmaxWithLossOptions(8, 4, {2}).div_value(2.));
+    auto x = torch::randn({4, 8});
+    auto logprob_out = asfm->log_prob(x);
+    NLLLoss nll_loss;
+
+    for (int64_t v = 0; v < 4; ++v) {
+      auto y = torch::full({4}, v, torch::kLong);
+      auto asm_out = asfm(x, y);
+      auto out = asm_out.output;
+      auto loss = torch::tensor(asm_out.loss, torch::kFloat);
+      auto expected = nll_loss->forward(logprob_out, y);
+
+      ASSERT_TRUE(torch::allclose(loss, expected));
+      ASSERT_TRUE(torch::allclose(out, logprob_out.gather(1, y.unsqueeze(1)).squeeze()));
+    }
+  }
+}
+
 TEST_F(ModulesTest, Softmax2d) {
   Softmax2d m;
   auto input = torch::arange(24, torch::kFloat).reshape({1, 2, 3, 4});
@@ -4544,4 +4588,39 @@ TEST_F(ModulesTest, PrettyPrintMultiheadAttention) {
     "torch::nn::MultiheadAttention(\n  (out_proj): torch::nn::Linear(in_features=20, out_features=20, bias=true)\n)");
   ASSERT_EQ(c10::str(MultiheadAttention(MultiheadAttentionOptions(20, 10).bias(false))),
     "torch::nn::MultiheadAttention(\n  (out_proj): torch::nn::Linear(in_features=20, out_features=20, bias=false)\n)");
+}
+
+TEST_F(ModulesTest, PrettyPrintAdaptiveLogSoftmaxWithLoss) {
+  {
+    AdaptiveLogSoftmaxWithLoss asfm(AdaptiveLogSoftmaxWithLossOptions(8, 4, {2}).div_value(2.));
+    ASSERT_EQ(
+      c10::str(asfm),
+      "torch::nn::AdaptiveLogSoftmaxWithLoss(\n"
+      "  (head): torch::nn::Linear(in_features=8, out_features=3, bias=false)\n"
+      "  (tail): torch::nn::ModuleList(\n"
+      "    (0): torch::nn::Sequential(\n"
+      "      (0): torch::nn::Linear(in_features=8, out_features=4, bias=false)\n"
+      "      (1): torch::nn::Linear(in_features=4, out_features=2, bias=false)\n"
+      "    )\n"
+      "  )\n"
+      ")");
+  }
+  {
+    AdaptiveLogSoftmaxWithLoss asfm(AdaptiveLogSoftmaxWithLossOptions(8, 10, {4, 8}).div_value(2.).head_bias(true));
+    ASSERT_EQ(
+      c10::str(asfm),
+      "torch::nn::AdaptiveLogSoftmaxWithLoss(\n"
+      "  (head): torch::nn::Linear(in_features=8, out_features=6, bias=true)\n"
+      "  (tail): torch::nn::ModuleList(\n"
+      "    (0): torch::nn::Sequential(\n"
+      "      (0): torch::nn::Linear(in_features=8, out_features=4, bias=false)\n"
+      "      (1): torch::nn::Linear(in_features=4, out_features=4, bias=false)\n"
+      "    )\n"
+      "    (1): torch::nn::Sequential(\n"
+      "      (0): torch::nn::Linear(in_features=8, out_features=2, bias=false)\n"
+      "      (1): torch::nn::Linear(in_features=2, out_features=2, bias=false)\n"
+      "    )\n"
+      "  )\n"
+      ")");
+  }
 }
