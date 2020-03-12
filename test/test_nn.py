@@ -6145,6 +6145,15 @@ class TestNN(NNTestCase):
                     result = torch.nn.functional.kl_div(input, target)
                     self.assertEqual(result.item(), expected.item(), 0.001)
 
+    def test_kl_div_log_softmax_target(self):
+        for device in device_():
+            a = torch.tensor([[1.0, 2, 3], [5.0, 5, 5]], device=device)
+            b = torch.tensor([[1.0, 2, 3], [5.0, 5, 5]], device=device)
+            self.assertEqual(
+                torch.kl_div(F.log_softmax(a, 1), F.log_softmax(b, 1), reduction=0, log_target=True),
+                torch.zeros_like(a)
+            )
+
     def test_cosine_embedding_loss_no_reduce(self):
         input1 = torch.randn(15, 10, requires_grad=True)
         input2 = torch.randn(15, 10, requires_grad=True)
