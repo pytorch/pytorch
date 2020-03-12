@@ -688,7 +688,7 @@ TEST(OperatorRegistrationTest, whenRegisteringMismatchingKernelsInSameOpCall_the
     auto registrar1 = c10::RegisterOperators().op("_test::dummy", c10::RegisterOperators::options()
       .kernel<DummyKernelWithIntParam>(c10::DispatchKey::CPUTensorId)
       .kernel<MockKernel>(c10::DispatchKey::CUDATensorId, &called_kernel));
-  }, "In registration for _test::dummy: the inferred function schema");
+  }, "In registration for _test::dummy: expected schema");
 }
 
 void backend_fallback_kernel(const c10::OperatorHandle& op, c10::Stack* stack) {

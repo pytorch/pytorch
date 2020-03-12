@@ -56,6 +56,7 @@ c10::FunctionSchema RegisterOperators::inferSchemaFromKernels_(const OperatorNam
     if (nullptr != kernel.inferred_function_schema.get()) {
       if (!inferred_schema.has_value()) {
         inferred_schema = *kernel.inferred_function_schema;
+        break;
       }
     }
   }
