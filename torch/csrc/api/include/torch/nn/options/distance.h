@@ -21,6 +21,13 @@ struct TORCH_API CosineSimilarityOptions {
 };
 
 namespace functional {
+/// Options for `torch::nn::functional::cosine_similarity`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::cosine_similarity(input1, input2, F::CosineSimilarityFuncOptions().dim(1));
+/// ```
 using CosineSimilarityFuncOptions = CosineSimilarityOptions;
 } // namespace functional
 
@@ -42,6 +49,13 @@ struct TORCH_API PairwiseDistanceOptions {
 };
 
 namespace functional {
+/// Options for `torch::nn::functional::pairwise_distance`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::pairwise_distance(input1, input2, F::PairwiseDistanceFuncOptions().p(1));
+/// ```
 using PairwiseDistanceFuncOptions = PairwiseDistanceOptions;
 } // namespace functional
 
