@@ -35,6 +35,35 @@ class TestScriptPy3(JitTestCase):
         self.assertAlmostEqual(out, out_script)
         self.assertEqual(captured, captured_script)
 
+    def test_dataclass_error(self):
+        from dataclasses import dataclass
+        @dataclass
+        class NormalizationInfo(object):
+            mean: float = 0.0
+            range: float = 1.0
+            _sum: float = 0.0
+            _count: float = 0.0
+            _min: float = 1e18
+            _max: float = -1e18
+
+            def update(self, value):
+                self._count += 1
+                self._sum += value
+                self._min = min(self._min, value)
+                self._max = max(self._max, value)
+
+            def compute(self, total_rows):
+                self.mean = self._sum / total_rows
+                self.range = max(self._max, self._max - self._min)
+                if self.range < 1e-9:
+                    self.range = 1.0
+
+        def fn():
+            return NormalizationInfo(1, 2, 3, 4, 5)
+
+        with self.assertRaisesRegex(OSError, "NormalizationInfo"):
+            torch.jit.script(fn)
+
     def test_optional_dict_construct(self):
         class M(torch.nn.Module):
             def use(self, buffer: Dict[str, Optional[torch.Tensor]]):
