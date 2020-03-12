@@ -142,7 +142,13 @@ using ConstantPad3dOptions = ConstantPadOptions<3>;
 
 namespace functional {
 
-/// Options for a pad functional.
+/// Options for `torch::nn::functional::pad`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::pad(input, F::PadFuncOptions({1, 2, 2, 1, 1, 2}).mode(torch::kReplicate));
+/// ```
 struct TORCH_API PadFuncOptions {
   typedef c10::variant<
     enumtype::kConstant,
