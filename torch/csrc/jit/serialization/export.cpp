@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/serialization/import_export_helpers.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/runtime/instruction.h>
+#include <torch/csrc/jit/passes/inliner.h>
 
 #include <onnx/checker.h>
 #include <onnx/onnx_pb.h>
@@ -916,10 +917,12 @@ void check_onnx_proto(const std::string& proto_string) {
 }
 
 namespace {
-void export_opnames(const Module& m, std::set<std::string>& opnames) {
+void export_opnames(const script::Module& m, std::set<std::string>& opnames) {
   for (const auto& method : m.get_methods()) {
     const auto& func = method.function();
-    for (const auto& node : func.graph()->nodes()) {
+    auto graph = func.graph()->copy();
+    Inline(*graph);
+    for (const auto& node : graph->nodes()) {
       auto schema = node->maybeSchema();
       if (schema) {
         auto opname = schema->operator_name();
@@ -937,7 +940,7 @@ void export_opnames(const Module& m, std::set<std::string>& opnames) {
 }
 } // namespace
 
-std::vector<std::string> export_opnames(const Module& m) {
+std::vector<std::string> export_opnames(const script::Module& m) {
   std::set<std::string> names;
   export_opnames(m, names);
   return std::vector<std::string>(names.begin(), names.end());
