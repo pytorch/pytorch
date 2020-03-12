@@ -1,5 +1,5 @@
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
-#include <torch/csrc/jit/codegen/cuda/ir.h>
+#include <torch/csrc/jit/codegen/cuda/ir_base.h>
 
 #include <torch/csrc/jit/codegen/cuda/ir_printer.h>
 #include <torch/csrc/jit/codegen/cuda/mutator.h>
@@ -20,6 +20,9 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
+#include <torch/csrc/jit/codegen/cuda/ir_nodes.h>
+
+
 /*
  * Statement member definitions & related functions
  */
@@ -37,66 +40,51 @@ Val::Val(ValType _vtype, DataType _dtype)
   }
 }
 
+  c10::optional<ValType> Val::getValType() const noexcept {
+    return vtype_;
+  }
+
+  c10::optional<DataType> Val::getDataType() const {
+    TORCH_INTERNAL_ASSERT(dtype_ != DataType::Null, "Value does not have a data type.");
+    return dtype_;
+  }
+
+  bool Val::isScalar() {
+    return vtype_ == ValType::Scalar;
+  }
+
 Expr* Val::getOrigin() {
-  FusionGuard fg(fusion_);
   return (fusion_->origin(this));
 }
 
+  bool IRInputOutput::hasInput(const Val* const input) const {
+    for (auto val : inputs_)
+      if (val == input)
+        return true;
+    return false;
+  }
+
+  bool IRInputOutput::hasOutput(const Val* const output) const {
+    for (auto val : outputs_)
+      if (val == output)
+        return true;
+    return false;
+  }
+
+void IRInputOutput::removeOutput(Val* val) {
+    auto it = outputs_.begin();
+    for (; it != outputs_.end(); ++it) {
+      if ((*it) == val)
+        break;
+    }
+    assert(it != outputs_.end());
+    outputs_.erase(it);
+  }
 Expr::Expr(ExprType _type) : type_{_type} {
   Fusion* fusion = FusionGuard::getCurFusion();
   if (fusion == nullptr)
     TORCH_CHECK(false, "No active fusion group found when creating an Expr.");
   this->fusion_ = fusion;
-}
-
-UnaryOp::UnaryOp(UnaryOpType _type, Val* _out, Val* _in)
-    : Expr(ExprType::UnaryOp), unary_op_type_{_type}, out_{_out}, in_{_in} {
-  addOutput(_out);
-  addInput(_in);
-  this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
-}
-
-BinaryOp::BinaryOp(
-    BinaryOpType _type,
-    Val* _out,
-    Val* _lhs,
-    Val* _rhs)
-    : Expr(ExprType::BinaryOp),
-      binary_op_type_{_type},
-      out_{_out},
-      lhs_{_lhs},
-      rhs_{_rhs} {
-  addOutput(_out);
-  addInput(_lhs);
-  addInput(_rhs);
-  this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
-}
-
-ForLoop::ForLoop(
-    Int*        _index,
-    IterDomain* _range,
-    const std::vector<const Expr*> &_body)
-    : Expr(ExprType::ForLoop),
-      index_{_index},
-      range_{_range},
-      body_{_body}
-{
-  addInput(_index);
-  addInput(_range);
-  this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
-}
-
-IfThenElse::IfThenElse(
-    Val* _cond,
-    const std::vector<const Expr*> &_if_body,
-    const std::vector<const Expr*> &_else_body)
-    : Expr(ExprType::IfThenElse),
-      cond_{_cond},
-      if_body_{_if_body},
-      else_body_{_else_body}
-{
-  addInput(_cond);
-  this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
 }
 
 Statement::~Statement() {}

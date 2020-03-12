@@ -4,6 +4,18 @@
 
 #include <iostream>
 
+/*
+ * IRMathPrinter and IRTransformPrinter allow the splitting up of fusion print
+ * functions. IRMathPrinter as its name implies focuses soley on what tensor
+ * computations are taking place. Resulting TensorView math will reflect the
+ * series of split/merge/reorder/computeAts that have taken place, however these
+ * nodes will not be displayed in what is printed. IRTransformPrinter does not
+ * print any mathematical functions and only lists the series of
+ * split/merge/reorder calls that were made. Both of these printing methods are
+ * quite verbose on purpose as to show accurately what is represented in the IR
+ * of a fusion.
+ */
+
 namespace torch {
 namespace jit {
 namespace fuser {
@@ -27,15 +39,15 @@ class TORCH_API IRTransformPrinter : public IRPrinter {
 
   // Tensor Expressions
   void handle(const UnaryOp* const uop) override {
-    if(print_inline_)
+    if (print_inline_)
       IRPrinter::handle(uop);
   }
 
   void handle(const BinaryOp* const bop) override {
-    if(print_inline_)
+    if (print_inline_)
       IRPrinter::handle(bop);
   }
-  
+
   void handle(const ForLoop* const) override {}
   void handle(const IfThenElse* const) override {}
 

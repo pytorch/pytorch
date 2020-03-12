@@ -4,43 +4,9 @@
 
 #include <sstream>
 
-// For debug:
-/*
-#include <torch/csrc/jit/codegen/cuda/iriostream.h>
-*/
 namespace torch {
 namespace jit {
 namespace fuser {
-
-// For debug:
-/*
-std::ostream& operator<<(std::ostream& os, std::vector<bool> vec) {
-  os << "<";
-  for (int i = 0; i < vec.size(); i++) {
-    if (vec[i])
-      os << " t";
-    else
-      os << " f";
-    if (i == vec.size() - 1)
-      os << ">";
-    else
-      os << ",";
-  }
-  return os;
-}
-
-std::ostream& operator<<(std::ostream& os, std::vector<int> vec) {
-  os << "<";
-  for (int i = 0; i < vec.size(); i++) {
-    os << vec[i];
-    if (i == vec.size() - 1)
-      os << ">";
-    else
-      os << ",";
-  }
-  return os;
-}
-*/
 
 /*
  * Functions to backward propagate influence from split/merge/reorder

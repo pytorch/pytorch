@@ -55,38 +55,6 @@ const c10::optional<TensorContiguity>& Tensor::getContiguityInfo() const {
   return contiguity_;
 }
 
-/*
- * Split, Merge, Reorder constructors
- */
-
-Split::Split(TensorDomain* _out, TensorDomain* _in, int _axis, Int* _factor)
-    : Expr(ExprType::Split),
-      out_{_out},
-      in_{_in},
-      axis_{_axis},
-      factor_{_factor} {
-  addOutput(_out);
-  addInput(_in);
-  this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
-}
-
-Merge::Merge(TensorDomain* _out, TensorDomain* _in, int _axis)
-    : Expr(ExprType::Merge), out_{_out}, in_{_in}, axis_{_axis} {
-  addOutput(_out);
-  addInput(_in);
-  this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
-}
-
-Reorder::Reorder(
-    TensorDomain* _out,
-    TensorDomain* _in,
-    std::vector<int> _pos2axis)
-    : Expr(ExprType::Reorder), out_{_out}, in_{_in}, pos2axis_{_pos2axis} {
-  addOutput(_out);
-  addInput(_in);
-  this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
-}
-
 TensorView* split(TensorView* tv, int axis, int factor) {
   TensorDomain* td = tv->domain();
 

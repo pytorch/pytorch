@@ -1,5 +1,5 @@
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
-#include <torch/csrc/jit/codegen/cuda/ir.h>
+#include <torch/csrc/jit/codegen/cuda/ir_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/iriostream.h>
 #include <torch/csrc/jit/codegen/cuda/tensor.h>
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
@@ -26,8 +26,8 @@ std::vector<Int*> CodeWrite::getLoopIndices() {
 void CodeWrite::printIndexInto(
     std::vector<Int*> indices,
     const TensorView* const tv) {
-  bool inpOrOut = FusionGuard::getCurFusion()->isInput(tv) ||
-      FusionGuard::getCurFusion()->isOutput(tv);
+  bool inpOrOut = FusionGuard::getCurFusion()->hasInput(tv) ||
+      FusionGuard::getCurFusion()->hasOutput(tv);
 
   os << "[";
   // Linearize the indexing for inputs/outputs
@@ -313,8 +313,8 @@ void CodeWrite::resetFors() {
 
 // Print register allocation of a TensorView
 void CodeWrite::printAlloc(TensorView* tv) {
-  if (FusionGuard::getCurFusion()->isInput(tv) ||
-      FusionGuard::getCurFusion()->isOutput(tv))
+  if (FusionGuard::getCurFusion()->hasInput(tv) ||
+      FusionGuard::getCurFusion()->hasOutput(tv))
     return;
 
   Int* size = new Int(1);
@@ -395,8 +395,8 @@ void CodeWrite::setupOverrides() {
   for (Val* val : used_vals) {
     if (val->getValType().value() == ValType::TensorView) {
       if(!(
-        FusionGuard::getCurFusion()->isInput(val)
-      ||FusionGuard::getCurFusion()->isOutput(val)
+        FusionGuard::getCurFusion()->hasInput(val)
+      ||FusionGuard::getCurFusion()->hasOutput(val)
       )) continue;
       TensorView* tv = static_cast<TensorView*>(val);
       TensorDomain* td = tv->domain();
@@ -416,6 +416,7 @@ void CodeWrite::setupOverrides() {
 }
 
 // Print the header for the kernel, the inputs/outputs
+// TODO: Push this out to another class so we don't need dispatch implemented here
 void CodeWrite::header() {
   os << "__global__ void " << kernel_name_ << "(";
 

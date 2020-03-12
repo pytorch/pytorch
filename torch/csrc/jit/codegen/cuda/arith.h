@@ -2,7 +2,7 @@
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
-#include <torch/csrc/jit/codegen/cuda/ir.h>
+#include <torch/csrc/jit/codegen/cuda/ir_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/type.h>
 
 /*
