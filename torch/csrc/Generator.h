@@ -12,7 +12,7 @@ struct THPGenerator {
 };
 
 // Creates a new Python object wrapping the default at::Generator. The reference is
-// borrowed. The caller should ensure that the THGenerator* object lifetime
+// borrowed. The caller should ensure that the at::GeneratorImp* object lifetime
 // last at least as long as the Python wrapper.
 THP_API PyObject * THPGenerator_initDefaultGenerator(at::GeneratorImpl* cdata);
 
