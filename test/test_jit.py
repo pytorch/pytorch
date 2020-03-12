@@ -8297,7 +8297,7 @@ a")
             # TODO we need to test exponent operator '**' and bitwise not
             # operator '~' once they are properly supported.
             list = [0, 1, 2, 3]
-            result = list[1:3][0] + double(4)  + (-3 + 8) * 6 // 2 % 4 << 2 + 1 >> 1 | 23 & 16 + 3 ^ 4
+            result = list[1:3][0] + double(4) + (-3 + 8) * 6 // 2 % 4 << 2 + 1 >> 1 | 23 & 16 + 3 ^ 4
             return result
 
         self.checkScript(complicated_arithmetic_operation, ())
