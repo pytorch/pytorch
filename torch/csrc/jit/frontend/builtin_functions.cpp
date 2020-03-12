@@ -5,7 +5,6 @@
 
 namespace torch {
 namespace jit {
-namespace script {
 
 auto scalar_operators_source = CodeTemplate(
     R"SCRIPT(
@@ -81,7 +80,7 @@ struct BuiltinFunctionRegistry {
     std::shared_ptr<CompilationUnit> cu = std::make_shared<CompilationUnit>();
     modules.emplace_back(cu);
     cu->define(
-        c10::nullopt, source, script::nativeResolver(), /*self=*/nullptr);
+        c10::nullopt, source, nativeResolver(), /*self=*/nullptr);
     for (auto& method : cu->get_functions()) {
       builtins_by_name_[Symbol::fromQualString(
                             the_namespace + "::" + method->name())]
@@ -134,6 +133,5 @@ const std::vector<Function*>& getAllBuiltinFunctionsFor(
   return registry.getAllBuiltinFunctionsFor(name);
 }
 
-} // namespace script
 } // namespace jit
 } // namespace torch
