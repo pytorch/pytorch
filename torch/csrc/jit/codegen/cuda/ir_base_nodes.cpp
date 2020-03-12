@@ -20,8 +20,6 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
-#include <torch/csrc/jit/codegen/cuda/ir_nodes.h>
-
 // When we create a Val we immediately register them with the active fusion.
 Val::Val(ValType _vtype, DataType _dtype) : vtype_{_vtype}, dtype_{_dtype} {
   Fusion* fusion = FusionGuard::getCurFusion();
