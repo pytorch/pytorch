@@ -267,9 +267,12 @@ void ProcessGroupAgent::shutdown() {
       const auto& pendingSends = it.second;
       const auto dst = it.first;
       for (auto send : pendingSends) {
-        LOG(INFO) << "Worker " << RpcAgent::getWorkerInfo().id_
-                  << " aborting pending send to destination rank " << dst;
-        send->abort();
+        if (!send->isCompleted()) {
+          LOG(INFO) << "Worker " << RpcAgent::getWorkerInfo().id_
+                    << " aborting pending send to destination rank " << dst;
+
+          send->abort();
+        }
       }
     }
   }
@@ -465,14 +468,22 @@ void ProcessGroupAgent::enqueueSend(SendWork work) {
       std::move(work)));
 }
 
-void ProcessGroupAgent::handleRecv(RecvWork& work) {
+int ProcessGroupAgent::handleRecv(RecvWork& work) {
   torch::Tensor& payload = work.payload_;
   auto data = wireDeserialize(payload.storage().data(), payload.numel());
   Message message(
       std::move(data.first), std::move(data.second), work.type_, work.id_);
   if (message.isRequest()) {
-    auto futureResponse = cb_->operator()(message);
+    ++serverActiveCalls_;
+    std::shared_ptr<FutureMessage> futureResponse;
+    try {
+      futureResponse = cb_->operator()(message);
+    } catch (const std::exception& e) {
+      futureResponse = std::make_shared<FutureMessage>();
+      futureResponse->setError(e.what());
+    }
     if (futureResponse->completed()) {
+      --serverActiveCalls_;
       if (!futureResponse->hasError()) {
         send(work.from_, std::move(*futureResponse).moveValue());
       } else {
@@ -482,6 +493,7 @@ void ProcessGroupAgent::handleRecv(RecvWork& work) {
                 futureResponse->error()->what(), message.id()));
       }
     } else {
+      ++serverActiveAsyncCalls_;
       // Callback processing returned an incomplete future. Add sending the
       // response as a callback which fires when the future completes.
       auto fromId = work.from_.id_;
@@ -490,6 +502,8 @@ void ProcessGroupAgent::handleRecv(RecvWork& work) {
           [this, fromId, requestId, futureResponse](
               const Message& /* unused */,
               const c10::optional<utils::FutureError>& err) {
+            --serverActiveCalls_;
+            --serverActiveAsyncCalls_;
             if (!err) {
               send(
                   getWorkerInfo(fromId),
@@ -512,7 +526,7 @@ void ProcessGroupAgent::handleRecv(RecvWork& work) {
         // RecvCounts will not be incremented here, it will be
         // incremented by the sender who has determined the future has
         // timed out.
-        return;
+        return 0;
       }
       // Use futureInfo before destructing it.
       fm = futureInfo->second.future_;
@@ -532,6 +546,7 @@ void ProcessGroupAgent::handleRecv(RecvWork& work) {
       }
     }
     futureCV_.notify_all();
+    --clientActiveCalls_;
     if (message.type() == MessageType::EXCEPTION) {
       fm->setError(
           std::string(message.payload().begin(), message.payload().end()));
@@ -542,13 +557,17 @@ void ProcessGroupAgent::handleRecv(RecvWork& work) {
     // TODO: pass the error back to the caller instead of crashing here.
     TORCH_INTERNAL_ASSERT(false, "unrecognized message type ", message.type());
   }
+  return 1;
 }
 
 void ProcessGroupAgent::enqueueRecv(RecvWork work) {
   threadPool_.run(std::bind(
       [&](RecvWork& work) {
         try {
-          handleRecv(work);
+          auto shouldIncr = handleRecv(work);
+          if (shouldIncr) {
+            recvCounts_.increment(work.from_.id_);
+          }
         } catch (const std::exception& e) {
           // Processing for this request/response failed. Log the details of the
           // request.
@@ -563,8 +582,10 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
               " : ",
               e.what());
           LOG(INFO) << err;
+          // Still increment so that this recv is recognized as non-oustanding
+          // during graceful shutdown.
+          recvCounts_.increment(work.from_.id_);
         }
-        recvCounts_.increment(work.from_.id_);
       },
       std::move(work)));
 }
