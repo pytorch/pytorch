@@ -317,7 +317,7 @@ The :class:`~torch.distributed.optim.DistributedOptimizer` operates as follows:
    the distributed optimizer uses RPC to remotely execute all the local
    optimizers on the appropriate remote workers. A distributed autograd 
    `context_id` must be provided as input to 
-   :meth: `torch.distributed.optim.DistributedOptimizer.step`. This is used
+   :meth:`torch.distributed.optim.DistributedOptimizer.step`. This is used
    by local optimizers to apply gradients stored in the corresponding
    context.
 5. If multiple concurrent distributed optimizers are updating the same
