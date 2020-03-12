@@ -135,6 +135,7 @@ void Dispatcher::deregisterDef_(const OperatorHandle& op, const OperatorName& op
   // reduce def_count and actually deregister if no references left
   TORCH_INTERNAL_ASSERT(op.operatorIterator_->def_count > 0);
   TORCH_INTERNAL_ASSERT(op.operatorIterator_->def_and_impl_count > 0);
+
   --op.operatorIterator_->def_count;
   --op.operatorIterator_->def_and_impl_count;
   if (0 == op.operatorIterator_->def_count) {
@@ -143,14 +144,8 @@ void Dispatcher::deregisterDef_(const OperatorHandle& op, const OperatorName& op
     // invariant
     listeners_->callOnOperatorDeregistered(op);
   }
-  if (0 == op.operatorIterator_->def_and_impl_count) {
-    // TODO: rename this to "assert deregistration invariants"
-    op.operatorIterator_->op.prepareForDeregistration();
-    operators_.erase(op.operatorIterator_);
-    operatorLookupTable_.write([&] (ska::flat_hash_map<OperatorName, OperatorHandle>& operatorLookupTable) {
-      operatorLookupTable.erase(op_name);
-    });
-  }
+
+  cleanup(op, op_name);
 }
 
 RegistrationHandleRAII Dispatcher::registerImpl(OperatorName op_name, c10::optional<DispatchKey> dispatch_key, KernelFunction kernel) {
@@ -163,20 +158,25 @@ RegistrationHandleRAII Dispatcher::registerImpl(OperatorName op_name, c10::optio
   ++op.operatorIterator_->def_and_impl_count;
 
   return RegistrationHandleRAII([this, op, op_name, dispatch_key, kernel_handle] {
-    op.operatorIterator_->op.deregisterKernel_(dispatch_key, kernel_handle);
-    deregisterImpl_(op, op_name);
+    deregisterImpl_(op, op_name, dispatch_key, kernel_handle);
   });
 }
 
-// NB: This doesn't actually deregister the op, that's handled by the lambda
-// above
-void Dispatcher::deregisterImpl_(const OperatorHandle& op, const OperatorName& op_name) {
+void Dispatcher::deregisterImpl_(const OperatorHandle& op, const OperatorName& op_name, c10::optional<DispatchKey> dispatch_key, std::list<impl::OperatorEntry::ListEntry>::iterator kernel_handle) {
   std::lock_guard<std::mutex> lock(mutex_);
+
+  op.operatorIterator_->op.deregisterKernel_(dispatch_key, kernel_handle);
 
   TORCH_INTERNAL_ASSERT(op.operator_name() == op_name);
 
   TORCH_INTERNAL_ASSERT(op.operatorIterator_->def_and_impl_count > 0);
   --op.operatorIterator_->def_and_impl_count;
+
+  cleanup(op, op_name);
+}
+
+// Test if the operator entry is completely dead, and if so remove it completely
+void Dispatcher::cleanup(const OperatorHandle& op, const OperatorName& op_name) {
   if (0 == op.operatorIterator_->def_and_impl_count) {
     // TODO: rename this to "assert deregistration invariants"
     op.operatorIterator_->op.prepareForDeregistration();
