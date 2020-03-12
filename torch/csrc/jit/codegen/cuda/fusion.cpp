@@ -60,11 +60,11 @@ void Fusion::removeVal(Val* val) {
   assertInFusion(val, "Cannot remove val ");
 
   for (Val* inp : inputs())
-    if (val->same_as(inp))
+    if (val->sameAs(inp))
       TORCH_CHECK(false, "Cannot remove val as it is an input of the fusion.");
 
   for (Val* out : outputs())
-    if (val->same_as(out))
+    if (val->sameAs(out))
       TORCH_CHECK(false, "Cannot remove val as it is an output of the fusion.");
 
   Expr* orig = origin(val);

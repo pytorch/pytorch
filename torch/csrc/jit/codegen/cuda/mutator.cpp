@@ -33,7 +33,7 @@ void OptOutMutator::mutate(Fusion* fusion) {
 
 Statement* OptOutMutator::mutate(IterDomain* id) {
    Int* s = static_cast< Int*>(mutate(id->size()));
-  if(!s->same_as(id->size()))
+  if(!s->sameAs(id->size()))
     return new IterDomain(s, id->parallel_method(), id->isReduction());
   return id;
 }
@@ -43,7 +43,7 @@ Statement* OptOutMutator::mutate(TensorDomain* td) {
   bool mutated = false;
   for (decltype(td->size()) i = 0; i < td->size(); i++) {
     IterDomain* id = static_cast<IterDomain*>(mutate(td->axis(i)));
-    if (!id->same_as(td->axis(i))) {
+    if (!id->sameAs(td->axis(i))) {
       mutated = true;
     }
   }
@@ -65,10 +65,10 @@ Statement* OptOutMutator::mutate(TensorView* tv) {
 
     bool same_tensor = tv->tensor() == nullptr
                     || t == nullptr 
-                     ? tv->tensor()==nullptr && t == nullptr : tv->tensor()->same_as(t);
+                     ? tv->tensor()==nullptr && t == nullptr : tv->tensor()->sameAs(t);
 
   if(!(  same_tensor
-      && tv->domain()->same_as(td)))
+      && tv->domain()->sameAs(td)))
       return new TensorView(t, td);
  return tv;
 }
@@ -86,9 +86,9 @@ Statement* OptOutMutator::mutate(Split* s) {
    Int* fact = static_cast< Int*>(mutate(s->factor()));
 
   if(!(
-       o->same_as(s->out())
-    && i->same_as(s->in())
-    && fact->same_as(s->factor())
+       o->sameAs(s->out())
+    && i->sameAs(s->in())
+    && fact->sameAs(s->factor())
   ))
     return new Split(o, i, s->axis(), fact);
   return s;
@@ -99,8 +99,8 @@ Statement* OptOutMutator::mutate(Merge* m) {
    TensorDomain* i = static_cast< TensorDomain*>(mutate(m->in()));
 
   if(!(
-       o->same_as(m->out())
-    && i->same_as(m->in())
+       o->sameAs(m->out())
+    && i->sameAs(m->in())
   ))
     return new Merge(o, i, m->axis());
   return m;
@@ -111,8 +111,8 @@ Statement* OptOutMutator::mutate(Reorder* ro) {
    TensorDomain* i = static_cast< TensorDomain*>(mutate(ro->in()));
 
   if(!(
-       o->same_as(ro->out())
-    && i->same_as(ro->in())
+       o->sameAs(ro->out())
+    && i->sameAs(ro->in())
   ))
     return new Reorder(o, i, ro->pos2axis());
   return ro;
@@ -122,7 +122,7 @@ Statement* OptOutMutator::mutate(UnaryOp* uop) {
   Val* out = static_cast<Val*>(mutate(uop->out()));
   Val* in = static_cast<Val*>(mutate(uop->in()));
 
-  if (!(out->same_as(uop->out()) && in->same_as(uop->in())))
+  if (!(out->sameAs(uop->out()) && in->sameAs(uop->in())))
     return new UnaryOp(uop->type(), out, in);
   return uop;
 }
@@ -144,18 +144,18 @@ Statement* OptOutMutator::mutate(IfThenElse* n) {
 }
 
 Statement* OptInMutator::mutate(Statement* s) {
-  return Statement::mutator_dispatch(this, s);
+  return Statement::mutatorDispatch(this, s);
 }
 Statement* OptInMutator::mutate(Expr* e) {
-  return Expr::mutator_dispatch(this, e);
+  return Expr::mutatorDispatch(this, e);
 }
 Statement* OptInMutator::mutate(Val* v) {
-  return Val::mutator_dispatch(this, v);
+  return Val::mutatorDispatch(this, v);
 }
 
 
  Statement* ReplaceAll::mutate( Val*  val){
-  if(val->same_as(instance_))
+  if(val->sameAs(instance_))
     return with_;
   return val;
 }

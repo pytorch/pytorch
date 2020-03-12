@@ -63,10 +63,10 @@ struct TORCH_API Statement {
   static void dispatch(T handler, Statement*);
 
   template <typename T>
-  static void const_dispatch(T handler, const Statement* const);
+  static void constDispatch(T handler, const Statement* const);
 
   template <typename T>
-  static Statement* mutator_dispatch(T mutator, Statement*);
+  static Statement* mutatorDispatch(T mutator, Statement*);
 
   // Accessor functions to types. Vals always have a DataType, Exprs never do
   virtual c10::optional<ValType> getValType() const noexcept {
@@ -98,7 +98,7 @@ struct TORCH_API Statement {
   }
 
   // Return if this statement is the same as another statement
-  virtual bool same_as(const Statement* const other) const {
+  virtual bool sameAs(const Statement* const other) const {
     return this == other;
   }
 
@@ -123,7 +123,7 @@ struct TORCH_API Statement {
  *     - Members must be private or protected
  *     - Accessor functions for members
  *     - Must call Val constructor, Val constructor registers with fusion
- *     - Implementation of bool same_as(...)
+ *     - Implementation of bool sameAs(...)
  * 2) dispatch.h/.cpp must be updated to include dispatch of the new Val
  * 3) Default mutator function should be added to mutator.h/.cpp
  * 4) Printing functions should be added to iriostream.h/.cpp
@@ -162,7 +162,7 @@ struct TORCH_API Val : public Statement {
   // TODO: Make this more sophisticated. A value being the same as another value
   // should be evaluated based on the DAG that created it, and that DAGs leaf
   // nodes
-  bool same_as(const Val* const other) const {
+  bool sameAs(const Val* const other) const {
     return this == other;
   }
 
@@ -171,10 +171,10 @@ struct TORCH_API Val : public Statement {
   static void dispatch(T handler, Val*);
 
   template <typename T>
-  static void const_dispatch(T handler, const Val* const);
+  static void constDispatch(T handler, const Val* const);
 
   template <typename T>
-  static Statement* mutator_dispatch(T mutator, Val*);
+  static Statement* mutatorDispatch(T mutator, Val*);
 
  protected:
   const ValType vtype_;
@@ -271,7 +271,7 @@ struct TORCH_API IRInputOutput {
  *     - Accessor functions for members
  *     - Constructors need to register with the Fusion after inputs/outputs are
  * defined
- *     - Implementation of bool same_as(...)
+ *     - Implementation of bool sameAs(...)
  * 2) dispatch.h/.cpp must be updated to include dispatch of the new Val
  * 3) Default mutator function should be added to mutator.h/.cpp
  * 4) Printing functions should be added to iriostream.h/.cpp
@@ -298,14 +298,14 @@ struct TORCH_API Expr : public Statement, IRInputOutput {
     return type_;
   }
 
-  virtual bool same_as(const Expr* const other) const {
+  virtual bool sameAs(const Expr* const other) const {
     if (getExprType() != other->getExprType())
       return false;
     if (inputs().size() != other->inputs().size() ||
         outputs().size() != other->outputs().size())
       return false;
     for (int i = 0; i < inputs().size(); i++) {
-      if (!input(i)->same_as(other->input(i)))
+      if (!input(i)->sameAs(other->input(i)))
         return false;
     }
     return true;
@@ -316,10 +316,10 @@ struct TORCH_API Expr : public Statement, IRInputOutput {
   static void dispatch(T handler, Expr*);
 
   template <typename T>
-  static void const_dispatch(T handler, const Expr* const);
+  static void constDispatch(T handler, const Expr* const);
 
   template <typename T>
-  static Statement* mutator_dispatch(T mutator, Expr*);
+  static Statement* mutatorDispatch(T mutator, Expr*);
 
  private:
   ExprType type_;

@@ -451,20 +451,20 @@ void testGPU_FusionEquality() {
   Float* fval2 = new Float();
   Float* fone = new Float(1.0);
 
-  TORCH_CHECK(fval1->same_as(fval1_copy));
-  TORCH_CHECK(!fval1->same_as(fval2));
-  TORCH_CHECK(!fone->same_as(fval1));
-  TORCH_CHECK(fone->same_as(new Float(1.0)));
+  TORCH_CHECK(fval1->sameAs(fval1_copy));
+  TORCH_CHECK(!fval1->sameAs(fval2));
+  TORCH_CHECK(!fone->sameAs(fval1));
+  TORCH_CHECK(fone->sameAs(new Float(1.0)));
 
   Int* ival1 = new Int();
   Int* ival1_copy = ival1;
   Int* ival2 = new Int();
   Int* ione = new Int(1);
 
-  TORCH_CHECK(ival1->same_as(ival1_copy));
-  TORCH_CHECK(!ival1->same_as(ival2));
-  TORCH_CHECK(!ione->same_as(ival1));
-  TORCH_CHECK(ione->same_as(new Int(1)));
+  TORCH_CHECK(ival1->sameAs(ival1_copy));
+  TORCH_CHECK(!ival1->sameAs(ival2));
+  TORCH_CHECK(!ione->sameAs(ival1));
+  TORCH_CHECK(ione->sameAs(new Int(1)));
 
   BinaryOp* add1 = new BinaryOp(BinaryOpType::Add, new Float(), fval1, ival1);
   BinaryOp* add1_copy =
@@ -475,12 +475,12 @@ void testGPU_FusionEquality() {
   UnaryOp* neg2 = new UnaryOp(UnaryOpType::Neg, new Float(), fval2);
   UnaryOp* neg1_copy = new UnaryOp(UnaryOpType::Neg, new Float(), fval1);
 
-  TORCH_CHECK(add1->same_as(add1_copy));
-  TORCH_CHECK(!add1->same_as(sub1));
+  TORCH_CHECK(add1->sameAs(add1_copy));
+  TORCH_CHECK(!add1->sameAs(sub1));
 
-  TORCH_CHECK(neg1->same_as(neg1_copy));
-  TORCH_CHECK(!static_cast<Expr*>(neg1)->same_as(add1));
-  TORCH_CHECK(!neg1->same_as(neg2));
+  TORCH_CHECK(neg1->sameAs(neg1_copy));
+  TORCH_CHECK(!static_cast<Expr*>(neg1)->sameAs(add1));
+  TORCH_CHECK(!neg1->sameAs(neg2));
 }
 
 void testGPU_FusionReplaceAll() {
@@ -508,7 +508,7 @@ void testGPU_FusionReplaceAll() {
   ReplaceAll::instancesOf(f1, f2);
   BinaryOp* bop = static_cast<BinaryOp*>(fusion.origin(f3));
   // make sure the binary op (origin of f3) actually changed to 2.f
-  TORCH_CHECK(static_cast<Float*>(bop->lhs())->same_as(new Float{2.f}));
+  TORCH_CHECK(static_cast<Float*>(bop->lhs())->sameAs(new Float{2.f}));
 
 }
 

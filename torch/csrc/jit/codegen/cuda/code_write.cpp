@@ -131,7 +131,7 @@ bool CodeWrite::print_predicate(const TensorView* const pred_tv) {
   bool first_pred = true;
   os << "if( ";
   for (decltype(preds.size()) i{0}; i < preds.size(); i++) {
-    if (preds[i]->same_as(new Int(1.0)))
+    if (preds[i]->sameAs(new Int(1.0)))
       continue;
     if (!first_pred)
       os << " && ";
@@ -342,7 +342,7 @@ void CodeWrite::updateView(TensorView* tv) {
   // computeAt structure.
   if (!tv->hasComputeAt()) {
     // If we're the last computeAt of a block of computeAt TVs.
-    if (active_view != nullptr && tv->same_as(active_view)) {
+    if (active_view != nullptr && tv->sameAs(active_view)) {
       int depth = fors.size();
       // reduce down to previous active view_axis
       for (int i = active_view_axis; i < depth; i++)

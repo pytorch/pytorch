@@ -9,6 +9,16 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
+/*
+ * TODO: improve implementation bool IterDomain::sameAs(const IterDomain*) const 
+ * TODO: Add testing of sameAs functions for these nodes
+ */
+
+/*
+ * A Float32 value. For now we don't have any other type besides Float32. This
+ * value can be a symbolic value (defined after the kernel is compiled) or a
+ * constant value (inlined into the kernel definition).
+ */
 struct TORCH_API Float : public Val {
   ~Float() = default;
 
@@ -33,16 +43,15 @@ struct TORCH_API Float : public Val {
     return maybe_value_;
   }
 
-  virtual bool same_as(const Float* const other) const {
-    if (isConst() && other->isConst())
-      return *value() == *(other->value());
-    return this == other;
-  }
+  bool sameAs(const Float* const other) const;
 
  private:
   const c10::optional<float> maybe_value_;
 };
 
+
+// An Int64 value. If used for indexing it's set as size_t. Otherwise it's an
+// inlined literal in the kernel.
 struct TORCH_API Int : public Val {
   ~Int() = default;
 
@@ -66,18 +75,20 @@ struct TORCH_API Int : public Val {
     return maybe_value_;
   }
 
-  virtual bool same_as(const Int* const other) const {
-    if (isConst() && other->isConst())
-      return *value() == *(other->value());
-    return this == other;
-  }
+  bool sameAs(const Int* const other) const;
 
  private:
   const c10::optional<int> maybe_value_;
 };
 
-
-// TODO: comment
+/*
+ * A specialization for Unary operations. Unary operations take in a single
+ * input and produce a single output. Examples include:
+ *   1) Casting operation i.e. float(a_val)
+ *   2) Negation i.e. val * -1
+ *   3) Reduction across a dimension i.e. val.sum(axis=2)
+ *   4) split/merge/reorder
+ */
 struct TORCH_API UnaryOp : public Expr {
   ~UnaryOp() = default;
   UnaryOp(UnaryOpType _type, Val* _out, Val* _in);
@@ -93,11 +104,7 @@ struct TORCH_API UnaryOp : public Expr {
 
   UnaryOpType type() const noexcept { return unary_op_type_; }
 
-  bool same_as(const UnaryOp* const other) const {
-    if (this->type() != other->type())
-      return false;
-    return static_cast<const Expr*>(this)->same_as(other);
-  }
+  bool sameAs(const UnaryOp* const other) const;
 
  private:
   const UnaryOpType unary_op_type_;
@@ -105,7 +112,12 @@ struct TORCH_API UnaryOp : public Expr {
   Val* const in_;
 };
 
-// TODO: comment
+/*
+ * A specialization for Binary operations. Binary operations take in two inputs
+ * and produce a single output. Examples include:
+ *  1) Add/mul/div/mod/sub (A * B)
+ *  2) LT (A < B)
+ */
 struct TORCH_API BinaryOp : public Expr {
   ~BinaryOp() = default;
   BinaryOp(BinaryOpType _type, Val* _out, Val* _lhs, Val* _rhs);
@@ -116,25 +128,13 @@ struct TORCH_API BinaryOp : public Expr {
   BinaryOp(BinaryOp&& other) = delete;
   BinaryOp& operator=(BinaryOp&& other) = delete;
 
-  Val* out() const noexcept {
-    return out_;
-  }
-  Val* lhs() const noexcept {
-    return lhs_;
-  }
-  Val* rhs() const noexcept {
-    return rhs_;
-  }
+  Val* out() const noexcept { return out_; }
+  Val* lhs() const noexcept { return lhs_; }
+  Val* rhs() const noexcept { return rhs_; }
 
-  BinaryOpType type() const noexcept {
-    return binary_op_type_;
-  }
+  BinaryOpType type() const noexcept { return binary_op_type_; }
 
-  bool same_as(const BinaryOp* other) const {
-    if (type() != other->type())
-      return false;
-    return static_cast<const Expr*>(this)->same_as(other);
-  }
+  bool sameAs(const BinaryOp* other) const;
 
  private:
   const BinaryOpType binary_op_type_;
@@ -143,8 +143,242 @@ struct TORCH_API BinaryOp : public Expr {
   Val* const rhs_;
 };
 
-// TODO: Not sure if array of expressions is appropriate composition
-// TODO: I named it ForLoop instead of For because it is easer to search for.
+/*
+ * Simply a representation of an iterable from 0 to size. TensorDomains which
+ * represent how to iterate over a tensor is made up of IterDomains. We directly
+ * set parallization strategies on IterDomains.
+ */
+struct TORCH_API IterDomain : public Val {
+  ~IterDomain() = default;
+
+  IterDomain() = delete;
+
+  IterDomain(
+      Int* _size,
+      ParallelType _parallel_method = ParallelType::Serial,
+      bool _reduction_domain = false);
+
+  IterDomain(
+      Val* int_size,
+      ParallelType _parallel_method = ParallelType::Serial,
+      bool _reduction_domain = false);
+
+  bool sameAs(const IterDomain* const other) const;
+
+  bool isReduction() const noexcept { return is_reduction_domain_; }
+  
+  bool isParallelized() const { return parallel_method_ != ParallelType::Serial;}
+
+  bool isBlockDim() const {
+    return ( parallel_method_ == ParallelType::BIDz
+          || parallel_method_ == ParallelType::BIDy
+          ||parallel_method_ == ParallelType::BIDx);
+  }
+
+  bool isThreadDim() const {
+    return ( parallel_method_ == ParallelType::TIDz
+          || parallel_method_ == ParallelType::TIDy
+          || parallel_method_ == ParallelType::TIDx);
+  }
+
+  bool isThread() const {
+    return ( isBlockDim() || isThreadDim() );
+  }
+
+  void parallelize(ParallelType t){parallel_method_ = t;}
+
+  ParallelType parallel_method() const noexcept {
+    return parallel_method_;
+  }
+
+  Int* size() const noexcept { return size_; }
+
+  IterDomain(const IterDomain& other) = delete;
+  IterDomain& operator=(const IterDomain& other) = delete;
+
+  IterDomain(IterDomain&& other) = delete;
+  IterDomain& operator=(IterDomain&& other) = delete;
+
+ private:
+  Int* const size_;
+  ParallelType parallel_method_ = ParallelType::Serial;
+  bool is_reduction_domain_;
+};
+
+// A list of IterDomains representing how to iterate across a given Tensor.
+struct TORCH_API TensorDomain : public Val {
+  ~TensorDomain() = default;
+
+  TensorDomain(const TensorDomain& other) = delete;
+  TensorDomain& operator=(const TensorDomain& other) = delete;
+
+  TensorDomain(TensorDomain&& other) = delete;
+  TensorDomain& operator=(TensorDomain&& other) = delete;
+
+  TensorDomain(std::vector<IterDomain*> domain_)
+      : Val(ValType::TensorDomain), domain(domain_) {}
+
+  std::vector<IterDomain*>::size_type size() const {
+    return domain.size();
+  }
+
+  bool sameAs(const TensorDomain* const other) const;
+
+  TensorDomain* noReductions() const;
+
+  //i here is int, as we want to accept negative value and ::size_type can be a uint.
+  IterDomain* axis(int i) const;
+
+ private:
+  std::vector<IterDomain*> domain;
+  
+};
+
+// Currently used as a go-between from JIT to TensorView. It's nothing more than
+// a middle-man and should be removed.
+struct TORCH_API Tensor : public Val {
+  ~Tensor() = default;
+
+  Tensor() = delete;
+
+  Tensor(DataType dt, TensorDomain* _td = nullptr)
+      : Val(ValType::Tensor, dt), contiguity_(c10::nullopt), domain_(_td) {}
+
+  Tensor(const Tensor& other) = delete;
+  Tensor& operator=(const Tensor& other) = delete;
+
+  Tensor(Tensor&& other) = delete;
+  Tensor& operator=(Tensor&& other) = delete;
+
+  Tensor(const std::shared_ptr<c10::TensorType>& tensor_type);
+
+  Tensor(const std::shared_ptr<Value>& jit_value);
+  
+
+  //TODO: implement   bool sameAs(const Tensor* other) const
+  bool hasContiguityInfo() const;
+
+  const c10::optional<TensorContiguity>& getContiguityInfo() const;
+
+  static Tensor* MakeDummyTensor(int ndims);
+
+  TensorDomain* domain() const noexcept { return domain_; }
+
+  private:
+
+  // Implementation details:
+  const c10::optional<TensorContiguity> contiguity_;
+  TensorDomain* domain_;
+};
+/*
+ * Representation for a split on IterDomain = axis in a TensorDomain, by factor
+ * = factor
+ * TODO: Implement split by nparts
+ */
+struct TORCH_API Split : public Expr {
+  ~Split() = default;
+
+  Split(const Split& other) = delete;
+  Split& operator=(const Split& other) = delete;
+
+  Split(Split&& other) = delete;
+  Split& operator=(Split&& other) = delete;
+
+  Split(
+      TensorDomain* _out,
+      TensorDomain* _in,
+      int _axis,
+      Int* _factor);
+
+  TensorDomain* out() const noexcept { return out_; }
+  TensorDomain* in() const noexcept { return in_; }
+
+  int axis() const noexcept { return axis_; }
+  Int* factor() const noexcept { return factor_; }
+  bool sameAs(const Split* const other) const;
+
+private:
+  TensorDomain* const out_;
+  TensorDomain* const in_;
+  const int axis_;
+  Int* const factor_;
+};
+
+
+/*
+ * Merge Iterdomain _axis in TensorDomain with the following IterDomain. Both
+ * IterDomains must be of the same iter or reduction type, as well as the same
+ * parallelization strategy if there is one.
+ * TODO: Should this be a unary op type?
+ */
+struct TORCH_API Merge : public Expr {
+  ~Merge() = default;
+  Merge(TensorDomain* _out, TensorDomain* _in, int _axis);
+
+  Merge(const Merge& other) = delete;
+  Merge& operator=(const Merge& other) = delete;
+
+  Merge(Merge&& other) = delete;
+  Merge& operator=(Merge&& other) = delete;
+
+  TensorDomain* out() const noexcept { return out_; }
+  TensorDomain* in() const noexcept { return in_; }
+  int axis() const noexcept { return axis_; }
+
+  bool sameAs(const Merge* const other) const{
+    return(
+         out()->sameAs(other->out())
+      && in()->sameAs(other->in())
+      && axis() == other->axis()
+    );
+  }
+
+ private:
+  TensorDomain* const out_;
+  TensorDomain* const in_;
+  int axis_;
+};
+
+
+/*
+ * Reorder the IterDomains of a tensor domain with the map
+ * pos2axis[new_position] = old_position
+ */
+struct TORCH_API Reorder : public Expr {
+  ~Reorder() = default;
+  Reorder(
+      TensorDomain* _out,
+      TensorDomain* _in,
+      std::vector<int> _pos2axis);
+
+  Reorder(const Reorder& other) = delete;
+  Reorder& operator=(const Reorder& other) = delete;
+
+  Reorder(Reorder&& other) = delete;
+  Reorder& operator=(Reorder&& other) = delete;
+
+  TensorDomain* out() const noexcept { return out_; }
+  TensorDomain* in() const noexcept { return in_; }
+  const std::vector<int>& pos2axis() const noexcept { return pos2axis_; }
+
+  bool sameAs(const Reorder* const other) const;
+  
+ private:
+  TensorDomain* const out_;
+  TensorDomain* const in_;
+  const std::vector<int> pos2axis_;
+};
+
+
+/*
+ * ForLoop provides scoping around an int iterator from 0 to range. Exprs placed
+ * in its body are considered inside the scope of the for loop. In the future
+ * the implementation should look quite different so that we can do proper
+ * dependency annalysis like in Fusion.
+ *
+ * TODO: Change implmentation of Exprs contained in the scope to be more similar
+ * to Fusion where we can do proper dependency analysis.
+ */
 struct TORCH_API ForLoop : public Expr {
   ~ForLoop() = default;
   ForLoop(
@@ -173,29 +407,25 @@ struct TORCH_API ForLoop : public Expr {
     body_.push_back(e);
   }
 
-  void remove_expr(const Expr* e) {
-    auto it = body_.begin();
-    for (; it != body_.end(); ++it)
-      if (*it == e)
-        break;
-    if (it != body_.end())
-      body_.erase(it);
-  }
-
-  // TODO: This should probably be more sophisiticated.
-  bool same_as(const ForLoop* other) const {
-    return static_cast<const Expr*>(this)->same_as(other);
-  }
+  void remove_expr(const Expr* e);
+  bool sameAs(const ForLoop* other) const;
 
  private:
-  // TODO: Why is the pointer const and not what's in the object?
   Int* const index_;
   IterDomain* const range_;
   std::vector<const Expr*> body_;
 };
 
-// TODO: Not sure if array of expressions is appropriate composition
-// TODO: I named it IfThenElse instead of For because it is easer to search for.
+
+/*
+ * IfThenElse provides scoping for an boolean operator. Exprs placed in its body
+ * are considered inside the scope of the if statement. In the future the
+ * implementation should look quite different so that we can do proper
+ * dependency annalysis like in Fusion.
+ *
+ * TODO: Change implmentation of Exprs contained in the scope to be more similar
+ * to Fusion where we can do proper dependency analysis.
+ */
 struct TORCH_API IfThenElse : public Expr {
   ~IfThenElse() = default;
   IfThenElse(
@@ -230,11 +460,8 @@ struct TORCH_API IfThenElse : public Expr {
     return !else_body_.empty();
   }
 
-  // TODO: This should probably be more sophisiticated.
-  bool same_as(const IfThenElse* other) const {
-    return static_cast<const Expr*>(this)->same_as(other);
-  }
-
+  bool sameAs(const IfThenElse* other) const;
+  
  private:
   // TODO: Why is the pointer const and not what's in the object?
   Val* const cond_;
@@ -243,20 +470,12 @@ struct TORCH_API IfThenElse : public Expr {
 };
 
 
+/*
+ * TODO: Fill out TensorIndex, which is a list of Ints used to directly index a
+ * TensorView. It is not the flattened index, which needs to be computed using
+ * stride information.
+ */
 struct TORCH_API TensorIndex : public Val {
-  TensorIndex(Int* _size)
-      : Val(ValType::TensorIndex, DataType::Int),
-        size_(_size) { }
-
-  bool same_as(const TensorIndex* const other) const {
-    return size()->same_as(other->size());
-  }
-
-  Int* size() const noexcept {
-    return size_;
-  }
-
-  TensorIndex() = delete;
   ~TensorIndex() = default;
 
   TensorIndex(const TensorIndex& other) = delete;
@@ -265,317 +484,20 @@ struct TORCH_API TensorIndex : public Val {
   TensorIndex(TensorIndex&& other) = delete;
   TensorIndex& operator=(TensorIndex&& other) = delete;
 
- private:
-  Int* const size_;
-};
+  TensorIndex(std::vector<Int*> _indices)
+      : Val(ValType::TensorIndex), indices_(_indices) {}
 
-struct TORCH_API IterDomain : public Val {
-  ~IterDomain() = default;
-
-  IterDomain() = delete;
-
-  IterDomain(
-      Int* _size,
-      ParallelType _parallel_method = ParallelType::Serial,
-      bool _reduction_domain = false)
-      : Val(ValType::IterDomain, DataType::Int),
-        size_(_size),
-        parallel_method_(_parallel_method),
-        is_reduction_domain_(_reduction_domain) {}
-
-  IterDomain(
-      Val* int_size,
-      ParallelType _parallel_method = ParallelType::Serial,
-      bool _reduction_domain = false)
-      : Val(ValType::IterDomain, DataType::Int),
-        size_(static_cast<Int*>(int_size)),
-        parallel_method_(_parallel_method),
-        is_reduction_domain_(_reduction_domain) {
-    assert(int_size->isVal());
-    assert(int_size->getDataType() == DataType::Int);
+  std::vector<Int*>::size_type size() const {
+    return indices_.size();
   }
 
-  bool same_as(const IterDomain* const other) const {
-    return(
-         isReduction() == other->isReduction()
-      && parallel_method() == other->parallel_method()
-      && size()->same_as(other->size())
-    );
-  }
-
-  bool isReduction() const noexcept {
-    return is_reduction_domain_;
-  }
-  
-  bool isParallelized(){ return parallel_method_ != ParallelType::Serial;}
-
-  bool isBlockDim(){
-    if( parallel_method_ == ParallelType::BIDz
-      ||parallel_method_ == ParallelType::BIDy
-      ||parallel_method_ == ParallelType::BIDx)
-      return true;
-    return false;
-  }
-
-  bool isThreadDim(){
-    if( parallel_method_ == ParallelType::TIDz
-      ||parallel_method_ == ParallelType::TIDy
-      ||parallel_method_ == ParallelType::TIDx)
-      return true;
-    return false;
-  }
-
-  bool isThread(){
-    return ( isBlockDim() || isThreadDim() );
-  }
-
-  void parallelize(ParallelType t){parallel_method_ = t;}
-
-  ParallelType parallel_method() const noexcept {
-    return parallel_method_;
-  }
-  Int* size() const noexcept {
-    return size_;
-  }
-
-  IterDomain(const IterDomain& other) = delete;
-  IterDomain& operator=(const IterDomain& other) = delete;
-
-  IterDomain(IterDomain&& other) = delete;
-  IterDomain& operator=(IterDomain&& other) = delete;
-
- private:
-  Int* const size_;
-  ParallelType parallel_method_ = ParallelType::Serial;
-  bool is_reduction_domain_;
-};
-
-struct TORCH_API TensorDomain : public Val {
-  ~TensorDomain() = default;
-
-  TensorDomain(const TensorDomain& other) = delete;
-  TensorDomain& operator=(const TensorDomain& other) = delete;
-
-  TensorDomain(TensorDomain&& other) = delete;
-  TensorDomain& operator=(TensorDomain&& other) = delete;
-
-  TensorDomain(std::vector<IterDomain*> domain_)
-      : Val(ValType::TensorDomain), domain(domain_) {}
-
-  std::vector<IterDomain*>::size_type size() const {
-    return domain.size();
-  }
-
-  bool same_as(const TensorDomain* const other) const {
-    if(size() != other->size())
-      return false;
-
-    for(decltype(size()) i = 0; i<size(); i++)
-      if( !(axis(i)->same_as(other->axis(i))) )
-        return false;
-
-    return true;
-      
-  }
-
-  TensorDomain* noReductions() const {
-    std::vector<IterDomain*> noReductionDomain;
-    for(IterDomain* id : domain)
-      if(!id->isReduction())
-        noReductionDomain.push_back(id);
-    return new TensorDomain(noReductionDomain);
-  }
-
+  bool sameAs(const TensorIndex* const other) const;
   //i here is int, as we want to accept negative value and ::size_type can be a uint.
-  IterDomain* axis(int i) const {
-    if(i < 0)
-      i+=size();
-    assert(i >= 0 && i < size());
-    return domain[i];
-  }
-
+  Int* axis(int i) const;
 
  private:
-  std::vector<IterDomain*> domain;
+  std::vector<Int*> indices_;
 };
-
-//Going to friend TransformReplay so it can reset TensorView domain before replaying.
-//We could narrow friend down to a single function but it would require including the entire header.
-struct TransformReplay;
-
-struct TORCH_API Tensor : public Val {
-  ~Tensor() = default;
-
-  Tensor() = delete;
-
-  Tensor(DataType dt, TensorDomain* _td = nullptr)
-      : Val(ValType::Tensor, dt), contiguity_(c10::nullopt), domain_(_td) {}
-
-  Tensor(const Tensor& other) = delete;
-  Tensor& operator=(const Tensor& other) = delete;
-
-  Tensor(Tensor&& other) = delete;
-  Tensor& operator=(Tensor&& other) = delete;
-
-  Tensor(const std::shared_ptr<c10::TensorType>& tensor_type);
-
-  Tensor(const std::shared_ptr<Value>& jit_value);
-  
-
-  //TODO: implement   bool same_as(const Tensor* other) const
-  bool hasContiguityInfo() const;
-
-  const c10::optional<TensorContiguity>& getContiguityInfo() const;
-
-  static Tensor* MakeDummyTensor(int ndims) {
-    std::vector<IterDomain*> sizes;
-    for (int i = 0; i < ndims; i++) {
-      sizes.push_back(new IterDomain(new Int()));
-    }
-    TensorDomain* td = new TensorDomain(sizes);
-
-    return new Tensor(DataType::Float, td);
-  }
-
-  TensorDomain* domain() const noexcept { return domain_; }
-
-  private:
-
-  // Implementation details:
-  const c10::optional<TensorContiguity> contiguity_;
-  TensorDomain* domain_;
-};
-
-/*
- * Split an axis, by factor factor
- * TODO: Implement split by nparts
- */
-struct TORCH_API Split : public Expr {
-  ~Split() = default;
-  Split(
-      TensorDomain* _out,
-      TensorDomain* _in,
-      int _axis,
-      Int* _factor);
-
-  TensorDomain* out() const noexcept {
-    return out_;
-  }
-  TensorDomain* in() const noexcept {
-    return in_;
-  }
-  int axis() const noexcept {
-    return axis_;
-  }
-  Int* factor() const noexcept {
-    return factor_;
-  }
-
-  bool same_as(const Split* const other) const{
-    return(
-         out()->same_as(other->out())
-      && in()->same_as(other->in())
-      && axis() == other->axis()
-      && factor()->same_as(other->factor())
-    );
-  }
-
-  Split(const Split& other) = delete;
-  Split& operator=(const Split& other) = delete;
-
-  Split(Split&& other) = delete;
-  Split& operator=(Split&& other) = delete;
-
- private:
-  TensorDomain* const out_;
-  TensorDomain* const in_;
-  const int axis_;
-  Int* const factor_;
-};
-
-/*
- * Merge axis _axis with the following axis. Both axis must be of the same
- * iter or reduction axis, as well as the same parallelization strategy if
- * there is one.
- * TODO: Should this be a unary op type?
- */
-struct TORCH_API Merge : public Expr {
-  ~Merge() = default;
-  Merge(TensorDomain* _out, TensorDomain* _in, int _axis);
-
-  Merge(const Merge& other) = delete;
-  Merge& operator=(const Merge& other) = delete;
-
-  Merge(Merge&& other) = delete;
-  Merge& operator=(Merge&& other) = delete;
-
-  TensorDomain* out() const noexcept {
-    return out_;
-  }
-  TensorDomain* in() const noexcept {
-    return in_;
-  }
-  int axis() const noexcept {
-    return axis_;
-  }
-
-  bool same_as(const Merge* const other) const{
-    return(
-         out()->same_as(other->out())
-      && in()->same_as(other->in())
-      && axis() == other->axis()
-    );
-  }
-
- private:
-  TensorDomain* const out_;
-  TensorDomain* const in_;
-  int axis_;
-};
-
-/*
- * Reorder axis of a tensor domain with the map
- * pos2axis[new_position] = old_position
- */
-struct TORCH_API Reorder : public Expr {
-  ~Reorder() = default;
-  Reorder(
-      TensorDomain* _out,
-      TensorDomain* _in,
-      std::vector<int> _pos2axis);
-
-  Reorder(const Reorder& other) = delete;
-  Reorder& operator=(const Reorder& other) = delete;
-
-  Reorder(Reorder&& other) = delete;
-  Reorder& operator=(Reorder&& other) = delete;
-
-  TensorDomain* out() const noexcept {
-    return out_;
-  }
-  TensorDomain* in() const noexcept {
-    return in_;
-  }
-  //Returns map pos2axis[new_position] = old_position
-  const std::vector<int>& pos2axis() const noexcept {
-    return pos2axis_;
-  }
-
-  bool same_as(const Merge* const other) const{
-    //Implicitly in and out matching means pos2axis matches
-    return(
-         out()->same_as(other->out())
-      && in()->same_as(other->in())
-    );
-  }
-
- private:
-  TensorDomain* const out_;
-  TensorDomain* const in_;
-  const std::vector<int> pos2axis_;
-};
-
-
 
 }}}
 

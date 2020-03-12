@@ -3,10 +3,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/tensor_meta.h>
 
-/*
- * TODO: improve implementation bool IterDomain::same_as(const IterDomain*) const 
- * TODO: Add testing of same_as functions for these nodes
- * 
+/* 
  * This file currently contains items associated with tensors, tensor domains, tensor views
  * and transforms associated with them (split, merge, reorder, compute_at).
  * 
@@ -52,6 +49,9 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
+
+struct TransformReplay;
+
 struct TORCH_API TensorView : public Val {
   ~TensorView() = default;
 
@@ -82,13 +82,13 @@ struct TORCH_API TensorView : public Val {
   Tensor* tensor() const noexcept { return tensor_; }
   TensorDomain* domain() const noexcept { return domain_; }
 
-  bool same_as(const TensorView* const other) const{
+  bool sameAs(const TensorView* const other) const{
     bool same_tensor = tensor() == nullptr
                     || other->tensor() == nullptr 
-                    ? tensor()==nullptr && other->tensor()==nullptr : tensor()->same_as(other->tensor());
+                    ? tensor()==nullptr && other->tensor()==nullptr : tensor()->sameAs(other->tensor());
     return(
          same_tensor
-      && domain()->same_as(other->domain())
+      && domain()->sameAs(other->domain())
       && getDataType().value() == other->getDataType().value()
     );
   }

@@ -253,7 +253,7 @@ TensorView* TensorView::computeAt(TensorView* consumer, int axis) {
    *
    * Compute at modifies this, not consumer.
    */
-  TORCH_CHECK(!this->same_as(consumer), 
+  TORCH_CHECK(!this->sameAs(consumer), 
     "Cannot call this->computeAt(this, ...)");
   if(axis < 0)
     //Compute at is funny where size is the maximum acceptable value instead of size-1
@@ -278,7 +278,7 @@ TensorView* TensorView::computeAt(TensorView* consumer, int axis) {
     TORCH_INTERNAL_ASSERT(val->getValType() == ValType::TensorView,
     "When following the transform dependency chain, an invalid value was found.");
     TensorView* tv = static_cast<TensorView*>(val);
-    if (tv->same_as(consumer))
+    if (tv->sameAs(consumer))
       continue;
     tv->computeAt(running_consumer, axis);
     // TransformReplay::replay(running_consumer, tv, axis);
@@ -296,7 +296,7 @@ TensorView* TensorView::computeAt(TensorView* consumer, int axis) {
 
       TensorView* other_consumer =
           static_cast<TensorView*>(maybe_other_consumer);
-      if (running_consumer->same_as(other_consumer))
+      if (running_consumer->sameAs(other_consumer))
         continue;
 
       if (DependencyCheck::isDependencyOf(running_consumer, other_consumer)) {

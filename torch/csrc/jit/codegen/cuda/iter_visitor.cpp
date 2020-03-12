@@ -125,7 +125,7 @@ std::ostream& operator<<(std::ostream& os, std::stack<Val*> vals) {
 */
 void DependencyCheck::handle(Val* val){
   //Debug dependency chain
-  if(val->same_as(dependency_))
+  if(val->sameAs(dependency_))
     is_dependency = true;
 }
 

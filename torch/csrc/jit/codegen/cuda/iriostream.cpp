@@ -67,7 +67,13 @@ TORCH_API void IRPrinter::handle(const IterDomain* const id) {
 }
 
 TORCH_API void IRPrinter::handle(const TensorIndex* const ti) {
-  print_inline(ti->size());
+  os << "[ ";
+  for(decltype(ti->size()) i{0}; i < ti->size(); i++){
+    print_inline(ti->axis(i));
+    if(i != ti->size() - 1)
+      os<<", ";
+  }
+  os<<" ]";
 }
 
 void IRPrinter::handle(const Tensor* const t) {

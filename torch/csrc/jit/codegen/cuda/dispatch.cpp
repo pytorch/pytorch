@@ -111,7 +111,7 @@ void Statement::dispatch(T handler, Statement* stmt) {
 }
 
 template <typename T>
-void Val::const_dispatch(T handler, const Val* const val) {
+void Val::constDispatch(T handler, const Val* const val) {
   switch (*(val->getValType())) {
     case ValType::IterDomain:
       ptr(handler)->handle(static_cast<const IterDomain* const>(val));
@@ -143,7 +143,7 @@ void Val::const_dispatch(T handler, const Val* const val) {
 }
 
 template <typename T>
-void Expr::const_dispatch(T handler, const Expr* const expr) {
+void Expr::constDispatch(T handler, const Expr* const expr) {
   switch (*(expr->getExprType())) {
     case ExprType::Split:
       ptr(handler)->handle(static_cast<const Split* const>(expr));
@@ -172,7 +172,7 @@ void Expr::const_dispatch(T handler, const Expr* const expr) {
 }
 
 template <typename T>
-void Statement::const_dispatch(T handler, const Statement* const stmt) {
+void Statement::constDispatch(T handler, const Statement* const stmt) {
   if (stmt->isVal()) {
     ptr(handler)->handle(static_cast<const Val* const>(stmt));
   } else if (stmt->isExpr()) {
@@ -182,18 +182,18 @@ void Statement::const_dispatch(T handler, const Statement* const stmt) {
 }
 
 /*
- * Generic mutator_dispatch for any handler that modifies the IR. This could be
+ * Generic mutatorDispatch for any handler that modifies the IR. This could be
  * a transformation on loop structures, or parallelizing a loop. This
- * mutator_dispatch is paired with a class that implements the functions
+ * mutatorDispatch is paired with a class that implements the functions
  * template <typenname node_type> Statement* mutate(node_type* node) mutate
- * should call (statement* node_to_dispatch)->mutator_dispatch() It could also
- * implement Statement* mutate(Statement* stmt){ stmt->mutator_dispatch(this);
+ * should call (statement* node_to_dispatch)->mutatorDispatch() It could also
+ * implement Statement* mutate(Statement* stmt){ stmt->mutatorDispatch(this);
  * }
  * And therefore dispatch should never call:
  *   ptr(mutator)->mutate(static_cast<Statement*>(this));
  */
 template <typename T>
-Statement* Val::mutator_dispatch(T mutator, Val* val) {
+Statement* Val::mutatorDispatch(T mutator, Val* val) {
   switch (*(val->getValType())) {
     case ValType::IterDomain:
       return ptr(mutator)->mutate(static_cast<IterDomain*>(val));
@@ -219,7 +219,7 @@ Statement* Val::mutator_dispatch(T mutator, Val* val) {
 }
 
 template <typename T>
-Statement* Expr::mutator_dispatch(T mutator, Expr* expr) {
+Statement* Expr::mutatorDispatch(T mutator, Expr* expr) {
   switch (*(expr->getExprType())) {
     case ExprType::Split:
       return ptr(mutator)->mutate(static_cast<Split*>(expr));
@@ -241,7 +241,7 @@ Statement* Expr::mutator_dispatch(T mutator, Expr* expr) {
 }
 
 template <typename T>
-Statement* Statement::mutator_dispatch(T mutator, Statement* stmt) {
+Statement* Statement::mutatorDispatch(T mutator, Statement* stmt) {
   if (stmt->isVal()) {
     return ptr(mutator)->mutate(static_cast<Val*>(stmt));
   }
@@ -270,30 +270,30 @@ template void Val::dispatch(OptInDispatch*, Val*);
 template void Expr::dispatch(OptInDispatch, Expr*);
 template void Expr::dispatch(OptInDispatch*, Expr*);
 
-template void Statement::const_dispatch(
+template void Statement::constDispatch(
     OptInConstDispatch,
     const Statement* const);
-template void Statement::const_dispatch(
+template void Statement::constDispatch(
     OptInConstDispatch*,
     const Statement* const);
-template void Val::const_dispatch(OptInConstDispatch, const Val* const);
-template void Val::const_dispatch(OptInConstDispatch*, const Val* const);
-template void Expr::const_dispatch(OptInConstDispatch, const Expr* const);
-template void Expr::const_dispatch(OptInConstDispatch*, const Expr* const);
+template void Val::constDispatch(OptInConstDispatch, const Val* const);
+template void Val::constDispatch(OptInConstDispatch*, const Val* const);
+template void Expr::constDispatch(OptInConstDispatch, const Expr* const);
+template void Expr::constDispatch(OptInConstDispatch*, const Expr* const);
 
-template Statement* Statement::mutator_dispatch(OptOutMutator, Statement*);
-template Statement* Statement::mutator_dispatch(OptOutMutator*, Statement*);
-template Statement* Val::mutator_dispatch(OptOutMutator, Val*);
-template Statement* Val::mutator_dispatch(OptOutMutator*, Val*);
-template Statement* Expr::mutator_dispatch(OptOutMutator, Expr*);
-template Statement* Expr::mutator_dispatch(OptOutMutator*, Expr*);
+template Statement* Statement::mutatorDispatch(OptOutMutator, Statement*);
+template Statement* Statement::mutatorDispatch(OptOutMutator*, Statement*);
+template Statement* Val::mutatorDispatch(OptOutMutator, Val*);
+template Statement* Val::mutatorDispatch(OptOutMutator*, Val*);
+template Statement* Expr::mutatorDispatch(OptOutMutator, Expr*);
+template Statement* Expr::mutatorDispatch(OptOutMutator*, Expr*);
 
-template Statement* Statement::mutator_dispatch(OptInMutator, Statement*);
-template Statement* Statement::mutator_dispatch(OptInMutator*, Statement*);
-template Statement* Val::mutator_dispatch(OptInMutator, Val*);
-template Statement* Val::mutator_dispatch(OptInMutator*, Val*);
-template Statement* Expr::mutator_dispatch(OptInMutator, Expr*);
-template Statement* Expr::mutator_dispatch(OptInMutator*, Expr*);
+template Statement* Statement::mutatorDispatch(OptInMutator, Statement*);
+template Statement* Statement::mutatorDispatch(OptInMutator*, Statement*);
+template Statement* Val::mutatorDispatch(OptInMutator, Val*);
+template Statement* Val::mutatorDispatch(OptInMutator*, Val*);
+template Statement* Expr::mutatorDispatch(OptInMutator, Expr*);
+template Statement* Expr::mutatorDispatch(OptInMutator*, Expr*);
 
 void OptOutDispatch::handle(Statement* s) {
   Statement::dispatch(this, s);
@@ -316,23 +316,23 @@ void OptInDispatch::handle(Val* v) {
 }
 
 void OptInConstDispatch::handle(const Statement* const s) {
-  Statement::const_dispatch(this, s);
+  Statement::constDispatch(this, s);
 }
 void OptInConstDispatch::handle(const Expr* const e) {
-  Expr::const_dispatch(this, e);
+  Expr::constDispatch(this, e);
 }
 void OptInConstDispatch::handle(const Val* const v) {
-  Val::const_dispatch(this, v);
+  Val::constDispatch(this, v);
 }
 
 Statement* OptOutMutator::mutate(Statement* s) {
-  return Statement::mutator_dispatch(this, s);
+  return Statement::mutatorDispatch(this, s);
 }
 Statement* OptOutMutator::mutate(Expr* e) {
-  return Expr::mutator_dispatch(this, e);
+  return Expr::mutatorDispatch(this, e);
 }
 Statement* OptOutMutator::mutate(Val* v) {
-  return Val::mutator_dispatch(this, v);
+  return Val::mutatorDispatch(this, v);
 }
 
 } // namespace fuser
