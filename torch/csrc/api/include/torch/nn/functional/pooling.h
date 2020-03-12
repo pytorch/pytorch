@@ -26,6 +26,17 @@ inline Tensor avg_pool1d(const Tensor& input,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.avg_pool1d
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::AvgPool1dFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::avg_pool1d(x, F::AvgPool1dFuncOptions(3).stride(2));
+/// ```
 inline Tensor avg_pool1d(const Tensor& input, const AvgPool1dFuncOptions& options) {
   return avg_pool1d(
     input,
@@ -57,6 +68,17 @@ inline Tensor avg_pool2d(const Tensor& input,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.avg_pool2d
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::AvgPool2dFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::avg_pool2d(x, F::AvgPool2dFuncOptions(3).stride(2));
+/// ```
 inline Tensor avg_pool2d(const Tensor& input, const AvgPool2dFuncOptions& options) {
   return detail::avg_pool2d(
     input,
@@ -89,6 +111,17 @@ inline Tensor avg_pool3d(const Tensor& input,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.avg_pool3d
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::AvgPool3dFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::avg_pool3d(x, F::AvgPool3dFuncOptions(3).stride(2));
+/// ```
 inline Tensor avg_pool3d(const Tensor& input, const AvgPool3dFuncOptions& options) {
   return detail::avg_pool3d(
     input,
@@ -121,6 +154,17 @@ inline Tensor max_pool1d(const Tensor& input,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.max_pool1d
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::MaxPool1dFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::max_pool1d(x, F::MaxPool1dFuncOptions(3).stride(2));
+/// ```
 inline Tensor max_pool1d(const Tensor& input, const MaxPool1dFuncOptions& options) {
    return detail::max_pool1d(
       input,
@@ -151,6 +195,14 @@ inline std::tuple<Tensor, Tensor> max_pool1d_with_indices(
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See the documentation for `torch::nn::functional::MaxPool1dFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::max_pool1d_with_indices(x, F::MaxPool1dFuncOptions(3).stride(2));
+/// ```
 inline std::tuple<Tensor, Tensor> max_pool1d_with_indices(const Tensor& input, const MaxPool1dFuncOptions& options) {
   return detail::max_pool1d_with_indices(
       input,
@@ -180,6 +232,17 @@ inline Tensor max_pool2d(const Tensor& input,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.max_pool2d
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::MaxPool2dFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::max_pool2d(x, F::MaxPool2dFuncOptions(3).stride(2));
+/// ```
 inline Tensor max_pool2d(const Tensor& input, const MaxPool2dFuncOptions& options) {
   return detail::max_pool2d(
       input,
@@ -210,6 +273,14 @@ inline std::tuple<Tensor, Tensor> max_pool2d_with_indices(
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See the documentation for `torch::nn::functional::MaxPool2dFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::max_pool2d_with_indices(x, F::MaxPool2dFuncOptions(3).stride(2));
+/// ```
 inline std::tuple<Tensor, Tensor> max_pool2d_with_indices(const Tensor& input, const MaxPool2dFuncOptions& options) {
   return detail::max_pool2d_with_indices(
       input,
@@ -239,6 +310,17 @@ inline Tensor max_pool3d(const Tensor& input,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.max_pool3d
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::MaxPool3dFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::max_pool3d(x, F::MaxPool3dFuncOptions(3).stride(2));
+/// ```
 inline Tensor max_pool3d(const Tensor& input, const MaxPool3dFuncOptions& options) {
   return detail::max_pool3d(
       input,
@@ -269,6 +351,14 @@ inline std::tuple<Tensor, Tensor> max_pool3d_with_indices(
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See the documentation for `torch::nn::functional::MaxPool3dFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::max_pool3d_with_indices(x, F::MaxPool3dFuncOptions(3).stride(2));
+/// ```
 inline std::tuple<Tensor, Tensor> max_pool3d_with_indices(const Tensor& input, const MaxPool3dFuncOptions& options) {
   return detail::max_pool3d_with_indices(
       input,
@@ -290,6 +380,17 @@ inline Tensor adaptive_max_pool1d(const Tensor& input,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.adaptive_max_pool1d
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::AdaptiveMaxPool1dFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::adaptive_max_pool1d(x, F::AdaptiveMaxPool1dFuncOptions(3));
+/// ```
 inline Tensor adaptive_max_pool1d(const Tensor& input,
   const AdaptiveMaxPool1dFuncOptions& options) {
    return detail::adaptive_max_pool1d(input, options.output_size());
@@ -304,6 +405,14 @@ inline std::tuple<Tensor, Tensor> adaptive_max_pool1d_with_indices(
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See the documentation for `torch::nn::functional::AdaptiveMaxPool1dFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::adaptive_max_pool1d_with_indices(x, F::AdaptiveMaxPool1dFuncOptions(3));
+/// ```
 inline std::tuple<Tensor, Tensor> adaptive_max_pool1d_with_indices(
   const Tensor& input, const AdaptiveMaxPool1dFuncOptions& options) {
    return detail::adaptive_max_pool1d_with_indices(input, options.output_size());
@@ -318,6 +427,17 @@ inline Tensor adaptive_max_pool2d(const Tensor& input,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.adaptive_max_pool2d
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::AdaptiveMaxPool2dFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::adaptive_max_pool2d(x, F::AdaptiveMaxPool2dFuncOptions(3));
+/// ```
 inline Tensor adaptive_max_pool2d(const Tensor& input,
   const AdaptiveMaxPool2dFuncOptions& options) {
    return detail::adaptive_max_pool2d(input, options.output_size());
@@ -332,6 +452,14 @@ inline std::tuple<Tensor, Tensor> adaptive_max_pool2d_with_indices(
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See the documentation for `torch::nn::functional::AdaptiveMaxPool2dFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::adaptive_max_pool2d_with_indices(x, F::AdaptiveMaxPool2dFuncOptions(3));
+/// ```
 inline std::tuple<Tensor, Tensor> adaptive_max_pool2d_with_indices(
   const Tensor& input, const AdaptiveMaxPool2dFuncOptions& options) {
    return detail::adaptive_max_pool2d_with_indices(input, options.output_size());
@@ -346,6 +474,17 @@ inline Tensor adaptive_max_pool3d(const Tensor& input,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.adaptive_max_pool3d
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::AdaptiveMaxPool3dFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::adaptive_max_pool3d(x, F::AdaptiveMaxPool3dFuncOptions(3));
+/// ```
 inline Tensor adaptive_max_pool3d(const Tensor& input,
   const AdaptiveMaxPool3dFuncOptions& options) {
    return detail::adaptive_max_pool3d(input, options.output_size());
@@ -360,6 +499,14 @@ inline std::tuple<Tensor, Tensor> adaptive_max_pool3d_with_indices(
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See the documentation for `torch::nn::functional::AdaptiveMaxPool3dFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::adaptive_max_pool3d_with_indices(x, F::AdaptiveMaxPool3dFuncOptions(3));
+/// ```
 inline std::tuple<Tensor, Tensor> adaptive_max_pool3d_with_indices(
   const Tensor& input, const AdaptiveMaxPool3dFuncOptions& options) {
    return detail::adaptive_max_pool3d_with_indices(input, options.output_size());
@@ -376,6 +523,17 @@ inline Tensor adaptive_avg_pool1d(const Tensor& input,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.adaptive_avg_pool1d
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::AdaptiveAvgPool1dFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::adaptive_avg_pool1d(x, F::AdaptiveAvgPool1dFuncOptions(3));
+/// ```
 inline Tensor adaptive_avg_pool1d(const Tensor& input,
   const AdaptiveAvgPool1dFuncOptions& options) {
    return detail::adaptive_avg_pool1d(input, options.output_size());
@@ -390,6 +548,17 @@ inline Tensor adaptive_avg_pool2d(const Tensor& input,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.adaptive_avg_pool2d
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::AdaptiveAvgPool2dFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::adaptive_avg_pool2d(x, F::AdaptiveAvgPool2dFuncOptions(3));
+/// ```
 inline Tensor adaptive_avg_pool2d(const Tensor& input,
   const AdaptiveAvgPool2dFuncOptions& options) {
    return detail::adaptive_avg_pool2d(input, options.output_size());
@@ -404,6 +573,17 @@ inline Tensor adaptive_avg_pool3d(const Tensor& input,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.adaptive_avg_pool3d
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::AdaptiveAvgPool3dFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::adaptive_avg_pool3d(x, F::AdaptiveAvgPool3dFuncOptions(3));
+/// ```
 inline Tensor adaptive_avg_pool3d(const Tensor& input,
   const AdaptiveAvgPool3dFuncOptions& options) {
    return detail::adaptive_avg_pool3d(input, options.output_size());
@@ -464,6 +644,17 @@ inline Tensor max_unpool1d(
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.max_unpool1d
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::MaxUnpool1dFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::max_unpool1d(x, indices, F::MaxUnpool1dFuncOptions(3).stride(2).padding(1));
+/// ```
 inline Tensor max_unpool1d(const Tensor& input, const Tensor& indices,
     const MaxUnpool1dFuncOptions& options) {
   return detail::max_unpool1d(
@@ -493,6 +684,17 @@ inline Tensor max_unpool2d(
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.max_unpool2d
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::MaxUnpool2dFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::max_unpool2d(x, indices, F::MaxUnpool2dFuncOptions(3).stride(2).padding(1));
+/// ```
 inline Tensor max_unpool2d(const Tensor& input, const Tensor& indices,
   const MaxUnpool2dFuncOptions& options) {
   return detail::max_unpool2d(
@@ -523,6 +725,17 @@ inline Tensor max_unpool3d(
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.max_unpool3d
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::MaxUnpool3dFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::max_unpool3d(x, indices, F::MaxUnpool3dFuncOptions(3));
+/// ```
 inline Tensor max_unpool3d(const Tensor& input, const Tensor& indices,
   const MaxUnpool3dFuncOptions& options) {
   return detail::max_unpool3d(
@@ -567,6 +780,14 @@ inline std::tuple<Tensor, Tensor> fractional_max_pool2d_with_indices(
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See the documentation for `torch::nn::functional::FractionalMaxPool2dFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::fractional_max_pool2d_with_indices(x, F::FractionalMaxPool2dFuncOptions(3).output_size(2));
+/// ```
 inline std::tuple<Tensor, Tensor> fractional_max_pool2d_with_indices(const Tensor& input, const FractionalMaxPool2dFuncOptions& options) {
   return detail::fractional_max_pool2d_with_indices(
       input,
@@ -589,6 +810,14 @@ inline Tensor fractional_max_pool2d(const Tensor& input,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See the documentation for `torch::nn::functional::FractionalMaxPool2dFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::fractional_max_pool2d(x, F::FractionalMaxPool2dFuncOptions(3).output_size(2));
+/// ```
 inline Tensor fractional_max_pool2d(const Tensor& input, const FractionalMaxPool2dFuncOptions& options) {
   return detail::fractional_max_pool2d(
       input,
@@ -630,6 +859,14 @@ inline std::tuple<Tensor, Tensor> fractional_max_pool3d_with_indices(
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See the documentation for `torch::nn::functional::FractionalMaxPool3dFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::fractional_max_pool3d_with_indices(x, F::FractionalMaxPool3dFuncOptions(3).output_size(2));
+/// ```
 inline std::tuple<Tensor, Tensor> fractional_max_pool3d_with_indices(const Tensor& input, const FractionalMaxPool3dFuncOptions& options) {
   return detail::fractional_max_pool3d_with_indices(
       input,
@@ -652,6 +889,14 @@ inline Tensor fractional_max_pool3d(const Tensor& input,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See the documentation for `torch::nn::functional::FractionalMaxPool3dFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::fractional_max_pool3d(x, F::FractionalMaxPool3dFuncOptions(3).output_size(2));
+/// ```
 inline Tensor fractional_max_pool3d(const Tensor& input, const FractionalMaxPool3dFuncOptions& options) {
   return detail::fractional_max_pool3d(
       input,
@@ -684,6 +929,17 @@ inline Tensor lp_pool1d(
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.lp_pool1d
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::LPPool1dFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::lp_pool1d(x, F::LPPool1dFuncOptions(2, 3).stride(2));
+/// ```
 inline Tensor lp_pool1d(const Tensor& input, const LPPool1dFuncOptions& options) {
   return detail::lp_pool1d(
     input,
@@ -717,6 +973,17 @@ inline Tensor lp_pool2d(
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.lp_pool2d
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::LPPool2dFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::lp_pool2d(x, F::LPPool2dFuncOptions(2, {2, 3}).stride(2));
+/// ```
 inline Tensor lp_pool2d(const Tensor& input, const LPPool2dFuncOptions& options) {
   return detail::lp_pool2d(
     input,

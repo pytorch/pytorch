@@ -58,12 +58,35 @@ using AvgPool2dOptions = AvgPoolOptions<2>;
 using AvgPool3dOptions = AvgPoolOptions<3>;
 
 namespace functional {
+/// Options for `torch::nn::functional::avg_pool1d`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::avg_pool1d(x, F::AvgPool1dFuncOptions(3).stride(2));
+/// ```
 using AvgPool1dFuncOptions = AvgPool1dOptions;
 } // namespace functional
+
 namespace functional {
+/// Options for `torch::nn::functional::avg_pool2d`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::avg_pool2d(x, F::AvgPool2dFuncOptions(3).stride(2));
+/// ```
 using AvgPool2dFuncOptions = AvgPool2dOptions;
 } // namespace functional
+
 namespace functional {
+/// Options for `torch::nn::functional::avg_pool3d`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::avg_pool3d(x, F::AvgPool3dFuncOptions(3).stride(2));
+/// ```
 using AvgPool3dFuncOptions = AvgPool3dOptions;
 } // namespace functional
 
@@ -116,12 +139,35 @@ using MaxPool2dOptions = MaxPoolOptions<2>;
 using MaxPool3dOptions = MaxPoolOptions<3>;
 
 namespace functional {
+/// Options for `torch::nn::functional::max_pool1d` and `torch::nn::functional::max_pool1d_with_indices`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::max_pool1d(x, F::MaxPool1dFuncOptions(3).stride(2));
+/// ```
 using MaxPool1dFuncOptions = MaxPool1dOptions;
 } // namespace functional
+
 namespace functional {
+/// Options for `torch::nn::functional::max_pool2d` and `torch::nn::functional::max_pool2d_with_indices`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::max_pool2d(x, F::MaxPool2dFuncOptions(3).stride(2));
+/// ```
 using MaxPool2dFuncOptions = MaxPool2dOptions;
 } // namespace functional
+
 namespace functional {
+/// Options for `torch::nn::functional::max_pool3d` and `torch::nn::functional::max_pool3d_with_indices`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::max_pool3d(x, F::MaxPool3dFuncOptions(3).stride(2));
+/// ```
 using MaxPool3dFuncOptions = MaxPool3dOptions;
 } // namespace functional
 
@@ -162,12 +208,35 @@ using AdaptiveMaxPool2dOptions = AdaptiveMaxPoolOptions<2>;
 using AdaptiveMaxPool3dOptions = AdaptiveMaxPoolOptions<3>;
 
 namespace functional {
+/// Options for `torch::nn::functional::adaptive_max_pool1d` and `torch::nn::functional::adaptive_max_pool1d_with_indices`
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::adaptive_max_pool1d(x, F::AdaptiveMaxPool1dFuncOptions(3));
+/// ```
 using AdaptiveMaxPool1dFuncOptions = AdaptiveMaxPool1dOptions;
 } // namespace functional
+
 namespace functional {
+/// Options for `torch::nn::functional::adaptive_max_pool2d` and `torch::nn::functional::adaptive_max_pool2d_with_indices`
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::adaptive_max_pool2d(x, F::AdaptiveMaxPool2dFuncOptions(3));
+/// ```
 using AdaptiveMaxPool2dFuncOptions = AdaptiveMaxPool2dOptions;
 } // namespace functional
+
 namespace functional {
+/// Options for `torch::nn::functional::adaptive_max_pool3d` and `torch::nn::functional::adaptive_max_pool3d_with_indices`
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::adaptive_max_pool3d(x, F::AdaptiveMaxPool3dFuncOptions(3));
+/// ```
 using AdaptiveMaxPool3dFuncOptions = AdaptiveMaxPool3dOptions;
 } // namespace functional
 
@@ -208,12 +277,35 @@ using AdaptiveAvgPool2dOptions = AdaptiveAvgPoolOptions<2>;
 using AdaptiveAvgPool3dOptions = AdaptiveAvgPoolOptions<3>;
 
 namespace functional {
+/// Options for `torch::nn::functional::adaptive_avg_pool1d`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::adaptive_avg_pool1d(x, F::AdaptiveAvgPool1dFuncOptions(3));
+/// ```
 using AdaptiveAvgPool1dFuncOptions = AdaptiveAvgPool1dOptions;
 } // namespace functional
+
 namespace functional {
+/// Options for `torch::nn::functional::adaptive_avg_pool2d`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::adaptive_avg_pool2d(x, F::AdaptiveAvgPool2dFuncOptions(3));
+/// ```
 using AdaptiveAvgPool2dFuncOptions = AdaptiveAvgPool2dOptions;
 } // namespace functional
+
 namespace functional {
+/// Options for `torch::nn::functional::adaptive_avg_pool3d`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::adaptive_avg_pool3d(x, F::AdaptiveAvgPool3dFuncOptions(3));
+/// ```
 using AdaptiveAvgPool3dFuncOptions = AdaptiveAvgPool3dOptions;
 } // namespace functional
 
@@ -282,13 +374,31 @@ struct MaxUnpoolFuncOptions {
   TORCH_ARG(c10::optional<std::vector<int64_t>>, output_size) = c10::nullopt;
 };
 
-/// `MaxUnpoolFuncOptions` specialized for 1-D maxunpool.
+/// Options for `torch::nn::functional::max_unpool1d`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::max_unpool1d(x, indices, F::MaxUnpool1dFuncOptions(3).stride(2).padding(1));
+/// ```
 using MaxUnpool1dFuncOptions = MaxUnpoolFuncOptions<1>;
 
-/// `MaxUnpoolFuncOptions` specialized for 2-D maxunpool.
+/// Options for `torch::nn::functional::max_unpool2d`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::max_unpool2d(x, indices, F::MaxUnpool2dFuncOptions(3).stride(2).padding(1));
+/// ```
 using MaxUnpool2dFuncOptions = MaxUnpoolFuncOptions<2>;
 
-/// `MaxUnpoolFuncOptions` specialized for 3-D maxunpool.
+/// Options for `torch::nn::functional::max_unpool3d`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::max_unpool3d(x, indices, F::MaxUnpool3dFuncOptions(3));
+/// ```
 using MaxUnpool3dFuncOptions = MaxUnpoolFuncOptions<3>;
 
 } // namespace functional
@@ -332,9 +442,24 @@ using FractionalMaxPool2dOptions = FractionalMaxPoolOptions<2>;
 using FractionalMaxPool3dOptions = FractionalMaxPoolOptions<3>;
 
 namespace functional {
+/// Options for `torch::nn::functional::fractional_max_pool2d` and `torch::nn::functional::fractional_max_pool2d_with_indices`
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::fractional_max_pool2d(x, F::FractionalMaxPool2dFuncOptions(3).output_size(2));
+/// ```
 using FractionalMaxPool2dFuncOptions = FractionalMaxPool2dOptions;
 } // namespace functional
+
 namespace functional {
+/// Options for `torch::nn::functional::fractional_max_pool3d` and `torch::nn::functional::fractional_max_pool3d_with_indices`
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::fractional_max_pool3d(x, F::FractionalMaxPool3dFuncOptions(3).output_size(2));
+/// ```
 using FractionalMaxPool3dFuncOptions = FractionalMaxPool3dOptions;
 } // namespace functional
 
@@ -375,9 +500,24 @@ using LPPool1dOptions = LPPoolOptions<1>;
 using LPPool2dOptions = LPPoolOptions<2>;
 
 namespace functional {
+/// Options for `torch::nn::functional::lp_pool1d`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::lp_pool1d(x, F::LPPool1dFuncOptions(2, 3).stride(2));
+/// ```
 using LPPool1dFuncOptions = LPPool1dOptions;
 } // namespace functional
+
 namespace functional {
+/// Options for `torch::nn::functional::lp_pool2d`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::lp_pool2d(x, F::LPPool2dFuncOptions(2, {2, 3}).stride(2));
+/// ```
 using LPPool2dFuncOptions = LPPool2dOptions;
 } // namespace functional
 
