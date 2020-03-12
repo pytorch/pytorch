@@ -891,13 +891,19 @@ Tensor kl_div_double_backward_grad_output(const Tensor & grad, const Tensor & in
 
 // Compute derivatives for targets.
 Tensor kl_div_target_backward(Tensor grad_output, Tensor self, Tensor target, int64_t reduction, bool log_target) {
-  if (reduction == at::Reduction::None) {
-    return grad_output.mul(target.log().add_(1).sub_(self)).masked_fill_(target == 0, 0.);
+  Tensor grad_target;
+  if (!log_target) {
+    grad_target = grad_output.mul(target.log().add_(1).sub_(self)).masked_fill_(target == 0, 0.);
   }
+  else {
+    grad_target = target.exp().mul_(target.add(1).sub_(self)).mul_(grad_output);
+  }
+
   if (reduction == at::Reduction::Mean) {
-    return grad_output.mul(target.log().add_(1).sub_(self)).div_(target.numel()).masked_fill_(target == 0, 0.);
+    grad_target.div_(target.numel());
   }
-  return grad_output.mul(target.log().add_(1).sub_(self)).masked_fill_(target == 0, 0.);
+
+  return grad_target;
 }
 
 Tensor binary_cross_entropy_with_logits_target_backward(const Tensor& grad_output, const Tensor& self, const Tensor& target, const Tensor& weight, const Tensor& pos_weight, int64_t reduction) {
