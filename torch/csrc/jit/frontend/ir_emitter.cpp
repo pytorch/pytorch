@@ -2280,9 +2280,9 @@ struct to_ir {
       case TK_FLOOR_DIV:
         return aten::floordiv;
       case TK_LSHIFT:
-        return aten::leftshift;
+        return aten::__lshift__;
       case TK_RSHIFT:
-        return aten::rightshift;
+        return aten::__rshift__;
       case '&':
         return aten::__and__;
       case '|':

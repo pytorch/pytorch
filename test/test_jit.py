@@ -8288,6 +8288,32 @@ a")
                    .check("Traceback") \
                    .check("in foo").check("in baz").run(str(cm.exception))
 
+    def test_operator_precedence(self):
+        def double(x):
+            return 2 * x
+
+        def complicated_arithmetic_operation():
+            list = [0, 1, 2, 3]
+            result = list[1:3][0] + 3 ** 2 - double(4) + (-3 + 4) * 6 // 2 % 2 << 2 + 1 >> 1 & 4 ^ 2 + 1 | 13 + ~4
+            # result = list[1:3][0] + 3 ** 2 - double(4) + 1 * 6 // 2 % 2 << 2 + 1 >> 1 & 4 ^ 2 + 1 | 13 + ~4
+            # result = list[1:3][0] + 3 ** 2 - 8 + 1 * 6 // 2 % 2 << 2 + 1 >> 1 & 4 ^ 2 + 1 | 13 + ~4
+            # result = [1, 2][0] + 3 ** 2 - 8 + 1 * 6 // 2 % 2 << 2 + 1 >> 1 & 4 ^ 2 + 1 | 13 + ~4
+            # result = 1 + 3 ** 2 - 8 + 1 * 6 // 2 % 2 << 2 + 1 >> 1 & 4 ^ 2 + 1 | 13 + ~4
+            # result = 1 + 9 - 8 + 1 * 6 // 2 % 2 << 2 + 1 >> 1 & 4 ^ 2 + 1 | 13 + ~4
+            # result = 1 + 9 - 8 + 1 * 6 // 2 % 2 << 2 + 1 >> 1 & 4 ^ 2 + 1 | 13 + -5
+            # result = 1 + 9 - 8 + 6 // 2 % 2 << 2 + 1 >> 1 & 4 ^ 2 + 1 | 13 + -5
+            # result = 1 + 9 - 8 + 3 % 2 << 2 + 1 >> 1 & 4 ^ 2 + 1 | 13 + -5
+            # result = 1 + 9 - 8 + 1 << 2 + 1 >> 1 & 4 ^ 2 + 1 | 13 + -5
+            # result = 3 << 3 >> 1 & 4 ^ 3 | 8
+            # result = 24 >> 1 & 4 ^ 3 | 8
+            # result = 12 & 4 ^ 3 | 8
+            # result = 4 ^ 3 | 8
+            # result = 7 | 8
+            # result = 15
+            return result
+
+        self.assertEqual(complicated_arithmetic_operation(), 15)
+
     def test_bitwise_ops(self):
 
         def int_test():
@@ -8305,10 +8331,15 @@ a")
         def tensor_test(x, y):
             return x & y, x ^ y, x | y
 
+        def tensor_with_int_test(x, y):
+            # type: (Tensor, int) -> Tuple[Tensor, Tensor]
+            return x << y, x >> y
+
         x = torch.tensor(2)
         y = torch.tensor(3)
 
         self.checkScript(tensor_test, (x, y))
+        self.checkScript(tensor_with_int_test, (x, 2))
 
         def not_test(x):
             return ~x
