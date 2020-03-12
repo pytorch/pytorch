@@ -246,6 +246,176 @@ class TORCH_API PytorchLLVMJITImpl {
         *Mangle("Sleef_fmodf8"),
         {llvm::pointerToJITTargetAddress(&Sleef_fmodf8), {}}));
 #endif
+
+    // FP64 Sleef functions -- SSE
+    cantFail(LLJ->defineAbsolute(
+        *Mangle("Sleef_acosd2"),
+        {llvm::pointerToJITTargetAddress(&Sleef_acosd2_u10), {}}));
+    cantFail(LLJ->defineAbsolute(
+        *Mangle("Sleef_asind2"),
+        {llvm::pointerToJITTargetAddress(&Sleef_asind2_u10), {}}));
+    cantFail(LLJ->defineAbsolute(
+        *Mangle("Sleef_atand2"),
+        {llvm::pointerToJITTargetAddress(&Sleef_atand2_u10), {}}));
+    cantFail(LLJ->defineAbsolute(
+        *Mangle("Sleef_cosd2"),
+        {llvm::pointerToJITTargetAddress(&Sleef_cosd2_u10), {}}));
+    cantFail(LLJ->defineAbsolute(
+        *Mangle("Sleef_sind2"),
+        {llvm::pointerToJITTargetAddress(&Sleef_sind2_u10), {}}));
+    cantFail(LLJ->defineAbsolute(
+        *Mangle("Sleef_tand2"),
+        {llvm::pointerToJITTargetAddress(&Sleef_tand2_u10), {}}));
+    cantFail(LLJ->defineAbsolute(
+        *Mangle("Sleef_coshd2"),
+        {llvm::pointerToJITTargetAddress(&Sleef_coshd2_u10), {}}));
+    cantFail(LLJ->defineAbsolute(
+        *Mangle("Sleef_sinhd2"),
+        {llvm::pointerToJITTargetAddress(&Sleef_sinhd2_u10), {}}));
+    cantFail(LLJ->defineAbsolute(
+        *Mangle("Sleef_tanhd2"),
+        {llvm::pointerToJITTargetAddress(&Sleef_tanhd2_u10), {}}));
+    cantFail(LLJ->defineAbsolute(
+        *Mangle("Sleef_erfd2"),
+        {llvm::pointerToJITTargetAddress(&Sleef_erfd2_u10), {}}));
+    cantFail(LLJ->defineAbsolute(
+        *Mangle("Sleef_erfcd2"),
+        {llvm::pointerToJITTargetAddress(&Sleef_erfcd2_u15), {}}));
+    cantFail(LLJ->defineAbsolute(
+        *Mangle("Sleef_expd2"),
+        {llvm::pointerToJITTargetAddress(&Sleef_expd2_u10), {}}));
+    cantFail(LLJ->defineAbsolute(
+        *Mangle("Sleef_expm1d2"),
+        {llvm::pointerToJITTargetAddress(&Sleef_expm1d2_u10), {}}));
+    cantFail(LLJ->defineAbsolute(
+        *Mangle("Sleef_logd2"),
+        {llvm::pointerToJITTargetAddress(&Sleef_logd2_u10), {}}));
+    cantFail(LLJ->defineAbsolute(
+        *Mangle("Sleef_log2d2"),
+        {llvm::pointerToJITTargetAddress(&Sleef_log2d2_u10), {}}));
+    cantFail(LLJ->defineAbsolute(
+        *Mangle("Sleef_log10d2"),
+        {llvm::pointerToJITTargetAddress(&Sleef_log10d2_u10), {}}));
+    cantFail(LLJ->defineAbsolute(
+        *Mangle("Sleef_logf1pd2"),
+        {llvm::pointerToJITTargetAddress(&Sleef_log1pd2_u10), {}}));
+    cantFail(LLJ->defineAbsolute(
+        *Mangle("Sleef_sqrtd2"),
+        {llvm::pointerToJITTargetAddress(&Sleef_sqrtd2_u05), {}}));
+    cantFail(LLJ->defineAbsolute(
+        *Mangle("Sleef_fabsd2"),
+        {llvm::pointerToJITTargetAddress(&Sleef_fabsd2), {}}));
+    cantFail(LLJ->defineAbsolute(
+        *Mangle("Sleef_floord2"),
+        {llvm::pointerToJITTargetAddress(&Sleef_floord2), {}}));
+    cantFail(LLJ->defineAbsolute(
+        *Mangle("Sleef_ceild2"),
+        {llvm::pointerToJITTargetAddress(&Sleef_ceild2), {}}));
+    cantFail(LLJ->defineAbsolute(
+        *Mangle("Sleef_truncd2"),
+        {llvm::pointerToJITTargetAddress(&Sleef_truncd2), {}}));
+    cantFail(LLJ->defineAbsolute(
+        *Mangle("Sleef_roundd2"),
+        {llvm::pointerToJITTargetAddress(&Sleef_roundd2), {}}));
+    cantFail(LLJ->defineAbsolute(
+        *Mangle("Sleef_lgammad2"),
+        {llvm::pointerToJITTargetAddress(&Sleef_lgammad2_u10), {}}));
+
+    cantFail(LLJ->defineAbsolute(
+        *Mangle("Sleef_atan2d2"),
+        {llvm::pointerToJITTargetAddress(&Sleef_atan2d2_u10), {}}));
+    cantFail(LLJ->defineAbsolute(
+        *Mangle("Sleef_powd2"),
+        {llvm::pointerToJITTargetAddress(&Sleef_powd2_u10), {}}));
+    cantFail(LLJ->defineAbsolute(
+        *Mangle("Sleef_fmodd2"),
+        {llvm::pointerToJITTargetAddress(&Sleef_fmodd2), {}}));
+
+    // FP64 Sleef functions -- AVX2
+#if defined(__AVX__) && !defined(_MSC_VER)
+    cantFail(LLJ->defineAbsolute(
+        *Mangle("Sleef_acosd4"),
+        {llvm::pointerToJITTargetAddress(&Sleef_acosd4_u10), {}}));
+    cantFail(LLJ->defineAbsolute(
+        *Mangle("Sleef_asind4"),
+        {llvm::pointerToJITTargetAddress(&Sleef_asind4_u10), {}}));
+    cantFail(LLJ->defineAbsolute(
+        *Mangle("Sleef_atand4"),
+        {llvm::pointerToJITTargetAddress(&Sleef_atand4_u10), {}}));
+    cantFail(LLJ->defineAbsolute(
+        *Mangle("Sleef_cosd4"),
+        {llvm::pointerToJITTargetAddress(&Sleef_cosd4_u10), {}}));
+    cantFail(LLJ->defineAbsolute(
+        *Mangle("Sleef_sind4"),
+        {llvm::pointerToJITTargetAddress(&Sleef_sind4_u10), {}}));
+    cantFail(LLJ->defineAbsolute(
+        *Mangle("Sleef_tand4"),
+        {llvm::pointerToJITTargetAddress(&Sleef_tand4_u10), {}}));
+    cantFail(LLJ->defineAbsolute(
+        *Mangle("Sleef_coshd4"),
+        {llvm::pointerToJITTargetAddress(&Sleef_coshd4_u10), {}}));
+    cantFail(LLJ->defineAbsolute(
+        *Mangle("Sleef_sinhd4"),
+        {llvm::pointerToJITTargetAddress(&Sleef_sinhd4_u10), {}}));
+    cantFail(LLJ->defineAbsolute(
+        *Mangle("Sleef_tanhd4"),
+        {llvm::pointerToJITTargetAddress(&Sleef_tanhd4_u10), {}}));
+    cantFail(LLJ->defineAbsolute(
+        *Mangle("Sleef_erfd4"),
+        {llvm::pointerToJITTargetAddress(&Sleef_erfd4_u10), {}}));
+    cantFail(LLJ->defineAbsolute(
+        *Mangle("Sleef_erfcd4"),
+        {llvm::pointerToJITTargetAddress(&Sleef_erfcd4_u15), {}}));
+    cantFail(LLJ->defineAbsolute(
+        *Mangle("Sleef_expd4"),
+        {llvm::pointerToJITTargetAddress(&Sleef_expd4_u10), {}}));
+    cantFail(LLJ->defineAbsolute(
+        *Mangle("Sleef_expm1d4"),
+        {llvm::pointerToJITTargetAddress(&Sleef_expm1d4_u10), {}}));
+    cantFail(LLJ->defineAbsolute(
+        *Mangle("Sleef_logd4"),
+        {llvm::pointerToJITTargetAddress(&Sleef_logd4_u10), {}}));
+    cantFail(LLJ->defineAbsolute(
+        *Mangle("Sleef_log2d4"),
+        {llvm::pointerToJITTargetAddress(&Sleef_log2d4_u10), {}}));
+    cantFail(LLJ->defineAbsolute(
+        *Mangle("Sleef_log10d4"),
+        {llvm::pointerToJITTargetAddress(&Sleef_log10d4_u10), {}}));
+    cantFail(LLJ->defineAbsolute(
+        *Mangle("Sleef_logf1pd4"),
+        {llvm::pointerToJITTargetAddress(&Sleef_log1pd4_u10), {}}));
+    cantFail(LLJ->defineAbsolute(
+        *Mangle("Sleef_sqrtd4"),
+        {llvm::pointerToJITTargetAddress(&Sleef_sqrtd4_u05), {}}));
+    cantFail(LLJ->defineAbsolute(
+        *Mangle("Sleef_fabsd4"),
+        {llvm::pointerToJITTargetAddress(&Sleef_fabsd4), {}}));
+    cantFail(LLJ->defineAbsolute(
+        *Mangle("Sleef_floord4"),
+        {llvm::pointerToJITTargetAddress(&Sleef_floord4), {}}));
+    cantFail(LLJ->defineAbsolute(
+        *Mangle("Sleef_ceild4"),
+        {llvm::pointerToJITTargetAddress(&Sleef_ceild4), {}}));
+    cantFail(LLJ->defineAbsolute(
+        *Mangle("Sleef_truncd4"),
+        {llvm::pointerToJITTargetAddress(&Sleef_truncd4), {}}));
+    cantFail(LLJ->defineAbsolute(
+        *Mangle("Sleef_roundd4"),
+        {llvm::pointerToJITTargetAddress(&Sleef_roundd4), {}}));
+    cantFail(LLJ->defineAbsolute(
+        *Mangle("Sleef_lgammad4"),
+        {llvm::pointerToJITTargetAddress(&Sleef_lgammad4_u10), {}}));
+
+    cantFail(LLJ->defineAbsolute(
+        *Mangle("Sleef_atan2d4"),
+        {llvm::pointerToJITTargetAddress(&Sleef_atan2d4_u10), {}}));
+    cantFail(LLJ->defineAbsolute(
+        *Mangle("Sleef_powd4"),
+        {llvm::pointerToJITTargetAddress(&Sleef_powd4_u10), {}}));
+    cantFail(LLJ->defineAbsolute(
+        *Mangle("Sleef_fmodd4"),
+        {llvm::pointerToJITTargetAddress(&Sleef_fmodd4), {}}));
+#endif
   }
 
   Error addModule(ThreadSafeModule M) {

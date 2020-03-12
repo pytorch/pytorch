@@ -290,11 +290,11 @@ void testLLVMVecLoadStoreTest() {
   EXPECT_EQ(b_buffer[3], 1);
 }
 
-#define INTRINSICS_TEST(Type, Name, Lanes)                       \
-  void testLLVMVecLoadStore##Name##Lane##Lanes##Test() {         \
+#define FLOAT_INTRINSICS_TEST(Name, Lanes)                       \
+  void testLLVMVecFloat_##Name##Lane##Lanes##Test() {         \
     KernelScope kernel_scope;                                    \
-    Buffer a(VarHandle("A", kHandle), Type, {1});                \
-    Buffer b(VarHandle("B", kHandle), Type, {1});                \
+    Buffer a(VarHandle("A", kHandle), kFloat, {1});                \
+    Buffer b(VarHandle("B", kHandle), kFloat, {1});                \
     float val = 0.5f;                                            \
     std::vector<float> a_buffer(Lanes, val);                     \
     std::vector<float> b_buffer(Lanes, val);                     \
@@ -311,30 +311,76 @@ void testLLVMVecLoadStoreTest() {
     float ref = std::Name(0.5f);                                 \
     EXPECT_EQ(cg.value<int>(args), 0);                           \
     for (int i = 0; i < Lanes; i++) {                            \
-      EXPECT_EQ(a_buffer[i], val);                               \
+      EXPECT_FLOAT_EQ(a_buffer[i], val);                               \
     }                                                            \
   } // namespace jit
-INTRINSICS_TEST(kFloat, erf, 4)
-INTRINSICS_TEST(kFloat, erfc, 4)
-INTRINSICS_TEST(kFloat, acos, 4)
-INTRINSICS_TEST(kFloat, asin, 4)
-INTRINSICS_TEST(kFloat, atan, 4)
-INTRINSICS_TEST(kFloat, cosh, 4)
-INTRINSICS_TEST(kFloat, sinh, 4)
-INTRINSICS_TEST(kFloat, tanh, 4)
-INTRINSICS_TEST(kFloat, expm1, 4)
-INTRINSICS_TEST(kFloat, lgamma, 4)
-INTRINSICS_TEST(kFloat, erf, 8)
-INTRINSICS_TEST(kFloat, erfc, 8)
-INTRINSICS_TEST(kFloat, acos, 8)
-INTRINSICS_TEST(kFloat, asin, 8)
-INTRINSICS_TEST(kFloat, atan, 8)
-INTRINSICS_TEST(kFloat, cosh, 8)
-INTRINSICS_TEST(kFloat, sinh, 8)
-INTRINSICS_TEST(kFloat, tanh, 8)
-INTRINSICS_TEST(kFloat, expm1, 8)
-INTRINSICS_TEST(kFloat, lgamma, 8)
-#undef INTRIN_TEST
+FLOAT_INTRINSICS_TEST(erf, 4)
+FLOAT_INTRINSICS_TEST(erfc, 4)
+FLOAT_INTRINSICS_TEST(acos, 4)
+FLOAT_INTRINSICS_TEST(asin, 4)
+FLOAT_INTRINSICS_TEST(atan, 4)
+FLOAT_INTRINSICS_TEST(cosh, 4)
+FLOAT_INTRINSICS_TEST(sinh, 4)
+FLOAT_INTRINSICS_TEST(tanh, 4)
+FLOAT_INTRINSICS_TEST(expm1, 4)
+FLOAT_INTRINSICS_TEST(lgamma, 4)
+FLOAT_INTRINSICS_TEST(erf, 8)
+FLOAT_INTRINSICS_TEST(erfc, 8)
+FLOAT_INTRINSICS_TEST(acos, 8)
+FLOAT_INTRINSICS_TEST(asin, 8)
+FLOAT_INTRINSICS_TEST(atan, 8)
+FLOAT_INTRINSICS_TEST(cosh, 8)
+FLOAT_INTRINSICS_TEST(sinh, 8)
+FLOAT_INTRINSICS_TEST(tanh, 8)
+FLOAT_INTRINSICS_TEST(expm1, 8)
+FLOAT_INTRINSICS_TEST(lgamma, 8)
+#undef FLOAT_INTRINSICS_TEST
+
+#define DOUBLE_INTRINSICS_TEST(Name, Lanes)                       \
+  void testLLVMVecDouble_##Name##Lane##Lanes##Test() {         \
+    KernelScope kernel_scope;                                    \
+    Buffer a(VarHandle("A", kHandle), kDouble, {1});                \
+    Buffer b(VarHandle("B", kHandle), kDouble, {1});                \
+    float val = 0.5f;                                            \
+    std::vector<double> a_buffer(Lanes, val);                     \
+    std::vector<double> b_buffer(Lanes, val);                     \
+    auto store = Store::make(                                    \
+        b,                                                       \
+        Ramp::make(0, 1, Lanes),                                 \
+        Name(Load::make(                                         \
+            a,                                                   \
+            Ramp::make(0, 1, Lanes),                             \
+            Broadcast::make(IntImm::make(1), Lanes))),           \
+        Broadcast::make(IntImm::make(1), Lanes));                \
+    LLVMCodeGen cg(store, {a, b});                               \
+    std::vector<void*> args({a_buffer.data(), b_buffer.data()}); \
+    float ref = std::Name(0.5f);                                 \
+    EXPECT_EQ(cg.value<int>(args), 0);                           \
+    for (int i = 0; i < Lanes; i++) {                            \
+      EXPECT_FLOAT_EQ(a_buffer[i], val);                               \
+    }                                                            \
+  } // namespace jit
+DOUBLE_INTRINSICS_TEST(erf, 2)
+DOUBLE_INTRINSICS_TEST(erfc, 2)
+DOUBLE_INTRINSICS_TEST(acos, 2)
+DOUBLE_INTRINSICS_TEST(asin, 2)
+DOUBLE_INTRINSICS_TEST(atan, 2)
+DOUBLE_INTRINSICS_TEST(cosh, 2)
+DOUBLE_INTRINSICS_TEST(sinh, 2)
+DOUBLE_INTRINSICS_TEST(tanh, 2)
+DOUBLE_INTRINSICS_TEST(expm1, 2)
+DOUBLE_INTRINSICS_TEST(lgamma, 2)
+DOUBLE_INTRINSICS_TEST(erf, 4)
+DOUBLE_INTRINSICS_TEST(erfc, 4)
+DOUBLE_INTRINSICS_TEST(acos, 4)
+DOUBLE_INTRINSICS_TEST(asin, 4)
+DOUBLE_INTRINSICS_TEST(atan, 4)
+DOUBLE_INTRINSICS_TEST(cosh, 4)
+DOUBLE_INTRINSICS_TEST(sinh, 4)
+DOUBLE_INTRINSICS_TEST(tanh, 4)
+DOUBLE_INTRINSICS_TEST(expm1, 4)
+DOUBLE_INTRINSICS_TEST(lgamma, 4)
+#undef DOUBLE_INTRINSICS_TEST
 
 void testLLVMVectorizerLoadStoreTest() {
   KernelScope kernel_scope;

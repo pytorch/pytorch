@@ -13,6 +13,7 @@ import elementwise
 #import conv
 #import matmul
 import swish
+import attention
 
 
 def main():

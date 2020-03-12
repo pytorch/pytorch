@@ -151,26 +151,46 @@ namespace jit {
   _(LLVMBlockTest)              \
   _(LLVMLoadStoreTest)          \
   _(LLVMVecLoadStoreTest)       \
-  _(LLVMVecLoadStoreacosLane4Test)   \
-  _(LLVMVecLoadStoreasinLane4Test)   \
-  _(LLVMVecLoadStoreatanLane4Test)   \
-  _(LLVMVecLoadStorecoshLane4Test)   \
-  _(LLVMVecLoadStoresinhLane4Test)   \
-  _(LLVMVecLoadStoretanhLane4Test)   \
-  _(LLVMVecLoadStoreerfLane4Test)    \
-  _(LLVMVecLoadStoreerfcLane4Test)   \
-  _(LLVMVecLoadStoreexpm1Lane4Test)  \
-  _(LLVMVecLoadStorelgammaLane4Test) \
-  _(LLVMVecLoadStoreacosLane8Test)   \
-  _(LLVMVecLoadStoreasinLane8Test)   \
-  _(LLVMVecLoadStoreatanLane8Test)   \
-  _(LLVMVecLoadStorecoshLane8Test)   \
-  _(LLVMVecLoadStoresinhLane8Test)   \
-  _(LLVMVecLoadStoretanhLane8Test)   \
-  _(LLVMVecLoadStoreerfLane8Test)    \
-  _(LLVMVecLoadStoreerfcLane8Test)   \
-  _(LLVMVecLoadStoreexpm1Lane8Test)  \
-  _(LLVMVecLoadStorelgammaLane8Test) \
+  _(LLVMVecFloat_acosLane4Test)   \
+  _(LLVMVecFloat_asinLane4Test)   \
+  _(LLVMVecFloat_atanLane4Test)   \
+  _(LLVMVecFloat_coshLane4Test)   \
+  _(LLVMVecFloat_sinhLane4Test)   \
+  _(LLVMVecFloat_tanhLane4Test)   \
+  _(LLVMVecFloat_erfLane4Test)    \
+  _(LLVMVecFloat_erfcLane4Test)   \
+  _(LLVMVecFloat_expm1Lane4Test)  \
+  _(LLVMVecFloat_lgammaLane4Test) \
+  _(LLVMVecFloat_acosLane8Test)   \
+  _(LLVMVecFloat_asinLane8Test)   \
+  _(LLVMVecFloat_atanLane8Test)   \
+  _(LLVMVecFloat_coshLane8Test)   \
+  _(LLVMVecFloat_sinhLane8Test)   \
+  _(LLVMVecFloat_tanhLane8Test)   \
+  _(LLVMVecFloat_erfLane8Test)    \
+  _(LLVMVecFloat_erfcLane8Test)   \
+  _(LLVMVecFloat_expm1Lane8Test)  \
+  _(LLVMVecFloat_lgammaLane8Test) \
+  _(LLVMVecDouble_acosLane2Test)   \
+  _(LLVMVecDouble_asinLane2Test)   \
+  _(LLVMVecDouble_atanLane2Test)   \
+  _(LLVMVecDouble_coshLane2Test)   \
+  _(LLVMVecDouble_sinhLane2Test)   \
+  _(LLVMVecDouble_tanhLane2Test)   \
+  _(LLVMVecDouble_erfLane2Test)    \
+  _(LLVMVecDouble_erfcLane2Test)   \
+  _(LLVMVecDouble_expm1Lane2Test)  \
+  _(LLVMVecDouble_lgammaLane2Test) \
+  _(LLVMVecDouble_acosLane4Test)   \
+  _(LLVMVecDouble_asinLane4Test)   \
+  _(LLVMVecDouble_atanLane4Test)   \
+  _(LLVMVecDouble_coshLane4Test)   \
+  _(LLVMVecDouble_sinhLane4Test)   \
+  _(LLVMVecDouble_tanhLane4Test)   \
+  _(LLVMVecDouble_erfLane4Test)    \
+  _(LLVMVecDouble_erfcLane4Test)   \
+  _(LLVMVecDouble_expm1Lane4Test)  \
+  _(LLVMVecDouble_lgammaLane4Test) \
   _(LLVMMemcpyTest)             \
   _(LLVMBzeroTest)              \
   _(LLVMElemwiseAdd)            \

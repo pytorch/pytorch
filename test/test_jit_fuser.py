@@ -11,6 +11,9 @@ from torch.testing import FileCheck
 
 from torch.testing._internal.common_utils import run_tests, IS_SANDCASTLE, ProfilingMode, GRAPH_EXECUTOR, \
     enable_profiling_mode
+from te_utils import CudaCodeGenCreated, CudaCodeGenExecuted, \
+    LLVMCodeGenCreated, LLVMCodeGenExecuted, SimpleIREvalExecuted
+
 from textwrap import dedent
 from itertools import product, permutations
 
@@ -796,10 +799,9 @@ class TestFuser(JitTestCase):
         x = torch.zeros([3, 4, 5], dtype=torch.float, device='cuda')
         m = M()
         out1 = m.create(x)
-        start_execs = torch._C._jit_get_trigger_value("cuda_codegen_executed")
+        cx = CudaCodeGenExecuted()
         out2 = m.create(x)
-        end_execs = torch._C._jit_get_trigger_value("cuda_codegen_executed")
-        assert (end_execs - start_execs) == 1
+        assert cx.elapsed_value() == 1
         self.assertNotEqual(out1, out2)
         self.assertTrue(torch.all(out1 >= 0))
         self.assertTrue(torch.all(out1 < 1))
@@ -875,10 +877,9 @@ class TestFuser(JitTestCase):
         y = torch.randn(4, 4, dtype=torch.float, device='cuda')
         script_f = torch.jit.script(fn_test_diamond, (x, y))
         warmup_forward(script_f, x, y)
-        start_execs = torch._C._jit_get_trigger_value("cuda_codegen_executed")
+        cx = CudaCodeGenExecuted()
         out = script_f(x, y)
-        end_execs = torch._C._jit_get_trigger_value("cuda_codegen_executed")
-        assert (end_execs - start_execs) == 1
+        assert cx.elapsed_value() == 1
         self.assertEqual(out, x + y)
 
     @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")

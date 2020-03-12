@@ -6,6 +6,9 @@ import unittest
 
 from torch.testing._internal.common_utils import suppress_warnings
 
+from te_utils import CudaCodeGenCreated, CudaCodeGenExecuted, \
+    LLVMCodeGenCreated, LLVMCodeGenExecuted, SimpleIREvalExecuted
+
 @contextlib.contextmanager
 def num_profiled_runs(num_runs):
     old_num_runs = torch._C._jit_set_num_profiled_runs(num_runs)
@@ -24,40 +27,6 @@ class BaseTestClass(unittest.TestCase):
 
     def tearDown(self):
         torch._C._jit_override_can_fuse_on_gpu(True)
-
-class ExecutionCounter(object):
-    def __init__(self, name):
-        self.name = name
-        self.start_value = torch._C._jit_get_trigger_value(self.name)
-
-    def elapsed_value(self):
-        value = torch._C._jit_get_trigger_value(self.name)
-        return value - self.start_value
-
-
-class CudaCodeGenCreated(ExecutionCounter):
-    def __init__(self):
-        super(CudaCodeGenCreated, self).__init__("cuda_codegen_created")
-
-
-class CudaCodeGenExecuted(ExecutionCounter):
-    def __init__(self):
-        super(CudaCodeGenExecuted, self).__init__("cuda_codegen_executed")
-
-
-class LLVMCodeGenCreated(ExecutionCounter):
-    def __init__(self):
-        super(LLVMCodeGenCreated, self).__init__("llvm_codegen_created")
-
-
-class LLVMCodeGenExecuted(ExecutionCounter):
-    def __init__(self):
-        super(LLVMCodeGenExecuted, self).__init__("llvm_codegen_executed")
-
-
-class SimpleIREvalExecuted(ExecutionCounter):
-    def __init__(self):
-        super(SimpleIREvalExecuted, self).__init__("simple_ir_eval_executed")
 
 class TestTensorExprFuser(BaseTestClass):
     def test_easy(self):
