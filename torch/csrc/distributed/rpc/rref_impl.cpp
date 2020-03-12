@@ -108,11 +108,11 @@ IValue UserRRef::toHere() {
   // see Note [Best-Effort Check on Deleted UserRRefs]
   TORCH_CHECK(
       !deletedOnOwner_,
-        "User RRef with RRefId=",
-        rrefId(),
-        " and ForkId=",
-        forkId(),
-        " has been deleted. Cannot call to_here() on it after deletion.");
+      "User RRef with RRefId=",
+      rrefId(),
+      " and ForkId=",
+      forkId(),
+      " has been deleted. Cannot call to_here() on it after deletion.");
 
   auto agent = RpcAgent::getCurrentRpcAgent();
 
@@ -176,11 +176,11 @@ RRefForkData UserRRef::fork() const {
   //    worth the gain.
   TORCH_CHECK(
       !deletedOnOwner_,
-        "User RRef with RRefId=",
-        rrefId(),
-        " and ForkId=",
-        forkId(),
-        " has been deleted. Cannot call fork an UserRRef after deletion.");
+      "User RRef with RRefId=",
+      rrefId(),
+      " and ForkId=",
+      forkId(),
+      " has been deleted. Cannot call fork an UserRRef after deletion.");
   return RRef::fork();
 }
 
