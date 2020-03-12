@@ -26,9 +26,11 @@ namespace autograd {
 
 
 DifferentiableViewMeta::DifferentiableViewMeta(at::TensorImpl* self_impl, Variable base,
+  std::function<at::Tensor(const at::Tensor&)> view_fn,
   CreationMeta creation_meta)
     : AutogradMeta(self_impl), creation_meta(creation_meta) {
   base_ = std::move(base);
+  view_fn_ = std::move(view_fn);
   TORCH_CHECK(base_.defined(), "base is undefined");
   if (base_.is_view()) {
     base_ = base_._base();
@@ -40,6 +42,7 @@ DifferentiableViewMeta::DifferentiableViewMeta(at::TensorImpl* self_impl, Variab
 
 DifferentiableViewMeta::~DifferentiableViewMeta() {
   base_.reset();
+  view_fn_ = nullptr;
 }
 
 namespace {
@@ -87,7 +90,7 @@ namespace impl {
           "Functions which modify views in-place must return a single Variable");
       diff_view_meta->output_nr_ = gradient_edge.input_nr;
       auto copy_slices = std::make_shared<CopySlices>(
-          diff_view_meta->base_, at::TensorGeometry(self), std::move(gradient_edge.function));
+          diff_view_meta->base_, diff_view_meta->view_fn_, at::TensorGeometry(self), std::move(gradient_edge.function));
       set_gradient_edge(diff_view_meta->base_, {std::move(copy_slices), 0});
       self.grad_fn(); // trigger an update to the view's grad_fn
     } else {
@@ -340,6 +343,11 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(const Tenso
       // This is an indirect rebase_history due to another view or the base being modified inplace
       handle_view_on_rebase(diff_view_meta, /* indirect */ true);
       TORCH_INTERNAL_ASSERT(diff_view_meta->output_nr_ == 0);
+      auto diff_base = at::empty_strided(diff_view_meta->base_.sizes(), diff_view_meta->base_.strides(), diff_view_meta->base_.options().requires_grad(true));
+      diff_base.copy_(diff_view_meta->base_);
+      auto diff_view = diff_view_meta->view_fn_(diff_base);
+      auto fn = diff_view.grad_fn();
+      /*
       auto fn = std::make_shared<torch::autograd::generated::AsStridedBackward>();
       fn->self_geometry = at::TensorGeometry(diff_view_meta->base_);
       fn->size = self.sizes().vec();
@@ -350,6 +358,7 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(const Tenso
         diff_view_meta->base_.options()
       , self.sizes() // Note: sizes(), not base_.sizes(), is intentional
       , diff_view_meta->base_.device());
+      */
       diff_view_meta->grad_fn_ = std::move(fn);
       diff_view_meta->attr_version = current_version;
     }

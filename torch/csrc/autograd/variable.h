@@ -384,13 +384,15 @@ struct TORCH_API DifferentiableViewMeta : public AutogradMeta {
   /// version_counter.current_version().
   uint32_t attr_version;
 
+  std::function<at::Tensor(const at::Tensor&)> view_fn_;
+
   CreationMeta creation_meta;
 
   bool requires_grad() const override {
     return requires_grad_ || grad_fn_ || (is_view_ && base_.requires_grad());
   }
 
-  DifferentiableViewMeta(at::TensorImpl* self_impl, Variable base,
+  DifferentiableViewMeta(at::TensorImpl* self_impl, Variable base, std::function<at::Tensor(const at::Tensor&)> view_fn,
                          CreationMeta creation_meta=CreationMeta::DEFAULT);
   ~DifferentiableViewMeta();
 };
@@ -420,13 +422,14 @@ struct TORCH_API DifferentiableViewMeta : public AutogradMeta {
 inline Variable make_variable_differentiable_view(
     Variable base,
     at::Tensor data,
+    std::function<at::Tensor(at::Tensor)> func,
     CreationMeta creation_meta) {
   if (data.defined()) {
     auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
       /*version_counter=*/0,
       /*allow_tensor_metadata_change=*/true);
     data_impl_copy->set_autograd_meta(std::make_unique<DifferentiableViewMeta>(
-      data_impl_copy.get(), std::move(base),
+      data_impl_copy.get(), std::move(base), std::move(func),
       creation_meta));
     return Variable(data_impl_copy);
     }

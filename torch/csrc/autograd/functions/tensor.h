@@ -30,6 +30,7 @@ struct TORCH_API CopyBackwards : public Node {
 struct TORCH_API CopySlices : public Node {
   CopySlices(
       const Variable& base_var,
+      std::function<at::Tensor(at::Tensor)> view_fn_,
       at::TensorGeometry view_,
       std::shared_ptr<Node> fn_);
 
@@ -37,6 +38,7 @@ struct TORCH_API CopySlices : public Node {
   void release_variables() override;
 
   at::TensorGeometry base;
+  std::function<at::Tensor(at::Tensor)> view_fn;
   at::TensorGeometry view;
   std::shared_ptr<Node> fn;
 };
