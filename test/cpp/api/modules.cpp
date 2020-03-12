@@ -1350,37 +1350,6 @@ TEST_F(ModulesTest, Dropout3d) {
   ASSERT_EQ(y.sum().item<float>(), 100);
 }
 
-TEST_F(ModulesTest, FeatureDropout) {
-  FeatureDropout dropout(0.5);
-  torch::Tensor x = torch::ones({10, 10}, torch::requires_grad());
-  torch::Tensor y = dropout(x);
-
-  y.backward(torch::ones_like(y));
-  ASSERT_EQ(y.ndimension(), 2);
-  ASSERT_EQ(y.size(0), 10);
-  ASSERT_EQ(y.size(1), 10);
-  ASSERT_LT(y.sum().item<float>(), 130); // Probably
-  ASSERT_GT(y.sum().item<float>(), 70); // Probably
-
-  dropout->eval();
-  y = dropout(x);
-  ASSERT_EQ(y.sum().item<float>(), 100);
-}
-
-TEST_F(ModulesTest, FeatureDropoutLegacyWarning) {
-  std::stringstream buffer;
-  torch::test::CerrRedirect cerr_redirect(buffer.rdbuf());
-
-  FeatureDropout bn(0.5);
-
-  ASSERT_EQ(
-    count_substr_occurrences(
-      buffer.str(),
-      "torch::nn::FeatureDropout module is deprecated"
-    ),
-  1);
-}
-
 TEST_F(ModulesTest, Parameters) {
   auto model = std::make_shared<NestedModel>();
   auto parameters = model->named_parameters();
@@ -1429,74 +1398,6 @@ TEST_F(ModulesTest, FunctionalArgumentBinding) {
   auto functional =
       Functional(torch::elu, /*alpha=*/1, /*scale=*/0, /*input_scale=*/1);
   ASSERT_EQ(functional(torch::ones({})).item<float>(), 0);
-}
-
-TEST_F(ModulesTest, BatchNormStateful) {
-  BatchNorm bn(5);
-
-  // Is stateful by default.
-  ASSERT_TRUE(bn->options.track_running_stats());
-
-  ASSERT_TRUE(bn->running_mean.defined());
-  ASSERT_EQ(bn->running_mean.dim(), 1);
-  ASSERT_EQ(bn->running_mean.size(0), 5);
-
-  ASSERT_TRUE(bn->running_var.defined());
-  ASSERT_EQ(bn->running_var.dim(), 1);
-  ASSERT_EQ(bn->running_var.size(0), 5);
-
-  // Is affine by default.
-  ASSERT_TRUE(bn->options.affine());
-
-  ASSERT_TRUE(bn->weight.defined());
-  ASSERT_EQ(bn->weight.dim(), 1);
-  ASSERT_EQ(bn->weight.size(0), 5);
-
-  ASSERT_TRUE(bn->bias.defined());
-  ASSERT_EQ(bn->bias.dim(), 1);
-  ASSERT_EQ(bn->bias.size(0), 5);
-}
-TEST_F(ModulesTest, BatchNormStateless) {
-  BatchNorm bn(BatchNormOptions(5).track_running_stats(false).affine(false));
-
-  ASSERT_FALSE(bn->running_mean.defined());
-  ASSERT_FALSE(bn->running_var.defined());
-  ASSERT_FALSE(bn->weight.defined());
-  ASSERT_FALSE(bn->bias.defined());
-
-  ASSERT_THROWS_WITH(
-      bn(torch::ones({2, 5})),
-      "Calling BatchNorm::forward is only permitted "
-      "when the 'track_running_stats' option is true (was false). "
-      "Use BatchNorm::pure_forward instead.");
-}
-
-TEST_F(ModulesTest, BatchNormPureForward) {
-  BatchNorm bn(BatchNormOptions(5).affine(false));
-  bn->eval();
-
-  // Want to make sure we use the supplied values in `pure_forward` even if
-  // we are stateful.
-  auto input = torch::randn({2, 5});
-  auto mean = torch::randn(5);
-  auto variance = torch::rand(5);
-  auto output = bn->pure_forward(input, mean, variance);
-  auto expected = (input - mean) / torch::sqrt(variance + bn->options.eps());
-  ASSERT_TRUE(output.allclose(expected));
-}
-
-TEST_F(ModulesTest, BatchNormLegacyWarning) {
-  std::stringstream buffer;
-  torch::test::CerrRedirect cerr_redirect(buffer.rdbuf());
-
-  BatchNorm bn(5);
-
-  ASSERT_EQ(
-    count_substr_occurrences(
-      buffer.str(),
-      "torch::nn::BatchNorm module is deprecated"
-    ),
-  1);
 }
 
 TEST_F(ModulesTest, BatchNorm1dStateful) {
@@ -4087,22 +3988,8 @@ TEST_F(ModulesTest, PrettyPrintDropout3d) {
   ASSERT_EQ(c10::str(Dropout3d(Dropout3dOptions().p(0.42).inplace(true))), "torch::nn::Dropout3d(p=0.42, inplace=true)");
 }
 
-TEST_F(ModulesTest, PrettyPrintFeatureDropout) {
-  ASSERT_EQ(c10::str(FeatureDropout()), "torch::nn::FeatureDropout(p=0.5, inplace=false)");
-  ASSERT_EQ(c10::str(FeatureDropout(0.42)), "torch::nn::FeatureDropout(p=0.42, inplace=false)");
-  ASSERT_EQ(c10::str(FeatureDropout(FeatureDropoutOptions().p(0.42).inplace(true))), "torch::nn::FeatureDropout(p=0.42, inplace=true)");
-}
-
 TEST_F(ModulesTest, PrettyPrintFunctional) {
   ASSERT_EQ(c10::str(Functional(torch::relu)), "torch::nn::Functional()");
-}
-
-TEST_F(ModulesTest, PrettyPrintBatchNorm) {
-  ASSERT_EQ(
-      c10::str(BatchNorm(
-          BatchNormOptions(4).eps(0.5).momentum(0.1).affine(false).track_running_stats(
-              true))),
-      "torch::nn::BatchNorm(num_features=4, eps=0.5, momentum=0.1, affine=false, track_running_stats=true)");
 }
 
 TEST_F(ModulesTest, PrettyPrintBatchNorm1d) {
