@@ -118,7 +118,7 @@ From the user's perspective the autograd context is setup as follows:
 It is important to note that your model's forward pass must be invoked within
 the distributed autograd context manager, as a valid context is needed in
 order to ensure that all ``send`` and ``recv`` functions are stored properly
-to run the backwards pass across all participating nodes.
+to run the backward pass across all participating nodes.
 
 Distributed Backward Pass
 ^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -249,7 +249,7 @@ As an example the complete code with distributed autograd would be as follows:
   # On worker 0:
 
   # Setup the autograd context. Computations that take
-  # part in the distributed backwards pass must be within
+  # part in the distributed backward pass must be within
   # the distributed autograd context manager.
   with dist_autograd.context() as context_id:
     t1 = torch.rand((3, 3), requires_grad=True)
@@ -316,7 +316,7 @@ The :class:`~torch.distributed.optim.DistributedOptimizer` operates as follows:
 4. When :meth:`torch.distributed.optim.DistributedOptimizer.step` is invoked,
    the distributed optimizer uses RPC to remotely execute all the local
    optimizers on the appropriate remote workers. A distributed autograd 
-   `context_id` must be provided as input to 
+   ``context_id`` must be provided as input to 
    :meth:`torch.distributed.optim.DistributedOptimizer.step`. This is used
    by local optimizers to apply gradients stored in the corresponding
    context.
