@@ -46,8 +46,6 @@ public:
       Fusion fusion;
       // lower torch::jit::Graph to torch::jit::fuser::cuda::fusion
       parseJitIR(graph, fusion);
-      std::cout << "compiling cached kernel: " << kernel_id << std::endl <<
-          &fusion << std::endl;
 
       // default constructor via accessing empty key;
       // TODO: compile and blablabla;
@@ -67,7 +65,6 @@ public:
     assert(kernel_cache_.count(kernel_id) != 0);
 
     CudaKernel& cuda_kernel_entry = kernel_cache_[kernel_id];
-    std::cout << "executing cached kernel: " << kernel_id << std::endl;
 
     runKernel(cuda_kernel_entry, inputs, outputs);
   }

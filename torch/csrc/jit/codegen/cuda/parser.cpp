@@ -50,8 +50,9 @@ public:
     auto block = graph_->block();
 
     // register all inputs;
+
     for (auto val : block->inputs()) {
-      assert(registerValue(val));
+      TORCH_CHECK(registerValue(val));
       fusion_->addInput(value_maps_[val->unique()]);
     }
 
@@ -196,24 +197,26 @@ protected:
   }
 
   bool registerScalar(const JitValue* val) {
-    CgValue* cg_val;
     if (val->type()->isSubtypeOf(static_cast<c10::TypePtr>(FloatType::get()))) {
+      CgValue* cg_val;
       if (auto ival = constant_as<float>(val)) {
         cg_val = new Float(ival.value());
       } else {
         cg_val = new Float();
       }
+      value_maps_.emplace(val->unique(), cg_val);
+      return true;
     } else if (val->type()->isSubtypeOf(static_cast<c10::TypePtr>(IntType::get()))) {
+      CgValue* cg_val;
       if (auto ival = constant_as<int>(val)) {
         cg_val = new Float(ival.value());
       } else {
         cg_val = new Int();
       }
-    } else {
-      return false;
+      value_maps_.emplace(val->unique(), cg_val);
+      return true;
     }
-    value_maps_.emplace(val->unique(), cg_val);
-    return true;
+    return false;
   }
 
   bool registerTensor(const JitValue* val) {
@@ -222,11 +225,10 @@ protected:
       // TODO: make this a static function in Tensor class;
       // create tensor;
       cg_val = new TensorView(new Tensor(val->type()->cast<TensorType>()));
-    } else {
-      return false;
+      value_maps_.emplace(val->unique(), cg_val);
+      return true;
     }
-    value_maps_.emplace(val->unique(), cg_val);
-    return true;
+    return false;
   }
 
   std::shared_ptr<Graph> graph_;

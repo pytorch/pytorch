@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/runtime/autodiff.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/codegen/cuda/partition.h>
+#include <torch/csrc/jit/codegen/cuda/manager.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/passes/pass_manager.h>
@@ -838,6 +839,18 @@ struct CudaGraphFuser {
   }
 };
 
+void compileFusionRecursive(Block* block) {
+  for (auto node : block->nodes()) {
+    if (node->kind() == prim::CudaFusionGroup) {
+      // TODO: need to hide this
+      fuser::cuda::compileCudaFusionGroup(node);
+    }
+    for (auto sub_block : node->blocks()) {
+      compileFusionRecursive(sub_block);
+    }
+  }
+}
+
 void PeepholeOptimizeShapeExpressions(Block* block) {
   auto nodes = block->nodes();
   for (auto it = nodes.begin(); it != nodes.end(); ++it) {
@@ -901,6 +914,9 @@ void CudaFuseGraph(std::shared_ptr<Graph>& graph) {
   EliminateDeadCode(graph);
   // Improve the quality of shape propagation code that was left
   PeepholeOptimizeShapeExpressions(graph->block());
+  // Compile CudaFusionGroup
+  std::cout << "pass graph for compilation" << std::endl << (*graph) << std::endl;
+  compileFusionRecursive(graph->block());
 }
 
 } // namespace jit
