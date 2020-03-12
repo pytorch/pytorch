@@ -2484,7 +2484,7 @@ class TestComparatorOps(TestCase):
 # NOT FOR REVIEW OR COMMIT - vasiliy testing ghstack behavior
 #
 # commit 1
-# a
+# a, updated to c
 #
 
 if __name__ == "__main__":
