@@ -11,15 +11,15 @@ namespace jit {
 // Must run this pass after constant folding.
 void FoldPrePackingOps(
     script::Module& m,
-    const PrePackingOpsFilterFn& is_foldable_op) {
+    const PrePackingOpsFilterFn& is_foldable_op,
+    const std::string& attr_prefix) {
   int64_t uid = 0;
-  const std::string& module_name = m.type()->name()->qualifiedName();
   auto method = m.get_method("forward");
   auto graph = method.graph();
   std::stack<Block*> blocks_to_visit;
   std::unordered_set<Node*> nodes_to_delete;
   blocks_to_visit.push(graph->block());
-  std::string attr_name_base = module_name + ".packed_weight_";
+  std::string attr_name_base = attr_prefix + "._jit_pass_packed_weight_";
   while (!blocks_to_visit.empty()) {
     Block* b = blocks_to_visit.top();
     blocks_to_visit.pop();
@@ -36,7 +36,7 @@ void FoldPrePackingOps(
               attr_name,
               " already exist in",
               " module of type:",
-              module_name,
+              m.type()->name()->qualifiedName(),
               ". Please make sure that",
               " FoldPrePackingOps is run at the top level module only.");
           m.register_attribute(attr_name, n->output(0)->type(), outputs[0]);

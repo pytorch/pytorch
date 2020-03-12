@@ -9,6 +9,11 @@ namespace torch {
 namespace nn {
 
 /// Options for ELU functional and module.
+///
+/// Example:
+/// ```
+/// ELU model(ELUOptions().alpha(42.42).inplace(true));
+/// ```
 struct TORCH_API ELUOptions {
   /// The `alpha` value for the ELU formulation. Default: 1.0
   TORCH_ARG(double, alpha) = 1.0;
@@ -22,6 +27,11 @@ TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(ELU, ELUFuncOptions)
 // ============================================================================
 
 /// Options for SELU functional and module.
+///
+/// Example:
+/// ```
+/// SELU model(SELUOptions().inplace(true));
+/// ```
 struct TORCH_API SELUOptions {
   /* implicit */ SELUOptions(bool inplace = false);
 
@@ -34,6 +44,11 @@ TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(SELU, SELUFuncOptions)
 // ============================================================================
 
 /// Options for GLU functional and module.
+///
+/// Example:
+/// ```
+/// GLU model(GLUOptions(1));
+/// ```
 struct TORCH_API GLUOptions {
   /* implicit */ GLUOptions(int64_t dim = -1);
 
@@ -46,6 +61,11 @@ TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(GLU, GLUFuncOptions)
 // ============================================================================
 
 /// Options for Hardshrink functional and module.
+///
+/// Example:
+/// ```
+/// Hardshrink model(HardshrinkOptions().lambda(42.42));
+/// ```
 struct TORCH_API HardshrinkOptions {
   /* implicit */ HardshrinkOptions(double lambda = 0.5);
 
@@ -58,6 +78,11 @@ TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(Hardshrink, HardshrinkFuncOptions)
 // ============================================================================
 
 /// Options for Hardtanh functional and module.
+///
+/// Example:
+/// ```
+/// Hardtanh model(HardtanhOptions().min_val(-42.42).max_val(0.42).inplace(true));
+/// ```
 struct TORCH_API HardtanhOptions {
   /// minimum value of the linear region range. Default: -1
   TORCH_ARG(double, min_val) = -1.0;
@@ -74,6 +99,11 @@ TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(Hardtanh, HardtanhFuncOptions)
 // ============================================================================
 
 /// Options for LeakyReLU functional and module.
+///
+/// Example:
+/// ```
+/// LeakyReLU model(LeakyReLUOptions().negative_slope(0.42).inplace(true));
+/// ```
 struct TORCH_API LeakyReLUOptions {
   /// Controls the angle of the negative slope. Default: 1e-2
   TORCH_ARG(double, negative_slope) = 1e-2;
@@ -87,6 +117,11 @@ TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(LeakyReLU, LeakyReLUFuncOptions)
 // ============================================================================
 
 /// Options for the Softmax functional and module.
+///
+/// Example:
+/// ```
+/// Softmax model(SoftmaxOptions(1));
+/// ```
 struct TORCH_API SoftmaxOptions {
   SoftmaxOptions(int64_t dim);
 
@@ -115,6 +150,11 @@ struct TORCH_API SoftmaxFuncOptions {
 // ============================================================================
 
 /// Options for the Softmin functional and module.
+///
+/// Example:
+/// ```
+/// Softmin model(SoftminOptions(1));
+/// ```
 struct TORCH_API SoftminOptions {
   SoftminOptions(int64_t dim);
 
@@ -143,6 +183,11 @@ struct TORCH_API SoftminFuncOptions {
 // ============================================================================
 
 /// Options for the LogSoftmax functional and module.
+///
+/// Example:
+/// ```
+/// LogSoftmax model(LogSoftmaxOptions(1));
+/// ```
 struct TORCH_API LogSoftmaxOptions {
   LogSoftmaxOptions(int64_t dim);
 
@@ -171,6 +216,11 @@ struct TORCH_API LogSoftmaxFuncOptions {
 // ============================================================================
 
 /// Options for PReLU functional and module.
+///
+/// Example:
+/// ```
+/// PReLU model(PReLUOptions().num_parameters(42));
+/// ```
 struct TORCH_API PReLUOptions {
   /// number of `a` to learn. Although it takes an int as input, there is only
   /// two values are legitimate: 1, or the number of channels at input. Default: 1
@@ -185,6 +235,11 @@ TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(PReLU, PReLUFuncOptions)
 // ============================================================================
 
 /// Options for ReLU functional and module.
+///
+/// Example:
+/// ```
+/// ReLU model(ReLUOptions().inplace(true));
+/// ```
 struct TORCH_API ReLUOptions {
   /* implicit */ ReLUOptions(bool inplace = false);
 
@@ -197,6 +252,11 @@ TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(ReLU, ReLUFuncOptions)
 // ============================================================================
 
 /// Options for ReLU6 functional and module.
+///
+/// Example:
+/// ```
+/// ReLU6 model(ReLU6Options().inplace(true));
+/// ```
 struct TORCH_API ReLU6Options {
   /* implicit */ ReLU6Options(bool inplace = false);
 
@@ -209,6 +269,11 @@ TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(ReLU6, ReLU6FuncOptions)
 // ============================================================================
 
 /// Options for RReLU functional and module.
+///
+/// Example:
+/// ```
+/// RReLU model(RReLUOptions().lower(0.24).upper(0.42).inplace(true));
+/// ```
 struct TORCH_API RReLUOptions {
   /// lower bound of the uniform distribution. Default: 1/8
   TORCH_ARG(double, lower) = 1.0 / 8.0;
@@ -242,6 +307,11 @@ struct TORCH_API RReLUFuncOptions {
 // ============================================================================
 
 /// Options for CELU functional and module.
+///
+/// Example:
+/// ```
+/// CELU model(CELUOptions().alpha(42.42).inplace(true));
+/// ```
 struct TORCH_API CELUOptions {
   /// The `alpha` value for the CELU formulation. Default: 1.0
   TORCH_ARG(double, alpha) = 1.0;
@@ -255,6 +325,11 @@ TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(CELU, CELUFuncOptions)
 // ============================================================================
 
 /// Options for Softplus functional and module.
+///
+/// Example:
+/// ```
+/// Softplus model(SoftplusOptions().beta(0.24).threshold(42.42));
+/// ```
 struct TORCH_API SoftplusOptions {
   /// the `beta` value for the Softplus formulation. Default: 1
   TORCH_ARG(double, beta) = 1.0;
@@ -268,6 +343,11 @@ TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(Softplus, SoftplusFuncOptions)
 // ============================================================================
 
 /// Options for Softshrink functional and module.
+///
+/// Example:
+/// ```
+/// Softshrink model(SoftshrinkOptions(42.42));
+/// ```
 struct TORCH_API SoftshrinkOptions {
   /* implicit */ SoftshrinkOptions(double lambda = 0.5);
 
@@ -280,6 +360,11 @@ TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(Softshrink, SoftshrinkFuncOptions)
 // ============================================================================
 
 /// Options for Threshold functional and module.
+///
+/// Example:
+/// ```
+/// Threshold model(ThresholdOptions(42.42, 24.24).inplace(true));
+/// ```
 struct TORCH_API ThresholdOptions {
   ThresholdOptions(double threshold, double value)
    : threshold_(threshold), value_(value) {}
@@ -318,6 +403,11 @@ struct TORCH_API GumbelSoftmaxFuncOptions {
 // ============================================================================
 
 /// Options for MultiheadAttention functional and module.
+///
+/// Example:
+/// ```
+/// MultiheadAttention model(MultiheadAttentionOptions(20, 10).bias(false));
+/// ```
 struct TORCH_API MultiheadAttentionOptions {
   MultiheadAttentionOptions(int64_t embed_dim, int64_t num_heads);
 

@@ -99,13 +99,12 @@ void insertXNNPACKOps(script::Module& module) {
 }
 
 void FoldXNNPACKPrePackingOps(script::Module& m) {
-  PrePackingOpsFilterFn filter_fn =
-    [](const Node* n) -> bool {
-      return ((n->kind() == Symbol::fromQualString("_xnnpack::linear_prepack")) ||
-          n->kind() == Symbol::fromQualString("_xnnpack::conv2d_prepack"));
-
-    };
-  FoldPrePackingOps(m, filter_fn);
+  PrePackingOpsFilterFn filter_fn = [](const Node* n) -> bool {
+    return (
+        (n->kind() == Symbol::fromQualString("_xnnpack::linear_prepack")) ||
+        n->kind() == Symbol::fromQualString("_xnnpack::conv2d_prepack"));
+  };
+  FoldPrePackingOps(m, filter_fn, "xnnpack_prepack_folding");
 }
 
 #else
@@ -121,7 +120,8 @@ void insertXNNPACKOps(script::Module& module) {
 }
 
 void FoldXNNPACKPrePackingOps(script::Module& m) {
-  TORCH_INTERNAL_ASSERT("XNNPACK is not enabled. Please build with USE_XNNPACK=1");
+  TORCH_INTERNAL_ASSERT(
+      "XNNPACK is not enabled. Please build with USE_XNNPACK=1");
 }
 
 #endif
