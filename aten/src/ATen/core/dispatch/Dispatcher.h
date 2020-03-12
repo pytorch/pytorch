@@ -53,7 +53,7 @@ private:
     // (in the new world, this should only ever be 1, but old style
     // registrations may register the schema multiple times, which
     // will increase this count).  def_and_impl_count reflects the number
-    // of combined def() and impl() registrations.  When a def() gets
+    // of combined def() and impl() registrations.  When the last def() gets
     // unregistered, we must immediately call the Deregistered listeners, but we
     // must not actually delete the handle as there are other outstanding RAII
     // destructors which will try to destruct and they had better still have a
@@ -169,8 +169,9 @@ private:
   OperatorHandle findOrRegisterName_(const OperatorName& op_name);
 
   void deregisterDef_(const OperatorHandle& op, const OperatorName& op_name);
-  void deregisterImpl_(const OperatorHandle& op, const OperatorName& op_name);
+  void deregisterImpl_(const OperatorHandle& op, const OperatorName& op_name, c10::optional<DispatchKey> dispatch_key, std::list<impl::OperatorEntry::ListEntry>::iterator kernel_handle);
   void deregisterFallback_(DispatchKey dispatchKey);
+  void cleanup(const OperatorHandle& op, const OperatorName& op_name);
 
   [[noreturn]] static void reportError(const DispatchTable& dispatchTable, DispatchKey dispatchKey);
 
