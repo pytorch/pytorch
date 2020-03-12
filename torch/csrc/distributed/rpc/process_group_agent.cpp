@@ -266,7 +266,7 @@ void ProcessGroupAgent::shutdown() {
     for (auto& it : currentPendingSends_) {
       const auto& pendingSends = it.second;
       const auto dst = it.first;
-      for (auto send : pendingSends) {
+      for (const auto& send : pendingSends) {
         if (!send->isCompleted()) {
           LOG(INFO) << "Worker " << RpcAgent::getWorkerInfo().id_
                     << " aborting pending send to destination rank " << dst;
