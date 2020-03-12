@@ -31,7 +31,7 @@ struct Layout final {
       }
 
       // Handle the case where batch size is zero.
-      int64_t batch = std::max<int64_t>(1, tensor[0]);
+      int64_t batch = tensor[0];
 
       for (size_t index = 1u; index < (tensor.size() - 1u); ++index) {
         batch *= tensor[index];

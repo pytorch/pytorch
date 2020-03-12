@@ -76,7 +76,8 @@ class TORCH_API DistAutogradContext {
   // variable.
   void accumulateGrad(
       const torch::autograd::Variable& variable,
-      const torch::Tensor& grad);
+      const torch::Tensor& grad,
+      size_t num_expected_refs);
 
   // Retrieve the GraphTask.
   std::shared_ptr<torch::autograd::GraphTask> retrieveGraphTask();
@@ -92,6 +93,8 @@ class TORCH_API DistAutogradContext {
   // Waits for all outstanding RPCs for this context to finish and clears all
   // outstanding rpcs held in this context. This should be called only once.
   std::shared_ptr<rpc::FutureMessage> clearAndWaitForOutstandingRpcsAsync();
+
+  void clearOutstandingRpcs();
 
   const int64_t contextId_;
 

@@ -104,7 +104,7 @@ void setstateTuple(const IValue& ivalue, std::vector<c10::IValue>& elements) {
   }
 }
 
-void moduleMethodsTuple(const script::Module& module,
+void moduleMethodsTuple(const Module& module,
     std::vector<c10::IValue>& elements) {
   auto methods = module.get_methods();
   // top level methods
@@ -132,8 +132,8 @@ class ScriptModuleSerializer {
       : writer_(writer_func) {}
 
   void serialize(
-      const script::Module& module,
-      const script::ExtraFilesMap& extra_files,
+      const Module& module,
+      const ExtraFilesMap& extra_files,
       bool bytecode_format) {
     C10_LOG_API_USAGE_ONCE("torch.script.save");
     writeExtraFiles(module, extra_files);
@@ -181,8 +181,8 @@ class ScriptModuleSerializer {
   }
 
   void writeExtraFiles(
-      const script::Module& module,
-      const script::ExtraFilesMap& extra_files) {
+      const Module& module,
+      const ExtraFilesMap& extra_files) {
     // Write out extra files.
     for (const auto& kv : extra_files) {
       const std::string key = "extra/" + kv.first;
@@ -190,7 +190,7 @@ class ScriptModuleSerializer {
     }
     auto hook = GetExtraFilesHook();
     if (hook) {
-      script::ExtraFilesMap hook_files = hook(module);
+      ExtraFilesMap hook_files = hook(module);
       for (const auto& kv : hook_files) {
         const std::string key = "extra/" + kv.first;
         writer_.writeRecord(key, kv.second.data(), kv.second.size());
@@ -235,7 +235,7 @@ class ScriptModuleSerializer {
     }
   }
 
-  void writeByteCode(const script::Module& module) {
+  void writeByteCode(const Module& module) {
     std::vector<c10::IValue> elements;
     moduleMethodsTuple(module, elements);
     auto telements = Tup(std::move(elements));
@@ -269,9 +269,9 @@ class ScriptModuleSerializer {
 };
 
 void ExportModule(
-    const script::Module& module,
+    const Module& module,
     std::ostream& out,
-    const script::ExtraFilesMap& extra_files,
+    const ExtraFilesMap& extra_files,
     bool bytecode_format) {
   ScriptModuleSerializer serializer(
     [&](const void* buf, size_t nbytes) -> size_t {
@@ -282,18 +282,18 @@ void ExportModule(
 }
 
 void ExportModule(
-    const script::Module& module,
+    const Module& module,
     const std::string& filename,
-    const script::ExtraFilesMap& extra_files,
+    const ExtraFilesMap& extra_files,
     bool bytecode_format) {
   ScriptModuleSerializer serializer(filename);
   serializer.serialize(module, extra_files, bytecode_format);
 }
 
 void ExportModule(
-    const script::Module& module,
+    const Module& module,
     const std::function<size_t(const void*, size_t)>& writer_func,
-    const script::ExtraFilesMap& extra_files,
+    const ExtraFilesMap& extra_files,
     bool bytecode_format) {
   ScriptModuleSerializer serializer(writer_func);
   serializer.serialize(module, extra_files, bytecode_format);
