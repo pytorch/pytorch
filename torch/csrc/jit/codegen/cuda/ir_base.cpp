@@ -22,15 +22,8 @@ namespace fuser {
 
 #include <torch/csrc/jit/codegen/cuda/ir_nodes.h>
 
-
-/*
- * Statement member definitions & related functions
- */
-
-// When we create a Val or EXPR we immediately register them with the active
-// fusion.
-Val::Val(ValType _vtype, DataType _dtype)
-    : vtype_{_vtype}, dtype_{_dtype} {
+// When we create a Val we immediately register them with the active fusion.
+Val::Val(ValType _vtype, DataType _dtype) : vtype_{_vtype}, dtype_{_dtype} {
   Fusion* fusion = FusionGuard::getCurFusion();
   if (fusion != nullptr) {
     this->name_ = fusion->registerVal(this);
@@ -40,72 +33,48 @@ Val::Val(ValType _vtype, DataType _dtype)
   }
 }
 
-  c10::optional<ValType> Val::getValType() const noexcept {
-    return vtype_;
-  }
-
-  c10::optional<DataType> Val::getDataType() const {
-    TORCH_INTERNAL_ASSERT(dtype_ != DataType::Null, "Value does not have a data type.");
-    return dtype_;
-  }
-
-  bool Val::isScalar() {
-    return vtype_ == ValType::Scalar;
-  }
+c10::optional<DataType> Val::getDataType() const {
+  TORCH_INTERNAL_ASSERT(
+      dtype_ != DataType::Null, "Value does not have a data type.");
+  return dtype_;
+}
 
 Expr* Val::getOrigin() {
   return (fusion_->origin(this));
 }
 
-  bool IRInputOutput::hasInput(const Val* const input) const {
-    for (auto val : inputs_)
-      if (val == input)
-        return true;
-    return false;
-  }
+bool IRInputOutput::hasInput(const Val* const input) const {
+  for (auto val : inputs_)
+    if (val == input)
+      return true;
+  return false;
+}
 
-  bool IRInputOutput::hasOutput(const Val* const output) const {
-    for (auto val : outputs_)
-      if (val == output)
-        return true;
-    return false;
-  }
+bool IRInputOutput::hasOutput(const Val* const output) const {
+  for (auto val : outputs_)
+    if (val == output)
+      return true;
+  return false;
+}
 
 void IRInputOutput::removeOutput(Val* val) {
-    auto it = outputs_.begin();
-    for (; it != outputs_.end(); ++it) {
-      if ((*it) == val)
-        break;
-    }
-    assert(it != outputs_.end());
-    outputs_.erase(it);
+  auto it = outputs_.begin();
+  for (; it != outputs_.end(); ++it) {
+    if ((*it) == val)
+      break;
   }
+  assert(it != outputs_.end());
+  outputs_.erase(it);
+}
+
+// We don't register with the active fusion in Expr as this needs to be done
+// after inputs and outputs are registered with the Expr
 Expr::Expr(ExprType _type) : type_{_type} {
   Fusion* fusion = FusionGuard::getCurFusion();
   if (fusion == nullptr)
     TORCH_CHECK(false, "No active fusion group found when creating an Expr.");
   this->fusion_ = fusion;
 }
-
-Statement::~Statement() {}
-
-/*
- * Val member definitions
- */
-
-Val::~Val() {}
-
-/*
- * IRInputOutput member definitions
- */
-
-IRInputOutput::~IRInputOutput() {}
-
-/*
- * Expr member definitions
- */
-
-Expr::~Expr() {}
 
 } // namespace fuser
 } // namespace jit
