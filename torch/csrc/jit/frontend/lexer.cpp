@@ -8,7 +8,6 @@
 
 namespace torch {
 namespace jit {
-namespace script {
 
 static const std::unordered_map<int, int> binary_prec = {
     {TK_IF, 1},
@@ -101,6 +100,5 @@ C10_EXPORT SharedParserData& sharedParserData() {
   return data;
 }
 
-} // namespace script
 } // namespace jit
 } // namespace torch
