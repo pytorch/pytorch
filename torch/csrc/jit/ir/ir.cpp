@@ -963,7 +963,7 @@ const Operator& Node::getOperator() const {
   if (maybe)
     return *maybe;
 
-  auto er = script::ErrorReport(sourceRange());
+  auto er = ErrorReport(sourceRange());
   er << "Schema not found for node. File a bug report.\n";
   er << "Node: " << *this << "\n";
   er << "Input types:";
@@ -1491,7 +1491,7 @@ Value* Graph::insert(
     at::ArrayRef<NamedValue> args,
     at::ArrayRef<NamedValue> kwargs,
     const c10::optional<SourceRange>& range) {
-  return script::emitBuiltinCall(
+  return emitBuiltinCall(
       range.value_or(fakeRange()), *this, opname, args, kwargs);
 }
 
@@ -1721,7 +1721,7 @@ Value* Graph::insertToList(Value* v, TypePtr type) {
 
 Value* Graph::insertFunctionCall(
     Function* callee,
-    const script::MatchedSchema& matched) {
+    const MatchedSchema& matched) {
   std::string func_name = callee->name();
   Value* fn_constant = insertNode(create(prim::Constant))
                            ->s_(attr::name, func_name)
@@ -1737,7 +1737,7 @@ Value* Graph::insertFunctionCall(
 
 Value* Graph::insertMethodCall(
     std::string method_name,
-    const script::MatchedSchema& matched) {
+    const MatchedSchema& matched) {
   Value* result = insertNode(create(prim::CallMethod, matched.inputs))
                       ->s_(attr::name, std::move(method_name))
                       ->output()
