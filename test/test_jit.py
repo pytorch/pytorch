@@ -2917,7 +2917,7 @@ graph(%Ra, %Rb):
         with self.assertRaisesRegex(RuntimeError, "failed to many any schema"):
             torch.ops.aten.add("a", 1)
         self.assertEqual("ab", torch.ops.aten.add("a", "b"))
-        a,b = torch.rand(3, 4), torch.rand(3, 4)
+        a, b = torch.rand(3, 4), torch.rand(3, 4)
         self.assertEqual(a + b, torch.ops.aten.add(a, b))
         self.assertEqual(a + 1, torch.ops.aten.add(a, 1))
 
