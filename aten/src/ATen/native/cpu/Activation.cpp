@@ -347,13 +347,11 @@ void hardsigmoid_backward_kernel(TensorIterator& iter) {
     cpu_kernel_vec(
         iter,
         [=](scalar_t grad_val, scalar_t self_val) {
-          // TODO: verify this is correct, since first time working on this area
           return (self_val >= zero && self_val <= one)
             ? grad_val / 6.0f
             : scalar_t(0);
         },
         [=](Vec grad_val, Vec self_val) {
-          // TODO: verify this is correct, since first time working on this area
           Vec gradNonZeroMask = (self_val > zero) & (self_val < one);
           return Vec::blendv(kZeroVec, grad_val * kOneSixthVec, gradNonZeroMask);
         });
