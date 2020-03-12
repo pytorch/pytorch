@@ -353,6 +353,21 @@ def leaky_relu(input, negative_slope=0.01, inplace=False,
         result = torch._C._nn.leaky_relu(input, negative_slope)
     return result
 
+def hardtanh(input, min_val=-1., max_val=1., inplace=False):
+    # type: (Tensor, float, float, bool) -> Tensor
+    r"""
+    hardtanh(input, min_val=-1., max_val=1., inplace=False) -> Tensor
+
+    Applies the quantized HardTanh function element-wise, with scale and
+    zero-point carried over from the input tensor. See :class:`~torch.nn.Hardtanh`
+    for more details.
+    """
+    if not input.is_quantized:
+        raise ValueError("Input to 'quantized.hardtanh' must be quantized!")
+    if inplace:
+        return torch._C._nn.hardtanh_(input, min_val, max_val)
+    return torch._C._nn.hardtanh(input, min_val, max_val)
+
 def clamp(input, min_, max_):
     # type: (Tensor, float, float) -> Tensor
     r"""float(input, min_, max_) -> Tensor
