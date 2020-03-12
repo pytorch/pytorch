@@ -40,16 +40,12 @@
 #include <torch/csrc/utils/tensor_memoryformats.h>
 #include <torch/csrc/utils/tensor_qschemes.h>
 #include <torch/csrc/utils/tensor_numpy.h>
-#include <torch/csrc/jit/python_tracer.h>
-#include <torch/csrc/jit/init.h>
-#include <torch/csrc/jit/python_ir.h>
+#include <torch/csrc/jit/python/python_tracer.h>
+#include <torch/csrc/jit/python/init.h>
+#include <torch/csrc/jit/python/python_ir.h>
 #include <torch/csrc/onnx/init.h>
 #include <torch/csrc/utils/init.h>
 #include <torch/csrc/api/include/torch/python/init.h>
-
-#ifdef USE_CUDNN
-#include <cudnn.h>
-#endif
 
 #ifdef USE_DISTRIBUTED
 #ifdef USE_C10D
@@ -450,6 +446,12 @@ PyObject *THPModule_setBenchmarkCuDNN(PyObject *_unused, PyObject *arg)
 {
   THPUtils_assert(PyBool_Check(arg), "set_benchmark_cudnn expects a bool, "
           "but got %s", THPUtils_typename(arg));
+#ifdef __HIP_PLATFORM_HCC__
+  if (arg == Py_False) {
+    TORCH_WARN_ONCE("Disabling benchmark mode for MIOpen is NOT supported. Overriding value to True");
+    arg = Py_True;
+  }
+#endif
   at::globalContext().setBenchmarkCuDNN(arg == Py_True);
   Py_RETURN_NONE;
 }
@@ -594,23 +596,6 @@ bool THDPBFloat16Storage_init(PyObject *module);
 
 static std::vector<PyMethodDef> methods;
 
-// TODO: Refactor this in some less manual way
-#ifdef USE_CUDNN
-static PyObject * THCUDNN_cudnn_version(PyObject *self, PyObject *args)
-{
-  return PyLong_FromLong(CUDNN_VERSION);
-}
-
-static PyMethodDef _THCUDNN_methods[] = {
-  {"_cudnn_version", (PyCFunction)THCUDNN_cudnn_version, METH_VARARGS, nullptr},
-  {nullptr}
-};
-
-PyMethodDef* THCUDNN_methods() {
-  return _THCUDNN_methods;
-}
-#endif
-
 // In Python we can't use the trick of C10_LOG_API_USAGE_ONCE
 // Guaranteed to be invoked from Python under GIL, no locking on map needed
 static void LogAPIUsageOnceFromPython(const std::string& event) {
@@ -639,9 +624,6 @@ PyObject* initModule() {
   THPUtils_addPyMethodDefs(methods, torch::multiprocessing::python_functions());
 #ifdef USE_CUDA
   THPUtils_addPyMethodDefs(methods, THCPModule_methods());
-#endif
-#ifdef USE_CUDNN
-  THPUtils_addPyMethodDefs(methods, THCUDNN_methods());
 #endif
 #ifdef USE_DISTRIBUTED
 #ifdef USE_C10D
@@ -731,7 +713,7 @@ PyObject* initModule() {
     return PyModule_AddObject(module, name, v) == 0;
   };
 
-#ifdef USE_CUDNN
+#if defined(USE_CUDNN) || defined(__HIP_PLATFORM_HCC__)
   PyObject *has_cudnn = Py_True;
 #else
   PyObject *has_cudnn = Py_False;
@@ -741,6 +723,16 @@ PyObject* initModule() {
   // force ATen to initialize because it handles
   // setting up TH Errors so that they throw C++ exceptions
   at::init();
+
+  // Automatically translate errors thrown from pybind11 functions
+  py::register_exception_translator([](std::exception_ptr e) { // NOLINT
+    try {
+      if (e) {
+        std::rethrow_exception(e);
+      }
+    }
+    CATCH_TH_ERRORS()
+  });
 
   auto py_module = py::reinterpret_borrow<py::module>(module);
   py_module.def("_demangle", &c10::demangle);

@@ -1,4 +1,6 @@
+#ifndef _USE_MATH_DEFINES
 #define _USE_MATH_DEFINES
+#endif
 
 #include <ATen/native/Activation.h>
 
@@ -198,23 +200,55 @@ void GeluBackwardMKLKernelImpl(TensorIterator* /* it */) {
 
 void elu_kernel(TensorIterator& it, Scalar alpha, Scalar scale, Scalar input_scale) {
   AT_DISPATCH_FLOATING_TYPES(it.dtype(), "elu_cpu", [&]() {
+    using Vec = Vec256<scalar_t>;
     auto negcoef = alpha.to<scalar_t>() * scale.to<scalar_t>();
     auto poscoef = scale.to<scalar_t>();
     auto negiptcoef = input_scale.to<scalar_t>();
-    cpu_kernel(it, [=](scalar_t a) -> scalar_t {
-      return a <= scalar_t(0) ? (std::exp(a * negiptcoef) - scalar_t(1)) * negcoef : a * poscoef;
-    });
+    const Vec negcoef_vec(negcoef);
+    const Vec negiptcoef_vec(negiptcoef);
+    const Vec poscoef_vec(poscoef);
+    const Vec one_vec(static_cast<scalar_t>(1));
+    const Vec zero_vec(static_cast<scalar_t>(0));
+    cpu_kernel_vec(
+        it,
+        [negcoef, negiptcoef, poscoef](scalar_t a) -> scalar_t {
+          return a <= scalar_t(0) ? (std::exp(a * negiptcoef) - scalar_t(1)) * negcoef : a * poscoef;
+        },
+        [&negcoef_vec, &negiptcoef_vec, &poscoef_vec, &one_vec, &zero_vec](Vec a) -> Vec {
+          auto cmp = (a > zero_vec);
+          if (!cmp.zero_mask()) {  // only a * poscoef (which is very quick) needs to be computed
+            return a * poscoef_vec;
+          } else {
+            return Vec::blendv(((a * negiptcoef_vec).exp() - one_vec) * negcoef_vec, a * poscoef_vec, cmp);
+          }
+        });
   });
 }
 
 void elu_backward_kernel(TensorIterator& it, Scalar alpha, Scalar scale, Scalar input_scale) {
   AT_DISPATCH_FLOATING_TYPES(it.dtype(), "elu_backward_cpu", [&]() {
+    using Vec = Vec256<scalar_t>;
     auto negcoef = alpha.to<scalar_t>() * scale.to<scalar_t>();
     auto poscoef = scale.to<scalar_t>();
     auto negiptcoef = input_scale.to<scalar_t>();
-    cpu_kernel(it, [=](scalar_t a, scalar_t b) -> scalar_t {
-      return b <= scalar_t(0) ? a * negiptcoef * (b + negcoef) : a * poscoef;
-    });
+    const Vec negcoef_vec(negcoef);
+    const Vec negiptcoef_vec(negiptcoef);
+    const Vec poscoef_vec(poscoef);
+    const Vec zero_vec(static_cast<scalar_t>(0));
+    cpu_kernel_vec(
+        it,
+        [negcoef, negiptcoef, poscoef](scalar_t a, scalar_t b) -> scalar_t {
+          return b <= scalar_t(0) ? a * negiptcoef * (b + negcoef) : a * poscoef;
+        },
+        [&negcoef_vec, &negiptcoef_vec, &poscoef_vec, &zero_vec](Vec a, Vec b) -> Vec {
+          auto cmp = (b > zero_vec);
+          if (!cmp.zero_mask()) {  // only a * poscoef (which is very quick) needs to be computed
+            return a * poscoef_vec;
+          } else {
+            return Vec::blendv(a * negiptcoef_vec * (b + negcoef_vec), a * poscoef_vec, cmp);
+          }
+        }
+    );
   });
 }
 
@@ -296,7 +330,7 @@ void hardshrink_kernel(TensorIterator& iter, Scalar lambd) {
 }
 
 void softshrink_kernel(TensorIterator& iter, Scalar lambd) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "softshrink_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "softshrink_cpu", [&]() {
     auto lambd_val = lambd.to<scalar_t>();
     cpu_kernel(iter, [=](scalar_t a) -> scalar_t {
       return a > lambd_val ? a - lambd_val : (a < -lambd_val ? a + lambd_val : scalar_t(0));
@@ -320,7 +354,7 @@ void shrink_backward_kernel(TensorIterator& iter, Scalar lambd) {
 }
 
 void hardtanh_backward_kernel(TensorIterator& iter, Scalar min, Scalar max) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "hardshrink_backward_cpu", [&] {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "hardshrink_backward_cpu", [&] {
     auto min_val = min.to<scalar_t>();
     auto max_val = max.to<scalar_t>();
     cpu_kernel_vec(
@@ -414,6 +448,40 @@ void softplus_backward_kernel(TensorIterator& iter, Scalar beta_, Scalar thresho
   });
 }
 
+void glu_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "glu_cpu", [&] {
+    using Vec = Vec256<scalar_t>;
+    const scalar_t one_val(1);
+    const Vec one_vec(one_val);
+    cpu_kernel_vec(
+      iter,
+      [one_val](scalar_t a, scalar_t b) -> scalar_t {
+        return a * (one_val / (one_val + std::exp(-b)));
+      },
+      [one_vec](Vec a, Vec b) -> Vec {
+        return a * (one_vec / (one_vec + b.neg().exp()));
+      }
+    );
+  });
+}
+
+void glu_backward_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "glu_backward_cpu", [&] {
+    using Vec = Vec256<scalar_t>;
+    const scalar_t one_val(1);
+    const Vec one_vec(one_val);
+    cpu_kernel_vec(
+      iter,
+      [one_val](scalar_t a, scalar_t b, scalar_t c) -> scalar_t {
+        return (one_val - a) * a * b * c;
+      },
+      [one_vec](Vec a, Vec b, Vec c) -> Vec {
+        return (one_vec - a) * a * b * c;
+      }
+    );
+  });
+}
+
 } // namespace
 
 REGISTER_DISPATCH(log_sigmoid_cpu_stub, &log_sigmoid_cpu_kernel);
@@ -431,6 +499,8 @@ REGISTER_DISPATCH(leaky_relu_stub, &leaky_relu_kernel);
 REGISTER_DISPATCH(leaky_relu_backward_stub, &leaky_relu_backward_kernel);
 REGISTER_DISPATCH(softplus_stub, &softplus_kernel);
 REGISTER_DISPATCH(softplus_backward_stub, &softplus_backward_kernel);
+REGISTER_DISPATCH(glu_stub, &glu_kernel);
+REGISTER_DISPATCH(glu_backward_stub, &glu_backward_kernel);
 
 } // namespace native
 } // namespace at

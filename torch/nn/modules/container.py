@@ -211,6 +211,9 @@ class ModuleList(Module):
             self.add_module(str(offset + i), module)
         return self
 
+    def forward(self):
+        raise NotImplementedError()
+
 
 class ModuleDict(Module):
     r"""Holds submodules in a dictionary.
@@ -451,6 +454,9 @@ class ParameterList(Module):
         tmpstr = '\n'.join(child_lines)
         return tmpstr
 
+    def __call__(self, input):
+        raise RuntimeError('ParameterList should not be called.')
+
 
 class ParameterDict(Module):
     r"""Holds parameters in a dictionary.
@@ -590,3 +596,6 @@ class ParameterDict(Module):
             child_lines.append('  (' + k + '): ' + parastr)
         tmpstr = '\n'.join(child_lines)
         return tmpstr
+
+    def __call__(self, input):
+        raise RuntimeError('ParameterDict should not be called.')

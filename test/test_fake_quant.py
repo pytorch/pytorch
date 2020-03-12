@@ -14,15 +14,15 @@ import unittest
 
 # Reference method for fake quantize
 def _fake_quantize_per_tensor_affine_reference(X, scale, zero_point, quant_min, quant_max):
-    res = (torch.clamp(torch.round(X.cpu() * (1.0 / scale) + zero_point), quant_min, quant_max) - zero_point) * scale
+    res = (torch.clamp(torch.round(X * (1.0 / scale) + zero_point), quant_min, quant_max) - zero_point) * scale
     return res
 
 # Reference method for the gradient of the fake quantize operator
 def _fake_quantize_per_tensor_affine_grad_reference(dY, X, scale, zero_point, quant_min, quant_max):
-    Xq = torch.round(X.cpu() * (1.0 / scale) + zero_point)
+    Xq = torch.round(X * (1.0 / scale) + zero_point)
     mask = (Xq >= quant_min) * (Xq <= quant_max)
-    res = torch.zeros_like(dY.cpu())
-    res[mask] = dY.cpu()[mask]
+    res = torch.zeros_like(dY)
+    res[mask] = dY[mask]
     return res
 
 # Helper function used to simulate per-channel fake-quant against any axis

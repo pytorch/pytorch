@@ -21,9 +21,33 @@ white_list = [
     # We export some functions and classes for test_jit.py directly from libtorch.so,
     # it's not important to have BC for them
     ('_TorchScriptTesting.*', datetime.date(9999, 1, 1)),
-    ('split_with_sizes', datetime.date(2020, 2, 1)),
-    ('linear_relu_dynamic_fp16', datetime.date(2020, 2, 5)),
-    ('aten::join', datetime.date(2020, 2, 10)),
+    ('aten::pop*', datetime.date(2020, 4, 1)),
+    ('aten::insert*', datetime.date(2020, 4, 1)),
+    ('aten::Delete*', datetime.date(2020, 4, 1)),
+    ('aten::clear*', datetime.date(2020, 4, 1)),
+    ('aten::_set_item*', datetime.date(2020, 4, 1)),
+    ('aten::copy*', datetime.date(2020, 4, 1)),
+    ('aten::extend*', datetime.date(2020, 4, 1)),
+    ('aten::reverse*', datetime.date(2020, 4, 1)),
+    ('aten::append*', datetime.date(2020, 4, 1)),
+    ('aten::list*', datetime.date(2020, 4, 1)),
+    ('aten::__getitem__*', datetime.date(2020, 4, 1)),
+    ('aten::len*', datetime.date(2020, 4, 1)),
+    ('aten::mul_*', datetime.date(2020, 4, 1)),
+    ('aten::slice*', datetime.date(2020, 4, 1)),
+    ('aten::add*', datetime.date(2020, 4, 1)),
+    ('aten::mul*', datetime.date(2020, 4, 1)),
+    ('aten::select*', datetime.date(2020, 4, 1)),
+    ('aten::add_*', datetime.date(2020, 4, 1)),
+    # _like default change, see https://github.com/pytorch/pytorch/issues/33580
+    ('aten::randn_like', datetime.date(2020, 3, 15)),
+    ('aten::full_like', datetime.date(2020, 3, 15)),
+    ('aten::empty_like', datetime.date(2020, 3, 15)),
+    ('aten::rand_like', datetime.date(2020, 3, 15)),
+    ('aten::ones_like', datetime.date(2020, 3, 15)),
+    ('aten::randint_like', datetime.date(2020, 3, 15)),
+    ('aten::zeros_like', datetime.date(2020, 3, 15)),
+    ('_aten', datetime.date(2020, 4, 1)),
 ]
 
 
@@ -88,6 +112,7 @@ if __name__ == '__main__':
             if "torch.classes" in line:
                 # TODO Fix type __torch__.torch.classes.xxx
                 continue
+
             s = parse_schema(line.strip())
             slist = new_schema_dict.get(s.name, [])
             slist.append(s)

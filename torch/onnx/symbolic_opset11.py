@@ -337,6 +337,14 @@ def round(g, self):
     return g.op("Round", self)
 
 
+@parse_args('v', 'v', 'i')
+def split_with_sizes(g, self, split_sizes, dim):
+    if sym_help._is_value(split_sizes) and split_sizes.node().kind() == 'prim::ListConstruct':
+        return g.op("SplitToSequence", self, split_sizes, axis_i=dim)
+    else:
+        return torch.onnx.symbolic_opset9.split_with_sizes(g, self, split_sizes, dim)
+
+
 # Generate paddings in ONNX order based on pad in pytorch.
 # Arguments:
 #     dim: the dimension of the tensor.

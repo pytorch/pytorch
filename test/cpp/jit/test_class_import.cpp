@@ -2,14 +2,12 @@
 #include <test/cpp/jit/test_utils.h>
 
 #include <ATen/core/qualified_name.h>
-#include <torch/csrc/jit/import_source.h>
-#include <torch/csrc/jit/script/resolver.h>
+#include <torch/csrc/jit/serialization/import_source.h>
+#include <torch/csrc/jit/frontend/resolver.h>
 #include <torch/torch.h>
 
 namespace torch {
 namespace jit {
-
-using namespace torch::jit::script;
 
 static const auto classSrcs1 = R"JIT(
 class FooNestedTest:

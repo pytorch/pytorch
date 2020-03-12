@@ -289,13 +289,13 @@ class _DistTestBase(object):
         return (group, group_id, rank)
 
     def _init_full_group_test(self, **kwargs):
-        group = [i for i in range(0, dist.get_world_size())]
+        group = list(range(0, dist.get_world_size()))
         group_id = dist.new_group(**kwargs)
         rank = dist.get_rank()
         return (group, group_id, rank)
 
     def _init_global_test(self):
-        group = [i for i in range(0, dist.get_world_size())]
+        group = list(range(0, dist.get_world_size()))
         group_id = dist.group.WORLD
         rank = dist.get_rank()
         return (group, group_id, rank)
@@ -499,6 +499,7 @@ class _DistTestBase(object):
     @require_backends_available({"gloo", "nccl"})
     @require_world_size(3)
     @require_num_gpus(2)
+    @skip_if_rocm
     def test_backend_group(self):
         self._test_group_override_backend(self._init_group_test)
 
@@ -1730,7 +1731,8 @@ class _DistTestBase(object):
     def _model_step(self, model):
         for param in model.parameters():
             if param.grad is not None:
-                param.data += param.grad
+                with torch.no_grad():
+                    param += param.grad
                 param.grad = None
 
     def _prepare_dummy_data(self, local_bs):
@@ -1868,6 +1870,7 @@ class _DistTestBase(object):
                      "Only Nccl & Gloo backend support DistributedDataParallel")
     @skip_if_no_cuda_distributed
     @skip_if_no_gpu
+    @skip_if_rocm
     def test_DistributedDataParallel(self):
         group, group_id, rank = self._init_global_test()
         rank_to_GPU = self._init_multigpu_helper()
@@ -1926,7 +1929,6 @@ class _DistTestBase(object):
                      "Only Nccl & Gloo backend support DistributedDataParallel")
     @skip_if_no_cuda_distributed
     @skip_if_no_gpu
-    @skip_if_rocm
     def test_DistributedDataParallel_SyncBatchNorm(self):
         group, group_id, rank = self._init_global_test()
         rank_to_GPU = self._init_multigpu_helper()

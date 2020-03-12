@@ -218,7 +218,6 @@ class CMake:
             '_GLIBCXX_USE_CXX11_ABI': 'GLIBCXX_USE_CXX11_ABI',
             'CUDNN_LIB_DIR': 'CUDNN_LIBRARY',
             'USE_CUDA_STATIC_LINK': 'CAFFE2_STATIC_LINK_CUDA',
-            'USE_GLOO_IBVERBS': 'USE_IBVERBS'   # Backward compatibility. Will be removed in the future.
         }
         additional_options.update({
             # Build options that have the same environment variable name and CMake variable name and that do not start
@@ -235,6 +234,8 @@ class CMake:
              'EXPERIMENTAL_SINGLE_THREAD_POOL',
              'INSTALL_TEST',
              'JAVA_HOME',
+             'INTEL_MKL_DIR',
+             'INTEL_OMP_DIR',
              'MKL_THREADING',
              'MKLDNN_THREADING',
              'MSVC_Z7_OVERRIDE',
@@ -245,9 +246,6 @@ class CMake:
              'ATEN_THREADING',
              'WERROR')
         })
-
-        if 'USE_GLOO_IBVERBS' in my_env:
-            print("WARNING: USE_GLOO_IBVERBS is deprecated. Use USE_IBVERBS instead.")
 
         for var, val in my_env.items():
             # We currently pass over all environment variables that start with "BUILD_", "USE_", and "CMAKE_". This is

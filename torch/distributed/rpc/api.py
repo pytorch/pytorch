@@ -14,6 +14,7 @@ from . import (
     RpcBackendOptions,
     WorkerInfo,
     _cleanup_python_rpc_handler,
+    _delete_all_user_rrefs,
     _destroy_rref_context,
     _get_current_rpc_agent,
     _invoke_remote_builtin,
@@ -235,6 +236,7 @@ def shutdown(graceful=True):
     """
     if graceful:
         _wait_all_workers()
+        _delete_all_user_rrefs()
         _get_current_rpc_agent().join()
     try:
         # This raises a `TORCH_CHECK()` exception on RRef leak detected.
@@ -422,8 +424,8 @@ def remote(to, func, args=None, kwargs=None):
     if qualified_name is not None:
         return _invoke_remote_builtin(dst_worker_info, qualified_name, rf, *args, **kwargs)
     elif isinstance(func, torch.jit.ScriptFunction):
-        return _remote_torchscript(
-            dst_worker_info.name, torch._jit_internal._qualified_name(func), args, kwargs
+        return _invoke_remote_torchscript(
+            dst_worker_info.name, torch._jit_internal._qualified_name(func), *args, **kwargs
         )
     else:
         (pickled_python_udf, tensors) = _default_pickler.serialize(
@@ -455,27 +457,13 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None):
     if qualified_name is not None:
         fut = _invoke_rpc_builtin(dst_worker_info, qualified_name, rf, *args, **kwargs)
     elif isinstance(func, torch.jit.ScriptFunction):
-        fut = _invoke_rpc_torchscript(
-            dst_worker_info.name, torch._jit_internal._qualified_name(func), *args, **kwargs
-        )
+        fut = _invoke_rpc_torchscript(dst_worker_info.name, func, args, kwargs)
     else:
         (pickled_python_udf, tensors) = _default_pickler.serialize(
             PythonUDF(func, args, kwargs)
         )
         fut = _invoke_rpc_python_udf(dst_worker_info, pickled_python_udf, tensors, rf)
     return fut
-
-
-@_require_initialized
-def enable_gil_profiling(flag):
-    r"""
-    Set whether GIL wait times should be enabled or not. This incurs a slight
-    overhead cost. Default is disabled for performance reasons.
-
-    Arguments:
-        flag (bool): True to set metrics profiling, False to disable.
-    """
-    _get_current_rpc_agent().enable_gil_profiling(flag)
 
 
 @_require_initialized
@@ -603,176 +591,4 @@ def rpc_async(to, func, args=None, kwargs=None):
         >>> rpc.init_rpc("worker1", rank=1, world_size=2)
         >>> rpc.shutdown()
     """
-    # If invoking an annotated TorchScript function,
-    # call the internal API _rpc_async_torchscript()
     return _invoke_rpc(to, func, RPCExecMode.ASYNC, args, kwargs)
-
-
-# All below private APIs are for making rpc torch script call that can be
-# serialized, deserialized and exectued in C++ without GIL.
-# These APIs will be binded to JIT and can be called in torch script
-# function/class/module in the future. But since JIT does not support torch
-# script function to be a jit type yet, the future binded APIs can only accept
-# qualified_name of the function as arg, that is why these APIs are made
-# to be private and different from above public rpc APIs.
-# Because JIT does not support torch script function to be a jit type, right now
-# these APIs can only accept torch script call to only be user annotated
-# torchscript function, they do not accept annotated torchscript class name or
-# script module class name or their class method name right now.
-@_require_initialized
-def _rpc_sync_torchscript(to, qualified_name, args=None, kwargs=None):
-    r"""
-    Make a blocking RPC call to run TorchScript function ``func`` on worker ``to``.
-    RPC messages are sent and received in parallel to execution of Python code. This
-    method is thread-safe.
-
-    Arguments:
-        to (str): name of the destination worker.
-        qualified_name (str): qualifited name of python function annotated with
-                              @torch.jit.script
-                              (like ``moduleName::torchScriptFuncName``)
-                              can be sent over RPC more efficiently.
-        args (tuple): the argument tuple for the ``func`` invocation.
-        kwargs (dict): is a dictionary of keyword arguments for the ``func``
-                       invocation.
-
-    Returns:
-        Returns the result of running ``func`` on ``args`` and ``kwargs``.
-
-    Example::
-        Make sure that ``MASTER_ADDRESS`` and ``MASTER_PORT`` are set properly
-        on both workers. Refer to :meth:`~torch.distributed.init_process_group`
-        API for more details. For example,
-
-        >>> export MASTER_ADDRESS=localhost
-        >>> export MASTER_port=5678
-
-        Then run the following code in two different processes:
-
-        >>> # On worker 0:
-        >>> @torch.jit.script
-        >>> def my_script_add(t1, t2):
-        >>>    return torch.add(t1, t2)
-        >>> import torch.distributed.rpc as rpc
-        >>> from torch._jit_internal import _qualified_name
-        >>> rpc.init_rpc("worker0", rank=0, world_size=2)
-        >>> ret = rpc._rpc_sync_torchscript("worker1", _qualified_name(my_script_add), args=(torch.ones(2), 3))
-        >>> rpc.shutdown()
-
-        >>> # On worker 1:
-        >>> import torch.distributed.rpc as rpc
-        >>> rpc.init_rpc("worker1", rank=1, world_size=2)
-        >>> rpc.shutdown()
-    """
-    fut = _rpc_async_torchscript(to, qualified_name, args, kwargs)
-    return fut.wait()
-
-
-@_require_initialized
-def _rpc_async_torchscript(to, qualified_name, args=None, kwargs=None):
-    r"""
-    Make a non-blocking RPC call to run TorchScript function ``func`` on worker ``to``.
-    RPC messages are sent and received in parallel to execution of Python code. This
-    method is thread-safe. This method will immediately return a
-    _pyFuture that can be awaited on.
-
-    Arguments:
-        to (str): name of the destination worker.
-        qualified_name (str): qualifited name of python function annotated with
-                              @torch.jit.script
-                              (like ``moduleName::torchScriptFuncName``)
-                              can be sent over RPC more efficiently.
-        args (tuple): the argument tuple for the ``func`` invocation.
-        kwargs (dict): is a dictionary of keyword arguments for the ``func``
-                       invocation.
-
-    Returns:
-        Returns a _pyFuture object that can be waited
-        on. When completed, the return value of ``func`` on ``args`` and
-        ``kwargs`` can be retrieved from the _pyFuture object.
-
-    Example::
-        Make sure that ``MASTER_ADDRESS`` and ``MASTER_PORT`` are set properly
-        on both workers. Refer to :meth:`~torch.distributed.init_process_group`
-        API for more details. For example,
-
-        >>> export MASTER_ADDRESS=localhost
-        >>> export MASTER_port=5678
-
-        Then run the following code in two different processes:
-
-        >>> # On worker 0:
-        >>> @torch.jit.script
-        >>> def my_script_add(t1, t2):
-        >>>    return torch.add(t1, t2)
-        >>> import torch.distributed.rpc as rpc
-        >>> from torch._jit_internal import _qualified_name
-        >>> rpc.init_rpc("worker0", rank=0, world_size=2)
-        >>> fut = rpc._rpc_async_torchscript("worker1", _qualified_name(my_script_add), args=(torch.ones(2), 3))
-        >>> ret = fut.wait()
-        >>> rpc.shutdown()
-
-        >>> # On worker 1:
-        >>> import torch.distributed.rpc as rpc
-        >>> rpc.init_rpc("worker1", rank=1, world_size=2)
-        >>> rpc.shutdown()
-    """
-    args = args if args else ()
-    kwargs = kwargs if kwargs else {}
-    fut = _invoke_rpc_torchscript(to, qualified_name, *args, **kwargs)
-    return fut
-
-
-@_require_initialized
-def _remote_torchscript(to, qualified_name, args=None, kwargs=None):
-    r"""
-    Make a remote call to run TorchScript func ``qualified_name`` on worker ``to`` and return an
-    :class:`~torch.distributed.rpc.RRef` to the result value immediately.
-    Worker ``to`` will be the owner of the returned
-    :class:`~torch.distributed.rpc.RRef`, and the worker calling ``remote`` is
-    a user. The owner manages the global reference count of its
-    :class:`~torch.distributed.rpc.RRef`, and the owner
-    :class:`~torch.distributed.rpc.RRef` is only destructed when globally there
-    are no living references to it.
-
-    Arguments:
-        to (str or WorkerInfo): id or name of the destination worker.
-        qualified_name (str): any callable function. python callable, builtin or annotated TorchScript
-                         functions (like meth:`torch.add`) can be sent over RPC more efficiently.
-        args (tuple): the argument tuple for the ``func`` invocation.
-        kwargs (dict): is a dictionary of keyword arguments for the ``func``
-                       invocation.
-
-    Returns:
-        A user :class:`~torch.distributed.rpc.RRef` instance to the result
-        value. Use the blocking API :meth:`torch.distributed.rpc.RRef.to_here`
-        to retrieve the result value locally.
-
-    Example::
-        Make sure that ``MASTER_ADDRESS`` and ``MASTER_PORT`` are set properly
-        on both workers. Refer to :meth:`~torch.distributed.init_process_group`
-        API for more details. For example,
-
-        >>> export MASTER_ADDRESS=localhost
-        >>> export MASTER_port=5678
-
-        Then run the following code in two different processes:
-
-        >>> # On worker 0:
-        >>> @torch.jit.script
-        >>> def my_script_add(t1, t2):
-        >>>    return torch.add(t1, t2)
-        >>> import torch.distributed.rpc as rpc
-        >>> rpc.init_rpc("worker0", rank=0, world_size=2)
-        >>> rref = rpc._remote_torchscript("worker1", _qualified_name(my_script_add), args=(torch.ones(2), 3))
-        >>> rref.to_here()
-        >>> rpc.shutdown()
-
-        >>> # On worker 1:
-        >>> import torch.distributed.rpc as rpc
-        >>> rpc.init_rpc("worker1", rank=1, world_size=2)
-        >>> rpc.shutdown()
-    """
-    args = args if args else ()
-    kwargs = kwargs if kwargs else {}
-    return _invoke_remote_torchscript(to, qualified_name, *args, **kwargs)

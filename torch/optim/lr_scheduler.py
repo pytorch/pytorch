@@ -218,6 +218,9 @@ class LambdaLR(_LRScheduler):
         warnings.warn(SAVE_STATE_WARNING, UserWarning)
         lr_lambdas = state_dict.pop('lr_lambdas')
         self.__dict__.update(state_dict)
+        # Restore state_dict keys in order to prevent side effects
+        # https://github.com/pytorch/pytorch/issues/32756
+        state_dict['lr_lambdas'] = lr_lambdas
 
         for idx, fn in enumerate(lr_lambdas):
             if fn is not None:
@@ -244,9 +247,8 @@ class MultiplicativeLR(_LRScheduler):
         last_epoch (int): The index of last epoch. Default: -1.
 
     Example:
-        >>> # Assuming optimizer has two groups.
         >>> lmbda = lambda epoch: 0.95
-        >>> scheduler = LambdaLR(optimizer, lr_lambda=lmbda)
+        >>> scheduler = MultiplicativeLR(optimizer, lr_lambda=lmbda)
         >>> for epoch in range(100):
         >>>     train(...)
         >>>     validate(...)
@@ -292,6 +294,9 @@ class MultiplicativeLR(_LRScheduler):
         """
         lr_lambdas = state_dict.pop('lr_lambdas')
         self.__dict__.update(state_dict)
+        # Restore state_dict keys in order to prevent side effects
+        # https://github.com/pytorch/pytorch/issues/32756
+        state_dict['lr_lambdas'] = lr_lambdas
 
         for idx, fn in enumerate(lr_lambdas):
             if fn is not None:
@@ -306,7 +311,7 @@ class MultiplicativeLR(_LRScheduler):
             return [group['lr'] * lmbda(self.last_epoch)
                     for lmbda, group in zip(self.lr_lambdas, self.optimizer.param_groups)]
         else:
-            return [base_lr for base_lr in self.base_lrs]
+            return list(self.base_lrs)
 
 
 class StepLR(_LRScheduler):
@@ -396,7 +401,8 @@ class MultiStepLR(_LRScheduler):
                 for group in self.optimizer.param_groups]
 
     def _get_closed_form_lr(self):
-        return [base_lr * self.gamma ** bisect_right(self.milestones, self.last_epoch)
+        milestones = list(sorted(self.milestones.elements()))
+        return [base_lr * self.gamma ** bisect_right(milestones, self.last_epoch)
                 for base_lr in self.base_lrs]
 
 
@@ -1039,7 +1045,7 @@ class OneCycleLR(_LRScheduler):
         max_lr (float or list): Upper learning rate boundaries in the cycle
             for each parameter group.
         total_steps (int): The total number of steps in the cycle. Note that
-            if a value is provided here, then it must be inferred by providing
+            if a value is not provided here, then it must be inferred by providing
             a value for epochs and steps_per_epoch.
             Default: None
         epochs (int): The number of epochs to train for. This is used along

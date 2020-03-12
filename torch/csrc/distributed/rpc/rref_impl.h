@@ -1,10 +1,10 @@
 #pragma once
 
 #include <ATen/core/jit_type.h>
+#include <ATen/core/rref_interface.h>
 #include <c10/util/Optional.h>
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
-#include <torch/csrc/distributed/rpc/rref_interface.h>
 #include <torch/csrc/distributed/rpc/types.h>
 
 #include <atomic>
@@ -17,6 +17,17 @@ class RRef;
 class RRefContext;
 class UserRRef;
 
+constexpr int OWNER_IDX = 0; // index of ownerId in the tuple
+constexpr int RREFID_ON_IDX = 1; // index of RRefId.createdOn_ in the tuple
+constexpr int RREFID_ID_IDX = 2; // index of RRefId.localId_ in the tuple
+constexpr int FORKID_ON_IDX = 3; // index of ForkId.createdOn_ in the tuple
+constexpr int FORKID_ID_IDX = 4; // index of ForkId.localId_ in the tuple
+constexpr int PARENT_IDX = 5; // index of parent in the tuple
+constexpr int TYPE_IDX = 6; // index of parent in the tuple
+
+// NB: if more fields are added, make sure this field is also bumped
+constexpr int RFD_TUPLE_SIZE = 7; // number of RRefForkData fields in py::tuple
+
 // Represents fork of an RRef to be sent over the wire.
 struct TORCH_API RRefForkData {
   const worker_id_t ownerId_;
@@ -27,8 +38,8 @@ struct TORCH_API RRefForkData {
 
   RRefForkData(
       worker_id_t ownerId,
-      const RRefId& rrefId_,
-      const ForkId& forkId_,
+      const RRefId& rrefId,
+      const ForkId& forkId,
       worker_id_t parent,
       std::string typeStr);
 };
@@ -198,9 +209,17 @@ class TORCH_API RRef : public RRefInterface {
   inline bool isPyObj() {
     return type_ == PyObjectType::get();
   }
-  inline const TypePtr type() {
+  inline const TypePtr type() const override {
     return type_;
   }
+
+  // Send delete UserRRef request to Owner,
+  // if the request hasn't been sent yet.
+  // There are 2 cases to call it,
+  // 1, Python GC decides end of UserRRef lifetime, calling destructor.
+  // 2, RPC module graceful shutdown calls it on all UserRRefs tracked
+  //    in the RRefContext.
+  virtual void tryDel() {}
 
  protected:
   friend class RRefContext;
@@ -228,6 +247,12 @@ class TORCH_API UserRRef final : public RRef {
   UserRRef& operator=(const UserRRef& other) = delete;
   UserRRef& operator=(UserRRef&& other) = delete;
 
+  UserRRef(
+      worker_id_t ownerId,
+      const RRefId& rrefId,
+      const ForkId& forkId,
+      TypePtr type);
+
   inline bool isOwner() const override {
     return false;
   }
@@ -237,21 +262,31 @@ class TORCH_API UserRRef final : public RRef {
 
   // Get of copy of the value from the ``OwnerRRef``. If the value is not ready
   // yet, this call will block.
-  std::vector<IValue> toHere();
+  IValue toHere();
 
+  void tryDel() override;
+
+  // Will be called when refcount reaches 0.
   // Upon destruction, this ``UserRRef`` will tell the owner to deref.
-  ~UserRRef() override;
+  void release_resources() override;
+
+  // Will be called when both refcount and weakcount reach 0. See
+  // https://github.com/pytorch/pytorch/blob/9116f02bebf3a5260feef5732d36c54ecb3b4033/c10/util/intrusive_ptr.h#L204
+  // This is called on destructing the wrapping intrusive_ptr_target instance
+  // and it's data members. We don't need to implement anything here.
+  ~UserRRef() = default;
 
  private:
   friend class RRefContext;
 
-  UserRRef(
-      worker_id_t ownerId,
-      const RRefId& rrefId,
-      const ForkId& forkId,
-      TypePtr type);
-
   const ForkId forkId_;
+
+  // Indicates if this user has sent delete message to it's owner.
+  // Note, thread safety is needed because delete message could be sent by
+  // either the destructor called by Python garbage collection or RRefContext
+  // proactive cleanup on RPC graceful shutdown.
+  std::mutex deletedOnOwnerMutex_;
+  bool deletedOnOwner_{false};
 };
 
 // Keep the template only on the derived class because ``RRefContext`` needs to
@@ -262,6 +297,18 @@ class TORCH_API OwnerRRef final : public RRef {
   OwnerRRef(OwnerRRef&& other) = delete;
   OwnerRRef& operator=(const OwnerRRef& other) = delete;
   OwnerRRef& operator=(OwnerRRef&& other) = delete;
+
+  OwnerRRef(worker_id_t ownerId, const RRefId& rrefId, TypePtr type)
+      : OwnerRRef(ownerId, rrefId, type, {}) {}
+
+  OwnerRRef(
+      worker_id_t ownerId,
+      const RRefId& rrefId,
+      TypePtr type,
+      c10::optional<IValue> value)
+      : RRef(ownerId, rrefId, std::move(type)) {
+    value_ = std::move(value);
+  }
 
   inline bool isOwner() const override {
     return true;
@@ -283,18 +330,6 @@ class TORCH_API OwnerRRef final : public RRef {
 
  private:
   friend class RRefContext;
-
-  OwnerRRef(worker_id_t ownerId, const RRefId& rrefId, TypePtr type)
-      : OwnerRRef(ownerId, rrefId, type, {}) {}
-
-  OwnerRRef(
-      worker_id_t ownerId,
-      const RRefId& rrefId,
-      TypePtr type,
-      c10::optional<IValue> value)
-      : RRef(ownerId, rrefId, std::move(type)) {
-    value_ = std::move(value);
-  }
 
   c10::optional<IValue> value_;
   mutable std::mutex mutex_;

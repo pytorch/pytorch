@@ -23,35 +23,59 @@ PYBIND11_MODULE(dnnlowp_pybind11, m) {
 
   m.def(
       "ObserveMinMaxOfOutput",
-      [](const string& min_max_file_name, int dump_freq) {
+      [](const string& min_max_file_name, int dump_freq, string delimiter) {
         AddGlobalNetObserverCreator(
-            [dump_freq, min_max_file_name](NetBase* net) {
+            [dump_freq, min_max_file_name, delimiter](NetBase* net) {
               return make_unique<OutputMinMaxNetObserver>(
-                  net, min_max_file_name, dump_freq);
+                  net, min_max_file_name, dump_freq, delimiter);
             });
       },
       pybind11::arg("min_max_file_name"),
-      pybind11::arg("dump_freq") = -1);
+      pybind11::arg("dump_freq") = -1,
+      pybind11::arg("delimiter") = " ");
 
   m.def(
       "ObserveHistogramOfOutput",
-      [](const string& out_file_name, int dump_freq, bool mul_nets) {
+      [](const string& out_file_name,
+         int dump_freq,
+         bool mul_nets,
+         string op_filter,
+         string delimiter) {
         AddGlobalNetObserverCreator(
-            [out_file_name, dump_freq, mul_nets](NetBase* net) {
+            [out_file_name, dump_freq, mul_nets, op_filter, delimiter](
+                NetBase* net) {
               return make_unique<HistogramNetObserver>(
-                  net, out_file_name, 2048, dump_freq, mul_nets);
+                  net,
+                  out_file_name,
+                  2048,
+                  dump_freq,
+                  mul_nets,
+                  op_filter,
+                  delimiter);
             });
       },
       pybind11::arg("out_file_name"),
       pybind11::arg("dump_freq") = -1,
-      pybind11::arg("mul_nets") = false);
+      pybind11::arg("mul_nets") = false,
+      pybind11::arg("op_filter") = "",
+      pybind11::arg("delimiter") = " ");
+
+  m.def(
+      "DumpHistogramFile",
+      [](Observable<NetBase>::Observer* ob) {
+        HistogramNetObserver* hist_ob =
+            dynamic_cast_if_rtti<HistogramNetObserver*>(ob);
+        hist_ob->DumpHistogramFile();
+      },
+      pybind11::arg("ob"));
 
   m.def(
       "AddHistogramObserver",
       [](const string& net_name,
          const string& out_file_name,
          int dump_freq,
-         bool mul_nets) {
+         bool mul_nets,
+         string delimiter) {
         Workspace* gWorkspace = caffe2::python::GetCurrentWorkspace();
         CAFFE_ENFORCE(gWorkspace);
         CAFFE_ENFORCE(
@@ -62,7 +86,7 @@ PYBIND11_MODULE(dnnlowp_pybind11, m) {
         const Observable<NetBase>::Observer* observer = nullptr;
 
         observer = net->AttachObserver(make_unique<HistogramNetObserver>(
-            net, out_file_name, 2048, dump_freq, mul_nets));
+            net, out_file_name, 2048, dump_freq, mul_nets, "", delimiter));
 
         CAFFE_ENFORCE(observer != nullptr);
         return pybind11::cast(observer);
@@ -70,7 +94,8 @@ PYBIND11_MODULE(dnnlowp_pybind11, m) {
       pybind11::arg("net_name"),
       pybind11::arg("out_file_name"),
       pybind11::arg("dump_freq") = -1,
-      pybind11::arg("mul_nets") = false);
+      pybind11::arg("mul_nets") = false,
+      pybind11::arg("delimiter") = " ");
 
   m.def(
       "AddOutputColumnMaxHistogramObserver",
@@ -78,7 +103,8 @@ PYBIND11_MODULE(dnnlowp_pybind11, m) {
          const string& out_file_name,
          const std::vector<std::string>& observe_column_max_for_blobs,
          int dump_freq,
-         bool mul_nets) {
+         bool mul_nets,
+         string delimiter) {
         Workspace* gWorkspace = caffe2::python::GetCurrentWorkspace();
         CAFFE_ENFORCE(gWorkspace);
         CAFFE_ENFORCE(
@@ -95,7 +121,8 @@ PYBIND11_MODULE(dnnlowp_pybind11, m) {
                 observe_column_max_for_blobs,
                 2048,
                 dump_freq,
-                mul_nets));
+                mul_nets,
+                delimiter));
 
         CAFFE_ENFORCE(observer != nullptr);
         return pybind11::cast(observer);
@@ -104,7 +131,8 @@ PYBIND11_MODULE(dnnlowp_pybind11, m) {
       pybind11::arg("out_file_name"),
       pybind11::arg("observe_column_max_for_blobs"),
       pybind11::arg("dump_freq") = -1,
-      pybind11::arg("mul_nets") = false);
+      pybind11::arg("mul_nets") = false,
+      pybind11::arg("delimiter") = " ");
 
   m.def(
       "ChooseQuantizationParams",

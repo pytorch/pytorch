@@ -1,7 +1,7 @@
 #include "test/cpp/jit/test_base.h"
 #include "test/cpp/jit/test_utils.h"
-#include "torch/csrc/jit/argument_spec.h"
-#include "torch/csrc/jit/autodiff.h"
+#include "torch/csrc/jit/runtime/argument_spec.h"
+#include "torch/csrc/jit/runtime/autodiff.h"
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
 #include "torch/csrc/jit/passes/constant_propagation.h"
 #include "torch/csrc/jit/passes/create_autodiff_subgraphs.h"
@@ -11,7 +11,7 @@
 #include "torch/csrc/jit/passes/requires_grad_analysis.h"
 #include "torch/csrc/jit/passes/shape_analysis.h"
 #include "torch/csrc/jit/passes/utils/subgraph_utils.h"
-#include "torch/csrc/jit/tracer.h"
+#include "torch/csrc/jit/frontend/tracer.h"
 
 #include <ATen/ATen.h>
 #include "torch/csrc/autograd/engine.h"
@@ -213,7 +213,7 @@ void testDifferentiateWithRequiresGrad() {
       %7 : Tensor = aten::add(%6, %1, %2)
       return (%4, %7))IR";
   auto g = std::make_shared<Graph>();
-  torch::jit::script::parseIR(graph_string, g.get());
+  torch::jit::parseIR(graph_string, g.get());
 
   auto a_var = autograd::make_variable(
       at::empty_strided(2, 2, at::CPU(at::kFloat).options()), true);

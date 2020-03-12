@@ -430,7 +430,11 @@ bool BatchMatMulDNNLowPOp<T>::RunOnDevice() {
       Y_int32_.resize(Y->numel());
 
 #ifdef _OPENMP
+#ifdef _MSC_VER
+#pragma omp parallel for
+#else
 #pragma omp parallel for collapse(2)
+#endif
 #endif
       for (int p = 0; p < num_outer_batches; ++p) {
         for (int i = 0; i < num_sub_batches; ++i) {
@@ -489,7 +493,11 @@ bool BatchMatMulDNNLowPOp<T>::RunOnDevice() {
         A_pack_buf_.resize(A_pack_len_per_thread * dnnlowp_get_max_threads());
 
 #ifdef _OPENMP
+#ifdef _MSC_VER
+#pragma omp parallel for
+#else
 #pragma omp parallel for collapse(2)
+#endif
 #endif
         for (int p = 0; p < num_outer_batches; ++p) {
           for (int i = 0; i < num_sub_batches; ++i) {
@@ -544,7 +552,11 @@ bool BatchMatMulDNNLowPOp<T>::RunOnDevice() {
             A_pack_buf_len_per_thread * dnnlowp_get_max_threads());
 
 #ifdef _OPENMP
+#ifdef _MSC_VER
+#pragma omp parallel for
+#else
 #pragma omp parallel for collapse(2)
+#endif
 #endif
         for (int p = 0; p < num_outer_batches; ++p) {
           for (int i = 0; i < num_sub_batches; ++i) {
@@ -610,7 +622,11 @@ bool BatchMatMulDNNLowPOp<T>::RunOnDevice() {
     T* Y_quantized = GetQuantizedOutputData_();
     Y_int32_.resize(Y->numel());
 #ifdef _OPENMP
+#ifdef _MSC_VER
+#pragma omp parallel for
+#else
 #pragma omp parallel for collapse(2)
+#endif
 #endif
     for (int p = 0; p < num_outer_batches; ++p) {
       for (int i = 0; i < num_sub_batches; ++i) {
