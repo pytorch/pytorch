@@ -5,7 +5,6 @@
 
 namespace torch {
 namespace jit {
-namespace script {
 
 // computes levenshtein edit distance between two words
 // returns maxEditDistance + 1 if the edit distance exceeds MaxEditDistance
@@ -52,6 +51,5 @@ size_t ComputeEditDistance(
   return result;
 }
 
-} // namespace script
 } // namespace jit
 } // namespace torch

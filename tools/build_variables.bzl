@@ -237,6 +237,7 @@ torch_cpp_srcs = [
     "torch/csrc/api/src/nn/module.cpp",
     "torch/csrc/api/src/nn/modules/_functions.cpp",
     "torch/csrc/api/src/nn/modules/activation.cpp",
+    "torch/csrc/api/src/nn/modules/adaptive.cpp",
     "torch/csrc/api/src/nn/modules/batchnorm.cpp",
     "torch/csrc/api/src/nn/modules/normalization.cpp",
     "torch/csrc/api/src/nn/modules/instancenorm.cpp",
@@ -253,8 +254,8 @@ torch_cpp_srcs = [
     "torch/csrc/api/src/nn/modules/rnn.cpp",
     "torch/csrc/api/src/nn/modules/upsampling.cpp",
     "torch/csrc/api/src/nn/modules/container/functional.cpp",
-    "torch/csrc/api/src/nn/modules/container/named_any.cpp",
     "torch/csrc/api/src/nn/options/activation.cpp",
+    "torch/csrc/api/src/nn/options/adaptive.cpp",
     "torch/csrc/api/src/nn/options/batchnorm.cpp",
     "torch/csrc/api/src/nn/options/conv.cpp",
     "torch/csrc/api/src/nn/options/dropout.cpp",
@@ -287,6 +288,9 @@ libtorch_python_cuda_sources = [
     "torch/csrc/cuda/python_nccl.cpp",
     "torch/csrc/cuda/serialization.cpp",
     "torch/csrc/cuda/utils.cpp",
+    "torch/csrc/cuda/shared/cudart.cpp",
+    "torch/csrc/cuda/shared/cudnn.cpp",
+    "torch/csrc/cuda/shared/nvtx.cpp",
     "torch/csrc/distributed/c10d/ddp.cpp",
 ]
 
