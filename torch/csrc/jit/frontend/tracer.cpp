@@ -152,7 +152,7 @@ Value* TracingState::getValue(const IValue& var) {
 
     // Find torchbind classes
     if (isCustomClass(var)) {
-      auto obj = script::Object(var.toObject());
+      auto obj = Object(var.toObject());
       auto qualname = obj.type()->name();
       auto custom_class_type = getCustomClass(qualname->qualifiedName());
       if (custom_class_type) {
@@ -313,14 +313,14 @@ static IValue addInput(const std::shared_ptr<TracingState> & state, const IValue
 static void gatherParametersAndBuffers(
     const std::shared_ptr<TracingState>& state,
     Value* self_value,
-    const script::Module& self,
+    const Module& self,
     const std::string& prefix) {
   Graph& g = *self_value->owningGraph();
 
   state->setValue(self._ivalue(), self_value);
 
   auto self_ty = self.type();
-  for (const script::NameValue& s : self.named_attributes(/*recurse=*/false)) {
+  for (const NameValue& s : self.named_attributes(/*recurse=*/false)) {
     auto qualname = prefix + "." + s.name;
     Value* trace_get_attr = g.insertNode(g.create(prim::TracedAttr))
                                 ->s_(attr::scope, qualname)
@@ -335,7 +335,7 @@ static void gatherParametersAndBuffers(
     }
     if (self_ty->getAttribute(s.name)->is_module()) {
       gatherParametersAndBuffers(
-          state, trace_get_attr, script::Module(s.value.toObject()), qualname);
+          state, trace_get_attr, Module(s.value.toObject()), qualname);
     }
   }
 }
@@ -345,7 +345,7 @@ std::pair<std::shared_ptr<TracingState>, Stack> trace(
     const std::function<Stack(Stack)>& traced_fn,
     std::function<std::string(const Variable&)> var_name_lookup_fn,
     bool force_outplace,
-    script::Module* self) {
+    Module* self) {
   try {
     // Start tracing, treating 'inputs' as inputs to the trace, which can be
     // varied on subsequent invocations of the trace.  Any other variables
@@ -387,7 +387,7 @@ std::pair<std::shared_ptr<TracingState>, Stack> trace(
     }
     setTracingState(nullptr);
 
-    if (script::getInlineEverythingMode()) {
+    if (getInlineEverythingMode()) {
       Inline(*graph);
     }
     FixupTraceScopeBlocks(graph, self);
