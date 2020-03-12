@@ -85,7 +85,7 @@ struct TORCH_API RNNCellOptionsBase {
 
 } // namespace detail
 
-/// Options for RNNCell modules.
+/// Options for the `RNNCell` module.
 ///
 /// Example:
 /// ```
@@ -107,7 +107,7 @@ struct TORCH_API RNNCellOptions {
   TORCH_ARG(nonlinearity_t, nonlinearity) = torch::kTanh;
 };
 
-/// Options for LSTMCell modules.
+/// Options for the `LSTMCell` module.
 ///
 /// Example:
 /// ```
@@ -125,7 +125,7 @@ struct TORCH_API LSTMCellOptions {
   TORCH_ARG(bool, bias) = true;
 };
 
-/// Options for GRUCell modules.
+/// Options for the `GRUCell` module.
 ///
 /// Example:
 /// ```
