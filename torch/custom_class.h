@@ -44,7 +44,7 @@ detail::types<void, Types...> init() {
 // test/custom_operator/test_custom_classes.py for example usages
 
 template <class CurClass>
-class class_ {
+class TORCH_API class_ {
   static_assert(std::is_base_of<CustomClassHolder, CurClass>::value,
     "torch::jit::class_<T> requires T to inherit from CustomClassHolder");
 
