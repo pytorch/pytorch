@@ -77,8 +77,7 @@ Tensor margin_ranking_loss(const Tensor& input1, const Tensor& input2, const Ten
 }
 
 Tensor _kl_div_log_target(const Tensor& input, const Tensor& target, int64_t reduction) {
-  auto exp_target = at::exp(target);
-  auto output = exp_target * (target - input);
+  auto output = at::exp(target) * (target - input);
   return apply_loss_reduction(output, reduction);
 }
 
