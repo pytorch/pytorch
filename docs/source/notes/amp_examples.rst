@@ -312,24 +312,28 @@ autocast compatibility if any function
 
 * takes multiple floating-point Tensor inputs,
 * wraps any autocastable op (see the :ref:`Autocast Op Reference<autocast-op-reference>`), or
-* needs a particular dtype.
+* requires a particular ``dtype`` (for example, if it wraps
+  `CUDA extensions <https://pytorch.org/tutorials/advanced/cpp_extension.html>`_
+  that were only compiled for ``dtype``).
 
-Functions with multiple inputs or autocastable ops
---------------------------------------------------
-
-If you're importing the function from a library and can't alter its definition,
-disable autocast and force ``float32`` execution at any point(s) of use where errors occur::
+In all cases, if you're importing the function and can't alter its definition, a safe fallback
+is to disable autocast and force execution in ``float32`` ( or ``dtype``) at any points of use where errors occur::
 
     with autocast():
         ...
         with autocast(enabled=False):
             output = imported_function(input1.float(), input2.float())
 
-If you're the function's author (or can alter its definition) apply
-:func:`torch.cuda.amp.custom_fwd` and :func:`torch.cuda.amp.custom_bwd` decorators
-(with no arguments) to ``forward`` and ``backward`` respectively.  These ensure
-``forward`` executes with the current autocast state and ``backward`` executes with the
-same autocast state as ``forward`` (which can prevent type mismatch errors)::
+If you're the function's author (or can alter its definition) a better solution is to use the
+:func:`torch.cuda.amp.custom_fwd` and :func:`torch.cuda.amp.custom_bwd` decorators as shown in
+the relevant case below.
+
+Functions with multiple inputs or autocastable ops
+--------------------------------------------------
+
+Apply :func:`custom_fwd` and :func:`custom_bwd` (with no arguments) to ``forward`` and ``backward``
+respectively.  These ensure ``forward`` executes with the current autocast state and ``backward``
+executes with the same autocast state as ``forward`` (which can prevent type mismatch errors)::
 
     class MyMM(torch.autograd.Function):
         @staticmethod
@@ -343,7 +347,7 @@ same autocast state as ``forward`` (which can prevent type mismatch errors)::
             a, b = ctx.saved_tensors
             return grad.mm(b.t()), a.t().mm(grad)
 
-Now ``MyMM`` can be invoked anywhere, without manually casting or disabling autocast::
+Now ``MyMM`` can be invoked anywhere, without disabling autocast or manually casting inputs::
 
     mymm = MyMM.apply
 
@@ -353,23 +357,8 @@ Now ``MyMM`` can be invoked anywhere, without manually casting or disabling auto
 Functions that need a particular dtype
 --------------------------------------
 
-If a custom function requires a certain precision, it should not receive autocasting.
-
-Consider, for example, a custom function wrapping
-`CUDA extensions <https://pytorch.org/tutorials/advanced/cpp_extension.html>`_
-that were only compiled for ``float32``.
-
-If you're importing the function from a library and can't alter its definition,
-disable autocast and force ``float32`` execution at the point of use::
-
-    with autocast():
-        ...
-        with autocast(enabled=False):
-            output = imported_float32_function(input.float())
-
-If you're the function's author (or can alter its definition),
-apply :func:`@custom_fwd(cast_inputs=torch.float32)<custom_fwd>` to ``forward``
-and :func:`@custom_bwd<custom_bwd>` (with no arguments) to ``backward``.
+Apply :func:`custom_fwd(cast_inputs=torch.float32)<custom_fwd>` to ``forward``
+and :func:`custom_bwd<custom_bwd>` (with no arguments) to ``backward``.
 With ``cast_inputs=torch.float32``, these disable autocast in ``forward`` and ``backward``,
 and ``forward`` casts incoming floating-point CUDA Tensors to ``float32``::
 
@@ -385,7 +374,7 @@ and ``forward`` casts incoming floating-point CUDA Tensors to ``float32``::
         def backward(ctx, grad):
             ...
 
-Now ``MyFloat32Func`` can be invoked anywhere, without manually casting or disabling autocast::
+Now ``MyFloat32Func`` can be invoked anywhere, without disabling autocast or manually casting inputs::
 
     func = MyFloat32Func.apply
 
