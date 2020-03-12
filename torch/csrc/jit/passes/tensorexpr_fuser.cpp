@@ -320,17 +320,11 @@ Operation createTensorExprOp(const Node* node) {
   };
 }
 
-c10::OperatorOptions getAliasAnalysisOption(AliasAnalysisKind k) {
-  auto options = c10::OperatorOptions();
-  options.setAliasAnalysis(k);
-  return options;
-}
-
 RegisterOperators TensorExprOps({
     torch::jit::Operator(
         getTensorExprSymbol(),
         createTensorExprOp,
-        getAliasAnalysisOption(AliasAnalysisKind::PURE_FUNCTION)),
+        AliasAnalysisKind::PURE_FUNCTION),
 });
 
 void registerTensorExprFuser() {
