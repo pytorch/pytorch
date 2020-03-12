@@ -58,7 +58,7 @@ class MemoryReadAdapter final : public caffe2::serialize::ReadAdapterInterface {
 class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
  private:
   friend HybridBase;
-  torch::jit::script::Module module_;
+  torch::jit::Module module_;
 
  public:
   constexpr static auto kJavaDescriptor = "Lorg/pytorch/NativePeer;";
@@ -104,11 +104,6 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
     }();
     ((void)once);
 
-    auto qengines = at::globalContext().supportedQEngines();
-    if (std::find(qengines.begin(), qengines.end(), at::QEngine::QNNPACK) !=
-        qengines.end()) {
-      at::globalContext().setQEngine(at::QEngine::QNNPACK);
-    }
 #ifdef TRACE_ENABLED
     torch::autograd::profiler::pushCallback(
         &onFunctionEnter,

@@ -65,22 +65,16 @@ int noop(Stack& n) {
   return 0;
 }
 
-c10::OperatorOptions aliasAnalysisFromSchema() {
-  c10::OperatorOptions result;
-  result.setAliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA);
-  return result;
+c10::AliasAnalysisKind aliasAnalysisFromSchema() {
+  return c10::AliasAnalysisKind::FROM_SCHEMA;
 }
 
-c10::OperatorOptions aliasAnalysisConservative() {
-  c10::OperatorOptions result;
-  result.setAliasAnalysis(c10::AliasAnalysisKind::CONSERVATIVE);
-  return result;
+c10::AliasAnalysisKind aliasAnalysisConservative() {
+  return c10::AliasAnalysisKind::CONSERVATIVE;
 }
 
-c10::OperatorOptions aliasAnalysisSpecialCase() {
-  c10::OperatorOptions result;
-  result.setAliasAnalysis(c10::AliasAnalysisKind::INTERNAL_SPECIAL_CASE);
-  return result;
+c10::AliasAnalysisKind aliasAnalysisSpecialCase() {
+  return c10::AliasAnalysisKind::INTERNAL_SPECIAL_CASE;
 }
 
 // using the rules from python_arg_parser FunctionParameter::check
@@ -1072,6 +1066,11 @@ RegisterOperators reg(
              pop(stack, elem_ty_val);
              pop(stack, dim_val);
              pop(stack, t);
+
+             // If the Tensor is not on the CPU, transfer it.
+             if (!t.device().is_cpu()) {
+               t = t.cpu();
+             }
 
              // Rebuild the output type using elem_ty_val and dim_val. Start
              // with the element type corresponding to elem_ty_val.
