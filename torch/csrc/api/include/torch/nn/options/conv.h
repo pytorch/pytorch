@@ -141,12 +141,27 @@ struct ConvOptions {
 };
 
 /// `ConvOptions` specialized for 1-D convolution.
+///
+/// Example:
+/// ```
+/// Conv1d model(Conv1dOptions(3, 2, 3).stride(1).bias(false));
+/// ```
 using Conv1dOptions = ConvOptions<1>;
 
 /// `ConvOptions` specialized for 2-D convolution.
+///
+/// Example:
+/// ```
+/// Conv2d model(Conv2dOptions(3, 2, 3).stride(1).bias(false));
+/// ```
 using Conv2dOptions = ConvOptions<2>;
 
 /// `ConvOptions` specialized for 3-D convolution.
+///
+/// Example:
+/// ```
+/// Conv3d model(Conv3dOptions(3, 2, 3).stride(1).bias(false));
+/// ```
 using Conv3dOptions = ConvOptions<3>;
 
 // ============================================================================
@@ -255,12 +270,27 @@ struct ConvTransposeOptions {
 };
 
 /// `ConvTransposeOptions` specialized for 1-D convolution.
+///
+/// Example:
+/// ```
+/// ConvTranspose1d model(ConvTranspose1dOptions(3, 2, 3).stride(1).bias(false));
+/// ```
 using ConvTranspose1dOptions = ConvTransposeOptions<1>;
 
 /// `ConvTransposeOptions` specialized for 2-D convolution.
+///
+/// Example:
+/// ```
+/// ConvTranspose2d model(ConvTranspose2dOptions(3, 2, 3).stride(1).bias(false));
+/// ```
 using ConvTranspose2dOptions = ConvTransposeOptions<2>;
 
 /// `ConvTransposeOptions` specialized for 3-D convolution.
+///
+/// Example:
+/// ```
+/// ConvTranspose3d model(ConvTranspose3dOptions(2, 2, 2).stride(1).bias(false));
+/// ```
 using ConvTranspose3dOptions = ConvTransposeOptions<3>;
 
 // ============================================================================
