@@ -28,7 +28,16 @@ struct TORCH_API ASMoutput {
 /// Efficient softmax approximation as described in
 /// `Efficient softmax approximation for GPUs`_ by Edouard Grave, Armand Joulin,
 /// Moustapha Cissé, David Grangier, and Hervé Jégou.
-// yf225 TODO: fill out doc
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.AdaptiveLogSoftmaxWithLoss to learn
+/// about the exact behavior of this module.
+///
+/// See the documentation for `torch::nn::AdaptiveLogSoftmaxWithLossOptions` class to learn what
+/// constructor arguments are supported for this module.
+///
+/// Example:
+/// ```
+/// AdaptiveLogSoftmaxWithLoss model(AdaptiveLogSoftmaxWithLossOptions(8, 10, {4, 8}).div_value(2.).head_bias(true));
+/// ```
 class TORCH_API AdaptiveLogSoftmaxWithLossImpl : public Cloneable<AdaptiveLogSoftmaxWithLossImpl> {
  public:
    AdaptiveLogSoftmaxWithLossImpl(int64_t in_features, int64_t n_classes, std::vector<int64_t> cutoffs)
@@ -74,7 +83,11 @@ class TORCH_API AdaptiveLogSoftmaxWithLossImpl : public Cloneable<AdaptiveLogSof
   ModuleList tail;
 };
 
-// yf225 TODO: fill out doc
+/// A `ModuleHolder` subclass for `AdaptiveLogSoftmaxWithLossImpl`.
+/// See the documentation for `AdaptiveLogSoftmaxWithLossImpl` class to learn what methods it
+/// provides, and examples of how to use `AdaptiveLogSoftmaxWithLoss` with `torch::nn::AdaptiveLogSoftmaxWithLossOptions`.
+/// See the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
 TORCH_MODULE(AdaptiveLogSoftmaxWithLoss);
 
 } // namespace nn

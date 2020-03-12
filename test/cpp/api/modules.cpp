@@ -4589,3 +4589,38 @@ TEST_F(ModulesTest, PrettyPrintMultiheadAttention) {
   ASSERT_EQ(c10::str(MultiheadAttention(MultiheadAttentionOptions(20, 10).bias(false))),
     "torch::nn::MultiheadAttention(\n  (out_proj): torch::nn::Linear(in_features=20, out_features=20, bias=false)\n)");
 }
+
+TEST_F(ModulesTest, PrettyPrintAdaptiveLogSoftmaxWithLoss) {
+  {
+    AdaptiveLogSoftmaxWithLoss asfm(AdaptiveLogSoftmaxWithLossOptions(8, 4, {2}).div_value(2.));
+    ASSERT_EQ(
+      c10::str(asfm),
+      "torch::nn::AdaptiveLogSoftmaxWithLoss(\n"
+      "  (head): torch::nn::Linear(in_features=8, out_features=3, bias=false)\n"
+      "  (tail): torch::nn::ModuleList(\n"
+      "     (0): torch::nn::Sequential(\n"
+      "       (0): torch::nn::Linear(in_features=8, out_features=4, bias=false)\n"
+      "       (1): torch::nn::Linear(in_features=4, out_features=2, bias=false)\n"
+      "     )\n"
+      "  )\n"
+      ")\n");
+  }
+  {
+    AdaptiveLogSoftmaxWithLoss asfm(AdaptiveLogSoftmaxWithLossOptions(8, 10, {4, 8}).div_value(2.).head_bias(true));
+    ASSERT_EQ(
+      c10::str(asfm),
+      "torch::nn::AdaptiveLogSoftmaxWithLoss(\n"
+      "  (head): torch::nn::Linear(in_features=8, out_features=6, bias=true)\n"
+      "  (tail): torch::nn::ModuleList(\n"
+      "     (0): torch::nn::Sequential(\n"
+      "       (0): torch::nn::Linear(in_features=8, out_features=4, bias=false)\n"
+      "       (1): torch::nn::Linear(in_features=4, out_features=4, bias=false)\n"
+      "     )\n"
+      "     (1): torch::nn::Sequential(\n"
+      "       (0): torch::nn::Linear(in_features=8, out_features=2, bias=false)\n"
+      "       (1): torch::nn::Linear(in_features=2, out_features=2, bias=false)\n"
+      "     )\n"
+      "  )\n"
+      ")\n");
+  }
+}
