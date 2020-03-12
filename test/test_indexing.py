@@ -61,14 +61,16 @@ class TestIndexing(TestCase):
     def test_byte_mask(self, device):
         v = torch.randn(5, 7, 3, device=device)
         mask = torch.ByteTensor([1, 0, 1, 1, 0]).to(device)
-        with self.assertRaisesRegex(RuntimeError,
+        with self.assertRaisesRegex(
+                RuntimeError,
                 'indexing with dtype torch.uint8 is no longer supported'):
             v[mask].shape
 
     def test_index_put_byte_indices(self, device):
         mask = torch.zeros(size=(10, ), dtype=torch.uint8, device=device)
         y = torch.ones(size=(10, 10), device=device)
-        with self.assertRaisesRegex(RuntimeError,
+        with self.assertRaisesRegex(
+                RuntimeError,
                 'indexing with dtype torch.uint8 is no longer supported'):
             y.index_put_((mask, ), y, accumulate=True)
 
