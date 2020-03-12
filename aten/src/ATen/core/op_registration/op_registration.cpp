@@ -137,14 +137,18 @@ namespace {
 }
 
 // TODO: add overloads that take FunctionSchema directly
-Module&& Module::def(const char* schema_str) && {
+Module& Module::def(const char* schema_str) & {
   auto schema = torch::jit::parseSchema(addNamespace(ns_, schema_str));
   schema.setAliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA); // TODO: clean this up
   registrars_.emplace_back(Dispatcher::singleton().registerDef(std::move(schema)));
+  return *this;
+}
+Module&& Module::def(const char* schema_str) && {
+  def(schema_str);
   return std::move(*this);
 }
 
-Module&& Module::def(const char* name_or_schema_str, CppFunction&& f) && {
+Module& Module::def(const char* name_or_schema_str, CppFunction&& f) & {
   auto name_or_schema = torch::jit::parseSchemaOrName(addNamespace(ns_, name_or_schema_str));
   FunctionSchema schema = [&] {
     if (name_or_schema.is_right()) {
@@ -162,19 +166,31 @@ Module&& Module::def(const char* name_or_schema_str, CppFunction&& f) && {
   schema.setAliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA); // TODO: clean this up
   registrars_.emplace_back(Dispatcher::singleton().registerDef(std::move(schema)));
   registrars_.emplace_back(Dispatcher::singleton().registerImpl(name, f.dispatch_key_, std::move(f.func_), std::move(f.schema_)));
+  return *this;
+}
+Module&& Module::def(const char* name_or_schema_str, CppFunction&& f) && {
+  def(name_or_schema_str, std::move(f));
   return std::move(*this);
 }
 
-Module&& Module::impl(const char* name_str, CppFunction&& f) && {
+Module& Module::impl(const char* name_str, CppFunction&& f) & {
   auto name = torch::jit::parseName(addNamespace(ns_, name_str));
   registrars_.emplace_back(Dispatcher::singleton().registerImpl(name, f.dispatch_key_, std::move(f.func_), std::move(f.schema_)));
+  return *this;
+}
+Module&& Module::impl(const char* name_str, CppFunction&& f) && {
+  impl(name_str, std::move(f));
   return std::move(*this);
 }
 
-Module&& Module::fallback(CppFunction&& f) && {
+Module& Module::fallback(CppFunction&& f) & {
   TORCH_CHECK(!ns_, "Cannot define fallbacks from namespaces, use c10::import().fallback() instead");
   TORCH_CHECK(f.dispatch_key_, "Fallback for catch all function not supported");
   registrars_.emplace_back(Dispatcher::singleton().registerFallback(*f.dispatch_key_, std::move(f.func_)));
+  return *this;
+}
+Module&& Module::fallback(CppFunction&& f) && {
+  fallback(std::move(f));
   return std::move(*this);
 }
 

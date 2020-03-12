@@ -773,16 +773,23 @@ public:
   // for it.  You're expected to then provide implementations using the
   // impl() method.
   Module&& def(const char* schema) &&;
+  Module& def(const char* schema) &;
 
   // Convenience method to define an operator for a schema and then register
   // an implementation for it.  def(n, f) is almost equivalent to def(n).impl(f),
   // except that if n is not a schema, then the schema is inferred from the
   // static type of f.
   Module&& def(const char* name_or_schema, CppFunction&& f) &&;
+  Module& def(const char* name_or_schema, CppFunction&& f) &;
   template <typename Func>
   Module&& def(const char* name_or_schema, Func&& raw_f) && {
     CppFunction f(std::forward<Func>(raw_f));
     return std::move(*this).def(name_or_schema, std::move(f));
+  }
+  template <typename Func>
+  Module& def(const char* name_or_schema, Func&& raw_f) & {
+    CppFunction f(std::forward<Func>(raw_f));
+    return def(name_or_schema, std::move(f));
   }
 
   // Register an implementation for an operator.  You may register multiple
@@ -790,10 +797,16 @@ public:
   // (see torch::dispatch).  Implementations must have a corresponding
   // declaration (from def), otherwise they are invalid.
   Module&& impl(const char* name, CppFunction&& f) &&;
+  Module& impl(const char* name, CppFunction&& f) &;
   template <typename Func>
   Module&& impl(const char* name, Func&& raw_f) && {
     CppFunction f(std::forward<Func>(raw_f));
     return std::move(*this).impl(name, std::move(f));
+  }
+  template <typename Func>
+  Module& impl(const char* name, Func&& raw_f) & {
+    CppFunction f(std::forward<Func>(raw_f));
+    return impl(name, std::move(f));
   }
 
   // Register a fallback implementation for all operators which will be used
@@ -801,10 +814,16 @@ public:
   // At the moment, you must specify a dispatch key (see torch::dispatch) for
   // your fallback.
   Module&& fallback(CppFunction&& f) &&;
+  Module& fallback(CppFunction&& f) &;
   template <typename Func>
   Module&& fallback(Func&& raw_f) && {
     CppFunction f(std::forward<Func>(raw_f));
     return std::move(*this).fallback(std::move(f));
+  }
+  template <typename Func>
+  Module& fallback(Func&& raw_f) & {
+    CppFunction f(std::forward<Func>(raw_f));
+    return fallback(std::move(f));
   }
 };
 

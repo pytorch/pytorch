@@ -40,6 +40,7 @@
 #include <torch/csrc/utils/tensor_memoryformats.h>
 #include <torch/csrc/utils/tensor_qschemes.h>
 #include <torch/csrc/utils/tensor_numpy.h>
+#include <torch/csrc/utils/python_dispatch.h>
 #include <torch/csrc/jit/python/python_tracer.h>
 #include <torch/csrc/jit/python/init.h>
 #include <torch/csrc/jit/python/python_ir.h>
@@ -664,6 +665,7 @@ PyObject* initModule() {
   // init.
   torch::onnx::initONNXBindings(module);
   torch::jit::initJITBindings(module);
+  torch::impl::dispatch::initDispatchBindings(module);
   torch::throughput_benchmark::initThroughputBenchmarkBindings(module);
   torch::autograd::initNNFunctions(module);
   torch::autograd::init_legacy_variable(module);

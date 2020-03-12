@@ -210,6 +210,10 @@ public:
     return operatorIterator_->op.schema();
   }
 
+  std::string dumpState() const {
+    return operatorIterator_->op.dumpState();
+  }
+
   template<class Return, class... Args>
   Return callUnboxed(Args... args) const {
     return c10::Dispatcher::singleton().callUnboxed<Return, Args...>(*this, std::forward<Args>(args)...);

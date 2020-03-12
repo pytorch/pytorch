@@ -130,5 +130,16 @@ void OperatorEntry::updateDispatchTable_(c10::optional<DispatchKey> dispatch_key
   }
 }
 
+std::string OperatorEntry::dumpState() const {
+  std::ostringstream oss;
+  oss << "name: " << name_ << "\n";
+  if (schema_) {
+    oss << "schema: " << *schema_ << "\n";
+  } else {
+    oss << "schema: (none)\n";
+  }
+  return oss.str();
+}
+
 }
 }
