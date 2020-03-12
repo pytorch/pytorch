@@ -3417,6 +3417,7 @@ int upsample_bilinear_op(Stack& stack) {
   return 0;
 }
 
+// These ops are no longer generated, but remain here for BC
 RegisterOperators reg3({
     Operator(
         "aten::__interpolate(Tensor input, int? size = None, float[]? scale_factor = None, str mode = 'nearest', bool? align_corners = None, bool? recompute_scale_factor = None) -> Tensor",
