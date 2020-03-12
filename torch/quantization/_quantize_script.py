@@ -80,6 +80,7 @@ def convert_script(model, inplace=False, debug=False):
     _check_is_script_module(model)
     if not inplace:
         model = model.copy()
+    model.eval()
     model = wrap_cpp_module(torch._C._jit_pass_insert_quant_dequant(model._c, 'forward', False))
     if not debug:
         model = wrap_cpp_module(torch._C._jit_pass_quant_finalize(model._c))
