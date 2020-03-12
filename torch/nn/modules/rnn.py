@@ -168,10 +168,10 @@ class RNNBase(Module):
                 bwd_names = [weight_names[i]
                              for i in range(len(weight_groups))
                              if i % 2 != 0]
-                fwd_weights = [y for y in x for x in fwd_weights]
-                bwd_weights = [y for y in x for x in bwd_weights]
-                fwd_names = [y for y in x for x in fwd_names]
-                bwd_names = [y for y in x for x in bwd_names]
+                fwd_weights = [y for x in fwd_weights for y in x]
+                bwd_weights = [y for x in bwd_weights for y in x]
+                fwd_names = [y for x in fwd_names for y in x]
+                bwd_names = [y for x in bwd_names for y in x]
                 # See above note regarding gradient disabling
                 with torch.no_grad():
                     for weight_pack in (fwd_weights, bwd_weights):
