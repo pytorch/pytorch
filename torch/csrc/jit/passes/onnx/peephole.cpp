@@ -815,6 +815,34 @@ void removeMaxPoolUnusedOutput(Block* b) {
   }
 }
 
+// This optimization fuses LogSoftmax and NegativeLogLikelihoodLoss operators into
+// one operator: SoftmaxCrossEntropyLoss.
+static void fuseLogSoftmaxNllLoss(Block* b) {
+  for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
+    for (auto* child_block : it->blocks()) {
+      fuseLogSoftmaxNllLoss(child_block);
+    }
+    if (it->kind() == onnx::NegativeLogLikelihoodLoss &&
+        it->input(0)->node()->kind() == onnx::LogSoftmax) {
+      auto origLogSoftmaxNode= it->input(0)->node();
+      auto origNllLossNode = *it;
+
+      Node* softmaxCrossEntropyNode = b->owningGraph()->create(onnx::SoftmaxCrossEntropyLoss, it->outputs().size());
+      for (size_t i = 0; i < softmaxCrossEntropyNode->outputs().size(); ++i) {
+         softmaxCrossEntropyNode->outputs()[i]->copyMetadata(it->outputs()[i]);
+      }
+      softmaxCrossEntropyNode->copyAttributes(*origNllLossNode);
+      softmaxCrossEntropyNode->insertBefore(origLogSoftmaxNode);
+      softmaxCrossEntropyNode->addInput(origLogSoftmaxNode->inputs().at(0));
+      softmaxCrossEntropyNode->addInput(origNllLossNode->inputs().at(1));
+      it->replaceAllUsesWith(softmaxCrossEntropyNode);
+      it->removeAllInputs();
+      origLogSoftmaxNode->destroy();
+      continue;
+    }
+  }
+}
+
 // This optimization does ONNX-specific peephole optimizations.
 //
 // At the moment, here are the optimizations it does:
@@ -857,6 +885,7 @@ void PeepholeOptimizeONNX(std::shared_ptr<Graph>& graph, int opset_version, bool
   convertSplitToDynamic(graph->block(), opset_version);
   eraseListConstruct(graph->block(), opset_version);
   removeMaxPoolUnusedOutput(graph->block());
+  fuseLogSoftmaxNllLoss(graph->block());
 }
 
 } // namespace jit
