@@ -134,7 +134,9 @@ struct TORCH_API Object {
 namespace script {
 // We once had a `script::` namespace that was deleted. This is for backcompat
 // of the public API; new code should not use this type alias.
-using Object = ::torch::jit::Object;
+using Object C10_DEPRECATED_MESSAGE(
+    "torch::jit::script namespace is deprecated, "
+    "use just torch::jit instead") = ::torch::jit::Object;
 }
 } // namespace jit
 } // namespace torch

@@ -298,7 +298,9 @@ struct StrongFunctionPtr {
 namespace script {
 // We once had a `script::` namespace that was deleted. This is for backcompat
 // of the public API; new code should not use this type alias.
-using CompilationUnit = ::torch::jit::CompilationUnit;
+using CompilationUnit C10_DEPRECATED_MESSAGE(
+    "torch::jit::script namespace is deprecated, "
+    "use just torch::jit instead") = ::torch::jit::CompilationUnit;
 }
 } // namespace jit
 } // namespace torch
