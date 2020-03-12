@@ -254,7 +254,6 @@ torch_cpp_srcs = [
     "torch/csrc/api/src/nn/modules/rnn.cpp",
     "torch/csrc/api/src/nn/modules/upsampling.cpp",
     "torch/csrc/api/src/nn/modules/container/functional.cpp",
-    "torch/csrc/api/src/nn/modules/container/named_any.cpp",
     "torch/csrc/api/src/nn/options/activation.cpp",
     "torch/csrc/api/src/nn/options/adaptive.cpp",
     "torch/csrc/api/src/nn/options/batchnorm.cpp",
