@@ -664,7 +664,7 @@ class TestDataParallel(TestCase):
             def forward(self, input):
                 return super(Model, self).forward(input)
 
-        model = dp.DataParallel(Model().cuda())
+        model = dp.DataParallel(Model().cuda().to(dtype=torch.float32))
         input = torch.randn((8, 8), dtype=torch.float32, device="cuda")
         self.assertTrue(model(input).dtype is torch.float16)
 
