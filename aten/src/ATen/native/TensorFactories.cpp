@@ -436,11 +436,11 @@ Tensor logspace(
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ones ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor ones(IntArrayRef size, const TensorOptions& options) {
-  return native::full(size, /*fill_value=*/1, options);
+  return native::full(size, /*fill_value=*/1., options);
 }
 
 Tensor& ones_out(Tensor& result, IntArrayRef size) {
-  return native::full_out(result, size, /*fill_value=*/1);
+  return native::full_out(result, size, /*fill_value=*/1.);
 }
 
 Tensor ones_like(
@@ -448,7 +448,7 @@ Tensor ones_like(
     const TensorOptions& options,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
   auto result = at::empty_like(self, options, optional_memory_format);
-  return result.fill_(1);
+  return result.fill_(1.);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ scalar_tensor ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -778,7 +778,7 @@ Tensor zeros(IntArrayRef size, const TensorOptions& options) {
 
 Tensor& zeros_out(Tensor& result, IntArrayRef size) {
   if (result.is_sparse()) {
-    result.sparse_resize_and_clear_(size, size.size(), 0);
+    result.sparse_resize_and_clear_(size, size.size(), 0.);
     return result;
   } else {
     result.resize_(size);
@@ -1005,14 +1005,14 @@ Tensor ones(
     IntArrayRef size,
     optional<DimnameList> names,
     const TensorOptions& options) {
-  return native::full(size, /*fill_value=*/1, names, options);
+  return native::full(size, /*fill_value=*/1., names, options);
 }
 
 Tensor zeros(
     IntArrayRef size,
     optional<DimnameList> names,
     const TensorOptions& options) {
-  return native::full(size, /*fill_value=*/0, names, options);
+  return native::full(size, /*fill_value=*/0., names, options);
 }
 
 Tensor randn(
