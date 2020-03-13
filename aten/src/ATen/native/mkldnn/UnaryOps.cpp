@@ -15,7 +15,7 @@ Tensor& mkldnn_sigmoid_(Tensor& self) {
   AT_ERROR("mkldnn_sigmoid_: ATen not compiled with MKLDNN support");
 }
 
-Tensor& mkldnn_sigmoid_backward(
+Tensor mkldnn_sigmoid_backward(
     const Tensor& grad_output,
     const Tensor& output) {
   AT_ERROR("mkldnn_sigmoid_backward: ATen not compiled with MKLDNN support");
