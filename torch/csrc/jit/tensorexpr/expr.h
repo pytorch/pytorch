@@ -5,10 +5,10 @@
  */
 #pragma once
 
-#include "torch/csrc/jit/tensorexpr/ir_mutator.h"
-#include "torch/csrc/jit/tensorexpr/ir_visitor.h"
-#include "torch/csrc/jit/tensorexpr/mem_arena.h"
-#include "torch/csrc/jit/tensorexpr/types.h"
+#include <torch/csrc/jit/tensorexpr/ir_mutator.h>
+#include <torch/csrc/jit/tensorexpr/ir_visitor.h>
+#include <torch/csrc/jit/tensorexpr/mem_arena.h>
+#include <torch/csrc/jit/tensorexpr/types.h>
 
 namespace torch {
 namespace jit {

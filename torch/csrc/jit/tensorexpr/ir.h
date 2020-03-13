@@ -3,8 +3,9 @@
 #include <string>
 #include <vector>
 
-#include "torch/csrc/jit/tensorexpr/expr.h"
-#include "torch/csrc/jit/tensorexpr/stmt.h"
+#include <torch/csrc/jit/tensorexpr/exceptions.h>
+#include <torch/csrc/jit/tensorexpr/expr.h>
+#include <torch/csrc/jit/tensorexpr/stmt.h>
 
 namespace torch {
 namespace jit {
@@ -264,7 +265,7 @@ ExprHandle getImmediateByType(ScalarType immType, T initialVal) {
     AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
 #undef TYPE_CASE
     default:
-      LOG(FATAL) << "Unsupported datatype: " << immType;
+      throw unsupported_dtype();
   }
   return ExprHandle();
 }

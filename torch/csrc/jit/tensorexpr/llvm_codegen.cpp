@@ -1,7 +1,7 @@
 #ifdef ENABLE_LLVM
 
-#include "torch/csrc/jit/tensorexpr/llvm_codegen.h"
-#include "torch/csrc/jit/tensorexpr/llvm_jit.h"
+#include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
+#include <torch/csrc/jit/tensorexpr/llvm_jit.h>
 
 #include <memory>
 
@@ -15,11 +15,11 @@
 #include <llvm/Target/TargetMachine.h>
 #include <llvm/Transforms/IPO/PassManagerBuilder.h>
 
-#include "torch/csrc/jit/tensorexpr/buffer.h"
-#include "torch/csrc/jit/tensorexpr/execution_counter.h"
-#include "torch/csrc/jit/tensorexpr/ir.h"
-#include "torch/csrc/jit/tensorexpr/ir_printer.h"
-#include "torch/csrc/jit/tensorexpr/types.h"
+#include <torch/csrc/jit/tensorexpr/buffer.h>
+#include <torch/csrc/jit/tensorexpr/execution_counter.h>
+#include <torch/csrc/jit/tensorexpr/ir.h>
+#include <torch/csrc/jit/tensorexpr/ir_printer.h>
+#include <torch/csrc/jit/tensorexpr/types.h>
 
 #define DEBUG_PRINT 0
 
@@ -176,8 +176,7 @@ static void* argToPtr(
 #undef TYPE_CASE
 
     default:
-      LOG(FATAL) << "Unhandled dtype for arg: " << bufferArg.var()->name_hint()
-                 << "dtype=" << bufferArg.var()->dtype();
+      throw unsupported_dtype();
   }
   return nullptr;
 }
@@ -275,7 +274,7 @@ llvm::Type* LLVMCodeGenImpl::dtypeToLLVM(Dtype dtype) {
     AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
     default:
-      LOG(FATAL) << "Unhandled dtype: " << dtype;
+      throw unsupported_dtype();
   }
   return nullptr;
 }
@@ -1039,7 +1038,7 @@ void LLVMCodeGenImpl::visit(const IfThenElse* v) {
 }
 
 void LLVMCodeGenImpl::visit(const BaseCallNode* v) {
-  LOG(FATAL) << "Unimplemented: BaseCall";
+  throw unimplemented_lowering(v);
 }
 
 static void applyMathFunctionAttributes(llvm::Function* f) {
@@ -1203,7 +1202,7 @@ void LLVMCodeGenImpl::visit(const Intrinsics* v) {
 #undef BINARY_MATH_CASE
 
       default: {
-        LOG(FATAL) << "Unimplemented: Intrinsics: " << ExprHandle(v);
+        throw unimplemented_lowering(v);
       } break;
     }
 
@@ -1353,7 +1352,7 @@ void LLVMCodeGenImpl::visit(const Intrinsics* v) {
 #undef BINARY_MATH_CASE
 
       default: {
-        LOG(FATAL) << "Unimplemented: Intrinsics: " << ExprHandle(v);
+        throw unimplemented_lowering(v);
       } break;
     }
   }
@@ -1367,7 +1366,7 @@ void LLVMCodeGenImpl::visit(const Intrinsics* v) {
   if (v->dtype().lanes() == 1 || call_simd_sleef == true) {
     value_ = irb_.CreateCall(call_ty, call_fn, params);
   } else {
-    llvm::Type* vecType = llvm::VectorType::get(FloatTy_, v->dtype().lanes());
+    llvm::Type* vecType = params[0]->getType();
     value_ = llvm::UndefValue::get(vecType);
     for (int i = 0; i < v->dtype().lanes(); ++i) {
       std::vector<llvm::Value*> call_operands;
@@ -1382,19 +1381,19 @@ void LLVMCodeGenImpl::visit(const Intrinsics* v) {
 }
 
 void LLVMCodeGenImpl::visit(const FunctionCall* v) {
-  LOG(FATAL) << "Unimplemented: FunctionCall";
+  throw unimplemented_lowering(v);
 }
 
 void LLVMCodeGenImpl::visit(const Allocate* v) {
-  LOG(FATAL) << "Unimplemented: Allocate";
+  throw unimplemented_lowering(v);
 }
 
 void LLVMCodeGenImpl::visit(const Free* v) {
-  LOG(FATAL) << "Unimplemented: Free";
+  throw unimplemented_lowering(v);
 }
 
 void LLVMCodeGenImpl::visit(const Cond* v) {
-  LOG(FATAL) << "Unimplemented: Cond";
+  throw unimplemented_lowering(v);
 }
 
 void LLVMCodeGenImpl::optimize(llvm::Module& M) {

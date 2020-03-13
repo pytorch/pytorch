@@ -1,8 +1,8 @@
-import framework
+import benchmark
 import numpy as np
 
 
-class MatMulBench(framework.Benchmark):
+class MatMulBench(benchmark.Benchmark):
     def __init__(self, mode, device, B, M, N, K):
         super().__init__(mode, device)
         self.B = B
@@ -24,22 +24,29 @@ class MatMulBench(framework.Benchmark):
 
     @staticmethod
     def module():
-        return 'batch_matmul'
+        return "batch_matmul"
 
     def memory_workload(self):
-        if self.mode == 'fwd':
+        if self.mode == "fwd":
             sol_count = 1
             algorithmic_count = 1
         else:
             sol_count = 1 + 1
             algorithmic_count = 1 + (1 + 1)
 
-        buffer_size = self.B * self.M * self.N  + self.B * self.M * self.N + self.B * self.N * self.K
+        buffer_size = (
+            self.B * self.M * self.N
+            + self.B * self.M * self.N
+            + self.B * self.N * self.K
+        )
         buffer_size *= 4
-        return {'sol': buffer_size * sol_count, 'algorithmic': buffer_size * algorithmic_count}
+        return {
+            "sol": buffer_size * sol_count,
+            "algorithmic": buffer_size * algorithmic_count,
+        }
 
     def compute_workload(self):
-        if self.mode == 'fwd':
+        if self.mode == "fwd":
             count = 1
         else:
             count = 1 + (1 + 1)
@@ -48,10 +55,9 @@ class MatMulBench(framework.Benchmark):
 
         return op_count * count
 
-        
     @staticmethod
     def default_configs():
         return [[128, 64, 128, 256]]
 
 
-framework.register_benchmark_class(MatMulBench)
+benchmark.register_benchmark_class(MatMulBench)

@@ -1,10 +1,10 @@
-import framework
+from . import benchmark
 import scipy.special
 import numpy as np
 import torch
 
 
-class SwishBench(framework.Benchmark):
+class SwishBench(benchmark.Benchmark):
     def __init__(self, mode, device, M, N):
         super().__init__(mode, device)
         self.M = M
@@ -49,4 +49,4 @@ class SwishBench(framework.Benchmark):
         return [[128, 1 << 16]]
 
 
-framework.register_benchmark_class(SwishBench)
+benchmark.register_benchmark_class(SwishBench)

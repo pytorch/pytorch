@@ -2,11 +2,11 @@
 # for benchmarking and some control flow stripped out.
 # https://github.com/mlperf/training/blob/master/rnn_translator/pytorch/seq2seq/models/attention.py
 
-import framework
+from . import benchmark
 import torch
 
 
-class BahdanauAttention(framework.Benchmark):
+class BahdanauAttention(benchmark.Benchmark):
     def __init__(self, mode, device, b, t_q, t_k, n):
         super().__init__(mode, device)
         self.b = b
@@ -87,4 +87,4 @@ class BahdanauAttention(framework.Benchmark):
         return [mlperf_inference, nvidia]
 
 
-framework.register_benchmark_class(BahdanauAttention)
+benchmark.register_benchmark_class(BahdanauAttention)

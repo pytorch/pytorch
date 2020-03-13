@@ -1,4 +1,4 @@
-#include "torch/csrc/jit/tensorexpr/schedule.h"
+#include <torch/csrc/jit/tensorexpr/schedule.h>
 
 #include <queue>
 #include <stdexcept>
@@ -6,10 +6,10 @@
 #include <unordered_set>
 #include <vector>
 
-#include "torch/csrc/jit/tensorexpr/eval.h"
-#include "torch/csrc/jit/tensorexpr/ir_mutator.h"
-#include "torch/csrc/jit/tensorexpr/ir_printer.h"
-#include "torch/csrc/jit/tensorexpr/tensor.h"
+#include <torch/csrc/jit/tensorexpr/eval.h>
+#include <torch/csrc/jit/tensorexpr/ir_mutator.h>
+#include <torch/csrc/jit/tensorexpr/ir_printer.h>
+#include <torch/csrc/jit/tensorexpr/tensor.h>
 
 namespace torch {
 namespace jit {

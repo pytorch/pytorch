@@ -3,9 +3,9 @@
 #ifdef ENABLE_LLVM
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
-#include "torch/csrc/jit/tensorexpr/codegen.h"
-#include "torch/csrc/jit/tensorexpr/ir.h"
-#include "torch/csrc/jit/tensorexpr/ir_visitor.h"
+#include <torch/csrc/jit/tensorexpr/codegen.h>
+#include <torch/csrc/jit/tensorexpr/ir.h>
+#include <torch/csrc/jit/tensorexpr/ir_visitor.h>
 
 #include <unordered_map>
 #include <vector>

@@ -1,14 +1,14 @@
-import framework
+import benchmark
 import scipy.special
 
 
-class SoftmaxBench(framework.Benchmark):
+class SoftmaxBench(benchmark.Benchmark):
     def __init__(self, mode, device, M, N):
         super().__init__(mode, device)
         self.M = M
         self.N = N
         self.data = self.rand([M, N], device=device, requires_grad=self.requires_grad)
- 
+
     def forward(self):
         y = self.softmax(self.data, dim=1)
         return y
@@ -21,10 +21,10 @@ class SoftmaxBench(framework.Benchmark):
 
     @staticmethod
     def module():
-        return 'softmax'
+        return "softmax"
 
     def memory_workload(self):
-        if self.mode == 'fwd':
+        if self.mode == "fwd":
             sol_count = 1 + 1
             algorithmic_count = 3 + 1
         else:
@@ -32,11 +32,14 @@ class SoftmaxBench(framework.Benchmark):
             algorithmic_count = (3 + 1) + (3 + 1)
 
         buffer_size = self.M * self.N * 4
-        return {'sol': buffer_size * sol_count, 'algorithmic': buffer_size * algorithmic_count}
+        return {
+            "sol": buffer_size * sol_count,
+            "algorithmic": buffer_size * algorithmic_count,
+        }
 
     @staticmethod
     def default_configs():
-        return [[128, 1<<16]]
+        return [[128, 1 << 16]]
 
 
-framework.register_benchmark_class(SoftmaxBench)
+benchmark.register_benchmark_class(SoftmaxBench)

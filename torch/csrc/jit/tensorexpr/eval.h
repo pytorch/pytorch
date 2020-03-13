@@ -5,14 +5,15 @@
 #include <vector>
 
 #include <c10/util/Logging.h>
-#include "torch/csrc/jit/tensorexpr/buffer.h"
-#include "torch/csrc/jit/tensorexpr/codegen.h"
-#include "torch/csrc/jit/tensorexpr/execution_counter.h"
-#include "torch/csrc/jit/tensorexpr/function.h"
-#include "torch/csrc/jit/tensorexpr/ir.h"
-#include "torch/csrc/jit/tensorexpr/ir_printer.h"
-#include "torch/csrc/jit/tensorexpr/tensor.h"
-#include "torch/csrc/jit/tensorexpr/types.h"
+#include <torch/csrc/jit/tensorexpr/buffer.h>
+#include <torch/csrc/jit/tensorexpr/codegen.h>
+#include <torch/csrc/jit/tensorexpr/exceptions.h>
+#include <torch/csrc/jit/tensorexpr/execution_counter.h>
+#include <torch/csrc/jit/tensorexpr/function.h>
+#include <torch/csrc/jit/tensorexpr/ir.h>
+#include <torch/csrc/jit/tensorexpr/ir_printer.h>
+#include <torch/csrc/jit/tensorexpr/tensor.h>
+#include <torch/csrc/jit/tensorexpr/types.h>
 
 namespace torch {
 namespace jit {
@@ -126,8 +127,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
       AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
       default:
-        LOG(FATAL) << "Unhandled dtype for argument " << buf.var()->name_hint()
-                   << ": " << buf.dtype();
+        throw unsupported_dtype();
     }
   }
 
@@ -337,7 +337,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
         value_ = binary_op<unsigned char>(lhs_v, rhs_v, expr_type);
         break;
       default:
-        LOG(FATAL) << "invalid dtype: " << lhs_v.dtype();
+        throw unsupported_dtype();
     }
   }
 
@@ -365,7 +365,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
       AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
       default:
-        LOG(FATAL) << "invalid dtype: " << lhs_v.dtype();
+        throw unsupported_dtype();
     }
   }
 
@@ -438,7 +438,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
       AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, DST_TYPE_CASE);
 #undef DST_TYPE_CASE
       default:
-        LOG(FATAL) << "Cast invalid dst type " << dst_dtype << "\n";
+        throw unsupported_dtype();
     }
   }
 
@@ -458,7 +458,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
         AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, SRC_TYPE_CASE);
 #undef SRC_TYPE_CASE
         default:
-          LOG(FATAL) << "Cast invalid src type " << src_dtype << "\n";
+          throw unsupported_dtype();
       }
     }
   }
@@ -509,7 +509,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
       AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
       default:
-        LOG(FATAL) << "invalid dtype: " << value.dtype();
+        throw unsupported_dtype();
     }
   }
 
@@ -549,7 +549,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
       AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
       default:
-        LOG(FATAL) << "Invalid dtype: " << v_sdtype;
+        throw unsupported_dtype();
     }
   }
 
@@ -582,7 +582,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
       AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
       default:
-        LOG(FATAL) << "Invalid dtype: " << v_sdtype;
+        throw unsupported_dtype();
     }
   }
 
@@ -828,7 +828,7 @@ class ExprEval {
         ret_value_ = Value((bool)ret_val_arg[0]);
       } break;
       default:
-        LOG(FATAL) << "Invalid Dtype " << dtype_ << "\n";
+        throw unsupported_dtype();
     }
   }
 

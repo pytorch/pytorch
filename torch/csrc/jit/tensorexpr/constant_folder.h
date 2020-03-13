@@ -1,9 +1,10 @@
 #pragma once
 
-#include "torch/csrc/jit/tensorexpr/eval.h"
-#include "torch/csrc/jit/tensorexpr/ir_mutator.h"
-#include "torch/csrc/jit/tensorexpr/ir_visitor.h"
-#include "torch/csrc/jit/tensorexpr/types.h"
+#include <torch/csrc/jit/tensorexpr/eval.h>
+#include <torch/csrc/jit/tensorexpr/exceptions.h>
+#include <torch/csrc/jit/tensorexpr/ir_mutator.h>
+#include <torch/csrc/jit/tensorexpr/ir_visitor.h>
+#include <torch/csrc/jit/tensorexpr/types.h>
 
 namespace torch {
 namespace jit {
@@ -279,8 +280,7 @@ class ConstantFolder : public IRMutator {
       AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
 #undef TYPE_CASE
       default:
-        LOG(FATAL) << "Unsupported datatype: " << v->dtype();
-        return nullptr;
+        throw unsupported_dtype();
     }
     return nullptr;
   }

@@ -1,8 +1,8 @@
 #pragma once
 
-#include "torch/csrc/jit/tensorexpr/buffer.h"
-#include "torch/csrc/jit/tensorexpr/ir.h"
-#include "torch/csrc/jit/tensorexpr/tensor.h"
+#include <torch/csrc/jit/tensorexpr/buffer.h>
+#include <torch/csrc/jit/tensorexpr/ir.h>
+#include <torch/csrc/jit/tensorexpr/tensor.h>
 
 namespace torch {
 namespace jit {
@@ -37,9 +37,7 @@ class CodeGen {
     return buffer_args_;
   }
 
-  TORCH_API virtual void call(const std::vector<CallArg>& args) {
-    LOG(FATAL) << "unimplemented call";
-  }
+  TORCH_API virtual void call(const std::vector<CallArg>& args) = 0;
 
  private:
   Stmt* stmt_;
