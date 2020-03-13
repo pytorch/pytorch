@@ -151,7 +151,7 @@ __device__ inline void elementwise_kernel_helper(func_t f, policy_t policy) {
   using return_t = typename traits::result_type;
   using args_t = typename traits::ArgsTuple;
 
-  int idx = block_work_size * blockIdx.x;
+  int idx = blockIdx.x;
 
   return_t results[thread_work_size];
   cuda9::workaround::enable_default_constructor<args_t> args_[thread_work_size];
