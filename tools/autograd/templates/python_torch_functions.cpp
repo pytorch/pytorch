@@ -267,7 +267,8 @@ static PyObject * THPVariable_full(PyObject* self, PyObject* args, PyObject* kwa
     }
 
     // Converts from c10::optional<std:vector...> to c10::optional<ArrayRef...>
-    c10::optional<DimnameList> names(*r.toDimnameListOptional(2));
+    auto raw_names = r.toDimnameListOptional(2);
+    c10::optional<DimnameList> names(*raw_names);
     return wrap(dispatch_full(size, fill_val, names, options).set_requires_grad(r.toBool(7)));
   }
 

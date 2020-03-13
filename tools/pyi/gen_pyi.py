@@ -449,6 +449,12 @@ def gen_pyi(declarations_path, out):
                     .format(FACTORY_PARAMS),
                     'def randint(high: _int, size: _size, *, {}) -> Tensor: ...'
                     .format(FACTORY_PARAMS)],
+        'full': ['def full(size: IntArrayRef, fill_value: Number, *,'
+                 ' out: Optional[Tensor]=None, {}) -> Tensor: ...'
+                 .format(FACTORY_PARAMS),
+                 'def full(size: IntArrayRef, fill_value: Number, *,'
+                 ' names: List[Union[str, None]], {}) -> Tensor: ...'
+                 .format(FACTORY_PARAMS)],
         'is_grad_enabled': ['def is_grad_enabled() -> _bool: ...']
     })
     for binop in ['mul', 'div']:
@@ -456,7 +462,7 @@ def gen_pyi(declarations_path, out):
             'def {}(input: Union[Tensor, Number],'
             ' other: Union[Tensor, Number],'
             ' *, out: Optional[Tensor]=None) -> Tensor: ...'.format(binop))
-    for binop in ['add', 'sub']: 
+    for binop in ['add', 'sub']:
         unsorted_function_hints[binop].append(
             'def {}(input: Union[Tensor, Number],'
             ' other: Union[Tensor, Number],'
@@ -543,8 +549,8 @@ def gen_pyi(declarations_path, out):
             unsorted_tensor_method_hints[binop].append(
                 'def {}(self, other: Union[Tensor, Number]{})'
                 ' -> Tensor: ...'.format(binop, out_suffix))
-    for binop in ['add', 'sub']: 
-        for inplace in [False, True]: 
+    for binop in ['add', 'sub']:
+        for inplace in [False, True]:
             out_suffix = ', out: Optional[Tensor]=None'
             if inplace:
                 binop += '_'
