@@ -141,7 +141,7 @@ bool InterpreterState::run(Stack& stack) {
       } break;
       case WARN: {
         drop(stack, 1);
-        AT_WARN(pop(stack).toStringRef());
+        TORCH_WARN(pop(stack).toStringRef());
         ++pc;
       } break;
       default:
