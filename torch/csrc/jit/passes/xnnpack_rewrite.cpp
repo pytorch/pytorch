@@ -1,6 +1,7 @@
 #include <ATen/core/jit_type.h>
 #include <ATen/native/xnnpack/OpContext.h>
 
+#include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
@@ -15,6 +16,10 @@ namespace torch {
 namespace jit {
 
 #ifdef USE_XNNPACK
+
+using graph_rewrite_helper::PatternInfo;
+using graph_rewrite_helper::ConvBNParameters;
+using graph_rewrite_helper::computeUpdatedConvWeightAndBias;
 
 namespace {
 

@@ -9,7 +9,6 @@
 #include <torch/csrc/jit/passes/freeze_module.h>
 
 #include <torch/csrc/jit/ir/ir.h>
-#include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/ir/node_hashing.h>
 #include <torch/csrc/jit/runtime/operator.h>
@@ -28,6 +27,9 @@ namespace {
 using OptionalModuleVector = std::vector<c10::optional<Module>>;
 using ModuleMethodVector = std::vector<std::pair<Module, std::string>>;
 using NameModuleVector = std::vector<std::pair<std::string, Module>>;
+using graph_rewrite_helper::PatternInfo;
+using graph_rewrite_helper::ConvBNParameters;
+using graph_rewrite_helper::computeUpdatedConvWeightAndBias;
 using graph_rewrite_helper::getValue;
 using graph_rewrite_helper::getIValue;
 using graph_rewrite_helper::getFuncName;
@@ -37,25 +39,6 @@ using graph_rewrite_helper::replaceConvolutionWithConv2d;
 // for example _scale, _zero_point,
 // _scalar_type and _axis(for per channel quantization)
 using QParamMap = std::unordered_map<std::string, IValue>;
-
-// This struct contains a compiled IR pattens slated for use in the
-// findPatternMatches function. The struct encapsulates the common
-// information from parseIR that is used in conjunction with the
-// pattern matching facility. A const instance of this struct can
-// also be stored away to cache the compiled IR pattern and reduce
-// runtime cost
-struct PatternInfo {
-  std::string pattern_string;
-  std::unique_ptr<Graph> pattern_graph;
-  std::unordered_map<std::string, Value*> vmap;
-
-  static PatternInfo parse_from_str(std::string pattern_string) {
-    PatternInfo rv{
-        std::move(pattern_string), std::make_unique<Graph>(), decltype(vmap){}};
-    parseIR(rv.pattern_string, rv.pattern_graph.get(), rv.vmap);
-    return rv;
-  }
-};
 
 struct PatternsAndModules {
   bool is_conv;
@@ -1692,16 +1675,6 @@ class ModuleUseDeduper {
   std::vector<Value*> uses_to_rewrite_;
 };
 
-struct ConvBNParameters {
-  at::Tensor conv_w;
-  at::Tensor conv_b;
-  at::Tensor bn_rm;
-  at::Tensor bn_rv;
-  double bn_eps = 0.0;
-  at::Tensor bn_w;
-  at::Tensor bn_b;
-};
-
 static bool hastensor(Module& m, const char* name) {
   return m.hasattr(name) && m.attr(name).isTensor();
 }
@@ -1728,16 +1701,6 @@ class FoldConvBatchNorm2dHelper {
       Module& bn,
       ConvBNParameters& r);
 
-  /**
-   * Given the current weight and bias tensors of a Conv2d module and parameters
-   * of the BatchNorm2d module we're folding with, compute the updated values
-   * for the weight and bias.
-   *
-   * The function is basically copied from torch/nn/utils/fusion.py
-   */
-  std::tuple<at::Tensor, at::Tensor> computeUpdatedConvWeightAndBias(
-      const ConvBNParameters& p);
-
   std::unordered_map<ModulePtr,
                      std::tuple<at::Tensor, at::Tensor>> conv_module_and_params_;
   std::unordered_map<Graph*, std::vector<std::tuple<std::string, std::string>>> conv_bn_names_;
@@ -1745,14 +1708,6 @@ class FoldConvBatchNorm2dHelper {
   std::vector<Value*> values_to_rewrite_;
   std::unordered_set<Node*> nodes_to_delete_;
 };
-
-std::tuple<at::Tensor, at::Tensor> FoldConvBatchNorm2dHelper::
-    computeUpdatedConvWeightAndBias(const ConvBNParameters& p) {
-  at::Tensor bn_var_rsqrt = at::rsqrt(p.bn_rv + p.bn_eps);
-  at::Tensor new_w = p.conv_w * (p.bn_w * bn_var_rsqrt).reshape({-1, 1, 1, 1});
-  at::Tensor new_b = (p.conv_b - p.bn_rm) * bn_var_rsqrt * p.bn_w + p.bn_b;
-  return std::make_tuple(new_w, new_b);
-}
 
 bool FoldConvBatchNorm2dHelper::tryExtractingConvBNParameters(
     Module& conv,

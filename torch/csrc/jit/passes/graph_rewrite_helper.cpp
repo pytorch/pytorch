@@ -6,6 +6,14 @@ namespace torch {
 namespace jit {
 namespace graph_rewrite_helper {
 
+std::tuple<at::Tensor, at::Tensor>
+  computeUpdatedConvWeightAndBias(const ConvBNParameters& p) {
+  at::Tensor bn_var_rsqrt = at::rsqrt(p.bn_rv + p.bn_eps);
+  at::Tensor new_w = p.conv_w * (p.bn_w * bn_var_rsqrt).reshape({-1, 1, 1, 1});
+  at::Tensor new_b = (p.conv_b - p.bn_rm) * bn_var_rsqrt * p.bn_w + p.bn_b;
+  return std::make_tuple(new_w, new_b);
+}
+
 std::string getFuncName(Value* func_value) {
   auto func_node = func_value->node();
   auto func = func_node->output()->type()->expect<FunctionType>()->function();
