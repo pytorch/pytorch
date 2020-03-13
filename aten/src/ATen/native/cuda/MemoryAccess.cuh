@@ -99,7 +99,7 @@ struct LoadWithCast {
 
   template<typename scalar_t>
   __device__ scalar_t load(char *base_ptr, uint32_t offset, int arg) {
-    void *ptr = base_ptr + element_sizea[arg] * offset;
+    void *ptr = base_ptr + element_sizes[arg] * offset;
     return c10::fetch_and_cast<scalar_t>(dtypes[arg], ptr);
   }
 };
