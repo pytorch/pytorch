@@ -29,10 +29,10 @@ c10::optional<TensorContiguity> infer_contiguity_from_tensor_type(
 } // namespace
 
 Tensor::Tensor(const std::shared_ptr<c10::TensorType>& tensor_type)
-    : Val(ValType::Tensor, aten_opt_type_map(tensor_type->scalarType())),
-      contiguity_(infer_contiguity_from_tensor_type(tensor_type)) {
+    : Val(ValType::Tensor, aten_opt_type_map(tensor_type->scalarType())) {
   std::vector<IterDomain*> sizes;
-  for (int i = 0; i < contiguity_->rank(); i++) {
+  TORCH_CHECK(tensor_type->dim().has_value(), "Requires static rank for Tensor");
+  for (int i = 0; i <tensor_type->dim().value(); i++) {
     sizes.push_back(new IterDomain(new Int()));
   }
   domain_ = new TensorDomain(sizes);
@@ -40,14 +40,6 @@ Tensor::Tensor(const std::shared_ptr<c10::TensorType>& tensor_type)
 
 Tensor::Tensor(const std::shared_ptr<Value>& jit_value)
     : Tensor(jit_value->type()->cast<c10::TensorType>()) {}
-
-bool Tensor::hasContiguityInfo() const {
-  return contiguity_.has_value();
-}
-
-const c10::optional<TensorContiguity>& Tensor::getContiguityInfo() const {
-  return contiguity_;
-}
 
 TensorView* split_(TensorView* tv, int axis, int factor) {
   TensorDomain* td = tv->domain();

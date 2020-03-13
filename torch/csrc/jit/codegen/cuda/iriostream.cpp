@@ -82,8 +82,6 @@ void IRPrinter::handle(const Tensor* const t) {
     os << " scalar_type: " << *(t->getDataType());
   if (t->domain() != nullptr)
     os << " " << t->domain();
-  if (t->hasContiguityInfo())
-    os << " " << &t->getContiguityInfo().value();
 }
 
 void IRPrinter::handle(const TensorContiguity* const t) {

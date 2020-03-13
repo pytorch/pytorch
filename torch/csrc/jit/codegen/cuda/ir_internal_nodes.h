@@ -181,7 +181,7 @@ struct TORCH_API Tensor : public Val {
   Tensor() = delete;
 
   Tensor(DataType dt, TensorDomain* _td = nullptr)
-      : Val(ValType::Tensor, dt), contiguity_(c10::nullopt), domain_(_td) {}
+      : Val(ValType::Tensor, dt), domain_(_td) {}
 
   Tensor(const Tensor& other) = delete;
   Tensor& operator=(const Tensor& other) = delete;
@@ -193,12 +193,6 @@ struct TORCH_API Tensor : public Val {
 
   Tensor(const std::shared_ptr<Value>& jit_value);
   
-
-  //TODO: implement   bool sameAs(const Tensor* other) const
-  bool hasContiguityInfo() const;
-
-  const c10::optional<TensorContiguity>& getContiguityInfo() const;
-
   static Tensor* MakeDummyTensor(int ndims);
 
   TensorDomain* domain() const noexcept { return domain_; }
@@ -206,7 +200,6 @@ struct TORCH_API Tensor : public Val {
   private:
 
   // Implementation details:
-  const c10::optional<TensorContiguity> contiguity_;
   TensorDomain* domain_;
 };
 /*
