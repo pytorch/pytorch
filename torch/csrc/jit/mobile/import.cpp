@@ -62,21 +62,6 @@ void print_unsupported_ops_and_throw(const std::unordered_set<std::string>& unsu
   TORCH_CHECK(false, "Following ops cannot be found:", error_message);
 }
 
-void print_unsupported_fns_and_throw(
-    const std::unordered_set<std::string>& unsupported_fns) {
-  std::string error_message("{");
-  for (const auto& op_name : unsupported_fns) {
-    error_message += op_name + ", ";
-  }
-  error_message += "}";
-  TORCH_CHECK(
-      false,
-      "The following custom C++ methods could not be found:",
-      error_message,
-      " Ensure the appropriate custom class registration (torch::jit::class_)"
-      " code is linked into your binary.");
-}
-
 void parseMethods(
     const std::vector<IValue>& vals,
     mobile::CompilationUnit& mcu) {
@@ -93,9 +78,6 @@ void parseMethods(
     const auto& consts_list = expect_field(table, "constants", 2).toTuple()->elements();
     const auto& types_list = expect_field(table, "types", 3).toTuple()->elements();
     const auto& register_size = expect_field(table, "register_size", 4).toInt();
-    // TODO: backward compatiblity? Can this be optional?
-    const auto& fn_names =
-        expect_field(table, "fn_names", 5).toTuple()->elements();
 
     for (const auto& ins : ins_list) {
       auto ins_item = ins.toTuple()->elements();
@@ -122,19 +104,6 @@ void parseMethods(
     if (!unsupported_op_names.empty()) {
       print_unsupported_ops_and_throw(unsupported_op_names);
     };
-
-    std::unordered_set<std::string> unsupported_fn_names;
-    for (const auto& fn : fn_names) {
-      std::string fn_qualname_str = fn.toStringRef();
-      bool fn_found = function->append_builtin_function(fn_qualname_str);
-      if (!fn_found) {
-        unsupported_fn_names.emplace(std::move(fn_qualname_str));
-      }
-    }
-
-    if (!unsupported_fn_names.empty()) {
-      print_unsupported_fns_and_throw(unsupported_fn_names);
-    }
 
     for (const auto& constant : consts_list) {
       function->append_constant(constant);

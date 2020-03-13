@@ -42,22 +42,6 @@ bool Function::append_operator(const std::string& name,
   return true;
 }
 
-bool Function::append_builtin_function(const std::string& qualname) {
-  std::shared_ptr<torch::jit::Function> found_function;
-  auto qualname_ = c10::QualifiedName(qualname);
-  for (const auto& fn : customClassMethods()) {
-    if (fn->qualname() == qualname_) {
-      found_function = fn;
-    }
-  }
-  if (!found_function) {
-    return false;
-  }
-
-  code_->custom_class_fns_.emplace_back(std::move(found_function));
-  return true;
-}
-
 void Function::append_constant(const c10::IValue& constant) {
   code_->constants_.push_back(constant);
 }

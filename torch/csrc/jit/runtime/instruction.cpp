@@ -71,7 +71,7 @@ OpCode parseOpCode(const char *str) {
 bool isOpSupportedInMobile(OpCode op) {
   // clang-format off
   static constexpr OpCode supported_ops_in_mobile[] {
-      OP, OPN, LOAD, MOVE, STOREN, STORE, DROP, DROPR, LOADC, JF, JMP, LOOP, RET, GET_ATTR, SET_ATTR, LIST_CONSTRUCT, TUPLE_CONSTRUCT, WARN, CALL
+      OP, OPN, LOAD, MOVE, STOREN, STORE, DROP, DROPR, LOADC, JF, JMP, LOOP, RET, GET_ATTR, SET_ATTR, LIST_CONSTRUCT, TUPLE_CONSTRUCT, WARN, INTERFACE_CALL
   };
   // clang-format on
 

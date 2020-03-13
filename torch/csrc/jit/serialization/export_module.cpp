@@ -43,11 +43,13 @@ c10::IValue getFunctionTuple(const Function& func) {
   Inline(*graph);
   torch::jit::Code code(graph, func.name());
 
+  auto instructions_copy = code.instructions();
+
   // operator names
   std::vector<c10::OperatorName> opnames;
-  std::vector<IValue> fn_names;
-  for (size_t i = 0; i < code.instructions().size(); ++i) {
-    Instruction ins = code.instructions()[i];
+  std::vector<std::string> method_names;
+  for (size_t i = 0; i < instructions_copy.size(); ++i) {
+    Instruction ins = instructions_copy[i];
     if (ins.op == OP || ins.op == OPN) {
       auto node = code.instructions_source()[i];
       opnames.emplace_back(node->schema().operator_name());
@@ -57,27 +59,24 @@ c10::IValue getFunctionTuple(const Function& func) {
     if (ins.op == CALL) {
       auto node = code.instructions_source()[i];
       if (node->kind() == prim::CallMethod) {
-        if (auto class_type = node->inputs().at(0)->type()->cast<ClassType>()) {
-          fn_names.emplace_back(class_type->getMethod(node->s(attr::name))
-                                    ->qualname()
-                                    .qualifiedName());
-        } else {
-          TORCH_CHECK(false, "Interface call not supported on mobile");
-        }
-      } else if (node->kind() == prim::CallFunction) {
-        auto* fn =
-            node->inputs().at(0)->type()->expect<FunctionType>()->function();
-        fn_names.emplace_back(fn->qualname().qualifiedName());
+        // NB: replacing instruction
+        auto method_name_idx =
+            code.constant_table().size() + method_names.size();
+        method_names.emplace_back(node->s(attr::name));
+        Instruction new_instr{
+            INTERFACE_CALL, method_name_idx, node->inputs().size()};
+        instructions_copy[i] = std::move(new_instr);
       } else {
-        TORCH_INTERNAL_ASSERT(false, "Unknown node kind on CALL opcode");
+        TORCH_INTERNAL_ASSERT(
+            false, "Unsupported node kind on CALL opcode for mobile");
       }
     }
   }
 
   // instructions
   std::vector<IValue> instructions;
-  instructions.reserve(code.instructions().size());
-  for (Instruction ins : code.instructions()) {
+  instructions.reserve(instructions_copy.size());
+  for (Instruction ins : instructions_copy) {
     instructions.emplace_back(Tup({toString(ins.op), ins.X, ins.N}));
   }
 
@@ -89,7 +88,11 @@ c10::IValue getFunctionTuple(const Function& func) {
   }
 
   // constants
-  const auto& constants = code.constant_table();
+  auto constants = code.constant_table();
+
+  for (auto& method_name : method_names) {
+    constants.emplace_back(std::move(method_name));
+  }
 
   // types
   std::vector<IValue> types;
@@ -105,8 +108,7 @@ c10::IValue getFunctionTuple(const Function& func) {
                       {"operators", Tup(operators)},
                       {"constants", Tup(constants)},
                       {"types", Tup(types)},
-                      {"register_size", register_size},
-                      {"fn_names", Tup(fn_names)}});
+                      {"register_size", register_size}});
 
   return Tup({func.qualname().qualifiedName(), table});
 }

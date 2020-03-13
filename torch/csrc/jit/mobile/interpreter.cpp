@@ -1,5 +1,6 @@
 #include "interpreter.h"
 #include <ATen/core/function.h>
+#include <ATen/core/jit_type.h>
 #include <ATen/core/operator_name.h>
 #include <torch/csrc/jit/mobile/function.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
@@ -55,8 +56,13 @@ bool InterpreterState::run(Stack& stack) {
         code_->operators_[inst.X](stack);
         ++pc;
       } break;
-      case CALL: {
-        code_->custom_class_fns_[inst.X]->run(stack);
+      case INTERFACE_CALL: {
+        torch::jit::Function* method =
+            peek(stack, 0, inst.N)
+                .toObject()
+                ->type()
+                ->getMethod(code_->constants_[inst.X].toStringRef());
+        method->run(stack);
         ++pc;
       } break;
       case LOAD:

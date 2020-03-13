@@ -22,7 +22,6 @@ class Function{
                        const std::string& overload_name);
   void append_constant(const c10::IValue& constant);
   void append_type(const c10::TypePtr& type);
-  bool append_builtin_function(const std::string& qualname);
 
   void set_register_size(size_t size);
 

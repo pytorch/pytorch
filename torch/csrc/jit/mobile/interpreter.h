@@ -14,7 +14,6 @@ struct Code {
   std::vector<std::function<void(Stack&)>> operators_;
   std::vector<c10::IValue> constants_;
   std::vector<c10::TypePtr> types_;
-  std::vector<std::shared_ptr<torch::jit::Function>> custom_class_fns_;
   size_t register_size_; // Aggregated output size.
 };
 
