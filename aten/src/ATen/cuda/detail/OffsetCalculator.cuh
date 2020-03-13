@@ -26,19 +26,24 @@ struct OffsetCalculator {
   // if element_sizes is nullptr, then the strides will be in bytes, otherwise
   // the strides will be in # of elements.
   OffsetCalculator(int dims, const int64_t* sizes, const int64_t* const* strides, const int64_t* element_sizes=nullptr) : dims(dims) {
+    std::cout << "entering OffsetCalculator" << std::endl;
     TORCH_CHECK(dims <= MAX_DIMS, "tensor has too many (>", MAX_DIMS, ") dims");
+    std::cout << "element_sizes = " << element_sizes << std::endl;
     for (int i = 0; i < MAX_DIMS; ++i) {
-      int64_t element_size = 1;
+      std::cout << "i = " << i << std::endl;
       if (i < dims) {
-        element_size = (element_sizes == nullptr ? 1LL : element_sizes[i]);
         sizes_[i] = IntDivider<index_t>(sizes[i]);
       } else {
         sizes_[i] = IntDivider<index_t>(1);
       }
       for (int arg = 0; arg < NARGS; arg++) {
+        std::cout << "arg = " << arg << std::endl;
+        int64_t element_size = (element_sizes == nullptr ? 1LL : element_sizes[arg]);
+        std::cout << "element_size = " << element_size << std::endl;
         strides_[i][arg] =  i < dims ? strides[arg][i] / element_size : 0;
       }
     }
+    std::cout << "leaving OffsetCalculator" << std::endl;
   }
 
   C10_HOST_DEVICE offset_type get(index_t linear_idx) const {

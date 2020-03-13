@@ -68,17 +68,21 @@ namespace at { namespace native {
 
 template<int N>
 static OffsetCalculator<N> make_input_offset_calculator(const TensorIterator& iter) {
+  std::cout << "entering make_input_offset_calculator" << std::endl;
+  std::cout << "N = " << N << std::endl;
   TORCH_INTERNAL_ASSERT(N == iter.ntensors() - 1);
   std::array<const int64_t*, N> strides;
-  int64_t element_sizes[N];
+  int64_t element_sizes[std::max<int>(N, 1)];  // array size can not be 0, this happens when N == 0
   for (int i = 1; i < N; i++) {
     strides[i] = iter.strides(i + 1).data();
     element_sizes[i] = iter.element_size(i + 1);
   }
+  std::cout << "element_sizes = " << element_sizes << std::endl;
   return OffsetCalculator<N>(iter.ndim(), iter.shape().data(), strides.data(), element_sizes);
 }
 
 static OffsetCalculator<1> make_output_offset_calculator(const TensorIterator& iter) {
+  std::cout << "entering make_output_offset_calculator" << std::endl;
   std::array<const int64_t*, 1> strides;
   strides[0] = iter.strides(0).data();
   int64_t element_size = iter.element_size(0);
@@ -106,6 +110,16 @@ __global__ void elementwise_kernel(int N, func_t f) {
       idx += nt;
     }
   }
+}
+
+template<int N>
+static OffsetCalculator<N> make_offset_calculator(const TensorIterator& iter) {
+  AT_ASSERT(N == iter.ntensors());
+  std::array<const int64_t*, N> strides;
+  for (int i = 0; i < N; i++) {
+    strides[i] = iter.strides(i).data();
+  }
+  return OffsetCalculator<N>(iter.ndim(), iter.shape().data(), strides.data());
 }
 
 template<int nt, int vt, typename func_t>
@@ -300,22 +314,19 @@ void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
       });
     }
   } else {
-    auto input_offset_calculator = make_input_offset_calculator<traits::arity>(iter);
-    auto output_offset_calculator = make_output_offset_calculator(iter);
+    auto offset_calc = legacy::make_offset_calculator<traits::arity + 1>(iter);
     if (needs_dynamic_casting<func_t>::check(iter)) {
       legacy::launch_kernel<launch_size_nd, launch_bound2>(numel, [=]GPU_LAMBDA(int idx) {
-        auto input_offsets = input_offset_calculator.get(idx);
-        arg0_t result = legacy::invoke(f, &data.data[1], input_offsets.data, &dtypes.data[1], 1);
-        auto output_offsets = output_offset_calculator.get(idx);
-        void* out = data[0] + output_offsets[0];
+        auto offsets = offset_calc.get(idx);
+        void* out = data[0] + offsets[0];
+        arg0_t result = legacy::invoke(f, &data.data[1], &offsets.data[1], &dtypes.data[1], 1);
         c10::cast_and_store<arg0_t>(dtypes[0], out, result);
       });
     } else {
       legacy::launch_kernel<launch_size_nd, launch_bound2>(numel, [=]GPU_LAMBDA(int idx) {
-        auto input_offsets = input_offset_calculator.get(idx);
-        auto output_offsets = output_offset_calculator.get(idx);
-        arg0_t* out = (arg0_t*)(data[0] + output_offsets[0]);
-        *out = legacy::invoke(f, &data.data[1], input_offsets.data, 1);
+        auto offsets = offset_calc.get(idx);
+        arg0_t* out = (arg0_t*)(data[0] + offsets[0]);
+        *out = legacy::invoke(f, &data.data[1], &offsets.data[1], 1);
       });
     }
   }
