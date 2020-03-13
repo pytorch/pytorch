@@ -910,38 +910,33 @@ void testGPU_FusionCodeGen2() {
   //I0o, I0i{4}, I1, I2]
 
 
-  tv0->computeAt(tv3, 1);
-  tv1->computeAt(tv3, 1);
+  tv0->computeAt(tv3, -1);
+  tv1->computeAt(tv3, -1);
   
   tv3->axis(0)->parallelize(ParallelType::BIDx);
-  tv2->axis(-1)->parallelize(ParallelType::TIDx);
   tv3->axis(-1)->parallelize(ParallelType::TIDx);
   
 
   //std::cout<<fusion<<std::endl;
   std::cout
-  << "%T3[ iS{( ceilDiv(%i0, 4) )}, iS{4}, iS{%i1}, iS{%i2} ] compute_at( %T5, 1 ) = %T1 + 2f\n"
+  << "%T3[ iS{( ceilDiv(%i0, 4) )}, iS{4}, iS{%i1}, iS{%i2} ] compute_at( %T5, -1 ) = %T1 + 2f\n"
   << "%T5[ iS{( ceilDiv(%i0, 4) )}, iS{4}, iS{%i1}, iS{%i2} ] = %T0 + %T3\n"
   << "::::::::::::" << std::endl;
   
   std::stringstream ref;
   ref << "__global__ void kernel(Tensor<float> T0, Tensor<float> T1, Tensor<float> T3){\n";
-  ref << "  float T2[( ( ( 1 * 4 ) * T0.size[1] ) * T0.size[2] )];\n";
-  ref << "  for( size_t i15 = 0; i15 < 4; ++i15 ) {\n";
-  ref << "    for( size_t i17 = 0; i17 < T0.size[1]; ++i17 ) {\n";
-  ref << "      if( ( ( ( blockIdx.x * 4 ) + i15 ) < T0.size[0] ) ) {\n";
-  ref << "        T2[i15 * T0.size[1] + i17]\n";
-  ref << "          = T1[( ( blockIdx.x * 4 ) + i15 ) * T1.stride[0] + i17 * T1.stride[1] + threadIdx.x * T1.stride[2]]\n";
+  ref << "  float T2[1];\n";
+  ref << "  for( size_t i12 = 0; i12 < 4; ++i12 ) {\n";
+  ref << "    for( size_t i14 = 0; i14 < T0.size[1]; ++i14 ) {\n";
+  ref << "      if( ( ( ( blockIdx.x * 4 ) + i12 ) < T0.size[0] ) ) {\n";
+  ref << "        T2[0]\n";
+  ref << "          = T1[( ( blockIdx.x * 4 ) + i12 ) * T1.stride[0] + i14 * T1.stride[1] + threadIdx.x * T1.stride[2]]\n";
   ref << "          + float(2);\n";
   ref << "      }\n";
-  ref << "    }\n";
-  ref << "  }\n";
-  ref << "  for( size_t i35 = 0; i35 < 4; ++i35 ) {\n";
-  ref << "    for( size_t i37 = 0; i37 < T0.size[1]; ++i37 ) {\n";
-  ref << "      if( ( ( ( blockIdx.x * 4 ) + i35 ) < T0.size[0] ) ) {\n";
-  ref << "        T3[( ( blockIdx.x * 4 ) + i35 ) * T3.stride[0] + i37 * T3.stride[1] + threadIdx.x * T3.stride[2]]\n";
-  ref << "          = T0[( ( blockIdx.x * 4 ) + i35 ) * T0.stride[0] + i37 * T0.stride[1] + threadIdx.x * T0.stride[2]]\n";
-  ref << "          + T2[i35 * T0.size[1] + i37];\n";
+  ref << "      if( ( ( ( blockIdx.x * 4 ) + i12 ) < T0.size[0] ) ) {\n";
+  ref << "        T3[( ( blockIdx.x * 4 ) + i12 ) * T3.stride[0] + i14 * T3.stride[1] + threadIdx.x * T3.stride[2]]\n";
+  ref << "          = T0[( ( blockIdx.x * 4 ) + i12 ) * T0.stride[0] + i14 * T0.stride[1] + threadIdx.x * T0.stride[2]]\n";
+  ref << "          + T2[0];\n";
   ref << "      }\n";
   ref << "    }\n";
   ref << "  }\n";
@@ -974,6 +969,30 @@ void testGPU_FusionCodeGen2() {
   /**** End   Debug code ****/
   
   TORCH_CHECK(ref.str() == cdg.str()); 
+  
+  torch::jit::fuser::cuda::CudaKernel prog;
+  prog.device_ = 0;
+  prog.grid(4);
+  prog.block(8);
+
+  auto options =
+  at::TensorOptions()
+    .dtype(at::kFloat)
+    .device(at::kCUDA, 0);
+
+  at::Tensor input1 = at::randn({16,8,8}, options);
+  at::Tensor input2 = at::randn_like(input1);;
+  at::Tensor output = at::empty_like(input1);
+  std::vector<at::Tensor> inputs{{input1, input2}};
+  std::vector<at::Tensor> outputs{{output}};
+
+  torch::jit::fuser::cuda::compileKernel(fusion, prog);
+  torch::jit::fuser::cuda::runTestKernel(prog, inputs, outputs);
+  
+  at::Tensor tv2_ref = input2 + 2.0;
+  at::Tensor output_ref = input1 + tv2_ref;
+
+  TORCH_CHECK(output_ref.equal(output));
 }
 
 
