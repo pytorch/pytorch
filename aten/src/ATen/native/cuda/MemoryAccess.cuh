@@ -103,7 +103,7 @@ struct unroll {
   template<typename scalar_t>
   __device__ inline void store(scalar_t *from, int idx) {
     int thread_idx = threadIdx.x;
-    scalar_t *to = reinterpret_cast<scalar_t *>(data[0]) + block_work_size * idx;
+    scalar_t *to = reinterpret_cast<scalar_t *>(data[0]) + idx;
     #pragma unroll
     for (int i = 0; i < thread_work_size; i++) {
       if (thread_idx >= remaining) {
@@ -159,7 +159,7 @@ struct vectorized {
   template<typename scalar_t>
   __device__ inline void store(scalar_t *from, int idx) {
     using vec_t = aligned_vector<scalar_t, vec_size>;
-    scalar_t *to = reinterpret_cast<scalar_t *>(data[0]) + block_work_size * idx;
+    scalar_t *to = reinterpret_cast<scalar_t *>(data[0]) + idx;
     vec_t *to_ = reinterpret_cast<vec_t *>(to);
     int thread_idx = threadIdx.x;
     #pragma unroll
