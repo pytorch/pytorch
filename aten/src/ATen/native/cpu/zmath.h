@@ -212,7 +212,7 @@ inline std::complex<float> max_impl (std::complex<float> a, std::complex<float> 
   if (_isnan<std::complex<float>>(a) || _isnan<std::complex<float>>(b)) {
     return std::complex<float>(std::numeric_limits<float>::quiet_NaN());
   } else {
-    return std::complex<float>(std::abs(a) > std::abs(b) ? a : b);
+    return std::abs(a) > std::abs(b) ? a : b;
   }
 }
 
@@ -221,7 +221,7 @@ inline std::complex<double> max_impl (std::complex<double> a, std::complex<doubl
   if (_isnan<std::complex<double>>(a) || _isnan<std::complex<double>>(b)) {
     return std::complex<double>(std::numeric_limits<double>::quiet_NaN());
   } else {
-    return std::complex<double>(std::abs(a) > std::abs(b) ? a : b);
+    return std::abs(a) > std::abs(b) ? a : b;
   }
 }
 
@@ -239,7 +239,7 @@ inline std::complex<float> min_impl (std::complex<float> a, std::complex<float> 
   if (_isnan<std::complex<float>>(a) || _isnan<std::complex<float>>(b)) {
     return std::complex<float>(std::numeric_limits<float>::quiet_NaN());
   } else {
-    return std::complex<float>(std::abs(a) < std::abs(b) ? a : b);
+    return std::abs(a) < std::abs(b) ? a : b;
   }
 }
 
@@ -248,7 +248,7 @@ inline std::complex<double> min_impl (std::complex<double> a, std::complex<doubl
   if (_isnan<std::complex<double>>(a) || _isnan<std::complex<double>>(b)) {
     return std::complex<double>(std::numeric_limits<double>::quiet_NaN());
   } else {
-    return std::complex<double>(std::abs(a) < std::abs(b) ? a : b);
+    return std::abs(a) < std::abs(b) ? a : b;
   }
 }
 
