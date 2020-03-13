@@ -49,7 +49,9 @@ BinaryOp::BinaryOp(BinaryOpType _type, Val* _out, Val* _lhs, Val* _rhs)
 bool BinaryOp::sameAs(const BinaryOp* other) const {
   if (getBinaryOpType() != other->getBinaryOpType())
     return false;
-  return static_cast<const Expr*>(this)->sameAs(other);
+  if(!(lhs()->sameAs(other->lhs()) && rhs()->sameAs(other->rhs())))
+    return false;
+  return true;
 }
 
 

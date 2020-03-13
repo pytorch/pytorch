@@ -109,9 +109,6 @@ namespace jit {
   _(GPU_FusionCastOp)            \
   _(GPU_FusionEquality)          \
   _(GPU_FusionReplaceAll)        \
-  _(GPU_FusionComputeAt)         \
-  _(GPU_FusionComputeAt2)        \
-  _(GPU_FusionComputeAt3)        \
   _(GPU_FusionDependency)        \
   _(GPU_FusionParser)            \
   _(GPU_FusionCodeGen)           \

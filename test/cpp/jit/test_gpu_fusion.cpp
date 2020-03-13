@@ -406,8 +406,16 @@ void testGPU_FusionTVMerge() {
   TensorView* tv = makeDummyTensor(3);
 
   tv = tv->merge(1);
+  Expr* axisOp = tv->axis(1)->size()->getOrigin();
 
-  std::cout << "Merge fusion output: " << fusion << std::endl;
+  TORCH_CHECK(
+       tv->nDims() == 2
+    && axisOp->getExprType() == ExprType::BinaryOp
+    && static_cast<BinaryOp*>(axisOp)->getBinaryOpType() == BinaryOpType::Mul
+    && static_cast<BinaryOp*>(axisOp)->lhs() == tv->getRootDomain()->axis(1)->size()
+    && static_cast<BinaryOp*>(axisOp)->rhs() == tv->getRootDomain()->axis(2)->size()
+  );
+
 }
 
 void testGPU_FusionTVReorder() {
@@ -514,47 +522,6 @@ void testGPU_FusionReplaceAll() {
   BinaryOp* bop = static_cast<BinaryOp*>(fusion.origin(f3));
   // make sure the binary op (origin of f3) actually changed to 2.f
   TORCH_CHECK(static_cast<Float*>(bop->lhs())->sameAs(new Float{2.f}));
-
-}
-
-void testGPU_FusionComputeAt() {
-  Fusion fusion;
-  FusionGuard fg(&fusion);
-
-  TensorView* tv0 = makeDummyTensor(2);
-  new BinaryOp(BinaryOpType::Add, tv0, new Float(0.0), new Float(1.0));
-  TensorView* tv1 = static_cast<TensorView*>(add(tv0, new Float(2.0)));
-  TensorView* tv2 = static_cast<TensorView*>(add(tv0, new Float(3.0)));
-  TensorView* tv3 = static_cast<TensorView*>(add(tv2, new Float(4.0)));
-  
-  //tv0 =   0 + 1
-  //tv1 = tv0 + 2
-  //tv2 = tv0 + 3
-  //tv3 = tv2 + 4
-  std::cout << "Replaying " << tv3 << "->";
-  //[I0, I1]
-  tv3 = tv3->split(0, 4);
-  //[I0o, I0i{4}, I1]
-  tv3 = tv3->reorder({{2, 0}});
-  //[I1, I0o, I0i{4}]
-  tv3 = tv3->split(0, 2);
-  //[I1o, I1i{2} I0o, I0i{4}]
-  tv3 = tv3->reorder( { {0, 2}, {1, 3} } );
-  //[I0o, I0i{4}, I1o, I1i{2}]
-
-  std::cout << tv3 <<std::endl;
-  tv0->computeAt(tv3, 1);
-
-  std::cout << "on to:\n" << tv0 << "\n" << tv2 << "\nand\n" << tv1 << std::endl;
-  std::cout << "These domains should approximately be: [I0o, I0i{4}, I1]" << std::endl;
-}
-
-
-void testGPU_FusionComputeAt2() {
-
-}
-
-void testGPU_FusionComputeAt3() {
 
 }
 
