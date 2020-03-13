@@ -137,7 +137,7 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
   } else if (ivalue.isRRef()) {
 #ifdef USE_DISTRIBUTED
     TORCH_CHECK(
-        torch::distributed::rpc::isInRpcCall == true, "RRef jit pickling is only allowed inside RPC calls.");
+        torch::distributed::rpc::allowJitRRefPickle == true, "RRef jit pickling is only allowed inside RPC calls.");
     pushRRef(ivalue);
 #else
     TORCH_CHECK(

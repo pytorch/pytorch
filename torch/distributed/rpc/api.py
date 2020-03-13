@@ -387,7 +387,8 @@ def remote(to, func, args=None, kwargs=None):
         >>> rpc.shutdown()
 
         If invoking an annotated TorchScript function, then run the following
-        code in two different processes:
+        code in two different processes, the TorchScript function will run 
+        without GIL.
 
         >>> # On worker 0:
         >>> @torch.jit.script
@@ -507,7 +508,8 @@ def rpc_sync(to, func, args=None, kwargs=None):
         >>> rpc.shutdown()
 
         If invoking an annotated TorchScript function, then run the following
-        code in two different processes:
+        code in two different processes, the TorchScript function will run 
+        without GIL.
 
         >>> # On worker 0:
         >>> @torch.jit.script
@@ -574,7 +576,8 @@ def rpc_async(to, func, args=None, kwargs=None):
         >>> rpc.shutdown()
 
         If invoking an annotated TorchScript function, then run the following
-        code in two different processes:
+        code in two different processes, the TorchScript function will run 
+        without GIL.
 
         >>> # On worker 0:
         >>> @torch.jit.script

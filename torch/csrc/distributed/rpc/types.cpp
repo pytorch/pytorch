@@ -5,7 +5,7 @@ namespace distributed {
 namespace rpc {
 
 // It is declared in torch/csrc/distributed/rpc/types.h
-thread_local bool isInRpcCall = false;
+thread_local bool allowJitRRefPickle = false;
 
 static_assert(
     std::numeric_limits<local_id_t>::max() <=
@@ -15,6 +15,14 @@ static_assert(
     std::numeric_limits<worker_id_t>::max() <=
         std::numeric_limits<int64_t>::max(),
     "The max value of worker_id_t must be within the range of int64_t");
+
+///////////////////////////  JitRRefPickleGuard   ///////////////////////////
+JitRRefPickleGuard::JitRRefPickleGuard() {
+  allowJitRRefPickle = true;
+}
+JitRRefPickleGuard::~JitRRefPickleGuard() {
+  allowJitRRefPickle = false;
+}
 
 ///////////////////////////  GloballyUniqueId   ///////////////////////////
 

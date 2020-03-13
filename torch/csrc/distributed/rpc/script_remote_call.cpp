@@ -49,7 +49,7 @@ std::unique_ptr<ScriptRemoteCall> ScriptRemoteCall::fromIValues(
 }
 
 Message ScriptRemoteCall::toMessage() && {
-  isInRpcCall = true;
+  JitRRefPickleGuard jitPickleGuard;
   std::vector<IValue> ivalues;
   ScriptCall::toIValues(ivalues);
   ivalues.emplace_back(retRRefId_.toIValue());
@@ -58,8 +58,6 @@ Message ScriptRemoteCall::toMessage() && {
   std::vector<torch::Tensor> tensor_table;
   auto payload = jit::pickle(
       c10::ivalue::Tuple::create(std::move(ivalues)), &tensor_table);
-
-  isInRpcCall = false;
 
   return Message(
       std::move(payload),
