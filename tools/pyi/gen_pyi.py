@@ -449,10 +449,10 @@ def gen_pyi(declarations_path, out):
                     .format(FACTORY_PARAMS),
                     'def randint(high: _int, size: _size, *, {}) -> Tensor: ...'
                     .format(FACTORY_PARAMS)],
-        'full': ['def full(size: IntArrayRef, fill_value: Number, *,'
+        'full': ['def full(size: _size, fill_value: Number, *,'
                  ' out: Optional[Tensor]=None, {}) -> Tensor: ...'
                  .format(FACTORY_PARAMS),
-                 'def full(size: IntArrayRef, fill_value: Number, *,'
+                 'def full(size: _size, fill_value: Number, *,'
                  ' names: List[Union[str, None]], {}) -> Tensor: ...'
                  .format(FACTORY_PARAMS)],
         'is_grad_enabled': ['def is_grad_enabled() -> _bool: ...']
