@@ -2882,6 +2882,7 @@ class TestNN(NNTestCase):
 
                     torch.autograd.gradcheck(fn, (m.weight_orig,))
 
+    @skipIfNoLapack
     def test_spectral_norm_load_state_dict(self):
         inp = torch.randn(2, 3)
         for activate_times in (0, 3):
