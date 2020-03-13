@@ -1494,26 +1494,6 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                 continue
             self.assertEqual(torch.tensor([i]), outputs[i])
 
-    @unittest.skipIf(platform == 'darwin', 'ProcessGroup timeout not yet supported on macOS')
-    def test_timeout_kwarg(self):
-        store = c10d.FileStore(self.file_name, self.world_size)
-        pg = c10d.ProcessGroupGloo(
-            store,
-            self.rank,
-            self.world_size,
-            timeout=timedelta(seconds=0.5))
-
-        # Wait on barrier
-        pg.barrier().wait()
-
-        # Sleep on one of the processes to trigger barrier timeout
-        if self.rank == 0:
-            time.sleep(1.0)
-
-        # The barrier will now time out
-        with self.assertRaisesRegex(RuntimeError, " (Timed out|closed) "):
-            pg.barrier().wait()
-
     def test_barrier_implies_wait(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
@@ -2778,6 +2758,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             torch.manual_seed(1337 + iteration)
             input = input[torch.randperm(global_batch_size)]
 
+    @requires_gloo()
     def test_ignored_output(self):
         """
         Test that the output of a model can be ignored and that there is no
@@ -2819,6 +2800,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             loss = criterion(output, target)
             loss.backward()
 
+    @requires_gloo()
     def test_ignored_output_with_unused_parameters(self):
         """
         Test that the output of a model can be ignored and that there is no
