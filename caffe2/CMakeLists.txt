@@ -655,7 +655,7 @@ endif()
 add_library(torch_cpu ${Caffe2_CPU_SRCS})
 torch_compile_options(torch_cpu)  # see cmake/public/utils.cmake
 
-if (LLVM_FOUND)
+if (USE_LLVM AND LLVM_FOUND)
   llvm_map_components_to_libnames(LLVM_LINK_LIBS
     support core analysis executionengine instcombine
     scalaropts transformutils native orcjit)
