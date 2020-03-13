@@ -131,15 +131,17 @@ void RNNImplBase<Derived>::flatten_parameters() {
   }
 
   NoGradGuard no_grad;
-  torch::_cudnn_rnn_flatten_weight(
-      flat_weights_,
-      /*weight_stride0=*/options.with_bias() ? 4 : 2,
-      options.input_size(),
-      static_cast<int64_t>(*cudnn_mode_),
-      options.hidden_size(),
-      options.layers(),
-      /*batch_first=*/options.batch_first(),
-      /*bidirectional=*/options.bidirectional());
+  if (torch::_use_cudnn_rnn_flatten_weight()) {
+    torch::_cudnn_rnn_flatten_weight(
+        flat_weights_,
+        /*weight_stride0=*/options.with_bias() ? 4 : 2,
+        options.input_size(),
+        static_cast<int64_t>(*cudnn_mode_),
+        options.hidden_size(),
+        options.layers(),
+        /*batch_first=*/options.batch_first(),
+        /*bidirectional=*/options.bidirectional());
+  }
 }
 
 template <typename Derived>
