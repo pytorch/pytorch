@@ -4,7 +4,6 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/Parallel.h>
 #include <unordered_map>
-#include <map>
 
 namespace at { namespace native {
 
@@ -301,32 +300,28 @@ void scatter_add_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, cons
     /*serial_exec=*/false);
 }
 
-  class ReduceFunctor {
-  public:
-    ReduceFunctor() {};
-    template <typename scalar_t, typename func_t>
-    void operator() (scalar_t* self_data, scalar_t* src_data, func_t op) {
-      op(self_data, src_data);
-    }
-  };
+class ReduceFunctor {
+public:
+  ReduceFunctor() {};
+  template <typename scalar_t, typename func_t>
+  void operator() (scalar_t* self_data, scalar_t* src_data, func_t op) {
+    op(self_data, src_data);
+  }
+};
+ReduceFunctor reduce_fn;
 
-  ReduceFunctor reduce_fn;
-
-  auto reduce_sum = [](auto * self_data, auto * src_data) {
-                      *self_data += *src_data;
-                    };
-
-  auto reduce_subtract = [](auto * self_data, auto * src_data) {
-                           *self_data -= *src_data;
-                         };
-
-  auto reduce_multiply = [](auto * self_data, auto * src_data) {
-                           *self_data *= *src_data;
-                         };
-
-  auto reduce_divide = [](auto * self_data, auto * src_data) {
-                         *self_data /= *src_data;
+auto reduce_sum = [](auto * self_data, auto * src_data) {
+                    *self_data += *src_data;
+                  };
+auto reduce_subtract = [](auto * self_data, auto * src_data) {
+                         *self_data -= *src_data;
                        };
+auto reduce_multiply = [](auto * self_data, auto * src_data) {
+                         *self_data *= *src_data;
+                       };
+auto reduce_divide = [](auto * self_data, auto * src_data) {
+                       *self_data /= *src_data;
+                     };
 
 template <typename func_t>
 void cpu_scatter_gather_reduce_kernel(
@@ -371,12 +366,12 @@ void cpu_scatter_gather_reduce_kernel(
     ScalarType::Bool, ScalarType::Half, iter.dtype(),
     method_name, [&] {
       using reduce_func_t = std::function<void(scalar_t*, scalar_t*)>;
-      std::map<const REDUCE_OPERATOR, reduce_func_t> reduce_funcs = {
-          {REDUCE_OPERATOR::SUM, reduce_sum},
-          {REDUCE_OPERATOR::SUBTRACT, reduce_subtract},
-          {REDUCE_OPERATOR::MULTIPLY, reduce_multiply},
-          {REDUCE_OPERATOR::DIVIDE, reduce_divide}
-      };
+      std::unordered_map<const REDUCE_OPERATOR, reduce_func_t> reduce_funcs({
+        {REDUCE_OPERATOR::SUM, reduce_sum},
+        {REDUCE_OPERATOR::SUBTRACT, reduce_subtract},
+        {REDUCE_OPERATOR::MULTIPLY, reduce_multiply},
+        {REDUCE_OPERATOR::DIVIDE, reduce_divide}
+      });
       auto loop = [&](char** data, const int64_t* strides, int64_t n) {
         auto* self_data_bytes = data[0];
         const auto* index_data_bytes = data[2];
@@ -387,7 +382,7 @@ void cpu_scatter_gather_reduce_kernel(
             (scalar_t*)self_data_bytes, self_dim_stride,
             (int64_t*)index_data_bytes, index_dim_stride,
             (scalar_t*)src_data_bytes, src_dim_stride,
-            reduce_funcs, reduce
+            reduce_funcs[reduce]
           );
 
           self_data_bytes += strides[0];
@@ -422,7 +417,7 @@ void scatter_reduce_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, c
       auto* self_data, auto self_dim_stride,
       const auto* index_data, auto index_dim_stride,
       auto* src_data, auto src_dim_stride,
-      auto& reduce_funcs, const REDUCE_OPERATOR& reduce
+      auto& reduce_func
     ) {                   
       for (int64_t i = 0; i < index_dim_size; ++i) {
         int64_t idx_dim = index_data[i * index_dim_stride];
@@ -435,7 +430,7 @@ void scatter_reduce_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, c
 
         reduce_fn(&self_data[idx_dim * self_dim_stride],
                   &src_data[i * src_dim_stride],
-                  reduce_funcs[reduce]);
+                  reduce_func);
       }
     },
     reduce,
