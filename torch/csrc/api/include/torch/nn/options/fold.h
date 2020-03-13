@@ -42,6 +42,9 @@ struct TORCH_API FoldOptions {
 namespace functional {
 /// Options for `torch::nn::functional::fold`.
 ///
+/// See the documentation for `torch::nn::FoldOptions` class to learn what
+/// arguments are supported.
+///
 /// Example:
 /// ```
 /// namespace F = torch::nn::functional;
@@ -79,6 +82,9 @@ struct TORCH_API UnfoldOptions {
 
 namespace functional {
 /// Options for `torch::nn::functional::unfold`.
+///
+/// See the documentation for `torch::nn::UnfoldOptions` class to learn what
+/// arguments are supported.
 ///
 /// Example:
 /// ```
