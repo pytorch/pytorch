@@ -68,12 +68,12 @@ struct alignas(sizeof(scalar_t) * vec_size) aligned_vector {
 namespace policies {
 
 template<typename data_t>
-struct checked_unroll {
+struct unroll {
 
   data_t data;
   int remaining;
 
-  __device__ checked_unroll(data_t data, int remaining): data(data), remaining(remaining) {}
+  __device__ unroll(data_t data, int remaining): data(data), remaining(remaining) {}
 
   __device__ inline bool check_inbounds(int thread_work_elem) {
     return ((threadIdx.x  + thread_work_elem*num_threads) < remaining);

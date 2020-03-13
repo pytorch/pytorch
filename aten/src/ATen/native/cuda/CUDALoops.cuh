@@ -176,15 +176,21 @@ __device__ inline void elementwise_kernel_helper(func_t f, policy_t policy) {
 
 template<int vec_size, typename func_t, typename array_t>
 C10_LAUNCH_BOUNDS_1(num_threads)
-__global__ void elementwise_kernel(int N, func_t f, array_t data) {
-  using return_t = typename function_traits<func_t>::result_type;
+__global__ void vectorized_elementwise_kernel(int N, func_t f, array_t data) {
   int remaining = N - block_work_size * blockIdx.x;
 
   if (remaining < block_work_size) {  // if this block handles the reminder, just do a naive unrolled loop
-    elementwise_kernel_helper(f, typename memory::policies::checked_unroll<array_t>(data, remaining));
+    elementwise_kernel_helper(f, typename memory::policies::unroll<array_t>(data, remaining));
   } else {  // if this block has a full `block_work_size` data to handle, use vectorized memory access
     elementwise_kernel_helper(f, typename memory::policies::template vectorized<vec_size, array_t>(data));
   }
+}
+
+template<typename func_t, typename array_t>
+C10_LAUNCH_BOUNDS_1(num_threads)
+__global__ void unrolled_elementwise_kernel(int N, func_t f, array_t data) {
+  int remaining = N - block_work_size * blockIdx.x;
+  elementwise_kernel_helper(f, typename memory::policies::unroll<array_t>(data, remaining));
 }
 
 // TODO (@zasdfgbnm): this function assume trivial 1d and no dynamic casting
@@ -199,13 +205,13 @@ static void launch_kernel(int64_t N, const func_t& f, array_t data) {
   int vec_size = memory::can_vectorize_up_to<func_t>(data);
   switch (vec_size) {
   case 4:
-    elementwise_kernel<4, func_t, array_t><<<grid, num_threads, 0, stream>>>(N, f, data);
+    vectorized_elementwise_kernel<4, func_t, array_t><<<grid, num_threads, 0, stream>>>(N, f, data);
     break;
   case 2:
-    elementwise_kernel<2, func_t, array_t><<<grid, num_threads, 0, stream>>>(N, f, data);
+    vectorized_elementwise_kernel<2, func_t, array_t><<<grid, num_threads, 0, stream>>>(N, f, data);
     break;
   case 1:
-    elementwise_kernel<1, func_t, array_t><<<grid, num_threads, 0, stream>>>(N, f, data);
+    unrolled_elementwise_kernel<func_t, array_t><<<grid, num_threads, 0, stream>>>(N, f, data);
     break;
   default:
     TORCH_INTERNAL_ASSERT(false, "Unexpected vectorization size");
