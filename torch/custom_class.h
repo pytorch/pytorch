@@ -18,10 +18,6 @@
 namespace torch {
 namespace jit {
 
-namespace script {
-struct CompilationUnit;
-}
-
 TORCH_API at::ClassTypePtr getCustomClass(const std::string& name);
 
 TORCH_API bool isCustomClass(const c10::IValue& v);
@@ -63,7 +59,7 @@ class class_ {
     // capsule attribute
     classTypePtr = at::ClassType::create(
         c10::QualifiedName(qualClassName),
-        std::weak_ptr<script::CompilationUnit>());
+        std::weak_ptr<CompilationUnit>());
     classTypePtr->addAttribute("capsule", at::CapsuleType::get());
 
     c10::getCustomClassTypeMap().insert(

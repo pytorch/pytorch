@@ -21,7 +21,6 @@ def foo3(x):
 
 namespace torch {
 namespace jit {
-using namespace script;
 using namespace testing;
 
 struct InlinerGuard {
