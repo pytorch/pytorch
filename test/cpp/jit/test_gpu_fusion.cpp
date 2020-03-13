@@ -1027,8 +1027,29 @@ void testGPU_FusionSimplePWise() {
   << "%T5[ iS{( ceilDiv(%i0, 4) )}, iS{4}, iS{%i1}, iS{%i2} ] = %T0 + %T3\n"
   << "::::::::::::" << std::endl;
 
-  CodeWrite cw(std::cout);
-  cw.traverse(&fusion);
+  torch::jit::fuser::cuda::CudaKernel prog;
+  prog.device_ = 0;
+  prog.grid(64);     //   1 CTA
+  prog.block(128,2); // 256 Threads
+
+  auto options =
+  at::TensorOptions()
+    .dtype(at::kFloat)
+    .device(at::kCUDA, 0);
+
+  at::Tensor input1 = at::randn({64,2,128}, options);
+  at::Tensor input2 = at::randn_like(input1);;
+  at::Tensor output = at::empty_like(input1);
+  std::vector<at::Tensor> inputs{{input1, input2}};
+  std::vector<at::Tensor> outputs{{output}};
+
+  torch::jit::fuser::cuda::compileKernel(fusion, prog);
+  torch::jit::fuser::cuda::runTestKernel(prog, inputs, outputs);
+  
+  at::Tensor tv2_ref = input2 + 2.0;
+  at::Tensor output_ref = input1 + tv2_ref;
+
+  TORCH_CHECK(output_ref.equal(output));
 }
 
 void testGPU_FusionExecKernel() {
@@ -1067,6 +1088,8 @@ void testGPU_FusionExecKernel() {
   
   torch::jit::fuser::cuda::CudaKernel prog;
   prog.device_ = 0;
+  prog.grid(1);    // 1 CTA
+  prog.block(128); // 128 Threads
 
   auto options =
   at::TensorOptions()
@@ -1080,7 +1103,7 @@ void testGPU_FusionExecKernel() {
   std::vector<at::Tensor> outputs{{output}};
 
   torch::jit::fuser::cuda::compileKernel(fusion, prog);
-  torch::jit::fuser::cuda::runKernel(prog, inputs, outputs);
+  torch::jit::fuser::cuda::runTestKernel(prog, inputs, outputs);
   
   at::Tensor check = at::full({1,128}, 4, options);;
   TORCH_CHECK(output.equal(check));

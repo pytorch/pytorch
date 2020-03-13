@@ -140,7 +140,7 @@ void compileKernel(Fusion& fusion, CudaKernel& entry) {
     std::vector<char> log(logsize);
     nvrtc().nvrtcGetProgramLog(program, log.data());
     std::stringstream cu;
-    cu << log.data();
+    cu << "NVRTC COMPILE ERROR: " << log.data();
     throw std::runtime_error(cu.str());
   }
   const char *lowered_kernel_name;
@@ -225,7 +225,9 @@ TORCH_API void runKernel(
  */
 }
 
-TORCH_API void runKernel(
+// WARNING:
+// This function is here for testing purposes only
+TORCH_API void runTestKernel(
     CudaKernel& entry,
     const std::vector<at::Tensor>& inputs,
     std::vector<at::Tensor>& outputs) {
@@ -233,11 +235,6 @@ TORCH_API void runKernel(
   const auto prior_device = at::cuda::current_device();
   at::cuda::set_device(entry.device_);
   auto stream = at::cuda::getCurrentCUDAStream();
-
-  // TODO: Proper API to establish reasonable launch configurations;
-  // Naive launch config;
-  size_t numel = outputs[0].numel();
-  const auto nBlocks = std::min(entry.max_blocks_, ceilDiv(numel, 128));
 
   // TODO: Proper API to tranform JIT I/O Tensor to CodeGen I/O Tensor
   std::vector<void*> arguments;
@@ -267,12 +264,12 @@ TORCH_API void runKernel(
   // launch kernel;
   AT_CUDA_DRIVER_CHECK(nvrtc().cuLaunchKernel(
       entry.function_,
-      nBlocks,
-      1,
-      1,
-      128,
-      1,
-      1,
+      entry.grid_.x,
+      entry.grid_.y,
+      entry.grid_.z,
+      entry.block_.x,
+      entry.block_.y,
+      entry.block_.z,
       0,
       stream,
       arguments.data(),
@@ -280,13 +277,6 @@ TORCH_API void runKernel(
 
   // Resets device (see at::DeviceGuard notes above)
   at::cuda::set_device(prior_device); 
-
-
-/*
-  for (auto& output : outputs) {
-    output.fill_(0.24);
-  }
- */
 }
 
 }}}} // namespace torch::jit::fuser::cuda

@@ -23,11 +23,25 @@ public:
   CUfunction& getFunction() {
     return function_;
   }
-
+  
   int16_t device_;
   CUmodule module_;
   CUfunction function_;
   int max_blocks_;
+
+  // WARNING:
+  // Block and Grid dimension setting is here for testing purposes only
+  // These are not here for general use and only for use with
+  // the runTestKernel() function.
+  void block(uint x=1, uint y=1, uint z=1) {
+	block_ = dim3(x,y,z);
+  }
+  void grid(uint x=1, uint y=1, uint z=1) {
+	grid_ = dim3(x,y,z);
+  }
+
+  dim3 block_;
+  dim3 grid_;
 };
 
 #define STRINGIFY(...) #__VA_ARGS__
@@ -43,7 +57,7 @@ TORCH_API void runKernel(
     const at::ArrayRef<IValue>& inputs,
     std::vector<at::Tensor>& outputs);
 
-TORCH_API void runKernel(
+TORCH_API void runTestKernel(
     CudaKernel& entry,
     const std::vector<at::Tensor>& inputs,
     std::vector<at::Tensor>& outputs);
