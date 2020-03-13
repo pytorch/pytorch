@@ -67,7 +67,7 @@ c10::IValue getFunctionTuple(const Function& func) {
             code.constant_table().size() + method_names.size();
         method_names.emplace_back(node->s(attr::name));
         Instruction new_instr{
-            INTERFACE_CALL, method_name_idx, node->inputs().size()};
+            INTERFACE_CALL, static_cast<int32_t>(method_name_idx), static_cast<uint16_t>(node->inputs().size())};
         instructions_copy[i] = std::move(new_instr);
       } else {
         TORCH_INTERNAL_ASSERT(
