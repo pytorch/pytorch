@@ -5,7 +5,6 @@
 #include <c10/util/BFloat16.h>
 #include <c10/util/Optional.h>
 #include <c10/util/typeid.h>
-#include <c10/macros/Macros.h>
 
 #include <complex>
 #include <cstdint>
@@ -260,7 +259,7 @@ static inline const char* toString(ScalarType t) {
 #undef DEFINE_CASE
 }
 
-static inline C10_HOST_DEVICE size_t elementSize(ScalarType t) {
+static inline size_t elementSize(ScalarType t) {
 #define CASE_ELEMENTSIZE_CASE(ctype, name) \
   case ScalarType::name:                   \
     return sizeof(ctype);
