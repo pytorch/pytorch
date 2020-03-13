@@ -111,17 +111,6 @@ IterDomain* TensorDomain::axis(int i) const {
   return domain[i];
 }
 
-Tensor* Tensor::MakeDummyTensor(int ndims) {
-  std::vector<IterDomain*> sizes;
-  for (int i = 0; i < ndims; i++) {
-    sizes.push_back(new IterDomain(new Int()));
-  }
-  TensorDomain* td = new TensorDomain(sizes);
-
-  return new Tensor(DataType::Float, td);
-}
-
-
 Split::Split(TensorDomain* _out, TensorDomain* _in, int _axis, Int* _factor)
     : Expr(ExprType::Split),
       out_{_out},

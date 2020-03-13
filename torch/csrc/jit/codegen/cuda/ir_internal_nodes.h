@@ -193,8 +193,6 @@ struct TORCH_API Tensor : public Val {
 
   Tensor(const std::shared_ptr<Value>& jit_value);
   
-  static Tensor* MakeDummyTensor(int ndims);
-
   TensorDomain* domain() const noexcept { return domain_; }
 
   private:

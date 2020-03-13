@@ -119,7 +119,6 @@ namespace jit {
   _(GPU_FusionCodeGen)           \
   _(GPU_FusionCodeGen2)          \
   _(GPU_FusionForLoop)           \
-  _(GPU_FusionIfThenElse)        \
   _(GPU_FusionSimplePWise)       \
   _(GPU_FusionExecKernel)        \
 
