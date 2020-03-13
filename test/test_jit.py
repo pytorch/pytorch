@@ -1574,9 +1574,9 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
             torch._C._jit_pass_quant_fusion(graph)
             FileCheck().run(input_str, graph)
 
-@unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
-                     " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
-                     " with instruction set support avx2 or newer.")
+    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
+                         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+                         " with instruction set support avx2 or newer.")
     def test_quantized_conv_relu_fusion(self):
         class M(torch.nn.Module):
             def __init__(self):
