@@ -1562,7 +1562,7 @@ def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
                  num_layers, dropout, train, bidirectional, batch_first=None, batch_sizes=None):
 
     warnings.warn("Exporting a model to ONNX with a batch_size other than 1, " +
-                  "with a variable lenght with " + variant + " can cause an error " +
+                  "with a variable length with " + variant + " can cause an error " +
                   "when running the ONNX model with a different batch size. " +
                   "Make sure to save the model with a batch size of 1, " +
                   "or define the initial states (h0/c0) as inputs of the model. ")
@@ -1936,6 +1936,13 @@ def log2(g, self):
 
 def prim_shape(g, self):
     return g.op('Shape', self)
+
+
+@parse_args('v', 'i')
+def one_hot(g, self, num_classes):
+    values = g.op("Constant", value_t=torch.LongTensor([0, 1]))
+    depth = g.op("Constant", value_t=torch.LongTensor([num_classes]))
+    return g.op("OneHot", self, depth, values, axis_i=-1)
 
 
 @parse_args('v', 'i', 'v', 'v')
