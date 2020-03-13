@@ -1,11 +1,11 @@
-#include <torch/csrc/jit/codegen/cuda/kernel.h>
 #include <torch/csrc/jit/codegen/cuda/code_write.h>
+#include <torch/csrc/jit/codegen/cuda/kernel.h>
 #include <iostream>
 
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <torch/csrc/jit/resource_guard.h>
-#include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 
 namespace torch {
 namespace jit {
@@ -27,9 +27,7 @@ static int ceilDiv(const int a, const int b) {
 
 std::pair<std::string, std::string> codeGeneration(Fusion& fusion) {
   std::stringstream str_stream;
-  
-  std::cout << "data structure:" << std::endl;
-  std::cout << typeinfo << std::endl;
+
   str_stream << "namespace " << CG_NAMESPACE << " {\n" << typeinfo << "\n";
   CodeWrite cw(str_stream, KERNEL_NAME);
   cw.traverse(&fusion);
@@ -48,14 +46,12 @@ void prepare_argument(
   Tensor<float>& t = tensor_args.back();
   // passing address, type doesn't really matter here;
   t.data = static_cast<float*>(val.data_ptr());
-  std::cout << "### tensor_args size: " << tensor_args.size();
-  std::cout << " set input: (";
+
   for (int i = 0; i < val.dim(); i++) {
-    std::cout << val.sizes()[i] << ", ";
     t.size[i] = val.sizes()[i];
     t.stride[i] = val.strides()[i];
   }
-  std::cout << ")" << std::endl;
+
   arguments.push_back(&(tensor_args.back()));
 };
 
@@ -81,19 +77,12 @@ void prepare_argument(
 } // namespace
 
 void compileKernel(Fusion& fusion, CudaKernel& entry) {
-  std::cout << "compiling kernel" << std::endl;
-
   // generating cuda code;
   std::string code;
   std::string func_name;
   std::tie(func_name, code) = codeGeneration(fusion);
 
-  std::cout << "function name: " << std::endl;
-  std::cout << func_name << std::endl;
-  std::cout << "kernel string: " << std::endl;
-  std::cout << code << std::endl;
-
-  // vvv NVRTC COMPILATION vvv 
+  // vvv NVRTC COMPILATION vvv
 
   // lazily construct context if non-existing yet;
   CUcontext pctx = 0;
@@ -143,7 +132,7 @@ void compileKernel(Fusion& fusion, CudaKernel& entry) {
     cu << "NVRTC COMPILE ERROR: " << log.data();
     throw std::runtime_error(cu.str());
   }
-  const char *lowered_kernel_name;
+  const char* lowered_kernel_name;
   nvrtc().nvrtcGetLoweredName(program, func_name.c_str(), &lowered_kernel_name);
 
   AT_CUDA_NVRTC_CHECK(result);
@@ -154,8 +143,8 @@ void compileKernel(Fusion& fusion, CudaKernel& entry) {
   AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcGetPTX(program, ptx.data()));
 
   AT_CUDA_DRIVER_CHECK(nvrtc().cuModuleLoadData(&(entry.module_), ptx.data()));
-  AT_CUDA_DRIVER_CHECK(
-      nvrtc().cuModuleGetFunction(&(entry.function_), entry.module_, lowered_kernel_name));
+  AT_CUDA_DRIVER_CHECK(nvrtc().cuModuleGetFunction(
+      &(entry.function_), entry.module_, lowered_kernel_name));
   AT_CUDA_DRIVER_CHECK(nvrtc().cuOccupancyMaxActiveBlocksPerMultiprocessor(
       &entry.max_blocks_, entry.function_, 128, 0));
   entry.max_blocks_ *= prop->multiProcessorCount;
@@ -165,7 +154,6 @@ TORCH_API void runKernel(
     CudaKernel& entry,
     const at::ArrayRef<IValue>& inputs,
     std::vector<at::Tensor>& outputs) {
-
   const auto prior_device = at::cuda::current_device();
   at::cuda::set_device(entry.device_);
   auto stream = at::cuda::getCurrentCUDAStream();
@@ -199,7 +187,7 @@ TORCH_API void runKernel(
   for (auto& output : outputs) {
     prepare_argument(arguments, tensor_args, output);
   }
-  
+
   // launch kernel;
   AT_CUDA_DRIVER_CHECK(nvrtc().cuLaunchKernel(
       entry.function_,
@@ -215,14 +203,13 @@ TORCH_API void runKernel(
       nullptr));
 
   // Resets device (see at::DeviceGuard notes above)
-  at::cuda::set_device(prior_device); 
+  at::cuda::set_device(prior_device);
 
-
-/*
-  for (auto& output : outputs) {
-    output.fill_(0.24);
-  }
- */
+  /*
+    for (auto& output : outputs) {
+      output.fill_(0.24);
+    }
+   */
 }
 
 // WARNING:
@@ -231,7 +218,6 @@ TORCH_API void runTestKernel(
     CudaKernel& entry,
     const std::vector<at::Tensor>& inputs,
     std::vector<at::Tensor>& outputs) {
-
   const auto prior_device = at::cuda::current_device();
   at::cuda::set_device(entry.device_);
   auto stream = at::cuda::getCurrentCUDAStream();
@@ -260,7 +246,7 @@ TORCH_API void runTestKernel(
   for (auto& output : outputs) {
     prepare_argument(arguments, tensor_args, output);
   }
-  
+
   // launch kernel;
   AT_CUDA_DRIVER_CHECK(nvrtc().cuLaunchKernel(
       entry.function_,
@@ -276,7 +262,10 @@ TORCH_API void runTestKernel(
       nullptr));
 
   // Resets device (see at::DeviceGuard notes above)
-  at::cuda::set_device(prior_device); 
+  at::cuda::set_device(prior_device);
 }
 
-}}}} // namespace torch::jit::fuser::cuda
+} // namespace cuda
+} // namespace fuser
+} // namespace jit
+} // namespace torch
