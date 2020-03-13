@@ -66,8 +66,13 @@ inline Return KernelFunction::callUnboxed(const OperatorHandle& opHandle, Args..
         return (*func)(getFunctor_(), std::forward<Args>(args)...);
     }
 
+#ifdef C10_MOBILE
+    // impl::boxAndCallBoxedFunc generates some binary size that we can avoid if we don't need it on mobile
+    TORCH_INTERNAL_ASSERT(false, "Mobile builds currently don't support calling boxed kernels");
+#else
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(boxed_kernel_func_ != nullptr, "Tried to call KernelFunction::callUnboxed() on an uninitialized KernelFunction.");
     return impl::boxAndCallBoxedFunc<Return, Args...>(boxed_kernel_func_, getFunctor_(), opHandle, std::forward<Args>(args)...);
+#endif
 }
 
 template<KernelFunction::BoxedKernelFunction* func>
