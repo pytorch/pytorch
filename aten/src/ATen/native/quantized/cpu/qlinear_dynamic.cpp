@@ -63,17 +63,17 @@ class QLinearDynamicInt8 final : public torch::OperatorKernel {
         /*len=*/input.numel());
 
     // Input tensor is quantized as 8-bit unsigned values
-    static constexpr int precision =
-        7; // Use the reduced range to avoid instruction overflow.
+    static constexpr int precision = 8;
     static constexpr bool is_signed = false;
 
     // Calculate scale and zero point for quantization of input tensor
     auto q_params = quant_utils::ChooseQuantizationParams(
         /*min=*/x_min,
         /*max=*/x_max,
-        /*qmin=*/is_signed ? -(1 << (precision - 1)) : 0,
+        /*qmin=*/is_signed ? -(1 << (precision - 1 - 1)) : 0,
         /*qmax=*/
-        is_signed ? ((1 << (precision - 1)) - 1) : (1 << precision) - 1,
+        is_signed ? ((1 << (precision - 1 - 1)) - 1)
+                  : (1 << (precision - 1)) - 1,
         /*preserve_sparsity=*/false);
 
     q_params.precision = precision;
