@@ -219,6 +219,26 @@ TEST(SerializeTest, KeysFunc) {
   }
 }
 
+TEST(SerializeTest, SerializeUndefinedTensor) {
+  auto tempfile = c10::make_tempfile();
+
+  auto ivalue = torch::IValue(torch::Tensor());
+
+  ASSERT_TRUE(ivalue.isTensor());
+  ASSERT_FALSE(ivalue.toTensor().defined());
+
+  torch::serialize::OutputArchive output_archive;
+  output_archive.write("value", ivalue);
+  output_archive.save_to(tempfile.name);
+
+  torch::serialize::InputArchive input_archive;
+  input_archive.load_from(tempfile.name);
+  c10::IValue ivalue_out;
+  input_archive.read("value", ivalue_out);
+
+  ASSERT_TRUE(ivalue_out.isTensor());
+  ASSERT_FALSE(ivalue_out.toTensor().defined());
+}
 TEST(SerializeTest, TryReadFunc) {
   auto tempfile = c10::make_tempfile();
   torch::serialize::OutputArchive output_archive;
@@ -665,6 +685,11 @@ TEST(SerializeTest, Optim_RMSprop) {
     }
   }
   is_optimizer_state_equal<RMSpropParamState>(optim1.state(), optim1_2.state());
+}
+
+TEST(SerializeTest, Optim_LBFGS) {
+  auto options = LBFGSOptions();
+  test_serialize_optimizer<LBFGS, LBFGSOptions, LBFGSParamState>(options);
 }
 
 TEST(SerializeTest, XOR_CUDA) {
