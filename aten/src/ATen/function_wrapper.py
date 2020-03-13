@@ -228,16 +228,16 @@ OPERATOR_NAME_FULL = CodeTemplate("""\
 
 # scalar_name, c_type, accreal, is_floating_type
 scalar_types = [
-    ('Bool', 'bool', 'BoolAccrealNotDefined', False),
+    #('Bool', 'bool', 'BoolAccrealNotDefined', False),
     ('Byte', 'uint8_t', 'Long', False),
-    ('Char', 'int8_t', 'Long', False),
-    ('Double', 'double', 'Double', True),
+    #('Char', 'int8_t', 'Long', False),
+    #('Double', 'double', 'Double', True),
     ('Float', 'float', 'Double', True),
-    ('Int', 'int', 'Long', False),
+    #('Int', 'int', 'Long', False),
     ('Long', 'int64_t', 'Long', False),
-    ('Short', 'int16_t', 'Long', False),
-    ('Half', 'Half', 'Double', True),
-    ('BFloat16', 'BFloat16', 'BFloat16AccrealNotDefined', True),
+    #('Short', 'int16_t', 'Long', False),
+    #('Half', 'Half', 'Double', True),
+    #('BFloat16', 'BFloat16', 'BFloat16AccrealNotDefined', True),
 ]
 
 static_dispatch_backends = ['CPU', 'QuantizedCPU']
