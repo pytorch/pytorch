@@ -175,6 +175,42 @@ class TestQuantizedOps(TestCase):
         self.assertEqual(qY.dequantize(), qY_hat.dequantize(),
                          message="F.leaky_relu failed ({} vs {})".format(qY, qY_hat))
 
+    """Tests the correctness of the quantized::elu op."""
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
+                       elements=hu.floats(-1e3, 1e3, allow_nan=False, allow_infinity=False),
+                       qparams=hu.qparams()),
+           alpha=st.floats(0.01, 10.0, allow_nan=False, allow_infinity=False))
+    def test_qelu(self, X, alpha):
+        X, (scale, zero_point, torch_type) = X
+
+        X = torch.from_numpy(X)
+        qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
+                                       dtype=torch_type)
+        op = torch.nn.quantized.functional.elu
+
+        # calculate ELU(dqX) and quantize
+        dqX = qX.dequantize()
+        dqY_hat = dqX.clone()
+        dqY_hat[dqX < 0] = alpha * (torch.exp(dqY_hat[dqX < 0]) - 1.)
+        qY_hat = torch.quantize_per_tensor(dqY_hat, scale=scale, zero_point=zero_point,
+                                           dtype=torch_type)
+
+        # test regular
+        qY = op(qX, alpha=alpha)
+        self.assertEqual(qY, qY_hat,
+                         message="F.elu failed ({} vs {})".format(qY, qY_hat))
+
+        # test inplace
+        qXcopy = qX.clone()
+        op(qXcopy, alpha=alpha, inplace=True)
+        self.assertEqual(qXcopy, qY_hat,
+                         message="F.elu_ failed ({} vs {})".format(qXcopy, qY_hat))
+
+        # test explicit scale and zp
+        qYout = op(qX, alpha=alpha, scale=scale, zero_point=zero_point)
+        self.assertEqual(qYout, qY_hat,
+                         message="F.elu.out failed ({} vs {})".format(qY, qY_hat))
+
     """Tests the correctness of the quantized::qnnpack_sigmoid op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
                        qparams=hu.qparams()))
@@ -1144,6 +1180,59 @@ class TestQuantizedOps(TestCase):
             "nn.functional": torch.nn.functional.interpolate,
             "nn.quantized.functional": torch.nn.quantized.functional.interpolate
         }
+        error_message = r"Results are off for {}:\n\tExpected:\n{}\n\tGot:\n{}"
+        for name, op in ops_under_test.items():
+            qX_hat = op(qX, size=size, scale_factor=scale_factor,
+                        mode=mode, align_corners=align_corners)
+            self.assertEqual(X_ref, qX_hat.int_repr(), prec=1.0,
+                             message="{} results are off".format(name, qX_hat.int_repr(), X_ref))
+            self.assertEqual(scale, qX_hat.q_scale(),
+                             message=error_message.format(name + '.scale', scale, qX_hat.q_scale()))
+            self.assertEqual(zero_point, qX_hat.q_zero_point(),
+                             message=error_message.format(name + '.zero_point', scale,
+                                                          qX_hat.q_zero_point()))
+
+    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=5, max_dims=5,
+                                              min_side=5, max_side=10),
+                       qparams=hu.qparams()),
+           size=st.sampled_from((1, 3, 5, 5, 10)),
+           scale_factor=st.sampled_from((None, 1.5, 2.0)),
+           align_corners=st.sampled_from((True, False)),
+           nhwc_layout=st.sampled_from((True, False)))
+    def test_interpolate3d(self, X, size, scale_factor, align_corners, nhwc_layout):
+        """
+        This test cover upsample_nearest2d and upsample_bilinear2d
+        """
+        X, (scale, zero_point, torch_type) = X
+        D, H, W = X.shape[-3:]
+        mode = "nearest"
+        if scale_factor is not None:
+            size = None
+        if mode == "nearest":
+            align_corners = None
+
+        if nhwc_layout:
+            if X.shape[1] < 176:
+                X = np.repeat(X, 176 / X.shape[1], 1)
+
+            X_nchw = np.ascontiguousarray(X.transpose([0, 2, 3, 4, 1]))
+            X = torch.from_numpy(X_nchw).permute([0, 4, 1, 2, 3])
+
+            qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
+                                           dtype=torch_type).permute([0, 4, 1, 2, 3])
+        else:
+            X = torch.from_numpy(X)
+            qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
+                                           dtype=torch_type)
+        X_ref = torch.nn.functional.interpolate(
+            qX.int_repr().to(torch.float), size=size, scale_factor=scale_factor,
+            mode=mode, align_corners=align_corners)
+
+        ops_under_test = {
+            "nn.functional": torch.nn.functional.interpolate,
+            "nn.quantized.functional": torch.nn.quantized.functional.interpolate
+        }
+
         error_message = r"Results are off for {}:\n\tExpected:\n{}\n\tGot:\n{}"
         for name, op in ops_under_test.items():
             qX_hat = op(qX, size=size, scale_factor=scale_factor,
