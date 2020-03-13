@@ -1764,6 +1764,14 @@ class _TestTorchMixin(object):
             self.assertIs(torch.int64, torch.randint(*args, size=size, out=out).dtype)
             self.assertIs(torch.int64, torch.randint(*args, size=size, out=out, dtype=torch.int64).dtype)
 
+    def test_full_inference(self):
+        size = (1, 2)
+        with self.maybeWarnsRegex(UserWarning, 'Deprecation warning: .+'):
+            torch.full(size, 1)
+
+        with self.maybeWarnsRegex(UserWarning, 'Deprecation warning: .+|Named tensors .+'):
+            torch.full(size, 1, names=('a', 'b'))
+
     def test_broadcast_empty(self):
         # empty + empty
         self.assertRaises(RuntimeError, lambda: torch.randn(5, 0) + torch.randn(0, 5))
@@ -12999,11 +13007,19 @@ class TestTorchDeviceType(TestCase):
                 # successful albeit with a singular input. Therefore,
                 # we require info.min() >= 0
                 self.assertGreaterEqual(info_.min(), 0)
+                print("DEBUG")
+                print(a)
                 a_LU, pivots = a.lu(pivot=pivot)
+                print(a_LU)
                 self.assertEqual(a_LU, a_LU_info)
                 self.assertEqual(pivots_info, pivots)
 
+                # print(a_LU)
                 P, L, U = torch.lu_unpack(a_LU, pivots)
+                # print(L)
+                # print(U)
+                # print(a)
+                # print(P.matmul(L.matmul(U)))
                 self.assertEqual(P.matmul(L.matmul(U)), a)
 
                 if self.device_type == 'cuda':
@@ -15695,7 +15711,7 @@ _types = [
     torch.uint8
 ]
 
-# _types2 adds bfloat16 type to  _types only on ROCm. Should eventually be unified 
+# _types2 adds bfloat16 type to  _types only on ROCm. Should eventually be unified
 # with _types when bfloat16 bringup is complete on all platforms.
 _types2 = _types + [torch.bfloat16] if TEST_WITH_ROCM else _types
 

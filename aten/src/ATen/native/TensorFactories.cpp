@@ -134,6 +134,7 @@ Tensor empty_cpu(IntArrayRef size, const TensorOptions& options_, c10::optional<
 
   auto memory_format = options.memory_format_opt().value_or(MemoryFormat::Contiguous);
   tensor.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
+
   return tensor;
 }
 
@@ -346,6 +347,15 @@ Tensor full(IntArrayRef size, Scalar fill_value, const TensorOptions& options) {
   if (options.layout() == kSparse) {
     AT_ERROR("full(...) is not implemented for sparse layout");
   }
+
+  if (!options.has_dtype() && fill_value.isIntegral(true)) {
+    TORCH_WARN_ONCE(
+      "Deprecation warning: In PyTorch 1.6 full will return a LongTensor when ",
+      "given an integer fill_value. Use the optional dtype argument to ",
+      "specify the desired dtype explicitly and suppress this warning."
+    );
+  }
+
   auto result = at::empty(size, options);
   return result.fill_(fill_value);
 }
@@ -354,6 +364,7 @@ Tensor& full_out(Tensor& result, IntArrayRef size, Scalar fill_value) {
   if (result.is_sparse()) {
     AT_ERROR("full(...) is not implemented for sparse layout");
   }
+
   result.resize_(size);
   return result.fill_(fill_value);
 }
@@ -960,6 +971,19 @@ Tensor full(
     Scalar fill_value,
     optional<DimnameList> names,
     const TensorOptions& options) {
+
+  if (options.layout() == kSparse) {
+    AT_ERROR("full(...) is not implemented for sparse layout");
+  }
+
+  if (!options.has_dtype() && fill_value.isIntegral(true)) {
+    TORCH_WARN_ONCE(
+      "Deprecation warning: In PyTorch 1.6 full will return a LongTensor when ",
+      "given an integer fill_value. Use the optional dtype argument to ",
+      "specify the desired dtype explicitly and suppress this warning."
+    );
+  }
+
   auto result = at::empty(size, names, options);
   return result.fill_(fill_value);
 }
