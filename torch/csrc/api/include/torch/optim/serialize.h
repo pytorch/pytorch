@@ -207,6 +207,23 @@ void serialize(
   }
 }
 
+template <typename T>
+c10::List<T> deque_to_list(const std::deque<T>& dq) {
+  c10::List<Tensor> list;
+  list.reserve(dq.size());
+  for (const auto& e : dq) {
+    list.push_back(e);
+  }
+  return list;
+}
+
+template <typename T>
+void list_to_deque(const c10::List<T>& list, std::deque<T>& dq) {
+  for (size_t i = 0; i < list.size(); i++) {
+    dq.push_back(list[i]);
+  }
+}
+
 #define _TORCH_OPTIM_SERIALIZE(name) \
   torch::optim::serialize(archive, #name, self.name)
 
@@ -216,10 +233,22 @@ void serialize(
 #define _TORCH_OPTIM_SERIALIZE_TORCH_ARG(name) \
   archive.write(#name, torch::IValue(name())); \
 
+#define _TORCH_OPTIM_SERIALIZE_TORCH_ARG_DEQUE(name) \
+  archive.write(#name, torch::IValue(deque_to_list(name())));
+
 #define _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(T, name) \
 { \
   c10::IValue ivalue; \
   name(ivalue.to<T>()); \
 }
+
+#define _TORCH_OPTIM_DESERIALIZE_TORCH_ARG_DEQUE(T, name) \
+{ \
+  c10::IValue ivalue; \
+  auto list = ivalue.to<c10::List<T::value_type>>(); \
+  auto& dq = name(); \
+  list_to_deque(list, dq); \
+}
+
 } // namespace optim
 } // namespace torch

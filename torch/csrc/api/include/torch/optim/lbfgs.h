@@ -15,7 +15,7 @@ namespace torch {
 namespace optim {
 
 struct TORCH_API LBFGSOptions : public OptimizerCloneableOptions<LBFGSOptions> {
-  LBFGSOptions(double lr);
+  LBFGSOptions(double lr = 1);
   TORCH_ARG(double, lr) = 1;
   TORCH_ARG(int64_t, max_iter) = 20;
   TORCH_ARG(c10::optional<int64_t>, max_eval) = c10::nullopt;
@@ -31,17 +31,17 @@ struct TORCH_API LBFGSOptions : public OptimizerCloneableOptions<LBFGSOptions> {
 };
 
 struct TORCH_API LBFGSParamState : public OptimizerCloneableParamState<LBFGSParamState> {
-  TORCH_ARG(Tensor, d) = {};
+  TORCH_ARG(int64_t, func_evals) = 0;
+  TORCH_ARG(int64_t, n_iter) = 0;
   TORCH_ARG(double, t);
-  TORCH_ARG(std::deque<Tensor>, old_dirs);
-  TORCH_ARG(std::deque<Tensor>, old_stps);
-  TORCH_ARG(std::deque<Tensor>, ro);
+  TORCH_ARG(Tensor, d) = {};
   TORCH_ARG(Tensor, H_diag) = {};
   TORCH_ARG(Tensor, prev_flat_grad) = {};
   TORCH_ARG(Tensor, prev_loss) = {};
+  TORCH_ARG(std::deque<Tensor>, old_dirs);
+  TORCH_ARG(std::deque<Tensor>, old_stps);
+  TORCH_ARG(std::deque<Tensor>, ro);
   TORCH_ARG(std::vector<Tensor>, al);
-  TORCH_ARG(int64_t, func_evals) = 0;
-  TORCH_ARG(int64_t, n_iter) = 0;
 
  public:
   void serialize(torch::serialize::InputArchive& archive) override;
@@ -70,8 +70,9 @@ class TORCH_API LBFGS : public Optimizer {
   Tensor _gather_flat_grad();
   void _add_grad(const double step_size, const Tensor& update);
   std::tuple<Tensor, Tensor> _directional_evaluate(
-    LossClosure closure, const Tensor& x, double t, const Tensor& d);
-  void _set_param(const Tensor& params_data);
+    LossClosure closure, const std::vector<Tensor>& x, double t, const Tensor& d);
+  void _set_param(const std::vector<Tensor>& params_data);
+  std::vector<Tensor> _clone_param();
   template <typename Self, typename Archive>
   static void serialize(Self& self, Archive& archive) {
     //_TORCH_OPTIM_SERIALIZE_WITH_TEMPLATE_ARG(LBGFS);

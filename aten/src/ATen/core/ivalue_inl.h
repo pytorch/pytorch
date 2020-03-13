@@ -620,16 +620,6 @@ static std::vector<T> createVectorFromList(const c10::detail::ListImpl* impl) {
   return result;
 }
 
-template<typename T>
-static std::deque<T> createDequeFromList(const c10::detail::ListImpl* impl) {
-  std::deque<T> result;
-  result.reserve(impl->list.size());
-  for (size_t i = 0, N = impl->list.size(); i < N; ++i) {
-    result.push_back(impl->list[i].to<T>());
-  }
-  return result;
-}
-
 inline c10::List<int64_t> IValue::toIntList() && {
   AT_ASSERT(isIntList(), "Expected IntList but got ", tagKind());
   return c10::List<int64_t>(moveToIntrusivePtr<c10::detail::ListImpl>());
@@ -673,10 +663,6 @@ inline c10::List<at::Tensor> IValue::toTensorList() const & {
 inline std::vector<at::Tensor> IValue::toTensorVector() const {
   AT_ASSERT(isTensorList(), "Expected TensorList but got ", tagKind());
   return createVectorFromList<at::Tensor>(static_cast<const c10::detail::ListImpl*>(payload.as_intrusive_ptr));
-}
-inline std::deque<at::Tensor> IValue::toTensorDeque() const {
-  AT_ASSERT(isTensorList(), "Expected TensorList but got ", tagKind());
-  return createDequeFromList<at::Tensor>(static_cast<const c10::detail::ListImpl*>(payload.as_intrusive_ptr));
 }
 inline c10::List<IValue> IValue::toList() && {
   AT_ASSERT(isList(), "Expected GenericList but got ", tagKind());
@@ -751,15 +737,6 @@ template<class T> inline IValue::IValue(const std::vector<T>& v)
   auto list = to<c10::List<T>>();
   list.reserve(v.size());
   for (const auto& e : v) {
-    list.push_back(e);
-  }
-}
-
-template<class T> inline IValue::IValue(const std::deque<T>& dq)
-: IValue(c10::List<T>()) {
-  auto list = to<c10::List<T>>();
-  list.reserve(dq.size());
-  for (const auto& e : dq) {
     list.push_back(e);
   }
 }
