@@ -31,15 +31,11 @@ PyObject * THPGenerator_initDefaultGenerator(at::GeneratorImpl* cdata)
   if (!self) throw python_error();
   auto self_ = reinterpret_cast<THPGenerator*>(self.get());
   self_->cdata = std::shared_ptr<at::GeneratorImpl>(cdata);
-  // self_->owner = false;
   return self.release();
 }
 
 static void THPGenerator_dealloc(THPGenerator* self)
 {
-  // if (self->owner) {
-  //   delete self->cdata;
-  // }
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
@@ -69,7 +65,6 @@ static PyObject * THPGenerator_pynew(PyTypeObject *type, PyObject *args, PyObjec
               " is not supported for torch.Generator() api.");
   self->cdata = std::make_shared<CPUGenerator>();
 #endif
-  // self->owner = true;
   return (PyObject*)self.release();
   END_HANDLE_TH_ERRORS
 }

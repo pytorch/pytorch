@@ -103,10 +103,6 @@ def type_argument_translations(arg):
         t = 'DimnameList'
         size = int(match.group(1))
 
-    # Legacy type sanitization. TODO: Do we really need this?
-    if t == 'Generator':
-        t = 'Generator'
-
     if not default:
         pass
     # This enables Tensor? x=None and translates to legacy
