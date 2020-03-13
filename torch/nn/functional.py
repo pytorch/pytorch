@@ -3764,7 +3764,7 @@ def multi_head_attention_forward(query,                           # type: Tensor
     assert key.size() == value.size()
 
     head_dim = embed_dim // num_heads
-    assert head_dim * num_heads == embed_dim, f"embed_dim = {embed_dim} must be divisible by num_heads = {num_heads}"
+    assert head_dim * num_heads == embed_dim, "embed_dim = {} must be divisible by num_heads = {}".format(embed_dim, num_heads)
     scaling = float(head_dim) ** -0.5
 
     if not use_separate_proj_weight:
