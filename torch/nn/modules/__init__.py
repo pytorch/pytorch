@@ -28,7 +28,8 @@ from .distance import PairwiseDistance, CosineSimilarity
 from .fold import Fold, Unfold
 from .adaptive import AdaptiveLogSoftmaxWithLoss
 from .transformer import TransformerEncoder, TransformerDecoder, \
-    TransformerEncoderLayer, TransformerDecoderLayer, Transformer
+    TransformerEncoderLayer, TransformerDecoderLayer, Transformer, \
+    MultiheadAttentionInProjection, ScaledDotProduct, MultiheadAttentionOutProjection
 from .flatten import Flatten
 
 __all__ = [
@@ -53,5 +54,6 @@ __all__ = [
     'ConstantPad3d', 'Bilinear', 'CosineSimilarity', 'Unfold', 'Fold',
     'AdaptiveLogSoftmaxWithLoss', 'TransformerEncoder', 'TransformerDecoder',
     'TransformerEncoderLayer', 'TransformerDecoderLayer', 'Transformer',
+    'MultiheadAttentionInProjection', 'ScaledDotProduct', 'MultiheadAttentionOutProjection',
     'Flatten',
 ]

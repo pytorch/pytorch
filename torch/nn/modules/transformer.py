@@ -375,6 +375,63 @@ class TransformerDecoderLayer(Module):
         return tgt
 
 
+class MultiheadAttentionInProjection(Module):
+    def __init__(self, in_embed_dim, num_heads, out_embed_dim=None):
+        super(MultiheadAttentionInProjection, self).__init__()
+        self.in_embed_dim = in_embed_dim
+        if not out_embed_dim:
+            self.out_embed_dim = in_embed_dim
+        else:
+            self.out_embed_dim = out_embed_dim
+        self.num_heads = num_heads
+        self.fc = Linear(self.in_embed_dim, self.out_embed_dim)
+
+    def forward(self, query):
+        seq, bsz, embed_dim = query.size(0), query.size(1), query.size(2)
+        head_dim = embed_dim // self.num_heads
+        assert head_dim * self.num_heads == embed_dim, \
+            "embed_dim must be divisible by num_heads"
+
+        q = self.fc(query)
+        q = torch.reshape(q, (seq, bsz * self.num_heads, head_dim))
+        return q.transpose(0, 1)
+
+
+class ScaledDotProduct(Module):
+    def __init__(self, dropout=0.0):
+        super(ScaledDotProduct, self).__init__()
+        self.dropout = dropout
+
+    def forward(self, query, key, value, attn_mask=None):
+        attn_output_weights = torch.matmul(query, key.transpose(-1, -2))
+        if attn_mask is not None:
+            attn_output_weights += attn_mask
+        attn_output_weights = F.softmax(attn_output_weights,
+                                        dim=-1)
+        attn_output_weights = F.dropout(attn_output_weights,
+                                        p=self.dropout,
+                                        training=self.training)
+        attn_output = torch.matmul(attn_output_weights, value)
+        return attn_output, attn_output_weights
+
+
+class MultiheadAttentionOutProjection(Module):
+    def __init__(self, embed_dim, num_heads):
+        super(MultiheadAttentionOutProjection, self).__init__()
+        self.embed_dim = embed_dim
+        self.num_heads = num_heads
+        self.linear = Linear(embed_dim, embed_dim)
+
+    def forward(self, attn_output):
+        batch_heads, tgt_len = attn_output.size(0), attn_output.size(1)
+        bsz = batch_heads // self.num_heads
+        assert bsz * self.num_heads == batch_heads, \
+            "batch size times the number of heads not equal to attn_output[0]"
+        attn_output = torch.reshape(attn_output.transpose(0, 1),
+                                    (tgt_len, bsz, self.embed_dim))
+        return self.linear(attn_output)
+
+
 def _get_clones(module, N):
     return ModuleList([copy.deepcopy(module) for i in range(N)])
 
