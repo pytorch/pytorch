@@ -11,7 +11,6 @@
 
 namespace torch {
 namespace jit {
-namespace script {
 
 std::string typeString(py::handle h);
 
@@ -175,6 +174,11 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
 
   SugaredValuePtr iter(const SourceRange& loc, Function& m) override;
 
+  std::shared_ptr<SugaredValue> getitem(
+      const SourceRange& loc,
+      Function& m,
+      Value* idx) override;
+
  private:
   Value* self_;
   std::shared_ptr<ConcreteModuleType> concreteType_;
@@ -186,7 +190,8 @@ void recurseThroughNestedModules(
     std::vector<SugaredValuePtr>& keys,
     std::vector<SugaredValuePtr>& values,
     std::shared_ptr<ModuleValue> self,
-    const std::string& prefix);
+    const std::string& prefix,
+    const std::string& field);
 
 // Used to support named_modules()
 struct VISIBILITY_HIDDEN SugaredModuleDict : public SugaredValue {
@@ -201,6 +206,14 @@ struct VISIBILITY_HIDDEN SugaredModuleDict : public SugaredValue {
 
   std::string kind() const override {
     return "ModuleDict";
+  }
+
+  std::shared_ptr<SugaredTupleValue> getKeys() {
+    return keys_;
+  }
+
+  std::shared_ptr<SugaredTupleValue> getModules() {
+    return modules_;
   }
 
   std::shared_ptr<SugaredValue> attr(
@@ -253,6 +266,5 @@ struct VISIBILITY_HIDDEN PythonClassValue : public ClassValue {
   py::object py_type_;
 };
 
-} // namespace script
 } // namespace jit
 } // namespace torch

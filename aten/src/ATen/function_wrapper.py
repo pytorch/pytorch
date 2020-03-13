@@ -615,10 +615,7 @@ def named_guard(option, tensors, tensorlists):
         named_conditions.append('at::has_names({})'.format(tensorlist))
     return ("""\
 if ({named_conditions}) {{
-    AT_ERROR(
-        "{op} is not yet supported with named tensors. Please drop names via "
-        "`tensor = tensor.rename(None)`, call the op with an unnamed tensor, "
-        "and set names on the result of the operation.");
+    AT_ERROR("{op}", named_tensors_unsupported_error);
 }}""".format(named_conditions=' || '.join(named_conditions), op=option['name']))
 
 
@@ -1391,11 +1388,7 @@ def create_derived(backend_type_env, declarations):
         if isinstance(resize, str):
             return "{}.resize_({}.sizes());".format(arg['name'], resize)
         else:
-            resize_scalar = arg.get('resize_scalar', False)
-            if resize_scalar:
-                dims = ['{}.dim() == 0 ? 1 : {}.size({})'.format(name, name, dim) for name, dim in resize]
-            else:
-                dims = ['{}.size({})'.format(name, dim) for name, dim in resize]
+            dims = ['{}.size({})'.format(name, dim) for name, dim in resize]
             return "{}.resize_({{ {} }});".format(arg['name'], ','.join(dims))
 
     def handle_call(env, option, cimpl):

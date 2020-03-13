@@ -21,10 +21,8 @@ namespace jit {
 
 namespace {
 
-c10::OperatorOptions aliasAnalysisFromSchema() {
-  c10::OperatorOptions result;
-  result.setAliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA);
-  return result;
+c10::AliasAnalysisKind aliasAnalysisFromSchema() {
+  return c10::AliasAnalysisKind::FROM_SCHEMA;
 }
 
 void checkListInputType(const c10::TypePtr& elem_type, bool empty_list) {
@@ -216,6 +214,7 @@ RegisterOperators reg({
           return 0;
         },
         aliasAnalysisFromSchema()),
+    // not currently being generated, here for BC
     Operator(
         "aten::list_with_default(int[] list, int[] defaults) -> int[]",
         [](Stack& stack) {

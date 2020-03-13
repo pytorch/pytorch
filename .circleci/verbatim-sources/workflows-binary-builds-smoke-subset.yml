@@ -10,13 +10,13 @@
           build_environment: "manywheel 2.7mu cpu devtoolset7"
           requires:
             - setup
-          docker_image: "pytorch/manylinux-cuda100"
+          docker_image: "pytorch/manylinux-cuda102"
       - binary_linux_build:
-          name: binary_linux_manywheel_3_7m_cu100_devtoolset7_build
-          build_environment: "manywheel 3.7m cu100 devtoolset7"
+          name: binary_linux_manywheel_3_7m_cu102_devtoolset7_build
+          build_environment: "manywheel 3.7m cu102 devtoolset7"
           requires:
             - setup
-          docker_image: "pytorch/manylinux-cuda100"
+          docker_image: "pytorch/manylinux-cuda102"
       - binary_linux_build:
           name: binary_linux_conda_2_7_cpu_devtoolset7_build
           build_environment: "conda 2.7 cpu devtoolset7"
@@ -31,7 +31,7 @@
           requires:
             - setup
           libtorch_variant: "shared-with-deps"
-          docker_image: "pytorch/manylinux-cuda100"
+          docker_image: "pytorch/manylinux-cuda102"
       - binary_linux_build:
           name: binary_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_shared-with-deps_build
           build_environment: "libtorch 2.7m cpu gcc5.4_cxx11-abi"
@@ -68,14 +68,14 @@
           requires:
             - setup
             - binary_linux_manywheel_2_7mu_cpu_devtoolset7_build
-          docker_image: "pytorch/manylinux-cuda100"
+          docker_image: "pytorch/manylinux-cuda102"
       - binary_linux_test:
-          name: binary_linux_manywheel_3_7m_cu100_devtoolset7_test
-          build_environment: "manywheel 3.7m cu100 devtoolset7"
+          name: binary_linux_manywheel_3_7m_cu102_devtoolset7_test
+          build_environment: "manywheel 3.7m cu102 devtoolset7"
           requires:
             - setup
-            - binary_linux_manywheel_3_7m_cu100_devtoolset7_build
-          docker_image: "pytorch/manylinux-cuda100"
+            - binary_linux_manywheel_3_7m_cu102_devtoolset7_build
+          docker_image: "pytorch/manylinux-cuda102"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
@@ -94,7 +94,7 @@
             - setup
             - binary_linux_libtorch_2_7m_cpu_devtoolset7_shared-with-deps_build
           libtorch_variant: "shared-with-deps"
-          docker_image: "pytorch/manylinux-cuda100"
+          docker_image: "pytorch/manylinux-cuda102"
       - binary_linux_test:
           name: binary_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_shared-with-deps_test
           build_environment: "libtorch 2.7m cpu gcc5.4_cxx11-abi"
