@@ -45,6 +45,8 @@ from torch.nn.quantized.modules.linear import LinearPackedParams
 from torch.quantization import QConfig
 from torch.quantization._quantize_script import ConvPackedParams
 from torch.quantization._quantize_script import script_qconfig
+from torch.quantization._quantize_script import prepare_script
+from torch.quantization._quantize_script import convert_script
 from torch.quantization._quantize_script import quantize_script
 from torch.quantization import default_observer
 from torch.quantization import default_weight_observer
@@ -1571,6 +1573,27 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
             graph = parse_ir(input_str)
             torch._C._jit_pass_quant_fusion(graph)
             FileCheck().run(input_str, graph)
+
+    def test_quantized_conv_relu_fusion(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.conv = torch.nn.Conv2d(1, 4, 2, 3).float()
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                return self.relu(self.conv(x))
+
+        m = torch.jit.script(M().eval())
+        m = prepare_script(m, {'': script_qconfig(default_qconfig)}, True)
+        data = torch.randn(1, 1, 10, 10, dtype=torch.float)
+        m(data)
+        m = convert_script(m, True)
+        print(m.graph_for(data))
+        FileCheck().check_not("aten::conv2d") \
+                   .check_not("aten::relu") \
+                   .check("quantized::conv2d_relu") \
+                   .run(m.graph_for(data))
 
     def test_foldbn_trivial(self):
         # Test trivial case
