@@ -152,7 +152,6 @@ __device__ inline void elementwise_kernel_helper(func_t f, policy_t policy) {
   using traits = function_traits<func_t>;
   using return_t = typename traits::result_type;
   using args_t = typename traits::ArgsTuple;
-  constexpr int arity = traits::arity;
 
   int idx = block_work_size * blockIdx.x;
 
