@@ -54,8 +54,11 @@ c10::IValue getFunctionTuple(const Function& func) {
       auto node = code.instructions_source()[i];
       opnames.emplace_back(node->schema().operator_name());
     }
-    // Emit qualified names for built-in Functions
-    // (i.e. Function instances for which isGraphFunction() returns false)
+    // CALL nodes at this point represent built-in (i.e. non-Graph)
+    // functions that were not inlined. Here we convert the CALL
+    // instructions for these functions into INTERFACE_CALL instructions
+    // s.t. at runtime, we will look up the Function* on the Type of the
+    // 0th argument in the stack and call that directly.
     if (ins.op == CALL) {
       auto node = code.instructions_source()[i];
       if (node->kind() == prim::CallMethod) {
@@ -88,8 +91,10 @@ c10::IValue getFunctionTuple(const Function& func) {
   }
 
   // constants
+  //
+  // Make a copy of the constants and append the method names
+  // that we emitted for the converted INTERFACE_CALL nodes above.
   auto constants = code.constant_table();
-
   for (auto& method_name : method_names) {
     constants.emplace_back(std::move(method_name));
   }
