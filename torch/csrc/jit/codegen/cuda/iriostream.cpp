@@ -122,11 +122,11 @@ void IRPrinter::handle(const UnaryOp* const uop) {
 
   if (!print_inline_)
     os << uop->out() << " = ";
-  if (auto inline_uop = inline_op_str(uop->type())) {
+  if (auto inline_uop = inline_op_str(uop->getUnaryOpType())) {
     os << inline_uop.value();
     handle( uop->in() );
   } else {
-    os << uop->type() << "(";
+    os << uop->getUnaryOpType() << "(";
     handle( uop->in() ); 
     os << ")";
   }
@@ -141,12 +141,12 @@ void IRPrinter::handle(const BinaryOp* const bop) {
 
   if (!print_inline_)
     os << bop->out() << " = ";
-  if (auto inline_bop = inline_op_str(bop->type())) {
+  if (auto inline_bop = inline_op_str(bop->getBinaryOpType())) {
     handle( bop->lhs() );
     os << " " << inline_bop.value() << " ";
     handle( bop->rhs() );
   } else {
-    os << bop->type() << "(";
+    os << bop->getBinaryOpType() << "(";
     handle( bop->lhs() );
     os  << ", ";
     handle( bop->rhs() );
@@ -158,12 +158,16 @@ void IRPrinter::handle(const BinaryOp* const bop) {
 }
 
 void IRPrinter::handle(const ForLoop* const fl) {
-  os << "ForLoop: index: " << fl->index() << " range: " << fl->range() << "\n";
-  for(auto &expr : fl->body()) {
-    os << "\t";
-    handle(expr);	
-  }
+  os <<"for(size_t " << fl->index() << "{0}; "
+  << fl->index() << " < " << fl->range() << "; "
+  << "++" << fl->index() <<" ) {\n";
+
+  for(auto &expr : fl->body())
+    handle(expr);
+
+  os << "}\n";
 }
+
 void IRPrinter::handle(const IfThenElse* const ite) {
   os << "if ( ";
   print_inline(ite->cond());

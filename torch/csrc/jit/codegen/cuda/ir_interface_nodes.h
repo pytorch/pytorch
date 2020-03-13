@@ -141,9 +141,11 @@ struct TORCH_API TensorView : public Val {
     return compute_at_view_->getComputeAtAxis(pos);
   }
 
+  TensorDomain* getRootDomain() const;
   // Return the TensorView to its original state, before all
   // transformations/computeAt calls.
   void resetView();
+  
 
   // Compute this TensorView relative to another tensor at axis
   TensorView* computeAt(TensorView* consumer, int axis);

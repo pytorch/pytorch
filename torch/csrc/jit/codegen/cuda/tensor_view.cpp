@@ -227,8 +227,12 @@ TensorView* TensorView::newForOutput(DataType dtype) const {
   return new TensorView(td, dtype);
 };
 
+TensorDomain* TensorView::getRootDomain() const {
+  return TransformIter::getRoot(this->domain());
+};
+
 void TensorView::resetView() {
-  setDomain(TransformIter::getRoot(this->domain()));
+  setDomain(getRootDomain());
   compute_at_view_ = nullptr;
   compute_at_axis_ = 0;
 }

@@ -41,53 +41,41 @@ void testGPU_FusionDispatch() {
   FusionGuard fg(&fusion);
 
   Float* f = new Float{2.f};
-
-  std::cout << "Dispatch 2.f by Float reference: " << f << std::endl;
-
-  std::cout << "Dispatch 2.f by Val reference: " << static_cast<Val*>(f)
-            << std::endl;
-
-  std::cout << "Dispatch 2.f by Statement reference: "
-            << static_cast<Statement*>(f) << std::endl;
+  std::stringstream ss1, ss2, ss3;
+  ss1 << f;
+  ss2 << static_cast<Val*>(f);
+  ss3 << static_cast<Statement*>(f);
+  TORCH_CHECK(ss1.str().compare(ss2.str()) == 0 && ss1.str().compare(ss3.str()) == 0,
+  "Error with dispatch system where results differ by passing Float* vs Val* vs Statement*.");
 }
 
 void testGPU_FusionSimpleArith() {
+
+  std::stringstream ss1, ss2;
+  
   Fusion fusion;
   FusionGuard fg(&fusion);
 
   Float* f1 = new Float(1.f);
   Float* f2 = new Float{2.f};
+  Float* f3 = new Float();
 
-  auto f3 = add(f1, f2);
-  std::cout << "Explicit add construction of 1.f + 2.f: " << fusion
-            << std::endl;
-}
-
-void testGPU_FusionContainer() {
-  Fusion fusion1;
-  FusionGuard fg(&fusion1);
-
-  Float* f1 = new Float(1.f);
-  Float* f2 = new Float(2.f);
-  auto f3 = add(f1, f2);
-  std::cout << "Implicit add construction of 1.f + 2.f : " << fusion1
-            << std::endl;
-  
-  Fusion fusion2;
+  //Disrupt the fusion to make sure guard works well
   {
-    FusionGuard fg2(&fusion2);
-    Float* f3 = new Float(1.f);
-    Float* f4 = new Float(2.f);
-    auto f5 = add(f3, f4);
-    TORCH_CHECK(
-       FusionGuard::getCurFusion()->used(f3)
-    && FusionGuard::getCurFusion()->used(f4)
-    && !FusionGuard::getCurFusion()->used(f5));
+    Fusion fusion2;
+    FusionGuard fg(&fusion2);
 
-    TORCH_CHECK(FusionGuard::getCurFusion() == &fusion2);
+    Float* f1 = new Float(1.f);
+    Float* f2 = new Float(2.f);
+    auto f3 = add(f1, f2);
+    ss2 << fusion2;
   }
 
-  TORCH_CHECK(FusionGuard::getCurFusion() == &fusion1);
+  new BinaryOp(BinaryOpType::Add, f3, f1, f2);
+  ss1 << fusion;
+
+  TORCH_CHECK(ss1.str().compare(ss2.str()) == 0,
+  "Error where explicit add nodes don't match implicit add nodes.");
 }
 
 void testGPU_FusionSimpleTypePromote() {
@@ -393,9 +381,22 @@ void testGPU_FusionTVSplit() {
   TensorView* tv = makeDummyTensor(3);
 
   tv = tv->split(2, 2);
-  std::cout << "Split: " << tv << std::endl;
+  TORCH_CHECK(tv->nDims() == 4);
+  Expr* outer = tv->axis(2)->size()->getOrigin();
 
-  std::cout << "Split fusion output: " << fusion << std::endl;
+  TORCH_CHECK(
+      outer->getExprType().value() == ExprType::BinaryOp
+      && static_cast<BinaryOp*>(outer)->getBinaryOpType() == BinaryOpType::CeilDiv
+      && static_cast<BinaryOp*>(outer)->lhs()->sameAs(tv->getRootDomain()->axis(2)->size())
+      && static_cast<Int*>( static_cast<BinaryOp*>(outer)->rhs() )->sameAs(new Int(2))
+    );
+
+  IterDomain* inner = static_cast<IterDomain*>(tv->axis(3));
+  TORCH_CHECK(
+      inner->size()->isScalar() && static_cast<Int*>(inner->size())->isConst()
+      && static_cast<Int*>(inner->size())->value().value() == 2
+    );
+
 }
 
 void testGPU_FusionTVMerge() {
@@ -659,47 +660,6 @@ void testGPU_FusionDependency() {
   TORCH_CHECK(dep_chain.empty());
 }
 
-void testGPU_FusionTwoAdds() {
-  Fusion fusion;
-  FusionGuard fg(&fusion);
-
-  // This is the beginning of an example where two Adds are fused where their computation
-  // is unrolled and vectorized per thread.
-
-  /**** Tensor Storage       ****/
-
-  // All Tensors have TensorDomain Shapes of [16]
-  // T3 is notably the only intermediate that is not I/O
-
-  auto TV0 = new TensorView(new TensorDomain({new IterDomain(new Int(16))}), DataType::Float);
-  auto TV1 = new TensorView(new TensorDomain({new IterDomain(new Int(16))}), DataType::Float);
-  auto TV2 = new TensorView(new TensorDomain({new IterDomain(new Int(16))}), DataType::Float);
-
-  fusion.addInput(TV0);
-  fusion.addInput(TV1);
-  fusion.addInput(TV2);
-  
-  /**** Operator Expressions ****/ 
-
-  TensorView *TV3 = static_cast<TensorView*>(add(TV0, TV1));
-  TensorView *TV4 = static_cast<TensorView*>(add(TV3, TV2));
-  
-  fusion.addOutput(TV4);
-  
-  /**** Tensor Expressions   ****/ 
- 
-  // [x] -> [16/4=4, 4]
-  TV4 = TV4->split(-1, 4);
-  // [x/4, 4] -> [16/4=4, 4/2=2, 2]
-  TV4 = TV4->split(-1, 2); 
-
-  // Compute T3 at inner loop of T4 but allow vectorization.
-  TV3->computeAt(TV4, 1);
-  
-  fusion.print();
-}
-
-
 void testGPU_FusionCodeGen() {
   Fusion fusion;
   FusionGuard fg(&fusion);
@@ -914,12 +874,6 @@ void testGPU_FusionSimplePWise() {
   tv3->axis(-2)->parallelize(ParallelType::TIDy);
   tv3->axis(-1)->parallelize(ParallelType::TIDx);
   
-
-  std::cout
-  << "%T3[ iS{( ceilDiv(%i0, 4) )}, iS{4}, iS{%i1}, iS{%i2} ] compute_at( %T5, 1 ) = %T1 + 2f\n"
-  << "%T5[ iS{( ceilDiv(%i0, 4) )}, iS{4}, iS{%i1}, iS{%i2} ] = %T0 + %T3\n"
-  << "::::::::::::" << std::endl;
-
   torch::jit::fuser::cuda::CudaKernel prog;
   prog.device_ = 0;
   prog.grid(64);     //   1 CTA
@@ -1012,8 +966,18 @@ void testGPU_FusionForLoop() {
   fusion.addOutput(TV2);
 
   ForLoop*  fl = new ForLoop(new Int(), ID0, {op});
+  std::stringstream result;
+  std::stringstream ref;
+  result << fl;
+  ref << "for(size_t i3{0}; i3 < iS{8}; ++i3 ) {\nT2[ iS{16} ] = T0[ iS{16} ] + T1[ iS{16} ]\n}";
 
-  std::cout << fl;
+  if(result.str().compare(ref.str()) == 0){
+    std::stringstream err_msg;
+    err_msg << "ForLoop printing has changed or something has gone wrong. "
+    << result.str() << "\n does not match reference: " << ref.str() << std::endl;
+    TORCH_CHECK(false, err_msg.str());
+  }
+  
 }
 
 void testGPU_Fusion() {}

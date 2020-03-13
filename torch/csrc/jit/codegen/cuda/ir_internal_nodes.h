@@ -41,7 +41,7 @@ struct TORCH_API UnaryOp : public Expr {
   Val* out() const noexcept { return out_; }
   Val* in() const noexcept { return in_; }
 
-  UnaryOpType type() const noexcept { return unary_op_type_; }
+  UnaryOpType getUnaryOpType() const noexcept { return unary_op_type_; }
 
   bool sameAs(const UnaryOp* const other) const;
 
@@ -71,7 +71,7 @@ struct TORCH_API BinaryOp : public Expr {
   Val* lhs() const noexcept { return lhs_; }
   Val* rhs() const noexcept { return rhs_; }
 
-  BinaryOpType type() const noexcept { return binary_op_type_; }
+  BinaryOpType getBinaryOpType() const noexcept { return binary_op_type_; }
 
   bool sameAs(const BinaryOp* other) const;
 

@@ -97,7 +97,6 @@ namespace jit {
   _(Interp)                      \
   _(GPU_FusionDispatch)          \
   _(GPU_FusionSimpleArith)       \
-  _(GPU_FusionContainer)         \
   _(GPU_FusionSimpleTypePromote) \
   _(GPU_FusionMutator)           \
   _(GPU_FusionTopoSort)          \
@@ -114,7 +113,6 @@ namespace jit {
   _(GPU_FusionComputeAt2)        \
   _(GPU_FusionComputeAt3)        \
   _(GPU_FusionDependency)        \
-  _(GPU_FusionTwoAdds)           \
   _(GPU_FusionParser)            \
   _(GPU_FusionCodeGen)           \
   _(GPU_FusionCodeGen2)          \

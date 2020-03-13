@@ -111,7 +111,7 @@ Statement* OptOutMutator::mutate(UnaryOp* uop) {
   Val* in = static_cast<Val*>(mutate(uop->in()));
 
   if (!(out->sameAs(uop->out()) && in->sameAs(uop->in())))
-    return new UnaryOp(uop->type(), out, in);
+    return new UnaryOp(uop->getUnaryOpType(), out, in);
   return uop;
 }
 
@@ -120,7 +120,7 @@ Statement* OptOutMutator::mutate(BinaryOp* bop) {
   Val* lhs = static_cast<Val*>(mutate(bop->lhs()));
   Val* rhs = static_cast<Val*>(mutate(bop->rhs()));
   if (!(out != bop->out() && lhs != bop->lhs() && rhs != bop->rhs()))
-    return new BinaryOp(bop->type(), out, lhs, rhs);
+    return new BinaryOp(bop->getBinaryOpType(), out, lhs, rhs);
   return bop;
 }
 

@@ -176,11 +176,11 @@ void CodeWrite::handle(const UnaryOp* const uop) {
 
   bool predicated = printConsumer(static_cast<TensorView*>(uop->out()));
 
-  if (auto inline_uop = inline_op_str(uop->type())) {
+  if (auto inline_uop = inline_op_str(uop->getUnaryOpType())) {
     os << inline_uop.value();
     handle(uop->in());
   } else {
-    os << uop->type() << "(";
+    os << uop->getUnaryOpType() << "(";
     handle(uop->in());
     os << ")";
   }
@@ -207,7 +207,7 @@ void CodeWrite::handle(const BinaryOp* const bop) {
 
   bool predicated = printConsumer(static_cast<TensorView*>(bop->out()));
 
-  if (auto inline_bop = inline_op_str(bop->type())) {
+  if (auto inline_bop = inline_op_str(bop->getBinaryOpType())) {
     handle(bop->lhs());
     os << "\n";
     indent();
@@ -215,7 +215,7 @@ void CodeWrite::handle(const BinaryOp* const bop) {
     os << inline_bop.value() << " ";
     handle(bop->rhs());
   } else {
-    os << bop->type() << "(";
+    os << bop->getBinaryOpType() << "(";
     handle(bop->lhs());
     os << "\n";
     indent();
@@ -401,7 +401,7 @@ void CodeWrite::setupOverrides() {
 
       TensorView* tv = static_cast<TensorView*>(val);
       TensorDomain* td = tv->domain();
-      TensorDomain* root = TransformIter::getRoot(tv->domain());
+      TensorDomain* root = tv->getRootDomain();
 
       for (decltype(root->size()) i{0}; i < root->size(); i++) {
         if (overrides_find(root->axis(i)->size()) == overrides.end()) {

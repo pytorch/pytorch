@@ -25,7 +25,7 @@ std::vector<Int*> PredicateCompute::computePredicates(
   if (!hasPredicates(tv, _indices))
     return preds;
 
-  TensorDomain* root = TransformIter::getRoot(tv->domain());
+  TensorDomain* root = tv->getRootDomain();
   TORCH_CHECK(root->size() == _indices.size());
   for (decltype(_indices.size()) i{0}; i < _indices.size(); i++)
 
