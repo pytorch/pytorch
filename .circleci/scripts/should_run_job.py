@@ -13,21 +13,23 @@ default_set = set([
     # Selected oldest Python 2 version to ensure Python 2 coverage
     'pytorch-linux-xenial-py2.7.9',
     # PyTorch CUDA
-    'pytorch-linux-xenial-cuda10.1-cudnn7-py3',
+    'pytorch-linux-xenial-cuda10.2-cudnn7-py3',
     # PyTorch ASAN
     'pytorch-linux-xenial-py3-clang5-asan',
     # PyTorch DEBUG
     'pytorch-linux-xenial-py3.6-gcc5.4',
     # LibTorch
-    'pytorch-libtorch-linux-xenial-cuda10.1-cudnn7-py3',
+    'pytorch-libtorch-linux-xenial-cuda10.2-cudnn7-py3',
 
     # Caffe2 CPU
     'caffe2-py2-mkl-ubuntu16.04',
     # Caffe2 CUDA
-    'caffe2-py3.5-cuda10.1-cudnn7-ubuntu16.04',
+    'caffe2-py3.5-cuda10.2-cudnn7-ubuntu16.04',
     # Caffe2 ONNX
     'caffe2-onnx-py2-gcc5-ubuntu16.04',
-    'caffe2-onnx-py3.6-clang7-ubuntu16.04',
+    'caffe2-onnx-main-py3.6-clang7-ubuntu16.04',
+    'caffe2-onnx-ort1-py3.6-clang7-ubuntu16.04',
+    'caffe2-onnx-ort2-py3.6-clang7-ubuntu16.04',
     # Caffe2 Clang
     'caffe2-py2-clang7-ubuntu16.04',
     # Caffe2 CMake
@@ -59,9 +61,11 @@ default_set = set([
     'pytorch-ios-11.2.1-x86_64_build',
     'pytorch-ios-11.2.1-arm64_build',
     'pytorch-ios-11.2.1-arm64_custom_build',
-    # PyTorch Mobile builds
+    # PyTorch Mobile builds (host toolchain + mobile CMake build options)
     'pytorch-linux-xenial-py3-clang5-mobile-build',
-    'pytorch-linux-xenial-py3-clang5-android-ndk-r19c-mobile-code-analysis',
+    'pytorch-linux-xenial-py3-clang5-mobile-custom-build-static',
+    'pytorch-linux-xenial-py3-clang5-mobile-custom-build-dynamic',
+    'pytorch-linux-xenial-py3-clang5-mobile-code-analysis',
 
     # Pytorch backward compatibility check
     'pytorch-linux-backward-compatibility-check-test',

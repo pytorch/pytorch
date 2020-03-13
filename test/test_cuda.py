@@ -280,6 +280,21 @@ class TestCuda(TestCase):
         for _ in self._test_memory_stats_generator(self):
             self._check_memory_stat_consistency()
 
+    def test_memory_allocation(self):
+        gc.collect()
+        torch.cuda.empty_cache()
+        mem = None
+        size = 1
+        prev = 0
+        try:
+            prev = torch.cuda.memory_allocated()
+            mem = torch.cuda.caching_allocator_alloc(size)
+            self.assertGreater(torch.cuda.memory_allocated(), prev)
+        finally:
+            if mem is not None:
+                torch.cuda.caching_allocator_delete(mem)
+                self.assertEqual(torch.cuda.memory_allocated(), prev)
+
     def test_cuda_get_device_name(self):
         # Testing the behaviour with None as an argument
         current_device = torch.cuda.current_device()

@@ -1,13 +1,15 @@
 #include <torch/csrc/jit/ir/ir.h>
 
+#include <ATen/core/builtin_function.h>
+#include <ATen/core/function.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
+#include <torch/csrc/jit/api/function_impl.h>
+#include <torch/csrc/jit/frontend/error_report.h>
+#include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/ir/constants.h>
-#include <torch/csrc/jit/api/function.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/serialization/python_print.h>
-#include <torch/csrc/jit/frontend/schema_matching.h>
-#include <torch/csrc/jit/frontend/error_report.h>
 
 #include <algorithm>
 #include <iostream>
@@ -430,6 +432,7 @@ void Node::lint() const {
       // longer.
       break;
     case prim::FusionGroup:
+    case prim::CudaFusionGroup:
       checkSameDevice(this);
       // TODO: Typecheck the parameters
       g(attr::Subgraph)->lint();
@@ -717,7 +720,7 @@ void Value::inferTypeFrom(const at::Tensor& output) {
 }
 
 bool Value::mustBeNone() const {
-  return node_->mustBeNone();
+  return type()->cast<NoneType>() || node_->mustBeNone();
 }
 bool Value::mustNotBeNone() const {
   return node_->kind() != prim::AutogradAdd && type() != NoneType::get() &&
@@ -960,7 +963,7 @@ const Operator& Node::getOperator() const {
   if (maybe)
     return *maybe;
 
-  auto er = script::ErrorReport(sourceRange());
+  auto er = ErrorReport(sourceRange());
   er << "Schema not found for node. File a bug report.\n";
   er << "Node: " << *this << "\n";
   er << "Input types:";
@@ -1005,17 +1008,13 @@ bool Node::isNondeterministic() const {
       "aten::rrelu(Tensor self, Scalar lower, Scalar upper, bool training, Generator? generator) -> Tensor",
       "aten::rrelu_with_noise(Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training, Generator? generator) -> Tensor",
       "aten::rand(int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
-      "aten::rand_like(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor",
-      "aten::rand_like(Tensor self, *, int dtype, int layout, Device device, bool pin_memory, MemoryFormat? memory_format=None) -> Tensor",
+      "aten::rand_like(Tensor self, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
       "aten::randint(int high, int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
       "aten::randint(int low, int high, int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
-      "aten::randint_like(Tensor self, int high, *, MemoryFormat? memory_format=None) -> Tensor",
-      "aten::randint_like(Tensor self, int low, int high, *, MemoryFormat? memory_format=None) -> Tensor",
-      "aten::randint_like(Tensor self, int high, *, int dtype, int layout, Device device, bool pin_memory, MemoryFormat? memory_format=None) -> Tensor",
-      "aten::randint_like(Tensor self, int low, int high, *, int dtype, int layout, Device device, bool pin_memory, MemoryFormat? memory_format=None) -> Tensor",
+      "aten::randint_like(Tensor self, int high, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
+      "aten::randint_like(Tensor self, int low, int high, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
       "aten::randn(int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
-      "aten::randn_like(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor",
-      "aten::randn_like(Tensor self, *, int dtype, int layout, Device device, bool pin_memory, MemoryFormat? memory_format=None) -> Tensor",
+      "aten::randn_like(Tensor self, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
       "aten::randperm(int n, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor"};
 
   if (!isMemberOf(nondeterministic_ops)) {
@@ -1492,7 +1491,7 @@ Value* Graph::insert(
     at::ArrayRef<NamedValue> args,
     at::ArrayRef<NamedValue> kwargs,
     const c10::optional<SourceRange>& range) {
-  return script::emitBuiltinCall(
+  return emitBuiltinCall(
       range.value_or(fakeRange()), *this, opname, args, kwargs);
 }
 
@@ -1686,9 +1685,43 @@ Value* Graph::insertUncheckedCast(Value* v, TypePtr type) {
   return n->output();
 }
 
+Value* Graph::insertToList(Value* v, TypePtr type) {
+  int dim = 0;
+  TypePtr ptr = type;
+
+  // Unwrap the type to determine the number of dimensions.
+  while (auto list_type = ptr->cast<ListType>()) {
+    ptr = list_type->getElementType();
+    ++dim;
+  }
+
+  // Encode the base element type as an integer.
+  int elem_ty = 0;
+  if (ptr == IntType::get()) {
+    elem_ty = 0;
+  } else if (ptr == FloatType::get()) {
+    elem_ty = 1;
+  } else if (ptr == BoolType::get()) {
+    elem_ty = 2;
+  } else {
+    TORCH_CHECK(
+        false,
+        ptr->python_str(),
+        " is not one of the supported element types for tolist: int, float, bool");
+  }
+
+  // Pass in the number of dimensions and base element type as arguments
+  // to the op.
+  Value* dim_val = insertConstant(IValue(dim));
+  Value* elem_ty_val = insertConstant(IValue(elem_ty));
+  Node* n = insertNode(create(prim::tolist, {v, dim_val, elem_ty_val}));
+  n->output()->setType(std::move(type));
+  return n->output();
+}
+
 Value* Graph::insertFunctionCall(
     Function* callee,
-    const script::MatchedSchema& matched) {
+    const MatchedSchema& matched) {
   std::string func_name = callee->name();
   Value* fn_constant = insertNode(create(prim::Constant))
                            ->s_(attr::name, func_name)
@@ -1704,7 +1737,7 @@ Value* Graph::insertFunctionCall(
 
 Value* Graph::insertMethodCall(
     std::string method_name,
-    const script::MatchedSchema& matched) {
+    const MatchedSchema& matched) {
   Value* result = insertNode(create(prim::CallMethod, matched.inputs))
                       ->s_(attr::name, std::move(method_name))
                       ->output()
@@ -1790,6 +1823,7 @@ at::ArrayRef<Value*> createTupleUnpack(Value* v) {
 
 std::vector<Value*> inlineCallTo(Node* to_replace, Function* callee) {
   WithInsertPoint guard(to_replace);
+  TORCH_INTERNAL_ASSERT(callee->isGraphFunction());
   std::unordered_map<Value*, Value*> value_map;
   auto new_outputs = insertGraph(
       *to_replace->owningGraph(),

@@ -751,6 +751,7 @@ class TestNamedTensor(TestCase):
             fn_method_and_inplace('atan2'),
             method('copy_'),
             function('floor_divide'),
+            function('true_divide'),
         ]
         tests = flatten(tests)
 

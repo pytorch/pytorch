@@ -3,10 +3,11 @@
 #include <ATen/ATen.h>
 #include <ATen/core/Reduction.h>
 #include <torch/cuda.h>
+#include "test_assert.h"
 
 // for TH compat test only...
 struct THFloatTensor;
-extern "C" THFloatTensor * THFloatTensor_newWithSize2d(size_t a, size_t b);
+extern "C" THFloatTensor * THFloatTensor_newWithSize1d(size_t a, size_t b);
 extern "C" void THFloatTensor_fill(THFloatTensor *, float v);
 
 #include <iostream>
@@ -206,7 +207,7 @@ void TestZeroDim(DeprecatedTypeProperties& type) {
 
 void TestTensorFromTH() {
   int a = 4;
-  THFloatTensor* t = THFloatTensor_newWithSize2d(a, a);
+  THFloatTensor* t = THFloatTensor_newWithSize1d(a, a);
   THFloatTensor_fill(t, a);
   ASSERT_NO_THROW(at::unsafeTensorFromTH(t, false));
 }
@@ -405,6 +406,7 @@ TEST(BasicTest, FactoryMethodsTest) {
     ASSERT_EQ(tensor1.dtype(), at::kHalf);
     ASSERT_EQ(tensor1.layout(), at::kSparse);
     ASSERT_TRUE(tensor1.device().is_cuda());
+    ASSERT_THROWS(tensor1.nbytes());
 
     // This is a bug
     // Issue https://github.com/pytorch/pytorch/issues/30405
