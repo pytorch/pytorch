@@ -367,7 +367,10 @@ def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False, s
 
     def emit_decl_variant(decl):
         if ('emit_dummy_placeholder' in decl):
-            return "DUMMY_OPERATION"
+            if decl['use_c10_dispatcher'] == 'unboxed_only':
+                return "DUMMY_OPERATION_JITONLY"
+            else:
+                return "DUMMY_OPERATION"
         kw_assignments = []
 
         # mutable arguments in aten are passed as non const references

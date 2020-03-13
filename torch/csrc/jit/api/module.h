@@ -33,7 +33,6 @@
 
 namespace torch {
 namespace jit {
-namespace script {
 
 using ::c10::Argument;
 using ::c10::FunctionSchema;
@@ -178,7 +177,7 @@ struct TORCH_API Module : public Object {
     train(/*on=*/false);
   }
   /// True if the module is in training mode.
-  bool is_training() {
+  bool is_training() const {
     return attr("training", true).toBool();
   }
 
@@ -554,6 +553,11 @@ struct NamedPolicy {
 
 TORCH_API bool& getInlineEverythingMode();
 
-} // namespace script
+namespace script {
+// We once had a `script::` namespace that was deleted. This is for backcompat
+// of the public API; new code should not use this type alias.
+using Module = ::torch::jit::Module;
+}
+
 } // namespace jit
 } // namespace torch

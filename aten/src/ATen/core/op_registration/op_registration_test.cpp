@@ -46,7 +46,7 @@ TEST(OperatorRegistrationTest, whenRegisteringSameSchemaWithAliasAnalysisAfterRe
 
     auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
     ASSERT_TRUE(op.has_value());
-    EXPECT_EQ(op->options().aliasAnalysis(), at::AliasAnalysisKind::PURE_FUNCTION);
+    EXPECT_EQ(op->schema().aliasAnalysis(), at::AliasAnalysisKind::PURE_FUNCTION);
   }
   {
     auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<DummyKernel>(c10::DispatchKey::XLATensorId).aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION));
@@ -54,7 +54,7 @@ TEST(OperatorRegistrationTest, whenRegisteringSameSchemaWithAliasAnalysisAfterRe
 
     auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
     ASSERT_TRUE(op.has_value());
-    EXPECT_EQ(op->options().aliasAnalysis(), at::AliasAnalysisKind::PURE_FUNCTION);
+    EXPECT_EQ(op->schema().aliasAnalysis(), at::AliasAnalysisKind::PURE_FUNCTION);
   }
 }
 
@@ -64,7 +64,7 @@ TEST(OperatorRegistrationTest, whenRegisteringSameSchemaWithSameAliasAnalysis_th
 
   auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
   ASSERT_TRUE(op.has_value());
-  EXPECT_EQ(op->options().aliasAnalysis(), at::AliasAnalysisKind::PURE_FUNCTION);
+  EXPECT_EQ(op->schema().aliasAnalysis(), at::AliasAnalysisKind::PURE_FUNCTION);
 }
 
 TEST(OperatorRegistrationTest, whenRegisteringSameSchemaWithNoAliasAnalysis_thenCanBeCalled) {
@@ -73,15 +73,15 @@ TEST(OperatorRegistrationTest, whenRegisteringSameSchemaWithNoAliasAnalysis_then
 
   auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
   ASSERT_TRUE(op.has_value());
-  EXPECT_TRUE(op->options().isDefaultAliasAnalysisKind());
-  EXPECT_EQ(op->options().aliasAnalysis(), at::AliasAnalysisKind::CONSERVATIVE);
+  EXPECT_TRUE(op->schema().isDefaultAliasAnalysisKind());
+  EXPECT_EQ(op->schema().aliasAnalysis(), at::AliasAnalysisKind::CONSERVATIVE);
 }
 
 TEST(OperatorRegistrationTest, whenRegisteringSameSchemaWithDifferentAliasAnalysis_thenShouldThrow) {
   expectThrows<c10::Error>([] {
     auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<DummyKernel>(c10::DispatchKey::CPUTensorId).aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION));
     auto registrar2 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<DummyKernel>(c10::DispatchKey::XLATensorId).aliasAnalysis(at::AliasAnalysisKind::CONSERVATIVE));
-  }, "Tried to register multiple operators with the same schema but different options:");
+  }, "Tried to register multiple operators with the same schema but different alias analysis kind:");
 }
 
 TEST(OperatorRegistrationTest, whenRegisteringWithSchemaBeforeKernelInOptionsObject_thenCanBeCalled) {
@@ -1317,12 +1317,12 @@ TEST(NewOperatorRegistrationTest, testBasics) {
 }
 
 TEST(OperatorRegistrationTest, whenDeregisteringOp_thenHandleBecomesInvalid) {
-  std::unique_ptr<OperatorHandle> handle;
+  c10::optional<OperatorHandle> handle;
   {
-    auto schema = torch::jit::parseSchema("_test::dummy(Tensor dummy) -> Tensor");
-    std::pair<c10::RegistrationHandleRAII, OperatorHandle> registration =
-        c10::Dispatcher::singleton().registerSchema(schema, c10::OperatorOptions());
-    handle = std::make_unique<OperatorHandle>(registration.second);
+    auto registrar = c10::import("_test")
+      .def("dummy(Tensor dummy) -> Tensor");
+    handle = Dispatcher::singleton().findSchema({"_test::dummy", ""});
+    EXPECT_TRUE(handle.has_value());
     EXPECT_TRUE(handle->isValid());
   }
   // Now the RegistrationHandleRAII went out of scope and the op is deregistered

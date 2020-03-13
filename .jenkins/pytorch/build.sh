@@ -36,7 +36,7 @@ if [[ "$BUILD_ENVIRONMENT" == *-linux-xenial-py3-clang5-asan* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-asan.sh" "$@"
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *-mobile-build* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *-mobile-*build* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-mobile.sh" "$@"
 fi
 
@@ -105,7 +105,6 @@ if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
   elif [[ "${BUILD_ENVIRONMENT}" == *-x86_64* ]]; then
     build_args+=("-DANDROID_ABI=x86_64")
   fi
-  export BUILD_PYTORCH_MOBILE=1
   exec ./scripts/build_android.sh "${build_args[@]}" "$@"
 fi
 
