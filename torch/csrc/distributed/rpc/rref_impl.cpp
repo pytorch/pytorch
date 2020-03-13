@@ -105,6 +105,15 @@ const ForkId& UserRRef::forkId() const {
 }
 
 IValue UserRRef::toHere() {
+  // see Note [Best-Effort Check on Deleted UserRRefs]
+  TORCH_CHECK(
+      !deletedOnOwner_,
+      "User RRef with RRefId=",
+      rrefId(),
+      " and ForkId=",
+      forkId(),
+      " has been deleted. Cannot call to_here() on it after deletion.");
+
   auto agent = RpcAgent::getCurrentRpcAgent();
 
   // ScriptRRefFetchCall message always carries autograd context id even if
@@ -141,6 +150,38 @@ IValue UserRRef::toHere() {
   } else {
     return rrefFetchRet.values().front();
   }
+}
+
+RRefForkData UserRRef::fork() const {
+  // Note [Best-Effort Check on Deleted UserRRefs]
+  // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  // This check does not guarantee correctness, as there could be another thread
+  // trying to delete this UserRRef concurrently. Passing this check does not
+  // mean this RRef will be alive throughout this function. This is just our
+  // best-effort attempt to raise proper error messages. The behavior of using
+  // deleted UserRRefs is undefined.
+  //
+  // The reason for not implementing strict checks are:
+  // 1. This would need to acquire lock on deletedOnOwnerMutex_, which would
+  //    introduce unnecessary overhead for most normal use cases.
+  // 2. This would introduce a lot of complexities to get the behavior correct.
+  //    Assume we acquired the lock here, and there is another thread X block
+  //    waiting in tryDel() on the lock. Exiting this fork function would
+  //    unblock thread X. However, while X proceeds with deleting this UserRRef,
+  //    the call site of fork() might have added the UserRRef to
+  //    pendingChildren_ map, but up to this point, nothing prevents X from
+  //    deleting this RRef even if it shouldn't do so due to the state change
+  //    in pendingChildren_. We might be able to get it right for now by locking
+  //    and checking pendingChildren_ in X, but the gain does not seem to
+  //    worth the complexity.
+  TORCH_CHECK(
+      !deletedOnOwner_,
+      "User RRef with RRefId=",
+      rrefId(),
+      " and ForkId=",
+      forkId(),
+      " has been deleted. Cannot call fork an UserRRef after deletion.");
+  return RRef::fork();
 }
 
 //////////////////////////  OwnerRRef  /////////////////////////////////////
