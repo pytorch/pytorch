@@ -205,9 +205,11 @@ def shutdown(graceful=True):
 
     Arguments:
         graceful (bool): Whether to do a graceful shutdown or not. If True,
-                         this will block until all local and remote RPC
-                         processes have reached this method and wait for all
-                         outstanding work to complete.
+                         this will 1) wait until there is no pending system
+                         messages for ``UserRRef``s and delete them; 2) block
+                         until all local and remote RPC processes have reached
+                         this method and wait for all outstanding work to
+                         complete.
 
     Example::
         Make sure that ``MASTER_ADDRESS`` and ``MASTER_PORT`` are set properly
