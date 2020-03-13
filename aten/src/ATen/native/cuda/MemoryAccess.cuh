@@ -51,7 +51,7 @@ struct load_with_policy {
     using arg_t = std::tuple_element_t<i, args_t>;
     // `data` hold the data_ptr for tensors [output, input0, input1, ...], so we
     // need a +1 offset to get the input
-    auto ptr = reinterpret_cast<arg_t *>(self.data[i + 1]) + idx;
+    auto ptr = reinterpret_cast<arg_t *>(self.data[i + 1]) + block_work_size * idx;
     auto args_accessor = [&args] __device__ (int index) -> arg_t & { return std::get<i>(args[index]); };
     self.load1(args_accessor, ptr);
   }
