@@ -394,6 +394,75 @@ void qtanh_kernel(const Tensor& qx, Tensor& qy) {
   });
 }
 
+void qelu_kernel(const Tensor& qx, Scalar alpha, Tensor& qy) {
+
+  int64_t i_zp = qx.q_zero_point();
+  float i_scale = qx.q_scale();
+
+  // In a future PR, we can improve on output scale and zero_point
+  // selection.
+  int64_t o_zp = qy.q_zero_point();
+  float o_scale = qy.q_scale();
+  float inv_o_scale = 1.0 / o_scale;
+
+  float alpha_float = alpha.to<float>();
+
+  AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qelu_kernel", [&] {
+
+    auto iter = TensorIterator::unary_op(qy, qx);
+
+    // vectorized
+    using Vec = Vec256<float>;
+    using qVec = Vec256<scalar_t>;
+
+    Vec zero_vec = Vec(0.0f);
+    Vec one_vec = Vec(1.0f);
+    Vec alpha_vec = Vec(alpha_float);
+    Vec i_scale_vec = Vec(i_scale);
+    Vec i_zero_point_vec = Vec((float)i_zp);
+    Vec i_scale_neg_zp_premul_vec = i_scale_vec * i_zero_point_vec.neg();
+
+    cpu_kernel_vec(
+      iter,
+      [&](scalar_t value_qx) -> scalar_t {
+        // dequantize
+        const auto x = at::dequantize_val(i_scale, i_zp, value_qx);
+        // ELU
+        const auto y = x >= 0
+          ? x
+          : (alpha_float * (std::exp(x) - 1));
+        // quantize
+        return at::quantize_val<scalar_t>(o_scale, o_zp, y);
+      },
+      [&](qVec value_qx) -> qVec {
+        // dequantize
+        auto dx_vec_vec = value_qx.dequantize(i_scale_vec, i_zero_point_vec,
+                                            i_scale_neg_zp_premul_vec);
+        for (int idx = 0; idx < dx_vec_vec.size(); idx++) {
+
+          // quickly check if any elements are below zero
+          auto cmp_to_zero = dx_vec_vec[idx] > zero_vec;
+
+          if (cmp_to_zero.zero_mask()) {
+
+            Vec dx_vec_copy_neg_elu = dx_vec_vec[idx] * one_vec;
+            // calculate the negative part of ELU on the copy
+            dx_vec_copy_neg_elu = dx_vec_copy_neg_elu.exp();
+            dx_vec_copy_neg_elu = dx_vec_copy_neg_elu - one_vec;
+            dx_vec_copy_neg_elu = dx_vec_copy_neg_elu * alpha_vec;
+            // blend
+            dx_vec_vec[idx] = Vec::blendv(dx_vec_copy_neg_elu, dx_vec_vec[idx],
+                                        dx_vec_vec[idx] > zero_vec);
+          }
+        }
+        // quantize
+        return qVec::quantize(dx_vec_vec, o_scale, o_zp, inv_o_scale);
+      }
+    );
+
+  });
+}
+
 // Note: out is assumed to be the same size as self and other.
 // Note: Addition is only supported when self, other, out are of the same dtype.
 template <bool ReLUFused = false>
@@ -1327,6 +1396,7 @@ REGISTER_DISPATCH(qrelu_leaky_stub, &leaky_qrelu_out_kernel);
 REGISTER_DISPATCH(qsigmoid_stub, &qsigmoid_kernel);
 REGISTER_DISPATCH(qclamp_stub, &qclamp_kernel);
 REGISTER_DISPATCH(qtanh_stub, &qtanh_kernel);
+REGISTER_DISPATCH(qelu_stub, &qelu_kernel);
 REGISTER_DISPATCH(qadd_relu_stub, &qadd_kernel<true>);
 REGISTER_DISPATCH(qadd_stub, &qadd_kernel<false>);
 REGISTER_DISPATCH(qmul_relu_stub, &qmul_kernel<true>);
