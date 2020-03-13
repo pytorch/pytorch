@@ -12,7 +12,19 @@
 namespace torch {
 namespace nn {
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Embedding ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 /// Performs a lookup in a fixed size embedding table.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.Embedding to learn
+/// about the exact behavior of this module.
+///
+/// See the documentation for `torch::nn::EmbeddingOptions` class to learn what
+/// constructor arguments are supported for this module.
+///
+/// Example:
+/// ```
+/// Embedding model(EmbeddingOptions(10, 2).padding_idx(3).max_norm(2).norm_type(2.5).scale_grad_by_freq(true).sparse(true));
+/// ```
 class TORCH_API EmbeddingImpl : public torch::nn::Cloneable<EmbeddingImpl> {
  public:
   EmbeddingImpl(int64_t num_embeddings, int64_t embedding_dim)
@@ -40,12 +52,15 @@ class TORCH_API EmbeddingImpl : public torch::nn::Cloneable<EmbeddingImpl> {
 
 /// A `ModuleHolder` subclass for `EmbeddingImpl`.
 /// See the documentation for `EmbeddingImpl` class to learn what methods it
-/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
+/// provides, and examples of how to use `Embedding` with `torch::nn::EmbeddingOptions`.
+/// See the documentation for `ModuleHolder` to learn about PyTorch's
 /// module storage semantics.
 class Embedding : public torch::nn::ModuleHolder<EmbeddingImpl> {
  public:
   using torch::nn::ModuleHolder<EmbeddingImpl>::ModuleHolder;
 
+  /// See the documentation for `torch::nn::EmbeddingFromPretrainedOptions` class to learn what
+  /// optional arguments are supported for this function.
   static Embedding from_pretrained(const torch::Tensor& embeddings, const EmbeddingFromPretrainedOptions& options = {}) {
     TORCH_CHECK(embeddings.dim() == 2, "Embeddings parameter is expected to be 2-dimensional");
 
@@ -66,6 +81,20 @@ class Embedding : public torch::nn::ModuleHolder<EmbeddingImpl> {
   }
 };
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ EmbeddingBag ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Computes sums or means of 'bags' of embeddings, without instantiating the
+/// intermediate embeddings.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.EmbeddingBag to learn
+/// about the exact behavior of this module.
+///
+/// See the documentation for `torch::nn::EmbeddingBagOptions` class to learn what
+/// constructor arguments are supported for this module.
+///
+/// Example:
+/// ```
+/// EmbeddingBag model(EmbeddingBagOptions(10, 2).max_norm(2).norm_type(2.5).scale_grad_by_freq(true).sparse(true).mode(torch::kSum));
+/// ```
 class TORCH_API EmbeddingBagImpl : public torch::nn::Cloneable<EmbeddingBagImpl> {
  public:
   EmbeddingBagImpl(int64_t num_embeddings, int64_t embedding_dim)
@@ -91,12 +120,15 @@ class TORCH_API EmbeddingBagImpl : public torch::nn::Cloneable<EmbeddingBagImpl>
 
 /// A `ModuleHolder` subclass for `EmbeddingBagImpl`.
 /// See the documentation for `EmbeddingBagImpl` class to learn what methods it
-/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
+/// provides, and examples of how to use `EmbeddingBag` with `torch::nn::EmbeddingBagOptions`.
+/// See the documentation for `ModuleHolder` to learn about PyTorch's
 /// module storage semantics.
 class EmbeddingBag : public torch::nn::ModuleHolder<EmbeddingBagImpl> {
  public:
   using torch::nn::ModuleHolder<EmbeddingBagImpl>::ModuleHolder;
 
+  /// See the documentation for `torch::nn::EmbeddingBagFromPretrainedOptions` class to learn what
+  /// optional arguments are supported for this function.
   static EmbeddingBag from_pretrained(const torch::Tensor& embeddings, const EmbeddingBagFromPretrainedOptions& options = {}) {
     TORCH_CHECK(embeddings.dim() == 2, "Embeddings parameter is expected to be 2-dimensional");
 

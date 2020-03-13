@@ -35,12 +35,27 @@ struct AvgPoolOptions {
 };
 
 /// `AvgPoolOptions` specialized for 1-D avgpool.
+///
+/// Example:
+/// ```
+/// AvgPool1d model(AvgPool1dOptions(3).stride(2));
+/// ```
 using AvgPool1dOptions = AvgPoolOptions<1>;
 
 /// `AvgPoolOptions` specialized for 2-D avgpool.
+///
+/// Example:
+/// ```
+/// AvgPool2d model(AvgPool2dOptions({3, 2}).stride({2, 2}));
+/// ```
 using AvgPool2dOptions = AvgPoolOptions<2>;
 
 /// `AvgPoolOptions` specialized for 3-D avgpool.
+///
+/// Example:
+/// ```
+/// AvgPool3d model(AvgPool3dOptions(5).stride(2));
+/// ```
 using AvgPool3dOptions = AvgPoolOptions<3>;
 
 TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(AvgPool1d, AvgPool1dFuncOptions)
@@ -72,12 +87,27 @@ struct MaxPoolOptions {
 };
 
 /// `MaxPoolOptions` specialized for 1-D maxpool.
+///
+/// Example:
+/// ```
+/// MaxPool1d model(MaxPool1dOptions(3).stride(2));
+/// ```
 using MaxPool1dOptions = MaxPoolOptions<1>;
 
 /// `MaxPoolOptions` specialized for 2-D maxpool.
+///
+/// Example:
+/// ```
+/// MaxPool2d model(MaxPool2dOptions({3, 2}).stride({2, 2}));
+/// ```
 using MaxPool2dOptions = MaxPoolOptions<2>;
 
 /// `MaxPoolOptions` specialized for 3-D maxpool.
+///
+/// Example:
+/// ```
+/// MaxPool3d model(MaxPool3dOptions(3).stride(2));
+/// ```
 using MaxPool3dOptions = MaxPoolOptions<3>;
 
 TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(MaxPool1d, MaxPool1dFuncOptions)
@@ -97,12 +127,27 @@ struct AdaptiveMaxPoolOptions {
 };
 
 /// `AdaptiveMaxPoolOptions` specialized for 1-D maxpool.
+///
+/// Example:
+/// ```
+/// AdaptiveMaxPool1d model(AdaptiveMaxPool1dOptions(3));
+/// ```
 using AdaptiveMaxPool1dOptions = AdaptiveMaxPoolOptions<1>;
 
 /// `AdaptiveMaxPoolOptions` specialized for 2-D adaptive maxpool.
+///
+/// Example:
+/// ```
+/// AdaptiveMaxPool2d model(AdaptiveMaxPool2dOptions({3, 2}));
+/// ```
 using AdaptiveMaxPool2dOptions = AdaptiveMaxPoolOptions<2>;
 
 /// `AdaptiveMaxPoolOptions` specialized for 3-D adaptive maxpool.
+///
+/// Example:
+/// ```
+/// AdaptiveMaxPool3d model(AdaptiveMaxPool3dOptions(3));
+/// ```
 using AdaptiveMaxPool3dOptions = AdaptiveMaxPoolOptions<3>;
 
 TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(AdaptiveMaxPool1d, AdaptiveMaxPool1dFuncOptions)
@@ -122,12 +167,27 @@ struct AdaptiveAvgPoolOptions {
 };
 
 /// `AdaptiveAvgPoolOptions` specialized for 1-D adaptive avgpool.
+///
+/// Example:
+/// ```
+/// AdaptiveAvgPool1d model(AdaptiveAvgPool1dOptions(5));
+/// ```
 using AdaptiveAvgPool1dOptions = AdaptiveAvgPoolOptions<1>;
 
 /// `AdaptiveAvgPoolOptions` specialized for 2-D adaptive avgpool.
+///
+/// Example:
+/// ```
+/// AdaptiveAvgPool2d model(AdaptiveAvgPool2dOptions({3, 2}));
+/// ```
 using AdaptiveAvgPool2dOptions = AdaptiveAvgPoolOptions<2>;
 
 /// `AdaptiveAvgPoolOptions` specialized for 3-D adaptive avgpool.
+///
+/// Example:
+/// ```
+/// AdaptiveAvgPool3d model(AdaptiveAvgPool3dOptions(3));
+/// ```
 using AdaptiveAvgPool3dOptions = AdaptiveAvgPoolOptions<3>;
 
 TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(AdaptiveAvgPool1d, AdaptiveAvgPool1dFuncOptions)
@@ -153,12 +213,27 @@ struct MaxUnpoolOptions {
 };
 
 /// `MaxUnpoolOptions` specialized for 1-D maxunpool.
+///
+/// Example:
+/// ```
+/// MaxUnpool1d model(MaxUnpool1dOptions(3).stride(2).padding(1));
+/// ```
 using MaxUnpool1dOptions = MaxUnpoolOptions<1>;
 
 /// `MaxUnpoolOptions` specialized for 2-D maxunpool.
+///
+/// Example:
+/// ```
+/// MaxUnpool2d model(MaxUnpool2dOptions(3).stride(2).padding(1));
+/// ```
 using MaxUnpool2dOptions = MaxUnpoolOptions<2>;
 
 /// `MaxUnpoolOptions` specialized for 3-D maxunpool.
+///
+/// Example:
+/// ```
+/// MaxUnpool3d model(MaxUnpool3dOptions(3).stride(2).padding(1));
+/// ```
 using MaxUnpool3dOptions = MaxUnpoolOptions<3>;
 
 // ============================================================================
@@ -218,9 +293,19 @@ struct FractionalMaxPoolOptions {
 };
 
 /// `FractionalMaxPoolOptions` specialized for 2-D maxpool.
+///
+/// Example:
+/// ```
+/// FractionalMaxPool2d model(FractionalMaxPool2dOptions(5).output_size(1));
+/// ```
 using FractionalMaxPool2dOptions = FractionalMaxPoolOptions<2>;
 
 /// `FractionalMaxPoolOptions` specialized for 3-D maxpool.
+///
+/// Example:
+/// ```
+/// FractionalMaxPool3d model(FractionalMaxPool3dOptions(5).output_size(1));
+/// ```
 using FractionalMaxPool3dOptions = FractionalMaxPoolOptions<3>;
 
 TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(FractionalMaxPool2d, FractionalMaxPool2dFuncOptions)
@@ -247,9 +332,19 @@ struct LPPoolOptions {
 };
 
 /// `LPPoolOptions` specialized for 1-D lppool.
+///
+/// Example:
+/// ```
+/// LPPool1d model(LPPool1dOptions(1, 2).stride(5).ceil_mode(true));
+/// ```
 using LPPool1dOptions = LPPoolOptions<1>;
 
 /// `LPPoolOptions` specialized for 2-D lppool.
+///
+/// Example:
+/// ```
+/// LPPool2d model(LPPool2dOptions(1, std::vector<int64_t>({3, 4})).stride({5, 6}).ceil_mode(true));
+/// ```
 using LPPool2dOptions = LPPoolOptions<2>;
 
 TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(LPPool1d, LPPool1dFuncOptions)

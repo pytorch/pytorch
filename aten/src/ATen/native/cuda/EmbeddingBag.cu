@@ -299,15 +299,17 @@ _embedding_bag_cuda(const Tensor &weight, const Tensor &indices,
   dim3 block = dim3(32, 8);
 #endif
   int grid = 1024;
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(weight.scalar_type(), "embedding_bag_cuda", [&] {
-    EmbeddingBag_updateOutputKernel<scalar_t><<<grid, block, 0, stream>>>(
-        indices.data_ptr<int64_t>(), offsets.data_ptr<int64_t>(),
-        weight.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(),
-        offset2bag.data_ptr<int64_t>(), numIndices, numBags, featureSize,
-        weight.stride(0), weight.stride(1), mode, bag_size.data_ptr<int64_t>(),
-        mode == MODE_MAX ? max_indices.data_ptr<int64_t>() : NULL,
-        per_sample_weights.defined() ? per_sample_weights.data_ptr<scalar_t>() : NULL,
-        per_sample_weights.defined() ? per_sample_weights.stride(0) : 0);
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, weight.scalar_type(), "embedding_bag_cuda", [&] {
+    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "embedding_bag_cuda", [&] {
+      EmbeddingBag_updateOutputKernel<scalar_t><<<grid, block, 0, stream>>>(
+          indices.data_ptr<int64_t>(), offsets.data_ptr<int64_t>(),
+          weight.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(),
+          offset2bag.data_ptr<int64_t>(), numIndices, numBags, featureSize,
+          weight.stride(0), weight.stride(1), mode, bag_size.data_ptr<int64_t>(),
+          mode == MODE_MAX ? max_indices.data_ptr<int64_t>() : NULL,
+          per_sample_weights.defined() ? per_sample_weights.data_ptr<scalar_t>() : NULL,
+          per_sample_weights.defined() ? per_sample_weights.stride(0) : 0);
+    });
   });
 
   THCudaCheck(cudaGetLastError());
