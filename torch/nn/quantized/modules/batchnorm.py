@@ -54,7 +54,7 @@ class BatchNorm2d(torch.nn.BatchNorm2d):
 
     @classmethod
     def from_float(cls, mod):
-        assert type(mod) == BatchNorm2d,\
+        assert type(mod) == torch.nn.BatchNorm2d,\
             "QuantizedBatchNorm2d expects an instance of BatchNorm2d"
         scale, zero_point = mod.activation_post_process.calculate_qparams()
         new_mod = BatchNorm2d(mod.num_features, mod.eps)
