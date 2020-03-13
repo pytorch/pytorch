@@ -1050,7 +1050,7 @@ void TensorExprKernel::PickAndCheckBackendType(
   if (device.type() == at::kCUDA) {
     backend_type = kCudaCodeGen;
   } else if (device.type() == at::kCPU) {
-#ifdef ENABLE_LLVM
+#ifdef TORCH_ENABLE_LLVM
     backend_type = kLLVMCodeGen;
 #else
     backend_type = kSimpleIREval;
