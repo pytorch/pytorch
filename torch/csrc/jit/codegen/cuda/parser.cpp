@@ -25,20 +25,6 @@ typedef Expr CgOp;
 
 typedef void (*ParseFuncPtr)(const Node* const, std::unordered_map<size_t, CgValue*>&);
 
-// Need to double check this. Current WAR to because `getOperatorForLiteral` is
-// not exposed;
-std::shared_ptr<Operator> getOperatorForLiteral_local(const char* signature) {
-  auto schema = parseSchema(signature);
-  auto ops_vec = getAllOperatorsFor(Symbol::fromQualString(schema.name()));
-
-  for (auto s_ptr_op : ops_vec) {
-    if (strcmp(canonicalSchemaString(s_ptr_op->schema()).c_str(),signature)==0) {
-      return s_ptr_op;
-    }
-  }
-  assert(false);
-};
-
 class IrParser {
 public:
   IrParser(std::shared_ptr<Graph> graph, Fusion& fusion)
@@ -155,7 +141,7 @@ protected:
         "aten::sub(Tensor self, Scalar other, Scalar alpha) -> Tensor"
     };
     for (auto signature : BinaryOpWithAlpha) {
-      auto ptr_op = getOperatorForLiteral_local(signature);
+      auto ptr_op = getOperatorForLiteral(signature);
       registerParseRule(ptr_op, &parseBinaryOpWithAlpha);
     }
 
@@ -166,7 +152,7 @@ protected:
         "aten::mul(Tensor self, Scalar other) -> Tensor"
     };
     for (auto signature : BinaryOp) {
-      auto ptr_op = getOperatorForLiteral_local(signature);
+      auto ptr_op = getOperatorForLiteral(signature);
       registerParseRule(ptr_op, &parseBinaryOp);
     }
   }
@@ -176,19 +162,25 @@ protected:
       // partition doesn't take constant node explicitly, but it does and copy
       // constant into subgraph. So we need to register constants in codegen IR;
       for (auto output : node->outputs()) {
-        assert(registerScalar(output));
+        TORCH_CHECK(registerScalar(output));
       }
     } else {
       auto iter = IrParser::jit_operator_registry_.find(node->kind());
       // make sure we have a parser for the op;
-      assert(iter != IrParser::jit_operator_registry_.end());
+      TORCH_CHECK(
+          iter != IrParser::jit_operator_registry_.end(),
+          "CudaFusionGroup Parser doesn't handle operator kind(): ",
+          node->kind().toDisplayString());
       for (auto& pair_op_func : iter->second) {
         if (node->matches(pair_op_func.first->schema())) {
           pair_op_func.second(node, value_maps_);
           return;
         }
       }
-      assert(false);
+      TORCH_CHECK(
+          false,
+          "CudaFusionGroup Parser doesn't recognize operator overload:",
+          canonicalSchemaString(node->schema()));
     }
   }
 

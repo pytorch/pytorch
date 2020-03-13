@@ -74,7 +74,7 @@ void prepare_argument(
     int_args.push_back(val.to<int>());
     arguments.push_back(&(int_args.back()));
   } else {
-    assert(false);
+    TORCH_CHECK(false, "Not supported input IValue encounted.");
   }
 };
 

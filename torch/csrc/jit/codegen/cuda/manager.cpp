@@ -62,7 +62,7 @@ public:
       int32_t kernel_id,
       const at::ArrayRef<IValue> inputs,
       std::vector<at::Tensor> outputs) {
-    assert(kernel_cache_.count(kernel_id) != 0);
+    TORCH_CHECK(kernel_cache_.count(kernel_id) != 0, "kernel id not recognized");
 
     CudaKernel& cuda_kernel_entry = kernel_cache_[kernel_id];
 
@@ -95,7 +95,9 @@ private:
 } // namespace
 
 void compileCudaFusionGroup(Node* fusion_node) {
-  assert(fusion_node->kind() == prim::CudaFusionGroup);
+  TORCH_CHECK(
+      fusion_node->kind() == prim::CudaFusionGroup,
+      "Only prim::CudaFusionGroup can be compiled");
   if (fusion_node->hasAttribute(attr::cache_id)) {
     // TODO: maybe we should error out here;
     AT_WARN("Double registration of CudaFusionGroup on CudaFusionManager");
@@ -106,10 +108,14 @@ void compileCudaFusionGroup(Node* fusion_node) {
 }
 
 void runCudaFusionGroup(const Node* const fusion_node, Stack& stack) {
-  assert(fusion_node->kind() == prim::CudaFusionGroup);
+  TORCH_CHECK(
+      fusion_node->kind() == prim::CudaFusionGroup,
+      "prim::CudaFusionGroup expected");
   // TODO: should we support runtime compilation with updated dynamic shape;
   //       shape inference would be needed so we can allocate output;
-  assert(fusion_node->hasAttribute(attr::cache_id));
+  TORCH_CHECK(
+      fusion_node->hasAttribute(attr::cache_id),
+      "node prim::CudaFusionGroup has not been compiled yet");
   int32_t kernel_id = fusion_node->i(attr::cache_id);
 
   // Currently we just construct I/O tensors for static graph;
@@ -122,7 +128,9 @@ void runCudaFusionGroup(const Node* const fusion_node, Stack& stack) {
   for (const auto* const output : graph->outputs()) {
     auto type = output->type()->expect<TensorType>();
     // Expect output to be tensor;
-    assert(type && type->isComplete());
+    TORCH_CHECK(
+        type && type->isComplete(),
+        "Complete TensorType for output is expected.");
 
     const auto device = *(type->device());
     const auto scalar_type = *(type->scalarType());
@@ -138,7 +146,6 @@ void runCudaFusionGroup(const Node* const fusion_node, Stack& stack) {
 
     auto tensor = at::empty_strided(sizes, strides, options);
     outputs.push_back(tensor);
-    printf("=== output ptr :%p\n", tensor.data_ptr());
   }
 
   CudaFusionManager::getManager().runFusionNode(kernel_id, inputs, outputs);
