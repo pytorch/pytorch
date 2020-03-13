@@ -49,6 +49,8 @@ static bool isFusibleDevice(const Node* node) {
 }
 
 inline bool isFusibleNode(const Node* const node)  {
+  // checks if node is compatible with parser:
+  // 1. if we have a parsing rule; or 2. if the node is already a fusion group.
   return (isNodeParsible(node) || node->kind() == prim::CudaFusionGroup);
 }
 

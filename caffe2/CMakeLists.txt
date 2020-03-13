@@ -452,7 +452,6 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/ir_nodes.cpp
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/iriostream.cpp
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/iter_visitor.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/management.cpp
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/mutator.cpp
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/predicate_compute.cpp
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/tensor_view.cpp

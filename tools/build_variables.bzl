@@ -191,7 +191,6 @@ libtorch_sources = [
     "torch/csrc/jit/codegen/cuda/ir_nodes.cpp",
     "torch/csrc/jit/codegen/cuda/iriostream.cpp",
     "torch/csrc/jit/codegen/cuda/iter_visitor.cpp",
-    "torch/csrc/jit/codegen/cuda/management.cpp",
     "torch/csrc/jit/codegen/cuda/mutator.cpp",
     "torch/csrc/jit/codegen/cuda/predicate_compute.cpp",
     "torch/csrc/jit/codegen/cuda/tensor.cpp",

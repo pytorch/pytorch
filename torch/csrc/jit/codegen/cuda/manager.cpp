@@ -16,7 +16,14 @@ namespace cuda {
 
 namespace {
 
-// The reason for two unordered_map here is to cache `torch::jit::Graph` lowering
+// CudaFusionManager holds compiled `CudaKernel` and handles all interfacing
+// including compilation and execution.
+//
+// We cache two maps here:
+//   a. string of graph -> kernel_id
+//   b. kernel_id -> CudaKernel
+//
+// This allows CudaKernel reuse across nodes;
 class CudaFusionManager {
 public:
   static CudaFusionManager& getManager() {
@@ -24,7 +31,6 @@ public:
     return cuda_fusion_manager_;
   };
 
-  // TODO: discuss whether or not we want reuse codegen.
   // TODO: I'm assuming we have stride information in `graph->toString`
   //       We need to make sure stride information is in the final string, as we
   //       want to AVOID kernel reuse between different fusion_node, unless they
@@ -48,7 +54,6 @@ public:
       parseJitIR(graph, fusion);
 
       // default constructor via accessing empty key;
-      // TODO: compile and blablabla;
       compileKernel(fusion, kernel_cache_[kernel_id]);
 
       return kernel_id;
@@ -57,7 +62,6 @@ public:
     }
   };
 
-  // TODO: IO construction should go outside;
   void runFusionNode(
       int32_t kernel_id,
       const at::ArrayRef<IValue> inputs,
@@ -99,7 +103,6 @@ void compileCudaFusionGroup(Node* fusion_node) {
       fusion_node->kind() == prim::CudaFusionGroup,
       "Only prim::CudaFusionGroup can be compiled");
   if (fusion_node->hasAttribute(attr::cache_id)) {
-    // TODO: maybe we should error out here;
     AT_WARN("Double registration of CudaFusionGroup on CudaFusionManager");
   }
   int32_t fusion_cache_id = 
@@ -141,6 +144,7 @@ void runCudaFusionGroup(const Node* const fusion_node, Stack& stack) {
       .device(device)
       .requires_grad(type->requires_grad());
 
+    // TODO: We should infer output shape from `inputs`
     const auto sizes = extractSizes(type);
     const auto strides= extractStrides(type);
 
