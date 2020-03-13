@@ -96,18 +96,6 @@ backend_test.exclude(r'(test_hardsigmoid'  # Does not support Hardsigmoid.
                      '|test_.*negative_ind.*'  # negative axis is not supported yet
                      '|test_argmax_.*select_last_index.*'  # unsupported case
                      '|test_argmin_.*select_last_index_.*'  # unsupported case
-                     '|test_gradient_of_add_and_mul_cpu'  # cannot translate Gradient op
-                     '|test_celu_cpu'  # cannot translate Celu op
-                     '|test_celu_expanded_cpu'
-                     '|test_gradient_of_add_cpu' # cannot translate Gradient op
-                     '|test_greater_equal.*'
-                     '|test_min_.*_cpu'  # Tensor type mismatch
-                     '|test_max_.*_cpu'  # Tensor type mismatch
-                     '|test_less_equal.*'
-                     '|test_inverse.*'
-                     '|test_softmax_cross_entropy.*'
-                     '|test_mean_square_distance.*'
-                     '|test_unfoldtodepth.*'
                      ')')
 
 # Quick patch to unbreak master CI, is working on the debugging.
@@ -130,7 +118,6 @@ if 'JENKINS_URL' in os.environ:
     backend_test.exclude(r'(test_vgg19|test_vgg)')
 
 # import all test cases at global scope to make them visible to python.unittest
-print(backend_test)
 globals().update(backend_test
                  .enable_report()
                  .test_cases)

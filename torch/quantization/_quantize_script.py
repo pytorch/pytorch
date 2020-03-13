@@ -76,13 +76,14 @@ def prepare_script(model, qconfig_dict, inplace=False):
                                                                 False))
     return model
 
-def convert_script(model, inplace=False):
+def convert_script(model, inplace=False, debug=False):
     _check_is_script_module(model)
     if not inplace:
         model = model.copy()
+    model.eval()
     model = wrap_cpp_module(torch._C._jit_pass_insert_quant_dequant(model._c, 'forward', False))
-    if 'fbgemm' in torch.backends.quantized.supported_engines:
-        torch._C._jit_pass_insert_prepack_unpack(model._c)
+    if not debug:
+        model = wrap_cpp_module(torch._C._jit_pass_quant_finalize(model._c))
     return model
 
 # TODO: non-scriptable QConfig will be supported later
@@ -91,7 +92,7 @@ def script_qconfig(qconfig):
         activation=torch.jit.script(qconfig.activation())._c,
         weight=torch.jit.script(qconfig.weight())._c)
 
-def quantize_script(model, qconfig_dict, run_fn, run_args, inplace=False):
+def quantize_script(model, qconfig_dict, run_fn, run_args, inplace=False, debug=False):
     _check_is_script_module(model)
     if not model._c._has_method('forward'):
         raise ValueError('input script module does not have forward method')
@@ -103,5 +104,5 @@ def quantize_script(model, qconfig_dict, run_fn, run_args, inplace=False):
     model = wrap_cpp_module(torch._C._jit_pass_fold_convbn(model._c))
     model = prepare_script(model, scripted_qconfig_dict, True)
     run_fn(model._c._get_method('forward'), *run_args)
-    model = convert_script(model, True)
+    model = convert_script(model, True, debug)
     return model
