@@ -1,4 +1,4 @@
-#ifdef ENABLE_LLVM
+#ifdef TORCH_ENABLE_LLVM
 #include "test/cpp/tensorexpr/test_base.h"
 
 #include "test/cpp/tensorexpr/padded_buffer.h"
@@ -1090,4 +1090,4 @@ void testLLVMDynamicShape2D() {
 } // namespace jit
 } // namespace torch
 
-#endif // ENABLE_LLVM
+#endif // TORCH_ENABLE_LLVM
