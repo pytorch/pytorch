@@ -200,7 +200,7 @@ struct ReadyQueue {
   // might set this to false.
   void push(NodeTask item, bool incrementOutstandingTasks = true);
   void pushShutdownTask();
-  std::unique_ptr<NodeTask> pop();
+  NodeTask pop();
   bool empty() const;
   size_t size() const;
 };
@@ -266,6 +266,8 @@ struct TORCH_API Engine {
       std::shared_ptr<GraphTask>& graph_task,
       Node* func,
       InputBuffer& inputs);
+
+  virtual void execute_until_ready_queue_empty(const std::shared_ptr<GraphTask>& graph_task);
   ReadyQueue& ready_queue(
       const std::shared_ptr<GraphTask>& graph_task,
       at::Device device);
@@ -275,7 +277,7 @@ struct TORCH_API Engine {
   // start device threads (CUDA, XLA, etc.) in Engine,
   // note that it does NOT start CPU thread.
   void start_device_threads();
-  virtual void thread_init(int device, const std::shared_ptr<ReadyQueue>& ready_queue);
+  virtual void thread_init(int device, std::shared_ptr<ReadyQueue> ready_queue);
   virtual void thread_on_exception(
       std::shared_ptr<GraphTask> graph_task,
       const std::shared_ptr<Node>& fn,
@@ -283,7 +285,7 @@ struct TORCH_API Engine {
   virtual void thread_main(
       const std::shared_ptr<GraphTask>& task,
       bool reentrant_thread);
-  void reentrant_thread_init(const std::shared_ptr<ReadyQueue>& parent_ready_queue);
+  void reentrant_thread_init(std::shared_ptr<ReadyQueue> parent_ready_queue);
   void add_thread_pool_task(const std::weak_ptr<GraphTask>& graph_task);
   void set_device(int device);
   void initialize_device_threads_pool();
@@ -323,7 +325,6 @@ struct TORCH_API Engine {
  std::shared_ptr<ThreadPoolShared> thread_pool_shared_;
 
 private:
- void execute_until_ready_queue_empty(const std::shared_ptr<GraphTask>& graph_task);
  void graph_task_exec_post_processing(
      const std::shared_ptr<GraphTask>& graph_task);
  void mark_graph_task_completed(const std::shared_ptr<GraphTask>& graph_task);

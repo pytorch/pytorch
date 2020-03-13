@@ -31,7 +31,7 @@ static Engine& get_python_engine() {
 
 namespace torch { namespace autograd { namespace python {
 
-void PythonEngine::thread_init(int device, const std::shared_ptr<ReadyQueue>& ready_queue) {
+void PythonEngine::thread_init(int device, std::shared_ptr<ReadyQueue> ready_queue) {
   // Create a PyThreadState, but release the GIL. This lets pybind11::gil_scoped_acquire calls
   // inside thread_main acquire the GIL without having to create a new
   // PyThreadState each time.
@@ -46,10 +46,8 @@ void PythonEngine::thread_on_exception(
     std::exception& e) {
   auto python_err = dynamic_cast<python_error*>(&e);
   if (python_err) {
-    LOG(ERROR) << "PythonEngine::thead_on_exception is python_error, is there type?" << python_err->type << " what's the value??" << python_err->value;
     python_err->persist();
   }
-  LOG(ERROR) << "PythonEngine::thead_on_exception: " << e.what();
   Engine::thread_on_exception(graph_task, fn, e);
 }
 

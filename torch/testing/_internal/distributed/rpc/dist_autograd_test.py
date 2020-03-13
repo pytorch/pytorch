@@ -1148,21 +1148,20 @@ class DistAutogradTest(RpcAgentTestFixture):
             tmp = (t1 + t2) * (t1 + t2)
             t3 = SimulateBackwardError.apply(tmp)
 
-            # t3.sum().backward()
             # Run multiple round trips across different nodes and verify the
             # original node receives an error thrown on a node deep in the chain.
             val = rpc.rpc_sync(
                 worker_name(self._next_rank()), torch.add, args=(t2, t3)
             )
-            # val = rpc.rpc_sync(
-            #     worker_name(self._next_rank()), torch.mul, args=(val, t2)
-            # )
-            # val = rpc.rpc_sync(
-            #     worker_name(self._next_rank()), torch.matmul, args=(val, t2)
-            # )
-            # val = rpc.rpc_sync(
-            #     worker_name(self._next_rank()), torch.div, args=(val, t2)
-            # )
+            val = rpc.rpc_sync(
+                worker_name(self._next_rank()), torch.mul, args=(val, t2)
+            )
+            val = rpc.rpc_sync(
+                worker_name(self._next_rank()), torch.matmul, args=(val, t2)
+            )
+            val = rpc.rpc_sync(
+                worker_name(self._next_rank()), torch.div, args=(val, t2)
+            )
 
             with self.assertRaisesRegex(
                 RuntimeError, "Error on Node [0-9]+: Simulate error on backward pass"

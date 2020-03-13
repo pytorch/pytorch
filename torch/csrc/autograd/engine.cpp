@@ -196,13 +196,12 @@ size_t ReadyQueue::size() const {
   return heap_.size();
 }
 
-auto ReadyQueue::pop() -> std::unique_ptr<NodeTask> {
+auto ReadyQueue::pop() -> NodeTask {
   // Lock mutex for accesses to heap_
   std::unique_lock<std::mutex> lock(mutex_);
   not_empty_.wait(lock, [this]{ return !heap_.empty(); });
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-  auto task = make_unique<NodeTask>(std::move(const_cast<NodeTask&>(heap_.top())));
-  heap_.pop();
+  auto task = std::move(const_cast<NodeTask&>(heap_.top())); heap_.pop();
   return task;
 }
 
@@ -251,7 +250,7 @@ void Engine::set_device(int device) {
   worker_device = device;
 }
 
-auto Engine::thread_init(int device, const std::shared_ptr<ReadyQueue>& ready_queue) -> void {
+auto Engine::thread_init(int device, std::shared_ptr<ReadyQueue> ready_queue) -> void {
   at::init_num_threads();
   // thread_init should only be called by device threads other than CPU_DEVICE
   TORCH_INTERNAL_ASSERT(device != CPU_DEVICE);
@@ -317,27 +316,26 @@ auto Engine::thread_main(
       // Scope this block of execution since NodeTask is not needed after this
       // block and can be deallocated (release any references to grad tensors
       // as part of inputs_).
-      auto task = local_ready_queue->pop();
+      NodeTask task = local_ready_queue->pop();
       // This will only work if the worker is running a non backward task
       // TODO Needs to be fixed this to work in all cases
-      if (task->isShutdownTask_) {
+      if (task.isShutdownTask_) {
         C10_LOG_API_USAGE_ONCE("torch.autograd.thread_shutdown");
         break;
       }
 
-      if (!(local_graph_task = task->base_.lock())) {
+      if (!(local_graph_task = task.base_.lock())) {
         // Reentrant thread's graph task should not expire since we hold a
         // reference to it in this method.
         continue;
       }
 
-      if (task->fn_ && !local_graph_task->has_error_.load()) {
+      if (task.fn_ && !local_graph_task->has_error_.load()) {
         AutoGradMode grad_mode(local_graph_task->grad_mode_);
         try {
-          evaluate_function(local_graph_task, task->fn_.get(), task->inputs_);
+          evaluate_function(local_graph_task, task.fn_.get(), task.inputs_);
         } catch (std::exception& e) {
-          LOG(ERROR) << "****evaluating function name: " << task->fn_->name() <<" thread on exception: " << e.what() << " for graphTask: " << local_graph_task;
-          thread_on_exception(local_graph_task, task->fn_, e);
+          thread_on_exception(local_graph_task, task.fn_, e);
         }
       }
     }
@@ -359,24 +357,24 @@ auto Engine::thread_main(
       if (worker_device == CPU_DEVICE) {
         break;
       }
-    }
 
-    auto base_owner = local_graph_task->owner_;
-    // Send a dummy function task to the owning thread just to
-    // ensure that it's not sleeping. If it has work, it might see that
-    // graph_task->outstanding_tasks_ == 0 before it gets to the task, but
-    // it's a no-op anyway.
-    // This is not necessary if the current thread is the owning thread.
-    if (base_owner != worker_device && gt_completed) {
-      // Synchronize outstanding_tasks_ with queue mutex
-      std::atomic_thread_fence(std::memory_order_release);
-      ready_queue_by_index(local_graph_task, base_owner)
-          .push(NodeTask(local_graph_task, nullptr, InputBuffer(0)));
+      auto base_owner = local_graph_task->owner_;
+      // Send a dummy function task to the owning thread just to
+      // ensure that it's not sleeping. If it has work, it might see that
+      // graph_task->outstanding_tasks_ == 0 before it gets to the task, but
+      // it's a no-op anyway.
+      // This is not necessary if the current thread is the owning thread.
+      if (base_owner != worker_device) {
+        // Synchronize outstanding_tasks_ with queue mutex
+        std::atomic_thread_fence(std::memory_order_release);
+        ready_queue_by_index(local_graph_task, base_owner)
+            .push(NodeTask(local_graph_task, nullptr, InputBuffer(0)));
+      }
     }
   }
 }
 
-void Engine::reentrant_thread_init(const std::shared_ptr<ReadyQueue>& parent_ready_queue) {
+void Engine::reentrant_thread_init(std::shared_ptr<ReadyQueue> parent_ready_queue) {
   at::init_num_threads();
   auto tp_shared= thread_pool_shared_;
   while(true) {
@@ -403,7 +401,6 @@ void Engine::thread_on_exception(
     std::shared_ptr<GraphTask> graph_task,
     const std::shared_ptr<Node>& fn,
     std::exception& e) {
-  LOG(ERROR) << "Engine::thread_on_exception: " << e.what();
   graph_task->set_exception(e, fn);
 }
 
@@ -421,7 +418,6 @@ void GraphTask::set_exception(
     std::exception& e,
     const std::shared_ptr<Node>& fn) {
   set_exception_without_signal(fn);
-  LOG(ERROR) << "GraphTask set_exception: " << e.what();
   future_result_->setErrorIfNeeded(e.what());
 }
 
@@ -731,31 +727,14 @@ auto Engine::execute(const edge_list& roots,
   // Lock post_callbacks_lock_ before clearing final_callbacks_
   ClearCallbacks _cb_guard(final_callbacks_, post_callbacks_lock_);
 
-  bool is_reentrant_call = worker_device != NO_DEVICE;
-  std::shared_ptr<ReadyQueue> memorized_cpu_ready_queue = nullptr;
-
-  if (is_reentrant_call) {
-    // Reentrant call will still use the parent thread ready_queue
-    // While we can create separate cpu_ready_queue for each new reentrant
-    // thread, but sharing the same cpu_ready_queue with parent thread is
-    // a mild performance improvement and cuda thread still have to do the
-    // same thing.
-    //
-    // if local_ready_queue already exist (i.e. from a previous backward call),
-    // we could also reuse it instead of creating a new one.
-    memorized_cpu_ready_queue = local_ready_queue;
-  } else {
-    // A frech first time Engine::execute call should start on the CPU device,
-    // initialize a new thread local ready queue on CPU and memorize it in GraphTask
-    init_local_ready_queue();
-    memorized_cpu_ready_queue = local_ready_queue;
-  }
+  init_local_ready_queue();
 
   auto graph_task = std::make_shared<GraphTask>(
       keep_graph,
       create_graph,
       worker_device == NO_DEVICE ? 0 : total_depth + 1,
-      memorized_cpu_ready_queue);
+      local_ready_queue,
+      true);
 
   // Now compute the dependencies for all executable functions and queue the root
   auto graph_root = std::make_shared<GraphRoot>(roots, inputs);
@@ -790,22 +769,22 @@ void Engine::enqueue_blocked_task_on_cpu(NodeTask task) {
 void Engine::execute_until_ready_queue_empty(const std::shared_ptr<GraphTask>& graph_task) {
   std::shared_ptr<ReadyQueue> graph_task_rq = graph_task->cpu_ready_queue_;
   while(!graph_task_rq->empty()) {
-    auto task = graph_task_rq->pop();
+    NodeTask task = graph_task_rq->pop();
     std::shared_ptr<GraphTask> local_graph_task;
-    if (!(local_graph_task = task->base_.lock())) {
+    if (!(local_graph_task = task.base_.lock())) {
       continue;
     }
-    if (task->fn_ && !local_graph_task->has_error_.load()) {
-      AutoGradMode grad_mode(local_graph_task->grad_mode_);
-      try {
-        LOG(ERROR) << "****evaluating function name: " << task->fn_->name() << " for graphTask: " << graph_task;
-        evaluate_function(local_graph_task, task->fn_.get(), task->inputs_);
-      } catch (std::exception& e) {
-        LOG(ERROR) << "****evaluating function name: " << task->fn_->name() <<" thread on exception: " << e.what() << " for graphTask: " << graph_task;
-        thread_on_exception(local_graph_task, task->fn_, e);
-        // early return in error so that we immediately stop the execution
-        // of this GraphTask and return the future with proper ErrorMessage
-        return;
+    {
+      if (task.fn_ && !local_graph_task->has_error_.load()) {
+        AutoGradMode grad_mode(local_graph_task->grad_mode_);
+        try {
+          evaluate_function(local_graph_task, task.fn_.get(), task.inputs_);
+        } catch (std::exception& e) {
+          thread_on_exception(local_graph_task, task.fn_, e);
+          // early return in error so that we immediately stop the execution
+          // of this GraphTask and return the future with proper ErrorMessage
+          return;
+        }
       }
     }
     // Decrement the outstanding task.
@@ -859,6 +838,9 @@ std::shared_ptr<FutureVariableList> Engine::execute_with_graph_task(
     // that has already been pushed to the current CPU thread's ready_queue
     lock.unlock();
     if (async_mode) {
+      // at::launch([this, graph_task]() {
+      //     execute_until_ready_queue_empty(graph_task);
+      // });
       execute_until_ready_queue_empty(graph_task);
     } else {
       thread_main(nullptr, false);
@@ -983,6 +965,17 @@ bool Engine::is_checkpoint_valid() {
 }
 
 std::shared_ptr<ReadyQueue> Engine::init_local_ready_queue(std::shared_ptr<ReadyQueue> ready_queue) {
+    // Reentrant call will still use the parent thread ready_queue
+    // While we can create separate cpu_ready_queue for each new reentrant
+    // thread, but sharing the same cpu_ready_queue with parent thread is
+    // a mild performance improvement and cuda thread still have to do the
+    // same thing.
+    //
+    // if local_ready_queue already exist (i.e. from a previous backward call),
+    // we could also reuse it instead of creating a new one.
+
+    // A frech first time Engine::execute call should start on the CPU device,
+    // initialize a new thread local ready queue on CPU and memorize it in GraphTask
   // if provided ready queue in the caller, use the caller's ready_queue to initialize local_ready_queue
   if (ready_queue) {
     TORCH_INTERNAL_ASSERT(!local_ready_queue);

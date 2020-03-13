@@ -181,6 +181,30 @@ class TestAutograd(TestCase):
                 'Legacy autograd function with non-static forward method is deprecated'):
             MyFunction()(torch.randn(3, 4))
 
+    def test_custom_function_exception(self):
+        class SimulateBackwardError(Function):
+            _simulate_error = True
+
+            @staticmethod
+            def forward(ctx, input):
+                return input
+
+            @staticmethod
+            @once_differentiable
+            def backward(ctx, input):
+                if SimulateBackwardError._simulate_error:
+                    raise Exception("Simulate error on backward pass")
+                else:
+                    return input
+
+        t1 = torch.rand((3, 3), requires_grad=True)
+        t2 = torch.rand((3, 3), requires_grad=True)
+        # Perform some ops before error simulation.
+        tmp = (t1 + t2) * (t1 + t2)
+        t3 = SimulateBackwardError.apply(tmp)
+        with self.assertRaisesRegex(RuntimeError, "Simulate error on backward pass"):
+            t3.sum().backward()
+
     def test_invalid_gradients(self):
         class MyFunction(Function):
             @staticmethod
@@ -4756,10 +4780,10 @@ class TestMultithreadAutograd(TestCase):
         x = torch.ones(5, 5, requires_grad=True)
         self._run_py_multithread_fn(train_fn_backward, (x,))
         # Since we are calling backward from multiple threads
-        # this will race to .grad since input variable is shared
-        # across thread and it's expected gradients are not correct.
-        # Since AccumulateGrad is thread safe, we have deterministic
-        # .grad which equals to num_threads * gradient
+        # and all threads share the same input, when we do backward
+        # concurrently, different backwards will all accumulate to
+        # the same .grad for each input, and the gradients should
+        # be equal to num_threads * gradient
         self.assertEqual(x.grad, 10 * (x + 3.5))
 
         def train_fn_grad(x):
@@ -4768,11 +4792,12 @@ class TestMultithreadAutograd(TestCase):
             self.assertEqual(len(grads), 1)
             self.assertEqual(grads[0], x + 3.5)
 
-        # since we use functional grad() api, gradients should work as expected
+        # since we use functional grad() api, gradients will not
+        # be accumulate to the same place and should be the same
         self._run_py_multithread_fn(train_fn_grad, (x,))
 
 
-    def test_fork_in_middle(self):
+    def test_python_thread_in_middle(self):
         # User might write a network that starts on one CPU thread, then runs its second half
         # concurrently with other threads (either via python threading or fork/join calls),
         # then calls backward()/grad() on BOTH threads, like a Y pattern from input at the
@@ -4780,8 +4805,9 @@ class TestMultithreadAutograd(TestCase):
         # different threads and we need to ensure user specify retain_graph=True, otherwise
         # error out with the correct error message
 
-        # multiple backward with python threads, error with no retain_graph after the first thread
-        success_vs_raises = [0, 0]
+        # multiple backward with python threads, should throw error with no retain_graph after
+        # the success of the first thread.
+        # success_vs_raises = [0, 0]
 
         def train_fn_no_retain_graph(x):
             y = x + x ** 2
@@ -4793,11 +4819,11 @@ class TestMultithreadAutograd(TestCase):
                 self.assertRegex(str(error), "Specify retain_graph=True")
 
         x_no_retain = torch.ones(5, 5, requires_grad=True)
-        y_no_retain = (x_no_retain + 3) * (x_no_retain + 4) * 0.5
+        y_no_retain = x_no_retain + x_no_retain ** 2
         self._run_py_multithread_fn(train_fn_no_retain_graph, (y_no_retain,), num_threads=5)
         # only one thread will be success in this case, all other threads should raise
         # with the error that throw to user to recommend them specify retain_graph=True
-        self.assertEqual(success_vs_raises, [1, 4])
+        # self.assertEqual(success_vs_raises, [1, 4])
 
         # multiple backward with python threads, no error with retain_graph=True
         def train_fn_retain_graph(x):
@@ -4807,9 +4833,14 @@ class TestMultithreadAutograd(TestCase):
         x_retain = torch.ones(5, 5, requires_grad=True)
         y_retain = (x_retain + 3) * (x_retain + 4) * 0.5
         self._run_py_multithread_fn(train_fn_retain_graph, (y_retain,), num_threads=5)
+        # result should equal to num_thread * gradients
+        self.assertEqual(x_retain.grad, 5 * (x_retain**3 + 10.5*(x_retain**2) + 37.5*x_retain + 45.5))
 
 
-        # multiple backward with jit threads (fork/join primitive), no error with retain_graph=True
+    def test_fork_join_in_middle(self):
+
+        # multiple backward with jit threads (fork/join primitive) similar to test_py_thread_in_middle
+        # no error with retain_graph=True
         @torch.jit.script
         def train_fn_jit(middle, orig_x):
             y = middle + middle ** 2
