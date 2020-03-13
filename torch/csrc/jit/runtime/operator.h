@@ -32,6 +32,10 @@ using ::c10::FunctionSchema;
 
 using OperationCreator = Operation (*)(const Node*);
 
+namespace details {
+  Operation makeOperationForC10Operator(c10::OperatorHandle handle);
+}
+
 /*
  * Note: JIT relies on Operator instances having static lifetime, because
  * it for example stores a non-owning FunctionSchema* pointer in the Node class,
@@ -54,7 +58,6 @@ struct TORCH_API Operator {
 private:
   struct C10Operator final {
     c10::OperatorHandle handle_;
-    Operation op_;
   };
   struct UnmaterializedFunctionSchema final {
     std::string schema_string_;
@@ -66,9 +69,9 @@ private:
   };
 public:
 
-  Operator(c10::OperatorHandle opHandle, Operation operation)
+  Operator(c10::OperatorHandle opHandle)
       : op_(c10::make_left<C10Operator, JitOnlyOperator>(C10Operator {
-        std::move(opHandle), std::move(operation)
+        std::move(opHandle)
       })) {}
 
 
@@ -110,7 +113,7 @@ public:
 
   Operation getOperation(const Node* node = nullptr) const {
     return op_.fold<Operation>([] (const C10Operator& op) {
-      return op.op_;
+      return details::makeOperationForC10Operator(op.handle_);
     }, [node] (const JitOnlyOperator& op) {
       return op.op_.fold<Operation>([] (const Operation& op) {
         return op;
