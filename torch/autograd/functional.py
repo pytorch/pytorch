@@ -3,33 +3,36 @@ import torch
 # Utility functions
 
 def _as_tuple(inp, arg_name, fn_name):
-    # Ensures that the inputs is a tuple of Tensors
+    # Ensures that inp is a tuple of Tensors
     # Returns whether or not the original inp was a tuple and the tupled version of the input
-    tuple_inp = True
+    is_inp_tuple = True
     if not isinstance(inp, tuple):
         inp = (inp,)
-        tuple_inp = False
+        is_inp_tuple = False
 
     for i, el in enumerate(inp):
         if not torch.is_tensor(el):
             raise TypeError("The {} given to {} must be either a Tensor or a tuple of Tensors but the"
                             " value at index {} has type {}.".format(arg_name, fn_name, i, type(el)))
 
-    return tuple_inp, inp
+    return is_inp_tuple, inp
 
-def _tuple_postprocess(inp, tuple_inp):
+def _tuple_postprocess(res, to_unpack):
     # Unpacks a potentially nested tuple of Tensors
-    # It is used to invert _as_tuple before returning to the user
-    if isinstance(tuple_inp, tuple):
-        assert len(tuple_inp) == 2
-        if not tuple_inp[1]:
-            inp = tuple(el[0] for el in inp)
-        if not tuple_inp[0]:
-            inp = inp[0]
+    # to_unpack should be a single boolean or a tuple of two booleans.
+    # It is used to:
+    # - invert _as_tuple when res should match the inp given to _as_tuple
+    # - optionally remove nesting of two tuples created by multiple calls to _as_tuple
+    if isinstance(to_unpack, tuple):
+        assert len(to_unpack) == 2
+        if not to_unpack[1]:
+            res = tuple(el[0] for el in res)
+        if not to_unpack[0]:
+            res = res[0]
     else:
-        if not tuple_inp:
-            inp = inp[0]
-    return inp
+        if not to_unpack:
+            res = res[0]
+    return res
 
 def _grad_preprocess(inputs, create_graph, need_graph):
     # Preprocess the inputs to make sure they require gradient
@@ -50,8 +53,8 @@ def _grad_preprocess(inputs, create_graph, need_graph):
 
 
 def _grad_postprocess(inputs, create_graph):
-    # Postprocess the generated Tensors to avoid returning Tensors with history when the user does not
-    # requested it.
+    # Postprocess the generated Tensors to avoid returning Tensors with history when the user did not
+    # request it.
     if torch.is_tensor(inputs[0]):
         if not create_graph:
             return tuple(inp.detach() for inp in inputs)
@@ -126,6 +129,48 @@ def _autograd_grad(outputs, inputs, grad_outputs=None, create_graph=False, retai
         return torch.autograd.grad(new_outputs, inputs, new_grad_outputs, allow_unused=True,
                                    create_graph=create_graph, retain_graph=retain_graph)
 
+def _fill_in_zeros(grads, refs, strict, create_graph, stage):
+    # Used to detect None in the grads and depending on the flags, either replace them
+    # with Tensors full of 0s of the appropriate size based on the refs or raise an error.
+    # strict and create graph allow us to detect when it is appropriate to raise an error
+    # stage gives us information of which backward call we consider to give good error message
+    if stage not in ["back", "back_trick", "double_back", "double_back_trick"]:
+        raise RuntimeError("Invalid stage argument '{}' to _fill_in_zeros".format(stage))
+
+    res = tuple()
+    for i, grads_i in enumerate(grads):
+        if grads_i is None:
+            if strict:
+                if stage == "back":
+                    raise RuntimeError("The output of the user-provided function is independent of "
+                                       "input {}. This is not allowed in strict mode.".format(i))
+                elif stage == "back_trick":
+                    raise RuntimeError("The gradient with respect to the input is independent of entry {}"
+                                       " in the grad_outputs when using the double backward trick to compute"
+                                       " forward mode gradients. This is not allowed in strict mode.".format(i))
+                elif stage == "double_back":
+                    raise RuntimeError("The jacobian of the user-provided function is independent of "
+                                       "input {}. This is not allowed in strict mode.".format(i))
+                else:
+                    raise RuntimeError("The hessian of the user-provided function is independent of "
+                                       "entry {} in the grad_jacobian. This is not allowed in strict "
+                                       "mode as it prevents from using the double backward trick to "
+                                       "replace forward mode AD.".format(i))
+
+            grads_i = torch.zeros_like(refs[i])
+        else:
+            if strict and create_graph and not grads_i.requires_grad:
+                if "double" not in stage:
+                    raise RuntimeError("The jacobian of the user-provided function is independent of "
+                                       "input {}. This is not allowed in strict mode when create_graph=True.".format(i))
+                else:
+                    raise RuntimeError("The hessian of the user-provided function is independent of "
+                                       "input {}. This is not allowed in strict mode when create_graph=True.".format(i))
+
+        res += (grads_i,)
+
+    return res
+
 # Public API
 
 def vjp(func, inputs, v=None, create_graph=False, strict=False):
@@ -183,15 +228,15 @@ def vjp(func, inputs, v=None, create_graph=False, strict=False):
          (tensor([2., 2.]), tensor([3., 3.])))
     """
 
-    tuple_inputs, inputs = _as_tuple(inputs, "inputs", "vjp")
+    is_inputs_tuple, inputs = _as_tuple(inputs, "inputs", "vjp")
     inputs = _grad_preprocess(inputs, create_graph=create_graph, need_graph=True)
 
     outputs = func(*inputs)
-    tuple_outputs, outputs = _as_tuple(outputs, "outputs of the user-provided function", "vjp")
+    is_outputs_tuple, outputs = _as_tuple(outputs, "outputs of the user-provided function", "vjp")
     _check_requires_grad(outputs, "outputs", strict=strict)
 
     if v is not None:
-        tuple_v, v = _as_tuple(v, "v", "vjp")
+        _, v = _as_tuple(v, "v", "vjp")
         v = _grad_preprocess(v, create_graph=create_graph, need_graph=False)
         _validate_v(v, outputs)
     else:
@@ -201,24 +246,13 @@ def vjp(func, inputs, v=None, create_graph=False, strict=False):
 
     grad_res = _autograd_grad(outputs, inputs, v, create_graph=create_graph)
 
-    vjp = tuple()
-    for i, vjp_i in enumerate(grad_res):
-        if vjp_i is None:
-            if strict:
-                raise RuntimeError("The output of the user-provided function is independent of "
-                                   "input {}. This is not allowed in strict mode.".format(i))
-            vjp_i = torch.zeros_like(inputs[i])
-        else:
-            if strict and create_graph and not vjp_i.requires_grad:
-                raise RuntimeError("The jacobian of the user-provided function is independent of "
-                                   "input {}. This is not allowed in strict mode when create_graph=True.".format(i))
-        vjp += (vjp_i,)
+    vjp = _fill_in_zeros(grad_res, inputs, strict, create_graph, "back")
 
     # Cleanup objects and return them to the user
     outputs = _grad_postprocess(outputs, create_graph)
     vjp = _grad_postprocess(vjp, create_graph)
 
-    return _tuple_postprocess(outputs, tuple_outputs), _tuple_postprocess(vjp, tuple_inputs)
+    return _tuple_postprocess(outputs, is_outputs_tuple), _tuple_postprocess(vjp, is_inputs_tuple)
 
 
 def jvp(func, inputs, v=None, create_graph=False, strict=False):
@@ -275,11 +309,11 @@ def jvp(func, inputs, v=None, create_graph=False, strict=False):
         forward mode AD in pytorch at the moment.
     """
 
-    tuple_inputs, inputs = _as_tuple(inputs, "inputs", "jvp")
+    is_inputs_tuple, inputs = _as_tuple(inputs, "inputs", "jvp")
     inputs = _grad_preprocess(inputs, create_graph=create_graph, need_graph=True)
 
     if v is not None:
-        tuple_v, v = _as_tuple(v, "v", "jvp")
+        _, v = _as_tuple(v, "v", "jvp")
         v = _grad_preprocess(v, create_graph=create_graph, need_graph=False)
         _validate_v(v, inputs)
     else:
@@ -288,7 +322,7 @@ def jvp(func, inputs, v=None, create_graph=False, strict=False):
                                "is a single Tensor with a single element.")
 
     outputs = func(*inputs)
-    tuple_outputs, outputs = _as_tuple(outputs, "outputs of the user-provided function", "jvp")
+    is_outputs_tuple, outputs = _as_tuple(outputs, "outputs of the user-provided function", "jvp")
     _check_requires_grad(outputs, "outputs", strict=strict)
     # The backward is linear so the value of grad_outputs is not important as it won't appear in the double
     # backward graph. We only need to ensure that it does not contain inf or nan.
@@ -299,25 +333,13 @@ def jvp(func, inputs, v=None, create_graph=False, strict=False):
 
     grad_res = _autograd_grad(grad_inputs, grad_outputs, v, create_graph=create_graph)
 
-    jvp = tuple()
-    for i, jvp_i in enumerate(grad_res):
-        if jvp_i is None:
-            if strict:
-                raise RuntimeError("The gradient with respect to the input is independent of entry {}"
-                                   " in the grad_outputs when using the double backward trick to compute"
-                                   " forward mode gradients. This is not allowed in strict mode.".format(i))
-            jvp_i = torch.zeros_like(outputs[i])
-        else:
-            if strict and create_graph and not jvp_i.requires_grad:
-                raise RuntimeError("The jacobian of the user-provided function is independent of "
-                                   "input {}. This is not allowed in strict mode when create_graph=True.".format(i))
-        jvp += (jvp_i,)
+    jvp = _fill_in_zeros(grad_res, outputs, strict, create_graph, "back_trick")
 
     # Cleanup objects and return them to the user
     outputs = _grad_postprocess(outputs, create_graph)
     jvp = _grad_postprocess(jvp, create_graph)
 
-    return _tuple_postprocess(outputs, tuple_outputs), _tuple_postprocess(jvp, tuple_outputs)
+    return _tuple_postprocess(outputs, is_outputs_tuple), _tuple_postprocess(jvp, is_outputs_tuple)
 
 
 def jacobian(func, inputs, create_graph=False, strict=False):
@@ -374,11 +396,11 @@ def jacobian(func, inputs, create_graph=False, strict=False):
                  [0., 3.]]))
     """
 
-    tuple_inputs, inputs = _as_tuple(inputs, "inputs", "jacobian")
+    is_inputs_tuple, inputs = _as_tuple(inputs, "inputs", "jacobian")
     inputs = _grad_preprocess(inputs, create_graph=create_graph, need_graph=True)
 
     outputs = func(*inputs)
-    tuple_outputs, outputs = _as_tuple(outputs, "outputs of the user-provided function", "jacobian")
+    is_outputs_tuple, outputs = _as_tuple(outputs, "outputs of the user-provided function", "jacobian")
     _check_requires_grad(outputs, "outputs", strict=strict)
 
     jacobian = tuple()
@@ -406,7 +428,7 @@ def jacobian(func, inputs, create_graph=False, strict=False):
 
     jacobian = _grad_postprocess(jacobian, create_graph)
 
-    return _tuple_postprocess(jacobian, (tuple_outputs, tuple_inputs))
+    return _tuple_postprocess(jacobian, (is_outputs_tuple, is_inputs_tuple))
 
 
 def hessian(func, inputs, create_graph=False, strict=False):
@@ -481,14 +503,14 @@ def hessian(func, inputs, create_graph=False, strict=False):
                   [0., 6.]])))
     """
 
-    tuple_inputs, inputs = _as_tuple(inputs, "inputs", "hessian")
+    is_inputs_tuple, inputs = _as_tuple(inputs, "inputs", "hessian")
 
     def ensure_single_output_function(*inp):
         out = func(*inp)
-        tuple_out, t_out = _as_tuple(out, "outputs of the user-provided function", "hessian")
+        is_out_tuple, t_out = _as_tuple(out, "outputs of the user-provided function", "hessian")
         _check_requires_grad(t_out, "outputs", strict=strict)
 
-        if tuple_out or not torch.is_tensor(out):
+        if is_out_tuple or not torch.is_tensor(out):
             raise RuntimeError("The function given to hessian should return a single Tensor")
 
         if out.nelement() != 1:
@@ -502,7 +524,7 @@ def hessian(func, inputs, create_graph=False, strict=False):
         return jac
 
     res = jacobian(jac_func, inputs, create_graph=create_graph, strict=strict)
-    return _tuple_postprocess(res, (tuple_inputs, tuple_inputs))
+    return _tuple_postprocess(res, (is_inputs_tuple, is_inputs_tuple))
 
 
 def vhp(func, inputs, v=None, create_graph=False, strict=False):
@@ -559,11 +581,11 @@ def vhp(func, inputs, v=None, create_graph=False, strict=False):
 
     """
 
-    tuple_inputs, inputs = _as_tuple(inputs, "inputs", "vhp")
+    is_inputs_tuple, inputs = _as_tuple(inputs, "inputs", "vhp")
     inputs = _grad_preprocess(inputs, create_graph=create_graph, need_graph=True)
 
     if v is not None:
-        tuple_v, v = _as_tuple(v, "v", "vhp")
+        _, v = _as_tuple(v, "v", "vhp")
         v = _grad_preprocess(v, create_graph=create_graph, need_graph=False)
         _validate_v(v, inputs)
     else:
@@ -572,10 +594,10 @@ def vhp(func, inputs, v=None, create_graph=False, strict=False):
                                "is a single Tensor with a single element.")
 
     outputs = func(*inputs)
-    tuple_outputs, outputs = _as_tuple(outputs, "outputs of the user-provided function", "vhp")
+    is_outputs_tuple, outputs = _as_tuple(outputs, "outputs of the user-provided function", "vhp")
     _check_requires_grad(outputs, "outputs", strict=strict)
 
-    if tuple_outputs or not torch.is_tensor(outputs[0]):
+    if is_outputs_tuple or not torch.is_tensor(outputs[0]):
         raise RuntimeError("The function given to vhp should return a single Tensor")
 
     if outputs[0].nelement() != 1:
@@ -586,23 +608,12 @@ def vhp(func, inputs, v=None, create_graph=False, strict=False):
 
     grad_res = _autograd_grad(jac, inputs, v, create_graph=create_graph)
 
-    vhp = tuple()
-    for i, vhp_i in enumerate(grad_res):
-        if vhp_i is None:
-            if strict:
-                raise RuntimeError("The jacobian of the user-provided function is independent of "
-                                   "input {}. This is not allowed in strict mode.".format(i))
-            vhp_i = torch.zeros_like(inputs[i])
-        else:
-            if strict and create_graph and not vhp_i.requires_grad:
-                raise RuntimeError("The hessian of the user-provided function is independent of "
-                                   "input {}. This is not allowed in strict mode when create_graph=True.".format(i))
-        vhp += (vhp_i,)
+    vhp = _fill_in_zeros(grad_res, inputs, strict, create_graph, "double_back")
 
     outputs = _grad_postprocess(outputs, create_graph)
     vhp = _grad_postprocess(vhp, create_graph)
 
-    return _tuple_postprocess(outputs, tuple_outputs), _tuple_postprocess(vhp, tuple_inputs)
+    return _tuple_postprocess(outputs, is_outputs_tuple), _tuple_postprocess(vhp, is_inputs_tuple)
 
 
 def hvp(func, inputs, v=None, create_graph=False, strict=False):
@@ -666,11 +677,11 @@ def hvp(func, inputs, v=None, create_graph=False, strict=False):
 
     """
 
-    tuple_inputs, inputs = _as_tuple(inputs, "inputs", "hvp")
+    is_inputs_tuple, inputs = _as_tuple(inputs, "inputs", "hvp")
     inputs = _grad_preprocess(inputs, create_graph=create_graph, need_graph=True)
 
     if v is not None:
-        tuple_v, v = _as_tuple(v, "v", "hvp")
+        _, v = _as_tuple(v, "v", "hvp")
         v = _grad_preprocess(v, create_graph=create_graph, need_graph=False)
         _validate_v(v, inputs)
     else:
@@ -679,10 +690,10 @@ def hvp(func, inputs, v=None, create_graph=False, strict=False):
                                "is a single Tensor with a single element.")
 
     outputs = func(*inputs)
-    tuple_outputs, outputs = _as_tuple(outputs, "outputs of the user-provided function", "hvp")
+    is_outputs_tuple, outputs = _as_tuple(outputs, "outputs of the user-provided function", "hvp")
     _check_requires_grad(outputs, "outputs", strict=strict)
 
-    if tuple_outputs or not torch.is_tensor(outputs[0]):
+    if is_outputs_tuple or not torch.is_tensor(outputs[0]):
         raise RuntimeError("The function given to hvp should return a single Tensor")
 
     if outputs[0].nelement() != 1:
@@ -698,22 +709,9 @@ def hvp(func, inputs, v=None, create_graph=False, strict=False):
 
     grad_res = _autograd_grad(double_back, grad_jac, v, create_graph=create_graph)
 
-    hvp = tuple()
-    for i, hvp_i in enumerate(grad_res):
-        if hvp_i is None:
-            if strict:
-                raise RuntimeError("The hessian of the user-provided function is independent of "
-                                   "entry {} in the grad_jacobian. This is not allowed in strict "
-                                   "mode as it prevents form using the double backward trick to "
-                                   "replace forward mode AD.".format(i))
-            hvp_i = torch.zeros_like(inputs[i])
-        else:
-            if strict and create_graph and not hvp_i.requires_grad:
-                raise RuntimeError("The hessian of the user-provided function is independent of "
-                                   "input {}. This is not allowed in strict mode when create_graph=True.".format(i))
-        hvp += (hvp_i,)
+    hvp = _fill_in_zeros(grad_res, inputs, strict, create_graph, "double_back_trick")
 
     outputs = _grad_postprocess(outputs, create_graph)
     hvp = _grad_postprocess(hvp, create_graph)
 
-    return _tuple_postprocess(outputs, tuple_outputs), _tuple_postprocess(hvp, tuple_inputs)
+    return _tuple_postprocess(outputs, is_outputs_tuple), _tuple_postprocess(hvp, is_inputs_tuple)
