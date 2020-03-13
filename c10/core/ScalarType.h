@@ -5,6 +5,7 @@
 #include <c10/util/BFloat16.h>
 #include <c10/util/Optional.h>
 #include <c10/util/typeid.h>
+#include <c10/macros/Macros.h>
 
 #include <complex>
 #include <cstdint>
@@ -259,7 +260,13 @@ static inline const char* toString(ScalarType t) {
 #undef DEFINE_CASE
 }
 
-static inline size_t elementSize(ScalarType t) {
+#ifdef __CUDA_ARCH__
+#define ERROR_ON_HOST(arg)
+#else
+#define ERROR_ON_HOST AT_ERROR
+#endif
+
+static inline C10_HOST_DEVICE size_t elementSize(ScalarType t) {
 #define CASE_ELEMENTSIZE_CASE(ctype, name) \
   case ScalarType::name:                   \
     return sizeof(ctype);
@@ -267,9 +274,10 @@ static inline size_t elementSize(ScalarType t) {
   switch (t) {
     AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(CASE_ELEMENTSIZE_CASE)
     default:
-      AT_ERROR("Unknown ScalarType");
+      ERROR_ON_HOST("Unknown ScalarType");
   }
 #undef CASE_ELEMENTSIZE_CASE
+  return 0;  // silence compiler warning
 }
 
 C10_DEPRECATED_MESSAGE("isIntegralType is deprecated. Please use the overload with 'includeBool' parameter instead.")
