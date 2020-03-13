@@ -86,14 +86,20 @@ struct LoadWithoutCast {
 template <int N>
 struct LoadWithCast {
   using array_t = at::detail::Array<at::ScalarType, N>;
-  array_t dtypes;
+  using size_array_t = at::detail::Array<uint32_t, N>;
 
-  LoadWithCast(array_t dtypes): dtypes(dtypes) {}
+  array_t dtypes;
+  size_array_t element_sizes;
+
+  LoadWithCast(array_t dtypes): dtypes(dtypes) {
+    for (int i = 0; i < N; i++) {
+      element_sizea[i] = c10::elementSize(dtypes[i]);
+    }
+  }
 
   template<typename scalar_t>
   __device__ scalar_t load(char *base_ptr, uint32_t offset, int arg) {
-    uint32_t size = c10::elementSize(dtypes[arg]);
-    void *ptr = base_ptr + size * offset;
+    void *ptr = base_ptr + element_sizea[arg] * offset;
     return c10::fetch_and_cast<scalar_t>(dtypes[arg], ptr);
   }
 };
@@ -107,11 +113,11 @@ struct StoreWithoutCast {
 
 struct StoreWithCast {
   at::ScalarType dtype;
-  StoreWithCast(at::ScalarType dtype): dtype(dtype) {}
+  uint32_t element_size;
+  StoreWithCast(at::ScalarType dtype): dtype(dtype), element_size(c10::elementSize(dtype)) {}
   template<typename scalar_t>
   __device__ void store(scalar_t value, char *base_ptr, uint32_t offset) {
-    int size = c10::elementSize(dtype);
-    void *ptr = base_ptr + size * offset;
+    void *ptr = base_ptr + element_size * offset;
     c10::cast_and_store<scalar_t>(dtype, ptr, value);
   }
 };
