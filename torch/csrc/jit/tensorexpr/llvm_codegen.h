@@ -1,6 +1,6 @@
 #pragma once
 
-#ifdef ENABLE_LLVM
+#ifdef TORCH_ENABLE_LLVM
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include "llvm/ExecutionEngine/Orc/ThreadSafeModule.h"
@@ -132,4 +132,4 @@ class TORCH_API LLVMCodeGen : public CodeGen, public IRVisitor {
 } // namespace jit
 } // namespace torch
 
-#endif // ENABLE_LLVM
+#endif // TORCH_ENABLE_LLVM
