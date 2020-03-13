@@ -66,7 +66,7 @@ struct OffsetCalculator {
 
   int dims;
   IntDivider<index_t> sizes_[MAX_DIMS];
-  index_t strides_[MAX_DIMS][NARGS];
+  index_t strides_[MAX_DIMS][std::max<int>(NARGS, 1)];
 };
 
 template <int NARGS, typename index_t = uint32_t>
