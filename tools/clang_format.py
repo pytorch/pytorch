@@ -1,58 +1,68 @@
 #!/usr/bin/env python
 """
-A script that runs clang-format on changes detected via git. It will
-report if running clang-format generated any changes.
+A script that runs clang-format on all C/C++ files in CLANG_FORMAT_WHITELIST. There is
+also a diff mode which simply checks if clang-format would make any changes, which is useful for 
+CI purposes.
 
-In CI, the script considers it a failure if running clang-format makes a change.
-In the pre-commit hook, the user is prompted to apply any clang-format changes.
-Running tools/clang_format.py manually with no arguments should replicate the pre-commit hook behavior.
-
-Only files that are in CLANG_FORMAT_WHITELIST are checked.
+If clang-format is not available, the script also downloads a platform-appropriate binary from
+and S3 bucket and verifies it against a precommited set of blessed binary hashes.
 """
-import subprocess
-import os
 import argparse
-import difflib
+import hashlib
+import os
+import platform
+import stat
+import subprocess
 import re
+import sys
+import urllib.request
+import urllib.error
 
+
+# String representing the host platform (e.g. Linux, Darwin).
+HOST_PLATFORM = platform.system()
+
+# PyTorch directory root, derived from the location of this file.
+PYTORCH_ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+
+# This dictionary maps each platform to the S3 object URL for its clang-format binary.
+PLATFORM_TO_CF_URL = {
+    "Darwin": "https://oss-clang-format.s3.us-east-2.amazonaws.com/mac/clang-format-mojave",
+    "Linux": "https://oss-clang-format.s3.us-east-2.amazonaws.com/linux64/clang-format-linux64",
+}
+
+# This dictionary maps each platform to a relative path to a file containing its reference hash.
+PLATFORM_TO_HASH = {
+    "Darwin": os.path.join("tools", "clang_format_hash", "mac", "clang-format-mojave"),
+}
+
+# Directory and file paths for the clang-format binary.
+CLANG_FORMAT_DIR = os.path.join(PYTORCH_ROOT, ".clang-format-bin")
+CLANG_FORMAT_PATH = os.path.join(CLANG_FORMAT_DIR, "clang-format")
 
 # Whitelist of directories to check. All files that in that directory
 # (recursively) will be checked.
 CLANG_FORMAT_WHITELIST = ["torch/csrc/jit/", "test/cpp/jit/"]
 
-CPP_FILE_REGEX = re.compile("^.*\\.(h|cpp|cc|c|hpp)$")
+# Only files with names matching this regex will be formatted.
 CPP_FILE_REGEX = re.compile(".*\\.(h|cpp|cc|c|hpp)$")
-# @@ -start,count +start,count @@
-CHUNK_PATTERN = r"^@@\s+-\d+(?:,\d+)?\s+\+(\d+)(?:,(\d+))?\s+@@"
 
 
-def parse_args():
-    parser = argparse.ArgumentParser(
-        description="Execute clang-format on your working copy changes."
-    )
-    parser.add_argument(
-        "-d",
-        "--diff",
-        default="HEAD",
-        help="Git revision to diff against to get changes",
-    )
-    parser.add_argument(
-        "--accept-changes",
-        action="store_true",
-        default=False,
-        help=(
-            "If true, apply whatever changes clang-format creates. "
-            "Otherwise, just print the changes and exit"
-        ),
-    )
-    parser.add_argument(
-        "--check-all",
-        action="store_true",
-        default=False,
-        help="If true, check all whitelisted files instead of just working copy changes",
-    )
-    parser.add_argument("--verbose", "-v", action="store_true", default=False)
-    return parser.parse_args()
+def compute_file_sha1(path):
+    """Compute the SHA1 hash of a file and return it as a hex string."""
+    # If the file doesn't exist, return an empty string.
+    if not os.path.exists(path):
+        return ""
+
+    hash = hashlib.sha1()
+
+    # Open the file in binary mode and hash it.
+    with open(path, "rb") as f:
+        for b in f:
+            hash.update(b)
+
+    # Return the hash as a hexadecimal string.
+    return hash.hexdigest()
 
 
 def get_whitelisted_files():
@@ -69,44 +79,52 @@ def get_whitelisted_files():
     return set(matches)
 
 
-def get_changed_files(rev):
+def run_clang_format(diff=False, verbose=False):
     """
-    Get all changed files between the working tree and `rev`
+    Run clang-format to all files in CLANG_FORMAT_WHITELIST that match CPP_FILE_REGEX.
     """
-    changed_files = (
-        subprocess.check_output(
-            ["git", "diff-index", "--diff-filter=AMU", "--name-only", rev]
-        )
-        .decode()
-        .split("\n")
-    )
-    return set(changed_files)
+    # Check to make sure the clang-format binary exists.
+    if not os.path.exists(CLANG_FORMAT_PATH):
+        print("clang-format binary not found")
+        return False
 
+    # Gather command-line options for clang-format.
+    args = [CLANG_FORMAT_PATH, "-style=file"]
 
-def get_changed_lines(filename, revision):
-    """
-    Given a filename and revision diff, return all the changed lines noted in the diff
-    Returns a list of (start_line, end_line) tuples.
-    """
-    command = ["git", "diff-index", "--unified=0", revision, filename]
-    output = subprocess.check_output(command).decode()
-    changed_lines = []
-    for chunk in re.finditer(CHUNK_PATTERN, output, re.MULTILINE):
-        start = int(chunk.group(1))
-        count = int(chunk.group(2) or 1)
-        changed_lines.append((start, start + count))
-
-    return changed_lines
-
-
-def run_clang_format(filename, lines, in_place):
-    args = ["clang-format", filename]
-    line_args = ["-lines={}:{}".format(i[0], i[1]) for i in lines]
-    args.extend(line_args)
-    if in_place:
+    if not diff:
         args.append("-i")
 
-    return subprocess.check_output(args).decode()
+    ok = True
+
+    # Format files.
+    for f in get_whitelisted_files():
+        args.append(f)
+        # This is equivalent to "{CLANG_FORMAT_PATH} {opts} {file}"
+        if diff:
+            # The formatted file will be written to stdout.
+            formatted_contents = subprocess.check_output(args).decode()
+            # Check if the formatted and original files are identical.
+            with open(f) as orig:
+                orig_contents = orig.read()
+                if formatted_contents != orig_contents:
+                    ok = False
+                    if verbose:
+                        print("{} is not formatted correctly".format(f))
+        else:
+            _ = subprocess.call(args)
+            if verbose:
+                print("Formatted {}".format(f))
+
+        args.pop()
+
+    # If --diff was passed, print out whether or not clang-format will generate changes.
+    if diff:
+        if ok:
+            print("All files are formatted correctly!")
+        else:
+            print("Some files are not formatted correctly!")
+
+    return ok
 
 
 def get_clang_format_diff(filename, lines):
@@ -124,57 +142,148 @@ def get_clang_format_diff(filename, lines):
             )
 
 
-def main():
-    args = parse_args()
+def report_download_progress(chunk_number, chunk_size, file_size):
+    """
+    Pretty printer for file download progress.
+    """
+    if file_size != -1:
+        percent = min(1, (chunk_number * chunk_size) / file_size)
+        bar = "#" * int(64 * percent)
+        sys.stdout.write("\r0% |{:<64}| {}%".format(bar, int(percent * 100)))
 
-    whitelisted_files = get_whitelisted_files()
 
-    if args.check_all:
-        files_to_check = whitelisted_files
+def download_clang_format(path):
+    """
+    Downloads a clang-format binary appropriate for the host platform and stores it at the given location.
+    """
+    if HOST_PLATFORM not in PLATFORM_TO_CF_URL:
+        print("Unsupported platform: {}".format(HOST_PLATFORM))
+        return False
+
+    cf_url = PLATFORM_TO_CF_URL[HOST_PLATFORM]
+    filename = os.path.join(path, "clang-format")
+
+    # Try to download clang-format.
+    print("Downloading clang-format to {}".format(path))
+    try:
+        urllib.request.urlretrieve(
+            cf_url, filename, reporthook=report_download_progress
+        )
+    except urllib.error.URLError as e:
+        print("Error downloading {}: {}".format(filename, str(e)))
+        return False
+    finally:
+        print()
+
+    return True
+
+
+def get_and_check_clang_format(verbose=False):
+    """
+    Download a platform-appropriate clang-format binary if one doesn't already exist at the expected location and verify
+    that it is the right binary by checking its SHA1 hash against the expected hash.
+    """
+    if not os.path.exists(CLANG_FORMAT_DIR):
+        # If the directory doesn't exist, try to create it.
+        try:
+            os.mkdir(CLANG_FORMAT_DIR)
+        except os.OSError as e:
+            print("Unable to create directory for clang-format binary: {}".format(CLANG_FORMAT_DIR))
+            return False
+        finally:
+            if verbose:
+                print("Created directory {} for clang-format binary".format(CLANG_FORMAT_DIR))
+
+        # If the directory didn't exist, neither did the binary, so download it.
+        ok = download_clang_format(CLANG_FORMAT_DIR)
+
+        if not ok:
+            return False
     else:
-        changed_files = get_changed_files(args.diff)
-        files_to_check = changed_files & whitelisted_files
+        # If the directory exists but the binary doesn't, download it.
+        if not os.path.exists(CLANG_FORMAT_PATH):
+            ok = download_clang_format(CLANG_FORMAT_DIR)
 
-    if args.verbose:
-        print("Running clang-format on whitelisted files: ")
-        for f in files_to_check:
-            print(f)
+            if not ok:
+                return False
+        else:
+            if verbose:
+                print("Found pre-existing clang-format binary, skipping download")
 
-    name_to_lines = {}
-    for f in files_to_check:
-        changed_lines = get_changed_lines(f, args.diff)
-        if len(changed_lines) != 0:
-            name_to_lines[f] = changed_lines
+    # Now that the binary is where it should be, hash it.
+    actual_bin_hash = compute_file_sha1(CLANG_FORMAT_PATH)
 
-    if len(name_to_lines) == 0:
-        return
+    # If the host platform is not in PLATFORM_TO_HASH, it is unsupported.
+    if HOST_PLATFORM not in PLATFORM_TO_HASH:
+        print("Unsupported platform: {}".format(HOST_PLATFORM))
+        return False
 
-    name_to_diff = {}
-    for filename, lines in name_to_lines.items():
-        diff = get_clang_format_diff(filename, lines)
-        if diff is not None:
-            name_to_diff[filename] = diff
+    # This is the path to the file containing the reference hash.
+    hashpath = os.path.join(PYTORCH_ROOT, PLATFORM_TO_HASH[HOST_PLATFORM])
 
-    if args.accept_changes:
-        # run clang-format on the necessary files
-        for name, lines in name_to_lines.items():
-            run_clang_format(name, lines, in_place=True)
+    if not os.path.exists(hashpath):
+        print("Unable to find reference binary hash")
+        return False
 
-        # add the changes so they will be committed
-        args = ["git", "add"]
-        args.extend(name_to_lines.keys())
-        subprocess.check_output(args)
-    else:
-        if len(name_to_diff) == 0:
-            return
+    # Load the reference hash and compare the actual hash to it.
+    with open(hashpath, "r") as f:
+        reference_bin_hash = f.readline()
 
-        print("ERROR: Running clang-format created changes: ")
-        for name, diff in name_to_diff.items():
-            print("In " + name)
-            for l in diff:
-                print(l)
-            print("\n")
+        if verbose:
+            print("Reference Hash: {}".format(reference_bin_hash))
+            print("Actual Hash: {}".format(actual_bin_hash))
+
+        if reference_bin_hash != actual_bin_hash:
+            print("The downloaded binary is not what was expected!")
+
+            # Err on the side of caution and try to delete the downloaded binary.
+            try:
+                os.unlink(CLANG_FORMAT_PATH)
+            except os.OSError as e:
+                print("Failed to delete binary: {}".format(str(e)))
+                print("Delete this binary as soon as possible and do not execute it!")
+
+            return False
+        else:
+            # Make sure the binary is executable.
+            mode = os.stat(CLANG_FORMAT_PATH).st_mode
+            mode |= stat.S_IXUSR
+            os.chmod(CLANG_FORMAT_PATH, mode)
+            print("Using clang-format located at {}".format(CLANG_FORMAT_PATH))
+
+    return True
+
+
+def parse_args(args):
+    """
+    Parse and return command-line arguments.
+    """
+    parser = argparse.ArgumentParser(
+        description="Execute clang-format on your working copy changes."
+    )
+    parser.add_argument(
+        "-d",
+        "--diff",
+        action="store_true",
+        default=False,
+        help="Determine whether running clang-format would produce changes",
+    )
+    parser.add_argument("--verbose", "-v", action="store_true", default=False)
+    return parser.parse_args(args)
+
+
+def main(args):
+    # Parse arguments.
+    options = parse_args(args)
+    # Get clang-format and make sure it is the right binary and it is in the right place.
+    ok = get_and_check_clang_format(options.verbose)
+    # Invoke clang-format on all files in the directories in the whitelist.
+    if ok:
+        ok = run_clang_format(options.diff, options.verbose)
+
+    # We have to invert because False -> 0, which is the code to be returned if everything is okay.
+    return not ok
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main(sys.argv[1:]))
