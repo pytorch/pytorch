@@ -69,7 +69,7 @@ torch::nn::Softmin|Yes|No
 torch::nn::Softmax|Yes|No
 torch::nn::Softmax2d|Yes|No
 torch::nn::LogSoftmax|Yes|No
-torch::nn::AdaptiveLogSoftmaxWithLoss|No|No
+torch::nn::AdaptiveLogSoftmaxWithLoss|Yes|No
 torch::nn::BatchNorm1d|Yes|No
 torch::nn::BatchNorm2d|Yes|No
 torch::nn::BatchNorm3d|Yes|No
@@ -135,11 +135,11 @@ torch::nn::utils::weight_norm|No|No
 torch::nn::utils::remove_weight_norm|No|No
 torch::nn::utils::spectral_norm|No|No
 torch::nn::utils::remove_spectral_norm|No|No
-torch::nn::utils::rnn::PackedSequence|No|No
-torch::nn::utils::rnn::pack_padded_sequence|No|No
-torch::nn::utils::rnn::pad_packed_sequence|No|No
-torch::nn::utils::rnn::pad_sequence|No|No
-torch::nn::utils::rnn::pack_sequence|No|No
+torch::nn::utils::rnn::PackedSequence|Yes|No
+torch::nn::utils::rnn::pack_padded_sequence|Yes|No
+torch::nn::utils::rnn::pad_packed_sequence|Yes|No
+torch::nn::utils::rnn::pad_sequence|Yes|No
+torch::nn::utils::rnn::pack_sequence|Yes|No
 torch::nn::SampleModule|Yes|Yes
 
 ## torch::nn::functional

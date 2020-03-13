@@ -110,20 +110,24 @@ static auto registry =
     torch::RegisterOperators()
         .op("quantized::cat(Tensor[] qx, int dim, float? scale, int? zero_point)"
             " -> Tensor",
-            torch::RegisterOperators::options().kernel<QCat<false>>(
-                DispatchKey::QuantizedCPUTensorId))
+            torch::RegisterOperators::options()
+                .aliasAnalysis(at::AliasAnalysisKind::FROM_SCHEMA)
+                .kernel<QCat<false>>(DispatchKey::QuantizedCPUTensorId))
         .op("quantized::cat_relu(Tensor[] qx, int dim, float? scale, int? zero_point)"
             " -> Tensor",
-            torch::RegisterOperators::options().kernel<QCat<true>>(
-                DispatchKey::QuantizedCPUTensorId))
-        .op("quantized::cat_out(Tensor[] qx, int dim, Tensor out)"
-            " -> Tensor",
-            torch::RegisterOperators::options().kernel<QCatOut<false>>(
-                DispatchKey::QuantizedCPUTensorId))
-        .op("quantized::cat_relu_out(Tensor[] qx, int dim, Tensor out)"
-            " -> Tensor",
-            torch::RegisterOperators::options().kernel<QCatOut<true>>(
-                DispatchKey::QuantizedCPUTensorId));
+            torch::RegisterOperators::options()
+                .aliasAnalysis(at::AliasAnalysisKind::FROM_SCHEMA)
+                .kernel<QCat<true>>(DispatchKey::QuantizedCPUTensorId))
+        .op("quantized::cat_out(Tensor[] qx, int dim, Tensor(a!) out)"
+            " -> Tensor(a!)",
+            torch::RegisterOperators::options()
+                .aliasAnalysis(at::AliasAnalysisKind::FROM_SCHEMA)
+                .kernel<QCatOut<false>>(DispatchKey::QuantizedCPUTensorId))
+        .op("quantized::cat_relu_out(Tensor[] qx, int dim, Tensor(a!) out)"
+            " -> Tensor(a!)",
+            torch::RegisterOperators::options()
+                .aliasAnalysis(at::AliasAnalysisKind::FROM_SCHEMA)
+                .kernel<QCatOut<true>>(DispatchKey::QuantizedCPUTensorId));
 
 } // namespace
 

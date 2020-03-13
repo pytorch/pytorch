@@ -69,76 +69,30 @@ THTensor *THTensor_(newWithTensor)(THTensor *tensor)
   return at::native::alias(THTensor_wrap(tensor)).unsafeReleaseTensorImpl();
 }
 
-/* Storage init */
-THTensor *THTensor_(newWithStorage)(THStorage *storage, ptrdiff_t storageOffset, at::IntArrayRef sizes, at::IntArrayRef strides) {
-  if (strides.data()) {
-    TORCH_CHECK(sizes.size() == strides.size(), "number of sizes and strides must match");
-  }
+THTensor *THTensor_(newWithStorage1d)(THStorage *storage, ptrdiff_t storageOffset,
+                               int64_t size0, int64_t stride0)
+{
+  c10::raw::intrusive_ptr::incref(storage);
   THTensor *self = c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
-    c10::intrusive_ptr<at::StorageImpl>::reclaim(THStorage_(new)()),
+    c10::intrusive_ptr<at::StorageImpl>::reclaim(storage),
     at::DispatchKey::CPUTensorId
   ).release();
-  THTensor_(setStorageNd)(self, storage, storageOffset, sizes.size(),
-                          const_cast<int64_t*>(sizes.data()), const_cast<int64_t*>(strides.data()));
+  THTensor_(setStorageNd)(self, storage, storageOffset, 1,
+                          &size0, &stride0);
 
   return self;
 }
 
-THTensor *THTensor_(newWithStorage1d)(THStorage *storage, ptrdiff_t storageOffset,
-                               int64_t size0, int64_t stride0)
-{
-  return THTensor_(newWithStorage)(storage, storageOffset, {size0}, {stride0});
-}
-
-THTensor *THTensor_(newWithStorage2d)(THStorage *storage, ptrdiff_t storageOffset,
-                               int64_t size0, int64_t stride0,
-                               int64_t size1, int64_t stride1)
-{
-  return THTensor_(newWithStorage)(storage, storageOffset, {size0, size1}, {stride0, stride1});
-}
-
-THTensor *THTensor_(newWithStorage3d)(THStorage *storage, ptrdiff_t storageOffset,
-                               int64_t size0, int64_t stride0,
-                               int64_t size1, int64_t stride1,
-                               int64_t size2, int64_t stride2)
-{
-  return THTensor_(newWithStorage)(storage, storageOffset, {size0, size1, size2}, {stride0, stride1, stride2});
-}
-
-THTensor *THTensor_(newWithStorage4d)(THStorage *storage, ptrdiff_t storageOffset,
-                               int64_t size0, int64_t stride0,
-                               int64_t size1, int64_t stride1,
-                               int64_t size2, int64_t stride2,
-                               int64_t size3, int64_t stride3)
-{
-  return THTensor_(newWithStorage)(storage, storageOffset,
-                                          {size0, size1, size2, size3},
-                                          {stride0, stride1, stride2, stride3});
-}
-
-THTensor *THTensor_(newWithSize)(at::IntArrayRef size, at::IntArrayRef stride)
-{
-  return THTensor_(newWithStorage)(NULL, 0, size, stride);
-}
-
 THTensor *THTensor_(newWithSize1d)(int64_t size0)
 {
-  return THTensor_(newWithSize)({size0}, {});
-}
+  THStorage *new_storage = THStorage_(new)();
+  THTensor *self = c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
+    c10::intrusive_ptr<at::StorageImpl>::reclaim(new_storage),
+    at::DispatchKey::CPUTensorId
+  ).release();
+  THTensor_(setStorageNd)(self, new_storage, 0, 1, &size0, nullptr);
 
-THTensor *THTensor_(newWithSize2d)(int64_t size0, int64_t size1)
-{
-  return THTensor_(newWithSize)({size0, size1}, {});
-}
-
-THTensor *THTensor_(newWithSize3d)(int64_t size0, int64_t size1, int64_t size2)
-{
-  return THTensor_(newWithSize)({size0, size1, size2}, {});
-}
-
-THTensor *THTensor_(newWithSize4d)(int64_t size0, int64_t size1, int64_t size2, int64_t size3)
-{
-  return THTensor_(newWithSize)({size0, size1, size2, size3}, {});
+  return self;
 }
 
 THTensor *THTensor_(newClone)(THTensor *self)
@@ -247,46 +201,6 @@ void THTensor_(setStorage)(THTensor *self, THStorage *storage_, ptrdiff_t storag
 {
   THTensor_setStorage(self, storage_, storageOffset_, size_, stride_);
 }
-
-void THTensor_(setStorage1d)(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_,
-                             int64_t size0_, int64_t stride0_)
-{
-  THTensor_(setStorage)(self, storage_, storageOffset_,
-                       {size0_}, {stride0_});
-}
-
-void THTensor_(setStorage2d)(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_,
-                             int64_t size0_, int64_t stride0_,
-                             int64_t size1_, int64_t stride1_)
-{
-  THTensor_(setStorage)(self, storage_, storageOffset_,
-                       {size0_, size1_},
-                       {stride0_, stride1_});
-}
-
-void THTensor_(setStorage3d)(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_,
-                             int64_t size0_, int64_t stride0_,
-                             int64_t size1_, int64_t stride1_,
-                             int64_t size2_, int64_t stride2_)
-{
-  THTensor_(setStorage)(self, storage_, storageOffset_,
-                        {size0_, size1_, size2_},
-                        {stride0_, stride1_, stride2_});
-}
-
-void THTensor_(setStorage4d)(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_,
-                             int64_t size0_, int64_t stride0_,
-                             int64_t size1_, int64_t stride1_,
-                             int64_t size2_, int64_t stride2_,
-                             int64_t size3_, int64_t stride3_)
-{
-
-  int64_t size[4] = {size0_, size1_, size2_, size3_};
-  int64_t stride[4] = {stride0_, stride1_, stride2_, stride3_};
-
-  THTensor_(setStorage)(self, storage_, storageOffset_, size, stride);
-}
-
 
 void THTensor_(narrow)(THTensor *self, THTensor *src, int dimension, int64_t firstIndex, int64_t size)
 {

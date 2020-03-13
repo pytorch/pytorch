@@ -1,6 +1,6 @@
 #include <ATen/core/op_registration/op_registration.h>
 #if !defined(CAFFE2_IS_XPLAT_BUILD)
-#include <torch/csrc/jit/script/function_schema_parser.h>
+#include <torch/csrc/jit/frontend/function_schema_parser.h>
 #endif
 
 namespace c10 {
@@ -12,15 +12,11 @@ static_assert(std::is_nothrow_move_assignable<c10::optional<RegistrationHandleRA
 // table deregisters it in the destructor.
 class RegisterOperators::OperatorRegistrar final {
 public:
-  explicit OperatorRegistrar(FunctionSchema&& schema, OperatorOptions&& operatorOptions, c10::optional<DispatchKey> dispatch_key, c10::optional<KernelFunction> kernel)
-  : op_(Dispatcher::singleton().registerSchema(std::move(schema), std::move(operatorOptions))), kernel_registration_handle_(c10::nullopt) {
+  explicit OperatorRegistrar(FunctionSchema&& schema, c10::optional<DispatchKey> dispatch_key, c10::optional<KernelFunction> kernel)
+  : op_(Dispatcher::singleton().registerSchema(std::move(schema))), kernel_registration_handle_(c10::nullopt) {
     if (kernel.has_value()) {
       TORCH_INTERNAL_ASSERT(kernel->isValid());
-      if (dispatch_key.has_value()) {
-        kernel_registration_handle_ = Dispatcher::singleton().registerKernel(op_.second, *dispatch_key, std::move(*kernel));
-      } else {
-        kernel_registration_handle_ = Dispatcher::singleton().registerCatchallKernel(op_.second, std::move(*kernel));
-      }
+      kernel_registration_handle_ = Dispatcher::singleton().registerKernel(op_.second, dispatch_key, std::move(*kernel));
     }
   }
 
@@ -127,42 +123,92 @@ void RegisterOperators::checkNoDuplicateKernels_(const Options& options) {
 
 void RegisterOperators::registerOp_(Options&& options) {
   FunctionSchema schema = std::move(*options.schemaOrName_).right();
+
+  // HACK: bong in the alias analysis kind from the legacy API directly
+  // into schema
+  if (options.aliasAnalysisKind_.has_value()) {
+    schema.setAliasAnalysis(*options.aliasAnalysisKind_);
+  }
+
   OperatorName op_name = schema.operator_name();
 
-  auto operatorOptions = makeOperatorOptions_(options);
-
   if (0 == options.kernels.size()) {
-    registerSchemaOnly_(std::move(schema), std::move(operatorOptions));
+    registerSchemaOnly_(std::move(schema));
   } else {
     for (auto& kernel : options.kernels) {
-      registerSchemaAndKernel_(schema, std::move(kernel), std::move(operatorOptions));
+      registerSchemaAndKernel_(schema, std::move(kernel));
     }
   }
 
   TORCH_INTERNAL_ASSERT(c10::Dispatcher::singleton().findSchema(op_name).has_value());
 }
 
-OperatorOptions RegisterOperators::makeOperatorOptions_(const RegisterOperators::Options& options) {
-  OperatorOptions result;
-  if (options.aliasAnalysisKind_.has_value()) {
-    result.setAliasAnalysis(*options.aliasAnalysisKind_);
-  }
-  return result;
-}
-
-void RegisterOperators::registerSchemaAndKernel_(FunctionSchema schema, Options::KernelRegistrationConfig&& kernel, OperatorOptions&& operatorOptions) {
+void RegisterOperators::registerSchemaAndKernel_(FunctionSchema schema, Options::KernelRegistrationConfig&& kernel) {
   TORCH_INTERNAL_ASSERT(kernel.func.isValid(), "Kernel must be set");
 
-  registrars_.emplace_back(std::move(schema), std::move(operatorOptions), kernel.dispatch_key, std::move(kernel.func));
+  registrars_.emplace_back(std::move(schema), kernel.dispatch_key, std::move(kernel.func));
 }
 
-void RegisterOperators::registerSchemaOnly_(FunctionSchema&& schema, OperatorOptions&& operatorOptions) {
-  registrars_.emplace_back(std::move(schema), std::move(operatorOptions), c10::nullopt, c10::nullopt);
+void RegisterOperators::registerSchemaOnly_(FunctionSchema&& schema) {
+  registrars_.emplace_back(std::move(schema), c10::nullopt, c10::nullopt);
 }
 
 RegisterOperators::RegisterOperators() = default;
 RegisterOperators::~RegisterOperators() = default;
 RegisterOperators::RegisterOperators(RegisterOperators&&) noexcept = default;
 RegisterOperators& RegisterOperators::operator=(RegisterOperators&&) noexcept = default;
+
+
+CppFunction::CppFunction(KernelFunction func, std::unique_ptr<c10::FunctionSchema> schema)
+  : func_(std::move(func))
+  , schema_(std::move(schema))
+  {}
+
+Module::Module(const char* ns)
+  : ns_(ns)
+  {}
+
+Module::Module(Module&&) noexcept = default;
+Module& Module::operator=(Module&&) noexcept = default;
+
+// TODO: Error if an operator is def'ed multiple times.  Right now we just
+// merge everything
+
+namespace {
+  std::string addNamespace(const char* ns, const char* name_or_schema) { if (ns) {
+      // TODO: slow!  Fix internal data structures so I don't have to paste the
+      // names together
+      std::ostringstream oss;
+      oss << ns << "::" << name_or_schema;
+      return oss.str();
+    } else {
+      return name_or_schema;
+    }
+  }
+}
+
+Module&& Module::def(const char* schema) && {
+  register_.op(c10::RegisterOperators::options()
+    .schema(addNamespace(ns_, schema))
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA));
+  return std::move(*this);
+}
+
+Module&& Module::def(const char* name_or_schema, CppFunction&& f) && {
+  register_.op(c10::RegisterOperators::options()
+    .schema(addNamespace(ns_, name_or_schema))
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA)
+    .kernel(f.dispatch_key_, std::move(f.func_), std::move(f.schema_)));
+  return std::move(*this);
+}
+
+Module&& Module::impl(const char* name_or_schema, CppFunction&& f) && {
+  register_.op(c10::RegisterOperators::options()
+    .schema(addNamespace(ns_, name_or_schema))
+    // NB: Don't specify AliasAnalysis; the def() is expected to provide
+    // this
+    .kernel(f.dispatch_key_, std::move(f.func_), std::move(f.schema_)));
+  return std::move(*this);
+}
 
 }

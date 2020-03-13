@@ -1,5 +1,6 @@
 #include <torch/csrc/distributed/rpc/script_call.h>
-#include <torch/csrc/jit/pickle.h>
+#include <torch/csrc/distributed/rpc/rpc_agent.h>
+#include <torch/csrc/jit/serialization/pickle.h>
 
 namespace torch {
 namespace distributed {
@@ -104,8 +105,8 @@ Message ScriptCall::toMessage() && {
   toIValues(ivalues);
 
   std::vector<torch::Tensor> tensor_table;
-  auto payload =
-      jit::pickle(c10::ivalue::Tuple::create(ivalues), &tensor_table);
+  auto payload = jit::pickle(
+      c10::ivalue::Tuple::create(std::move(ivalues)), &tensor_table);
 
   return Message(
       std::move(payload), std::move(tensor_table), MessageType::SCRIPT_CALL);
@@ -114,8 +115,11 @@ Message ScriptCall::toMessage() && {
 std::unique_ptr<ScriptCall> ScriptCall::fromMessage(const Message& message) {
   auto payload = static_cast<const char*>(message.payload().data());
   auto payload_size = message.payload().size();
-  auto value =
-      jit::unpickle(payload, payload_size, nullptr, &message.tensors());
+  auto value = jit::unpickle(
+      payload,
+      payload_size,
+      *RpcAgent::getCurrentRpcAgent()->getTypeResolver(),
+      &message.tensors());
 
   auto values = value.toTuple()->elements();
   return fromIValues(values);

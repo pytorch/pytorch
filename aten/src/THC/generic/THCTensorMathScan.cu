@@ -1,3 +1,5 @@
+#include <algorithm>
+
 #ifndef THC_GENERIC_FILE
 #define THC_GENERIC_FILE "THC/generic/THCTensorMathScan.cu"
 #else
@@ -41,9 +43,11 @@ __host__ void THCTensor_(scanOuterDim)(THCState *state, THCTensor *tgt,
     num_irows *= THCTensor_(sizeLegacyNoScalars)(state, src, dim);
   }
 
-  dim3 threads(min(512, num_irows));
+  dim3 threads(std::min(512u, num_irows));
   unsigned maxGridDim = 1024;
-  dim3 grid(min(maxGridDim, num_orows), min(maxGridDim, THCCeilDiv(num_irows, threads.x)));
+  dim3 grid(
+      std::min(maxGridDim, num_orows),
+      std::min(maxGridDim, THCCeilDiv(num_irows, threads.x)));
 
   THCTensor_kernel_scanOuterDim<scalar_t><<<grid, threads, 0, c10::cuda::getCurrentCUDAStream()>>>(
     THCTensor_(data)(state, tgt), THCTensor_(data)(state, src),
@@ -66,7 +70,7 @@ __host__ void THCTensor_(scanInnermostDim)(THCState *state, THCTensor *tgt,
   unsigned row_size = THCTensor_(sizeLegacyNoScalars)(state, src, ndim - 1);
 
   dim3 threads(16, 32);
-  dim3 grid(min(1024, THCCeilDiv(num_rows, threads.y)));
+  dim3 grid(std::min(1024u, THCCeilDiv(num_rows, threads.y)));
 
   THCTensor_kernel_scanInnermostDim<scalar_t, 16, 32><<<grid, threads, 0, c10::cuda::getCurrentCUDAStream()>>>(
     THCTensor_(data)(state, tgt), THCTensor_(data)(state, src), num_rows, row_size, init, binary_op);

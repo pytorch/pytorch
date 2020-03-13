@@ -21,7 +21,7 @@
 #include <torch/csrc/distributed/rpc/script_remote_call.h>
 #include <torch/csrc/distributed/rpc/script_resp.h>
 #include <torch/csrc/distributed/rpc/utils.h>
-#include <torch/csrc/jit/pybind_utils.h>
+#include <torch/csrc/jit/python/pybind_utils.h>
 
 namespace torch {
 namespace distributed {
@@ -70,13 +70,11 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
     }
     case MessageType::PYTHON_CALL: {
       auto& pyCall = static_cast<PythonCall&>(rpc);
-      std::vector<torch::Tensor> responseTensorTable;
-      auto payload = PythonRpcHandler::getInstance().generatePythonUDFResult(
-          pyCall.pickledPayload(), pyCall.tensors(), responseTensorTable);
+      auto serializedPyObj =
+          PythonRpcHandler::getInstance().generatePythonUDFResult(
+              pyCall.serializedPyObj());
       return wrap(
-          std::move(
-              PythonResp(std::move(payload), std::move(responseTensorTable)))
-              .toMessage());
+          std::move(PythonResp(std::move(serializedPyObj))).toMessage());
     }
     case MessageType::SCRIPT_REMOTE_CALL: {
       auto& scriptRemoteCall = static_cast<ScriptRemoteCall&>(rpc);
@@ -164,8 +162,7 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
     case MessageType::SCRIPT_RREF_FETCH_CALL: {
       auto& srf = static_cast<ScriptRRefFetchCall&>(rpc);
       auto& ctx = RRefContext::getInstance();
-      c10::intrusive_ptr<OwnerRRef> rref =
-          ctx.getOwnerRRef(srf.rrefId());
+      c10::intrusive_ptr<OwnerRRef> rref = ctx.getOwnerRRef(srf.rrefId());
       if (rref->hasValue()) { // optional fast-path
         return wrap(ScriptRRefFetchRet({rref->getValue()}).toMessage());
       }
@@ -190,8 +187,7 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
     case MessageType::PYTHON_RREF_FETCH_CALL: {
       auto& prf = static_cast<PythonRRefFetchCall&>(rpc);
       auto& ctx = RRefContext::getInstance();
-      c10::intrusive_ptr<OwnerRRef> rref =
-          ctx.getOwnerRRef(prf.rrefId());
+      c10::intrusive_ptr<OwnerRRef> rref = ctx.getOwnerRRef(prf.rrefId());
       if (rref->hasValue()) { // optional fast-path
         auto value = rref->getValue();
         py::object pyValue;
@@ -201,7 +197,8 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
         }
         SerializedPyObj result =
             PythonRpcHandler::getInstance().serialize(pyValue);
-        return wrap(PythonRRefFetchRet(result.toIValues()).toMessage());
+        return wrap(
+            PythonRRefFetchRet(std::move(result).toIValues()).toMessage());
       }
 
       auto whenValueSet = rref->getFuture();
@@ -221,7 +218,8 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
               }
               SerializedPyObj result =
                   PythonRpcHandler::getInstance().serialize(pyValue);
-              Message m = PythonRRefFetchRet(result.toIValues()).toMessage();
+              Message m =
+                  PythonRRefFetchRet(std::move(result).toIValues()).toMessage();
               m.setId(messageId);
               responseFuture->markCompleted(std::move(m));
             } else {

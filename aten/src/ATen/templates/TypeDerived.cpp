@@ -31,6 +31,13 @@ $storage_tensor_headers
 $extra_cuda_headers
 $legacy_th_headers
 
+namespace {
+static const char* named_tensors_unsupported_error =
+  " is not yet supported with named tensors. Please drop names via "
+  "`tensor = tensor.rename(None)`, call the op with an unnamed tensor, "
+  "and set names on the result of the operation.";
+}
+
 namespace at {
 
 /* example
@@ -48,7 +55,7 @@ ${type_derived_method_definitions}
 
 #ifndef USE_STATIC_DISPATCH
 namespace {
-auto registerer = torch::RegisterOperators()
+auto registerer = torch::import()
   ${function_registrations};
 }
 #endif

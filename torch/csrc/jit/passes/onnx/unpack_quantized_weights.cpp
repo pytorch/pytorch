@@ -1,9 +1,9 @@
 #include <torch/csrc/jit/passes/onnx/unpack_quantized_weights.h>
-#include <torch/csrc/jit/constants.h>
-#include <torch/csrc/jit/irparser.h>
+#include <torch/csrc/jit/ir/constants.h>
+#include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
-#include <torch/csrc/jit/subgraph_matcher.h>
+#include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <stack>
 
 using ::c10::Dispatcher;
@@ -131,7 +131,7 @@ void unpackQuantizedWeightsHelper(
     const std::string& unpack_fn) {
   Graph pattern_graph;
   std::unordered_map<std::string, Value*> vmap;
-  script::parseIR(pattern, &pattern_graph, vmap);
+  parseIR(pattern, &pattern_graph, vmap);
   const auto& matches = findPatternMatches(pattern_graph, *graph);
 
   for (const auto& match : matches) {
@@ -262,7 +262,7 @@ void insertPermutesHelper(
     const std::string& pattern) {
   Graph pattern_graph;
   std::unordered_map<std::string, Value*> vmap;
-  script::parseIR(pattern, &pattern_graph, vmap);
+  parseIR(pattern, &pattern_graph, vmap);
 
   const auto& matches = findPatternMatches(pattern_graph, *graph);
 
