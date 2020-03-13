@@ -1484,7 +1484,7 @@ class RpcTest(RpcAgentTestFixture):
             dst_worker = worker_name(dst_rank)
             # allow destination worker to exit without joining
             error_str = get_shutdown_error_regex(dist_utils.TEST_CONFIG.rpc_backend_name)
-            er = wait_until_node_failure(dst_rank, error_str)
+            wait_until_node_failure(dst_rank, error_str)
             fut = rpc.rpc_async(dst_worker, torch.add, args=(torch.ones(1), 3))
             # Shutdown sequence is not very well defined and as a result
             # we can see any of the error messages defined in get_shutdown_error_regex.

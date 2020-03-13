@@ -120,6 +120,7 @@ def get_shutdown_error_regex(rpc_backend):
             "worker.: Error in reponse from worker.: server shutting down",
             "worker.: Error in response from worker.: Failed to write to remote endpoint",
             "worker.: Error in response from worker.: AsyncSocketException: recv() failed",
+            "worker.: Error in response from worker.: Dropping unsent request"
         ]
     error_regex = "".join(["({})|".format(error_str) for error_str in error_regexes])
     # Strip out the last | or else it will match anything
