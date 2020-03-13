@@ -54,19 +54,31 @@ class TORCH_API LBFGS : public Optimizer {
  public:
    explicit LBFGS(std::vector<OptimizerParamGroup> param_groups,
        LBFGSOptions defaults) : Optimizer(std::move(param_groups), std::make_unique<LBFGSOptions>(defaults)) {
-      TORCH_CHECK(param_groups_.size() == 1, "LBFGS doesn't support per-parameter options (parameter groups)");
-      _params = param_groups_[0].params();
-      _numel_cache = c10::nullopt;
+     TORCH_CHECK(param_groups_.size() == 1, "LBFGS doesn't support per-parameter options (parameter groups)");
+     if (defaults.max_eval() == c10::nullopt) {
+       auto max_eval_val = (defaults.max_iter() * 5) / 4;
+       auto& options = static_cast<LBFGSOptions&>(param_groups_[0].options());
+       options.max_eval(max_eval_val);
+       auto& default_options = static_cast<LBFGSOptions&>(*defaults_.get());
+       default_options.max_eval(max_eval_val);
+     }
+     _params = &param_groups_[0].params();
+     _numel_cache = c10::nullopt;
    }
    explicit LBFGS(
        std::vector<Tensor> params,
        LBFGSOptions defaults) : LBFGS({std::move(OptimizerParamGroup(params))}, defaults) {}
+
   Tensor step(LossClosure closure) override;
+  void add_parameters(const std::vector<Tensor>& parameters) override;
+  const std::vector<Tensor>& parameters() const noexcept override;
+  std::vector<Tensor>& parameters() noexcept override;
+  size_t size() const noexcept override;
   void save(serialize::OutputArchive& archive) const override;
   void load(serialize::InputArchive& archive) override;
 
  private:
-  std::vector<Tensor> _params;
+  std::vector<Tensor>* _params;
   c10::optional<int64_t> _numel_cache;
   int64_t _numel();
   Tensor _gather_flat_grad();
@@ -75,9 +87,10 @@ class TORCH_API LBFGS : public Optimizer {
     LossClosure closure, const std::vector<Tensor>& x, double t, const Tensor& d);
   void _set_param(const std::vector<Tensor>& params_data);
   std::vector<Tensor> _clone_param();
+
   template <typename Self, typename Archive>
   static void serialize(Self& self, Archive& archive) {
-    //_TORCH_OPTIM_SERIALIZE_WITH_TEMPLATE_ARG(LBGFS);
+    //_TORCH_OPTIM_SERIALIZE_WITH_TEMPLATE_ARG(LBFGS);
   }
 };
 } // namespace optim

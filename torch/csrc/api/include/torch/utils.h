@@ -32,12 +32,4 @@ inline bool equal_if_defined(Tensor t1, Tensor t2) {
   return ((!t1.defined() && !t2.defined()) || (t1.defined() && t2.defined() && torch::equal(t1, t2)));
 }
 
-template <typename T>
-inline bool if_container_equal(T lhs, T rhs) {
-  TORCH_INTERNAL_ASSERT(lhs.size() == rhs.size());
-  for (int i = 0; i < lhs.size(); i++) {
-    torch::equal(lhs[i], rhs[i]);
-  }
-}
-
 } // namespace torch

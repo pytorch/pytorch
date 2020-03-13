@@ -239,6 +239,7 @@ TEST(SerializeTest, SerializeUndefinedTensor) {
   ASSERT_TRUE(ivalue_out.isTensor());
   ASSERT_FALSE(ivalue_out.toTensor().defined());
 }
+
 TEST(SerializeTest, TryReadFunc) {
   auto tempfile = c10::make_tempfile();
   torch::serialize::OutputArchive output_archive;
@@ -421,75 +422,6 @@ TEST(SerializeTest, XOR) {
 
   auto loss = getLoss(model2, 100);
   ASSERT_LT(loss.item<float>(), 0.1);
-}
-
-TEST(SerializeTest, Optim) {
-  auto model1 = Linear(5, 2);
-  auto model2 = Linear(5, 2);
-  auto model3 = Linear(5, 2);
-
-  // Models 1, 2, 3 will have the same parameters.
-  auto model_tempfile = c10::make_tempfile();
-  torch::save(model1, model_tempfile.name);
-  torch::load(model2, model_tempfile.name);
-  torch::load(model3, model_tempfile.name);
-
-  auto param1 = model1->named_parameters();
-  auto param2 = model2->named_parameters();
-  auto param3 = model3->named_parameters();
-  for (const auto& p : param1) {
-    ASSERT_TRUE(p->allclose(param2[p.key()]));
-    ASSERT_TRUE(param2[p.key()].allclose(param3[p.key()]));
-  }
-
-  // Make some optimizers with momentum (and thus state)
-  auto optim1 = torch::optim::SGD(
-      model1->parameters(), torch::optim::SGDOptions(1e-1).momentum(0.9));
-  auto optim2 = torch::optim::SGD(
-      model2->parameters(), torch::optim::SGDOptions(1e-1).momentum(0.9));
-  auto optim2_2 = torch::optim::SGD(
-      model2->parameters(), torch::optim::SGDOptions(1e-1).momentum(0.9));
-  auto optim3 = torch::optim::SGD(
-      model3->parameters(), torch::optim::SGDOptions(1e-1).momentum(0.9));
-  auto optim3_2 = torch::optim::SGD(
-      model3->parameters(), torch::optim::SGDOptions(1e-1).momentum(0.9));
-
-  auto x = torch::ones({10, 5});
-
-  auto step = [&x](torch::optim::Optimizer& optimizer, Linear model) {
-    optimizer.zero_grad();
-    auto y = model->forward(x).sum();
-    y.backward();
-    optimizer.step();
-  };
-
-  // Do 2 steps of model1
-  step(optim1, model1);
-  step(optim1, model1);
-
-  // Do 2 steps of model 2 without saving the optimizer
-  step(optim2, model2);
-  step(optim2_2, model2);
-
-  // Do 2 steps of model 3 while saving the optimizer
-  step(optim3, model3);
-
-  auto optim_tempfile = c10::make_tempfile();
-  torch::save(optim3, optim_tempfile.name);
-  torch::load(optim3_2, optim_tempfile.name);
-  step(optim3_2, model3);
-
-  param1 = model1->named_parameters();
-  param2 = model2->named_parameters();
-  param3 = model3->named_parameters();
-  for (const auto& p : param1) {
-    const auto& name = p.key();
-    // Model 1 and 3 should be the same
-    ASSERT_TRUE(
-        param1[name].norm().item<float>() == param3[name].norm().item<float>());
-    ASSERT_TRUE(
-        param1[name].norm().item<float>() != param2[name].norm().item<float>());
-  }
 }
 
 TEST(SerializeTest, Optim_Adagrad) {

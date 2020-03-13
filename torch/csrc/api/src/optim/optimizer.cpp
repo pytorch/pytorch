@@ -100,7 +100,7 @@ void Optimizer::add_parameters(const std::vector<Tensor>& parameters) {
 }
 
 void Optimizer::_add_parameters_new_design(const std::vector<Tensor>& parameters) {
-  param_groups_.emplace_back(OptimizerParamGroup(parameters, defaults_->clone()));
+  param_groups_.at(0).params().insert(param_groups_.at(0).params().end(), parameters.begin(), parameters.end());
 }
 
 void Optimizer::zero_grad() {

@@ -39,11 +39,20 @@ void LBFGSOptions::serialize(torch::serialize::OutputArchive& archive) const {
 void LBFGSOptions::serialize(torch::serialize::InputArchive& archive) {
   _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(double, lr);
   _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(int64_t, max_iter);
-  _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(c10::optional<int64_t>, max_eval);
+  _TORCH_OPTIM_DESERIALIZE_TORCH_ARG_OPTIONAL(int64_t, max_eval);
   _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(double, tolerance_grad);
   _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(double, tolerance_change);
   _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(int64_t, history_size);
-  _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(c10::optional<std::string>, line_search_fn);
+  _TORCH_OPTIM_DESERIALIZE_TORCH_ARG_OPTIONAL(std::string, line_search_fn);
+}
+
+template <typename T>
+bool if_container_equal(T lhs, T rhs) {
+  if(lhs.size() == rhs.size()) return false;
+  for (int i = 0; i < lhs.size(); i++) {
+    if(!torch::equal(lhs[i], rhs[i])) return false;
+  }
+  return true;
 }
 
 bool operator==(const LBFGSParamState& lhs, const LBFGSParamState& rhs) {
@@ -54,10 +63,10 @@ bool operator==(const LBFGSParamState& lhs, const LBFGSParamState& rhs) {
          torch::equal_if_defined(lhs.H_diag(), rhs.H_diag()) &&
          torch::equal_if_defined(lhs.prev_flat_grad(), rhs.prev_flat_grad()) &&
          torch::equal_if_defined(lhs.prev_loss(), rhs.prev_loss()) &&
-         torch::if_container_equal(lhs.old_dirs(), rhs.old_dirs()) &&
-         torch::if_container_equal(lhs.old_stps(), rhs.old_stps()) &&
-         torch::if_container_equal(lhs.ro(), rhs.ro()) &&
-         torch::if_container_equal(lhs.al(), rhs.al());
+         if_container_equal(lhs.old_dirs(), rhs.old_dirs()) &&
+         if_container_equal(lhs.old_stps(), rhs.old_stps()) &&
+         if_container_equal(lhs.ro(), rhs.ro()) &&
+         if_container_equal(lhs.al(), rhs.al());
 }
 
 void LBFGSParamState::serialize(torch::serialize::OutputArchive& archive) const {
@@ -90,15 +99,16 @@ void LBFGSParamState::serialize(torch::serialize::InputArchive& archive) {
 
 Tensor LBFGS::_gather_flat_grad() {
   std::vector<Tensor> views;
-  for (const auto& p : _params) {
+  for (const auto& p : *_params) {
+    Tensor view;
     if (!p.grad().defined()) {
       views.emplace_back(p.new_empty({p.numel()}).zero_());
     }
     else if (p.grad().is_sparse()) {
-      views.push_back(p.grad().to_dense().view(-1));
+      views.emplace_back(p.grad().to_dense().view(-1));
     }
     else {
-      views.push_back(p.grad().view(-1));
+      views.emplace_back(p.grad().view(-1));
     }
   }
   return torch::cat(views, 0);
@@ -107,17 +117,17 @@ Tensor LBFGS::_gather_flat_grad() {
 int64_t LBFGS::_numel() {
   if(_numel_cache == c10::nullopt) {
     auto res = 0;
-    for (const auto& p : _params) {
+    for (const auto& p :*_params) {
       res += p.numel();
     }
-    *_numel_cache = res;
+    _numel_cache = res;
   }
   return *_numel_cache;
 }
 
 void LBFGS::_add_grad(const double step_size, const Tensor& update) {
   auto offset = 0;
-  for (auto& p : _params) {
+  for (auto& p : *_params) {
     auto numel = p.numel();
     // view as to avoid deprecated pointwise semantics
     p.add_(update.index(
@@ -128,15 +138,15 @@ void LBFGS::_add_grad(const double step_size, const Tensor& update) {
 }
 
 void LBFGS::_set_param(const std::vector<Tensor>& params_data) {
-  TORCH_INTERNAL_ASSERT(params_data.size() == _params.size());
-  for (size_t i = 0; i < _params.size(); i++) {
-    _params[i].copy_(params_data[i]);
+  TORCH_INTERNAL_ASSERT(params_data.size() == _params->size());
+  for (size_t i = 0; i < _params->size(); i++) {
+    _params->at(i).copy_(params_data.at(i));
   }
 }
 
 std::vector<Tensor> LBFGS::_clone_param() {
   std::vector<Tensor> result;
-  for (const auto& p : _params) {
+  for (const auto& p : *_params) {
     result.emplace_back(p.clone(at::MemoryFormat::Contiguous));
   }
   return result;
@@ -176,16 +186,16 @@ double _cubic_interpolate(
   //   min_pos = x2 - (x2 - x1)*((g2 + d2 - d1)/(g2 - g1 + 2*d2));
   //   t_new = min(max(min_pos,xmin_bound),xmax_bound);
 
-  auto d1 = g1 + g2 - 3 * (f1 - f2) / (x1 - x2);
+  auto d1 = (g1 + g2) - (3 * (f1 - f2) / (x1 - x2));
   auto d2_square = std::pow(d1, 2) - g1 * g2;
   double d2;
   if (d2_square >= 0) {
     d2 = std::sqrt(d2_square);
     double min_pos;
     if(x1 <= x2) {
-      min_pos = x2 - (x2 - x1) * ((g2 + d2 - d1) / (g2 - g1 + 2 * d2));
+      min_pos = x2 - ((x2 - x1) * ((g2 + d2 - d1) / (g2 - g1 + 2 * d2)));
     } else {
-      min_pos = x1 - (x1 - x2) * ((g1 + d2 - d1) / (g1 - g2 + 2 * d2));
+      min_pos = x1 - ((x1 - x2) * ((g1 + d2 - d1) / (g1 - g2 + 2 * d2)));
     }
     return std::min(std::max(min_pos, xmin_bound), xmax_bound);
   } else {
@@ -194,9 +204,9 @@ double _cubic_interpolate(
 }
 
 template <typename Function>
-std::tuple<Tensor, Tensor, double, int64_t> _strong_wolfe(Function obj_func,
-      const std::vector<Tensor>& x, double t, Tensor& d, Tensor& f, Tensor& g, Tensor& gtd, double c1=1e-4,
-      double c2=0.9, double tolerance_change=1e-9, double max_ls=25) {
+std::tuple<Tensor, Tensor, double, int64_t> _strong_wolfe(Function obj_func, const std::vector<Tensor>& x,
+                                          double t, Tensor d, Tensor f, Tensor g, Tensor gtd, double c1 = 1e-4,
+                                          double c2 = 0.9, double tolerance_change = 1e-9, double max_ls = 25) {
 
     auto val = [](const Tensor& t) {return t.item<double>(); };
 
@@ -224,7 +234,7 @@ std::tuple<Tensor, Tensor, double, int64_t> _strong_wolfe(Function obj_func,
       if ((val(f_new) > val(f + c1 * t * gtd)) || (ls_iter > 1 && (val(f_new) >= val(f_prev)))) {
         bracket = {t_prev, t};
         bracket_f = {f_prev, f_new};
-        bracket_g = {g_prev, g_new};
+        bracket_g = {g_prev, g_new.clone(at::MemoryFormat::Contiguous)};
         bracket_gtd = {gtd_prev, gtd_new};
         break;
       }
@@ -246,9 +256,9 @@ std::tuple<Tensor, Tensor, double, int64_t> _strong_wolfe(Function obj_func,
       auto min_step = t + 0.01 * (t - t_prev);
       auto max_step = t * 10;
       auto tmp = t;
-      t = _cubic_interpolate(t_prev, val(f_prev), val(gtd_prev), t, val(f_new), val(gtd_new),
-                              std::make_tuple(min_step, max_step));
-
+      t = _cubic_interpolate(t_prev, val(f_prev), val(gtd_prev),
+                             t, val(f_new), val(gtd_new),
+                             std::make_tuple(min_step, max_step));
       // next step
       t_prev = tmp;
       f_prev = f_new;
@@ -298,9 +308,9 @@ std::tuple<Tensor, Tensor, double, int64_t> _strong_wolfe(Function obj_func,
       auto eps = 0.1 * (bracket_max - bracket_min);
       if (std::min(bracket_max - t, t - bracket_min) < eps) {
         // interpolation close to boundary
-        if (insuf_progress || t >= bracket_max || t <= bracket_min) {
+        if (insuf_progress || (t >= bracket_max) || (t <= bracket_min)) {
           // evaluate at 0.1 away from boundary
-          t = (abs(t - bracket_max) < abs(t - bracket_min)) ? bracket_max - eps : bracket_max + eps;
+          t = (abs(t - bracket_max) < abs(t - bracket_min)) ? bracket_max - eps : bracket_min + eps;
           insuf_progress = false;
         } else {
           insuf_progress = true;
@@ -337,7 +347,8 @@ std::tuple<Tensor, Tensor, double, int64_t> _strong_wolfe(Function obj_func,
           bracket_g[high_pos] = bracket_g[low_pos];
           bracket_gtd[high_pos] = bracket_gtd[low_pos];
         }
-        // # new point becomes new low
+
+        // new point becomes new low
         bracket[low_pos] = t;
         bracket_f[low_pos] = f_new;
         bracket_g[low_pos] = g_new.clone(at::MemoryFormat::Contiguous);
@@ -345,8 +356,9 @@ std::tuple<Tensor, Tensor, double, int64_t> _strong_wolfe(Function obj_func,
       }
 
       // line-search bracket is so small
-      if(abs(bracket[1] - bracket[0]) * d_norm < tolerance_change) break;
+      if((abs(bracket[1] - bracket[0]) * d_norm) < tolerance_change) break;
     }
+
     // return stuff
     t = bracket[low_pos];
     f_new = bracket_f[low_pos];
@@ -359,8 +371,9 @@ Tensor LBFGS::step(LossClosure closure) {
   TORCH_CHECK(closure != nullptr, "LBFGS requires a closure function");
   TORCH_INTERNAL_ASSERT(param_groups_.size() == 1);
   auto val = [](const Tensor& t) {return t.item<double>(); };
+
   auto& group = param_groups_[0];
-  auto options = static_cast<LBFGSOptions&>(group.options());
+  const auto& options = static_cast<const LBFGSOptions&>(group.options());
   auto lr = options.lr();
   auto max_iter = options.max_iter();
   auto max_eval = options.max_eval();
@@ -371,22 +384,21 @@ Tensor LBFGS::step(LossClosure closure) {
 
   // NOTE: LBFGS has only global state, but we register it as state for
   // the first param, because this helps with casting in load_state_dict
-  auto param_state = state_.find(c10::guts::to_string(_params[0].unsafeGetTensorImpl()));
+  auto param_state = state_.find(c10::guts::to_string(_params->at(0).unsafeGetTensorImpl()));
   if(param_state == state_.end()) {
-    state_[c10::guts::to_string(_params[0].unsafeGetTensorImpl())] = std::make_unique<LBFGSParamState>();
+    state_[c10::guts::to_string(_params->at(0).unsafeGetTensorImpl())] = std::make_unique<LBFGSParamState>();
   }
-  auto& state = static_cast<LBFGSParamState&>(*state_[c10::guts::to_string(_params[0].unsafeGetTensorImpl())]);
-
+  auto& state = static_cast<LBFGSParamState&>(*state_[c10::guts::to_string(_params->at(0).unsafeGetTensorImpl())]);
   // evaluate initial f(x) and df/dx
   Tensor orig_loss;
   {
     torch::AutoGradMode enable_grad(true);
     orig_loss = closure();
   }
+
   auto loss = orig_loss.clone(at::MemoryFormat::Contiguous);
   auto current_evals = 1;
   state.func_evals(state.func_evals()+1);
-
   auto flat_grad = _gather_flat_grad();
   auto opt_cond = (val(flat_grad.abs().max()) <= tolerance_grad);
 
@@ -394,6 +406,7 @@ Tensor LBFGS::step(LossClosure closure) {
   if(opt_cond) {
     return orig_loss;
   }
+
   // tensors cached in state (for tracing)
   auto& d = state.d();
   auto& t = state.t();
@@ -425,7 +438,7 @@ Tensor LBFGS::step(LossClosure closure) {
       auto ys = y.dot(s); // y*s
       if (val(ys) > 1e-10) {
         // updating memory
-        if (old_dirs.size() == history_size) {
+        if (int(old_dirs.size()) == history_size) {
           // shift history by one (limited-memory)
           old_dirs.pop_front();
           old_stps.pop_front();
@@ -450,9 +463,17 @@ Tensor LBFGS::step(LossClosure closure) {
 
       // iteration in L-BFGS loop collapsed to use just one buffer
       auto q = flat_grad.neg();
-      for (int i = num_old - 1; i > -1; i--) {
-        al[i] = old_stps[i].dot(q) * ro[i];
-        q.add_(old_dirs[i], -val(al[i]));
+      for (int i = num_old - 1; i >= 0; i--) {
+        al.at(i) = old_stps.at(i).dot(q) * ro.at(i);
+        q.add_(old_dirs.at(i), -val(al[i]));
+      }
+
+      // multiply by initial Hessian
+      // r/d is the final direction
+      d = torch::mul(q, H_diag);
+      for (size_t i = 0; i < num_old; i++) {
+        auto be_i = old_dirs[i].dot(d) * ro[i];
+        d.add_(old_stps[i], (al[i] - be_i).item<double>());
       }
     }
 
@@ -468,7 +489,7 @@ Tensor LBFGS::step(LossClosure closure) {
     // ############################################################
     // reset initial guess for step size
     if (state.n_iter() == 1) {
-      t = std::min(1., 1. / val(flat_grad.abs().sum()));
+      t = std::min(1., 1. / val(flat_grad.abs().sum())) * lr;
     } else {
       t = lr;
     }
@@ -484,7 +505,7 @@ Tensor LBFGS::step(LossClosure closure) {
     if (line_search_fn != c10::nullopt) {
       TORCH_CHECK(*line_search_fn == "strong_wolfe", "only 'strong_wolfe' is supported");
       auto x_init = _clone_param();
-      auto obj_func = [&](const std::vector<Tensor>& x, double t, Tensor d) { return _directional_evaluate(closure, x, t, d); };
+      auto obj_func = [&](const std::vector<Tensor>& x, double t, const Tensor& d) { return _directional_evaluate(closure, x, t, d); };
       auto strong_wolfe_res = _strong_wolfe(obj_func, x_init, t, d, loss, flat_grad, gtd);
       _add_grad(t, d);
     } else {
@@ -511,14 +532,35 @@ Tensor LBFGS::step(LossClosure closure) {
     // # check conditions
     // ############################################################
     if (n_iter == max_iter) break;
-    if (max_eval != c10::nullopt && current_evals >= *max_eval) break;
+
+    if (current_evals >= *max_eval) break;
+
     // optimal condition
     if (opt_cond) break;
+
     // lack of progress
     if (val(d.mul(t).abs().max()) <= tolerance_change) break;
+
     if (val(abs(loss - prev_loss)) < tolerance_change) break;
   }
+
   return orig_loss;
+}
+
+void LBFGS::add_parameters(const std::vector<Tensor>& parameters) {
+  return _add_parameters_new_design(parameters);
+}
+
+const std::vector<Tensor>& LBFGS::parameters() const noexcept {
+  return _parameters_new_design();
+}
+
+std::vector<Tensor>& LBFGS::parameters() noexcept {
+  return _parameters_new_design();
+}
+
+size_t LBFGS::size() const noexcept {
+  return _size_new_design();
 }
 
 void LBFGS::save(serialize::OutputArchive& archive) const {
@@ -544,7 +586,7 @@ void LBFGS::load(serialize::InputArchive& archive) {
     archive("prev_loss", prev_loss);
     torch::optim::serialize(archive, "old_dirs", old_dirs);
     torch::optim::serialize(archive, "old_stps", old_stps);
-    std::vector<Tensor> params = _params;
+    std::vector<Tensor> params = *_params;
     for (size_t idx = 0; idx < params.size(); idx++) {
       auto state = std::make_unique<LBFGSParamState>();
       state->d(d);

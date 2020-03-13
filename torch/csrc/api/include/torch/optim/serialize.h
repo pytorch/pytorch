@@ -242,6 +242,12 @@ void list_to_deque(const c10::List<T>& list, std::deque<T>& dq) {
   name(ivalue.to<T>()); \
 }
 
+#define _TORCH_OPTIM_DESERIALIZE_TORCH_ARG_OPTIONAL(T, name) \
+{ \
+  c10::IValue ivalue; \
+  name(ivalue.toOptional<T>()); \
+}
+
 #define _TORCH_OPTIM_DESERIALIZE_TORCH_ARG_DEQUE(T, name) \
 { \
   c10::IValue ivalue; \
