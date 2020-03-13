@@ -350,9 +350,9 @@ struct Foo : torch::jit::CustomClassHolder {
 };
 
 template <class T>
-struct Stack : torch::jit::CustomClassHolder {
+struct MyStackClass : torch::jit::CustomClassHolder {
   std::vector<T> stack_;
-  Stack(std::vector<T> init) : stack_(init.begin(), init.end()) {}
+  MyStackClass(std::vector<T> init) : stack_(init.begin(), init.end()) {}
 
   void push(T x) {
     stack_.push_back(x);
@@ -363,11 +363,11 @@ struct Stack : torch::jit::CustomClassHolder {
     return val;
   }
 
-  c10::intrusive_ptr<Stack> clone() const {
-    return c10::make_intrusive<Stack>(stack_);
+  c10::intrusive_ptr<MyStackClass> clone() const {
+    return c10::make_intrusive<MyStackClass>(stack_);
   }
 
-  void merge(const c10::intrusive_ptr<Stack>& c) {
+  void merge(const c10::intrusive_ptr<MyStackClass>& c) {
     for (auto& elem : c->stack_) {
       push(elem);
     }
@@ -392,24 +392,24 @@ static auto test = torch::jit::class_<Foo>("_TorchScriptTesting_Foo")
                        .def("combine", &Foo::combine);
 
 static auto testStack =
-    torch::jit::class_<Stack<std::string>>("_TorchScriptTesting_StackString")
+    torch::jit::class_<MyStackClass<std::string>>("_TorchScriptTesting_StackString")
         .def(torch::jit::init<std::vector<std::string>>())
-        .def("push", &Stack<std::string>::push)
-        .def("pop", &Stack<std::string>::pop)
-        .def("clone", &Stack<std::string>::clone)
-        .def("merge", &Stack<std::string>::merge)
+        .def("push", &MyStackClass<std::string>::push)
+        .def("pop", &MyStackClass<std::string>::pop)
+        .def("clone", &MyStackClass<std::string>::clone)
+        .def("merge", &MyStackClass<std::string>::merge)
         .def_pickle(
-            [](const c10::intrusive_ptr<Stack<std::string>>& self) {
+            [](const c10::intrusive_ptr<MyStackClass<std::string>>& self) {
               return self->stack_;
             },
             [](std::vector<std::string> state) { // __setstate__
-              return c10::make_intrusive<Stack<std::string>>(
+              return c10::make_intrusive<MyStackClass<std::string>>(
                   std::vector<std::string>{"i", "was", "deserialized"});
             })
-        .def("return_a_tuple", &Stack<std::string>::return_a_tuple)
+        .def("return_a_tuple", &MyStackClass<std::string>::return_a_tuple)
         .def(
             "top",
-            [](const c10::intrusive_ptr<Stack<std::string>>& self)
+            [](const c10::intrusive_ptr<MyStackClass<std::string>>& self)
                 -> std::string { return self->stack_.back(); });
 // clang-format off
         // The following will fail with a static assert telling you you have to
