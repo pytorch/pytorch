@@ -249,3 +249,6 @@ TAGS
 
 # ccls file
 .ccls-cache/
+
+# clang-format storage location used by apply_clang_format.py
+.clang-format-bin
