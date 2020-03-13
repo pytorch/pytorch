@@ -6485,6 +6485,11 @@ full(size, fill_value, out=None, dtype=None, layout=torch.strided, device=None, 
 
 Returns a tensor of size :attr:`size` filled with :attr:`fill_value`.
 
+.. warning::
+    In PyTorch 1.5 integral ``fill_value`s will produce a warning if `out`
+    or `dtype` are not set, and in PyTorch 1.6 this will produce an error.
+    In PyTorch 1.7, integral ``fill_value`s will return LongTensors by default.
+
 Args:
     size (int...): a list, tuple, or :class:`torch.Size` of integers defining the
         shape of the output tensor.

@@ -233,9 +233,10 @@ static PyObject * THPVariable_full(PyObject* self, PyObject* args, PyObject* kwa
     "full(IntArrayRef size, Scalar fill_value, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
     "full(IntArrayRef size, Scalar fill_value, *, DimnameList names=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
   }, /*traceable=*/true);
+
+  // Acquires (common) arguments
   ParsedArgs<8> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
-
   auto size = r.intlist(0);
   auto fill_val = r.scalar(1);
   const auto options = TensorOptions{}
@@ -252,25 +253,21 @@ static PyObject * THPVariable_full(PyObject* self, PyObject* args, PyObject* kwa
     }
 
     // full.out
+    // Validates out tensor and other kwargs
     auto result = r.tensor(2);
-    // Validates out and other kwags
     TORCH_CHECK(!r.toBool(6), " `pin_memory` and `out` parameters are incompatible");
     check_out_type_matches(result, r.scalartype(3), r.isNone(3), r.layout(4),
                           r.device(5), r.isNone(5));
 
     return wrap(dispatch_full(size, fill_val, result).set_requires_grad(r.toBool(7)));
-
   } else if (r.idx == 1) {
     // full.names
     if (r.isNone(2)) {
       return wrap(dispatch_full(size, fill_val, c10::nullopt, options).set_requires_grad(r.toBool(7)));
     }
 
-    // Converts from c10::optional<std:vector...> to
-    // c10::optional<ArrayRef...>
-    auto raw_names = r.toDimnameListOptional(2);
-    c10::optional<DimnameList> names(*raw_names);
-
+    // Converts from c10::optional<std:vector...> to c10::optional<ArrayRef...>
+    c10::optional<DimnameList> names(*r.toDimnameListOptional(2));
     return wrap(dispatch_full(size, fill_val, names, options).set_requires_grad(r.toBool(7)));
   }
 

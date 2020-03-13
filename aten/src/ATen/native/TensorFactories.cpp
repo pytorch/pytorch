@@ -343,20 +343,41 @@ Tensor& eye_out_cpu(Tensor& result, int64_t n, int64_t m) {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ full ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+namespace {
+
+// Performs dtype inference for full
+TensorOptions infer_full_options(
+  Scalar fill_value,
+  const TensorOptions& options) {
+
+  if (!options.has_dtype()) {
+    if (fill_value.isIntegral(true)) {
+      TORCH_WARN_ONCE(
+        "Deprecation warning: In PyTorch 1.6 torch.full with an integral ",
+        "fill_value will require a dtype or out argument. ",
+        "In PyTorch 1.7 an integral fill_value will return a LongTensor ",
+        "by default. ",
+        "Set the optional dtype or out arguments to suppress this warning. "
+      );
+    } else if (fill_value.isComplex()) {
+      auto scalar_type = (get_default_dtype() == ScalarType::Double) ?
+                            ScalarType::ComplexDouble :
+                            ScalarType::ComplexFloat;
+      return options.dtype(scalar_type);
+    }
+  }
+
+  return options;
+}
+
+} // anonymous namespace
+
 Tensor full(IntArrayRef size, Scalar fill_value, const TensorOptions& options) {
   if (options.layout() == kSparse) {
     AT_ERROR("full(...) is not implemented for sparse layout");
   }
 
-  if (!options.has_dtype() && fill_value.isIntegral(true)) {
-    TORCH_WARN_ONCE(
-      "Deprecation warning: In PyTorch 1.6 full will return a LongTensor when ",
-      "given an integer fill_value. Use the optional dtype argument to ",
-      "specify the desired dtype explicitly and suppress this warning."
-    );
-  }
-
-  auto result = at::empty(size, options);
+  auto result = at::empty(size, infer_full_options(fill_value, options));
   return result.fill_(fill_value);
 }
 
@@ -976,15 +997,7 @@ Tensor full(
     AT_ERROR("full(...) is not implemented for sparse layout");
   }
 
-  if (!options.has_dtype() && fill_value.isIntegral(true)) {
-    TORCH_WARN_ONCE(
-      "Deprecation warning: In PyTorch 1.6 full will return a LongTensor when ",
-      "given an integer fill_value. Use the optional dtype argument to ",
-      "specify the desired dtype explicitly and suppress this warning."
-    );
-  }
-
-  auto result = at::empty(size, names, options);
+  auto result = at::empty(size, names, infer_full_options(fill_value, options));
   return result.fill_(fill_value);
 }
 

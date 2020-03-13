@@ -1766,11 +1766,30 @@ class _TestTorchMixin(object):
 
     def test_full_inference(self):
         size = (1, 2)
+
+        # Tests integer fill_values deprecated without specific dtype set
         with self.maybeWarnsRegex(UserWarning, 'Deprecation warning: .+'):
             torch.full(size, 1)
+        torch.full(size, 1, dtype=torch.int)
 
+        # Tests integer fill_values deprecated with named tensors, too
         with self.maybeWarnsRegex(UserWarning, 'Deprecation warning: .+|Named tensors .+'):
             torch.full(size, 1, names=('a', 'b'))
+        with self.maybeWarnsRegex(UserWarning, 'Named tensors .+'):
+            torch.full(size, 1, names=('a', 'b'), dtype=torch.float)
+
+        # Tests complex inference
+        self.assertTrue(torch.full(size, (1 + 1j)).dtype == torch.complex64)
+        tmp = torch.full(size, (1 + 1j), dtype=torch.complex128)
+        self.assertTrue(tmp.dtype == torch.complex128)
+
+        prev_default = torch.get_default_dtype()
+        torch.set_default_dtype(torch.double)
+        self.assertTrue(torch.full(size, (1 + 1j)).dtype == torch.complex128)
+        torch.set_default_dtype(torch.half)
+        self.assertTrue(torch.full(size, (1 + 1j)).dtype == torch.complex64)
+        torch.set_default_dtype(prev_default)
+
 
     def test_broadcast_empty(self):
         # empty + empty
@@ -13007,19 +13026,11 @@ class TestTorchDeviceType(TestCase):
                 # successful albeit with a singular input. Therefore,
                 # we require info.min() >= 0
                 self.assertGreaterEqual(info_.min(), 0)
-                print("DEBUG")
-                print(a)
                 a_LU, pivots = a.lu(pivot=pivot)
-                print(a_LU)
                 self.assertEqual(a_LU, a_LU_info)
                 self.assertEqual(pivots_info, pivots)
 
-                # print(a_LU)
                 P, L, U = torch.lu_unpack(a_LU, pivots)
-                # print(L)
-                # print(U)
-                # print(a)
-                # print(P.matmul(L.matmul(U)))
                 self.assertEqual(P.matmul(L.matmul(U)), a)
 
                 if self.device_type == 'cuda':
