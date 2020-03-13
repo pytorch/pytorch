@@ -197,6 +197,16 @@ TensorView::TensorView(TensorDomain* _domain, DataType dtype)
     : Val(ValType::TensorView, dtype),
       domain_(_domain) {}
 
+TensorView::TensorView(const std::shared_ptr<c10::TensorType>& tensor_type)
+    : Val(ValType::TensorView, aten_opt_type_map(tensor_type->scalarType())) {
+  std::vector<IterDomain*> sizes;
+  TORCH_CHECK(tensor_type->dim().has_value(), "Requires static rank for Tensor");
+  for (int i = 0; i <tensor_type->dim().value(); i++) {
+    sizes.push_back(new IterDomain(new Int()));
+  }
+  domain_ = new TensorDomain(sizes);
+}
+
 TensorView* TensorView::clone() const {
   TensorView* new_view = new TensorView(domain_, getDataType().value());
   new_view->compute_at_view_ = compute_at_view_;
@@ -236,12 +246,6 @@ void TensorView::copyDomain(const TensorDomain* td) {
   for (decltype(td->size()) i = 0; i < td->size(); i++)
     idv.push_back(td->axis(i));
   setDomain(new TensorDomain(idv));
-}
-
-bool TensorView::sameAs(const TensorView* const other) const {
-  return (
-      domain()->sameAs(other->domain()) &&
-      getDataType().value() == other->getDataType().value());
 }
 
 TensorView* TensorView::computeAt(TensorView* consumer, int axis) {

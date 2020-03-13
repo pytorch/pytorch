@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_base_nodes.h>
 
+#include <torch/csrc/jit/ir/ir.h>
 /*
  * Nodes in here are intended to be "user facing" users in this sense being
  * those that want to be able to generate CUDA code.
@@ -98,15 +99,17 @@ struct TORCH_API TensorView : public Val {
 
   TensorView(TensorDomain* _domain, DataType dtype);
 
+  TensorView(const std::shared_ptr<c10::TensorType>& tensor_type);
+
+  TensorView(const std::shared_ptr<Value>& jit_value)
+    : TensorView(jit_value->type()->cast<c10::TensorType>()) {}
+
   // Make a new tensor with the given dtype, and the same domain as this tensor
   // (minus reduction IterDomains).
   TensorView* newForOutput(DataType dtype) const;
 
   // Make an exact copy of this tensor with the same dtype and same domain
   TensorView* clone() const;
-
-  // Check if another TensorView is the same as this one.
-  bool sameAs(const TensorView* const other) const;
 
   TensorDomain* domain() const noexcept {
     return domain_;
