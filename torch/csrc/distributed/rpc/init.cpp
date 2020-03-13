@@ -421,17 +421,16 @@ If the future completes with an error, an exception is thrown.
   module.def(
       "_invoke_rpc_torchscript",
       [](const std::string& dstWorkerName,
-         const py::object& userCallable,
+         const std::string& qualifiedNameStr,
          const py::tuple& argsTuple,
          const py::dict& kwargsDict) {
         DCHECK(!PyGILState_Check());
+        const c10::QualifiedName qualifiedName(qualifiedNameStr);
         // No need to catch exception here, if function can not be found,
         // exception will be thrown in get_function() call; if args do not match
         // with function schema, exception will be thrown in
         // createStackForSchema() call.
         auto& pythonRpcHandler = PythonRpcHandler::getInstance();
-        c10::QualifiedName qualifiedName =
-            pythonRpcHandler.getQualifiedName(userCallable);
         c10::FunctionSchema functionSchema =
             pythonRpcHandler.jitCompilationUnit()
                 ->get_function(qualifiedName)
