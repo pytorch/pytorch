@@ -11,6 +11,8 @@ namespace at {
 
 namespace at { namespace native {
 
+enum class REDUCE_OPERATOR: uint8_t {  SUM, SUBTRACT, MULTIPLY, DIVIDE };
+
 using index_fn = void(*)(TensorIterator &, IntArrayRef indexed_sizes, IntArrayRef indexed_strides);
 using index_put_fn = void(*)(TensorIterator &, IntArrayRef indexed_sizes, IntArrayRef indexed_strides, bool accumulate);
 using index_put_accum_fn = void(*)(Tensor &, TensorList , const Tensor &, bool unsafe);
@@ -21,7 +23,7 @@ using scatter_fn = void(*)(Tensor& self, int64_t dim, const Tensor& index, const
 using scatter_fill_fn = void(*)(Tensor& self, int64_t dim, const Tensor& index, Scalar src);
 using scatter_add_fn = void(*)(Tensor& self, int64_t dim, const Tensor& index, const Tensor& src);
 using scatter_reduce_fn = void(*)(Tensor& self, int64_t dim, const Tensor& index, const Tensor& src,
-                                  std::string& reduce);
+                                  const REDUCE_OPERATOR& reduce);
 
 DECLARE_DISPATCH(index_fn, index_stub);
 DECLARE_DISPATCH(index_put_fn, index_put_stub);
@@ -33,5 +35,6 @@ DECLARE_DISPATCH(scatter_fn, scatter_stub);
 DECLARE_DISPATCH(scatter_fill_fn, scatter_fill_stub);
 DECLARE_DISPATCH(scatter_add_fn, scatter_add_stub);
 DECLARE_DISPATCH(scatter_reduce_fn, scatter_reduce_stub);
+
 
 }} // namespace at::native
