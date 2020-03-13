@@ -298,17 +298,12 @@ def _trace(func, args, operator_export_type, return_outs=False):
     return trace_graph
 
 
-def _trace_and_get_graph_from_model(model, args, training):
+def _trace_and_get_graph_from_model(model, args):
 
     # A basic sanity check: make sure the state_dict keys are the same
     # before and after running the model.  Fail fast!
     orig_state_dict_keys = _unique_state_dict(model).keys()
 
-    # By default, training=TrainingMode.EVAL, which is good because running a model in
-    # training mode could result in internal buffers getting updated, dropout
-    # getting applied, etc.  If you really know what you're doing, you
-    # can turn training=TrainingMode.TRAINING or training=TrainingMode.PRESERVE,
-    # to preserve whatever the original training mode was.)
     trace_graph, torch_out, inputs_states = \
         torch.jit._get_trace_graph(model, args, _force_outplace=False, _return_inputs_states=True)
     warn_on_static_input_change(inputs_states)
@@ -320,7 +315,7 @@ def _trace_and_get_graph_from_model(model, args, training):
     return trace_graph, torch_out
 
 
-def _model_to_graph(model, args, verbose=False, training=None,
+def _model_to_graph(model, args, verbose=False,
                     input_names=None, output_names=None,
                     operator_export_type=OperatorExportTypes.ONNX,
                     example_outputs=None, propagate=False,
@@ -353,7 +348,7 @@ def _model_to_graph(model, args, verbose=False, training=None,
         graph = _propagate_and_assign_input_shapes(
             model.graph, tuple(in_vars), False, propagate)
     else:
-        graph, torch_out = _trace_and_get_graph_from_model(model, args, training)
+        graph, torch_out = _trace_and_get_graph_from_model(model, args)
         state_dict = _unique_state_dict(model)
         params = list(state_dict.values())
         if _retain_param_name:
@@ -452,8 +447,7 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
                                                          opset_version)
         val_add_node_names = _decide_add_node_names(add_node_names, operator_export_type)
         val_do_constant_folding = _decide_constant_folding(do_constant_folding, operator_export_type)
-        graph, params_dict, torch_out = _model_to_graph(model, args, verbose,
-                                                        training, input_names,
+        graph, params_dict, torch_out = _model_to_graph(model, args, verbose, input_names,
                                                         output_names, operator_export_type,
                                                         example_outputs, propagate, _retain_param_name,
                                                         val_do_constant_folding, fixed_batch_size=fixed_batch_size)
@@ -493,6 +487,12 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
             else:
                 operator_export_type = OperatorExportTypes.ONNX
 
+        # By default, training=None, (which defaults to TrainingMode.EVAL),
+        # which is good because running a model in training mode could result in
+        # internal buffers getting updated, dropout getting applied, etc.
+        # If you really know what you're doing, you can turn
+        # training=TrainingMode.TRAINING or training=TrainingMode.PRESERVE,
+        # (to preserve whatever the original training mode was.)
         with select_model_mode_for_export(model, training):
             _set_opset_version(opset_version)
             _set_operator_export_type(operator_export_type)
@@ -504,8 +504,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
             val_use_external_data_format, model_file_location = _decide_external_data_format(use_external_data_format,
                                                                                              operator_export_type,
                                                                                              f)
-            graph, params_dict, torch_out = _model_to_graph(model, args, verbose,
-                                                            training, input_names,
+            graph, params_dict, torch_out = _model_to_graph(model, args, verbose, input_names,
                                                             output_names, operator_export_type,
                                                             example_outputs, propagate,
                                                             _retain_param_name, val_do_constant_folding,

@@ -419,9 +419,13 @@ def assert_training_mode(op_mode, op_name):
     if op_mode != _training_mode:
         op_mode = "training " if op_mode else "inference"
         training_mode = "training " if _training_mode else "inference"
+        # setting the model mode could result in op_mode != _training_mode
+        # if the model is a FuncModule. In this case we warn the user of
+        # the state and export depending on training_mode
         warnings.warn("ONNX export mode is set to " + training_mode +
-                      " mode, but operator " + op_name + " is exporting in " +
-                      op_mode + " mode.")
+                      " mode, but operator " + op_name + " is set to " +
+                      op_mode + " mode. The model will be exported in " +
+                      training_mode + ", as specified by the export mode.")
 
 # ---------------------------------------------------------------------
 # ONNX operator version
