@@ -6163,6 +6163,35 @@ Example::
             [1, 2, 2]])
 """.format(**factory_common_args))
 
+add_docstr(torch.true_divide,
+           r"""
+true_divide(dividend, divisor) -> Tensor
+
+Performs "true division" that always computes the division
+in floating point. Analogous to division in Python 3 and equivalent to
+:func:`torch.div` except when both inputs have bool or integer scalar types,
+in which case they are cast to the default (floating) scalar type before the division.
+
+.. math::
+    \text{{out}}_i = \frac{{\text{{dividend}}_i}}{{\text{{divisor}}}}
+
+Args:
+    dividend (Tensor): the dividend
+    divisor (Tensor or Scalar): the divisor
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> dividend = torch.tensor([5, 3], dtype=torch.int)
+    >>> divisor = torch.tensor([3, 2], dtype=torch.int)
+    >>> torch.true_divide(dividend, divisor)
+    tensor([1.6667, 1.5000])
+    >>> torch.true_divide(dividend, 2)
+    tensor([2.5000, 1.5000])
+""".format(**common_args))
+
 add_docstr(torch.trunc,
            r"""
 trunc(input, out=None) -> Tensor

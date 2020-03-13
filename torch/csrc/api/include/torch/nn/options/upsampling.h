@@ -13,6 +13,11 @@ namespace torch {
 namespace nn {
 
 /// Options for a `D`-dimensional Upsample module.
+///
+/// Example:
+/// ```
+/// Upsample model(UpsampleOptions().scale_factor({3}).mode(torch::kLinear).align_corners(false));
+/// ```
 struct TORCH_API UpsampleOptions {
   /// output spatial sizes.
   TORCH_ARG(std::vector<int64_t>, size) = {};
