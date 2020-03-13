@@ -239,3 +239,5 @@ jobs:
             export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_WIN_BUILD_V1}
             set -x
             .jenkins/pytorch/win-test.sh
+      - store_artifacts:
+          path: ${PWD}/build/win_tmp
