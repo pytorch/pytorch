@@ -29,7 +29,12 @@ class IrParser {
 public:
   IrParser(std::shared_ptr<Graph> graph, Fusion& fusion)
   : graph_(std::move(graph)),
-    fusion_(&fusion) {}
+    fusion_(&fusion) {
+    if (init_registry_) {
+      registerJitOperator();
+      init_registry_ = false;
+    }
+  }
 
   void parse() {
     FusionGuard fg(fusion_);
@@ -78,13 +83,12 @@ public:
   }
 
   static bool canParseNode(const Node* const node) {
-    static bool init_registry = true;
-    if (init_registry) {
+    if (init_registry_) {
+      // TODO: mutex this guy;
       registerJitOperator();
-      init_registry = false;
+      init_registry_ = false;
     }
 
-    
     // match signature.
     auto iter = jit_operator_registry_.find(node->kind());
     if (iter == jit_operator_registry_.end()) {
@@ -230,9 +234,11 @@ protected:
   std::unordered_map<size_t, CgValue*> value_maps_;
 
   static std::unordered_map<Symbol, std::vector<std::pair<std::shared_ptr<Operator>, ParseFuncPtr>>> jit_operator_registry_;
+  static bool init_registry_;
 };
 
 std::unordered_map<Symbol, std::vector<std::pair<std::shared_ptr<Operator>, ParseFuncPtr>>> IrParser::jit_operator_registry_;
+bool IrParser::init_registry_ = true;
 
 } // namespace
 
