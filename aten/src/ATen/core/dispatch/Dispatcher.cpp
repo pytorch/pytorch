@@ -138,24 +138,29 @@ void Dispatcher::deregisterDef_(const OperatorHandle& op, const OperatorName& op
   cleanup(op, op_name);
 }
 
-RegistrationHandleRAII Dispatcher::registerImpl(OperatorName op_name, c10::optional<DispatchKey> dispatch_key, KernelFunction kernel, std::unique_ptr<FunctionSchema> inferred_function_schema) {
+RegistrationHandleRAII Dispatcher::registerImpl(
+  OperatorName op_name,
+  c10::optional<DispatchKey> dispatch_key,
+  KernelFunction kernel,
+  std::unique_ptr<FunctionSchema> inferred_function_schema
+) {
   std::lock_guard<std::mutex> lock(mutex_);
 
   auto op = findOrRegisterName_(op_name);
 
-  auto kernel_handle = op.operatorIterator_->op.registerKernel(dispatch_key, std::move(kernel), std::move(inferred_function_schema));
+  auto handle = op.operatorIterator_->op.registerKernel(dispatch_key, std::move(kernel), std::move(inferred_function_schema));
 
   ++op.operatorIterator_->def_and_impl_count;
 
-  return RegistrationHandleRAII([this, op, op_name, dispatch_key, kernel_handle] {
-    deregisterImpl_(op, op_name, dispatch_key, kernel_handle);
+  return RegistrationHandleRAII([this, op, op_name, dispatch_key, handle] {
+    deregisterImpl_(op, op_name, dispatch_key, handle);
   });
 }
 
-void Dispatcher::deregisterImpl_(const OperatorHandle& op, const OperatorName& op_name, c10::optional<DispatchKey> dispatch_key, std::list<impl::OperatorEntry::ListEntry>::iterator kernel_handle) {
+void Dispatcher::deregisterImpl_(const OperatorHandle& op, const OperatorName& op_name, c10::optional<DispatchKey> dispatch_key, std::list<impl::OperatorEntry::KernelSchemaPair>::iterator handle) {
   std::lock_guard<std::mutex> lock(mutex_);
 
-  op.operatorIterator_->op.deregisterKernel_(dispatch_key, kernel_handle);
+  op.operatorIterator_->op.deregisterKernel_(dispatch_key, handle);
 
   TORCH_INTERNAL_ASSERT(op.operator_name() == op_name);
 
