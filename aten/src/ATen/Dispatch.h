@@ -6,10 +6,21 @@
 #include <c10/util/Exception.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
 
+#define IS_SUPPORTED_AT_SCALAR_TYPE(enum_type) ( \
+    enum_type == at::ScalarType::Byte         || \
+    enum_type == at::ScalarType::Float        || \
+    enum_type == at::ScalarType::Long         || \
+    enum_type == at::ScalarType::QInt8        || \
+    enum_type == at::ScalarType::QUInt8)
+
 #define AT_PRIVATE_CASE_TYPE(enum_type, type, ...) \
   case enum_type: {                                \
     using scalar_t = type;                         \
-    return __VA_ARGS__();                          \
+    if (!IS_SUPPORTED_AT_SCALAR_TYPE(enum_type)) { \
+        AT_ERROR(#type, " not supported");         \
+    } else {                                       \
+        return __VA_ARGS__();                      \
+    }                                              \
   }
 
 #define AT_QINT_PRIVATE_CASE_TYPE(enum_type, type, underlying_enum, underlying_type, ...) \
