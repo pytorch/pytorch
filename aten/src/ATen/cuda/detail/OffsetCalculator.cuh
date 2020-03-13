@@ -40,6 +40,8 @@ struct OffsetCalculator {
         std::cout << "arg = " << arg << std::endl;
         int64_t element_size = (element_sizes == nullptr ? 1LL : element_sizes[arg]);
         std::cout << "element_size = " << element_size << std::endl;
+        std::cout << "strides[arg][i] = " << strides[arg][i] << std::endl;
+        std::cout << "strides_[i][arg] = " << strides_[i][arg] << std::endl;
         strides_[i][arg] =  i < dims ? strides[arg][i] / element_size : 0;
       }
     }

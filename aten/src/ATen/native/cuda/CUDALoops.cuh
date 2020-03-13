@@ -70,9 +70,11 @@ template<int N>
 static OffsetCalculator<N> make_input_offset_calculator(const TensorIterator& iter) {
   std::cout << "entering make_input_offset_calculator" << std::endl;
   std::cout << "N = " << N << std::endl;
+  // array size can not be 0, this happens when N == 0
+  constexpr int array_size = std::max<int>(N, 1)
   TORCH_INTERNAL_ASSERT(N == iter.ntensors() - 1);
-  std::array<const int64_t*, N> strides;
-  int64_t element_sizes[std::max<int>(N, 1)];  // array size can not be 0, this happens when N == 0
+  std::array<const int64_t*, array_size> strides;
+  int64_t element_sizes[array_size];
   for (int i = 1; i < N; i++) {
     strides[i] = iter.strides(i + 1).data();
     element_sizes[i] = iter.element_size(i + 1);
