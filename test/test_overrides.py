@@ -462,25 +462,69 @@ class TestTorchFunctionOverride(TestCase):
             quux(t1)
 
 def generate_tensor_like_override_tests(cls):
-    def test_generator(func, override):
-        if torch._six.PY3:
-            args = inspect.getfullargspec(override)
+    from tools.autograd.gen_autograd import load_aten_declarations
+
+    def test_generator(func, override, decls, aten_names):
+        func_args = []
+        if inspect.isbuiltin(func) and func.__name__ in aten_names:
+            i = names.index(func.__name__)
+            decl = decls[i]
+            for arg in decl['arguments']:
+                # Guess valid input to aten function based on type of argument
+                t = arg['simple_type']
+                if t.endswith('?'):
+                    t = t[:-1]
+                if 'default' in arg or arg.get('kwarg_only', False):
+                    continue
+                if t == 'Tensor':
+                    func_args.append(TensorLike())
+                elif t == 'TensorList':
+                    func_args.append([TensorLike(), TensorLike()])
+                elif t == 'IntArrayRef':
+                    size = arg.get('size', 2)
+                    if size == 1:
+                        func_args.append(1)
+                    else:
+                        func_args.append([1] * size)
+                elif t == 'Scalar':
+                    func_args.append(3.5)
+                elif t == 'bool':
+                    func_args.append(False)
+                elif t.startswith('int') or t == 'Dimname':
+                    func_args.append(0)
+                elif t.startswith('float') or t == 'double':
+                    func_args.append(1.0)
+                elif t in ('Generator', 'MemoryFormat', 'TensorOptions'):
+                    func_args.append(None)
+                elif t == 'ScalarType':
+                    func_args.append(torch.float32)
+                elif t == 'std::string':
+                    func_args.append('')
+                else:
+                    "Unsupported argument type %s for argument %s of function %s"
+                    raise RuntimeError(msg % (t, arg['name'], func))
         else:
-            args = inspect.getargspec(override)
-        nargs = len(args.args)
-        if args.defaults is not None:
-            nargs -= len(args.defaults)
-        func_args = [TensorLike() for _ in range(nargs)]
-        if args.varargs is not None:
-            func_args += [TensorLike(), TensorLike()]
+            if torch._six.PY3:
+                args = inspect.getfullargspec(override)
+            else:
+                args = inspect.getargspec(override)
+
+            nargs = len(args.args)
+            if args.defaults is not None:
+                nargs -= len(args.defaults)
+            func_args += [TensorLike() for _ in range(nargs)]
+            if args.varargs is not None:
+                func_args += [TensorLike(), TensorLike()]
 
         def test(self):
             self.assertEqual(func(*func_args), -1)
 
         return test
 
+    decls = load_aten_declarations("build/aten/src/ATen/Declarations.yaml")
+    names = [d['name'] for d in decls]
     for func, override in get_testing_overrides().items():
-        test_method = test_generator(func, override)
+        test_method = test_generator(func, override, decls, names)
         module = func.__module__
         if module:
             name = 'test_{}_{}'.format(module.replace('.', '_'), func.__name__)
