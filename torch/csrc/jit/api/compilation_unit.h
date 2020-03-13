@@ -24,7 +24,6 @@
 
 namespace torch {
 namespace jit {
-namespace script {
 
 struct Def;
 struct ClassDef;
@@ -281,22 +280,25 @@ struct TORCH_API CompilationUnit {
   mutable size_t mangleIndex_ = 0;
 };
 
-} // namespace script
-
 // An owning pointer to a Function. Just a pair of a raw Function ptr and it's
 // owning CU. We need this because pybind requires a ref-counted way to refer to
 // Functions.
 struct StrongFunctionPtr {
   StrongFunctionPtr(
-      std::shared_ptr<script::CompilationUnit> cu,
+      std::shared_ptr<CompilationUnit> cu,
       Function* function)
       : cu_(std::move(cu)), function_(function) {
     TORCH_INTERNAL_ASSERT(cu_);
     TORCH_INTERNAL_ASSERT(function_);
   }
-  std::shared_ptr<script::CompilationUnit> cu_;
+  std::shared_ptr<CompilationUnit> cu_;
   Function* function_;
 };
 
+namespace script {
+// We once had a `script::` namespace that was deleted. This is for backcompat
+// of the public API; new code should not use this type alias.
+using CompilationUnit = ::torch::jit::CompilationUnit;
+}
 } // namespace jit
 } // namespace torch
