@@ -226,6 +226,9 @@ def lobpcg(A,                   # type: Tensor
         fparams['ortho_tol_replace'] = fparams.get('ortho_tol_replace', tol)
         bparams['ortho_use_drop'] = bparams.get('ortho_use_drop', False)
 
+    if not torch.jit.is_scripting():
+        LOBPCG.call_tracker = LOBPCG_call_tracker
+
     if len(A.shape) > 2:
         N = int(torch.prod(torch.tensor(A.shape[:-2])))
         bA = A.reshape((N,) + A.shape[-2:])
@@ -233,6 +236,7 @@ def lobpcg(A,                   # type: Tensor
         bX = X.reshape((N,) + X.shape[-2:]) if X is not None else None
         bE = torch.empty((N, k), dtype=dtype, device=device)
         bXret = torch.empty((N, m, k), dtype=dtype, device=device)
+
         for i in range(N):
             A_ = bA[i]
             B_ = bB[i] if bB is not None else None
@@ -243,17 +247,25 @@ def lobpcg(A,                   # type: Tensor
             worker.run()
             bE[i] = worker.E[:k]
             bXret[i] = worker.X[:, :k]
+
+        if not torch.jit.is_scripting():
+            LOBPCG.call_tracker = LOBPCG_call_tracker_orig
+
         return bE.reshape(A.shape[:-2] + (k,)), bXret.reshape(A.shape[:-2] + (m, k))
 
     X = torch.randn((m, n), dtype=dtype, device=device) if X is None else X
     assert len(X.shape) == 2 and X.shape == (m, n), (X.shape, (m, n))
 
     worker = LOBPCG(A, B, X, iK, iparams, fparams, bparams, method, tracker)
+
     worker.run()
+
+    if not torch.jit.is_scripting():
+        LOBPCG.call_tracker = LOBPCG_call_tracker_orig
+
     return worker.E[:k], worker.X[:, :k]
 
 
-@torch.jit.script
 class LOBPCG(object):
     """Worker class of LOBPCG methods.
     """
@@ -719,4 +731,6 @@ class LOBPCG(object):
 
 # Calling tracker is separated from LOBPCG definitions because
 # TorchScript does not support user-defined callback arguments:
-LOBPCG.call_tracker = lambda self: self.tracker(self)
+LOBPCG_call_tracker_orig = LOBPCG.call_tracker
+def LOBPCG_call_tracker(self):
+    self.tracker(self)
