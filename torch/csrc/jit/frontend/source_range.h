@@ -173,13 +173,14 @@ struct CAFFE2_API SourceRange {
   size_t end_;
 };
 
-
 struct StackEntry {
   std::string filename;
   SourceRange range;
 };
 
-C10_EXPORT void format_stack_trace(std::ostream& out, const std::vector<StackEntry>& entries);
+C10_EXPORT void format_stack_trace(
+    std::ostream& out,
+    const std::vector<StackEntry>& entries);
 
 inline std::ostream& operator<<(std::ostream& out, const SourceRange& range) {
   range.highlight(out);

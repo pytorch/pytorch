@@ -1,8 +1,8 @@
+#include <torch/csrc/jit/passes/bailout_graph.h>
 #include <ATen/core/function.h>
+#include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/ir/alias_analysis.h>
-#include <torch/csrc/jit/passes/bailout_graph.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/liveness.h>
 #include <memory>
@@ -59,7 +59,7 @@ struct BailOutGraphBuilderForNode {
     }
   }
 
-  Value *getInputForValue(Value *v) {
+  Value* getInputForValue(Value* v) {
     TORCH_INTERNAL_ASSERT(this->old_to_new_.count(v));
     return this->old_to_new_[v];
   }

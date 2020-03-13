@@ -6,8 +6,8 @@
 namespace torch {
 namespace jit {
 
-std::unordered_map<std::string, std::string> quant_fusion_pattern_and_replacements() {
-
+std::unordered_map<std::string, std::string>
+quant_fusion_pattern_and_replacements() {
   std::string conv2d = R"(
 graph(%a_quant, %packed_params, %r_scale, %r_zero_point, %r_dtype, %stride, %padding, %dilation, %groups):
         %a_dequant = aten::dequantize(%a_quant)
@@ -63,13 +63,11 @@ graph(%packed_params, %a_quant, %r_scale, %r_zero_point, %r_dtype):
         %r = quantized::linear(%a_quant, %packed_params, %r_scale, %r_zero_point)
         return (%r) )";
 
-  return {
-    {conv2d, quantized_conv2d},
-    {addmm, quantized_linear},
-    {matmul_with_bias, quantized_linear},
-    {matmul_no_bias, quantized_linear_no_bias}
-  };
-
+  return {{conv2d, quantized_conv2d},
+          {addmm, quantized_linear},
+          {matmul_with_bias, quantized_linear},
+          {matmul_no_bias, quantized_linear_no_bias}};
 }
 
-}} // torch::jit
+} // namespace jit
+} // namespace torch

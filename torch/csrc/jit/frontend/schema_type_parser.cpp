@@ -1,10 +1,10 @@
+#include <torch/csrc/jit/frontend/schema_type_parser.h>
 #include <ATen/core/alias_info.h>
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/jit_type.h>
 #include <c10/util/string_utils.h>
 #include <torch/csrc/jit/frontend/lexer.h>
 #include <torch/csrc/jit/frontend/parse_string_literal.h>
-#include <torch/csrc/jit/frontend/schema_type_parser.h>
 #include <torch/custom_class.h>
 #include <string>
 
@@ -21,10 +21,10 @@ using c10::ListType;
 using c10::NoneType;
 using c10::NumberType;
 using c10::OptionalType;
+using c10::QSchemeType;
 using c10::RRefType;
 using c10::StringType;
 using c10::Symbol;
-using c10::QSchemeType;
 using c10::TensorType;
 using c10::TupleType;
 using c10::VarType;

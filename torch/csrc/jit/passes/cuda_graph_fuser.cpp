@@ -1,17 +1,17 @@
 #include <torch/csrc/jit/passes/cuda_graph_fuser.h>
 
 #include <c10/util/Exception.h>
-#include <torch/csrc/jit/runtime/autodiff.h>
-#include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
-#include <torch/csrc/jit/runtime/operator.h>
+#include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
-#include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/passes/pass_manager.h>
-#include <torch/csrc/jit/frontend/ir_emitter.h>
+#include <torch/csrc/jit/passes/utils/subgraph_utils.h>
+#include <torch/csrc/jit/runtime/autodiff.h>
+#include <torch/csrc/jit/runtime/custom_operator.h>
+#include <torch/csrc/jit/runtime/operator.h>
 
 #include <queue>
 #include <unordered_map>
@@ -174,7 +174,7 @@ struct GraphFuser {
     return callback_(node);
   }
 
-  bool isFusableDevice(Value *v) {
+  bool isFusableDevice(Value* v) {
     if (!v->type()->isSubtypeOf(TensorType::get())) {
       return true;
     }
@@ -191,7 +191,6 @@ struct GraphFuser {
     }
     throw std::runtime_error("Unknown device");
   }
-
 
   // Default fusability check - used when the user doesn't pass in
   // a callback.
@@ -529,8 +528,8 @@ struct GraphFuser {
 
   // There are two invariants for prim::ConstantChunk:
   // (1) the tensor input to prim::ConstantChunk must be an input to the fusion
-  // group (2) no two ConstantChunks in the same CudaFusionGroup can share a tensor
-  // input.
+  // group (2) no two ConstantChunks in the same CudaFusionGroup can share a
+  // tensor input.
   graph_node_list::iterator fuseChunk(Node* consumer, Value* producer) {
     auto* chunk = producer->node();
     AT_ASSERT(consumer->kind() == prim::CudaFusionGroup);
@@ -848,8 +847,9 @@ struct GraphFuser {
         }
         auto fusion_group = tryFuse(consumer, producer);
         if (fusion_group) {
-          // after fusion, consumer moves into a CudaFusionGroup, so inputs is no
-          // longer valid so we rescan the new CudaFusionGroup for more fusions...
+          // after fusion, consumer moves into a CudaFusionGroup, so inputs is
+          // no longer valid so we rescan the new CudaFusionGroup for more
+          // fusions...
           return std::make_pair(fusion_group.value()->reverseIterator(), true);
         }
       }

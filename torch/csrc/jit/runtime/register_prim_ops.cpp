@@ -5,19 +5,19 @@
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/autograd/variable.h>
-#include <torch/csrc/jit/runtime/custom_operator.h>
+#include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
-#include <torch/csrc/jit/runtime/graph_executor.h>
+#include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/runtime/custom_operator.h>
+#include <torch/csrc/jit/runtime/graph_executor.h>
+#include <torch/csrc/jit/runtime/jit_exception.h>
+#include <torch/csrc/jit/runtime/logging.h>
 #include <torch/csrc/jit/runtime/operator.h>
-#include <torch/csrc/jit/serialization/pickle.h>
 #include <torch/csrc/jit/runtime/print_handler.h>
 #include <torch/csrc/jit/runtime/profiling_record.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
-#include <torch/csrc/jit/api/compilation_unit.h>
-#include <torch/csrc/jit/frontend/error_report.h>
-#include <torch/csrc/jit/runtime/jit_exception.h>
-#include <torch/csrc/jit/runtime/logging.h>
+#include <torch/csrc/jit/serialization/pickle.h>
 
 #include <ATen/ExpandUtils.h>
 #include <ATen/Parallel.h>
@@ -734,7 +734,8 @@ RegisterOperators reg(
            auto outputs = pop(stack).toTensorList();
            std::vector<torch::autograd::Variable> input_vars(
                inputs.begin(), inputs.end());
-           std::vector<torch::autograd::Variable> output_vars(outputs.begin(), outputs.end());
+           std::vector<torch::autograd::Variable> output_vars(
+               outputs.begin(), outputs.end());
            std::vector<torch::autograd::Variable> gradients;
 
            if (!grad_outputs.isNone()) {
@@ -834,36 +835,36 @@ RegisterOperators reg(
      Operator(
          "prim::Print(...) -> ()",
          [](Stack& stack) {
-          auto num_inputs = pop(stack).toInt();
-          std::stringstream ss;
-          bool first = true;
-          for (const IValue& i : last(stack, num_inputs)) {
-            if (!first)
-              ss << " ";
-            first = false;
-            ss << i;
-          }
-          drop(stack, num_inputs);
-          ss << std::endl;
-          auto* handler = getPrintHandler();
-          TORCH_INTERNAL_ASSERT(handler);
-          handler(ss.str());
-          return 0;
+           auto num_inputs = pop(stack).toInt();
+           std::stringstream ss;
+           bool first = true;
+           for (const IValue& i : last(stack, num_inputs)) {
+             if (!first)
+               ss << " ";
+             first = false;
+             ss << i;
+           }
+           drop(stack, num_inputs);
+           ss << std::endl;
+           auto* handler = getPrintHandler();
+           TORCH_INTERNAL_ASSERT(handler);
+           handler(ss.str());
+           return 0;
          },
          aliasAnalysisSpecialCase()),
      Operator(
          "prim::BroadcastSizes(...) -> int[]",
-          [](Stack& stack) {
-             auto num_inputs = pop(stack).toInt();
-             std::vector<int64_t> size;
-             size.reserve(8);
-             for (auto i = 0; i < num_inputs; ++i) {
-               size = at::infer_size(
-                   size, peek(stack, i, num_inputs).toIntVector());
-             }
-             drop(stack, num_inputs);
-             push(stack, IValue(std::move(size)));
-             return 0;
+         [](Stack& stack) {
+           auto num_inputs = pop(stack).toInt();
+           std::vector<int64_t> size;
+           size.reserve(8);
+           for (auto i = 0; i < num_inputs; ++i) {
+             size =
+                 at::infer_size(size, peek(stack, i, num_inputs).toIntVector());
+           }
+           drop(stack, num_inputs);
+           push(stack, IValue(std::move(size)));
+           return 0;
          },
          aliasAnalysisSpecialCase()),
      Operator(
@@ -880,7 +881,7 @@ RegisterOperators reg(
                  dim < (int64_t)regular_shape.size(),
                  "Dimension out of range for chunk");
              int64_t split_size = (regular_shape[dim] + chunks - 1) / chunks;
-             regular_shape[dim] =split_size;
+             regular_shape[dim] = split_size;
              if (shape[dim] % chunks == 0) {
                last_shape[dim] = split_size;
              } else {
@@ -899,9 +900,9 @@ RegisterOperators reg(
      Operator(
          "aten::warn(str message, int stacklevel=2) -> ()",
          [](Stack& stack) {
-            TORCH_CHECK(
+           TORCH_CHECK(
                false, "warn is implemented directly in the interpreter");
-            return 0;
+           return 0;
          },
          aliasAnalysisFromSchema()),
      Operator(
@@ -954,31 +955,31 @@ RegisterOperators reg(
          aliasAnalysisSpecialCase()),
      Operator(
          "prim::AutogradAnyNonZero(...) -> bool",
-           [](Stack& stack) {
-             auto num_inputs = pop(stack).toInt();
-             bool result = false;
-             for (const IValue& v : last(stack, num_inputs)) {
-               if (v.isTensor()) {
-                 if (v.toTensor().defined()) {
-                   result = true;
-                   break;
-                 }
-               } else if (v.isTensorList()) {
-                 for (const at::Tensor& t : v.toTensorVector()) {
-                   if (t.defined()) {
-                     result = true;
-                   }
-                 }
-                 if (result) {
-                   break;
-                 }
-               } else {
-                 TORCH_INTERNAL_ASSERT(false);
+         [](Stack& stack) {
+           auto num_inputs = pop(stack).toInt();
+           bool result = false;
+           for (const IValue& v : last(stack, num_inputs)) {
+             if (v.isTensor()) {
+               if (v.toTensor().defined()) {
+                 result = true;
+                 break;
                }
+             } else if (v.isTensorList()) {
+               for (const at::Tensor& t : v.toTensorVector()) {
+                 if (t.defined()) {
+                   result = true;
+                 }
+               }
+               if (result) {
+                 break;
+               }
+             } else {
+               TORCH_INTERNAL_ASSERT(false);
              }
-             drop(stack, num_inputs);
-             stack.emplace_back(result);
-             return 0;
+           }
+           drop(stack, num_inputs);
+           stack.emplace_back(result);
+           return 0;
          },
          aliasAnalysisFromSchema()),
      Operator(
@@ -989,11 +990,9 @@ RegisterOperators reg(
            if (!a.defined() && !b.defined()) {
              // undef + undef == undef
              stack.emplace_back(a);
-           }
-           else if (!a.defined()) {
+           } else if (!a.defined()) {
              stack.emplace_back(b);
-           }
-           else if (!b.defined()) {
+           } else if (!b.defined()) {
              stack.emplace_back(a);
            } else {
              stack.emplace_back(a + b);
@@ -1009,9 +1008,7 @@ RegisterOperators reg(
            if (size.isNone()) {
              push(stack, std::move(self));
            } else {
-             push(
-                 stack,
-                 at::sum_to(self.toTensor(), size.toIntVector()));
+             push(stack, at::sum_to(self.toTensor(), size.toIntVector()));
            }
            return 0;
          },
@@ -1032,7 +1029,8 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         // note the compiler knows to type TupleIndex more accurately than it is listed here.
+         // note the compiler knows to type TupleIndex more accurately than it
+         // is listed here.
          "prim::TupleIndex(Any tup, int i) -> Any",
          [](Stack& stack) {
            int64_t index = pop(stack).toInt();
@@ -1046,17 +1044,19 @@ RegisterOperators reg(
            return 0;
          },
          aliasAnalysisSpecialCase()),
-      Operator("prim::TupleUnpack(Any tup) -> ...",
+     Operator(
+         "prim::TupleUnpack(Any tup) -> ...",
          [](Stack& stack) {
-             tupleUnpack(stack);
-             return 0;
+           tupleUnpack(stack);
+           return 0;
          },
          aliasAnalysisSpecialCase()),
      Operator(
          prim::tolist,
-         // This operator has to be unschematized because the return type depends on the type hint and input.
-         // The implementation of this operator below is intended to be as close to the Python implementation in
-         // torch/csrc/utils/tensor_list.cpp as possible.
+         // This operator has to be unschematized because the return type
+         // depends on the type hint and input. The implementation of this
+         // operator below is intended to be as close to the Python
+         // implementation in torch/csrc/utils/tensor_list.cpp as possible.
          [](const Node* node) -> Operation {
            return [](Stack& stack) {
              int elem_ty_val;
@@ -1082,14 +1082,21 @@ RegisterOperators reg(
              } else if (elem_ty_val == 2) {
                out_ty = BoolType::get();
              } else {
-               TORCH_CHECK(false, "Unsupported element type for tolist; only int, float and bool are supported");
+               TORCH_CHECK(
+                   false,
+                   "Unsupported element type for tolist; only int, float and bool are supported");
              }
 
              // Check that type of the Tensor matches that of the annotation.
-             TORCH_CHECK(tryScalarTypeFromJitType(out_ty) == t.scalar_type(), "Output annotation element type and runtime tensor element type must match for tolist()")
+             TORCH_CHECK(
+                 tryScalarTypeFromJitType(out_ty) == t.scalar_type(),
+                 "Output annotation element type and runtime tensor element type must match for tolist()")
 
-             // Check that the dimension of the Tensor matches that of the annotation.
-             TORCH_CHECK(dim_val == t.dim(), "Output annotation list dimension and runtime tensor dimension must match for tolist()")
+             // Check that the dimension of the Tensor matches that of the
+             // annotation.
+             TORCH_CHECK(
+                 dim_val == t.dim(),
+                 "Output annotation list dimension and runtime tensor dimension must match for tolist()")
 
              // Wrap out_ty in a ListType dim times.
              for (int i = 0; i < dim_val; ++i) {
@@ -1101,7 +1108,8 @@ RegisterOperators reg(
              auto strides = t.strides();
              size_t element_size = t.element_size();
              char* data = (char*)t.data_ptr();
-             auto result = tensorToListRecursive(data, 0, dim, out_ty, sizes, strides, element_size);
+             auto result = tensorToListRecursive(
+                 data, 0, dim, out_ty, sizes, strides, element_size);
              push(stack, std::move(result));
              return 0;
            };
@@ -1176,7 +1184,10 @@ RegisterOperators reg(
          "prim::unchecked_unwrap_optional(t(a)? optional) -> t(a)",
          noop,
          aliasAnalysisFromSchema()),
-     Operator("prim::unchecked_cast(t x) -> t", noop, aliasAnalysisSpecialCase()),
+     Operator(
+         "prim::unchecked_cast(t x) -> t",
+         noop,
+         aliasAnalysisSpecialCase()),
      Operator(
          "aten::wait(Future(t) self) -> t",
          [](Stack& stack) {
@@ -1308,52 +1319,51 @@ RegisterOperators logging_operators(
 // int/float variations to avoid trapping Scalar args
 // in unintended implicit conversions
 #define DEFINE_SCALAR_BINARY_OP(aten_op, int_op, float_op, result) \
-  Operator( \
-    #aten_op "(Scalar a, Scalar b) -> " #result, \
-    [](Stack& stack) { \
-      IValue x, y; \
-      pop(stack, x, y); \
-      if (x.isDouble()) { \
-        if (y.isDouble()) { \
-          double a = x.toDouble(); \
-          double b = y.toDouble(); \
-          push(stack, float_op); \
-        } else { \
-          double a = x.toDouble(); \
-          int64_t b = y.toInt(); \
-          push(stack, float_op); \
-        } \
-      } else { \
-        if (y.isDouble()) { \
-          int64_t a = x.toInt(); \
-          double b = y.toDouble(); \
-          push(stack, float_op); \
-        } else { \
-          int64_t a = x.toInt(); \
-          int64_t b = y.toInt(); \
-          push(stack, int_op); \
-        } \
-      } \
-      return 0; \
-    }, \
-    aliasAnalysisFromSchema() \
-  )
+  Operator(                                                        \
+      #aten_op "(Scalar a, Scalar b) -> " #result,                 \
+      [](Stack& stack) {                                           \
+        IValue x, y;                                               \
+        pop(stack, x, y);                                          \
+        if (x.isDouble()) {                                        \
+          if (y.isDouble()) {                                      \
+            double a = x.toDouble();                               \
+            double b = y.toDouble();                               \
+            push(stack, float_op);                                 \
+          } else {                                                 \
+            double a = x.toDouble();                               \
+            int64_t b = y.toInt();                                 \
+            push(stack, float_op);                                 \
+          }                                                        \
+        } else {                                                   \
+          if (y.isDouble()) {                                      \
+            int64_t a = x.toInt();                                 \
+            double b = y.toDouble();                               \
+            push(stack, float_op);                                 \
+          } else {                                                 \
+            int64_t a = x.toInt();                                 \
+            int64_t b = y.toInt();                                 \
+            push(stack, int_op);                                   \
+          }                                                        \
+        }                                                          \
+        return 0;                                                  \
+      },                                                           \
+      aliasAnalysisFromSchema())
 
-#define DEFINE_BINARY_OP(aten_op, op)               \
-  DEFINE_GENERIC_OP(aten_op, op, op, int, float),   \
-  DEFINE_INT_FLOAT_OP(aten_op, op, float),          \
-  DEFINE_SCALAR_BINARY_OP(aten_op, op, op, Scalar)
+#define DEFINE_BINARY_OP(aten_op, op)             \
+  DEFINE_GENERIC_OP(aten_op, op, op, int, float), \
+      DEFINE_INT_FLOAT_OP(aten_op, op, float),    \
+      DEFINE_SCALAR_BINARY_OP(aten_op, op, op, Scalar)
 
 #define DEFINE_BINARY_FLOAT_OP(aten_op, op)         \
   DEFINE_GENERIC_OP(aten_op, op, op, float, float), \
-  DEFINE_INT_FLOAT_OP(aten_op, op, float),          \
-  DEFINE_SCALAR_BINARY_OP(aten_op, op, op, float)
+      DEFINE_INT_FLOAT_OP(aten_op, op, float),      \
+      DEFINE_SCALAR_BINARY_OP(aten_op, op, op, float)
 
-#define DEFINE_COMPARISON_OP(aten_op, op)         \
-  DEFINE_GENERIC_OP(aten_op, op, op, bool, bool), \
-  DEFINE_INT_FLOAT_OP(aten_op, op, bool),         \
-  DEFINE_SCALAR_BINARY_OP(aten_op, op, op, bool), \
-  DEFINE_STR_CMP_OP(aten_op, op)
+#define DEFINE_COMPARISON_OP(aten_op, op)             \
+  DEFINE_GENERIC_OP(aten_op, op, op, bool, bool),     \
+      DEFINE_INT_FLOAT_OP(aten_op, op, bool),         \
+      DEFINE_SCALAR_BINARY_OP(aten_op, op, op, bool), \
+      DEFINE_STR_CMP_OP(aten_op, op)
 
 #define DEFINE_UNARY_INT_OP(aten_op, op, result) \
   Operator(                                      \
@@ -1379,23 +1389,22 @@ RegisterOperators logging_operators(
 
 #define DEFINE_UNARY_OP(aten_op, op, int_result, float_result) \
   DEFINE_UNARY_INT_OP(aten_op, op, int_result),                \
-  DEFINE_UNARY_FLOAT_OP(aten_op, op, float_result),            \
-  Operator( \
-  #aten_op "(Scalar a) -> Scalar", \
-  [](Stack& stack) { \
-    IValue x; \
-    pop(stack, x); \
-    if (x.isDouble()) { \
-      double a = x.toDouble(); \
-      push(stack, static_cast<float_result>(op)); \
-    } else { \
-      int64_t a = x.toInt(); \
-      push(stack, static_cast<int_result>(op)); \
-    } \
-    return 0; \
-  }, \
-  aliasAnalysisFromSchema() \
-)
+      DEFINE_UNARY_FLOAT_OP(aten_op, op, float_result),        \
+      Operator(                                                \
+          #aten_op "(Scalar a) -> Scalar",                     \
+          [](Stack& stack) {                                   \
+            IValue x;                                          \
+            pop(stack, x);                                     \
+            if (x.isDouble()) {                                \
+              double a = x.toDouble();                         \
+              push(stack, static_cast<float_result>(op));      \
+            } else {                                           \
+              int64_t a = x.toInt();                           \
+              push(stack, static_cast<int_result>(op));        \
+            }                                                  \
+            return 0;                                          \
+          },                                                   \
+          aliasAnalysisFromSchema())
 #define DEFINE_BOOL_OP(aten_op, op)        \
   Operator(                                \
       #aten_op "(bool a, bool b) -> bool", \
@@ -1448,7 +1457,8 @@ int listReverse(Stack& stack) {
   return 0;
 }
 
-template <typename T> int minList(Stack &stack) {
+template <typename T>
+int minList(Stack& stack) {
   c10::List<T> a = pop(stack).to<c10::List<T>>();
   c10::List<T> b = pop(stack).to<c10::List<T>>();
 
@@ -1466,7 +1476,8 @@ template <typename T> int minList(Stack &stack) {
   return 0;
 }
 
-template <typename T> int maxList(Stack &stack) {
+template <typename T>
+int maxList(Stack& stack) {
   c10::List<T> a = pop(stack).to<c10::List<T>>();
   c10::List<T> b = pop(stack).to<c10::List<T>>();
 
@@ -1521,7 +1532,6 @@ int listDelete(Stack& stack) {
   pop(stack);
   return 0;
 }
-
 
 template <typename T>
 int listInsert(Stack& stack) {
@@ -1602,11 +1612,10 @@ int listRemove<at::Tensor>(Stack& stack) {
   at::Tensor elem = pop(stack).to<at::Tensor>();
   c10::List<at::Tensor> list = pop(stack).to<c10::List<at::Tensor>>();
 
-  auto pos = std::find_if(
-      list.begin(), list.end(), [&](const at::Tensor& b) {
-        const auto cmp_result = elem.eq(b);
-        return cmp_result.is_nonzero();
-      });
+  auto pos = std::find_if(list.begin(), list.end(), [&](const at::Tensor& b) {
+    const auto cmp_result = elem.eq(b);
+    return cmp_result.is_nonzero();
+  });
 
   if (pos != list.end()) {
     list.erase(pos);
@@ -1638,8 +1647,8 @@ int listIndex<at::Tensor>(Stack& stack) {
   at::Tensor elem = pop(stack).to<at::Tensor>();
   c10::List<at::Tensor> list = pop(stack).to<c10::List<at::Tensor>>();
 
-  auto pos = std::find_if(
-      list.begin(), list.end(), [elem](const at::Tensor& b) {
+  auto pos =
+      std::find_if(list.begin(), list.end(), [elem](const at::Tensor& b) {
         const auto cmp_result = elem.eq(b);
         return cmp_result.is_nonzero();
       });
@@ -1669,8 +1678,8 @@ int listCount<at::Tensor>(Stack& stack) {
   at::Tensor elem = pop(stack).to<at::Tensor>();
   c10::List<at::Tensor> list = pop(stack).to<c10::List<at::Tensor>>();
 
-  const int64_t count = std::count_if(
-      list.begin(), list.end(), [&](const at::Tensor& b) {
+  const int64_t count =
+      std::count_if(list.begin(), list.end(), [&](const at::Tensor& b) {
         const auto cmp_result = elem.eq(b);
         return cmp_result.is_nonzero();
       });
@@ -1679,7 +1688,7 @@ int listCount<at::Tensor>(Stack& stack) {
   return 0;
 }
 
-template<typename T>
+template <typename T>
 int listExtend(Stack& stack) {
   c10::List<T> b = pop(stack).to<c10::List<T>>();
   c10::List<T> a = pop(stack).to<c10::List<T>>();
@@ -1733,7 +1742,9 @@ int listNe(Stack& stack) {
   return 0;
 }
 
-inline bool tensor_list_equal(const c10::List<at::Tensor>& a, const c10::List<at::Tensor>& b) {
+inline bool tensor_list_equal(
+    const c10::List<at::Tensor>& a,
+    const c10::List<at::Tensor>& b) {
   if (a.size() != b.size()) {
     return false;
   }
@@ -2001,7 +2012,6 @@ int dictLen(Stack& stack) {
   return 0;
 }
 
-
 int dictValues(Stack& stack) {
   auto dict = pop(stack).toGenericDict();
   auto values = c10::impl::GenericList(dict.valueType());
@@ -2037,7 +2047,7 @@ int dictIndex(Stack& stack) {
   return 0;
 }
 
-template<bool has_default>
+template <bool has_default>
 int dictGet(Stack& stack) {
   IValue default_value;
   if (has_default) {
@@ -2070,7 +2080,7 @@ int dictSetDefault(Stack& stack) {
   return 0;
 }
 
-template<bool has_default>
+template <bool has_default>
 int dictPop(Stack& stack) {
   IValue default_value;
   if (has_default) {
@@ -2163,7 +2173,8 @@ int dictConstructFromList(Stack& stack) {
   auto input_list = pop(stack);
   auto list = input_list.toList();
   auto tup_type = list.elementType()->expect<TupleType>();
-  auto dict = c10::impl::GenericDict(tup_type->elements().at(0), tup_type->elements().at(1));
+  auto dict = c10::impl::GenericDict(
+      tup_type->elements().at(0), tup_type->elements().at(1));
   dict.reserve(list.size());
   for (IValue input : list) {
     const auto tup = input.toTuple()->elements();
@@ -2955,15 +2966,18 @@ RegisterOperators reg2({
           lldiv_t divresult = {};
           pop(stack, a, b);
           if (b == 0) {
-            throw std::runtime_error("ZeroDivisionError: integer division or modulo by zero");
+            throw std::runtime_error(
+                "ZeroDivisionError: integer division or modulo by zero");
           }
           divresult = lldiv(a, b);
           if (divresult.rem && (a < 0) != (b < 0)) {
             divresult.quot -= 1;
-            divresult.rem  += b;
+            divresult.rem += b;
           }
-          push(stack, static_cast<int64_t>(divresult.quot), \
-            static_cast<int64_t>(divresult.rem));
+          push(
+              stack,
+              static_cast<int64_t>(divresult.quot),
+              static_cast<int64_t>(divresult.rem));
           return 0;
         },
         aliasAnalysisFromSchema()),
@@ -2977,9 +2991,9 @@ RegisterOperators reg2({
           }
           double rem = fmod(a, b);
           if (rem && (a < 0) != (b < 0)) {
-            rem  += b;
+            rem += b;
           }
-          push(stack, (a - rem)/b, rem);
+          push(stack, (a - rem) / b, rem);
           return 0;
         },
         aliasAnalysisFromSchema()),
@@ -3070,7 +3084,7 @@ int sort_op(Stack& stack) {
           return false;
         }
         if (!lt_func) {
-          lt_func =  checkSortSchema(a.type());
+          lt_func = checkSortSchema(a.type());
         }
         sort_stack.push_back(a);
         sort_stack.push_back(b);
@@ -3087,11 +3101,11 @@ int sort_op(Stack& stack) {
 RegisterOperators regSort({
     Operator(
         "aten::sorted(t[](a) self) -> (t[])",
-        sort_op</*has_reverse_arg*/false, /*copy_return_list*/true>,
+        sort_op</*has_reverse_arg*/ false, /*copy_return_list*/ true>,
         aliasAnalysisFromSchema()),
     Operator(
         "aten::sort(t[](a!) self, bool reverse=False) -> ()",
-        sort_op</*has_reverse_arg*/true, /*copy_return_list*/false>,
+        sort_op</*has_reverse_arg*/ true, /*copy_return_list*/ false>,
         aliasAnalysisFromSchema()),
 });
 
@@ -3162,40 +3176,40 @@ at::Tensor interpolate(
   double scale_factors_2 = -1.0;
   double scale_factors_3 = -1.0;
 
-  if(!scale_factors.isNone() && recompute_scale_factor == c10::nullopt) {
+  if (!scale_factors.isNone() && recompute_scale_factor == c10::nullopt) {
     recompute_scale_factor = true;
     bool warn_recompute_scale_factor = false;
 
     if (scale_factors.isDouble()) {
       // only warn when the scales have floating values since
       // the result for ints is the same with/without recompute_scale_factor
-      if (_is_floating_value(scale_factors.toDouble())){
+      if (_is_floating_value(scale_factors.toDouble())) {
         warn_recompute_scale_factor = true;
       }
     } else if (scale_factors.isDoubleList()) {
       auto scale_factors_list = scale_factors.toDoubleList();
 
-      for (const auto & scales : scale_factors_list) {
+      for (const auto& scales : scale_factors_list) {
         // only warn when the scales have floating values since
         // the result for ints is the same with/without recompute_scale_factor
-        if(_is_floating_value(scales)) {
+        if (_is_floating_value(scales)) {
           warn_recompute_scale_factor = true;
           break;
         }
       }
     }
 
-    if(warn_recompute_scale_factor) {
+    if (warn_recompute_scale_factor) {
       AT_WARN(
-        "The default behavior for interpolate/upsample with float scale_factor will change "
-        "in 1.5.0 to align with other frameworks/libraries, and use scale_factor directly, "
-        "instead of relying on the computed output size. "
-        "If you wish to keep the old behavior, please set recompute_scale_factor=True. "
-        "See the documentation of nn.Upsample for details.");
+          "The default behavior for interpolate/upsample with float scale_factor will change "
+          "in 1.5.0 to align with other frameworks/libraries, and use scale_factor directly, "
+          "instead of relying on the computed output size. "
+          "If you wish to keep the old behavior, please set recompute_scale_factor=True. "
+          "See the documentation of nn.Upsample for details.");
     }
   }
 
-  if(recompute_scale_factor == false) {
+  if (recompute_scale_factor == false) {
     if (scale_factors.isDouble()) {
       scale_factors_1 = scale_factors.toDouble();
       scale_factors_2 = scale_factors.toDouble();
@@ -3203,9 +3217,9 @@ at::Tensor interpolate(
     } else if (scale_factors.isDoubleList()) {
       auto scale_factors_list = scale_factors.toDoubleList();
       scale_factors_1 = scale_factors_list[0];
-      if (scale_factors_list.size() >= 2){
+      if (scale_factors_list.size() >= 2) {
         scale_factors_2 = scale_factors_list[1];
-        if (scale_factors_list.size() >= 3){
+        if (scale_factors_list.size() >= 3) {
           scale_factors_3 = scale_factors_list[2];
         }
       }
@@ -3222,10 +3236,17 @@ at::Tensor interpolate(
         input, _output_size(input, 1, size, scale_factors), scale_factors_1);
   if (input_dim == dim2d && mode == "nearest")
     return at::upsample_nearest2d(
-        input, _output_size(input, 2, size, scale_factors), scale_factors_1, scale_factors_2);
+        input,
+        _output_size(input, 2, size, scale_factors),
+        scale_factors_1,
+        scale_factors_2);
   if (input_dim == dim3d && mode == "nearest")
     return at::upsample_nearest3d(
-        input, _output_size(input, 3, size, scale_factors), scale_factors_1, scale_factors_2, scale_factors_3);
+        input,
+        _output_size(input, 3, size, scale_factors),
+        scale_factors_1,
+        scale_factors_2,
+        scale_factors_3);
   if (input_dim == dim1d && mode == "area")
     return at::adaptive_avg_pool1d(
         input, _output_size(input, 1, size, scale_factors));
@@ -3237,7 +3258,10 @@ at::Tensor interpolate(
         input, _output_size(input, 3, size, scale_factors));
   if (input_dim == dim1d && mode == "linear")
     return at::upsample_linear1d(
-        input, _output_size(input, 1, size, scale_factors), *align_corners, scale_factors_1);
+        input,
+        _output_size(input, 1, size, scale_factors),
+        *align_corners,
+        scale_factors_1);
   if (input_dim == dim1d && mode == "bilinear")
     throw std::runtime_error("Got 3D input, but bilinear mode needs 4D input");
   if (input_dim == dim1d && mode == "bicubic")
@@ -3248,10 +3272,18 @@ at::Tensor interpolate(
     throw std::runtime_error("Got 4D input, but linear mode needs 3D input");
   if (input_dim == dim2d && mode == "bilinear")
     return at::upsample_bilinear2d(
-        input, _output_size(input, 2, size, scale_factors), *align_corners, scale_factors_1, scale_factors_2);
+        input,
+        _output_size(input, 2, size, scale_factors),
+        *align_corners,
+        scale_factors_1,
+        scale_factors_2);
   if (input_dim == dim2d && mode == "bicubic")
     return at::upsample_bicubic2d(
-        input, _output_size(input, 2, size, scale_factors), *align_corners, scale_factors_1, scale_factors_2);
+        input,
+        _output_size(input, 2, size, scale_factors),
+        *align_corners,
+        scale_factors_1,
+        scale_factors_2);
   if (input_dim == dim2d && mode == "trilinear")
     throw std::runtime_error("Got 4D input, but trilinear mode needs 5D input");
   if (input_dim == dim3d && mode == "linear")
@@ -3262,7 +3294,12 @@ at::Tensor interpolate(
     throw std::runtime_error("Got 5D input, but bicubic mode needs 4D input");
   if (input_dim == dim3d && mode == "trilinear")
     return at::upsample_trilinear3d(
-        input, _output_size(input, 3, size, scale_factors), *align_corners, scale_factors_1, scale_factors_2, scale_factors_3);
+        input,
+        _output_size(input, 3, size, scale_factors),
+        *align_corners,
+        scale_factors_1,
+        scale_factors_2,
+        scale_factors_3);
 
   AT_ERROR(
       "Input Error: Only 3D, 4D and 5D input Tensors supported",
@@ -3275,17 +3312,28 @@ at::Tensor interpolate(
 }
 
 int interpolate_op(Stack& stack) {
-    at::Tensor input;
-    IValue size;
-    IValue scale_factors;
-    std::string mode;
-    IValue align_corners;
-    IValue recompute_scale_factor;
-    pop(stack, input, size, scale_factors, mode, align_corners, recompute_scale_factor);
-    at::Tensor res = interpolate(
-        input, size, scale_factors, mode, align_corners.toOptional<bool>(), recompute_scale_factor.toOptional<bool>());
-    push(stack, std::move(res));
-    return 0;
+  at::Tensor input;
+  IValue size;
+  IValue scale_factors;
+  std::string mode;
+  IValue align_corners;
+  IValue recompute_scale_factor;
+  pop(stack,
+      input,
+      size,
+      scale_factors,
+      mode,
+      align_corners,
+      recompute_scale_factor);
+  at::Tensor res = interpolate(
+      input,
+      size,
+      scale_factors,
+      mode,
+      align_corners.toOptional<bool>(),
+      recompute_scale_factor.toOptional<bool>());
+  push(stack, std::move(res));
+  return 0;
 }
 
 // interpolate takes in float & float[] for scale factor
@@ -3316,8 +3364,8 @@ int upsample_nearest_op(Stack& stack) {
   IValue scale_factor_int;
   pop(stack, input, size, scale_factor_int);
   IValue scale_factor_double = convert_scale_factor_to_double(scale_factor_int);
-  at::Tensor res =
-      interpolate(input, size, scale_factor_double, "nearest", c10::nullopt, c10::nullopt);
+  at::Tensor res = interpolate(
+      input, size, scale_factor_double, "nearest", c10::nullopt, c10::nullopt);
   push(stack, std::move(res));
   return 0;
 }
@@ -3331,7 +3379,12 @@ int upsample_op(Stack& stack) {
   pop(stack, input, size, scale_factor_int, mode, align_corners);
   IValue scale_factor_double = convert_scale_factor_to_double(scale_factor_int);
   at::Tensor res = interpolate(
-      input, size, scale_factor_double, mode, align_corners.toOptional<bool>(), c10::nullopt);
+      input,
+      size,
+      scale_factor_double,
+      mode,
+      align_corners.toOptional<bool>(),
+      c10::nullopt);
   push(stack, std::move(res));
   return 0;
 }
@@ -3342,8 +3395,8 @@ int upsample_bilinear_op(Stack& stack) {
   IValue scale_factor_int;
   pop(stack, input, size, scale_factor_int);
   IValue scale_factor_double = convert_scale_factor_to_double(scale_factor_int);
-  at::Tensor res =
-      interpolate(input, size, scale_factor_double, "bilinear", true, c10::nullopt);
+  at::Tensor res = interpolate(
+      input, size, scale_factor_double, "bilinear", true, c10::nullopt);
   push(stack, std::move(res));
   return 0;
 }

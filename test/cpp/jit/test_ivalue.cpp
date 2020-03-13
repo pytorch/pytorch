@@ -1,8 +1,8 @@
 #include <ATen/ATen.h>
-#include "ATen/core/ivalue.h"
 #include <test/cpp/jit/test_base.h>
 #include <test/cpp/jit/test_utils.h>
 #include <torch/torch.h>
+#include "ATen/core/ivalue.h"
 
 namespace torch {
 namespace jit {

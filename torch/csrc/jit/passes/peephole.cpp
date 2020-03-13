@@ -1,11 +1,11 @@
 #include <torch/csrc/jit/passes/peephole.h>
 #include <ATen/core/jit_type.h>
-#include <torch/csrc/jit/runtime/graph_executor.h>
+#include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/peephole.h>
+#include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/utils/memory.h>
 
 namespace torch {
@@ -243,7 +243,8 @@ struct PeepholeOptimizeImpl {
         }
       } else if (
           node->kind() == aten::Float || node->kind() == aten::Int ||
-          node->kind() == aten::FloatImplicit || node->kind() == aten::IntImplicit ||
+          node->kind() == aten::FloatImplicit ||
+          node->kind() == aten::IntImplicit ||
           node->kind() == aten::ScalarImplicit) {
         Node* input_node = node->input()->node();
         if (input_node->kind() == prim::NumToTensor) {

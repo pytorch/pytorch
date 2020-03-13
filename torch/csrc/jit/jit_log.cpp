@@ -4,9 +4,9 @@
 #include <sstream>
 #include <vector>
 
+#include <ATen/core/function.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
-#include <ATen/core/function.h>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -18,15 +18,14 @@ namespace jit {
 
 // gets a string representation of a node header
 // (e.g. outputs, a node kind and outputs)
-std::string getHeader(const Node *node) {
+std::string getHeader(const Node* node) {
   std::stringstream ss;
   node->print(ss, 0, {}, false, false, false, false);
   return ss.str();
 }
 
-static std::unordered_map<std::string, size_t>
-parseJITLogOption(const char *option) {
-
+static std::unordered_map<std::string, size_t> parseJITLogOption(
+    const char* option) {
   std::stringstream in_ss;
   in_ss << "function:";
   if (option) {
@@ -44,8 +43,8 @@ parseJITLogOption(const char *option) {
     auto begin_index = index_at == std::string::npos ? 0 : index_at + 1;
     size_t logging_level = index_at == std::string::npos ? 1 : index_at + 2;
     auto end_index = line.find_last_of('.') == std::string::npos
-                         ? line.size()
-                         : line.find_last_of('.');
+        ? line.size()
+        : line.find_last_of('.');
     auto filename = line.substr(begin_index, end_index - begin_index);
     files_to_levels.insert({filename, logging_level});
   }
@@ -53,16 +52,15 @@ parseJITLogOption(const char *option) {
   return files_to_levels;
 }
 
-bool is_enabled(const char *cfname, JitLoggingLevels level) {
-
+bool is_enabled(const char* cfname, JitLoggingLevels level) {
   static const char* c_log_level = std::getenv("PYTORCH_JIT_LOG_LEVEL");
   static const std::unordered_map<std::string, size_t> files_to_levels =
       parseJITLogOption(c_log_level);
   std::string fname{cfname};
   fname = c10::detail::StripBasename(fname);
   auto end_index = fname.find_last_of('.') == std::string::npos
-                       ? fname.size()
-                       : fname.find_last_of('.');
+      ? fname.size()
+      : fname.find_last_of('.');
   auto fname_no_ext = fname.substr(0, end_index);
 
   auto it = files_to_levels.find(fname_no_ext);
@@ -76,7 +74,7 @@ bool is_enabled(const char *cfname, JitLoggingLevels level) {
 // Unfortunately, in `GraphExecutor` where `log_function` is invoked
 // we won't have access to an original function, so we have to construct
 // a dummy function to give to PythonPrint
-std::string log_function(const std::shared_ptr<torch::jit::Graph> &graph) {
+std::string log_function(const std::shared_ptr<torch::jit::Graph>& graph) {
   torch::jit::GraphFunction func("source_dump", graph, nullptr);
   std::vector<at::Tensor> tensors;
   std::vector<c10::NamedTypePtr> deps;

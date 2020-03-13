@@ -2,10 +2,10 @@
 
 #include <ATen/core/functional.h> //fmap
 #include <ATen/core/stack.h>
-#include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/codegen/fuser/kernel_cache.h>
-#include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/runtime/custom_operator.h>
+#include <torch/csrc/jit/runtime/interpreter.h>
 
 #include <stdexcept>
 

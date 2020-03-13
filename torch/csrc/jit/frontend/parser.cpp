@@ -22,8 +22,8 @@ Decl mergeTypesFromTypeComment(
         << "Number of type annotations ("
         << type_annotation_decl.params().size()
         << ") did not match the number of "
-        << (is_method ? "method" : "function")
-        << " parameters (" << expected_num_annotations << ")";
+        << (is_method ? "method" : "function") << " parameters ("
+        << expected_num_annotations << ")";
   }
   auto old = decl.params();
   auto _new = type_annotation_decl.params();
@@ -210,7 +210,8 @@ struct ParserImpl {
     auto cond = parseExp();
     L.expect(TK_ELSE);
     auto false_branch = parseExp(binary_prec);
-    return create_compound(TK_IF_EXPR, range, {cond, std::move(true_branch), false_branch});
+    return create_compound(
+        TK_IF_EXPR, range, {cond, std::move(true_branch), false_branch});
   }
   // parse the longest expression whose binary operators have
   // precedence strictly greater than 'precedence'
@@ -266,9 +267,10 @@ struct ParserImpl {
       }
 
       if (kind == TK_FOR) {
-        // TK_FOR targets should only parse exprs prec greater than 4, which only
-        // includes subset of Exprs that suppose to be on the LHS according to the
-        // python grammar https://docs.python.org/3/reference/grammar.html
+        // TK_FOR targets should only parse exprs prec greater than 4, which
+        // only includes subset of Exprs that suppose to be on the LHS according
+        // to the python grammar
+        // https://docs.python.org/3/reference/grammar.html
         auto target = parseLHSExp();
         L.expect(TK_IN);
         auto iter = parseExp();
@@ -342,13 +344,14 @@ struct ParserImpl {
     });
   }
 
-  // parse LHS acceptable exprs, which only includes subset of Exprs that prec is
-  // greater than 4 according to the python grammar
+  // parse LHS acceptable exprs, which only includes subset of Exprs that prec
+  // is greater than 4 according to the python grammar
   Expr parseLHSExp() {
     return parseExp(4);
   }
 
-  // Parse expr's of the form [a:], [:b], [a:b], [:] and all variations with "::"
+  // Parse expr's of the form [a:], [:b], [a:b], [:] and all variations with
+  // "::"
   Expr parseSubscriptExp() {
     TreeRef first, second, third;
     auto range = L.cur().range;
@@ -359,17 +362,17 @@ struct ParserImpl {
       if (L.cur().kind != ',' && L.cur().kind != ']' && L.cur().kind != ':') {
         second = parseExp();
       }
-    if (L.nextIf(':')) {
-      if (L.cur().kind != ',' && L.cur().kind != ']') {
-        third = parseExp();
+      if (L.nextIf(':')) {
+        if (L.cur().kind != ',' && L.cur().kind != ']') {
+          third = parseExp();
+        }
       }
-    }
       auto maybe_first = first ? Maybe<Expr>::create(range, Expr(first))
                                : Maybe<Expr>::create(range);
       auto maybe_second = second ? Maybe<Expr>::create(range, Expr(second))
                                  : Maybe<Expr>::create(range);
       auto maybe_third = third ? Maybe<Expr>::create(range, Expr(third))
-                                : Maybe<Expr>::create(range);
+                               : Maybe<Expr>::create(range);
       return SliceExpr::create(range, maybe_first, maybe_second, maybe_third);
     } else {
       return Expr(first);
@@ -411,7 +414,11 @@ struct ParserImpl {
       def = Maybe<Expr>::create(L.cur().range);
     }
     return Param::create(
-        type->range(), Ident(ident), Maybe<Expr>(type), Maybe<Expr>(def), kwarg_only);
+        type->range(),
+        Ident(ident),
+        Maybe<Expr>(type),
+        Maybe<Expr>(def),
+        kwarg_only);
   }
 
   Param parseBareTypeAnnotation() {
@@ -504,8 +511,9 @@ struct ParserImpl {
       }
       case TK_RETURN: {
         auto range = L.next().range;
-        Expr value = L.cur().kind != TK_NEWLINE ? parseExpOrExpTuple()
-                                                : Expr(create_compound(TK_NONE, range, {}));
+        Expr value = L.cur().kind != TK_NEWLINE
+            ? parseExpOrExpTuple()
+            : Expr(create_compound(TK_NONE, range, {}));
         L.expect(TK_NEWLINE);
         return Return::create(range, value);
       }
@@ -645,7 +653,7 @@ struct ParserImpl {
         paramlist.range(), List<Param>(paramlist), return_annotation);
   }
 
-TreeRef parseClass() {
+  TreeRef parseClass() {
     L.expect(TK_CLASS_DEF);
     const auto name = parseIdent();
     Maybe<Expr> superclass = Maybe<Expr>::create(name.range());

@@ -1,5 +1,5 @@
-#include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
+#include <torch/csrc/jit/runtime/operator.h>
 
 namespace torch {
 namespace jit {
@@ -19,7 +19,11 @@ int64_t normalizeIndex(int64_t idx, int64_t list_size) {
   return idx;
 }
 
-std::string stringSlice(std::string string, int64_t start, int64_t end, int64_t step) {
+std::string stringSlice(
+    std::string string,
+    int64_t start,
+    int64_t end,
+    int64_t step) {
   TORCH_CHECK(step == 1, "Slicing a string only supports step=1");
 
   const int64_t size = string.size();

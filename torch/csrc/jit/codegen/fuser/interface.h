@@ -1,9 +1,9 @@
 #pragma once
 
 #include <ATen/ATen.h>
+#include <ATen/core/stack.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/ir/ir.h>
-#include <ATen/core/stack.h>
 
 #include <cstdint>
 #include <memory>

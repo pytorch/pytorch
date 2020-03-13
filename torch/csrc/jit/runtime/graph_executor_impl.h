@@ -4,14 +4,14 @@
 #include <ATen/core/ivalue.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/grad_mode.h>
+#include <torch/csrc/jit/frontend/tracer.h>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/runtime/argument_spec.h>
 #include <torch/csrc/jit/runtime/autodiff.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
-#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/profiling_record.h>
-#include <torch/csrc/jit/resource_guard.h>
-#include <torch/csrc/jit/frontend/tracer.h>
 
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/function.h>
@@ -56,7 +56,9 @@ struct GraphExecutorImplBase {
     return copy;
   }
 
-  GraphExecutorImplBase(const std::shared_ptr<Graph>& graph, std::string function_name)
+  GraphExecutorImplBase(
+      const std::shared_ptr<Graph>& graph,
+      std::string function_name)
       : graph(prepareGraph(graph)),
         function_name_(std::move(function_name)),
         num_inputs(this->graph->inputs().size()),

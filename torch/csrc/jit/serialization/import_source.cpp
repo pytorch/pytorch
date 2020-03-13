@@ -249,9 +249,11 @@ struct SourceImporterImpl : public Resolver,
       // ClassTypes)
       return importNamedTuple(qualified_name, class_def);
     } else if (superclass_name == "Interface") {
-      cu_->define_interface(qualified_name, class_def, shared_from_this(), /*is_module=*/false);
+      cu_->define_interface(
+          qualified_name, class_def, shared_from_this(), /*is_module=*/false);
     } else if (superclass_name == "ModuleInterface") {
-      cu_->define_interface(qualified_name, class_def, shared_from_this(), /*is_module=*/true);
+      cu_->define_interface(
+          qualified_name, class_def, shared_from_this(), /*is_module=*/true);
     } else {
       throw ErrorReport(class_def.range())
           << "Torchscript does not support class inheritance.";

@@ -1,6 +1,6 @@
+#include <torch/csrc/jit/runtime/operator.h>
 #include <ATen/ATen.h>
 #include <ATen/core/alias_info.h>
-#include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/frontend/edit_distance.h>
 
 #include <queue>
@@ -117,7 +117,7 @@ struct OperatorRegistry {
     registerPendingOperators();
     std::vector<std::shared_ptr<Operator>> values;
     values.clear();
-    for (auto & kv : operators) {
+    for (auto& kv : operators) {
       values.insert(values.end(), kv.second.begin(), kv.second.end());
     }
     return values;
@@ -139,26 +139,13 @@ bool printerHasSpecialCaseFor(Symbol sym) {
   // schema to editing this list here. These cases should only be things
   // that require special handling because they do not fit normal schema
   const static std::unordered_set<Symbol> handled = {
-      prim::Constant,
-      prim::Uninitialized,
-      prim::fork,
-      prim::ListConstruct,
-      prim::DictConstruct,
-      prim::ListUnpack,
-      prim::Print,
-      prim::PythonOp,
-      prim::TupleConstruct,
-      prim::TupleIndex,
-      prim::TupleSlice,
-      prim::TupleUnpack,
-      prim::CreateObject,
-      prim::GetAttr,
-      prim::SetAttr,
-      prim::CallFunction,
-      prim::isinstance,
-      prim::unchecked_cast,
-      prim::tolist,
-      prim::rpc_async,
+      prim::Constant,      prim::Uninitialized, prim::fork,
+      prim::ListConstruct, prim::DictConstruct, prim::ListUnpack,
+      prim::Print,         prim::PythonOp,      prim::TupleConstruct,
+      prim::TupleIndex,    prim::TupleSlice,    prim::TupleUnpack,
+      prim::CreateObject,  prim::GetAttr,       prim::SetAttr,
+      prim::CallFunction,  prim::isinstance,    prim::unchecked_cast,
+      prim::tolist,        prim::rpc_async,
   };
 
   // WARNING: by adding a value to this set, you are asserting that your
@@ -298,7 +285,8 @@ const std::vector<std::shared_ptr<Operator>>& getAllOperatorsFor(Symbol name) {
 }
 
 std::shared_ptr<Operator> findOperatorFor(const c10::OperatorName& full_name) {
-  for (const auto& op : getRegistry().getOperators(Symbol::fromQualString(full_name.name))) {
+  for (const auto& op :
+       getRegistry().getOperators(Symbol::fromQualString(full_name.name))) {
     if (op->schema().overload_name() == full_name.overload_name) {
       return op;
     }

@@ -1,13 +1,13 @@
 #pragma once
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/variable.h>
-#include <torch/csrc/jit/runtime/argument_spec.h>
-#include <torch/csrc/jit/runtime/graph_executor.h>
+#include <torch/csrc/jit/api/object.h>
+#include <torch/csrc/jit/frontend/source_range.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/named_value.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
-#include <torch/csrc/jit/api/object.h>
-#include <torch/csrc/jit/frontend/source_range.h>
+#include <torch/csrc/jit/runtime/argument_spec.h>
+#include <torch/csrc/jit/runtime/graph_executor.h>
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/api/include/torch/ordered_dict.h>
@@ -557,7 +557,7 @@ namespace script {
 // We once had a `script::` namespace that was deleted. This is for backcompat
 // of the public API; new code should not use this type alias.
 using Module = ::torch::jit::Module;
-}
+} // namespace script
 
 } // namespace jit
 } // namespace torch

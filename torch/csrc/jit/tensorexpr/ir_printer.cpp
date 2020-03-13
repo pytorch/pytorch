@@ -15,7 +15,9 @@ void IRPrinter::print(Stmt stmt) {
 // TODO: change whether to include the parenthesis to the parent expression,
 // we need to look at the operator precedence to make the output simpler.
 template <typename Op>
-void IRPrinter::visitBinaryOp(const BinaryOpNode<Op>* v, const std::string& op_str) {
+void IRPrinter::visitBinaryOp(
+    const BinaryOpNode<Op>* v,
+    const std::string& op_str) {
   os() << "(";
   v->lhs().accept(this);
   os() << " " << op_str << " ";

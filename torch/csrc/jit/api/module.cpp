@@ -1,13 +1,13 @@
 #include <torch/csrc/jit/api/module.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
-#include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/runtime/operator.h>
-#include <torch/csrc/jit/passes/dead_code_elimination.h>
-#include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
+#include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/inliner.h>
+#include <torch/csrc/jit/runtime/operator.h>
 
 namespace torch {
 namespace jit {
@@ -176,7 +176,8 @@ Module Module::clone_impl(
   Module r;
   if (type_already_cloned) {
     // if we cloned the class type before, we'll reuse it
-    Module new_module(_ivalue()->compilation_unit(), type_remap[type()]->cast<ClassType>());
+    Module new_module(
+        _ivalue()->compilation_unit(), type_remap[type()]->cast<ClassType>());
     r = new_module;
   } else {
     Module new_module(*type()->name(), _ivalue()->compilation_unit(), true);
@@ -194,9 +195,9 @@ Module Module::clone_impl(
       type_remap[orig.type()] = cloned.type();
       r.register_module(type()->getAttributeName(i), cloned);
     } else {
-      // this adds new slot and creates a new attribute for the underlying type if
-      // the type is not already cloned, otherwise it will only
-      // add a new slot and typecheck
+      // this adds new slot and creates a new attribute for the underlying type
+      // if the type is not already cloned, otherwise it will only add a new
+      // slot and typecheck
       r.register_attribute(
           type()->getAttributeName(i),
           type()->getAttribute(i),

@@ -1,27 +1,23 @@
 #include <ATen/ATen.h>
-#include <ATen/core/interned_strings.h>
-#include <ATen/core/ivalue.h>
 #include <ATen/Parallel.h>
 #include <ATen/ThreadLocalDebugInfo.h>
+#include <ATen/core/interned_strings.h>
+#include <ATen/core/ivalue.h>
 
 #include "test/cpp/jit/test_base.h"
 #include "test/cpp/jit/test_utils.h"
 
-#include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/ir/type_hashing.h>
+#include <torch/csrc/jit/passes/canonicalize.h>
 #include "torch/csrc/autograd/generated/variable_factories.h"
 #include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/jit/runtime/argument_spec.h"
-#include "torch/csrc/jit/ir/attributes.h"
-#include "torch/csrc/jit/runtime/autodiff.h"
-#include "torch/csrc/jit/frontend/code_template.h"
-#include "torch/csrc/jit/runtime/custom_operator.h"
 #include "torch/csrc/jit/codegen/fuser/interface.h"
-#include "torch/csrc/jit/serialization/import.h"
-#include "torch/csrc/jit/runtime/interpreter.h"
-#include "torch/csrc/jit/ir/irparser.h"
-#include "torch/csrc/jit/passes/pass_manager.h"
+#include "torch/csrc/jit/frontend/code_template.h"
+#include "torch/csrc/jit/frontend/tracer.h"
 #include "torch/csrc/jit/ir/alias_analysis.h"
+#include "torch/csrc/jit/ir/attributes.h"
+#include "torch/csrc/jit/ir/irparser.h"
+#include "torch/csrc/jit/ir/scope.h"
 #include "torch/csrc/jit/passes/bailout_graph.h"
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
 #include "torch/csrc/jit/passes/constant_propagation.h"
@@ -34,21 +30,25 @@
 #include "torch/csrc/jit/passes/liveness.h"
 #include "torch/csrc/jit/passes/lower_grad_of.h"
 #include "torch/csrc/jit/passes/lower_tuples.h"
+#include "torch/csrc/jit/passes/pass_manager.h"
 #include "torch/csrc/jit/passes/requires_grad_analysis.h"
 #include "torch/csrc/jit/passes/shape_analysis.h"
 #include "torch/csrc/jit/passes/utils/subgraph_utils.h"
-#include "torch/csrc/jit/ir/scope.h"
+#include "torch/csrc/jit/runtime/argument_spec.h"
+#include "torch/csrc/jit/runtime/autodiff.h"
+#include "torch/csrc/jit/runtime/custom_operator.h"
+#include "torch/csrc/jit/runtime/interpreter.h"
 #include "torch/csrc/jit/runtime/symbolic_script.h"
-#include "torch/csrc/jit/frontend/tracer.h"
+#include "torch/csrc/jit/serialization/import.h"
 
 #include "torch/csrc/autograd/engine.h"
 #include "torch/csrc/autograd/variable.h"
 
 #include <torch/csrc/jit/testing/file_check.h>
 #include <torch/script.h>
-#include "torch/csrc/jit/runtime/profiling_record.h"
-#include "torch/csrc/jit/frontend/ir_emitter.h"
 #include "torch/csrc/jit/api/module.h"
+#include "torch/csrc/jit/frontend/ir_emitter.h"
+#include "torch/csrc/jit/runtime/profiling_record.h"
 #include "torch/jit.h"
 
 #include "onnx/onnx_pb.h"
@@ -72,7 +72,6 @@ namespace jit {
 inline c10::AliasAnalysisKind aliasAnalysisFromSchema() {
   return c10::AliasAnalysisKind::FROM_SCHEMA;
 }
-
 
 template <typename T>
 std::ostream& operator<<(std::ostream& out, const std::vector<T>& list) {
@@ -420,15 +419,16 @@ void testCustomFusionNestedBlocks() {
       Symbol::fromQualString("prim::FusionGroup"));
 
   // Could be done in more efficient ways, but this is only a test.
-  std::function<bool(const Block*, Symbol)> dfs = [&](const Block* b, Symbol s) {
-      for (auto node : b->nodes()) {
-          if (node->kind() == s)
-              return true;
-          for (auto nested_b : node->blocks())
-              if (dfs(nested_b, s))
-                  return true;
-      }
-      return false;
+  std::function<bool(const Block*, Symbol)> dfs = [&](const Block* b,
+                                                      Symbol s) {
+    for (auto node : b->nodes()) {
+      if (node->kind() == s)
+        return true;
+      for (auto nested_b : node->blocks())
+        if (dfs(nested_b, s))
+          return true;
+    }
+    return false;
   };
 
   AT_ASSERT(dfs(g->block(), Symbol::fromQualString("prim::FusionGroup")));
@@ -466,9 +466,7 @@ void testControlFlow() {
     return stack;
   };
 
-  auto L = [](int64_t l) {
-    return IValue(scalar_to_tensor(at::Scalar(l)));
-  };
+  auto L = [](int64_t l) { return IValue(scalar_to_tensor(at::Scalar(l))); };
   auto V = [](IValue t) { return std::move(t).toTensor().item<int64_t>(); };
   auto run_binary = [&](const std::string& name, int64_t a, int64_t b) {
     return V(run(name, {L(a), L(b)})[0]);
@@ -498,7 +496,7 @@ void testEvalModeForLoadedModule() {
 }
 
 void testSerializationInterop() {
-  if (isSandcastle()){
+  if (isSandcastle()) {
     // The module file to load is not generated in Sandcastle
     return;
   }
@@ -521,7 +519,7 @@ void testSerializationInterop() {
 }
 
 void testTorchSaveError() {
-  if (isSandcastle()){
+  if (isSandcastle()) {
     // The file to load is not generated in Sandcastle
     return;
   }
@@ -764,8 +762,7 @@ void testRecordFunction() {
             sizes.push_back(std::vector<int64_t>());
           }
         }
-        traced_inputs.push_back(
-            std::make_tuple(fn.name().str(), sizes));
+        traced_inputs.push_back(std::make_tuple(fn.name().str(), sizes));
       },
       [](const autograd::profiler::RecordFunction&) {},
       /* needs_inputs */ true);
@@ -843,8 +840,7 @@ void testRecordFunction() {
   autograd::profiler::popCallback();
 }
 
-class TestThreadLocalDebugInfo
-  : public at::ThreadLocalDebugInfoBase {
+class TestThreadLocalDebugInfo : public at::ThreadLocalDebugInfoBase {
  public:
   int getModelId() const {
     return model_id_;
@@ -861,11 +857,11 @@ class TestThreadLocalDebugInfo
 };
 
 void testThreadLocalDebugInfo() {
-  auto checkDebugInfo = [](){
+  auto checkDebugInfo = []() {
     auto debug_info = at::getThreadLocalDebugInfo();
     TORCH_CHECK(debug_info != nullptr);
-    auto* test_debug_info = dynamic_cast<TestThreadLocalDebugInfo*>(
-        debug_info.get());
+    auto* test_debug_info =
+        dynamic_cast<TestThreadLocalDebugInfo*>(debug_info.get());
     TORCH_CHECK(test_debug_info != nullptr);
     TORCH_CHECK(test_debug_info->getModelId() == 42);
   };
@@ -878,12 +874,13 @@ void testThreadLocalDebugInfo() {
   checkDebugInfo();
 
   // check that thread local debug info is propagated through fork calls
-  std::atomic<bool> done {false};
-  at::launch([checkDebugInfo, &done](){
+  std::atomic<bool> done{false};
+  at::launch([checkDebugInfo, &done]() {
     checkDebugInfo();
     done = true;
   });
-  while (!done) {}
+  while (!done) {
+  }
   checkDebugInfo();
 
   // check that thread local debug info is propagated through backward pass
@@ -1303,15 +1300,15 @@ void testAutogradSymbols() {
   TORCH_CHECK(canRunWithAutograd(node));
 
   sym = Symbol::fromQualString("prim::test_symbol");
-  node =  graph.create(sym);
+  node = graph.create(sym);
   TORCH_CHECK(canRunWithAutograd(node));
 
   sym = Symbol::fromQualString("prim::FusionGroup");
-  node =  graph.create(sym);
+  node = graph.create(sym);
   TORCH_CHECK(!canRunWithAutograd(node));
 
   sym = Symbol::fromQualString("custom::test_symbol");
-  node =  graph.create(sym);
+  node = graph.create(sym);
   TORCH_CHECK(!canRunWithAutograd(node));
 }
 
