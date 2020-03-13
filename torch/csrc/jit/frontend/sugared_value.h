@@ -10,7 +10,6 @@
 
 namespace torch {
 namespace jit {
-namespace script {
 
 using SugaredValuePtr = std::shared_ptr<SugaredValue>;
 
@@ -365,7 +364,7 @@ struct FunctionValue : public SugaredValue {
       try {
         callee->ensure_defined();
       } catch (const RecursiveMethodCallError&) {
-        throw script::ErrorReport(loc)
+        throw ErrorReport(loc)
             << " function '" << callee->name() << "' is called recursively. "
             << "Recursive calls are not supported";
       }
@@ -428,7 +427,7 @@ struct MethodValue : public SugaredValue {
         try {
           method->ensure_defined();
         } catch (const RecursiveMethodCallError&) {
-          throw script::ErrorReport(loc)
+          throw ErrorReport(loc)
               << " method '" << method->name() << "' is called recursively. "
               << "Recursive calls are not supported";
         }
@@ -652,6 +651,5 @@ struct SimpleSelf : public Self {
  private:
   ClassTypePtr classType_;
 };
-} // namespace script
 } // namespace jit
 } // namespace torch

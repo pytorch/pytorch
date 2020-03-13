@@ -53,7 +53,7 @@ TypePtr tryInferTypeWithTypeHint(
     const py::object& type_hint) {
   // If the py::object to be contained by the RRef is a ScripModule, we enforce
   // users to specify its ModuleInterface type.
-  if (auto module = jit::script::as_module(value)) {
+  if (auto module = jit::as_module(value)) {
     TORCH_CHECK(
         !type_hint.is_none(),
         "The RRef being created contains a ScriptModule, "
@@ -128,8 +128,11 @@ py::object PyRRef::toHere() {
     if (rref_->isPyObj()) {
       // python_rpc_handler deserialization will acquires GIL.
       auto rfr_values = value.toTuple()->elements();
-      return PythonRpcHandler::getInstance().deserialize(
+      auto& pythonRpcHandler = PythonRpcHandler::getInstance();
+      auto ret = pythonRpcHandler.deserialize(
           SerializedPyObj::fromIValues(rfr_values));
+      pythonRpcHandler.handleException(ret);
+      return ret;
     } else {
       // acquiring GIL as torch::jit::toPyObject creates new py::object
       // without grabbing the GIL.
