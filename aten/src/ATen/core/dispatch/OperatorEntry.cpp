@@ -13,7 +13,7 @@ namespace {
     }
   }
 
-  std::string listAllDispatchKeys(const ska::flat_hash_map<c10::optional<DispatchKey>, std::list<OperatorEntry::ListEntry>>& kernels) {
+  std::string listAllDispatchKeys(const ska::flat_hash_map<c10::optional<DispatchKey>, std::list<OperatorEntry::KernelSchemaPair>>& kernels) {
     if (kernels.size() == 0) {
       return "";
     }
@@ -78,7 +78,11 @@ void OperatorEntry::deregisterSchema() {
   dispatchTable_.deregisterSchema();
 }
 
-std::list<OperatorEntry::ListEntry>::iterator OperatorEntry::registerKernel(c10::optional<DispatchKey> dispatch_key, KernelFunction kernel, std::unique_ptr<FunctionSchema> inferred_function_schema) {
+std::list<OperatorEntry::KernelSchemaPair>::iterator OperatorEntry::registerKernel(
+  c10::optional<DispatchKey> dispatch_key,
+  KernelFunction kernel,
+  std::unique_ptr<FunctionSchema> inferred_function_schema
+) {
   std::unique_lock<std::mutex> lock(kernelsMutex_);
 
   if (schema_ && inferred_function_schema) {
@@ -89,14 +93,17 @@ std::list<OperatorEntry::ListEntry>::iterator OperatorEntry::registerKernel(c10:
   // possibly creating the list if this is the first kernel.
   auto& k = kernels_[dispatch_key];
   k.emplace_front(std::move(kernel), std::move(inferred_function_schema));
-  std::list<OperatorEntry::ListEntry>::iterator inserted = k.begin();
+  std::list<OperatorEntry::KernelSchemaPair>::iterator inserted = k.begin();
   // update the dispatch table, i.e. re-establish the invariant
   // that the dispatch table points to the newest kernel
   updateDispatchTable_(dispatch_key);
   return inserted;
 }
 
-void OperatorEntry::deregisterKernel_(c10::optional<DispatchKey> dispatch_key, std::list<OperatorEntry::ListEntry>::iterator kernel) {
+void OperatorEntry::deregisterKernel_(
+  c10::optional<DispatchKey> dispatch_key,
+  std::list<OperatorEntry::KernelSchemaPair>::iterator kernel
+) {
   std::unique_lock<std::mutex> lock(kernelsMutex_);
 
   auto found = kernels_.find(dispatch_key);
