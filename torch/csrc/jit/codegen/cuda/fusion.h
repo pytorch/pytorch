@@ -188,7 +188,6 @@ struct TORCH_API Fusion : public IRInputOutput {
 
   // map from valtype to individual name counters
   std::unordered_map<ValType, StmtNameType> val_type_name_map = {
-      {ValType::Tensor, 0},
       {ValType::TensorView, 0},
       {ValType::TensorDomain, 0},
       {ValType::IterDomain, 0},

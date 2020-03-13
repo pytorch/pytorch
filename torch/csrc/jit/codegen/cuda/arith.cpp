@@ -13,10 +13,6 @@ namespace fuser {
 // tensorview it will propagate the shape information from val.
 TORCH_API Val* newValLike(const Val* const val, DataType dtype) {
   switch (val->getValType().value()) {
-    case (ValType::Tensor):
-      TORCH_CHECK(
-          false,
-          "Tensors cannot be intermediate values in this IR, must use TensorViews.");
     case (ValType::TensorView):
       return static_cast<const TensorView* const>(val)->newForOutput(dtype);
     case (ValType::Scalar):

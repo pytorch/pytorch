@@ -53,23 +53,11 @@ Statement* OptOutMutator::mutate(TensorDomain* td) {
   return td;
 }
 
-Statement* OptOutMutator::mutate(Tensor* n) {
-  return n;
-}
-
 Statement* OptOutMutator::mutate(TensorView* tv) {
-   Tensor* t = nullptr;
-   if(tv->tensor() != nullptr)
-      t = static_cast< Tensor*>(mutate(tv->tensor()));
    TensorDomain* td = static_cast< TensorDomain*>( mutate(tv->domain()));
 
-    bool same_tensor = tv->tensor() == nullptr
-                    || t == nullptr 
-                     ? tv->tensor()==nullptr && t == nullptr : tv->tensor()->sameAs(t);
-
-  if(!(  same_tensor
-      && tv->domain()->sameAs(td)))
-      return new TensorView(t, td);
+  if(!( tv->domain()->sameAs(td)))
+      return new TensorView(td, tv->getDataType().value());
  return tv;
 }
 

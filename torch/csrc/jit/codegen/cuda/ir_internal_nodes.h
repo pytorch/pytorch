@@ -173,33 +173,6 @@ struct TORCH_API TensorDomain : public Val {
   
 };
 
-// Currently used as a go-between from JIT to TensorView. It's nothing more than
-// a middle-man and should be removed.
-struct TORCH_API Tensor : public Val {
-  ~Tensor() = default;
-
-  Tensor() = delete;
-
-  Tensor(DataType dt, TensorDomain* _td = nullptr)
-      : Val(ValType::Tensor, dt), domain_(_td) {}
-
-  Tensor(const Tensor& other) = delete;
-  Tensor& operator=(const Tensor& other) = delete;
-
-  Tensor(Tensor&& other) = delete;
-  Tensor& operator=(Tensor&& other) = delete;
-
-  Tensor(const std::shared_ptr<c10::TensorType>& tensor_type);
-
-  Tensor(const std::shared_ptr<Value>& jit_value);
-  
-  TensorDomain* domain() const noexcept { return domain_; }
-
-  private:
-
-  // Implementation details:
-  TensorDomain* domain_;
-};
 /*
  * Representation for a split on IterDomain = axis in a TensorDomain, by factor
  * = factor

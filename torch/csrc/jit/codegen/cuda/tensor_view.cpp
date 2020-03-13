@@ -28,19 +28,6 @@ c10::optional<TensorContiguity> infer_contiguity_from_tensor_type(
 
 } // namespace
 
-Tensor::Tensor(const std::shared_ptr<c10::TensorType>& tensor_type)
-    : Val(ValType::Tensor, aten_opt_type_map(tensor_type->scalarType())) {
-  std::vector<IterDomain*> sizes;
-  TORCH_CHECK(tensor_type->dim().has_value(), "Requires static rank for Tensor");
-  for (int i = 0; i <tensor_type->dim().value(); i++) {
-    sizes.push_back(new IterDomain(new Int()));
-  }
-  domain_ = new TensorDomain(sizes);
-}
-
-Tensor::Tensor(const std::shared_ptr<Value>& jit_value)
-    : Tensor(jit_value->type()->cast<c10::TensorType>()) {}
-
 TensorView* split_(TensorView* tv, int axis, int factor) {
   TensorDomain* td = tv->domain();
 
@@ -205,21 +192,13 @@ TensorView* reorder_(TensorView* tv, std::unordered_map<int, int> axis2pos) {
   return tv;
 }
 
-TensorView::TensorView(Tensor* _tensor, TensorDomain* _domain)
-    : Val(ValType::TensorView, _tensor->getDataType().value()),
-      tensor_(_tensor),
-      domain_(_domain) {
-  if (_domain == nullptr)
-    copyDomain(_tensor->domain());
-}
 
 TensorView::TensorView(TensorDomain* _domain, DataType dtype)
     : Val(ValType::TensorView, dtype),
-      tensor_(new Tensor(dtype, _domain)),
       domain_(_domain) {}
 
 TensorView* TensorView::clone() const {
-  TensorView* new_view = new TensorView(tensor_, domain_);
+  TensorView* new_view = new TensorView(domain_, getDataType().value());
   new_view->compute_at_view_ = compute_at_view_;
   new_view->compute_at_axis_ = compute_at_axis_;
   return new_view;
@@ -260,11 +239,8 @@ void TensorView::copyDomain(const TensorDomain* td) {
 }
 
 bool TensorView::sameAs(const TensorView* const other) const {
-  bool same_tensor = tensor() == nullptr || other->tensor() == nullptr
-      ? tensor() == nullptr && other->tensor() == nullptr
-      : tensor()->sameAs(other->tensor());
   return (
-      same_tensor && domain()->sameAs(other->domain()) &&
+      domain()->sameAs(other->domain()) &&
       getDataType().value() == other->getDataType().value());
 }
 

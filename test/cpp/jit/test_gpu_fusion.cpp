@@ -247,13 +247,12 @@ void testGPU_FusionTensor() {
 
   Fusion fusion;
   FusionGuard fg(&fusion);
-  auto fuser_tensor = new Tensor(tensor_type);
+  TORCH_CHECK(false);
+  /*
+  auto fuser_tensor = new TensorView(tensor_type);
   TORCH_CHECK(fuser_tensor->getDataType().value() == DataType::Float);
   TORCH_CHECK(fuser_tensor->domain() != nullptr);
-
-  auto fuser_null_tensor = new Tensor(DataType::Int);
-  TORCH_CHECK(fuser_null_tensor->getDataType().value() == DataType::Int);
-  TORCH_CHECK(fuser_null_tensor->domain() == nullptr);
+  */
 }
 
 void testGPU_FusionTensorContiguity() {
@@ -673,28 +672,22 @@ void testGPU_FusionTwoAdds() {
 
   // All Tensors have TensorDomain Shapes of [16]
   // T3 is notably the only intermediate that is not I/O
-  const auto T0  = new Tensor(DataType::Float, new TensorDomain({new IterDomain(new Int(16))}));
-  const auto T1  = new Tensor(DataType::Float, new TensorDomain({new IterDomain(new Int(16))}));
-  const auto T2  = new Tensor(DataType::Float, new TensorDomain({new IterDomain(new Int(16))}));
-  const auto T3  = new Tensor(DataType::Float, new TensorDomain({new IterDomain(new Int(16))}));
-  const auto T4  = new Tensor(DataType::Float, new TensorDomain({new IterDomain(new Int(16))}));
 
-  fusion.addInput(T0);
-  fusion.addInput(T1);
-  fusion.addInput(T2);
-  fusion.addOutput(T4);
+  auto TV0 = new TensorView(new TensorDomain({new IterDomain(new Int(16))}), DataType::Float);
+  auto TV1 = new TensorView(new TensorDomain({new IterDomain(new Int(16))}), DataType::Float);
+  auto TV2 = new TensorView(new TensorDomain({new IterDomain(new Int(16))}), DataType::Float);
 
-  auto TV0 = new TensorView(T0);
-  auto TV1 = new TensorView(T1);
-  auto TV2 = new TensorView(T2);
-  auto TV3 = new TensorView(T3);
-  auto TV4 = new TensorView(T4);
+  fusion.addInput(TV0);
+  fusion.addInput(TV1);
+  fusion.addInput(TV2);
   
   /**** Operator Expressions ****/ 
 
-  new BinaryOp(BinaryOpType::Add, TV3, T0, T1);
-  new BinaryOp(BinaryOpType::Add, TV4, TV3, T2);
-
+  TensorView *TV3 = static_cast<TensorView*>(add(TV0, TV1));
+  TensorView *TV4 = static_cast<TensorView*>(add(TV3, TV2));
+  
+  fusion.addOutput(TV4);
+  
   /**** Tensor Expressions   ****/ 
  
   // [x] -> [16/4=4, 4]
@@ -1001,19 +994,18 @@ void testGPU_FusionForLoop() {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
-  const auto T0  = new Tensor(DataType::Float, new TensorDomain({new IterDomain(new Int(16))}));
-  const auto T1  = new Tensor(DataType::Float, new TensorDomain({new IterDomain(new Int(16))}));
-  const auto T2  = new Tensor(DataType::Float, new TensorDomain({new IterDomain(new Int(16))}));
-
-  fusion.addInput(T0);
-  fusion.addInput(T1);
-  fusion.addOutput(T2);
-
+  const auto TV0  = new TensorView(new TensorDomain({new IterDomain(new Int(16))}), DataType::Float);
+  const auto TV1  = new TensorView(new TensorDomain({new IterDomain(new Int(16))}), DataType::Float);
+  
+  fusion.addInput(TV0);
+  fusion.addInput(TV1);
+  
   auto ID0 = new IterDomain(new Int(8));
 
-  auto TV2 = new TensorView(T2);
-  
-  BinaryOp* op = new BinaryOp(BinaryOpType::Add, TV2, T0, T1);
+  TensorView* TV2 = static_cast<TensorView*>(add(TV0, TV1));
+  BinaryOp* op = static_cast<BinaryOp*>(TV2->getOrigin());
+  fusion.addOutput(TV2);
+
   ForLoop*  fl = new ForLoop(new Int(), ID0, {op});
 
   std::cout << fl;

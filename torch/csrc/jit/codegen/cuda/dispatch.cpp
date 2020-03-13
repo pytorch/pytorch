@@ -48,9 +48,6 @@ void Val::dispatch(T handler, Val* val) {
     case ValType::TensorDomain:
       ptr(handler)->handle(static_cast<TensorDomain*>(val));
       return;
-    case ValType::Tensor:
-      ptr(handler)->handle(static_cast<Tensor*>(val));
-      return;
     case ValType::TensorView:
       ptr(handler)->handle(static_cast<TensorView*>(val));
       return;
@@ -118,9 +115,6 @@ void Val::constDispatch(T handler, const Val* const val) {
       return;
     case ValType::TensorDomain:
       ptr(handler)->handle(static_cast<const TensorDomain* const>(val));
-      return;
-    case ValType::Tensor:
-      ptr(handler)->handle(static_cast<const Tensor* const>(val));
       return;
     case ValType::TensorView:
       ptr(handler)->handle(static_cast<const TensorView* const>(val));
@@ -199,8 +193,6 @@ Statement* Val::mutatorDispatch(T mutator, Val* val) {
       return ptr(mutator)->mutate(static_cast<IterDomain*>(val));
     case ValType::TensorDomain:
       return ptr(mutator)->mutate(static_cast<TensorDomain*>(val));
-    case ValType::Tensor:
-      return ptr(mutator)->mutate(static_cast<Tensor*>(val));
     case ValType::TensorView:
       return ptr(mutator)->mutate(static_cast<TensorView*>(val));
     case ValType::Scalar:

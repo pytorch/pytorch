@@ -96,7 +96,6 @@ struct TORCH_API TensorView : public Val {
   TensorView(TensorView&& other) = delete;
   TensorView& operator=(TensorView&& other) = delete;
 
-  TensorView(Tensor* _tensor, TensorDomain* _domain = nullptr);
   TensorView(TensorDomain* _domain, DataType dtype);
 
   // Make a new tensor with the given dtype, and the same domain as this tensor
@@ -108,10 +107,6 @@ struct TORCH_API TensorView : public Val {
 
   // Check if another TensorView is the same as this one.
   bool sameAs(const TensorView* const other) const;
-
-  Tensor* tensor() const noexcept {
-    return tensor_;
-  }
 
   TensorDomain* domain() const noexcept {
     return domain_;
@@ -178,7 +173,6 @@ struct TORCH_API TensorView : public Val {
   }
 
  private:
-  Tensor* const tensor_;
   TensorDomain* domain_;
   TensorView* compute_at_view_ = nullptr;
   int compute_at_axis_ = 0;

@@ -216,7 +216,8 @@ protected:
     if (val->isCompleteTensor()) {
       // TODO: make this a static function in Tensor class;
       // create tensor;
-      cg_val = new TensorView(new Tensor(val->type()->cast<TensorType>()));
+      //cg_val = new TensorView(new Tensor(val->type()->cast<TensorType>()));
+      TORCH_CHECK(false);
       value_maps_.emplace(val->unique(), cg_val);
       return true;
     }

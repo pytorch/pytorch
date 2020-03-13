@@ -20,7 +20,6 @@ struct BinaryOp;
 struct ForLoop;
 struct IfThenElse;
 
-struct Tensor;
 struct TensorDomain;
 struct TensorView;
 struct IterDomain;
@@ -69,7 +68,6 @@ public:
   virtual void handle(const Val* const v) { OptInConstDispatch::handle(v); };
   virtual void handle(const Expr* const e) { OptInConstDispatch::handle(e); };
 
-  virtual void handle(const Tensor* const);
   virtual void handle(const TensorDomain* const);
   virtual void handle(const TensorView* const);
   virtual void handle(const IterDomain* const);

@@ -18,7 +18,6 @@ enum class TORCH_API ValType {
   TensorDomain,
   IterDomain,
   TensorView,
-  Tensor,
   Scalar
 };
 

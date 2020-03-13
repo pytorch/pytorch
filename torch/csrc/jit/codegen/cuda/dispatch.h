@@ -51,7 +51,6 @@ struct Val;
 // Vals
 struct IterDomain;
 struct TensorDomain;
-struct Tensor;
 struct TensorView;
 struct Float;
 struct Int;
@@ -87,7 +86,6 @@ struct TORCH_API OptOutDispatch {
   // Vals
   virtual void handle(IterDomain*) {}
   virtual void handle(TensorDomain*) {}
-  virtual void handle(Tensor*) {}
   virtual void handle(TensorView*) {}
   virtual void handle(Float*) {}
   virtual void handle(Int*) {}
@@ -123,9 +121,6 @@ struct TORCH_API OptInConstDispatch {
   }
   virtual void handle(const TensorDomain* const) {
     AT_ERROR("Handle not overriden for TensorDomain.");
-  }
-  virtual void handle(const Tensor* const) {
-    AT_ERROR("Handle not overriden for Tensor.");
   }
   virtual void handle(const TensorView* const) {
     AT_ERROR("Handle not overriden for TensorView.");
@@ -183,9 +178,6 @@ struct TORCH_API OptInDispatch {
   virtual void handle(TensorDomain*) {
     AT_ERROR("Handle not overriden for TensorDomain.");
   }
-  virtual void handle(Tensor*) {
-    AT_ERROR("Handle not overriden for Tensor.");
-  }
   virtual void handle(TensorView*) {
     AT_ERROR("Handle not overriden for TensorView.");
   }
@@ -241,7 +233,6 @@ struct TORCH_API OptOutMutator {
   // Vals
   virtual Statement* mutate(IterDomain*);
   virtual Statement* mutate(TensorDomain*);
-  virtual Statement* mutate(Tensor*);
   virtual Statement* mutate(TensorView*);
   virtual Statement* mutate(Float*);
   virtual Statement* mutate(Int*);
@@ -277,9 +268,6 @@ struct TORCH_API OptInMutator {
   }
   virtual Statement* mutate(TensorDomain*) {
     AT_ERROR("Mutate not overriden for TensorDomain.");
-  }
-  virtual Statement* mutate(Tensor*) {
-    AT_ERROR("Mutate not overriden for Tensor.");
   }
   virtual Statement* mutate(TensorView*) {
     AT_ERROR("Mutate not overriden for TensorView.");

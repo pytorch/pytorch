@@ -26,19 +26,12 @@ void IRPrinter::handle(const TensorDomain* const td) {
 }
 
 void IRPrinter::handle(const TensorView* const tv) {
-  if (tv->tensor() != nullptr){
-    os << "T" << tv->tensor()->name();
-    handle(tv->domain());
-  }else{
-    os << "TV" << tv->name();
-    handle(tv->domain());
-  }
+  os << "T" << tv->name();
+  handle(tv->domain());
+
   if (tv->getComputeAtView() != nullptr) {
     os << " compute_at( ";
-    if (tv->getComputeAtView()->tensor() == nullptr)
-      os << "TV" << tv->getComputeAtView()->name();
-    else
-      os << "T" << tv->getComputeAtView()->tensor()->name();
+    os << "T" << tv->getComputeAtView()->name();
     os << ", " << tv->getComputeAtAxis() << " )";
   }
 }
@@ -76,13 +69,6 @@ void IRPrinter::handle(const TensorIndex* const ti) {
   os<<" ]";
 }
 
-void IRPrinter::handle(const Tensor* const t) {
-  os << "T" << t->name();
-  if (t->getDataType().has_value())
-    os << " scalar_type: " << *(t->getDataType());
-  if (t->domain() != nullptr)
-    os << " " << t->domain();
-}
 
 void IRPrinter::handle(const TensorContiguity* const t) {
   os << "format_tag: " << t->getContiguityTag();

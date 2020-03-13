@@ -398,12 +398,11 @@ void CodeWrite::setupOverrides() {
         FusionGuard::getCurFusion()->hasInput(val)
       ||FusionGuard::getCurFusion()->hasOutput(val)
       )) continue;
+
       TensorView* tv = static_cast<TensorView*>(val);
       TensorDomain* td = tv->domain();
-      if (tv->tensor() == nullptr)
-        continue;
-
       TensorDomain* root = TransformIter::getRoot(tv->domain());
+
       for (decltype(root->size()) i{0}; i < root->size(); i++) {
         if (overrides_find(root->axis(i)->size()) == overrides.end()) {
           std::stringstream ss;
