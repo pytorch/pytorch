@@ -157,7 +157,7 @@ class TestQuantizedOps(unittest.TestCase):
                 return self.dequant(res)
 
         x = np.random.rand(1, 2, 3, 4).astype("float32")
-        self.generic_test(QUpsampleModule(), (x,), input_names=["x"], decimal=0)
+        self.generic_test(QUpsampleModule(), (x,), input_names=["x"], decimal=5)
 
     def test_avg_pool2d(self):
         class QAvgPool2dModule(torch.nn.Module):
@@ -185,7 +185,7 @@ class TestQuantizedOps(unittest.TestCase):
                 return self.dequant(res)
 
         x = np.random.rand(1, 2, 3, 4).astype("float32")
-        self.generic_test(QReshapeModule(), (x,), input_names=["x"], decimal=0)
+        self.generic_test(QReshapeModule(), (x,), input_names=["x"], decimal=5)
 
     def test_slice(self):
         class QSliceModule(torch.nn.Module):
@@ -200,7 +200,7 @@ class TestQuantizedOps(unittest.TestCase):
                 return self.dequant(res)
 
         x = np.random.rand(1, 2, 3, 4).astype("float32")
-        self.generic_test(QSliceModule(), (x,), input_names=["x"], decimal=0)
+        self.generic_test(QSliceModule(), (x,), input_names=["x"], decimal=5)
 
     def test_cat(self):
         class QConcatModule(torch.nn.Module):
@@ -229,7 +229,7 @@ class TestQuantizedOps(unittest.TestCase):
                 return self.dequant(res)
 
         x = np.random.rand(1, 2, 8, 8).astype("float32")
-        self.generic_test(QMaxPool2dModule(), (x,), input_names=["x"], decimal=0)
+        self.generic_test(QMaxPool2dModule(), (x,), input_names=["x"], decimal=5)
 
     def test_quantized_sigmoid(self):
         self.generic_unary_test(torch.nn.Sigmoid())
