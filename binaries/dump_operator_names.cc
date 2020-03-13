@@ -24,7 +24,7 @@
 
 namespace torch {
 namespace jit {
-void dump_opnames(const script::Module& m, std::unordered_set<std::string>& opnames) {
+void dump_opnames(const Module& m, std::unordered_set<std::string>& opnames) {
   auto methods = m.get_methods();
   for (const auto& method : methods) {
     const auto& func = method.function();
