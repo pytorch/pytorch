@@ -940,7 +940,7 @@ EXCLUDE_SCRIPT = {
 
 # generates a script function and set of example inputs 
 # from a specified test in the format of nn_functional_tests
-def get_nn_functional_compiled_fn_and_inputs(name, self_size, args, variant_name='', kwargs=None):
+def get_nn_functional_compiled_fn_and_inputs(name, self_size, args, variant_name='', *extra_args):
     test_name = 'test_nn_' + name
 
     if variant_name != '':
@@ -949,9 +949,10 @@ def get_nn_functional_compiled_fn_and_inputs(name, self_size, args, variant_name
     no_grad = variant_name == 'inplace'
 
     self_variable = create_input((self_size,))[0][0]
+    kwargs = None
 
     # need to record this because methods can change the size (e.g. unsqueeze)
-    args_variable, kwargs_variable = create_input(args, call_kwargs=kwargs)
+    args_variable, kwargs_variable = create_input(args)
 
     self_tensor = deepcopy(self_variable.data)
     args_tensor = deepcopy(unpack_variables(args_variable))
