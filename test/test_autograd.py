@@ -3235,6 +3235,79 @@ class TestAutograd(TestCase):
         # check one of them is using the computed buffer
         self.assertTrue(p_a == p_g or p_b == p_g)
 
+    def test_no_grad_copy_sparse(self):
+        # create autograd function that saves grad pointer as class static
+        class MyFunc(Function):
+            static_grad_ptr = None
+
+            @staticmethod
+            def forward(ctx, inp1, inp2):
+                return inp1 + inp2
+
+            @staticmethod
+            def backward(ctx, grad):
+                MyFunc.static_grad_ptr = grad._values().data_ptr()
+                return grad, grad
+
+        class NonContGradFunc(Function):
+            static_grad_ptr = None
+
+            @staticmethod
+            def forward(ctx, inp1, inp2):
+                return inp1 + inp2
+
+            @staticmethod
+            def backward(ctx, grad):
+                # Create a sparse tensor with non-contigous indices and values
+                # and return as grad.
+                v = torch.rand(1, 3)
+                i = torch.ones(1, 1, dtype=torch.long)
+                nv = v.expand(8, 3)
+                ni = i.expand(1, 8)
+                ngrad = torch.sparse.FloatTensor(ni, nv, torch.Size([10, 3]))
+                NonContGradFunc.static_grad_ptr = ngrad._values().data_ptr()
+                return ngrad, ngrad
+
+        a = torch.randn(10, 3, requires_grad=True)
+        b = torch.randn(10, 3, requires_grad=True)
+        input = torch.tensor([1, 2, 4, 5, 4, 3, 2, 9])
+        offsets = torch.tensor([0, 4])
+        import torch.nn.functional as F
+
+        # test case that should trigger no copy for one of a,b
+        emb_matrix = MyFunc.apply(a, b)
+        loss = F.embedding_bag(emb_matrix, input, offsets, sparse=True).sum()
+        loss.backward(retain_graph=True)
+        p_g = MyFunc.static_grad_ptr
+        p_a = a.grad._values().data_ptr()
+        p_b = b.grad._values().data_ptr()
+        # check a,b uses different grad buffer
+        self.assertFalse(p_a == p_b)
+        # check one of them is using the computed buffer
+        self.assertTrue(p_a == p_g or p_b == p_g)
+
+        # Run backwards multiple times to ensure accumulation works.
+        for i in range(10):
+            loss.backward(retain_graph=True)
+
+        # non-contiguous indices and value, we should trigger a copy.
+        a.grad = b.grad = None
+        emb_matrix = NonContGradFunc.apply(a, b)
+        loss = F.embedding_bag(emb_matrix, input, offsets, sparse=True).sum()
+        loss.backward(retain_graph=True)
+        p_g = NonContGradFunc.static_grad_ptr
+        p_a = a.grad._values().data_ptr()
+        p_b = b.grad._values().data_ptr()
+        # check a,b uses different grad buffer
+        self.assertFalse(p_a == p_b)
+        # Verify we cloned both grads.
+        self.assertFalse(p_a == p_g)
+        self.assertFalse(p_b == p_g)
+
+        # Run backwards multiple times to ensure accumulation works.
+        for i in range(10):
+            loss.backward(retain_graph=True)
+
     def test_gradcheck_single_input(self):
         def f(inp):
             return inp.mul(5)
@@ -3824,6 +3897,32 @@ for shape in [(1,), ()]:
         with self.assertRaisesRegex(RuntimeError, bad_mark_dirty_err):
             fn(a, b)
 
+    def test_custom_function_return_view_in_nograd(self):
+        class Alias(Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x[:]
+
+            @staticmethod
+            def backward(ctx, gx):
+                return gx
+
+        inp = torch.rand(2, requires_grad=True)
+
+        with torch.no_grad():
+            output = Alias.apply(inp)
+
+        with torch.no_grad():
+            expected_output = inp[:]
+
+        # Calling the custom function should operate as if we called an equivalent op
+        self.assertEqual(output.requires_grad, expected_output.requires_grad)
+
+        # Check that in-place modification on view throws
+        leaf_grad_err = "A view was created in no_grad mode and is being modified inplace"
+        with self.assertRaisesRegex(RuntimeError, leaf_grad_err):
+            output.zero_()
+
     def test_grad_mode_restored_reentrant(self):
         class MyFunction(Function):
             @staticmethod
@@ -3892,6 +3991,28 @@ for shape in [(1,), ()]:
             b = torch.nn.functional.rrelu_(a.clone(), -5.0, 1.0)
             with self.assertRaisesRegex(RuntimeError, "call out-of-place version"):
                 b.backward(torch.ones(2, device=device))
+
+    def test_custom_function_local_inplace(self):
+        class MyFn(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, inp, inplace):
+                view = inp.clone()[:3]
+                if inplace:
+                    view += 2
+                return view
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad, None
+
+        base = torch.rand(10, requires_grad=True)
+
+        foo = MyFn.apply(base, False)
+        self.assertEqual(foo.grad_fn.__class__.__name__, "MyFnBackward")
+
+        foo = MyFn.apply(base, True)
+        self.assertEqual(foo.grad_fn.__class__.__name__, "MyFnBackward")
+
 
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):

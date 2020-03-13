@@ -413,11 +413,11 @@ void FunctionParameter::set_default_str(const std::string& str) {
     }
   } else if (type_ == ParameterType::LAYOUT) {
     if (str == "None") {
-      default_layout = nullptr;
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(allow_none);
     } else if (str == "torch.strided") {
-      default_layout = torch::getLayout(at::Backend::CPU);
+      default_layout = at::Layout::Strided;
     } else if (str == "torch.sparse_coo") {
-      default_layout = torch::getLayout(at::Backend::SparseCPU);
+      default_layout = at::Layout::Sparse;
     } else {
       throw std::runtime_error("invalid default value for layout: " + str);
     }

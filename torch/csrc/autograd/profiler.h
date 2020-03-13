@@ -199,10 +199,10 @@ struct RangeEventList {
   }
 
   std::vector<Event> consolidate() {
-    std::unique_lock<std::mutex> guard(mutex_);
+    std::unique_lock<std::mutex> lock(mutex_);
     std::forward_list<block_type> localBlocks;
     localBlocks.swap(blocks);
-    guard.unlock();
+    lock.unlock();
     std::vector<Event> result;
 
     for (auto & block : localBlocks) {
@@ -233,7 +233,7 @@ struct RangeEventList {
 TORCH_API RangeEventList& getEventList();
 TORCH_API void mark(std::string name, bool include_cuda = true);
 TORCH_API void pushRange(std::string name);
-TORCH_API void popRange(const StringView& name = StringView(""));
+TORCH_API void popRange();
 
 using thread_event_lists = std::vector<std::vector<Event>>;
 // NOTE: changing profiler modes is **NOT THREAD SAFE**. You should ensure that
