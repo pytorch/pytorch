@@ -460,12 +460,14 @@
   dispatch:
     CPU: baddbmm_cpu
     CUDA: baddbmm_cuda
+    MkldnnCPU: mkldnn_baddbmm 
 
 - func: baddbmm_(Tensor(a!) self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
   variants: method
   dispatch:
     CPU: baddbmm__cpu
     CUDA: baddbmm__cuda
+    MkldnnCPU: mkldnn_baddbmm_ 
 
 - func: _baddbmm_mkl_(Tensor(a!) self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
   variants: function
@@ -475,6 +477,7 @@
   dispatch:
     CPU: baddbmm_out_cpu
     CUDA: baddbmm_out_cuda
+    MkldnnCPU: mkldnn_baddbmm_out 
 
 - func: bartlett_window(int window_length, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
@@ -643,6 +646,7 @@
   dispatch:
     CPU: bmm_cpu
     CUDA: bmm_cuda
+    MkldnnCPU: mkldnn_bmm
   supports_named_tensor: True
 
 - func: bmm.out(Tensor self, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
@@ -650,6 +654,7 @@
   dispatch:
     CPU: bmm_out_cpu
     CUDA: bmm_out_cuda
+    MkldnnCPU: mkldnn_bmm_out 
   supports_named_tensor: True
 
 - func: broadcast_tensors(Tensor[] tensors) -> Tensor[]
@@ -1986,6 +1991,7 @@
     CUDA: legacy::cuda::_th_mm
     SparseCPU: _sparse_mm
     SparseCUDA: _sparse_mm
+    MkldnnCPU: mkldnn_mm
   supports_named_tensor: True
 
 - func: mm.out(Tensor self, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
@@ -1994,6 +2000,7 @@
     CUDA: legacy::cuda::_th_mm_out
     SparseCPU: _sparse_mm_out
     SparseCUDA: _sparse_mm_out
+    MkldnnCPU: mkldnn_mm_out
   supports_named_tensor: True
 
 - func: _sparse_mm(Tensor sparse, Tensor dense) -> Tensor
@@ -4335,11 +4342,13 @@
   dispatch:
     CPU: legacy::cpu::_th_addbmm_
     CUDA: legacy::cuda::_th_addbmm_
+    MkldnnCPU: mkldnn_addbmm_ 
 
 - func: addbmm.out(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: legacy::cpu::_th_addbmm_out
     CUDA: legacy::cuda::_th_addbmm_out
+    MkldnnCPU: mkldnn_addbmm_out 
 
 - func: addbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   use_c10_dispatcher: full
@@ -4347,6 +4356,7 @@
   dispatch:
     CPU: legacy::cpu::_th_addbmm
     CUDA: legacy::cuda::_th_addbmm
+    MkldnnCPU: mkldnn_addbmm 
 
 - func: addcdiv_(Tensor(a!) self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor(a!)
   variants: method
