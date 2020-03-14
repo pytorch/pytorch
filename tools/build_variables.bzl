@@ -182,23 +182,6 @@ libtorch_sources = [
     "torch/csrc/jit/codegen/fuser/fallback.cpp",
     "torch/csrc/jit/codegen/fuser/cpu/fused_kernel.cpp",
     "torch/csrc/jit/codegen/fuser/interface.cpp",
-    "torch/csrc/jit/codegen/cuda/arith.cpp",
-    "torch/csrc/jit/codegen/cuda/code_write.cpp",
-    "torch/csrc/jit/codegen/cuda/dispatch.cpp",
-    "torch/csrc/jit/codegen/cuda/fusion.cpp",
-    "torch/csrc/jit/codegen/cuda/index_compute.cpp",
-    "torch/csrc/jit/codegen/cuda/ir_base.cpp",
-    "torch/csrc/jit/codegen/cuda/ir_nodes.cpp",
-    "torch/csrc/jit/codegen/cuda/iriostream.cpp",
-    "torch/csrc/jit/codegen/cuda/iter_visitor.cpp",
-    "torch/csrc/jit/codegen/cuda/mutator.cpp",
-    "torch/csrc/jit/codegen/cuda/predicate_compute.cpp",
-    "torch/csrc/jit/codegen/cuda/tensor.cpp",
-    "torch/csrc/jit/codegen/cuda/tensor_meta.cpp",
-    "torch/csrc/jit/codegen/cuda/transform_iter.cpp",
-    "torch/csrc/jit/codegen/cuda/transform_replay.cpp",
-    "torch/csrc/jit/codegen/cuda/type.cpp",
-    "torch/csrc/jit/codegen/cuda/utils.cpp",
     "torch/csrc/jit/runtime/vararg_functions.cpp",
     "torch/csrc/jit/python/update_graph_executor_opt.cpp",
     "torch/csrc/jit/mobile/function.cpp",
@@ -236,15 +219,6 @@ libtorch_sources = [
 libtorch_cuda_sources = [
     "torch/csrc/cuda/comm.cpp",
     "torch/csrc/cuda/nccl.cpp",
-<<<<<<< HEAD
-<<<<<<< HEAD:tools/build_variables.bzl
-<<<<<<< HEAD:tools/build_variables.bzl
-=======
-    "torch/csrc/jit/codegen/cuda/parser.cpp",
-    "torch/csrc/jit/codegen/cuda/partition.cpp",
-    "torch/csrc/jit/codegen/cuda/kernel.cpp",
-    "torch/csrc/jit/codegen/cuda/manager.cpp",
->>>>>>> update build files
     "torch/csrc/jit/codegen/fuser/cuda/fused_kernel.cpp",
     "torch/csrc/autograd/profiler_cuda.cpp",
     "torch/csrc/autograd/functions/comm.cpp",
@@ -303,34 +277,6 @@ torch_cpp_srcs = [
     "torch/csrc/api/src/optim/sgd.cpp",
     "torch/csrc/api/src/serialize/input-archive.cpp",
     "torch/csrc/api/src/serialize/output-archive.cpp",
-=======
-    "torch/csrc/jit/fuser/cuda/interface.cpp",
-    "torch/csrc/jit/fuser/cuda/parser.cpp",
-    "torch/csrc/jit/fuser/cuda/partition.cpp",
-    "torch/csrc/jit/fuser/cuda/kernel.cpp",
-    "torch/csrc/jit/fuser/cuda/manager.cpp",
-    "torch/csrc/autograd/profiler_cuda.cpp",
-    "torch/csrc/autograd/functions/comm.cpp",
-    "torch/csrc/jit/fuser/cuda/cs_ir/IR.cpp",
-    "torch/csrc/jit/fuser/cuda/cs_ir/IRMutator.cpp",
-    "torch/csrc/jit/fuser/cuda/cs_ir/IRVisitor.cpp",
-    "torch/csrc/jit/fuser/cuda/cs_ir/Printer.cpp",
-    "torch/csrc/jit/fuser/cuda/cs_ir/test.cpp"
->>>>>>> it builds!:tools/build_variables.py
-=======
-    "torch/csrc/jit/codegen/cuda/interface.cpp",
-    "torch/csrc/jit/codegen/cuda/parser.cpp",
-    "torch/csrc/jit/codegen/cuda/partition.cpp",
-    "torch/csrc/jit/codegen/cuda/kernel.cpp",
-    "torch/csrc/jit/codegen/cuda/manager.cpp",
-    "torch/csrc/autograd/profiler_cuda.cpp",
-    "torch/csrc/autograd/functions/comm.cpp",
-    "torch/csrc/jit/codegen/cuda/cs_ir/IR.cpp",
-    "torch/csrc/jit/codegen/cuda/cs_ir/IRMutator.cpp",
-    "torch/csrc/jit/codegen/cuda/cs_ir/IRVisitor.cpp",
-    "torch/csrc/jit/codegen/cuda/cs_ir/Printer.cpp",
-    "torch/csrc/jit/codegen/cuda/cs_ir/test.cpp"
->>>>>>> fix build:tools/build_variables.py
 ]
 
 libtorch_python_cuda_sources = [

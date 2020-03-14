@@ -30,6 +30,7 @@ namespace jit {
   _(IValueFuture)                      \
   _(PassManagement)                    \
   _(Proto)                             \
+  _(RegisterFusionCachesKernel)        \
   _(SchemaParser)                      \
   _(TopologicalIndex)                  \
   _(TopologicalMove)                   \
@@ -89,34 +90,13 @@ namespace jit {
   _(LiteInterpreterParams)             \
   _(LiteInterpreterSetState)
 
-#define TH_FORALL_TESTS_CUDA(_)  \
-  _(ArgumentSpec)                \
-  _(CompleteArgumentSpec)        \
-  _(GraphExecutor)               \
-  _(ModuleConversion)            \
-  _(Interp)                      \
-  _(GPU_FusionDispatch)          \
-  _(GPU_FusionSimpleArith)       \
-  _(GPU_FusionSimpleTypePromote) \
-  _(GPU_FusionMutator)           \
-  _(GPU_FusionTopoSort)          \
-  _(GPU_FusionRegister)          \
-  _(GPU_FusionTensor)            \
-  _(GPU_FusionTensorContiguity)  \
-  _(GPU_FusionTVSplit)           \
-  _(GPU_FusionTVMerge)           \
-  _(GPU_FusionTVReorder)         \
-  _(GPU_FusionCastOp)            \
-  _(GPU_FusionEquality)          \
-  _(GPU_FusionReplaceAll)        \
-  _(GPU_FusionDependency)        \
-  _(GPU_FusionParser)            \
-  _(GPU_FusionCodeGen)           \
-  _(GPU_FusionCodeGen2)          \
-  _(GPU_FusionForLoop)           \
-  _(GPU_FusionSimplePWise)       \
-  _(GPU_FusionExecKernel)        \
-
+#define TH_FORALL_TESTS_CUDA(_) \
+  _(ArgumentSpec)               \
+  _(CompleteArgumentSpec)       \
+  _(Fusion)                     \
+  _(GraphExecutor)              \
+  _(ModuleConversion)           \
+  _(Interp)
 
 #define DECLARE_JIT_TEST(name) void test##name();
 TH_FORALL_TESTS(DECLARE_JIT_TEST)
