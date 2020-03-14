@@ -603,6 +603,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/api/src/nn/module.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/_functions.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/activation.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/adaptive.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/batchnorm.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/normalization.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/instancenorm.cpp
@@ -619,8 +620,8 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/rnn.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/upsampling.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/container/functional.cpp
-      ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/container/named_any.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/activation.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/options/adaptive.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/batchnorm.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/embedding.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/instancenorm.cpp
@@ -742,6 +743,9 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
         ${NVTOOLEXT_HOME}/lib/x64/nvToolsExt64_1.lib
         ${CUDA_LIBRARIES})
       target_include_directories(torch_cuda PUBLIC "${NVTOOLEXT_HOME}/include")
+      # -INCLUDE is used to ensure torch_cuda is linked against in a project that relies on it.
+      # Related issue: https://github.com/pytorch/pytorch/issues/31611
+      target_link_libraries(torch_cuda INTERFACE "-INCLUDE:\"?warp_size@cuda@at@@YAHXZ\"")
 
     elseif(APPLE)
       set(TORCH_CUDA_LIBRARIES
