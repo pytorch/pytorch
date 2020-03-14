@@ -3,7 +3,6 @@
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/runtime/operator_options.h>
-#include <torch/csrc/jit/passes/pass_manager.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
@@ -192,12 +191,5 @@ void fuseTensorExprs(std::shared_ptr<Graph>& graph) {
   GRAPH_DUMP("After TExprFuser: ", graph);
 }
 
-void registerTensorExprFuser() {
-  static bool already_registered = false;
-  if (!already_registered) {
-    RegisterPass pass(fuseTensorExprs);
-    already_registered = true;
-  }
-}
 } // namespace jit
 } // namespace torch
