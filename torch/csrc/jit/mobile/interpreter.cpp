@@ -1,6 +1,8 @@
 #include "interpreter.h"
-#include <torch/csrc/jit/mobile/function.h>
+#include <ATen/core/function.h>
+#include <ATen/core/jit_type.h>
 #include <ATen/core/operator_name.h>
+#include <torch/csrc/jit/mobile/function.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 
 #if defined(PYTORCH_MOBILE_OPERATOR_OBSERVER)
@@ -52,6 +54,15 @@ bool InterpreterState::run(Stack& stack) {
       case OPN: {
         stack.push_back(inst.N);
         code_->operators_[inst.X](stack);
+        ++pc;
+      } break;
+      case INTERFACE_CALL: {
+        torch::jit::Function* method =
+            peek(stack, 0, inst.N)
+                .toObject()
+                ->type()
+                ->getMethod(code_->constants_[inst.X].toStringRef());
+        method->run(stack);
         ++pc;
       } break;
       case LOAD:
