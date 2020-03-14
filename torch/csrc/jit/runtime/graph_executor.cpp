@@ -54,7 +54,7 @@ namespace jit {
 
 namespace {
 c10::AliasAnalysisKind aliasAnalysisInternalSpecialCase() {
-  return AliasAnalysisKind::INTERNAL_SPECIAL_CASE;  
+  return AliasAnalysisKind::INTERNAL_SPECIAL_CASE;
 }
 } // namespace
 
