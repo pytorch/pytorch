@@ -60,6 +60,16 @@ class ProfilingMode(Enum):
     PROFILING = 3
 
 @contextmanager
+def disable_legacy_fuser():
+    old_cpu_fuse = torch._C._jit_override_can_fuse_on_cpu(False)
+    old_gpu_fuse = torch._C._jit_override_can_fuse_on_gpu(False)
+    try:
+        yield
+    finally:
+        torch._C._jit_override_can_fuse_on_cpu(old_cpu_fuse)
+        torch._C._jit_override_can_fuse_on_gpu(old_gpu_fuse)
+
+@contextmanager
 def enable_profiling_mode():
     if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
         old_prof_exec_state = torch._C._jit_set_profiling_executor(True)
