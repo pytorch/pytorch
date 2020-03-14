@@ -78,6 +78,9 @@ struct TORCH_API LocalResponseNormOptions {
 namespace functional {
 /// Options for `torch::nn::functional::local_response_norm`.
 ///
+/// See the documentation for `torch::nn::LocalResponseNormOptions` class to learn what
+/// arguments are supported.
+///
 /// Example:
 /// ```
 /// namespace F = torch::nn::functional;
