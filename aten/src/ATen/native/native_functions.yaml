@@ -6325,6 +6325,7 @@
   dispatch:
     CPU: upsample_nearest3d_cpu
     CUDA: upsample_nearest3d_cuda
+    QuantizedCPU: quantized_upsample_nearest3d_cpu
 
 - func: upsample_nearest3d_backward.grad_input(Tensor grad_output, int[3] output_size, int[5] input_size, float? scales_d=None, float? scales_h=None, float? scales_w=None, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn

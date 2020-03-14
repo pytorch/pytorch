@@ -623,11 +623,14 @@ class RpcTest(RpcAgentTestFixture):
         )
         self.assertEqual(ret, my_function(n, n + 1, n + 2))
 
-    def _profiler_test_with_rpc(self, rpc_exec_mode, func, args):
+    def _profiler_test_with_rpc(self, rpc_exec_mode, func, args, use_record_function=False):
         dst = (self.rank + 1) % self.world_size
         # only run profiler on rank 1.
         if self.rank == 1:
             with torch.autograd.profiler.profile() as prof:
+                if use_record_function:
+                    record_function = torch.autograd.profiler.record_function("foo")
+                    record_function.__enter__()
                 if rpc_exec_mode == RPCExecMode.SYNC:
                     rpc.rpc_sync(worker_name(dst), func, args=args)
                 elif rpc_exec_mode == RPCExecMode.ASYNC:
@@ -645,11 +648,19 @@ class RpcTest(RpcAgentTestFixture):
                     # any pending users, which indicates that the confirmation
                     # was processed on this worker.
                     wait_until_pending_users_flushed()
+                if use_record_function:
+                    record_function.__exit__()
 
             events = prof.function_events
             rpc_event = [
                 event for event in events if rpc_exec_mode.value in event.name
             ][0]
+            if use_record_function:
+                scope_event = [event for event in events if "foo" in event.name][0]
+                # Since RPC call is within the scope, its CPU interval should be
+                # contained within foo's interval.
+                self.assertTrue(scope_event.cpu_interval.start < rpc_event.cpu_interval.start)
+                self.assertTrue(scope_event.cpu_interval.end > rpc_event.cpu_interval.end)
             # the sender, dest worker, function run, and type of RPC should all
             # be recorded.
             self_worker_name = worker_name(self.rank)
@@ -659,35 +670,59 @@ class RpcTest(RpcAgentTestFixture):
             self.assertTrue(func.__name__ in rpc_event.name)
             self.assertTrue(rpc_exec_mode.value in rpc_event.name)
             self.assertEqual(rpc_event.count, 1)
+            if use_record_function:
+                # verify order by ensuring that the outer context comes
+                # before the rpc event.
+                foo_event_ix = next(i for i, event in enumerate(events) if "foo" in event.name)
+                rpc_event_idx = next(i for i, event in enumerate(events) if rpc_exec_mode.value in event.name)
+                self.assertLess(foo_event_ix, rpc_event_idx)
 
     @dist_init
     def test_profiler_with_sync_rpc_udf(self):
         self._profiler_test_with_rpc(RPCExecMode.SYNC, my_sleep_func, args=(1,))
+        self._profiler_test_with_rpc(RPCExecMode.SYNC, my_sleep_func, args=(1,),
+                                     use_record_function=True)
 
     @dist_init
     def test_profiler_with_sync_rpc_builtin(self):
         self._profiler_test_with_rpc(
             RPCExecMode.SYNC, torch.add, args=(torch.ones(1), torch.ones(1))
         )
+        self._profiler_test_with_rpc(
+            RPCExecMode.SYNC, torch.add, args=(torch.ones(1), torch.ones(1)),
+            use_record_function=True
+        )
 
     @dist_init
     def test_profiler_with_async_rpc_udf(self):
         self._profiler_test_with_rpc(RPCExecMode.ASYNC, my_sleep_func, args=(1,))
+        self._profiler_test_with_rpc(RPCExecMode.ASYNC, my_sleep_func, args=(1,),
+                                     use_record_function=True)
 
     @dist_init
     def test_profiler_with_async_rpc_builtin(self):
         self._profiler_test_with_rpc(
             RPCExecMode.ASYNC, torch.add, args=(torch.ones(1), torch.ones(1))
         )
+        self._profiler_test_with_rpc(
+            RPCExecMode.ASYNC, torch.add, args=(torch.ones(1), torch.ones(1)),
+            use_record_function=True
+        )
 
     @dist_init
     def test_profiler_with_remote_udf(self):
         self._profiler_test_with_rpc(RPCExecMode.REMOTE, my_sleep_func, args=(1,))
+        self._profiler_test_with_rpc(RPCExecMode.REMOTE, my_sleep_func, args=(1,),
+                                     use_record_function=True)
 
     @dist_init
     def test_profiler_with_remote_builtin(self):
         self._profiler_test_with_rpc(
             RPCExecMode.REMOTE, torch.add, args=(torch.ones(1), torch.ones(1))
+        )
+        self._profiler_test_with_rpc(
+            RPCExecMode.REMOTE, torch.add, args=(torch.ones(1), torch.ones(1)),
+            use_record_function=True
         )
 
     @dist_init
@@ -1679,3 +1714,33 @@ class RpcTest(RpcAgentTestFixture):
             torch.add,
             args=(torch.ones(n, n), 2)
         )
+
+    @dist_init(setup_rpc=False)
+    def test_use_rref_after_shutdown(self):
+        rpc.init_rpc(
+            name="worker%d" % self.rank,
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=self.rpc_backend_options,
+        )
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        rref = rpc.remote(
+            worker_name(dst_rank),
+            torch.add,
+            args=(torch.ones(n, n), torch.ones(n, n)),
+        )
+        # pass in graceful=True to ensure that local UserRRefs are deleted.
+        rpc.shutdown(graceful=True)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "Cannot call to_here\\(\\) on it after deletion."
+        ):
+            rref.to_here()
+
+        with self.assertRaisesRegex(
+            RuntimeError, "Cannot call fork an UserRRef after deletion."
+        ):
+            import torch.distributed.rpc.internal as internal
+            internal.serialize(rref)
