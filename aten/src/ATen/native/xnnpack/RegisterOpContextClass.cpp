@@ -75,19 +75,27 @@ static auto registry =
   // We can refactor the code and use a better namespace.
     torch::RegisterOperators()
         .op("_xnnpack::linear_prepack(Tensor W, Tensor? B=None) -> __torch__.torch.classes.XNNPackLinearOpContext",
-            torch::RegisterOperators::options().kernel<internal::linear::LinearPrePack>(
+            torch::RegisterOperators::options()
+            .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
+            .kernel<internal::linear::LinearPrePack>(
                 DispatchKey::CPUTensorId))
         .op("_xnnpack::linear_packed(Tensor X, __torch__.torch.classes.XNNPackLinearOpContext W_prepack) -> Tensor Y",
-            torch::RegisterOperators::options().kernel<internal::linear::LinearPacked>(
+            torch::RegisterOperators::options()
+            .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
+            .kernel<internal::linear::LinearPacked>(
                 DispatchKey::CPUTensorId))
         .op("_xnnpack::conv2d_prepack(Tensor W, Tensor? B, int[2] stride, "
             "int[2] padding, int[2] dilation, int groups) "
             "-> __torch__.torch.classes.XNNPackConv2dOpContext",
-            torch::RegisterOperators::options().kernel<internal::convolution2d::Conv2dPrePack>(
+            torch::RegisterOperators::options()
+            .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
+            .kernel<internal::convolution2d::Conv2dPrePack>(
                 DispatchKey::CPUTensorId))
         .op("_xnnpack::conv2d_packed(Tensor X, "
             "__torch__.torch.classes.XNNPackConv2dOpContext W_prepack) -> Tensor Y",
-            torch::RegisterOperators::options().kernel<internal::convolution2d::Conv2dPacked>(
+            torch::RegisterOperators::options()
+            .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
+            .kernel<internal::convolution2d::Conv2dPacked>(
                 DispatchKey::CPUTensorId));
 } // namespace
 

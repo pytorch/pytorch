@@ -366,11 +366,15 @@ class TestXNNPACKSerDes(TestCase):
                      " Please build with USE_XNNPACK=1.")
 class TestXNNPACKRewritePass(TestCase):
     def test_linear(self):
-        def validate_transformed_module(module_name, pattern_count_map, data_shape):
+        def validate_transformed_module(module_name, pattern_count_map, data_shape, prepack_removal=False):
             scripted_model = torch.jit.script(module_name())
+            scripted_model.eval()
             input_data = torch.rand(data_shape)
             ref_result = scripted_model(input_data)
             torch._C._jit_pass_insert_xnnpack_ops(scripted_model._c)
+            if (prepack_removal):
+                scripted_model._c = torch._C._freeze_module(scripted_model._c)
+                torch._C._jit_pass_fold_xnnpack_prepack_ops(scripted_model._c)
 
             buffer = io.BytesIO()
             torch.jit.save(scripted_model, buffer)
@@ -490,6 +494,9 @@ class TestXNNPACKRewritePass(TestCase):
                              "_xnnpack::linear_prepack": 1,
                              "_xnnpack::linear_packed": 1}
         validate_transformed_module(M, pattern_count_map, data_shape)
+        pattern_count_map["_xnnpack::conv2d_prepack"] = -1
+        pattern_count_map["_xnnpack::linear_prepack"] = -1
+        validate_transformed_module(M, pattern_count_map, data_shape, True)
 
 
 if __name__ == "__main__":
