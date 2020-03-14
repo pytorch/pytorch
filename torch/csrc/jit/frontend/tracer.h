@@ -21,10 +21,7 @@ namespace jit {
 struct Node;
 struct Value;
 struct Graph;
-
-namespace script {
-  struct Module;
-}
+struct Module;
 
 namespace tracer {
 
@@ -210,7 +207,7 @@ TORCH_API std::pair<std::shared_ptr<TracingState>, Stack> trace(
     const std::function<Stack(Stack)>& traced_fn,
     std::function<std::string(const Variable&)> var_name_lookup_fn,
     bool force_outplace = false,
-    script::Module* self = nullptr);
+    Module* self = nullptr);
 
 TORCH_API void abandon();
 
@@ -271,15 +268,6 @@ TORCH_API void addInputs(
     const char* name,
     const c10::optional<at::MemoryFormat>& value);
 TORCH_API void addInputs(Node* n, const char* name, at::Generator* value);
-
-template <typename T>
-TORCH_API void addInputs(Node* n, const char* name, ArrayRef<T> value);
-
-template <typename K, typename V>
-TORCH_API void addInputs(
-    Node* n,
-    const char* name,
-    const std::unordered_map<K, V>& value);
 
 inline void addInputs(
     Node* n,

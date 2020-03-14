@@ -221,6 +221,9 @@ namespace c10 {
   _(onnx, SequenceInsert)            \
   _(onnx, ConcatFromSequence)        \
   _(onnx, Identity)                  \
+  _(onnx, SoftmaxCrossEntropyLoss)   \
+  _(onnx, NegativeLogLikelihoodLoss) \
+  _(onnx, LogSoftmax)                \
   FORALL_ATTR_BASE_SYMBOLS(_)        \
   _(attr, Subgraph)                  \
   _(attr, ReverseSubgraph)           \

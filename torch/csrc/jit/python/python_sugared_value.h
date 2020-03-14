@@ -11,7 +11,6 @@
 
 namespace torch {
 namespace jit {
-namespace script {
 
 std::string typeString(py::handle h);
 
@@ -267,6 +266,5 @@ struct VISIBILITY_HIDDEN PythonClassValue : public ClassValue {
   py::object py_type_;
 };
 
-} // namespace script
 } // namespace jit
 } // namespace torch

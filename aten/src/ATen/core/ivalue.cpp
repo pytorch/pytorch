@@ -378,7 +378,7 @@ std::vector<std::pair<IValue, IValue>> iterationOrder(const c10::Dict<IValue, IV
 }
 
 StrongTypePtr::StrongTypePtr(
-    std::shared_ptr<torch::jit::script::CompilationUnit> cu,
+    std::shared_ptr<torch::jit::CompilationUnit> cu,
     std::shared_ptr<Type> type) {
   cu_ = std::move(cu);
   type_ = type;
