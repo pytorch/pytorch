@@ -431,6 +431,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/passes/utils/subgraph_utils.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/utils/check_alias_annotation.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/utils/memory_dag.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/prepack_folding.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/quantization.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/xnnpack_rewrite.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/fuse_linear.cpp

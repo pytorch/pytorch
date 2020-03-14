@@ -137,6 +137,7 @@ libtorch_sources = [
     "torch/csrc/jit/passes/peephole.cpp",
     "torch/csrc/jit/serialization/python_print.cpp",
     "torch/csrc/jit/passes/quantization.cpp",
+    "torch/csrc/jit/passes/prepack_folding.cpp",
     "torch/csrc/jit/passes/xnnpack_rewrite.cpp",
     "torch/csrc/jit/passes/fuse_linear.cpp",
     "torch/csrc/jit/passes/freeze_module.cpp",
