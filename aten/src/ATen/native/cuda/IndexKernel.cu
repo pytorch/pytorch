@@ -11,7 +11,6 @@ namespace at { namespace native {
 
 static constexpr int launch_bound2 = 4;
 
-static constexpr int launch_size_1d = 512;
 static constexpr int launch_size_nd = 128;
 
 template<int nt, int vt, typename func_t>

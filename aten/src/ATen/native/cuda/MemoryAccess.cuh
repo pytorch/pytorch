@@ -85,14 +85,17 @@ struct LoadWithoutCast {
 
 template <int N>
 struct LoadWithCast {
-  using array_t = at::detail::Array<at::ScalarType, N>;
-  using size_array_t = at::detail::Array<uint32_t, N>;
+  using array_t = at::detail::Array<at::ScalarType, std::max<int>(N, 1)>;
+  using size_array_t = at::detail::Array<uint32_t, std::max<int>(N, 1)>;
 
   array_t dtypes;
   size_array_t element_sizes;
 
-  LoadWithCast(array_t dtypes): dtypes(dtypes) {
+  template<typename array_t_>
+  LoadWithCast(array_t_ dtypes) {
+    #pragma unroll
     for (int i = 0; i < N; i++) {
+      this->dtypes[i] = dtypes[i];
       element_sizes[i] = c10::elementSize(dtypes[i]);
     }
   }
