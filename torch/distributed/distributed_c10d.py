@@ -78,6 +78,7 @@ class Backend(object):
             raise ValueError("Invalid backend: '{}'".format(name))
         return value
 
+
 # `_backend`, `dist_backend`, and `reduce_op` are here to maintain backward
 # compatibility with pre-c10d distributed package.
 # TODO: remove them when users are ready to take a hard dependency on PyTorch 1.
@@ -103,6 +104,7 @@ class reduce_op(object):
         warnings.warn("torch.distributed.reduce_op is deprecated, please use "
                       "torch.distributed.ReduceOp instead")
         return object.__getattribute__(self, key)
+
 
 reduce_op = reduce_op()
 
@@ -1158,6 +1160,7 @@ def all_gather(tensor_list,
         return work
     else:
         work.wait()
+
 
 def all_gather_coalesced(output_tensor_lists,
                          input_tensor_list,
