@@ -11,8 +11,9 @@ from .modules import utils
 from .modules.utils import _single, _pair, _triple, _list_with_default
 from . import grad  # noqa: F401
 from torch import _VF
-from .._jit_internal import boolean_dispatch, List
+from .._jit_internal import boolean_dispatch, List, Optional, _overload
 from .._overrides import has_torch_function, handle_torch_function
+
 
 Tensor = torch.Tensor
 
@@ -2707,8 +2708,18 @@ Examples::
     torch.Size([1, 1, 12, 12])
 """)
 
+@_overload  # noqa: F811
+def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=None):  # noqa: F811
+    # type: (Tensor, Optional[int], Optional[float], str, Optional[bool]) -> Tensor
+    pass
 
-def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=None):
+@_overload  # noqa: F811
+def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=None):  # noqa: F811
+    # type: (Tensor, Optional[List[int]], Optional[float], str, Optional[bool]) -> Tensor
+    pass
+
+
+def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=None):  # noqa: F811
     r"""Upsamples the input to either the given :attr:`size` or the given
     :attr:`scale_factor`
 
@@ -2767,8 +2778,96 @@ def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=
     warnings.warn("nn.functional.upsample is deprecated. Use nn.functional.interpolate instead.")
     return interpolate(input, size, scale_factor, mode, align_corners)
 
+@_overload  # noqa: F811
+def _interp_output_size(dim, closed_over_args):  # noqa: F811
+    # type: (int, Tuple[Tensor, Optional[int], Optional[List[float]], Optional[bool]]) -> List[int]
+    pass
 
-def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corners=None, recompute_scale_factor=None):
+@_overload  # noqa: F811
+def _interp_output_size(dim, closed_over_args):  # noqa: F811
+    # type: (int, Tuple[Tensor, Optional[List[int]], Optional[List[float]], Optional[bool]]) -> List[int]
+    pass
+
+@_overload  # noqa: F811
+def _interp_output_size(dim, closed_over_args):  # noqa: F811
+    # type: (int, Tuple[Tensor, Optional[int], Optional[float], Optional[bool]]) -> List[int]
+    pass
+
+@_overload  # noqa: F811
+def _interp_output_size(dim, closed_over_args):  # noqa: F811
+    # type: (int, Tuple[Tensor, Optional[List[int]], Optional[float], Optional[bool]]) -> List[int]
+    pass
+
+def _interp_output_size(dim, closed_over_args):  # noqa: F811
+    input, size, scale_factor, recompute_scale_factor = closed_over_args
+    if size is None and scale_factor is None:
+        raise ValueError('either size or scale_factor should be defined')
+    if size is not None and scale_factor is not None:
+        raise ValueError('only one of size or scale_factor should be defined')   
+    if scale_factor is not None:
+        if isinstance(scale_factor, (list, tuple)):
+            if len(scale_factor) != dim:
+                raise ValueError('scale_factor shape must match input shape. '
+                                 'Input is {}D, scale_factor size is {}'.format(dim, len(scale_factor)))
+
+    if size is not None:
+        if isinstance(size, (list, tuple)):
+            return size
+        else:
+            return [size for i in range(dim)]
+
+    assert scale_factor is not None
+    if isinstance(scale_factor, (list, tuple)):
+        scale_factors = scale_factor
+    else:
+        scale_factors = [scale_factor for _ in range(dim)]
+
+    if recompute_scale_factor is None:
+        # only warn when the scales have floating values since
+        # the result for ints is the same with/without recompute_scale_factor
+
+        is_float_scale_factor = False
+        for scale in scale_factors:
+            is_float_scale_factor = math.floor(scale) == scale
+            if is_float_scale_factor:
+                break
+
+        if is_float_scale_factor:
+            warnings.warn("The default behavior for interpolate/upsample with float scale_factor will change "
+                          "in 1.6.0 to align with other frameworks/libraries, and use scale_factor directly, "
+                          "instead of relying on the computed output size. "
+                          "If you wish to keep the old behavior, please set recompute_scale_factor=True. "
+                          "See the documentation of nn.Upsample for details. ")
+
+    if not torch.jit.is_scripting():
+        # make scale_factor a tensor in tracing so constant doesn't get baked in
+        if torch._C._get_tracing_state():
+            return [(torch.floor((input.size(i + 2).float() * torch.tensor(scale_factors[i],
+                    dtype=torch.float32)).float())) for i in range(dim)]
+    return [int(math.floor(float(input.size(i + 2)) * scale_factors[i])) for i in range(dim)]
+
+@_overload  # noqa: F811
+def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corners=None, recompute_scale_factor=None):  # noqa: F811
+    # type: (Tensor, Optional[int], Optional[List[float]], str, Optional[bool], Optional[bool]) -> Tensor
+    pass
+
+@_overload  # noqa: F811
+def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corners=None, recompute_scale_factor=None):  # noqa: F811
+    # type: (Tensor, Optional[List[int]], Optional[List[float]], str, Optional[bool], Optional[bool]) -> Tensor
+    pass
+
+@_overload  # noqa: F811
+def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corners=None, recompute_scale_factor=None):  # noqa: F811
+    # type: (Tensor, Optional[int], Optional[float], str, Optional[bool], Optional[bool]) -> Tensor
+    pass
+
+@_overload  # noqa: F811
+def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corners=None, recompute_scale_factor=None):  # noqa: F811
+    # type: (Tensor, Optional[List[int]], Optional[float], str, Optional[bool], Optional[bool]) -> Tensor
+    pass
+
+def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corners=None, recompute_scale_factor=None):  # noqa: F811
+    # type: (Tensor, Optional[int], Optional[List[float]], str, Optional[bool], Optional[bool]) -> Tensor
     r"""Down/up samples the input to either the given :attr:`size` or the given
     :attr:`scale_factor`
 
@@ -2843,48 +2942,6 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
                 interpolate, (input,), input, size=size, scale_factor=scale_factor,
                 mode=mode, align_corners=align_corners,
                 recompute_scale_factor=recompute_scale_factor)
-    from .modules.utils import _ntuple
-
-    def _check_size_scale_factor(dim):
-        if size is None and scale_factor is None:
-            raise ValueError('either size or scale_factor should be defined')
-        if size is not None and scale_factor is not None:
-            raise ValueError('only one of size or scale_factor should be defined')
-        if scale_factor is not None and isinstance(scale_factor, tuple)\
-                and len(scale_factor) != dim:
-            raise ValueError('scale_factor shape must match input shape. '
-                             'Input is {}D, scale_factor size is {}'.format(dim, len(scale_factor)))
-        if scale_factor is not None and recompute_scale_factor is None:
-            # only warn when the scales have floating values since
-            # the result for ints is the same with/without recompute_scale_factor
-            is_float_scale_factor = any(not float(scale).is_integer() for scale in _ntuple(dim)(scale_factor))
-            if is_float_scale_factor:
-                warnings.warn("The default behavior for interpolate/upsample with float scale_factor will change "
-                              "in 1.6.0 to align with other frameworks/libraries, and use scale_factor directly, "
-                              "instead of relying on the computed output size. "
-                              "If you wish to keep the old behavior, please set recompute_scale_factor=True. "
-                              "See the documentation of nn.Upsample for details. ")
-
-    def _output_size(dim):
-        _check_size_scale_factor(dim)
-        if size is not None:
-            return size
-        scale_factors = _ntuple(dim)(scale_factor)
-        # math.floor might return float in py2.7
-
-        # make scale_factor a tensor in tracing so constant doesn't get baked in
-        if torch._C._get_tracing_state():
-            return [(torch.floor((input.size(i + 2).float() * torch.tensor(scale_factors[i],
-                     dtype=torch.float32)).float())) for i in range(dim)]
-        else:
-            return [int(math.floor(float(input.size(i + 2)) * scale_factors[i])) for i in range(dim)]
-
-    def _scale_factors(dim):
-        scale_factor_len = dim - 2
-        scale_factor_list = _ntuple(scale_factor_len)(None)
-        if scale_factor is not None and recompute_scale_factor is False:
-            scale_factor_list = _ntuple(scale_factor_len)(scale_factor)
-        return scale_factor_list
 
     if mode in ('nearest', 'area'):
         if align_corners is not None:
@@ -2898,23 +2955,34 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
                           "See the documentation of nn.Upsample for details.".format(mode))
             align_corners = False
 
-    scale_factor_list = _scale_factors(input.dim())
+    scale_factor_len = input.dim() - 2
+    scale_factor_list = torch.jit.annotate(List[Optional[float]], [None for _ in range(scale_factor_len)])
+    if scale_factor is not None and recompute_scale_factor is False:
+        if isinstance(scale_factor, list):
+            _scale_factor_repeated = scale_factor
+        else:
+            _scale_factor_repeated = [scale_factor for _ in range(scale_factor_len)]  # noqa: C416
+        scale_factor_list = torch.jit.annotate(List[Optional[float]], [elem for elem in _scale_factor_repeated])  # noqa: C416
 
+    # TODO: rewrite _interp_output_size as inner function when TS supports closures
+    closed_over_args = (input, size, scale_factor, recompute_scale_factor)
     if input.dim() == 3 and mode == 'nearest':
-        return torch._C._nn.upsample_nearest1d(input, _output_size(1), scale_factor_list[0])
+        return torch._C._nn.upsample_nearest1d(input, _interp_output_size(1, closed_over_args), scale_factor_list[0])
     elif input.dim() == 4 and mode == 'nearest':
-        return torch._C._nn.upsample_nearest2d(input, _output_size(2), scale_factor_list[0], scale_factor_list[1])
+        return torch._C._nn.upsample_nearest2d(input, _interp_output_size(2, closed_over_args), 
+                                               scale_factor_list[0], scale_factor_list[1])
     elif input.dim() == 5 and mode == 'nearest':
-        return torch._C._nn.upsample_nearest3d(input, _output_size(3),
+        return torch._C._nn.upsample_nearest3d(input, _interp_output_size(3, closed_over_args),
                                                scale_factor_list[0], scale_factor_list[1], scale_factor_list[2])
     elif input.dim() == 3 and mode == 'area':
-        return adaptive_avg_pool1d(input, _output_size(1))
+        return adaptive_avg_pool1d(input, _interp_output_size(1, closed_over_args))
     elif input.dim() == 4 and mode == 'area':
-        return adaptive_avg_pool2d(input, _output_size(2))
+        return adaptive_avg_pool2d(input, _interp_output_size(2, closed_over_args))
     elif input.dim() == 5 and mode == 'area':
-        return adaptive_avg_pool3d(input, _output_size(3))
+        return adaptive_avg_pool3d(input, _interp_output_size(3, closed_over_args))
     elif input.dim() == 3 and mode == 'linear':
-        return torch._C._nn.upsample_linear1d(input, _output_size(1), align_corners, scale_factor_list[0])
+        assert align_corners is not None
+        return torch._C._nn.upsample_linear1d(input, _interp_output_size(1, closed_over_args), align_corners, scale_factor_list[0])
     elif input.dim() == 3 and mode == 'bilinear':
         raise NotImplementedError("Got 3D input, but bilinear mode needs 4D input")
     elif input.dim() == 3 and mode == 'trilinear':
@@ -2922,7 +2990,9 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
     elif input.dim() == 4 and mode == 'linear':
         raise NotImplementedError("Got 4D input, but linear mode needs 3D input")
     elif input.dim() == 4 and mode == 'bilinear':
-        return torch._C._nn.upsample_bilinear2d(input, _output_size(2), align_corners, scale_factor_list[0], scale_factor_list[1])
+        assert align_corners is not None
+        return torch._C._nn.upsample_bilinear2d(input, _interp_output_size(2, closed_over_args), align_corners, 
+                                                scale_factor_list[0], scale_factor_list[1])
     elif input.dim() == 4 and mode == 'trilinear':
         raise NotImplementedError("Got 4D input, but trilinear mode needs 5D input")
     elif input.dim() == 5 and mode == 'linear':
@@ -2930,17 +3000,29 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
     elif input.dim() == 5 and mode == 'bilinear':
         raise NotImplementedError("Got 5D input, but bilinear mode needs 4D input")
     elif input.dim() == 5 and mode == 'trilinear':
-        return torch._C._nn.upsample_trilinear3d(input, _output_size(3), align_corners,
+        assert align_corners is not None
+        return torch._C._nn.upsample_trilinear3d(input, _interp_output_size(3, closed_over_args), align_corners,
                                                  scale_factor_list[0], scale_factor_list[1], scale_factor_list[2])
     elif input.dim() == 4 and mode == 'bicubic':
-        return torch._C._nn.upsample_bicubic2d(input, _output_size(2), align_corners, scale_factor_list[0], scale_factor_list[1])
+        assert align_corners is not None
+        return torch._C._nn.upsample_bicubic2d(input, _interp_output_size(2, closed_over_args), align_corners, 
+                                               scale_factor_list[0], scale_factor_list[1])
     else:
         raise NotImplementedError("Input Error: Only 3D, 4D and 5D input Tensors supported"
                                   " (got {}D) for the modes: nearest | linear | bilinear | bicubic | trilinear"
                                   " (got {})".format(input.dim(), mode))
 
+@_overload  # noqa: F811
+def upsample_nearest(input, size=None, scale_factor=None):  # noqa: F811
+    # type: (Tensor, Optional[int], Optional[float]) -> Tensor
+    pass
 
-def upsample_nearest(input, size=None, scale_factor=None):
+@_overload  # noqa: F811
+def upsample_nearest(input, size=None, scale_factor=None):  # noqa: F811
+    # type: (Tensor, Optional[List[int]], Optional[float]) -> Tensor
+    pass
+
+def upsample_nearest(input, size=None, scale_factor=None):  # noqa: F811
     r"""Upsamples the input, using nearest neighbours' pixel values.
 
     .. warning::
@@ -2962,8 +3044,27 @@ def upsample_nearest(input, size=None, scale_factor=None):
     warnings.warn("nn.functional.upsample_nearest is deprecated. Use nn.functional.interpolate instead.")
     return interpolate(input, size, scale_factor, mode='nearest')
 
+@_overload  # noqa: F811
+def upsample_bilinear(input, size=None, scale_factor=None):  # noqa: F811
+    # type: (Tensor, Optional[int], Optional[float]) -> Tensor
+    pass
 
-def upsample_bilinear(input, size=None, scale_factor=None):
+@_overload  # noqa: F811
+def upsample_bilinear(input, size=None, scale_factor=None):  # noqa: F811
+    # type: (Tensor, Optional[List[int]], Optional[float]) -> Tensor
+    pass
+
+@_overload  # noqa: F811
+def upsample_bilinear(input, size=None, scale_factor=None):  # noqa: F811
+    # type: (Tensor, Optional[int], Optional[List[float]]) -> Tensor
+    pass
+
+@_overload  # noqa: F811
+def upsample_bilinear(input, size=None, scale_factor=None):  # noqa: F811
+    # type: (Tensor, Optional[List[int]], Optional[List[float]]) -> Tensor
+    pass
+
+def upsample_bilinear(input, size=None, scale_factor=None):  # noqa: F811
     r"""Upsamples the input, using bilinear upsampling.
 
     .. warning::
