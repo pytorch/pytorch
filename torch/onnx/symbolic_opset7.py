@@ -42,6 +42,7 @@ def min(g, self, dim_or_y=None, keepdim=None):
                       "have different shapes")
     return sym_opset9.min(g, self, dim_or_y, keepdim)
 
+logical_not = sym_opset9.logical_not
 
 for black_listed_op in black_listed_operators:
     vars()[black_listed_op] = _black_list_in_opset(black_listed_op)

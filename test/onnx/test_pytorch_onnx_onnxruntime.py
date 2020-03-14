@@ -37,7 +37,7 @@ def ort_test_with_input(ort_sess, input, output, rtol, atol):
     inputs = list(map(to_numpy, input))
     outputs = list(map(to_numpy, output))
 
-    ort_inputs = dict((ort_sess.get_inputs()[i].name, input) for i, input in enumerate(inputs))
+    ort_inputs = {inp.name: inputs[i] for i, inp in enumerate(ort_sess.get_inputs())}
     ort_outs = ort_sess.run(None, ort_inputs)
 
     # compare onnxruntime and PyTorch results
@@ -418,6 +418,25 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = {"test_key_in": torch.randn(1, 2, 3)}
         self.run_test(MyModel(), (x,))
+
+    def test_logical_not(self):
+        class MyModel(torch.nn.Module):
+            def forward(self, x, y=None):
+                return torch.logical_not(x, out=y)
+
+        x = torch.tensor([True, False])
+        self.run_test(MyModel(), (x,))
+
+        x = torch.tensor([0, 1, -10], dtype=torch.int8)
+        self.run_test(MyModel(), (x,))
+
+        x = torch.tensor([0., 1.5, -10.], dtype=torch.double)
+        self.run_test(MyModel(), (x,))
+
+        x = torch.tensor([0., 1., -10.], dtype=torch.double)
+        y = torch.empty(3, dtype=torch.int16)
+        self.run_test(MyModel(), (x, y))
+
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_cste_script(self):

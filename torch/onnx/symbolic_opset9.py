@@ -840,6 +840,16 @@ def bitwise_not(g, inp):
     return g.op("Not", inp)
 
 
+@parse_args('v', 'none')
+def logical_not(g, inp, output=None):
+    if inp.type().scalarType() != 'Bool':
+        inp = g.op("Cast", inp, to_i=sym_help.cast_pytorch_to_onnx['Bool'])
+    op = g.op("Not", inp)
+    if output is not None:
+        to_type = output.type().scalarType()
+        op = g.op("Cast", op, to_i=sym_help.cast_pytorch_to_onnx[to_type])
+    return op
+
 def wrap_logical_op_with_cast_to(to_type):
     def decorator(fn):
         def wrap_with_cast(g, input, other):

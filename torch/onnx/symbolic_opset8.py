@@ -126,6 +126,9 @@ def _comparison_operator(g, input, other, op_name):
     return g.op(op_name, input, other)
 
 
+logical_not = sym_opset9.logical_not
+
+
 # NOTE: For symbolics {gt, lt, bmm, matmul, prelu, mm, addmm, view, flatten},
 #       integer input type not supported in opset8. Cast to float if possible.
 def gt(g, input, other):
