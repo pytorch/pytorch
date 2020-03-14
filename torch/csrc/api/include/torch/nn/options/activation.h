@@ -24,6 +24,9 @@ struct TORCH_API ELUOptions {
 namespace functional {
 /// Options for `torch::nn::functional::elu`.
 ///
+/// See the documentation for `torch::nn::ELUOptions` class to learn what
+/// arguments are supported.
+///
 /// Example:
 /// ```
 /// namespace F = torch::nn::functional;
@@ -49,6 +52,9 @@ struct TORCH_API SELUOptions {
 
 namespace functional {
 /// Options for `torch::nn::functional::selu`.
+///
+/// See the documentation for `torch::nn::SELUOptions` class to learn what
+/// arguments are supported.
 ///
 /// Example:
 /// ```
@@ -76,6 +82,9 @@ struct TORCH_API GLUOptions {
 namespace functional {
 /// Options for `torch::nn::functional::glu`.
 ///
+/// See the documentation for `torch::nn::GLUOptions` class to learn what
+/// arguments are supported.
+///
 /// Example:
 /// ```
 /// namespace F = torch::nn::functional;
@@ -101,6 +110,9 @@ struct TORCH_API HardshrinkOptions {
 
 namespace functional {
 /// Options for `torch::nn::functional::hardshrink`.
+///
+/// See the documentation for `torch::nn::HardshrinkOptions` class to learn what
+/// arguments are supported.
 ///
 /// Example:
 /// ```
@@ -132,6 +144,9 @@ struct TORCH_API HardtanhOptions {
 namespace functional {
 /// Options for `torch::nn::functional::hardtanh`.
 ///
+/// See the documentation for `torch::nn::HardtanhOptions` class to learn what
+/// arguments are supported.
+///
 /// Example:
 /// ```
 /// namespace F = torch::nn::functional;
@@ -158,6 +173,9 @@ struct TORCH_API LeakyReLUOptions {
 
 namespace functional {
 /// Options for `torch::nn::functional::leaky_relu`.
+///
+/// See the documentation for `torch::nn::LeakyReLUOptions` class to learn what
+/// arguments are supported.
 ///
 /// Example:
 /// ```
@@ -304,10 +322,6 @@ struct TORCH_API PReLUOptions {
   TORCH_ARG(double, init) = 0.25;
 };
 
-namespace functional {
-using PReLUFuncOptions = PReLUOptions;
-} // namespace functional
-
 // ============================================================================
 
 /// Options for the `ReLU` module.
@@ -325,6 +339,9 @@ struct TORCH_API ReLUOptions {
 
 namespace functional {
 /// Options for `torch::nn::functional::relu`.
+///
+/// See the documentation for `torch::nn::ReLUOptions` class to learn what
+/// arguments are supported.
 ///
 /// Example:
 /// ```
@@ -351,6 +368,9 @@ struct TORCH_API ReLU6Options {
 
 namespace functional {
 /// Options for `torch::nn::functional::relu6`.
+///
+/// See the documentation for `torch::nn::ReLU6Options` class to learn what
+/// arguments are supported.
 ///
 /// Example:
 /// ```
@@ -424,6 +444,9 @@ struct TORCH_API CELUOptions {
 namespace functional {
 /// Options for `torch::nn::functional::celu`.
 ///
+/// See the documentation for `torch::nn::CELUOptions` class to learn what
+/// arguments are supported.
+///
 /// Example:
 /// ```
 /// namespace F = torch::nn::functional;
@@ -451,6 +474,9 @@ struct TORCH_API SoftplusOptions {
 namespace functional {
 /// Options for `torch::nn::functional::softplus`.
 ///
+/// See the documentation for `torch::nn::SoftplusOptions` class to learn what
+/// arguments are supported.
+///
 /// Example:
 /// ```
 /// namespace F = torch::nn::functional;
@@ -476,6 +502,9 @@ struct TORCH_API SoftshrinkOptions {
 
 namespace functional {
 /// Options for `torch::nn::functional::softshrink`.
+///
+/// See the documentation for `torch::nn::SoftshrinkOptions` class to learn what
+/// arguments are supported.
 ///
 /// Example:
 /// ```
@@ -509,6 +538,9 @@ struct TORCH_API ThresholdOptions {
 
 namespace functional {
 /// Options for `torch::nn::functional::threshold`.
+///
+/// See the documentation for `torch::nn::ThresholdOptions` class to learn what
+/// arguments are supported.
 ///
 /// Example:
 /// ```
