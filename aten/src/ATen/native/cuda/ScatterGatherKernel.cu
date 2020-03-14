@@ -1,5 +1,4 @@
-#pragma once
-#include <ScatterGatherKernel.cuh>
+#include <ATen/native/cuda/ScatterGatherKernel.cuh>
 
 namespace {
 
@@ -80,7 +79,6 @@ struct IndexToScatterGatherOffsets<IndexType, Real, -1> {
   }
 };
 
-
 template <typename index_t, typename scalar_t, int dims>
 #ifdef __HIP_PLATFORM_HCC__
 C10_LAUNCH_BOUNDS_1(512)
@@ -99,7 +97,7 @@ __global__ void scatter_kernel(
     index_t srcOffset = 0;
     index_t indexOffset = 0;
 
-    IndexToScatterGatherOffsets<index_t, scalar_t, Dims>::compute(linearId, dim,
+    IndexToScatterGatherOffsets<index_t, scalar_t, dims>::compute(linearId, dim,
                                                                 index, &indexOffset,
                                                                 src, &srcOffset,
                                                                 tensor, &tensorOffset);
@@ -109,6 +107,7 @@ __global__ void scatter_kernel(
     tensorOffset += indexValue * tensor.strides[dim];
 
     tensor.data[tensorOffset] = src.data[srcOffset];
+  }
 }
-
+  
 } // anonymous namespace
