@@ -54,7 +54,7 @@ namespace jit {
 
 namespace {
 c10::AliasAnalysisKind aliasAnalysisInternalSpecialCase() {
-  return AliasAnalysisKind::INTERNAL_SPECIAL_CASE;
+  return AliasAnalysisKind::INTERNAL_SPECIAL_CASE;  
 }
 } // namespace
 
@@ -717,8 +717,8 @@ void runNondiffOptimization(
     std::shared_ptr<Graph>& graph,
     bool strict_fuser_check) {
   // Run custom passes that different backends can register.
-  for (const auto& pass : getCustomPreFusionPasses()) {
-    pass(graph);
+  for (const auto& passPair : getCustomPreFusionPasses()) {
+    passPair.first(graph);
   }
 
   // decomposition pass, decompose certain ops that will be used in the
@@ -740,8 +740,8 @@ void runNondiffOptimization(
   FuseGraph(graph, strict_fuser_check);
 
   // Run custom post-fusion passes
-  for (const auto& pass : getCustomPostFusionPasses()) {
-    pass(graph);
+  for (const auto& passPair : getCustomPostFusionPasses()) {
+    passPair.first(graph);
   }
 }
 

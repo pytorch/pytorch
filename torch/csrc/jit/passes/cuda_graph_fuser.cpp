@@ -12,6 +12,7 @@
 #include <torch/csrc/jit/runtime/autodiff.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/operator.h>
+#include <torch/csrc/jit/frontend/ir_emitter.h>
 
 #include <queue>
 #include <unordered_map>
@@ -1217,14 +1218,6 @@ void CudaFuseGraph(std::shared_ptr<Graph>& graph) {
   EliminateDeadCode(graph);
   // Improve the quality of shape propagation code that was left
   PeepholeOptimizeShapeExpressions(graph->block());
-}
-
-void registerCudaFuseGraph() {
-  static bool not_registered = true;
-  if (not_registered) {
-    RegisterPostFusionPass pass(CudaFuseGraph);
-    not_registered = false;
-  }
 }
 
 } // namespace jit

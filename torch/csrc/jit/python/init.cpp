@@ -369,6 +369,8 @@ void initJITBindings(PyObject* module) {
       .def("_jit_override_can_fuse_on_gpu", &overrideCanFuseOnGPU)
       .def("_jit_can_fuse_on_cpu", &canFuseOnCPU)
       .def("_jit_can_fuse_on_gpu", &canFuseOnGPU)
+      .def("_jit_register_tensorexpr_fuser", &RegisterTensorExprFuser::registerPass)
+      .def("_jit_clear_tensorexpr_fuser", &RegisterTensorExprFuser::clearPass)
       .def(
           "_jit_differentiate",
           [](Graph& g) {
@@ -386,7 +388,8 @@ void initJITBindings(PyObject* module) {
             auto stack = toTraceableStack(args);
             checkAliasAnnotation(g, std::move(stack), unqualified_op_name);
           })
-      .def("_jit_register_cuda_fuser", &registerCudaFuseGraph)
+      .def(
+            "_jit_register_cuda_fuser", &RegisterCudaFuseGraph::registerPass)
       .def(
           "_jit_set_profiling_mode",
           [](bool profiling_flag) {
