@@ -93,7 +93,7 @@ struct LoadWithCast {
 
   LoadWithCast(array_t dtypes): dtypes(dtypes) {
     for (int i = 0; i < N; i++) {
-      element_sizea[i] = c10::elementSize(dtypes[i]);
+      element_sizes[i] = c10::elementSize(dtypes[i]);
     }
   }
 
