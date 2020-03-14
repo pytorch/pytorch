@@ -1,7 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/core/autocast/autocast_mode.h>
+#include <ATen/core/autocast_mode.h>
 
 #include <c10/util/intrusive_ptr.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>

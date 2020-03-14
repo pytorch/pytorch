@@ -52,8 +52,10 @@ class autocast(object):
 
     Floating-point Tensors produced in an autocast-enabled region may be ``float16``.
     After returning to an autocast-disabled region, using them with floating-point
-    Tensors of different dtypes may cause type mismatch errors.  If so, cast the ``float16``
-    Tensors back to the default dtype (or other type if desired)::
+    Tensors of different dtypes may cause type mismatch errors.  If so, cast the Tensor(s)
+    produced in the autocast region back to ``float32`` (or other dtype if desired).
+    If a Tensor from the autocast region is already ``float32``, the cast is a no-op,
+    and incurs no additional overhead.  Example::
 
         # Creates some tensors in default dtype (here assumed to be float32)
         a_float32 = torch.rand((8, 8), device="cuda")
@@ -77,9 +79,9 @@ class autocast(object):
 
     ``autocast(enabled=False)`` subregions can be nested in autocast-enabled regions.
     Locally disabling autocast can be useful, for example, if you want to force a subregion
-    to run in a particular ``dtype``.  In the subregion, inputs from the surrounding region
-    should be cast to ``dtype`` before use.  The following example shows a subregion with
-    forced ``float32`` execution::
+    to run in a particular ``dtype``.  Disabling autocast gives you explicit control over
+    the execution type.  In the subregion, inputs from the surrounding region
+    should be cast to ``dtype`` before use::
 
         # Creates some tensors in default dtype (here assumed to be float32)
         a_float32 = torch.rand((8, 8), device="cuda")

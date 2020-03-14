@@ -57,6 +57,8 @@ updates the parameters, so the scale factor does not interfere with the learning
 Autocast Op Reference
 ^^^^^^^^^^^^^^^^^^^^^
 
+.. _autocast-eligibility:
+
 Op Eligibility
 --------------
 Only CUDA ops are eligible for autocasting.
@@ -66,33 +68,29 @@ run in these types whether or not autocast is enabled.
 
 Only out-of-place ops and Tensor methods are eligible.
 In-place variants and calls that explicitly supply an ``out=...`` Tensor
-are allowed in autocast-enabled regions, but won't receive autocasting.
-For example, in an autocast-enabled region ``a.addmm(b, c)`` is guaranteed to run
-in ``float16``, but ``a.addmm_(b, c)`` and ``a.addmm(b, c, out=d)`` may not.
+are allowed in autocast-enabled regions, but won't go through autocasting.
+For example, in an autocast-enabled region ``a.addmm(b, c)`` can autocast,
+but ``a.addmm_(b, c)`` and ``a.addmm(b, c, out=d)`` cannot.
 For best performance and stability, prefer out-of-place ops in autocast-enabled
 regions.
 
 Op-Specific Behavior
 --------------------
-
 The following lists describe the behavior of eligible ops in autocast-enabled regions.
-Some are ``torch`` functions, some are ``torch.nn.functional`` functions,
-and some are :class:`torch.Tensor` methods.  Some are available in more than one of those
-three namespaces.  Some are called by the forward method of :class:`torch.nn.Module`\ s.
-Autocasting occurs in the C++ backend, so any listed op may be called however it's available
-in Python and still receive autocasting.
+These ops always go through autocasting whether they are invoked as part of a :class:`torch.nn.Module`,
+as a function, or as a :class:`torch.Tensor` method. If functions are exposed in multiple namespaces,
+they go through autocasting regardless of the namespace.
 
-Ops not listed below do not receive autocasting.  They run in the type
+Ops not listed below do not go through autocasting.  They run in the type
 defined by their inputs.  However, autocasting may still change the type
 in which unlisted ops run if they're downstream from autocasted ops.
 
-If an op is unlisted, we assume it's safe to run in ``float16`` without impairing
-convergence.  If you encounter an unlisted op that causes convergence problems
-in ``float16``, please file an issue.
+If an op is unlisted, we assume it's numerically stable in ``float16``.
+If you believe an unlisted op is numerically unstable in ``float16``,
+please file an issue.
 
-Ops that run in ``float16``
-"""""""""""""""""""""""""""
-These ops (if eligible) execute in ``float16`` and produce ``float16`` output.
+Ops that can autocast to ``float16``
+""""""""""""""""""""""""""""""""""""
 
 ``__matmul__``,
 ``addbmm``,
@@ -108,16 +106,14 @@ These ops (if eligible) execute in ``float16`` and produce ``float16`` output.
 ``conv_transpose1d``,
 ``conv_transpose2d``,
 ``conv_transpose3d``,
-``conv_tbc``,
 ``linear``,
 ``matmul``,
 ``mm``,
 ``mv``,
 ``prelu``
 
-Ops that run in ``float32``
-"""""""""""""""""""""""""""
-These ops (if eligible) execute in ``float32`` and produce ``float32`` output.
+Ops that can autocast to ``float32``
+""""""""""""""""""""""""""""""""""""
 
 ``__pow__``,
 ``__rdiv__``,
@@ -190,16 +186,20 @@ autocast casts all inputs to ``float32`` and runs the op in ``float32``.
 ``stack``,
 ``tensordot``
 
-Some ops not listed here (e.g., binary ops like ``add``) natively promote to the widest
-input type without autocasting's intervention.  If inputs are a mixture of ``float16``
+Some ops not listed here (e.g., binary ops like ``add``) natively promote
+inputs without autocasting's intervention.  If inputs are a mixture of ``float16``
 and ``float32``, these ops run in ``float32`` and produce ``float32`` output,
 regardless of whether autocast is enabled.
 
-Banned ops
-""""""""""
-:func:`torch.nn.functional.binary_cross_entropy` (and :mod:`torch.nn.BCELoss`, which wraps it)
-are unsafe to autocast, and will raise an error in autocast-enabled regions.
+Prefer ``binary_cross_entropy_with_logits`` over ``binary_cross_entropy``
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+The backward passes of :func:`torch.nn.functional.binary_cross_entropy` (and :mod:`torch.nn.BCELoss`, which wraps it)
+can produce gradients that aren't representable in ``float16``.  In autocast-enabled regions, the forward input
+may be ``float16``, which means the backward gradient must be representable in ``float16`` (autocasting ``float16``
+forward inputs to ``float32`` doesn't help, because that cast must be reversed in backward).
+Therefore, ``binary_cross_entropy`` and ``BCELoss`` raise an error in autocast-enabled regions.
+
 Many models use a sigmoid layer right before the binary cross entropy layer.
-In this case, combine the two layers using :func:`torch.nn.functional.binary_cross_entropy_with_logits`,
+In this case, combine the two layers using :func:`torch.nn.functional.binary_cross_entropy_with_logits`
 or :mod:`torch.nn.BCEWithLogitsLoss`.  ``binary_cross_entropy_with_logits`` and ``BCEWithLogits``
 are safe to autocast.
