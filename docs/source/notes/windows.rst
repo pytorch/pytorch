@@ -15,15 +15,18 @@ MKL and MAGMA. Here are the steps to build with them.
     REM Make sure you have 7z and curl installed.
 
     REM Download MKL files
-    curl https://s3.amazonaws.com/ossci-windows/mkl_2018.2.185.7z -k -O
+    curl https://s3.amazonaws.com/ossci-windows/mkl_2020.0.166.7z -k -O
     7z x -aoa mkl_2018.2.185.7z -omkl
 
     REM Download MAGMA files
-    REM cuda100/cuda101 is also available for `CUDA_PREFIX`. There are also 2.4.0 binaries for cuda80/cuda92.
-    REM The configuration could be `debug` or `release` for 2.5.0. Only `release` is available for 2.4.0.
-    set CUDA_PREFIX=cuda90
+    REM version available:
+    REM 2.5.2 (CUDA 9.2 10.0 10.1 10.2) x (Debug Release)
+    REM 2.5.1 (CUDA 9.2 10.0 10.1 10.2) x (Debug Release)
+    REM 2.5.0 (CUDA 9.0 9.2 10.0 10.1) x (Debug Release)
+    REM 2.4.0 (CUDA 8.0 9.2) x (Release)
+    set CUDA_PREFIX=cuda92
     set CONFIG=release
-    curl -k https://s3.amazonaws.com/ossci-windows/magma_2.5.0_%CUDA_PREFIX%_%CONFIG%.7z -o magma.7z
+    curl -k https://s3.amazonaws.com/ossci-windows/magma_2.5.1_%CUDA_PREFIX%_%CONFIG%.7z -o magma.7z
     7z x -aoa magma.7z -omagma
     
     REM Setting essential environment variables
@@ -76,7 +79,7 @@ object to make it build on Windows.
        relative_to=__file__,
        with_cuda=with_cuda,
        extra_compile_args=["-std=c99"],
-       libraries=['ATen', '_C'] # Append cuda libaries when necessary, like cudart
+       libraries=['ATen', '_C'] # Append cuda libraries when necessary, like cudart
    )
 
 Second, here is a workground for "unresolved external symbol 
@@ -157,7 +160,7 @@ be solved before we officially release it. You can build it by yourself.
 Import error
 ^^^^^^^^^^^^
 
-.. code-block:: py3tb
+.. code-block:: python
 
     from torch._C import *
 
@@ -174,7 +177,7 @@ You can resolve this by typing the following command.
     conda install -c peterjc123 vc vs2017_runtime
     conda install mkl_fft intel_openmp numpy mkl
 
-As for the wheels package, since we didn't pack some libaries and VS2017 
+As for the wheels package, since we didn't pack some libraries and VS2017 
 redistributable files in, please make sure you install them manually.
 The `VS 2017 redistributable installer
 <https://aka.ms/vs/15/release/VC_redist.x64.exe>`_ can be downloaded.
@@ -188,7 +191,7 @@ uses MKL instead of OpenBLAS. You may type in the following command.
 Another possible cause may be you are using GPU version without NVIDIA
 graphics cards. Please replace your GPU package with the CPU one.
 
-.. code-block:: py3tb
+.. code-block:: python
 
     from torch._C import *
 
@@ -210,7 +213,7 @@ Usage (multiprocessing)
 Multiprocessing error without if-clause protection
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-.. code-block:: py3tb
+.. code-block:: python
 
     RuntimeError:
            An attempt has been made to start a new process before the
@@ -247,7 +250,7 @@ your code into the following structure.
 Multiprocessing error "Broken pipe"
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-.. code-block:: py3tb
+.. code-block:: python
 
     ForkingPickler(file, protocol).dump(obj)
 
@@ -261,7 +264,7 @@ can debug your code by reducing the ``num_worker`` of
 Multiprocessing error "driver shut down"
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-.. code-block:: py3tb
+::
 
     Couldn’t open shared file mapping: <torch_14808_1591070686>, error code: <1455> at torch\lib\TH\THAllocator.c:154
 
@@ -275,7 +278,7 @@ update the TDR settings according to this `post
 CUDA IPC operations
 ^^^^^^^^^^^^^^^^^^^
 
-.. code-block:: py3tb
+.. code-block:: python
 
    THCudaCheck FAIL file=torch\csrc\generic\StorageSharing.cpp line=252 error=63 : OS call failed or operation not supported on this OS
 

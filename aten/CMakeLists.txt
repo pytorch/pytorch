@@ -24,6 +24,7 @@ set(ATen_THIRD_PARTY_INCLUDE)
 set(ATen_CUDA_SRCS)
 set(ATen_CUDA_TEST_SRCS)
 set(ATen_CUDA_INCLUDE)
+set(ATen_NVRTC_STUB_SRCS)
 set(ATen_HIP_SRCS)
 set(ATen_HIP_TEST_SRCS)
 set(ATen_HIP_INCLUDE)
@@ -48,16 +49,19 @@ set(TH_CPU_INCLUDE
   ${CMAKE_BINARY_DIR}/aten/src)
 list(APPEND ATen_CPU_INCLUDE ${TH_CPU_INCLUDE})
 
-add_subdirectory(src/THNN)
 
 # Find the HIP package, set the HIP paths, load the HIP CMake.
 IF(USE_ROCM)
   include(LoadHIP)
   if (NOT PYTORCH_FOUND_HIP)
-    MESSAGE(FATAL_ERROR
-      "Could not find HIP installation")
+    set(USE_ROCM OFF)
   endif()
 ENDIF()
+
+# Both CUDA and ROCM are enabled and found. Report an error.
+if(USE_CUDA AND USE_ROCM)
+  message(FATAL_ERROR "Both CUDA and ROCm are enabled and found. PyTorch can only be built with either of them. Please turn one off by using either USE_CUDA=OFF or USE_ROCM=OFF.")
+endif()
 
 IF(MSVC)
   # we want to respect the standard, and we are bored of those **** .
@@ -101,6 +105,7 @@ add_subdirectory(src/ATen)
 set(ATen_CPU_SRCS ${ATen_CPU_SRCS} PARENT_SCOPE)
 set(ATen_CUDA_SRCS ${ATen_CUDA_SRCS} PARENT_SCOPE)
 set(ATen_HIP_SRCS ${ATen_HIP_SRCS} PARENT_SCOPE)
+set(ATen_NVRTC_STUB_SRCS ${ATen_NVRTC_STUB_SRCS} PARENT_SCOPE)
 set(ATen_CPU_TEST_SRCS ${ATen_CPU_TEST_SRCS} PARENT_SCOPE)
 set(ATen_CUDA_TEST_SRCS ${ATen_CUDA_TEST_SRCS} PARENT_SCOPE)
 set(ATen_HIP_TEST_SRCS ${ATen_HIP_TEST_SRCS} PARENT_SCOPE)

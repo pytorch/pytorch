@@ -1,3 +1,5 @@
+#pragma once
+
 #include <torch/csrc/autograd/generated/VariableType.h>
 
 #include <torch/csrc/autograd/variable.h>
@@ -8,15 +10,12 @@
 #include <torch/csrc/autograd/generated/Functions.h>
 #include <torch/csrc/autograd/functions/tensor.h>
 #include <torch/csrc/autograd/functions/basic_ops.h>
-#include <torch/csrc/jit/tracer.h>
-#include <torch/csrc/jit/constants.h>
-#include <torch/csrc/jit/symbolic_variable.h>
-#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/frontend/tracer.h>
+#include <torch/csrc/jit/ir/constants.h>
+#include <torch/csrc/jit/ir/ir.h>
 
 #include <torch/csrc/utils/variadic.h>
 #include <torch/csrc/autograd/functions/utils.h>
-
-#include <ATen/core/VariableHooksInterface.h>
 
 #include <array>
 #include <cstddef>
@@ -40,13 +39,19 @@ using namespace torch::autograd::generated;
 
 namespace torch { namespace autograd {
 
-extern std::vector<std::unique_ptr<Type>> type_to_variable_type;
-
 inline void check_inplace(const Tensor& tensor) {
   auto& var = static_cast<const Variable&>(tensor);
-  if (var.requires_grad() && var.is_leaf() && GradMode::is_enabled()) {
-    AT_ERROR(
-      "a leaf Variable that requires grad has been used in an in-place operation.");
+  if (var.requires_grad() && GradMode::is_enabled()) {
+    if (var.is_view()) {
+      // NB: is_view() ==> get_autograd_meta()
+      auto diff_view_meta = static_cast<DifferentiableViewMeta*>(impl::get_autograd_meta(var));
+      // This can throw or warn
+      handle_view_on_rebase(diff_view_meta);
+    }
+    if (var.is_leaf()) {
+      AT_ERROR(
+        "a leaf Variable that requires grad is being used in an in-place operation.");
+    }
   }
 }
 
@@ -58,33 +63,29 @@ inline void throw_error_out_requires_grad(const char* name) {
 
 // TODO: Blegh, bare references
 
-inline void rebase_history(Variable& var, std::shared_ptr<Function> grad_fn) {
+inline void rebase_history(Variable& var, std::shared_ptr<Node> grad_fn) {
   if (grad_fn && var.defined()) {
     grad_fn->add_input_metadata(var);
-    var.rebase_history({std::move(grad_fn), 0});
+    impl::rebase_history(var, {std::move(grad_fn), 0});
   }
 }
 
-inline void rebase_history(std::vector<Variable>&& vars, std::shared_ptr<Function> grad_fn) {
+inline void rebase_history(std::vector<Variable>&& vars, std::shared_ptr<Node> grad_fn) {
   if (grad_fn) {
     for (auto& var : vars) {
       if (var.defined()) {
         // TODO: eliminate const_cast
         auto output_nr = grad_fn->add_input_metadata(var);
-        var.rebase_history({std::move(grad_fn), output_nr});
+        impl::rebase_history(var, {std::move(grad_fn), output_nr});
       } else {
-        grad_fn->add_input_metadata(Function::undefined_input());
+        grad_fn->add_input_metadata(Node::undefined_input());
       }
     }
   }
 }
 
 inline void increment_version(Tensor & t) {
-  as_variable_ref(t).bump_version();
-}
-
-inline bool isFloatingPoint(ScalarType s) {
-  return s == kFloat || s == kDouble || s == kHalf;
+  impl::bump_version(as_variable_ref(t));
 }
 
 struct Flatten : IterArgs<Flatten> {
@@ -104,23 +105,36 @@ template<typename... Args> inline variable_list flatten_tensor_args(Args&&... ar
 }
 
 // See NOTE [ Autograd View Variables ] for details.
-inline Tensor as_view(const Tensor & base, Tensor tensor, bool is_differentiable = true) {
+inline Tensor as_view(const Tensor & base, Tensor tensor, bool is_differentiable,
+                      CreationMeta creation_meta=CreationMeta::DEFAULT) {
   auto base_var = Variable(base);
   if (base_var.is_view()) {
-    base_var = base_var.base();
+    base_var = base_var._base();
   }
-  return make_variable_view(std::move(base_var), std::move(tensor), is_differentiable);
+  if (is_differentiable) {
+    return make_variable_differentiable_view(std::move(base_var), std::move(tensor), creation_meta);
+  } else {
+    TORCH_CHECK(creation_meta == CreationMeta::DEFAULT,
+                "Non-differentiable views must have creation_meta=CreationMeta::DEFAULT");
+    return make_variable_non_differentiable_view(std::move(base_var), std::move(tensor));
+  }
 }
 
 // See NOTE [ Autograd View Variables ] for details.
-inline std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor> tensors,
-                                   bool is_differentiable = true) {
+inline std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor> tensors, bool is_differentiable,
+                                   CreationMeta creation_meta=CreationMeta::DEFAULT) {
   auto base_var = Variable(base);
   if (base_var.is_view()) {
-    base_var = base_var.base();
+    base_var = base_var._base();
   }
   for(Tensor &tensor : tensors) {
-    tensor = make_variable_view(base_var, std::move(tensor), is_differentiable);
+    if (is_differentiable) {
+      tensor = make_variable_differentiable_view(base_var, std::move(tensor), creation_meta);
+    } else {
+      TORCH_CHECK(creation_meta == CreationMeta::DEFAULT,
+                  "Non-differentiable views must have creation_meta=CreationMeta::DEFAULT");
+      tensor = make_variable_non_differentiable_view(base_var, std::move(tensor));
+    }
   }
   return tensors;
 }
@@ -145,39 +159,6 @@ inline void check_no_requires_grad(TensorList tensors, const char* name) {
 inline std::vector<SavedVariable> make_saved_variable_list(TensorList tensors) {
   return fmap(tensors, [](const Tensor& tensor) -> SavedVariable {
       return SavedVariable{tensor, false /* is output */}; });
-}
-
-inline Tensor as_variable(Tensor tensor) {
-  return make_variable(std::move(tensor), /*requires_grad=*/false);
-}
-
-inline std::vector<Tensor> as_variable(TensorList tl) {
-  return fmap(tl, [](const Tensor& t) -> Tensor {
-      return make_variable(t, /*requires_grad=*/false);
-  });
-}
-
-template <typename... Tensors, size_t... Is>
-std::tuple<Tensors...> as_variable_impl(
-    std::tuple<Tensors...> tensors,
-    Indices<Is...>) {
-  // Expand the integer parameter pack into a sequence of Variable
-  // constructions. This turns into (boolean omitted):
-  // Variable(std::get<0>(tensors)), Variable(std::get<1>(tensors)), ...
-  return std::tuple<Tensors...>(
-      as_variable(std::get<Is>(tensors))...);
-}
-
-// NB: Because this was not forward declared, recursive std::tuple won't work.
-// You can probably rejigger this to make it supported if you really need it.
-template <typename... Tensors>
-std::tuple<Tensors...> as_variable(std::tuple<Tensors...> tensors) {
-  // `sizeof...(Tensors)` gets us the size of the `Tensors` parameter pack at
-  // compile time. We use it to parameterize a `MakeIndices` class, which will
-  // expand into an Indices object containing the numbers 0 to
-  // sizeof...(Tensors) - 1.
-  return as_variable_impl(
-      tensors, typename MakeIndices<sizeof...(Tensors)>::indices());
 }
 
 inline std::vector<std::vector<int64_t>> to_args_sizes(TensorList tensors) {

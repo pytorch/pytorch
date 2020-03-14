@@ -349,6 +349,12 @@ Non-linear activations (weighted sum, nonlinearity)
 .. autoclass:: CELU
     :members:
 
+:hidden:`GELU`
+~~~~~~~~~~~~~~
+
+.. autoclass:: GELU
+    :members:
+
 :hidden:`Sigmoid`
 ~~~~~~~~~~~~~~~~~
 
@@ -490,6 +496,12 @@ Normalization layers
 Recurrent layers
 ----------------------------------
 
+:hidden:`RNNBase`
+~~~~~~~~~~~~~
+
+.. autoclass:: RNNBase
+    :members:
+
 :hidden:`RNN`
 ~~~~~~~~~~~~~
 
@@ -524,6 +536,39 @@ Recurrent layers
 ~~~~~~~~~~~~~~~~~
 
 .. autoclass:: GRUCell
+    :members:
+
+Transformer layers
+----------------------------------
+
+:hidden:`Transformer`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: Transformer
+    :members:
+
+:hidden:`TransformerEncoder`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: TransformerEncoder
+    :members:
+
+:hidden:`TransformerDecoder`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: TransformerDecoder
+    :members:
+
+:hidden:`TransformerEncoderLayer`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: TransformerEncoderLayer
+    :members:
+
+:hidden:`TransformerDecoderLayer`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: TransformerDecoderLayer
     :members:
 
 Linear layers
@@ -761,12 +806,6 @@ DataParallel layers (multi-GPU, distributed)
 .. autoclass:: torch.nn.parallel.DistributedDataParallel
     :members:
 
-:hidden:`DistributedDataParallelCPU`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autoclass:: torch.nn.parallel.DistributedDataParallelCPU
-    :members:
-
 
 Utilities
 ---------
@@ -790,6 +829,109 @@ Utilities
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: torch.nn.utils.vector_to_parameters
+
+
+.. currentmodule:: torch.nn.utils.prune
+
+:hidden:`BasePruningMethod`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass :: torch.nn.utils.prune.BasePruningMethod
+    :members:
+
+:hidden:`PruningContainer`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass :: torch.nn.utils.prune.PruningContainer
+    :inherited-members:
+    :members:
+
+:hidden:`Identity`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass :: torch.nn.utils.prune.Identity
+    :inherited-members:
+    :members:
+
+:hidden:`RandomUnstructured`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass :: torch.nn.utils.prune.RandomUnstructured
+    :inherited-members:
+    :members:
+
+:hidden:`L1Unstructured`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass :: torch.nn.utils.prune.L1Unstructured
+    :inherited-members:
+    :members:
+
+:hidden:`RandomStructured`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass :: torch.nn.utils.prune.RandomStructured
+    :inherited-members:
+    :members:
+
+:hidden:`LnStructured`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass :: torch.nn.utils.prune.LnStructured
+    :inherited-members:
+    :members:
+
+:hidden:`CustomFromMask`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass :: torch.nn.utils.prune.CustomFromMask
+    :inherited-members:
+    :members:
+
+:hidden:`identity`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction :: torch.nn.utils.prune.identity
+
+:hidden:`random_unstructured`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction :: torch.nn.utils.prune.random_unstructured
+
+:hidden:`l1_unstructured`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction :: torch.nn.utils.prune.l1_unstructured
+
+:hidden:`random_structured`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction :: torch.nn.utils.prune.random_structured
+
+:hidden:`ln_structured`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction :: torch.nn.utils.prune.ln_structured
+
+:hidden:`global_unstructured`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction :: torch.nn.utils.prune.global_unstructured
+
+:hidden:`custom_from_mask`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction :: torch.nn.utils.prune.custom_from_mask
+
+:hidden:`remove`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction :: torch.nn.utils.prune.remove
+
+:hidden:`is_pruned`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction :: torch.nn.utils.prune.is_pruned
 
 :hidden:`weight_norm`
 ~~~~~~~~~~~~~~~~~~~~~
@@ -843,528 +985,17 @@ Utilities
 
 .. autofunction:: torch.nn.utils.rnn.pack_sequence
 
+.. currentmodule:: torch.nn
 
-torch.nn.functional
-===================
-
-.. currentmodule:: torch.nn.functional
-
-Convolution functions
-----------------------------------
-
-:hidden:`conv1d`
-~~~~~~~~~~~~~~~~
-
-.. autofunction:: conv1d
-
-:hidden:`conv2d`
-~~~~~~~~~~~~~~~~
-
-.. autofunction:: conv2d
-
-:hidden:`conv3d`
-~~~~~~~~~~~~~~~~
-
-.. autofunction:: conv3d
-
-:hidden:`conv_transpose1d`
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: conv_transpose1d
-
-:hidden:`conv_transpose2d`
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: conv_transpose2d
-
-:hidden:`conv_transpose3d`
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: conv_transpose3d
-
-:hidden:`unfold`
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: unfold
-
-:hidden:`fold`
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: fold
-
-Pooling functions
-----------------------------------
-
-:hidden:`avg_pool1d`
-~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: avg_pool1d
-
-:hidden:`avg_pool2d`
-~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: avg_pool2d
-
-:hidden:`avg_pool3d`
-~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: avg_pool3d
-
-:hidden:`max_pool1d`
-~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: max_pool1d
-
-:hidden:`max_pool2d`
-~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: max_pool2d
-
-:hidden:`max_pool3d`
-~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: max_pool3d
-
-:hidden:`max_unpool1d`
-~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: max_unpool1d
-
-:hidden:`max_unpool2d`
-~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: max_unpool2d
-
-:hidden:`max_unpool3d`
-~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: max_unpool3d
-
-:hidden:`lp_pool1d`
-~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: lp_pool1d
-
-:hidden:`lp_pool2d`
-~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: lp_pool2d
-
-:hidden:`adaptive_max_pool1d`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: adaptive_max_pool1d
-
-:hidden:`adaptive_max_pool2d`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: adaptive_max_pool2d
-
-:hidden:`adaptive_max_pool3d`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: adaptive_max_pool3d
-
-:hidden:`adaptive_avg_pool1d`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: adaptive_avg_pool1d
-
-:hidden:`adaptive_avg_pool2d`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: adaptive_avg_pool2d
-
-:hidden:`adaptive_avg_pool3d`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: adaptive_avg_pool3d
-
-
-Non-linear activation functions
--------------------------------
-
-:hidden:`threshold`
-~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: threshold
-.. autofunction:: threshold_
-
-
-:hidden:`relu`
-~~~~~~~~~~~~~~
-
-.. autofunction:: relu
-.. autofunction:: relu_
-
-:hidden:`hardtanh`
-~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: hardtanh
-.. autofunction:: hardtanh_
-
-:hidden:`relu6`
-~~~~~~~~~~~~~~~
-
-.. autofunction:: relu6
-
-:hidden:`elu`
-~~~~~~~~~~~~~
-
-.. autofunction:: elu
-.. autofunction:: elu_
-
-:hidden:`selu`
-~~~~~~~~~~~~~~
-
-.. autofunction:: selu
-
-:hidden:`celu`
-~~~~~~~~~~~~~~
-
-.. autofunction:: celu
-
-:hidden:`leaky_relu`
-~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: leaky_relu
-.. autofunction:: leaky_relu_
-
-:hidden:`prelu`
-~~~~~~~~~~~~~~~
-
-.. autofunction:: prelu
-
-:hidden:`rrelu`
-~~~~~~~~~~~~~~~
-
-.. autofunction:: rrelu
-.. autofunction:: rrelu_
-
-:hidden:`glu`
-~~~~~~~~~~~~~~~
-
-.. autofunction:: glu
-
-:hidden:`logsigmoid`
-~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: logsigmoid
-
-:hidden:`hardshrink`
-~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: hardshrink
-
-:hidden:`tanhshrink`
-~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: tanhshrink
-
-:hidden:`softsign`
-~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: softsign
-
-:hidden:`softplus`
-~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: softplus
-
-:hidden:`softmin`
+:hidden:`Flatten`
 ~~~~~~~~~~~~~~~~~
 
-.. autofunction:: softmin
+.. autoclass:: Flatten
+    :members:
 
-:hidden:`softmax`
-~~~~~~~~~~~~~~~~~
 
-.. autofunction:: softmax
+Quantized Functions
+--------------------
 
-:hidden:`softshrink`
-~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: softshrink
-
-:hidden:`gumbel_softmax`
-~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: gumbel_softmax
-
-:hidden:`log_softmax`
-~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: log_softmax
-
-:hidden:`tanh`
-~~~~~~~~~~~~~~
-
-.. autofunction:: tanh
-
-:hidden:`sigmoid`
-~~~~~~~~~~~~~~~~~
-
-.. autofunction:: sigmoid
-
-Normalization functions
------------------------
-
-:hidden:`batch_norm`
-~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: batch_norm
-
-:hidden:`instance_norm`
-~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: instance_norm
-
-:hidden:`layer_norm`
-~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: layer_norm
-
-:hidden:`local_response_norm`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: local_response_norm
-
-:hidden:`normalize`
-~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: normalize
-
-Linear functions
-----------------
-
-:hidden:`linear`
-~~~~~~~~~~~~~~~~
-
-.. autofunction:: linear
-
-:hidden:`bilinear`
-~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: bilinear
-
-Dropout functions
------------------
-
-:hidden:`dropout`
-~~~~~~~~~~~~~~~~~
-
-.. autofunction:: dropout
-
-:hidden:`alpha_dropout`
-~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: alpha_dropout
-
-:hidden:`dropout2d`
-~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: dropout2d
-
-:hidden:`dropout3d`
-~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: dropout3d
-
-Sparse functions
-----------------------------------
-
-:hidden:`embedding`
-~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: embedding
-
-:hidden:`embedding_bag`
-~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: embedding_bag
-
-:hidden:`one_hot`
-~~~~~~~~~~~~~~~~~
-
-.. autofunction:: one_hot
-
-Distance functions
-----------------------------------
-
-:hidden:`pairwise_distance`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: pairwise_distance
-
-:hidden:`cosine_similarity`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: cosine_similarity
-
-:hidden:`pdist`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: pdist
-
-
-Loss functions
---------------
-
-:hidden:`binary_cross_entropy`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: binary_cross_entropy
-
-:hidden:`binary_cross_entropy_with_logits`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: binary_cross_entropy_with_logits
-
-:hidden:`poisson_nll_loss`
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: poisson_nll_loss
-
-:hidden:`cosine_embedding_loss`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: cosine_embedding_loss
-
-:hidden:`cross_entropy`
-~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: cross_entropy
-
-:hidden:`ctc_loss`
-~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: ctc_loss
-
-:hidden:`hinge_embedding_loss`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: hinge_embedding_loss
-
-:hidden:`kl_div`
-~~~~~~~~~~~~~~~~
-
-.. autofunction:: kl_div
-
-:hidden:`l1_loss`
-~~~~~~~~~~~~~~~~~
-
-.. autofunction:: l1_loss
-
-:hidden:`mse_loss`
-~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: mse_loss
-
-:hidden:`margin_ranking_loss`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: margin_ranking_loss
-
-:hidden:`multilabel_margin_loss`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: multilabel_margin_loss
-
-:hidden:`multilabel_soft_margin_loss`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: multilabel_soft_margin_loss
-
-:hidden:`multi_margin_loss`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: multi_margin_loss
-
-:hidden:`nll_loss`
-~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: nll_loss
-
-:hidden:`smooth_l1_loss`
-~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: smooth_l1_loss
-
-:hidden:`soft_margin_loss`
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: soft_margin_loss
-
-:hidden:`triplet_margin_loss`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: triplet_margin_loss
-
-Vision functions
-----------------
-
-:hidden:`pixel_shuffle`
-~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: pixel_shuffle
-
-:hidden:`pad`
-~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: pad
-
-:hidden:`interpolate`
-~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: interpolate
-
-:hidden:`upsample`
-~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: upsample
-
-:hidden:`upsample_nearest`
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: upsample_nearest
-
-:hidden:`upsample_bilinear`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: upsample_bilinear
-
-:hidden:`grid_sample`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: grid_sample
-
-:hidden:`affine_grid`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: affine_grid
-
-DataParallel functions (multi-GPU, distributed)
------------------------------------------------
-
-:hidden:`data_parallel`
-~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: torch.nn.parallel.data_parallel
-
-
-torch.nn.init
-=============
-
-.. currentmodule:: torch.nn.init
-.. autofunction:: calculate_gain
-.. autofunction:: uniform_
-.. autofunction:: normal_
-.. autofunction:: constant_
-.. autofunction:: eye_
-.. autofunction:: dirac_
-.. autofunction:: xavier_uniform_
-.. autofunction:: xavier_normal_
-.. autofunction:: kaiming_uniform_
-.. autofunction:: kaiming_normal_
-.. autofunction:: orthogonal_
-.. autofunction:: sparse_
+Quantization refers to techniques for performing computations and storing tensors at lower bitwidths than
+floating point precision. PyTorch supports both per tensor and per channel asymmetric linear quantization. To learn more how to use quantized functions in PyTorch, please refer to the :ref:`quantization-doc` documentation.

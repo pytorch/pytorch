@@ -6,6 +6,7 @@
 #include <unordered_map>
 
 #include "caffe2/core/logging.h"
+#include "caffe2/opt/shape_info.h"
 #include "foxi/onnxifi_loader.h"
 
 namespace caffe2 {
@@ -16,13 +17,19 @@ struct BackendGraphInfo {
   onnxBackend backend;
   onnxGraph graph;
   onnxifi_library* lib{nullptr};
+  std::unordered_map<std::string, ShapeInfo> weight_shape_info;
 
   BackendGraphInfo(
       onnxBackendID backend_id,
       onnxBackend backend,
       onnxGraph graph,
-      onnxifi_library* lib)
-      : backend_id(backend_id), backend(backend), graph(graph), lib(lib) {}
+      onnxifi_library* lib,
+      std::unordered_map<std::string, ShapeInfo>&& s)
+      : backend_id(backend_id),
+        backend(backend),
+        graph(graph),
+        lib(lib),
+        weight_shape_info(std::move(s)) {}
 
   BackendGraphInfo(const BackendGraphInfo& other) = delete;
 
@@ -33,6 +40,7 @@ struct BackendGraphInfo {
     backend = other.backend;
     graph = other.graph;
     lib = other.lib;
+    weight_shape_info = std::move(other.weight_shape_info);
     other.backend_id = other.backend = other.graph = other.lib = nullptr;
   }
 
@@ -41,6 +49,7 @@ struct BackendGraphInfo {
     backend = other.backend;
     graph = other.graph;
     lib = other.lib;
+    weight_shape_info = std::move(other.weight_shape_info);
     other.backend_id = other.backend = other.graph = other.lib = nullptr;
     return *this;
   }

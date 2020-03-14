@@ -74,6 +74,7 @@ class MIOPENConvOpBase : public ConvPoolOpBase<HIPContext> {
  protected:
   vector<int64_t> mio_input_dims_;
   vector<int64_t> mio_weight_dims_;
+  vector<int64_t> mio_output_dims_;
   MIOPENWrapper miopen_wrapper_;
   miopenTensorDescriptor_t bottom_desc_;
   miopenTensorDescriptor_t bias_desc_;
@@ -211,8 +212,8 @@ bool MIOPENConvOp::DoRunWithType() {
   // Figure out the output shape
   CAFFE_ENFORCE(X.ndim() >= 3 && X.ndim() <= 5);
   CAFFE_ENFORCE(
-      Weight.ndim() == 4,
-      "Conv op with MIOpen engine is supported only for 2D convolutions");
+      Weight.ndim() == 4 || Weight.ndim() == 5,
+      "Conv op with MIOpen engine is supported only for 2D and 3D convolutions");
 
   const int M = Weight.dim32(0);
   auto sizes = ConvPoolOpBase<HIPContext>::GetOutputSize(X, M);
@@ -252,48 +253,50 @@ bool MIOPENConvOp::DoRunWithType() {
     VLOG(1) << "Changing MIOpen descriptor configurations.";
     if (input_changed) {
       mio_input_dims_ = X.sizes().vec();
-      MIOPEN_ENFORCE(miopenSet4dTensorDescriptor(
-          bottom_desc_, miopenTypeWrapper<T_X>::type, N, C, H, W));
+      std::vector<int> input_dims(std::begin(mio_input_dims_), std::end(mio_input_dims_));
+      MIOPEN_ENFORCE(miopenSetTensorDescriptor(
+            bottom_desc_, miopenTypeWrapper<T_X>::type, input_dims.size(), input_dims.data(), nullptr));
     }
 
     if (weight_changed) {
       mio_weight_dims_ = Weight.sizes().vec();
-      MIOPEN_ENFORCE(miopenInitConvolutionDescriptor(
-          conv_desc_,
-          mode_,
-          pad_t(),
-          pad_l(),
-          stride_h(),
-          stride_w(),
-          dilation_h(),
-          dilation_w()));
-
+      std::vector<int> weight_dims(std::begin(mio_weight_dims_), std::end(mio_weight_dims_));
+      int spatial_dim = (weight_dims.size() == 5) ? 3 : 2;
+      MIOPEN_ENFORCE(miopenInitConvolutionNdDescriptor(
+            conv_desc_,
+            spatial_dim,
+            pads_.data(),
+            stride_.data(),
+            dilation_.data(),
+            mode_));
       MIOPEN_ENFORCE(miopenSetConvolutionGroupCount(conv_desc_, group_));
 
-      MIOPEN_ENFORCE(miopenSet4dTensorDescriptor(
-          weight_desc_,
-          miopenTypeWrapper<T_W>::type,
-          M,
-          C / group_,
-          kernel_h(),
-          kernel_w()));
+      MIOPEN_ENFORCE(miopenSetTensorDescriptor(
+            weight_desc_,
+            miopenTypeWrapper<T_W>::type,
+            mio_weight_dims_.size(),
+            weight_dims.data(),
+            nullptr));
     }
-
-    MIOPEN_ENFORCE(miopenGetConvolutionForwardOutputDim(
-        conv_desc_,
-        bottom_desc_,
-        weight_desc_,
-        &N_out,
-        &C_out,
-        &H_out,
-        &W_out));
-
-    MIOPEN_ENFORCE(miopenSet4dTensorDescriptor(
-        top_desc_, miopenTypeWrapper<T_X>::type, N_out, C_out, H_out, W_out));
+    
+    mio_output_dims_ = Y->sizes().vec();
+    std::vector<int> output_dims(std::begin(mio_output_dims_), std::end(mio_output_dims_));
+    int output_dim_size = output_dims.size();
+    MIOPEN_ENFORCE(miopenGetConvolutionNdForwardOutputDim(
+          conv_desc_,
+          bottom_desc_,
+          weight_desc_,
+          &output_dim_size,
+          output_dims.data()));
+          
+    MIOPEN_ENFORCE(miopenSetTensorDescriptor(
+          top_desc_, miopenTypeWrapper<T_X>::type, output_dims.size(), output_dims.data(), nullptr));
 
     if (InputSize() == 3) {
-      MIOPEN_ENFORCE(miopenSet4dTensorDescriptor(
-          bias_desc_, miopenTypeWrapper<T_B>::type, 1, M, 1, 1));
+      std::vector<int> bias_dims(X.dim(), 1);
+      bias_dims[1] = M;
+      MIOPEN_ENFORCE(miopenSetTensorDescriptor(
+            bias_desc_, miopenTypeWrapper<T_B>::type, bias_dims.size(), bias_dims.data(), nullptr));
     }
 
     while (!bestAlgoFound_) {
@@ -411,8 +414,8 @@ bool MIOPENConvGradientOp::DoRunWithType() {
 
   CAFFE_ENFORCE(X.ndim() >= 3 && X.ndim() <= 5);
   CAFFE_ENFORCE(
-      Weight.ndim() == 4,
-      "ConvGradient op with MIOpen engine is supported only for 2D convolutions");
+      Weight.ndim() == 4 || Weight.ndim() == 5,
+      "ConvGradient op with MIOpen engine is supported only for 2D and 3D convolutions");
 
   const int M = Weight.dim32(0);
   int N = 0, C = 0, H = 0, W = 0, D = 0, N_out = 0, C_out = 0, H_out = 0,
@@ -468,48 +471,50 @@ bool MIOPENConvGradientOp::DoRunWithType() {
     VLOG(1) << "Changing MIOpen descriptor configurations.";
     if (input_changed) {
       mio_input_dims_ = X.sizes().vec();
-      MIOPEN_ENFORCE(miopenSet4dTensorDescriptor(
-          bottom_desc_, miopenTypeWrapper<T_X>::type, N, C, H, W));
+      std::vector<int>  input_dims(std::begin(mio_input_dims_), std::end(mio_input_dims_));
+      MIOPEN_ENFORCE(miopenSetTensorDescriptor(
+            bottom_desc_, miopenTypeWrapper<T_X>::type, input_dims.size(), input_dims.data(), nullptr));
     }
 
     if (weight_changed) {
       mio_weight_dims_ = Weight.sizes().vec();
-      MIOPEN_ENFORCE(miopenInitConvolutionDescriptor(
-          conv_desc_,
-          mode_,
-          pad_t(),
-          pad_l(),
-          stride_h(),
-          stride_w(),
-          dilation_h(),
-          dilation_w()));
+      std::vector<int> weight_dims(std::begin(mio_weight_dims_), std::end(mio_weight_dims_));
+      const int spatial_dim = weight_dims.size() - 2;
+      MIOPEN_ENFORCE(miopenInitConvolutionNdDescriptor(
+            conv_desc_,
+            spatial_dim,
+            pads_.data(),
+            stride_.data(),
+            dilation_.data(),
+            mode_));
 
       MIOPEN_ENFORCE(miopenSetConvolutionGroupCount(conv_desc_, group_));
 
-      MIOPEN_ENFORCE(miopenSet4dTensorDescriptor(
-          weight_desc_,
-          miopenTypeWrapper<T_X>::type,
-          M,
-          C / group_,
-          kernel_h(),
-          kernel_w()));
+      MIOPEN_ENFORCE(miopenSetTensorDescriptor(
+            weight_desc_,
+            miopenTypeWrapper<T_X>::type,
+            weight_dims.size(),
+            weight_dims.data(),
+            nullptr));
     }
 
-    MIOPEN_ENFORCE(miopenGetConvolutionForwardOutputDim(
-        conv_desc_,
-        bottom_desc_,
-        weight_desc_,
-        &N_out,
-        &C_out,
-        &H_out,
-        &W_out));
-
-    MIOPEN_ENFORCE(miopenSet4dTensorDescriptor(
-        top_desc_, miopenTypeWrapper<T_X>::type, N_out, C_out, H_out, W_out));
+    mio_output_dims_ = dY.sizes().vec();
+    std::vector<int> output_dims(std::begin(mio_output_dims_), std::end(mio_output_dims_));
+    int output_dim_size = output_dims.size();
+    MIOPEN_ENFORCE(miopenGetConvolutionNdForwardOutputDim(
+         conv_desc_,
+         bottom_desc_,
+         weight_desc_,
+         &output_dim_size,
+         output_dims.data()));
+    MIOPEN_ENFORCE(miopenSetTensorDescriptor(
+          top_desc_, miopenTypeWrapper<T_X>::type, output_dims.size(), output_dims.data(), nullptr));
 
     if (!no_bias_) {
-      MIOPEN_ENFORCE(miopenSet4dTensorDescriptor(
-          bias_desc_, miopenTypeWrapper<T_B>::type, 1, M, 1, 1));
+      std::vector<int> bias_dims(X.dim(), 1);
+      bias_dims[1] = M;
+      MIOPEN_ENFORCE(miopenSetTensorDescriptor(
+            bias_desc_, miopenTypeWrapper<T_B>::type, bias_dims.size(), bias_dims.data(), nullptr));
     }
 
     while ((!bestDataAlgoFound_) && doBwdDataComputation) {
@@ -619,9 +624,6 @@ bool MIOPENConvGradientOp::DoRunWithType() {
         bwdWeightWsSize_));
   });
 
-  // Synchronize the work across groups.
-  hipDeviceSynchronize();
-
   ////////////////////////////////////// BIAS ///////////////////////////
   if (!no_bias_) {
     auto* dbias = Output(BIAS_OR_INPUT_GRAD);
@@ -670,4 +672,6 @@ bool MIOPENConvGradientOp::RunOnDevice() {
 
 REGISTER_MIOPEN_OPERATOR(Conv, MIOPENConvOp);
 REGISTER_MIOPEN_OPERATOR(ConvGradient, MIOPENConvGradientOp);
+REGISTER_MIOPEN_OPERATOR(Conv3D, MIOPENConvOp);
+REGISTER_MIOPEN_OPERATOR(Conv3DGradient, MIOPENConvGradientOp);
 } // namespace caffe2

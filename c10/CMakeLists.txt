@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
 project(c10 CXX)
 
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Main build file for the C10 library.
@@ -17,7 +17,6 @@ set(C10_USE_GFLAGS ${USE_GFLAGS}) # used in cmake_macros.h.in
 set(C10_USE_GLOG ${USE_GLOG}) # used in cmake_macros.h.in
 set(C10_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS}) # used in cmake_macros.h.in
 set(C10_USE_NUMA ${USE_NUMA})
-set(C10_DISABLE_NUMA ${CAFFE2_DISABLE_NUMA}) # used in cmake_macros.h.in
 configure_file(
     ${CMAKE_CURRENT_LIST_DIR}/macros/cmake_macros.h.in
     ${CMAKE_BINARY_DIR}/c10/macros/cmake_macros.h)
@@ -28,6 +27,7 @@ configure_file(
 file(GLOB C10_SRCS
         *.cpp
         core/*.cpp
+        core/boxing/*.cpp
         core/dispatch/*.cpp
         core/op_registration/*.cpp
         core/impl/*.cpp
@@ -54,15 +54,11 @@ if (${USE_GLOG})
 endif()
 
 if (USE_NUMA)
-  if (NOT CAFFE2_DISABLE_NUMA)
-    message(STATUS "NUMA paths:")
-    message(STATUS ${Numa_INCLUDE_DIR})
-    message(STATUS ${Numa_LIBRARIES})
-    include_directories(SYSTEM ${Numa_INCLUDE_DIR})
-    target_link_libraries(c10 PRIVATE ${Numa_LIBRARIES})
-  else()
-    message(STATUS "NUMA is disabled")
-  endif()
+  message(STATUS "NUMA paths:")
+  message(STATUS ${Numa_INCLUDE_DIR})
+  message(STATUS ${Numa_LIBRARIES})
+  include_directories(SYSTEM ${Numa_INCLUDE_DIR})
+  target_link_libraries(c10 PRIVATE ${Numa_LIBRARIES})
 else()
   message(STATUS "don't use NUMA")
 endif()
@@ -78,6 +74,7 @@ target_include_directories(
     $<INSTALL_INTERFACE:include>)
 
 add_subdirectory(test)
+add_subdirectory(benchmark)
 
 if(USE_CUDA)
   add_subdirectory(cuda)

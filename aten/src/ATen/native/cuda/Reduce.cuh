@@ -2,7 +2,7 @@
 
 #include <assert.h>
 #include <ATen/ATen.h>
-#include <ATen/cuda/Array.h>
+#include <ATen/core/Array.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/detail/FunctionTraits.h>
@@ -11,6 +11,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <c10/macros/Macros.h>
+#include <c10/cuda/CUDACachingAllocator.h>
 #include <functional>
 #include <iosfwd>
 #include <tuple>
@@ -20,7 +21,7 @@
 
 namespace at { namespace native {
 
-using at::cuda::Array;
+using at::detail::Array;
 
 static inline int64_t div_up(int64_t a, int64_t b) {
   return (a + b - 1) / b;
@@ -241,8 +242,9 @@ __device__ void strided_iterate(func_t f, index_t begin, index_t end, index_t st
 
 template <typename out_scalar_t, typename func_t>
 struct func_wrapper_t {
-  using arg_t = typename binary_function_traits<func_t>::arg2_t;
-  func_t reduce;
+  using arg_t = typename binary_function_traits<func_t>::arg1_t;
+  using scalar_t = typename binary_function_traits<func_t>::arg2_t;
+
   func_t combine;
   static inline __device__ out_scalar_t project(arg_t arg) {
     return (out_scalar_t) arg;
@@ -251,20 +253,28 @@ struct func_wrapper_t {
     return WARP_SHFL_DOWN(arg, offset);
   }
 
-  func_wrapper_t(const func_t& op) : reduce(op), combine(op) {
+  static __device__ arg_t translate_idx(arg_t acc, int64_t /*idx*/) {
+    return acc;
+  }
+
+  func_wrapper_t(const func_t& op) : combine(op) {
+  }
+
+  // wrap a normal reduction that ignores the index
+  __device__ arg_t reduce(arg_t acc, scalar_t val, int64_t idx) const {
+    return combine(acc, val);
   }
 };
 
 template <typename scalar_t, typename func_t>
 func_wrapper_t<scalar_t, func_t> func_wrapper(const func_t& op) {
-  using arg_t = typename binary_function_traits<func_t>::arg2_t;
   return func_wrapper_t<scalar_t, func_t> { op };
 }
 
 template <typename scalar_t, typename ops_t, typename index_t, typename out_scalar_t=scalar_t, int vt0=4>
 struct ReduceOp {
-  using traits = binary_function_traits<decltype(&ops_t::reduce)>;
-  using arg_t = typename std::remove_const<typename std::remove_reference<typename traits::arg1_t>::type>::type;
+  using traits = function_traits<decltype(&ops_t::reduce)>;
+  using arg_t = typename std::decay<typename traits::template arg<0>::type>::type;
 
   using InputCalculator = OffsetCalculator<1, index_t>;
   using OutputCalculator = OffsetCalculator<2, index_t>;
@@ -288,22 +298,36 @@ struct ReduceOp {
   // cta_buf used for accumulation between blocks during global reduction
   void* cta_buf;
   int* semaphores;
+  int64_t base_idx;
   bool accumulate;
   bool final_output;
   int noutputs;
 
-  ReduceOp(ops_t ops, ReduceConfig config, InputCalculator input_calc, OutputCalculator output_calc,
-           const void* src, char* dst0, optional<char*> dst1, void* acc_buf, void* cta_buf, int* semaphores, arg_t ident, int noutputs)
-    : ops(ops)
-    , config(config)
-    , input_calc(input_calc)
-    , output_calc(output_calc)
-    , src(src)
-    , acc_buf(acc_buf)
-    , cta_buf(cta_buf)
-    , semaphores(semaphores)
-    , ident(ident)
-    , noutputs(noutputs) {
+  ReduceOp(
+      ops_t ops,
+      ReduceConfig config,
+      InputCalculator input_calc,
+      OutputCalculator output_calc,
+      const void* src,
+      char* dst0,
+      optional<char*> dst1,
+      void* acc_buf,
+      void* cta_buf,
+      int* semaphores,
+      arg_t ident,
+      int noutputs,
+      int64_t base_idx)
+      : ops(ops),
+        ident(ident),
+        config(config),
+        input_calc(input_calc),
+        output_calc(output_calc),
+        src(src),
+        acc_buf(acc_buf),
+        cta_buf(cta_buf),
+        semaphores(semaphores),
+        base_idx(base_idx),
+        noutputs(noutputs) {
     dst[0] = dst0;
     if (dst1.has_value()) {
       dst[1] = dst1.value();
@@ -321,8 +345,8 @@ struct ReduceOp {
       auto input_slice = (const char*)src + base_offsets[1];
       value = thread_reduce((const scalar_t*)input_slice);
     }
-    bool should_block_y_reduce = config.should_block_y_reduce();
-    if (should_block_y_reduce) {
+
+    if (config.should_block_y_reduce()) {
       value = block_y_reduce(value, shared_memory);
     }
     if (config.should_block_x_reduce()) {
@@ -341,6 +365,10 @@ struct ReduceOp {
     if (config.should_global_reduce()) {
       value = global_reduce(value, acc, shared_memory);
     } else if (config.should_store(output_idx)) {
+      if (accumulate) {
+        value = ops.translate_idx(value, base_idx);
+      }
+
       if (acc == nullptr) {
         if (accumulate) {
           value = accumulate_in_output<can_accumulate_in_output>(out, value);
@@ -391,7 +419,7 @@ struct ReduceOp {
       }
       // compute
       strided_iterate<vt0, index_t>([&](index_t i, index_t idx) {
-        value_list[i] = ops.reduce(value_list[i], values[i]);
+        value_list[i] = ops.reduce(value_list[i], values[i], idx);
       }, idx, config.num_inputs, config.step_input);
       // step offset
       idx += config.step_input * vt0;
@@ -563,6 +591,10 @@ struct ReduceOp {
         value = block_x_reduce(value, shared_memory);
       }
       if (should_store) {
+        if (accumulate) {
+          value = ops.translate_idx(value, base_idx);
+        }
+
         if (acc == nullptr) {
           if (accumulate) {
             value = accumulate_in_output<can_accumulate_in_output>(out, value);
@@ -611,7 +643,7 @@ struct AccumulationBuffer {
       numerator_ = 1;
       denominator_ = 1;
     } else {
-      auto& allocator = *at::globalContext().getTHCState()->cudaDeviceAllocator;
+      auto& allocator = *c10::cuda::CUDACachingAllocator::get();
       buffer_ = allocator.allocate(size);
       acc_ptr_ = (char*)buffer_.get();
       numerator_ = acc_t_size;
@@ -637,11 +669,11 @@ struct AccumulationBuffer {
 
 template <typename scalar_t, typename out_scalar_t, int vt0=4, typename ops_t, typename ident_t=double>
 inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t ident=0,
-                              AccumulationBuffer* acc_buf_ptr=nullptr) {
+                              AccumulationBuffer* acc_buf_ptr=nullptr, int64_t base_idx=0) {
   AT_ASSERT(iter.numel() > 0 && iter.ntensors() - iter.noutputs() == 1 && iter.noutputs() >= 1);
 
-  using traits = binary_function_traits<decltype(&ops_t::reduce)>;
-  using arg_t = typename traits::arg1_t;
+  using traits = function_traits<decltype(&ops_t::reduce)>;
+  using arg_t = typename traits::template arg<0>::type;
   static constexpr bool can_accumulate_in_output =
     std::is_convertible<arg_t, out_scalar_t>::value;
 
@@ -670,7 +702,12 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
 
   if (!can_use_32bit_indexing) {
     for (auto& sub_iter : iter.with_32bit_indexing()) {
-      gpu_reduce_kernel<scalar_t, out_scalar_t, vt0>(sub_iter, ops, ident, acc_buf_ptr);
+      // Dim 0 is always the reduced dimension
+      AT_ASSERT(sub_iter.strides(0)[0] == 0);
+      int64_t sub_iter_base_idx = sub_iter.view_offsets()[0];
+
+      gpu_reduce_kernel<scalar_t, out_scalar_t, vt0>(sub_iter, ops, ident,
+          acc_buf_ptr, sub_iter_base_idx);
     }
     return;
   }
@@ -696,21 +733,42 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
 
   int64_t dim0;
   int64_t dim1;
-  // adjust block size to fit width to fast changing dimension
-  if (iter.strides(/*arg=*/input_index)[0] == sizeof(scalar_t)) {
+
+  // Adjust block size to map block width to fastest changing dimension of input
+  // tensor. This grants the best possible memory accessing pattern, given that
+  // for non-contiguous tensor with space in between, we cannot have perfect
+  // memory coalescing.
+  bool reduction_on_fastest_striding_dimension =
+      (iter.num_reduce_dims() == iter.ndim()) ||
+      (iter.strides(/*arg=*/input_index)[0] <
+       iter.strides(/*arg=*/input_index)[iter.num_reduce_dims()]);
+  // Notice that dim0 & dim1 does NOT guarantee any launch configuration here!
+  // dim0 & dim1 are more like the upper bound of the block dimension. The
+  // actual launch config and reduction scheme is determined by setting values
+  // to `config.input_mult` and `config.output_mult`.
+  // We try to max out dim1 so that we have enough threads per CTA to deliver
+  // performance for larger problem size.
+  if (reduction_on_fastest_striding_dimension) {
+    // Map block.x to the fastest reducing dimension. It implies:
+    //   1. block_x_reduce is required.
+    //   2. block.y now max out to num_outputs.
     dim0 = iter.shape()[0];
     dim1 = num_outputs;
   } else {
+    // Map block.x to the fastest non reducing dimension. It implies:
+    //   1. block_x_reduce is turned off.
+    //   2. block.y now max out to inputs_per_output.
     dim0 = iter.shape()[iter.num_reduce_dims()];
     dim1 = inputs_per_output;
   }
 
+  // Adjust block_width and block_height
   config.set_block_dimension(dim0, dim1);
 
   int block_width = config.block_width;
   int block_height = config.block_height;
 
-  if (iter.ndim() == 0 || iter.strides(/*arg=*/input_index)[0] == sizeof(scalar_t)) {
+  if (iter.ndim() == 0 || reduction_on_fastest_striding_dimension) {
     // Split the input across lanes if the input is contiguous in the reduced
     // dimension. This will require reduction between threads using warp
     // shuffle instructions and shared memory (if block_width > warpSize).
@@ -744,7 +802,7 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
   at::DataPtr buffer;
   at::DataPtr semaphores;
   if (config.should_global_reduce()) {
-    auto& allocator = *at::globalContext().getTHCState()->cudaDeviceAllocator;
+    auto& allocator = *c10::cuda::CUDACachingAllocator::get();
     buffer = allocator.allocate(config.global_memory_size());
     semaphores = allocator.allocate(config.semaphore_size());
 
@@ -767,7 +825,8 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
       buffer.get(),
       (int*)semaphores.get(),
       ident,
-      noutputs);
+      noutputs,
+      base_idx);
   reduce.accumulate = iter.should_accumulate();
   reduce.final_output = iter.is_final_output();
 

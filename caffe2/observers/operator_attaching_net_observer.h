@@ -16,7 +16,7 @@ class OperatorAttachingNetObserver : public ObserverBase<NetBase> {
       : ObserverBase<NetBase>(subject_) {
     const auto& operators = subject_->GetOperators();
     for (auto* op : operators) {
-      auto observer = caffe2::make_unique<TOpObserver>(op, netObserver);
+      auto observer = std::make_unique<TOpObserver>(op, netObserver);
       const auto* ob = observer.get();
       op->AttachObserver(std::move(observer));
       operator_observers_.push_back(ob);

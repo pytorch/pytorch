@@ -10,15 +10,25 @@ bool THPEngine_initModule(PyObject *module);
 namespace torch { namespace autograd { namespace python {
 
 struct PythonEngine : public Engine {
+  static Engine& get_python_engine();
   void thread_init(int device) override;
-  void thread_on_exception(FunctionTask& task, std::exception& e) override;
+  void thread_on_exception(
+      std::shared_ptr<GraphTask> graph_task,
+      const std::shared_ptr<Node>& fn,
+      std::exception& e) override;
   variable_list execute(
       const edge_list& roots,
       const variable_list& inputs,
       bool keep_graph,
       bool create_graph,
       const edge_list& outputs = {}) override;
+
+  std::shared_ptr<FutureVariableList> execute_with_graph_task(
+      const std::shared_ptr<GraphTask>& graph_task,
+      std::shared_ptr<Node> graph_root) override;
   std::unique_ptr<AnomalyMetadata> make_anomaly_metadata() override;
+  private:
+    PythonEngine();
 };
 
 }}} // namespace torch::autograd::python

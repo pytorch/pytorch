@@ -4,9 +4,9 @@ namespace at {
 
 QTensorImpl::QTensorImpl(
     Storage&& storage,
-    TensorTypeId type_id,
+    DispatchKeySet key_set,
     QuantizerPtr quantizer)
-    : TensorImpl(std::move(storage), type_id),
+    : TensorImpl(std::move(storage), key_set),
       quantizer_(quantizer) {}
 
 } // namespace at

@@ -1,32 +1,34 @@
 #pragma once
 
-#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/ir/ir.h>
 
 namespace torch {
 namespace jit {
 
-// nvrtc has a limit on the number of arguments allowed in a CUDA kernel.
-// The specific limit is a function of constant memory size, amount available
-// to pass arguments, and some implementation dependence. Select a safe
-// limit here.
-//   This limit is also applied to other devices in the fuser, because we
-// don't consider a kernel with such a large number of arguments would be
-// profitable.
-constexpr size_t fusion_kernel_args_limit = 128;
-
 // NB: Be sure to run DCE before fusion, because dead instructions
 // can prevent fusion opportunities from being exploited.
 // On Windows will noop, NYI
-TORCH_API void FuseGraph(std::shared_ptr<Graph>& graph);
+TORCH_API void FuseGraph(
+    std::shared_ptr<Graph>& graph,
+    bool strict_fuser_check = false);
 
+// \brief Custom fusion pass using a node-level callback to
+// determine the inclusion of nodes in a subgraph.
+//
+// This helper omits aliased inputs and fusion across control flow
+// boundaries.
+//
+// \arg graph The graph to be modified in-place
+// \arg is_fusable A callback run on each fusable node in the graph.
+// \arg kind The label given to the resultant fused subgraph
+// \arg arg_limit The maximum number of args the resultant fused subgraph
+//                should have.  Note: This will likely develop into a general
+//                post condition on the fused subgraph.
 TORCH_API void CustomFuseGraph(
     std::shared_ptr<Graph>& graph,
     std::function<bool(Node*)> is_fusable,
-    Symbol kind);
-
-TORCH_API bool trackSingleGradSumToSizeToOutputs(
-    Value* gradSumToSizeOutput,
-    std::vector<int64_t>* outputGradSumToSizes);
+    Symbol kind,
+    size_t arg_limit=std::numeric_limits<size_t>::max());
 
 } // namespace jit
 } // namespace torch

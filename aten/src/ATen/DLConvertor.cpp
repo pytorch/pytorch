@@ -7,7 +7,7 @@
 using namespace std;
 namespace at {
 
-static DLDataType getDLDataType(const Tensor& t) {
+DLDataType getDLDataType(const Tensor& t) {
   DLDataType dtype;
   dtype.lanes = 1;
   dtype.bits = t.element_size() * 8;
@@ -39,6 +39,9 @@ static DLDataType getDLDataType(const Tensor& t) {
     case ScalarType::Bool:
       dtype.code = DLDataTypeCode::kDLUInt;
       break;
+    case ScalarType::BFloat16:
+      throw std::logic_error("BFloat16 is not supported by dlpack");
+      break;
     case ScalarType::QInt8:
       throw std::logic_error("QInt8 is not supported by dlpack");
       break;
@@ -62,7 +65,7 @@ static DLDataType getDLDataType(const Tensor& t) {
   return dtype;
 }
 
-static DLContext getDLContext(const Tensor& tensor, const int64_t& device_id) {
+DLContext getDLContext(const Tensor& tensor, const int64_t& device_id) {
   DLContext ctx;
   ctx.device_id = device_id;
   if (tensor.is_cuda()) {
@@ -85,7 +88,7 @@ static Device getATenDevice(const DLContext& ctx) {
       return at::Device(DeviceType::HIP, ctx.device_id);
     default:
       throw std::logic_error(
-          "Unsupported device_type: " + std::to_string(ctx.device_type));
+          "Unsupported device_type: " + c10::to_string(ctx.device_type));
   }
 }
 
@@ -101,7 +104,7 @@ ScalarType toScalarType(const DLDataType& dtype) {
           break;
         default:
           throw std::logic_error(
-              "Unsupported kUInt bits " + std::to_string(dtype.bits));
+              "Unsupported kUInt bits " + c10::to_string(dtype.bits));
       }
       break;
     case DLDataTypeCode::kDLInt:
@@ -120,7 +123,7 @@ ScalarType toScalarType(const DLDataType& dtype) {
           break;
         default:
           throw std::logic_error(
-              "Unsupported kInt bits " + std::to_string(dtype.bits));
+              "Unsupported kInt bits " + c10::to_string(dtype.bits));
       }
       break;
     case DLDataTypeCode::kDLFloat:
@@ -136,11 +139,11 @@ ScalarType toScalarType(const DLDataType& dtype) {
           break;
         default:
           throw std::logic_error(
-              "Unsupported kFloat bits " + std::to_string(dtype.bits));
+              "Unsupported kFloat bits " + c10::to_string(dtype.bits));
       }
       break;
     default:
-      throw std::logic_error("Unsupported code " + std::to_string(dtype.code));
+      throw std::logic_error("Unsupported code " + c10::to_string(dtype.code));
   }
   return stype;
 }

@@ -1,3 +1,6 @@
+from __future__ import absolute_import, division, print_function, unicode_literals
+
+
 r"""
 `torch.distributed.launch` is a module that spawns up multiple distributed
 training processes on each of the training nodes.
@@ -16,7 +19,7 @@ aggregated communication bandwidth.
 In both cases of single-node distributed training or multi-node distributed
 training, this utility will launch the given number of processes per node
 (``--nproc_per_node``). If used for GPU training, this number needs to be less
-or euqal to the number of GPUs on the current system (``nproc_per_node``),
+or equal to the number of GPUs on the current system (``nproc_per_node``),
 and each process will be operating on a single GPU from *GPU 0 to
 GPU (nproc_per_node - 1)*.
 
@@ -60,7 +63,7 @@ Node 2:
 
 **Important Notices:**
 
-1. This utilty and multi-process distributed (single-node or
+1. This utility and multi-process distributed (single-node or
 multi-node) GPU training currently only achieves the best performance using
 the NCCL distributed backend. Thus NCCL backend is the recommended backend to
 use for GPU training.
@@ -149,7 +152,7 @@ def parse_args():
     @retval ArgumentParser
     """
     parser = ArgumentParser(description="PyTorch distributed training launch "
-                                        "helper utilty that will spawn up "
+                                        "helper utility that will spawn up "
                                         "multiple distributed processes")
 
     # Optional arguments for the launch helper
@@ -171,13 +174,20 @@ def parse_args():
                              "--master_addr can simply be 127.0.0.1")
     parser.add_argument("--master_port", default=29500, type=int,
                         help="Master node (rank 0)'s free port that needs to "
-                             "be used for communciation during distributed "
+                             "be used for communication during distributed "
                              "training")
     parser.add_argument("--use_env", default=False, action="store_true",
                         help="Use environment variable to pass "
                              "'local rank'. For legacy reasons, the default value is False. "
                              "If set to True, the script will not pass "
                              "--local_rank as argument, and will instead set LOCAL_RANK.")
+    parser.add_argument("-m", "--module", default=False, action="store_true",
+                        help="Changes each process to interpret the launch script "
+                             "as a python module, executing with the same behavior as"
+                             "'python -m'.")
+    parser.add_argument("--no_python", default=False, action="store_true",
+                        help="Do not prepend the training script with \"python\" - just exec "
+                             "it directly. Useful when the script is not a Python script.")
 
     # positional
     parser.add_argument("training_script", type=str,
@@ -189,7 +199,6 @@ def parse_args():
     # rest from the training program
     parser.add_argument('training_script_args', nargs=REMAINDER)
     return parser.parse_args()
-
 
 def main():
     args = parse_args()
@@ -205,6 +214,15 @@ def main():
 
     processes = []
 
+    if 'OMP_NUM_THREADS' not in os.environ and args.nproc_per_node > 1:
+        current_env["OMP_NUM_THREADS"] = str(1)
+        print("*****************************************\n"
+              "Setting OMP_NUM_THREADS environment variable for each process "
+              "to be {} in default, to avoid your system being overloaded, "
+              "please further tune the variable for optimal performance in "
+              "your application as needed. \n"
+              "*****************************************".format(current_env["OMP_NUM_THREADS"]))
+
     for local_rank in range(0, args.nproc_per_node):
         # each process's rank
         dist_rank = args.nproc_per_node * args.node_rank + local_rank
@@ -212,14 +230,24 @@ def main():
         current_env["LOCAL_RANK"] = str(local_rank)
 
         # spawn the processes
-        if args.use_env:
-            cmd = [sys.executable, "-u",
-                   args.training_script] + args.training_script_args
+        with_python = not args.no_python
+        cmd = []
+        if with_python:
+            cmd = [sys.executable, "-u"]
+            if args.module:
+                cmd.append("-m")
         else:
-            cmd = [sys.executable,
-                   "-u",
-                   args.training_script,
-                   "--local_rank={}".format(local_rank)] + args.training_script_args
+            if not args.use_env:
+                raise ValueError("When using the '--no_python' flag, you must also set the '--use_env' flag.")
+            if args.module:
+                raise ValueError("Don't use both the '--no_python' flag and the '--module' flag at the same time.")
+
+        cmd.append(args.training_script)
+
+        if not args.use_env:
+            cmd.append("--local_rank={}".format(local_rank))
+
+        cmd.extend(args.training_script_args)
 
         process = subprocess.Popen(cmd, env=current_env)
         processes.append(process)
@@ -228,7 +256,7 @@ def main():
         process.wait()
         if process.returncode != 0:
             raise subprocess.CalledProcessError(returncode=process.returncode,
-                                                cmd=process.args)
+                                                cmd=cmd)
 
 
 if __name__ == "__main__":

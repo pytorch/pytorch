@@ -7,74 +7,58 @@ list(APPEND CMAKE_MODULE_PATH
   ${CMAKE_CURRENT_SOURCE_DIR}/../../../cmake/Modules_CUDA_fix)
 
 if(USE_CUDA)
-  find_package(CUDA)
-  if(CUDA_FOUND)
-    set(C10D_USE_CUDA true)
-    message(STATUS "Building C10D with CUDA support")
-    add_definitions(-DUSE_CUDA=1)
-  else()
-    set(C10D_USE_CUDA false)
-    message(STATUS "CUDA not found, building C10D without CUDA support")
-  endif()
+  add_definitions(-DUSE_CUDA=1)
 elseif(USE_ROCM)
   add_definitions(-DUSE_ROCM=1)
   add_definitions(-D__HIP_PLATFORM_HCC__=1)
   add_definitions(-DHIP_VERSION=${HIP_VERSION_MAJOR})
-
-  set(C10D_USE_CUDA false)
-  set(C10D_USE_ROCM true)
 else()
-  set(C10D_USE_CUDA false)
-  message(STATUS "Building C10D without CUDA support")
+  message(STATUS "Building c10d without CUDA/ROCm support")
 endif()
 
-find_package(MPI)
-if(MPI_FOUND)
-  message(STATUS "MPI_INCLUDE_PATH: ${MPI_INCLUDE_PATH}")
-  message(STATUS "MPI_LIBRARIES: ${MPI_LIBRARIES}")
-  message(STATUS "MPIEXEC: ${MPIEXEC}")
-else()
-  message(STATUS "Not able to find MPI, will compile c10d without MPI support")
+if(USE_TBB)
+include_directories(${TBB_ROOT_DIR}/include)
+endif()
+
+if(USE_GLOO)
+  option(USE_C10D_GLOO "USE C10D GLOO" ON)
+endif()
+
+if(USE_NCCL)
+  option(USE_C10D_NCCL "USE C10D NCCL" ON)
+endif()
+
+if(USE_MPI)
+  find_package(MPI)
+  if(MPI_FOUND)
+    message(STATUS "MPI_INCLUDE_PATH: ${MPI_INCLUDE_PATH}")
+    message(STATUS "MPI_LIBRARIES: ${MPI_LIBRARIES}")
+    message(STATUS "MPIEXEC: ${MPIEXEC}")
+    option(USE_C10D_MPI "USE C10D MPI" ON)
+  else()
+    message(STATUS "Not able to find MPI, will compile c10d without MPI support")
+  endif()
 endif()
 
 function(copy_header file)
   configure_file(${file} ${CMAKE_BINARY_DIR}/include/c10d/${file} COPYONLY)
 endfunction()
 
-if(USE_NCCL)
-  option(USE_C10D_NCCL "USE C10D NCCL" ON)
-endif()
-
-if(MPI_FOUND)
-  option(USE_C10D_MPI "USE C10D MPI" ON)
-endif()
-
 set(C10D_SRCS
   FileStore.cpp
+  HashStore.cpp
   ProcessGroup.cpp
+  ProcessGroupRoundRobin.cpp
   Store.cpp
   PrefixStore.cpp
   TCPStore.cpp
   Utils.cpp
   )
 
-if(C10D_USE_CUDA)
-  set(C10D_LIBS
-    caffe2_gpu
-    )
-elseif(C10D_USE_ROCM)
-  set(C10D_LIBS
-    caffe2_hip
-    )
-else()
-  set(C10D_LIBS
-    caffe2
-    )
-endif()
-
+set(C10D_LIBS torch)
 
 if(USE_C10D_NCCL)
-  list(APPEND C10D_SRCS ProcessGroupNCCL.cpp)
+  list(APPEND C10D_SRCS ProcessGroupNCCL.cpp NCCLUtils.cpp)
   list(APPEND C10D_LIBS __caffe2_nccl)
 endif()
 
@@ -83,13 +67,17 @@ if(USE_C10D_MPI)
   list(APPEND C10D_LIBS ${MPI_LIBRARIES})
 endif()
 
-if (USE_GLOO)
-  list(APPEND C10D_SRCS ProcessGroupGloo.cpp)
+if(USE_C10D_GLOO)
+  list(APPEND C10D_SRCS ProcessGroupGloo.cpp GlooDeviceFactory.cpp)
+  list(APPEND C10D_LIBS gloo)
+  if(USE_CUDA)
+    list(APPEND C10D_LIBS gloo_cuda)
+  endif()
 endif()
 
 add_library(c10d STATIC ${C10D_SRCS})
 set_property(TARGET c10d PROPERTY POSITION_INDEPENDENT_CODE ON)
-set_property(TARGET c10d PROPERTY CXX_STANDARD 11)
+set_property(TARGET c10d PROPERTY CXX_STANDARD 14)
 target_compile_options(c10d PUBLIC
   -Wall
   -Wextra
@@ -99,14 +87,12 @@ target_compile_options(c10d PUBLIC
   -Wno-unknown-pragmas
   )
 
+add_dependencies(c10d torch)
 
-add_dependencies(c10d caffe2)
-
-if (USE_GLOO)
+if(USE_C10D_GLOO)
   add_dependencies(c10d gloo)
-  target_link_libraries(c10d PUBLIC gloo)
-  if (USE_CUDA)
-    target_link_libraries(c10d PUBLIC gloo_cuda)
+  if(USE_CUDA)
+    add_dependencies(c10d gloo_cuda)
   endif()
 endif()
 
@@ -128,7 +114,12 @@ if(USE_C10D_MPI)
   target_compile_definitions(c10d INTERFACE USE_C10D_MPI)
 endif()
 
+if(USE_C10D_GLOO)
+  target_compile_definitions(c10d INTERFACE USE_C10D_GLOO)
+endif()
+
 copy_header(FileStore.hpp)
+copy_header(HashStore.hpp)
 copy_header(PrefixStore.hpp)
 copy_header(ProcessGroup.hpp)
 copy_header(Store.hpp)
@@ -137,6 +128,7 @@ copy_header(Types.hpp)
 copy_header(Utils.hpp)
 if(USE_GLOO)
   copy_header(ProcessGroupGloo.hpp)
+  copy_header(GlooDeviceFactory.hpp)
 endif()
 
 if(USE_C10D_NCCL)

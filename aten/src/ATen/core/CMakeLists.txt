@@ -8,21 +8,22 @@ EXCLUDE(ATen_CORE_SRCS "${ATen_CORE_SRCS}" ${ATen_CORE_TEST_SRCS})
 
 # Add files needed from jit folders
 LIST(APPEND ATen_CORE_HEADERS
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../torch/csrc/jit/source_range.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../torch/csrc/jit/script/function_schema_parser.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../torch/csrc/jit/script/lexer.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../torch/csrc/jit/script/strtod.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../torch/csrc/jit/script/parse_string_literal.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../torch/csrc/jit/script/schema_type_parser.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../torch/csrc/jit/script/error_report.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../torch/csrc/jit/script/tree.h
+    ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/source_range.h
+    ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/function_schema_parser.h
+    ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/lexer.h
+    ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/strtod.h
+    ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/parse_string_literal.h
+    ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/schema_type_parser.h
+    ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/error_report.h
+    ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/tree.h
 )
 LIST(APPEND ATen_CORE_SRCS
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../torch/csrc/jit/script/function_schema_parser.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../torch/csrc/jit/script/lexer.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../torch/csrc/jit/script/strtod.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../torch/csrc/jit/script/schema_type_parser.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../torch/csrc/jit/source_range.cpp
+    ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/error_report.cpp
+    ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/function_schema_parser.cpp
+    ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/lexer.cpp
+    ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/strtod.cpp
+    ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/schema_type_parser.cpp
+    ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/source_range.cpp
 )
 
 # Pass to parent

@@ -32,18 +32,22 @@ class SGD(Optimizer):
         Considering the specific case of Momentum, the update can be written as
 
         .. math::
-                  v = \rho * v + g \\
-                  p = p - lr * v
+            \begin{aligned}
+                v_{t+1} & = \mu * v_{t} + g_{t+1}, \\
+                p_{t+1} & = p_{t} - \text{lr} * v_{t+1},
+            \end{aligned}
 
-        where p, g, v and :math:`\rho` denote the parameters, gradient,
-        velocity, and momentum respectively.
+        where :math:`p`, :math:`g`, :math:`v` and :math:`\mu` denote the 
+        parameters, gradient, velocity, and momentum respectively.
 
         This is in contrast to Sutskever et. al. and
         other frameworks which employ an update of the form
 
         .. math::
-             v = \rho * v + lr * g \\
-             p = p - v
+            \begin{aligned}
+                v_{t+1} & = \mu * v_{t} + \text{lr} * g_{t+1}, \\
+                p_{t+1} & = p_{t} - v_{t+1}.
+            \end{aligned}
 
         The Nesterov version is analogously modified.
     """
@@ -68,6 +72,7 @@ class SGD(Optimizer):
         for group in self.param_groups:
             group.setdefault('nesterov', False)
 
+    @torch.no_grad()
     def step(self, closure=None):
         """Performs a single optimization step.
 
@@ -77,7 +82,8 @@ class SGD(Optimizer):
         """
         loss = None
         if closure is not None:
-            loss = closure()
+            with torch.enable_grad():
+                loss = closure()
 
         for group in self.param_groups:
             weight_decay = group['weight_decay']
@@ -88,21 +94,21 @@ class SGD(Optimizer):
             for p in group['params']:
                 if p.grad is None:
                     continue
-                d_p = p.grad.data
+                d_p = p.grad
                 if weight_decay != 0:
-                    d_p.add_(weight_decay, p.data)
+                    d_p = d_p.add(p, alpha=weight_decay)
                 if momentum != 0:
                     param_state = self.state[p]
                     if 'momentum_buffer' not in param_state:
                         buf = param_state['momentum_buffer'] = torch.clone(d_p).detach()
                     else:
                         buf = param_state['momentum_buffer']
-                        buf.mul_(momentum).add_(1 - dampening, d_p)
+                        buf.mul_(momentum).add_(d_p, alpha=1 - dampening)
                     if nesterov:
-                        d_p = d_p.add(momentum, buf)
+                        d_p = d_p.add(buf, alpha=momentum)
                     else:
                         d_p = buf
 
-                p.data.add_(-group['lr'], d_p)
+                p.add_(d_p, alpha=-group['lr'])
 
         return loss

@@ -42,8 +42,6 @@
  *   - DO NOT CHANGE THE LAYOUT OR SIZE OF STRUCTURES
  */
 
-#if __ANDROID_API__ >= __ANDROID_API_O_MR1__
-
 #include <stddef.h>
 #include <stdint.h>
 #include <sys/cdefs.h>
@@ -1497,7 +1495,7 @@ int ANeuralNetworksModel_finish(ANeuralNetworksModel* model);
  * {@link ANeuralNetworksExecution_setOutputFromMemory} and
  * {@link ANeuralNetworksExecution_setOperandValue}.
  *
- * To build a model that can accomodate inputs of various sizes, as you may want
+ * To build a model that can accommodate inputs of various sizes, as you may want
  * to do for a CNN, set the size of the dimensions that will vary at run time to 0.
  * If you do so, provide the full dimensions when calling
  * {@link ANeuralNetworksExecution_setInput} or {@link ANeuralNetworksExecution_setInputFromMemory}.
@@ -1921,8 +1919,6 @@ int ANeuralNetworksEvent_wait(ANeuralNetworksEvent* event);
 void ANeuralNetworksEvent_free(ANeuralNetworksEvent* event);
 
 __END_DECLS
-
-#endif  //  __ANDROID_API__ >= 27
 
 #endif  // ANDROID_ML_NN_RUNTIME_NEURAL_NETWORKS_H
 

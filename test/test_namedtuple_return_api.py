@@ -11,8 +11,8 @@ path = os.path.dirname(os.path.realpath(__file__))
 aten_native_yaml = os.path.join(path, '../aten/src/ATen/native/native_functions.yaml')
 all_operators_with_namedtuple_return = {
     'max', 'min', 'median', 'mode', 'kthvalue', 'svd', 'symeig', 'eig',
-    'pstrf', 'qr', 'geqrf', 'solve', 'slogdet', 'sort', 'topk', 'gels',
-    'triangular_solve'
+    'qr', 'geqrf', 'solve', 'slogdet', 'sort', 'topk', 'lstsq',
+    'triangular_solve', 'cummax', 'cummin'
 }
 
 
@@ -20,18 +20,20 @@ class TestNamedTupleAPI(unittest.TestCase):
 
     def test_native_functions_yaml(self):
         operators_found = set()
-        regex = re.compile(r"^(\w*)\(")
+        regex = re.compile(r"^(\w*)(\(|\.)")
         file = open(aten_native_yaml, 'r')
         for f in yaml.load(file.read()):
             f = f['func']
             ret = f.split('->')[1].strip()
-            name = regex.findall(f)[0]
+            name = regex.findall(f)[0][0]
             if name in all_operators_with_namedtuple_return:
                 operators_found.add(name)
                 continue
-            if name.endswith('_backward') or name.endswith('_forward'):
+            if '_backward' in name or name.endswith('_forward'):
                 continue
             if not ret.startswith('('):
+                continue
+            if ret == '()':
                 continue
             ret = ret[1:-1].split(',')
             for r in ret:
@@ -50,7 +52,7 @@ class TestNamedTupleAPI(unittest.TestCase):
 
         op = namedtuple('op', ['operators', 'input', 'names', 'hasout'])
         operators = [
-            op(operators=['max', 'min', 'median', 'mode', 'sort', 'topk'], input=(0,),
+            op(operators=['max', 'min', 'median', 'mode', 'sort', 'topk', 'cummax', 'cummin'], input=(0,),
                names=('values', 'indices'), hasout=True),
             op(operators=['kthvalue'], input=(1, 0),
                names=('values', 'indices'), hasout=True),
@@ -61,7 +63,7 @@ class TestNamedTupleAPI(unittest.TestCase):
             op(operators=['geqrf'], input=(), names=('a', 'tau'), hasout=True),
             op(operators=['symeig', 'eig'], input=(True,), names=('eigenvalues', 'eigenvectors'), hasout=True),
             op(operators=['triangular_solve'], input=(a,), names=('solution', 'cloned_coefficient'), hasout=True),
-            op(operators=['gels'], input=(a,), names=('solution', 'QR'), hasout=True),
+            op(operators=['lstsq'], input=(a,), names=('solution', 'QR'), hasout=True),
         ]
 
         for op in operators:
@@ -75,26 +77,11 @@ class TestNamedTupleAPI(unittest.TestCase):
                         self.assertIs(getattr(ret, name), ret[i])
 
         all_covered_operators = set([x for y in operators for x in y.operators])
-        all_covered_operators |= {
-            # operators manually covered below
-            'pstrf',  # this operator is deprecated and will be removed in later release
-        }
 
         self.assertEqual(all_operators_with_namedtuple_return, all_covered_operators, textwrap.dedent('''
         The set of covered operators does not match the `all_operators_with_namedtuple_return` of
         test_namedtuple_return_api.py. Do you forget to add test for that operator?
         '''))
-
-        # test pstrf
-        b = torch.eye(5)
-        ret = b.pstrf()
-        self.assertIs(ret.u, ret[0])
-        self.assertIs(ret.pivot, ret[1])
-        ret1 = torch.pstrf(b, out=tuple(ret))
-        self.assertIs(ret1.u, ret1[0])
-        self.assertIs(ret1.pivot, ret1[1])
-        self.assertIs(ret1.u, ret[0])
-        self.assertIs(ret1.pivot, ret[1])
 
 
 if __name__ == '__main__':

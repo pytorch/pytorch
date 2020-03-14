@@ -4,14 +4,24 @@
 
 namespace caffe2 {
 
-namespace {
-void annotateOpIndex(NetDef* net) {
-  int i = 0;
+// Populate 'net_pos' argument for any ops that don't already have it. 'net_pos'
+// we populate here starts after the max 'net_pos' value we encountered.
+void BackendTransformerBase::annotateOpIndex(NetDef* net) {
+  // find the max net_pos that we have so far.
+  int i = -1;
+  for (const auto& op : net->op()) {
+    ArgumentHelper helper(op);
+    int old_index = helper.GetSingleArgument(op, kNetPos, -1);
+    i = std::max(i, old_index);
+  }
+
+  // populate net_pos for any op that doesn't already have it.
   for (auto& op : *(net->mutable_op())) {
-    AddArgument(kNetPos, i++, &op);
+    if (!ArgumentHelper::HasArgument(op, kNetPos)) {
+      AddArgument(kNetPos, ++i, &op);
+    }
   }
 }
-} // namespace
 
 std::string BackendTransformerBase::getModelId(const NetDef& net) {
   static std::atomic<size_t> seq_id{0};
@@ -33,21 +43,24 @@ std::string BackendTransformerBase::getModelId(const NetDef& net) {
   return model_id;
 }
 
-TensorProto BackendTransformerBase::wrapShapeInfoIntoTensorProto(
+TensorProto wrapShapeInfoIntoTensorProto(
     const std::string& name,
-    const ShapeInfo& shape_info) const {
+    const ShapeInfo& shape_info) {
   TensorProto t;
   t.set_name(name);
   t.set_data_type(shape_info.shape.data_type());
   for (const auto i : shape_info.shape.dims()) {
     t.add_dims(i);
   }
+  for (const auto& dimType : shape_info.getDimType()) {
+    t.add_int32_data(static_cast<int32_t>(dimType));
+  }
   return t;
 }
 
-QTensorProto BackendTransformerBase::wrapShapeInfoIntoQTensorProto(
+QTensorProto wrapShapeInfoIntoQTensorProto(
     const std::string& name,
-    const ShapeInfo& shape_info) const {
+    const ShapeInfo& shape_info) {
   QTensorProto t;
   CAFFE_ENFORCE(
       shape_info.is_quantized == true,
@@ -71,14 +84,16 @@ QTensorProto BackendTransformerBase::wrapShapeInfoIntoQTensorProto(
   for (const auto i : shape_info.shape.dims()) {
     t.add_dims(i);
   }
+  for (const auto& dimType : shape_info.getDimType()) {
+    t.add_data(static_cast<int32_t>(dimType));
+  }
   return t;
 }
 
-std::unordered_map<std::string, TensorShape>
-BackendTransformerBase::ssaRewriteAndMapNames(
+ShapeInfoMap BackendTransformerBase::ssaRewriteAndMapNames(
     Workspace* ws,
     NetDef* pred_net,
-    const std::unordered_map<std::string, TensorShape>& input_shape_hints) {
+    const ShapeInfoMap& input_shape_hints) {
   input_mapping_ = onnx::SsaRewrite(nullptr, pred_net);
   // Annote the ops with net position
   annotateOpIndex(pred_net);
@@ -96,7 +111,7 @@ BackendTransformerBase::ssaRewriteAndMapNames(
     input_mapping_.erase(i);
   }
 
-  std::unordered_map<std::string, TensorShape> shape_hints_mapped;
+  ShapeInfoMap shape_hints_mapped;
   for (const auto& kv : input_shape_hints) {
     shape_hints_mapped.emplace(kv.first, kv.second);
   }
@@ -106,24 +121,15 @@ BackendTransformerBase::ssaRewriteAndMapNames(
 ShapeInfoMap BackendTransformerBase::inferShapes(
     Workspace* ws,
     NetDef* pred_net,
-    const std::unordered_map<std::string, TensorShape>& shape_hints_mapped,
+    const ShapeInfoMap& shape_hints_mapped,
     const BoundShapeSpec& spec) {
-  ShapeInfoMap shape_map;
-  // We treat hinted shapes as BATCH. If there are shape hints on blobs in the
-  // workspace, since they are already inserted as CONSTANT, it will take effect
-  // here. For SEQ typed tensors, there are only a few of them and they will be
-  // handled by BoundShapeInferencer.
-  for (const auto& kv : shape_hints_mapped) {
-    shape_map.emplace(
-        std::piecewise_construct,
-        std::forward_as_tuple(kv.first),
-        std::forward_as_tuple(ShapeInfo::DimType::BATCH, kv.second));
-  }
+  ShapeInfoMap shape_map = shape_hints_mapped;
+
   // Populate shapes from workplace
   const std::vector<std::string> ws_blobs = ws->Blobs();
   for (const auto& s : ws_blobs) {
     auto shape_info = getShapeInfoFromBlob(ws->GetBlob(s));
-    if (shape_info.dim_type != ShapeInfo::DimType::UNKNOWN) {
+    if (shape_info.dimTypeIsSet()) {
       shape_map.emplace(s, shape_info);
     }
   }
@@ -136,7 +142,7 @@ ShapeInfoMap BackendTransformerBase::inferShapes(
         std::piecewise_construct,
         std::forward_as_tuple(kv.first),
         std::forward_as_tuple(
-            kv.second.dim_type,
+            kv.second.getDimType(),
             kv.second.shape,
             kv.second.is_quantized,
             kv.second.q_info));
@@ -144,11 +150,9 @@ ShapeInfoMap BackendTransformerBase::inferShapes(
   return shape_map;
 }
 
-void BackendTransformerBase::dumpNet(
-    const NetDef& pred_net,
-    const ShapeInfoMap& shape_hints,
-    const std::string& fname) const {
-  NetDef shape_net(pred_net);
+void BackendTransformerBase::addShapeToNet(
+    NetDef& shape_net,
+    const ShapeInfoMap& shape_hints) const {
   auto* shape_arg = shape_net.add_arg();
   auto* qshape_arg = shape_net.add_arg();
   shape_arg->set_name("shape_info");
@@ -156,14 +160,20 @@ void BackendTransformerBase::dumpNet(
   for (const auto& kv : shape_hints) {
     if (!kv.second.is_quantized) {
       auto t = wrapShapeInfoIntoTensorProto(kv.first, kv.second);
-      t.add_int32_data(static_cast<int32_t>(kv.second.dim_type));
       shape_arg->mutable_tensors()->Add()->CopyFrom(t);
     } else {
       auto t = wrapShapeInfoIntoQTensorProto(kv.first, kv.second);
-      t.add_data(static_cast<int32_t>(kv.second.dim_type));
       qshape_arg->mutable_qtensors()->Add()->CopyFrom(t);
     }
   }
+}
+
+void BackendTransformerBase::dumpNet(
+    const NetDef& pred_net,
+    const ShapeInfoMap& shape_hints,
+    const std::string& fname) const {
+  NetDef shape_net(pred_net);
+  addShapeToNet(shape_net, shape_hints);
   WriteProtoToTextFile(shape_net, fname);
 }
 } // namespace caffe2

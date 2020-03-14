@@ -2,7 +2,7 @@
 #define TH_GENERIC_FILE "torch/csrc/generic/utils.cpp"
 #else
 
-#if defined(THD_GENERIC_FILE) || defined(TH_REAL_IS_HALF)
+#if defined(TH_REAL_IS_HALF)
 #define GENERATE_SPARSE 0
 #else
 #define GENERATE_SPARSE 1

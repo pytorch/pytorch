@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 #
 # PyTorch documentation build configuration file, created by
@@ -120,7 +119,7 @@ master_doc = 'index'
 
 # General information about the project.
 project = 'PyTorch'
-copyright = '2018, Torch Contributors'
+copyright = '2019, Torch Contributors'
 author = 'Torch Contributors'
 
 # The version info for the project you're documenting, acts as replacement for
@@ -180,7 +179,7 @@ html_logo = os.path.join(
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
 # NOTE: sharing python docs resources
-html_static_path = [os.path.join(repo_root, 'docs', 'source', '_static')]
+html_static_path = [os.path.join(repo_root, 'docs', 'cpp', 'source', '_static')]
 
 
 # Called automatically by Sphinx, making this `conf.py` an "extension".
@@ -188,7 +187,7 @@ def setup(app):
     # NOTE: in Sphinx 1.8+ `html_css_files` is an official configuration value
     # and can be moved outside of this function (and the setup(app) function
     # can be deleted).
-    html_css_files = []
+    html_css_files = ['cpp_theme.css']
 
     # In Sphinx 1.8 it was renamed to `add_css_file`, 1.7 and prior it is
     # `add_stylesheet` (deprecated in 1.8).

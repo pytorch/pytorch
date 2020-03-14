@@ -1,252 +1,246 @@
 #include "caffe2/operators/instance_norm_op.h"
+
+#include <string>
+#include <vector>
+
 #include "caffe2/utils/eigen_utils.h"
 
 namespace caffe2 {
 
-template <typename T, typename Context>
-bool InstanceNormGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
-  const auto& input = Input(INPUT);
-  const auto& scale = Input(SCALE);
-  const auto& bias = Input(BIAS);
-  const auto& output_grad = Input(OUTPUT_GRAD);
-  const auto& mean = InputSize() >= 5 ? Input(MEAN) : mean_;
-  const auto& inv_stdev = InputSize() >= 6 ? Input(INV_STDEV) : inv_stdev_;
+namespace {
 
-  CAFFE_ENFORCE_EQ(4, input.dim());
-  const int N = input.dim32(0);
-  const int H = input.dim32(1);
-  const int W = input.dim32(2);
-  const int C = input.dim32(3);
-  CAFFE_ENFORCE_EQ(1, scale.dim());
-  CAFFE_ENFORCE_EQ(C, scale.dim32(0));
-  CAFFE_ENFORCE_EQ(1, bias.dim());
-  CAFFE_ENFORCE_EQ(C, bias.dim32(0));
-  CAFFE_ENFORCE_EQ(4, output_grad.dim());
-  CAFFE_ENFORCE_EQ(N, output_grad.dim32(0));
-  CAFFE_ENFORCE_EQ(H, output_grad.dim32(1));
-  CAFFE_ENFORCE_EQ(W, output_grad.dim32(2));
-  CAFFE_ENFORCE_EQ(C, output_grad.dim32(3));
-  auto input_grad = Output(INPUT_GRAD, input.sizes(), at::dtype<T>());
-  auto scale_grad = Output(SCALE_GRAD, scale.sizes(), at::dtype<T>());
-  auto bias_grad = Output(BIAS_GRAD, bias.sizes(), at::dtype<T>());
-
-  ConstEigenVectorArrayMap<T> scale_arr(scale.template data<T>(), C);
-  ConstEigenVectorArrayMap<T> bias_arr(bias.template data<T>(), C);
-  EigenVectorArrayMap<T> scale_grad_arr(
-      scale_grad->template mutable_data<T>(), C);
-  EigenVectorArrayMap<T> bias_grad_arr(
-      bias_grad->template mutable_data<T>(), C);
-
-  // Resize before we get into the per-instance loop
-  if (InputSize() < 5) {
-    ReinitializeTensor(
-        &mean_, {N, C}, at::dtype<T>().device(Context::GetDeviceType()));
+template <typename T>
+void ComputeInternalGradientsNHWC(
+    const int64_t N,
+    const int64_t C,
+    const int64_t HxW,
+    const T* dY,
+    const T* X,
+    T* ds,
+    T* db) {
+  EigenArrayMap<T> ds_arr(ds, C, N);
+  EigenArrayMap<T> db_arr(db, C, N);
+  for (int64_t i = 0; i < N; ++i) {
+    ConstEigenArrayMap<T> dY_arr(dY + i * C * HxW, C, HxW);
+    ConstEigenArrayMap<T> X_arr(X + i * C * HxW, C, HxW);
+    ds_arr.col(i) = dY_arr.col(0) * X_arr.col(0);
+    db_arr.col(i) = dY_arr.col(0);
+    for (int j = 1; j < HxW; ++j) {
+      ds_arr.col(i) += dY_arr.col(j) * X_arr.col(j);
+      db_arr.col(i) += dY_arr.col(j);
+    }
   }
-  if (InputSize() < 6) {
-    ReinitializeTensor(
-        &inv_stdev_, {N, C}, at::dtype<T>().device(Context::GetDeviceType()));
+}
+
+template <typename T>
+void InstanceNormBackwardNCHW(
+    const int64_t N,
+    const int64_t C,
+    const int64_t HxW,
+    const T* dY,
+    const T* X,
+    const T* mean,
+    const T* rstd,
+    const T* gamma,
+    T* dX,
+    T* ds,
+    T* db) {
+  const T scale = T(1) / static_cast<T>(HxW);
+  ConstEigenArrayMap<T> dY_arr(dY, HxW, N * C);
+  ConstEigenArrayMap<T> X_arr(X, HxW, N * C);
+  for (int64_t i = 0; i < N * C; ++i) {
+    const T ds_sum = (dY_arr.col(i) * X_arr.col(i)).sum();
+    const T db_sum = dY_arr.col(i).sum();
+    const int64_t c = i % C;
+    const T c1 = rstd[i] * gamma[c];
+    T c2 = ds_sum * gamma[c];
+    T c3 = db_sum * gamma[c];
+    c2 = (c3 * mean[i] - c2) * rstd[i] * rstd[i] * rstd[i] * scale;
+    c3 = -c2 * mean[i] - c3 * rstd[i] * scale;
+    for (int64_t j = 0; j < HxW; ++j) {
+      const int64_t index = i * HxW + j;
+      dX[index] = c1 * dY[index] + c2 * X[index] + c3;
+    }
+    ds[i] = ds_sum;
+    db[i] = db_sum;
   }
+}
 
-  // looping over per-instance and using Eigen blocks to extract out
-  // a chunk of channels
-  for (int n = 0; n < N; ++n) {
-    // All Eigen mats and arrs in here are per-instance.
-    ConstEigenArrayMap<T> input_mat(
-        input.template data<T>() + n * C * H * W, C, H * W);
-    ConstEigenArrayMap<T> output_grad_mat(
-        output_grad.template data<T>() + n * C * H * W, C, H * W);
-    EigenArrayMap<T> input_grad_mat(
-        input_grad->template mutable_data<T>() + n * C * H * W, C, H * W);
-
-    // Compute mean if it wasn't passed in
-    if (InputSize() < 5) {
-      EigenVectorArrayMap<T> mean_mutable_arr(
-          mean_.template mutable_data<T>() + n * C, C);
-      mean_mutable_arr = input_mat.rowwise().mean();
-    }
-    CAFFE_ENFORCE_EQ(2, mean.dim());
-    CAFFE_ENFORCE_EQ(N, mean.dim32(0));
-    CAFFE_ENFORCE_EQ(C, mean.dim32(1));
-    ConstEigenVectorArrayMap<T> mean_arr(mean.template data<T>() + n * C, C);
-
-    // subtract mean
-    input_grad_mat = input_mat.colwise() - mean_arr;
-
-    // Compute 1 / stdev if it wasn't passed in
-    if (InputSize() < 6) {
-      EigenVectorArrayMap<T> inv_stdev_mutable_arr(
-          inv_stdev_.template mutable_data<T>() + n * C, C);
-
-      // Square the diffs along each channel and take the mean to get var
-      inv_stdev_mutable_arr = input_grad_mat.pow(2).rowwise().mean();
-      // sqrt to get stdev and take the inverse
-      inv_stdev_mutable_arr =
-          (inv_stdev_mutable_arr + epsilon_).sqrt().inverse();
-    }
-    CAFFE_ENFORCE_EQ(2, inv_stdev.dim());
-    CAFFE_ENFORCE_EQ(N, inv_stdev.dim32(0));
-    CAFFE_ENFORCE_EQ(C, inv_stdev.dim32(1));
-
-    ConstEigenVectorArrayMap<T> inv_stdev_arr(
-        inv_stdev.template data<T>() + n * C, C);
-
-    // for each channel
-    // dl/dbias = sum_j dl/dy_j
-    auto bias_grad_delta = output_grad_mat.rowwise().sum();
-    if (n == 0) {
-      bias_grad_arr = bias_grad_delta;
-    } else {
-      bias_grad_arr += bias_grad_delta;
-    }
-    // for each channel
-    // dl/dscale = sum_j dl/dy_j (x_j - mu) / stdev
-    auto scale_grad_delta =
-        ((input_grad_mat.colwise() * inv_stdev_arr) * output_grad_mat)
-            .rowwise()
-            .sum();
-    if (n == 0) {
-      scale_grad_arr = scale_grad_delta;
-    } else {
-      scale_grad_arr += scale_grad_delta;
-    }
-
-    // dl/dx_j = this gross thing
-    // Derived gradient and manually massaged it to minimize extra storage
-    // and number of vectorized calls.  Verified it with the autograd package
-    // in python.
-
-    // a = -1/(HW) sum_j dl/dy_j * (x_j - mu) / stdev^3
-    const auto temp = (inv_stdev_arr.pow(3) *
-                       (input_grad_mat * output_grad_mat).rowwise().mean() *
-                       -1).eval();
-    // b_j = a * (x_j - mu)
-    input_grad_mat.colwise() *= temp;
-
-    // c_j = b_j + dl/dy_j / stdev
-    input_grad_mat += output_grad_mat.colwise() * inv_stdev_arr;
-
-    // dl/dx_j = s * (c_j - mean(c_j))
-    const auto result_mean = input_grad_mat.rowwise().mean().eval();
-    input_grad_mat.colwise() -= result_mean;
-    input_grad_mat.colwise() *= scale_arr;
+template <typename T>
+void InstanceNormBackwardNHWC(
+    const int64_t N,
+    const int64_t C,
+    const int64_t HxW,
+    const T* dY,
+    const T* X,
+    const T* ds,
+    const T* db,
+    const T* mean,
+    const T* rstd,
+    const T* gamma,
+    T* dX,
+    T* c1,
+    T* c2,
+    T* c3) {
+  const T scale = T(1) / static_cast<T>(HxW);
+  ConstEigenArrayMap<T> ds_arr(ds, C, N);
+  ConstEigenArrayMap<T> db_arr(db, C, N);
+  ConstEigenArrayMap<T> mean_arr(mean, C, N);
+  ConstEigenArrayMap<T> rstd_arr(rstd, C, N);
+  ConstEigenVectorArrayMap<T> gamma_arr(gamma, C);
+  EigenArrayMap<T> c1_arr(c1, C, N);
+  EigenArrayMap<T> c2_arr(c2, C, N);
+  EigenArrayMap<T> c3_arr(c3, C, N);
+  c1_arr = rstd_arr.colwise() * gamma_arr;
+  c2_arr = ds_arr.colwise() * gamma_arr;
+  c3_arr = db_arr.colwise() * gamma_arr;
+  c2_arr = (c3_arr * mean_arr - c2_arr) * rstd_arr.cube() * scale;
+  c3_arr = -c2_arr * mean_arr - c3_arr * rstd_arr * scale;
+  for (int64_t i = 0; i < N; ++i) {
+    ConstEigenArrayMap<T> dY_arr(dY + i * HxW * C, C, HxW);
+    ConstEigenArrayMap<T> X_arr(X + i * HxW * C, C, HxW);
+    EigenArrayMap<T> dX_arr(dX + i * HxW * C, C, HxW);
+    dX_arr =
+        (dY_arr.colwise() * c1_arr.col(i) + X_arr.colwise() * c2_arr.col(i))
+            .colwise() +
+        c3_arr.col(i);
   }
+}
 
+template <typename T>
+void GammaBetaBackward(
+    const int64_t N,
+    const int64_t C,
+    const T* ds,
+    const T* db,
+    const T* mean,
+    const T* rstd,
+    T* dgamma,
+    T* dbeta) {
+  ConstEigenArrayMap<T> ds_arr(ds, C, N);
+  ConstEigenArrayMap<T> db_arr(db, C, N);
+  ConstEigenArrayMap<T> mean_arr(mean, C, N);
+  ConstEigenArrayMap<T> rstd_arr(rstd, C, N);
+  EigenVectorArrayMap<T> dgamma_arr(dgamma, C);
+  EigenVectorArrayMap<T> dbeta_arr(dbeta, C);
+  dgamma_arr =
+      (ds_arr.col(0) - db_arr.col(0) * mean_arr.col(0)) * rstd_arr.col(0);
+  dbeta_arr = db_arr.col(0);
+  for (int64_t i = 1; i < N; ++i) {
+    dgamma_arr +=
+        (ds_arr.col(i) - db_arr.col(i) * mean_arr.col(i)) * rstd_arr.col(i);
+    dbeta_arr += db_arr.col(i);
+  }
+}
+
+} // namespace
+
+template <>
+void InstanceNormGradientOp<float, CPUContext>::ComputeMoments(
+    const int64_t N,
+    const int64_t C,
+    const int64_t HxW,
+    const float* X,
+    float* mean,
+    float* rstd) {
+  if (order_ == StorageOrder::NCHW) {
+    const std::array<int, 2> X_dims = {static_cast<int>(N * C),
+                                       static_cast<int>(HxW)};
+    const std::array<int, 2> Y_dims = {static_cast<int>(N * C), 1};
+    math::Moments<float, CPUContext>(
+        2, X_dims.data(), Y_dims.data(), X, mean, rstd, &context_);
+    math::InvStd<float, CPUContext>(N * C, epsilon_, rstd, rstd, &context_);
+  } else {
+    const float c = 1.0f / static_cast<float>(HxW);
+    EigenArrayMap<float> mean_arr(mean, C, N);
+    EigenArrayMap<float> rstd_arr(rstd, C, N);
+    for (int64_t i = 0; i < N; ++i) {
+      ConstEigenArrayMap<float> X_arr(X + i * HxW * C, C, HxW);
+      mean_arr.col(i) = X_arr.col(0);
+      rstd_arr.col(i) = X_arr.col(0).square();
+      for (int64_t j = 1; j < HxW; ++j) {
+        mean_arr.col(i) += X_arr.col(j);
+        rstd_arr.col(i) += X_arr.col(j).square();
+      }
+    }
+    mean_arr *= c;
+    rstd_arr =
+        ((rstd_arr * c - mean_arr.square()).max(0.0f) + epsilon_).rsqrt();
+  }
+}
+
+template <>
+bool InstanceNormGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW(
+    const int64_t N,
+    const int64_t C,
+    const int64_t HxW,
+    const float* dY,
+    const float* X,
+    const float* mean,
+    const float* rstd,
+    const float* gamma,
+    float* dX,
+    float* dgamma,
+    float* dbeta) {
+  ReinitializeTensor(&ds_, {N, C}, at::dtype<float>().device(CPU));
+  ReinitializeTensor(&db_, {N, C}, at::dtype<float>().device(CPU));
+  float* ds_data = ds_.mutable_data<float>();
+  float* db_data = db_.mutable_data<float>();
+  InstanceNormBackwardNCHW<float>(
+      N, C, HxW, dY, X, mean, rstd, gamma, dX, ds_data, db_data);
+  GammaBetaBackward<float>(N, C, ds_data, db_data, mean, rstd, dgamma, dbeta);
   return true;
 }
 
-template <typename T, typename Context>
-bool InstanceNormGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
-  const auto& input = Input(INPUT);
-  const auto& scale = Input(SCALE);
-  const auto& bias = Input(BIAS);
-  const auto& output_grad = Input(OUTPUT_GRAD);
-  const auto& mean = InputSize() >= 5 ? Input(MEAN) : mean_;
-  const auto& inv_stdev = InputSize() >= 6 ? Input(INV_STDEV) : inv_stdev_;
-
-  CAFFE_ENFORCE_EQ(4, input.dim());
-  const int N = input.dim32(0);
-  const int C = input.dim32(1);
-  const int H = input.dim32(2);
-  const int W = input.dim32(3);
-  CAFFE_ENFORCE_EQ(1, scale.dim());
-  CAFFE_ENFORCE_EQ(C, scale.dim32(0));
-  CAFFE_ENFORCE_EQ(1, bias.dim());
-  CAFFE_ENFORCE_EQ(C, bias.dim32(0));
-  CAFFE_ENFORCE_EQ(4, output_grad.dim());
-  CAFFE_ENFORCE_EQ(N, output_grad.dim32(0));
-  CAFFE_ENFORCE_EQ(C, output_grad.dim32(1));
-  CAFFE_ENFORCE_EQ(H, output_grad.dim32(2));
-  CAFFE_ENFORCE_EQ(W, output_grad.dim32(3));
-  auto input_grad = Output(INPUT_GRAD, input.sizes(), at::dtype<T>());
-  auto scale_grad = Output(SCALE_GRAD, scale.sizes(), at::dtype<T>());
-  auto bias_grad = Output(BIAS_GRAD, bias.sizes(), at::dtype<T>());
-
-  ConstEigenArrayMap<T> input_mat(input.template data<T>(), H * W, N * C);
-  ConstEigenVectorArrayMap<T> scale_arr(scale.template data<T>(), C);
-  ConstEigenVectorArrayMap<T> bias_arr(bias.template data<T>(), C);
-  ConstEigenArrayMap<T> output_grad_mat(
-      output_grad.template data<T>(), H * W, N * C);
-
-  EigenArrayMap<T> input_grad_mat(
-      input_grad->template mutable_data<T>(), H * W, N * C);
-  EigenVectorArrayMap<T> scale_grad_arr(
-      scale_grad->template mutable_data<T>(), C);
-  EigenVectorArrayMap<T> bias_grad_arr(
-      bias_grad->template mutable_data<T>(), C);
-
-  // Compute mean if it wasn't passed in
-  if (InputSize() < 5) {
-    ReinitializeTensor(
-        &mean_, {N, C}, at::dtype<T>().device(Context::GetDeviceType()));
-    EigenVectorArrayMap<T> mean_mutable_arr(
-        mean_.template mutable_data<T>(), N * C);
-    mean_mutable_arr = input_mat.colwise().mean();
-  }
-  CAFFE_ENFORCE_EQ(2, mean.dim());
-  CAFFE_ENFORCE_EQ(N, mean.dim32(0));
-  CAFFE_ENFORCE_EQ(C, mean.dim32(1));
-  ConstEigenVectorArrayMap<T> mean_arr(mean.template data<T>(), N * C);
-
-  // subtract mean
-  input_grad_mat = input_mat.rowwise() - mean_arr.transpose();
-
-  // compute 1 / stdev if not passed in
-  if (InputSize() < 6) {
-    ReinitializeTensor(
-        &inv_stdev_, {N, C}, at::dtype<T>().device(Context::GetDeviceType()));
-    EigenVectorArrayMap<T> inv_stdev_mutable_arr(
-        inv_stdev_.template mutable_data<T>(), N * C);
-
-    // Square the diffs along each column and take mean to get var
-    inv_stdev_mutable_arr = input_grad_mat.pow(2).colwise().mean();
-    // sqrt to get stdev and then invert
-    inv_stdev_mutable_arr = (inv_stdev_mutable_arr + epsilon_).sqrt().inverse();
-  }
-  CAFFE_ENFORCE_EQ(2, inv_stdev.dim());
-  CAFFE_ENFORCE_EQ(N, inv_stdev.dim32(0));
-  CAFFE_ENFORCE_EQ(C, inv_stdev.dim32(1));
-
-  ConstEigenVectorArrayMap<T> inv_stdev_arr(
-      inv_stdev.template data<T>(), N * C);
-
-  // Visit comments in the NHWC version about these gradients.  scale and bias
-  // grads are about the same, but the input grads no longer slice out one
-  // example at a time and instead vectorize across all N * C feature maps.
-
-  // scale and bias gradients
-  scale_grad_arr.setZero();
-  bias_grad_arr.setZero();
-  for (int n = 0; n < N; ++n) {
-    scale_grad_arr += ((input_grad_mat.rowwise() * inv_stdev_arr.transpose()) *
-                       output_grad_mat)
-                          .block(0, n * C, H * W, C)
-                          .colwise()
-                          .sum();
-    bias_grad_arr += output_grad_mat.block(0, n * C, H * W, C).colwise().sum();
-  }
-
-  // input gradient
-  const auto temp = ((inv_stdev_arr.pow(3).transpose() *
-                      (input_grad_mat * output_grad_mat).colwise().mean()) *
-                     -1).eval();
-  input_grad_mat.rowwise() *= temp;
-
-  input_grad_mat += output_grad_mat.rowwise() * inv_stdev_arr.transpose();
-
-  const auto result_mean = input_grad_mat.colwise().mean().eval();
-  input_grad_mat.rowwise() -= result_mean;
-
-  for (int n = 0; n < N; ++n) {
-    input_grad_mat.block(0, n * C, H * W, C).rowwise() *= scale_arr.transpose();
-  }
-
+template <>
+bool InstanceNormGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC(
+    const int64_t N,
+    const int64_t C,
+    const int64_t HxW,
+    const float* dY,
+    const float* X,
+    const float* mean,
+    const float* rstd,
+    const float* gamma,
+    float* dX,
+    float* dgamma,
+    float* dbeta) {
+  ReinitializeTensor(&ds_, {N, C}, at::dtype<float>().device(CPU));
+  ReinitializeTensor(&db_, {N, C}, at::dtype<float>().device(CPU));
+  float* ds_data = ds_.mutable_data<float>();
+  float* db_data = db_.mutable_data<float>();
+  ComputeInternalGradientsNHWC<float>(N, C, HxW, dY, X, ds_data, db_data);
+  ReinitializeTensor(&c1_, {N, C}, at::dtype<float>().device(CPU));
+  ReinitializeTensor(&c2_, {N, C}, at::dtype<float>().device(CPU));
+  ReinitializeTensor(&c3_, {N, C}, at::dtype<float>().device(CPU));
+  float* c1_data = c1_.mutable_data<float>();
+  float* c2_data = c2_.mutable_data<float>();
+  float* c3_data = c3_.mutable_data<float>();
+  InstanceNormBackwardNHWC<float>(
+      N,
+      C,
+      HxW,
+      dY,
+      X,
+      ds_data,
+      db_data,
+      mean,
+      rstd,
+      gamma,
+      dX,
+      c1_data,
+      c2_data,
+      c3_data);
+  GammaBetaBackward<float>(N, C, ds_data, db_data, mean, rstd, dgamma, dbeta);
   return true;
 }
+
+namespace {
 
 class GetInstanceNormGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
-  vector<OperatorDef> GetGradientDefs() override {
-    vector<string> inputs{I(0), I(1), I(2), GO(0)};
+  std::vector<OperatorDef> GetGradientDefs() override {
+    std::vector<std::string> inputs = {I(0), I(1), I(2), GO(0)};
     if (def_.output_size() >= 2) {
       inputs.push_back(O(1));
     }
@@ -257,9 +251,11 @@ class GetInstanceNormGradient : public GradientMakerBase {
         "InstanceNormGradient",
         "",
         inputs,
-        vector<string>{GI(0), GI(1), GI(2)});
+        std::vector<std::string>({GI(0), GI(1), GI(2)}));
   }
 };
+
+} // namespace
 
 REGISTER_CPU_OPERATOR(
     InstanceNormGradient,
@@ -268,4 +264,5 @@ REGISTER_CPU_OPERATOR(
 OPERATOR_SCHEMA(InstanceNormGradient).NumInputs(4, 6).NumOutputs(3);
 
 REGISTER_GRADIENT(InstanceNorm, GetInstanceNormGradient);
-}
+
+} // namespace caffe2

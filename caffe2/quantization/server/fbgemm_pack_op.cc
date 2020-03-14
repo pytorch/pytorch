@@ -1,5 +1,6 @@
 #include "fbgemm_pack_op.h"
 
+#include "caffe2/core/tensor.h"
 #include "caffe2/core/tensor_int8.h"
 
 #include "caffe2_dnnlowp_utils.h"
@@ -228,7 +229,9 @@ FullyConnectedDNNLowPPackWeightOp::FullyConnectedDNNLowPPackWeightOp(
     : DNNLowPOp<uint8_t, FCFp32Op>(operator_def, ws),
       axis_w_(this->GetSingleArgument<int32_t>("axis_w", 1)),
       quantize_channelwise_(
-          this->GetSingleArgument<bool>("quantize_channelwise", false)) {
+          this->GetSingleArgument<bool>("quantize_channelwise", false)),
+      save_unpacked_weights_(
+          this->GetSingleArgument<bool>("save_unpacked_weights", false)) {
   if (this->debug_def().engine() == "DNNLOWP_ROWWISE") {
     quantize_channelwise_ = true;
   }
@@ -257,6 +260,13 @@ bool FullyConnectedDNNLowPPackWeightOp::RunOnDevice() {
   QuantizeWeight<uint8_t>(
       InputBlob(0), K, N, Y->qparams, W_quantized, qfactory_.get());
 
+  if (save_unpacked_weights_) {
+    ReinitializeTensor(
+        &Y->original_tensor, filter.sizes(), at::dtype<int8_t>().device(CPU));
+    auto* buffer = Y->original_tensor.template mutable_data<int8_t>();
+    CAFFE_ENFORCE_EQ(Y->original_tensor.numel(), W_quantized.size());
+    memcpy(buffer, W_quantized.data(), W_quantized.size() * sizeof(int8_t));
+  }
   if (this->InputIsType<int8::Int8TensorCPU>(0) && quantize_channelwise_) {
     static int log_occurences = 0;
     if (log_occurences < 32) {
@@ -317,6 +327,33 @@ bool FullyConnectedDNNLowPPackWeightOp::RunOnDevice() {
     Y->bias = nullptr;
   }
 
+  // Output quantized bias if we specify a second output. This output is meant
+  // to be consumed by accelerator instead of CPU ops.
+  if (OutputSize() >= 2) {
+    CAFFE_ENFORCE(Y->bias, "Bias is not quantized");
+    // The reason we don't support this is basically due to limitation of
+    // Int8TensorCPU only support single scale and zero_point. If we choose to
+    // output bias as Int8FCDNNLowPPackedWeightBlob with original layout,
+    // everything should still work for accelerator.
+    CAFFE_ENFORCE_EQ(
+        1,
+        Y->qparams.size(),
+        "We don't support outputing channelwise quantized bias yet");
+    auto quantized_bias = Y->bias;
+    float in_scale = GetSingleArgument<float>("in_scale", 0);
+    float bias_scale = in_scale * Y->qparams.front().scale;
+    LOG(INFO) << "Bias scale " << bias_scale << ": input scale " << in_scale
+              << " weight scale " << Y->qparams.front().scale;
+    auto* Bq = this->Output<int8::Int8TensorCPU>(1);
+    std::vector<int64_t> shape = {static_cast<int64_t>(quantized_bias->size())};
+    Bq->t.Resize(shape);
+    Bq->scale = bias_scale;
+    Bq->zero_point = 0;
+    auto* data = Bq->t.template mutable_data<int32_t>();
+    context_.template CopySameDevice<int32_t>(
+        quantized_bias->size(), quantized_bias->data(), data);
+  }
+
   return true;
 }
 
@@ -370,25 +407,60 @@ bool ConvDNNLowPPackWeightOp::TakeDepthWise3x3x3FastPath_() {
   return ret;
 }
 
-bool ConvDNNLowPPackWeightOp::TakeGConvFastPath_() {
-  if (this->debug_def().engine() == "DNNLOWP_ACC16" ||
-      this->kernel_.size() != 2) {
-    return false;
-  }
+fbgemm::conv_param_t<> ConvDNNLowPPackWeightOp::GetConvParam_() {
+  CAFFE_ENFORCE_EQ(this->kernel_.size(), 2);
 
   auto& filter = InputTensorCPU_(FILTER);
   const int M = filter.dim32(0), C = filter.dim32(filter.dim() - 1) * group_;
-  fbgemm::conv_param_t<> conv_p(
-      1,
+
+  return fbgemm::conv_param_t<>(
+      1, // dummy
       C,
       M,
-      {1, 1},
+      {this->kernel_[0] * this->stride_[0],
+       this->kernel_[1] * this->stride_[1]}, // dummy
       group_,
       {this->kernel_[0], this->kernel_[1]},
       {this->stride_[0], this->stride_[1]},
       {this->pads_[0], this->pads_[1], this->pads_[2], this->pads_[3]});
+}
 
-  return fbgemm::fbgemmOptimizedGConv(conv_p);
+fbgemm::conv_param_t<3> ConvDNNLowPPackWeightOp::GetConv3DParam_() {
+  CAFFE_ENFORCE_EQ(this->kernel_.size(), 3);
+
+  auto& filter = InputTensorCPU_(FILTER);
+  const int M = filter.dim32(0), C = filter.dim32(filter.dim() - 1) * group_;
+
+  return fbgemm::conv_param_t<3>(
+      1, // dummy
+      C,
+      M,
+      {1,
+       this->kernel_[1] * this->stride_[1],
+       this->kernel_[2] * this->stride_[2]}, // dummy
+      group_,
+      {this->kernel_[0], this->kernel_[1], this->kernel_[2]},
+      {this->stride_[0], this->stride_[1], this->stride_[2]},
+      {this->pads_[0],
+       this->pads_[1],
+       this->pads_[2],
+       this->pads_[3],
+       this->pads_[4],
+       this->pads_[5]});
+}
+
+bool ConvDNNLowPPackWeightOp::TakeGConvFastPath_() {
+  if (this->debug_def().engine() == "DNNLOWP_ACC16" ||
+      (this->kernel_.size() != 2 && this->kernel_.size() != 3)) {
+    return false;
+  }
+
+  if (this->kernel_.size() == 2) {
+    return fbgemm::fbgemmOptimizedGConv(GetConvParam_());
+  } else {
+    CAFFE_ENFORCE_EQ(this->kernel_.size(), 3);
+    return fbgemm::fbgemmOptimizedGConv(GetConv3DParam_());
+  }
 }
 
 bool ConvDNNLowPPackWeightOp::RunOnDevice() {
@@ -422,9 +494,9 @@ bool ConvDNNLowPPackWeightOp::RunOnDevice() {
       W_quantized,
       qfactory_.get());
   if (save_unpacked_weights_) {
-        ReinitializeTensor(&Y->original_tensor, filter.sizes(), at::dtype<int8_t>().device(CPU));
-    auto* buffer =
-        Y->original_tensor.template mutable_data<int8_t>();
+    ReinitializeTensor(
+        &Y->original_tensor, filter.sizes(), at::dtype<int8_t>().device(CPU));
+    auto* buffer = Y->original_tensor.template mutable_data<int8_t>();
     CAFFE_ENFORCE_EQ(Y->original_tensor.numel(), W_quantized.size());
     memcpy(buffer, W_quantized.data(), W_quantized.size() * sizeof(int8_t));
   }
@@ -527,24 +599,25 @@ bool ConvDNNLowPPackWeightOp::RunOnDevice() {
       fallback_to_32_bit_accumulation) {
     // acc32
     if (TakeDepthWise3x3FastPath_()) {
-      Y->W_depthwise_3x3.reset(
-          new fbgemm::Packed3x3ConvMatrix(group_, W_quantized.data()));
+      Y->W_depthwise.reset(new fbgemm::PackedDepthWiseConvMatrix(
+          group_, 3 * 3, W_quantized.data()));
     } else if (TakeDepthWise3x3x3FastPath_()) {
-      Y->W_depthwise_3x3x3.reset(
-          new fbgemm::Packed3x3x3ConvMatrix(group_, W_quantized.data()));
+      Y->W_depthwise.reset(new fbgemm::PackedDepthWiseConvMatrix(
+          group_, 3 * 3 * 3, W_quantized.data()));
     } else if (TakeGConvFastPath_()) {
-      fbgemm::conv_param_t<> conv_p(
-          1,
-          group_ * C_per_group,
-          M,
-          {1, 1},
-          group_,
-          {this->kernel_[0], this->kernel_[1]},
-          {this->stride_[0], this->stride_[1]},
-          {this->pads_[0], this->pads_[1], this->pads_[2], this->pads_[3]});
-
-      Y->W_gconv.reset(new fbgemm::PackWeightMatrixForGConv<int8_t>(
-          fbgemm::matrix_op_t::Transpose, conv_p, W_quantized.data()));
+      if (this->kernel_.size() == 2) {
+        Y->W_gconv.reset(new fbgemm::PackWeightMatrixForGConv<int8_t>(
+            fbgemm::matrix_op_t::Transpose,
+            GetConvParam_(),
+            W_quantized.data()));
+      } else {
+        CAFFE_ENFORCE_EQ(this->kernel_.size(), 3);
+        Y->W_gconv3d.reset(
+            new fbgemm::PackWeightMatrixForGConv<int8_t, int32_t, 3>(
+                fbgemm::matrix_op_t::Transpose,
+                GetConv3DParam_(),
+                W_quantized.data()));
+      }
     } else {
       Y->W.reset(new fbgemm::PackBMatrix<int8_t>(
           fbgemm::matrix_op_t::Transpose,
@@ -570,9 +643,204 @@ bool ConvDNNLowPPackWeightOp::RunOnDevice() {
   return true;
 }
 
+bool Int8FCDNNLowpPackedWeightBlobShapeFunctions::IsSameMetaType(
+    TypeIdentifier id) {
+  return id == TypeMeta::Id<Int8FCDNNLowPPackedWeightBlob>();
+}
+
+bool Int8ConvDNNLowpPackedWeightBlobShapeFunctions::IsSameMetaType(
+    TypeIdentifier id) {
+  return id == TypeMeta::Id<Int8ConvDNNLowPPackedWeightBlob>();
+}
+
+TypeIdentifier Int8FCDNNLowpPackedWeightBlobShapeFunctions::GetTypeMetaId() {
+  return TypeMeta::Id<Int8FCDNNLowPPackedWeightBlob>();
+}
+
+TypeIdentifier Int8ConvDNNLowpPackedWeightBlobShapeFunctions::GetTypeMetaId() {
+  return TypeMeta::Id<Int8ConvDNNLowPPackedWeightBlob>();
+}
+
+TypeMeta Int8FCDNNLowpPackedWeightBlobShapeFunctions::GetExternalTensorType(
+    const void* c) {
+  const Int8FCDNNLowPPackedWeightBlob* int8_tensor =
+      reinterpret_cast<const Int8FCDNNLowPPackedWeightBlob*>(c);
+  // We forced the output type to be uint8_t since we know it always is.
+  // If it is going to be implemented elsewhere, we might need to change here.
+  // return (int8_tensor->original_tensor).dtype();
+  return TypeMeta::Make<uint8_t>();
+}
+
+TypeMeta Int8ConvDNNLowpPackedWeightBlobShapeFunctions::GetExternalTensorType(
+    const void* c) {
+  const Int8ConvDNNLowPPackedWeightBlob* int8_tensor =
+      reinterpret_cast<const Int8ConvDNNLowPPackedWeightBlob*>(c);
+  // return (int8_tensor->original_tensor).dtype();
+  return TypeMeta::Make<uint8_t>();
+}
+
+vector<int64_t>
+Int8FCDNNLowpPackedWeightBlobShapeFunctions::GetExternalTensorInfo(
+    const void* c,
+    size_t* capacity,
+    DeviceOption* device) {
+  const Int8FCDNNLowPPackedWeightBlob* int8_tensor =
+      reinterpret_cast<const Int8FCDNNLowPPackedWeightBlob*>(c);
+  return GetTensorInfo(&(int8_tensor->original_tensor), capacity, device);
+}
+
+vector<int64_t>
+Int8ConvDNNLowpPackedWeightBlobShapeFunctions::GetExternalTensorInfo(
+    const void* c,
+    size_t* capacity,
+    DeviceOption* device) {
+  const Int8ConvDNNLowPPackedWeightBlob* int8_tensor =
+      reinterpret_cast<const Int8ConvDNNLowPPackedWeightBlob*>(c);
+  return GetTensorInfo(&(int8_tensor->original_tensor), capacity, device);
+}
+
+void Int8FCDNNLowpPackedWeightBlobShapeFunctions::LoadInfoOfBlob(
+    const Blob* blob,
+    std::vector<float>* scale,
+    std::vector<float>* offset,
+    uint32_t* axis) {
+  scale->clear();
+  offset->clear();
+  const Int8FCDNNLowPPackedWeightBlob* int8_tensor =
+      reinterpret_cast<const Int8FCDNNLowPPackedWeightBlob*>(blob->GetRaw());
+  const auto& qparams = int8_tensor->qparams;
+  for (const auto& qparam : qparams) {
+    scale->emplace_back(qparam.scale);
+    offset->emplace_back(static_cast<float>(qparam.zero_point));
+  }
+  *axis = 1;
+}
+
+void Int8ConvDNNLowpPackedWeightBlobShapeFunctions::LoadInfoOfBlob(
+    const Blob* blob,
+    std::vector<float>* scale,
+    std::vector<float>* offset,
+    uint32_t* axis) {
+  scale->clear();
+  offset->clear();
+  const Int8ConvDNNLowPPackedWeightBlob* int8_tensor =
+      reinterpret_cast<const Int8ConvDNNLowPPackedWeightBlob*>(blob->GetRaw());
+  const auto& qparams = int8_tensor->qparams;
+  for (const auto& qparam : qparams) {
+    scale->emplace_back(qparam.scale);
+    offset->emplace_back(static_cast<float>(qparam.zero_point));
+  }
+  *axis = 1;
+}
+
+void Int8FCDNNLowpPackedWeightBlobShapeFunctions::SetupExternalTensorDescriptor(
+    const Blob* blob,
+    std::vector<std::vector<uint64_t>>* shapes,
+    std::vector<std::vector<float>>* all_scales,
+    std::vector<std::vector<int32_t>>* all_offsets,
+    ExternalTensorDescriptor* desc) {
+  const auto& dnntensor = blob->template Get<Int8FCDNNLowPPackedWeightBlob>();
+  const Tensor& cpu_tensor = dnntensor.original_tensor;
+
+  if (cpu_tensor.template IsType<uint8_t>()) {
+    desc->dataType = kONNXIFI_DATATYPE_UINT8;
+    desc->buffer = reinterpret_cast<uint64_t>(cpu_tensor.data<uint8_t>());
+  } else if (cpu_tensor.template IsType<int32_t>()) {
+    desc->dataType = kONNXIFI_DATATYPE_INT32;
+    desc->buffer = reinterpret_cast<uint64_t>(cpu_tensor.data<int32_t>());
+  } else if (cpu_tensor.template IsType<int8_t>()) {
+    desc->dataType = kONNXIFI_DATATYPE_INT8;
+    desc->buffer = reinterpret_cast<uint64_t>(cpu_tensor.data<int8_t>());
+  } else {
+    CAFFE_THROW(
+        "Unsupported Int8FCDNNLowPPackedWeightBlob type in ONNXIFI: ",
+        cpu_tensor.dtype().name());
+  }
+
+  desc->quantizationParams = dnntensor.qparams.size();
+  desc->quantizationAxis = 1;
+  std::vector<float> scales;
+  std::vector<int32_t> offsets;
+  for (const auto v : dnntensor.qparams) {
+    scales.push_back(v.scale);
+    int32_t cur_offset = v.zero_point;
+    offsets.push_back(cur_offset);
+  }
+  all_scales->push_back(scales);
+  all_offsets->push_back(offsets);
+  desc->scales = all_scales->back().data();
+  desc->biases = all_offsets->back().data();
+
+  // Set up dim and shape
+  const auto shape = cpu_tensor.sizes();
+  desc->dimensions = shape.size();
+  shapes->emplace_back(shape.cbegin(), shape.cend());
+  desc->shape = shapes->back().data();
+
+  // not an offline tensor
+  desc->isOffline = 0;
+}
+
+void Int8ConvDNNLowpPackedWeightBlobShapeFunctions::
+    SetupExternalTensorDescriptor(
+        const Blob* blob,
+        std::vector<std::vector<uint64_t>>* shapes,
+        std::vector<std::vector<float>>* all_scales,
+        std::vector<std::vector<int32_t>>* all_offsets,
+        ExternalTensorDescriptor* desc) {
+  const auto& dnntensor = blob->template Get<Int8ConvDNNLowPPackedWeightBlob>();
+  const Tensor& cpu_tensor = dnntensor.original_tensor;
+
+  if (cpu_tensor.template IsType<uint8_t>()) {
+    desc->dataType = kONNXIFI_DATATYPE_UINT8;
+    desc->buffer = reinterpret_cast<uint64_t>(cpu_tensor.data<uint8_t>());
+  } else if (cpu_tensor.template IsType<int32_t>()) {
+    desc->dataType = kONNXIFI_DATATYPE_INT32;
+    desc->buffer = reinterpret_cast<uint64_t>(cpu_tensor.data<int32_t>());
+  } else if (cpu_tensor.template IsType<int8_t>()) {
+    desc->dataType = kONNXIFI_DATATYPE_INT8;
+    desc->buffer = reinterpret_cast<uint64_t>(cpu_tensor.data<int8_t>());
+  } else {
+    CAFFE_THROW(
+        "Unsupported Int8ConvDNNLowPPackedWeightBlob type in ONNXIFI: ",
+        cpu_tensor.dtype().name());
+  }
+
+  desc->quantizationParams = dnntensor.qparams.size();
+  desc->quantizationAxis = 1;
+  std::vector<float> scales;
+  std::vector<int32_t> offsets;
+  for (const auto v : dnntensor.qparams) {
+    scales.push_back(v.scale);
+    int32_t cur_offset = v.zero_point;
+    offsets.push_back(cur_offset);
+  }
+  all_scales->push_back(scales);
+  all_offsets->push_back(offsets);
+  desc->scales = all_scales->back().data();
+  desc->biases = all_offsets->back().data();
+
+  // Set up dim and shape
+  const auto shape = cpu_tensor.sizes();
+  desc->dimensions = shape.size();
+  shapes->emplace_back(shape.cbegin(), shape.cend());
+  desc->shape = shapes->back().data();
+
+  // not an offline tensor
+  desc->isOffline = 0;
+}
+
 // Explicitly register TypeMeta
 CAFFE_KNOWN_TYPE(Int8FCDNNLowPPackedWeightBlob);
 CAFFE_KNOWN_TYPE(Int8ConvDNNLowPPackedWeightBlob);
+
+// Register DNNLOWP Type in caffe2 core
+REGISTER_EXTERNAL_TENSOR_FUNCTIONS(
+    (TypeMeta::Id<Int8FCDNNLowPPackedWeightBlob>()),
+    Int8FCDNNLowpPackedWeightBlobShapeFunctions);
+REGISTER_EXTERNAL_TENSOR_FUNCTIONS(
+    (TypeMeta::Id<Int8ConvDNNLowPPackedWeightBlob>()),
+    Int8ConvDNNLowpPackedWeightBlobShapeFunctions);
 
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Int8FCPackWeight,
@@ -591,11 +859,12 @@ REGISTER_CPU_OPERATOR_WITH_ENGINE(
 
 OPERATOR_SCHEMA(Int8FCPackWeight)
     .NumInputs(1, 2)
-    .NumOutputs(1)
+    .NumOutputs(1, 2)
     .SetDoc(R"DOC(Prepack weight for Int8FC)DOC")
     .Input(0, "W", "Weight tensor in KRSC layout")
     .Input(1, "b", "Bias tensor")
-    .Output(0, "W_q", "Weight/bias tensor in a packed format");
+    .Output(0, "W_q", "Weight/bias tensor in a packed format")
+    .Output(1, "B_q", "Bias int32 quantized tensor");
 
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Int8ConvPackWeight,

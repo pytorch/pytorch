@@ -12,7 +12,7 @@
 
 #include <c10/core/CPUAllocator.h>
 
-#if HAVE_MMAP
+#if defined(HAVE_MMAP)
 #include <sys/types.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -430,7 +430,6 @@ THRefcountedMapAllocator::THRefcountedMapAllocator(WithFd, const char *filename,
 }
 
 void THRefcountedMapAllocator::initializeAlloc() {
-  char *data = ((char*)base_ptr_) + TH_ALLOC_ALIGNMENT;
   THMapInfo *map_info = (THMapInfo*)base_ptr_;
 
 #ifdef _WIN32

@@ -1,26 +1,17 @@
-ir_version: 4
+ir_version: 6
 producer_name: "pytorch"
-producer_version: "1.1"
+producer_version: "1.4"
 graph {
   node {
-    input: "0"
-    input: "1"
+    input: "x"
+    input: "y"
     output: "2"
+    name: "Less_0"
     op_type: "Less"
-  }
-  node {
-    input: "2"
-    output: "3"
-    op_type: "Cast"
-    attribute {
-      name: "to"
-      i: 2
-      type: INT
-    }
   }
   name: "torch-jit-export"
   input {
-    name: "0"
+    name: "x"
     type {
       tensor_type {
         elem_type: 6
@@ -42,7 +33,7 @@ graph {
     }
   }
   input {
-    name: "1"
+    name: "y"
     type {
       tensor_type {
         elem_type: 6
@@ -58,10 +49,10 @@ graph {
     }
   }
   output {
-    name: "3"
+    name: "2"
     type {
       tensor_type {
-        elem_type: 2
+        elem_type: 9
         shape {
           dim {
             dim_value: 1

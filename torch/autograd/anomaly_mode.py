@@ -1,5 +1,5 @@
 import torch
-
+import warnings
 
 class detect_anomaly(object):
     r"""Context-manager that enable anomaly detection for the autograd engine.
@@ -9,6 +9,10 @@ class detect_anomaly(object):
     pass to print the traceback of the forward operation that created the failing
     backward function.
     - Any backward computation that generate "nan" value will raise an error.
+
+    .. warning::
+        This mode should be enabled only for debugging as the different tests
+        will slow down your program execution.
 
     Example:
 
@@ -63,6 +67,9 @@ class detect_anomaly(object):
 
     def __init__(self):
         self.prev = torch.is_anomaly_enabled()
+        warnings.warn('Anomaly Detection has been enabled. '
+                      'This mode will increase the runtime '
+                      'and should only be enabled for debugging.')
 
     def __enter__(self):
         torch.set_anomaly_enabled(True)

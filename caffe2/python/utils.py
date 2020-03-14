@@ -62,6 +62,9 @@ def Caffe2TensorToNumpyArray(tensor):
     elif tensor.data_type == caffe2_pb2.TensorProto.DOUBLE:
         return np.asarray(
             tensor.double_data, dtype=np.float64).reshape(tensor.dims)
+    elif tensor.data_type == caffe2_pb2.TensorProto.INT64:
+        return np.asarray(
+            tensor.int64_data, dtype=np.int64).reshape(tensor.dims)
     elif tensor.data_type == caffe2_pb2.TensorProto.INT32:
         return np.asarray(
             tensor.int32_data, dtype=np.int).reshape(tensor.dims)   # pb.INT32=>np.int use int32_data
@@ -94,6 +97,9 @@ def NumpyArrayToCaffe2Tensor(arr, name=None):
     elif arr.dtype == np.float64:
         tensor.data_type = caffe2_pb2.TensorProto.DOUBLE
         tensor.double_data.extend(list(arr.flatten().astype(np.float64)))
+    elif arr.dtype == np.int64:
+        tensor.data_type = caffe2_pb2.TensorProto.INT64
+        tensor.int64_data.extend(list(arr.flatten().astype(np.int64)))
     elif arr.dtype == np.int or arr.dtype == np.int32:
         tensor.data_type = caffe2_pb2.TensorProto.INT32
         tensor.int32_data.extend(arr.flatten().astype(np.int).tolist())
@@ -110,7 +116,7 @@ def NumpyArrayToCaffe2Tensor(arr, name=None):
         tensor.data_type = caffe2_pb2.TensorProto.UINT8
         tensor.int32_data.extend(list(arr.flatten().astype(np.uint8)))   # np.uint8=>pb.UNIT8 use int32_data
     else:
-        # TODO: complete the data type: bool, float16, byte, int64, string
+        # TODO: complete the data type: bool, float16, byte, string
         raise RuntimeError(
             "Numpy data type not supported yet: " + str(arr.dtype))
     return tensor
@@ -205,7 +211,7 @@ def TryReadProtoWithClass(cls, s):
     try:
         text_format.Parse(s, obj)
         return obj
-    except text_format.ParseError:
+    except (text_format.ParseError, UnicodeDecodeError):
         obj.ParseFromString(s)
         return obj
 
@@ -351,7 +357,10 @@ def BuildUniqueMutexIter(
     from caffe2.python import core
     if not init_net.BlobIsDefined(iter):
         # Add training operators.
-        with core.DeviceScope(core.DeviceOption(caffe2_pb2.CPU)):
+        with core.DeviceScope(
+                core.DeviceOption(caffe2_pb2.CPU,
+                                  extra_info=["device_type_override:cpu"])
+        ):
             iteration = init_net.ConstantFill(
                 [],
                 iter,

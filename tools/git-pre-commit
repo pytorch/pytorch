@@ -10,9 +10,8 @@ then
   python tools/clang_tidy.py \
     --paths torch/csrc \
     --diff HEAD \
-    -g"-torch/csrc/distributed/Module.cpp" \
-    -g"-torch/csrc/jit/export.cpp" \
-    -g"-torch/csrc/jit/import.cpp" \
+    -g"-torch/csrc/jit/serialization/export.cpp" \
+    -g"-torch/csrc/jit/serialization/import.cpp" \
     -j
 else
   echo "WARNING: Couldn't find clang-tidy executable."

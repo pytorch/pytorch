@@ -3,28 +3,13 @@
 #include <THCUNN/THCHalfAutoNumerics.cuh>
 #include <THC/THCApply.cuh>
 
-#if defined(_MSC_VER) || defined(__HIP_PLATFORM_HCC__)
-#define ZERO_MACRO zero<T>()
-template <typename T>
-inline __device__ typename std::enable_if<std::is_same<T, double>::value, T>::type zero() {
-        return 0.;
-}
-
-template <typename T>
-inline __device__ typename std::enable_if<!std::is_same<T, double>::value, T>::type zero() {
-        return 0.f;
-}
-#else
-#define ZERO_MACRO 0.f
-#endif
-
 template <typename T>
 struct logSigmoid_updateOutput_functor
 {
   __device__ void operator()(T *output, const T *input) const {
-    const T max = fmaxType(ZERO_MACRO, -*input);
+    const T max = fmaxType(T{0}, -*input);
     const T z = THCNumerics<T>::exp(-max) + THCNumerics<T>::exp(-*input -max);
-    *output = -(max + THCNumerics<T>::log(z));
+    *output = -(max + static_cast<T>(std::log(z)));
   }
 };
 
@@ -33,7 +18,7 @@ template <typename T>
 struct logSigmoid_updateGradInput_functor
 {
   __device__ void operator()(T *gradInput, const T *input, const T *gradOutput) const {
-    const T max = fmaxType(ZERO_MACRO, -*input);
+    const T max = fmaxType(T{0}, -*input);
     const T z = THCNumerics<T>::exp(-max) + THCNumerics<T>::exp(-*input -max);
     T max_deriv = 0.f;
     T sign = -1.f;
@@ -51,7 +36,7 @@ struct logSigmoid_updateOutput_functor<half> {
     float in = __half2float(*input);
     float max = fmaxType(0.f, -in);
     float z = THCNumerics<float>::exp(-max) + THCNumerics<float>::exp(-in - max);
-    *output = __float2half(-(max + THCNumerics<float>::log(z)));
+    *output = __float2half(-(max + std::log(z)));
   }
 };
 

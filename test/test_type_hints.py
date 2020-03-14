@@ -1,6 +1,6 @@
 from __future__ import print_function
 import unittest
-from common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests
 import tempfile
 import torch
 import re
@@ -61,7 +61,15 @@ def get_all_examples():
     This function grabs (hopefully all) examples from the torch documentation
     strings and puts them in one nonsensical module returned as a string.
     """
-    blacklist = {"_np"}
+    blacklist = {
+        "_np",
+        "refine_names",
+        "rename",
+        "names",
+        "align_as",
+        "align_to",
+        "unflatten",
+    }
     allexamples = ""
 
     example_file_lines = [
@@ -162,6 +170,28 @@ class TestTypeHints(TestCase):
             except subprocess.CalledProcessError as e:
                 raise AssertionError("mypy failed.  Look above this error for mypy's output.")
 
+    @unittest.skipIf(sys.version_info[0] == 2, "no type hints for Python 2")
+    @unittest.skipIf(not HAVE_MYPY, "need mypy")
+    def test_type_hint_examples(self):
+        """
+        Runs mypy over all the test examples present in
+        `type_hint_tests` directory.
+        """
+        test_path = os.path.dirname(os.path.realpath(__file__))
+        examples_folder = os.path.join(test_path, "type_hint_tests")
+        examples = os.listdir(examples_folder)
+        for example in examples:
+            try: 
+                example_path = os.path.join(examples_folder, example)
+                subprocess.run([ 
+                    sys.executable, 
+                    '-mmypy', 
+                    '--follow-imports', 'silent', 
+                    '--check-untyped-defs', 
+                    example_path],  
+                    check=True) 
+            except subprocess.CalledProcessError as e: 
+                raise AssertionError("mypy failed for example {}.  Look above this error for mypy's output.".format(example))
 
 if __name__ == '__main__':
     run_tests()

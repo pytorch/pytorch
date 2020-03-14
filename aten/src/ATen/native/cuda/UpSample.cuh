@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <THC/THCAtomics.cuh>
 
 #include <math.h>
 
@@ -25,7 +26,7 @@ static inline void upsample_1d_shape_check(
     int nchannels,
     int input_width,
     int output_width) {
-  AT_CHECK(
+  TORCH_CHECK(
       input_width > 0 && output_width > 0,
       "input and output sizes should be greater than 0, but got input (W: ",
       input_width,
@@ -34,10 +35,14 @@ static inline void upsample_1d_shape_check(
       ")");
 
   if (input.defined()) {
-    AT_CHECK(
-        input.numel() != 0 && input.dim() == 3,
-        "non-empty 3D input tensor expected but got a tensor with sizes ",
-        input.sizes());
+    // Allow for empty batch size but not other dimensions
+    bool valid_empty = false;
+    valid_empty = input.size(0) == 0 && input.size(1) != 0 && input.size(2) != 0;
+    
+    TORCH_CHECK(
+                (input.numel() != 0 || valid_empty) && input.dim() == 3,
+                "Non-empty 3D data tensor expected but got a tensor with sizes ",
+                input.sizes());
   } else if (grad_output.defined()) {
     check_dim_size(grad_output, 3, 0, nbatch);
     check_dim_size(grad_output, 3, 1, nchannels);
@@ -54,7 +59,7 @@ static inline void upsample_2d_shape_check(
     int input_width,
     int output_height,
     int output_width) {
-  AT_CHECK(
+  TORCH_CHECK(
       input_height > 0 && input_width > 0 && output_height > 0 &&
           output_width > 0,
       "input and output sizes should be greater than 0,"
@@ -69,10 +74,14 @@ static inline void upsample_2d_shape_check(
       ")");
 
   if (input.defined()) {
-    AT_CHECK(
-        input.numel() != 0 && input.dim() == 4,
-        "non-empty 4D input tensor expected but got a tensor with sizes ",
-        input.sizes());
+    // Allow for empty batch size but not other dimensions
+    bool valid_empty = false;
+    valid_empty = input.size(0) == 0 && input.size(1) != 0 &&
+      input.size(2) != 0 && input.size(3) != 0;
+    TORCH_CHECK(
+                (input.numel() != 0 || valid_empty) && input.dim() == 4,
+                "Non-empty 4D data tensor expected but got a tensor with sizes ",
+                input.sizes());
   } else if (grad_output.defined()) {
     check_dim_size(grad_output, 4, 0, nbatch);
     check_dim_size(grad_output, 4, 1, nchannels);
@@ -92,7 +101,7 @@ static inline void upsample_3d_shape_check(
     int output_depth,
     int output_height,
     int output_width) {
-  AT_CHECK(
+  TORCH_CHECK(
       input_depth > 0 && input_height > 0 && input_width > 0 &&
           output_depth > 0 && output_height > 0 && output_width > 0,
       "Input and output sizes should be greater than 0, but got input (D: ",
@@ -110,10 +119,14 @@ static inline void upsample_3d_shape_check(
       ")");
 
   if (input.defined()) {
-    AT_CHECK(
-        input.numel() != 0 && input.dim() == 5,
-        "Non-empty 5D data tensor expected but got a tensor with sizes ",
-        input.sizes());
+    // Allow for empty batch size but not other dimensions
+    bool valid_empty = false;
+    valid_empty = input.size(0) == 0 && input.size(1) != 0 &&
+      input.size(2) != 0 && input.size(3) != 0 && input.size(4) != 0;
+    TORCH_CHECK(
+                (input.numel() != 0 || valid_empty) && input.dim() == 5,
+                "Non-empty 5D data tensor expected but got a tensor with sizes ",
+                input.sizes());
   } else if (grad_output.defined()) {
     check_dim_size(grad_output, 5, 0, nbatch);
     check_dim_size(grad_output, 5, 1, nchannels);
@@ -124,13 +137,34 @@ static inline void upsample_3d_shape_check(
 }
 
 template <typename accscalar_t>
+__host__ __forceinline__ static accscalar_t compute_scales_value(
+    const c10::optional<double> scale,
+    int64_t input_size,
+    int64_t output_size) {
+  // FIXME: remove magic > 0 after we ensure no models were serialized with -1 defaults.
+  return (scale.has_value() && scale.value() > 0.) ? (accscalar_t)(1.0 / scale.value())
+                                                   : (accscalar_t)input_size / output_size;
+}
+
+template <typename accscalar_t>
+__host__ __forceinline__ static accscalar_t compute_scales_value_backwards(
+    const c10::optional<double> scale,
+    int64_t input_size,
+    int64_t output_size) {
+  // FIXME: remove magic > 0 after we ensure no models were serialized with -1 defaults.
+  return (scale.has_value() && scale.value() > 0.) ? (accscalar_t)scale.value()
+                                                   : (accscalar_t)input_size / output_size;
+}
+
+template <typename accscalar_t>
 __host__ __forceinline__ static accscalar_t area_pixel_compute_scale(
     int input_size,
     int output_size,
-    bool align_corners) {
+    bool align_corners,
+    const c10::optional<double> scale) {
   if (output_size > 1) {
     return align_corners ? (accscalar_t)(input_size - 1) / (output_size - 1)
-                         : (accscalar_t)input_size / output_size;
+                         :  compute_scales_value<accscalar_t>(scale, input_size, output_size);
   } else {
     return static_cast<accscalar_t>(0);
   }
@@ -159,29 +193,29 @@ __device__ __forceinline__ static int nearest_neighbor_compute_source_index(
     int dst_index,
     int input_size) {
   const int src_index =
-      min<int>(static_cast<int>(floorf(dst_index * scale)), input_size - 1);
+      min(static_cast<int>(floorf(dst_index * scale)), input_size - 1);
   return src_index;
 }
 
 /* Used by UpSampleBicubic2d.cu */
 template <typename scalar_t>
 __device__ __forceinline__ static scalar_t upsample_get_value_bounded(
-    const PackedTensorAccessor<scalar_t, 4>& data,
+    const PackedTensorAccessor64<scalar_t, 4>& data,
     int batch,
     int channel,
     int height,
     int width,
     int y,
     int x) {
-  int access_y = max<int>(min<int>(y, height - 1), 0);
-  int access_x = max<int>(min<int>(x, width - 1), 0);
+  int access_y = max(min(y, height - 1), 0);
+  int access_x = max(min(x, width - 1), 0);
   return data[batch][channel][access_y][access_x];
 }
 
 /* Used by UpSampleBicubic2d.cu */
 template <typename scalar_t, typename accscalar_t>
 __device__ __forceinline__ static void upsample_increment_value_bounded(
-    PackedTensorAccessor<scalar_t, 4>& data,
+    PackedTensorAccessor64<scalar_t, 4>& data,
     int batch,
     int channel,
     int height,
@@ -189,12 +223,12 @@ __device__ __forceinline__ static void upsample_increment_value_bounded(
     int y,
     int x,
     accscalar_t value) {
-  int access_y = max<int>(min<int>(y, height - 1), 0);
-  int access_x = max<int>(min<int>(x, width - 1), 0);
-  /* TODO: result here is trucated to scalar_t,
+  int access_y = max(min(y, height - 1), 0);
+  int access_x = max(min(x, width - 1), 0);
+  /* TODO: result here is truncated to scalar_t,
      check: https://github.com/pytorch/pytorch/pull/19630#discussion_r281426912
    */
-  atomicAdd(
+  gpuAtomicAdd(
       &data[batch][channel][access_y][access_x], static_cast<scalar_t>(value));
 }
 

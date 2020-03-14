@@ -13,7 +13,7 @@
 
 namespace torch { namespace autograd {
 
-using function_constructor = std::function<std::shared_ptr<Function>(edge_list&&)>;
+using function_constructor = std::function<std::shared_ptr<Node>(edge_list&&)>;
 
 /**
  * Wraps the tensor outputs in variables and creates the grad_fn and sets the
@@ -50,20 +50,20 @@ inline bool compute_requires_grad(Args&&... args) {
 
 inline void set_history(
     at::Tensor& variable,
-    const std::shared_ptr<Function>& grad_fn) {
+    const std::shared_ptr<Node>& grad_fn) {
   AT_ASSERT(grad_fn);
   if (variable.defined()) {
     auto output_nr =
         grad_fn->add_input_metadata(variable);
-    as_variable_ref(variable).set_gradient_edge({grad_fn, output_nr});
+    impl::set_gradient_edge(as_variable_ref(variable), {grad_fn, output_nr});
   } else {
-    grad_fn->add_input_metadata(Function::undefined_input());
+    grad_fn->add_input_metadata(Node::undefined_input());
   }
 }
 
 inline void set_history(
     std::vector<Variable>&& variables,
-    const std::shared_ptr<Function>& grad_fn) {
+    const std::shared_ptr<Node>& grad_fn) {
   for (auto& variable : variables) {
     set_history(variable, grad_fn);
   }
@@ -71,7 +71,7 @@ inline void set_history(
 
 inline void set_history(
     std::vector<Variable>& variables,
-    const std::shared_ptr<Function>& grad_fn) {
+    const std::shared_ptr<Node>& grad_fn) {
   for (auto& variable : variables) {
     set_history(variable, grad_fn);
   }

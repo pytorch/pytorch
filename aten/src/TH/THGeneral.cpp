@@ -23,8 +23,7 @@
 /* Torch Error Handling */
 static void defaultErrorHandlerFunction(const char *msg, void *data)
 {
-  printf("$ Error: %s\n", msg);
-  exit(-1);
+  throw std::runtime_error(msg);
 }
 
 static THErrorHandlerFunction defaultErrorHandler = defaultErrorHandlerFunction;
@@ -81,11 +80,9 @@ void THSetDefaultErrorHandler(THErrorHandlerFunction new_handler, void *data)
 /* Torch Arg Checking Handling */
 static void defaultArgErrorHandlerFunction(int argNumber, const char *msg, void *data)
 {
-  if(msg)
-    printf("$ Invalid argument %d: %s\n", argNumber, msg);
-  else
-    printf("$ Invalid argument %d\n", argNumber);
-  exit(-1);
+  std::stringstream new_error;
+  new_error << "invalid argument " << argNumber << ": " << msg;
+  throw std::runtime_error(new_error.str());
 }
 
 static THArgErrorHandlerFunction defaultArgErrorHandler = defaultArgErrorHandlerFunction;
@@ -189,31 +186,6 @@ void* THRealloc(void *ptr, ptrdiff_t size)
 void THFree(void *ptr)
 {
   c10::free_cpu(ptr);
-}
-
-double THLog10(const double x)
-{
-  return log10(x);
-}
-
-double THLog1p(const double x)
-{
-#if (defined(_MSC_VER) || defined(__MINGW32__))
-  volatile double y = 1 + x;
-  return log(y) - ((y-1)-x)/y ;  /* cancels errors with IEEE arithmetic */
-#else
-  return log1p(x);
-#endif
-}
-
-double THLog2(const double x)
-{
-  return log2(x);
-}
-
-double THExpm1(const double x)
-{
-  return expm1(x);
 }
 
 THDescBuff _THSizeDesc(const int64_t *size, const int64_t ndim) {

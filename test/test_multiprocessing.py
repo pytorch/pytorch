@@ -3,6 +3,7 @@ import gc
 import os
 import sys
 import time
+import subprocess
 import unittest
 from sys import platform
 
@@ -11,8 +12,8 @@ import torch.cuda
 import torch.multiprocessing as mp
 import torch.utils.hooks
 from torch.nn import Parameter
-from common_utils import (TestCase, run_tests, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, TEST_WITH_ASAN,
-                          load_tests, slowTest)
+from torch.testing._internal.common_utils import (TestCase, run_tests, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, TEST_WITH_ASAN,
+                                                  load_tests, slowTest, TEST_WITH_TSAN)
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -77,11 +78,6 @@ def receive_and_send(queue, out_queue, event, count):
         t = queue.get()
         out_queue.put(t.clone())
     event.wait()
-
-
-def call_backward():
-    x = torch.randn(3, 3, requires_grad=True)
-    x.sum().backward()
 
 
 def sum_tensors(inq, outq):
@@ -155,6 +151,9 @@ def mixed_type_producer(queue, event):
         event.wait()
         event.clear()
 
+def simple_autograd_function(a=1):
+    torch.rand(3).requires_grad_(True).mean().backward()
+    return a ** 2
 
 @contextlib.contextmanager
 def fs_sharing():
@@ -220,6 +219,7 @@ class leak_checker(object):
         return False
 
 
+@unittest.skipIf(TEST_WITH_TSAN, "TSAN is not fork-safe since we're forking in a multi-threaded environment")
 class TestMultiprocessing(TestCase):
 
     def tearDown(self):
@@ -356,6 +356,21 @@ class TestMultiprocessing(TestCase):
         p.join(1)
         self.assertEqual(t, torch.ones(5, 5) * 3, 0)
 
+    @unittest.skipIf(IS_WINDOWS, "Test needs to use fork multiprocessing")
+    def test_autograd_errors(self):
+        ctx = mp.get_context('fork')
+        simple_autograd_function()
+        with self.assertRaisesRegex(RuntimeError, r'Unable to handle autograd'):
+            with ctx.Pool(3) as pool:
+                pool.map(simple_autograd_function, [1, 2, 3])
+
+    @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Test needs to use spawn multiprocessing")
+    def test_autograd_fine_with_spawn(self):
+        ctx = mp.get_context('spawn')
+        simple_autograd_function()
+        with ctx.Pool(3) as pool:
+            pool.map(simple_autograd_function, [1, 2, 3])
+
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
                      don't support multiprocessing with spawn start method")
     @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
@@ -467,6 +482,28 @@ class TestMultiprocessing(TestCase):
         inq.put(t)
         p.join()
         self.assertIsInstance(outq.get(), RuntimeError)
+
+    @unittest.skipIf(IS_WINDOWS, 'not applicable to Windows (only fails with fork)')
+    @unittest.skipIf(not torch.cuda.is_available(), 'CUDA not available')
+    def test_wrong_cuda_fork(self):
+        results = self.run_process_no_exception("""\
+import torch
+from torch.multiprocessing import Process
+def run(rank):
+    torch.cuda.set_device(rank)
+if __name__ == "__main__":
+    size = 2
+    processes = []
+    for rank in range(size):
+        # it would work fine without the line below
+        x = torch.rand(20, 2).cuda()
+        p = Process(target=run, args=(rank,))
+        p.start()
+        processes.append(p)
+    for p in processes:
+        p.join()
+""")
+        self.assertRegex(results[1].decode('ascii'), "Cannot re-initialize CUDA in forked subprocess.")
 
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
                      don't support multiprocessing with spawn start method")
@@ -755,6 +792,15 @@ class TestMultiprocessing(TestCase):
         param = Parameter(torch.arange(1., 26, device='cuda').view(5, 5))
         self._test_autograd_sharing(param, mp.get_context('spawn'), is_parameter=True)
 
+    @staticmethod
+    def run_process_no_exception(code):
+        popen = subprocess.Popen(
+            [sys.executable, '-c', code],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE)
+        pipes = popen.communicate()
+        return pipes
+
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
                      don't support multiprocessing with spawn start method")
     def test_integer_parameter_serialization(self):
@@ -787,15 +833,6 @@ class TestMultiprocessing(TestCase):
     def test_is_shared_cuda(self):
         t = torch.randn(5, 5).cuda()
         self.assertTrue(t.is_shared())
-
-    @unittest.skip('this test occasionally fails and deadlocks; see https://github.com/pytorch/pytorch/issues/5834')
-    def test_backwards_fork(self):
-        r"backwards() should succeed when called before and after a fork"
-        call_backward()
-        p = mp.Process(target=call_backward)
-        p.start()
-        p.join(1)
-        self.assertFalse(p.is_alive())
 
 
 if __name__ == '__main__':

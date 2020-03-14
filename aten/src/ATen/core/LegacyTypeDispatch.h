@@ -4,107 +4,29 @@
 // object, which is essentially a giant virtual dispatch table
 // for every operation we support dynamically dispatching over.
 //
-// We intend to deprecate this design for a more extensible one
-// that permits addition of extra operators *out-of-band*.  However,
-// for the time being, it's the only mechanism which works for
-// dispatching PyTorch operators, so we are supporting it for now.
-//
-// The use of Type in ATen/core poses another problem: on a
-// mobile build, we don't want to assume that Type is available.
-// But all methods on Tensor which route to PyTorch operators
-// need to somehow *get* a Type, and then do a virtual call on it.
-// How are we going to get the Type?  Why, by another indirection!
-//
-// This registry is the mechanism for getting a concrete Type.
-// For a regular build, we register all types here; for a
-// mobile build, there are no registrations and instead we
-// return a stub which errors for all functions.
-//
-// NB: We don't use Registry for this, because we don't want to
-// pay for a hash table lookup every time we do an operation.
+// This has been deprecated in favor of ATenDispatch, and in the future,
+// c10 dispatcher.
+// TODO: Clean up what remains here
 
 #include <c10/core/Backend.h>
 #include <c10/core/ScalarType.h>
-#include <ATen/core/VariableHooksInterface.h>
 #include <c10/util/Exception.h>
 #include <ATen/core/LegacyDeviceTypeInit.h>
+#include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/core/TensorImpl.h>
+#include <ATen/core/TensorBody.h>
 
 namespace at {
 
-struct Type;
-
-struct CAFFE2_API LegacyTypeDeleter {
-  using TypeDeleterFun = void(Type*);
-  TypeDeleterFun *fn_ = nullptr;
-  LegacyTypeDeleter() {}
-  /* implicit */ LegacyTypeDeleter(TypeDeleterFun *fn) : fn_(fn) {}
-  void operator()(Type * ptr) {
-    if (fn_) {
-      (*fn_)(ptr);
-    }
-  }
-};
-
 class CAFFE2_API LegacyTypeDispatch {
  public:
-  using TypeUniquePtr = std::unique_ptr<Type, LegacyTypeDeleter>;
-  // WARNING: This function has the precondition that you have
-  // initialized the type you want to call.  This initialization
-  // step is generally done by Context, or assumed because you
-  // have a Tensor and thus the Type of that Tensor must already
-  // be initialized.
-  Type* getNonVariableTypeRaw(Backend p, ScalarType s) {
-    return type_registry[static_cast<int>(p)].get();
-  }
-  Type * getNonVariableTypeOpt(Backend p, ScalarType s) {
-    if (p != Backend::Undefined) {
-      initForDeviceType(backendToDeviceType(p));
-      initForScalarType(s);
-    }
-    auto type = getNonVariableTypeRaw(p, s);
-
-    if(!type) {
-      // there is only a single Undefined Type.
-      if (p == Backend::Undefined || s == ScalarType::Undefined) {
-        return getNonVariableTypeRaw(Backend::Undefined, ScalarType::Undefined);
-      }
-    }
-
-    return type;
-  }
-
-  Type & getNonVariableType(Backend p, ScalarType s) {
-    auto* type = getNonVariableTypeOpt(p, s);
-    if (!type) AT_ERROR(toString(p), toString(s), "Type is not enabled.");
-    return *type;
-  }
-
-  Type* getTypeRaw(Backend p, ScalarType s, bool is_variable) {
-    auto baseType = getNonVariableTypeRaw(p, s);
-    if (is_variable) {
-      return &detail::getVariableHooks().getVariableTypeFromBaseType(*baseType);
-    } else {
-      return baseType;
-    }
-  }
-  Type & getVariableType(Backend p, ScalarType s) {
-    auto& baseType = getNonVariableType(p, s);
-    return detail::getVariableHooks().getVariableTypeFromBaseType(baseType);
-  }
-  Type & getType(Backend p, ScalarType s, bool is_variable) {
-    if (is_variable) {
-      return getVariableType(p, s);
-    } else {
-      return getNonVariableType(p, s);
-    }
-  }
-  void registerType(Backend b, TypeUniquePtr&& t) {
-    type_registry[static_cast<int>(b)] = std::move(t);
-    detail::getVariableHooks().registerVariableTypeFor(this, b);
-  }
-private:
-  void initForDeviceType(DeviceType p) {
+  void initForDispatchKeySet(DispatchKeySet ts) {
+    // TODO: Avoid use of legacyExtractDispatchKey here.  The key
+    // problem is that you may get a DispatchKeySet with
+    // VariableTensorId set; should you initialize the "underlying"
+    // type in that case?  Hard to say.
+    auto b = dispatchKeyToBackend(legacyExtractDispatchKey(ts));
+    auto p = backendToDeviceType(b);
     static std::once_flag cpu_once;
     static std::once_flag cuda_once;
     if (p == DeviceType::CPU) {
@@ -121,69 +43,50 @@ private:
       });
     }
   }
-  void initForScalarType(ScalarType s) {
-    static std::once_flag once;
-    // Only complex may need initialization
-    if (isComplexType(s)) {
-      std::call_once(once, [] {
-        getLegacyDeviceTypeInit().initComplex();
-      });
-    }
-  }
-
-  // NB: type_registry has nullptr for all CUDA backends until
-  // CUDA initialization has occurred
-  TypeUniquePtr type_registry
-    [static_cast<int>(Backend::NumOptions)];
 };
 
 CAFFE2_API LegacyTypeDispatch& globalLegacyTypeDispatch();
 
-// A RAII, thread local (!) guard that has the following effect:
+// A RAII, thread local (!) guard that will disable dispatch to variable
+// handler.
 //
-// Upon construction: sets NonVariableTypeMode_enabled for the current thread to
-// control whether we are in non-Variable-type mode.
+// NOTE [ Treating Variables as non-Variables in type dispatch ]
 //
-// Upon destruction: sets NonVariableTypeMode_enabled back to the original value.
+// What exactly does AutoNonVariableType do?  The short answer is, it causes
+// dispatches on ATen functions to go to the non-variable implementation,
+// bypassing autograd handling (and also profiling and tracing).
 //
-// See NOTE [ Treating Variables as non-Variables in type dispatch ] for details.
+// To understand why this guard exists, it's helpful to understand the history
+// behind how Variable was implemented.  Previously, Variables were implemented
+// as a wrapper on Tensors; so the act of processing a Variable involved
+// unwrapping the underlying Tensor, and then calling the underlying base
+// operation on /that/ operation
+//
+// However, after the Variable/Tensor merge, there is no concept of unwrapping
+// a tensor anymore.  If you just call the operation on the same variable
+// again inside your VariableType handler, you'll dispatch back to
+// VariableType, which is not what we want.
+//
+// The solution to the above problem is to add `at::NonVariableTypeMode`, which
+// when enabled will cause `legacyTensorType()` and `getType()` to always return
+// non-Variable type, even if the tensor being called on is a variable.
+//
+// TODO: Since `torch::NoGradGuard` serves almost the same purpose in libtorch,
+// we should merge these two thread-local guards.  However, NoGradGuard does
+// something subtly different: it turns off gradient recording, but DOES NOT
+// skip VariableType implementation (as we still might need to profile or
+// trace).  To unify the two, we would first have to move profiling and tracing
+// out of VariableType.
+
 struct CAFFE2_API AutoNonVariableTypeMode {
-  AutoNonVariableTypeMode(bool enabled) : prev_mode(NonVariableTypeMode::is_enabled()) {
-    NonVariableTypeMode::set_enabled(enabled);
+  // NB: The enabled parameter must ALWAYS be black, as Henry Ford used to say.
+  // TODO: Eliminate this parameter entirely
+  AutoNonVariableTypeMode(bool enabled = true) :
+    guard_(DispatchKey::VariableTensorId) {
+
+    TORCH_INTERNAL_ASSERT(enabled);
   }
-  ~AutoNonVariableTypeMode() {
-    NonVariableTypeMode::set_enabled(prev_mode);
-  }
-  bool prev_mode;
+  c10::impl::ExcludeDispatchKeyGuard guard_;
 };
-
-/**
- * Return the Type object corresponding to this Tensor, which we can
- * use to do dynamic dispatch to operators from.  This method is NOT
- * intended to be used by end-users; it is purely an implementation
- * detail.
- *
- * NOTE: We also check `at::NonVariableTypeMode`, and if it's enabled
- * we always return non-Variable type in this function.
- * See NOTE [ Treating Variables as non-Variables in type dispatch ]
- */
-inline Type& legacyTensorType(const TensorImpl& tensor) {
-  // NB: It's valid to use getTypeRaw here, because the TensorImpl
-  // could not have been created without initializing the Type first.
-  // NB: This is not actually true via the Caffe2 codepath! But we call
-  // initializeLegacyTypeDispatchFor in the right place.
-  return *globalLegacyTypeDispatch().getTypeRaw(
-      tensorTypeIdToBackend(tensor.type_id()),
-      typeMetaToScalarType(tensor.dtype()),
-      tensor.is_variable());
-}
-
-inline void initializeLegacyTypeDispatchFor(const TensorImpl& tensor) {
-  // getType calls the right initialization
-  globalLegacyTypeDispatch().getType(
-      tensorTypeIdToBackend(tensor.type_id()),
-      typeMetaToScalarType(tensor.dtype()),
-      tensor.is_variable());
-}
 
 } // namespace at

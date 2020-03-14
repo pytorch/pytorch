@@ -4,9 +4,10 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import numpy as np
+import torch
+import sys
 import unittest
 from scipy import interpolate
-import sys
 
 import caffe2.python.hypothesis_test_util as hu
 from caffe2.python import core, utils
@@ -27,6 +28,15 @@ def heatmap_approx_keypoint_ref(maps, rois):
     return [keypoint_utils.approx_heatmap_keypoint(maps, rois)]
 
 
+def c10_op_ref(maps, rois):
+    keypoints = torch.ops._caffe2.HeatmapMaxKeypoint(
+        torch.Tensor(maps),
+        torch.Tensor(rois),
+        should_output_softmax=True,
+    )
+    return [keypoints.numpy()]
+
+
 class TestHeatmapMaxKeypointOp(hu.HypothesisTestCase):
     def setUp(self):
         super(TestHeatmapMaxKeypointOp, self).setUp()
@@ -35,7 +45,7 @@ class TestHeatmapMaxKeypointOp(hu.HypothesisTestCase):
         # initial coordinates and interpolate HEATMAP_SIZE from it
         HEATMAP_SMALL_SIZE = 4
         bboxes_in = 500 * np.random.rand(NUM_TEST_ROI, 4).astype(np.float32)
-        # only bbox with smaller first coordiantes
+        # only bbox with smaller first coordinates
         for i in range(NUM_TEST_ROI):
             if bboxes_in[i][0] > bboxes_in[i][2]:
                 tmp = bboxes_in[i][2]
@@ -46,14 +56,15 @@ class TestHeatmapMaxKeypointOp(hu.HypothesisTestCase):
                 bboxes_in[i][3] = bboxes_in[i][1]
                 bboxes_in[i][1] = tmp
 
-        # initial randomized coordiantes for heatmaps and expand it with interpolation
+        # initial randomized coordinates for heatmaps and expand it with interpolation
         init = np.random.rand(
             NUM_TEST_ROI,
             NUM_KEYPOINTS,
             HEATMAP_SMALL_SIZE,
             HEATMAP_SMALL_SIZE).astype(np.float32)
-        heatmaps_in = np.zeros((NUM_TEST_ROI, NUM_KEYPOINTS,
-            HEATMAP_SIZE, HEATMAP_SIZE)).astype(np.float32)
+        heatmaps_in = np.zeros(
+            (NUM_TEST_ROI, NUM_KEYPOINTS, HEATMAP_SIZE, HEATMAP_SIZE)
+        ).astype(np.float32)
         for roi in range(NUM_TEST_ROI):
             for keyp in range(NUM_KEYPOINTS):
                 f = interpolate.interp2d(
@@ -120,6 +131,14 @@ class TestHeatmapMaxKeypointOp(hu.HypothesisTestCase):
                 inputs=[heatmap_test, example_bboxes],
                 reference=heatmap_approx_keypoint_ref,
             )
+
+    def test_caffe2_pytorch_eq(self):
+        self.assertReferenceChecks(
+            device_option=caffe2_pb2.DeviceOption(),
+            op=self.op,
+            inputs=[self.heatmaps_in, self.bboxes_in],
+            reference=c10_op_ref,
+        )
 
 
 if __name__ == "__main__":

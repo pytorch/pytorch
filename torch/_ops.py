@@ -2,6 +2,7 @@ import torch._C
 
 import contextlib
 import ctypes
+import os
 import sys
 import types
 
@@ -62,10 +63,12 @@ class _OpNamespace(types.ModuleType):
         # with qualified_op_name
         torch.jit._register_builtin(op, qualified_op_name)
         setattr(self, op_name, op)
+        op.__module__ = self.__module__ + "." + self.name
         return op
 
-
 class _Ops(types.ModuleType):
+    __file__ = os.path.join(os.path.dirname(__file__), '_ops.py')
+
     def __init__(self):
         super(_Ops, self).__init__('torch.ops')
         self.loaded_libraries = set()
@@ -101,7 +104,6 @@ class _Ops(types.ModuleType):
             # operators with the JIT.
             ctypes.CDLL(path)
         self.loaded_libraries.add(path)
-
 
 # The ops "namespace"
 ops = _Ops()

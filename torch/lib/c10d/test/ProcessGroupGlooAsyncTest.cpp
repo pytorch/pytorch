@@ -1,7 +1,5 @@
-#include <gloo/transport/tcp/device.h>
-
-#include <c10/cuda/CUDAGuard.h>
 #include <ATen/cuda/CUDAMultiStreamGuard.h>
+#include <c10/cuda/CUDAGuard.h>
 
 #include <c10d/FileStore.hpp>
 #include <c10d/ProcessGroupGloo.hpp>
@@ -51,8 +49,8 @@ class AsyncTest {
     // Use tiny timeout to make this test run fast
     ::c10d::ProcessGroupGloo::Options options;
     options.timeout = std::chrono::milliseconds(50);
-    ::gloo::transport::tcp::attr attr;
-    options.devices.push_back(::gloo::transport::tcp::CreateDevice(attr));
+    options.devices.push_back(
+        ::c10d::ProcessGroupGloo::createDeviceForHostname("127.0.0.1"));
 
     pg_ = std::unique_ptr<::c10d::ProcessGroupGloo>(
         new ::c10d::ProcessGroupGloo(store, rank, size, options));
@@ -198,7 +196,7 @@ void runAsyncAllreduceTest(
     auto tensors = tests[i].getTensors();
     for (size_t j = 0; j < tensors.size(); j++) {
       auto& tensor = tensors[j];
-      auto data = tensor.data<float>();
+      auto data = tensor.data_ptr<float>();
       for (auto k = 0; k < tensor.numel(); k++) {
         if (data[k] != expected) {
           throw std::runtime_error("BOOM!");
@@ -233,7 +231,7 @@ void runAsyncBroadcastTest(
         auto tensors = tests[i].getTensors();
         for (size_t j = 0; j < tensors.size(); j++) {
           auto& tensor = tensors[j];
-          auto data = tensor.data<float>();
+          auto data = tensor.data_ptr<float>();
           for (auto k = 0; k < tensor.numel(); k++) {
             if (data[k] != expected) {
               throw std::runtime_error("BOOM!");
@@ -246,6 +244,10 @@ void runAsyncBroadcastTest(
 }
 
 int main(int argc, char** argv) {
+  if (!at::cuda::is_available()) {
+    LOG(INFO) << "CUDA not available, skipping test";
+    return EXIT_SUCCESS;
+  }
   {
     TemporaryFile file;
     runAsyncAllreduceTest(file.path, 4, 2);
@@ -255,5 +257,5 @@ int main(int argc, char** argv) {
     TemporaryFile file;
     runAsyncBroadcastTest(file.path, 4, 1);
   }
-  std::cout << "Test successful" << std::endl;
+  LOG(INFO) << "Test successful";
 }

@@ -446,7 +446,7 @@ def _operator_to_node_simp(op, inter_blobs, seen):
         if op.name:
             name = op.name
         else:
-            name_list = [name for name in outputs]
+            name_list = list(outputs)
             scope = os.path.commonprefix(name_list)
             name = os.path.join(scope, op.type)
         assert(name)
@@ -708,7 +708,7 @@ def _operators_to_graph_def(
         # Show a cleaner, easier-to-interpret version of the model graph
         blobs = input_blobs
 
-    for blob in blobs:
+    for blob in sorted(blobs):
         current_graph.node.extend([_blob_to_node(producing_ops, {}, blob)])
 
     return current_graph

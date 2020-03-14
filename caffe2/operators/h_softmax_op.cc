@@ -81,7 +81,7 @@ bool HSoftmaxOp<float, CPUContext>::RunOnDevice() {
   // Batch size
   int M = X.dim() > 1 ? X.dim32(0) : 1;
   // Input feature dimension
-  int K = X.numel() / M;
+  size_t K = X.numel() / M;
   CAFFE_ENFORCE_GE(W.dim(), 2); // N*K
   CAFFE_ENFORCE_EQ(b.dim(), 1); // N
   CAFFE_ENFORCE_EQ(K, W.numel() / (W.dim32(0)));
@@ -632,7 +632,7 @@ search tree.
     .Arg("topN", "Number of nodes in outputs")
     .Input(0, "X", "Input data from previous layer")
     .Input(1, "W", "The matrix trained from Softmax Ops")
-    .Input(2, "b", "The bias traiend from Softmax Ops")
+    .Input(2, "b", "The bias trained from Softmax Ops")
     .Output(
         0,
         "Y_names",
@@ -647,7 +647,7 @@ OPERATOR_SCHEMA(HuffmanTreeHierarchy)
     .NumOutputs(1)
     .SetDoc(R"DOC(
 HuffmanTreeHierarchy is an operator to generate huffman tree hierarchy given
-the input labels. It returns the tree as seralized HierarchyProto
+the input labels. It returns the tree as serialized HierarchyProto
 )DOC")
     .Arg("num_classes", "The number of classes used to build the hierarchy.")
     .Input(0, "Labels", "The labels vector")

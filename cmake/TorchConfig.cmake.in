@@ -38,22 +38,48 @@ endif()
 # Library dependencies.
 if (@BUILD_SHARED_LIBS@)
   find_package(Caffe2 REQUIRED PATHS ${CMAKE_CURRENT_LIST_DIR}/../Caffe2)
+  set(TORCH_LIBRARIES torch ${Caffe2_MAIN_LIBS})
+else()
+  add_library(torch STATIC IMPORTED) # set imported_location at the bottom
+  set(TORCH_LIBRARIES torch)
 endif()
 
-if (NOT ANDROID)
-  find_library(TORCH_LIBRARY torch PATHS "${TORCH_INSTALL_PREFIX}/lib")
-else()
-  find_library(TORCH_LIBRARY NO_CMAKE_FIND_ROOT_PATH torch PATHS "${TORCH_INSTALL_PREFIX}/lib")
-endif()
-add_library(torch UNKNOWN IMPORTED)
-set(TORCH_LIBRARIES torch ${Caffe2_MAIN_LIBS})
-
-if (NOT ANDROID)
-  find_library(C10_LIBRARY c10 PATHS "${TORCH_INSTALL_PREFIX}/lib")
-else()
-  find_library(C10_LIBRARY c10 NO_CMAKE_FIND_ROOT_PATH PATHS "${TORCH_INSTALL_PREFIX}/lib")
-endif()
+find_library(C10_LIBRARY c10 PATHS "${TORCH_INSTALL_PREFIX}/lib")
 list(APPEND TORCH_LIBRARIES ${C10_LIBRARY})
+
+# We need manually add dependent libraries when they are not linked into the
+# shared library.
+# TODO: this list might be incomplete.
+if (NOT @BUILD_SHARED_LIBS@)
+  find_library(TORCH_CPU_LIBRARY torch_cpu PATHS "${TORCH_INSTALL_PREFIX}/lib")
+  list(APPEND TORCH_LIBRARIES ${TORCH_CPU_LIBRARY})
+
+  if (@USE_NNPACK@)
+    find_library(NNPACK_LIBRARY nnpack PATHS "${TORCH_INSTALL_PREFIX}/lib")
+    list(APPEND TORCH_LIBRARIES ${NNPACK_LIBRARY})
+  endif()
+
+  if (@USE_PYTORCH_QNNPACK@)
+    find_library(PYTORCH_QNNPACK_LIBRARY pytorch_qnnpack PATHS "${TORCH_INSTALL_PREFIX}/lib")
+    list(APPEND TORCH_LIBRARIES ${PYTORCH_QNNPACK_LIBRARY})
+  endif()
+
+  if (@USE_XNNPACK@)
+    find_library(XNNPACK_LIBRARY XNNPACK PATHS "${TORCH_INSTALL_PREFIX}/lib")
+    list(APPEND TORCH_LIBRARIES ${XNNPACK_LIBRARY})
+  endif()
+
+  if (@INTERN_USE_EIGEN_BLAS@)
+    find_library(EIGEN_BLAS_LIBRARY eigen_blas PATHS "${TORCH_INSTALL_PREFIX}/lib")
+    list(APPEND TORCH_LIBRARIES ${EIGEN_BLAS_LIBRARY})
+  endif()
+
+  find_library(CPUINFO_LIBRARY cpuinfo PATHS "${TORCH_INSTALL_PREFIX}/lib")
+  list(APPEND TORCH_LIBRARIES ${CPUINFO_LIBRARY})
+
+  find_library(CLOG_LIBRARY clog PATHS "${TORCH_INSTALL_PREFIX}/lib")
+  list(APPEND TORCH_LIBRARIES ${CLOG_LIBRARY})
+endif()
 
 if (@USE_CUDA@)
   if(MSVC)
@@ -65,6 +91,8 @@ if (@USE_CUDA@)
       ${NVTOOLEXT_HOME}/lib/x64/nvToolsExt64_1.lib
       ${CUDA_LIBRARIES})
     list(APPEND TORCH_INCLUDE_DIRS ${NVTOOLEXT_HOME}/include)
+    find_library(CAFFE2_NVRTC_LIBRARY caffe2_nvrtc PATHS "${TORCH_INSTALL_PREFIX}/lib")
+    list(APPEND TORCH_CUDA_LIBRARIES ${CAFFE2_NVRTC_LIBRARY})
   elseif(APPLE)
     set(TORCH_CUDA_LIBRARIES
       ${CUDA_TOOLKIT_ROOT_DIR}/lib/libcudart.dylib
@@ -89,10 +117,11 @@ if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
   set(TORCH_CXX_FLAGS "-D_GLIBCXX_USE_CXX11_ABI=@GLIBCXX_USE_CXX11_ABI@")
 endif()
 
+find_library(TORCH_LIBRARY torch PATHS "${TORCH_INSTALL_PREFIX}/lib")
 set_target_properties(torch PROPERTIES
     IMPORTED_LOCATION "${TORCH_LIBRARY}"
     INTERFACE_INCLUDE_DIRECTORIES "${TORCH_INCLUDE_DIRS}"
-    CXX_STANDARD 11
+    CXX_STANDARD 14
 )
 if (TORCH_CXX_FLAGS)
   set_property(TARGET torch PROPERTY INTERFACE_COMPILE_OPTIONS "${TORCH_CXX_FLAGS}")

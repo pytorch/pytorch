@@ -94,7 +94,7 @@ void reflection_pad1d_out_template(
     output.resize_({nplane, output_w});
     AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "reflection_pad1d", [&] {
       reflection_pad1d_out_frame<scalar_t>(
-        input.data<scalar_t>(), output.data<scalar_t>(),
+        input.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(),
         nplane,
         input_w, output_w,
         pad_l);
@@ -103,7 +103,7 @@ void reflection_pad1d_out_template(
     output.resize_({nbatch, nplane, output_w});
     AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "reflection_pad1d", [&] {
       reflection_pad1d_out_loop<scalar_t>(
-        input.data<scalar_t>(), output.data<scalar_t>(),
+        input.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(),
         nbatch, nplane,
         input_w, output_w,
         pad_l);
@@ -190,7 +190,7 @@ void reflection_pad1d_backward_out_template(
     AT_DISPATCH_FLOATING_TYPES(
       grad_input.scalar_type(), "reflection_pad1d_backward", [&] {
         reflection_pad1d_backward_out_frame(
-          grad_input.data<scalar_t>(), grad_output.data<scalar_t>(),
+          grad_input.data_ptr<scalar_t>(), grad_output.data_ptr<scalar_t>(),
           nplane,
           input_w, output_w,
           pad_l);
@@ -200,8 +200,8 @@ void reflection_pad1d_backward_out_template(
     AT_DISPATCH_FLOATING_TYPES(
       grad_input.scalar_type(), "reflection_pad1d_backward", [&] {
         reflection_pad1d_backward_out_loop(
-          grad_input.data<scalar_t>(),
-          grad_output.data<scalar_t>(),
+          grad_input.data_ptr<scalar_t>(),
+          grad_output.data_ptr<scalar_t>(),
           nbatch, nplane,
           input_w, output_w,
           pad_l);
@@ -325,7 +325,7 @@ void reflection_pad2d_out_template(
     output.resize_({nplane, output_h, output_w});
     AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "reflection_pad2d", [&] {
       reflection_pad2d_out_frame(
-        input.data<scalar_t>(), output.data<scalar_t>(),
+        input.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(),
         nplane,
         input_w, input_h, output_w, output_h,
         pad_l, pad_t);
@@ -335,7 +335,7 @@ void reflection_pad2d_out_template(
     output.resize_({nbatch, nplane, output_h, output_w});
     AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "reflection_pad2d", [&] {
       reflection_pad2d_out_loop(
-        input.data<scalar_t>(), output.data<scalar_t>(),
+        input.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(),
         nbatch, nplane,
         input_w, input_h, output_w, output_h,
         pad_l, pad_t);
@@ -451,7 +451,7 @@ void reflection_pad2d_backward_out_template(
     AT_DISPATCH_FLOATING_TYPES(
       grad_output.scalar_type(), "reflection_pad2d_backward", [&] {
         reflection_pad2d_backward_out_frame(
-          grad_input.data<scalar_t>(), grad_output.data<scalar_t>(),
+          grad_input.data_ptr<scalar_t>(), grad_output.data_ptr<scalar_t>(),
           nplane,
           input_w, input_h, output_w, output_h,
           pad_l, pad_t);
@@ -461,7 +461,7 @@ void reflection_pad2d_backward_out_template(
     AT_DISPATCH_FLOATING_TYPES(
       grad_output.scalar_type(), "reflection_pad2d_backward", [&] {
         reflection_pad2d_backward_out_loop(
-          grad_input.data<scalar_t>(), grad_output.data<scalar_t>(),
+          grad_input.data_ptr<scalar_t>(), grad_output.data_ptr<scalar_t>(),
           nbatch, nplane,
           input_w, input_h, output_w, output_h,
           pad_l, pad_t);
@@ -500,7 +500,7 @@ Tensor reflection_pad1d_backward_cpu(
     const Tensor& grad_output,
     const Tensor& input,
     IntArrayRef padding) {
-  auto grad_input = at::zeros_like(input);
+  auto grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   reflection_pad1d_backward_out_template(
     grad_input, grad_output, input, padding);
   return grad_input;
@@ -534,7 +534,7 @@ Tensor reflection_pad2d_backward_cpu(
     const Tensor& grad_output,
     const Tensor& input,
     IntArrayRef padding) {
-  auto grad_input = at::zeros_like(input);
+  auto grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   reflection_pad2d_backward_out_template(
     grad_input, grad_output, input, padding);
   return grad_input;

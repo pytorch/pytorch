@@ -3,8 +3,9 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/symbolic.h>
+#include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
-#include <torch/csrc/jit/python_ir.h>
+#include <torch/csrc/jit/python/python_ir.h>
 #include <torch/csrc/utils/pybind.h>
 #include <sstream>
 #include <unordered_map>
@@ -35,7 +36,7 @@ void removePrintOps(Block* block) {
   }
 }
 
-void removePrintOps(std::shared_ptr<Graph>& graph) {
+void RemovePrintOps(std::shared_ptr<Graph>& graph) {
   removePrintOps(graph->block());
 }
 
@@ -55,8 +56,10 @@ void checkONNXCompatibility(const c10::FunctionSchema& schema) {
     }
     if (type->kind() == TypeKind::ListType) {
       const auto& elem_type = reinterpret_cast<ListType*>(type.get())->getElementType();
-      if (elem_type->isSubclass(TypeKind::TensorType)) {
-        AT_ASSERTM(!has_tensor_list, "ONNX export supports at most one TensorList as input.");
+      if (elem_type->isSubtypeOf(TensorType::get())) {
+        AT_ASSERTM(
+            !has_tensor_list,
+            "ONNX export supports at most one TensorList as input.");
         has_tensor_list = true;
       }
     }
@@ -92,22 +95,18 @@ void preprocessCaffe2Ops(Block* block) {
             AT_ASSERT(type->kind() != TypeKind::OptionalType);
           }
         }
-        if (type->isSubclass(TypeKind::TensorType)) {
+        if (type->isSubtypeOf(TensorType::get())) {
           it->addInput(origin_input);
-        } else if (type->kind() == TypeKind::BoolType || type->kind() == TypeKind::FloatType || type->kind() == TypeKind::IntType) {
+        } else if (
+            type->kind() == TypeKind::BoolType ||
+            type->kind() == TypeKind::IntType) {
           const auto* constant_node = origin_input->node();
           AT_ASSERT(constant_node->kind() == prim::Constant);
-          const auto& tensor = constant_node->t(attr::value);
-          AT_ASSERT(tensor.numel() == 1);
-          if (type->kind() == TypeKind::IntType || type->kind() == TypeKind::BoolType) {
-            it->i_(Symbol::attr(arg.name()), tensor.item().to<int64_t>());
-          } else if (type->kind() == TypeKind::FloatType) {
-            it->f_(Symbol::attr(arg.name()), tensor.item().to<float>());
-          } else {
-            // TODO handle the StringType, no c10 op accept String as argument yet
-            throw std::runtime_error("Unhandled scalar arg: " + arg.name() +
-                ", type: " + c10::typeKindToString(type->kind()));
-          }
+          it->i_(Symbol::attr(arg.name()), constant_node->i(attr::value));
+        } else if (type->kind() == TypeKind::FloatType) {
+          const auto* constant_node = origin_input->node();
+          AT_ASSERT(constant_node->kind() == prim::Constant);
+          it->f_(Symbol::attr(arg.name()), constant_node->f(attr::value));
         } else if (type->kind() == TypeKind::StringType) {
           const auto* constant_node = origin_input->node();
           AT_ASSERT(constant_node->kind() == prim::Constant);
@@ -116,12 +115,14 @@ void preprocessCaffe2Ops(Block* block) {
           const auto& list_node = origin_input->node();
           AT_ASSERT(list_node->kind() == prim::ListConstruct);
           const auto& elem_type = reinterpret_cast<ListType*>(type.get())->getElementType();
-          if (elem_type->isSubclass(TypeKind::TensorType)) {
+          if (elem_type->isSubtypeOf(TensorType::get())) {
             const auto& tensor_list = origin_input->node()->inputs();
             for (const auto& t : tensor_list) {
               it->addInput(t);
             }
-          } else if (elem_type->kind() == TypeKind::IntType || elem_type->kind() == TypeKind::BoolType) {
+          } else if (
+              elem_type->kind() == TypeKind::IntType ||
+              elem_type->kind() == TypeKind::BoolType) {
             // TODO support list of ints and bools, needs c10 op for testing
             throw std::runtime_error("List[int] and List[bool] are not supported yet.");
           } else if (elem_type->kind() == TypeKind::FloatType) {
@@ -129,25 +130,25 @@ void preprocessCaffe2Ops(Block* block) {
             for (const auto* elem_input : list_node->inputs()) {
               const auto* constant_node = elem_input->node();
               AT_ASSERT(constant_node->kind() == prim::Constant);
-              const auto& tensor = constant_node->t(attr::value);
-              AT_ASSERT(tensor.numel() == 1);
-              values.push_back(tensor.item().to<double>());
+              values.push_back(constant_node->f(attr::value));
             }
             it->fs_(Symbol::attr(arg.name()), values);
           } else {
             throw std::runtime_error("Unhandled scalar arg: " + arg.name() +
-                ", type: " + c10::typeKindToString(elem_type->kind())); }
+                ", type: " + c10::typeKindToString(elem_type->kind()));
+          }
         } else {
           throw std::runtime_error("Unsupported input type of arg " +
               arg.name() + " in Caffe2 operator: " +
-              c10::typeKindToString(type->kind())); }
+              c10::typeKindToString(type->kind()));
+        }
       }
     }
   }
-  EliminateDeadCode(block);
+  EliminateDeadCode(block, true, DCESideEffectPolicy::ALLOW_DELETING_NODES_WITH_SIDE_EFFECTS);
 }
 
-void preprocessCaffe2Ops(std::shared_ptr<Graph>& graph) {
+void PreprocessCaffe2Ops(std::shared_ptr<Graph>& graph) {
   preprocessCaffe2Ops(graph->block());
 }
 
@@ -157,8 +158,6 @@ std::shared_ptr<Graph> ToONNX(
     ::torch::onnx::OperatorExportTypes operator_export_type) {
   auto new_graph = std::make_shared<Graph>(graph->current_scope());
   std::unordered_map<Value*, Value*> env;
-  removePrintOps(graph);
-  preprocessCaffe2Ops(graph);
   BlockToONNX(graph->block(), new_graph->block(), operator_export_type, env);
   return new_graph;
 }
@@ -209,7 +208,12 @@ void BlockToONNX(
         // Allow symbolic() to skip specifying the type of the return node.
         // Unfortunately, they are on the hook for all internal nodes
         // (though in practice, the types are not computed.)
-        outputs[i]->setType(old->type());
+        auto old_tensor_type = old->type()->cast<TensorType>();
+        if (old_tensor_type == nullptr || old_tensor_type->scalarType().has_value()) {
+          // Check if Tensor has scalartype when overwriting output type
+          outputs[i]->setType(old->type());
+        }
+
         // Copy over source location and scope information to all nodes
         // created by the symbolic
         outputs[i]->node()->setSourceRange(node->sourceRange());
@@ -342,7 +346,7 @@ void BlockToONNX(
   // Finally, visit all nodes in the graph
   for (auto node : old_block->nodes()) {
     if (node->kind().is_caffe2()) {
-      // Pass on Caffe2 opeartor, since we already preprocess it
+      // Pass on Caffe2 operator, since we already preprocess it
       cloneNode(node);
     } else if (node->kind() == prim::PythonOp) {
       callPySymbolicMethod(static_cast<ConcretePythonOp*>(node));
@@ -354,8 +358,7 @@ void BlockToONNX(
     ctx.block->registerOutput(env.at(output));
     env.at(output)->setType(output->type());
   }
-
-  EliminateDeadCode(ctx.block);
+  EliminateDeadCode(ctx.block, true, DCESideEffectPolicy::ALLOW_DELETING_NODES_WITH_SIDE_EFFECTS);
 }
 
 } // namespace jit

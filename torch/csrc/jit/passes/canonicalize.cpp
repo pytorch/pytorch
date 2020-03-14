@@ -1,5 +1,5 @@
 #include <torch/csrc/jit/passes/canonicalize.h>
-#include <torch/csrc/jit/ir_views.h>
+#include <torch/csrc/jit/ir/ir_views.h>
 
 namespace torch {
 namespace jit {
@@ -19,14 +19,14 @@ std::shared_ptr<Graph> Canonicalize(
     auto* r_input = r->addInput();
     r_input->copyMetadata(input);
     if (!keep_unique_names)
-      r_input->setUniqueName("");
+      r_input->setDebugName("");
     rn_env[input] = r_input;
   }
   for (auto* node : graph->nodes()) {
     auto* r_node = r->createClone(node, rn_fn);
     if (!keep_unique_names) {
       for (auto* output : r_node->outputs()) {
-        output->setUniqueName("");
+        output->setDebugName("");
       }
     }
     r->appendNode(r_node);
@@ -60,15 +60,6 @@ size_t blockIndex(const Block* b) {
   AT_ASSERT(false);
 }
 
-size_t blocksFromGraphBlock(Node* n) {
-  size_t dist = 0;
-  while (n->owningBlock()->owningNode()) {
-    n = n->owningBlock()->owningNode();
-    ++dist;
-  }
-  return dist;
-}
-
 /*
  * This establishes a canonical ordering of nodes.
  * If n1 and n2 are in the same block, whichever node appears first
@@ -85,8 +76,8 @@ bool isBefore(Node* n1, Node* n2) {
   AT_ASSERT(n1 != n2);
 
   // Set n1 and n2 to be the number of blocks from the Graph block
-  size_t d_1 = blocksFromGraphBlock(n1);
-  size_t d_2 = blocksFromGraphBlock(n2);
+  size_t d_1 = n1->blocksFromGraphBlock();
+  size_t d_2 = n2->blocksFromGraphBlock();
 
   for (; d_1 > d_2; --d_1) {
     n1 = n1->owningBlock()->owningNode();
@@ -218,7 +209,7 @@ void CanonicalizeOutputs(Block* block) {
 
 // Canonicalize a graph's control flow node outputs. We do this to solve jitter
 // issues with outputs added to control flow nodes after the first pass of
-// compilation in compiler.cpp
+// compilation in ir_emitter.cpp
 void CanonicalizeOutputs(std::shared_ptr<Graph>& graph) {
   CanonicalizeOutputs(graph->block());
 }

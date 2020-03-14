@@ -3,6 +3,7 @@
 #include <array>
 #include <tuple>
 #include <type_traits>
+#include <vector>
 
 // #define DNNLOWP_MEASURE_TIME_BREAKDOWN
 #ifdef DNNLOWP_MEASURE_TIME_BREAKDOWN
@@ -73,6 +74,8 @@ bool SumDNNLowPOp<T, ReluFused>::RunOnDevice() {
     if (InputSize() == 2 && is_same<T, uint8_t>::value && GetCpuId().avx2() &&
         GetCpuId().fma()) {
       // fast path when we have 2 uint8_t inputs with AVX2 / FMA support
+      // NOTE: this path does addition in floating point unlike slow path that
+      // does everything in fixed-point. So they are numerically different.
       array<const T*, 2> input_data;
       for (int i = 0; i < 2; ++i) {
         input_data[i] = InputTensorCPU_(i).template data<T>();
@@ -100,8 +103,8 @@ bool SumDNNLowPOp<T, ReluFused>::RunOnDevice() {
             out_qparams_.zero_point);
       } // omp parallel
     } else {
-      RequantizationParams in_requantization_params[InputSize()];
-      const T* input_data[InputSize()];
+      vector<RequantizationParams> in_requantization_params(InputSize());
+      vector<T*> input_data(InputSize());
       for (int i = 0; i < InputSize(); ++i) {
         float real_multiplier =
             in_qparams_[i].scale / intermediate_qparams_.scale;
@@ -134,9 +137,8 @@ bool SumDNNLowPOp<T, ReluFused>::RunOnDevice() {
         }
       }
     }
-  } // InputTensorCPU_(0).template IsType<T>()
-  else {
-    const float* input_data[InputSize()];
+  } else { // InputTensorCPU_(0).template IsType<T>()
+    vector<float*> input_data(InputSize());
     for (int i = 0; i < InputSize(); ++i) {
       input_data[i] = InputTensorCPU_(i).template data<float>();
     }
@@ -153,7 +155,7 @@ bool SumDNNLowPOp<T, ReluFused>::RunOnDevice() {
         int32_t acc = 0;
         for (int i = 0; i < InputSize(); ++i) {
           acc += fbgemm::Quantize<int32_t>(
-              ((const float*)input_data[i])[j],
+              input_data[i][j],
               intermediate_qparams_.zero_point,
               intermediate_qparams_.scale,
               qfactory_->GetEltwiseQuantizePrecision());

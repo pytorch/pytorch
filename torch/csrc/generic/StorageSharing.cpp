@@ -6,7 +6,7 @@
 
 #include <random>
 
-static PyObject * THPStorage_(sharedDecref)(THPStorage *self)
+static PyObject * THPStorage_(sharedDecref)(THPStorage *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
 #ifndef THC_GENERIC_FILE
@@ -21,7 +21,7 @@ static PyObject * THPStorage_(sharedDecref)(THPStorage *self)
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPStorage_(sharedIncref)(THPStorage *self)
+static PyObject * THPStorage_(sharedIncref)(THPStorage *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
 #ifndef THC_GENERIC_FILE
@@ -69,7 +69,7 @@ static PyObject * THPStorage_(pyNewFilenameStorage)(PyObject *_unused, PyObject 
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPStorage_(shareFilename)(THPStorage *self)
+static PyObject * THPStorage_(shareFilename)(THPStorage *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   THWStorage *storage = self->cdata;
@@ -150,7 +150,7 @@ static PyObject * THPStorage_(pyNewFdStorage)(PyObject *_unused, PyObject *args)
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPStorage_(shareFd)(THPStorage *self)
+static PyObject * THPStorage_(shareFd)(THPStorage *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   THWStorage *storage = self->cdata;
@@ -212,7 +212,7 @@ static PyObject * THPStorage_(newSharedFd)(PyObject *_unused, PyObject *args)
 
 #else // THC_GENERIC_FILE
 
-static PyObject * THPStorage_(shareCuda)(THPStorage *self)
+static PyObject * THPStorage_(shareCuda)(THPStorage *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   THWStorage *storage = self->cdata;
@@ -324,7 +324,7 @@ static PyObject * THPStorage_(releaseIPCCounter)(PyObject *_unused, PyObject *ar
         sizeof(int64_t) * torch::CUDA_IPC_REF_COUNTER_FILE_SIZE,
         nullptr);
     *(static_cast<int64_t*>(sptr.get()) + ref_counter_offset) -= 1;
-  } catch (c10::Error) {
+  } catch (c10::Error& err) {
     // Already warned inside of producer process
   }
   Py_RETURN_NONE;
@@ -430,7 +430,7 @@ static PyObject * THPStorage_(newSharedCuda)(PyObject *_unused, PyObject *args)
               sizeof(int64_t) * torch::CUDA_IPC_REF_COUNTER_FILE_SIZE,
               nullptr);
           *(static_cast<int64_t*>(sptr.get()) + ref_counter_offset) -= 1;
-        } catch (c10::Error) {
+        } catch (c10::Error& err) {
           // Already warned inside of producer process
         }
       });
@@ -496,7 +496,7 @@ PyObject * THPStorage_(expired)(PyObject *_unused, PyObject *arg)
   END_HANDLE_TH_ERRORS
 }
 
-PyObject * THPStorage_(sharedFd)(THPStorage *self)
+PyObject * THPStorage_(sharedFd)(THPStorage *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   THMapAllocator *ctx = nullptr;
@@ -510,7 +510,7 @@ PyObject * THPStorage_(sharedFd)(THPStorage *self)
   END_HANDLE_TH_ERRORS
 }
 
-PyObject * THPStorage_(isShared)(THPStorage *self)
+PyObject * THPStorage_(isShared)(THPStorage *self, PyObject *noargs)
 {
 #ifdef THC_GENERIC_FILE
   Py_RETURN_TRUE;
@@ -525,22 +525,22 @@ PyObject * THPStorage_(isShared)(THPStorage *self)
 }
 
 static PyMethodDef THPStorage_(sharingMethods)[] = {
-  {"_new_with_weak_ptr", (PyCFunction)THPStorage_(newWithWeakPtr), METH_O | METH_CLASS, nullptr},
+  {"_new_with_weak_ptr", (PyCFunction)(void(*)(void))THPStorage_(newWithWeakPtr), METH_O | METH_CLASS, nullptr},
 #ifdef THC_GENERIC_FILE
   {"_share_cuda_", (PyCFunction)THPStorage_(shareCuda), METH_NOARGS, nullptr},
-  {"_new_shared_cuda", (PyCFunction)THPStorage_(newSharedCuda), METH_VARARGS | METH_STATIC, nullptr},
-  {"_release_ipc_counter", (PyCFunction)THPStorage_(releaseIPCCounter), METH_VARARGS | METH_STATIC, nullptr},
+  {"_new_shared_cuda", (PyCFunction)(void(*)(void))THPStorage_(newSharedCuda), METH_VARARGS | METH_STATIC, nullptr},
+  {"_release_ipc_counter", (PyCFunction)(void(*)(void))THPStorage_(releaseIPCCounter), METH_VARARGS | METH_STATIC, nullptr},
 #else
   {"_share_fd_", (PyCFunction)THPStorage_(shareFd), METH_NOARGS, nullptr},
-  {"_new_shared_fd", (PyCFunction)THPStorage_(newSharedFd), METH_VARARGS | METH_STATIC, nullptr},
-  {"_new_using_fd", (PyCFunction)THPStorage_(pyNewFdStorage), METH_VARARGS | METH_STATIC, nullptr},
+  {"_new_shared_fd", (PyCFunction)(void(*)(void))THPStorage_(newSharedFd), METH_VARARGS | METH_STATIC, nullptr},
+  {"_new_using_fd", (PyCFunction)(void(*)(void))THPStorage_(pyNewFdStorage), METH_VARARGS | METH_STATIC, nullptr},
   {"_share_filename_", (PyCFunction)THPStorage_(shareFilename), METH_NOARGS, nullptr},
-  {"_new_shared_filename", (PyCFunction)THPStorage_(newSharedFilename), METH_VARARGS | METH_STATIC, nullptr},
-  {"_new_using_filename", (PyCFunction)THPStorage_(pyNewFilenameStorage), METH_VARARGS | METH_STATIC, nullptr},
+  {"_new_shared_filename", (PyCFunction)(void(*)(void))THPStorage_(newSharedFilename), METH_VARARGS | METH_STATIC, nullptr},
+  {"_new_using_filename", (PyCFunction)(void(*)(void))THPStorage_(pyNewFilenameStorage), METH_VARARGS | METH_STATIC, nullptr},
 #endif
   {"_weak_ref", (PyCFunction)THPStorage_(weakRef), METH_NOARGS, nullptr},
-  {"_free_weak_ref", (PyCFunction)THPStorage_(freeWeakRef), METH_O | METH_STATIC, nullptr},
-  {"_expired", (PyCFunction)THPStorage_(expired), METH_O | METH_STATIC, nullptr},
+  {"_free_weak_ref", (PyCFunction)(void(*)(void))THPStorage_(freeWeakRef), METH_O | METH_STATIC, nullptr},
+  {"_expired", (PyCFunction)(void(*)(void))THPStorage_(expired), METH_O | METH_STATIC, nullptr},
   {"_shared_decref", (PyCFunction)THPStorage_(sharedDecref), METH_NOARGS, nullptr},
   {"_shared_incref", (PyCFunction)THPStorage_(sharedIncref), METH_NOARGS, nullptr},
   {"_get_shared_fd", (PyCFunction)THPStorage_(sharedFd), METH_NOARGS, nullptr},

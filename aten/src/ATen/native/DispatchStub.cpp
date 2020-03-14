@@ -20,10 +20,10 @@ static CPUCapability compute_cpu_capability() {
     if (strcmp(envar, "default") == 0) {
       return CPUCapability::DEFAULT;
     }
-    AT_WARN("ignoring invalid value for ATEN_CPU_CAPABILITY: ", envar);
+    TORCH_WARN("ignoring invalid value for ATEN_CPU_CAPABILITY: ", envar);
   }
 
-#ifndef __powerpc__
+#if !defined(__powerpc__) && !defined(__s390x__)
   if (cpuinfo_initialize()) {
     if (cpuinfo_has_x86_avx2() && cpuinfo_has_x86_fma3()) {
       return CPUCapability::AVX2;

@@ -34,7 +34,7 @@ variable_list Scatter::apply(variable_list&& inputs) {
   AT_ASSERT(inputs.size() == 1);
   auto& input = inputs.front();
 
-  std::shared_ptr<Function> grad_fn;
+  std::shared_ptr<Node> grad_fn;
   if (compute_requires_grad(input)) {
     grad_fn =
         std::make_shared<Gather>(/*destination_device=*/input.device(), dim_);
@@ -77,7 +77,7 @@ variable_list Gather::apply(variable_list&& inputs) {
     TORCH_CHECK(
         input.is_cuda(),
         "All inputs to Gather must be CUDA tensors, got ",
-        input.type());
+        input.toString());
     if (input.dim() > 0) {
       all_are_zero_dim = false;
     }
@@ -85,7 +85,7 @@ variable_list Gather::apply(variable_list&& inputs) {
 
   const bool unsqueeze_scalars = all_are_zero_dim && dim_ == 0;
   if (unsqueeze_scalars) {
-    AT_WARN(
+    TORCH_WARN(
         "Was asked to gather along dimension 0, but all "
         "input tensors were scalars; will instead unsqueeze "
         "and return a vector.");
@@ -101,7 +101,7 @@ variable_list Gather::apply(variable_list&& inputs) {
     }
   }
 
-  std::shared_ptr<Function> grad_fn;
+  std::shared_ptr<Node> grad_fn;
   if (compute_requires_grad(inputs)) {
     std::vector<at::Device> source_devices;
     std::vector<int64_t> input_sizes;

@@ -139,6 +139,7 @@ class TestMomentumSGD(serial.SerializedTestCase):
             [grad, m, lr, w, indices],
             sparse)
 
+    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/31368")
     @unittest.skipIf(not workspace.has_gpu_support, "No gpu support.")
     @given(n=st.integers(4, 8), nesterov=st.booleans(), **hu.gcs)
     def test_fp16momentum_sgd(self, n, nesterov, gc, dc):

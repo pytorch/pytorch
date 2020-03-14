@@ -16,9 +16,13 @@ class TestDocCoverage(unittest.TestCase):
 
     @staticmethod
     def parse_rst(filename, regex):
-        filename = os.path.join(rstpath, filename)
+        path = os.path.join(os.getenv('DOCS_SRC_DIR', ''), filename)
+        if not os.path.exists(path):
+            # Try to find the file using a relative path.
+            path = os.path.join(rstpath, filename)
+
         ret = set()
-        with open(filename, 'r') as f:
+        with open(path, 'r') as f:
             lines = f.readlines()
             for l in lines:
                 l = l.strip()
@@ -43,7 +47,7 @@ class TestDocCoverage(unittest.TestCase):
             # below are some jit functions
             'wait', 'fork', 'parse_type_comment', 'import_ir_module',
             'import_ir_module_from_buffer', 'merge_type_from_type_comment',
-            'parse_ir',
+            'parse_ir', 'parse_schema',
 
             # below are symbols mistakely binded to torch.*, but should
             # go to torch.nn.functional.* instead
@@ -60,28 +64,39 @@ class TestDocCoverage(unittest.TestCase):
             has_docstring & whitelist, whitelist,
             textwrap.dedent('''
             The whitelist in test_docs_coverage.py contains something
-            that don't have docstring or not in torch.*. If you just
-            removed something from torch.*, please remove it from whiltelist
+            that doesn't have a docstring or isn't in torch.*. If you just
+            removed something from torch.*, please remove it from the whitelist
             in test_docs_coverage.py'''))
         has_docstring -= whitelist
+        # https://github.com/pytorch/pytorch/issues/32014
+        # The following context manager classes are imported on top leve torch
+        # and are referred in docs as torch.no_grad. So we would like to have them
+        # included in docs too. has_docstring only contains functions and no classes
+        # so adding some them manually here.
+        has_docstring |= {'no_grad', 'enable_grad', 'set_grad_enabled'}
         # assert they are equal
         self.assertEqual(
             has_docstring, in_rst,
             textwrap.dedent('''
-            List of functions documented in torch.rst and in python are different.
-            Do you forget to add new thing to torch.rst, or whitelist things you
+            The lists of functions documented in torch.rst and in python are different.
+            Did you forget to add a new thing to torch.rst, or whitelist things you
             don't want to document?''')
         )
 
     def test_tensor(self):
         in_rst = self.parse_rst('tensors.rst', r2)
+        whitelist = {
+            'names', 'unflatten', 'align_as', 'rename_', 'refine_names', 'align_to',
+            'has_names', 'rename',
+        }
         classes = [torch.FloatTensor, torch.LongTensor, torch.ByteTensor]
         has_docstring = set(x for c in classes for x in dir(c) if not x.startswith('_') and getattr(c, x).__doc__)
+        has_docstring -= whitelist
         self.assertEqual(
             has_docstring, in_rst,
             textwrap.dedent('''
-            List of tensor methods documented in tensor.rst and in python are
-            different. Do you forget to add new thing to tensor.rst, or whitelist
+            The lists of tensor methods documented in tensors.rst and in python are
+            different. Did you forget to add a new thing to tensors.rst, or whitelist
             things you don't want to document?''')
         )
 

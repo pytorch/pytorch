@@ -28,10 +28,10 @@ void initializeMemoryFormats() {
     throw python_error();
   }
 
-  _ADD_MEMORY_FORMAT(at::MemoryFormat::Any, "any_format");
   _ADD_MEMORY_FORMAT(at::MemoryFormat::Preserve, "preserve_format");
   _ADD_MEMORY_FORMAT(at::MemoryFormat::Contiguous, "contiguous_format");
   _ADD_MEMORY_FORMAT(at::MemoryFormat::ChannelsLast, "channels_last");
+  _ADD_MEMORY_FORMAT(at::MemoryFormat::ChannelsLast3d, "channels_last_3d");
 
 }
 

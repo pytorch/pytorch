@@ -30,22 +30,27 @@ from itertools import product
 from random import shuffle
 
 import torch
+
+# TODO: remove this global setting
+# Distributions tests use double as the default dtype
+torch.set_default_dtype(torch.double)
+
 from torch._six import inf
-from common_utils import TestCase, run_tests, set_rng_seed, TEST_WITH_UBSAN, load_tests
-from common_cuda import TEST_CUDA
+from torch.testing._internal.common_utils import TestCase, run_tests, set_rng_seed, TEST_WITH_UBSAN, load_tests
+from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.autograd import grad, gradcheck
 from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
-                                 Cauchy, Chi2, Dirichlet, Distribution,
-                                 Exponential, ExponentialFamily,
+                                 Cauchy, Chi2, ContinuousBernoulli, Dirichlet,
+                                 Distribution, Exponential, ExponentialFamily,
                                  FisherSnedecor, Gamma, Geometric, Gumbel,
                                  HalfCauchy, HalfNormal,
                                  Independent, Laplace, LogisticNormal,
                                  LogNormal, LowRankMultivariateNormal,
-                                 Multinomial, MultivariateNormal,
+                                 MixtureSameFamily, Multinomial, MultivariateNormal,
                                  NegativeBinomial, Normal, OneHotCategorical, Pareto,
                                  Poisson, RelaxedBernoulli, RelaxedOneHotCategorical,
                                  StudentT, TransformedDistribution, Uniform,
-                                 Weibull, constraints, kl_divergence)
+                                 VonMises, Weibull, constraints, kl_divergence)
 from torch.distributions.constraint_registry import biject_to, transform_to
 from torch.distributions.constraints import Constraint, is_dependent
 from torch.distributions.dirichlet import _Dirichlet_backward
@@ -54,13 +59,13 @@ from torch.distributions.transforms import (AbsTransform, AffineTransform,
                                             CatTransform, ComposeTransform, ExpTransform,
                                             LowerCholeskyTransform,
                                             PowerTransform, SigmoidTransform,
-                                            SoftmaxTransform,
+                                            TanhTransform, SoftmaxTransform,
                                             StickBreakingTransform,
                                             identity_transform, StackTransform)
 from torch.distributions.utils import probs_to_logits, lazy_property
 from torch.nn.functional import softmax
 
-# load_tests from common_utils is used to automatically filter tests for
+# load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
 
@@ -75,7 +80,7 @@ except ImportError:
 
 def pairwise(Dist, *params):
     """
-    Creates a pair of distributions `Dist` initialzed to test each element of
+    Creates a pair of distributions `Dist` initialized to test each element of
     param with each other.
     """
     params1 = [torch.tensor([p] * len(p)) for p in params]
@@ -425,6 +430,35 @@ EXAMPLES = [
             'scale': torch.randn(5, 5).abs().requires_grad_(),
             'concentration': torch.randn(1).abs().requires_grad_()
         }
+    ]),
+    Example(MixtureSameFamily, [
+        {
+            'mixture_distribution': Categorical(torch.rand(5, requires_grad=True)),
+            'component_distribution': Normal(torch.randn(5, requires_grad=True), 
+                                             torch.rand(5, requires_grad=True)),
+        },
+        {
+            'mixture_distribution': Categorical(torch.rand(5, requires_grad=True)),
+            'component_distribution': MultivariateNormal(
+                loc=torch.randn(5, 2, requires_grad=True),
+                covariance_matrix=torch.tensor([[2.0, 0.3], [0.3, 0.25]], requires_grad=True)),
+        },     
+    ]),
+    Example(VonMises, [
+        {
+            'loc': torch.tensor(1.0, requires_grad=True),
+            'concentration': torch.tensor(10.0, requires_grad=True)
+        },
+        {
+            'loc': torch.tensor([0.0, math.pi / 2], requires_grad=True),
+            'concentration': torch.tensor([1.0, 10.0], requires_grad=True)
+        },
+    ]),
+    Example(ContinuousBernoulli, [
+        {'probs': torch.tensor([0.7, 0.2, 0.4], requires_grad=True)},
+        {'probs': torch.tensor([0.3], requires_grad=True)},
+        {'probs': 0.3},
+        {'logits': torch.tensor([0.], requires_grad=True)},
     ])
 ]
 
@@ -645,12 +679,18 @@ BAD_EXAMPLES = [
             'scale': torch.tensor([1.0], requires_grad=True),
             'concentration': torch.tensor([-1.0], requires_grad=True)
         }
+    ]),
+    Example(ContinuousBernoulli, [
+        {'probs': torch.tensor([1.1, 0.2, 0.4], requires_grad=True)},
+        {'probs': torch.tensor([-0.5], requires_grad=True)},
+        {'probs': 1.00001},
     ])
 ]
 
 
 class TestDistributions(TestCase):
     _do_cuda_memory_leak_check = True
+    _do_cuda_non_default_stream = True
 
     def _gradcheck_log_prob(self, dist_ctor, ctor_params):
         # performs gradient checks on log_prob
@@ -677,7 +717,7 @@ class TestDistributions(TestCase):
             asset_fn(i, val.squeeze(), log_prob)
 
     def _check_sampler_sampler(self, torch_dist, ref_dist, message, multivariate=False,
-                               num_samples=10000, failure_rate=1e-3):
+                               circular=False, num_samples=10000, failure_rate=1e-3):
         # Checks that the .sample() method matches a reference function.
         torch_samples = torch_dist.sample((num_samples,)).squeeze()
         torch_samples = torch_samples.cpu().numpy()
@@ -689,6 +729,8 @@ class TestDistributions(TestCase):
             torch_samples = np.dot(torch_samples, axis)
             ref_samples = np.dot(ref_samples, axis)
         samples = [(x, +1) for x in torch_samples] + [(x, -1) for x in ref_samples]
+        if circular:
+            samples = [(np.cos(x), v) for (x, v) in samples]
         shuffle(samples)  # necessary to prevent stable sort from making uneven bins for discrete
         samples.sort(key=lambda x: x[0])
         samples = np.array(samples)[:, 1]
@@ -1342,6 +1384,23 @@ class TestDistributions(TestCase):
         low.grad.zero_()
         high.grad.zero_()
 
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_vonmises_sample(self):
+        for loc in [0.0, math.pi / 2.0]:
+            for concentration in [0.03, 0.3, 1.0, 10.0, 100.0]:
+                self._check_sampler_sampler(VonMises(loc, concentration),
+                                            scipy.stats.vonmises(loc=loc, kappa=concentration),
+                                            "VonMises(loc={}, concentration={})".format(loc, concentration),
+                                            num_samples=int(1e5), circular=True)
+
+    def test_vonmises_logprob(self):
+        concentrations = [0.01, 0.03, 0.1, 0.3, 1.0, 3.0, 10.0, 30.0, 100.0]
+        for concentration in concentrations:
+            grid = torch.arange(0., 2 * math.pi, 1e-4)
+            prob = VonMises(0.0, concentration).log_prob(grid).exp()
+            norm = prob.mean().item() * 2 * math.pi
+            self.assertLess(abs(norm - 1), 1e-3)
+
     def test_cauchy(self):
         loc = torch.zeros(5, 5, requires_grad=True)
         scale = torch.ones(5, 5, requires_grad=True)
@@ -1552,6 +1611,92 @@ class TestDistributions(TestCase):
                 LogisticNormal(mean_th, std_th), ref_dist,
                 'LogisticNormal(loc={}, scale={})'.format(mean_th, std_th),
                 multivariate=True)
+
+    def test_mixture_same_family_shape(self):
+        normal_case_1d = MixtureSameFamily(
+            Categorical(torch.rand(5)),
+            Normal(torch.randn(5), torch.rand(5)))
+        normal_case_1d_batch = MixtureSameFamily(
+            Categorical(torch.rand(3, 5)), 
+            Normal(torch.randn(3, 5), torch.rand(3, 5)))
+        normal_case_1d_multi_batch = MixtureSameFamily(
+            Categorical(torch.rand(4, 3, 5)), 
+            Normal(torch.randn(4, 3, 5), torch.rand(4, 3, 5)))
+        normal_case_2d = MixtureSameFamily(
+            Categorical(torch.rand(5)),
+            Independent(Normal(torch.randn(5, 2), torch.rand(5, 2)), 1))
+        normal_case_2d_batch = MixtureSameFamily(
+            Categorical(torch.rand(3, 5)), 
+            Independent(Normal(torch.randn(3, 5, 2), torch.rand(3, 5, 2)), 1))
+        normal_case_2d_multi_batch = MixtureSameFamily(
+            Categorical(torch.rand(4, 3, 5)), 
+            Independent(Normal(torch.randn(4, 3, 5, 2), torch.rand(4, 3, 5, 2)), 1))
+
+        self.assertEqual(normal_case_1d.sample().size(), ())
+        self.assertEqual(normal_case_1d.sample((2,)).size(), (2,))
+        self.assertEqual(normal_case_1d.sample((2, 7)).size(), (2, 7))            
+        self.assertEqual(normal_case_1d_batch.sample().size(), (3,))
+        self.assertEqual(normal_case_1d_batch.sample((2,)).size(), (2, 3))
+        self.assertEqual(normal_case_1d_batch.sample((2, 7)).size(), (2, 7, 3))
+        self.assertEqual(normal_case_1d_multi_batch.sample().size(), (4, 3))
+        self.assertEqual(normal_case_1d_multi_batch.sample((2,)).size(), (2, 4, 3))
+        self.assertEqual(normal_case_1d_multi_batch.sample((2, 7)).size(), (2, 7, 4, 3))
+
+        self.assertEqual(normal_case_2d.sample().size(), (2,))
+        self.assertEqual(normal_case_2d.sample((2,)).size(), (2, 2))
+        self.assertEqual(normal_case_2d.sample((2, 7)).size(), (2, 7, 2))            
+        self.assertEqual(normal_case_2d_batch.sample().size(), (3, 2))
+        self.assertEqual(normal_case_2d_batch.sample((2,)).size(), (2, 3, 2))
+        self.assertEqual(normal_case_2d_batch.sample((2, 7)).size(), (2, 7, 3, 2))
+        self.assertEqual(normal_case_2d_multi_batch.sample().size(), (4, 3, 2))
+        self.assertEqual(normal_case_2d_multi_batch.sample((2,)).size(), (2, 4, 3, 2))
+        self.assertEqual(normal_case_2d_multi_batch.sample((2, 7)).size(), (2, 7, 4, 3, 2))
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_mixture_same_family_log_prob(self):
+        probs = torch.rand(5, 5).softmax(dim=-1)
+        loc = torch.randn(5, 5)
+        scale = torch.rand(5, 5)
+
+        def ref_log_prob(idx, x, log_prob):
+            p = probs[idx].numpy()
+            m = loc[idx].numpy()
+            s = scale[idx].numpy()
+            mix = scipy.stats.multinomial(1, p)
+            comp = scipy.stats.norm(m, s)
+            expected = scipy.special.logsumexp(comp.logpdf(x) + np.log(mix.p))
+            self.assertAlmostEqual(log_prob, expected, places=3)
+
+        self._check_log_prob(
+            MixtureSameFamily(Categorical(probs=probs), 
+                              Normal(loc, scale)), ref_log_prob)
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_mixture_same_family_sample(self):
+        probs = torch.rand(5).softmax(dim=-1)
+        loc = torch.randn(5)
+        scale = torch.rand(5)
+
+        class ScipyMixtureNormal(object):
+            def __init__(self, probs, mu, std):
+                self.probs = probs
+                self.mu = mu
+                self.std = std
+
+            def rvs(self, n_sample):
+                comp_samples = [scipy.stats.norm(m, s).rvs(n_sample) for m, s
+                                in zip(self.mu, self.std)]
+                mix_samples = scipy.stats.multinomial(1, self.probs).rvs(n_sample)
+                samples = []
+                for i in range(n_sample):
+                    samples.append(comp_samples[mix_samples[i].argmax()][i])
+                return np.asarray(samples)
+
+        self._check_sampler_sampler(
+            MixtureSameFamily(Categorical(probs=probs), Normal(loc, scale)),
+            ScipyMixtureNormal(probs.numpy(), loc.numpy(), scale.numpy()),
+            '''MixtureSameFamily(Categorical(probs={}), 
+            Normal(loc={}, scale={}))'''.format(probs, loc, scale))
 
     def test_normal(self):
         loc = torch.randn(5, 5, requires_grad=True)
@@ -1780,6 +1925,11 @@ class TestDistributions(TestCase):
         multivariate_normal_log_prob_gradcheck(mean_no_batch, None, prec_batched)
         multivariate_normal_log_prob_gradcheck(mean, None, None, scale_tril)
         multivariate_normal_log_prob_gradcheck(mean_no_batch, None, None, scale_tril_batched)
+
+    def test_multivariate_normal_stable_with_precision_matrix(self):
+        x = torch.randn(10)
+        P = torch.exp(-(x - x.unsqueeze(-1)) ** 2)  # RBF kernel
+        MultivariateNormal(x.new_zeros(10), precision_matrix=P)
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_multivariate_normal_log_prob(self):
@@ -2262,6 +2412,44 @@ class TestDistributions(TestCase):
         # TODO: increase precision once imbalance on GPU is fixed.
         self.assertEqual(frac_zeros, 0.5, 0.12)
         self.assertEqual(frac_ones, 0.5, 0.12)
+
+    def test_continuous_bernoulli(self):
+        p = torch.tensor([0.7, 0.2, 0.4], requires_grad=True)
+        r = torch.tensor(0.3, requires_grad=True)
+        s = 0.3
+        self.assertEqual(ContinuousBernoulli(p).sample((8,)).size(), (8, 3))
+        self.assertFalse(ContinuousBernoulli(p).sample().requires_grad)
+        self.assertEqual(ContinuousBernoulli(r).sample((8,)).size(), (8,))
+        self.assertEqual(ContinuousBernoulli(r).sample().size(), ())
+        self.assertEqual(ContinuousBernoulli(r).sample((3, 2)).size(), (3, 2,))
+        self.assertEqual(ContinuousBernoulli(s).sample().size(), ())
+        self._gradcheck_log_prob(ContinuousBernoulli, (p,))
+
+        def ref_log_prob(idx, val, log_prob):
+            prob = p[idx]
+            if prob > 0.499 and prob < 0.501:  # using default value of lim here
+                log_norm_const = math.log(2.) + 4. / 3. * math.pow(prob - 0.5, 2) + 104. / 45. * math.pow(prob - 0.5, 4)
+            else:
+                log_norm_const = math.log(2. * math.atanh(1. - 2. * prob) / (1. - 2.0 * prob))
+            res = val * math.log(prob) + (1. - val) * math.log1p(-prob) + log_norm_const
+            self.assertEqual(log_prob, res)
+
+        self._check_log_prob(ContinuousBernoulli(p), ref_log_prob)
+        self._check_log_prob(ContinuousBernoulli(logits=p.log() - (-p).log1p()), ref_log_prob)
+
+        # check entropy computation
+        self.assertEqual(ContinuousBernoulli(p).entropy(), torch.tensor([-0.02938, -0.07641, -0.00682]), prec=1e-4)
+        # entropy below corresponds to the clamped value of prob when using float 64
+        # the value for float32 should be -1.76898
+        self.assertEqual(ContinuousBernoulli(torch.tensor([0.0])).entropy(), torch.tensor([-2.58473]))
+        self.assertEqual(ContinuousBernoulli(s).entropy(), torch.tensor(-0.02938), prec=1e-4)
+
+    def test_continuous_bernoulli_3d(self):
+        p = torch.full((2, 3, 5), 0.5).requires_grad_()
+        self.assertEqual(ContinuousBernoulli(p).sample().size(), (2, 3, 5))
+        self.assertEqual(ContinuousBernoulli(p).sample(sample_shape=(2, 5)).size(),
+                         (2, 5, 2, 3, 5))
+        self.assertEqual(ContinuousBernoulli(p).sample((2,)).size(), (2, 2, 3, 5))
 
     def test_independent_shape(self):
         for Dist, params in EXAMPLES:
@@ -2901,7 +3089,8 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(halfcauchy.sample().size(), torch.Size())
         self.assertEqual(halfcauchy.sample(torch.Size((3, 2))).size(),
                          torch.Size((3, 2)))
-        self.assertRaises(ValueError, halfcauchy.log_prob, self.scalar_sample)
+        self.assertEqual(halfcauchy.log_prob(self.scalar_sample).size(),
+                         torch.Size())
         self.assertEqual(halfcauchy.log_prob(self.tensor_sample_1).size(),
                          torch.Size((3, 2)))
         self.assertEqual(halfcauchy.log_prob(self.tensor_sample_2).size(),
@@ -2933,13 +3122,23 @@ class TestDistributionShapes(TestCase):
         simplex_sample = simplex_sample / simplex_sample.sum(-1).unsqueeze(-1)
         self.assertEqual(dist.log_prob(simplex_sample).size(), torch.Size((3, 3)))
 
+    def test_mixture_same_family_shape(self):
+        dist = MixtureSameFamily(Categorical(torch.rand(5)),
+                                 Normal(torch.randn(5), torch.rand(5)))
+        self.assertEqual(dist._batch_shape, torch.Size())
+        self.assertEqual(dist._event_shape, torch.Size())
+        self.assertEqual(dist.sample().size(), torch.Size())
+        self.assertEqual(dist.sample((5, 4)).size(), torch.Size((5, 4)))
+        self.assertEqual(dist.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
+        self.assertEqual(dist.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2, 3)))
+
     def test_gamma_shape_scalar_params(self):
         gamma = Gamma(1, 1)
         self.assertEqual(gamma._batch_shape, torch.Size())
         self.assertEqual(gamma._event_shape, torch.Size())
         self.assertEqual(gamma.sample().size(), torch.Size())
         self.assertEqual(gamma.sample((3, 2)).size(), torch.Size((3, 2)))
-        self.assertRaises(ValueError, gamma.log_prob, self.scalar_sample)
+        self.assertEqual(gamma.log_prob(self.scalar_sample).size(), torch.Size())
         self.assertEqual(gamma.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
         self.assertEqual(gamma.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2, 3)))
 
@@ -2959,7 +3158,7 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(chi2._event_shape, torch.Size())
         self.assertEqual(chi2.sample().size(), torch.Size())
         self.assertEqual(chi2.sample((3, 2)).size(), torch.Size((3, 2)))
-        self.assertRaises(ValueError, chi2.log_prob, self.scalar_sample)
+        self.assertEqual(chi2.log_prob(self.scalar_sample).size(), torch.Size())
         self.assertEqual(chi2.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
         self.assertEqual(chi2.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2, 3)))
 
@@ -3010,6 +3209,27 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(gumbel.sample((3, 2)).size(), torch.Size((3, 2)))
         self.assertEqual(gumbel.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
         self.assertEqual(gumbel.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2, 3)))
+
+    def test_vonmises_shape_tensor_params(self):
+        von_mises = VonMises(torch.tensor([0., 0.]), torch.tensor([1., 1.]))
+        self.assertEqual(von_mises._batch_shape, torch.Size((2,)))
+        self.assertEqual(von_mises._event_shape, torch.Size(()))
+        self.assertEqual(von_mises.sample().size(), torch.Size((2,)))
+        self.assertEqual(von_mises.sample(torch.Size((3, 2))).size(), torch.Size((3, 2, 2)))
+        self.assertEqual(von_mises.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
+        self.assertEqual(von_mises.log_prob(torch.ones(2, 1)).size(), torch.Size((2, 2)))
+
+    def test_vonmises_shape_scalar_params(self):
+        von_mises = VonMises(0., 1.)
+        self.assertEqual(von_mises._batch_shape, torch.Size())
+        self.assertEqual(von_mises._event_shape, torch.Size())
+        self.assertEqual(von_mises.sample().size(), torch.Size())
+        self.assertEqual(von_mises.sample(torch.Size((3, 2))).size(),
+                         torch.Size((3, 2)))
+        self.assertEqual(von_mises.log_prob(self.tensor_sample_1).size(),
+                         torch.Size((3, 2)))
+        self.assertEqual(von_mises.log_prob(self.tensor_sample_2).size(),
+                         torch.Size((3, 2, 3)))
 
     def test_weibull_scale_scalar_params(self):
         weibull = Weibull(1, 1)
@@ -3100,6 +3320,26 @@ class TestDistributionShapes(TestCase):
         self.assertRaises(ValueError, laplace.log_prob, self.tensor_sample_2)
         self.assertEqual(laplace.log_prob(torch.ones(2, 1)).size(), torch.Size((2, 2)))
 
+    def test_continuous_bernoulli_shape_scalar_params(self):
+        continuous_bernoulli = ContinuousBernoulli(0.3)
+        self.assertEqual(continuous_bernoulli._batch_shape, torch.Size())
+        self.assertEqual(continuous_bernoulli._event_shape, torch.Size())
+        self.assertEqual(continuous_bernoulli.sample().size(), torch.Size())
+        self.assertEqual(continuous_bernoulli.sample((3, 2)).size(), torch.Size((3, 2)))
+        self.assertRaises(ValueError, continuous_bernoulli.log_prob, self.scalar_sample)
+        self.assertEqual(continuous_bernoulli.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
+        self.assertEqual(continuous_bernoulli.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2, 3)))
+
+    def test_continuous_bernoulli_shape_tensor_params(self):
+        continuous_bernoulli = ContinuousBernoulli(torch.tensor([[0.6, 0.3], [0.6, 0.3], [0.6, 0.3]]))
+        self.assertEqual(continuous_bernoulli._batch_shape, torch.Size((3, 2)))
+        self.assertEqual(continuous_bernoulli._event_shape, torch.Size(()))
+        self.assertEqual(continuous_bernoulli.sample().size(), torch.Size((3, 2)))
+        self.assertEqual(continuous_bernoulli.sample((3, 2)).size(), torch.Size((3, 2, 3, 2)))
+        self.assertEqual(continuous_bernoulli.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
+        self.assertRaises(ValueError, continuous_bernoulli.log_prob, self.tensor_sample_2)
+        self.assertEqual(continuous_bernoulli.log_prob(torch.ones(3, 1, 1)).size(), torch.Size((3, 3, 2)))
+
 
 class TestKL(TestCase):
 
@@ -3145,6 +3385,7 @@ class TestKL(TestCase):
         uniform_positive = pairwise(Uniform, [1, 1.5, 2, 4], [1.2, 2.0, 3, 7])
         uniform_real = pairwise(Uniform, [-2., -1, 0, 2], [-1., 1, 1, 4])
         uniform_pareto = pairwise(Uniform, [6.5, 8.5, 6.5, 8.5], [7.5, 7.5, 9.5, 9.5])
+        continuous_bernoulli = pairwise(ContinuousBernoulli, [0.1, 0.2, 0.5, 0.9])
 
         # These tests should pass with precision = 0.01, but that makes tests very expensive.
         # Instead, we test with precision = 0.1 and only test with higher precision locally
@@ -3203,6 +3444,10 @@ class TestKL(TestCase):
             (uniform_real, gumbel),
             (uniform_real, normal),
             (uniform_pareto, pareto),
+            (continuous_bernoulli, continuous_bernoulli),
+            (continuous_bernoulli, exponential),
+            (continuous_bernoulli, normal),
+            (beta, continuous_bernoulli)
         ]
 
         self.infinite_examples = [
@@ -3258,6 +3503,18 @@ class TestKL(TestCase):
             (Uniform(-1, 2), Exponential(3)),
             (Uniform(-1, 2), Gamma(3, 4)),
             (Uniform(-1, 2), Pareto(3, 4)),
+            (ContinuousBernoulli(0.25), Uniform(0.25, 1)),
+            (ContinuousBernoulli(0.25), Uniform(0, 0.75)),
+            (ContinuousBernoulli(0.25), Uniform(0.25, 0.75)),
+            (ContinuousBernoulli(0.25), Pareto(1, 2)),
+            (Exponential(1), ContinuousBernoulli(0.75)),
+            (Gamma(1, 2), ContinuousBernoulli(0.75)),
+            (Gumbel(-1, 2), ContinuousBernoulli(0.75)),
+            (Laplace(-1, 2), ContinuousBernoulli(0.75)),
+            (Normal(-1, 2), ContinuousBernoulli(0.75)),
+            (Uniform(-1, 1), ContinuousBernoulli(0.75)),
+            (Uniform(0, 2), ContinuousBernoulli(0.75)),
+            (Uniform(-1, 2), ContinuousBernoulli(0.75))
         ]
 
     def test_kl_monte_carlo(self):
@@ -3463,7 +3720,7 @@ class TestKL(TestCase):
 
 
 class TestConstraints(TestCase):
-    def test_params_contains(self):
+    def test_params_constraints(self):
         for Dist, params in EXAMPLES:
             for i, param in enumerate(params):
                 dist = Dist(**param)
@@ -3486,7 +3743,7 @@ class TestConstraints(TestCase):
                         Dist.__name__, i + 1, len(params), name, value)
                     self.assertTrue(constraint.check(value).all(), msg=message)
 
-    def test_support_contains(self):
+    def test_support_constraints(self):
         for Dist, params in EXAMPLES:
             self.assertIsInstance(Dist.support, Constraint)
             for i, param in enumerate(params):
@@ -3616,10 +3873,107 @@ class TestNumericalStability(TestCase):
             log_pdf_prob_0 = multinomial.log_prob(torch.tensor([10, 0], dtype=dtype))
             self.assertEqual(log_pdf_prob_0.item(), -inf, allow_inf=True)
 
+    def test_continuous_bernoulli_gradient(self):
+
+        def expec_val(x, probs=None, logits=None):
+            assert not (probs is None and logits is None)
+            if logits is not None:
+                probs = 1. / (1. + math.exp(-logits))
+            bern_log_lik = x * math.log(probs) + (1. - x) * math.log1p(-probs)
+            if probs < 0.499 or probs > 0.501:  # using default values of lims here
+                log_norm_const = math.log(
+                    math.fabs(math.atanh(1. - 2. * probs))) - math.log(math.fabs(1. - 2. * probs)) + math.log(2.)
+            else:
+                aux = math.pow(probs - 0.5, 2)
+                log_norm_const = math.log(2.0) + (4.0 / 3.0 + 104.0 / 45.0 * aux) * aux
+            log_lik = bern_log_lik + log_norm_const
+            return log_lik
+
+        def expec_grad(x, probs=None, logits=None):
+            assert not (probs is None and logits is None)
+            if logits is not None:
+                probs = 1. / (1. + math.exp(-logits))
+            grad_bern_log_lik = x / probs - (1. - x) / (1. - probs)
+            if probs < 0.499 or probs > 0.501:  # using default values of lims here
+                grad_log_c = 2. * probs - 4. * (probs - 1.) * probs * math.atanh(1. - 2. * probs) - 1.
+                grad_log_c /= 2. * (probs - 1.) * probs * (2. * probs - 1.) * math.atanh(1. - 2. * probs)
+            else:
+                grad_log_c = 8. / 3. * (probs - 0.5) + 416. / 45. * math.pow(probs - 0.5, 3)
+            grad = grad_bern_log_lik + grad_log_c
+            if logits is not None:
+                grad *= 1. / (1. + math.exp(logits)) - 1. / math.pow(1. + math.exp(logits), 2)
+            return grad
+
+        for tensor_type in [torch.FloatTensor, torch.DoubleTensor]:
+            self._test_pdf_score(dist_class=ContinuousBernoulli,
+                                 probs=tensor_type([0.1]),
+                                 x=tensor_type([0.1]),
+                                 expected_value=tensor_type([expec_val(0.1, probs=0.1)]),
+                                 expected_gradient=tensor_type([expec_grad(0.1, probs=0.1)]))
+
+            self._test_pdf_score(dist_class=ContinuousBernoulli,
+                                 probs=tensor_type([0.1]),
+                                 x=tensor_type([1.]),
+                                 expected_value=tensor_type([expec_val(1., probs=0.1)]),
+                                 expected_gradient=tensor_type([expec_grad(1., probs=0.1)]))
+
+            self._test_pdf_score(dist_class=ContinuousBernoulli,
+                                 probs=tensor_type([0.4999]),
+                                 x=tensor_type([0.9]),
+                                 expected_value=tensor_type([expec_val(0.9, probs=0.4999)]),
+                                 expected_gradient=tensor_type([expec_grad(0.9, probs=0.4999)]))
+
+            self._test_pdf_score(dist_class=ContinuousBernoulli,
+                                 probs=tensor_type([1e-4]),
+                                 x=tensor_type([1]),
+                                 expected_value=tensor_type([expec_val(1, probs=1e-4)]),
+                                 expected_gradient=tensor_type(tensor_type([expec_grad(1, probs=1e-4)])),
+                                 prec=1e-3)
+
+            self._test_pdf_score(dist_class=ContinuousBernoulli,
+                                 probs=tensor_type([1 - 1e-4]),
+                                 x=tensor_type([0.1]),
+                                 expected_value=tensor_type([expec_val(0.1, probs=1 - 1e-4)]),
+                                 expected_gradient=tensor_type([expec_grad(0.1, probs=1 - 1e-4)]),
+                                 prec=2)
+
+            self._test_pdf_score(dist_class=ContinuousBernoulli,
+                                 logits=tensor_type([math.log(9999)]),
+                                 x=tensor_type([0]),
+                                 expected_value=tensor_type([expec_val(0, logits=math.log(9999))]),
+                                 expected_gradient=tensor_type([expec_grad(0, logits=math.log(9999))]),
+                                 prec=1e-3)
+
+            self._test_pdf_score(dist_class=ContinuousBernoulli,
+                                 logits=tensor_type([0.001]),
+                                 x=tensor_type([0.5]),
+                                 expected_value=tensor_type([expec_val(0.5, logits=0.001)]),
+                                 expected_gradient=tensor_type([expec_grad(0.5, logits=0.001)]))
+
+    def test_continuous_bernoulli_with_logits_underflow(self):
+        for tensor_type, lim, expected in ([(torch.FloatTensor, -1e38, 2.76898),
+                                            (torch.DoubleTensor, -1e308, 3.58473)]):
+            self._test_pdf_score(dist_class=ContinuousBernoulli,
+                                 logits=tensor_type([lim]),
+                                 x=tensor_type([0]),
+                                 expected_value=tensor_type([expected]),
+                                 expected_gradient=tensor_type([0.]))
+
+    def test_continuous_bernoulli_with_logits_overflow(self):
+        for tensor_type, lim, expected in ([(torch.FloatTensor, 1e38, 2.76898),
+                                            (torch.DoubleTensor, 1e308, 3.58473)]):
+            self._test_pdf_score(dist_class=ContinuousBernoulli,
+                                 logits=tensor_type([lim]),
+                                 x=tensor_type([1]),
+                                 expected_value=tensor_type([expected]),
+                                 expected_gradient=tensor_type([0.]))
+
 
 class TestLazyLogitsInitialization(TestCase):
     def setUp(self):
         super(TestLazyLogitsInitialization, self).setUp()
+        # ContinuousBernoulli is not tested because log_prob is not computed simply
+        # from 'logits', but 'probs' is also needed
         self.examples = [e for e in EXAMPLES if e.Dist in
                          (Categorical, OneHotCategorical, Bernoulli, Binomial, Multinomial)]
 
@@ -3762,6 +4116,10 @@ class TestAgainstScipy(TestCase):
                 scipy.stats.uniform(random_var, positive_var)
             ),
             (
+                VonMises(random_var, positive_var),
+                scipy.stats.vonmises(positive_var, loc=random_var)
+            ),
+            (
                 Weibull(positive_var[0], positive_var2[0]),  # scipy var for Weibull only supports scalars
                 scipy.stats.weibull_min(c=positive_var2[0], scale=positive_var[0])
             )
@@ -3779,8 +4137,9 @@ class TestAgainstScipy(TestCase):
 
     def test_variance_stddev(self):
         for pytorch_dist, scipy_dist in self.distribution_pairs:
-            if isinstance(pytorch_dist, (Cauchy, HalfCauchy)):
+            if isinstance(pytorch_dist, (Cauchy, HalfCauchy, VonMises)):
                 # Cauchy, HalfCauchy distributions' standard deviation is nan, skipping check
+                # VonMises variance is circular and scipy doesn't produce a correct result
                 continue
             elif isinstance(pytorch_dist, (Multinomial, OneHotCategorical)):
                 self.assertEqual(pytorch_dist.variance, np.diag(scipy_dist.cov()), message=pytorch_dist)
@@ -3825,6 +4184,7 @@ class TestTransforms(TestCase):
                 PowerTransform(exponent=torch.tensor(5.).normal_(),
                                cache_size=cache_size),
                 SigmoidTransform(cache_size=cache_size),
+                TanhTransform(cache_size=cache_size),
                 AffineTransform(0, 1, cache_size=cache_size),
                 AffineTransform(1, -2, cache_size=cache_size),
                 AffineTransform(torch.randn(5),
@@ -3879,6 +4239,10 @@ class TestTransforms(TestCase):
             return x.normal_().exp()
         elif domain is constraints.unit_interval:
             return x.uniform_()
+        elif isinstance(domain, constraints.interval):
+            x = x.uniform_()
+            x = x.mul_(domain.upper_bound - domain.lower_bound).add_(domain.lower_bound)
+            return x
         elif domain is constraints.simplex:
             x = x.normal_().exp()
             x /= x.sum(-1, True)
@@ -4107,9 +4471,9 @@ class TestTransforms(TestCase):
 
 class TestFunctors(TestCase):
     def test_cat_transform(self):
-        x1 = -1 * torch.range(1, 100).view(-1, 100)
-        x2 = (torch.range(1, 100).view(-1, 100) - 1) / 100
-        x3 = torch.range(1, 100).view(-1, 100)
+        x1 = -1 * torch.arange(1, 101, dtype=torch.float).view(-1, 100)
+        x2 = (torch.arange(1, 101, dtype=torch.float).view(-1, 100) - 1) / 100
+        x3 = torch.arange(1, 101, dtype=torch.float).view(-1, 100)
         t1, t2, t3 = ExpTransform(), AffineTransform(1, 100), identity_transform
         dim = 0
         x = torch.cat([x1, x2, x3], dim=dim)
@@ -4122,9 +4486,9 @@ class TestFunctors(TestCase):
         actual = t(x)
         expected = torch.cat([t1(x1), t2(x2), t3(x3)], dim=dim)
         self.assertEqual(expected, actual)
-        y1 = torch.range(1, 100).view(-1, 100)
-        y2 = torch.range(1, 100).view(-1, 100)
-        y3 = torch.range(1, 100).view(-1, 100)
+        y1 = torch.arange(1, 101, dtype=torch.float).view(-1, 100)
+        y2 = torch.arange(1, 101, dtype=torch.float).view(-1, 100)
+        y3 = torch.arange(1, 101, dtype=torch.float).view(-1, 100)
         y = torch.cat([y1, y2, y3], dim=dim)
         actual_cod_check = t.codomain.check(y)
         expected_cod_check = torch.cat([t1.codomain.check(y1),
@@ -4141,9 +4505,9 @@ class TestFunctors(TestCase):
         self.assertEqual(actual_jac, expected_jac)
 
     def test_cat_transform_non_uniform(self):
-        x1 = -1 * torch.range(1, 100).view(-1, 100)
-        x2 = torch.cat([(torch.range(1, 100).view(-1, 100) - 1) / 100,
-                        torch.range(1, 100).view(-1, 100)])
+        x1 = -1 * torch.arange(1, 101, dtype=torch.float).view(-1, 100)
+        x2 = torch.cat([(torch.arange(1, 101, dtype=torch.float).view(-1, 100) - 1) / 100,
+                        torch.arange(1, 101, dtype=torch.float).view(-1, 100)])
         t1 = ExpTransform()
         t2 = CatTransform([AffineTransform(1, 100), identity_transform], dim=0)
         dim = 0
@@ -4156,9 +4520,9 @@ class TestFunctors(TestCase):
         actual = t(x)
         expected = torch.cat([t1(x1), t2(x2)], dim=dim)
         self.assertEqual(expected, actual)
-        y1 = torch.range(1, 100).view(-1, 100)
-        y2 = torch.cat([torch.range(1, 100).view(-1, 100),
-                        torch.range(1, 100).view(-1, 100)])
+        y1 = torch.arange(1, 101, dtype=torch.float).view(-1, 100)
+        y2 = torch.cat([torch.arange(1, 101, dtype=torch.float).view(-1, 100),
+                        torch.arange(1, 101, dtype=torch.float).view(-1, 100)])
         y = torch.cat([y1, y2], dim=dim)
         actual_cod_check = t.codomain.check(y)
         expected_cod_check = torch.cat([t1.codomain.check(y1),
@@ -4173,9 +4537,9 @@ class TestFunctors(TestCase):
         self.assertEqual(actual_jac, expected_jac)
 
     def test_stack_transform(self):
-        x1 = -1 * torch.range(1, 100)
-        x2 = (torch.range(1, 100) - 1) / 100
-        x3 = torch.range(1, 100)
+        x1 = -1 * torch.arange(1, 101, dtype=torch.float)
+        x2 = (torch.arange(1, 101, dtype=torch.float) - 1) / 100
+        x3 = torch.arange(1, 101, dtype=torch.float)
         t1, t2, t3 = ExpTransform(), AffineTransform(1, 100), identity_transform
         dim = 0
         x = torch.stack([x1, x2, x3], dim=dim)
@@ -4188,9 +4552,9 @@ class TestFunctors(TestCase):
         actual = t(x)
         expected = torch.stack([t1(x1), t2(x2), t3(x3)], dim=dim)
         self.assertEqual(expected, actual)
-        y1 = torch.range(1, 100)
-        y2 = torch.range(1, 100)
-        y3 = torch.range(1, 100)
+        y1 = torch.arange(1, 101, dtype=torch.float)
+        y2 = torch.arange(1, 101, dtype=torch.float)
+        y3 = torch.arange(1, 101, dtype=torch.float)
         y = torch.stack([y1, y2, y3], dim=dim)
         actual_cod_check = t.codomain.check(y)
         expected_cod_check = torch.stack([t1.codomain.check(y1),
@@ -4383,6 +4747,7 @@ class TestJit(TestCase):
             xfail = [
                 Cauchy,  # aten::cauchy(Double(2,1), float, float, Generator)
                 HalfCauchy,  # aten::cauchy(Double(2, 1), float, float, Generator)
+                VonMises  # Variance is not Euclidean
             ]
             if Dist in xfail:
                 continue

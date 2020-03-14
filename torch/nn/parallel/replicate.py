@@ -1,3 +1,4 @@
+import torch
 import torch.cuda.comm as comm
 from torch.cuda._utils import _get_device_index
 
@@ -23,10 +24,9 @@ def _is_jit_enabled():
 
 
 # Check if we can safely replicate the module.
-# there are three types of module:
+# there are two types of module:
 # 1. python modules
-# 2. weak python modules (nn.Module annotated by @weak_module)
-# 3. ScriptModule
+# 2. ScriptModule
 #
 # currently a module cannot be replicated properly if the descendants of
 # any ScriptModule contains python module (type 1 above)
@@ -59,16 +59,6 @@ def _replicatable_module(module, memo=None):
             return False
 
     return True
-
-
-def _copy_scriptmodule_methods(modules, module_copies, module_indices):
-    for i, module in enumerate(modules):
-        if not _is_script_module(module):
-            continue
-        replica = module_copies[i]
-        for method_name in module._c._method_names():
-            replica._c.clone_method(module._c, method_name)
-
 
 def _broadcast_coalesced_reshape(tensors, devices, detach=False):
     from ._functions import Broadcast
@@ -122,17 +112,12 @@ def replicate(network, devices, detach=False):
             if _is_script_module(module):
                 # we have to initialize ScriptModule properly so that
                 # it works with pybind11
-                replica = _init_script_module()
-                keys = set(module.__dict__.keys()) - scriptmodule_skip_attr
-                for key in keys:
-                    if not _is_script_method(module.__dict__[key]):
-                        replica.__dict__[key] = module.__dict__[key]
+                def init_fn(script_module):
+                    # Don't do anything here, we'll initialize the ScriptModule below
+                    return
+                replica = torch.jit.RecursiveScriptModule._construct(module._c._replicate_for_data_parallel(), init_fn)
             else:
-                replica = module.__new__(type(module))
-                replica.__dict__ = module.__dict__.copy()
-                replica._parameters = replica._parameters.copy()
-                replica._buffers = replica._buffers.copy()
-                replica._modules = replica._modules.copy()
+                replica = module._replicate_for_data_parallel()
 
             module_copies[j].append(replica)
 
@@ -146,7 +131,7 @@ def replicate(network, devices, detach=False):
                 module_idx = module_indices[child]
                 for j in range(num_replicas):
                     replica = module_copies[j][i]
-                    replica._modules[key] = module_copies[j][module_idx]
+                    setattr(replica, key, module_copies[j][module_idx])
         for key, param in module._parameters.items():
             if param is None:
                 for j in range(num_replicas):
@@ -156,7 +141,14 @@ def replicate(network, devices, detach=False):
                 param_idx = param_indices[param]
                 for j in range(num_replicas):
                     replica = module_copies[j][i]
-                    replica._parameters[key] = param_copies[j][param_idx]
+                    param = param_copies[j][param_idx]
+                    # parameters in replicas are no longer leaves, so remove them from _parameters
+                    # and setattr them as non-parameter attributes
+                    # scripted modules don't allow deleting parameters, but also don't complain
+                    # on assigning non-Parameter type
+                    if (not _is_script_module(replica)):
+                        del replica._parameters[key]
+                    setattr(replica, key, param)
         for key, buf in module._buffers.items():
             if buf is None:
                 for j in range(num_replicas):
@@ -171,9 +163,6 @@ def replicate(network, devices, detach=False):
                     buffer_idx = buffer_indices_not_rg[buf]
                 for j in range(num_replicas):
                     replica = module_copies[j][i]
-                    replica._buffers[key] = buffer_copies[j][buffer_idx]
-
-    for j in range(num_replicas):
-        _copy_scriptmodule_methods(modules, module_copies[j], module_indices)
+                    setattr(replica, key, buffer_copies[j][buffer_idx])
 
     return [module_copies[j][0] for j in range(num_replicas)]

@@ -1,0 +1,67 @@
+  docker_build:
+    triggers:
+      - schedule:
+          cron: "0 15 * * 0"
+          filters:
+            branches:
+              only:
+                - master
+    jobs:
+      - docker_for_ecr_gc_build_job
+      - docker_build_job:
+          name: "pytorch-linux-bionic-clang9-thrift-llvmdev"
+          image_name: "pytorch-linux-bionic-clang9-thrift-llvmdev"
+      - docker_build_job:
+          name: "pytorch-linux-xenial-cuda10-cudnn7-py3-gcc7"
+          image_name: "pytorch-linux-xenial-cuda10-cudnn7-py3-gcc7"
+      - docker_build_job:
+          name: "pytorch-linux-xenial-cuda10.1-cudnn7-py3-gcc7"
+          image_name: "pytorch-linux-xenial-cuda10.1-cudnn7-py3-gcc7"
+      - docker_build_job:
+          name: "pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7"
+          image_name: "pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7"
+      - docker_build_job:
+          name: "pytorch-linux-xenial-cuda9-cudnn7-py2"
+          image_name: "pytorch-linux-xenial-cuda9-cudnn7-py2"
+      - docker_build_job:
+          name: "pytorch-linux-xenial-cuda9-cudnn7-py3"
+          image_name: "pytorch-linux-xenial-cuda9-cudnn7-py3"
+      - docker_build_job:
+          name: "pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7"
+          image_name: "pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7"
+      - docker_build_job:
+          name: "pytorch-linux-xenial-py2.7.9"
+          image_name: "pytorch-linux-xenial-py2.7.9"
+      - docker_build_job:
+          name: "pytorch-linux-xenial-py2.7"
+          image_name: "pytorch-linux-xenial-py2.7"
+      - docker_build_job:
+          name: "pytorch-linux-xenial-py3-clang5-android-ndk-r19c"
+          image_name: "pytorch-linux-xenial-py3-clang5-android-ndk-r19c"
+      - docker_build_job:
+          name: "pytorch-linux-xenial-py3-clang5-asan"
+          image_name: "pytorch-linux-xenial-py3-clang5-asan"
+      - docker_build_job:
+          name: "pytorch-linux-xenial-py3.5"
+          image_name: "pytorch-linux-xenial-py3.5"
+      - docker_build_job:
+          name: "pytorch-linux-xenial-py3.8"
+          image_name: "pytorch-linux-xenial-py3.8"
+      - docker_build_job:
+          name: "pytorch-linux-xenial-py3.6-clang7"
+          image_name: "pytorch-linux-xenial-py3.6-clang7"
+      - docker_build_job:
+          name: "pytorch-linux-xenial-py3.6-gcc4.8"
+          image_name: "pytorch-linux-xenial-py3.6-gcc4.8"
+      - docker_build_job:
+          name: "pytorch-linux-xenial-py3.6-gcc5.4"
+          image_name: "pytorch-linux-xenial-py3.6-gcc5.4"
+      - docker_build_job:
+          name: "pytorch-linux-xenial-py3.6-gcc7.2"
+          image_name: "pytorch-linux-xenial-py3.6-gcc7.2"
+      - docker_build_job:
+          name: "pytorch-linux-xenial-py3.6-gcc7"
+          image_name: "pytorch-linux-xenial-py3.6-gcc7"
+      - docker_build_job:
+          name: "pytorch-linux-xenial-pynightly"
+          image_name: "pytorch-linux-xenial-pynightly"

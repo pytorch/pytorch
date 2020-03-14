@@ -12,8 +12,8 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAEvent.h>
 #include <ATen/cuda/CUDAMultiStreamGuard.h>
-#include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/cuda/CUDAGuard.h>
 
 #include <cstddef>
 #include <memory>
@@ -28,10 +28,11 @@ namespace {
 void copyBroadcastTensorsToReplicas(
     const std::vector<std::vector<at::Tensor>>& broadcastTensors,
     std::vector<std::vector<at::Tensor>>& replicaData) {
-  AT_ASSERT(replicaData.size() == broadcastTensors.size());
+  TORCH_INTERNAL_ASSERT(replicaData.size() == broadcastTensors.size());
   // replica = 1 means we skip the root (replica 0).
   for (size_t replica = 1; replica < replicaData.size(); ++replica) {
-    AT_ASSERT(replicaData[replica].size() == broadcastTensors[replica].size());
+    TORCH_INTERNAL_ASSERT(
+        replicaData[replica].size() == broadcastTensors[replica].size());
     for (size_t tensor = 0; tensor < replicaData[replica].size(); ++tensor) {
       replicaData[replica][tensor].set_(broadcastTensors[replica][tensor]);
     }
@@ -87,7 +88,7 @@ void distBroadcastCoalesced(
     work[bucket]->wait();
     const auto synced =
         torch::utils::unflatten_dense_tensors(flatTensors[bucket][0], tensors);
-    AT_ASSERT(synced.size() == tensors.size());
+    TORCH_INTERNAL_ASSERT(synced.size() == tensors.size());
     for (size_t i = 0; i < synced.size(); ++i) {
       // Copy into the per-process tensors.
       tensors[i].copy_(synced[i], /*non_blocking=*/true);
@@ -102,9 +103,9 @@ void syncParams(
     const std::vector<int64_t>& devices,
     int64_t broadcastBucketSize,
     bool broadcastBuffers) {
-  AT_ASSERT(!parameterData.empty());
-  AT_ASSERT(!bufferData.empty());
-  AT_ASSERT(!devices.empty());
+  TORCH_INTERNAL_ASSERT(!parameterData.empty());
+  TORCH_INTERNAL_ASSERT(!bufferData.empty());
+  TORCH_INTERNAL_ASSERT(!devices.empty());
 
   // Do an intra-node sync if we have more than one device.
   if (devices.size() > 1) {
@@ -134,11 +135,13 @@ std::tuple<std::shared_ptr<ProcessGroup::Work>, at::Tensor> queueReduction(
     const std::vector<int64_t>& devices) {
 #ifndef USE_C10D_NCCL
   if (devices.size() > 1) {
-    AT_ERROR("queueReduction with more than 1 device not suppported without NCCL");
+    TORCH_CHECK(
+        false,
+        "queueReduction with more than 1 device not suppported without NCCL");
   }
 #endif
-  AT_ASSERT(!gradsBatch.empty());
-  AT_ASSERT(!devices.empty());
+  TORCH_INTERNAL_ASSERT(!gradsBatch.empty());
+  TORCH_INTERNAL_ASSERT(!devices.empty());
 
   // Events to record the current state on the default stream of each GPUs
   std::vector<at::cuda::CUDAEvent> events;
@@ -163,7 +166,7 @@ std::tuple<std::shared_ptr<ProcessGroup::Work>, at::Tensor> queueReduction(
     // freed before their worker stream ops finish.
     for (at::Tensor& grad : gradsBatch[devIdx]) {
       c10::cuda::CUDACachingAllocator::recordStream(
-        grad.storage().data(), workerStreams.back());
+          grad.storage().data_ptr(), workerStreams.back());
     }
   }
 
@@ -181,7 +184,9 @@ std::tuple<std::shared_ptr<ProcessGroup::Work>, at::Tensor> queueReduction(
 #ifdef USE_C10D_NCCL
     torch::cuda::nccl::reduce(gradsBatchCoalesced, 0);
 #else
-    AT_ERROR("shouldn't have gotten here -- queueReduction not suppported without NCCL");
+    TORCH_CHECK(
+        false,
+        "shouldn't have gotten here -- queueReduction not suppported without NCCL");
 #endif
   }
 
@@ -207,7 +212,7 @@ void syncReduction(
   // before their worker stream ops finish.
   for (at::Tensor& grad : gradsBatch) {
     c10::cuda::CUDACachingAllocator::recordStream(
-      grad.storage().data(), workerStream);
+        grad.storage().data_ptr(), workerStream);
   }
 
   at::cuda::CUDAStreamGuard cudaGuard(workerStream);
@@ -218,7 +223,7 @@ void syncReduction(
   std::vector<at::Tensor> gradsReduced =
       torch::utils::unflatten_dense_tensors(gradsBatchCoalesced, gradsBatch);
 
-  AT_ASSERT(gradsReduced.size() == gradsBatch.size());
+  TORCH_INTERNAL_ASSERT(gradsReduced.size() == gradsBatch.size());
 
   for (size_t i = 0; i < gradsReduced.size(); ++i) {
     gradsBatch[i].copy_(gradsReduced[i]);

@@ -365,7 +365,9 @@ class WeightedSumOp : public Operator<Context> {
 
   template <typename T>
   bool DoRunWithType() {
-    const int input_size = this->InputSize();
+    // the code is written this way because of 10.1 + gcc 7.3.1 compiler bug
+    // as discussed at https://devtalk.nvidia.com/default/topic/1048037/linux/cuda-10-1-nvidia-you-re-now-quot-fixing-quot-gcc-bugs-that-gcc-doesn-t-even-have/
+    const int input_size = (*this).InputSize();
     CAFFE_ENFORCE_EQ(input_size % 2, 0);
     const auto& X0 = Input(0);
     const auto& weight0 = Input(1);
@@ -739,6 +741,122 @@ class ScatterAssignOp : public Operator<Context> {
 };
 
 template <class Context>
+class ScatterOp : public Operator<CPUContext> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+
+  template <class... Args>
+  explicit ScatterOp(Args&&... args)
+      : Operator<CPUContext>(std::forward<Args>(args)...),
+        OP_SINGLE_ARG(int, "axis", axis_, 1) {
+  }
+
+  virtual ~ScatterOp() noexcept override {}
+
+  bool RunOnDevice() override {
+
+    TORCH_CHECK(Context::GetDeviceType() == kCPU, "ScatterOp currently only supports CPU.")
+
+    return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
+        this, this->template Input<Tensor>(INDICES, CPU));
+  }
+
+  template <typename IndexType>
+  bool DoRunWithType() {
+    const Tensor& data = Input(DATA);
+    const Tensor& indices = Input(INDICES);
+    const Tensor& updates = Input(UPDATES);
+    const TypeMeta dataType = data.dtype();
+    size_t item_bytesize = dataType.itemsize();
+
+    // ONNX allows negative axis to index from the back, valid range: [-r, r].
+    axis_ = data.canonical_axis_index(axis_);
+
+    CAFFE_ENFORCE_GE(data.dim(), axis_ + 1, "DATA should be at least [axis+1]-D");
+    CAFFE_ENFORCE_GE(axis_, 0, "Axis should be non-negative");
+    CAFFE_ENFORCE_LT(axis_, data.dim(), "Axis out of range");
+
+    Tensor* output = Output(0, data.sizes().vec(), at::dtype(dataType));
+    output->CopyFrom(data);
+    char* out = static_cast<char*>(output->raw_mutable_data(dataType));
+
+    // Succeed if size of output is zero, which can happen for empty batch which
+    // would have data dimension size of 0.
+    // This *must* be done AFTER output->raw_mutable_data() above as that has
+    // important allocation side effect that we must see.
+    if (output->numel() == 0) {
+      return true;
+    }
+
+    const IndexType* idxs = indices.template data<IndexType>();
+    const char* src_base = static_cast<const char*>(updates.raw_data());
+
+    const int64_t outer_dims_product = indices.size_to_dim(axis_);
+
+    const int64_t dst_indexing_axis_dim = data.size(axis_);
+
+    const int64_t idxs_block_size = indices.size_from_dim(axis_ + 1);
+    const int64_t src_block_size = updates.size_from_dim(axis_ + 1);
+    const int64_t dst_block_size = data.size_from_dim(axis_ + 1);
+
+    const int64_t idxs_batch_size = indices.size_from_dim(axis_);
+    const int64_t src_batch_size = updates.size_from_dim(axis_);
+    const int64_t dst_batch_size = data.size_from_dim(axis_);
+
+    const int64_t N = indices.size(axis_);
+
+    check_indexarray_range<IndexType>(idxs, N, dst_indexing_axis_dim);
+
+    // For a 3-D tensor, dst is updated as:
+    //    dst[i][idxs[i][j][k]][k] = src[i][j][k]  # if dim == 1
+    // where i, j, k are iterating over their corresponding axis I, J, K.
+    // For a given i, j, k tuple.
+    // idxs offset can be computed as i * J_src * K + j * K + k.
+    // src offset can be computed as i * J_src * K + j * K + k.
+    // dst offset can be computed as i * J_dst * K + idxs[idxs_offset] * K + K
+    // Note that idxs and src should have the same rank and shape.
+    // dst should have the same rank as idxs and src, but the dimension of dim axis can be different.
+    // That is why in the above equation, there is the difference of J_src and J_dst.
+    for (int64_t outer_batch = 0; outer_batch < outer_dims_product; ++outer_batch) {
+      for (int64_t i = 0; i < N; ++i) {
+        for (int64_t inner_batch = 0; inner_batch < idxs_block_size; ++inner_batch) {
+          auto idxs_elem_idx = outer_batch * idxs_batch_size + i * idxs_block_size + inner_batch;
+          auto src_elem_idx = outer_batch * src_batch_size + i * src_block_size + inner_batch;
+          auto dst_elem_idx = outer_batch * dst_batch_size + idxs[idxs_elem_idx] * dst_block_size + inner_batch;
+
+          auto src = src_base + src_elem_idx * item_bytesize;
+          auto dst = out + dst_elem_idx * item_bytesize;
+          context_.CopyItemsSameDevice(dataType, 1, src, dst);
+        }
+      }
+    }
+    return true;
+  }
+
+  INPUT_TAGS(DATA, INDICES, UPDATES);
+
+  // Check that indices fall within dimension array size with CAFFE_ENFORCE.
+  template <typename IndexType>
+  static void check_indexarray_range(
+      const IndexType* indices,
+      int64_t n,
+      IndexType indexing_axis_dim) {
+    for (auto i = 0; i < n; ++i) {
+      auto idx = indices[i];
+      CAFFE_ENFORCE(
+          0 <= idx && idx < indexing_axis_dim,
+          "INDICES element is out of DATA bounds, id=",
+          idx,
+          " axis_dim=",
+          indexing_axis_dim);
+    }
+  }
+
+ protected:
+  int axis_;
+};
+
+template <class Context>
 class LengthsToSegmentIdsOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
@@ -975,10 +1093,14 @@ class HasElementsOp : public Operator<Context> {
   USE_SIMPLE_CTOR_DTOR(HasElementsOp);
 
   bool RunOnDevice() override {
-    auto& input = Input(0);
+    bool res = false;
+    for (auto i = 0; i < InputSize(); ++i) {
+      const auto& input = Input(i);
+      res = res || input.numel() > 0;
+    }
     auto* output = Output(0);
     output->Resize(std::vector<int64_t>{});
-    *output->template mutable_data<bool>() = input.numel() > 0;
+    *output->template mutable_data<bool>() = res;
     return true;
   }
 };
@@ -1058,7 +1180,7 @@ class GatherRangesOp : public Operator<Context> {
     CAFFE_ENFORCE(ranges.dim() == 3, "Ranges must be 3-D");
     CAFFE_ENFORCE(ranges.size(1) > 0, "There has to be at least one range");
     CAFFE_ENFORCE_EQ(
-        ranges.size(2), 2, "Ranges last dimention should be of size 2");
+        ranges.size(2), 2, "Ranges last dimension should be of size 2");
 
     auto* rawData = static_cast<const char*>(data.raw_data());
     auto* rangesData = ranges.template data<Index>();
@@ -1276,7 +1398,7 @@ class RangeOp : public Operator<Context> {
     T step = 1;
 
     for (int i = 0; i < InputSize(); ++i) {
-      CAFFE_ENFORCE_EQ(Input(0).dim(), 0, "All inputs must be scalar.");
+      CAFFE_ENFORCE_EQ(Input(i).numel(), 1, "All inputs must be scalar/1D tensor.");
     }
 
     switch (InputSize()) {

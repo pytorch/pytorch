@@ -2,7 +2,7 @@ Tensor Basics
 =============
 
 The ATen tensor library backing PyTorch is a simple tensor library thats exposes
-the Tensor operations in Torch directly in C++11. ATen's API is auto-generated
+the Tensor operations in Torch directly in C++14. ATen's API is auto-generated
 from the same declarations PyTorch uses so the two APIs will track each other
 over time.
 
@@ -76,19 +76,24 @@ CUDA accessors
 .. code-block:: cpp
 
   __global__ void packed_accessor_kernel(
-      PackedTensorAccessor<float, 2> foo,
+      PackedTensorAccessor64<float, 2> foo,
       float* trace) {
     int i=threadIdx.x
-    atomicAdd(trace, foo[i](i])
+    gpuAtomicAdd(trace, foo[i][i])
   }
-  
+
   torch::Tensor foo = torch::rand({12, 12});
 
   // assert foo is 2-dimensional and holds floats.
-  auto foo_a = foo.packed_accessor<float,2>();
+  auto foo_a = foo.packed_accessor64<float,2>();
   float trace = 0;
 
   packed_accessor_kernel<<<1, 12>>>(foo_a, &trace);
+
+In addition to ``PackedTensorAccessor64`` and ``packed_accessor64`` there are
+also the corresponding ``PackedTensorAccessor32`` and ``packed_accessor32``
+which use 32-bit integers for indexing. This can be quite a bit faster on CUDA
+but may lead to overflows in the indexing calculations.
 
 Note that the template can hold other parameters such as the pointer restriction
 and the integer type for indexing. See documentation for a thorough template

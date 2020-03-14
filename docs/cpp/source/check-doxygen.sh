@@ -19,7 +19,6 @@ python aten/src/ATen/gen.py \
   -s aten/src/ATen \
   -d build/aten/src/ATen \
   aten/src/ATen/Declarations.cwrap \
-  aten/src/THNN/generic/THNN.h \
   aten/src/THCUNN/generic/THCUNN.h \
   aten/src/ATen/nn.yaml \
   aten/src/ATen/native/native_functions.yaml
@@ -42,6 +41,7 @@ cp original-doxygen-log.txt doxygen-log.txt
 # Filter out some warnings.
 ignore_warning "warning: no uniquely matching class member found for"
 ignore_warning "warning: explicit link request to 'Item' could not be resolved"
+ignore_warning "warning: Included by graph for 'types.h' not generated, too many nodes"
 
 # Count the number of remaining warnings.
 warnings="$(grep 'warning:' doxygen-log.txt | wc -l)"

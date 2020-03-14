@@ -1,9 +1,12 @@
 #include <gtest/gtest.h>
 
 #include <iostream>
+#include <random>
 // define constants like M_PI and C keywords for MSVC
 #ifdef _MSC_VER
+#ifndef _USE_MATH_DEFINES
 #define _USE_MATH_DEFINES
+#endif
 #include <math.h>
 #endif
 #include <ATen/ATen.h>
@@ -19,7 +22,7 @@ struct Foo {
   static void apply(Tensor a, Tensor b) {
     scalar_type s = 1;
     std::stringstream ss;
-    ss << "hello, dispatch: " << a.dispatch_type().toString() << s << "\n";
+    ss << "hello, dispatch: " << a.toString() << s << "\n";
     auto data = (scalar_type*)a.data_ptr();
     (void)data;
   }
@@ -38,15 +41,15 @@ void test_overflow() {
   ASSERT_EQ(s1.toFloat(), 100000.0);
   ASSERT_EQ(s1.toInt(), 100000);
 
-  ASSERT_THROW(s1.toHalf(), std::domain_error);
+  ASSERT_THROW(s1.toHalf(), std::runtime_error);
 
   s1 = Scalar(NAN);
   ASSERT_TRUE(std::isnan(s1.toFloat()));
-  ASSERT_THROW(s1.toInt(), std::domain_error);
+  ASSERT_THROW(s1.toInt(), std::runtime_error);
 
   s1 = Scalar(INFINITY);
   ASSERT_TRUE(std::isinf(s1.toFloat()));
-  ASSERT_THROW(s1.toInt(), std::domain_error);
+  ASSERT_THROW(s1.toInt(), std::runtime_error);
 }
 
 TEST(TestScalar, TestScalar) {
@@ -57,9 +60,13 @@ TEST(TestScalar, TestScalar) {
   Half h = bar.toHalf();
   Scalar h2 = h;
   cout << "H2: " << h2.toDouble() << " " << what.toFloat() << " "
-       << bar.toDouble() << " " << what.isIntegral() << "\n";
-  Generator& gen = at::globalContext().defaultGenerator(at::kCPU);
-  ASSERT_NO_THROW(gen.seed());
+       << bar.toDouble() << " " << what.isIntegral(false) << "\n";
+  auto gen = at::detail::getDefaultCPUGenerator();
+  {
+    // See Note [Acquire lock when using random generators]
+    std::lock_guard<std::mutex> lock(gen->mutex_);
+    ASSERT_NO_THROW(gen->set_current_seed(std::random_device()()));
+  }
   auto&& C = at::globalContext();
   if (at::hasCUDA()) {
     auto t2 = zeros({4, 4}, at::kCUDA);
@@ -105,7 +112,7 @@ TEST(TestScalar, TestScalar) {
       scalar_t s = 1;
       std::stringstream ss;
       ASSERT_NO_THROW(
-          ss << "hello, dispatch" << x.dispatch_type().toString() << s << "\n");
+          ss << "hello, dispatch" << x.toString() << s << "\n");
       auto data = (scalar_t*)x.data_ptr();
       (void)data;
     });

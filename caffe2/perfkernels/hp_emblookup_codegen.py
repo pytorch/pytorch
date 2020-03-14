@@ -7,7 +7,7 @@ import sys
 sizeof = {"float": 4, "at::Half": 2, "uint8_t": 1}
 
 
-def unroll(uf, IndexType, InType, OutType, use_weights, isa, fused):
+def unroll(uf, IndexType, InType, OutType, use_weights, isa, fused, use_offsets):
     def compute(regid, InType, use_weights, isa, prefetch):
         code = []
 
@@ -50,27 +50,51 @@ def unroll(uf, IndexType, InType, OutType, use_weights, isa, fused):
 
     code = []
     code.append("    // unrolling " + str(uf) + " times")
-    code.append(
-        "    for ("
-        + IndexType
-        + " rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {"
-    )
+
+    if use_offsets:
+        code.append(
+            "    for ("
+            + IndexType
+            + " rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {"
+        )
+    else:
+        code.append(
+            "    for ("
+            + IndexType
+            + " rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {"
+        )
+
     code.append("      " + OutType + "* op = &out[rangeIndex * block_size];")
     for i in range(0, uf):
         j = 8 * i
         code.append("      __m256 vop" + str(j) + " = _mm256_setzero_ps();")
 
     # inner loop
-    code.append(
-        "      if (dataInd + lengths[rangeIndex] > index_size) {\n"
-        + "        return false;\n"
-        + "      }"
-    )
-    code.append(
-        "      for ("
-        + IndexType
-        + " start = dataInd; dataInd < start + lengths[rangeIndex];\n           ++dataInd) {"  # noqa
-    )
+    if use_offsets:
+        code.append(
+            "      if (dataInd != offsets[rangeIndex] - offsets[0]) {\n"
+            + "        return false;\n"
+            + "      }"
+        )
+        code.append("""\
+      int64_t end_offset = offsets[rangeIndex + 1];
+      int64_t length = end_offset - offsets[rangeIndex];""")
+        code.append(
+            "      for ("
+            + "int64_t"
+            + " start = dataInd; dataInd < end_offset - offsets[0];\n           ++dataInd) {"  # noqa
+        )
+    else:
+        code.append(
+            "      if (dataInd + lengths[rangeIndex] > index_size) {\n"
+            + "        return false;\n"
+            + "      }"
+        )
+        code.append(
+            "      for ("
+            + IndexType
+            + " start = dataInd; dataInd < start + lengths[rangeIndex];\n           ++dataInd) {"  # noqa
+        )
     code.append("        const " + IndexType + " idx = indices[dataInd];")
     code.append(
         "        if (idx < 0 || idx >= data_size) {\n"
@@ -133,13 +157,19 @@ def unroll(uf, IndexType, InType, OutType, use_weights, isa, fused):
         code.extend(compute(j, InType, use_weights, isa, prefetch))
     code.append("      }")
 
-    code.append("      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {")
+    if use_offsets:
+        code.append("      if (!normalize_by_lengths || length == 0) {")
+    else:
+        code.append("      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {")
     for i in range(0, uf):
         j = 8 * i
         code.append("        _mm256_storeu_ps(&op[" + str(j) + "], vop" + str(j) + ");")
     code.append("      } else {")
     # inv of length
-    code.append("        __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);")
+    if use_offsets:
+        code.append("        __m256 vlen_inv = _mm256_set1_ps(1.0f / length);")
+    else:
+        code.append("        __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);")
     for i in range(0, uf):
         j = 8 * i
         code.append(
@@ -156,7 +186,7 @@ def unroll(uf, IndexType, InType, OutType, use_weights, isa, fused):
     return code
 
 
-def generic(IndexType, InType, OutType, use_weights, isa, fused):
+def generic(IndexType, InType, OutType, use_weights, isa, fused, use_offsets):
     def compute(InType, use_weights, isa):
         code = []
         if InType == "float":
@@ -199,11 +229,22 @@ def generic(IndexType, InType, OutType, use_weights, isa, fused):
     code = []
     if InType == "at::Half":
         code.append("    alignas(64) at::Half vtmp1[8] = {0};")
-    code.append(
-        "    for ("
-        + IndexType
-        + " rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {"
-    )
+
+
+
+    if use_offsets:
+        code.append(
+            "    for ("
+            + IndexType
+            + " rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {"
+        )
+    else:
+        code.append(
+            "    for ("
+            + IndexType
+            + " rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {"
+        )
+
     code.append("      " + OutType + "* op = &out[rangeIndex * block_size];")
 
     # initialize to 0
@@ -216,16 +257,31 @@ def generic(IndexType, InType, OutType, use_weights, isa, fused):
     code.append("      }")
 
     # inner loop
-    code.append(
-        "      if (dataInd + lengths[rangeIndex] > index_size) {\n"
-        + "        return false;\n"
-        + "      }"
-    )
-    code.append(
-        "      for ("
-        + IndexType
-        + " start = dataInd; dataInd < start + lengths[rangeIndex];\n           ++dataInd) {"  # noqa
-    )
+    if use_offsets:
+        code.append(
+            "      if (dataInd != offsets[rangeIndex] - offsets[0]) {\n"
+            + "        return false;\n"
+            + "      }"
+        )
+        code.append("""\
+      int64_t end_offset = offsets[rangeIndex + 1];
+      int64_t length = end_offset - offsets[rangeIndex];""")
+        code.append(
+            "      for ("
+            + "int64_t"
+            + " start = dataInd; dataInd < end_offset - offsets[0];\n           ++dataInd) {"  # noqa
+        )
+    else:
+        code.append(
+            "      if (dataInd + lengths[rangeIndex] > index_size) {\n"
+            + "        return false;\n"
+            + "      }"
+        )
+        code.append(
+            "      for ("
+            + IndexType
+            + " start = dataInd; dataInd < start + lengths[rangeIndex];\n           ++dataInd) {"  # noqa
+        )
     code.append("        const " + IndexType + " idx = indices[dataInd];")
     code.append(
         "        if (idx < 0 || idx >= data_size) {\n"
@@ -287,16 +343,16 @@ def generic(IndexType, InType, OutType, use_weights, isa, fused):
     # leftover
     code.append("        for (; j < block_size; j++) {")
     if InType == "float":
-        code.append("          op[j] += wgt * ip[j];")
+        code.append("          op[j] = std::fma(wgt, ip[j], op[j]);")
     elif InType == "at::Half":
         code.append("          vtmp1[0] = ip[j];")
         code.append(
             "          __m256 vtmp2 =\n"
             "              _mm256_cvtph_ps(*(reinterpret_cast<const __m128i*>(vtmp1)));"
         )
-        code.append("          op[j] += wgt * ((float*)(&vtmp2))[0];")
+        code.append("          op[j] = std::fma(wgt, ((float*)(&vtmp2))[0], op[j]);")
     elif InType == "uint8_t":
-        code.append("          op[j] += wgt * ((float)ip[j]) + bio;")
+        code.append("          op[j] = std::fma(wgt, (float)ip[j], bio + op[j]);")
     else:
         assert False
 
@@ -304,8 +360,12 @@ def generic(IndexType, InType, OutType, use_weights, isa, fused):
 
     code.append("      }")
 
-    code.append("      if (normalize_by_lengths && lengths[rangeIndex]) {")
-    code.append("        float len_inv = 1.0f / lengths[rangeIndex];")
+    if use_offsets:
+        code.append("      if (normalize_by_lengths && length) {")
+        code.append("        float len_inv = 1.0f / length;")
+    else:
+        code.append("      if (normalize_by_lengths && lengths[rangeIndex]) {")
+        code.append("        float len_inv = 1.0f / lengths[rangeIndex];")
     code.append("        __m256 vlen_inv = _mm256_set1_ps(len_inv);")
     code.append("        j = 0;")
     code.append("        for (; j + 8 <= block_size; j += 8) {")
@@ -328,13 +388,20 @@ def generic(IndexType, InType, OutType, use_weights, isa, fused):
 parser = argparse.ArgumentParser()
 parser.add_argument("-f", "--filename", help="file name")
 parser.add_argument("--fused", action="store_true")
+parser.add_argument("--use-offsets", action="store_true")
 opts = parser.parse_args()
 if opts.filename:
     filename = opts.filename
 elif opts.fused:
-    filename = "embedding_lookup_fused_8bit_rowwise_avx2.cc"
+    if opts.use_offsets:
+        filename = "embedding_lookup_fused_8bit_rowwise_idx_avx2.cc"
+    else:
+        filename = "embedding_lookup_fused_8bit_rowwise_avx2.cc"
 else:
-    filename = "embedding_lookup_avx2.cc"
+    if opts.use_offsets:
+        filename = "embedding_lookup_idx_avx2.cc"
+    else:
+        filename = "embedding_lookup_avx2.cc"
 
 options = [
     ["int32_t", "int", "float", "float", "float", "float"],
@@ -363,9 +430,14 @@ for o in options:
 
     prefix = "Fused8BitRowwise" if opts.fused else ""
     code.append("template <bool IS_WEIGHT_POSITIONAL>")
-    fn_base = "{}EmbeddingLookup_{}_{}_{}".format(
-        prefix, IndexTypeName, InTypeName, OutTypeName
-    )
+    if opts.use_offsets:
+        fn_base = "{}EmbeddingLookupIdx_{}_{}_{}".format(
+            prefix, IndexTypeName, InTypeName, OutTypeName
+        )
+    else:
+        fn_base = "{}EmbeddingLookup_{}_{}_{}".format(
+            prefix, IndexTypeName, InTypeName, OutTypeName
+        )
     suffix = "__avx2_fma"
     fn = "static bool " + fn_base + suffix
     code.append(fn + "(")
@@ -377,7 +449,10 @@ for o in options:
     args.append("    const int64_t data_size,")
     args.append("    const " + InType + "* input,")
     args.append("    const " + IndexType + "* indices,")
-    args.append("    const int* lengths,")
+    if opts.use_offsets:
+        args.append("    const int64_t* offsets,")
+    else:
+        args.append("    const int* lengths,")
     args.append("    const float* weights,")
     if not opts.fused:
         args.append("    const float* scale_bias,")
@@ -392,21 +467,24 @@ for o in options:
     code.append(
         "  const {} fused_block_size = block_size + {};".format(IndexType, offset)
     )
-    code.append("  " + IndexType + " dataInd = 0;")
+    if opts.use_offsets:
+        code.append("  int64_t dataInd = 0;")
+    else:
+        code.append("  " + IndexType + " dataInd = 0;")
 
     # code.append("printf(\"calling " + fn + "\\n\");");
 
     code.append("  if (block_size == 128) {")
-    code += unroll(16, IndexType, InType, OutType, True, "AVX2", opts.fused)
+    code += unroll(16, IndexType, InType, OutType, True, "AVX2", opts.fused, opts.use_offsets)
     code.append("  } else if (block_size == 64) {")
-    code += unroll(8, IndexType, InType, OutType, True, "AVX2", opts.fused)
+    code += unroll(8, IndexType, InType, OutType, True, "AVX2", opts.fused, opts.use_offsets)
     code.append("  } else if (block_size == 32) {")
-    code += unroll(4, IndexType, InType, OutType, True, "AVX2", opts.fused)
+    code += unroll(4, IndexType, InType, OutType, True, "AVX2", opts.fused, opts.use_offsets)
     code.append("  } else if (block_size == 16) {")
-    code += unroll(2, IndexType, InType, OutType, True, "AVX2", opts.fused)
+    code += unroll(2, IndexType, InType, OutType, True, "AVX2", opts.fused, opts.use_offsets)
     code.append("  } else {")
     code.append("    // generic code")
-    code += generic(IndexType, InType, OutType, True, "AVX2", opts.fused)
+    code += generic(IndexType, InType, OutType, True, "AVX2", opts.fused, opts.use_offsets)
     code.append("  }")
     code.append("  return dataInd == index_size;")
 
@@ -415,14 +493,23 @@ for o in options:
     for is_weight_positional in ["false", "true"]:
         code.append("bool " + fn_base + "_" + is_weight_positional + suffix + "(")
         code += args
-        code.append("  return " + fn_base + suffix + "<" + is_weight_positional + ">(")
+        # Resolve the Lint warnings: Limit of 80 characters in one line.
+        extra_space = "\n      "
+        ret_string = "  return " + fn_base + suffix + "<" + is_weight_positional + ">("
+        if len(ret_string) <= 80:
+            code.append(ret_string)
+        else:
+            code.append("  return " + fn_base + suffix + "<" + extra_space + is_weight_positional + ">(")
         code.append("      block_size,")
         code.append("      output_size,")
         code.append("      index_size,")
         code.append("      data_size,")
         code.append("      input,")
         code.append("      indices,")
-        code.append("      lengths,")
+        if opts.use_offsets:
+            code.append("      offsets,")
+        else:
+            code.append("      lengths,")
         code.append("      weights,")
         if not opts.fused:
             code.append("      scale_bias,")

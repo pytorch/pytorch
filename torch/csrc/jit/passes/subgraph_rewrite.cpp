@@ -1,6 +1,6 @@
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
-#include <torch/csrc/jit/irparser.h>
-#include <torch/csrc/jit/subgraph_matcher.h>
+#include <torch/csrc/jit/ir/irparser.h>
+#include <torch/csrc/jit/ir/subgraph_matcher.h>
 
 namespace torch {
 namespace jit {
@@ -26,38 +26,46 @@ void SubgraphRewriter::RegisterRewritePattern(
   patterns_.push_back(d);
 }
 
-std::shared_ptr<script::Module> SubgraphRewriter::runOnModule(
-    std::shared_ptr<script::Module> module) {
+Module SubgraphRewriter::runOnModule(const Module& module) {
   nodes_to_delete_.clear();
-  const auto& methods = module->get_methods();
-  for (const auto& m : methods) {
-    auto g = m->function().graph();
+  for (const auto& m : module.get_methods()) {
+    auto g = m.function().graph();
     runOnGraph(g);
   }
   return module;
 }
 
-void SubgraphRewriter::runOnGraph(std::shared_ptr<Graph>& graph) {
+void SubgraphRewriter::runOnGraph(
+    std::shared_ptr<Graph>& graph,
+    const std::function<
+        bool(const Match&, const std::unordered_map<std::string, Value*>&)>&
+        filter) {
   for (const RewritePatternDescr& pattern : patterns_) {
-    rewriteSinglePatternOnGraph(graph, pattern);
+    rewriteSinglePatternOnGraph(graph, pattern, filter);
   }
 }
 
 void SubgraphRewriter::rewriteSinglePatternOnGraph(
     std::shared_ptr<Graph>& graph,
-    RewritePatternDescr pattern) {
+    const RewritePatternDescr& pattern,
+    const std::function<
+        bool(const Match&, const std::unordered_map<std::string, Value*>&)>&
+        filter) {
   std::unordered_map<Value*, Value*> rewrite_map;
   std::vector<Value*> values_to_rewrite;
 
   Graph pattern_graph;
   std::unordered_map<std::string, Value*> vmap;
-  script::parseIR(pattern.pattern, &pattern_graph, vmap);
+  parseIR(pattern.pattern, &pattern_graph, vmap);
 
   Graph replacement_graph;
-  script::parseIR(pattern.replacement, &replacement_graph);
+  parseIR(pattern.replacement, &replacement_graph);
 
   const auto& matches = findPatternMatches(pattern_graph, *graph);
   for (const Match& match : matches) {
+    if (!filter(match, vmap)) {
+      continue;
+    }
     // Matches might overlap with each other, in that case some of the nodes in
     // the current match might have already been used in another folded pattern.
     // We need to skip such matches.
@@ -83,7 +91,7 @@ void SubgraphRewriter::rewriteSinglePatternOnGraph(
     // new ones.
     WithInsertPoint insert_point(match.anchor);
     std::vector<Value*> new_outputs =
-        inlineCallTo(*graph, replacement_graph, inputs);
+        insertGraph(*graph, replacement_graph, inputs);
 
     // Record all planned rewritings
     AT_ASSERT(outputs.size() == new_outputs.size());
@@ -123,8 +131,7 @@ bool SubgraphRewriter::overlapsWithPreviousMatches(const Match* match) {
   return false;
 }
 
-std::shared_ptr<script::Module> PatternBasedRewrite(
-    std::shared_ptr<script::Module>& module) {
+Module PatternBasedRewrite(const Module& module) {
   // TODO: Deep-copy the module
   SubgraphRewriter subgraph_rewriter;
   subgraph_rewriter.RegisterDefaultPatterns();

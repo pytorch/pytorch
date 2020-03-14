@@ -1,3 +1,7 @@
+:orphan:
+
+.. _multiprocessing-doc:
+
 Multiprocessing package - torch.multiprocessing
 ===============================================
 
@@ -19,6 +23,9 @@ Strategy management
 .. autofunction:: get_sharing_strategy
 .. autofunction:: set_sharing_strategy
 
+
+.. _multiprocessing-cuda-sharing-details:
+
 Sharing CUDA tensors
 --------------------
 
@@ -28,8 +35,13 @@ Python 2 can only create subprocesses using ``fork``, and it's not supported
 by the CUDA runtime.
 
 Unlike CPU tensors, the sending process is required to keep the original tensor
-as long as the receiving process retains a copy of the tensor. It is implemented
-under the hood but requires users to follow the next best practices.
+as long as the receiving process retains a copy of the tensor. The refcounting is
+implemented under the hood but requires users to follow the next best practices.
+
+.. warning::
+    If the consumer process dies abnormally to a fatal signal, the shared tensor
+    could be forever kept in memory as long as the sending process is running.
+
 
 1. Release memory ASAP in the consumer.
 

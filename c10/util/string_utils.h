@@ -63,6 +63,25 @@ inline long long stoll(const std::string& str) {
   s >> result;
   return result;
 }
+
+inline long long stoll(const std::string& str, size_t pos, int base) {
+  // std::stoll doesn't exist in our Android environment, we need to implement
+  // it ourselves.
+  std::stringstream s;
+  if (str.size() > 0 && str.at(0) == '0') {
+    if (str.size() > 1 && (str.at(1) == 'x' || str.at(1) == 'X')) {
+      s << std::hex << str;
+    } else {
+      s << std::oct << str;
+    }
+  } else {
+    s << str;
+  }
+  long long result = 0;
+  s >> result;
+  return result;
+}
+
 #else
 #define CAFFE2_TESTONLY_WE_ARE_USING_CUSTOM_STRING_FUNCTIONS 0
 using std::stod;
@@ -73,3 +92,12 @@ using std::to_string;
 #endif // defined(__ANDROID__) || defined(CAFFE2_FORCE_STD_STRING_FALLBACK_TEST)
 
 } // namespace c10
+
+#if defined(__ANDROID__) && __ANDROID_API__ < 21 && defined(__GLIBCXX__)
+#include <cstdlib>
+// std::strtoll isn't available on Android NDK platform < 21 when building
+// with libstdc++, so bring the global version into std.
+namespace std {
+  using ::strtoll;
+}
+#endif

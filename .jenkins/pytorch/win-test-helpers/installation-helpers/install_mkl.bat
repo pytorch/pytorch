@@ -1,8 +1,8 @@
 if "%REBUILD%"=="" (
   if "%BUILD_ENVIRONMENT%"=="" (
-    curl -k https://s3.amazonaws.com/ossci-windows/mkl_2018.2.185.7z --output %TMP_DIR_WIN%\mkl.7z
+    curl --retry 3 -k https://s3.amazonaws.com/ossci-windows/mkl_2020.0.166.7z --output %TMP_DIR_WIN%\mkl.7z
   ) else (
-    aws s3 cp s3://ossci-windows/mkl_2018.2.185.7z %TMP_DIR_WIN%\mkl.7z --quiet
+    aws s3 cp s3://ossci-windows/mkl_2020.0.166.7z %TMP_DIR_WIN%\mkl.7z --quiet
   )
   7z x -aoa %TMP_DIR_WIN%\mkl.7z -o%TMP_DIR_WIN%\mkl
 )

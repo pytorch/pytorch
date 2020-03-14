@@ -38,6 +38,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <c10/util/C++17.h>
 #include <stdexcept>
 #include <string>
@@ -101,32 +102,32 @@ public:
   // No explicit construct/copy/destroy for aggregate type.
 
   // DR 776.
-  AT_CPP14_CONSTEXPR void fill(const value_type& __u)
+  constexpr void fill(const value_type& __u)
   { std::fill_n(begin(), size(), __u); }
 
-  AT_CPP14_CONSTEXPR void swap(array& __other)
+  constexpr void swap(array& __other)
   { std::swap_ranges(begin(), end(), __other.begin()); }
 
   // Iterators.
-  AT_CPP14_CONSTEXPR iterator begin() noexcept
+  constexpr iterator begin() noexcept
   { return iterator(data()); }
 
   constexpr const_iterator begin() const noexcept
   { return const_iterator(data()); }
 
-  AT_CPP14_CONSTEXPR iterator end() noexcept
+  constexpr iterator end() noexcept
   { return iterator(data() + _Nm); }
 
   constexpr const_iterator end() const noexcept
   { return const_iterator(data() + _Nm); }
 
-  AT_CPP14_CONSTEXPR reverse_iterator rbegin() noexcept
+  constexpr reverse_iterator rbegin() noexcept
   { return reverse_iterator(end()); }
 
   constexpr const_reverse_iterator rbegin() const noexcept
   { return const_reverse_iterator(end()); }
 
-  AT_CPP14_CONSTEXPR reverse_iterator rend() noexcept
+  constexpr reverse_iterator rend() noexcept
   { return reverse_iterator(begin()); }
 
   constexpr const_reverse_iterator rend() const noexcept
@@ -152,13 +153,13 @@ public:
   constexpr bool empty() const noexcept { return size() == 0; }
 
   // Element access.
-  AT_CPP14_CONSTEXPR reference operator[](size_type __n) noexcept
+  constexpr reference operator[](size_type __n) noexcept
   { return _AT_Type::_S_ref(_M_elems, __n); }
 
   constexpr const_reference operator[](size_type __n) const noexcept
   { return _AT_Type::_S_ref(_M_elems, __n); }
 
-  AT_CPP14_CONSTEXPR reference at(size_type __n) {
+  constexpr reference at(size_type __n) {
     if (__n >= _Nm) {
       detail::__throw_out_of_range(std::string() +
           "array::at: __n (which is " + to_string(__n) + ") " +
@@ -177,13 +178,13 @@ public:
          _AT_Type::_S_ref(_M_elems, 0));
      }
 
-  AT_CPP14_CONSTEXPR reference front() noexcept
+  constexpr reference front() noexcept
   { return *begin(); }
 
   constexpr const_reference front() const noexcept
   { return _AT_Type::_S_ref(_M_elems, 0); }
 
-  AT_CPP14_CONSTEXPR reference back() noexcept
+  constexpr reference back() noexcept
   { return _Nm ? *(end() - 1) : *end(); }
 
   constexpr const_reference back() const noexcept
@@ -192,7 +193,7 @@ public:
             : _AT_Type::_S_ref(_M_elems, 0);
   }
 
-  AT_CPP14_CONSTEXPR pointer data() noexcept
+  constexpr pointer data() noexcept
   { return _AT_Type::_S_ptr(_M_elems); }
 
   constexpr const_pointer data() const noexcept
@@ -202,7 +203,7 @@ public:
 #if defined(__cpp_deduction_guides) && __cpp_deduction_guides >= 201606
   template<typename _Tp, typename... _Up>
   array(_Tp, _Up...) ->
-    array<enable_if_t<(std::is_same<_Tp, _Up>::value && ...), _Tp>, 1 + sizeof...(_Up)>;
+    array<std::enable_if_t<(std::is_same<_Tp, _Up>::value && ...), _Tp>, 1 + sizeof...(_Up)>;
 #endif
 
 // Array comparisons.
@@ -259,7 +260,7 @@ template<std::size_t _Int, typename _Tp, std::size_t _Nm>
 constexpr _Tp&& get(array<_Tp, _Nm>&& __arr) noexcept
 {
   static_assert(_Int < _Nm, "array index is within bounds");
-  return guts::move(get<_Int>(__arr));
+  return std::move(get<_Int>(__arr));
 }
 
 template<std::size_t _Int, typename _Tp, std::size_t _Nm>
@@ -277,27 +278,27 @@ constexpr const _Tp& get(const array<_Tp, _Nm>& __arr) noexcept
  *  prepend(2, {3, 4}) == {2, 3, 4}
  */
 namespace detail {
-template<class T, size_t N, size_t... I>
-constexpr inline array<T, N-1> tail_(const array<T, N>& arg, guts::index_sequence<I...>) {
-  static_assert(sizeof...(I) == N-1, "invariant");
-  return {{get<I+1>(arg)...}};
+template<class T, size_t N, size_t... INDEX>
+constexpr inline array<T, N-1> tail_(const array<T, N>& arg, std::index_sequence<INDEX...>) {
+  static_assert(sizeof...(INDEX) == N-1, "invariant");
+  return {{get<INDEX+1>(arg)...}};
 }
 }
 template<class T, size_t N>
 constexpr inline array<T, N-1> tail(const array<T, N>& arg) {
   static_assert(N > 0, "Can only call tail() on an array with at least one element");
-  return detail::tail_(arg, guts::make_index_sequence<N-1>());
+  return detail::tail_(arg, std::make_index_sequence<N-1>());
 }
 
 namespace detail {
-template<class T, size_t N, size_t... I>
-constexpr inline array<T, N+1> prepend_(T&& head, const array<T, N>& tail, guts::index_sequence<I...>) {
-  return {{guts::forward<T>(head), get<I>(tail)...}};
+template<class T, size_t N, size_t... INDEX>
+constexpr inline array<T, N+1> prepend_(T&& head, const array<T, N>& tail, std::index_sequence<INDEX...>) {
+  return {{std::forward<T>(head), get<INDEX>(tail)...}};
 }
 }
 template<class T, size_t N>
 constexpr inline array<T, N+1> prepend(T&& head, const array<T, N>& tail) {
-  return detail::prepend_(guts::forward<T>(head), tail, guts::make_index_sequence<N>());
+  return detail::prepend_(std::forward<T>(head), tail, std::make_index_sequence<N>());
 }
 
 /**
@@ -308,15 +309,15 @@ constexpr inline array<T, N+1> prepend(T&& head, const array<T, N>& tail) {
  */
 
 namespace detail {
-template<class T, size_t N, size_t... I>
-constexpr array<T, N> to_array_(const T (&arr)[N], guts::index_sequence<I...>) {
-  return {{arr[I]...}};
+template<class T, size_t N, size_t... INDEX>
+constexpr array<T, N> to_array_(const T (&arr)[N], std::index_sequence<INDEX...>) {
+  return {{arr[INDEX]...}};
 }
 }
 
 template<class T, size_t N>
 constexpr array<T, N> to_array(const T (&arr)[N]) {
-  return detail::to_array_(arr, guts::make_index_sequence<N>());
+  return detail::to_array_(arr, std::make_index_sequence<N>());
 }
 
 }}

@@ -20,9 +20,23 @@ class DistributedSampler(Sampler):
         num_replicas (optional): Number of processes participating in
             distributed training.
         rank (optional): Rank of the current process within num_replicas.
+        shuffle (optional): If true (default), sampler will shuffle the indices
+
+    .. warning::
+        In distributed mode, calling the ``set_epoch`` method is needed to
+        make shuffling work; each process will use the same random seed
+        otherwise.
+
+    Example::
+
+        >>> sampler = DistributedSampler(dataset) if is_distributed else None
+        >>> loader = DataLoader(dataset, shuffle=(sampler is None),
+        ...                     sampler=sampler)
+        >>> for epoch in range(start_epoch, n_epochs):
+        ...     if is_distributed:
     """
 
-    def __init__(self, dataset, num_replicas=None, rank=None):
+    def __init__(self, dataset, num_replicas=None, rank=None, shuffle=True):
         if num_replicas is None:
             if not dist.is_available():
                 raise RuntimeError("Requires distributed package to be available")
@@ -37,12 +51,17 @@ class DistributedSampler(Sampler):
         self.epoch = 0
         self.num_samples = int(math.ceil(len(self.dataset) * 1.0 / self.num_replicas))
         self.total_size = self.num_samples * self.num_replicas
+        self.shuffle = shuffle
 
     def __iter__(self):
         # deterministically shuffle based on epoch
         g = torch.Generator()
         g.manual_seed(self.epoch)
-        indices = torch.randperm(len(self.dataset), generator=g).tolist()
+        if self.shuffle:
+            indices = torch.randperm(len(self.dataset), generator=g).tolist()
+        else:
+            indices = list(range(len(self.dataset)))
+
 
         # add extra samples to make it evenly divisible
         indices += indices[:(self.total_size - len(indices))]

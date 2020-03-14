@@ -22,11 +22,6 @@ class AliasInfo {
     static const Symbol wc = Symbol::fromQualString("alias::*");
     return wc;
   }
-  static AliasInfo createWildcard() {
-    AliasInfo ret;
-    ret.addBeforeSet(wildcardSet());
-    return ret;
-  }
 
   void setIsWrite(bool isWrite) {
     isWrite_ = isWrite;
@@ -57,8 +52,12 @@ class AliasInfo {
     return *beforeSets_.begin();
   }
 
-  bool isWildcard() const {
+  bool isWildcardBefore() const {
     return beforeSets_.count(wildcardSet()) != 0;
+  }
+
+  bool isWildcardAfter() const {
+    return afterSets_.count(wildcardSet()) != 0;
   }
 
   // the alias info for the contained types of the type
@@ -87,7 +86,7 @@ inline bool operator==(const AliasInfo& lhs, const AliasInfo& rhs) {
       && lhs.containedTypes() == rhs.containedTypes();
 }
 
-// DEBUG ONLY; this does not match the way things are represented in the schema
+// this does match the way things are represented in the schema
 inline std::ostream& operator<<(std::ostream& out, const AliasInfo& aliasInfo) {
   out << "(";
   bool first = true;
@@ -99,11 +98,22 @@ inline std::ostream& operator<<(std::ostream& out, const AliasInfo& aliasInfo) {
     }
     out << set.toUnqualString();
   }
-  out << ")";
-
-  if (!aliasInfo.containedTypes().empty()) {
-    out << " CONTAINS " << aliasInfo.containedTypes()[0];
+  if (aliasInfo.isWrite()) {
+    out << "!";
   }
+  if (aliasInfo.beforeSets() != aliasInfo.afterSets()) {
+    out << " -> ";
+    first = true;
+    for (const auto& set : aliasInfo.afterSets()) {
+      if (first) {
+        first = false;
+      } else {
+        out << "|";
+      }
+      out << set.toUnqualString();
+    }
+  }
+  out << ")";
   return out;
 }
 } // namespace c10

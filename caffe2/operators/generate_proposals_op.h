@@ -1,13 +1,13 @@
 #ifndef CAFFE2_OPERATORS_GENERATE_PROPOSALS_OP_H_
 #define CAFFE2_OPERATORS_GENERATE_PROPOSALS_OP_H_
 
-#include "caffe2/core/c10_operator.h"
+#include "caffe2/core/export_caffe2_op_to_c10.h"
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/math.h"
 
-C10_DECLARE_CAFFE2_OPERATOR(GenerateProposals);
+C10_DECLARE_EXPORT_CAFFE2_OP_TO_C10(GenerateProposals);
 
 namespace caffe2 {
 
@@ -69,7 +69,7 @@ CAFFE2_API ERArrXXf ComputeSortedAnchors(
 } // namespace utils
 
 // C++ implementation of GenerateProposalsOp
-// Generate bounding box proposals for Faster RCNN. The propoasls are generated
+// Generate bounding box proposals for Faster RCNN. The proposals are generated
 //     for a list of images based on image score 'score', bounding box
 //     regression result 'deltas' as well as predefined bounding box shapes
 //     'anchors'. Greedy non-maximum suppression is applied to generate the

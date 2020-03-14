@@ -1,8 +1,9 @@
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 
-#include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/node_hashing.h>
-#include <torch/csrc/jit/passes/alias_analysis.h>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/ir/node_hashing.h>
+#include <torch/csrc/jit/ir/alias_analysis.h>
 
 #include <unordered_map>
 
@@ -19,8 +20,16 @@ void EliminateCommonSubexpression(
   std::unordered_set<Node*, HashNode, EqualNode> subexprs;
   for (auto it = block->nodes().begin(); it != block->nodes().end(); ++it) {
     auto node = *it;
-    if (node->hasSideEffects() || node->isNondeterministic() ||
-        aliasDb.hasWriters(node)) {
+    if (node->hasSideEffects()) {
+      GRAPH_DEBUG("Node was skipped due to side effects:\n", *node);
+      continue;
+    }
+    if (node->isNondeterministic()) {
+      GRAPH_DEBUG("Node was skipped due to its non determinism:\n", *node);
+      continue;
+    }
+    if (aliasDb.hasWriters(node)) {
+      GRAPH_DEBUG("Node was skipped due to alias analysis result:\n", *node);
       // Do NOT have enough information to do CSE on these nodes.
       continue;
     }
@@ -45,13 +54,12 @@ void EliminateCommonSubexpression(
     auto parent_lookup = parent_lookup_fn(node);
     auto g_out = node->owningGraph()->outputs();
     if (parent_lookup) {
-      // since the graph outputs may be mutated after they are returned,
-      // don't introduce new aliasing among graph outputs
-      if (aliasDb.mayContainAlias(node->outputs(), g_out) &&
-          aliasDb.mayContainAlias(parent_lookup->outputs(), g_out)) {
+      if (!aliasDb.safeToChangeAliasingRelationship(
+              node->outputs(), parent_lookup->outputs())) {
         continue;
       }
 
+      GRAPH_UPDATE("Replacing\n", *node, "with\n", *parent_lookup);
       node->replaceAllUsesWith(parent_lookup);
       it.destroyCurrent();
       continue;
@@ -70,6 +78,7 @@ void EliminateCommonSubexpression(
         continue;
       }
 
+      GRAPH_UPDATE("Replacing\n", *node, "with\n", *existing);
       node->replaceAllUsesWith(existing);
       // Destroy the node.
       it.destroyCurrent();
@@ -78,8 +87,9 @@ void EliminateCommonSubexpression(
 }
 } // namespace
 
-void EliminateCommonSubexpression(std::shared_ptr<Graph>& graph) {
+void EliminateCommonSubexpression(const std::shared_ptr<Graph>& graph) {
   AliasDb aliasDb(graph);
+  GRAPH_DUMP("Before CSE", graph);
   EliminateCommonSubexpression(
       graph->block(), aliasDb, [](Node*) { return nullptr; });
 }

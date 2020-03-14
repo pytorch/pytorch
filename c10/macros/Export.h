@@ -45,6 +45,7 @@
 #endif // C10_USING_CUSTOM_GENERATED_MACROS
 
 #ifdef _WIN32
+#define C10_HIDDEN
 #if defined(C10_BUILD_SHARED_LIBS)
 #define C10_EXPORT __declspec(dllexport)
 #define C10_IMPORT __declspec(dllimport)
@@ -55,11 +56,18 @@
 #else // _WIN32
 #if defined(__GNUC__)
 #define C10_EXPORT __attribute__((__visibility__("default")))
+#define C10_HIDDEN __attribute__((__visibility__("hidden")))
 #else // defined(__GNUC__)
 #define C10_EXPORT
+#define C10_HIDDEN
 #endif // defined(__GNUC__)
 #define C10_IMPORT C10_EXPORT
 #endif // _WIN32
+
+#ifdef NO_EXPORT
+#undef C10_EXPORT
+#define C10_EXPORT
+#endif
 
 // Definition of an adaptive XX_API macro, that depends on whether you are
 // building the library itself or not, routes to XX_EXPORT and XX_IMPORT.
@@ -83,11 +91,26 @@
 #define C10_API C10_IMPORT
 #endif
 
-// This one is being used by libcaffe2.so
+// This one is being used by libtorch.so
+// TODO: rename this to TORCH_API
 #ifdef CAFFE2_BUILD_MAIN_LIB
 #define CAFFE2_API C10_EXPORT
 #else
 #define CAFFE2_API C10_IMPORT
+#endif
+
+// NB: For now, HIP is overloaded to use the same macro, but ideally
+// HIPify should translate TORCH_CUDA_API to TORCH_HIP_API
+#if defined(TORCH_CUDA_BUILD_MAIN_LIB) || defined(TORCH_HIP_BUILD_MAIN_LIB)
+#define TORCH_CUDA_API C10_EXPORT
+#else
+#define TORCH_CUDA_API C10_IMPORT
+#endif
+
+#if defined(TORCH_HIP_BUILD_MAIN_LIB)
+#define TORCH_HIP_API C10_EXPORT
+#else
+#define TORCH_HIP_API C10_IMPORT
 #endif
 
 #endif // C10_MACROS_MACROS_H_

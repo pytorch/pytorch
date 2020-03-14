@@ -53,7 +53,7 @@ ATen ``Tensor`` class with capabilities concerning automatic differentiation.
 The autograd system records operations on tensors to form an *autograd graph*.
 Calling ``backwards()`` on a leaf variable in this graph performs reverse mode
 differentiation through the network of functions and tensors spanning the
-autograd graph, ultimately yieldings gradients. The following example provides
+autograd graph, ultimately yielding gradients. The following example provides
 a taste of this interface:
 
 .. code-block:: cpp
@@ -68,7 +68,7 @@ a taste of this interface:
 
 The ``at::Tensor`` class in ATen is not differentiable by default. To add the
 differentiability of tensors the autograd API provides, you must use tensor
-factory functions from the `torch::` namespace instead of the `at` namespace.
+factory functions from the `torch::` namespace instead of the `at::` namespace.
 For example, while a tensor created with `at::ones` will not be differentiable,
 a tensor created with `torch::ones` will be.
 
@@ -161,7 +161,6 @@ Contents
 
    installing
    frontend
-   contributing
    api/library_root
 
 .. toctree::

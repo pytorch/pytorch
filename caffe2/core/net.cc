@@ -37,6 +37,7 @@ NetBase::NetBase(
       name_(def->name()),
       net_def_(def) {
   static GlobalInitIsCalledGuard guard;
+  C10_LOG_API_USAGE_ONCE("caffe2.net.create");
   // Check that node_name is empty for all ops
   for (const OperatorDef& op : def->op()) {
     if (op.has_device_option()) {

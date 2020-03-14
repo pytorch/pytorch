@@ -5,7 +5,7 @@
 
 namespace caffe2 {
 
-CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(12, Tensor);
+CAFFE_KNOWN_TYPE(Tensor);
 
 TensorPrinter::TensorPrinter(
     const std::string& tensor_name,
@@ -57,6 +57,7 @@ TypeMeta GetTensorType(const void* c) {
   const Tensor* tc = static_cast<const Tensor*>(c);
   return tc->dtype();
 }
+
 TypeMeta GetInt8TensorType(const void* c) {
   const int8::Int8TensorCPU* int8_tensor =
       static_cast<const int8::Int8TensorCPU*>(c);
@@ -103,6 +104,7 @@ GetInt8TensorInfo(const void* c, size_t* capacity, DeviceOption* device) {
       static_cast<const int8::Int8TensorCPU*>(c);
   return GetTensorInfo(&(int8_tensor->t), capacity, device);
 }
+
 // since we only have one tensor, probably need to remove this at some point?
 static CaffeMap<TypeIdentifier, TensorInfoCall> tensor_info_call_registry_{
     {TypeMeta::Id<Tensor>(), GetTensorInfo},
@@ -199,9 +201,12 @@ void Tensor::enforce_invariants() {
   if (impl_.get() == nullptr) {
     throw std::runtime_error("TensorImpl with nullptr is not supported");
   }
+  // TODO: only check `!impl_->requires_grad()` after Variable and Tensor are merged
+#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
   CAFFE_ENFORCE(
-      !impl_->is_variable(),
-      "Caffe2 tensor wrapper doesn't support autograd variables");
+    !(impl_->requires_grad() && at::GradMode::is_enabled()),
+    "Caffe2 tensor wrapper doesn't support autograd variables that require grad");
+#endif
   CAFFE_ENFORCE_EQ(
       impl_->layout(),
       at::kStrided,

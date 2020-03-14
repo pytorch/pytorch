@@ -1,21 +1,12 @@
-ir_version: 4
+ir_version: 6
 producer_name: "pytorch"
-producer_version: "1.1"
+producer_version: "1.4"
 graph {
   node {
     input: "0"
     output: "1"
+    name: "IsNaN_0"
     op_type: "IsNaN"
-  }
-  node {
-    input: "1"
-    output: "2"
-    op_type: "Cast"
-    attribute {
-      name: "to"
-      i: 2
-      type: INT
-    }
   }
   name: "torch-jit-export"
   input {
@@ -32,10 +23,10 @@ graph {
     }
   }
   output {
-    name: "2"
+    name: "1"
     type {
       tensor_type {
-        elem_type: 2
+        elem_type: 9
         shape {
           dim {
             dim_value: 3

@@ -43,7 +43,6 @@
 #include <caffe2/operators/stop_gradient.h>
 #include <caffe2/operators/tanh_op.h>
 #include <caffe2/operators/tensor_protos_db_input.h>
-#include <caffe2/operators/transpose_op.h>
 #include <caffe2/operators/utility_ops.h>
 #include <caffe2/queue/queue_ops.h>
 #include <caffe2/sgd/iter_op.h>
@@ -51,7 +50,7 @@
 #include "caffe2/operators/bbox_transform_op.h"
 #include "caffe2/operators/box_with_nms_limit_op.h"
 
-#ifdef CAFFE2_USE_GLOO
+#if __linux__ && defined(CAFFE2_USE_GLOO)
 #include <caffe2/contrib/gloo/common_world_ops.h>
 #include <caffe2/contrib/gloo/broadcast_ops.h>
 #include <caffe2/contrib/gloo/allreduce_ops.h>
@@ -80,7 +79,6 @@ REGISTER_IDEEP_OPERATOR(
     IDEEPFallbackOp<AveragedLoss<float, CPUContext>, SkipIndices<0>>);
 REGISTER_IDEEP_OPERATOR(Flatten, IDEEPFallbackOp<FlattenOp<CPUContext>>);
 REGISTER_IDEEP_OPERATOR(ResizeLike, IDEEPFallbackOp<ResizeLikeOp<CPUContext>>);
-REGISTER_IDEEP_OPERATOR(Transpose, IDEEPFallbackOp<TransposeOp<CPUContext>>);
 REGISTER_IDEEP_OPERATOR(Slice, IDEEPFallbackOp<SliceOp<CPUContext>>);
 REGISTER_IDEEP_OPERATOR(Clip, IDEEPFallbackOp<ClipOp<float, CPUContext>>);
 REGISTER_IDEEP_OPERATOR(
@@ -200,6 +198,12 @@ REGISTER_IDEEP_OPERATOR(
     IDEEPFallbackOp<UnaryElementwiseOp<
       TensorTypes<float>, CPUContext, SqrtFunctor<CPUContext>>>);
 REGISTER_IDEEP_OPERATOR(
+    Sign,
+    IDEEPFallbackOp<UnaryElementwiseOp<
+        TensorTypes<float>,
+        CPUContext,
+        SignFunctor<CPUContext>>>);
+REGISTER_IDEEP_OPERATOR(
     Div,
     IDEEPFallbackOp<BinaryElementwiseOp<
       NumericTypes, CPUContext, DivFunctor<CPUContext>>>);
@@ -280,7 +284,7 @@ REGISTER_IDEEP_OPERATOR(
     BatchMatMul,
     IDEEPFallbackOp<BatchMatMulOp<CPUContext>>);
 
-#ifdef CAFFE2_USE_GLOO
+#if __linux__ && defined(CAFFE2_USE_GLOO)
 namespace gloo {
 // gloo operators
 REGISTER_IDEEP_OPERATOR(

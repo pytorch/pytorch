@@ -64,5 +64,25 @@ inline void check_size_nonnegative(IntArrayRef size) {
     TORCH_CHECK(x >= 0, "Trying to create tensor with negative dimension ", x, ": ", size);
   }
 }
+
+inline void check_supported_max_int_with_precision(int64_t n, const Tensor& tensor) {
+  TORCH_CHECK(at::scalar_tensor(n, tensor.options()).defined(),
+              "n is too large for result tensor type: '", tensor.toString(), "'");
+
+  // Ensure sufficient precision for floating point representation.
+  switch (tensor.scalar_type()) {
+    case at::ScalarType::Half:
+      TORCH_CHECK(n <= (int64_t(1) << 11) + 1, "n cannot be greater than 2049 for Half type.");
+      break;
+    case at::ScalarType::Float:
+      TORCH_CHECK(n <= (int64_t(1) << 24) + 1, "n cannot be greater than 2^24+1 for Float type.");
+      break;
+    case at::ScalarType::Double:  // Unlikely to happen, but doesn't hurt to check
+      TORCH_CHECK(n <= (int64_t(1) << 53) + 1, "n cannot be greater than 2^53+1 for Double type.");
+      break;
+    default:
+      break;
+  }
+}
 } // namespace native
 } // namespace at

@@ -15,7 +15,7 @@ torch.dtype
 .. class:: torch.dtype
 
 A :class:`torch.dtype` is an object that represents the data type of a
-:class:`torch.Tensor`. PyTorch has eight different data types:
+:class:`torch.Tensor`. PyTorch has nine different data types:
 
 ========================   ===========================================   ===========================
 Data type                  dtype                                         Tensor types
@@ -28,10 +28,87 @@ Data type                  dtype                                         Tensor 
 16-bit integer (signed)    ``torch.int16`` or ``torch.short``            ``torch.*.ShortTensor``
 32-bit integer (signed)    ``torch.int32`` or ``torch.int``              ``torch.*.IntTensor``
 64-bit integer (signed)    ``torch.int64`` or ``torch.long``             ``torch.*.LongTensor``
+Boolean                    ``torch.bool``                                ``torch.*.BoolTensor``
 ========================   ===========================================   ===========================
 
 To find out if a :class:`torch.dtype` is a floating point data type, the property :attr:`is_floating_point`
 can be used, which returns ``True`` if the data type is a floating point data type.
+
+.. _type-promotion-doc:
+
+When the dtypes of inputs to an arithmetic operation (`add`, `sub`, `div`, `mul`) differ, we promote
+by finding the minimum dtype that satisfies the following rules:
+
+* If the type of a scalar operand is of a higher category than tensor operands
+  (where floating > integral > boolean), we promote to a type with sufficient size to hold
+  all scalar operands of that category.
+* If a zero-dimension tensor operand has a higher category than dimensioned operands,
+  we promote to a type with sufficient size and category to hold all zero-dim tensor operands of
+  that category.
+* If there are no higher-category zero-dim operands, we promote to a type with sufficient size
+  and category to hold all dimensioned operands.
+
+A floating point scalar operand has dtype `torch.get_default_dtype()` and an integral
+non-boolean scalar operand has dtype `torch.int64`. Unlike numpy, we do not inspect
+values when determining the minimum `dtypes` of an operand.  Quantized and complex types
+are not yet supported.
+
+Promotion Examples::
+
+    >>> float_tensor = torch.ones(1, dtype=torch.float)
+    >>> double_tensor = torch.ones(1, dtype=torch.double)
+    >>> int_tensor = torch.ones(1, dtype=torch.int)
+    >>> long_tensor = torch.ones(1, dtype=torch.long)
+    >>> uint_tensor = torch.ones(1, dtype=torch.uint8)
+    >>> double_tensor = torch.ones(1, dtype=torch.double)
+    >>> bool_tensor = torch.ones(1, dtype=torch.bool)
+    # zero-dim tensors
+    >>> long_zerodim = torch.tensor(1, dtype=torch.long)
+    >>> int_zerodim = torch.tensor(1, dtype=torch.int)
+
+    >>> torch.add(5, 5).dtype
+    torch.int64
+    # 5 is an int64, but does not have higher category than int_tensor so is not considered.
+    >>> (int_tensor + 5).dtype
+    torch.int32
+    >>> (int_tensor + long_zerodim).dtype
+    torch.int32
+    >>> (long_tensor + int_tensor).dtype
+    torch.int64
+    >>> (bool_tensor + long_tensor).dtype
+    torch.int64
+    >>> (bool_tensor + uint_tensor).dtype
+    torch.uint8
+    >>> (float_tensor + double_tensor).dtype
+    torch.float64
+    >>> (bool_tensor + int_tensor).dtype
+    torch.int32
+    # Since long is a different kind than float, result dtype only needs to be large enough
+    # to hold the float.
+    >>> torch.add(long_tensor, float_tensor).dtype
+    torch.float32
+
+When the output tensor of an arithmetic operation is specified, we allow casting to its `dtype` except that:
+  * An integral output tensor cannot accept a floating point tensor.
+  * A boolean output tensor cannot accept a non-boolean tensor.
+
+Casting Examples::
+
+    # allowed:
+    >>> float_tensor *= double_tensor
+    >>> float_tensor *= int_tensor
+    >>> float_tensor *= uint_tensor
+    >>> float_tensor *= bool_tensor
+    >>> float_tensor *= double_tensor
+    >>> int_tensor *= long_tensor
+    >>> int_tensor *= uint_tensor
+    >>> uint_tensor *= int_tensor
+
+    # disallowed (RuntimeError: result type can't be cast to the desired output type):
+    >>> int_tensor *= float_tensor
+    >>> bool_tensor *= int_tensor
+    >>> bool_tensor *= uint_tensor
+
 
 .. _device-doc:
 
@@ -43,10 +120,11 @@ torch.device
 A :class:`torch.device` is an object representing the device on which a :class:`torch.Tensor` is
 or will be allocated.
 
-The :class:`torch.device` contains a device type (``'cpu'`` or ``'cuda'``) and optional device ordinal for the
-device type.  If the device ordinal is not present, this represents the current device for the device type;
-e.g. a :class:`torch.Tensor` constructed with device ``'cuda'`` is equivalent to ``'cuda:X'`` where X is the result of
-:func:`torch.cuda.current_device()`.
+The :class:`torch.device` contains a device type (``'cpu'`` or ``'cuda'``) and optional device
+ordinal for the device type. If the device ordinal is not present, this object will always represent
+the current device for the device type, even after :func:`torch.cuda.set_device()` is called; e.g.,
+a :class:`torch.Tensor` constructed with device ``'cuda'`` is equivalent to ``'cuda:X'`` where X is
+the result of :func:`torch.cuda.current_device()`.
 
 A :class:`torch.Tensor`'s device can be accessed via the :attr:`Tensor.device` property.
 

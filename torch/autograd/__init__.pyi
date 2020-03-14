@@ -2,10 +2,11 @@ from typing import Any, Callable, Union, Tuple, Sequence, Optional
 from .. import Tensor
 from .grad_mode import no_grad as no_grad, enable_grad as enable_grad, \
     set_grad_enabled as set_grad_enabled
+from . import profiler
 
-# TODO make Variable and Function more precise
-class Variable:
-    ...
+# The Variable API has been deprecated.
+# Variable(tensor) and Variable(tensor, requires_grad) still work, but they return Tensors instead of Variables.
+def Variable(tensor: Tensor, requires_grad: bool=...) -> Tensor: ...
 
 class Function:
     @staticmethod
@@ -26,7 +27,7 @@ class NestedIOFunction(Function):
 
 # 'func' accepts a vararg of tensors, which isn't expressable in the type system at the moment.
 # If https://mypy.readthedocs.io/en/latest/additional_features.html?highlight=callable#extended-callable-types is accepted,
-# the '...' first argument of Callabe can be replaced with VarArg(Tensor).
+# the '...' first argument of Callable can be replaced with VarArg(Tensor).
 # For now, we permit any input.
 def gradcheck(func: Callable[..., Union[Tensor, Tuple[Tensor, ...]]], inputs: Union[Tensor, Tuple[Tensor, ...]], eps: float=..., atol: float=..., rtol: float=..., raise_exception: bool=..., check_sparse_nnz: bool=...) -> bool: ...
 def gradgradcheck(func: Callable[..., Union[Tensor, Tuple[Tensor, ...]]], inputs: Union[Tensor, Tuple[Tensor, ...]], eps: float=..., atol: float=..., rtol: float=..., gen_non_contig_grad_outputs: bool=..., raise_exception: bool=...) -> bool: ...

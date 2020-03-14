@@ -34,6 +34,10 @@
 #define THIntStorage THStorage
 #define THLongStorage THStorage
 #define THBoolStorage THStorage
+#define THBFloat16Storage THStorage
+#define THQUInt8Storage THStorage
+#define THQInt8Storage THStorage
+#define THQInt32Storage THStorage
 
 TH_API scalar_t* THStorage_(data)(const THStorage*);
 TH_API ptrdiff_t THStorage_(size)(const THStorage*);
@@ -46,9 +50,6 @@ TH_API scalar_t THStorage_(get)(const THStorage*, ptrdiff_t);
 TH_API THStorage* THStorage_(new)(void);
 TH_API THStorage* THStorage_(newWithSize)(ptrdiff_t size);
 TH_API THStorage* THStorage_(newWithSize1)(scalar_t);
-TH_API THStorage* THStorage_(newWithSize2)(scalar_t, scalar_t);
-TH_API THStorage* THStorage_(newWithSize3)(scalar_t, scalar_t, scalar_t);
-TH_API THStorage* THStorage_(newWithSize4)(scalar_t, scalar_t, scalar_t, scalar_t);
 TH_API THStorage* THStorage_(newWithMapping)(const char *filename, ptrdiff_t size, int flags);
 
 TH_API THStorage* THStorage_(newWithAllocator)(ptrdiff_t size,

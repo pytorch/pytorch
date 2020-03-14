@@ -3,7 +3,7 @@
 #include <THCUNN/common.h>
 #include <THC/THCReduceApplyUtils.cuh>
 #include <TH/THHalf.h>
-#include <THCUNN/THCHalfAutoNumerics.cuh>
+#include <THC/THCNumerics.cuh>
 #include <c10/macros/Macros.h>
 
 #include <thrust/functional.h>
@@ -155,5 +155,8 @@ __global__ void cunn_MultiLabelMarginCriterion_updateGradInput_kernel(Dtype *gra
 
 #include <THCUNN/generic/MultiLabelMarginCriterion.cu>
 #include <THC/THCGenerateFloatTypes.h>
+
+#include <THCUNN/generic/MultiLabelMarginCriterion.cu>
+#include <THC/THCGenerateBFloat16Type.h>
 
 #undef MULTILABELMARGIN_THREADS

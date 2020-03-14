@@ -225,7 +225,7 @@ def Caffe2LSTM(args):
                 "Max usage differs from current total usage: {} > {}".
                 format(stats['max_total'], stats['total'])
             )
-            log.warning("This means that costly deallocations occured.")
+            log.warning("This means that costly deallocations occurred.")
 
     return time.time() - start_time
 

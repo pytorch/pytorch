@@ -41,15 +41,6 @@ def argument_to_declaration(param, func=None):
         arg['default'] = default
     arg['name'] = name
 
-    if func is not None:
-        default_inits = func.get('default_init', {})
-        wrap_dims = func.get('wrap_dim', {})
-        if name in default_inits:
-            # non constexpr defaults
-            arg['default_init'] = default_inits[name]
-        if name in wrap_dims:
-            arg['wrap_dim'] = wrap_dims[name]
-
     return arg
 
 
@@ -225,7 +216,7 @@ def unique_args(argslist):
     return result
 
 
-def function_info(name, arguments, cimpls, buffers, backends, inplace, scalar_check):
+def function_info(name, arguments, cimpls, buffers, backends, inplace, backend_types):
     """
     cimpls contains information use to call into THNN:
         cname: THNN function name
@@ -235,18 +226,20 @@ def function_info(name, arguments, cimpls, buffers, backends, inplace, scalar_ch
     return {
         'mode': 'NN',
         'name': name,
-        'types': ['Float', 'Double', 'Half'],  # Half will be stripped for CPU backend
+        'cpu_bfloat16': True if backend_types is not None and 'CPU' in backend_types and
+                'BFloat16' in backend_types['CPU'] else False,
+        'cuda_bfloat16': True if backend_types is not None and 'CUDA' in backend_types and
+                'BFloat16' in backend_types['CUDA'] else False,
+        'backend_types': backend_types,
         'arguments': arguments,
         'return': 'argument 0' if inplace else get_return(arguments),
         'buffers': buffers,
         'backends': backends,
         'cimpls': cimpls,
-        'scalar_check': scalar_check,
         'variants': ['function'],
     }
 
-
-def base_declaration(func, thnn_function, backends, inplace=False):
+def base_declaration(func, thnn_function, backends, backend_types, inplace=False):
     """Creates the NN function without any buffers in it's signature"""
     name, params = re.match(NAME_PARAM_REGEX, func['name']).groups()
     if inplace:
@@ -258,10 +251,9 @@ def base_declaration(func, thnn_function, backends, inplace=False):
     buffers = [argument_to_declaration('Tensor ' + buf)
                for buf in func.get('buffers', [])]
 
-    return function_info(name, arguments, None, buffers, backends, inplace, func.get('scalar_check'))
+    return function_info(name, arguments, None, buffers, backends, inplace, backend_types)
 
-
-def forward_declaration(base, thnn_function, inplace=False):
+def forward_declaration(base, thnn_function, backend_types, inplace=False):
     name = '{}_forward'.format(base['name'])
     if inplace:
         name += '_'
@@ -279,15 +271,9 @@ def forward_declaration(base, thnn_function, inplace=False):
     arguments = remove_unused_args(arguments, thnn_args)
     cimpl = {'cname': thnn_function.name, 'arguments': thnn_args}
 
-    scalar_check = base['scalar_check']
-    if scalar_check is not None:
-        output_arg_names = [arg['name'] for arg in arguments if arg.get('output', False)]
-        scalar_check = {k: v for (k, v) in scalar_check.items() if k in output_arg_names}
+    return function_info(name, arguments, [cimpl], [], base['backends'], inplace, backend_types)
 
-    return function_info(name, arguments, [cimpl], [], base['backends'], inplace, scalar_check)
-
-
-def backward_declaration(base, thnn_functions):
+def backward_declaration(base, thnn_functions, backend_types):
     name = '{}_backward'.format(base['name'])
 
     arguments = []
@@ -295,21 +281,6 @@ def backward_declaration(base, thnn_functions):
     arguments += [copy.deepcopy(arg) for arg in base['arguments']
                   if arg['name'] != 'inplace']
     arguments += base['buffers']
-
-    if 'upsample' in base['name']:
-        # Add input_size as parameter to upsample backwards functions
-        # Note that input_size is 4-dim for upsample_xxx2d
-        size = 2 + int(re.search(r'(\d+)d', base['name']).group(1))
-        input_size_arg = {'type': 'IntArrayRef', 'name': 'input_size', 'size': size}
-        for output_size_idx, arg in enumerate(arguments):
-            if arg['name'] == 'output_size':
-                break
-        arguments.insert(output_size_idx + 1, input_size_arg)
-
-    if 'im2col' in base['name']:
-        # Add input_size as parameter to im2col backwards function
-        input_size_arg = {'type': 'IntArrayRef', 'name': 'input_size', 'size': 2}
-        arguments.insert(2, input_size_arg)
 
     # outputs from the forward may be inputs to the backwards
     for arg in arguments:
@@ -361,22 +332,8 @@ def backward_declaration(base, thnn_functions):
         cimpls.append(cimpl)
 
     output_args = [arg for arg in arguments if arg.get('output', False)]
-    scalar_check_arg = base['scalar_check'] if base['scalar_check'] is not None else dict()
-    scalar_check = {k: v for (k, v) in scalar_check_arg.items() if k in [a['name'] for a in output_args]}
-    for arg in output_args:
-        # resize automatically sets scalar_check
-        if scalar_check.get(arg['name']) is not None or arg.get('resize', False):
-            pass
-        else:
-            base_name = arg['name'][len('grad_'):] if arg['name'] != 'grad_input' else 'self'
-            if base_name in [a['name'] for a in arguments]:
-                scalar_check[arg['name']] = base_name + '_->dim() == 0'
-            else:
-                raise ValueError(("Could not infer scalar_check for {} argument of func {} because {} "
-                                  "does not exist.  Please explicitly specify scalar_check."
-                                  .format(arg['name'], name, base_name)))
 
-    return function_info(name, arguments, cimpls, [], base['backends'], False, scalar_check)
+    return function_info(name, arguments, cimpls, [], base['backends'], False, backend_types)
 
 
 def parse_nn_yaml(filename):
@@ -418,12 +375,22 @@ def run(paths):
                 if cname + suffix in header_functions:
                     bwd_functions.append(header_functions[cname + suffix])
 
-            base = base_declaration(func, fwd_function, backends)
-            declarations.append(forward_declaration(base, fwd_function))
-            declarations.append(backward_declaration(base, bwd_functions))
+            default_scalar_types = ['Float', 'Double', 'Half']  # Half will be stripped for CPU backend
+            forward_backend_types = {}
+            backward_backend_types = {}
+            for backend in backends:
+                backend_props = func.get(backend, {})
+                forward_backend_types[backend] = backend_props.get('forward_scalar_types', default_scalar_types)
+                backward_backend_types[backend] = backend_props.get('backward_scalar_types', default_scalar_types)
+
+            base = base_declaration(func, fwd_function, backends, None)
+            declarations.append(forward_declaration(base, fwd_function, forward_backend_types))
+            if bwd_functions:
+                declarations.append(backward_declaration(base, bwd_functions, backward_backend_types))
+
 
             if func.get('has_inplace', False):
-                declarations.append(base_declaration(func, fwd_function, backends, True))
-                declarations.append(forward_declaration(base, fwd_function, True))
+                declarations.append(base_declaration(func, fwd_function, backends, forward_backend_types, True))
+                declarations.append(forward_declaration(base, fwd_function, forward_backend_types, True))
 
     return declarations

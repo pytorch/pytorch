@@ -1,12 +1,13 @@
-ir_version: 4
+ir_version: 6
 producer_name: "pytorch"
-producer_version: "1.1"
+producer_version: "1.4"
 graph {
   node {
     input: "0"
     input: "1"
     input: "2"
     output: "3"
+    name: "Gemm_0"
     op_type: "Gemm"
     attribute {
       name: "alpha"
@@ -24,6 +25,7 @@ graph {
     input: "1"
     input: "3"
     output: "4"
+    name: "Gemm_1"
     op_type: "Gemm"
     attribute {
       name: "alpha"

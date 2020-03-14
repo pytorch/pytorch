@@ -98,7 +98,7 @@ std::function<bool(int64_t)> getContinuationTest(
   }
 };
 
-// if the blob doesn't exist or is not initiaized, return false
+// if the blob doesn't exist or is not initialized, return false
 inline bool getShouldStop(const Blob* b) {
   if (!b || b->meta().id() == TypeIdentifier::uninitialized()) { // not exist or uninitialized
     return false;
@@ -164,7 +164,7 @@ struct CompiledExecutionStep;
  * ExecuteStepRecursive will call call compiled() once before the given
  * execution step is run and keep it alive for the length of its execution.
  * This means that, for steps with create_workspace=true, a child workspace
- * will be created everytime the step is executed, and destroyed right
+ * will be created every time the step is executed, and destroyed right
  * afterwards.
  */
 struct ExecutionStepWrapper {
@@ -361,7 +361,7 @@ bool ExecuteStepRecursive(ExecutionStepWrapper& stepWrapper) {
 
   std::unique_ptr<Reporter> reporter;
   if (step.has_report_net() || compiledStep->reportSubsteps.size() > 0) {
-    reporter = caffe2::make_unique<Reporter>();
+    reporter = std::make_unique<Reporter>();
     auto* reportNet = compiledStep->reportNet;
     if (reportNet) {
       VLOG(1) << "Starting reporter net";

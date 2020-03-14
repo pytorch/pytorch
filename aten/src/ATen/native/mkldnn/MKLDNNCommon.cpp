@@ -46,39 +46,32 @@ Tensor new_with_itensor_mkldnn(ideep::tensor&& it, const TensorOptions& options)
   auto dims = it.get_dims();
   IDeepTensorWrapperPtr handle = c10::make_intrusive<IDeepTensorWrapper>(std::move(it));
   return detail::make_tensor<MKLDNNTensorImpl>(
-    MkldnnCPUTensorId(), options.dtype(), options.device(), handle,
+    DispatchKeySet(DispatchKey::MkldnnCPUTensorId),
+    options.dtype(), options.device(), handle,
     std::vector<int64_t>(dims.begin(), dims.end()));
-}
-
-Tensor new_with_sizes_mkldnn(IntArrayRef sizes, const TensorOptions& options) {
-  // NOTE: int32_t dims from ideep::tensor but sizes needs int64_t
-  // TODO: support int64_t dims in ideep::tensor to avoid extra conversion
-  ideep::tensor::dims dst_dims (sizes.begin(), sizes.end());
-  ideep::tensor it;
-  it.resize<AllocForMKLDNN>(dst_dims, ideep::tensor::data_type::f32);
-  return new_with_itensor_mkldnn(std::move(it), options);
 }
 
 ideep::tensor& itensor_from_mkldnn(const MKLDNNTensor& mkldnn_tensor) {
   AT_ASSERTM(mkldnn_tensor.is_mkldnn(),
              "mkldnn_to_dense expects MKL-DNN tensor input");
-  AT_ASSERTM(!mkldnn_tensor.is_variable(), "_internal_get_MKLDNNImpl: should not be a variable");
+  TORCH_INTERNAL_ASSERT(at::impl::variable_excluded_from_dispatch());
   MKLDNNTensorImpl *mklimpl = static_cast<MKLDNNTensorImpl *>(mkldnn_tensor.unsafeGetTensorImpl());
   return mklimpl->unsafe_opaque_handle()->get_target();
 }
 
 ideep::tensor itensor_view_from_dense(const Tensor& tensor) {
   AT_ASSERTM(
-      tensor.type_id() == CPUTensorId(),
-      "itensor_view_from_dense expects dense CPU tensor input");
+      tensor.device().type() == DeviceType::CPU,
+      "itensor_view_from_dense expects CPU tensor input");
+  AT_ASSERTM(
+      tensor.layout() == Layout::Strided,
+      "itensor_view_from_dense expects dense tensor input");
   AT_ASSERTM(tensor.scalar_type() == ScalarType::Float,
              "itensor_view_from_dense expects float tensor input");
-  AT_ASSERTM(
-      !tensor.is_variable(),
-      "itensor_view_from_dense: should not be a variable");
+  TORCH_INTERNAL_ASSERT(at::impl::variable_excluded_from_dispatch());
   return {{{tensor.sizes().cbegin(), tensor.sizes().cend()},
            ideep::tensor::data_type::f32},
-          tensor.template data<float>()};
+          tensor.template data_ptr<float>()};
 }
 }}
 

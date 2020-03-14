@@ -6,7 +6,15 @@
 #include <stdexcept>
 
 namespace c10 {
-
+class intrusive_ptr_target;
+namespace raw {
+  namespace weak_intrusive_ptr {
+    inline void incref(intrusive_ptr_target* self);
+  }
+  namespace intrusive_ptr {
+    inline void incref(intrusive_ptr_target * self);
+  }
+}
 /**
  * intrusive_ptr<T> is an alternative to shared_ptr<T> that has better
  * performance because it does the refcounting intrusively
@@ -60,8 +68,11 @@ class C10_API intrusive_ptr_target {
 
   template <typename T, typename NullType>
   friend class intrusive_ptr;
+  friend inline void raw::intrusive_ptr::incref(intrusive_ptr_target* self);
+
   template <typename T, typename NullType>
   friend class weak_intrusive_ptr;
+  friend inline void raw::weak_intrusive_ptr::incref(intrusive_ptr_target* self);
 
  protected:
   // protected destructor. We never want to destruct intrusive_ptr_target*
@@ -72,7 +83,7 @@ class C10_API intrusive_ptr_target {
 // We also have to disable -Wunknown-warning-option and -Wpragmas, because
 // some other compilers don't know about -Wterminate or -Wexceptions and
 // will show a warning about unknown warning options otherwise.
-#ifdef _MSC_VER
+#if defined(_MSC_VER) && !defined(__clang__)
 #  pragma warning(push)
 #  pragma warning(disable: 4297) // function assumed not to throw an exception but does
 #else
@@ -82,13 +93,13 @@ class C10_API intrusive_ptr_target {
 #  pragma GCC diagnostic ignored "-Wterminate"
 #  pragma GCC diagnostic ignored "-Wexceptions"
 #endif
-    AT_ASSERTM(
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
         refcount_.load() == 0,
         "Tried to destruct an intrusive_ptr_target that still has intrusive_ptr to it");
-    AT_ASSERTM(
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
         weakcount_.load() == 0,
         "Tried to destruct an intrusive_ptr_target that still has weak_intrusive_ptr to it");
-#ifdef _MSC_VER
+#if defined(_MSC_VER) && !defined(__clang__)
 #  pragma warning(pop)
 #else
 #  pragma GCC diagnostic pop
@@ -174,7 +185,7 @@ class intrusive_ptr final {
   void retain_() {
     if (target_ != NullType::singleton()) {
       size_t new_refcount = ++target_->refcount_;
-      AT_ASSERTM(
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
           new_refcount != 1,
           "intrusive_ptr: Cannot increase refcount after it reached zero.");
     }
@@ -182,14 +193,14 @@ class intrusive_ptr final {
 
   void reset_() noexcept {
     if (target_ != NullType::singleton() && --target_->refcount_ == 0) {
+      // justification for const_cast: release_resources is basically a destructor
+      // and a destructor always mutates the object, even for const objects.
+      const_cast<std::remove_const_t<TTarget>*>(target_)->release_resources();
+
       // See comment above about weakcount. As long as refcount>0,
       // weakcount is one larger than the actual number of weak references.
       // So we need to decrement it here.
-      auto weak_count = --target_->weakcount_;
-      // justification for const_cast: release_resources is basically a destructor
-      // and a destructor always mutates the object, even for const objects.
-      const_cast<c10::guts::remove_const_t<TTarget>*>(target_)->release_resources();
-      if (weak_count == 0) {
+      if (--target_->weakcount_ == 0) {
         delete target_;
       }
     }
@@ -271,19 +282,11 @@ class intrusive_ptr final {
     return target_;
   }
 
-  const TTarget& operator*() const noexcept {
+  TTarget& operator*() const noexcept {
     return *target_;
   }
 
-  TTarget& operator*() noexcept {
-    return *target_;
-  }
-
-  const TTarget* operator->() const noexcept {
-    return target_;
-  }
-
-  TTarget* operator->() noexcept {
+  TTarget* operator->() const noexcept {
     return target_;
   }
 
@@ -344,10 +347,6 @@ class intrusive_ptr final {
    * passed in *must* have been created using intrusive_ptr::release().
    */
   static intrusive_ptr reclaim(TTarget* owning_ptr) {
-    // See Note [Stack allocated intrusive_ptr_target safety]
-    AT_ASSERTM(
-        owning_ptr == NullType::singleton() || owning_ptr->refcount_.load() > 0,
-        "intrusive_ptr: Can only intrusive_ptr::reclaim() owning pointers that were created using intrusive_ptr::release().");
     return intrusive_ptr(owning_ptr);
   }
 
@@ -370,7 +369,7 @@ class intrusive_ptr final {
    */
   static intrusive_ptr unsafe_reclaim_from_nonowning(TTarget* raw_ptr) {
     // See Note [Stack allocated intrusive_ptr_target safety]
-    AT_ASSERTM(
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
         raw_ptr == NullType::singleton() || raw_ptr->refcount_.load() > 0,
         "intrusive_ptr: Can only reclaim pointers that are owned by someone");
     auto ptr = reclaim(raw_ptr); // doesn't increase refcount
@@ -443,7 +442,7 @@ class weak_intrusive_ptr final {
   void retain_() {
     if (target_ != NullType::singleton()) {
       size_t new_weakcount = ++target_->weakcount_;
-      AT_ASSERTM(
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
           new_weakcount != 1,
           "weak_intrusive_ptr: Cannot increase weakcount after it reached zero.");
     }
@@ -621,7 +620,7 @@ class weak_intrusive_ptr final {
     // if refcount > 0, weakcount must be >1 for weak references to exist.
     // see weak counting explanation at top of this file.
     // if refcount == 0, weakcount only must be >0.
-    AT_ASSERTM(
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
         owning_weak_ptr == NullType::singleton() ||
         owning_weak_ptr->weakcount_.load() > 1 ||
             (owning_weak_ptr->refcount_.load() == 0 &&
@@ -692,10 +691,9 @@ namespace intrusive_ptr {
   // WARNING: Unlike the reclaim() API, it is NOT valid to pass
   // NullType::singleton to this function
   inline void incref(intrusive_ptr_target* self) {
-    auto ptr = c10::intrusive_ptr<intrusive_ptr_target>::reclaim(self);
-    auto ptr_copy = ptr;
-    ptr_copy.release();
-    ptr.release();
+    if (self) {
+      ++self->refcount_;
+    }
   }
 
   // WARNING: Unlike the reclaim() API, it is NOT valid to pass
@@ -728,10 +726,7 @@ namespace intrusive_ptr {
 namespace weak_intrusive_ptr {
 
   inline void incref(weak_intrusive_ptr_target* self) {
-    auto wptr = c10::weak_intrusive_ptr<weak_intrusive_ptr_target>::reclaim(self);
-    auto wptr_copy = wptr;
-    wptr_copy.release();
-    wptr.release();
+    ++self->weakcount_;
   }
 
   inline void decref(weak_intrusive_ptr_target* self) {

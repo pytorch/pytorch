@@ -20,7 +20,7 @@ def get_rng_state():
 
 def manual_seed(seed):
     r"""Sets the seed for generating random numbers. Returns a
-    `torch._C.Generator` object.
+    `torch.Generator` object.
 
     Args:
         seed (int): The desired seed.
@@ -28,10 +28,23 @@ def manual_seed(seed):
     seed = int(seed)
     import torch.cuda
 
-    if not torch.cuda._in_bad_fork:
+    if not torch.cuda._is_in_bad_fork():
         torch.cuda.manual_seed_all(seed)
 
     return default_generator.manual_seed(seed)
+
+
+def seed():
+    r"""Sets the seed for generating random numbers to a non-deterministic
+    random number. Returns a 64 bit number used to seed the RNG.
+    """
+    seed = default_generator.seed()
+    import torch.cuda
+
+    if not torch.cuda._is_in_bad_fork():
+        torch.cuda.manual_seed_all(seed)
+
+    return seed
 
 
 def initial_seed():
@@ -98,13 +111,11 @@ def fork_rng(devices=None, enabled=True, _caller="fork_rng", _devices_kw="device
     cpu_rng_state = torch.get_rng_state()
     gpu_rng_states = []
     for device in devices:
-        with torch.cuda.device(device):
-            gpu_rng_states.append(torch.cuda.get_rng_state())
+        gpu_rng_states.append(torch.cuda.get_rng_state(device))
 
     try:
         yield
     finally:
         torch.set_rng_state(cpu_rng_state)
         for device, gpu_rng_state in zip(devices, gpu_rng_states):
-            with torch.cuda.device(device):
-                torch.cuda.set_rng_state(gpu_rng_state)
+            torch.cuda.set_rng_state(gpu_rng_state, device)

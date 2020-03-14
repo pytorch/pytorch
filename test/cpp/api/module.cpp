@@ -1,11 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <torch/nn/module.h>
-#include <torch/nn/modules/linear.h>
-#include <torch/nn/modules/rnn.h>
-#include <torch/nn/modules/sequential.h>
-#include <torch/types.h>
-#include <torch/utils.h>
+#include <torch/torch.h>
 
 #include <test/cpp/api/support.h>
 
@@ -77,9 +72,7 @@ TEST_F(ModuleTest, ZeroGradWithUndefined) {
 }
 
 TEST_F(ModuleTest, RegisterModuleThrowsForEmptyOrDottedName) {
-  struct TestModel : public torch::nn::Module {
-    using torch::nn::Module::register_module;
-  };
+  struct TestModel : public torch::nn::Module {};
   ASSERT_THROWS_WITH(
       TestModel{}.register_module("name.with.dot", torch::nn::Linear(3, 4)),
       "Submodule name must not contain a dot (got 'name.with.dot')");
@@ -89,9 +82,7 @@ TEST_F(ModuleTest, RegisterModuleThrowsForEmptyOrDottedName) {
 }
 
 TEST_F(ModuleTest, RegisterModuleThrowsForDuplicateModuleName) {
-  struct TestModel : public torch::nn::Module {
-    using torch::nn::Module::register_module;
-  };
+  struct TestModel : public torch::nn::Module {};
   TestModel model;
   model.register_module("linear", torch::nn::Linear(3, 4));
   ASSERT_THROWS_WITH(
@@ -99,10 +90,39 @@ TEST_F(ModuleTest, RegisterModuleThrowsForDuplicateModuleName) {
       "Submodule 'linear' already defined");
 }
 
-TEST_F(ModuleTest, RegisterParameterThrowsForEmptyOrDottedName) {
+TEST_F(ModuleTest, ReplaceModuleThrowsForUnknownModuleName) {
+  torch::nn::Module model;
+  ASSERT_THROWS_WITH(
+      model.replace_module("linear", torch::nn::Linear(3, 4)),
+      "Submodule 'linear' is not defined");
+}
+
+TEST_F(ModuleTest, ReplaceModule) {
   struct TestModel : public torch::nn::Module {
-    using torch::nn::Module::register_parameter;
+    torch::nn::Linear l1{nullptr};
+    TestModel() {
+      l1 = register_module("l1", torch::nn::Linear(3, 4));
+    }
   };
+  auto model = std::make_shared<TestModel>();
+  model->l1 = model->replace_module("l1", torch::nn::Linear(5, 6));
+  ASSERT_EQ(model->named_parameters()["l1.weight"].size(0), 6);
+  ASSERT_EQ(model->l1.get(), model->named_modules()["l1"]->as<Linear>());
+}
+
+TEST_F(ModuleTest, UnregisterModule) {
+  struct TestModel : public torch::nn::Module {};
+  TestModel model;
+  ASSERT_THROWS_WITH(
+      model.unregister_module("linear"),
+      "No Module with name `linear` is registered");
+  model.register_module("linear", torch::nn::Linear(3, 4));
+  model.unregister_module("linear");
+  ASSERT_TRUE(model.children().empty());
+}
+
+TEST_F(ModuleTest, RegisterParameterThrowsForEmptyOrDottedName) {
+  struct TestModel : public torch::nn::Module {};
   ASSERT_THROWS_WITH(
       TestModel{}.register_parameter("name.with.dot", torch::ones(5)),
       "Parameter name must not contain a dot (got 'name.with.dot')");
@@ -112,9 +132,7 @@ TEST_F(ModuleTest, RegisterParameterThrowsForEmptyOrDottedName) {
 }
 
 TEST_F(ModuleTest, RegisterParameterThrowsForDuplicateModuleName) {
-  struct TestModel : public torch::nn::Module {
-    using torch::nn::Module::register_parameter;
-  };
+  struct TestModel : public torch::nn::Module {};
   TestModel model;
   model.register_parameter("p", torch::ones(5));
   ASSERT_THROWS_WITH(
@@ -122,10 +140,32 @@ TEST_F(ModuleTest, RegisterParameterThrowsForDuplicateModuleName) {
       "Parameter 'p' already defined");
 }
 
+TEST_F(ModuleTest, RegisterParameterUndefinedTensor) {
+  struct TestModel : public torch::nn::Module {};
+  {
+    TestModel model;
+    model.register_parameter("undefined_tensor", torch::Tensor(), /*requires_grad=*/false);
+    ASSERT_EQ(model.parameters().size(), 0);
+  }
+  {
+    std::stringstream buffer;
+    CerrRedirect cerr_redirect(buffer.rdbuf());
+
+    TestModel model;
+    model.register_parameter("undefined_tensor", torch::Tensor());
+    ASSERT_EQ(model.parameters().size(), 0);
+
+    ASSERT_EQ(
+      count_substr_occurrences(
+        buffer.str(),
+        "Ignoring the `requires_grad=true` function parameter"
+      ),
+    1);
+  }
+}
+
 TEST_F(ModuleTest, RegisterBufferThrowsForEmptyOrDottedName) {
-  struct TestModel : public torch::nn::Module {
-    using torch::nn::Module::register_buffer;
-  };
+  struct TestModel : public torch::nn::Module {};
   ASSERT_THROWS_WITH(
       TestModel{}.register_buffer("name.with.dot", torch::ones(5)),
       "Buffer name must not contain a dot (got 'name.with.dot')");
@@ -135,9 +175,7 @@ TEST_F(ModuleTest, RegisterBufferThrowsForEmptyOrDottedName) {
 }
 
 TEST_F(ModuleTest, RegisterBufferThrowsForDuplicateModuleName) {
-  struct TestModel : public torch::nn::Module {
-    using torch::nn::Module::register_buffer;
-  };
+  struct TestModel : public torch::nn::Module {};
   TestModel model;
   model.register_buffer("p", torch::ones(5));
   ASSERT_THROWS_WITH(
@@ -181,6 +219,87 @@ TEST_F(ModuleTest, AsCastsModulesCorrectly) {
   ASSERT_EQ(unit.as<Linear>(), nullptr);
   ASSERT_EQ(unit.as<LinearImpl>(), nullptr);
   ASSERT_EQ(unit.as<AGIUnit>(), &unit);
+}
+
+void test_DeviceOrDtypeConversionSkipsUndefinedTensor(
+  torch::Device to_device, torch::Dtype to_dtype) {
+  {
+    // Case 1: Undefined tensors as parameters
+    Linear module(LinearOptions(10, 20).bias(false));
+    ASSERT_TRUE(module->weight.defined());
+    ASSERT_FALSE(module->bias.defined());
+
+    module->to(to_device);
+    ASSERT_TRUE(module->weight.defined());
+    ASSERT_EQ(module->weight.device().type(), to_device.type());
+    ASSERT_FALSE(module->bias.defined());
+
+    module->to(to_dtype);
+    ASSERT_TRUE(module->weight.defined());
+    ASSERT_EQ(module->weight.dtype(), to_dtype);
+    ASSERT_FALSE(module->bias.defined());
+  }
+  {
+    // Case 2: Undefined tensors as buffers
+    BatchNorm1d module(BatchNorm1dOptions(5).track_running_stats(false).affine(true));
+    ASSERT_TRUE(module->weight.defined());
+    ASSERT_FALSE(module->running_mean.defined());
+
+    module->to(to_device);
+    ASSERT_TRUE(module->weight.defined());
+    ASSERT_EQ(module->weight.device().type(), to_device.type());
+    ASSERT_FALSE(module->running_mean.defined());
+
+    module->to(to_dtype);
+    ASSERT_TRUE(module->weight.defined());
+    ASSERT_EQ(module->weight.dtype(), to_dtype);
+    ASSERT_FALSE(module->running_mean.defined());
+  }
+}
+
+TEST_F(ModuleTest, DeviceOrDtypeConversionSkipsUndefinedTensor) {
+  test_DeviceOrDtypeConversionSkipsUndefinedTensor(torch::kCPU, torch::kDouble);
+}
+
+TEST_F(ModuleTest, DeviceOrDtypeConversionSkipsUndefinedTensor_CUDA) {
+  test_DeviceOrDtypeConversionSkipsUndefinedTensor(torch::kCUDA, torch::kDouble);
+}
+
+TEST_F(ModuleTest, ParametersAndBuffersAccessorSkipsUndefinedTensor) {
+  {
+    Linear module(LinearOptions(10, 20).bias(false));
+
+    auto params = module->parameters();
+    ASSERT_EQ(params.size(), 1);
+    auto named_params = module->named_parameters();
+    ASSERT_EQ(named_params.size(), 1);
+
+    ASSERT_TRUE(pointer_equal(params[0], named_params["weight"]));
+    ASSERT_TRUE(pointer_equal(named_params["weight"], module->weight));
+  }
+  {
+    BatchNorm1d module(BatchNorm1dOptions(5).track_running_stats(false).affine(false));
+
+    auto buffers = module->buffers();
+    ASSERT_EQ(buffers.size(), 0);
+    auto named_buffers = module->named_buffers();
+    ASSERT_EQ(named_buffers.size(), 0);
+  }
+  {
+    BatchNorm1d module(BatchNorm1dOptions(5).track_running_stats(true).affine(false));
+
+    auto buffers = module->buffers();
+    ASSERT_EQ(buffers.size(), 3);
+    auto named_buffers = module->named_buffers();
+    ASSERT_EQ(named_buffers.size(), 3);
+
+    ASSERT_TRUE(pointer_equal(buffers[0], named_buffers["running_mean"]));
+    ASSERT_TRUE(pointer_equal(named_buffers["running_mean"], module->running_mean));
+    ASSERT_TRUE(pointer_equal(buffers[1], named_buffers["running_var"]));
+    ASSERT_TRUE(pointer_equal(named_buffers["running_var"], module->running_var));
+    ASSERT_TRUE(pointer_equal(buffers[2], named_buffers["num_batches_tracked"]));
+    ASSERT_TRUE(pointer_equal(named_buffers["num_batches_tracked"], module->num_batches_tracked));
+  }
 }
 
 TEST_F(ModuleTest, Conversion_MultiCUDA) {
@@ -249,29 +368,25 @@ TEST_F(ModuleTest, CallingCloneOnModuleThatDoesOverrideCloneDoesNotThrow) {
   ASSERT_NO_THROW({ module.clone(); });
 }
 
-TEST_F(ModuleTest, CloneCreatesDistinctParameters) {
-  struct TestModule : public Cloneable<TestModule> {
-    TestModule() {
-      reset();
-    }
-    void reset() override {
-      l1 = register_module("l1", Linear(10, 3));
-      l2 = register_module("l2", Linear(3, 5));
-      l3 = register_module("l3", Linear(5, 100));
-      buffer = register_buffer("buf", torch::ones({2, 2}));
-    }
+struct TestDistinctParametersModule
+    : public Cloneable<TestDistinctParametersModule> {
+  TestDistinctParametersModule() {
+    reset();
+  }
+  void reset() override {
+    l1 = register_module("l1", Linear(10, 3));
+    l2 = register_module("l2", Linear(3, 5));
+    l3 = register_module("l3", Linear(5, 100));
+    buffer = register_buffer("buf", torch::ones({2, 2}));
+  }
 
-    Linear l1{nullptr}, l2{nullptr}, l3{nullptr};
-    torch::Tensor buffer;
-  };
+  Linear l1{nullptr}, l2{nullptr}, l3{nullptr};
+  torch::Tensor buffer;
+};
 
-  auto module = std::make_shared<TestModule>();
-
-  torch::NoGradGuard no_grad;
-
-  auto module2 = module->clone();
-  auto params1 = module->named_parameters();
-  auto params2 = module2->named_parameters();
+void testDistinctParameters(std::shared_ptr<Module> m1, std::shared_ptr<Module> m2) {
+  auto params1 = m1->named_parameters();
+  auto params2 = m2->named_parameters();
   ASSERT_EQ(params1.size(), 6);
   ASSERT_EQ(params2.size(), 6);
   for (auto& param : params1) {
@@ -283,8 +398,8 @@ TEST_F(ModuleTest, CloneCreatesDistinctParameters) {
     ASSERT_FALSE(param->allclose(params2[param.key()]));
   }
 
-  auto buffers1 = module->named_buffers();
-  auto buffers2 = module2->named_buffers();
+  auto buffers1 = m1->named_buffers();
+  auto buffers2 = m2->named_buffers();
   ASSERT_EQ(buffers1.size(), 1);
   ASSERT_EQ(buffers2.size(), 1);
   for (auto& buffer : buffers1) {
@@ -295,6 +410,44 @@ TEST_F(ModuleTest, CloneCreatesDistinctParameters) {
   for (auto& buffer : buffers1) {
     ASSERT_FALSE(buffer->allclose(buffers2[buffer.key()]));
   }
+}
+
+TEST_F(ModuleTest, CloneCreatesDistinctParameters) {
+  auto module = std::make_shared<TestDistinctParametersModule>();
+  torch::NoGradGuard no_grad;
+  auto module2 = module->clone();
+  testDistinctParameters(module, module2);
+}
+
+TEST_F(ModuleTest, CloneCreatesDistinctParametersExplicitDevice_CUDA) {
+  auto module = std::make_shared<TestDistinctParametersModule>();
+  torch::NoGradGuard no_grad;
+  torch::Device device(torch::kCUDA, 0);
+  module->to(device);
+  auto module2 = module->clone(device);
+  testDistinctParameters(module, module2);
+}
+
+TEST_F(ModuleTest, CloneCreatesDistinctParametersExplicitDevice_MultiCUDA) {
+  auto module = std::make_shared<TestDistinctParametersModule>();
+  torch::NoGradGuard no_grad;
+  torch::Device d0(torch::kCUDA, 0);
+  torch::Device d1(torch::kCUDA, 1);
+  module->to(d0);
+  auto module2 = module->clone(d1);
+
+  for (auto& param : module->parameters()) {
+    ASSERT_EQ(param.device(), d0);
+  }
+
+  for (auto& param : module2->parameters()) {
+    ASSERT_EQ(param.device(), d1);
+  }
+
+  // need to move the module back to d0 as allclose expects two tensors on
+  // the same device.
+  module2->to(d0);
+  testDistinctParameters(module, module2);
 }
 
 TEST_F(ModuleTest, ClonePreservesExternalReferences) {
@@ -613,8 +766,8 @@ TEST_F(ModuleTest, ParametersReturnsExpectedTensorsForFlatModel) {
   TestModule module(1);
   std::vector<torch::Tensor> parameters = module.parameters();
   ASSERT_EQ(parameters.size(), 2);
-  ASSERT_EQ(parameters[0].data<float>(), module.p1.data<float>());
-  ASSERT_EQ(parameters[1].data<float>(), module.p2.data<float>());
+  ASSERT_EQ(parameters[0].data_ptr<float>(), module.p1.data_ptr<float>());
+  ASSERT_EQ(parameters[1].data_ptr<float>(), module.p2.data_ptr<float>());
 }
 
 TEST_F(ModuleTest, NamedParametersReturnsExpectedTensorsForFlatModel) {
@@ -623,17 +776,17 @@ TEST_F(ModuleTest, NamedParametersReturnsExpectedTensorsForFlatModel) {
       module.named_parameters();
   ASSERT_EQ(parameters.size(), 2);
   ASSERT_EQ(parameters[0].key(), "p1");
-  ASSERT_EQ(parameters[0]->data<float>(), module.p1.data<float>());
+  ASSERT_EQ(parameters[0]->data_ptr<float>(), module.p1.data_ptr<float>());
   ASSERT_EQ(parameters[1].key(), "p2");
-  ASSERT_EQ(parameters[1]->data<float>(), module.p2.data<float>());
+  ASSERT_EQ(parameters[1]->data_ptr<float>(), module.p2.data_ptr<float>());
 }
 
 TEST_F(ModuleTest, BuffersReturnsExpectedTensorsForFlatModel) {
   TestModule module(1);
   std::vector<torch::Tensor> buffers = module.buffers();
   ASSERT_EQ(buffers.size(), 2);
-  ASSERT_EQ(buffers[0].data<float>(), module.b1.data<float>());
-  ASSERT_EQ(buffers[1].data<float>(), module.b2.data<float>());
+  ASSERT_EQ(buffers[0].data_ptr<float>(), module.b1.data_ptr<float>());
+  ASSERT_EQ(buffers[1].data_ptr<float>(), module.b2.data_ptr<float>());
 }
 
 TEST_F(ModuleTest, NamedBuffersReturnsExpectedTensorsForFlatModel) {
@@ -642,9 +795,9 @@ TEST_F(ModuleTest, NamedBuffersReturnsExpectedTensorsForFlatModel) {
       module.named_buffers();
   ASSERT_EQ(buffers.size(), 2);
   ASSERT_EQ(buffers[0].key(), "b1");
-  ASSERT_EQ(buffers[0]->data<float>(), module.b1.data<float>());
+  ASSERT_EQ(buffers[0]->data_ptr<float>(), module.b1.data_ptr<float>());
   ASSERT_EQ(buffers[1].key(), "b2");
-  ASSERT_EQ(buffers[1]->data<float>(), module.b2.data<float>());
+  ASSERT_EQ(buffers[1]->data_ptr<float>(), module.b2.data_ptr<float>());
 }
 
 struct TestContainer : torch::nn::Module {
@@ -847,7 +1000,6 @@ TEST_F(ModuleTest, PrettyPrint) {
     float y_;
   };
 
-  using namespace torch::nn;
 
   ASSERT_EQ(c10::str(EmptyModule{}), "EmptyModule");
   ASSERT_EQ(c10::str(TestModule(1, 3.14)), "TestModule(x=1, y=3.14)");

@@ -4,7 +4,7 @@
 namespace at { namespace native {
 
 void checkLongTensor(const Tensor& tensor) {
-  TORCH_CHECK(tensor.dim() == 1 && tensor.type().device_type() == at::kCPU && tensor.scalar_type() == at::kLong,
+  TORCH_CHECK(tensor.dim() == 1 && tensor.device().type() == at::kCPU && tensor.scalar_type() == at::kLong,
            "'lengths' argument should be a 1D CPU int64 tensor");
 }
 
@@ -19,7 +19,8 @@ std::tuple<Tensor, Tensor> _pack_padded_sequence(const Tensor& _input, const Ten
   checkLongTensor(lengths_t);
 
   int64_t batch_size = input.size(1);
-  int64_t * lengths = lengths_t.data<int64_t>();
+  int64_t * lengths = lengths_t.data_ptr<int64_t>();
+  TORCH_CHECK(input.numel() > 0, "Cannot pack empty tensors.");
   TORCH_CHECK(lengths_t.size(0) == batch_size,
            "Expected `len(lengths)` to be equal to batch_size, but got ", lengths_t.size(0),
            " (batch_size=", batch_size, ")");
@@ -41,7 +42,7 @@ std::tuple<Tensor, Tensor> _pack_padded_sequence(const Tensor& _input, const Ten
   std::vector<at::Tensor> steps;
   steps.reserve(batch_size);
   at::Tensor batch_sizes_t = at::empty(lengths[0], _lengths.options());
-  int64_t * batch_sizes = batch_sizes_t.data<int64_t>();
+  int64_t * batch_sizes = batch_sizes_t.data_ptr<int64_t>();
 
   std::vector<int64_t> step_shape; // == [-1, *input.shape[2:]]
   {
@@ -104,7 +105,7 @@ Tensor _pack_padded_sequence_backward(const Tensor& grad, at::IntArrayRef input_
 
   int64_t offset = 0;
   int64_t max_seq_len = batch_sizes_t.size(0);
-  int64_t * batch_sizes = batch_sizes_t.data<int64_t>();
+  int64_t * batch_sizes = batch_sizes_t.data_ptr<int64_t>();
   for (int64_t i = 0; i < max_seq_len; ++i) {
     grad_input[i].slice(0, 0, batch_sizes[i]).copy_(grad.slice(0, offset, offset + batch_sizes[i]));
     offset += batch_sizes[i];
@@ -121,7 +122,7 @@ std::tuple<Tensor, Tensor> _pad_packed_sequence(const Tensor& data, const Tensor
   auto batch_sizes_t = _batch_sizes.contiguous();
   checkLongTensor(batch_sizes_t);
 
-  int64_t * batch_sizes = batch_sizes_t.data<int64_t>();
+  int64_t * batch_sizes = batch_sizes_t.data_ptr<int64_t>();
   int64_t max_batch_size = batch_sizes[0];
   int64_t max_real_seq_length = batch_sizes_t.size(0);
   int64_t max_seq_length = max_real_seq_length;
@@ -147,7 +148,7 @@ std::tuple<Tensor, Tensor> _pad_packed_sequence(const Tensor& data, const Tensor
   std::vector<int64_t> tmp_view_size = std::move(output_size); // == [-1, -1, *var_data.size()[1:]]
 
   at::Tensor lengths_t = at::empty(max_batch_size, batch_sizes_t.options());
-  int64_t * lengths = lengths_t.data<int64_t>() + max_batch_size - 1;
+  int64_t * lengths = lengths_t.data_ptr<int64_t>() + max_batch_size - 1;
   int64_t data_offset = 0;
   int64_t prev_batch_size = max_batch_size;
   int64_t prev_i = 0;

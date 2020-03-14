@@ -82,6 +82,12 @@ mz_ulong mz_adler32(mz_ulong adler, const unsigned char *ptr, size_t buf_len)
         }
         return ~crcu32;
     }
+#elif defined(USE_EXTERNAL_MZCRC)
+/* If USE_EXTERNAL_CRC is defined, an external module will export the
+ * mz_crc32() symbol for us to use, e.g. an SSE-accelerated version.
+ * Depending on the impl, it may be necessary to ~ the input/output crc values.
+ */
+mz_ulong mz_crc32(mz_ulong crc, const mz_uint8 *ptr, size_t buf_len);
 #else
 /* Faster, but larger CPU cache footprint.
  */
@@ -4516,7 +4522,9 @@ void *mz_zip_reader_extract_file_to_heap(mz_zip_archive *pZip, const char *pFile
 mz_bool mz_zip_reader_extract_to_callback(mz_zip_archive *pZip, mz_uint file_index, mz_file_write_func pCallback, void *pOpaque, mz_uint flags)
 {
     int status = TINFL_STATUS_DONE;
+#ifndef MINIZ_DISABLE_ZIP_READER_CRC32_CHECKS
     mz_uint file_crc32 = MZ_CRC32_INIT;
+#endif
     mz_uint64 read_buf_size, read_buf_ofs = 0, read_buf_avail, comp_remaining, out_buf_ofs = 0, cur_file_ofs;
     mz_zip_archive_file_stat file_stat;
     void *pRead_buf = NULL;

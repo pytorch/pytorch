@@ -128,13 +128,13 @@ class OrderedDict {
   // Modifiers
 
   /// Inserts a new `(key, value)` pair into the `OrderedDict`. Throws an
-  /// exception if the key is already present. If insertion is succesful,
+  /// exception if the key is already present. If insertion is successful,
   /// immediately returns a reference to the inserted value.
   template <typename K, typename V>
   Value& insert(K&& key, V&& value);
 
   /// Inserts a new `(key, value)` pair into the `OrderedDict`. Throws an
-  /// exception if the key is already present. If insertion is succesful,
+  /// exception if the key is already present. If insertion is successful,
   /// immediately returns a reference to the inserted value.
   Value& insert(Key key, Value&& value);
 
@@ -145,6 +145,10 @@ class OrderedDict {
   /// Inserts all items from `other` into this `OrderedDict`. If any key from
   /// `other` is already present in this `OrderedDict`, an exception is thrown.
   void update(const OrderedDict& other);
+
+  /// Removes the item that has `key` from this `OrderedDict` if exists and if
+  /// it doesn't an exception is thrown.
+  void erase(const Key& key);
 
   /// Removes all items from this `OrderedDict`.
   void clear();
@@ -165,6 +169,10 @@ class OrderedDict {
   /// Returns a newly allocated vector and copies all keys and values from this
   /// `OrderedDict` into a vector of `std::pair<Key, Value>`.
   ::std::vector<std::pair<Key, Value>> pairs() const;
+
+  /// Returns true if both dicts contain the same keys and values, in the same order.
+  template<typename K, typename V>
+  friend bool operator==(const OrderedDict<K, V> &a, const OrderedDict<K, V> &b);
 
  private:
   /// A mapping from a key to an index into the `items_` vector.
@@ -221,14 +229,14 @@ class OrderedDict<Key, Value>::Item {
   }
 
   /// Returns a `(key, value)` pair.
-  const std::pair<const Key, Value>& pair() const noexcept {
+  const std::pair<Key, Value>& pair() const noexcept {
     return pair_;
   }
 
  private:
   /// This is stored as an std::pair because it will make Python binding a lot,
   /// lot easier.
-  ::std::pair<const Key, Value> pair_;
+  ::std::pair<Key, Value> pair_;
 };
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ OrderedDict ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -402,6 +410,20 @@ const Value* OrderedDict<Key, Value>::find(const Key& key) const noexcept {
 }
 
 template <typename Key, typename Value>
+void OrderedDict<Key, Value>::erase(const Key& key) {
+  auto it = index_.find(key);
+  TORCH_CHECK(it != index_.end(), "Key '", key, "' doesn't exist");
+
+  auto index = it->second;
+  index_.erase(it);
+  items_.erase(items_.begin() + index);
+
+  for (auto& pair : index_)
+    if (pair.second > index)
+      --pair.second;
+}
+
+template <typename Key, typename Value>
 bool OrderedDict<Key, Value>::contains(const Key& key) const noexcept {
   return find(key) != nullptr;
 }
@@ -468,6 +490,18 @@ template <typename Key, typename Value>
 void OrderedDict<Key, Value>::reserve(size_t requested_capacity) {
   index_.reserve(requested_capacity);
   items_.reserve(requested_capacity);
+}
+
+template<typename K, typename V>
+bool operator==(const torch::OrderedDict<K, V>& a, const torch::OrderedDict<K, V>& b) {
+  using Item = typename torch::OrderedDict<K, V>::Item;
+  if (a.index_ != b.index_) return false;
+  if (a.items_.size() != b.items_.size()) return false;
+  // NOTE: There's no point in comparing keys for items_, as we already know that index is equal.
+  return std::equal(a.items_.begin(), a.items_.end(),
+                    b.items_.begin(),
+                    [](const Item& a, const Item& b)
+                    { return a.value() == b.value(); });
 }
 
 } // namespace torch

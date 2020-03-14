@@ -251,7 +251,7 @@ class _Simplex(Constraint):
     Specifically: `x >= 0` and `x.sum(-1) == 1`.
     """
     def check(self, value):
-        return (value >= 0).all() & ((value.sum(-1, True) - 1).abs() < 1e-6).all()
+        return torch.all(value >= 0, dim=-1) & ((value.sum(-1) - 1).abs() < 1e-6)
 
 
 class _LowerTriangular(Constraint):
@@ -295,7 +295,7 @@ class _RealVector(Constraint):
     but additionally reduces across the `event_shape` dimension.
     """
     def check(self, value):
-        return (value == value).all()  # False for NANs.
+        return torch.all(value == value, dim=-1)  # False for NANs.
 
 
 class _Cat(Constraint):

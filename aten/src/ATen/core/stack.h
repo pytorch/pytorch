@@ -77,9 +77,27 @@ static inline void pop(Stack& stack, Types&... args) {
   (void)result;
   drop(stack, N);
 }
+template <typename Type>
+static inline void push_one(Stack& stack, Type&& arg) {
+  stack.emplace_back(std::forward<Type>(arg));
+}
+
+static inline void push_one(Stack& stack, c10::TensorOptions options) {
+  stack.emplace_back(c10::typeMetaToScalarType(options.dtype()));
+  stack.emplace_back(options.layout());
+  stack.emplace_back(options.device());
+  stack.emplace_back(options.pinned_memory());
+}
+
 template <typename... Types>
 static inline void push(Stack& stack, Types&&... args) {
-  (void)std::initializer_list<int>{(stack.emplace_back(std::forward<Types>(args)), 0)...};
+  (void)std::initializer_list<int>{(push_one(stack, std::forward<Types>(args)), 0)...};
+}
+template <class T>
+static inline void push_list_elements(Stack& stack, const c10::List<T>& elements) {
+  for (T elem : elements) {
+    stack.push_back(std::move(elem));
+  }
 }
 
 // The packer here is carefully written not to make any unnecessary

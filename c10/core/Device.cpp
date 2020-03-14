@@ -38,13 +38,6 @@ DeviceType parse_type(const std::string& device_string) {
 }
 } // namespace
 
-void Device::validate() {
-  TORCH_CHECK(index_ == -1 || index_ >= 0,
-           "Device index must be -1 or non-negative, got ", index_);
-  TORCH_CHECK(!is_cpu() || index_ <= 0,
-           "CPU device index must be -1 or zero, got ", index_);
-}
-
 // `std::regex` is still in a very incomplete state in GCC 4.8.x,
 // so we have to do our own parsing, like peasants.
 // https://stackoverflow.com/questions/12530406/is-gcc-4-8-or-earlier-buggy-about-regular-expressions
@@ -70,7 +63,7 @@ void Device::validate() {
 // }
 Device::Device(const std::string& device_string) : Device(Type::CPU) {
   TORCH_CHECK(!device_string.empty(), "Device string must not be empty");
-  int index = device_string.find(":");
+  auto index = device_string.find(':');
   if (index == std::string::npos) {
     type_ = parse_type(device_string);
   } else {
@@ -92,11 +85,17 @@ Device::Device(const std::string& device_string) : Device(Type::CPU) {
   validate();
 }
 
-std::ostream& operator<<(std::ostream& stream, const Device& device) {
-  stream << device.type();
-  if (device.has_index()) {
-    stream << ":" << device.index();
+std::string Device::str() const {
+  std::string str = DeviceTypeName(type(), /* lower case */ true);
+  if (has_index()) {
+    str.push_back(':');
+    str.append(to_string(index()));
   }
+  return str;
+}
+
+std::ostream& operator<<(std::ostream& stream, const Device& device) {
+  stream << device.str();
   return stream;
 }
 

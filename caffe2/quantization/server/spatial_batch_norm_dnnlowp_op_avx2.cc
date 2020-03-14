@@ -23,10 +23,11 @@ void SpatialBNNHWCAVX2(
     const T* X,
     const float* alpha,
     const float* beta,
-    T* Y);
+    T* Y,
+    bool relu_fused);
 
-template <>
-void SpatialBNNHWCAVX2<uint8_t>(
+template <bool ReluFused>
+void SpatialBNNHWCAVX2_uint8(
     const int N,
     const int C,
     const int HxW,
@@ -96,8 +97,10 @@ void SpatialBNNHWCAVX2<uint8_t>(
       const __m256 result_float_v =
           _mm256_fmadd_ps(alpha_v, cur_v_float, beta_v);
       const __m256i result_rounded_v = _mm256_cvtps_epi32(result_float_v);
-      const __m256i result_v =
-          _mm256_add_epi32(result_rounded_v, out_zero_point_v);
+      __m256i result_v = _mm256_add_epi32(result_rounded_v, out_zero_point_v);
+      if (ReluFused) {
+        result_v = _mm256_max_epi32(result_v, out_zero_point_v);
+      }
       __m256i clipped_v =
           _mm256_max_epi32(min_v, _mm256_min_epi32(max_v, result_v));
       clipped_v = _mm256_shuffle_epi8(clipped_v, shuffle_mask_v);
@@ -109,8 +112,32 @@ void SpatialBNNHWCAVX2<uint8_t>(
       long quantized_down = out_zero_point +
           std::lrintf(alpha[n + j] * (X_ptr[n + j] - in_zero_point) +
                       beta[n + j]);
+      if (ReluFused) { // static if
+        quantized_down = std::max<long>(quantized_down, out_zero_point);
+      }
       Y_ptr[n + j] = fbgemm::clamp<long, uint8_t>(quantized_down, 8);
     }
+  }
+}
+
+template <>
+void SpatialBNNHWCAVX2<uint8_t>(
+    const int N,
+    const int C,
+    const int HxW,
+    const int in_zero_point,
+    const int out_zero_point,
+    const uint8_t* X,
+    const float* alpha,
+    const float* beta,
+    uint8_t* Y,
+    bool relu_fused) {
+  if (relu_fused) {
+    SpatialBNNHWCAVX2_uint8<true>(
+        N, C, HxW, in_zero_point, out_zero_point, X, alpha, beta, Y);
+  } else {
+    SpatialBNNHWCAVX2_uint8<false>(
+        N, C, HxW, in_zero_point, out_zero_point, X, alpha, beta, Y);
   }
 }
 

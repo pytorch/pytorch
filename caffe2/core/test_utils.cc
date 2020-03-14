@@ -7,10 +7,28 @@ namespace {
 template <typename T>
 void assertTensorEqualsWithType(
     const caffe2::TensorCPU& tensor1,
-    const caffe2::TensorCPU& tensor2) {
+    const caffe2::TensorCPU& tensor2,
+    float /* unused */) {
   CAFFE_ENFORCE_EQ(tensor1.sizes(), tensor2.sizes());
   for (auto idx = 0; idx < tensor1.numel(); ++idx) {
     CAFFE_ENFORCE_EQ(tensor1.data<T>()[idx], tensor2.data<T>()[idx]);
+  }
+}
+
+template <>
+void assertTensorEqualsWithType<float>(
+    const caffe2::TensorCPU& tensor1,
+    const caffe2::TensorCPU& tensor2,
+    float eps) {
+  CAFFE_ENFORCE_EQ(tensor1.sizes(), tensor2.sizes());
+  for (auto idx = 0; idx < tensor1.numel(); ++idx) {
+    CAFFE_ENFORCE_LT(
+        fabs(tensor1.data<float>()[idx] - tensor2.data<float>()[idx]),
+        eps,
+        "Mismatch at index ",
+        idx,
+        " exceeds threshold of ",
+        eps);
   }
 }
 } // namespace
@@ -25,17 +43,20 @@ void assertNear(float value1, float value2, float epsilon) {
   CAFFE_ENFORCE_GE(value1, value2 - epsilon);
 }
 
-void assertTensorEquals(const TensorCPU& tensor1, const TensorCPU& tensor2) {
+void assertTensorEquals(
+    const TensorCPU& tensor1,
+    const TensorCPU& tensor2,
+    float eps) {
   CAFFE_ENFORCE_EQ(tensor1.sizes(), tensor2.sizes());
   if (tensor1.IsType<float>()) {
     CAFFE_ENFORCE(tensor2.IsType<float>());
-    assertTensorEqualsWithType<float>(tensor1, tensor2);
+    assertTensorEqualsWithType<float>(tensor1, tensor2, eps);
   } else if (tensor1.IsType<int>()) {
     CAFFE_ENFORCE(tensor2.IsType<int>());
-    assertTensorEqualsWithType<int>(tensor1, tensor2);
+    assertTensorEqualsWithType<int>(tensor1, tensor2, eps);
   } else if (tensor1.IsType<int64_t>()) {
     CAFFE_ENFORCE(tensor2.IsType<int64_t>());
-    assertTensorEqualsWithType<int64_t>(tensor1, tensor2);
+    assertTensorEqualsWithType<int64_t>(tensor1, tensor2, eps);
   }
   // Add more types if needed.
 }

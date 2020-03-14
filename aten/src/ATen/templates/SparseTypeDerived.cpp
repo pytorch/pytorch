@@ -17,6 +17,7 @@
 #include <c10/util/Half.h>
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/util/Optional.h>
+#include <ATen/core/op_registration/op_registration.h>
 
 #include <cstddef>
 #include <functional>
@@ -26,22 +27,26 @@
 #include <ATen/Config.h>
 $extra_cuda_headers
 
+namespace {
+static const char* named_tensors_unsupported_error =
+  " is not yet supported with named tensors. Please drop names via "
+  "`tensor = tensor.rename(None)`, call the op with an unnamed tensor, "
+  "and set names on the result of the operation.";
+}
+
 namespace at {
 
-${Type}::${Type}()
-  : ${DeviceType}TypeDefault(${Backend}TensorId(), /*is_variable=*/false, /*is_undefined=*/false) {}
-Backend ${Type}::backend() const {
-  return Backend::${Backend};
-}
-
-const char * ${Type}::toString() const {
-  return "${Type}";
-}
-
-TypeID ${Type}::ID() const {
-  return ${TypeID};
-}
+namespace ${Type} {
 
 ${type_derived_method_definitions}
+
+}  // namespace ${Type}
+
+#ifndef USE_STATIC_DISPATCH
+namespace {
+static auto registerer = torch::import()
+  ${function_registrations};
+}
+#endif
 
 }

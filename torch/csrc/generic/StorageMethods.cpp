@@ -1,22 +1,28 @@
+#include <ATen/ATen.h>
+
 #ifdef USE_CUDA
 #include <cuda_runtime.h>
 #endif
 
-static PyObject * THPStorage_(size)(THPStorage *self)
+#ifdef _MSC_VER
+#define LSEEK _lseeki64
+#else
+#define LSEEK lseek
+#endif
+
+static PyObject * THPStorage_(size)(THPStorage *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   return PyLong_FromLong(THWStorage_(size)(LIBRARY_STATE self->cdata));
   END_HANDLE_TH_ERRORS
 }
 
-#ifndef THD_GENERIC_FILE
-static PyObject * THPStorage_(dataPtr)(THPStorage *self)
+static PyObject * THPStorage_(dataPtr)(THPStorage *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   return PyLong_FromVoidPtr(THWStorage_(data)(LIBRARY_STATE self->cdata));
   END_HANDLE_TH_ERRORS
 }
-#endif
 
 static PyObject * THPStorage_(copy_)(PyObject *self, PyObject *args, PyObject *kwargs)
 {
@@ -25,37 +31,25 @@ static PyObject * THPStorage_(copy_)(PyObject *self, PyObject *args, PyObject *k
   END_HANDLE_TH_ERRORS
 }
 
-#ifndef THD_GENERIC_FILE
-static PyObject * THPStorage_(isPinned)(THPStorage *self)
+static PyObject * THPStorage_(isPinned)(THPStorage *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
 #if defined(USE_CUDA)
-  cudaPointerAttributes attr;
-  cudaError_t err = cudaPointerGetAttributes(&attr, THWStorage_(data)(LIBRARY_STATE self->cdata));
-  if (err != cudaSuccess) {
-    cudaGetLastError();
-    Py_RETURN_FALSE;
-  }
-  #if CUDA_VERSION >= 10000
-    return PyBool_FromLong(attr.type == cudaMemoryTypeHost);
-  #else
-    return PyBool_FromLong(attr.memoryType == cudaMemoryTypeHost);
-  #endif
+  return PyBool_FromLong(at::globalContext().isPinnedPtr(THWStorage_(data)(LIBRARY_STATE self->cdata)));
 #else
   Py_RETURN_FALSE;
 #endif
   END_HANDLE_TH_ERRORS
 }
-#endif
 
-static PyObject * THPStorage_(elementSize)(THPStorage *self)
+static PyObject * THPStorage_(elementSize)(THPStorage *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   return PyLong_FromLong(THWStorage_(elementSize)(LIBRARY_STATE_NOARGS));
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPStorage_(new)(THPStorage *self)
+static PyObject * THPStorage_(new)(THPStorage *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   THWStoragePtr new_storage(THWStorage_(new)(LIBRARY_STATE_NOARGS));
@@ -89,7 +83,7 @@ static PyObject * THPStorage_(fill_)(THPStorage *self, PyObject *number_arg)
   END_HANDLE_TH_ERRORS
 }
 
-#if !defined(THC_GENERIC_FILE) && !defined(THD_GENERIC_FILE)
+#if !defined(THC_GENERIC_FILE)
 static PyObject * THPStorage_(fromBuffer)(PyObject *_unused, PyObject *args, PyObject *keywds)
 {
   HANDLE_TH_ERRORS
@@ -111,13 +105,13 @@ static PyObject * THPStorage_(fromBuffer)(PyObject *_unused, PyObject *args, PyO
   }
 
 #if !(defined(TH_REAL_IS_BYTE) || defined(TH_REAL_IS_CHAR))
-  THPByteOrder byte_order;
+  torch::utils::THPByteOrder byte_order;
   if (strcmp(byte_order_str, "native") == 0) {
-    byte_order = THP_nativeByteOrder();
+    byte_order = torch::utils::THP_nativeByteOrder();
   } else if (strcmp(byte_order_str, "big") == 0) {
-    byte_order = THP_BIG_ENDIAN;
+    byte_order = torch::utils::THP_BIG_ENDIAN;
   } else if (strcmp(byte_order_str, "little") == 0) {
-    byte_order = THP_LITTLE_ENDIAN;
+    byte_order = torch::utils::THP_LITTLE_ENDIAN;
   } else {
     PyErr_Format(PyExc_ValueError,
       "invalid byte_order '%s' (expected 'big', 'little', or 'native')",
@@ -164,20 +158,30 @@ static PyObject * THPStorage_(fromBuffer)(PyObject *_unused, PyObject *args, PyO
   // Because of ASAN checks, that are failing in the THStorage.cpp whenever
   // we are trying to get a value which is not 0 or 1, we have to manually
   // convert original values to boolean ones.
-  THP_decodeBoolBuffer(THWStorage_(data)(storage), src + offset, byte_order, count);
+  torch::utils::THP_decodeBoolBuffer(
+      THWStorage_(data)(storage), src + offset, byte_order, count);
 #elif defined(TH_REAL_IS_SHORT)
-  THP_decodeInt16Buffer(THWStorage_(data)(storage), src + offset, byte_order, count);
+  torch::utils::THP_decodeInt16Buffer(
+      THWStorage_(data)(storage), src + offset, byte_order, count);
 #elif defined(TH_REAL_IS_INT)
-  THP_decodeInt32Buffer(THWStorage_(data)(storage), src + offset, byte_order, count);
+  torch::utils::THP_decodeInt32Buffer(
+      THWStorage_(data)(storage), src + offset, byte_order, count);
 #elif defined(TH_REAL_IS_LONG)
   // TODO: remove the cast
-  THP_decodeInt64Buffer((int64_t*) THWStorage_(data)(storage), src + offset, byte_order, count);
+  torch::utils::THP_decodeInt64Buffer(
+      (int64_t*)THWStorage_(data)(storage), src + offset, byte_order, count);
 #elif defined(TH_REAL_IS_HALF)
-  THP_decodeHalfBuffer(THWStorage_(data)(storage), src + offset, byte_order, count);
+  torch::utils::THP_decodeHalfBuffer(
+      THWStorage_(data)(storage), src + offset, byte_order, count);
+#elif defined(TH_REAL_IS_BFLOAT16)
+  torch::utils::THP_decodeBFloat16Buffer(
+      THWStorage_(data)(storage), src + offset, byte_order, count);
 #elif defined(TH_REAL_IS_FLOAT)
-  THP_decodeFloatBuffer(THWStorage_(data)(storage), src + offset, byte_order, count);
+  torch::utils::THP_decodeFloatBuffer(
+      THWStorage_(data)(storage), src + offset, byte_order, count);
 #elif defined(TH_REAL_IS_DOUBLE)
-  THP_decodeDoubleBuffer(THWStorage_(data)(storage), src + offset, byte_order, count);
+  torch::utils::THP_decodeDoubleBuffer(
+      THWStorage_(data)(storage), src + offset, byte_order, count);
 #else
 #error "Unknown type"
 #endif
@@ -206,22 +210,22 @@ static PyObject * THPStorage_(fromFile)(PyObject *_unused, PyObject *args, PyObj
   END_HANDLE_TH_ERRORS
 }
 
-#ifndef THD_GENERIC_FILE
 PyObject * THPStorage_(writeFile)(THPStorage *self, PyObject *args)
 {
   HANDLE_TH_ERRORS
   PyObject *file = PyTuple_GET_ITEM(args, 0);
   bool is_real_file = PyTuple_GET_ITEM(args, 1) == Py_True;
+  bool save_size = PyTuple_GET_ITEM(args, 2) == Py_True;
 
   if (!is_real_file) {
-    THPStorage_(writeFileRaw<PyObject*>)(self->cdata, file);
+    THPStorage_(writeFileRaw<PyObject*>)(self->cdata, file, save_size);
     Py_RETURN_NONE;
   }
 
   int fd = PyObject_AsFileDescriptor(file);
   THPUtils_assert(fd != -1, "_write_file couldn't retrieve a file descriptor "
       "from given object");
-  THPStorage_(writeFileRaw)(self->cdata, fd);
+  THPStorage_(writeFileRaw)(self->cdata, fd, save_size);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -262,9 +266,9 @@ static PyObject *THPStorage_(setFromFile)(THPStorage *self, PyObject *args)
 
   // file is backed by a fd
   const int fd = PyObject_AsFileDescriptor(file);
-  const auto fd_original_pos = lseek(fd, 0, SEEK_CUR);
+  const auto fd_original_pos = LSEEK(fd, 0, SEEK_CUR);
   if (offset != Py_None) {
-    lseek(fd, THPUtils_unpackLong(offset), SEEK_SET);
+    LSEEK(fd, THPUtils_unpackLong(offset), SEEK_SET);
   }
   THPUtils_assert(fd != -1, "_set_from_file couldn't retrieve a file "
       "descriptor from given object");
@@ -275,10 +279,10 @@ static PyObject *THPStorage_(setFromFile)(THPStorage *self, PyObject *args)
 
   // the file descriptor is returned to original position and
   // the file handle at python call-site needs updating to the
-  // advanced postion
-  const auto fd_current_pos = lseek(fd, 0, SEEK_CUR);
-  lseek(fd, fd_original_pos, SEEK_SET);
-  const auto seek_return = PyObject_CallMethod(file, "seek", "li", fd_current_pos, 0);
+  // advanced position
+  const auto fd_current_pos = LSEEK(fd, 0, SEEK_CUR);
+  LSEEK(fd, fd_original_pos, SEEK_SET);
+  const auto seek_return = PyObject_CallMethod(file, "seek", "Li", (long long)fd_current_pos, 0);
   if (seek_return == nullptr) {
       return nullptr;
   }
@@ -287,10 +291,9 @@ static PyObject *THPStorage_(setFromFile)(THPStorage *self, PyObject *args)
   return (PyObject *) self;
   END_HANDLE_TH_ERRORS
 }
-#endif // !defined(THD_GENERIC_FILE)
 
 #ifdef THC_GENERIC_FILE
-PyObject * THPStorage_(getDevice)(THPStorage *self)
+PyObject * THPStorage_(getDevice)(THPStorage *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   return PyLong_FromLong(THCStorage_(getDevice)(LIBRARY_STATE self->cdata));
@@ -314,28 +317,24 @@ PyObject * THPStorage_(_setCdata)(THPStorage *self, PyObject *new_cdata)
 }
 
 static PyMethodDef THPStorage_(methods)[] = {
-  {"copy_", (PyCFunction)THPStorage_(copy_), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"copy_", (PyCFunction)(void(*)(void))THPStorage_(copy_), METH_VARARGS | METH_KEYWORDS, nullptr},
   {"element_size", (PyCFunction)THPStorage_(elementSize), METH_NOARGS, nullptr},
   {"fill_", (PyCFunction)THPStorage_(fill_), METH_O, nullptr},
   {"new", (PyCFunction)THPStorage_(new), METH_NOARGS, nullptr},
   {"resize_", (PyCFunction)THPStorage_(resize_), METH_O, nullptr},
   {"size", (PyCFunction)THPStorage_(size), METH_NOARGS, nullptr},
-#ifndef THD_GENERIC_FILE
   {"data_ptr", (PyCFunction)THPStorage_(dataPtr), METH_NOARGS, nullptr},
   {"is_pinned", (PyCFunction)THPStorage_(isPinned), METH_NOARGS, nullptr},
   {"_write_file", (PyCFunction)THPStorage_(writeFile), METH_VARARGS, nullptr},
-  {"_new_with_file", (PyCFunction)THPStorage_(newWithFile), METH_O | METH_STATIC, nullptr},
+  {"_new_with_file", (PyCFunction)(void(*)(void))THPStorage_(newWithFile), METH_O | METH_STATIC, nullptr},
   {"_set_from_file", (PyCFunction)THPStorage_(setFromFile), METH_VARARGS, nullptr},
-#endif // !defined(THD_GENERIC_FILE)
-#if !defined(THC_GENERIC_FILE) && !defined(THD_GENERIC_FILE)
-  {"from_buffer", (PyCFunction)THPStorage_(fromBuffer), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
+#if !defined(THC_GENERIC_FILE)
+  {"from_buffer", (PyCFunction)(void(*)(void))THPStorage_(fromBuffer), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
 #endif
-  {"from_file", (PyCFunction)THPStorage_(fromFile), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
+  {"from_file", (PyCFunction)(void(*)(void))THPStorage_(fromFile), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
 #ifdef THC_GENERIC_FILE
   {"get_device", (PyCFunction)THPStorage_(getDevice), METH_NOARGS, nullptr},
 #endif
   {"_set_cdata", (PyCFunction)THPStorage_(_setCdata), METH_O, nullptr},
-#ifndef THD_GENERIC_FILE
-#endif
   {nullptr}
 };

@@ -2,15 +2,22 @@
 #include "caffe2/core/types.h"
 #include "caffe2/perfkernels/common.h"
 #include "caffe2/utils/cpuid.h"
-#include "caffe2/utils/math.h"
 
 namespace caffe2 {
 
+void TypedAxpy__base(int N, const float a, const float* x, float* y) {
+  for (int i = 0; i < N; ++i) {
+    y[i] += a * x[i];
+  }
+}
+
+decltype(TypedAxpy__base) TypedAxpy__avx2_fma;
+decltype(TypedAxpy__base) TypedAxpy__avx_f16c;
 template <>
 void TypedAxpy<float, float>(int N, const float a, const float* x, float* y) {
-  // This uses a hack that axpy implementation actually does not use the
-  // CPUContext, so passing in a nullpointer works.
-  math::Axpy<float, float, CPUContext>(N, a, x, y, nullptr);
+  AVX2_FMA_DO(TypedAxpy, N, a, x, y);
+  AVX_F16C_DO(TypedAxpy, N, a, x, y);
+  BASE_DO(TypedAxpy, N, a, x, y);
 }
 
 void TypedAxpyHalffloat__base(

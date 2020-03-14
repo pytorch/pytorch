@@ -9,9 +9,10 @@
  */
 #pragma once
 
-#include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/script/module.h>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/api/module.h>
 
+#include <functional>
 #include <unordered_set>
 #include <vector>
 
@@ -28,8 +29,7 @@ struct Match;
  * recognized patterns (see SubgraphRewriter::RegisterDefaultPatterns for the
  * list of these patterns).
  */
-TORCH_API std::shared_ptr<script::Module> PatternBasedRewrite(
-    std::shared_ptr<script::Module>& module);
+TORCH_API Module PatternBasedRewrite(const Module& module);
 
 /** A class implementing API for pattern-based subgraph rewrites.
  *
@@ -45,11 +45,22 @@ TORCH_API std::shared_ptr<script::Module> PatternBasedRewrite(
 class TORCH_API SubgraphRewriter {
  public:
   // Run pattern-based subgraph rewrite pass on the module.
-  std::shared_ptr<script::Module> runOnModule(
-      std::shared_ptr<script::Module> module);
+  Module runOnModule(const Module& module);
 
   // Run pattern-based subgraph rewrite pass on the graph (used in testing).
-  void runOnGraph(std::shared_ptr<Graph>& graph);
+  // filter is a function that does extra filtering on the match, if it returns
+  // false for a given Match, we'll skip the match
+  // filter function takes a `Match` and a value map from parsing the pattern graph
+  // since we need to do extra filtering on the matched result but we need to refer
+  // to the values in the matched result through the values in pattern graph.
+  void runOnGraph(
+      std::shared_ptr<Graph>& graph,
+      const std::function<
+          bool(const Match&, const std::unordered_map<std::string, Value*>&)>&
+          filter =
+              [](const Match&, const std::unordered_map<std::string, Value*>&) {
+                return true;
+              });
 
   // Register standard rewrite patterns.
   void RegisterDefaultPatterns();
@@ -72,7 +83,13 @@ class TORCH_API SubgraphRewriter {
 
   void rewriteSinglePatternOnGraph(
       std::shared_ptr<Graph>& graph,
-      RewritePatternDescr pattern);
+      const RewritePatternDescr& pattern,
+      const std::function<
+          bool(const Match&, const std::unordered_map<std::string, Value*>&)>&
+          filter =
+              [](const Match&, const std::unordered_map<std::string, Value*>&) {
+                return true;
+              });
   bool overlapsWithPreviousMatches(const Match* match);
 };
 

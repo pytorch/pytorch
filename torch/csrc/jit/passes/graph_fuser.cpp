@@ -1,17 +1,16 @@
 #include <torch/csrc/jit/passes/graph_fuser.h>
 
 #include <c10/util/Exception.h>
-#include <torch/csrc/jit/autodiff.h>
-#include <torch/csrc/jit/custom_operator.h>
-#include <torch/csrc/jit/fuser/interface.h>
-#include <torch/csrc/jit/operator.h>
-#include <torch/csrc/jit/passes/alias_analysis.h>
+#include <torch/csrc/jit/runtime/autodiff.h>
+#include <torch/csrc/jit/runtime/custom_operator.h>
+#include <torch/csrc/jit/codegen/fuser/interface.h>
+#include <torch/csrc/jit/runtime/operator.h>
+#include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
-#include <torch/csrc/jit/script/compiler.h>
-#include <torch/csrc/jit/symbolic_variable.h>
+#include <torch/csrc/jit/frontend/ir_emitter.h>
 
 #include <queue>
 #include <unordered_map>
@@ -28,7 +27,7 @@ namespace {
 //      or all tensor inputs have the same scalar type and
 //         output is identified in PropagateInputShapes
 //    - Output and all tensor inputs should be on the same device
-//    - Produces contiguous outputs
+//    - Produces dense non-overlapping outputs
 // Some of these restrictions may be relaxable, but you should
 // carefully read the code first, as we rely on these assumptions.
 bool isSimpleMap(Node* node) {
@@ -67,7 +66,6 @@ bool isSimpleMap(Node* node) {
       "aten::pow(Tensor self, Tensor exponent) -> Tensor",
       "aten::pow(Tensor self, Scalar exponent) -> Tensor",
       "aten::pow(Scalar self, Tensor exponent) -> Tensor",
-      "aten::rand_like(Tensor self) -> Tensor",
       "aten::reciprocal(Tensor self) -> Tensor",
       "aten::relu(Tensor self) -> Tensor",
       "aten::threshold(Tensor self, Scalar threshold, Scalar value) -> Tensor",
@@ -80,6 +78,7 @@ bool isSimpleMap(Node* node) {
       "aten::sqrt(Tensor self) -> Tensor",
       "aten::sub(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
       "aten::tan(Tensor self) -> Tensor",
+      "aten::rand_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
       "aten::tanh(Tensor self) -> Tensor",
       "aten::trunc(Tensor self) -> Tensor",
       "aten::add(Tensor self, Scalar other, Scalar alpha) -> Tensor",
@@ -105,7 +104,7 @@ bool isSimpleMap(Node* node) {
 
       "aten::type_as(Tensor self, Tensor other) -> Tensor",
   }};
-  if (!simple_mappable.find(node)) {
+  if (!node->isMemberOf(simple_mappable)) {
     return false;
   }
   for (Value* input : node->inputs()) {
@@ -118,64 +117,6 @@ bool isSimpleMap(Node* node) {
     }
   }
   return true;
-}
-
-RegisterOperators reg_bn_unsqueeze({Operator(
-    "aten::_ncf_unsqueeze(Tensor self, int ndim) -> Tensor",
-    [](const Node* node) {
-      return [](Stack& stack) {
-        const int64_t ndim = pop(stack).toInt();
-        auto self = pop(stack).toTensor();
-        c10::SmallVector<int64_t, 8> sizes(ndim, 1);
-        AT_ASSERT(self.dim() == 1);
-        sizes.at(1) = self.size(0);
-        push(stack, self.reshape(sizes));
-        return 0;
-      };
-    })});
-
-RegisterOperators reg_ln_view({Operator(
-    "aten::_ncf_view(Tensor self, int[] input_shape, int normalized_ndim) -> Tensor",
-    [](const Node* node) {
-      return [](Stack& stack) {
-        const int64_t normalized_ndim = pop(stack).toInt();
-        auto input_shape = pop(stack).toIntListRef();
-        auto self = pop(stack).toTensor();
-        const int64_t input_ndim = input_shape.size();
-        c10::SmallVector<int64_t, 8> sizes(input_ndim, 1);
-        for (int i = 0; i < input_ndim - normalized_ndim; ++i) {
-          sizes.at(i) = input_shape[i];
-        }
-        push(stack, self.reshape(sizes));
-        return 0;
-      };
-    })});
-
-// Yes, no, or no value if we can't tell
-c10::optional<bool> isDefined(Value* tensor) {
-  if (tensor->type()->isSubtypeOf(TensorType::get())) {
-    return true;
-  }
-  if (tensor->node()->mustBeNone()) {
-    return false;
-  }
-  return {};
-}
-
-bool isFusableNorm(Node* normalize_op) {
-  static const OperatorSet decomposable_normalization_ops = {
-      "aten::batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor",
-      "aten::layer_norm(Tensor input, int[] normalized_shape, Tensor? weight, Tensor? bias, float eps, bool cudnn_enable) -> Tensor",
-  };
-
-  if (decomposable_normalization_ops.find(normalize_op)) {
-    // If we can't determine if weight and bias is defined statically there's
-    // really no point in decomposing normalization into simpler ops, since it
-    // won't get fused into a single kernel.
-    return isDefined(normalize_op->namedInput(attr::weight)).has_value() &&
-        isDefined(normalize_op->namedInput(attr::bias)).has_value();
-  }
-  return false;
 }
 
 Value* broadcastSizes(at::ArrayRef<Value*> sizes) {
@@ -193,11 +134,27 @@ struct GraphFuser {
   Block* block_;
   std::unique_ptr<AliasDb> aliasDb_;
   std::shared_ptr<Graph> graph_;
-  FusionCallback callback_ = [&](Node* n) { return isFusableDefault(n); };
+  FusionCallback callback_ = [&](Node* n) {
+    return isFusableDefault(n, this->strict_fuser_check_);
+  };
   Symbol kind_ = prim::FusionGroup;
+  bool strict_fuser_check_;
 
-  GraphFuser(Block* block, std::shared_ptr<Graph> graph)
-      : block_(block), graph_(std::move(graph)) {}
+  // nvrtc has a limit on the number of arguments allowed in a CUDA kernel.
+  // The specific limit is a function of constant memory size, amount available
+  // to pass arguments, and some implementation dependence. Select a safe
+  // limit here.
+  // This limit is also applied to other devices in the fuser by default.
+  // Change with setInputArgLimit
+  size_t subgraph_arg_limit_ = 128;
+
+  GraphFuser(
+      Block* block,
+      std::shared_ptr<Graph> graph,
+      bool strict_fuser_check)
+      : block_(block),
+        graph_(std::move(graph)),
+        strict_fuser_check_(strict_fuser_check) {}
 
   // Custom passes require kind to specified
   GraphFuser(
@@ -210,16 +167,13 @@ struct GraphFuser {
         callback_(callback),
         kind_(kind) {}
 
+  void setInputArgLimit(size_t limit) {
+    subgraph_arg_limit_ = limit;
+  }
+
   value_list tensorInputs(Node* node) {
     return filter(node->inputs(), [](Value* v) {
       return v->type()->isSubtypeOf(TensorType::get());
-    });
-  }
-
-  bool containsGradSumToSize(Node* fusion_group) {
-    auto nodes = getSubgraph(fusion_group).nodes();
-    return std::any_of(nodes.begin(), nodes.end(), [](Node* n) {
-      return n->kind() == aten::_grad_sum_to_size;
     });
   }
 
@@ -227,30 +181,32 @@ struct GraphFuser {
     return callback_(node);
   }
 
-  bool isFusableDevice(Value *v) {
-    auto tensor_type = v->type()->cast<DimensionedTensorType>();
-    if (!tensor_type) {
+  bool isFusableDevice(Value* v, bool strict_fuser_check) {
+    if (!v->type()->isSubtypeOf(TensorType::get())) {
       return true;
     }
-    if (tensor_type->device().is_cpu()) {
+    auto device = v->type()->expect<TensorType>()->device();
+    if (!device) {
+      return !strict_fuser_check;
+    }
+    if ((*device).is_cpu()) {
       return canFuseOnCPU();
-    } else if (tensor_type->device().is_cuda()) {
+    } else if ((*device).is_cuda()) {
       return canFuseOnGPU();
     }
     throw std::runtime_error("Unknown device");
   }
 
-
   // Default fusability check - used when the user doesn't pass in
   // a callback.
-  bool isFusableDefault(Node* node) {
+  bool isFusableDefault(Node* node, bool strict_fuser_check) {
     bool fusableDevice = true;
     for (const auto& output : node->outputs()) {
       if (output->uses().size() > 0) {
-        fusableDevice &= isFusableDevice(output);
+        fusableDevice &= isFusableDevice(output, strict_fuser_check);
       }
     }
-    return fusableDevice && (isFusableMap(node) || isFusableNorm(node));
+    return fusableDevice && isFusableMap(node);
   }
 
   bool isFusableMap(Node* node) {
@@ -258,14 +214,6 @@ struct GraphFuser {
     // are not necessarily correct.
     if (node->owningBlock() != block_)
       return false;
-    if (node->kind() == aten::_grad_sum_to_size) {
-      // We only fuse _grad_sum_to_size if
-      // - we will fuse its input next (checked here)
-      // - we can commute the _grad_sum_to_size with everything
-      //   along the computation graph until we reach the outputs,
-      //   but this is checked later
-      return isFusable(node->inputs()[0]->node());
-    }
     return node->kind() == prim::FusionGroup || isSimpleMap(node);
   }
 
@@ -277,7 +225,7 @@ struct GraphFuser {
 
     auto tensors_node = node->namedInput(attr::tensors)->node();
     if ((tensors_node->inputs().size() + node->outputs().size()) >
-        fusion_kernel_args_limit) {
+        subgraph_arg_limit_) {
       return false;
     }
     if (tensors_node->kind() != prim::ListConstruct)
@@ -310,113 +258,6 @@ struct GraphFuser {
   Graph& getSubgraph(Node* n) {
     AT_ASSERT(n->kind() == kind_);
     return *n->g(attr::Subgraph);
-  }
-
-  Value* decomposeCommonNormalization(
-      Node* normalization_op,
-      const char* source,
-      const std::string& method_name,
-      const std::vector<Value*>& inputs) {
-    std::shared_ptr<Graph> nm_graph;
-    std::once_flag flag;
-    std::call_once(
-        flag,
-        [](std::shared_ptr<Graph>* graph_ptr,
-           const char* source,
-           const std::string& method_name) {
-          script::CompilationUnit cu;
-          cu.define(source, script::nativeResolver(), nullptr);
-          *graph_ptr = cu.get_function(method_name).graph();
-        },
-        &nm_graph,
-        source,
-        method_name);
-
-    WithInsertPoint insert_guard{normalization_op};
-    return inlineCallTo(*normalization_op->owningGraph(), *nm_graph, inputs)
-        .at(0);
-  }
-
-  void decomposeNormalizationOps(Node* normalization_op) {
-    static const char* bm_source = R"SCRIPT(
-        def batch_norm(input : Tensor, running_mean : Optional[Tensor], running_var : Optional[Tensor], training : bool, momentum : float, eps : float) -> Tensor:
-            if training:
-                norm_mean, norm_var = torch.batch_norm_update_stats(input, running_mean, running_var, momentum)
-            else:
-                norm_mean = torch._unwrap_optional(running_mean)
-                norm_var = torch._unwrap_optional(running_var)
-            norm_mean = torch._ncf_unsqueeze(norm_mean, input.dim())
-            norm_var = torch._ncf_unsqueeze(norm_var, input.dim())
-            norm_invstd = 1 / (torch.sqrt(norm_var + eps))
-            return ((input - norm_mean) * norm_invstd)
-      )SCRIPT";
-    static const char* lm_source = R"SCRIPT(
-        def layer_norm(input : Tensor, normalized_shape : List[int], eps : float, cudnn_enable : bool) -> Tensor:
-            input_ndim = input.dim()
-            normalized_ndim = len(normalized_shape)
-            n = 1
-            for i in range(input_ndim - normalized_ndim):
-                n *= input.size(i)
-            input_reshape = input.contiguous().view(1, n, -1)
-            mean, invstd = torch.batch_norm_stats(input_reshape, eps)
-            input_shape = input.size()
-            mean = torch._ncf_view(mean, input_shape, normalized_ndim)
-            invstd = torch._ncf_view(invstd, input_shape, normalized_ndim)
-
-            return (input - mean) * invstd
-      )SCRIPT";
-    AT_ASSERT(isFusableNorm(normalization_op));
-    WithInsertPoint insert_guard{normalization_op};
-    Value* input = normalization_op->namedInput(attr::input);
-    if (normalization_op->kind() == aten::batch_norm) {
-      Value* input_dim = graph_->insert(aten::dim, {input});
-      std::vector<Value*> inputs{
-          input,
-          normalization_op->namedInput(attr::running_mean),
-          normalization_op->namedInput(attr::running_var),
-          normalization_op->namedInput(attr::training),
-          normalization_op->namedInput(attr::momentum),
-          normalization_op->namedInput(attr::eps)};
-
-      Value* new_output = decomposeCommonNormalization(
-          normalization_op, bm_source, "batch_norm", inputs);
-      auto weight = normalization_op->namedInput(attr::weight);
-      auto bias = normalization_op->namedInput(attr::bias);
-      if (isDefined(weight).value()) {
-        Value* expanded_weight =
-            graph_->insert(aten::_ncf_unsqueeze, {weight, input_dim});
-        new_output = graph_->insert(aten::mul, {new_output, expanded_weight});
-      }
-      if (isDefined(bias).value()) {
-        Value* expanded_bias =
-            graph_->insert(aten::_ncf_unsqueeze, {bias, input_dim});
-        new_output = graph_->insert(aten::add, {new_output, expanded_bias});
-      }
-      normalization_op->output()->replaceAllUsesWith(new_output);
-      normalization_op->destroy();
-
-    } else if (normalization_op->kind() == aten::layer_norm) {
-      std::vector<Value*> inputs{
-          input,
-          normalization_op->namedInput(attr::normalized_shape),
-          normalization_op->namedInput(attr::eps),
-          normalization_op->namedInput(attr::cudnn_enable)};
-      Value* new_output = decomposeCommonNormalization(
-          normalization_op, lm_source, "layer_norm", inputs);
-      auto weight = normalization_op->namedInput(attr::weight);
-      auto bias = normalization_op->namedInput(attr::bias);
-      auto weight_defined = isDefined(weight).value();
-      auto bias_defined = isDefined(bias).value();
-      if (weight_defined && bias_defined) {
-        new_output = graph_->insert(aten::addcmul, {bias, new_output, weight});
-      } else if (weight_defined) {
-        new_output = graph_->insert(aten::mul, {new_output, weight});
-      } else if (bias_defined) {
-        new_output = graph_->insert(aten::add, {new_output, bias});
-      }
-      normalization_op->output()->replaceAllUsesWith(new_output);
-      normalization_op->destroy();
-    }
   }
 
   void mergeFusionGroups(Node* consumer_group, Node* producer_group) {
@@ -593,42 +434,13 @@ struct GraphFuser {
 
     if ((consumer->inputs().size() + consumer->outputs().size() +
          producer->node()->inputs().size() +
-         producer->node()->outputs().size()) > fusion_kernel_args_limit) {
+         producer->node()->outputs().size()) > subgraph_arg_limit_) {
       return at::nullopt;
-    }
-
-    if (producer->node()->kind() == aten::_grad_sum_to_size &&
-        consumer->kind() == kind_) {
-      // check that we will be able to move the _grad_sum_to_size to be fused
-      // to the end of the fusion group in the fusion compiler
-      // the difficulty here is that the producer is not part of the fusion
-      // group yet
-      for (auto& u : producer->uses()) {
-        if (u.user == consumer) {
-          auto subgraph = &getSubgraph(consumer);
-          if (!trackSingleGradSumToSizeToOutputs(
-                  subgraph->inputs().at(u.offset), nullptr)) {
-            return at::nullopt;
-          }
-        }
-      }
     }
 
     auto group = consumer;
     if (consumer->kind() != kind_) {
       group = createSingletonFusionGroup(consumer);
-    }
-
-    if (kind_ == prim::FusionGroup &&
-        (producer->node()->matches(
-             "aten::layer_norm(Tensor input, int[] normalized_shape, Tensor? weight, Tensor? bias, float eps, bool cudnn_enable) -> Tensor") ||
-         producer->node()->matches(
-             "aten::batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor"))) {
-      // We don't do any fusions in here, but simply decompose the normalization
-      // ops into a kernel that computes the stats + pointwise ops which will be
-      // considered in this fusion next.
-      decomposeNormalizationOps(producer->node());
-      return group;
     }
 
     if (producer->node()->kind() == kind_) {
@@ -770,11 +582,21 @@ struct GraphFuser {
     return ++consumer->reverseIterator();
   }
 
+  at::ArrayRef<Value*> broadcast_tensors(value_list inputs) {
+    AT_ASSERT(inputs.size() > 0);
+    auto* g = inputs[0]->owningGraph();
+    auto* input_list =
+        g->insertNode(g->createList(TensorType::get(), inputs))->output();
+    auto* output_list = g->insert(aten::broadcast_tensors, {input_list});
+    auto* unpack_node = g->insertNode(
+        g->create(prim::ListUnpack, {output_list}, inputs.size()));
+    return unpack_node->outputs();
+  }
+
   void insertExplicitBroadcast(Node* node) {
     WithInsertPoint insert_guard{node};
     auto tensors = tensorInputs(node);
-    auto new_tensors =
-        SymbolicVariable::broadcast_tensors(fmap<SymbolicVariable>(tensors));
+    auto new_tensors = broadcast_tensors(tensors);
 
     // Replace tensors inputs with broadcasted values
     auto new_tensors_it = new_tensors.begin();
@@ -990,6 +812,10 @@ struct GraphFuser {
     // The output of producer_for_chunk_node could have been used in some
     // aten::size operators, so we need to clean those up as well (we simply
     // broadcast all its tensor inputs).
+    // We need to insert these early in the graph, i.e. immediately after
+    // the producer_for_chunk_node as we will have the _size_if_not_same
+    // that may be before the bchunk.
+    WithInsertPoint guard2(producer_for_chunk_node);
     auto size_calc_uses = producer_for_chunk_node->output()->uses();
     if (!size_calc_uses.empty()) {
       auto tensor_inputs = filter(
@@ -1195,18 +1021,16 @@ struct GraphFuser {
     // If the number of kernel args could exceed the limit, skip.
     if ((before_check->inputs().size() + before_check->outputs().size() +
          producer->node()->inputs().size() +
-         producer->node()->outputs().size()) > fusion_kernel_args_limit) {
+         producer->node()->outputs().size()) > subgraph_arg_limit_) {
       return false;
     }
 
     // Fusion groups can be merged with concat's group if and only if
-    // - the value they produce isn't already coming from a concat and
-    // - the fusion group does not contain GradSumToSize
+    // the value they produce isn't already coming from a concat
     if (producer->node()->kind() == prim::FusionGroup) {
       auto subgraph = producer->node()->g(attr::Subgraph);
       auto* node = subgraph->outputs().at(producer->offset())->node();
-      return node->kind() != prim::FusedConcat &&
-          !containsGradSumToSize(producer->node());
+      return node->kind() != prim::FusedConcat;
     }
     return true;
   }
@@ -1281,7 +1105,7 @@ struct GraphFuser {
 
   void run() {
     // Run the pass until no changes are made.
-    // This is neccessary, because the algorithm can miss out on certain fusion
+    // This is necessary, because the algorithm can miss out on certain fusion
     // opportunities if ran only once. Consider this graph:
     //
     // %1 = f(...)
@@ -1328,7 +1152,7 @@ struct GraphFuser {
 
     for (Node* node : block_->nodes()) {
       for (Block* sub_block : node->blocks()) {
-        GraphFuser(sub_block, graph_).run();
+        GraphFuser(sub_block, graph_, callback_, kind_).run();
       }
     }
   }
@@ -1388,85 +1212,8 @@ void PeepholeOptimizeShapeExpressions(Block* block) {
 
 } // anonymous namespace
 
-// This takes a _grad_sum_to_size output and tracks it to the return
-// statements that depend on it, checking that it only hits nodes
-// that commute with _grad_sum_to_size on its path.
-// If a non-nullptr vector pointer outputGradSumToSizes is passed, the sizes
-// will be recorded as target sizes for the outputs as applicable.
-// In the graph_fuser pass we only need to check that we can go to the
-// outputs while in the fuser's compiler we want to record the sizes.
-// Note: This will only record a new sum_to_size if there is not one
-// already. As we want the last grad_sum_to_size, you need to call
-// it in reverse order when recording and removing outputs.
-bool trackSingleGradSumToSizeToOutputs(
-    Value* gradSumToSizeOutput,
-    std::vector<int64_t>* outputGradSumToSizes) {
-  static OperatorSet commutes_with_SumToSize{{
-      "aten::mul(Tensor self, Tensor other) -> Tensor",
-      "aten::div(Tensor self, Tensor other) -> Tensor",
-      // for div we might check whether we're the first argument
-      "aten::mul(Tensor self, Scalar other) -> Tensor",
-      "aten::div(Tensor self, Scalar other) -> Tensor",
-      "aten::neg(Tensor self) -> Tensor",
-      "aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
-      "aten::where(Tensor condition, Tensor self, Tensor other) -> Tensor",
-      // add this used to be prim::AutogradAdd
-  }};
-
-  std::queue<Use> uses_to_process{};
-  auto add_to_uses = [&](const use_list& uses) {
-    for (auto u : uses) {
-      uses_to_process.push(u);
-    }
-  };
-  add_to_uses(gradSumToSizeOutput->uses());
-  while (!uses_to_process.empty()) {
-    auto user = uses_to_process.front().user;
-    auto offset = uses_to_process.front().offset;
-    uses_to_process.pop();
-    if (user->matches("aten::type_as(Tensor self, Tensor other) -> Tensor")) {
-      // sometimes, a mask or similar is cast to the same type as the gradient,
-      // i.e. we see other. Then we don't need to do anything, as the shape is
-      // not used, only the type..
-      // But we might also see it as self, when the gradient is cast, then we
-      // want to track it.
-      if (offset == 0) {
-        add_to_uses(user->output()->uses());
-      }
-    } else if (commutes_with_SumToSize.find(user)) {
-      add_to_uses(user->output()->uses());
-    } else if (user->kind() == prim::Return) {
-      // During compilation and only if we don't already have a
-      // _grad_sum_to_size for this output we record the size to sum the output
-      // to. We only do this if we didn't see anything yet because we want later
-      // (in the graph) nodes to take precedence over earlier ones and we
-      // iterate backwards. The implicit assumption is that if we have several
-      // _grad_sumtosizes "in parallel" (from auto-diff added AutogradAdd as the
-      // backward of using an input in multiple places) they are the same. This
-      // is because AutogradAdd does not broadcast.
-      if (outputGradSumToSizes && (*outputGradSumToSizes)[offset] == -1) {
-        // note: we make the assumption that the sizes are inputs to the
-        // fusion group (rather than something calculated).
-        (*outputGradSumToSizes)[offset] =
-            gradSumToSizeOutput->node()->inputs()[1]->offset();
-      }
-    } else if (user->kind() == aten::_grad_sum_to_size) {
-      // do nothing
-      // this case only happens in the graph_fuser step because in the
-      // compile step because we iterate backwards and delete
-      // all _grad_sum_to_size nodes we see
-    } else {
-      // we find something we do not support. Note that this notably includes
-      // prim::FusedConcat, which we do not know how to deal with in conjunction
-      // with _grad_sum_to_size
-      return false;
-    }
-  }
-  return true;
-}
-
-void FuseGraph(std::shared_ptr<Graph>& graph) {
-  GraphFuser(graph->block(), graph).run();
+void FuseGraph(std::shared_ptr<Graph>& graph, bool strict_fuser_check) {
+  GraphFuser(graph->block(), graph, strict_fuser_check).run();
   // After FuseGraph some common subexpressions may come back
   EliminateCommonSubexpression(graph);
   // We might have emitted a fair amount of useless shape propagating code, so
@@ -1479,13 +1226,15 @@ void FuseGraph(std::shared_ptr<Graph>& graph) {
 void CustomFuseGraph(
     std::shared_ptr<Graph>& graph,
     std::function<bool(Node*)> fn,
-    Symbol kind) {
-  GraphFuser(
+    Symbol kind,
+    size_t arg_limit) {
+  auto g = GraphFuser(
       graph->block(),
       graph,
       [=](Node* n) { return fn(n) || n->kind() == kind; },
-      kind)
-      .run();
+      kind);
+  g.setInputArgLimit(arg_limit);
+  g.run();
 }
 
 } // namespace jit

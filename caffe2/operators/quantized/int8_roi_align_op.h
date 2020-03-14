@@ -146,7 +146,8 @@ void ROIAlignForward(
     const float y_scale,
     const int32_t x_offset,
     const int32_t y_offset,
-    StorageOrder order) {
+    StorageOrder order /* unused */,
+    bool continuous_coordinate) {
   DCHECK(roi_cols == 4 || roi_cols == 5);
 
   int n_rois = nthreads / channels / pooled_width / pooled_height;
@@ -163,14 +164,23 @@ void ROIAlignForward(
     }
 
     // Do not using rounding; this implementation detail is critical
-    float roi_start_w = offset_bottom_rois[0] * spatial_scale;
-    float roi_start_h = offset_bottom_rois[1] * spatial_scale;
-    float roi_end_w = offset_bottom_rois[2] * spatial_scale;
-    float roi_end_h = offset_bottom_rois[3] * spatial_scale;
+    float roi_offset = continuous_coordinate ? 0.5 : 0;
+    float roi_start_w = offset_bottom_rois[0] * spatial_scale - roi_offset;
+    float roi_start_h = offset_bottom_rois[1] * spatial_scale - roi_offset;
+    float roi_end_w = offset_bottom_rois[2] * spatial_scale - roi_offset;
+    float roi_end_h = offset_bottom_rois[3] * spatial_scale - roi_offset;
 
-    // Force malformed ROIs to be 1x1
-    float roi_width = std::max(roi_end_w - roi_start_w, (float)1.);
-    float roi_height = std::max(roi_end_h - roi_start_h, (float)1.);
+    float roi_width = roi_end_w - roi_start_w;
+    float roi_height = roi_end_h - roi_start_h;
+    if (continuous_coordinate) {
+      CAFFE_ENFORCE(
+          roi_width >= 0 && roi_height >= 0,
+          "ROIs in ROIAlign do not have non-negative size!");
+    } else { // backward compatibility
+      // Force malformed ROIs to be 1x1
+      roi_width = std::max(roi_width, (float)1.);
+      roi_height = std::max(roi_height, (float)1.);
+    }
     float bin_size_h =
         static_cast<float>(roi_height) / static_cast<float>(pooled_height);
     float bin_size_w =
@@ -268,7 +278,8 @@ class Int8RoIAlignOp final : public Operator<CPUContext> {
         pooled_height_(this->template GetSingleArgument<int>("pooled_h", 1)),
         pooled_width_(this->template GetSingleArgument<int>("pooled_w", 1)),
         sampling_ratio_(
-            this->template GetSingleArgument<int>("sampling_ratio", -1)) {
+            this->template GetSingleArgument<int>("sampling_ratio", -1)),
+        aligned_(this->template GetSingleArgument<bool>("aligned", false)) {
     DCHECK_GT(spatial_scale_, 0);
     DCHECK_GT(pooled_height_, 0);
     DCHECK_GT(pooled_width_, 0);
@@ -325,7 +336,8 @@ class Int8RoIAlignOp final : public Operator<CPUContext> {
         Y_scale,
         X.zero_point,
         Y_offset,
-        order_);
+        order_,
+        aligned_);
 
     return true;
   }
@@ -336,6 +348,7 @@ class Int8RoIAlignOp final : public Operator<CPUContext> {
   int pooled_height_;
   int pooled_width_;
   int sampling_ratio_;
+  bool aligned_;
 };
 
 } // namespace int8

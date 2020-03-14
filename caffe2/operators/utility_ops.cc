@@ -51,6 +51,7 @@ REGISTER_CPU_OPERATOR(
     ScatterWeightedSum,
     ScatterWeightedSumOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(ScatterAssign, ScatterAssignOp<CPUContext>);
+REGISTER_CPU_OPERATOR(Scatter, ScatterOp<CPUContext>);
 
 REGISTER_CPU_OPERATOR(LengthsToShape, LengthsToShapeOp<CPUContext>);
 REGISTER_CPU_OPERATOR(HasElements, HasElementsOp<CPUContext>);
@@ -369,12 +370,44 @@ Currently only works on CPU because of access to INDICES.
         "Update slices, with shape len(INDICES) + shape(X_0)[1:]")
     .Output(0, "DATA", "Has to be exactly the same tensor as the input 0");
 
+OPERATOR_SCHEMA(Scatter)
+    .NumInputs(3)
+    .NumOutputs(1)
+    .AllowInplace({{0, 0}})
+    .SetDoc(R"DOC(
+Update values of the tensor by overriding current value specified by indices.
+
+Writes all values from the tensor UPDATES into DATA at the indices specified in the INDICES tensor.
+For each value in DATA, its output index is specified by its index in UPDATES and by the corresponding value in INDICES for the specified axis.
+
+For a 3-D tensor, DATA is updated as:
+
+DATA[INDICES[i][j][k]][j][k] = UPDATES[i][j][k]  # if axis == 0
+DATA[i][INDICES[i][j][k]][k] = UPDATES[i][j][k]  # if axis == 1
+DATA[i][j][INDICES[i][j][k]] = UPDATES[i][j][k]  # if axis == 2
+
+Currently only works on CPU because of access to INDICES.
+)DOC")
+    .Input(0, "DATA", "Tensor to be updated.")
+    .Input(
+        1,
+        "INDICES",
+        "1-D list of indices on the first dimension"
+        "of X_0 that need to be updated")
+    .Input(
+        2,
+        "UPDATES",
+        "Update slices, with shape len(INDICES) + shape(X_0)[1:]")
+    .Output(0, "OUTPUT", "The updated output.")
+    .Arg(
+        "axis",
+        "*(type: int; default: 1)* Which dimension to scatter on.");
 
 OPERATOR_SCHEMA(HasElements)
-    .NumInputs(1)
+    .NumInputs(1, INT_MAX)
     .NumOutputs(1)
     .SetDoc(R"DOC(
-The *HasElements* op accepts a single input $tensor$, and produces a single boolean output $has\_elements$. The output is *True* if and only if $tensor$ has size > 0. Note, this op is the opposite of the *IsEmpty* op.
+The *HasElements* op accepts a single or multiple input tensors, and produces a single boolean output $has\_elements$. The output is *True* if and only if any of the input tensor has size > 0. Note, this op is the opposite of the *IsEmpty* op.
 
 Github Links:
 
@@ -432,8 +465,14 @@ has_elements:  False
 </details>
 
 )DOC")
-    .Input(0, "tensor", "Input data tensor to check for elements.")
-    .Output(0, "has_elements", "Output scalar boolean tensor. True if input has size > 0.");
+    .Input(
+        0,
+        "X1, X2, ...",
+        "List of input data tensors to check for elements.")
+    .Output(
+        0,
+        "has_elements",
+        "Output scalar boolean tensor. True if input has size > 0.");
 
 OPERATOR_SCHEMA(GatherRanges)
     .NumInputs(2)
@@ -739,6 +778,7 @@ REGISTER_GRADIENT(Sum, GetSumGradient);
 
 SHOULD_NOT_DO_GRADIENT(ScatterWeightedSum);
 SHOULD_NOT_DO_GRADIENT(ScatterAssign);
+SHOULD_NOT_DO_GRADIENT(Scatter);
 
 class GetWeightedSumGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
@@ -984,9 +1024,9 @@ output: [ 4  6  8 10 12 14 16]
     .Input(
         0,
         "start",
-        "(*Tensor*): [OPTIONAL] scalar tensor containing the start of the interval (inclusive) (default=0)")
-    .Input(1, "stop", "(*Tensor*): scalar tensor containing the end of the interval (exclusive)")
-    .Input(2, "step", "(*Tensor*): [OPTIONAL] scalar tensor specifying the spacing between values (default=1)")
+        "(*Tensor*): [OPTIONAL] scalar or 1-element tensor containing the start of the interval (inclusive) (default=0)")
+    .Input(1, "stop", "(*Tensor*): scalar or 1-element tensor containing the end of the interval (exclusive)")
+    .Input(2, "step", "(*Tensor*): [OPTIONAL] scalar or 1-element tensor specifying the spacing between values (default=1)")
     .Output(
         0,
         "output",

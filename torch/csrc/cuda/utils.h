@@ -18,4 +18,7 @@
 
 #define THC_GENERIC_FILE "torch/csrc/generic/utils.h"
 #include <THC/THCGenerateBoolType.h>
+
+#define THC_GENERIC_FILE "torch/csrc/generic/utils.h"
+#include <THC/THCGenerateBFloat16Type.h>
 #endif

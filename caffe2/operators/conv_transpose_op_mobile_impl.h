@@ -551,6 +551,11 @@ bool ConvTransposeMobileOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   auto sizes = ConvTransposeUnpoolBase<Context>::GetOutputSize(X, C);
   Tensor* Y = Output(0, sizes, at::dtype<T>());
 
+  if (X.numel() == 0) {
+    VLOG(2) << "Number of elements is 0 in ConvTrasposeOp";
+    return true;
+  }
+
   const int outputH = Y->dim32(2);
   const int outputW = Y->dim32(3);
   const int outputPlaneSize = outputH * outputW;
