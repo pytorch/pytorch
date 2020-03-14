@@ -242,7 +242,7 @@ Tensor embedding_bag_backward_cuda_max(const Tensor &grad,
             grad_weight.data_ptr<scalar_t>(), stride, numBags);
       });
 
-  THCudaCheck(cudaGetLastError());
+  AT_CUDA_CHECK(cudaGetLastError());
   return grad_weight;
 }
 }
@@ -312,7 +312,7 @@ _embedding_bag_cuda(const Tensor &weight, const Tensor &indices,
     });
   });
 
-  THCudaCheck(cudaGetLastError());
+  AT_CUDA_CHECK(cudaGetLastError());
   return std::tuple<Tensor, Tensor, Tensor, Tensor>(output, offset2bag, bag_size, max_indices);
 }
 
