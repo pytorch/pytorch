@@ -257,7 +257,7 @@ TEST_F(RNNTest, EndToEndRNNTanh_CUDA) {
 TEST_F(RNNTest, PrettyPrintRNNs) {
   ASSERT_EQ(
       c10::str(LSTM(LSTMOptions(128, 64).num_layers(3).dropout(0.2))),
-      "torch::nn::LSTM(input_size=128, hidden_size=64, num_layers=3, bias=1, batch_first=0, dropout=0.2, bidirectional=0)");
+      "torch::nn::LSTM(input_size=128, hidden_size=64, num_layers=3, bias=true, batch_first=false, dropout=0.2, bidirectional=false)");
   ASSERT_EQ(
       c10::str(GRU(GRUOptions(128, 64).num_layers(3).dropout(0.5))),
       "torch::nn::GRU(input_size=128, hidden_size=64, num_layers=3, bias=1, batch_first=0, dropout=0.5, bidirectional=0)");
