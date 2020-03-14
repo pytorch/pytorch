@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/TensorAdvancedIndexing.h>
+#include <ATen/native/cuda/ScatterGatherKernel.cuh>
 
 namespace at { namespace native {
 namespace {
