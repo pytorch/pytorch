@@ -1156,6 +1156,6 @@ void LLVMCodeGen::optimize(llvm::Module& M) {
   PM.run(M);
 }
 
-RegisterCodeGen<LLVMCodeGen> reg("llvm_codegen");
+RegisterCodeGen<LLVMCodeGen> llvm_codegen_reg("llvm_codegen");
 
 #endif // TORCH_ENABLE_LLVM

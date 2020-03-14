@@ -688,7 +688,7 @@ void CudaCodeGen::CompileToNVRTC(
       nvrtc().cuModuleGetFunction(&function_, module, func_name.c_str()));
 }
 
-RegisterCodeGen<CudaCodeGen> reg("cuda_codegen");
+RegisterCodeGen<CudaCodeGen> cuda_codegen_reg("cuda_codegen");
 
 } // namespace tensorexpr
 } // namespace jit
