@@ -63,6 +63,7 @@ class CudaPrinter : public IRPrinter {
   }
 
   using IRPrinter::name_manager;
+  using IRPrinter::visit;
 
  private:
   std::vector<const Expr*> gpu_block_extents_;
