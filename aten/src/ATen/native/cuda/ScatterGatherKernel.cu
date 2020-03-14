@@ -1,4 +1,11 @@
-#include <ATen/native/cuda/ScatterGatherKernel.cuh>
+#include <THC/THCTensorMath.h>
+#include <THC/THCGeneral.h>
+#include <THC/THCAtomics.cuh>
+#include <THC/THCApply.cuh>
+
+#include <ATen/cuda/CUDAApplyUtils.cuh>
+
+//#include <ATen/native/cuda/ScatterGatherKernel.cuh>
 
 namespace {
 
@@ -84,7 +91,7 @@ template <typename index_t, typename scalar_t, int dims>
 C10_LAUNCH_BOUNDS_1(512)
 #endif
 __global__ void scatter_kernel(
-  TensorInfo<scalar_t, index_t> tensor,
+  TensorInfo<scalar_t, index_t> self,
   TensorInfo<scalar_t, index_t> src,
   TensorInfo<int64_t, index_t> index,
   const int dim,
@@ -100,13 +107,13 @@ __global__ void scatter_kernel(
     IndexToScatterGatherOffsets<index_t, scalar_t, dims>::compute(linearId, dim,
                                                                 index, &indexOffset,
                                                                 src, &srcOffset,
-                                                                tensor, &tensorOffset);
+                                                                self, &tensorOffset);
 
     int64_t indexValue = index.data[indexOffset];
     CUDA_KERNEL_ASSERT(indexValue >= 0 && indexValue < tensor.sizes[dim]);
-    tensorOffset += indexValue * tensor.strides[dim];
+    tensorOffset += indexValue * self.strides[dim];
 
-    tensor.data[tensorOffset] = src.data[srcOffset];
+    self.data[tensorOffset] = src.data[srcOffset];
   }
 }
   

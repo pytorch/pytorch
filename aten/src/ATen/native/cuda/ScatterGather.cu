@@ -1,7 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/TensorAdvancedIndexing.h>
-#include <ATen/native/cuda/ScatterGatherKernel.cuh>
+#include <ATen/native/cuda/ScatterGatherKernel.cu>
 
 namespace at { namespace native {
 namespace {
@@ -22,6 +22,31 @@ namespace {
           auto self_info = cuda::detail::getTensorInfo<scalar_t, unsigned int>(self);
           auto index_info = cuda::detail::getTensorInfo<int64_t, unsigned int>(index);
           auto src_info = cuda::detail::getTensorInfo<scalar_t, unsigned int>(src);
+
+          switch(index_info.dims) {
+          case 1:
+            scatter_kernel<unsigned int, scalar_t, 1><<<grid, block, 0, stream>>>(
+              self_info, src_info, index_info, dim, numel);
+            break;
+          case 2:
+            scatter_kernel<unsigned int, scalar_t, 2><<<grid, block, 0, stream>>>(
+              self_info, src_info, index_info, dim, numel);
+            break;
+          case 3:
+            scatter_kernel<unsigned int, scalar_t, 3><<<grid, block, 0, stream>>>(
+              self_info, src_info, index_info, dim, numel);
+            break;
+          default:
+            scatter_kernel<unsigned int, scalar_t, -1><<<grid, block, 0, stream>>>(
+              self_info, src_info, index_info, dim, numel);
+          }
+        }
+        else {
+          auto self_info = cuda::detail::getTensorInfo<scalar_t, uint64_t>(self);
+          auto index_info = cuda::detail::getTensorInfo<int64_t, uint64_t>(index);
+          auto src_info = cuda::detail::getTensorInfo<scalar_t, uint64_t>(src);
+          scatter_kernel<uint64_t, scalar_t, -1><<<grid, block, 0, stream>>>(
+            self_info, src_info, index_info, dim, numel);
         }
       });
     }
