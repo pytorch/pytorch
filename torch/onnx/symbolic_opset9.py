@@ -845,7 +845,7 @@ def logical_not(g, inp, output=None):
     if inp.type().scalarType() != 'Bool':
         inp = g.op("Cast", inp, to_i=sym_help.cast_pytorch_to_onnx['Bool'])
     op = g.op("Not", inp)
-    if output is not None:
+    if output is not None and output.type().scalarType() != 'Bool':
         to_type = output.type().scalarType()
         op = g.op("Cast", op, to_i=sym_help.cast_pytorch_to_onnx[to_type])
     return op
