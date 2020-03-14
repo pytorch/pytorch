@@ -195,6 +195,9 @@ PyObject* rpc_init(PyObject* /* unused */) {
           .def(
               py::pickle(
                   [](const PyRRef& self) {
+                    TORCH_CHECK(
+                        false,
+                        "Can not pickle rref in python pickler, rref can only be pickled in _InternalRPCPickler");
                     // __getstate__
                     return self.pickle();
                   },
@@ -202,6 +205,14 @@ PyObject* rpc_init(PyObject* /* unused */) {
                     // __setstate__
                     return PyRRef::unpickle(t);
                   }),
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "_serialize",
+              &PyRRef::pickle,
+              py::call_guard<py::gil_scoped_release>())
+          .def_static(
+              "_deserialize",
+              &PyRRef::unpickle,
               py::call_guard<py::gil_scoped_release>())
           // not releasing GIL to avoid context switch
           .def("__str__", &PyRRef::str);

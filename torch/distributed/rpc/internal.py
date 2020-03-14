@@ -7,6 +7,7 @@ import threading
 import traceback
 
 import torch
+import torch.distributed.rpc as rpc
 
 
 # Thread local tensor tables to store tensors while pickling torch.Tensor
@@ -37,6 +38,7 @@ class _InternalRPCPickler:
         if torch._six.PY3:
             self._dispatch_table = copyreg.dispatch_table.copy()
             self._dispatch_table[torch.Tensor] = self._tensor_reducer
+            self._dispatch_table[rpc.RRef] = self._rref_reducer
 
     @classmethod
     def _tensor_receiver(cls, tensor_index):
@@ -48,6 +50,14 @@ class _InternalRPCPickler:
         _thread_local_tensor_tables.send_tables.append(obj)
         tensor_index = len(_thread_local_tensor_tables.send_tables) - 1
         return (_InternalRPCPickler._tensor_receiver, (tensor_index,))
+
+    @classmethod
+    def _rref_receiver(cls, rref_fork_data):
+        return rpc.RRef._deserialize(rref_fork_data)
+
+    def _rref_reducer(self, obj):
+        rref_fork_data = obj._serialize()
+        return (_InternalRPCPickler._rref_receiver, (rref_fork_data, ))
 
     def serialize(self, obj):
         r"""
