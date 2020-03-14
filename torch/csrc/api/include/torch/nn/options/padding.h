@@ -22,7 +22,7 @@ struct TORCH_API ReflectionPadOptions {
   TORCH_ARG(ExpandingArray<D*2>, padding);
 };
 
-/// `ReflectionPadOptions` specialized for 1-D ReflectionPad.
+/// `ReflectionPadOptions` specialized for the `ReflectionPad1d` module.
 ///
 /// Example:
 /// ```
@@ -30,7 +30,7 @@ struct TORCH_API ReflectionPadOptions {
 /// ```
 using ReflectionPad1dOptions = ReflectionPadOptions<1>;
 
-/// `ReflectionPadOptions` specialized for 2-D ReflectionPad.
+/// `ReflectionPadOptions` specialized for the `ReflectionPad2d` module.
 ///
 /// Example:
 /// ```
@@ -54,7 +54,7 @@ struct TORCH_API ReplicationPadOptions {
   TORCH_ARG(ExpandingArray<D*2>, padding);
 };
 
-/// `ReplicationPadOptions` specialized for 1-D ReplicationPad.
+/// `ReplicationPadOptions` specialized for the `ReplicationPad1d` module.
 ///
 /// Example:
 /// ```
@@ -62,7 +62,7 @@ struct TORCH_API ReplicationPadOptions {
 /// ```
 using ReplicationPad1dOptions = ReplicationPadOptions<1>;
 
-/// `ReplicationPadOptions` specialized for 2-D ReplicationPad.
+/// `ReplicationPadOptions` specialized for the `ReplicationPad2d` module.
 ///
 /// Example:
 /// ```
@@ -70,7 +70,7 @@ using ReplicationPad1dOptions = ReplicationPadOptions<1>;
 /// ```
 using ReplicationPad2dOptions = ReplicationPadOptions<2>;
 
-/// `ReplicationPadOptions` specialized for 3-D ReplicationPad.
+/// `ReplicationPadOptions` specialized for the `ReplicationPad3d` module.
 ///
 /// Example:
 /// ```
@@ -80,7 +80,7 @@ using ReplicationPad3dOptions = ReplicationPadOptions<3>;
 
 // ============================================================================
 
-/// Options for a ZeroPad2d module.
+/// Options for the `ZeroPad2d` module.
 ///
 /// Example:
 /// ```
@@ -114,7 +114,7 @@ struct TORCH_API ConstantPadOptions {
   TORCH_ARG(double, value);
 };
 
-/// `ConstantPadOptions` specialized for 1-D ConstantPad.
+/// `ConstantPadOptions` specialized for the `ConstantPad1d` module.
 ///
 /// Example:
 /// ```
@@ -122,7 +122,7 @@ struct TORCH_API ConstantPadOptions {
 /// ```
 using ConstantPad1dOptions = ConstantPadOptions<1>;
 
-/// `ConstantPadOptions` specialized for 2-D ConstantPad.
+/// `ConstantPadOptions` specialized for the `ConstantPad2d` module.
 ///
 /// Example:
 /// ```
@@ -130,7 +130,7 @@ using ConstantPad1dOptions = ConstantPadOptions<1>;
 /// ```
 using ConstantPad2dOptions = ConstantPadOptions<2>;
 
-/// `ConstantPadOptions` specialized for 3-D ConstantPad.
+/// `ConstantPadOptions` specialized for the `ConstantPad3d` module.
 ///
 /// Example:
 /// ```
@@ -142,7 +142,13 @@ using ConstantPad3dOptions = ConstantPadOptions<3>;
 
 namespace functional {
 
-/// Options for a pad functional.
+/// Options for `torch::nn::functional::pad`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::pad(input, F::PadFuncOptions({1, 2, 2, 1, 1, 2}).mode(torch::kReplicate));
+/// ```
 struct TORCH_API PadFuncOptions {
   typedef c10::variant<
     enumtype::kConstant,

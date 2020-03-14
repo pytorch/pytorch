@@ -591,6 +591,29 @@ TEST(BoundShapeInference, FC3D) {
       {spec.max_batch_size, 16});
 }
 
+TEST(BoundShapeInference, Quantization) {
+  NetDef net;
+  net.add_op()->CopyFrom(CreateOperatorDef(
+      "FloatToFused8BitRowwiseQuantized", "", {"w"}, {"Out_w"}, {}));
+  ShapeInfoMap shape_map;
+  shape_map.emplace(
+      "w",
+      makeTensorInfo(
+          {TensorBoundShape_DimType_CONSTANT,
+           TensorBoundShape_DimType_CONSTANT},
+          {16, 64}));
+  BoundShapeSpec spec(20, 1000);
+  BoundShapeInferencer eng(spec);
+  eng.InferBoundShapeAndType(net, shape_map, nullptr);
+  const auto& out_shape = eng.shape_info();
+  verifyShapeInfo(
+      out_shape,
+      "Out_w",
+      {TensorBoundShape_DimType_CONSTANT, TensorBoundShape_DimType_CONSTANT},
+      {16, 72},
+      TensorProto_DataType_UINT8);
+}
+
 TEST(BoundShapeInference, Combo0) {
   NetDef net;
   net.add_op()->CopyFrom(CreateOperatorDef(
