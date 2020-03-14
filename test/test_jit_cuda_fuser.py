@@ -17,8 +17,6 @@ if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
     torch._C._jit_set_profiling_executor(True)
     torch._C._jit_set_profiling_mode(True)
 
-torch._C._jit_register_cuda_fuser()
-
 class TestCudaFuser(JitTestCase):
     def _has_cuda_fusion_group(self, graph):
         has_cuda_fusion_group = False
@@ -83,7 +81,9 @@ class TestCudaFuser(JitTestCase):
             o = t(x, y, 2.0)
             self.assertEqual(o, jit_o)
             self.assertTrue(self._has_cuda_fusion_group(t_jit.graph_for(x, y, 2.0)))
-    
+
 
 if __name__ == '__main__':
+    torch._C._jit_register_cuda_fuser()
     run_tests()
+    torch._C._jit_clear_cuda_fuser()
