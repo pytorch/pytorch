@@ -9,7 +9,7 @@ import onnx
 import caffe2.python.onnx.backend as c2
 
 class TestQuantizedOps(unittest.TestCase):
-    def generic_test(self, model, sample_inputs, input_names=None):
+    def generic_test(self, model, sample_inputs, input_names=None, decimal=3):
         torch.backends.quantized.engine = "qnnpack"
         pt_inputs = tuple(torch.from_numpy(x) for x in sample_inputs)
         model.qconfig = torch.quantization.default_qconfig
@@ -23,7 +23,7 @@ class TestQuantizedOps(unittest.TestCase):
         f.seek(0)
         onnx_model = onnx.load(f)
         caffe_res = c2.run_model(onnx_model, dict(zip(input_names, sample_inputs)))[0]
-        np.testing.assert_almost_equal(pytorch_res.numpy(), caffe_res, decimal=3)
+        np.testing.assert_almost_equal(pytorch_res.numpy(), caffe_res, decimal=decimal)
 
     def generic_unary_test(self, op):
         class QModule(torch.nn.Module):
@@ -203,6 +203,20 @@ class TestQuantizedOps(unittest.TestCase):
         x = np.random.rand(1, 2, 3, 4).astype("float32")
         y = np.random.rand(1, 4, 3, 4).astype("float32")
         self.generic_test(QConcatModule(), (x, y,), input_names=["x", "y"])
+
+    def test_max_pool2d(self):
+        class QMaxPool2dModule(torch.nn.Module):
+            def __init__(self):
+                super(QMaxPool2dModule, self).__init__()
+                self.quant1 = torch.quantization.QuantStub()
+                self.dequant = torch.quantization.DeQuantStub()
+
+            def forward(self, x):
+                res = torch.nn.functional.max_pool2d(self.quant1(x), kernel_size=2, stride=1, padding=0)
+                return self.dequant(res)
+
+        x = np.random.rand(1, 2, 8, 8).astype("float32")
+        self.generic_test(QMaxPool2dModule(), (x,), input_names=["x"], decimal=0)
 
 if __name__ == '__main__':
     unittest.main()
