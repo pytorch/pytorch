@@ -300,7 +300,7 @@ template <typename Derived>
 void RNNImplBase<Derived>::pretty_print(std::ostream& stream) const {
   const std::string name = this->name();
   const std::string name_without_impl = name.substr(0, name.size() - 4);
-  stream << name_without_impl << "(input_size=" << options_base.input_size()
+  stream << std::boolalpha << name_without_impl << "(input_size=" << options_base.input_size()
          << ", hidden_size=" << options_base.hidden_size()
          << ", num_layers=" << options_base.num_layers()
          << ", bias=" << options_base.bias()
