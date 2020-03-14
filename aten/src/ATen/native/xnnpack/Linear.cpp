@@ -72,15 +72,15 @@ Tensor run(
       Layout::ActivationND::batch(padded_input.sizes()),  // Batch,
       padded_input.data_ptr<float>(),                     // input
       output.data_ptr<float>(),                           // output
-      nullptr);                                           // threadpool
+      caffe2::xnnpack_threadpool());                      // threadpool
 
   TORCH_CHECK(
       xnn_status_success == setup_status,
       "xnn_setup_fully_connected_nc_f32 failed!");
 
   const xnn_status run_status = xnn_run_operator(
-      context.op.get(),         // operator
-      nullptr);                 // threadpool
+      context.op.get(),               // operator
+      caffe2::xnnpack_threadpool());  // threadpool
 
   TORCH_INTERNAL_ASSERT(
       xnn_status_success == run_status,
