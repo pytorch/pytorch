@@ -1,25 +1,14 @@
 #ifdef USE_XNNPACK
 
-#include <ATen/cpp_custom_type_hack.h>
 #include <ATen/native/xnnpack/Common.h>
 #include <ATen/native/xnnpack/Factory.h>
+#include <ATen/native/xnnpack/Linear.h>
 
 namespace at {
 namespace native {
 namespace xnnpack {
 namespace internal {
 namespace linear {
-
-struct Context final {
-  Operator linear_op;
-
-  struct Output final {
-    int64_t channels;
-  } output;
-
-  static constexpr float kMin = -std::numeric_limits<float>::infinity();
-  static constexpr float kMax = std::numeric_limits<float>::infinity();
-};
 
 namespace {
 
@@ -33,62 +22,19 @@ bool available(
     const float output_max) {
          // XNNPACK
   return xnnpack::internal::available() &&
-         // Weight
-         (2 == weight.ndimension()) &&
-         (c10::DeviceType::CPU == weight.device().type()) &&
-         (kFloat == weight.scalar_type()) &&
-         // Bias
-         ((bias && bias->defined()) ? ((1 == bias->ndimension()) &&
-                                      (c10::DeviceType::CPU == bias->device().type()) &&
-                                      (kFloat == bias->scalar_type()) &&
-                                      (weight.size(Layout::Filter::output)) == bias->size(0))
-                                    : true) &&
-         // Output Min / Max
-         (output_max > output_min) &&
-         true;
-}
-
-Context create(
-    const Tensor& weight,
-    const c10::optional<Tensor>& bias,
-    const float output_min,
-    const float output_max) {
-  const Tensor weight_contig = weight.contiguous();
-
-  TORCH_CHECK(
-      available(
-          weight_contig,
-          bias,
-          output_min,
-          output_max),
-      "XNNPACK Linear not available! "
-      "Reason: The provided (weight, bias, output_min, output_max) parameters are "
-      "either invalid individually or their combination is not supported by XNNPACK.");
-
-  xnn_operator_t linear_op{};
-
-  const xnn_status create_status = xnn_create_fully_connected_nc_f32(
-      weight_contig.size(Layout::Filter::input),                      // input_channels
-      weight_contig.size(Layout::Filter::output),                     // output_channels
-      weight_contig.size(Layout::Filter::input),                      // input_pixel_stride
-      weight_contig.size(Layout::Filter::output),                     // output_pixel_stride
-      weight_contig.data_ptr<float>(),                                // kernel
-      (bias && bias->defined()) ? bias->data_ptr<float>() : nullptr,  // bias
-      output_min,                                                     // output_min
-      output_max,                                                     // output_max
-      0u,                                                             // flags
-      &linear_op);                                                    // operator
-
-  TORCH_CHECK(
-      xnn_status_success == create_status,
-      "xnn_create_fully_connected_nc_f32 failed!");
-
-  return Context{
-    Operator(linear_op),
-    {
-      weight_contig.size(Layout::Filter::output),
-    }
-  };
+          // Weight
+          (2 == weight.ndimension()) &&
+          (c10::DeviceType::CPU == weight.device().type()) &&
+          (kFloat == weight.scalar_type()) &&
+          // Bias
+          ((bias && bias->defined()) ? ((1 == bias->ndimension()) &&
+                                       (c10::DeviceType::CPU == bias->device().type()) &&
+                                       (kFloat == bias->scalar_type()) &&
+                                       (weight.size(Layout::Filter::output)) == bias->size(0))
+                                     : true) &&
+          // Output Min / Max
+          (output_max > output_min) &&
+          true;
 }
 
 // TODO: Decouple and improve error handling and messages.
@@ -101,30 +47,30 @@ bool usable(const Tensor& input) {
 }
 
 Tensor run(
-    const Context& context,
+    const ContextLinear& context,
     const Tensor& input) {
   using namespace internal;
 
-  const Tensor& input_contig = input.contiguous();
+  const Tensor padded_input = allocate_padded_if_needed(input.contiguous());
 
   TORCH_CHECK(
-      usable(input_contig),
+      usable(padded_input),
       "XNNPACK Linear not usable! "
       "Reason: The provided input tensor is either invalid or unsupported by XNNPACK.");
 
-  const IntArrayRef input_size = input_contig.sizes();
+  const IntArrayRef input_size = padded_input.sizes();
   std::vector<int64_t> output_size(input_size.cbegin(), input_size.cend());
-  output_size.back() = context.output.channels;
+  output_size.back() = context.output_channels;
 
   Tensor output = empty_with_tail_padding(
       output_size,
-      input_contig.options().dtype(),
-      input_contig.suggest_memory_format());
+      padded_input.options().dtype(),
+      padded_input.suggest_memory_format());
 
   const xnn_status setup_status = xnn_setup_fully_connected_nc_f32(
-      context.linear_op.get(),                            // operator
-      Layout::ActivationND::batch(input_contig.sizes()),  // Batch,
-      input_contig.data_ptr<float>(),                     // input
+      context.op.get(),                                   // operator
+      Layout::ActivationND::batch(padded_input.sizes()),  // Batch,
+      padded_input.data_ptr<float>(),                     // input
       output.data_ptr<float>(),                           // output
       nullptr);                                           // threadpool
 
@@ -133,7 +79,7 @@ Tensor run(
       "xnn_setup_fully_connected_nc_f32 failed!");
 
   const xnn_status run_status = xnn_run_operator(
-      context.linear_op.get(),  // operator
+      context.op.get(),         // operator
       nullptr);                 // threadpool
 
   TORCH_INTERNAL_ASSERT(
@@ -159,6 +105,63 @@ Tensor create_and_run(
 }
 
 } // namespace
+
+ContextLinear create(
+    const Tensor& weight,
+    const c10::optional<Tensor>& bias,
+    const float output_min,
+    const float output_max) {
+  const Tensor weight_contig = weight.contiguous();
+
+  TORCH_CHECK(
+      available(
+          weight_contig,
+          bias,
+          output_min,
+          output_max),
+      "XNNPACK Linear not available! "
+      "Reason: The provided (weight, bias, output_min, output_max) parameters are "
+      "either invalid individually or their combination is not supported by XNNPACK.");
+
+  xnn_operator_t linear_op{};
+
+  const xnn_status create_status = xnn_create_fully_connected_nc_f32(
+      weight_contig.size(Layout::Filter::input),                        // input_channels
+      weight_contig.size(Layout::Filter::output),                       // output_channels
+      weight_contig.size(Layout::Filter::input),                        // input_pixel_stride
+      weight_contig.size(Layout::Filter::output),                       // output_pixel_stride
+      weight_contig.data_ptr<float>(),                                  // kernel
+      (bias && bias->defined()) ? bias->data_ptr<float>() : nullptr,  // bias
+      output_min,                                                     // output_min
+      output_max,                                                     // output_max
+      0u,                                                             // flags
+      &linear_op);                                                    // operator
+
+  TORCH_CHECK(
+      xnn_status_success == create_status,
+      "xnn_create_fully_connected_nc_f32 failed!");
+
+  return ContextLinear(
+    Operator(linear_op),
+    weight_contig.size(Layout::Filter::output)
+  );
+}
+
+c10::intrusive_ptr<xnnpack::XNNPackLinearOpContext>
+    LinearPrePack::operator()(
+        Tensor weight,
+        c10::optional<Tensor> bias) {
+      return xnnpack::XNNPackLinearOpContext::create_context(
+          std::move(weight), std::move(bias), {}, {});
+}
+
+Tensor LinearPacked::operator()(
+    const Tensor& input,
+    const c10::intrusive_ptr<xnnpack::XNNPackLinearOpContext>& op_context) {
+      return
+        xnnpack::internal::linear::run((op_context.get())->get_context(), input);
+}
+
 } // namespace linear
 } // namespace internal
 
@@ -169,8 +172,8 @@ bool use_linear(
   return internal::linear::available(
             weight,
             bias,
-            internal::linear::Context::kMin,
-            internal::linear::Context::kMax) &&
+            ContextLinear::kMin,
+            ContextLinear::kMax) &&
          internal::linear::usable(input);
 }
 
@@ -182,42 +185,13 @@ Tensor linear(
       input,
       weight,
       bias,
-      internal::linear::Context::kMin,
-      internal::linear::Context::kMax);
+      ContextLinear::kMin,
+      ContextLinear::kMax);
 }
 
 } // namespace xnnpack
 
-Tensor _linear_prepack(
-    const Tensor& weight,
-    const Tensor& bias,
-    const c10::optional<double> output_min,
-    const c10::optional<double> output_max) {
-  return cpp_custom_type_hack::create(
-      std::make_unique<xnnpack::internal::linear::Context>(
-          xnnpack::internal::linear::create(
-              weight,
-              bias,
-              output_min ? *output_min : xnnpack::internal::linear::Context::kMin,
-              output_max ? *output_max : xnnpack::internal::linear::Context::kMax)),
-      weight.options());
-}
-
-Tensor _linear_packed(
-    const Tensor& packed_weight,
-    const Tensor& input) {
-  return xnnpack::internal::linear::run(
-      cpp_custom_type_hack::cast<xnnpack::internal::linear::Context>(packed_weight),
-      input);
-}
-
 } // namespace native
 } // namespace at
-
-namespace caffe2 {
-
-CAFFE_KNOWN_TYPE(at::native::xnnpack::internal::linear::Context);
-
-} // namespace caffe2
 
 #endif /* USE_XNNPACK */
