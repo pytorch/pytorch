@@ -6,6 +6,13 @@
 namespace at { namespace native {
 namespace {
   void scatter_cuda_(Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
+    int64_t numel = index.numel();
+    int64_t block = 512;
+    int64_t grid = std::min<int64_t>((numel + block - 1) / block, 2048L);
+
+    if (numel > 0) {
+      
+    }
   }
 
   void scatter_fill_cuda_(Tensor& self, int64_t dim, const Tensor& index, Scalar src) {
