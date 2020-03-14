@@ -162,14 +162,16 @@ py::object PyRRef::localValue() {
 }
 
 std::string PyRRef::str() const {
-  std::ostringstream ss;
   if (rref_->isOwner()) {
-    ss << "OwnerRRef(" << rref_->rrefId() << ")";
+    return c10::str("OwnerRRef(", rref_->rrefId(), ")");
   } else {
-    ss << "UserRRef(RRefId = " << rref_->rrefId() << ", ForkId = "
-       << c10::static_intrusive_pointer_cast<UserRRef>(rref_)->forkId() << ")";
+    return c10::str(
+        "UserRRef(RRefId = ",
+        rref_->rrefId(),
+        ", ForkId = ",
+        c10::static_intrusive_pointer_cast<UserRRef>(rref_)->forkId(),
+        ")");
   }
-  return ss.str();
 }
 
 py::tuple PyRRef::pickle() const {

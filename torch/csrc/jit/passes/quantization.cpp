@@ -4,6 +4,8 @@
 #include <torch/csrc/jit/passes/fuse_linear.h>
 #include <torch/csrc/jit/passes/quantization_patterns.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
+#include <torch/csrc/jit/passes/inliner.h>
+#include <torch/csrc/jit/passes/freeze_module.h>
 
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/irparser.h>
@@ -137,20 +139,25 @@ bool isFunctionNode(Node* n,
 // the quantization parameters for output given inputs
 std::vector<size_t> getGeneralOpTensorInputIndexes(Node* n) {
   std::vector<std::string> single_input_aten_funcs = {
-    "adaptive_avg_pool2d",
-    "max_pool2d",
-    "avg_pool2d",
-    "flatten",
-    "max",
-    "min",
-    "mean",
-    // TODO: sort returns a tuple of Tensors, we have
-    // to extend the API to support that
-    // "sort",
-    "__interpolate",
-    "__upsample",
-    "__upsample_bilinear",
-    "__upsample_nearest",
+      "max_pool2d",
+      "avg_pool2d",
+      "flatten",
+      "max",
+      "min",
+      "mean",
+      "upsample_nearest1d",
+      "upsample_nearest2d",
+      "upsample_nearest3d",
+      "adaptive_avg_pool1d",
+      "adaptive_avg_pool2d",
+      "adaptive_avg_pool3d",
+      "upsample_linear1d",
+      "upsample_bilinear2d",
+      "upsample_trilinear3d",
+      "upsample_bicubic2d",
+      // TODO: sort returns a tuple of Tensors, we have
+      // to extend the API to support that
+      // "sort",
   };
   std::vector<std::string> single_input_call_funcs = {
     "adaptive_avg_pool2d",
@@ -731,7 +738,7 @@ ModuleMethodVector InsertObserversHelper::getInvokedMethods(
 void InsertObserversHelper::insertObserverFor(
     Value* v,
     Module& module,
-    const script::Module& observer_module,
+    const Module& observer_module,
     NameModuleVector& observer_name_and_modules) {
   if (observed_values_.count(v)) {
     return;
@@ -2007,12 +2014,12 @@ void FoldQuantNodesIntoInputsOutputs(std::shared_ptr<Graph>& graph) {
   throw std::runtime_error("Pass not implemented yet!");
 }
 
-void SwapFunctionalLinear(script::Module& module) {
+void SwapFunctionalLinear(Module& module) {
   for (auto& method : module.get_methods()) {
     std::shared_ptr<Graph> g = method.graph();
     SwapFunctionalLinear(g);
   }
-  for (script::Module m : module.children()) {
+  for (Module m : module.children()) {
     SwapFunctionalLinear(m);
   }
 }
@@ -2397,6 +2404,18 @@ void FoldPrepackedWeightIntoModule(
 void DedupModuleUses(Module& module) {
   ModuleUseDeduper d(module);
   d.dedup();
+}
+
+script::Module Finalize(script::Module& module) {
+  SwapFunctionalLinear(module);
+  auto graph = module.get_method("forward").graph();
+  Inline(*graph);
+  ReplicateDeQuant(graph);
+  SwapDeQuant(graph);
+  InsertPrepackUnpack(graph);
+  ConstantPropagation(graph);
+  QuantFusion(graph);
+  return freeze_module(module);
 }
 
 } // namespace jit
