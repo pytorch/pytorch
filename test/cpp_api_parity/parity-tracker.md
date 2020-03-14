@@ -84,9 +84,9 @@ torch::nn::CrossMapLRN2d|Yes|No
 torch::nn::RNN|No|No
 torch::nn::LSTM|No|No
 torch::nn::GRU|No|No
-torch::nn::RNNCell|No|No
-torch::nn::LSTMCell|No|No
-torch::nn::GRUCell|No|No
+torch::nn::RNNCell|Yes|No
+torch::nn::LSTMCell|Yes|No
+torch::nn::GRUCell|Yes|No
 torch::nn::Transformer|No|No
 torch::nn::TransformerEncoder|No|No
 torch::nn::TransformerDecoder|No|No
