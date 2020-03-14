@@ -3,7 +3,7 @@ import unittest
 import torch
 import torch.distributed.autograd as dist_autograd
 from torch.testing import FileCheck
-from torch.testing._internal.dist_utils import dist_init
+from torch.testing._internal.dist_utils import dist_init, worker_name
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
 )
@@ -56,7 +56,7 @@ class JitDistAutogradTest(RpcAgentTestFixture):
         with dist_autograd.context() as context_id:
             t1 = torch.rand((3, 3), requires_grad=True)
             t2 = torch.rand((3, 3), requires_grad=True)
-            dst_worker_name = "worker{}".format((self.rank + 1) % self.world_size)
+            dst_worker_name = worker_name((self.rank + 1) % self.world_size)
             res = fork_add(t1, t2, dst_worker_name)
             loss = res.sum()
             dist_autograd.backward(context_id, [loss])

@@ -198,6 +198,10 @@ int64_t DistAutogradContainer::getMaxId() {
   return max_id_;
 }
 
+void DistAutogradContainer::forceCurrentContextId(int64_t contextId) {
+  current_context_id_ = contextId;
+}
+
 void DistAutogradContainer::setCurrentContextId(int64_t contextId) {
   TORCH_INTERNAL_ASSERT(
       current_context_id_ == kInvalidContextId,

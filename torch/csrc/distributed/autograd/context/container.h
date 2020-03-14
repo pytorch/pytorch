@@ -76,6 +76,11 @@ class TORCH_API DistAutogradContainer {
   // Can set current context id if there is no valid context yet
   static void setCurrentContextId(int64_t contextId);
 
+  // Forcibly sets the thread local current context id. Should only be used in
+  // cases where you know what you're doing and need to override the thread
+  // local. Otherwise, use setCurrentContextId instead.
+  static void forceCurrentContextId(int64_t contextId);
+
   // Clear current context id
   void clearCurrentContext();
 

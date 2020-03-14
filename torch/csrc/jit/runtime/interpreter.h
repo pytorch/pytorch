@@ -4,6 +4,7 @@
 #include <vector>
 
 #include <ATen/core/ivalue.h>
+#include <torch/csrc/ThreadLocalState.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 namespace at {
@@ -94,20 +95,18 @@ struct InterpreterContinuation {
   InterpreterContinuation(
       InterpreterState state_,
       Stack stack_,
-      bool grad_mode_enabled_,
-      int64_t dist_autograd_context_id_)
+      std::shared_ptr<torch::ThreadLocalState> thread_local_state_)
       : state(state_),
         stack(std::move(stack_)),
-        grad_mode_enabled(grad_mode_enabled_),
-        dist_autograd_context_id(dist_autograd_context_id_) {}
+        thread_local_state(std::move(thread_local_state_)) {}
 
   void operator()();
 
  private:
   InterpreterState state;
   Stack stack;
-  bool grad_mode_enabled;
-  int64_t dist_autograd_context_id;
+  // Thread local state that needs to be carried over to the continuation.
+  std::shared_ptr<torch::ThreadLocalState> thread_local_state;
 };
 
 // what is the tensors type, including state from the current execution context

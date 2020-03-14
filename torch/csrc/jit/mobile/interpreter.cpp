@@ -22,19 +22,19 @@ bool InterpreterState::run(Stack& stack) {
   while (true) {
     Instruction inst = code_->instructions_[pc];
 
-//    std::cout << "RUNNING " << pc << " " << code_->instructions_[pc];
-//    if (inst.op == OP) {
-//      std::cout << ", " << code_->op_names_[inst.X].name << "." <<
-//        code_->op_names_[inst.X].overload_name;
-//    }
-//    std::cout << std::endl;
-//    for (auto val : stack) {
-//      if (val.isTensor()) {
-//        std::cout << val.toTensor().sizes() << std::endl;
-//      } else {
-//        std::cout << val << std::endl;
-//      }
-//    }
+  //  std::cout << "RUNNING " << pc << " " << code_->instructions_[pc];
+  //  if (inst.op == OP) {
+  //    std::cout << ", " << code_->op_names_[inst.X].name << "." <<
+  //      code_->op_names_[inst.X].overload_name;
+  //  }
+  //  std::cout << std::endl;
+  //  for (auto val : stack) {
+  //    if (val.isTensor()) {
+  //      std::cout << val.toTensor().sizes() << std::endl;
+  //    } else {
+  //      std::cout << val << std::endl;
+  //    }
+  //  }
     switch (inst.op) {
       case OP: {
 #if defined(PYTORCH_MOBILE_OPERATOR_OBSERVER)
@@ -141,7 +141,7 @@ bool InterpreterState::run(Stack& stack) {
       } break;
       case WARN: {
         drop(stack, 1);
-        AT_WARN(pop(stack).toStringRef());
+        TORCH_WARN(pop(stack).toStringRef());
         ++pc;
       } break;
       default:

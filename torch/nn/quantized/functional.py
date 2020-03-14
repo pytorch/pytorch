@@ -43,6 +43,36 @@ def avg_pool2d(input, kernel_size, stride=None, padding=0, ceil_mode=False,
                                           ceil_mode, count_include_pad,
                                           divisor_override)
 
+def avg_pool3d(input, kernel_size, stride=None, padding=0, ceil_mode=False,
+               count_include_pad=True, divisor_override=None):
+    r"""
+    Applies 3D average-pooling operation in :math:`kD \ times kH \times kW` regions by step size
+    :math:`sD \times sH \times sW` steps. The number of output features is equal to the number of
+    input planes.
+
+    .. note:: The input quantization parameters propagate to the output.
+
+    Args:
+        input: quantized input tensor :math:`(\text{minibatch} , \text{in\_channels} , iH , iW)`
+        kernel_size: size of the pooling region. Can be a single number or a
+          tuple `(kD, kH, kW)`
+        stride: stride of the pooling operation. Can be a single number or a
+          tuple `(sD, sH, sW)`. Default: :attr:`kernel_size`
+        padding: implicit zero paddings on both sides of the input. Can be a
+          single number or a tuple `(padD, padH, padW)`. Default: 0
+        ceil_mode: when True, will use `ceil` instead of `floor` in the formula
+            to compute the output shape. Default: ``False``
+        count_include_pad: when True, will include the zero-padding in the
+            averaging calculation. Default: ``True``
+        divisor_override: if specified, it will be used as divisor, otherwise
+             size of the pooling region will be used. Default: None
+    """
+    if not input.is_quantized:
+        raise ValueError("Input to 'quantized.avg_pool3d' must be quantized!")
+    return torch.nn.functional.avg_pool3d(input, kernel_size, stride, padding,
+                                          ceil_mode, count_include_pad,
+                                          divisor_override)
+
 def adaptive_avg_pool2d(input, output_size):
     # type: (Tensor, BroadcastingList2[int]) -> Tensor
     r"""
@@ -196,7 +226,7 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
 
     .. note:: The input quantization parameters propagate to the output.
 
-    .. note:: Only 2D input is supported for quantized inputs
+    .. note:: Only 2D/3D input is supported for quantized inputs
 
     .. note:: Only the following modes are supported for the quantized inputs:
 
@@ -322,6 +352,50 @@ def leaky_relu(input, negative_slope=0.01, inplace=False,
     else:
         result = torch._C._nn.leaky_relu(input, negative_slope)
     return result
+
+def hardtanh(input, min_val=-1., max_val=1., inplace=False):
+    # type: (Tensor, float, float, bool) -> Tensor
+    r"""
+    hardtanh(input, min_val=-1., max_val=1., inplace=False) -> Tensor
+
+    Applies the quantized HardTanh function element-wise, with scale and
+    zero-point carried over from the input tensor. See :class:`~torch.nn.Hardtanh`
+    for more details.
+    """
+    if not input.is_quantized:
+        raise ValueError("Input to 'quantized.hardtanh' must be quantized!")
+    if inplace:
+        return torch._C._nn.hardtanh_(input, min_val, max_val)
+    return torch._C._nn.hardtanh(input, min_val, max_val)
+
+def elu(input, alpha=1., inplace=False, scale=None, zero_point=None):
+    r"""
+    Applies the quantized ELU function element-wise:
+
+    .. math::
+        \text{ELU}(x) = \max(0,x) + \min(0, \alpha * (\exp(x) - 1))
+
+    Args:
+        input: quantized input
+        alpha: the :math:`\alpha` value for the ELU formulation. Default: 1.0
+        inplace: Inplace modification of the input tensor
+        scale, zero_point: Scale and zero point of the output tensor.
+    """
+    if not input.is_quantized:
+        raise ValueError("Input to 'quantized.elu' must be quantized!")
+    if (scale is not None) != (zero_point is not None):
+        raise ValueError("Either both or none of (scale, zero_point) must be specified!")
+
+    if scale is not None and zero_point is not None:
+        assert not inplace, "Cannot rescale with `inplace`"
+        output = torch.quantize_per_tensor(torch.zeros(input.shape),
+                                           scale, int(zero_point), input.dtype)
+        torch._C._nn.elu(input, alpha, out=output)
+        return output
+    elif inplace:
+        return torch._C._nn.elu_(input, alpha)
+    else:
+        return torch._C._nn.elu(input, alpha)
 
 def clamp(input, min_, max_):
     # type: (Tensor, float, float) -> Tensor
