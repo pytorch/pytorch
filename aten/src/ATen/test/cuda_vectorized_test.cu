@@ -78,7 +78,7 @@ __global__ void vectorized_copy(scalar_t *dst, scalar_t *src) {
   array_t data;
   data[0] = reinterpret_cast<char *>(dst);
   data[1] = reinterpret_cast<char *>(src);
-  int idx = block_work_size * blockIdx.x;
+  int idx = blockIdx.x;
   using vectorized = policies::vectorized<vec_size, array_t>;
   auto policy = vectorized(data);
   scalar_t buf[thread_work_size];
