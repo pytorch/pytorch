@@ -328,7 +328,9 @@ class FunctionInliner : public IRMutator {
   FunctionInliner(const std::vector<Function*>& funcs) : funcs_(funcs) {
     for (Function* func : funcs) {
       // TODO: Support multiple-output functions
-      CHECK(func->func_vars().size() == 1);
+      if (func->func_vars().size() != 1) {
+        throw unimplemented_lowering();
+      }
       func_var_set_.insert(func->func_var(0));
     }
   }
@@ -343,7 +345,10 @@ class FunctionInliner : public IRMutator {
   const Expr* mutate(const FunctionCall* v) override {
     Function* func = v->tensor()->function();
     // TODO: Support multiple-output functions
-    CHECK(func->func_vars().size() == 1);
+    if (func->func_vars().size() != 1) {
+      throw unimplemented_lowering();
+    }
+
     if (should_inline(func)) {
       // Insert the caller/callee pair into the mapping.
       for (int i = 0; i < func->ndim(); i++) {
@@ -591,10 +596,16 @@ std::vector<Tensor*> LoopNest::FindAllNeededTensors(
     }
     if (all_processed) {
       result.push_back(t);
-      CHECK(!processed.count(t));
+      if (processed.count(t)) {
+        throw malformed_input();
+      }
+
       processed.insert(t);
     } else {
-      CHECK(!queued.count(t));
+      if (queued.count(t)) {
+        throw malformed_input();
+      }
+
       q.push(t);
       queued.insert(t);
     }
@@ -639,7 +650,11 @@ Stmt* LoopNest::LowerToStmt(Tensor* t) {
   if (f->ndim() == 0) {
     return body;
   }
-  CHECK(f->ndim() >= 1);
+
+  if (f->ndim() == 0) {
+    throw malformed_input();
+  }
+
   for (size_t i = 0; i < f->ndim(); i++) {
     // Going in reverse order: from innermost loop to the outermost
     size_t dim_index = f->ndim() - i - 1;
@@ -711,7 +726,11 @@ void LoopNest::SplitWithTail(
     For** inner,
     For** tail) {
   Block* p = dynamic_cast<Block*>(f->get_parent());
-  CHECK(f && p);
+  if (!f) {
+    throw malformed_input(f);
+  } else if (!p) {
+    throw malformed_input(p);
+  }
 
   bool tail_is_needed = true;
   if (dynamic_cast<const IntImm*>(f->start()) &&
@@ -800,8 +819,10 @@ void LoopNest::SplitWithMask(For* f, int factor, For** outer, For** inner) {
   // are only materializing predicates at the last, lowering, step.
   if (tail_is_needed) {
     const IntImm* start = dynamic_cast<const IntImm*>(f->start());
-    CHECK(start && start->value() == 0)
-        << "Non-zero start is not implemented yet";
+    if (!start || start->value() != 0) {
+      throw unimplemented_lowering();
+    }
+
     const Expr* predicate =
         CompareSelect::make(ExprHandle(f->var()), ExprHandle(f->stop()), kLT)
             .node();

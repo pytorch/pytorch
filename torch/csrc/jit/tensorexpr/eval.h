@@ -62,7 +62,9 @@ class Value {
 #define VALUE_AS_DISPATCH(Type, Name)             \
   template <>                                     \
   inline Type Value::as<Type>() const {           \
-    CHECK_EQ(dtype_, k##Name) << "invalid dtype"; \
+    if (dtype_ != k##Name) {                      \
+      throw unsupported_dtype();                  \
+    }                                             \
     return Name##values[0];                       \
   }
 AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, VALUE_AS_DISPATCH);
@@ -71,7 +73,9 @@ AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, VALUE_AS_DISPATCH);
 #define VALUE_AS_VEC_DISPATCH(Type, Name)                                \
   template <>                                                            \
   inline const std::vector<Type>& Value::as_vec<Type>() const {          \
-    CHECK_EQ(dtype_.scalar_type(), ScalarType::Name) << "invalid dtype"; \
+    if (dtype_.scalar_type() != ScalarType::Name) {                      \
+      throw unsupported_dtype();                                         \
+    }                                                                    \
     return Name##values;                                                 \
   }
 AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, VALUE_AS_VEC_DISPATCH);
@@ -91,8 +95,7 @@ mod_value(T lhs, T rhs) {
 }
 
 inline bool mod_value(bool lhs, bool rhs) {
-  LOG(FATAL) << "Attempted modulus of bool";
-  return false;
+  throw std::runtime_error("Attempted modulus of bool");
 }
 
 class SimpleIREvaluator : public CodeGen, public IRVisitor {
@@ -102,7 +105,9 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
   ~SimpleIREvaluator() override {}
 
   TORCH_API void call(const std::vector<CallArg>& args) override {
-    CHECK_EQ(args.size(), buffer_args().size());
+    if (args.size() != buffer_args().size()) {
+      throw malformed_input();
+    }
     for (size_t i = 0; i < args.size(); i++) {
       bind(buffer_args()[i], args[i]);
     }
@@ -317,7 +322,9 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     Value lhs_v = value_;
     v->rhs()->accept(this);
     Value rhs_v = value_;
-    CHECK_EQ(lhs_v.dtype(), rhs_v.dtype());
+    if (lhs_v.dtype() != rhs_v.dtype()) {
+      throw malformed_input(v);
+    }
     IRNodeType expr_type = v->expr_type();
     if (expr_type == IRNodeType::kAnd || expr_type == IRNodeType::kOr ||
         expr_type == IRNodeType::kXor || expr_type == IRNodeType::kLshift ||
@@ -353,8 +360,10 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     v->ret_val2()->accept(this);
     Value ret_val2_v = value_;
 
-    CHECK_EQ(lhs_v.dtype(), rhs_v.dtype());
-    CHECK_EQ(ret_val1_v.dtype(), ret_val2_v.dtype());
+    if (lhs_v.dtype() != rhs_v.dtype() ||
+        ret_val1_v.dtype() != ret_val2_v.dtype()) {
+      throw malformed_input(v);
+    }
 
     switch (lhs_v.dtype().scalar_type()) {
 #define TYPE_CASE(Type, Name)                          \
@@ -378,40 +387,59 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
 
   TORCH_API void visit(const Let* v) override {
     const Var* var = dynamic_cast<const Var*>(v->var());
-    CHECK(var != nullptr);
+    if (!var) {
+      throw malformed_input(v);
+    }
     v->value()->accept(this);
     Value value = value_;
     auto iter = eval_context_.find(var);
-    // TODO: make the same value settable multiple times.
-    CHECK(iter == eval_context_.end())
-        << "var must not exist in the context before";
-    eval_context_[var] = value_;
+    if (iter != eval_context_.end()) {
+      // Save the old value
+      auto stash = iter->second;
+      iter->second = value;
 
-    v->body()->accept(this);
+      v->body()->accept(this);
 
-    eval_context_.erase(var);
+      // Restore the old value
+      eval_context_[var] = stash;
+    } else {
+      eval_context_[var] = value_;
+      v->body()->accept(this);
+      eval_context_.erase(var);
+    }
   }
 
   TORCH_API void visit(const LetStmt* v) override {
     const Var* var = v->var();
-    CHECK(var != nullptr);
+    if (!var) {
+      throw malformed_input(v);
+    }
+
     v->value()->accept(this);
     Value value = value_;
     auto iter = eval_context_.find(var);
-    // TODO: make the same value settable multiple times.
-    CHECK(iter == eval_context_.end())
-        << "var must not exist in the context before";
-    eval_context_[var] = value_;
+    if (iter != eval_context_.end()) {
+      // Save the old value
+      auto stash = iter->second;
+      iter->second = value;
 
-    v->body()->accept(this);
+      v->body()->accept(this);
 
-    eval_context_.erase(var);
+      // Restore the old value
+      eval_context_[var] = stash;
+    } else {
+      eval_context_[var] = value_;
+      v->body()->accept(this);
+      eval_context_.erase(var);
+    }
   }
 
   TORCH_API void visit(const Var* v) override {
     auto iter = eval_context_.find(v);
-    CHECK(iter != eval_context_.end())
-        << "var must be defined in the context before";
+    if (iter == eval_context_.end()) {
+      throw malformed_input(v);
+    }
+
     value_ = iter->second;
   }
 
@@ -447,7 +475,10 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     src_value->accept(this);
     Dtype dst_dtype = v->dtype();
     Dtype src_dtype = src_value->dtype();
-    CHECK_EQ(src_dtype.lanes(), dst_dtype.lanes());
+    if (src_dtype.lanes() != dst_dtype.lanes()) {
+      throw malformed_input(v);
+    }
+
 
     if (src_dtype != dst_dtype) {
       switch (src_dtype.scalar_type()) {
@@ -469,9 +500,10 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     int start = value_.as<int>();
     v->stop()->accept(this);
     int stop = value_.as<int>();
-    auto iter = eval_context_.find(var_node);
-    CHECK(iter == eval_context_.end())
-        << "var in For must not exist in eval context";
+    if (eval_context_.count(var_node)) {
+      throw malformed_input(v);
+    }
+
     for (int i = start; i < stop; i++) {
       eval_context_[var_node] = Value(i);
       if (v->body()) {
@@ -525,8 +557,9 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
   TORCH_API void visit(const Load* v) override {
     const Var* base_node = v->base_handle();
     auto iter = buffer_mapping_.find(base_node);
-    CHECK(iter != buffer_mapping_.end())
-        << "missing buffer binding: " << base_node->name_hint();
+    if (iter == buffer_mapping_.end()) {
+      throw malformed_input(v);
+    }
     void* ptr = iter->second;
 
     v->index()->accept(this);
@@ -556,14 +589,20 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
   TORCH_API void visit(const Store* v) override {
     const Var* base_node = v->base_handle();
     auto iter = buffer_mapping_.find(base_node);
-    CHECK(iter != buffer_mapping_.end());
+    if (iter == buffer_mapping_.end()) {
+      throw malformed_input(v);
+    }
+
     void* ptr = iter->second;
 
     v->index()->accept(this);
     std::vector<int> index = value().as_vec<int>();
     v->mask()->accept(this);
     std::vector<int> mask = value().as_vec<int>();
-    CHECK_EQ(index.size(), mask.size());
+    if (index.size() != mask.size()) {
+      throw malformed_input(v);
+    }
+
     ScalarType v_sdtype = v->value()->dtype().scalar_type();
 
     switch (v_sdtype) {
@@ -571,7 +610,9 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
   case ScalarType::Name: {                                  \
     v->value()->accept(this);                               \
     std::vector<Type> value = this->value().as_vec<Type>(); \
-    CHECK_EQ(index.size(), value.size());                   \
+    if (index.size() != value.size()) {                     \
+      throw malformed_input(v);                             \
+    }                                                       \
     Type* ptr##Name = static_cast<Type*>(ptr);              \
     for (size_t i = 0; i < index.size(); i++) {             \
       if (mask[i]) {                                        \
@@ -587,7 +628,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
   }
 
   TORCH_API void visit(const BaseCallNode* v) override {
-    LOG(FATAL) << "unsupported visit to BaseCallNode";
+    throw unimplemented_lowering(v);
   }
 
   TORCH_API void visit(const Intrinsics* v) override {
@@ -603,10 +644,15 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     std::vector<float> v2;
     if (values.size() >= 2ULL) {
       v2 = values[1].as_vec<float>();
-      CHECK_EQ(v1.size(), v2.size()) << "mismatch vectorize sizes";
+      if (v1.size() != v2.size()) {
+        throw malformed_input(v);
+      }
     }
-    CHECK_LE(values.size(), 2ULL)
-        << "no support for intrinsics for more than two operand yet";
+
+    if (values.size() > 2) {
+      throw unimplemented_lowering(v);
+    }
+
     std::vector<float> result(v1.size(), -1);
     if (values.size() == 1ULL) {
       for (size_t i = 0; i < v1.size(); i++) {
@@ -759,7 +805,9 @@ class VarSubMutator : public IRMutator {
       const ExprHandle& key = entry.first;
       const ExprHandle& value = entry.second;
       const Var* key_var = key.AsNode<Var>();
-      CHECK(key_var != nullptr);
+      if (!key_var) {
+        throw malformed_input();
+      }
       var_mapping_[key_var] = value;
     }
   }

@@ -61,6 +61,7 @@ class LLVMCodeGenImpl : public IRVisitor {
   LLVMCodeGenImpl(
       Stmt* stmt,
       const std::vector<CodeGen::BufferArg>& args,
+      at::Device device,
       Dtype dtype);
   ~LLVMCodeGenImpl() = default;
 
@@ -155,9 +156,10 @@ LLVMCodeGen::LLVMCodeGen(Stmt* stmt)
 LLVMCodeGen::LLVMCodeGen(
     Stmt* stmt,
     const std::vector<BufferArg>& args,
+    at::Device device,
     Dtype dtype)
-    : CodeGen(stmt, args),
-      impl_(std::make_unique<LLVMCodeGenImpl>(stmt, args, dtype)) {}
+    : CodeGen(stmt, args, device),
+      impl_(std::make_unique<LLVMCodeGenImpl>(stmt, args, device, dtype)) {}
 
 static void* argToPtr(
     const CodeGen::BufferArg& bufferArg,
@@ -182,8 +184,10 @@ static void* argToPtr(
 }
 
 void LLVMCodeGen::call(const std::vector<CallArg>& args) {
-  CHECK_EQ(args.size(), buffer_args().size())
-      << "args: " << args.size() << ", buffers: " << buffer_args().size();
+  if (args.size() != buffer_args().size()) {
+    throw malformed_input();
+  }
+
   std::vector<void*> argv;
   for (size_t i = 0; i < buffer_args().size(); i++) {
     auto const& bufferArg = buffer_args()[i];
@@ -205,6 +209,7 @@ llvm::JITTargetAddress LLVMCodeGenImpl::getKernelAddress() const {
 LLVMCodeGenImpl::LLVMCodeGenImpl(
     Stmt* stmt,
     const std::vector<CodeGen::BufferArg>& args,
+    at::Device device,
     Dtype dtype)
     : context_(std::make_unique<llvm::LLVMContext>()), irb_(getContext()) {
   // Manually map types to LLVM types.
@@ -324,8 +329,9 @@ void LLVMCodeGenImpl::emitKernel(
 #if DEBUG_PRINT
   llvm::errs() << *module_;
 #endif
-  CHECK(!llvm::verifyFunction(*fn_, &llvm::outs()))
-      << "Function verification failed";
+  if (llvm::verifyFunction(*fn_, &llvm::outs())) {
+    throw std::runtime_error("Function verification failed");
+  }
   optimize(*module_);
 
 #if DEBUG_PRINT
@@ -359,7 +365,7 @@ void LLVMCodeGenImpl::visit(const Add* v) {
   } else if (!lfp && !rfp) {
     value_ = irb_.CreateAdd(lhs, rhs);
   } else {
-    LOG(FATAL) << "Unhandled mismatch add arg types";
+    throw malformed_input(v);
   }
 }
 
@@ -377,7 +383,7 @@ void LLVMCodeGenImpl::visit(const Sub* v) {
   } else if (!lfp && !rfp) {
     value_ = irb_.CreateSub(lhs, rhs);
   } else {
-    LOG(FATAL) << "Unhandled mismatch sub arg types";
+    throw malformed_input(v);
   }
 }
 
@@ -395,7 +401,7 @@ void LLVMCodeGenImpl::visit(const Mul* v) {
   } else if (!lfp && !rfp) {
     value_ = irb_.CreateMul(lhs, rhs);
   } else {
-    LOG(FATAL) << "Unhandled mismatch mul arg types";
+    throw malformed_input(v);
   }
 }
 
@@ -413,7 +419,7 @@ void LLVMCodeGenImpl::visit(const Div* v) {
   } else if (!lfp && !rfp) {
     value_ = irb_.CreateSDiv(lhs, rhs);
   } else {
-    LOG(FATAL) << "Unhandled mismatch div arg types";
+    throw malformed_input(v);
   }
 }
 
@@ -428,7 +434,7 @@ void LLVMCodeGenImpl::visit(const And* v) {
   if (!lfp && !rfp) {
     value_ = irb_.CreateAnd(lhs, rhs);
   } else {
-    LOG(FATAL) << "Unhandled mismatch And arg types";
+    throw malformed_input(v);
   }
 }
 
@@ -443,7 +449,7 @@ void LLVMCodeGenImpl::visit(const Or* v) {
   if (!lfp && !rfp) {
     value_ = irb_.CreateOr(lhs, rhs);
   } else {
-    LOG(FATAL) << "Unhandled mismatch Or arg types";
+    throw malformed_input(v);
   }
 }
 
@@ -458,7 +464,7 @@ void LLVMCodeGenImpl::visit(const Xor* v) {
   if (!lfp && !rfp) {
     value_ = irb_.CreateXor(lhs, rhs);
   } else {
-    LOG(FATAL) << "Unhandled mismatch And arg types";
+    throw malformed_input(v);
   }
 }
 
@@ -473,7 +479,7 @@ void LLVMCodeGenImpl::visit(const Lshift* v) {
   if (!lfp && !rfp) {
     value_ = irb_.CreateShl(lhs, rhs);
   } else {
-    LOG(FATAL) << "Unhandled mismatch And arg types";
+    throw malformed_input(v);
   }
 }
 
@@ -488,7 +494,7 @@ void LLVMCodeGenImpl::visit(const Rshift* v) {
   if (!lfp && !rfp) {
     value_ = irb_.CreateLShr(lhs, rhs);
   } else {
-    LOG(FATAL) << "Unhandled mismatch And arg types";
+    throw malformed_input(v);
   }
 }
 
@@ -663,7 +669,7 @@ void LLVMCodeGenImpl::visit(const Cast* v) {
         value_ = irb_.CreateFPToSI(value_, dstType);
       }
     } else {
-      LOG(FATAL) << "Unsupported cast!";
+      throw unimplemented_lowering(v);
     }
   } else if (srcType->isIntOrIntVectorTy()) {
     if (dstType->isFPOrFPVectorTy()) {
@@ -675,7 +681,7 @@ void LLVMCodeGenImpl::visit(const Cast* v) {
     } else if (dstType->isIntOrIntVectorTy()) {
       value_ = irb_.CreateIntCast(value_, dstType, !destUnsigned);
     } else {
-      LOG(FATAL) << "Unsupported cast!";
+      throw unimplemented_lowering(v);
     }
   }
 }
@@ -692,7 +698,10 @@ void LLVMCodeGenImpl::visit(const Var* v) {
 
 void LLVMCodeGenImpl::visit(const Let* v) {
   const Var* var = dynamic_cast<const Var*>(v->var());
-  CHECK(var != nullptr);
+  if (!var) {
+    throw malformed_input(v);
+  }
+
   v->value()->accept(this);
   auto value = value_;
   if (!varToVal_.count(var)) {
@@ -711,7 +720,10 @@ void LLVMCodeGenImpl::visit(const Let* v) {
 // TODO: refactor this and merge with Let
 void LLVMCodeGenImpl::visit(const LetStmt* v) {
   const Var* var = v->var();
-  CHECK(var != nullptr);
+  if (!var) {
+    throw malformed_input(v);
+  }
+
   v->value()->accept(this);
   auto value = value_;
   if (!varToVal_.count(var)) {
@@ -733,6 +745,18 @@ void LLVMCodeGenImpl::visit(const Ramp* v) {
   v->stride()->accept(this);
   auto stride = this->value_;
   int lanes = v->lanes();
+
+  if (llvm::ConstantInt* const_stride = llvm::dyn_cast<llvm::ConstantInt>(stride)) {
+    std::vector<llvm::Constant*> vals = { llvm::ConstantInt::get(base->getType(), 0) };
+    for (int i = 1; i < lanes; ++i) {
+      vals.push_back(llvm::ConstantExpr::getAdd(vals.back(), const_stride));
+    }
+
+    llvm::Value* offsets = llvm::ConstantVector::get(vals);
+    llvm::Value* splat = irb_.CreateVectorSplat(lanes, base);
+    value_ = irb_.CreateAdd(splat, offsets);
+    return;
+  }
 
   llvm::Type* vecType = nullptr;
   switch (v->dtype().scalar_type()) {
@@ -789,18 +813,18 @@ llvm::Value* LLVMCodeGenImpl::emitMaskedLoad(
 }
 
 void LLVMCodeGenImpl::visit(const Load* v) {
-  v->base_handle()->accept(this);
-  auto base = this->value_;
-  v->index()->accept(this);
-  auto idx = this->value_;
-  v->mask()->accept(this);
-  auto mask = this->value_;
-
   if (v->dtype().lanes() == 1) {
+    v->base_handle()->accept(this);
+    auto base = this->value_;
+    v->index()->accept(this);
+    auto idx = this->value_;
+
     auto* maskimm = dynamic_cast<const IntImm*>(v->mask());
     if (maskimm && maskimm->value() == 1) {
       value_ = emitUnmaskedLoad(base, idx);
     } else {
+      v->mask()->accept(this);
+      auto mask = this->value_;
       value_ = emitMaskedLoad(base, idx, mask);
     }
     return;
@@ -834,7 +858,11 @@ void LLVMCodeGenImpl::visit(const Load* v) {
   if (unmasked_load && idx_ramp) {
     auto* stride_imm = dynamic_cast<const IntImm*>(idx_ramp->stride());
     if (stride_imm && stride_imm->value() == 1) {
-      auto first_idx = irb_.CreateExtractElement(idx, uint64_t{0ULL});
+      v->base_handle()->accept(this);
+      auto base = this->value_;
+      idx_ramp->base()->accept(this);
+      auto first_idx = this->value_;
+
       auto addr = irb_.CreateGEP(base, first_idx);
       auto vaddr = irb_.CreateBitOrPointerCast(
           addr, llvm::PointerType::get(loadType, 0));
@@ -844,6 +872,13 @@ void LLVMCodeGenImpl::visit(const Load* v) {
   }
 
   // Fallback to a scalar implementation
+  v->base_handle()->accept(this);
+  auto base = this->value_;
+  v->index()->accept(this);
+  auto idx = this->value_;
+  v->mask()->accept(this);
+  auto mask = this->value_;
+
   llvm::Value* load = llvm::UndefValue::get(loadType);
   for (int i = 0; i < v->dtype().lanes(); ++i) {
     auto sub_idx = irb_.CreateExtractElement(idx, i);
@@ -943,24 +978,25 @@ void LLVMCodeGenImpl::emitMaskedStore(
 }
 
 void LLVMCodeGenImpl::visit(const Store* v) {
-  v->base_handle()->accept(this);
-  auto base = this->value_;
-  v->index()->accept(this);
-  auto idx = this->value_;
-  v->mask()->accept(this);
-  auto mask = this->value_;
-  v->value()->accept(this);
-  auto val = this->value_;
-
-  value_ = llvm::ConstantInt::get(IntTy_, 0);
-
   if (v->value()->dtype().lanes() == 1) {
+    v->base_handle()->accept(this);
+    auto base = this->value_;
+    v->index()->accept(this);
+    auto idx = this->value_;
+    v->value()->accept(this);
+    auto val = this->value_;
+
     auto* maskimm = dynamic_cast<const IntImm*>(v->mask());
     if (maskimm && maskimm->value() == 1) {
       emitUnmaskedStore(base, idx, val);
     } else {
+      v->mask()->accept(this);
+      auto mask = this->value_;
+
       emitMaskedStore(base, idx, mask, val);
     }
+
+    value_ = llvm::ConstantInt::get(IntTy_, 0);
     return;
   }
 
@@ -974,19 +1010,33 @@ void LLVMCodeGenImpl::visit(const Store* v) {
     }
   }
 
+  v->base_handle()->accept(this);
+  auto base = this->value_;
+  v->value()->accept(this);
+  auto val = this->value_;
+
   // Handle the case where the store is contiguous and unmasked efficiently
   auto* idx_ramp = dynamic_cast<const Ramp*>(v->index());
   if (unmasked_store && idx_ramp) {
     auto* stride_imm = dynamic_cast<const IntImm*>(idx_ramp->stride());
     if (stride_imm && stride_imm->value() == 1) {
-      auto first_idx = irb_.CreateExtractElement(idx, uint64_t{0});
+      idx_ramp->base()->accept(this);
+      auto first_idx = value_;
+
       auto addr = irb_.CreateGEP(base, first_idx);
       auto vaddr = irb_.CreateBitOrPointerCast(
           addr, llvm::PointerType::get(val->getType(), 0));
       irb_.CreateAlignedStore(val, vaddr, 4);
+
+      value_ = llvm::ConstantInt::get(IntTy_, 0);
       return;
     }
   }
+
+  v->index()->accept(this);
+  auto idx = this->value_;
+  v->mask()->accept(this);
+  auto mask = this->value_;
 
   // Fallback to a scalar implementation
   for (int i = 0; i < v->value()->dtype().lanes(); ++i) {
@@ -999,6 +1049,8 @@ void LLVMCodeGenImpl::visit(const Store* v) {
       emitMaskedStore(base, sub_idx, sub_mask, sub_val);
     }
   }
+
+  value_ = llvm::ConstantInt::get(IntTy_, 0);
 }
 
 void LLVMCodeGenImpl::visit(const Broadcast* v) {

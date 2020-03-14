@@ -76,7 +76,10 @@ class LetStmt : public StmtNode<LetStmt> {
       const VarHandle& var,
       const ExprHandle& value,
       Stmt* body) {
-    CHECK(!body->get_parent());
+    if (body->get_parent()) {
+      throw malformed_input(body);
+    }
+
     return new LetStmt(var.node(), value.node(), body);
   }
 
@@ -110,12 +113,18 @@ class Block : public StmtNode<Block> {
   }
 
   void append_stmt(Stmt* s) {
-    CHECK(!s->get_parent());
+    if (s->get_parent()) {
+      throw malformed_input(s);
+    }
+
     stmts_.push_back(s);
     set_parent(s, this);
   }
   bool replace_stmt(Stmt* old_stmt, Stmt* new_stmt) {
-    CHECK(!new_stmt->get_parent());
+    if (new_stmt->get_parent()) {
+      throw malformed_input(new_stmt);
+    }
+
     auto pos = std::find(stmts_.begin(), stmts_.end(), old_stmt);
     if (pos == stmts_.end()) {
       return false;
@@ -132,7 +141,10 @@ class Block : public StmtNode<Block> {
 
   explicit Block(const std::vector<Stmt*>& stmts) {
     for (Stmt* s : stmts) {
-      CHECK(!s->get_parent());
+      if (s->get_parent()) {
+        throw malformed_input(s);
+      }
+
       stmts_.push_back(s);
       set_parent(s, this);
     }
@@ -195,10 +207,18 @@ class TORCH_API Store : public StmtNode<Store> {
       const Expr* value,
       const Expr* mask)
       : base_handle_(base_handle), index_(index), value_(value), mask_(mask) {
-    CHECK_EQ(base_handle_->dtype(), kHandle);
-    CHECK_EQ(index->dtype().lanes(), mask->dtype().lanes());
-    CHECK_EQ(index->dtype().lanes(), value->dtype().lanes());
-    CHECK_EQ(index->dtype().scalar_type(), ScalarType::Int);
+    if (base_handle_->dtype() != kHandle) {
+      throw malformed_input(base_handle);
+    }
+
+    if (index->dtype().lanes() != mask->dtype().lanes() ||
+        index->dtype().lanes() != value->dtype().lanes()) {
+      throw malformed_input();
+    }
+
+    if (index->dtype().scalar_type() != ScalarType::Int) {
+      throw unsupported_dtype();
+    }
   }
 
  private:
@@ -325,14 +345,21 @@ class LoopOptions {
   }
 
   std::string gpu_block_index_str() const {
-    DCHECK(is_gpu_block_index());
+    if (!is_gpu_block_index()) {
+      throw malformed_input();
+    }
+
     static const char* kBlockIndexNames[] = {
         "blockIdx.x",
         "blockIdx.y",
         "blockIdx.z",
         "blockIdx.w",
     };
-    DCHECK(gpu_block_index_ >= 0 && gpu_block_index_ < 4);
+
+    if (gpu_block_index_ < 0 || gpu_block_index_ >= 4) {
+      throw malformed_input();
+    }
+
     return kBlockIndexNames[gpu_block_index_];
   }
 
@@ -358,10 +385,17 @@ class LoopOptions {
   }
 
   std::string gpu_thread_index_str() const {
-    DCHECK(is_gpu_thread_index());
+    if (!is_gpu_thread_index()) {
+      throw malformed_input();
+    }
+
     static const char* kThreadIndexNames[] = {
         "threadIdx.x", "threadIdx.y", "threadIdx.z", "threadIdx.w"};
-    DCHECK(gpu_thread_index_ >= 0 && gpu_thread_index_ < 4);
+
+    if (gpu_thread_index_ < 0 || gpu_thread_index_ >= 4) {
+      throw malformed_input();
+    }
+
     return kThreadIndexNames[gpu_thread_index_];
   }
 
@@ -433,8 +467,16 @@ class For : public StmtNode<For> {
 
   For(const Var* var, const Expr* start, const Expr* stop, Stmt* body)
       : var_(var), start_(start), stop_(stop) {
-    CHECK(var && start && stop && body);
-    CHECK(!body->get_parent());
+    if (!var) {
+      throw malformed_input(var);
+    } else if (!start) {
+      throw malformed_input(start);
+    } else if (!stop) {
+      throw malformed_input(stop);
+    } else if (!body || body->get_parent()) {
+      throw malformed_input(body);
+    }
+
     Block* b = dynamic_cast<Block*>(body);
     if (!b) {
       b = new Block({body});
@@ -449,8 +491,16 @@ class For : public StmtNode<For> {
       Stmt* body,
       const LoopOptions& loop_options)
       : var_(var), start_(start), stop_(stop), loop_options_(loop_options) {
-    CHECK(var && start && stop && body);
-    CHECK(!body->get_parent());
+    if (!var) {
+      throw malformed_input(var);
+    } else if (!start) {
+      throw malformed_input(start);
+    } else if (!stop) {
+      throw malformed_input(stop);
+    } else if (!body || body->get_parent()) {
+      throw malformed_input(body);
+    }
+
     Block* b = dynamic_cast<Block*>(body);
     if (!b) {
       b = new Block({body});

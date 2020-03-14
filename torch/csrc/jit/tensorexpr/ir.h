@@ -150,8 +150,12 @@ class And : public BinaryOpNode<And> {
  public:
   And(const Expr* lhs, const Expr* rhs)
       : BinaryOpNode(lhs, rhs, IRNodeType::kAnd) {
-    CHECK_EQ(lhs->dtype().scalar_type(), ScalarType::Int);
-    CHECK_EQ(lhs->dtype(), rhs->dtype());
+    if (lhs->dtype().scalar_type() != ScalarType::Int) {
+      throw unsupported_dtype();
+    }
+    if (lhs->dtype() != rhs->dtype()) {
+      throw malformed_input();
+    }
   }
 };
 
@@ -159,8 +163,12 @@ class Or : public BinaryOpNode<Or> {
  public:
   Or(const Expr* lhs, const Expr* rhs)
       : BinaryOpNode(lhs, rhs, IRNodeType::kOr) {
-    CHECK_EQ(lhs->dtype().scalar_type(), ScalarType::Int);
-    CHECK_EQ(lhs->dtype(), rhs->dtype());
+    if (lhs->dtype().scalar_type() != ScalarType::Int) {
+      throw unsupported_dtype();
+    }
+    if (lhs->dtype() != rhs->dtype()) {
+      throw malformed_input();
+    }
   }
 };
 
@@ -168,8 +176,12 @@ class Xor : public BinaryOpNode<Xor> {
  public:
   Xor(const Expr* lhs, const Expr* rhs)
       : BinaryOpNode(lhs, rhs, IRNodeType::kXor) {
-    CHECK_EQ(lhs->dtype().scalar_type(), ScalarType::Int);
-    CHECK_EQ(lhs->dtype(), rhs->dtype());
+    if (lhs->dtype().scalar_type() != ScalarType::Int) {
+      throw unsupported_dtype();
+    }
+    if (lhs->dtype() != rhs->dtype()) {
+      throw malformed_input();
+    }
   }
 };
 
@@ -177,8 +189,12 @@ class Lshift : public BinaryOpNode<Lshift> {
  public:
   Lshift(const Expr* lhs, const Expr* rhs)
       : BinaryOpNode(lhs, rhs, IRNodeType::kLshift) {
-    CHECK_EQ(lhs->dtype().scalar_type(), ScalarType::Int);
-    CHECK_EQ(lhs->dtype(), rhs->dtype());
+    if (lhs->dtype().scalar_type() != ScalarType::Int) {
+      throw unsupported_dtype();
+    }
+    if (lhs->dtype() != rhs->dtype()) {
+      throw malformed_input();
+    }
   }
 };
 
@@ -186,8 +202,12 @@ class Rshift : public BinaryOpNode<Rshift> {
  public:
   Rshift(const Expr* lhs, const Expr* rhs)
       : BinaryOpNode(lhs, rhs, IRNodeType::kRshift) {
-    CHECK_EQ(lhs->dtype().scalar_type(), ScalarType::Int);
-    CHECK_EQ(lhs->dtype(), rhs->dtype());
+    if (lhs->dtype().scalar_type() != ScalarType::Int) {
+      throw unsupported_dtype();
+    }
+    if (lhs->dtype() != rhs->dtype()) {
+      throw malformed_input();
+    }
   }
 };
 
@@ -327,7 +347,9 @@ class Ramp : public ExprNode<Ramp> {
         base_(base),
         stride_(stride),
         lanes_(lanes) {
-    CHECK_EQ(stride->dtype(), base->dtype());
+    if (stride->dtype() != base->dtype()) {
+      throw malformed_input();
+    }
   }
 
  private:
@@ -421,9 +443,15 @@ class IfThenElse : public ExprNode<IfThenElse> {
 
   IfThenElse(const Expr* c, const Expr* t, const Expr* f)
       : ExprNodeBase(t->dtype()), condition_(c), true_(t), false_(f) {
-    CHECK_EQ(c->dtype().scalar_type(), ScalarType::Int);
-    CHECK_EQ(c->dtype().lanes(), 1);
-    CHECK_EQ(t->dtype(), f->dtype());
+    if (c->dtype().scalar_type() != ScalarType::Int) {
+      throw unsupported_dtype();
+    }
+    if (c->dtype().lanes() != 1) {
+      throw unsupported_dtype();
+    }
+    if (t->dtype() != f->dtype()) {
+      throw malformed_input();
+    }
   }
 
  private:
@@ -506,7 +534,9 @@ class TORCH_API CompareSelect : public ExprNode<CompareSelect> {
       const ExprHandle& lhs,
       const ExprHandle& rhs,
       CompareSelectOperation cmp_op) {
-    CHECK_EQ(lhs.dtype(), rhs.dtype());
+    if (lhs.dtype() != rhs.dtype()) {
+      throw malformed_input();
+    }
     return ExprHandle(new CompareSelect(
         lhs.node(),
         rhs.node(),
@@ -521,8 +551,10 @@ class TORCH_API CompareSelect : public ExprNode<CompareSelect> {
       const ExprHandle& ret_val1,
       const ExprHandle& ret_val2,
       CompareSelectOperation cmp_op) {
-    CHECK_EQ(lhs.dtype(), rhs.dtype());
-    CHECK_EQ(ret_val1.dtype(), ret_val2.dtype());
+    if (lhs.dtype() != rhs.dtype() ||
+        ret_val1.dtype() != ret_val2.dtype()) {
+      throw malformed_input();
+    }
     return ExprHandle(new CompareSelect(
         lhs.node(), rhs.node(), ret_val1.node(), ret_val2.node(), cmp_op));
   }
@@ -546,7 +578,9 @@ class TORCH_API CompareSelect : public ExprNode<CompareSelect> {
         ret_val1_(ret_val1),
         ret_val2_(ret_val2),
         compare_op_(cmp_op) {
-    CHECK_EQ(ret_val1->dtype(), ret_val2->dtype());
+    if (ret_val1->dtype() != ret_val2->dtype()) {
+      throw malformed_input();
+    }
   }
 };
 
@@ -689,13 +723,17 @@ class Intrinsics : public CallNode<Intrinsics> {
   Intrinsics(IntrinsicsOp op_type, Dtype dtype)
       : BaseClass(IntrinsicsDtype(op_type, dtype), kIntrinsics, {}),
         op_type_(op_type) {
-    CHECK_EQ(OpArgCount(op_type), 0);
+    if (OpArgCount(op_type) != 0) {
+      throw malformed_input();
+    }
   }
 
   Intrinsics(IntrinsicsOp op_type, const Expr* v1)
       : BaseClass(IntrinsicsDtype(op_type, v1->dtype()), kIntrinsics, {v1}),
         op_type_(op_type) {
-    CHECK_EQ(OpArgCount(op_type), 1);
+    if (OpArgCount(op_type) != 1) {
+      throw malformed_input();
+    }
   }
 
   Intrinsics(IntrinsicsOp op_type, const Expr* v1, const Expr* v2)
@@ -704,13 +742,17 @@ class Intrinsics : public CallNode<Intrinsics> {
             kIntrinsics,
             {v1, v2}),
         op_type_(op_type) {
-    CHECK_EQ(OpArgCount(op_type), 2);
+    if (OpArgCount(op_type) != 2) {
+      throw malformed_input();
+    }
   }
 
   Intrinsics(IntrinsicsOp op_type, const std::vector<const Expr*>& params)
       : BaseClass(IntrinsicsDtype(op_type, params), kIntrinsics, params),
         op_type_(op_type) {
-    CHECK_EQ(OpArgCount(op_type), nparams());
+    if (OpArgCount(op_type) != nparams()) {
+      throw malformed_input();
+    }
   }
 
   bool isPure() const {

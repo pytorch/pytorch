@@ -46,8 +46,7 @@ static const Expr* mutate_binary_op(
     case IRNodeType::kRshift:
       return new Rshift(lhs_new, rhs_new);
     default:
-      LOG(FATAL) << "unsupported expr_type: " << static_cast<int>(expr_type);
-      return nullptr;
+      throw unsupported_dtype();
   }
 }
 

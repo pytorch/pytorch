@@ -1171,11 +1171,18 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             break;
           }
           case GUARD: {
-            auto t = stack.back().toTensor();
-            const TypePtr& expected = af.types[inst.X];
-            bool comp = expected->cast<TensorType>()
-                            ->isCompatibleWithInCurrentExecutionContext(t);
-            push(stack, comp);
+            if (!stack.back().isTensor()) {
+              // stack.back() is an Uninitialized IValue and this is a guard
+              // on a block output. Uninitialized IValues are never used
+              // so it's safe to pass this guard check
+              push(stack, true);
+            } else {
+              auto t = stack.back().toTensor();
+              const TypePtr& expected = af.types[inst.X];
+              bool comp = expected->cast<TensorType>()
+                              ->isCompatibleWithInCurrentExecutionContext(t);
+              push(stack, comp);
+            }
             ++af.pc;
           } break;
           case TAIL_CALL: {

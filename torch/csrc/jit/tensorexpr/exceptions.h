@@ -25,19 +25,40 @@ namespace tensorexpr {
 
 class unsupported_dtype : public std::runtime_error {
  public:
-  unsupported_dtype()
-    : std::runtime_error("UNSUPPORTED_DTYPE") {}
-  unsupported_dtype(const std::string& err)
-    : std::runtime_error("UNSUPPORTED_DTYPE: " + err) {}
+  explicit unsupported_dtype()
+    : std::runtime_error("UNSUPPORTED DTYPE") {}
+  explicit unsupported_dtype(const std::string& err)
+    : std::runtime_error("UNSUPPORTED DTYPE: " + err) {}
+};
+
+class out_of_range_index : public std::runtime_error {
+ public:
+  explicit out_of_range_index()
+    : std::runtime_error("OUT OF RANGE INDEX") {}
+  explicit out_of_range_index(const std::string& err)
+    : std::runtime_error("OUT OF RANGE INDEX: " + err) {}
 };
 
 class unimplemented_lowering : public std::runtime_error {
  public:
-  unimplemented_lowering(const Expr* expr)
-    : std::runtime_error(std::to_string(expr)) { }
-  unimplemented_lowering(const Stmt* stmt)
-    : std::runtime_error(std::to_string(stmt)) { }
+  explicit unimplemented_lowering() : std::runtime_error("UNIMPLEMENTED LOWERING") { }
+  explicit unimplemented_lowering(const Expr* expr)
+    : std::runtime_error("UNIMPLEMENTED LOWERING: " + std::to_string(expr)) { }
+  explicit unimplemented_lowering(const Stmt* stmt)
+    : std::runtime_error("UNIMPLEMENTED LOWERING: " + std::to_string(stmt)) { }
 };
+
+class malformed_input : public std::runtime_error {
+ public:
+  explicit malformed_input() : std::runtime_error("MALFORMED INPUT") { }
+  explicit malformed_input(const std::string& err)
+    : std::runtime_error("MALFORMED INPUT: " + err) {}
+  explicit malformed_input(const Expr* expr)
+    : std::runtime_error("MALFORMED INPUT: " + std::to_string(expr)) { }
+  explicit malformed_input(const Stmt* stmt)
+    : std::runtime_error("MALFORMED INPUT: " + std::to_string(stmt)) { }
+};
+
 
 } // namespace tensorexpr
 } // namespace jit

@@ -21,23 +21,23 @@ inline std::vector<int64_t> bufferSizes(const T& t) {
 
 template <typename T>
 inline std::vector<ExprHandle> computeIndicesToBroadcast(
-    const std::vector<T>& output_axes,
-    const std::vector<ExprHandle>& input_sizes) {
-  TORCH_CHECK(
-      output_axes.size() >= input_sizes.size(),
-      "Cannot broadcast to a lower rank tensor");
+    const std::vector<T>& outputAxes,
+    const std::vector<ExprHandle>& inputSizes) {
+  if (outputAxes.size() < inputSizes.size()) {
+    throw malformed_input("Cannot broadcast to a lower rank tensor");
+  }
   std::vector<ExprHandle> bcast;
-  auto axis_it = output_axes.rbegin();
-  auto size_it = input_sizes.rbegin();
-  while (size_it != input_sizes.rend()) {
-    auto const& size = size_it->AsNode<IntImm>();
+  auto axisIt = outputAxes.rbegin();
+  auto sizeIt = inputSizes.rbegin();
+  while (sizeIt != inputSizes.rend()) {
+    auto const& size = sizeIt->AsNode<IntImm>();
     if (size && size->value() == 1) {
       bcast.push_back(0);
     } else {
-      bcast.push_back(*axis_it);
+      bcast.push_back(*axisIt);
     }
-    ++axis_it;
-    ++size_it;
+    ++axisIt;
+    ++sizeIt;
   }
   std::reverse(bcast.begin(), bcast.end());
   return bcast;
@@ -76,7 +76,7 @@ class TensorExprKernel {
   template <typename T, typename T1>
   ExprHandle chunk(
       const T& t,
-      size_t chunk_idx,
+      size_t chunkIdx,
       size_t dim,
       size_t chunks,
       const std::vector<T1>& axes) {
@@ -86,7 +86,7 @@ class TensorExprKernel {
     std::vector<ExprHandle> indices;
     for (size_t i = 0; i < axes.size(); ++i) {
       if (i == dim) {
-        indices.push_back(axes[i] + IntImm::make(chunk_idx * step));
+        indices.push_back(axes[i] + IntImm::make(chunkIdx * step));
       } else {
         indices.push_back(axes[i]);
       }
@@ -112,53 +112,53 @@ class TensorExprKernel {
     return constant(v);
   }
 
-  Tensor* ComputeOneOperand(
+  Tensor* computeOneOperand(
       const std::string& name,
       const torch::jit::Value* v,
-      const std::function<ExprHandle(const ExprHandle&)>& inner_expr);
+      const std::function<ExprHandle(const ExprHandle&)>& innerExpr);
 
-  Tensor* ComputeTwoOperand(
-      const std::string& name,
-      const torch::jit::Value* v,
-      const std::function<ExprHandle(const ExprHandle&, const ExprHandle&)>&
-          inner_expr);
-
-  Tensor* ComputeTwoOperandWithAlpha(
+  Tensor* computeTwoOperand(
       const std::string& name,
       const torch::jit::Value* v,
       const std::function<ExprHandle(const ExprHandle&, const ExprHandle&)>&
-          inner_expr);
+          innerExpr);
 
-  Tensor* ComputeThreeOperand(
+  Tensor* computeTwoOperandWithAlpha(
+      const std::string& name,
+      const torch::jit::Value* v,
+      const std::function<ExprHandle(const ExprHandle&, const ExprHandle&)>&
+          innerExpr);
+
+  Tensor* computeThreeOperand(
       const std::string& name,
       const torch::jit::Value* v,
       const std::function<
           ExprHandle(const ExprHandle&, const ExprHandle&, const ExprHandle&)>&
-          inner_expr);
+          innerExpr);
 
-  Tensor* ComputeConditionWithTwoOperand(
+  Tensor* computeConditionWithTwoOperand(
       const std::string& name,
       const torch::jit::Value* v,
       const std::function<
           ExprHandle(const ExprHandle&, const ExprHandle&, const ExprHandle&)>&
-          inner_expr);
+          innerExpr);
 
-  Tensor* ComputeFourOperand(
+  Tensor* computeFourOperand(
       const std::string& name,
       const torch::jit::Value* v,
       const std::function<ExprHandle(
           const ExprHandle&,
           const ExprHandle&,
           const ExprHandle&,
-          const ExprHandle&)>& inner_expr);
+          const ExprHandle&)>& innerExpr);
 
-  Tensor* ComputeValue(const torch::jit::Value* v);
+  Tensor* computeValue(const torch::jit::Value* v);
 
-  void LowerToBackend(BackendType backend_type);
+  void lowerToBackend(BackendType backendType);
 
-  void PickAndCheckBackendType(const at::ArrayRef<IValue>& inputs);
+  void pickAndCheckBackendType(const at::ArrayRef<IValue>& inputs);
 
-  void CodeGenRun(const std::vector<CodeGen::CallArg>& run_args);
+  void codeGenRun(const std::vector<CodeGen::CallArg>& runArgs);
 
   void bindInput(const torch::jit::Value* input);
 
@@ -205,16 +205,16 @@ class TensorExprKernel {
     std::vector<ShapeArg> strideArgs_;
   };
 
-  int64_t n_inputs_ = 0;
+  int64_t nInputs_ = 0;
   std::vector<KernelArg> kernelArgs_;
-  std::vector<Tensor*> tensor_outputs_;
+  std::vector<Tensor*> tensorOutputs_;
   std::unordered_map<int64_t, Tensor*> tensors_;
   std::unordered_map<int64_t, VarHandle> scalars_;
-  std::unique_ptr<CodeGen> codegen_;
-  KernelArena kernel_arena_;
-  BackendType backend_type_ = BackendType::kUninitialized;
+  std::unordered_map<size_t, std::unique_ptr<CodeGen>> codegenCache_;
+  KernelArena kernelArena_;
+  BackendType backendType_ = BackendType::kUninitialized;
   at::Device device_ = at::kCPU;
-  std::vector<TypePtr> input_types_;
+  std::vector<TypePtr> inputTypes_;
   std::shared_ptr<Graph> graph_;
   Code code_;
   bool fallback_{false};
@@ -222,9 +222,9 @@ class TensorExprKernel {
   bool hasBroadcast_{false};
 };
 
-TORCH_API int& GetTECudaPointwiseLoopLevels();
-TORCH_API int& GetTECudaPointwiseBlockCount();
-TORCH_API int& GetTECudaPointwiseBlockSize();
+TORCH_API int& getTECudaPointwiseLoopLevels();
+TORCH_API int& getTECudaPointwiseBlockCount();
+TORCH_API int& getTECudaPointwiseBlockSize();
 
 } // namespace tensorexpr
 } // namespace jit

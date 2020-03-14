@@ -63,6 +63,7 @@ class CudaPrinter : public IRPrinter {
   }
 
   using IRPrinter::name_manager;
+  using IRPrinter::visit;
 
  private:
   std::vector<const Expr*> gpu_block_extents_;
@@ -75,12 +76,19 @@ class CudaPrinter : public IRPrinter {
 class TORCH_API CudaCodeGen : public CodeGen {
  public:
   template <typename... Ts>
-  CudaCodeGen(Stmt* stmt, Ts... ts) : CodeGen(stmt, std::forward<Ts>(ts)...) {
+  CudaCodeGen(Stmt* stmt, Ts... ts)
+      : CodeGen(
+            stmt,
+            std::vector<BufferArg>({BufferArg(ts)...}),
+            at::Device(at::kCUDA, at::cuda::current_device())) {
     Initialize();
   }
 
-  CudaCodeGen(Stmt* stmt, const std::vector<BufferArg>& buffer_args)
-      : CodeGen(stmt, buffer_args) {
+  CudaCodeGen(
+      Stmt* stmt,
+      const std::vector<BufferArg>& buffer_args,
+      at::Device device = at::Device(at::kCUDA, at::cuda::current_device()))
+      : CodeGen(stmt, buffer_args, device) {
     Initialize();
   }
 

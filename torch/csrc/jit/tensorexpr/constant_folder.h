@@ -314,8 +314,7 @@ class ConstantFolder : public IRMutator {
       case IRNodeType::kRshift:
         return new Rshift(lhs, rhs);
       default:
-        LOG(FATAL) << "unsupported expr_type: " << static_cast<int>(expr_type);
-        return nullptr;
+        throw unsupported_dtype();
     }
   }
 
