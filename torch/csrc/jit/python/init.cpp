@@ -46,6 +46,7 @@
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/passes/utils/check_alias_annotation.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
+#include <torch/csrc/jit/passes/xnnpack_rewrite.h>
 #include <torch/csrc/jit/runtime/print_handler.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/python/python_arg_flatten.h>
@@ -408,6 +409,16 @@ void initJITBindings(PyObject* module) {
           "_jit_fuser_get_fused_kernel_code",
           [](Graph& g, std::vector<at::Tensor> inps) {
             return debugGetFusedKernelCode(g, inps);
+          })
+      .def(
+          "_jit_pass_insert_xnnpack_ops",
+          [](std::shared_ptr<Graph>& graph) {
+            return insertXNNPACKOps(graph);
+          })
+      .def(
+          "_jit_pass_insert_xnnpack_ops",
+          [](script::Module& module) {
+            return insertXNNPACKOps(module);
           })
       .def(
           "_jit_pass_onnx_unpack_quantized_weights",
