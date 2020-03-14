@@ -23,6 +23,8 @@ namespace rpc {
 
 namespace {
 
+constexpr std::chrono::milliseconds kDeleteAllUsersTimeout(100000);
+
 template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
 
@@ -113,7 +115,12 @@ PyObject* rpc_init(PyObject* /* unused */) {
       shared_ptr_class_<PyRRef>(module, "RRef", R"(
           A class encapsulating a reference to a value of some type on a remote
           worker. This handle will keep the referenced remote value alive on the
-          worker.
+          worker. A ``UserRRef`` will be deleted when 1) no references to it in
+          both the application code and in the local RRef context, or 2) the
+          application has called a graceful shutdown. Invoking methods on a
+          deleted RRef leads to undefined behaviors. RRef implementation only
+          offers best-effort error detection, and applications should not use
+          ``UserRRef``s after ``rpc.shutdown()``.
 
           Example::
               Following examples skip RPC initialization and shutdown code
@@ -149,7 +156,10 @@ PyObject* rpc_init(PyObject* /* unused */) {
               >>> # count is automatically updated.
               >>> rpc.rpc_sync("worker1", f, args(rref,))
           )")
-          .def(py::init<const py::object&>())
+          .def(
+              py::init<const py::object&, const py::object&>(),
+              py::arg("value"),
+              py::arg("type_hint") = py::none())
           .def(
               // not releasing GIL here to avoid context switch on getters
               "is_owner",
@@ -327,6 +337,13 @@ If the future completes with an error, an exception is thrown.
     RpcAgent::setCurrentRpcAgent(nullptr);
   });
 
+  module.def(
+      "_delete_all_user_rrefs",
+      [](std::chrono::milliseconds timeoutMillis) {
+        RRefContext::getInstance().delAllUsers(timeoutMillis);
+      },
+      py::arg("timeout") = kDeleteAllUsersTimeout);
+
   module.def("_destroy_rref_context", [](bool ignoreRRefLeak) {
     // NB: do not release GIL in the function. The destroyInstance() method
     // returns a list of deleted OwnerRRefs that hold py::object instances.
@@ -339,9 +356,10 @@ If the future completes with an error, an exception is thrown.
     return RRefContext::getInstance().getDebugInfo();
   });
 
-  module.def("_cleanup_python_rpc_handler", []() {
-    PythonRpcHandler::getInstance().cleanup();
-  });
+  module.def(
+      "_cleanup_python_rpc_handler",
+      []() { PythonRpcHandler::getInstance().cleanup(); },
+      py::call_guard<py::gil_scoped_release>());
 
   module.def(
       "_invoke_rpc_builtin",
@@ -406,31 +424,33 @@ If the future completes with an error, an exception is thrown.
          const py::object& userCallable,
          const py::tuple& argsTuple,
          const py::dict& kwargsDict) {
-        DCHECK(PyGILState_Check());
+        DCHECK(!PyGILState_Check());
         // No need to catch exception here, if function can not be found,
         // exception will be thrown in get_function() call; if args do not match
         // with function schema, exception will be thrown in
         // createStackForSchema() call.
-        auto qualifiedNameStr = c10::QualifiedName(
-            py::cast<std::string>(py::module::import("torch.jit")
-                                      .attr("_qualified_name")(userCallable)));
-        auto qualifiedName = c10::QualifiedName(qualifiedNameStr);
-        auto functionSchema = PythonRpcHandler::getInstance()
-                                  .jitCompilationUnit()
-                                  ->get_function(qualifiedName)
-                                  .getSchema();
-        Stack stack = torch::jit::createStackForSchema(
-            functionSchema,
-            argsTuple.cast<py::args>(),
-            kwargsDict.cast<py::kwargs>(),
-            c10::nullopt);
-        py::gil_scoped_release release;
+        auto& pythonRpcHandler = PythonRpcHandler::getInstance();
+        c10::QualifiedName qualifiedName =
+            pythonRpcHandler.getQualifiedName(userCallable);
+        c10::FunctionSchema functionSchema =
+            pythonRpcHandler.jitCompilationUnit()
+                ->get_function(qualifiedName)
+                .getSchema();
+        Stack stack;
+        {
+          py::gil_scoped_acquire acquire;
+          stack = torch::jit::createStackForSchema(
+              functionSchema,
+              argsTuple.cast<py::args>(),
+              kwargsDict.cast<py::kwargs>(),
+              c10::nullopt);
+        }
         DCHECK(!PyGILState_Check());
         c10::intrusive_ptr<c10::ivalue::Future> fut =
             rpcTorchscript(dstWorkerName, qualifiedName, functionSchema, stack);
         return PythonFutureWrapper(fut);
       },
-      py::call_guard<py::gil_scoped_acquire>());
+      py::call_guard<py::gil_scoped_release>());
 
   module.def(
       "_invoke_remote_builtin",

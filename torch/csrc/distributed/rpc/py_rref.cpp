@@ -3,6 +3,7 @@
 #include <torch/csrc/distributed/rpc/python_functions.h>
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
+#include <torch/csrc/jit/python/module_python.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 
 namespace torch {
@@ -46,6 +47,50 @@ RRefForkData fromPyTuple(const py::tuple& pyTuple) {
 
   return RRefForkData(ownerId, rrefId, forkId, parent, typeStr);
 }
+
+TypePtr tryInferTypeWithTypeHint(
+    const py::object& value,
+    const py::object& type_hint) {
+  // If the py::object to be contained by the RRef is a ScripModule, we enforce
+  // users to specify its ModuleInterface type.
+  if (auto module = jit::as_module(value)) {
+    TORCH_CHECK(
+        !type_hint.is_none(),
+        "The RRef being created contains a ScriptModule, "
+        "must provide its ModuleInterface type hint. ");
+    c10::QualifiedName type_qualified_name = c10::QualifiedName(
+        py::cast<std::string>(py::module::import("torch.jit")
+                                  .attr("_qualified_name")(type_hint)));
+    TypePtr type_hint_ptr =
+        jit::get_python_cu()->get_interface(type_qualified_name);
+    TORCH_CHECK(
+        type_hint_ptr != nullptr &&
+            module.value().type()->isSubtypeOf(type_hint_ptr),
+        module.value().type()->python_str(),
+        " is not a subtype of the type hint: ",
+        type_qualified_name.qualifiedName(),
+        ", did you pass a valid interface type?");
+    return type_hint_ptr;
+  } else {
+    TORCH_CHECK(
+        type_hint.is_none(),
+        "type_hint should only be specified when the RRef being created contains a ScriptModule.");
+  }
+
+  // NB: `jit::tryToInferType(..)` infers types including ScriptClass, but
+  // excluding ScripModule.
+  jit::InferredType type_inferred = jit::tryToInferType(value);
+  if (type_inferred.success()) {
+    // If we could infer the type from the pyobject, we create
+    // the RRef with the IValue of that type.
+    return type_inferred.type();
+  }
+
+  // Otherwise it's a pure pyobject, create the RRef
+  // that holds an IValue of an pyobject.
+  return PyObjectType::get();
+} // namespace
+
 } // namespace
 
 ///////////////////////////  PyRRef  //////////////////////////////////
@@ -54,19 +99,9 @@ PyRRef::PyRRef(c10::intrusive_ptr<RRef> rref) : rref_(std::move(rref)) {
   TORCH_CHECK(rref_, "PyRRef must not wrap nullptr");
 }
 
-PyRRef::PyRRef(const py::object& value)
-    : PyRRef([&value]() {
-        jit::InferredType type_inferred = jit::tryToInferType(value);
-        TypePtr elem_type = nullptr;
-        if (type_inferred.success()) {
-          // If we could infer the type from the pyobject, we create
-          // the RRef with the IValue of that type.
-          elem_type = type_inferred.type();
-        } else {
-          // Otherwise it's a pure pyobject, create the RRef
-          // that holds an IValue of an pyobject
-          elem_type = PyObjectType::get();
-        }
+PyRRef::PyRRef(const py::object& value, const py::object& type_hint)
+    : PyRRef([&value, &type_hint]() {
+        TypePtr elem_type = tryInferTypeWithTypeHint(value, type_hint);
         auto rref = RRefContext::getInstance().createOwnerRRef(elem_type);
         py::object copy(value); // increases refcount
         IValue ivalue = jit::toIValue(std::move(copy), elem_type);
@@ -93,8 +128,11 @@ py::object PyRRef::toHere() {
     if (rref_->isPyObj()) {
       // python_rpc_handler deserialization will acquires GIL.
       auto rfr_values = value.toTuple()->elements();
-      return PythonRpcHandler::getInstance().deserialize(
+      auto& pythonRpcHandler = PythonRpcHandler::getInstance();
+      auto ret = pythonRpcHandler.deserialize(
           SerializedPyObj::fromIValues(rfr_values));
+      pythonRpcHandler.handleException(ret);
+      return ret;
     } else {
       // acquiring GIL as torch::jit::toPyObject creates new py::object
       // without grabbing the GIL.
@@ -124,14 +162,16 @@ py::object PyRRef::localValue() {
 }
 
 std::string PyRRef::str() const {
-  std::ostringstream ss;
   if (rref_->isOwner()) {
-    ss << "OwnerRRef(" << rref_->rrefId() << ")";
+    return c10::str("OwnerRRef(", rref_->rrefId(), ")");
   } else {
-    ss << "UserRRef(RRefId = " << rref_->rrefId() << ", ForkId = "
-       << c10::static_intrusive_pointer_cast<UserRRef>(rref_)->forkId() << ")";
+    return c10::str(
+        "UserRRef(RRefId = ",
+        rref_->rrefId(),
+        ", ForkId = ",
+        c10::static_intrusive_pointer_cast<UserRRef>(rref_)->forkId(),
+        ")");
   }
-  return ss.str();
 }
 
 py::tuple PyRRef::pickle() const {

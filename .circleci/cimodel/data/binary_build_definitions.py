@@ -33,8 +33,8 @@ class Conf(object):
 
         docker_distro_prefix = miniutils.override(self.pydistro, docker_word_substitution)
 
-        # The cpu nightlies are built on the pytorch/manylinux-cuda100 docker image
-        alt_docker_suffix = self.cuda_version or "100"
+        # The cpu nightlies are built on the pytorch/manylinux-cuda102 docker image
+        alt_docker_suffix = self.cuda_version or "102"
         docker_distro_suffix = "" if self.pydistro == "conda" else alt_docker_suffix
         return miniutils.quote("pytorch/" + docker_distro_prefix + "-cuda" + docker_distro_suffix)
 
