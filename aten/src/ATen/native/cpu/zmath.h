@@ -198,7 +198,7 @@ inline std::complex<double> trunc_impl (std::complex<double> z) {
   return std::complex<double>(std::trunc(z.real()), std::trunc(z.imag()));
 }
 
-template <typename TYPE>
+template <typename TYPE, std::enable_if_t<!c10::is_complex_t<TYPE>::value, int> = 0>
 inline TYPE max_impl (TYPE a, TYPE b) {
   if (_isnan<TYPE>(a) || _isnan<TYPE>(b)) {
     return std::numeric_limits<TYPE>::quiet_NaN();
@@ -207,25 +207,18 @@ inline TYPE max_impl (TYPE a, TYPE b) {
   }
 }
 
-template <>
-inline std::complex<float> max_impl (std::complex<float> a, std::complex<float> b) {
-  if (_isnan<std::complex<float>>(a) || _isnan<std::complex<float>>(b)) {
-    return std::complex<float>(std::numeric_limits<float>::quiet_NaN());
+template <typename TYPE, std::enable_if_t<c10::is_complex_t<TYPE>::value, int> = 0>
+inline TYPE max_impl (TYPE a, TYPE b) {
+  if (_isnan<TYPE>(a)) {
+    return a;
+  } else if (_isnan<TYPE>(b)) {
+    return b;
   } else {
     return std::abs(a) > std::abs(b) ? a : b;
   }
 }
 
-template <>
-inline std::complex<double> max_impl (std::complex<double> a, std::complex<double> b) {
-  if (_isnan<std::complex<double>>(a) || _isnan<std::complex<double>>(b)) {
-    return std::complex<double>(std::numeric_limits<double>::quiet_NaN());
-  } else {
-    return std::abs(a) > std::abs(b) ? a : b;
-  }
-}
-
-template <typename TYPE>
+template <typename TYPE, std::enable_if_t<!c10::is_complex_t<TYPE>::value, int> = 0>
 inline TYPE min_impl (TYPE a, TYPE b) {
   if (_isnan<TYPE>(a) || _isnan<TYPE>(b)) {
     return std::numeric_limits<TYPE>::quiet_NaN();
@@ -234,19 +227,12 @@ inline TYPE min_impl (TYPE a, TYPE b) {
   }
 }
 
-template <>
-inline std::complex<float> min_impl (std::complex<float> a, std::complex<float> b) {
-  if (_isnan<std::complex<float>>(a) || _isnan<std::complex<float>>(b)) {
-    return std::complex<float>(std::numeric_limits<float>::quiet_NaN());
-  } else {
-    return std::abs(a) < std::abs(b) ? a : b;
-  }
-}
-
-template <>
-inline std::complex<double> min_impl (std::complex<double> a, std::complex<double> b) {
-  if (_isnan<std::complex<double>>(a) || _isnan<std::complex<double>>(b)) {
-    return std::complex<double>(std::numeric_limits<double>::quiet_NaN());
+template <typename TYPE, std::enable_if_t<c10::is_complex_t<TYPE>::value, int> = 0>
+inline TYPE min_impl (TYPE a, TYPE b) {
+  if (_isnan<TYPE>(a)) {
+    return a;
+  } else if (_isnan<TYPE>(b)) {
+    return b;
   } else {
     return std::abs(a) < std::abs(b) ? a : b;
   }
