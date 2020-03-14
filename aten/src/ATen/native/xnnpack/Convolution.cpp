@@ -110,15 +110,15 @@ Tensor run(
       padded_input_nhwc.size(Layout::Activation4D::width),   // input_width
       padded_input_nhwc.data_ptr<float>(),                   // input
       output.data_ptr<float>(),                              // output
-      nullptr);                                              // threadpool
+      caffe2::xnnpack_threadpool());                         // threadpool
 
   TORCH_CHECK(
       xnn_status_success == setup_status,
       "xnn_setup_convolution2d_nhwc_f32 failed!");
 
   const xnn_status run_status = xnn_run_operator(
-      context.op.get(),             // operator
-      nullptr);                     // threadpool
+      context.op.get(),               // operator
+      caffe2::xnnpack_threadpool());  // threadpool
 
   TORCH_INTERNAL_ASSERT(
       xnn_status_success == run_status,
