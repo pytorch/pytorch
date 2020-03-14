@@ -2393,11 +2393,11 @@ RegisterOperators reg2({
           maxList<value_type>,                                                \
           aliasAnalysisFromSchema()),                                         \
       Operator(                                                               \
-          "prim::min.self." decl_type "(" decl_type "[] self) -> " decl_type, \
+          "prim::min.self_" decl_type "(" decl_type "[] self) -> " decl_type, \
           listMin<value_type>,                                                \
           aliasAnalysisFromSchema()),                                         \
       Operator(                                                               \
-          "prim::max.self." decl_type "(" decl_type "[] self) -> " decl_type, \
+          "prim::max.self_" decl_type "(" decl_type "[] self) -> " decl_type, \
           listMax<value_type>,                                                \
           aliasAnalysisFromSchema()),
                     CREATE_COMPARATOR_LIST_OPS_SPECIALIZED("int", int64_t)
