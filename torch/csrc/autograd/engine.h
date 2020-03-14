@@ -290,9 +290,9 @@ struct TORCH_API Engine {
   void set_device(int device);
   void initialize_device_threads_pool();
 
-  // Ensures ready_queues_ are initialized only once
+  // Ensures device_ready_queues_ are initialized only once
   std::once_flag start_device_threads_flag_;
-  // Safe to read ready_queues_ without synchronization after intialization
+  // Safe to read device_ready_queues_ without synchronization after intialization
   std::vector<std::shared_ptr<ReadyQueue>> device_ready_queues_;
   std::vector<std::function<void()>> final_callbacks_;
   // To protect reads and writes to final_callbacks_

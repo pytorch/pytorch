@@ -88,7 +88,7 @@ static thread_local int total_depth = 0;
 //
 // For reentrant backward calls, if we spawn new thread from the current thread
 // because we reached the maximum depth, the new thread will just reuse the same
-// ReadyQueue with the parent thread for a mild performance improvement.
+// ReadyQueue with the parent thread for performance improvement.
 // see Note [Reentrant backwards] for more details.
 static thread_local std::shared_ptr<ReadyQueue> local_ready_queue = nullptr;
 
@@ -276,7 +276,7 @@ auto Engine::thread_init(int device, std::shared_ptr<ReadyQueue> ready_queue) ->
 
   // initialize each device thread's thread local ready queue with the ready queue
   // that is created before the thread initialization
-  init_local_ready_queue(ready_queue);
+  init_local_ready_queue(std::move(ready_queue));
 
   std::shared_ptr<GraphTask> graph_task = nullptr;
   thread_main(graph_task, /* reentrant_thread */ false);
@@ -374,6 +374,11 @@ auto Engine::thread_main(
   }
 }
 
+
+// Reentrant call will still use the parent thread ready_queue for queueing
+// tasks. While we can create separate cpu_ready_queue for each new reentrant
+// thread, but sharing the same cpu_ready_queue with parent thread is
+// a performance improvement and cuda thread still have to do the same thing.
 void Engine::reentrant_thread_init(std::shared_ptr<ReadyQueue> parent_ready_queue) {
   at::init_num_threads();
   auto tp_shared= thread_pool_shared_;
@@ -391,6 +396,7 @@ void Engine::reentrant_thread_init(std::shared_ptr<ReadyQueue> parent_ready_queu
       continue;
     }
     set_device(graph_task->owner_);
+    // set the local_ready_queue to the parent_ready_queue provided
     init_local_ready_queue(parent_ready_queue);
     total_depth = graph_task->reentrant_depth_;
     thread_main(graph_task, /* reentrant thread*/ true);
@@ -727,6 +733,9 @@ auto Engine::execute(const edge_list& roots,
   // Lock post_callbacks_lock_ before clearing final_callbacks_
   ClearCallbacks _cb_guard(final_callbacks_, post_callbacks_lock_);
 
+  // A frech first time Engine::execute call should start on the CPU device, initialize
+  // a new thread local ready queue on CPU or reuse the existing one (if there is one
+  // allocated already), then memorize the local_ready_queue in GraphTask
   init_local_ready_queue();
 
   auto graph_task = std::make_shared<GraphTask>(
@@ -825,10 +834,8 @@ std::shared_ptr<FutureVariableList> Engine::execute_with_graph_task(
     // We set the worker_device to CPU_DEVICE only if worker_device was previously
     // NO_DEVICE. Setting it to CPU afterwards allow us to detect whether this is
     // a re-entrant call or not.
-    //
     // If worker_device = NO_DEVICE: this is NOT a re-entrant call
-    // If worker_device is other devices (i.e. CPU, CUDA): this is a re-entrant
-    //    backward call from that device.
+    //
     set_device(CPU_DEVICE);
 
     // set the graph_task owner to the current device
@@ -852,12 +859,13 @@ std::shared_ptr<FutureVariableList> Engine::execute_with_graph_task(
     // reuse it for new backward calls.
     worker_device = NO_DEVICE;
   } else {
-    // this must be a re-entrant call from worker_device
+    // If worker_device is other devices (i.e. CPU, CUDA): this is a re-entrant
+    //    backward call from that device.
     graph_task->owner_ = worker_device;
     if (current_depth >= max_recursion_depth_) {
       // See Note [Reentrant backwards]
       // If reached the max depth, switch to a different thread
-      lock.unlock();
+      // lock.unlock();
       add_thread_pool_task(graph_task);
     } else {
       // Total depth needs to be updated only in this codepath, since it is
@@ -965,32 +973,24 @@ bool Engine::is_checkpoint_valid() {
 }
 
 std::shared_ptr<ReadyQueue> Engine::init_local_ready_queue(std::shared_ptr<ReadyQueue> ready_queue) {
-    // Reentrant call will still use the parent thread ready_queue
-    // While we can create separate cpu_ready_queue for each new reentrant
-    // thread, but sharing the same cpu_ready_queue with parent thread is
-    // a mild performance improvement and cuda thread still have to do the
-    // same thing.
-    //
-    // if local_ready_queue already exist (i.e. from a previous backward call),
-    // we could also reuse it instead of creating a new one.
-
-    // A frech first time Engine::execute call should start on the CPU device,
-    // initialize a new thread local ready queue on CPU and memorize it in GraphTask
-  // if provided ready queue in the caller, use the caller's ready_queue to initialize local_ready_queue
   if (ready_queue) {
+    // if ready_queue provided in the caller, use the caller's ready_queue to initialize local_ready_queue
     TORCH_INTERNAL_ASSERT(!local_ready_queue);
     local_ready_queue = std::move(ready_queue);
   } else if (!local_ready_queue){
     // otherwise if local_ready_queue not allocated, allocate a new ready_queue
     local_ready_queue = std::make_shared<ReadyQueue>();
   }
+
+  // if local_ready_queue already exist (i.e. from a previous backward call),
+  // we could also reuse it instead of creating a new one.
   return local_ready_queue;
 }
 
 size_t Engine::ready_queue_size(const std::shared_ptr<GraphTask>& graph_task, at::Device device) {
   if (device_ready_queues_.empty()) {
-    // The vector ready_queues_ is initialized in start_threads, but this method
-    // can be called before start_threads. Adding this check to avoid index
+    // The vector device_ready_queues_ is initialized in start_device_threads, but this method
+    // can be called before start_device_threads. Adding this check to avoid index
     // out of bound error.
     return 0;
   }

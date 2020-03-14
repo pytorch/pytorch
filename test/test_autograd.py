@@ -4757,7 +4757,6 @@ class TestMultithreadAutograd(TestCase):
         for p in threads:
             p.join()
 
-
     def test_simple_backward(self):
         # simple multithreaded backward that create threads in the beginning of training
         # and everything else is training separately, i.e. inputs, operations, etc.
@@ -4805,9 +4804,9 @@ class TestMultithreadAutograd(TestCase):
         # different threads and we need to ensure user specify retain_graph=True, otherwise
         # error out with the correct error message
 
-        # multiple backward with python threads, should throw error with no retain_graph after
-        # the success of the first thread.
-        # success_vs_raises = [0, 0]
+        # Case 1: multiple backward with python threads, retain_graph=False
+        # should throw error in some threads with no retain_graph.
+        success_vs_raises = [0, 0]
 
         def train_fn_no_retain_graph(x):
             y = x + x ** 2
@@ -4821,9 +4820,9 @@ class TestMultithreadAutograd(TestCase):
         x_no_retain = torch.ones(5, 5, requires_grad=True)
         y_no_retain = x_no_retain + x_no_retain ** 2
         self._run_py_multithread_fn(train_fn_no_retain_graph, (y_no_retain,), num_threads=5)
-        # only one thread will be success in this case, all other threads should raise
+        # at least one thread will be success in this case, all other threads should raise
         # with the error that throw to user to recommend them specify retain_graph=True
-        # self.assertEqual(success_vs_raises, [1, 4])
+        self.assertTrue(success_vs_raises[0] > 1)
 
         # multiple backward with python threads, no error with retain_graph=True
         def train_fn_retain_graph(x):
@@ -4831,31 +4830,56 @@ class TestMultithreadAutograd(TestCase):
             y.sum().backward(retain_graph=True)
 
         x_retain = torch.ones(5, 5, requires_grad=True)
-        y_retain = (x_retain + 3) * (x_retain + 4) * 0.5
+        y_retain = x_retain + x_retain ** 2
         self._run_py_multithread_fn(train_fn_retain_graph, (y_retain,), num_threads=5)
         # result should equal to num_thread * gradients
-        self.assertEqual(x_retain.grad, 5 * (x_retain**3 + 10.5*(x_retain**2) + 37.5*x_retain + 45.5))
+        self.assertEqual(x_retain.grad, 5 * (4 * x_retain ** 3 + 6 * (x_retain ** 2) + 4 * x_retain +1))
 
 
     def test_fork_join_in_middle(self):
+        # multiple backward with jit threads (fork/join primitive)
+        # similar to test_python_thread_in_middle, we test with retain_graph=False/True
 
-        # multiple backward with jit threads (fork/join primitive) similar to test_py_thread_in_middle
-        # no error with retain_graph=True
+        # Case 1: multiple grad() calls with jit threads, retain_graph=False
+        # should throw error in some threads with no retain_graph.
         @torch.jit.script
-        def train_fn_jit(middle, orig_x):
+        def train_fn_jit_no_retain(middle, orig_x):
+            y = middle + middle ** 2
+            return torch.autograd.grad([y.sum()], [orig_x])
+
+        @torch.jit.script
+        def train_fn_fork_join_calls_no_retain(x):
+            y_no_retain = (x + 3) * (x + 4) * 0.5
+
+            fut = torch.jit._fork(train_fn_jit_no_retain, y_no_retain, x)
+            grad_hat = train_fn_jit_no_retain(y_no_retain, x)
+            grad = torch.jit._wait(fut)
+            return grad, grad_hat
+
+        try:
+            train_fn_fork_join_calls_no_retain(torch.randn(5, 5, requires_grad=True))
+        except RuntimeError as error:
+            self.assertRegex(str(error), "Specify retain_graph=True")
+
+        # Case 2: no error with retain_graph=True
+        @torch.jit.script
+        def train_fn_jit_retain(middle, orig_x):
             y = middle + middle ** 2
             return torch.autograd.grad([y.sum()], [orig_x], retain_graph=True)
 
         @torch.jit.script
-        def train_fn_fork_join_calls(x):
+        def train_fn_fork_join_calls_retain(x):
             y_retain = (x + 3) * (x + 4) * 0.5
-            fut = torch.jit._fork(train_fn_jit, y_retain, x)
-            grad_hat = train_fn_jit(y_retain, x)
-            grad = torch.jit._wait(fut)
-            return grad, grad_hat
+            fut1 = torch.jit._fork(train_fn_jit_retain, y_retain, x)
+            fut2 = torch.jit._fork(train_fn_jit_retain, y_retain, x)
+            grad = train_fn_jit_retain(y_retain, x)
+            grad1 = torch.jit._wait(fut1)
+            grad2 = torch.jit._wait(fut2)
+            return grad, grad1, grad2
 
-        grad, grad_hat = train_fn_fork_join_calls(torch.randn(5, 5, requires_grad=True))
-        self.assertEqual(grad, grad_hat)
+        grad, grad1, grad2 = train_fn_fork_join_calls_retain(torch.randn(5, 5, requires_grad=True))
+        self.assertEqual(grad, grad1)
+        self.assertEqual(grad, grad2)
 
 
 
