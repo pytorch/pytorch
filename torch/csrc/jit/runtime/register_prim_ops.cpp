@@ -2679,6 +2679,8 @@ RegisterOperators reg2({
     DEFINE_INT_OP(aten::__and__, a& b),
     DEFINE_INT_OP(aten::__or__, a | b),
     DEFINE_INT_OP(aten::__xor__, a ^ b),
+    DEFINE_INT_OP(aten::__lshift__, a << b),
+    DEFINE_INT_OP(aten::__rshift__, a >> b),
 
     DEFINE_UNARY_OP(aten::floor, floor(a), int, int),
     DEFINE_UNARY_OP(aten::ceil, ceil(a), int, int),
@@ -3148,7 +3150,7 @@ at::Tensor interpolate(
     }
   } else {
     if (align_corners == c10::nullopt) {
-      AT_WARN(
+      TORCH_WARN(
           "Default upsampling behavior when mode=",
           mode,
           " is changed "
@@ -3186,7 +3188,7 @@ at::Tensor interpolate(
     }
 
     if(warn_recompute_scale_factor) {
-      AT_WARN(
+      TORCH_WARN(
         "The default behavior for interpolate/upsample with float scale_factor will change "
         "in 1.5.0 to align with other frameworks/libraries, and use scale_factor directly, "
         "instead of relying on the computed output size. "
