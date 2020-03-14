@@ -71,7 +71,7 @@ white_list = [
     ('aten::__interpolate', datetime.date(2020, 4, 1)),
     ('aten::fabs', datetime.date(2020, 4, 1)),
     ('aten::gamma', datetime.date(2020, 4, 1)),
-    ('aten::abs', datetime.date(2020, 4, 1)),
+    ('prim::abs', datetime.date(2020, 4, 1)),
     ('aten::factorial', datetime.date(2020, 4, 1)),
     ('aten::radians', datetime.date(2020, 4, 1)),
     ('aten::degrees', datetime.date(2020, 4, 1)),
@@ -79,7 +79,7 @@ white_list = [
     ('prim::atanh', datetime.date(2020, 4, 1)),
     ('aten::asinh', datetime.date(2020, 4, 1)),
     ('aten::floordiv', datetime.date(2020, 4, 1)),
-    ('aten::NumToTensor', datetime.date(2020, 4, 1)),
+    ('prim::NumToTensor', datetime.date(2020, 4, 1)),
     ('aten::sin', datetime.date(2020, 4, 1)),
     ('aten::round', datetime.date(2020, 4, 1)),
     ('aten::remainder', datetime.date(2020, 4, 1)),
@@ -101,9 +101,12 @@ white_list = [
     ('aten::isinf', datetime.date(2020, 4, 1)),
     ('aten::lgamma', datetime.date(2020, 4, 1)),
     ('aten::asin', datetime.date(2020, 4, 1)),
-    ('prim::log', datetime.date(2020, 4, 1)),
-    ('prim::cos', datetime.date(2020, 4, 1)),
-    ('prim::tanh', datetime.date(2020, 4, 1)),
+    ('aten::log', datetime.date(2020, 4, 1)),
+    ('aten::log10', datetime.date(2020, 4, 1)),
+    ('aten::cos', datetime.date(2020, 4, 1)),
+    ('aten::tanh', datetime.date(2020, 4, 1)),
+    ('prim::min', datetime.date(2020, 4, 1)),
+    ('prim::max', datetime.date(2020, 4, 1)),
 ]
 
 
