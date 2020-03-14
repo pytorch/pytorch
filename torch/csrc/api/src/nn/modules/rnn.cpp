@@ -247,7 +247,7 @@ void RNNImplBase<Derived>::check_input(const Tensor& input, const Tensor& batch_
     "input must have ", expected_input_dim, " dimensions, got ", input.dim());
   TORCH_CHECK(
     options_base.input_size() == input.size(-1),
-    "input.size(-1) must be equal to input_size. Expected ", options_base.input_size(), " got ", input.size(-1));
+    "input.size(-1) must be equal to input_size. Expected ", options_base.input_size(), ", got ", input.size(-1));
 }
 
 template <typename Derived>
