@@ -323,6 +323,22 @@ class TestMkldnn(TestCase):
             z.to_dense(),
         )
 
+    def test_reshape_blocked_format(self):
+        # construct an mkldnn blocked tensor with mkldnn conv2d
+        C = 7
+        m = mkldnn_utils.to_mkldnn(torch.nn.Conv2d(C, C, 3))
+        x = torch.randn(1, C, 8, 8).to_mkldnn()
+
+        # mkldnn tensor w/ blocked format
+        y_block = m(x)
+        # aten tensor w/ plain format
+        y_plain = y_block.to_dense()
+
+        y_block_reshape = y_block.reshape(C, -1)
+        y_plain_reshape = y_plain.reshape(C, -1)
+
+        self.assertEqual(y_plain_reshape, y_block_reshape.to_dense())
+
     def test_clone(self):
         x = torch.randn(4, 5, dtype=torch.float32) * 10
         self.assertEqual(
