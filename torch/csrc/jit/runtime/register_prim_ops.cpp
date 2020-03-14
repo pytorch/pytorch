@@ -2338,12 +2338,12 @@ RegisterOperators reg2({
           listList<value_type>,                                                     \
           aliasAnalysisFromSchema()),                                               \
       Operator(                                                                     \
-          "aten::mul.left." decl_type "(" decl_type                                 \
+          "aten::mul.left_" decl_type "(" decl_type                                 \
           "[] l, int n) -> " decl_type "[]",                                        \
           listMulIntLeft<value_type>,                                               \
           aliasAnalysisFromSchema()),                                               \
       Operator(                                                                     \
-          "aten::mul.right.(int n, " decl_type "[] l) -> " decl_type "[]",          \
+          "aten::mul.right_(int n, " decl_type "[] l) -> " decl_type "[]",          \
           listMulIntRight<value_type>,                                              \
           aliasAnalysisFromSchema()),                                               \
       Operator(                                                                     \
