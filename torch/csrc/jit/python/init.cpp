@@ -389,7 +389,7 @@ void initJITBindings(PyObject* module) {
             checkAliasAnnotation(g, std::move(stack), unqualified_op_name);
           })
       .def(
-            "_jit_register_cuda_fuser", &RegisterCudaFuseGraph::registerPass)
+          "_jit_register_cuda_fuser", &RegisterCudaFuseGraph::registerPass)
       .def(
           "_jit_set_profiling_mode",
           [](bool profiling_flag) {
