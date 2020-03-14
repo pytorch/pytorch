@@ -49,3 +49,30 @@ TEST(WireSerialize, RecopySparseTensors) {
   EXPECT_TRUE(torch::equal(tiny, deser.second[0]));
   EXPECT_LT(ser.size(), (tiny.element_size() * k1K) + k1K);
 }
+
+TEST(WireSerialize, CloneSparseTensors) {
+  constexpr size_t k1K = 1024;
+  at::Tensor big = torch::randn({k1K, k1K});
+  auto v1 = torch::distributed::rpc::cloneSparseTensors({big});
+  EXPECT_EQ(v1.get(0).storage(), big.storage()); // Not cloned
+
+  at::Tensor tiny = big.select(0, 2); // Select a row in the middle
+  auto v2 = torch::distributed::rpc::cloneSparseTensors({tiny});
+  EXPECT_NE(&v2.get(0).storage(), &tiny.storage()); // Cloned.
+  EXPECT_TRUE(torch::equal(v2.get(0), tiny));
+
+  at::Tensor sparse =
+      at::empty({2, 3}, at::dtype<float>().layout(at::kSparse));
+  auto v3 = torch::distributed::rpc::cloneSparseTensors({sparse});
+  // There is no storage() to compare, but at least confirm equality.
+  EXPECT_TRUE(v3.get(0).is_same(sparse));
+}
+
+// Enable this once JIT Pickler supports sparse tensors.
+TEST(WireSerialize, DISABLED_Sparse) {
+  at::Tensor main =
+      at::empty({2, 3}, at::dtype<float>().layout(at::kSparse));
+  auto ser = torch::distributed::rpc::wireSerialize({}, {main.to(at::kSparse)});
+  auto deser = torch::distributed::rpc::wireDeserialize(ser.data(), ser.size());
+  EXPECT_TRUE(torch::equal(main, deser.second[0]));
+}

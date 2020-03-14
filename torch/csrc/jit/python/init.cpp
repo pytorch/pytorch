@@ -219,9 +219,10 @@ void initJITBindings(PyObject* module) {
              SwapFunctionalLinear(graph);
            })
       .def("_jit_pass_swap_functional_linear",
-           [](script::Module& module) {
+           [](Module& module) {
              SwapFunctionalLinear(module);
            })
+      .def("_jit_pass_quant_finalize", &Finalize)
       .def(
           "_jit_pass_pattern_based_rewrite",
           [](const Module& m) { return PatternBasedRewrite(m); })
@@ -591,22 +592,18 @@ void initJITBindings(PyObject* module) {
           auto symbol = Symbol::fromQualString(op_name);
           auto operations = getAllOperatorsFor(symbol);
           TORCH_CHECK(!operations.empty(), "No such operator ", op_name);
-          TORCH_CHECK(
-              operations.size() == 1,
-              "Found ",
-              operations.size(),
-              " overloads for operator ",
-              op_name,
-              "! Overloads are not supported from Python.");
-          std::shared_ptr<Operator> op = operations[0];
-          AT_ASSERT(op != nullptr);
           std::ostringstream docstring;
           docstring << "Automatically bound operator '" << op_name
-                    << "' with schema: " << op->schema();
+                    << "' with schema(s):\n";
+                    
+          for (const auto& op : operations) {
+            docstring << "  " << op->schema() << "\n";
+          }
+
           return py::cpp_function(
-              [op](py::args args, py::kwargs kwargs) {
+              [operations](py::args args, py::kwargs kwargs) {
                 return invokeOperatorFromPython(
-                    *op, std::move(args), std::move(kwargs));
+                    operations, std::move(args), std::move(kwargs));
               },
               py::name(symbol.toUnqualString()),
               py::doc(docstring.str().c_str()));
