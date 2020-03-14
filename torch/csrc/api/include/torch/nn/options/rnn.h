@@ -19,7 +19,6 @@ struct TORCH_API RNNOptionsBase {
     enumtype::kRNN_RELU> rnn_options_base_mode_t;
 
   RNNOptionsBase(rnn_options_base_mode_t mode, int64_t input_size, int64_t hidden_size);
-  virtual ~RNNOptionsBase() = default;
 
   TORCH_ARG(rnn_options_base_mode_t, mode);
   /// The number of features of a single sample in the input sequence `x`.
