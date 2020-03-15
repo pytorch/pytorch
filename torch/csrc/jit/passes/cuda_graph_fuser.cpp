@@ -915,7 +915,6 @@ void CudaFuseGraph(std::shared_ptr<Graph>& graph) {
   // Improve the quality of shape propagation code that was left
   PeepholeOptimizeShapeExpressions(graph->block());
   // Compile CudaFusionGroup
-  std::cout << "pass graph for compilation" << std::endl << (*graph) << std::endl;
   compileFusionRecursive(graph->block());
 }
 
