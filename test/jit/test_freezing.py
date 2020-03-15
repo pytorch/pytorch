@@ -117,8 +117,181 @@ class TestFreezing(JitTestCase):
         self.assertFalse(mf.hasattr('a'))
         self.assertTrue(mf.hasattr('b'))
         self.assertTrue(mf.hasattr('sub2'))
+        self.assertTrue(mf.sub2.hasattr('b'))   # verify b is preserved in sub2
+        self.assertFalse(mf.sub2.hasattr('a'))  # verify a is removed in sub2
         output_f = mf.forward(input)
         self.assertEqual(output_s, output_f)
+
+    def test_freeze_module_with_sharedclasstype(self):
+        class SubModule(nn.Module):
+            def __init__(self):
+                super(SubModule, self).__init__()
+                self.a = torch.tensor([1.1])
+                self.b = torch.tensor([2.2])
+
+            def forward(self, x):
+                return self.a + self.b
+
+            @torch.jit.export
+            def modify_a(self, x):
+                self.a[0] += 10
+                return self. b
+
+            @torch.jit.export
+            def modify_b(self, x):
+                self.b[0] += 20
+                return self.a
+
+        class SubModule2(nn.Module):
+            def __init__(self):
+                super(SubModule2, self).__init__()
+                self.sub = SubModule()
+                self.b = torch.tensor([3.3])
+
+            def forward(self, x):
+                y = self.sub.modify_b(x)
+                return y + self.b
+
+        class TestModule(nn.Module):
+            def __init__(self):
+                super(TestModule, self).__init__()
+                self.sub1 = SubModule()  # sub1 and sub2.sub shared same class type.
+                self.sub2 = SubModule2()
+                self.a = torch.tensor([4.4])
+
+            def forward(self, x):
+                z = self.sub1.modify_a(x)
+                return self.sub2(x) + z + self.a
+
+        m = torch.jit.script(TestModule())
+        m.eval()
+        input = torch.randn(2, 2)
+        output_s = m.forward(input)
+        mf = torch._C._freeze_module(m._c)
+        self.assertTrue(mf.hasattr('sub1'))
+        self.assertTrue(mf.sub1.hasattr('a'))
+        self.assertTrue(mf.sub1.hasattr('b'))
+        self.assertFalse(mf.hasattr('a'))
+        self.assertTrue(mf.hasattr('sub2'))
+        self.assertTrue(mf.sub2.hasattr('sub'))
+        self.assertFalse(mf.sub2.hasattr('b'))
+        self.assertTrue(mf.sub2.sub.hasattr('a'))
+        self.assertTrue(mf.sub2.sub.hasattr('b'))
+        output_f = mf.forward(input)
+        self.assertEqual(output_s, output_f)
+
+    def test_freeze_module_with_nestedaliasing(self):
+        class SubModule(nn.Module):
+            def __init__(self):
+                super(SubModule, self).__init__()
+                self.a = torch.tensor([1.1])
+                self.b = torch.tensor([2.2])
+
+            def forward(self, x):
+                return self.a + self.b
+
+            @torch.jit.export
+            def modify_a(self, x):
+                self.a[0] = 10
+                return self. b
+
+            @torch.jit.export
+            def modify_b(self, x):
+                self.b[0] = 20
+                return self.a
+        Sub = SubModule()
+
+        class SubModule2(nn.Module):
+            def __init__(self):
+                super(SubModule2, self).__init__()
+                self.sub = Sub  # aliasing
+
+            def forward(self, x):
+                return self.sub.a
+
+        class TestModule(nn.Module):
+            def __init__(self):
+                super(TestModule, self).__init__()
+                self.sub1 = Sub  # aliasing
+                self.sub2 = SubModule2()
+
+            def forward(self, x):
+                z = self.sub1.modify_a(x)
+                return self.sub2(x) + z
+
+        m = torch.jit.script(TestModule())
+        m.eval()
+        mf = torch._C._freeze_module(m._c)
+        self.assertTrue(mf.hasattr('sub1'))
+        self.assertTrue(mf.sub1.hasattr('a'))
+        self.assertFalse(mf.sub1.hasattr('b'))
+        self.assertTrue(mf.hasattr('sub2'))
+        self.assertTrue(mf.sub2.hasattr('sub'))
+        self.assertTrue(mf.sub2.sub.hasattr('a'))  # Freezing detects that self.sub2.sub.a and self.sub1.a are alias
+        self.assertFalse(mf.sub2.sub.hasattr('b'))
+        input = torch.randn(2, 2)
+        output_s = m.forward(input)
+        output_f = mf.forward(input)
+        self.assertEqual(output_s, output_f)
+
+    # FIXME: JIT is not honoring aliasing. 'Sub' module is copied. As a result
+    # Eager and Script modules produce different output.
+    def test_freeze_module_with_nestedaliasingscalar(self):
+        class SubModule(nn.Module):
+            def __init__(self):
+                super(SubModule, self).__init__()
+                self.a = 1.1
+                self.b = 2.2
+
+            def forward(self, x):
+                return self.a + self.b
+
+            @torch.jit.export
+            def modify_a(self, x):
+                self.a = 10.0
+                return self. b
+
+            @torch.jit.export
+            def modify_b(self, x):
+                self.b = 20.0
+                return self.a
+        Sub = SubModule()
+
+        class SubModule2(nn.Module):
+            def __init__(self):
+                super(SubModule2, self).__init__()
+                self.sub = Sub  # aliasing
+
+            def forward(self, x):
+                return self.sub.a
+
+        class TestModule(nn.Module):
+            def __init__(self):
+                super(TestModule, self).__init__()
+                self.sub1 = Sub  # aliasing
+                self.sub2 = SubModule2()
+
+            def forward(self, x):
+                z = self.sub1.modify_a(x)
+                return self.sub2(x) + z
+        m = TestModule()
+        ms = torch.jit.script(m)
+        ms.eval()
+        mf = torch._C._freeze_module(ms._c)
+        self.assertTrue(mf.hasattr('sub1'))
+        self.assertTrue(mf.sub1.hasattr('a'))
+        self.assertFalse(mf.sub1.hasattr('b'))
+        # sub2 is fully folded becasue self.sub1 and self.sub2.sub are not alias (Scripting bug)
+        self.assertFalse(mf.hasattr('sub2'))
+        input = torch.randn(2, 2)
+        output = m.forward(input)
+        output_s = ms.forward(input)
+        output_f = mf.forward(input)
+        print(output, " ", output_s, " ", output_f)
+        # Should be equal
+        self.assertNotEqual(output, output_s)
+        self.assertEqual(output_s, output_f)
+
 
     def test_freeze_module_with_helperfunction(self):
         class SubModule(nn.Module):
