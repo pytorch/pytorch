@@ -34,7 +34,7 @@ Tensor& random_to(Tensor& self, int64_t to, Generator generator) {
 }
 
 Generator createTestCPUGenerator(uint64_t value) {
-  return std::make_shared<TestCPUGenerator>(value);
+  return at::make_generator<TestCPUGenerator>(value);
 }
 
 static auto registry = torch::RegisterOperators()

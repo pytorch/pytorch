@@ -15,7 +15,7 @@ static int64_t num_gpus;
 static std::deque<std::once_flag> cuda_gens_init_flag;
 
 // Default, global CUDA generators, one per GPU.
-static std::vector<std::shared_ptr<CUDAGenerator>> default_gens_cuda;
+static std::vector<Generator> default_gens_cuda;
 
 /* 
 * Populates the global variables related to CUDA generators
@@ -35,7 +35,7 @@ static void initCUDAGenVector(){
  * getDefaultCUDAGenerator gets the default generator for a particular
  * cuda device.
  */
-CUDAGenerator* getDefaultCUDAGenerator(DeviceIndex device_index) {
+Generator getDefaultCUDAGenerator(DeviceIndex device_index) {
   std::call_once(num_gpu_init_flag, initCUDAGenVector);
   DeviceIndex idx = device_index;
   if (idx == -1) {
@@ -44,25 +44,25 @@ CUDAGenerator* getDefaultCUDAGenerator(DeviceIndex device_index) {
     TORCH_CHECK(idx >= 0 && idx < num_gpus);
   }
   std::call_once(cuda_gens_init_flag[idx], [&] {
-    default_gens_cuda[idx] = std::make_shared<CUDAGenerator>(idx);
+    default_gens_cuda[idx] = make_generator<CUDAGenerator>(idx);
     default_gens_cuda[idx]->seed();
   });
-  return default_gens_cuda[idx].get();
+  return default_gens_cuda[idx];
 }
 
 /**
  * Utility to create a CUDAGenerator. Returns a shared_ptr
  */
-std::shared_ptr<CUDAGenerator> createCUDAGenerator(DeviceIndex device_index) {
+Generator createCUDAGenerator(DeviceIndex device_index) {
   std::call_once(num_gpu_init_flag, initCUDAGenVector);
   DeviceIndex idx = device_index;
   if (idx == -1) {
     idx = c10::cuda::current_device();
   }
   TORCH_CHECK(idx >= 0 && idx < num_gpus, "The device_index is invalid.");
-  auto gen = std::make_shared<CUDAGenerator>(idx);
-  gen->set_current_seed(default_rng_seed_val);
-  gen->set_philox_offset_per_thread(0);
+  auto gen = make_generator<CUDAGenerator>(idx);
+  gen.get<CUDAGenerator>()->set_current_seed(default_rng_seed_val);
+  gen.get<CUDAGenerator>()->set_philox_offset_per_thread(0);
   return gen;
 }
 
@@ -73,7 +73,7 @@ std::shared_ptr<CUDAGenerator> createCUDAGenerator(DeviceIndex device_index) {
  * CUDAGenerator class implementation
  */
 CUDAGenerator::CUDAGenerator(DeviceIndex device_index)
-  : GeneratorImpl{Device(DeviceType::CUDA, device_index),
+  : c10::GeneratorImpl{Device(DeviceType::CUDA, device_index),
               DispatchKeySet(c10::DispatchKey::CUDATensorId)} { }
 
 /**

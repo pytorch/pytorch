@@ -64,7 +64,7 @@ namespace detail {
       }
     }
     void operator()(at::Generator gen) {
-      if (gen != nullptr) {
+      if (gen) {
         ts = ts | gen->key_set();
       }
     }

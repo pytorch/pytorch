@@ -12,7 +12,7 @@
 #include <c10/util/C++17.h>
 #include <c10/core/Device.h>
 #include <c10/core/DispatchKeySet.h>
-#include <c10/core/GeneratorImpl.h>
+#include <c10/util/python_stub.h>
 
 /**
  * Note [Generator]
@@ -48,51 +48,56 @@
  * forks into other threads).
  */
 
-namespace at {
+namespace c10 {
 
-struct Generator {
-  Generator() {}
+// The default seed is selected to be a large number
+// with good distribution of 0s and 1s in bit representation
+constexpr uint64_t default_rng_seed_val = 67280421310721;
 
-  Generator(c10::GeneratorImpl* g) { this->impl = std::shared_ptr<c10::GeneratorImpl>(g); }
-  Generator& operator=(c10::GeneratorImpl* g) { this->impl = std::shared_ptr<c10::GeneratorImpl>(g); return *this; }
+struct CAFFE2_API GeneratorImpl {
+  // Constructors
+  GeneratorImpl(Device device_in, DispatchKeySet key_set);
 
-  Generator(std::shared_ptr<c10::GeneratorImpl> g) { this->impl = g; }
-  Generator& operator=(std::shared_ptr<c10::GeneratorImpl> g) { this->impl = g; return *this; }
+  // Delete all copy and move assignment in favor of clone()
+  // method
+  GeneratorImpl(const GeneratorImpl& other) = delete;
+  GeneratorImpl(GeneratorImpl&& other) = delete;
+  GeneratorImpl& operator=(const GeneratorImpl& other) = delete;
 
-  bool operator==(const Generator& that) const {
-    return (!(this->impl) && !(that.impl)) || (this->impl == that.impl);
+  virtual ~GeneratorImpl() = default;
+  std::shared_ptr<GeneratorImpl> clone() const;
+
+  // Common methods for all generators
+  virtual void set_current_seed(uint64_t seed) = 0;
+  virtual uint64_t current_seed() const = 0;
+  virtual uint64_t seed() = 0;
+  Device device() const;
+
+  // See Note [Acquire lock when using random generators]
+  std::mutex mutex_;
+
+  DispatchKeySet key_set() const { return key_set_; }
+
+  inline void set_pyobj(PyObject* pyobj) noexcept {
+    pyobj_ = pyobj;
   }
 
-  bool operator!=(const Generator& that) const {
-    return !((*this) == that);
+  inline PyObject* pyobj() const noexcept {
+    return pyobj_;
   }
 
-  bool operator==(c10::GeneratorImpl* g) const {
-    return this->impl && this->impl.get() == g;
-  }
+  private:
+    Device device_;
+    DispatchKeySet key_set_;
+    PyObject* pyobj_ = nullptr;
 
-  bool operator!=(c10::GeneratorImpl* g) const {
-    return !((*this) == g);
-  }
-
-  operator bool() const { return (bool)impl; }
-
-  // c10::GeneratorImpl* operator->() { return impl.get(); }
-
-  c10::GeneratorImpl* operator->() const { return impl.get(); }
-
-  c10::GeneratorImpl* get() { return impl.get(); }
-
-  template<typename T>
-  T* get() { return dynamic_cast<T*>(impl.get()); }
-
- private:
-  std::shared_ptr<c10::GeneratorImpl> impl;
+    virtual GeneratorImpl* clone_impl() const = 0;
 };
 
-template<class Impl, class... Args>
-Generator make_generator(Args&&... args) {
-  return Generator(std::make_shared<Impl>(args...));
-}
+namespace detail {
 
-} // namespace at
+CAFFE2_API uint64_t getNonDeterministicRandom(bool is_cuda = false);
+
+} // namespace detail
+
+} // namespace c10

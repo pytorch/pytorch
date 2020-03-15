@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include <ATen/test/rng_test.h>
 #include <ATen/Generator.h>
+#include <c10/core/GeneratorImpl.h>
 #include <ATen/Tensor.h>
 #include <ATen/native/DistributionTemplates.h>
 #include <ATen/native/cpu/DistributionTemplates.h>
@@ -13,7 +14,7 @@ using namespace at;
 
 namespace {
 
-struct TestCPUGenerator : public GeneratorImpl {
+struct TestCPUGenerator : public c10::GeneratorImpl {
   TestCPUGenerator(uint64_t value) : GeneratorImpl{Device(DeviceType::CPU), DispatchKeySet(DispatchKey::CustomRNGKeyId)}, value_(value) { }
   ~TestCPUGenerator() = default;
   uint32_t random() { return value_; }
@@ -91,7 +92,7 @@ TEST_F(RNGTest, Random) {
 // This test proves that Tensor.random_() distribution is able to generate unsigned 64 bit max value(64 ones)
 // https://github.com/pytorch/pytorch/issues/33299
 TEST_F(RNGTest, Random64bits) {
-  auto gen = std::make_shared<TestCPUGenerator>(std::numeric_limits<uint64_t>::max());
+  auto gen = at::make_generator<TestCPUGenerator>(std::numeric_limits<uint64_t>::max());
   auto actual = torch::empty({1}, torch::kInt64);
   actual.random_(std::numeric_limits<int64_t>::min(), c10::nullopt, gen);
   ASSERT_EQ(static_cast<uint64_t>(actual[0].item<int64_t>()), std::numeric_limits<uint64_t>::max());
@@ -100,14 +101,14 @@ TEST_F(RNGTest, Random64bits) {
 TEST_F(RNGTest, Cauchy) {
   const auto median = 123.45;
   const auto sigma = 67.89;
-  auto gen = std::make_shared<TestCPUGenerator>(42.0);
+  auto gen = at::make_generator<TestCPUGenerator>(42.0);
 
   auto actual = torch::empty({3, 3});
   actual.cauchy_(median, sigma, gen);
 
   auto expected = torch::empty_like(actual);
   auto iter = TensorIterator::nullary_op(expected);
-  native::templates::cpu::cauchy_kernel(iter, median, sigma, gen.get());
+  native::templates::cpu::cauchy_kernel(iter, median, sigma, gen.get<TestCPUGenerator>());
 
   ASSERT_TRUE(torch::allclose(actual, expected));
 }
