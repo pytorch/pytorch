@@ -103,7 +103,7 @@ void compileCudaFusionGroup(Node* fusion_node) {
       fusion_node->kind() == prim::CudaFusionGroup,
       "Only prim::CudaFusionGroup can be compiled");
   if (fusion_node->hasAttribute(attr::cache_id)) {
-    AT_WARN("Double registration of CudaFusionGroup on CudaFusionManager");
+    TORCH_WARN("Double registration of CudaFusionGroup on CudaFusionManager");
   }
   int32_t fusion_cache_id = 
       CudaFusionManager::getManager().registerOrGetCacheId(fusion_node->g(attr::Subgraph));

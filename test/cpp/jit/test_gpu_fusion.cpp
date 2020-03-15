@@ -14,7 +14,7 @@
 
 // fuser and IR parser
 #include <torch/csrc/jit/codegen/cuda/parser.h>
-#include "torch/csrc/jit/irparser.h"
+#include "torch/csrc/jit/ir/irparser.h"
 
 #include <iostream>
 
@@ -113,22 +113,19 @@ class ZeroMutator : public OptOutMutator {
 };
 
 void testGPU_FusionMutator() {
-  
   Fusion fusion;
   FusionGuard fg(&fusion);
 
   Float* f4 = new Float{1.f};
   Int* i1 = new Int{3};
   Val* f5 = add(f4, i1);
-  std::cout<<"Replacing floats of val 1 with 0 in: "<<fusion<<std::endl;
   ZeroMutator mutator;
   mutator.mutate(&fusion);
   Val* lhs = static_cast<BinaryOp*>(fusion.origin(f5))->lhs();
   TORCH_CHECK(lhs->getValType().value() == ValType::Scalar && lhs->getDataType().value() == DataType::Float);
   Float* flhs = static_cast<Float *>( lhs );
   
-  TORCH_CHECK(flhs->value().value() == 0.f);
-  
+  TORCH_CHECK(flhs->value().value() == 0.f);  
 }
 
 void testGPU_FusionRegister() {
@@ -533,7 +530,7 @@ void testGPU_FusionParser() {
       %c0 : Float(2, 3, 4) = aten::mul(%0, %1)
       %d0 : Float(2, 3, 4) = aten::mul(%c0, %0)
       return (%d0))IR";
-  torch::jit::script::parseIR(graph0_string, g.get());
+  torch::jit::parseIR(graph0_string, g.get());
 
   // strides are not yet supported in the irparser.
   for (auto val : g->block()->inputs()) {
@@ -551,8 +548,36 @@ void testGPU_FusionParser() {
   FusionGuard fg(&fusion);
   fuser::cuda::parseJitIR(g, fusion);
   
-  CodeWrite cw(std::cout);
+  std::stringstream ref;
+  ref
+    << "__global__ void kernel(Tensor<float> T0, Tensor<float> T1, Tensor<float> T3){\n"
+    << "  float T2[1];\n"
+    << "  if( ( ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) / T1.size[2] ) / T1.size[1] ) < T1.size[0] ) && ( ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) / T1.size[2] ) % T1.size[1] ) < T1.size[1] ) && ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) % T1.size[2] ) < T1.size[2] ) ) {\n"
+    << "    T2[0]\n"
+    << "      = T0[( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) / T0.size[2] ) / T0.size[1] ) * T0.stride[0] + ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) / T0.size[2] ) % T0.size[1] ) * T0.stride[1] + ( ( ( blockIdx.x * 128 ) + threadIdx.x ) % T0.size[2] ) * T0.stride[2]]\n"
+    << "      * T1[( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) / T1.size[2] ) / T1.size[1] ) * T1.stride[0] + ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) / T1.size[2] ) % T1.size[1] ) * T1.stride[1] + ( ( ( blockIdx.x * 128 ) + threadIdx.x ) % T1.size[2] ) * T1.stride[2]];\n"
+    << "  }\n"
+    << "  if( ( ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) / T0.size[2] ) / T0.size[1] ) < T0.size[0] ) && ( ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) / T0.size[2] ) % T0.size[1] ) < T0.size[1] ) && ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) % T0.size[2] ) < T0.size[2] ) ) {\n"
+    << "    T3[( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) / T0.size[2] ) / T0.size[1] ) * T3.stride[0] + ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) / T0.size[2] ) % T0.size[1] ) * T3.stride[1] + ( ( ( blockIdx.x * 128 ) + threadIdx.x ) % T0.size[2] ) * T3.stride[2]]\n"
+    << "      = T2[0]\n"
+    << "      * T0[( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) / T0.size[2] ) / T0.size[1] ) * T0.stride[0] + ( ( ( ( blockIdx.x * 128 ) + threadIdx.x ) / T0.size[2] ) % T0.size[1] ) * T0.stride[1] + ( ( ( blockIdx.x * 128 ) + threadIdx.x ) % T0.size[2] ) * T0.stride[2]];\n"
+    << "  }\n"
+    << "}\n"
+  ;
+
+  std::stringstream cdg;
+  CodeWrite cw(cdg);
   cw.traverse(&fusion);
+
+  if (ref.str().size() != cdg.str().size() || ref.str().compare(cdg.str()) != 0){
+    std::cerr
+        << " Codegen mismatch, codegen possibly changed, or is incorrect. "
+        << " \n ========= REF ========= \n"
+        << ref.str() << "\n========= RESULT ========== \n"
+        << cdg.str() << "\n=================" << std::endl;
+    TORCH_CHECK(false);
+  }
+
 }
 
 void testGPU_FusionDependency() {
