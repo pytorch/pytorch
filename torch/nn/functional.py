@@ -3754,14 +3754,14 @@ def multi_head_attention_forward(query,                           # type: Tensor
         return mha_output, None
 
 
-def multi_head_attention_out_projection(attn_output, out_proj_weight, out_proj_bias, num_heads):
-    # type: (Tensor, Tensor, Tensor, int) -> Tensor
+def multi_head_attention_out_projection(attn_output, num_heads, out_proj_weight, out_proj_bias=None):
+    # type: (Tensor, int, Tensor, Optional[Tensor]) -> Tensor
     r"""
     Args:
         attn_output (Tensor): Projection to be decoded to an embedding.
-        out_proj_weight, out_proj_bias (Tensor): Weight and bias used to get
-            embedding.
         num_heads (int): Number of parallel attention heads
+        out_proj_weight (Tensor): weight used to decode projection.
+        out_proj_bias (Tensor, optional): bias used to decode projection.
 
     Shape:
         S is the sequence length, H is the number of attention heads, N is the
@@ -3774,28 +3774,27 @@ def multi_head_attention_out_projection(attn_output, out_proj_weight, out_proj_b
 
     """
     if not torch.jit.is_scripting():
-        tens_ops = (attn_output, out_proj_weight, out_proj_bias)
+        tens_ops = (attn_output, out_proj_weight)
         if any([type(t) is not Tensor for t in tens_ops]) and has_torch_function(tens_ops):
             return handle_torch_function(
                 multi_head_attention_out_projection, tens_ops,
-                attn_output, out_proj_weight, out_proj_bias, num_heads)
+                attn_output, num_heads, out_proj_weight, out_proj_bias=out_proj_bias)
     batch_heads, seq_len, _ = attn_output.size()
     embed_dim = out_proj_weight.size(0)
     assert batch_heads % num_heads == 0, "dimension 0 of attn_output must be divisible by num_heads"
     bsz = batch_heads // num_heads
     attn_output = attn_output.transpose(0, 1).reshape(seq_len, bsz, embed_dim)
-    # (L, N, P)
     return linear(attn_output, out_proj_weight, out_proj_bias)
 
 
-def multi_head_attention_in_projection(query, in_proj_weight, in_proj_bias, num_heads):
-    # type: (Tensor, Tensor, Tensor, int) -> Tensor
+def multi_head_attention_in_projection(query, num_heads, in_proj_weight, in_proj_bias=None):
+    # type: (Tensor, int, Tensor, Optional[Tensor]) -> Tensor
     r"""
     Args:
         query (Tensor): query to be projected
-        in_proj_weight, in_proj_bias (Tensor): weight and bias used to get
-            projection.
         num_heads (int): number of parallel heads used.
+        in_proj_weight (Tensor): weight used for projection
+        in_proj_bias (Tensor, optional): bias used for projection.
     
     Shape:
         S is the sequence length, H is the number of attention heads, N is the
@@ -3808,11 +3807,11 @@ def multi_head_attention_in_projection(query, in_proj_weight, in_proj_bias, num_
 
     """
     if not torch.jit.is_scripting():
-        tens_ops = (query, in_proj_weight, in_proj_bias)
+        tens_ops = (query, in_proj_weight)
         if any([type(t) is not Tensor for t in tens_ops]) and has_torch_function(tens_ops):
             return handle_torch_function(
                 multi_head_attention_in_projection, tens_ops,
-                query, in_proj_weight, in_proj_bias, num_heads)
+                query, num_heads, in_proj_weight, in_proj_bias=in_proj_bias)
     seq_len, bsz, embed_dim = query.size()
     assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads"
     head_dim = embed_dim // num_heads
@@ -3844,15 +3843,15 @@ def scaled_dot_product_attention(q,                     # type: Tensor
             value sequences at dimension 1.
         dropout_p (float): Probability of an element will be zeroed.
         training (bool): Apply dropout if ``training=True``
-        key_padding_mask: Specified padding elements in the key will be ignored
-            by the attention. This is a binary mask. When the value is True, the
-            corresponding value on the attention layer will be set to
-            :math:`-\inf`.
-        attn_mask: 2D or 3D mask that prevents attention to certain positions.
-            This is an additive mask (i.e. the values will be added to the 
-            attention layer). A 2D mask will be broadcasted for all the batches
-            while a 3D mask allows to specify a different mask for the entries
-            of each batch.
+        key_padding_mask (Tensor, optional): Specified padding elements in the
+            key will be ignored by the attention. This is a binary mask. When
+            the value is True, the corresponding value on the attention layer
+            will be set to :math:`-\inf`.
+        attn_mask (Tensor, optional): 2D or 3D mask that prevents attention to
+            certain positions. This is an additive mask (i.e. the values will
+            be added to the attention layer). A 2D mask will be broadcasted for
+            all the batches while a 3D mask allows to specify a different mask
+            for the entries of each batch.
 
     Shape:
         L is the target length, S is the source length, H is the number of
