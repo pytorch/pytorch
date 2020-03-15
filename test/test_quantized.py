@@ -1192,6 +1192,59 @@ class TestQuantizedOps(TestCase):
                              message=error_message.format(name + '.zero_point', scale,
                                                           qX_hat.q_zero_point()))
 
+    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=5, max_dims=5,
+                                              min_side=5, max_side=10),
+                       qparams=hu.qparams()),
+           size=st.sampled_from((1, 3, 5, 5, 10)),
+           scale_factor=st.sampled_from((None, 1.5, 2.0)),
+           align_corners=st.sampled_from((True, False)),
+           nhwc_layout=st.sampled_from((True, False)))
+    def test_interpolate3d(self, X, size, scale_factor, align_corners, nhwc_layout):
+        """
+        This test cover upsample_nearest2d and upsample_bilinear2d
+        """
+        X, (scale, zero_point, torch_type) = X
+        D, H, W = X.shape[-3:]
+        mode = "nearest"
+        if scale_factor is not None:
+            size = None
+        if mode == "nearest":
+            align_corners = None
+
+        if nhwc_layout:
+            if X.shape[1] < 176:
+                X = np.repeat(X, 176 / X.shape[1], 1)
+
+            X_nchw = np.ascontiguousarray(X.transpose([0, 2, 3, 4, 1]))
+            X = torch.from_numpy(X_nchw).permute([0, 4, 1, 2, 3])
+
+            qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
+                                           dtype=torch_type).permute([0, 4, 1, 2, 3])
+        else:
+            X = torch.from_numpy(X)
+            qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
+                                           dtype=torch_type)
+        X_ref = torch.nn.functional.interpolate(
+            qX.int_repr().to(torch.float), size=size, scale_factor=scale_factor,
+            mode=mode, align_corners=align_corners)
+
+        ops_under_test = {
+            "nn.functional": torch.nn.functional.interpolate,
+            "nn.quantized.functional": torch.nn.quantized.functional.interpolate
+        }
+
+        error_message = r"Results are off for {}:\n\tExpected:\n{}\n\tGot:\n{}"
+        for name, op in ops_under_test.items():
+            qX_hat = op(qX, size=size, scale_factor=scale_factor,
+                        mode=mode, align_corners=align_corners)
+            self.assertEqual(X_ref, qX_hat.int_repr(), prec=1.0,
+                             message="{} results are off".format(name, qX_hat.int_repr(), X_ref))
+            self.assertEqual(scale, qX_hat.q_scale(),
+                             message=error_message.format(name + '.scale', scale, qX_hat.q_scale()))
+            self.assertEqual(zero_point, qX_hat.q_zero_point(),
+                             message=error_message.format(name + '.zero_point', scale,
+                                                          qX_hat.q_zero_point()))
+
     """Tests quantize concatenation (both fused and not)."""
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
                                               min_side=1, max_side=10),
@@ -1335,6 +1388,35 @@ class TestQuantizedOps(TestCase):
             eps = 0.001
             qx = torch.quantize_per_tensor(X, scale_x, zero_point_x, dtype_x)
             qy = torch.ops.quantized.batch_norm(qx, weight, bias, mean, var, eps, Y_scale, Y_zero_point)
+
+            float_ref = F.batch_norm(qx.dequantize(), weight=weight, bias=bias,
+                                     running_mean=mean, running_var=var, training=False, momentum=0, eps=eps)
+            quantize_ref = torch.quantize_per_tensor(float_ref, Y_scale, Y_zero_point, dtype_x)
+            self.assertEqual(qy.int_repr().numpy(), quantize_ref.int_repr().numpy())
+
+    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=5, max_dims=5,
+                                              min_side=1, max_side=32),
+                       qparams=hu.qparams()),
+           Y_scale=st.floats(0.2, 2.6),
+           Y_zero_point=st.integers(0, 5),
+           qengine=st.sampled_from(("qnnpack", "fbgemm")))
+    def test_batch_norm3d(self, X, Y_scale, Y_zero_point, qengine):
+        if qengine not in torch.backends.quantized.supported_engines:
+            return
+
+        with override_quantized_engine(qengine):
+            X, (scale_x, zero_point_x, dtype_x) = X
+
+            X = torch.from_numpy(X)
+            c = X.shape[1]
+
+            mean = torch.rand(c).float()
+            var = torch.rand(c).float()
+            weight = torch.rand(c).float()
+            bias = torch.rand(c).float()
+            eps = 0.001
+            qx = torch.quantize_per_tensor(X, scale_x, zero_point_x, dtype_x)
+            qy = torch.ops.quantized.batch_norm3d(qx, weight, bias, mean, var, eps, Y_scale, Y_zero_point)
 
             float_ref = F.batch_norm(qx.dequantize(), weight=weight, bias=bias,
                                      running_mean=mean, running_var=var, training=False, momentum=0, eps=eps)
