@@ -64,7 +64,7 @@ std::string operator()(const enumtype::k##name& v) const { \
 // However, it throws the following error instead:
 //
 // ```
-// error: could not convert ‘torch::kNone’ from ‘const torch::enumtype::kNone’ to ‘torch::nn::SomeOptions’
+// error: could not convert `torch::kNone` from `const torch::enumtype::kNone` to `torch::nn::SomeOptions`
 // ```
 //
 // To get around this problem, we explicitly provide the following constructors for `SomeOptions`:

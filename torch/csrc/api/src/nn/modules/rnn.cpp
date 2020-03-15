@@ -132,7 +132,7 @@ void RNNImplBase<Derived>::reset() {
   }
 
   this->flatten_parameters();
-  this->reset_parameters(); 
+  this->reset_parameters();
 }
 
 template <typename Derived>
@@ -187,7 +187,7 @@ void RNNImplBase<Derived>::flatten_parameters() {
               static_cast<int64_t>(get_cudnn_mode_for_rnn(options_base.mode())),
               options_base.hidden_size(),
               options_base.num_layers(),
-              options_base.batch_first(), 
+              options_base.batch_first(),
               options_base.bidirectional());
       }
     }
@@ -258,7 +258,7 @@ std::tuple<int64_t, int64_t, int64_t> RNNImplBase<Derived>::get_expected_hidden_
     mini_batch = batch_sizes[0].item<int64_t>();
   } else {
     mini_batch = options_base.batch_first() ? input.size(0) : input.size(1);
-  }    
+  }
   int64_t num_directions = options_base.bidirectional() ? 2 : 1;
   return std::make_tuple(options_base.num_layers() * num_directions, mini_batch, options_base.hidden_size());
 }
@@ -368,7 +368,7 @@ std::tuple<Tensor, Tensor> RNNImpl::forward_helper(
     // Each batch of the hidden state should match the input sequence that
     // the user believes he/she is passing in.
     hx = this->permute_hidden(hx, sorted_indices);
-  }    
+  }
 
   this->check_forward_args(input, hx, batch_sizes);
 
@@ -480,7 +480,7 @@ std::tuple<Tensor, std::tuple<Tensor, Tensor>> LSTMImpl::forward_helper(
     // Each batch of the hidden state should match the input sequence that
     // the user believes he/she is passing in.
     hx = this->permute_hidden(hx, sorted_indices);
-  }    
+  }
 
   this->check_forward_args(input, hx, batch_sizes);
   std::tuple<Tensor, Tensor, Tensor> result;
@@ -557,7 +557,7 @@ std::tuple<Tensor, Tensor> GRUImpl::forward_helper(
     // Each batch of the hidden state should match the input sequence that
     // the user believes he/she is passing in.
     hx = this->permute_hidden(hx, sorted_indices);
-  }    
+  }
 
   this->check_forward_args(input, hx, batch_sizes);
   std::tuple<Tensor, Tensor> result;
