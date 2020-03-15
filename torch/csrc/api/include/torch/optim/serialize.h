@@ -230,15 +230,22 @@ void list_to_deque(const c10::List<T>& list, std::deque<T>& dq) {
 #define _TORCH_OPTIM_SERIALIZE_WITH_TEMPLATE_ARG(OptimizerName) \
   torch::optim::serialize<OptimizerName##ParamState, OptimizerName##Options>(archive, self)
 
-#define _TORCH_OPTIM_SERIALIZE_TORCH_ARG(name) \
+#define _TORCH_OPTIM_SERIALIZE_TORCH_ARG(name) { \
+  c10::IValue ivalue = torch::IValue(name()); \
+  std::cout<<#name<<" tagKind: "<<ivalue.tagKind()<<std::endl; \
   archive.write(#name, torch::IValue(name())); \
+}
 
-#define _TORCH_OPTIM_SERIALIZE_TORCH_ARG_DEQUE(name) \
-  archive.write(#name, torch::IValue(deque_to_list(name())));
+#define _TORCH_OPTIM_SERIALIZE_TORCH_ARG_DEQUE(name) {\
+  c10::IValue ivalue = torch::IValue(deque_to_list(name())); \
+  std::cout<<#name<<"tagKind: "<<ivalue.tagKind()<<std::endl; \
+  archive.write(#name, ivalue); \
+}
 
 #define _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(T, name) \
 { \
   c10::IValue ivalue; \
+  std::cout<<"tagKind: "<<ivalue.tagKind()<<std::endl; \
   name(ivalue.to<T>()); \
 }
 

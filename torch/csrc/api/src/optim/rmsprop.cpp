@@ -11,7 +11,8 @@
 namespace torch {
 namespace optim {
 
-RMSpropOptions::RMSpropOptions(double lr) : lr_(lr) {}
+RMSpropOptions::RMSpropOptions(double lr)
+    : lr_(lr) {}
 
 bool operator==(const RMSpropOptions& lhs, const RMSpropOptions& rhs) {
   return (lhs.lr() == rhs.lr()) &&
@@ -43,9 +44,12 @@ void RMSpropOptions::serialize(torch::serialize::InputArchive& archive) {
 bool operator==(const RMSpropParamState& lhs, const RMSpropParamState& rhs) {
   return (lhs.step() == rhs.step()) &&
          torch::equal(lhs.square_avg(), rhs.square_avg()) &&
-         torch::equal_if_defined(lhs.momentum_buffer(), rhs.momentum_buffer()) &&
-         torch::equal_if_defined(lhs.grad_avg(), rhs.grad_avg()) &&
-         torch::equal(lhs.grad_avg(), rhs.grad_avg());
+         ((!lhs.momentum_buffer().defined() && !rhs.momentum_buffer().defined()) ||
+          (lhs.momentum_buffer().defined() && rhs.momentum_buffer().defined() &&
+          torch::equal(lhs.momentum_buffer(), rhs.momentum_buffer()))) &&
+         ((!lhs.grad_avg().defined() && !rhs.grad_avg().defined()) ||
+           (lhs.grad_avg().defined() && rhs.grad_avg().defined() &&
+           torch::equal(lhs.grad_avg(), rhs.grad_avg())));
 }
 
 void RMSpropParamState::serialize(torch::serialize::OutputArchive& archive) const {
@@ -127,7 +131,6 @@ Tensor RMSprop::step(LossClosure closure)  {
       }
     }
   }
-  return loss;
 }
 
 void RMSprop::add_parameters(const std::vector<Tensor>& parameters) {

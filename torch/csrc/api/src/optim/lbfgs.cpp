@@ -37,13 +37,21 @@ void LBFGSOptions::serialize(torch::serialize::OutputArchive& archive) const {
 }
 
 void LBFGSOptions::serialize(torch::serialize::InputArchive& archive) {
-  _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(double, lr);
-  _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(int64_t, max_iter);
-  _TORCH_OPTIM_DESERIALIZE_TORCH_ARG_OPTIONAL(int64_t, max_eval);
-  _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(double, tolerance_grad);
-  _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(double, tolerance_change);
-  _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(int64_t, history_size);
-  _TORCH_OPTIM_DESERIALIZE_TORCH_ARG_OPTIONAL(std::string, line_search_fn);
+  // std::cout<<"entering options deserialize\n";
+  // _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(double, lr);
+  // std::cout<<"deserialized lr\n";
+  // _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(int64_t, max_iter);
+  // std::cout<<"deserialized max_iter\n";
+  // _TORCH_OPTIM_DESERIALIZE_TORCH_ARG_OPTIONAL(int64_t, max_eval);
+  // std::cout<<"deserialized max_eval\n";
+  // _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(double, tolerance_grad);
+  // std::cout<<"deserialized tolerance_grad\n";
+  // _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(double, tolerance_change);
+  // std::cout<<"deserialized tolerance_change\n";
+  // _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(int64_t, history_size);
+  // std::cout<<"deserialized history_size\n";
+  // _TORCH_OPTIM_DESERIALIZE_TORCH_ARG_OPTIONAL(std::string, line_search_fn);
+  // std::cout<<"deserialized line_search_fn\n";
 }
 
 template <typename T>
@@ -84,17 +92,29 @@ void LBFGSParamState::serialize(torch::serialize::OutputArchive& archive) const 
 }
 
 void LBFGSParamState::serialize(torch::serialize::InputArchive& archive) {
-  _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(int64_t, func_evals);
-  _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(int64_t, n_iter);
-  _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(double, t);
-  _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(Tensor, d);
-  _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(Tensor, H_diag);
-  _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(Tensor, prev_flat_grad);
-  _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(Tensor, prev_loss);
-  _TORCH_OPTIM_DESERIALIZE_TORCH_ARG_DEQUE(std::deque<Tensor>, old_dirs);
-  _TORCH_OPTIM_DESERIALIZE_TORCH_ARG_DEQUE(std::deque<Tensor>, old_stps);
-  _TORCH_OPTIM_DESERIALIZE_TORCH_ARG_DEQUE(std::deque<Tensor>, ro);
-  _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(std::vector<Tensor>, al);
+  // std::cout<<"entering state deserialize\n";
+  // _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(int64_t, func_evals);
+  // std::cout<<"deserialized func_evals\n";
+  // _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(int64_t, n_iter);
+  // std::cout<<"deserialized n_iter\n";
+  // _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(double, t);
+  // std::cout<<"deserialized t\n";
+  // _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(Tensor, d);
+  // std::cout<<"deserialized d\n";
+  // _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(Tensor, H_diag);
+  // std::cout<<"deserialized H_diag\n";
+  // _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(Tensor, prev_flat_grad);
+  // std::cout<<"deserialized prev_flat_grad\n";
+  // _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(Tensor, prev_loss);
+  // std::cout<<"deserialized prev_loss\n";
+  // _TORCH_OPTIM_DESERIALIZE_TORCH_ARG_DEQUE(std::deque<Tensor>, old_dirs);
+  // std::cout<<"deserialized old_dirs\n";
+  // _TORCH_OPTIM_DESERIALIZE_TORCH_ARG_DEQUE(std::deque<Tensor>, old_stps);
+  // std::cout<<"deserialized old_stps\n";
+  // _TORCH_OPTIM_DESERIALIZE_TORCH_ARG_DEQUE(std::deque<Tensor>, ro);
+  // std::cout<<"deserialized ro\n";
+  // _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(std::vector<Tensor>, al);
+  // std::cout<<"deserialized al\n";
 }
 
 Tensor LBFGS::_gather_flat_grad() {
@@ -216,7 +236,7 @@ std::tuple<Tensor, Tensor, double, int64_t> _strong_wolfe(Function obj_func, con
     auto obj_func_res = obj_func(x, t, d);
     auto f_new = std::get<0>(obj_func_res);
     auto g_new = std::get<1>(obj_func_res);
-    auto ls_func_evals = 1;
+    int64_t ls_func_evals = 1;
     auto gtd_new = g_new.dot(d);
 
     // bracket an interval containing a point satisfying the Wolfe criteria
@@ -397,7 +417,7 @@ Tensor LBFGS::step(LossClosure closure) {
   }
 
   auto loss = orig_loss.clone(at::MemoryFormat::Contiguous);
-  auto current_evals = 1;
+  int64_t current_evals = 1;
   state.func_evals(state.func_evals()+1);
   auto flat_grad = _gather_flat_grad();
   auto opt_cond = (val(flat_grad.abs().max()) <= tolerance_grad);
@@ -574,9 +594,9 @@ void LBFGS::load(serialize::InputArchive& archive) {
   }
   else { // deserializing archives saved in old format (prior to version 1.5.0)
     TORCH_WARN(
-      "Your serialized Adagrad optimizer is still using the old serialization format. "
+      "Your serialized LBFGS optimizer is still using the old serialization format. "
       "The func_evals and n_iter value in state will be set to 0 because the old RMSprop optimizer didn't save these values."
-      "You should re-save your Adagrad optimizer to use the new serialization format.");
+      "You should re-save your LBFGS optimizer to use the new serialization format.");
     Tensor d, t, H_diag, prev_flat_grad, prev_loss;
     std::deque<Tensor> old_dirs, old_stps;
     archive("d", d);

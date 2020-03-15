@@ -43,7 +43,8 @@ bool operator==(const AdamParamState& lhs, const AdamParamState& rhs) {
   return (lhs.step() == rhs.step()) &&
           torch::equal(lhs.exp_avg(), rhs.exp_avg()) &&
           torch::equal(lhs.exp_avg_sq(), rhs.exp_avg_sq()) &&
-          torch::equal_if_defined(lhs.max_exp_avg_sq(), rhs.max_exp_avg_sq());
+          ((!lhs.max_exp_avg_sq().defined() && !rhs.max_exp_avg_sq().defined()) ||
+           (lhs.max_exp_avg_sq().defined() && rhs.max_exp_avg_sq().defined() && torch::equal(lhs.max_exp_avg_sq(), rhs.max_exp_avg_sq())));
 }
 
 void AdamParamState::serialize(torch::serialize::OutputArchive& archive) const {
@@ -60,13 +61,8 @@ void AdamParamState::serialize(torch::serialize::InputArchive& archive) {
   _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(Tensor, max_exp_avg_sq);
 }
 
-Tensor Adam::step(LossClosure closure)  {
+void Adam::step() {
   NoGradGuard no_grad;
-  Tensor loss = {};
-  if (closure != nullptr) {
-    at::AutoGradMode enable_grad(true);
-    loss = closure();
-  }
   for (auto& group : param_groups_) {
     for (auto& p : group.params()) {
       if (!p.grad().defined()) {
@@ -126,7 +122,6 @@ Tensor Adam::step(LossClosure closure)  {
       p.addcdiv_(exp_avg, denom, -step_size);
     }
   }
-  return loss;
 }
 
 void Adam::add_parameters(const std::vector<Tensor>& parameters) {

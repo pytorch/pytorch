@@ -90,7 +90,7 @@ class TORCH_API LBFGS : public Optimizer {
 
   template <typename Self, typename Archive>
   static void serialize(Self& self, Archive& archive) {
-    //_TORCH_OPTIM_SERIALIZE_WITH_TEMPLATE_ARG(LBFGS);
+    _TORCH_OPTIM_SERIALIZE_WITH_TEMPLATE_ARG(LBFGS);
   }
 };
 } // namespace optim

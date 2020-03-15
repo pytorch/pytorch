@@ -75,10 +75,11 @@ void OptimizerOptions::serialize(torch::serialize::OutputArchive& archive) const
     "You must override it in your subclass of torch::optim::OptimizerCloneableOptions<YourOptimizerOptions>.");
 }
 
-Optimizer::Optimizer(std::vector<Tensor> parameters)
+namespace detail {
+OptimizerBase::OptimizerBase(std::vector<Tensor> parameters)
     : parameters_(std::move(parameters)) {}
 
-void Optimizer::add_param_group(const OptimizerParamGroup& param_group) {
+void OptimizerBase::add_param_group(const OptimizerParamGroup& param_group) {
   for (const auto& param : param_group.params()) {
     TORCH_CHECK(param.is_leaf(), "can't optimize a non-leaf Tensor");
   }
@@ -95,15 +96,15 @@ void Optimizer::add_param_group(const OptimizerParamGroup& param_group) {
   param_groups_.emplace_back(std::move(param_group_));
 }
 
-void Optimizer::add_parameters(const std::vector<Tensor>& parameters) {
+void OptimizerBase::add_parameters(const std::vector<Tensor>& parameters) {
   parameters_.insert(parameters_.end(), parameters.begin(), parameters.end());
 }
 
-void Optimizer::_add_parameters_new_design(const std::vector<Tensor>& parameters) {
-  param_groups_.at(0).params().insert(param_groups_.at(0).params().end(), parameters.begin(), parameters.end());
+void OptimizerBase::_add_parameters_new_design(const std::vector<Tensor>& parameters) {
+  param_groups_.emplace_back(OptimizerParamGroup(parameters, defaults_->clone()));
 }
 
-void Optimizer::zero_grad() {
+void OptimizerBase::zero_grad() {
   for (auto& parameter : parameters_) {
     if (parameter.grad().defined()) {
       parameter.grad().detach_();
@@ -121,29 +122,29 @@ void Optimizer::zero_grad() {
 }
 
 // TODO: remove this function after all the optimizers use the new design
-const std::vector<Tensor>& Optimizer::parameters() const noexcept {
+const std::vector<Tensor>& OptimizerBase::parameters() const noexcept {
   return parameters_;
 }
 
-const std::vector<Tensor>& Optimizer::_parameters_new_design() const noexcept {
+const std::vector<Tensor>& OptimizerBase::_parameters_new_design() const noexcept {
    return param_groups_.at(0).params();
 }
 
 // TODO: remove this function after all the optimizers use the new design
-std::vector<Tensor>& Optimizer::parameters() noexcept {
+std::vector<Tensor>& OptimizerBase::parameters() noexcept {
   return parameters_;
 }
 
-std::vector<Tensor>& Optimizer::_parameters_new_design() noexcept {
+std::vector<Tensor>& OptimizerBase::_parameters_new_design() noexcept {
    return param_groups_.at(0).params();
 }
 
 // TODO: update size to return the sum of #params in all param_groups
-size_t Optimizer::size() const noexcept {
+size_t OptimizerBase::size() const noexcept {
   return parameters_.size();
 }
 
-size_t Optimizer::_size_new_design() const noexcept {
+size_t OptimizerBase::_size_new_design() const noexcept {
   size_t count = 0;
   for (const auto& group : param_groups_) {
     count += group.params().size();
@@ -151,31 +152,31 @@ size_t Optimizer::_size_new_design() const noexcept {
   return count;
 }
 
-OptimizerOptions& Optimizer::defaults() noexcept {
+OptimizerOptions& OptimizerBase::defaults() noexcept {
   return *defaults_.get();
 }
 
-const OptimizerOptions& Optimizer::defaults() const noexcept {
+const OptimizerOptions& OptimizerBase::defaults() const noexcept {
   return *defaults_.get();
 }
 
-std::vector<OptimizerParamGroup>& Optimizer::param_groups() noexcept {
+std::vector<OptimizerParamGroup>& OptimizerBase::param_groups() noexcept {
   return param_groups_;
 }
 
-const std::vector<OptimizerParamGroup>& Optimizer::param_groups() const noexcept {
+const std::vector<OptimizerParamGroup>& OptimizerBase::param_groups() const noexcept {
   return param_groups_;
 }
 
-ska::flat_hash_map<std::string, std::unique_ptr<OptimizerParamState>>& Optimizer::state() noexcept {
+ska::flat_hash_map<std::string, std::unique_ptr<OptimizerParamState>>& OptimizerBase::state() noexcept {
   return state_;
 }
 
-const ska::flat_hash_map<std::string, std::unique_ptr<OptimizerParamState>>& Optimizer::state() const noexcept {
+const ska::flat_hash_map<std::string, std::unique_ptr<OptimizerParamState>>& OptimizerBase::state() const noexcept {
   return state_;
 }
 
-Tensor& Optimizer::buffer_at(std::vector<Tensor>& buffers, size_t index) {
+Tensor& OptimizerBase::buffer_at(std::vector<Tensor>& buffers, size_t index) {
   if (buffers.size() <= index) {
     buffers.reserve(index);
     for (auto i = buffers.size(); i <= index; ++i) {
@@ -192,13 +193,13 @@ Tensor& Optimizer::buffer_at(std::vector<Tensor>& buffers, size_t index) {
   return buffers[index];
 }
 
-void Optimizer::save(serialize::OutputArchive& archive) const {}
-void Optimizer::load(serialize::InputArchive& archive) {}
+void OptimizerBase::save(serialize::OutputArchive& archive) const {}
+void OptimizerBase::load(serialize::InputArchive& archive) {}
 
-/// Serializes an `Optimizer` into an `OutputArchive`.
+/// Serializes an `OptimizerBase` into an `OutputArchive`.
 serialize::OutputArchive& operator<<(
     serialize::OutputArchive& archive,
-    const Optimizer& optimizer) {
+    const OptimizerBase& optimizer) {
   optimizer.save(archive);
   return archive;
 }
@@ -206,9 +207,10 @@ serialize::OutputArchive& operator<<(
 /// Deserializes a `Tensor` from an `InputArchive`.
 serialize::InputArchive& operator>>(
     serialize::InputArchive& archive,
-    Optimizer& optimizer) {
+    OptimizerBase& optimizer) {
   optimizer.load(archive);
   return archive;
 }
+} // namespace detail
 } // namespace optim
 } // namespace torch

@@ -54,11 +54,6 @@ void SGDParamState::serialize(torch::serialize::InputArchive& archive) {
 
 Tensor SGD::step(LossClosure closure)  {
   NoGradGuard no_grad;
-  Tensor loss = {};
-  if (closure != nullptr) {
-    at::AutoGradMode enable_grad(true);
-    loss = closure();
-  }
   for (auto& group : param_groups_) {
     auto& options = static_cast<SGDOptions&>(group.options());
     auto weight_decay = options.weight_decay();
@@ -95,7 +90,6 @@ Tensor SGD::step(LossClosure closure)  {
       p.data().add_(d_p, -1 * options.lr());
     }
   }
-  return loss;
 }
 
 void SGD::add_parameters(const std::vector<Tensor>& parameters) {

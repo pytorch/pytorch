@@ -109,8 +109,7 @@ void check_exact_values(
     auto loss = output.sum();
     loss.backward();
 
-    auto closure = []() { return torch::tensor({10}); };
-    optimizer.step(closure);
+    optimizer.step();
 
     if (i % kSampleEvery == 0) {
       ASSERT_TRUE(
@@ -169,7 +168,7 @@ TEST(OptimTest, OptimizerAccessors) {
 TEST(OptimTest, BasicInterface) {
   struct MyOptimizer : Optimizer {
     using Optimizer::Optimizer;
-    torch::Tensor step(LossClosure closure = nullptr) override { return {};}
+    void step() override {}
   };
   std::vector<torch::Tensor> parameters = {
       torch::ones({2, 3}), torch::zeros({2, 3}), torch::rand({2, 3})};
@@ -278,14 +277,6 @@ TEST(
       RMSpropOptions(0.1).weight_decay(1e-6).centered(true).momentum(0.9),
       expected_parameters::
           RMSprop_with_weight_decay_and_centered_and_momentum());
-}
-
-TEST(OptimTest, ProducesPyTorchValues_LBFGS) {
-  check_exact_values<LBFGS>(LBFGSOptions(1.0), expected_parameters::LBFGS());
-}
-
-TEST(OptimTest, ProducesPyTorchValues_LBFGSWithLineSearch) {
-  check_exact_values<LBFGS>(LBFGSOptions(0.1), expected_parameters::LBFGS_with_line_search());
 }
 
 TEST(OptimTest, ProducesPyTorchValues_SGD) {
