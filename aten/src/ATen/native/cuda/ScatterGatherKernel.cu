@@ -5,8 +5,6 @@
 
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 
-//#include <ATen/native/cuda/ScatterGatherKernel.cuh>
-
 namespace {
 
 using at::cuda::detail::TensorInfo;
