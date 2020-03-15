@@ -199,8 +199,9 @@ TORCH_API serialize::InputArchive& operator>>(
 /// according to the concrete optimization algorithm.
 class Optimizer : public detail::OptimizerBase {
  public:
-  using detail::OptimizerBase::OptimizerBase;
-  virtual void step() = 0;
+   using LossClosure = std::function<Tensor()>;
+   using detail::OptimizerBase::OptimizerBase;
+   virtual Tensor step(LossClosure closure = nullptr) = 0;
 };
 
 /// Optimizer that requires the loss function to be supplied to the `step()`
