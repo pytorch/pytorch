@@ -56,9 +56,9 @@ using namespace torch::distributed::autograd;
 
 void RequestCallbackImpl::processRpc(
     RpcCommandBase& rpc,
-    MessageType messageType,
-    int64_t messageId,
-    std::shared_ptr<FutureMessage> responseFuture) const {
+    const MessageType messageType,
+    const int64_t messageId,
+    const std::shared_ptr<FutureMessage>& responseFuture) const {
   auto markComplete = [messageId, responseFuture](Message m) {
     m.setId(messageId);
     responseFuture->markCompleted(std::move(m));

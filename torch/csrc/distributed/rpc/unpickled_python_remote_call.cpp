@@ -9,8 +9,8 @@ namespace rpc {
 
 UnpickledPythonRemoteCall::UnpickledPythonRemoteCall(
     const SerializedPyObj& serializedPyObj,
-    at::IValue rrefId,
-    at::IValue forkId)
+    const at::IValue& rrefId,
+    const at::IValue& forkId)
     : UnpickledPythonCall(serializedPyObj),
       rrefId_(RRefId::fromIValue(rrefId)),
       forkId_(ForkId::fromIValue(forkId)) {}

@@ -538,7 +538,7 @@ def rref_script_annotation(rref_var):
 @torch.jit.script
 def script_check_rref_confirmed(rref):
     # type: (RRef[Tensor]) -> bool
-    return rref.is_confirmed()
+    return rref.confirmed_by_owner()
 
 @unittest.skipIf(
     not torch._six.PY3, "Pytorch distributed rpc package does not support python2"

@@ -259,7 +259,7 @@ def clear_global_rref():
 
 
 def check_rref_confirmed(rref):
-    return rref.is_confirmed()
+    return rref.confirmed_by_owner()
 
 
 # load_tests from common_utils is used to automatically filter tests for
