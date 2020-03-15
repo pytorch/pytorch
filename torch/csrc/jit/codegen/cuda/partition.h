@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/ir/ir.h>
 
 /*
  * API for query node-compatibility in CudaCodeGen
