@@ -29,7 +29,7 @@ class C10_EXPORT RRefInterface : public c10::intrusive_ptr_target {
 
   // Returns true if this is an ``OwnerRRef`` or if this ``UserRRef`` has been
   // confirmed by its owner.
-  virtual bool isConfirmed() const = 0;
+  virtual bool confirmedByOwner() const = 0;
 
   virtual const TypePtr type() const = 0;
 };

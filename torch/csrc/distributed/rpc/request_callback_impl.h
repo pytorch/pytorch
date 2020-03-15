@@ -14,7 +14,7 @@ class TORCH_API RequestCallbackImpl : public RequestCallback {
       Message& request) const override;
 
  private:
-   void processRpc(
+  void processRpc(
       RpcCommandBase& rpc,
       MessageType messageType,
       int64_t messageId,

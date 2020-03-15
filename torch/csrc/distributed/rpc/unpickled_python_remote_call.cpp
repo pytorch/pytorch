@@ -1,7 +1,7 @@
 #include <torch/csrc/distributed/rpc/unpickled_python_remote_call.h>
 
-#include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <c10/util/C++17.h>
+#include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 
 namespace torch {
 namespace distributed {
@@ -15,13 +15,13 @@ UnpickledPythonRemoteCall::UnpickledPythonRemoteCall(
       rrefId_(RRefId::fromIValue(rrefId)),
       forkId_(ForkId::fromIValue(forkId)) {}
 
-  const RRefId& UnpickledPythonRemoteCall::rrefId() const {
-    return rrefId_;
-  }
+const RRefId& UnpickledPythonRemoteCall::rrefId() const {
+  return rrefId_;
+}
 
-  const ForkId& UnpickledPythonRemoteCall::forkId() const {
-    return forkId_;
-  }
+const ForkId& UnpickledPythonRemoteCall::forkId() const {
+  return forkId_;
+}
 
 } // namespace rpc
 } // namespace distributed

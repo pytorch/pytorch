@@ -12,7 +12,7 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-constexpr auto kDefaultNumSendRecvThreads = 16;
+constexpr auto kDefaultNumSendRecvThreads = 4;
 
 struct ProcessGroupRpcBackendOptions : public RpcBackendOptions {
   ProcessGroupRpcBackendOptions(

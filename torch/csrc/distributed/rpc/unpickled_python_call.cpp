@@ -1,7 +1,7 @@
 #include <torch/csrc/distributed/rpc/unpickled_python_call.h>
 
-#include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <c10/util/C++17.h>
+#include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 
 namespace torch {
 namespace distributed {
@@ -14,13 +14,12 @@ UnpickledPythonCall::UnpickledPythonCall(
   pythonUdf_ = pythonRpcHandler.deserialize(serializedPyObj);
 }
 
-Message UnpickledPythonCall::toMessage() && {
-  TORCH_INTERNAL_ASSERT(
-      false,
-      "UnpickledPythonCall does not support toMessage().")
-}
+Message UnpickledPythonCall::toMessage() &&
+    {TORCH_INTERNAL_ASSERT(
+        false,
+        "UnpickledPythonCall does not support toMessage().")}
 
-py::object UnpickledPythonCall::movePythonUdf() && {
+    py::object UnpickledPythonCall::movePythonUdf() && {
   return std::move(pythonUdf_);
 }
 

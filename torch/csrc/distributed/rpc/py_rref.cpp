@@ -113,8 +113,8 @@ bool PyRRef::isOwner() const {
   return rref_->isOwner();
 }
 
-bool PyRRef::isConfirmed() const {
-  return rref_->isConfirmed();
+bool PyRRef::confirmedByOwner() const {
+  return rref_->confirmedByOwner();
 }
 
 WorkerInfo PyRRef::owner() const {

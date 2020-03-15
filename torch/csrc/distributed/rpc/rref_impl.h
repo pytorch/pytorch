@@ -257,7 +257,7 @@ class TORCH_API UserRRef final : public RRef {
     return false;
   }
 
-  inline bool isConfirmed() const override {
+  inline bool confirmedByOwner() const override {
     return confirmed_;
   }
 
@@ -325,7 +325,7 @@ class TORCH_API OwnerRRef final : public RRef {
 
   // OwnerRRef is always confirmed, while UserRRef is only confirmed when the
   // owner knows about it.
-  inline bool isConfirmed() const override {
+  inline bool confirmedByOwner() const override {
     return true;
   }
 

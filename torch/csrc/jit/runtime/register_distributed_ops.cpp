@@ -67,7 +67,7 @@ RegisterOperators reg_rpc_ops({
          "aten::is_confirmed(RRef(t) self) -> bool",
          [](Stack& stack) {
            auto rref = pop(stack).toRRef();
-           push(stack, rref->isConfirmed());
+           push(stack, rref->confirmedByOwner());
            return 0;
          },
          aliasAnalysisFromSchema()),

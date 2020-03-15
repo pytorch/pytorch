@@ -34,7 +34,7 @@ namespace {
 std::unique_ptr<RpcCommandBase> deserializePythonRpcCommand(
     std::unique_ptr<RpcCommandBase> rpc,
     MessageType messageType) {
-  switch(messageType) {
+  switch (messageType) {
     case MessageType::PYTHON_CALL: {
       auto& pc = static_cast<PythonCall&>(*rpc);
       return std::make_unique<UnpickledPythonCall>(pc.serializedPyObj());
@@ -42,9 +42,7 @@ std::unique_ptr<RpcCommandBase> deserializePythonRpcCommand(
     case MessageType::PYTHON_REMOTE_CALL: {
       auto& prc = static_cast<PythonRemoteCall&>(*rpc);
       return std::make_unique<UnpickledPythonRemoteCall>(
-          prc.serializedPyObj(),
-          prc.retRRefId(),
-          prc.retForkId());
+          prc.serializedPyObj(), prc.retRRefId(), prc.retForkId());
     }
     default: {
       return rpc;
@@ -52,7 +50,7 @@ std::unique_ptr<RpcCommandBase> deserializePythonRpcCommand(
   }
 }
 
-}
+} // namespace
 
 using namespace torch::distributed::autograd;
 
@@ -230,23 +228,18 @@ void RequestCallbackImpl::processRpc(
       auto& ctx = RRefContext::getInstance();
       c10::intrusive_ptr<OwnerRRef> rref = ctx.getOwnerRRef(prf.rrefId());
       if (rref->hasValue()) { // optional fast-path
-
         auto value = rref->getValue();
         py::object pyValue;
         {
           pybind11::gil_scoped_acquire ag;
           pyValue = torch::jit::toPyObject(std::move(value));
         }
-
         SerializedPyObj result =
             PythonRpcHandler::getInstance().serialize(pyValue);
         markComplete(
             PythonRRefFetchRet(std::move(result).toIValues()).toMessage());
-
         return;
       }
-
-
 
       auto whenValueSet = rref->getFuture();
 
@@ -423,11 +416,9 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processMessage(
        rpc = (std::shared_ptr<RpcCommandBase>)std::move(rpc),
        messageType = request.type(),
        id = request.id()](
-          const bool& unused,
-          const c10::optional<utils::FutureError>& error) {
+          const bool& unused, const c10::optional<utils::FutureError>& error) {
         processRpc(*rpc, messageType, id, retFuture);
-      }
-  );
+      });
   return retFuture;
 }
 

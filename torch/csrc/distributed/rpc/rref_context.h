@@ -162,7 +162,7 @@ class TORCH_API RRefContext {
   // because this Future is already captured in callbacks of the
   // PendingUserState. If there is no pending UserRRefs, this method returns a
   // completed future.
-  std::shared_ptr<torch::utils::Future<bool>>  waitForThreadLocalPendingUsers();
+  std::shared_ptr<torch::utils::Future<bool>> waitForThreadLocalPendingUsers();
 
   void delUser(
       const worker_id_t owner,
