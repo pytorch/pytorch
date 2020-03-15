@@ -3764,12 +3764,14 @@ def multi_head_attention_out_projection(attn_output, out_proj_weight, out_proj_b
         num_heads (int): Number of parallel attention heads
 
     Shape:
-        S is the sequence Length, H is the number of heads, N is the batch
-        length, P is the projection dimension, and E is embedding dimension.
+        S is the sequence length, H is the number of attention heads, N is the
+        batch size, P is the projection dimension, and E is the embedding
+        dimension.
         - attn_output: :math:`(N * H, S, P / H)`
         - out_proj_weight: :math:`(P, E)`
         - out_proj_bias: :math:`(E)`
         - Output: :math:`(S, N, E)`
+
     """
     if not torch.jit.is_scripting():
         tens_ops = (attn_output, out_proj_weight, out_proj_bias)
@@ -3796,13 +3798,13 @@ def multi_head_attention_in_projection(query, in_proj_weight, in_proj_bias, num_
         num_heads (int): number of parallel heads used.
     
     Shape:
-        - query: :math:`(S, N, E)` where S is the sequence length, N is
-          the batch size, and E is the embedding dimension.
-        - in_proj_weight: :math:`(E, P)` where E is as above and P is the
-          projection dimension.
+        S is the sequence length, H is the number of attention heads, N is the
+        batch size, P is the projection dimension, and E is the embedding
+        dimension.
+        - query: :math:`(S, N, E)`
+        - in_proj_weight: :math:`(E, P)`
         - in_proj_bias: :math:`(P)`
-        - output: :math:`(N * H, S, P / H)` where H is the number of attention
-          heads.
+        - Output: :math:`(N * H, S, P / H)`
 
     """
     if not torch.jit.is_scripting():
@@ -3819,6 +3821,7 @@ def multi_head_attention_in_projection(query, in_proj_weight, in_proj_bias, num_
     # Shape of q: (S, N, P)
     q = q.reshape(seq_len, bsz * num_heads, head_dim).transpose(0, 1)
     return q
+
 
 def scaled_dot_product_attention(q,                     # type: Tensor
                                  k,                     # type: Tensor
@@ -3843,7 +3846,7 @@ def scaled_dot_product_attention(q,                     # type: Tensor
         training (bool): Apply dropout if ``training=True``
         key_padding_mask: Specified padding elements in the key will be ignored
             by the attention. This is a binary mask. When the value is True, the
-            corresponding value on the attention layer will be filled set to 
+            corresponding value on the attention layer will be set to
             :math:`-\inf`.
         attn_mask: 2D or 3D mask that prevents attention to certain positions.
             This is an additive mask (i.e. the values will be added to the 
@@ -3852,13 +3855,14 @@ def scaled_dot_product_attention(q,                     # type: Tensor
             of each batch.
 
     Shape:
-        - q: :math:`(N * H, L, P / H)` where N is the batch size, H is the
-          number of heads, L is the target length, and P is the projection
-          dimension.
-        - k: :math:`(N * H, S, P / H)` where S is the source length.
+        L is the target length, S is the source length, H is the number of
+        attention heads, N is the batch size, and P is the projection 
+        dimension.
+        - q: :math:`(N * H, L, P / H)`
+        - k: :math:`(N * H, S, P / H)`
         - v: :math:`(N * H, S, P / H)`
         - key_padding_mask: :math:`(N, S)`
-        - attn_mask:
+        - attn_mask: :math:`(L, S)` or :math:`(N * H, L, S)`
         - Output: :math:`(N * H, L, P / H)`, :math:`(N * H, L, S)`
 
     """
@@ -3873,6 +3877,7 @@ def scaled_dot_product_attention(q,                     # type: Tensor
     assert q.size(0) == k.size(0) == v.size(0), "Dimension 0 of q, k, v must match"
     assert batch_heads % num_heads == 0, "Dimension 0 of q, k, v must be divisible by num_heads"
     bsz = batch_heads // num_heads
+    assert k.size(1) == v.size(1), "Dimension 1 of k, v must match"
     src_len = k.size(1)
 
     # Scale q
@@ -3880,10 +3885,10 @@ def scaled_dot_product_attention(q,                     # type: Tensor
     if attn_mask is not None:
         if attn_mask.dim() == 2:
             attn_mask = attn_mask.unsqueeze(0)
-            if list(attn_mask.size()) != [1, query.size(0), key.size(0)]:
+            if list(attn_mask.size()) != [1, tgt_len, src_len]:
                 raise RuntimeError('The size of the 2D attn_mask is not correct.')
         elif attn_mask.dim() == 3:
-            if list(attn_mask.size()) != [bsz * num_heads, query.size(0), key.size(0)]:
+            if list(attn_mask.size()) != [batch_heads, tgt_len, src_len]:
                 raise RuntimeError('The size of the 3D attn_mask is not correct.')
         else:
             raise RuntimeError("attn_mask's dimension {} is not supported".format(attn_mask.dim()))
