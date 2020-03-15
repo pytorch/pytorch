@@ -58,9 +58,60 @@ static inline Tensor& unary_op_impl_(Tensor& self, OutImpl& out_impl) {
   return out_impl(self, self);
 }
 
-Tensor& acos_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, acos_stub); }
-Tensor acos(const Tensor& self) { return unary_op_impl(self, at::acos_out); }
-Tensor& acos_(Tensor& self) { return unary_op_impl_(self, at::acos_out); }
+template <typename Stub>
+static inline Tensor& unary_floating_ufunc_op_impl_out(Tensor& result, const Tensor& self, Stub& stub) {
+  TORCH_CHECK(!isIntegralType(result.scalar_type(), /*includeBool=*/ true),
+    "Attempted to call a function that returns a tensor of floating dtype ",
+    "but requested a tensor of bool or integral dtype. ",
+    "Specify an out tensor with a floating dtype or a floating dtype argument.");
+
+  auto iter = TensorIterator::unary_floating_ufunc(result, self,
+    /*check_mem_overlap=*/true);
+  stub(iter.device_type(), iter);
+  return result;
+}
+
+template <typename OutImpl>
+static inline Tensor unary_floating_ufunc_op_impl(const Tensor& self, OutImpl& out_impl) {
+  if (isIntegralType(self.scalar_type(), /*includeBool=*/ true)) {
+    const auto scalar_type = typeMetaToScalarType(c10::get_default_dtype());
+    Tensor result = at::empty({0}, self.options().dtype(scalar_type));
+    return out_impl(result, self);
+  }
+
+  Tensor result = at::empty({0}, self.options());
+  return out_impl(result, self);
+}
+
+template <typename OutImpl>
+static inline Tensor unary_floating_ufunc_cast_op_impl(
+    const Tensor& self,
+    OutImpl& out_impl) {
+  if (isIntegralType(self.scalar_type(), /*includeBool=*/ true)) {
+    const auto scalar_type = typeMetaToScalarType(c10::get_default_dtype());
+    Tensor result = at::empty({0}, self.options().dtype(scalar_type));
+    return out_impl(result, self.to(scalar_type));
+  }
+
+  Tensor result = at::empty({0}, self.options());
+  return out_impl(result, self);
+}
+
+template <typename OutImpl>
+static inline Tensor& unary_floating_ufunc_op_impl_(Tensor& self, OutImpl& out_impl) {
+  TORCH_CHECK(!isIntegralType(self.scalar_type(), /*includeBool=*/ true),
+    "Attempted to call a function that returns a tensor of floating dtype ",
+    "inplace on a tensor of bool or integral dtype. ",
+    "Perform the operation out-of-place ",
+    "or cast the tensor to a floating dtype first.");
+  return out_impl(self, self);
+}
+
+Tensor& acos_out(Tensor& result, const Tensor& self) {
+  return unary_floating_ufunc_op_impl_out(result, self, acos_stub);
+}
+Tensor acos(const Tensor& self) { return unary_floating_ufunc_op_impl(self, at::acos_out); }
+Tensor& acos_(Tensor& self) { return unary_floating_ufunc_op_impl_(self, at::acos_out); }
 
 Tensor& asin_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, asin_stub); }
 Tensor asin(const Tensor& self) { return unary_op_impl(self, at::asin_out); }
@@ -310,6 +361,11 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
     return result;                                                     \
   }
 
+#define IMPLEMENT_UNARY_FLOATING_UFUNC_OP_CORE(op)                     \
+  Tensor op(const Tensor& self) {                                      \
+    return unary_floating_ufunc_cast_op_impl(self, at::op##_out);      \
+  }
+
 #define IMPLEMENT_UNARY_OP_OUT_INPLACE(op, prefix, device)             \
   Tensor& _##op##__##prefix(Tensor& self) {                            \
     return at::op##_out(self, self);                                   \
@@ -323,9 +379,24 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
     return result;                                                     \
   }
 
+#define IMPLEMENT_UNARY_FLOATING_UFUNC_OP_OUT_INPLACE(op, prefix, device) \
+  Tensor& _##op##__##prefix(Tensor& self) {                            \
+    return unary_floating_ufunc_op_impl_(self, at::op##_out);          \
+  }                                                                    \
+                                                                       \
+  Tensor& _##op##_out_##prefix(Tensor& result, const Tensor& self) {   \
+    checkDeviceType(#op, result, DeviceType::device);                  \
+    checkLayout(#op, result, Layout::Strided);                         \
+    return unary_floating_ufunc_op_impl_out(result, self, op##_stub);  \
+  }
+
 #define IMPLEMENT_UNARY_OP_VEC(op)                                     \
   IMPLEMENT_UNARY_OP_CORE(op)                                          \
   IMPLEMENT_UNARY_OP_OUT_INPLACE(op, cpu, CPU)
+
+#define IMPLEMENT_UNARY_FLOATING_UFUNC_OP_VEC(op)                      \
+  IMPLEMENT_UNARY_FLOATING_UFUNC_OP_CORE(op)                           \
+  IMPLEMENT_UNARY_FLOATING_UFUNC_OP_OUT_INPLACE(op, cpu, CPU)
 
 #define IMPLEMENT_UNARY_OP_VEC_CUDA(op)                                \
   IMPLEMENT_UNARY_OP_CORE(op)                                          \
@@ -333,7 +404,7 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
   IMPLEMENT_UNARY_OP_OUT_INPLACE(op, cuda, CUDA)
 
 IMPLEMENT_UNARY_OP_VEC(atan)
-IMPLEMENT_UNARY_OP_VEC(cos)
+IMPLEMENT_UNARY_FLOATING_UFUNC_OP_VEC(cos)
 IMPLEMENT_UNARY_OP_VEC(cosh)
 IMPLEMENT_UNARY_OP_VEC(erf)
 IMPLEMENT_UNARY_OP_VEC(erfc)

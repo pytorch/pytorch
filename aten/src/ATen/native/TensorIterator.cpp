@@ -690,6 +690,19 @@ TensorIterator TensorIterator::unary_op(Tensor& out, const Tensor& a,
   return iter;
 }
 
+//
+TensorIterator TensorIterator::unary_floating_ufunc(Tensor& out, const Tensor& a,
+    bool check_mem_overlap) {
+  auto iter = TensorIterator();
+  iter.set_check_mem_overlap(check_mem_overlap);
+  iter.add_output(out);
+  iter.add_input(a);
+  iter.num_outputs_ = 1;
+  iter.promote_common_dtype();
+  iter.build();
+  return iter;
+}
+
 TensorIterator TensorIterator::nullary_op(Tensor& out) {
   auto iter = TensorIterator();
   iter.add_output(out);
