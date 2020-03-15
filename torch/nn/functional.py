@@ -3662,107 +3662,62 @@ def multi_head_attention_forward(query,                           # type: Tensor
     assert embed_dim == embed_dim_to_check
     assert key.size() == value.size()
 
-    head_dim = embed_dim // num_heads
-    assert head_dim * num_heads == embed_dim, "embed_dim must be divisible by num_heads"
-    scaling = float(head_dim) ** -0.5
-
     if not use_separate_proj_weight:
         if torch.equal(query, key) and torch.equal(key, value):
             # self-attention
-            q, k, v = linear(query, in_proj_weight, in_proj_bias).chunk(3, dim=-1)
+            q, k, v = multi_head_attention_in_projection(query, in_proj_weight, in_proj_bias, num_heads).chunk(3, -1)
 
         elif torch.equal(key, value):
             # encoder-decoder attention
-            # This is inline in_proj function with in_proj_weight and in_proj_bias
-            _b = in_proj_bias
-            _start = 0
-            _end = embed_dim
-            _w = in_proj_weight[_start:_end, :]
-            if _b is not None:
-                _b = _b[_start:_end]
-            q = linear(query, _w, _b)
-
+            q_proj_weight = in_proj_weight[:embed_dim, :]
+            q_proj_bias = in_proj_bias[:embed_dim] if in_proj_bias is not None else None
+            q = multi_head_attention_in_projection(query, q_proj_weight, q_proj_bias, num_heads)
+            
             if key is None:
-                assert value is None
                 k = None
                 v = None
             else:
-
-                # This is inline in_proj function with in_proj_weight and in_proj_bias
-                _b = in_proj_bias
-                _start = embed_dim
-                _end = None
-                _w = in_proj_weight[_start:, :]
-                if _b is not None:
-                    _b = _b[_start:]
-                k, v = linear(key, _w, _b).chunk(2, dim=-1)
-
+                k_proj_weight = in_proj_weight[embed_dim:, :]
+                k_proj_bias = in_proj_bias[embed_dim:] if in_proj_bias is not None else None
+                k, v = multi_head_attention_in_projection(key, k_proj_weight, k_proj_bias, num_heads).chunk(2, -1)
         else:
-            # This is inline in_proj function with in_proj_weight and in_proj_bias
-            _b = in_proj_bias
-            _start = 0
-            _end = embed_dim
-            _w = in_proj_weight[_start:_end, :]
-            if _b is not None:
-                _b = _b[_start:_end]
-            q = linear(query, _w, _b)
+            q_proj_weight = in_proj_weight[:embed_dim, :]
+            q_proj_bias = in_proj_bias[:embed_dim] if in_proj_bias is not None else None
 
-            # This is inline in_proj function with in_proj_weight and in_proj_bias
-            _b = in_proj_bias
-            _start = embed_dim
-            _end = embed_dim * 2
-            _w = in_proj_weight[_start:_end, :]
-            if _b is not None:
-                _b = _b[_start:_end]
-            k = linear(key, _w, _b)
+            k_proj_weight = in_proj_weight[embed_dim:embed_dim * 2, :]
+            k_proj_bias = in_proj_bias[embed_dim:embed_dim * 2] if in_proj_bias is not None else None
 
-            # This is inline in_proj function with in_proj_weight and in_proj_bias
-            _b = in_proj_bias
-            _start = embed_dim * 2
-            _end = None
-            _w = in_proj_weight[_start:, :]
-            if _b is not None:
-                _b = _b[_start:]
-            v = linear(value, _w, _b)
+            v_proj_weight = in_proj_weight[embed_dim * 2:, :]
+            v_proj_bias = in_proj_bias[embed_dim * 2:] if in_proj_bias is not None else None
+
+            q = multi_head_attention_in_projection(query, q_proj_weight, q_proj_bias, num_heads)
+            k = multi_head_attention_in_projection(key, k_proj_weight, k_proj_bias, num_heads)
+            v = multi_head_attention_in_projection(value, v_proj_weight, v_proj_bias, num_heads)
     else:
         q_proj_weight_non_opt = torch.jit._unwrap_optional(q_proj_weight)
         len1, len2 = q_proj_weight_non_opt.size()
         assert len1 == embed_dim and len2 == query.size(-1)
+        q_proj_bias = in_proj_bias[:embed_dim] if in_proj_bias is not None else None
 
         k_proj_weight_non_opt = torch.jit._unwrap_optional(k_proj_weight)
         len1, len2 = k_proj_weight_non_opt.size()
         assert len1 == embed_dim and len2 == key.size(-1)
+        k_proj_bias = in_proj_bias[embed_dim:embed_dim * 2] if in_proj_bias is not None else None
 
         v_proj_weight_non_opt = torch.jit._unwrap_optional(v_proj_weight)
         len1, len2 = v_proj_weight_non_opt.size()
         assert len1 == embed_dim and len2 == value.size(-1)
+        v_proj_bias = in_proj_bias[embed_dim * 2:] if in_proj_bias is not None else None
 
-        if in_proj_bias is not None:
-            q = linear(query, q_proj_weight_non_opt, in_proj_bias[0:embed_dim])
-            k = linear(key, k_proj_weight_non_opt, in_proj_bias[embed_dim:(embed_dim * 2)])
-            v = linear(value, v_proj_weight_non_opt, in_proj_bias[(embed_dim * 2):])
-        else:
-            q = linear(query, q_proj_weight_non_opt, in_proj_bias)
-            k = linear(key, k_proj_weight_non_opt, in_proj_bias)
-            v = linear(value, v_proj_weight_non_opt, in_proj_bias)
-    q = q * scaling
-
-    if attn_mask is not None:
-        if attn_mask.dim() == 2:
-            attn_mask = attn_mask.unsqueeze(0)
-            if list(attn_mask.size()) != [1, query.size(0), key.size(0)]:
-                raise RuntimeError('The size of the 2D attn_mask is not correct.')
-        elif attn_mask.dim() == 3:
-            if list(attn_mask.size()) != [bsz * num_heads, query.size(0), key.size(0)]:
-                raise RuntimeError('The size of the 3D attn_mask is not correct.')
-        else:
-            raise RuntimeError("attn_mask's dimension {} is not supported".format(attn_mask.dim()))
-        # attn_mask's dim is 3 now.
+        q = multi_head_attention_in_projection(query, q_proj_weight, q_proj_bias, num_heads)
+        k = multi_head_attention_in_projection(key, k_proj_weight, k_proj_bias, num_heads)
+        v = multi_head_attention_in_projection(value, v_proj_weight, v_proj_bias, num_heads)
 
     if bias_k is not None and bias_v is not None:
         if static_k is None and static_v is None:
-            k = torch.cat([k, bias_k.repeat(1, bsz, 1)])
-            v = torch.cat([v, bias_v.repeat(1, bsz, 1)])
+            # bias shape after repeat: (1, N, P)
+            k = torch.cat([k, bias_k.repeat(1, bsz, 1).reshape(bsz * num_heads, 1, head_dim).transpose(0, 1)], dim=1)
+            v = torch.cat([v, bias_v.repeat(1, bsz, 1).reshape(bsz * num_heads, 1, head_dim).transpose(0, 1)], dim=1)
             if attn_mask is not None:
                 attn_mask = pad(attn_mask, (0, 1))
             if key_padding_mask is not None:
@@ -3774,12 +3729,6 @@ def multi_head_attention_forward(query,                           # type: Tensor
         assert bias_k is None
         assert bias_v is None
 
-    q = q.contiguous().view(tgt_len, bsz * num_heads, head_dim).transpose(0, 1)
-    if k is not None:
-        k = k.contiguous().view(-1, bsz * num_heads, head_dim).transpose(0, 1)
-    if v is not None:
-        v = v.contiguous().view(-1, bsz * num_heads, head_dim).transpose(0, 1)
-
     if static_k is not None:
         assert static_k.size(0) == bsz * num_heads
         assert static_k.size(2) == head_dim
@@ -3789,6 +3738,156 @@ def multi_head_attention_forward(query,                           # type: Tensor
         assert static_v.size(0) == bsz * num_heads
         assert static_v.size(2) == head_dim
         v = static_v
+
+    attn_output, attn_output_weights = scaled_dot_product_attention(
+        q, v, k, add_zero_attn, dropout_p, training, key_padding_mask, attn_mask
+    )
+
+    assert list(attn_output.size()) == [bsz * num_heads, tgt_len, head_dim]
+
+    mha_output = multi_head_attention_out_projection(attn_output, out_proj_weight, out_proj_bias, num_heads)
+    if need_weights:
+        # average attention weights over heads
+        attn_output_weights = attn_output_weights.view(bsz, num_heads, tgt_len, src_len)
+        return mha_output, attn_output_weights.sum(dim=1) / num_heads
+    else:
+        return mha_output, None
+
+
+def multi_head_attention_out_projection(attn_output, out_proj_weight, out_proj_bias, num_heads):
+    # type: (Tensor, Tensor, Tensor, int) -> Tensor
+    r"""
+    Args:
+        attn_output (Tensor): Projection to be decoded to an embedding.
+        out_proj_weight, out_proj_bias (Tensor): Weight and bias used to get
+            embedding.
+        num_heads (int): Number of parallel attention heads
+
+    Shape:
+        S is the sequence Length, H is the number of heads, N is the batch
+        length, P is the projection dimension, and E is embedding dimension.
+        - attn_output: :math:`(N * H, S, P / H)`
+        - out_proj_weight: :math:`(P, E)`
+        - out_proj_bias: :math:`(E)`
+        - Output: :math:`(S, N, E)`
+    """
+    if not torch.jit.is_scripting():
+        tens_ops = (attn_output, out_proj_weight, out_proj_bias)
+        if any([type(t) is not Tensor for t in tens_ops]) and has_torch_function(tens_ops):
+            return handle_torch_function(
+                multi_head_attention_out_projection, tens_ops,
+                attn_output, out_proj_weight, out_proj_bias, num_heads)
+    batch_heads, seq_len, _ = attn_output.size()
+    embed_dim = out_proj_weight.size(0)
+    assert batch_heads % num_heads == 0, "dimension 0 of attn_output must be divisible by num_heads"
+    bsz = batch_heads // num_heads
+    attn_output = attn_output.transpose(0, 1).reshape(seq_len, bsz, embed_dim)
+    # (L, N, P)
+    return linear(attn_output, out_proj_weight, out_proj_bias)
+
+
+def multi_head_attention_in_projection(query, in_proj_weight, in_proj_bias, num_heads):
+    # type: (Tensor, Tensor, Tensor, int) -> Tensor
+    r"""
+    Args:
+        query (Tensor): query to be projected
+        in_proj_weight, in_proj_bias (Tensor): weight and bias used to get
+            projection.
+        num_heads (int): number of parallel heads used.
+    
+    Shape:
+        - query: :math:`(S, N, E)` where S is the sequence length, N is
+          the batch size, and E is the embedding dimension.
+        - in_proj_weight: :math:`(E, P)` where E is as above and P is the
+          projection dimension.
+        - in_proj_bias: :math:`(P)`
+        - output: :math:`(N * H, S, P / H)` where H is the number of attention
+          heads.
+
+    """
+    if not torch.jit.is_scripting():
+        tens_ops = (query, in_proj_weight, in_proj_bias)
+        if any([type(t) is not Tensor for t in tens_ops]) and has_torch_function(tens_ops):
+            return handle_torch_function(
+                multi_head_attention_in_projection, tens_ops,
+                query, in_proj_weight, in_proj_bias, num_heads)
+    seq_len, bsz, embed_dim = query.size()
+    assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads"
+    head_dim = embed_dim // num_heads
+
+    q = linear(query, in_proj_weight, in_proj_bias)
+    # Shape of q: (S, N, P)
+    q = q.reshape(seq_len, bsz * num_heads, head_dim).transpose(0, 1)
+    return q
+
+def scaled_dot_product_attention(q,                     # type: Tensor
+                                 k,                     # type: Tensor
+                                 v,                     # type: Tensor
+                                 num_heads,             # type: int
+                                 add_zero_attn,         # type: bool
+                                 dropout_p,             # type: float
+                                 training=True,         # type: bool
+                                 key_padding_mask=None, # type: Optional[Tensor]
+                                 attn_mask=None,        # type: Optional[Tensor]
+                                 ):
+    # type: (...) -> Tuple[Tensor, Optional[Tensor]]
+    r"""
+    Args:
+        q (Tensor): Projected query
+        k (Tensor): Projected key
+        v (Tensor): Projected value
+        num_heads (int): Number of parallel attention heads.
+        add_zero_attn (bool): Add a new batch of zeros to the projected key and
+            value sequences at dimension 1.
+        dropout_p (float): Probability of an element will be zeroed.
+        training (bool): Apply dropout if ``training=True``
+        key_padding_mask: Specified padding elements in the key will be ignored
+            by the attention. This is a binary mask. When the value is True, the
+            corresponding value on the attention layer will be filled set to 
+            :math:`-\inf`.
+        attn_mask: 2D or 3D mask that prevents attention to certain positions.
+            This is an additive mask (i.e. the values will be added to the 
+            attention layer). A 2D mask will be broadcasted for all the batches
+            while a 3D mask allows to specify a different mask for the entries
+            of each batch.
+
+    Shape:
+        - q: :math:`(N * H, L, P / H)` where N is the batch size, H is the
+          number of heads, L is the target length, and P is the projection
+          dimension.
+        - k: :math:`(N * H, S, P / H)` where S is the source length.
+        - v: :math:`(N * H, S, P / H)`
+        - key_padding_mask: :math:`(N, S)`
+        - attn_mask:
+        - Output: :math:`(N * H, L, P / H)`, :math:`(N * H, L, S)`
+
+    """
+    if not torch.jit.is_scripting():
+        tens_ops = (q, k, v)
+        if any([type(t) is not Tensor for t in tens_ops]) and has_torch_function(tens_ops):
+            return handle_torch_function(
+                scaled_dot_product_attention, tens_ops,
+                q, k, v, num_heads, add_zero_attn, dropout_p,
+                training=training, key_padding_mask=key_padding_mask, attn_mask=attn_mask)
+    batch_heads, tgt_len, head_dim = q.size()
+    assert q.size(0) == k.size(0) == v.size(0), "Dimension 0 of q, k, v must match"
+    assert batch_heads % num_heads == 0, "Dimension 0 of q, k, v must be divisible by num_heads"
+    bsz = batch_heads // num_heads
+    src_len = k.size(1)
+
+    # Scale q
+    q = q * float(head_dim) ** -0.5
+    if attn_mask is not None:
+        if attn_mask.dim() == 2:
+            attn_mask = attn_mask.unsqueeze(0)
+            if list(attn_mask.size()) != [1, query.size(0), key.size(0)]:
+                raise RuntimeError('The size of the 2D attn_mask is not correct.')
+        elif attn_mask.dim() == 3:
+            if list(attn_mask.size()) != [bsz * num_heads, query.size(0), key.size(0)]:
+                raise RuntimeError('The size of the 3D attn_mask is not correct.')
+        else:
+            raise RuntimeError("attn_mask's dimension {} is not supported".format(attn_mask.dim()))
+        # attn_mask's dim is 3 now.
 
     src_len = k.size(1)
 
@@ -3806,7 +3905,7 @@ def multi_head_attention_forward(query,                           # type: Tensor
             key_padding_mask = pad(key_padding_mask, (0, 1))
 
     attn_output_weights = torch.bmm(q, k.transpose(1, 2))
-    assert list(attn_output_weights.size()) == [bsz * num_heads, tgt_len, src_len]
+    assert list(attn_output_weights.size()) == [batch_heads, tgt_len, src_len]
 
     if attn_mask is not None:
         attn_output_weights += attn_mask
@@ -3817,20 +3916,10 @@ def multi_head_attention_forward(query,                           # type: Tensor
             key_padding_mask.unsqueeze(1).unsqueeze(2),
             float('-inf'),
         )
-        attn_output_weights = attn_output_weights.view(bsz * num_heads, tgt_len, src_len)
+        attn_output_weights = attn_output_weights.reshape(batch_heads, tgt_len, src_len)
 
-    attn_output_weights = softmax(
-        attn_output_weights, dim=-1)
+    attn_output_weights = softmax(attn_output_weights, dim=-1)
     attn_output_weights = dropout(attn_output_weights, p=dropout_p, training=training)
-
+    
     attn_output = torch.bmm(attn_output_weights, v)
-    assert list(attn_output.size()) == [bsz * num_heads, tgt_len, head_dim]
-    attn_output = attn_output.transpose(0, 1).contiguous().view(tgt_len, bsz, embed_dim)
-    attn_output = linear(attn_output, out_proj_weight, out_proj_bias)
-
-    if need_weights:
-        # average attention weights over heads
-        attn_output_weights = attn_output_weights.view(bsz, num_heads, tgt_len, src_len)
-        return attn_output, attn_output_weights.sum(dim=1) / num_heads
-    else:
-        return attn_output, None
+    return attn_output, attn_output_weights
