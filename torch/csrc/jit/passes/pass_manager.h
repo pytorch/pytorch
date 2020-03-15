@@ -2,16 +2,16 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 
-/* `getCustomPreFusionPasses()` returns a vector of passes that will be executed
+/* `getCustomPrePasses()` returns a vector of passes that will be executed
  * after differentiation but before any fusion. This is the de-facto location
  * for compiler backends to insert passes.
  *
- * `getCustomPostFusionPasses()` returns a vector of passes that will be
+ * `getCustomPostPasses()` returns a vector of passes that will be
  * executed after differentiation and after fusion (if any). This is the
  * location for fusion cleanup passes if they are needed.
  *
  * Static registration of a pass can be done by creating a global
- * `Register{Pre,Post}FusionPass r(Pass)` variable in a compilation unit.
+ * `Register{Pre,Post}Pass r(Pass)` variable in a compilation unit.
  *
  * pass_manager.h uses a Meyer's singleton to store a vector of `Pass`es, which
  * modify the IR graph in place.
@@ -26,37 +26,37 @@ using GraphPassNameType = unsigned int;
 using GraphPassEntry = std::pair<GraphPass, GraphPassNameType>;
 static GraphPassNameType graphPassID = 1;
 
-TORCH_API std::vector<std::pair<GraphPass, GraphPassNameType> >& getCustomPostFusionPasses();
-TORCH_API std::vector<std::pair<GraphPass, GraphPassNameType> >& getCustomPreFusionPasses();
+TORCH_API std::vector<std::pair<GraphPass, GraphPassNameType> >& getCustomPostPasses();
+TORCH_API std::vector<std::pair<GraphPass, GraphPassNameType> >& getCustomPrePasses();
 
-struct TORCH_API RegisterPostFusionPass {
+struct TORCH_API RegisterPostPass {
   // Back-compat
-  RegisterPostFusionPass(GraphPass p);
-  static GraphPassNameType registerPostFusionPass(GraphPass p);
+  RegisterPostPass(GraphPass p);
+  static GraphPassNameType registerPostPass(GraphPass p);
 };
 
-using RegisterPass = RegisterPostFusionPass;
+using RegisterPass = RegisterPostPass;
 
-struct TORCH_API RegisterPreFusionPass {
+struct TORCH_API RegisterPrePass {
   // Back-compat
-  RegisterPreFusionPass(GraphPass p);
-  static GraphPassNameType registerPreFusionPass(GraphPass p);
+  RegisterPrePass(GraphPass p);
+  static GraphPassNameType registerPrePass(GraphPass p);
 };
 
-struct TORCH_API ClearPostFusionPass {
-  ClearPostFusionPass(GraphPassNameType p);
+struct TORCH_API ClearPostPass {
+  ClearPostPass(GraphPassNameType p);
 };
 
-struct TORCH_API ClearPreFusionPass {
-  ClearPreFusionPass(GraphPassNameType p);
+struct TORCH_API ClearPrePass {
+  ClearPrePass(GraphPassNameType p);
 };
 
-struct TORCH_API ClearAllPostFusionPasses {
-  ClearAllPostFusionPasses();
+struct TORCH_API ClearAllPostPasses {
+  ClearAllPostPasses();
 };
 
-struct TORCH_API ClearAllPreFusionPasses {
-  ClearAllPreFusionPasses();
+struct TORCH_API ClearAllPrePasses {
+  ClearAllPrePasses();
 };
 
 // Mechanism to be able to remove a registered pass
