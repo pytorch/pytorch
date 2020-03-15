@@ -15,20 +15,6 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
-/*
-std::ostream& operator<<(std::ostream& os, std::vector<Int*> vec) {
-  os << "<";
-  for (int i = 0; i < vec.size(); i++) {
-    IRPrinter(os).print_inline(vec[i]);
-    if (i == vec.size() - 1)
-      os << ">";
-    else
-      os << ",";
-  }
-  return os;
-}
-*/
-
 // Run through and grab all values that are used in this fusion based on
 // the registered outputs.
 struct FindUsedVals : public IterVisitor {
@@ -99,7 +85,7 @@ struct TORCH_API CodeWrite : public IRPrinter {
   TensorView* consumer = nullptr;
 
   // Track the for loops
-  std::vector<const ForLoop*> fors;
+  std::vector<std::pair<Int*, IterDomain*> >fors;
   // Track the indentation size for pretty printing
   int indent_size = 0;
 

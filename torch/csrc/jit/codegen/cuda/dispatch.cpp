@@ -86,12 +86,6 @@ void Expr::dispatch(T handler, Expr* expr) {
     case ExprType::BinaryOp:
       ptr(handler)->handle(static_cast<BinaryOp*>(expr));
       return;
-    case ExprType::ForLoop:
-      ptr(handler)->handle(static_cast<ForLoop*>(expr));
-      return;
-    case ExprType::IfThenElse:
-      ptr(handler)->handle(static_cast<IfThenElse*>(expr));
-      return;
     default:
       TORCH_INTERNAL_ASSERT(false, "Unknown exprtype in dispatch!");
   }
@@ -153,12 +147,6 @@ void Expr::constDispatch(T handler, const Expr* const expr) {
       return;
     case ExprType::BinaryOp:
       ptr(handler)->handle(static_cast<const BinaryOp* const>(expr));
-      return;
-    case ExprType::ForLoop:
-      ptr(handler)->handle(static_cast<const ForLoop* const>(expr));
-      return;
-    case ExprType::IfThenElse:
-      ptr(handler)->handle(static_cast<const IfThenElse* const>(expr));
       return;
     default:
       TORCH_INTERNAL_ASSERT(false, "Unknown exprtype in dispatch!");
@@ -223,10 +211,6 @@ Statement* Expr::mutatorDispatch(T mutator, Expr* expr) {
       return ptr(mutator)->mutate(static_cast<UnaryOp*>(expr));
     case ExprType::BinaryOp:
       return ptr(mutator)->mutate(static_cast<BinaryOp*>(expr));
-    case ExprType::ForLoop:
-      return ptr(mutator)->mutate(static_cast<ForLoop*>(expr));
-    case ExprType::IfThenElse:
-      return ptr(mutator)->mutate(static_cast<ForLoop*>(expr));
     default:
       TORCH_INTERNAL_ASSERT(false, "Unknown exprtype in dispatch!");
   }

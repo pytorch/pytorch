@@ -16,7 +16,7 @@ namespace fuser {
 std::vector<Int*> CodeWrite::getLoopIndices() {
   std::vector<Int*> inds;
   for (auto loop : fors)
-    inds.push_back(loop->index());
+    inds.push_back(loop.first);
   return inds;
 }
 
@@ -51,7 +51,7 @@ void CodeWrite::printIndexInto(
 
     for (decltype(fors.size()) i{tv->getComputeAtAxis()}; i < fors.size();
          i++) {
-      if (fors[i]->range()->isThread())
+      if (fors[i].second->isThread())
         continue;
 
       if (!first_index)
@@ -60,14 +60,14 @@ void CodeWrite::printIndexInto(
       first_index = false;
 
       // Index
-      print_inline(fors[i]->index());
+      print_inline(fors[i].first);
 
       for (decltype(fors.size()) j{i + 1}; j < fors.size(); j++) {
-        if (fors[j]->range()->isThread())
+        if (fors[j].second->isThread())
           continue;
         os << " * ";
         // Strides
-        print_inline(fors[j]->range()->size());
+        print_inline(fors[j].second->size());
       }
     }
 
@@ -243,8 +243,8 @@ void CodeWrite::indent() {
 
 // Pop the inner most for loop
 void CodeWrite::closeFor() {
-  IterDomain* id = fors.back()->range();
-  Val* iterator = fors.back()->index();
+  IterDomain* id = fors.back().second;
+  Val* iterator = fors.back().first;
   fors.pop_back();
   // Clear overrides associated with this for loop
   if (id->parallel_method() != ParallelType::Serial) {
@@ -275,10 +275,10 @@ void CodeWrite::bind(IterDomain* id, Val* iterator) {
 
 // Push Back a new for loop scope based on the IterDomain
 void CodeWrite::openFor(IterDomain* id) {
-  fors.push_back(new ForLoop(new Int(), id, {}));
+  fors.push_back({ new Int(), id });
 
   if (id->parallel_method() != ParallelType::Serial) {
-    bind(id, fors.back()->index());
+    bind(id, fors.back().first);
     return;
   }
 
@@ -286,13 +286,13 @@ void CodeWrite::openFor(IterDomain* id) {
   indent_size++;
 
   os << "for( size_t ";
-  handle(fors.back()->index());
+  handle(fors.back().first);
   os << " = " << new Int(0) << "; ";
-  handle(fors.back()->index());
+  handle(fors.back().first);
   os << " < ";
   print_inline(id->size());
   os << "; ++";
-  handle(fors.back()->index());
+  handle(fors.back().first);
   os << " ) {" << std::endl;
 }
 
@@ -478,7 +478,7 @@ void CodeWrite::traverse(Fusion* fusion) {
   producer = false;
   consumer = nullptr;
 
-  fors = std::vector<const ForLoop*>();
+  fors = std::vector<std::pair<Int*, IterDomain*> >();
   indent_size = 0;
   active_view = nullptr;
   active_view_axis = 0;

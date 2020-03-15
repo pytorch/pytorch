@@ -48,9 +48,6 @@ class TORCH_API IRTransformPrinter : public IRPrinter {
       IRPrinter::handle(bop);
   }
 
-  void handle(const ForLoop* const) override {}
-  void handle(const IfThenElse* const) override {}
-
   void handle(Fusion* f) override {
     IRPrinter::handle(f);
   }

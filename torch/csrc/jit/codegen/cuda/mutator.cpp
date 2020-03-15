@@ -124,13 +124,6 @@ Statement* OptOutMutator::mutate(BinaryOp* bop) {
   return bop;
 }
 
-Statement* OptOutMutator::mutate(ForLoop* n) {
-  return n;
-}
-Statement* OptOutMutator::mutate(IfThenElse* n) {
-  return n;
-}
-
 Statement* OptInMutator::mutate(Statement* s) {
   return Statement::mutatorDispatch(this, s);
 }
@@ -140,7 +133,6 @@ Statement* OptInMutator::mutate(Expr* e) {
 Statement* OptInMutator::mutate(Val* v) {
   return Val::mutatorDispatch(this, v);
 }
-
 
  Statement* ReplaceAll::mutate( Val*  val){
   if(val->sameAs(instance_))

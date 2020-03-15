@@ -59,17 +59,6 @@ void IRPrinter::handle(const IterDomain* const id) {
   os << "}";
 }
 
-void IRPrinter::handle(const TensorIndex* const ti) {
-  os << "[ ";
-  for(decltype(ti->size()) i{0}; i < ti->size(); i++){
-    print_inline(ti->axis(i));
-    if(i != ti->size() - 1)
-      os<<", ";
-  }
-  os<<" ]";
-}
-
-
 void IRPrinter::handle(const TensorContiguity* const t) {
   os << "format_tag: " << t->getContiguityTag();
 }
@@ -155,33 +144,6 @@ void IRPrinter::handle(const BinaryOp* const bop) {
   
   if(!print_inline_)
     os<<"\n";
-}
-
-void IRPrinter::handle(const ForLoop* const fl) {
-  os <<"for(size_t " << fl->index() << "{0}; "
-  << fl->index() << " < " << fl->range() << "; "
-  << "++" << fl->index() <<" ) {\n";
-
-  for(auto &expr : fl->body())
-    handle(expr);
-
-  os << "}\n";
-}
-
-void IRPrinter::handle(const IfThenElse* const ite) {
-  os << "if ( ";
-  print_inline(ite->cond());
-  os << " ) { \n";
-  for(auto &expr : ite->if_body()) {
-    handle(expr);
-  }
-  if(ite->hasElse()) {
-    os << "} else { \n";
-    for(auto &expr : ite->else_body()) {
-      handle(expr);
-    }
-  }
-  os<<"}\n";
 }
 
 void IRPrinter::handle(const Split* const s) {

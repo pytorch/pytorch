@@ -939,38 +939,5 @@ void testGPU_FusionExecKernel() {
   TORCH_CHECK(output.equal(check));
 }
 
-void testGPU_FusionForLoop() {
-  Fusion fusion;
-  FusionGuard fg(&fusion);
-
-  const auto TV0  = new TensorView(new TensorDomain({new IterDomain(new Int(16))}), DataType::Float);
-  const auto TV1  = new TensorView(new TensorDomain({new IterDomain(new Int(16))}), DataType::Float);
-  
-  fusion.addInput(TV0);
-  fusion.addInput(TV1);
-  
-  auto ID0 = new IterDomain(new Int(8));
-
-  TensorView* TV2 = static_cast<TensorView*>(add(TV0, TV1));
-  BinaryOp* op = static_cast<BinaryOp*>(TV2->getOrigin());
-  fusion.addOutput(TV2);
-
-  ForLoop*  fl = new ForLoop(new Int(), ID0, {op});
-  std::stringstream result;
-  std::stringstream ref;
-  result << fl;
-  ref << "for(size_t i3{0}; i3 < iS{8}; ++i3 ) {\nT2[ iS{16} ] = T0[ iS{16} ] + T1[ iS{16} ]\n}";
-
-  if(result.str().compare(ref.str()) == 0){
-    std::stringstream err_msg;
-    err_msg << "ForLoop printing has changed or something has gone wrong. "
-    << result.str() << "\n does not match reference: " << ref.str() << std::endl;
-    TORCH_CHECK(false, err_msg.str());
-  }
-  
-}
-
-void testGPU_Fusion() {}
-
 } // namespace jit
 } // namespace torch

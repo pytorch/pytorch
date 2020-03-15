@@ -61,8 +61,6 @@ struct Merge;
 struct Reorder;
 struct UnaryOp;
 struct BinaryOp;
-struct ForLoop;
-struct IfThenElse;
 
 /*
  * By default, all IR nodes are handled in this dispatch, and will call an empty
@@ -96,8 +94,6 @@ struct TORCH_API OptOutDispatch {
   virtual void handle(Reorder*) {}
   virtual void handle(UnaryOp*) {}
   virtual void handle(BinaryOp*) {}
-  virtual void handle(ForLoop*) {}
-  virtual void handle(IfThenElse*) {}
 };
 
 struct TORCH_API OptInConstDispatch {
@@ -147,12 +143,6 @@ struct TORCH_API OptInConstDispatch {
   }
   virtual void handle(const BinaryOp* const) {
     AT_ERROR("Handle not overriden for BinaryOp.");
-  }
-  virtual void handle(const ForLoop* const) {
-    AT_ERROR("Handle not overriden for ForLoop.");
-  }
-  virtual void handle(const IfThenElse* const) {
-    AT_ERROR("Handle not overriden for IfThenElse.");
   }
 };
 
@@ -204,12 +194,6 @@ struct TORCH_API OptInDispatch {
   virtual void handle(BinaryOp*) {
     AT_ERROR("Handle not overriden for BinaryOp.");
   }
-  virtual void handle(ForLoop*) {
-    AT_ERROR("Handle not overriden for ForLoop.");
-  }
-  virtual void handle(IfThenElse*) {
-    AT_ERROR("Handle not overriden for IfThenElse.");
-  }
 };
 
 struct TORCH_API OptOutMutator {
@@ -243,8 +227,6 @@ struct TORCH_API OptOutMutator {
   virtual Statement* mutate(Reorder*);
   virtual Statement* mutate(UnaryOp*);
   virtual Statement* mutate(BinaryOp*);
-  virtual Statement* mutate(ForLoop*);
-  virtual Statement* mutate(IfThenElse*);
 };
 
 struct TORCH_API OptInMutator {
@@ -294,12 +276,6 @@ struct TORCH_API OptInMutator {
   }
   virtual Statement* mutate(BinaryOp*) {
     AT_ERROR("Mutate not overriden for BinaryOp.");
-  }
-  virtual Statement* mutate(ForLoop*) {
-    AT_ERROR("Mutate not overriden for ForLoop.");
-  }
-  virtual Statement* mutate(IfThenElse*) {
-    AT_ERROR("Mutate not overriden for IfThenElse.");
   }
 };
 
