@@ -83,7 +83,7 @@ __global__ void vectorized_copy(scalar_t *dst, scalar_t *src) {
   auto policy = vectorized(data);
   scalar_t buf[thread_work_size];
   auto accessor = [&](int index) -> scalar_t & { return buf[index]; };
-  policy.load1(accessor, src + 256 * blockIdx.x);
+  policy.load_single_arg(accessor, src + 256 * blockIdx.x);
   policy.store(buf, idx);
 }
 
