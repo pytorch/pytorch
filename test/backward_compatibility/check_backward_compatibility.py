@@ -88,8 +88,8 @@ white_list = [
     ('aten::sqrt', datetime.date(2020, 4, 1)),
     ('aten::log1p', datetime.date(2020, 4, 1)),
     ('aten::acos', datetime.date(2020, 4, 1)),
-    ('prim::floor', datetime.date(2020, 4, 1)),
-    ('prim::exp', datetime.date(2020, 4, 1)),
+    ('aten::floor', datetime.date(2020, 4, 1)),
+    ('aten::exp', datetime.date(2020, 4, 1)),
     ('aten::tan', datetime.date(2020, 4, 1)),
     ('aten::sinh', datetime.date(2020, 4, 1)),
     ('aten::ceil', datetime.date(2020, 4, 1)),
@@ -107,6 +107,10 @@ white_list = [
     ('aten::tanh', datetime.date(2020, 4, 1)),
     ('prim::min', datetime.date(2020, 4, 1)),
     ('prim::max', datetime.date(2020, 4, 1)),
+    ('aten::_linear_packed', datetime.date(2020, 4, 1)),
+    ('aten::_linear_prepack', datetime.date(2020, 4, 1)),
+    ('aten::_conv2d_packed', datetime.date(2020, 4, 1)),
+    ('aten::_conv2d_prepack', datetime.date(2020, 4, 1)),
 ]
 
 
