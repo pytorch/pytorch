@@ -226,6 +226,7 @@ static inline void launch_vectorized_kernel(int64_t N, const func_t& f, array_t 
   int vec_size = memory::can_vectorize_up_to<func_t>(data);
   auto input_calc = TrivialOffsetCalculator<traits::arity>();
   auto output_calc = TrivialOffsetCalculator<1>();
+
   switch (vec_size) {
   case 4:
     vectorized_elementwise_kernel<4, func_t, array_t><<<grid, num_threads, 0, stream>>>(N, f, data);
