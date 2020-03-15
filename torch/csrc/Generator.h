@@ -22,3 +22,7 @@ THP_API PyObject * THPGenerator_initDefaultGenerator(at::GeneratorImpl* cdata);
 THP_API PyObject *THPGeneratorClass;
 
 bool THPGenerator_init(PyObject *module);
+
+PyObject * THPGenerator_Wrap(at::Generator gen);
+
+PyObject* THPGenerator_NewWithVar(PyTypeObject* type, at::Generator gen);

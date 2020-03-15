@@ -221,3 +221,38 @@ bool THPGenerator_init(PyObject *module)
   PyModule_AddObject(module, "Generator", (PyObject *)&THPGeneratorType);
   return true;
 }
+
+void set_pyobj(const Generator& self, PyObject* pyobj) {
+  TORCH_CHECK(self, "cannot call set_pyobj() on undefined generator");
+  self->set_pyobj(pyobj);
+}
+
+PyObject* pyobj(const Generator& self) {
+  TORCH_CHECK(self, "cannot call pyobj() on undefined generator");
+  return self->pyobj();
+}
+
+PyObject * THPGenerator_Wrap(Generator gen)
+{
+  if (!gen) {
+    Py_RETURN_NONE;
+  }
+
+  if (auto obj = pyobj(gen)) {
+    Py_INCREF(obj);
+    return obj;
+  }
+
+  return THPGenerator_NewWithVar((PyTypeObject *)THPGeneratorClass, std::move(gen));
+}
+
+PyObject* THPGenerator_NewWithVar(PyTypeObject* type, Generator gen)
+{
+  PyObject* obj = type->tp_alloc(type, 0);
+  if (obj) {
+    auto g = (THPGenerator*) obj;
+    new (&g->cdata) Generator(std::move(gen));
+    set_pyobj(g->cdata, obj);
+  }
+  return obj;
+}

@@ -12,7 +12,7 @@
 #include <c10/util/C++17.h>
 #include <c10/core/Device.h>
 #include <c10/core/DispatchKeySet.h>
-// #include <c10/util/intrusive_ptr.h>
+#include <torch/csrc/python_headers.h>
 
 /**
  * Note [Generator]
@@ -78,10 +78,19 @@ struct CAFFE2_API GeneratorImpl {
 
   DispatchKeySet key_set() const { return key_set_; }
 
+  inline void set_pyobj(PyObject* pyobj) noexcept {
+    pyobj_ = pyobj;
+  }
+
+  inline PyObject* pyobj() const noexcept {
+    return pyobj_;
+  }
+
   private:
     Device device_;
     DispatchKeySet key_set_;
     virtual GeneratorImpl* clone_impl() const = 0;
+    PyObject* pyobj_ = nullptr;
 };
 
 typedef std::shared_ptr<GeneratorImpl> Generator;

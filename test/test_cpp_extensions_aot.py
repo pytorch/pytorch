@@ -11,6 +11,7 @@ import torch.utils.cpp_extension
 try:
     import torch_test_cpp_extension.cpp as cpp_extension
     import torch_test_cpp_extension.msnpu as msnpu_extension
+    import torch_test_cpp_extension.rng as rng_extension
 except ImportError:
     raise RuntimeError(
         "test_cpp_extensions_aot.py cannot be invoked directly. Run "
@@ -140,6 +141,20 @@ class TestMSNPUTensor(common.TestCase):
         self.assertEqual(msnpu_extension.get_test_int(), 3)
         self.assertEqual(grad[0].shape, input.shape)
 
+
+class TestRNGExtension(common.TestCase):
+
+    def test_rng(self):
+        t = torch.empty(10, dtype=torch.int64).random_()
+        self.assertNotEqual(t, torch.full((10,), 42))
+
+        gen = torch.Generator(device='cpu')
+        t = torch.empty(10, dtype=torch.int64).random_(generator=gen)
+        self.assertNotEqual(t, torch.full((10,), 42))
+
+        gen = rng_extension.createTestCPUGenerator(42)
+        t = torch.empty(10, dtype=torch.int64).random_(generator=gen)
+        self.assertEqual(t, torch.full((10,), 42))
 
 if __name__ == "__main__":
     common.run_tests()
