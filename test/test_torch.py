@@ -15857,24 +15857,35 @@ class TestTensorDeviceOps(TestCase):
         self._test_svd_helper((5, 20), False, True, device, dtype)
 
 
-_ufunc_meta = collections.namedtuple('_ufunc_meta', 'is_floating alt_impl')
-def ufunc_meta(is_floating=False, alt_impl=None):
-    return _ufunc_meta(is_floating, alt_impl)
+# Below are fixtures and functions for generating tests related to unary
+# "universal functions (ufuncs)", a class of elementwise unary operations
+# This class can be further divided into "normal" and "floating" unary
+# ufuncs. The former does not participate in type promotion, while the latter
+# promotes integral types, including bool, to the default scalar type.
 
+# Helpers to organize ufunc metadata and improve test readability
+_ufunc_meta = collections.namedtuple('_ufunc_meta',
+                                     'is_floating alt_impl complex_on')
+def ufunc_meta(is_floating=False, alt_impl=None, complex_on=('cpu', 'cuda')):
+    return _ufunc_meta(is_floating, alt_impl, complex_on)
+
+# Dict of unary ufuncs and their associated test metadata
 unary_ufuncs = {
     'acos': ufunc_meta(is_floating=True),
-    'cos': ufunc_meta(is_floating=True)
+    'cos': ufunc_meta(is_floating=True, complex_on=('cpu'))
 }
 
+# Creates and adds a test of the given unary floating ufunc's type promotion
+# Unary floating ufuncs promote tensors of bool and integral types to
+# the default scalar type.
 def generate_unary_floating_ufunc_promo_test(cls, op_str):
     int_types = [torch.bool, torch.uint8, torch.int8, torch.int16,
                  torch.int, torch.long]
-    float_types = [torch.float, torch.double, torch.complex64,
-                   torch.complex128]
+    float_types = [torch.float, torch.double]
+    float_types_cuda = [torch.half, torch.float, torch.double]
+    complex_types = [torch.complex64, torch.complex128]
     default_types = [torch.float, torch.double]
     default_types_cuda = [torch.half, torch.float, torch.double]
-    float_types_cuda = [torch.half, torch.float, torch.double, torch.complex64,
-                        torch.complex128]
 
     def test_fn(self, device):
         op = getattr(torch, op_str)
@@ -15884,19 +15895,23 @@ def generate_unary_floating_ufunc_promo_test(cls, op_str):
         if self.device_type == 'cuda':
             my_default_types = default_types_cuda
             my_float_types = float_types_cuda
+        if self.device_type in unary_ufuncs[op_str].complex_on:
+            my_float_types.extend(complex_types)
 
         prev_def_type = torch.get_default_dtype()
-        for in_type, def_type in product(int_types, my_default_types):
-            torch.set_default_dtype(def_type)
-            t = torch.tensor((1,), dtype=in_type)
-            self.assertEqual(op(t).dtype, def_type)
-        torch.set_default_dtype(prev_def_type)
+        try:
+            for in_type, def_type in product(int_types, my_default_types):
+                torch.set_default_dtype(def_type)
+                t = torch.tensor((1,), device=device, dtype=in_type)
+                self.assertEqual(op(t).dtype, def_type)
+        finally:
+            torch.set_default_dtype(prev_def_type)
 
         for in_type in my_float_types:
-            t = torch.tensor((1,), dtype=in_type)
+            t = torch.tensor((1,), device=device, dtype=in_type)
             self.assertEqual(op(t).dtype, in_type)
 
-    test_name = "test_" + op_str + "promo"
+    test_name = "test_" + op_str + "_dtype_promotion"
     assert not hasattr(cls, test_name), "{0} already in {1}".format(test_name, cls.__name__)
     setattr(cls, test_name, test_fn)
 
