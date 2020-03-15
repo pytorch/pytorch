@@ -353,10 +353,12 @@ TensorOptions infer_full_options(
   if (!options.has_dtype()) {
     if (fill_value.isIntegral(true)) {
       TORCH_WARN_ONCE(
-        "Deprecation warning: In PyTorch 1.6 torch.full with an integral ",
-        "fill_value will require a dtype or out argument. ",
-        "In PyTorch 1.7 an integral fill_value will return a LongTensor ",
-        "by default. ",
+        "Deprecation warning: In PyTorch 1.6 torch.full with a bool or ",
+        "integral fill_value will require a dtype or out argument. ",
+        "In PyTorch 1.7, when `out` and `dtype` are not set a bool fill_value ",
+        "will return a tensor of torch.bool dtype, ",
+        "and an integral fill_value will return a tensor of torch.long ",
+        "dtype. ",
         "Set the optional dtype or out arguments to suppress this warning. "
       );
     } else if (fill_value.isComplex()) {
@@ -373,18 +375,16 @@ TensorOptions infer_full_options(
 } // anonymous namespace
 
 Tensor full(IntArrayRef size, Scalar fill_value, const TensorOptions& options) {
-  if (options.layout() == kSparse) {
-    AT_ERROR("full(...) is not implemented for sparse layout");
-  }
+  TORCH_CHECK(options.layout() != kSparse,
+    "full(...) is not implemented for sparse layout");
 
   auto result = at::empty(size, infer_full_options(fill_value, options));
   return result.fill_(fill_value);
 }
 
 Tensor& full_out(Tensor& result, IntArrayRef size, Scalar fill_value) {
-  if (result.is_sparse()) {
-    AT_ERROR("full(...) is not implemented for sparse layout");
-  }
+  TORCH_CHECK(!result.is_sparse(),
+    "full(...) is not implemented for sparse layout");
 
   result.resize_(size);
   return result.fill_(fill_value);
@@ -993,9 +993,8 @@ Tensor full(
     optional<DimnameList> names,
     const TensorOptions& options) {
 
-  if (options.layout() == kSparse) {
-    AT_ERROR("full(...) is not implemented for sparse layout");
-  }
+  TORCH_CHECK(options.layout() != kSparse,
+    "full(...) is not implemented for sparse layout");
 
   auto result = at::empty(size, names, infer_full_options(fill_value, options));
   return result.fill_(fill_value);

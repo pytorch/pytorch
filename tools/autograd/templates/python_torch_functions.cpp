@@ -49,6 +49,8 @@ using namespace torch::autograd::utils;
 
 namespace torch { namespace autograd {
 
+static PyObject* THPVariableFunctionsModule = NULL;
+
 static void check_out_type_matches(Tensor result,
                                    ScalarType scalarType, bool scalarType_is_none,
                                    c10::optional<at::Layout> layout,
@@ -112,6 +114,10 @@ static PyObject * THPVariable_arange(PyObject* self, PyObject* args, PyObject* k
 
   ParsedArgs<9> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
+
+  if(r.has_torch_function()) {
+    return handle_torch_function(r, args, kwargs, THPVariableFunctionsModule, "torch");
+  }
 
   if (r.idx == 0) {
     if (r.isNone(1)) {
@@ -178,6 +184,7 @@ static PyObject * THPVariable_range(PyObject* self, PyObject* args, PyObject* kw
 
   ParsedArgs<8> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
+
   if (r.idx == 0) {
     PyErr_WarnEx(PyExc_UserWarning, "torch.range is deprecated in favor of torch.arange "
         "and will be removed in 0.5. Note that arange generates values in [start; end), "
@@ -237,6 +244,11 @@ static PyObject * THPVariable_full(PyObject* self, PyObject* args, PyObject* kwa
   // Acquires (common) arguments
   ParsedArgs<8> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
+
+  if(r.has_torch_function()) {
+    return handle_torch_function(r, args, kwargs, THPVariableFunctionsModule, "torch");
+  }
+
   auto size = r.intlist(0);
   auto fill_val = r.scalar(1);
   const auto options = TensorOptions{}
@@ -323,6 +335,11 @@ static PyObject * THPVariable_randint(PyObject* self_, PyObject* args, PyObject*
 
   ParsedArgs<9> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
+
+  if(r.has_torch_function()) {
+    return handle_torch_function(r, args, kwargs, THPVariableFunctionsModule, "torch");
+  }
+
   if (r.idx == 0) {
     if (r.isNone(3)) {
       auto high = r.toInt64(0);
@@ -524,8 +541,6 @@ static PyTypeObject THPVariableFunctions = {
   0,                                     /* tp_alloc */
   0                                      /* tp_new */
 };
-
-static PyObject* THPVariableFunctionsModule = NULL;
 
 void initTorchFunctions(PyObject* module) {
   if (PyType_Ready(&THPVariableFunctions) < 0) {

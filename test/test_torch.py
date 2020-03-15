@@ -1764,33 +1764,6 @@ class _TestTorchMixin(object):
             self.assertIs(torch.int64, torch.randint(*args, size=size, out=out).dtype)
             self.assertIs(torch.int64, torch.randint(*args, size=size, out=out, dtype=torch.int64).dtype)
 
-    def test_full_inference(self):
-        size = (1, 2)
-
-        # Tests integer fill_values deprecated without specific dtype set
-        with self.maybeWarnsRegex(UserWarning, 'Deprecation warning: .+'):
-            torch.full(size, 1)
-        torch.full(size, 1, dtype=torch.int)
-
-        # Tests integer fill_values deprecated with named tensors, too
-        with self.maybeWarnsRegex(UserWarning, 'Deprecation warning: .+|Named tensors .+'):
-            torch.full(size, 1, names=('a', 'b'))
-        with self.maybeWarnsRegex(UserWarning, 'Named tensors .+'):
-            torch.full(size, 1, names=('a', 'b'), dtype=torch.float)
-
-        # Tests complex inference
-        self.assertTrue(torch.full(size, (1 + 1j)).dtype == torch.complex64)
-        tmp = torch.full(size, (1 + 1j), dtype=torch.complex128)
-        self.assertTrue(tmp.dtype == torch.complex128)
-
-        prev_default = torch.get_default_dtype()
-        torch.set_default_dtype(torch.double)
-        self.assertTrue(torch.full(size, (1 + 1j)).dtype == torch.complex128)
-        torch.set_default_dtype(torch.half)
-        self.assertTrue(torch.full(size, (1 + 1j)).dtype == torch.complex64)
-        torch.set_default_dtype(prev_default)
-
-
     def test_broadcast_empty(self):
         # empty + empty
         self.assertRaises(RuntimeError, lambda: torch.randn(5, 0) + torch.randn(0, 5))
@@ -15449,6 +15422,47 @@ class TestDevicePrecision(TestCase):
         x = torch.randn(100, 100, device=devices[1], dtype=torch.float32)
         output = torch.ones_like(x)
         self.assertEqual(output, expected)
+
+    def test_full_deprecation_warning(self, device):
+        size = (1, 2)
+        # Tests integer fill_values deprecated without specific dtype set
+        with self.maybeWarnsRegex(UserWarning, 'Deprecation warning: .+'):
+            torch.full(size, 1)
+        torch.full(size, 1, dtype=torch.int)
+
+        # Tests integer fill_values deprecated with named tensors, too
+        with self.maybeWarnsRegex(UserWarning, 'Deprecation warning: .+|Named tensors .+'):
+            torch.full(size, 1, names=('a', 'b'))
+        with self.maybeWarnsRegex(UserWarning, 'Named tensors .+'):
+            torch.full(size, 1, names=('a', 'b'), dtype=torch.float)
+
+    @dtypes(torch.half, torch.float, torch.double)
+    def test_full_inference(self, device, dtype):
+        size = (1, 2)
+
+        prev_default = torch.get_default_dtype()
+        torch.set_default_dtype(dtype)
+
+        # Tests bool fill value inference
+        # Note: in the future this will return a tensor of torch.bool dtype
+        t = torch.full(size, True)
+        self.assertEqual(t.dtype, dtype)
+
+        # Tests integer fill value inference
+        # Note: in the future this will return a tensor of torch.long dtype
+        t = torch.full(size, 1)
+        self.assertEqual(t.dtype, dtype)
+
+        # Tests float fill value inference
+        t = torch.full(size, 1.)
+        self.assertEqual(t.dtype, dtype)
+
+        # Tests complex inference
+        t = torch.full(size, (1 + 1j))
+        ctype = torch.complex128 if dtype is torch.double else torch.complex64
+        self.assertEqual(t.dtype, ctype)
+
+        torch.set_default_dtype(prev_default)
 
 
 # Tests ops and indexing to ensure they return views (and new tensors) as
