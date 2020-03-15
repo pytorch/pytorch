@@ -33,7 +33,7 @@ namespace {
 
 std::unique_ptr<RpcCommandBase> deserializePythonRpcCommand(
     std::unique_ptr<RpcCommandBase> rpc,
-    MessageType messageType) {
+    const MessageType& messageType) {
   switch (messageType) {
     case MessageType::PYTHON_CALL: {
       auto& pc = static_cast<PythonCall&>(*rpc);
@@ -50,16 +50,16 @@ std::unique_ptr<RpcCommandBase> deserializePythonRpcCommand(
   }
 }
 
-} // namespace
+} // anonymous namespace
 
 using namespace torch::distributed::autograd;
 
 void RequestCallbackImpl::processRpc(
     RpcCommandBase& rpc,
-    const MessageType messageType,
+    const MessageType& messageType,
     const int64_t messageId,
     const std::shared_ptr<FutureMessage>& responseFuture) const {
-  auto markComplete = [messageId, responseFuture](Message m) {
+  auto markComplete = [messageId, &responseFuture](Message m) {
     m.setId(messageId);
     responseFuture->markCompleted(std::move(m));
   };
@@ -407,6 +407,10 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processMessage(
   rpc = deserializePythonRpcCommand(std::move(rpc), request.type());
   auto rrefsReadyFuture = rrefContext.waitForThreadLocalPendingRRefs();
 
+  // We need two futures here because it could pause twice when processing a
+  // RPC message:
+  //  1) waiting for all RRefs in the arguments to become confirmed;
+  //  2) waiting for processRpc to finish.
   auto retFuture = std::make_shared<FutureMessage>();
   rrefsReadyFuture->addCallback(
       [this,
@@ -416,7 +420,8 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processMessage(
        rpc = (std::shared_ptr<RpcCommandBase>)std::move(rpc),
        messageType = request.type(),
        id = request.id()](
-          const bool& unused, const c10::optional<utils::FutureError>& error) {
+          const bool& /*unused*/,
+          const c10::optional<utils::FutureError>& /*unused*/) {
         processRpc(*rpc, messageType, id, retFuture);
       });
   return retFuture;

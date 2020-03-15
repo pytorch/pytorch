@@ -526,7 +526,7 @@ std::shared_ptr<torch::utils::Future<bool>> RRefContext::
       state->future_.addCallback(
           [future, remainingRRefs](
               const bool& /* unused */,
-              const c10::optional<utils::FutureError>& error) {
+              const c10::optional<utils::FutureError>& /* unused */) {
             auto localCount = remainingRRefs->fetch_sub(1);
             if (localCount == 1) {
               future->markCompleted(true);

@@ -72,7 +72,7 @@ UserRRef::UserRRef(
     TypePtr type)
     : RRef(ownerId, rrefId, std::move(type)),
       forkId_(forkId),
-      confirmed_(false) {
+      confirmedByOwner_(false) {
   // Do nothing,
   // (1) If this UserRRef is a fork of an existing RRef, RRefContext will send
   //     a RREF_FORK_REQUEST message to the owner.

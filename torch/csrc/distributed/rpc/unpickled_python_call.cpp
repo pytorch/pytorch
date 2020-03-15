@@ -14,12 +14,12 @@ UnpickledPythonCall::UnpickledPythonCall(
   pythonUdf_ = pythonRpcHandler.deserialize(serializedPyObj);
 }
 
-Message UnpickledPythonCall::toMessage() &&
-    {TORCH_INTERNAL_ASSERT(
-        false,
-        "UnpickledPythonCall does not support toMessage().")}
+Message UnpickledPythonCall::toMessage() && {
+  TORCH_INTERNAL_ASSERT(
+      false, "UnpickledPythonCall does not support toMessage().");
+}
 
-    py::object UnpickledPythonCall::movePythonUdf() && {
+py::object UnpickledPythonCall::movePythonUdf() && {
   return std::move(pythonUdf_);
 }
 
