@@ -3108,11 +3108,11 @@ int sort_op(Stack& stack) {
 // NB: this must be registered after the other aten::sort operators
 RegisterOperators regSort({
     Operator(
-        "aten::sorted_self(t[](a) self) -> (t[])",
+        "aten::sorted(t[](a) self) -> (t[])",
         sort_op</*has_reverse_arg*/ false, /*copy_return_list*/ true>,
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::sort_self(t[](a!) self, bool reverse=False) -> ()",
+        "aten::sort(t[](a!) self, bool reverse=False) -> ()",
         sort_op</*has_reverse_arg*/ true, /*copy_return_list*/ false>,
         aliasAnalysisFromSchema()),
 });
