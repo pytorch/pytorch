@@ -507,7 +507,7 @@ void RRefContext::delPendingUser(const ForkId& forkId) {
   deletedState.reset(); // Decrease refcount.
 }
 
-void RRefContext::recordThreadLocalPendingUsers() {
+void RRefContext::recordThreadLocalPendingRRefs() {
   TORCH_INTERNAL_ASSERT(
       userTable_.empty(),
       "User RRef Table should be empty when start recording");
@@ -515,7 +515,7 @@ void RRefContext::recordThreadLocalPendingUsers() {
 }
 
 std::shared_ptr<torch::utils::Future<bool>> RRefContext::
-    waitForThreadLocalPendingUsers() {
+    waitForThreadLocalPendingRRefs() {
   auto future = std::make_shared<torch::utils::Future<bool>>();
   if (userTable_.empty()) {
     future->markCompleted(true);

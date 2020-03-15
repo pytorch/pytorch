@@ -150,8 +150,8 @@ class TORCH_API RRefContext {
 
   // Start recroding new pending UserRRefs. All pending UserRRefs introduced
   // after this point will be put into the thread_local userTable_, which will
-  // then be consumed and cleared in waitForThreadLocalPendingUsers().
-  void recordThreadLocalPendingUsers();
+  // then be consumed and cleared in waitForThreadLocalPendingRRefs().
+  void recordThreadLocalPendingRRefs();
   // End recording new pending UserRRefs, and clear the thread_local userTable_.
   // Returns a Future which will be marked as completed when all pending
   // UserRRefs in the current userTable_ are confirmed by their owners. The bool
@@ -162,7 +162,7 @@ class TORCH_API RRefContext {
   // because this Future is already captured in callbacks of the
   // PendingUserState. If there is no pending UserRRefs, this method returns a
   // completed future.
-  std::shared_ptr<torch::utils::Future<bool>> waitForThreadLocalPendingUsers();
+  std::shared_ptr<torch::utils::Future<bool>> waitForThreadLocalPendingRRefs();
 
   void delUser(
       const worker_id_t owner,

@@ -402,10 +402,10 @@ void RequestCallbackImpl::processRpc(
 std::shared_ptr<FutureMessage> RequestCallbackImpl::processMessage(
     Message& request) const {
   auto& rrefContext = RRefContext::getInstance();
-  rrefContext.recordThreadLocalPendingUsers();
+  rrefContext.recordThreadLocalPendingRRefs();
   std::unique_ptr<RpcCommandBase> rpc = deserializeRequest(request);
   rpc = deserializePythonRpcCommand(std::move(rpc), request.type());
-  auto rrefsReadyFuture = rrefContext.waitForThreadLocalPendingUsers();
+  auto rrefsReadyFuture = rrefContext.waitForThreadLocalPendingRRefs();
 
   auto retFuture = std::make_shared<FutureMessage>();
   rrefsReadyFuture->addCallback(
