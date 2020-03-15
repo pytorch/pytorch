@@ -2464,35 +2464,35 @@ RegisterOperators reg2({
         aliasAnalysisFromSchema()),
 
     Operator(
-        "aten::eq.int(int[] a, int[] b) -> bool",
+        "aten::eq.int_list(int[] a, int[] b) -> bool",
         listEq<int64_t>,
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::eq.float(float[] a, float[] b) -> bool",
+        "aten::eq.float_list(float[] a, float[] b) -> bool",
         listEq<double>,
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::eq.Tensor(Tensor[] a, Tensor[] b) -> bool",
+        "aten::eq.Tensor_list(Tensor[] a, Tensor[] b) -> bool",
         listEq<at::Tensor>,
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::eq.bool(bool[] a, bool[] b) -> bool",
+        "aten::eq.bool_list(bool[] a, bool[] b) -> bool",
         listEq<bool>,
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::ne.int(int[] a, int[] b) -> bool",
+        "aten::ne.int_list(int[] a, int[] b) -> bool",
         listNe<int64_t>,
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::ne.float(float[] a, float[] b) -> bool",
+        "aten::ne.float_list(float[] a, float[] b) -> bool",
         listNe<double>,
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::ne.Tensor(Tensor[] a, Tensor[] b) -> bool",
+        "aten::ne.Tensor_list(Tensor[] a, Tensor[] b) -> bool",
         listNe<at::Tensor>,
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::ne.bool(bool[] a, bool[] b) -> bool",
+        "aten::ne.bool_list(bool[] a, bool[] b) -> bool",
         listNe<bool>,
         aliasAnalysisFromSchema()),
 
@@ -3108,11 +3108,11 @@ int sort_op(Stack& stack) {
 // NB: this must be registered after the other aten::sort operators
 RegisterOperators regSort({
     Operator(
-        "aten::sorted(t[](a) self) -> (t[])",
+        "aten::sorted_self(t[](a) self) -> (t[])",
         sort_op</*has_reverse_arg*/ false, /*copy_return_list*/ true>,
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::sort(t[](a!) self, bool reverse=False) -> ()",
+        "aten::sort_self(t[](a!) self, bool reverse=False) -> ()",
         sort_op</*has_reverse_arg*/ true, /*copy_return_list*/ false>,
         aliasAnalysisFromSchema()),
 });
