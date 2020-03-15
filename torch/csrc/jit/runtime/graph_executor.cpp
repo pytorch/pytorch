@@ -717,7 +717,7 @@ void runNondiffOptimization(
     std::shared_ptr<Graph>& graph,
     bool strict_fuser_check) {
   // Run custom passes that different backends can register.
-  for (const auto& passPair : getCustomPreFusionPasses()) {
+  for (const auto& passPair : getCustomPrePasses()) {
     passPair.first(graph);
   }
 
@@ -740,7 +740,7 @@ void runNondiffOptimization(
   FuseGraph(graph, strict_fuser_check);
 
   // Run custom post-fusion passes
-  for (const auto& passPair : getCustomPostFusionPasses()) {
+  for (const auto& passPair : getCustomPostPasses()) {
     passPair.first(graph);
   }
 }

@@ -3,36 +3,36 @@
 namespace torch {
 namespace jit {
 
-RegisterPostFusionPass::RegisterPostFusionPass(GraphPass p){
-  registerPostFusionPass(p);
+RegisterPostPass::RegisterPostPass(GraphPass p){
+  registerPostPass(p);
 }
 
-RegisterPreFusionPass::RegisterPreFusionPass(GraphPass p){
-  registerPreFusionPass(p);
+RegisterPrePass::RegisterPrePass(GraphPass p){
+  registerPrePass(p);
 }
 
-std::vector<GraphPassEntry>& getCustomPostFusionPasses() {
+std::vector<GraphPassEntry>& getCustomPostPasses() {
   static std::vector<GraphPassEntry> passes;
   return passes;
 }
 
-std::vector<GraphPassEntry>& getCustomPreFusionPasses() {
+std::vector<GraphPassEntry>& getCustomPrePasses() {
   static std::vector<GraphPassEntry> passes;
   return passes;
 }
 
-GraphPassNameType RegisterPostFusionPass::registerPostFusionPass(GraphPass p) {
-  getCustomPostFusionPasses().emplace_back(GraphPassEntry{std::move(p), graphPassID});
+GraphPassNameType RegisterPostPass::registerPostPass(GraphPass p) {
+  getCustomPostPasses().emplace_back(GraphPassEntry{std::move(p), graphPassID});
   return graphPassID++;
 }
 
-GraphPassNameType RegisterPreFusionPass::registerPreFusionPass(GraphPass p) {
-  getCustomPreFusionPasses().emplace_back(GraphPassEntry{std::move(p), graphPassID});
+GraphPassNameType RegisterPrePass::registerPrePass(GraphPass p) {
+  getCustomPrePasses().emplace_back(GraphPassEntry{std::move(p), graphPassID});
   return graphPassID++;
 }
 
-ClearPostFusionPass::ClearPostFusionPass(GraphPassNameType pid) {
-  auto& passes = getCustomPostFusionPasses();
+ClearPostPass::ClearPostPass(GraphPassNameType pid) {
+  auto& passes = getCustomPostPasses();
   auto it = passes.begin();
   for (; it != passes.end(); it++) {
     if (pid == (*it).second)
@@ -42,8 +42,8 @@ ClearPostFusionPass::ClearPostFusionPass(GraphPassNameType pid) {
     passes.erase(it);
 }
 
-ClearPreFusionPass::ClearPreFusionPass(GraphPassNameType pid) {
-  auto& passes = getCustomPreFusionPasses();
+ClearPrePass::ClearPrePass(GraphPassNameType pid) {
+  auto& passes = getCustomPrePasses();
   auto it = passes.begin();
   for (; it != passes.end(); it++) {
     if (pid == (*it).second)
@@ -53,13 +53,13 @@ ClearPreFusionPass::ClearPreFusionPass(GraphPassNameType pid) {
     passes.erase(it);
 }
 
-ClearAllPostFusionPasses::ClearAllPostFusionPasses() {
-  auto& passes = getCustomPostFusionPasses();
+ClearAllPostPasses::ClearAllPostPasses() {
+  auto& passes = getCustomPostPasses();
   passes.erase(passes.begin(), passes.end());
 }
 
-ClearAllPreFusionPasses::ClearAllPreFusionPasses() {
-  auto& passes = getCustomPreFusionPasses();
+ClearAllPrePasses::ClearAllPrePasses() {
+  auto& passes = getCustomPrePasses();
   passes.erase(passes.begin(), passes.end());
 }
 
@@ -77,14 +77,14 @@ bool PassManager::flipRegistered(bool flip){
 }
 void PassManager::registerPass(GraphPass pass) {
   if (!flipRegistered()) {
-    name( RegisterPostFusionPass::registerPostFusionPass(pass), true );
+    name( RegisterPostPass::registerPostPass(pass), true );
     flipRegistered(true);
   }
 }
 
 void PassManager::clearPass() {
   if (flipRegistered()) {
-    ClearPostFusionPass pass(name());
+    ClearPostPass pass(name());
     flipRegistered(true);
   }
 }
