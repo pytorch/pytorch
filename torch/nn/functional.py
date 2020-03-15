@@ -3003,6 +3003,10 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
         assert align_corners is not None
         return torch._C._nn.upsample_trilinear3d(input, _interp_output_size(3, closed_over_args), align_corners,
                                                  scale_factor_list[0], scale_factor_list[1], scale_factor_list[2])
+    elif input.dim() == 3 and mode == 'bicubic':
+        assert align_corners is not None
+        return torch._C._nn.upsample_bicubic2d(input, _interp_output_size(1, closed_over_args), align_corners,
+                                               scale_factor_list[0], scale_factor_list[1])
     elif input.dim() == 4 and mode == 'bicubic':
         assert align_corners is not None
         return torch._C._nn.upsample_bicubic2d(input, _interp_output_size(2, closed_over_args), align_corners, 
