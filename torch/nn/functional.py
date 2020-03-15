@@ -3665,13 +3665,13 @@ def multi_head_attention_forward(query,                           # type: Tensor
     if not use_separate_proj_weight:
         if torch.equal(query, key) and torch.equal(key, value):
             # self-attention
-            q, k, v = multi_head_attention_in_projection(query, in_proj_weight, in_proj_bias, num_heads).chunk(3, -1)
+            q, k, v = multi_head_attention_in_projection(query, num_heads, in_proj_weight, in_proj_bias).chunk(3, -1)
 
         elif torch.equal(key, value):
             # encoder-decoder attention
             q_proj_weight = in_proj_weight[:embed_dim, :]
             q_proj_bias = in_proj_bias[:embed_dim] if in_proj_bias is not None else None
-            q = multi_head_attention_in_projection(query, q_proj_weight, q_proj_bias, num_heads)
+            q = multi_head_attention_in_projection(query, num_heads, q_proj_weight, q_proj_bias)
             
             if key is None:
                 k = None
@@ -3679,7 +3679,7 @@ def multi_head_attention_forward(query,                           # type: Tensor
             else:
                 k_proj_weight = in_proj_weight[embed_dim:, :]
                 k_proj_bias = in_proj_bias[embed_dim:] if in_proj_bias is not None else None
-                k, v = multi_head_attention_in_projection(key, k_proj_weight, k_proj_bias, num_heads).chunk(2, -1)
+                k, v = multi_head_attention_in_projection(key, num_heads, k_proj_weight, k_proj_bias).chunk(2, -1)
         else:
             q_proj_weight = in_proj_weight[:embed_dim, :]
             q_proj_bias = in_proj_bias[:embed_dim] if in_proj_bias is not None else None
@@ -3690,9 +3690,9 @@ def multi_head_attention_forward(query,                           # type: Tensor
             v_proj_weight = in_proj_weight[embed_dim * 2:, :]
             v_proj_bias = in_proj_bias[embed_dim * 2:] if in_proj_bias is not None else None
 
-            q = multi_head_attention_in_projection(query, q_proj_weight, q_proj_bias, num_heads)
-            k = multi_head_attention_in_projection(key, k_proj_weight, k_proj_bias, num_heads)
-            v = multi_head_attention_in_projection(value, v_proj_weight, v_proj_bias, num_heads)
+            q = multi_head_attention_in_projection(query, num_heads, q_proj_weight, q_proj_bias)
+            k = multi_head_attention_in_projection(key, num_heads, k_proj_weight, k_proj_bias)
+            v = multi_head_attention_in_projection(value, num_heads, v_proj_weight, v_proj_bias)
     else:
         q_proj_weight_non_opt = torch.jit._unwrap_optional(q_proj_weight)
         len1, len2 = q_proj_weight_non_opt.size()
@@ -3709,9 +3709,9 @@ def multi_head_attention_forward(query,                           # type: Tensor
         assert len1 == embed_dim and len2 == value.size(-1)
         v_proj_bias = in_proj_bias[embed_dim * 2:] if in_proj_bias is not None else None
 
-        q = multi_head_attention_in_projection(query, q_proj_weight, q_proj_bias, num_heads)
-        k = multi_head_attention_in_projection(key, k_proj_weight, k_proj_bias, num_heads)
-        v = multi_head_attention_in_projection(value, v_proj_weight, v_proj_bias, num_heads)
+        q = multi_head_attention_in_projection(query, num_heads, q_proj_weight, q_proj_bias)
+        k = multi_head_attention_in_projection(key, num_heads, k_proj_weight, k_proj_bias)
+        v = multi_head_attention_in_projection(value, num_heads, v_proj_weight, v_proj_bias)
 
     if bias_k is not None and bias_v is not None:
         if static_k is None and static_v is None:
@@ -3745,7 +3745,7 @@ def multi_head_attention_forward(query,                           # type: Tensor
 
     assert list(attn_output.size()) == [bsz * num_heads, tgt_len, head_dim]
 
-    mha_output = multi_head_attention_out_projection(attn_output, out_proj_weight, out_proj_bias, num_heads)
+    mha_output = multi_head_attention_out_projection(attn_output, num_heads, out_proj_weight, out_proj_bias)
     if need_weights:
         # average attention weights over heads
         attn_output_weights = attn_output_weights.view(bsz, num_heads, tgt_len, src_len)
