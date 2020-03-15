@@ -227,6 +227,13 @@ class AttributePropagator {
         elems.set(i, overrideGradient(elems.extract(i)));
       }
       attr = std::move(elems);
+    } else if (attr.isGenericDict()) {
+      auto dict = std::move(attr).toGenericDict();
+      for (const auto& pair : dict) {
+        auto val = pair.value();
+        val = overrideGradient(val);
+      }
+      attr = std::move(dict);
     }
 
     return attr;
@@ -242,7 +249,7 @@ class AttributePropagator {
     auto block = graph->block();
     std::stack<Block*> blocks({block});
 
-    // Record Attributes that are explicitely set in the module. They cannot be
+    // Record Attributes that are explicitly set in the module. They cannot be
     // folded.
     recordMutableAttrs(graph);
 
@@ -268,11 +275,11 @@ class AttributePropagator {
           }
           TORCH_INTERNAL_ASSERT(attrModule.hasattr(name));
           Value* paramConst = nullptr;
-          auto I = attrValues.find(attrModule._ivalue());
-          if (I != attrValues.end()) {
-            auto II = I->second.find(name);
-            if (II != I->second.end())
-              paramConst = II->second;
+          auto iter = attrValues.find(attrModule._ivalue());
+          if (iter != attrValues.end()) {
+            auto iter2 = iter->second.find(name);
+            if (iter2 != iter->second.end())
+              paramConst = iter2->second;
           }
           if (!paramConst) {
             auto attr = attrModule.attr(name);
@@ -371,7 +378,9 @@ Module freeze_module(const Module& module) {
   // folded.
   // TODO: Determine if freezing in training mode is useful and further clarify
   // its semantics.
-  TORCH_CHECK(!module.is_training());
+  TORCH_CHECK(
+      !module.is_training(),
+      "Freezing module in training mode is not yet supported");
 
   Method method = module.get_method("forward");
   // Check that module does not return itself.

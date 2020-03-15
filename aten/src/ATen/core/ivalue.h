@@ -518,16 +518,16 @@ struct CAFFE2_API IValue final {
   }
 
   // Detection Aliased tensors.
-  struct HashIValue {
+  struct HashAliasedIValue {
     size_t operator()(const IValue& val) const {
       if (val.isTensor()) {
-        return 0;
+        return reinterpret_cast<size_t>(val.toTensor().storage().unsafeGetStorageImpl());
       }
       return val.hash();
     }
   };
 
-  struct CompIValues {
+  struct CompAliasedIValues {
     bool operator()(const IValue& lhs, const IValue& rhs) const {
       if (lhs.isTensor() && rhs.isTensor()) {
         return lhs.isAliasOf(rhs);
@@ -536,7 +536,7 @@ struct CAFFE2_API IValue final {
     }
   };
 
-  using HashAliasedIValues = std::unordered_set<IValue, HashIValue, CompIValues>;
+  using HashAliasedIValues = std::unordered_set<IValue, HashAliasedIValue, CompAliasedIValues>;
 
   // Chechs if this and rhs has a subvalues in common.
   // [t1,t2] and [t2, t3] returns true.

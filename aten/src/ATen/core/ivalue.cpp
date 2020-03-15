@@ -92,9 +92,19 @@ void IValue::getSubValues(HashAliasedIValues& subValues) const {
         pair.key().getSubValues(subValues);
       }
       break;
+    case Tag::Object: {
+      subValues.insert(*this);
+      auto obj_type = type()->expect<ClassType>();
+      auto obj_value = toObject();
+      auto attribute_names = obj_type->attributeNames();
+      for (const auto& name: attribute_names) {
+	auto attribute = obj_value->getAttr(name);
+	attribute.getSubValues(subValues);
+      }
+      break;
+    }
     case Tag::Future:
     case Tag::Device:
-    case Tag::Object:
     case Tag::PyObject:
     case Tag::Uninitialized:
     case Tag::Capsule:
