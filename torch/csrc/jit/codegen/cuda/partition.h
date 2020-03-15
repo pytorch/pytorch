@@ -18,10 +18,10 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-TORCH_API bool isFusibleCudaFusionGroup(const Node* const node);
+TORCH_API bool isFusableCudaFusionGroup(const Node* const node);
 
 // consider if `node` could be fused into `fusion`
-TORCH_API bool isFusibleCudaFusionGroup(
+TORCH_API bool isFusableCudaFusionGroup(
     const Node* const fusion,
     const Node* const node);
 

@@ -28,7 +28,7 @@ static c10::optional<c10::Device> getDevice(const Node* const node) {
   return getDevice(outputs[0]);
 }
 
-static bool isFusibleDevice(const Node* node, const c10::Device device) {
+static bool isFusableDevice(const Node* node, const c10::Device device) {
   for (auto value : node->outputs()) {
     auto output_device = getDevice(value);
     if (!output_device.has_value() || output_device.value() != device) {
@@ -39,16 +39,16 @@ static bool isFusibleDevice(const Node* node, const c10::Device device) {
 }
 
 // TODO: we need to check input type when we handle `to()`
-static bool isFusibleDevice(const Node* node) {
+static bool isFusableDevice(const Node* node) {
   auto device = getDevice(node);
   if (!device.has_value()) {
     return false;
   }
   // Technically we don't need to check device for node->outputs()[0] again, meh
-  return isFusibleDevice(node, device.value());
+  return isFusableDevice(node, device.value());
 }
 
-inline bool isFusibleNode(const Node* const node)  {
+inline bool isFusableNode(const Node* const node)  {
   // checks if node is compatible with parser:
   // 1. if we have a parsing rule; or 2. if the node is already a fusion group.
   return (isNodeParsible(node) || node->kind() == prim::CudaFusionGroup);
@@ -56,20 +56,20 @@ inline bool isFusibleNode(const Node* const node)  {
 
 } // namespace
 
-bool isFusibleCudaFusionGroup(const Node* const node) {
-  if (isFusibleNode(node)) {
-    return isFusibleDevice(node);
+bool isFusableCudaFusionGroup(const Node* const node) {
+  if (isFusableNode(node)) {
+    return isFusableDevice(node);
   }
   return false;
 }
 
-bool isFusibleCudaFusionGroup(
+bool isFusableCudaFusionGroup(
     const Node* const fusion,
     const Node* const node) {
-  if (isFusibleNode(node)) {
+  if (isFusableNode(node)) {
     auto device = getDevice(fusion);
 
-    return (device.has_value() && isFusibleDevice(node, device.value()));
+    return (device.has_value() && isFusableDevice(node, device.value()));
   }
   return false;
 }
