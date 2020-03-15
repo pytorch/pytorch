@@ -109,6 +109,7 @@ class CAFFE2_API Context {
   at::QEngine qEngine() const;
   void setQEngine(at::QEngine e);
   const std::vector<at::QEngine>& supportedQEngines() const;
+  bool isXNNPACKAvailable() const;
 
  private:
   void initCUDAIfNeeded(DeviceType p) {
