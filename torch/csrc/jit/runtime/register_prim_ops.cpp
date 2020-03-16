@@ -5,19 +5,19 @@
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/autograd/variable.h>
-#include <torch/csrc/jit/runtime/custom_operator.h>
+#include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
-#include <torch/csrc/jit/runtime/graph_executor.h>
+#include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/runtime/custom_operator.h>
+#include <torch/csrc/jit/runtime/graph_executor.h>
+#include <torch/csrc/jit/runtime/jit_exception.h>
+#include <torch/csrc/jit/runtime/logging.h>
 #include <torch/csrc/jit/runtime/operator.h>
-#include <torch/csrc/jit/serialization/pickle.h>
 #include <torch/csrc/jit/runtime/print_handler.h>
 #include <torch/csrc/jit/runtime/profiling_record.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
-#include <torch/csrc/jit/api/compilation_unit.h>
-#include <torch/csrc/jit/frontend/error_report.h>
-#include <torch/csrc/jit/runtime/jit_exception.h>
-#include <torch/csrc/jit/runtime/logging.h>
+#include <torch/csrc/jit/serialization/pickle.h>
 
 #include <ATen/ExpandUtils.h>
 #include <ATen/Parallel.h>
@@ -65,22 +65,16 @@ int noop(Stack& n) {
   return 0;
 }
 
-c10::OperatorOptions aliasAnalysisFromSchema() {
-  c10::OperatorOptions result;
-  result.setAliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA);
-  return result;
+c10::AliasAnalysisKind aliasAnalysisFromSchema() {
+  return c10::AliasAnalysisKind::FROM_SCHEMA;
 }
 
-c10::OperatorOptions aliasAnalysisConservative() {
-  c10::OperatorOptions result;
-  result.setAliasAnalysis(c10::AliasAnalysisKind::CONSERVATIVE);
-  return result;
+c10::AliasAnalysisKind aliasAnalysisConservative() {
+  return c10::AliasAnalysisKind::CONSERVATIVE;
 }
 
-c10::OperatorOptions aliasAnalysisSpecialCase() {
-  c10::OperatorOptions result;
-  result.setAliasAnalysis(c10::AliasAnalysisKind::INTERNAL_SPECIAL_CASE);
-  return result;
+c10::AliasAnalysisKind aliasAnalysisSpecialCase() {
+  return c10::AliasAnalysisKind::INTERNAL_SPECIAL_CASE;
 }
 
 // using the rules from python_arg_parser FunctionParameter::check
@@ -394,7 +388,7 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         "prim::NumToTensor(Scalar a) -> Tensor",
+         "prim::NumToTensor.Scalar(Scalar a) -> Tensor",
          [](Stack& stack) {
            at::Scalar s;
            pop(stack, s);
@@ -405,7 +399,7 @@ RegisterOperators reg(
      // note: this op needs to share a name with the Scalar -> Tensor conversion
      // because all _to_tensor conversion have to have the same operator namet
      Operator(
-         "prim::NumToTensor(bool a) -> Tensor",
+         "prim::NumToTensor.bool(bool a) -> Tensor",
          [](Stack& stack) {
            bool b;
            pop(stack, b);
@@ -414,7 +408,7 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         "aten::Bool(Tensor a) -> bool",
+         "aten::Bool.Tensor(Tensor a) -> bool",
          [](Stack& stack) {
            at::Tensor a;
            pop(stack, a);
@@ -423,7 +417,7 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         "aten::Bool(int a) -> bool",
+         "aten::Bool.int(int a) -> bool",
          [](Stack& stack) {
            int64_t i;
            pop(stack, i);
@@ -432,7 +426,7 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         "aten::Bool(float a) -> bool",
+         "aten::Bool.float(float a) -> bool",
          [](Stack& stack) {
            double d;
            pop(stack, d);
@@ -441,7 +435,7 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         "aten::Float(Tensor a) -> float",
+         "aten::Float.Tensor(Tensor a) -> float",
          [](Stack& stack) {
            at::Tensor a;
            pop(stack, a);
@@ -450,7 +444,7 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         "aten::Float(Scalar a) -> float",
+         "aten::Float.Scalar(Scalar a) -> float",
          [](Stack& stack) {
            IValue scalar;
            pop(stack, scalar);
@@ -463,7 +457,7 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         "aten::Float(int a) -> float",
+         "aten::Float.int(int a) -> float",
          [](Stack& stack) {
            int64_t i;
            pop(stack, i);
@@ -472,7 +466,7 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         "aten::Float(bool a) -> float",
+         "aten::Float.bool(bool a) -> float",
          [](Stack& stack) {
            bool b;
            pop(stack, b);
@@ -481,7 +475,7 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         "aten::Float(str a) -> float",
+         "aten::Float.str(str a) -> float",
          [](Stack& stack) {
            auto s = pop(stack).toString();
            if (s->string() == "inf")
@@ -514,7 +508,7 @@ RegisterOperators reg(
          aliasAnalysisFromSchema()),
      // reference function parse_to_conversion in python_arg_parsing.h
      Operator(
-         "aten::to(Tensor(a) self, Device? device, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor(a|b)",
+         "aten::to.prim_Device(Tensor(a) self, Device? device, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor(a|b)",
          [](Stack& stack) {
            bool non_blocking;
            bool copy;
@@ -531,7 +525,7 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         "aten::to(Tensor(a) self, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor(a|b)",
+         "aten::to.prim_dtype(Tensor(a) self, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor(a|b)",
          [](Stack& stack) {
            bool non_blocking;
            bool copy;
@@ -547,7 +541,7 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         "aten::to(Tensor(a) self, bool non_blocking=False, bool copy=False) -> Tensor(a|b)",
+         "aten::to.prim_other(Tensor(a) self, bool non_blocking=False, bool copy=False) -> Tensor(a|b)",
          [](Stack& stack) {
            at::Tensor self;
            bool non_blocking;
@@ -740,7 +734,8 @@ RegisterOperators reg(
            auto outputs = pop(stack).toTensorList();
            std::vector<torch::autograd::Variable> input_vars(
                inputs.begin(), inputs.end());
-           std::vector<torch::autograd::Variable> output_vars(outputs.begin(), outputs.end());
+           std::vector<torch::autograd::Variable> output_vars(
+               outputs.begin(), outputs.end());
            std::vector<torch::autograd::Variable> gradients;
 
            if (!grad_outputs.isNone()) {
@@ -770,7 +765,7 @@ RegisterOperators reg(
      // the whole gradients in every tensor of the Autograd graph with
      // create_graph=True so we use aliasAnalysisConservative for these two OPs
      Operator(
-         "aten::backward(Tensor[](a!) tensors, Tensor?[]? grad_tensors=None, bool? retain_graph=None, bool create_graph=False) -> ()",
+         "aten::backward.list(Tensor[](a!) tensors, Tensor?[]? grad_tensors=None, bool? retain_graph=None, bool create_graph=False) -> ()",
          [](Stack& stack) {
            bool create_graph = pop(stack).toBool();
            auto retain_graph = pop(stack).toOptional<bool>();
@@ -840,36 +835,36 @@ RegisterOperators reg(
      Operator(
          "prim::Print(...) -> ()",
          [](Stack& stack) {
-          auto num_inputs = pop(stack).toInt();
-          std::stringstream ss;
-          bool first = true;
-          for (const IValue& i : last(stack, num_inputs)) {
-            if (!first)
-              ss << " ";
-            first = false;
-            ss << i;
-          }
-          drop(stack, num_inputs);
-          ss << std::endl;
-          auto* handler = getPrintHandler();
-          TORCH_INTERNAL_ASSERT(handler);
-          handler(ss.str());
-          return 0;
+           auto num_inputs = pop(stack).toInt();
+           std::stringstream ss;
+           bool first = true;
+           for (const IValue& i : last(stack, num_inputs)) {
+             if (!first)
+               ss << " ";
+             first = false;
+             ss << i;
+           }
+           drop(stack, num_inputs);
+           ss << std::endl;
+           auto* handler = getPrintHandler();
+           TORCH_INTERNAL_ASSERT(handler);
+           handler(ss.str());
+           return 0;
          },
          aliasAnalysisSpecialCase()),
      Operator(
          "prim::BroadcastSizes(...) -> int[]",
-          [](Stack& stack) {
-             auto num_inputs = pop(stack).toInt();
-             std::vector<int64_t> size;
-             size.reserve(8);
-             for (auto i = 0; i < num_inputs; ++i) {
-               size = at::infer_size(
-                   size, peek(stack, i, num_inputs).toIntVector());
-             }
-             drop(stack, num_inputs);
-             push(stack, IValue(std::move(size)));
-             return 0;
+         [](Stack& stack) {
+           auto num_inputs = pop(stack).toInt();
+           std::vector<int64_t> size;
+           size.reserve(8);
+           for (auto i = 0; i < num_inputs; ++i) {
+             size =
+                 at::infer_size(size, peek(stack, i, num_inputs).toIntVector());
+           }
+           drop(stack, num_inputs);
+           push(stack, IValue(std::move(size)));
+           return 0;
          },
          aliasAnalysisSpecialCase()),
      Operator(
@@ -886,7 +881,7 @@ RegisterOperators reg(
                  dim < (int64_t)regular_shape.size(),
                  "Dimension out of range for chunk");
              int64_t split_size = (regular_shape[dim] + chunks - 1) / chunks;
-             regular_shape[dim] =split_size;
+             regular_shape[dim] = split_size;
              if (shape[dim] % chunks == 0) {
                last_shape[dim] = split_size;
              } else {
@@ -905,9 +900,9 @@ RegisterOperators reg(
      Operator(
          "aten::warn(str message, int stacklevel=2) -> ()",
          [](Stack& stack) {
-            TORCH_CHECK(
+           TORCH_CHECK(
                false, "warn is implemented directly in the interpreter");
-            return 0;
+           return 0;
          },
          aliasAnalysisFromSchema()),
      Operator(
@@ -960,31 +955,31 @@ RegisterOperators reg(
          aliasAnalysisSpecialCase()),
      Operator(
          "prim::AutogradAnyNonZero(...) -> bool",
-           [](Stack& stack) {
-             auto num_inputs = pop(stack).toInt();
-             bool result = false;
-             for (const IValue& v : last(stack, num_inputs)) {
-               if (v.isTensor()) {
-                 if (v.toTensor().defined()) {
-                   result = true;
-                   break;
-                 }
-               } else if (v.isTensorList()) {
-                 for (const at::Tensor& t : v.toTensorVector()) {
-                   if (t.defined()) {
-                     result = true;
-                   }
-                 }
-                 if (result) {
-                   break;
-                 }
-               } else {
-                 TORCH_INTERNAL_ASSERT(false);
+         [](Stack& stack) {
+           auto num_inputs = pop(stack).toInt();
+           bool result = false;
+           for (const IValue& v : last(stack, num_inputs)) {
+             if (v.isTensor()) {
+               if (v.toTensor().defined()) {
+                 result = true;
+                 break;
                }
+             } else if (v.isTensorList()) {
+               for (const at::Tensor& t : v.toTensorVector()) {
+                 if (t.defined()) {
+                   result = true;
+                 }
+               }
+               if (result) {
+                 break;
+               }
+             } else {
+               TORCH_INTERNAL_ASSERT(false);
              }
-             drop(stack, num_inputs);
-             stack.emplace_back(result);
-             return 0;
+           }
+           drop(stack, num_inputs);
+           stack.emplace_back(result);
+           return 0;
          },
          aliasAnalysisFromSchema()),
      Operator(
@@ -995,11 +990,9 @@ RegisterOperators reg(
            if (!a.defined() && !b.defined()) {
              // undef + undef == undef
              stack.emplace_back(a);
-           }
-           else if (!a.defined()) {
+           } else if (!a.defined()) {
              stack.emplace_back(b);
-           }
-           else if (!b.defined()) {
+           } else if (!b.defined()) {
              stack.emplace_back(a);
            } else {
              stack.emplace_back(a + b);
@@ -1015,9 +1008,7 @@ RegisterOperators reg(
            if (size.isNone()) {
              push(stack, std::move(self));
            } else {
-             push(
-                 stack,
-                 at::sum_to(self.toTensor(), size.toIntVector()));
+             push(stack, at::sum_to(self.toTensor(), size.toIntVector()));
            }
            return 0;
          },
@@ -1038,7 +1029,8 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         // note the compiler knows to type TupleIndex more accurately than it is listed here.
+         // note the compiler knows to type TupleIndex more accurately than it
+         // is listed here.
          "prim::TupleIndex(Any tup, int i) -> Any",
          [](Stack& stack) {
            int64_t index = pop(stack).toInt();
@@ -1052,17 +1044,19 @@ RegisterOperators reg(
            return 0;
          },
          aliasAnalysisSpecialCase()),
-      Operator("prim::TupleUnpack(Any tup) -> ...",
+     Operator(
+         "prim::TupleUnpack(Any tup) -> ...",
          [](Stack& stack) {
-             tupleUnpack(stack);
-             return 0;
+           tupleUnpack(stack);
+           return 0;
          },
          aliasAnalysisSpecialCase()),
      Operator(
          prim::tolist,
-         // This operator has to be unschematized because the return type depends on the type hint and input.
-         // The implementation of this operator below is intended to be as close to the Python implementation in
-         // torch/csrc/utils/tensor_list.cpp as possible.
+         // This operator has to be unschematized because the return type
+         // depends on the type hint and input. The implementation of this
+         // operator below is intended to be as close to the Python
+         // implementation in torch/csrc/utils/tensor_list.cpp as possible.
          [](const Node* node) -> Operation {
            return [](Stack& stack) {
              int elem_ty_val;
@@ -1072,6 +1066,11 @@ RegisterOperators reg(
              pop(stack, elem_ty_val);
              pop(stack, dim_val);
              pop(stack, t);
+
+             // If the Tensor is not on the CPU, transfer it.
+             if (!t.device().is_cpu()) {
+               t = t.cpu();
+             }
 
              // Rebuild the output type using elem_ty_val and dim_val. Start
              // with the element type corresponding to elem_ty_val.
@@ -1083,14 +1082,21 @@ RegisterOperators reg(
              } else if (elem_ty_val == 2) {
                out_ty = BoolType::get();
              } else {
-               TORCH_CHECK(false, "Unsupported element type for tolist; only int, float and bool are supported");
+               TORCH_CHECK(
+                   false,
+                   "Unsupported element type for tolist; only int, float and bool are supported");
              }
 
              // Check that type of the Tensor matches that of the annotation.
-             TORCH_CHECK(tryScalarTypeFromJitType(out_ty) == t.scalar_type(), "Output annotation element type and runtime tensor element type must match for tolist()")
+             TORCH_CHECK(
+                 tryScalarTypeFromJitType(out_ty) == t.scalar_type(),
+                 "Output annotation element type and runtime tensor element type must match for tolist()")
 
-             // Check that the dimension of the Tensor matches that of the annotation.
-             TORCH_CHECK(dim_val == t.dim(), "Output annotation list dimension and runtime tensor dimension must match for tolist()")
+             // Check that the dimension of the Tensor matches that of the
+             // annotation.
+             TORCH_CHECK(
+                 dim_val == t.dim(),
+                 "Output annotation list dimension and runtime tensor dimension must match for tolist()")
 
              // Wrap out_ty in a ListType dim times.
              for (int i = 0; i < dim_val; ++i) {
@@ -1102,7 +1108,8 @@ RegisterOperators reg(
              auto strides = t.strides();
              size_t element_size = t.element_size();
              char* data = (char*)t.data_ptr();
-             auto result = tensorToListRecursive(data, 0, dim, out_ty, sizes, strides, element_size);
+             auto result = tensorToListRecursive(
+                 data, 0, dim, out_ty, sizes, strides, element_size);
              push(stack, std::move(result));
              return 0;
            };
@@ -1177,7 +1184,10 @@ RegisterOperators reg(
          "prim::unchecked_unwrap_optional(t(a)? optional) -> t(a)",
          noop,
          aliasAnalysisFromSchema()),
-     Operator("prim::unchecked_cast(t x) -> t", noop, aliasAnalysisSpecialCase()),
+     Operator(
+         "prim::unchecked_cast(t x) -> t",
+         noop,
+         aliasAnalysisSpecialCase()),
      Operator(
          "aten::wait(Future(t) self) -> t",
          [](Stack& stack) {
@@ -1242,7 +1252,7 @@ RegisterOperators logging_operators(
 // define implementations for primitive number ops
 #define DEFINE_GENERIC_OP(aten_op, int_op, float_op, int_result, float_result) \
   Operator(                                                                    \
-      #aten_op "(int a, int b) -> " #int_result,                               \
+      #aten_op ".int(int a, int b) -> " #int_result,                           \
       [](Stack& stack) {                                                       \
         int64_t a, b;                                                          \
         pop(stack, a, b);                                                      \
@@ -1251,7 +1261,7 @@ RegisterOperators logging_operators(
       },                                                                       \
       aliasAnalysisFromSchema()),                                              \
       Operator(                                                                \
-          #aten_op "(float a, float b) -> " #float_result,                     \
+          #aten_op ".float(float a, float b) -> " #float_result,               \
           [](Stack& stack) {                                                   \
             double a, b;                                                       \
             pop(stack, a, b);                                                  \
@@ -1260,26 +1270,26 @@ RegisterOperators logging_operators(
           },                                                                   \
           aliasAnalysisFromSchema())
 
-#define DEFINE_INT_FLOAT_OP(aten_op, op, result)   \
-  Operator(                                        \
-      #aten_op "(int a, float b) -> " #result,     \
-      [](Stack& stack) {                           \
-        int64_t a;                                 \
-        double b;                                  \
-        pop(stack, a, b);                          \
-        push(stack, op);                           \
-        return 0;                                  \
-      },                                           \
-      aliasAnalysisFromSchema()),                  \
-      Operator(                                    \
-          #aten_op "(float a, int b) -> " #result, \
-          [](Stack& stack) {                       \
-            double a;                              \
-            int64_t b;                             \
-            pop(stack, a, b);                      \
-            push(stack, op);                       \
-            return 0;                              \
-          },                                       \
+#define DEFINE_INT_FLOAT_OP(aten_op, op, result)             \
+  Operator(                                                  \
+      #aten_op ".int_float(int a, float b) -> " #result,     \
+      [](Stack& stack) {                                     \
+        int64_t a;                                           \
+        double b;                                            \
+        pop(stack, a, b);                                    \
+        push(stack, op);                                     \
+        return 0;                                            \
+      },                                                     \
+      aliasAnalysisFromSchema()),                            \
+      Operator(                                              \
+          #aten_op ".float_int(float a, int b) -> " #result, \
+          [](Stack& stack) {                                 \
+            double a;                                        \
+            int64_t b;                                       \
+            pop(stack, a, b);                                \
+            push(stack, op);                                 \
+            return 0;                                        \
+          },                                                 \
           aliasAnalysisFromSchema())
 
 #define DEFINE_INT_OP(aten_op, op)                          \
@@ -1309,56 +1319,55 @@ RegisterOperators logging_operators(
 // int/float variations to avoid trapping Scalar args
 // in unintended implicit conversions
 #define DEFINE_SCALAR_BINARY_OP(aten_op, int_op, float_op, result) \
-  Operator( \
-    #aten_op "(Scalar a, Scalar b) -> " #result, \
-    [](Stack& stack) { \
-      IValue x, y; \
-      pop(stack, x, y); \
-      if (x.isDouble()) { \
-        if (y.isDouble()) { \
-          double a = x.toDouble(); \
-          double b = y.toDouble(); \
-          push(stack, float_op); \
-        } else { \
-          double a = x.toDouble(); \
-          int64_t b = y.toInt(); \
-          push(stack, float_op); \
-        } \
-      } else { \
-        if (y.isDouble()) { \
-          int64_t a = x.toInt(); \
-          double b = y.toDouble(); \
-          push(stack, float_op); \
-        } else { \
-          int64_t a = x.toInt(); \
-          int64_t b = y.toInt(); \
-          push(stack, int_op); \
-        } \
-      } \
-      return 0; \
-    }, \
-    aliasAnalysisFromSchema() \
-  )
+  Operator(                                                        \
+      #aten_op "(Scalar a, Scalar b) -> " #result,                 \
+      [](Stack& stack) {                                           \
+        IValue x, y;                                               \
+        pop(stack, x, y);                                          \
+        if (x.isDouble()) {                                        \
+          if (y.isDouble()) {                                      \
+            double a = x.toDouble();                               \
+            double b = y.toDouble();                               \
+            push(stack, float_op);                                 \
+          } else {                                                 \
+            double a = x.toDouble();                               \
+            int64_t b = y.toInt();                                 \
+            push(stack, float_op);                                 \
+          }                                                        \
+        } else {                                                   \
+          if (y.isDouble()) {                                      \
+            int64_t a = x.toInt();                                 \
+            double b = y.toDouble();                               \
+            push(stack, float_op);                                 \
+          } else {                                                 \
+            int64_t a = x.toInt();                                 \
+            int64_t b = y.toInt();                                 \
+            push(stack, int_op);                                   \
+          }                                                        \
+        }                                                          \
+        return 0;                                                  \
+      },                                                           \
+      aliasAnalysisFromSchema())
 
-#define DEFINE_BINARY_OP(aten_op, op)               \
-  DEFINE_GENERIC_OP(aten_op, op, op, int, float),   \
-  DEFINE_INT_FLOAT_OP(aten_op, op, float),          \
-  DEFINE_SCALAR_BINARY_OP(aten_op, op, op, Scalar)
+#define DEFINE_BINARY_OP(aten_op, op)             \
+  DEFINE_GENERIC_OP(aten_op, op, op, int, float), \
+      DEFINE_INT_FLOAT_OP(aten_op, op, float),    \
+      DEFINE_SCALAR_BINARY_OP(aten_op, op, op, Scalar)
 
 #define DEFINE_BINARY_FLOAT_OP(aten_op, op)         \
   DEFINE_GENERIC_OP(aten_op, op, op, float, float), \
-  DEFINE_INT_FLOAT_OP(aten_op, op, float),          \
-  DEFINE_SCALAR_BINARY_OP(aten_op, op, op, float)
+      DEFINE_INT_FLOAT_OP(aten_op, op, float),      \
+      DEFINE_SCALAR_BINARY_OP(aten_op, op, op, float)
 
-#define DEFINE_COMPARISON_OP(aten_op, op)         \
-  DEFINE_GENERIC_OP(aten_op, op, op, bool, bool), \
-  DEFINE_INT_FLOAT_OP(aten_op, op, bool),         \
-  DEFINE_SCALAR_BINARY_OP(aten_op, op, op, bool), \
-  DEFINE_STR_CMP_OP(aten_op, op)
+#define DEFINE_COMPARISON_OP(aten_op, op)             \
+  DEFINE_GENERIC_OP(aten_op, op, op, bool, bool),     \
+      DEFINE_INT_FLOAT_OP(aten_op, op, bool),         \
+      DEFINE_SCALAR_BINARY_OP(aten_op, op, op, bool), \
+      DEFINE_STR_CMP_OP(aten_op, op)
 
 #define DEFINE_UNARY_INT_OP(aten_op, op, result) \
   Operator(                                      \
-      #aten_op "(int a) -> " #result,            \
+      #aten_op ".int(int a) -> " #result,        \
       [](Stack& stack) {                         \
         int64_t a;                               \
         pop(stack, a);                           \
@@ -1369,7 +1378,7 @@ RegisterOperators logging_operators(
 
 #define DEFINE_UNARY_FLOAT_OP(aten_op, op, result) \
   Operator(                                        \
-      #aten_op "(float a) -> " #result,            \
+      #aten_op ".float(float a) -> " #result,      \
       [](Stack& stack) {                           \
         double a;                                  \
         pop(stack, a);                             \
@@ -1380,23 +1389,22 @@ RegisterOperators logging_operators(
 
 #define DEFINE_UNARY_OP(aten_op, op, int_result, float_result) \
   DEFINE_UNARY_INT_OP(aten_op, op, int_result),                \
-  DEFINE_UNARY_FLOAT_OP(aten_op, op, float_result),            \
-  Operator( \
-  #aten_op "(Scalar a) -> Scalar", \
-  [](Stack& stack) { \
-    IValue x; \
-    pop(stack, x); \
-    if (x.isDouble()) { \
-      double a = x.toDouble(); \
-      push(stack, static_cast<float_result>(op)); \
-    } else { \
-      int64_t a = x.toInt(); \
-      push(stack, static_cast<int_result>(op)); \
-    } \
-    return 0; \
-  }, \
-  aliasAnalysisFromSchema() \
-)
+      DEFINE_UNARY_FLOAT_OP(aten_op, op, float_result),        \
+      Operator(                                                \
+          #aten_op ".Scalar(Scalar a) -> Scalar",              \
+          [](Stack& stack) {                                   \
+            IValue x;                                          \
+            pop(stack, x);                                     \
+            if (x.isDouble()) {                                \
+              double a = x.toDouble();                         \
+              push(stack, static_cast<float_result>(op));      \
+            } else {                                           \
+              int64_t a = x.toInt();                           \
+              push(stack, static_cast<int_result>(op));        \
+            }                                                  \
+            return 0;                                          \
+          },                                                   \
+          aliasAnalysisFromSchema())
 #define DEFINE_BOOL_OP(aten_op, op)        \
   Operator(                                \
       #aten_op "(bool a, bool b) -> bool", \
@@ -1449,7 +1457,8 @@ int listReverse(Stack& stack) {
   return 0;
 }
 
-template <typename T> int minList(Stack &stack) {
+template <typename T>
+int minList(Stack& stack) {
   c10::List<T> a = pop(stack).to<c10::List<T>>();
   c10::List<T> b = pop(stack).to<c10::List<T>>();
 
@@ -1467,7 +1476,8 @@ template <typename T> int minList(Stack &stack) {
   return 0;
 }
 
-template <typename T> int maxList(Stack &stack) {
+template <typename T>
+int maxList(Stack& stack) {
   c10::List<T> a = pop(stack).to<c10::List<T>>();
   c10::List<T> b = pop(stack).to<c10::List<T>>();
 
@@ -1522,7 +1532,6 @@ int listDelete(Stack& stack) {
   pop(stack);
   return 0;
 }
-
 
 template <typename T>
 int listInsert(Stack& stack) {
@@ -1603,11 +1612,10 @@ int listRemove<at::Tensor>(Stack& stack) {
   at::Tensor elem = pop(stack).to<at::Tensor>();
   c10::List<at::Tensor> list = pop(stack).to<c10::List<at::Tensor>>();
 
-  auto pos = std::find_if(
-      list.begin(), list.end(), [&](const at::Tensor& b) {
-        const auto cmp_result = elem.eq(b);
-        return cmp_result.is_nonzero();
-      });
+  auto pos = std::find_if(list.begin(), list.end(), [&](const at::Tensor& b) {
+    const auto cmp_result = elem.eq(b);
+    return cmp_result.is_nonzero();
+  });
 
   if (pos != list.end()) {
     list.erase(pos);
@@ -1639,8 +1647,8 @@ int listIndex<at::Tensor>(Stack& stack) {
   at::Tensor elem = pop(stack).to<at::Tensor>();
   c10::List<at::Tensor> list = pop(stack).to<c10::List<at::Tensor>>();
 
-  auto pos = std::find_if(
-      list.begin(), list.end(), [elem](const at::Tensor& b) {
+  auto pos =
+      std::find_if(list.begin(), list.end(), [elem](const at::Tensor& b) {
         const auto cmp_result = elem.eq(b);
         return cmp_result.is_nonzero();
       });
@@ -1670,8 +1678,8 @@ int listCount<at::Tensor>(Stack& stack) {
   at::Tensor elem = pop(stack).to<at::Tensor>();
   c10::List<at::Tensor> list = pop(stack).to<c10::List<at::Tensor>>();
 
-  const int64_t count = std::count_if(
-      list.begin(), list.end(), [&](const at::Tensor& b) {
+  const int64_t count =
+      std::count_if(list.begin(), list.end(), [&](const at::Tensor& b) {
         const auto cmp_result = elem.eq(b);
         return cmp_result.is_nonzero();
       });
@@ -1680,7 +1688,7 @@ int listCount<at::Tensor>(Stack& stack) {
   return 0;
 }
 
-template<typename T>
+template <typename T>
 int listExtend(Stack& stack) {
   c10::List<T> b = pop(stack).to<c10::List<T>>();
   c10::List<T> a = pop(stack).to<c10::List<T>>();
@@ -1734,7 +1742,9 @@ int listNe(Stack& stack) {
   return 0;
 }
 
-inline bool tensor_list_equal(const c10::List<at::Tensor>& a, const c10::List<at::Tensor>& b) {
+inline bool tensor_list_equal(
+    const c10::List<at::Tensor>& a,
+    const c10::List<at::Tensor>& b) {
   if (a.size() != b.size()) {
     return false;
   }
@@ -2002,7 +2012,6 @@ int dictLen(Stack& stack) {
   return 0;
 }
 
-
 int dictValues(Stack& stack) {
   auto dict = pop(stack).toGenericDict();
   auto values = c10::impl::GenericList(dict.valueType());
@@ -2038,7 +2047,7 @@ int dictIndex(Stack& stack) {
   return 0;
 }
 
-template<bool has_default>
+template <bool has_default>
 int dictGet(Stack& stack) {
   IValue default_value;
   if (has_default) {
@@ -2071,7 +2080,7 @@ int dictSetDefault(Stack& stack) {
   return 0;
 }
 
-template<bool has_default>
+template <bool has_default>
 int dictPop(Stack& stack) {
   IValue default_value;
   if (has_default) {
@@ -2164,7 +2173,8 @@ int dictConstructFromList(Stack& stack) {
   auto input_list = pop(stack);
   auto list = input_list.toList();
   auto tup_type = list.elementType()->expect<TupleType>();
-  auto dict = c10::impl::GenericDict(tup_type->elements().at(0), tup_type->elements().at(1));
+  auto dict = c10::impl::GenericDict(
+      tup_type->elements().at(0), tup_type->elements().at(1));
   dict.reserve(list.size());
   for (IValue input : list) {
     const auto tup = input.toTuple()->elements();
@@ -2200,7 +2210,7 @@ RegisterOperators reg2({
     DEFINE_STRING_OP(aten::add, a + b, str),
 #undef DEFINE_STRING_OP
     Operator(
-        "aten::len(str s) -> int",
+        "aten::len.str(str s) -> int",
         [](Stack& stack) {
           auto string = pop(stack).toStringRef();
           push(stack, static_cast<int64_t>(string.size()));
@@ -2209,7 +2219,7 @@ RegisterOperators reg2({
         aliasAnalysisFromSchema()),
     // tensor length op (size of 1st dimension)
     Operator(
-        "aten::len(Tensor t) -> int",
+        "aten::len.Tensor(Tensor t) -> int",
         [](Stack& stack) {
           at::Tensor t = pop(stack).toTensor();
           if (t.dim() == 0) {
@@ -2220,7 +2230,7 @@ RegisterOperators reg2({
         },
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::__getitem__(str s, int index) -> str",
+        "aten::__getitem__.str(str s, int index) -> str",
         [](Stack& stack) {
           auto index = pop(stack).toInt();
           auto string = pop(stack).toStringRef();
@@ -2243,175 +2253,156 @@ RegisterOperators reg2({
           return 0;
         },
         aliasAnalysisFromSchema()),
-// Mutable ops for lists containing mutable types.
-#define CREATE_MUTABLE_LIST_OPS(decl_type, value_type)                        \
+
+// these ops are generic over the list element type.
+#define CREATE_GENERIC_LIST_OPS(decl_type, value_type)                              \
+  Operator(                                                                         \
+      "aten::select." decl_type "(" decl_type                                       \
+      "[](a) list, int idx) -> " decl_type "(*)",                                   \
+      listSelect<value_type>,                                                       \
+      aliasAnalysisFromSchema()),                                                   \
+      Operator(                                                                     \
+          "aten::__getitem__." decl_type "(" decl_type                              \
+          "[](a) list, int idx) -> " decl_type "(*)",                               \
+          listSelect<value_type>,                                                   \
+          aliasAnalysisFromSchema()),                                               \
+      Operator(                                                                     \
+          "aten::append." decl_type "(" decl_type "[](a!) self, " decl_type         \
+          "(c -> *) el) -> " decl_type "[](a!)",                                    \
+          listAppend<value_type>,                                                   \
+          aliasAnalysisFromSchema()),                                               \
+      Operator(                                                                     \
+          "aten::reverse." decl_type "(" decl_type "[](a!) self) -> ()",            \
+          listReverse<value_type>,                                                  \
+          aliasAnalysisFromSchema()),                                               \
+      Operator(                                                                     \
+          "aten::extend." decl_type "(" decl_type "[](a!) self, " decl_type         \
+          " [] other) -> ()",                                                       \
+          listExtend<value_type>,                                                   \
+          aliasAnalysisFromSchema()),                                               \
+      Operator(                                                                     \
+          "aten::copy." decl_type "(" decl_type                                     \
+          "[](a) self)"                                                             \
+          " -> " decl_type "[]",                                                    \
+          listCopy<value_type>,                                                     \
+          aliasAnalysisFromSchema()),                                               \
+      Operator(                                                                     \
+          "aten::_set_item." decl_type "(" decl_type                                \
+          "[](a!) l, int idx, " decl_type "(b -> *) el) -> " decl_type              \
+          "[](a!)",                                                                 \
+          listSetItem<value_type>,                                                  \
+          aliasAnalysisFromSchema()),                                               \
+      Operator(                                                                     \
+          "aten::clear." decl_type "( " decl_type "[](a!) self) -> ()",             \
+          listClear<value_type>,                                                    \
+          aliasAnalysisFromSchema()),                                               \
+      Operator(                                                                     \
+          "aten::Delete." decl_type "( " decl_type                                  \
+          "[](a!) self, int idx) -> ()",                                            \
+          listDelete<value_type>,                                                   \
+          aliasAnalysisFromSchema()),                                               \
+      Operator(                                                                     \
+          "aten::insert." decl_type "( " decl_type                                  \
+          "[](a!) self, int idx,                                                    \
+          " decl_type "(b -> *) el) -> ()",                                         \
+          listInsert<value_type>,                                                   \
+          aliasAnalysisFromSchema()),                                               \
+      Operator(                                                                     \
+          "aten::pop." decl_type "(" decl_type                                      \
+          "[](a!) self, int idx=-1)                                                 \
+        -> " decl_type "(*)",                                                       \
+          listPop<value_type>,                                                      \
+          aliasAnalysisFromSchema()),                                               \
+      Operator(                                                                     \
+          "aten::len." decl_type "(" decl_type "[] a) -> int",                      \
+          listLen<value_type>,                                                      \
+          aliasAnalysisFromSchema()),                                               \
+      Operator(                                                                     \
+          "aten::add." decl_type "(" decl_type "[] a, " decl_type                   \
+          "[] b) -> " decl_type "[]",                                               \
+          listAdd<value_type>,                                                      \
+          aliasAnalysisFromSchema()),                                               \
+      Operator(                                                                     \
+          "aten::add_." decl_type "(" decl_type "[](a!) self, " decl_type           \
+          "[] b) -> " decl_type "[]",                                               \
+          listInplaceAdd<value_type>,                                               \
+          aliasAnalysisFromSchema()),                                               \
+      Operator(                                                                     \
+          "aten::slice." decl_type "(" decl_type                                    \
+          "[] l, int start, int end=9223372036854775807, int step=1) -> " decl_type \
+          "[]",                                                                     \
+          listSlice<value_type>,                                                    \
+          aliasAnalysisFromSchema()),                                               \
+      Operator(                                                                     \
+          "aten::list." decl_type "(" decl_type "[] l) -> " decl_type "[]",         \
+          listList<value_type>,                                                     \
+          aliasAnalysisFromSchema()),                                               \
+      Operator(                                                                     \
+          "aten::mul.left_" decl_type "(" decl_type                                 \
+          "[] l, int n) -> " decl_type "[]",                                        \
+          listMulIntLeft<value_type>,                                               \
+          aliasAnalysisFromSchema()),                                               \
+      Operator(                                                                     \
+          "aten::mul.right_(int n, " decl_type "[] l) -> " decl_type "[]",          \
+          listMulIntRight<value_type>,                                              \
+          aliasAnalysisFromSchema()),                                               \
+      Operator(                                                                     \
+          "aten::mul_." decl_type "(" decl_type                                     \
+          "[](a!) l, int n) -> " decl_type "[](a!)",                                \
+          listMulIntLeftInPlace<value_type>,                                        \
+          aliasAnalysisFromSchema())
+
+    CREATE_GENERIC_LIST_OPS("t", IValue),
+
+// these ops have a specialized implementation for the list element type
+#define CREATE_SPECIALIZED_LIST_OPS(decl_type, value_type) \
+  Operator(                                                \
+      "aten::remove." decl_type "(" decl_type              \
+      "[](a!) self,                                                           \
+        " decl_type " el) -> ()",                          \
+      listRemove<value_type>,                              \
+      aliasAnalysisFromSchema()),                          \
+      Operator(                                            \
+          "aten::index." decl_type "(" decl_type           \
+          "[] self,                                                               \
+        " decl_type " el) -> int",                         \
+          listIndex<value_type>,                           \
+          aliasAnalysisFromSchema()),                      \
+      Operator(                                            \
+          "aten::count." decl_type "(" decl_type           \
+          "[] self,                                                               \
+        " decl_type " el) -> int",                         \
+          listCount<value_type>,                           \
+          aliasAnalysisFromSchema()),
+
+    CREATE_SPECIALIZED_LIST_OPS("int", int64_t)
+        CREATE_SPECIALIZED_LIST_OPS("float", double)
+            CREATE_SPECIALIZED_LIST_OPS("bool", bool)
+                CREATE_SPECIALIZED_LIST_OPS("Tensor", at::Tensor)
+
+// these ops are not defined for Tensor
+#define CREATE_COMPARATOR_LIST_OPS_SPECIALIZED(decl_type, value_type)         \
   Operator(                                                                   \
-      "aten::select(" decl_type "[](a) list, int idx) -> " decl_type "(*)",   \
-      listSelect<value_type>,                                                 \
+      "prim::min." decl_type "(" decl_type "[] l, " decl_type                 \
+      "[] r) -> " decl_type "[]",                                             \
+      minList<value_type>,                                                    \
       aliasAnalysisFromSchema()),                                             \
       Operator(                                                               \
-          "aten::__getitem__(" decl_type "[](a) list, int idx) -> " decl_type \
-          "(*)",                                                              \
-          listSelect<value_type>,                                             \
+          "prim::max." decl_type "(" decl_type "[] l, " decl_type             \
+          "[] r) -> " decl_type "[]",                                         \
+          maxList<value_type>,                                                \
           aliasAnalysisFromSchema()),                                         \
       Operator(                                                               \
-          "aten::append." decl_type "(" decl_type "[](a!) self, " decl_type   \
-          "(c -> *) el) -> " decl_type "[](a!)",                              \
-          listAppend<value_type>,                                             \
+          "prim::min.self_" decl_type "(" decl_type "[] self) -> " decl_type, \
+          listMin<value_type>,                                                \
           aliasAnalysisFromSchema()),                                         \
       Operator(                                                               \
-          "aten::reverse(" decl_type "[](a!) self) -> ()",                    \
-          listReverse<value_type>,                                            \
-          aliasAnalysisFromSchema()),                                         \
-      Operator(                                                               \
-          "aten::extend(" decl_type "[](a!) self, " decl_type                 \
-          " [] other) -> ()",                                                 \
-          listExtend<value_type>,                                             \
-          aliasAnalysisFromSchema()),                                         \
-      Operator(                                                               \
-          "aten::copy(" decl_type                                             \
-          "[](a) self)"                                                       \
-          " -> " decl_type "[]",                                              \
-          listCopy<value_type>,                                               \
-          aliasAnalysisFromSchema()),                                         \
-      Operator(                                                               \
-          "aten::_set_item(" decl_type "[](a!) l, int idx, " decl_type        \
-          "(b -> *) el) -> " decl_type "[](a!)",                              \
-          listSetItem<value_type>,                                            \
-          aliasAnalysisFromSchema()),                                         \
-      Operator(                                                               \
-          "aten::clear( " decl_type "[](a!) self) -> ()",                     \
-          listClear<value_type>,                                              \
-          aliasAnalysisFromSchema()),                                         \
-      Operator(                                                               \
-          "aten::Delete( " decl_type "[](a!) self, int idx) -> ()",           \
-          listDelete<value_type>,                                             \
-          aliasAnalysisFromSchema()),                                         \
-      Operator(                                                               \
-          "aten::insert( " decl_type                                          \
-          "[](a!) self, int idx,                                                    \
-          " decl_type "(b -> *) el) -> ()",                                   \
-          listInsert<value_type>,                                             \
-          aliasAnalysisFromSchema()),                                         \
-      Operator(                                                               \
-          "aten::pop(" decl_type                                              \
-          "[](a!) self, int idx=-1)                                                 \
-        -> " decl_type "(*)",                                                 \
-          listPop<value_type>,                                                \
-          aliasAnalysisFromSchema())
-
-    CREATE_MUTABLE_LIST_OPS("Tensor", at::Tensor),
-
-    Operator(
-        "aten::remove(Tensor[](a!) self, Tensor el) -> ()",
-        listRemove<at::Tensor>,
-        aliasAnalysisFromSchema()),
-    Operator(
-        "aten::index(Tensor[] self, Tensor el) -> int",
-        listIndex<at::Tensor>,
-        aliasAnalysisFromSchema()),
-    Operator(
-        "aten::count(Tensor[] self, Tensor el) -> int",
-        listCount<at::Tensor>,
-        aliasAnalysisFromSchema()),
-
-// Mutable ops for lists containing immutable types.
-#define CREATE_IMMUTABLE_LIST_OPS(decl_type, value_type)                       \
-  Operator(                                                                    \
-      "aten::select(" decl_type "[] a, int b) -> " decl_type,                  \
-      listSelect<value_type>,                                                  \
-      aliasAnalysisFromSchema()),                                              \
-      Operator(                                                                \
-          "aten::__getitem__(" decl_type "[](a) list, int idx) -> " decl_type, \
-          listSelect<value_type>,                                              \
-          aliasAnalysisFromSchema()),                                          \
-      Operator(                                                                \
-          "prim::min(" decl_type "[] l, " decl_type "[] r) -> " decl_type "[]",\
-          minList<value_type>,                                                 \
-          aliasAnalysisFromSchema()),                                          \
-      Operator(                                                                \
-          "prim::max(" decl_type "[] l, " decl_type "[] r) -> " decl_type "[]",\
-          maxList<value_type>,                                                 \
-          aliasAnalysisFromSchema()),                                          \
-      Operator(                                                                \
-          "aten::append." decl_type "(" decl_type "[](a!) self, " decl_type                  \
-          " el) -> " decl_type "[](a!)",                                       \
-          listAppend<value_type>,                                              \
-          aliasAnalysisFromSchema()),                                          \
-      Operator(                                                                \
-          "aten::reverse(" decl_type "[](a!) self) -> ()",                     \
-          listReverse<value_type>,                                             \
-          aliasAnalysisFromSchema()),                                          \
-      Operator(                                                                \
-          "prim::min(" decl_type "[] self) -> " decl_type,                     \
-          listMin<value_type>,                                                 \
-          aliasAnalysisFromSchema()),                                          \
-      Operator(                                                                \
-          "prim::max(" decl_type "[] self) -> " decl_type,                     \
-          listMax<value_type>,                                                 \
-          aliasAnalysisFromSchema()),                                          \
-      Operator(                                                                \
-          "aten::extend(" decl_type "[](a!) self, " decl_type                  \
-          " [] other) -> ()",                                                  \
-          listExtend<value_type>,                                              \
-          aliasAnalysisFromSchema()),                                          \
-      Operator(                                                                \
-          "aten::copy(" decl_type                                              \
-          "[](a) self)"                                                        \
-          " -> " decl_type "[]",                                               \
-          listCopy<value_type>,                                                \
-          aliasAnalysisFromSchema()),                                          \
-      Operator(                                                                \
-          "aten::_set_item(" decl_type "[](a!) l, int idx, " decl_type         \
-          " el) -> " decl_type "[](a!)",                                       \
-          listSetItem<value_type>,                                             \
-          aliasAnalysisFromSchema()),                                          \
-      Operator(                                                                \
-          "aten::clear( " decl_type "[](a!) self) -> ()",                      \
-          listClear<value_type>,                                               \
-          aliasAnalysisFromSchema()),                                          \
-      Operator(                                                                \
-          "aten::Delete( " decl_type "[](a!) self, int idx) -> ()",            \
-          listDelete<value_type>,                                              \
-          aliasAnalysisFromSchema()),                                          \
-      Operator(                                                                \
-          "aten::insert( " decl_type                                           \
-          "[](a!) self, int idx,                                                  \
-          " decl_type " el) -> ()",                                            \
-          listInsert<value_type>,                                              \
-          aliasAnalysisFromSchema()),                                          \
-      Operator(                                                                \
-          "aten::remove(" decl_type                                            \
-          "[](a!) self,                                                           \
-          " decl_type " el) -> ()",                                            \
-          listRemove<value_type>,                                              \
-          aliasAnalysisFromSchema()),                                          \
-      Operator(                                                                \
-          "aten::index(" decl_type                                             \
-          "[] self,                                                               \
-          " decl_type " el) -> int",                                           \
-          listIndex<value_type>,                                               \
-          aliasAnalysisFromSchema()),                                          \
-      Operator(                                                                \
-          "aten::count(" decl_type                                             \
-          "[] self,                                                               \
-          " decl_type " el) -> int",                                           \
-          listCount<value_type>,                                               \
-          aliasAnalysisFromSchema()),                                          \
-      Operator(                                                                \
-          "aten::pop(" decl_type                                               \
-          "[](a!) self, int idx=-1)                                               \
-          -> " decl_type,                                                      \
-          listPop<value_type>,                                                 \
-          aliasAnalysisFromSchema())
-
-    CREATE_IMMUTABLE_LIST_OPS("int", int64_t),
-    CREATE_IMMUTABLE_LIST_OPS("float", double),
-    CREATE_IMMUTABLE_LIST_OPS("bool", bool),
-
-    // NOTE: this must be after the other list specializations so that operator
-    // resolution doesn't pick this up first
-    CREATE_MUTABLE_LIST_OPS("t", IValue),
+          "prim::max.self_" decl_type "(" decl_type "[] self) -> " decl_type, \
+          listMax<value_type>,                                                \
+          aliasAnalysisFromSchema()),
+                    CREATE_COMPARATOR_LIST_OPS_SPECIALIZED("int", int64_t)
+                        CREATE_COMPARATOR_LIST_OPS_SPECIALIZED("float", double)
+                            CREATE_COMPARATOR_LIST_OPS_SPECIALIZED("bool", bool)
 
     // TODO: remove once tests that rely on
     // https://github.com/pytorch/pytorch/issues/24856
@@ -2421,131 +2412,87 @@ RegisterOperators reg2({
         listAppend<std::string>,
         aliasAnalysisFromSchema()),
 
-#undef CREATE_IMMUTABLE_LIST_OPS
-#undef CREATE_MUTABLE_LIST_OPS
-
-#define CREATE_LIST_OPS(decl_type, c_type)                                          \
-  Operator(                                                                         \
-      "aten::len(" decl_type "[] a) -> int",                                        \
-      listLen<c_type::value_type>,                                                  \
-      aliasAnalysisFromSchema()),                                                   \
-      Operator(                                                                     \
-          "aten::add(" decl_type "[] a, " decl_type "[] b) -> " decl_type           \
-          "[]",                                                                     \
-          listAdd<c_type::value_type>,                                              \
-          aliasAnalysisFromSchema()),                                               \
-      Operator(                                                                     \
-          "aten::add_(" decl_type "[](a!) self, " decl_type                         \
-          "[] b) -> " decl_type "[]",                                               \
-          listInplaceAdd<c_type::value_type>,                                       \
-          aliasAnalysisFromSchema()),                                               \
-      Operator(                                                                     \
-          "aten::slice(" decl_type                                                  \
-          "[] l, int start, int end=9223372036854775807, int step=1) -> " decl_type \
-          "[]",                                                                     \
-          listSlice<c_type::value_type>,                                            \
-          aliasAnalysisFromSchema()),                                               \
-      Operator(                                                                     \
-          "aten::list(" decl_type "[] l) -> " decl_type "[]",                       \
-          listList<c_type::value_type>,                                             \
-          aliasAnalysisFromSchema()),                                               \
-      Operator(                                                                     \
-          "aten::mul(" decl_type "[] l, int n) -> " decl_type "[]",                 \
-          listMulIntLeft<c_type::value_type>,                                       \
-          aliasAnalysisFromSchema()),                                               \
-      Operator(                                                                     \
-          "aten::mul(int n, " decl_type "[] l) -> " decl_type "[]",                 \
-          listMulIntRight<c_type::value_type>,                                      \
-          aliasAnalysisFromSchema()),                                               \
-      Operator(                                                                     \
-          "aten::mul_(" decl_type "[](a!) l, int n) -> " decl_type "[](a!)",        \
-          listMulIntLeftInPlace<c_type::value_type>,                                \
-          aliasAnalysisFromSchema())
-
-    CREATE_LIST_OPS("int", c10::List<int64_t>),
-    CREATE_LIST_OPS("float", c10::List<double>),
-    CREATE_LIST_OPS("bool", c10::List<bool>),
-    CREATE_LIST_OPS("Tensor", c10::List<at::Tensor>),
-    CREATE_LIST_OPS("t", c10::List<IValue>),
+#undef CREATE_GENERIC_LIST_OPS
+#undef CREATE_COMPARATOR_LIST_OPS_SPECIALIZED
+#undef CREATE_SPECIALIZED_LIST_OPS
 
     // `listContains<T>` is not implemented for non-primitive types
     // TODO: Add List[bool] once .to<c10::List<bool>> doesn't throw an error
     Operator(
-        "aten::__contains__(int[] l, int item) -> bool",
+        "aten::__contains__.int(int[] l, int item) -> bool",
         listContains<int64_t>,
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::__contains__(float[] l, float item) -> bool",
+        "aten::__contains__.float(float[] l, float item) -> bool",
         listContains<double>,
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::__contains__(str[] l, str item) -> bool",
+        "aten::__contains__.str(str[] l, str item) -> bool",
         listContains<std::string>,
         aliasAnalysisFromSchema()),
-#undef CREATE_LIST_OPS
     Operator(
-        "aten::sort(int[](a!) self, bool reverse=False) -> ()",
+        "aten::sort.int(int[](a!) self, bool reverse=False) -> ()",
         listSort<int64_t>,
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::sort(float[](a!) self, bool reverse=False) -> ()",
+        "aten::sort.float(float[](a!) self, bool reverse=False) -> ()",
         listSort<double>,
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::sort(Tensor[](a!) self, bool reverse=False) -> ()",
+        "aten::sort.Tensor(Tensor[](a!) self, bool reverse=False) -> ()",
         listSort<at::Tensor>,
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::sort(bool[](a!) self, bool reverse=False) -> ()",
+        "aten::sort.bool(bool[](a!) self, bool reverse=False) -> ()",
         listSort<bool>,
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::sorted(int[](a) input) -> (int[])",
+        "aten::sorted.int(int[](a) input) -> (int[])",
         listCopyAndSort<int64_t>,
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::sorted(float[](a) input) -> (float[])",
+        "aten::sorted.float(float[](a) input) -> (float[])",
         listCopyAndSort<double>,
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::sorted(Tensor[](a) input) -> (Tensor[])",
+        "aten::sorted.Tensor(Tensor[](a) input) -> (Tensor[])",
         listCopyAndSort<at::Tensor>,
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::sorted(bool[](a) input) -> (bool[])",
+        "aten::sorted.bool(bool[](a) input) -> (bool[])",
         listCopyAndSort<bool>,
         aliasAnalysisFromSchema()),
 
     Operator(
-        "aten::eq(int[] a, int[] b) -> bool",
+        "aten::eq.int_list(int[] a, int[] b) -> bool",
         listEq<int64_t>,
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::eq(float[] a, float[] b) -> bool",
+        "aten::eq.float_list(float[] a, float[] b) -> bool",
         listEq<double>,
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::eq(Tensor[] a, Tensor[] b) -> bool",
+        "aten::eq.Tensor_list(Tensor[] a, Tensor[] b) -> bool",
         listEq<at::Tensor>,
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::eq(bool[] a, bool[] b) -> bool",
+        "aten::eq.bool_list(bool[] a, bool[] b) -> bool",
         listEq<bool>,
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::ne(int[] a, int[] b) -> bool",
+        "aten::ne.int_list(int[] a, int[] b) -> bool",
         listNe<int64_t>,
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::ne(float[] a, float[] b) -> bool",
+        "aten::ne.float_list(float[] a, float[] b) -> bool",
         listNe<double>,
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::ne(Tensor[] a, Tensor[] b) -> bool",
+        "aten::ne.Tensor_list(Tensor[] a, Tensor[] b) -> bool",
         listNe<at::Tensor>,
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::ne(bool[] a, bool[] b) -> bool",
+        "aten::ne.bool_list(bool[] a, bool[] b) -> bool",
         listNe<bool>,
         aliasAnalysisFromSchema()),
 
@@ -2749,6 +2696,8 @@ RegisterOperators reg2({
     DEFINE_INT_OP(aten::__and__, a& b),
     DEFINE_INT_OP(aten::__or__, a | b),
     DEFINE_INT_OP(aten::__xor__, a ^ b),
+    DEFINE_INT_OP(aten::__lshift__, a << b),
+    DEFINE_INT_OP(aten::__rshift__, a >> b),
 
     DEFINE_UNARY_OP(aten::floor, floor(a), int, int),
     DEFINE_UNARY_OP(aten::ceil, ceil(a), int, int),
@@ -2928,7 +2877,7 @@ RegisterOperators reg2({
         aliasAnalysisFromSchema()),
 #define CREATE_DICT_OPS(key_type)                                             \
   Operator(                                                                   \
-      "aten::len(Dict(" key_type ", t) self) -> int",                         \
+      "aten::len.Dict(Dict(" key_type ", t) self) -> int",                    \
       dictLen,                                                                \
       aliasAnalysisFromSchema()),                                             \
       Operator(                                                               \
@@ -2940,7 +2889,7 @@ RegisterOperators reg2({
           dictValues,                                                         \
           aliasAnalysisFromSchema()),                                         \
       Operator(                                                               \
-          "aten::__getitem__(Dict(" key_type ", t) self, " key_type           \
+          "aten::__getitem__.Dict(Dict(" key_type ", t) self, " key_type      \
           " key) -> t(*)",                                                    \
           dictIndex,                                                          \
           aliasAnalysisFromSchema()),                                         \
@@ -2959,17 +2908,17 @@ RegisterOperators reg2({
           dictSetDefault,                                                     \
           aliasAnalysisFromSchema()),                                         \
       Operator(                                                               \
-          "aten::Delete(Dict(" key_type ", t)(a!) self, " key_type            \
+          "aten::Delete.Dict(Dict(" key_type ", t)(a!) self, " key_type       \
           " key) -> ()",                                                      \
           dictDelete,                                                         \
           aliasAnalysisFromSchema()),                                         \
       Operator(                                                               \
-          "aten::pop(Dict(" key_type ", t)(a!) self, " key_type               \
+          "aten::pop.Dict(Dict(" key_type ", t)(a!) self, " key_type          \
           " key) -> t(*)",                                                    \
           dictPop<false>,                                                     \
           aliasAnalysisFromSchema()),                                         \
       Operator(                                                               \
-          "aten::pop(Dict(" key_type ", t)(a!) self, " key_type               \
+          "aten::pop.Dict_default(Dict(" key_type ", t)(a!) self, " key_type  \
           " key, t default_value) -> t(*)",                                   \
           dictPop<true>,                                                      \
           aliasAnalysisFromSchema()),                                         \
@@ -2992,7 +2941,7 @@ RegisterOperators reg2({
           dictItems,                                                          \
           aliasAnalysisFromSchema()),                                         \
       Operator(                                                               \
-          "aten::copy(Dict(" key_type ", t)(a) self) -> Dict(" key_type       \
+          "aten::copy.Dict(Dict(" key_type ", t)(a) self) -> Dict(" key_type  \
           ", t)",                                                             \
           dictCopy,                                                           \
           aliasAnalysisFromSchema()),                                         \
@@ -3019,26 +2968,29 @@ RegisterOperators reg2({
 #undef CREATE_DICT_OPS
 
     Operator(
-        "aten::divmod(int x, int y) -> (int, int)",
+        "aten::divmod.int(int x, int y) -> (int, int)",
         [](Stack& stack) {
           int64_t a, b;
           lldiv_t divresult = {};
           pop(stack, a, b);
           if (b == 0) {
-            throw std::runtime_error("ZeroDivisionError: integer division or modulo by zero");
+            throw std::runtime_error(
+                "ZeroDivisionError: integer division or modulo by zero");
           }
           divresult = lldiv(a, b);
           if (divresult.rem && (a < 0) != (b < 0)) {
             divresult.quot -= 1;
-            divresult.rem  += b;
+            divresult.rem += b;
           }
-          push(stack, static_cast<int64_t>(divresult.quot), \
-            static_cast<int64_t>(divresult.rem));
+          push(
+              stack,
+              static_cast<int64_t>(divresult.quot),
+              static_cast<int64_t>(divresult.rem));
           return 0;
         },
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::divmod(float x, float y) -> (float, float)",
+        "aten::divmod.float(float x, float y) -> (float, float)",
         [](Stack& stack) {
           double a, b;
           pop(stack, a, b);
@@ -3047,9 +2999,9 @@ RegisterOperators reg2({
           }
           double rem = fmod(a, b);
           if (rem && (a < 0) != (b < 0)) {
-            rem  += b;
+            rem += b;
           }
-          push(stack, (a - rem)/b, rem);
+          push(stack, (a - rem) / b, rem);
           return 0;
         },
         aliasAnalysisFromSchema()),
@@ -3140,7 +3092,7 @@ int sort_op(Stack& stack) {
           return false;
         }
         if (!lt_func) {
-          lt_func =  checkSortSchema(a.type());
+          lt_func = checkSortSchema(a.type());
         }
         sort_stack.push_back(a);
         sort_stack.push_back(b);
@@ -3157,11 +3109,11 @@ int sort_op(Stack& stack) {
 RegisterOperators regSort({
     Operator(
         "aten::sorted(t[](a) self) -> (t[])",
-        sort_op</*has_reverse_arg*/false, /*copy_return_list*/true>,
+        sort_op</*has_reverse_arg*/ false, /*copy_return_list*/ true>,
         aliasAnalysisFromSchema()),
     Operator(
         "aten::sort(t[](a!) self, bool reverse=False) -> ()",
-        sort_op</*has_reverse_arg*/true, /*copy_return_list*/false>,
+        sort_op</*has_reverse_arg*/ true, /*copy_return_list*/ false>,
         aliasAnalysisFromSchema()),
 });
 
@@ -3218,7 +3170,7 @@ at::Tensor interpolate(
     }
   } else {
     if (align_corners == c10::nullopt) {
-      AT_WARN(
+      TORCH_WARN(
           "Default upsampling behavior when mode=",
           mode,
           " is changed "
@@ -3232,40 +3184,40 @@ at::Tensor interpolate(
   double scale_factors_2 = -1.0;
   double scale_factors_3 = -1.0;
 
-  if(!scale_factors.isNone() && recompute_scale_factor == c10::nullopt) {
+  if (!scale_factors.isNone() && recompute_scale_factor == c10::nullopt) {
     recompute_scale_factor = true;
     bool warn_recompute_scale_factor = false;
 
     if (scale_factors.isDouble()) {
       // only warn when the scales have floating values since
       // the result for ints is the same with/without recompute_scale_factor
-      if (_is_floating_value(scale_factors.toDouble())){
+      if (_is_floating_value(scale_factors.toDouble())) {
         warn_recompute_scale_factor = true;
       }
     } else if (scale_factors.isDoubleList()) {
       auto scale_factors_list = scale_factors.toDoubleList();
 
-      for (const auto & scales : scale_factors_list) {
+      for (const auto& scales : scale_factors_list) {
         // only warn when the scales have floating values since
         // the result for ints is the same with/without recompute_scale_factor
-        if(_is_floating_value(scales)) {
+        if (_is_floating_value(scales)) {
           warn_recompute_scale_factor = true;
           break;
         }
       }
     }
 
-    if(warn_recompute_scale_factor) {
-      AT_WARN(
-        "The default behavior for interpolate/upsample with float scale_factor will change "
-        "in 1.5.0 to align with other frameworks/libraries, and use scale_factor directly, "
-        "instead of relying on the computed output size. "
-        "If you wish to keep the old behavior, please set recompute_scale_factor=True. "
-        "See the documentation of nn.Upsample for details.");
+    if (warn_recompute_scale_factor) {
+      TORCH_WARN(
+          "The default behavior for interpolate/upsample with float scale_factor will change "
+          "in 1.5.0 to align with other frameworks/libraries, and use scale_factor directly, "
+          "instead of relying on the computed output size. "
+          "If you wish to keep the old behavior, please set recompute_scale_factor=True. "
+          "See the documentation of nn.Upsample for details.");
     }
   }
 
-  if(recompute_scale_factor == false) {
+  if (recompute_scale_factor == false) {
     if (scale_factors.isDouble()) {
       scale_factors_1 = scale_factors.toDouble();
       scale_factors_2 = scale_factors.toDouble();
@@ -3273,9 +3225,9 @@ at::Tensor interpolate(
     } else if (scale_factors.isDoubleList()) {
       auto scale_factors_list = scale_factors.toDoubleList();
       scale_factors_1 = scale_factors_list[0];
-      if (scale_factors_list.size() >= 2){
+      if (scale_factors_list.size() >= 2) {
         scale_factors_2 = scale_factors_list[1];
-        if (scale_factors_list.size() >= 3){
+        if (scale_factors_list.size() >= 3) {
           scale_factors_3 = scale_factors_list[2];
         }
       }
@@ -3292,10 +3244,17 @@ at::Tensor interpolate(
         input, _output_size(input, 1, size, scale_factors), scale_factors_1);
   if (input_dim == dim2d && mode == "nearest")
     return at::upsample_nearest2d(
-        input, _output_size(input, 2, size, scale_factors), scale_factors_1, scale_factors_2);
+        input,
+        _output_size(input, 2, size, scale_factors),
+        scale_factors_1,
+        scale_factors_2);
   if (input_dim == dim3d && mode == "nearest")
     return at::upsample_nearest3d(
-        input, _output_size(input, 3, size, scale_factors), scale_factors_1, scale_factors_2, scale_factors_3);
+        input,
+        _output_size(input, 3, size, scale_factors),
+        scale_factors_1,
+        scale_factors_2,
+        scale_factors_3);
   if (input_dim == dim1d && mode == "area")
     return at::adaptive_avg_pool1d(
         input, _output_size(input, 1, size, scale_factors));
@@ -3307,7 +3266,10 @@ at::Tensor interpolate(
         input, _output_size(input, 3, size, scale_factors));
   if (input_dim == dim1d && mode == "linear")
     return at::upsample_linear1d(
-        input, _output_size(input, 1, size, scale_factors), *align_corners, scale_factors_1);
+        input,
+        _output_size(input, 1, size, scale_factors),
+        *align_corners,
+        scale_factors_1);
   if (input_dim == dim1d && mode == "bilinear")
     throw std::runtime_error("Got 3D input, but bilinear mode needs 4D input");
   if (input_dim == dim1d && mode == "bicubic")
@@ -3318,10 +3280,18 @@ at::Tensor interpolate(
     throw std::runtime_error("Got 4D input, but linear mode needs 3D input");
   if (input_dim == dim2d && mode == "bilinear")
     return at::upsample_bilinear2d(
-        input, _output_size(input, 2, size, scale_factors), *align_corners, scale_factors_1, scale_factors_2);
+        input,
+        _output_size(input, 2, size, scale_factors),
+        *align_corners,
+        scale_factors_1,
+        scale_factors_2);
   if (input_dim == dim2d && mode == "bicubic")
     return at::upsample_bicubic2d(
-        input, _output_size(input, 2, size, scale_factors), *align_corners, scale_factors_1, scale_factors_2);
+        input,
+        _output_size(input, 2, size, scale_factors),
+        *align_corners,
+        scale_factors_1,
+        scale_factors_2);
   if (input_dim == dim2d && mode == "trilinear")
     throw std::runtime_error("Got 4D input, but trilinear mode needs 5D input");
   if (input_dim == dim3d && mode == "linear")
@@ -3332,7 +3302,12 @@ at::Tensor interpolate(
     throw std::runtime_error("Got 5D input, but bicubic mode needs 4D input");
   if (input_dim == dim3d && mode == "trilinear")
     return at::upsample_trilinear3d(
-        input, _output_size(input, 3, size, scale_factors), *align_corners, scale_factors_1, scale_factors_2, scale_factors_3);
+        input,
+        _output_size(input, 3, size, scale_factors),
+        *align_corners,
+        scale_factors_1,
+        scale_factors_2,
+        scale_factors_3);
 
   AT_ERROR(
       "Input Error: Only 3D, 4D and 5D input Tensors supported",
@@ -3345,17 +3320,28 @@ at::Tensor interpolate(
 }
 
 int interpolate_op(Stack& stack) {
-    at::Tensor input;
-    IValue size;
-    IValue scale_factors;
-    std::string mode;
-    IValue align_corners;
-    IValue recompute_scale_factor;
-    pop(stack, input, size, scale_factors, mode, align_corners, recompute_scale_factor);
-    at::Tensor res = interpolate(
-        input, size, scale_factors, mode, align_corners.toOptional<bool>(), recompute_scale_factor.toOptional<bool>());
-    push(stack, std::move(res));
-    return 0;
+  at::Tensor input;
+  IValue size;
+  IValue scale_factors;
+  std::string mode;
+  IValue align_corners;
+  IValue recompute_scale_factor;
+  pop(stack,
+      input,
+      size,
+      scale_factors,
+      mode,
+      align_corners,
+      recompute_scale_factor);
+  at::Tensor res = interpolate(
+      input,
+      size,
+      scale_factors,
+      mode,
+      align_corners.toOptional<bool>(),
+      recompute_scale_factor.toOptional<bool>());
+  push(stack, std::move(res));
+  return 0;
 }
 
 // interpolate takes in float & float[] for scale factor
@@ -3386,8 +3372,8 @@ int upsample_nearest_op(Stack& stack) {
   IValue scale_factor_int;
   pop(stack, input, size, scale_factor_int);
   IValue scale_factor_double = convert_scale_factor_to_double(scale_factor_int);
-  at::Tensor res =
-      interpolate(input, size, scale_factor_double, "nearest", c10::nullopt, c10::nullopt);
+  at::Tensor res = interpolate(
+      input, size, scale_factor_double, "nearest", c10::nullopt, c10::nullopt);
   push(stack, std::move(res));
   return 0;
 }
@@ -3401,7 +3387,12 @@ int upsample_op(Stack& stack) {
   pop(stack, input, size, scale_factor_int, mode, align_corners);
   IValue scale_factor_double = convert_scale_factor_to_double(scale_factor_int);
   at::Tensor res = interpolate(
-      input, size, scale_factor_double, mode, align_corners.toOptional<bool>(), c10::nullopt);
+      input,
+      size,
+      scale_factor_double,
+      mode,
+      align_corners.toOptional<bool>(),
+      c10::nullopt);
   push(stack, std::move(res));
   return 0;
 }
@@ -3412,19 +3403,20 @@ int upsample_bilinear_op(Stack& stack) {
   IValue scale_factor_int;
   pop(stack, input, size, scale_factor_int);
   IValue scale_factor_double = convert_scale_factor_to_double(scale_factor_int);
-  at::Tensor res =
-      interpolate(input, size, scale_factor_double, "bilinear", true, c10::nullopt);
+  at::Tensor res = interpolate(
+      input, size, scale_factor_double, "bilinear", true, c10::nullopt);
   push(stack, std::move(res));
   return 0;
 }
 
+// These ops are no longer generated, but remain here for BC
 RegisterOperators reg3({
     Operator(
-        "aten::__interpolate(Tensor input, int? size = None, float[]? scale_factor = None, str mode = 'nearest', bool? align_corners = None, bool? recompute_scale_factor = None) -> Tensor",
+        "aten::__interpolate.scale_list(Tensor input, int? size = None, float[]? scale_factor = None, str mode = 'nearest', bool? align_corners = None, bool? recompute_scale_factor = None) -> Tensor",
         interpolate_op,
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::__interpolate(Tensor input, int[]? size = None, float[]? scale_factor = None, str mode = 'nearest', bool? align_corners = None, bool? recompute_scale_factor = None) -> Tensor",
+        "aten::__interpolate.size_list_scale_list(Tensor input, int[]? size = None, float[]? scale_factor = None, str mode = 'nearest', bool? align_corners = None, bool? recompute_scale_factor = None) -> Tensor",
         interpolate_op,
         aliasAnalysisFromSchema()),
     Operator(
@@ -3432,7 +3424,7 @@ RegisterOperators reg3({
         interpolate_op,
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::__interpolate(Tensor input, int[]? size = None, float? scale_factor = None, str mode = 'nearest', bool? align_corners = None, bool? recompute_scale_factor = None) -> Tensor",
+        "aten::__interpolate.size_list(Tensor input, int[]? size = None, float? scale_factor = None, str mode = 'nearest', bool? align_corners = None, bool? recompute_scale_factor = None) -> Tensor",
         interpolate_op,
         aliasAnalysisFromSchema()),
 
@@ -3441,7 +3433,7 @@ RegisterOperators reg3({
         upsample_nearest_op,
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::__upsample_nearest(Tensor input, int[]? size = None, int? scale_factor = None) -> Tensor",
+        "aten::__upsample_nearest.size_list(Tensor input, int[]? size = None, int? scale_factor = None) -> Tensor",
         upsample_nearest_op,
         aliasAnalysisFromSchema()),
 
@@ -3450,7 +3442,7 @@ RegisterOperators reg3({
         upsample_op,
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::__upsample(Tensor input, int[]? size = None, int? scale_factor = None, str mode = 'nearest', bool? align_corners = None) -> Tensor",
+        "aten::__upsample.size_list(Tensor input, int[]? size = None, int? scale_factor = None, str mode = 'nearest', bool? align_corners = None) -> Tensor",
         upsample_op,
         aliasAnalysisFromSchema()),
 
@@ -3459,7 +3451,7 @@ RegisterOperators reg3({
         upsample_bilinear_op,
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::__upsample_bilinear(Tensor input, int[]? size = None, int? scale_factor = None) -> Tensor",
+        "aten::__upsample_bilinear.size_list(Tensor input, int[]? size = None, int? scale_factor = None) -> Tensor",
         upsample_bilinear_op,
         aliasAnalysisFromSchema()),
     Operator(
@@ -3467,7 +3459,7 @@ RegisterOperators reg3({
         upsample_bilinear_op,
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::__upsample_bilinear(Tensor input, int[]? size = None, int[]? scale_factor = None) -> Tensor",
+        "aten::__upsample_bilinear.size_list(Tensor input, int[]? size = None, int[]? scale_factor = None) -> Tensor",
         upsample_bilinear_op,
         aliasAnalysisFromSchema()),
 

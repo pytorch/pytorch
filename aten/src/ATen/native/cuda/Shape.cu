@@ -1,18 +1,10 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/DeviceGuard.h>
-#include <ATen/Context.h>
-#include <ATen/Utils.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/Dispatch.h>
-
-#include <c10/core/TensorImpl.h>
-#include <c10/core/ScalarType.h>
-#include <c10/core/UndefinedTensorImpl.h>
-#include <c10/cuda/CUDACachingAllocator.h>
-#include <c10/util/typeid.h>
-#include <c10/util/intrusive_ptr.h>
+#include <c10/core/MemoryFormat.h>
+#include <c10/util/Optional.h>
 
 #include <THC/THC.h>
 
@@ -30,7 +22,7 @@ inline bool getCatGrid(ptrdiff_t nTensors, dim3& grid) {
   //X dim of grid for cat array cooperates on a single tensor in the cat.
   //Given half of the GPU, full utilization will always occur.
   grid = dim3( 2LL * numSM, (long long) nTensors );
-             
+
   return true;
 }
 
@@ -44,6 +36,10 @@ struct CatArrIndexToOffset {
       const IndexType dimSize,
       const unsigned int concatDim,
       IndexType linearIndex) {
+    // linearIndex is not really linear index, but instead the offset in
+    // input tensor. If the input tensor is contiguous, then this offset
+    // is the linear index, but if the input tensor is channels last, then
+    // it is the linear index of the permuted contiguous tensor
     IndexType offset = 0;
 
 #pragma unroll
@@ -103,7 +99,7 @@ __global__ void CatArrayBatchedCopy(
     IndexType nElements = inputs[blockIdx.y].nElements;
 
     if(tid >= nElements) return;
-    
+
     T* data = inputs[blockIdx.y].input;
     IndexType offset = inputs[blockIdx.y].offset;
     IndexType dimSize = inputs[blockIdx.y].dimSize;
@@ -143,7 +139,7 @@ void check_shape_except_dim(const Tensor &first, const Tensor &second,
 
 template <typename scalar_t>
 void parallel_cat(Tensor &out, const TensorList &inputs, int64_t dimension,
-                  int nDims) {
+                  int nDims, c10::MemoryFormat memory_format) {
   // First, let's set up our kernel parameters. We start with a raw pointer to
   // the storage for the output Tensor.
   scalar_t *data = out.data_ptr<scalar_t>();
@@ -159,9 +155,24 @@ void parallel_cat(Tensor &out, const TensorList &inputs, int64_t dimension,
   OutputTensorSizeStride<unsigned int, CAT_ARRAY_MAX_INPUT_DIMS> param;
 
   // Next, let's initialize the size, stride arrays for the output Tensor.
-  for (int i = 0; i < nDims; ++i) {
-    param.outputSize[i] = at::native::size(out, i);
-    param.outputStride[i] = out.stride(i);
+  if (memory_format == c10::MemoryFormat::Contiguous) {
+    for (int i = 0; i < nDims; ++i) {
+      param.outputSize[i] = at::native::size(out, i);
+      param.outputStride[i] = out.stride(i);
+    }
+  } else if (memory_format == c10::MemoryFormat::ChannelsLast || memory_format == c10::MemoryFormat::ChannelsLast3d) {
+    // permute the semantics of dims from NCHW to NHWC so that the input
+    // tensor is now contiguous
+    param.outputSize[0] = at::native::size(out, 0);
+    param.outputStride[0] = out.stride(0);
+    for (int i = 1; i < nDims - 1; ++i) {
+      param.outputSize[i] = at::native::size(out, i + 1);
+      param.outputStride[i] = out.stride(i + 1);
+    }
+    param.outputSize[nDims - 1] = at::native::size(out, 1);
+    param.outputStride[nDims - 1] = out.stride(1);
+  } else {
+    TORCH_CHECK(false, "unsupported memory format");
   }
 
   at::cuda::CUDAStream stream = at::cuda::getCurrentCUDAStream();
@@ -208,6 +219,17 @@ void parallel_cat(Tensor &out, const TensorList &inputs, int64_t dimension,
     getCatGrid(batchCounter, catGrid);
 
 
+    if (memory_format != c10::MemoryFormat::Contiguous) {
+      switch (dimension) {
+      case 0:
+        break;
+      case 1:
+        dimension = nDims - dimension;
+        break;
+      default:
+        dimension--;
+      }
+    }
     // Template Declarations for dim = 1, 2, 3, 4
 #define HANDLE_CASE(DIMS) \
     CatArrayBatchedCopy<scalar_t, unsigned int, DIMS><<<\
@@ -228,7 +250,7 @@ void parallel_cat(Tensor &out, const TensorList &inputs, int64_t dimension,
         break;
     }
 #undef HANDLE_CASE
-    THCudaCheck(cudaGetLastError());
+    AT_CUDA_CHECK(cudaGetLastError());
   }
 }
 
@@ -238,6 +260,25 @@ Tensor cat_cuda(TensorList inputs, int64_t dimension) {
   Tensor out = at::empty({0}, inputs.front().options());
   cat_out_cuda(out, inputs, dimension);
   return out;
+}
+
+inline c10::MemoryFormat compute_output_memory_format(const TensorList &inputs) {
+  c10::optional<c10::MemoryFormat> format = c10::nullopt;
+  for (auto &t : inputs) {
+    auto f = t.suggest_memory_format();
+    if (!format.has_value()) {
+      format = f;
+      continue;
+    }
+    if (format.value() == f) {
+      continue;
+    }
+    bool contiguous = (format.value() == c10::MemoryFormat::Contiguous || f == c10::MemoryFormat::Contiguous || format.value() != f);
+    if (contiguous) {
+      return c10::MemoryFormat::Contiguous;
+    }
+  }
+  return format.value();
 }
 
 Tensor& cat_out_cuda(Tensor& out, TensorList inputs, int64_t dimension) {
@@ -284,6 +325,8 @@ Tensor& cat_out_cuda(Tensor& out, TensorList inputs, int64_t dimension) {
   TORCH_CHECK(inputs.size() > 0, "invalid number of inputs ", inputs.size());
   TORCH_CHECK(dimension >= 0, "invalid dimension ", dimension);
 
+  c10::MemoryFormat memory_format = compute_output_memory_format(inputs);
+
   std::vector<int64_t> size(notSkippedTensor->sizes().vec());
 
   // Compute size of the result in the cat dimension
@@ -299,7 +342,7 @@ Tensor& cat_out_cuda(Tensor& out, TensorList inputs, int64_t dimension) {
 
   // Compute the size of the result
   size[dimension] = cat_dim_size;
-  out.resize_(size);
+  out.resize_(size, memory_format);
   if (out.numel() == 0) {
     return out;
   }
@@ -324,8 +367,8 @@ Tensor& cat_out_cuda(Tensor& out, TensorList inputs, int64_t dimension) {
       return t.device() == firstDevice;
     });
   const bool allContiguous = std::all_of(inputs.begin(), inputs.end(),
-    [](const Tensor& t) {
-      return !t.defined() || t.is_contiguous();
+    [=](const Tensor& t) {
+      return !t.defined() || t.is_contiguous(memory_format);
     });
   if (inputs.size() > 1 &&
       !hasSkippedInput &&
@@ -338,7 +381,7 @@ Tensor& cat_out_cuda(Tensor& out, TensorList inputs, int64_t dimension) {
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
         at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
         out.scalar_type(), "cat_cuda", [&]() {
-      parallel_cat<scalar_t>(out, inputs, dimension, nDims);
+      parallel_cat<scalar_t>(out, inputs, dimension, nDims, memory_format);
     });
 
   } else {

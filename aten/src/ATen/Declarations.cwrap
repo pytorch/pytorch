@@ -129,6 +129,7 @@
 [[
   name: _th_index_select
   cuda_bool: True
+  cuda_bfloat16: True
   cname: indexSelect
   variants:
     - function
@@ -265,8 +266,9 @@
 ]]
 [[
   name: _th_min
-  cpu_bool: True
   cuda_bool: True
+  backends:
+    - CUDA
   variants:
     - function
   options:
@@ -294,8 +296,9 @@
 ]]
 [[
   name: _th_max
-  cpu_bool: True
   cuda_bool: True
+  backends:
+    - CUDA
   variants:
     - function
   options:
@@ -638,43 +641,6 @@
         - THTensor* self
         - real other
     - cname: cfmod
-      arguments:
-        - THTensor* self
-        - arg: THTensor* self
-          broadcast: other inplace fallback
-        - THTensor* other
-]]
-[[
-  name: _th_remainder
-  return: argument 0
-  variants:
-    - function
-  options:
-    - cname: remainder
-      arguments:
-        - arg: THTensor* result
-          output: True
-        - THTensor* self
-        - real other
-    - cname: cremainder
-      arguments:
-        - arg: THTensor* result
-          output: True
-        - arg: THTensor* self
-          broadcast: other fallback
-        - arg: THTensor* other
-]]
-[[
-  name: _th_remainder_
-  return: argument 0
-  variants: function
-  options:
-    - cname: remainder
-      arguments:
-        - THTensor* self
-        - THTensor* self
-        - real other
-    - cname: cremainder
       arguments:
         - THTensor* self
         - arg: THTensor* self

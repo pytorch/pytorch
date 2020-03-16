@@ -1345,7 +1345,7 @@ def script_method(fn):
 
 
 # These OrderedDictWrapper classes replace the actual OrderedDicts in
-# module with versions that get/set properties inside of script::Module.
+# module with versions that get/set properties inside of Module.
 # This allows us to reuse most of nn.Module while still storing the
 # data in C++.
 # Each OrderedDict needs to support:
@@ -1398,7 +1398,7 @@ class OrderedModuleDict(OrderedDictWrapper):
         # contains _both_ script modules and non-script python-only modules
 
         # because script modules are subclassed in python and the
-        # C++ script::Module class will not hold references to them,
+        # C++ Module class will not hold references to them,
         # to ensure that you always get the same python value here
         # we store it in the python dict as well
         self._python_modules = python_dict
@@ -1504,7 +1504,7 @@ if _enabled:
 
     class ScriptModule(with_metaclass(ScriptMeta, Module)):
         """
-        ``ScriptModule``s wrap a C++ ``torch::jit::script::Module``. ``ScriptModule``s
+        ``ScriptModule``s wrap a C++ ``torch::jit::Module``. ``ScriptModule``s
         contain methods, attributes, parameters, and
         constants. These can be accessed the same as on a normal ``nn.Module``.
         """
@@ -1604,7 +1604,7 @@ if _enabled:
             control of how the RecursiveScriptModule instance is created).
 
             Arguments:
-                cpp_module:  The C++ script::Module that will hold the actual state of
+                cpp_module:  The C++ Module that will hold the actual state of
                              this RecursiveScriptModule instance.
                 init_fn:  Lambda that initializes the RecursiveScriptModule passed to it.
             """
@@ -1853,7 +1853,16 @@ class TracedModule(ScriptModule):
         # Copy a subset of `orig` to a temporary nn.Module.
         # This is a way to customize what will actually get compiled by create_script_module
         id_set = set()
-        tmp_module = Module()
+
+        # This allows us to preserve the original module's qualified name by defining a new
+        # type with the attribute _jit_override_qualname. In torch._jit_internal._qualified_name
+        # we have a special case that will look up this attribute to override whatever qualname
+        # we would get from the python type system
+        class QualnameWrapper(torch.nn.Module):
+            pass
+        QualnameWrapper._jit_override_qualname = torch._jit_internal._qualified_name(type(orig))
+
+        tmp_module = QualnameWrapper()
 
         def check_unique(param):
             if param in id_set:
@@ -1880,8 +1889,6 @@ class TracedModule(ScriptModule):
         for name, submodule in orig._modules.items():
             tmp_module._modules[name] = make_module(submodule, TracedModule, _compilation_unit=None)
 
-        # TODO: this way of doing it means we lose name information on the class,
-        # since the qualname is basically "nn.Module"
         script_module = torch.jit._recursive.create_script_module(tmp_module, lambda module: (), share_types=False)
 
         self.__dict__['_name'] = type(orig).__name__
