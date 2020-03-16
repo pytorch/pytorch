@@ -418,7 +418,10 @@ class ScaledDotProduct(Module):
         assert query.size(-1) == key.size(-1), "The head dimension of query must be equal to that of key"
         assert query.size(0) == key.size(0) and query.size(0) == value.size(0), \
             "The number of heads/batches for query/key/value must be equal."
+
         attn_output_weights = torch.matmul(query, key.transpose(-1, -2))
+        attn_output_weights = attn_output_weights * float(query.size(-1)) ** -0.5 
+
         if attn_mask is not None:
             attn_output_weights += attn_mask
         attn_output_weights = F.softmax(attn_output_weights,
