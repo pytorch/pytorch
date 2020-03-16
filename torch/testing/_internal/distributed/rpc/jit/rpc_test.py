@@ -2,6 +2,7 @@ import unittest
 from typing import Dict, Tuple
 
 import torch
+import torch.distributed as dist
 import torch.distributed.rpc as rpc
 from torch import Tensor
 from torch.testing._internal.dist_utils import dist_init, worker_name
@@ -566,6 +567,14 @@ class JitRpcTest(LocalRRefTest, JitRpcAsyncOpTest, RpcAgentTestFixture):
     def test_torchscript_functions_not_supported(self):
         dst_worker_name = worker_name((self.rank + 1) % self.world_size)
 
+        my_local_script_module = MyScriptModule(self.rank)
+
+        # It is not thread safe to instantiate MyScriptModule in multiple threads,
+        # wait for local MyScriptModule instantiation to finish, 
+        # otherwise it could instantiate MyScriptModule in parallel with 
+        # server thread in the below
+        dist.barrier()
+
         # rpc_sync still accepts script class and run it in
         # the same code path as python call.
         ret = rpc.rpc_sync(
@@ -578,6 +587,15 @@ class JitRpcTest(LocalRRefTest, JitRpcAsyncOpTest, RpcAgentTestFixture):
         ):
             ret = rpc.rpc_sync(
                 dst_worker_name, MyScriptModule, args=(self.rank,)
+            )
+
+        # Python 3.5 and Python 3.6 throw different error message, the only	
+        # common word can be greped is "pickle".	
+        with self.assertRaisesRegex(	
+            TypeError, "pickle"	
+        ):	
+            ret = rpc.rpc_async(	
+                dst_worker_name, my_local_script_module.forward, args=()	
             )
 
     @dist_init
