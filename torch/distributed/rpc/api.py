@@ -14,6 +14,7 @@ from . import (
     RpcBackendOptions,
     WorkerInfo,
     _cleanup_python_rpc_handler,
+    _delete_all_user_rrefs,
     _destroy_rref_context,
     _get_current_rpc_agent,
     _invoke_remote_builtin,
@@ -204,9 +205,11 @@ def shutdown(graceful=True):
 
     Arguments:
         graceful (bool): Whether to do a graceful shutdown or not. If True,
-                         this will block until all local and remote RPC
-                         processes have reached this method and wait for all
-                         outstanding work to complete.
+                         this will 1) wait until there is no pending system
+                         messages for ``UserRRef``s and delete them; 2) block
+                         until all local and remote RPC processes have reached
+                         this method and wait for all outstanding work to
+                         complete.
 
     Example::
         Make sure that ``MASTER_ADDRESS`` and ``MASTER_PORT`` are set properly
@@ -235,6 +238,7 @@ def shutdown(graceful=True):
     """
     if graceful:
         _wait_all_workers()
+        _delete_all_user_rrefs()
         _get_current_rpc_agent().join()
     try:
         # This raises a `TORCH_CHECK()` exception on RRef leak detected.
@@ -360,6 +364,12 @@ def remote(to, func, args=None, kwargs=None):
         value. Use the blocking API :meth:`torch.distributed.rpc.RRef.to_here`
         to retrieve the result value locally.
 
+    .. warning ::
+        Using GPU tensors as arguments or return values of ``func`` is not
+        supported since we don't support sending GPU tensors over the wire. You
+        need to explicitly copy GPU tensors to CPU before using them as
+        arguments or return values of ``func``.
+
     Example::
         Make sure that ``MASTER_ADDRESS`` and ``MASTER_PORT`` are set properly
         on both workers. Refer to :meth:`~torch.distributed.init_process_group`
@@ -482,6 +492,12 @@ def rpc_sync(to, func, args=None, kwargs=None):
     Returns:
         Returns the result of running ``func`` on ``args`` and ``kwargs``.
 
+    .. warning ::
+        Using GPU tensors as arguments or return values of ``func`` is not
+        supported since we don't support sending GPU tensors over the wire. You
+        need to explicitly copy GPU tensors to CPU before using them as
+        arguments or return values of ``func``.
+
     Example::
         Make sure that ``MASTER_ADDRESS`` and ``MASTER_PORT`` are set properly
         on both workers. Refer to :meth:`~torch.distributed.init_process_group`
@@ -546,6 +562,12 @@ def rpc_async(to, func, args=None, kwargs=None):
         Returns a Future object that can be waited
         on. When completed, the return value of ``func`` on ``args`` and
         ``kwargs`` can be retrieved from the Future object.
+
+    .. warning ::
+        Using GPU tensors as arguments or return values of ``func`` is not
+        supported since we don't support sending GPU tensors over the wire. You
+        need to explicitly copy GPU tensors to CPU before using them as
+        arguments or return values of ``func``.
 
     Example::
         Make sure that ``MASTER_ADDRESS`` and ``MASTER_PORT`` are set properly

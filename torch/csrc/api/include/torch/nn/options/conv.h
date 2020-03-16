@@ -140,13 +140,28 @@ struct ConvOptions {
   TORCH_ARG(padding_mode_t, padding_mode) = torch::kZeros;
 };
 
-/// `ConvOptions` specialized for 1-D convolution.
+/// `ConvOptions` specialized for the `Conv1d` module.
+///
+/// Example:
+/// ```
+/// Conv1d model(Conv1dOptions(3, 2, 3).stride(1).bias(false));
+/// ```
 using Conv1dOptions = ConvOptions<1>;
 
-/// `ConvOptions` specialized for 2-D convolution.
+/// `ConvOptions` specialized for the `Conv2d` module.
+///
+/// Example:
+/// ```
+/// Conv2d model(Conv2dOptions(3, 2, 3).stride(1).bias(false));
+/// ```
 using Conv2dOptions = ConvOptions<2>;
 
-/// `ConvOptions` specialized for 3-D convolution.
+/// `ConvOptions` specialized for the `Conv3d` module.
+///
+/// Example:
+/// ```
+/// Conv3d model(Conv3dOptions(3, 2, 3).stride(1).bias(false));
+/// ```
 using Conv3dOptions = ConvOptions<3>;
 
 // ============================================================================
@@ -179,13 +194,31 @@ struct ConvFuncOptions {
   TORCH_ARG(int64_t, groups) = 1;
 };
 
-/// `ConvFuncOptions` specialized for 1-D convolution.
+/// `ConvFuncOptions` specialized for `torch::nn::functional::conv1d`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::conv1d(x, weight, F::Conv1dFuncOptions().stride(1));
+/// ```
 using Conv1dFuncOptions = ConvFuncOptions<1>;
 
-/// `ConvFuncOptions` specialized for 2-D convolution.
+/// `ConvFuncOptions` specialized for `torch::nn::functional::conv2d`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::conv2d(x, weight, F::Conv2dFuncOptions().stride(1));
+/// ```
 using Conv2dFuncOptions = ConvFuncOptions<2>;
 
-/// `ConvFuncOptions` specialized for 3-D convolution.
+/// `ConvFuncOptions` specialized for `torch::nn::functional::conv3d`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::conv3d(x, weight, F::Conv3dFuncOptions().stride(1));
+/// ```
 using Conv3dFuncOptions = ConvFuncOptions<3>;
 
 } // namespace functional
@@ -254,13 +287,28 @@ struct ConvTransposeOptions {
   TORCH_ARG(padding_mode_t, padding_mode) = torch::kZeros;
 };
 
-/// `ConvTransposeOptions` specialized for 1-D convolution.
+/// `ConvTransposeOptions` specialized for the `ConvTranspose1d` module.
+///
+/// Example:
+/// ```
+/// ConvTranspose1d model(ConvTranspose1dOptions(3, 2, 3).stride(1).bias(false));
+/// ```
 using ConvTranspose1dOptions = ConvTransposeOptions<1>;
 
-/// `ConvTransposeOptions` specialized for 2-D convolution.
+/// `ConvTransposeOptions` specialized for the `ConvTranspose2d` module.
+///
+/// Example:
+/// ```
+/// ConvTranspose2d model(ConvTranspose2dOptions(3, 2, 3).stride(1).bias(false));
+/// ```
 using ConvTranspose2dOptions = ConvTransposeOptions<2>;
 
-/// `ConvTransposeOptions` specialized for 3-D convolution.
+/// `ConvTransposeOptions` specialized for the `ConvTranspose3d` module.
+///
+/// Example:
+/// ```
+/// ConvTranspose3d model(ConvTranspose3dOptions(2, 2, 2).stride(1).bias(false));
+/// ```
 using ConvTranspose3dOptions = ConvTransposeOptions<3>;
 
 // ============================================================================
@@ -296,13 +344,31 @@ struct ConvTransposeFuncOptions {
   TORCH_ARG(ExpandingArray<D>, dilation) = 1;
 };
 
-/// `ConvTransposeFuncOptions` specialized for 1-D convolution transpose.
+/// `ConvTransposeFuncOptions` specialized for `torch::nn::functional::conv_transpose1d`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::conv_transpose1d(x, weight, F::ConvTranspose1dFuncOptions().stride(1));
+/// ```
 using ConvTranspose1dFuncOptions = ConvTransposeFuncOptions<1>;
 
-/// `ConvTransposeFuncOptions` specialized for 2-D convolution transpose.
+/// `ConvTransposeFuncOptions` specialized for `torch::nn::functional::conv_transpose2d`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::conv_transpose2d(x, weight, F::ConvTranspose2dFuncOptions().stride(1));
+/// ```
 using ConvTranspose2dFuncOptions = ConvTransposeFuncOptions<2>;
 
-/// `ConvTransposeFuncOptions` specialized for 3-D convolution transpose.
+/// `ConvTransposeFuncOptions` specialized for `torch::nn::functional::conv_transpose3d`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::conv_transpose3d(x, weight, F::ConvTranspose3dFuncOptions().stride(1));
+/// ```
 using ConvTranspose3dFuncOptions = ConvTransposeFuncOptions<3>;
 
 } // namespace functional

@@ -7,11 +7,8 @@
 namespace torch {
 namespace jit {
 
-namespace script {
 struct Method;
 struct Module;
-} // namespace script
-
 struct PythonPrintImpl;
 
 struct TORCH_API PythonPrint {
