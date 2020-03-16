@@ -403,6 +403,21 @@ class ScaledDotProduct(Module):
         self.dropout = dropout
 
     def forward(self, query, key, value, attn_mask=None):
+        r"""Scaled Dot Product
+
+        Args:
+            query, key, value: map a query and a set of key-value pairs to an output.
+
+        Shape:
+            - query: :math:`(N, L, E)`
+            - key: :math:`(N, S, E)`
+            - value: :math:`(N, S, E)`
+            where L is the target sequence length, S is the source sequence length, N is the batch size,
+              E is the head dimension.
+        """
+        assert query.size(-1) == key.size(-1), "The head dimension of query must be equal to that of key"
+        assert query.size(0) == key.size(0) and query.size(0) == value.size(0), \
+            "The number of heads/batches for query/key/value must be equal."
         attn_output_weights = torch.matmul(query, key.transpose(-1, -2))
         if attn_mask is not None:
             attn_output_weights += attn_mask
