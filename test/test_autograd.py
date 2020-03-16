@@ -4820,7 +4820,7 @@ class TestMultithreadAutograd(TestCase):
         self._run_py_multithread_fn(train_fn_no_retain_graph, (y_no_retain,), num_threads=5)
         # at least one thread will be success in this case, all other threads should raise
         # with the error that throw to user to recommend them specify retain_graph=True
-        self.assertTrue(success_vs_raises[0] > 1)
+        self.assertTrue(success_vs_raises[0] >= 1)
 
         # multiple backward with python threads, no error with retain_graph=True
         def train_fn_retain_graph(x):

@@ -1032,7 +1032,7 @@ auto Engine::start_device_threads() -> void {
   // allocate one thread for every GPU device (but colocate GPUs of different
   // types), and pre-allocate the device_ready_queues_ to ensure safe reading on it.
   device_ready_queues_ = std::vector<std::shared_ptr<ReadyQueue>>(num_devices);
-  for (auto& queue : device_ready_queues_)	{
+  for (auto& queue : device_ready_queues_)    {
     queue.reset(new ReadyQueue());
   }
 
