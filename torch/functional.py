@@ -196,7 +196,7 @@ def lu_unpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
             # product(*map(lambda x: list(range(x)), shape[:-2])) when issue 33781 is fixed
             indices = _indices_product(shape[:-2])
             for idx in indices:
-                final_order = list(range(m))
+                final_order = [i for i in range(m)]  # noqa: C416 TODO: rewrite as list(range(m))
                 for k, j in enumerate(_index_tensor_with_indices_list(LU_pivots_zero_idx, idx)):
                     final_order[k], final_order[j] = final_order[j], final_order[k]
                 # TODO: remove _index_tensor_with_indices_list when TorchScript supports indexing Tensor with list
@@ -204,7 +204,7 @@ def lu_unpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
                 p_idx.copy_(p_idx.index_select(1, torch.as_tensor(final_order, device=LU_pivots.device)))
         else:
             P = torch.eye(m, device=LU_data.device, dtype=LU_data.dtype)
-            final_order = list(range(m))
+            final_order = [i for i in range(m)]  # noqa: C416 TODO: rewrite as list(range(m))
             for k, j, in enumerate(LU_pivots_zero_idx):
                 final_order[k], final_order[j] = final_order[j], final_order[k]
             P = P.index_select(1, torch.as_tensor(final_order, device=LU_pivots.device))
@@ -290,7 +290,7 @@ Examples::
     return _VF.einsum(equation, operands)
 
 
-def meshgrid(*tensors, **kwargs):
+def meshgrid(*tensors):
     r"""Take :math:`N` tensors, each of which can be either scalar or 1-dimensional
 vector, and create :math:`N` N-dimensional grids, where the :math:`i` :sup:`th` grid is defined by
 expanding the :math:`i` :sup:`th` input over dimensions defined by other inputs.
@@ -321,9 +321,7 @@ expanding the :math:`i` :sup:`th` input over dimensions defined by other inputs.
     """
     if not torch.jit.is_scripting():
         if any(type(t) is not Tensor for t in tensors) and has_torch_function(tensors):
-            return handle_torch_function(meshgrid, tensors, *tensors, **kwargs)
-    if kwargs:
-        raise TypeError("meshgrid() got an unexpected keyword argument '%s'" % (list(kwargs)[0],))
+            return handle_torch_function(meshgrid, tensors, *tensors)
     if len(tensors) == 1 and isinstance(tensors[0], (list, tuple)):
         # the old interface of passing the operands as one list argument
         tensors = tensors[0]
@@ -854,7 +852,7 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
                 raise ValueError("dtype argument is not supported in frobenius norm")
 
             if _dim is None:
-                _dim = list(range(ndim))
+                _dim = [i for i in range(ndim)]  # noqa: C416 TODO: rewrite as list(range(m))
             if out is None:
                 return _VF.frobenius_norm(input, _dim, keepdim=keepdim)
             else:
@@ -875,7 +873,7 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
         raise RuntimeError("only valid string values are 'fro' and 'nuc', found {}".format(p))
     else:
         if _dim is None:
-            _dim = list(range(ndim))
+            _dim = [i for i in range(ndim)]  # noqa: C416 TODO: rewrite as list(range(m))
 
         if out is None:
             if dtype is None:

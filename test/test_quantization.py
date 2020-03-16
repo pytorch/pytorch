@@ -573,9 +573,12 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
         checkQuantized(model)
 
     @unittest.skip("temporarily disable the test")
-    @given(qengine=st.sampled_from(("qnnpack", "fbgemm")))
+    @given(qengine=st.sampled_from(("fbgemm",)))
     def test_quantized_rnn(self, qengine):
         d_in, d_hid = 2, 2
+
+        # TODO: qlinear_prepack_fp16 currently doesn't support QNNPACK
+        # re-add "qnnpack" to the engine set when this is supported
 
         with override_quantized_engine(qengine):
             model = LSTMDynamicModel().eval()
@@ -896,8 +899,8 @@ class GraphModePostTrainingQuantTest(QuantizationTestCase):
         eager mode and graph mode
         """
         # eager mode
-        annotated_linear_model = AnnotatedSingleLayerLinearModel()
-        linear_model = SingleLayerLinearModel()
+        annotated_linear_model = AnnotatedSingleLayerLinearModel().eval()
+        linear_model = SingleLayerLinearModel().eval()
         # copy the weight from eager mode so that we can
         # compare the result of the two quantized models later
         linear_model.fc1.weight = torch.nn.Parameter(annotated_linear_model.fc1.module.weight.detach())
@@ -1011,10 +1014,10 @@ class GraphModePostTrainingQuantTest(QuantizationTestCase):
 
     def test_nested(self):
         # Eager mode
-        eager_model = AnnotatedNestedModel()
+        eager_model = AnnotatedNestedModel().eval()
 
         # Graph mode
-        script_model = NestedModel()
+        script_model = NestedModel().eval()
         # Copy weights for eager_model
         script_model.sub1.fc.weight = torch.nn.Parameter(eager_model.sub1.fc.weight.detach())
         script_model.sub1.fc.bias = torch.nn.Parameter(eager_model.sub1.fc.bias.detach())

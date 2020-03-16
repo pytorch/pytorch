@@ -11,7 +11,6 @@
 
 namespace torch {
 namespace jit {
-namespace script {
 
 static ObjectPtr create_module_object(
     c10::QualifiedName class_name,
@@ -389,14 +388,13 @@ void Module::dump(
             << std::endl;
 }
 
-} // namespace script
 } // namespace jit
 } // namespace torch
 
 namespace c10 {
 
-torch::jit::script::Module IValue::toModule() const {
-  return torch::jit::script::Module(toObject());
+torch::jit::Module IValue::toModule() const {
+  return torch::jit::Module(toObject());
 }
 bool IValue::isModule() const {
   return isObject() && toObjectRef().type()->is_module();
