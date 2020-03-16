@@ -5,6 +5,30 @@
 using namespace torch::jit;
 using namespace torch::jit::tensorexpr;
 
+namespace torch {
+namespace jit {
+namespace tensorexpr {
+
+static int te_cuda_pointwise_loop_levels = -1;
+static int te_cuda_pointwise_block_count = -1;
+static int te_cuda_pointwise_block_size = -1;
+
+int& GetTECudaPointwiseLoopLevels() {
+  return te_cuda_pointwise_loop_levels;
+}
+
+int& GetTECudaPointwiseBlockCount() {
+  return te_cuda_pointwise_block_count;
+}
+
+int& GetTECudaPointwiseBlockSize() {
+  return te_cuda_pointwise_block_size;
+}
+
+} // namespace tensorexpr
+} // namespace jit
+} // namespace torch
+
 static at::ScalarType tensorType(Tensor* t) {
   return static_cast<at::ScalarType>(t->body()->dtype().scalar_type());
 }
@@ -883,11 +907,95 @@ Tensor* TensorExprKernel::ComputeValue(const torch::jit::Value* v) {
 void TensorExprKernel::LowerToBackend(BackendType backend_type) {
   std::vector<Tensor*> tensor_outputs(tensor_outputs_);
 
+  if (backend_type == BackendType::kCudaCodeGen) {
+    for (size_t tensor_idx = 0; tensor_idx < tensor_outputs_.size();
+         tensor_idx++) {
+      Tensor* tensor = tensor_outputs_[tensor_idx];
+      ExprHandle total_count = ExprHandle(tensor->dim(0));
+      for (int i = 1; i < tensor->ndim(); i++) {
+        const IntImm* total_count_i = total_count.AsNode<IntImm>();
+        const IntImm* tensor_dim_i =
+            dynamic_cast<const IntImm*>(tensor->dim(i));
+        if (total_count_i && tensor_dim_i) {
+          // TODO: switch to real constant folding when it is available.
+          total_count =
+              ExprHandle(total_count_i->value() * tensor_dim_i->value());
+        } else {
+          total_count = total_count * ExprHandle(tensor->dim(i));
+        }
+      }
+      // Flatten the index for GPU kernels.
+      // TODO: move this to fusing axis when it is ready.
+      Tensor* new_out = Compute(
+          tensor->func_var()->name_hint() + "_flat",
+          {total_count},
+          [tensor](const VarHandle& index) -> ExprHandle {
+            std::vector<ExprHandle> dims;
+            ExprHandle value = index;
+            for (int i = tensor->ndim() - 1; i >= 0; i--) {
+              ExprHandle idx = value;
+              if (i > 0) {
+                idx = Mod::make(value, ExprHandle(tensor->dim(i)));
+              }
+              dims.push_back(idx);
+              value = value / ExprHandle(tensor->dim(i));
+            }
+            std::reverse(dims.begin(), dims.end());
+            return tensor->call(dims);
+          });
+      tensor_outputs[tensor_idx] = new_out;
+    }
+  }
+
   torch::jit::tensorexpr::schedule::LoopNest l(tensor_outputs);
 
   // Compute non-output tensors_ inline
   for (auto& p : tensors_) {
     l.ComputeInline(l.getLoopBodyFor(p.second));
+  }
+  if (backend_type == kCudaCodeGen) {
+    for (size_t i = 0; i < tensor_outputs_.size(); i++) {
+      l.ComputeInline(l.getLoopBodyFor(tensor_outputs_[i]));
+
+      Tensor* tensor = tensor_outputs[i];
+      const Var* index = tensor->arg(0);
+      int loop_levels = GetTECudaPointwiseLoopLevels();
+      const int kDefaultLoopLevels = 2;
+      loop_levels = (loop_levels > 0) ? loop_levels : kDefaultLoopLevels;
+      int block_count = GetTECudaPointwiseBlockCount();
+      int block_size = GetTECudaPointwiseBlockSize();
+
+      if (loop_levels == 2) {
+        Stmt* outer;
+        Stmt* inner;
+        const int kDefaultBlockSize = 512;
+        if (block_size < 0) {
+          block_size = kDefaultBlockSize;
+        }
+        std::vector<Stmt*> loops = l.getLoopStmtsFor(tensor);
+        l.SplitWithMask(loops[0], block_size, &outer, &inner);
+        l.SetGPUBlockIndex(outer, 0);
+        l.SetGPUThreadIndex(inner, 0);
+      } else if (loop_levels == 3) {
+        Stmt* outer;
+        Stmt* inner;
+        Stmt* inner_1;
+        Stmt* inner_2;
+        // TODO: change the number of microprocessors
+        const int kDefaultBlockCount = 1280;
+        const int kDefaultBlockSize = 256;
+        block_count = (block_count > 0) ? block_count : kDefaultBlockCount;
+        block_size = (block_size > 0) ? block_size : kDefaultBlockSize;
+        std::vector<Stmt*> loops = l.getLoopStmtsFor(tensor);
+        l.SplitWithMask(loops[0], block_count * block_size, &outer, &inner);
+        l.SplitWithMask(inner, block_size, &inner_1, &inner_2);
+        l.SetGPUBlockIndex(inner_1, 0);
+        l.SetGPUThreadIndex(inner_2, 0);
+      } else {
+        throw std::runtime_error(
+            "Invalid loop-level: " + std::to_string(loop_levels));
+      }
+    }
   }
 
   l.ApplyInlines();
@@ -911,6 +1019,9 @@ void TensorExprKernel::LowerToBackend(BackendType backend_type) {
   // Generate code.
   std::string codegen_name;
   switch (backend_type_) {
+    case kCudaCodeGen:
+      codegen_name = "cuda_codegen";
+      break;
     case kSimpleIREval:
       codegen_name = "simple_ir_eval";
       break;
@@ -933,7 +1044,9 @@ void TensorExprKernel::PickAndCheckBackendType(
     throw std::runtime_error("No tensor inputs");
   }();
   BackendType backend_type = BackendType::kUninitialized;
-  if (device.type() == at::kCPU) {
+  if (device.type() == at::kCUDA) {
+    backend_type = kCudaCodeGen;
+  } else if (device.type() == at::kCPU) {
     backend_type = kSimpleIREval;
   } else {
     throw std::runtime_error("Invalid device type");
@@ -956,6 +1069,7 @@ void TensorExprKernel::CodeGenRun(
     const std::vector<CodeGen::CallArg>& run_args) {
   switch (backend_type_) {
     case kSimpleIREval:
+    case kCudaCodeGen:
       codegen_->call(run_args);
       break;
     default:
