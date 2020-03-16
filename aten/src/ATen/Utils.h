@@ -146,7 +146,7 @@ inline int64_t prod_intlist(ArrayRef<int64_t> list) {
  */
 template <typename T>
 static inline T* get_generator_or_default(Generator expr, Generator defaultValue) {
-  T* result = static_cast<T*>(expr ? expr.get() : defaultValue.get());
+  T* result = static_cast<T*>(expr.defined() ? expr.get() : defaultValue.get());
   if (result == nullptr) {
     AT_ERROR("Expected a '", T::device_type(), "' device type for generator but found 'nullptr'");
   }

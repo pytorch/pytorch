@@ -64,7 +64,7 @@ namespace detail {
       }
     }
     void operator()(at::Generator gen) {
-      if (gen) {
+      if (gen.defined()) {
         ts = ts | gen->key_set();
       }
     }

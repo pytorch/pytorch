@@ -223,18 +223,18 @@ bool THPGenerator_init(PyObject *module)
 }
 
 void set_pyobj(const Generator& self, PyObject* pyobj) {
-  TORCH_CHECK(self, "cannot call set_pyobj() on undefined generator");
+  TORCH_CHECK(self.defined(), "cannot call set_pyobj() on undefined generator");
   self->set_pyobj(pyobj);
 }
 
 PyObject* pyobj(const Generator& self) {
-  TORCH_CHECK(self, "cannot call pyobj() on undefined generator");
+  TORCH_CHECK(self.defined(), "cannot call pyobj() on undefined generator");
   return self->pyobj();
 }
 
 PyObject * THPGenerator_Wrap(Generator gen)
 {
-  if (!gen) {
+  if (!gen.defined()) {
     Py_RETURN_NONE;
   }
 
