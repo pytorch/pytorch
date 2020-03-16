@@ -273,6 +273,7 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 ]]; t
   test_torchvision
   test_python_nn
 elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 ]]; then
+  test_torchvision
   test_python_all_except_nn
   test_aten
   test_libtorch
