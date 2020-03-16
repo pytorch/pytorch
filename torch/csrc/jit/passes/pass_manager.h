@@ -38,6 +38,8 @@ TORCH_API std::vector<std::pair<GraphPass, GraphPassNameType>>& getCustomPrePass
 
 TORCH_API GraphPassNameType registerPostPass(GraphPass p);
 TORCH_API GraphPassNameType registerPrePass(GraphPass p);
+//Default to registerPostPass
+TORCH_API GraphPassNameType registerPass(GraphPass p);
 
 // Look up pass by name passed in, remove it from registered passes
 TORCH_API void clearPostPass(GraphPassNameType p);

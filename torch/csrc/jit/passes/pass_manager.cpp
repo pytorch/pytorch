@@ -18,6 +18,10 @@ GraphPassNameType registerPostPass(GraphPass p) {
   return graphPassID++;
 }
 
+GraphPassNameType registerPass(GraphPass p){
+  return registerPostPass(std::move(p));
+}
+
 GraphPassNameType registerPrePass(GraphPass p) {
   getCustomPrePasses().emplace_back(GraphPassEntry{std::move(p), graphPassID});
   return graphPassID++;
