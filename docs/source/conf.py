@@ -65,7 +65,7 @@ autosectionlabel_prefix_document = True
 #
 #
 
-katex_prerender = False
+katex_prerender = True
 
 napoleon_use_ivar = True
 
