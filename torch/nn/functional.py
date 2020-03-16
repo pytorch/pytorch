@@ -3662,6 +3662,9 @@ def multi_head_attention_forward(query,                           # type: Tensor
     assert embed_dim == embed_dim_to_check
     assert key.size() == value.size()
 
+    head_dim = embed_dim // num_heads
+    assert head_dim * num_heads == embed_dim, "embed_dim must be divisible by num_heads"
+
     if not use_separate_proj_weight:
         if torch.equal(query, key) and torch.equal(key, value):
             # self-attention
@@ -3740,7 +3743,7 @@ def multi_head_attention_forward(query,                           # type: Tensor
         v = static_v
 
     attn_output, attn_output_weights = scaled_dot_product_attention(
-        q, v, k, add_zero_attn, dropout_p, training, key_padding_mask, attn_mask
+        q, k, v, num_heads, add_zero_attn, dropout_p, training, key_padding_mask, attn_mask
     )
 
     assert list(attn_output.size()) == [bsz * num_heads, tgt_len, head_dim]
@@ -3748,7 +3751,7 @@ def multi_head_attention_forward(query,                           # type: Tensor
     mha_output = multi_head_attention_out_projection(attn_output, num_heads, out_proj_weight, out_proj_bias)
     if need_weights:
         # average attention weights over heads
-        attn_output_weights = attn_output_weights.view(bsz, num_heads, tgt_len, src_len)
+        attn_output_weights = attn_output_weights.view(bsz, num_heads, tgt_len, -1)
         return mha_output, attn_output_weights.sum(dim=1) / num_heads
     else:
         return mha_output, None
@@ -3848,7 +3851,7 @@ def scaled_dot_product_attention(q,                     # type: Tensor
     src_len = k.size(1)
 
     # Scale q
-    q = q * float(head_dim) ** -0.5
+    q = q * (float(head_dim) ** -0.5)
     if attn_mask is not None:
         if attn_mask.dim() == 2:
             attn_mask = attn_mask.unsqueeze(0)
