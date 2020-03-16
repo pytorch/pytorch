@@ -3776,7 +3776,7 @@ def multi_head_attention_forward(query,                           # type: Tensor
             q_proj_weight = in_proj_weight[:embed_dim, :]
             q_proj_bias = in_proj_bias[:embed_dim] if in_proj_bias is not None else None
             q = multi_head_attention_in_projection(query, num_heads, q_proj_weight, q_proj_bias)
-            
+
             if key is None:
                 k = None
                 v = None
