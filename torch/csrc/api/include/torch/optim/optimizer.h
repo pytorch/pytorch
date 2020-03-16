@@ -194,13 +194,15 @@ TORCH_API serialize::InputArchive& operator>>(
     OptimizerBase& optimizer);
 } // namespace detail
 
-/// Optimizer that defines a required `step()` method that takes no arguments
-/// and produces no values. The only side effect is that parameters are updated
+/// Optimizer that can optionally take a loss function in `step()` method
+/// and returns the loss value. The only side effect is that parameters are updated
 /// according to the concrete optimization algorithm.
 class Optimizer : public detail::OptimizerBase {
  public:
-  using detail::OptimizerBase::OptimizerBase;
-  virtual void step() = 0;
+   /// A loss function closure, which is expected to return the loss value.
+   using LossClosure = std::function<Tensor()>;
+   using detail::OptimizerBase::OptimizerBase;
+   virtual Tensor step(LossClosure closure = nullptr) = 0;
 };
 
 /// Optimizer that requires the loss function to be supplied to the `step()`
