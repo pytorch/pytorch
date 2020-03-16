@@ -38,15 +38,14 @@ TORCH_API std::vector<std::pair<GraphPass, GraphPassNameType>>& getCustomPrePass
 
 TORCH_API GraphPassNameType registerPostPass(GraphPass p);
 TORCH_API GraphPassNameType registerPrePass(GraphPass p);
-using RegisterPass = RegisterPostPass;
 
 // Look up pass by name passed in, remove it from registered passes
-TORCH_API void ClearPostPass(GraphPassNameType p);
-TORCH_API void ClearPrePass(GraphPassNameType p);
+TORCH_API void clearPostPass(GraphPassNameType p);
+TORCH_API void clearPrePass(GraphPassNameType p);
 
 // Remove all passes
-TORCH_API void ClearAllPostPasses();
-TORCH_API void ClearAllPrePasses();
+TORCH_API void clearAllPostPasses();
+TORCH_API void clearAllPrePasses();
 
 /*
  * PassManager is a wrapper on the register/clear PostPass functions above. It

@@ -23,7 +23,7 @@ GraphPassNameType registerPrePass(GraphPass p) {
   return graphPassID++;
 }
 
-void ClearPostPass(GraphPassNameType pid) {
+void clearPostPass(GraphPassNameType pid) {
   auto& passes = getCustomPostPasses();
   auto it = passes.begin();
   for (; it != passes.end(); it++) {
@@ -34,7 +34,7 @@ void ClearPostPass(GraphPassNameType pid) {
     passes.erase(it);
 }
 
-void ClearPrePass(GraphPassNameType pid) {
+void clearPrePass(GraphPassNameType pid) {
   auto& passes = getCustomPrePasses();
   auto it = passes.begin();
   for (; it != passes.end(); it++) {
@@ -45,12 +45,12 @@ void ClearPrePass(GraphPassNameType pid) {
     passes.erase(it);
 }
 
-void ClearAllPostPasses() {
+void clearAllPostPasses() {
   auto& passes = getCustomPostPasses();
   passes.erase(passes.begin(), passes.end());
 }
 
-void ClearAllPrePasses() {
+void clearAllPrePasses() {
   auto& passes = getCustomPrePasses();
   passes.erase(passes.begin(), passes.end());
 }
@@ -78,7 +78,7 @@ void PassManager<DerivedType>::registerPass(GraphPass pass) {
   if (!isRegistered()) {
     // If we don't already have a registered pass, register pass
     // hold on to its name, change isRegistered to true
-    name(RegisterPostPass::registerPostPass(std::move(pass)), true);
+    name(registerPostPass(std::move(pass)), true);
     isRegistered(true);
   }
 }
@@ -87,8 +87,8 @@ template <typename DerivedType>
 void PassManager<DerivedType>::clearPass() {
   // If the pass is registered, clear it and change isRegistered to false.
   if (isRegistered()) {
-    ClearPostPass pass(name());
-    isRegistered(true);
+    clearPostPass(name());
+    //isRegistered(true);
   }
 }
 
