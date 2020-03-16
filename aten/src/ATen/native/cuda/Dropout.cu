@@ -283,7 +283,7 @@ fused_dropout_cuda(const Tensor& self, double p, Generator * gen_){
       }
    });
   }
-  THCudaCheck(cudaGetLastError());
+  AT_CUDA_CHECK(cudaGetLastError());
   return std::tuple<Tensor,Tensor>(ret, mask);
 }
 
