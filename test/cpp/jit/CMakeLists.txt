@@ -39,7 +39,7 @@ set(JIT_TEST_SRCS
     ${JIT_TEST_ROOT}/torch_python_test.cpp
     )
 
-if (USE_CUDA)
+if (USE_CUDA AND NOT USE_ROCM)
   list (APPEND JIT_TEST_SRCS
       ${JIT_TEST_ROOT}/test_gpu_fusion.cpp
   )

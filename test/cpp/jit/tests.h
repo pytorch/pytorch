@@ -89,7 +89,7 @@ namespace jit {
   _(LiteInterpreterParams)             \
   _(LiteInterpreterSetState)
 
-#ifdef USE_CUDA
+#if defined(USE_CUDA) && !defined(USE_ROCM)
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \
   _(CompleteArgumentSpec)       \

@@ -18,6 +18,9 @@ struct TORCH_API RegisterCudaFuseGraph : public PassManager{
     TORCH_CHECK(
         at::globalContext().hasCUDA(),
         "CudaFuseGraph requires pytorch built with CUDA");
+      TORCH_CHECK(
+        !at::globalContext().hasHIP(),
+        "CudaFuseGraph is not supported for HIP.");
     PassManager::registerPass(CudaFuseGraph);
   }
 };
