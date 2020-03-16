@@ -50,17 +50,17 @@
 
 namespace at {
 
-struct Generator {
+struct CAFFE2_API Generator {
   Generator() {}
 
-  Generator(c10::GeneratorImpl* g) { this->impl = std::shared_ptr<c10::GeneratorImpl>(g); }
-  Generator& operator=(c10::GeneratorImpl* g) { this->impl = std::shared_ptr<c10::GeneratorImpl>(g); return *this; }
+  Generator(c10::GeneratorImpl* g) { this->impl_ = std::shared_ptr<c10::GeneratorImpl>(g); }
+  Generator& operator=(c10::GeneratorImpl* g) { this->impl_ = std::shared_ptr<c10::GeneratorImpl>(g); return *this; }
 
-  Generator(std::shared_ptr<c10::GeneratorImpl> g) { this->impl = g; }
-  Generator& operator=(std::shared_ptr<c10::GeneratorImpl> g) { this->impl = g; return *this; }
+  Generator(std::shared_ptr<c10::GeneratorImpl> g) { this->impl_ = g; }
+  Generator& operator=(std::shared_ptr<c10::GeneratorImpl> g) { this->impl_ = g; return *this; }
 
   bool operator==(const Generator& that) const {
-    return (!(this->impl) && !(that.impl)) || (this->impl == that.impl);
+    return (!(this->impl_) && !(that.impl_)) || (this->impl_ == that.impl_);
   }
 
   bool operator!=(const Generator& that) const {
@@ -68,26 +68,26 @@ struct Generator {
   }
 
   bool operator==(c10::GeneratorImpl* g) const {
-    return this->impl && this->impl.get() == g;
+    return this->impl_ && this->impl_.get() == g;
   }
 
   bool operator!=(c10::GeneratorImpl* g) const {
     return !((*this) == g);
   }
 
-  operator bool() const { return (bool)impl; }
+  bool defined() const {
+    return (bool)impl_;
+  }
 
-  c10::GeneratorImpl* operator->() { return impl.get(); }
+  c10::GeneratorImpl* operator->() const { return impl_.get(); }
 
-  const c10::GeneratorImpl* operator->() const { return impl.get(); }
-
-  c10::GeneratorImpl* get() { return impl.get(); }
+  c10::GeneratorImpl* get() const { return impl_.get(); }
 
   template<typename T>
-  T* get() { return dynamic_cast<T*>(impl.get()); }
+  T* get() { return dynamic_cast<T*>(impl_.get()); }
 
  private:
-  std::shared_ptr<c10::GeneratorImpl> impl;
+  std::shared_ptr<c10::GeneratorImpl> impl_;
 };
 
 template<class Impl, class... Args>

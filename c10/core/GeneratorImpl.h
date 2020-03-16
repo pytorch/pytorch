@@ -53,7 +53,7 @@ namespace c10 {
 // with good distribution of 0s and 1s in bit representation
 constexpr uint64_t default_rng_seed_val = 67280421310721;
 
-struct CAFFE2_API GeneratorImpl {
+struct C10_API GeneratorImpl {
   // Constructors
   GeneratorImpl(Device device_in, DispatchKeySet key_set);
 

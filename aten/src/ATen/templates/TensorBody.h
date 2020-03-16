@@ -17,14 +17,12 @@
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/core/NamedTensor.h>
-#include <c10/core/GeneratorImpl.h>
 
 namespace caffe2 {
 class Tensor;
 }
 namespace c10{
 struct TensorOptions;
-struct GeneratorImpl;
 }
 namespace at {
 struct Generator;
