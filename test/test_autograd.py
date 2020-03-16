@@ -3992,6 +3992,28 @@ for shape in [(1,), ()]:
             with self.assertRaisesRegex(RuntimeError, "call out-of-place version"):
                 b.backward(torch.ones(2, device=device))
 
+    def test_custom_function_local_inplace(self):
+        class MyFn(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, inp, inplace):
+                view = inp.clone()[:3]
+                if inplace:
+                    view += 2
+                return view
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad, None
+
+        base = torch.rand(10, requires_grad=True)
+
+        foo = MyFn.apply(base, False)
+        self.assertEqual(foo.grad_fn.__class__.__name__, "MyFnBackward")
+
+        foo = MyFn.apply(base, True)
+        self.assertEqual(foo.grad_fn.__class__.__name__, "MyFnBackward")
+
+
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):
         shape = (shape,)
