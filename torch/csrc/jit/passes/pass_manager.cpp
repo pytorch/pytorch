@@ -3,11 +3,11 @@
 namespace torch {
 namespace jit {
 
-RegisterPostPass::RegisterPostPass(GraphPass p){
+RegisterPostPass::RegisterPostPass(GraphPass p) {
   registerPostPass(p);
 }
 
-RegisterPrePass::RegisterPrePass(GraphPass p){
+RegisterPrePass::RegisterPrePass(GraphPass p) {
   registerPrePass(p);
 }
 
@@ -63,21 +63,22 @@ ClearAllPrePasses::ClearAllPrePasses() {
   passes.erase(passes.begin(), passes.end());
 }
 
-GraphPassNameType PassManager::name(GraphPassNameType PassName, bool set){
+GraphPassNameType PassManager::name(GraphPassNameType PassName, bool set) {
   static GraphPassNameType name = 0;
-  if(set)
+  if (set)
     name = PassName;
   return name;
 }
 
-bool PassManager::flipRegistered(bool flip){
+bool PassManager::flipRegistered(bool flip) {
   static bool val = false;
-  if(flip) val = !val;
+  if (flip)
+    val = !val;
   return val;
 }
 void PassManager::registerPass(GraphPass pass) {
   if (!flipRegistered()) {
-    name( RegisterPostPass::registerPostPass(pass), true );
+    name(RegisterPostPass::registerPostPass(pass), true);
     flipRegistered(true);
   }
 }
@@ -88,7 +89,6 @@ void PassManager::clearPass() {
     flipRegistered(true);
   }
 }
-
 
 } // namespace jit
 } // namespace torch

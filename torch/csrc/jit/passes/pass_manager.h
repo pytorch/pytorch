@@ -26,8 +26,10 @@ using GraphPassNameType = unsigned int;
 using GraphPassEntry = std::pair<GraphPass, GraphPassNameType>;
 static GraphPassNameType graphPassID = 1;
 
-TORCH_API std::vector<std::pair<GraphPass, GraphPassNameType> >& getCustomPostPasses();
-TORCH_API std::vector<std::pair<GraphPass, GraphPassNameType> >& getCustomPrePasses();
+TORCH_API std::vector<std::pair<GraphPass, GraphPassNameType>>&
+getCustomPostPasses();
+TORCH_API std::vector<std::pair<GraphPass, GraphPassNameType>>&
+getCustomPrePasses();
 
 struct TORCH_API RegisterPostPass {
   // Back-compat
@@ -62,14 +64,18 @@ struct TORCH_API ClearAllPrePasses {
 // Mechanism to be able to remove a registered pass
 // Each pass needs to inherit this class as it's based on
 // static members.
-struct TORCH_API PassManager{
-private:
+struct TORCH_API PassManager {
+ private:
   // Force class to be abstract
   virtual void abstract() = 0;
-protected:
-  static GraphPassNameType name(GraphPassNameType PassName = 0, bool set = false);
+
+ protected:
+  static GraphPassNameType name(
+      GraphPassNameType PassName = 0,
+      bool set = false);
   static bool flipRegistered(bool flip = false);
-public:
+
+ public:
   static void registerPass(GraphPass p);
   static void clearPass();
 };

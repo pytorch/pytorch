@@ -12,8 +12,8 @@ struct Graph;
 // Run TensorExpressions-based fuser.
 TORCH_API void fuseTensorExprs(std::shared_ptr<Graph>& graph);
 
-struct TORCH_API RegisterTensorExprFuser : public PassManager{
-  static void registerPass(){
+struct TORCH_API RegisterTensorExprFuser : public PassManager {
+  static void registerPass() {
     PassManager::registerPass(fuseTensorExprs);
   }
 };

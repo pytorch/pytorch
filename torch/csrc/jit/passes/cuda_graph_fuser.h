@@ -12,8 +12,8 @@ namespace jit {
 TORCH_API void CudaFuseGraph(std::shared_ptr<Graph>& graph);
 
 // Register CudaFuseGraph in custom passes
-struct TORCH_API RegisterCudaFuseGraph : public PassManager{
-  static void registerPass(){
+struct TORCH_API RegisterCudaFuseGraph : public PassManager {
+  static void registerPass() {
     PassManager::registerPass(CudaFuseGraph);
   }
 };
