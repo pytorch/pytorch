@@ -14135,6 +14135,25 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                          torch.tensor(expectedOutput, dtype=dtype, device=device), precision_4dps)
 
     @onlyCPU
+    @dtypes(torch.float, torch.double)
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_hardsigmoid(self, device, dtype):
+        inputValues = [-1000, -4, -3, -2, 0, 2, 3, 4, 1000]
+        expectedOutput = np.minimum(np.maximum((np.add(inputValues, 3)), 0), 6) / 6.0
+
+        inputTensor = torch.tensor(inputValues, dtype=dtype, device=device)
+        precision_4dps = 0.0002
+
+        # normal
+        self.assertEqual(torch.nn.functional.hardsigmoid(inputTensor),
+                         torch.tensor(expectedOutput, dtype=dtype, device=device), precision_4dps)
+
+        # inplace
+        inputTensorCpy = inputTensor.clone().detach()
+        self.assertEqual(torch.nn.functional.hardsigmoid(inputTensorCpy, inplace=True),
+                         torch.tensor(expectedOutput, dtype=dtype, device=device), precision_4dps)
+
+    @onlyCPU
     @dtypes(torch.float)
     def test_diag_embed(self, device, dtype):
         x = torch.arange(3 * 4, dtype=dtype, device=device).view(3, 4)
