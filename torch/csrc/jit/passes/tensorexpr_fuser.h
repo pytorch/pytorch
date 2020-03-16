@@ -18,5 +18,7 @@ struct TORCH_API RegisterTensorExprFuser : public PassManager{
   }
 };
 
+TORCH_API void setTensorExprFuserEnabled(bool val);
+
 } // namespace jit
 } // namespace torch
