@@ -1,8 +1,10 @@
 #include <torch/csrc/jit/tensorexpr/kernel.h>
+
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/constant_folder.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
+#include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/schedule.h>
 
 using namespace torch::jit;
@@ -951,8 +953,7 @@ void TensorExprKernel::lowerToBackend(BackendType backendType) {
   std::vector<Tensor*> tensorOutputs(tensorOutputs_);
 
   if (backendType == BackendType::kCudaCodeGen) {
-    for (size_t tensorIdx = 0; tensorIdx < tensorOutputs_.size();
-         tensorIdx++) {
+    for (size_t tensorIdx = 0; tensorIdx < tensorOutputs_.size(); tensorIdx++) {
       Tensor* tensor = tensorOutputs_[tensorIdx];
       ExprHandle totalCount = ExprHandle(tensor->dim(0));
       for (int i = 1; i < tensor->ndim(); i++) {
@@ -1059,7 +1060,7 @@ void TensorExprKernel::lowerToBackend(BackendType backendType) {
     } else if (Block* body = dynamic_cast<Block*>(l.root_stmt())) {
       std::vector<Block*> blocks = {body};
       while (blocks.size()) {
-        Block *b = blocks.back();
+        Block* b = blocks.back();
         blocks.pop_back();
 
         for (Stmt* s : b->stmts()) {
@@ -1114,9 +1115,7 @@ void TensorExprKernel::lowerToBackend(BackendType backendType) {
 
   l.ApplyInlines();
   Stmt* stmt = l.root_stmt();
-
-  ConstantFolder constantFolder;
-  stmt = stmt->accept_mutator(&constantFolder);
+  stmt = IRSimplifier::simplify(stmt);
 
   // Set up formal params (inputs, then outputs) for kernel.
   std::vector<CodeGen::BufferArg> params;
@@ -1182,7 +1181,9 @@ static bool isValidVaryingShape(
   return true;
 }
 
-static void checkInputs(const at::ArrayRef<IValue>& inputs, std::vector<TypePtr>& inputTypes) {
+static void checkInputs(
+    const at::ArrayRef<IValue>& inputs,
+    std::vector<TypePtr>& inputTypes) {
   TORCH_INTERNAL_ASSERT(
       inputs.size() == inputTypes.size(),
       "number of actual inputs don't match with the number of inputs to a subgraph");

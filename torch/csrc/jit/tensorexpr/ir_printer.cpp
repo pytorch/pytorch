@@ -368,6 +368,11 @@ void IRPrinter::visit(const Cond* v) {
   }
 }
 
+void IRPrinter::visit(const LinearForm* v) {
+  os() << "(" << *v->getA() << ") * (" << *v->getX() << ") + (" << *v->getB()
+       << ")" << std::endl;
+}
+
 void IRPrinter::emitIndent() {
   os() << std::setw(2 * indent_) << "";
 }

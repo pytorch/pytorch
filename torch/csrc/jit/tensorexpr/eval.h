@@ -880,6 +880,12 @@ class ExprEval {
     }
   }
 
+  template <typename T>
+  T value(std::vector<void*>& args) {
+    call(args);
+    return ret_value_.as<T>();
+  }
+
   template <typename T, typename... Ts>
   T value(Ts... ts) {
     call(std::forward<Ts>(ts)...);

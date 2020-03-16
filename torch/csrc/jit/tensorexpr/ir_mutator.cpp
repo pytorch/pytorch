@@ -232,6 +232,13 @@ const Expr* IRMutator::mutate(const FunctionCall* v) {
   return this->mutate(base);
 }
 
+const Expr* IRMutator::mutate(const LinearForm* v) {
+  const Expr* new_x = v->getX()->accept_mutator(this);
+  const Expr* new_a = v->getA()->accept_mutator(this);
+  const Expr* new_b = v->getB()->accept_mutator(this);
+  return new LinearForm(new_x, new_a, new_b);
+}
+
 const Expr* IRMutator::mutate(const BaseCallNode* v) {
   std::vector<const Expr*> params(v->nparams());
   bool any_change = false;
@@ -369,7 +376,6 @@ const Expr* IRMutator::DefaultMutator(
     std::vector<const Expr*>& params) {
   return v->DefaultMutator(params);
 }
-
 
 class StmtClone : public IRMutator {
  public:

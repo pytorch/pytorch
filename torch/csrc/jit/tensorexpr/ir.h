@@ -68,6 +68,10 @@ class Cast : public ExprNode<Cast> {
   Cast(Dtype dtype, const Expr* src_value)
       : ExprNodeBase(dtype, kCast), src_value_(src_value) {}
 
+  bool isConstant() const override {
+    return src_value_->isConstant();
+  }
+
  private:
   const Expr* src_value_;
 };
@@ -261,7 +265,9 @@ class Min : public BinaryOpNode<Min> {
    public:                                                    \
     Name##Imm(Type value)                                     \
         : ExprNodeBase(k##Name, kPrimitive), value_(value) {} \
-    bool isConstant() const override { return true; }               \
+    bool isConstant() const override {                        \
+      return true;                                            \
+    }                                                         \
     Type value() const {                                      \
       return value_;                                          \
     }                                                         \
@@ -288,6 +294,11 @@ ExprHandle getImmediateByType(ScalarType immType, T initialVal) {
       throw unsupported_dtype();
   }
   return ExprHandle();
+}
+
+template <typename T>
+ExprHandle getImmediateByType(Dtype dtype, T initialVal) {
+  return getImmediateByType<T>(dtype.scalar_type(), initialVal);
 }
 
 // Bind the value to the var and evaluate the body.
@@ -777,6 +788,49 @@ class Intrinsics : public CallNode<Intrinsics> {
       const std::vector<const Expr*>& params);
 
   IntrinsicsOp op_type_;
+};
+
+/* An internal only Expr used in IR simplification.
+ * Encodes relationship y = Ax + B, where A and B are Immediates.
+ * Not required to be implemented by codegen. */
+class LinearForm : public ExprNode<LinearForm> {
+ public:
+  LinearForm(const Expr* x, const Expr* A, const Expr* B)
+      : ExprNodeBase(dtypeFor(x, A, B)), x_(x), A_(A), B_(B) {}
+
+  LinearForm(const Expr* x)
+      : ExprNodeBase(x->dtype()),
+        x_(x),
+        A_(new CharImm(1)),
+        B_(new CharImm(0)) {}
+
+  const Expr* getX() const {
+    return x_;
+  }
+  const Expr* getA() const {
+    return A_;
+  }
+  const Expr* getB() const {
+    return B_;
+  }
+
+  void setA(const Expr* A) {
+    A_ = A;
+  }
+
+  void setB(const Expr* B) {
+    B_ = B;
+  }
+
+  static Dtype dtypeFor(const Expr* A, const Expr* B, const Expr* C) {
+    return ToDtype(promoteTypes(
+        A->dtype().scalar_type(), promoteTypes(B->dtype(), C->dtype())));
+  }
+
+ private:
+  const Expr* x_;
+  const Expr* A_;
+  const Expr* B_;
 };
 
 class FunctionCall;

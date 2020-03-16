@@ -176,6 +176,12 @@ void IRVisitor::visit(const Cond* v) {
   }
 }
 
+void IRVisitor::visit(const LinearForm* v) {
+  v->getA()->accept(this);
+  v->getX()->accept(this);
+  v->getB()->accept(this);
+}
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
