@@ -85,8 +85,7 @@ Logic to extract the promote type from any Tensor or TensorList args.
 // Overload to catch Tensor args.
 // If nextArg is floating-point, compare its scalar_type with our
 // current best guess for the promote type, and update if necessary.
-inline at::ScalarType
-prioritize(at::ScalarType current, const Tensor& nextArg) {
+inline at::ScalarType prioritize(at::ScalarType current, const Tensor& nextArg) {
   if (current == at::kDouble) {
     AT_ERROR("promote type is double in at::autocast::prioritize");
     return current;
@@ -110,8 +109,7 @@ prioritize(at::ScalarType current, const Tensor& nextArg) {
 
 // Overload to catch TensorList args (for e.g. cat, stack).
 // Reuses the overload above to process each Tensor in the list.
-inline at::ScalarType
-prioritize(at::ScalarType current, const TensorList& list) {
+inline at::ScalarType prioritize(at::ScalarType current, const TensorList& list) {
   for (const auto& tensor : list) {
     current = prioritize(current, tensor);
   }
@@ -119,21 +117,20 @@ prioritize(at::ScalarType current, const TensorList& list) {
 }
 
 // Template to catch non-Tensor args (no-op that returns current best guess)
-template<typename T> inline at::ScalarType
-prioritize(at::ScalarType current, T nextArg) {
+template<typename T>
+inline at::ScalarType prioritize(at::ScalarType current, T nextArg) {
   return current;
 }
 
 // Overload for the tail case.
-inline at::ScalarType
-promote_type(at::ScalarType current) {
+inline at::ScalarType promote_type(at::ScalarType current) {
   return current;
 }
 
 // Unpack args and determine if incoming float16 tensors need to be promoted to float32.
 // Non-Tensor arguments are ignored.
-template<typename Arg0, typename... Args> inline at::ScalarType
-promote_type(at::ScalarType current, Arg0 arg0, Args... args) {
+template<typename Arg0, typename... Args>
+inline at::ScalarType promote_type(at::ScalarType current, Arg0 arg0, Args... args) {
   auto new_current = prioritize(current, arg0);
   return promote_type(new_current, args...);
 }
@@ -141,14 +138,13 @@ promote_type(at::ScalarType current, Arg0 arg0, Args... args) {
 /****************************************************
 Logic to apply cached casting to any Tensor argument.
 ****************************************************/
+inline bool is_eligible(const Tensor& arg) {
+  return (arg.is_cuda() && arg.is_floating_point() && (arg.scalar_type() != at::kDouble));
+}
 
 // Overload to catch Tensor args
-inline Tensor
-cached_cast(at::ScalarType to_type, const Tensor& arg) {
-  if (arg.is_cuda() &&
-      arg.is_floating_point() &&
-      arg.scalar_type() != at::kDouble &&
-      arg.scalar_type() != to_type) {
+inline Tensor cached_cast(at::ScalarType to_type, const Tensor& arg) {
+  if (is_eligible(arg) && (arg.scalar_type() != to_type)) {
     // Heuristic:  Do what Apex does, and cache fp16 casts of fp32 model weights (leaves).
     // See cached_casts declaration above for detailed strategy.
     bool can_try_cache = (to_type == at::kHalf && arg.scalar_type() == at::kFloat && arg.requires_grad() && arg.is_leaf());
@@ -180,8 +176,8 @@ std::vector<Tensor> cached_cast(at::ScalarType to_type, const TensorList& arg) {
 }
 
 // Template to catch non-Tensor args.
-template<typename T> inline T
-cached_cast(at::ScalarType to_type, T arg) {
+template<typename T>
+inline T cached_cast(at::ScalarType to_type, T arg) {
   return arg;
 }
 
@@ -206,11 +202,14 @@ inline T set_opt_dtype(at::ScalarType to_type, T arg) {
   return arg;
 }
 
-// Checks if the first arg is float64.
-// Intended only for functions with the right signature, so only one overload.
 template<typename... Args>
-inline bool firstarg_is_double(const Tensor& arg, Args... args) {
-  return (arg.scalar_type() == at::kDouble);
+inline bool firstarg_is_eligible(const Tensor& arg, Args... args) {
+  return is_eligible(arg);
+}
+
+template<typename... Args>
+inline at::ScalarType type_from_firstarg(at::ScalarType to_type, const Tensor& arg, Args... args) {
+  return (is_eligible(arg) ? to_type : arg.scalar_type());
 }
 
 /********************************************************************************************************
@@ -250,10 +249,12 @@ template<class Redispatch, Redispatch* F, class Ret, class... Args>
 struct WrapFunction_<CastPolicy::fp32_set_opt_dtype, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
     c10::impl::ExcludeDispatchKeyGuard no_autocasting(DispatchKey::AutocastTensorId);
-    if (firstarg_is_double(args...)) {
-      return (*F)(args...);
-    } else {
+    if (firstarg_is_eligible(args...)) {
       return (*F)(set_opt_dtype(at::kFloat, args)...);
+    } else {
+      // If ineligible, calls F with unaltered args.  Does not set opt dtype, because setting
+      // opt dtype explicitly may interfere with internal implicit promotion decisions.
+      return (*F)(args...);
     }
   }
 };
@@ -263,7 +264,7 @@ template<class Redispatch, Redispatch* F, class Ret, class... Args>
 struct WrapFunction_<CastPolicy::fp32_append_dtype, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
     c10::impl::ExcludeDispatchKeyGuard no_autocasting(DispatchKey::AutocastTensorId);
-    at::ScalarType out_type = (firstarg_is_double(args...) ? at::kDouble : at::kFloat);
+    at::ScalarType out_type = type_from_firstarg(at::kFloat, args...);
     return (*F)(args..., out_type);
   }
 };
@@ -471,6 +472,8 @@ auto register_out_of_place = torch::RegisterOperators()
   KERNEL_UNBOXED_ONLY(at::sum, "aten::sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", Tensor (const Tensor &, IntArrayRef, bool, c10::optional<ScalarType>), fp32_set_opt_dtype)
   KERNEL_UNBOXED_ONLY(at::sum, "aten::sum.dim_DimnameList(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", Tensor (const Tensor &, DimnameList, bool, c10::optional<ScalarType>), fp32_set_opt_dtype)
   // fp32_append_dtype
+  // The fp32_append_dtype wrapper overrides implicit promotion behavior.
+  // norm does not implicitly promote, but be aware when adding new ops to this policy.
   KERNEL_UNBOXED_ONLY_DIFFERENT_REDISPATCH_SIGNATURE(at::norm, "aten::norm.Scalar(Tensor self, Scalar p=2) -> Tensor", Tensor (const Tensor &, Scalar), Tensor (const Tensor &, c10::optional<Scalar>, ScalarType), fp32_append_dtype)
   KERNEL_UNBOXED_ONLY_DIFFERENT_REDISPATCH_SIGNATURE(at::norm, "aten::norm.ScalarOpt_dim(Tensor self, Scalar? p, int[1] dim, bool keepdim=False) -> Tensor", Tensor (const Tensor &, c10::optional<Scalar>, IntArrayRef, bool), Tensor (const Tensor &, c10::optional<Scalar>, IntArrayRef, bool, ScalarType), fp32_append_dtype)
   KERNEL_UNBOXED_ONLY_DIFFERENT_REDISPATCH_SIGNATURE(at::norm, "aten::norm.names_ScalarOpt_dim(Tensor self, Scalar? p, Dimname[1] dim, bool keepdim=False) -> Tensor", Tensor (const Tensor &, c10::optional<Scalar>, DimnameList, bool), Tensor (const Tensor &, c10::optional<Scalar>, DimnameList, bool, ScalarType), fp32_append_dtype)

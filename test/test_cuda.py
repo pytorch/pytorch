@@ -2687,29 +2687,45 @@ t2.start()
                     getattr(module, op)(*args)
 
     @skipIfRocm
-    def test_autocast_ignores_double(self):
+    def test_autocast_ignored_types(self):
         with torch.cuda.amp.autocast():
-            a_64 = torch.randn((8, 8), dtype=torch.float64, device="cuda:0")
-            b_64 = torch.randn((8, 8), dtype=torch.float64, device="cuda:0")
-            c_16 = torch.randn((8, 8), dtype=torch.float16, device="cuda:0")
+            for ignore_type in (torch.double, torch.int32):
+                a_ignore = torch.ones((8, 8), dtype=ignore_type, device="cuda:0")
+                b_ignore = torch.ones((8, 8), dtype=ignore_type, device="cuda:0")
+                c_16 = torch.ones((8, 8), dtype=torch.float16, device="cuda:0")
 
-            # Tests if CastPolicy::fp16 ops ignore double
-            with self.assertRaises(RuntimeError):
-                torch.mm(a_64, c_16)
-            self.assertTrue(torch.mm(a_64, b_64).dtype is torch.float64)
+                # Tests if CastPolicy::fp16 ops ignore double and int
+                # Currently, no ops belonging to this policy support integer inputs.
+                if ignore_type is torch.double:
+                    with self.assertRaises(RuntimeError):
+                        torch.mm(a_ignore, c_16)
+                    with torch.cuda.amp.autocast(enabled=False):
+                        type_no_autocast = torch.mm(a_ignore, b_ignore).dtype
+                    self.assertTrue(torch.mm(a_ignore, b_ignore).dtype is type_no_autocast)
 
-            # Tests if CastPolicy::fp32 ops ignore double
-            self.assertTrue(torch.acos(a_64).dtype is torch.float64)
+                # Tests if CastPolicy::fp32 ops ignore double and int
+                with torch.cuda.amp.autocast(enabled=False):
+                    type_no_autocast = torch.pow(a_ignore, 2.0).dtype
+                self.assertTrue(torch.pow(a_ignore, 2.0).dtype is type_no_autocast)
 
-            # Tests if CastPolicy::fp32_set_opt_dtype ops ignore double
-            self.assertTrue(torch.softmax(a_64, 0).dtype is torch.float64)
+                # Tests if CastPolicy::fp32_set_opt_dtype ops ignore double and int
+                with torch.cuda.amp.autocast(enabled=False):
+                    type_no_autocast = torch.sum(a_ignore).dtype
+                self.assertTrue(torch.sum(a_ignore).dtype is type_no_autocast)
 
-            # Tests if CastPolicy::fp32_append_dtype ops ignore double
-            self.assertTrue(torch.norm(a_64).dtype is torch.float64)
+                # Tests if CastPolicy::fp32_append_dtype ops ignore double and int
+                # Currently, no ops belonging to this policy support integer inputs.
+                if ignore_type is torch.double:
+                    with torch.cuda.amp.autocast(enabled=False):
+                        type_no_autocast = torch.norm(a_ignore).dtype
+                    self.assertTrue(torch.norm(a_ignore).dtype is type_no_autocast)
 
-            # Tests if CastPolicy::promote ops ignore double
-            with self.assertRaises(RuntimeError):
-                torch.cat((a_64, c_16))
+                # Tests if CastPolicy::promote ops ignore double and int
+                with self.assertRaises(RuntimeError):
+                    torch.cat((a_ignore, c_16))
+                with torch.cuda.amp.autocast(enabled=False):
+                    type_no_autocast = torch.cat((a_ignore, b_ignore)).dtype
+                self.assertTrue(torch.cat((a_ignore, b_ignore)).dtype is type_no_autocast)
 
     @skipIfRocm
     def test_autocast_custom_enabled(self):
