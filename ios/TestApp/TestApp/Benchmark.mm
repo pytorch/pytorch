@@ -65,10 +65,6 @@ static int iter = 10;
     }
   }
 
-  auto qengines = at::globalContext().supportedQEngines();
-  if (std::find(qengines.begin(), qengines.end(), at::QEngine::QNNPACK) != qengines.end()) {
-    at::globalContext().setQEngine(at::QEngine::QNNPACK);
-  }
   torch::autograd::AutoGradMode guard(false);
   torch::jit::GraphOptimizerEnabledGuard opguard(false);
   auto module = torch::jit::load(model);
