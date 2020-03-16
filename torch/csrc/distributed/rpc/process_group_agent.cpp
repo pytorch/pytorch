@@ -335,6 +335,8 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
           try {
             payload = std::make_unique<std::string>(
                 wireSerialize(message.payload(), message.tensors()));
+            // only increment sendCounts when the message is indeed added into
+            // local recv.
             sendCounts_.increment(pg_->getRank());
           } catch (std::exception& e) {
             future->setError(e.what());
