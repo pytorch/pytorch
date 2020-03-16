@@ -152,7 +152,7 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
         pybind11::gil_scoped_acquire ag;
         auto pythonUdf = pythonRpcHandler.deserialize(prc.serializedPyObj());
         py_ivalue = jit::toIValue(
-            PythonRpcHandler::getInstance().runPythonUdf(std::move(pythonUdf)),
+            pythonRpcHandler.runPythonUdf(std::move(pythonUdf)),
             PyObjectType::get());
       }
 
