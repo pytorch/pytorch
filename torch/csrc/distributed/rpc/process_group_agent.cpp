@@ -465,7 +465,7 @@ void ProcessGroupAgent::enqueueSend(SendWork work) {
               "Encountered exception in ProcessGroupAgent::enqueueSend: ",
               e.what());
           auto exceptionMsg =
-              rpc::createExceptionResponse(work.message_, errorStr);
+              rpc::createExceptionResponse(errorStr, work.message_.id());
           if (work.message_.isRequest()) {
             auto err = c10::str(
                 "Encountered exception in ProcessGroupAgent::enqueueSend: ",
