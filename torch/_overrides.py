@@ -4,7 +4,7 @@ Python implementation of __torch_function__
 While most of the torch API and handling for __torch_function__ happens
 at the C++ level, some of the torch API is written in Python so we need
 python-level handling for __torch_function__ overrides as well. The main
-developer-facing functionality in this file are handle_torch_function and 
+developer-facing functionality in this file are handle_torch_function and
 has_torch_function. See torch/functional.py and test/test_overrides.py
 for usage examples.
 
@@ -126,6 +126,7 @@ def get_ignored_functions():
         torch.nn.functional.has_torch_function,
         torch.nn.functional.handle_torch_function,
         torch.nn.functional.sigmoid,
+        torch.nn.functional.hardsigmoid,
         torch.nn.functional.tanh,
     )
 
@@ -134,7 +135,7 @@ def get_testing_overrides():
 
     Returns
     -------
-    A dictionary that maps overridable functions in the PyTorch API to 
+    A dictionary that maps overridable functions in the PyTorch API to
     lambda functions that have the same signature as the real function
     and unconditionally return -1. These lambda functions are useful
     for testing API coverage for a type that defines __torch_function__.
