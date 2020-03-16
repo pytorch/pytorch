@@ -8,7 +8,7 @@ from contextlib import contextmanager
 
 import torch
 
-from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH_EXECUTOR
+from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH_EXECUTOR, skipIfRocm
 
 from test_jit import JitTestCase, RUN_CUDA
 
