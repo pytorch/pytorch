@@ -79,7 +79,8 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "Requires profiling node to run cuda fuser")
     def test_scalar_input(self):
-        def t(x : torch.Tensor, y : torch.Tensor, z : float):
+        def t(x, y, z):
+            # type: (Tensor, Tensor, float) -> Tensor
             o = x + y
             o = o + z
             return o
