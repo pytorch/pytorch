@@ -5,7 +5,6 @@
 
 namespace torch {
 namespace jit {
-namespace script {
 
 struct Call {
   std::string fn_name;
@@ -49,6 +48,5 @@ const ErrorReport& operator<<(const ErrorReport& e, const T& t) {
   return e;
 }
 
-} // namespace script
 } // namespace jit
 } // namespace torch

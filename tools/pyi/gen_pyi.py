@@ -451,16 +451,16 @@ def gen_pyi(declarations_path, out):
                     .format(FACTORY_PARAMS)],
         'is_grad_enabled': ['def is_grad_enabled() -> _bool: ...']
     })
-    for binop in ['add', 'sub', 'mul', 'div']:
+    for binop in ['mul', 'div']:
         unsorted_function_hints[binop].append(
             'def {}(input: Union[Tensor, Number],'
             ' other: Union[Tensor, Number],'
             ' *, out: Optional[Tensor]=None) -> Tensor: ...'.format(binop))
+    for binop in ['add', 'sub']: 
         unsorted_function_hints[binop].append(
             'def {}(input: Union[Tensor, Number],'
-            ' value: Number,'
             ' other: Union[Tensor, Number],'
-            ' *, out: Optional[Tensor]=None) -> Tensor: ...'.format(binop))
+            ' *, alpha: Optional[Number]=1, out: Optional[Tensor]=None) -> Tensor: ...'.format(binop))
 
     function_declarations = get_py_torch_functions(declarations)
     for name in sorted(function_declarations.keys()):
@@ -534,8 +534,8 @@ def gen_pyi(declarations_path, out):
                ],
         'item': ["def item(self) -> Number: ..."],
     })
-    for binop in ['add', 'sub', 'mul', 'div']:
-        for inplace in [True, False]:
+    for binop in ['mul', 'div']:
+        for inplace in [False, True]:
             out_suffix = ', *, out: Optional[Tensor]=None'
             if inplace:
                 binop += '_'
@@ -543,9 +543,15 @@ def gen_pyi(declarations_path, out):
             unsorted_tensor_method_hints[binop].append(
                 'def {}(self, other: Union[Tensor, Number]{})'
                 ' -> Tensor: ...'.format(binop, out_suffix))
+    for binop in ['add', 'sub']: 
+        for inplace in [False, True]: 
+            out_suffix = ', out: Optional[Tensor]=None'
+            if inplace:
+                binop += '_'
+                out_suffix = ''
             unsorted_tensor_method_hints[binop].append(
-                'def {}(self, value: Number,'
-                ' other: Union[Tensor, Number]{})'
+                'def {}(self, other: Union[Tensor, Number], '
+                '*, alpha: Optional[Number]=1{})'
                 ' -> Tensor: ...'.format(binop, out_suffix))
     simple_conversions = ['byte', 'char', 'cpu', 'double', 'float',
                           'half', 'int', 'long', 'short', 'bool',
