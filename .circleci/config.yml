@@ -1869,6 +1869,11 @@ workflows:
           name: pytorch_linux_xenial_py3_5_build
           requires:
             - setup
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
           build_environment: "pytorch-linux-xenial-py3.5-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.5:f990c76a-a798-42bb-852f-5be5006f8026"
       - pytorch_linux_test:
@@ -1876,6 +1881,11 @@ workflows:
           requires:
             - setup
             - pytorch_linux_xenial_py3_5_build
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
           build_environment: "pytorch-linux-xenial-py3.5-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.5:f990c76a-a798-42bb-852f-5be5006f8026"
           resource_class: large
@@ -1935,6 +1945,11 @@ workflows:
           name: pytorch_paralleltbb_linux_xenial_py3_6_gcc5_4_build
           requires:
             - setup
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
           build_environment: "pytorch-paralleltbb-linux-xenial-py3.6-gcc5.4-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:f990c76a-a798-42bb-852f-5be5006f8026"
       - pytorch_linux_test:
@@ -1942,6 +1957,11 @@ workflows:
           requires:
             - setup
             - pytorch_paralleltbb_linux_xenial_py3_6_gcc5_4_build
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
           build_environment: "pytorch-paralleltbb-linux-xenial-py3.6-gcc5.4-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:f990c76a-a798-42bb-852f-5be5006f8026"
           resource_class: large
@@ -1949,6 +1969,11 @@ workflows:
           name: pytorch_parallelnative_linux_xenial_py3_6_gcc5_4_build
           requires:
             - setup
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
           build_environment: "pytorch-parallelnative-linux-xenial-py3.6-gcc5.4-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:f990c76a-a798-42bb-852f-5be5006f8026"
       - pytorch_linux_test:
@@ -1956,6 +1981,11 @@ workflows:
           requires:
             - setup
             - pytorch_parallelnative_linux_xenial_py3_6_gcc5_4_build
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
           build_environment: "pytorch-parallelnative-linux-xenial-py3.6-gcc5.4-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:f990c76a-a798-42bb-852f-5be5006f8026"
           resource_class: large
@@ -2247,11 +2277,19 @@ workflows:
             - pytorch_macos_10_13_py3_build
       - pytorch_android_gradle_build-x86_32:
           name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build-x86_32
+          filters:
+            branches:
+              only:
+                - master
           requires:
             - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_32_build
 
       - pytorch_android_gradle_build:
           name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build
+          filters:
+            branches:
+              only:
+                - master
           requires:
             - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_32_build
             - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_64_build
@@ -2380,6 +2418,8 @@ workflows:
           build_environment: "caffe2-onnx-ort2-py3.6-clang7-ubuntu16.04-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py3.6-clang7-ubuntu16.04:345"
           resource_class: large
+      # TODO: Refactor circleci/cimodel/data/binary_build_data.py to generate this file
+      #       instead of doing one offs here
       # Binary builds (subset, to smoke test that they'll work)
       #
       # NB: If you modify this file, you need to also modify
@@ -2399,6 +2439,10 @@ workflows:
           requires:
             - setup
           docker_image: "pytorch/manylinux-cuda102"
+          filters:
+            branches:
+              only:
+                - master
       - binary_linux_build:
           name: binary_linux_conda_2_7_cpu_devtoolset7_build
           build_environment: "conda 2.7 cpu devtoolset7"
@@ -2428,11 +2472,19 @@ workflows:
           build_environment: "wheel 3.6 cpu"
           requires:
             - setup
+          filters:
+            branches:
+              only:
+                - master
       - binary_mac_build:
           name: binary_macos_conda_2_7_cpu_build
           build_environment: "conda 2.7 cpu"
           requires:
             - setup
+          filters:
+            branches:
+              only:
+                - master
       # This job has an average run time of 3 hours o.O
       # Now only running this on master to reduce overhead
       - binary_mac_build:
@@ -2451,6 +2503,10 @@ workflows:
             - setup
             - binary_linux_manywheel_2_7mu_cpu_devtoolset7_build
           docker_image: "pytorch/manylinux-cuda102"
+          filters:
+            branches:
+              only:
+                - master
       - binary_linux_test:
           name: binary_linux_manywheel_3_7m_cu102_devtoolset7_test
           build_environment: "manywheel 3.7m cu102 devtoolset7"
@@ -2460,6 +2516,10 @@ workflows:
           docker_image: "pytorch/manylinux-cuda102"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
+          filters:
+            branches:
+              only:
+                - master
       - binary_linux_test:
           name: binary_linux_conda_2_7_cpu_devtoolset7_test
           build_environment: "conda 2.7 cpu devtoolset7"
