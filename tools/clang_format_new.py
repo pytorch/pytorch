@@ -34,6 +34,7 @@ PLATFORM_TO_CF_URL = {
 # This dictionary maps each platform to a relative path to a file containing its reference hash.
 PLATFORM_TO_HASH = {
     "Darwin": os.path.join("tools", "clang_format_hash", "mac", "clang-format-mojave"),
+    "Linux": os.path.join("tools", "clang_format_hash", "linux64", "clang-format-linux64"),
 }
 
 # Directory and file paths for the clang-format binary.
