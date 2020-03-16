@@ -151,6 +151,7 @@ class TORCH_API RRefContext {
       const worker_id_t owner,
       const RRefId& rrefId,
       const ForkId& forkId);
+  void delAllUsers(std::chrono::milliseconds timeoutMillis);
 
   std::unordered_map<std::string, std::string> getDebugInfo();
 
@@ -195,17 +196,27 @@ class TORCH_API RRefContext {
       RRefId::Hash>
       forks_;
 
-  // The follow two maps keep UserRRefs alive by holding a intrusive_ptr to the
+  // This cond var is used by deleteAllUsers(), a event notificaton is sent if
+  // number of pending UserRRef or UserRRef children is reduced, or
+  // number of owned OwnerRRef is reduced.
+  std::condition_variable deleteAllUsersCV_;
+  // The follow 3 maps keep UserRRefs alive by holding a intrusive_ptr to the
   // RRef instances. A UserRRef must be added into this map if any of the
   // following two conditions is true:
   //
   // (1) A UserRRef has not been accepted by owner yet.
   //
   //     It can be used or shared, but cannot be deleted, and hence kept alive
-  //     in this map. A message of type RREF_USER_ACCEPT will remove the
-  //     corresponding RRef from this map.
+  //     in this map. A message of type RREF_USER_ACCEPT will move the
+  //     corresponding RRef from pendingUsers_ map to confirmedUsers_ map.
   std::unordered_map<ForkId, c10::intrusive_ptr<RRef>, ForkId::Hash>
       pendingUsers_;
+  //     UserRRefs are added into this map when it is confirmed by the owner.
+  //     When destroying RRefContext this map helps to find local UserRRefs
+  //     and send delete messages if they are still not deleted by Python
+  //     garbage collection.
+  std::unordered_map<ForkId, c10::weak_intrusive_ptr<RRef>, ForkId::Hash>
+      confirmedUsers_;
 
   // (2) A UserRRef has forked a child UserRRef which has not been accepted by
   //     the owner yet.

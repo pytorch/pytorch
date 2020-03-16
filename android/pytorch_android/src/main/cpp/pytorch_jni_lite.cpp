@@ -31,11 +31,6 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
   }
 
   PytorchJni(facebook::jni::alias_ref<jstring> modelPath) {
-    auto qengines = at::globalContext().supportedQEngines();
-    if (std::find(qengines.begin(), qengines.end(), at::QEngine::QNNPACK) !=
-        qengines.end()) {
-      at::globalContext().setQEngine(at::QEngine::QNNPACK);
-    }
     module_ = torch::jit::_load_for_mobile(std::move(modelPath->toStdString()));
   }
 
