@@ -39,7 +39,7 @@ struct TORCH_API ReplaceAll : public OptOutMutator {
 
  public:
   // Traverses Statement, and replaces all instances of _instance with _with.
-  TORCH_API static void instancesWithin(
+  static void instancesWithin(
       Val* _instance,
       Val* _with,
       Expr* _within) {
@@ -50,7 +50,7 @@ struct TORCH_API ReplaceAll : public OptOutMutator {
     ra.mutate(_within);
   }
 
-  TORCH_API static void instancesOf(Val* instance, Val* with);
+  static void instancesOf(Val* instance, Val* with);
 };
 
 } // namespace fuser

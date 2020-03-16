@@ -48,10 +48,10 @@ class CudaKernel {
   // Block and Grid dimension setting is here for testing purposes only
   // These are not here for general use and only for use with
   // the runTestKernel() function.
-  void block(uint x = 1, uint y = 1, uint z = 1) {
+  void block(unsigned int x = 1, unsigned int y = 1, unsigned int z = 1) {
     block_ = dim3(x, y, z);
   }
-  void grid(uint x = 1, uint y = 1, uint z = 1) {
+  void grid(unsigned int x = 1, unsigned int y = 1, unsigned int z = 1) {
     grid_ = dim3(x, y, z);
   }
 
