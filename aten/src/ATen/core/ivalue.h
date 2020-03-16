@@ -323,7 +323,10 @@ struct CAFFE2_API IValue final {
 
   template<class T>
   IValue(c10::List<T> v);
-  template<class T>
+  template <
+      class T,
+      std::enable_if_t<!std::is_same<at::Dimname, T>::value, std::nullptr_t> =
+          nullptr>
   IValue(at::ArrayRef<T> v);
   template<class T>
   IValue(const std::vector<T>& v);
@@ -343,7 +346,11 @@ struct CAFFE2_API IValue final {
   /// \endcond
   IValue(std::unordered_map<Key, Value> v);
 
-  template<class T>
+  template <
+      class T,
+      std::enable_if_t<
+          !std::is_same<ArrayRef<at::Dimname>, T>::value,
+          std::nullptr_t> = nullptr>
   IValue(c10::optional<T> v);
   IValue(c10::nullopt_t);
 
