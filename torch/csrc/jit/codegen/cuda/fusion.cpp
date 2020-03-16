@@ -7,7 +7,7 @@ namespace jit {
 namespace fuser {
 
 // Initialize to no active fusion.
-thread_local Fusion* FusionGuard::cur_fusion = nullptr;
+Fusion* FusionGuard::cur_fusion = nullptr;
 
 void ExprSort::handle(Expr* expr) {
   exprs.push_back(expr);

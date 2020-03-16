@@ -51,7 +51,7 @@ struct Fusion;
 // it to be accessed anywhere through FusionGuard::getCurFusion().
 struct TORCH_API FusionGuard {
  public:
-  static thread_local Fusion* cur_fusion;
+  static Fusion* cur_fusion;
   Fusion* prev_fusion;
 
   FusionGuard(Fusion* fusion) {

@@ -21,11 +21,13 @@ if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
 def enable_new_fuser():
     old_cpu_fuse = torch._C._jit_override_can_fuse_on_cpu(False)
     old_gpu_fuse = torch._C._jit_override_can_fuse_on_gpu(False)
-    torch._C._jit_register_cuda_fuser()
+    if(RUN_CUDA):
+        torch._C._jit_register_cuda_fuser()
     try:
         yield
     finally:
-        torch._C._jit_clear_cuda_fuser()
+        if(RUN_CUDA):
+            torch._C._jit_clear_cuda_fuser()
         torch._C._jit_override_can_fuse_on_cpu(old_cpu_fuse)
         torch._C._jit_override_can_fuse_on_gpu(old_gpu_fuse)
 
