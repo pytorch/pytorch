@@ -2010,3 +2010,44 @@ class DistAutogradTest(RpcAgentTestFixture):
             # Run backwards multiple times to verify accumulation.
             for i in range(10):
                 dist_autograd.backward(context_id, [loss], retain_graph=True)
+
+    @dist_init
+    def test_grad_copy_sparse_indices_extra_ref(self):
+        # create autograd function that saves grad pointer as class static
+        class MyFunc(Function):
+            static_grad_ptr = None
+            static_grad_indices_ref = None
+            static_grad_values_ref = None
+
+            @staticmethod
+            def forward(ctx, inp):
+                return inp
+
+            @staticmethod
+            def backward(ctx, grad):
+                MyFunc.static_grad_ptr = grad._values().data_ptr()
+                # indices() and values() return views, so holding onto
+                # references of them would not increment refcount of indices
+                # and values inside the sparse tensor.
+                MyFunc.static_grad_indices_ref = grad._indices()
+                MyFunc.static_grad_values_ref = grad._values()
+                return grad
+
+        a = torch.randn(10, 3, requires_grad=True)
+        input = torch.tensor([1, 2, 4, 5, 4, 3, 2, 9])
+        offsets = torch.tensor([0, 4])
+        import torch.nn.functional as F
+
+        with dist_autograd.context() as context_id:
+            emb_matrix = MyFunc.apply(a)
+            loss = F.embedding_bag(emb_matrix, input, offsets, sparse=True).sum()
+            dist_autograd.backward(context_id, [loss], retain_graph=True)
+            grads = dist_autograd.get_gradients(context_id)
+            p_g = MyFunc.static_grad_ptr
+            p_a = grads[a]._values().data_ptr()
+            self.assertIsNotNone(MyFunc.static_grad_indices_ref)
+            self.assertIsNotNone(MyFunc.static_grad_values_ref)
+            # grad would be stolen, since static_grad_indices_ref and
+            # static_grad_values_ref are holding onto views and don't bump the
+            # refcount.
+            self.assertTrue(p_g == p_a)
