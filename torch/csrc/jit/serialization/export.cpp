@@ -602,7 +602,7 @@ GraphEncoder::GraphEncoder(
 
   for (auto const& custom_opset : custom_opsets){
     if (!std::count(domains_.begin(), domains_.end(), custom_opset.first)) {
-      AT_WARN("Custom opset domain: '", custom_opset.first, "' provided is not used in the model. ",
+      TORCH_WARN("Custom opset domain: '", custom_opset.first, "' provided is not used in the model. ",
       "Please verify custom opset domain names.");
     }
   }
@@ -916,7 +916,7 @@ void check_onnx_proto(const std::string& proto_string) {
 }
 
 namespace {
-void export_opnames(const script::Module& m, std::set<std::string>& opnames) {
+void export_opnames(const Module& m, std::set<std::string>& opnames) {
   for (const auto& method : m.get_methods()) {
     const auto& func = method.function();
     for (const auto& node : func.graph()->nodes()) {
@@ -937,7 +937,7 @@ void export_opnames(const script::Module& m, std::set<std::string>& opnames) {
 }
 } // namespace
 
-std::vector<std::string> export_opnames(const script::Module& m) {
+std::vector<std::string> export_opnames(const Module& m) {
   std::set<std::string> names;
   export_opnames(m, names);
   return std::vector<std::string>(names.begin(), names.end());
