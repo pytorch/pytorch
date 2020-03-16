@@ -50,22 +50,16 @@ struct Fusion;
 // Fusion Guard is our "context manager". It holds the actrive fusion and allows
 // it to be accessed anywhere through FusionGuard::getCurFusion().
 struct TORCH_API FusionGuard {
- public:
-  static Fusion* cur_fusion;
+
+public:
   Fusion* prev_fusion;
 
-  FusionGuard(Fusion* fusion) {
-    prev_fusion = cur_fusion;
-    cur_fusion = fusion;
-  }
+  //Set the active fusion so it can be manipulated.
+  FusionGuard(Fusion* fusion);
 
-  ~FusionGuard() {
-    cur_fusion = prev_fusion;
-  }
+  ~FusionGuard();
 
-  static Fusion* getCurFusion() {
-    return cur_fusion;
-  }
+  static Fusion* getCurFusion();
 };
 
 // Expr sort will take a fusion and return a topologically sorted list of

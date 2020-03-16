@@ -6,8 +6,21 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
-// Initialize to no active fusion.
-Fusion* FusionGuard::cur_fusion = nullptr;
+
+static thread_local Fusion* ACTIVE_FUSION = nullptr;
+
+FusionGuard::FusionGuard(Fusion* fusion) {
+  prev_fusion = ACTIVE_FUSION;
+  ACTIVE_FUSION = fusion;
+}
+
+FusionGuard::~FusionGuard() {
+  ACTIVE_FUSION = prev_fusion;
+}
+
+Fusion* FusionGuard::getCurFusion() {
+  return ACTIVE_FUSION;
+}
 
 void ExprSort::handle(Expr* expr) {
   exprs.push_back(expr);

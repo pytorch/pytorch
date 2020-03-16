@@ -167,10 +167,10 @@ struct TORCH_API TensorView : public Val {
   }
 
   // Implementations for split/merge/reorder
-  friend TensorView* split_(TensorView*, int axis, int factor);
-  friend TensorView* merge_(TensorView*, int axis);
-  friend TensorView* reorder_(TensorView*, const std::unordered_map<int, int>&);
-  friend TransformReplay;
+  friend TORCH_API TensorView* split_(TensorView*, int axis, int factor);
+  friend TORCH_API TensorView* merge_(TensorView*, int axis);
+  friend TORCH_API TensorView* reorder_(TensorView*, const std::unordered_map<int, int>&);
+  friend TORCH_API TransformReplay;
 
  protected:
   void setDomain(TensorDomain* td) {
