@@ -180,7 +180,7 @@ To checked_convert(From f, const char* name) {
     std::ostringstream oss;
     oss << "value cannot be converted to type " << name
         << " without overflow: " << f;
-    throw std::domain_error(oss.str());
+    throw std::runtime_error(oss.str());  // rather than domain_error (issue 33562)
   }
   return convert<To, From>(f);
 }
