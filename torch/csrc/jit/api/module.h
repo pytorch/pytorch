@@ -33,7 +33,6 @@
 
 namespace torch {
 namespace jit {
-namespace script {
 
 using ::c10::Argument;
 using ::c10::FunctionSchema;
@@ -97,13 +96,13 @@ struct TORCH_API Module : public Object {
   ~Module() {}
 
   void set_optimized(bool o) {
-    AT_WARN(
+    TORCH_WARN(
         "Module::set_optimized() is deprecated and has no effect. "
         "Please use setGraphExecutorOptimize()");
   }
 
   bool is_optimized() const {
-    AT_WARN(
+    TORCH_WARN(
         "Module::is_optimized() is deprecated and always returns true. "
         "Please use getGraphExecutorOptimize()");
     return true;
@@ -554,6 +553,12 @@ struct NamedPolicy {
 
 TORCH_API bool& getInlineEverythingMode();
 
-} // namespace script
+namespace script {
+// We once had a `script::` namespace that was deleted. This is for backcompat
+// of the public API; new code should not use this type alias.
+using Module = ::torch::jit::Module;
+using ExtraFilesMap = ::torch::jit::ExtraFilesMap;
+}
+
 } // namespace jit
 } // namespace torch
