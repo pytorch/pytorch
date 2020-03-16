@@ -570,8 +570,8 @@ class JitRpcTest(LocalRRefTest, JitRpcAsyncOpTest, RpcAgentTestFixture):
         my_local_script_module = MyScriptModule(self.rank)
 
         # It is not thread safe to instantiate MyScriptModule in multiple threads,
-        # wait for local MyScriptModule instantiation to finish, 
-        # otherwise it could instantiate MyScriptModule in parallel with 
+        # wait for local MyScriptModule instantiation to finish,
+        # otherwise it could instantiate MyScriptModule in parallel with
         # server thread in the below
         dist.barrier()
 
