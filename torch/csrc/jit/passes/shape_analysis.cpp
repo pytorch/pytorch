@@ -78,7 +78,7 @@ class ShapePropagator {
       } catch (propagation_error& e) {
         setUnshapedType(node);
       } catch (std::exception& e) {
-        throw script::ErrorReport(node->sourceRange())
+        throw ErrorReport(node->sourceRange())
             << ExceptionMessage(e)
             << "\nThe above operation failed shape propagation in this context";
       }

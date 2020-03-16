@@ -19,6 +19,12 @@ from torch.testing._internal.common_utils import TEST_WITH_UBSAN, TestCase, run_
 from torch.testing._internal.common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams, \
     override_quantized_engine
 
+np_dtype = {
+    torch.quint8 : np.uint8,
+    torch.qint8 : np.int8,
+    torch.qint32 : np.int32
+}
+
 # Make sure we won't have overflows from vpmaddubsw instruction used in FBGEMM.
 # On the current Intel x86 architecture, we need to utilize vpmaddubsw instruction
 # for the 8-bit int multiplication. This instruction vertically multiplies each
@@ -169,6 +175,42 @@ class TestQuantizedOps(TestCase):
         self.assertEqual(qY.dequantize(), qY_hat.dequantize(),
                          message="F.leaky_relu failed ({} vs {})".format(qY, qY_hat))
 
+    """Tests the correctness of the quantized::elu op."""
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
+                       elements=hu.floats(-1e3, 1e3, allow_nan=False, allow_infinity=False),
+                       qparams=hu.qparams()),
+           alpha=st.floats(0.01, 10.0, allow_nan=False, allow_infinity=False))
+    def test_qelu(self, X, alpha):
+        X, (scale, zero_point, torch_type) = X
+
+        X = torch.from_numpy(X)
+        qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
+                                       dtype=torch_type)
+        op = torch.nn.quantized.functional.elu
+
+        # calculate ELU(dqX) and quantize
+        dqX = qX.dequantize()
+        dqY_hat = dqX.clone()
+        dqY_hat[dqX < 0] = alpha * (torch.exp(dqY_hat[dqX < 0]) - 1.)
+        qY_hat = torch.quantize_per_tensor(dqY_hat, scale=scale, zero_point=zero_point,
+                                           dtype=torch_type)
+
+        # test regular
+        qY = op(qX, alpha=alpha)
+        self.assertEqual(qY, qY_hat,
+                         message="F.elu failed ({} vs {})".format(qY, qY_hat))
+
+        # test inplace
+        qXcopy = qX.clone()
+        op(qXcopy, alpha=alpha, inplace=True)
+        self.assertEqual(qXcopy, qY_hat,
+                         message="F.elu_ failed ({} vs {})".format(qXcopy, qY_hat))
+
+        # test explicit scale and zp
+        qYout = op(qX, alpha=alpha, scale=scale, zero_point=zero_point)
+        self.assertEqual(qYout, qY_hat,
+                         message="F.elu.out failed ({} vs {})".format(qY, qY_hat))
+
     """Tests the correctness of the quantized::qnnpack_sigmoid op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
                        qparams=hu.qparams()))
@@ -252,6 +294,44 @@ class TestQuantizedOps(TestCase):
             qY_hat = op(qX, min_val, max_val)
             self.assertEqual(qY, qY_hat, message="{} qclamp failed".format(name))
 
+    """Tests the correctness of the quantized::hardtanh op."""
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 8, 1, 8),
+                       elements=hu.floats(-1e6, 1e6, allow_nan=False, allow_infinity=False),
+                       qparams=hu.qparams()),
+           min_val=hu.floats(-1e6, 1e6, allow_nan=False, allow_infinity=False),
+           max_val=hu.floats(-1e6, 1e6, allow_nan=False, allow_infinity=False))
+    def test_hardtanh(self, X, min_val, max_val):
+        X, (scale, zero_point, torch_type) = X
+
+        assume(min_val <= max_val)
+        Y = X.copy()
+        Y[Y < min_val] = min_val
+        Y[Y > max_val] = max_val
+        qY = torch.quantize_per_tensor(torch.from_numpy(Y), scale=scale,
+                                       zero_point=zero_point, dtype=torch_type)
+        X = torch.from_numpy(X)
+        qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
+                                       dtype=torch_type)
+
+        ops_under_test = {
+            'nn.quantized.functional.hardtanh':
+                torch.nn.quantized.functional.hardtanh,
+        }
+
+        for name, op in ops_under_test.items():
+            qY_hat = op(qX, min_val, max_val)
+            self.assertEqual(qY, qY_hat, message="{} hardtanh failed".format(name))
+
+        ops_under_test_inplace = {
+            'inplace nn.quantized.functional.hardtanh':
+                torch.nn.quantized.functional.hardtanh,
+        }
+
+        for name, op_ in ops_under_test_inplace.items():
+            qY_hat = qX.clone()
+            op_(qY_hat, min_val, max_val, inplace=True)
+            self.assertEqual(qY, qY_hat, message="{} hardtanh failed".format(name))
+
     """Tests the correctness of the scalar addition."""
     @given(A=hu.tensor(shapes=hu.array_shapes(1, 4, 1, 5),
                        elements=hu.floats(-1e6, 1e6, allow_nan=False),
@@ -305,11 +385,6 @@ class TestQuantizedOps(TestCase):
 
             # Add ReLU ground truth
             C = (qA.dequantize() + qB.dequantize()).numpy()
-            np_dtype = {
-                torch.quint8 : np.uint8,
-                torch.qint8 : np.int8,
-                torch.qint32 : np.int32
-            }
             qC = _quantize(C, scale, zero_point, dtype=np_dtype[dtype])
             qC_hat = add(qA, qB, scale=scale, zero_point=zero_point)
             np.testing.assert_equal(qC, qC_hat.int_repr(),
@@ -365,11 +440,6 @@ class TestQuantizedOps(TestCase):
 
             # Add ground truth
             C = (qA.dequantize() + qB.dequantize()).numpy()
-            np_dtype = {
-                torch.quint8 : np.uint8,
-                torch.qint8 : np.int8,
-                torch.qint32 : np.int32
-            }
             qC = _quantize(C, scale_C, zero_point_C, dtype=np_dtype[dtype])
             qC_hat = add(qA, qB, scale=scale_C, zero_point=zero_point_C)
             np.testing.assert_equal(qC, qC_hat.int_repr(),
@@ -398,112 +468,114 @@ class TestQuantizedOps(TestCase):
 
     """Tests the correctness of the mul and mul_relu op."""
     def test_qmul_relu_same_qparams(self):
-        mul_relu = torch.ops.quantized.mul_relu
-        mul = torch.ops.quantized.mul
-        mul_out = torch.ops.quantized.mul_out
-        mul_relu_out = torch.ops.quantized.mul_relu_out
+        for dtype in [torch.quint8, torch.qint8, torch.qint32]:
+            mul_relu = torch.ops.quantized.mul_relu
+            mul = torch.ops.quantized.mul
+            mul_out = torch.ops.quantized.mul_out
+            mul_relu_out = torch.ops.quantized.mul_relu_out
 
-        A = torch.arange(-25, 25, dtype=torch.float)
-        B = torch.arange(-25, 25, dtype=torch.float)
-        scale = 2.0
-        zero_point = 127
-        qA = torch.quantize_per_tensor(A, scale=scale, zero_point=zero_point,
-                                       dtype=torch.quint8)
-        qB = torch.quantize_per_tensor(B, scale=scale, zero_point=zero_point,
-                                       dtype=torch.quint8)
+            A = torch.arange(-100, 100, dtype=torch.float)
+            B = torch.arange(-100, 100, dtype=torch.float)
+            scale = 2.0
+            zero_point = 127
+            qA = torch.quantize_per_tensor(A, scale=scale, zero_point=zero_point,
+                                           dtype=dtype)
+            qB = torch.quantize_per_tensor(B, scale=scale, zero_point=zero_point,
+                                           dtype=dtype)
 
-        # mul ReLU ground truth
-        C = (qA.dequantize() * qB.dequantize()).numpy()
-        qC = _quantize(C, scale, zero_point)
-        qC_hat = mul(qA, qB, scale=scale, zero_point=zero_point)
-        np.testing.assert_equal(qC, qC_hat.int_repr(),
-                                "Quantized mulition failed.")
-        qC_out_hat = torch._empty_affine_quantized(qC.shape,
-                                                   scale=scale,
-                                                   zero_point=zero_point,
-                                                   dtype=torch.quint8)
-        mul_out(qA, qB, out=qC_out_hat)
-        self.assertEqual(qC_hat, qC_out_hat, message="mul.out failed")
-
-        # mul + ReLU ground truth
-        Crelu = C.copy()
-        Crelu[C < 0] = 0
-        qCrelu = _quantize(Crelu, scale, zero_point)
-        qCrelu_hat = mul_relu(qA, qB, scale=scale, zero_point=zero_point)
-        np.testing.assert_equal(qCrelu, qCrelu_hat.int_repr(),
-                                "Quantized mulition with ReLU failed.")
-        qCrelu_out_hat = torch._empty_affine_quantized(qCrelu.shape,
+            # mul ReLU ground truth
+            C = (qA.dequantize() * qB.dequantize()).numpy()
+            qC = _quantize(C, scale, zero_point, dtype=np_dtype[dtype])
+            qC_hat = mul(qA, qB, scale=scale, zero_point=zero_point)
+            np.testing.assert_equal(qC, qC_hat.int_repr(),
+                                    "Quantized mulition failed.")
+            qC_out_hat = torch._empty_affine_quantized(qC.shape,
                                                        scale=scale,
                                                        zero_point=zero_point,
-                                                       dtype=torch.quint8)
-        mul_relu_out(qA, qB, out=qCrelu_out_hat)
-        self.assertEqual(qCrelu_hat, qCrelu_out_hat,
-                         message="mulReLU.out failed")
+                                                       dtype=dtype)
+            mul_out(qA, qB, out=qC_out_hat)
+            self.assertEqual(qC_hat, qC_out_hat, message="mul.out failed")
 
-        # Scalar multiplication
-        for b in B:
-            C_ref = qA.dequantize().numpy() * b.item()
-            qC_hat = torch.ops.quantized.mul_scalar(qA, b.item())
+            # mul + ReLU ground truth
+            Crelu = C.copy()
+            Crelu[C < 0] = 0
+            qCrelu = _quantize(Crelu, scale, zero_point, dtype=np_dtype[dtype])
+            qCrelu_hat = mul_relu(qA, qB, scale=scale, zero_point=zero_point)
+            np.testing.assert_equal(qCrelu, qCrelu_hat.int_repr(),
+                                    "Quantized mulition with ReLU failed.")
+            qCrelu_out_hat = torch._empty_affine_quantized(qCrelu.shape,
+                                                           scale=scale,
+                                                           zero_point=zero_point,
+                                                           dtype=dtype)
+            mul_relu_out(qA, qB, out=qCrelu_out_hat)
+            self.assertEqual(qCrelu_hat, qCrelu_out_hat,
+                             message="mulReLU.out failed")
 
-            self.assertEqual(C_ref, qC_hat.dequantize())
+            # Scalar multiplication
+            for b in B:
+                C_ref = qA.dequantize().numpy() * b.item()
+                qC_hat = torch.ops.quantized.mul_scalar(qA, b.item())
 
-        # Scalar multiplication + relu
-        for b in B:
-            C_ref = qA.dequantize().numpy() * b.item()
-            C_ref[C_ref < 0] = 0
-            qC_hat = torch.ops.quantized.mul_scalar_relu(qA, b.item())
+                self.assertEqual(C_ref, qC_hat.dequantize())
 
-            self.assertEqual(C_ref, qC_hat.dequantize())
+            # Scalar multiplication + relu
+            for b in B:
+                C_ref = qA.dequantize().numpy() * b.item()
+                C_ref[C_ref < 0] = 0
+                qC_hat = torch.ops.quantized.mul_scalar_relu(qA, b.item())
+
+                self.assertEqual(C_ref, qC_hat.dequantize())
 
     """Tests the correctness of the mul and mul_relu op."""
     def test_qmul_relu_different_qparams(self):
-        mul_relu = torch.ops.quantized.mul_relu
-        mul = torch.ops.quantized.mul
-        mul_out = torch.ops.quantized.mul_out
-        mul_relu_out = torch.ops.quantized.mul_relu_out
+        for dtype in [torch.quint8, torch.qint8, torch.qint32]:
+            mul_relu = torch.ops.quantized.mul_relu
+            mul = torch.ops.quantized.mul
+            mul_out = torch.ops.quantized.mul_out
+            mul_relu_out = torch.ops.quantized.mul_relu_out
 
-        A = torch.arange(-25, 25, dtype=torch.float)
-        B = torch.arange(-25, 25, dtype=torch.float)
-        scale_A = 3.0
-        zero_point_A = 7
-        scale_B = 5.0
-        zero_point_B = 127
+            A = torch.arange(-100, 100, dtype=torch.float)
+            B = torch.arange(-100, 100, dtype=torch.float)
+            scale_A = 3.0
+            zero_point_A = 7
+            scale_B = 5.0
+            zero_point_B = 127
 
-        scale_C = 0.5
-        zero_point_C = 5
+            scale_C = 0.5
+            zero_point_C = 5
 
-        qA = torch.quantize_per_tensor(A, scale=scale_A, zero_point=zero_point_A,
-                                       dtype=torch.quint8)
-        qB = torch.quantize_per_tensor(B, scale=scale_B, zero_point=zero_point_B,
-                                       dtype=torch.quint8)
+            qA = torch.quantize_per_tensor(A, scale=scale_A, zero_point=zero_point_A,
+                                           dtype=dtype)
+            qB = torch.quantize_per_tensor(B, scale=scale_B, zero_point=zero_point_B,
+                                           dtype=dtype)
 
-        # mul ground truth
-        C = (qA.dequantize() * qB.dequantize()).numpy()
-        qC = _quantize(C, scale_C, zero_point_C)
-        qC_hat = mul(qA, qB, scale=scale_C, zero_point=zero_point_C)
-        np.testing.assert_equal(qC, qC_hat.int_repr(),
-                                "Quantized multiplication failed.")
-        qC_out_hat = torch._empty_affine_quantized(qC.shape,
-                                                   scale=scale_C,
-                                                   zero_point=zero_point_C,
-                                                   dtype=torch.quint8)
-        mul_out(qA, qB, out=qC_out_hat)
-        self.assertEqual(qC_hat, qC_out_hat, message="mul.out failed")
-
-        # mul + ReLU ground truth
-        Crelu = C.copy()
-        Crelu[C < 0] = 0
-        qCrelu = _quantize(Crelu, scale_C, zero_point_C)
-        qCrelu_hat = mul_relu(qA, qB, scale=scale_C, zero_point=zero_point_C)
-        np.testing.assert_equal(qCrelu, qCrelu_hat.int_repr(),
-                                "Quantized multiplication with ReLU failed.")
-        qCrelu_out_hat = torch._empty_affine_quantized(qCrelu.shape,
+            # mul ground truth
+            C = (qA.dequantize() * qB.dequantize()).numpy()
+            qC = _quantize(C, scale_C, zero_point_C, dtype=np_dtype[dtype])
+            qC_hat = mul(qA, qB, scale=scale_C, zero_point=zero_point_C)
+            np.testing.assert_equal(qC, qC_hat.int_repr(),
+                                    "Quantized multiplication failed.")
+            qC_out_hat = torch._empty_affine_quantized(qC.shape,
                                                        scale=scale_C,
                                                        zero_point=zero_point_C,
-                                                       dtype=torch.quint8)
-        mul_relu_out(qA, qB, out=qCrelu_out_hat)
-        self.assertEqual(qCrelu_hat, qCrelu_out_hat,
-                         message="mulReLU.out failed")
+                                                       dtype=dtype)
+            mul_out(qA, qB, out=qC_out_hat)
+            self.assertEqual(qC_hat, qC_out_hat, message="mul.out failed")
+
+            # mul + ReLU ground truth
+            Crelu = C.copy()
+            Crelu[C < 0] = 0
+            qCrelu = _quantize(Crelu, scale_C, zero_point_C, dtype=np_dtype[dtype])
+            qCrelu_hat = mul_relu(qA, qB, scale=scale_C, zero_point=zero_point_C)
+            np.testing.assert_equal(qCrelu, qCrelu_hat.int_repr(),
+                                    "Quantized multiplication with ReLU failed.")
+            qCrelu_out_hat = torch._empty_affine_quantized(qCrelu.shape,
+                                                           scale=scale_C,
+                                                           zero_point=zero_point_C,
+                                                           dtype=dtype)
+            mul_relu_out(qA, qB, out=qCrelu_out_hat)
+            self.assertEqual(qCrelu_hat, qCrelu_out_hat,
+                             message="mulReLU.out failed")
 
     """Tests the correctness of the mul and mul_relu op."""
     def test_qmul_broadcast(self):
@@ -738,6 +810,122 @@ class TestQuantizedOps(TestCase):
         ops_under_test = {
             "nn.functional": torch.nn.functional.avg_pool2d,
             "nn.quantized.functional": torch.nn.quantized.functional.avg_pool2d
+        }
+        error_message = r"Results are off for {}:\n\tExpected:\n{}\n\tGot:\n{}"
+        for name, op in ops_under_test.items():
+            X_hat = op(qX, kernel_size=kernel, stride=stride, padding=padding, ceil_mode=ceil_mode,
+                       count_include_pad=count_include_pad, divisor_override=divisor_override)
+            self.assertTrue(X_hat.stride() != sorted(X_hat.stride()))
+            qX_ref = torch.quantize_per_tensor(X_ref, scale=X_hat.q_scale(), zero_point=X_hat.q_zero_point(),
+                                               dtype=torch_type)
+
+            self.assertEqual(qX_ref.int_repr().to(torch.double), X_hat.int_repr().to(torch.double), prec=1.0,
+                             message=error_message.format(name, X_hat.int_repr(), qX_ref.int_repr()))
+            self.assertEqual(scale, X_hat.q_scale(),
+                             message=error_message.format(name + '.scale', scale, X_hat.q_scale()))
+            self.assertEqual(zero_point, X_hat.q_zero_point(),
+                             message=error_message.format(name + '.zero_point', scale,
+                             X_hat.q_zero_point()))
+
+    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=5,
+                                              min_side=5, max_side=10),
+                       qparams=hu.qparams(dtypes=torch.quint8)),
+           kernel=st.sampled_from((3, 5)),
+           stride=st.sampled_from((None, 1, 2)),
+           padding=st.integers(0, 2),
+           ceil_mode=st.sampled_from((True, False)),
+           count_include_pad=st.sampled_from((True, False)),
+           divisor_override=st.sampled_from((None, None)))
+    def test_avg_pool3d(self, X, kernel, stride, padding, ceil_mode, count_include_pad, divisor_override):
+        """
+        Note: we currently cannot test the divisor_override, because quantized op will clamp the result
+        within range. However, the float op will not.
+        """
+        X, (scale, zero_point, torch_type) = X
+
+        assume(kernel // 2 >= padding)  # Kernel cannot be overhanging!
+        iD, iH, iW = X.shape[-3:]
+        oD = pool_output_shape(iD, kernel, padding, stride, dilation=1)
+        assume(oD > 0)
+        oH = pool_output_shape(iH, kernel, padding, stride, dilation=1)
+        assume(oH > 0)
+        oW = pool_output_shape(iW, kernel, padding, stride, dilation=1)
+        assume(oW > 0)
+
+        X = torch.from_numpy(X)
+        qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
+                                       dtype=torch_type)
+        X = qX.dequantize()
+        # Run reference on float tensor and then quantize the result for comparison
+        X_ref = torch.nn.functional.avg_pool3d(
+            X, kernel_size=kernel, stride=stride, padding=padding,
+            ceil_mode=ceil_mode, count_include_pad=count_include_pad, divisor_override=divisor_override)
+        ops_under_test = {
+            "nn.functional": torch.nn.functional.avg_pool3d,
+            "nn.quantized.functional": torch.nn.quantized.functional.avg_pool3d
+        }
+        error_message = r"Results are off for {}:\n\tExpected:\n{}\n\tGot:\n{}"
+        for name, op in ops_under_test.items():
+            qX_hat = op(qX, kernel_size=kernel, stride=stride, padding=padding, ceil_mode=ceil_mode,
+                        count_include_pad=count_include_pad, divisor_override=divisor_override)
+            qX_ref = torch.quantize_per_tensor(X_ref, scale=qX_hat.q_scale(), zero_point=qX_hat.q_zero_point(),
+                                               dtype=torch_type)
+
+            self.assertEqual(qX_ref.int_repr().to(torch.double), qX_hat.int_repr().to(torch.double), prec=1.0,
+                             message=error_message.format(name, qX_hat.int_repr(), qX_ref.int_repr()))
+            self.assertEqual(scale, qX_hat.q_scale(),
+                             message=error_message.format(name + '.scale', scale, qX_hat.q_scale()))
+            self.assertEqual(zero_point, qX_hat.q_zero_point(),
+                             message=error_message.format(name + '.zero_point', scale,
+                                                          qX_hat.q_zero_point()))
+
+    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=5, max_dims=5,
+                                              min_side=5, max_side=10),
+                       qparams=hu.qparams(dtypes=torch.qint8)),
+           kernel=st.sampled_from((4, 5)),
+           stride=st.sampled_from((None, 1, 2)),
+           padding=st.integers(0, 2),
+           ceil_mode=st.sampled_from((True, False)),
+           count_include_pad=st.sampled_from((True, False)),
+           divisor_override=st.sampled_from((None, None)))
+    def test_avg_pool3d_nhwc(self, X, kernel, stride, padding, ceil_mode, count_include_pad, divisor_override):
+        """
+        Note: 1) we currently cannot test the divisor_override, because quantized op will clamp the result
+        within range. However, the float op will not.
+        2) we cannot test the qint32, since the float point precision is much lower than int32 for big number,
+        which will make the test be very flaky.
+        """
+        X, (scale, zero_point, torch_type) = X
+        D, H, W = X.shape[-3:]
+
+
+        if X.shape[1] < 176:
+            X = np.repeat(X, 176 / X.shape[1], 1)
+
+        assume(kernel // 2 >= padding)  # Kernel cannot be overhanging!
+        iD, iH, iW = X.shape[-3:]
+        oD = pool_output_shape(iD, kernel, padding, stride, dilation=1)
+        assume(oD > 0)
+        oH = pool_output_shape(iH, kernel, padding, stride, dilation=1)
+        assume(oH > 0)
+        oW = pool_output_shape(iW, kernel, padding, stride, dilation=1)
+        assume(oW > 0)
+
+        X_nchw = np.ascontiguousarray(X.transpose([0, 2, 3, 4, 1]))
+
+        qX = torch.quantize_per_tensor(torch.from_numpy(X_nchw), scale=scale,
+                                       zero_point=zero_point, dtype=torch_type).permute([0, 4, 1, 2, 3])
+        X = qX.dequantize()
+
+        # Run reference on int_repr + round to avoid double rounding error.
+        X_ref = torch.nn.functional.avg_pool3d(
+            X, kernel_size=kernel, stride=stride, padding=padding,
+            ceil_mode=ceil_mode, count_include_pad=count_include_pad, divisor_override=divisor_override)
+
+        self.assertTrue(qX.stride() != sorted(qX.stride()))
+        ops_under_test = {
+            "nn.functional": torch.nn.functional.avg_pool3d,
+            "nn.quantized.functional": torch.nn.quantized.functional.avg_pool3d
         }
         error_message = r"Results are off for {}:\n\tExpected:\n{}\n\tGot:\n{}"
         for name, op in ops_under_test.items():
@@ -1004,6 +1192,59 @@ class TestQuantizedOps(TestCase):
                              message=error_message.format(name + '.zero_point', scale,
                                                           qX_hat.q_zero_point()))
 
+    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=5, max_dims=5,
+                                              min_side=5, max_side=10),
+                       qparams=hu.qparams()),
+           size=st.sampled_from((1, 3, 5, 5, 10)),
+           scale_factor=st.sampled_from((None, 1.5, 2.0)),
+           align_corners=st.sampled_from((True, False)),
+           nhwc_layout=st.sampled_from((True, False)))
+    def test_interpolate3d(self, X, size, scale_factor, align_corners, nhwc_layout):
+        """
+        This test cover upsample_nearest2d and upsample_bilinear2d
+        """
+        X, (scale, zero_point, torch_type) = X
+        D, H, W = X.shape[-3:]
+        mode = "nearest"
+        if scale_factor is not None:
+            size = None
+        if mode == "nearest":
+            align_corners = None
+
+        if nhwc_layout:
+            if X.shape[1] < 176:
+                X = np.repeat(X, 176 / X.shape[1], 1)
+
+            X_nchw = np.ascontiguousarray(X.transpose([0, 2, 3, 4, 1]))
+            X = torch.from_numpy(X_nchw).permute([0, 4, 1, 2, 3])
+
+            qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
+                                           dtype=torch_type).permute([0, 4, 1, 2, 3])
+        else:
+            X = torch.from_numpy(X)
+            qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
+                                           dtype=torch_type)
+        X_ref = torch.nn.functional.interpolate(
+            qX.int_repr().to(torch.float), size=size, scale_factor=scale_factor,
+            mode=mode, align_corners=align_corners)
+
+        ops_under_test = {
+            "nn.functional": torch.nn.functional.interpolate,
+            "nn.quantized.functional": torch.nn.quantized.functional.interpolate
+        }
+
+        error_message = r"Results are off for {}:\n\tExpected:\n{}\n\tGot:\n{}"
+        for name, op in ops_under_test.items():
+            qX_hat = op(qX, size=size, scale_factor=scale_factor,
+                        mode=mode, align_corners=align_corners)
+            self.assertEqual(X_ref, qX_hat.int_repr(), prec=1.0,
+                             message="{} results are off".format(name, qX_hat.int_repr(), X_ref))
+            self.assertEqual(scale, qX_hat.q_scale(),
+                             message=error_message.format(name + '.scale', scale, qX_hat.q_scale()))
+            self.assertEqual(zero_point, qX_hat.q_zero_point(),
+                             message=error_message.format(name + '.zero_point', scale,
+                                                          qX_hat.q_zero_point()))
+
     """Tests quantize concatenation (both fused and not)."""
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
                                               min_side=1, max_side=10),
@@ -1147,6 +1388,35 @@ class TestQuantizedOps(TestCase):
             eps = 0.001
             qx = torch.quantize_per_tensor(X, scale_x, zero_point_x, dtype_x)
             qy = torch.ops.quantized.batch_norm(qx, weight, bias, mean, var, eps, Y_scale, Y_zero_point)
+
+            float_ref = F.batch_norm(qx.dequantize(), weight=weight, bias=bias,
+                                     running_mean=mean, running_var=var, training=False, momentum=0, eps=eps)
+            quantize_ref = torch.quantize_per_tensor(float_ref, Y_scale, Y_zero_point, dtype_x)
+            self.assertEqual(qy.int_repr().numpy(), quantize_ref.int_repr().numpy())
+
+    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=5, max_dims=5,
+                                              min_side=1, max_side=32),
+                       qparams=hu.qparams()),
+           Y_scale=st.floats(0.2, 2.6),
+           Y_zero_point=st.integers(0, 5),
+           qengine=st.sampled_from(("qnnpack", "fbgemm")))
+    def test_batch_norm3d(self, X, Y_scale, Y_zero_point, qengine):
+        if qengine not in torch.backends.quantized.supported_engines:
+            return
+
+        with override_quantized_engine(qengine):
+            X, (scale_x, zero_point_x, dtype_x) = X
+
+            X = torch.from_numpy(X)
+            c = X.shape[1]
+
+            mean = torch.rand(c).float()
+            var = torch.rand(c).float()
+            weight = torch.rand(c).float()
+            bias = torch.rand(c).float()
+            eps = 0.001
+            qx = torch.quantize_per_tensor(X, scale_x, zero_point_x, dtype_x)
+            qy = torch.ops.quantized.batch_norm3d(qx, weight, bias, mean, var, eps, Y_scale, Y_zero_point)
 
             float_ref = F.batch_norm(qx.dequantize(), weight=weight, bias=bias,
                                      running_mean=mean, running_var=var, training=False, momentum=0, eps=eps)

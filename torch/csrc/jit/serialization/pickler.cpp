@@ -3,15 +3,20 @@
 #ifdef USE_DISTRIBUTED
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #endif
-#include <torch/csrc/jit/api/function.h>
-#include <torch/csrc/jit/serialization/pickler.h>
 #include <aten/src/ATen/quantized/Quantizer.h>
+#include <torch/csrc/jit/api/function_impl.h>
+#include <torch/csrc/jit/serialization/pickler.h>
 #include <string>
 
 namespace torch {
 namespace jit {
 
 using ::c10::IValue;
+
+thread_local bool add_type_tags = false;
+bool getTypeTags() {
+  return add_type_tags;
+}
 
 // Protocol 2 is the highest that can be decoded by Python 2
 // See https://docs.python.org/3/library/pickle.html#data-stream-format
@@ -59,6 +64,36 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
     pushDict(ivalue);
   } else if (ivalue.isNone()) {
     push<PickleOpCode>(PickleOpCode::NONE);
+  } else if (ivalue.isIntList()) {
+    pushSpecializedList(
+        ivalue, "build_intlist", [=](const IValue& ivalue) {
+          for (const int64_t item : ivalue.toIntVector()) {
+            pushInt(item);
+          }
+        });
+  } else if (ivalue.isTensorList()) {
+    pushSpecializedList(
+        ivalue, "build_tensorlist", [=](const IValue& ivalue) {
+          for (const at::Tensor& item : ivalue.toTensorVector()) {
+            pushIValue(item);
+          }
+        });
+  } else if (ivalue.isDoubleList()) {
+    pushSpecializedList(
+        ivalue, "build_doublelist", [=](const IValue& ivalue) {
+          for (double item : ivalue.toDoubleVector()) {
+            pushDouble(item);
+          }
+        });
+  } else if (ivalue.isBoolList()) {
+    pushSpecializedList(
+        ivalue, "build_boollist", [=](const IValue& ivalue) {
+          for (bool item : ivalue.toBoolList()) {
+            pushBool(item);
+          }
+        });
+  // note: isList must be after isIntList and friends because
+  // isList is true for all lists.
   } else if (ivalue.isList()) {
     pushGenericList(ivalue);
   } else if (ivalue.isObject()) {
@@ -96,7 +131,7 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
         err << " " << qualname->qualifiedName();
       }
     }
-    err << ". Please define serialization methods via torch::jit::pickle_ for "
+    err << ". Please define serialization methods via def_pickle() for "
            "this class.";
     AT_ERROR(err.str());
   } else if (ivalue.isRRef()) {
@@ -383,6 +418,33 @@ void Pickler::pushLiteralTensor(const IValue& ivalue) {
   push<PickleOpCode>(PickleOpCode::REDUCE);
 }
 
+void Pickler::pushSpecializedList(
+    const IValue& ivalue,
+    const char* list_name,
+    const std::function<void(const IValue&)>& item_pusher) {
+  pushGlobal("torch.jit._pickle", list_name);
+
+  // Reduce arguments are spread (e.g. `*args`) before calling the global,
+  // so wrap in a tuple
+  push<PickleOpCode>(PickleOpCode::MARK);
+
+  push<PickleOpCode>(PickleOpCode::EMPTY_LIST);
+  // Mark list
+  push<PickleOpCode>(PickleOpCode::MARK);
+
+  // Add all items
+  item_pusher(ivalue);
+
+  // Finish list
+  push<PickleOpCode>(PickleOpCode::APPENDS);
+
+  // Finish tuple
+  push<PickleOpCode>(PickleOpCode::TUPLE);
+
+  // Call reduce
+  push<PickleOpCode>(PickleOpCode::REDUCE);
+}
+
 static inline double swapDouble(double value) {
   const char* bytes = reinterpret_cast<const char*>(&value);
   double flipped;
@@ -428,22 +490,26 @@ void Pickler::pushTensorReference(const IValue& ivalue) {
 // ivalue to the stack as a string so we can preserve type tags across
 // serialization
 void Pickler::startTypeTag() {
-  pushGlobal("torch.jit._pickle", "restore_type_tag");
+  if (getTypeTags()) {
+    pushGlobal("torch.jit._pickle", "restore_type_tag");
+  }
 }
 
 // See startTypeTag
 void Pickler::endTypeTag(const IValue& ivalue) {
-  TORCH_INTERNAL_ASSERT(ivalue.isGenericDict() || ivalue.isList());
+  if (getTypeTags()) {
+    TORCH_INTERNAL_ASSERT(ivalue.isGenericDict() || ivalue.isList());
 
-  // Push the dict type
-  TORCH_INTERNAL_ASSERT(ivalue.type());
-  pushString(ivalue.type()->python_str());
+    // Push the dict type
+    TORCH_INTERNAL_ASSERT(ivalue.type());
+    pushString(ivalue.type()->python_str());
 
-  // Pop the dict and type into a tuple
-  push<PickleOpCode>(PickleOpCode::TUPLE2);
+    // Pop the dict and type into a tuple
+    push<PickleOpCode>(PickleOpCode::TUPLE2);
 
-  // Call function via reduce
-  push<PickleOpCode>(PickleOpCode::REDUCE);
+    // Call function via reduce
+    push<PickleOpCode>(PickleOpCode::REDUCE);
+  }
 }
 
 void Pickler::pushDict(const IValue& ivalue) {

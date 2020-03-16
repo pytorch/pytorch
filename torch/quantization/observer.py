@@ -144,20 +144,48 @@ class _ObserverBase(ObserverBase):
             )
             return torch.tensor([1.0]), torch.tensor([0])
 
-        for i in range(len(min_vals)):
-            assert (
-                min_vals[i] <= max_vals[i]
-            ), "min {} should be less than max {}".format(min_vals[i], max_vals[i])
+        diff = min_vals <= max_vals
+        assert (torch.sum(diff) == len(diff)), "min_vals should be less than max_vals for indices."
 
         scales = torch.empty(min_vals.size(), dtype=torch.float32)
         zero_points = torch.empty(min_vals.size(), dtype=torch.int64)
 
-        for i in range(len(scales)):
-            qparam = self._calculate_qparams(
-                min_vals[i], max_vals[i]
-            )
-            scales[i] = float(qparam[0])
-            zero_points[i] = int(qparam[1])
+        if self.dtype == torch.qint8:
+            if self.reduce_range:
+                qmin, qmax = -64, 63
+            else:
+                qmin, qmax = -128, 127
+        else:
+            if self.reduce_range:
+                qmin, qmax = 0, 127
+            else:
+                qmin, qmax = 0, 255
+
+        max_vals, min_vals = max_vals.to(dtype=torch.float), min_vals.to(dtype=torch.float)
+
+        min_vals = torch.min(min_vals, torch.tensor([0.], device=min_vals.device, dtype=torch.float))
+        max_vals = torch.max(max_vals, torch.tensor([0.], device=max_vals.device, dtype=torch.float))
+        if torch.equal(max_vals, min_vals):
+            scales.fill_(1.0)
+            zero_points.fill_(0)
+        else:
+            if self.qscheme == torch.per_tensor_symmetric or self.qscheme == torch.per_channel_symmetric:
+                max_vals = torch.max(-min_vals, max_vals)
+                scales = max_vals / ((qmax - qmin) / 2)
+                scales = torch.max(scales, torch.tensor([self.eps], device=scales.device, dtype=scales.dtype))
+                if self.dtype == torch.qint8:
+                    zp = 0
+                else:
+                    zp = 128
+                zero_points.fill_(zp)
+            else:
+                scales = (max_vals - min_vals) / float(qmax - qmin)
+                scales = torch.max(scales, torch.tensor([self.eps], device=scales.device))
+                zero_points = qmin - torch.round(min_vals / scales)
+                zero_points = torch.max(zero_points, torch.tensor([qmin], dtype=zero_points.dtype, device=zero_points.device))
+                zero_points = torch.min(zero_points, torch.tensor([qmax], dtype=zero_points.dtype, device=zero_points.device))
+                zero_points = zero_points.to(dtype=torch.int64)
+        scales.to(dtype=torch.float)
 
         return scales, zero_points
 
@@ -758,14 +786,14 @@ class HistogramObserver(_ObserverBase):
         # histogram, which is initialized with zeros.
         # The offset at which the histogram is introduced is determined
         # by the start index as the output histogram can cover a wider range
-        histogram_with_output_range = torch.zeros((Nbins * downsample_rate))
+        histogram_with_output_range = torch.zeros((Nbins * downsample_rate), device=orig_hist.device)
         histogram_with_output_range[start_idx:Nbins * upsample_rate + start_idx] = upsampled_histogram
         # Compute integral histogram, double precision is needed to ensure
         # that there are no overflows
         integral_histogram = torch.cumsum(histogram_with_output_range, 0,
                                           dtype=torch.double)[downsample_rate - 1 :: downsample_rate]
         # Finally perform interpolation
-        shifted_integral_histogram = torch.zeros((Nbins))
+        shifted_integral_histogram = torch.zeros((Nbins), device=orig_hist.device)
         shifted_integral_histogram[1:Nbins] = integral_histogram[0:-1]
         interpolated_histogram = (integral_histogram - shifted_integral_histogram) / upsample_rate
         orig_hist = orig_hist + interpolated_histogram.to(torch.float)

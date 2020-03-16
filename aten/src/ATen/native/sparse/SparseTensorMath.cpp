@@ -211,6 +211,60 @@ SparseTensor& div_out_sparse_scalar(SparseTensor& r, const SparseTensor& t, Scal
 }
 
 // --------------------------------------------------------------------
+// true_divide(SparseTensor, Scalar)
+// --------------------------------------------------------------------
+
+Tensor true_divide_sparse(const Tensor& self, const Tensor& value) {
+  auto commonDtype = at::result_type(self, value);
+
+  // Ensures floating dtype
+  if (isIntegralType(commonDtype, /*includeBool=*/ true)) {
+    commonDtype = typeMetaToScalarType(c10::get_default_dtype());
+  }
+
+  Tensor result = at::empty({0}, self.options().dtype(commonDtype));
+  return div_out_sparse_zerodim(result, self, value);
+}
+
+SparseTensor& true_divide_out_sparse_zerodim(
+    SparseTensor& result,
+    const SparseTensor& dividend,
+    const Tensor& divisor) {
+  TORCH_CHECK(divisor.dim() == 0, "Sparse true division only supports",
+    " scalar or zero-dim dense tensor divisors (got shape ", divisor.sizes());
+  TORCH_CHECK(!divisor.is_sparse(), "A Sparse Tensor can only be divided by",
+    " a scalar or zero-dim dense tensor divisor, but got a sparse divisor.");
+
+  AT_ASSERT(result.is_sparse());
+  AT_ASSERT(dividend.is_sparse());
+
+  // Short-circuits if result and dividend are the same tensor
+  if (is_same_tensor(result, dividend)) {
+    Tensor result_values = result._values();
+    at::true_divide_out(result_values, result_values, divisor);
+  } else {
+    Tensor dividend_tmp = dividend;
+    result.resize_as_(dividend_tmp);
+    auto indices = result._indices();
+    indices.resize_as_(dividend_tmp.indices());
+    indices.copy_(dividend_tmp._indices());
+    Tensor result_values = result._values();
+    at::true_divide_out(result_values, dividend_tmp._values(), divisor);
+    get_sparse_impl(result)->set_nnz_and_narrow(dividend_tmp._nnz());
+    result._coalesced_(dividend_tmp.is_coalesced());
+  }
+
+  return result;
+}
+
+SparseTensor& true_divide_out_sparse_scalar(
+    SparseTensor& result,
+    const SparseTensor& dividend,
+    Scalar divisor) {
+  return true_divide_out_sparse_zerodim(result, dividend, wrapped_scalar_tensor(divisor));
+}
+
+// --------------------------------------------------------------------
 // norm(SparseTensor, Scalar)
 // --------------------------------------------------------------------
 

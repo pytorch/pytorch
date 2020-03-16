@@ -98,7 +98,7 @@ struct OperatorRegistry {
         rankings(cmp);
     static constexpr size_t MAX_EDIT_DIST = 2u;
     for (const auto& op : operators) {
-      auto edit_dist = script::ComputeEditDistance(
+      auto edit_dist = ComputeEditDistance(
           input_op.toQualString(), op.first.toQualString(), MAX_EDIT_DIST);
       if (edit_dist <= MAX_EDIT_DIST) {
         rankings.emplace(edit_dist, op.first);
