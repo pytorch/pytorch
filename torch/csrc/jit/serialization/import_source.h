@@ -9,7 +9,6 @@
 
 namespace torch {
 namespace jit {
-namespace script {
 
 struct SourceImporterImpl;
 
@@ -32,7 +31,7 @@ struct TORCH_API SourceImporter {
   // Add the methods defined in `src` to the module `mod`, using SourceImporter
   // to resolve any classes via loadNamedType
   void LEGACY_import_methods(
-      const script::Module& mod,
+      const Module& mod,
       const std::shared_ptr<Source>& src);
   ~SourceImporter();
 
@@ -40,6 +39,5 @@ struct TORCH_API SourceImporter {
   std::shared_ptr<SourceImporterImpl> pImpl;
 };
 
-} // namespace script
 } // namespace jit
 } // namespace torch

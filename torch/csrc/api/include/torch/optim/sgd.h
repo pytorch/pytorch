@@ -58,7 +58,7 @@ class TORCH_API SGD : public Optimizer {
   explicit SGD(std::vector<Tensor> params,
       SGDOptions defaults) : SGD({std::move(OptimizerParamGroup(params))}, defaults) {}
 
-  void step() override;
+  torch::Tensor step(LossClosure closure = nullptr) override;
 
   /// Adds the given vector of parameters to the optimizer's parameter list.
   void add_parameters(const std::vector<Tensor>& parameters) override;

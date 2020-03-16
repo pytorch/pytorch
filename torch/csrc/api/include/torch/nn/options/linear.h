@@ -8,6 +8,11 @@ namespace torch {
 namespace nn {
 
 /// Options for the `Linear` module.
+///
+/// Example:
+/// ```
+/// Linear model(LinearOptions(5, 2).bias(false));
+/// ```
 struct TORCH_API LinearOptions {
   LinearOptions(int64_t in_features, int64_t out_features);
   /// size of each input sample
@@ -23,6 +28,11 @@ struct TORCH_API LinearOptions {
 // ============================================================================
 
 /// Options for the `Flatten` module.
+///
+/// Example:
+/// ```
+/// Flatten model(FlattenOptions().start_dim(2).end_dim(4));
+/// ```
 struct TORCH_API FlattenOptions {
   /// first dim to flatten
   TORCH_ARG(int64_t, start_dim) = 1;
@@ -33,6 +43,11 @@ struct TORCH_API FlattenOptions {
 // ============================================================================
 
 /// Options for the `Bilinear` module.
+///
+/// Example:
+/// ```
+/// Bilinear model(BilinearOptions(3, 2, 4).bias(false));
+/// ```
 struct TORCH_API BilinearOptions {
   BilinearOptions(int64_t in1_features, int64_t in2_features, int64_t out_features);
   /// The number of features in input 1 (columns of the input1 matrix).
