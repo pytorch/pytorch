@@ -162,7 +162,7 @@ struct TORCH_API TensorView : public Val {
   }
 
   // Reorder axes according to map[old_pos] = new_pos
-  TensorView* reorder(std::unordered_map<int, int> map) {
+  TensorView* reorder(const std::unordered_map<int, int>& map) {
     return reorder_(this, map);
   }
 
