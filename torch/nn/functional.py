@@ -3800,7 +3800,7 @@ def scaled_dot_product_attention(q,                     # type: Tensor
                                  key_padding_mask=None, # type: Optional[Tensor]
                                  attn_mask=None,        # type: Optional[Tensor]
                                  ):
-    # type: (...) -> Tuple[Tensor, Optional[Tensor]]
+    # type: (...) -> Tuple[Tensor, Tensor]
     r"""
     Args:
         q (Tensor): Projected query
