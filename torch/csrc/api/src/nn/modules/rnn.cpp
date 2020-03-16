@@ -1,6 +1,7 @@
 #include <torch/nn/modules/rnn.h>
 
 #include <torch/nn/modules/dropout.h>
+#include <torch/nn/init.h>
 #include <torch/types.h>
 #include <torch/utils.h>
 
@@ -11,6 +12,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <regex>
 #include <string>
 #include <tuple>
 #include <unordered_set>
@@ -299,5 +301,185 @@ RNNOutput GRUImpl::forward(const Tensor& input, Tensor state) {
   return generic_forward(
       static_cast<RNNFunctionSignature*>(&torch::gru), input, std::move(state));
 }
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ RNNCellImplBase ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+namespace detail {
+template <typename Derived>
+RNNCellImplBase<Derived>::RNNCellImplBase(
+  const RNNCellOptionsBase& options_)
+  : options_base(options_) {
+  reset();
+}
+
+template <typename Derived>
+void RNNCellImplBase<Derived>::reset() {
+  weight_ih = this->register_parameter(
+    "weight_ih", torch::empty({options_base.num_chunks() * options_base.hidden_size(), options_base.input_size()}));
+  weight_hh = this->register_parameter(
+    "weight_hh", torch::empty({options_base.num_chunks() * options_base.hidden_size(), options_base.hidden_size()}));
+
+  if (options_base.bias()) {
+    bias_ih = this->register_parameter("bias_ih", torch::empty({options_base.num_chunks() * options_base.hidden_size()}));
+    bias_hh = this->register_parameter("bias_hh", torch::empty({options_base.num_chunks() * options_base.hidden_size()}));
+  } else {
+    bias_ih = this->register_parameter("bias_ih", Tensor(), /*requires_grad=*/false);
+    bias_hh = this->register_parameter("bias_hh", Tensor(), /*requires_grad=*/false);
+  }
+
+  reset_parameters();
+}
+
+template <typename Derived>
+void RNNCellImplBase<Derived>::reset_parameters() {
+  const double stdv = 1.0 / std::sqrt(options_base.hidden_size());
+  for (auto& weight : this->parameters()) {
+    init::uniform_(weight, -stdv, stdv);
+  }
+}
+
+template <typename Derived>
+void RNNCellImplBase<Derived>::pretty_print(std::ostream& stream) const {
+  const std::string name = this->name();
+  const std::string name_without_impl = name.substr(0, name.size() - 4);
+  stream << name_without_impl
+         << "(" << options_base.input_size()
+         << ", " << options_base.hidden_size();
+  if (!options_base.bias()) {
+    stream << ", bias=" << std::boolalpha << false;
+  }
+  auto nonlinearity_str = this->get_nonlinearity_str();
+  if (!nonlinearity_str.empty() && nonlinearity_str != "kTanh") {
+    stream << ", nonlinearity=" << nonlinearity_str;
+  }
+  stream << ")"; 
+}
+
+template <typename Derived>
+void RNNCellImplBase<Derived>::check_forward_input(const Tensor& input) const {
+  TORCH_CHECK(
+    input.size(1) == options_base.input_size(), 
+    "input has inconsistent input_size: got ", input.size(1), " expected ", options_base.input_size());
+}
+
+template <typename Derived>
+void RNNCellImplBase<Derived>::check_forward_hidden(const Tensor& input, const Tensor& hx, std::string hidden_label) const {
+  TORCH_CHECK(
+    input.size(0) == hx.size(0),
+    "Input batch size ", input.size(0), " doesn't match hidden", hidden_label, " batch size ", hx.size(0));
+
+  TORCH_CHECK(
+    hx.size(1) == options_base.hidden_size(),
+    "hidden", hidden_label, " has inconsistent hidden_size: got ", hx.size(1), ", expected ", options_base.hidden_size());
+}
+
+template <typename Derived>
+std::string RNNCellImplBase<Derived>::get_nonlinearity_str() const {
+  return "";
+}
+
+template class RNNCellImplBase<LSTMCellImpl>;
+template class RNNCellImplBase<GRUCellImpl>;
+template class RNNCellImplBase<RNNCellImpl>;
+} // namespace detail
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ RNNCell ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+RNNCellImpl::RNNCellImpl(const RNNCellOptions& options_)
+    : detail::RNNCellImplBase<RNNCellImpl>(
+          detail::RNNCellOptionsBase(
+            options_.input_size(),
+            options_.hidden_size(),
+            options_.bias(),
+            /*num_chunks=*/1)),
+      options(options_) {}
+
+
+Tensor RNNCellImpl::forward(const Tensor& input, Tensor hx) {
+  this->check_forward_input(input);
+  if (!hx.defined()) {
+    hx = torch::zeros({input.size(0), options.hidden_size()}, torch::dtype(input.dtype()).device(input.device()));
+  }
+  this->check_forward_hidden(input, hx, "");
+  Tensor ret;
+  if (c10::get_if<enumtype::kTanh>(&options.nonlinearity())) {
+    ret = torch::rnn_tanh_cell(
+      input, hx,
+      weight_ih, weight_hh,
+      bias_ih, bias_hh
+    );
+  } else if (c10::get_if<enumtype::kReLU>(&options.nonlinearity())) {
+    ret = torch::rnn_relu_cell(
+      input, hx,
+      weight_ih, weight_hh,
+      bias_ih, bias_hh
+    );
+  } else {
+    TORCH_CHECK(false, "Unknown nonlinearity: ", torch::enumtype::get_enum_name(options.nonlinearity()));
+  }
+  return ret;
+}
+
+std::string RNNCellImpl::get_nonlinearity_str() const {
+  return get_enum_name(options.nonlinearity());
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ LSTMCell ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+LSTMCellImpl::LSTMCellImpl(const LSTMCellOptions& options_)
+    : detail::RNNCellImplBase<LSTMCellImpl>(
+          detail::RNNCellOptionsBase(
+            options_.input_size(),
+            options_.hidden_size(),
+            options_.bias(),
+            /*num_chunks=*/4)),
+      options(options_) {}
+
+std::tuple<Tensor, Tensor> LSTMCellImpl::forward(
+  const Tensor& input, torch::optional<std::tuple<Tensor, Tensor>> hx_opt) {
+  this->check_forward_input(input);
+
+  std::tuple<Tensor, Tensor> hx;
+  if (!hx_opt.has_value()) {
+    auto zeros = torch::zeros({input.size(0), options.hidden_size()}, torch::dtype(input.dtype()).device(input.device()));
+    hx = std::make_tuple(zeros, zeros);
+  } else {
+    hx = hx_opt.value();
+  }
+
+  this->check_forward_hidden(input, std::get<0>(hx), "[0]");
+  this->check_forward_hidden(input, std::get<1>(hx), "[1]");
+
+  return torch::lstm_cell(
+    input, {std::get<0>(hx), std::get<1>(hx)},
+    weight_ih, weight_hh,
+    bias_ih, bias_hh
+  );
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ GRUCell ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+GRUCellImpl::GRUCellImpl(const GRUCellOptions& options_)
+    : detail::RNNCellImplBase<GRUCellImpl>(
+          detail::RNNCellOptionsBase(
+            options_.input_size(),
+            options_.hidden_size(),
+            options_.bias(),
+            /*num_chunks=*/3)),
+      options(options_) {}
+
+Tensor GRUCellImpl::forward(const Tensor& input, Tensor hx) {
+  this->check_forward_input(input);
+  if (!hx.defined()) {
+    hx = torch::zeros({input.size(0), options.hidden_size()}, torch::dtype(input.dtype()).device(input.device()));
+  }
+  this->check_forward_hidden(input, hx, "");
+  return torch::gru_cell(
+    input, hx,
+    weight_ih, weight_hh,
+    bias_ih, bias_hh
+  );
+}
+
 } // namespace nn
 } // namespace torch

@@ -1,10 +1,11 @@
 #include "import.h"
 #include <ATen/core/ivalue.h>
-#include <torch/csrc/jit/api/compilation_unit.h>
-#include <torch/csrc/jit/serialization/unpickler.h>
 #include <caffe2/serialize/inline_container.h>
-#include <torch/csrc/jit/runtime/instruction.h>
+#include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/mobile/type_parser.h>
+#include <torch/csrc/jit/runtime/instruction.h>
+#include <torch/csrc/jit/serialization/unpickler.h>
+#include <torch/custom_class.h>
 
 #include <fstream>
 #include <string>
@@ -61,7 +62,9 @@ void print_unsupported_ops_and_throw(const std::unordered_set<std::string>& unsu
   TORCH_CHECK(false, "Following ops cannot be found:", error_message);
 }
 
-void parseMethods(const std::vector<IValue>& vals, mobile::CompilationUnit& mcu) {
+void parseMethods(
+    const std::vector<IValue>& vals,
+    mobile::CompilationUnit& mcu) {
   for (const auto& element : vals) {
     const auto& m_tuple = element.toTuple()->elements();
     const std::string& function_name = m_tuple[0].toStringRef();
@@ -125,14 +128,14 @@ class BytecodeDeserializer final {
  private:
   c10::IValue readArchive(const std::string& archive_name,
     std::shared_ptr<mobile::CompilationUnit> mcu);
-  std::shared_ptr<script::CompilationUnit> compilation_unit_;
+  std::shared_ptr<CompilationUnit> compilation_unit_;
   std::unordered_set<std::string> imported_libs_;
   std::unique_ptr<PyTorchStreamReader> reader_;
   c10::optional<at::Device> device_;
 };
 
 BytecodeDeserializer::BytecodeDeserializer(std::unique_ptr<PyTorchStreamReader> reader)
-    : compilation_unit_(std::make_shared<script::CompilationUnit>()), reader_(std::move(reader)) {}
+    : compilation_unit_(std::make_shared<CompilationUnit>()), reader_(std::move(reader)) {}
 
 mobile::Module BytecodeDeserializer::deserialize(c10::optional<at::Device> device) {
   device_ = device;
@@ -179,13 +182,25 @@ c10::IValue BytecodeDeserializer::readArchive(const std::string& archive_name,
     auto qn = cls->name();
     c10::QualifiedName method_name(qn.value(), "__setstate__");
     auto setstate = mcu->find_function(method_name);
+    auto find_custom_class_with_setstate = [&qn]() -> c10::ClassTypePtr {
+      auto custom_class_type = torch::jit::getCustomClass(qn->qualifiedName());
+      if (custom_class_type && custom_class_type->getMethod("__setstate__")) {
+        return custom_class_type;
+      }
+      return nullptr;
+    };
     if (setstate) {
       auto obj = c10::ivalue::Object::create(type, 0);
       Stack stack({obj, input});
       setstate->run(stack);
       return obj;
-    }
-    else {
+    } else if (auto custom_class_type = find_custom_class_with_setstate()) {
+      auto obj = c10::ivalue::Object::create(
+          c10::StrongTypePtr(nullptr, custom_class_type), 1);
+      Stack stack({obj, input});
+      custom_class_type->getMethod("__setstate__")->run(stack);
+      return obj;
+    } else {
       auto dict = std::move(input).toGenericDict();
       size_t ndict = dict.size();
       auto obj = c10::ivalue::Object::create(type, ndict);

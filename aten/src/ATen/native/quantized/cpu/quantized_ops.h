@@ -15,6 +15,10 @@ using qclamp_fn = void (*)(
     Scalar max,
     at::Tensor& /*qy*/);
 using qtanh_fn = void (*)(const at::Tensor& /*qx*/, at::Tensor& /*qy*/);
+using qelu_fn = void(*)(
+    const at::Tensor& /*qx*/,
+    Scalar /*alpha*/,
+    at::Tensor& /*qy*/);
 using qbinary_fn =
     void (*)(Tensor& /*out*/, const Tensor& /*self*/, const Tensor& /*other*/);
 using qmaxpool_2d_fn = void (*)(
@@ -121,6 +125,7 @@ DECLARE_DISPATCH(qbinary_fn, qadd_stub);
 DECLARE_DISPATCH(qbinary_fn, qadd_relu_stub);
 DECLARE_DISPATCH(qbinary_fn, qmul_stub);
 DECLARE_DISPATCH(qbinary_fn, qmul_relu_stub);
+DECLARE_DISPATCH(qelu_fn, qelu_stub);
 DECLARE_DISPATCH(qmaxpool_2d_fn, qmaxpool_2d_nhwc_stub);
 DECLARE_DISPATCH(qadaptive_avg_pool2d_fn, qadaptive_avg_pool2d_nhwc_stub);
 DECLARE_DISPATCH(qavg_pool2d_fn, qavg_pool2d_nhwc_stub);

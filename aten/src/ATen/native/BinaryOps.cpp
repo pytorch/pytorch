@@ -14,6 +14,7 @@ DEFINE_DISPATCH(add_stub);
 DEFINE_DISPATCH(sub_stub);
 DEFINE_DISPATCH(mul_stub);
 DEFINE_DISPATCH(div_stub);
+DEFINE_DISPATCH(remainder_stub);
 DEFINE_DISPATCH(atan2_stub);
 DEFINE_DISPATCH(bitwise_and_stub);
 DEFINE_DISPATCH(bitwise_or_stub);
@@ -73,6 +74,24 @@ Tensor div(const Tensor& self, const Tensor& other) {
 
 Tensor& div_(Tensor& self, const Tensor& other) {
   return native::div_out(self, self, other);
+}
+
+Tensor& remainder_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  auto iter = TensorIterator::binary_op(result, self, other,
+    /*check_mem_overlap=*/true);
+  remainder_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor remainder(const Tensor& self, const Tensor& other) {
+  Tensor result;
+  auto iter = TensorIterator::binary_op(result, self, other);
+  remainder_stub(iter.device_type(), iter);
+  return iter.output();
+}
+
+Tensor& remainder_(Tensor& self, const Tensor& other) {
+  return native::remainder_out(self, self, other);
 }
 
 Tensor truncate(const Tensor& tensor) {
@@ -250,6 +269,30 @@ Tensor div(const Tensor& self, Scalar other) {
 // used for Python)
 Tensor& div_(Tensor& self, Scalar other) {
   return self.div_(wrapped_scalar_tensor(other)); // redispatch!
+}
+
+Tensor remainder(const Tensor& self, Scalar other) {
+  Tensor other_tensor = wrapped_scalar_tensor(other);
+  // FIXME: 'other' is converted to match the dtype of 'self' to retain
+  //   BC with TH, but in the future, we should use normal type promotion,
+  //   like in numpy
+  return native::remainder(self, other_tensor.toType(self.scalar_type()));
+}
+
+Tensor& remainder_(Tensor& self, Scalar other) {
+  Tensor other_tensor = wrapped_scalar_tensor(other);
+  // FIXME: 'other' is converted to match the dtype of 'self' to retain
+  //   BC with TH, but in the future, we should use normal type promotion,
+  //   like in numpy
+  return native::remainder_(self, other_tensor.toType(self.scalar_type()));
+}
+
+Tensor& remainder_out(Tensor& result, const Tensor& self, Scalar other) {
+  Tensor other_tensor = wrapped_scalar_tensor(other);
+  // FIXME: 'other' is converted to match the dtype of 'self' to retain
+  //   BC with TH, but in the future, we should use normal type promotion,
+  //   like in numpy
+  return native::remainder_out(result, self, other_tensor.toType(self.scalar_type()));
 }
 
 Tensor mul(const Tensor& self, Scalar other) {
