@@ -129,6 +129,7 @@
 [[
   name: _th_index_select
   cuda_bool: True
+  cuda_bfloat16: True
   cname: indexSelect
   variants:
     - function

@@ -21,15 +21,6 @@ white_list = [
     # We export some functions and classes for test_jit.py directly from libtorch.so,
     # it's not important to have BC for them
     ('_TorchScriptTesting.*', datetime.date(9999, 1, 1)),
-    # _like default change, see https://github.com/pytorch/pytorch/issues/33580
-    ('aten::randn_like', datetime.date(2020, 3, 15)),
-    ('aten::full_like', datetime.date(2020, 3, 15)),
-    ('aten::empty_like', datetime.date(2020, 3, 15)),
-    ('aten::rand_like', datetime.date(2020, 3, 15)),
-    ('aten::ones_like', datetime.date(2020, 3, 15)),
-    ('aten::randint_like', datetime.date(2020, 3, 15)),
-    ('aten::zeros_like', datetime.date(2020, 3, 15)),
-    ('_aten', datetime.date(2020, 4, 1)),
 ]
 
 

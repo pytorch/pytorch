@@ -98,8 +98,8 @@ void IValue::getSubValues(HashAliasedIValues& subValues) const {
       auto obj_value = toObject();
       auto attribute_names = obj_type->attributeNames();
       for (const auto& name: attribute_names) {
-	auto attribute = obj_value->getAttr(name);
-	attribute.getSubValues(subValues);
+        auto attribute = obj_value->getAttr(name);
+        attribute.getSubValues(subValues);
       }
       break;
     }
