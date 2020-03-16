@@ -255,7 +255,7 @@ static void clamp_min_kernel(TensorIterator& iter, Scalar min_scalar) {
 
 static void cauchy_kernel(TensorIterator& iter, double median, double sigma, Generator* gen) {
   CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
-  templates::cauchy_kernel(iter, median, sigma, generator);
+  templates::cpu::cauchy_kernel(iter, median, sigma, generator);
 }
 
 #if !AT_MKL_ENABLED()
@@ -440,7 +440,40 @@ void normal_fill(Tensor& self, const scalar_t mean, const scalar_t std, Generato
   }
 }
 
+std::vector<int64_t> computeStrideForComplex(IntArrayRef oldstride) {
+  auto res = oldstride.vec();
+  for(size_t i = 0; i < res.size(); i++) {
+    res[i] = res[i] * 2;
+  }
+  res.emplace_back(1);
+  return res;
+}
+
+// expects as input a complex tensor and returns back a float tensor
+// containing the complex values in the last two dimensions
+Tensor view_complex_as_float(const Tensor& self) {
+  TORCH_INTERNAL_ASSERT(self.is_complex());
+  auto new_sizes = self.sizes().vec();
+  // last dimension will always have two elements containing the real and imag vals
+  new_sizes.emplace_back(2);
+  auto new_strides = computeStrideForComplex(self.strides());
+  if(self.scalar_type() == at::kComplexFloat) {
+    float* data = reinterpret_cast<float*>(self.data_ptr<std::complex<float>>());
+    return at::from_blob(data, new_sizes, new_strides, dtype(at::kFloat));
+  } else {
+    double* data = reinterpret_cast<double*>(self.data_ptr<std::complex<double>>());
+    return at::from_blob(data, new_sizes, new_strides, dtype(at::kDouble));
+  }
+}
+
 void normal_kernel(Tensor& self, double mean, double std, Generator* gen) {
+  if(self.is_complex()) {
+    // note: float_tensor lives only as long as the self tensor lives
+    auto float_tensor = at::native::view_complex_as_float(self);
+    // variance for normal distribution of the real and imaginary values
+    // is half of the input variance
+    return normal_kernel(float_tensor, mean, std/(std::sqrt(2)), gen);
+  }
   auto size = self.numel();
   if (self.scalar_type() == ScalarType::Float && size >= 16 && self.is_contiguous()) {
 #ifdef __AVX2__
@@ -463,6 +496,24 @@ void normal_kernel(Tensor& self, double mean, double std, Generator* gen) {
       }
     });
   }
+}
+
+static void random_from_to_kernel(TensorIterator& iter, uint64_t range, int64_t base, Generator* gen) {
+  CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
+  templates::cpu::random_from_to_kernel(iter, range, base, generator);
+}
+
+static void random_kernel(TensorIterator& iter, Generator* gen) {
+  CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
+  templates::cpu::random_kernel(iter, generator);
+}
+
+// This is the special kernel to handle single specific case:
+// from(inclusive) = std::numeric_limits<int64_t>::lowest()
+// to(exclusive) = None (= std::numeric_limits<int64_t>::max() + 1)
+static void random_full_64_bits_range_kernel(TensorIterator& iter, Generator* gen) {
+  CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
+  templates::cpu::random_full_64_bits_range_kernel(iter, generator);
 }
 
 static void rsqrt_kernel(TensorIterator& iter) {
@@ -550,6 +601,9 @@ REGISTER_DISPATCH(exponential_stub, &exponential_kernel);
 REGISTER_DISPATCH(geometric_stub, &geometric_kernel);
 REGISTER_DISPATCH(log_normal_stub, &log_normal_kernel);
 REGISTER_DISPATCH(normal_stub, &normal_kernel);
+REGISTER_DISPATCH(random_from_to_stub, &random_from_to_kernel);
+REGISTER_DISPATCH(random_full_64_bits_range_stub, &random_full_64_bits_range_kernel);
+REGISTER_DISPATCH(random_stub, &random_kernel);
 REGISTER_DISPATCH(abs_stub, &abs_kernel);
 REGISTER_DISPATCH(angle_stub, &angle_kernel);
 REGISTER_DISPATCH(real_stub, &real_kernel);

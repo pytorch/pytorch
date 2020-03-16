@@ -1,8 +1,8 @@
-#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/testing/file_check.h>
 #include <torch/jit.h>
 #include "test/cpp/jit/test_base.h"
-#include "torch/csrc/jit/custom_operator.h"
+#include "torch/csrc/jit/runtime/custom_operator.h"
 
 #include <sstream>
 #include <string>
@@ -21,9 +21,9 @@ void testSchemaMatching() {
                 pop(stack, list, a);
                 push(stack, a);
                 return 0;
-            }),
+            }, c10::AliasAnalysisKind::FROM_SCHEMA),
     });
-    script::Module m("m");
+    Module m("m");
     m.define(R"(
       def test(self):
         a = (1.0, 2.0)
@@ -57,9 +57,9 @@ void testSchemaMatching() {
               pop(stack, a, list);
               push(stack, a);
               return 0;
-            }),
+            }, AliasAnalysisKind::FROM_SCHEMA),
     });
-    script::Module m("m");
+    Module m("m");
     m.define(R"JIT(
       def test(self):
           a = (1.0, 2.0)

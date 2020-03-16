@@ -455,7 +455,7 @@ void TrackMemoryAlloc(size_t nbytes) {
   int this_gpu = CaffeCudaGetDevice();
   g_total_by_gpu_map[this_gpu] += nbytes;
   g_max_by_gpu_map[this_gpu] =
-      max(g_max_by_gpu_map[this_gpu], g_total_by_gpu_map[this_gpu]);
+      std::max(g_max_by_gpu_map[this_gpu], g_total_by_gpu_map[this_gpu]);
   g_total_mem += nbytes;
   if (g_total_mem - g_last_rep >
       FLAGS_caffe2_gpu_memory_report_interval_mb * 1024 * 1024) {

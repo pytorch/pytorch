@@ -942,6 +942,7 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
         self.gradient_generators[str(y)][self.frontier[str(y)]].append(
             generator)
 
+    AUTOGEN_GRAD_SUFFIX = "_autogen_grad"
 
     def _GetInitGradients(self, ys):
         input_to_grad = {}
@@ -951,7 +952,7 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
             autograd_op = None
             if g is None:
                 autograd_op = CreateOperator(
-                    "ConstantFill", [y], [str(y) + "_autogen_grad"],
+                    "ConstantFill", [y], [str(y) + IR.AUTOGEN_GRAD_SUFFIX],
                     value=1.0)
                 gradient_ops.append(autograd_op)
                 g = autograd_op.output[0]

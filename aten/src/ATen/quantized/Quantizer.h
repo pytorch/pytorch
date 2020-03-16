@@ -53,7 +53,7 @@ struct CAFFE2_API Quantizer : public c10::intrusive_ptr_target {
   explicit Quantizer(ScalarType scalar_type) : scalar_type_(scalar_type) {}
   virtual ~Quantizer();
 
-  // Copied from torch/csrc/jit/scope.h
+  // Copied from torch/csrc/jit/ir/scope.h
   QuantizerPtr intrusive_from_this() {
     c10::raw::intrusive_ptr::incref(this); // we are creating a new pointer
                                            // from a raw `this` pointer
@@ -247,6 +247,13 @@ CAFFE2_API Tensor dequantize_tensor(Tensor qtensor, Tensor rtensor, double scale
 template <typename SRC_T, typename DST_T>
 CAFFE2_API DST_T requantize_val(double, int64_t, double, int64_t, SRC_T src);
 
+// Given a multiplier and a zero_point, requantize int32_t computed values back
+// to quantized values. See comment above
+// make_per_tensor_affine_quantizer function for the usage of int64_t
+template <typename DST_T>
+CAFFE2_API DST_T
+requantize_from_int(double multiplier, int64_t zero_point, int64_t src);
+
 // double and int64_t are because of the native function API, we only have these
 // argument types right now in native functions
 CAFFE2_API QuantizerPtr
@@ -263,7 +270,6 @@ CAFFE2_API QuantizerPtr make_per_channel_affine_quantizer(
 CAFFE2_API Tensor new_qtensor_cpu(
     IntArrayRef sizes,
     const TensorOptions& options,
-    QuantizerPtr quantizer,
-    MemoryFormat memory_format);
+    QuantizerPtr quantizer);
 
 } // namespace at
