@@ -3,14 +3,6 @@
 namespace torch {
 namespace jit {
 
-RegisterPostPass::RegisterPostPass(GraphPass p) {
-  registerPostPass(p);
-}
-
-RegisterPrePass::RegisterPrePass(GraphPass p) {
-  registerPrePass(p);
-}
-
 std::vector<GraphPassEntry>& getCustomPostPasses() {
   static std::vector<GraphPassEntry> passes;
   return passes;
@@ -21,17 +13,17 @@ std::vector<GraphPassEntry>& getCustomPrePasses() {
   return passes;
 }
 
-GraphPassNameType RegisterPostPass::registerPostPass(GraphPass p) {
+GraphPassNameType registerPostPass(GraphPass p) {
   getCustomPostPasses().emplace_back(GraphPassEntry{std::move(p), graphPassID});
   return graphPassID++;
 }
 
-GraphPassNameType RegisterPrePass::registerPrePass(GraphPass p) {
+GraphPassNameType registerPrePass(GraphPass p) {
   getCustomPrePasses().emplace_back(GraphPassEntry{std::move(p), graphPassID});
   return graphPassID++;
 }
 
-ClearPostPass::ClearPostPass(GraphPassNameType pid) {
+void ClearPostPass(GraphPassNameType pid) {
   auto& passes = getCustomPostPasses();
   auto it = passes.begin();
   for (; it != passes.end(); it++) {
@@ -42,7 +34,7 @@ ClearPostPass::ClearPostPass(GraphPassNameType pid) {
     passes.erase(it);
 }
 
-ClearPrePass::ClearPrePass(GraphPassNameType pid) {
+void ClearPrePass(GraphPassNameType pid) {
   auto& passes = getCustomPrePasses();
   auto it = passes.begin();
   for (; it != passes.end(); it++) {
@@ -53,40 +45,48 @@ ClearPrePass::ClearPrePass(GraphPassNameType pid) {
     passes.erase(it);
 }
 
-ClearAllPostPasses::ClearAllPostPasses() {
+void ClearAllPostPasses() {
   auto& passes = getCustomPostPasses();
   passes.erase(passes.begin(), passes.end());
 }
 
-ClearAllPrePasses::ClearAllPrePasses() {
+void ClearAllPrePasses() {
   auto& passes = getCustomPrePasses();
   passes.erase(passes.begin(), passes.end());
 }
 
-GraphPassNameType PassManager::name(GraphPassNameType PassName, bool set) {
+template<typename DerivedType>
+GraphPassNameType PassManager<DerivedType>::name(GraphPassNameType PassName, bool set) {
   static GraphPassNameType name = 0;
   if (set)
     name = PassName;
   return name;
 }
 
-bool PassManager::flipRegistered(bool flip) {
+template<typename DerivedType>
+bool PassManager<DerivedType>::isRegistered(bool flip_bit) {
   static bool val = false;
-  if (flip)
+  if (flip_bit)
     val = !val;
   return val;
 }
-void PassManager::registerPass(GraphPass pass) {
-  if (!flipRegistered()) {
-    name(RegisterPostPass::registerPostPass(pass), true);
-    flipRegistered(true);
+
+template<typename DerivedType>
+void PassManager<DerivedType>::registerPass(GraphPass pass) {
+  if (!isRegistered()) {
+    // If we don't already have a registered pass, register pass
+    // hold on to its name, change isRegistered to true
+    name(RegisterPostPass::registerPostPass(std::move(pass)), true);
+    isRegistered(true);
   }
 }
 
-void PassManager::clearPass() {
-  if (flipRegistered()) {
+template<typename DerivedType>
+void PassManager<DerivedType>::clearPass() {
+  //If the pass is registered, clear it and change isRegistered to false.
+  if (isRegistered()) {
     ClearPostPass pass(name());
-    flipRegistered(true);
+    isRegistered(true);
   }
 }
 

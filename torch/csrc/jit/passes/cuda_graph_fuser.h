@@ -12,8 +12,14 @@ namespace jit {
 TORCH_API void CudaFuseGraph(std::shared_ptr<Graph>& graph);
 
 // Register CudaFuseGraph in custom passes
-struct TORCH_API RegisterCudaFuseGraph : public PassManager {
-  static void registerPass() {
+struct TORCH_API RegisterCudaFuseGraph : public PassManager<RegisterCudaFuseGraph>{
+  static void registerPass(){
+    TORCH_CHECK(
+        at::globalContext().hasCUDA(),
+        "CudaFuseGraph requires pytorch built with CUDA");
+      TORCH_CHECK(
+        !at::globalContext().hasHIP(),
+        "CudaFuseGraph is not supported for HIP.");
     PassManager::registerPass(CudaFuseGraph);
   }
 };
