@@ -5046,7 +5046,7 @@
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_min
+    CPU: min
     CUDA: legacy::cuda::_th_min
     QuantizedCPU: min_quant
   supports_named_tensor: True
@@ -5061,7 +5061,7 @@
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_max
+    CPU: max
     CUDA: legacy::cuda::_th_max
     QuantizedCPU: max_quant
   supports_named_tensor: True
