@@ -19,11 +19,7 @@ OutputArchive::OutputArchive(std::shared_ptr<jit::CompilationUnit> cu)
       module_("__torch__.Module", cu_, /*shouldMangle=*/true) {}
 
 void OutputArchive::write(const std::string& key, const c10::IValue& ivalue) {
-  if(ivalue.isTensor() && (ivalue.unsafeToTensorImpl() == at::UndefinedTensorImpl::singleton())) {
-    module_.register_attribute(key, c10::TensorType::get()->withUndefined(), ivalue);
-  } else {
-    module_.register_attribute(key, ivalue.type(), ivalue);
-  }
+  module_.register_attribute(key, ivalue.type(), ivalue);
 }
 
 void OutputArchive::write(
