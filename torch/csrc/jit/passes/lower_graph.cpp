@@ -78,11 +78,11 @@ std::pair<std::shared_ptr<Graph>, std::vector<Slot>> lower_graph(
       continue;
     }
     if (e.n->kind() == prim::PythonOp) {
-      throw script::ErrorReport(e.n->sourceRange())
+      throw ErrorReport(e.n->sourceRange())
           << "Couldn't export Python method.";
     }
     if (e.n->kind() != prim::GetAttr) {
-      throw script::ErrorReport(e.n->sourceRange())
+      throw ErrorReport(e.n->sourceRange())
           << "temporary: the only valid use of a module is looking up an "
              "attribute but found "
           << *e.n;
