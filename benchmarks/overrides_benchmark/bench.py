@@ -1,7 +1,7 @@
 import torch
 import time
 
-from common import SubTensor, WithTorchFunction
+from common import SubTensor, WithTorchFunction, SubWithTorchFunction
 
 NUM_REPEATS = 1000
 NUM_REPEAT_OF_REPEATS = 1000
@@ -22,7 +22,7 @@ def bench(t1, t2):
 
 
 def main():
-    types = [torch.Tensor, SubTensor, WithTorchFunction]
+    types = [torch.Tensor, SubTensor, WithTorchFunction, SubWithTorchFunction]
 
     for t in types:
         tensor_1 = t(1)

@@ -1,6 +1,7 @@
 import sys
 import torch
-from common import SubTensor, WithTorchFunction  # noqa: F401
+from common import SubTensor, WithTorchFunction, SubWithTorchFunction  # noqa: F401
+
 Tensor = torch.Tensor
 
 NUM_REPEATS = 1000000
