@@ -141,7 +141,7 @@ RegisterOperators reg_rpc_ops({
                  const string& keyStr = keyIValue.toStringRef();
                  names.emplace_back(keyStr);
                }
-               functionSchema.findErrorInKwargs(names);
+               throw std::runtime_error(functionSchema.findErrorInKwargs(names));
              }
 
              // Send RPC request.

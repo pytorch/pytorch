@@ -411,6 +411,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/passes/inline_fork_wait.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/graph_fuser.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/cuda_graph_fuser.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/graph_rewrite_helper.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/guard_elimination.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/inplace_check.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/liveness.cpp
@@ -430,7 +431,9 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/passes/utils/subgraph_utils.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/utils/check_alias_annotation.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/utils/memory_dag.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/prepack_folding.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/quantization.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/xnnpack_rewrite.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/fuse_linear.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/freeze_module.cpp
     ${TORCH_SRC_DIR}/csrc/jit/runtime/print_handler.cpp
@@ -595,6 +598,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/api/src/nn/module.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/_functions.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/activation.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/adaptive.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/batchnorm.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/normalization.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/instancenorm.cpp
@@ -611,8 +615,8 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/rnn.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/upsampling.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/container/functional.cpp
-      ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/container/named_any.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/activation.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/options/adaptive.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/batchnorm.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/embedding.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/instancenorm.cpp
@@ -727,6 +731,9 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
         ${NVTOOLEXT_HOME}/lib/x64/nvToolsExt64_1.lib
         ${CUDA_LIBRARIES})
       target_include_directories(torch_cuda PUBLIC "${NVTOOLEXT_HOME}/include")
+      # -INCLUDE is used to ensure torch_cuda is linked against in a project that relies on it.
+      # Related issue: https://github.com/pytorch/pytorch/issues/31611
+      target_link_libraries(torch_cuda INTERFACE "-INCLUDE:\"?warp_size@cuda@at@@YAHXZ\"")
 
     elseif(APPLE)
       set(TORCH_CUDA_LIBRARIES
