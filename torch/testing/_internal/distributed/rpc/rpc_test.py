@@ -235,7 +235,8 @@ def heavy_rpc(tensor):
     return 0
 
 @torch.jit.script
-def heavy_rpc_torchscript(tensor):
+def heavy_rpc_torchscript():
+    tensor = torch.ones(100, 100)
     for i in range(1, 100):
         tensor *= i
         tensor /= i + 1
@@ -888,7 +889,7 @@ class RpcTest(RpcAgentTestFixture):
 
     @dist_init
     def test_stress_heavy_rpc_torchscript(self):
-        self._stress_test_rpc(heavy_rpc_torchscript, repeat=20, args=(torch.ones(100, 100),))
+        self._stress_test_rpc(heavy_rpc_torchscript, repeat=20, args=())
 
     @dist_init
     def test_builtin_remote_ret(self):
