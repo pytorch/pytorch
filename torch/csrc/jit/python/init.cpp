@@ -46,6 +46,7 @@
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/passes/utils/check_alias_annotation.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
+#include <torch/csrc/jit/passes/xnnpack_rewrite.h>
 #include <torch/csrc/jit/runtime/print_handler.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/python/python_arg_flatten.h>
@@ -219,7 +220,7 @@ void initJITBindings(PyObject* module) {
              SwapFunctionalLinear(graph);
            })
       .def("_jit_pass_swap_functional_linear",
-           [](script::Module& module) {
+           [](Module& module) {
              SwapFunctionalLinear(module);
            })
       .def("_jit_pass_quant_finalize", &Finalize)
@@ -410,6 +411,21 @@ void initJITBindings(PyObject* module) {
             return debugGetFusedKernelCode(g, inps);
           })
       .def(
+          "_jit_pass_insert_xnnpack_ops",
+          [](std::shared_ptr<Graph>& graph) {
+            return insertXNNPACKOps(graph);
+          })
+      .def(
+          "_jit_pass_insert_xnnpack_ops",
+          [](script::Module& module) {
+            return insertXNNPACKOps(module);
+          })
+      .def(
+          "_jit_pass_fold_xnnpack_prepack_ops",
+          [](script::Module& module) {
+            return FoldXNNPACKPrePackingOps(module);
+          })
+      .def(
           "_jit_pass_onnx_unpack_quantized_weights",
           [](std::shared_ptr<Graph>& graph,
              std::map<std::string, at::Tensor>& paramsDict) {
@@ -592,22 +608,18 @@ void initJITBindings(PyObject* module) {
           auto symbol = Symbol::fromQualString(op_name);
           auto operations = getAllOperatorsFor(symbol);
           TORCH_CHECK(!operations.empty(), "No such operator ", op_name);
-          TORCH_CHECK(
-              operations.size() == 1,
-              "Found ",
-              operations.size(),
-              " overloads for operator ",
-              op_name,
-              "! Overloads are not supported from Python.");
-          std::shared_ptr<Operator> op = operations[0];
-          AT_ASSERT(op != nullptr);
           std::ostringstream docstring;
           docstring << "Automatically bound operator '" << op_name
-                    << "' with schema: " << op->schema();
+                    << "' with schema(s):\n";
+                    
+          for (const auto& op : operations) {
+            docstring << "  " << op->schema() << "\n";
+          }
+
           return py::cpp_function(
-              [op](py::args args, py::kwargs kwargs) {
+              [operations](py::args args, py::kwargs kwargs) {
                 return invokeOperatorFromPython(
-                    *op, std::move(args), std::move(kwargs));
+                    operations, std::move(args), std::move(kwargs));
               },
               py::name(symbol.toUnqualString()),
               py::doc(docstring.str().c_str()));
