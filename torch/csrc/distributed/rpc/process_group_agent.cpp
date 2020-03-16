@@ -328,14 +328,16 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
   if (to.id_ == (worker_id_t)pg_->getRank()) {
     threadPool_.run(std::bind(
         [this, future](const Message& message) {
-          sendCounts_.increment(pg_->getRank());
           // Unlike the other cases, need to add a tensor deleter, since the
           // data outlives the scope of this function. It's shared_ptr<> due
           // to c++11 lambda capture limitations with unique_ptr<>.
           std::unique_ptr<std::string> payload;
           try {
             payload = std::make_unique<std::string>(
-              wireSerialize(message.payload(), message.tensors()));
+                wireSerialize(message.payload(), message.tensors()));
+            // only increment sendCounts when the message is indeed added into
+            // local recv.
+            sendCounts_.increment(pg_->getRank());
           } catch (std::exception& e) {
             future->setError(e.what());
             return;
