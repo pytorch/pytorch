@@ -27,10 +27,10 @@ namespace {
 
 // PythonTypeResolver that inherits from Script::Resolver to
 // support resolving types together with ScriptTypeParser.
-struct PythonTypeResolver : public jit::script::Resolver {
-  std::shared_ptr<jit::script::SugaredValue> resolveValue(
+struct PythonTypeResolver : public jit::Resolver {
+  std::shared_ptr<jit::SugaredValue> resolveValue(
       const std::string& /* unused */,
-      Function& /* unused */,
+      torch::jit::Function& /* unused */,
       const jit::SourceRange& /* unused */) override {
     TORCH_INTERNAL_ASSERT(
         false, "RPC Type resolver does not need to resolve value");
@@ -62,61 +62,58 @@ PythonRpcHandler::PythonRpcHandler() {
   PROFILE_GIL_SCOPED_ACQUIRE;
   py::object module = py::module::import("torch.distributed.rpc.internal");
   pyRunFunction_ = getFunction(module, "_run_function");
-  pyLoadReturnValue_ = getFunction(module, "_load_return_value");
   pySerialize_ = getFunction(module, "serialize");
+  pyDeserialize_ = getFunction(module, "deserialize");
   pyHandleException_ = getFunction(module, "_handle_exception");
+  pyGetQualifiedName_ = py::module::import("torch.jit").attr("_qualified_name");
   jitCompilationUnit_ = torch::jit::get_python_cu();
-  typeParser_ = std::make_shared<jit::script::ScriptTypeParser>(
+  typeParser_ = std::make_shared<jit::ScriptTypeParser>(
       std::make_shared<PythonTypeResolver>());
 }
 
 void PythonRpcHandler::cleanup() {
   PROFILE_GIL_SCOPED_ACQUIRE;
   pyRunFunction_ = py::none();
-  pyLoadReturnValue_ = py::none();
   pySerialize_ = py::none();
+  pyDeserialize_ = py::none();
   pyHandleException_ = py::none();
+  pyGetQualifiedName_ = py::none();
   jitCompilationUnit_ = nullptr;
   typeParser_ = nullptr;
 }
 
 PythonRpcHandler& PythonRpcHandler::getInstance() {
+  // A thread could hold GIL when calling PythonRpcHandler::getInstance(),
+  // meantime another thread could have been doing static data
+  // initialization by calling `new PythonRpcHandler()`, inside of which GIL is
+  // also required. Static data initialization is thread-safe, so the thread
+  // holding the GIL will wait for the other thread to finish static data
+  // initializating before going forward. Because the initialization can't
+  // proceed without GIL, there is a deadlock. We ask the calling thread to
+  // release GIL to avoid this situation.
+  TORCH_INTERNAL_ASSERT(!PyGILState_Check());
   // Leaky singleton to avoid module destructor race.
   static PythonRpcHandler* handler = new PythonRpcHandler();
   return *handler;
 }
 
-std::shared_ptr<torch::jit::script::CompilationUnit> PythonRpcHandler::
+std::shared_ptr<torch::jit::CompilationUnit> PythonRpcHandler::
     jitCompilationUnit() {
   return jitCompilationUnit_;
 }
 
-std::vector<char> PythonRpcHandler::generatePythonUDFResult(
-    const std::vector<char>& pickledPayload,
-    const std::vector<torch::Tensor>& requestTensorTable,
-    std::vector<torch::Tensor>& responseTensorTable) {
+SerializedPyObj PythonRpcHandler::generatePythonUDFResult(
+    const SerializedPyObj& serializedPyObj) {
   PROFILE_GIL_SCOPED_ACQUIRE;
-  auto pargs = py::bytes(pickledPayload.data(), pickledPayload.size());
-  py::tuple pres = pySerialize_(pyRunFunction_(pargs, requestTensorTable));
-  const auto& presStr = pres[0].cast<std::string>();
-  responseTensorTable = pres[1].cast<std::vector<torch::Tensor>>();
-  std::vector<char> payload(presStr.begin(), presStr.end());
-  return payload;
-}
-
-py::object PythonRpcHandler::loadPythonUDFResult(
-    const std::vector<char>& pickledPayload,
-    const std::vector<torch::Tensor>& tensorTable) {
-  PROFILE_GIL_SCOPED_ACQUIRE;
-  auto pargs = py::bytes(pickledPayload.data(), pickledPayload.size());
-  return pyLoadReturnValue_(pargs, tensorTable);
+  auto pythonUdf = deserialize(serializedPyObj);
+  return serialize(pyRunFunction_(std::move(pythonUdf)));
 }
 
 py::object PythonRpcHandler::runPythonUDF(
-    const SerializedPyObj& serializedObj) {
+    const SerializedPyObj& serializedPyObj) {
   PROFILE_GIL_SCOPED_ACQUIRE;
-  return pyRunFunction_(
-      py::bytes(serializedObj.payload_), serializedObj.tensors_);
+  auto pythonUdf = deserialize(serializedPyObj);
+  return pyRunFunction_(std::move(pythonUdf));
 }
 
 SerializedPyObj PythonRpcHandler::serialize(const py::object& obj) {
@@ -128,7 +125,10 @@ SerializedPyObj PythonRpcHandler::serialize(const py::object& obj) {
 
 py::object PythonRpcHandler::deserialize(const SerializedPyObj& serializedObj) {
   PROFILE_GIL_SCOPED_ACQUIRE;
-  return pyLoadReturnValue_(
+  // NB: pyDeserialize_ can return an AttributeError if the deserialize() Python
+  // function fails. Functions consuming the result needs to handle such error
+  // properly.
+  return pyDeserialize_(
       py::bytes(serializedObj.payload_), serializedObj.tensors_);
 }
 
@@ -140,6 +140,11 @@ void PythonRpcHandler::handleException(const py::object& obj) {
 void PythonRpcHandler::handleExceptionGILHeld(const py::object& obj) {
   TORCH_CHECK(PyGILState_Check(), "GIL should be held");
   pyHandleException_(obj);
+}
+
+c10::QualifiedName PythonRpcHandler::getQualifiedName(const py::object& obj) {
+  PROFILE_GIL_SCOPED_ACQUIRE;
+  return c10::QualifiedName(pyGetQualifiedName_(obj).cast<std::string>());
 }
 
 TypePtr PythonRpcHandler::parseTypeFromStr(const std::string& type_str) {

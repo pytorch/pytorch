@@ -151,12 +151,31 @@ if (INTERN_BUILD_ATEN_OPS)
     set(GEN_ROCM_FLAG --rocm)
   endif()
 
+  set(CUSTOM_BUILD_FLAG)
+  if (SELECTED_OP_LIST AND NOT USE_STATIC_DISPATCH)
+    if (NOT OP_DEPENDENCY)
+      message(FATAL_ERROR "Must provide op dependency graph .yaml file for custom build with dynamic dispatch!")
+    endif()
+    EXECUTE_PROCESS(
+      COMMAND
+      "${PYTHON_EXECUTABLE}" ${CMAKE_CURRENT_LIST_DIR}/../tools/code_analyzer/gen_transitive_deps.py
+      --op-dependency "${OP_DEPENDENCY}"
+      --root-ops "${SELECTED_OP_LIST}"
+      OUTPUT_VARIABLE SELECTED_OP_CLOSURE
+    )
+    separate_arguments(SELECTED_OP_CLOSURE)
+    message(STATUS "Custom build with selected op closure: ${SELECTED_OP_CLOSURE}")
+    set(CUSTOM_BUILD_FLAG
+      --op_registration_whitelist ${SELECTED_OP_CLOSURE})
+  endif()
+
   SET(GEN_COMMAND
       "${PYTHON_EXECUTABLE}" ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/gen.py
       --source-path ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen
       --install_dir ${CMAKE_BINARY_DIR}/aten/src/ATen
       ${GEN_ROCM_FLAG}
       ${cwrap_files}
+      ${CUSTOM_BUILD_FLAG}
   )
 
   EXECUTE_PROCESS(

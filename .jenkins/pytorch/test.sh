@@ -37,6 +37,7 @@ fi
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # TODO: Move this to Docker
+  sudo apt-get -qq install --no-install-recommends apt-transport-https ca-certificates
   sudo apt-get -qq update
   sudo apt-get -qq install --no-install-recommends libsndfile1
 fi
@@ -117,7 +118,7 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     # Increase stack size, because ASAN red zones use more stack
     ulimit -s 81920
 
-    (cd test && python -c "import torch")
+    (cd test && python -c "import torch; print(torch.__version__, torch.version.git_version)")
     echo "The next three invocations are expected to crash; if they don't that means ASAN/UBSAN is misconfigured"
     (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_csrc_asan(3)")
     (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_csrc_ubsan(0)")
@@ -130,23 +131,28 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX2-* ]]; then
   export ATEN_CPU_CAPABILITY=avx
 fi
 
+if [ -n "$CIRCLE_PULL_REQUEST" ]; then
+  DETERMINE_FROM=$(mktemp)
+  file_diff_from_base "$DETERMINE_FROM"
+fi
+
 test_python_nn() {
-  time python test/run_test.py --include test_nn --verbose
+  time python test/run_test.py --include test_nn --verbose --determine-from="$DETERMINE_FROM"
   assert_git_not_dirty
 }
 
 test_python_ge_config_simple() {
-  time python test/run_test.py --include test_jit_simple --verbose
+  time python test/run_test.py --include test_jit_simple --verbose --determine-from="$DETERMINE_FROM"
   assert_git_not_dirty
 }
 
 test_python_ge_config_legacy() {
-  time python test/run_test.py --include test_jit_legacy test_jit_fuser_legacy --verbose
+  time python test/run_test.py --include test_jit_legacy test_jit_fuser_legacy --verbose --determine-from="$DETERMINE_FROM"
   assert_git_not_dirty
 }
 
 test_python_all_except_nn() {
-  time python test/run_test.py --exclude test_nn test_jit_simple test_jit_legacy test_jit_fuser_legacy --verbose --bring-to-front test_quantization test_quantized test_quantized_tensor test_quantized_nn_mods
+  time python test/run_test.py --exclude test_nn test_jit_simple test_jit_legacy test_jit_fuser_legacy --verbose --bring-to-front test_quantization test_quantized test_quantized_tensor test_quantized_nn_mods --determine-from="$DETERMINE_FROM"
   assert_git_not_dirty
 }
 

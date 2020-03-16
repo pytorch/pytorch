@@ -286,11 +286,15 @@ void TensorIterator::allocate_outputs() {
     if (!op.tensor.defined()) {
       TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
       int element_size = elementSize(op.target_dtype);
-      if (requires_channels_last_output_ && ndim() == 4) {
+      if ((requires_channels_last_output_ && ndim() == 4) ||
+          (requires_channels_last_3d_output_ && ndim() == 5)) {
         auto tensor_shape = invert_perm(shape_);
         op.tensor = at::empty(tensor_shape, op.options());
-        op.tensor.unsafeGetTensorImpl()->empty_tensor_restride(
-            MemoryFormat::ChannelsLast);
+        if (requires_channels_last_output_) {
+          op.tensor.unsafeGetTensorImpl()->empty_tensor_restride(MemoryFormat::ChannelsLast);
+        } else {
+          op.tensor.unsafeGetTensorImpl()->empty_tensor_restride(MemoryFormat::ChannelsLast3d);
+        }
         // As we are allocating output after permutations is done, we need to
         // make sure that operand's strides are matching element size and
         // dimensions permutations which are stored in _perm
@@ -803,8 +807,11 @@ void TensorIterator::compute_shape() {
         tensor.resize_(shape_);
         if (requires_channels_last_output_ && tensor.dim() == 4) {
           // Temporary stick to 4d tensor, will update with arbitrary batched later on
-          tensor.unsafeGetTensorImpl()->empty_tensor_restride(
-              MemoryFormat::ChannelsLast);
+          tensor.unsafeGetTensorImpl()->empty_tensor_restride(MemoryFormat::ChannelsLast);
+        }
+        else if (requires_channels_last_3d_output_ && tensor.dim() == 5) {
+          // Temporary stick to 5d tensor, will update with arbitrary batched later on
+          tensor.unsafeGetTensorImpl()->empty_tensor_restride(MemoryFormat::ChannelsLast3d);
         }
         continue;
       }
@@ -838,9 +845,15 @@ void TensorIterator::compute_strides() {
 
 void TensorIterator::analyze_memory_format() {
   for (auto& op : operands_) {
-    if (op.tensor.defined() &&
-        op.tensor.suggest_memory_format() == MemoryFormat::ChannelsLast) {
-      requires_channels_last_output_ = true;
+    if (op.tensor.defined()) {
+      if (!requires_channels_last_output_ &&
+          op.tensor.suggest_memory_format() == MemoryFormat::ChannelsLast) {
+        requires_channels_last_output_ = true;
+      }
+      else if (!requires_channels_last_3d_output_ &&
+          op.tensor.suggest_memory_format() == MemoryFormat::ChannelsLast3d) {
+        requires_channels_last_3d_output_ = true;
+      }
     }
   }
 }
@@ -961,7 +974,7 @@ bool TensorIterator::fast_set_up() {
         break;
       }
     default:
-      TORCH_INTERNAL_ASSERT(false, "Unsupported fast setup type", std::to_string((int)setup_type));
+      TORCH_INTERNAL_ASSERT(false, "Unsupported fast setup type", c10::to_string((int)setup_type));
   }
   //coalescing dimensions consists of collapsing dimensions to 1 (we are limited to contiguous no-broadcast cases here)
   if (ndim() > 1){

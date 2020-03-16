@@ -6,123 +6,9 @@ namespace at {
 namespace native {
 namespace {
 
-template <typename scalar_t>
-static void upsample_nearest2d_out_frame(
-    scalar_t* odata,
-    scalar_t* idata,
-    int64_t input_height,
-    int64_t input_width,
-    int64_t output_height,
-    int64_t output_width,
-    int64_t nbatch,
-    int64_t channels,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w) {
-  const float height_scale = compute_scales_value<float>(scales_h, input_height, output_height);
-  const float width_scale = compute_scales_value<float>(scales_w, input_width, output_width);
-
-  channels = channels * nbatch;
-
-  // special case: just copy
-  if (input_height == output_height && input_width == output_width) {
-    for (int64_t h2 = 0; h2 < output_height; ++h2) {
-      const int64_t h1 = h2;
-
-      for (int64_t w2 = 0; w2 < output_width; ++w2) {
-        const int64_t w1 = w2;
-        const scalar_t* pos1 = &idata[h1 * input_width + w1];
-        scalar_t* pos2 = &odata[h2 * output_width + w2];
-
-        for (int64_t c = 0; c < channels; ++c) {
-          pos2[0] = pos1[0];
-          pos1 += input_height * input_width;
-          pos2 += output_height * output_width;
-        }
-      }
-    }
-    return;
-  }
-
-  for (int64_t h2 = 0; h2 < output_height; ++h2) {
-    const int64_t h1 =
-        nearest_neighbor_compute_source_index(height_scale, h2, input_height);
-
-    for (int64_t w2 = 0; w2 < output_width; ++w2) {
-      const int64_t w1 =
-          nearest_neighbor_compute_source_index(width_scale, w2, input_width);
-
-      const scalar_t* pos1 = &idata[h1 * input_width + w1];
-      scalar_t* pos2 = &odata[h2 * output_width + w2];
-
-      for (int64_t c = 0; c < channels; ++c) {
-        pos2[0] = pos1[0];
-        pos1 += input_height * input_width;
-        pos2 += output_height * output_width;
-      }
-    }
-  }
-}
-
-template <typename scalar_t>
-static void upsample_nearest2d_backward_out_frame(
-    scalar_t* odata,
-    scalar_t* idata,
-    int64_t input_height,
-    int64_t input_width,
-    int64_t output_height,
-    int64_t output_width,
-    int64_t nbatch,
-    int64_t channels,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w) {
-
-  const float height_scale = compute_scales_value<float>(scales_h, input_height, output_height);
-  const float width_scale = compute_scales_value<float>(scales_w, input_width, output_width);
-
-  channels = channels * nbatch;
-
-  // special case: just copy
-  if (input_height == output_height && input_width == output_width) {
-    for (int64_t h2 = 0; h2 < output_height; ++h2) {
-      const int64_t h1 = h2;
-
-      for (int64_t w2 = 0; w2 < output_width; ++w2) {
-        const int64_t w1 = w2;
-        scalar_t* pos1 = &idata[h1 * input_width + w1];
-        const scalar_t* pos2 = &odata[h2 * output_width + w2];
-
-        for (int64_t c = 0; c < channels; ++c) {
-          pos1[0] = pos2[0];
-          pos1 += input_height * input_width;
-          pos2 += output_height * output_width;
-        }
-      }
-    }
-    return;
-  }
-
-  for (int64_t h2 = 0; h2 < output_height; ++h2) {
-    const int64_t h1 =
-        nearest_neighbor_compute_source_index(height_scale, h2, input_height);
-
-    for (int64_t w2 = 0; w2 < output_width; ++w2) {
-      const int64_t w1 =
-          nearest_neighbor_compute_source_index(width_scale, w2, input_width);
-      scalar_t* pos1 = &idata[h1 * input_width + w1];
-      const scalar_t* pos2 = &odata[h2 * output_width + w2];
-
-      for (int64_t c = 0; c < channels; ++c) {
-        pos1[0] += pos2[0];
-        pos1 += input_height * input_width;
-        pos2 += output_height * output_width;
-      }
-    }
-  }
-}
-
 static void upsample_nearest2d_out_cpu_template(
     Tensor& output,
-    const Tensor& input_,
+    const Tensor& input,
     IntArrayRef output_size,
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
@@ -134,13 +20,13 @@ static void upsample_nearest2d_out_cpu_template(
   int64_t output_height = output_size[0];
   int64_t output_width = output_size[1];
 
-  int64_t nbatch = input_.size(0);
-  int64_t channels = input_.size(1);
-  int64_t input_height = input_.size(2);
-  int64_t input_width = input_.size(3);
+  int64_t nbatch = input.size(0);
+  int64_t channels = input.size(1);
+  int64_t input_height = input.size(2);
+  int64_t input_width = input.size(3);
 
   upsample_2d_shape_check(
-      input_,
+      input,
       Tensor(),
       nbatch,
       channels,
@@ -149,34 +35,15 @@ static void upsample_nearest2d_out_cpu_template(
       output_height,
       output_width);
 
-  auto input = input_.contiguous();
-
   output.resize_({nbatch, channels, output_height, output_width});
-  output.zero_();
 
   AT_ASSERT(input_width > 0 && output_width > 0);
-
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "upsample_nearest2d", [&] {
-    auto* idata = input.data_ptr<scalar_t>();
-    auto* odata = output.data_ptr<scalar_t>();
-
-    upsample_nearest2d_out_frame<scalar_t>(
-        odata,
-        idata,
-        input_height,
-        input_width,
-        output_height,
-        output_width,
-        nbatch,
-        channels,
-        scales_h,
-        scales_w);
-  });
+  upsample_nearest2d_kernel(kCPU, output, input, scales_h, scales_w);
 }
 
 static void upsample_nearest2d_backward_out_cpu_template(
     Tensor& grad_input,
-    const Tensor& grad_output_,
+    const Tensor& grad_output,
     IntArrayRef output_size,
     IntArrayRef input_size,
     c10::optional<double> scales_h,
@@ -201,7 +68,7 @@ static void upsample_nearest2d_backward_out_cpu_template(
 
   upsample_2d_shape_check(
       Tensor(),
-      grad_output_,
+      grad_output,
       nbatch,
       channels,
       input_height,
@@ -212,25 +79,7 @@ static void upsample_nearest2d_backward_out_cpu_template(
   grad_input.resize_({nbatch, channels, input_height, input_width});
   grad_input.zero_();
 
-  auto grad_output = grad_output_.contiguous();
-
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-      grad_output.scalar_type(), "upsample_nearest2d_backward", [&] {
-        scalar_t* idata = grad_input.data_ptr<scalar_t>();
-        scalar_t* odata = grad_output.data_ptr<scalar_t>();
-
-        upsample_nearest2d_backward_out_frame<scalar_t>(
-            odata,
-            idata,
-            input_height,
-            input_width,
-            output_height,
-            output_width,
-            nbatch,
-            channels,
-            scales_h,
-            scales_w);
-      });
+  upsample_nearest2d_backward_kernel(kCPU, grad_input, grad_output, scales_h, scales_w);
 }
 } // namespace
 
@@ -273,6 +122,9 @@ Tensor upsample_nearest2d_backward_cpu(
       grad_input, grad_output, output_size, input_size, scales_h, scales_w);
   return grad_input;
 }
+
+DEFINE_DISPATCH(upsample_nearest2d_kernel);
+DEFINE_DISPATCH(upsample_nearest2d_backward_kernel);
 
 } // namespace native
 } // namespace at
