@@ -32,9 +32,7 @@ def drosenbrock(tensor):
 
 
 class TestOptim(TestCase):
-    def setUp(self):
-        super(TestOptim, self).setUp()
-        self.exact_dtype = True
+    exact_dtype = True
 
     def _test_rosenbrock_sparse(self, constructor, scheduler_constructors=None,
                                 sparse_only=False):
