@@ -580,15 +580,6 @@ class JitRpcTest(LocalRRefTest, JitRpcAsyncOpTest, RpcAgentTestFixture):
                 dst_worker_name, MyScriptModule, args=(self.rank,)
             )
 
-        # Python 3.5 and Python 3.6 throw different error message, the only
-        # common word can be greped is "pickle".
-        with self.assertRaisesRegex(
-            TypeError, "pickle"
-        ):
-            ret = rpc.rpc_async(
-                dst_worker_name, MyScriptModule(self.rank).forward, args=()
-            )
-
     @dist_init
     def test_rref_as_arg_and_return(self):
         n = self.rank + 1
@@ -626,7 +617,7 @@ class JitRpcTest(LocalRRefTest, JitRpcAsyncOpTest, RpcAgentTestFixture):
 
         api._ignore_rref_leak = True
 
-        local_ret = MyScriptModule(self.rank).forward() + torch.ones(self.rank)
+        local_ret = torch.ones(self.rank) + torch.ones(self.rank)
 
         n = self.rank + 1
         dst_rank = n % self.world_size
