@@ -13816,7 +13816,11 @@ class TestTorchDeviceType(TestCase):
         o = torch.empty(10, dtype=dtype, device=device)
 
         torch.floor_divide(x, y, out=o)
-        self.assertEqual(o, torch.floor_divide(x, y))
+        self.assertEqual(o, x // y)
+
+        # Tests scalar with out
+        torch.floor_divide(x, 2, out=o)
+        self.assertEqual(o, x // 2)
 
         if dtype == torch.int:
             o = torch.empty(10, dtype=torch.float, device=device)
