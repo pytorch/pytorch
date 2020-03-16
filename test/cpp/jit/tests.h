@@ -83,6 +83,7 @@ namespace jit {
   _(CommonAncestor)                    \
   _(AutogradSymbols)                   \
   _(MobileTypeParser)                  \
+  _(LiteInterpreterBuiltinFunction)    \
   _(LiteInterpreterPrim)               \
   _(LiteInterpreterLoadOrigJit)        \
   _(LiteInterpreterWrongMethodName)    \
