@@ -30,7 +30,6 @@ from torch._C import TensorType, BoolType, parse_ir, _propagate_shapes
 from torch._six import inf, PY2, PY37, StringIO
 from torch.autograd import Variable, Function
 from torch.jit.annotations import BroadcastingList2, BroadcastingList3, Any  # noqa: F401
-from torch.jit.frontend import NotSupportedError
 from torch.onnx import OperatorExportTypes
 from torch.testing import FileCheck
 import torch.cuda
@@ -45,6 +44,9 @@ from torch.nn.quantized.modules.linear import LinearPackedParams
 from torch.quantization import QConfig
 from torch.quantization._quantize_script import ConvPackedParams
 from torch.quantization._quantize_script import script_qconfig
+from torch.quantization._quantize_script import prepare_script
+from torch.quantization._quantize_script import convert_script
+from torch.quantization._quantize_script import quantize_script
 from torch.quantization import default_observer
 from torch.quantization import default_weight_observer
 from torch.quantization import default_per_channel_weight_observer
@@ -83,6 +85,7 @@ from collections import namedtuple, OrderedDict
 from copy import deepcopy
 from functools import wraps
 from itertools import product, chain
+import itertools
 from textwrap import dedent
 from typing import List, Dict, Optional, Tuple, Union
 import copy
@@ -102,6 +105,8 @@ import unittest
 import warnings
 import zipfile
 import re
+import string
+
 
 RUN_CUDA_HALF = RUN_CUDA
 if torch.cuda.is_available():
@@ -1023,7 +1028,7 @@ graph(%x : Tensor,
         m = torch.jit.script(M())
         observer = torch.jit.script(default_observer())
         qconfig_dict = {'': script_qconfig(default_qconfig)}
-        torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, True)
+        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
         # for input and output of conv
         assert len(attrs_with_prefix(m, '_observer_')) == 2
         # for weight
@@ -1053,9 +1058,9 @@ graph(%x : Tensor,
         qconfig_dict = {
             'sub.fc': qconfig
         }
-        torch._C._jit_pass_insert_observers(m._c, "forward",
-                                            qconfig_dict,
-                                            True)
+        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward",
+                                                                qconfig_dict,
+                                                                False))
         # input and output of sub
         assert len(attrs_with_prefix(m, '_observer_')) == 2
         # not quantized
@@ -1156,7 +1161,7 @@ graph(%x : Tensor,
         qconfig_dict = {
             '': script_qconfig(default_qconfig)
         }
-        torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, True)
+        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
         activation_dtypes = set([obs.getattr('dtype') for x, obs in m._modules._c.items()
                                  if x.startswith('_observer_')])
         weight_dtypes = set([obs.getattr('dtype') for x, obs in m.conv._modules._c.items()
@@ -1178,8 +1183,7 @@ graph(%x : Tensor,
 
         m = torch.jit.script(M())
         qconfig_dict = {'': script_qconfig(default_qconfig)}
-        m._c = torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False)
-        m = wrap_cpp_module(m._c)
+        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
         # conv1 and conv2 shares the same type, we need to
         # make sure we didn't quantize the type twice
         conv1_observers = attrs_with_prefix(m.conv1, '_observer_')
@@ -1190,6 +1194,100 @@ graph(%x : Tensor,
             'Expected to have 1 observer submodules'
         assert conv1_observers == conv2_observers, \
             'Expect conv1 and conv2 to have same observers since the class type is shared'
+
+    def test_insert_observers_for_general_ops(self):
+        """ Make sure we skip observers for ops that doesn't require
+            observation, e.g. flatten
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 3).float()
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = torch.flatten(x)
+                return x
+
+        qconfig_dict = {'': script_qconfig(default_qconfig)}
+        m = torch.jit.script(M())
+        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
+        # input and output of conv
+        assert len(attrs_with_prefix(m, '_observer_')) == 2
+        FileCheck().check('Observer = prim::GetAttr[name="_observer_') \
+                   .check('prim::GetAttr[name="conv"]') \
+                   .check('prim::CallMethod') \
+                   .check('Observer = prim::GetAttr[name="_observer_') \
+                   .check('aten::flatten') \
+                   .check_not('Observer = prim::GetAttr[name="_observer_') \
+                   .run(m.graph)
+
+    # TODO: this is too long, split this to test_insert_observers.py and remove
+    # insrt_observers prefix
+    def test_insert_observers_propagate_observed(self):
+        """ Make sure we propagate observed property through general ops
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.conv1 = torch.nn.Conv2d(3, 3, 3).float()
+                self.conv2 = torch.nn.Conv2d(3, 3, 3).float()
+
+            def forward(self, x):
+                x = self.conv1(x)
+                x = torch.flatten(x)
+                # we don't want to insert observer for input of self.conv2
+                # because output of self.conv1 is already observed
+                x = self.conv2(x)
+                return x
+
+        qconfig_dict = {'': script_qconfig(default_qconfig)}
+        m = torch.jit.script(M())
+        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
+        # input and output of conv
+        assert len(attrs_with_prefix(m, '_observer_')) == 3
+        FileCheck().check('Observer = prim::GetAttr[name="_observer_') \
+                   .check('prim::GetAttr[name="conv1"]') \
+                   .check('prim::CallMethod') \
+                   .check('Observer = prim::GetAttr[name="_observer_') \
+                   .check('aten::flatten') \
+                   .check_not('Observer = prim::GetAttr[name="_observer_') \
+                   .check('prim::GetAttr[name="conv2"]') \
+                   .check('Observer = prim::GetAttr[name="_observer_') \
+                   .run(m.graph)
+
+    def test_insert_observers_propagate_observed_in_submodule(self):
+        """ Make sure we propagate observed property through general ops
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.conv1 = torch.nn.Conv2d(3, 3, 3).float()
+                self.conv2 = torch.nn.Conv2d(3, 3, 3).float()
+                self.avgpool = torch.nn.AdaptiveAvgPool2d((1, 1))
+
+            def forward(self, x):
+                x = self.conv1(x)
+                x = self.avgpool(x)
+                # we don't want to insert observer for input of self.conv2
+                # because output of self.conv1 is already observed
+                x = self.conv2(x)
+                return x
+
+        qconfig_dict = {'': script_qconfig(default_qconfig)}
+        m = torch.jit.script(M())
+        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
+        # input and output of conv
+        assert len(attrs_with_prefix(m, '_observer_')) == 3
+        FileCheck().check('Observer = prim::GetAttr[name="_observer_') \
+                   .check('prim::GetAttr[name="conv1"]') \
+                   .check('prim::CallMethod') \
+                   .check('Observer = prim::GetAttr[name="_observer_') \
+                   .check('prim::CallMethod') \
+                   .check_not('Observer = prim::GetAttr[name="_observer_') \
+                   .check('prim::GetAttr[name="conv2"]') \
+                   .check('Observer = prim::GetAttr[name="_observer_') \
+                   .run(m.graph)
 
     def test_insert_quant_dequant(self):
         class M(torch.nn.Module):
@@ -1251,7 +1349,7 @@ graph(%x : Tensor,
 
         m = torch.jit.script(M())
         qconfig_dict = {'': script_qconfig(default_qconfig)}
-        torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, True)
+        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
         m(torch.rand(1, 3, 10, 10), torch.rand(3, 3, 3, 3), torch.rand(3, 3, 3, 3), torch.rand(3, 3, 3, 3))
         torch._C._jit_pass_insert_quant_dequant(m._c, "forward", True)
 
@@ -1473,6 +1571,52 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
             graph = parse_ir(input_str)
             torch._C._jit_pass_quant_fusion(graph)
             FileCheck().run(input_str, graph)
+
+    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
+                         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+                         " with instruction set support avx2 or newer.")
+    def test_quantized_conv_relu_fusion(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.conv = torch.nn.Conv2d(1, 4, 2, 3).float()
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                return self.relu(self.conv(x))
+
+        m = torch.jit.script(M().eval())
+        m = prepare_script(m, {'': script_qconfig(default_qconfig)}, True)
+        data = torch.randn(1, 1, 10, 10, dtype=torch.float)
+        m(data)
+        m = convert_script(m, True)
+        print(m.graph_for(data))
+        FileCheck().check_not("aten::conv2d") \
+                   .check_not("aten::relu") \
+                   .check("quantized::conv2d_relu") \
+                   .run(m.graph_for(data))
+
+    def test_quantized_add_relu_fusion(self):
+        class M(torch.nn.Module):
+            def __init__(self, inplace):
+                super(M, self).__init__()
+                self.relu = torch.nn.ReLU(inplace)
+
+            def forward(self, x, y):
+                x += y
+                return self.relu(x)
+
+        for inplace in [True, False]:
+            m = torch.jit.script(M(inplace).eval())
+            m = prepare_script(m, {'': script_qconfig(default_qconfig)}, True)
+            data = torch.randn(1, 1, 10, 10, dtype=torch.float)
+            m(data, data)
+            m = convert_script(m, True)
+            FileCheck().check_not("aten::add") \
+                       .check_not("aten::relu") \
+                       .check_not("aten::relu_") \
+                       .check("quantized::add_relu") \
+                       .run(m.graph_for(data, data))
 
     def test_foldbn_trivial(self):
         # Test trivial case
@@ -1707,9 +1851,9 @@ graph(%input, %weight):
                 qconfig_dict = {
                     '': script_qconfig(qconfig)
                 }
-                m._c = torch._C._jit_pass_insert_observers(m._c, 'forward', qconfig_dict, False)
+                m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, 'forward', qconfig_dict, False))
                 get_forward(m._c)(data)
-                m._c = torch._C._jit_pass_insert_quant_dequant(m._c, 'forward', False)
+                m = wrap_cpp_module(torch._C._jit_pass_insert_quant_dequant(m._c, 'forward', False))
                 torch._C._jit_pass_insert_prepack_unpack(m._c)
                 linear_packed_params = torch.jit.script(LinearPackedParams())._c
                 conv_packed_params = torch.jit.script(ConvPackedParams())._c
@@ -1864,10 +2008,6 @@ graph(%input, %weight):
                    .check("aten::max") \
                    .check("aten::min") \
                    .check("aten::mean") \
-                   .check("aten::__interpolate") \
-                   .check("aten::__upsample") \
-                   .check("aten::__upsample_bilinear") \
-                   .check("aten::__upsample_nearest") \
                    .run(m.graph)
         torch._C._jit_pass_swap_dequantize(m.graph)
         FileCheck().check("aten::max_pool2d") \
@@ -1877,12 +2017,69 @@ graph(%input, %weight):
                    .check("aten::max") \
                    .check("aten::min") \
                    .check("aten::mean") \
-                   .check("aten::__interpolate") \
-                   .check("aten::__upsample") \
-                   .check("aten::__upsample_bilinear") \
-                   .check("aten::__upsample_nearest") \
                    .check("dequantize") \
                    .run(m.graph)
+
+    def test_swap_functional_linear(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+
+            def forward(self, x, weight, bias):
+                x = torch.dequantize(x)
+                weight = torch.dequantize(weight)
+                x = F.linear(x, weight, bias)
+                x = torch.quantize_per_tensor(x, scale=1.0, zero_point=0, dtype=torch.quint8)
+                return x
+
+        x = torch.rand((10, 5), dtype=torch.float)
+        x = torch.quantize_per_tensor(x, scale=0.5, zero_point=1, dtype=torch.quint8)
+        weight = torch.rand((5, 5), dtype=torch.float)
+        weight = torch.quantize_per_tensor(weight, scale=0.5, zero_point=1, dtype=torch.qint8)
+        bias = torch.rand((5), dtype=torch.float)
+        m = torch.jit.script(M())
+        ref_res = m(x, weight, bias)
+        FileCheck().check("CallFunction") \
+                   .run(m.graph)
+        torch._C._jit_pass_swap_functional_linear(m.graph)
+        FileCheck().check("aten::linear") \
+                   .check_not("CallFunction") \
+                   .run(m.graph)
+        res = m(x, weight, bias)
+        self.assertEqual(res, ref_res)
+
+    def test_finalize_for_conv2d(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 3).float()
+
+            def forward(self, x):
+                return self.conv(x)
+
+        data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        qconfig_dict = {'': default_qconfig}
+        model = torch.jit.script(M()).eval()
+        model = quantize_script(model, qconfig_dict, _test_only_eval_fn, [data], inplace=False)
+        FileCheck().check("quantized::conv2d") \
+                   .run(model.graph)
+
+    def test_finalize_debug(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 3).float()
+
+            def forward(self, x):
+                return self.conv(x)
+
+        data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        qconfig_dict = {'': default_qconfig}
+        model = torch.jit.script(M()).eval()
+        model = quantize_script(model, qconfig_dict, _test_only_eval_fn, [data], inplace=False, debug=True)
+        FileCheck().check_not("quantized::conv2d") \
+                   .check("CallMethod") \
+                   .run(model.graph)
 
     def test_pattern_based_rewrite(self):
         # mul(mul(mul(mul(x,y),z),x),y) --> mul(mul(mulmul(x,y,z), x), y) -->
@@ -2539,7 +2736,6 @@ graph(%Ra, %Rb):
         for node in g.nodes():
             self.assertTrue(g2.findNode(node.kind()) is not None)
 
-    @unittest.skipIf(IS_WINDOWS, "TODO: need to fix this test case for Windows")
     @unittest.skipIf(IS_SANDCASTLE, "gtest runs these in sandcastle")
     @unittest.skipIf(RUN_CUDA, "covered by test_cpp_cuda")
     @unittest.skipIf(not torch._C._jit_has_cpp_tests(), "Tests were not built, use BUILD_TEST=1")
@@ -2550,7 +2746,6 @@ graph(%Ra, %Rb):
         torch._C._jit_run_cpp_tests(run_cuda=False)
         tests_setup.shutdown()
 
-    @unittest.skipIf(IS_WINDOWS, "TODO: need to fix this test case for Windows")
     @unittest.skipIf(not RUN_CUDA, "cpp tests require CUDA")
     @unittest.skipIf(not torch._C._jit_has_cpp_tests(), "Tests were not built, use BUILD_TEST=1")
     @skipIfRocm
@@ -2761,6 +2956,14 @@ graph(%Ra, %Rb):
         traced_model = torch.jit.trace(model, inputs)
         self.assertEqual(traced_model(*inputs), model(*inputs))
         self.assertExportImportModule(traced_model, (scores, bbox_deltas, im_info, anchors))
+
+    def test_torch_ops_overloaded(self):
+        with self.assertRaisesRegex(RuntimeError, "failed to many any schema"):
+            torch.ops.aten.add("a", 1)
+        self.assertEqual("ab", torch.ops.aten.add("a", "b"))
+        a, b = torch.rand(3, 4), torch.rand(3, 4)
+        self.assertEqual(a + b, torch.ops.aten.add(a, b))
+        self.assertEqual(a + 1, torch.ops.aten.add(a, 1))
 
     def test_nested_inplace(self):
         x = torch.randn(2, 2)
@@ -3467,10 +3670,25 @@ graph(%Ra, %Rb):
         for constant in constants:
             check_constant(constant)
 
+        for key_type in ["str", "int", "float"]:
+            for value_type in ["Tensor", "bool", "str", "int", "float"]:
+                check_constant("torch.jit.annotate(Dict[ " + key_type + ", " + value_type + "], {})")
+                check_constant("torch.jit.annotate(Dict[ " + key_type + ", Optional[" + value_type + "]], {})")
+
         for i in range(len(constants)):
             for j in range(i + 1, len(constants)):
                 tup_constant = constants[i] + ", " + constants[j]
                 check_constant(tup_constant)
+
+        for i in range(len(constants)):
+            # check_constant constructs the second dict with another Tensor
+            # which fails the comparison
+            if isinstance(eval(constants[i]), (list, bool, Tensor)) or eval(constants[i]) is None:
+                continue
+            for j in range(len(constants)):
+                dict_constant = "{ " + constants[i] + ": " + constants[j] + "}"
+                check_constant(dict_constant)
+
 
         # testing node hashing
         funcs_template = dedent('''
@@ -3499,8 +3717,17 @@ graph(%Ra, %Rb):
             print(b)
         ''')
 
-        # test that equal tuples correctly work with node hashing
-        for tup in map(lambda x: "(" + x + ",)", constants):
+        # generate dicts with built-in types (excluding torch.Tensor)
+        xprod = itertools.product(constants, constants)
+
+        def keys_pred(t):
+            return isinstance(eval(t[0]), (list, bool)) or eval(t[0]) is None
+
+        filt = [x for x in xprod if not keys_pred(x)]
+        dict_strs = map(lambda t: '{' + t[0] + ':' + t[1] + '}', filt)
+
+        # test that equal tuples and dicts correctly work with node hashing
+        for tup in chain(map(lambda x: "(" + x + ",)", constants), dict_strs):
             funcs_str = funcs_template.format(constant_constructor=tup)
             scope = {}
             execWrapper(funcs_str, globals(), scope)
@@ -4908,6 +5135,15 @@ def foo(x):
                     'parameters_r': ['P']}
         self.assertEqual(expected, result)
 
+    def test_parameter_order(self):
+        m = nn.Module()
+        for i, name in enumerate(string.ascii_letters):
+            setattr(m, name, nn.Parameter(torch.tensor([float(i)])))
+        ms = torch.jit.script(m)
+        print(torch.cat(list(m.parameters())))
+        print(torch.cat(list(ms.parameters())))
+        self.assertEqual(list(m.parameters()), list(ms.parameters()))
+
     def test_tracing_hooks(self):
         class Net(nn.Module):
             def __init__(self):
@@ -5292,6 +5528,12 @@ def foo(x):
         nt_loaded = torch.load(b)
         for exp in [7, 3, 3, 1]:
             self.assertEqual(nt_loaded.pop(), exp)
+
+    @skipIfRocm
+    @unittest.skipIf(IS_WINDOWS, "TODO: Fix this test case")
+    def test_torchbind_instantiate_missing_class(self):
+        with self.assertRaisesRegex(RuntimeError, 'Tried to instantiate class IDontExist but it does not exist!'):
+            torch.classes.IDontExist(3, 4, 5)
 
     def test_jitter_bug(self):
         @torch.jit.script
@@ -6979,12 +7221,13 @@ a")
         loop_inputs = list(loop_body.inputs())
         loop_outputs = list(loop_body.outputs())
 
-        self.assertTrue(loop_inputs[1].requires_grad())
 
         if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
+            self.assertTrue(loop_inputs[2].requires_grad())
             bailouts_in_outer_block = graph.findAllNodes("prim::BailOut", False)
             self.assertFalse(bailouts_in_outer_block[1].output().requires_grad())
         else:
+            self.assertTrue(loop_inputs[1].requires_grad())
             self.assertTrue(loop.output().requires_grad())
             self.assertFalse(loop_outputs[1].requires_grad())
 
@@ -8183,17 +8426,24 @@ a")
                    .check("Traceback") \
                    .check("in foo").check("in baz").run(str(cm.exception))
 
-    def test_binop_unsupported_error(self):
-        with self.assertRaisesRegex(NotSupportedError, "unsupported binary operator:"):
-            @torch.jit.script
-            def binop(x, y):
-                # Replace this with another unsupported op when/if it gets supported
-                return x << y
+    def test_operator_precedence(self):
+        def double(x):
+            # type: (int) -> int
+            return 2 * x
+
+        def complicated_arithmetic_operation():
+            # TODO we need to test exponent operator '**' and bitwise not
+            # operator '~' once they are properly supported.
+            list = [0, 1, 2, 3]
+            result = list[1:3][0] + double(4) + (-3 + 8) * 6 // 2 % 4 << 2 + 1 >> 1 | 23 & 16 + 3 ^ 4
+            return result
+
+        self.checkScript(complicated_arithmetic_operation, ())
 
     def test_bitwise_ops(self):
 
         def int_test():
-            return 2 & 3, 2 ^ 3, 2 | 3
+            return 2 & 3, 2 ^ 3, 2 | 3, 2 << 3, 2 >> 3
 
         self.checkScript(int_test, ())
 
@@ -8207,10 +8457,15 @@ a")
         def tensor_test(x, y):
             return x & y, x ^ y, x | y
 
+        def tensor_with_int_test(x, y):
+            # type: (Tensor, int) -> Tuple[Tensor, Tensor]
+            return x << y, x >> y
+
         x = torch.tensor(2)
         y = torch.tensor(3)
 
         self.checkScript(tensor_test, (x, y))
+        self.checkScript(tensor_with_int_test, (x, 2))
 
         def not_test(x):
             return ~x
@@ -10047,27 +10302,55 @@ a")
             m2 = M2()
             m2(torch.zeros(4, 3))
 
-    def test_named_modules(self):
+    def test_module_apis(self):
+        class Sub(torch.nn.Module):
+            def __init__(self):
+                super(Sub, self).__init__()
+
+            def forward(self, thing):
+                return thing - 2
+
+        class Double(torch.nn.Module):
+            def __init__(self):
+                super(Double, self).__init__()
+
+            def forward(self, thing):
+                return thing * 2
+
         class MyMod(torch.nn.Module):
             def __init__(self):
                 super(MyMod, self).__init__()
-                self.mod = (nn.ReLU())
-                self.mod2 = (nn.ReLU())
-                self.mod3 = nn.Sequential(nn.Sequential(nn.ReLU()))
+                self.mod = (Sub())
+                self.mod2 = (Sub())
+                self.mod3 = nn.Sequential(nn.Sequential(Sub()))
+                self.mod4 = nn.Sequential(Sub(), Double())
 
             @torch.jit.export
-            def method(self, x):
+            def method(self, x, x1, y, y1):
                 mod_names = ""
                 for name, mod in self.named_modules():
                     mod_names = mod_names + " " + name
                     x = mod(x)
-                return mod_names, x
+
+                children_names = ""
+                for name, mod in self.named_children():
+                    children_names = children_names + " " + name
+                    x1 = mod(x1)
+
+                for mod in self.modules():
+                    y = mod(y)
+
+                for mod in self.children():
+                    y1 = mod(y1)
+
+                return mod_names, children_names, x, x1, y, y1
 
             def forward(self, x):
                 return x + 2
 
         mod = torch.jit.script(MyMod())
-        self.assertEqual(mod.method(torch.tensor(2)), MyMod().method(torch.tensor(2)))
+        inps = tuple([torch.tensor(i) for i in range(1, 5)])
+        self.assertEqual(mod.method(*inps), MyMod().method(*inps))
 
     def test_script_module_const(self):
         class M(torch.jit.ScriptModule):
@@ -10393,8 +10676,6 @@ a")
                 return thing - self.i
 
         class M(torch.nn.Module):
-            __constants__ = ['mods']
-
             def __init__(self):
                 super(M, self).__init__()
                 self.mods = nn.ModuleList([Sub(i) for i in range(10)])
@@ -10407,6 +10688,19 @@ a")
 
         x = torch.tensor(1)
         self.checkModule(M(), (x,))
+
+        class MForward(torch.nn.Module):
+            def __init__(self):
+                super(MForward, self).__init__()
+                self.mods = nn.ModuleList([Sub(i) for i in range(10)])
+
+            def forward(self, v):
+                v = self.mods[4](v)
+                v = self.mods[-1](v)
+                v = self.mods[-9](v)
+                return v
+
+        self.checkModule(MForward(), (torch.tensor(1),))
 
         class M2(M):
             def __init__(self):
@@ -10549,6 +10843,12 @@ a")
             return torch.cdist(a, b, compute_mode="use_mm_for_euclid_dist")
 
         self.checkScript(cdist_fn, ())
+
+        def norm():
+            c = torch.tensor([[1, 2, 3], [-1, 1, 4]], dtype=torch.float)
+            return torch.norm(c, p="fro"), torch.norm(c, p="nuc"), torch.norm(c), torch.norm(c, p=.5)
+
+        self.checkScript(norm, ())
 
     def test_missing_getstate(self):
         class Foo(torch.nn.Module):
@@ -13106,7 +13406,7 @@ a")
 
         self.checkModule(Mod(), (torch.tensor(.5),))
 
-        # variable lenghth, modulelist
+        # variable length, modulelist
         class Mod2(Mod):
             def forward(self, x):
                 for val, mod in zip(range(int(x)), self.mods):
@@ -18231,65 +18531,65 @@ nn_functional_tests = [
     ('ctc_loss', torch.rand(S, S, S).log_softmax(2).detach().requires_grad_(),
      (torch.randint(1, S, (S, S), dtype=torch.long), torch.full((S,), S, dtype=torch.long),
       torch.randint(1, S, (S,), dtype=torch.long))),
-    ('upsample', torch.randn(S, S, M, M), (None, 2), 'with_scale'),
+    ('upsample', torch.randn(S, S, M, M), (None, 2.), 'with_scale'),
     ('upsample', torch.randn(S, S, M, M), (4,), 'with_size'),
-    ('interpolate', torch.zeros(3, 3).view(1, 1, 3, 3), (2,), 'nearest_4d', (True, 'aten::__interpolate')),
-    ('interpolate', torch.randn(S, S, M, M), (None, 2.), 'nearest_4d_with_scale', (True, 'aten::__interpolate')),
-    ('interpolate', torch.randn(S, S, M, M), (4,), 'nearest_4d_with_size', (True, 'aten::__interpolate')),
-    ('interpolate', torch.zeros(3, 3).view(1, 1, 3, 3), (2,), 'area_4d', (True, 'aten::__interpolate')),
-    ('interpolate', torch.randn(S, S, M, M), (None, 2.), 'area_4d_with_scale', (True, 'aten::__interpolate')),
-    ('interpolate', torch.randn(S, S, M, M), (4,), 'area_4d_with_size', (True, 'aten::__interpolate')),
-    ('interpolate', torch.zeros(3, 3).view(1, 1, 3, 3), (2,), 'bilinear_4d', (True, 'aten::__interpolate')),
-    ('interpolate', torch.randn(S, S, M, M), (None, 2.), 'bilinear_4d_with_scale', (True, 'aten::__interpolate')),
-    ('interpolate', torch.randn(S, S, M, M), (4,), 'bilinear_4d_with_size', (True, 'aten::__interpolate')),
-    ('interpolate', torch.zeros(3, 3).view(1, 1, 3, 3), (2,), 'bicubic_4d', (True, 'aten::__interpolate')),
-    ('interpolate', torch.randn(S, S, M, M), (None, 2.), 'bicubic_4d_with_scale', (True, 'aten::__interpolate')),
-    ('interpolate', torch.randn(S, S, M, M), (4,), 'bicubic_4d_with_size', (True, 'aten::__interpolate')),
-    ('interpolate', torch.zeros(3, 3).view(1, 3, 3), (2,), 'nearest_3d', (True, 'aten::__interpolate')),
-    ('interpolate', torch.randn(S, M, M), (None, 2.), 'nearest_3d_with_scale', (True, 'aten::__interpolate')),
-    ('interpolate', torch.randn(S, M, M), (4,), 'nearest_3d_with_size', (True, 'aten::__interpolate')),
-    ('interpolate', torch.zeros(3, 3).view(1, 3, 3), (2,), 'area_3d', (True, 'aten::__interpolate')),
-    ('interpolate', torch.randn(S, M, M), (None, 2.), 'area_3d_with_scale', (True, 'aten::__interpolate')),
-    ('interpolate', torch.randn(S, M, M), (4,), 'area_3d_with_size', (True, 'aten::__interpolate')),
-    ('interpolate', torch.zeros(3, 3).view(1, 3, 3), (2,), 'linear_3d', (True, 'aten::__interpolate')),
-    ('interpolate', torch.randn(S, M, M), (None, 2.), 'linear_3d_with_scale', (True, 'aten::__interpolate')),
-    ('interpolate', torch.randn(S, M, M), (4,), 'linear_3d_with_size', (True, 'aten::__interpolate')),
-    ('interpolate', torch.randn(S, M, M, M, M), (None, 2.), 'nearest_5d_with_scale', (True, 'aten::__interpolate')),
-    ('interpolate', torch.randn(S, M, M, M, M), (4,), 'nearest_5d_with_size', (True, 'aten::__interpolate')),
-    ('interpolate', torch.zeros(3, 3, 3).view(1, 1, 3, 3, 3), (2,), 'area_5d', (True, 'aten::__interpolate')),
-    ('interpolate', torch.randn(S, M, M, M, M), (None, 2.), 'area_5d_with_scale', (True, 'aten::__interpolate')),
-    ('interpolate', torch.randn(S, M, M, M, M), (4,), 'area_5d_with_size', (True, 'aten::__interpolate')),
-    ('interpolate', torch.zeros(3, 3, 3).view(1, 1, 3, 3, 3), (2,), 'trilinear_5d', (True, 'aten::__interpolate')),
-    ('interpolate', torch.randn(S, M, M, M, M), (None, 2.), 'trilinear_5d_with_scale', (True, 'aten::__interpolate')),
-    ('interpolate', torch.randn(S, M, M, M, M), (4,), 'trilinear_5d_with_size', (True, 'aten::__interpolate')),
+    ('interpolate', torch.zeros(3, 3).view(1, 1, 3, 3), (2,), 'nearest_4d'),
+    ('interpolate', torch.randn(S, S, M, M), (None, 2.), 'nearest_4d_with_scale'),
+    ('interpolate', torch.randn(S, S, M, M), (4,), 'nearest_4d_with_size'),
+    ('interpolate', torch.zeros(3, 3).view(1, 1, 3, 3), (2,), 'area_4d'),
+    ('interpolate', torch.randn(S, S, M, M), (None, 2.), 'area_4d_with_scale'),
+    ('interpolate', torch.randn(S, S, M, M), (4,), 'area_4d_with_size'),
+    ('interpolate', torch.zeros(3, 3).view(1, 1, 3, 3), (2,), 'bilinear_4d'),
+    ('interpolate', torch.randn(S, S, M, M), (None, 2.), 'bilinear_4d_with_scale'),
+    ('interpolate', torch.randn(S, S, M, M), (4,), 'bilinear_4d_with_size'),
+    ('interpolate', torch.zeros(3, 3).view(1, 1, 3, 3), (2,), 'bicubic_4d'),
+    ('interpolate', torch.randn(S, S, M, M), (None, 2.), 'bicubic_4d_with_scale'),
+    ('interpolate', torch.randn(S, S, M, M), (4,), 'bicubic_4d_with_size'),
+    ('interpolate', torch.zeros(3, 3).view(1, 3, 3), (2,), 'nearest_3d'),
+    ('interpolate', torch.randn(S, M, M), (None, 2.), 'nearest_3d_with_scale'),
+    ('interpolate', torch.randn(S, M, M), (4,), 'nearest_3d_with_size'),
+    ('interpolate', torch.zeros(3, 3).view(1, 3, 3), (2,), 'area_3d'),
+    ('interpolate', torch.randn(S, M, M), (None, 2.), 'area_3d_with_scale'),
+    ('interpolate', torch.randn(S, M, M), (4,), 'area_3d_with_size'),
+    ('interpolate', torch.zeros(3, 3).view(1, 3, 3), (2,), 'linear_3d'),
+    ('interpolate', torch.randn(S, M, M), (None, 2.), 'linear_3d_with_scale'),
+    ('interpolate', torch.randn(S, M, M), (4,), 'linear_3d_with_size'),
+    ('interpolate', torch.randn(S, M, M, M, M), (None, 2.), 'nearest_5d_with_scale'),
+    ('interpolate', torch.randn(S, M, M, M, M), (4,), 'nearest_5d_with_size'),
+    ('interpolate', torch.zeros(3, 3, 3).view(1, 1, 3, 3, 3), (2,), 'area_5d'),
+    ('interpolate', torch.randn(S, M, M, M, M), (None, 2.), 'area_5d_with_scale'),
+    ('interpolate', torch.randn(S, M, M, M, M), (4,), 'area_5d_with_size'),
+    ('interpolate', torch.zeros(3, 3, 3).view(1, 1, 3, 3, 3), (2,), 'trilinear_5d'),
+    ('interpolate', torch.randn(S, M, M, M, M), (None, 2.), 'trilinear_5d_with_scale'),
+    ('interpolate', torch.randn(S, M, M, M, M), (4,), 'trilinear_5d_with_size'),
     ('interpolate', torch.zeros(3, 3).view(1, 1, 3, 3), (2, None, 'nearest', None, False),
-     'nearest_4d_not_recompute_scale_factor', (True, 'aten::__interpolate')),
+     'nearest_4d_not_recompute_scale_factor'),
     ('interpolate', torch.randn(S, S, M, M), (4, None, 'nearest', None, False),
-     'nearest_4d_with_size_not_recompute_scale_factor', (True, 'aten::__interpolate')),
+     'nearest_4d_with_size_not_recompute_scale_factor'),
     ('interpolate', torch.randn(S, S, M, M), (None, 2., 'bilinear', None, False),
-     'bilinear_4d_with_scale_not_recompute_scale_factor', (True, 'aten::__interpolate')),
+     'bilinear_4d_with_scale_not_recompute_scale_factor'),
     ('interpolate', torch.randn(S, S, M, M), (4, None, 'bilinear', None, False),
-     'bilinear_4d_with_size_not_recompute_scale_factor', (True, 'aten::__interpolate')),
+     'bilinear_4d_with_size_not_recompute_scale_factor'),
     ('interpolate', torch.randn(S, S, M, M), (None, 2., 'bicubic', None, False),
-     'bicubic_4d_with_scale_not_recompute_scale_factor', (True, 'aten::__interpolate')),
+     'bicubic_4d_with_scale_not_recompute_scale_factor'),
     ('interpolate', torch.randn(S, S, M, M), (4, None, 'bicubic', None, False),
-     'bicubic_4d_with_size_not_recompute_scale_factor', (True, 'aten::__interpolate')),
+     'bicubic_4d_with_size_not_recompute_scale_factor'),
     ('interpolate', torch.randn(S, M, M), (None, 2., 'nearest', None, False),
-     'nearest_3d_with_scale_not_recompute_scale_factor', (True, 'aten::__interpolate')),
+     'nearest_3d_with_scale_not_recompute_scale_factor'),
     ('interpolate', torch.randn(S, M, M), (4, None, 'nearest', None, False),
-     'nearest_3d_with_size_not_recompute_scale_factor', (True, 'aten::__interpolate')),
+     'nearest_3d_with_size_not_recompute_scale_factor'),
     ('interpolate', torch.randn(S, M, M), (None, 2., 'linear', None, False),
-     'linear_3d_with_scale_not_recompute_scale_factor', (True, 'aten::__interpolate')),
+     'linear_3d_with_scale_not_recompute_scale_factor'),
     ('interpolate', torch.randn(S, M, M), (4, None, 'linear', None, False),
-     'linear_3d_with_size_not_recompute_scale_factor', (True, 'aten::__interpolate')),
+     'linear_3d_with_size_not_recompute_scale_factor'),
     ('interpolate', torch.randn(S, M, M, M, M), (None, 2., 'nearest', None, False),
-     'nearest_5d_with_scale_not_recompute_scale_factor', (True, 'aten::__interpolate')),
+     'nearest_5d_with_scale_not_recompute_scale_factor'),
     ('interpolate', torch.randn(S, M, M, M, M), (4, None, 'nearest', None, False),
-     'nearest_5d_with_size_not_recompute_scale_factor', (True, 'aten::__interpolate')),
+     'nearest_5d_with_size_not_recompute_scale_factor'),
     ('interpolate', torch.randn(S, M, M, M, M), (None, 2., 'trilinear', None, False),
-     'trilinear_5d_with_scale_not_recompute_scale_factor', (True, 'aten::__interpolate')),
+     'trilinear_5d_with_scale_not_recompute_scale_factor'),
     ('interpolate', torch.randn(S, M, M, M, M), (4, None, 'trilinear', None, False),
-     'trilinear_5d_with_size_not_recompute_scale_factor', (True, 'aten::__interpolate')),
+     'trilinear_5d_with_size_not_recompute_scale_factor'),
 ]
 
 
@@ -18719,7 +19019,11 @@ for test in criterion_tests:
 
 if __name__ == '__main__':
     run_tests()
-    if not PY2:
+    PY36 = sys.version_info >= (3, 6)
+    if PY36:
         import test_jit_py3
+        import jit.test_module_interface
         suite = unittest.findTestCases(test_jit_py3)
+        unittest.TextTestRunner().run(suite)
+        suite = unittest.findTestCases(jit.test_module_interface)
         unittest.TextTestRunner().run(suite)

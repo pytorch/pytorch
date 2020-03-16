@@ -70,7 +70,6 @@ TESTS = [
     'test_jit_disabled',
     'test_function_schema',
     'test_overrides',
-    'test_determination',
 ]
 
 # skip < 3.3 because mock is added in 3.3 and is used in rpc_spawn
@@ -80,7 +79,6 @@ if PY33:
         'distributed/rpc/test_rpc_spawn',
         'distributed/rpc/test_dist_autograd_spawn',
         'distributed/rpc/test_dist_optimizer_spawn',
-        'distributed/rpc/jit/test_rpc_spawn',
         'distributed/rpc/jit/test_dist_autograd_spawn',
     ])
 
@@ -88,6 +86,8 @@ if PY33:
 if PY36:
     TESTS.extend([
         'test_jit_py3',
+        'test_determination',
+        'distributed/rpc/jit/test_rpc_spawn',
     ])
 
 WINDOWS_BLACKLIST = [
@@ -108,6 +108,7 @@ ROCM_BLACKLIST = [
     'distributed/rpc/test_dist_optimizer_spawn',
     'distributed/rpc/jit/test_rpc_spawn',
     'distributed/rpc/jit/test_dist_autograd_spawn',
+    'test_determination',
 ]
 
 # These tests are slow enough that it's worth calculating whether the patch
@@ -523,7 +524,7 @@ def log_test_reason(file_type, filename, test, options):
         print_to_stderr(
             'Determination found {} file {} -- running {}'.format(
                 file_type,
-                filename, 
+                filename,
                 test,
             )
         )
@@ -603,7 +604,7 @@ def determine_target(test, touched_files, options):
             if touched_module.startswith('test.'):
                 touched_module = touched_module.split('test.')[1]
             if (
-                touched_module in dep_modules 
+                touched_module in dep_modules
                 or touched_module == test.replace('/', '.')
             ):
                 log_test_reason(file_type, touched_file, test, options)
@@ -635,13 +636,13 @@ def main():
     if options.determine_from is not None and os.path.exists(options.determine_from):
         with open(options.determine_from, 'r') as fh:
             touched_files = [
-                os.path.normpath(name.strip()) for name in fh.read().split('\n') 
+                os.path.normpath(name.strip()) for name in fh.read().split('\n')
                 if len(name.strip()) > 0
             ]
         # HACK: Ensure the 'test' paths can be traversed by Modulefinder
         sys.path.append('test')
         selected_tests = [
-            test for test in selected_tests 
+            test for test in selected_tests
             if determine_target(test, touched_files, options)
         ]
         sys.path.remove('test')

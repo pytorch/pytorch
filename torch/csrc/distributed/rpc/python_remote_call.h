@@ -33,7 +33,7 @@ class TORCH_API PythonRemoteCall : public RpcCommandBase {
   static std::unique_ptr<PythonRemoteCall> fromMessage(const Message& message);
 
  private:
-  const SerializedPyObj serializedPyObj_;
+  SerializedPyObj serializedPyObj_;
   const at::IValue retRRefId_;
   const at::IValue retForkId_;
 };

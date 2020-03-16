@@ -13,6 +13,7 @@ import torch.testing._internal.dist_utils as dist_utils
 from torch.distributed.rpc import RRef, _get_debug_info, _rref_context_get_debug_info
 from torch.distributed.rpc.api import _use_rpc_pickler
 from torch.distributed.rpc.internal import PythonUDF, RPCExecMode, _internal_rpc_pickler
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import IS_MACOS, load_tests
 from torch.testing._internal.dist_utils import (
     dist_init,
@@ -20,6 +21,7 @@ from torch.testing._internal.dist_utils import (
     initialize_pg,
     wait_until_node_failure,
     wait_until_pending_users_flushed,
+    worker_name,
 )
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
@@ -49,7 +51,7 @@ class StubRpcAgent:
 
     def get_worker_infos(self):
         return {
-            rpc.WorkerInfo(name="worker{}".format(rank), id=rank)
+            rpc.WorkerInfo(name=worker_name(rank), id=rank)
             for rank in range(self.world_size)
         }
 
@@ -185,7 +187,7 @@ def multi_layer_nested_async_rpc(dst, world_size, ttl):
     # this method returns immediately without blocking the callee, but will
     # generate additional requests.
     if ttl > 0:
-        current_dst = "worker{}".format(dst)
+        current_dst = worker_name(dst)
         next_dst = (dst + 1) % world_size
         rpc.rpc_async(
             current_dst,
@@ -209,7 +211,7 @@ def nested_remote(dst):
 
 def rref_forward_chain(dst, world_size, rref, ttl):
     if ttl > 0:
-        current_dst = "worker{}".format(dst)
+        current_dst = worker_name(dst)
         next_dst = (dst + 1) % world_size
         ret_rref = rpc.remote(
             current_dst, rref_forward_chain, args=(next_dst, world_size, rref, ttl - 1)
@@ -272,10 +274,10 @@ class RpcTest(RpcAgentTestFixture):
         n = self.rank + 1
         peer_rank = n % self.world_size
         self_worker_info = rpc.get_worker_info()
-        peer_worker_info = rpc.get_worker_info("worker{}".format(peer_rank))
+        peer_worker_info = rpc.get_worker_info(worker_name(peer_rank))
 
-        self.assertEqual(self_worker_info.name, "worker{}".format(self.rank))
-        self.assertEqual(peer_worker_info.name, "worker{}".format(peer_rank))
+        self.assertEqual(self_worker_info.name, worker_name(self.rank))
+        self.assertEqual(peer_worker_info.name, worker_name(peer_rank))
 
         with self.assertRaisesRegex(RuntimeError, "Unknown destination worker"):
             unknown_worker_id = rpc.get_worker_info("WorkerUnknown")
@@ -286,7 +288,7 @@ class RpcTest(RpcAgentTestFixture):
 
         worker_names = {worker_info.name for worker_info in worker_infos}
         expected_worker_names = {
-            "worker{}".format(rank) for rank in range(self.world_size)
+            worker_name(rank) for rank in range(self.world_size)
         }
         self.assertEqual(worker_names, expected_worker_names)
 
@@ -297,7 +299,7 @@ class RpcTest(RpcAgentTestFixture):
     @dist_init
     def test_self_add(self):
         self_worker_info = rpc.get_worker_info()
-        self_worker_name = "worker{}".format(self.rank)
+        self_worker_name = worker_name(self.rank)
         fut = rpc.rpc_async(self_worker_info, torch.add, args=(torch.ones(2, 2), 1))
         ret = rpc.rpc_sync(self_worker_info, torch.add, args=(torch.ones(2, 2), 1))
         self.assertEqual(fut.wait(), torch.ones(2, 2) + 1)
@@ -319,7 +321,7 @@ class RpcTest(RpcAgentTestFixture):
 
     @dist_init
     def test_self_remote_rref_as_rpc_arg(self):
-        dst = "worker{}".format((self.rank + 1) % self.world_size)
+        dst = worker_name((self.rank + 1) % self.world_size)
         self._test_self_remote_rref_as_rpc_arg(dst)
 
     @dist_init
@@ -336,7 +338,7 @@ class RpcTest(RpcAgentTestFixture):
 
     @dist_init
     def test_self_remote_rref_as_remote_arg(self):
-        dst = "worker{}".format((self.rank + 1) % self.world_size)
+        dst = worker_name((self.rank + 1) % self.world_size)
         self._test_self_remote_rref_as_remote_arg(dst)
 
     @dist_init
@@ -395,7 +397,7 @@ class RpcTest(RpcAgentTestFixture):
     @dist_init(setup_rpc=False)
     def test_reinit(self):
         rpc.init_rpc(
-            name="worker{}".format(self.rank),
+            name=worker_name(self.rank),
             backend=self.rpc_backend,
             rank=self.rank,
             world_size=self.world_size,
@@ -408,7 +410,7 @@ class RpcTest(RpcAgentTestFixture):
 
         with self.assertRaisesRegex(RuntimeError, "is already initialized"):
             rpc.init_rpc(
-                name="worker{}".format(self.rank),
+                name=worker_name(self.rank),
                 backend=self.rpc_backend,
                 rank=self.rank,
                 world_size=self.world_size,
@@ -440,7 +442,7 @@ class RpcTest(RpcAgentTestFixture):
         n = self.rank + 1
         dst_rank = n % self.world_size
         ret = rpc.rpc_sync(
-            "worker{}".format(dst_rank),
+            worker_name(dst_rank),
             torch.add,
             args=(torch.ones(n, n), torch.ones(n, n)),
         )
@@ -450,7 +452,7 @@ class RpcTest(RpcAgentTestFixture):
     def test_add_with_id(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
-        workder_info = rpc.get_worker_info("worker{}".format(dst_rank))
+        workder_info = rpc.get_worker_info(worker_name(dst_rank))
 
         ret = rpc.rpc_sync(
             workder_info, torch.add, args=(torch.ones(n, n), torch.ones(n, n))
@@ -462,7 +464,7 @@ class RpcTest(RpcAgentTestFixture):
         n = self.rank + 1
         dst_rank = n % self.world_size
         ret = rpc.rpc_sync(
-            "worker{}".format(dst_rank), torch.add, args=(torch.ones(n, n), n)
+            worker_name(dst_rank), torch.add, args=(torch.ones(n, n), n)
         )
         self.assertEqual(ret, (torch.ones(n, n) + n))
 
@@ -471,7 +473,7 @@ class RpcTest(RpcAgentTestFixture):
         n = self.rank + 1
         dst_rank = n % self.world_size
         fut = rpc.rpc_async(
-            "worker{}".format(dst_rank),
+            worker_name(dst_rank),
             torch.add,
             args=(torch.ones(n, n), torch.ones(n, n)),
         )
@@ -483,7 +485,7 @@ class RpcTest(RpcAgentTestFixture):
         dst_rank = n % self.world_size
         x = torch.ones(self.world_size, self.world_size)
         x[self.rank][self.rank] = 0
-        ret = rpc.rpc_sync("worker{}".format(dst_rank), torch.nonzero, args=(x,))
+        ret = rpc.rpc_sync(worker_name(dst_rank), torch.nonzero, args=(x,))
         self.assertEqual(ret, x.nonzero())
 
     @dist_init
@@ -492,7 +494,7 @@ class RpcTest(RpcAgentTestFixture):
         for i in range(20):
             n = i + self.rank + 1
             ret = rpc.rpc_sync(
-                "worker{}".format(dst_rank),
+                worker_name(dst_rank),
                 torch.add,
                 args=(torch.ones(n, n), torch.ones(n, n)),
             )
@@ -582,7 +584,7 @@ class RpcTest(RpcAgentTestFixture):
         n = self.rank + 1
         dst_rank = n % self.world_size
         ret = rpc.rpc_sync(
-            "worker{}".format(dst_rank),
+            worker_name(dst_rank),
             torch.add,
             args=(torch.ones(n, n), torch.ones(n, n)),
         )
@@ -591,7 +593,7 @@ class RpcTest(RpcAgentTestFixture):
 
         with self.assertRaisesRegex(RuntimeError, "^RPC has not been initialized"):
             rpc.rpc_sync(
-                "worker{}".format(dst_rank),
+                worker_name(dst_rank),
                 torch.add,
                 args=(torch.ones(n, n), torch.ones(n, n)),
             )
@@ -600,7 +602,7 @@ class RpcTest(RpcAgentTestFixture):
     def test_expected_src(self):
         dst_rank = (self.rank + 1) % self.world_size
         expected_src_rank = (self.rank - 1) % self.world_size
-        ret = rpc.rpc_sync("worker{}".format(dst_rank), set_value, args=(self.rank,))
+        ret = rpc.rpc_sync(worker_name(dst_rank), set_value, args=(self.rank,))
         value = VALUE_FUTURE.result()
         self.assertEqual(value, expected_src_rank)
 
@@ -608,7 +610,7 @@ class RpcTest(RpcAgentTestFixture):
     def test_py_built_in(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
-        ret = rpc.rpc_sync("worker{}".format(dst_rank), min, args=(n, n + 1, n + 2))
+        ret = rpc.rpc_sync(worker_name(dst_rank), min, args=(n, n + 1, n + 2))
         self.assertEqual(ret, min(n, n + 1, n + 2))
 
     @dist_init
@@ -616,25 +618,28 @@ class RpcTest(RpcAgentTestFixture):
         n = self.rank + 1
         dst_rank = n % self.world_size
         ret = rpc.rpc_sync(
-            "worker{}".format(dst_rank),
+            worker_name(dst_rank),
             my_function,
             kwargs={"a": n, "b": n + 1, "c": n + 2},
         )
         self.assertEqual(ret, my_function(n, n + 1, n + 2))
 
-    def _profiler_test_with_rpc(self, rpc_exec_mode, func, args):
+    def _profiler_test_with_rpc(self, rpc_exec_mode, func, args, use_record_function=False):
         dst = (self.rank + 1) % self.world_size
         # only run profiler on rank 1.
         if self.rank == 1:
             with torch.autograd.profiler.profile() as prof:
+                if use_record_function:
+                    record_function = torch.autograd.profiler.record_function("foo")
+                    record_function.__enter__()
                 if rpc_exec_mode == RPCExecMode.SYNC:
-                    rpc.rpc_sync("worker{}".format(dst), func, args=args)
+                    rpc.rpc_sync(worker_name(dst), func, args=args)
                 elif rpc_exec_mode == RPCExecMode.ASYNC:
-                    fut = rpc.rpc_async("worker{}".format(dst), func, args=args)
+                    fut = rpc.rpc_async(worker_name(dst), func, args=args)
                     fut.wait()
                 else:
                     self.assertTrue(rpc_exec_mode == RPCExecMode.REMOTE)
-                    rref = rpc.remote("worker{}".format(dst), func, args=args)
+                    rref = rpc.remote(worker_name(dst), func, args=args)
                     rref.to_here()
                     # We need to wait for the instance to be created on
                     # the owner, and get back a positive confirmation.
@@ -644,56 +649,88 @@ class RpcTest(RpcAgentTestFixture):
                     # any pending users, which indicates that the confirmation
                     # was processed on this worker.
                     wait_until_pending_users_flushed()
+                if use_record_function:
+                    record_function.__exit__()
 
             events = prof.function_events
             rpc_event = [
                 event for event in events if rpc_exec_mode.value in event.name
             ][0]
+            if use_record_function:
+                scope_event = [event for event in events if "foo" in event.name][0]
+                # Since RPC call is within the scope, its CPU interval should be
+                # contained within foo's interval.
+                self.assertTrue(scope_event.cpu_interval.start < rpc_event.cpu_interval.start)
+                self.assertTrue(scope_event.cpu_interval.end > rpc_event.cpu_interval.end)
             # the sender, dest worker, function run, and type of RPC should all
             # be recorded.
-            self_worker_name = "worker{}".format(self.rank)
-            dst_worker_name = "worker{}".format(dst)
+            self_worker_name = worker_name(self.rank)
+            dst_worker_name = worker_name(dst)
             self.assertTrue(self_worker_name in rpc_event.name)
             self.assertTrue(dst_worker_name in rpc_event.name)
             self.assertTrue(func.__name__ in rpc_event.name)
             self.assertTrue(rpc_exec_mode.value in rpc_event.name)
             self.assertEqual(rpc_event.count, 1)
+            if use_record_function:
+                # verify order by ensuring that the outer context comes
+                # before the rpc event.
+                foo_event_ix = next(i for i, event in enumerate(events) if "foo" in event.name)
+                rpc_event_idx = next(i for i, event in enumerate(events) if rpc_exec_mode.value in event.name)
+                self.assertLess(foo_event_ix, rpc_event_idx)
 
     @dist_init
     def test_profiler_with_sync_rpc_udf(self):
         self._profiler_test_with_rpc(RPCExecMode.SYNC, my_sleep_func, args=(1,))
+        self._profiler_test_with_rpc(RPCExecMode.SYNC, my_sleep_func, args=(1,),
+                                     use_record_function=True)
 
     @dist_init
     def test_profiler_with_sync_rpc_builtin(self):
         self._profiler_test_with_rpc(
             RPCExecMode.SYNC, torch.add, args=(torch.ones(1), torch.ones(1))
         )
+        self._profiler_test_with_rpc(
+            RPCExecMode.SYNC, torch.add, args=(torch.ones(1), torch.ones(1)),
+            use_record_function=True
+        )
 
     @dist_init
     def test_profiler_with_async_rpc_udf(self):
         self._profiler_test_with_rpc(RPCExecMode.ASYNC, my_sleep_func, args=(1,))
+        self._profiler_test_with_rpc(RPCExecMode.ASYNC, my_sleep_func, args=(1,),
+                                     use_record_function=True)
 
     @dist_init
     def test_profiler_with_async_rpc_builtin(self):
         self._profiler_test_with_rpc(
             RPCExecMode.ASYNC, torch.add, args=(torch.ones(1), torch.ones(1))
         )
+        self._profiler_test_with_rpc(
+            RPCExecMode.ASYNC, torch.add, args=(torch.ones(1), torch.ones(1)),
+            use_record_function=True
+        )
 
     @dist_init
     def test_profiler_with_remote_udf(self):
         self._profiler_test_with_rpc(RPCExecMode.REMOTE, my_sleep_func, args=(1,))
+        self._profiler_test_with_rpc(RPCExecMode.REMOTE, my_sleep_func, args=(1,),
+                                     use_record_function=True)
 
     @dist_init
     def test_profiler_with_remote_builtin(self):
         self._profiler_test_with_rpc(
             RPCExecMode.REMOTE, torch.add, args=(torch.ones(1), torch.ones(1))
         )
+        self._profiler_test_with_rpc(
+            RPCExecMode.REMOTE, torch.add, args=(torch.ones(1), torch.ones(1)),
+            use_record_function=True
+        )
 
     @dist_init
     def test_py_class_constructor(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
-        ret = rpc.rpc_sync("worker{}".format(dst_rank), MyClass, args=(n,))
+        ret = rpc.rpc_sync(worker_name(dst_rank), MyClass, args=(n,))
         self.assertEqual(ret.a, n)
 
     @dist_init
@@ -701,7 +738,7 @@ class RpcTest(RpcAgentTestFixture):
         n = self.rank + 1
         dst_rank = n % self.world_size
         ret = rpc.rpc_sync(
-            "worker{}".format(dst_rank), MyClass(2).my_instance_method, args=(n,)
+            worker_name(dst_rank), MyClass(2).my_instance_method, args=(n,)
         )
         self.assertEqual(ret, MyClass(2).my_instance_method(n))
 
@@ -710,7 +747,7 @@ class RpcTest(RpcAgentTestFixture):
         n = self.rank + 1
         dst_rank = n % self.world_size
         ret = rpc.rpc_sync(
-            "worker{}".format(dst_rank), MyClass.my_class_method, args=(n, n + 1)
+            worker_name(dst_rank), MyClass.my_class_method, args=(n, n + 1)
         )
         self.assertEqual(ret, MyClass.my_class_method(n, n + 1))
 
@@ -719,7 +756,7 @@ class RpcTest(RpcAgentTestFixture):
         n = self.rank + 1
         dst_rank = n % self.world_size
         ret = rpc.rpc_sync(
-            "worker{}".format(dst_rank), MyClass.my_static_method, args=(n + 10,)
+            worker_name(dst_rank), MyClass.my_static_method, args=(n + 10,)
         )
         self.assertEqual(ret, MyClass.my_static_method(n + 10))
 
@@ -727,7 +764,7 @@ class RpcTest(RpcAgentTestFixture):
     def test_py_multi_async_call(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
-        dst_worker_info = rpc.get_worker_info("worker{}".format(dst_rank))
+        dst_worker_info = rpc.get_worker_info(worker_name(dst_rank))
         fut1 = rpc.rpc_async(dst_worker_info, MyClass.my_static_method, args=(n + 10,))
         fut2 = rpc.rpc_async(dst_worker_info, min, args=(n, n + 1, n + 2))
         self.assertEqual(fut1.wait(), MyClass.my_static_method(n + 10))
@@ -737,7 +774,7 @@ class RpcTest(RpcAgentTestFixture):
     def test_py_no_return_result(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
-        ret = rpc.rpc_sync("worker{}".format(dst_rank), no_result)
+        ret = rpc.rpc_sync(worker_name(dst_rank), no_result)
         self.assertEqual(ret, no_result())
 
     @dist_init
@@ -745,7 +782,7 @@ class RpcTest(RpcAgentTestFixture):
         n = self.rank + 1
         dst_rank = n % self.world_size
         ret = rpc.rpc_sync(
-            "worker{}".format(dst_rank),
+            worker_name(dst_rank),
             my_tensor_function,
             args=(torch.ones(n, n), torch.ones(n, n)),
         )
@@ -758,7 +795,7 @@ class RpcTest(RpcAgentTestFixture):
         dst_rank = n % self.world_size
         for i in range(100):
             fut = rpc.rpc_async(
-                "worker{}".format(dst_rank),
+                worker_name(dst_rank),
                 my_tensor_function,
                 args=(torch.ones(i, i), torch.ones(i, i)),
             )
@@ -779,7 +816,7 @@ class RpcTest(RpcAgentTestFixture):
         b = TensorClass(build_complex_tensors())
         c = {"foo": torch.ones(n, n), "bar": torch.ones(n, n)}
         ret = rpc.rpc_sync(
-            "worker{}".format(dst_rank), my_complex_tensor_function, args=(a, b, c)
+            worker_name(dst_rank), my_complex_tensor_function, args=(a, b, c)
         )
         self.assertEqual(ret, my_complex_tensor_function(a, b, c))
 
@@ -789,7 +826,7 @@ class RpcTest(RpcAgentTestFixture):
         dst_rank = n % self.world_size
 
         ret = rpc.rpc_sync(
-            "worker{}".format(dst_rank),
+            worker_name(dst_rank),
             run_nested_pickle,
             args=(MyPickleClass(), torch.ones(2, 2)),
         )
@@ -803,13 +840,13 @@ class RpcTest(RpcAgentTestFixture):
         n = self.rank + 1
         dst_rank = n % self.world_size
         with self.assertRaises(TypeError):
-            ret = rpc.rpc_sync("worker{}".format(dst_rank), no_result, args=(10,))
+            ret = rpc.rpc_sync(worker_name(dst_rank), no_result, args=(10,))
 
     @dist_init
     def test_py_raise_in_user_func(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
-        fut = rpc.rpc_async("worker{}".format(dst_rank), raise_func)
+        fut = rpc.rpc_async(worker_name(dst_rank), raise_func)
         with self.assertRaises(ValueError):
             fut.wait()
 
@@ -818,9 +855,9 @@ class RpcTest(RpcAgentTestFixture):
         n = self.rank + 1
         dst_rank = n % self.world_size
         ret = rpc.rpc_sync(
-            "worker{}".format(dst_rank),
+            worker_name(dst_rank),
             nested_rpc,
-            args=("worker{}".format(self.rank),),
+            args=(worker_name(self.rank),),
         )
         self.assertEqual(ret, torch.ones(2, 2) + 1)
 
@@ -830,7 +867,7 @@ class RpcTest(RpcAgentTestFixture):
         futs = []
         tik = time.time()
         for _ in range(repeat):
-            fut = rpc.rpc_async("worker{}".format(dst_rank), f, args=args)
+            fut = rpc.rpc_async(worker_name(dst_rank), f, args=args)
             futs.append(fut)
 
         for fut in futs:
@@ -859,7 +896,7 @@ class RpcTest(RpcAgentTestFixture):
         n = self.rank + 1
         dst_rank = n % self.world_size
         rref = rpc.remote(
-            "worker{}".format(dst_rank),
+            worker_name(dst_rank),
             torch.add,
             args=(torch.ones(n, n), torch.ones(n, n)),
         )
@@ -875,7 +912,7 @@ class RpcTest(RpcAgentTestFixture):
             n = n + i
             rrefs.append(
                 rpc.remote(
-                    "worker{}".format(dst_rank),
+                    worker_name(dst_rank),
                     fn,
                     args=args_fn(n),
                     kwargs=kwargs_fn(n),
@@ -898,7 +935,7 @@ class RpcTest(RpcAgentTestFixture):
         n = self.rank + 1
         dst_rank = n % self.world_size
         rref = rpc.remote(
-            "worker{}".format(dst_rank),
+            worker_name(dst_rank),
             my_function,
             kwargs={"a": n, "b": n + 1, "c": n + 2},
         )
@@ -916,13 +953,13 @@ class RpcTest(RpcAgentTestFixture):
         n = self.rank + 1
         dst_rank = n % self.world_size
         rref_a = rpc.remote(
-            "worker{}".format(dst_rank), torch.add, args=(torch.ones(n, n), 2)
+            worker_name(dst_rank), torch.add, args=(torch.ones(n, n), 2)
         )
         rref_b = rpc.remote(
-            "worker{}".format(dst_rank), torch.add, args=(torch.ones(n, n), 1)
+            worker_name(dst_rank), torch.add, args=(torch.ones(n, n), 1)
         )
         rref_c = rpc.remote(
-            "worker{}".format(dst_rank), my_rref_function, args=(rref_a, rref_b)
+            worker_name(dst_rank), my_rref_function, args=(rref_a, rref_b)
         )
         self.assertEqual(rref_c.to_here(), torch.ones(n, n) + 4)
 
@@ -932,13 +969,13 @@ class RpcTest(RpcAgentTestFixture):
         owner_rank = n % self.world_size
         user_rank = (n + 1) % self.world_size
         rref_a = rpc.remote(
-            "worker{}".format(owner_rank), my_function, args=(torch.ones(n, n), 2, 0)
+            worker_name(owner_rank), my_function, args=(torch.ones(n, n), 2, 0)
         )
         rref_b = rpc.remote(
-            "worker{}".format(owner_rank), my_function, args=(torch.ones(n, n), 1, 0)
+            worker_name(owner_rank), my_function, args=(torch.ones(n, n), 1, 0)
         )
         rref_c = rpc.remote(
-            "worker{}".format(user_rank), my_rref_function, args=(rref_a, rref_b)
+            worker_name(user_rank), my_rref_function, args=(rref_a, rref_b)
         )
         self.assertEqual(rref_c.to_here(), torch.ones(n, n) + 4)
 
@@ -947,14 +984,14 @@ class RpcTest(RpcAgentTestFixture):
         n = self.rank + 1
         dst_rank = n % self.world_size
         rref_a = rpc.remote(
-            "worker{}".format(dst_rank), my_function, args=(torch.ones(n, n), 2, 0)
+            worker_name(dst_rank), my_function, args=(torch.ones(n, n), 2, 0)
         )
         rref_b = rpc.remote(
-            "worker{}".format(dst_rank), my_function, args=(torch.ones(n, n), 1, 0)
+            worker_name(dst_rank), my_function, args=(torch.ones(n, n), 1, 0)
         )
 
         c = rpc.rpc_sync(
-            "worker{}".format(dst_rank), my_rref_function, args=(rref_a, rref_b)
+            worker_name(dst_rank), my_rref_function, args=(rref_a, rref_b)
         )
 
         self.assertEqual(c, torch.ones(n, n) + 4)
@@ -966,9 +1003,9 @@ class RpcTest(RpcAgentTestFixture):
         dst_rank2 = (n + 1) % self.world_size
 
         rref = rpc.remote(
-            "worker{}".format(dst_rank1),
+            worker_name(dst_rank1),
             nested_remote,
-            args=("worker{}".format(dst_rank2),),
+            args=(worker_name(dst_rank2),),
         )
         self.assertEqual(rref.to_here(), torch.ones(2, 2) + 3)
 
@@ -978,11 +1015,16 @@ class RpcTest(RpcAgentTestFixture):
         dst_rank1 = n % self.world_size
         dst_rank2 = (n + 1) % self.world_size
         rref_of_rrefs = rpc.remote(
-            "worker{}".format(dst_rank1),
+            worker_name(dst_rank1),
             nested_rref,
-            args=("worker{}".format(dst_rank2),),
+            args=(worker_name(dst_rank2),),
         )
+
+        # Say C has 2 OwnerRRefs.
+        # B has 2 UserRRefs to those 2 OwnerRRefs, respectively.
+        # This call is effectively A asking B to share it's 2 UserRRefs.
         rrefs = rref_of_rrefs.to_here()
+
         self.assertEqual(len(rrefs), 2)
         self.assertEqual(rrefs[0].to_here(), torch.ones(2, 2) + 1)
         self.assertEqual(rrefs[1].to_here(), torch.ones(2, 2) + 2)
@@ -996,9 +1038,9 @@ class RpcTest(RpcAgentTestFixture):
         for _ in range(20):
             all_rrefs.append(
                 rpc.remote(
-                    "worker{}".format(dst_rank1),
+                    worker_name(dst_rank1),
                     nested_rref,
-                    args=("worker{}".format(dst_rank2),),
+                    args=(worker_name(dst_rank2),),
                 )
             )
 
@@ -1026,11 +1068,11 @@ class RpcTest(RpcAgentTestFixture):
         n = self.rank + 1
         dst_rank = n % self.world_size
         # check ref to other workers
-        rref = rpc.remote("worker{}".format(dst_rank), raise_func)
+        rref = rpc.remote(worker_name(dst_rank), raise_func)
         with self.assertRaises(ValueError):
             rref.to_here()
         # check ref to itself
-        rref = rpc.remote("worker{}".format(self.rank), no_result, args=(10,))
+        rref = rpc.remote(worker_name(self.rank), no_result, args=(10,))
         with self.assertRaises(TypeError):
             rref.to_here()
 
@@ -1040,9 +1082,9 @@ class RpcTest(RpcAgentTestFixture):
         dst_rank1 = n % self.world_size
         dst_rank2 = (n + 1) % self.world_size
         rref = rpc.rpc_sync(
-            "worker{}".format(dst_rank1),
+            worker_name(dst_rank1),
             rpc_return_rref,
-            args=("worker{}".format(dst_rank2),),
+            args=(worker_name(dst_rank2),),
         )
         self.assertEqual(rref.to_here(), torch.ones(2, 2) + 1)
 
@@ -1053,7 +1095,7 @@ class RpcTest(RpcAgentTestFixture):
         dst_rank = n % self.world_size
 
         rref = rpc.remote(
-            "worker{}".format(dst_rank), torch.add, args=(torch.ones(n, n), 1)
+            worker_name(dst_rank), torch.add, args=(torch.ones(n, n), 1)
         )
 
         ret_rref = rref_forward_chain(dst_rank, self.world_size, rref, ttl)
@@ -1076,7 +1118,7 @@ class RpcTest(RpcAgentTestFixture):
         # local_value() on a non-owning node.
         next_rank = (self.rank + 1) % self.world_size
         rref = rpc.remote(
-            "worker{}".format(next_rank), torch.add, args=(torch.ones(1), torch.ones(1))
+            worker_name(next_rank), torch.add, args=(torch.ones(1), torch.ones(1))
         )
         with self.assertRaisesRegex(
             RuntimeError, "Call it on worker{}".format(next_rank)
@@ -1089,7 +1131,7 @@ class RpcTest(RpcAgentTestFixture):
         dst_rank = n % self.world_size
 
         rref_list = rpc.rpc_sync(
-            "worker{}".format(dst_rank), get_rref_list, args=([1, 2, 3],)
+            worker_name(dst_rank), get_rref_list, args=([1, 2, 3],)
         )
 
         for rref in rref_list:
@@ -1115,10 +1157,10 @@ class RpcTest(RpcAgentTestFixture):
 
         other_rank = (self.rank + 1) % self.world_size
         other_a = rpc.remote(
-            "worker{}".format(other_rank), torch.add, args=(torch.ones(1), 1)
+            worker_name(other_rank), torch.add, args=(torch.ones(1), 1)
         )
         other_b = rpc.remote(
-            "worker{}".format(other_rank), torch.add, args=(torch.ones(1), 1)
+            worker_name(other_rank), torch.add, args=(torch.ones(1), 1)
         )
         other_a.to_here()  # to ensure clean termination
         other_b.to_here()
@@ -1144,7 +1186,7 @@ class RpcTest(RpcAgentTestFixture):
     def test_pass_local_rrefs(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
-        dst_worker = "worker{}".format(dst_rank)
+        dst_worker = worker_name(dst_rank)
 
         rref = RRef(40)
         self.assertEqual(
@@ -1162,13 +1204,13 @@ class RpcTest(RpcAgentTestFixture):
         n = self.rank + 1
         dst_rank = n % self.world_size
         rref_a = rpc.remote(
-            "worker{}".format(dst_rank), torch.add, args=(torch.ones(n, n), 2)
+            worker_name(dst_rank), torch.add, args=(torch.ones(n, n), 2)
         )
         rref_b = rpc.remote(
-            "worker{}".format(dst_rank), torch.add, args=(torch.ones(n, n), 1)
+            worker_name(dst_rank), torch.add, args=(torch.ones(n, n), 1)
         )
         rref_c = rpc.remote(
-            "worker{}".format(dst_rank), my_rref_function, args=(rref_a, rref_b)
+            worker_name(dst_rank), my_rref_function, args=(rref_a, rref_b)
         )
         self.assertEqual(rref_c.to_here(), torch.ones(n, n) + 4)
 
@@ -1180,7 +1222,7 @@ class RpcTest(RpcAgentTestFixture):
         """
         vals = [10, 2, 5, 7]
         dst_rank = (self.rank + 1) % self.world_size
-        dst_worker = "worker{}".format(dst_rank)
+        dst_worker = worker_name(dst_rank)
 
         # creates a remote object
         rref = rpc.remote(dst_worker, MyClass, args=(vals[0],))
@@ -1209,9 +1251,13 @@ class RpcTest(RpcAgentTestFixture):
 
         self.assertEqual(result, sum(vals))
 
-    def _test_rref_leak(self, ignore_leak):
+    # Notice `rpc.api.shutdown()` accesses `_delete_all_user_rrefs`
+    # through `torch.distributed.rpc.api`, so patching
+    # `torch.distributed.rpc._delete_all_user_rrefs` will not help.
+    @mock.patch.object(torch.distributed.rpc.api, "_delete_all_user_rrefs")
+    def _test_rref_leak(self, _mock_delete_all_user_rrefs, ignore_leak):
         rpc.init_rpc(
-            name="worker{}".format(self.rank),
+            name=worker_name(self.rank),
             backend=self.rpc_backend,
             rank=self.rank,
             world_size=self.world_size,
@@ -1223,7 +1269,7 @@ class RpcTest(RpcAgentTestFixture):
         dist.barrier()
 
         rref = rpc.remote(
-            "worker{}".format((self.rank + 1) % self.world_size),
+            worker_name((self.rank + 1) % self.world_size),
             torch.add,
             args=(torch.ones(2, 2), 1),
         )
@@ -1256,7 +1302,7 @@ class RpcTest(RpcAgentTestFixture):
 
         dst_rank = (self.rank + 1) % self.world_size
         rref2 = rpc.remote(
-            "worker{}".format(dst_rank), torch.add, args=(torch.ones(2, 2), 1)
+            worker_name(dst_rank), torch.add, args=(torch.ones(2, 2), 1)
         )
         self.assertEqual(
             rref2.__str__(),
@@ -1293,7 +1339,7 @@ class RpcTest(RpcAgentTestFixture):
         ###########################################################
 
         dst_rank = (self.rank + 1) % self.world_size
-        rpc.rpc_sync("worker{}".format(dst_rank), set_global_rref, args=(rref1,))
+        rpc.rpc_sync(worker_name(dst_rank), set_global_rref, args=(rref1,))
 
         # barrier before check 2
         dist.barrier()
@@ -1308,15 +1354,15 @@ class RpcTest(RpcAgentTestFixture):
         dist.barrier()
 
         # clear states for check 2
-        rpc.rpc_sync("worker{}".format(dst_rank), clear_global_rref)
+        rpc.rpc_sync(worker_name(dst_rank), clear_global_rref)
 
         # Check 3: rpc.remote call should update owners_ map
         ####################################################
         rref2 = rpc.remote(
-            "worker{}".format(dst_rank), torch.add, args=(torch.ones(2, 2), 1)
+            worker_name(dst_rank), torch.add, args=(torch.ones(2, 2), 1)
         )
         rref3 = rpc.remote(
-            "worker{}".format(dst_rank), torch.add, args=(torch.ones(2, 2), 1)
+            worker_name(dst_rank), torch.add, args=(torch.ones(2, 2), 1)
         )
         rref2.to_here()
         rref3.to_here()
@@ -1342,13 +1388,13 @@ class RpcTest(RpcAgentTestFixture):
         # GIL profiling should be disabled by default.
         dst_rank = (self.rank + 1) % self.world_size
         rpc.rpc_sync(
-            "worker{}".format(dst_rank), torch.add, args=(torch.ones(1), torch.ones(1))
+            worker_name(dst_rank), torch.add, args=(torch.ones(1), torch.ones(1))
         )
         info = rpc.api._get_current_rpc_agent().get_debug_info()
         self.assertRaises(KeyError, lambda: info["agent.gil_average_wait_time_us"])
         rpc.enable_gil_profiling(True)
         rpc.rpc_sync(
-            "worker{}".format(dst_rank), torch.add, args=(torch.ones(1), torch.ones(1))
+            worker_name(dst_rank), torch.add, args=(torch.ones(1), torch.ones(1))
         )
         info = rpc.api._get_current_rpc_agent().get_debug_info()
         self.assertIn("agent.gil_average_wait_time_us", info)
@@ -1374,7 +1420,7 @@ class RpcTest(RpcAgentTestFixture):
         dist.barrier()
         dst_rank = (self.rank + 1) % self.world_size
         fut = rpc.rpc_async(
-            "worker{}".format(dst_rank), set_and_check_done, args=(dst_rank,)
+            worker_name(dst_rank), set_and_check_done, args=(dst_rank,)
         )
         # blocks until the request arrives
         self.assertEqual(self.rank, VALUE_FUTURE.result())
@@ -1480,7 +1526,7 @@ class RpcTest(RpcAgentTestFixture):
 
         if self.rank == 1:
             dst_rank = (self.rank + 1) % self.world_size
-            dst_worker = "worker{}".format(dst_rank)
+            dst_worker = worker_name(dst_rank)
             # allow destination worker to exit without joining
             wait_until_node_failure(dst_rank)
             fut = rpc.rpc_async(dst_worker, torch.add, args=(torch.ones(1), 3))
@@ -1510,7 +1556,7 @@ class RpcTest(RpcAgentTestFixture):
         n = self.rank + 1
         dst_rank = n % self.world_size
         rpc.rpc_sync(
-            "worker{}".format(dst_rank),
+            worker_name(dst_rank),
             torch.add,
             args=(torch.ones(n, n), torch.ones(n, n)),
         )
@@ -1532,7 +1578,7 @@ class RpcTest(RpcAgentTestFixture):
         rpc_backend_options.rpc_timeout = timeout
 
         rpc.init_rpc(
-            name="worker{}".format(self.rank),
+            name=worker_name(self.rank),
             backend=self.rpc_backend,
             rank=self.rank,
             world_size=self.world_size,
@@ -1569,7 +1615,7 @@ class RpcTest(RpcAgentTestFixture):
         rpc._set_rpc_timeout(timedelta(milliseconds=1))
         # futures should time out and be marked with an exception indicating it as such.
         futs = [
-            rpc.rpc_async("worker{}".format(dst_rank), my_sleep_func, args=())
+            rpc.rpc_async(worker_name(dst_rank), my_sleep_func, args=())
             for _ in range(10)
         ]
         for fut in futs:
@@ -1579,18 +1625,18 @@ class RpcTest(RpcAgentTestFixture):
         # ensure that if a new timeout is set old futures don't time out but new ones do.
         rpc._set_rpc_timeout(timedelta(seconds=200))
         # create a longstanding RPC.
-        fut1 = rpc.rpc_async("worker{}".format(dst_rank), my_sleep_func, args=(1,))
+        fut1 = rpc.rpc_async(worker_name(dst_rank), my_sleep_func, args=(1,))
         # now, set a short timeout.
         rpc._set_rpc_timeout(timedelta(milliseconds=1))
         # f2 should time out, f should not.
-        fut2 = rpc.rpc_async("worker{}".format(dst_rank), my_sleep_func, args=(1,))
+        fut2 = rpc.rpc_async(worker_name(dst_rank), my_sleep_func, args=(1,))
         with self.assertRaises(RuntimeError):
             fut2.wait()
         fut1.wait()
 
         # future should run to completion if the timeout is zero.
         rpc._set_rpc_timeout(timedelta(seconds=0))
-        rpc.rpc_async("worker{}".format(dst_rank), my_sleep_func, args=()).wait()
+        rpc.rpc_async(worker_name(dst_rank), my_sleep_func, args=()).wait()
 
         # reset to default timeout so shutdown messages can process cleanly.
         rpc._set_rpc_timeout(rpc.constants.DEFAULT_RPC_TIMEOUT)
@@ -1651,3 +1697,95 @@ class RpcTest(RpcAgentTestFixture):
                 AttributeError, "RPC pickler does not serialize"
             ):
                 rpc.rpc_sync(callee_worker, foo_add, args=())
+
+    @dist_init
+    def test_non_garbage_collected_user_rref_due_to_local_circular_dependency(self):
+        dst_worker_name = worker_name((self.rank + 1) % self.world_size)
+
+        a = MyClass(1)
+        b = MyClass(2)
+
+        # This is to make Python not garbage collect a and b.
+        a.other = b
+        b.other = a
+
+        n = self.rank
+        a.rref = rpc.remote(
+            dst_worker_name,
+            torch.add,
+            args=(torch.ones(n, n), 2)
+        )
+
+    @dist_init(setup_rpc=False)
+    def test_use_rref_after_shutdown(self):
+        rpc.init_rpc(
+            name="worker%d" % self.rank,
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=self.rpc_backend_options,
+        )
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        rref = rpc.remote(
+            worker_name(dst_rank),
+            torch.add,
+            args=(torch.ones(n, n), torch.ones(n, n)),
+        )
+        # pass in graceful=True to ensure that local UserRRefs are deleted.
+        rpc.shutdown(graceful=True)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "Cannot call to_here\\(\\) on it after deletion."
+        ):
+            rref.to_here()
+
+        with self.assertRaisesRegex(
+            RuntimeError, "Cannot call fork an UserRRef after deletion."
+        ):
+            import torch.distributed.rpc.internal as internal
+            internal.serialize(rref)
+
+    @staticmethod
+    def _return_gpu_tensor():
+        return torch.rand(3, 3).cuda(0)
+
+    @staticmethod
+    def _return_gpu_tensor_list():
+        return [torch.rand(3, 3).cuda(0), torch.rand(3, 3).cuda(1)]
+
+    @staticmethod
+    def _gpu_tensor_list_arg(tensor_list):
+        return torch.rand(3, 3)
+
+    @skip_if_lt_x_gpu(2)
+    @dist_init
+    def test_cuda(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        t1 = torch.rand(3, 3).cuda(0)
+        t2 = torch.rand(3, 3).cuda(1)
+        t3 = torch.rand(3, 3)
+
+        # cuda tensors as args fail.
+        with self.assertRaisesRegex(RuntimeError, "RPC backend only supports CPU tensors.*Found tensor on device: cuda:0"):
+            rpc.rpc_sync(dst, torch.add, args=(t1, t2))
+
+        # mix of cpu and cuda tensors as args fail.
+        with self.assertRaisesRegex(RuntimeError, "RPC backend only supports CPU tensors.*Found tensor on device: cuda:0"):
+            rpc.rpc_sync(dst, torch.add, args=(t1, t3))
+
+        # gpu tensor list as args fails.
+        with self.assertRaisesRegex(RuntimeError, "RPC backend only supports CPU tensors.*Found tensor on device: cuda:0"):
+            rpc.rpc_sync(dst, RpcTest._gpu_tensor_list_arg, args=([t1, t2]))
+
+        # cuda tensors as return values fail.
+        with self.assertRaisesRegex(RuntimeError, "RPC backend only supports CPU tensors.*Found tensor on device: cuda:0"):
+            rpc.rpc_sync(dst, RpcTest._return_gpu_tensor, args=())
+
+        # cuda tensors as a list of return value fails
+        with self.assertRaisesRegex(RuntimeError, "RPC backend only supports CPU tensors.*Found tensor on device: cuda:0"):
+            rpc.rpc_sync(dst, RpcTest._return_gpu_tensor_list, args=())
+
+        # Sending to self should fail too.
+        with self.assertRaisesRegex(RuntimeError, "RPC backend only supports CPU tensors.*Found tensor on device: cuda:0"):
+            rpc.rpc_sync(worker_name(self.rank), torch.add, args=(t1, t2))
