@@ -24,8 +24,8 @@ using caffe2::serialize::PyTorchStreamReader;
 void postSetStateValidate(const IValue& v);
 namespace {
 
-struct ClassResolver : public script::Resolver {
-  explicit ClassResolver(script::SourceImporter source_importer)
+struct ClassResolver : public Resolver {
+  explicit ClassResolver(SourceImporter source_importer)
       : source_importer_(std::move(source_importer)) {}
   TypePtr resolveType(const std::string& name, const SourceRange& loc)
       override {
@@ -33,13 +33,13 @@ struct ClassResolver : public script::Resolver {
   }
 
  private:
-  script::SourceImporter source_importer_;
+  SourceImporter source_importer_;
 };
 
 class ScriptModuleDeserializer final {
  public:
   ScriptModuleDeserializer(
-      std::shared_ptr<script::CompilationUnit> cu,
+      std::shared_ptr<CompilationUnit> cu,
       std::unique_ptr<PyTorchStreamReader> reader,
       const c10::optional<at::Device>& device)
       : compilation_unit_(cu),
@@ -54,31 +54,31 @@ class ScriptModuleDeserializer final {
             },
             reader_->version()) {}
 
-  script::Module LEGACY_deserialize();
+  Module LEGACY_deserialize();
 
  private:
   at::Tensor LEGACY_loadTensor(
       const torch::TensorDef& tensor_proto,
       std::unordered_map<std::string, at::Storage>& storageMap);
   void LEGACY_loadTensorTable(torch::ModelDef* model_def);
-  void LEGACY_moduleSetState(const script::Module& module, IValue state);
+  void LEGACY_moduleSetState(const Module& module, IValue state);
   IValue LEGACY_loadPickleArchive(const std::string& name);
-  script::Module LEGACY_convertModule(const torch::ModuleDef& module_def);
+  Module LEGACY_convertModule(const torch::ModuleDef& module_def);
 
   std::vector<IValue> LEGACY_pickled_ivalues_;
   std::vector<std::string> LEGACY_moduleStack_;
 
   std::shared_ptr<Source> sourceLoader(const std::string& qualifier);
 
-  std::shared_ptr<script::CompilationUnit> compilation_unit_;
+  std::shared_ptr<CompilationUnit> compilation_unit_;
   std::unique_ptr<PyTorchStreamReader> reader_;
   c10::optional<at::Device> device_;
   std::vector<at::Tensor> constants_table_;
-  script::SourceImporter source_importer_;
+  SourceImporter source_importer_;
   std::string export_prefix_ = "code/";
 };
 
-script::Module ScriptModuleDeserializer::LEGACY_deserialize() {
+Module ScriptModuleDeserializer::LEGACY_deserialize() {
   torch::ModelDef model_def;
 
   at::DataPtr data_ptr;
@@ -240,7 +240,7 @@ at::Tensor ScriptModuleDeserializer::LEGACY_loadTensor(
 }
 
 void ScriptModuleDeserializer::LEGACY_moduleSetState(
-    const script::Module& module,
+    const Module& module,
     IValue state) {
   auto setstate = module.find_method("__setstate__");
 
@@ -265,7 +265,7 @@ void ScriptModuleDeserializer::LEGACY_moduleSetState(
   }
 }
 
-script::Module ScriptModuleDeserializer::LEGACY_convertModule(
+Module ScriptModuleDeserializer::LEGACY_convertModule(
     const torch::ModuleDef& module_def) {
   // HACK: The current model exporter can create module_defs with invalid Python
   // identifiers as names (they contain `.`)
@@ -278,7 +278,7 @@ script::Module ScriptModuleDeserializer::LEGACY_convertModule(
     auto sanitized = is_digits(atom) ? std::string("_") + atom : atom;
     LEGACY_moduleStack_.emplace_back(sanitized);
   }
-  auto module = script::Module(
+  auto module = Module(
       c10::QualifiedName(LEGACY_moduleStack_), compilation_unit_);
   for (int i = 0; i < module_def.submodules_size(); ++i) {
     const torch::ModuleDef& sub_def = module_def.submodules(i);
@@ -294,7 +294,7 @@ script::Module ScriptModuleDeserializer::LEGACY_convertModule(
       module.register_parameter(param_def.name(), tensor, /*is_buffer=*/false);
     }
   }
-  script::ScriptTypeParser typeParser(
+  ScriptTypeParser typeParser(
       std::make_shared<ClassResolver>(source_importer_));
   for (int i = 0; i < module_def.attributes_size(); ++i) {
     const torch::AttributeDef& attr_def = module_def.attributes(i);
@@ -373,8 +373,8 @@ script::Module ScriptModuleDeserializer::LEGACY_convertModule(
 
 } // namespace
 
-script::Module LEGACY_deserialize(
-    std::shared_ptr<script::CompilationUnit> cu,
+Module LEGACY_deserialize(
+    std::shared_ptr<CompilationUnit> cu,
     std::unique_ptr<caffe2::serialize::PyTorchStreamReader> reader,
     const c10::optional<c10::Device>& device) {
   ScriptModuleDeserializer deserializer(cu, std::move(reader), device);
