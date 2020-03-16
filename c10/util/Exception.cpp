@@ -70,11 +70,14 @@ namespace {
     static WarningHandler base_warning_handler_ = WarningHandler();
     return &base_warning_handler_;
   };
-  static thread_local WarningHandler* warning_handler_ = getHandler();
+  static thread_local WarningHandler* warning_handler_ = nullptr;
 
 }
 
 void warn(SourceLocation source_location, const std::string& msg) {
+  if (!warning_handler_) {
+    warning_handler_ = getHandler();
+  }
   warning_handler_->process(source_location, msg);
 }
 
@@ -83,6 +86,9 @@ void set_warning_handler(WarningHandler* handler) noexcept(true) {
 }
 
 WarningHandler* get_warning_handler() noexcept(true) {
+  if (!warning_handler_) {
+    warning_handler_ = getHandler();
+  }
   return warning_handler_;
 }
 
