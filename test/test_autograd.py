@@ -4831,7 +4831,7 @@ class TestMultithreadAutograd(TestCase):
         y_retain = x_retain + x_retain ** 2
         self._run_py_multithread_fn(train_fn_retain_graph, (y_retain,), num_threads=5)
         # result should equal to num_thread * gradients
-        self.assertEqual(x_retain.grad, 5 * (4 * x_retain ** 3 + 6 * (x_retain ** 2) + 4 * x_retain +1))
+        self.assertEqual(x_retain.grad, 5 * (4 * x_retain ** 3 + 6 * (x_retain ** 2) + 4 * x_retain + 1))
 
 
     def test_fork_join_in_middle(self):
