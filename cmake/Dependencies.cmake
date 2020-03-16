@@ -248,11 +248,6 @@ if (USE_NNPACK OR USE_QNNPACK OR USE_PYTORCH_QNNPACK OR USE_XNNPACK)
     if (NOT DEFINED PTHREADPOOL_SOURCE_DIR)
       set(PTHREADPOOL_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/pthreadpool" CACHE STRING "pthreadpool source directory")
     endif()
-    if (NOT DEFINED CLOG_SOURCE_DIR)
-      # XNNPACK gets clog from inside the cpuinfo repository,
-      # so lets just do the same for now.
-      set(CLOG_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/cpuinfo/deps/clog" CACHE STRING "cpuinfo source directory")
-    endif()
 
     set(CPUINFO_LIBRARY_TYPE "static" CACHE STRING "")
     set(CPUINFO_LOG_LEVEL "error" CACHE STRING "")
@@ -313,6 +308,36 @@ if (USE_XNNPACK)
       EXCLUDE_FROM_ALL)
   ENDIF()
 endif()
+
+# ---[ Caffe2 uses cpuinfo library in the thread pool
+if (NOT TARGET cpuinfo)
+  if (NOT DEFINED CPUINFO_SOURCE_DIR)
+    set(CPUINFO_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/../third_party/cpuinfo" CACHE STRING "cpuinfo source directory")
+  endif()
+
+  set(CPUINFO_BUILD_TOOLS OFF CACHE BOOL "")
+  set(CPUINFO_BUILD_UNIT_TESTS OFF CACHE BOOL "")
+  set(CPUINFO_BUILD_MOCK_TESTS OFF CACHE BOOL "")
+  set(CPUINFO_BUILD_BENCHMARKS OFF CACHE BOOL "")
+  set(CPUINFO_LIBRARY_TYPE "static" CACHE STRING "")
+  set(CPUINFO_LOG_LEVEL "error" CACHE STRING "")
+  if(MSVC)
+    if (CAFFE2_USE_MSVC_STATIC_RUNTIME)
+      set(CPUINFO_RUNTIME_TYPE "static" CACHE STRING "")
+    else()
+      set(CPUINFO_RUNTIME_TYPE "shared" CACHE STRING "")
+    endif()
+  endif()
+  add_subdirectory(
+    "${CPUINFO_SOURCE_DIR}"
+    "${CONFU_DEPENDENCIES_BINARY_DIR}/cpuinfo")
+  # We build static version of cpuinfo but link
+  # them into a shared library for Caffe2, so they need PIC.
+  set_property(TARGET cpuinfo PROPERTY POSITION_INDEPENDENT_CODE ON)
+  # Need to set this to avoid conflict with XNNPACK's clog external project
+  set(CLOG_SOURCE_DIR "${CPUINFO_SOURCE_DIR}/deps/clog")
+endif()
+list(APPEND Caffe2_DEPENDENCY_LIBS cpuinfo)
 
 # ---[ QNNPACK
 if(USE_QNNPACK)
@@ -409,39 +434,20 @@ if(USE_XNNPACK)
       "${CONFU_DEPENDENCIES_BINARY_DIR}/XNNPACK")
 
     set_property(TARGET XNNPACK PROPERTY POSITION_INDEPENDENT_CODE ON)
+    # Context: pthreadpool_get_threads_count implementation that is built in pytorch, uses
+    # implementation defined in caffe2/utils/threadpool/pthreadpool_impl.cc. This implementation
+    # assumes the the pthreadpool* passed is of type caffe2::ThradPool and thus does reinterpret cast.
+    # This is not valid when we create pthreadpool via caffe2::xnnpack_threadpool, which is of type
+    # compatible with new pthreadpool interface and is used in PT's XNNPACK integration.
+    # Thus all the calls for pthreadpool_get_threads_count originating from XNNPACK must be routed
+    # appropriately to pthreadpool_get_threads_count_xnnpack, which does not do the aforementioned
+    # casting to caffe2::ThradPool. Once the threadpools are unified, we will not need this.
+    target_compile_definitions(XNNPACK PRIVATE -Dpthreadpool_get_threads_count=pthreadpool_get_threads_count_xnnpack)
   endif()
 
   include_directories(SYSTEM ${XNNPACK_INCLUDE_DIR})
   list(APPEND Caffe2_DEPENDENCY_LIBS XNNPACK)
 endif()
-
-# ---[ Caffe2 uses cpuinfo library in the thread pool
-if (NOT TARGET cpuinfo)
-  if (NOT DEFINED CPUINFO_SOURCE_DIR)
-    set(CPUINFO_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/../third_party/cpuinfo" CACHE STRING "cpuinfo source directory")
-  endif()
-
-  set(CPUINFO_BUILD_TOOLS OFF CACHE BOOL "")
-  set(CPUINFO_BUILD_UNIT_TESTS OFF CACHE BOOL "")
-  set(CPUINFO_BUILD_MOCK_TESTS OFF CACHE BOOL "")
-  set(CPUINFO_BUILD_BENCHMARKS OFF CACHE BOOL "")
-  set(CPUINFO_LIBRARY_TYPE "static" CACHE STRING "")
-  set(CPUINFO_LOG_LEVEL "error" CACHE STRING "")
-  if(MSVC)
-    if (CAFFE2_USE_MSVC_STATIC_RUNTIME)
-      set(CPUINFO_RUNTIME_TYPE "static" CACHE STRING "")
-    else()
-      set(CPUINFO_RUNTIME_TYPE "shared" CACHE STRING "")
-    endif()
-  endif()
-  add_subdirectory(
-    "${CPUINFO_SOURCE_DIR}"
-    "${CONFU_DEPENDENCIES_BINARY_DIR}/cpuinfo")
-  # We build static version of cpuinfo but link
-  # them into a shared library for Caffe2, so they need PIC.
-  set_property(TARGET cpuinfo PROPERTY POSITION_INDEPENDENT_CODE ON)
-endif()
-list(APPEND Caffe2_DEPENDENCY_LIBS cpuinfo)
 
 # ---[ gflags
 if(USE_GFLAGS)
