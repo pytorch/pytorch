@@ -89,7 +89,7 @@ def _join_rocm_home(*paths):
     return os.path.join(ROCM_HOME, *paths)
 
 
-MINIMUM_GCC_VERSION = (4, 9, 0)
+MINIMUM_GCC_VERSION = (5, 0, 0)
 MINIMUM_MSVC_VERSION = (19, 0, 24215)
 ABI_INCOMPATIBILITY_WARNING = '''
 
@@ -97,11 +97,11 @@ ABI_INCOMPATIBILITY_WARNING = '''
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 Your compiler ({}) may be ABI-incompatible with PyTorch!
-Please use a compiler that is ABI-compatible with GCC 4.9 and above.
+Please use a compiler that is ABI-compatible with GCC 5.0 and above.
 See https://gcc.gnu.org/onlinedocs/libstdc++/manual/abi.html.
 
 See https://gist.github.com/goldsborough/d466f43e8ffc948ff92de7486c5216d6
-for instructions on how to install GCC 4.9 or higher.
+for instructions on how to install GCC 5 or higher.
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
                               !! WARNING !!
@@ -1220,6 +1220,9 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose):
         extra_ldflags.append('torch_cpu.lib')
         if with_cuda:
             extra_ldflags.append('torch_cuda.lib')
+            # /INCLUDE is used to ensure torch_cuda is linked against in a project that relies on it.
+            # Related issue: https://github.com/pytorch/pytorch/issues/31611
+            extra_ldflags.append('/INCLUDE:\"?warp_size@cuda@at@@YAHXZ\"')
         extra_ldflags.append('torch.lib')
         extra_ldflags.append('torch_python.lib')
         extra_ldflags.append('/LIBPATH:{}'.format(python_lib_path))

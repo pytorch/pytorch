@@ -20,7 +20,7 @@ static CPUCapability compute_cpu_capability() {
     if (strcmp(envar, "default") == 0) {
       return CPUCapability::DEFAULT;
     }
-    AT_WARN("ignoring invalid value for ATEN_CPU_CAPABILITY: ", envar);
+    TORCH_WARN("ignoring invalid value for ATEN_CPU_CAPABILITY: ", envar);
   }
 
 #if !defined(__powerpc__) && !defined(__s390x__)

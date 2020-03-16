@@ -181,7 +181,7 @@ import glob
 import importlib
 
 from tools.build_pytorch_libs import build_caffe2
-from tools.setup_helpers.env import (IS_WINDOWS, IS_DARWIN,
+from tools.setup_helpers.env import (IS_WINDOWS, IS_DARWIN, IS_LINUX,
                                      check_env_flag, build_type)
 from tools.setup_helpers.cmake import CMake
 
@@ -412,6 +412,12 @@ class build_ext(setuptools.command.build_ext.build_ext):
                 report('-- Building with distributed package ')
         else:
             report('-- Building without distributed package')
+
+        # Do not use clang to compile exensions if `-fstack-clash-protection` is defined
+        # in system CFLAGS
+        system_c_flags = distutils.sysconfig.get_config_var('CFLAGS')
+        if IS_LINUX and '-fstack-clash-protection' in system_c_flags and 'clang' in os.environ.get('CC', ''):
+            os.environ['CC'] = distutils.sysconfig.get_config_var('CC')
 
         # It's an old-style class in Python 2.7...
         setuptools.command.build_ext.build_ext.run(self)
@@ -869,7 +875,7 @@ if __name__ == '__main__':
         download_url='https://github.com/pytorch/pytorch/tags',
         author='PyTorch Team',
         author_email='packages@pytorch.org',
-        python_requires='>=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*, !=3.4.*',
+        python_requires='>=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*, !=3.4.*, !=3.6.0',
         # PyPI package information.
         classifiers=[
             'Development Status :: 5 - Production/Stable',

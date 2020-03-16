@@ -5,8 +5,7 @@ import torch
 import torch.backends.cudnn as cudnn
 
 from torch._six import PY2, PY37
-from ..nn.modules.utils import _single, _pair, _triple, _quadruple, \
-    _list_with_default
+from ..nn.modules.utils import _single, _pair, _triple, _quadruple
 
 from collections import OrderedDict
 
@@ -17,7 +16,6 @@ _modules_containing_builtins = (torch, torch._C._nn)
 
 _builtin_ops = [
     # Pairs of (function, op_name)
-    (_list_with_default, "aten::list_with_default"),
     (_pair, "aten::_pair"),
     (_quadruple, "aten::_quadruple"),
     (_single, "aten::_single"),
@@ -76,6 +74,7 @@ _builtin_ops = [
     (torch.nn.functional.upsample_bilinear, "aten::__upsample_bilinear"),
     (torch.nn.functional.upsample_nearest, "aten::__upsample_nearest"),
     (torch.nn.functional.upsample, "aten::__upsample"),
+    (torch.nn.functional.assert_int_or_pair, "aten::_assert_int_or_pair"),
     (torch.nn.init._no_grad_fill_, "aten::_no_grad_fill_"),
     (torch.nn.init._no_grad_normal_, "aten::_no_grad_normal_"),
     (torch.nn.init._no_grad_uniform_, "aten::_no_grad_uniform_"),
