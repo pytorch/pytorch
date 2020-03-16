@@ -100,7 +100,8 @@ void test_serialize_optimizer(DerivedOptimizerOptions options) {
     optimizer.zero_grad();
     auto y = model->forward(x).sum();
     y.backward();
-    optimizer.step();
+    auto closure = []() { return torch::tensor({10}); };
+    optimizer.step(closure);
   };
 
   // Do 2 steps of model1
@@ -551,6 +552,119 @@ TEST(SerializeTest, Optim_SGD) {
   auto optim1_2 = SGD(model1_params, torch::optim::SGDOptions(1e-1).momentum(0.9));
   OLD_SERIALIZATION_LOGIC_WARNING_CHECK(torch::load, optim1_2, optim_tempfile_old_format.name);
   is_optimizer_state_equal<SGDParamState>(optim1.state(), optim1_2.state());
+}
+
+TEST(SerializeTest, Optim_Adam) {
+  test_serialize_optimizer<Adam, AdamOptions, AdamParamState>(AdamOptions().lr(0.99999).amsgrad(true).weight_decay(0.5));
+
+  // bc compatibility check
+  auto model1 = Linear(5, 2);
+  auto model1_params = model1->parameters();
+  // added a tensor for lazy init check - when all params do not have entry in buffers
+  model1_params.emplace_back(torch::randn({2,3}));
+  auto optim1 = torch::optim::Adam(model1_params, torch::optim::AdamOptions().weight_decay(0.5));
+
+  auto x = torch::ones({10, 5});
+  auto step = [&x](torch::optim::Optimizer& optimizer, Linear model) {
+    optimizer.zero_grad();
+    auto y = model->forward(x).sum();
+    y.backward();
+    optimizer.step();
+  };
+  step(optim1, model1);
+
+  std::vector<int64_t> step_buffers;
+  std::vector<at::Tensor> exp_average_buffers;
+  std::vector<at::Tensor> exp_average_sq_buffers;
+  std::vector<at::Tensor> max_exp_average_sq_buffers;
+  const auto& params_ = optim1.param_groups()[0].params();
+  const auto& optim1_state = optim1.state();
+  for (size_t i = 0; i < params_.size(); i++) {
+    if(i != (params_.size() - 1)) {
+      auto key_ = c10::guts::to_string(params_[i].unsafeGetTensorImpl());
+      const AdamParamState& curr_state_ = static_cast<const AdamParamState&>(*(optim1_state.at(key_).get()));
+      step_buffers.emplace_back(curr_state_.step());
+      exp_average_buffers.emplace_back(curr_state_.exp_avg());
+      exp_average_sq_buffers.emplace_back(curr_state_.exp_avg_sq());
+      if(curr_state_.max_exp_avg_sq().defined()) {
+        max_exp_average_sq_buffers.emplace_back(curr_state_.max_exp_avg_sq());
+      }
+    }
+  }
+  // write buffers to the file
+  auto optim_tempfile_old_format = c10::make_tempfile();
+  torch::serialize::OutputArchive output_archive;
+  write_step_buffers(output_archive, "step_buffers", step_buffers);
+  write_tensors_to_archive(output_archive, "exp_average_buffers", exp_average_buffers);
+  write_tensors_to_archive(output_archive, "exp_average_sq_buffers", exp_average_sq_buffers);
+  write_tensors_to_archive(output_archive, "max_exp_average_sq_buffers", max_exp_average_sq_buffers);
+  output_archive.save_to(optim_tempfile_old_format.name);
+  auto optim1_2 = Adam(model1_params, torch::optim::AdamOptions());
+  OLD_SERIALIZATION_LOGIC_WARNING_CHECK(torch::load, optim1_2, optim_tempfile_old_format.name);
+  is_optimizer_state_equal<AdamParamState>(optim1.state(), optim1_2.state());
+}
+
+TEST(SerializeTest, Optim_RMSprop) {
+  auto options = RMSpropOptions(0.1).momentum(0.9).centered(true);
+  test_serialize_optimizer<RMSprop, RMSpropOptions, RMSpropParamState>(options);
+
+  // bc compatibility check
+  auto model1 = Linear(5, 2);
+  auto model1_params = model1->parameters();
+
+  // added a tensor for lazy init check - when all params do not have a momentum buffer entry
+  model1_params.emplace_back(torch::randn({2,3}));
+  auto optim1 = torch::optim::RMSprop(model1_params, options);
+
+  auto x = torch::ones({10, 5});
+  auto step = [&x](torch::optim::Optimizer& optimizer, Linear model) {
+    optimizer.zero_grad();
+    auto y = model->forward(x).sum();
+    y.backward();
+    optimizer.step();
+  };
+  step(optim1, model1);
+
+  std::vector<at::Tensor> square_average_buffers;
+  std::vector<at::Tensor> momentum_buffers;
+  std::vector<at::Tensor> grad_average_buffers;
+  const auto& params_ = optim1.param_groups()[0].params();
+  const auto& optim1_state = optim1.state();
+  for (size_t i = 0; i < params_.size(); i++) {
+    if(i != (params_.size() - 1)) {
+      auto key_ = c10::guts::to_string(params_[i].unsafeGetTensorImpl());
+      const RMSpropParamState& curr_state_ = static_cast<const RMSpropParamState&>(*(optim1_state.at(key_).get()));
+      square_average_buffers.emplace_back(curr_state_.square_avg());
+      if(curr_state_.momentum_buffer().defined()) {
+        momentum_buffers.emplace_back(curr_state_.momentum_buffer());
+      }
+      if(curr_state_.grad_avg().defined()) {
+        grad_average_buffers.emplace_back(curr_state_.grad_avg());
+      }
+    }
+  }
+  // write buffers to the file
+  auto optim_tempfile_old_format = c10::make_tempfile();
+  torch::serialize::OutputArchive output_archive;
+  write_tensors_to_archive(output_archive, "square_average_buffers", square_average_buffers);
+  write_tensors_to_archive(output_archive, "momentum_buffers", momentum_buffers);
+  write_tensors_to_archive(output_archive, "grad_average_buffers", grad_average_buffers);
+  output_archive.save_to(optim_tempfile_old_format.name);
+  auto optim1_2 = RMSprop(model1_params, options);
+  OLD_SERIALIZATION_LOGIC_WARNING_CHECK(torch::load, optim1_2, optim_tempfile_old_format.name);
+  const auto& params1_2_ = optim1_2.param_groups()[0].params();
+  auto& optim1_2_state = optim1_2.state();
+  // old RMSprop didn't track step value
+  for (size_t i = 0; i < params1_2_.size(); i++) {
+    if(i != (params1_2_.size() - 1)) {
+      auto key_ = c10::guts::to_string(params_[i].unsafeGetTensorImpl());
+      auto key1_2_ = c10::guts::to_string(params1_2_[i].unsafeGetTensorImpl());
+      const RMSpropParamState& curr_state_ = static_cast<const RMSpropParamState&>(*(optim1_state.at(key_).get()));
+      RMSpropParamState& curr_state1_2_ = static_cast<RMSpropParamState&>(*(optim1_2_state.at(key_).get()));
+      curr_state1_2_.step(curr_state_.step());
+    }
+  }
+  is_optimizer_state_equal<RMSpropParamState>(optim1.state(), optim1_2.state());
 }
 
 TEST(SerializeTest, XOR_CUDA) {

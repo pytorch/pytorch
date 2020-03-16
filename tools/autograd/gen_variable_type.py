@@ -467,13 +467,14 @@ def format_prerecord_trace(declaration):
     return PRE_RECORD_TRACE.substitute(local)
 
 
-def format_trace(declaration):
-    if not should_trace(declaration):
+def format_trace(declaration, disable_trace=False):
+    if disable_trace or not should_trace(declaration):
         return ('', '')
     return (format_prerecord_trace(declaration), format_postrecord_trace(declaration))
 
 
-def gen_variable_type(out, aten_declarations, template_path):
+def gen_variable_type(out, aten_declarations, template_path, disable_trace=False):
+
     """VariableType.h and VariableType.cpp body
 
     This is the at::Type subclass for differentiable tensors. The
@@ -486,7 +487,7 @@ def gen_variable_type(out, aten_declarations, template_path):
 
     aten_declarations = list(sorted(aten_declarations, key=lambda decl: decl['name']))
 
-    gen_variable_type_shard(out, aten_declarations, template_path, None, True)
+    gen_variable_type_shard(out, aten_declarations, template_path, None, True, disable_trace)
 
     # NOTE: see Note [Sharded File] at the top of the VariableType.cpp
     # template regarding sharding of the generated files.
@@ -499,8 +500,8 @@ def gen_variable_type(out, aten_declarations, template_path):
         shards[x].append(decl)
 
     for i, shard in enumerate(shards):
-        gen_variable_type_shard(out, shard, template_path, '_%d' % i, False)
-    gen_variable_type_shard(out, aten_declarations, template_path, 'Everything', False)
+        gen_variable_type_shard(out, shard, template_path, '_%d' % i, False, disable_trace)
+    gen_variable_type_shard(out, aten_declarations, template_path, 'Everything', False, disable_trace)
 
     REGISTRATION_DECLARATIONS_H = CodeTemplate.from_file(template_path + "/RegistrationDeclarations.h")
     registration_declarations = []
@@ -516,7 +517,7 @@ def gen_variable_type(out, aten_declarations, template_path):
     }
     write(out, 'RegistrationDeclarations.h', REGISTRATION_DECLARATIONS_H, env)
 
-def gen_variable_type_shard(out, aten_declarations, template_path, suffix, header):
+def gen_variable_type_shard(out, aten_declarations, template_path, suffix, header, disable_trace):
     VARIABLE_TYPE_H = CodeTemplate.from_file(template_path + '/VariableType.h')
     VARIABLE_TYPE_CPP = CodeTemplate.from_file(template_path + '/VariableType.cpp')
 
@@ -528,7 +529,7 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
         formal_types = [arg['type'] for arg in declaration['arguments']]
         type_declarations.append(METHOD_DECLARATION.substitute(declaration))
         if not declaration['manual_kernel_registration']:
-            body = emit_body(declaration)
+            body = emit_body(declaration, disable_trace)
             type_definitions.append(METHOD_DEFINITION.substitute(
                 declaration, type_definition_body=body))
             if declaration['use_c10_dispatcher'] == 'full':
@@ -550,7 +551,7 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
         write(out, 'VariableType%s.cpp' % suffix, VARIABLE_TYPE_CPP, env)
 
 
-def emit_body(declaration):
+def emit_body(declaration, disable_trace):
     strategy = dispatch_strategy(declaration)
 
     arguments = declaration['arguments']
@@ -927,7 +928,7 @@ def emit_body(declaration):
         body.extend(setup_derivative(differentiable_inputs))
     body.append(declare_returned_variables())
 
-    pre_record_trace, post_record_trace = format_trace(declaration)
+    pre_record_trace, post_record_trace = format_trace(declaration, disable_trace)
 
     body.append(pre_record_trace)
     body.append(emit_call(env))

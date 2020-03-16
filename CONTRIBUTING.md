@@ -457,10 +457,11 @@ variables `DEBUG`, `USE_DISTRIBUTED`, `USE_MKLDNN`, `USE_CUDA`, `BUILD_TEST`, `U
 - `USE_FBGEMM=0` will disable using FBGEMM (quantized 8-bit server operators).
 - `USE_NNPACK=0` will disable compiling with NNPACK.
 - `USE_QNNPACK=0` will disable QNNPACK build (quantized 8-bit operators).
+- `USE_XNNPACK=0` will disable compiling with XNNPACK.
 
 For example:
 ```bash
-DEBUG=1 USE_DISTRIBUTED=0 USE_MKLDNN=0 USE_CUDA=0 BUILD_TEST=0 USE_FBGEMM=0 USE_NNPACK=0 USE_QNNPACK=0 python setup.py develop
+DEBUG=1 USE_DISTRIBUTED=0 USE_MKLDNN=0 USE_CUDA=0 BUILD_TEST=0 USE_FBGEMM=0 USE_NNPACK=0 USE_QNNPACK=0 USE_XNNPACK=0 python setup.py develop
 ```
 
 For subsequent builds (i.e., when `build/CMakeCache.txt` exists), the build

@@ -51,10 +51,10 @@ namespace jit {
 // that is confusing to display to the end user since it always reports
 // locations in libtorch code rather than user code.
 
-inline std::shared_ptr<script::CompilationUnit> get_python_cu() {
+inline std::shared_ptr<CompilationUnit> get_python_cu() {
   return py::module::import("torch.jit")
       .attr("_python_cu")
-      .cast<std::shared_ptr<script::CompilationUnit>>();
+      .cast<std::shared_ptr<CompilationUnit>>();
 }
 
 struct TypedIValue : public std::pair<IValue, TypePtr> {
@@ -174,8 +174,8 @@ inline InferredType tryToInferType(py::handle input) {
     }
   }
 
-  if (py::isinstance<script::Object>(input)) {
-    auto object = py::cast<script::Object>(input);
+  if (py::isinstance<Object>(input)) {
+    auto object = py::cast<Object>(input);
     return InferredType(object.type());
 #ifdef USE_DISTRIBUTED
   } else if (py::isinstance<torch::distributed::rpc::PyRRef>(input)) {
@@ -490,7 +490,7 @@ inline IValue toIValue(
     }
     case TypeKind::ClassType: {
       auto classType = type->expect<ClassType>();
-      if (auto mod = script::as_module(py::cast<py::object>(obj))) {
+      if (auto mod = as_module(py::cast<py::object>(obj))) {
         // if obj is already a ScriptModule, just return its ivalue
         return mod.value()._ivalue();
       }
@@ -519,7 +519,7 @@ inline IValue toIValue(
       // from them correspondingly.
       c10::ClassTypePtr classType = nullptr;
       IValue res;
-      if (auto mod = script::as_module(py::cast<py::object>(obj))) {
+      if (auto mod = as_module(py::cast<py::object>(obj))) {
         classType = mod.value().type();
         res = mod.value()._ivalue();
       } else {
@@ -599,7 +599,7 @@ inline IValue toIValue(
     case TypeKind::AnyTupleType:
       break;
   }
-  AT_ERROR("toIValue() cannot handle converting to type: ", type->python_str());
+  throw py::cast_error(c10::str("toIValue() cannot handle converting to type: ", type->python_str()));
 }
 
 // Small wrapper around getting the type name string from Python to make
@@ -626,6 +626,14 @@ inline std::string friendlyTypeName(py::handle obj) {
   }
 }
 
+// Thrown when trying to create a schema for a list of python
+// arguments that cannot be converted. 
+// Can be caught by the caller to attempt to use other schema
+// when there is an overloaded operator.
+struct schema_match_error : public std::runtime_error {
+  using std::runtime_error::runtime_error;
+};
+
 inline IValue argumentToIValue(
     const FunctionSchema& schema,
     size_t argumentPosition,
@@ -634,7 +642,7 @@ inline IValue argumentToIValue(
   try {
     return toIValue(object, argument.type(), argument.N());
   } catch (const py::cast_error& error) {
-    throw std::runtime_error(c10::str(
+    throw schema_match_error(c10::str(
       schema.formatTypeMismatchMsg(
         argument,
         friendlyTypeName(object),
@@ -731,12 +739,12 @@ inline py::object toPyObject(IValue ivalue) {
   } else if (ivalue.isObject()) {
     const auto obj = std::move(ivalue).toObject();
     if (obj->type()->is_module()) {
-      return py::cast(script::Module(obj));
+      return py::cast(Module(obj));
     }
 
     auto pyCu = get_python_cu();
     if (obj->name().find("__torch__.torch.classes") == 0) {
-      return py::cast(script::Object(obj));
+      return py::cast(Object(obj));
     }
     const auto classType = pyCu->get_class(c10::QualifiedName(obj->name()));
     AT_ASSERT(classType);
@@ -813,7 +821,7 @@ inline Stack createStackForSchema(
     c10::optional<IValue> self) {
   size_t all_arguments = (self ? 1 : 0) + args.size() + kwargs.size();
   if (all_arguments > schema.arguments().size()) {
-    throw std::runtime_error(c10::str(
+    throw schema_match_error(c10::str(
         schema.name(),
         "() expected at most ",
         schema.arguments().size(),
@@ -846,7 +854,7 @@ inline Stack createStackForSchema(
     } else if (arg.default_value()) {
       push(stack, *arg.default_value());
     } else {
-      throw std::runtime_error(c10::str(
+      throw schema_match_error(c10::str(
           schema.name(),
           "() is missing value for argument '",
           arg.name(),
@@ -860,7 +868,7 @@ inline Stack createStackForSchema(
     for (const auto& kwarg : kwargs) {
       names.emplace_back(py::cast<std::string>(kwarg.first));
     }
-    schema.findErrorInKwargs(names);
+    throw schema_match_error(schema.findErrorInKwargs(names));
   }
 
   return stack;
@@ -913,7 +921,7 @@ inline py::object runAndInsertCall(
     c10::optional<IValue> self,
     // Lambda that tells this function how to insert `callee` into the graph if
     // we're tracing.
-    std::function<Value*(Graph&, const script::MatchedSchema& match)>
+    std::function<Value*(Graph&, const MatchedSchema& match)>
         callInserter) {
   auto stack = createStackForSchema(
       callee.getSchema(), std::move(args), std::move(kwargs), std::move(self));
@@ -939,7 +947,7 @@ inline py::object runAndInsertCall(
     }
 
     // Add a call node.
-    script::MatchedSchema match = script::matchSchema(
+    MatchedSchema match = matchSchema(
         callee.getSchema(),
         tracer::getPythonInterpreterSourceRange(),
         *graph,
@@ -974,13 +982,13 @@ inline py::object invokeScriptFunctionFromPython(
       args,
       kwargs,
       /*self=*/c10::nullopt,
-      [&](Graph& graph, const script::MatchedSchema& match) {
+      [&](Graph& graph, const MatchedSchema& match) {
         return graph.insertFunctionCall(&callee, match);
       });
 }
 
 inline py::object invokeScriptMethodFromPython(
-    script::Method& callee,
+    Method& callee,
     tuple_slice args,
     py::kwargs kwargs) {
   auto self = callee.owner()._ivalue();
@@ -989,32 +997,57 @@ inline py::object invokeScriptMethodFromPython(
       args,
       kwargs,
       self,
-      [&](Graph& graph, const script::MatchedSchema& match) {
+      [&](Graph& graph, const MatchedSchema& match) {
         return graph.insertMethodCall(callee.name(), match);
       });
 }
 
 inline py::object invokeScriptMethodFromPython(
-    script::Object& object,
+    Object& object,
     const std::string& method_name,
     tuple_slice args,
     py::kwargs kwargs) {
   auto type = object.type();
-  script::Method init_method(object._ivalue(), type->getMethod(method_name));
+  Method init_method(object._ivalue(), type->getMethod(method_name));
   invokeScriptMethodFromPython(init_method, std::move(args), std::move(kwargs));
-  return py::cast(script::Object(object));
+  return py::cast(Object(object));
 }
 
 inline py::object invokeOperatorFromPython(
-    const Operator& op,
+    const std::vector<std::shared_ptr<Operator>>& operations,
     py::args args,
     py::kwargs kwargs) {
-  // Create a stack full of the arguments and keyword arguments.
-  auto stack = createStackForSchema(
-      op.schema(), std::move(args), std::move(kwargs), c10::nullopt);
+  
+  Stack stack;
 
-  // Invoke the operation, which puts the return values onto the stack.
-  op.getOperation()(stack);
+  if (operations.size() == 1) {
+    const Operator& op = *operations.at(0);
+    // Create a stack full of the arguments and keyword arguments.
+    stack = createStackForSchema(
+        op.schema(), std::move(args), std::move(kwargs), c10::nullopt);
+    op.getOperation()(stack);
+  } else {
+    std::vector<schema_match_error> errors;
+    std::shared_ptr<Operator> found_op = nullptr;
+    for (const auto& op : operations) {
+      try {
+        stack = createStackForSchema(op->schema(), args, kwargs, c10::nullopt);
+        found_op = op;
+        break;
+      } catch(schema_match_error& error) {
+        errors.push_back(std::move(error));
+      }
+    }
+    if (!found_op) {
+      std::stringstream ss;
+      ss << "Overloaded torch operator invoked from Python failed to many any schema:\n";
+      for (const auto& err: errors) {
+        ss << err.what() << "\n\n";
+      }
+      throw std::runtime_error(ss.str());
+    }
+    found_op->getOperation()(stack);
+  }
 
   return createPyObjectForStack(std::move(stack));
 }

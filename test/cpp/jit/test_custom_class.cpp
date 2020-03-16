@@ -1,4 +1,5 @@
 #include <torch/custom_class.h>
+#include <torch/script.h>
 
 #include <iostream>
 #include <string>
@@ -9,7 +10,7 @@ namespace jit {
 
 namespace {
 
-struct Foo : torch::jit::CustomClassHolder {
+struct Foo : torch::CustomClassHolder {
   int x, y;
   Foo() : x(0), y(0) {}
   Foo(int x_, int y_) : x(x_), y(y_) {}
@@ -32,7 +33,7 @@ struct Foo : torch::jit::CustomClassHolder {
 };
 
 template <class T>
-struct Stack : torch::jit::CustomClassHolder {
+struct Stack : torch::CustomClassHolder {
   std::vector<T> stack_;
   Stack(std::vector<T> init) : stack_(init.begin(), init.end()) {}
 
@@ -60,22 +61,22 @@ struct Stack : torch::jit::CustomClassHolder {
   }
 };
 
-struct PickleTester : torch::jit::CustomClassHolder {
+struct PickleTester : torch::CustomClassHolder {
   PickleTester(std::vector<int64_t> vals) : vals(std::move(vals)) {}
   std::vector<int64_t> vals;
 };
 
-static auto test = torch::jit::class_<Foo>("_TorchScriptTesting_Foo")
-                       .def(torch::jit::init<int64_t, int64_t>())
-                       // .def(torch::jit::init<>())
+static auto test = torch::class_<Foo>("_TorchScriptTesting_Foo")
+                       .def(torch::init<int64_t, int64_t>())
+                       // .def(torch::init<>())
                        .def("info", &Foo::info)
                        .def("increment", &Foo::increment)
                        .def("add", &Foo::add)
                        .def("combine", &Foo::combine);
 
 static auto testStack =
-    torch::jit::class_<Stack<std::string>>("_TorchScriptTesting_StackString")
-        .def(torch::jit::init<std::vector<std::string>>())
+    torch::class_<Stack<std::string>>("_TorchScriptTesting_StackString")
+        .def(torch::init<std::vector<std::string>>())
         .def("push", &Stack<std::string>::push)
         .def("pop", &Stack<std::string>::pop)
         .def("clone", &Stack<std::string>::clone)
@@ -100,8 +101,8 @@ static auto testStack =
 // clang-format on
 
 static auto testPickle =
-    torch::jit::class_<PickleTester>("_TorchScriptTesting_PickleTester")
-        .def(torch::jit::init<std::vector<int64_t>>())
+    torch::class_<PickleTester>("_TorchScriptTesting_PickleTester")
+        .def(torch::init<std::vector<int64_t>>())
         .def_pickle(
             [](c10::intrusive_ptr<PickleTester> self) { // __getstate__
               return std::vector<int64_t>{1, 3, 3, 7};
@@ -121,11 +122,10 @@ static auto testPickle =
         });
 
 at::Tensor take_an_instance(const c10::intrusive_ptr<PickleTester>& instance) {
-  return at::zeros({instance->vals.back(), 4});
+  return torch::zeros({instance->vals.back(), 4});
 }
 
 torch::RegisterOperators& register_take_instance() {
-  static int ensure_custom_class_handler_registered = register_custom_class_handler();
   static auto instance_registry = torch::RegisterOperators().op(
   torch::RegisterOperators::options()
       .schema(

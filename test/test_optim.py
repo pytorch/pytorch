@@ -758,6 +758,17 @@ class TestLRScheduler(TestCase):
         scheduler = MultiStepLR(self.opt, gamma=0.1, milestones=[2, 5, 9])
         self._test(scheduler, targets, epochs)
 
+    def test_multi_step_lr_with_epoch(self):
+        # lr = 0.05     if epoch < 2
+        # lr = 0.005    if 2 <= epoch < 5
+        # lr = 0.0005   if epoch < 9
+        # lr = 0.00005   if epoch >= 9
+        epochs = 10
+        single_targets = [0.05] * 2 + [0.005] * 3 + [0.0005] * 4 + [0.00005] * 3
+        targets = [single_targets, list(map(lambda x: x * epochs, single_targets))]
+        scheduler = MultiStepLR(self.opt, gamma=0.1, milestones=[2, 5, 9])
+        self._test_with_epoch(scheduler, targets, epochs)
+
     def test_exp_lr(self):
         epochs = 10
         single_targets = [0.05 * (0.9 ** x) for x in range(epochs)]
@@ -1412,6 +1423,16 @@ class TestLRScheduler(TestCase):
                 self.assertAlmostEqual(target, result,
                                        msg='LR is wrong in epoch {}: expected {}, got {}'.format(
                                            epoch, t, r), delta=1e-5)
+
+    def _test_with_epoch(self, schedulers, targets, epochs=10):
+        if isinstance(schedulers, _LRScheduler):
+            schedulers = [schedulers]
+        for epoch in range(epochs):
+            [scheduler.step(epoch) for scheduler in schedulers]  # step before assert: skip initial lr
+            for param_group, target in zip(self.opt.param_groups, targets):
+                self.assertAlmostEqual(target[epoch], param_group['lr'],
+                                       msg='LR is wrong in epoch {}: expected {}, got {}'.format(
+                                           epoch, target[epoch], param_group['lr']), delta=1e-5)
 
     def _test(self, schedulers, targets, epochs=10):
         if isinstance(schedulers, _LRScheduler):
