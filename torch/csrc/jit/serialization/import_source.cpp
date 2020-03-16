@@ -1,15 +1,14 @@
 #include "import_source.h"
 
 #include <ATen/core/qualified_name.h>
-#include <torch/csrc/jit/api/custom_class.h>
-#include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/frontend/parser.h>
 #include <torch/csrc/jit/frontend/resolver.h>
 #include <torch/csrc/jit/frontend/script_type_parser.h>
+#include <torch/csrc/jit/serialization/export.h>
+#include <torch/custom_class.h>
 
 namespace torch {
 namespace jit {
-namespace script {
 
 struct OpsValue : public SugaredValue {
   OpsValue(size_t version) : version_(version) {}
@@ -177,7 +176,7 @@ struct SourceImporterImpl : public Resolver,
   }
 
   void LEGACY_import_methods(
-      const script::Module& mod,
+      const Module& mod,
       const std::shared_ptr<Source>& src) {
     auto self = SimpleSelf(mod.type());
     c10::QualifiedName prefix = *mod.type()->name();
@@ -484,12 +483,11 @@ TypePtr SourceImporter::loadNamedType(const QualifiedName& name) const {
 }
 
 void SourceImporter::LEGACY_import_methods(
-    const script::Module& mod,
+    const Module& mod,
     const std::shared_ptr<Source>& src) {
   pImpl->LEGACY_import_methods(mod, src);
 }
 SourceImporter::~SourceImporter() = default;
 
-} // namespace script
 } // namespace jit
 } // namespace torch
