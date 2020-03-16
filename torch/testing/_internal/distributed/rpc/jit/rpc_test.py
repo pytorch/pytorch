@@ -589,13 +589,13 @@ class JitRpcTest(LocalRRefTest, JitRpcAsyncOpTest, RpcAgentTestFixture):
                 dst_worker_name, MyScriptModule, args=(self.rank,)
             )
 
-        # Python 3.5 and Python 3.6 throw different error message, the only	
-        # common word can be greped is "pickle".	
-        with self.assertRaisesRegex(	
-            TypeError, "pickle"	
-        ):	
-            ret = rpc.rpc_async(	
-                dst_worker_name, my_local_script_module.forward, args=()	
+        # Python 3.5 and Python 3.6 throw different error message, the only
+        # common word can be greped is "pickle".
+        with self.assertRaisesRegex(
+            TypeError, "pickle"
+        ):
+            ret = rpc.rpc_async(
+                dst_worker_name, my_local_script_module.forward, args=()
             )
 
     @dist_init
