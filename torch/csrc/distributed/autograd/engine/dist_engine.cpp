@@ -21,8 +21,6 @@ using torch::autograd::validate_outputs;
 using torch::autograd::variable_list;
 
 static constexpr char* kNumBackwardPasses = "num_current_backward_passes";
-static constexpr char* kEngineCPUQueueSize =
-    "local_autograd_engine_cpu_queue_size";
 static constexpr char* kNumAutogradContexts = "num_autograd_contexts";
 
 DistEngine::DistEngine()
@@ -397,10 +395,17 @@ size_t DistEngine::numBackwardPasses() const {
 
 std::unordered_map<std::string, std::string> DistEngine::getDebugInfo() const {
   std::unordered_map<std::string, std::string> debugInfo;
-  auto autogradContext = DistAutogradContainer::getInstance().currentContext();
+  auto& DistAutogradContainer = DistAutogradContainer::getInstance();
   debugInfo[kNumBackwardPasses] = std::to_string(numBackwardPasses());
-  debugInfo[kEngineCPUQueueSize] =
-      std::to_string(engine_.ready_queue_size(autogradContext->retrieveGraphTask(), at::kCPU));
+  // fill in all cpu queue size information for each graph task of the context_id
+  // in initializedContextIds_
+  std::lock_guard<std::mutex> guard(initializedContextIdsLock_);
+  for(auto context_id : initializedContextIds_) {
+    std::shared_ptr<torch::autograd::GraphTask> graph_task = DistAutogradContainer.retrieveContext(context_id)->retrieveGraphTask();
+    std::string kGraphTaskCPUQueueSize = "context_id: "  + std::to_string(context_id) + " graph_task_cpu_queue_size";
+    debugInfo[kGraphTaskCPUQueueSize] =
+        std::to_string(engine_.ready_queue_size(graph_task, at::kCPU));
+  }
   debugInfo[kNumAutogradContexts] = std::to_string(
       DistAutogradContainer::getInstance().numAutogradContexts());
   return debugInfo;

@@ -1664,7 +1664,6 @@ class DistAutogradTest(RpcAgentTestFixture):
             return input
 
     @dist_init
-    @unittest.skip
     def test_debug_info(self):
         initialize_pg(self.init_method, self.rank, self.world_size)
 
@@ -1713,7 +1712,8 @@ class DistAutogradTest(RpcAgentTestFixture):
         debug_info = dist_autograd._get_debug_info()
         assert debug_info is not None
         self.assertEqual(0, int(debug_info["num_current_backward_passes"]))
-        self.assertEqual(0, int(debug_info["local_autograd_engine_cpu_queue_size"]))
+        # only have `num_current_backward_passes` and `num_autograd contexts`
+        self.assertTrue(len(debug_info) == 2)
 
         self.assertTrue(_all_contexts_cleaned_up())
 
