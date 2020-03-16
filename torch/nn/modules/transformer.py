@@ -375,6 +375,98 @@ class TransformerDecoderLayer(Module):
         return tgt
 
 
+class MultiheadAttentionInProjection(Module):
+    r"""
+    Args:
+        in_embed_dim (int): Input embedding dimension
+        num_heads (int): Number of parallel attention heads.
+        out_embed_dim (int, optional): Output embedding dimension. If not
+            provided, then set to `in_embed_dim`. Must be divisible by
+            `num_heads`.
+    """
+    def __init__(self, in_embed_dim, num_heads, out_embed_dim=None):
+        # TODO: Bias??
+        super(MultiheadAttentionInProjection, self).__init__()
+        self.in_embed_dim = in_embed_dim
+        if out_embed_dim is None:
+            out_embed_dim = in_embed_dim
+        assert out_embed_dim % num_heads == 0, "out_embed_dim must be divisible by num_heads"
+        self.out_embed_dim = out_embed_dim
+        self.num_heads = num_heads
+        self.weight = Parameter(torch.Tensor(in_embed_dim, out_embed_dim))
+        init.kaiming_uniform_(self.weight, a=math.sqrt(5))
+        self.bias = None
+
+    def forward(self, query):
+        return F.multi_head_attention_in_projection(query, self.num_heads, self.weight, self.bias)
+
+
+class ScaledDotProduct(Module):
+    r"""
+    Args:
+        num_heads (int): Number of parallel attention heads.
+        add_zero_attn (bool): Whether to add a batch of zeros to the key and
+            value sequences.
+        dropout (float): probability of dropping an attention value.
+    """
+    def __init__(self, num_heads, add_zero_attn=False, dropout=0.0):
+        super(ScaledDotProduct, self).__init__()
+        self.dropout = dropout
+        self.add_zero_attn = add_zero_attn
+        self.num_heads = num_heads
+
+    def forward(self, query, key, value, key_padding_mask=None, attn_mask=None):
+        r"""Scaled Dot Product
+        Args:
+            query, key, value: map a query and a set of key-value pairs to
+            an output.
+            key_padding_mask (Tensor, optional): Specified padding elements 
+                in the key will be ignored by the attention.
+            attn_mask (Tensor, optional): 2D or 3D additive mask. A 2D mask
+                will be broadcasted for all the batches while a 3D mask allows
+                to specify a different mask for the entries of each batch.
+
+        Shape:
+            - query: :math:`(N * H, L, P / H)`
+            - key: :math:`(N * H, S, P / H)`
+            - value: :math:`(N * H, S, P / H)`
+            - key_padding_mask: :math:`(N, S)`
+            - attn_mask: :math:`(L, S)` or :math:`(N * H, L, S)`
+            - Output: :math:`(N * H, L, P / H)`, :math:`(N * H, L, S)`
+            where L is the target sequence length, S is the source sequence
+            length, H is the number of attention heads, N is the batch size,
+            and P is the projection dimensionE is the head dimension.
+        """
+        return F.scaled_dot_product_attention(query, key, value,
+            self.num_heads, self.add_zero_attn, self.dropout, self.training, key_padding_mask, attn_mask)
+
+
+class MultiheadAttentionOutProjection(Module):
+    r"""
+    Args:
+        in_embed_dim (int): Input embedding dimension
+        num_heads (int): Number of parallel attention heads.
+        out_embed_dim (int, optional): Output embedding dimension. If not
+            provided, then set to `in_embed_dim`. Must be divisible by
+            `num_heads`.
+    """
+    def __init__(self, in_embed_dim, num_heads, out_embed_dim=None):
+        # TODO: Bias??
+        super(MultiheadAttentionOutProjection, self).__init__()
+        assert in_embed_dim % num_heads, "in_embed_dim must be divisible by num_heads."
+        self.in_embed_dim = in_embed_dim
+        if out_embed_dim is None:
+            out_embed_dim = in_embed_dim
+        self.out_embed_dim = out_embed_dim
+        self.num_heads = num_heads
+        self.weight = Parameter(torch.Tensor(in_embed_dim, out_embed_dim))
+        init.kaiming_uniform_(self.weight, a=math.sqrt(5))
+        self.bias = None
+
+    def forward(self, attn_output):
+        return F.multi_head_attention_out_projection(attn_output, self.num_heads, self.weight, self.bias)
+
+
 def _get_clones(module, N):
     return ModuleList([copy.deepcopy(module) for i in range(N)])
 
