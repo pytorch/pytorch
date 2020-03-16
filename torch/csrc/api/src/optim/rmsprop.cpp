@@ -131,6 +131,7 @@ Tensor RMSprop::step(LossClosure closure)  {
       }
     }
   }
+  return loss;
 }
 
 void RMSprop::add_parameters(const std::vector<Tensor>& parameters) {

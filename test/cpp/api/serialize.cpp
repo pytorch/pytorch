@@ -711,14 +711,19 @@ TEST(SerializeTest, Optim_LBFGS) {
   };
 
   // Do 2 steps of model1
+  std::cout<<"optim1 step1: "<<std::endl;
   step(optim1, model1);
+  std::cout<<"optim1 step2: "<<std::endl;
   step(optim1, model1);
 
   // Do 2 steps of model 2 without saving the optimizer
+  std::cout<<"optim2 step1: "<<std::endl;
   step(optim2, model2);
+  std::cout<<"optim2_2 step1: "<<std::endl;
   step(optim2_2, model2);
 
   // Do 1 step of model 3
+  std::cout<<"optim3 step1: "<<std::endl;
   step(optim3, model3);
 
   // save the optimizer
@@ -731,13 +736,13 @@ TEST(SerializeTest, Optim_LBFGS) {
   auto& optim3_2_state = optim3_2.state();
   auto& optim3_state = optim3.state();
 
-  // optim3_2 and optim1 should have param_groups and state of size 1 and 2 respectively
+  // LBFGS only supports 1 param_group
+  // optim3_2 and optim1 should have param_groups of size 1
+  ASSERT_TRUE(optim3_param_groups.size() == 1);
   ASSERT_TRUE(optim3_2_param_groups.size() == 1);
-  ASSERT_TRUE(optim3_2_state.size() == 2);
-
-  // optim3_2 and optim1 should have param_groups and state of same size
-  ASSERT_TRUE(optim3_2_param_groups.size() == optim3_param_groups.size());
-  ASSERT_TRUE(optim3_2_state.size() == optim3_state.size());
+  // LBFGS only maintains one global state
+  ASSERT_TRUE(optim3_2_state.size() == 1);
+  ASSERT_TRUE(optim3_state.size() == 1);
 
   // checking correctness of serialization logic for optimizer.param_groups_ and optimizer.state_
   for (int i = 0; i < optim3_2_param_groups.size(); i++) {
@@ -747,6 +752,7 @@ TEST(SerializeTest, Optim_LBFGS) {
   }
 
   // Do step2 for model 3
+  std::cout<<"optim3 step2: "<<std::endl;
   step(optim3_2, model3);
 
   param1 = model1->named_parameters();

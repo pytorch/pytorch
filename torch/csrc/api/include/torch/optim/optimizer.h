@@ -216,5 +216,6 @@ class LossClosureOptimizer : public detail::OptimizerBase {
   using detail::OptimizerBase::OptimizerBase;
   virtual Tensor step(LossClosure closure) = 0;
 };
+
 } // namespace optim
 } // namespace torch

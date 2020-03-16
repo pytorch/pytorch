@@ -232,7 +232,6 @@ void list_to_deque(const c10::List<T>& list, std::deque<T>& dq) {
 
 #define _TORCH_OPTIM_SERIALIZE_TORCH_ARG(name) { \
   auto ivalue = torch::IValue(name()); \
-  std::cout<<#name<<" tagKind: "<<ivalue.tagKind()<<std::endl; \
   /* do not serialize if name is an undefined tensor*/ \
   if (!(ivalue.isTensor() && ivalue.unsafeToTensorImpl() == at::UndefinedTensorImpl::singleton())) { \
     archive.write(#name, ivalue); \
@@ -240,16 +239,16 @@ void list_to_deque(const c10::List<T>& list, std::deque<T>& dq) {
 }
 
 #define _TORCH_OPTIM_SERIALIZE_TORCH_ARG_DEQUE(name) {\
-  c10::IValue ivalue = torch::IValue(deque_to_list(name())); \
-  std::cout<<#name<<"tagKind: "<<ivalue.tagKind()<<std::endl; \
-  archive.write(#name, ivalue); \
+  if(name().size() != 0) { \
+    c10::IValue ivalue = torch::IValue(deque_to_list(name())); \
+    archive.write(#name, ivalue); \
+  } \
 }
 
 #define _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(T, name) \
 { \
   c10::IValue ivalue; \
   bool exists = archive.try_read(#name, ivalue); \
-  std::cout<<"tagKind: "<<ivalue.tagKind()<<std::endl; \
   if (exists) \
     name(ivalue.to<T>()); \
 }
@@ -257,15 +256,20 @@ void list_to_deque(const c10::List<T>& list, std::deque<T>& dq) {
 #define _TORCH_OPTIM_DESERIALIZE_TORCH_ARG_OPTIONAL(T, name) \
 { \
   c10::IValue ivalue; \
-  name(ivalue.toOptional<T>()); \
+  bool exists = archive.try_read(#name, ivalue); \
+  if (exists) \
+    name(ivalue.toOptional<T>()); \
 }
 
 #define _TORCH_OPTIM_DESERIALIZE_TORCH_ARG_DEQUE(T, name) \
 { \
   c10::IValue ivalue; \
-  auto list = ivalue.to<c10::List<T::value_type>>(); \
-  auto& dq = name(); \
-  list_to_deque(list, dq); \
+  bool exists = archive.try_read(#name, ivalue); \
+  if (exists) { \
+    auto list = ivalue.to<c10::List<T::value_type>>(); \
+    auto& dq = name(); \
+    list_to_deque(list, dq); \
+  } \
 }
 
 } // namespace optim
