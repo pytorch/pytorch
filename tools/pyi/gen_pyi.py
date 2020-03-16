@@ -160,6 +160,8 @@ def arg_to_type_hint(arg):
         elif isinstance(default, str) and default.startswith('{') and default.endswith('}'):
             if arg['dynamic_type'] == 'Tensor' and default == '{}':
                 default = None
+            elif arg['dynamic_type'] == 'Generator' and default == '{}':
+                default = None
             elif arg['dynamic_type'] == 'IntArrayRef':
                 default = '(' + default[1:-1] + ')'
             else:

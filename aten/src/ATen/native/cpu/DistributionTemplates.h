@@ -56,10 +56,10 @@ void random_full_64_bits_range_kernel(TensorIterator& iter, RNG generator) {
 template<typename RNG>
 struct RandomFromToKernel {
   void operator()(TensorIterator& iter, uint64_t range, int64_t base, at::Generator gen) {
-    random_from_to_kernel(iter, range, base, (RNG)gen.get());
+    random_from_to_kernel(iter, range, base, check_generator<RNG>(gen));
   }
   void operator()(TensorIterator& iter, at::Generator gen) {
-    random_full_64_bits_range_kernel(iter, (RNG)gen.get());
+    random_full_64_bits_range_kernel(iter, check_generator<RNG>(gen));
   }
 };
 
@@ -102,7 +102,7 @@ void random_kernel(TensorIterator& iter, RNG generator) {
 template<typename RNG>
 struct RandomKernel {
   void operator()(TensorIterator& iter, at::Generator gen) {
-    random_kernel(iter, (RNG)gen.get());
+    random_kernel(iter, check_generator<RNG>(gen));
   }
 };
 

@@ -193,11 +193,14 @@ TEST(CUDAGenerator, TestCloning) {
   if (!at::cuda::is_available()) return;
   auto gen1 = at::cuda::detail::createCUDAGenerator();
   gen1->set_current_seed(123); // modify gen1 state
-  gen1.get<CUDAGenerator>()->set_philox_offset_per_thread(4);
+  check_generator<CUDAGenerator>(gen1)->set_philox_offset_per_thread(4);
   auto gen2 = at::cuda::detail::createCUDAGenerator();
-  gen2 = gen1->clone();
+  gen2 = Generator(gen1->clone());
   ASSERT_EQ(gen1->current_seed(), gen2->current_seed());
-  ASSERT_EQ(gen1.get<CUDAGenerator>()->philox_offset_per_thread(), gen2.get<CUDAGenerator>()->philox_offset_per_thread());
+  ASSERT_EQ(
+    check_generator<CUDAGenerator>(gen1)->philox_offset_per_thread(),
+    check_generator<CUDAGenerator>(gen2)->philox_offset_per_thread()
+  );
 }
 
 void thread_func_get_set_current_seed(Generator generator) {
@@ -233,7 +236,7 @@ TEST(CUDAGenerator, TestRNGForking) {
   auto current_gen = at::cuda::detail::createCUDAGenerator();
   {
     std::lock_guard<std::mutex> lock(default_gen->mutex_);
-    current_gen = default_gen->clone(); // capture the current state of default generator
+    current_gen = Generator(default_gen->clone()); // capture the current state of default generator
   }
   auto target_value = at::randn({1000}, at::kCUDA);
   // Dramatically alter the internal state of the main generator
