@@ -26,11 +26,12 @@ PyTorch is an optimized tensor library for deep learning using GPUs and CPUs.
    packages
 
 .. toctree::
+   :glob:
    :maxdepth: 1
    :caption: Python API
 
    torch
-   nn
+   nn/index.rst
    nn.functional
    tensors
    tensor_attributes
@@ -61,6 +62,9 @@ PyTorch is an optimized tensor library for deep learning using GPUs and CPUs.
    named_tensor
    name_inference
    torch.__config__ <__config__>
+
+
+
 
 .. toctree::
    :glob:
