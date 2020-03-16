@@ -1022,6 +1022,9 @@ void TensorExprKernel::LowerToBackend(BackendType backend_type) {
     case kCudaCodeGen:
       codegen_name = "cuda_codegen";
       break;
+    case kLLVMCodeGen:
+      codegen_name = "llvm_codegen";
+      break;
     case kSimpleIREval:
       codegen_name = "simple_ir_eval";
       break;
@@ -1047,7 +1050,12 @@ void TensorExprKernel::PickAndCheckBackendType(
   if (device.type() == at::kCUDA) {
     backend_type = kCudaCodeGen;
   } else if (device.type() == at::kCPU) {
+#ifdef TORCH_ENABLE_LLVM
+    backend_type = kLLVMCodeGen;
+#else
     backend_type = kSimpleIREval;
+    ;
+#endif
   } else {
     throw std::runtime_error("Invalid device type");
   }
@@ -1069,6 +1077,7 @@ void TensorExprKernel::CodeGenRun(
     const std::vector<CodeGen::CallArg>& run_args) {
   switch (backend_type_) {
     case kSimpleIREval:
+    case kLLVMCodeGen:
     case kCudaCodeGen:
       codegen_->call(run_args);
       break;

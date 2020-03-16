@@ -44,6 +44,16 @@ class CudaCodeGenExecuted(ExecutionCounter):
         super(CudaCodeGenExecuted, self).__init__("cuda_codegen_executed")
 
 
+class LLVMCodeGenCreated(ExecutionCounter):
+    def __init__(self):
+        super(LLVMCodeGenCreated, self).__init__("llvm_codegen_created")
+
+
+class LLVMCodeGenExecuted(ExecutionCounter):
+    def __init__(self):
+        super(LLVMCodeGenExecuted, self).__init__("llvm_codegen_executed")
+
+
 class SimpleIREvalExecuted(ExecutionCounter):
     def __init__(self):
         super(SimpleIREvalExecuted, self).__init__("simple_ir_eval_executed")
@@ -63,6 +73,7 @@ class TestTensorExprFuser(BaseTestClass):
 
 
     def test_three_arg(self):
+        llvm_executed = LLVMCodeGenExecuted()
         simple_ir_eval_executed = SimpleIREvalExecuted()
 
         def easy(x, y, z):
@@ -81,7 +92,8 @@ class TestTensorExprFuser(BaseTestClass):
         npr = a.numpy() + b.numpy() + c.numpy()
         np.testing.assert_allclose(npr, x.numpy())
         assert (
-            simple_ir_eval_executed.elapsed_value() >= 1
+            llvm_executed.elapsed_value() >= 1
+            or simple_ir_eval_executed.elapsed_value() >= 1
         )
 
 
@@ -1017,6 +1029,7 @@ class TestTensorExprFuser(BaseTestClass):
             return torch.add(torch.add(x, y, alpha=a), z, alpha=b)
 
         for test in (test_float, test_int):
+            llvm = LLVMCodeGenExecuted()
             interp = SimpleIREvalExecuted()
             x, y, z = [torch.rand(4) for i in range(3)]
             a, b = 1, 2
@@ -1024,7 +1037,7 @@ class TestTensorExprFuser(BaseTestClass):
             r = test(x, y, z, a, b)
             xn, yn, zn = [t.numpy() for t in (x, y, z)]
             np.testing.assert_allclose(r.numpy(), xn + yn * a + zn * b)
-            assert interp.elapsed_value() == 1
+            assert llvm.elapsed_value() == 1 or interp.elapsed_value() == 1
 
 # FIXME: Blocked on profiling executor changes
 # def test_loop():
@@ -1037,11 +1050,12 @@ class TestTensorExprFuser(BaseTestClass):
 #            b = b + y
 #        return b
 #
+#    llvm = LLVMCodeGenExecuted()
 #    interp = SimpleIREvalExecuted()
 #    x, y, z = (torch.zeros(32, 32), torch.ones(32, 32), 4)
 #    test(x, y, z)
 #    r = test(x, y, z)
-#    assert interp.elapsed_value() == 1
+#    assert llvm.elapsed_value == 1 or interp.elapsed_value() == 1
 
     def test_slice(self):
         def easy(x, y):
@@ -1051,6 +1065,7 @@ class TestTensorExprFuser(BaseTestClass):
 
         traced = torch.jit.trace(easy, (torch.ones(1024, 1024), torch.zeros(1024, 1024)))
 
+        llvm = LLVMCodeGenExecuted()
         interp = SimpleIREvalExecuted()
 
         a = torch.ones(1024, 1024)
@@ -1058,7 +1073,7 @@ class TestTensorExprFuser(BaseTestClass):
         npr = a[0:512:2]
         npr = npr + npr
         np.testing.assert_allclose(npr.numpy(), x.numpy())
-        assert interp.elapsed_value() == 1
+        assert llvm.elapsed_value() == 1 or interp.elapsed_value() == 1
 
 
     @unittest.skip("fails on trunk")
@@ -1070,6 +1085,7 @@ class TestTensorExprFuser(BaseTestClass):
 
         traced = torch.jit.trace(easy, (torch.ones(1024, 1024), torch.zeros(1024, 1024)))
 
+        llvm = LLVMCodeGenExecuted()
         interp = SimpleIREvalExecuted()
 
         a = torch.rand(1024, 1024)
@@ -1077,13 +1093,14 @@ class TestTensorExprFuser(BaseTestClass):
         npr = np.expand_dims(a, 0)
         npr = npr + npr
         np.testing.assert_allclose(npr, x.numpy())
-        assert interp.elapsed_value() == 1
+        assert llvm.elapsed_value() == 1 or interp.elapsed_value() == 1
 
 
     def test_transpose(self):
         @torch.jit.script
         def test(x, y, z):
             return x.transpose(0, 1) + y + z
+        llvm = LLVMCodeGenExecuted()
         interp = SimpleIREvalExecuted()
         x = torch.rand(4, 5, 2, 3)
         y = torch.rand(5, 4, 2, 3)
@@ -1091,13 +1108,14 @@ class TestTensorExprFuser(BaseTestClass):
         ref = test(x, y, z)
         res = test(x, y, z)
         np.testing.assert_allclose(ref.numpy(), res.numpy())
-        assert interp.elapsed_value() == 1
+        assert llvm.elapsed_value() == 1 or interp.elapsed_value() == 1
 
 
     def test_sliced_stride(self):
         @torch.jit.script
         def test(x, y, z):
             return x + y + z
+        llvm = LLVMCodeGenExecuted()
         interp = SimpleIREvalExecuted()
         x = torch.rand(16, 4, 2, 3)[::2]
         y = torch.rand(8, 4, 2, 3)
@@ -1105,7 +1123,7 @@ class TestTensorExprFuser(BaseTestClass):
         ref = test(x, y, z)
         res = test(x, y, z)
         np.testing.assert_allclose(ref.numpy(), res.numpy())
-        assert interp.elapsed_value() == 1
+        assert llvm.elapsed_value() == 1 or interp.elapsed_value() == 1
 
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
