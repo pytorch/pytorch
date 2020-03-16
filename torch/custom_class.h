@@ -16,7 +16,6 @@
 #include <sstream>
 
 namespace torch {
-namespace jit {
 
 TORCH_API at::ClassTypePtr getCustomClass(const std::string& name);
 
@@ -28,13 +27,13 @@ detail::types<void, Types...> init() {
 }
 
 // To bind custom classes into Torchscript, use an API very similar to Pybind's.
-// Currently exposes one class `torch::jit::class_<T>` and 2 methods.
-// - Constructing `torch::jit::class_<Foo>` registers `Foo` in Python and
+// Currently exposes one class `torch::class_<T>` and 2 methods.
+// - Constructing `torch::class_<Foo>` registers `Foo` in Python and
 // Torchscript, and puts it under `torch.classes.Foo` in Python.
-// - torch::jit::class_<Foo>.def("method1", &Foo::method1) does some template
+// - torch::class_<Foo>.def("method1", &Foo::method1) does some template
 // metaprogramming to introspect the function types and register the operator
 // for use in Torchscript.
-// - torch::jit::class_<Foo>.def(torch::jit::init<int64_t, int64_t>()) registers
+// - torch::class_<Foo>.def(torch::init<int64_t, int64_t>()) registers
 // the Foo(int, int) constructor.
 // see test/custom_operator/classes.cpp and
 // test/custom_operator/test_custom_classes.py for example usages
@@ -42,7 +41,7 @@ detail::types<void, Types...> init() {
 template <class CurClass>
 class class_ {
   static_assert(std::is_base_of<CustomClassHolder, CurClass>::value,
-    "torch::jit::class_<T> requires T to inherit from CustomClassHolder");
+    "torch::class_<T> requires T to inherit from CustomClassHolder");
 
   std::string className;
   std::string qualClassName;
@@ -59,7 +58,7 @@ class class_ {
     // capsule attribute
     classTypePtr = at::ClassType::create(
         c10::QualifiedName(qualClassName),
-        std::weak_ptr<CompilationUnit>());
+        std::weak_ptr<jit::CompilationUnit>());
     classTypePtr->addAttribute("capsule", at::CapsuleType::get());
 
     c10::getCustomClassTypeMap().insert(
@@ -72,11 +71,11 @@ class class_ {
 
   template <typename... Types>
   class_& def(detail::types<void, Types...>) { // Used in combination with
-                                               // torch::jit::init<...>()
+                                               // torch::init<...>()
     auto func = [](c10::tagged_capsule<CurClass> self, Types... args) {
       auto classObj = c10::make_intrusive<CurClass>(args...);
-      auto genericPtr = c10::static_intrusive_pointer_cast<torch::jit::CustomClassHolder>(std::move(classObj));
-      auto capsule = IValue(std::move(genericPtr));
+      auto genericPtr = c10::static_intrusive_pointer_cast<torch::CustomClassHolder>(std::move(classObj));
+      auto capsule = c10::IValue(std::move(genericPtr));
       auto object = std::move(self.ivalue).toObject();
       object->setSlot(0, std::move(capsule));
     };
@@ -97,7 +96,7 @@ class class_ {
     static_assert(
         c10::guts::is_stateless_lambda<std::decay_t<GetStateFn>>::value &&
             c10::guts::is_stateless_lambda<std::decay_t<SetStateFn>>::value,
-        "torch::jit::pickle_ currently only supports lambdas as "
+        "def_pickle() currently only supports lambdas as "
         "__getstate__ and __setstate__ arguments.");
     def("__getstate__", std::forward<GetStateFn>(get_state));
 
@@ -115,9 +114,9 @@ class class_ {
       c10::intrusive_ptr<CurClass> classObj =
           at::guts::invoke(set_state, std::forward<SetStateArg>(arg));
       auto genericPtr =
-          c10::static_intrusive_pointer_cast<torch::jit::CustomClassHolder>(
+          c10::static_intrusive_pointer_cast<torch::CustomClassHolder>(
               classObj);
-      auto capsule = IValue(genericPtr);
+      auto capsule = c10::IValue(genericPtr);
       auto object = self.ivalue.toObject();
       object->setSlot(0, capsule);
     };
@@ -166,7 +165,7 @@ class class_ {
     auto qualMethodName = qualClassName + "." + name;
     auto schema = c10::inferFunctionSchemaSingleReturn<Func>(std::move(name), "");
 
-    auto wrapped_func = [func = std::move(func)](Stack& stack) mutable -> void {
+    auto wrapped_func = [func = std::move(func)](jit::Stack& stack) mutable -> void {
       // TODO: we need to figure out how to profile calls to custom functions
       // like this! Currently can't do it because the profiler stuff is in
       // libtorch and not ATen
@@ -174,7 +173,7 @@ class class_ {
           typename c10::guts::infer_function_traits_t<Func>::return_type;
       detail::BoxedProxy<RetType, Func>()(stack, func);
     };
-    auto method = std::make_shared<BuiltinOpFunction>(
+    auto method = std::make_shared<jit::BuiltinOpFunction>(
         qualMethodName, std::move(schema), std::move(wrapped_func));
 
     // Register the method here to keep the Method alive.
@@ -185,6 +184,35 @@ class class_ {
     classTypePtr->addMethod(method.get());
   }
 };
+
+template <typename CurClass, typename... CtorArgs>
+c10::IValue make_custom_class(CtorArgs&&... args) {
+  if (!c10::isCustomClassRegistered<c10::intrusive_ptr<CurClass>>()) {
+    throw c10::Error(
+        "Trying to instantiate a class that isn't a registered custom class.",
+        "");
+  }
+  auto classType = c10::getCustomClassType<c10::intrusive_ptr<CurClass>>();
+  auto ivalue_obj = c10::ivalue::Object::create(
+      c10::StrongTypePtr(nullptr, classType), /*num_slots=*/1);
+  auto userClassInstance =
+      c10::make_intrusive<CurClass>(std::forward<CtorArgs...>(args)...);
+  ivalue_obj->setAttr(
+      "capsule",
+      c10::static_intrusive_pointer_cast<torch::jit::CustomClassHolder>(
+          userClassInstance));
+  return ivalue_obj;
+}
+
+// jit namespace for backward-compatibility
+// We previously defined everything in torch::jit but moved it out to
+// better reflect that these features are not limited only to TorchScript
+namespace jit {
+
+using ::torch::getCustomClass;
+using ::torch::isCustomClass;
+using ::torch::init;
+using ::torch::class_;
 
 } // namespace jit
 

@@ -557,6 +557,7 @@ namespace script {
 // We once had a `script::` namespace that was deleted. This is for backcompat
 // of the public API; new code should not use this type alias.
 using Module = ::torch::jit::Module;
+using ExtraFilesMap = ::torch::jit::ExtraFilesMap;
 }
 
 } // namespace jit

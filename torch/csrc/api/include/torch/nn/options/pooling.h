@@ -60,6 +60,9 @@ using AvgPool3dOptions = AvgPoolOptions<3>;
 namespace functional {
 /// Options for `torch::nn::functional::avg_pool1d`.
 ///
+/// See the documentation for `torch::nn::AvgPool1dOptions` class to learn what
+/// arguments are supported.
+///
 /// Example:
 /// ```
 /// namespace F = torch::nn::functional;
@@ -71,6 +74,9 @@ using AvgPool1dFuncOptions = AvgPool1dOptions;
 namespace functional {
 /// Options for `torch::nn::functional::avg_pool2d`.
 ///
+/// See the documentation for `torch::nn::AvgPool2dOptions` class to learn what
+/// arguments are supported.
+///
 /// Example:
 /// ```
 /// namespace F = torch::nn::functional;
@@ -81,6 +87,9 @@ using AvgPool2dFuncOptions = AvgPool2dOptions;
 
 namespace functional {
 /// Options for `torch::nn::functional::avg_pool3d`.
+///
+/// See the documentation for `torch::nn::AvgPool3dOptions` class to learn what
+/// arguments are supported.
 ///
 /// Example:
 /// ```
@@ -279,6 +288,9 @@ using AdaptiveAvgPool3dOptions = AdaptiveAvgPoolOptions<3>;
 namespace functional {
 /// Options for `torch::nn::functional::adaptive_avg_pool1d`.
 ///
+/// See the documentation for `torch::nn::AdaptiveAvgPool1dOptions` class to learn what
+/// arguments are supported.
+///
 /// Example:
 /// ```
 /// namespace F = torch::nn::functional;
@@ -290,6 +302,9 @@ using AdaptiveAvgPool1dFuncOptions = AdaptiveAvgPool1dOptions;
 namespace functional {
 /// Options for `torch::nn::functional::adaptive_avg_pool2d`.
 ///
+/// See the documentation for `torch::nn::AdaptiveAvgPool2dOptions` class to learn what
+/// arguments are supported.
+///
 /// Example:
 /// ```
 /// namespace F = torch::nn::functional;
@@ -300,6 +315,9 @@ using AdaptiveAvgPool2dFuncOptions = AdaptiveAvgPool2dOptions;
 
 namespace functional {
 /// Options for `torch::nn::functional::adaptive_avg_pool3d`.
+///
+/// See the documentation for `torch::nn::AdaptiveAvgPool3dOptions` class to learn what
+/// arguments are supported.
 ///
 /// Example:
 /// ```
@@ -502,6 +520,9 @@ using LPPool2dOptions = LPPoolOptions<2>;
 namespace functional {
 /// Options for `torch::nn::functional::lp_pool1d`.
 ///
+/// See the documentation for `torch::nn::LPPool1dOptions` class to learn what
+/// arguments are supported.
+///
 /// Example:
 /// ```
 /// namespace F = torch::nn::functional;
@@ -512,6 +533,9 @@ using LPPool1dFuncOptions = LPPool1dOptions;
 
 namespace functional {
 /// Options for `torch::nn::functional::lp_pool2d`.
+///
+/// See the documentation for `torch::nn::LPPool2dOptions` class to learn what
+/// arguments are supported.
 ///
 /// Example:
 /// ```

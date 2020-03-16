@@ -26,6 +26,9 @@ struct TORCH_API L1LossOptions {
 namespace functional {
 /// Options for `torch::nn::functional::l1_loss`.
 ///
+/// See the documentation for `torch::nn::L1LossOptions` class to learn what
+/// arguments are supported.
+///
 /// Example:
 /// ```
 /// namespace F = torch::nn::functional;
@@ -54,6 +57,9 @@ struct TORCH_API KLDivLossOptions {
 
 namespace functional {
 /// Options for `torch::nn::functional::kl_div`.
+///
+/// See the documentation for `torch::nn::KLDivLossOptions` class to learn what
+/// arguments are supported.
 ///
 /// Example:
 /// ```
@@ -84,6 +90,9 @@ struct TORCH_API MSELossOptions {
 namespace functional {
 /// Options for `torch::nn::functional::mse_loss`.
 ///
+/// See the documentation for `torch::nn::MSELossOptions` class to learn what
+/// arguments are supported.
+///
 /// Example:
 /// ```
 /// namespace F = torch::nn::functional;
@@ -113,6 +122,9 @@ struct TORCH_API BCELossOptions {
 namespace functional {
 /// Options for `torch::nn::functional::binary_cross_entropy`.
 ///
+/// See the documentation for `torch::nn::BCELossOptions` class to learn what
+/// arguments are supported.
+///
 /// Example:
 /// ```
 /// namespace F = torch::nn::functional;
@@ -141,6 +153,9 @@ struct TORCH_API HingeEmbeddingLossOptions {
 
 namespace functional {
 /// Options for `torch::nn::functional::hinge_embedding_loss`.
+///
+/// See the documentation for `torch::nn::HingeEmbeddingLossOptions` class to learn what
+/// arguments are supported.
 ///
 /// Example:
 /// ```
@@ -180,6 +195,9 @@ struct TORCH_API MultiMarginLossOptions {
 namespace functional {
 /// Options for `torch::nn::functional::multi_margin_loss`.
 ///
+/// See the documentation for `torch::nn::MultiMarginLossOptions` class to learn what
+/// arguments are supported.
+///
 /// Example:
 /// ```
 /// namespace F = torch::nn::functional;
@@ -209,6 +227,9 @@ struct TORCH_API CosineEmbeddingLossOptions {
 
 namespace functional {
 /// Options for `torch::nn::functional::cosine_embedding_loss`.
+///
+/// See the documentation for `torch::nn::CosineEmbeddingLossOptions` class to learn what
+/// arguments are supported.
 ///
 /// Example:
 /// ```
@@ -241,6 +262,9 @@ struct TORCH_API MultiLabelMarginLossOptions {
 namespace functional {
 /// Options for `torch::nn::functional::multilabel_margin_loss`.
 ///
+/// See the documentation for `torch::nn::MultiLabelMarginLossOptions` class to learn what
+/// arguments are supported.
+///
 /// Example:
 /// ```
 /// namespace F = torch::nn::functional;
@@ -271,6 +295,9 @@ struct TORCH_API SoftMarginLossOptions {
 
 namespace functional {
 /// Options for `torch::nn::functional::soft_margin_loss`.
+///
+/// See the documentation for `torch::nn::SoftMarginLossOptions` class to learn what
+/// arguments are supported.
 ///
 /// Example:
 /// ```
@@ -305,6 +332,9 @@ struct TORCH_API MultiLabelSoftMarginLossOptions {
 
 namespace functional {
 /// Options for `torch::nn::functional::multilabel_soft_margin_loss`.
+///
+/// See the documentation for `torch::nn::MultiLabelSoftMarginLossOptions` class to learn what
+/// arguments are supported.
 ///
 /// Example:
 /// ```
@@ -342,6 +372,9 @@ struct TORCH_API TripletMarginLossOptions {
 namespace functional {
 /// Options for `torch::nn::functional::triplet_margin_loss`.
 ///
+/// See the documentation for `torch::nn::TripletMarginLossOptions` class to learn what
+/// arguments are supported.
+///
 /// Example:
 /// ```
 /// namespace F = torch::nn::functional;
@@ -374,6 +407,9 @@ struct TORCH_API CTCLossOptions {
 namespace functional {
 /// Options for `torch::nn::functional::ctc_loss`.
 ///
+/// See the documentation for `torch::nn::CTCLossOptions` class to learn what
+/// arguments are supported.
+///
 /// Example:
 /// ```
 /// namespace F = torch::nn::functional;
@@ -404,6 +440,9 @@ struct TORCH_API SmoothL1LossOptions {
 
 namespace functional {
 /// Options for `torch::nn::functional::smooth_l1_loss`.
+///
+/// See the documentation for `torch::nn::SmoothL1LossOptions` class to learn what
+/// arguments are supported.
 ///
 /// Example:
 /// ```
@@ -440,6 +479,9 @@ struct TORCH_API PoissonNLLLossOptions {
 namespace functional {
 /// Options for `torch::nn::functional::poisson_nll_loss`.
 ///
+/// See the documentation for `torch::nn::PoissonNLLLossOptions` class to learn what
+/// arguments are supported.
+///
 /// Example:
 /// ```
 /// namespace F = torch::nn::functional;
@@ -467,6 +509,9 @@ struct TORCH_API MarginRankingLossOptions {
 
 namespace functional {
 /// Options for `torch::nn::functional::margin_ranking_loss`.
+///
+/// See the documentation for `torch::nn::MarginRankingLossOptions` class to learn what
+/// arguments are supported.
 ///
 /// Example:
 /// ```
@@ -501,6 +546,9 @@ struct TORCH_API NLLLossOptions {
 namespace functional {
 /// Options for `torch::nn::functional::nll_loss`.
 ///
+/// See the documentation for `torch::nn::NLLLossOptions` class to learn what
+/// arguments are supported.
+///
 /// Example:
 /// ```
 /// namespace F = torch::nn::functional;
@@ -533,6 +581,9 @@ struct TORCH_API CrossEntropyLossOptions {
 namespace functional {
 /// Options for `torch::nn::functional::cross_entropy`.
 ///
+/// See the documentation for `torch::nn::CrossEntropyLossOptions` class to learn what
+/// arguments are supported.
+///
 /// Example:
 /// ```
 /// namespace F = torch::nn::functional;
@@ -563,6 +614,9 @@ struct TORCH_API BCEWithLogitsLossOptions {
 
 namespace functional {
 /// Options for `torch::nn::functional::binary_cross_entropy_with_logits`.
+///
+/// See the documentation for `torch::nn::BCEWithLogitsLossOptions` class to learn what
+/// arguments are supported.
 ///
 /// Example:
 /// ```

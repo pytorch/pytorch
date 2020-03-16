@@ -23,6 +23,9 @@ struct TORCH_API CosineSimilarityOptions {
 namespace functional {
 /// Options for `torch::nn::functional::cosine_similarity`.
 ///
+/// See the documentation for `torch::nn::CosineSimilarityOptions` class to learn what
+/// arguments are supported.
+///
 /// Example:
 /// ```
 /// namespace F = torch::nn::functional;
@@ -50,6 +53,9 @@ struct TORCH_API PairwiseDistanceOptions {
 
 namespace functional {
 /// Options for `torch::nn::functional::pairwise_distance`.
+///
+/// See the documentation for `torch::nn::PairwiseDistanceOptions` class to learn what
+/// arguments are supported.
 ///
 /// Example:
 /// ```
