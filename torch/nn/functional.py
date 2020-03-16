@@ -4027,8 +4027,8 @@ def scaled_dot_product_attention(q,                         # type: Tensor
     assert q.size(0) == k.size(0) == v.size(0), "Dimension 0 of q, k, v must be equal."
     assert batch_heads % num_heads == 0, "Dimension 0 of q, k, v must be divisible by num_heads"
     bsz = batch_heads // num_heads
-    assert k.size(1) == v.size(1), "Dimension 1 of k, v must match"
-    assert query.size(-1) == key.size(-1), "The head dimension of query must be equal to that of key"
+    assert k.size() == v.size(), "Shape of k, v must match"
+    assert q.size(-1) == k.size(-1), "The head dimension of query must be equal to that of key"
 
     src_len = k.size(1)
 

@@ -455,7 +455,7 @@ class MultiheadAttentionOutProjection(Module):
     def __init__(self, in_embed_dim, num_heads, out_embed_dim=None):
         # TODO: Bias??
         super(MultiheadAttentionOutProjection, self).__init__()
-        assert in_embed_dim % num_heads, "in_embed_dim must be divisible by num_heads."
+        assert in_embed_dim % num_heads == 0, "in_embed_dim must be divisible by num_heads."
         self.in_embed_dim = in_embed_dim
         if out_embed_dim is None:
             out_embed_dim = in_embed_dim
