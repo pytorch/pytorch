@@ -82,8 +82,8 @@ Tensor q_batch_norm_impl(
   Tensor qy = at::_empty_affine_quantized(
       oSizes,
       at::device(kCPU)
-         .dtype(qx_nhwc.scalar_type())
-         .memory_format(MemoryFormat::ChannelsLast),
+        .dtype(qx_nhwc.scalar_type())
+        .memory_format(MemoryFormat::ChannelsLast),
       output_scale,
       output_zero_point);
 
@@ -157,10 +157,11 @@ Tensor q_batch_norm3d_impl(
   auto qx_nhwc = qx.contiguous(MemoryFormat::ChannelsLast3d);
   Tensor qy = at::_empty_affine_quantized(
       oSizes,
-      at::device(kCPU).dtype(qx_nhwc.scalar_type()),
+      at::device(kCPU)
+        .dtype(qx_nhwc.scalar_type())
+        .memory_format(MemoryFormat::ChannelsLast3d),
       output_scale,
-      output_zero_point,
-      MemoryFormat::ChannelsLast3d);
+      output_zero_point);
 
   compute_fused_params(
       C,
