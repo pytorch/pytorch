@@ -129,6 +129,7 @@
 [[
   name: _th_index_select
   cuda_bool: True
+  cuda_bfloat16: True
   cname: indexSelect
   variants:
     - function
@@ -265,8 +266,9 @@
 ]]
 [[
   name: _th_min
-  cpu_bool: True
   cuda_bool: True
+  backends:
+    - CUDA
   variants:
     - function
   options:
@@ -294,8 +296,9 @@
 ]]
 [[
   name: _th_max
-  cpu_bool: True
   cuda_bool: True
+  backends:
+    - CUDA
   variants:
     - function
   options:

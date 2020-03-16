@@ -7,7 +7,7 @@
 @end
 
 @implementation TestAppTests {
-  torch::jit::script::Module _module;
+  torch::jit::Module _module;
 }
 
 + (void)setUp {

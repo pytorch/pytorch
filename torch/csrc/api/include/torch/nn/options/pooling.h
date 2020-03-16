@@ -3,13 +3,12 @@
 #include <torch/arg.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/expanding_array.h>
-#include <torch/nn/options/common.h>
 #include <torch/types.h>
 
 namespace torch {
 namespace nn {
 
-/// Options for a `D`-dimensional avgpool functional and module.
+/// Options for a `D`-dimensional avgpool module.
 template <size_t D>
 struct AvgPoolOptions {
   AvgPoolOptions(ExpandingArray<D> kernel_size)
@@ -34,22 +33,75 @@ struct AvgPoolOptions {
   TORCH_ARG(c10::optional<int64_t>, divisor_override) = c10::nullopt;
 };
 
-/// `AvgPoolOptions` specialized for 1-D avgpool.
+/// `AvgPoolOptions` specialized for the `AvgPool1d` module.
+///
+/// Example:
+/// ```
+/// AvgPool1d model(AvgPool1dOptions(3).stride(2));
+/// ```
 using AvgPool1dOptions = AvgPoolOptions<1>;
 
-/// `AvgPoolOptions` specialized for 2-D avgpool.
+/// `AvgPoolOptions` specialized for the `AvgPool2d` module.
+///
+/// Example:
+/// ```
+/// AvgPool2d model(AvgPool2dOptions({3, 2}).stride({2, 2}));
+/// ```
 using AvgPool2dOptions = AvgPoolOptions<2>;
 
-/// `AvgPoolOptions` specialized for 3-D avgpool.
+/// `AvgPoolOptions` specialized for the `AvgPool3d` module.
+///
+/// Example:
+/// ```
+/// AvgPool3d model(AvgPool3dOptions(5).stride(2));
+/// ```
 using AvgPool3dOptions = AvgPoolOptions<3>;
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(AvgPool1d, AvgPool1dFuncOptions)
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(AvgPool2d, AvgPool2dFuncOptions)
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(AvgPool3d, AvgPool3dFuncOptions)
+namespace functional {
+/// Options for `torch::nn::functional::avg_pool1d`.
+///
+/// See the documentation for `torch::nn::AvgPool1dOptions` class to learn what
+/// arguments are supported.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::avg_pool1d(x, F::AvgPool1dFuncOptions(3).stride(2));
+/// ```
+using AvgPool1dFuncOptions = AvgPool1dOptions;
+} // namespace functional
+
+namespace functional {
+/// Options for `torch::nn::functional::avg_pool2d`.
+///
+/// See the documentation for `torch::nn::AvgPool2dOptions` class to learn what
+/// arguments are supported.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::avg_pool2d(x, F::AvgPool2dFuncOptions(3).stride(2));
+/// ```
+using AvgPool2dFuncOptions = AvgPool2dOptions;
+} // namespace functional
+
+namespace functional {
+/// Options for `torch::nn::functional::avg_pool3d`.
+///
+/// See the documentation for `torch::nn::AvgPool3dOptions` class to learn what
+/// arguments are supported.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::avg_pool3d(x, F::AvgPool3dFuncOptions(3).stride(2));
+/// ```
+using AvgPool3dFuncOptions = AvgPool3dOptions;
+} // namespace functional
 
 // ============================================================================
 
-/// Options for a `D`-dimensional maxpool functional and module.
+/// Options for a `D`-dimensional maxpool module.
 template <size_t D>
 struct MaxPoolOptions {
   MaxPoolOptions(ExpandingArray<D> kernel_size)
@@ -71,22 +123,66 @@ struct MaxPoolOptions {
   TORCH_ARG(bool, ceil_mode) = false;
 };
 
-/// `MaxPoolOptions` specialized for 1-D maxpool.
+/// `MaxPoolOptions` specialized for the `MaxPool1d` module.
+///
+/// Example:
+/// ```
+/// MaxPool1d model(MaxPool1dOptions(3).stride(2));
+/// ```
 using MaxPool1dOptions = MaxPoolOptions<1>;
 
-/// `MaxPoolOptions` specialized for 2-D maxpool.
+/// `MaxPoolOptions` specialized for the `MaxPool2d` module.
+///
+/// Example:
+/// ```
+/// MaxPool2d model(MaxPool2dOptions({3, 2}).stride({2, 2}));
+/// ```
 using MaxPool2dOptions = MaxPoolOptions<2>;
 
-/// `MaxPoolOptions` specialized for 3-D maxpool.
+/// `MaxPoolOptions` specialized for the `MaxPool3d` module.
+///
+/// Example:
+/// ```
+/// MaxPool3d model(MaxPool3dOptions(3).stride(2));
+/// ```
 using MaxPool3dOptions = MaxPoolOptions<3>;
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(MaxPool1d, MaxPool1dFuncOptions)
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(MaxPool2d, MaxPool2dFuncOptions)
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(MaxPool3d, MaxPool3dFuncOptions)
+namespace functional {
+/// Options for `torch::nn::functional::max_pool1d` and `torch::nn::functional::max_pool1d_with_indices`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::max_pool1d(x, F::MaxPool1dFuncOptions(3).stride(2));
+/// ```
+using MaxPool1dFuncOptions = MaxPool1dOptions;
+} // namespace functional
+
+namespace functional {
+/// Options for `torch::nn::functional::max_pool2d` and `torch::nn::functional::max_pool2d_with_indices`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::max_pool2d(x, F::MaxPool2dFuncOptions(3).stride(2));
+/// ```
+using MaxPool2dFuncOptions = MaxPool2dOptions;
+} // namespace functional
+
+namespace functional {
+/// Options for `torch::nn::functional::max_pool3d` and `torch::nn::functional::max_pool3d_with_indices`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::max_pool3d(x, F::MaxPool3dFuncOptions(3).stride(2));
+/// ```
+using MaxPool3dFuncOptions = MaxPool3dOptions;
+} // namespace functional
 
 // ============================================================================
 
-/// Options for a `D`-dimensional adaptive maxpool functional and module.
+/// Options for a `D`-dimensional adaptive maxpool module.
 template <size_t D>
 struct AdaptiveMaxPoolOptions {
   AdaptiveMaxPoolOptions(ExpandingArray<D> output_size)
@@ -96,22 +192,66 @@ struct AdaptiveMaxPoolOptions {
   TORCH_ARG(ExpandingArray<D>, output_size);
 };
 
-/// `AdaptiveMaxPoolOptions` specialized for 1-D maxpool.
+/// `AdaptiveMaxPoolOptions` specialized for the `AdaptiveMaxPool1d` module.
+///
+/// Example:
+/// ```
+/// AdaptiveMaxPool1d model(AdaptiveMaxPool1dOptions(3));
+/// ```
 using AdaptiveMaxPool1dOptions = AdaptiveMaxPoolOptions<1>;
 
-/// `AdaptiveMaxPoolOptions` specialized for 2-D adaptive maxpool.
+/// `AdaptiveMaxPoolOptions` specialized for the `AdaptiveMaxPool2d` module.
+///
+/// Example:
+/// ```
+/// AdaptiveMaxPool2d model(AdaptiveMaxPool2dOptions({3, 2}));
+/// ```
 using AdaptiveMaxPool2dOptions = AdaptiveMaxPoolOptions<2>;
 
-/// `AdaptiveMaxPoolOptions` specialized for 3-D adaptive maxpool.
+/// `AdaptiveMaxPoolOptions` specialized for the `AdaptiveMaxPool3d` module.
+///
+/// Example:
+/// ```
+/// AdaptiveMaxPool3d model(AdaptiveMaxPool3dOptions(3));
+/// ```
 using AdaptiveMaxPool3dOptions = AdaptiveMaxPoolOptions<3>;
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(AdaptiveMaxPool1d, AdaptiveMaxPool1dFuncOptions)
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(AdaptiveMaxPool2d, AdaptiveMaxPool2dFuncOptions)
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(AdaptiveMaxPool3d, AdaptiveMaxPool3dFuncOptions)
+namespace functional {
+/// Options for `torch::nn::functional::adaptive_max_pool1d` and `torch::nn::functional::adaptive_max_pool1d_with_indices`
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::adaptive_max_pool1d(x, F::AdaptiveMaxPool1dFuncOptions(3));
+/// ```
+using AdaptiveMaxPool1dFuncOptions = AdaptiveMaxPool1dOptions;
+} // namespace functional
+
+namespace functional {
+/// Options for `torch::nn::functional::adaptive_max_pool2d` and `torch::nn::functional::adaptive_max_pool2d_with_indices`
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::adaptive_max_pool2d(x, F::AdaptiveMaxPool2dFuncOptions(3));
+/// ```
+using AdaptiveMaxPool2dFuncOptions = AdaptiveMaxPool2dOptions;
+} // namespace functional
+
+namespace functional {
+/// Options for `torch::nn::functional::adaptive_max_pool3d` and `torch::nn::functional::adaptive_max_pool3d_with_indices`
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::adaptive_max_pool3d(x, F::AdaptiveMaxPool3dFuncOptions(3));
+/// ```
+using AdaptiveMaxPool3dFuncOptions = AdaptiveMaxPool3dOptions;
+} // namespace functional
 
 // ============================================================================
 
-/// Options for a `D`-dimensional adaptive avgpool functional and module.
+/// Options for a `D`-dimensional adaptive avgpool module.
 template <size_t D>
 struct AdaptiveAvgPoolOptions {
   AdaptiveAvgPoolOptions(ExpandingArray<D> output_size)
@@ -121,18 +261,71 @@ struct AdaptiveAvgPoolOptions {
   TORCH_ARG(ExpandingArray<D>, output_size);
 };
 
-/// `AdaptiveAvgPoolOptions` specialized for 1-D adaptive avgpool.
+/// `AdaptiveAvgPoolOptions` specialized for the `AdaptiveAvgPool1d` module.
+///
+/// Example:
+/// ```
+/// AdaptiveAvgPool1d model(AdaptiveAvgPool1dOptions(5));
+/// ```
 using AdaptiveAvgPool1dOptions = AdaptiveAvgPoolOptions<1>;
 
-/// `AdaptiveAvgPoolOptions` specialized for 2-D adaptive avgpool.
+/// `AdaptiveAvgPoolOptions` specialized for the `AdaptiveAvgPool2d` module.
+///
+/// Example:
+/// ```
+/// AdaptiveAvgPool2d model(AdaptiveAvgPool2dOptions({3, 2}));
+/// ```
 using AdaptiveAvgPool2dOptions = AdaptiveAvgPoolOptions<2>;
 
-/// `AdaptiveAvgPoolOptions` specialized for 3-D adaptive avgpool.
+/// `AdaptiveAvgPoolOptions` specialized for the `AdaptiveAvgPool3d` module.
+///
+/// Example:
+/// ```
+/// AdaptiveAvgPool3d model(AdaptiveAvgPool3dOptions(3));
+/// ```
 using AdaptiveAvgPool3dOptions = AdaptiveAvgPoolOptions<3>;
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(AdaptiveAvgPool1d, AdaptiveAvgPool1dFuncOptions)
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(AdaptiveAvgPool2d, AdaptiveAvgPool2dFuncOptions)
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(AdaptiveAvgPool3d, AdaptiveAvgPool3dFuncOptions)
+namespace functional {
+/// Options for `torch::nn::functional::adaptive_avg_pool1d`.
+///
+/// See the documentation for `torch::nn::AdaptiveAvgPool1dOptions` class to learn what
+/// arguments are supported.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::adaptive_avg_pool1d(x, F::AdaptiveAvgPool1dFuncOptions(3));
+/// ```
+using AdaptiveAvgPool1dFuncOptions = AdaptiveAvgPool1dOptions;
+} // namespace functional
+
+namespace functional {
+/// Options for `torch::nn::functional::adaptive_avg_pool2d`.
+///
+/// See the documentation for `torch::nn::AdaptiveAvgPool2dOptions` class to learn what
+/// arguments are supported.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::adaptive_avg_pool2d(x, F::AdaptiveAvgPool2dFuncOptions(3));
+/// ```
+using AdaptiveAvgPool2dFuncOptions = AdaptiveAvgPool2dOptions;
+} // namespace functional
+
+namespace functional {
+/// Options for `torch::nn::functional::adaptive_avg_pool3d`.
+///
+/// See the documentation for `torch::nn::AdaptiveAvgPool3dOptions` class to learn what
+/// arguments are supported.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::adaptive_avg_pool3d(x, F::AdaptiveAvgPool3dFuncOptions(3));
+/// ```
+using AdaptiveAvgPool3dFuncOptions = AdaptiveAvgPool3dOptions;
+} // namespace functional
 
 // ============================================================================
 
@@ -152,13 +345,28 @@ struct MaxUnpoolOptions {
   TORCH_ARG(ExpandingArray<D>, padding) = 0;
 };
 
-/// `MaxUnpoolOptions` specialized for 1-D maxunpool.
+/// `MaxUnpoolOptions` specialized for the `MaxUnpool1d` module.
+///
+/// Example:
+/// ```
+/// MaxUnpool1d model(MaxUnpool1dOptions(3).stride(2).padding(1));
+/// ```
 using MaxUnpool1dOptions = MaxUnpoolOptions<1>;
 
-/// `MaxUnpoolOptions` specialized for 2-D maxunpool.
+/// `MaxUnpoolOptions` specialized for the `MaxUnpool2d` module.
+///
+/// Example:
+/// ```
+/// MaxUnpool2d model(MaxUnpool2dOptions(3).stride(2).padding(1));
+/// ```
 using MaxUnpool2dOptions = MaxUnpoolOptions<2>;
 
-/// `MaxUnpoolOptions` specialized for 3-D maxunpool.
+/// `MaxUnpoolOptions` specialized for the `MaxUnpool3d` module.
+///
+/// Example:
+/// ```
+/// MaxUnpool3d model(MaxUnpool3dOptions(3).stride(2).padding(1));
+/// ```
 using MaxUnpool3dOptions = MaxUnpoolOptions<3>;
 
 // ============================================================================
@@ -184,20 +392,38 @@ struct MaxUnpoolFuncOptions {
   TORCH_ARG(c10::optional<std::vector<int64_t>>, output_size) = c10::nullopt;
 };
 
-/// `MaxUnpoolFuncOptions` specialized for 1-D maxunpool.
+/// `MaxUnpoolFuncOptions` specialized for `torch::nn::functional::max_unpool1d`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::max_unpool1d(x, indices, F::MaxUnpool1dFuncOptions(3).stride(2).padding(1));
+/// ```
 using MaxUnpool1dFuncOptions = MaxUnpoolFuncOptions<1>;
 
-/// `MaxUnpoolFuncOptions` specialized for 2-D maxunpool.
+/// `MaxUnpoolFuncOptions` specialized for `torch::nn::functional::max_unpool2d`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::max_unpool2d(x, indices, F::MaxUnpool2dFuncOptions(3).stride(2).padding(1));
+/// ```
 using MaxUnpool2dFuncOptions = MaxUnpoolFuncOptions<2>;
 
-/// `MaxUnpoolFuncOptions` specialized for 3-D maxunpool.
+/// `MaxUnpoolFuncOptions` specialized for `torch::nn::functional::max_unpool3d`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::max_unpool3d(x, indices, F::MaxUnpool3dFuncOptions(3));
+/// ```
 using MaxUnpool3dFuncOptions = MaxUnpoolFuncOptions<3>;
 
 } // namespace functional
 
 // ============================================================================
 
-/// Options for a `D`-dimensional fractional maxpool functional and module.
+/// Options for a `D`-dimensional fractional maxpool module.
 template <size_t D>
 struct FractionalMaxPoolOptions {
   FractionalMaxPoolOptions(ExpandingArray<D> kernel_size)
@@ -217,18 +443,47 @@ struct FractionalMaxPoolOptions {
   TORCH_ARG(torch::Tensor, _random_samples) = Tensor();
 };
 
-/// `FractionalMaxPoolOptions` specialized for 2-D maxpool.
+/// `FractionalMaxPoolOptions` specialized for the `FractionalMaxPool2d` module.
+///
+/// Example:
+/// ```
+/// FractionalMaxPool2d model(FractionalMaxPool2dOptions(5).output_size(1));
+/// ```
 using FractionalMaxPool2dOptions = FractionalMaxPoolOptions<2>;
 
-/// `FractionalMaxPoolOptions` specialized for 3-D maxpool.
+/// `FractionalMaxPoolOptions` specialized for the `FractionalMaxPool3d` module.
+///
+/// Example:
+/// ```
+/// FractionalMaxPool3d model(FractionalMaxPool3dOptions(5).output_size(1));
+/// ```
 using FractionalMaxPool3dOptions = FractionalMaxPoolOptions<3>;
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(FractionalMaxPool2d, FractionalMaxPool2dFuncOptions)
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(FractionalMaxPool3d, FractionalMaxPool3dFuncOptions)
+namespace functional {
+/// Options for `torch::nn::functional::fractional_max_pool2d` and `torch::nn::functional::fractional_max_pool2d_with_indices`
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::fractional_max_pool2d(x, F::FractionalMaxPool2dFuncOptions(3).output_size(2));
+/// ```
+using FractionalMaxPool2dFuncOptions = FractionalMaxPool2dOptions;
+} // namespace functional
+
+namespace functional {
+/// Options for `torch::nn::functional::fractional_max_pool3d` and `torch::nn::functional::fractional_max_pool3d_with_indices`
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::fractional_max_pool3d(x, F::FractionalMaxPool3dFuncOptions(3).output_size(2));
+/// ```
+using FractionalMaxPool3dFuncOptions = FractionalMaxPool3dOptions;
+} // namespace functional
 
 // ============================================================================
 
-/// Options for a `D`-dimensional lppool functional and module.
+/// Options for a `D`-dimensional lppool module.
 template <size_t D>
 struct LPPoolOptions {
   LPPoolOptions(double norm_type, ExpandingArray<D> kernel_size)
@@ -246,14 +501,49 @@ struct LPPoolOptions {
   TORCH_ARG(bool, ceil_mode) = false;
 };
 
-/// `LPPoolOptions` specialized for 1-D lppool.
+/// `LPPoolOptions` specialized for the `LPPool1d` module.
+///
+/// Example:
+/// ```
+/// LPPool1d model(LPPool1dOptions(1, 2).stride(5).ceil_mode(true));
+/// ```
 using LPPool1dOptions = LPPoolOptions<1>;
 
-/// `LPPoolOptions` specialized for 2-D lppool.
+/// `LPPoolOptions` specialized for the `LPPool2d` module.
+///
+/// Example:
+/// ```
+/// LPPool2d model(LPPool2dOptions(1, std::vector<int64_t>({3, 4})).stride({5, 6}).ceil_mode(true));
+/// ```
 using LPPool2dOptions = LPPoolOptions<2>;
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(LPPool1d, LPPool1dFuncOptions)
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(LPPool2d, LPPool2dFuncOptions)
+namespace functional {
+/// Options for `torch::nn::functional::lp_pool1d`.
+///
+/// See the documentation for `torch::nn::LPPool1dOptions` class to learn what
+/// arguments are supported.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::lp_pool1d(x, F::LPPool1dFuncOptions(2, 3).stride(2));
+/// ```
+using LPPool1dFuncOptions = LPPool1dOptions;
+} // namespace functional
+
+namespace functional {
+/// Options for `torch::nn::functional::lp_pool2d`.
+///
+/// See the documentation for `torch::nn::LPPool2dOptions` class to learn what
+/// arguments are supported.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::lp_pool2d(x, F::LPPool2dFuncOptions(2, {2, 3}).stride(2));
+/// ```
+using LPPool2dFuncOptions = LPPool2dOptions;
+} // namespace functional
 
 } // namespace nn
 } // namespace torch
