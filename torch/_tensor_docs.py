@@ -3662,11 +3662,11 @@ If ``n`` is the number of dimensions in ``x``,
 ``x.T`` is equivalent to ``x.permute(n-1, n-2, ..., 0)``.
 """)
 
-add_docstr_all('make_subclass',
+add_docstr_all('as_subclass',
                r"""
-make_subclass(cls, data, require_grad=False) -> Tensor
+as_subclass(cls) -> Tensor
 
-Makes a ``cls`` instance with the same data pointer as ``data``. Changes
+Makes a ``cls`` instance with the same data pointer as ``self``. Changes
 in the output mirror changes in ``data``. ``cls`` must be a subclass of
 ``Tensor``.
 """)

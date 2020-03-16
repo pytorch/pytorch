@@ -144,10 +144,36 @@ static PyObject *THPVariable_pynew(PyTypeObject *type, PyObject *args, PyObject 
 }
 
 // Instantiates a subclass of torch.Tensor. Used by nn.Parameter()
+static PyObject* THPVariable_as_subclass(THPVariable* self, PyObject* args, PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "as_subclass(PyObject* cls)",
+  });
+  ParsedArgs<2> parsed_args{};
+  auto r = parser.parse(args, kwargs, parsed_args);
+  PyObject* cls = r.pyobject(0);
+  if (!PyType_Check(cls)) {
+    throw TypeError("cls must be a type (got %s)", Py_TYPE(cls)->tp_name);
+  }
+  auto data = as_variable_ref(self->cdata);
+  // We set `data`'s `allow_tensor_metadata_change` to true here, because we want to
+  // allow the following use case for backward compatibility:
+  //
+  // ```python
+  // rnn = torch.nn.RNN(100, 100, 2)
+  // # The following calls `torch._cudnn_rnn_flatten_weight(rnn._flat_weights, ...)`,
+  // # which changes storage of `rnn`'s weights in-place
+  // rnn.flatten_parameters()
+  // ```
+  data.unsafeGetTensorImpl()->set_allow_tensor_metadata_change(true);
+  return THPVariable_NewWithVar((PyTypeObject*)cls, std::move(data));
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THPVariable_make_subclass(PyObject* _ignored, PyObject* args, PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "make_subclass(PyObject* cls, Tensor data, bool require_grad=False)",
+    "_make_subclass(PyObject* cls, Tensor data, bool require_grad=False)",
   });
   ParsedArgs<3> parsed_args{};
   auto r = parser.parse(args, kwargs, parsed_args);
@@ -539,7 +565,8 @@ static PyMappingMethods THPVariable_as_mapping = {
 };
 
 static PyMethodDef extra_methods[] = {
-  {"make_subclass", (PyCFunction)THPVariable_make_subclass, METH_STATIC | METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"as_subclass", (PyCFunction)THPVariable_as_subclass, METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"_make_subclass", (PyCFunction)THPVariable_make_subclass, METH_STATIC | METH_VARARGS | METH_KEYWORDS, nullptr},
   {nullptr}
 };
 

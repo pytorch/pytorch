@@ -1211,15 +1211,15 @@ class _TestTorchMixin(object):
 
     def test_make_subclass(self):
         class SubTensor(torch.Tensor):
-            pass
+            member_var = object()
 
-        t0 = torch.Tensor(0)
-        t1 = torch.Tensor([1, 2])
-        t2 = torch.Tensor([[3, 4], [5, 6]])
+        t0 = torch.tensor(0)
+        t1 = torch.tensor([1, 2])
+        t2 = torch.tensor([[3, 4], [5, 6]])
 
-        s0 = torch.Tensor.make_subclass(SubTensor, t0)
-        s1 = torch.Tensor.make_subclass(SubTensor, t1)
-        s2 = torch.Tensor.make_subclass(SubTensor, t2)
+        s0 = t0.as_subclass(SubTensor)
+        s1 = t1.as_subclass(SubTensor)
+        s2 = t2.as_subclass(SubTensor)
 
         self.assertTrue(type(s0) is SubTensor)
         self.assertTrue(type(s1) is SubTensor)
@@ -1228,6 +1228,10 @@ class _TestTorchMixin(object):
         self.assertEqual(t0, s0)
         self.assertEqual(t1, s1)
         self.assertEqual(t2, s2)
+
+        self.assertTrue(s0.member_var is SubTensor.member_var)
+        self.assertTrue(s1.member_var is SubTensor.member_var)
+        self.assertTrue(s2.member_var is SubTensor.member_var)
 
     def test_constructor_dtypes(self):
         default_type = torch.Tensor().type()
