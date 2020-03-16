@@ -135,6 +135,7 @@ std::vector<size_t> getGeneralOpTensorInputIndexes(Node* n) {
       "upsample_trilinear3d",
       "upsample_bicubic2d",
       "dropout",
+      "reshape",
       // TODO: sort returns a tuple of Tensors, we have
       // to extend the API to support that
       // "sort",
