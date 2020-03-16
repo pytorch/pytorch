@@ -1235,6 +1235,25 @@ def retry_on_connect_failures(func=None, connect_errors=(ADDRESS_IN_USE)):
     return wrapper
 
 
+# Decorator to retry upon certain Exceptions.
+def retry(ExceptionToCheck, tries=3, delay=3):
+    def deco_retry(f):
+        @wraps(f)
+        def f_retry(*args, **kwargs):
+            mtries, mdelay = tries, delay
+            while mtries > 1:
+                try:
+                    return f(*args, **kwargs)
+                except ExceptionToCheck as e:
+                    msg = "%s, Retrying in %d seconds..." % (str(e), mdelay)
+                    print(msg)
+                    time.sleep(mdelay)
+                    mtries -= 1
+            return f(*args, **kwargs)
+        return f_retry  # true decorator
+    return deco_retry
+
+
 # Methods for matrix generation
 # Used in test_autograd.py and test_torch.py
 def prod_single_zero(dim_size):
