@@ -7,6 +7,7 @@
 #include <c10/util/Logging.h>
 #include "torch/csrc/jit/tensorexpr/buffer.h"
 #include "torch/csrc/jit/tensorexpr/codegen.h"
+#include "torch/csrc/jit/tensorexpr/execution_counter.h"
 #include "torch/csrc/jit/tensorexpr/function.h"
 #include "torch/csrc/jit/tensorexpr/ir.h"
 #include "torch/csrc/jit/tensorexpr/ir_printer.h"
@@ -16,6 +17,8 @@
 namespace torch {
 namespace jit {
 namespace tensorexpr {
+
+DECLARE_TRIGGER(simple_ir_eval_executed);
 
 class Value {
  public:
@@ -106,6 +109,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     eval_context_.clear();
     buffer_mapping_.clear();
     internal_buffers_.clear();
+    USE_TRIGGER(simple_ir_eval_executed);
   }
 
   void bind(const BufferArg& buf, const CallArg& data) {
