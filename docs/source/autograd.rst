@@ -16,9 +16,9 @@ Automatic differentiation package - torch.autograd
 Functional higher level API
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-This section contains the higher level API for the autograd that build on the basic API above.
+This section contains the higher level API for the autograd that builds on the basic API above.
 
-This API always works with user-provided functions that take only Tensors as input and return
+This API works with user-provided functions that take only Tensors as input and return
 only Tensors.
 If your function takes other arguments that are not Tensors or Tensors for which you don't require gradients,
 you can use a lambda to capture them.
