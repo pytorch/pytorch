@@ -168,7 +168,7 @@ TEST(OptimTest, OptimizerAccessors) {
 TEST(OptimTest, BasicInterface) {
   struct MyOptimizer : Optimizer {
     using Optimizer::Optimizer;
-    void step() override {}
+    torch::Tensor step(LossClosure closure = nullptr) override { return {};}
   };
   std::vector<torch::Tensor> parameters = {
       torch::ones({2, 3}), torch::zeros({2, 3}), torch::rand({2, 3})};
