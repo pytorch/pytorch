@@ -4,7 +4,6 @@
 
 namespace torch {
 namespace jit {
-namespace script {
 const std::unordered_map<std::string, TypePtr>& string_to_type_lut();
 namespace {
 
@@ -355,6 +354,5 @@ c10::IValue ScriptTypeParser::parseClassConstant(const Assign& assign) {
   return *default_val.begin();
 }
 
-} // namespace script
 } // namespace jit
 } // namespace torch

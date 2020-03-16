@@ -6,7 +6,6 @@
 
 namespace torch {
 namespace jit {
-namespace script {
 
 struct Decl;
 struct ParserImpl;
@@ -30,6 +29,5 @@ struct TORCH_API Parser {
   std::unique_ptr<ParserImpl> pImpl;
 };
 
-} // namespace script
 } // namespace jit
 } // namespace torch

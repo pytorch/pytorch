@@ -14,7 +14,7 @@ namespace {
 
 class AttributePropagator {
  public:
-  AttributePropagator(script::Module& module) : module_(module) {}
+  AttributePropagator(Module& module) : module_(module) {}
 
   void run(std::shared_ptr<Graph>& graph) {
     Inline(*graph);
@@ -67,7 +67,7 @@ class AttributePropagator {
   bool findConstantAttr(
       Node* node,
       std::string& name,
-      script::Module& attrModule) {
+      Module& attrModule) {
     names_.clear();
     while (!(node->outputs()[0]->type() == attrModule.type())) {
       if (node->kind() == prim::GetAttr) {
@@ -114,7 +114,7 @@ class AttributePropagator {
   void insertMutableAttr(
       const std::string& name,
       const IValue& attr,
-      script::Module& attrModule) {
+      Module& attrModule) {
     if (AliasDb::mutableType(attr.type())) {
       preservedAttrs_[attrModule._ivalue()].insert(attr);
     } else {
@@ -234,7 +234,7 @@ class AttributePropagator {
 
   void propagateAttributes(std::shared_ptr<Graph>& graph) {
     std::unordered_map<
-        script::ModulePtr,
+        ModulePtr,
         std::unordered_map<std::string, Value*>>
         attrValues;
     auto isEval = !module_.is_training();
@@ -349,21 +349,21 @@ class AttributePropagator {
   }
 
   // Contains attributes that can't be folded or user directs to keep them.
-  std::unordered_map<script::ModulePtr, IValue::HashAliasedIValues>
+  std::unordered_map<ModulePtr, IValue::HashAliasedIValues>
       preservedAttrs_;
   // Tracked immutable types (Scalars) by their attribute names not
   // IValues.
-  std::unordered_map<script::ModulePtr, std::unordered_set<std::string>>
+  std::unordered_map<ModulePtr, std::unordered_set<std::string>>
       preservedScalarAttrs_;
 
-  script::Module& module_;
+  Module& module_;
 
   // Contains the attributes names (e.g. {"self", "subModule", "a"}
   std::deque<std::string> names_;
 }; // class AttributePropagator
 } // namespace
 
-script::Module freeze_module(const script::Module& module) {
+Module freeze_module(const Module& module) {
   // Currently freezing module is supported only in eval mode.
   // If assertion below is commented and module is in training mode then this
   // implementation folds attributes correctly. Tensor attributes with
@@ -373,7 +373,7 @@ script::Module freeze_module(const script::Module& module) {
   // its semantics.
   TORCH_CHECK(!module.is_training());
 
-  script::Method method = module.get_method("forward");
+  Method method = module.get_method("forward");
   // Check that module does not return itself.
   for (auto& output : method.graph()->outputs())
     TORCH_CHECK(
