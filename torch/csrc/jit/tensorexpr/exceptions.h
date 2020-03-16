@@ -15,8 +15,8 @@ class Stmt;
 
 // Forward declarations of functions
 namespace std {
-std::string to_string(const torch::jit::tensorexpr::Expr*);
-std::string to_string(const torch::jit::tensorexpr::Stmt*);
+TORCH_API std::string to_string(const torch::jit::tensorexpr::Expr*);
+TORCH_API std::string to_string(const torch::jit::tensorexpr::Stmt*);
 }
 
 namespace torch {
