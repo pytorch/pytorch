@@ -14,6 +14,7 @@ import warnings
 import types
 import pickle
 import textwrap
+import collections
 from torch.utils.dlpack import from_dlpack, to_dlpack
 from torch._six import inf, nan, string_classes, istuple
 from itertools import product, combinations, combinations_with_replacement, permutations
@@ -15710,7 +15711,7 @@ _types = [
     torch.uint8
 ]
 
-# _types2 adds bfloat16 type to  _types only on ROCm. Should eventually be unified 
+# _types2 adds bfloat16 type to  _types only on ROCm. Should eventually be unified
 # with _types when bfloat16 bringup is complete on all platforms.
 _types2 = _types + [torch.bfloat16] if TEST_WITH_ROCM else _types
 
@@ -16345,16 +16346,88 @@ class TestTensorDeviceOps(TestCase):
     def test_svd_tall_all_col_maj(self, device, dtype):
         self._test_svd_helper((5, 20), False, True, device, dtype)
 
+
+# Below are fixtures and functions for generating tests related to unary
+# "universal functions (ufuncs)", a class of elementwise unary operations
+# This class can be further divided into "normal" and "floating" unary
+# ufuncs. The former does not participate in type promotion, while the latter
+# promotes integral types, including bool, to the default scalar type.
+
+# Helpers to organize ufunc metadata and improve test readability
+_ufunc_meta = collections.namedtuple('_ufunc_meta',
+                                     'is_floating alt_impl complex_on')
+def ufunc_meta(is_floating=False, alt_impl=None, complex_on=('cpu', 'cuda')):
+    return _ufunc_meta(is_floating, alt_impl, complex_on)
+
+# Dict of unary ufuncs and their associated test metadata
+unary_ufuncs = {
+    'acos': ufunc_meta(is_floating=True),
+    'cos': ufunc_meta(is_floating=True, complex_on=('cpu'))
+}
+
+# Creates and adds a test of the given unary floating ufunc's type promotion
+# Unary floating ufuncs promote tensors of bool and integral types to
+# the default scalar type.
+def generate_unary_floating_ufunc_promo_test(cls, op_str):
+    int_types = [torch.bool, torch.uint8, torch.int8, torch.int16,
+                 torch.int, torch.long]
+    float_types = [torch.float, torch.double]
+    float_types_cuda = [torch.half, torch.float, torch.double]
+    complex_types = [torch.complex64, torch.complex128]
+    default_types = [torch.float, torch.double]
+    default_types_cuda = [torch.half, torch.float, torch.double]
+
+    def test_fn(self, device):
+        op = getattr(torch, op_str)
+
+        my_default_types = default_types
+        my_float_types = float_types
+        if self.device_type == 'cuda':
+            my_default_types = default_types_cuda
+            my_float_types = float_types_cuda
+        if self.device_type in unary_ufuncs[op_str].complex_on:
+            my_float_types.extend(complex_types)
+
+        prev_def_type = torch.get_default_dtype()
+        try:
+            for in_type, def_type in product(int_types, my_default_types):
+                torch.set_default_dtype(def_type)
+                t = torch.tensor((1,), device=device, dtype=in_type)
+                self.assertEqual(op(t).dtype, def_type)
+        finally:
+            torch.set_default_dtype(prev_def_type)
+
+        for in_type in my_float_types:
+            t = torch.tensor((1,), device=device, dtype=in_type)
+            self.assertEqual(op(t).dtype, in_type)
+
+    test_name = "test_" + op_str + "_dtype_promotion"
+    assert not hasattr(cls, test_name), "{0} already in {1}".format(test_name, cls.__name__)
+    setattr(cls, test_name, test_fn)
+
+def generate_unary_floating_ufunc_tests(cls):
+    for k, v in unary_ufuncs.items():
+        if not v.is_floating:
+            continue
+
+        generate_unary_floating_ufunc_promo_test(cls, k)
+
+
 class TestTorch(TestCase, _TestTorchMixin):
     exact_dtype = True
+
+class TestUnaryUfuncs(TestCase):
+    pass
 
 
 # Generates tests
 # Note: test generation must be done at file scope, not within main, or
 # pytest will fail.
 add_neg_dim_tests()
+generate_unary_floating_ufunc_tests(TestUnaryUfuncs)
 generate_tensor_op_tests(TestTensorDeviceOps)
 generate_not_implemented_tests(TestTorchDeviceType)
+instantiate_device_type_tests(TestUnaryUfuncs, globals())
 instantiate_device_type_tests(TestTorchDeviceType, globals())
 instantiate_device_type_tests(TestViewOps, globals())
 instantiate_device_type_tests(TestDevicePrecision, globals(), except_for='cpu')

@@ -227,7 +227,7 @@ def sin(g, self):
 
 
 def cos(g, self):
-    return g.op("Cos", self)
+    return sym_help._unary_ufunc_helper(g, self, "Cos")
 
 
 def tan(g, self):
@@ -239,7 +239,7 @@ def asin(g, self):
 
 
 def acos(g, self):
-    return g.op("Acos", self)
+    return sym_help._unary_ufunc_helper(g, self, "Acos")
 
 
 def atan(g, self):

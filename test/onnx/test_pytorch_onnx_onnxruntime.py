@@ -1199,7 +1199,7 @@ class TestONNXRuntime(unittest.TestCase):
 
     def _interpolate_script(self, x, mode, use_size, is_upsample, align_corners=False):
         # test disabled
-        return 
+        return
 
         class MyModel(torch.jit.ScriptModule):
             __constants__ = ['mode', 'use_size', 'is_upsample', 'size', 'scale', 'size_array', 'scale_array', 'align_corners']
@@ -3109,6 +3109,34 @@ def setup_rnn_tests():
 
 setup_rnn_tests()
 
+# Unary floating ufunc tests
+# Tests that integral arguments are properly cast to float
+unary_floating_ufuncs = (
+    'cos',
+    'acos'
+)
+
+def setup_unary_floating_ufunc_tests_helper(cls, op_name):
+    op = getattr(torch, op_name)
+
+    def test_fn(self):
+        class module(torch.nn.Module):
+            def forward(self, x):
+                return op(x)
+
+        x = (torch.rand(2, 3, 4) * 10).to(torch.int)
+        self.run_test(module(), (x,))
+        self.run_test(torch.jit.trace(module(), (x,)), (x,))
+
+    test_name = "test_" + op_name
+    assert not hasattr(cls, test_name), "{0} already in {1}".format(test_name, cls.__name__)
+    setattr(cls, test_name, test_fn)
+
+def setup_unary_floating_ufunc_tests(cls):
+    for op_name in unary_floating_ufuncs:
+        setup_unary_floating_ufunc_tests_helper(cls, op_name)
+
+setup_unary_floating_ufunc_tests(TestONNXRuntime)
 
 # opset 7 tests
 TestONNXRuntime_opset7 = type(str("TestONNXRuntime_opset7"),
