@@ -42,6 +42,7 @@ class TestCudaFuser(JitTestCase):
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "Requires profiling node to run cuda fuser")
+    @skipIfRocm
     def test_const(self):
         def t(x, y):
             o = x + y
@@ -58,6 +59,7 @@ class TestCudaFuser(JitTestCase):
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "Requires profiling node to run cuda fuser")
+    @skipIfRocm
     def test_chunk(self):
         def t(x, y, z, q):
             o = x + q
@@ -80,6 +82,7 @@ class TestCudaFuser(JitTestCase):
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "Requires profiling node to run cuda fuser")
+    @skipIfRocm
     def test_scalar_input(self):
         def t(x, y, z):
             # type: (Tensor, Tensor, float) -> Tensor
