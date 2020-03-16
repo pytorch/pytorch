@@ -182,6 +182,7 @@ libtorch_sources = [
     "torch/csrc/jit/codegen/fuser/fallback.cpp",
     "torch/csrc/jit/codegen/fuser/cpu/fused_kernel.cpp",
     "torch/csrc/jit/codegen/fuser/interface.cpp",
+    "torch/csrc/jit/codegen/cuda/interface.cpp",
     "torch/csrc/jit/runtime/vararg_functions.cpp",
     "torch/csrc/jit/python/update_graph_executor_opt.cpp",
     "torch/csrc/jit/mobile/function.cpp",
@@ -243,6 +244,7 @@ libtorch_cuda_sources = [
     "torch/csrc/jit/codegen/cuda/transform_replay.cpp",
     "torch/csrc/jit/codegen/cuda/type.cpp",
     "torch/csrc/jit/codegen/cuda/utils.cpp",
+    "torch/csrc/jit/codegen/cuda/register_interface.cpp",
 ]
 
 torch_cpp_srcs = [

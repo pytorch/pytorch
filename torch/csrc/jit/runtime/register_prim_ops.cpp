@@ -7,7 +7,7 @@
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
-#include <torch/csrc/jit/codegen/cuda/manager.h>
+#include <torch/csrc/jit/codegen/cuda/interface.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/operator.h>
@@ -298,7 +298,7 @@ RegisterOperators reg(
          prim::CudaFusionGroup,
          [](const Node* node) -> Operation {
            return [node](Stack& stack) {
-             fuser::cuda::runCudaFusionGroup(node, stack);
+             fuser::cuda::runFusionGroup(node, stack);
              return 0;
            };
          },
