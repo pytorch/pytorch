@@ -55,7 +55,7 @@ struct TensorView;
 
 TORCH_API TensorView* split_(TensorView*, int axis, int factor);
 TORCH_API TensorView* merge_(TensorView*, int axis);
-TORCH_API TensorView* reorder_(TensorView*, std::unordered_map<int, int>);
+TORCH_API TensorView* reorder_(TensorView*, const std::unordered_map<int, int>&);
 
 } // namespace fuser
 } // namespace jit

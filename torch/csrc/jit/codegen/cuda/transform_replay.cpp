@@ -70,7 +70,7 @@ TensorView* TransformReplay::replay(Split* expr, TensorView* tv) {
     tv->split(real_axis, *(expr->factor()->value()));
     // Inserted a real axis, push everything in axis_map over to the right
     // after this inserted axis
-    for (int i = 0; i < axis_map.size(); i++)
+    for (decltype(axis_map.size()) i{0}; i < axis_map.size(); i++)
       if (axis_map[i] > real_axis)
         axis_map[i] = axis_map[i] + 1;
 
@@ -134,7 +134,7 @@ TensorView* TransformReplay::replay(Reorder* expr, TensorView* tv) {
   // axis_map[new_fake_pos] -> new_real_pos
 
   std::vector<std::pair<int, int>> needed_real_reorder;
-  for (int i = 0; i < pos2axis.size(); i++) {
+  for (decltype(pos2axis.size()) i{0}; i < pos2axis.size(); i++) {
     int new_fake_axis = i;
     int old_fake_axis = pos2axis[i];
     int old_real_axis = axis_map[old_fake_axis];
@@ -160,7 +160,7 @@ TensorView* TransformReplay::replay(Reorder* expr, TensorView* tv) {
     axis2pos[entry.first] = axis++;
   }
 
-  for (int i = 0; i < tv->nDims(); i++) {
+  for (decltype(tv->nDims()) i{0}; i < tv->nDims(); i++) {
     if (axis2pos.find(i) == axis2pos.end())
       axis2pos[i] = axis++;
   }
@@ -223,11 +223,11 @@ TensorView* TransformReplay::runReplay(
     TensorView* replay_target,
     int compute_at_axis) {
   if (compute_at_axis < 0)
-    compute_at_axis += replay_ref->nDims() + 1;
+    compute_at_axis += int(replay_ref->nDims()) + 1;
 
   TORCH_CHECK(
       compute_at_axis >= 0 &&
-          compute_at_axis < replay_ref->nDims() + 1,
+          compute_at_axis < int(replay_ref->nDims()) + 1,
       "Transform replay cannot be performed as the compute_at_axis is not in the valid range.");
 
   this->compute_at_axis = compute_at_axis;

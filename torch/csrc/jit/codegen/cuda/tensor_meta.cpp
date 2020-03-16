@@ -201,7 +201,7 @@ bool TensorContiguity::canCollapseLowerHigher(int lower_axis, int higher_axis)
 }
 
 int TensorContiguity::getFCD() const {
-  for (int i = 0; i < contiguity_.size(); i++) {
+  for (decltype(contiguity_.size()) i{0}; i < contiguity_.size(); i++) {
     if (contiguity_[i] == (-contiguity_.size() - 1))
       return i;
   }
@@ -222,7 +222,7 @@ bool TensorContiguity::isCompatible(const TensorContiguity& tc) const {
   return false;
 }
 bool TensorContiguity::hasContiguousFCD() const {
-  for (int i = 0; i < contiguity_.size(); i++) {
+  for (decltype(contiguity_.size()) i{0}; i < contiguity_.size(); i++) {
     if (contiguity_[i] == (-contiguity_.size() - 1))
       return true;
   }

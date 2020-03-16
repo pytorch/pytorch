@@ -120,7 +120,7 @@ TensorView* merge_(TensorView* tv, int axis) {
  * Takes axis2pos map, axis2pos[old_pos] = new_pos, to modify the ordering of
  * the iter axes.
  */
-TensorView* reorder_(TensorView* tv, std::unordered_map<int, int> axis2pos) {
+TensorView* reorder_(TensorView* tv, const std::unordered_map<int, int>& axis2pos) {
   TensorDomain* td = tv->domain();
   auto ndims = td->size();
   // Map to save from previous order, to new order.
@@ -152,7 +152,7 @@ TensorView* reorder_(TensorView* tv, std::unordered_map<int, int> axis2pos) {
         false, "Reorder found duplicate destination positions.");
 
   std::set<int> all_positions;
-  for (int i = 0; i < ndims; i++)
+  for (decltype(ndims) i{0}; i < ndims; i++)
     all_positions.insert(i);
 
   // Check what positions haven't been specified.
@@ -182,10 +182,9 @@ TensorView* reorder_(TensorView* tv, std::unordered_map<int, int> axis2pos) {
   }
 
   std::vector<IterDomain*> reordered_domain;
-
-  for (int i = 0; i < pos2axis.size(); i++) {
-    reordered_domain.push_back(td->axis(pos2axis[i]));
-  }
+  for (int entry : pos2axis)
+    reordered_domain.push_back(td->axis(entry));
+  
   TensorDomain* reordered_td = new TensorDomain(reordered_domain);
   Reorder* merge_node = new Reorder(reordered_td, td, pos2axis);
   tv->setDomain(reordered_td);
@@ -265,7 +264,7 @@ TensorView* TensorView::computeAt(TensorView* consumer, int axis) {
   if (axis < 0)
     // Compute at is funny where size is the maximum acceptable value instead of
     // size-1
-    axis += consumer->nDims() + 1;
+    axis += int(consumer->nDims()) + 1;
 
   TORCH_CHECK(
       axis >= 0 && axis < consumer->nDims() + 1,

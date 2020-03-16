@@ -123,7 +123,7 @@ struct TORCH_API Fusion : public IRInputOutput {
 
   // Throw an error if stmt is not in this fusion. Message will be:
   // msg + " it was not found in the active fusion."
-  void assertInFusion(const Statement* stmt, std::string msg = "") const;
+  void assertInFusion(const Statement* stmt, const std::string& msg = "") const;
 
   /*
    * Return a list of topologically sorted expressions. We can start

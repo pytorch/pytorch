@@ -59,7 +59,7 @@ void IndexCompute::replayBackward(Reorder* expr) {
 }
 
 IndexCompute::IndexCompute(const TensorView* tv, std::vector<Int*> _indices) {
-  indices = _indices;
+  indices = std::move(_indices);
 
   TensorDomain* td = tv->domain();
 
@@ -91,7 +91,7 @@ IndexCompute::IndexCompute(const TensorView* tv, std::vector<Int*> _indices) {
   // Remove indices associated with reduction axes, we had them just for
   // bookkeeping.
   if (exclude_reduction) {
-    for (int i = root->size() - 1; i >= 0; i--)
+    for (auto i = root->size() - 1; i >= 0; i--)
       if (root->axis(i)->isReduction())
         indices.erase(indices.begin() + i);
   }
@@ -100,7 +100,7 @@ IndexCompute::IndexCompute(const TensorView* tv, std::vector<Int*> _indices) {
 std::vector<Int*> IndexCompute::computeIndices(
     const TensorView* tv,
     std::vector<Int*> _indices) {
-  IndexCompute ic(tv, _indices);
+  IndexCompute ic(tv, std::move(_indices));
   return ic.indices;
 }
 

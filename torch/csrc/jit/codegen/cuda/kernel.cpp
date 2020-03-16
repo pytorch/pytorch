@@ -12,8 +12,8 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-#define CG_NAMESPACE "CudaCodeGen"
-#define KERNEL_NAME "kernel"
+constexpr auto CG_NAMESPACE = "CudaCodeGen";
+constexpr auto KERNEL_NAME = "kernel";
 
 namespace {
 // See NOTE [ USE OF NVRTC AND DRIVER API ]
@@ -47,7 +47,7 @@ void prepare_argument(
   // passing address, type doesn't really matter here;
   t.data = static_cast<float*>(val.data_ptr());
 
-  for (int i = 0; i < val.dim(); i++) {
+  for (decltype(val.dim()) i{0}; i < val.dim(); i++) {
     t.size[i] = val.sizes()[i];
     t.stride[i] = val.strides()[i];
   }
@@ -170,7 +170,7 @@ TORCH_API void runKernel(
   // argument holder;
   // host code, `T` in `Tensor<T>` doesn't really matter, as we only interact
   // with the address; Just put a float here to simply the argument holder.
-  int max_capacity = inputs.size() + outputs.size();
+  auto max_capacity = inputs.size() + outputs.size();
   std::vector<Tensor<float>> tensor_args;
   std::vector<int> int_args;
   std::vector<float> float_args;
@@ -229,7 +229,7 @@ TORCH_API void runTestKernel(
   // argument holder;
   // host code, `T` in `Tensor<T>` doesn't really matter, as we only interact
   // with the address; Just put a float here to simply the argument holder.
-  int max_capacity = inputs.size() + outputs.size();
+  auto max_capacity = inputs.size() + outputs.size();
   std::vector<Tensor<float>> tensor_args;
   std::vector<int> int_args;
   std::vector<float> float_args;

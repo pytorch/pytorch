@@ -75,7 +75,7 @@ public:
 
   // Starts at from, traverses backwards through DAG, calls handle on nodes
   // in depth first topological sorted order.
-  void traverseFrom(Fusion* const fusion, std::vector<Val*> from);
+  void traverseFrom(Fusion* const fusion, const std::vector<Val*>& from);
 };
 
 

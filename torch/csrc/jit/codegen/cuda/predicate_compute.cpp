@@ -10,7 +10,7 @@ namespace fuser {
 
 bool PredicateCompute::hasPredicates(
     const TensorView* tv,
-    const std::vector<Int*> _indices) {
+    const std::vector<Int*>& _indices) {
   std::vector<Int*> preds;
   for (auto ind : _indices)
     if (FusionGuard::getCurFusion()->origin(ind) != nullptr)
@@ -20,7 +20,7 @@ bool PredicateCompute::hasPredicates(
 
 std::vector<Int*> PredicateCompute::computePredicates(
     const TensorView* tv,
-    const std::vector<Int*> _indices) {
+    const std::vector<Int*>& _indices) {
   std::vector<Int*> preds;
   if (!hasPredicates(tv, _indices))
     return preds;

@@ -4,11 +4,11 @@ namespace torch {
 namespace jit {
 
 RegisterPostPass::RegisterPostPass(GraphPass p){
-  registerPostPass(p);
+  registerPostPass(std::move(p));
 }
 
 RegisterPrePass::RegisterPrePass(GraphPass p){
-  registerPrePass(p);
+  registerPrePass(std::move(p));
 }
 
 std::vector<GraphPassEntry>& getCustomPostPasses() {
@@ -77,7 +77,7 @@ bool PassManager::flipRegistered(bool flip){
 }
 void PassManager::registerPass(GraphPass pass) {
   if (!flipRegistered()) {
-    name( RegisterPostPass::registerPostPass(pass), true );
+    name( RegisterPostPass::registerPostPass(std::move(pass)), true );
     flipRegistered(true);
   }
 }

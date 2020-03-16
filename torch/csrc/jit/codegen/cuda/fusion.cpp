@@ -23,12 +23,19 @@ std::vector<Expr*> ExprSort::getExprs(
 }
 
 Fusion::~Fusion() {
-  for (auto it = val_set_.begin(); it != val_set_.end(); ++it) {
-    delete *it;
+  {
+  auto it = val_set_.begin();
+  while (it != val_set_.end()) {
+    auto del = it;
+    it = ++it;
+    delete (*del);
   }
-
-  for (auto it = expr_set_.begin(); it != expr_set_.end(); ++it) {
-    delete *it;
+  }  
+  auto it = expr_set_.begin();
+  while (it != expr_set_.end()) {
+    auto del = it;
+    it = ++it;
+    delete (*del);
   }
 };
 
@@ -101,7 +108,7 @@ bool Fusion::inFusion(const Statement* stmt) const {
   return infusion;
 }
 
-void Fusion::assertInFusion(const Statement* stmt, std::string msg) const {
+void Fusion::assertInFusion(const Statement* stmt, const std::string& msg) const {
   if (inFusion(stmt))
     return;
   std::stringstream errmsg;

@@ -14,7 +14,7 @@ namespace jit {
 namespace fuser {
 
 /*
- * A Float32 value. For now we don't have any other type besides Float32. This
+ * A Float32 value. For now we don't have any other type besides Float32.reorder_ This
  * value can be a symbolic value (defined after the kernel is compiled) or a
  * constant value (inlined into the kernel definition).
  */
@@ -169,7 +169,7 @@ struct TORCH_API TensorView : public Val {
   // Implementations for split/merge/reorder
   friend TensorView* split_(TensorView*, int axis, int factor);
   friend TensorView* merge_(TensorView*, int axis);
-  friend TensorView* reorder_(TensorView*, std::unordered_map<int, int>);
+  friend TensorView* reorder_(TensorView*, const std::unordered_map<int, int>&);
   friend TransformReplay;
 
  protected:

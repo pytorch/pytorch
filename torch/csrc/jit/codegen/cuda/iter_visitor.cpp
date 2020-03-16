@@ -36,7 +36,7 @@ std::vector<Statement*> IterVisitor::next(Expr* expr) {
 
 void IterVisitor::traverseFrom(
     Fusion* const fusion
-  , std::vector<Val*> from ) {
+  , const std::vector<Val*>& from ) {
   FusionGuard fg(fusion);
 
   std::set<Statement*> visited;

@@ -149,7 +149,7 @@ Reorder::Reorder(
     TensorDomain* _out,
     TensorDomain* _in,
     std::vector<int> _pos2axis)
-    : Expr(ExprType::Reorder), out_{_out}, in_{_in}, pos2axis_{_pos2axis} {
+    : Expr(ExprType::Reorder), out_{_out}, in_{_in}, pos2axis_{std::move(_pos2axis)} {
   addOutput(_out);
   addInput(_in);
   this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
