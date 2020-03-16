@@ -525,6 +525,7 @@ jobs:
             set -x
 
             # Build
+            cd /c/pytorch
             .jenkins/pytorch/win-build.sh
 
             # =================== The above code will be executed inside Docker container ===================
