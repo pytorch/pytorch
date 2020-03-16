@@ -593,7 +593,6 @@ class TestTypePromotion(TestCase):
         casting_result = dividend.to(torch.get_default_dtype()) / 2
         self.assertEqual(casting_result, torch.true_divide(dividend_sparse, 2).to_dense())
 
-    # TODO: Update this test when integer division is an error
     @dtypes(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64)
     def test_integer_div_deprecated(self, device, dtype):
         a = torch.tensor(1, device=device, dtype=dtype)
@@ -602,10 +601,15 @@ class TestTypePromotion(TestCase):
 
         with self.maybeWarnsRegex(UserWarning, '^Integer division.+is deprecated.+'):
             c = a / b
+        with self.maybeWarnsRegex(UserWarning, '^Integer division.+is deprecated.+'):
             c = torch.div(a, b)
-            torch.div(a, b, out=o)
+        with self.maybeWarnsRegex(UserWarning, '^Integer division.+is deprecated.+'):
             torch.addcdiv(a, b, b)
+        with self.maybeWarnsRegex(UserWarning, '^Integer division.+is deprecated.+'):
             torch.addcdiv(a, b, b, out=o)
+        with self.maybeWarnsRegex(UserWarning, '^Integer division.+is deprecated.+'):
+            torch.div(a, b, out=o)
+
 
 instantiate_device_type_tests(TestTypePromotion, globals())
 

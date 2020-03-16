@@ -262,13 +262,21 @@ Performs the element-wise division of :attr:`tensor1` by :attr:`tensor2`,
 multiply the result by the scalar :attr:`value` and add it to :attr:`input`.
 
 .. warning::
-    Integer division with addcdiv is deprecated and will be removed in a future
-    release. In an even later release it will be changed to perform a true
-    division.
+    Integer division with addcdiv is deprecated. It will be disabled in Pytorch
+    1.6, and in PyTorch 1.7 addcdiv will perform a true division of
+    :attr:`tensor1` and :attr:`tensor2`. The current addcdiv behavior can be
+    replicated using :func:`floor_divide` for integral inputs
+    (:attr:`input` + :attr:`value` * :attr:`tensor1` // :attr:`tensor2`)
+    and :func:`div` for float inputs
+    (:attr:`input` + :attr:`value` * :attr:`tensor1` / :attr:`tensor2`).
+    The new addcdiv behavior can be implemented with :func:`true_divide`
+    (:attr:`input` + :attr:`value` * torch.true_divide(:attr:`tensor1`,
+    :attr:`tensor2`).
 
 .. math::
     \text{out}_i = \text{input}_i + \text{value} \times \frac{\text{tensor1}_i}{\text{tensor2}_i}
 """ + r"""
+
 The shapes of :attr:`input`, :attr:`tensor1`, and :attr:`tensor2` must be
 :ref:`broadcastable <broadcasting-semantics>`.
 
@@ -1786,9 +1794,10 @@ Divides each element of the input ``input`` with the scalar ``other`` and
 returns a new resulting tensor.
 
 .. warning::
-    Integer division using div is deprecated and will be removed in a future
-    release. In an even later release div will be changed to perform true
-    division like :func:`torch.true_divide`.
+    Integer division using div is deprecated. In PyTorch 1.6 it will be
+    disabled, and in PyTorch 1.7 div will perform true division like
+    :func:`torch.true_divide`. Use :func:`torch.floor_divide`
+    (or // in Python) to perform integer division, instead.
 
 .. math::
     \text{{out}}_i = \frac{{\text{{input}}_i}}{{\text{{other}}}}
