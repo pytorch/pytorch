@@ -27,6 +27,11 @@ struct PyNode : public Node {
   variable_list apply(variable_list&& inputs) override;
   variable_list legacy_apply(const variable_list& inputs);
 
+  // throw a persist python_error to allow it to be thrown
+  // in another thread, this is made so that even for pure
+  // C++ thread without a pre-create PyThreadState could
+  // also capture the correct error message.
+  void throw_python_error();
   void release_variables() override;
   std::string name() const override;
   bool is_traceable() override;
