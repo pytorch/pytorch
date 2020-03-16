@@ -54,5 +54,6 @@ __all__ = [
     'ConstantPad3d', 'Bilinear', 'CosineSimilarity', 'Unfold', 'Fold',
     'AdaptiveLogSoftmaxWithLoss', 'TransformerEncoder', 'TransformerDecoder',
     'TransformerEncoderLayer', 'TransformerDecoderLayer', 'Transformer',
+    'MultiheadAttentionInProjection', 'ScaledDotProduct', 'MultiheadAttentionOutProjection',
     'Flatten',
 ]
