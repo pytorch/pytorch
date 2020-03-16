@@ -98,7 +98,7 @@ bool loadPythonClasses() {
 }
 } // anonymous namespace
 
-#if !defined(_WIN32) && !defined(__HIP_PLATFORM_HCC__)
+#if !defined(__HIP_PLATFORM_HCC__)
 TORCH_API void runJITCPPTests(bool runCuda);
 #endif
 
@@ -305,7 +305,7 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_create_autodiff_subgraphs",
           [](std::shared_ptr<Graph> graph) { CreateAutodiffSubgraphs(graph); })
-#if defined(BUILDING_TESTS) && !defined(_WIN32) && !defined(__HIP_PLATFORM_HCC__)
+#if defined(BUILDING_TESTS) && !defined(__HIP_PLATFORM_HCC__)
       .def(
           "_jit_run_cpp_tests",
           [](bool runCuda) {

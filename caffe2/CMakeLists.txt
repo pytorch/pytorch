@@ -788,7 +788,7 @@ ENDIF()
     DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch)
 
 
-  if (BUILD_TEST AND NOT MSVC AND NOT USE_ROCM)
+  if (BUILD_TEST AND NOT USE_ROCM)
     add_subdirectory(${TORCH_ROOT}/test/cpp/jit ${CMAKE_BINARY_DIR}/test_jit)
     add_subdirectory(${TORCH_ROOT}/test/cpp/tensorexpr ${CMAKE_BINARY_DIR}/test_tensorexpr)
     if (USE_DISTRIBUTED)
