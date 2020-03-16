@@ -211,7 +211,10 @@ struct TORCH_API Engine {
   /// Returns a reference to a static `Engine` instance.
   static Engine& get_default_engine();
 
-  Engine();
+  static Engine& get_base_engine();
+
+  Engine(const Engine&) = delete;
+  Engine(Engine&&) = delete;
   virtual ~Engine();
 
   // Given a list of (Node, input number) pairs computes the value of the graph
@@ -261,13 +264,13 @@ struct TORCH_API Engine {
   size_t ready_queue_size(const std::shared_ptr<GraphTask>& graph_task, at::Device device);
 
  protected:
+  Engine();
   void compute_dependencies(Node* root, GraphTask& task);
   void evaluate_function(
       std::shared_ptr<GraphTask>& graph_task,
       Node* func,
       InputBuffer& inputs);
 
-  virtual void execute_until_ready_queue_empty(const std::shared_ptr<GraphTask>& graph_task);
   ReadyQueue& ready_queue(
       const std::shared_ptr<GraphTask>& graph_task,
       at::Device device);
@@ -325,6 +328,7 @@ struct TORCH_API Engine {
  std::shared_ptr<ThreadPoolShared> thread_pool_shared_;
 
 private:
+ void execute_graph_task_with_continuation(const std::shared_ptr<GraphTask>& graph_task);
  void graph_task_exec_post_processing(
      const std::shared_ptr<GraphTask>& graph_task);
  void mark_graph_task_completed(const std::shared_ptr<GraphTask>& graph_task);

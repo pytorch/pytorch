@@ -1664,6 +1664,7 @@ class DistAutogradTest(RpcAgentTestFixture):
             return input
 
     @dist_init
+    @unittest.skip
     def test_debug_info(self):
         initialize_pg(self.init_method, self.rank, self.world_size)
 

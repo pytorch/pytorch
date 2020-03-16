@@ -10,6 +10,7 @@ bool THPEngine_initModule(PyObject *module);
 namespace torch { namespace autograd { namespace python {
 
 struct PythonEngine : public Engine {
+  static Engine& get_python_engine();
   void thread_init(int device, std::shared_ptr<ReadyQueue> ready_queue) override;
   void thread_on_exception(
       std::shared_ptr<GraphTask> graph_task,
@@ -28,6 +29,8 @@ struct PythonEngine : public Engine {
       bool async_mode = false) override;
 
   std::unique_ptr<AnomalyMetadata> make_anomaly_metadata() override;
+  private:
+    PythonEngine();
 };
 
 }}} // namespace torch::autograd::python

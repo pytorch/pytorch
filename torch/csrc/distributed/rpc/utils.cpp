@@ -220,6 +220,9 @@ c10::List<at::Tensor> cloneSparseTensors(
   // force a clone(). Some Tensors are effectively small views, only using
   // ~1% of the underlying Storage.
   auto worthRecopying = [](const at::Tensor& t) -> bool {
+    if (!t.has_storage()) {
+      return false; // avoid throwing below.
+    }
     auto storageSize = t.storage().elementSize() * t.storage().numel();
     auto usefulSize = t.element_size() * t.numel();
     constexpr size_t kMinMultiple = 2;

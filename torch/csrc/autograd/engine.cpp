@@ -344,8 +344,7 @@ auto Engine::thread_main(
     --local_graph_task->outstanding_tasks_;
 
     // Check if we've completed execution.
-    bool gt_completed = graph_task_completed(local_graph_task);
-    if (gt_completed) {
+    if (graph_task_completed(local_graph_task)) {
       // We don't need to explicitly notify the owner thread, since
       // 'mark_graph_task_completed' would mark the Future as completed and this
       // would notify the owner thread that the task has been completed.
@@ -775,7 +774,7 @@ void Engine::enqueue_blocked_task_on_cpu(NodeTask task) {
       std::move(task), /* incrementOutstandingTasks */ false);
 }
 
-void Engine::execute_until_ready_queue_empty(const std::shared_ptr<GraphTask>& graph_task) {
+void Engine::execute_graph_task_with_continuation(const std::shared_ptr<GraphTask>& graph_task) {
   std::shared_ptr<ReadyQueue> graph_task_rq = graph_task->cpu_ready_queue_;
   while(!graph_task_rq->empty()) {
     NodeTask task = graph_task_rq->pop();
@@ -808,7 +807,7 @@ void Engine::execute_until_ready_queue_empty(const std::shared_ptr<GraphTask>& g
   } else {
     // schedule a continuation
     at::launch([this, graph_task]() {
-        execute_until_ready_queue_empty(graph_task);
+        execute_graph_task_with_continuation(graph_task);
     });
   }
 
@@ -845,10 +844,9 @@ std::shared_ptr<FutureVariableList> Engine::execute_with_graph_task(
     // that has already been pushed to the current CPU thread's ready_queue
     lock.unlock();
     if (async_mode) {
-      // at::launch([this, graph_task]() {
-      //     execute_until_ready_queue_empty(graph_task);
-      // });
-      execute_until_ready_queue_empty(graph_task);
+      at::launch([this, graph_task]() {
+          execute_graph_task_with_continuation(graph_task);
+      });
     } else {
       thread_main(nullptr, false);
       TORCH_INTERNAL_ASSERT(graph_task->future_result_->completed());
@@ -865,7 +863,6 @@ std::shared_ptr<FutureVariableList> Engine::execute_with_graph_task(
     if (current_depth >= max_recursion_depth_) {
       // See Note [Reentrant backwards]
       // If reached the max depth, switch to a different thread
-      // lock.unlock();
       add_thread_pool_task(graph_task);
     } else {
       // Total depth needs to be updated only in this codepath, since it is
@@ -907,7 +904,7 @@ void Engine::mark_graph_task_completed(const std::shared_ptr<GraphTask>& graph_t
     graph_task->future_result_->markCompleted(
         std::move(graph_task->captured_vars_));
   } catch (std::exception& e) {
-    graph_task->future_result_->setError(e.what());
+    graph_task->future_result_->setErrorIfNeeded(e.what());
   }
 }
 
@@ -947,12 +944,12 @@ void Engine::graph_task_exec_post_processing(
 // note that when python is present, this base engine will be overriden
 // with a PythonEngine. Because this typically happens before get_default_engine
 // is called, this base engine will never be created.
-static Engine& get_base_engine() {
+Engine& Engine::get_base_engine() {
   static Engine engine;
   return engine;
 }
 
-std::atomic<EngineStub> engine_stub(get_base_engine);
+std::atomic<EngineStub> engine_stub(Engine::get_base_engine);
 
 void set_default_engine_stub(EngineStub stub) {
   engine_stub.store(stub);

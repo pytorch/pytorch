@@ -120,9 +120,7 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
   THPObjectPtr apply_fn(PyObject_GetAttrString(obj, "apply"));
   if (!apply_fn) throw python_error();
   THPObjectPtr r(PyObject_CallObject(apply_fn, pyInputs.get()));
-  if (!r) {
-    throw python_error();
-  }
+  if (!r) throw python_error();
   ensure_tuple(r);
 
   auto& is_variable_input = py_fn->is_variable_input;
