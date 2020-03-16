@@ -354,6 +354,7 @@
 [[
   name: _th_topk
   cname: topk
+  cuda_bfloat16: True
   backends:
     - CUDA
   variants:
