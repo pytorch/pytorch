@@ -78,7 +78,6 @@ namespace jit {
   _(LiteInterpreterConv)               \
   _(LiteInterpreterInline)             \
   _(LiteInterpreterTuple)              \
-  _(LiteInterpreterPrimOverload)       \
   _(LiteInterpreterUpsampleNearest2d)  \
   _(CommonAncestor)                    \
   _(AutogradSymbols)                   \
