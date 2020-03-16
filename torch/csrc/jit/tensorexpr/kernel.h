@@ -52,6 +52,7 @@ class TensorExprKernel {
   enum BackendType {
     kUninitialized,
     kSimpleIREval,
+    kCudaCodeGen,
   };
 
   ExprHandle constant(const torch::jit::Value* v);
@@ -204,6 +205,10 @@ class TensorExprKernel {
   BackendType backend_type_ = BackendType::kUninitialized;
   at::Device device_ = at::kCPU;
 };
+
+TORCH_API int& GetTECudaPointwiseLoopLevels();
+TORCH_API int& GetTECudaPointwiseBlockCount();
+TORCH_API int& GetTECudaPointwiseBlockSize();
 
 } // namespace tensorexpr
 } // namespace jit
