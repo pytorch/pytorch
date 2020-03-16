@@ -502,35 +502,39 @@ jobs:
     steps:
       - checkout
       - run:
-          name: Install VS2017
-          command: |
-            if [[ "${VC_YEAR}" == "2017" ]]; then
-              powershell .circleci/scripts/vs_install.ps1
-            fi
-      - run:
-          name: Install Cuda
-          no_output_timeout: 30m
-          command: |
-            curl --retry 3 -kLO https://ossci-windows.s3.amazonaws.com/cuda_10.1.243_426.00_win10.exe
-            ./cuda_10.1.243_426.00_win10.exe -s
-            rm -f ./cuda_10.1.243_426.00_win10.exe
-      - run:
-          name: Install Cudnn
-          command : |
-            cd c:/
-            curl --retry 3 -O https://ossci-windows.s3.amazonaws.com/cudnn-10.1-windows10-x64-v7.6.4.38.zip
-            7z x cudnn-10.1-windows10-x64-v7.6.4.38.zip -ocudnn
-            cp -r cudnn/cuda/* "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v10.1/"
-      - run:
           name: Build
           no_output_timeout: "90m"
           command: |
             set -e
+            cat > ci_build_script.sh \<<EOL
+            # =================== The following code will be executed inside Docker container ===================
+            set -ex
+            export BUILD_ENVIRONMENT="$BUILD_ENVIRONMENT"
+            export SCCACHE_BUCKET="$SCCACHE_BUCKET"
+            export CUDA_VERSION="$CUDA_VERSION"
+            export PYTHON_VERSION="$PYTHON_VERSION"
+            export VC_VERSION="$VC_VERSION"
+            export VC_YEAR="$VC_YEAR"
+            export VC_PRODUCT="$VC_PRODUCT"
+            export USE_CUDA="$USE_CUDA"
+            export TORCH_CUDA_ARCH_LIST="$TORCH_CUDA_ARCH_LIST"
+
             set +x
             export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_WIN_BUILD_V1}
             export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_WIN_BUILD_V1}
             set -x
+
+            # Build
             .jenkins/pytorch/win-build.sh
+
+            # =================== The above code will be executed inside Docker container ===================
+            EOL
+            export DOCKER_IMAGE=peterjc123/windows-cuda-container:v2.0.0
+            echo "DOCKER_IMAGE: "${DOCKER_IMAGE}
+            time docker pull ${DOCKER_IMAGE} >/dev/null
+            export id=$(docker run --cap-add=SYS_PTRACE -t -d ${DOCKER_IMAGE})
+            docker cp . $id:C:\pytorch\
+            docker exec -i "$id" sh ./pytorch/ci_build_script.sh
   pytorch_windows_test:
     <<: *pytorch_windows_params
     parameters:
@@ -1789,11 +1793,6 @@ workflows:
           use_cuda: "1"
           requires:
             - setup
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
       - pytorch_windows_test:
           name: pytorch_windows_vs2017_14.16_py36_cuda10.1_test1
           test_name: pytorch-windows-test1
@@ -1806,11 +1805,6 @@ workflows:
           requires:
             - setup
             - pytorch_windows_vs2017_14.16_py36_cuda10.1_build
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
       - pytorch_windows_test:
           name: pytorch_windows_vs2017_14.16_py36_cuda10.1_test2
           test_name: pytorch-windows-test2
@@ -1823,11 +1817,6 @@ workflows:
           requires:
             - setup
             - pytorch_windows_vs2017_14.16_py36_cuda10.1_build
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
       - pytorch_windows_build:
           name: pytorch_windows_vs2019_py36_cuda10.1_build
           cuda_version: "10"
@@ -1838,6 +1827,11 @@ workflows:
           use_cuda: "1"
           requires:
             - setup
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
       - pytorch_windows_test:
           name: pytorch_windows_vs2019_py36_cuda10.1_test1
           test_name: pytorch-windows-test1
@@ -1850,6 +1844,11 @@ workflows:
           requires:
             - setup
             - pytorch_windows_vs2019_py36_cuda10.1_build
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
       - pytorch_windows_test:
           name: pytorch_windows_vs2019_py36_cuda10.1_test2
           test_name: pytorch-windows-test2
@@ -1862,6 +1861,11 @@ workflows:
           requires:
             - setup
             - pytorch_windows_vs2019_py36_cuda10.1_build
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
       - setup
       - pytorch_linux_build:
           name: pytorch_linux_xenial_py3_5_build
