@@ -1,5 +1,6 @@
 #include <ATen/CUDAGenerator.h>
 #include <c10/cuda/CUDAFunctions.h>
+#include <ATen/Utils.h>
 
 namespace at {
 
@@ -61,8 +62,8 @@ Generator createCUDAGenerator(DeviceIndex device_index) {
   }
   TORCH_CHECK(idx >= 0 && idx < num_gpus, "The device_index is invalid.");
   auto gen = make_generator<CUDAGenerator>(idx);
-  gen.get<CUDAGenerator>()->set_current_seed(default_rng_seed_val);
-  gen.get<CUDAGenerator>()->set_philox_offset_per_thread(0);
+  check_generator<CUDAGenerator>(gen)->set_current_seed(default_rng_seed_val);
+  check_generator<CUDAGenerator>(gen)->set_philox_offset_per_thread(0);
   return gen;
 }
 
@@ -102,7 +103,7 @@ uint64_t CUDAGenerator::current_seed() const {
  * in getNonDeterministicRandom is unified for both CPU and CUDA
  */
 uint64_t CUDAGenerator::seed() {
-  auto random = detail::getNonDeterministicRandom(true);
+  auto random = c10::detail::getNonDeterministicRandom(true);
   this->set_current_seed(random);
   return random;
 }

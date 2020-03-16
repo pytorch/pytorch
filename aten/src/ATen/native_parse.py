@@ -48,7 +48,7 @@ def type_argument_translations(arg):
     # "Generator x = nullptr". See [temp translations].
     if t == 'Generator?' and default == 'None':
         t = 'Generator'
-        default = 'nullptr'
+        default = 'nullptr'  # TODO(pbelevich): replace with {}
     # Enables Generator? by translating to legacy Generator*.
     elif t == "Generator?":
         t = 'Generator'

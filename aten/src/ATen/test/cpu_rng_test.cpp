@@ -24,15 +24,17 @@ struct TestCPUGenerator : public c10::GeneratorImpl {
   uint64_t seed() override { throw std::runtime_error("not implemented"); }
   TestCPUGenerator* clone_impl() const override { throw std::runtime_error("not implemented"); }
 
+  static DeviceType device_type() { return DeviceType::CPU; }
+
   uint64_t value_;
 };
 
 Tensor& random_(Tensor& self, Generator generator) {
-  return at::native::templates::random_impl<native::templates::cpu::RandomKernel, TestCPUGenerator*>(self, generator);
+  return at::native::templates::random_impl<native::templates::cpu::RandomKernel, TestCPUGenerator>(self, generator);
 }
 
 Tensor& random_from_to(Tensor& self, int64_t from, optional<int64_t> to, Generator generator) {
-  return at::native::templates::random_from_to_impl<native::templates::cpu::RandomFromToKernel, TestCPUGenerator*>(self, from, to, generator);
+  return at::native::templates::random_from_to_impl<native::templates::cpu::RandomFromToKernel, TestCPUGenerator>(self, from, to, generator);
 }
 
 Tensor& random_to(Tensor& self, int64_t to, Generator generator) {
@@ -108,7 +110,7 @@ TEST_F(RNGTest, Cauchy) {
 
   auto expected = torch::empty_like(actual);
   auto iter = TensorIterator::nullary_op(expected);
-  native::templates::cpu::cauchy_kernel(iter, median, sigma, gen.get<TestCPUGenerator>());
+  native::templates::cpu::cauchy_kernel(iter, median, sigma, check_generator<TestCPUGenerator>(gen));
 
   ASSERT_TRUE(torch::allclose(actual, expected));
 }

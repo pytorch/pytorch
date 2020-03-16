@@ -32,11 +32,11 @@ TEST(CPUGenerator, TestCloning) {
   // Note that we don't allow cloning of other
   // generator states into default generators.
   auto gen1 = at::detail::createCPUGenerator();
-  gen1.get<CPUGenerator>()->random(); // advance gen1 state
-  gen1.get<CPUGenerator>()->random();
+  check_generator<CPUGenerator>(gen1)->random(); // advance gen1 state
+  check_generator<CPUGenerator>(gen1)->random();
   auto gen2 = at::detail::createCPUGenerator();
-  gen2 = gen1->clone();
-  ASSERT_EQ(gen1.get<CPUGenerator>()->random(), gen2.get<CPUGenerator>()->random());
+  gen2 = Generator(gen1->clone());
+  ASSERT_EQ(check_generator<CPUGenerator>(gen1)->random(), check_generator<CPUGenerator>(gen2)->random());
 }
 
 void thread_func_get_engine_op(CPUGenerator* generator) {
@@ -54,19 +54,19 @@ TEST(CPUGenerator, TestMultithreadingGetEngineOperator) {
   auto gen2 = at::detail::createCPUGenerator();
   {
     std::lock_guard<std::mutex> lock(gen1->mutex_);
-    gen2 = gen1->clone(); // capture the current state of default generator
+    gen2 = Generator(gen1->clone()); // capture the current state of default generator
   }
-  std::thread t0{thread_func_get_engine_op, gen1.get<CPUGenerator>()};
-  std::thread t1{thread_func_get_engine_op, gen1.get<CPUGenerator>()};
-  std::thread t2{thread_func_get_engine_op, gen1.get<CPUGenerator>()};
+  std::thread t0{thread_func_get_engine_op, check_generator<CPUGenerator>(gen1)};
+  std::thread t1{thread_func_get_engine_op, check_generator<CPUGenerator>(gen1)};
+  std::thread t2{thread_func_get_engine_op, check_generator<CPUGenerator>(gen1)};
   t0.join();
   t1.join();
   t2.join();
   std::lock_guard<std::mutex> lock(gen2->mutex_);
-  gen2.get<CPUGenerator>()->random();
-  gen2.get<CPUGenerator>()->random();
-  gen2.get<CPUGenerator>()->random();
-  ASSERT_EQ(gen1.get<CPUGenerator>()->random(), gen2.get<CPUGenerator>()->random());
+  check_generator<CPUGenerator>(gen2)->random();
+  check_generator<CPUGenerator>(gen2)->random();
+  check_generator<CPUGenerator>(gen2)->random();
+  ASSERT_EQ(check_generator<CPUGenerator>(gen1)->random(), check_generator<CPUGenerator>(gen2)->random());
 }
 
 TEST(CPUGenerator, TestGetSetCurrentSeed) {
@@ -111,7 +111,7 @@ TEST(CPUGenerator, TestRNGForking) {
   auto current_gen = at::detail::createCPUGenerator();
   {
     std::lock_guard<std::mutex> lock(default_gen->mutex_);
-    current_gen = default_gen->clone(); // capture the current state of default generator
+    current_gen = Generator(default_gen->clone()); // capture the current state of default generator
   }
   auto target_value = at::randn({1000});
   // Dramatically alter the internal state of the main generator

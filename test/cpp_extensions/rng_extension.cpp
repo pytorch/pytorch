@@ -8,8 +8,8 @@
 
 using namespace at;
 
-struct TestCPUGenerator : public GeneratorImpl {
-  TestCPUGenerator(uint64_t value) : GeneratorImpl{Device(DeviceType::CPU), DispatchKeySet(DispatchKey::CustomRNGKeyId)}, value_(value) { }
+struct TestCPUGenerator : public c10::GeneratorImpl {
+  TestCPUGenerator(uint64_t value) : c10::GeneratorImpl{Device(DeviceType::CPU), DispatchKeySet(DispatchKey::CustomRNGKeyId)}, value_(value) { }
   ~TestCPUGenerator() = default;
   uint32_t random() { return value_; }
   uint64_t random64() { return value_; }
@@ -18,15 +18,17 @@ struct TestCPUGenerator : public GeneratorImpl {
   uint64_t seed() override { throw std::runtime_error("not implemented"); }
   TestCPUGenerator* clone_impl() const override { throw std::runtime_error("not implemented"); }
 
+  static DeviceType device_type() { return DeviceType::CPU; }
+
   uint64_t value_;
 };
 
 Tensor& random_(Tensor& self, Generator generator) {
-  return at::native::templates::random_impl<native::templates::cpu::RandomKernel, TestCPUGenerator*>(self, generator);
+  return at::native::templates::random_impl<native::templates::cpu::RandomKernel, TestCPUGenerator>(self, generator);
 }
 
 Tensor& random_from_to(Tensor& self, int64_t from, optional<int64_t> to, Generator generator) {
-  return at::native::templates::random_from_to_impl<native::templates::cpu::RandomFromToKernel, TestCPUGenerator*>(self, from, to, generator);
+  return at::native::templates::random_from_to_impl<native::templates::cpu::RandomFromToKernel, TestCPUGenerator>(self, from, to, generator);
 }
 
 Tensor& random_to(Tensor& self, int64_t to, Generator generator) {

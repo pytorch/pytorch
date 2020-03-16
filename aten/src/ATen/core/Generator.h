@@ -53,26 +53,35 @@ namespace at {
 struct CAFFE2_API Generator {
   Generator() {}
 
-  Generator(c10::GeneratorImpl* g) { this->impl_ = std::shared_ptr<c10::GeneratorImpl>(g); }
-  Generator& operator=(c10::GeneratorImpl* g) { this->impl_ = std::shared_ptr<c10::GeneratorImpl>(g); return *this; }
-
-  Generator(std::shared_ptr<c10::GeneratorImpl> g) { this->impl_ = g; }
-  Generator& operator=(std::shared_ptr<c10::GeneratorImpl> g) { this->impl_ = g; return *this; }
-
-  bool operator==(const Generator& that) const {
-    return (!(this->impl_) && !(that.impl_)) || (this->impl_ == that.impl_);
+  explicit Generator(std::shared_ptr<c10::GeneratorImpl> gen_impl)
+   : impl_(std::move(gen_impl)) {
+    if (impl_.get() == nullptr) {
+      throw std::runtime_error("GeneratorImpl with nullptr is not supported");
+    }
   }
 
-  bool operator!=(const Generator& that) const {
-    return !((*this) == that);
+  // TODO(pbelevich): delete this after replace Generator generator = nullptr with {}
+  Generator(c10::GeneratorImpl* gen_impl)
+   : impl_(std::shared_ptr<c10::GeneratorImpl>(gen_impl)) {}
+
+  Generator(const Generator&) = default;
+  Generator(Generator&&) = default;
+
+  Generator& operator=(const Generator& x) & {
+    impl_ = x.impl_;
+    return *this;
+  }
+  Generator& operator=(Generator&& x) & {
+    impl_ = std::move(x.impl_);
+    return *this;
   }
 
-  bool operator==(c10::GeneratorImpl* g) const {
-    return this->impl_ && this->impl_.get() == g;
+  bool operator==(const Generator& rhs) const {
+    return (!(this->impl_) && !(rhs.impl_)) || (this->impl_ == rhs.impl_);
   }
 
-  bool operator!=(c10::GeneratorImpl* g) const {
-    return !((*this) == g);
+  bool operator!=(const Generator& rhs) const {
+    return !((*this) == rhs);
   }
 
   bool defined() const {
@@ -82,9 +91,6 @@ struct CAFFE2_API Generator {
   c10::GeneratorImpl* operator->() const { return impl_.get(); }
 
   c10::GeneratorImpl* get() const { return impl_.get(); }
-
-  template<typename T>
-  T* get() { return dynamic_cast<T*>(impl_.get()); }
 
  private:
   std::shared_ptr<c10::GeneratorImpl> impl_;
@@ -96,3 +102,4 @@ Generator make_generator(Args&&... args) {
 }
 
 } // namespace at
+
