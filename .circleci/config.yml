@@ -534,7 +534,7 @@ jobs:
             echo "DOCKER_IMAGE: "${DOCKER_IMAGE}
             time docker pull ${DOCKER_IMAGE} >/dev/null
             export id=$(docker run --cap-add=SYS_PTRACE -t -d ${DOCKER_IMAGE})
-            docker cp C:\Users\circleci\project\. $id:C:\pytorch\
+            docker cp C:\\Users\\circleci\\project\\. $id:C:\\pytorch\\
             docker exec -i "$id" sh /c/pytorch/ci_build_script.sh
   pytorch_windows_test:
     <<: *pytorch_windows_params
