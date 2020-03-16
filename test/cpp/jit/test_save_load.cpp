@@ -10,7 +10,6 @@
 
 namespace torch {
 namespace jit {
-using namespace script;
 
 void testSaveExtraFilesHook() {
   // no secrets

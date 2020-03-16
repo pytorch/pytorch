@@ -43,7 +43,7 @@ graph():
       -> (%50, %tot.3)
   return (%tot)
 )IR";
-  script::parseIR(input, graph.get());
+  parseIR(input, graph.get());
   EliminateDeadCode(graph);
   // Check that dead code elimin
   testing::FileCheck().run(input, *graph);
