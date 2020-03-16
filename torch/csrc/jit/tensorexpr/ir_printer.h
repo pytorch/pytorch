@@ -2,9 +2,9 @@
 
 #include <iostream>
 
-#include "torch/csrc/jit/tensorexpr/ir.h"
-#include "torch/csrc/jit/tensorexpr/ir_visitor.h"
-#include "torch/csrc/jit/tensorexpr/unique_name_manager.h"
+#include <torch/csrc/jit/tensorexpr/ir.h>
+#include <torch/csrc/jit/tensorexpr/ir_visitor.h>
+#include <torch/csrc/jit/tensorexpr/unique_name_manager.h>
 
 namespace torch {
 namespace jit {
@@ -48,6 +48,7 @@ class TORCH_API IRPrinter : public IRVisitor {
   void visit(const Allocate* v) override;
   void visit(const Free* v) override;
   void visit(const Cond* v) override;
+  void visit(const LinearForm* v) override;
 
   std::ostream& os() {
     return printer_os_;
@@ -83,25 +84,18 @@ TORCH_API std::ostream& operator<<(std::ostream& stream, const ExprHandle&);
 TORCH_API std::ostream& operator<<(std::ostream& stream, const Stmt&);
 TORCH_API std::ostream& operator<<(std::ostream& stream, Stmt*);
 
+TORCH_API void print(const Expr* expr);
+TORCH_API void print(const Stmt* stmt);
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
 
 namespace std {
 
-using torch::jit::tensorexpr::ExprHandle;
+using torch::jit::tensorexpr::Expr;
 using torch::jit::tensorexpr::Stmt;
 
-inline std::string to_string(const ExprHandle& expr) {
-  std::ostringstream oss;
-  oss << expr;
-  return oss.str();
-}
-
-inline std::string to_string(Stmt* stmt) {
-  std::ostringstream oss;
-  oss << stmt;
-  return oss.str();
-}
-
-}; // namespace std
+TORCH_API std::string to_string(const Expr* expr);
+TORCH_API std::string to_string(const Stmt* stmt);
+} // namespace std
