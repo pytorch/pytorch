@@ -139,6 +139,32 @@ graph(%input_quant, %dim, %r_scale, %r_zero_point, %r_dtype):
          %r_quant = quantized::cat(%input_quant, %dim, %r_scale, %r_zero_point)
          return (%r_quant) )";
 
+  std::string add = R"(
+graph(%a_quant, %b_quant, %alpha, %scale, %zero_point, %dtype):
+         %a_dequant = aten::dequantize(%a_quant)
+         %b_dequant = aten::dequantize(%b_quant)
+         %r_add = aten::add(%a_dequant, %b_dequant, %alpha)
+         %r = aten::quantize_per_tensor(%r_add, %scale, %zero_point, %dtype)
+         return (%r) )";
+
+  // TODO: add %dtype after when https://github.com/pytorch/pytorch/issues/34351
+  // is fixed
+  std::string quantized_add = R"(
+graph(%a_quant, %b_quant, %alpha, %scale, %zero_point, %dtype):
+         %r_add = quantized::add(%a_quant, %b_quant, %scale, %zero_point)
+         return (%r_add) )";
+
+  std::string inplace_add = R"(
+graph(%a_quant, %b_quant, %alpha, %scale, %zero_point, %dtype):
+         %alpha = prim::Constant[value=1]()
+         %a_dequant = aten::dequantize(%a_quant)
+         %b_dequant = aten::dequantize(%b_quant)
+         %r_add = aten::add_(%a_dequant, %b_dequant, %alpha)
+         %r = aten::quantize_per_tensor(%r_add, %scale, %zero_point, %dtype)
+         return (%r) )";
+
+  // We don't have quantized inplace add right now
+
   return {
     {conv2d, quantized_conv2d},
     {conv2d_relu, quantized_conv2d_relu},
@@ -150,6 +176,8 @@ graph(%input_quant, %dim, %r_scale, %r_zero_point, %r_dtype):
     {add_relu, quantized_add_relu},
     {add_inplace_relu, quantized_add_relu},
     {cat, quantized_cat},
+    {add, quantized_add},
+    {inplace_add, quantized_add},
   };
 
 }
