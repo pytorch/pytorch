@@ -1,4 +1,3 @@
-
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/ir_visitor.h>
@@ -123,7 +122,7 @@ class HashProvider : public IRVisitor {
         v,
         hash_combine(
             hashOf(v->lhs()),
-            v->compare_select_op(),
+            (int)v->compare_select_op(),
             hashOf(v->rhs()),
             hashOf(v->ret_val1()),
             hashOf(v->ret_val2())));

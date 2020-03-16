@@ -12,7 +12,7 @@ namespace jit {
 namespace tensorexpr {
 
 enum CompareSelectOperation {
-  kEQ,
+  kEQ = 0,
   kGT,
   kGE,
   kLT,
