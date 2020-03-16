@@ -6,7 +6,6 @@
 #include <c10/util/TypeTraits.h>
 
 namespace torch {
-namespace jit {
 
 namespace detail {
 
@@ -69,7 +68,7 @@ template <
 typename c10::guts::infer_function_traits_t<Functor>::return_type
 call_torchbind_method_from_stack(
     Functor& functor,
-    Stack& stack,
+    jit::Stack& stack,
     std::index_sequence<ivalue_arg_indices...>) {
   (void)(stack); // when sizeof...(ivalue_arg_indices) == 0, this argument would
                  // be unused and we have to silence the compiler warning.
@@ -88,7 +87,7 @@ call_torchbind_method_from_stack(
 
 template <class Functor, bool AllowDeprecatedTypes>
 typename c10::guts::infer_function_traits_t<Functor>::return_type
-call_torchbind_method_from_stack(Functor& functor, Stack& stack) {
+call_torchbind_method_from_stack(Functor& functor, jit::Stack& stack) {
   constexpr size_t num_ivalue_args =
       c10::guts::infer_function_traits_t<Functor>::number_of_parameters;
   return call_torchbind_method_from_stack<Functor, AllowDeprecatedTypes>(
@@ -100,7 +99,7 @@ struct BoxedProxy;
 
 template <class RetType, class Func>
 struct BoxedProxy {
-  void operator()(Stack& stack, Func& func) {
+  void operator()(jit::Stack& stack, Func& func) {
     auto retval = call_torchbind_method_from_stack<Func, false>(func, stack);
     constexpr size_t num_ivalue_args =
         c10::guts::infer_function_traits_t<Func>::number_of_parameters;
@@ -111,19 +110,23 @@ struct BoxedProxy {
 
 template <class Func>
 struct BoxedProxy<void, Func> {
-  void operator()(Stack& stack, Func& func) {
+  void operator()(jit::Stack& stack, Func& func) {
     call_torchbind_method_from_stack<Func, false>(func, stack);
     constexpr size_t num_ivalue_args =
         c10::guts::infer_function_traits_t<Func>::number_of_parameters;
     torch::jit::drop(stack, num_ivalue_args);
-    stack.emplace_back(IValue());
+    stack.emplace_back(c10::IValue());
   }
 };
 
 } // namespace detail
 
 TORCH_API void registerCustomClass(at::ClassTypePtr class_type);
-TORCH_API void registerCustomClassMethod(std::shared_ptr<Function> method);
+TORCH_API void registerCustomClassMethod(std::shared_ptr<jit::Function> method);
 
-} // namespace jit
+namespace jit {
+using ::torch::registerCustomClass;
+using ::torch::registerCustomClassMethod;
+}
+
 } // namespace torch

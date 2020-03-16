@@ -226,7 +226,7 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
 
     .. note:: The input quantization parameters propagate to the output.
 
-    .. note:: Only 2D input is supported for quantized inputs
+    .. note:: Only 2D/3D input is supported for quantized inputs
 
     .. note:: Only the following modes are supported for the quantized inputs:
 

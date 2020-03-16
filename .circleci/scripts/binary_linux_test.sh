@@ -36,7 +36,7 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
   fi
   retry conda install -yq future numpy protobuf six
   if [[ "$DESIRED_CUDA" != 'cpu' ]]; then
-    # DESIRED_CUDA is in format cu90 or cu100
+    # DESIRED_CUDA is in format cu90 or cu102
     if [[ "${#DESIRED_CUDA}" == 4 ]]; then
       cu_ver="${DESIRED_CUDA:2:1}.${DESIRED_CUDA:3}"
     else

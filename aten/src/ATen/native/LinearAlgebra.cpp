@@ -28,6 +28,11 @@ static inline std::tuple<Tensor, Tensor> _lu_det_P_diag_U(const Tensor& self) {
   auto n = self.size(-1);
   auto num_exchanges = (at::arange(1, n + 1, pivs.options()) != pivs).sum(-1, /*keepdim=*/false, /*dtype=*/self.scalar_type()).fmod_(2);
   auto u_diagonal = lu.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1);
+
+  // We have to manually set the diagonal to 0 due to an issue with MAGMA's getrf_batched routine
+  if (self.dim() > 2 && self.is_cuda()) {
+    u_diagonal.index_put_(infos.nonzero_numpy(), at::zeros({}, self.options()));
+  }
   return std::tuple<Tensor, Tensor>(num_exchanges.mul_(-2).add_(1), u_diagonal);
 }
 
@@ -247,7 +252,11 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
   if (self_or_result.numel() == 0) {
     return self_or_result;
   } else if (contraction_size == 0) {
-    return self_or_result.zero_();
+    if (is_bmm_out) {
+      return self_or_result.zero_();
+    } else {
+      return self_or_result.mul_(beta);
+    }
   }
 
   auto batch_items_contiguous_or_transposed = [&](const Tensor& t) {

@@ -3,6 +3,7 @@
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/MemoryAccess.cuh>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/core/Array.h>
 
 using namespace at::native;
 using namespace at::native::memory;
@@ -44,41 +45,46 @@ TEST(TestLoops, HasSameArgTypes) {
 TEST(TestVectorizedMemoryAccess, CanVectorizeUpTo) {
   char *ptr = reinterpret_cast<char *>(buffer1);
 
-  ASSERT_EQ(can_vectorize_up_to<bool>(ptr), 4);
-  ASSERT_EQ(can_vectorize_up_to<int8_t>(ptr), 4);
-  ASSERT_EQ(can_vectorize_up_to<int16_t>(ptr), 4);
-  ASSERT_EQ(can_vectorize_up_to<int>(ptr), 4);
-  ASSERT_EQ(can_vectorize_up_to<int64_t>(ptr), 4);
+  ASSERT_EQ(memory::can_vectorize_up_to<bool>(ptr), 4);
+  ASSERT_EQ(memory::can_vectorize_up_to<int8_t>(ptr), 4);
+  ASSERT_EQ(memory::can_vectorize_up_to<int16_t>(ptr), 4);
+  ASSERT_EQ(memory::can_vectorize_up_to<int>(ptr), 4);
+  ASSERT_EQ(memory::can_vectorize_up_to<int64_t>(ptr), 4);
 
-  ASSERT_EQ(can_vectorize_up_to<bool>(ptr + 1), 1);
-  ASSERT_EQ(can_vectorize_up_to<int8_t>(ptr + 1), 1);
+  ASSERT_EQ(memory::can_vectorize_up_to<bool>(ptr + 1), 1);
+  ASSERT_EQ(memory::can_vectorize_up_to<int8_t>(ptr + 1), 1);
 
-  ASSERT_EQ(can_vectorize_up_to<bool>(ptr + 2), 2);
-  ASSERT_EQ(can_vectorize_up_to<int8_t>(ptr + 2), 2);
-  ASSERT_EQ(can_vectorize_up_to<int16_t>(ptr + 2), 1);
+  ASSERT_EQ(memory::can_vectorize_up_to<bool>(ptr + 2), 2);
+  ASSERT_EQ(memory::can_vectorize_up_to<int8_t>(ptr + 2), 2);
+  ASSERT_EQ(memory::can_vectorize_up_to<int16_t>(ptr + 2), 1);
 
-  ASSERT_EQ(can_vectorize_up_to<bool>(ptr + 4), 4);
-  ASSERT_EQ(can_vectorize_up_to<int8_t>(ptr + 4), 4);
-  ASSERT_EQ(can_vectorize_up_to<int16_t>(ptr + 4), 2);
-  ASSERT_EQ(can_vectorize_up_to<int>(ptr + 4), 1);
+  ASSERT_EQ(memory::can_vectorize_up_to<bool>(ptr + 4), 4);
+  ASSERT_EQ(memory::can_vectorize_up_to<int8_t>(ptr + 4), 4);
+  ASSERT_EQ(memory::can_vectorize_up_to<int16_t>(ptr + 4), 2);
+  ASSERT_EQ(memory::can_vectorize_up_to<int>(ptr + 4), 1);
 
-  ASSERT_EQ(can_vectorize_up_to<bool>(ptr + 8), 4);
-  ASSERT_EQ(can_vectorize_up_to<int8_t>(ptr + 8), 4);
-  ASSERT_EQ(can_vectorize_up_to<int16_t>(ptr + 8), 4);
-  ASSERT_EQ(can_vectorize_up_to<int>(ptr + 8), 2);
-  ASSERT_EQ(can_vectorize_up_to<int64_t>(ptr + 8), 1);
+  ASSERT_EQ(memory::can_vectorize_up_to<bool>(ptr + 8), 4);
+  ASSERT_EQ(memory::can_vectorize_up_to<int8_t>(ptr + 8), 4);
+  ASSERT_EQ(memory::can_vectorize_up_to<int16_t>(ptr + 8), 4);
+  ASSERT_EQ(memory::can_vectorize_up_to<int>(ptr + 8), 2);
+  ASSERT_EQ(memory::can_vectorize_up_to<int64_t>(ptr + 8), 1);
 }
 
 // The following kernel copy values by using vectorized policies
 // defined in `ATen/native/cuda/MemoryAccess.cuh`
 template <typename scalar_t, int vec_size>
 __global__ void vectorized_copy(scalar_t *dst, scalar_t *src) {
-  using vectorized = policies::vectorized<vec_size>;
-  auto policy = vectorized();
+  using array_t = at::detail::Array<char*, 2>;
+  array_t data;
+  data[0] = reinterpret_cast<char *>(dst);
+  data[1] = reinterpret_cast<char *>(src);
+  int idx = blockIdx.x;
+  using vectorized = policies::vectorized<vec_size, array_t>;
+  auto policy = vectorized(data);
   scalar_t buf[thread_work_size];
   auto accessor = [&](int index) -> scalar_t & { return buf[index]; };
-  policy.load(accessor, src + 256 * blockIdx.x);
-  policy.store(accessor, dst + 256 * blockIdx.x);
+  policy.load_single_arg(accessor, src + 256 * blockIdx.x);
+  policy.store(buf, idx);
 }
 
 TEST(TestVectorizedMemoryAccess, CopyKernel) {
