@@ -7,25 +7,31 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 namespace torch {
-class CustomClassHolder : public c10::intrusive_ptr_target {};
 namespace jit {
-using ::torch::CustomClassHolder;
 struct Function;
 struct CompilationUnit;
 struct Module;
 } // namespace jit
 } // namespace torch
 namespace c10 {
+struct ClassType;
+using ClassTypePtr = std::shared_ptr<ClassType>;
+} // namespace c10
+
+namespace torch {
+struct CustomClassHolder : public c10::intrusive_ptr_target {};
+namespace jit {
+using ::torch::CustomClassHolder;
+} // namespace jit
+} // namespace torch
+
+namespace c10 {
 template<class Key, class Value> class Dict;
 template<class T> class List;
 struct IValue;
-struct ClassType;
 struct Type;
 class RRefInterface;
 using TypePtr = std::shared_ptr<Type>;
-
-struct ClassType;
-using ClassTypePtr = std::shared_ptr<ClassType>;
 
 namespace ivalue {
 struct Tuple;
@@ -207,13 +213,24 @@ struct CAFFE2_API IValue final {
   /// @private [doxygen private]
   c10::intrusive_ptr<caffe2::Blob> toBlob() const &;
 
-  // Capsule
-  IValue(intrusive_ptr<torch::CustomClassHolder> blob);
+  // Capsule. Capsule is an internal implementation detail
+  // of custom C++ classes. No new callsites of these APIs should
+  // be introduced.
+  static inline IValue make_capsule(intrusive_ptr<torch::CustomClassHolder> blob);
   bool isCapsule() const {
     return Tag::Capsule == tag;
   }
   c10::intrusive_ptr<torch::CustomClassHolder> toCapsule() &&;
   c10::intrusive_ptr<torch::CustomClassHolder> toCapsule() const &;
+
+  // Custom C++ classes
+  template <typename T, std::enable_if_t<std::is_base_of<torch::CustomClassHolder, T>::value, int> = 0>
+  IValue(intrusive_ptr<T> custom_class);
+  bool isCustomClass() const;
+  template <typename T>
+  c10::intrusive_ptr<T> toCustomClass() &&;
+  template <typename T>
+  c10::intrusive_ptr<T> toCustomClass() const &;
 
   // Tuple
   IValue(c10::intrusive_ptr<ivalue::Tuple> v);
