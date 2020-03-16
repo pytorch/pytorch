@@ -104,7 +104,7 @@ class AttributePropagator {
   void insertMutableAttr(
       const std::string& name,
       const IValue& attr,
-      ModulePtr attrModule) {
+      const ModulePtr& attrModule) {
     if (AliasDb::mutableType(attr.type())) {
       preservedAttrs_.insert(attr);
     } else {
@@ -155,7 +155,8 @@ class AttributePropagator {
                 n->kind() == prim::GetAttr ? "attribute: " + name + " in %" +
                         n->output()->debugName() + " has inplace writer"
                                            : "attribute: " + name + " is set");
-            insertMutableAttr(name, attr, attrModule._ivalue());
+            auto mptr = attrModule._ivalue();
+            insertMutableAttr(name, attr, mptr);
           }
         }
       }
