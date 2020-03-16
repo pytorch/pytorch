@@ -221,11 +221,14 @@ or will be allocated.
 
 Possible values are:
 
-- torch.contiguous_format:
-  Tensor will be allocated in dense non-overlapping memory C order.
+- ``torch.contiguous_format``:
+  Tensor is or will be  allocated in dense non-overlapping memory. Strides represented by values in decreasing order.
 
-- torch.channels_last:
-  Tensor will be allocated in dense non-overlapping memory 
+- ``torch.channels_last``:
+  Tensor is or will be  allocated in dense non-overlapping memory. Strides represented by values in 
+  ``strides[0] > strides[2] > strides[3] > strides[1] == 1`` aka NHWC order. 
 
-- torch.preserve_format:
-  Used in functions like `clone` to preserve memory format of the input tensor. 
+- ``torch.preserve_format``:
+  Used in functions like `clone` to preserve the memory format of the input tensor. If input tensor is 
+  allocated in dense non-overlapping memory, the output tensor strides will be copied from the input. 
+  Otherwise output strides will follow ``torch.contiguous_format``

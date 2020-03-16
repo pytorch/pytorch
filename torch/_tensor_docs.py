@@ -9,11 +9,9 @@ def add_docstr_all(method, docstr):
     add_docstr(getattr(torch._C._TensorBase, method), docstr)
 
 common_args = parse_kwargs("""
-    memory_format (:class:`torch.memory_format`, optional): COMMON_ARGS_PLACEHOLDER. 
-        Default: ``torch.preserve_format``.
+    memory_format (:class:`torch.memory_format`, optional): the desired memory format of 
+        returned Tensor. Default: ``torch.preserve_format``.
 """)
-
-# print(common_args)
 
 new_common_args = parse_kwargs("""
     size (int...): a list, tuple, or :class:`torch.Size` of integers defining the
@@ -755,13 +753,13 @@ add_docstr_all('contiguous',
                r"""
 contiguous(memory_format=torch.contiguous_format) -> Tensor
 
-Returns a contiguous tensor containing the same data as :attr:`self` tensor. If
-:attr:`self` tensor is contiguous, this function returns the :attr:`self`
-tensor.
+Returns a contiguous in memory tensor containing the same data as :attr:`self` tensor. If
+:attr:`self` tensor is already in the specified memory format, this function returns the 
+:attr:`self` tensor.
 
 Args: 
-    memory_format (:class:`torch.memory_format`, optional): CONT_MEM_FORMAT_PLACEHOLDER. 
-        Default: ``torch.contiguous_format``.
+    memory_format (:class:`torch.memory_format`, optional): the desired memory format of 
+        returned Tensor. Default: ``torch.contiguous_format``.
 """)
 
 add_docstr_all('copy_',
@@ -1526,11 +1524,12 @@ add_docstr_all('is_contiguous',
                r"""
 is_contiguous(memory_format=torch.contiguous_format) -> bool
 
-Returns True if :attr:`self` tensor is contiguous in memory in order specified by memory format.
+Returns True if :attr:`self` tensor is contiguous in memory in the order specified 
+by memory format.
 
 Args: 
-    memory_format (:class:`torch.memory_format`, optional): IS_ONT_MEM_FORMAT_PLACEHOLDER. 
-        Default: ``torch.contiguous_format``.
+    memory_format (:class:`torch.memory_format`, optional): Specifies memory allocation 
+        order. Default: ``torch.contiguous_format``.
 """)
 
 add_docstr_all('is_pinned',

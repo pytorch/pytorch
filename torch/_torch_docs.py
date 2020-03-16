@@ -70,8 +70,8 @@ factory_common_args = merge_dicts(common_args, parse_kwargs("""
         returned tensor. Default: ``False``.
     pin_memory (bool, optional): If set, returned tensor would be allocated in
         the pinned memory. Works only for CPU tensors. Default: ``False``.
-    memory_format (:class:`torch.memory_format`, optional): If set, specifies memory format. 
-        Default: ``torch.contiguous_format``.
+    memory_format (:class:`torch.memory_format`, optional): the desired memory format of 
+        returned Tensor. Default: ``torch.contiguous_format``.
 """))
 
 factory_like_common_args = parse_kwargs("""
@@ -86,8 +86,8 @@ factory_like_common_args = parse_kwargs("""
         returned tensor. Default: ``False``.
     pin_memory (bool, optional): If set, returned tensor would be allocated in
         the pinned memory. Works only for CPU tensors. Default: ``False``.
-    memory_format (:class:`torch.memory_format`, optional): FACTORY_LIKE_PLACEHOLDER If set, specifies memory format. 
-        Default: ``torch.preserve_format``.
+    memory_format (:class:`torch.memory_format`, optional): the desired memory format of 
+        returned Tensor. Default: ``torch.preserve_format``.
 """)
 
 factory_data_common_args = parse_kwargs("""
@@ -4564,7 +4564,8 @@ Example::
 
 add_docstr(torch.randint_like,
            r"""
-randint_like(input, low=0, high, dtype=None, layout=torch.strided, device=None, requires_grad=False, memory_format=torch.preserve_format) -> Tensor
+randint_like(input, low=0, high, dtype=None, layout=torch.strided, device=None, requires_grad=False,
+memory_format=torch.preserve_format) -> Tensor
 
 Returns a tensor with the same shape as Tensor :attr:`input` filled with
 random integers generated uniformly between :attr:`low` (inclusive) and
@@ -6516,7 +6517,8 @@ Example::
 
 add_docstr(torch.full_like,
            r"""
-full_like(input, fill_value, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False, memory_format=torch.preserve_format) -> Tensor
+full_like(input, fill_value, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False,
+memory_format=torch.preserve_format) -> Tensor
 
 Returns a tensor with the same size as :attr:`input` filled with :attr:`fill_value`.
 ``torch.full_like(input, fill_value)`` is equivalent to
