@@ -813,7 +813,7 @@ void setRecordSourceLocation(void (*v)(Node*)) {
 }
 
 void defaultWarn(const std::string& str) {
-  AT_WARN(str);
+  TORCH_WARN(str);
 }
 std::atomic<warn_fn_type> warn_callback{defaultWarn};
 
