@@ -7,7 +7,8 @@
 
 #include <ATen/core/UndefinedTensorImpl.h>
 #include <c10/util/intrusive_ptr.h>
-#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
+#if defined(EXPOSE_C2_OPS) || \
+    !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
 #include "ATen/core/Tensor.h"
 #include <ATen/core/grad_mode.h>
 #endif
@@ -119,10 +120,11 @@ class CAFFE2_API Tensor final {
    * The tensor will share the same instance (data, strides, sizes, etc) but
    * a different subset of APIs would be available
    */
-#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
-  explicit Tensor(at::Tensor tensor)
-      : impl_(std::move(tensor.impl_)) {
-    enforce_invariants();
+#if defined(EXPOSE_C2_OPS) || \
+    !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
+    explicit Tensor(at::Tensor tensor)
+        : impl_(std::move(tensor.impl_)) {
+      enforce_invariants();
   }
 
   explicit operator at::Tensor() const& {
@@ -196,7 +198,8 @@ class CAFFE2_API Tensor final {
    */
   void CopyFrom(const Tensor& src, bool async = false) {
     // TODO: only check `!impl_->requires_grad()` after Variable and Tensor are merged
-#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
+#if defined(EXPOSE_C2_OPS) || \
+    !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
     AT_ASSERT(!(impl_->requires_grad() && at::GradMode::is_enabled()));
 #endif
     AT_ASSERTM(

@@ -397,6 +397,9 @@ void THCTensor_(indexFill)(THCState *state, THCTensor *dst, int dim, THCudaLongT
 
 void THCTensor_(indexSelect)(THCState *state, THCTensor *dst, THCTensor *src, int dim, THCudaLongTensor *indices)
 {
+#if defined(THC_REAL_IS_BFLOAT16) && !defined(__HIP_PLATFORM_HCC__)
+  TORCH_CHECK(false, "indexSelect not suppported with BFloat16");
+#else
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, dst, src, indices));
 
   dim = at::maybe_wrap_dim(dim, src);
@@ -533,6 +536,7 @@ void THCTensor_(indexSelect)(THCState *state, THCTensor *dst, THCTensor *src, in
 
 #undef SMALL_INDEX
 #undef LARGE_INDEX
+#endif // THC_REAL_IS_BFLOAT16 && !__HIP_PLATFORM_HCC__
 }
 
 
