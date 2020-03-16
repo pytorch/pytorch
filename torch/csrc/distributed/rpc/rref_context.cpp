@@ -539,6 +539,11 @@ std::shared_ptr<torch::utils::Future<bool>> RRefContext::
   return future;
 }
 
+void RRefContext::clearRecordedPendingRRefsOnError() {
+  userTable_.clear();
+  recording = false;
+}
+
 void RRefContext::finishForkRequest(const ForkId& forkId, worker_id_t parent) {
   delPendingUser(forkId);
   auto fm = agent_->send(

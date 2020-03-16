@@ -68,9 +68,40 @@ std::unique_ptr<RpcCommandBase> deserializePythonRpcCommand(
   return pythonRpc ? std::move(pythonRpc) : std::move(rpc);
 }
 
+// When request message has autograd info, processMessage() will set up valid
+// current context id properly. This struct is used to clean up current context
+// id after processMessage() is done.
+struct ClearAutogradContextGuard {
+  ClearAutogradContextGuard() = default;
+  ~ClearAutogradContextGuard() {
+    clear();
+  }
+
+  void clear() {
+    auto& autogradContainer = autograd::DistAutogradContainer::getInstance();
+    autogradContainer.clearCurrentContext();
+  }
+};
+
 } // anonymous namespace
 
 using namespace torch::distributed::autograd;
+
+Message RequestCallbackImpl::handleError(
+    const std::exception& e,
+    const MessageType messageType,
+    int64_t messageId) const {
+  LOG(ERROR) << "Received error while processing request type "
+             << messageType << ": " << e.what();
+  // Adding node information to the error here since all processed RPC
+  // requests should be going through this function.
+  std::string errorMsg = c10::str(
+      "Error on Node ",
+      DistAutogradContainer::getInstance().getWorkerId(),
+      ": ",
+      e.what());
+  return createExceptionResponse(messageId, errorMsg);
+}
 
 void RequestCallbackImpl::processRpc(
     RpcCommandBase& rpc,
@@ -419,29 +450,41 @@ void RequestCallbackImpl::processRpc(
 
 std::shared_ptr<FutureMessage> RequestCallbackImpl::processMessage(
     Message& request) const {
-  auto& rrefContext = RRefContext::getInstance();
-  rrefContext.recordThreadLocalPendingRRefs();
-  std::unique_ptr<RpcCommandBase> rpc =
-      deserializePythonRpcCommand(deserializeRequest(request), request.type());
-  auto rrefsReadyFuture = rrefContext.waitForThreadLocalPendingRRefs();
-
   // We need two futures here because it could pause twice when processing a
   // RPC message:
   //  1) waiting for all RRefs in the arguments to become confirmed;
   //  2) waiting for processRpc to finish.
   auto retFuture = std::make_shared<FutureMessage>();
-  rrefsReadyFuture->addCallback(
-      [this,
-       retFuture,
-       // std::function must be copyable, hence hae to cast the unique_ptr to
-       // a shared_ptr here.
-       rpc = (std::shared_ptr<RpcCommandBase>)std::move(rpc),
-       messageType = request.type(),
-       id = request.id()](
-          const bool& /*unused*/,
-          const c10::optional<utils::FutureError>& /*unused*/) {
-        processRpc(*rpc, messageType, id, retFuture);
-      });
+  auto& rrefContext = RRefContext::getInstance();
+  try {
+    rrefContext.recordThreadLocalPendingRRefs();
+    std::unique_ptr<RpcCommandBase> rpc =
+        deserializePythonRpcCommand(deserializeRequest(request), request.type());
+    auto rrefsReadyFuture = rrefContext.waitForThreadLocalPendingRRefs();
+
+    rrefsReadyFuture->addCallback(
+        [this,
+         retFuture,
+         // std::function must be copyable, hence hae to cast the unique_ptr to
+         // a shared_ptr here.
+         rpc = (std::shared_ptr<RpcCommandBase>)std::move(rpc),
+         messageType = request.type(),
+         id = request.id()](
+            const bool& /*unused*/,
+            const c10::optional<utils::FutureError>& /*unused*/) {
+          try {
+            // For a recv thread, current context id should be invalid outside
+            // processMessage().
+            ClearAutogradContextGuard guard;
+            processRpc(*rpc, messageType, id, retFuture);
+          } catch (std::exception& e) {
+            retFuture->markCompleted(handleError(e, messageType, id));
+          }
+        });
+  } catch (std::exception& e) {
+    retFuture->markCompleted(handleError(e, request.type(), request.id()));
+    rrefContext.clearRecordedPendingRRefsOnError();
+  }
   return retFuture;
 }
 

@@ -163,6 +163,11 @@ class TORCH_API RRefContext {
   // PendingUserState. If there is no pending UserRRefs, this method returns a
   // completed future.
   std::shared_ptr<torch::utils::Future<bool>> waitForThreadLocalPendingRRefs();
+  // Only call this function when there are errors during a recording session,
+  // and it is likely that waitForThreadLocalPendingRRefs() cannot be invoked
+  // properly.
+  // TODO: make this a context guard
+  void clearRecordedPendingRRefsOnError();
 
   void delUser(
       const worker_id_t owner,
