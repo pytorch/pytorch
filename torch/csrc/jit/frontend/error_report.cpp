@@ -5,7 +5,6 @@
 
 namespace torch {
 namespace jit {
-namespace script {
 
 // Avoid storing objects with destructor in thread_local for mobile build.
 #ifndef C10_MOBILE
@@ -72,6 +71,5 @@ const char* ErrorReport::what() const noexcept {
   return the_message.c_str();
 }
 
-} // namespace script
 } // namespace jit
 } // namespace torch

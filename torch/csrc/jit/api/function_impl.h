@@ -76,7 +76,7 @@ struct TORCH_API GraphFunction : public Function {
   }
 
   bool is_optimized() const {
-    AT_WARN(
+    TORCH_WARN(
         "GraphFunction::is_optimized() is deprecated and always returns true. "
         "Please use getGraphExecutorOptimize()");
     return true;

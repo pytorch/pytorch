@@ -6,7 +6,6 @@
 
 namespace torch {
 namespace jit {
-namespace script {
 
 using ObjectPtr = c10::intrusive_ptr<c10::ivalue::Object>;
 
@@ -61,6 +60,11 @@ struct TORCH_API Method {
   Function* function_;
 };
 
-} // namespace script
+namespace script {
+// We once had a `script::` namespace that was deleted. This is for backcompat
+// of the public API; new code should not use this type alias.
+using Method = ::torch::jit::Method;
+}
+
 } // namespace jit
 } // namespace torch

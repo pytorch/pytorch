@@ -434,6 +434,15 @@ if(USE_XNNPACK)
       "${CONFU_DEPENDENCIES_BINARY_DIR}/XNNPACK")
 
     set_property(TARGET XNNPACK PROPERTY POSITION_INDEPENDENT_CODE ON)
+    # Context: pthreadpool_get_threads_count implementation that is built in pytorch, uses
+    # implementation defined in caffe2/utils/threadpool/pthreadpool_impl.cc. This implementation
+    # assumes the the pthreadpool* passed is of type caffe2::ThradPool and thus does reinterpret cast.
+    # This is not valid when we create pthreadpool via caffe2::xnnpack_threadpool, which is of type
+    # compatible with new pthreadpool interface and is used in PT's XNNPACK integration.
+    # Thus all the calls for pthreadpool_get_threads_count originating from XNNPACK must be routed
+    # appropriately to pthreadpool_get_threads_count_xnnpack, which does not do the aforementioned
+    # casting to caffe2::ThradPool. Once the threadpools are unified, we will not need this.
+    target_compile_definitions(XNNPACK PRIVATE -Dpthreadpool_get_threads_count=pthreadpool_get_threads_count_xnnpack)
   endif()
 
   include_directories(SYSTEM ${XNNPACK_INCLUDE_DIR})

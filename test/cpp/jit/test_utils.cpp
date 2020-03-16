@@ -84,7 +84,7 @@ std::shared_ptr<Graph> build_lstm() {
       %22 : Tensor = aten::mul(%14, %21)
       return (%22, %20))IR";
   auto g = std::make_shared<Graph>();
-  torch::jit::script::parseIR(graph_string, g.get());
+  torch::jit::parseIR(graph_string, g.get());
   g->lint();
 
   return g;
