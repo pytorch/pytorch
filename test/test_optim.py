@@ -32,6 +32,10 @@ def drosenbrock(tensor):
 
 
 class TestOptim(TestCase):
+    def setUp(self):
+        super(TestOptim, self).setUp()
+        self.exact_dtype = True
+
     def _test_rosenbrock_sparse(self, constructor, scheduler_constructors=None,
                                 sparse_only=False):
         if scheduler_constructors is None:
@@ -514,6 +518,7 @@ class TestLRScheduler(TestCase):
         self.opt = SGD(
             [{'params': self.net.conv1.parameters()}, {'params': self.net.conv2.parameters(), 'lr': 0.5}],
             lr=0.05)
+        self.exact_dtype = True
 
     def test_error_when_getlr_has_epoch(self):
         class MultiStepLR(torch.optim.lr_scheduler._LRScheduler):
@@ -1418,7 +1423,6 @@ class TestLRScheduler(TestCase):
             result = [scheduler.get_last_lr() for scheduler in schedulers]
             [scheduler.step() for scheduler in schedulers]
             target = [[t[epoch] for t in targets]] * len(schedulers)
-            # print(target)
             for t, r in zip(target, result):
                 self.assertAlmostEqual(target, result,
                                        msg='LR is wrong in epoch {}: expected {}, got {}'.format(
