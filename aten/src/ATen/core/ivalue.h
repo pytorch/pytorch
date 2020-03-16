@@ -322,7 +322,7 @@ struct CAFFE2_API IValue final {
   c10::ArrayRef<IValue> toListRef() const;
 
   // Some template constructors of IValue calls another constructor recursively.
-  // This SNIFEAs the underhood ctro exists.
+  // This SNIFEAs the called constructor exists.
   template<class T>
   using enable_if_recursive_ctor_exists =
       std::enable_if_t<std::is_constructible<IValue, T>::value, std::nullptr_t>;
