@@ -12,12 +12,12 @@ CudaFuserInterface* getFuserInterface() {
 
 bool isFusable(const Node* const node) {
   TORCH_CHECK(getFuserInterface()->fn_is_fusible_n_ != nullptr, "fn_is_fusible_n_ not initialized");
-  getFuserInterface()->fn_is_fusible_n_(node);
+  return getFuserInterface()->fn_is_fusible_n_(node);
 }
 
 bool isFusable(const Node* const fusion, const Node* const node) {
   TORCH_CHECK(getFuserInterface()->fn_is_fusible_n_n_ != nullptr, "fn_is_fusible_n_n_ not initialized");
-  getFuserInterface()->fn_is_fusible_n_n_(fusion, node);
+  return getFuserInterface()->fn_is_fusible_n_n_(fusion, node);
 }
 
 void compileFusionGroup(Node* fusion_node) {
