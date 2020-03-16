@@ -50,10 +50,10 @@ struct TORCH_API LBFGSParamState : public OptimizerCloneableParamState<LBFGSPara
   ~LBFGSParamState() = default;
 };
 
-class TORCH_API LBFGS : public Optimizer {
+class TORCH_API LBFGS : public LossClosureOptimizer {
  public:
    explicit LBFGS(std::vector<OptimizerParamGroup> param_groups,
-       LBFGSOptions defaults) : Optimizer(std::move(param_groups), std::make_unique<LBFGSOptions>(defaults)) {
+       LBFGSOptions defaults) : LossClosureOptimizer(std::move(param_groups), std::make_unique<LBFGSOptions>(defaults)) {
      TORCH_CHECK(param_groups_.size() == 1, "LBFGS doesn't support per-parameter options (parameter groups)");
      if (defaults.max_eval() == c10::nullopt) {
        auto max_eval_val = (defaults.max_iter() * 5) / 4;
