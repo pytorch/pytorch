@@ -482,6 +482,8 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/ir_printer.cpp
     ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/ir_visitor.cpp
     ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/kernel.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_codegen.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_jit.cpp
     ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/mem_arena.cpp
     ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/schedule.cpp
     ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/tensor.cpp
@@ -656,6 +658,13 @@ endif()
 
 add_library(torch_cpu ${Caffe2_CPU_SRCS})
 torch_compile_options(torch_cpu)  # see cmake/public/utils.cmake
+
+if (USE_LLVM AND LLVM_FOUND)
+  llvm_map_components_to_libnames(LLVM_LINK_LIBS
+    support core analysis executionengine instcombine
+    scalaropts transformutils native orcjit)
+  target_link_libraries(torch_cpu PRIVATE ${LLVM_LINK_LIBS})
+endif (LLVM_FOUND)
 
 # This is required for older versions of CMake, which don't allow
 # specifying add_library() without a list of source files
