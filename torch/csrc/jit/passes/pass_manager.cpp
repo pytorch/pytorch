@@ -55,15 +55,17 @@ void ClearAllPrePasses() {
   passes.erase(passes.begin(), passes.end());
 }
 
-template<typename DerivedType>
-GraphPassNameType PassManager<DerivedType>::name(GraphPassNameType PassName, bool set) {
+template <typename DerivedType>
+GraphPassNameType PassManager<DerivedType>::name(
+    GraphPassNameType PassName,
+    bool set) {
   static GraphPassNameType name = 0;
   if (set)
     name = PassName;
   return name;
 }
 
-template<typename DerivedType>
+template <typename DerivedType>
 bool PassManager<DerivedType>::isRegistered(bool flip_bit) {
   static bool val = false;
   if (flip_bit)
@@ -71,7 +73,7 @@ bool PassManager<DerivedType>::isRegistered(bool flip_bit) {
   return val;
 }
 
-template<typename DerivedType>
+template <typename DerivedType>
 void PassManager<DerivedType>::registerPass(GraphPass pass) {
   if (!isRegistered()) {
     // If we don't already have a registered pass, register pass
@@ -81,9 +83,9 @@ void PassManager<DerivedType>::registerPass(GraphPass pass) {
   }
 }
 
-template<typename DerivedType>
+template <typename DerivedType>
 void PassManager<DerivedType>::clearPass() {
-  //If the pass is registered, clear it and change isRegistered to false.
+  // If the pass is registered, clear it and change isRegistered to false.
   if (isRegistered()) {
     ClearPostPass pass(name());
     isRegistered(true);
