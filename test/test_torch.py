@@ -6002,6 +6002,59 @@ class TestTorchDeviceType(TestCase):
         input_ = layer_norm(input_.transpose(1, 2).contiguous()).contiguous()
         input_.sum().backward()
 
+    def test_future_div(self, device):
+        import torch
+
+        prev_div = torch.div
+        prev_tensor_div = torch.Tensor.div
+        prev_tensor_div_ = torch.Tensor.div_
+        prev_tensor_truediv = torch.Tensor.__truediv__
+
+        # Note: reload required since this test may be run multiple times
+        import torch.future_div
+        import importlib
+        importlib.reload(torch.future_div)
+
+        self.assertTrue(torch.div is torch.true_divide)
+        self.assertTrue(torch.Tensor.div is torch.Tensor.true_divide)
+        self.assertTrue(torch.Tensor.div_ is torch.Tensor.true_divide_)
+        self.assertTrue(torch.Tensor.__truediv__ is torch.Tensor.true_divide)
+
+        # Tests dense tensor behavior
+        t = torch.tensor((2,), device=device, dtype=torch.int)
+        d = torch.tensor((1,), device=device, dtype=torch.int)
+        o = torch.empty((2,), device=device, dtype=torch.int)
+        self.assertTrue((t / d).dtype, torch.get_default_dtype())
+        self.assertTrue((t / 2).dtype, torch.get_default_dtype())
+        self.assertTrue(torch.div(t, d).dtype, torch.get_default_dtype())
+        self.assertTrue(torch.div(t, 2).dtype, torch.get_default_dtype())
+        self.assertTrue(t.div(d).dtype, torch.get_default_dtype())
+        self.assertTrue(t.div(2).dtype, torch.get_default_dtype())
+        with self.assertRaises(RuntimeError):
+            t.div_(d)
+        with self.assertRaises(RuntimeError):
+            t.div_(2)
+        with self.assertRaises(RuntimeError):
+            torch.div(t, d, out=o)
+        with self.assertRaises(RuntimeError):
+            torch.div(t, 2, out=o)
+
+        # Tests sparse tensor behavior
+        s = (torch.rand((5,), device=device) * 10).to(torch.int).to_sparse()
+        o = (torch.empty((5,), device=device) * 10).to(torch.int).to_sparse()
+        self.assertTrue((s / 2).dtype, torch.get_default_dtype())
+        self.assertTrue(torch.div(s, 2).dtype, torch.get_default_dtype())
+        self.assertTrue(s.div(2).dtype, torch.get_default_dtype())
+        with self.assertRaises(RuntimeError):
+            s.div_(2)
+        with self.assertRaises(RuntimeError):
+            torch.div(s, 2, out=o)
+
+        # Undoes torch.future_div import
+        torch.div = prev_div
+        torch.Tensor.div = prev_tensor_div
+        torch.Tensor.div_ = prev_tensor_div_
+        torch.Tensor.__truediv__ = prev_tensor_truediv
 
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     @onlyCPU
@@ -15220,7 +15273,7 @@ _types = [
     torch.uint8
 ]
 
-# _types2 adds bfloat16 type to  _types only on ROCm. Should eventually be unified 
+# _types2 adds bfloat16 type to  _types only on ROCm. Should eventually be unified
 # with _types when bfloat16 bringup is complete on all platforms.
 _types2 = _types + [torch.bfloat16] if TEST_WITH_ROCM else _types
 
@@ -15370,6 +15423,16 @@ tensor_op_tests = [
     ('div', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-1),
     ('div', 'tensor', _small_3d,
         lambda t, d: [_small_3d(t, d, has_zeros=False)], 1e-1),
+    ('true_divide', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-1,
+        1e-5, 1e-5, _types, False),
+    ('true_divide', 'with_inplace', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-1,
+        1e-5, 1e-5, _float_types),
+    ('true_divide', 'tensor', _small_3d,
+        lambda t, d: [_small_3d(t, d, has_zeros=False)], 1e-1,
+        1e-5, 1e-5, _types, False),
+    ('true_divide', 'tensor_with_inplace', _small_3d,
+        lambda t, d: [_small_3d(t, d, has_zeros=False)], 1e-1,
+        1e-5, 1e-5, _float_types),
     ('pow', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-1, 1e-5, 1e-5, _float_types),
     ('pow', '1', _small_3d, lambda t, d: [_number(1., 1, t)], 1e-1),
     ('pow', '2', _small_3d, lambda t, d: [_number(2., 2, t)], 1e-1),

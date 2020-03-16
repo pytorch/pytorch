@@ -6172,6 +6172,8 @@ in floating point. Analogous to division in Python 3 and equivalent to
 :func:`torch.div` except when both inputs have bool or integer scalar types,
 in which case they are cast to the default (floating) scalar type before the division.
 
+Importing `torch.future_div` will make :func:`torch.div` perform true division.
+
 .. math::
     \text{{out}}_i = \frac{{\text{{dividend}}_i}}{{\text{{divisor}}}}
 

@@ -131,6 +131,10 @@ Tensor true_divide(const Tensor& self, const Tensor& divisor) {
   return iter.output();
 }
 
+Tensor& true_divide_(Tensor& self, const Tensor& divisor) {
+  return native::true_divide_out(self, self, divisor);
+}
+
 Tensor floor_divide(const Tensor& input, const Tensor& other) {
   Tensor out = input / other;
   return truncate(out);
@@ -696,8 +700,11 @@ Tensor& fmod_(Tensor& self, Scalar other) {
 }
 
 Tensor true_divide(const Tensor& self, Scalar divisor) {
-  return at::true_divide(self, wrapped_scalar_tensor(divisor)); // redispatch!
+  return self.true_divide(wrapped_scalar_tensor(divisor)); // redispatch!
 }
 
+Tensor& true_divide_(Tensor& self, Scalar divisor) {
+  return self.true_divide_(wrapped_scalar_tensor(divisor)); // redispatch!
 }
-}  // namespace at
+
+}}  // at::native
