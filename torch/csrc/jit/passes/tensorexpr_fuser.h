@@ -17,6 +17,9 @@ struct TORCH_API RegisterTensorExprFuser
   static void registerPass() {
     PassManager::registerPass(fuseTensorExprs);
   }
+  static void clearPass() {
+    PassManager::clearPass();
+  }
 };
 
 TORCH_API void setTensorExprFuserEnabled(bool val);
