@@ -210,3 +210,22 @@ Example::
     (1, 5)
 
 For more information on ``torch.sparse_coo`` tensors, see :ref:`sparse-docs`.
+
+torch.memory_format
+------------
+
+.. class:: torch.memory_format
+
+A :class:`torch.memory_format` is an object representing the memory format on which a :class:`torch.Tensor` is
+or will be allocated.
+
+Possible values are:
+
+- torch.contiguous_format:
+  Tensor will be allocated in dense non-overlapping memory C order.
+
+- torch.channels_last:
+  Tensor will be allocated in dense non-overlapping memory 
+
+- torch.preserve_format:
+  Used in functions like `clone` to preserve memory format of the input tensor. 
