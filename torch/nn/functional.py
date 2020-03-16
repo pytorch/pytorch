@@ -3765,7 +3765,7 @@ def multi_head_attention_in_projection(query, num_heads, in_proj_weight, in_proj
         num_heads (int): number of parallel heads used.
         in_proj_weight (Tensor): weight used for projection
         in_proj_bias (Tensor, optional): bias used for projection.
-    
+
     Shape:
         S is the sequence length, H is the number of attention heads, N is the
         batch size, P is the projection dimension, and E is the embedding
@@ -3793,15 +3793,15 @@ def multi_head_attention_in_projection(query, num_heads, in_proj_weight, in_proj
     return q
 
 
-def scaled_dot_product_attention(q,                     # type: Tensor
-                                 k,                     # type: Tensor
-                                 v,                     # type: Tensor
-                                 num_heads,             # type: int
-                                 add_zero_attn,         # type: bool
-                                 dropout_p,             # type: float
-                                 training=True,         # type: bool
-                                 key_padding_mask=None, # type: Optional[Tensor]
-                                 attn_mask=None,        # type: Optional[Tensor]
+def scaled_dot_product_attention(q,                         # type: Tensor
+                                 k,                         # type: Tensor
+                                 v,                         # type: Tensor
+                                 num_heads,                 # type: int
+                                 add_zero_attn,             # type: bool
+                                 dropout_p,                 # type: float
+                                 training=True,             # type: bool
+                                 key_padding_mask=None,     # type: Optional[Tensor]
+                                 attn_mask=None,            # type: Optional[Tensor]
                                  ):
     # type: (...) -> Tuple[Tensor, Tensor]
     r"""
@@ -3895,7 +3895,7 @@ def scaled_dot_product_attention(q,                     # type: Tensor
 
     attn_output_weights = softmax(attn_output_weights, dim=-1)
     attn_output_weights = dropout(attn_output_weights, p=dropout_p, training=training)
-    
+
     attn_output = torch.bmm(attn_output_weights, v)
     return attn_output, attn_output_weights
 
