@@ -437,8 +437,10 @@ class ScaledDotProduct(Module):
             length, H is the number of attention heads, N is the batch size,
             and P is the projection dimensionE is the head dimension.
         """
-        return F.scaled_dot_product_attention(query, key, value,
+        attn_output, attn_output_weights = F.scaled_dot_product_attention(
+            query, key, value,
             self.num_heads, self.add_zero_attn, self.dropout, self.training, key_padding_mask, attn_mask)
+        return attn_output, attn_output_weights
 
 
 class MultiheadAttentionOutProjection(Module):
