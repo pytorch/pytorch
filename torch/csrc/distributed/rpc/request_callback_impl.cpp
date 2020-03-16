@@ -31,23 +31,41 @@ namespace rpc {
 
 namespace {
 
-std::unique_ptr<RpcCommandBase> deserializePythonRpcCommand(
-    std::unique_ptr<RpcCommandBase> rpc,
+std::unique_ptr<RpcCommandBase> deserializePythonRpcCommandReference(
+    RpcCommandBase& rpc,
     const MessageType& messageType) {
   switch (messageType) {
     case MessageType::PYTHON_CALL: {
-      auto& pc = static_cast<PythonCall&>(*rpc);
+      auto& pc = static_cast<PythonCall&>(rpc);
       return std::make_unique<UnpickledPythonCall>(pc.serializedPyObj());
     }
     case MessageType::PYTHON_REMOTE_CALL: {
-      auto& prc = static_cast<PythonRemoteCall&>(*rpc);
+      auto& prc = static_cast<PythonRemoteCall&>(rpc);
       return std::make_unique<UnpickledPythonRemoteCall>(
           prc.serializedPyObj(), prc.retRRefId(), prc.retForkId());
     }
+    case MessageType::FORWARD_AUTOGRAD_REQ: {
+      // Deserialize the wrapped RPC if it contains Python UDF
+      auto& rwa = static_cast<autograd::RpcWithAutograd&>(rpc);
+      auto& wrappedRpc = rwa.wrappedRpc();
+      auto pythonRpc = deserializePythonRpcCommandReference(
+          wrappedRpc, rwa.wrappedMessageType());
+      if (pythonRpc) {
+        rwa.setWrappedRpc(std::move(pythonRpc));
+      }
+      return nullptr;
+    }
     default: {
-      return rpc;
+      return nullptr;
     }
   }
+}
+
+std::unique_ptr<RpcCommandBase> deserializePythonRpcCommand(
+    std::unique_ptr<RpcCommandBase> rpc,
+    const MessageType& messageType) {
+  auto pythonRpc = deserializePythonRpcCommandReference(*rpc, messageType);
+  return pythonRpc ? std::move(pythonRpc) : std::move(rpc);
 }
 
 } // anonymous namespace
@@ -313,16 +331,16 @@ void RequestCallbackImpl::processRpc(
 
       // Process the original RPC.
       auto wrappedMessageType = rpcWithAutograd.wrappedMessageType();
+      // Make an overall future for the wrapped response.
+      auto wrappedRpcResponseFuture = std::make_shared<FutureMessage>();
       // Kick off processing for the nested future and get a Future<T> to the
       // result.
-      std::shared_ptr<FutureMessage> wrappedRpcResponseFuture = nullptr;
       processRpc(
           rpcWithAutograd.wrappedRpc(),
           wrappedMessageType,
           messageId,
           wrappedRpcResponseFuture);
 
-      // Make an overall future for the wrapped response.
       auto fromWorkerId = rpcWithAutograd.fromWorkerId();
       // The original future needs to be marked as completed when the wrapped
       // one completes, with the autograd context information wrapped.
@@ -403,8 +421,8 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processMessage(
     Message& request) const {
   auto& rrefContext = RRefContext::getInstance();
   rrefContext.recordThreadLocalPendingRRefs();
-  std::unique_ptr<RpcCommandBase> rpc = deserializeRequest(request);
-  rpc = deserializePythonRpcCommand(std::move(rpc), request.type());
+  std::unique_ptr<RpcCommandBase> rpc =
+      deserializePythonRpcCommand(deserializeRequest(request), request.type());
   auto rrefsReadyFuture = rrefContext.waitForThreadLocalPendingRRefs();
 
   // We need two futures here because it could pause twice when processing a
