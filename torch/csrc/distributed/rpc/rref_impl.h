@@ -226,7 +226,7 @@ class TORCH_API RRef : public RRefInterface {
 
   RRef(worker_id_t ownerId, const RRefId& rrefId, TypePtr type);
 
-  RRefForkData fork() const;
+  virtual RRefForkData fork() const;
 
   const worker_id_t ownerId_;
   const RRefId rrefId_;
@@ -278,6 +278,8 @@ class TORCH_API UserRRef final : public RRef {
 
  private:
   friend class RRefContext;
+
+  RRefForkData fork() const override;
 
   const ForkId forkId_;
 
