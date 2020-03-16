@@ -1819,11 +1819,6 @@ class DistAutogradTest(RpcAgentTestFixture):
             for i in range(1000):
                 dist_autograd.backward(context_id, [loss], retain_graph=True)
 
-    @unittest.skipIf(
-        torch.testing._internal.dist_utils.TEST_CONFIG.rpc_backend_name
-        == "PROCESS_GROUP",
-        "Skipping this test temporarily, see https://github.com/pytorch/pytorch/issues/33208",
-    )
     @dist_init(clean_shutdown=False)
     def test_multiple_backward_with_errors(self):
         initialize_pg(self.init_method, self.rank, self.world_size)
