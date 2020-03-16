@@ -3819,9 +3819,9 @@ def multi_head_attention_forward(query,                           # type: Tensor
 
     if bias_k is not None and bias_v is not None:
         if static_k is None and static_v is None:
-            # bias shape after repeat: (1, N, P)
-            k = torch.cat([k, bias_k.repeat(1, bsz, 1).reshape(bsz * num_heads, 1, head_dim).transpose(0, 1)], dim=1)
-            v = torch.cat([v, bias_v.repeat(1, bsz, 1).reshape(bsz * num_heads, 1, head_dim).transpose(0, 1)], dim=1)
+            # bias start shape: (1, 1, P). bias target shape: (N * H, 1, P / H)
+            k = torch.cat([k, bias_k.reshape(num_heads, 1, head_dim).repeat(bsz, 1, 1)], dim=1)
+            v = torch.cat([v, bias_v.reshape(num_heads, 1, head_dim).repeat(bsz, 1, 1)], dim=1)
             if attn_mask is not None:
                 attn_mask = pad(attn_mask, (0, 1))
             if key_padding_mask is not None:
@@ -3945,10 +3945,12 @@ def scaled_dot_product_attention(q,                         # type: Tensor
                 q, k, v, num_heads, add_zero_attn, dropout_p,
                 training=training, key_padding_mask=key_padding_mask, attn_mask=attn_mask)
     batch_heads, tgt_len, head_dim = q.size()
-    assert q.size(0) == k.size(0) == v.size(0), "Dimension 0 of q, k, v must match"
+    assert q.size(0) == k.size(0) == v.size(0), "Dimension 0 of q, k, v must be equal."
     assert batch_heads % num_heads == 0, "Dimension 0 of q, k, v must be divisible by num_heads"
     bsz = batch_heads // num_heads
     assert k.size(1) == v.size(1), "Dimension 1 of k, v must match"
+    assert query.size(-1) == key.size(-1), "The head dimension of query must be equal to that of key"
+
     src_len = k.size(1)
 
     # Scale q
