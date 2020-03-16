@@ -3709,9 +3709,9 @@ def multi_head_attention_forward(query,                           # type: Tensor
         assert len1 == embed_dim and len2 == value.size(-1)
         v_proj_bias = in_proj_bias[embed_dim * 2:] if in_proj_bias is not None else None
 
-        q = multi_head_attention_in_projection(query, num_heads, q_proj_weight, q_proj_bias)
-        k = multi_head_attention_in_projection(key, num_heads, k_proj_weight, k_proj_bias)
-        v = multi_head_attention_in_projection(value, num_heads, v_proj_weight, v_proj_bias)
+        q = multi_head_attention_in_projection(query, num_heads, q_proj_weight_non_opt, q_proj_bias)
+        k = multi_head_attention_in_projection(key, num_heads, k_proj_weight_non_opt, k_proj_bias)
+        v = multi_head_attention_in_projection(value, num_heads, v_proj_weight_non_opt, v_proj_bias)
 
     if bias_k is not None and bias_v is not None:
         if static_k is None and static_v is None:
