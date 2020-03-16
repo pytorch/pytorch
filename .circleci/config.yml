@@ -506,7 +506,7 @@ jobs:
           no_output_timeout: "90m"
           command: |
             set -e
-            cat > ci_build_script.sh \<<EOL
+            cat > /c/Users/circleci/project/ci_build_script.sh \<<EOL
             # =================== The following code will be executed inside Docker container ===================
             set -ex
             export BUILD_ENVIRONMENT="$BUILD_ENVIRONMENT"
@@ -529,12 +529,13 @@ jobs:
 
             # =================== The above code will be executed inside Docker container ===================
             EOL
+            set -x
             export DOCKER_IMAGE=peterjc123/windows-cuda-container:v2.0.0
             echo "DOCKER_IMAGE: "${DOCKER_IMAGE}
             time docker pull ${DOCKER_IMAGE} >/dev/null
             export id=$(docker run --cap-add=SYS_PTRACE -t -d ${DOCKER_IMAGE})
-            docker cp . $id:C:\pytorch\
-            docker exec -i "$id" sh ./pytorch/ci_build_script.sh
+            docker cp C:\Users\circleci\project\. $id:C:\pytorch\
+            docker exec -i "$id" sh /c/pytorch/ci_build_script.sh
   pytorch_windows_test:
     <<: *pytorch_windows_params
     parameters:
