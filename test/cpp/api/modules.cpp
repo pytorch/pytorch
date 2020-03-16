@@ -3701,6 +3701,73 @@ TEST_F(ModulesTest, CrossMapLRN2d) {
   ASSERT_TRUE(output.allclose(expected));
 }
 
+TEST_F(ModulesTest, RNNCell) {
+  torch::manual_seed(0);
+  auto rnn = RNNCell(1, 2);
+  auto input = torch::randn({3, 1});
+  auto hx = torch::randn({3, 2});
+  auto output = rnn(input, hx);
+  auto expected = torch::tensor({{-0.5078,  0.4380},
+                                 {-0.7215,  0.2969},
+                                 {-0.1304,  0.0653}});
+  ASSERT_TRUE(torch::allclose(output, expected, 1e-05, 2e-04));
+
+  output = rnn(input);
+  expected = torch::tensor({{-0.0775,  0.6688},
+                            {-0.0734,  0.4759},
+                            {-0.0725,  0.4225}});
+  ASSERT_TRUE(torch::allclose(output, expected, 1e-05, 2e-04));
+}
+
+TEST_F(ModulesTest, LSTMCell) {
+  torch::manual_seed(0);
+  auto rnn = LSTMCell(1, 2);
+  auto input = torch::randn({3, 1});
+  auto hx = torch::randn({3, 2});
+  auto cx = torch::randn({3, 2});
+  auto output = rnn(input, std::make_tuple(hx, cx));
+  auto output_hx = std::get<0>(output);
+  auto output_cx = std::get<1>(output);
+  auto expected_hx = torch::tensor({{-0.2462,  0.0810},
+                                    {-0.2206,  0.1867},
+                                    {-0.0146,  0.0429}});
+  auto expected_cx = torch::tensor({{-0.4480,  0.1071},
+                                    {-0.6245,  0.2687},
+                                    {-0.0322,  0.0518}});
+  ASSERT_TRUE(torch::allclose(output_hx, expected_hx, 1e-05, 2e-04));
+  ASSERT_TRUE(torch::allclose(output_cx, expected_cx, 1e-05, 2e-04));
+
+  output = rnn(input);
+  output_hx = std::get<0>(output);
+  output_cx = std::get<1>(output);
+  expected_hx = torch::tensor({{-0.1331,  0.1634},
+                               {-0.1494,  0.2869},
+                               {-0.1428,  0.2263}});
+  expected_cx = torch::tensor({{-0.2679,  0.2180},
+                               {-0.3049,  0.3493},
+                               {-0.2896,  0.2853}});
+  ASSERT_TRUE(torch::allclose(output_hx, expected_hx, 1e-05, 2e-04));
+  ASSERT_TRUE(torch::allclose(output_cx, expected_cx, 1e-05, 2e-04));
+}
+
+TEST_F(ModulesTest, GRUCell) {
+  torch::manual_seed(0);
+  auto rnn = GRUCell(1, 2);
+  auto input = torch::randn({3, 1});
+  auto hx = torch::randn({3, 2});
+  auto output = rnn(input, hx);
+  auto expected = torch::tensor({{ 1.0243,  0.3227},
+                                 {-0.5659,  0.0330},
+                                 {-0.4030, -0.2800}});
+  ASSERT_TRUE(torch::allclose(output, expected, 1e-05, 2e-04));
+
+  output = rnn(input);
+  expected = torch::tensor({{-0.0085,  0.1095},
+                            {-0.1291,  0.2675},
+                            {-0.1339,  0.2725}});
+  ASSERT_TRUE(torch::allclose(output, expected, 1e-05, 2e-04));
+}
+
 TEST_F(ModulesTest, PrettyPrintLinear) {
   ASSERT_EQ(
       c10::str(Linear(3, 4)), "torch::nn::Linear(in_features=3, out_features=4, bias=true)");
@@ -4475,6 +4542,29 @@ TEST_F(ModulesTest, PrettyPrintMultiheadAttention) {
     "torch::nn::MultiheadAttention(\n  (out_proj): torch::nn::Linear(in_features=20, out_features=20, bias=true)\n)");
   ASSERT_EQ(c10::str(MultiheadAttention(MultiheadAttentionOptions(20, 10).bias(false))),
     "torch::nn::MultiheadAttention(\n  (out_proj): torch::nn::Linear(in_features=20, out_features=20, bias=false)\n)");
+}
+
+TEST_F(ModulesTest, PrettyPrintRNNCell) {
+  ASSERT_EQ(c10::str(RNNCell(20, 10)),
+    "torch::nn::RNNCell(20, 10)");
+  ASSERT_EQ(c10::str(RNNCell(RNNCellOptions(20, 10).bias(false).nonlinearity(torch::kTanh))),
+    "torch::nn::RNNCell(20, 10, bias=false)");
+  ASSERT_EQ(c10::str(RNNCell(RNNCellOptions(20, 10).bias(false).nonlinearity(torch::kReLU))),
+    "torch::nn::RNNCell(20, 10, bias=false, nonlinearity=kReLU)");
+}
+
+TEST_F(ModulesTest, PrettyPrintLSTMCell) {
+  ASSERT_EQ(c10::str(LSTMCell(20, 10)),
+    "torch::nn::LSTMCell(20, 10)");
+  ASSERT_EQ(c10::str(LSTMCell(LSTMCellOptions(20, 10).bias(false))),
+    "torch::nn::LSTMCell(20, 10, bias=false)");
+}
+
+TEST_F(ModulesTest, PrettyPrintGRUCell) {
+  ASSERT_EQ(c10::str(GRUCell(20, 10)),
+    "torch::nn::GRUCell(20, 10)");
+  ASSERT_EQ(c10::str(GRUCell(GRUCellOptions(20, 10).bias(false))),
+    "torch::nn::GRUCell(20, 10, bias=false)");
 }
 
 TEST_F(ModulesTest, PrettyPrintAdaptiveLogSoftmaxWithLoss) {

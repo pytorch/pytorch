@@ -70,13 +70,13 @@ struct TORCH_API CompilationUnit {
   }
 
   void set_optimized(bool o) {
-    AT_WARN(
+    TORCH_WARN(
         "CompilationUnit::set_optimized() is deprecated and has no effect. "
         "Please use setGraphExecutorOptimize()");
   }
 
    bool is_optimized() const {
-    AT_WARN(
+    TORCH_WARN(
         "CompilationUnit::is_optimized() is deprecated and always returns true. "
         "Please use getGraphExecutorOptimize()");
     return true;

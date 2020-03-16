@@ -73,17 +73,19 @@ __global__ void max_pool_forward_nchw(const int nthreads, const scalar_t* bottom
 
 template <typename scalar_t, typename accscalar_t>
 C10_LAUNCH_BOUNDS_1(CUDA_MAX_THREADS)
-__global__ void max_pool_forward_nhwc(const scalar_t* bottom_data,
+__global__ void max_pool_forward_nhwc(const scalar_t* bottom_data, const int nbatch, 
                                    const int channels, const int height,
                                    const int width, const int pooled_height, const int pooled_width,
                                    const int kernel_h, const int kernel_w, const int stride_h,
                                    const int stride_w, const int pad_h, const int pad_w,
                                    const int dilation_h, const int dilation_w,
-                                   const int in_stride_c, const int in_stride_h, const int in_stride_w,
+                                   const int in_stride_n, const int in_stride_c, 
+                                   const int in_stride_h, const int in_stride_w,
+                                   const int kernel_stride_C, const int kernel_size_C,
                                    scalar_t* top_data, int64_t* top_mask) {
   extern __shared__ int smem[];
   int *out_mask_cached = smem;
-  scalar_t *out_cached = reinterpret_cast<scalar_t*>(&out_mask_cached[channels*blockDim.y*blockDim.z]);
+  scalar_t *out_cached = reinterpret_cast<scalar_t*>(&out_mask_cached[kernel_size_C*blockDim.x*blockDim.y*blockDim.z]);
 
   // flattening cta for pre-computation & smem initialization;
   int thread_id = threadIdx.x + blockDim.x * (threadIdx.y + blockDim.y * threadIdx.z);
@@ -91,19 +93,23 @@ __global__ void max_pool_forward_nhwc(const scalar_t* bottom_data,
 
   // use shared memory to store temporary output value. This is simply to
   // reduce register usage.
-  for (int i = thread_id; i < channels*blockDim.y*blockDim.z; i+= block_size) {
+  for (int i = thread_id; i < kernel_size_C*blockDim.x*blockDim.y*blockDim.z; i+= block_size) {
     out_cached[i] = at::numeric_limits<scalar_t>::lower_bound();
     out_mask_cached[i] = 0;
   }
 
   __syncthreads();
 
-  top_data = top_data + blockIdx.x * pooled_height * pooled_width * channels;
-  top_mask = top_mask + blockIdx.x * pooled_height * pooled_width * channels;
-  bottom_data = bottom_data + blockIdx.x * channels * height * width;
+  int batch_id = blockIdx.x % nbatch; 
+  int channel_id = blockIdx.x / nbatch; 
+  int channel_offset = threadIdx.x + channel_id * blockDim.x; 
 
-  out_cached = &out_cached[(threadIdx.z * blockDim.y + threadIdx.y) * channels];
-  out_mask_cached = &out_mask_cached[(threadIdx.z * blockDim.y + threadIdx.y) * channels];
+  top_data = top_data + batch_id * pooled_height * pooled_width * channels;
+  top_mask = top_mask + batch_id * pooled_height * pooled_width * channels;
+  bottom_data = bottom_data + batch_id * in_stride_n;
+
+  out_cached = &out_cached[(threadIdx.z * blockDim.y + threadIdx.y) * kernel_size_C*blockDim.x];
+  out_mask_cached = &out_mask_cached[(threadIdx.z * blockDim.y + threadIdx.y) * kernel_size_C*blockDim.x];
 
   int oH = (pooled_height + gridDim.z-1) / gridDim.z;
   int oW = (pooled_width + gridDim.y-1) / gridDim.y;
@@ -113,10 +119,10 @@ __global__ void max_pool_forward_nhwc(const scalar_t* bottom_data,
   int oendW = ::min(ostartW+oW, pooled_width);
 
   for (int oh = ostartH; oh < oendH; oh+=blockDim.z) {
+    int hstart = oh * stride_h - pad_h;
+    int hend = min(hstart + (kernel_h - 1) * dilation_h + 1, height);
     for (int ow = ostartW; ow < oendW; ow+=blockDim.y) {
-      int hstart = oh * stride_h - pad_h;
       int wstart = ow * stride_w - pad_w;
-      int hend = min(hstart + (kernel_h - 1) * dilation_h + 1, height);
       int wend = min(wstart + (kernel_w - 1) * dilation_w + 1, width);
       while(hstart < 0)
         hstart += dilation_h;
@@ -124,23 +130,28 @@ __global__ void max_pool_forward_nhwc(const scalar_t* bottom_data,
         wstart += dilation_w;
       for (int ih = hstart; ih < hend; ih++) {
         for (int iw = wstart; iw < wend; iw++) {
+          int cached_index = threadIdx.x; 
           const scalar_t *ptr_input = bottom_data + ih * in_stride_h + iw * in_stride_w;
-          for(int c = threadIdx.x; c < channels; c+= blockDim.x) {
-            scalar_t val = ptr_input[c];
-            if ((scalar_cast<accscalar_t>(val) > out_cached[c]) || THCNumerics<scalar_t>::isnan(val)) {
-              out_cached[c] = scalar_cast<accscalar_t>(val);
-              out_mask_cached[c] = ih * width + iw;
+          for(int c = channel_offset; c < channels; c+= blockDim.x*kernel_stride_C) {
+            scalar_t val = ptr_input[c*in_stride_c];
+            if ((scalar_cast<accscalar_t>(val) > out_cached[cached_index]) || THCNumerics<scalar_t>::isnan(val)) {
+              out_cached[cached_index] = scalar_cast<accscalar_t>(val);
+              out_mask_cached[cached_index] = ih * width + iw;
             }
+            cached_index += blockDim.x; 
           }
         }
       }
       scalar_t *ptr_output_data = top_data + (oh * pooled_width + ow) * channels;
       int64_t *ptr_output_mask = top_mask + (oh * pooled_width + ow) * channels;
-      for(int c = threadIdx.x; c < channels; c+= blockDim.x) {
-        ptr_output_data[c] = out_cached[c];
-        ptr_output_mask[c] = out_mask_cached[c];
-        out_cached[c] = at::numeric_limits<scalar_t>::lower_bound();
-        out_mask_cached[c] = 0;
+
+      int cached_index = threadIdx.x; 
+      for(int c = channel_offset; c < channels; c+= blockDim.x*kernel_stride_C) {
+        ptr_output_data[c] = out_cached[cached_index];
+        ptr_output_mask[c] = out_mask_cached[cached_index];
+        out_cached[cached_index] = at::numeric_limits<scalar_t>::lower_bound();
+        out_mask_cached[cached_index] = 0;
+        cached_index += blockDim.x; 
       }
     }
   }
@@ -197,13 +208,15 @@ __global__ void max_pool_backward_nchw(const int nthreads, const scalar_t* top_d
 template <typename scalar_t, typename accscalar_t>
 C10_LAUNCH_BOUNDS_1(CUDA_MAX_THREADS)
 __global__ void max_pool_backward_nhwc(const int nthreads, const scalar_t* top_diff,
-                                    const int64_t* top_mask, const int num, const int channels,
+                                    const int64_t* top_mask, const int nbatch, const int channels,
                                     const int height, const int width, const int pooled_height,
                                     const int pooled_width, const int kernel_h, const int kernel_w,
                                     const int stride_h, const int stride_w, const int pad_h, const int pad_w,
                                     const int dilation_h, const int dilation_w,
                                     const int out_stride_c, const int out_stride_h, const int out_stride_w,
-                                    const int in_stride_c, const int in_stride_h, const int in_stride_w,
+                                    const int in_stride_n, const int in_stride_c, 
+                                    const int in_stride_h, const int in_stride_w,
+                                    const int kernel_stride_C, const int kernel_size_C, 
                                     scalar_t* bottom_diff) {
   extern __shared__ int smem[];
   scalar_t *out_cached = reinterpret_cast<scalar_t*>(smem);
@@ -211,15 +224,21 @@ __global__ void max_pool_backward_nhwc(const int nthreads, const scalar_t* top_d
   int thread_id = threadIdx.x + blockDim.x * (threadIdx.y + blockDim.y * threadIdx.z);
   int block_size = blockDim.x * blockDim.y * blockDim.z;
 
-  for (int i = thread_id; i < channels*blockDim.y*blockDim.z; i+= block_size) {
+  int batch_id = blockIdx.x % nbatch; 
+  int channel_id = blockIdx.x / nbatch; 
+  int channel_offset = threadIdx.x + channel_id * blockDim.x; 
+
+  for (int i = thread_id; i < kernel_size_C*blockDim.x*blockDim.y*blockDim.z; i+= block_size) {
     out_cached[i] = scalar_t(0.0);
   }
-  __syncthreads();
-  out_cached = &out_cached[(threadIdx.z * blockDim.y + threadIdx.y) * channels];
 
-  bottom_diff = bottom_diff + blockIdx.x * height * width * channels;
-  top_mask = top_mask + blockIdx.x * pooled_height * pooled_width * channels;
-  top_diff = top_diff + blockIdx.x * pooled_height * pooled_width * channels;
+  __syncthreads();
+
+  out_cached = &out_cached[(threadIdx.z * blockDim.y + threadIdx.y) * kernel_size_C*blockDim.x];
+
+  bottom_diff = bottom_diff + batch_id * height * width * channels;
+  top_mask = top_mask + batch_id * pooled_height * pooled_width * channels;
+  top_diff = top_diff + batch_id * pooled_height * pooled_width * channels;
 
   int iH = (height + gridDim.z-1) / gridDim.z;
   int iW = (width + gridDim.y-1) / gridDim.y;
@@ -229,34 +248,43 @@ __global__ void max_pool_backward_nhwc(const int nthreads, const scalar_t* top_d
   int iendW = ::min(istartW+iW, width);
 
   for (int ih = istartH; ih < iendH; ih+=blockDim.z) {
+    int phstart = p_start(ih, pad_h, kernel_h, dilation_h, stride_h);
+    int phend = p_end(ih, pad_h, pooled_height, stride_h);
     for (int iw = istartW; iw < iendW; iw+=blockDim.y) {
-      int phstart = p_start(ih, pad_h, kernel_h, dilation_h, stride_h);
-      int phend = p_end(ih, pad_h, pooled_height, stride_h);
       int pwstart = p_start(iw, pad_w, kernel_w, dilation_w, stride_w);
       int pwend = p_end(iw, pad_w, pooled_width, stride_w);
+      int index_shift = ih * width + iw; 
       if ((phstart + 1 != phend) || (pwstart + 1 != pwend)) {
         for(int oh = phstart; oh < phend; ++oh) {
           for(int ow = pwstart; ow < pwend; ++ow) {
+            int cached_index = threadIdx.x; 
             const int64_t* ptr_top_mask = top_mask + oh * out_stride_h + ow * out_stride_w;
-            for (int c = threadIdx.x; c < channels; c += blockDim.x) {
-              if (ptr_top_mask[c] == ih * width + iw) {
-                out_cached[c] += scalar_cast<scalar_t>(top_diff[oh * out_stride_h + ow * out_stride_w + c]);
+            for (int c = channel_offset; c < channels; c += blockDim.x*kernel_stride_C) {
+              if (ptr_top_mask[c*out_stride_c] == index_shift) {
+                out_cached[cached_index] += 
+                  scalar_cast<scalar_t>(top_diff[oh * out_stride_h + ow * out_stride_w + c*out_stride_c]);
               }
+              cached_index += blockDim.x; 
             }
           }
         }
-        scalar_t *ptr_bottom_diff = bottom_diff + (ih * width + iw) * channels;
-        for (int c = threadIdx.x; c < channels; c += blockDim.x) {
-          ptr_bottom_diff[c] = out_cached[c];
+        scalar_t *ptr_bottom_diff = bottom_diff + index_shift * channels;
+        int cached_index = threadIdx.x; 
+        for (int c = channel_offset; c < channels; c += blockDim.x*kernel_stride_C) {
+          ptr_bottom_diff[c] = out_cached[cached_index];
           out_cached[c] = scalar_t(0.0);
+          cached_index += blockDim.x; 
         }
       } else {
         const int64_t* ptr_top_mask = top_mask + phstart * out_stride_h + pwstart * out_stride_w;
-        scalar_t *ptr_bottom_diff = bottom_diff + (ih * width + iw) * channels;
-        for (int c = threadIdx.x; c < channels; c += blockDim.x) {
-          if (ptr_top_mask[c] == ih * width + iw) {
-            ptr_bottom_diff[c] = scalar_cast<scalar_t>(top_diff[phstart * out_stride_h + pwstart * out_stride_w + c]);
+        scalar_t *ptr_bottom_diff = bottom_diff + index_shift * channels;
+        int cached_index = threadIdx.x; 
+        for (int c = channel_offset; c < channels; c += blockDim.x*kernel_stride_C) {
+          if (ptr_top_mask[c*out_stride_c] == index_shift) {
+            ptr_bottom_diff[c] = 
+              scalar_cast<scalar_t>(top_diff[phstart * out_stride_h + pwstart * out_stride_w + c*out_stride_c]);
           }
+          cached_index += blockDim.x; 
         }
       }
     }
@@ -330,6 +358,7 @@ void max_pool2d_with_indices_out_cuda_template(
 
   Tensor input = input_.contiguous(memory_format);
 
+  const int64_t in_stride_n = input.stride(-4);
   const int64_t in_stride_c = input.stride(-3);
   const int64_t in_stride_h = input.stride(-2);
   const int64_t in_stride_w = input.stride(-1);
@@ -366,7 +395,13 @@ void max_pool2d_with_indices_out_cuda_template(
             block_x = std::min<int>(
                 maxThreadsDim[0], std::min<int>(lastPow2(nInputPlane), max_threads / block_y / block_z));
             const dim3 block(block_x, block_y, block_z);
-            int grid_x = nbatch;
+
+            int kernel_stride_C = cuda::ATenCeilDiv(
+                safe_downcast<int, int64_t>(nInputPlane), block_x * 4); 
+            int kernel_size_C = cuda::ATenCeilDiv(
+                safe_downcast<int, int64_t>(nInputPlane), block_x * kernel_stride_C); 
+
+            int grid_x = nbatch*kernel_stride_C;
             int grid_y = std::min<int>(
                 at::cuda::getCurrentDeviceProperties()->maxGridSize[1],
                 cuda::ATenCeilDiv(safe_downcast<int, int64_t>(outputWidth), block_y*BLOCK_STRIDE));
@@ -375,12 +410,17 @@ void max_pool2d_with_indices_out_cuda_template(
                 cuda::ATenCeilDiv(safe_downcast<int, int64_t>(outputHeight), block_z*BLOCK_STRIDE));
             const dim3 grid(grid_x, grid_y, grid_z);
 
+            size_t shmem_size = (kernel_size_C * block_x*block_y*block_z) * (sizeof(int) + sizeof(scalar_t));
+            AT_ASSERT(shmem_size <= at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock); 
+
             max_pool_forward_nhwc<scalar_t, scalar_t>
-            <<<grid, block, nInputPlane * block_y * block_z * (sizeof(int) + sizeof(scalar_t)), at::cuda::getCurrentCUDAStream()>>>(
-                input_data,
+            <<<grid, block, shmem_size, at::cuda::getCurrentCUDAStream()>>>(
+                input_data, nbatch, 
                     nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth,
                     kH, kW, dH, dW, padH, padW, dilationH, dilationW,
-                    in_stride_c, in_stride_h, in_stride_w,
+                    in_stride_n, in_stride_c, 
+                    in_stride_h, in_stride_w,
+                    kernel_stride_C, kernel_size_C, 
                     output_data, indices_data);
             break;
           }
@@ -401,9 +441,7 @@ void max_pool2d_with_indices_out_cuda_template(
     }
   );
 
-  TORCH_CHECK(cudaGetLastError() == cudaSuccess,
-     "max_pool2d_with_indices_out_cuda_frame failed with error code ",
-     cudaGetLastError());
+  AT_CUDA_CHECK(cudaGetLastError()); 
 
   if(input.ndimension() == 3) {
     output.resize_({nInputPlane, outputHeight, outputWidth});
@@ -468,6 +506,7 @@ void max_pool2d_with_indices_backward_out_cuda_template(
   const int64_t inputHeight = input.size(-2);
   const int64_t inputWidth = input.size(-1);
 
+  const int64_t in_stride_n = input.stride(-4);
   const int64_t in_stride_c = input.stride(-3);
   const int64_t in_stride_h = input.stride(-2);
   const int64_t in_stride_w = input.stride(-1);
@@ -520,7 +559,13 @@ void max_pool2d_with_indices_backward_out_cuda_template(
             block_x = std::min<int>(
                 maxThreadsDim[0], std::min<int>(lastPow2(nInputPlane), max_threads / block_y / block_z));
             const dim3 block(block_x, block_y, block_z);
-            int grid_x = nbatch;
+
+            int kernel_stride_C = cuda::ATenCeilDiv(
+                safe_downcast<int, int64_t>(nInputPlane), block_x * 4);
+            int kernel_size_C = cuda::ATenCeilDiv(
+                safe_downcast<int, int64_t>(nInputPlane), block_x * kernel_stride_C);
+
+            int grid_x = nbatch*kernel_stride_C;
             int grid_y = std::min<int>(
                 at::cuda::getCurrentDeviceProperties()->maxGridSize[1],
                 cuda::ATenCeilDiv(safe_downcast<int, int64_t>(inputWidth), block_y*BLOCK_STRIDE));
@@ -529,8 +574,14 @@ void max_pool2d_with_indices_backward_out_cuda_template(
                 cuda::ATenCeilDiv(safe_downcast<int, int64_t>(inputHeight), block_z*BLOCK_STRIDE));
             const dim3 grid(grid_x, grid_y, grid_z);
 
+            size_t shmem_size = (kernel_size_C * block_x*block_y*block_z) * sizeof(scalar_t);
+            AT_ASSERT(shmem_size <= at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock); 
+
+            // The backward kernel is launched on input instead output. 
+            // If it is launched on output layer, atomic_add would not provide much benefit on FP16. 
+            // Please check comments at https://github.com/pytorch/pytorch/pull/34519. 
             max_pool_backward_nhwc<scalar_t, accscalar_t>
-            <<<grid, block, nInputPlane * block_y * block_z * sizeof(scalar_t), at::cuda::getCurrentCUDAStream()>>>(
+            <<<grid, block, shmem_size, at::cuda::getCurrentCUDAStream()>>>(
                 count,
                     gradOutput_data,
                     indices_data,
@@ -538,7 +589,9 @@ void max_pool2d_with_indices_backward_out_cuda_template(
                     nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth,
                     kH, kW, dH, dW, padH, padW, dilationH, dilationW,
                     out_stride_c, out_stride_h, out_stride_w,
-                    in_stride_c, in_stride_h, in_stride_w,
+                    in_stride_n, in_stride_c, 
+                    in_stride_h, in_stride_w,
+                    kernel_stride_C, kernel_size_C, 
                     gradInput_data);
             break;
           }
@@ -571,9 +624,7 @@ void max_pool2d_with_indices_backward_out_cuda_template(
     }
   );
 
-  TORCH_CHECK(cudaGetLastError() == cudaSuccess,
-    "fractional_max_pool2d_backward_out_cuda failed with error code ",
-    cudaGetLastError());
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 } // namespace

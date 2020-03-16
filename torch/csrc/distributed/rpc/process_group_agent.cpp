@@ -327,13 +327,19 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
   // to our receiving queue.
   if (to.id_ == (worker_id_t)pg_->getRank()) {
     threadPool_.run(std::bind(
-        [this](const Message& message) {
+        [this, future](const Message& message) {
           sendCounts_.increment(pg_->getRank());
           // Unlike the other cases, need to add a tensor deleter, since the
           // data outlives the scope of this function. It's shared_ptr<> due
           // to c++11 lambda capture limitations with unique_ptr<>.
-          auto payload = std::make_unique<std::string>(
+          std::unique_ptr<std::string> payload;
+          try {
+            payload = std::make_unique<std::string>(
               wireSerialize(message.payload(), message.tensors()));
+          } catch (std::exception& e) {
+            future->setError(e.what());
+            return;
+          }
           const char* data = payload->data();
           size_t len = payload->length();
           std::string* delete_when_done = payload.release();
@@ -404,13 +410,16 @@ void ProcessGroupAgent::enqueueSend(SendWork work) {
         try {
           handleSend(work);
         } catch (std::exception& e) {
+          auto errorStr = c10::str(
+              "Encountered exception in ProcessGroupAgent::enqueueSend: ",
+              e.what());
+          auto exceptionMsg =
+              rpc::createExceptionResponse(work.message_, errorStr);
           if (work.message_.isRequest()) {
-            std::ostringstream ss;
-            ss << "Encountered exception in ProcessGroupAgent::enqueueSend: "
-               << e.what();
-            auto exceptionMsg =
-                rpc::createExceptionResponse(work.message_, ss.str());
             markFutureWithError(exceptionMsg);
+          } else if (work.message_.isResponse()) {
+            // Try sending the error along.
+            handleSend(SendWork(work.to_, std::move(exceptionMsg)));
           }
         }
       },
@@ -665,11 +674,12 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
     futureCV_.notify_all();
 
     for (const auto& timedOutFuture : timedOutFutures) {
-      std::ostringstream ss;
-      ss << "RPC ran for more than " << timedOutFuture.timeout_.count()
-         << " milliseconds and timed out.";
+      std::string errorStr = c10::str(
+          "RPC ran for more than ",
+          timedOutFuture.timeout_.count(),
+          " milliseconds and timed out.");
       const auto exceptionMsg = createExceptionResponse(
-          Message({}, {}, MessageType::EXCEPTION), ss.str());
+          Message({}, {}, MessageType::EXCEPTION), errorStr);
       if (!timedOutFuture.future_->hasError()) {
         --clientActiveCalls_;
         timedOutFuture.future_->setError(std::string(
