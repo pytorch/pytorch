@@ -43,7 +43,6 @@ namespace jit {
   _(MemoryDAG)                         \
   _(IRParser)                          \
   _(ConstantPooling)                   \
-  _(NetDefConverter)                   \
   _(THNNConv)                          \
   _(ATenNativeBatchNorm)               \
   _(NoneSchemaMatch)                   \
@@ -67,6 +66,7 @@ namespace jit {
   _(ProfiledTensorTypeHashing)         \
   _(ScriptObject)                      \
   _(SaveExtraFilesHook)                \
+  _(TypeTags)                          \
   _(DCE)                               \
   _(CustomFusionNestedBlocks)          \
   _(ClassDerive)                       \
@@ -78,11 +78,11 @@ namespace jit {
   _(LiteInterpreterConv)               \
   _(LiteInterpreterInline)             \
   _(LiteInterpreterTuple)              \
-  _(LiteInterpreterPrimOverload)       \
   _(LiteInterpreterUpsampleNearest2d)  \
   _(CommonAncestor)                    \
   _(AutogradSymbols)                   \
   _(MobileTypeParser)                  \
+  _(LiteInterpreterBuiltinFunction)    \
   _(LiteInterpreterPrim)               \
   _(LiteInterpreterLoadOrigJit)        \
   _(LiteInterpreterWrongMethodName)    \
