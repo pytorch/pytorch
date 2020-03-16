@@ -8,7 +8,22 @@ class SubTensor(torch.Tensor):
     pass
 
 
-class WithTorchFunction(torch.Tensor):
+class WithTorchFunction:
+    def __init__(self, data, requires_grad=False):
+        if isinstance(data, torch.Tensor):
+            self._tensor = data
+            return
+
+        self._tensor = torch.Tensor(data, requires_grad)
+
+    def __torch_function__(self, func, args=(), kwargs=None):
+        if kwargs is None:
+            kwargs = {}
+
+        return WithTorchFunction(args[0]._tensor + args[1]._tensor)
+
+
+class SubWithTorchFunction(torch.Tensor):
     def __torch_function__(self, func, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
