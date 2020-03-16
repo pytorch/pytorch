@@ -29,6 +29,8 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+using namespace torch::distributed::autograd;
+
 namespace {
 
 std::unique_ptr<RpcCommandBase> deserializePythonRpcCommandReference(
@@ -46,7 +48,7 @@ std::unique_ptr<RpcCommandBase> deserializePythonRpcCommandReference(
     }
     case MessageType::FORWARD_AUTOGRAD_REQ: {
       // Deserialize the wrapped RPC if it contains Python UDF
-      auto& rwa = static_cast<autograd::RpcWithAutograd&>(rpc);
+      auto& rwa = static_cast<RpcWithAutograd&>(rpc);
       auto& wrappedRpc = rwa.wrappedRpc();
       auto pythonRpc = deserializePythonRpcCommandReference(
           wrappedRpc, rwa.wrappedMessageType());
@@ -78,21 +80,19 @@ struct ClearAutogradContextGuard {
   }
 
   void clear() {
-    auto& autogradContainer = autograd::DistAutogradContainer::getInstance();
+    auto& autogradContainer = DistAutogradContainer::getInstance();
     autogradContainer.clearCurrentContext();
   }
 };
 
 } // anonymous namespace
 
-using namespace torch::distributed::autograd;
-
 Message RequestCallbackImpl::handleError(
     const std::exception& e,
     const MessageType messageType,
     int64_t messageId) const {
-  LOG(ERROR) << "Received error while processing request type "
-             << messageType << ": " << e.what();
+  LOG(ERROR) << "Received error while processing request type " << messageType
+             << ": " << e.what();
   // Adding node information to the error here since all processed RPC
   // requests should be going through this function.
   std::string errorMsg = c10::str(
@@ -458,8 +458,8 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processMessage(
   auto& rrefContext = RRefContext::getInstance();
   try {
     rrefContext.recordThreadLocalPendingRRefs();
-    std::unique_ptr<RpcCommandBase> rpc =
-        deserializePythonRpcCommand(deserializeRequest(request), request.type());
+    std::unique_ptr<RpcCommandBase> rpc = deserializePythonRpcCommand(
+        deserializeRequest(request), request.type());
     auto rrefsReadyFuture = rrefContext.waitForThreadLocalPendingRRefs();
 
     rrefsReadyFuture->addCallback(

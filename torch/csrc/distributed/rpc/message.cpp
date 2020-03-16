@@ -112,9 +112,7 @@ void Message::setId(int64_t id) {
   id_ = id;
 }
 
-Message createExceptionResponse(
-    int64_t requestId,
-    const std::exception& e) {
+Message createExceptionResponse(int64_t requestId, const std::exception& e) {
   return createExceptionResponse(requestId, e.what());
 }
 

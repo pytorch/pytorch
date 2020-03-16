@@ -1773,7 +1773,6 @@ class RpcTest(RpcAgentTestFixture):
         with self.assertRaisesRegex(RuntimeError, "RPC backend only supports CPU tensors.*Found tensor on device: cuda:0"):
             rpc.rpc_sync(dst, torch.add, args=(t1, t2))
 
-
         # mix of cpu and cuda tensors as args fail.
         with self.assertRaisesRegex(RuntimeError, "RPC backend only supports CPU tensors.*Found tensor on device: cuda:0"):
             rpc.rpc_sync(dst, torch.add, args=(t1, t3))

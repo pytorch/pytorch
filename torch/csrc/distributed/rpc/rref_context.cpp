@@ -260,7 +260,6 @@ c10::intrusive_ptr<OwnerRRef> RRefContext::getOrCreateOwnerRRef(
     const RRefId& rrefId,
     const TypePtr& type) {
   std::lock_guard<std::mutex> lock(mutex_);
-
   const auto iter = owners_.find(rrefId);
   if (iter == owners_.end()) {
     // Scenario (1) the first time this owner knows about this RRef
@@ -292,7 +291,6 @@ c10::intrusive_ptr<OwnerRRef> RRefContext::createOwnerRRef(
 
 c10::intrusive_ptr<OwnerRRef> RRefContext::getOwnerRRef(const RRefId& rrefId) {
   std::unique_lock<std::mutex> lock(mutex_);
-
   const auto iter = owners_.find(rrefId);
   if (iter == owners_.end()) {
     // Scenario (1) RRef is used before it is created
