@@ -165,6 +165,7 @@ std::vector<WorkerInfo> ProcessGroupAgent::getWorkerInfos() const {
 
 void ProcessGroupAgent::join() {
   sync();
+
   std::unique_lock<std::mutex> lock(futureMutex_);
   futureCV_.wait(
       lock, [this] { return futures_.empty() && futureTimeouts_.empty(); });
@@ -339,7 +340,7 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
             // local recv.
             sendCounts_.increment(pg_->getRank());
           } catch (std::exception& e) {
-            future->setError(e.what());
+            markFutureWithError(message.id(), e.what());
             return;
           }
           const char* data = payload->data();
@@ -535,7 +536,12 @@ void ProcessGroupAgent::markFutureWithError(Message& message) {
   TORCH_INTERNAL_ASSERT(
       message.type() == MessageType::EXCEPTION,
       "markFutureWithError should be only called with Message that has type Exception.");
-  auto id = message.id();
+  markFutureWithError(
+      message.id(),
+      std::string(message.payload().begin(), message.payload().end()));
+}
+
+void ProcessGroupAgent::markFutureWithError(int64_t id, std::string errorMsg) {
   std::shared_ptr<FutureMessage> fm = nullptr;
   {
     std::lock_guard<std::mutex> lock{futureMutex_};
@@ -564,7 +570,7 @@ void ProcessGroupAgent::markFutureWithError(Message& message) {
   }
 
   --clientActiveCalls_;
-  fm->setError(std::string(message.payload().begin(), message.payload().end()));
+  fm->setError(std::move(errorMsg));
   futureCV_.notify_all();
 }
 
