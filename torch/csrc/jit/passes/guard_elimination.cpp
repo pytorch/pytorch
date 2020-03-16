@@ -159,16 +159,14 @@ struct GuardElimination {
 
   // `checkInputs` check the invariants specified in `removableGuard`
   // on inputs to `n`. The invariants must hold, or an input must
-  // be a `prim::Constant` or be of `NumberType` if `allow numbers` is `true`
-  // or be included as an exception in `except`
-  bool checkInputs(Node *n, const std::unordered_set<size_t> &except, bool allow_numbers = true) {
+  // be a `prim::Constant` or be included as an exception in `except`
+  bool checkInputs(Node *n, const std::unordered_set<size_t> &except) {
     bool all_inputs_guarded = true;
     size_t i = 0;
     for (auto input : n->inputs()) {
       if ((input->node()->kind() == prim::Guard &&
            !input->type()->expect<TensorType>()->isSummarized()) ||
           input->node()->kind() == prim::Constant ||
-          (allow_numbers && input->type()->isSubtypeOf(NumberType::get())) ||
           except.count(i) != 0) {
         AT_ASSERT(
             input->node()->kind() != prim::Guard ||
@@ -272,9 +270,8 @@ private:
     case aten::reciprocal:
     case aten::addcmul:
     case aten::where:
-     return checkInputs(n, no_exceptions);
     case aten::avg_pool2d:
-      return checkInputs(n, no_exceptions, false);
+      return checkInputs(n, no_exceptions);
     case aten::slice:
       return !n->input(0)->type()->expect<TensorType>()->isSummarized() &&
              // check that the dimension argument is constant
