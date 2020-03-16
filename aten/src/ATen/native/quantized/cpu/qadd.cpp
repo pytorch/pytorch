@@ -89,7 +89,7 @@ Tensor _add_scalar_out(Tensor& out, const Tensor& self, Scalar other) {
       if (ReLUFused) {
         dequantized_add.relu_();
       }
-      out = at::quantize_per_tensor(dequantized_add, s_prime, z_prime, self.scalar_type());
+      out.copy_(at::quantize_per_tensor(dequantized_add, s_prime, z_prime, self.scalar_type()));
     } else if (q_max < z - c_q) {
       s_prime = ((double)(z - c_q) - q_min) / ((double)q_max - q_min) * s;
       z_prime = q_max;
@@ -97,7 +97,7 @@ Tensor _add_scalar_out(Tensor& out, const Tensor& self, Scalar other) {
       if (ReLUFused) {
         dequantized_add.relu_();
       }
-      out = at::quantize_per_tensor(dequantized_add, s_prime, z_prime, self.scalar_type());
+      out.copy_(at::quantize_per_tensor(dequantized_add, s_prime, z_prime, self.scalar_type()));
     } else {
       s_prime = s;
       z_prime = z - c_q;
@@ -226,7 +226,7 @@ class QAddScalar final : public c10::OperatorKernel {
   TORCH_CHECK(qa.qscheme() == kPerTensorAffine ||
               qa.qscheme() == kPerTensorSymmetric,
               "Only per tensor quantization is suuported in Add.");
-    auto qc = at::empty_like(qa, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    auto qc = at::empty_like(qa, qa.suggest_memory_format());
     return _add_scalar_out<ReLUFused>(qc, qa, b);
   }
 };
