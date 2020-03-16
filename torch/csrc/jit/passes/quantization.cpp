@@ -2492,6 +2492,7 @@ script::Module Finalize(script::Module& module) {
   SwapFunctionalLinear(module);
   auto graph = module.get_method("forward").graph();
   Inline(*graph);
+  ConstantPropagation(graph);
   ReplicateQuant(graph);
   ReplicateDeQuant(graph);
   SwapDeQuant(graph);
