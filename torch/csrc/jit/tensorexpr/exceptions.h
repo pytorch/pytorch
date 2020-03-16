@@ -1,7 +1,9 @@
 #pragma once
 
-#include <stdexcept>
+#include <torch/csrc/WindowsTorchApiMacro.h>
+
 #include <sstream>
+#include <stdexcept>
 
 // Forward declarations of types
 namespace torch {
