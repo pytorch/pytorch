@@ -27,8 +27,8 @@ namespace {
 
 // PythonTypeResolver that inherits from Script::Resolver to
 // support resolving types together with ScriptTypeParser.
-struct PythonTypeResolver : public jit::script::Resolver {
-  std::shared_ptr<jit::script::SugaredValue> resolveValue(
+struct PythonTypeResolver : public jit::Resolver {
+  std::shared_ptr<jit::SugaredValue> resolveValue(
       const std::string& /* unused */,
       torch::jit::Function& /* unused */,
       const jit::SourceRange& /* unused */) override {
@@ -65,8 +65,9 @@ PythonRpcHandler::PythonRpcHandler() {
   pySerialize_ = getFunction(module, "serialize");
   pyDeserialize_ = getFunction(module, "deserialize");
   pyHandleException_ = getFunction(module, "_handle_exception");
+  pyGetQualifiedName_ = py::module::import("torch.jit").attr("_qualified_name");
   jitCompilationUnit_ = torch::jit::get_python_cu();
-  typeParser_ = std::make_shared<jit::script::ScriptTypeParser>(
+  typeParser_ = std::make_shared<jit::ScriptTypeParser>(
       std::make_shared<PythonTypeResolver>());
 }
 
@@ -76,17 +77,27 @@ void PythonRpcHandler::cleanup() {
   pySerialize_ = py::none();
   pyDeserialize_ = py::none();
   pyHandleException_ = py::none();
+  pyGetQualifiedName_ = py::none();
   jitCompilationUnit_ = nullptr;
   typeParser_ = nullptr;
 }
 
 PythonRpcHandler& PythonRpcHandler::getInstance() {
+  // A thread could hold GIL when calling PythonRpcHandler::getInstance(),
+  // meantime another thread could have been doing static data
+  // initialization by calling `new PythonRpcHandler()`, inside of which GIL is
+  // also required. Static data initialization is thread-safe, so the thread
+  // holding the GIL will wait for the other thread to finish static data
+  // initializating before going forward. Because the initialization can't
+  // proceed without GIL, there is a deadlock. We ask the calling thread to
+  // release GIL to avoid this situation.
+  TORCH_INTERNAL_ASSERT(!PyGILState_Check());
   // Leaky singleton to avoid module destructor race.
   static PythonRpcHandler* handler = new PythonRpcHandler();
   return *handler;
 }
 
-std::shared_ptr<torch::jit::script::CompilationUnit> PythonRpcHandler::
+std::shared_ptr<torch::jit::CompilationUnit> PythonRpcHandler::
     jitCompilationUnit() {
   return jitCompilationUnit_;
 }
@@ -129,6 +140,11 @@ void PythonRpcHandler::handleException(const py::object& obj) {
 void PythonRpcHandler::handleExceptionGILHeld(const py::object& obj) {
   TORCH_CHECK(PyGILState_Check(), "GIL should be held");
   pyHandleException_(obj);
+}
+
+c10::QualifiedName PythonRpcHandler::getQualifiedName(const py::object& obj) {
+  PROFILE_GIL_SCOPED_ACQUIRE;
+  return c10::QualifiedName(pyGetQualifiedName_(obj).cast<std::string>());
 }
 
 TypePtr PythonRpcHandler::parseTypeFromStr(const std::string& type_str) {

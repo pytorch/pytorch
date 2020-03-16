@@ -1350,37 +1350,6 @@ TEST_F(ModulesTest, Dropout3d) {
   ASSERT_EQ(y.sum().item<float>(), 100);
 }
 
-TEST_F(ModulesTest, FeatureDropout) {
-  FeatureDropout dropout(0.5);
-  torch::Tensor x = torch::ones({10, 10}, torch::requires_grad());
-  torch::Tensor y = dropout(x);
-
-  y.backward(torch::ones_like(y));
-  ASSERT_EQ(y.ndimension(), 2);
-  ASSERT_EQ(y.size(0), 10);
-  ASSERT_EQ(y.size(1), 10);
-  ASSERT_LT(y.sum().item<float>(), 130); // Probably
-  ASSERT_GT(y.sum().item<float>(), 70); // Probably
-
-  dropout->eval();
-  y = dropout(x);
-  ASSERT_EQ(y.sum().item<float>(), 100);
-}
-
-TEST_F(ModulesTest, FeatureDropoutLegacyWarning) {
-  std::stringstream buffer;
-  torch::test::CerrRedirect cerr_redirect(buffer.rdbuf());
-
-  FeatureDropout bn(0.5);
-
-  ASSERT_EQ(
-    count_substr_occurrences(
-      buffer.str(),
-      "torch::nn::FeatureDropout module is deprecated"
-    ),
-  1);
-}
-
 TEST_F(ModulesTest, Parameters) {
   auto model = std::make_shared<NestedModel>();
   auto parameters = model->named_parameters();
@@ -1429,74 +1398,6 @@ TEST_F(ModulesTest, FunctionalArgumentBinding) {
   auto functional =
       Functional(torch::elu, /*alpha=*/1, /*scale=*/0, /*input_scale=*/1);
   ASSERT_EQ(functional(torch::ones({})).item<float>(), 0);
-}
-
-TEST_F(ModulesTest, BatchNormStateful) {
-  BatchNorm bn(5);
-
-  // Is stateful by default.
-  ASSERT_TRUE(bn->options.track_running_stats());
-
-  ASSERT_TRUE(bn->running_mean.defined());
-  ASSERT_EQ(bn->running_mean.dim(), 1);
-  ASSERT_EQ(bn->running_mean.size(0), 5);
-
-  ASSERT_TRUE(bn->running_var.defined());
-  ASSERT_EQ(bn->running_var.dim(), 1);
-  ASSERT_EQ(bn->running_var.size(0), 5);
-
-  // Is affine by default.
-  ASSERT_TRUE(bn->options.affine());
-
-  ASSERT_TRUE(bn->weight.defined());
-  ASSERT_EQ(bn->weight.dim(), 1);
-  ASSERT_EQ(bn->weight.size(0), 5);
-
-  ASSERT_TRUE(bn->bias.defined());
-  ASSERT_EQ(bn->bias.dim(), 1);
-  ASSERT_EQ(bn->bias.size(0), 5);
-}
-TEST_F(ModulesTest, BatchNormStateless) {
-  BatchNorm bn(BatchNormOptions(5).track_running_stats(false).affine(false));
-
-  ASSERT_FALSE(bn->running_mean.defined());
-  ASSERT_FALSE(bn->running_var.defined());
-  ASSERT_FALSE(bn->weight.defined());
-  ASSERT_FALSE(bn->bias.defined());
-
-  ASSERT_THROWS_WITH(
-      bn(torch::ones({2, 5})),
-      "Calling BatchNorm::forward is only permitted "
-      "when the 'track_running_stats' option is true (was false). "
-      "Use BatchNorm::pure_forward instead.");
-}
-
-TEST_F(ModulesTest, BatchNormPureForward) {
-  BatchNorm bn(BatchNormOptions(5).affine(false));
-  bn->eval();
-
-  // Want to make sure we use the supplied values in `pure_forward` even if
-  // we are stateful.
-  auto input = torch::randn({2, 5});
-  auto mean = torch::randn(5);
-  auto variance = torch::rand(5);
-  auto output = bn->pure_forward(input, mean, variance);
-  auto expected = (input - mean) / torch::sqrt(variance + bn->options.eps());
-  ASSERT_TRUE(output.allclose(expected));
-}
-
-TEST_F(ModulesTest, BatchNormLegacyWarning) {
-  std::stringstream buffer;
-  torch::test::CerrRedirect cerr_redirect(buffer.rdbuf());
-
-  BatchNorm bn(5);
-
-  ASSERT_EQ(
-    count_substr_occurrences(
-      buffer.str(),
-      "torch::nn::BatchNorm module is deprecated"
-    ),
-  1);
 }
 
 TEST_F(ModulesTest, BatchNorm1dStateful) {
@@ -2404,6 +2305,50 @@ TEST_F(ModulesTest, LogSoftmax) {
   for (int i = 0; i < 2; i++) {
     auto expected = torch::log(torch::exp(input[i]) / sum[i]);
     ASSERT_TRUE(torch::allclose(output[i], expected));
+  }
+}
+
+TEST_F(ModulesTest, AdaptiveLogSoftmaxWithLoss) {
+  {
+    // log_probs actually returns log_proba
+    AdaptiveLogSoftmaxWithLoss asfm(AdaptiveLogSoftmaxWithLossOptions(8, 4, {2}).div_value(2.));
+    auto x = torch::randn({4, 8});
+    auto logprob_out = asfm->log_prob(x);
+    ASSERT_TRUE(torch::allclose(torch::exp(logprob_out).data().sum(1), torch::ones(4)));
+  }
+  {
+    // test predict
+    AdaptiveLogSoftmaxWithLoss asfm(AdaptiveLogSoftmaxWithLossOptions(8, 10, {4, 8}).div_value(2.).head_bias(true));
+    auto x = torch::randn({64, 8});
+    auto logprob_out = asfm->log_prob(x);
+    auto predict_out = asfm->predict(x);
+    ASSERT_TRUE(torch::allclose(predict_out, logprob_out.argmax(1)));
+  }
+  {
+    // cluster sizes
+    AdaptiveLogSoftmaxWithLoss asfm(AdaptiveLogSoftmaxWithLossOptions(16, 20, {4, 10, 15}).div_value(2.));
+    auto x = torch::arange(100, 132, torch::kFloat).reshape({2, 16});
+    auto y = torch::tensor({0, 17}, torch::kLong);
+    auto asm_out = asfm(x, y);
+    ASSERT_EQ(asm_out.output.sizes(), std::vector<int64_t>({2}));
+  }
+  {
+    // forward returns the same thing as log_probs
+    AdaptiveLogSoftmaxWithLoss asfm(AdaptiveLogSoftmaxWithLossOptions(8, 4, {2}).div_value(2.));
+    auto x = torch::randn({4, 8});
+    auto logprob_out = asfm->log_prob(x);
+    NLLLoss nll_loss;
+
+    for (int64_t v = 0; v < 4; ++v) {
+      auto y = torch::full({4}, v, torch::kLong);
+      auto asm_out = asfm(x, y);
+      auto out = asm_out.output;
+      auto loss = torch::tensor(asm_out.loss, torch::kFloat);
+      auto expected = nll_loss->forward(logprob_out, y);
+
+      ASSERT_TRUE(torch::allclose(loss, expected));
+      ASSERT_TRUE(torch::allclose(out, logprob_out.gather(1, y.unsqueeze(1)).squeeze()));
+    }
   }
 }
 
@@ -3756,6 +3701,73 @@ TEST_F(ModulesTest, CrossMapLRN2d) {
   ASSERT_TRUE(output.allclose(expected));
 }
 
+TEST_F(ModulesTest, RNNCell) {
+  torch::manual_seed(0);
+  auto rnn = RNNCell(1, 2);
+  auto input = torch::randn({3, 1});
+  auto hx = torch::randn({3, 2});
+  auto output = rnn(input, hx);
+  auto expected = torch::tensor({{-0.5078,  0.4380},
+                                 {-0.7215,  0.2969},
+                                 {-0.1304,  0.0653}});
+  ASSERT_TRUE(torch::allclose(output, expected, 1e-05, 2e-04));
+
+  output = rnn(input);
+  expected = torch::tensor({{-0.0775,  0.6688},
+                            {-0.0734,  0.4759},
+                            {-0.0725,  0.4225}});
+  ASSERT_TRUE(torch::allclose(output, expected, 1e-05, 2e-04));
+}
+
+TEST_F(ModulesTest, LSTMCell) {
+  torch::manual_seed(0);
+  auto rnn = LSTMCell(1, 2);
+  auto input = torch::randn({3, 1});
+  auto hx = torch::randn({3, 2});
+  auto cx = torch::randn({3, 2});
+  auto output = rnn(input, std::make_tuple(hx, cx));
+  auto output_hx = std::get<0>(output);
+  auto output_cx = std::get<1>(output);
+  auto expected_hx = torch::tensor({{-0.2462,  0.0810},
+                                    {-0.2206,  0.1867},
+                                    {-0.0146,  0.0429}});
+  auto expected_cx = torch::tensor({{-0.4480,  0.1071},
+                                    {-0.6245,  0.2687},
+                                    {-0.0322,  0.0518}});
+  ASSERT_TRUE(torch::allclose(output_hx, expected_hx, 1e-05, 2e-04));
+  ASSERT_TRUE(torch::allclose(output_cx, expected_cx, 1e-05, 2e-04));
+
+  output = rnn(input);
+  output_hx = std::get<0>(output);
+  output_cx = std::get<1>(output);
+  expected_hx = torch::tensor({{-0.1331,  0.1634},
+                               {-0.1494,  0.2869},
+                               {-0.1428,  0.2263}});
+  expected_cx = torch::tensor({{-0.2679,  0.2180},
+                               {-0.3049,  0.3493},
+                               {-0.2896,  0.2853}});
+  ASSERT_TRUE(torch::allclose(output_hx, expected_hx, 1e-05, 2e-04));
+  ASSERT_TRUE(torch::allclose(output_cx, expected_cx, 1e-05, 2e-04));
+}
+
+TEST_F(ModulesTest, GRUCell) {
+  torch::manual_seed(0);
+  auto rnn = GRUCell(1, 2);
+  auto input = torch::randn({3, 1});
+  auto hx = torch::randn({3, 2});
+  auto output = rnn(input, hx);
+  auto expected = torch::tensor({{ 1.0243,  0.3227},
+                                 {-0.5659,  0.0330},
+                                 {-0.4030, -0.2800}});
+  ASSERT_TRUE(torch::allclose(output, expected, 1e-05, 2e-04));
+
+  output = rnn(input);
+  expected = torch::tensor({{-0.0085,  0.1095},
+                            {-0.1291,  0.2675},
+                            {-0.1339,  0.2725}});
+  ASSERT_TRUE(torch::allclose(output, expected, 1e-05, 2e-04));
+}
+
 TEST_F(ModulesTest, PrettyPrintLinear) {
   ASSERT_EQ(
       c10::str(Linear(3, 4)), "torch::nn::Linear(in_features=3, out_features=4, bias=true)");
@@ -4043,22 +4055,8 @@ TEST_F(ModulesTest, PrettyPrintDropout3d) {
   ASSERT_EQ(c10::str(Dropout3d(Dropout3dOptions().p(0.42).inplace(true))), "torch::nn::Dropout3d(p=0.42, inplace=true)");
 }
 
-TEST_F(ModulesTest, PrettyPrintFeatureDropout) {
-  ASSERT_EQ(c10::str(FeatureDropout()), "torch::nn::FeatureDropout(p=0.5, inplace=false)");
-  ASSERT_EQ(c10::str(FeatureDropout(0.42)), "torch::nn::FeatureDropout(p=0.42, inplace=false)");
-  ASSERT_EQ(c10::str(FeatureDropout(FeatureDropoutOptions().p(0.42).inplace(true))), "torch::nn::FeatureDropout(p=0.42, inplace=true)");
-}
-
 TEST_F(ModulesTest, PrettyPrintFunctional) {
   ASSERT_EQ(c10::str(Functional(torch::relu)), "torch::nn::Functional()");
-}
-
-TEST_F(ModulesTest, PrettyPrintBatchNorm) {
-  ASSERT_EQ(
-      c10::str(BatchNorm(
-          BatchNormOptions(4).eps(0.5).momentum(0.1).affine(false).track_running_stats(
-              true))),
-      "torch::nn::BatchNorm(num_features=4, eps=0.5, momentum=0.1, affine=false, track_running_stats=true)");
 }
 
 TEST_F(ModulesTest, PrettyPrintBatchNorm1d) {
@@ -4544,4 +4542,62 @@ TEST_F(ModulesTest, PrettyPrintMultiheadAttention) {
     "torch::nn::MultiheadAttention(\n  (out_proj): torch::nn::Linear(in_features=20, out_features=20, bias=true)\n)");
   ASSERT_EQ(c10::str(MultiheadAttention(MultiheadAttentionOptions(20, 10).bias(false))),
     "torch::nn::MultiheadAttention(\n  (out_proj): torch::nn::Linear(in_features=20, out_features=20, bias=false)\n)");
+}
+
+TEST_F(ModulesTest, PrettyPrintRNNCell) {
+  ASSERT_EQ(c10::str(RNNCell(20, 10)),
+    "torch::nn::RNNCell(20, 10)");
+  ASSERT_EQ(c10::str(RNNCell(RNNCellOptions(20, 10).bias(false).nonlinearity(torch::kTanh))),
+    "torch::nn::RNNCell(20, 10, bias=false)");
+  ASSERT_EQ(c10::str(RNNCell(RNNCellOptions(20, 10).bias(false).nonlinearity(torch::kReLU))),
+    "torch::nn::RNNCell(20, 10, bias=false, nonlinearity=kReLU)");
+}
+
+TEST_F(ModulesTest, PrettyPrintLSTMCell) {
+  ASSERT_EQ(c10::str(LSTMCell(20, 10)),
+    "torch::nn::LSTMCell(20, 10)");
+  ASSERT_EQ(c10::str(LSTMCell(LSTMCellOptions(20, 10).bias(false))),
+    "torch::nn::LSTMCell(20, 10, bias=false)");
+}
+
+TEST_F(ModulesTest, PrettyPrintGRUCell) {
+  ASSERT_EQ(c10::str(GRUCell(20, 10)),
+    "torch::nn::GRUCell(20, 10)");
+  ASSERT_EQ(c10::str(GRUCell(GRUCellOptions(20, 10).bias(false))),
+    "torch::nn::GRUCell(20, 10, bias=false)");
+}
+
+TEST_F(ModulesTest, PrettyPrintAdaptiveLogSoftmaxWithLoss) {
+  {
+    AdaptiveLogSoftmaxWithLoss asfm(AdaptiveLogSoftmaxWithLossOptions(8, 4, {2}).div_value(2.));
+    ASSERT_EQ(
+      c10::str(asfm),
+      "torch::nn::AdaptiveLogSoftmaxWithLoss(\n"
+      "  (head): torch::nn::Linear(in_features=8, out_features=3, bias=false)\n"
+      "  (tail): torch::nn::ModuleList(\n"
+      "    (0): torch::nn::Sequential(\n"
+      "      (0): torch::nn::Linear(in_features=8, out_features=4, bias=false)\n"
+      "      (1): torch::nn::Linear(in_features=4, out_features=2, bias=false)\n"
+      "    )\n"
+      "  )\n"
+      ")");
+  }
+  {
+    AdaptiveLogSoftmaxWithLoss asfm(AdaptiveLogSoftmaxWithLossOptions(8, 10, {4, 8}).div_value(2.).head_bias(true));
+    ASSERT_EQ(
+      c10::str(asfm),
+      "torch::nn::AdaptiveLogSoftmaxWithLoss(\n"
+      "  (head): torch::nn::Linear(in_features=8, out_features=6, bias=true)\n"
+      "  (tail): torch::nn::ModuleList(\n"
+      "    (0): torch::nn::Sequential(\n"
+      "      (0): torch::nn::Linear(in_features=8, out_features=4, bias=false)\n"
+      "      (1): torch::nn::Linear(in_features=4, out_features=4, bias=false)\n"
+      "    )\n"
+      "    (1): torch::nn::Sequential(\n"
+      "      (0): torch::nn::Linear(in_features=8, out_features=2, bias=false)\n"
+      "      (1): torch::nn::Linear(in_features=2, out_features=2, bias=false)\n"
+      "    )\n"
+      "  )\n"
+      ")");
+  }
 }

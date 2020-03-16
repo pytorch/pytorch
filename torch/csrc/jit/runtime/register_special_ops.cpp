@@ -21,10 +21,8 @@ namespace jit {
 
 namespace {
 
-c10::OperatorOptions aliasAnalysisFromSchema() {
-  c10::OperatorOptions result;
-  result.setAliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA);
-  return result;
+c10::AliasAnalysisKind aliasAnalysisFromSchema() {
+  return c10::AliasAnalysisKind::FROM_SCHEMA;
 }
 
 void checkListInputType(const c10::TypePtr& elem_type, bool empty_list) {
@@ -169,7 +167,7 @@ int createTensorFromList(Stack& stack) {
 
     if (dtype.isNone() && tensor.scalar_type() != default_type &&
         tensor.numel() == 0) {
-      AT_WARN(
+      TORCH_WARN(
           "Creating a tensor from an empty ",
           elem_type->python_str(),
           "list will create a tensor of default floating point type  (currently ",
