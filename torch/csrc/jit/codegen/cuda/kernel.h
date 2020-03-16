@@ -1,7 +1,7 @@
 #pragma once
 
-#include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <torch/csrc/jit/codegen/cuda/fusion.h>
 
 /*
  * The exposed APIs in this file is used by manager.h/cpp
@@ -27,8 +27,8 @@ namespace cuda {
 #include <torch/csrc/jit/codegen/cuda/data_struct_str.h>
 #undef STRINGIFY
 
-class CudaKernel{
-public:
+class CudaKernel {
+ public:
   CudaKernel() = default;
 
   CUmodule& getModule() {
@@ -38,7 +38,7 @@ public:
   CUfunction& getFunction() {
     return function_;
   }
-  
+
   int16_t device_;
   CUmodule module_;
   CUfunction function_;
@@ -48,11 +48,11 @@ public:
   // Block and Grid dimension setting is here for testing purposes only
   // These are not here for general use and only for use with
   // the runTestKernel() function.
-  void block(uint x=1, uint y=1, uint z=1) {
-	block_ = dim3(x,y,z);
+  void block(uint x = 1, uint y = 1, uint z = 1) {
+    block_ = dim3(x, y, z);
   }
-  void grid(uint x=1, uint y=1, uint z=1) {
-	grid_ = dim3(x,y,z);
+  void grid(uint x = 1, uint y = 1, uint z = 1) {
+    grid_ = dim3(x, y, z);
   }
 
   dim3 block_;
@@ -62,8 +62,8 @@ public:
 // include IO data structure for stringification
 #define STRINGIFY(...) #__VA_ARGS__
 static auto typeinfo =
-#include"data_struct_str.h"
-;
+#include "data_struct_str.h"
+    ;
 #undef STRINGIFY
 
 // compile Fusion to CUDA functions:
@@ -85,4 +85,7 @@ TORCH_API void runTestKernel(
     const std::vector<at::Tensor>& inputs,
     std::vector<at::Tensor>& outputs);
 
-}}}} // namespace torch::jit::fuser::cuda
+} // namespace cuda
+} // namespace fuser
+} // namespace jit
+} // namespace torch
