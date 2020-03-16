@@ -7,7 +7,7 @@ import unittest
 from torch.testing._internal.common_utils import suppress_warnings
 
 from te_utils import CudaCodeGenCreated, CudaCodeGenExecuted, \
-    LLVMCodeGenCreated, LLVMCodeGenExecuted, SimpleIREvalExecuted
+    LLVMCodeGenExecuted, SimpleIREvalExecuted
 
 @contextlib.contextmanager
 def num_profiled_runs(num_runs):
