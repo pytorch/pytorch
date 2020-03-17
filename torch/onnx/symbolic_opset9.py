@@ -340,6 +340,15 @@ def expand(g, self, size, implicit):
     size = sym_help._maybe_get_const(size, 'is')
     if not sym_help._is_value(size):
         size = g.op("Constant", value_t=torch.LongTensor(size))
+    elif sym_help._is_packed_list(size):
+        # Expand with -1 dim value means dim is unchanged.
+        # Since onnx::expand supports two-way broadcasting,
+        # -1 dim value can be exported to onnx as 1
+        size = view(g, stack(g, size, 0), [-1])
+    dtype = 4  # dim type is int64
+    ones = ones_like(g, size, dtype)
+    neg_ones = mul(g, ones, g.op("Constant", value_t=torch.tensor(-1)))
+    size = where(g, g.op("Equal", size, neg_ones), ones, size)
     return g.op("Expand", self, size)
 
 
@@ -1562,7 +1571,7 @@ def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
                  num_layers, dropout, train, bidirectional, batch_first=None, batch_sizes=None):
 
     warnings.warn("Exporting a model to ONNX with a batch_size other than 1, " +
-                  "with a variable lenght with " + variant + " can cause an error " +
+                  "with a variable length with " + variant + " can cause an error " +
                   "when running the ONNX model with a different batch size. " +
                   "Make sure to save the model with a batch size of 1, " +
                   "or define the initial states (h0/c0) as inputs of the model. ")
