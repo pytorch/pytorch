@@ -38,8 +38,6 @@ TORCH_API std::vector<std::pair<GraphPass, GraphPassNameType>>& getCustomPrePass
 
 TORCH_API GraphPassNameType registerPostPass(GraphPass p);
 TORCH_API GraphPassNameType registerPrePass(GraphPass p);
-//Default to registerPostPass
-TORCH_API GraphPassNameType registerPass(GraphPass p);
 
 // Look up pass by name passed in, remove it from registered passes
 TORCH_API void clearPostPass(GraphPassNameType p);
@@ -90,12 +88,12 @@ struct TORCH_API PassManager {
    * Similarly to isRegistered we use an internal static variable to hold the
    * name.
    */
-  static GraphPassNameType name(
-      GraphPassNameType PassName = 0,
+  static GraphPassNameType passID(
+      GraphPassNameType PassID = 0,
       bool set = false) {
-    static GraphPassNameType name = 0;
+    static GraphPassNameType pass_id = 0;
     if (set)
-      name = PassName;
+      pass_id = PassID;
     return name;
   }
 
@@ -106,16 +104,16 @@ struct TORCH_API PassManager {
     if (!isRegistered()) {
       // If we don't already have a registered pass, register pass
       // hold on to its name, change isRegistered to true
-      name(registerPostPass(std::move(p)), true);
+      passID(registerPostPass(std::move(p)), true);
       isRegistered(true);
     }
   }
 
-  // Calls ClearPostPass(name())
+  // Calls ClearPostPass(passID())
   static void clearPass() {
     // If the pass is registered, clear it and change isRegistered to false.
     if (isRegistered()) {
-      clearPostPass(name());
+      clearPostPass(passID());
       isRegistered(true);
     }
   }
