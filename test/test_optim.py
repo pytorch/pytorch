@@ -510,13 +510,14 @@ class LambdaLRTestObject:
 
 
 class TestLRScheduler(TestCase):
+    exact_dtype = True
+
     def setUp(self):
         super(TestLRScheduler, self).setUp()
         self.net = SchedulerTestNet()
         self.opt = SGD(
             [{'params': self.net.conv1.parameters()}, {'params': self.net.conv2.parameters(), 'lr': 0.5}],
             lr=0.05)
-        self.exact_dtype = True
 
     def test_error_when_getlr_has_epoch(self):
         class MultiStepLR(torch.optim.lr_scheduler._LRScheduler):
