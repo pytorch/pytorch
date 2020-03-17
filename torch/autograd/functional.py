@@ -49,8 +49,13 @@ def _grad_preprocess(inputs, create_graph, need_graph):
     res = []
     for inp in inputs:
         if create_graph and inp.requires_grad:
-            # Use .view_as() to get a new Tensor in a differentiable way
-            res.append(inp.view_as(inp))
+            # Create at least a new Tensor object in a differentiable way
+            if not inp.is_sparse:
+                # Use .view_as() to get a shallow copy
+                res.append(inp.view_as(inp))
+            else:
+                # We cannot use view for sparse Tensors so we clone
+                res.append(inp.clone())
         else:
             res.append(inp.detach().requires_grad_(need_graph))
     return tuple(res)
@@ -104,11 +109,11 @@ def _check_requires_grad(inputs, input_type, strict):
                                    " You should ensure that your function is thrice differentiable and that"
                                    " the hessian depends on the inputs.".format(i))
             elif input_type == "jacobian":
-                raise RuntimeError("The jacobian of the user-provided function with respect to input {}"
-                                   " is independent of the input. This is not allowed in strict mode."
-                                   " You should ensure that your function is twice differentiable and that"
-                                   " the jacobian depends on the inputs (this would be violated by a linear"
-                                   " function).".format(i))
+                raise RuntimeError("While computing the hessian, found that the jacobian of the user-provided"
+                                   " function with respect to input {} is independent of the input. This is not"
+                                   " allowed in strict mode. You should ensure that your function is twice"
+                                   " differentiable and that the jacobian depends on the inputs (this would be"
+                                   " violated by a linear function for example).".format(i))
             elif input_type == "grad_inputs":
                 raise RuntimeError("The gradient with respect to input {} is independent of the inputs of the"
                                    " user-provided function. This is not allowed in strict mode.".format(i))
@@ -192,8 +197,8 @@ def vjp(func, inputs, v=None, create_graph=False, strict=False):
         func (function): a Python function that takes Tensor inputs and returns
             a tuple of Tensors or a Tensor.
         inputs (tuple of Tensors or Tensor): inputs to the function ``func``.
-        v (tuple of Tensors or Tensor): The vector that will multiply the Jacobian. Must be the
-            same size as the output of ``func``. This argument is optional when
+        v (tuple of Tensors or Tensor): The vector for which the vector Jacobian product is computed.
+            Must be the same size as the output of ``func``. This argument is optional when
             ``func``'s output contains a single element and (if it is not provided) will be set as a Tensor
             containing a single ``1``.
         create_graph (bool, optional): If ``True``, both the output and result will be
@@ -274,7 +279,7 @@ def jvp(func, inputs, v=None, create_graph=False, strict=False):
         func (function): a Python function that takes Tensor inputs and returns
             a tuple of Tensors or a Tensor.
         inputs (tuple of Tensors or Tensor): inputs to the function ``func``.
-        v (tuple of Tensors or Tensor): The vector that will multiply the Jacobian. Must be the
+        v (tuple of Tensors or Tensor): The vector for which the Jacobian vector product is computed. Must be the
             same size as the input of ``func``. This argument is optional when
             ``func``'s input contains a single element and (if it is not provided) will be set as a Tensor
             containing a single ``1``.
@@ -316,8 +321,8 @@ def jvp(func, inputs, v=None, create_graph=False, strict=False):
 
     Note::
 
-        The jvp is currently computed using the double backward trick as we don't have support for
-        forward mode AD in PyTorch at the moment.
+        The jvp is currently computed by using the backward of the backward (sometimes called the double
+        backwards trick) as we don't have support for forward mode AD in PyTorch at the moment.
     """
 
     is_inputs_tuple, inputs = _as_tuple(inputs, "inputs", "jvp")
@@ -545,7 +550,7 @@ def vhp(func, inputs, v=None, create_graph=False, strict=False):
         func (function): a Python function that takes Tensor inputs and returns
             a Tensor with a single element.
         inputs (tuple of Tensors or Tensor): inputs to the function ``func``.
-        v (tuple of Tensors or Tensor): The vector that will multiply the Hessian. Must be the
+        v (tuple of Tensors or Tensor): The vector for which the vector Hessian product is computed. Must be the
             same size as the input of ``func``. This argument is optional when
             ``func``'s input contains a single element and (if it is not provided) will be set as a Tensor
             containing a single ``1``.
@@ -634,7 +639,7 @@ def hvp(func, inputs, v=None, create_graph=False, strict=False):
         func (function): a Python function that takes Tensor inputs and returns
             a Tensor with a single element.
         inputs (tuple of Tensors or Tensor): inputs to the function ``func``.
-        v (tuple of Tensors or Tensor): The vector that will multiply the Hessian. Must be the
+        v (tuple of Tensors or Tensor): The vector for which the Hessian vector product is computed. Must be the
             same size as the input of ``func``. This argument is optional when
             ``func``'s input contains a single element and (if it is not provided) will be set as a Tensor
             containing a single ``1``.
