@@ -1,16 +1,22 @@
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/autograd/record_function.h>
-#include <torch/csrc/jit/runtime/custom_operator.h>
-#include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/runtime/operator_options.h>
-#include <torch/csrc/jit/passes/pass_manager.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/pass_manager.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
+#include <torch/csrc/jit/runtime/custom_operator.h>
+#include <torch/csrc/jit/runtime/operator_options.h>
+#include <torch/csrc/jit/tensorexpr/kernel.h>
 
 namespace torch {
 namespace jit {
+
+static bool texpr_fuser_enabled = true;
+void setTensorExprFuserEnabled(bool val) {
+  texpr_fuser_enabled = val;
+}
 
 const Symbol& getTensorExprSymbol() {
   static Symbol s = Symbol::fromQualString("tensorexpr::Group");
@@ -36,9 +42,88 @@ value_list sortReverseTopological(
   return result;
 }
 
+bool isSupported(Node* node) {
+  // TODO:
+  switch (node->kind()) {
+    case aten::add:
+    case aten::_cast_Float:
+    case aten::type_as:
+    case aten::sub:
+    case aten::mul:
+    case aten::div:
+    case aten::eq:
+    case aten::ne:
+    case aten::ge:
+    case aten::gt:
+    case aten::le:
+    case aten::lt:
+    case aten::min:
+    case aten::max:
+    case aten::pow:
+    case aten::clamp:
+    case aten::lerp:
+    case aten::log10:
+    case aten::log:
+    case aten::log2:
+    case aten::exp:
+    case aten::erf:
+    case aten::erfc:
+    case aten::fmod:
+    case aten::cos:
+    case aten::sin:
+    case aten::tan:
+    case aten::acos:
+    case aten::asin:
+    case aten::atan:
+    case aten::atan2:
+    case aten::cosh:
+    case aten::sinh:
+    case aten::tanh:
+    case aten::sqrt:
+    case aten::rsqrt:
+    case aten::abs:
+    case aten::floor:
+    case aten::ceil:
+    case aten::round:
+    case aten::trunc:
+    case aten::threshold:
+    case aten::remainder:
+    case prim::ConstantChunk:
+    case aten::cat:
+    case prim::ListConstruct:
+    case aten::sigmoid:
+    case aten::relu:
+    case aten::addcmul:
+    case aten::neg:
+    case aten::reciprocal:
+    case aten::expm1:
+    case aten::lgamma:
+    case aten::slice:
+    case aten::unsqueeze:
+    case aten::frac:
+    case aten::rand_like:
+    case aten::_sigmoid_backward:
+    case aten::_tanh_backward:
+    case aten::__and__:
+    case aten::__or__:
+    case aten::__xor__:
+    case aten::__lshift__:
+    case aten::__rshift__:
+    case aten::where:
+      return true;
+    default:
+      return false;
+  }
+}
+
 bool canHandle(Node* node, AliasDb& aliasDb) {
-  // TODO: actually support some ops
-  return false;
+  if (node->kind() == prim::Constant) {
+    return true;
+  }
+  if (node->kind() == prim::Loop) {
+    return false; // TODO
+  }
+  return isSupported(node);
 }
 
 #define REQ(cond)                           \
@@ -65,6 +150,36 @@ bool canMerge(Node* consumer, Node* producer, AliasDb& aliasDb) {
   // Alias checks
   REQ(aliasDb.couldMoveAfterTopologically(consumer, producer));
 
+  // Ops that return aliases can only be folded if this is the only use.
+  if (producer->kind() == aten::slice || producer->kind() == aten::unsqueeze ||
+      producer->kind() == prim::ConstantChunk) {
+    for (auto& use : producer->output(0)->uses()) {
+      REQ(use.user == consumer);
+    }
+  }
+
+  if (!consumer->hasAttribute(attr::Subgraph) &&
+      consumer->kind() != getTensorExprSymbol()) {
+    // Don't initiate a fusion group from prim::ListConstruct
+    REQ(consumer->kind() != prim::ListConstruct);
+    REQ(consumer->kind() != aten::slice);
+    REQ(consumer->kind() != aten::unsqueeze);
+    REQ(consumer->kind() != prim::ConstantChunk);
+
+    // Don't initiate a fusion group just for a constant operand
+    REQ(producer->kind() != prim::Constant);
+  }
+
+  if (producer->kind() == aten::cat) {
+    REQ(producer->inputs()[0]->node()->kind() == prim::ListConstruct);
+    REQ(producer->inputs()[0]->uses().size() == 1);
+    REQ(producer->inputs()[1]->node()->kind() == prim::Constant);
+  } else if (consumer->kind() == aten::cat) {
+    REQ(consumer->inputs()[0]->node()->kind() == prim::ListConstruct);
+    REQ(consumer->inputs()[0]->uses().size() == 1);
+    REQ(consumer->inputs()[1]->node()->kind() == prim::Constant);
+  }
+
   return true;
 }
 #undef REQ
@@ -73,7 +188,10 @@ Node* getOrCreateTensorExprSubgraph(Node* n) {
   if (n->hasAttribute(attr::Subgraph) && n->kind() == getTensorExprSymbol()) {
     return n;
   }
-  return SubgraphUtils::createSingletonSubgraph(n, getTensorExprSymbol());
+  auto te_group =
+      SubgraphUtils::createSingletonSubgraph(n, getTensorExprSymbol());
+  GRAPH_UPDATE("getOrCreateTensorExprSubgraph: ", *te_group);
+  return te_group;
 }
 
 c10::optional<Node*> tryMerge(
@@ -82,9 +200,9 @@ c10::optional<Node*> tryMerge(
     AliasDb& aliasDb) {
   GRAPH_DEBUG(
       "Trying producer ",
-      producer->kind().toQualString(),
+      getHeader(producer),
       " and consumer ",
-      consumer->kind().toQualString(),
+      getHeader(consumer),
       ":\n");
 
   if (!canMerge(consumer, producer, aliasDb)) {
@@ -93,8 +211,24 @@ c10::optional<Node*> tryMerge(
 
   consumer = getOrCreateTensorExprSubgraph(consumer);
 
-  aliasDb.moveAfterTopologicallyValid(consumer, producer);
-  SubgraphUtils::mergeNodeIntoSubgraph(producer, consumer);
+  if (producer->kind() == aten::cat) {
+    Node* listconstruct = producer->inputs()[0]->node();
+
+    aliasDb.moveAfterTopologicallyValid(consumer, producer);
+    GRAPH_UPDATE(
+        "Merging ", getHeader(producer), " into ", getHeader(consumer));
+    SubgraphUtils::mergeNodeIntoSubgraph(producer, consumer);
+
+    aliasDb.moveAfterTopologicallyValid(consumer, listconstruct);
+    GRAPH_UPDATE(
+        "Merging ", getHeader(listconstruct), " into ", getHeader(consumer));
+    SubgraphUtils::mergeNodeIntoSubgraph(listconstruct, consumer);
+  } else {
+    aliasDb.moveAfterTopologicallyValid(consumer, producer);
+    GRAPH_UPDATE(
+        "Merging ", getHeader(producer), " into ", getHeader(consumer));
+    SubgraphUtils::mergeNodeIntoSubgraph(producer, consumer);
+  }
 
   return consumer;
 }
@@ -120,26 +254,10 @@ std::pair<graph_node_list::iterator, bool> scanNode(
   return {++(++iter), false};
 }
 
-Operation createTensorExprOp(const Node* node) {
-  // TODO: actually compile the fusion group.
-  return [](Stack& stack) {
-    RECORD_FUNCTION("TensorExpr", std::vector<c10::IValue>());
-    return 0;
-  };
-}
-
-c10::AliasAnalysisKind getAliasAnalysisOption(AliasAnalysisKind k) {
-  return k;
-}
-
-RegisterOperators TensorExprOps({
-    torch::jit::Operator(
-        getTensorExprSymbol(),
-        createTensorExprOp,
-        getAliasAnalysisOption(AliasAnalysisKind::PURE_FUNCTION)),
-});
-
 void fuseTensorExprs(std::shared_ptr<Graph>& graph) {
+  if (!texpr_fuser_enabled) {
+    return;
+  }
   GRAPH_DUMP("Before TExprFuser: ", graph);
 
   // Get rid of dead code so that we don't waste effort fusing it.
@@ -191,6 +309,23 @@ void fuseTensorExprs(std::shared_ptr<Graph>& graph) {
 
   GRAPH_DUMP("After TExprFuser: ", graph);
 }
+
+Operation createTensorExprOp(const Node* node) {
+  auto kernel =
+      std::make_shared<tensorexpr::TensorExprKernel>(*node->g(attr::Subgraph));
+  return [kernel](Stack& stack) {
+    RECORD_FUNCTION("TensorExpr", std::vector<c10::IValue>());
+    kernel->run(stack);
+    return 0;
+  };
+}
+
+RegisterOperators TensorExprOps({
+    torch::jit::Operator(
+        getTensorExprSymbol(),
+        createTensorExprOp,
+        AliasAnalysisKind::PURE_FUNCTION),
+});
 
 void registerTensorExprFuser() {
   static bool already_registered = false;

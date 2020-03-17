@@ -4,7 +4,7 @@ Python implementation of __torch_function__
 While most of the torch API and handling for __torch_function__ happens
 at the C++ level, some of the torch API is written in Python so we need
 python-level handling for __torch_function__ overrides as well. The main
-developer-facing functionality in this file are handle_torch_function and 
+developer-facing functionality in this file are handle_torch_function and
 has_torch_function. See torch/functional.py and test/test_overrides.py
 for usage examples.
 
@@ -126,6 +126,7 @@ def get_ignored_functions():
         torch.nn.functional.has_torch_function,
         torch.nn.functional.handle_torch_function,
         torch.nn.functional.sigmoid,
+        torch.nn.functional.hardsigmoid,
         torch.nn.functional.tanh,
     )
 
@@ -134,7 +135,7 @@ def get_testing_overrides():
 
     Returns
     -------
-    A dictionary that maps overridable functions in the PyTorch API to 
+    A dictionary that maps overridable functions in the PyTorch API to
     lambda functions that have the same signature as the real function
     and unconditionally return -1. These lambda functions are useful
     for testing API coverage for a type that defines __torch_function__.
@@ -322,6 +323,8 @@ def get_testing_overrides():
         torch.le: lambda input, other, out=None: -1,
         torch.lerp: lambda input, end, weight, out=None: -1,
         torch.lgamma: lambda input, out=None: -1,
+        torch.lobpcg: lambda input, k=None, B=None, X=None, n=None, iK=None, niter=None, tol=None, largest=None, method=None,
+        tracker=None, ortho_iparams=None, ortho_fparams=None, ortho_bparams=None: -1,
         torch.log: lambda input, out=None: -1,
         torch.log_softmax: lambda input, dim, dtype: -1,
         torch.log10: lambda input, out=None: -1,
@@ -512,6 +515,7 @@ def get_testing_overrides():
         torch.orgqr: lambda input1, input2: -1,
         torch.ormqr: lambda input, input2, input3, left=True, transpose=False: -1,
         torch.pairwise_distance: lambda x1, x2, p=2.0, eps=1e-06, keepdim=False: -1,
+        torch.pca_lowrank: lambda input, q=None, center=True, niter=2: -1,
         torch.pdist: lambda input, p=2: -1,
         torch.pinverse: lambda input, rcond=1e-15: -1,
         torch.pixel_shuffle: lambda input, upscale_factor: -1,
@@ -595,6 +599,7 @@ def get_testing_overrides():
         torch.sub: lambda input, other, out=None: -1,
         torch.sum: lambda input: -1,
         torch.svd: lambda input, some=True, compute_uv=True, out=None: -1,
+        torch.svd_lowrank: lambda input, q=6, niter=2, M=None: -1,
         torch.symeig: lambda input, eigenvectors=False, upper=True, out=None: -1,
         torch.t: lambda input: -1,
         torch.take: lambda input, index: -1,

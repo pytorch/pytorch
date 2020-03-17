@@ -398,6 +398,8 @@ class ExprBuilder(Builder):
         ast.BitAnd: '&',
         ast.BitXor: '^',
         ast.BitOr: '|',
+        ast.LShift: '<<',
+        ast.RShift: '>>',
     }
 
     if not PY2:
