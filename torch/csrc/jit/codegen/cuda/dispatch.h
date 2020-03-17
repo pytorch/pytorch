@@ -1,5 +1,7 @@
 #pragma once
 
+#include <torch/csrc/WindowsTorchApiMacro.h>
+
 /*
  * dispatch.h prevents the need from adding manual dispatch in every class that
  * wants to define how to process a series of nodes. dispatch.h provides 4

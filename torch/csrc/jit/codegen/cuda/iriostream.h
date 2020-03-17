@@ -1,6 +1,9 @@
 #pragma once
 
+#include <torch/csrc/WindowsTorchApiMacro.h>
+
 #include <torch/csrc/jit/codegen/cuda/dispatch.h>
+
 #include <iostream>
 
 namespace torch {

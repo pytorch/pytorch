@@ -51,7 +51,7 @@ void testGPU_FusionDispatch() {
 void testGPU_FusionSimpleArith() {
 
   std::stringstream ss1, ss2;
-  
+
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -123,8 +123,8 @@ void testGPU_FusionMutator() {
   Val* lhs = static_cast<BinaryOp*>(fusion.origin(f5))->lhs();
   TORCH_CHECK(lhs->getValType().value() == ValType::Scalar && lhs->getDataType().value() == DataType::Float);
   Float* flhs = static_cast<Float *>( lhs );
-  
-  TORCH_CHECK(flhs->value().value() == 0.f);  
+
+  TORCH_CHECK(flhs->value().value() == 0.f);
 }
 
 void testGPU_FusionRegister() {
@@ -141,7 +141,7 @@ void testGPU_FusionRegister() {
 }
 
 // dummy expr with 2 outputs only for toposort test.
-struct TORCH_API DummyExpr : public Expr {
+struct DummyExpr : public Expr {
   ~DummyExpr() = default;
   DummyExpr(Val* _outlhs, Val* _outrhs, Val* _lhs, Val* _rhs)
       : Expr(ExprType::BinaryOp) // Not terribly safe...
@@ -546,7 +546,7 @@ void testGPU_FusionParser() {
   Fusion fusion;
   FusionGuard fg(&fusion);
   fuser::cuda::parseJitIR(g, fusion);
-  
+
   std::stringstream ref;
   ref
     << "__global__ void kernel(Tensor<float> T0, Tensor<float> T1, Tensor<float> T3){\n"
@@ -671,7 +671,7 @@ void testGPU_FusionCodeGen() {
   fusion.addOutput(tv2);
 
   tv0->computeAt(tv2, 1);
-  
+
   std::stringstream ref;
   ref
   << "__global__ void kernel(Tensor<float> T2){\n"
@@ -756,10 +756,10 @@ void testGPU_FusionCodeGen2() {
 
   tv0->computeAt(tv3, -1);
   tv1->computeAt(tv3, -1);
-  
+
   tv3->axis(0)->parallelize(ParallelType::BIDx);
   tv3->axis(-1)->parallelize(ParallelType::TIDx);
-  
+
   std::stringstream ref;
   ref
   << "__global__ void kernel(Tensor<float> T0, Tensor<float> T1, Tensor<float> T3){\n"
@@ -779,7 +779,7 @@ void testGPU_FusionCodeGen2() {
   << "    }\n"
   << "  }\n"
   << "}\n"
- ; 
+ ;
  std::stringstream cdg;
   CodeWrite cw(cdg);
   cw.traverse(&fusion);
@@ -811,7 +811,7 @@ void testGPU_FusionCodeGen2() {
 
   torch::jit::fuser::cuda::compileKernel(fusion, prog);
   torch::jit::fuser::cuda::runTestKernel(prog, inputs, outputs);
-  
+
   at::Tensor tv2_ref = input2 + 2.0;
   at::Tensor output_ref = input1 + tv2_ref;
 
@@ -823,7 +823,7 @@ void testGPU_FusionSimplePWise() {
   Fusion fusion;
   FusionGuard fg(&fusion);
   //dimensionality of the problem
-  int nDims = 3; 
+  int nDims = 3;
 
   //Set up symbolic sizes for the axes should be dimensionality of the problem
   std::vector<IterDomain*> dom;
@@ -849,7 +849,7 @@ void testGPU_FusionSimplePWise() {
   // This doesn't have to be in this order
   tv3->merge(1);
   tv3->merge(0);
-  
+
   // Split by n_threads
   tv3->split(-1, 128*2);
   tv3->split(-1, 128);
@@ -858,11 +858,11 @@ void testGPU_FusionSimplePWise() {
   tv0->computeAt(tv3, -1);
   tv1->computeAt(tv3, -1);
 
-  //Parallelize TV3  
+  //Parallelize TV3
   tv3->axis(0)->parallelize(ParallelType::BIDx);
   tv3->axis(-2)->parallelize(ParallelType::TIDy);
   tv3->axis(-1)->parallelize(ParallelType::TIDx);
-  
+
   torch::jit::fuser::cuda::CudaKernel prog;
   prog.device_ = 0;
   prog.grid(64);     //   1 CTA
@@ -881,7 +881,7 @@ void testGPU_FusionSimplePWise() {
 
   torch::jit::fuser::cuda::compileKernel(fusion, prog);
   torch::jit::fuser::cuda::runTestKernel(prog, inputs, outputs);
-  
+
   at::Tensor tv2_ref = input2 + 2.0;
   at::Tensor output_ref = input1 + tv2_ref;
 
@@ -891,7 +891,7 @@ void testGPU_FusionSimplePWise() {
 void testGPU_FusionExecKernel() {
   Fusion fusion;
   FusionGuard fg(&fusion);
-  
+
   //Set up your input tensor views
   TensorView* tv0 = makeDummyTensor(2);
   TensorView* tv1 = makeDummyTensor(2);
@@ -911,10 +911,10 @@ void testGPU_FusionExecKernel() {
   tv0->computeAt(tv3, -1);
   tv1->computeAt(tv3, -1);
 
-  //Parallelize TV3  
+  //Parallelize TV3
   tv3->axis(0)->parallelize(ParallelType::BIDx);
   tv3->axis(-1)->parallelize(ParallelType::TIDx);
-  
+
   torch::jit::fuser::cuda::CudaKernel prog;
   prog.device_ = 0;
   prog.grid(1);    // 1 CTA
@@ -933,7 +933,7 @@ void testGPU_FusionExecKernel() {
 
   torch::jit::fuser::cuda::compileKernel(fusion, prog);
   torch::jit::fuser::cuda::runTestKernel(prog, inputs, outputs);
-  
+
   at::Tensor check = at::full({1,128}, 4, options);;
   TORCH_CHECK(output.equal(check));
 }

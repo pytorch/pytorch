@@ -1,5 +1,7 @@
 #pragma once
 
+#include <torch/csrc/WindowsTorchApiMacro.h>
+
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/index_compute.h>
 #include <torch/csrc/jit/codegen/cuda/iriostream.h>

@@ -1,6 +1,8 @@
 #pragma once
 
 #include <ATen/cuda/CUDAContext.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
+
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 
 /*
