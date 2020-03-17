@@ -581,7 +581,7 @@ std::vector<at::Tensor> flatten_for_scatter_gather(
     std::vector<at::Tensor>& other,
     size_t world_size,
     size_t rank,
-    bool inplace) {
+    bool no_copy) {
   if (tensor_lists.size() != other.size()) {
     throw std::runtime_error(
         "Tensor list operands to scatter/gather must have the same length");
@@ -613,24 +613,28 @@ std::vector<at::Tensor> flatten_for_scatter_gather(
       }
     }
 
-    //  Check if the tensors are already flattened to do inplace operation
-    if (inplace) {
+    if (no_copy) {
+      // no_copy operation requires all tensors in tensor_list are contiguous views
+      // into a single flattened tensor
       for (auto j = size_t{}; j < tensor_lists[i].size(); ++j) {
         auto t = tensor_lists[i][j];
-        if (!t.storage().is_alias_of(other[i].storage()) ||
-            t.storage_offset() != (tensor_lists[i][0].storage_offset() +
-              j * other[i].numel())) {
-          inplace = false;
+        if (!tensor_lists[i][j].storage().is_alias_of(tensor_lists[i][0].storage()) ||
+            tensor_lists[i][j].storage_offset() != (tensor_lists[i][0].storage_offset() +
+              j * tensor_lists[i][0].numel())) {
+          no_copy = false;
           break;
         }
       }
-      if (other[i].storage_offset() != (tensor_lists[i][0].storage_offset() +
-            rank * other[i].numel())) {
-        inplace = false;
+      // no_copy operation is allowed if other tensor does not share storage with tensors
+      // in tensor_list or other tensor is properly aligned according to rank.
+      if (!other[i].storage().is_alias_of(tensor_lists[i][0].storage()) ||
+          other[i].storage_offset() != (tensor_lists[i][0].storage_offset() +
+            rank * tensor_lists[i][0].numel())) {
+        no_copy = false;
       }
     }
 
-    if (inplace) {
+    if (no_copy) {
       flattened[i] = at::empty({0}, other[i].options()).set_(
           tensor_lists[i][0].storage(),
           tensor_lists[i][0].storage_offset(),
@@ -810,7 +814,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather(
   check_gpu_tensors(inputTensors);
 
   auto outputFlattened = 
-      flatten_for_scatter_gather(outputTensors, inputTensors, size_, rank_, opts.inplace);
+      flatten_for_scatter_gather(outputTensors, inputTensors, size_, rank_, opts.noCopy);
 
   check_gpu_tensors(outputFlattened);
 
@@ -871,7 +875,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce_scatter(
   check_gpu_tensors(outputTensors);
 
   auto inputFlattened =
-      flatten_for_scatter_gather(inputTensors, outputTensors, size_, rank_, opts.inplace);
+      flatten_for_scatter_gather(inputTensors, outputTensors, size_, rank_, opts.noCopy);
   check_gpu_tensors(inputFlattened);
 
   return collective(
