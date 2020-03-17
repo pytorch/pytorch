@@ -362,7 +362,7 @@ class HashProvider : public IRVisitor {
 
   // at:::Half doesn't have a std::hash, so cast to short.
   void _hash_combine(SimplifierHashType& seed, const at::Half& val) {
-    seed ^= std::hash<uint16_t>()((u_int16_t)val) + 0x1f752c19 + (seed << 7) +
+    seed ^= std::hash<uint16_t>()((uint16_t)val) + 0x1f752c19 + (seed << 7) +
         (seed >> 4);
   }
 
