@@ -65,7 +65,7 @@ class TORCH_API RMSprop : public Optimizer {
   explicit RMSprop(std::vector<Tensor> params,
       RMSpropOptions defaults) : RMSprop({std::move(OptimizerParamGroup(params))}, defaults) {}
 
-  void step() override;
+  torch::Tensor step(LossClosure closure = nullptr) override;
 
   /// Returns the number of parameters referenced by the optimizer.
   size_t size() const noexcept override;
