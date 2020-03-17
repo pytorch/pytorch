@@ -38,8 +38,6 @@ from .internal import (
 
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-logger.addHandler(logging.StreamHandler(sys.stdout))
 
 
 # NB: Ignoring RRef leaks during shutdown. Without this, applications have to
