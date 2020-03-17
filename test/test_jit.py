@@ -30,7 +30,6 @@ from torch._C import TensorType, BoolType, parse_ir, _propagate_shapes
 from torch._six import inf, PY2, PY37, StringIO
 from torch.autograd import Variable, Function
 from torch.jit.annotations import BroadcastingList2, BroadcastingList3, Any  # noqa: F401
-from torch.jit.frontend import NotSupportedError
 from torch.onnx import OperatorExportTypes
 from torch.testing import FileCheck
 import torch.cuda
