@@ -725,12 +725,14 @@ def handle_torch_function(
     """
     # Check for __torch_function__ methods.
     overloaded_args = _get_overloaded_args(relevant_args)
+    # overloaded_args already have unique types.
+    types = tuple(map(type, overloaded_args))
 
     # Call overrides
     for overloaded_arg in overloaded_args:
         # Use `public_api` instead of `implementation` so __torch_function__
         # implementations can do equality/identity comparisons.
-        result = overloaded_arg.__torch_function__(public_api, args, kwargs)
+        result = overloaded_arg.__torch_function__(public_api, types, args, kwargs)
 
         if result is not NotImplemented:
             return result
