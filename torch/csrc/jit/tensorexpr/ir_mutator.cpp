@@ -1,7 +1,7 @@
-#include "torch/csrc/jit/tensorexpr/ir_mutator.h"
+#include <torch/csrc/jit/tensorexpr/ir_mutator.h>
 
-#include "torch/csrc/jit/tensorexpr/eval.h"
-#include "torch/csrc/jit/tensorexpr/ir.h"
+#include <torch/csrc/jit/tensorexpr/eval.h>
+#include <torch/csrc/jit/tensorexpr/ir.h>
 
 namespace torch {
 namespace jit {
@@ -46,8 +46,7 @@ static const Expr* mutate_binary_op(
     case IRNodeType::kRshift:
       return new Rshift(lhs_new, rhs_new);
     default:
-      LOG(FATAL) << "unsupported expr_type: " << static_cast<int>(expr_type);
-      return nullptr;
+      throw unsupported_dtype();
   }
 }
 
@@ -233,6 +232,13 @@ const Expr* IRMutator::mutate(const FunctionCall* v) {
   return this->mutate(base);
 }
 
+const Expr* IRMutator::mutate(const LinearForm* v) {
+  const Expr* new_x = v->getX()->accept_mutator(this);
+  const Expr* new_a = v->getA()->accept_mutator(this);
+  const Expr* new_b = v->getB()->accept_mutator(this);
+  return new LinearForm(new_x, new_a, new_b);
+}
+
 const Expr* IRMutator::mutate(const BaseCallNode* v) {
   std::vector<const Expr*> params(v->nparams());
   bool any_change = false;
@@ -268,6 +274,9 @@ Stmt* IRMutator::mutate(const For* v) {
       body == body_new) {
     return (Stmt*)v;
   }
+  if (body_new == body) {
+    body_new = Stmt::clone(body);
+  }
   return new For(var_new, start_new, stop_new, body_new, loop_options);
 }
 
@@ -278,6 +287,8 @@ Stmt* IRMutator::mutate(const Block* v) {
     Stmt* stmt_new = stmt->accept_mutator(this);
     if (stmt != stmt_new) {
       any_change = true;
+    } else {
+      stmt_new = Stmt::clone(stmt);
     }
     if (stmt_new) {
       stmts.push_back(stmt_new);
@@ -349,6 +360,14 @@ Stmt* IRMutator::mutate(const Cond* v) {
   if (cond_old == cond_new && true_old == true_new && false_old == false_new) {
     return (Stmt*)v;
   }
+
+  if (true_old && true_new == true_old) {
+    true_new = Stmt::clone(true_old);
+  }
+  if (false_old && false_new == false_old) {
+    false_new = Stmt::clone(false_old);
+  }
+
   return new Cond(cond_new, true_new, false_new);
 }
 
@@ -356,6 +375,74 @@ const Expr* IRMutator::DefaultMutator(
     const BaseCallNode* v,
     std::vector<const Expr*>& params) {
   return v->DefaultMutator(params);
+}
+
+class StmtClone : public IRMutator {
+ public:
+  Stmt* mutate(const LetStmt* v) override;
+  Stmt* mutate(const For* v) override;
+  Stmt* mutate(const Block* v) override;
+  Stmt* mutate(const Store* v) override;
+  Stmt* mutate(const Allocate* v) override;
+  Stmt* mutate(const Free* v) override;
+  Stmt* mutate(const Cond* v) override;
+};
+
+Stmt* StmtClone::mutate(const LetStmt* v) {
+  // Expressions are immutable => we don't need to clone them
+  const Var* var = v->var();
+  const Expr* value = v->value();
+
+  // Statements are mutable => we need to clone them
+  Stmt* body_new = v->body()->accept_mutator(this);
+
+  // Create a new LetStmt with the cloned statement for body
+  return new LetStmt(var, value, body_new);
+}
+
+Stmt* StmtClone::mutate(const For* v) {
+  // Only body needs to be cloned as only statements are mutable
+  Stmt* body_new = v->body()->accept_mutator(this);
+
+  return new For(v->var(), v->start(), v->stop(), body_new, v->loop_options());
+}
+
+Stmt* StmtClone::mutate(const Block* v) {
+  std::vector<Stmt*> stmts;
+  for (Stmt* stmt : v->stmts()) {
+    stmts.push_back(stmt->accept_mutator(this));
+  }
+  return new Block(stmts);
+}
+
+Stmt* StmtClone::mutate(const Store* v) {
+  return new Store(v->base_handle(), v->index(), v->value(), v->mask());
+}
+
+Stmt* StmtClone::mutate(const Allocate* v) {
+  return new Allocate(v->buffer_var(), v->dtype(), v->dims());
+}
+
+Stmt* StmtClone::mutate(const Free* v) {
+  return new Free(v->buffer_var());
+}
+
+Stmt* StmtClone::mutate(const Cond* v) {
+  const Expr* cond_old = v->condition();
+  Stmt* true_old = v->true_stmt();
+  Stmt* false_old = v->false_stmt();
+
+  Stmt* true_new = true_old ? true_old->accept_mutator(this) : true_old;
+  Stmt* false_new = false_old ? false_old->accept_mutator(this) : false_old;
+
+  return new Cond(v->condition(), true_new, false_new);
+}
+
+Stmt* Stmt::clone(Stmt* s) {
+  StmtClone clone_mutator;
+  Stmt* cloned = s->accept_mutator(&clone_mutator);
+  set_parent(cloned, nullptr);
+  return cloned;
 }
 
 } // namespace tensorexpr
