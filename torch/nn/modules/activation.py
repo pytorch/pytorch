@@ -271,6 +271,29 @@ class Sigmoid(Module):
         return torch.sigmoid(input)
 
 
+class Hardsigmoid(Module):
+    r"""Applies the element-wise function:
+
+    .. math::
+        \text{Hardsigmoid}(x) = \frac{ReLU6(x + 3)}{6}
+
+
+    Shape:
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions
+        - Output: :math:`(N, *)`, same shape as the input
+
+    Examples::
+
+        >>> m = nn.Hardsigmoid()
+        >>> input = torch.randn(2)
+        >>> output = m(input)
+    """
+
+    def forward(self, input):
+        return F.hardsigmoid(input)
+
+
 class Tanh(Module):
     r"""Applies the element-wise function:
 

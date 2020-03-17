@@ -397,6 +397,17 @@ def elu(input, alpha=1., inplace=False, scale=None, zero_point=None):
     else:
         return torch._C._nn.elu(input, alpha)
 
+def hardsigmoid(input):
+    # type: (Tensor) -> Tensor
+    r"""
+    Applies the quantized element-wise function :math:`\text{Hardsigmoid}(x) = \frac{ReLU6(x + 3)}{6}`
+
+    See :class:`~torch.nn.Hardsigmoid` for more details.
+    """
+    if not input.is_quantized:
+        raise ValueError("Input to 'quantized.hardsigmoid' must be quantized!")
+    return torch._C._nn.hardsigmoid(input)
+
 def clamp(input, min_, max_):
     # type: (Tensor, float, float) -> Tensor
     r"""float(input, min_, max_) -> Tensor

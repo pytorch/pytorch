@@ -1570,6 +1570,24 @@ def sigmoid(input):
     return input.sigmoid()
 
 
+def hardsigmoid(input, inplace=False):
+    r"""hardsigmoid(input) -> Tensor
+
+    Applies the element-wise function :math:`\text{Hardsigmoid}(x) = \frac{ReLU6(x + 3)}{6}`
+
+    Args:
+        inplace: If set to ``True``, will do this operation in-place. Default: ``False``
+
+    See :class:`~torch.nn.Hardsigmoid` for more details.
+    """
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(hardsigmoid, (input,), input, inplace=inplace)
+    if inplace:
+        return torch._C._nn.hardsigmoid_(input)
+    return torch._C._nn.hardsigmoid(input)
+
+
 def linear(input, weight, bias=None):
     # type: (Tensor, Tensor, Optional[Tensor]) -> Tensor
     r"""
