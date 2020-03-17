@@ -809,7 +809,7 @@ inline IValue IValue::make_capsule(intrusive_ptr<torch::CustomClassHolder> blob)
   return iv;
 }
 
-template <typename T, std::enable_if_t<std::is_base_of<torch::CustomClassHolder, T>::value, int> = 0>
+template <typename T, std::enable_if_t<std::is_base_of<torch::CustomClassHolder, T>::value, int>>
 IValue::IValue(c10::intrusive_ptr<T> custom_class) {
   if (!c10::isCustomClassRegistered<c10::intrusive_ptr<T>>()) {
     throw c10::Error(
