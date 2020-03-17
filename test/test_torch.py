@@ -31,7 +31,7 @@ from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
     skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm, skipCUDAIfNotRocm, onlyCUDA, onlyCPU, \
     dtypes, dtypesIfCUDA, deviceCountAtLeast, skipCUDAIf, precisionOverride, \
-    PYTORCH_CUDA_MEMCHECK, largeCUDATensorTest
+    PYTORCH_CUDA_MEMCHECK, largeCUDATensorTest, onlyOnCPUAndCUDA
 import torch.backends.quantized
 import torch.testing._internal.data
 
@@ -13811,6 +13811,8 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(z.dtype, x.dtype)
         self.assertEqual(z, z_alt)
 
+    # Note: this tests fails on XLA
+    @onlyOnCPUAndCUDA
     @dtypes(torch.float, torch.long)
     def test_floor_divide_out(self, device, dtype):
         x = torch.randn(10, device=device).mul(10).to(dtype)
