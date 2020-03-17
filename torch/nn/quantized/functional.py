@@ -398,7 +398,7 @@ def elu(input, alpha=1., inplace=False, scale=None, zero_point=None):
         return torch._C._nn.elu(input, alpha)
 
 def hardsigmoid(input):
-    # type: (Tensor, float, float, bool) -> Tensor
+    # type: (Tensor) -> Tensor
     r"""
     Applies the quantized element-wise function :math:`\text{Hardsigmoid}(x) = \frac{ReLU6(x + 3)}{6}`
 
