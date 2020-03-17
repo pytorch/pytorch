@@ -356,7 +356,6 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
   if (to.id_ == (worker_id_t)pg_->getRank()) {
     threadPool_.run(std::bind(
         [this, future](const Message& message) {
-          sendCounts_.increment(pg_->getRank());
           // Unlike the other cases, need to add a tensor deleter, since the
           // data outlives the scope of this function. It's shared_ptr<> due
           // to c++11 lambda capture limitations with unique_ptr<>.
@@ -364,8 +363,11 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
           try {
             payload = std::make_unique<std::string>(
                 wireSerialize(message.payload(), message.tensors()));
+            // only increment sendCounts when the message is indeed added into
+            // local recv.
+            sendCounts_.increment(pg_->getRank());
           } catch (std::exception& e) {
-            future->setError(e.what());
+            markFutureWithError(message.id(), e.what());
             return;
           }
           const char* data = payload->data();
@@ -608,7 +610,12 @@ void ProcessGroupAgent::markFutureWithError(Message& message) {
   TORCH_INTERNAL_ASSERT(
       message.type() == MessageType::EXCEPTION,
       "markFutureWithError should be only called with Message that has type Exception.");
-  auto id = message.id();
+  markFutureWithError(
+      message.id(),
+      std::string(message.payload().begin(), message.payload().end()));
+}
+
+void ProcessGroupAgent::markFutureWithError(int64_t id, std::string errorMsg) {
   std::shared_ptr<FutureMessage> fm = nullptr;
   {
     std::lock_guard<std::mutex> lock{futureMutex_};
@@ -637,7 +644,7 @@ void ProcessGroupAgent::markFutureWithError(Message& message) {
   }
 
   --clientActiveCalls_;
-  fm->setError(std::string(message.payload().begin(), message.payload().end()));
+  fm->setError(std::move(errorMsg));
   futureCV_.notify_all();
 }
 
