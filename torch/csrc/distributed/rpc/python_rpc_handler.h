@@ -19,12 +19,8 @@ class PYBIND11_EXPORT PythonRpcHandler {
  public:
   static PythonRpcHandler& getInstance();
 
-  // Deserialize Python function, run it, and serialize its return value.
-  SerializedPyObj generatePythonUDFResult(
-      const SerializedPyObj& serializedPyObj);
-
   // Run a pickled Python UDF and return the result py::object
-  py::object runPythonUDF(const SerializedPyObj& serializedObj);
+  py::object runPythonUdf(py::object&& pythonUdf);
 
   // Serialized a py::object into a string
   SerializedPyObj serialize(const py::object& obj);
