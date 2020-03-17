@@ -669,9 +669,6 @@ TEST(SerializeTest, Optim_RMSprop) {
 
 TEST(SerializeTest, Optim_LBFGS) {
   auto options = LBFGSOptions();
-  using OptimizerClass = LBFGS;
-  using DerivedOptimizerOptions = LBFGSOptions;
-  using DerivedOptimizerParamState = LBFGSParamState;
   auto model1 = Linear(5, 2);
   auto model2 = Linear(5, 2);
   auto model3 = Linear(5, 2);
@@ -690,15 +687,15 @@ TEST(SerializeTest, Optim_LBFGS) {
     ASSERT_TRUE(param2[p.key()].allclose(param3[p.key()]));
   }
   // Make some optimizers
-  auto optim1 = OptimizerClass(
+  auto optim1 = LBFGS(
       {torch::optim::OptimizerParamGroup(model1->parameters())}, options);
-  auto optim2 = OptimizerClass(
+  auto optim2 = LBFGS(
       model2->parameters(), options);
-  auto optim2_2 = OptimizerClass(
+  auto optim2_2 = LBFGS(
       model2->parameters(), options);
-  auto optim3 = OptimizerClass(
+  auto optim3 = LBFGS(
       model3->parameters(), options);
-  auto optim3_2 = OptimizerClass(
+  auto optim3_2 = LBFGS(
       model3->parameters(), options);
 
   auto x = torch::ones({10, 5});
@@ -706,24 +703,20 @@ TEST(SerializeTest, Optim_LBFGS) {
   auto step = [&x](torch::optim::LossClosureOptimizer& optimizer, Linear model) {
     optimizer.zero_grad();
     auto y = model->forward(x).sum();
+    y.backward();
     auto closure = []() { return torch::tensor({10}); };
     optimizer.step(closure);
   };
 
   // Do 2 steps of model1
-  std::cout<<"optim1 step1: "<<std::endl;
   step(optim1, model1);
-  std::cout<<"optim1 step2: "<<std::endl;
   step(optim1, model1);
 
   // Do 2 steps of model 2 without saving the optimizer
-  std::cout<<"optim2 step1: "<<std::endl;
   step(optim2, model2);
-  std::cout<<"optim2_2 step1: "<<std::endl;
   step(optim2_2, model2);
 
   // Do 1 step of model 3
-  std::cout<<"optim3 step1: "<<std::endl;
   step(optim3, model3);
 
   // save the optimizer
@@ -746,13 +739,12 @@ TEST(SerializeTest, Optim_LBFGS) {
 
   // checking correctness of serialization logic for optimizer.param_groups_ and optimizer.state_
   for (int i = 0; i < optim3_2_param_groups.size(); i++) {
-    is_optimizer_param_group_equal<DerivedOptimizerOptions>(
+    is_optimizer_param_group_equal<LBFGSOptions>(
       optim3_2_param_groups[i], optim3_param_groups[i]);
-    is_optimizer_state_equal<DerivedOptimizerParamState>(optim3_2_state, optim3_state);
+    is_optimizer_state_equal<LBFGSParamState>(optim3_2_state, optim3_state);
   }
 
   // Do step2 for model 3
-  std::cout<<"optim3 step2: "<<std::endl;
   step(optim3_2, model3);
 
   param1 = model1->named_parameters();

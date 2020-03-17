@@ -62,7 +62,6 @@ class TORCH_API LBFGS : public LossClosureOptimizer {
        auto& default_options = static_cast<LBFGSOptions&>(*defaults_.get());
        default_options.max_eval(max_eval_val);
      }
-     _params = &param_groups_[0].params();
      _numel_cache = c10::nullopt;
    }
    explicit LBFGS(
@@ -78,13 +77,12 @@ class TORCH_API LBFGS : public LossClosureOptimizer {
   void load(serialize::InputArchive& archive) override;
 
  private:
-  std::vector<Tensor>* _params;
   c10::optional<int64_t> _numel_cache;
   int64_t _numel();
   Tensor _gather_flat_grad();
   void _add_grad(const double step_size, const Tensor& update);
   std::tuple<Tensor, Tensor> _directional_evaluate(
-    LossClosure closure, const std::vector<Tensor>& x, double t, const Tensor& d);
+    const LossClosure& closure, const std::vector<Tensor>& x, double t, const Tensor& d);
   void _set_param(const std::vector<Tensor>& params_data);
   std::vector<Tensor> _clone_param();
 

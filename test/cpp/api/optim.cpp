@@ -310,7 +310,7 @@ TEST(OptimTest, ProducesPyTorchValues_LBFGS) {
 
 TEST(OptimTest, ProducesPyTorchValues_LBFGS_with_line_search) {
   check_exact_values<LBFGS>(
-      LBFGSOptions(1.0),
+      LBFGSOptions(1.0).line_search_fn("strong_wolfe"),
       expected_parameters::LBFGS_with_line_search());
 }
 

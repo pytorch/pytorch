@@ -48,9 +48,9 @@ void LBFGSOptions::serialize(torch::serialize::InputArchive& archive) {
 
 template <typename T>
 bool if_container_equal(T lhs, T rhs) {
-  if(!(lhs.size() == rhs.size())) return false;
+  if (!(lhs.size() == rhs.size())) return false;
   for (int i = 0; i < lhs.size(); i++) {
-    if(!torch::equal(lhs[i], rhs[i])) return false;
+    if (!torch::equal(lhs.at(i), rhs.at(i))) return false;
   }
   return true;
 }
@@ -99,19 +99,15 @@ void LBFGSParamState::serialize(torch::serialize::InputArchive& archive) {
 
 Tensor LBFGS::_gather_flat_grad() {
   std::vector<Tensor> views;
-  //for (const auto& p : *_params) {
-  for (const auto& p : param_groups_[0].params()) {
+  for (const auto& p : param_groups_.at(0).params()) {
     Tensor view;
     if (!p.grad().defined()) {
-      std::cout<<"!p.grad().defined(): "<<!p.grad().defined()<<std::endl;
       views.emplace_back(p.new_empty({p.numel()}).zero_());
     }
     else if (p.grad().is_sparse()) {
-      std::cout<<"p.grad().is_sparse(): "<<p.grad().is_sparse()<<std::endl;
       views.emplace_back(p.grad().to_dense().view(-1));
     }
     else {
-      std::cout<<"else: "<<p.grad().view(-1)<<std::endl;
       views.emplace_back(p.grad().view(-1));
     }
   }
@@ -119,9 +115,9 @@ Tensor LBFGS::_gather_flat_grad() {
 }
 
 int64_t LBFGS::_numel() {
-  if(_numel_cache == c10::nullopt) {
+  if (_numel_cache == c10::nullopt) {
     auto res = 0;
-    for (const auto& p :*_params) {
+    for (const auto& p : param_groups_.at(0).params()) {
       res += p.numel();
     }
     _numel_cache = res;
@@ -131,7 +127,7 @@ int64_t LBFGS::_numel() {
 
 void LBFGS::_add_grad(const double step_size, const Tensor& update) {
   auto offset = 0;
-  for (auto& p : *_params) {
+  for (auto& p : param_groups_.at(0).params()) {
     auto numel = p.numel();
     // view as to avoid deprecated pointwise semantics
     p.add_(update.index(
@@ -142,22 +138,23 @@ void LBFGS::_add_grad(const double step_size, const Tensor& update) {
 }
 
 void LBFGS::_set_param(const std::vector<Tensor>& params_data) {
-  TORCH_INTERNAL_ASSERT(params_data.size() == _params->size());
-  for (size_t i = 0; i < _params->size(); i++) {
-    _params->at(i).copy_(params_data.at(i));
+  auto& _params = param_groups_.at(0).params();
+  TORCH_INTERNAL_ASSERT(params_data.size() == _params.size());
+  for (size_t i = 0; i < _params.size(); i++) {
+    _params.at(i).copy_(params_data.at(i));
   }
 }
 
 std::vector<Tensor> LBFGS::_clone_param() {
   std::vector<Tensor> result;
-  for (const auto& p : *_params) {
+  for (const auto& p : param_groups_.at(0).params()) {
     result.emplace_back(p.clone(at::MemoryFormat::Contiguous));
   }
   return result;
 }
 
 std::tuple<Tensor, Tensor> LBFGS::_directional_evaluate(
-  LossClosure closure, const std::vector<Tensor>& x, double t, const Tensor& d) {
+  const LossClosure& closure, const std::vector<Tensor>& x, double t, const Tensor& d) {
     _add_grad(t, d);
     Tensor loss;
     {
@@ -196,7 +193,7 @@ double _cubic_interpolate(
   if (d2_square >= 0) {
     d2 = std::sqrt(d2_square);
     double min_pos;
-    if(x1 <= x2) {
+    if (x1 <= x2) {
       min_pos = x2 - ((x2 - x1) * ((g2 + d2 - d1) / (g2 - g1 + 2 * d2)));
     } else {
       min_pos = x1 - ((x1 - x2) * ((g1 + d2 - d1) / (g1 - g2 + 2 * d2)));
@@ -288,7 +285,7 @@ std::tuple<Tensor, Tensor, double, int64_t> _strong_wolfe(Function obj_func, con
     bool insuf_progress = false;
     // find high and low points in bracket
     int64_t low_pos, high_pos;
-    if(val(bracket_f[0]) <= val(bracket_f[1])) {
+    if (val(bracket_f[0]) <= val(bracket_f[1])) {
       low_pos = 0;
       high_pos = 1;
     } else {
@@ -360,7 +357,7 @@ std::tuple<Tensor, Tensor, double, int64_t> _strong_wolfe(Function obj_func, con
       }
 
       // line-search bracket is so small
-      if((abs(bracket[1] - bracket[0]) * d_norm) < tolerance_change) break;
+      if ((abs(bracket[1] - bracket[0]) * d_norm) < tolerance_change) break;
     }
 
     // return stuff
@@ -376,7 +373,8 @@ Tensor LBFGS::step(LossClosure closure) {
   TORCH_INTERNAL_ASSERT(param_groups_.size() == 1);
   auto val = [](const Tensor& t) {return t.item<double>(); };
 
-  auto& group = param_groups_[0];
+  auto& group = param_groups_.at(0);
+  auto& _params = group.params();
   const auto& options = static_cast<const LBFGSOptions&>(group.options());
   auto lr = options.lr();
   auto max_iter = options.max_iter();
@@ -388,11 +386,11 @@ Tensor LBFGS::step(LossClosure closure) {
 
   // NOTE: LBFGS has only global state, but we register it as state for
   // the first param, because this helps with casting in load_state_dict
-  auto param_state = state_.find(c10::guts::to_string(_params->at(0).unsafeGetTensorImpl()));
-  if(param_state == state_.end()) {
-    state_[c10::guts::to_string(_params->at(0).unsafeGetTensorImpl())] = std::make_unique<LBFGSParamState>();
+  auto param_state = state_.find(c10::guts::to_string(_params.at(0).unsafeGetTensorImpl()));
+  if (param_state == state_.end()) {
+    state_[c10::guts::to_string(_params.at(0).unsafeGetTensorImpl())] = std::make_unique<LBFGSParamState>();
   }
-  auto& state = static_cast<LBFGSParamState&>(*state_[c10::guts::to_string(_params->at(0).unsafeGetTensorImpl())]);
+  auto& state = static_cast<LBFGSParamState&>(*state_[c10::guts::to_string(_params.at(0).unsafeGetTensorImpl())]);
   // evaluate initial f(x) and df/dx
   Tensor orig_loss;
   {
@@ -402,14 +400,12 @@ Tensor LBFGS::step(LossClosure closure) {
 
   auto loss = orig_loss.clone(at::MemoryFormat::Contiguous);
   auto current_evals = 1;
-  state.func_evals(state.func_evals()+1);
+  state.func_evals(state.func_evals() + 1);
   auto flat_grad = _gather_flat_grad();
-  std::cout<<"val(flat_grad.abs().max()) "<<val(flat_grad.abs().max())<<
-             " tolerance_grad: "<<tolerance_grad<<std::endl;
   auto opt_cond = (val(flat_grad.abs().max()) <= tolerance_grad);
 
   // optimal condition
-  if(opt_cond) {
+  if (opt_cond) {
     return orig_loss;
   }
 
@@ -431,21 +427,18 @@ Tensor LBFGS::step(LossClosure closure) {
   while(n_iter < max_iter) {
     // keep track of nb of iterations
     n_iter += 1;
-    state.n_iter(state.n_iter()+1);
+    state.n_iter(state.n_iter() + 1);
 
     // compute gradient descent direction
     if (state.n_iter() == 1) {
-      std::cout<<"state.n_iter(): "<<state.n_iter()<<std::endl;
       d = flat_grad.neg();
       H_diag = ONE;
     } else {
-      std::cout<<"!state.n_iter(): "<<state.n_iter()<<std::endl;
       // do lbfgs update (update memory)
       auto y = flat_grad.sub(prev_flat_grad);
       auto s = d.mul(t);
       auto ys = y.dot(s); // y*s
       if (val(ys) > 1e-10) {
-        std::cout<<"val(ys) > 1e-10: "<<(val(ys) > 1e-10)<<std::endl;
         // updating memory
         if (int(old_dirs.size()) == history_size) {
           // shift history by one (limited-memory)
@@ -466,7 +459,7 @@ Tensor LBFGS::step(LossClosure closure) {
       // multiplied by the gradient
       auto num_old = old_dirs.size();
 
-      if(al.size() == 0) {
+      if (al.size() == 0) {
         al.resize(history_size);
       }
 
@@ -474,15 +467,15 @@ Tensor LBFGS::step(LossClosure closure) {
       auto q = flat_grad.neg();
       for (int i = num_old - 1; i >= 0; i--) {
         al.at(i) = old_stps.at(i).dot(q) * ro.at(i);
-        q.add_(old_dirs.at(i), -val(al[i]));
+        q.add_(old_dirs.at(i), -val(al.at(i)));
       }
 
       // multiply by initial Hessian
       // r/d is the final direction
       d = torch::mul(q, H_diag);
       for (size_t i = 0; i < num_old; i++) {
-        auto be_i = old_dirs[i].dot(d) * ro[i];
-        d.add_(old_stps[i], val(al[i] - be_i));
+        auto be_i = old_dirs.at(i).dot(d) * ro.at(i);
+        d.add_(old_stps.at(i), val(al.at(i) - be_i));
       }
     }
 
@@ -600,7 +593,7 @@ void LBFGS::load(serialize::InputArchive& archive) {
     archive("prev_loss", prev_loss);
     torch::optim::serialize(archive, "old_dirs", old_dirs);
     torch::optim::serialize(archive, "old_stps", old_stps);
-    std::vector<Tensor> params = *_params;
+    std::vector<Tensor> params = param_groups_.at(0).params();
     for (size_t idx = 0; idx < params.size(); idx++) {
       auto state = std::make_unique<LBFGSParamState>();
       state->d(d);
@@ -610,7 +603,7 @@ void LBFGS::load(serialize::InputArchive& archive) {
       state->prev_loss(prev_loss);
       state->old_dirs(old_dirs);
       state->old_stps(old_stps);
-      state_[c10::guts::to_string(params[idx].unsafeGetTensorImpl())] = std::move(state);
+      state_[c10::guts::to_string(params.at(idx).unsafeGetTensorImpl())] = std::move(state);
     }
   }
 }

@@ -239,7 +239,7 @@ void list_to_deque(const c10::List<T>& list, std::deque<T>& dq) {
 }
 
 #define _TORCH_OPTIM_SERIALIZE_TORCH_ARG_DEQUE(name) {\
-  if(name().size() != 0) { \
+  if (name().size() != 0) { \
     c10::IValue ivalue = torch::IValue(deque_to_list(name())); \
     archive.write(#name, ivalue); \
   } \
@@ -251,14 +251,21 @@ void list_to_deque(const c10::List<T>& list, std::deque<T>& dq) {
   bool exists = archive.try_read(#name, ivalue); \
   if (exists) \
     name(ivalue.to<T>()); \
+  /* undefined tensors are not serialized. it's imp to save {} in name() to ensure that
+  undefined tensor values are retained in case the user set it. */ \
+  else if (ivalue.isTensor()) \
+    name({}); \
 }
 
 #define _TORCH_OPTIM_DESERIALIZE_TORCH_ARG_OPTIONAL(T, name) \
 { \
   c10::IValue ivalue; \
-  bool exists = archive.try_read(#name, ivalue); \
-  if (exists) \
-    name(ivalue.toOptional<T>()); \
+  archive.read(#name, ivalue); \
+  /*c10::nullopt is serialized which is consistent with the
+   Python API as it serializes None values. currently only options (and not state)
+   consist of c10::optional entries so we don't end up serializing anything that's not
+   serialized by Python API*/ \
+  name(ivalue.toOptional<T>()); \
 }
 
 #define _TORCH_OPTIM_DESERIALIZE_TORCH_ARG_DEQUE(T, name) \
