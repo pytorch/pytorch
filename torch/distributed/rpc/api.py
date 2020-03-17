@@ -376,7 +376,8 @@ def remote(to, func, args=None, kwargs=None):
         sending them over the wire, which could be done by a different thread
         depending on the RPC backend type. The caller should make sure that the
         contents of those tensors stay intact until the returned RRef is
-        confirmed by the owner.
+        confirmed by the owner, which can be checked using the
+        :meth:`torch.distributed.rpc.RRef.confirmed_by_owner` API.
 
     Example::
         Make sure that ``MASTER_ADDRESS`` and ``MASTER_PORT`` are set properly
