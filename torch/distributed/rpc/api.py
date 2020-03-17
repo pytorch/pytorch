@@ -37,8 +37,8 @@ from .internal import (
 )
 
 
-logging.basicConfig()
 logger = logging.getLogger(__name__)
+
 
 # NB: Ignoring RRef leaks during shutdown. Without this, applications have to
 # make sure there is no references to any RRef in the application code and
