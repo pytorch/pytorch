@@ -496,3 +496,17 @@ TEST(DictTest, dictTensorAsKey) {
   EXPECT_EQ(dict.end(), found_nokey1);
   EXPECT_EQ(dict.end(), found_nokey2);
 }
+
+TEST(DictTest, dictEquality) {
+  Dict<string, int64_t> dict;
+  dict.insert("one", 1);
+  dict.insert("two", 2);
+
+
+  Dict<string, int64_t> dictSameValue;
+  dictSameValue.insert("one", 1);
+  dictSameValue.insert("two", 2);
+
+  EXPECT_EQ(dict, dictSameValue);
+  EXPECT_FALSE(dict.is(dictSameValue));
+}
