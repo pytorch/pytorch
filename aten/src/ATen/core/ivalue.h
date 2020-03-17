@@ -321,11 +321,23 @@ struct CAFFE2_API IValue final {
   c10::List<IValue> toList() const &;
   c10::ArrayRef<IValue> toListRef() const;
 
+  // Some template constructors of IValue calls another constructor recursively.
+  // This SNIFAEs the called constructor exists.
   template<class T>
+  using enable_if_ivalue_constructible =
+      std::enable_if_t<std::is_constructible<IValue, T>::value, std::nullptr_t>;
+
+  template <
+      class T,
+      enable_if_ivalue_constructible<T> = nullptr>
   IValue(c10::List<T> v);
-  template<class T>
+  template <
+      class T,
+      enable_if_ivalue_constructible<T> = nullptr>
   IValue(at::ArrayRef<T> v);
-  template<class T>
+  template <
+      class T,
+      enable_if_ivalue_constructible<T> = nullptr>
   IValue(const std::vector<T>& v);
 
   // GenericDict
@@ -343,7 +355,9 @@ struct CAFFE2_API IValue final {
   /// \endcond
   IValue(std::unordered_map<Key, Value> v);
 
-  template<class T>
+  template <
+      class T,
+      enable_if_ivalue_constructible<T> = nullptr>
   IValue(c10::optional<T> v);
   IValue(c10::nullopt_t);
 
