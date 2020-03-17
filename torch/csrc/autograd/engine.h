@@ -227,7 +227,16 @@ struct TORCH_API Engine {
       const edge_list& outputs = {});
 
   // Given a pre-populated GraphTask and GraphRoot, computes the backward pass
-  // for the graph. This API should only be used by internal autograd specific
+  // for the graph.
+  // The async_mode is a mode where we run the graph_task in an async way.
+  // when async_mode=True, we will launch execute_graph_task_with_continuation in
+  // a separate thread and return the graph_task->future_results_ immediately.
+  // execute_graph_task_with_continuation will execute the graph task from its
+  // associated ready_queue util the queue is empty, and re-launch it to the end
+  // of thread pool tasks' queue, this is so that we don't block the computation
+  // and IO, which is used by the Distributed Autograd Engine.
+  //
+  // NB: This API should only be used by internal autograd specific
   // machinery and shouldn't be exposed to users in anyway.
   virtual std::shared_ptr<FutureVariableList> execute_with_graph_task(
       const std::shared_ptr<GraphTask>& graph_task,
@@ -280,7 +289,7 @@ struct TORCH_API Engine {
   // start device threads (CUDA, XLA, etc.) in Engine,
   // note that it does NOT start CPU thread.
   void start_device_threads();
-  virtual void thread_init(int device, std::shared_ptr<ReadyQueue> ready_queue);
+  virtual void thread_init(int device, const std::shared_ptr<ReadyQueue>& ready_queue);
   virtual void thread_on_exception(
       std::shared_ptr<GraphTask> graph_task,
       const std::shared_ptr<Node>& fn,
@@ -288,7 +297,7 @@ struct TORCH_API Engine {
   virtual void thread_main(
       const std::shared_ptr<GraphTask>& task,
       bool reentrant_thread);
-  void reentrant_thread_init(std::shared_ptr<ReadyQueue> parent_ready_queue);
+  void reentrant_thread_init(const std::shared_ptr<ReadyQueue>& parent_ready_queue);
   void add_thread_pool_task(const std::weak_ptr<GraphTask>& graph_task);
   void set_device(int device);
   void initialize_device_threads_pool();

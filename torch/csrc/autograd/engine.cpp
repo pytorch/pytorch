@@ -250,7 +250,7 @@ void Engine::set_device(int device) {
   worker_device = device;
 }
 
-auto Engine::thread_init(int device, std::shared_ptr<ReadyQueue> ready_queue) -> void {
+auto Engine::thread_init(int device, const std::shared_ptr<ReadyQueue>& ready_queue) -> void {
   at::init_num_threads();
   // thread_init should only be called by device threads other than CPU_DEVICE
   TORCH_INTERNAL_ASSERT(device != CPU_DEVICE);
@@ -378,7 +378,7 @@ auto Engine::thread_main(
 // tasks. While we can create separate cpu_ready_queue for each new reentrant
 // thread, but sharing the same cpu_ready_queue with parent thread is
 // a performance improvement and cuda thread still have to do the same thing.
-void Engine::reentrant_thread_init(std::shared_ptr<ReadyQueue> parent_ready_queue) {
+void Engine::reentrant_thread_init(const std::shared_ptr<ReadyQueue>& parent_ready_queue) {
   at::init_num_threads();
   auto tp_shared= thread_pool_shared_;
   while(true) {
