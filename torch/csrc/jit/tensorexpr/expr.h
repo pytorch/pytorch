@@ -5,10 +5,10 @@
  */
 #pragma once
 
-#include "torch/csrc/jit/tensorexpr/ir_mutator.h"
-#include "torch/csrc/jit/tensorexpr/ir_visitor.h"
-#include "torch/csrc/jit/tensorexpr/mem_arena.h"
-#include "torch/csrc/jit/tensorexpr/types.h"
+#include <torch/csrc/jit/tensorexpr/ir_mutator.h>
+#include <torch/csrc/jit/tensorexpr/ir_visitor.h>
+#include <torch/csrc/jit/tensorexpr/mem_arena.h>
+#include <torch/csrc/jit/tensorexpr/types.h>
 
 namespace torch {
 namespace jit {
@@ -47,6 +47,10 @@ class Expr : public KernelScopedObject {
 
   IRNodeType expr_type() const {
     return expr_type_;
+  }
+  // Is this a fixed (constant) immediate value.
+  virtual bool isConstant() const {
+    return false;
   }
 
  private:

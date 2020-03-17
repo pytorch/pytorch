@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-#include "torch/csrc/jit/tensorexpr/expr.h"
+#include <torch/csrc/jit/tensorexpr/expr.h>
 namespace torch {
 namespace jit {
 namespace tensorexpr {
@@ -12,15 +12,24 @@ namespace tensorexpr {
 class Buffer;
 
 // The common base between all statement node.
-class Stmt : public KernelScopedObject {
+class TORCH_API Stmt : public KernelScopedObject {
  public:
   Stmt() {}
-  TORCH_API virtual void accept(IRVisitor* visitor) const = 0;
+  virtual void accept(IRVisitor* visitor) const = 0;
   virtual Stmt* accept_mutator(IRMutator* mutator) = 0;
 
   Stmt* get_parent() const {
     return parent_;
   }
+
+  /*
+   * Make a deep copy of the given statement.
+   *
+   * All statements used in children of the statement are cloned. Note that
+   * expressions and variables are not deep-copied: it is not necessary since
+   * they are immutable.
+   */
+  static Stmt* clone(Stmt* s);
 
  protected:
   static void set_parent(Stmt* s, Stmt* new_parent) {
@@ -63,7 +72,14 @@ class LetStmt : public StmtNode<LetStmt> {
     return body_;
   }
 
-  static Stmt* make(const VarHandle& var, const ExprHandle& value, Stmt* body) {
+  static LetStmt* make(
+      const VarHandle& var,
+      const ExprHandle& value,
+      Stmt* body) {
+    if (body->get_parent()) {
+      throw malformed_input(body);
+    }
+
     return new LetStmt(var.node(), value.node(), body);
   }
 
@@ -78,7 +94,7 @@ class LetStmt : public StmtNode<LetStmt> {
 
 class Block : public StmtNode<Block> {
  public:
-  static Stmt* make(const std::vector<Stmt*>& stmts) {
+  static Block* make(const std::vector<Stmt*>& stmts) {
     std::vector<Stmt*> valid_stmts;
     for (size_t i = 0; i < stmts.size(); i++) {
       if (!stmts[i]) {
@@ -97,16 +113,25 @@ class Block : public StmtNode<Block> {
   }
 
   void append_stmt(Stmt* s) {
+    if (s->get_parent()) {
+      throw malformed_input(s);
+    }
+
     stmts_.push_back(s);
     set_parent(s, this);
   }
   bool replace_stmt(Stmt* old_stmt, Stmt* new_stmt) {
+    if (new_stmt->get_parent()) {
+      throw malformed_input(new_stmt);
+    }
+
     auto pos = std::find(stmts_.begin(), stmts_.end(), old_stmt);
     if (pos == stmts_.end()) {
       return false;
     }
     stmts_.insert(pos, new_stmt);
     stmts_.erase(pos);
+    set_parent(old_stmt, nullptr);
     set_parent(new_stmt, this);
     return true;
   }
@@ -116,6 +141,10 @@ class Block : public StmtNode<Block> {
 
   explicit Block(const std::vector<Stmt*>& stmts) {
     for (Stmt* s : stmts) {
+      if (s->get_parent()) {
+        throw malformed_input(s);
+      }
+
       stmts_.push_back(s);
       set_parent(s, this);
     }
@@ -140,7 +169,7 @@ class TORCH_API Store : public StmtNode<Store> {
     return mask_;
   }
 
-  static Stmt* make(
+  static Store* make(
       const Buffer& buffer,
       const ExprHandle& index,
       const ExprHandle& value,
@@ -148,7 +177,7 @@ class TORCH_API Store : public StmtNode<Store> {
     return new Store(buffer, index.node(), value.node(), mask.node());
   }
 
-  static Stmt* make(
+  static Store* make(
       const VarHandle& base_handle,
       const ExprHandle& index,
       const ExprHandle& value,
@@ -157,7 +186,7 @@ class TORCH_API Store : public StmtNode<Store> {
         base_handle.node(), index.node(), value.node(), mask.node());
   }
 
-  static Stmt* make(
+  static Store* make(
       const VarHandle& base_handle,
       const ExprHandle& index,
       const ExprHandle& value) {
@@ -178,10 +207,18 @@ class TORCH_API Store : public StmtNode<Store> {
       const Expr* value,
       const Expr* mask)
       : base_handle_(base_handle), index_(index), value_(value), mask_(mask) {
-    CHECK_EQ(base_handle_->dtype(), kHandle);
-    CHECK_EQ(index->dtype().lanes(), mask->dtype().lanes());
-    CHECK_EQ(index->dtype().lanes(), value->dtype().lanes());
-    CHECK_EQ(index->dtype().scalar_type(), ScalarType::Int);
+    if (base_handle_->dtype() != kHandle) {
+      throw malformed_input(base_handle);
+    }
+
+    if (index->dtype().lanes() != mask->dtype().lanes() ||
+        index->dtype().lanes() != value->dtype().lanes()) {
+      throw malformed_input();
+    }
+
+    if (index->dtype().scalar_type() != ScalarType::Int) {
+      throw unsupported_dtype();
+    }
   }
 
  private:
@@ -196,7 +233,7 @@ class TORCH_API Store : public StmtNode<Store> {
 // explicitly freed. An unfreed memory is likely considered an error.
 class Allocate : public StmtNode<Allocate> {
  public:
-  static Stmt* make(
+  static Allocate* make(
       const VarHandle& buffer_var,
       Dtype dtype,
       const std::vector<ExprHandle>& dims) {
@@ -235,7 +272,7 @@ class Allocate : public StmtNode<Allocate> {
 // Free the specific buffer. It is an error.
 class Free : public StmtNode<Free> {
  public:
-  static Stmt* make(const VarHandle& buffer_var) {
+  static Free* make(const VarHandle& buffer_var) {
     return new Free(buffer_var.node());
   }
 
@@ -251,7 +288,7 @@ class Free : public StmtNode<Free> {
 
 class Cond : public StmtNode<Cond> {
  public:
-  static Stmt* make(
+  static Cond* make(
       const ExprHandle& condition,
       Stmt* true_stmt,
       Stmt* false_stmt) {
@@ -262,11 +299,11 @@ class Cond : public StmtNode<Cond> {
     return condition_;
   }
 
-  Stmt* true_stmt() const {
+  Block* true_stmt() const {
     return true_stmt_;
   }
 
-  Stmt* false_stmt() const {
+  Block* false_stmt() const {
     return false_stmt_;
   }
 
@@ -308,14 +345,21 @@ class LoopOptions {
   }
 
   std::string gpu_block_index_str() const {
-    DCHECK(is_gpu_block_index());
+    if (!is_gpu_block_index()) {
+      throw malformed_input();
+    }
+
     static const char* kBlockIndexNames[] = {
         "blockIdx.x",
         "blockIdx.y",
         "blockIdx.z",
         "blockIdx.w",
     };
-    DCHECK(gpu_block_index_ >= 0 && gpu_block_index_ < 4);
+
+    if (gpu_block_index_ < 0 || gpu_block_index_ >= 4) {
+      throw malformed_input();
+    }
+
     return kBlockIndexNames[gpu_block_index_];
   }
 
@@ -341,10 +385,17 @@ class LoopOptions {
   }
 
   std::string gpu_thread_index_str() const {
-    DCHECK(is_gpu_thread_index());
+    if (!is_gpu_thread_index()) {
+      throw malformed_input();
+    }
+
     static const char* kThreadIndexNames[] = {
         "threadIdx.x", "threadIdx.y", "threadIdx.z", "threadIdx.w"};
-    DCHECK(gpu_thread_index_ >= 0 && gpu_thread_index_ < 4);
+
+    if (gpu_thread_index_ < 0 || gpu_thread_index_ >= 4) {
+      throw malformed_input();
+    }
+
     return kThreadIndexNames[gpu_thread_index_];
   }
 
@@ -386,10 +437,10 @@ class For : public StmtNode<For> {
   const Expr* stop() const {
     return stop_;
   }
-  Stmt* body() const {
+  Block* body() const {
     return body_;
   }
-  static Stmt* make(
+  static For* make(
       const VarHandle& var,
       const ExprHandle& start,
       const ExprHandle& stop,
@@ -399,7 +450,7 @@ class For : public StmtNode<For> {
     }
     return new For(var.node(), start.node(), stop.node(), body);
   }
-  static Stmt* make(
+  static For* make(
       const VarHandle& var,
       const ExprHandle& start,
       const ExprHandle& stop,
@@ -416,7 +467,16 @@ class For : public StmtNode<For> {
 
   For(const Var* var, const Expr* start, const Expr* stop, Stmt* body)
       : var_(var), start_(start), stop_(stop) {
-    CHECK(var && start && stop && body);
+    if (!var) {
+      throw malformed_input(var);
+    } else if (!start) {
+      throw malformed_input(start);
+    } else if (!stop) {
+      throw malformed_input(stop);
+    } else if (!body || body->get_parent()) {
+      throw malformed_input(body);
+    }
+
     Block* b = dynamic_cast<Block*>(body);
     if (!b) {
       b = new Block({body});
@@ -431,7 +491,16 @@ class For : public StmtNode<For> {
       Stmt* body,
       const LoopOptions& loop_options)
       : var_(var), start_(start), stop_(stop), loop_options_(loop_options) {
-    CHECK(var && start && stop && body);
+    if (!var) {
+      throw malformed_input(var);
+    } else if (!start) {
+      throw malformed_input(start);
+    } else if (!stop) {
+      throw malformed_input(stop);
+    } else if (!body || body->get_parent()) {
+      throw malformed_input(body);
+    }
+
     Block* b = dynamic_cast<Block*>(body);
     if (!b) {
       b = new Block({body});
