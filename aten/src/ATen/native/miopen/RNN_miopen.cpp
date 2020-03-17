@@ -447,7 +447,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> miopen_rnn(
     fn.tensors.set(input.sizes(), fn_batch_sizes, batch_first);
 
     if (fn.rnn.rnn_mode != miopenLSTM) {
-        AT_CHECK(!cx.defined(), "miopen_rnn: illegal defined cx for non-LSTM RNN.");
+        TORCH_CHECK(!cx.defined(), "miopen_rnn: illegal defined cx for non-LSTM RNN.");
     }
 
     auto is_input_packed = fn.tensors.batch_sizes.size() != 0;
@@ -458,8 +458,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> miopen_rnn(
     auto hidden_size = _hidden_size(fn.rnn, fn.tensors);
     auto output_size = _output_size(fn.rnn, fn.tensors);
 
-    AT_CHECK(hx.is_contiguous(), "miopen_rnn : hx is not contiguous.");
-    AT_CHECK(!cx.defined() || cx.is_contiguous(), "miopen_rnn : cx is not contiguous.");
+    TORCH_CHECK(hx.is_contiguous(), "miopen_rnn : hx is not contiguous.");
+    TORCH_CHECK(!cx.defined() || cx.is_contiguous(), "miopen_rnn : cx is not contiguous.");
 
     auto x = input.contiguous();
     auto output = at::empty(output_size, input.options());
@@ -493,7 +493,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> miopen_rnn(
         _copyParams_and_permute(MatrixRef<Tensor>{weight, static_cast<size_t>(weight_stride0)},
                     MatrixRef<Tensor>{params, params_stride0}, fn_mode);
 
-    AT_CHECK(!cx.defined() || cx.sizes().equals(hidden_size), "Expected cell size ", IntArrayRef{hidden_size}, ", got", cx.sizes());
+    TORCH_CHECK(!cx.defined() || cx.sizes().equals(hidden_size), "Expected cell size ", IntArrayRef{hidden_size}, ", got", cx.sizes());
 
     size_t workspace_size;
     auto x_descs_arr = descs.get_x_descs();
@@ -563,7 +563,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> miopen_rnn_backward_input(
     auto handle = getMiopenHandle();
 
     if(fn.rnn.rnn_mode != miopenLSTM) {
-        AT_CHECK(!cx.defined(), "rnn: illegal defined cx for non-LSTM RNN");
+        TORCH_CHECK(!cx.defined(), "rnn: illegal defined cx for non-LSTM RNN");
     }
 
     auto is_input_packed = fn_batch_sizes.size() != 0;
@@ -577,8 +577,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> miopen_rnn_backward_input(
     auto hidden_size = _hidden_size(fn.rnn, fn.tensors);
     auto output_size = _output_size(fn.rnn, fn.tensors);
 
-    AT_CHECK(hx.is_contiguous(), "rnn: hx is not contiguous");
-    AT_CHECK(!cx.defined() || cx.is_contiguous(), "rnn: cx is not contiguous");
+    TORCH_CHECK(hx.is_contiguous(), "rnn: hx is not contiguous");
+    TORCH_CHECK(!cx.defined() || cx.is_contiguous(), "rnn: cx is not contiguous");
 
     auto x = input.contiguous();
     auto dy = grad_output.contiguous();
@@ -591,23 +591,23 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> miopen_rnn_backward_input(
     AT_ASSERTM(cx.defined() || !output_mask[2], "illegally required grad of cx for non-LSTM RNN");
     auto dcx = cx.defined() ? at::empty(hidden_size, cx.options()) : Tensor();
 
-    AT_CHECK(fn_train, "miopen RNN backward can only be called in training mode");
+    TORCH_CHECK(fn_train, "miopen RNN backward can only be called in training mode");
 
-    AT_CHECK(input.sizes().equals(input_size),
+    TORCH_CHECK(input.sizes().equals(input_size),
         "Expected input size ", IntArrayRef{input_size}, ", got ", input.sizes());
-    AT_CHECK(output.sizes().equals(output_size),
+    TORCH_CHECK(output.sizes().equals(output_size),
         "Expected output size ", IntArrayRef{output_size}, ", got ", output.sizes());
 
-    AT_CHECK(!hx.defined() || hx.sizes().equals(hidden_size),
+    TORCH_CHECK(!hx.defined() || hx.sizes().equals(hidden_size),
         "Expected hidden size ", IntArrayRef{hidden_size}, ", got ", hx.sizes());
-    AT_CHECK(!cx.defined() || cx.sizes().equals(hidden_size),
+    TORCH_CHECK(!cx.defined() || cx.sizes().equals(hidden_size),
         "Expected cell size ", IntArrayRef{hidden_size}, ", got ", cx.sizes());
-    AT_CHECK(!dhy.defined() || dhy.sizes().equals(hidden_size),
+    TORCH_CHECK(!dhy.defined() || dhy.sizes().equals(hidden_size),
         "Expected d_hidden size ", IntArrayRef{hidden_size}, ", got ", dhy.sizes());
-    AT_CHECK(!dcy.defined() || dcy.sizes().equals(hidden_size),
+    TORCH_CHECK(!dcy.defined() || dcy.sizes().equals(hidden_size),
         "Expected d_cell size ", IntArrayRef{hidden_size}, ", got ", dcy.sizes());
 
-    AT_CHECK(dhy.is_cuda() && dy.is_cuda() && (!dcy.defined() || dcy.is_cuda()),
+    TORCH_CHECK(dhy.is_cuda() && dy.is_cuda() && (!dcy.defined() || dcy.is_cuda()),
         "Gradients aren't HIP tensors");
 
     miopenRNNAlgo_t algo = miopenRNNdefault;
@@ -679,7 +679,7 @@ std::vector<Tensor> miopen_rnn_backward_weight(
     auto handle = getMiopenHandle();
 
     if (fn.rnn.rnn_mode != miopenLSTM) {
-        AT_CHECK(!cx.defined(), "rnn: illegal defined cx for non-LSTM RNN");
+        TORCH_CHECK(!cx.defined(), "rnn: illegal defined cx for non-LSTM RNN");
     }
 
     auto is_input_packed = fn_batch_sizes.size() != 0;
@@ -691,15 +691,15 @@ std::vector<Tensor> miopen_rnn_backward_weight(
     auto input_size = _input_size(fn.tensors);
     auto hidden_size = _hidden_size(fn.rnn, fn.tensors);
 
-    AT_CHECK(fn_train, "miopen RNN backward can only be called in training mode");
+    TORCH_CHECK(fn_train, "miopen RNN backward can only be called in training mode");
 
-    AT_CHECK(input.sizes().equals(input_size),
+    TORCH_CHECK(input.sizes().equals(input_size),
         "Expected input size ", IntArrayRef{input_size}, ", got ", input.sizes());
-    AT_CHECK(!hx.defined() || hx.sizes().equals(hidden_size),
+    TORCH_CHECK(!hx.defined() || hx.sizes().equals(hidden_size),
         "Expected hidden size ", IntArrayRef{hidden_size}, ", got ", hx.sizes());
 
-    AT_CHECK(hx.is_contiguous(), "rnn: hx is not contiguous");
-    AT_CHECK(!cx.defined() || cx.is_contiguous(), "rnn: cx is not contiguous");
+    TORCH_CHECK(hx.is_contiguous(), "rnn: hx is not contiguous");
+    TORCH_CHECK(!cx.defined() || cx.is_contiguous(), "rnn: cx is not contiguous");
 
     auto x = input.contiguous();
     const auto& y = output;
@@ -808,7 +808,7 @@ std::pair<Tensor, hidden_type> _miopen_impl(
     std::tie(hx, cx) = unpack_hidden(hidden);
     int64_t hidden_size = hx.size(2);
 
-    AT_CHECK(_batch_sizes.dim() == 1, "batch_sizes tensor should be 1D");
+    TORCH_CHECK(_batch_sizes.dim() == 1, "batch_sizes tensor should be 1D");
     IntArrayRef batch_sizes { _batch_sizes.data_ptr<int64_t>(), static_cast<size_t>(_batch_sizes.size(0)) };
 
     Tensor dropout_state = at::empty({0}, input.options());
