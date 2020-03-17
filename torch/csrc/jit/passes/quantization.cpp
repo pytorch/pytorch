@@ -476,6 +476,12 @@ class InsertObserversHelper {
 
   bool valueNeedsToBeQuantized(Value* v);
 
+  bool isObserved(
+      Value* v,
+      const std::unordered_set<Value*>& block_observed_values) {
+    return block_observed_values.count(v) || observed_values_.count(v);
+  }
+
   // Fill the map between the caller input/output to input/output
   // of called graph, this is used to navigate through the graph
   // to find the observer for a given value
@@ -854,6 +860,7 @@ void InsertObserversHelper::preprocess(
   }
 }
 
+// TODO: remove this as a class method
 bool InsertObserversHelper::valueNeedsToBeQuantized(Value* v) {
   if (!v->type()->isSubtypeOf(TensorType::get()) ||
       isBiasOfConvOrLinear(v)) {
@@ -1037,7 +1044,7 @@ InsertObserversHelper::insertObserversFor(
         auto m = getInvokedModule(module, n, self);
         std::unordered_set<Value*> callee_observed_inputs;
         for (auto i = 0; i < n->inputs().size(); ++i) {
-          if (block_observed_values.count(n->input(i))) {
+          if (isObserved(n->input(i)), block_observed_values) {
             callee_observed_inputs.insert(caller_to_callee_[n->inputs()[i]]);
           }
         }
@@ -1051,16 +1058,14 @@ InsertObserversHelper::insertObserversFor(
         }
         for (auto i = 0; i < n->inputs().size(); ++i) {
           if (input_observers[i] && !inputs_outputs.count(n->input(i)) &&
-              !block_observed_values.count(n->input(i)) &&
-              !observed_values_.count(n->input(i))) {
+              !isObserved(n->input(i), block_observed_values)) {
             values_to_observe[n->inputs()[i]] = *input_observers[i];
             block_observed_values.insert(n->input(i));
           }
         }
         for (auto i = 0; i < n->outputs().size(); ++i) {
           if (output_observers[i] && !inputs_outputs.count(n->output(i)) &&
-              !block_observed_values.count(n->output(i)) &&
-              !observed_values_.count(n->output(i))) {
+              !isObserved(n->output(i), block_observed_values)) {
             values_to_observe[n->outputs()[i]] = *output_observers[i];
             block_observed_values.insert(n->output(i));
           }
@@ -1107,8 +1112,7 @@ InsertObserversHelper::insertObserversFor(
         for (Value* v : n->outputs()) {
           propagateObservedProperty(v, block_observed_values);
           if (!inputs_outputs.count(v) &&
-              !block_observed_values.count(v) &&
-              !observed_values_.count(v)) {
+              !isObserved(v, block_observed_values)) {
             if (auto observer_opt = getObserverFor(v)) {
               values_to_observe[v] = *observer_opt;
               block_observed_values.insert(v);
@@ -1123,7 +1127,7 @@ InsertObserversHelper::insertObserversFor(
   }
   std::vector<size_t> output_idxs;
   for (auto i = 0; i < block->outputs().size(); ++i) {
-    if (block_observed_values.count(block->outputs()[i])) {
+    if (isObserved(block->outputs()[i], block_observed_values)) {
       output_idxs.push_back(i);
     }
   }
