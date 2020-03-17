@@ -993,6 +993,22 @@ class TestJit(JitTestCase):
         self.run_pass('cse', ints_alias_outputs.graph)
         FileCheck().check_count("aten::add", 1, exactly=True).run(ints_alias_outputs.graph)
 
+    def test_lobpcg(self):
+        from torch.testing._internal.common_utils import random_sparse_pd_matrix
+        from torch._linalg_utils import matmul as mm
+
+        lobpcg = torch.jit.script(torch.lobpcg)
+
+        m = 500
+        k = 5
+        device = "cpu"
+        dtype = torch.double
+        A1 = random_sparse_pd_matrix(m, density=2.0 / m, device=device, dtype=dtype)
+        X1 = torch.randn((m, k), dtype=dtype, device=device)
+        E1, V1 = lobpcg(A1, X=X1)
+        eq_err = torch.norm((mm(A1, V1) - V1 * E1), 2) / E1.max()
+        self.assertLess(eq_err, 1e-6)
+
     def test_recursive_cse(self):
         input_str = """
 graph(%x : Tensor,
