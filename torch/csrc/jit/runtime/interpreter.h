@@ -95,7 +95,7 @@ struct InterpreterContinuation {
   InterpreterContinuation(
       InterpreterState state_,
       Stack stack_,
-      std::shared_ptr<torch::ThreadLocalState> thread_local_state_)
+      torch::ThreadLocalState thread_local_state_)
       : state(state_),
         stack(std::move(stack_)),
         thread_local_state(std::move(thread_local_state_)) {}
@@ -106,7 +106,7 @@ struct InterpreterContinuation {
   InterpreterState state;
   Stack stack;
   // Thread local state that needs to be carried over to the continuation.
-  std::shared_ptr<torch::ThreadLocalState> thread_local_state;
+  torch::ThreadLocalState thread_local_state;
 };
 
 // what is the tensors type, including state from the current execution context

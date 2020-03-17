@@ -15,7 +15,7 @@ class ThreadLocalState {
   int64_t dist_autograd_context_id_;
 };
 
-std::shared_ptr<ThreadLocalState> getThreadLocalState();
+ThreadLocalState getThreadLocalState();
 
 void setThreadLocalState(const ThreadLocalState& state);
 
@@ -23,17 +23,17 @@ void setThreadLocalState(const ThreadLocalState& state);
 // interpreter continuations.
 class ThreadLocalStateGuard {
  public:
-  explicit ThreadLocalStateGuard(std::shared_ptr<ThreadLocalState> state) {
-    prev_state_ = getThreadLocalState();
-    setThreadLocalState(*state);
+  explicit ThreadLocalStateGuard(const ThreadLocalState& state)
+      : prev_state_(getThreadLocalState()) {
+    setThreadLocalState(state);
   }
 
   ~ThreadLocalStateGuard() {
-    setThreadLocalState(*prev_state_);
+    setThreadLocalState(prev_state_);
   }
 
  private:
-  std::shared_ptr<ThreadLocalState> prev_state_;
+  ThreadLocalState prev_state_;
 };
 
 } // namespace torch

@@ -24,13 +24,13 @@ int64_t ThreadLocalState::distAutogradContextId() const {
   return dist_autograd_context_id_;
 }
 
-std::shared_ptr<ThreadLocalState> getThreadLocalState() {
+ThreadLocalState getThreadLocalState() {
   int64_t dist_autograd_context_id = -1;
 #ifdef USE_DISTRIBUTED
   dist_autograd_context_id = DistAutogradContainer::currentContextId();
 #endif
 
-  return std::make_shared<ThreadLocalState>(
+  return ThreadLocalState(
       autograd::GradMode::is_enabled(), dist_autograd_context_id);
 }
 

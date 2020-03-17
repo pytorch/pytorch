@@ -1447,7 +1447,7 @@ InterpreterState::InterpreterState(
     : pImpl(std::move(pImpl_)) {}
 
 void InterpreterContinuation::operator()() {
-  torch::ThreadLocalStateGuard guard(std::move(thread_local_state));
+  torch::ThreadLocalStateGuard guard(thread_local_state);
   state.runAsync(stack);
 }
 } // namespace jit
