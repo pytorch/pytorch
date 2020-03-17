@@ -1065,6 +1065,12 @@ def get_nn_module_name_from_kwargs(**kwargs):
     elif 'constructor' in kwargs:
         return kwargs['constructor'].__name__
 
+def get_nn_mod_test_name(**kwargs):
+    name = get_nn_module_name_from_kwargs(**kwargs)
+    test_name = name
+    if 'desc' in kwargs:
+        test_name = "{}_{}".format(test_name, kwargs['desc'])
+    return 'test_nn_{}'.format(test_name)
 
 def try_get_nn_module_compiled_mod_and_inputs(*args, **kwargs):
     name = get_nn_module_name_from_kwargs(**kwargs)
@@ -1073,10 +1079,7 @@ def try_get_nn_module_compiled_mod_and_inputs(*args, **kwargs):
         # eval() is not supported, so skip these tests
         return
 
-    test_name = name
-    if 'desc' in kwargs:
-        test_name = "{}_{}".format(test_name, kwargs['desc'])
-    test_name = 'test_nn_{}'.format(test_name)
+    test_name = get_nn_mod_test_name(**kwargs)
 
     if test_name in EXCLUDE_SCRIPT_MODULES:
         return

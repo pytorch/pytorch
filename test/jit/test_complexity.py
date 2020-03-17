@@ -10,7 +10,7 @@ torch.set_default_dtype(torch.double)
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import JitTestCase, enable_profiling_mode, try_get_nn_module_compiled_mod_and_inputs, \
-    get_nn_module_name_from_kwargs
+    get_nn_mod_test_name
 from torch.testing._internal.common_utils import run_tests, suppress_warnings
 import torch.testing._internal.jit_utils as jit_utils
 
@@ -75,7 +75,7 @@ class TestComplexity(JitTestCase):
                     continue
 
                 mod, inputs = out
-                test_name = get_nn_module_name_from_kwargs(**test)
+                test_name = get_nn_mod_test_name(**test)
                 for _ in range(6):
                     mod(*inputs)
 
