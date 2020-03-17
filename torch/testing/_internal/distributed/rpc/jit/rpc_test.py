@@ -5,7 +5,11 @@ import torch
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
 from torch import Tensor
-from torch.testing._internal.dist_utils import dist_init, worker_name
+from torch.testing._internal.dist_utils import (
+    dist_init,
+    worker_name,
+    initialize_pg,
+)
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
 )
@@ -578,6 +582,7 @@ class JitRpcTest(LocalRRefTest, JitRpcAsyncOpTest, RpcAgentTestFixture):
         # wait for local MyScriptModule instantiation to finish,
         # otherwise it could instantiate MyScriptModule in parallel with
         # server thread in the below
+        initialize_pg(self.init_method, self.rank, self.world_size)
         dist.barrier()
 
         # rpc_sync still accepts script class and run it in
