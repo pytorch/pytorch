@@ -325,8 +325,8 @@ auto Engine::thread_main(
       }
 
       if (!(local_graph_task = task.base_.lock())) {
-        // Reentrant thread's graph task should not expire since we hold a
-        // reference to it in this method.
+        // GraphTask for function is no longer valid, skipping further
+        // execution.
         continue;
       }
 

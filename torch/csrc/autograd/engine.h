@@ -232,7 +232,7 @@ struct TORCH_API Engine {
   // when async_mode=True, we will launch execute_graph_task_with_continuation in
   // a separate thread and return the graph_task->future_results_ immediately.
   // execute_graph_task_with_continuation will execute the graph task from its
-  // associated ready_queue util the queue is empty, and re-launch it to the end
+  // associated ready_queue until the queue is empty, and re-launch it to the end
   // of thread pool tasks' queue, this is so that we don't block the computation
   // and IO, which is used by the Distributed Autograd Engine.
   //
@@ -265,11 +265,6 @@ struct TORCH_API Engine {
 
   bool is_checkpoint_valid();
 
-  // initialize the thread local ready queue with the ready queue that is created
-  // elsewhere, i.e. thread_init, reentrant_thread_init, initialization in the
-  // distributed autograd engine, etc.
-  std::shared_ptr<ReadyQueue> init_local_ready_queue(std::shared_ptr<ReadyQueue> ready_queue = nullptr);
-
   size_t ready_queue_size(const std::shared_ptr<GraphTask>& graph_task, at::Device device);
 
  protected:
@@ -279,6 +274,10 @@ struct TORCH_API Engine {
       std::shared_ptr<GraphTask>& graph_task,
       Node* func,
       InputBuffer& inputs);
+
+  // initialize the thread local ready queue with the ready queue that is created
+  // elsewhere, i.e. thread_init, reentrant_thread_init, etc.
+  std::shared_ptr<ReadyQueue> init_local_ready_queue(std::shared_ptr<ReadyQueue> ready_queue = nullptr);
 
   ReadyQueue& ready_queue(
       const std::shared_ptr<GraphTask>& graph_task,
