@@ -904,7 +904,7 @@ void PeepholeOptimizeShapeExpressions(Block* block) {
 
 } // anonymous namespace
 
-void CudaFuseGraph(std::shared_ptr<Graph>& graph) {
+TORCH_API void CudaFuseGraph(std::shared_ptr<Graph>& graph) {
   CudaGraphFuser(graph->block(), graph).run();
   // After FuseGraph some common subexpressions may come back
   EliminateCommonSubexpression(graph);

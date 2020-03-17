@@ -243,11 +243,11 @@ bool IrParser::init_registry_ = true;
 
 } // namespace
 
-bool isNodeParsible(const Node* const node) {
+TORCH_API bool isNodeParsible(const Node* const node) {
   return IrParser::canParseNode(node);
 }
 
-void parseJitIR(std::shared_ptr<Graph>& graph, Fusion& fusion) {
+TORCH_API void parseJitIR(std::shared_ptr<Graph>& graph, Fusion& fusion) {
   IrParser parser(graph, fusion);
   parser.parse();
 }

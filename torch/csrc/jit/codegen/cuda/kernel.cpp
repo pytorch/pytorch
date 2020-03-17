@@ -76,7 +76,7 @@ void prepare_argument(
 
 } // namespace
 
-void compileKernel(Fusion& fusion, CudaKernel& entry) {
+TORCH_API void compileKernel(Fusion& fusion, CudaKernel& entry) {
   // generating cuda code;
   std::string code;
   std::string func_name;
@@ -150,7 +150,7 @@ void compileKernel(Fusion& fusion, CudaKernel& entry) {
   entry.max_blocks_ *= prop->multiProcessorCount;
 }
 
-void runKernel(
+TORCH_API void runKernel(
     CudaKernel& entry,
     const at::ArrayRef<IValue>& inputs,
     std::vector<at::Tensor>& outputs) {
@@ -214,7 +214,7 @@ void runKernel(
 
 // WARNING:
 // This function is here for testing purposes only
-void runTestKernel(
+TORCH_API void runTestKernel(
     CudaKernel& entry,
     const std::vector<at::Tensor>& inputs,
     std::vector<at::Tensor>& outputs) {

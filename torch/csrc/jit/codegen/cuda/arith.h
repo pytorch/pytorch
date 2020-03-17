@@ -32,6 +32,7 @@ TORCH_API Val* unaryOp(UnaryOpType type, Val* v1);
 TORCH_API Val* binaryOp(BinaryOpType type, Val* v1, Val* v2);
 
 TORCH_API Val* add(Val* v1, Val* v2);
+TORCH_API Val* SomeCrazyName(Val* v1, Val* v2);
 TORCH_API Val* sub(Val* v1, Val* v2);
 TORCH_API Val* mul(Val* v1, Val* v2);
 TORCH_API Val* div(Val* v1, Val* v2);

@@ -56,7 +56,7 @@ enum class TORCH_API BinaryOpType {
   , CeilDiv
 };
 
-enum class ParallelType {
+enum class TORCH_API ParallelType {
   BIDz,
   BIDy,
   BIDx,
