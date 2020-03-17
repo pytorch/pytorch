@@ -218,10 +218,12 @@ c10::List<T> deque_to_list(const std::deque<T>& dq) {
 }
 
 template <typename T>
-void list_to_deque(const c10::List<T>& list, std::deque<T>& dq) {
+std::deque<T> list_to_deque(const c10::List<T>& list) {
+  std::deque<T> dq;
   for (size_t i = 0; i < list.size(); i++) {
     dq.push_back(list[i]);
   }
+  return dq;
 }
 
 #define _TORCH_OPTIM_SERIALIZE(name) \
@@ -253,10 +255,6 @@ void list_to_deque(const c10::List<T>& list, std::deque<T>& dq) {
 #define _TORCH_OPTIM_DESERIALIZE_TORCH_ARG_OPTIONAL(T, name) { \
   c10::IValue ivalue; \
   bool exists = archive.try_read(#name, ivalue); \
-  /*c10::nullopt is serialized which is consistent with the
-   Python API as it serializes None values. currently only options (and not state)
-   consist of c10::optional entries so we don't end up serializing anything that's not
-   serialized by Python API*/ \
   if (exists) { \
     name(ivalue.toOptional<T>()); \
   } \
@@ -267,8 +265,7 @@ void list_to_deque(const c10::List<T>& list, std::deque<T>& dq) {
   bool exists = archive.try_read(#name, ivalue); \
   if (exists) { \
     auto list = ivalue.to<c10::List<T::value_type>>(); \
-    auto& dq = name(); \
-    list_to_deque(list, dq); \
+    name(list_to_deque(list)); \
   } \
 }
 

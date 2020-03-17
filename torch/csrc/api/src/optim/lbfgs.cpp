@@ -57,7 +57,7 @@ bool if_container_equal(T lhs, T rhs) {
 }
 
 bool operator==(const LBFGSParamState& lhs, const LBFGSParamState& rhs) {
-  auto isNull = [](c10::optional<std::vector<Tensor>> val) { return val == c10::nullopt; };
+  auto isNull = [](const c10::optional<std::vector<Tensor>>& val) { return val == c10::nullopt; };
   return (lhs.func_evals() == rhs.func_evals()) &&
          (lhs.n_iter() == rhs.n_iter()) &&
          (lhs.t() == rhs.t()) &&
@@ -210,8 +210,8 @@ double _cubic_interpolate(
 }
 
 using Function = std::function<std::tuple<double, Tensor>(const std::vector<Tensor>& x, double t, const Tensor& d)>;
-std::tuple<double, Tensor, double, int64_t> _strong_wolfe(Function obj_func, const std::vector<Tensor>& x,
-                                          double t, Tensor d, double f, Tensor g, const Tensor& gtd,
+std::tuple<double, Tensor, double, int64_t> _strong_wolfe(const Function& obj_func, const std::vector<Tensor>& x,
+                                          double t, const Tensor& d, double f, Tensor g, const Tensor& gtd,
                                           double c1 = 1e-4, double c2 = 0.9, // // NOLINT(cppcoreguidelines-avoid-magic-numbers)
                                           double tolerance_change = 1e-9, double max_ls = 25) { // NOLINT(cppcoreguidelines-avoid-magic-numbers)
 
