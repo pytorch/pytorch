@@ -64,13 +64,29 @@ RegisterOperators reg_rpc_ops({
         },
         aliasAnalysisFromSchema()),
      Operator(
-         "aten::confirmed_by_owner(RRef(t) self) -> bool",
-         [](Stack& stack) {
-           auto rref = pop(stack).toRRef();
-           push(stack, rref->confirmedByOwner());
-           return 0;
-         },
-         aliasAnalysisFromSchema()),
+       "aten::owner(RRef(t) self) -> int",
+       [](Stack& stack) {
+         auto rref = pop(stack).toRRef();
+         push(stack, rref->owner());
+         return 0;
+       },
+       aliasAnalysisFromSchema()),
+     Operator(
+        "aten::owner_name(RRef(t) self) -> str",
+        [](Stack& stack) {
+          auto rref = pop(stack).toRRef();
+          push(stack, rref->ownerName());
+          return 0;
+        },
+        aliasAnalysisFromSchema()),
+     Operator(
+        "aten::confirmed_by_owner(RRef(t) self) -> bool",
+        [](Stack& stack) {
+          auto rref = pop(stack).toRRef();
+          push(stack, rref->confirmedByOwner());
+          return 0;
+        },
+        aliasAnalysisFromSchema()),
      Operator(
          prim::rpc_async,
          [](const Node* node) -> Operation {
