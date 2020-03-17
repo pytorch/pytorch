@@ -238,27 +238,19 @@ void list_to_deque(const c10::List<T>& list, std::deque<T>& dq) {
   } \
 }
 
-#define _TORCH_OPTIM_SERIALIZE_TORCH_ARG_DEQUE(name) {\
-  if (name().size() != 0) { \
-    c10::IValue ivalue = torch::IValue(deque_to_list(name())); \
-    archive.write(#name, ivalue); \
-  } \
+#define _TORCH_OPTIM_SERIALIZE_TORCH_ARG_DEQUE(name) { \
+  c10::IValue ivalue = torch::IValue(deque_to_list(name())); \
+  archive.write(#name, ivalue); \
 }
 
-#define _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(T, name) \
-{ \
+#define _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(T, name) { \
   c10::IValue ivalue; \
   bool exists = archive.try_read(#name, ivalue); \
   if (exists) \
     name(ivalue.to<T>()); \
-  /* undefined tensors are not serialized. it's imp to save {} in name() to ensure that
-  undefined tensor values are retained in case the user set it. */ \
-  else if (ivalue.isTensor()) \
-    name({}); \
 }
 
-#define _TORCH_OPTIM_DESERIALIZE_TORCH_ARG_OPTIONAL(T, name) \
-{ \
+#define _TORCH_OPTIM_DESERIALIZE_TORCH_ARG_OPTIONAL(T, name) { \
   c10::IValue ivalue; \
   archive.read(#name, ivalue); \
   /*c10::nullopt is serialized which is consistent with the
@@ -268,8 +260,7 @@ void list_to_deque(const c10::List<T>& list, std::deque<T>& dq) {
   name(ivalue.toOptional<T>()); \
 }
 
-#define _TORCH_OPTIM_DESERIALIZE_TORCH_ARG_DEQUE(T, name) \
-{ \
+#define _TORCH_OPTIM_DESERIALIZE_TORCH_ARG_DEQUE(T, name) { \
   c10::IValue ivalue; \
   bool exists = archive.try_read(#name, ivalue); \
   if (exists) { \

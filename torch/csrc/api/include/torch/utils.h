@@ -1,8 +1,8 @@
 #pragma once
 
-#include <torch/types.h>
 #include <ATen/Parallel.h>
 #include <torch/csrc/autograd/grad_mode.h>
+#include <torch/csrc/api/include/torch/types.h>
 #include <cstdint>
 
 namespace torch {

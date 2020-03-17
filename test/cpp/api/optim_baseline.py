@@ -60,6 +60,7 @@ def run(optimizer_name, iterations, sample_every):
     model = model.to(torch.float64).apply(weight_init)
 
     optimizer = OPTIMIZERS[optimizer_name](model.parameters())
+
     input = torch.tensor([[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]], dtype=torch.float64)
 
     values = []

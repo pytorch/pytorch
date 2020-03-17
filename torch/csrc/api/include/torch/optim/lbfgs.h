@@ -57,10 +57,8 @@ class TORCH_API LBFGS : public LossClosureOptimizer {
      TORCH_CHECK(param_groups_.size() == 1, "LBFGS doesn't support per-parameter options (parameter groups)");
      if (defaults.max_eval() == c10::nullopt) {
        auto max_eval_val = (defaults.max_iter() * 5) / 4;
-       auto& options = static_cast<LBFGSOptions&>(param_groups_[0].options());
-       options.max_eval(max_eval_val);
-       auto& default_options = static_cast<LBFGSOptions&>(*defaults_.get());
-       default_options.max_eval(max_eval_val);
+       static_cast<LBFGSOptions&>(param_groups_[0].options()).max_eval(max_eval_val);
+       static_cast<LBFGSOptions&>(*defaults_.get()).max_eval(max_eval_val);
      }
      _numel_cache = c10::nullopt;
    }

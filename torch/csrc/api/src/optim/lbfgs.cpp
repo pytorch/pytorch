@@ -23,7 +23,8 @@ bool operator==(const LBFGSOptions& lhs, const LBFGSOptions& rhs) {
          (lhs.max_eval() == rhs.max_eval()) &&
          (lhs.tolerance_grad() == rhs.tolerance_grad()) &&
          (lhs.tolerance_change() == rhs.tolerance_change() &&
-         (lhs.history_size() == rhs.history_size()));
+         (lhs.history_size() == rhs.history_size())) &&
+         (lhs.line_search_fn() == rhs.line_search_fn());
 }
 
 void LBFGSOptions::serialize(torch::serialize::OutputArchive& archive) const {
@@ -59,7 +60,7 @@ bool operator==(const LBFGSParamState& lhs, const LBFGSParamState& rhs) {
   return (lhs.func_evals() == rhs.func_evals()) &&
          (lhs.n_iter() == rhs.n_iter()) &&
          (lhs.t() == rhs.t()) &&
-         torch::equal_if_defined(lhs.d(), lhs.d()) &&
+         torch::equal_if_defined(lhs.d(), rhs.d()) &&
          torch::equal_if_defined(lhs.H_diag(), rhs.H_diag()) &&
          torch::equal_if_defined(lhs.prev_flat_grad(), rhs.prev_flat_grad()) &&
          torch::equal_if_defined(lhs.prev_loss(), rhs.prev_loss()) &&
@@ -100,7 +101,6 @@ void LBFGSParamState::serialize(torch::serialize::InputArchive& archive) {
 Tensor LBFGS::_gather_flat_grad() {
   std::vector<Tensor> views;
   for (const auto& p : param_groups_.at(0).params()) {
-    Tensor view;
     if (!p.grad().defined()) {
       views.emplace_back(p.new_empty({p.numel()}).zero_());
     }
@@ -221,7 +221,7 @@ std::tuple<Tensor, Tensor, double, int64_t> _strong_wolfe(Function obj_func, con
     auto gtd_new = g_new.dot(d);
 
     // bracket an interval containing a point satisfying the Wolfe criteria
-    auto t_prev = 0;
+    double t_prev = 0;
     auto f_prev = f;
     auto g_prev = g;
     auto gtd_prev = gtd;
