@@ -664,7 +664,7 @@ if (USE_LLVM AND LLVM_FOUND)
     support core analysis executionengine instcombine
     scalaropts transformutils native orcjit)
   target_link_libraries(torch_cpu PRIVATE ${LLVM_LINK_LIBS})
-endif (LLVM_FOUND)
+endif (USE_LLVM AND LLVM_FOUND)
 
 # This is required for older versions of CMake, which don't allow
 # specifying add_library() without a list of source files
