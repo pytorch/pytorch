@@ -1,4 +1,4 @@
-#include "torch/csrc/jit/tensorexpr/ir_printer.h"
+#include <torch/csrc/jit/tensorexpr/ir_printer.h>
 
 namespace torch {
 namespace jit {
@@ -153,6 +153,21 @@ void IRPrinter::visit(const CompareSelect* v) {
   if (rhs_prec >= self_prec) {
     os() << ")";
   }
+  os() << " ? ";
+
+  auto withParens = [&](const Expr* e) {
+    auto prec = getPrecedence(e->expr_type());
+    if (prec >= self_prec) {
+      os() << "(";
+    }
+    e->accept(this);
+    if (prec >= self_prec) {
+      os() << "(";
+    }
+  };
+  withParens(v->ret_val1());
+  os() << " : ";
+  withParens(v->ret_val2());
 }
 
 static void formatFPSuffix(std::ostream& os, double v) {
@@ -240,8 +255,7 @@ void IRPrinter::visit(const LetStmt* v) {
 }
 
 void IRPrinter::visit(const Ramp* v) {
-  emitIndent();
-  os() << "Ramp(" << v->base() << ", " << v->stride() << ", " << v->lanes()
+  os() << "Ramp(" << *v->base() << ", " << *v->stride() << ", " << v->lanes()
        << ")";
 }
 
@@ -264,7 +278,7 @@ void IRPrinter::visit(const For* v) {
   os() << std::endl;
   if (v->body()) {
     indent_++;
-    os() << *v->body() << std::endl;
+    os() << *v->body();
     indent_--;
   }
   emitIndent();
@@ -285,7 +299,7 @@ void IRPrinter::visit(const Store* v) {
 }
 
 void IRPrinter::visit(const Broadcast* v) {
-  os() << "Broadcast(" << v->value() << ", " << v->lanes() << ")";
+  os() << "Broadcast(" << *v->value() << ", " << v->lanes() << ")";
 }
 
 void IRPrinter::visit(const IfThenElse* v) {
@@ -354,6 +368,11 @@ void IRPrinter::visit(const Cond* v) {
   }
 }
 
+void IRPrinter::visit(const LinearForm* v) {
+  os() << "(" << *v->getA() << ") * (" << *v->getX() << ") + (" << *v->getB()
+       << ")" << std::endl;
+}
+
 void IRPrinter::emitIndent() {
   os() << std::setw(2 * indent_) << "";
 }
@@ -394,18 +413,38 @@ std::ostream& operator<<(std::ostream& stream, const Stmt& stmt) {
   return stream;
 }
 
-std::ostream& operator<<(std::ostream& stream, Stmt* stmt) {
-  IRPrinter::PrinterStream* printer_stream =
-      dynamic_cast<IRPrinter::PrinterStream*>(&stream);
-  if (printer_stream != nullptr) {
-    stmt->accept(printer_stream->printer());
+void print(const Expr* expr) {
+  if (expr) {
+    IRPrinter p(std::cout);
+    p.print(*expr);
   } else {
-    IRPrinter p(stream);
-    p.print(*stmt);
+    std::cout << "(null expr)";
   }
-  return stream;
+}
+
+void print(const Stmt* stmt) {
+  if (stmt) {
+    IRPrinter p(std::cout);
+    p.print(*stmt);
+  } else {
+    std::cout << "(null stmt)\n";
+  }
 }
 
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
+
+namespace std {
+std::string to_string(const Expr* expr) {
+  std::ostringstream oss;
+  oss << *expr;
+  return oss.str();
+}
+
+std::string to_string(const Stmt* stmt) {
+  std::ostringstream oss;
+  oss << *stmt;
+  return oss.str();
+}
+} // namespace std
