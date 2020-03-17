@@ -16360,7 +16360,7 @@ unary_ufuncs = {
     "mvlgamma": ufunc_meta(is_floating=True),
     "digamma": ufunc_meta(is_floating=True, complex_on=('cpu')),
     "rsqrt": ufunc_meta(is_floating=True, complex_on=('cpu')),
-    "sigmoid": ufunc_meta(is_floating=True, complex_on=('cpu'))
+    "sigmoid": ufunc_meta(is_floating=True, complex_on=('cpu')),
     "atan": ufunc_meta(is_floating=True, complex_on=('cpu')),
     'cos': ufunc_meta(is_floating=True, complex_on=('cpu')),
     "cosh": ufunc_meta(is_floating=True, complex_on=('cpu')),
