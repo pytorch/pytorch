@@ -127,18 +127,6 @@ graph(%packed_params, %a_quant, %r_scale, %r_zero_point, %r_dtype):
         %r = quantized::linear(%a_quant, %packed_params, %r_scale, %r_zero_point)
         return (%r) )";
 
-  std::string cat = R"(
-graph(%input_quant, %dim, %r_scale, %r_zero_point, %r_dtype):
-        %input_dequant = aten::dequantize(%input_quant)
-        %r = aten::cat(%input_dequant, %dim)
-        %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
-        return (%r_quant) )";
-
-  std::string quantized_cat = R"(
-graph(%input_quant, %dim, %r_scale, %r_zero_point, %r_dtype):
-         %r_quant = quantized::cat(%input_quant, %dim, %r_scale, %r_zero_point)
-         return (%r_quant) )";
-
   std::string add = R"(
 graph(%a_quant, %b_quant, %alpha, %scale, %zero_point, %dtype):
          %a_dequant = aten::dequantize(%a_quant)
@@ -162,7 +150,6 @@ graph(%a_quant, %b_quant, %alpha, %scale, %zero_point, %dtype):
          %r_add = aten::add_(%a_dequant, %b_dequant, %alpha)
          %r = aten::quantize_per_tensor(%r_add, %scale, %zero_point, %dtype)
          return (%r) )";
-
   // We don't have quantized inplace add right now
 
   return {
@@ -175,7 +162,6 @@ graph(%a_quant, %b_quant, %alpha, %scale, %zero_point, %dtype):
     {aten_linear, quantized_aten_linear},
     {add_relu, quantized_add_relu},
     {add_inplace_relu, quantized_add_relu},
-    {cat, quantized_cat},
     {add, quantized_add},
     {inplace_add, quantized_add},
   };
