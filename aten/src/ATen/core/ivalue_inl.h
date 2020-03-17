@@ -130,6 +130,8 @@ inline c10::intrusive_ptr<torch::CustomClassHolder> IValue::toCapsule() const & 
 
 namespace ivalue {
 
+void CAFFE2_API checkCustomClassType(TypePtr expected_type, TypePtr actual_type);
+
 template <typename T>
 using Shared = c10::intrusive_ptr<T>;
 
@@ -532,14 +534,7 @@ c10::intrusive_ptr<T> IValue::toCustomClass() && {
               "Tried to cast IValue to custom class but it did "
               "not contain a custom class!");
   auto expected_type = c10::getCustomClassType<c10::intrusive_ptr<T>>();
-  // NB: doing pointer comparison here
-  // If in the future there ever arises a need to call operator== on custom class
-  // Type's, this needs to be changed!
-  TORCH_CHECK(type() == expected_type,
-              "Tried to convert an IValue of type ",
-              type()->python_str(),
-              " to custom class type ",
-              expected_type->python_str());
+  ivalue::checkCustomClassType(expected_type, type());
   auto userObj = c10::static_intrusive_pointer_cast<T>(obj->getSlot(0).toCapsule());
   return userObj;
 }
@@ -554,14 +549,7 @@ c10::intrusive_ptr<T> IValue::toCustomClass() const & {
               "Tried to cast IValue to custom class but it did "
               "not contain a custom class!");
   auto expected_type = c10::getCustomClassType<c10::intrusive_ptr<T>>();
-  // NB: doing pointer comparison here
-  // If in the future there ever arises a need to call operator== on custom class
-  // Type's, this needs to be changed!
-  TORCH_CHECK(type() == expected_type,
-              "Tried to convert an IValue of type ",
-              type()->python_str(),
-              " to custom class type ",
-              expected_type->python_str());
+  ivalue::checkCustomClassType(expected_type, type());
   auto userObj = c10::static_intrusive_pointer_cast<T>(obj->getSlot(0).toCapsule());
   return userObj;
 }
