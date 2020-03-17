@@ -124,8 +124,10 @@ PyObject* rpc_init(PyObject* /* unused */) {
 
           .. warning::
               RRefs can only be serialized and deserialized by the RPC module.
-              Serializing and deserializing RRefs without RPC will lead to
-              errors.
+              Serializing and deserializing RRefs without RPC (e.g., Python
+              pickle, :meth:`~torch.save`, :meth:`~torch.load`,
+              :meth:`~torch.jit.save`, :meth:`~torch.jit.load`, etc.) will lead
+              to errors.
 
           Example::
               Following examples skip RPC initialization and shutdown code
