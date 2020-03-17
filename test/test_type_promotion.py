@@ -65,7 +65,7 @@ class TestTypePromotion(TestCase):
         uint8_tensor *= int16_tensor
 
     @float_double_default_dtype
-    def test_unsinged(self, device):
+    def test_unsigned(self, device):
         dont_promote = torch.ones(3, dtype=torch.uint8, device=device) + 5
         self.assertEqual(dont_promote.dtype, torch.uint8)
 
@@ -592,6 +592,38 @@ class TestTypePromotion(TestCase):
         dividend_sparse = dividend.to_sparse()
         casting_result = dividend.to(torch.get_default_dtype()) / 2
         self.assertEqual(casting_result, torch.true_divide(dividend_sparse, 2).to_dense())
+
+    @float_double_default_dtype
+    def test_reductions(self, device):
+        for fn, meth in ((torch.mean, torch.Tensor.mean),
+                         (torch.std, torch.Tensor.std),
+                         (torch.var, torch.Tensor.var),
+                         (torch.logsumexp, torch.Tensor.logsumexp)):
+
+            t = torch.tensor((2, 4), device=device, dtype=torch.int)
+            self.assertTrue(fn(t, dim=0).dtype, torch.get_default_dtype())
+            self.assertTrue(meth(t, dim=0).dtype, torch.get_default_dtype())
+
+            o = torch.empty((2,), device=device, dtype=torch.int)
+            with self.assertRaises(RuntimeError):
+                fn(t, dim=0, out=o)
+
+            o = o.to(torch.get_default_dtype())
+            fn(t, dim=0, out=o)
+
+    @float_double_default_dtype
+    def test_std_mean(self, device):
+        t = torch.tensor((2, 4), device=device, dtype=torch.int)
+        m = torch.std_mean(t)
+        self.assertTrue(m[0].dtype, torch.get_default_dtype())
+        self.assertTrue(m[1].dtype, torch.get_default_dtype())
+
+    @float_double_default_dtype
+    def test_var_mean(self, device):
+        t = torch.tensor((2, 4), device=device, dtype=torch.int)
+        m = torch.var_mean(t)
+        self.assertTrue(m[0].dtype, torch.get_default_dtype())
+        self.assertTrue(m[1].dtype, torch.get_default_dtype())
 
 
 instantiate_device_type_tests(TestTypePromotion, globals())

@@ -447,13 +447,10 @@ Tensor& prod_out(Tensor& result, const Tensor& self, Dimname dim,
 
 Tensor &mean_out_cpu_gpu(Tensor &result, const Tensor &self, IntArrayRef dim,
                  bool keepdim, c10::optional<ScalarType> opt_dtype) {
-  ScalarType scalarType = opt_dtype.has_value() ? opt_dtype.value() : self.scalar_type();
-  TORCH_CHECK(
-      at::isFloatingType(scalarType) || at::isComplexType(scalarType),
-      "Can only calculate the mean of floating types. Got ",
-      toString(scalarType),
-      " instead.");
-  ScalarType dtype = get_dtype(result, self, opt_dtype, true);
+  ScalarType dtype = get_dtype(result, self, opt_dtype);
+  TORCH_CHECK(!at::isIntegralType(dtype),
+    "mean requires a floating point output, but got ", dtype);
+
   // TODO: the TensorIterator reduction implementation of mean
   // (mean_kernel_impl()) is unvectorized and leads to very poor performance
   // for production workloads. Once that's fixed, the following code can be used
@@ -485,7 +482,13 @@ Tensor mean_cpu_gpu(const Tensor &self, optional<ScalarType> dtype) {
 }
 
 Tensor mean_cpu_gpu(const Tensor& self, IntArrayRef dim, bool keepdim, optional<ScalarType> dtype) {
-  Tensor result;
+  if (isIntegralType(self.scalar_type())) {
+    const auto scalar_type = typeMetaToScalarType(c10::get_default_dtype());
+    Tensor result = at::empty({0}, self.options().dtype(scalar_type));
+    return at::native::mean_out_cpu_gpu(result, self, dim, keepdim, dtype);
+  }
+
+  Tensor result = at::empty({0}, self.options());
   return at::native::mean_out_cpu_gpu(result, self, dim, keepdim, dtype);
 }
 
@@ -511,15 +514,28 @@ static Tensor squeeze_multiple(const Tensor& self, IntArrayRef dims) {
 }
 
 static Tensor& logsumexp_out_impl(Tensor& result, const Tensor& self, IntArrayRef dims, bool keepdim) {
+  TORCH_CHECK(!at::isIntegralType(result.scalar_type()),
+    "logsumexp requires a floating point output type, but got ",
+    result.scalar_type());
+
+  // Casts integral inputs to the appropriate (floating) type
+  Tensor cast_self;
+  if (at::isIntegralType(self.scalar_type())) {
+    cast_self = self.to(result.scalar_type());
+  }
+  const Tensor& ref = at::isIntegralType(self.scalar_type()) ?
+                        cast_self :
+                        self;
+
   // can't take max of empty tensor
-  if (self.numel() != 0) {
-    auto maxes = at::max_values(self, dims, true);
+  if (ref.numel() != 0) {
+    auto maxes = at::max_values(ref, dims, true);
     auto maxes_squeezed = (keepdim ? maxes : squeeze_multiple(maxes, dims));
     maxes_squeezed.masked_fill_(maxes_squeezed.abs() == INFINITY, 0);
-    at::sum_out(result, at::exp(self - maxes), dims, keepdim);
+    at::sum_out(result, at::exp(ref - maxes), dims, keepdim);
     result.log_().add_(maxes_squeezed);
   } else {
-    at::sum_out(result, at::exp(self), dims, keepdim);
+    at::sum_out(result, at::exp(ref), dims, keepdim);
     result.log_();
   }
   return result;
@@ -535,6 +551,12 @@ Tensor& logsumexp_out(Tensor& result, const Tensor& self, IntArrayRef dims, bool
 }
 
 Tensor logsumexp(const Tensor& self, IntArrayRef dims, bool keepdim) {
+  if (isIntegralType(self.scalar_type())) {
+    const auto scalar_type = typeMetaToScalarType(c10::get_default_dtype());
+    Tensor result = at::empty({0}, self.options().dtype(scalar_type));
+    return at::native::logsumexp_out(result, self, dims, keepdim);
+  }
+
   Tensor result = at::empty({0}, self.options());
   return at::native::logsumexp_out(result, self, dims, keepdim);
 }
@@ -794,8 +816,8 @@ static Tensor &std_var_out(Tensor &result, const Tensor &self, IntArrayRef dim, 
               "std and var only supports CPU AND CUDA device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               "std and var only supports strided layout, got: ", self.layout());
-  TORCH_CHECK(at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
-              "std and var only support floating-point dtypes");
+  TORCH_CHECK(!at::isIntegralType(result.scalar_type()),
+               "std and var only support floating-point dtype outputs");
 
   if (at::isComplexType(self.scalar_type())){
     ScalarType dtype = c10::toValueType(get_dtype(result, self, {}, true));
@@ -817,7 +839,7 @@ static Tensor &std_var_out(Tensor &result, const Tensor &self, IntArrayRef dim, 
     }
     at::add_out(result, real_out, imag_out);
     take_sqrt ? at::sqrt_out(result, result) : result;
-  } else{
+  } else {
     ScalarType dtype = get_dtype(result, self, {}, true);
     auto iter = make_reduction("std or var", result, self, dim, keepdim, dtype);
     if (iter.numel() == 0) {
@@ -835,8 +857,8 @@ static std::tuple<Tensor&,Tensor&> std_var_mean_out(const char* fname, Tensor &r
               fname, " only supports CPU AND CUDA device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               fname, " only supports strided layout, got: ", self.layout());
-  TORCH_CHECK(at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
-              fname, " only support floating-point dtypes");
+  TORCH_CHECK(!at::isIntegralType(result1.scalar_type()) || !at::isIntegralType(result2.scalar_type()),
+               fname, " only support floating-point dtype outputs");
   TORCH_CHECK(result1.scalar_type() == result2.scalar_type(),
            "provided by result1 dtype must match dtype of result2. Got ",
            toString(result1.scalar_type()),
@@ -898,24 +920,52 @@ std::tuple<Tensor&,Tensor&> std_mean_out(Tensor &result1, Tensor &result2, const
 }
 
 std::tuple<Tensor,Tensor> var_mean(const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim) {
+  if (isIntegralType(self.scalar_type())) {
+    const auto scalar_type = typeMetaToScalarType(c10::get_default_dtype());
+    Tensor result1 = at::empty({0}, self.options().dtype(scalar_type));
+    Tensor result2 = at::empty({0}, self.options().dtype(scalar_type));
+    return at::native::var_mean_out(result1, result2, self, dim, unbiased, keepdim);
+  }
+
   Tensor result1 = at::empty({0}, self.options());
   Tensor result2 = at::empty({0}, self.options());
   return at::native::var_mean_out(result1, result2, self, dim, unbiased, keepdim);
 }
 
 std::tuple<Tensor,Tensor> std_mean(const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim) {
+  if (isIntegralType(self.scalar_type())) {
+    const auto scalar_type = typeMetaToScalarType(c10::get_default_dtype());
+    Tensor result1 = at::empty({0}, self.options().dtype(scalar_type));
+    Tensor result2 = at::empty({0}, self.options().dtype(scalar_type));
+    return at::native::std_mean_out(result1, result2, self, dim, unbiased, keepdim);
+  }
+
   Tensor result1 = at::empty({0}, self.options());
   Tensor result2 = at::empty({0}, self.options());
   return at::native::std_mean_out(result1, result2, self, dim, unbiased, keepdim);
 }
 
 std::tuple<Tensor,Tensor> std_mean(const Tensor& self, bool unbiased) {
+  if (isIntegralType(self.scalar_type())) {
+    const auto scalar_type = typeMetaToScalarType(c10::get_default_dtype());
+    Tensor result1 = at::empty({0}, self.options().dtype(scalar_type));
+    Tensor result2 = at::empty({0}, self.options().dtype(scalar_type));
+    return at::native::std_mean_out(result1, result2, self, unbiased);
+  }
+
   Tensor result1 = at::empty({0}, self.options());
   Tensor result2 = at::empty({0}, self.options());
   return at::native::std_mean_out(result1, result2, self, unbiased);
 }
 
 std::tuple<Tensor,Tensor> var_mean(const Tensor& self, bool unbiased) {
+  if (isIntegralType(self.scalar_type())) {
+    const auto scalar_type = typeMetaToScalarType(c10::get_default_dtype());
+    Tensor result1 = at::empty({0}, self.options().dtype(scalar_type));
+    Tensor result2 = at::empty({0}, self.options().dtype(scalar_type));
+    return at::native::var_mean_out(result1, result2, self, unbiased);
+  }
+
   Tensor result1 = at::empty({0}, self.options());
   Tensor result2 = at::empty({0}, self.options());
   return at::native::var_mean_out(result1, result2, self, unbiased);
@@ -926,13 +976,25 @@ Tensor var(const Tensor& self, bool unbiased) {
               "var only supports CPU AND CUDA device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               "var only supports strided layout, got: ", self.layout());
-  TORCH_CHECK(at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
-              "var only supports floating-point dtypes");
   auto trivial_return = _allreduce_return_trivial(self, std::numeric_limits<double>::quiet_NaN());
+
+  // Pre-casts integral inputs to the default scalar type
+  // Note: _th_var (_var) does not support integral types
+  if (at::isIntegralType(self.scalar_type())) {
+    const auto scalar_type = typeMetaToScalarType(c10::get_default_dtype());
+    return trivial_return.has_value() ? trivial_return.value() : at::_var(self.to(scalar_type), unbiased);
+  }
+
   return trivial_return.has_value() ? trivial_return.value() : at::_var(self, unbiased);
 }
 
 Tensor var(const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim) {
+  if (isIntegralType(self.scalar_type())) {
+    const auto scalar_type = typeMetaToScalarType(c10::get_default_dtype());
+    Tensor result = at::empty({0}, self.options().dtype(scalar_type));
+    return at::native::var_out(result, self, dim, unbiased, keepdim);
+  }
+
   Tensor result = at::empty({0}, self.options());
   return at::native::var_out(result, self, dim, unbiased, keepdim);
 }
@@ -941,18 +1003,30 @@ Tensor &var_out(Tensor &result, const Tensor &self, IntArrayRef dim, bool unbias
   return std_var_out(result, self, dim, unbiased, keepdim, false);
 }
 
+// Pre-casts integral inputs to the default scalar type
+// Note: _th_std (_std) does not support integral types
 Tensor std(const Tensor& self, bool unbiased) {
   TORCH_CHECK(self.device().type() == DeviceType::CPU || self.device().type() == DeviceType::CUDA,
               "std only supports CPU AND CUDA device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               "std only supports strided layout, got: ", self.layout());
-  TORCH_CHECK(at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
-              "std only supports floating-point dtypes");
   auto trivial_return = _allreduce_return_trivial(self, std::numeric_limits<double>::quiet_NaN());
+
+  if (at::isIntegralType(self.scalar_type())) {
+    const auto scalar_type = typeMetaToScalarType(c10::get_default_dtype());
+    return trivial_return.has_value() ? trivial_return.value() : at::_std(self.to(scalar_type), unbiased);
+  }
+
   return trivial_return.has_value() ? trivial_return.value() : at::_std(self, unbiased);
 }
 
 Tensor std(const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim) {
+  if (isIntegralType(self.scalar_type())) {
+    const auto scalar_type = typeMetaToScalarType(c10::get_default_dtype());
+    Tensor result = at::empty({0}, self.options().dtype(scalar_type));
+    return at::native::std_out(result, self, dim, unbiased, keepdim);
+  }
+
   Tensor result = at::empty({0}, self.options());
   return at::native::std_out(result, self, dim, unbiased, keepdim);
 }
