@@ -1289,6 +1289,36 @@ graph(%x : Tensor,
                    .check('Observer = prim::GetAttr[name="_observer_') \
                    .run(m.graph)
 
+    def test_insert_observers_if(self):
+        class Res(torch.nn.Module):
+            def __init__(self, use_skip):
+                super(Res, self).__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 1).float()
+                self.use_skip = use_skip
+
+            def forward(self, x):
+                if self.use_skip:
+                    return self.conv(x)
+                else:
+                    return self.conv(x)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.res1 = Res(True)
+                self.res2 = Res(False)
+
+            def forward(self, x):
+                x = self.res1(x)
+                x = self.res2(x)
+                return x
+
+        data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        qconfig_dict = {'': default_qconfig}
+        model = torch.jit.script(M()).eval()
+        model = quantize_script(model, qconfig_dict, _test_only_eval_fn, [data], inplace=False)
+        print(model.graph)
+
     def test_insert_quant_dequant(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -1865,6 +1895,43 @@ graph(%input, %weight):
         res = get_forward(m._c)(x)
         self.assertEqual(res, ref_res)
 
+    def test_replicate_dequantize_in_block(self):
+        class M(torch.nn.Module):
+            def __init__(self, cond):
+                super(M, self).__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 1).float()
+
+                self.cond = cond
+
+            def forward(self, x):
+                x = torch.dequantize(x)
+                if self.cond:
+                    x = self.conv(x)
+                else:
+                    x = x + 3
+                return x
+
+        x = torch.randn([1, 3, 10, 10], dtype=torch.float)
+        x = torch.quantize_per_tensor(x, 0.5, 1, torch.quint8)
+        m = torch.jit.script(M(True))
+        ref_res = m(x)
+        FileCheck().check_count("aten::dequantize", 1, exactly=True) \
+                   .run(m.graph)
+        torch._C._jit_pass_replicate_dequantize(m.graph)
+        FileCheck().check_count("aten::dequantize", 2, exactly=True) \
+                   .run(m.graph)
+        # check dequantize is right before CallMethod of conv
+        FileCheck().check("aten::dequantize") \
+                   .check_next("CallMethod") \
+                   .run(m.graph)
+        # check dequantize is right before add
+        FileCheck().check("aten::dequantize") \
+                   .check("aten::dequantize") \
+                   .check_next("aten::add") \
+                   .run(m.graph)
+        res = get_forward(m._c)(x)
+        self.assertEqual(res, ref_res)
+
     def test_swap_dequantize(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -1903,6 +1970,7 @@ graph(%input, %weight):
                 super(M, self).__init__()
                 self.maxpool = torch.nn.MaxPool2d(kernel_size=3)
                 self.adaptive_avgpool = torch.nn.AdaptiveAvgPool2d((1, 1))
+                self.dropout = torch.nn.Dropout()
                 self.avgpool = torch.nn.AvgPool2d(3)
 
             def forward(self, x):
@@ -1914,6 +1982,13 @@ graph(%input, %weight):
                 x = torch.max(x)
                 x = torch.min(x)
                 x = torch.mean(x)
+                x = x.reshape([-1])
+                x = x.view(-1)
+                x = x.transpose(1, 2)
+                x = x.contiguous()
+                x, y = torch.chunk(x, 2)
+                x = F.dropout(x)
+                x = self.dropout(x)
                 # TODO: uncomment when sort is supported
                 # x, _ = torch.sort(x)
                 x = F.interpolate(x, 4, mode='nearest')
@@ -1921,8 +1996,10 @@ graph(%input, %weight):
                 x = F.upsample_bilinear(x, (32, 32))
                 x = F.upsample_nearest(x, (32, 32))
                 return x
+
         m = torch.jit.script(M())
         torch._C._jit_pass_inline(m.graph)
+        torch._C._jit_pass_constant_propagation(m.graph)
         FileCheck().check("aten::dequantize") \
                    .check("aten::max_pool2d") \
                    .check("aten::adaptive_avg_pool2d") \
@@ -1931,6 +2008,13 @@ graph(%input, %weight):
                    .check("aten::max") \
                    .check("aten::min") \
                    .check("aten::mean") \
+                   .check("aten::reshape") \
+                   .check("aten::view") \
+                   .check("aten::transpose") \
+                   .check("aten::contiguous") \
+                   .check("aten::chunk") \
+                   .check("aten::dropout") \
+                   .check("aten::dropout") \
                    .run(m.graph)
         torch._C._jit_pass_swap_dequantize(m.graph)
         FileCheck().check("aten::max_pool2d") \
@@ -1940,6 +2024,13 @@ graph(%input, %weight):
                    .check("aten::max") \
                    .check("aten::min") \
                    .check("aten::mean") \
+                   .check("aten::reshape") \
+                   .check("aten::view") \
+                   .check("aten::transpose") \
+                   .check("aten::contiguous") \
+                   .check("aten::chunk") \
+                   .check("aten::dropout") \
+                   .check("aten::dropout") \
                    .check("dequantize") \
                    .run(m.graph)
 

@@ -215,6 +215,7 @@ void initJITBindings(PyObject* module) {
           })
       .def("_jit_pass_fold_prepack", &FoldPrepackedWeightIntoModule)
       .def("_jit_pass_dedup_module_uses", &DedupModuleUses)
+      .def("_jit_pass_replicate_quantize", &ReplicateQuant)
       .def("_jit_pass_replicate_dequantize", &ReplicateDeQuant)
       .def("_jit_pass_swap_dequantize", &SwapDeQuant)
       .def("_jit_pass_swap_functional_linear",
