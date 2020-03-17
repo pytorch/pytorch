@@ -2,7 +2,6 @@
 
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
-#include <torch/csrc/jit/tensorexpr/constant_folder.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/schedule.h>
@@ -1257,7 +1256,7 @@ void TensorExprKernel::pickAndCheckBackendType(
   if (device.type() == at::kCUDA) {
     backendType = kCudaCodeGen;
   } else if (device.type() == at::kCPU) {
-#ifdef ENABLE_LLVM
+#ifdef TORCH_ENABLE_LLVM
     backendType = kLLVMCodeGen;
 #else
     backendType = kSimpleIREval;

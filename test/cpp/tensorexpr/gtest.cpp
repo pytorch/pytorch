@@ -12,7 +12,7 @@ namespace jit {
 TH_FORALL_TESTS(TENSOREXPR_GTEST)
 #undef TENSOREXPR_GTEST
 
-#ifdef ENABLE_LLVM
+#ifdef TORCH_ENABLE_LLVM
 #define TENSOREXPR_GTEST_LLVM(name)   \
   TEST(TensorExprTest, name##_LLVM) { \
     test##name();                     \

@@ -1,4 +1,4 @@
-#ifdef ENABLE_LLVM
+#ifdef TORCH_ENABLE_LLVM
 
 #include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
 #include <torch/csrc/jit/tensorexpr/llvm_jit.h>
@@ -1477,4 +1477,4 @@ void LLVMCodeGenImpl::optimize(llvm::Module& M) {
 
 RegisterCodeGen<LLVMCodeGen> reg("llvm_codegen");
 
-#endif // ENABLE_LLVM
+#endif // TORCH_ENABLE_LLVM

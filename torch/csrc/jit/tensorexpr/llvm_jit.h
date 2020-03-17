@@ -1,6 +1,6 @@
 #pragma once
 
-#ifdef ENABLE_LLVM
+#ifdef TORCH_ENABLE_LLVM
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <llvm/ExecutionEngine/JITSymbol.h>

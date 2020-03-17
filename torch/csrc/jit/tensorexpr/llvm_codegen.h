@@ -1,6 +1,6 @@
 #pragma once
 
-#ifdef ENABLE_LLVM
+#ifdef TORCH_ENABLE_LLVM
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <torch/csrc/jit/tensorexpr/codegen.h>
@@ -53,4 +53,4 @@ class TORCH_API LLVMCodeGen : public CodeGen {
 } // namespace jit
 } // namespace torch
 
-#endif // ENABLE_LLVM
+#endif // TORCH_ENABLE_LLVM
