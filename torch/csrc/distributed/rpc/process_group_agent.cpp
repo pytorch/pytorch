@@ -328,16 +328,18 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
   if (to.id_ == (worker_id_t)pg_->getRank()) {
     threadPool_.run(std::bind(
         [this, future](const Message& message) {
-          sendCounts_.increment(pg_->getRank());
           // Unlike the other cases, need to add a tensor deleter, since the
           // data outlives the scope of this function. It's shared_ptr<> due
           // to c++11 lambda capture limitations with unique_ptr<>.
           std::unique_ptr<std::string> payload;
           try {
             payload = std::make_unique<std::string>(
-              wireSerialize(message.payload(), message.tensors()));
+                wireSerialize(message.payload(), message.tensors()));
+            // only increment sendCounts when the message is indeed added into
+            // local recv.
+            sendCounts_.increment(pg_->getRank());
           } catch (std::exception& e) {
-            future->setError(e.what());
+            markFutureWithError(message.id(), e.what());
             return;
           }
           const char* data = payload->data();
@@ -414,7 +416,7 @@ void ProcessGroupAgent::enqueueSend(SendWork work) {
               "Encountered exception in ProcessGroupAgent::enqueueSend: ",
               e.what());
           auto exceptionMsg =
-              rpc::createExceptionResponse(work.message_, errorStr);
+              rpc::createExceptionResponse(work.message_.id(), errorStr);
           if (work.message_.isRequest()) {
             markFutureWithError(exceptionMsg);
           } else if (work.message_.isResponse()) {
@@ -453,7 +455,7 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
               send(
                   work.from_,
                   createExceptionResponse(
-                      message, futureResponse->error()->what()));
+                      message.id(), futureResponse->error()->what()));
             }
           } else {
             ++serverActiveAsyncCalls_;
@@ -533,7 +535,12 @@ void ProcessGroupAgent::markFutureWithError(Message& message) {
   TORCH_INTERNAL_ASSERT(
       message.type() == MessageType::EXCEPTION,
       "markFutureWithError should be only called with Message that has type Exception.");
-  auto id = message.id();
+  markFutureWithError(
+      message.id(),
+      std::string(message.payload().begin(), message.payload().end()));
+}
+
+void ProcessGroupAgent::markFutureWithError(int64_t id, std::string errorMsg) {
   std::shared_ptr<FutureMessage> fm = nullptr;
   {
     std::lock_guard<std::mutex> lock{futureMutex_};
@@ -562,7 +569,7 @@ void ProcessGroupAgent::markFutureWithError(Message& message) {
   }
 
   --clientActiveCalls_;
-  fm->setError(std::string(message.payload().begin(), message.payload().end()));
+  fm->setError(std::move(errorMsg));
   futureCV_.notify_all();
 }
 
@@ -678,8 +685,7 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
           "RPC ran for more than ",
           timedOutFuture.timeout_.count(),
           " milliseconds and timed out.");
-      const auto exceptionMsg = createExceptionResponse(
-          Message({}, {}, MessageType::EXCEPTION), errorStr);
+      const auto exceptionMsg = createExceptionResponse(-1, errorStr);
       if (!timedOutFuture.future_->hasError()) {
         --clientActiveCalls_;
         timedOutFuture.future_->setError(std::string(

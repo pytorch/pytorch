@@ -1426,83 +1426,6 @@ graph(%x : Tensor,
                            .check("return") \
                            .run(conv._get_method('_conv_forward').graph)
 
-    def test_insert_prepack_unpack(self):
-        # Module with linear and per tensor/channel quantized weight
-        class L(torch.nn.Module):
-            def __init__(self):
-                super(L, self).__init__()
-                self.weight = torch.nn.Parameter(torch.rand((5, 5), dtype=torch.float))
-                self.bias = torch.nn.Parameter(torch.rand(5, dtype=torch.float))
-
-            def forward(self, x):
-                xq = torch.quantize_per_tensor(x, 0.2, 1, torch.quint8)
-                wq = torch.quantize_per_tensor(self.weight, 0.2, 1, torch.qint8)
-                r = torch.nn.functional.linear(xq.dequantize(), wq.dequantize(), self.bias)
-                rq = torch.quantize_per_tensor(r, 0.2, 1, torch.quint8)
-                return rq
-
-        class L2(torch.nn.Module):
-            def __init__(self):
-                super(L2, self).__init__()
-                self.weight = torch.nn.Parameter(torch.rand((5, 5), dtype=torch.float))
-                self.bias = torch.nn.Parameter(torch.rand(5, dtype=torch.float))
-
-            def forward(self, x):
-                xq = torch.quantize_per_tensor(x, 0.2, 1, torch.quint8)
-                wq = torch.quantize_per_channel(self.weight,
-                                                torch.tensor([2], dtype=torch.float),
-                                                torch.tensor([0], dtype=torch.long),
-                                                0,
-                                                torch.qint8)
-                r = torch.nn.functional.linear(xq.dequantize(), wq.dequantize(), self.bias)
-                rq = torch.quantize_per_tensor(r, 0.2, 1, torch.quint8)
-                return rq
-
-        for M in [L, L2]:
-            m = torch.jit.script(M())
-            torch._C._jit_pass_insert_prepack_unpack(m._c)
-            FileCheck().check("quantized::linear_prepack") \
-                       .check("quantized::linear_unpack") \
-                       .run(get_forward_graph(m._c))
-
-        # Module with conv2d and per tensor/channel quantized weight
-        class C(torch.nn.Module):
-            def __init__(self):
-                super(C, self).__init__()
-                self.weight = torch.nn.Parameter(torch.rand((5, 5), dtype=torch.float))
-                self.bias = torch.nn.Parameter(torch.rand(5, dtype=torch.float))
-
-            def forward(self, x):
-                xq = torch.quantize_per_tensor(x, 0.2, 1, torch.quint8)
-                wq = torch.quantize_per_tensor(self.weight, 0.2, 1, torch.qint8)
-                r = torch.conv2d(xq.dequantize(), wq.dequantize(), self.bias)
-                rq = torch.quantize_per_tensor(r, 0.2, 1, torch.quint8)
-                return rq
-
-        class C2(torch.nn.Module):
-            def __init__(self):
-                super(C2, self).__init__()
-                self.weight = torch.nn.Parameter(torch.rand((5, 5), dtype=torch.float))
-                self.bias = torch.nn.Parameter(torch.rand(5, dtype=torch.float))
-
-            def forward(self, x):
-                xq = torch.quantize_per_tensor(x, 0.2, 1, torch.quint8)
-                wq = torch.quantize_per_channel(self.weight,
-                                                torch.tensor([2], dtype=torch.float),
-                                                torch.tensor([0], dtype=torch.long),
-                                                0,
-                                                torch.qint8)
-                r = torch.conv2d(xq.dequantize(), wq.dequantize(), self.bias)
-                rq = torch.quantize_per_tensor(r, 0.2, 1, torch.quint8)
-                return rq
-
-        for M in [C, C2]:
-            m = torch.jit.script(M())
-            torch._C._jit_pass_insert_prepack_unpack(m._c)
-            FileCheck().check("quantized::conv2d_prepack") \
-                       .check("quantized::conv2d_unpack") \
-                       .run(get_forward_graph(m._c))
-
     def test_quant_fusion(self):
         input_strs = [
             # aten::conv2d --> quantized::conv2d
@@ -2752,7 +2675,6 @@ graph(%Ra, %Rb):
         for node in g.nodes():
             self.assertTrue(g2.findNode(node.kind()) is not None)
 
-    @unittest.skipIf(IS_WINDOWS, "TODO: need to fix this test case for Windows")
     @unittest.skipIf(IS_SANDCASTLE, "gtest runs these in sandcastle")
     @unittest.skipIf(RUN_CUDA, "covered by test_cpp_cuda")
     @unittest.skipIf(not torch._C._jit_has_cpp_tests(), "Tests were not built, use BUILD_TEST=1")
@@ -2763,7 +2685,6 @@ graph(%Ra, %Rb):
         torch._C._jit_run_cpp_tests(run_cuda=False)
         tests_setup.shutdown()
 
-    @unittest.skipIf(IS_WINDOWS, "TODO: need to fix this test case for Windows")
     @unittest.skipIf(not RUN_CUDA, "cpp tests require CUDA")
     @unittest.skipIf(not torch._C._jit_has_cpp_tests(), "Tests were not built, use BUILD_TEST=1")
     @skipIfRocm
@@ -5319,7 +5240,6 @@ def foo(x):
         self.assertFalse("training" in w.state_dict())
 
     @skipIfRocm
-    @unittest.skipIf(IS_WINDOWS, "TODO: Fix this test case")
     def test_torchbind(self):
         def test_equality(f, cmp_key):
             obj1 = f()
@@ -5349,7 +5269,6 @@ def foo(x):
         test_equality(f, lambda x: x)
 
     @skipIfRocm
-    @unittest.skipIf(IS_WINDOWS, "TODO: Fix this test case")
     def test_torchbind_take_as_arg(self):
         global StackString  # see [local resolution in python]
         StackString = torch.classes._TorchScriptTesting_StackString
@@ -5365,7 +5284,6 @@ def foo(x):
         self.assertEqual(script_output.pop(), "lel")
 
     @skipIfRocm
-    @unittest.skipIf(IS_WINDOWS, "TODO: Fix this test case")
     def test_torchbind_return_instance(self):
         def foo():
             ss = torch.classes._TorchScriptTesting_StackString(["hi", "mom"])
@@ -5382,7 +5300,6 @@ def foo(x):
         self.assertEqual(out.pop(), "hi")
 
     @skipIfRocm
-    @unittest.skipIf(IS_WINDOWS, "TODO: Fix this test case")
     def test_torchbind_return_instance_from_method(self):
         def foo():
             ss = torch.classes._TorchScriptTesting_StackString(["hi", "mom"])
@@ -5397,7 +5314,6 @@ def foo(x):
         self.assertEqual(out[1].pop(), "hi")
 
     @skipIfRocm
-    @unittest.skipIf(IS_WINDOWS, "TODO: Fix this test case")
     def test_torchbind_take_instance_as_method_arg(self):
         def foo():
             ss = torch.classes._TorchScriptTesting_StackString(["mom"])
@@ -5411,7 +5327,6 @@ def foo(x):
         self.assertEqual(out.pop(), "mom")
 
     @skipIfRocm
-    @unittest.skipIf(IS_WINDOWS, "TODO: Fix this test case")
     def test_torchbind_return_tuple(self):
         def f():
             val = torch.classes._TorchScriptTesting_StackString(["3", "5"])
@@ -5422,7 +5337,6 @@ def foo(x):
         self.assertEqual(tup, (1337.0, 123))
 
     @skipIfRocm
-    @unittest.skipIf(IS_WINDOWS, "TODO: Fix this test case")
     def test_torchbind_save_load(self):
         def foo():
             ss = torch.classes._TorchScriptTesting_StackString(["mom"])
@@ -5453,7 +5367,6 @@ def foo(x):
         self.assertEqual(scripted(x), eic(x))
 
     @skipIfRocm
-    @unittest.skipIf(IS_WINDOWS, "TODO: Fix this test case")
     def test_torchbind_lambda_method(self):
         def foo():
             ss = torch.classes._TorchScriptTesting_StackString(["mom"])
@@ -5463,7 +5376,6 @@ def foo(x):
         self.assertEqual(scripted(), "mom")
 
     @skipIfRocm
-    @unittest.skipIf(IS_WINDOWS, "TODO: Fix this test case")
     def test_torchbind_class_attribute(self):
         class FooBar1234(torch.nn.Module):
             def __init__(self):
@@ -5481,7 +5393,6 @@ def foo(x):
             assert eic.f.pop() == expected
 
     @skipIfRocm
-    @unittest.skipIf(IS_WINDOWS, "TODO: Fix this test case")
     def test_torchbind_getstate(self):
         class FooBar4321(torch.nn.Module):
             def __init__(self):
@@ -5504,7 +5415,6 @@ def foo(x):
             assert eic.f.pop() == expected
 
     @skipIfRocm
-    @unittest.skipIf(IS_WINDOWS, "TODO: Fix this test case")
     def test_torchbind_tracing(self):
         class TryTracing(torch.nn.Module):
             def __init__(self):
@@ -5518,7 +5428,6 @@ def foo(x):
         self.assertEqual(torch.zeros(4, 4), traced())
 
     @skipIfRocm
-    @unittest.skipIf(IS_WINDOWS, "TODO: Fix this test case")
     def test_torchbind_tracing_nested(self):
         class TryTracingNest(torch.nn.Module):
             def __init__(self):
@@ -5537,7 +5446,6 @@ def foo(x):
         self.assertEqual(torch.zeros(4, 4), traced())
 
     @skipIfRocm
-    @unittest.skipIf(IS_WINDOWS, "TODO: Fix this test case")
     def test_torchbind_pickle_serialization(self):
         nt = torch.classes._TorchScriptTesting_PickleTester([3, 4])
         b = io.BytesIO()
@@ -5548,7 +5456,6 @@ def foo(x):
             self.assertEqual(nt_loaded.pop(), exp)
 
     @skipIfRocm
-    @unittest.skipIf(IS_WINDOWS, "TODO: Fix this test case")
     def test_torchbind_instantiate_missing_class(self):
         with self.assertRaisesRegex(RuntimeError, 'Tried to instantiate class IDontExist but it does not exist!'):
             torch.classes.IDontExist(3, 4, 5)
