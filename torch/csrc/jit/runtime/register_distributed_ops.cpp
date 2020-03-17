@@ -93,7 +93,7 @@ RegisterOperators reg_rpc_ops(
            return [num_inputs](Stack& stack) {
              // Get inputs from the stack.
              auto stackIter = stack.end() - num_inputs;
-             auto& dstWorkerNameIValue = *stackIter++;
+             auto& dstWorkerIValue = *stackIter++;
              auto& qualifiedNameIValue = *stackIter++;
              IValue emptyTuple(c10::ivalue::Tuple::create({}));
              IValue emptyDict{
@@ -106,7 +106,7 @@ RegisterOperators reg_rpc_ops(
              auto& kwargsDictIValue =
                  num_inputs >= 4 ? *stackIter++ : emptyDict;
              TORCH_INTERNAL_ASSERT(
-                 dstWorkerNameIValue.isString() || dstWorkerNameIValue.isInt());
+                 dstWorkerIValue.isString() || dstWorkerIValue.isInt());
              TORCH_INTERNAL_ASSERT(qualifiedNameIValue.isString());
              TORCH_INTERNAL_ASSERT(argsTupleIValue.isTuple());
              TORCH_INTERNAL_ASSERT(kwargsDictIValue.isGenericDict());
@@ -172,16 +172,14 @@ RegisterOperators reg_rpc_ops(
 
              // Get destination WorkerName.
              std::string dstWorkerNameStr;
-             if (dstWorkerNameIValue.isString()) {
+             if (dstWorkerIValue.isString()) {
                // ivalue::ConstantString::str_ is a const member, which can't be
                // moved, copy it here.
-               dstWorkerNameStr = dstWorkerNameIValue.toStringRef();
+               dstWorkerNameStr = dstWorkerIValue.toStringRef();
              } else {
-               TORCH_INTERNAL_ASSERT(dstWorkerNameIValue.isInt());
-               dstWorkerNameStr =
-                   dist_rpc::RpcAgent::getCurrentRpcAgent()
-                       ->getWorkerInfo(dstWorkerNameIValue.toInt())
-                       .name_;
+               dstWorkerNameStr = dist_rpc::RpcAgent::getCurrentRpcAgent()
+                                      ->getWorkerInfo(dstWorkerIValue.toInt())
+                                      .name_;
              }
 
              // Send RPC request.
