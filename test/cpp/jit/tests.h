@@ -87,7 +87,8 @@ namespace jit {
   _(LiteInterpreterLoadOrigJit)        \
   _(LiteInterpreterWrongMethodName)    \
   _(LiteInterpreterParams)             \
-  _(LiteInterpreterSetState)
+  _(LiteInterpreterSetState)           \
+  _(TorchbindIValueAPI)
 
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \
