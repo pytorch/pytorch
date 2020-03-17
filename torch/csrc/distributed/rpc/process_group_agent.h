@@ -174,6 +174,7 @@ class ProcessGroupAgent : public RpcAgent {
   // futures_ map. It is also removed from the futureTimeouts_ map since these
   // maps are kept in sync.
   void markFutureWithError(Message& message);
+  void markFutureWithError(int64_t id, std::string errorMsg);
 
   // Note [Termination Detection]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
