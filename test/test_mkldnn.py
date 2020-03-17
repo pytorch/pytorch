@@ -601,6 +601,125 @@ class TestMkldnn(TestCase):
             if bias:
                 self.assertEqual(linear.bias.grad, mkldnn_linear.bias.grad)
 
+    def test_mm(self):
+        M, N, O = 23, 8, 12
+        b1 = torch.randn(M, N, dtype=torch.float32)
+        b2 = torch.randn(N, O, dtype=torch.float32)
+        mm = torch.mm(b1, b2)
+        for dtype in [torch.bfloat16, torch.float]:
+            b1_ = b1.clone().to_mkldnn().to(dtype)
+            b2_ = b2.clone().to_mkldnn().to(dtype)
+            mkldnn_mm = torch.mm(b1_, b2_)
+            self.assertEqual(mkldnn_mm.dtype, dtype)
+            self.assertEqual(mm, mkldnn_mm.float().to_dense(), prec=5e-02)
+            
+            y = torch.randn(M, O, dtype=torch.float32)
+            mkldnn_y = y.clone().to_mkldnn().to(dtype)
+            torch.mm(b1_, b2_, out=mkldnn_y)
+            self.assertEqual(mkldnn_y.dtype, dtype)
+            self.assertEqual(mm, mkldnn_y.float().to_dense(), prec=5e-02)
+
+    def test_bmm(self):
+        num_batches = 10
+        M, N, O = 23, 8, 12
+        b1 = torch.randn(num_batches, M, N, dtype=torch.float32)
+        b2 = torch.randn(num_batches, N, O, dtype=torch.float32)
+        bmm = torch.bmm(b1, b2)
+        for dtype in [torch.bfloat16, torch.float]:
+            b1_ = b1.clone().to_mkldnn().to(dtype)
+            b2_ = b2.clone().to_mkldnn().to(dtype)
+            mkldnn_bmm = torch.bmm(b1_, b2_)
+            self.assertEqual(mkldnn_bmm.dtype, dtype)
+            self.assertEqual(bmm, mkldnn_bmm.float().to_dense(), prec=6e-02)
+            
+            y = torch.randn(num_batches, M, O, dtype=torch.float32)
+            mkldnn_y = y.clone().to_mkldnn().to(dtype)
+            torch.bmm(b1_, b2_, out=mkldnn_y)
+            self.assertEqual(mkldnn_y.dtype, dtype)
+            self.assertEqual(bmm, mkldnn_y.float().to_dense(), prec=6e-02)
+    ''' 
+    def test_addmm(self):
+        for i in range(8, 14, 2):
+            for j in range(8, 14, 2):
+                alpha = i / 10
+                beta = j / 10 
+                M, N, O = 23, 8, 12
+                b1 = torch.randn(M, N, dtype=torch.float32)
+                b2 = torch.randn(N, O, dtype=torch.float32)
+                res = torch.randn(M, O, dtype=torch.float32)
+        
+                addmm = torch.addmm(input=res, mat1=b1, mat2=b2, alpha=alpha, beta=beta)
+                for dtype in [torch.bfloat16, torch.float]:
+                    b1_ = b1.clone().to_mkldnn().to(dtype)
+                    b2_ = b2.clone().to_mkldnn().to(dtype)
+                    res_ = res.clone().to_mkldnn().to(dtype)
+                    mkldnn_addmm = torch.addmm(input=res_, mat1=b1_, mat2=b2_, \
+                                   alpha=alpha, beta=beta)
+                    self.assertEqual(mkldnn_addmm.dtype, dtype)
+                    self.assertEqual(addmm, mkldnn_addmm.float().to_dense(), prec=5e-02)
+          
+                    y = torch.randn(M, O, dtype=torch.float32)
+                    mkldnn_y = y.clone().to_mkldnn().to(dtype)
+                    torch.addmm(input=res_, mat1=b1_, mat2=b2_, alpha=alpha, beta=beta, \
+                                out=mkldnn_y),
+                    self.assertEqual(mkldnn_y.dtype, dtype)
+                    self.assertEqual(addmm, mkldnn_y.float().to_dense(), prec=5e-02)
+    '''
+
+    def test_addbmm(self):
+        dtype2prec = {torch.float: 2e-5, torch.bfloat16: 5e-1}
+        for i in range(8, 14, 2):
+            for j in range(8, 14, 2):
+                alpha = i / 10
+                beta = j / 10 
+                num_batches = 10 
+                M, N, O = 23, 8, 12
+                b1 = torch.randn(num_batches, M, N, dtype=torch.float32)
+                b2 = torch.randn(num_batches, N, O, dtype=torch.float32)
+                res = torch.randn(M, O, dtype=torch.float32)
+                
+                addbmm = torch.addbmm(res, b1, b2, beta=beta, alpha=alpha)
+                for dtype in [torch.bfloat16, torch.float]:
+                    b1_ = b1.clone().to_mkldnn().to(dtype)
+                    b2_ = b2.clone().to_mkldnn().to(dtype)
+                    res_ = res.clone().to_mkldnn().to(dtype)
+                    mkldnn_addbmm = torch.addbmm(res_, b1_, b2_, beta=beta, alpha=alpha)
+                    self.assertEqual(mkldnn_addbmm.dtype, dtype)
+                    self.assertEqual(addbmm, mkldnn_addbmm.float().to_dense(), prec=dtype2prec[dtype])
+                       
+                    y = torch.randn(M, O, dtype=torch.float32)
+                    mkldnn_y = y.clone().to_mkldnn().to(dtype)
+                    torch.addbmm(res_, b1_, b2_, beta=beta, alpha=alpha, out=mkldnn_y)
+                    self.assertEqual(mkldnn_y.dtype, dtype)
+                    self.assertEqual(addbmm, mkldnn_y.float().to_dense(), prec=dtype2prec[dtype])
+                    
+    def test_baddbmm(self):
+        dtype2prec = {torch.float: 2e-5, torch.bfloat16: 5e-1}
+        for i in range(8, 14, 2):
+            for j in range(8, 14, 2):
+                alpha = i / 10
+                beta = j / 10 
+                num_batches = 10
+                M, N, O = 23, 8, 12
+                b1 = torch.randn(num_batches, M, N, dtype=torch.float32)
+                b2 = torch.randn(num_batches, N, O, dtype=torch.float32)
+                res = torch.randn(num_batches, M, O, dtype=torch.float32)
+        
+                baddbmm = torch.baddbmm(res, b1, b2, alpha=alpha, beta=beta)
+                for dtype in [torch.bfloat16, torch.float]:
+                    b1_ = b1.clone().to_mkldnn().to(dtype)
+                    b2_ = b2.clone().to_mkldnn().to(dtype)
+                    res_ = res.clone().to_mkldnn().to(dtype)
+                    mkldnn_baddbmm = torch.baddbmm(res_, b1_, b2_, alpha=alpha, beta=beta)
+                    self.assertEqual(mkldnn_baddbmm.dtype, dtype)
+                    self.assertEqual(baddbmm, mkldnn_baddbmm.float().to_dense(), prec=dtype2prec[dtype])
+          
+                    y = torch.randn(num_batches, M, O, dtype=torch.float32)
+                    mkldnn_y = y.clone().to_mkldnn().to(dtype)
+                    torch.baddbmm(res_, b1_, b2_, alpha=alpha, beta=beta, out=mkldnn_y),
+                    self.assertEqual(mkldnn_y.dtype, dtype)
+                    self.assertEqual(baddbmm, mkldnn_y.float().to_dense(), prec=dtype2prec[dtype])
+    
     def test_softmax(self):
         x = torch.randn(3, 4, 5, dtype=torch.float32) * 10
         for dim in range(x.ndim):
