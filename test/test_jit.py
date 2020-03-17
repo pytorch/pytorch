@@ -5300,7 +5300,6 @@ def foo(x):
         self.assertEqual(7, w(3))
         self.assertFalse("training" in w.state_dict())
 
-    @skipIfRocm
     def test_torchbind(self):
         def test_equality(f, cmp_key):
             obj1 = f()
@@ -5329,7 +5328,6 @@ def foo(x):
             return ss1.pop() + ss2.pop()
         test_equality(f, lambda x: x)
 
-    @skipIfRocm
     def test_torchbind_take_as_arg(self):
         global StackString  # see [local resolution in python]
         StackString = torch.classes._TorchScriptTesting_StackString
@@ -5344,7 +5342,6 @@ def foo(x):
         script_output = scripted(script_input)
         self.assertEqual(script_output.pop(), "lel")
 
-    @skipIfRocm
     def test_torchbind_return_instance(self):
         def foo():
             ss = torch.classes._TorchScriptTesting_StackString(["hi", "mom"])
@@ -5360,7 +5357,6 @@ def foo(x):
         self.assertEqual(out.pop(), "mom")
         self.assertEqual(out.pop(), "hi")
 
-    @skipIfRocm
     def test_torchbind_return_instance_from_method(self):
         def foo():
             ss = torch.classes._TorchScriptTesting_StackString(["hi", "mom"])
@@ -5374,7 +5370,6 @@ def foo(x):
         self.assertEqual(out[1].pop(), "mom")
         self.assertEqual(out[1].pop(), "hi")
 
-    @skipIfRocm
     def test_torchbind_take_instance_as_method_arg(self):
         def foo():
             ss = torch.classes._TorchScriptTesting_StackString(["mom"])
@@ -5387,7 +5382,6 @@ def foo(x):
         self.assertEqual(out.pop(), "hi")
         self.assertEqual(out.pop(), "mom")
 
-    @skipIfRocm
     def test_torchbind_return_tuple(self):
         def f():
             val = torch.classes._TorchScriptTesting_StackString(["3", "5"])
@@ -5397,7 +5391,6 @@ def foo(x):
         tup = scripted()
         self.assertEqual(tup, (1337.0, 123))
 
-    @skipIfRocm
     def test_torchbind_save_load(self):
         def foo():
             ss = torch.classes._TorchScriptTesting_StackString(["mom"])
@@ -5436,7 +5429,6 @@ def foo(x):
         scripted = torch.jit.script(foo)
         self.assertEqual(scripted(), "mom")
 
-    @skipIfRocm
     def test_torchbind_class_attribute(self):
         class FooBar1234(torch.nn.Module):
             def __init__(self):
@@ -5453,7 +5445,6 @@ def foo(x):
         for expected in ["deserialized", "was", "i"]:
             assert eic.f.pop() == expected
 
-    @skipIfRocm
     def test_torchbind_getstate(self):
         class FooBar4321(torch.nn.Module):
             def __init__(self):
@@ -5475,7 +5466,6 @@ def foo(x):
         for expected in [7, 3, 3, 1]:
             assert eic.f.pop() == expected
 
-    @skipIfRocm
     def test_torchbind_tracing(self):
         class TryTracing(torch.nn.Module):
             def __init__(self):
@@ -5488,7 +5478,6 @@ def foo(x):
         traced = torch.jit.trace(TryTracing(), ())
         self.assertEqual(torch.zeros(4, 4), traced())
 
-    @skipIfRocm
     def test_torchbind_tracing_nested(self):
         class TryTracingNest(torch.nn.Module):
             def __init__(self):
@@ -5506,7 +5495,6 @@ def foo(x):
         traced = torch.jit.trace(TryTracing123(), ())
         self.assertEqual(torch.zeros(4, 4), traced())
 
-    @skipIfRocm
     def test_torchbind_pickle_serialization(self):
         nt = torch.classes._TorchScriptTesting_PickleTester([3, 4])
         b = io.BytesIO()
@@ -5516,7 +5504,6 @@ def foo(x):
         for exp in [7, 3, 3, 1]:
             self.assertEqual(nt_loaded.pop(), exp)
 
-    @skipIfRocm
     def test_torchbind_instantiate_missing_class(self):
         with self.assertRaisesRegex(RuntimeError, 'Tried to instantiate class IDontExist but it does not exist!'):
             torch.classes.IDontExist(3, 4, 5)
