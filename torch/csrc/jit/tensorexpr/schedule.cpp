@@ -429,6 +429,8 @@ class RandomInliner : public FunctionInliner {
   explicit RandomInliner(const std::vector<Function*>& funcs)
       : FunctionInliner(funcs) {}
 
+  using FunctionInliner::mutate;
+
   // Bind random vars in the true and false branches of a conditional.
   Stmt* mutate(const Cond* v) override {
     const Expr* cond = v->condition();
