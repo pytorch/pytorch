@@ -441,6 +441,10 @@ struct Environment {
 
     if (!retval) {
       // [python globals]
+      // These are symbols that have special representations in the compiler
+      // (e.g. some de-sugar to magic methods, others turn into `SugaredValue`s)
+      // with extra behavior. We need to resolve these last in case someone
+      // overwrote them in Python with their own function.
       static std::unordered_map<std::string, SugaredValuePtr> globals = {
           {"print", std::make_shared<PrintValue>()},
           {"tuple", SpecialFormValue::create(prim::TupleConstruct)},

@@ -641,8 +641,10 @@ std::shared_ptr<SugaredValue> toSugaredValue(
 
   if (py::isinstance<py::function>(obj)) {
     if (py::cast<bool>(
-            py::module::import("torch.jit").attr("_is_global_builtin")(obj))) {
-      // See [python globals]
+            py::module::import("torch.jit").attr("_is_python_builtin")(obj))) {
+      // See [python globals], for Python function we want to skip them here
+      // so they get handled in the compiler via the builtins that the compiler
+      // knows about.
       return nullptr;
     }
     if (typeString(obj) == "builtin_function_or_method") {

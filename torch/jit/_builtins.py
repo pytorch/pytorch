@@ -145,43 +145,5 @@ def _find_builtin(fn):
 # [python globals] in the compiler for details. Adding a builtin global here
 # indicates that when resolving, we should skip these so they dispatch to
 # the correct sugared representation
-compiler_builtins = None
-def _is_global_builtin(maybe_builtin):
-    global compiler_builtins
-    if compiler_builtins is None:
-        # Errors (AssertionError and RuntimeError) should not be here since
-        # they are handled separately in the compiler
-        compiler_builtins = set([
-            print,
-            tuple,
-            float,
-            int,
-            bool,
-            str,
-            getattr,
-            hasattr,
-            isinstance,
-            len,
-            hex,
-            oct,
-            round,
-            hash,
-            min,
-            max,
-            abs,
-            all,
-            divmod,
-            list,
-            ord,
-            chr,
-            bin,
-            range,
-            zip,
-            enumerate,
-            sorted,
-        ])
-
-        if PY2:
-            compiler_builtins.add(rangelist)
-
-    return maybe_builtin in compiler_builtins
+def _is_python_builtin(maybe_builtin):
+    return hasattr(maybe_builtin, '__name__') and hasattr(builtins, maybe_builtin.__name__)
