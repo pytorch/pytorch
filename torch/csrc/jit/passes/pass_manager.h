@@ -94,7 +94,7 @@ struct TORCH_API PassManager {
     static GraphPassNameType pass_id = 0;
     if (set)
       pass_id = PassID;
-    return name;
+    return pass_id;
   }
 
  public:

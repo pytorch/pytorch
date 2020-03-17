@@ -1011,8 +1011,8 @@ void fakePass(std::shared_ptr<Graph>& g) {
 
 
 void testPassManagement() {
-  
-  registerPass(fakePass);
+
+  registerPostPass(fakePass);
   std::shared_ptr<Graph> graph = std::make_shared<Graph>();
   parseIR(
       R"IR(
