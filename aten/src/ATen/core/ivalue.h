@@ -7,21 +7,12 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 namespace torch {
+class CustomClassHolder : public c10::intrusive_ptr_target {};
 namespace jit {
+using ::torch::CustomClassHolder;
 struct Function;
 struct CompilationUnit;
 struct Module;
-} // namespace jit
-} // namespace torch
-namespace c10 {
-struct ClassType;
-using ClassTypePtr = std::shared_ptr<ClassType>;
-} // namespace c10
-
-namespace torch {
-struct CustomClassHolder : public c10::intrusive_ptr_target {};
-namespace jit {
-using ::torch::CustomClassHolder;
 } // namespace jit
 } // namespace torch
 
@@ -29,9 +20,13 @@ namespace c10 {
 template<class Key, class Value> class Dict;
 template<class T> class List;
 struct IValue;
+struct ClassType;
 struct Type;
 class RRefInterface;
 using TypePtr = std::shared_ptr<Type>;
+
+struct ClassType;
+using ClassTypePtr = std::shared_ptr<ClassType>;
 
 namespace ivalue {
 struct Tuple;

@@ -526,7 +526,6 @@ c10::intrusive_ptr<T> IValue::toCustomClass() && {
   static_assert(std::is_base_of<torch::CustomClassHolder, T>::value == true,
     "toCustomClass requires that template parameter T must inherit "
     "from torch::CustomClassHolder");
-  auto expected_type = getCustomClassType<c10::intrusive_ptr<T>>();
   auto obj = toObject();
   TORCH_CHECK(obj->slots().size() == 1,
               "Tried to cast IValue to custom class but it did "
@@ -541,7 +540,6 @@ c10::intrusive_ptr<T> IValue::toCustomClass() const & {
   static_assert(std::is_base_of<torch::CustomClassHolder, T>::value == true,
     "toCustomClass requires that template parameter T must inherit "
     "from torch::CustomClassHolder");
-  auto expected_type = getCustomClassType<c10::intrusive_ptr<T>>();
   auto obj = toObject();
   TORCH_CHECK(obj->slots().size() == 1,
               "Tried to cast IValue to custom class but it did "
