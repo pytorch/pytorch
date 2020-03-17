@@ -1,5 +1,6 @@
-#include "torch/csrc/jit/tensorexpr/types.h"
+#include <torch/csrc/jit/tensorexpr/types.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/jit/tensorexpr/exceptions.h>
 
 #include <c10/util/Logging.h>
 
@@ -63,8 +64,7 @@ Dtype ToDtype(ScalarType type) {
     case ScalarType::Uninitialized:
       return kUninitialized;
     default:
-      LOG(FATAL) << "invalid scalar type: " << type;
-      return kUninitialized;
+      throw unsupported_dtype();
   }
 }
 
@@ -103,7 +103,7 @@ TORCH_API std::ostream& operator<<(
       stream << "None";
       break;
     default:
-      LOG(FATAL) << "invalid scalar type: " << (int)type;
+      throw unsupported_dtype();
   }
   return stream;
 }
@@ -137,9 +137,9 @@ std::string Dtype::ToCppString() const {
     case ScalarType::Half:
       return "half";
     default:
-      throw std::runtime_error(
-          "Invalid dtype: " + std::to_string(scalar_type_));
+      throw unsupported_dtype();
   }
+  return "invalid";
 }
 
 } // namespace tensorexpr
