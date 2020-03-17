@@ -11,7 +11,7 @@ using namespace at;
 struct TestCPUGenerator : public c10::GeneratorImpl {
   TestCPUGenerator(uint64_t value) : c10::GeneratorImpl{Device(DeviceType::CPU), DispatchKeySet(DispatchKey::CustomRNGKeyId)}, value_(value) { }
   ~TestCPUGenerator() = default;
-  uint32_t random() { return value_; }
+  uint32_t random() { return static_cast<uint32_t>(value_); }
   uint64_t random64() { return value_; }
   void set_current_seed(uint64_t seed) override { throw std::runtime_error("not implemented"); }
   uint64_t current_seed() const override { throw std::runtime_error("not implemented"); }
