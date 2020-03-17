@@ -381,6 +381,15 @@ static ScalarType get_dtype(Tensor& result, const Tensor& self, optional<ScalarT
   return src_type;
 }
 
+static Tensor make_floating_result(const Tensor& self) {
+  if (at::isIntegralType(self.scalar_type())) {
+    const auto scalar_type = typeMetaToScalarType(c10::get_default_dtype());
+    return at::empty({0}, self.options().dtype(scalar_type));
+  }
+
+  return at::empty({0}, self.options());
+}
+
 Tensor& sum_out(Tensor& result, const Tensor& self, IntArrayRef dim,
                        bool keepdim, optional<ScalarType> opt_dtype) {
   ScalarType dtype = get_dtype(result, self, opt_dtype, true);
@@ -482,13 +491,7 @@ Tensor mean_cpu_gpu(const Tensor &self, optional<ScalarType> dtype) {
 }
 
 Tensor mean_cpu_gpu(const Tensor& self, IntArrayRef dim, bool keepdim, optional<ScalarType> dtype) {
-  if (isIntegralType(self.scalar_type())) {
-    const auto scalar_type = typeMetaToScalarType(c10::get_default_dtype());
-    Tensor result = at::empty({0}, self.options().dtype(scalar_type));
-    return at::native::mean_out_cpu_gpu(result, self, dim, keepdim, dtype);
-  }
-
-  Tensor result = at::empty({0}, self.options());
+  Tensor result = make_floating_result(self);
   return at::native::mean_out_cpu_gpu(result, self, dim, keepdim, dtype);
 }
 
@@ -920,54 +923,26 @@ std::tuple<Tensor&,Tensor&> std_mean_out(Tensor &result1, Tensor &result2, const
 }
 
 std::tuple<Tensor,Tensor> var_mean(const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim) {
-  if (isIntegralType(self.scalar_type())) {
-    const auto scalar_type = typeMetaToScalarType(c10::get_default_dtype());
-    Tensor result1 = at::empty({0}, self.options().dtype(scalar_type));
-    Tensor result2 = at::empty({0}, self.options().dtype(scalar_type));
-    return at::native::var_mean_out(result1, result2, self, dim, unbiased, keepdim);
-  }
-
-  Tensor result1 = at::empty({0}, self.options());
-  Tensor result2 = at::empty({0}, self.options());
+  Tensor result1 = make_floating_result(self);
+  Tensor result2 = make_floating_result(self);
   return at::native::var_mean_out(result1, result2, self, dim, unbiased, keepdim);
 }
 
 std::tuple<Tensor,Tensor> std_mean(const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim) {
-  if (isIntegralType(self.scalar_type())) {
-    const auto scalar_type = typeMetaToScalarType(c10::get_default_dtype());
-    Tensor result1 = at::empty({0}, self.options().dtype(scalar_type));
-    Tensor result2 = at::empty({0}, self.options().dtype(scalar_type));
-    return at::native::std_mean_out(result1, result2, self, dim, unbiased, keepdim);
-  }
-
-  Tensor result1 = at::empty({0}, self.options());
-  Tensor result2 = at::empty({0}, self.options());
+  Tensor result1 = make_floating_result(self);
+  Tensor result2 = make_floating_result(self);
   return at::native::std_mean_out(result1, result2, self, dim, unbiased, keepdim);
 }
 
 std::tuple<Tensor,Tensor> std_mean(const Tensor& self, bool unbiased) {
-  if (isIntegralType(self.scalar_type())) {
-    const auto scalar_type = typeMetaToScalarType(c10::get_default_dtype());
-    Tensor result1 = at::empty({0}, self.options().dtype(scalar_type));
-    Tensor result2 = at::empty({0}, self.options().dtype(scalar_type));
-    return at::native::std_mean_out(result1, result2, self, unbiased);
-  }
-
-  Tensor result1 = at::empty({0}, self.options());
-  Tensor result2 = at::empty({0}, self.options());
+  Tensor result1 = make_floating_result(self);
+  Tensor result2 = make_floating_result(self);
   return at::native::std_mean_out(result1, result2, self, unbiased);
 }
 
 std::tuple<Tensor,Tensor> var_mean(const Tensor& self, bool unbiased) {
-  if (isIntegralType(self.scalar_type())) {
-    const auto scalar_type = typeMetaToScalarType(c10::get_default_dtype());
-    Tensor result1 = at::empty({0}, self.options().dtype(scalar_type));
-    Tensor result2 = at::empty({0}, self.options().dtype(scalar_type));
-    return at::native::var_mean_out(result1, result2, self, unbiased);
-  }
-
-  Tensor result1 = at::empty({0}, self.options());
-  Tensor result2 = at::empty({0}, self.options());
+  Tensor result1 = make_floating_result(self);
+  Tensor result2 = make_floating_result(self);
   return at::native::var_mean_out(result1, result2, self, unbiased);
 }
 
@@ -989,13 +964,7 @@ Tensor var(const Tensor& self, bool unbiased) {
 }
 
 Tensor var(const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim) {
-  if (isIntegralType(self.scalar_type())) {
-    const auto scalar_type = typeMetaToScalarType(c10::get_default_dtype());
-    Tensor result = at::empty({0}, self.options().dtype(scalar_type));
-    return at::native::var_out(result, self, dim, unbiased, keepdim);
-  }
-
-  Tensor result = at::empty({0}, self.options());
+  Tensor result = make_floating_result(self);
   return at::native::var_out(result, self, dim, unbiased, keepdim);
 }
 
@@ -1021,13 +990,7 @@ Tensor std(const Tensor& self, bool unbiased) {
 }
 
 Tensor std(const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim) {
-  if (isIntegralType(self.scalar_type())) {
-    const auto scalar_type = typeMetaToScalarType(c10::get_default_dtype());
-    Tensor result = at::empty({0}, self.options().dtype(scalar_type));
-    return at::native::std_out(result, self, dim, unbiased, keepdim);
-  }
-
-  Tensor result = at::empty({0}, self.options());
+  Tensor result = make_floating_result(self);
   return at::native::std_out(result, self, dim, unbiased, keepdim);
 }
 
