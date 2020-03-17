@@ -161,6 +161,17 @@ static SparseTensor& coalesce_(SparseTensor& tensor) {
   return tensor;
 }
 
+// Note [Sparse Floor Division]
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// Uncoalesced sparse tensors cannot be floor divided correctly. Integer
+// division is considered a special-case of floor division for purposes of
+// this note.
+// For example, an integer tensor with values=[3, 3] divided by 2 would produce
+// values=[1, 1], which sum to 2 instead of 3 (=6/2).
+// A float tensor with values=[3., 3.] floor divided by 2 would also produce
+// values=[1., 1.] (after truncation), which sum to 2.f instead of 3.f.
+// To perform floor division the sparse tensor must be coalesced first.
+
 SparseTensor& div_out_sparse_zerodim(SparseTensor& r, const SparseTensor& t, const Tensor& value) {
   TORCH_CHECK(value.dim() == 0, "Sparse division requires a scalar or ",
     "zero-dim dense tensor divisor (got shape ", value.sizes(), " for divisor)");
@@ -171,9 +182,7 @@ SparseTensor& div_out_sparse_zerodim(SparseTensor& r, const SparseTensor& t, con
   AT_ASSERT(t.is_sparse());
 
   if (is_same_tensor(r, t)) {
-    // Can't divide an uncoalesced integral tensor accurately. e.g. for a sparse int tensor with value 6
-    // represented as values=[3, 3], integer division by 2 would give values=[1, 1] => 2 instead
-    // of 6 / 2 => 3
+    // See note "Sparse Floor Division"
     if (!r.is_coalesced() && isIntegralType(r.scalar_type(), /*includeBool=*/true)) {
       coalesce_(r);
     }
@@ -283,13 +292,7 @@ SparseTensor& floor_divide_out_sparse_zerodim(
   // Performs floor division in-place
   if (is_same_tensor(result, dividend)) {
 
-    // Ensures result tensor is coalesced
-    // Note: uncoalesced tensors, whether integral or not, cannot be floor
-    // divided correctly. The integral case is the same as sparse division
-    // (above). An integer tensor with values=[3, 3] divided by 2 would produce
-    // values=[1, 1], which sum to 2 instead of 3 (=6/2).
-    // A float tensor with values=[3., 3.] floor divided by 2 would also produce
-    // values=[1., 1.] (after truncation), which sum to 2.f instead of 3.f.
+    // See note "Sparse Floor Division"
     if (!result.is_coalesced()) {
       coalesce_(result);
     }

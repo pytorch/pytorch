@@ -13811,7 +13811,7 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(z.dtype, x.dtype)
         self.assertEqual(z, z_alt)
 
-    @dtypes(torch.float, torch.int)
+    @dtypes(torch.float, torch.long)
     def test_floor_divide_out(self, device, dtype):
         x = torch.randn(10, device=device).mul(10).to(dtype)
         y = torch.arange(1, 11, dtype=dtype, device=device)
@@ -15402,9 +15402,9 @@ tensor_op_tests = [
     # Note: precision for floor_divide is 1 since a small (1e-5, for example)
     # error in division can lead to an difference of 1 post-truncation
     # (e.g. .9999 vs 1 post truncation is 0 vs 1)
-    ('floor_divide', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1, 1, 1, _types),
+    ('floor_divide', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1, 1e-5, 1e-5, _types),
     ('floor_divide', 'tensor', _small_3d,
-        lambda t, d: [_small_3d(t, d, has_zeros=False)], 1, 1, 1, _types),
+        lambda t, d: [_small_3d(t, d, has_zeros=False)], 1, 1e-5, 1e-5, _types),
     ('pow', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-1, 1e-5, 1e-5, _float_types),
     ('pow', '1', _small_3d, lambda t, d: [_number(1., 1, t)], 1e-1),
     ('pow', '2', _small_3d, lambda t, d: [_number(2., 2, t)], 1e-1),
