@@ -381,6 +381,8 @@ static ScalarType get_dtype(Tensor& result, const Tensor& self, optional<ScalarT
   return src_type;
 }
 
+// Returns an empty tensor with self's options, unless self has an integral
+// dtype, in which case the empty tensor's dtype is the default scalar type
 static Tensor make_floating_result(const Tensor& self) {
   if (at::isIntegralType(self.scalar_type())) {
     const auto scalar_type = typeMetaToScalarType(c10::get_default_dtype());
@@ -966,8 +968,6 @@ Tensor &var_out(Tensor &result, const Tensor &self, IntArrayRef dim, bool unbias
   return std_var_out(result, self, dim, unbiased, keepdim, false);
 }
 
-// Pre-casts integral inputs to the default scalar type
-// Note: _th_std (_std) does not support integral types
 Tensor std(const Tensor& self, bool unbiased) {
   TORCH_CHECK(self.device().type() == DeviceType::CPU || self.device().type() == DeviceType::CUDA,
               "std only supports CPU AND CUDA device type, got: ", self.device().type());
@@ -975,6 +975,8 @@ Tensor std(const Tensor& self, bool unbiased) {
               "std only supports strided layout, got: ", self.layout());
   auto trivial_return = _allreduce_return_trivial(self, std::numeric_limits<double>::quiet_NaN());
 
+  // Pre-casts integral inputs to the default scalar type
+  // Note: _th_std (_std) does not support integral types
   if (at::isIntegralType(self.scalar_type())) {
     const auto scalar_type = typeMetaToScalarType(c10::get_default_dtype());
     return trivial_return.has_value() ? trivial_return.value() : at::_std(self.to(scalar_type), unbiased);
