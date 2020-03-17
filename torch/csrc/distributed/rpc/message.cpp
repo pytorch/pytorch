@@ -112,21 +112,19 @@ void Message::setId(int64_t id) {
   id_ = id;
 }
 
-Message createExceptionResponse(
-    const Message& request,
-    const std::exception& e) {
-  return createExceptionResponse(request, e.what());
+Message createExceptionResponse(int64_t requestId, const std::exception& e) {
+  return createExceptionResponse(requestId, e.what());
 }
 
 Message createExceptionResponse(
-    const Message& request,
+    int64_t requestId,
     const std::string& exceptionStr) {
   std::vector<char> payload(exceptionStr.begin(), exceptionStr.end());
   return Message(
       std::move(payload),
       std::vector<torch::Tensor>(),
       MessageType::EXCEPTION,
-      request.id());
+      requestId);
 }
 
 } // namespace rpc

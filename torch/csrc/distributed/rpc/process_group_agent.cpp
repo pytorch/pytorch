@@ -416,7 +416,7 @@ void ProcessGroupAgent::enqueueSend(SendWork work) {
               "Encountered exception in ProcessGroupAgent::enqueueSend: ",
               e.what());
           auto exceptionMsg =
-              rpc::createExceptionResponse(work.message_, errorStr);
+              rpc::createExceptionResponse(work.message_.id(), errorStr);
           if (work.message_.isRequest()) {
             markFutureWithError(exceptionMsg);
           } else if (work.message_.isResponse()) {
@@ -455,7 +455,7 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
               send(
                   work.from_,
                   createExceptionResponse(
-                      message, futureResponse->error()->what()));
+                      message.id(), futureResponse->error()->what()));
             }
           } else {
             ++serverActiveAsyncCalls_;
@@ -685,8 +685,7 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
           "RPC ran for more than ",
           timedOutFuture.timeout_.count(),
           " milliseconds and timed out.");
-      const auto exceptionMsg = createExceptionResponse(
-          Message({}, {}, MessageType::EXCEPTION), errorStr);
+      const auto exceptionMsg = createExceptionResponse(-1, errorStr);
       if (!timedOutFuture.future_->hasError()) {
         --clientActiveCalls_;
         timedOutFuture.future_->setError(std::string(
