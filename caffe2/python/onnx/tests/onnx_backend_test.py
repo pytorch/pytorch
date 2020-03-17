@@ -96,12 +96,13 @@ backend_test.exclude(r'(test_hardsigmoid'  # Does not support Hardsigmoid.
                      '|test_.*negative_ind.*'  # negative axis is not supported yet
                      '|test_argmax_.*select_last_index.*'  # unsupported case
                      '|test_argmin_.*select_last_index_.*'  # unsupported case
-                     '|test_gradient_of_add_and_mul_cpu'  # cannot translate Gradient op
                      '|test_celu.*'  # cannot translate Celu op
-                     '|test_gradient_of_add_cpu' # cannot translate Gradient op
+                     '|test_gradient.*' # cannot translate Gradient op
                      '|test_greater_equal.*'
                      '|test_min_.*_cpu'  # Tensor type mismatch
                      '|test_max_.*_cpu'  # Tensor type mismatch
+                     '|test_min_.*_gpu'
+                     '|test_max_.*_gpu'
                      '|test_less_equal.*'
                      '|test_inverse.*'
                      '|test_softmax_cross_entropy.*'
