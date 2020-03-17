@@ -464,6 +464,53 @@ void qelu_kernel(const Tensor& qx, Scalar alpha, Tensor& qy) {
 }
 
 // Note: out is assumed to be the same size as self and other.
+// Note: Addition is only supported when self and out are of the same dtype.
+// Note: other is already assumed to be in int32, i.e., it's
+// round(float/self_scale)
+template <bool ReLUFused = false>
+void qadd_scalar_kernel(Tensor& out, const Tensor& self, Scalar other) {
+  int64_t zero_point = out.q_zero_point();
+  float scale = out.q_scale();
+  float inv_scale = 1.0f / scale;
+  int64_t self_zero_point = self.q_zero_point();
+  float self_scale = self.q_scale();
+
+  float multiplier = self_scale * inv_scale;
+
+  AT_DISPATCH_QINT_TYPES(self.scalar_type(), "qadd_scalar", [&]() {
+    using Vec = Vec256<scalar_t>;
+    auto iter = TensorIterator::unary_op(out, self);
+    auto other_val = other.to<int32_t>();
+    auto other_vec = Vec256<c10::qint32>(static_cast<c10::qint32>(other_val));
+    cpu_kernel_vec(
+        iter,
+        [&](scalar_t a) -> scalar_t {
+          int32_t a_sub_z = static_cast<int32_t>(a.val_) -
+              static_cast<int32_t>(self_zero_point);
+          int32_t c = a_sub_z + other_val;
+          scalar_t res =
+              at::requantize_from_int<scalar_t>(multiplier, zero_point, c);
+          if (ReLUFused) {
+            res.val_ = std::max<scalar_t::underlying>(res.val_, zero_point);
+          }
+          return res;
+        },
+        [&](Vec a) -> Vec {
+          Vec::int_vec_return_type a_sub_z =
+              a.widening_subtract(Vec(static_cast<scalar_t>(self_zero_point)));
+          Vec::int_vec_return_type c;
+          for (int i = 0; i < Vec::int_num_vecs(); ++i) {
+            c[i] = a_sub_z[i] + other_vec;
+          }
+          Vec rv = Vec::requantize_from_int(c, multiplier, zero_point);
+          if (ReLUFused) {
+            rv = rv.maximum(Vec(static_cast<scalar_t>(zero_point)));
+          }
+          return rv;
+        });
+  });
+}
+// Note: out is assumed to be the same size as self and other.
 // Note: Addition is only supported when self, other, out are of the same dtype.
 template <bool ReLUFused = false>
 void qadd_kernel(Tensor& out, const Tensor& self, const Tensor& other) {
@@ -1399,6 +1446,8 @@ REGISTER_DISPATCH(qtanh_stub, &qtanh_kernel);
 REGISTER_DISPATCH(qelu_stub, &qelu_kernel);
 REGISTER_DISPATCH(qadd_relu_stub, &qadd_kernel<true>);
 REGISTER_DISPATCH(qadd_stub, &qadd_kernel<false>);
+REGISTER_DISPATCH(qadd_scalar_relu_stub, &qadd_scalar_kernel<true>);
+REGISTER_DISPATCH(qadd_scalar_stub, &qadd_scalar_kernel<false>);
 REGISTER_DISPATCH(qmul_relu_stub, &qmul_kernel<true>);
 REGISTER_DISPATCH(qmul_stub, &qmul_kernel<false>);
 REGISTER_DISPATCH(qmaxpool_2d_nhwc_stub, &qmaxpool_2d_nhwc_kernel);
