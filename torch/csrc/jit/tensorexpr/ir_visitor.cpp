@@ -1,7 +1,7 @@
-#include "torch/csrc/jit/tensorexpr/ir_visitor.h"
+#include <torch/csrc/jit/tensorexpr/ir_visitor.h>
 
-#include "torch/csrc/jit/tensorexpr/ir.h"
-#include "torch/csrc/jit/tensorexpr/tensor.h"
+#include <torch/csrc/jit/tensorexpr/ir.h>
+#include <torch/csrc/jit/tensorexpr/tensor.h>
 
 namespace torch {
 namespace jit {
@@ -174,6 +174,12 @@ void IRVisitor::visit(const Cond* v) {
   if (false_stmt) {
     false_stmt->accept(this);
   }
+}
+
+void IRVisitor::visit(const LinearForm* v) {
+  v->getA()->accept(this);
+  v->getX()->accept(this);
+  v->getB()->accept(this);
 }
 
 } // namespace tensorexpr
