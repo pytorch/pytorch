@@ -5,7 +5,7 @@ import itertools
 
 from torch.testing._internal.common_utils import TestCase, run_tests, load_tests
 from torch.testing._internal.common_device_type import (instantiate_device_type_tests, onlyOnCPUAndCUDA,
-                                                        dtypes, onlyCUDA)
+                                                        dtypes, dtypesIfCUDA)
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -602,40 +602,43 @@ class TestTypePromotion(TestCase):
 
     @onlyOnCPUAndCUDA
     @float_double_default_dtype
-    def test_floating_reductions(self, device):
+    def test_floating_reductions_promotion(self, device):
         for fn, meth in self.floating_reductions:
-            t = torch.tensor((2, 4), device=device, dtype=torch.int)
+            t = torch.tensor((2, 4), device=device, dtype=torch.long)
             self.assertTrue(fn(t, dim=0).dtype, torch.get_default_dtype())
             self.assertTrue(meth(t, dim=0).dtype, torch.get_default_dtype())
 
-            o = torch.empty((2,), device=device, dtype=torch.int)
+            o = torch.empty((2,), device=device, dtype=torch.long)
             with self.assertRaises(RuntimeError):
                 fn(t, dim=0, out=o)
 
             o = o.to(torch.get_default_dtype())
-            fn(t, dim=0, out=o)
-
-    @onlyCUDA
-    def test_floating_reductions_half(self, device):
-        for fn, meth in self.floating_reductions:
-            t = torch.tensor((2, 4), device=device, dtype=torch.half)
-            result = fn(t, dim=0)
-
-            self.assertTrue(result.dtype, torch.float)
+            self.assertTrue(fn(t, dim=0, out=o).dtype, o.dtype)
 
     @onlyOnCPUAndCUDA
+    @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float, torch.double)
-    def test_mean(self, device, dtype):
-        t = torch.tensor((2, 4), device=device, dtype=torch.int)
+    def test_floating_reductions_preserve_float(self, device, dtype):
+        for fn, meth in self.floating_reductions:
+            t = torch.tensor((2, 4), device=device, dtype=dtype)
+            result = fn(t, dim=0)
+
+            self.assertTrue(result.dtype, dtype)
+
+    @onlyOnCPUAndCUDA
+    @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @dtypes(torch.float, torch.double)
+    def test_mean_dtype(self, device, dtype):
+        t = torch.tensor((2, 4), device=device, dtype=torch.long)
         self.assertTrue(torch.mean(t, dtype=dtype).dtype, dtype)
 
         with self.assertRaises(RuntimeError):
-            torch.mean(t, dtype=torch.int)
+            torch.mean(t, dtype=torch.long))
 
     @onlyOnCPUAndCUDA
     @float_double_default_dtype
     def test_std_mean(self, device):
-        t = torch.tensor((2, 4), device=device, dtype=torch.int)
+        t = torch.tensor((2, 4), device=device, dtype=torch.long)
         m = torch.std_mean(t)
         self.assertTrue(m[0].dtype, torch.get_default_dtype())
         self.assertTrue(m[1].dtype, torch.get_default_dtype())
@@ -643,7 +646,7 @@ class TestTypePromotion(TestCase):
     @onlyOnCPUAndCUDA
     @float_double_default_dtype
     def test_var_mean(self, device):
-        t = torch.tensor((2, 4), device=device, dtype=torch.int)
+        t = torch.tensor((2, 4), device=device, dtype=torch.long)
         m = torch.var_mean(t)
         self.assertTrue(m[0].dtype, torch.get_default_dtype())
         self.assertTrue(m[1].dtype, torch.get_default_dtype())

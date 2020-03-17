@@ -261,13 +261,17 @@ def _slice(g, input, axes, starts, ends):
     return g.op("Slice", input, axes_i=axes, starts_i=starts, ends_i=ends)
 
 
-def _reduce_op_symbolic(onnx_op_name, allow_multi_dim_support=True):
+def _reduce_op_symbolic(onnx_op_name, allow_multi_dim_support=True, ensure_fp=False):
     def symbolic(g, self, dim=None, keepdim=None):
         if dim is None:
             # all-reduce path
+            if ensure_fp:
+                self = sym_help._ensure_fp(g, self)
             return g.op(onnx_op_name, self, keepdims_i=0)
         else:
             # dim-reduce path
+            if ensure_fp:
+                self = sym_help._ensure_fp(g, self)
             desc = 'is' if allow_multi_dim_support else 'i'
             dim, keepdim = sym_help._get_const(dim, desc, 'dim'), sym_help._get_const(keepdim, 'i', 'keepdim')
             dim_list = dim if allow_multi_dim_support else [dim]
@@ -286,8 +290,10 @@ def overload_by_arg_count(fn):
         raise NotImplementedError("Unknown aten::{} signature".format(fn.__name__))
     return wrapper
 
-def _reduce_with_dtype(onnx_op, name, allow_multi_dim_support=True):
-    symbolic = _reduce_op_symbolic(onnx_op, allow_multi_dim_support=allow_multi_dim_support)
+def _reduce_with_dtype(onnx_op, name, allow_multi_dim_support=True, ensure_fp=False):
+    symbolic = _reduce_op_symbolic(onnx_op,
+                                   allow_multi_dim_support=allow_multi_dim_support,
+                                   ensure_fp=ensure_fp)
 
     @overload_by_arg_count
     def reduce(g, *args, **kwargs):
@@ -308,7 +314,7 @@ def _reduce_with_dtype(onnx_op, name, allow_multi_dim_support=True):
     return reduce
 
 sum = _reduce_with_dtype('ReduceSum', 'sum')
-mean = _reduce_with_dtype('ReduceMean', 'mean')
+mean = _reduce_with_dtype('ReduceMean', 'mean', ensure_fp=True)
 prod = _reduce_with_dtype('ReduceProd', 'prod', allow_multi_dim_support=False)  # torch.prod does not support multidimensional 'dim'
 
 @parse_args('v', 'i', 'none')
@@ -1962,14 +1968,20 @@ def gather(g, self, dim, index, sparse_grad=False):
 @parse_args('v', 'is', 'b', 'i')
 def _std(g, input, dim, unbiased, keepdim):
     if input.isCompleteTensor():
-        sqrd = g.op("Mul", input, input)
+        # Casts non-floating inputs to the default scalar type
+        cast_input = input
+        if not sym_help._is_fp(input):
+            ddtype = sym_help.scalar_type_to_pytorch_type.index(torch.get_default_dtype())
+            cast_input = g.op("Cast", input, to_i=sym_help.scalar_type_to_onnx[ddtype])
+
+        sqrd = g.op("Mul", cast_input, cast_input)
         if dim is None:
             sqrdmean = g.op("ReduceMean", sqrd, keepdims_i=0)
-            mean = g.op("ReduceMean", input, keepdims_i=0)
+            mean = g.op("ReduceMean", cast_input, keepdims_i=0)
             redudced_dims = input.type().sizes()
         else:
             sqrdmean = g.op("ReduceMean", sqrd, axes_i=dim, keepdims_i=keepdim)
-            mean = g.op("ReduceMean", input, axes_i=dim, keepdims_i=keepdim)
+            mean = g.op("ReduceMean", cast_input, axes_i=dim, keepdims_i=keepdim)
             redudced_dims = [input.type().sizes()[i] for i in dim]
         meansqrd = g.op("Mul", mean, mean)
         var = g.op("Abs", g.op("Sub", sqrdmean, meansqrd))
@@ -1997,6 +2009,7 @@ def std(g, input, *args):
 
 @parse_args('v', 'is', 'i')
 def logsumexp(g, input, dim, keepdim):
+    input = sym_help._ensure_fp(g, input)
     return g.op('ReduceLogSumExp', input, axes_i=dim, keepdims_i=keepdim)
 
 

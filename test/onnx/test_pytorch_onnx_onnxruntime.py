@@ -755,6 +755,19 @@ class TestONNXRuntime(unittest.TestCase):
 
         torch.set_default_dtype(prev_default)
 
+    def test_mean(self):
+        class MeanModule(torch.nn.Module):
+            def forward(self, x):
+                return torch.mean(x)
+
+        x = (torch.rand(3, 3) * 100)
+        self.run_test(MeanModule(), (x,))
+        self.run_test(torch.jit.trace(MeanModule(), (x,)), (x,))
+
+        x = x.to(torch.long)
+        self.run_test(MeanModule(), (x,))
+        self.run_test(torch.jit.trace(MeanModule(), (x,)), (x,))
+
     def test_slice_trace(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):
@@ -1199,7 +1212,7 @@ class TestONNXRuntime(unittest.TestCase):
 
     def _interpolate_script(self, x, mode, use_size, is_upsample, align_corners=False):
         # test disabled
-        return 
+        return
 
         class MyModel(torch.jit.ScriptModule):
             __constants__ = ['mode', 'use_size', 'is_upsample', 'size', 'scale', 'size_array', 'scale_array', 'align_corners']
@@ -1342,6 +1355,9 @@ class TestONNXRuntime(unittest.TestCase):
         model = StandardDeviation()
         self.run_test(model, x)
 
+        x = torch.tensor((1, 2, 3, 4, 5), dtype=torch.long)
+        self.run_test(model, x)
+
     def test_std_along_dims(self):
         class StandardDeviation(torch.nn.Module):
             def forward(self, input):
@@ -1351,6 +1367,9 @@ class TestONNXRuntime(unittest.TestCase):
         model = StandardDeviation()
         self.run_test(model, x)
 
+        x = torch.tensor(((1, 2, 3), (4, 5, 6)), dtype=torch.long)
+        self.run_test(model, x)
+
     def test_std_keepdim(self):
         class StandardDeviation(torch.nn.Module):
             def forward(self, input):
@@ -1358,6 +1377,9 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(2, 3, 4)
         model = StandardDeviation()
+        self.run_test(model, x)
+
+        x = torch.tensor(((1, 2, 3), (4, 5, 6)), dtype=torch.long)
         self.run_test(model, x)
 
     def test_bitshift(self):
@@ -1598,11 +1620,15 @@ class TestONNXRuntime(unittest.TestCase):
     def test_reduce_log_sum_exp(self):
         class ReduceLogSumExpModel(torch.nn.Module):
             def forward(self, input):
+                # return input
                 a = torch.logsumexp(input, dim=0)
                 b = torch.logsumexp(input, dim=(0, 1))
                 return a + b
 
         x = torch.randn(4, 4, requires_grad=True)
+        self.run_test(ReduceLogSumExpModel(), x)
+
+        x = torch.tensor(((1, 2, 3), (4, 5, 6)), dtype=torch.long)
         self.run_test(ReduceLogSumExpModel(), x)
 
     def test_logsoftmax(self):

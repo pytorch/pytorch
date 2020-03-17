@@ -385,7 +385,6 @@ static ScalarType get_dtype(Tensor& result, const Tensor& self, optional<ScalarT
 // If the optional dtype argument is specified, that is the output dtype
 // Otherwise, the dtype of self is used, unless...
 //  (1) It is an integral type, in which case the result has the default scalar type
-//  (2) It is a CUDA half tensor, in which case the result has float dtype
 static c10::optional<ScalarType> get_floating_dtype(
     const Tensor& self,
     const optional<ScalarType>& dtype = c10::nullopt) {
@@ -394,9 +393,6 @@ static c10::optional<ScalarType> get_floating_dtype(
     return *dtype;
   } else if (at::isIntegralType(self.scalar_type())) {
     return typeMetaToScalarType(c10::get_default_dtype());
-  } else if (self.is_cuda() && self.scalar_type() == kHalf) {
-    // Promotes CUDA half reductions to float
-    return kFloat;
   }
 
   return c10::nullopt;
