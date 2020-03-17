@@ -35,7 +35,6 @@ Tensor prepare_matrix_for_cublas(Tensor& tensor, bool& transpose_tensor) {
     tensor_ = tensor;
     transpose_tensor = true;
   } else {
-    // This way is better, right?
     transpose_tensor = true;
     tensor_ = tensor.clone(at::MemoryFormat::Contiguous);
   }
