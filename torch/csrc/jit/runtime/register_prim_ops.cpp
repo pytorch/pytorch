@@ -2727,7 +2727,7 @@ RegisterOperators reg2({
     DEFINE_UNARY_INT_OP(aten::factorial, factorial(a), int),
     DEFINE_UNARY_FLOAT_OP(aten::isnan, std::isnan(a), bool),
     DEFINE_UNARY_FLOAT_OP(aten::isfinite, std::isfinite(a), bool),
-    DEFINE_UNARY_FLOAT_OP(aten::isinf, std::isinf(a), bool),
+    DEFINE_UNARY_FLOAT_OP(aten::isinf, bool(std::isinf(a)), bool),
     Operator(
         "aten::modf(float a) -> (float, float)",
         [](Stack& stack) {

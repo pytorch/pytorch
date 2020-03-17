@@ -5,7 +5,7 @@ import torch.testing
 import torch.jit._recursive
 
 from torch.jit._recursive import ScriptMethodStub
-from torch.jit._builtins import _find_builtin, _get_builtin_table, _register_builtin  # noqa
+from torch.jit._builtins import _find_builtin, _get_builtin_table, _register_builtin, _is_global_builtin  # noqa
 from torch._jit_internal import _qualified_name
 from torch.autograd import Variable, function
 from torch.jit.frontend import get_jit_class_def, get_jit_def, get_default_args

@@ -4533,6 +4533,15 @@ class TestScript(JitTestCase):
                 results = fct_loop(inp, NUM_ITERATIONS)
                 self.assertEqual(results[1], expected)
 
+    def test_builtin_shadowing(self):
+        def len(x):
+            return x + 2
+
+        def fn(x):
+            return len(x)
+
+        self.checkScript(fn, [torch.randn(2, 2)])
+
     def test_set_attribute_through_optional(self):
         class A(torch.nn.Module):
             __annotations__ = {"x": Optional[torch.Tensor]}

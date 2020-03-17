@@ -640,6 +640,11 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   }
 
   if (py::isinstance<py::function>(obj)) {
+    if (py::cast<bool>(
+            py::module::import("torch.jit").attr("_is_global_builtin")(obj))) {
+      // See [python globals]
+      return nullptr;
+    }
     if (typeString(obj) == "builtin_function_or_method") {
       throw ErrorReport(loc) << "Python builtin " << py::str(obj)
                              << " is currently not supported in Torchscript";

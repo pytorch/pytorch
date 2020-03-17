@@ -420,6 +420,27 @@ struct Environment {
     auto retval = findInAnyFrame(ident);
 
     if (!retval) {
+      if (auto type = resolver->resolveType(ident, range)) {
+        if (auto tuple_type = type->cast<TupleType>()) {
+          retval = std::make_shared<NamedTupleConstructor>(tuple_type);
+        }
+      }
+    }
+
+    if (!retval) {
+      retval = resolver->resolveValue(ident, method, range);
+    }
+
+    if (!retval) {
+      if (auto type = resolver->resolveType(ident, range)) {
+        if (auto class_type = type->cast<ClassType>()) {
+          retval = std::make_shared<ClassValue>(class_type);
+        }
+      }
+    }
+
+    if (!retval) {
+      // [python globals]
       static std::unordered_map<std::string, SugaredValuePtr> globals = {
           {"print", std::make_shared<PrintValue>()},
           {"tuple", SpecialFormValue::create(prim::TupleConstruct)},
@@ -484,26 +505,6 @@ struct Environment {
       auto it = globals.find(ident);
       if (it != globals.end()) {
         retval = it->second;
-      }
-    }
-
-    if (!retval) {
-      if (auto type = resolver->resolveType(ident, range)) {
-        if (auto tuple_type = type->cast<TupleType>()) {
-          retval = std::make_shared<NamedTupleConstructor>(tuple_type);
-        }
-      }
-    }
-
-    if (!retval) {
-      retval = resolver->resolveValue(ident, method, range);
-    }
-
-    if (!retval) {
-      if (auto type = resolver->resolveType(ident, range)) {
-        if (auto class_type = type->cast<ClassType>()) {
-          retval = std::make_shared<ClassValue>(class_type);
-        }
       }
     }
 

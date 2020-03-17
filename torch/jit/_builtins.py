@@ -84,14 +84,14 @@ _builtin_ops = [
     (torch._VF.frobenius_norm, "aten::frobenius_norm"),
 ]
 
-# ops in torch.functional are bound to torch 
-# in these cases, we want to resolve the function to their python implementation 
+# ops in torch.functional are bound to torch
+# in these cases, we want to resolve the function to their python implementation
 # instead looking up a builtin "aten::" schema
 
 def _gen_torch_functional_registered_ops():
-    # eventually ops should encompass all of torch/functional.py, (torch.functional.__all__) 
-    # but we are currently only able to compile some of the functions. additionally, 
-    # some functions directly map to their aten:: implementations. 
+    # eventually ops should encompass all of torch/functional.py, (torch.functional.__all__)
+    # but we are currently only able to compile some of the functions. additionally,
+    # some functions directly map to their aten:: implementations.
     # TODO: add support for more ops
     ops = ["stft", "lu", "lu_unpack", "cdist", "norm"]
     return set(getattr(torch.functional, name) for name in ops)
@@ -139,3 +139,49 @@ def _register_builtin(fn, op):
 
 def _find_builtin(fn):
     return _get_builtin_table().get(id(fn))
+
+
+# These are Python globals that have special sugaring in the compiler. See
+# [python globals] in the compiler for details. Adding a builtin global here
+# indicates that when resolving, we should skip these so they dispatch to
+# the correct sugared representation
+compiler_builtins = None
+def _is_global_builtin(maybe_builtin):
+    global compiler_builtins
+    if compiler_builtins is None:
+        # Errors (AssertionError and RuntimeError) should not be here since
+        # they are handled separately in the compiler
+        compiler_builtins = set([
+            print,
+            tuple,
+            float,
+            int,
+            bool,
+            str,
+            getattr,
+            hasattr,
+            isinstance,
+            len,
+            hex,
+            oct,
+            round,
+            hash,
+            min,
+            max,
+            abs,
+            all,
+            divmod,
+            list,
+            ord,
+            chr,
+            bin,
+            range,
+            zip,
+            enumerate,
+            sorted,
+        ])
+
+        if PY2:
+            compiler_builtins.add(rangelist)
+
+    return maybe_builtin in compiler_builtins
