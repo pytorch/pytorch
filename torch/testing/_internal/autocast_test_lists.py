@@ -14,9 +14,10 @@ class AutocastTestLists(object):
         mat1_fp16 = (torch.randn((n, n), dtype=torch.float16, device=dev),)
         mat2_fp16 = (torch.randn((n, n), dtype=torch.float16, device=dev),)
 
-        conv_args_fp32 = [(torch.randn((n, n, *(n,) * dims), dtype=torch.float32, device=dev),
-                           torch.randn((n, *(n,) * (dims + 1)), dtype=torch.float32, device=dev))
-                          for dims in (1, 2, 3)]
+        dimsets = ((n, n, n), (n, n, n, n), (n, n, n, n, n))
+        conv_args_fp32 = [(torch.randn(dimset, dtype=torch.float32, device=dev),
+                           torch.randn(dimset, dtype=torch.float32, device=dev))
+                          for dimset in dimsets]
         bias_fp32 = (torch.randn((n,), dtype=torch.float32, device=dev),)
         element0_fp32 = (torch.randn(1, dtype=torch.float32, device=dev),)
         pointwise0_fp32 = (torch.randn(n, dtype=torch.float32, device=dev),)
