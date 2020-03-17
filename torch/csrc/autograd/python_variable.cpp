@@ -155,7 +155,7 @@ static PyObject* THPVariable_as_subclass(THPVariable* self, PyObject* args, PyOb
   if (!PyType_Check(cls)) {
     throw TypeError("cls must be a type (got %s)", Py_TYPE(cls)->tp_name);
   }
-  auto data = as_variable_ref(self->cdata);
+  auto data = as_variable_ref(self->cdata.alias());
   data.unsafeGetTensorImpl()->set_allow_tensor_metadata_change(true);
   return THPVariable_NewWithVar((PyTypeObject*)cls, std::move(data));
   END_HANDLE_TH_ERRORS
