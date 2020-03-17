@@ -290,31 +290,120 @@ void testLLVMVecLoadStoreTest() {
   EXPECT_EQ(b_buffer[3], 1);
 }
 
+#define FLOAT_INTRINSICS_TEST(Name, Lanes)                       \
+  void testLLVMVecFloat_##Name##Lane##Lanes##Test() {         \
+    KernelScope kernel_scope;                                    \
+    Buffer a(VarHandle("A", kHandle), kFloat, {1});                \
+    Buffer b(VarHandle("B", kHandle), kFloat, {1});                \
+    float val = 0.5f;                                            \
+    std::vector<float> a_buffer(Lanes, val);                     \
+    std::vector<float> b_buffer(Lanes, val);                     \
+    auto store = Store::make(                                    \
+        b,                                                       \
+        Ramp::make(0, 1, Lanes),                                 \
+        Name(Load::make(                                         \
+            a,                                                   \
+            Ramp::make(0, 1, Lanes),                             \
+            Broadcast::make(IntImm::make(1), Lanes))),           \
+        Broadcast::make(IntImm::make(1), Lanes));                \
+    LLVMCodeGen cg(store, {a, b});                               \
+    std::vector<void*> args({a_buffer.data(), b_buffer.data()}); \
+    float ref = std::Name(0.5f);                                 \
+    EXPECT_EQ(cg.value<int>(args), 0);                           \
+    for (int i = 0; i < Lanes; i++) {                            \
+      EXPECT_FLOAT_EQ(a_buffer[i], val);                               \
+    }                                                            \
+  } // namespace jit
+FLOAT_INTRINSICS_TEST(erf, 4)
+FLOAT_INTRINSICS_TEST(erfc, 4)
+FLOAT_INTRINSICS_TEST(acos, 4)
+FLOAT_INTRINSICS_TEST(asin, 4)
+FLOAT_INTRINSICS_TEST(atan, 4)
+FLOAT_INTRINSICS_TEST(cosh, 4)
+FLOAT_INTRINSICS_TEST(sinh, 4)
+FLOAT_INTRINSICS_TEST(tanh, 4)
+FLOAT_INTRINSICS_TEST(expm1, 4)
+FLOAT_INTRINSICS_TEST(lgamma, 4)
+FLOAT_INTRINSICS_TEST(erf, 8)
+FLOAT_INTRINSICS_TEST(erfc, 8)
+FLOAT_INTRINSICS_TEST(acos, 8)
+FLOAT_INTRINSICS_TEST(asin, 8)
+FLOAT_INTRINSICS_TEST(atan, 8)
+FLOAT_INTRINSICS_TEST(cosh, 8)
+FLOAT_INTRINSICS_TEST(sinh, 8)
+FLOAT_INTRINSICS_TEST(tanh, 8)
+FLOAT_INTRINSICS_TEST(expm1, 8)
+FLOAT_INTRINSICS_TEST(lgamma, 8)
+#undef FLOAT_INTRINSICS_TEST
+
+#define DOUBLE_INTRINSICS_TEST(Name, Lanes)                       \
+  void testLLVMVecDouble_##Name##Lane##Lanes##Test() {         \
+    KernelScope kernel_scope;                                    \
+    Buffer a(VarHandle("A", kHandle), kDouble, {1});                \
+    Buffer b(VarHandle("B", kHandle), kDouble, {1});                \
+    float val = 0.5f;                                            \
+    std::vector<double> a_buffer(Lanes, val);                     \
+    std::vector<double> b_buffer(Lanes, val);                     \
+    auto store = Store::make(                                    \
+        b,                                                       \
+        Ramp::make(0, 1, Lanes),                                 \
+        Name(Load::make(                                         \
+            a,                                                   \
+            Ramp::make(0, 1, Lanes),                             \
+            Broadcast::make(IntImm::make(1), Lanes))),           \
+        Broadcast::make(IntImm::make(1), Lanes));                \
+    LLVMCodeGen cg(store, {a, b});                               \
+    std::vector<void*> args({a_buffer.data(), b_buffer.data()}); \
+    float ref = std::Name(0.5f);                                 \
+    EXPECT_EQ(cg.value<int>(args), 0);                           \
+    for (int i = 0; i < Lanes; i++) {                            \
+      EXPECT_FLOAT_EQ(a_buffer[i], val);                               \
+    }                                                            \
+  } // namespace jit
+DOUBLE_INTRINSICS_TEST(erf, 2)
+DOUBLE_INTRINSICS_TEST(erfc, 2)
+DOUBLE_INTRINSICS_TEST(acos, 2)
+DOUBLE_INTRINSICS_TEST(asin, 2)
+DOUBLE_INTRINSICS_TEST(atan, 2)
+DOUBLE_INTRINSICS_TEST(cosh, 2)
+DOUBLE_INTRINSICS_TEST(sinh, 2)
+DOUBLE_INTRINSICS_TEST(tanh, 2)
+DOUBLE_INTRINSICS_TEST(expm1, 2)
+DOUBLE_INTRINSICS_TEST(lgamma, 2)
+DOUBLE_INTRINSICS_TEST(erf, 4)
+DOUBLE_INTRINSICS_TEST(erfc, 4)
+DOUBLE_INTRINSICS_TEST(acos, 4)
+DOUBLE_INTRINSICS_TEST(asin, 4)
+DOUBLE_INTRINSICS_TEST(atan, 4)
+DOUBLE_INTRINSICS_TEST(cosh, 4)
+DOUBLE_INTRINSICS_TEST(sinh, 4)
+DOUBLE_INTRINSICS_TEST(tanh, 4)
+DOUBLE_INTRINSICS_TEST(expm1, 4)
+DOUBLE_INTRINSICS_TEST(lgamma, 4)
+#undef DOUBLE_INTRINSICS_TEST
+
 void testLLVMVectorizerLoadStoreTest() {
   KernelScope kernel_scope;
   Buffer a(VarHandle("A", kHandle), kInt, {1});
-  Buffer b(VarHandle("B", kHandle), kInt, {1});
-  std::vector<int32_t> a_buffer = {1, 1, 1, 1};
-  std::vector<int32_t> b_buffer = {2, 2, 2, 2};
 
-  auto mask = IntImm::make(1);
-  VarHandle i("i", kInt);
-  auto expr =
-      For::make(i, 0, 4, Store::make(b, i, Load::make(a, i, mask), mask));
-  auto vectorized = Vectorize(expr);
-  EXPECT_EQ(dynamic_cast<For*>(vectorized), nullptr);
+  Tensor* c = Compute("c", {{4, "i"}}, [&](const VarHandle& i) {
+    return Load::make(a, i, 1);
+  });
 
-  LLVMCodeGen cg(vectorized, {a, b});
-  std::vector<void*> args({a_buffer.data(), b_buffer.data()});
-  EXPECT_EQ(cg.value<int>(args), 0);
-  EXPECT_EQ(a_buffer[0], 1);
-  EXPECT_EQ(a_buffer[1], 1);
-  EXPECT_EQ(a_buffer[2], 1);
-  EXPECT_EQ(a_buffer[3], 1);
-  EXPECT_EQ(b_buffer[0], 1);
-  EXPECT_EQ(b_buffer[1], 1);
-  EXPECT_EQ(b_buffer[2], 1);
-  EXPECT_EQ(b_buffer[3], 1);
+  Buffer c_buf(VarHandle(c->func_var()), kInt, {4});
+  LoopNest l({c});
+  Stmt* s = l.root_stmt();
+  l.Vectorize(*dynamic_cast<Block*>(s)->stmts().begin());
+
+  EXPECT_TRUE(dynamic_cast<For*>(*dynamic_cast<Block*>(s)->stmts().begin()) == nullptr);
+
+  LLVMCodeGen cg(s, {a, c_buf});
+
+  std::vector<int> a_vec(4, 21);
+  std::vector<int> c_vec(4, 0);
+  std::vector<void*> args({a_vec.data(), c_vec.data()});
+  ASSERT_EQ(cg.value<int>(args), 0);
+  assertAllEqual(c_vec, 21);
 }
 
 void testLLVMMemcpyTest() {

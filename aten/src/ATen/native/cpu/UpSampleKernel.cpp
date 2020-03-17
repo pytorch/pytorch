@@ -137,6 +137,103 @@ void cpu_upsample_nearest(
 }
 
 template <typename scalar_t, typename scale_type>
+void cpu_upsample_nearest_channels_last(
+    Tensor& output_,
+    const Tensor& input_,
+    const scale_type& scales) {
+  TORCH_CHECK(input_.dtype() == output_.dtype(), "expected dtype ", input_.dtype(),
+              " for `output` but got dtype ", output_.dtype());
+
+  auto input_sizes = input_.sizes().vec();
+  auto output_sizes = output_.sizes().vec();
+  auto ndim = input_sizes.size();
+  TORCH_CHECK(ndim >=4 && ndim <= 5, "Upsample with NHWC format supports tensors with 4 or 5 dims.")
+
+  auto channels_last_memory_format = ndim == 4 ? at::MemoryFormat::ChannelsLast : at::MemoryFormat::ChannelsLast3d;
+  auto input = input_.contiguous(channels_last_memory_format);
+  auto output = output_.contiguous(channels_last_memory_format);
+
+  auto input_data = input.data_ptr<scalar_t>();
+  auto output_data = output.data_ptr<scalar_t>();
+
+  // treat nbatch and channels as one dimension
+  int64_t num_batches =  input_sizes[0];
+  int64_t channels =  input_sizes[1];
+  int64_t input_depth = (ndim == 5) ? input_sizes[2] : 1;
+  int64_t output_depth = (ndim == 5) ? output_sizes[2] : 1;
+  int64_t input_height = (ndim >= 4) ? input_sizes[ndim - 2] : 1;
+  int64_t output_height = (ndim >= 4) ? output_sizes[ndim - 2] : 1;
+  int64_t input_width = input_sizes[ndim - 1];
+  int64_t output_width = output_sizes[ndim - 1];
+  auto num_work_items = num_batches * output_depth
+                      * output_height
+                      * output_width
+                      ;
+
+  auto loop2d = [&](int64_t start, int64_t end) {
+    int64_t n = 0;
+    int64_t oh = 0;
+    int64_t ow = 0;
+    data_index_init(start, n, num_batches, oh, output_height, ow, output_width);
+
+    // We can unroll this loop by some factor. Perhaps by 4 or something.
+    // But if we are doing memcpy then it may not help.
+    // Then we need custom sort of memcpy.
+    for (int64_t i = start; i < end; i++) {
+      int64_t ih = nearest_idx(oh, input_height, output_height, scales[0]);
+      int64_t iw = nearest_idx(ow, input_width, output_width, scales[1]);
+      auto input_data_ptr = input_data + n * (input_height * input_width * channels)
+        + ih * (input_width * channels) + iw * channels;
+      auto output_data_ptr = output_data + n * (output_height * output_width * channels)
+        + oh * (output_width * channels) + ow * channels;
+      std::memcpy(output_data_ptr, input_data_ptr, sizeof(scalar_t) * channels);
+      data_index_step(n, num_batches, oh, output_height, ow, output_width);
+    }
+  };
+
+  auto loop3d = [&](int64_t start, int64_t end) {
+    int64_t n = 0;
+    int64_t od = 0;
+    int64_t oh = 0;
+    int64_t ow = 0;
+    data_index_init(start, n, num_batches, oh, output_height, ow, output_width);
+    data_index_init(start, n, num_batches, od, output_depth, oh, output_height, ow, output_width);
+
+    // We need to unroll this loop by some factor. Perhaps by 4 or something.
+    // But we are doing memcpy then it may not help.
+    // Then we need custom sort of memcpy.
+    for (int64_t i = start; i < end; i++) {
+      int64_t id = nearest_idx(od, input_depth, output_depth, scales[0]);
+      int64_t ih = nearest_idx(oh, input_height, output_height, scales[1]);
+      int64_t iw = nearest_idx(ow, input_width, output_width, scales[2]);
+      auto input_data_ptr = input_data
+        + n * (input_depth * input_height * input_width * channels)
+        + id * (input_height * input_width * channels)
+        + ih * (input_width * channels) + iw * channels;
+      auto output_data_ptr = output_data
+        + n * (output_depth * output_height * output_width * channels)
+        + od * (output_height * output_width * channels)
+        + oh * (output_width * channels) + ow * channels;
+      std::memcpy(output_data_ptr, input_data_ptr, sizeof(scalar_t) * channels);
+      data_index_step(n, num_batches, od, output_depth, oh, output_height, ow, output_width);
+    }
+  };
+
+  if (ndim == 4) {
+    // upsample nearest 2d
+    at::parallel_for(0, num_work_items, at::internal::GRAIN_SIZE, loop2d);
+  } else {
+    // upsample nearest 3d
+    TORCH_INTERNAL_ASSERT(ndim == 5);
+    at::parallel_for(0, num_work_items, at::internal::GRAIN_SIZE, loop3d);
+  }
+
+  if (!output_.is_contiguous(channels_last_memory_format)) {
+    output_.copy_(output);
+  }
+}
+
+template <typename scalar_t, typename scale_type>
 void cpu_upsample_nearest_backward(
     Tensor& grad_input_,
     const Tensor& grad_output_,
@@ -221,6 +318,7 @@ void cpu_upsample_nearest_backward(
     at::parallel_for(0, channels, at::internal::GRAIN_SIZE / output_slice_size, loop3d);
   }
 
+  // Should this actually check for is_contiguous(input.suggest_memory_format())
   if (!grad_input_.is_contiguous()) {
     grad_input_.copy_(grad_input);
   }
@@ -241,9 +339,15 @@ void upsample_nearest2d_kernel_impl(
     const Tensor& input,
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "upsample_nearest2d", [&] {
-    cpu_upsample_nearest<scalar_t, scale_t>(output, input, {scales_h, scales_w});
-  });
+  if (input.is_contiguous(at::MemoryFormat::ChannelsLast)) {
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "upsample_nearest2d_channels_last", [&] {
+      cpu_upsample_nearest_channels_last<scalar_t, scale_t>(output, input, {scales_h, scales_w});
+    });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "upsample_nearest2d", [&] {
+      cpu_upsample_nearest<scalar_t, scale_t>(output, input, {scales_h, scales_w});
+    });
+  }
 }
 
 void upsample_nearest3d_kernel_impl(
@@ -252,9 +356,15 @@ void upsample_nearest3d_kernel_impl(
     c10::optional<double> scales_d,
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "upsample_nearest3d", [&] {
-    cpu_upsample_nearest<scalar_t, scale_t>(output, input, {scales_d, scales_h, scales_w});
-  });
+  if (input.is_contiguous(at::MemoryFormat::ChannelsLast3d)) {
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "upsample_nearest3d_channels_last", [&] {
+      cpu_upsample_nearest_channels_last<scalar_t, scale_t>(output, input, {scales_d, scales_h, scales_w});
+    });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "upsample_nearest3d", [&] {
+      cpu_upsample_nearest<scalar_t, scale_t>(output, input, {scales_d, scales_h, scales_w});
+    });
+  }
 }
 
 void upsample_nearest1d_backward_kernel_impl(
