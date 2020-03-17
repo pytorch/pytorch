@@ -141,10 +141,11 @@ autograd computation is done.
 
 We accumulate the gradients in the appropriate
 :class:`torch.distributed.autograd.context` on each of the nodes. The autograd
-context used is the current autograd context of this node when
+context to be used is looked up given the ``context_id`` that is passed in when
 :meth:`torch.distributed.autograd.backward` is called. If there is no valid
-autograd context, we throw an error. You can retrieve the accumulated
-gradients using the :meth:`~torch.distributed.autograd.get_gradients` API.
+autograd context corresponding to the given ID, we throw an error. You can
+retrieve the accumulated gradients using the
+:meth:`~torch.distributed.autograd.get_gradients` API.
 
 Arguments:
     context_id (int): The autograd context id for which we should retrieve the gradients.
@@ -180,8 +181,8 @@ Example::
 get_gradients(context_id: int) -> Dict[Tensor, Tensor]
 
 Retrieves a map from Tensor to the appropriate gradient for that Tensor
-accumulated in the provided ``context_id`` as part of the distributed autograd
-backward pass.
+accumulated in the provided context corresponding to the given ``context_id``
+as part of the distributed autograd backward pass.
 
 Arguments:
     context_id(int): The autograd context id for which we should retrieve the
@@ -199,8 +200,8 @@ Example::
     >>      loss = t1 + t2
     >>      dist_autograd.backward(context_id, [loss.sum()])
     >>      grads = dist_autograd.get_gradients(context_id)
-    >>      print (grads[t1])
-    >>      print (grads[t2])
+    >>      print(grads[t1])
+    >>      print(grads[t2])
 )",
       py::arg("context_id"));
 
