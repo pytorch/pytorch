@@ -1209,7 +1209,7 @@ class _TestTorchMixin(object):
         d = torch.autograd.Variable(torch.DoubleTensor(2, 3))
         self.assertRaises(RuntimeError, lambda: torch.zeros((2, 3), out=d, dtype=torch.float32))
 
-    def test_make_subclass(self):
+    def test_as_subclass(self):
         class SubTensor(torch.Tensor):
             member_var = object()
 
