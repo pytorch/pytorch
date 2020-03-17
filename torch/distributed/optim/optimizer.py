@@ -128,8 +128,9 @@ class DistributedOptimizer:
 
         This will call :meth:`torch.optim.Optimizer.step` on each worker
         containing parameters to be optimized, and will block until all workers
-        return. The current distributed autograd
-        :class:`~torch.distributed.autograd.context` will be used globally.
+        return. The provided ``context_id`` will be used to retrieve the
+        corresponding :class:`~torch.distributed.autograd.context` that
+        contains the gradients that should be applied to the parameters.
 
         Args:
             context_id: the autograd context id for which we should run the
