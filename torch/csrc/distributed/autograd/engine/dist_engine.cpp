@@ -74,9 +74,10 @@ void DistEngine::computeDependencies(
 
   // Build a CPU ready queue that is used by the graphTask in local
   // autograd engine, since Distributed Autograd Engine calls
-  // Engine::execute_with_graph_task instead of Engine::execute, we
-  // need to allocate our own CPU ReadyQueue for the GraphTask.
-  auto cpu_ready_queue = engine_.init_local_ready_queue();
+  // Engine::execute_with_graph_task in async mode instead of
+  // Engine::execute, we need to allocate our own CPU ReadyQueue
+  // for each GraphTask .
+  auto cpu_ready_queue = std::make_shared<ReadyQueue>();
 
   // Build the graph task and graph root.
   auto graphTask = std::make_shared<GraphTask>(
