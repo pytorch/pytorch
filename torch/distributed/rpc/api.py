@@ -374,8 +374,8 @@ def remote(to, func, args=None, kwargs=None):
         The ``remote`` API does not copy storages of argument tensors until
         sending them over the wire, which could be done by a different thread
         depending on the RPC backend type. The caller should make sure that the
-        content of those tensors stay intact until the returned Future
-        completes.
+        contents of those tensors stay intact until the returned RRef is
+        confirmed by the owner.
 
     Example::
         Make sure that ``MASTER_ADDRESS`` and ``MASTER_PORT`` are set properly
@@ -580,7 +580,7 @@ def rpc_async(to, func, args=None, kwargs=None):
         The ``rpc_async`` API does not copy storages of argument tensors until
         sending them over the wire, which could be done by a different thread
         depending on the RPC backend type. The caller should make sure that the
-        content of those tensors stay intact until the returned Future
+        contents of those tensors stay intact until the returned Future
         completes.
 
     Example::
