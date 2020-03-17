@@ -158,12 +158,6 @@ std::vector<size_t> getGeneralOpTensorInputIndexes(Node* n) {
                  /* call_funcs = */ {},
                  /* aten_funcs = */ single_input_aten_funcs)) {
     return {0};
-  } else if (n->kind() == prim::ListConstruct) {
-    std::vector<size_t> indexes;
-    for (auto i = 0; i < n->inputs().size(); ++i) {
-      indexes.push_back(i);
-    }
-    return indexes;
   }
   return {};
 }
@@ -181,8 +175,7 @@ bool nodeQuantizable(Node* n) {
       "relu",
       "addmm",
       "matmul",
-      "add_",
-      "cat",
+      "add_"
     });
 }
 
