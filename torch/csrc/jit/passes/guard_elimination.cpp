@@ -213,8 +213,6 @@ private:
 
     const static auto no_exceptions = std::unordered_set<size_t>{};
     switch (n->kind()) {
-    case aten::add:
-    case aten::sub:
     case aten::mul:
     case aten::div:
     case aten::t:
@@ -272,6 +270,9 @@ private:
     case aten::where:
     case aten::avg_pool2d:
       return checkInputs(n, no_exceptions);
+    case aten::add:
+    case aten::sub:
+      return checkInputs(n, std::unordered_set<size_t>{2});
     case aten::slice:
       return !n->input(0)->type()->expect<TensorType>()->isSummarized() &&
              // check that the dimension argument is constant
