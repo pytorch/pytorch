@@ -71,18 +71,18 @@ static auto typeinfo =
 // compile Fusion to CUDA functions:
 // 1. JIT compilation via nvrtc to generate CUDA c++ kernel code;
 // 2. CUDA Drive API to load CUDA c++ kernel code as function_;
-TORCH_API void compileKernel(Fusion& fusion, CudaKernel& entry);
+TORCH_CUDA_API void compileKernel(Fusion& fusion, CudaKernel& entry);
 
 // run loaded kernel through Function.
 // inputs/outputs is given in the sense of a PyTorch JIT ir node. This function
 // wraps IO data structure for tensors on host.
-TORCH_API void runKernel(
+TORCH_CUDA_API void runKernel(
     CudaKernel& entry,
     const at::ArrayRef<IValue>& inputs,
     std::vector<at::Tensor>& outputs);
 
 // Facility API to run kernel in tests.
-TORCH_API void runTestKernel(
+TORCH_CUDA_API void runTestKernel(
     CudaKernel& entry,
     const std::vector<at::Tensor>& inputs,
     std::vector<at::Tensor>& outputs);

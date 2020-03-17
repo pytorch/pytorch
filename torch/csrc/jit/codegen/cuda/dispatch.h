@@ -68,7 +68,7 @@ struct BinaryOp;
  * By default, all IR nodes are handled in this dispatch, and will call an empty
  * function on all nodes.
  */
-struct TORCH_API OptOutDispatch {
+struct TORCH_CUDA_API OptOutDispatch {
   virtual ~OptOutDispatch() = default;
   OptOutDispatch() = default;
 
@@ -98,7 +98,7 @@ struct TORCH_API OptOutDispatch {
   virtual void handle(BinaryOp*) {}
 };
 
-struct TORCH_API OptInConstDispatch {
+struct TORCH_CUDA_API OptInConstDispatch {
   virtual ~OptInConstDispatch() = default;
   OptInConstDispatch() = default;
 
@@ -148,7 +148,7 @@ struct TORCH_API OptInConstDispatch {
   }
 };
 
-struct TORCH_API OptInDispatch {
+struct TORCH_CUDA_API OptInDispatch {
   virtual ~OptInDispatch() = default;
   OptInDispatch() = default;
 
@@ -198,7 +198,7 @@ struct TORCH_API OptInDispatch {
   }
 };
 
-struct TORCH_API OptOutMutator {
+struct TORCH_CUDA_API OptOutMutator {
   virtual ~OptOutMutator() = default;
   OptOutMutator() = default;
 
@@ -231,7 +231,7 @@ struct TORCH_API OptOutMutator {
   virtual Statement* mutate(BinaryOp*);
 };
 
-struct TORCH_API OptInMutator {
+struct TORCH_CUDA_API OptInMutator {
   virtual ~OptInMutator() = default;
   OptInMutator() = default;
 

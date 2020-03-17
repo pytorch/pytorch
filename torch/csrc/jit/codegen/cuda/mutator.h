@@ -27,7 +27,7 @@ struct Fusion;
 
 // Search through "within" and replace all instances of "instance" with the
 // value "with".
-struct TORCH_API ReplaceAll : public OptOutMutator {
+struct TORCH_CUDA_API ReplaceAll : public OptOutMutator {
  private:
   Statement* mutate(Val*);
   Statement* mutate(Expr* expr) {

@@ -43,7 +43,7 @@ struct Add;
  * operator <<.
  */
 
-struct TORCH_API IRPrinter : public OptInConstDispatch {
+struct TORCH_CUDA_API IRPrinter : public OptInConstDispatch {
 
   std::ostream& os;
   bool print_inline_ = false;
@@ -91,9 +91,9 @@ public:
 
   };
 
-  TORCH_API std::ostream& operator<< (std::ostream& os, const Statement* const stmt);
-  TORCH_API std::ostream& operator<< (std::ostream& os, Fusion* f);
-  TORCH_API std::ostream& operator<< (std::ostream& os, Fusion& f);
+  TORCH_CUDA_API std::ostream& operator<< (std::ostream& os, const Statement* const stmt);
+  TORCH_CUDA_API std::ostream& operator<< (std::ostream& os, Fusion* f);
+  TORCH_CUDA_API std::ostream& operator<< (std::ostream& os, Fusion& f);
 
 } // namespace fuser
 } // namespace jit

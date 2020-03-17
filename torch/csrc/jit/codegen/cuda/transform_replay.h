@@ -124,7 +124,7 @@ namespace fuser {
  *
  */
 
-struct TORCH_API TransformReplay : public TransformIter {
+struct TORCH_CUDA_API TransformReplay : public TransformIter {
  private:
   /*
    * Functions to backward propagate influence from split/merge/reorder

@@ -96,43 +96,43 @@ DataType aten_to_data_type(const at::ScalarType& scalar_type) {
   return at_type_map[scalar_type];
 }
 
-TORCH_API std::ostream& operator<<(std::ostream& out, const ValType vtype) {
+TORCH_CUDA_API std::ostream& operator<<(std::ostream& out, const ValType vtype) {
   TORCH_INTERNAL_ASSERT(val_type_string_map.count(vtype) != 0,
   "No string found for val type.");
   return out << val_type_string_map[vtype];
 }
 
-TORCH_API std::ostream& operator<<(std::ostream& out, const DataType dtype) {
+TORCH_CUDA_API std::ostream& operator<<(std::ostream& out, const DataType dtype) {
   TORCH_INTERNAL_ASSERT(data_type_string_map.count(dtype) != 0,
   "No string found for data type.");
   return out << data_type_string_map[dtype];
 }
 
-TORCH_API std::ostream& operator<<(std::ostream& out, const ExprType etype) {
+TORCH_CUDA_API std::ostream& operator<<(std::ostream& out, const ExprType etype) {
   TORCH_INTERNAL_ASSERT(expr_type_string_map.count(etype) != 0,
   "No string found for expr type.");
   return out << expr_type_string_map[etype];
 }
 
-TORCH_API std::ostream& operator<<(std::ostream& out, const UnaryOpType uotype) {
+TORCH_CUDA_API std::ostream& operator<<(std::ostream& out, const UnaryOpType uotype) {
   TORCH_INTERNAL_ASSERT(unary_op_type_string_map.count(uotype) != 0,
   "No string found for UnaryOp type.");
   return out << unary_op_type_string_map[uotype];
 }
 
-TORCH_API std::ostream& operator<<(std::ostream& out, const BinaryOpType botype) {
+TORCH_CUDA_API std::ostream& operator<<(std::ostream& out, const BinaryOpType botype) {
   TORCH_INTERNAL_ASSERT(binary_op_type_string_map.count(botype) != 0,
   "No string found for BinaryOp type.");
   return out << binary_op_type_string_map[botype];
 }
 
-TORCH_API std::ostream& operator<<(std::ostream& out, const ParallelType ptype) {
+TORCH_CUDA_API std::ostream& operator<<(std::ostream& out, const ParallelType ptype) {
   TORCH_INTERNAL_ASSERT(parallel_type_string_map.count(ptype) != 0,
   "No string found for parallel type.");
   return out << parallel_type_string_map[ptype];
 }
 
-TORCH_API c10::optional<std::string> inline_op_str(const UnaryOpType uotype) {
+TORCH_CUDA_API c10::optional<std::string> inline_op_str(const UnaryOpType uotype) {
   if(unary_op_type_inline_op_string_map.find(uotype) == unary_op_type_inline_op_string_map.end()) {
     return c10::nullopt;
   } else {
@@ -140,7 +140,7 @@ TORCH_API c10::optional<std::string> inline_op_str(const UnaryOpType uotype) {
   }
 }
 
-TORCH_API c10::optional<std::string> inline_op_str(const BinaryOpType botype) {
+TORCH_CUDA_API c10::optional<std::string> inline_op_str(const BinaryOpType botype) {
   if(binary_op_type_inline_op_string_map.find(botype) == binary_op_type_inline_op_string_map.end()) {
     return c10::nullopt;
   } else {

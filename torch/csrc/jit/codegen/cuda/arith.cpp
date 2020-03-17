@@ -11,7 +11,7 @@ namespace fuser {
 
 // Will return a new value of type val with the DataType dtype, if it's a
 // tensorview it will propagate the shape information from val.
-TORCH_API Val* newValLike(const Val* const val, DataType dtype) {
+TORCH_CUDA_API Val* newValLike(const Val* const val, DataType dtype) {
   switch (val->getValType().value()) {
     case (ValType::TensorView):
       return static_cast<const TensorView* const>(val)->newForOutput(dtype);
@@ -34,11 +34,11 @@ TORCH_API Val* newValLike(const Val* const val, DataType dtype) {
   TORCH_CHECK(false, err_msg.str());
 }
 
-TORCH_API Val* newValLike(const Val* const val) {
+TORCH_CUDA_API Val* newValLike(const Val* const val) {
   return newValLike(val, val->getDataType().value());
 }
 
-TORCH_API Val* promoteNew(Val* v1, Val* v2) {
+TORCH_CUDA_API Val* promoteNew(Val* v1, Val* v2) {
   // Can't promote two types if they aren't both
   // values with valid data types.
   TORCH_CHECK(v1->isVal() && v2->isVal());
@@ -57,7 +57,7 @@ TORCH_API Val* promoteNew(Val* v1, Val* v2) {
   return newValLike(v1, out_dtype);
 }
 
-TORCH_API Val* castOp(DataType dtype, Val* v1) {
+TORCH_CUDA_API Val* castOp(DataType dtype, Val* v1) {
   if (v1->getDataType().value() == dtype)
     return v1;
 
@@ -73,13 +73,13 @@ TORCH_API Val* castOp(DataType dtype, Val* v1) {
   return out;
 }
 
-TORCH_API Val* unaryOp(UnaryOpType type, Val* v1) {
+TORCH_CUDA_API Val* unaryOp(UnaryOpType type, Val* v1) {
   Val* out = newValLike(v1);
   Statement* expr = new UnaryOp(type, out, v1);
   return out;
 }
 
-TORCH_API Val* binaryOp(BinaryOpType type, Val* v1, Val* v2) {
+TORCH_CUDA_API Val* binaryOp(BinaryOpType type, Val* v1, Val* v2) {
   Val* out = promoteNew(v1, v2);
   if (type >= BinaryOpType::Mod) {
     if (out->getDataType().value() != DataType::Int)
@@ -89,35 +89,31 @@ TORCH_API Val* binaryOp(BinaryOpType type, Val* v1, Val* v2) {
   return out;
 }
 
-TORCH_API Val* SomeCrazyName(Val* v1, Val* v2) {
+TORCH_CUDA_API Val* add(Val* v1, Val* v2) {
   return binaryOp(BinaryOpType::Add, v1, v2);
 }
 
-TORCH_API Val* add(Val* v1, Val* v2) {
-  return binaryOp(BinaryOpType::Add, v1, v2);
-}
-
-TORCH_API Val* sub(Val* v1, Val* v2) {
+TORCH_CUDA_API Val* sub(Val* v1, Val* v2) {
   return binaryOp(BinaryOpType::Sub, v1, v2);
 }
 
-TORCH_API Val* mul(Val* v1, Val* v2) {
+TORCH_CUDA_API Val* mul(Val* v1, Val* v2) {
   return binaryOp(BinaryOpType::Mul, v1, v2);
 }
 
-TORCH_API Val* div(Val* v1, Val* v2) {
+TORCH_CUDA_API Val* div(Val* v1, Val* v2) {
   return binaryOp(BinaryOpType::Div, v1, v2);
 }
 
-TORCH_API Val* mod(Val* v1, Val* v2) {
+TORCH_CUDA_API Val* mod(Val* v1, Val* v2) {
   return binaryOp(BinaryOpType::Mod, v1, v2);
 }
 
-TORCH_API Val* lt(Val* v1, Val* v2) {
+TORCH_CUDA_API Val* lt(Val* v1, Val* v2) {
   return binaryOp(BinaryOpType::LT, v1, v2);
 }
 
-TORCH_API Val* ceilDiv(Val* v1, Val* v2) {
+TORCH_CUDA_API Val* ceilDiv(Val* v1, Val* v2) {
   return binaryOp(BinaryOpType::CeilDiv, v1, v2);
 }
 

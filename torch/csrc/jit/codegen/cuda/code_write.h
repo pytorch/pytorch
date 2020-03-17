@@ -34,7 +34,7 @@ struct FindUsedVals : public IterVisitor {
   }
 };
 
-struct TORCH_API CodeWrite : public IRPrinter {
+struct TORCH_CUDA_API CodeWrite : public IRPrinter {
  private:
   // Check if expr has a TensorView as an output
   bool isTVOp(const Expr* expr);

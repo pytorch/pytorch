@@ -66,7 +66,7 @@ void testGPU_FusionSimpleArith() {
 
     Float* f1 = new Float(1.f);
     Float* f2 = new Float(2.f);
-    auto f3 = SomeCrazyName(f1, f2);
+    auto f3 = add(f1, f2);
     ss2 << fusion2;
   }
 

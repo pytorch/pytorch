@@ -26,9 +26,9 @@ namespace fuser {
 namespace cuda {
 
 // returns whether or not a parsing function exists for the given node type.
-TORCH_API bool isNodeParsible(const Node* const node);
+TORCH_CUDA_API bool isNodeParsible(const Node* const node);
 
 // lowers PyTorch jit graph to `Fusion`.
-TORCH_API void parseJitIR(std::shared_ptr<Graph>& graph, Fusion& fusion);
+TORCH_CUDA_API void parseJitIR(std::shared_ptr<Graph>& graph, Fusion& fusion);
 
 }}}} // namespace torch::jit::fuser::cuda

@@ -49,7 +49,7 @@ struct Fusion;
 
 // Fusion Guard is our "context manager". It holds the actrive fusion and allows
 // it to be accessed anywhere through FusionGuard::getCurFusion().
-struct TORCH_API FusionGuard {
+struct TORCH_CUDA_API FusionGuard {
 
 public:
   Fusion* prev_fusion;
@@ -85,7 +85,7 @@ struct ExprSort : public IterVisitor {
  * so.
  */
 
-struct TORCH_API Fusion : public IRInputOutput {
+struct TORCH_CUDA_API Fusion : public IRInputOutput {
   Fusion() {}
 
   // Not copyable

@@ -55,9 +55,9 @@ namespace fuser {
 struct TransformReplay;
 struct TensorView;
 
-TORCH_API TensorView* split_(TensorView*, int axis, int factor);
-TORCH_API TensorView* merge_(TensorView*, int axis);
-TORCH_API TensorView* reorder_(TensorView*, const std::unordered_map<int, int>&);
+TORCH_CUDA_API TensorView* split_(TensorView*, int axis, int factor);
+TORCH_CUDA_API TensorView* merge_(TensorView*, int axis);
+TORCH_CUDA_API TensorView* reorder_(TensorView*, const std::unordered_map<int, int>&);
 
 } // namespace fuser
 } // namespace jit

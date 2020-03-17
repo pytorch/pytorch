@@ -14,7 +14,7 @@ namespace jit {
 namespace fuser {
 
 //Order of strength
-enum class TORCH_API ValType {
+enum class TORCH_CUDA_API ValType {
   TensorIndex,
   TensorDomain,
   IterDomain,
@@ -22,13 +22,13 @@ enum class TORCH_API ValType {
   Scalar
 };
 
-enum class TORCH_API DataType {
+enum class TORCH_CUDA_API DataType {
   Float,
   Int,
   Null
 };
 
-enum class TORCH_API ExprType {
+enum class TORCH_CUDA_API ExprType {
     UnaryOp
   , BinaryOp
   , ForLoop
@@ -40,12 +40,12 @@ enum class TORCH_API ExprType {
 // , Index
 };
 
-enum class TORCH_API UnaryOpType {
+enum class TORCH_CUDA_API UnaryOpType {
     Neg
   , Cast
 };
 
-enum class TORCH_API BinaryOpType {
+enum class TORCH_CUDA_API BinaryOpType {
     Add
   , Sub
   , Mul
@@ -56,7 +56,7 @@ enum class TORCH_API BinaryOpType {
   , CeilDiv
 };
 
-enum class TORCH_API ParallelType {
+enum class TORCH_CUDA_API ParallelType {
   BIDz,
   BIDy,
   BIDx,
@@ -75,15 +75,15 @@ bool is_cast_legal(const DataType& t1, const DataType& t2);
 
 DataType aten_to_data_type(const at::ScalarType& scalar_type);
 
-TORCH_API std::ostream& operator<<(std::ostream&, const ValType);
-TORCH_API std::ostream& operator<<(std::ostream&, const DataType);
-TORCH_API std::ostream& operator<<(std::ostream&, const ExprType);
-TORCH_API std::ostream& operator<<(std::ostream&, const UnaryOpType);
-TORCH_API std::ostream& operator<<(std::ostream&, const BinaryOpType);
-TORCH_API std::ostream& operator<<(std::ostream&, const ParallelType);
+TORCH_CUDA_API std::ostream& operator<<(std::ostream&, const ValType);
+TORCH_CUDA_API std::ostream& operator<<(std::ostream&, const DataType);
+TORCH_CUDA_API std::ostream& operator<<(std::ostream&, const ExprType);
+TORCH_CUDA_API std::ostream& operator<<(std::ostream&, const UnaryOpType);
+TORCH_CUDA_API std::ostream& operator<<(std::ostream&, const BinaryOpType);
+TORCH_CUDA_API std::ostream& operator<<(std::ostream&, const ParallelType);
 
-TORCH_API c10::optional<std::string> inline_op_str(const UnaryOpType);
-TORCH_API c10::optional<std::string> inline_op_str(const BinaryOpType);
+TORCH_CUDA_API c10::optional<std::string> inline_op_str(const UnaryOpType);
+TORCH_CUDA_API c10::optional<std::string> inline_op_str(const BinaryOpType);
 
 } // namespace fuser
 } // namespace jit

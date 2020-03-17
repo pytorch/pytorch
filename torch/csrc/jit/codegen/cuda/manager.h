@@ -22,12 +22,12 @@ namespace cuda {
 // Get fusion_node ready for execution.
 // find or compile `CudaKernel` for graph stored in `attr::Subgraph`
 // this function assigns `attr::cache_id` to `fusion_node`
-TORCH_API void compileCudaFusionGroup(Node* fusion_node);
+TORCH_CUDA_API void compileCudaFusionGroup(Node* fusion_node);
 
 // Execute fusion_node.
 // Current protocol is that the function allocates output tensor append them to
 // `stack` after execution.
 // TODO: support shape inferencing. Right now we only handles static shape
-TORCH_API void runCudaFusionGroup(const Node* const fusion_node, Stack& stack);
+TORCH_CUDA_API void runCudaFusionGroup(const Node* const fusion_node, Stack& stack);
 
 }}}} // namespace torch::jit::fuser::cuda

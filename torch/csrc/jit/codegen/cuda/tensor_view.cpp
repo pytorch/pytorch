@@ -28,7 +28,7 @@ c10::optional<TensorContiguity> infer_contiguity_from_tensor_type(
 
 } // namespace
 
-TORCH_API TensorView* split_(TensorView* tv, int axis, int factor) {
+TensorView* split_(TensorView* tv, int axis, int factor) {
   TensorDomain* td = tv->domain();
 
   if (axis < 0)
@@ -78,7 +78,7 @@ TORCH_API TensorView* split_(TensorView* tv, int axis, int factor) {
   return tv;
 }
 
-TORCH_API TensorView* merge_(TensorView* tv, int axis) {
+TensorView* merge_(TensorView* tv, int axis) {
   TensorDomain* td = tv->domain();
 
   if (axis < 0)
@@ -120,7 +120,7 @@ TORCH_API TensorView* merge_(TensorView* tv, int axis) {
  * Takes axis2pos map, axis2pos[old_pos] = new_pos, to modify the ordering of
  * the iter axes.
  */
-TORCH_API TensorView* reorder_(TensorView* tv, const std::unordered_map<int, int>& axis2pos) {
+TensorView* reorder_(TensorView* tv, const std::unordered_map<int, int>& axis2pos) {
   TensorDomain* td = tv->domain();
   auto ndims = td->size();
   // Map to save from previous order, to new order.

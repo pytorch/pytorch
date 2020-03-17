@@ -98,7 +98,7 @@ private:
 
 } // namespace
 
-TORCH_API void compileCudaFusionGroup(Node* fusion_node) {
+void compileCudaFusionGroup(Node* fusion_node) {
   TORCH_CHECK(
       fusion_node->kind() == prim::CudaFusionGroup,
       "Only prim::CudaFusionGroup can be compiled");
@@ -110,7 +110,7 @@ TORCH_API void compileCudaFusionGroup(Node* fusion_node) {
   fusion_node->i_(attr::cache_id, fusion_cache_id);
 }
 
-TORCH_API void runCudaFusionGroup(const Node* const fusion_node, Stack& stack) {
+void runCudaFusionGroup(const Node* const fusion_node, Stack& stack) {
   TORCH_CHECK(
       fusion_node->kind() == prim::CudaFusionGroup,
       "prim::CudaFusionGroup expected");

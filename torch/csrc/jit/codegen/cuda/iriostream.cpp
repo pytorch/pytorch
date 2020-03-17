@@ -170,20 +170,20 @@ void IRPrinter::handle(const Reorder* const ro) {
   os << "\n";
 }
 
-TORCH_API std::ostream& operator<< (std::ostream& os, const Statement* const stmt){
+std::ostream& operator<< (std::ostream& os, const Statement* const stmt){
   IRPrinter p(os);
   p.handle(stmt);
   return os;
 }
 
-TORCH_API std::ostream& operator<< (std::ostream& os, Fusion* f){
+std::ostream& operator<< (std::ostream& os, Fusion* f){
   IRPrinter p(os);
   FusionGuard guard(f);
   p.handle(f);
   return os;
 }
 
-TORCH_API std::ostream& operator<< (std::ostream& os, Fusion& f){
+std::ostream& operator<< (std::ostream& os, Fusion& f){
   return os << &f;
 }
 

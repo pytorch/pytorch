@@ -29,7 +29,7 @@ namespace fuser {
  *   3) Reduction across a dimension i.e. val.sum(axis=2)
  *   4) split/merge/reorder
  */
-struct TORCH_API UnaryOp : public Expr {
+struct TORCH_CUDA_API UnaryOp : public Expr {
   ~UnaryOp() = default;
   UnaryOp(UnaryOpType _type, Val* _out, Val* _in);
 
@@ -58,7 +58,7 @@ struct TORCH_API UnaryOp : public Expr {
  *  1) Add/mul/div/mod/sub (A * B)
  *  2) LT (A < B)
  */
-struct TORCH_API BinaryOp : public Expr {
+struct TORCH_CUDA_API BinaryOp : public Expr {
   ~BinaryOp() = default;
   BinaryOp(BinaryOpType _type, Val* _out, Val* _lhs, Val* _rhs);
 
@@ -88,7 +88,7 @@ struct TORCH_API BinaryOp : public Expr {
  * represent how to iterate over a tensor is made up of IterDomains. We directly
  * set parallization strategies on IterDomains.
  */
-struct TORCH_API IterDomain : public Val {
+struct TORCH_CUDA_API IterDomain : public Val {
   ~IterDomain() = default;
 
   IterDomain() = delete;
@@ -146,7 +146,7 @@ struct TORCH_API IterDomain : public Val {
 };
 
 // A list of IterDomains representing how to iterate across a given Tensor.
-struct TORCH_API TensorDomain : public Val {
+struct TORCH_CUDA_API TensorDomain : public Val {
   ~TensorDomain() = default;
 
   TensorDomain(const TensorDomain& other) = delete;
@@ -179,7 +179,7 @@ struct TORCH_API TensorDomain : public Val {
  * = factor
  * TODO: Implement split by nparts
  */
-struct TORCH_API Split : public Expr {
+struct TORCH_CUDA_API Split : public Expr {
   ~Split() = default;
 
   Split(const Split& other) = delete;
@@ -215,7 +215,7 @@ private:
  * parallelization strategy if there is one.
  * TODO: Should this be a unary op type?
  */
-struct TORCH_API Merge : public Expr {
+struct TORCH_CUDA_API Merge : public Expr {
   ~Merge() = default;
   Merge(TensorDomain* _out, TensorDomain* _in, int _axis);
 
@@ -242,7 +242,7 @@ struct TORCH_API Merge : public Expr {
  * Reorder the IterDomains of a tensor domain with the map
  * pos2axis[new_position] = old_position
  */
-struct TORCH_API Reorder : public Expr {
+struct TORCH_CUDA_API Reorder : public Expr {
   ~Reorder() = default;
   Reorder(
       TensorDomain* _out,

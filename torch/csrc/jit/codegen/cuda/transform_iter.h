@@ -17,7 +17,7 @@ namespace fuser {
  * these events (generate_record=true) you can then replay them on another
  * tensor domain.
  */
-struct TORCH_API TransformIter : public IterVisitor {
+struct TORCH_CUDA_API TransformIter : public IterVisitor {
  protected:
   virtual void replayBackward(Split* expr);
   virtual void replayBackward(Merge* expr);

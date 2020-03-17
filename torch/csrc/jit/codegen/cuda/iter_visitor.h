@@ -33,7 +33,7 @@ enum class ValType;
  * found to stop traversal. toVisitCallback is used to maintain a dependency
  * stack.
  */
-struct TORCH_API IterVisitor : public OptOutDispatch{
+struct TORCH_CUDA_API IterVisitor : public OptOutDispatch{
   virtual ~IterVisitor() = default;
 
   IterVisitor() = default;
@@ -80,7 +80,7 @@ public:
 
 
 //Class to check if nodes are in the dependency chain of another node.
-struct TORCH_API DependencyCheck : public IterVisitor{
+struct TORCH_CUDA_API DependencyCheck : public IterVisitor{
 private:
   
   //Class constructor checking if _dependency is a dependency of _of.

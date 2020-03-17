@@ -56,14 +56,14 @@ inline bool isFusableNode(const Node* const node)  {
 
 } // namespace
 
-TORCH_API bool isFusableCudaFusionGroup(const Node* const node) {
+bool isFusableCudaFusionGroup(const Node* const node) {
   if (isFusableNode(node)) {
     return isFusableDevice(node);
   }
   return false;
 }
 
-TORCH_API bool isFusableCudaFusionGroup(
+bool isFusableCudaFusionGroup(
     const Node* const fusion,
     const Node* const node) {
   if (isFusableNode(node)) {

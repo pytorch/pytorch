@@ -20,7 +20,7 @@ namespace fuser {
  * value can be a symbolic value (defined after the kernel is compiled) or a
  * constant value (inlined into the kernel definition).
  */
-struct TORCH_API Float : public Val {
+struct TORCH_CUDA_API Float : public Val {
   ~Float() = default;
 
   Float() : Val(ValType::Scalar, DataType::Float), maybe_value_{c10::nullopt} {}
@@ -52,7 +52,7 @@ struct TORCH_API Float : public Val {
 
 // An Int64 value. If used for indexing it's set as size_t. Otherwise it's an
 // inlined literal in the kernel.
-struct TORCH_API Int : public Val {
+struct TORCH_CUDA_API Int : public Val {
   ~Int() = default;
 
   Int() : Val(ValType::Scalar, DataType::Int), maybe_value_{c10::nullopt} {}
@@ -90,7 +90,7 @@ struct TransformReplay;
  * physical memory. Generally when users are thinking of code generation in
  * reference to a Tensor, this is the class they should be interacting with.
  */
-struct TORCH_API TensorView : public Val {
+struct TORCH_CUDA_API TensorView : public Val {
   ~TensorView() = default;
 
   TensorView(const TensorView& other) = delete;
@@ -169,10 +169,10 @@ struct TORCH_API TensorView : public Val {
   }
 
   // Implementations for split/merge/reorder
-  friend TORCH_API TensorView* split_(TensorView*, int axis, int factor);
-  friend TORCH_API TensorView* merge_(TensorView*, int axis);
-  friend TORCH_API TensorView* reorder_(TensorView*, const std::unordered_map<int, int>&);
-  friend TORCH_API TransformReplay;
+  friend TORCH_CUDA_API TensorView* split_(TensorView*, int axis, int factor);
+  friend TORCH_CUDA_API TensorView* merge_(TensorView*, int axis);
+  friend TORCH_CUDA_API TensorView* reorder_(TensorView*, const std::unordered_map<int, int>&);
+  friend TORCH_CUDA_API TransformReplay;
 
  protected:
   void setDomain(TensorDomain* td) {

@@ -27,10 +27,10 @@ using GraphPassNameType = unsigned int;
 using GraphPassEntry = std::pair<GraphPass, GraphPassNameType>;
 static GraphPassNameType graphPassID = 1;
 
-TORCH_API std::vector<std::pair<GraphPass, GraphPassNameType> >& getCustomPostPasses();
-TORCH_API std::vector<std::pair<GraphPass, GraphPassNameType> >& getCustomPrePasses();
+TORCH_CUDA_API std::vector<std::pair<GraphPass, GraphPassNameType> >& getCustomPostPasses();
+TORCH_CUDA_API std::vector<std::pair<GraphPass, GraphPassNameType> >& getCustomPrePasses();
 
-struct TORCH_API RegisterPostPass {
+struct TORCH_CUDA_API RegisterPostPass {
   // Back-compat
   RegisterPostPass(GraphPass p);
   static GraphPassNameType registerPostPass(GraphPass p);
@@ -38,32 +38,32 @@ struct TORCH_API RegisterPostPass {
 
 using RegisterPass = RegisterPostPass;
 
-struct TORCH_API RegisterPrePass {
+struct TORCH_CUDA_API RegisterPrePass {
   // Back-compat
   RegisterPrePass(GraphPass p);
   static GraphPassNameType registerPrePass(GraphPass p);
 };
 
-struct TORCH_API ClearPostPass {
+struct TORCH_CUDA_API ClearPostPass {
   ClearPostPass(GraphPassNameType p);
 };
 
-struct TORCH_API ClearPrePass {
+struct TORCH_CUDA_API ClearPrePass {
   ClearPrePass(GraphPassNameType p);
 };
 
-struct TORCH_API ClearAllPostPasses {
+struct TORCH_CUDA_API ClearAllPostPasses {
   ClearAllPostPasses();
 };
 
-struct TORCH_API ClearAllPrePasses {
+struct TORCH_CUDA_API ClearAllPrePasses {
   ClearAllPrePasses();
 };
 
 // Mechanism to be able to remove a registered pass
 // Each pass needs to inherit this class as it's based on
 // static members.
-struct TORCH_API PassManager{
+struct TORCH_CUDA_API PassManager{
 private:
   // Force class to be abstract
   virtual void abstract() = 0;

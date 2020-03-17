@@ -5,27 +5,27 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-TORCH_API CudaFuserInterface* getFuserInterface() {
+TORCH_CUDA_API CudaFuserInterface* getFuserInterface() {
   static CudaFuserInterface fuser_interface_;
   return &fuser_interface_;
 }
 
-TORCH_API bool isFusable(const Node* const node) {
+TORCH_CUDA_API bool isFusable(const Node* const node) {
   TORCH_CHECK(getFuserInterface()->fn_is_fusible_n_ != nullptr, "fn_is_fusible_n_ not initialized");
   return getFuserInterface()->fn_is_fusible_n_(node);
 }
 
-TORCH_API bool isFusable(const Node* const fusion, const Node* const node) {
+TORCH_CUDA_API bool isFusable(const Node* const fusion, const Node* const node) {
   TORCH_CHECK(getFuserInterface()->fn_is_fusible_n_n_ != nullptr, "fn_is_fusible_n_n_ not initialized");
   return getFuserInterface()->fn_is_fusible_n_n_(fusion, node);
 }
 
-TORCH_API void compileFusionGroup(Node* fusion_node) {
+TORCH_CUDA_API void compileFusionGroup(Node* fusion_node) {
   TORCH_CHECK(getFuserInterface()->fn_compile_n_ != nullptr, "fn_compile_n_ not initialized");
   getFuserInterface()->fn_compile_n_(fusion_node);
 }
 
-TORCH_API void runFusionGroup(const Node* const fusion_node, Stack& stack) {
+TORCH_CUDA_API void runFusionGroup(const Node* const fusion_node, Stack& stack) {
   TORCH_CHECK(getFuserInterface()->fn_run_n_s_ != nullptr, "fn_run_n_s_ not initialized");
   getFuserInterface()->fn_run_n_s_(fusion_node, stack);
 }

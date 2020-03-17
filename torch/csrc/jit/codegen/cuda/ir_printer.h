@@ -22,7 +22,7 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
-class TORCH_API IRMathPrinter : public IRPrinter {
+class TORCH_CUDA_API IRMathPrinter : public IRPrinter {
  public:
   IRMathPrinter(std::ostream& os) : IRPrinter(os) {}
 
@@ -35,7 +35,7 @@ class TORCH_API IRMathPrinter : public IRPrinter {
   }
 };
 
-class TORCH_API IRTransformPrinter : public IRPrinter {
+class TORCH_CUDA_API IRTransformPrinter : public IRPrinter {
  public:
   IRTransformPrinter(std::ostream& os) : IRPrinter(os) {}
 
