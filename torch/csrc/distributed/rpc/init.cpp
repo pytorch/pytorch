@@ -430,8 +430,8 @@ If the future completes with an error, an exception is thrown.
       "_invoke_rpc_torchscript",
       [](const std::string& dstWorkerName,
          const std::string& qualifiedNameStr,
-         const py::tuple& argsTuple,
-         const py::dict& kwargsDict) {
+         const py::args& args,
+         const py::kwargs& kwargs) {
         DCHECK(!PyGILState_Check());
         const c10::QualifiedName qualifiedName(qualifiedNameStr);
         // No need to catch exception here, if function can not be found,
@@ -447,10 +447,7 @@ If the future completes with an error, an exception is thrown.
         {
           py::gil_scoped_acquire acquire;
           stack = torch::jit::createStackForSchema(
-              functionSchema,
-              argsTuple.cast<py::args>(),
-              kwargsDict.cast<py::kwargs>(),
-              c10::nullopt);
+              functionSchema, args, kwargs, c10::nullopt);
         }
         DCHECK(!PyGILState_Check());
         c10::intrusive_ptr<c10::ivalue::Future> fut =
