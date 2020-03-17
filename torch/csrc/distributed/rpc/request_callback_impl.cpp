@@ -70,11 +70,17 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
     }
     case MessageType::PYTHON_CALL: {
       auto& pyCall = static_cast<PythonCall&>(rpc);
-      auto serializedPyObj =
-          PythonRpcHandler::getInstance().generatePythonUDFResult(
-              pyCall.serializedPyObj());
+      auto& pythonRpcHandler = PythonRpcHandler::getInstance();
+      std::shared_ptr<SerializedPyObj> serializedPyObj = nullptr;
+      {
+        pybind11::gil_scoped_acquire ag;
+        auto pythonUdf = pythonRpcHandler.deserialize(pyCall.serializedPyObj());
+        serializedPyObj =
+            std::make_shared<SerializedPyObj>(pythonRpcHandler.serialize(
+                pythonRpcHandler.runPythonUdf(std::move(pythonUdf))));
+      }
       return wrap(
-          std::move(PythonResp(std::move(serializedPyObj))).toMessage());
+          std::move(PythonResp(std::move(*serializedPyObj))).toMessage());
     }
     case MessageType::SCRIPT_REMOTE_CALL: {
       auto& scriptRemoteCall = static_cast<ScriptRemoteCall&>(rpc);
@@ -140,9 +146,15 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
 
       auto ownerRRef = ctx.getOrCreateOwnerRRef(rrefId, PyObjectType::get());
 
-      IValue py_ivalue = jit::toIValue(
-          PythonRpcHandler::getInstance().runPythonUDF(prc.serializedPyObj()),
-          PyObjectType::get());
+      auto& pythonRpcHandler = PythonRpcHandler::getInstance();
+      IValue py_ivalue;
+      {
+        pybind11::gil_scoped_acquire ag;
+        auto pythonUdf = pythonRpcHandler.deserialize(prc.serializedPyObj());
+        py_ivalue = jit::toIValue(
+            pythonRpcHandler.runPythonUdf(std::move(pythonUdf)),
+            PyObjectType::get());
+      }
 
       ownerRRef->setValue(std::move(py_ivalue));
 
