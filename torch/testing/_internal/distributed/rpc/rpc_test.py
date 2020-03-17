@@ -13,6 +13,7 @@ import torch.testing._internal.dist_utils as dist_utils
 from torch.distributed.rpc import RRef, _get_debug_info, _rref_context_get_debug_info
 from torch.distributed.rpc.api import _use_rpc_pickler
 from torch.distributed.rpc.internal import PythonUDF, RPCExecMode, _internal_rpc_pickler
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import IS_MACOS, load_tests
 from torch.testing._internal.dist_utils import (
     dist_init,
@@ -1744,3 +1745,47 @@ class RpcTest(RpcAgentTestFixture):
         ):
             import torch.distributed.rpc.internal as internal
             internal.serialize(rref)
+
+    @staticmethod
+    def _return_gpu_tensor():
+        return torch.rand(3, 3).cuda(0)
+
+    @staticmethod
+    def _return_gpu_tensor_list():
+        return [torch.rand(3, 3).cuda(0), torch.rand(3, 3).cuda(1)]
+
+    @staticmethod
+    def _gpu_tensor_list_arg(tensor_list):
+        return torch.rand(3, 3)
+
+    @skip_if_lt_x_gpu(2)
+    @dist_init
+    def test_cuda(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        t1 = torch.rand(3, 3).cuda(0)
+        t2 = torch.rand(3, 3).cuda(1)
+        t3 = torch.rand(3, 3)
+
+        # cuda tensors as args fail.
+        with self.assertRaisesRegex(RuntimeError, "RPC backend only supports CPU tensors.*Found tensor on device: cuda:0"):
+            rpc.rpc_sync(dst, torch.add, args=(t1, t2))
+
+        # mix of cpu and cuda tensors as args fail.
+        with self.assertRaisesRegex(RuntimeError, "RPC backend only supports CPU tensors.*Found tensor on device: cuda:0"):
+            rpc.rpc_sync(dst, torch.add, args=(t1, t3))
+
+        # gpu tensor list as args fails.
+        with self.assertRaisesRegex(RuntimeError, "RPC backend only supports CPU tensors.*Found tensor on device: cuda:0"):
+            rpc.rpc_sync(dst, RpcTest._gpu_tensor_list_arg, args=([t1, t2]))
+
+        # cuda tensors as return values fail.
+        with self.assertRaisesRegex(RuntimeError, "RPC backend only supports CPU tensors.*Found tensor on device: cuda:0"):
+            rpc.rpc_sync(dst, RpcTest._return_gpu_tensor, args=())
+
+        # cuda tensors as a list of return value fails
+        with self.assertRaisesRegex(RuntimeError, "RPC backend only supports CPU tensors.*Found tensor on device: cuda:0"):
+            rpc.rpc_sync(dst, RpcTest._return_gpu_tensor_list, args=())
+
+        # Sending to self should fail too.
+        with self.assertRaisesRegex(RuntimeError, "RPC backend only supports CPU tensors.*Found tensor on device: cuda:0"):
+            rpc.rpc_sync(worker_name(self.rank), torch.add, args=(t1, t2))
