@@ -21,17 +21,6 @@ TORCH_API at::ClassTypePtr getCustomClass(const std::string& name);
 
 TORCH_API bool isCustomClass(const c10::IValue& v);
 
-template <typename CurClass, typename... CtorArgs>
-c10::IValue make_custom_class(CtorArgs&&... args) {
-  if (!c10::isCustomClassRegistered<c10::intrusive_ptr<CurClass>>()) {
-    throw c10::Error(
-        "Trying to instantiate a class that isn't a registered custom class.",
-        "");
-  }
-  auto userClassInstance = c10::make_intrusive<CurClass>(std::forward<CtorArgs>(args)...);
-  return c10::IValue(std::move(userClassInstance));
-}
-
 template <class... Types>
 detail::types<void, Types...> init() {
   return detail::types<void, Types...>{};
@@ -189,6 +178,17 @@ class class_ {
     classTypePtr->addMethod(method.get());
   }
 };
+
+template <typename CurClass, typename... CtorArgs>
+c10::IValue make_custom_class(CtorArgs&&... args) {
+  if (!c10::isCustomClassRegistered<c10::intrusive_ptr<CurClass>>()) {
+    throw c10::Error(
+        "Trying to instantiate a class that isn't a registered custom class.",
+        "");
+  }
+  auto userClassInstance = c10::make_intrusive<CurClass>(std::forward<CtorArgs>(args)...);
+  return c10::IValue(std::move(userClassInstance));
+}
 
 // jit namespace for backward-compatibility
 // We previously defined everything in torch::jit but moved it out to

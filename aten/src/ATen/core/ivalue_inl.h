@@ -17,6 +17,7 @@ namespace jit {
 struct Function;
 struct CompilationUnit;
 } // namespace jit
+TORCH_API bool isCustomClass(const c10::IValue& v);
 } // namespace torch
 namespace c10 {
 struct IValue;
@@ -544,6 +545,7 @@ c10::intrusive_ptr<T> IValue::toCustomClass() const & {
   TORCH_CHECK(obj->slots().size() == 1,
               "Tried to cast IValue to custom class but it did "
               "not contain a custom class!");
+  // FIXME: this cast isn't actually checked!
   auto userObj = c10::static_intrusive_pointer_cast<T>(obj->getSlot(0).toCapsule());
   return userObj;
 }
@@ -850,20 +852,7 @@ inline optional<T> IValue::toOptional() {
 }
 
 inline bool IValue::isCustomClass() const {
-  if (!isObject()) {
-    return false;
-  }
-
-  auto &obj = toObjectRef();
-  if (obj.slots().size() != 1) {
-    return false;
-  }
-
-  if (!obj.getSlot(0).isCapsule()) {
-    return false;
-  }
-
-  return true;
+  return torch::isCustomClass(*this);
 }
 
 inline bool IValue::isSameIdentity(const IValue& rhs) const {
