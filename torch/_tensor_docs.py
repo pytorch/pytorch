@@ -3667,6 +3667,6 @@ add_docstr_all('as_subclass',
 as_subclass(cls) -> Tensor
 
 Makes a ``cls`` instance with the same data pointer as ``self``. Changes
-in the output mirror changes in ``data``. ``cls`` must be a subclass of
-``Tensor``.
+in the output mirror changes in ``self``, and the output stays attached
+to the autograd graph. ``cls`` must be a subclass of ``Tensor``.
 """)
