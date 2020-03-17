@@ -34,14 +34,14 @@ struct TORCH_API LBFGSParamState : public OptimizerCloneableParamState<LBFGSPara
   TORCH_ARG(int64_t, func_evals) = 0;
   TORCH_ARG(int64_t, n_iter) = 0;
   TORCH_ARG(double, t);
+  TORCH_ARG(double, prev_loss);
   TORCH_ARG(Tensor, d) = {};
   TORCH_ARG(Tensor, H_diag) = {};
   TORCH_ARG(Tensor, prev_flat_grad) = {};
-  TORCH_ARG(Tensor, prev_loss) = {};
   TORCH_ARG(std::deque<Tensor>, old_dirs);
   TORCH_ARG(std::deque<Tensor>, old_stps);
   TORCH_ARG(std::deque<Tensor>, ro);
-  TORCH_ARG(std::vector<Tensor>, al);
+  TORCH_ARG(c10::optional<std::vector<Tensor>>, al) = c10::nullopt;
 
  public:
   void serialize(torch::serialize::InputArchive& archive) override;
@@ -79,7 +79,7 @@ class TORCH_API LBFGS : public LossClosureOptimizer {
   int64_t _numel();
   Tensor _gather_flat_grad();
   void _add_grad(const double step_size, const Tensor& update);
-  std::tuple<Tensor, Tensor> _directional_evaluate(
+  std::tuple<double, Tensor> _directional_evaluate(
     const LossClosure& closure, const std::vector<Tensor>& x, double t, const Tensor& d);
   void _set_param(const std::vector<Tensor>& params_data);
   std::vector<Tensor> _clone_param();
