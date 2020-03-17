@@ -804,6 +804,43 @@ class TestDataLoader(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'Error in worker_init_fn'):
             list(iter(loader))
 
+    @unittest.skipIf(IS_WINDOWS, "Only supported or needed on Unix")
+    def test_fd_limit_exceeded(self):
+        import subprocess
+        subprocess.check_call([sys.executable, '-c', """\
+import torch
+import resource
+from torch.utils.data import DataLoader, IterableDataset
+
+class RandomDataset(IterableDataset):
+    def __init__(self, len, size):
+        super(RandomDataset).__init__()
+        self.len = len
+        self.size = size
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self.len <= 0:
+            raise StopIteration
+        self.len -= 1
+        return torch.randn(self.size)
+
+try:
+    keep_fds_alive = []
+    resource.setrlimit(resource.RLIMIT_NOFILE, (100, 100))
+    for random_t in DataLoader(RandomDataset(200, (2,2)),
+                               num_workers=1):
+      random_t.max(dim=0)
+      keep_fds_alive.append(random_t)
+except RuntimeError as e:
+    assert "ulimit -n" in str(e)
+    assert "set_sharing_strategy" in str(e)
+else:
+    assert False, "Expected a RuntimeError with keywords ulimit and set_sharing_strategy"
+"""])
+
     def test_invalid_assign_after_init(self):
         dl = DataLoader(self.dataset)
         for attr in ('batch_size', 'sampler', 'batch_sampler', 'drop_last', 'dataset'):
