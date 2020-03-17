@@ -58,7 +58,7 @@ Tensor _add_scalar_out(Tensor& out, const Tensor& self, Scalar other) {
   // Let s' = the calculated scale or the output
   // z' = the calculated zero-point for the output
   //
-  // If q_min > c_q
+  // If q_min > z - c_q
   //   s' = [(q_max - (z - c_q)]/[q_max - q_min] * s
   //   z' = q_min
   //   Xq' = torch.quantize_linear(Xq.dequantize() + c_q.dequantize() , s', z')
