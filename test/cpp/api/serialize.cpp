@@ -100,7 +100,8 @@ void test_serialize_optimizer(DerivedOptimizerOptions options) {
     optimizer.zero_grad();
     auto y = model->forward(x).sum();
     y.backward();
-    optimizer.step();
+    auto closure = []() { return torch::tensor({10}); };
+    optimizer.step(closure);
   };
 
   // Do 2 steps of model1
