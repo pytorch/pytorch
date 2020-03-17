@@ -4,7 +4,7 @@ import warnings
 import torch
 import torch.backends.cudnn as cudnn
 
-from torch._six import PY2, PY37
+from torch._six import PY2, PY37, builtins
 from ..nn.modules.utils import _single, _pair, _triple, _quadruple
 
 from collections import OrderedDict
