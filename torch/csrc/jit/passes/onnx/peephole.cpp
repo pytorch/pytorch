@@ -835,6 +835,9 @@ static void fuseLogSoftmaxNllLoss(Block* b) {
       softmaxCrossEntropyNode->insertBefore(origLogSoftmaxNode);
       softmaxCrossEntropyNode->addInput(origLogSoftmaxNode->inputs().at(0));
       softmaxCrossEntropyNode->addInput(origNllLossNode->inputs().at(1));
+      if (origNllLossNode->inputs().size() == 3) {
+        softmaxCrossEntropyNode->addInput(origNllLossNode->inputs().at(2));
+      }
       it->replaceAllUsesWith(softmaxCrossEntropyNode);
       it->removeAllInputs();
       origLogSoftmaxNode->destroy();

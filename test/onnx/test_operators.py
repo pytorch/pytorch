@@ -871,6 +871,10 @@ class TestOperators(TestCase):
         y = torch.empty(3, dtype=torch.long).random_(5)
         self.assertONNX(torch.nn.CrossEntropyLoss(ignore_index=1), (x, y), opset_version=12)
 
+    def test_softmaxcrossentropy_weights(self):
+        x = torch.randn(3, 5)
+        y = torch.empty(3, dtype=torch.long).random_(5)
+        self.assertONNX(torch.nn.CrossEntropyLoss(weight=torch.randn(5)), (x, y), opset_version=12)
 
 if __name__ == '__main__':
     no_onnx_dep_flag = '--no-onnx'
