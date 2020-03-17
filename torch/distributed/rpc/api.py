@@ -353,8 +353,9 @@ def remote(to, func, args=None, kwargs=None):
 
     Arguments:
         to (str or WorkerInfo): id or name of the destination worker.
-        func (callable): any callable function. python callable, builtin or annotated TorchScript
-                         functions (like meth:`torch.add`) can be sent over RPC more efficiently.
+        func (callable): a callable function, such as Python callables, builtin
+                         operators (e.g. :meth:`~torch.add`) and annotated
+                         TorchScript functions.
         args (tuple): the argument tuple for the ``func`` invocation.
         kwargs (dict): is a dictionary of keyword arguments for the ``func``
                        invocation.
@@ -401,13 +402,14 @@ def remote(to, func, args=None, kwargs=None):
         >>> rpc.init_rpc("worker1", rank=1, world_size=2)
         >>> rpc.shutdown()
 
-        If invoking an annotated TorchScript function, then run the following
-        code in two different processes:
+        Below is an example of running a TorchScript function using RPC.
 
-        >>> # On worker 0:
+        >>> # On both workers:
         >>> @torch.jit.script
         >>> def my_script_add(t1, t2):
         >>>    return torch.add(t1, t2)
+
+        >>> # On worker 0:
         >>> import torch.distributed.rpc as rpc
         >>> rpc.init_rpc("worker0", rank=0, world_size=2)
         >>> rref = rpc.remote("worker1", my_script_add, args=(torch.ones(2), 3))
@@ -490,14 +492,15 @@ def rpc_sync(to, func, args=None, kwargs=None):
 
     Arguments:
         to (str or WorkerInfo): id or name of the destination worker.
-        func (callable): any callable function. python callable, builtin or annotated TorchScript
-                         functions (like meth:`torch.add`) can be sent over RPC more efficiently.
+        func (callable): a callable function, such as Python callables, builtin
+                         operators (e.g. :meth:`~torch.add`) and annotated
+                         TorchScript functions.
         args (tuple): the argument tuple for the ``func`` invocation.
         kwargs (dict): is a dictionary of keyword arguments for the ``func``
                        invocation.
 
     Returns:
-        Returns the result of running ``func`` on ``args`` and ``kwargs``.
+        Returns the result of running ``func`` with ``args`` and ``kwargs``.
 
     .. warning ::
         Using GPU tensors as arguments or return values of ``func`` is not
@@ -527,13 +530,14 @@ def rpc_sync(to, func, args=None, kwargs=None):
         >>> rpc.init_rpc("worker1", rank=1, world_size=2)
         >>> rpc.shutdown()
 
-        If invoking an annotated TorchScript function, then run the following
-        code in two different processes:
+        Below is an example of running a TorchScript function using RPC.
 
-        >>> # On worker 0:
+        >>> # On both workers:
         >>> @torch.jit.script
         >>> def my_script_add(t1, t2):
         >>>    return torch.add(t1, t2)
+
+        >>> # On worker 0:
         >>> import torch.distributed.rpc as rpc
         >>> rpc.init_rpc("worker0", rank=0, world_size=2)
         >>> ret = rpc.rpc_sync("worker1", my_script_add, args=(torch.ones(2), 3))
@@ -554,13 +558,14 @@ def rpc_async(to, func, args=None, kwargs=None):
     r"""
     Make a non-blocking RPC call to run function ``func`` on worker ``to``. RPC
     messages are sent and received in parallel to execution of Python code. This
-    method is thread-safe. This method will immediately return a
-    Future that can be awaited on.
+    method is thread-safe. This method will immediately return a Future that can
+    be awaited on.
 
     Arguments:
         to (str or WorkerInfo): id or name of the destination worker.
-        func (callable): any callable function. python callable, builtin or annotated TorchScript
-                         functions (like meth:`torch.add`) can be sent over RPC more efficiently.
+        func (callable): a callable function, such as Python callables, builtin
+                         operators (e.g. :meth:`~torch.add`) and annotated
+                         TorchScript functions.
         args (tuple): the argument tuple for the ``func`` invocation.
         kwargs (dict): is a dictionary of keyword arguments for the ``func``
                        invocation.
@@ -607,13 +612,14 @@ def rpc_async(to, func, args=None, kwargs=None):
         >>> rpc.init_rpc("worker1", rank=1, world_size=2)
         >>> rpc.shutdown()
 
-        If invoking an annotated TorchScript function, then run the following
-        code in two different processes:
+        Below is an example of running a TorchScript function using RPC.
 
-        >>> # On worker 0:
+        >>> # On both workers:
         >>> @torch.jit.script
         >>> def my_script_add(t1, t2):
         >>>    return torch.add(t1, t2)
+
+        >>> # On worker 0:
         >>> import torch.distributed.rpc as rpc
         >>> rpc.init_rpc("worker0", rank=0, world_size=2)
         >>> fut = rpc.rpc_async("worker1", my_script_add, args=(torch.ones(2), 3))
