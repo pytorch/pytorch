@@ -143,7 +143,7 @@ static PyObject *THPVariable_pynew(PyTypeObject *type, PyObject *args, PyObject 
   END_HANDLE_TH_ERRORS
 }
 
-// Instantiates a subclass of torch.Tensor. Used by nn.Parameter()
+// Instantiates a subclass of self with the same data.
 static PyObject* THPVariable_as_subclass(THPVariable* self, PyObject* args, PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
@@ -156,15 +156,6 @@ static PyObject* THPVariable_as_subclass(THPVariable* self, PyObject* args, PyOb
     throw TypeError("cls must be a type (got %s)", Py_TYPE(cls)->tp_name);
   }
   auto data = as_variable_ref(self->cdata);
-  // We set `data`'s `allow_tensor_metadata_change` to true here, because we want to
-  // allow the following use case for backward compatibility:
-  //
-  // ```python
-  // rnn = torch.nn.RNN(100, 100, 2)
-  // # The following calls `torch._cudnn_rnn_flatten_weight(rnn._flat_weights, ...)`,
-  // # which changes storage of `rnn`'s weights in-place
-  // rnn.flatten_parameters()
-  // ```
   data.unsafeGetTensorImpl()->set_allow_tensor_metadata_change(true);
   return THPVariable_NewWithVar((PyTypeObject*)cls, std::move(data));
   END_HANDLE_TH_ERRORS
