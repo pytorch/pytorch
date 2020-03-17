@@ -68,8 +68,13 @@ void RMSpropParamState::serialize(torch::serialize::InputArchive& archive) {
 
 /// Adapted from
 /// https://github.com/pytorch/pytorch/blob/master/torch/optim/rmsprop.py
-void RMSprop::step() {
+Tensor RMSprop::step(LossClosure closure)  {
   NoGradGuard no_grad;
+  Tensor loss = {};
+  if (closure != nullptr) {
+    at::AutoGradMode enable_grad(true);
+    loss = closure();
+  }
   for (auto& group : param_groups_) {
     for (auto& p : group.params()) {
       if (!p.grad().defined()) {
@@ -126,6 +131,7 @@ void RMSprop::step() {
       }
     }
   }
+  return loss;
 }
 
 void RMSprop::add_parameters(const std::vector<Tensor>& parameters) {
