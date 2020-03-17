@@ -30,7 +30,6 @@ from torch._C import TensorType, BoolType, parse_ir, _propagate_shapes
 from torch._six import inf, PY2, PY37, StringIO
 from torch.autograd import Variable, Function
 from torch.jit.annotations import BroadcastingList2, BroadcastingList3, Any  # noqa: F401
-from torch.jit.frontend import NotSupportedError
 from torch.onnx import OperatorExportTypes
 from torch.testing import FileCheck
 import torch.cuda
@@ -2061,7 +2060,7 @@ graph(%input, %weight):
                 x = torch.min(x)
                 x = torch.mean(x)
                 x = x.reshape([-1])
-                x = torch.chunk(x, 2)
+                x, y = torch.chunk(x, 2)
                 x = F.dropout(x)
                 x = self.dropout(x)
                 # TODO: uncomment when sort is supported
@@ -2074,6 +2073,7 @@ graph(%input, %weight):
 
         m = torch.jit.script(M())
         torch._C._jit_pass_inline(m.graph)
+        torch._C._jit_pass_constant_propagation(m.graph)
         FileCheck().check("aten::dequantize") \
                    .check("aten::max_pool2d") \
                    .check("aten::adaptive_avg_pool2d") \

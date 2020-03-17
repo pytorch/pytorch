@@ -951,10 +951,11 @@ InsertObserversHelper::insertObserversFor(
       script::Module& module,
       std::unordered_set<Value*>& block_observed_values,
       bool is_entry_point) {
-  // graph input/output values, used to skip inserting observers
-  // for input and output of the graph, we have to insert the observers
-  // at call site because the graph itself can be shared
-  std::unordered_set<Value*> graph_inputs_outputs;
+  // input/output values, used to skip inserting observers
+  // for input and output of the block and the owning graph,
+  // we have to insert the observers at call site because
+  // the graph itself can be shared
+  std::unordered_set<Value*> inputs_outputs;
   // list of observer modules for input values
   std::vector<c10::optional<Module>> block_input_observers;
   // list of observer modules for output values
@@ -964,18 +965,15 @@ InsertObserversHelper::insertObserversFor(
   // of the top level module), we can insert observers in the block directly
   if (!is_entry_point) {
     auto* graph = block->owningGraph();
+    // graph inputs/outputs
     for (auto list : {graph->inputs(), graph->outputs()}) {
       for (auto* v : list) {
-        graph_inputs_outputs.insert(v);
+        inputs_outputs.insert(v);
       }
     }
-    for (auto* v : graph->outputs()) {
-      if (v->node()->kind() == prim::If) {
-        Node* if_node = v->node();
-        for (auto* b : if_node->blocks()) {
-          graph_inputs_outputs.insert(b->outputs()[v->offset()]);
-        }
-      }
+    // block outputs
+    for (auto* v : block->outputs()) {
+      inputs_outputs.insert(v);
     }
 
     for (auto* v : block->inputs()) {
@@ -1018,7 +1016,7 @@ InsertObserversHelper::insertObserversFor(
   std::unordered_map<Value*, Module> values_to_observe;
 
   for (auto* v : block->inputs()) {
-    if (!graph_inputs_outputs.count(v) && !values_to_observe.count(v)) {
+    if (!inputs_outputs.count(v) && !values_to_observe.count(v)) {
       if (auto observer_opt = getObserverFor(v)) {
         values_to_observe[v] = *observer_opt;
       }
@@ -1048,7 +1046,7 @@ InsertObserversHelper::insertObserversFor(
           block_observed_values.insert(n->outputs()[idx]);
         }
         for (auto i = 0; i < n->inputs().size(); ++i) {
-          if (input_observers[i] && !graph_inputs_outputs.count(n->input(i)) &&
+          if (input_observers[i] && !inputs_outputs.count(n->input(i)) &&
               !block_observed_values.count(n->input(i)) &&
               !observed_values_.count(n->input(i))) {
             values_to_observe[n->inputs()[i]] = *input_observers[i];
@@ -1056,7 +1054,7 @@ InsertObserversHelper::insertObserversFor(
           }
         }
         for (auto i = 0; i < n->outputs().size(); ++i) {
-          if (output_observers[i] && !graph_inputs_outputs.count(n->output(i)) &&
+          if (output_observers[i] && !inputs_outputs.count(n->output(i)) &&
               !block_observed_values.count(n->output(i)) &&
               !observed_values_.count(n->output(i))) {
             values_to_observe[n->outputs()[i]] = *output_observers[i];
@@ -1091,7 +1089,7 @@ InsertObserversHelper::insertObserversFor(
                         "way");
           } else {
             for (auto i = 0; i < n->outputs().size(); ++i) {
-              if (output_observers[i] && !graph_inputs_outputs.count(n->output(i))
+              if (output_observers[i] && !inputs_outputs.count(n->output(i))
                   && !block_observed_values.count(n->output(i))
                   && !observed_values_.count(n->output(i))) {
                 values_to_observe[n->output(i)] = *output_observers[i];
@@ -1104,7 +1102,7 @@ InsertObserversHelper::insertObserversFor(
       } else {
         for (Value* v : n->outputs()) {
           propagateObservedProperty(v, block_observed_values);
-          if (!graph_inputs_outputs.count(v) &&
+          if (!inputs_outputs.count(v) &&
               !block_observed_values.count(v) &&
               !observed_values_.count(v)) {
             if (auto observer_opt = getObserverFor(v)) {
