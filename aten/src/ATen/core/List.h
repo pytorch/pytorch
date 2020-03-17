@@ -30,8 +30,6 @@ struct ListImpl final : public c10::intrusive_ptr_target {
 
   TypePtr elementType;
 
-  friend bool operator==(const ListImpl& lhs, const ListImpl& rhs);
-
   intrusive_ptr<ListImpl> copy() const {
     return make_intrusive<ListImpl>(list, elementType);
   }

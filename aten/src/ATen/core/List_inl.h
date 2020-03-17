@@ -4,11 +4,6 @@
 #include <ATen/core/jit_type.h>
 
 namespace c10 {
-namespace detail {
-bool operator==(const ListImpl& lhs, const ListImpl& rhs) {
-  return lhs.list == rhs.list && lhs.elementType == rhs.elementType;
-}
-}
 
 template<class T> TypePtr getTypePtr();
 std::string toString(TypePtr typePtr);
@@ -270,8 +265,15 @@ bool operator==(const List<T>& lhs, const List<T>& rhs) {
     return true;
   }
 
-  // Otherwise compare the lists by value
-  return *lhs.impl_ == *rhs.impl_;
+  if (lhs.size() != rhs.size()) {
+    return false;
+  }
+  for (size_t i = 0; i < lhs.size(); ++i) {
+    if (lhs.get(i) != rhs.get(i)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 template<class T>
