@@ -832,7 +832,7 @@ static void fuseLogSoftmaxNllLoss(Block* b) {
          softmaxCrossEntropyNode->outputs()[i]->copyMetadata(it->outputs()[i]);
       }
       softmaxCrossEntropyNode->copyAttributes(*origNllLossNode);
-      softmaxCrossEntropyNode->insertBefore(origLogSoftmaxNode);
+      softmaxCrossEntropyNode->insertBefore(origNllLossNode);
       softmaxCrossEntropyNode->addInput(origLogSoftmaxNode->inputs().at(0));
       softmaxCrossEntropyNode->addInput(origNllLossNode->inputs().at(1));
       if (origNllLossNode->inputs().size() == 3) {
@@ -841,6 +841,7 @@ static void fuseLogSoftmaxNllLoss(Block* b) {
       it->replaceAllUsesWith(softmaxCrossEntropyNode);
       it->removeAllInputs();
       origLogSoftmaxNode->destroy();
+      it.destroyCurrent();
       continue;
     }
   }
