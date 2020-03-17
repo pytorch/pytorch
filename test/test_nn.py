@@ -376,6 +376,7 @@ class NewCriterionTest(InputVariableMixin, CriterionTest):
         super(NewCriterionTest, self).__init__(*args, **kwargs)
         self.check_gradgrad = kwargs.get('check_gradgrad', True)
         self.check_half = kwargs.get('check_half', True)
+        self.check_bfloat16 = kwargs.get('check_bfloat16', False)
         self.convert_target = kwargs.get('convert_target', True)
 
     def _do_extra_tests(self, test_case, module, input, target):
@@ -435,7 +436,7 @@ class NewCriterionTest(InputVariableMixin, CriterionTest):
             gpu_module.cuda()
 
             # torch.HalfTensor doesn't support most operations, converting back to default
-            if dtype == torch.half:
+            if dtype in {torch.half, torch.bfloat16}:
                 cpu_input = self._get_input()
                 cpu_target = self._get_target()
                 # Loss modules with weights require consistent input/module weight types
@@ -444,11 +445,11 @@ class NewCriterionTest(InputVariableMixin, CriterionTest):
             cpu_output = test_case._forward_criterion(cpu_module, cpu_input, cpu_target, extra_args=extra_args)
             gpu_output = test_case._forward_criterion(gpu_module, gpu_input, gpu_target, extra_args=extra_args)
             # dtype can be None, so set precision in this way instead of a precision map
-            test_case.assertEqual(cpu_output, gpu_output, 1e-1 if dtype == torch.half else 4e-4)
+            test_case.assertEqual(cpu_output, gpu_output, 1e-1 if dtype in {torch.half, torch.bfloat16} else 4e-4)
 
             cpu_gradInput = test_case._backward_criterion(cpu_module, cpu_input, cpu_target, extra_args=extra_args)
             gpu_gradInput = test_case._backward_criterion(gpu_module, gpu_input, gpu_target, extra_args=extra_args)
-            test_case.assertEqual(cpu_gradInput, gpu_gradInput, 1e-1 if dtype == torch.half else 4e-4)
+            test_case.assertEqual(cpu_gradInput, gpu_gradInput, 1e-1 if dtype in {torch.half, torch.bfloat16} else 4e-4)
         except NotImplementedError:
             pass
 
@@ -2881,6 +2882,7 @@ class TestNN(NNTestCase):
 
                     torch.autograd.gradcheck(fn, (m.weight_orig,))
 
+    @skipIfNoLapack
     def test_spectral_norm_load_state_dict(self):
         inp = torch.randn(2, 3)
         for activate_times in (0, 3):
@@ -6312,7 +6314,6 @@ class TestNN(NNTestCase):
         input2 = torch.randn(4, 4, requires_grad=True)
         self.assertTrue(gradcheck(lambda x, y: F.pairwise_distance(x, y), (input1, input2)))
 
-    @skipIfRocm
     def test_pdist(self):
         for device, trans in itertools.product(device_(), [False, True]):
             inp = torch.randn(4, 5, dtype=torch.double, device=device, requires_grad=True)
@@ -6343,7 +6344,6 @@ class TestNN(NNTestCase):
         inp = torch.randn(4, 5, requires_grad=True)
         gradgradcheck(F.pdist, (inp,))
 
-    @skipIfRocm
     @unittest.expectedFailure
     def test_pdist_cuda_gradgrad_unimplemented(self):
         inp = torch.randn(4, 5, device='cuda', requires_grad=True)
@@ -8563,6 +8563,12 @@ def add_test(test, decorator=None):
             test.test_cuda(self, dtype=torch.half, **kwargs)
         if getattr(test, 'check_half', True):
             add(cuda_test_name + '_half', test_half)
+
+        def test_bfloat16(self, test=test, kwargs=kwargs):
+            test.test_cuda(self, dtype=torch.bfloat16, **kwargs)
+        if getattr(test, 'check_bfloat16', True):
+            add(cuda_test_name + '_bfloat16', test_bfloat16)
+
     else:
         add(cuda_test_name, lambda self, test=test, kwargs=kwargs: test.test_cuda(self, **kwargs))
 
@@ -9359,25 +9365,31 @@ class TestNNDeviceType(NNTestCase):
         test('threshold', 3, 2, inplace=True)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    def test_max_pool2d_nhwc(self, device):
-        input = torch.randint(1, 10, (4, 8, 8, 8), dtype=torch.float32, device="cuda")
-        input = input.contiguous(memory_format=torch.channels_last).requires_grad_()
-        grad = torch.randint(1, 10, (4, 8, 1, 1), dtype=torch.float32, device="cuda")
-        pool = torch.nn.MaxPool2d((7, 7)).cuda()
+    @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @dtypes(torch.float, torch.double)
+    def test_max_pool2d_nhwc(self, device, dtypes):
+        def helper(n, c, h, w, kernel_size):
+            input = torch.randn(n, c, h, w, dtype=dtypes, device="cuda")
+            input = input.contiguous(memory_format=torch.channels_last).requires_grad_()
+            grad = torch.randn(n, c, h // kernel_size, w // kernel_size, dtype=dtypes, device="cuda")
+            pool = torch.nn.MaxPool2d(kernel_size).cuda()
 
-        ref_input = input.detach().clone().contiguous().requires_grad_(True)
-        ref_grad = grad.detach().clone().contiguous()
-        ref_pool = torch.nn.MaxPool2d((7, 7)).cuda()
+            ref_input = input.detach().clone().contiguous().requires_grad_(True)
+            ref_grad = grad.detach().clone().contiguous()
+            ref_pool = torch.nn.MaxPool2d(kernel_size).cuda()
 
-        out = pool(input)
-        out.backward(grad)
-        ref_out = ref_pool(ref_input)
-        ref_out.backward(ref_grad)
+            out = pool(input)
+            out.backward(grad)
+            ref_out = ref_pool(ref_input)
+            ref_out.backward(ref_grad)
 
-        self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
-        self.assertTrue(ref_out.is_contiguous())
-        self.assertTrue(torch.allclose(out, ref_out))
-        self.assertTrue(torch.allclose(input.grad, ref_input.grad))
+            self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+            self.assertTrue(ref_out.is_contiguous())
+            self.assertTrue(torch.allclose(out, ref_out))
+            self.assertTrue(torch.allclose(input.grad, ref_input.grad))
+
+        helper(4, 8, 8, 8, 7)
+        helper(200, 512, 28, 28, 2)
 
     def test_embedding_dense_grad(self, device):
         embd = nn.Embedding(20, 20).to(device)
@@ -9817,7 +9829,7 @@ class TestNNDeviceType(NNTestCase):
             torch.__future__.set_overwrite_module_params_on_conversion(False)
 
     @onlyCUDA
-    @dtypes(torch.half, torch.float, torch.double)
+    @dtypes(*ALL_TENSORTYPES2)
     def test_embedding_max_norm_device(self, device, dtype):
         embedding = nn.Embedding(22, 5, max_norm=1.0).to(device, dtype=dtype)
         # nn.Embedding only takes LongTensor as input
@@ -10257,6 +10269,13 @@ class TestNNDeviceType(NNTestCase):
 
         self._test_EmbeddingBag(device, 'sum', True, dtype, test_backward=test_backward)
         self._test_EmbeddingBag(device, 'mean', True, dtype, test_backward=test_backward)
+
+
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    def test_embedding_bag_bfloat16(self, device):
+        self._test_EmbeddingBag(device, 'sum', True, dtype=torch.bfloat16, test_backward=True)
+        self._test_EmbeddingBag(device, 'mean', True, dtype=torch.bfloat16, test_backward=True)
 
     @onlyCUDA
     @dtypes(torch.half, torch.float, torch.double)
@@ -10721,60 +10740,48 @@ class TestNNDeviceType(NNTestCase):
                           lambda: nn.functional.multi_margin_loss(torch.randn(5, device=device),
                                                                   torch.zeros(3, device=device)))
 
+    def _test_bfloat16_ops(self, op, device, inp_dims=(), prec=1e-2):
+        # fp32 compute
+        input1 = torch.randn(inp_dims, dtype=torch.float32, device=device, requires_grad=True)
+        out1 = op(input1)
+        grad_input1 = torch.randn_like(out1, device=device)
+        out1.backward(grad_input1)
+
+        # bfloat16 compute
+        op_bfp16 = op.bfloat16()
+        input2 = input1.detach().bfloat16().requires_grad_()
+        grad_input2 = grad_input1.bfloat16()
+        out2 = op_bfp16(input2)
+        out2.backward(grad_input2)
+
+        self.assertEqual(out1, out2, prec=prec)
+        self.assertEqual(input1.grad.data, input2.grad.data, prec=prec)
+
     @onlyCUDA
     @skipCUDAIfNotRocm
     def test_activations_bfloat16(self, device):
-        def test(activation):
-            # fp32 compute
-            input1 = torch.randn(5, dtype=torch.float32, device=device, requires_grad=True)
-            grad_input1 = torch.randn(5, device=device)
-            out1 = activation(input1)
-            out1.backward(grad_input1)
-
-            # bfloat16 compute
-            activation2 = activation.bfloat16()
-            input2 = input1.detach().bfloat16().requires_grad_()
-            grad_input2 = grad_input1.bfloat16()
-            out2 = activation2(input2)
-            out2.backward(grad_input2)
-
-            self.assertEqual(out1, out2, prec=1e-2)
-            self.assertEqual(input1.grad.data, input2.grad.data, prec=1e-2)
-
-        test(torch.nn.ReLU())
-        test(torch.nn.Threshold(0.1, 20))
-        test(torch.nn.ELU())
-        test(torch.nn.Softplus())
-        test(torch.nn.Hardshrink())
-        test(torch.nn.Softshrink())
-        test(torch.nn.LeakyReLU())
+        self._test_bfloat16_ops(torch.nn.ReLU(), device, inp_dims=(5), prec=1e-2)
+        self._test_bfloat16_ops(torch.nn.Threshold(0.1, 20), device, inp_dims=(5), prec=1e-2)
+        self._test_bfloat16_ops(torch.nn.ELU(), device, inp_dims=(5), prec=1e-2)
+        self._test_bfloat16_ops(torch.nn.Softplus(), device, inp_dims=(5), prec=1e-2)
+        self._test_bfloat16_ops(torch.nn.Hardshrink(), device, inp_dims=(5), prec=1e-2)
+        self._test_bfloat16_ops(torch.nn.Softshrink(), device, inp_dims=(5), prec=1e-2)
+        self._test_bfloat16_ops(torch.nn.LeakyReLU(), device, inp_dims=(5), prec=1e-2)
 
     @onlyCUDA
     @skipCUDAIfNotRocm
     def test_pooling_bfloat16(self, device):
-        def test(pool_func, inp_dims):
-            # fp32 compute
-            input1 = torch.randn(inp_dims, dtype=torch.float32, device=device, requires_grad=True)
-            out1 = pool_func(input1)
-            grad_input1 = torch.randn_like(out1, device=device)
-            out1.backward(grad_input1)
+        self._test_bfloat16_ops(torch.nn.AvgPool1d(3, stride=2), device, inp_dims=(8, 4, 16), prec=0.05)
+        self._test_bfloat16_ops(torch.nn.AvgPool2d(3, stride=2), device, inp_dims=(8, 4, 16, 16), prec=0.05)
+        self._test_bfloat16_ops(torch.nn.AvgPool3d(3, stride=2), device, inp_dims=(8, 4, 16, 16, 16), prec=0.05)
+        self._test_bfloat16_ops(torch.nn.AdaptiveAvgPool1d(3), device, inp_dims=(8, 4, 16), prec=0.05)
+        self._test_bfloat16_ops(torch.nn.AdaptiveAvgPool2d((3, 5)), device, inp_dims=(8, 4, 16, 16), prec=0.05)
+        self._test_bfloat16_ops(torch.nn.AdaptiveAvgPool3d((3, 5, 7)), device, inp_dims=(8, 4, 16, 16, 16), prec=0.05)
 
-            # bfloat16 compute
-            pool_func2 = pool_func.bfloat16()
-            input2 = input1.detach().bfloat16().requires_grad_()
-            grad_input2 = grad_input1.bfloat16()
-            out2 = pool_func(input2)
-            out2.backward(grad_input2)
-
-            self.assertEqual(out1, out2, prec=0.05)
-            self.assertEqual(input1.grad.data, input2.grad.data, prec=0.05)
-
-        test(torch.nn.AvgPool1d(3, stride=2), inp_dims=(8, 4, 16))
-        test(torch.nn.AvgPool2d(3, stride=2), inp_dims=(8, 4, 16, 16))
-        test(torch.nn.AvgPool3d(3, stride=2), inp_dims=(8, 4, 16, 16, 16))
-        test(torch.nn.AdaptiveAvgPool1d(3), inp_dims=(8, 4, 16))
-        test(torch.nn.AdaptiveAvgPool2d((3, 5)), inp_dims=(8, 4, 16, 16))
-        test(torch.nn.AdaptiveAvgPool3d((3, 5, 7)), inp_dims=(8, 4, 16, 16, 16))
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    def test_softmax_bfloat16(self, device):
+        self._test_bfloat16_ops(torch.nn.Softmax(dim=1), device, inp_dims=(16, 32), prec=1e-2)
 
     @onlyCUDA    
     @skipCUDAIfRocm
