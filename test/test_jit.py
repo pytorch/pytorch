@@ -71,7 +71,7 @@ from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, dis
     RUN_CUDA, RUN_CUDA_MULTI_GPU
 from torch.testing._internal.jit_utils import attrs_with_prefix, create_script_fn, nn_functional_tests, get_script_args, \
     get_call, script_template, EXCLUDE_SCRIPT, additional_module_tests, EXCLUDE_SCRIPT_MODULES, \
-    get_nn_module_name_from_kwargs, create_script_module
+    get_nn_module_name_from_kwargs, script_method_template 
 from torch.testing._internal.common_nn import module_tests, new_module_tests, criterion_tests
 from torch.testing._internal.common_methods_invocations import method_tests as autograd_method_tests
 from torch.testing._internal.common_methods_invocations import create_input, unpack_variables, \
@@ -18498,6 +18498,43 @@ def add_nn_module_test(*args, **kwargs):
         else:
             constructor_args = kwargs.get('constructor_args', ())
 
+        module_name = get_nn_module_name_from_kwargs(**kwargs)
+
+        # Construct a script module that passes arguments through
+        # to self.submodule
+        def create_script_module(*args, **kwargs):
+            formals, tensors, actuals = get_script_args(args)
+
+            method_args = ', '.join(['self'] + actuals)
+            call_args_str = ', '.join(actuals)
+            call = "self.submodule({})".format(call_args_str)
+            script = script_method_template.format(method_args, call)
+
+            submodule_constants = []
+            if kwargs.get('is_constant'):
+                submodule_constants = ['submodule']
+
+            # Create module to use the script method
+            class TheModule(torch.jit.ScriptModule):
+                __constants__ = submodule_constants
+
+                def __init__(self):
+                    super(TheModule, self).__init__()
+                    self.submodule = nn_module(*constructor_args)
+
+            def make_module(script):
+                module = TheModule()
+                # check __repr__
+                str(module)
+                module.define(script)
+                return module
+
+            module = make_module(script)
+            self.assertExportImportModule(module, tensors)
+            create_script_module.last_graph = module.graph
+            mod = module(*args)
+            return mod
+
         # Construct a normal nn module to stay consistent with create_script_module
         # and make use of a single global rng_state in module initialization
         def create_nn_module(*args, **kwargs):
@@ -18525,7 +18562,7 @@ def add_nn_module_test(*args, **kwargs):
         f_args_variable = deepcopy(unpack_variables(args_variable))
 
         # Check against Python module as reference
-        check_against_reference(self, create_script_module(self, nn_module, constructor_args), create_nn_module, f_args_variable, no_grad=no_grad)
+        check_against_reference(self, create_script_module, create_nn_module, f_args_variable, no_grad=no_grad)
 
     if 'slowTest' in kwargs:
         do_test = slowTest(do_test)

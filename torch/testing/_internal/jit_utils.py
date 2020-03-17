@@ -5,6 +5,7 @@ from torch.autograd.function import _nested_map
 from torch.jit.annotations import BroadcastingList2, BroadcastingList3  # noqa: F401
 from torch.testing._internal.common_methods_invocations import non_differentiable, create_input, \
     unpack_variables
+from torch.testing._internal.common_nn import module_tests, new_module_tests
 import torch.nn.functional as F
 from torch.onnx import OperatorExportTypes
 import torch
@@ -961,7 +962,8 @@ def get_nn_functional_compiled_fn_and_inputs(name, self_size, args, variant_name
     f_args_tensor = (self_tensor,) + args_tensor
     with torch.jit._disable_emit_hooks():
         script_fn, inputs = gen_script_fn_and_args(name, "nn_functional", *f_args_variable)
-    return script_fn, inputs
+
+    return script_fn, deepcopy(inputs)
 
 
 # additional modules test
@@ -1050,7 +1052,7 @@ def create_script_module(self, nn_module, constructor_args, *args, **kwargs):
         module = make_module(script)
         if self:
             self.assertExportImportModule(module, tensors)
-        module(*args)
+            module(*args)
         create_script_module.last_graph = module.graph
         return module
     return script_module
@@ -1065,9 +1067,6 @@ def get_nn_module_name_from_kwargs(**kwargs):
 
 
 def try_get_nn_module_compiled_mod_and_inputs(*args, **kwargs):
-    prev_default = prev_default = torch.get_default_dtype()
-    torch.set_default_dtype(torch.double)
-
     name = get_nn_module_name_from_kwargs(**kwargs)
 
     if 'desc' in kwargs and 'eval' in kwargs['desc']:
@@ -1113,8 +1112,12 @@ def try_get_nn_module_compiled_mod_and_inputs(*args, **kwargs):
 
     args_variable, kwargs_variable = create_input(input)
     f_args_variable = deepcopy(unpack_variables(args_variable))
+    out_var = deepcopy(f_args_variable)
 
-    args, mod = f_args_variable, create_script_module(None, nn_module, constructor_args, *f_args_variable)
-    torch.set_default_dtype(prev_default)
+    args, mod = f_args_variable, create_script_module(None, nn_module, constructor_args, *f_args_variable)(*f_args_variable)
 
-    return f_args_variable, mod
+    return mod, out_var
+
+
+def get_all_nn_module_tests():
+    return module_tests + new_module_tests + additional_module_tests
