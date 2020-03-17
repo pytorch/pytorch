@@ -39,7 +39,7 @@ void RegisterCodeGenList::AddStmtFactoryMethod(
 
 std::unique_ptr<CodeGen> CreateCodeGen(
     const std::string& name,
-    const Stmt& stmt,
+    Stmt* stmt,
     const std::vector<CodeGen::BufferArg>& params) {
   RegisterCodeGenList::StmtFactoryMethod method =
       RegisterCodeGenList::GetInstance().FindStmtFactoryMethod(name);
