@@ -118,13 +118,12 @@ class TORCH_API Message final {
 // Create a response Message with an exception for the provided request message.
 // The exception string representation will be used as the message's payload.
 TORCH_API Message
-createExceptionResponse(const Message& request, const std::exception& e);
+createExceptionResponse(int64_t requestId, const std::exception& e);
 
 // Create a response Message with an exception type for the provided request
 // message. The passed in string will be used as the created message's payload
-TORCH_API Message createExceptionResponse(
-    const Message& request,
-    const std::string& exceptionStr);
+TORCH_API Message
+createExceptionResponse(int64_t requestId, const std::string& exceptionStr);
 
 typedef torch::utils::Future<Message> FutureMessage;
 
