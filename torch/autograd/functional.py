@@ -12,8 +12,12 @@ def _as_tuple(inp, arg_name, fn_name):
 
     for i, el in enumerate(inp):
         if not torch.is_tensor(el):
-            raise TypeError("The {} given to {} must be either a Tensor or a tuple of Tensors but the"
-                            " value at index {} has type {}.".format(arg_name, fn_name, i, type(el)))
+            if is_inp_tuple:
+                raise TypeError("The {} given to {} must be either a Tensor or a tuple of Tensors but the"
+                                " value at index {} has type {}.".format(arg_name, fn_name, i, type(el)))
+            else:
+                raise TypeError("The {} given to {} must be either a Tensor or a tuple of Tensors but the"
+                                " given {} has type {}.".format(arg_name, fn_name, arg_name, type(el)))
 
     return is_inp_tuple, inp
 
@@ -36,7 +40,7 @@ def _tuple_postprocess(res, to_unpack):
 
 def _grad_preprocess(inputs, create_graph, need_graph):
     # Preprocess the inputs to make sure they require gradient
-    # inputs is a tuple of Tensor to preprocess
+    # inputs is a tuple of Tensors to preprocess
     # create_graph specifies if the user wants gradients to flow back to the Tensors in inputs
     # need_graph specifies if we internally want gradients to flow back to the Tensors in res
     # Note that we *always* create a new Tensor object to be able to see the difference between
@@ -63,16 +67,23 @@ def _grad_postprocess(inputs, create_graph):
     else:
         return tuple(_grad_postprocess(inp, create_graph) for inp in inputs)
 
-def _validate_v(v, other):
+def _validate_v(v, other, is_other_tuple):
     # This assumes that other is the correct shape, and v should match
     # Both are assumed to be tuples of Tensors
     if len(other) != len(v):
-        raise RuntimeError("v is a tuple of invalid length: should be {} but got {}.".format(len(other), len(v)))
+        if is_other_tuple:
+            raise RuntimeError("v is a tuple of invalid length: should be {} but got {}.".format(len(other), len(v)))
+        else:
+            raise RuntimeError("The given v should contain a single Tensor.")
 
     for idx, (el_v, el_other) in enumerate(zip(v, other)):
         if el_v.size() != el_other.size():
-            raise RuntimeError("Entry {} in v has invalid size: should be {} but got {}.".format(
-                               idx, el_other.size(), el_v.size()))
+            prepend = ""
+            if is_other_tuple:
+                prepend = "Entry {} in ".format(idx)
+            raise RuntimeError("{}v has invalid size: should be {} but got {}.".format(
+                               prepend, el_other.size(), el_v.size()))
+
 
 def _check_requires_grad(inputs, input_type, strict):
     # Used to make all the necessary checks to raise nice errors in strict mode.
@@ -109,11 +120,11 @@ def _check_requires_grad(inputs, input_type, strict):
 def _autograd_grad(outputs, inputs, grad_outputs=None, create_graph=False, retain_graph=None):
     # Version of autograd.grad that accepts `None` in outputs and do not compute gradients for them.
     # This has the extra constraint that inputs has to be a tuple
-    if torch.is_tensor(outputs):
-        outputs = (outputs,)
-        grad_outputs = (grad_outputs,)
+    assert isinstance(outputs, tuple)
     if grad_outputs is None:
         grad_outputs = (None,) * len(outputs)
+    assert isinstance(grad_outputs, tuple)
+    assert len(outputs) == len(grad_outputs)
 
     new_outputs = tuple()
     new_grad_outputs = tuple()
@@ -179,24 +190,24 @@ def vjp(func, inputs, v=None, create_graph=False, strict=False):
 
     Args:
         func (function): a Python function that takes Tensor inputs and returns
-            a tuple of Tensor or a Tensor.
-        inputs (tuple of Tensor or Tensor): inputs to the function ``func``.
-        v (tuple of Tensor or Tensor): The vector that will multiply the Jacobian. Must be the
+            a tuple of Tensors or a Tensor.
+        inputs (tuple of Tensors or Tensor): inputs to the function ``func``.
+        v (tuple of Tensors or Tensor): The vector that will multiply the Jacobian. Must be the
             same size as the output of ``func``. This argument is optional when
             ``func``'s output contains a single element and (if it is not provided) will be set as a Tensor
             containing a single ``1``.
         create_graph (bool, optional): If ``True``, both the output and result will be
-            computed in a differentiable way. Note that when strict is ``False``, the result can not
+            computed in a differentiable way. Note that when ``strict`` is ``False``, the result can not
             require gradients or be disconnected from the inputs.
             Defaults to ``False``.
         strict (bool, optional): If ``True``, an error will be raised when we detect that there exists an input
-            such that all the outputs are independent of it. If ``False``, we return zeros as the vjp for
-            said inputs, which is the expected mathematical value.
+            such that all the outputs are independent of it. If ``False``, we return a Tensor of zeros as the
+            vjp for said inputs, which is the expected mathematical value.
             Defaults to ``False``.
 
     Returns:
-        output (tuple of Tensor or Tensor): output of ``func(inputs)``
-        result (tuple of Tensor or Tensor): result of the dot product with the same shape
+        func_output (tuple of Tensors or Tensor): output of ``func(inputs)``
+        vjp (tuple of Tensors or Tensor): result of the dot product with the same shape
             as the inputs.
 
     Example::
@@ -238,7 +249,7 @@ def vjp(func, inputs, v=None, create_graph=False, strict=False):
     if v is not None:
         _, v = _as_tuple(v, "v", "vjp")
         v = _grad_preprocess(v, create_graph=create_graph, need_graph=False)
-        _validate_v(v, outputs)
+        _validate_v(v, outputs, is_outputs_tuple)
     else:
         if len(outputs) != 1 or outputs[0].nelement() != 1:
             raise RuntimeError("The vector v can only be None if the user-provided function returns "
@@ -261,24 +272,24 @@ def jvp(func, inputs, v=None, create_graph=False, strict=False):
 
     Args:
         func (function): a Python function that takes Tensor inputs and returns
-            a tuple of Tensor or a Tensor.
-        inputs (tuple of Tensor or Tensor): inputs to the function ``func``.
-        v (tuple of Tensor or Tensor): The vector that will multiply the Jacobian. Must be the
+            a tuple of Tensors or a Tensor.
+        inputs (tuple of Tensors or Tensor): inputs to the function ``func``.
+        v (tuple of Tensors or Tensor): The vector that will multiply the Jacobian. Must be the
             same size as the input of ``func``. This argument is optional when
             ``func``'s input contains a single element and (if it is not provided) will be set as a Tensor
             containing a single ``1``.
         create_graph (bool, optional): If ``True``, both the output and result will be
-            computed in a differentiable way. Note that when strict is ``False``, the result can not
+            computed in a differentiable way. Note that when ``strict`` is ``False``, the result can not
             require gradients or be disconnected from the inputs.
             Defaults to ``False``.
         strict (bool, optional): If ``True``, an error will be raised when we detect that there exists an input
-            such that all the outputs are independent of it. If ``False``, we return zeros as the jvp for
-            said inputs, which is the expected mathematical value.
+            such that all the outputs are independent of it. If ``False``, we return a Tensor of zeros as the
+            jvp for said inputs, which is the expected mathematical value.
             Defaults to ``False``.
 
     Returns:
-        output (tuple of Tensor or Tensor): output of ``func(inputs)``
-        result (tuple of Tensor or Tensor): result of the dot product with the same shape
+        func_output (tuple of Tensors or Tensor): output of ``func(inputs)``
+        jvp (tuple of Tensors or Tensor): result of the dot product with the same shape
             as the output.
 
     Example::
@@ -306,7 +317,7 @@ def jvp(func, inputs, v=None, create_graph=False, strict=False):
     Note::
 
         The jvp is currently computed using the double backward trick as we don't have support for
-        forward mode AD in pytorch at the moment.
+        forward mode AD in PyTorch at the moment.
     """
 
     is_inputs_tuple, inputs = _as_tuple(inputs, "inputs", "jvp")
@@ -315,7 +326,7 @@ def jvp(func, inputs, v=None, create_graph=False, strict=False):
     if v is not None:
         _, v = _as_tuple(v, "v", "jvp")
         v = _grad_preprocess(v, create_graph=create_graph, need_graph=False)
-        _validate_v(v, inputs)
+        _validate_v(v, inputs, is_inputs_tuple)
     else:
         if len(inputs) != 1 or inputs[0].nelement() != 1:
             raise RuntimeError("The vector v can only be None if the input to the user-provided function "
@@ -347,19 +358,19 @@ def jacobian(func, inputs, create_graph=False, strict=False):
 
     Args:
         func (function): a Python function that takes Tensor inputs and returns
-            a tuple of Tensor or a Tensor.
-        inputs (tuple of Tensor or Tensor): inputs to the function ``func``.
+            a tuple of Tensors or a Tensor.
+        inputs (tuple of Tensors or Tensor): inputs to the function ``func``.
         create_graph (bool, optional): If ``True``, the Jacobian will be computed in
-            a differentiable manner. Note that when strict is ``False``, the result can not
+            a differentiable manner. Note that when ``strict`` is ``False``, the result can not
             require gradients or be disconnected from the inputs.
             Defaults to ``False``.
         strict (bool, optional): If ``True``, an error will be raised when we detect that there exists an input
-            such that all the outputs are independent of it. If ``False``, we return zeros as the jacobian for
-            said inputs, which is the expected mathematical value.
+            such that all the outputs are independent of it. If ``False``, we return a Tensor of zeros as the
+            jacobian for said inputs, which is the expected mathematical value.
             Defaults to ``False``.
 
     Returns:
-        Jacobian (Tensor or nested tuple of Tensor) if there are a single input
+        Jacobian (Tensor or nested tuple of Tensors) if there are a single input
             and output, this will be a single Tensor containing the Jacobian for the
             linearized inputs and output. If one of the two is a tuple, then the Jacobian
             will be a tuple of Tensors. If both of them are tuples, then the Jacobian will
@@ -408,8 +419,7 @@ def jacobian(func, inputs, create_graph=False, strict=False):
 
         jac_i = tuple([] for _ in range(len(inputs)))
         for j in range(out.nelement()):
-            # Do this instead of the grad_output trick in `gradcheck` to avoid version counter issues
-            vj = _autograd_grad(out.reshape(-1)[j], inputs, retain_graph=True, create_graph=create_graph)
+            vj = _autograd_grad((out.reshape(-1)[j],), inputs, retain_graph=True, create_graph=create_graph)
 
             for el_idx, (jac_i_el, vj_el, inp_el) in enumerate(zip(jac_i, vj, inputs)):
                 if vj_el is not None:
@@ -437,18 +447,18 @@ def hessian(func, inputs, create_graph=False, strict=False):
     Args:
         func (function): a Python function that takes Tensor inputs and returns
             a Tensor with a single element.
-        inputs (tuple of Tensor or Tensor): inputs to the function ``func``.
+        inputs (tuple of Tensors or Tensor): inputs to the function ``func``.
         create_graph (bool, optional): If ``True``, the Hessian will be computed in
-            a differentiable manner. Note that when strict is ``False``, the result can not
+            a differentiable manner. Note that when ``strict`` is ``False``, the result can not
             require gradients or be disconnected from the inputs.
             Defaults to ``False``.
         strict (bool, optional): If ``True``, an error will be raised when we detect that there exists an input
-            such that all the outputs are independent of it. If ``False``, we return zeros as the hessian for
-            said inputs, which is the expected mathematical value.
+            such that all the outputs are independent of it. If ``False``, we return a Tensor of zeros as the
+            hessian for said inputs, which is the expected mathematical value.
             Defaults to ``False``.
 
     Returns:
-        Hessian (Tensor or a tuple of tuple of Tensor) if there are a single input,
+        Hessian (Tensor or a tuple of tuple of Tensors) if there are a single input,
             this will be a single Tensor containing the Hessian for the input.
             If it is a tuple, then the Hessian will be a tuple of tuples where
             ``Hessian[i][j]`` will contain the Hessian of the ``i``th input
@@ -534,23 +544,23 @@ def vhp(func, inputs, v=None, create_graph=False, strict=False):
     Args:
         func (function): a Python function that takes Tensor inputs and returns
             a Tensor with a single element.
-        inputs (tuple of Tensor or Tensor): inputs to the function ``func``.
-        v (tuple of Tensor or Tensor): The vector that will multiply the Hessian. Must be the
+        inputs (tuple of Tensors or Tensor): inputs to the function ``func``.
+        v (tuple of Tensors or Tensor): The vector that will multiply the Hessian. Must be the
             same size as the input of ``func``. This argument is optional when
             ``func``'s input contains a single element and (if it is not provided) will be set as a Tensor
             containing a single ``1``.
         create_graph (bool, optional): If ``True``, both the output and result will be
-            computed in a differentiable way. Note that when strict is ``False``, the result can not
+            computed in a differentiable way. Note that when ``strict`` is ``False``, the result can not
             require gradients or be disconnected from the inputs.
             Defaults to ``False``.
         strict (bool, optional): If ``True``, an error will be raised when we detect that there exists an input
-            such that all the outputs are independent of it. If ``False``, we return zeros as the vhp for
-            said inputs, which is the expected mathematical value.
+            such that all the outputs are independent of it. If ``False``, we return a Tensor of zeros as the
+            vhp for said inputs, which is the expected mathematical value.
             Defaults to ``False``.
 
     Returns:
-        output (tuple of Tensor or Tensor): output of ``func(inputs)``
-        result (tuple of Tensor or Tensor): result of the dot product with the same shape
+        func_output (tuple of Tensors or Tensor): output of ``func(inputs)``
+        vhp (tuple of Tensors or Tensor): result of the dot product with the same shape
             as the inputs.
 
     Example::
@@ -587,7 +597,7 @@ def vhp(func, inputs, v=None, create_graph=False, strict=False):
     if v is not None:
         _, v = _as_tuple(v, "v", "vhp")
         v = _grad_preprocess(v, create_graph=create_graph, need_graph=False)
-        _validate_v(v, inputs)
+        _validate_v(v, inputs, is_inputs_tuple)
     else:
         if len(inputs) != 1 or inputs[0].nelement() != 1:
             raise RuntimeError("The vector v can only be None if the input to the user-provided function "
@@ -623,23 +633,23 @@ def hvp(func, inputs, v=None, create_graph=False, strict=False):
     Args:
         func (function): a Python function that takes Tensor inputs and returns
             a Tensor with a single element.
-        inputs (tuple of Tensor or Tensor): inputs to the function ``func``.
-        v (tuple of Tensor or Tensor): The vector that will multiply the Hessian. Must be the
+        inputs (tuple of Tensors or Tensor): inputs to the function ``func``.
+        v (tuple of Tensors or Tensor): The vector that will multiply the Hessian. Must be the
             same size as the input of ``func``. This argument is optional when
             ``func``'s input contains a single element and (if it is not provided) will be set as a Tensor
             containing a single ``1``.
         create_graph (bool, optional): If ``True``, both the output and result will be
-            computed in a differentiable way. Note that when strict is ``False``, the result can not
+            computed in a differentiable way. Note that when ``strict`` is ``False``, the result can not
             require gradients or be disconnected from the inputs.
             Defaults to ``False``.
         strict (bool, optional): If ``True``, an error will be raised when we detect that there exists an input
-            such that all the outputs are independent of it. If ``False``, we return zeros as the hvp for
-            said inputs, which is the expected mathematical value.
+            such that all the outputs are independent of it. If ``False``, we return a Tensor of zeros as the
+            hvp for said inputs, which is the expected mathematical value.
             Defaults to ``False``.
 
     Returns:
-        output (tuple of Tensor or Tensor): output of ``func(inputs)``
-        result (tuple of Tensor or Tensor): result of the dot product with the same shape
+        func_output (tuple of Tensors or Tensor): output of ``func(inputs)``
+        hvp (tuple of Tensors or Tensor): result of the dot product with the same shape
             as the inputs.
 
     Example::
@@ -672,7 +682,7 @@ def hvp(func, inputs, v=None, create_graph=False, strict=False):
 
         This function is significantly slower than `vhp` due to backward mode AD constraints.
         If your functions is twice continuously differentiable, then hvp = vhp.t(). So if you
-        know that your function verifies this condition, you should use vhp instead that is
+        know that your function satisfies this condition, you should use vhp instead that is
         much faster with the current implementation.
 
     """
@@ -683,7 +693,7 @@ def hvp(func, inputs, v=None, create_graph=False, strict=False):
     if v is not None:
         _, v = _as_tuple(v, "v", "hvp")
         v = _grad_preprocess(v, create_graph=create_graph, need_graph=False)
-        _validate_v(v, inputs)
+        _validate_v(v, inputs, is_inputs_tuple)
     else:
         if len(inputs) != 1 or inputs[0].nelement() != 1:
             raise RuntimeError("The vector v can only be None if the input to the user-provided function "

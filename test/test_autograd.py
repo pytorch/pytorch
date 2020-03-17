@@ -4295,10 +4295,10 @@ class TestAutogradFunctional(TestCase):
         with self.assertRaisesRegex(RuntimeError, "The vector v can only be None if the user-provided function returns"):
             res = autogradF.vjp(foo, inp)
 
-        with self.assertRaisesRegex(RuntimeError, "v is a tuple of invalid length: should be 1 but got 2."):
+        with self.assertRaisesRegex(RuntimeError, "The given v should contain a single Tensor."):
             res = autogradF.vjp(foo, inp, (torch.ones_like(inp), torch.ones_like(inp)))
 
-        with self.assertRaisesRegex(RuntimeError, "Entry 0 in v has invalid size: should be torch.Size"):
+        with self.assertRaisesRegex(RuntimeError, "v has invalid size: should be torch.Size"):
             res = autogradF.vjp(foo, inp, v[:2])
 
         res = autogradF.vjp(foo, inp, v)[1]
@@ -4446,10 +4446,10 @@ class TestAutogradFunctional(TestCase):
         with self.assertRaisesRegex(RuntimeError, "The vector v can only be None if the input to the user-provided function"):
             res = autogradF.jvp(foo, inp)
 
-        with self.assertRaisesRegex(RuntimeError, "v is a tuple of invalid length: should be 1 but got 2."):
+        with self.assertRaisesRegex(RuntimeError, "The given v should contain a single Tensor."):
             res = autogradF.jvp(foo, inp, (v, v))
 
-        with self.assertRaisesRegex(RuntimeError, "Entry 0 in v has invalid size: should be torch.Size"):
+        with self.assertRaisesRegex(RuntimeError, "v has invalid size: should be torch.Size"):
             res = autogradF.jvp(foo, inp, v[:2])
 
         res = autogradF.jvp(foo, inp, v)[1]
@@ -4879,7 +4879,7 @@ class TestAutogradFunctional(TestCase):
         with self.assertRaisesRegex(RuntimeError, err_msg_out):
             res = autogradF.vhp(bar2, inp, v)
 
-        with self.assertRaisesRegex(RuntimeError, "Entry 0 in v has invalid size:"):
+        with self.assertRaisesRegex(RuntimeError, "v has invalid size:"):
             res = autogradF.vhp(foo, inp, torch.rand(5))
 
         with self.assertRaisesRegex(TypeError, "The v given to vhp must be either a Tensor or a tuple of Tensors"):
@@ -5037,7 +5037,7 @@ class TestAutogradFunctional(TestCase):
         with self.assertRaisesRegex(RuntimeError, err_msg_out):
             res = autogradF.hvp(bar2, inp, v)
 
-        with self.assertRaisesRegex(RuntimeError, "Entry 0 in v has invalid size:"):
+        with self.assertRaisesRegex(RuntimeError, "v has invalid size:"):
             res = autogradF.hvp(foo, inp, torch.rand(5))
 
         with self.assertRaisesRegex(TypeError, "The v given to hvp must be either a Tensor or a tuple of Tensors"):
