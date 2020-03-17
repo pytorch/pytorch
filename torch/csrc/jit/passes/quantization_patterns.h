@@ -162,7 +162,6 @@ graph(%a_quant, %b_quant, %alpha, %scale, %zero_point, %dtype):
          %r_add = aten::add_(%a_dequant, %b_dequant, %alpha)
          %r = aten::quantize_per_tensor(%r_add, %scale, %zero_point, %dtype)
          return (%r) )";
-
   // We don't have quantized inplace add right now
 
   return {
@@ -175,9 +174,9 @@ graph(%a_quant, %b_quant, %alpha, %scale, %zero_point, %dtype):
     {aten_linear, quantized_aten_linear},
     {add_relu, quantized_add_relu},
     {add_inplace_relu, quantized_add_relu},
-    {cat, quantized_cat},
     {add, quantized_add},
     {inplace_add, quantized_add},
+    {cat, quantized_cat},
   };
 
 }
