@@ -6,6 +6,7 @@
 #include <ATen/Utils.h>
 #include <ATen/Generator.h>
 #include <ATen/Parallel.h>
+#include <ATen/ComplexHelper.h>
 
 #include <ATen/cpu/vml.h>
 #include <ATen/cpu/vec256/vec256.h>
@@ -444,7 +445,7 @@ void normal_fill(Tensor& self, const scalar_t mean, const scalar_t std, Generato
 void normal_kernel(Tensor& self, double mean, double std, Generator* gen) {
   if(self.is_complex()) {
     // note: float_tensor lives only as long as the self tensor lives
-    auto float_tensor = at::native::view_complex_as_float(self);
+    auto float_tensor = at::view_complex_as_float(self);
     // variance for normal distribution of the real and imaginary values
     // is half of the input variance
     return normal_kernel(float_tensor, mean, std/(std::sqrt(2)), gen);
