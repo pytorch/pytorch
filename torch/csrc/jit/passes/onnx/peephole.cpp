@@ -75,8 +75,8 @@ const std::vector<size_t>& getBroadcastPositions(Node* node) {
     for (long unsigned int i = 0; i < iter->second.size(); i++) {
       if (iter->second[i] >= node->inputs().size()){
         std::copy(iter->second.begin(), iter->second.begin()+i, positions.begin());
-	return positions;
-      }	      
+        return positions;
+      }              
     }
     return iter->second;
   }
@@ -116,9 +116,6 @@ void fuseBroadcast(Block* b) {
     }
 
     for (size_t position : broadcast_positions) {
-      //if (position >= n->inputs().size()) {
-      //  break;
-      //}
       auto* expand_node = n->input(position)->node();
 
       // Confirm it is expand node.
