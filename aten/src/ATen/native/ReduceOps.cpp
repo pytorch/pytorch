@@ -381,12 +381,34 @@ static ScalarType get_dtype(Tensor& result, const Tensor& self, optional<ScalarT
   return src_type;
 }
 
-// Returns an empty tensor with self's options, unless self has an integral
-// dtype, in which case the empty tensor's dtype is the default scalar type
-static Tensor make_floating_result(const Tensor& self) {
-  if (at::isIntegralType(self.scalar_type())) {
-    const auto scalar_type = typeMetaToScalarType(c10::get_default_dtype());
-    return at::empty({0}, self.options().dtype(scalar_type));
+// Returns the appropriate floating dtype for the (floating) reduction's result
+// If the optional dtype argument is specified, that is the output dtype
+// Otherwise, the dtype of self is used, unless...
+//  (1) It is an integral type, in which case the result has the default scalar type
+//  (2) It is a CUDA half tensor, in which case the result has float dtype
+static c10::optional<ScalarType> get_floating_dtype(
+    const Tensor& self,
+    const optional<ScalarType>& dtype = c10::nullopt) {
+
+  if (dtype.has_value()) {
+    return *dtype;
+  } else if (at::isIntegralType(self.scalar_type())) {
+    return typeMetaToScalarType(c10::get_default_dtype());
+  } else if (self.is_cuda() && self.scalar_type() == kHalf) {
+    // Promotes CUDA half reductions to float
+    return kFloat;
+  }
+
+  return c10::nullopt;
+}
+
+static Tensor make_floating_result(
+    const Tensor& self,
+    const optional<ScalarType>& dtype = c10::nullopt) {
+
+  auto maybe_dtype = get_floating_dtype(self, dtype);
+  if (maybe_dtype.has_value()) {
+    return at::empty({0}, self.options().dtype(*maybe_dtype));
   }
 
   return at::empty({0}, self.options());
@@ -493,7 +515,7 @@ Tensor mean_cpu_gpu(const Tensor &self, optional<ScalarType> dtype) {
 }
 
 Tensor mean_cpu_gpu(const Tensor& self, IntArrayRef dim, bool keepdim, optional<ScalarType> dtype) {
-  Tensor result = make_floating_result(self);
+  Tensor result = make_floating_result(self, dtype);
   return at::native::mean_out_cpu_gpu(result, self, dim, keepdim, dtype);
 }
 
@@ -951,9 +973,11 @@ Tensor var(const Tensor& self, bool unbiased) {
 
   // Pre-casts integral inputs to the default scalar type
   // Note: _th_var (_var) does not support integral types
-  if (at::isIntegralType(self.scalar_type())) {
-    const auto scalar_type = typeMetaToScalarType(c10::get_default_dtype());
-    return trivial_return.has_value() ? trivial_return.value() : at::_var(self.to(scalar_type), unbiased);
+  auto maybe_dtype = get_floating_dtype(self);
+  if (maybe_dtype.has_value()) {
+    return trivial_return.has_value() ?
+      trivial_return.value() :
+      at::_var(self.to(*maybe_dtype), unbiased);
   }
 
   return trivial_return.has_value() ? trivial_return.value() : at::_var(self, unbiased);
@@ -977,9 +1001,11 @@ Tensor std(const Tensor& self, bool unbiased) {
 
   // Pre-casts integral inputs to the default scalar type
   // Note: _th_std (_std) does not support integral types
-  if (at::isIntegralType(self.scalar_type())) {
-    const auto scalar_type = typeMetaToScalarType(c10::get_default_dtype());
-    return trivial_return.has_value() ? trivial_return.value() : at::_std(self.to(scalar_type), unbiased);
+  auto maybe_dtype = get_floating_dtype(self);
+  if (maybe_dtype.has_value()) {
+    return trivial_return.has_value() ?
+      trivial_return.value() :
+      at::_std(self.to(*maybe_dtype), unbiased);
   }
 
   return trivial_return.has_value() ? trivial_return.value() : at::_std(self, unbiased);
