@@ -419,37 +419,37 @@ void initJITBindings(PyObject* module) {
           "_jit_get_te_cuda_pointwise_loop_levels",
           []() -> int {
             using namespace torch::jit::tensorexpr;
-            return GetTECudaPointwiseLoopLevels();
+            return getTECudaPointwiseLoopLevels();
           })
       .def(
           "_jit_set_te_cuda_pointwise_loop_levels",
           [](int level) {
             using namespace torch::jit::tensorexpr;
-            return GetTECudaPointwiseLoopLevels() = level;
+            return getTECudaPointwiseLoopLevels() = level;
           })
       .def(
           "_jit_get_te_cuda_pointwise_block_count",
           []() -> int {
             using namespace torch::jit::tensorexpr;
-            return GetTECudaPointwiseBlockCount();
+            return getTECudaPointwiseBlockCount();
           })
       .def(
           "_jit_set_te_cuda_pointwise_block_count",
           [](int block_count) {
             using namespace torch::jit::tensorexpr;
-            return GetTECudaPointwiseBlockCount() = block_count;
+            return getTECudaPointwiseBlockCount() = block_count;
           })
       .def(
           "_jit_get_te_cuda_pointwise_block_size",
           []() -> int {
             using namespace torch::jit::tensorexpr;
-            return GetTECudaPointwiseBlockSize();
+            return getTECudaPointwiseBlockSize();
           })
       .def(
           "_jit_set_te_cuda_pointwise_block_size",
           [](int block_size) {
             using namespace torch::jit::tensorexpr;
-            return GetTECudaPointwiseBlockSize() = block_size;
+            return getTECudaPointwiseBlockSize() = block_size;
           })
       .def("_jit_set_texpr_fuser_enabled", &setTensorExprFuserEnabled)
       .def(
@@ -658,7 +658,7 @@ void initJITBindings(PyObject* module) {
           std::ostringstream docstring;
           docstring << "Automatically bound operator '" << op_name
                     << "' with schema(s):\n";
-                    
+
           for (const auto& op : operations) {
             docstring << "  " << op->schema() << "\n";
           }
