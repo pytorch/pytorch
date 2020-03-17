@@ -177,7 +177,15 @@ jobs:
           no_output_timeout: 30m
           command: |
             curl --retry 3 -kLO https://ossci-windows.s3.amazonaws.com/cuda_10.1.243_426.00_win10.exe
-            ./cuda_10.1.243_426.00_win10.exe -s
+            mkdir cuda_install_logs
+            ./cuda_10.1.243_426.00_win10.exe -s -loglevel:6 -log:"$(pwd -W)/cuda_install_logs"
+            cat cuda_install_logs/LOG.setup.exe.log
+            if ! ls "/c/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v10.1/bin/nvcc.exe"
+            then
+              echo "CUDA installation failed"
+              exit 1
+            fi
+            rm -rf ./cuda_install_logs
             rm -f ./cuda_10.1.243_426.00_win10.exe
       - run:
           name: Install Cudnn
