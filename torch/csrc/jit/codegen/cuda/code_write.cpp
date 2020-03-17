@@ -49,8 +49,8 @@ void CodeWrite::printIndexInto(
     // assuming we've printed something
     bool first_index = true;
 
-    for (decltype(fors.size()) i{tv->getComputeAtAxis()}; i < fors.size();
-         i++) {
+    for (size_t i{size_t(tv->getComputeAtAxis())};
+         i < fors.size(); i++) {
       if (fors[i].second->isThread())
         continue;
 
