@@ -411,6 +411,9 @@
   self: zeros_like(self)
   other: zeros_like(other)
 
+- name: hardsigmoid(Tensor self) -> Tensor
+  self: hardsigmoid_backward(grad, result)
+
 - name: histc(Tensor self, int bins=100, Scalar min=0, Scalar max=0) -> Tensor
   self: not_implemented("histc")
 
