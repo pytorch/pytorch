@@ -276,7 +276,7 @@ auto Engine::thread_init(int device, const std::shared_ptr<ReadyQueue>& ready_qu
 
   // initialize each device thread's thread local ready queue with the ready queue
   // that is created before the thread initialization
-  init_local_ready_queue(std::move(ready_queue));
+  init_local_ready_queue(ready_queue);
 
   std::shared_ptr<GraphTask> graph_task = nullptr;
   thread_main(graph_task, /* reentrant_thread */ false);
