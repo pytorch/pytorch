@@ -209,10 +209,10 @@ void serialize(
 
 template <typename T>
 c10::List<T> deque_to_list(const std::deque<T>& dq) {
-  c10::List<Tensor> list;
+  c10::List<T> list;
   list.reserve(dq.size());
   for (const auto& e : dq) {
-    list.push_back(e);
+    list.emplace_back(e);
   }
   return list;
 }
@@ -220,8 +220,8 @@ c10::List<T> deque_to_list(const std::deque<T>& dq) {
 template <typename T>
 std::deque<T> list_to_deque(const c10::List<T>& list) {
   std::deque<T> dq;
-  for (size_t i = 0; i < list.size(); i++) {
-    dq.push_back(list[i]);
+  for (const auto& e : list) {
+    dq.emplace_back(e);
   }
   return dq;
 }
@@ -248,8 +248,12 @@ std::deque<T> list_to_deque(const c10::List<T>& list) {
 #define _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(T, name) { \
   c10::IValue ivalue; \
   bool exists = archive.try_read(#name, ivalue); \
-  if (exists) \
+  if (exists) {\
     name(ivalue.to<T>()); \
+  } else { \
+    bool is_tensor_type = std::is_base_of<torch::Tensor, T>::value; \
+    TORCH_INTERNAL_ASSERT(is_tensor_type); \
+  } \
 }
 
 #define _TORCH_OPTIM_DESERIALIZE_TORCH_ARG_OPTIONAL(T, name) { \
@@ -262,11 +266,9 @@ std::deque<T> list_to_deque(const c10::List<T>& list) {
 
 #define _TORCH_OPTIM_DESERIALIZE_TORCH_ARG_DEQUE(T, name) { \
   c10::IValue ivalue; \
-  bool exists = archive.try_read(#name, ivalue); \
-  if (exists) { \
-    auto list = ivalue.to<c10::List<T::value_type>>(); \
-    name(list_to_deque(list)); \
-  } \
+  archive.read(#name, ivalue); \
+  auto list = ivalue.to<c10::List<T::value_type>>(); \
+  name(list_to_deque(list)); \
 }
 
 } // namespace optim
