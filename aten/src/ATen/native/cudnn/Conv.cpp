@@ -690,7 +690,12 @@ public:
         cudaGetLastError(); // clear CUDA error
       }
     }
-    TORCH_CHECK(false, "Unable to find a valid cuDNN algorithm to run convolution");
+    // This error doesn't necessarily mean the error originated from cudnn.
+    // In case where we have concurrent kernel failure outside of cudnn,
+    // we could also get here.
+    // One quick trick to rule out that is to set CUDA_LAUNCH_BLOCKING to
+    // avoid concurrent kernel execution.
+    TORCH_CHECK(false, "run cudnn convolution failed, try set `CUDA_LAUNCH_BLOCKING=0`");
   }
 };
 
