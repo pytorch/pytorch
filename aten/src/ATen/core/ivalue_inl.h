@@ -531,7 +531,15 @@ c10::intrusive_ptr<T> IValue::toCustomClass() && {
   TORCH_CHECK(obj->slots().size() == 1,
               "Tried to cast IValue to custom class but it did "
               "not contain a custom class!");
-  // FIXME: this cast isn't actually checked!
+  auto expected_type = c10::getCustomClassType<c10::intrusive_ptr<T>>();
+  // NB: doing pointer comparison here
+  // If in the future there ever arises a need to call operator== on custom class
+  // Type's, this needs to be changed!
+  TORCH_CHECK(type() == expected_type,
+              "Tried to convert an IValue of type ",
+              type()->python_str(),
+              " to custom class type ",
+              expected_type->python_str());
   auto userObj = c10::static_intrusive_pointer_cast<T>(obj->getSlot(0).toCapsule());
   return userObj;
 }
@@ -545,7 +553,15 @@ c10::intrusive_ptr<T> IValue::toCustomClass() const & {
   TORCH_CHECK(obj->slots().size() == 1,
               "Tried to cast IValue to custom class but it did "
               "not contain a custom class!");
-  // FIXME: this cast isn't actually checked!
+  auto expected_type = c10::getCustomClassType<c10::intrusive_ptr<T>>();
+  // NB: doing pointer comparison here
+  // If in the future there ever arises a need to call operator== on custom class
+  // Type's, this needs to be changed!
+  TORCH_CHECK(type() == expected_type,
+              "Tried to convert an IValue of type ",
+              type()->python_str(),
+              " to custom class type ",
+              expected_type->python_str());
   auto userObj = c10::static_intrusive_pointer_cast<T>(obj->getSlot(0).toCapsule());
   return userObj;
 }
@@ -819,9 +835,7 @@ IValue::IValue(c10::intrusive_ptr<T> custom_class) {
   auto classType = c10::getCustomClassType<c10::intrusive_ptr<T>>();
   auto ivalue_obj = c10::ivalue::Object::create(
       c10::StrongTypePtr(nullptr, classType), /*num_slots=*/1);
-  ivalue_obj->setAttr(
-      "capsule",
-      make_capsule(std::move(custom_class)));
+  ivalue_obj->setSlot(0, IValue::make_capsule(std::move(custom_class)));
   payload.as_intrusive_ptr = ivalue_obj.release();
   tag = Tag::Object;
   is_intrusive_ptr = true;
