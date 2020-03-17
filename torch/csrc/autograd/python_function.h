@@ -27,9 +27,11 @@ struct PyNode : public Node {
   variable_list apply(variable_list&& inputs) override;
   variable_list legacy_apply(const variable_list& inputs);
 
-  // throw a persist python_error to allow it to be thrown
-  // in another thread, this is made so that even for pure
-  // C++ thread without a pre-create PyThreadState could
+  // Throw a python_error with the PyErr state persisted,
+  // so that we don't lose the error state if the GIL is
+  // released when we don't have a PyThreadState created
+  // beforehand, this is made so that even for pure
+  // C++ thread without a pre-created PyThreadState could
   // also capture the correct error message.
   void throw_python_error();
   void release_variables() override;

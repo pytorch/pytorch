@@ -45,9 +45,9 @@ PyObject *THPFunctionClass = nullptr;
 namespace torch { namespace autograd {
 
 void PyNode::throw_python_error() {
-  auto python_err = python_error();
-  python_err.persist();
-  throw python_err;
+  python_error err;
+  err.persist();
+  throw err;
 }
 auto PyNode::legacy_apply(const variable_list& inputs) -> variable_list {
   pybind11::gil_scoped_acquire gil;
