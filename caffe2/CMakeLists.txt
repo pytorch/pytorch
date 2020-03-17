@@ -32,6 +32,7 @@ if (INTERN_BUILD_ATEN_OPS)
   # Add source, includes, and libs to lists
   list(APPEND Caffe2_CPU_SRCS ${ATen_CPU_SRCS})
   list(APPEND Caffe2_GPU_SRCS ${ATen_CUDA_SRCS})
+  list(APPEND Caffe2_GPU_SRCS_W_SORT_BY_KEY ${ATen_CUDA_SRCS_W_SORT_BY_KEY})
   list(APPEND Caffe2_HIP_SRCS ${ATen_HIP_SRCS})
   list(APPEND Caffe2_CPU_TEST_SRCS ${ATen_CPU_TEST_SRCS})
   list(APPEND Caffe2_GPU_TEST_SRCS ${ATen_CUDA_TEST_SRCS})
@@ -702,11 +703,19 @@ IF (USE_ROCM)
 ELSEIF(USE_CUDA)
   set(CUDA_LINK_LIBRARIES_KEYWORD PRIVATE)
   cuda_add_library(torch_cuda ${Caffe2_GPU_SRCS})
+  cuda_add_library(__torch_cuda_sp ${Caffe2_GPU_SRCS_W_SORT_BY_KEY} STATIC)
+  add_dependencies(__torch_cuda_sp Caffe2_PROTO)
+  if (INTERN_BUILD_ATEN_OPS)
+    add_dependencies(__torch_cuda_sp aten_op_header_gen)
+  endif()
   set(CUDA_LINK_LIBRARIES_KEYWORD)
   torch_compile_options(torch_cuda)  # see cmake/public/utils.cmake
+  torch_compile_options(__torch_cuda_sp)  # see cmake/public/utils.cmake
+  target_link_libraries(torch_cuda PRIVATE __torch_cuda_sp)
   if (USE_NCCL)
     target_link_libraries(torch_cuda PRIVATE __caffe2_nccl)
     target_compile_definitions(torch_cuda PRIVATE USE_NCCL)
+    target_compile_definitions(__torch_cuda_sp PRIVATE USE_NCCL)
   endif()
 ENDIF()
 
@@ -964,9 +973,11 @@ torch_set_target_props(torch_cpu)
 target_compile_options(torch_cpu PRIVATE "-DCAFFE2_BUILD_MAIN_LIB")
 if(USE_CUDA)
   target_compile_options(torch_cuda PRIVATE "-DTORCH_CUDA_BUILD_MAIN_LIB")
+  target_compile_options(__torch_cuda_sp PRIVATE "-DTORCH_CUDA_BUILD_MAIN_LIB")
   # NB: This must be target_compile_definitions, not target_compile_options,
   # as the latter is not respected by nvcc
   target_compile_definitions(torch_cuda PRIVATE "-DTORCH_CUDA_BUILD_MAIN_LIB")
+  target_compile_definitions(__torch_cuda_sp PRIVATE "-DTORCH_CUDA_BUILD_MAIN_LIB")
 elseif(USE_ROCM)
   target_compile_options(torch_hip PRIVATE "-DTORCH_HIP_BUILD_MAIN_LIB")
   target_compile_definitions(torch_hip PRIVATE "-DTORCH_HIP_BUILD_MAIN_LIB")
@@ -1129,6 +1140,8 @@ if(USE_CUDA)
       torch_cuda INTERFACE $<INSTALL_INTERFACE:include>)
   target_include_directories(
       torch_cuda PRIVATE ${Caffe2_GPU_INCLUDE})
+  target_include_directories(
+      __torch_cuda_sp PRIVATE ${Caffe2_GPU_INCLUDE})
   target_link_libraries(
       torch_cuda PRIVATE ${Caffe2_CUDA_DEPENDENCY_LIBS})
 
