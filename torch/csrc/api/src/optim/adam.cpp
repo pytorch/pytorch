@@ -61,8 +61,13 @@ void AdamParamState::serialize(torch::serialize::InputArchive& archive) {
   _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(Tensor, max_exp_avg_sq);
 }
 
-void Adam::step() {
+Tensor Adam::step(LossClosure closure)  {
   NoGradGuard no_grad;
+  Tensor loss = {};
+  if (closure != nullptr) {
+    at::AutoGradMode enable_grad(true);
+    loss = closure();
+  }
   for (auto& group : param_groups_) {
     for (auto& p : group.params()) {
       if (!p.grad().defined()) {
@@ -122,6 +127,7 @@ void Adam::step() {
       p.addcdiv_(exp_avg, denom, -step_size);
     }
   }
+  return loss;
 }
 
 void Adam::add_parameters(const std::vector<Tensor>& parameters) {
