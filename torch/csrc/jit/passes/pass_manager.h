@@ -77,7 +77,13 @@ struct TORCH_API PassManager {
    * state, this is so when functions are derived from this class, they don't
    * have to worry about initializing the static members.
    */
-  static bool isRegistered(bool flip_bit = false);
+  static bool isRegistered(bool flip_bit = false) {
+    static bool val = false;
+    if (flip_bit)
+      val = !val;
+    return val;
+  }
+
   /*
    * name() will return the name of the registered pass
    * name(pass_name, true) will set the name of the pass
@@ -86,14 +92,33 @@ struct TORCH_API PassManager {
    */
   static GraphPassNameType name(
       GraphPassNameType PassName = 0,
-      bool set = false);
+      bool set = false) {
+    static GraphPassNameType name = 0;
+    if (set)
+      name = PassName;
+    return name;
+  }
 
  public:
   // registerPass(pass) will register the pass provided and set the
   // name/isRegistered functions appropriately
-  static void registerPass(GraphPass p);
+  static void registerPass(GraphPass p) {
+    if (!isRegistered()) {
+      // If we don't already have a registered pass, register pass
+      // hold on to its name, change isRegistered to true
+      name(registerPostPass(std::move(p)), true);
+      isRegistered(true);
+    }
+  }
+
   // Calls ClearPostPass(name())
-  static void clearPass();
+  static void clearPass() {
+    // If the pass is registered, clear it and change isRegistered to false.
+    if (isRegistered()) {
+      clearPostPass(name());
+      isRegistered(true);
+    }
+  }
 };
 
 } // namespace jit
