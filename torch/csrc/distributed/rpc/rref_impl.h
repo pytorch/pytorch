@@ -201,6 +201,11 @@ class TORCH_API RRef : public RRefInterface {
     return ownerId_;
   }
 
+  // returns the worker name of the owner
+  inline std::string ownerName() const override {
+    return RpcAgent::getCurrentRpcAgent()->getWorkerInfo(ownerId_).name_;
+  }
+
   // Returns the globally unique RRefId of this RRef
   inline const RRefId& rrefId() const {
     return rrefId_;
