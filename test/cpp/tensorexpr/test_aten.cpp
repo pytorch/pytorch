@@ -363,7 +363,7 @@ void testATenaddcmulFloat() {
     EXPECT_EQ(b_v(i), 2 * i + 1) << "index: " << i;
     EXPECT_EQ(c_v(i), 3 * i + 2) << "index: " << i;
     EXPECT_EQ(d_v(i), 5 * i + 3) << "index: " << i;
-    EXPECT_EQ(e_v(i), a_v(i) + b_v(i) * c_v(i) * d_v(i)) << "index: " << i;
+    EXPECT_FLOAT_EQ(e_v(i), a_v(i) + b_v(i) * c_v(i) * d_v(i)) << "index: " << i;
   }
 }
 

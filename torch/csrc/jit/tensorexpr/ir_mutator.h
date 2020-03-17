@@ -45,6 +45,7 @@ class Allocate;
 class Free;
 class Cond;
 class Stmt;
+class LinearForm;
 
 class TORCH_API IRMutator {
  public:
@@ -84,6 +85,8 @@ class TORCH_API IRMutator {
   virtual const Expr* mutate(const BaseCallNode* v);
   virtual const Expr* mutate(const Intrinsics* v);
   virtual const Expr* mutate(const FunctionCall* v);
+
+  virtual const Expr* mutate(const LinearForm* v);
 
   virtual Stmt* mutate(const For* v);
   virtual Stmt* mutate(const Block* v);
