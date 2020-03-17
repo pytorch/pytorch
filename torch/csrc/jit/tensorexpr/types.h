@@ -7,6 +7,8 @@
 #include <c10/util/Logging.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
+#include <torch/csrc/jit/tensorexpr/exceptions.h>
+
 namespace torch {
 namespace jit {
 namespace tensorexpr {
@@ -47,7 +49,9 @@ class TORCH_API Dtype {
   Dtype(ScalarType type, int lanes) : scalar_type_(type), lanes_(lanes) {}
   Dtype(Dtype type, int lanes)
       : scalar_type_(type.scalar_type_), lanes_(lanes) {
-    CHECK(type.lanes() == 1);
+    if (type.lanes() != 1) {
+      throw malformed_input();
+    }
   }
   int lanes() const {
     return lanes_;
@@ -122,12 +126,16 @@ inline Dtype BinaryOpDtype(
     return ToDtype(ret_type);
   }
 
-  CHECK_EQ(op1_dtype.lanes(), op2_dtype.lanes()) << "vector lengths must match";
+  if (op1_dtype.lanes() != op2_dtype.lanes()) {
+    throw malformed_input();
+  }
   int lanes = op1_dtype.lanes();
 
   ScalarType resultType = promoteTypes(op1_dtype, op2_dtype);
-  CHECK_NE(resultType, ScalarType::Undefined)
-      << "Invalid dtypes: " << op1_dtype << ", " << op2_dtype;
+  if (resultType == ScalarType::Undefined) {
+    throw malformed_input();
+  }
+
 
   if (lanes == 1) {
     // Use the fixed scalar Dtypes.
