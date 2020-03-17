@@ -113,6 +113,10 @@ bool PyRRef::isOwner() const {
   return rref_->isOwner();
 }
 
+bool PyRRef::confirmedByOwner() const {
+  return rref_->confirmedByOwner();
+}
+
 WorkerInfo PyRRef::owner() const {
   return RRefContext::getInstance().agent()->getWorkerInfo(rref_->owner());
 }
