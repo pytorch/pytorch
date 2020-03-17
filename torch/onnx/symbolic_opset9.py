@@ -211,7 +211,7 @@ def neg(g, self):
 
 
 def sqrt(g, self):
-    return g.op("Sqrt", self)
+    return sym_help._unary_ufunc_helper(g, self, "Sqrt")
 
 
 def rsqrt(g, self):
@@ -219,11 +219,11 @@ def rsqrt(g, self):
 
 
 def tanh(g, self):
-    return g.op("Tanh", self)
+    return sym_help._unary_ufunc_helper(g, self, "Tanh")
 
 
 def sin(g, self):
-    return g.op("Sin", self)
+    return sym_help._unary_ufunc_helper(g, self, "Sin")
 
 
 def cos(g, self):
@@ -231,11 +231,11 @@ def cos(g, self):
 
 
 def tan(g, self):
-    return g.op("Tan", self)
+    return sym_help._unary_ufunc_helper(g, self, "Tan")
 
 
 def asin(g, self):
-    return g.op("Asin", self)
+    return sym_help._unary_ufunc_helper(g, self, "Asin")
 
 
 def acos(g, self):
@@ -243,11 +243,11 @@ def acos(g, self):
 
 
 def atan(g, self):
-    return g.op("Atan", self)
+    return sym_help._unary_ufunc_helper(g, self, "Atan")
 
 
 def sigmoid(g, self):
-    return g.op("Sigmoid", self)
+    return sym_help._unary_ufunc_helper(g, self, "Sigmoid")
 
 
 def sign(g, self):
@@ -532,11 +532,10 @@ def relu(g, input):
 
 
 def ceil(g, input):
-    return g.op("Ceil", input)
-
+    return sym_help._unary_ufunc_helper(g, self, "Ceil")
 
 def floor(g, input):
-    return g.op("Floor", input)
+    return sym_help._unary_ufunc_helper(g, self, "Floor")
 
 
 @parse_args('v', 't', 't')
@@ -1222,7 +1221,7 @@ def abs(g, self):
 
 
 def log(g, self):
-    return g.op("Log", self)
+    return sym_help._unary_ufunc_helper(g, self, "Log")
 
 
 def log1p(g, self):
@@ -1291,7 +1290,7 @@ def min(g, self, dim_or_y=None, keepdim=None):
 
 
 def exp(g, self):
-    return g.op("Exp", self)
+    return sym_help._unary_ufunc_helper(g, self, "Exp")
 
 
 @parse_args('v', 'f', 'i')
@@ -1853,7 +1852,7 @@ def log_sigmoid(g, input):
 
 @parse_args('v')
 def erf(g, input):
-    return g.op('Erf', input)
+    return sym_help._unary_ufunc_helper(g, self, "Erf")
 
 
 @parse_args('v', 'i', 'i')
