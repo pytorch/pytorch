@@ -101,8 +101,8 @@ backend_test.exclude(r'(test_hardsigmoid'  # Does not support Hardsigmoid.
                      '|test_greater_equal.*'
                      '|test_min_.*_cpu'  # Tensor type mismatch
                      '|test_max_.*_cpu'  # Tensor type mismatch
-                     '|test_min_.*_gpu'
-                     '|test_max_.*_gpu'
+                     '|test_min_.*_cuda'
+                     '|test_max_.*_cuda'
                      '|test_less_equal.*'
                      '|test_inverse.*'
                      '|test_softmax_cross_entropy.*'
