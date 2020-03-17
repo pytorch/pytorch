@@ -42,9 +42,8 @@ Tensor& random_to(Tensor& self, int64_t to, Generator generator) {
 }
 
 Tensor& custom_rng_cauchy_(Tensor& self, double median, double sigma, Generator generator) {
-  auto gen = (TestCPUGenerator*)(generator.get());
   auto iter = TensorIterator::nullary_op(self);
-  native::templates::cpu::cauchy_kernel(iter, median, sigma, gen);
+  native::templates::cpu::cauchy_kernel(iter, median, sigma, check_generator<TestCPUGenerator>(generator));
   return self;
 }
 
