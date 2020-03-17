@@ -3113,6 +3113,30 @@ setup_rnn_tests()
 # Tests that integral arguments are properly cast to float
 unary_floating_ufuncs = (
     'cos',
+    'asin',
+    'ceil',
+    'expm1',
+    'floor',
+    'log',
+    'log10',
+    'log1p',
+    'log2',
+    'sin',
+    'sinh',
+    'sqrt',
+    'trunc',
+    'atan',
+    'cosh',
+    'exp',
+    'tan',
+    'tanh',
+    'erf',
+    'erfc',
+    'erfinv',
+    'lgamma',
+    'digamma',
+    'rsqrt',
+    'sigmoid',
     'acos'
 )
 

@@ -534,6 +534,7 @@ def relu(g, input):
 def ceil(g, input):
     return sym_help._unary_ufunc_helper(g, self, "Ceil")
 
+
 def floor(g, input):
     return sym_help._unary_ufunc_helper(g, self, "Floor")
 
