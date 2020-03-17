@@ -64,6 +64,7 @@ TESTS = [
     'test_jit_simple',
     'test_jit_legacy',
     'test_jit_fuser_legacy',
+    'test_jit_fuser_te',
     'test_tensorboard',
     'test_namedtensor',
     'test_type_promotion',
