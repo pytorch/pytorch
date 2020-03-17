@@ -261,7 +261,7 @@ void testCudaTestRand01() {
     sum1 += v;
     sum2 += v * v;
     sum3 += v * v * v;
-    EXPECT_TRUE(v >= 0 && v < 1) << "invalid value: " << i << ", " << v;
+    ASSERT_TRUE(v >= 0 && v < 1, "invalid value: ", i, ", ", v);
   }
   sum1 /= N;
   sum2 /= N;
@@ -270,9 +270,9 @@ void testCudaTestRand01() {
   float sum2_mean = 1.f / 3;
   float sum3_mean = 1.f / 4;
 
-  EXPECT_NEAR(sum1, sum1_mean, 2e-2);
-  EXPECT_NEAR(sum2, sum2_mean, 2e-2);
-  EXPECT_NEAR(sum3, sum3_mean, 2e-2);
+  ASSERT_NEAR(sum1, sum1_mean, 2e-2);
+  ASSERT_NEAR(sum2, sum2_mean, 2e-2);
+  ASSERT_NEAR(sum3, sum3_mean, 2e-2);
   cudaFree(c_dev);
 }
 
