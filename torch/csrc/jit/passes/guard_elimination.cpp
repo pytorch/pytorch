@@ -284,6 +284,20 @@ private:
              n->input(3)->node()->kind() == prim::Constant &&
              // the stride is constant
              n->input(4)->node()->kind() == prim::Constant;
+    case aten::max_pool1d:
+    case aten::max_pool2d:
+    case aten::max_pool3d:
+      return !n->input(0)->type()->expect<TensorType>()->isSummarized() &&
+          // check that the kernel size is constant
+          n->input(1)->node()->kind() == prim::Constant &&
+          // check that the stride is constant
+          n->input(2)->node()->kind() == prim::Constant &&
+          // check that the padding is constant
+          n->input(3)->node()->kind() == prim::Constant &&
+          // check that the dilation is constant
+          n->input(4)->node()->kind() == prim::Constant &&
+          // check that the ceil_mode is constant
+          n->input(5)->node()->kind() == prim::Constant;
     case aten::unsqueeze:
      // check that the dimension argument is constant
      return !n->input(0)->type()->expect<TensorType>()->isSummarized() &&
