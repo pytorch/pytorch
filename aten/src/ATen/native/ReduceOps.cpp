@@ -458,7 +458,7 @@ Tensor &mean_out_cpu_gpu(Tensor &result, const Tensor &self, IntArrayRef dim,
                  bool keepdim, c10::optional<ScalarType> opt_dtype) {
   ScalarType dtype = get_dtype(result, self, opt_dtype);
   TORCH_CHECK(!at::isIntegralType(dtype),
-    "mean requires a floating point output, but got ", dtype);
+    "mean requires a floating point output dtype, but got ", dtype);
 
   // TODO: the TensorIterator reduction implementation of mean
   // (mean_kernel_impl()) is unvectorized and leads to very poor performance
@@ -554,13 +554,7 @@ Tensor& logsumexp_out(Tensor& result, const Tensor& self, IntArrayRef dims, bool
 }
 
 Tensor logsumexp(const Tensor& self, IntArrayRef dims, bool keepdim) {
-  if (isIntegralType(self.scalar_type())) {
-    const auto scalar_type = typeMetaToScalarType(c10::get_default_dtype());
-    Tensor result = at::empty({0}, self.options().dtype(scalar_type));
-    return at::native::logsumexp_out(result, self, dims, keepdim);
-  }
-
-  Tensor result = at::empty({0}, self.options());
+  Tensor result = make_floating_result(self);
   return at::native::logsumexp_out(result, self, dims, keepdim);
 }
 
