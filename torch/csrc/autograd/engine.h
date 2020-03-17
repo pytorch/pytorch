@@ -160,7 +160,10 @@ struct TORCH_API Engine {
   /// Returns a reference to a static `Engine` instance.
   static Engine& get_default_engine();
 
-  Engine();
+  static Engine& get_base_engine();
+
+  Engine(const Engine&) = delete;
+  Engine(Engine&&) = delete;
   virtual ~Engine();
 
   using ready_queue_type = std::deque<std::pair<std::shared_ptr<Node>, InputBuffer>>;
@@ -207,6 +210,7 @@ struct TORCH_API Engine {
   size_t ready_queue_size(at::Device device);
 
  protected:
+  Engine();
   void compute_dependencies(Node* root, GraphTask& task);
   void evaluate_function(
       std::shared_ptr<GraphTask>& graph_task,

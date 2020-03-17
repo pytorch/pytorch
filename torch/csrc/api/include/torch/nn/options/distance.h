@@ -2,7 +2,6 @@
 
 #include <torch/arg.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/nn/options/common.h>
 #include <torch/types.h>
 
 namespace torch {
@@ -21,7 +20,19 @@ struct TORCH_API CosineSimilarityOptions {
   TORCH_ARG(double, eps) = 1e-8;
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(CosineSimilarity, CosineSimilarityFuncOptions)
+namespace functional {
+/// Options for `torch::nn::functional::cosine_similarity`.
+///
+/// See the documentation for `torch::nn::CosineSimilarityOptions` class to learn what
+/// arguments are supported.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::cosine_similarity(input1, input2, F::CosineSimilarityFuncOptions().dim(1));
+/// ```
+using CosineSimilarityFuncOptions = CosineSimilarityOptions;
+} // namespace functional
 
 // ============================================================================
 
@@ -40,7 +51,19 @@ struct TORCH_API PairwiseDistanceOptions {
   TORCH_ARG(bool, keepdim) = false;
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(PairwiseDistance, PairwiseDistanceFuncOptions)
+namespace functional {
+/// Options for `torch::nn::functional::pairwise_distance`.
+///
+/// See the documentation for `torch::nn::PairwiseDistanceOptions` class to learn what
+/// arguments are supported.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::pairwise_distance(input1, input2, F::PairwiseDistanceFuncOptions().p(1));
+/// ```
+using PairwiseDistanceFuncOptions = PairwiseDistanceOptions;
+} // namespace functional
 
 } // namespace nn
 } // namespace torch

@@ -23,6 +23,8 @@ namespace rpc {
 
 namespace {
 
+constexpr std::chrono::milliseconds kDeleteAllUsersTimeout(100000);
+
 template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
 
@@ -113,7 +115,12 @@ PyObject* rpc_init(PyObject* /* unused */) {
       shared_ptr_class_<PyRRef>(module, "RRef", R"(
           A class encapsulating a reference to a value of some type on a remote
           worker. This handle will keep the referenced remote value alive on the
-          worker.
+          worker. A ``UserRRef`` will be deleted when 1) no references to it in
+          both the application code and in the local RRef context, or 2) the
+          application has called a graceful shutdown. Invoking methods on a
+          deleted RRef leads to undefined behaviors. RRef implementation only
+          offers best-effort error detection, and applications should not use
+          ``UserRRef``s after ``rpc.shutdown()``.
 
           Example::
               Following examples skip RPC initialization and shutdown code
@@ -160,6 +167,14 @@ PyObject* rpc_init(PyObject* /* unused */) {
               R"(
                   Returns whether or not the current node is the owner of this
                   ``RRef``.
+              )")
+          .def(
+              "confirmed_by_owner",
+              &PyRRef::confirmedByOwner,
+              R"(
+                  Returns whether this ``RRef`` has been confirmed by the owner.
+                  ``OwnerRRef`` always returns true, while ``UserRRef`` only
+                  returns true when the owner knowns about this ``UserRRef``.
               )")
           .def(
               // not releasing GIL here to avoid context switch on getters
@@ -329,6 +344,13 @@ If the future completes with an error, an exception is thrown.
   module.def("_reset_current_rpc_agent", []() {
     RpcAgent::setCurrentRpcAgent(nullptr);
   });
+
+  module.def(
+      "_delete_all_user_rrefs",
+      [](std::chrono::milliseconds timeoutMillis) {
+        RRefContext::getInstance().delAllUsers(timeoutMillis);
+      },
+      py::arg("timeout") = kDeleteAllUsersTimeout);
 
   module.def("_destroy_rref_context", [](bool ignoreRRefLeak) {
     // NB: do not release GIL in the function. The destroyInstance() method

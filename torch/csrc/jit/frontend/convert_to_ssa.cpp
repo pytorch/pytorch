@@ -9,7 +9,6 @@
 
 namespace torch {
 namespace jit {
-namespace script {
 
 // At the beginning of the pass the Graph has already undergone type checking,
 // and writes or reads to a variable are emitted as Loads and Stores in the
@@ -328,6 +327,5 @@ void ConvertToSSA(std::shared_ptr<Graph>& graph) {
   TransformExits(graph);
 }
 
-} // namespace script
 } // namespace jit
 } // namespace torch

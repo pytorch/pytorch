@@ -7,7 +7,6 @@
 
 namespace torch {
 namespace jit {
-namespace script {
 
 using TypePtr = c10::TypePtr;
 
@@ -33,6 +32,5 @@ struct CAFFE2_API SchemaTypeParser {
   Lexer& L;
   size_t next_id = 0;
 };
-} // namespace script
 } // namespace jit
 } // namespace torch

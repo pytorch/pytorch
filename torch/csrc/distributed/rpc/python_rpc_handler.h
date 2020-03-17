@@ -19,12 +19,8 @@ class PYBIND11_EXPORT PythonRpcHandler {
  public:
   static PythonRpcHandler& getInstance();
 
-  // Deserialize Python function, run it, and serialize its return value.
-  SerializedPyObj generatePythonUDFResult(
-      const SerializedPyObj& serializedPyObj);
-
   // Run a pickled Python UDF and return the result py::object
-  py::object runPythonUDF(const SerializedPyObj& serializedObj);
+  py::object runPythonUdf(py::object&& pythonUdf);
 
   // Serialized a py::object into a string
   SerializedPyObj serialize(const py::object& obj);
@@ -55,7 +51,7 @@ class PYBIND11_EXPORT PythonRpcHandler {
   // PythonRpcHandler.
   void cleanup();
 
-  std::shared_ptr<torch::jit::script::CompilationUnit> jitCompilationUnit();
+  std::shared_ptr<torch::jit::CompilationUnit> jitCompilationUnit();
 
   // Parse the string to recover the jit_type, this is used for RRef python
   // pickling/unpickling type recovery. The type string inference rule is as
@@ -97,11 +93,11 @@ class PYBIND11_EXPORT PythonRpcHandler {
   // and imported in C++ (see get_python_cu() in
   // csrc/jit/python/pybind_utils.h). We import the compilation unit here only
   // once for less cost and thread safety.
-  std::shared_ptr<torch::jit::script::CompilationUnit> jitCompilationUnit_;
+  std::shared_ptr<torch::jit::CompilationUnit> jitCompilationUnit_;
 
   // jit type parser to parse type_str back to TypePtr for RRef type
   // recovery when pickling and unpickling RRef
-  std::shared_ptr<jit::script::ScriptTypeParser> typeParser_;
+  std::shared_ptr<jit::ScriptTypeParser> typeParser_;
 };
 
 } // namespace rpc

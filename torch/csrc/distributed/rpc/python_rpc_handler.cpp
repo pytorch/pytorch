@@ -27,8 +27,8 @@ namespace {
 
 // PythonTypeResolver that inherits from Script::Resolver to
 // support resolving types together with ScriptTypeParser.
-struct PythonTypeResolver : public jit::script::Resolver {
-  std::shared_ptr<jit::script::SugaredValue> resolveValue(
+struct PythonTypeResolver : public jit::Resolver {
+  std::shared_ptr<jit::SugaredValue> resolveValue(
       const std::string& /* unused */,
       torch::jit::Function& /* unused */,
       const jit::SourceRange& /* unused */) override {
@@ -67,7 +67,7 @@ PythonRpcHandler::PythonRpcHandler() {
   pyHandleException_ = getFunction(module, "_handle_exception");
   pyGetQualifiedName_ = py::module::import("torch.jit").attr("_qualified_name");
   jitCompilationUnit_ = torch::jit::get_python_cu();
-  typeParser_ = std::make_shared<jit::script::ScriptTypeParser>(
+  typeParser_ = std::make_shared<jit::ScriptTypeParser>(
       std::make_shared<PythonTypeResolver>());
 }
 
@@ -97,22 +97,13 @@ PythonRpcHandler& PythonRpcHandler::getInstance() {
   return *handler;
 }
 
-std::shared_ptr<torch::jit::script::CompilationUnit> PythonRpcHandler::
+std::shared_ptr<torch::jit::CompilationUnit> PythonRpcHandler::
     jitCompilationUnit() {
   return jitCompilationUnit_;
 }
 
-SerializedPyObj PythonRpcHandler::generatePythonUDFResult(
-    const SerializedPyObj& serializedPyObj) {
+py::object PythonRpcHandler::runPythonUdf(py::object&& pythonUdf) {
   PROFILE_GIL_SCOPED_ACQUIRE;
-  auto pythonUdf = deserialize(serializedPyObj);
-  return serialize(pyRunFunction_(std::move(pythonUdf)));
-}
-
-py::object PythonRpcHandler::runPythonUDF(
-    const SerializedPyObj& serializedPyObj) {
-  PROFILE_GIL_SCOPED_ACQUIRE;
-  auto pythonUdf = deserialize(serializedPyObj);
   return pyRunFunction_(std::move(pythonUdf));
 }
 
