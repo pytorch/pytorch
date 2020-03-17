@@ -66,7 +66,11 @@ std::string get_stacked_errors(const std::vector<Call>& error_stack) {
 }
 
 std::string ErrorReport::current_call_stack() {
+#ifndef C10_MOBILE
   return get_stacked_errors(calls);
+#else
+  AT_ERROR("Call stack not supported on mobile");
+#endif // C10_MOBILE
 }
 
 const char* ErrorReport::what() const noexcept {
