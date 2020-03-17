@@ -16,6 +16,9 @@ Automatic differentiation package - torch.autograd
 Functional higher level API
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+.. warning::
+    This API is experimental.
+
 This section contains the higher level API for the autograd that builds on the basic API above
 and allows you to compute jacobians, hessians, etc.
 
