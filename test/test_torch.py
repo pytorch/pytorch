@@ -16408,9 +16408,9 @@ def generate_unary_floating_ufunc_promo_test(cls, op_str):
             t = torch.tensor((1,), device=device, dtype=in_type)
             self.assertEqual(op(t).dtype, in_type)
 
-        only_cpu_ops = ['atan', 'cos', 'cosh', 'erf', 'erfc', 'exp', 'tan', 'tanh']
+        only_out_on_cpu = ['atan', 'cos', 'cosh', 'erf', 'erfc', 'exp', 'tan', 'tanh']
         for in_type in my_float_types + int_types:
-            if (op_str in only_cpu_ops and self.device_type == 'cuda'):
+            if (op_str in only_out_on_cpu and self.device_type == 'cuda'):
                 continue
             t = torch.tensor((1,), device=device, dtype=in_type)
             for out_type in my_float_types:
