@@ -377,8 +377,6 @@ class build_ext(setuptools.command.build_ext.build_ext):
         cmake_cache_vars = defaultdict(lambda: False, cmake.get_cmake_cache_variables())
         if cmake_cache_vars['USE_NUMPY']:
             report('-- Building with NumPy bindings')
-            global install_requires
-            install_requires += ['numpy']
         else:
             report('-- NumPy not found')
         if cmake_cache_vars['USE_CUDNN']:
@@ -564,6 +562,7 @@ def configure_extension_build():
     ################################################################################
 
     library_dirs = []
+    extra_install_requires = []
 
     if IS_WINDOWS:
         # /NODEFAULTLIB makes sure we only link to DLL runtime
@@ -624,6 +623,9 @@ def configure_extension_build():
     if cmake_cache_vars['USE_CUDA']:
         library_dirs.append(
             os.path.dirname(cmake_cache_vars['CUDA_CUDA_LIB']))
+
+    if cmake_cache_vars['USE_NUMPY']:
+        extra_install_requires += ['numpy']
 
     if build_type.is_debug():
         if IS_WINDOWS:
@@ -703,7 +705,7 @@ def configure_extension_build():
         ]
     }
 
-    return extensions, cmdclass, packages, entry_points
+    return extensions, cmdclass, packages, entry_points, extra_install_requires
 
 # post run, warnings, printed at the end to make them more visible
 build_update_message = """
@@ -742,7 +744,9 @@ if __name__ == '__main__':
     if RUN_BUILD_DEPS:
         build_deps()
 
-    extensions, cmdclass, packages, entry_points = configure_extension_build()
+    extensions, cmdclass, packages, entry_points, extra_install_requires = configure_extension_build()
+
+    install_requires += extra_install_requires
 
     setup(
         name=package_name,

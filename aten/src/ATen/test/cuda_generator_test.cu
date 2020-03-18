@@ -161,7 +161,7 @@ TEST(CUDAGenerator, TestGeneratorDynamicCast) {
   //  Test Description: Check dynamic cast for CUDA
   if (!at::cuda::is_available()) return;
   auto foo = at::cuda::detail::createCUDAGenerator();
-  auto result = dynamic_cast<at::CUDAGenerator*>(foo.get());
+  auto result = foo.get<CUDAGenerator>();
   ASSERT_EQ(typeid(at::CUDAGenerator*).hash_code(), typeid(result).hash_code());
 }
 
@@ -193,13 +193,15 @@ TEST(CUDAGenerator, TestCloning) {
   if (!at::cuda::is_available()) return;
   auto gen1 = at::cuda::detail::createCUDAGenerator();
   gen1->set_current_seed(123); // modify gen1 state
-  check_generator<CUDAGenerator>(gen1)->set_philox_offset_per_thread(4);
+  auto cuda_gen1 = check_generator<CUDAGenerator>(gen1);
+  cuda_gen1->set_philox_offset_per_thread(4);
   auto gen2 = at::cuda::detail::createCUDAGenerator();
   gen2 = Generator(gen1->clone());
+  auto cuda_gen2 = check_generator<CUDAGenerator>(gen2);
   ASSERT_EQ(gen1->current_seed(), gen2->current_seed());
   ASSERT_EQ(
-    check_generator<CUDAGenerator>(gen1)->philox_offset_per_thread(),
-    check_generator<CUDAGenerator>(gen2)->philox_offset_per_thread()
+    cuda_gen1->philox_offset_per_thread(),
+    cuda_gen2->philox_offset_per_thread()
   );
 }
 

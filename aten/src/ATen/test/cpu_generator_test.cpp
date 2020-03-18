@@ -13,7 +13,7 @@ using namespace at;
 TEST(CPUGenerator, TestGeneratorDynamicCast) {
   // Test Description: Check dynamic cast for CPU
   auto foo = at::detail::createCPUGenerator();
-  auto result = dynamic_cast<CPUGenerator*>(foo.get());
+  auto result = check_generator<CPUGenerator>(foo);
   ASSERT_EQ(typeid(CPUGenerator*).hash_code(), typeid(result).hash_code());
 }
 
@@ -32,11 +32,13 @@ TEST(CPUGenerator, TestCloning) {
   // Note that we don't allow cloning of other
   // generator states into default generators.
   auto gen1 = at::detail::createCPUGenerator();
-  check_generator<CPUGenerator>(gen1)->random(); // advance gen1 state
-  check_generator<CPUGenerator>(gen1)->random();
+  auto cpu_gen1 = check_generator<CPUGenerator>(gen1);
+  cpu_gen1->random(); // advance gen1 state
+  cpu_gen1->random();
   auto gen2 = at::detail::createCPUGenerator();
   gen2 = Generator(gen1->clone());
-  ASSERT_EQ(check_generator<CPUGenerator>(gen1)->random(), check_generator<CPUGenerator>(gen2)->random());
+  auto cpu_gen2 = check_generator<CPUGenerator>(gen2);
+  ASSERT_EQ(cpu_gen1->random(), cpu_gen2->random());
 }
 
 void thread_func_get_engine_op(CPUGenerator* generator) {
@@ -51,22 +53,24 @@ TEST(CPUGenerator, TestMultithreadingGetEngineOperator) {
   // random samples.
   // See Note [Acquire lock when using random generators]
   auto gen1 = at::detail::createCPUGenerator();
+  auto cpu_gen1 = check_generator<CPUGenerator>(gen1);
   auto gen2 = at::detail::createCPUGenerator();
   {
     std::lock_guard<std::mutex> lock(gen1->mutex_);
     gen2 = Generator(gen1->clone()); // capture the current state of default generator
   }
-  std::thread t0{thread_func_get_engine_op, check_generator<CPUGenerator>(gen1)};
-  std::thread t1{thread_func_get_engine_op, check_generator<CPUGenerator>(gen1)};
-  std::thread t2{thread_func_get_engine_op, check_generator<CPUGenerator>(gen1)};
+  std::thread t0{thread_func_get_engine_op, cpu_gen1};
+  std::thread t1{thread_func_get_engine_op, cpu_gen1};
+  std::thread t2{thread_func_get_engine_op, cpu_gen1};
   t0.join();
   t1.join();
   t2.join();
   std::lock_guard<std::mutex> lock(gen2->mutex_);
-  check_generator<CPUGenerator>(gen2)->random();
-  check_generator<CPUGenerator>(gen2)->random();
-  check_generator<CPUGenerator>(gen2)->random();
-  ASSERT_EQ(check_generator<CPUGenerator>(gen1)->random(), check_generator<CPUGenerator>(gen2)->random());
+  auto cpu_gen2 = check_generator<CPUGenerator>(gen2);
+  cpu_gen2->random();
+  cpu_gen2->random();
+  cpu_gen2->random();
+  ASSERT_EQ(cpu_gen1->random(), cpu_gen2->random());
 }
 
 TEST(CPUGenerator, TestGetSetCurrentSeed) {
