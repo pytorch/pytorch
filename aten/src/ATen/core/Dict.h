@@ -356,7 +356,7 @@ public:
    * Identity comparison. Returns true if and only if `rhs` represents the same
    * Dict object as `this`.
    */
-  bool is(const Dict& is) const;
+  bool is(const Dict& rhs) const;
 
   // private API for now because the return type will change to TypePtr
   // instead of optional<TypePtr> once types are mandatory.
