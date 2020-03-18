@@ -5,7 +5,8 @@ from torch.optim.lr_scheduler import _LRScheduler
 
 
 class AveragedModel(Module):
-    """
+    r"""Implements averaged model for Stochastic Weight Averaging (SWA).
+    
     ToDo
     .. _Averaging Weights Leads to Wider Optima and Better Generalization:
         https://arxiv.org/abs/1803.05407
