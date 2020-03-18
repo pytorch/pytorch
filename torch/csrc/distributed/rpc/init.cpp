@@ -122,6 +122,13 @@ PyObject* rpc_init(PyObject* /* unused */) {
           offers best-effort error detection, and applications should not use
           ``UserRRef``s after ``rpc.shutdown()``.
 
+          .. warning::
+              RRefs can only be serialized and deserialized by the RPC module.
+              Serializing and deserializing RRefs without RPC (e.g., Python
+              pickle, torch :meth:`~torch.save` / :meth:`~torch.load`,
+              JIT :meth:`~torch.jit.save` / :meth:`~torch.jit.load`, etc.) will
+              lead to errors.
+
           Example::
               Following examples skip RPC initialization and shutdown code
               for simplicity. Refer to RPC docs for those details.
