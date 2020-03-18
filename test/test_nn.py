@@ -9369,7 +9369,7 @@ class TestNNDeviceType(NNTestCase):
     @onlyCUDA
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     def test_max_pool2d_nhwc(self, device, dtype):
-        def helper(n, c, h, w, kernel_size, stride = None):
+        def helper(n, c, h, w, kernel_size, stride=None):
             if stride == None:
                 stride = kernel_size
             input = torch.randn(n, c, h, w, dtype=dtype, device=device)
