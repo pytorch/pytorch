@@ -591,60 +591,122 @@ class TestTypePromotion(TestCase):
         casting_result = dividend.to(torch.get_default_dtype()) / 2
         self.assertEqual(casting_result, torch.true_divide(dividend_sparse, 2).to_dense())
 
-    floating_reductions = (
+    _floating_reductions = [
         (torch.mean, torch.Tensor.mean),
         (torch.std, torch.Tensor.std),
         (torch.var, torch.Tensor.var),
         (torch.logsumexp, torch.Tensor.logsumexp)
-    )
+    ]
+
+    _fr_promoting_in_types = [
+        torch.bool, torch.long
+    ]
+
+    _fr_nonpromoting_in_types = [
+        torch.float, torch.complex64
+    ]
+
+    _fr_out_types = (torch.float, torch.double)
 
     @onlyOnCPUAndCUDA
     @float_double_default_dtype
     def test_floating_reductions_promotion(self, device):
-        for fn, meth in self.floating_reductions:
-            t = torch.tensor((2, 4), device=device, dtype=torch.long)
-            self.assertEqual(fn(t, dim=0).dtype, torch.get_default_dtype())
-            self.assertEqual(meth(t, dim=0).dtype, torch.get_default_dtype())
-
-            o = torch.empty((2,), device=device, dtype=torch.long)
-            with self.assertRaises(RuntimeError):
-                fn(t, dim=0, out=o)
-
-            o = o.to(torch.get_default_dtype())
-            self.assertEqual(fn(t, dim=0, out=o).dtype, o.dtype)
+        for fn, meth in self._floating_reductions:
+            # Skips logsumexp, which requires dim
+            if fn is torch.logsumexp:
+                continue
+            for in_type, out_type in itertools.product(self._fr_promoting_in_types,
+                                                       self._fr_out_types):
+                t = torch.tensor((2, 4), device=device, dtype=in_type)
+                self.assertEqual(fn(t).dtype, torch.get_default_dtype())
+                self.assertEqual(meth(t).dtype, torch.get_default_dtype())
 
     @onlyOnCPUAndCUDA
-    @dtypesIfCUDA(torch.half, torch.float, torch.double)
-    @dtypes(torch.float, torch.double)
-    def test_floating_reductions_preserve_float(self, device, dtype):
-        for fn, meth in self.floating_reductions:
-            t = torch.tensor((2, 4), device=device, dtype=dtype)
-            result = fn(t, dim=0)
+    @float_double_default_dtype
+    def test_floating_reductions_promotion_dim(self, device):
+        for fn, meth in self._floating_reductions:
+            for in_type, out_type in itertools.product(self._fr_promoting_in_types,
+                                                       self._fr_out_types):
+                t = torch.tensor((2, 4), device=device, dtype=in_type)
+                self.assertEqual(fn(t, dim=0).dtype, torch.get_default_dtype())
+                self.assertEqual(meth(t, dim=0).dtype, torch.get_default_dtype())
 
-            self.assertEqual(result.dtype, dtype)
+                o = torch.empty((2,), device=device, dtype=in_type)
+                with self.assertRaises(RuntimeError):
+                    fn(t, dim=0, out=o)
+
+                o = torch.empty((2,), device=device, dtype=out_type)
+                self.assertEqual(fn(t, dim=0, out=o).dtype, o.dtype)
 
     @onlyOnCPUAndCUDA
-    @dtypesIfCUDA(torch.half, torch.float, torch.double)
-    @dtypes(torch.float, torch.double)
-    def test_mean_dtype(self, device, dtype):
-        t = torch.tensor((2, 4), device=device, dtype=torch.long)
-        self.assertEqual(torch.mean(t, dtype=dtype).dtype, dtype)
+    def test_floating_reductions_preserve_float(self, device):
+        for fn, meth in self._floating_reductions:
+            # Skips logsumexp, which requires dim
+            if fn is torch.logsumexp:
+                continue
+            for dtype in self._fr_nonpromoting_in_types:
+                # Skips logsumexp x complex and mean_cuda x complex64
+                if dtype is torch.complex64:
+                    if self.device_type == 'cuda' and fn is torch.mean:
+                        continue
 
+                t = torch.tensor((2, 4), device=device, dtype=dtype)
+                self.assertEqual(fn(t).dtype, dtype)
+                self.assertEqual(meth(t).dtype, dtype)
+
+    @onlyOnCPUAndCUDA
+    def test_floating_reductions_preserve_float_dim(self, device):
+        for fn, meth in self._floating_reductions:
+            for dtype in self._fr_nonpromoting_in_types:
+                # Skips logsumexp x complex and mean_cuda x complex64
+                if dtype is torch.complex64:
+                    if fn is torch.logsumexp:
+                        continue
+                    elif self.device_type == 'cuda' and fn is torch.mean:
+                        continue
+
+                t = torch.tensor((2, 4), device=device, dtype=dtype)
+                self.assertEqual(fn(t, dim=0).dtype, dtype)
+                self.assertEqual(meth(t, dim=0).dtype, dtype)
+
+                o = torch.empty((2, 4), device=device, dtype=dtype)
+                self.assertEqual(fn(t, dim=0, out=o).dtype, o.dtype)
+
+    # Note: mean on CUDA doesn't support complex inputs or outputs
+    @onlyOnCPUAndCUDA
+    def test_mean_dtype(self, device):
+        in_types = self._fr_promoting_in_types + self._fr_nonpromoting_in_types
+        for in_type, out_type in itertools.product(in_types,
+                                                   self._fr_out_types):
+            if self.device_type == 'cuda' and \
+               in_type == torch.complex64 or \
+               out_type == torch.complex64:
+                continue
+
+            t = torch.tensor((2, 4), device=device, dtype=in_type)
+            self.assertEqual(torch.mean(t, dtype=out_type).dtype, out_type)
+
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.bool, torch.long, torch.float, torch.complex64)
+    def test_mean_dtypes_error(self, device, dtype):
+        t = torch.empty((2, 4), device=device, dtype=dtype)
         with self.assertRaises(RuntimeError):
             torch.mean(t, dtype=torch.long)
 
     @onlyOnCPUAndCUDA
     @float_double_default_dtype
-    def test_std_mean(self, device):
-        t = torch.tensor((2, 4), device=device, dtype=torch.long)
+    @dtypes(torch.bool, torch.long)
+    def test_std_mean(self, device, dtype):
+        t = torch.tensor((2, 4), device=device, dtype=dtype)
         m = torch.std_mean(t)
         self.assertEqual(m[0].dtype, torch.get_default_dtype())
         self.assertEqual(m[1].dtype, torch.get_default_dtype())
 
     @onlyOnCPUAndCUDA
     @float_double_default_dtype
-    def test_var_mean(self, device):
-        t = torch.tensor((2, 4), device=device, dtype=torch.long)
+    @dtypes(torch.bool, torch.long)
+    def test_var_mean(self, device, dtype):
+        t = torch.tensor((2, 4), device=device, dtype=dtype)
         m = torch.var_mean(t)
         self.assertEqual(m[0].dtype, torch.get_default_dtype())
         self.assertEqual(m[1].dtype, torch.get_default_dtype())
