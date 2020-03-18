@@ -5,6 +5,12 @@
 namespace c10 {
 namespace detail {
 inline bool DictKeyEqualTo::operator()(const IValue& lhs, const IValue& rhs) const {
+  if (lhs.isTensor() && rhs.isTensor()) {
+    // for tensors, we compare only by identity (following how it's done in Python).
+    return lhs.is(rhs);
+  }
+  // Otherwise, we first compare by identity for efficiency, then by value (see:
+  // [container equality])
   return _fastEqualsForContainer(lhs, rhs);
 }
 inline bool operator==(const DictImpl& lhs, const DictImpl& rhs) {

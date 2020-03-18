@@ -200,12 +200,19 @@ IValue IValue::equals(const IValue& rhs) const {
           "Uninitialized IValues are internal-only,",
           "they should never participate in equality comparison");
   }
+  // the above switch should be exhaustive
+  TORCH_INTERNAL_ASSERT(false, "we should never reach here")
 }
 
 bool IValue::is(const IValue& rhs) const {
   const IValue& lhs = *this;
   if (lhs.tag != rhs.tag) {
     return false;
+  }
+  if (lhs.tag == Tag::Tensor) {
+    // Compare the underlying tensor implementations, as we may have two
+    // distinct `at::Tensor` objects pointing to the same impl.
+    return lhs.toTensor().is_same(rhs.toTensor());
   }
   if (lhs.is_intrusive_ptr) {
     TORCH_INTERNAL_ASSERT(rhs.is_intrusive_ptr);
