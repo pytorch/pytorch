@@ -216,6 +216,8 @@ def load(f, map_location=None, _extra_files=DEFAULT_EXTRA_FILES_MAP):
     if isinstance(f, string_classes):
         if not os.path.exists(f):
             raise ValueError("The provided filename {} does not exist".format(f))
+        if os.path.isdir(f):
+            raise ValueError("The provided filename {} is a directory".format(f))
     if isinstance(map_location, string_classes):
         map_location = torch.device(map_location)
     elif not (map_location is None or
@@ -390,24 +392,9 @@ def _clone_inputs(args):
 
 
 # This is purely for developer debugging.  We are not going to advertise it.
-_JIT_DUMP = os.environ.get('PYTORCH_JIT_DUMP', False)
 _JIT_TIME = os.environ.get('PYTORCH_JIT_TIME', False)  # CUDA-only timing
 _JIT_DISABLE = os.environ.get('PYTORCH_JIT_DISABLE', False)
 _JIT_STATS = os.environ.get('PYTORCH_JIT_STATS', False)
-
-
-def _dump_trace(trace_name, pass_name, input_key, trace):
-    if not _JIT_DUMP:
-        return
-
-    import torch.contrib._graph_vis as graph_vis
-
-    filename = "{}_{}".format(trace_name, pass_name)
-    # TODO: Also paste out the backtrace when the trace was compiled
-    # (and maybe also when it was run?)
-    with open(filename + ".ir", "w") as f:
-        f.write("Input key: {}\n\n{}".format(input_key, str(trace)))
-    graph_vis.write(trace.graph(), filename + ".html")
 
 
 @contextlib.contextmanager
@@ -668,6 +655,10 @@ def _check_trace(check_inputs, func, traced_func, check_tolerance,
             all_ok = True
             for i, (orig, ref) in enumerate(zip(original, reference)):
                 try:
+                    if orig.is_quantized:
+                        orig = orig.dequantize()
+                    if ref.is_quantized:
+                        ref = ref.dequantize()
                     torch.testing.assert_allclose(orig.double(), ref.double(), rtol=check_tolerance,
                                                   atol=torch.testing._get_default_tolerance(orig, ref)[1])
                 except AssertionError as e:
@@ -1354,7 +1345,7 @@ def script_method(fn):
 
 
 # These OrderedDictWrapper classes replace the actual OrderedDicts in
-# module with versions that get/set properties inside of script::Module.
+# module with versions that get/set properties inside of Module.
 # This allows us to reuse most of nn.Module while still storing the
 # data in C++.
 # Each OrderedDict needs to support:
@@ -1407,7 +1398,7 @@ class OrderedModuleDict(OrderedDictWrapper):
         # contains _both_ script modules and non-script python-only modules
 
         # because script modules are subclassed in python and the
-        # C++ script::Module class will not hold references to them,
+        # C++ Module class will not hold references to them,
         # to ensure that you always get the same python value here
         # we store it in the python dict as well
         self._python_modules = python_dict
@@ -1513,7 +1504,7 @@ if _enabled:
 
     class ScriptModule(with_metaclass(ScriptMeta, Module)):
         """
-        ``ScriptModule``s wrap a C++ ``torch::jit::script::Module``. ``ScriptModule``s
+        ``ScriptModule``s wrap a C++ ``torch::jit::Module``. ``ScriptModule``s
         contain methods, attributes, parameters, and
         constants. These can be accessed the same as on a normal ``nn.Module``.
         """
@@ -1613,7 +1604,7 @@ if _enabled:
             control of how the RecursiveScriptModule instance is created).
 
             Arguments:
-                cpp_module:  The C++ script::Module that will hold the actual state of
+                cpp_module:  The C++ Module that will hold the actual state of
                              this RecursiveScriptModule instance.
                 init_fn:  Lambda that initializes the RecursiveScriptModule passed to it.
             """
@@ -1637,6 +1628,15 @@ if _enabled:
             return self.forward.graph
 
         @property
+        def inlined_graph(self):
+            r"""
+            Returns a string representation of the internal graph for the
+            ``forward`` method. This graph will be preprocessed to inline all function and method calls.
+            See `Interpreting Graphs`_ for details.
+            """
+            return self.forward.inlined_graph
+
+        @property
         def code(self):
             r"""
             Returns a pretty-printed representation (as valid Python syntax) of
@@ -1652,6 +1652,20 @@ if _enabled:
             See :func:`torch.jit.save <torch.jit.save>` for details.
             """
             return self._c.save(*args, **kwargs)
+
+        def _save_for_lite_interpreter(self, *args, **kwargs):
+            r"""
+            _save_for_lite_interpreter(f)
+
+            Add (or update) the bytecode session to the script model. The updated model is used
+            in lite interpreter for mobile applications.
+
+            Arguments:
+                f: a string containing a file name.
+                _extra_files: Map from filename to contents which will be stored as part of 'f'.
+
+            """
+            return self._c._save_for_mobile(*args, **kwargs)
 
         def save_to_buffer(self, *args, **kwargs):
             return self._c.save_to_buffer(*args, **kwargs)
@@ -1839,7 +1853,16 @@ class TracedModule(ScriptModule):
         # Copy a subset of `orig` to a temporary nn.Module.
         # This is a way to customize what will actually get compiled by create_script_module
         id_set = set()
-        tmp_module = Module()
+
+        # This allows us to preserve the original module's qualified name by defining a new
+        # type with the attribute _jit_override_qualname. In torch._jit_internal._qualified_name
+        # we have a special case that will look up this attribute to override whatever qualname
+        # we would get from the python type system
+        class QualnameWrapper(torch.nn.Module):
+            pass
+        QualnameWrapper._jit_override_qualname = torch._jit_internal._qualified_name(type(orig))
+
+        tmp_module = QualnameWrapper()
 
         def check_unique(param):
             if param in id_set:
@@ -1856,6 +1879,9 @@ class TracedModule(ScriptModule):
             if buf is not None:
                 tmp_module._buffers[name] = buf
                 check_unique(buf)
+        for name, val in orig.__dict__.items():
+            if torch._C._jit_is_script_object(val) and name not in orig._parameters and name not in orig._buffers:
+                setattr(tmp_module, name, val)
 
         if orig._backward_hooks:
             raise ValueError("Modules that have backward hooks assigned can't be compiled: " + str(orig))
@@ -1863,8 +1889,6 @@ class TracedModule(ScriptModule):
         for name, submodule in orig._modules.items():
             tmp_module._modules[name] = make_module(submodule, TracedModule, _compilation_unit=None)
 
-        # TODO: this way of doing it means we lose name information on the class,
-        # since the qualname is basically "nn.Module"
         script_module = torch.jit._recursive.create_script_module(tmp_module, lambda module: (), share_types=False)
 
         self.__dict__['_name'] = type(orig).__name__
@@ -1973,8 +1997,7 @@ def _add_script_class(cls, name):
 def _get_script_class(name):
     global _script_classes
     if name not in _script_classes:
-        raise RuntimeError("Unknown reference to ScriptClass '{}'. "
-                           "Did you forget to import it?".format(name))
+        return None
     return _script_classes[name]
 
 # overloads are registered in _jit_internal and compiled here so that _overload
@@ -2041,7 +2064,8 @@ def _get_named_tuple_properties(obj):
     has_annotations = hasattr(obj, '__annotations__')
     for field in fields:
         if has_annotations and field in obj.__annotations__:
-            annotations.append(torch.jit.annotations.ann_to_type(obj.__annotations__[field]))
+            the_type = torch.jit.annotations.ann_to_type(obj.__annotations__[field], _jit_internal.fake_range())
+            annotations.append(the_type)
         else:
             annotations.append(torch._C.TensorType.get())
     return type(obj).__name__, fields, annotations

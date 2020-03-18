@@ -18,7 +18,7 @@ import warnings
 from torch._six import string_classes
 from torch.jit import _unique_state_dict
 from torch.onnx import ONNX_ARCHIVE_MODEL_PROTO_NAME, ExportTypes, OperatorExportTypes
-from torch._C import ListType, _propagate_and_assign_input_shapes, _assign_output_shapes
+from torch._C import ListType, _propagate_and_assign_input_shapes, _assign_output_shapes, _check_onnx_proto
 
 
 # the flag to tell the user whether it's in the middle of ONNX export or not
@@ -49,7 +49,8 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
            input_names=None, output_names=None, aten=False, export_raw_ir=False,
            operator_export_type=None, opset_version=None, _retain_param_name=True,
            do_constant_folding=True, example_outputs=None, strip_doc_string=True,
-           dynamic_axes=None, keep_initializers_as_inputs=None, custom_opsets=None):
+           dynamic_axes=None, keep_initializers_as_inputs=None, custom_opsets=None,
+           enable_onnx_checker=True, use_external_data_format=False):
     if aten or export_raw_ir:
         assert operator_export_type is None
         assert aten ^ export_raw_ir
@@ -64,7 +65,8 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
             _retain_param_name=_retain_param_name, do_constant_folding=do_constant_folding,
             example_outputs=example_outputs, strip_doc_string=strip_doc_string,
             dynamic_axes=dynamic_axes, keep_initializers_as_inputs=keep_initializers_as_inputs,
-            custom_opsets=custom_opsets)
+            custom_opsets=custom_opsets, enable_onnx_checker=enable_onnx_checker,
+            use_external_data_format=use_external_data_format)
 
 
 # ONNX can't handle constants that are lists of tensors, which can
@@ -246,6 +248,18 @@ def _decide_constant_folding(do_constant_folding, operator_export_type):
     return _resolve_args_by_export_type("do_constant_folding", do_constant_folding, operator_export_type)
 
 
+def _decide_external_data_format(use_external_data_format, operator_export_type, f):
+    val_use_external_data_format = _resolve_args_by_export_type("use_external_data_format",
+                                                                use_external_data_format,
+                                                                operator_export_type)
+    # f can be a non-string in regular-sized model export case, but for large model export, f must be a non-empty
+    # string specifying the location of the model. For large model cases, if f is not a non-empty string,
+    # then this method returns an empty string, which is an error condition for the large model export code
+    # path later (but not for regular model export code path).
+    model_file_location = f if val_use_external_data_format and isinstance(f, str) else str()
+    return val_use_external_data_format, model_file_location
+
+
 def _trace(func, args, operator_export_type, return_outs=False):
     # Special case for common case of passing a single Tensor
     if isinstance(args, torch.Tensor):
@@ -378,7 +392,8 @@ def export_to_pretty_string(model, args, f, export_params=True, verbose=False, t
                             operator_export_type=None, export_type=ExportTypes.PROTOBUF_FILE,
                             example_outputs=None, propagate=False, google_printer=False,
                             opset_version=None, _retain_param_name=True,
-                            keep_initializers_as_inputs=None, custom_opsets=None):
+                            keep_initializers_as_inputs=None, custom_opsets=None, add_node_names=True,
+                            do_constant_folding=True):
     if aten or export_raw_ir:
         assert operator_export_type is None
         assert aten ^ export_raw_ir
@@ -389,6 +404,8 @@ def export_to_pretty_string(model, args, f, export_params=True, verbose=False, t
                                     input_names, output_names, operator_export_type,
                                     export_type, example_outputs, propagate, google_printer,
                                     opset_version, _retain_param_name,
+                                    do_constant_folding=do_constant_folding,
+                                    add_node_names=add_node_names,
                                     keep_initializers_as_inputs=keep_initializers_as_inputs,
                                     custom_opsets=custom_opsets)
 
@@ -432,7 +449,8 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
             export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None, propagate=False,
             opset_version=None, _retain_param_name=False, do_constant_folding=True,
             strip_doc_string=True, dynamic_axes=None, keep_initializers_as_inputs=None,
-            fixed_batch_size=False, custom_opsets=None, add_node_names=True):
+            fixed_batch_size=False, custom_opsets=None, add_node_names=True,
+            enable_onnx_checker=True, use_external_data_format=False):
     if isinstance(model, torch.nn.DataParallel):
         raise ValueError('torch.nn.DataParallel is not supported by ONNX '
                          'exporter, please use \'attribute\' module to '
@@ -459,6 +477,9 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
                                                          opset_version)
         val_add_node_names = _decide_add_node_names(add_node_names, operator_export_type)
         val_do_constant_folding = _decide_constant_folding(do_constant_folding, operator_export_type)
+        val_use_external_data_format, model_file_location = _decide_external_data_format(use_external_data_format,
+                                                                                         operator_export_type,
+                                                                                         f)
         graph, params_dict, torch_out = _model_to_graph(model, args, verbose,
                                                         training, input_names,
                                                         output_names, operator_export_type,
@@ -479,11 +500,19 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
             proto, export_map = graph._export_onnx(
                 params_dict, opset_version, dynamic_axes, defer_weight_export,
                 operator_export_type, strip_doc_string, val_keep_init_as_ip, custom_opsets,
-                val_add_node_names)
+                val_add_node_names, val_use_external_data_format, model_file_location)
         else:
             proto, export_map = graph._export_onnx(
                 {}, opset_version, dynamic_axes, False, operator_export_type,
-                strip_doc_string, val_keep_init_as_ip, custom_opsets, val_add_node_names)
+                strip_doc_string, val_keep_init_as_ip, custom_opsets, val_add_node_names,
+                val_use_external_data_format, model_file_location)
+
+        if enable_onnx_checker and \
+           operator_export_type is OperatorExportTypes.ONNX and \
+           not val_use_external_data_format:
+            # Only run checker if enabled and we are not using ATEN fallback and
+            # large model format export in not enabled.
+            _check_onnx_proto(proto)
 
         if export_type == ExportTypes.PROTOBUF_FILE:
             assert(len(export_map) == 0)
@@ -719,6 +748,9 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
                 elif n.kindOf("value") == "is":
                     value = torch.stack([torch.tensor(v) for v in n["value"]]) if n["value"] else []
                     return g.op("Constant", value_t=value)
+                elif n.kindOf("value") == "fs":
+                    value = torch.stack([torch.tensor(v) for v in n["value"]]) if n["value"] else []
+                    return g.op("Constant", value_t=value)
                 elif n.output().type().kind() == "DeviceObjType":
                     return None
                 else:
@@ -851,7 +883,11 @@ def register_custom_op_symbolic(symbolic_name, symbolic_fn, opset_version):
         raise RuntimeError("Failed to register operator {}. The domain {} is already a used domain."
                            .format(symbolic_name, ns))
     import torch.onnx.symbolic_registry as sym_registry
-    sym_registry.register_op(op_name, symbolic_fn, ns, opset_version)
+    from torch.onnx.symbolic_helper import _onnx_stable_opsets
+
+    for version in _onnx_stable_opsets:
+        if version >= opset_version:
+            sym_registry.register_op(op_name, symbolic_fn, ns, version)
 
 # This helper function ensures dynamic axes argument is following the expected format
 def _validate_dynamic_axes(dynamic_axes, model, input_names, output_names):

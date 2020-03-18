@@ -10,14 +10,17 @@ Message::Message(
     std::vector<char>&& payload,
     std::vector<torch::Tensor>&& tensors,
     MessageType type)
-    : payload_(payload), tensors_(tensors), type_(type) {}
+    : payload_(std::move(payload)), tensors_(std::move(tensors)), type_(type) {}
 
 Message::Message(
     std::vector<char>&& payload,
     std::vector<torch::Tensor>&& tensors,
     MessageType type,
     int64_t id)
-    : payload_(payload), tensors_(tensors), type_(type), id_(id) {}
+    : payload_(std::move(payload)),
+      tensors_(std::move(tensors)),
+      type_(type),
+      id_(id) {}
 
 Message::Message(const Message& other) = default;
 
@@ -109,21 +112,19 @@ void Message::setId(int64_t id) {
   id_ = id;
 }
 
-Message createExceptionResponse(
-    const Message& request,
-    const std::exception& e) {
-  return createExceptionResponse(request, e.what());
+Message createExceptionResponse(int64_t requestId, const std::exception& e) {
+  return createExceptionResponse(requestId, e.what());
 }
 
 Message createExceptionResponse(
-    const Message& request,
+    int64_t requestId,
     const std::string& exceptionStr) {
   std::vector<char> payload(exceptionStr.begin(), exceptionStr.end());
   return Message(
       std::move(payload),
       std::vector<torch::Tensor>(),
       MessageType::EXCEPTION,
-      request.id());
+      requestId);
 }
 
 } // namespace rpc

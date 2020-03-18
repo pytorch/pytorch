@@ -24,7 +24,7 @@ TupleTypePtr Tuple::type() const {
 } // namespace ivalue
 
 TypePtr IValue::type() const {
-  switch(tag) {
+  switch (tag) {
     case Tag::None:
       return NoneType::get();
     case Tag::Tensor:
@@ -47,6 +47,8 @@ TypePtr IValue::type() const {
       return ListType::create(toList().elementType());
     case Tag::Future:
       return toFuture()->type();
+    case Tag::RRef:
+      return RRefType::create(toRRef()->type());
     case Tag::Device:
       return DeviceObjType::get();
     case Tag::Object:
@@ -63,6 +65,60 @@ TypePtr IValue::type() const {
   // switch above is complete but this silences compiler warnings
   TORCH_INTERNAL_ASSERT(false, "unhandled case in IValue::type()");
 }
+
+void IValue::getSubValues(HashAliasedIValues& subValues) const {
+  switch (this->tag) {
+    case Tag::Tensor:
+      subValues.insert(*this);
+      return;
+    case Tag::Tuple:
+    case Tag::GenericList: {
+      subValues.insert(*this);
+      c10::ArrayRef<IValue> elems;
+      if (isTuple()) {
+        elems = this->toTuple()->elements();
+      } else {
+        elems = this->toListRef();
+      }
+      for (auto& elem : elems) {
+        elem.getSubValues(subValues);
+      }
+      break;
+    }
+    case Tag::GenericDict:
+      subValues.insert(*this);
+      for (const auto& pair : this->toGenericDict()) {
+        pair.value().getSubValues(subValues);
+        pair.key().getSubValues(subValues);
+      }
+      break;
+    case Tag::Future:
+    case Tag::Device:
+    case Tag::Object:
+    case Tag::PyObject:
+    case Tag::Uninitialized:
+    case Tag::Capsule:
+      TORCH_INTERNAL_ASSERT(
+          false, "sub ivalue is nat enabled for: ", this->tagKind());
+      // Fall through
+    default:
+      // don't record scalars.
+      break;
+  }
+}
+
+bool IValue::overlaps(const IValue& rhs) const {
+  HashAliasedIValues rhsSubValues, thisSubValues;
+  rhs.getSubValues(rhsSubValues);
+  getSubValues(thisSubValues);
+  for (auto& sub : thisSubValues) {
+    if (rhsSubValues.count(sub)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 namespace {
 
 using IValueFormatter = std::function<void(std::ostream&, const IValue&)>;
@@ -76,7 +132,7 @@ std::ostream& printList(
     IValueFormatter formatter) {
   out << start;
   for (size_t i = 0; i < list.size(); ++i) {
-    if (i > 0){
+    if (i > 0) {
       out << ", ";
     }
     formatter(out, IValue(list[i]));
@@ -120,6 +176,22 @@ std::ostream& printDict(
   out << "}";
   return out;
 }
+}
+
+// Properly disambiguate the type of an empty dict
+std::ostream& printMaybeAnnotatedDict(
+    std::ostream& out,
+    const IValue& the_dict,
+    IValueFormatter formatter) {
+  auto value_type = the_dict.type()->cast<DictType>()->getValueType();
+  if (the_dict.toGenericDict().size() == 0 ||
+      !elementTypeCanBeInferredFromMembers(value_type)) {
+    out << "annotate(" << the_dict.type()->python_str() << ",";
+    printDict(out, the_dict.toGenericDict(), formatter) << ")";
+  } else {
+    return printDict(out, the_dict.toGenericDict(), formatter);
+  }
+  return out;
 }
 
 std::ostream& IValue::repr(
@@ -175,7 +247,7 @@ std::ostream& IValue::repr(
       return out << ")";
     }
     case IValue::Tag::GenericDict:
-      return printDict(out, v.toGenericDict(), formatter);
+      return printMaybeAnnotatedDict(out, v, formatter);
     default:
       TORCH_INTERNAL_ASSERT(false, "repr() not defined on: ", v.tagKind());
   }
@@ -221,6 +293,8 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       return out << "Capsule";
     case IValue::Tag::GenericList:
       return printList(out, v.toList(), "[", "]", formatter);
+    case IValue::Tag::RRef:
+      return out << "RRef";
     case IValue::Tag::Future:
       return out << "Future";
     case IValue::Tag::Uninitialized:
@@ -249,58 +323,87 @@ void IValue::dump() const {
   std::cout << *this << "\n";
 }
 
+std::shared_ptr<ClassType> ivalue::Object::type() const {
+  return type_.type_->expect<ClassType>();
+}
+
 IValue IValue::deepcopy() const {
+  std::unordered_map<IValue, IValue> memo;
+  return deepcopy(memo);
+}
+
+IValue IValue::deepcopy(
+    std::unordered_map<IValue, IValue>& memo) const {
+  if (memo.count(*this)) {
+    return memo.at(*this);
+  }
+  IValue copy;
   switch(tag) {
     case IValue::Tag::Tensor:
-      return IValue(toTensor().clone());
+      copy = IValue(toTensor().clone());
+      break;
     case IValue::Tag::Tuple: {
-      std::vector<IValue> copied_elements;
+      std::vector<IValue> copied_tuple;
       for (const auto& e : toTuple()->elements()) {
-        copied_elements.push_back(e.deepcopy());
+        copied_tuple.push_back(e.deepcopy(memo));
       }
-      return IValue(ivalue::Tuple::create(copied_elements));
+      copy = IValue(ivalue::Tuple::create(copied_tuple));
     }
-    case IValue::Tag::String:
-      return IValue(ivalue::ConstantString::create(toString()->string()));
-    case IValue::Tag::GenericList:
-      return IValue(toList().copy());
-    case IValue::Tag::GenericDict:
-      return IValue(toGenericDict().copy());
+      break;
+    case IValue::Tag::GenericList: {
+      c10::List<IValue> copied_list;
+      for (IValue v : toList()) {
+        copied_list.push_back(v.deepcopy(memo));
+      }
+      copy = IValue(copied_list);
+    }
+      break;
+    case IValue::Tag::GenericDict: {
+      c10::Dict<IValue, IValue> copied_dict;
+      for (const auto& entry : toGenericDict()) {
+        copied_dict.insert(entry.key().deepcopy(memo), entry.value().deepcopy(memo));
+      }
+      copy = IValue(copied_dict);
+    }
+      break;
     case IValue::Tag::Object: {
-      return IValue(toObject()->deepcopy());
+      copy = IValue(toObject()->deepcopy(memo));
+      break;
+    case IValue::Tag::String:
     case IValue::Tag::None:
     case IValue::Tag::Double:
     case IValue::Tag::Int:
     case IValue::Tag::Bool:
     case IValue::Tag::Device:
     case IValue::Tag::Uninitialized:
-    case IValue::Tag::Blob:
-    case IValue::Tag::Capsule:
-    case IValue::Tag::Future:
-    case IValue::Tag::PyObject:
-      return *this;
+      copy = *this;
+      break;
+    default:
+      AT_ERROR("Can't deepcopy IValue with tag: ", tagKind());
     }
   }
-  AT_ERROR("Tag not found: ", tagKind());
+  if (!isSameIdentity(copy)) {
+    memo[*this] = copy;
+  }
+  return copy;
 }
 
-
 std::string ivalue::Object::name() const {
-  return this->type_.type_->name()->qualifiedName();
+  return type()->name()->qualifiedName();
 }
 
 IValue ivalue::Object::getAttr(const std::string& name) const {
-  const size_t slot = type_.type_->getAttributeSlot(name);
+  const size_t slot = type()->getAttributeSlot(name);
   return getSlot(slot);
 }
 
 void ivalue::Object::setAttr(const std::string& name, IValue v) {
-  const size_t slot = type_.type_->getAttributeSlot(name);
+  const size_t slot = type()->getAttributeSlot(name);
   setSlot(slot, std::move(v));
 }
 
 void ivalue::Object::unsafeRemoveAttr(const std::string& name) {
-  const size_t slot = type_.type_->getAttributeSlot(name);
+  const size_t slot = type()->getAttributeSlot(name);
   unsafeRemoveSlot(slot);
 }
 
@@ -310,9 +413,14 @@ void ivalue::Object::resizeObject(size_t slot) {
 }
 
 c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy() const {
+  std::unordered_map<IValue, IValue> memo;
+  return deepcopy(memo);
+}
+
+c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy(std::unordered_map<IValue, IValue>& memo) const {
   auto object = ivalue::Object::create(c10::StrongTypePtr(compilation_unit(), type()), type()->numAttributes());
   for (auto i = 0; i < slots_.size(); ++i) {
-    object->setSlot(i, slots_[i].deepcopy());
+    object->setSlot(i, slots_[i].deepcopy(memo));
   }
   return object;
 }
@@ -343,8 +451,16 @@ std::vector<std::pair<IValue, IValue>> iterationOrder(const c10::Dict<IValue, IV
   return ordered;
 }
 
-std::unordered_map<std::string, c10::StrongTypePtr>& getCustomClassTypeMap() {
-    static std::unordered_map<std::string, c10::StrongTypePtr> tmap;
+StrongTypePtr::StrongTypePtr(
+    std::shared_ptr<torch::jit::CompilationUnit> cu,
+    std::shared_ptr<Type> type) {
+  cu_ = std::move(cu);
+  type_ = type;
+  TORCH_INTERNAL_ASSERT(type_);
+}
+
+std::unordered_map<std::string, c10::ClassTypePtr>& getCustomClassTypeMap() {
+    static std::unordered_map<std::string, c10::ClassTypePtr> tmap;
     return tmap;
 }
 

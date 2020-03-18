@@ -28,8 +28,8 @@ class Linear(nnq.Linear):
         torch.Size([128, 30])
     """
 
-    def __init__(self, in_features, out_features, bias_=True):
-        super(Linear, self).__init__(in_features, out_features, bias_)
+    def __init__(self, in_features, out_features, bias_=True, dtype=torch.qint8):
+        super(Linear, self).__init__(in_features, out_features, bias_, dtype=dtype)
         # We don't muck around with buffers or attributes or anything here
         # to keep the module simple. *everything* is simply a Python attribute.
         # Serialization logic is explicitly handled in the below serialization and
@@ -37,8 +37,14 @@ class Linear(nnq.Linear):
 
     def forward(self, x):
         # Note that we can handle self.bias == None case.
-        Y = torch.ops.quantized.linear_dynamic(
-            x, self._packed_params._packed_params)
+        if self._packed_params.dtype == torch.qint8:
+            Y = torch.ops.quantized.linear_dynamic(
+                x, self._packed_params._packed_params)
+        elif self._packed_params.dtype == torch.float16:
+            Y = torch.ops.quantized.linear_dynamic_fp16(
+                x, self._packed_params._packed_params)
+        else:
+            raise RuntimeError('Unsupported dtype on dynamic quantized linear!')
         return Y.to(x.dtype)
 
     def _get_name(self):
@@ -67,9 +73,15 @@ class Linear(nnq.Linear):
             # import until we need it.
             from torch.quantization.qconfig import default_dynamic_qconfig
             weight_observer = default_dynamic_qconfig.weight()
-        assert weight_observer.dtype == torch.qint8, 'Weight observer must have dtype torch.qint8'
+        dtype = weight_observer.dtype
+        assert dtype in [torch.qint8, torch.float16], 'The only supported dtypes for dynamic quantized linear are qint8 and float16'
         weight_observer(mod.weight)
-        qweight = _quantize_weight(mod.weight.float(), weight_observer)
-        qlinear = Linear(mod.in_features, mod.out_features)
+        if dtype == torch.qint8:
+            qweight = _quantize_weight(mod.weight.float(), weight_observer)
+        elif dtype == torch.float16:
+            qweight = mod.weight.float()
+        else:
+            raise RuntimeError('Unsupported dtype specified for dynamic quantized Linear!')
+        qlinear = Linear(mod.in_features, mod.out_features, dtype=dtype)
         qlinear.set_weight_bias(qweight, mod.bias)
         return qlinear
