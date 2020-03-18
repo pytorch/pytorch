@@ -64,7 +64,7 @@ struct CAFFE2_API Generator {
   }
 
   // TODO(pbelevich): delete this after replace Generator generator = nullptr with c10::optional<at::Generator> = c10::nullopt
-  Generator(nullptr_t gen_impl) {}
+  Generator(std::nullptr_t gen_impl) {}
 
   explicit Generator(Device device) {
 #ifdef USE_CUDA
