@@ -3,8 +3,8 @@
 #include <functional>
 #include <vector>
 
-#include "torch/csrc/jit/tensorexpr/expr.h"
-#include "torch/csrc/jit/tensorexpr/ir.h"
+#include <torch/csrc/jit/tensorexpr/expr.h>
+#include <torch/csrc/jit/tensorexpr/ir.h>
 
 namespace torch {
 namespace jit {
@@ -57,16 +57,20 @@ class Function : public KernelScopedObject {
     return dims_.size();
   }
   const Expr* dim(int index) const {
-    CHECK_GE(index, 0) << "index out of lower bound";
-    CHECK_LT(index, ndim()) << "index out of upper bound";
+    if (index < 0 || index >= ndim()) {
+      throw out_of_range_index();
+    }
+
     return dims_[index];
   }
   const std::vector<const Expr*>& dims() const {
     return dims_;
   }
   const Var* arg(int index) const {
-    CHECK_GE(index, 0) << "index out of lower bound";
-    CHECK_LT(index, ndim()) << "index out of upper bound";
+    if (index < 0 || index >= ndim()) {
+      throw out_of_range_index();
+    }
+
     return args_[index];
   }
   const std::vector<const Var*>& args() const {
@@ -77,7 +81,10 @@ class Function : public KernelScopedObject {
     return bodies_;
   }
   const Expr* body(size_t index) const {
-    CHECK(index < bodies_.size());
+    if (index >= bodies_.size()) {
+      throw out_of_range_index();
+    }
+
     return bodies_[index];
   }
 
@@ -85,7 +92,9 @@ class Function : public KernelScopedObject {
     return func_vars_;
   }
   const Var* func_var(size_t index) const {
-    CHECK(index < func_vars_.size());
+    if (index >= func_vars_.size()) {
+      throw out_of_range_index();
+    }
     return func_vars_[index];
   }
 
