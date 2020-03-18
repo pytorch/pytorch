@@ -224,6 +224,9 @@ PyObject* rpc_init(PyObject* /* unused */) {
                     return self.pickle();
                   },
                   [](py::tuple t) { // NOLINT
+                    TORCH_CHECK(
+                        false,
+                        "Can not unpickle rref in python pickler, rref can only be unpickled when using RPC");
                     // __setstate__
                     return PyRRef::unpickle(t);
                   }),
