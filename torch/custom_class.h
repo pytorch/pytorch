@@ -74,10 +74,8 @@ class class_ {
                                                // torch::init<...>()
     auto func = [](c10::tagged_capsule<CurClass> self, Types... args) {
       auto classObj = c10::make_intrusive<CurClass>(args...);
-      auto genericPtr = c10::static_intrusive_pointer_cast<torch::CustomClassHolder>(std::move(classObj));
-      auto capsule = c10::IValue(std::move(genericPtr));
-      auto object = std::move(self.ivalue).toObject();
-      object->setSlot(0, std::move(capsule));
+      auto object = self.ivalue.toObject();
+      object->setSlot(0, c10::IValue::make_capsule(std::move(classObj)));
     };
 
     defineMethod("__init__", std::move(func));
@@ -113,12 +111,8 @@ class class_ {
                                 SetStateArg&& arg) {
       c10::intrusive_ptr<CurClass> classObj =
           at::guts::invoke(set_state, std::forward<SetStateArg>(arg));
-      auto genericPtr =
-          c10::static_intrusive_pointer_cast<torch::CustomClassHolder>(
-              classObj);
-      auto capsule = c10::IValue(genericPtr);
       auto object = self.ivalue.toObject();
-      object->setSlot(0, capsule);
+      object->setSlot(0, c10::IValue::make_capsule(classObj));
     };
     defineMethod(
         "__setstate__",
@@ -192,16 +186,8 @@ c10::IValue make_custom_class(CtorArgs&&... args) {
         "Trying to instantiate a class that isn't a registered custom class.",
         "");
   }
-  auto classType = c10::getCustomClassType<c10::intrusive_ptr<CurClass>>();
-  auto ivalue_obj = c10::ivalue::Object::create(
-      c10::StrongTypePtr(nullptr, classType), /*num_slots=*/1);
-  auto userClassInstance =
-      c10::make_intrusive<CurClass>(std::forward<CtorArgs...>(args)...);
-  ivalue_obj->setAttr(
-      "capsule",
-      c10::static_intrusive_pointer_cast<torch::jit::CustomClassHolder>(
-          userClassInstance));
-  return ivalue_obj;
+  auto userClassInstance = c10::make_intrusive<CurClass>(std::forward<CtorArgs>(args)...);
+  return c10::IValue(std::move(userClassInstance));
 }
 
 // jit namespace for backward-compatibility
