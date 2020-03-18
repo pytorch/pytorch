@@ -380,43 +380,42 @@ class MultiheadAttentionInProjection(Module):
     r"""Process input using multi-head attention.
 
     Args:
-        in_embed_dim (int): Input embedding dimension
+        embed_dim (int): Input embedding dimension
         num_heads (int): Number of parallel attention heads.
-        out_embed_dim (int, optional): Output projection dimension. If not
-            provided, then it is set to ``in_embed_dim``. Must be divisible by
-            ``num_heads``.
+        head_dim (int, optional): Dimension of embedding for each attention
+            head. If not provided, then it is set to ``embed_dim / num_heads``.
 
     Shape:
         - seq: :math:`(S, N, E)`
-        - Output: :math:`(N * H, S, P / H)`
+        - Output: :math:`(N * H, S, D)`
         where S is the sequence length, N is the batch size, H is the number of
-        attention heads, E is the embedding dimension, and P is the projection
+        attention heads, E is the embedding dimension, and D is the head
         dimension.
 
     Attributes:
         weight: The learnable weights of the module of shape
-            :math:`(\text{out\_embed\_dim}, \text{in\_embed\_dim}) = (P, E)`.
+            :math:`(\text{head\_dim} * \text{num\_heads}, \text{embed\_dim})`.
 
     Examples::
 
-        >>> # S = 21; N = 64; E = 10; P = 12; H = 4;
-        >>> MHA_in = nn.MultiheadAttentionInProjection(10, 4, 12)
+        >>> # S = 21; N = 64; E = 10; D = 3; H = 4;
+        >>> MHA_in = nn.MultiheadAttentionInProjection(10, 4, 3)
         >>> seq = torch.randn(21, 64, 10)
         >>> s = MHA_in(seq)
         >>> print(s.shape)
         torch.Size([256, 21, 3])
     """
-    __constants__ = ['in_embed_dim', 'num_heads', 'out_embed_dim']
+    __constants__ = ['embed_dim', 'num_heads', 'head_dim']
 
-    def __init__(self, in_embed_dim, num_heads, out_embed_dim=None):
+    def __init__(self, embed_dim, num_heads, head_dim=None):
         super(MultiheadAttentionInProjection, self).__init__()
-        self.in_embed_dim = in_embed_dim
-        if out_embed_dim is None:
-            out_embed_dim = in_embed_dim
-        assert out_embed_dim % num_heads == 0, "out_embed_dim must be divisible by num_heads"
-        self.out_embed_dim = out_embed_dim
+        if head_dim is None:
+            assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads when head_dim=None"
+            head_dim = embed_dim // num_heads
+        self.head_dim = head_dim
+        self.embed_dim = embed_dim
         self.num_heads = num_heads
-        self.weight = torch.nn.Parameter(torch.Tensor(out_embed_dim, in_embed_dim))
+        self.weight = torch.nn.Parameter(torch.Tensor(head_dim * num_heads, embed_dim))
         kaiming_uniform_(self.weight, a=sqrt(5))
 
     def forward(self, seq):
@@ -434,19 +433,19 @@ class ScaledDotProduct(Module):
         dropout_p (float): probability of dropping an attention weight.
 
     Shape:
-        - query: :math:`(N * H, L, P / H)`
-        - key: :math:`(N * H, S, P / H)`
-        - value: :math:`(N * H, S, P / H)`
+        - query: :math:`(N * H, L, D)`
+        - key: :math:`(N * H, S, D)`
+        - value: :math:`(N * H, S, D)`
         - key_padding_mask: :math:`(N, S)`
         - attn_mask: :math:`(L, S)` or :math:`(N * H, L, S)`
-        - Output: :math:`(N * H, L, P / H)`, :math:`(N * H, L, S)`
+        - Output: :math:`(N * H, L, D)`, :math:`(N * H, L, S)`
         where L is the target sequence length, S is the source sequence
         length, H is the number of attention heads, N is the batch size,
-        and P is the projection dimensionE is the head dimension.
+        and D is the head dimension.
 
     Examples::
 
-        >>> # S = L = 21; N = 64; E = 10; P = 12; H = 4;
+        >>> # S = L = 21; N = 64; E = 10; D = 3; H = 4;
         >>> SDP = nn.ScaledDotProduct(4, False, 0.1)
         >>> q = torch.randn(256, 21, 3)
         >>> k = v = torch.randn(256, 21, 3)
@@ -473,43 +472,43 @@ class MultiheadAttentionOutProjection(Module):
     r"""Process attention output using multi-head attention.
 
     Args:
-        in_embed_dim (int): Input projection dimension. Must be divisible by
-            ``num_heads``.
+        embed_dim (int): Input projection dimension.
         num_heads (int): Number of parallel attention heads.
-        out_embed_dim (int, optional): Output embedding dimension. If not
-            provided, then it is set to ``in_embed_dim``.
+        head_dim (int, optional): Dimension of embedding for each attention
+            head. If not provided, then it is set to ``embed_dim / num_heads``.
 
     Shape:
-        - attn_output: :math:`(N * H, S, P / H)`
+        - attn_output: :math:`(N * H, S, D)`
         - Output: :math:`(S, N, E)`
         where S is the sequence length, N is the batch size, H is the number of
-        attention heads, E is the embedding dimension, and P is the projection
+        attention heads, E is the embedding dimension, and D is the head
         dimension.
 
     Attributes:
         weight: The learnable weights of the module of shape
-            :math:`(\text{out\_embed\_dim}, \text{in\_embed\_dim}) = (E, P)`.
+            :math:`(\text{embed\_dim}, \text{head\_dim} * \text{num\_heads})`.
 
     Examples::
 
-        >>> # S = 21; N = 64; E = 10; P = 12; H = 4;
-        >>> MHA_out = nn.MultiheadAttentionOutProjection(12, 4, 10)
+        >>> # S = 21; N = 64; E = 10; D = 3; H = 4;
+        >>> MHA_out = nn.MultiheadAttentionOutProjection(10, 4, 3)
         >>> attn_seq = torch.randn(256, 21, 3)
         >>> a = MHA_out(attn_seq)
         >>> print(a.shape)
         torch.Size([21, 64, 10])
     """
-    __constants__ = ['in_embed_dim', 'num_heads', 'out_embed_dim']
+    __constants__ = ['embed_dim', 'num_heads', 'head_dim']
 
-    def __init__(self, in_embed_dim, num_heads, out_embed_dim=None):
+    def __init__(self, embed_dim, num_heads, head_dim=None):
         super(MultiheadAttentionOutProjection, self).__init__()
-        assert in_embed_dim % num_heads == 0, "in_embed_dim must be divisible by num_heads."
-        self.in_embed_dim = in_embed_dim
-        if out_embed_dim is None:
-            out_embed_dim = in_embed_dim
-        self.out_embed_dim = out_embed_dim
+        self.embed_dim = embed_dim
+        if head_dim is None:
+            assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads when head_dim=None"
+            head_dim = embed_dim // num_heads
+        self.embed_dim = embed_dim
         self.num_heads = num_heads
-        self.weight = torch.nn.Parameter(torch.Tensor(out_embed_dim, in_embed_dim))
+        self.head_dim = head_dim
+        self.weight = torch.nn.Parameter(torch.Tensor(embed_dim, head_dim * num_heads))
         kaiming_uniform_(self.weight, a=sqrt(5))
 
     def forward(self, attn_output):
