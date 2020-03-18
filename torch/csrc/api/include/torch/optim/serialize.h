@@ -207,14 +207,32 @@ void serialize(
   }
 }
 
+template <typename T>
+c10::List<T> deque_to_list(const std::deque<T>& dq) {
+  c10::List<T> list;
+  list.reserve(dq.size());
+  for (const auto& e : dq) {
+    list.emplace_back(e);
+  }
+  return list;
+}
+
+template <typename T>
+std::deque<T> list_to_deque(const c10::List<T>& list) {
+  std::deque<T> dq;
+  for (const auto& e : list) {
+    dq.emplace_back(e);
+  }
+  return dq;
+}
+
 #define _TORCH_OPTIM_SERIALIZE(name) \
   torch::optim::serialize(archive, #name, self.name)
 
 #define _TORCH_OPTIM_SERIALIZE_WITH_TEMPLATE_ARG(OptimizerName) \
   torch::optim::serialize<OptimizerName##ParamState, OptimizerName##Options>(archive, self)
 
-#define _TORCH_OPTIM_SERIALIZE_TORCH_ARG(name) \
-{ \
+#define _TORCH_OPTIM_SERIALIZE_TORCH_ARG(name) { \
   auto ivalue = torch::IValue(name()); \
   /* do not serialize if name is an undefined tensor*/ \
   if (!(ivalue.isTensor() && ivalue.unsafeToTensorImpl() == at::UndefinedTensorImpl::singleton())) { \
@@ -222,12 +240,36 @@ void serialize(
   } \
 }
 
-#define _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(T, name) \
-{ \
+#define _TORCH_OPTIM_SERIALIZE_TORCH_ARG_DEQUE(name) { \
+  c10::IValue ivalue = torch::IValue(deque_to_list(name())); \
+  archive.write(#name, ivalue); \
+}
+
+#define _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(T, name) { \
   c10::IValue ivalue; \
   bool exists = archive.try_read(#name, ivalue); \
-  if (exists) \
+  if (exists) {\
     name(ivalue.to<T>()); \
+  } else { \
+    bool is_tensor_type = std::is_base_of<torch::Tensor, T>::value; \
+    TORCH_INTERNAL_ASSERT(is_tensor_type); \
+  } \
 }
+
+#define _TORCH_OPTIM_DESERIALIZE_TORCH_ARG_OPTIONAL(T, name) { \
+  c10::IValue ivalue; \
+  bool exists = archive.try_read(#name, ivalue); \
+  if (exists) { \
+    name(ivalue.toOptional<T>()); \
+  } \
+}
+
+#define _TORCH_OPTIM_DESERIALIZE_TORCH_ARG_DEQUE(T, name) { \
+  c10::IValue ivalue; \
+  archive.read(#name, ivalue); \
+  auto list = ivalue.to<c10::List<T::value_type>>(); \
+  name(list_to_deque(list)); \
+}
+
 } // namespace optim
 } // namespace torch
