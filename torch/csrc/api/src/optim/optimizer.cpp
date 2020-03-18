@@ -79,13 +79,10 @@ void Optimizer::add_param_group(const OptimizerParamGroup& param_group) {
   for (const auto& param : param_group.params()) {
     TORCH_CHECK(param.is_leaf(), "can't optimize a non-leaf Tensor");
   }
+  TORCH_INTERNAL_ASSERT(defaults_ != nullptr);
   OptimizerParamGroup param_group_(param_group.params());
   if (!param_group.has_options()) {
-    if(defaults_ != nullptr) {
-      param_group_.set_options(defaults_->clone());
-    } else {
-      param_group_.set_options(nullptr);
-    }
+    param_group_.set_options(defaults_->clone());
   } else {
     param_group_.set_options(param_group.options().clone());
   }

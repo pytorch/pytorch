@@ -88,8 +88,6 @@ class TORCH_API Optimizer {
   Optimizer(const Optimizer& optimizer) = delete;
   Optimizer(Optimizer&& optimizer) = default;
 
-  Optimizer() : defaults_(nullptr) {}
-
   explicit Optimizer(std::vector<OptimizerParamGroup> param_groups, std::unique_ptr<OptimizerOptions> defaults) : defaults_(std::move(defaults)) {
     for (const auto& param_group : param_groups) {
       add_param_group(param_group);
