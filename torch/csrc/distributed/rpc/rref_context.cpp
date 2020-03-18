@@ -344,6 +344,7 @@ void RRefContext::notifyOwnerAndParentOfFork(
     const ForkId& forkId,
     worker_id_t parent,
     const c10::intrusive_ptr<RRef>& rref) {
+  // Fork is shared from owner.
   if (parent == rref->owner()) {
     if (parent == agent_->getWorkerInfo().id_) {
       // Owner sending RRef to self, remove the forkId as it was added during
@@ -365,10 +366,12 @@ void RRefContext::notifyOwnerAndParentOfFork(
       // Hence, it is not necessary to send another RREF_CHILD_ACCEPT or
       // RREF_FORK_REQUEST back to the owner. See Note [Early Fork
       // Registration].
+      addConfirmedUser(forkId, rref);
     }
     return;
   }
 
+  // Fork is shared from user.
   if (rref->isOwner()) {
     // See Note [Useful Phantom Fork ID for User to Owner Call]
     // In this case, the owner is the caller, and it does not add the fork id
@@ -503,6 +506,16 @@ void RRefContext::delPendingUser(const ForkId& forkId) {
   deletedState->confirm();
   deleteAllUsersCV_.notify_all();
   deletedState.reset(); // Decrease refcount.
+}
+
+void RRefContext::addConfirmedUser(
+    const ForkId& forkId,
+    const c10::intrusive_ptr<RRef>& rref) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  confirmedUsers_.emplace(
+      std::piecewise_construct,
+      std::forward_as_tuple(forkId),
+      std::forward_as_tuple(rref));
 }
 
 void RRefContext::recordThreadLocalPendingRRefs() {
