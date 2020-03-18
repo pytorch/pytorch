@@ -78,6 +78,7 @@ Tensor& set_storage_cpu_(Tensor& result, Storage storage, int64_t storage_offset
   if (storage_offset < 0) {
     TORCH_CHECK("Tensor: invalid storage offset ", storage_offset);
   }
+  result.unsafeGetTensorImpl()->set_storage_offset(storage_offset);
 
   c10::optional<IntArrayRef> stride_opt = stride.data() != nullptr ?
                                               c10::optional<IntArrayRef>(stride) : c10::nullopt;
