@@ -653,6 +653,21 @@ class TestDataParallel(TestCase):
         dpm = dp.DataParallel(module)
         dpm(torch.rand(4, 3, 6, 5))
 
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skipIfRocm
+    def test_autocast(self):
+        class Model(torch.nn.Linear):
+            def __init__(self):
+                super(Model, self).__init__(8, 8)
+
+            @torch.cuda.amp.autocast()
+            def forward(self, input):
+                return super(Model, self).forward(input)
+
+        model = dp.DataParallel(Model().cuda().to(dtype=torch.float32))
+        input = torch.randn((8, 8), dtype=torch.float32, device="cuda")
+        self.assertTrue(model(input).dtype is torch.float16)
+
 
 if __name__ == '__main__':
     run_tests()
