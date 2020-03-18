@@ -592,18 +592,18 @@ void LBFGS::load(serialize::InputArchive& archive) {
     archive("prev_loss", prev_loss, /*is_buffer=*/true);
     torch::optim::serialize(archive, "old_dirs", old_dirs);
     torch::optim::serialize(archive, "old_stps", old_stps);
-    std::vector<Tensor> params = param_groups_.at(0).params();
-    for (const auto& param : params) {
-      auto state = std::make_unique<LBFGSParamState>();
-      state->d(d);
-      state->t(t.item<double>());
-      state->H_diag(H_diag);
-      state->prev_flat_grad(prev_flat_grad);
-      state->prev_loss(prev_loss.item<double>());
-      state->old_dirs(old_dirs);
-      state->old_stps(old_stps);
-      state_[c10::guts::to_string(param.unsafeGetTensorImpl())] = std::move(state);
-    }
+
+    // NOTE: LBFGS has only global state, but we register it as state for
+    // the first param, because this helps with casting in load_state_dict
+    auto state = std::make_unique<LBFGSParamState>();
+    state->d(d);
+    state->t(t.item<double>());
+    state->H_diag(H_diag);
+    state->prev_flat_grad(prev_flat_grad);
+    state->prev_loss(prev_loss.item<double>());
+    state->old_dirs(old_dirs);
+    state->old_stps(old_stps);
+    state_[c10::guts::to_string(param_groups_.at(0).params().at(0).unsafeGetTensorImpl())] = std::move(state);
   }
 }
 } // namespace optim
