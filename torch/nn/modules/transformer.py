@@ -381,10 +381,23 @@ class MultiheadAttentionInProjection(Module):
     Args:
         in_embed_dim (int): Input embedding dimension
         num_heads (int): Number of parallel attention heads.
-        out_embed_dim (int, optional): Output embedding dimension. If not
+        out_embed_dim (int, optional): Output projection dimension. If not
             provided, then set to `in_embed_dim`. Must be divisible by
             `num_heads`.
+
+    Shape:
+        - seq: :math:`(S, N, E)`
+        - Output: :math:`(N * H, S, P / H)`
+        where S is the sequence length, N is the batch size, H is the number of
+        attention heads, E is the embedding dimension, and P is the projection
+        dimension.
+
+    Attributes:
+        weight: The learnable weights of the module of shape
+            :math:`(\text{out_embed_dim}, \text{in_embed_dim}) = (P, E)`.
     """
+    __constants__ = ['in_embed_dim', 'num_heads', 'out_embed_dim']
+
     def __init__(self, in_embed_dim, num_heads, out_embed_dim=None):
         super(MultiheadAttentionInProjection, self).__init__()
         self.in_embed_dim = in_embed_dim
@@ -397,10 +410,6 @@ class MultiheadAttentionInProjection(Module):
         init.kaiming_uniform_(self.weight, a=math.sqrt(5))
 
     def forward(self, seq):
-        r"""
-        Args:
-            seq (Tensor): A sequence of shape :math:`(S, N, H)`
-        """
         return F.multi_head_attention_in_projection(seq, self.num_heads, self.weight, in_proj_bias=None)
 
 
@@ -412,51 +421,65 @@ class ScaledDotProduct(Module):
         num_heads (int): Number of parallel attention heads.
         add_zero_attn (bool): Whether to add a batch of zeros to the key and
             value sequences.
-        dropout (float): probability of dropping an attention value.
+        dropout_p (float): probability of dropping an attention value.
+
+    Shape:
+        - query: :math:`(N * H, L, P / H)`
+        - key: :math:`(N * H, S, P / H)`
+        - value: :math:`(N * H, S, P / H)`
+        - key_padding_mask: :math:`(N, S)`
+        - attn_mask: :math:`(L, S)` or :math:`(N * H, L, S)`
+        - Output: :math:`(N * H, L, P / H)`, :math:`(N * H, L, S)`
+        where L is the target sequence length, S is the source sequence
+        length, H is the number of attention heads, N is the batch size,
+        and P is the projection dimensionE is the head dimension.
+        
+    Examples::
+
+        >>> SDP = nn.ScaledDotProduct(8, False, 0.1)
+        >>> q = torch.randn(30, 11, 3)
+        >>> k = v = torch.randn(30, 4, 3)
+        >>> attn_output, attn_weights = SDP(q, k, v)
+        >>> print(attn_output.shape, attn_weights.shape)
+        torch.Size([30, 11, 3]) torch.Size([30, 11, 4])
     """
-    def __init__(self, num_heads, add_zero_attn=False, dropout=0.0):
+    __constants__ = ['num_heads', 'add_zero_attn', 'dropout_p']
+
+    def __init__(self, num_heads, add_zero_attn=False, dropout_p=0.0):
         super(ScaledDotProduct, self).__init__()
-        self.dropout = dropout
+        self.dropout_p = dropout_p
         self.add_zero_attn = add_zero_attn
         self.num_heads = num_heads
 
     def forward(self, query, key, value, key_padding_mask=None, attn_mask=None):
-        r"""
-        Args:
-            query, key, value: map a query and a set of key-value pairs to
-            an output.
-            key_padding_mask (Tensor, optional): Specified padding elements 
-                in the key will be ignored by the attention.
-            attn_mask (Tensor, optional): 2D or 3D additive mask. A 2D mask
-                will be broadcasted for all the batches while a 3D mask allows
-                to specify a different mask for the entries of each batch.
-
-        Shape:
-            - query: :math:`(N * H, L, P / H)`
-            - key: :math:`(N * H, S, P / H)`
-            - value: :math:`(N * H, S, P / H)`
-            - key_padding_mask: :math:`(N, S)`
-            - attn_mask: :math:`(L, S)` or :math:`(N * H, L, S)`
-            - Output: :math:`(N * H, L, P / H)`, :math:`(N * H, L, S)`
-            where L is the target sequence length, S is the source sequence
-            length, H is the number of attention heads, N is the batch size,
-            and P is the projection dimensionE is the head dimension.
-        """
         attn_output, attn_output_weights = F.scaled_dot_product_attention(
             query, key, value,
-            self.num_heads, self.add_zero_attn, self.dropout, self.training, key_padding_mask, attn_mask)
+            self.num_heads, self.add_zero_attn, self.dropout_p, self.training, key_padding_mask, attn_mask)
         return attn_output, attn_output_weights
 
 
 class MultiheadAttentionOutProjection(Module):
-    r"""
+    r"""Process attention output using multi-head attention.
     Args:
-        in_embed_dim (int): Input embedding dimension
+        in_embed_dim (int): Input projection dimension
         num_heads (int): Number of parallel attention heads.
         out_embed_dim (int, optional): Output embedding dimension. If not
             provided, then set to `in_embed_dim`. Must be divisible by
             `num_heads`.
+
+    Shape:
+        - attn_output: :math:`(N * H, S, P / H)`
+        - Output: :math:`(S, N, E)`
+        where S is the sequence length, N is the batch size, H is the number of
+        attention heads, E is the embedding dimension, and P is the projection
+        dimension.
+
+    Attributes:
+        weight: The learnable weights of the module of shape
+            :math:`(\text{out_embed_dim}, \text{in_embed_dim}) = (E, P)`.
     """
+    __constants__ = ['in_embed_dim', 'num_heads', 'out_embed_dim']
+
     def __init__(self, in_embed_dim, num_heads, out_embed_dim=None):
         super(MultiheadAttentionOutProjection, self).__init__()
         assert in_embed_dim % num_heads == 0, "in_embed_dim must be divisible by num_heads."
@@ -469,10 +492,6 @@ class MultiheadAttentionOutProjection(Module):
         init.kaiming_uniform_(self.weight, a=math.sqrt(5))
 
     def forward(self, attn_output):
-        r"""
-        Args:
-            attn_output (Tensor): A projected query of shape :math:`(N * H, L, P / H)`
-        """
         return F.multi_head_attention_out_projection(attn_output, self.num_heads, self.weight, out_proj_bias=None)
 
 
