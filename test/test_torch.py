@@ -1251,9 +1251,8 @@ class _TestTorchMixin(object):
 
         s_ = t_.as_subclass(SubTensor)
         s_.backward()
-        t_.backward()
 
-        self.assertEqual(t_.grad, s_.grad)
+        self.assertTrue(t.grad is not None)
 
     def test_constructor_dtypes(self):
         default_type = torch.Tensor().type()
