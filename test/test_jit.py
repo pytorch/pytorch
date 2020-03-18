@@ -2040,6 +2040,7 @@ graph(%input, %weight):
                    .check("aten::transpose") \
                    .check("aten::contiguous") \
                    .check("aten::chunk") \
+                   .check("prim::ListUnpack") \
                    .check("aten::dropout") \
                    .check("aten::dropout") \
                    .run(m.graph)
@@ -2056,6 +2057,7 @@ graph(%input, %weight):
                    .check("aten::transpose") \
                    .check("aten::contiguous") \
                    .check("aten::chunk") \
+                   .check("prim::ListUnpack") \
                    .check("aten::dropout") \
                    .check("aten::dropout") \
                    .check("dequantize") \
