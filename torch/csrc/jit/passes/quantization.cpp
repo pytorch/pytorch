@@ -1211,7 +1211,8 @@ class InsertQuantDeQuantHelper {
   // get the information of original value that's been observed and
   // the quantization parameters
   std::unordered_map<Graph*, std::vector<Node*>> observer_nodes_for_graph_;
-  // A map from qparam name (e.g. _scale) to the attribute name in
+  // qparam name map for each observer node, where each qparam name map  maps
+  // from qparam name (e.g. _scale) to the attribute name in
   // the module(e.g. weight_scale_0)
   std::unordered_map<Node*, std::unordered_map<std::string, std::string>> qparam_name_map_for_node_;
   // Record qscheme for every graph, this is for checking
