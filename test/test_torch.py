@@ -16408,12 +16408,19 @@ def generate_unary_floating_ufunc_promo_test(cls, op_str):
             t = torch.tensor((1,), device=device, dtype=in_type)
             self.assertEqual(op(t).dtype, in_type)
 
+        # These ops only support out= calls on CPU devices
         only_out_on_cpu = ['atan', 'cos', 'cosh', 'erf', 'erfc', 'exp', 'tan', 'tanh']
+
+        # Test for out= code paths
         for in_type in my_float_types + int_types:
+            # Floating type promotion for out= calls on ops listed in only_out_on_cpu
+            # not supported on cuda devices
             if (op_str in only_out_on_cpu and self.device_type == 'cuda'):
                 continue
             t = torch.tensor((1,), device=device, dtype=in_type)
             for out_type in my_float_types:
+                # Floating type promotion does not support out= calls for input as bool tensors
+                # and output as complex tensors
                 if (in_type == torch.bool and out_type in complex_types):
                     continue
                 out_t = torch.tensor((), device=device, dtype=out_type)
@@ -16428,6 +16435,7 @@ def generate_unary_floating_ufunc_promo_test(cls, op_str):
             # lgamma, digamma and erfinv don't have in-place functions
             return
 
+        # Test for in-place code paths
         for in_type in int_types:
             t = torch.tensor((1,), device=device, dtype=in_type)
             self.assertRaises(RuntimeError, lambda: op_inplace(t))
