@@ -5,8 +5,6 @@ In this note we'll cover ways of extending :mod:`torch.nn`,
 :mod:`torch.autograd`, :mod:`torch`, and writing custom C extensions utilizing our C
 libraries.
 
-.. _extending-autograd:
-
 Extending :mod:`torch.autograd`
 -------------------------------
 
