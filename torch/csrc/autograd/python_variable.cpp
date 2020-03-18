@@ -149,7 +149,7 @@ static PyObject* THPVariable_as_subclass(THPVariable* self, PyObject* args, PyOb
   static PythonArgParser parser({
     "as_subclass(PyObject* cls)",
   });
-  ParsedArgs<2> parsed_args{};
+  ParsedArgs<1> parsed_args{};
   auto r = parser.parse(args, kwargs, parsed_args);
   PyObject* cls = r.pyobject(0);
   if (!PyType_Check(cls)) {
