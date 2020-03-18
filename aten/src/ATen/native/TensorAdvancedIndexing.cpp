@@ -539,7 +539,7 @@ Tensor masked_scatter(const Tensor & self, const Tensor & mask, const Tensor & s
 static Tensor & masked_fill_impl_cpu(Tensor & self, const Tensor & mask, Scalar value) {
   NoNamesGuard guard;
   if (mask.dtype() == ScalarType::Byte) {
-    AT_WARN("masked_fill_ received a mask with dtype torch.uint8, this behavior is now deprecated," \
+    TORCH_WARN("masked_fill_ received a mask with dtype torch.uint8, this behavior is now deprecated," \
             "please use a mask with dtype torch.bool instead.");
   }
 

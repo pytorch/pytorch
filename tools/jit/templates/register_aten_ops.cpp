@@ -107,9 +107,11 @@ KernelFunction::InternalBoxedKernelFunction *DUMMY_OPERATION =
 
 class Registerer final {
 public:
-  Registerer&& op(const std::string& schema, KernelFunction::InternalBoxedKernelFunction* boxed_kernel_wrapper) && {
+  Registerer&& op(const std::string& schemaStr, KernelFunction::InternalBoxedKernelFunction* boxed_kernel_wrapper) && {
     static auto& dispatcher = c10::Dispatcher::singleton();
-    std::pair<RegistrationHandleRAII, OperatorHandle> registration = dispatcher.registerSchema(parseSchema(schema));
+    auto schema = parseSchema(schemaStr);
+    schema.setAliasAnalysis(AliasAnalysisKind::FROM_SCHEMA);
+    std::pair<RegistrationHandleRAII, OperatorHandle> registration = dispatcher.registerSchema(std::move(schema));
     registrationHandles_.push_back(std::move(registration.first));
     dispatcher.setManuallyBoxedKernelFor_(registration.second, boxed_kernel_wrapper);
     return std::move(*this);
