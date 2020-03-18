@@ -16410,10 +16410,12 @@ def generate_unary_floating_ufunc_promo_test(cls, op_str):
 
         only_cpu_ops = ['atan', 'cos', 'cosh', 'erf', 'erfc', 'exp', 'tan', 'tanh']
         for in_type in my_float_types + int_types:
-            if(op_str in only_cpu_ops and self.device_type == 'cuda'): continue
+            if(op_str in only_cpu_ops and self.device_type == 'cuda'):
+                continue
             t = torch.tensor((1,), device=device, dtype=in_type)
             for out_type in my_float_types:
-                if(in_type == torch.bool and out_type in complex_types): continue
+                if(in_type == torch.bool and out_type in complex_types):
+                    continue
                 out_t = torch.tensor((), device=device, dtype=out_type)
                 self.assertEqual(op(t, out=out_t).dtype, out_type)
             for out_type in int_types:
