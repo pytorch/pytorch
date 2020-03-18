@@ -861,9 +861,17 @@ void InsertObserversHelper::fillBoundaryValueMap(
           auto* input_val = g->inputs()[i];
           boundary_value_map_[caller_input].insert(input_val);
         }
-      }
-      for (Block* subblock : n->blocks()) {
-        blocks_to_visit.push(subblock);
+      } else if (n->kind() == prim::If) {
+        for (Block* subblock : n->blocks()) {
+          blocks_to_visit.push(subblock);
+          for (Value* v : n->outputs()) {
+            boundary_value_map_[v].insert(subblock->outputs()[v->offset()]);
+          }
+        }
+      } else {
+        for (Block* subblock : n->blocks()) {
+          blocks_to_visit.push(subblock);
+        }
       }
     }
   }
@@ -1093,7 +1101,7 @@ InsertObserversHelper::insertObserversFor(
         std::unordered_set<Value*> callee_observed_inputs;
         for (auto i = 0; i < g->inputs().size(); ++i) {
           auto* node_input = n->input(i + input_offset);
-          if (isObserved(node_input, block_observed_values))
+          if (isObserved(node_input, block_observed_values)) {
             callee_observed_inputs.insert(g->inputs()[i]);
           }
         }
@@ -1358,7 +1366,8 @@ class InsertQuantDeQuantHelper {
   // get the information of original value that's been observed and
   // the quantization parameters
   std::unordered_map<Graph*, std::vector<Node*>> observer_nodes_for_graph_;
-  // A map from qparam name (e.g. _scale) to the attribute name in
+  // qparam name map for each observer node, where each qparam name map  maps
+  // from qparam name (e.g. _scale) to the attribute name in
   // the module(e.g. weight_scale_0)
   std::unordered_map<Node*, std::unordered_map<std::string, std::string>> qparam_name_map_for_node_;
   // Record qscheme for every graph, this is for checking
