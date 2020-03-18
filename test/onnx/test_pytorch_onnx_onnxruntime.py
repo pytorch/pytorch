@@ -3116,11 +3116,9 @@ unary_floating_ufuncs = (
     'asin', 'acos', 'atan',
     'sinh', 'cosh', 'tanh',
     'ceil', 'floor',
-    'exp', 'expm1', 'log', 'log10', 'log1p', 'log2',
+    'exp', 'log', 'log1p', 'log2',
     'sqrt', 'rsqrt',
-    'trunc',
-    'erf', 'erfc', 'erfinv',
-    'lgamma', 'digamma',
+    'erf',
     'sigmoid'
 )
 
