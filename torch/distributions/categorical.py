@@ -100,12 +100,11 @@ class Categorical(Distribution):
         return torch.full(self._extended_shape(), nan, dtype=self.probs.dtype, device=self.probs.device)
 
     def sample(self, sample_shape=torch.Size()):
-        sample_shape = self._extended_shape(sample_shape)
-        param_shape = sample_shape + torch.Size((self._num_events,))
-        probs = self.probs.expand(param_shape)
-        probs_2d = probs.reshape(-1, self._num_events)
-        sample_2d = torch.multinomial(probs_2d, 1, True)
-        return sample_2d.reshape(sample_shape)
+        if not isinstance(sample_shape, torch.Size):
+            sample_shape = torch.Size(sample_shape)
+        probs_2d = self.probs.reshape(-1, self._num_events)
+        samples_2d = torch.multinomial(probs_2d, sample_shape.numel(), True).T
+        return samples_2d.reshape(self._extended_shape(sample_shape))
 
     def log_prob(self, value):
         if self._validate_args:

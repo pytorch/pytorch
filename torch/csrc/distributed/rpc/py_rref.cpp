@@ -121,6 +121,10 @@ WorkerInfo PyRRef::owner() const {
   return RRefContext::getInstance().agent()->getWorkerInfo(rref_->owner());
 }
 
+std::string PyRRef::ownerName() const {
+  return rref_->ownerName();
+}
+
 py::object PyRRef::toHere() {
   if (rref_->isOwner()) {
     return localValue();
