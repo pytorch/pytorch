@@ -871,8 +871,9 @@ void InsertObserversHelper::preprocess(
 
 // TODO: remove this as a class method
 bool InsertObserversHelper::valueNeedsToBeQuantized(Value* v) {
-  if (!v->type()->isSubtypeOf(TensorType::get()) ||
-      isBiasOfConvOrLinear(v)) {
+  if (isBiasOfConvOrLinear(v) ||
+      !(v->type()->isSubtypeOf(TensorType::get()) ||
+        v->type()->isSubtypeOf(ListType::ofTensors()))) {
     return false;
   }
   // Check whether producer is quantizable

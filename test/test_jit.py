@@ -1598,6 +1598,37 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
                        .check("quantized::add_relu") \
                        .run(m.graph_for(data, data))
 
+    def test_quantized_cat_fusion(self):
+        """ Note that we to support the case that torch.cat is quantized
+        indepdently, we need to have an observer that works
+        for list of Tensors.
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.conv1 = torch.nn.Conv2d(1, 1, 1).float()
+                self.conv2 = torch.nn.Conv2d(1, 1, 1).float()
+
+            def forward(self, x, y):
+                x = self.conv1(x)
+                y = self.conv2(y)
+                return torch.cat([x, y], 1)
+
+        m = torch.jit.script(M().eval())
+        m = prepare_script(m, {'': script_qconfig(default_qconfig)}, True)
+        data = torch.randn(1, 1, 10, 10, dtype=torch.float)
+        m(data, data)
+        m = convert_script(m, True)
+        g = m.graph_for(data, data)
+        # two for input of conv and two for weight of conv
+        # this also tests the ListConstruct can preserve the observed property
+        FileCheck().check_count("aten::quantize_per_tensor", 4, exactly=True) \
+                   .run(g)
+
+        FileCheck().check_not("aten::cat") \
+                   .check("quantized::cat") \
+                   .run(g)
+
     def test_foldbn_trivial(self):
         # Test trivial case
         class TestModule(torch.nn.Module):
@@ -2040,6 +2071,7 @@ graph(%input, %weight):
                    .check("aten::transpose") \
                    .check("aten::contiguous") \
                    .check("aten::chunk") \
+                   .check("prim::ListUnpack") \
                    .check("aten::dropout") \
                    .check("aten::dropout") \
                    .run(m.graph)
@@ -2056,6 +2088,7 @@ graph(%input, %weight):
                    .check("aten::transpose") \
                    .check("aten::contiguous") \
                    .check("aten::chunk") \
+                   .check("prim::ListUnpack") \
                    .check("aten::dropout") \
                    .check("aten::dropout") \
                    .check("dequantize") \
