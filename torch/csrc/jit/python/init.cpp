@@ -734,6 +734,7 @@ void initJITBindings(PyObject* module) {
       return op->schema();
     });
   });
+  m.def("_is_tracing", []() { return jit::tracer::isTracing(); });
 
   struct PythonFutureWrapper {
     explicit PythonFutureWrapper(c10::intrusive_ptr<c10::ivalue::Future> fut)
