@@ -55,7 +55,7 @@ struct IterDomain;
  * Basically beinng able to succienctly traverse down the inhereitance stack of
  * a Statment at runtime. This is currently implemented in dispatch.h
  */
-struct TORCH_API Statement {
+struct TORCH_CUDA_API Statement {
   virtual ~Statement() = default;
 
   // Dispatch functions, definitions in dispatch.cpp
@@ -130,7 +130,7 @@ struct TORCH_API Statement {
  * 5) An enum value must be added to ValType in type.h
  * 6) A string entry must be added in val_type_string_map
  */
-struct TORCH_API Val : public Statement {
+struct TORCH_CUDA_API Val : public Statement {
  public:
   virtual ~Val() = default;
 
@@ -192,7 +192,7 @@ struct TORCH_API Val : public Statement {
  *   binary operations on tensors, scalar values, or a combination, a thread all
  *   reduce, for loops
  */
-struct TORCH_API IRInputOutput {
+struct TORCH_CUDA_API IRInputOutput {
   virtual ~IRInputOutput() = default;
 
   // Returns if Val is an input or output of this IRInputOutput instance
@@ -279,7 +279,7 @@ struct TORCH_API IRInputOutput {
  * 6) An enum value must be added to ExprType in type.h
  * 7) A string entry must be added in expr_type_string_map
  */
-struct TORCH_API Expr : public Statement, IRInputOutput {
+struct TORCH_CUDA_API Expr : public Statement, IRInputOutput {
  public:
   virtual ~Expr() = default;
   Expr() = delete;

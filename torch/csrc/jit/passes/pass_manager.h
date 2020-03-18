@@ -61,7 +61,7 @@ TORCH_API void clearAllPrePasses();
  * types.
  */
 template <typename DerivedType>
-struct TORCH_API PassManager {
+struct PassManager {
  private:
   // We want this class to be abstract because it's
   virtual void abstract() = 0;
