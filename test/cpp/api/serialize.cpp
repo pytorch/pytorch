@@ -64,7 +64,7 @@ void is_optimizer_state_equal(
 }
 
 template <typename OptimizerClass, typename DerivedOptimizerOptions, typename DerivedOptimizerParamState>
-void test_serialize_optimizer(DerivedOptimizerOptions options, int state_size = 2) {
+void test_serialize_optimizer(DerivedOptimizerOptions options, bool only_has_global_state = false) {
   auto model1 = Linear(5, 2);
   auto model2 = Linear(5, 2);
   auto model3 = Linear(5, 2);
@@ -128,6 +128,7 @@ void test_serialize_optimizer(DerivedOptimizerOptions options, int state_size = 
   // optim3_2 and optim1 should have param_groups and state of size 1 and state_size respectively
   ASSERT_TRUE(optim3_2_param_groups.size() == 1);
   // state_size = 2 for all optimizers except LBFGS as LBFGS only maintains one global state
+  int state_size = only_has_global_state ? 1 : 2;
   ASSERT_TRUE(optim3_2_state.size() == state_size);
 
   // optim3_2 and optim1 should have param_groups and state of same size
@@ -669,7 +670,7 @@ TEST(SerializeTest, Optim_RMSprop) {
 }
 
 TEST(SerializeTest, Optim_LBFGS) {
-  test_serialize_optimizer<LBFGS, LBFGSOptions, LBFGSParamState>(LBFGSOptions(), 1);
+  test_serialize_optimizer<LBFGS, LBFGSOptions, LBFGSParamState>(LBFGSOptions(), true);
   // bc compatibility check
   auto model1 = Linear(5, 2);
   auto model1_params = model1->parameters();
@@ -704,11 +705,11 @@ TEST(SerializeTest, Optim_LBFGS) {
   // write buffers to the file
   auto optim_tempfile_old_format = c10::make_tempfile();
   torch::serialize::OutputArchive output_archive;
-  output_archive.write("d", d);
-  output_archive.write("t", t);
-  output_archive.write("H_diag", H_diag);
-  output_archive.write("prev_flat_grad", prev_flat_grad);
-  output_archive.write("prev_loss", prev_loss);
+  output_archive.write("d", d, /*is_buffer=*/true);
+  output_archive.write("t", t, /*is_buffer=*/true);
+  output_archive.write("H_diag", H_diag, /*is_buffer=*/true);
+  output_archive.write("prev_flat_grad", prev_flat_grad, /*is_buffer=*/true);
+  output_archive.write("prev_loss", prev_loss, /*is_buffer=*/true);
   write_tensors_to_archive(output_archive, "old_dirs", old_dirs);
   write_tensors_to_archive(output_archive, "old_stps", old_stps);
   output_archive.save_to(optim_tempfile_old_format.name);

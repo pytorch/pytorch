@@ -166,24 +166,11 @@ TEST(OptimTest, OptimizerAccessors) {
   optimizer_.state();
 }
 
-#define OLD_INTERFACE_WARNING_CHECK(func, val) \
+#define OLD_INTERFACE_WARNING_CHECK(func) \
 { \
   std::stringstream buffer;\
   torch::test::CerrRedirect cerr_redirect(buffer.rdbuf());\
-  val = func;\
-  ASSERT_EQ(\
-    torch::test::count_substr_occurrences(\
-      buffer.str(),\
-      "will be removed"\
-    ),\
-  1);\
-}
-
-#define OLD_INTERFACE_WARNING_CHECK_(func_call) \
-{ \
-  std::stringstream buffer;\
-  torch::test::CerrRedirect cerr_redirect(buffer.rdbuf());\
-  func_call;\
+  func;\
   ASSERT_EQ(\
     torch::test::count_substr_occurrences(\
       buffer.str(),\
@@ -210,7 +197,7 @@ TEST(OptimTest, OldInterface) {
   {
     MyOptimizer optimizer(parameters);
     size_t size;
-    OLD_INTERFACE_WARNING_CHECK(optimizer.size(), size);
+    OLD_INTERFACE_WARNING_CHECK(size = optimizer.size());
     ASSERT_EQ(size, parameters.size());
   }
   {
@@ -218,18 +205,18 @@ TEST(OptimTest, OldInterface) {
     MyOptimizer optimizer(params);
 
     size_t size;
-    OLD_INTERFACE_WARNING_CHECK(optimizer.size(), size);
+    OLD_INTERFACE_WARNING_CHECK(size = optimizer.size());
     ASSERT_EQ(size, 0);
 
-    OLD_INTERFACE_WARNING_CHECK_(optimizer.add_parameters(parameters));
+    OLD_INTERFACE_WARNING_CHECK(optimizer.add_parameters(parameters));
 
-    OLD_INTERFACE_WARNING_CHECK(optimizer.size(), size);
+    OLD_INTERFACE_WARNING_CHECK(size = optimizer.size());
     ASSERT_EQ(size, parameters.size());
 
+    std::vector<torch::Tensor> params_;
+    OLD_INTERFACE_WARNING_CHECK(params_ = optimizer.parameters());
     for (size_t p = 0; p < size; ++p) {
-      std::vector<torch::Tensor> params;
-      OLD_INTERFACE_WARNING_CHECK(optimizer.parameters(), params);
-      ASSERT_TRUE(params[p].allclose(parameters[p]));
+      ASSERT_TRUE(params_[p].allclose(parameters[p]));
     }
   }
   {
@@ -237,7 +224,7 @@ TEST(OptimTest, OldInterface) {
     MyOptimizer optimizer(linear->parameters());
 
     size_t size;
-    OLD_INTERFACE_WARNING_CHECK(optimizer.size(), size);
+    OLD_INTERFACE_WARNING_CHECK(size = optimizer.size());
     ASSERT_EQ(size, linear->parameters().size());
   }
 }
@@ -424,7 +411,7 @@ TEST(OptimTest, AddParameter_LBFGS) {
   }
 
   LBFGS optimizer(std::vector<torch::Tensor>{}, 1.0);
-  OLD_INTERFACE_WARNING_CHECK_(optimizer.add_parameters(parameters));
+  OLD_INTERFACE_WARNING_CHECK(optimizer.add_parameters(parameters));
 
   optimizer.step([]() { return torch::tensor(1); });
 
