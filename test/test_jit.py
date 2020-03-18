@@ -4661,6 +4661,7 @@ def foo(x):
 
         # Working example
         untraceable = torch.jit._lazy_script_while_tracing(untraceable)
+
         def fn2(x):
             return untraceable(x)
 
