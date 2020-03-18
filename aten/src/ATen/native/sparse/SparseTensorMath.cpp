@@ -466,8 +466,9 @@ inline void add_dense_sparse_worker_cpu(Tensor& r, Scalar value, const SparseTen
   });
 }
 
+static constexpr unsigned add_dense_sparse_max_lock_num_bits = 14;
 template <typename scalar_t>
-inline void add_dense_sparse_worker_non_coalesced_cpu(Tensor& r, Scalar value,
+inline void add_dense_sparse_worker_critical_section_cpu(Tensor& r, Scalar value,
     const SparseTensor& sparse, const Tensor& indices, const Tensor& values) {
 
   // Get the dense dimension element numbers of hybrid sparse tensor
@@ -482,47 +483,35 @@ inline void add_dense_sparse_worker_non_coalesced_cpu(Tensor& r, Scalar value,
   scalar_t cast_value = value.to<scalar_t>();
   auto sparse_dim = sparse.sparse_dim();
 
+  auto lock_nums = (1 << add_dense_sparse_max_lock_num_bits);
+  auto lock_num_mask = lock_nums - 1;
+  std::vector<std::atomic<bool>> locks(lock_nums);
+  at::parallel_for(0, lock_nums, 0, [&](int64_t start, int64_t end) {
+    PRAGMA_SIMD
+    for (auto i = start; i < end; i++) {
+      locks[i] = false;
+    }
+  });
   auto indices_accessor = indices.accessor<int64_t, 2>();
-  int64_t result_length = r.size(0);
   std::vector<int64_t> result_stride(sparse_dim);
   for (int64_t d = 0; d < sparse_dim; d++) {
     result_stride[d] = r.stride(d);
   }
 
   auto sparse_nnz = sparse._nnz();
-  int32_t max_threads = at::get_num_threads();
-  max_threads = (result_length < max_threads) ? result_length : max_threads;
-  int64_t avg_chunk_down = result_length / max_threads;
-  int64_t chuck_size[max_threads];
-  for (auto i = 0; i < max_threads; i++) {
-    chuck_size[i] = avg_chunk_down;
-  }
-  //make chunk balance among threads as 211
-  for (auto i = 0 ; i < result_length % max_threads ; i++) {
-    chuck_size[i] += 1;
-  }
-  int64_t chuck_sum_size[max_threads + 1];
-  chuck_sum_size[0] = 0;
-  for (auto i = 1; i < max_threads; i++) {
-    chuck_sum_size[i] = chuck_sum_size[i - 1] + chuck_size[i - 1];
-  }
-  chuck_sum_size[max_threads] = result_length;
-  at::parallel_for(0, max_threads, 0, [&](int64_t start, int64_t end) {
+  at::parallel_for(0, sparse_nnz, 0, [&](int64_t start, int64_t end) {
     for (auto k = start; k < end; k++) {
-      int64_t chunk_begin = chuck_sum_size[k];
-      int64_t chunk_end = chuck_sum_size[k + 1];
-      for (int64_t n = 0; n < sparse_nnz; n++) {
-        int64_t chunk_offset = indices_accessor[0][n];
-        if (chunk_offset >= chunk_begin && chunk_offset < chunk_end) {
-          int64_t r_offset = result_stride[0] * chunk_offset;
-          for (int64_t d = 1; d < sparse_dim; d++) {
-            r_offset += result_stride[d] * indices_accessor[d][n];
-          }
-          scalar_t* v_index = v_ptr + n * values_dense_size;
-          auto r_index = r_ptr + r_offset;
-          THBlas_axpy<scalar_t>(values_dense_size, cast_value, v_index, 1, r_index, 1);
-        }
+      int64_t r_offset = 0;
+      for (int64_t d = 0; d < sparse_dim; d++) {
+        r_offset += result_stride[d] * indices_accessor[d][k];
       }
+      auto v_index = v_ptr + k * values_dense_size;
+      auto r_index = r_ptr + r_offset;
+      auto lock_id = (r_offset & lock_num_mask);
+      while (locks.at(lock_id)) {_mm_pause();};
+      while (locks.at(lock_id).exchange(true)) {_mm_pause();};
+      THBlas_axpy<scalar_t>(values_dense_size, cast_value, v_index, 1, r_index, 1);
+      locks.at(lock_id) = false;
     }
   });
 }
@@ -584,8 +573,8 @@ Tensor& add_out_dense_sparse_cpu(Tensor& r, const Tensor& dense, const SparseTen
     LongTensor indices = sparse_._indices();
     Tensor valuesBuffer = values.to(commonDtype);
     AT_DISPATCH_ALL_TYPES(
-        commonDtype, "add_dense_sparse_worker_non_coalesced", [&] {
-          add_dense_sparse_worker_non_coalesced_cpu<scalar_t>(resultBuffer, value, sparse_, indices, valuesBuffer);
+        commonDtype, "add_dense_sparse_critical_section", [&] {
+          add_dense_sparse_worker_critical_section_cpu<scalar_t>(resultBuffer, value, sparse_, indices, valuesBuffer);
         });
   } else {
     // Slow path for non-contiguous values and output
