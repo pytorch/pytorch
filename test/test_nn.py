@@ -9366,19 +9366,21 @@ class TestNNDeviceType(NNTestCase):
         test('threshold', 3, 2)
         test('threshold', 3, 2, inplace=True)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @onlyCUDA
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
-    @dtypes(torch.float, torch.double)
-    def test_max_pool2d_nhwc(self, device, dtypes):
-        def helper(n, c, h, w, kernel_size):
-            input = torch.randn(n, c, h, w, dtype=dtypes, device="cuda")
+    def test_max_pool2d_nhwc(self, device, dtype):
+        def helper(n, c, h, w, kernel_size, stride=None):
+            if stride is None:
+                stride = kernel_size
+            input = torch.randn(n, c, h, w, dtype=dtype, device=device)
             input = input.contiguous(memory_format=torch.channels_last).requires_grad_()
-            grad = torch.randn(n, c, h // kernel_size, w // kernel_size, dtype=dtypes, device="cuda")
-            pool = torch.nn.MaxPool2d(kernel_size).cuda()
+            grad = torch.randn(n, c, (h - kernel_size) // stride + 1, (w - kernel_size) // stride + 1,
+                               dtype=dtype, device=device)
+            pool = torch.nn.MaxPool2d(kernel_size, stride).to(device)
 
             ref_input = input.detach().clone().contiguous().requires_grad_(True)
             ref_grad = grad.detach().clone().contiguous()
-            ref_pool = torch.nn.MaxPool2d(kernel_size).cuda()
+            ref_pool = torch.nn.MaxPool2d(kernel_size, stride).to(device)
 
             out = pool(input)
             out.backward(grad)
@@ -9392,6 +9394,9 @@ class TestNNDeviceType(NNTestCase):
 
         helper(4, 8, 8, 8, 7)
         helper(200, 512, 28, 28, 2)
+        helper(4, 8, 7, 7, 3, stride=1)
+        helper(10, 512, 31, 31, 3, stride=2)
+        helper(1, 129, 8, 8, 3, stride=2)
 
     def test_embedding_dense_grad(self, device):
         embd = nn.Embedding(20, 20).to(device)
