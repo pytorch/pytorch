@@ -6,7 +6,6 @@
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/custom_class.h>
-#include <torch/csrc/jit/serialization/export.h>
 #include <torch/torch.h>
 
 // Tests go in torch::jit

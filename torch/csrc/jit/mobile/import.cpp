@@ -90,26 +90,15 @@ void parseMethods(
     }
 
     std::unordered_set<std::string> unsupported_op_names;
-    std::set<std::string> op_names;
     for (const auto& op : ops_list) {
       auto op_item = op.toTuple()->elements();
       TORCH_CHECK(op_item.size() == 2,
                   "There should be two parts in an operator name.");
       auto op_found = function->append_operator(op_item[0].toString()->string(),
                            op_item[1].toString()->string());
-      std::string name = op_item[0].toString()->string();
-      if (!op_item[1].toString()->string().empty()) {
-        name += "." + op_item[1].toString()->string();
-      }
       if (!op_found) {
-        unsupported_op_names.emplace(name);
+        unsupported_op_names.emplace(op_item[0].toString()->string() + "." + op_item[1].toString()->string());
       }
-      op_names.emplace(name);
-    }
-
-    std::cout << "op_names: " << std::endl;
-    for (const auto& name : op_names) {
-      std::cout << name << std::endl;
     }
 
     if (!unsupported_op_names.empty()) {
