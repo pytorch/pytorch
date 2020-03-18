@@ -804,8 +804,9 @@ class TestDataLoader(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'Error in worker_init_fn'):
             list(iter(loader))
 
-    @unittest.skipIf(IS_WINDOWS, "Only supported or needed on Unix")
+    @unittest.skipIf(IS_WINDOWS or IS_MACOS, "Only supported or needed on Linux")
     def test_fd_limit_exceeded(self):
+        # See NOTE [ DataLoader on Linux and open files limit ]
         import subprocess
         subprocess.check_call([sys.executable, '-c', """\
 import torch
