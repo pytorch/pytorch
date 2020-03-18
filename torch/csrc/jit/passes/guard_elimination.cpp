@@ -159,16 +159,15 @@ struct GuardElimination {
 
   // `checkInputs` check the invariants specified in `removableGuard`
   // on inputs to `n`. The invariants must hold, or an input must
-  // be a `prim::Constant` or be of `NumberType` or be included
-  // as an exception in `except`
-  bool checkInputs(Node *n, const std::unordered_set<size_t> &except) {
+  // be a `prim::Constant` or be included as an exception in `except`
+  bool checkInputs(Node *n, const std::unordered_set<size_t> &except, bool allow_numbers) {
     bool all_inputs_guarded = true;
     size_t i = 0;
     for (auto input : n->inputs()) {
       if ((input->node()->kind() == prim::Guard &&
            !input->type()->expect<TensorType>()->isSummarized()) ||
           input->node()->kind() == prim::Constant ||
-          input->type()->isSubtypeOf(NumberType::get()) ||
+          (allow_numbers && input->type()->isSubtypeOf(NumberType::get())) ||
           except.count(i) != 0) {
         AT_ASSERT(
             input->node()->kind() != prim::Guard ||
@@ -256,7 +255,6 @@ private:
     case aten::pow:
     case aten::relu:
     case aten::threshold:
-    case aten::avg_pool2d:
     case prim::AutogradAdd:
     case prim::AutogradZero:
     case aten::rand_like:
@@ -273,7 +271,9 @@ private:
     case aten::reciprocal:
     case aten::addcmul:
     case aten::where:
-     return checkInputs(n, no_exceptions);
+      return checkInputs(n, no_exceptions, true);
+    case aten::avg_pool2d:
+    return checkInputs(n, no_exceptions, false);
     case aten::slice:
       return !n->input(0)->type()->expect<TensorType>()->isSummarized() &&
              // check that the dimension argument is constant
@@ -309,15 +309,15 @@ private:
              // no extra nodes in between aten::cat and prim::ListConstruct
              n->prev() == n->input(0)->node() &&
              // check the inputs to prim::ListConstruct (not aten::cat)
-             checkInputs(n->input(0)->node(), no_exceptions);
+             checkInputs(n->input(0)->node(), no_exceptions, false);
     case aten::clamp:
       // the second and third args do not affect shapes
-      return checkInputs(n, std::unordered_set<size_t>{1, 2});
+      return checkInputs(n, std::unordered_set<size_t>{1, 2}, false);
     // after some optimizations we might end up with two Guards back-to-back
     // which case we can remove the one whose input is also prim::Guard
     case aten::_grad_sum_to_size:
       // skip checking size argument
-      if (checkInputs(n, std::unordered_set<size_t>{1})) {
+      if (checkInputs(n, std::unordered_set<size_t>{1}, false)) {
         auto asize = n->input(1)->node();
         if (asize->kind() == prim::Constant) {
           return true;
@@ -342,7 +342,7 @@ private:
       if (chunk->kind() != aten::chunk) {
         return false;
       }
-      return checkInputs(chunk, no_exceptions);
+      return checkInputs(chunk, no_exceptions, false);
     }
     // this is checked by one of the tests in test_jit_fuser.py
     case aten::broadcast_tensors: {
@@ -350,7 +350,7 @@ private:
       if (list_construct->kind() != prim::ListConstruct) {
         return false;
       }
-      return checkInputs(list_construct, no_exceptions);
+      return checkInputs(list_construct, no_exceptions, false);
     }
     case prim::Guard:
     case prim::GradOf:

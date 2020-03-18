@@ -18,6 +18,7 @@ class PyRRef {
   bool isOwner() const;
   bool confirmedByOwner() const;
   WorkerInfo owner() const;
+  std::string ownerName() const;
   py::object toHere();
   py::object localValue();
   std::string str() const;
