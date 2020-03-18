@@ -225,7 +225,12 @@ void testGPU_FusionTopoSort() {
 }
 
 void testGPU_FusionTensor() {
-  auto tensor = at::randn({2, 3, 4, 5}, at::kCUDA);
+  auto options =
+  at::TensorOptions()
+    .dtype(at::kFloat)
+    .device(at::kCUDA, 0);
+
+  auto tensor = at::randn({2, 3, 4, 5}, options);
   auto sizes = tensor.sizes().vec();
   auto tensor_type = TensorType::create(tensor);
 
