@@ -43,8 +43,7 @@ bool operator==(const AdamParamState& lhs, const AdamParamState& rhs) {
   return (lhs.step() == rhs.step()) &&
           torch::equal(lhs.exp_avg(), rhs.exp_avg()) &&
           torch::equal(lhs.exp_avg_sq(), rhs.exp_avg_sq()) &&
-          ((!lhs.max_exp_avg_sq().defined() && !rhs.max_exp_avg_sq().defined()) ||
-           (lhs.max_exp_avg_sq().defined() && rhs.max_exp_avg_sq().defined() && torch::equal(lhs.max_exp_avg_sq(), rhs.max_exp_avg_sq())));
+          torch::equal_if_defined(lhs.max_exp_avg_sq(), rhs.max_exp_avg_sq());
 }
 
 void AdamParamState::serialize(torch::serialize::OutputArchive& archive) const {
