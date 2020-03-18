@@ -233,8 +233,6 @@ scalar_types = [
     ('Char', 'int8_t', 'Long', False),
     ('Double', 'double', 'Double', True),
     ('Float', 'float', 'Double', True),
-    ('ComplexFloat', 'std::complex<float>', 'ComplexDouble', False),
-    ('ComplexDouble', 'std::complex<double>', 'ComplexDouble', False),
     ('Int', 'int', 'Long', False),
     ('Long', 'int64_t', 'Long', False),
     ('Short', 'int16_t', 'Long', False),

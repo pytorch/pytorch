@@ -1216,8 +1216,6 @@ class _TestTorchMixin(object):
         self.assertIs(torch.uint8, torch.ByteTensor.dtype)
         self.assertIs(torch.float32, torch.FloatTensor.dtype)
         self.assertIs(torch.float64, torch.DoubleTensor.dtype)
-        self.assertIs(torch.complex64, torch.ComplexFloatTensor.dtype)
-        self.assertIs(torch.complex128, torch.ComplexDoubleTensor.dtype)
 
         torch.set_default_tensor_type('torch.FloatTensor')
         self.assertIs(torch.float32, torch.get_default_dtype())
@@ -1235,7 +1233,6 @@ class _TestTorchMixin(object):
             torch.set_default_tensor_type(torch.cuda.FloatTensor)
             self.assertIs(torch.float32, torch.get_default_dtype())
             self.assertIs(torch.float32, torch.cuda.FloatTensor.dtype)
-            self.assertIs(torch.complex64, torch.cuda.ComplexFloatTensor.dtype)
             self.assertIs(torch.cuda.FloatStorage, torch.Storage)
 
             torch.set_default_dtype(torch.float64)

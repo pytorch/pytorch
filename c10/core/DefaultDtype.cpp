@@ -7,10 +7,10 @@ static auto default_complex_dtype = caffe2::TypeMeta::Make<std::complex<float>>(
 
 void set_default_dtype(caffe2::TypeMeta dtype) {
   default_dtype = std::move(dtype);
-  if(dtype == caffe2::TypeMeta::Make<float>()) {
-    default_complex_dtype = std::move(caffe2::TypeMeta::Make<std::complex<float>>());
-  } else {
+  if(dtype == caffe2::TypeMeta::Make<double>()) {
     default_complex_dtype = std::move(caffe2::TypeMeta::Make<std::complex<double>>());
+  } else {
+    default_complex_dtype = std::move(caffe2::TypeMeta::Make<std::complex<float>>());
   }
 }
 

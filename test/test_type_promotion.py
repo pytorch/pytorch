@@ -28,7 +28,6 @@ def float_double_default_dtype(fn):
 
     return wrapped_fn
 
-
 class TestTypePromotion(TestCase):
 
     # In-place operations don't promote.
@@ -80,7 +79,7 @@ class TestTypePromotion(TestCase):
         self.assertEqual(c.dtype, torch.int64)
 
     @float_double_default_dtype
-    def test_complex_float_promotion(self, device):
+    def test_float_promotion(self, device):
         def test_promotion(dtype_float, dtype_double):
             a = torch.ones([4, 4, 4], dtype=dtype_float, device=device)
             b = torch.ones([4, 4, 4], dtype=dtype_double, device=device)
@@ -91,7 +90,26 @@ class TestTypePromotion(TestCase):
             self.assertEqual(c, b + b)
             self.assertEqual(c.dtype, dtype_double)
         test_promotion(torch.float, torch.double)
+
+    @float_double_default_dtype
+    def test_complex_promotion(self, device):
+        def test_promotion(dtype_float, dtype_double):
+            a = torch.ones([4, 4, 4], dtype=dtype_float, device=device)
+            b = torch.ones([4, 4, 4], dtype=dtype_double, device=device)
+            c = a + b
+            self.assertEqual(c, b + b)
+            self.assertEqual(c.dtype, dtype_double)
+            c = b + a
+            self.assertEqual(c, b + b)
+            self.assertEqual(c.dtype, dtype_double)
+
         test_promotion(torch.complex64, torch.complex128)
+
+        a = torch.randn(3, dtype=torch.complex64, device=device)
+        self.assertEqual((a * 5).dtype, torch.complex64)
+        # not a "wrapped number"
+        other = torch.tensor(5.5, dtype=torch.double, device=device)
+        self.assertEqual((a + other).dtype, torch.complex64)
 
     @float_double_default_dtype
     def test_complex_scalar_mult_tensor_promotion(self, device):
@@ -122,10 +140,8 @@ class TestTypePromotion(TestCase):
     @float_double_default_dtype
     def test_from_issue(self, device):
         a = torch.rand(3, dtype=torch.float32, device=device)
-        b = torch.randn(3, dtype=torch.complex64, device=device)
         u = torch.tensor([0, 0, 1], dtype=torch.uint8, device=device)
         self.assertEqual((a * 5).dtype, torch.float32)
-        self.assertEqual((b * 5).dtype, torch.complex64)
         self.assertEqual((u + 1).dtype, torch.uint8)
         self.assertEqual((u + 1000).dtype, torch.uint8)  # integer overflow
 
@@ -137,7 +153,6 @@ class TestTypePromotion(TestCase):
         # adding a 0-dim tensor to a float doesn't promote to double unless first
         # type was integral.
         self.assertEqual((a + other).dtype, torch.float32)
-        self.assertEqual((b + other).dtype, torch.complex64)
 
     @float_double_default_dtype
     def test_half(self, device):
@@ -213,8 +228,9 @@ class TestTypePromotion(TestCase):
     def test_many_promotions(self, device):
         # Can also include half on CPU in cases where it will be promoted to a
         # supported dtype
-        dtypes1 = torch.testing.get_all_math_dtypes_and_complex('cuda')
-        dtypes2 = torch.testing.get_all_math_dtypes_and_complex(device)
+        complex_dtypes = get_all_complex_dtypes()
+        dtypes1 = torch.testing.get_all_math_dtypes('cuda') + complex_dtypes
+        dtypes2 = torch.testing.get_all_math_dtypes(device) + complex_dtypes
         ops = [torch.add, torch.sub, torch.mul, torch.div, torch.rsub]
         for dt1, dt2 in itertools.product(dtypes1, dtypes2):
             for op, non_contiguous in itertools.product(ops, [True, False]):

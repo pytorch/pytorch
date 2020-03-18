@@ -18,12 +18,12 @@ A :class:`torch.dtype` is an object that represents the data type of a
 :class:`torch.Tensor`. PyTorch has eleven different data types:
 
 ========================   ===========================================   ===========================
-Data type                  dtype                                         Tensor types
+Data type                  dtype                                         Legacy Constructors
 ========================   ===========================================   ===========================
 32-bit floating point      ``torch.float32`` or ``torch.float``          ``torch.*.FloatTensor``
 64-bit floating point      ``torch.float64`` or ``torch.double``         ``torch.*.DoubleTensor``
-64-bit complex             ``torch.complex64`` or ``torch.cfloat``       ``torch.*.ComplexFloatTensor``
-128-bit floating point     ``torch.complex128`` or ``torch.cdouble``     ``torch.*.ComplexDoubleTensor``
+64-bit complex             ``torch.complex64`` or ``torch.cfloat``
+128-bit floating point     ``torch.complex128`` or ``torch.cdouble``
 16-bit floating point      ``torch.float16`` or ``torch.half``           ``torch.*.HalfTensor``
 8-bit integer (unsigned)   ``torch.uint8``                               ``torch.*.ByteTensor``
 8-bit integer (signed)     ``torch.int8``                                ``torch.*.CharTensor``
@@ -37,7 +37,7 @@ To find out if a :class:`torch.dtype` is a floating point data type, the propert
 can be used, which returns ``True`` if the data type is a floating point data type.
 
 To find out if a :class:`torch.dtype` is a complex data type, the property :attr:`is_complex`
-can be used, which returns ``True`` if the data type is a floating point data type.
+can be used, which returns ``True`` if the data type is a complex data type.
 
 .. _type-promotion-doc:
 
