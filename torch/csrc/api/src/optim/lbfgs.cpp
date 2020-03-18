@@ -456,7 +456,7 @@ Tensor LBFGS::step(LossClosure closure) {
 
       // compute the approximate (L-BFGS) inverse Hessian
       // multiplied by the gradient
-      size_t num_old = old_dirs.size();
+      int64_t num_old = static_cast<int64_t>(old_dirs.size());
 
       if (state.al() == c10::nullopt) {
         state.al(std::vector<Tensor>(history_size));
@@ -465,7 +465,7 @@ Tensor LBFGS::step(LossClosure closure) {
 
       // iteration in L-BFGS loop collapsed to use just one buffer
       auto q = flat_grad.neg();
-      for (size_t i = num_old - 1; i > -1; i--) {
+      for (int64_t i = num_old - 1; i > -1; i--) {
         (*al).at(i) = old_stps.at(i).dot(q) * ro.at(i);
         q.add_(old_dirs.at(i), -val((*al).at(i)));
       }
@@ -474,7 +474,7 @@ Tensor LBFGS::step(LossClosure closure) {
       // r/d is the final direction
       auto r = torch::mul(q, H_diag);
       d = r;
-      for (size_t i = 0; i < num_old; i++) {
+      for (int64_t i = 0; i < num_old; i++) {
         auto be_i = old_dirs.at(i).dot(r) * ro.at(i);
         r.add_(old_stps.at(i), val((*al).at(i) - be_i));
       }
@@ -593,7 +593,7 @@ void LBFGS::load(serialize::InputArchive& archive) {
     torch::optim::serialize(archive, "old_dirs", old_dirs);
     torch::optim::serialize(archive, "old_stps", old_stps);
     std::vector<Tensor> params = param_groups_.at(0).params();
-    for (size_t idx = 0; idx < params.size(); idx++) {
+    for (const auto& param : params) {
       auto state = std::make_unique<LBFGSParamState>();
       state->d(d);
       state->t(t.item<double>());
@@ -602,7 +602,7 @@ void LBFGS::load(serialize::InputArchive& archive) {
       state->prev_loss(prev_loss.item<double>());
       state->old_dirs(old_dirs);
       state->old_stps(old_stps);
-      state_[c10::guts::to_string(params.at(idx).unsafeGetTensorImpl())] = std::move(state);
+      state_[c10::guts::to_string(param.unsafeGetTensorImpl())] = std::move(state);
     }
   }
 }
