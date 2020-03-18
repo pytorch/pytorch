@@ -1,6 +1,16 @@
 #pragma once
-#include <ATen/ATen.h>
-#include <ATen/core/ivalue.h>
+#include <c10/macros/Export.h>
+
+#include <cstdint>
+#include <functional>
+#include <memory>
+#include <string>
+
+namespace c10 {
+namespace ivalue {
+struct Future;
+} // namespace ivalue
+} // namespace c10
 
 namespace at {
 namespace internal {
