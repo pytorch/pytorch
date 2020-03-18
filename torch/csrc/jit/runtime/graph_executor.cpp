@@ -547,6 +547,7 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
 
   ExecutionPlan compileSpec(const ArgumentSpec& spec) {
     auto opt_graph = graph->copy();
+    TORCH_INTERNAL_ASSERT(false, "Boom!");
     SOURCE_DUMP("Optimizing the following function:", opt_graph);
     arg_spec_creator_.specializeTypes(*opt_graph, spec);
 
