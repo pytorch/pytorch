@@ -23,6 +23,8 @@ namespace rpc {
 
 namespace {
 
+constexpr std::chrono::milliseconds kDeleteAllUsersTimeout(100000);
+
 template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
 
@@ -113,7 +115,19 @@ PyObject* rpc_init(PyObject* /* unused */) {
       shared_ptr_class_<PyRRef>(module, "RRef", R"(
           A class encapsulating a reference to a value of some type on a remote
           worker. This handle will keep the referenced remote value alive on the
-          worker.
+          worker. A ``UserRRef`` will be deleted when 1) no references to it in
+          both the application code and in the local RRef context, or 2) the
+          application has called a graceful shutdown. Invoking methods on a
+          deleted RRef leads to undefined behaviors. RRef implementation only
+          offers best-effort error detection, and applications should not use
+          ``UserRRef``s after ``rpc.shutdown()``.
+
+          .. warning::
+              RRefs can only be serialized and deserialized by the RPC module.
+              Serializing and deserializing RRefs without RPC (e.g., Python
+              pickle, torch :meth:`~torch.save` / :meth:`~torch.load`,
+              JIT :meth:`~torch.jit.save` / :meth:`~torch.jit.load`, etc.) will
+              lead to errors.
 
           Example::
               Following examples skip RPC initialization and shutdown code
@@ -162,11 +176,26 @@ PyObject* rpc_init(PyObject* /* unused */) {
                   ``RRef``.
               )")
           .def(
+              "confirmed_by_owner",
+              &PyRRef::confirmedByOwner,
+              R"(
+                  Returns whether this ``RRef`` has been confirmed by the owner.
+                  ``OwnerRRef`` always returns true, while ``UserRRef`` only
+                  returns true when the owner knowns about this ``UserRRef``.
+              )")
+          .def(
               // not releasing GIL here to avoid context switch on getters
               "owner",
               &PyRRef::owner,
               R"(
                   Returns worker information of the node that owns this ``RRef``.
+              )")
+          .def(
+              // not releasing GIL here to avoid context switch on getters
+              "owner_name",
+              &PyRRef::ownerName,
+              R"(
+                  Returns worker name of the node that owns this ``RRef``.
               )")
           .def(
               "to_here",
@@ -330,6 +359,13 @@ If the future completes with an error, an exception is thrown.
     RpcAgent::setCurrentRpcAgent(nullptr);
   });
 
+  module.def(
+      "_delete_all_user_rrefs",
+      [](std::chrono::milliseconds timeoutMillis) {
+        RRefContext::getInstance().delAllUsers(timeoutMillis);
+      },
+      py::arg("timeout") = kDeleteAllUsersTimeout);
+
   module.def("_destroy_rref_context", [](bool ignoreRRefLeak) {
     // NB: do not release GIL in the function. The destroyInstance() method
     // returns a list of deleted OwnerRRefs that hold py::object instances.
@@ -407,17 +443,16 @@ If the future completes with an error, an exception is thrown.
   module.def(
       "_invoke_rpc_torchscript",
       [](const std::string& dstWorkerName,
-         const py::object& userCallable,
-         const py::tuple& argsTuple,
-         const py::dict& kwargsDict) {
+         const std::string& qualifiedNameStr,
+         const py::args& args,
+         const py::kwargs& kwargs) {
         DCHECK(!PyGILState_Check());
+        const c10::QualifiedName qualifiedName(qualifiedNameStr);
         // No need to catch exception here, if function can not be found,
         // exception will be thrown in get_function() call; if args do not match
         // with function schema, exception will be thrown in
         // createStackForSchema() call.
         auto& pythonRpcHandler = PythonRpcHandler::getInstance();
-        c10::QualifiedName qualifiedName =
-            pythonRpcHandler.getQualifiedName(userCallable);
         c10::FunctionSchema functionSchema =
             pythonRpcHandler.jitCompilationUnit()
                 ->get_function(qualifiedName)
@@ -426,10 +461,7 @@ If the future completes with an error, an exception is thrown.
         {
           py::gil_scoped_acquire acquire;
           stack = torch::jit::createStackForSchema(
-              functionSchema,
-              argsTuple.cast<py::args>(),
-              kwargsDict.cast<py::kwargs>(),
-              c10::nullopt);
+              functionSchema, args, kwargs, c10::nullopt);
         }
         DCHECK(!PyGILState_Check());
         c10::intrusive_ptr<c10::ivalue::Future> fut =

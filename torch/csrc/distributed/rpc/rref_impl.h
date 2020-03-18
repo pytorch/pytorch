@@ -201,6 +201,11 @@ class TORCH_API RRef : public RRefInterface {
     return ownerId_;
   }
 
+  // returns the worker name of the owner
+  inline std::string ownerName() const override {
+    return RpcAgent::getCurrentRpcAgent()->getWorkerInfo(ownerId_).name_;
+  }
+
   // Returns the globally unique RRefId of this RRef
   inline const RRefId& rrefId() const {
     return rrefId_;
@@ -213,12 +218,20 @@ class TORCH_API RRef : public RRefInterface {
     return type_;
   }
 
+  // Send delete UserRRef request to Owner,
+  // if the request hasn't been sent yet.
+  // There are 2 cases to call it,
+  // 1, Python GC decides end of UserRRef lifetime, calling destructor.
+  // 2, RPC module graceful shutdown calls it on all UserRRefs tracked
+  //    in the RRefContext.
+  virtual void tryDel() {}
+
  protected:
   friend class RRefContext;
 
   RRef(worker_id_t ownerId, const RRefId& rrefId, TypePtr type);
 
-  RRefForkData fork() const;
+  virtual RRefForkData fork() const;
 
   const worker_id_t ownerId_;
   const RRefId rrefId_;
@@ -249,6 +262,10 @@ class TORCH_API UserRRef final : public RRef {
     return false;
   }
 
+  inline bool confirmedByOwner() const override {
+    return confirmedByOwner_;
+  }
+
   // Returns the globally unique ForkId of this RRef
   const ForkId& forkId() const;
 
@@ -256,13 +273,36 @@ class TORCH_API UserRRef final : public RRef {
   // yet, this call will block.
   IValue toHere();
 
+  void tryDel() override;
+
+  // Will be called when refcount reaches 0.
   // Upon destruction, this ``UserRRef`` will tell the owner to deref.
-  ~UserRRef() override;
+  void release_resources() override;
+
+  // Will be called when both refcount and weakcount reach 0. See
+  // https://github.com/pytorch/pytorch/blob/9116f02bebf3a5260feef5732d36c54ecb3b4033/c10/util/intrusive_ptr.h#L204
+  // This is called on destructing the wrapping intrusive_ptr_target instance
+  // and it's data members. We don't need to implement anything here.
+  ~UserRRef() = default;
 
  private:
   friend class RRefContext;
 
+  RRefForkData fork() const override;
+  inline void confirm() {
+    confirmedByOwner_ = true;
+  }
+
   const ForkId forkId_;
+
+  // Indicates if this user has sent delete message to it's owner.
+  // Note, thread safety is needed because delete message could be sent by
+  // either the destructor called by Python garbage collection or RRefContext
+  // proactive cleanup on RPC graceful shutdown.
+  std::mutex deletedOnOwnerMutex_;
+  bool deletedOnOwner_{false};
+  // Indicating whether this UserRRef has been confirmed by its owner.
+  std::atomic<bool> confirmedByOwner_;
 };
 
 // Keep the template only on the derived class because ``RRefContext`` needs to
@@ -287,6 +327,12 @@ class TORCH_API OwnerRRef final : public RRef {
   }
 
   inline bool isOwner() const override {
+    return true;
+  }
+
+  // OwnerRRef is always confirmed, while UserRRef is only confirmed when the
+  // owner knows about it.
+  inline bool confirmedByOwner() const override {
     return true;
   }
 

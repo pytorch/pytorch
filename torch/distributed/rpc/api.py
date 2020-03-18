@@ -14,6 +14,7 @@ from . import (
     RpcBackendOptions,
     WorkerInfo,
     _cleanup_python_rpc_handler,
+    _delete_all_user_rrefs,
     _destroy_rref_context,
     _get_current_rpc_agent,
     _invoke_remote_builtin,
@@ -36,8 +37,8 @@ from .internal import (
 )
 
 
-logging.basicConfig()
 logger = logging.getLogger(__name__)
+
 
 # NB: Ignoring RRef leaks during shutdown. Without this, applications have to
 # make sure there is no references to any RRef in the application code and
@@ -204,9 +205,11 @@ def shutdown(graceful=True):
 
     Arguments:
         graceful (bool): Whether to do a graceful shutdown or not. If True,
-                         this will block until all local and remote RPC
-                         processes have reached this method and wait for all
-                         outstanding work to complete.
+                         this will 1) wait until there is no pending system
+                         messages for ``UserRRef``s and delete them; 2) block
+                         until all local and remote RPC processes have reached
+                         this method and wait for all outstanding work to
+                         complete.
 
     Example::
         Make sure that ``MASTER_ADDRESS`` and ``MASTER_PORT`` are set properly
@@ -235,6 +238,7 @@ def shutdown(graceful=True):
     """
     if graceful:
         _wait_all_workers()
+        _delete_all_user_rrefs()
         _get_current_rpc_agent().join()
     try:
         # This raises a `TORCH_CHECK()` exception on RRef leak detected.
@@ -349,8 +353,9 @@ def remote(to, func, args=None, kwargs=None):
 
     Arguments:
         to (str or WorkerInfo): id or name of the destination worker.
-        func (callable): any callable function. python callable, builtin or annotated TorchScript
-                         functions (like meth:`torch.add`) can be sent over RPC more efficiently.
+        func (callable): a callable function, such as Python callables, builtin
+                         operators (e.g. :meth:`~torch.add`) and annotated
+                         TorchScript functions.
         args (tuple): the argument tuple for the ``func`` invocation.
         kwargs (dict): is a dictionary of keyword arguments for the ``func``
                        invocation.
@@ -359,6 +364,20 @@ def remote(to, func, args=None, kwargs=None):
         A user :class:`~torch.distributed.rpc.RRef` instance to the result
         value. Use the blocking API :meth:`torch.distributed.rpc.RRef.to_here`
         to retrieve the result value locally.
+
+    .. warning ::
+        Using GPU tensors as arguments or return values of ``func`` is not
+        supported since we don't support sending GPU tensors over the wire. You
+        need to explicitly copy GPU tensors to CPU before using them as
+        arguments or return values of ``func``.
+
+    .. warning ::
+        The ``remote`` API does not copy storages of argument tensors until
+        sending them over the wire, which could be done by a different thread
+        depending on the RPC backend type. The caller should make sure that the
+        contents of those tensors stay intact until the returned RRef is
+        confirmed by the owner, which can be checked using the
+        :meth:`torch.distributed.rpc.RRef.confirmed_by_owner` API.
 
     Example::
         Make sure that ``MASTER_ADDRESS`` and ``MASTER_PORT`` are set properly
@@ -384,13 +403,14 @@ def remote(to, func, args=None, kwargs=None):
         >>> rpc.init_rpc("worker1", rank=1, world_size=2)
         >>> rpc.shutdown()
 
-        If invoking an annotated TorchScript function, then run the following
-        code in two different processes:
+        Below is an example of running a TorchScript function using RPC.
 
-        >>> # On worker 0:
+        >>> # On both workers:
         >>> @torch.jit.script
         >>> def my_script_add(t1, t2):
         >>>    return torch.add(t1, t2)
+
+        >>> # On worker 0:
         >>> import torch.distributed.rpc as rpc
         >>> rpc.init_rpc("worker0", rank=0, world_size=2)
         >>> rref = rpc.remote("worker1", my_script_add, args=(torch.ones(2), 3))
@@ -455,7 +475,9 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None):
     if qualified_name is not None:
         fut = _invoke_rpc_builtin(dst_worker_info, qualified_name, rf, *args, **kwargs)
     elif isinstance(func, torch.jit.ScriptFunction):
-        fut = _invoke_rpc_torchscript(dst_worker_info.name, func, args, kwargs)
+        fut = _invoke_rpc_torchscript(
+            dst_worker_info.name, torch.jit._qualified_name(func), *args, **kwargs
+        )
     else:
         (pickled_python_udf, tensors) = _default_pickler.serialize(
             PythonUDF(func, args, kwargs)
@@ -473,14 +495,21 @@ def rpc_sync(to, func, args=None, kwargs=None):
 
     Arguments:
         to (str or WorkerInfo): id or name of the destination worker.
-        func (callable): any callable function. python callable, builtin or annotated TorchScript
-                         functions (like meth:`torch.add`) can be sent over RPC more efficiently.
+        func (callable): a callable function, such as Python callables, builtin
+                         operators (e.g. :meth:`~torch.add`) and annotated
+                         TorchScript functions.
         args (tuple): the argument tuple for the ``func`` invocation.
         kwargs (dict): is a dictionary of keyword arguments for the ``func``
                        invocation.
 
     Returns:
-        Returns the result of running ``func`` on ``args`` and ``kwargs``.
+        Returns the result of running ``func`` with ``args`` and ``kwargs``.
+
+    .. warning ::
+        Using GPU tensors as arguments or return values of ``func`` is not
+        supported since we don't support sending GPU tensors over the wire. You
+        need to explicitly copy GPU tensors to CPU before using them as
+        arguments or return values of ``func``.
 
     Example::
         Make sure that ``MASTER_ADDRESS`` and ``MASTER_PORT`` are set properly
@@ -504,13 +533,14 @@ def rpc_sync(to, func, args=None, kwargs=None):
         >>> rpc.init_rpc("worker1", rank=1, world_size=2)
         >>> rpc.shutdown()
 
-        If invoking an annotated TorchScript function, then run the following
-        code in two different processes:
+        Below is an example of running a TorchScript function using RPC.
 
-        >>> # On worker 0:
+        >>> # On both workers:
         >>> @torch.jit.script
         >>> def my_script_add(t1, t2):
         >>>    return torch.add(t1, t2)
+
+        >>> # On worker 0:
         >>> import torch.distributed.rpc as rpc
         >>> rpc.init_rpc("worker0", rank=0, world_size=2)
         >>> ret = rpc.rpc_sync("worker1", my_script_add, args=(torch.ones(2), 3))
@@ -531,13 +561,14 @@ def rpc_async(to, func, args=None, kwargs=None):
     r"""
     Make a non-blocking RPC call to run function ``func`` on worker ``to``. RPC
     messages are sent and received in parallel to execution of Python code. This
-    method is thread-safe. This method will immediately return a
-    Future that can be awaited on.
+    method is thread-safe. This method will immediately return a Future that can
+    be awaited on.
 
     Arguments:
         to (str or WorkerInfo): id or name of the destination worker.
-        func (callable): any callable function. python callable, builtin or annotated TorchScript
-                         functions (like meth:`torch.add`) can be sent over RPC more efficiently.
+        func (callable): a callable function, such as Python callables, builtin
+                         operators (e.g. :meth:`~torch.add`) and annotated
+                         TorchScript functions.
         args (tuple): the argument tuple for the ``func`` invocation.
         kwargs (dict): is a dictionary of keyword arguments for the ``func``
                        invocation.
@@ -546,6 +577,19 @@ def rpc_async(to, func, args=None, kwargs=None):
         Returns a Future object that can be waited
         on. When completed, the return value of ``func`` on ``args`` and
         ``kwargs`` can be retrieved from the Future object.
+
+    .. warning ::
+        Using GPU tensors as arguments or return values of ``func`` is not
+        supported since we don't support sending GPU tensors over the wire. You
+        need to explicitly copy GPU tensors to CPU before using them as
+        arguments or return values of ``func``.
+
+    .. warning ::
+        The ``rpc_async`` API does not copy storages of argument tensors until
+        sending them over the wire, which could be done by a different thread
+        depending on the RPC backend type. The caller should make sure that the
+        contents of those tensors stay intact until the returned Future
+        completes.
 
     Example::
         Make sure that ``MASTER_ADDRESS`` and ``MASTER_PORT`` are set properly
@@ -571,13 +615,14 @@ def rpc_async(to, func, args=None, kwargs=None):
         >>> rpc.init_rpc("worker1", rank=1, world_size=2)
         >>> rpc.shutdown()
 
-        If invoking an annotated TorchScript function, then run the following
-        code in two different processes:
+        Below is an example of running a TorchScript function using RPC.
 
-        >>> # On worker 0:
+        >>> # On both workers:
         >>> @torch.jit.script
         >>> def my_script_add(t1, t2):
         >>>    return torch.add(t1, t2)
+
+        >>> # On worker 0:
         >>> import torch.distributed.rpc as rpc
         >>> rpc.init_rpc("worker0", rank=0, world_size=2)
         >>> fut = rpc.rpc_async("worker1", my_script_add, args=(torch.ones(2), 3))

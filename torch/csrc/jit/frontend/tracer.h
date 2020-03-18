@@ -269,15 +269,6 @@ TORCH_API void addInputs(
     const c10::optional<at::MemoryFormat>& value);
 TORCH_API void addInputs(Node* n, const char* name, at::Generator* value);
 
-template <typename T>
-TORCH_API void addInputs(Node* n, const char* name, ArrayRef<T> value);
-
-template <typename K, typename V>
-TORCH_API void addInputs(
-    Node* n,
-    const char* name,
-    const std::unordered_map<K, V>& value);
-
 inline void addInputs(
     Node* n,
     const char* name,
