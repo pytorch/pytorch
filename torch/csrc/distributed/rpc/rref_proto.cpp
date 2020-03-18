@@ -29,7 +29,6 @@ std::vector<IValue> toIValues(const Message& message, MessageType type) {
 }
 
 Message fromIValues(std::vector<IValue> ivalues, MessageType type) {
-  JitRRefPickleGuard jitPickleGuard;
   std::vector<torch::Tensor> tensor_table;
   auto payload = jit::pickle(
       c10::ivalue::Tuple::create(std::move(ivalues)), &tensor_table);
@@ -44,7 +43,7 @@ const RRefId& RRefMessageBase::rrefId() {
   return rrefId_;
 }
 
-Message RRefMessageBase::toMessage() && {
+Message RRefMessageBase::toMessageInternal() && {
   return fromIValues({rrefId_.toIValue()}, type_);
 }
 
@@ -64,7 +63,7 @@ const ForkId& ForkMessageBase::forkId() {
   return forkId_;
 }
 
-Message ForkMessageBase::toMessage() && {
+Message ForkMessageBase::toMessageInternal() && {
   return fromIValues({rrefId_.toIValue(), forkId_.toIValue()}, type_);
 }
 
@@ -82,7 +81,7 @@ std::pair<RRefId, ForkId> ForkMessageBase::fromMessage(
 
 /////////////////////////// RRef Protocol //////////////////////////////////
 
-Message ScriptRRefFetchCall::toMessage() && {
+Message ScriptRRefFetchCall::toMessageInternal() && {
   std::vector<at::IValue> ivalues;
   ivalues.reserve(2);
   ivalues.emplace_back(rrefId_.toIValue());
@@ -104,7 +103,7 @@ std::unique_ptr<ScriptRRefFetchCall> ScriptRRefFetchCall::fromMessage(
       worker_id_t(id), RRefId::fromIValue(values[0]));
 }
 
-Message PythonRRefFetchCall::toMessage() && {
+Message PythonRRefFetchCall::toMessageInternal() && {
   std::vector<at::IValue> ivalues;
   ivalues.reserve(2);
   ivalues.emplace_back(rrefId_.toIValue());
@@ -130,8 +129,7 @@ const std::vector<at::IValue>& RRefFetchRet::values() {
   return values_;
 }
 
-Message RRefFetchRet::toMessage() && {
-  JitRRefPickleGuard jitPickleGuard;
+Message RRefFetchRet::toMessageInternal() && {
   std::vector<at::IValue> ivalues = values_;
   std::vector<torch::Tensor> tensor_table;
   auto payload =
@@ -172,7 +170,7 @@ const ForkId& RRefChildAccept::forkId() const {
   return forkId_;
 }
 
-Message RRefChildAccept::toMessage() && {
+Message RRefChildAccept::toMessageInternal() && {
   return fromIValues({forkId_.toIValue()}, MessageType::RREF_CHILD_ACCEPT);
 }
 
@@ -191,7 +189,7 @@ std::unique_ptr<RRefForkRequest> RRefForkRequest::fromMessage(
   return std::make_unique<RRefForkRequest>(pair.first, pair.second);
 }
 
-Message RRefAck::toMessage() && {
+Message RRefAck::toMessageInternal() && {
   return Message({}, {}, MessageType::RREF_ACK);
 }
 

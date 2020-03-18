@@ -22,8 +22,7 @@ const at::IValue& ScriptResp::value() {
   return value_;
 }
 
-Message ScriptResp::toMessage() && {
-  JitRRefPickleGuard jitPickleGuard;
+Message ScriptResp::toMessageInternal() && {
   std::vector<torch::Tensor> tensor_table;
   auto payload = jit::pickle(value_, &tensor_table);
   return Message(
