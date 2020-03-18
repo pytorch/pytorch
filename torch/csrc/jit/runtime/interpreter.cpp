@@ -1148,7 +1148,9 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                     : state_(std::move(state)), stack_(std::move(stack)) {}
                 void operator()() {
                   at::launch(InterpreterContinuation(
-                      state_, std::move(stack_), torch::getThreadLocalState()));
+                      state_,
+                      std::move(stack_),
+                      torch::ThreadLocalState::getThreadLocalState()));
                 }
 
                private:
@@ -1273,7 +1275,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             InterpreterContinuation continuation(
                 forked_interpreter,
                 Stack(stack.end() - inst.N, stack.end()),
-                torch::getThreadLocalState());
+                torch::ThreadLocalState::getThreadLocalState());
             drop(stack, inst.N);
             push(stack, forked_interpreter.getFuture());
             at::launch(std::move(continuation));

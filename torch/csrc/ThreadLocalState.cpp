@@ -16,15 +16,7 @@ ThreadLocalState::ThreadLocalState(
     : grad_mode_enabled_(grad_mode_enabled),
       dist_autograd_context_id_(dist_autograd_context_id) {}
 
-bool ThreadLocalState::gradModeEnabled() const {
-  return grad_mode_enabled_;
-}
-
-int64_t ThreadLocalState::distAutogradContextId() const {
-  return dist_autograd_context_id_;
-}
-
-ThreadLocalState getThreadLocalState() {
+ThreadLocalState ThreadLocalState::getThreadLocalState() {
   int64_t dist_autograd_context_id = -1;
 #ifdef USE_DISTRIBUTED
   dist_autograd_context_id = DistAutogradContainer::currentContextId();
@@ -34,11 +26,11 @@ ThreadLocalState getThreadLocalState() {
       autograd::GradMode::is_enabled(), dist_autograd_context_id);
 }
 
-void setThreadLocalState(const ThreadLocalState& state) {
-  at::GradMode::set_enabled(state.gradModeEnabled());
+void ThreadLocalState::setThreadLocalState(const ThreadLocalState& state) {
+  at::GradMode::set_enabled(state.grad_mode_enabled_);
 
 #ifdef USE_DISTRIBUTED
-  DistAutogradContainer::forceCurrentContextId(state.distAutogradContextId());
+  DistAutogradContainer::forceCurrentContextId(state.dist_autograd_context_id_);
 #endif
 }
 
