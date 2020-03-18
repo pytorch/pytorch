@@ -15780,6 +15780,35 @@ a")
         tester(float_hash, (20.0, 21.00001, 22.443))
         tester(str_hash, ("", "hello", "a"))
 
+    def test_id(self):
+        @torch.jit.script
+        def test_id_scalars():
+            a = id(None) == id(None)
+            b = id(None) != id(0)
+            c = id(1) != id(0)
+            d = id(None) != id(0.0)
+            f = id(torch.float) != id(torch.double)
+            return a and b and c and d and f
+
+        self.assertTrue(test_id_scalars())
+
+        @torch.jit.script
+        class FooTest(object):
+            def __init__(self, x):
+                self.foo = x
+
+            def getFooTest(self):
+                return self.foo
+
+        def test_id_class_types():
+            a = id(FooTest(torch.tensor(3)))
+            b = id(FooTest(torch.tensor(2)))
+            c = id(None)
+            return a != b and b != c
+
+        script = torch.jit.script(test_id_class_types)
+        self.assertEqual(script(), test_id_class_types())
+
     def test_mutable_dce(self):
         @torch.jit.script
         def foo():
