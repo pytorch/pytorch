@@ -114,11 +114,12 @@ class QuantizationTestCase(TestCase):
     def checkQuantizedLinear(self, mod):
         self.assertEqual(type(mod), nnq.Linear)
 
-    def checkDynamicQuantizedLinear(self, mod):
+    def checkDynamicQuantizedLinear(self, mod, dtype):
         r"""Checks that mod has been swapped for an nnqd.Linear
             module, the bias is float.
         """
         self.assertEqual(type(mod), nnqd.Linear)
+        self.assertEqual(mod._packed_params.dtype, dtype)
 
     def checkLinear(self, mod):
         self.assertEqual(type(mod), torch.nn.Linear)
@@ -474,7 +475,7 @@ class ModelForFusion(nn.Module):
         super(ModelForFusion, self).__init__()
         self.conv1 = nn.Conv2d(3, 2, 5, bias=None).to(dtype=torch.float)
         self.bn1 = nn.BatchNorm2d(2).to(dtype=torch.float)
-        self.relu1 = nn.ReLU(inplace=False).to(dtype=torch.float)
+        self.relu1 = nn.ReLU(inplace=True).to(dtype=torch.float)
         self.sub1 = SubModelForFusion()
         self.sub2 = SubModelWithoutFusion()
         self.fc = nn.Linear(72, 10).to(dtype=torch.float)

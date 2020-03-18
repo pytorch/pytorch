@@ -30,6 +30,11 @@ from collections import defaultdict
 from .utils import YamlLoader, split_name_params
 
 # See NOTE [ Autograd View Variables ] in variable.h for details.
+# If you update list VIEW_FUNCTIONS or RETURNS_VIEWS_OF_INPUT,
+# you **MUST** also update the public list of view ops accordingly in
+# docs/source/tensor_view.rst. Note not all ATen functions are exposed to public,
+# e.g alias & sparse_coo_tensor_with_dims_and_tensors.
+#
 # A map: function name => name of the argument that all outputs are view of
 VIEW_FUNCTIONS = {
     'numpy_T': 'self',
@@ -37,8 +42,7 @@ VIEW_FUNCTIONS = {
     'as_strided': 'self',
     'diagonal': 'self',
     'expand': 'self',
-    'split': 'self',
-    'split_with_sizes': 'self',
+    'narrow': 'self',
     'permute': 'self',
     'select': 'self',
     'slice': 'self',
@@ -64,21 +68,7 @@ VIEW_FUNCTIONS = {
 # this list contains both the root view functions and any that are purely composed
 # of viewing functions, and is used by the JIT to determine when an operator
 # returns a view of its inputs
-RETURNS_VIEWS_OF_INPUT = set(VIEW_FUNCTIONS.keys()).union({'chunk', 'narrow'})
-
-# note: For functions that return multiple views, we make a distinction between the
-# functions that only perform viewing (called pure views here) versus all others (like
-# user-defined Functions). This list is used to know which functions are pure views.
-# A function should NOT be added to this list if:
-# - Your backward function does more than just the backward of the views. For example if your
-# function makes changes to the layout both in forward and backward.
-# A function should be added to this list if:
-# - You want to allow inplace modification of the result.
-# - You are aware that inplace modification of the output will change the memory usage of the
-#   backward as the multiple Nodes we create will force the gradient buffer to be created
-#   for each Node, instead of once in the original multi-output Node.
-# If you update this list, please update "test_multi_view_methods" in test_autograd.py
-PURE_VIEW_FUNCTIONS = ['split', 'split_with_sizes', 'unbind']
+RETURNS_VIEWS_OF_INPUT = set(VIEW_FUNCTIONS.keys()).union({'chunk', 'split'})
 
 def format_return_type(returns):
     if len(returns) == 0:
@@ -123,6 +113,12 @@ def load_aten_declarations(path):
                                               for arg in declaration['arguments']]
         declaration['type_method_args'] = [arg['name'] for arg in declaration['arguments']]
         declaration['api_name'] = declaration['name']
+        # NB: keep this in sync with common_with_cwrap.py
+        if declaration.get('overload_name'):
+            declaration['type_wrapper_name'] = "{}_{}".format(
+                declaration['name'], declaration['overload_name'])
+        else:
+            declaration['type_wrapper_name'] = declaration['name']
         declaration['return_type'] = format_return_type(declaration['returns'])
 
         declaration['base_name'] = declaration['name']
@@ -193,7 +189,7 @@ def load_deprecated_signatures(aten_decls, deprecated_path):
     return declarations
 
 
-def gen_autograd(aten_path, out, autograd_dir, disable_autograd=False):
+def gen_autograd(aten_path, out, autograd_dir, disable_autograd=False, disable_trace=False):
     aten_decls = load_aten_declarations(aten_path)
 
     # Parse and load derivatives.yaml
@@ -206,7 +202,7 @@ def gen_autograd(aten_path, out, autograd_dir, disable_autograd=False):
     # Generate VariableType.h/cpp
     if not disable_autograd:
         from .gen_variable_type import gen_variable_type
-        gen_variable_type(out, aten_decls, template_path)
+        gen_variable_type(out, aten_decls, template_path, disable_trace)
 
     # Generate Functions.h/cpp
     from .gen_autograd_functions import gen_autograd_functions_lib
@@ -216,7 +212,8 @@ def gen_autograd(aten_path, out, autograd_dir, disable_autograd=False):
     # Generate variable_factories.h
     from .gen_variable_factories import gen_variable_factories
     gen_variable_factories(
-        out, aten_decls, template_path, disable_autograd=disable_autograd)
+        out, aten_decls, template_path, disable_autograd=disable_autograd,
+        disable_trace=disable_trace)
 
 
 def gen_autograd_python(aten_path, out, autograd_dir):

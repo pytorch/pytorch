@@ -117,6 +117,7 @@ void THCTensor_(prod)(THCState* state, THCTensor *self, THCTensor *src, int dime
 void THCTensor_(renorm)(THCState *state, THCTensor* self, THCTensor* src, scalar_t value, int dimension, scalar_t maxnorm)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self, src));
+  dimension = at::maybe_wrap_dim(dimension, src);
   THArgCheck(dimension >= 0 && dimension < THCTensor_(nDimensionLegacyNoScalars)(state, src), 3, "invalid dimension");
   THArgCheck(THCNumerics<scalar_t>::gt(value, scalar_cast<scalar_t>(0)), 2, "non-positive-norm not supported");
   THArgCheck(THCTensor_(nDimensionLegacyNoScalars)(state, src) > 1, 1, "need at least 2 dimensions");
@@ -133,7 +134,7 @@ void THCTensor_(renorm)(THCState *state, THCTensor* self, THCTensor* src, scalar
     dim3 threads(32);
 
     THCTensor_kernel_renorm<scalar_t, accreal>
-      <<<grid, threads, 0, THCState_getCurrentStream(state)>>>
+      <<<grid, threads, 0, c10::cuda::getCurrentCUDAStream()>>>
       (THCTensor_(data)(state, data), scalar_cast<accreal>(value), size, scalar_cast<accreal>(maxnorm));
 
     cudaError_t errcode = cudaGetLastError();
@@ -175,61 +176,6 @@ accreal THCTensor_(var_all)(THCState *state, THCTensor *self, bool unbiased)
 
   THCudaCheck(cudaGetLastError());
   return val;
-}
-
-accreal THCTensor_(dist)(THCState *state, THCTensor *self,
-                         THCTensor *src, scalar_t _value)
-{
-  const accreal value = scalar_cast<accreal>(_value);
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self, src));
-  self = THCTensor_(newContiguous)(state, self);
-  ptrdiff_t size = THCTensor_(nElement)(state, self);
-  src = THCTensor_(newContiguous)(state, src);
-  thrust::device_ptr<scalar_t> self_data(THCTensor_(data)(state, self));
-  thrust::device_ptr<scalar_t> src_data(THCTensor_(data)(state, src));
-
-  THCThrustAllocator thrustAlloc(state);
-  accreal result;
-
-  if (THCNumerics<accreal>::eq(value, scalar_cast<accreal>(INFINITY))) {
-    result = thrust::inner_product(
-#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
-      thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
-#endif
-      self_data, self_data+size, src_data, scalar_cast<accreal>(0),
-      ReduceMax<accreal>(),
-      ThrustTensorDistOp<scalar_t, accreal>(scalar_cast<scalar_t>(1)));
-  } else if (THCNumerics<accreal>::eq(value, scalar_cast<accreal>(-INFINITY))) {
-    result = thrust::inner_product(
-#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
-      thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
-#endif
-      self_data, self_data+size, src_data, scalar_cast<accreal>(INFINITY),
-      ReduceMin<accreal>(),
-      ThrustTensorDistOp<scalar_t, accreal>(scalar_cast<scalar_t>(1)));
-  } else if (THCNumerics<accreal>::eq(value, scalar_cast<accreal>(0))) {
-    result = thrust::inner_product(
-#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
-      thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
-#endif
-      self_data, self_data+size, src_data, scalar_cast<accreal>(0),
-      thrust::plus<accreal>(),
-      ThrustTensorDistOp<scalar_t, accreal>(scalar_cast<scalar_t>(0)));
-  } else {
-    result = thrust::inner_product(
-#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
-      thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
-#endif
-      self_data, self_data+size, src_data, scalar_cast<accreal>(0),
-      thrust::plus<accreal>(),
-      ThrustTensorDistOp<scalar_t, accreal>(value));
-
-    result = THCNumerics<accreal>::pow(result, static_cast<accreal>(1) / value);
-  }
-  THCTensor_(free)(state, src);
-  THCTensor_(free)(state, self);
-
-  return result;
 }
 
 #endif

@@ -65,13 +65,14 @@ class TORCH_API MemoryDAG {
   // Converts from the compressed index representation
   const Element* fromIndex(unsigned x) const;
   Element* fromIndex(unsigned x);
+  void collectAllContainedMemoryLocations(
+      const Element* elem,
+      MemoryLocations& cont) const;
 
  private:
   bool mayAliasImpl(const Element* a, const Element* b) const;
   bool mayContainAliasImpl(const Element* contained, const Element* container)
       const;
-  void collectAllContainedMemoryLocations(
-    const Element* elem, MemoryLocations& cont) const;
 
   std::vector<std::unique_ptr<Element>> indexToElementMap_;
 };

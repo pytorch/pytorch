@@ -100,6 +100,10 @@ void OptimizerBase::add_parameters(const std::vector<Tensor>& parameters) {
   parameters_.insert(parameters_.end(), parameters.begin(), parameters.end());
 }
 
+void OptimizerBase::_add_parameters_new_design(const std::vector<Tensor>& parameters) {
+  param_groups_.emplace_back(OptimizerParamGroup(parameters, defaults_->clone()));
+}
+
 void OptimizerBase::zero_grad() {
   for (auto& parameter : parameters_) {
     if (parameter.grad().defined()) {
@@ -117,16 +121,35 @@ void OptimizerBase::zero_grad() {
   }
 }
 
+// TODO: remove this function after all the optimizers use the new design
 const std::vector<Tensor>& OptimizerBase::parameters() const noexcept {
   return parameters_;
 }
 
+const std::vector<Tensor>& OptimizerBase::_parameters_new_design() const noexcept {
+   return param_groups_.at(0).params();
+}
+
+// TODO: remove this function after all the optimizers use the new design
 std::vector<Tensor>& OptimizerBase::parameters() noexcept {
   return parameters_;
 }
 
+std::vector<Tensor>& OptimizerBase::_parameters_new_design() noexcept {
+   return param_groups_.at(0).params();
+}
+
+// TODO: update size to return the sum of #params in all param_groups
 size_t OptimizerBase::size() const noexcept {
   return parameters_.size();
+}
+
+size_t OptimizerBase::_size_new_design() const noexcept {
+  size_t count = 0;
+  for (const auto& group : param_groups_) {
+    count += group.params().size();
+  }
+  return count;
 }
 
 OptimizerOptions& OptimizerBase::defaults() noexcept {

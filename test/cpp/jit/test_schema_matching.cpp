@@ -1,8 +1,8 @@
-#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/testing/file_check.h>
 #include <torch/jit.h>
 #include "test/cpp/jit/test_base.h"
-#include "torch/csrc/jit/custom_operator.h"
+#include "torch/csrc/jit/runtime/custom_operator.h"
 
 #include <sstream>
 #include <string>
@@ -15,17 +15,15 @@ void testSchemaMatching() {
     RegisterOperators reg({
         Operator(
             "aten::test_vartype(t[] a, t b) -> (t)",
-            [](const Node* node) -> Operation {
-              return [](Stack& stack) {
+            [](Stack& stack) {
                 c10::List<double> list;
                 double a;
                 pop(stack, list, a);
                 push(stack, a);
                 return 0;
-              };
-            }),
+            }, c10::AliasAnalysisKind::FROM_SCHEMA),
     });
-    script::Module m("m");
+    Module m("m");
     m.define(R"(
       def test(self):
         a = (1.0, 2.0)
@@ -53,17 +51,15 @@ void testSchemaMatching() {
     RegisterOperators reg({
         Operator(
             "aten::test_vartype2(t a, t[] b) -> (t[])",
-            [](const Node* node) -> Operation {
-              return [](Stack& stack) {
-                double a;
-                c10::List<double> list;
-                pop(stack, a, list);
-                push(stack, a);
-                return 0;
-              };
-            }),
+            [](Stack& stack) {
+              double a;
+              c10::List<double> list;
+              pop(stack, a, list);
+              push(stack, a);
+              return 0;
+            }, AliasAnalysisKind::FROM_SCHEMA),
     });
-    script::Module m("m");
+    Module m("m");
     m.define(R"JIT(
       def test(self):
           a = (1.0, 2.0)

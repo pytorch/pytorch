@@ -26,6 +26,11 @@ static PODLocalDispatchKeySet raw_local_dispatch_key_set;
 
 LocalDispatchKeySet tls_local_dispatch_key_set() {
   // Hack until variable performance is fixed
+  //
+  // ezyang: I'm pretty unhappy about this implementation, it looks wrong
+  // to me, as it seems to be performing a mutation on
+  // raw_local_dispatch_key_set.  I can't conveniently test the correct
+  // version though...
   if (FLAGS_disable_variable_dispatch) {
     raw_local_dispatch_key_set.set_excluded(
       raw_local_dispatch_key_set.excluded().add(
@@ -53,7 +58,8 @@ LocalDispatchKeySet tls_local_dispatch_key_set() {
 IncludeDispatchKeyGuard::IncludeDispatchKeyGuard(DispatchKey x)
   : tls_(&raw_local_dispatch_key_set)
   , id_(x)
-  , prev_state_(tls_->included().has(x)) {
+  // NB: prev_state_ == true on Undefined makes the guard no-op
+  , prev_state_(x == DispatchKey::Undefined ? true : tls_->included().has(x)) {
   if (!prev_state_) {
     tls_->set_included(tls_->included().add(x));
   }
@@ -68,7 +74,8 @@ IncludeDispatchKeyGuard::~IncludeDispatchKeyGuard() {
 ExcludeDispatchKeyGuard::ExcludeDispatchKeyGuard(DispatchKey x)
   : tls_(&raw_local_dispatch_key_set)
   , id_(x)
-  , prev_state_(tls_->excluded().has(x)) {
+  // NB: prev_state_ == true on Undefined makes the guard no-op
+  , prev_state_(x == DispatchKey::Undefined ? true : tls_->excluded().has(x)) {
   if (!prev_state_) {
     tls_->set_excluded(tls_->excluded().add(x));
   }
