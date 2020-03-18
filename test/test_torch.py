@@ -16344,26 +16344,26 @@ def ufunc_meta(is_floating=False, alt_impl=None, complex_on=('cpu', 'cuda')):
 
 # Dict of unary ufuncs and their associated test metadata
 unary_ufuncs = {
-    'sin': ufunc_meta(is_floating=True),
+    'sin': ufunc_meta(is_floating=True, complex_on=('cpu')),
     'cos': ufunc_meta(is_floating=True, complex_on=('cpu')),
     'tan': ufunc_meta(is_floating=True, complex_on=('cpu')),
-    'asin': ufunc_meta(is_floating=True),
-    'acos': ufunc_meta(is_floating=True),
+    'asin': ufunc_meta(is_floating=True, complex_on=('cpu')),
+    'acos': ufunc_meta(is_floating=True, complex_on=('cpu')),
     'atan': ufunc_meta(is_floating=True, complex_on=('cpu')),
-    'sinh': ufunc_meta(is_floating=True),
+    'sinh': ufunc_meta(is_floating=True, complex_on=('cpu')),
     'cosh': ufunc_meta(is_floating=True, complex_on=('cpu')),
     'tanh': ufunc_meta(is_floating=True, complex_on=('cpu')),
-    'ceil': ufunc_meta(is_floating=True),
-    'floor': ufunc_meta(is_floating=True),
+    'ceil': ufunc_meta(is_floating=True, complex_on=('cpu')),
+    'floor': ufunc_meta(is_floating=True, complex_on=('cpu')),
     'exp': ufunc_meta(is_floating=True, complex_on=('cpu')),
     'expm1': ufunc_meta(is_floating=True, complex_on=()),
-    'log': ufunc_meta(is_floating=True),
-    'log10': ufunc_meta(is_floating=True),
+    'log': ufunc_meta(is_floating=True, complex_on=('cpu')),
+    'log10': ufunc_meta(is_floating=True, complex_on=('cpu')),
     'log1p': ufunc_meta(is_floating=True, complex_on=()),
-    'log2': ufunc_meta(is_floating=True),
-    'sqrt': ufunc_meta(is_floating=True),
+    'log2': ufunc_meta(is_floating=True, complex_on=('cpu')),
+    'sqrt': ufunc_meta(is_floating=True, complex_on=('cpu')),
     'rsqrt': ufunc_meta(is_floating=True, complex_on=('cpu')),
-    'trunc': ufunc_meta(is_floating=True),
+    'trunc': ufunc_meta(is_floating=True, complex_on=('cpu')),
     'erf': ufunc_meta(is_floating=True, complex_on=()),
     'erfc': ufunc_meta(is_floating=True, complex_on=()),
     'erfinv': ufunc_meta(is_floating=True, complex_on=()),
@@ -16386,11 +16386,11 @@ def generate_unary_floating_ufunc_promo_test(cls, op_str):
 
     def test_fn(self, device):
         op = getattr(torch, op_str)
-        my_default_types = default_types.copy()
-        my_float_types = float_types.copy()
+        my_default_types = default_types
+        my_float_types = float_types
         if self.device_type == 'cuda':
-            my_default_types = default_types_cuda.copy()
-            my_float_types = float_types_cuda.copy()
+            my_default_types = default_types_cuda
+            my_float_types = float_types_cuda
         if self.device_type in unary_ufuncs[op_str].complex_on:
             my_float_types.extend(complex_types)
 
@@ -16411,16 +16411,13 @@ def generate_unary_floating_ufunc_promo_test(cls, op_str):
         only_out_on_cpu = ['atan', 'cos', 'cosh', 'erf', 'erfc', 'exp', 'tan', 'tanh']
 
         # Test for out= code paths
-        # Choose float types depending on device
-        # Floating unary ufuncs do not support complex types with cuda devices
-        float_types_for_device = float_types_cuda if self.device_type == 'cuda' else my_float_types
-        for in_type in float_types_for_device + int_types:
+        for in_type in my_float_types + int_types:
             # Floating type promotion for out= calls on ops listed in only_out_on_cpu
             # not supported on cuda devices
             if (op_str in only_out_on_cpu and self.device_type == 'cuda'):
                 break
             t = torch.tensor((1,), device=device, dtype=in_type)
-            for out_type in float_types_for_device:
+            for out_type in my_float_types:
                 # Floating type promotion does not support out= calls for input as bool tensors
                 # and output as complex tensors
                 if (in_type == torch.bool and out_type in complex_types):
@@ -16430,6 +16427,21 @@ def generate_unary_floating_ufunc_promo_test(cls, op_str):
             for out_type in int_types:
                 out_t = torch.empty((1,), device=device, dtype=out_type)
                 self.assertRaises(RuntimeError, lambda: op(t, out=out_t))
+
+        # Test for out= code paths (with input as float tensors and out as complex tensors)
+        # No unary floating ufuncs support float to complex promotion on CUDA devices
+        # List of unary floating ufuncs which do not support float to complex promotion (on cpu devices)
+        floating_ufuncs_no_float_to_complex = ['expm1', 'log1p', 'erf', 'erfc', 'erfinv', 'lgamma', 'digamma']
+
+        if (self.device_type == 'cpu'):
+            for in_type in my_float_types:
+                if (op_str in floating_ufuncs_no_float_to_complex):
+                    break
+                t = torch.tensor((1,), device=device, dtype=in_type)
+                for out_type in complex_types:
+                    out_t = torch.empty((1,), device=device, dtype=out_type)
+                    self.assertEqual(op(t, out=out_t).dtype, out_type)
+
         try:
             op_inplace = getattr(torch, op_str + "_")
         except AttributeError:
@@ -16441,9 +16453,10 @@ def generate_unary_floating_ufunc_promo_test(cls, op_str):
             t = torch.tensor((1,), device=device, dtype=in_type)
             self.assertRaises(RuntimeError, lambda: op_inplace(t))
 
-        for in_type in float_types_for_device:
+        for in_type in my_float_types:
             t = torch.tensor((1,), device=device, dtype=in_type)
             self.assertEqual(op_inplace(t).dtype, t.dtype)
+
     test_name = "test_" + op_str + "_dtype_promotion"
     assert not hasattr(cls, test_name), "{0} already in {1}".format(test_name, cls.__name__)
     setattr(cls, test_name, test_fn)
