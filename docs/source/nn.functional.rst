@@ -505,6 +505,24 @@ Vision functions
 
 .. autofunction:: affine_grid
 
+Attention functions
+-------------------
+
+:hidden:`multi_head_attention_in_projection`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: multi_head_attention_in_projection
+
+:hidden:`scaled_dot_product_attention`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: scaled_dot_product_attention
+
+:hidden:`multi_head_attention_out_projection`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: multi_head_attention_out_projection
+
 DataParallel functions (multi-GPU, distributed)
 -----------------------------------------------
 

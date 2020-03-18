@@ -541,6 +541,24 @@ Recurrent layers
 Transformer layers
 ----------------------------------
 
+:hidden:`MultiheadAttentionInProjection`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: MultiheadAttentionInProjection
+    :members:
+
+:hidden:`ScaledDotProduct`
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: ScaledDotProduct
+    :members:
+
+:hidden:`MultiheadAttentionOutProjection`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: MultiheadAttentionOutProjection
+    :members:
+
 :hidden:`Transformer`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
