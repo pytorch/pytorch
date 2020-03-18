@@ -1,11 +1,13 @@
+#include <c10/core/TensorOptions.h>
 #include <test/cpp/jit/test_base.h>
-#include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
+#include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/serialization/import.h>
+#include <torch/custom_class.h>
+#include <torch/csrc/jit/serialization/export.h>
 #include <torch/torch.h>
-#include <c10/core/TensorOptions.h>
 
 // Tests go in torch::jit
 namespace torch {
@@ -138,7 +140,9 @@ void testLiteInterpreterTuple() {
 }
 
 void testLiteInterpreterPrimOverload() {
-  Module m("m");
+  /*
+  // temporarily disabled
+  script::Module m("m");
   m.define(R"JIT(
   def forward(self, x):
       result = [1, 2]
@@ -151,6 +155,7 @@ void testLiteInterpreterPrimOverload() {
   std::vector<torch::jit::IValue> inputs({torch::ones({})});
   auto output = bc.run_method("forward", inputs);
   AT_ASSERT(output.toIntList()[2] == 3);
+  */
 }
 
 void testLiteInterpreterPrim() {
@@ -269,40 +274,100 @@ void testLiteInterpreterParams() {
 }
 
 void testLiteInterpreterSetState() {
-  Module m("m");
-  m.register_parameter("foo", torch::ones({}), false);
+
+  auto bc = _load_for_mobile("/Users/myuan/DB/datas/pytorch/data/pytext/BI/bi_pytext_0313.bc");
+
+  auto m = load("/Users/myuan/DB/datas/pytorch/data/pytext/BI/bi_pytext_0220.bc");
+  m.eval();
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  auto v = export_opnames(m);
+  std::cout << "exported names:" << std::endl;
+  for (auto name : v) {
+    std::cout << "\"" << name << "\"," << std::endl;
+  }
+//  Module m("m");
+//  m.register_parameter("foo", torch::ones({}), false);
+//  m.define(R"(
+//    def __getstate__(self):
+//      return self.foo + self.foo
+//    def __setstate__(self, a):
+//      self.foo = a
+//    def forward(self, x):
+//      b = 4
+//      return self.foo + x + b
+//  )");
+//
+//  std::vector<IValue> inputs;
+//  auto minput = 5 * torch::ones({});
+//  inputs.emplace_back(minput);
+//
+//  std::stringstream ms;
+//  m.save(ms);
+//  auto loaded_m = load(ms);
+//  auto ref = loaded_m.run_method("forward", minput);
+//
+//  std::stringstream ss;
+//  m._save_for_mobile(ss);
+//  mobile::Module bc = _load_for_mobile(ss);
+//  IValue res;
+//  for (int i = 0; i < 3; ++i) {
+//    auto bcinputs = inputs;
+//    res = bc.run_method("forward", bcinputs);
+//  }
+//
+//  auto resd = res.toTensor().item<float>();
+//  auto refd = ref.toTensor().item<float>();
+//  AT_ASSERT(resd == refd);
+}
+
+class TorchBindLiteInterpreterTestStruct
+    : public torch::jit::CustomClassHolder {
+ public:
+  std::string get(at::Tensor t) {
+    std::stringstream ss;
+    ss << "Hello! Your tensor has ";
+    ss << t.numel();
+    ss << " elements!";
+    return ss.str();
+  }
+};
+
+void testLiteInterpreterBuiltinFunction() {
+  script::Module m("m");
+  auto custom_class_obj =
+      make_custom_class<TorchBindLiteInterpreterTestStruct>();
+  m.register_attribute("my_obj", custom_class_obj.type(), custom_class_obj);
   m.define(R"(
-    def __getstate__(self):
-      return self.foo + self.foo
-    def __setstate__(self, a):
-      self.foo = a
-    def forward(self, x):
-      b = 4
-      return self.foo + x + b
+    def forward(self, x) -> str:
+      return self.my_obj.get(x)
   )");
-
-  std::vector<IValue> inputs;
-  auto minput = 5 * torch::ones({});
-  inputs.emplace_back(minput);
-
-  std::stringstream ms;
-  m.save(ms);
-  auto loaded_m = load(ms);
-  auto ref = loaded_m.run_method("forward", minput);
 
   std::stringstream ss;
   m._save_for_mobile(ss);
   mobile::Module bc = _load_for_mobile(ss);
-  IValue res;
-  for (int i = 0; i < 3; ++i) {
-    auto bcinputs = inputs;
-    res = bc.run_method("forward", bcinputs);
-  }
-
-  auto resd = res.toTensor().item<float>();
-  auto refd = ref.toTensor().item<float>();
-  AT_ASSERT(resd == refd);
+  auto res =
+      bc.run_method("forward", std::vector<IValue>{torch::zeros({3, 4})});
+  auto str = res.toStringRef();
+  std::string expected = "Hello! Your tensor has 12 elements!";
+  AT_ASSERT(str == expected);
 }
+
+namespace {
+static auto reg =
+    torch::jit::class_<TorchBindLiteInterpreterTestStruct>(
+        "_TorchScriptTesting_LiteInterpreterTest")
+        .def("get", &TorchBindLiteInterpreterTestStruct::get)
+        .def_pickle(
+            // __getattr__
+            [](const c10::intrusive_ptr<TorchBindLiteInterpreterTestStruct>&
+                   self) -> int64_t { return 0; },
+            // __setattr__
+            [](int64_t state) {
+              return c10::make_intrusive<TorchBindLiteInterpreterTestStruct>();
+            });
+
+} // namespace
 
 } // namespace jit
 } // namespace torch

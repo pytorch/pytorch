@@ -3,13 +3,12 @@
 #include <torch/arg.h>
 #include <torch/enum.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/nn/options/common.h>
 #include <torch/types.h>
 
 namespace torch {
 namespace nn {
 
-/// Options for a L1 loss module.
+/// Options for the `L1Loss` module.
 ///
 /// Example:
 /// ```
@@ -24,11 +23,23 @@ struct TORCH_API L1LossOptions {
   TORCH_ARG(reduction_t, reduction) = torch::kMean;
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(L1Loss, L1LossFuncOptions)
+namespace functional {
+/// Options for `torch::nn::functional::l1_loss`.
+///
+/// See the documentation for `torch::nn::L1LossOptions` class to learn what
+/// arguments are supported.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::l1_loss(input, target, F::L1LossFuncOptions(torch::kNone));
+/// ```
+using L1LossFuncOptions = L1LossOptions;
+} // namespace functional
 
 // ============================================================================
 
-/// Options for a KLDiv loss module.
+/// Options for the `KLDivLoss` module.
 ///
 /// Example:
 /// ```
@@ -44,11 +55,23 @@ struct TORCH_API KLDivLossOptions {
   TORCH_ARG(reduction_t, reduction) = torch::kMean;
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(KLDivLoss, KLDivFuncOptions)
+namespace functional {
+/// Options for `torch::nn::functional::kl_div`.
+///
+/// See the documentation for `torch::nn::KLDivLossOptions` class to learn what
+/// arguments are supported.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::kl_div(input, target, F::KLDivFuncOptions(torch::kNone));
+/// ```
+using KLDivFuncOptions = KLDivLossOptions;
+} // namespace functional
 
 // ============================================================================
 
-/// Options for a MSE loss module.
+/// Options for the `MSELoss` module.
 ///
 /// Example:
 /// ```
@@ -64,11 +87,23 @@ struct TORCH_API MSELossOptions {
   TORCH_ARG(reduction_t, reduction) = torch::kMean;
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(MSELoss, MSELossFuncOptions)
+namespace functional {
+/// Options for `torch::nn::functional::mse_loss`.
+///
+/// See the documentation for `torch::nn::MSELossOptions` class to learn what
+/// arguments are supported.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::mse_loss(input, target, F::MSELossFuncOptions(torch::kNone));
+/// ```
+using MSELossFuncOptions = MSELossOptions;
+} // namespace functional
 
 // ============================================================================
 
-/// Options for a BCE loss module.
+/// Options for the `BCELoss` module.
 ///
 /// Example:
 /// ```
@@ -84,11 +119,23 @@ struct TORCH_API BCELossOptions {
   TORCH_ARG(reduction_t, reduction) = torch::kMean;
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(BCELoss, BinaryCrossEntropyFuncOptions)
+namespace functional {
+/// Options for `torch::nn::functional::binary_cross_entropy`.
+///
+/// See the documentation for `torch::nn::BCELossOptions` class to learn what
+/// arguments are supported.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::binary_cross_entropy(input, target, F::BinaryCrossEntropyFuncOptions().weight(weight));
+/// ```
+using BinaryCrossEntropyFuncOptions = BCELossOptions;
+} // namespace functional
 
 // ============================================================================
 
-/// Options for a Hinge Embedding loss functional and module.
+/// Options for the `HingeEmbeddingLoss` module.
 ///
 /// Example:
 /// ```
@@ -104,11 +151,23 @@ struct TORCH_API HingeEmbeddingLossOptions {
   TORCH_ARG(reduction_t, reduction) = torch::kMean;
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(HingeEmbeddingLoss, HingeEmbeddingLossFuncOptions)
+namespace functional {
+/// Options for `torch::nn::functional::hinge_embedding_loss`.
+///
+/// See the documentation for `torch::nn::HingeEmbeddingLossOptions` class to learn what
+/// arguments are supported.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::hinge_embedding_loss(input, target, F::HingeEmbeddingLossFuncOptions().margin(2));
+/// ```
+using HingeEmbeddingLossFuncOptions = HingeEmbeddingLossOptions;
+} // namespace functional
 
 // ============================================================================
 
-/// Options for a multi-margin loss functional and module.
+/// Options for the `MultiMarginLoss` module.
 ///
 /// Example:
 /// ```
@@ -133,11 +192,23 @@ struct TORCH_API MultiMarginLossOptions {
   TORCH_ARG(reduction_t, reduction) = torch::kMean;
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(MultiMarginLoss, MultiMarginLossFuncOptions)
+namespace functional {
+/// Options for `torch::nn::functional::multi_margin_loss`.
+///
+/// See the documentation for `torch::nn::MultiMarginLossOptions` class to learn what
+/// arguments are supported.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::multi_margin_loss(input, target, F::MultiMarginLossFuncOptions().margin(2).weight(weight));
+/// ```
+using MultiMarginLossFuncOptions = MultiMarginLossOptions;
+} // namespace functional
 
 // ============================================================================
 
-/// Options for a Cosine Embedding loss functional and module.
+/// Options for the `CosineEmbeddingLoss` module.
 ///
 /// Example:
 /// ```
@@ -154,11 +225,23 @@ struct TORCH_API CosineEmbeddingLossOptions {
   TORCH_ARG(reduction_t, reduction) = torch::kMean;
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(CosineEmbeddingLoss, CosineEmbeddingLossFuncOptions)
+namespace functional {
+/// Options for `torch::nn::functional::cosine_embedding_loss`.
+///
+/// See the documentation for `torch::nn::CosineEmbeddingLossOptions` class to learn what
+/// arguments are supported.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::cosine_embedding_loss(input1, input2, target, F::CosineEmbeddingLossFuncOptions().margin(0.5));
+/// ```
+using CosineEmbeddingLossFuncOptions = CosineEmbeddingLossOptions;
+} // namespace functional
 
 // ============================================================================
 
-/// Options for a multi-label margin loss functional and module.
+/// Options for the `MultiLabelMarginLoss` module.
 ///
 /// Example:
 /// ```
@@ -176,11 +259,23 @@ struct TORCH_API MultiLabelMarginLossOptions {
   TORCH_ARG(reduction_t, reduction) = torch::kMean;
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(MultiLabelMarginLoss, MultiLabelMarginLossFuncOptions)
+namespace functional {
+/// Options for `torch::nn::functional::multilabel_margin_loss`.
+///
+/// See the documentation for `torch::nn::MultiLabelMarginLossOptions` class to learn what
+/// arguments are supported.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::multilabel_margin_loss(input, target, F::MultiLabelMarginLossFuncOptions(torch::kNone));
+/// ```
+using MultiLabelMarginLossFuncOptions = MultiLabelMarginLossOptions;
+} // namespace functional
 
 // ============================================================================
 
-/// Options for a soft margin loss functional and module.
+/// Options for the `SoftMarginLoss` module.
 ///
 /// Example:
 /// ```
@@ -198,11 +293,23 @@ struct TORCH_API SoftMarginLossOptions {
   TORCH_ARG(reduction_t, reduction) = torch::kMean;
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(SoftMarginLoss, SoftMarginLossFuncOptions)
+namespace functional {
+/// Options for `torch::nn::functional::soft_margin_loss`.
+///
+/// See the documentation for `torch::nn::SoftMarginLossOptions` class to learn what
+/// arguments are supported.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::soft_margin_loss(input, target, F::SoftMarginLossFuncOptions(torch::kNone));
+/// ```
+using SoftMarginLossFuncOptions = SoftMarginLossOptions;
+} // namespace functional
 
 // ============================================================================
 
-/// Options for a multi-label soft margin loss functional and module.
+/// Options for the `MultiLabelSoftMarginLoss` module.
 ///
 /// Example:
 /// ```
@@ -223,11 +330,23 @@ struct TORCH_API MultiLabelSoftMarginLossOptions {
   TORCH_ARG(reduction_t, reduction) = torch::kMean;
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(MultiLabelSoftMarginLoss, MultiLabelSoftMarginLossFuncOptions)
+namespace functional {
+/// Options for `torch::nn::functional::multilabel_soft_margin_loss`.
+///
+/// See the documentation for `torch::nn::MultiLabelSoftMarginLossOptions` class to learn what
+/// arguments are supported.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::multilabel_soft_margin_loss(input, target, F::MultiLabelSoftMarginLossFuncOptions().reduction(torch::kNone).weight(weight));
+/// ```
+using MultiLabelSoftMarginLossFuncOptions = MultiLabelSoftMarginLossOptions;
+} // namespace functional
 
 // ============================================================================
 
-/// Options for a triplet-margin-Loss functional and module.
+/// Options for the `TripletMarginLoss` module.
 ///
 /// Example:
 /// ```
@@ -250,11 +369,23 @@ struct TORCH_API TripletMarginLossOptions {
   TORCH_ARG(reduction_t, reduction) = torch::kMean;
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(TripletMarginLoss, TripletMarginLossFuncOptions)
+namespace functional {
+/// Options for `torch::nn::functional::triplet_margin_loss`.
+///
+/// See the documentation for `torch::nn::TripletMarginLossOptions` class to learn what
+/// arguments are supported.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::triplet_margin_loss(anchor, positive, negative, F::TripletMarginLossFuncOptions().margin(1.0));
+/// ```
+using TripletMarginLossFuncOptions = TripletMarginLossOptions;
+} // namespace functional
 
 // ============================================================================
 
-/// Options for The Connectionist Temporal Classification loss functional and module.
+/// Options for the `CTCLoss` module.
 ///
 /// Example:
 /// ```
@@ -273,11 +404,23 @@ struct TORCH_API CTCLossOptions {
   TORCH_ARG(bool, zero_infinity) = false;
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(CTCLoss, CTCLossFuncOptions)
+namespace functional {
+/// Options for `torch::nn::functional::ctc_loss`.
+///
+/// See the documentation for `torch::nn::CTCLossOptions` class to learn what
+/// arguments are supported.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::ctc_loss(log_probs, targets, input_lengths, target_lengths, F::CTCLossFuncOptions().reduction(torch::kNone));
+/// ```
+using CTCLossFuncOptions = CTCLossOptions;
+} // namespace functional
 
 // ============================================================================
 
-/// Options for a smooth L1 loss functional and module.
+/// Options for the `SmoothL1Loss` module.
 ///
 /// Example:
 /// ```
@@ -295,11 +438,23 @@ struct TORCH_API SmoothL1LossOptions {
   TORCH_ARG(reduction_t, reduction) = torch::kMean;
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(SmoothL1Loss, SmoothL1LossFuncOptions)
+namespace functional {
+/// Options for `torch::nn::functional::smooth_l1_loss`.
+///
+/// See the documentation for `torch::nn::SmoothL1LossOptions` class to learn what
+/// arguments are supported.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::smooth_l1_loss(input, target, F::SmoothL1LossFuncOptions(torch::kNone));
+/// ```
+using SmoothL1LossFuncOptions = SmoothL1LossOptions;
+} // namespace functional
 
 // ============================================================================
 
-/// Options for PoissonNLLLoss functional and module.
+/// Options for the `PoissonNLLLoss` module.
 ///
 /// Example:
 /// ```
@@ -321,11 +476,23 @@ struct TORCH_API PoissonNLLLossOptions {
   TORCH_ARG(reduction_t, reduction) = torch::kMean;
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(PoissonNLLLoss, PoissonNLLLossFuncOptions)
+namespace functional {
+/// Options for `torch::nn::functional::poisson_nll_loss`.
+///
+/// See the documentation for `torch::nn::PoissonNLLLossOptions` class to learn what
+/// arguments are supported.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::poisson_nll_loss(input, target, F::PoissonNLLLossFuncOptions().reduction(torch::kNone));
+/// ```
+using PoissonNLLLossFuncOptions = PoissonNLLLossOptions;
+} // namespace functional
 
 // ============================================================================
 
-/// Options for MarginRankingLoss functional and module.
+/// Options for the `MarginRankingLoss` module.
 ///
 /// Example:
 /// ```
@@ -340,11 +507,23 @@ struct TORCH_API MarginRankingLossOptions {
   TORCH_ARG(reduction_t, reduction) = torch::kMean;
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(MarginRankingLoss, MarginRankingLossFuncOptions)
+namespace functional {
+/// Options for `torch::nn::functional::margin_ranking_loss`.
+///
+/// See the documentation for `torch::nn::MarginRankingLossOptions` class to learn what
+/// arguments are supported.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::margin_ranking_loss(input1, input2, target, F::MarginRankingLossFuncOptions().margin(0.5).reduction(torch::kSum));
+/// ```
+using MarginRankingLossFuncOptions = MarginRankingLossOptions;
+} // namespace functional
 
 // ============================================================================
 
-/// Options for an nll-loss functional and module.
+/// Options for the `NLLLoss` module.
 ///
 /// Example:
 /// ```
@@ -364,11 +543,23 @@ struct TORCH_API NLLLossOptions {
   TORCH_ARG(reduction_t, reduction) = torch::kMean;
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(NLLLoss, NLLLossFuncOptions)
+namespace functional {
+/// Options for `torch::nn::functional::nll_loss`.
+///
+/// See the documentation for `torch::nn::NLLLossOptions` class to learn what
+/// arguments are supported.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::nll_loss(input, target, F::NLLLossFuncOptions().ignore_index(-100).reduction(torch::kMean));
+/// ```
+using NLLLossFuncOptions = NLLLossOptions;
+} // namespace functional
 
 // ============================================================================
 
-/// Options for a cross-entropy-Loss functional and module.
+/// Options for the `CrossEntropyLoss` module.
 ///
 /// Example:
 /// ```
@@ -387,11 +578,23 @@ struct TORCH_API CrossEntropyLossOptions {
   TORCH_ARG(reduction_t, reduction) = torch::kMean;
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(CrossEntropyLoss, CrossEntropyFuncOptions)
+namespace functional {
+/// Options for `torch::nn::functional::cross_entropy`.
+///
+/// See the documentation for `torch::nn::CrossEntropyLossOptions` class to learn what
+/// arguments are supported.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::cross_entropy(input, target, F::CrossEntropyFuncOptions().ignore_index(-100).reduction(torch::kMean));
+/// ```
+using CrossEntropyFuncOptions = CrossEntropyLossOptions;
+} // namespace functional
 
 // ============================================================================
 
-/// Options for BCEWithLogitsLoss functional and module.
+/// Options for the `BCEWithLogitsLoss` module.
 ///
 /// Example:
 /// ```
@@ -409,7 +612,19 @@ struct TORCH_API BCEWithLogitsLossOptions {
   TORCH_ARG(Tensor, pos_weight) = {};
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(BCEWithLogitsLoss, BinaryCrossEntropyWithLogitsFuncOptions)
+namespace functional {
+/// Options for `torch::nn::functional::binary_cross_entropy_with_logits`.
+///
+/// See the documentation for `torch::nn::BCEWithLogitsLossOptions` class to learn what
+/// arguments are supported.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::binary_cross_entropy_with_logits(input, target, F::BinaryCrossEntropyWithLogitsFuncOptions().pos_weight(pos_weight).reduction(torch::kSum));
+/// ```
+using BinaryCrossEntropyWithLogitsFuncOptions = BCEWithLogitsLossOptions;
+} // namespace functional
 
 } // namespace nn
 } // namespace torch

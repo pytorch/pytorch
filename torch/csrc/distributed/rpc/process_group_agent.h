@@ -152,6 +152,10 @@ class ProcessGroupAgent : public RpcAgent {
   void handleSend(const SendWork& work);
   // put RecvWork into a queue and notify the worker thread
   void enqueueRecv(RecvWork work);
+  // handle a RecvWork request. Return 1 if we should increment recvCounts, 0 if
+  // not (i.e. if the RPC timed out and we are getting a result after the
+  // timeout)
+  int handleRecv(RecvWork& work);
   // Loop for receiving messages. Calls listenLoopInternal and handles errors
   // such as timeouts on the process group.
   virtual void listenLoopInternal();
@@ -174,6 +178,7 @@ class ProcessGroupAgent : public RpcAgent {
   // futures_ map. It is also removed from the futureTimeouts_ map since these
   // maps are kept in sync.
   void markFutureWithError(Message& message);
+  void markFutureWithError(int64_t id, std::string errorMsg);
 
   // Note [Termination Detection]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -231,6 +236,16 @@ class ProcessGroupAgent : public RpcAgent {
   // interruptible in shutdown().
   std::mutex recvWorkMutex_;
   std::shared_ptr<c10d::ProcessGroup::Work> recvWork_;
+  // Map of dst rank to current oustanding sends that we are waiting on. In the
+  // case of a call to ::shutdown() while we are still waiting on these sends,
+  // the pending sends contained in this map will be aborted, allowing the
+  // waiting thread to be unblocked.
+  std::unordered_map<
+      worker_id_t,
+      std::set<std::shared_ptr<c10d::ProcessGroup::Work>>>
+      currentPendingSends_;
+  // Lock to serialize access to the above map.
+  std::mutex pendingSendMutex_;
   // A threadPool that processing both SendWork and RecvWork. There are two
   // motivations for adding a ThreadPool:
   // (1) RPC serialization/deserialization and processing can be expensive,

@@ -43,20 +43,43 @@ c10::IValue getFunctionTuple(const Function& func) {
   Inline(*graph);
   torch::jit::Code code(graph, func.name());
 
+  auto instructions_copy = code.instructions();
+
   // operator names
   std::vector<c10::OperatorName> opnames;
-  for (size_t i = 0; i < code.instructions().size(); ++i) {
-    Instruction ins = code.instructions()[i];
+  std::vector<std::string> method_names;
+  for (size_t i = 0; i < instructions_copy.size(); ++i) {
+    Instruction ins = instructions_copy[i];
     if (ins.op == OP || ins.op == OPN) {
       auto node = code.instructions_source()[i];
       opnames.emplace_back(node->schema().operator_name());
+    }
+    // CALL nodes at this point represent built-in (i.e. non-Graph)
+    // functions that were not inlined. Here we convert the CALL
+    // instructions for these functions into INTERFACE_CALL instructions
+    // s.t. at runtime, we will look up the Function* on the Type of the
+    // 0th argument in the stack and call that directly.
+    if (ins.op == CALL) {
+      auto node = code.instructions_source()[i];
+      if (node->kind() == prim::CallMethod) {
+        // NB: replacing instruction
+        auto method_name_idx =
+            code.constant_table().size() + method_names.size();
+        method_names.emplace_back(node->s(attr::name));
+        Instruction new_instr{
+            INTERFACE_CALL, static_cast<int32_t>(method_name_idx), static_cast<uint16_t>(node->inputs().size())};
+        instructions_copy[i] = std::move(new_instr);
+      } else {
+        TORCH_INTERNAL_ASSERT(
+            false, "Unsupported node kind on CALL opcode for mobile");
+      }
     }
   }
 
   // instructions
   std::vector<IValue> instructions;
-  instructions.reserve(code.instructions().size());
-  for (Instruction ins : code.instructions()) {
+  instructions.reserve(instructions_copy.size());
+  for (Instruction ins : instructions_copy) {
     instructions.emplace_back(Tup({toString(ins.op), ins.X, ins.N}));
   }
 
@@ -68,7 +91,13 @@ c10::IValue getFunctionTuple(const Function& func) {
   }
 
   // constants
-  const auto& constants = code.constant_table();
+  //
+  // Make a copy of the constants and append the method names
+  // that we emitted for the converted INTERFACE_CALL nodes above.
+  auto constants = code.constant_table();
+  for (auto& method_name : method_names) {
+    constants.emplace_back(std::move(method_name));
+  }
 
   // types
   std::vector<IValue> types;
@@ -95,9 +124,10 @@ void setstateTuple(const IValue& ivalue, std::vector<c10::IValue>& elements) {
   auto type = obj->type();
   if (checkHasValidSetGetState(type)) {
     Function *setstate = type->getMethod("__setstate__");
-    elements.push_back(getFunctionTuple(*setstate));
-  }
-  else {
+    if (setstate->isGraphFunction()) {
+      elements.push_back(getFunctionTuple(*setstate));
+    }
+  } else {
     for (size_t i = 0, n = type->numAttributes(); i < n; ++i) {
       setstateTuple(obj->getSlot(i), elements);
     }

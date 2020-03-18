@@ -603,7 +603,7 @@ GraphEncoder::GraphEncoder(
 
   for (auto const& custom_opset : custom_opsets){
     if (!std::count(domains_.begin(), domains_.end(), custom_opset.first)) {
-      AT_WARN("Custom opset domain: '", custom_opset.first, "' provided is not used in the model. ",
+      TORCH_WARN("Custom opset domain: '", custom_opset.first, "' provided is not used in the model. ",
       "Please verify custom opset domain names.");
     }
   }
@@ -922,15 +922,12 @@ void export_opnames(const script::Module& m, std::set<std::string>& opnames) {
     const auto& func = method.function();
     auto graph = func.graph()->copy();
     Inline(*graph);
-    for (const auto& node : graph->nodes()) {
-      auto schema = node->maybeSchema();
-      if (schema) {
-        auto opname = schema->operator_name();
-        std::string namestr = opname.name;
-        if (!opname.overload_name.empty()) {
-          namestr += "." + opname.overload_name;
-        }
-        opnames.emplace(namestr);
+    torch::jit::Code code(graph, func.name());
+    for (size_t i = 0; i < code.instructions().size(); ++i) {
+      Instruction ins = code.instructions()[i];
+      if (ins.op == OP || ins.op == OPN) {
+        auto node = code.instructions_source()[i];
+        opnames.emplace(toString(node->schema().operator_name()));
       }
     }
   }

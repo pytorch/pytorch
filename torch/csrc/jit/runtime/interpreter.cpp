@@ -1292,7 +1292,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                   "", range->filename()->c_str(), uint32_t(line)};
               c10::Warning::warn(location, pop(stack).toStringRef());
             } else {
-              AT_WARN(pop(stack).toStringRef());
+              TORCH_WARN(pop(stack).toStringRef());
             }
             ++af.pc;
           } break;
