@@ -395,7 +395,6 @@ public:
     }
     return ret;
   }
-
 private:
   template <typename Op>
   inline Vec256<T> binary_pred(const Vec256<T>& other, Op op) const {
