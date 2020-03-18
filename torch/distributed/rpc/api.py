@@ -370,6 +370,14 @@ def remote(to, func, args=None, kwargs=None):
         need to explicitly copy GPU tensors to CPU before using them as
         arguments or return values of ``func``.
 
+    .. warning ::
+        The ``remote`` API does not copy storages of argument tensors until
+        sending them over the wire, which could be done by a different thread
+        depending on the RPC backend type. The caller should make sure that the
+        contents of those tensors stay intact until the returned RRef is
+        confirmed by the owner, which can be checked using the
+        :meth:`torch.distributed.rpc.RRef.confirmed_by_owner` API.
+
     Example::
         Make sure that ``MASTER_ADDRESS`` and ``MASTER_PORT`` are set properly
         on both workers. Refer to :meth:`~torch.distributed.init_process_group`
@@ -570,6 +578,13 @@ def rpc_async(to, func, args=None, kwargs=None):
         supported since we don't support sending GPU tensors over the wire. You
         need to explicitly copy GPU tensors to CPU before using them as
         arguments or return values of ``func``.
+
+    .. warning ::
+        The ``rpc_async`` API does not copy storages of argument tensors until
+        sending them over the wire, which could be done by a different thread
+        depending on the RPC backend type. The caller should make sure that the
+        contents of those tensors stay intact until the returned Future
+        completes.
 
     Example::
         Make sure that ``MASTER_ADDRESS`` and ``MASTER_PORT`` are set properly
