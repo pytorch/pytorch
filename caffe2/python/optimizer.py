@@ -520,7 +520,7 @@ class AdagradOptimizer(Optimizer):
                  sparse_dedup_aggregator=None, rowWise=False, engine='',
                  lars=None, output_effective_lr=False,
                  output_effective_lr_and_update=False,
-                 pruning_options=None, **kwargs):
+                 pruning_options=None, weight_scale=None, **kwargs):
         super(AdagradOptimizer, self).__init__()
         self.alpha = alpha
         self.epsilon = epsilon
@@ -533,6 +533,7 @@ class AdagradOptimizer(Optimizer):
         self.output_effective_lr = output_effective_lr
         self.output_effective_lr_and_update = output_effective_lr_and_update
         self.init_kwargs = kwargs
+        self.weight_scale = weight_scale
 
         self._process_pruning_options(pruning_options)
 
@@ -598,7 +599,7 @@ class AdagradOptimizer(Optimizer):
                     and core.IsGPUDeviceType(current_scope.device_type)),
             )
 
-        lr, _ = self.build_lr(
+        lr, lr_iteration = self.build_lr(
             net, param_init_net,
             base_learning_rate=self.alpha,
             policy=self.policy,
@@ -730,6 +731,20 @@ class AdagradOptimizer(Optimizer):
                     decay=float(self.decay),
                     engine=self.engine
                 )
+        if self.weight_scale:
+            net.WeightScale(
+                [param, lr_iteration],
+                [param],
+                stepsize=self.weight_scale.stepsize,
+                upper_bound_iter=self.weight_scale.upper_bound_iter,
+                scale=float(self.weight_scale.scale))
+            if self.weight_scale.to_aux:
+                net.WeightScale(
+                    [param_squared_sum, lr_iteration],
+                    [param_squared_sum],
+                    stepsize=self.weight_scale.stepsize,
+                    upper_bound_iter=self.weight_scale.upper_bound_iter,
+                    scale=float(self.weight_scale.scale))
 
     def scale_learning_rate(self, scale):
         self.alpha *= scale
