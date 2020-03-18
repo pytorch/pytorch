@@ -1,5 +1,6 @@
 #if AT_PARALLEL_OPENMP
 #include <ATen/Parallel.h>
+#include <ATen/core/ivalue.h>
 
 #include <atomic>
 

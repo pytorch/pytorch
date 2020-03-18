@@ -1,6 +1,7 @@
 #pragma once
-#include <ATen/ATen.h>
+#include <c10/util/Exception.h>
 
+#include <atomic>
 #include <cstddef>
 #include <exception>
 
