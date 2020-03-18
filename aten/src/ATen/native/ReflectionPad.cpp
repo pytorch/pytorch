@@ -1,6 +1,7 @@
-#include <ATen/ATen.h>
+#include <ATen/core/TensorBody.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
+#include <ATen/Dispatch.h>
 
 namespace at {
 namespace native {
@@ -479,7 +480,7 @@ Tensor& reflection_pad1d_out_cpu(
 }
 
 Tensor reflection_pad1d_cpu(const Tensor& input, IntArrayRef padding) {
-  auto output = at::empty({0}, input.options());
+  auto output = at::native::empty({0}, c10::optional<DimnameList>(), input.options());
   reflection_pad1d_out_template(output, input, padding);
   return output;
 }
@@ -500,7 +501,7 @@ Tensor reflection_pad1d_backward_cpu(
     const Tensor& grad_output,
     const Tensor& input,
     IntArrayRef padding) {
-  auto grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto grad_input = at::native::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   reflection_pad1d_backward_out_template(
     grad_input, grad_output, input, padding);
   return grad_input;
@@ -513,7 +514,7 @@ Tensor& reflection_pad2d_out_cpu(
 }
 
 Tensor reflection_pad2d_cpu(const Tensor& input, IntArrayRef padding) {
-  auto output = at::empty({0}, input.options());
+  auto output = at::native::empty({0}, c10::optional<DimnameList>(), input.options());
   reflection_pad2d_out_template(output, input, padding);
   return output;
 }
@@ -534,7 +535,7 @@ Tensor reflection_pad2d_backward_cpu(
     const Tensor& grad_output,
     const Tensor& input,
     IntArrayRef padding) {
-  auto grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto grad_input = at::native::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   reflection_pad2d_backward_out_template(
     grad_input, grad_output, input, padding);
   return grad_input;
