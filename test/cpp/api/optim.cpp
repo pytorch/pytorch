@@ -166,7 +166,7 @@ TEST(OptimTest, OptimizerAccessors) {
   optimizer_.state();
 }
 
-TEST(OptimTest, BasicInterface) {
+TEST(OptimTest, OldInterface) {
   struct MyOptimizer : Optimizer {
     using Optimizer::Optimizer;
     torch::Tensor step(LossClosure closure = nullptr) override { return {};}
