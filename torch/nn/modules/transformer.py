@@ -1,10 +1,11 @@
 import torch
 import copy
+from math import sqrt
 from .. import functional as F
 from .module import Module
 from .activation import MultiheadAttention
 from .container import ModuleList
-from ..init import xavier_uniform_
+from ..init import xavier_uniform_, kaiming_uniform_
 from .dropout import Dropout
 from .linear import Linear
 from .normalization import LayerNorm
@@ -395,6 +396,15 @@ class MultiheadAttentionInProjection(Module):
     Attributes:
         weight: The learnable weights of the module of shape
             :math:`(\text{out\_embed\_dim}, \text{in\_embed\_dim}) = (P, E)`.
+
+    Examples::
+
+        >>> # S = 21; N = 64; E = 10; P = 12; H = 4;
+        >>> MHA_in = nn.MultiheadAttentionInProjection(10, 4, 12)
+        >>> seq = torch.randn(21, 64, 10)
+        >>> s = MHA_in(seq)
+        >>> print(s.shape)
+        torch.Size([256, 21, 3])
     """
     __constants__ = ['in_embed_dim', 'num_heads', 'out_embed_dim']
 
@@ -406,8 +416,8 @@ class MultiheadAttentionInProjection(Module):
         assert out_embed_dim % num_heads == 0, "out_embed_dim must be divisible by num_heads"
         self.out_embed_dim = out_embed_dim
         self.num_heads = num_heads
-        self.weight = Parameter(torch.Tensor(in_embed_dim, out_embed_dim))
-        init.kaiming_uniform_(self.weight, a=math.sqrt(5))
+        self.weight = torch.nn.Parameter(torch.Tensor(out_embed_dim, in_embed_dim))
+        kaiming_uniform_(self.weight, a=sqrt(5))
 
     def forward(self, seq):
         return F.multi_head_attention_in_projection(seq, self.num_heads, self.weight, in_proj_bias=None)
@@ -436,12 +446,13 @@ class ScaledDotProduct(Module):
 
     Examples::
 
-        >>> SDP = nn.ScaledDotProduct(8, False, 0.1)
-        >>> q = torch.randn(30, 11, 3)
-        >>> k = v = torch.randn(30, 4, 3)
+        >>> # S = L = 21; N = 64; E = 10; P = 12; H = 4;
+        >>> SDP = nn.ScaledDotProduct(4, False, 0.1)
+        >>> q = torch.randn(256, 21, 3)
+        >>> k = v = torch.randn(256, 21, 3)
         >>> attn_output, attn_weights = SDP(q, k, v)
         >>> print(attn_output.shape, attn_weights.shape)
-        torch.Size([30, 11, 3]) torch.Size([30, 11, 4])
+        torch.Size([256, 11, 3]) torch.Size([256, 21, 21])
     """
     __constants__ = ['num_heads', 'add_zero_attn', 'dropout_p']
 
@@ -478,6 +489,15 @@ class MultiheadAttentionOutProjection(Module):
     Attributes:
         weight: The learnable weights of the module of shape
             :math:`(\text{out\_embed\_dim}, \text{in\_embed\_dim}) = (E, P)`.
+
+    Examples::
+
+        >>> # S = 21; N = 64; E = 10; P = 12; H = 4;
+        >>> MHA_out = nn.MultiheadAttentionOutProjection(12, 4, 10)
+        >>> attn_seq = torch.randn(256, 21, 3)
+        >>> a = MHA_out(attn_seq)
+        >>> print(a.shape)
+        torch.Size([21, 64, 10])
     """
     __constants__ = ['in_embed_dim', 'num_heads', 'out_embed_dim']
 
@@ -489,8 +509,8 @@ class MultiheadAttentionOutProjection(Module):
             out_embed_dim = in_embed_dim
         self.out_embed_dim = out_embed_dim
         self.num_heads = num_heads
-        self.weight = Parameter(torch.Tensor(in_embed_dim, out_embed_dim))
-        init.kaiming_uniform_(self.weight, a=math.sqrt(5))
+        self.weight = torch.nn.Parameter(torch.Tensor(out_embed_dim, in_embed_dim))
+        kaiming_uniform_(self.weight, a=sqrt(5))
 
     def forward(self, attn_output):
         return F.multi_head_attention_out_projection(attn_output, self.num_heads, self.weight, out_proj_bias=None)
