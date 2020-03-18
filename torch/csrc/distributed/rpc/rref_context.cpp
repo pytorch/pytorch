@@ -510,7 +510,7 @@ void RRefContext::addConfirmedUser(
     const ForkId& forkId,
     const c10::intrusive_ptr<RRef>& rref) {
   // Notice, caller need to hold the mutex for confirmedUsers_.
-  std::lock_guard<std::mutex> lock(mutex_);
+  // std::lock_guard<std::mutex> lock(mutex_);
   confirmedUsers_.emplace(
       std::piecewise_construct,
       std::forward_as_tuple(forkId),
