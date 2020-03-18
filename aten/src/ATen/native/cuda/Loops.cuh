@@ -34,17 +34,8 @@ struct needs_dynamic_casting<func_t, 0> {
 
 }}  // namespace at::native
 
-// Note:
-// CUDA and ROCm get diverged in this PR:
-//   https://github.com/pytorch/pytorch/pull/32383
-// Because for some reason trying to enable vectorized
-// memory access introduce regression on ROCm.
-
-#ifndef __HIP_PLATFORM_HCC__
+// TODO: inline this later
 #include <ATen/native/cuda/CUDALoops.cuh>
-#else
-#include <ATen/native/cuda/ROCmLoops.cuh>
-#endif
 
 namespace at { namespace native {
 
