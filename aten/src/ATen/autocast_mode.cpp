@@ -349,13 +349,13 @@ Therefore, for the moment, this is all copy pasted in from VariableTypeEverythin
   .op(torch::RegisterOperators::options() \
     .schema(REGISTER_SCHEMA) \
     .kernel<SIGNATURE>(DispatchKey::AutocastTensorId, \
-    &WrapFunction<CastPolicy::POLICY, SIGNATURE, SIGNATURE, FUNC>::type::call))
+    &WrapFunction<CastPolicy::POLICY, SIGNATURE, SIGNATURE, &FUNC>::type::call))
 
 #define KERNEL_UNBOXED_ONLY(FUNC, REGISTER_SCHEMA, SIGNATURE, POLICY) \
   .op(torch::RegisterOperators::options() \
     .schema(REGISTER_SCHEMA) \
     .impl_unboxedOnlyKernel<SIGNATURE, \
-    &WrapFunction<CastPolicy::POLICY, SIGNATURE, SIGNATURE, FUNC>::type::call \
+    &WrapFunction<CastPolicy::POLICY, SIGNATURE, SIGNATURE, &FUNC>::type::call \
     >(DispatchKey::AutocastTensorId))
 
 // Less-common but still useful case: redispatching to a function with a new signature (e.g. appending a dtype)
@@ -363,7 +363,7 @@ Therefore, for the moment, this is all copy pasted in from VariableTypeEverythin
   .op(torch::RegisterOperators::options() \
     .schema(REGISTER_SCHEMA) \
     .impl_unboxedOnlyKernel<REGISTER_SIGNATURE, \
-    &WrapFunction<CastPolicy::POLICY, REGISTER_SIGNATURE, REDISPATCH_SIGNATURE, REDISPATCH_FUNC>::type::call \
+    &WrapFunction<CastPolicy::POLICY, REGISTER_SIGNATURE, REDISPATCH_SIGNATURE, &REDISPATCH_FUNC>::type::call \
     >(DispatchKey::AutocastTensorId))
 
 /*****************************************
@@ -422,7 +422,7 @@ auto register_out_of_place = torch::RegisterOperators()
   .op(torch::RegisterOperators::options()
     .schema("aten::native_layer_norm(Tensor input, Tensor? weight, Tensor? bias, int M, int N, float eps) -> (Tensor, Tensor, Tensor)")
     .impl_unboxedOnlyKernel<std::tuple<Tensor,Tensor,Tensor> (const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t, double),
-    &WrapFunction<CastPolicy::fp32, std::tuple<Tensor,Tensor,Tensor> (const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t, double), std::tuple<Tensor,Tensor,Tensor> (const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t, double), at::native_layer_norm>::type::call
+    &WrapFunction<CastPolicy::fp32, std::tuple<Tensor,Tensor,Tensor> (const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t, double), std::tuple<Tensor,Tensor,Tensor> (const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t, double), &at::native_layer_norm>::type::call
     >(DispatchKey::AutocastTensorId)
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   KERNEL_UNBOXED_ONLY(at::group_norm, "aten::group_norm(Tensor input, int num_groups, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enabled=True) -> Tensor", Tensor (const Tensor &, int64_t, const Tensor &, const Tensor &, double, bool), fp32)
