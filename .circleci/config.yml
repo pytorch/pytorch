@@ -513,7 +513,7 @@ jobs:
             mkdir cuda_install_logs
             ./setup.exe -s nvcc_10.1 cuobjdump_10.1 nvprune_10.1 cupti_10.1 cublas_10.1 cublas_dev_10.1 cudart_10.1 cufft_10.1 cufft_dev_10.1 curand_10.1 curand_dev_10.1 cusolver_10.1 cusolver_dev_10.1 cusparse_10.1 cusparse_dev_10.1 nvgraph_10.1 nvgraph_dev_10.1 npp_10.1 npp_dev_10.1 nvrtc_10.1 nvrtc_dev_10.1 nvml_dev_10.1 -loglevel:6 -log:"$(pwd -W)/cuda_install_logs"
             cp -r CUDAVisualStudioIntegration/extras/visual_studio_integration/MSBuildExtensions/* "C:/Program Files (x86)/Microsoft Visual Studio/2017/BuildTools/Common7/IDE/VC/VCTargets/BuildCustomizations/"
-            cp -r CUDAVisualStudioIntegration/extras/visual_studio_integration/MSBuildExtensions/* "C:\Program Files (x86)/MSBuild/Microsoft.Cpp/v4.0/BuildCustomizations/"
+            cp -r CUDAVisualStudioIntegration/extras/visual_studio_integration/MSBuildExtensions/* "C:/Program Files (x86)/MSBuild/Microsoft.Cpp/v4.0/BuildCustomizations/"
             curl --retry 3 -kLO https://ossci-windows.s3.amazonaws.com/NvToolsExt.7z
             7z x NvToolsExt.7z -oNvToolsExt
             mkdir -p "C:/Program Files/NVIDIA Corporation/NvToolsExt"
