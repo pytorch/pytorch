@@ -90,6 +90,24 @@ def prof_func_call(*args, **kwargs):
 def prof_meth_call(*args, **kwargs):
     return prof_callable(meth_call, *args, **kwargs)
 
+def get_jit_profiling_executor():
+    cur = torch._C._jit_set_profiling_executor(True)
+    torch._C._jit_set_profiling_executor(cur)
+    return cur
+
+def get_jit_profiling_mode():
+    cur = torch._C._jit_set_profiling_mode(True)
+    torch._C._jit_set_profiling_mode(cur)
+    return cur
+
+def graph_executor_mode():
+    if get_jit_profiling_executor():
+        if get_jit_profiling_mode():
+            return ProfilingMode.PROFILING
+        else:
+            return ProfilingMode.SIMPLE
+    return ProfilingMode.LEGACY
+
 torch._C.ScriptFunction.__call__ = prof_func_call
 torch._C.ScriptMethod.__call__ = prof_meth_call
 
