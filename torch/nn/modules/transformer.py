@@ -433,7 +433,7 @@ class ScaledDotProduct(Module):
         where L is the target sequence length, S is the source sequence
         length, H is the number of attention heads, N is the batch size,
         and P is the projection dimensionE is the head dimension.
-        
+
     Examples::
 
         >>> SDP = nn.ScaledDotProduct(8, False, 0.1)

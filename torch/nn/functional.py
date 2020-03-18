@@ -4005,7 +4005,7 @@ def scaled_dot_product_attention(q,                         # type: Tensor
     # type: (...) -> Tuple[Tensor, Tensor]
     r"""Uses a scaled dot product with the projected key-value pair to update
         the projected query.
-    
+
     Args:
         q (Tensor): Projected query
         k (Tensor): Projected key
@@ -4107,7 +4107,7 @@ def scaled_dot_product_attention(q,                         # type: Tensor
 def multi_head_attention_out_projection(attn_output, num_heads, out_proj_weight, out_proj_bias=None):
     # type: (Tensor, int, Tensor, Optional[Tensor]) -> Tensor
     r"""Projects an output sequence using parallel attention heads.
-    
+
     Args:
         attn_output (Tensor): Projection to be decoded to an embedding.
         num_heads (int): Number of parallel attention heads
