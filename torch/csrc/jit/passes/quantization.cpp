@@ -36,7 +36,7 @@ using graph_rewrite_helper::replaceConvolutionWithConv2d;
 // Map of quantization parameter name and value
 // for example _scale, _zero_point,
 // _scalar_type and _axis(for per channel quantization)
-using QParamMap = std::unordered_map<std::string, IValue>;
+using QParamVector = std::vector<std::pair<std::string, IValue>>;
 
 // This struct contains a compiled IR pattens slated for use in the
 // findPatternMatches function. The struct encapsulates the common
@@ -225,6 +225,11 @@ Module getInvokedModule(
   auto* instance = n->inputs()[0];
   auto path = getModuleAccessPath(instance, self);
   return findChildModule(module, path);
+}
+
+bool isPerChannel(at::QScheme qscheme) {
+  return qscheme == c10::kPerChannelAffine ||
+    qscheme == c10::kPerChannelSymmetric;
 }
 
 class ModuleCloneHelper {
@@ -1169,8 +1174,8 @@ class InsertQuantDeQuantHelper {
   // Get quantization parameter map of the given Value in Graph
   // by searching for observer module of the value and extract the
   // quantization parameters from the observer module
-  std::tuple<c10::QScheme, QParamMap> getQSchemeAndQParamMap(
-      Module& module,
+  std::tuple<c10::QScheme, QParamVector> getQSchemeAndQParamVector(
+      script::Module& module,
       Node* n);
   void checkQScheme(Graph* g, c10::QScheme qscheme) {
     if (qscheme_for_graph_.count(g)) {
@@ -1306,17 +1311,17 @@ void InsertQuantDeQuantHelper::quantizeTensors(
   }
   for (auto* n : observer_nodes_.at(g)) {
     auto* original_value = n->input(1);
-    auto tp = getQSchemeAndQParamMap(module, n);
-    checkQScheme(g, std::get<0>(tp));
+    auto tp = getQSchemeAndQParamVector(module, n);
+    auto qscheme = std::get<0>(tp);
     auto qparam_map = std::get<1>(tp);
+    checkQScheme(g, qscheme);
     for (auto& pr : qparam_map) {
       const auto& name = pr.first;
       const auto& qparam = pr.second;
       module.register_attribute(
           original_value->debugName() + name, qparam.type(), qparam);
     }
-    bool is_per_channel = qparam_map.at("_scale").isTensor();
-    insertQuantDeQuantCall(self, n, is_per_channel);
+    insertQuantDeQuantCall(self, n, isPerChannel(qscheme));
   }
 }
 
@@ -1352,8 +1357,8 @@ void checkGetQParamsResult(const IValue& qparams) {
   }
 }
 
-std::tuple<c10::QScheme, QParamMap> InsertQuantDeQuantHelper::
-    getQSchemeAndQParamMap(Module& module, Node* n) {
+std::tuple<c10::QScheme, QParamVector> InsertQuantDeQuantHelper::
+    getQSchemeAndQParamVector(script::Module& module, Node* n) {
   // TODO: refactor findObserverName to take Node* as input
   Value* v = n->output();
   TORCH_INTERNAL_ASSERT(
@@ -1376,19 +1381,19 @@ std::tuple<c10::QScheme, QParamMap> InsertQuantDeQuantHelper::
   auto tp = result.toTuple();
   at::Tensor scale = tp->elements()[0].toTensor().to(at::kFloat);
   at::Tensor zero_point = tp->elements()[1].toTensor().to(at::kInt);
-  std::unordered_map<std::string, IValue> qparams = {
-      {"_scalar_type", scalar_type},
-  };
+  // quantization parameters should appear in the same order as
+  // the argument for quantize_per_tensor/quantize_per_channel function
+  QParamVector qparams;
   auto qscheme = observer_module.attr("qscheme").toQScheme();
-  if (qscheme == c10::kPerChannelAffine ||
-      qscheme == c10::kPerChannelSymmetric) {
-    qparams["_scale"] = scale;
-    qparams["_zero_point"] = zero_point;
-    qparams["_axis"] = tp->elements()[2].toInt();
+  if (isPerChannel(qscheme)) {
+    qparams.push_back(std::make_pair("_scale", scale));
+    qparams.push_back(std::make_pair("_zero_point", zero_point));
+    qparams.push_back(std::make_pair("_axis", tp->elements()[2].toInt()));
   } else {
-    qparams["_scale"] = scale.item<double>();
-    qparams["_zero_point"] = zero_point.item<int64_t>();
+    qparams.push_back(std::make_pair("_scale", scale.item<double>()));
+    qparams.push_back(std::make_pair("_zero_point", zero_point.item<int64_t>()));
   }
+  qparams.push_back(std::make_pair("_scalar_type", scalar_type));
   return std::make_tuple(qscheme, qparams);
 }
 
@@ -1457,7 +1462,7 @@ void InsertQuantDeQuantHelper::run(
   if (observer_nodes_.count(graph.get())) {
     for (auto* n : observer_nodes_.at(graph.get())) {
       auto* original_value = n->input(1);
-      auto tp = getQSchemeAndQParamMap(module, n);
+      auto tp = getQSchemeAndQParamVector(module, n);
       checkQScheme(graph.get(), std::get<0>(tp));
       auto qparam_map = std::get<1>(tp);
       for (auto& pr : qparam_map) {
