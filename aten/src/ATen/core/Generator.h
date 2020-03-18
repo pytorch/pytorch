@@ -13,6 +13,8 @@
 #include <c10/core/Device.h>
 #include <c10/core/DispatchKeySet.h>
 #include <c10/core/GeneratorImpl.h>
+#include <ATen/CPUGenerator.h>
+#include <ATen/CUDAGenerator.h>
 
 /**
  * Note [Generator]
@@ -60,8 +62,26 @@ struct CAFFE2_API Generator {
     }
   }
 
-  // // TODO(pbelevich): delete this after replace Generator generator = nullptr with {}
+  // TODO(pbelevich): delete this after replace Generator generator = nullptr with c10::optional<at::Generator> = c10::nullopt
   Generator(nullptr_t gen_impl) {}
+
+  explicit Generator(Device device) {
+#ifdef USE_CUDA
+    if (device.type() == at::kCPU) {
+      this->impl_ = std::make_shared<CPUGenerator>();
+    } else if (device.type() == at::kCUDA){
+      this->impl_ = std::make_shared<CUDAGenerator>(device.index());
+    } else {
+      AT_ERROR("Device type ", c10::DeviceTypeName(device.type()),
+              " is not supported for torch.Generator() api.");
+    }
+#else
+    TORCH_CHECK(device.type() == at::kCPU,
+                "Device type ", c10::DeviceTypeName(device.type()),
+                " is not supported for Generator API.");
+    this->impl_ = std::make_shared<CPUGenerator>();
+#endif
+  }
 
   bool operator==(const Generator& rhs) const {
     return (!(this->impl_) && !(rhs.impl_)) || (this->impl_ == rhs.impl_);
@@ -89,5 +109,47 @@ Generator make_generator(Args&&... args) {
   return Generator(std::make_shared<Impl>(args...));
 }
 
-} // namespace at
+/**
+ * Utility function to static cast input Generator* to
+ * the backend generator type (CPU/CUDAGenerator etc.)
+ */
+template <typename T>
+static inline T * check_generator(Generator expr) {
+  if (T::device_type() == expr->device().type()) {
+    return expr.get<T>();
+  }
+  AT_ERROR("Expected a '", T::device_type(), "' device type for generator but found '", expr->device().type(), "'");
+}
 
+/**
+ * Utility function used in tensor implementations, which
+ * supplies the default generator to tensors, if an input generator
+ * is not supplied. The input Generator* is also static casted to
+ * the backend generator type (CPU/CUDAGenerator etc.)
+ */
+template <typename T>
+static inline T* get_generator_or_default(const Generator& expr, const Generator& defaultValue) {
+  T* result = expr.defined() ? check_generator<T>(expr) : check_generator<T>(defaultValue);
+  if (result == nullptr) {
+    AT_ERROR("Expected a '", T::device_type(), "' device type for generator but found 'nullptr'");
+  }
+  return result;
+}
+
+namespace detail {
+
+CAFFE2_API const Generator& getDefaultCPUGenerator();
+CAFFE2_API Generator createCPUGenerator(uint64_t seed_val = default_rng_seed_val);
+
+} // namespace detail
+
+namespace cuda {
+namespace detail {
+
+  TORCH_CUDA_API const Generator& getDefaultCUDAGenerator(DeviceIndex device_index = -1);
+  TORCH_CUDA_API Generator createCUDAGenerator(DeviceIndex device_index = -1);
+
+} // namespace detail
+} // namespace cuda
+
+} // namespace at

@@ -1,11 +1,12 @@
 #pragma once
 
 #include <c10/core/GeneratorImpl.h>
-#include <ATen/core/Generator.h>
 
 // TODO: this file should be in ATen/cuda, not top level
 
 namespace at {
+
+struct Generator;
 
 struct TORCH_CUDA_API CUDAGenerator : public c10::GeneratorImpl {
   // Constructors
@@ -28,13 +29,5 @@ private:
   uint64_t philox_offset_per_thread_ = 0;
 };
 
-namespace cuda {
-namespace detail {
-
-  TORCH_CUDA_API const Generator& getDefaultCUDAGenerator(DeviceIndex device_index = -1);
-  TORCH_CUDA_API Generator createCUDAGenerator(DeviceIndex device_index = -1);
-
-} // namespace detail
-} // namespace cuda
 } // namespace at
 

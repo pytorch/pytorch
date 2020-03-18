@@ -1,11 +1,12 @@
 #pragma once
 
-#include <ATen/core/Generator.h>
 #include <ATen/core/MT19937RNGEngine.h>
 #include <c10/util/Optional.h>
 #include <c10/core/GeneratorImpl.h>
 
 namespace at {
+
+struct Generator;
 
 struct CAFFE2_API CPUGenerator : public c10::GeneratorImpl {
   // Constructors
@@ -33,12 +34,5 @@ private:
   c10::optional<float> next_float_normal_sample_;
   c10::optional<double> next_double_normal_sample_;
 };
-
-namespace detail {
-
-CAFFE2_API const Generator& getDefaultCPUGenerator();
-CAFFE2_API Generator createCPUGenerator(uint64_t seed_val = default_rng_seed_val);
-
-} // namespace detail
 
 }

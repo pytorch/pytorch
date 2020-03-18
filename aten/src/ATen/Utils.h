@@ -138,31 +138,4 @@ inline int64_t prod_intlist(ArrayRef<int64_t> list) {
   return std::accumulate(list.begin(), list.end(), 1ll, std::multiplies<int64_t>());
 }
 
-/**
- * Utility function to static cast input Generator* to
- * the backend generator type (CPU/CUDAGenerator etc.)
- */
-template <typename T>
-static inline T * check_generator(Generator expr) {
-  if (T::device_type() == expr->device().type()) {
-    return expr.get<T>();
-  }
-  AT_ERROR("Expected a '", T::device_type(), "' device type for generator but found '", expr->device().type(), "'");
-}
-
-/**
- * Utility function used in tensor implementations, which
- * supplies the default generator to tensors, if an input generator
- * is not supplied. The input Generator* is also static casted to
- * the backend generator type (CPU/CUDAGenerator etc.)
- */
-template <typename T>
-static inline T* get_generator_or_default(const Generator& expr, const Generator& defaultValue) {
-  T* result = expr.defined() ? check_generator<T>(expr) : check_generator<T>(defaultValue);
-  if (result == nullptr) {
-    AT_ERROR("Expected a '", T::device_type(), "' device type for generator but found 'nullptr'");
-  }
-  return result;
-}
-
 } // at
