@@ -156,13 +156,20 @@ void testTorchbindIValueAPI() {
     AT_ASSERT(tup->elements().size() == 2);
     auto str = tup->elements()[0].toStringRef();
     auto other_obj =
-        tup->elements()[1].to<c10::intrusive_ptr<MyStackClass<std::string>>>();
+        tup->elements()[1].toCustomClass<MyStackClass<std::string>>();
     AT_ASSERT(str == expected);
-    auto ref_obj = obj.to<c10::intrusive_ptr<MyStackClass<std::string>>>();
+    auto ref_obj = obj.toCustomClass<MyStackClass<std::string>>();
     AT_ASSERT(other_obj.get() == ref_obj.get());
   };
 
   test_with_obj(custom_class_obj, "bar");
+
+  // test IValue() API
+  auto my_new_stack = c10::make_intrusive<MyStackClass<std::string>>(
+      std::vector<std::string>{"baz", "boo"});
+  auto new_stack_ivalue = c10::IValue(my_new_stack);
+
+  test_with_obj(new_stack_ivalue, "boo");
 }
 
 } // namespace jit

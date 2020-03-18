@@ -183,6 +183,24 @@ class TORCH_API OptimizerBase {
   std::vector<Tensor> parameters_;
 };
 
+/* How do we decide whether to serialize undefined tensors or
+  c10::nullopt values into the output archive?
+Answer: we strictly follow the behavior of Python API. To be more specific:
+
+For optimizer options:
+a) For undefined tensor: currently no tensor is used as an options argument in Python API,
+   so we don't need to worry about it now.
+b) For c10::nullopt value: we serialize c10::nullopt values into the output archive,
+   to follow the exact same behavior as Python API.
+
+For optimizer param state:
+a) For undefined tensor: in param state, undefined tensor in C++ impl is equivalent to
+   missing key in Python impl. Since we don't serialize missing keys in Python API,
+   we skip undefined tensors when serializing the param state.
+b) For c10::nullopt value: in param state, c10::nullopt value in C++ impl is equivalent to
+   missing key in Python impl. Since we don't serialize missing keys in Python API,
+   we skip c10::nullopt values when serializing the param state. */
+
 /// Serializes an `OptimizerBase` into an `OutputArchive`.
 TORCH_API serialize::OutputArchive& operator<<(
     serialize::OutputArchive& archive,
