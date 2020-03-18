@@ -382,8 +382,8 @@ class MultiheadAttentionInProjection(Module):
         in_embed_dim (int): Input embedding dimension
         num_heads (int): Number of parallel attention heads.
         out_embed_dim (int, optional): Output projection dimension. If not
-            provided, then set to `in_embed_dim`. Must be divisible by
-            `num_heads`.
+            provided, then it is set to ``in_embed_dim``. Must be divisible by
+            ``num_heads``.
 
     Shape:
         - seq: :math:`(S, N, E)`
@@ -394,7 +394,7 @@ class MultiheadAttentionInProjection(Module):
 
     Attributes:
         weight: The learnable weights of the module of shape
-            :math:`(\text{out_embed_dim}, \text{in_embed_dim}) = (P, E)`.
+            :math:`(\text{out\_embed\_dim}, \text{in\_embed\_dim}) = (P, E)`.
     """
     __constants__ = ['in_embed_dim', 'num_heads', 'out_embed_dim']
 
@@ -415,13 +415,13 @@ class MultiheadAttentionInProjection(Module):
 
 class ScaledDotProduct(Module):
     r"""Processes a projected query and key-value pair to apply attention
-        in each parallel attention head.
+    in each parallel attention head.
 
     Args:
         num_heads (int): Number of parallel attention heads.
         add_zero_attn (bool): Whether to add a batch of zeros to the key and
             value sequences.
-        dropout_p (float): probability of dropping an attention value.
+        dropout_p (float): probability of dropping an attention weight.
 
     Shape:
         - query: :math:`(N * H, L, P / H)`
@@ -460,12 +460,13 @@ class ScaledDotProduct(Module):
 
 class MultiheadAttentionOutProjection(Module):
     r"""Process attention output using multi-head attention.
+
     Args:
-        in_embed_dim (int): Input projection dimension
+        in_embed_dim (int): Input projection dimension. Must be divisible by
+            ``num_heads``.
         num_heads (int): Number of parallel attention heads.
         out_embed_dim (int, optional): Output embedding dimension. If not
-            provided, then set to `in_embed_dim`. Must be divisible by
-            `num_heads`.
+            provided, then it is set to ``in_embed_dim``.
 
     Shape:
         - attn_output: :math:`(N * H, S, P / H)`
@@ -476,7 +477,7 @@ class MultiheadAttentionOutProjection(Module):
 
     Attributes:
         weight: The learnable weights of the module of shape
-            :math:`(\text{out_embed_dim}, \text{in_embed_dim}) = (E, P)`.
+            :math:`(\text{out\_embed\_dim}, \text{in\_embed\_dim}) = (E, P)`.
     """
     __constants__ = ['in_embed_dim', 'num_heads', 'out_embed_dim']
 

@@ -3966,13 +3966,13 @@ def multi_head_attention_in_projection(seq, num_heads, in_proj_weight, in_proj_b
         in_proj_bias (Tensor, optional): bias used for projection.
 
     Shape:
-        S is the sequence length, H is the number of attention heads, N is the
-        batch size, P is the projection dimension, and E is the embedding
-        dimension.
         - seq: :math:`(S, N, E)`
         - in_proj_weight: :math:`(P, E)`
         - in_proj_bias: :math:`(P)`
         - Output: :math:`(N * H, S, P / H)`
+        where S is the sequence length, H is the number of attention heads, N is the
+        batch size, P is the projection dimension, and E is the embedding
+        dimension.
 
     """
     if not torch.jit.is_scripting():
@@ -4004,7 +4004,7 @@ def scaled_dot_product_attention(q,                         # type: Tensor
                                  ):
     # type: (...) -> Tuple[Tensor, Tensor]
     r"""Uses a scaled dot product with the projected key-value pair to update
-        the projected query.
+    the projected query.
 
     Args:
         q (Tensor): Projected query
@@ -4026,15 +4026,15 @@ def scaled_dot_product_attention(q,                         # type: Tensor
             for the entries of each batch.
 
     Shape:
-        L is the target length, S is the source length, H is the number of
-        attention heads, N is the batch size, and P is the projection 
-        dimension.
         - q: :math:`(N * H, L, P / H)`
         - k: :math:`(N * H, S, P / H)`
         - v: :math:`(N * H, S, P / H)`
         - key_padding_mask: :math:`(N, S)`
         - attn_mask: :math:`(L, S)` or :math:`(N * H, L, S)`
         - Output: :math:`(N * H, L, P / H)`, :math:`(N * H, L, S)`
+        where L is the target length, S is the source length, H is the number
+        of attention heads, N is the batch size, and P is the projection
+        dimension.
 
     """
     if not torch.jit.is_scripting():
@@ -4115,13 +4115,13 @@ def multi_head_attention_out_projection(attn_output, num_heads, out_proj_weight,
         out_proj_bias (Tensor, optional): bias used to decode projection.
 
     Shape:
-        S is the sequence length, H is the number of attention heads, N is the
-        batch size, P is the projection dimension, and E is the embedding
-        dimension.
         - attn_output: :math:`(N * H, S, P / H)`
         - out_proj_weight: :math:`(E, P)`
         - out_proj_bias: :math:`(E)`
         - Output: :math:`(S, N, E)`
+        where S is the sequence length, H is the number of attention heads, N is the
+        batch size, P is the projection dimension, and E is the embedding
+        dimension.
 
     """
     if not torch.jit.is_scripting():
