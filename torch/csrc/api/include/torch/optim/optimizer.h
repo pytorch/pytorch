@@ -108,9 +108,6 @@ class TORCH_API Optimizer {
   /// A loss function closure, which is expected to return the loss value.
   virtual Tensor step(LossClosure closure = nullptr) = 0;
 
-  // TODO: when all optimizers use the new design, we can devirtualize some of the following methods
-  // such as add_parameters() / parameters() / size()
-
   /// Adds the given vector of parameters to the optimizer's parameter list.
   void add_parameters(const std::vector<Tensor>& parameters);
 
