@@ -175,9 +175,17 @@ TEST(OptimTest, OptimizerAccessors) {
 }
 
 TEST(OptimTest, OldInterface) {
+  struct MyOptimizerOptions : public OptimizerCloneableOptions<MyOptimizerOptions> {
+    MyOptimizerOptions(double lr = 1.0);
+    TORCH_ARG(double, lr) = 1.0;
+  };
+
   struct MyOptimizer : Optimizer {
     using Optimizer::Optimizer;
     torch::Tensor step(LossClosure closure = nullptr) override { return {};}
+    explicit MyOptimizer(
+        std::vector<at::Tensor> params, MyOptimizerOptions defaults = {}) :
+          Optimizer({std::move(OptimizerParamGroup(params))}, std::make_unique<MyOptimizerOptions>(defaults)) {}
   };
   std::vector<torch::Tensor> parameters = {
       torch::ones({2, 3}), torch::zeros({2, 3}), torch::rand({2, 3})};
@@ -186,7 +194,8 @@ TEST(OptimTest, OldInterface) {
     ASSERT_EQ(optimizer.size(), parameters.size());
   }
   {
-    MyOptimizer optimizer;
+    std::vector<at::Tensor> params;
+    MyOptimizer optimizer(params);
     ASSERT_EQ(optimizer.size(), 0);
     optimizer.add_parameters(parameters);
     ASSERT_EQ(optimizer.size(), parameters.size());
