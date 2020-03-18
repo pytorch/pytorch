@@ -353,13 +353,11 @@ TensorOptions infer_full_options(
   if (!options.has_dtype()) {
     if (fill_value.isIntegral(true)) {
       TORCH_WARN_ONCE(
-        "Deprecation warning: In PyTorch 1.6 torch.full with a bool or ",
-        "integral fill_value will require a dtype or out argument. ",
-        "In PyTorch 1.7, when `out` and `dtype` are not set a bool fill_value ",
-        "will return a tensor of torch.bool dtype, ",
-        "and an integral fill_value will return a tensor of torch.long ",
-        "dtype. ",
-        "Set the optional dtype or out arguments to suppress this warning. "
+        "Deprecation warning: In a future PyTorch release torch.full ",
+        "will no longer return tensors of floating dtype by default. ",
+        "Instead, a bool fill_value will return a tensor of torch.bool dtype, ",
+        "and an integral fill_value will return a tensor of torch.long dtype. ",
+        "Set the optional `dtype` or `out` arguments to suppress this warning."
       );
     } else if (fill_value.isComplex()) {
       auto scalar_type = (get_default_dtype() == ScalarType::Double) ?
