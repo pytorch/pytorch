@@ -3955,11 +3955,12 @@ def multi_head_attention_forward(query,                           # type: Tensor
         return attn_output, None
 
 
-def multi_head_attention_in_projection(query, num_heads, in_proj_weight, in_proj_bias=None):
+def multi_head_attention_in_projection(seq, num_heads, in_proj_weight, in_proj_bias=None):
     # type: (Tensor, int, Tensor, Optional[Tensor]) -> Tensor
-    r"""
+    r"""Projects an input sequence using parallel attention heads.
+
     Args:
-        query (Tensor): query to be projected
+        seq (Tensor): sequence to be projected
         num_heads (int): number of parallel heads used.
         in_proj_weight (Tensor): weight used for projection
         in_proj_bias (Tensor, optional): bias used for projection.
@@ -3968,7 +3969,7 @@ def multi_head_attention_in_projection(query, num_heads, in_proj_weight, in_proj
         S is the sequence length, H is the number of attention heads, N is the
         batch size, P is the projection dimension, and E is the embedding
         dimension.
-        - query: :math:`(S, N, E)`
+        - seq: :math:`(S, N, E)`
         - in_proj_weight: :math:`(P, E)`
         - in_proj_bias: :math:`(P)`
         - Output: :math:`(N * H, S, P / H)`
@@ -3980,12 +3981,12 @@ def multi_head_attention_in_projection(query, num_heads, in_proj_weight, in_proj
             return handle_torch_function(
                 multi_head_attention_in_projection, tens_ops,
                 query, num_heads, in_proj_weight, in_proj_bias=in_proj_bias)
-    seq_len, bsz, _ = query.size()
+    seq_len, bsz, _ = seq.size()
     proj_dim = in_proj_weight.size(0)
     assert proj_dim % num_heads == 0, "projection dimension must be divisible by num_heads"
     head_dim = proj_dim // num_heads
 
-    q = linear(query, in_proj_weight, in_proj_bias)
+    q = linear(seq, in_proj_weight, in_proj_bias)
     # Shape of q: (S, N, P)
     q = q.reshape(seq_len, bsz * num_heads, head_dim).transpose(0, 1)
     return q
@@ -4002,7 +4003,9 @@ def scaled_dot_product_attention(q,                         # type: Tensor
                                  attn_mask=None,            # type: Optional[Tensor]
                                  ):
     # type: (...) -> Tuple[Tensor, Tensor]
-    r"""
+    r"""Uses a scaled dot product with the projected key-value pair to update
+        the projected query.
+    
     Args:
         q (Tensor): Projected query
         k (Tensor): Projected key
@@ -4079,7 +4082,8 @@ def scaled_dot_product_attention(q,                         # type: Tensor
         if key_padding_mask is not None:
             key_padding_mask = pad(key_padding_mask, (0, 1))
 
-    attn_output_weights = torch.bmm(q, k.transpose(1, 2))
+    # Dot product of q, k
+    attn_output_weights = torch.matmul(q, k.transpose(-2, -1))
     assert list(attn_output_weights.size()) == [batch_heads, tgt_len, src_len]
 
     if attn_mask is not None:
@@ -4096,13 +4100,14 @@ def scaled_dot_product_attention(q,                         # type: Tensor
     attn_output_weights = softmax(attn_output_weights, dim=-1)
     attn_output_weights = dropout(attn_output_weights, p=dropout_p, training=training)
 
-    attn_output = torch.bmm(attn_output_weights, v)
+    attn_output = torch.matmul(attn_output_weights, v)
     return attn_output, attn_output_weights
 
 
 def multi_head_attention_out_projection(attn_output, num_heads, out_proj_weight, out_proj_bias=None):
     # type: (Tensor, int, Tensor, Optional[Tensor]) -> Tensor
-    r"""
+    r"""Projects an output sequence using parallel attention heads.
+    
     Args:
         attn_output (Tensor): Projection to be decoded to an embedding.
         num_heads (int): Number of parallel attention heads
