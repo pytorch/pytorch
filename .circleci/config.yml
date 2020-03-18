@@ -6998,6 +6998,9 @@ workflows:
       - promote_approval:
           context: org-member
           type: approval
+          filters:
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*/
       - promote_s3:
           context: org-member
           name: promote_s3_libtorch
