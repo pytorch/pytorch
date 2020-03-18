@@ -7,14 +7,12 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 namespace torch {
-namespace jit {
 class CustomClassHolder : public c10::intrusive_ptr_target {};
-
+namespace jit {
+using ::torch::CustomClassHolder;
 struct Function;
-namespace script {
 struct CompilationUnit;
 struct Module;
-}
 } // namespace jit
 } // namespace torch
 namespace c10 {
@@ -209,13 +207,24 @@ struct CAFFE2_API IValue final {
   /// @private [doxygen private]
   c10::intrusive_ptr<caffe2::Blob> toBlob() const &;
 
-  // Capsule
-  IValue(intrusive_ptr<torch::jit::CustomClassHolder> blob);
+  // Capsule. Capsule is an internal implementation detail
+  // of custom C++ classes. No new callsites of these APIs should
+  // be introduced.
+  static inline IValue make_capsule(intrusive_ptr<torch::CustomClassHolder> blob);
   bool isCapsule() const {
     return Tag::Capsule == tag;
   }
-  c10::intrusive_ptr<torch::jit::CustomClassHolder> toCapsule() &&;
-  c10::intrusive_ptr<torch::jit::CustomClassHolder> toCapsule() const &;
+  c10::intrusive_ptr<torch::CustomClassHolder> toCapsule() &&;
+  c10::intrusive_ptr<torch::CustomClassHolder> toCapsule() const &;
+
+  // Custom C++ classes
+  template <typename T, std::enable_if_t<std::is_base_of<torch::CustomClassHolder, T>::value, int> = 0>
+  IValue(intrusive_ptr<T> custom_class);
+  bool isCustomClass() const;
+  template <typename T>
+  c10::intrusive_ptr<T> toCustomClass() &&;
+  template <typename T>
+  c10::intrusive_ptr<T> toCustomClass() const &;
 
   // Tuple
   IValue(c10::intrusive_ptr<ivalue::Tuple> v);
@@ -323,11 +332,23 @@ struct CAFFE2_API IValue final {
   c10::List<IValue> toList() const &;
   c10::ArrayRef<IValue> toListRef() const;
 
+  // Some template constructors of IValue calls another constructor recursively.
+  // This SNIFAEs the called constructor exists.
   template<class T>
+  using enable_if_ivalue_constructible =
+      std::enable_if_t<std::is_constructible<IValue, T>::value, std::nullptr_t>;
+
+  template <
+      class T,
+      enable_if_ivalue_constructible<T> = nullptr>
   IValue(c10::List<T> v);
-  template<class T>
+  template <
+      class T,
+      enable_if_ivalue_constructible<T> = nullptr>
   IValue(at::ArrayRef<T> v);
-  template<class T>
+  template <
+      class T,
+      enable_if_ivalue_constructible<T> = nullptr>
   IValue(const std::vector<T>& v);
 
   // GenericDict
@@ -345,7 +366,9 @@ struct CAFFE2_API IValue final {
   /// \endcond
   IValue(std::unordered_map<Key, Value> v);
 
-  template<class T>
+  template <
+      class T,
+      enable_if_ivalue_constructible<T> = nullptr>
   IValue(c10::optional<T> v);
   IValue(c10::nullopt_t);
 
@@ -356,7 +379,7 @@ struct CAFFE2_API IValue final {
   c10::intrusive_ptr<ivalue::Object> toObject() const & ;
   const ivalue::Object& toObjectRef() const;
 
-  torch::jit::script::Module toModule() const;
+  torch::jit::Module toModule() const;
   bool isModule() const;
 
   // PyObject
@@ -692,10 +715,10 @@ private:
 // guaranteed to stay alive as long as we hold this object.
 struct TORCH_API StrongTypePtr {
   StrongTypePtr(
-      std::shared_ptr<torch::jit::script::CompilationUnit> cu,
+      std::shared_ptr<torch::jit::CompilationUnit> cu,
       std::shared_ptr<Type> type);
 
-  std::shared_ptr<torch::jit::script::CompilationUnit> cu_;
+  std::shared_ptr<torch::jit::CompilationUnit> cu_;
   std::shared_ptr<Type> type_;
 };
 

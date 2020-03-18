@@ -43,8 +43,7 @@ bool operator==(const AdamParamState& lhs, const AdamParamState& rhs) {
   return (lhs.step() == rhs.step()) &&
           torch::equal(lhs.exp_avg(), rhs.exp_avg()) &&
           torch::equal(lhs.exp_avg_sq(), rhs.exp_avg_sq()) &&
-          ((!lhs.max_exp_avg_sq().defined() && !rhs.max_exp_avg_sq().defined()) ||
-           (lhs.max_exp_avg_sq().defined() && rhs.max_exp_avg_sq().defined() && torch::equal(lhs.max_exp_avg_sq(), rhs.max_exp_avg_sq())));
+          torch::equal_if_defined(lhs.max_exp_avg_sq(), rhs.max_exp_avg_sq());
 }
 
 void AdamParamState::serialize(torch::serialize::OutputArchive& archive) const {
@@ -61,13 +60,19 @@ void AdamParamState::serialize(torch::serialize::InputArchive& archive) {
   _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(Tensor, max_exp_avg_sq);
 }
 
-void Adam::step() {
+Tensor Adam::step(LossClosure closure)  {
+  NoGradGuard no_grad;
+  Tensor loss = {};
+  if (closure != nullptr) {
+    at::AutoGradMode enable_grad(true);
+    loss = closure();
+  }
   for (auto& group : param_groups_) {
     for (auto& p : group.params()) {
       if (!p.grad().defined()) {
         continue;
       }
-      auto grad = p.grad().data();
+      auto grad = p.grad();
       TORCH_CHECK(!grad.is_sparse(), "Adam does not support sparse gradients"/*, please consider SparseAdam instead*/);
       auto param_state = state_.find(c10::guts::to_string(p.unsafeGetTensorImpl()));
       auto& options = static_cast<AdamOptions&>(group.options());
@@ -77,12 +82,12 @@ void Adam::step() {
         auto state = std::make_unique<AdamParamState>();
         state->step(0);
         // Exponential moving average of gradient values
-        state->exp_avg(torch::zeros_like(p.data(), MemoryFormat::Preserve));
+        state->exp_avg(torch::zeros_like(p, MemoryFormat::Preserve));
         // Exponential moving average of squared gradient values
-        state->exp_avg_sq(torch::zeros_like(p.data(), MemoryFormat::Preserve));
+        state->exp_avg_sq(torch::zeros_like(p, MemoryFormat::Preserve));
         if(options.amsgrad()) {
           // Maintains max of all exp. moving avg. of sq. grad. values
-          state->max_exp_avg_sq(torch::zeros_like(p.data(), MemoryFormat::Preserve));
+          state->max_exp_avg_sq(torch::zeros_like(p, MemoryFormat::Preserve));
         }
         state_[c10::guts::to_string(p.unsafeGetTensorImpl())] = std::move(state);
       }
@@ -103,7 +108,6 @@ void Adam::step() {
         grad = grad.add(p, options.weight_decay());
       }
 
-      NoGradGuard no_grad;
       // Decay the first and second moment running average coefficient
       exp_avg.mul_(beta1).add_(grad, 1 - beta1);
       exp_avg_sq.mul_(beta2).addcmul_(grad, grad, 1 - beta2);
@@ -119,9 +123,10 @@ void Adam::step() {
       }
 
       auto step_size = options.lr() / bias_correction1;
-      p.data().addcdiv_(exp_avg, denom, -step_size);
+      p.addcdiv_(exp_avg, denom, -step_size);
     }
   }
+  return loss;
 }
 
 void Adam::add_parameters(const std::vector<Tensor>& parameters) {
@@ -168,10 +173,8 @@ void Adam::load(serialize::InputArchive& archive) {
       state->step(step_buffers.at(idx));
       state->exp_avg(exp_average_buffers.at(idx));
       state->exp_avg_sq(exp_average_sq_buffers.at(idx));
-      if(idx < max_exp_average_sq_buffers.size()) {
+      if (idx < max_exp_average_sq_buffers.size()) {
         state->max_exp_avg_sq(max_exp_average_sq_buffers.at(idx));
-      } else {
-        state->max_exp_avg_sq({});
       }
       state_[c10::guts::to_string(params.at(idx).unsafeGetTensorImpl())] = std::move(state);
     }

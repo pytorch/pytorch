@@ -53,7 +53,7 @@ TypePtr tryInferTypeWithTypeHint(
     const py::object& type_hint) {
   // If the py::object to be contained by the RRef is a ScripModule, we enforce
   // users to specify its ModuleInterface type.
-  if (auto module = jit::script::as_module(value)) {
+  if (auto module = jit::as_module(value)) {
     TORCH_CHECK(
         !type_hint.is_none(),
         "The RRef being created contains a ScriptModule, "
@@ -113,8 +113,16 @@ bool PyRRef::isOwner() const {
   return rref_->isOwner();
 }
 
+bool PyRRef::confirmedByOwner() const {
+  return rref_->confirmedByOwner();
+}
+
 WorkerInfo PyRRef::owner() const {
   return RRefContext::getInstance().agent()->getWorkerInfo(rref_->owner());
+}
+
+std::string PyRRef::ownerName() const {
+  return rref_->ownerName();
 }
 
 py::object PyRRef::toHere() {
@@ -162,14 +170,16 @@ py::object PyRRef::localValue() {
 }
 
 std::string PyRRef::str() const {
-  std::ostringstream ss;
   if (rref_->isOwner()) {
-    ss << "OwnerRRef(" << rref_->rrefId() << ")";
+    return c10::str("OwnerRRef(", rref_->rrefId(), ")");
   } else {
-    ss << "UserRRef(RRefId = " << rref_->rrefId() << ", ForkId = "
-       << c10::static_intrusive_pointer_cast<UserRRef>(rref_)->forkId() << ")";
+    return c10::str(
+        "UserRRef(RRefId = ",
+        rref_->rrefId(),
+        ", ForkId = ",
+        c10::static_intrusive_pointer_cast<UserRRef>(rref_)->forkId(),
+        ")");
   }
-  return ss.str();
 }
 
 py::tuple PyRRef::pickle() const {

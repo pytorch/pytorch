@@ -135,9 +135,18 @@ auto handle_torch_function(PythonArgs &r, PyObject* args, PyObject* kwargs, PyOb
   py::object torch_api_function = PyObject_FastGetAttrString(torch_api, (char*)r.get_func_name().c_str());
   TORCH_INTERNAL_ASSERT(torch_api_function.ptr() != nullptr, "torch API function must exist");
   py::object ret;
+
+  // overloaded_args already all have unique types
+  std::vector<py::object> overloaded_types;
+  overloaded_types.reserve(r.signature.overloaded_args.size());
+  for (auto &arg : r.signature.overloaded_args) {
+    overloaded_types.push_back(py::reinterpret_borrow<py::object>((PyObject *) Py_TYPE(arg.ptr())));
+  }
+  py::tuple py_types = py::cast(overloaded_types);
+
   for (auto &arg : r.signature.overloaded_args) {
     py::object torch_function = PyObject_FastGetAttrString(arg.ptr(), "__torch_function__");
-    ret = py::reinterpret_steal<py::object>(PyObject_CallFunctionObjArgs(torch_function.ptr(), torch_api_function.ptr(), args, kwargs, NULL));
+    ret = py::reinterpret_steal<py::object>(PyObject_CallFunctionObjArgs(torch_function.ptr(), torch_api_function.ptr(), py_types.ptr(), args, kwargs, NULL));
     if (ret.ptr() != Py_NotImplemented) {
       // Return the reference to the result. This also covers the case where ret
       // is NULL and __torch_function__ raised an exception, which we throw below
@@ -413,11 +422,11 @@ void FunctionParameter::set_default_str(const std::string& str) {
     }
   } else if (type_ == ParameterType::LAYOUT) {
     if (str == "None") {
-      default_layout = nullptr;
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(allow_none);
     } else if (str == "torch.strided") {
-      default_layout = torch::getLayout(at::Backend::CPU);
+      default_layout = at::Layout::Strided;
     } else if (str == "torch.sparse_coo") {
-      default_layout = torch::getLayout(at::Backend::SparseCPU);
+      default_layout = at::Layout::Sparse;
     } else {
       throw std::runtime_error("invalid default value for layout: " + str);
     }

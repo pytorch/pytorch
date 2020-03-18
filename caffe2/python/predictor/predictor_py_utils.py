@@ -15,6 +15,7 @@ def create_predict_net(predictor_export_meta):
     # Construct a new net to clear the existing settings.
     net = core.Net(predictor_export_meta.predict_net.name or "predict")
     net.Proto().op.extend(predictor_export_meta.predict_net.op)
+    net.Proto().partition_info.extend(predictor_export_meta.predict_net.partition_info)
     net.Proto().external_input.extend(
         predictor_export_meta.inputs + predictor_export_meta.parameters)
     net.Proto().external_output.extend(predictor_export_meta.outputs)
@@ -142,6 +143,14 @@ def AddPlan(meta_net_def, plan_name, plan_def):
 def AddNet(meta_net_def, net_name, net_def):
     meta_net_def.nets.add(key=net_name, value=net_def)
 
+
+def SetBlobsOrder(meta_net_def, blobs_order):
+    for blob in blobs_order:
+        meta_net_def.blobsOrder.append(blob)
+
+def SetPreLoadBlobs(meta_net_def, pre_load_blobs):
+    for blob in pre_load_blobs:
+        meta_net_def.preLoadBlobs.append(blob)
 
 def GetArgumentByName(net_def, arg_name):
     for arg in net_def.arg:

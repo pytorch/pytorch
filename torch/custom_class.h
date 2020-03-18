@@ -16,54 +16,59 @@
 #include <sstream>
 
 namespace torch {
-namespace jit {
 
-namespace script {
-struct CompilationUnit;
-}
-
+// Given a qualified name (e.g. __torch__.torch.classes.Foo), return
+// the ClassType pointer to the Type that describes that custom class,
+// or nullptr if no class by that name was found.
 TORCH_API at::ClassTypePtr getCustomClass(const std::string& name);
 
+// Given an IValue, return true if the object contained in that IValue
+// is a custom C++ class, otherwise return false.
 TORCH_API bool isCustomClass(const c10::IValue& v);
 
+// This function is used in conjunction with `class_::def()` to register
+// a constructor for a given C++ class type. For example,
+// torch::init<int, std::string>() would register a two-argument constructor
+// taking an int and a std::string as argument.
 template <class... Types>
 detail::types<void, Types...> init() {
   return detail::types<void, Types...>{};
 }
 
-// To bind custom classes into Torchscript, use an API very similar to Pybind's.
-// Currently exposes one class `torch::jit::class_<T>` and 2 methods.
-// - Constructing `torch::jit::class_<Foo>` registers `Foo` in Python and
-// Torchscript, and puts it under `torch.classes.Foo` in Python.
-// - torch::jit::class_<Foo>.def("method1", &Foo::method1) does some template
-// metaprogramming to introspect the function types and register the operator
-// for use in Torchscript.
-// - torch::jit::class_<Foo>.def(torch::jit::init<int64_t, int64_t>()) registers
-// the Foo(int, int) constructor.
-// see test/custom_operator/classes.cpp and
-// test/custom_operator/test_custom_classes.py for example usages
-
+// Entry point for custom C++ class registration. To register a C++ class
+// in PyTorch, instantiate `torch::class_` with the desired class as the
+// template parameter. Typically, this instantiation should be done in
+// the initialization of a global variable, so that the class will be
+// made available on dynamic library loading without any additional API
+// calls needed. For example, to register a class named Foo, you might
+// create a global variable like so:
+//
+//   static auto register_foo = torch::class_<Foo>("Foo")
+//     .def("myMethod", &Foo::myMethod)
+//     .def("lambdaMethod", [](const c10::intrusive_ptr<Foo>& self) {
+//       // Do something with `self`
+//     });
+//
+// In addition to registering the class, this registration also chains
+// `def()` calls to register methods. `myMethod()` is registered with
+// a pointer to the Foo class's `myMethod()` method. `lambdaMethod()`
+// is registered with a C++ lambda expression.
 template <class CurClass>
 class class_ {
   static_assert(std::is_base_of<CustomClassHolder, CurClass>::value,
-    "torch::jit::class_<T> requires T to inherit from CustomClassHolder");
-
-  std::string className;
-  std::string qualClassName;
-  at::ClassTypePtr classTypePtr;
-
-  const std::string parentModule = "classes";
-  const std::string topModule = "__torch__.torch";
+    "torch::class_<T> requires T to inherit from CustomClassHolder");
 
  public:
+  // Constructor. String argument className_ is the name you would like to
+  // see this class exposed as in Python and TorchScript. For example, if
+  // you pass in "MyStack" here, the class will appear as
+  // `torch.classes.MyStack` in both Python and TorchScript.
   class_(std::string className_) : className(std::move(className_)) {
     qualClassName = topModule + "." + parentModule + "." + className;
 
-    // We currently represent custom classes as torchscript classes with a
-    // capsule attribute
     classTypePtr = at::ClassType::create(
         c10::QualifiedName(qualClassName),
-        std::weak_ptr<script::CompilationUnit>());
+        std::weak_ptr<jit::CompilationUnit>());
     classTypePtr->addAttribute("capsule", at::CapsuleType::get());
 
     c10::getCustomClassTypeMap().insert(
@@ -74,20 +79,40 @@ class class_ {
     registerCustomClass(classTypePtr);
   }
 
+  // def() can be used in conjunction with `torch::init()` to register
+  // a constructor for a given C++ class type. For example, passing
+  // torch::init<int, std::string>() would register a two-argument constructor
+  // taking an int and a std::string as argument.
   template <typename... Types>
   class_& def(detail::types<void, Types...>) { // Used in combination with
-                                               // torch::jit::init<...>()
+                                               // torch::init<...>()
     auto func = [](c10::tagged_capsule<CurClass> self, Types... args) {
       auto classObj = c10::make_intrusive<CurClass>(args...);
-      auto genericPtr = c10::static_intrusive_pointer_cast<torch::jit::CustomClassHolder>(std::move(classObj));
-      auto capsule = IValue(std::move(genericPtr));
-      auto object = std::move(self.ivalue).toObject();
-      object->setSlot(0, std::move(capsule));
+      auto object = self.ivalue.toObject();
+      object->setSlot(0, c10::IValue::make_capsule(std::move(classObj)));
     };
 
     defineMethod("__init__", std::move(func));
     return *this;
   }
+
+  // This is the normal method registration API. `name` is the name that
+  // the method will be made accessible by in Python and TorchScript.
+  // `f` is a callable object that defines the method. Typically `f`
+  // will either be a pointer to a method on `CurClass`, or a lambda
+  // expression that takes a c10::intrusive_ptr<CurClass> as the first
+  // argument (emulating a `this` argument in a C++ method.)
+  //
+  // Examples:
+  //    // Exposes method `foo` on C++ class `Foo` as `call_foo()` in
+  //    // Python and TorchScript
+  //    .def("call_foo", &Foo::foo)
+  //
+  //    // Exposes the given lambda expression as method `call_lambda()`
+  //    // in Python and TorchScript.
+  //    .def("call_lambda", [](const c10::intrusive_ptr<Foo>& self) {
+  //      // do something
+  //    })
   template <typename Func>
   class_& def(std::string name, Func f) {
     auto wrapped_f = detail::wrap_func<CurClass, Func>(std::move(f));
@@ -95,13 +120,28 @@ class class_ {
     return *this;
   }
 
-  // Pickle
+  // def_pickle() is used to define exactly what state gets serialized
+  // or deserialized for a given instance of a custom C++ class in
+  // Python or TorchScript. This protocol is equivalent to the Pickle
+  // concept of __getstate__ and __setstate__ from Python
+  // (https://docs.python.org/2/library/pickle.html#object.__getstate__)
+  //
+  // Currently, both the `get_state` and `set_state` callables must be
+  // C++ lambda expressions. They should have the following signatures,
+  // where CurClass is the class you're registering and T is some object
+  // that encapsulates the state of the object.
+  //
+  // __getstate__(intrusive_ptr<CurClass>) -> T
+  // __setstate__(T) -> intrusive_ptr<CurClass>
+  //
+  // T must be an object that is convertable to IValue by the same rules
+  // for custom op/method registration.
   template <typename GetStateFn, typename SetStateFn>
   class_& def_pickle(GetStateFn&& get_state, SetStateFn&& set_state) {
     static_assert(
         c10::guts::is_stateless_lambda<std::decay_t<GetStateFn>>::value &&
             c10::guts::is_stateless_lambda<std::decay_t<SetStateFn>>::value,
-        "torch::jit::pickle_ currently only supports lambdas as "
+        "def_pickle() currently only supports lambdas as "
         "__getstate__ and __setstate__ arguments.");
     def("__getstate__", std::forward<GetStateFn>(get_state));
 
@@ -118,12 +158,8 @@ class class_ {
                                 SetStateArg&& arg) {
       c10::intrusive_ptr<CurClass> classObj =
           at::guts::invoke(set_state, std::forward<SetStateArg>(arg));
-      auto genericPtr =
-          c10::static_intrusive_pointer_cast<torch::jit::CustomClassHolder>(
-              classObj);
-      auto capsule = IValue(genericPtr);
       auto object = self.ivalue.toObject();
-      object->setSlot(0, capsule);
+      object->setSlot(0, c10::IValue::make_capsule(classObj));
     };
     defineMethod(
         "__setstate__",
@@ -170,7 +206,7 @@ class class_ {
     auto qualMethodName = qualClassName + "." + name;
     auto schema = c10::inferFunctionSchemaSingleReturn<Func>(std::move(name), "");
 
-    auto wrapped_func = [func = std::move(func)](Stack& stack) mutable -> void {
+    auto wrapped_func = [func = std::move(func)](jit::Stack& stack) mutable -> void {
       // TODO: we need to figure out how to profile calls to custom functions
       // like this! Currently can't do it because the profiler stuff is in
       // libtorch and not ATen
@@ -178,7 +214,7 @@ class class_ {
           typename c10::guts::infer_function_traits_t<Func>::return_type;
       detail::BoxedProxy<RetType, Func>()(stack, func);
     };
-    auto method = std::make_shared<BuiltinOpFunction>(
+    auto method = std::make_shared<jit::BuiltinOpFunction>(
         qualMethodName, std::move(schema), std::move(wrapped_func));
 
     // Register the method here to keep the Method alive.
@@ -188,7 +224,44 @@ class class_ {
     registerCustomClassMethod(method);
     classTypePtr->addMethod(method.get());
   }
+
+  std::string className;
+  std::string qualClassName;
+  at::ClassTypePtr classTypePtr;
+
+  const std::string parentModule = "classes";
+  const std::string topModule = "__torch__.torch";
 };
+
+// make_custom_class() is a convenient way to create an instance of a registered
+// custom class and wrap it in an IValue, for example when you want to pass the
+// object to TorchScript. Its syntax is equivalent to APIs like std::make_shared<>
+// or c10::make_intrusive<>.
+//
+// For example, if you have a custom C++ class that can be constructed from an int
+// and std::string, you might use this API like so:
+//
+// IValue custom_class_iv = torch::make_custom_class<MyClass>(3, "foobarbaz");
+template <typename CurClass, typename... CtorArgs>
+c10::IValue make_custom_class(CtorArgs&&... args) {
+  if (!c10::isCustomClassRegistered<c10::intrusive_ptr<CurClass>>()) {
+    throw c10::Error(
+        "Trying to instantiate a class that isn't a registered custom class.",
+        "");
+  }
+  auto userClassInstance = c10::make_intrusive<CurClass>(std::forward<CtorArgs>(args)...);
+  return c10::IValue(std::move(userClassInstance));
+}
+
+// jit namespace for backward-compatibility
+// We previously defined everything in torch::jit but moved it out to
+// better reflect that these features are not limited only to TorchScript
+namespace jit {
+
+using ::torch::getCustomClass;
+using ::torch::isCustomClass;
+using ::torch::init;
+using ::torch::class_;
 
 } // namespace jit
 
