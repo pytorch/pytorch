@@ -94,6 +94,13 @@ Tensor& remainder_(Tensor& self, const Tensor& other) {
   return native::remainder_out(self, self, other);
 }
 
+Tensor truncate(const Tensor& tensor) {
+  if (tensor.is_floating_point()) {
+    return tensor.trunc();
+  }
+  return tensor;
+}
+
 Tensor& true_divide_out(Tensor& result, const Tensor& self, const Tensor& divisor) {
   TORCH_CHECK(!isIntegralType(result.scalar_type(), /*includeBool=*/ true),
             "True division requires a floating output type, but got ",
@@ -124,34 +131,14 @@ Tensor true_divide(const Tensor& self, const Tensor& divisor) {
   return iter.output();
 }
 
-Tensor& floor_divide_out(Tensor& result, const Tensor& self, const Tensor& other) {
-  auto iter = TensorIterator::binary_op(result, self, other,
-    /*check_mem_overlap=*/true);
-  div_stub(iter.device_type(), iter);
-
-  if (result.is_floating_point()) {
-    result.trunc_();
-  }
-
-  return result;
+Tensor floor_divide(const Tensor& input, const Tensor& other) {
+  Tensor out = input / other;
+  return truncate(out);
 }
 
-Tensor floor_divide(const Tensor& self, const Tensor& other) {
-  Tensor result;
-  auto iter = TensorIterator::binary_op(result, self, other);
-
-  div_stub(iter.device_type(), iter);
-
-  auto out = iter.output();
-  if (out.is_floating_point()) {
-    out.trunc_();
-  }
-
-  return out;
-}
-
-Tensor& floor_divide_(Tensor& self, const Tensor& other) {
-  return native::floor_divide_out(self, self, other);
+Tensor floor_divide(const Tensor& input, Scalar other) {
+  Tensor out = input / other;
+  return truncate(out);
 }
 
 Tensor& mul_out(Tensor& result, const Tensor& self, const Tensor& other) {
@@ -673,14 +660,6 @@ Tensor min(const Tensor& self, const Tensor& other) {
 }
 
 Tensor& min_(Tensor& self, const Tensor& other) { return at::min_out(self, self, other); }
-
-Tensor floor_divide(const Tensor& self, Scalar other) {
-  return at::floor_divide(self, wrapped_scalar_tensor(other));
-}
-
-Tensor& floor_divide_(Tensor& self, Scalar other) {
-  return at::floor_divide_out(self, self, wrapped_scalar_tensor(other));
-}
 
 Tensor& fmod_out(Tensor & result, const Tensor& self, const Tensor& other) {
   auto iter = TensorIterator::binary_op(result, self, other,
