@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/WindowsTorchApiMacro.h> // TORCH_API
+#include <torch/csrc/WindowsTorchApiMacro.h> // TORCH_CUDA_API
 #include <c10/core/Device.h>
 #include <c10/core/DeviceType.h>
 #include <c10/util/Exception.h>
@@ -19,7 +19,7 @@ namespace fuser {
    2. memory overlap / interleave;
  TODO: docs explaining the protocol; what is stored and how does merge work
  */
-struct TORCH_API TensorContiguity {
+struct TORCH_CUDA_API TensorContiguity {
 
   TensorContiguity(
       const std::vector<int64_t>& size, 
