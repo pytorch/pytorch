@@ -586,7 +586,8 @@ inline IValue toIValue(
       return c10::ivalue::ConcretePyObjectHolder::create(obj.cast<py::object>());
 
     case TypeKind::CapsuleType: {
-      return py::cast<c10::intrusive_ptr<CustomClassHolder>>(obj);
+      return IValue::make_capsule(
+          py::cast<c10::intrusive_ptr<CustomClassHolder>>(obj));
     } break;
     case TypeKind::AnyType:
       return toTypeInferredIValue(obj);
