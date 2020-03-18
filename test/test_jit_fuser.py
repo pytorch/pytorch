@@ -116,8 +116,9 @@ class TestFuser(JitTestCase):
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @unittest.skipIf(not RUN_CUDA_HALF, "no half support")
-    @unittest.skipIf(graph_executor_mode() != ProfilingMode.LEGACY, "no half support with profiling on")
     def test_cuda_half(self):
+        if graph_executor_mode() == ProfilingMode.PROFILING:
+            self.skipTest("no half support with profiling on")
         x = torch.randn(4, 4, dtype=torch.half, device='cuda')
         y = torch.randn(4, 4, dtype=torch.half, device='cuda')
 
@@ -304,8 +305,10 @@ class TestFuser(JitTestCase):
             self.assertAllFused(graph, except_for={'aten::Float', 'aten::_grad_sum_to_size'})
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    @unittest.skipIf(graph_executor_mode() != ProfilingMode.LEGACY, "no half support with profiling on")
     def test_dropout(self):
+        if graph_executor_mode() == ProfilingMode.PROFILING:
+            self.skipTest("no half support with profiling on")
+
         def func(x):
             x = torch.nn.functional.dropout(x)
             return torch.nn.functional.relu(x)
@@ -454,9 +457,13 @@ class TestFuser(JitTestCase):
         self.assertAllFused(ge.graph_for(x, y))
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    @unittest.skipIf(graph_executor_mode() != ProfilingMode.LEGACY, "broken with profiling on")
     @_inline_everything
     def test_fuse_decompose_normalization(self):
+        if graph_executor_mode() == ProfilingMode.PROFILING:
+            self.skipTest("broken with profiling on")
+        if graph_executor_mode() == ProfilingMode.LEGACY:
+            self.skipTest("broken with legacy executor")
+
         class ResLike(torch.jit.ScriptModule):
             def __init__(self, norm_module):
                 super(ResLike, self).__init__()
@@ -611,6 +618,9 @@ class TestFuser(JitTestCase):
     @unittest.skipIf(not RUN_CUDA_MULTI_GPU, "needs non-zero device")
     @enable_cpu_fuser
     def test_fusion_reuse_multi_gpu(self):
+        if graph_executor_mode() == ProfilingMode.LEGACY:
+            self.skipTest("broken with legacy executor")
+
         def fn(x, y):
             return x * y * x * y
 
@@ -631,6 +641,9 @@ class TestFuser(JitTestCase):
     @unittest.skipIf(not RUN_CUDA_MULTI_GPU, "needs non-zero device")
     @enable_cpu_fuser
     def test_kernel_cache_multi_gpu(self):
+        if graph_executor_mode() == ProfilingMode.LEGACY:
+            self.skipTest("broken with legacy executor")
+
         def not_fusible(x):
             return x
 
@@ -760,8 +773,10 @@ class TestFuser(JitTestCase):
         warmup_backward((hy + cy).sum())
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    @unittest.skipUnless(graph_executor_mode() == ProfilingMode.PROFILING, "Passes only with profiling executor")
     def test_rand_cuda(self):
+        if graph_executor_mode() != ProfilingMode.PROFILING:
+            self.skipTest("Passes only with profiling executor")
+
         class M(torch.jit.ScriptModule):
             __constants__ = ['d']
 
@@ -811,6 +826,9 @@ class TestFuser(JitTestCase):
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_rand_broadcast_cuda(self):
+        if graph_executor_mode() != ProfilingMode.PROFILING:
+            self.skipTest("Passes only with profiling executor")
+
         def fn_test_rand(x, y):
             r = torch.rand_like(y)
             return r * x + x
@@ -891,8 +909,11 @@ class TestFuser(JitTestCase):
         self.assertAllFused(script_f.graph_for(x, y), except_for={'prim::TupleConstruct'})
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    @unittest.skipIf(graph_executor_mode() != ProfilingMode.LEGACY, "no half support with profiling on")
     def test_grad_sum_to_size_elimination(self):
+        if graph_executor_mode() == ProfilingMode.PROFILING:
+            self.skipTest("no half support with profiling on")
+        if graph_executor_mode() == ProfilingMode.LEGACY:
+            self.skipTest("broken with legacy executor too")
 
         def my_broadcasted_cell(a, b, c):
             return (a + b) + c
