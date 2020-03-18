@@ -857,6 +857,8 @@ std::shared_ptr<FutureVariableList> Engine::execute_with_graph_task(
     // reuse it for new backward calls.
     worker_device = NO_DEVICE;
   } else {
+    TORCH_CHECK(!async_mode, "The async_mode of autograd engine is only supposed"
+                " to be used by non-reentrant backward calls");
     // If worker_device is other devices (i.e. CPU, CUDA): this is a re-entrant
     //    backward call from that device.
     graph_task->owner_ = worker_device;
