@@ -16344,32 +16344,32 @@ def ufunc_meta(is_floating=False, alt_impl=None, complex_on=('cpu', 'cuda')):
 
 # Dict of unary ufuncs and their associated test metadata
 unary_ufuncs = {
-    'acos': ufunc_meta(is_floating=True),
+    'sin': ufunc_meta(is_floating=True),
+    'cos': ufunc_meta(is_floating=True, complex_on=('cpu')),
+    'tan': ufunc_meta(is_floating=True, complex_on=('cpu')),
     'asin': ufunc_meta(is_floating=True),
+    'acos': ufunc_meta(is_floating=True),
+    'atan': ufunc_meta(is_floating=True, complex_on=('cpu')),
+    'sinh': ufunc_meta(is_floating=True),
+    'cosh': ufunc_meta(is_floating=True, complex_on=('cpu')),
+    'tanh': ufunc_meta(is_floating=True, complex_on=('cpu')),
     'ceil': ufunc_meta(is_floating=True),
-    'expm1': ufunc_meta(is_floating=True, complex_on=()),
     'floor': ufunc_meta(is_floating=True),
+    'exp': ufunc_meta(is_floating=True, complex_on=('cpu')),
+    'expm1': ufunc_meta(is_floating=True, complex_on=()),
     'log': ufunc_meta(is_floating=True),
     'log10': ufunc_meta(is_floating=True),
     'log1p': ufunc_meta(is_floating=True, complex_on=()),
     'log2': ufunc_meta(is_floating=True),
-    'sin': ufunc_meta(is_floating=True),
-    'sinh': ufunc_meta(is_floating=True),
     'sqrt': ufunc_meta(is_floating=True),
-    'trunc': ufunc_meta(is_floating=True),
-    'digamma': ufunc_meta(is_floating=True, complex_on=()),
     'rsqrt': ufunc_meta(is_floating=True, complex_on=('cpu')),
-    'sigmoid': ufunc_meta(is_floating=True, complex_on=('cpu')),
-    'atan': ufunc_meta(is_floating=True, complex_on=('cpu')),
-    'cos': ufunc_meta(is_floating=True, complex_on=('cpu')),
-    'cosh': ufunc_meta(is_floating=True, complex_on=('cpu')),
-    'exp': ufunc_meta(is_floating=True, complex_on=('cpu')),
-    'tan': ufunc_meta(is_floating=True, complex_on=('cpu')),
-    'tanh': ufunc_meta(is_floating=True, complex_on=('cpu')),
+    'trunc': ufunc_meta(is_floating=True),
     'erf': ufunc_meta(is_floating=True, complex_on=()),
     'erfc': ufunc_meta(is_floating=True, complex_on=()),
     'erfinv': ufunc_meta(is_floating=True, complex_on=()),
-    'lgamma': ufunc_meta(is_floating=True, complex_on=())
+    'lgamma': ufunc_meta(is_floating=True, complex_on=()),
+    'digamma': ufunc_meta(is_floating=True, complex_on=()),
+    'sigmoid': ufunc_meta(is_floating=True, complex_on=('cpu'))
 }
 
 # Creates and adds a test of the given unary floating ufunc's type promotion
