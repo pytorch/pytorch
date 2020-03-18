@@ -64,6 +64,30 @@ TORCH_CUDA_API Allocator* getCUDADeviceAllocator();
 TORCH_CUDA_API cusparseHandle_t getCurrentCUDASparseHandle();
 TORCH_CUDA_API cublasHandle_t getCurrentCUDABlasHandle();
 
+namespace detail {
+
+/* 
+* Populates the global variables related to CUDA generators
+* Warning: this function must only be called once!
+*/
+static void initCUDAGenVector();
+
+/**
+ * PyTorch maintains a collection of default generators that get
+ * initialized once. The purpose of these default generators is to
+ * maintain a global running state of the pseudo random number generation,
+ * when a user does not explicitly mention any generator.
+ * getDefaultCUDAGenerator gets the default generator for a particular
+ * cuda device.
+ */
+const Generator& getDefaultCUDAGenerator(DeviceIndex device_index);
+
+/**
+ * Utility to create a CUDAGenerator. Returns a shared_ptr
+ */
+Generator createCUDAGenerator(DeviceIndex device_index);
+
+} // namespace detail
 
 } // namespace cuda
 } // namespace at
