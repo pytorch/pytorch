@@ -163,6 +163,8 @@ std::vector<size_t> getGeneralOpTensorInputIndexes(Node* n) {
                  /* call_funcs = */ {},
                  /* aten_funcs = */ single_input_aten_funcs)) {
     return {0};
+  } else if (n->kind() == prim::ListUnpack) {
+    return {0};
   }
   return {};
 }
@@ -817,9 +819,17 @@ void InsertObserversHelper::fillBoundaryValueMap(
           boundary_value_map_[n->input(i)].insert(input_val);
           caller_to_callee_[n->input(i)] = input_val;
         }
-      }
-      for (Block* subblock : n->blocks()) {
-        blocks_to_visit.push(subblock);
+      } else if (n->kind() == prim::If) {
+        for (Block* subblock : n->blocks()) {
+          blocks_to_visit.push(subblock);
+          for (Value* v : n->outputs()) {
+            boundary_value_map_[v].insert(subblock->outputs()[v->offset()]);
+          }
+        }
+      } else {
+        for (Block* subblock : n->blocks()) {
+          blocks_to_visit.push(subblock);
+        }
       }
     }
   }
@@ -1036,7 +1046,7 @@ InsertObserversHelper::insertObserversFor(
         auto m = getInvokedModule(module, n, self);
         std::unordered_set<Value*> callee_observed_inputs;
         for (auto i = 0; i < n->inputs().size(); ++i) {
-          if (isObserved(n->input(i)), block_observed_values) {
+          if (isObserved(n->input(i), block_observed_values)) {
             callee_observed_inputs.insert(caller_to_callee_[n->inputs()[i]]);
           }
         }
@@ -1300,7 +1310,8 @@ class InsertQuantDeQuantHelper {
   // get the information of original value that's been observed and
   // the quantization parameters
   std::unordered_map<Graph*, std::vector<Node*>> observer_nodes_for_graph_;
-  // A map from qparam name (e.g. _scale) to the attribute name in
+  // qparam name map for each observer node, where each qparam name map  maps
+  // from qparam name (e.g. _scale) to the attribute name in
   // the module(e.g. weight_scale_0)
   std::unordered_map<Node*, std::unordered_map<std::string, std::string>> qparam_name_map_for_node_;
   // Record qscheme for every graph, this is for checking
@@ -2195,12 +2206,11 @@ void SwapDeQuant(std::shared_ptr<Graph>& graph) {
           dequantize_node->removeAllInputs();
           dequantize_node->destroy();
         }
-        TORCH_CHECK(n->outputs().size() == 1, "We only support dequantize swapping for ops"
-                    " with one output right now");
-        auto* output = n->output();
-        std::vector<Use> uses = output->uses();
-        // Insert new dequantize node for each use of the output
-        insertDeQuantCall(graph.get(), output, output, uses);
+        for (auto* output: n->outputs()) {
+          std::vector<Use> uses = output->uses();
+          // Insert new dequantize node for each use of the output
+          insertDeQuantCall(graph.get(), output, output, uses);
+        }
       }
       for (Block* subblock : n->blocks()) {
         blocks_to_visit.push(subblock);

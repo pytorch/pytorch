@@ -137,6 +137,7 @@ graph(%a_quant, %b_quant, %alpha, %scale, %zero_point, %dtype):
 
   // TODO: add %dtype after when https://github.com/pytorch/pytorch/issues/34351
   // is fixed
+  // TODO: add filter for %alpha
   std::string quantized_add = R"(
 graph(%a_quant, %b_quant, %alpha, %scale, %zero_point, %dtype):
          %r_add = quantized::add(%a_quant, %b_quant, %scale, %zero_point)
@@ -144,7 +145,6 @@ graph(%a_quant, %b_quant, %alpha, %scale, %zero_point, %dtype):
 
   std::string inplace_add = R"(
 graph(%a_quant, %b_quant, %alpha, %scale, %zero_point, %dtype):
-         %alpha = prim::Constant[value=1]()
          %a_dequant = aten::dequantize(%a_quant)
          %b_dequant = aten::dequantize(%b_quant)
          %r_add = aten::add_(%a_dequant, %b_dequant, %alpha)
