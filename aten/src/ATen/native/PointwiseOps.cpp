@@ -72,9 +72,8 @@ Tensor& addcdiv_out(
   if (isIntegralType(tensor1.scalar_type(), /*includeBool=*/ true)
       && isIntegralType(tensor2.scalar_type(), /*includeBool=*/ true)) {
     TORCH_WARN_ONCE(
-      "Integer division with addcdiv is deprecated. ",
-      "In PyTorch 1.6 it will be disabled, and in PyTorch 1.7 addcdiv will a ",
-      "perform a true division of tensor1 and tensor2. ",
+      "Integer division with addcdiv is deprecated, and in a future  ",
+      "release addcdiv will perform a true division of tensor1 and tensor2. ",
       "The current addcdiv behavior can be replicated using floor_divide ",
       "for integral inputs (self + value * tensor1 // tensor2) and ",
       "division for float inputs (self + value * tensor1 / tensor2). ",

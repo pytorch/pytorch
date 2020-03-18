@@ -60,10 +60,9 @@ Tensor& add_(Tensor& self, const Tensor& other, Scalar alpha) {
 Tensor& div_out(Tensor& result, const Tensor& self, const Tensor& other) {
   if (isIntegralType(result.scalar_type(), /*includeBool=*/ true)) {
     TORCH_WARN_ONCE(
-      "Integer division of tensors using div or / is deprecated. ",
-      "In PyTorch 1.6 it will be disabled, and in PyTorch 1.7 div will ",
-      "perform true division as in Python 3. Use true_divide or ",
-      "floor_divide (or // in Python) instead.");
+      "Integer division of tensors using div or / is deprecated, ",
+      "and in a future release div will perform true division as in Python 3. ",
+      "Use true_divide or floor_divide (// in Python) instead.");
   }
 
   auto iter = TensorIterator::binary_op(result, self, other,
@@ -76,10 +75,9 @@ Tensor div(const Tensor& self, const Tensor& other) {
   if (isIntegralType(self.scalar_type(), /*includeBool=*/ true)
       && isIntegralType(other.scalar_type(), /*includeBool=*/ true)) {
     TORCH_WARN_ONCE(
-      "Integer division of tensors using div or / is deprecated. ",
-      "In PyTorch 1.6 it will be disabled, and in PyTorch 1.7 div will ",
-      "perform true division as in Python 3. Use true_divide or ",
-      "floor_divide (or // in Python) instead.");
+      "Integer division of tensors using div or / is deprecated, ",
+      "and in a future release div will perform true division as in Python 3. ",
+      "Use true_divide or floor_divide (// in Python) instead.");
   }
   Tensor result;
   auto iter = TensorIterator::binary_op(result, self, other);
