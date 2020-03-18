@@ -366,6 +366,7 @@ void RRefContext::notifyOwnerAndParentOfFork(
       // Hence, it is not necessary to send another RREF_CHILD_ACCEPT or
       // RREF_FORK_REQUEST back to the owner. See Note [Early Fork
       // Registration].
+      std::lock_guard<std::mutex> lock(mutex_);
       addConfirmedUser(forkId, rref);
     }
     return;
@@ -497,10 +498,7 @@ void RRefContext::delPendingUser(const ForkId& forkId) {
     // hiding the subtle logic using a reentrant lock.
     deletedState = iter->second; // Increase refcount
 
-    confirmedUsers_.emplace(
-        std::piecewise_construct,
-        std::forward_as_tuple(forkId),
-        std::forward_as_tuple(iter->second->rref_));
+    addConfirmedUser(forkId, iter->second->rref_);
     pendingUsers_.erase(iter); // Decrease refcount.
   }
   deletedState->confirm();
@@ -511,6 +509,7 @@ void RRefContext::delPendingUser(const ForkId& forkId) {
 void RRefContext::addConfirmedUser(
     const ForkId& forkId,
     const c10::intrusive_ptr<RRef>& rref) {
+  // Notice, caller need to hold the mutex for confirmedUsers_.
   std::lock_guard<std::mutex> lock(mutex_);
   confirmedUsers_.emplace(
       std::piecewise_construct,
