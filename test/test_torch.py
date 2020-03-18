@@ -31,7 +31,7 @@ from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
     skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm, skipCUDAIfNotRocm, onlyCUDA, onlyCPU, \
     dtypes, dtypesIfCUDA, deviceCountAtLeast, skipCUDAIf, precisionOverride, \
-    PYTORCH_CUDA_MEMCHECK, largeCUDATensorTest
+    PYTORCH_CUDA_MEMCHECK, largeCUDATensorTest, onlyOnCPUAndCUDA
 import torch.backends.quantized
 import torch.testing._internal.data
 
@@ -13756,7 +13756,7 @@ class TestTorchDeviceType(TestCase):
 
             # classical eigenvalue problem, smallest eigenvalues
             E, V = lobpcg(A, k=k, n=n, largest=False)
-            self.assertEqual(E, e_smallest)            
+            self.assertEqual(E, e_smallest)
             self.assertEqual(matmul(A, V), mm(V, E.diag_embed()), prec=prec)
 
             # classical eigenvalue problem, largest eigenvalues
@@ -15049,6 +15049,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             dt = torch.full(size, 1, names=('a', 'b'), dtype=torch.long).dtype
             self.assertEqual(dt, torch.long)
 
+    @onlyOnCPUAndCUDA
     @dtypes(torch.half, torch.float, torch.double)
     def test_full_inference(self, device, dtype):
         size = (2, 2)
@@ -15077,8 +15078,9 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
         torch.set_default_dtype(prev_default)
 
-    # Full-like precendence is the explicit dtype then the dtype of the "like"
+    # Full-like precedence is the explicit dtype then the dtype of the "like"
     # tensor.
+    @onlyOnCPUAndCUDA
     def test_full_like_inference(self, device):
         size = (2, 2)
         like = torch.empty((5,), device=device, dtype=torch.long)
