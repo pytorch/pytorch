@@ -448,8 +448,7 @@ void ProcessGroupAgent::handleSend(const SendWork& work) {
   {
     std::lock_guard<std::mutex> pendingSendGuard(pendingSendMutex_);
     // NB: We cannot just erase all of currentPendingSends[dst], since this
-    // might
-    // preemptively remove sends from other threads.
+    // might preemptively remove sends from other threads.
     auto& set = currentPendingSends_[dst];
     for (auto& p : pendingSends) {
       set.erase(p);
