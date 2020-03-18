@@ -376,7 +376,8 @@ class TransformerDecoderLayer(Module):
 
 
 class MultiheadAttentionInProjection(Module):
-    r"""
+    r"""Process input using multi-head attention.
+
     Args:
         in_embed_dim (int): Input embedding dimension
         num_heads (int): Number of parallel attention heads.
@@ -385,7 +386,6 @@ class MultiheadAttentionInProjection(Module):
             `num_heads`.
     """
     def __init__(self, in_embed_dim, num_heads, out_embed_dim=None):
-        # TODO: Bias??
         super(MultiheadAttentionInProjection, self).__init__()
         self.in_embed_dim = in_embed_dim
         if out_embed_dim is None:
@@ -395,14 +395,19 @@ class MultiheadAttentionInProjection(Module):
         self.num_heads = num_heads
         self.weight = Parameter(torch.Tensor(in_embed_dim, out_embed_dim))
         init.kaiming_uniform_(self.weight, a=math.sqrt(5))
-        self.bias = None
 
-    def forward(self, query):
-        return F.multi_head_attention_in_projection(query, self.num_heads, self.weight, self.bias)
+    def forward(self, seq):
+        r"""
+        Args:
+            seq (Tensor): A sequence of shape :math:`(S, N, H)`
+        """
+        return F.multi_head_attention_in_projection(seq, self.num_heads, self.weight, in_proj_bias=None)
 
 
 class ScaledDotProduct(Module):
-    r"""
+    r"""Processes a projected query and key-value pair to apply attention
+        in each parallel attention head.
+
     Args:
         num_heads (int): Number of parallel attention heads.
         add_zero_attn (bool): Whether to add a batch of zeros to the key and
@@ -416,7 +421,7 @@ class ScaledDotProduct(Module):
         self.num_heads = num_heads
 
     def forward(self, query, key, value, key_padding_mask=None, attn_mask=None):
-        r"""Scaled Dot Product
+        r"""
         Args:
             query, key, value: map a query and a set of key-value pairs to
             an output.
@@ -453,7 +458,6 @@ class MultiheadAttentionOutProjection(Module):
             `num_heads`.
     """
     def __init__(self, in_embed_dim, num_heads, out_embed_dim=None):
-        # TODO: Bias??
         super(MultiheadAttentionOutProjection, self).__init__()
         assert in_embed_dim % num_heads == 0, "in_embed_dim must be divisible by num_heads."
         self.in_embed_dim = in_embed_dim
@@ -463,10 +467,13 @@ class MultiheadAttentionOutProjection(Module):
         self.num_heads = num_heads
         self.weight = Parameter(torch.Tensor(in_embed_dim, out_embed_dim))
         init.kaiming_uniform_(self.weight, a=math.sqrt(5))
-        self.bias = None
 
     def forward(self, attn_output):
-        return F.multi_head_attention_out_projection(attn_output, self.num_heads, self.weight, self.bias)
+        r"""
+        Args:
+            attn_output (Tensor): A projected query of shape :math:`(N * H, L, P / H)`
+        """
+        return F.multi_head_attention_out_projection(attn_output, self.num_heads, self.weight, out_proj_bias=None)
 
 
 def _get_clones(module, N):
