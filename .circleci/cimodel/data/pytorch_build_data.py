@@ -4,15 +4,17 @@ from cimodel.lib.conf_tree import ConfigNode, X, XImportant
 CONFIG_TREE_DATA = [
     ("xenial", [
         (None, [
-            X("3.5"),
+            # XImportant("2.7.9"),
+            # X("2.7"),
+            XImportant("3.5"),  # Not run on all PRs, but should be included on [test all]
             X("nightly"),
         ]),
         ("gcc", [
             ("5.4", [  # All this subtree rebases to master and then build
                 XImportant("3.6"),
                 ("3.6", [
-                    ("parallel_tbb", [X(True)]),
-                    ("parallel_native", [X(True)]),
+                    ("parallel_tbb", [XImportant(True)]),
+                    ("parallel_native", [XImportant(True)]),
                 ]),
             ]),
             # TODO: bring back libtorch test
