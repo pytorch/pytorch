@@ -254,6 +254,42 @@ def sign(g, self):
     return g.op("Sign", self)
 
 
+def erfc(g, self):
+    return sym_help._unary_ufunc_helper(g, self, "Erfc")
+
+
+def expm1(g, self):
+    return sym_help._unary_ufunc_helper(g, self, "Expm1")
+
+
+def lgamma(g, self):
+    return sym_help._unary_ufunc_helper(g, self, "Lgamma")
+
+
+def log10(g, self):
+    return sym_help._unary_ufunc_helper(g, self, "Log10")
+
+
+def erfinv(g, self):
+    return sym_help._unary_ufunc_helper(g, self, "Erfinv")
+
+
+def sinh(g, self):
+    return sym_help._unary_ufunc_helper(g, self, "Sinh")
+
+
+def trunc(g, self):
+    return sym_help._unary_ufunc_helper(g, self, "Trunc")
+
+
+def digamma(g, self):
+    return sym_help._unary_ufunc_helper(g, self, "Digamma")
+
+
+def cosh(g, self):
+    return sym_help._unary_ufunc_helper(g, self, "Cosh")
+
+
 def _slice(g, input, axes, starts, ends):
     assert len(starts) == len(ends)
     if len(starts) == 1 and starts[0] == 0 and ends[0] == 9223372036854775807:
