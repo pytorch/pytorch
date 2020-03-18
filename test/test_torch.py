@@ -31,7 +31,7 @@ from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
     skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm, skipCUDAIfNotRocm, onlyCUDA, onlyCPU, \
     dtypes, dtypesIfCUDA, deviceCountAtLeast, skipCUDAIf, precisionOverride, \
-    PYTORCH_CUDA_MEMCHECK, largeCUDATensorTest
+    PYTORCH_CUDA_MEMCHECK, largeCUDATensorTest, onlyOnCPUAndCUDA
 import torch.backends.quantized
 import torch.testing._internal.data
 
@@ -13756,7 +13756,7 @@ class TestTorchDeviceType(TestCase):
 
             # classical eigenvalue problem, smallest eigenvalues
             E, V = lobpcg(A, k=k, n=n, largest=False)
-            self.assertEqual(E, e_smallest)            
+            self.assertEqual(E, e_smallest)
             self.assertEqual(matmul(A, V), mm(V, E.diag_embed()), prec=prec)
 
             # classical eigenvalue problem, largest eigenvalues
@@ -15021,6 +15021,85 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             self.assertRaises(RuntimeError,
                               lambda: torch.min(a, 0, out=(values, indices)))
 
+    def test_full_deprecation_warning(self, device):
+        size = (2, 2)
+        # Tests bool and integer fill_values deprecated without specific dtype set
+        with self.maybeWarnsRegex(UserWarning, 'Deprecation warning: .+'):
+            self.assertEqual(torch.full(size, True).dtype, torch.float)
+        with self.maybeWarnsRegex(UserWarning, 'Deprecation warning: .+'):
+            self.assertEqual(torch.full(size, 1).dtype, torch.float)
+
+        # Explicitly setting the dtype doesn't warn
+        with self.maybeWarnsRegex(UserWarning, ''):
+            self.assertEqual(torch.full(size, 1, dtype=torch.long).dtype, torch.long)
+        with self.maybeWarnsRegex(UserWarning, ''):
+            self.assertEqual(torch.full(size, True, dtype=torch.bool).dtype,
+                             torch.bool)
+
+        # Performs same tests with named tensor
+        with self.maybeWarnsRegex(UserWarning, 'Deprecation warning: .+|Named tensors .+'):
+            self.assertEqual(torch.full(size, True, names=('a', 'b')).dtype, torch.float)
+        with self.maybeWarnsRegex(UserWarning, 'Deprecation warning: .+|Named tensors .+'):
+            self.assertEqual(torch.full(size, 1, names=('a', 'b')).dtype, torch.float)
+
+        with self.maybeWarnsRegex(UserWarning, 'Named tensors .+'):
+            dt = torch.full(size, True, names=('a', 'b'), dtype=torch.bool).dtype
+            self.assertEqual(dt, torch.bool)
+        with self.maybeWarnsRegex(UserWarning, 'Named tensors .+'):
+            dt = torch.full(size, 1, names=('a', 'b'), dtype=torch.long).dtype
+            self.assertEqual(dt, torch.long)
+
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.half, torch.float, torch.double)
+    def test_full_inference(self, device, dtype):
+        size = (2, 2)
+
+        prev_default = torch.get_default_dtype()
+        torch.set_default_dtype(dtype)
+
+        # Tests bool fill value inference
+        # Note: in the future this will return a tensor of torch.bool dtype
+        t = torch.full(size, True)
+        self.assertEqual(t.dtype, dtype)
+
+        # Tests integer fill value inference
+        # Note: in the future this will return a tensor of torch.long dtype
+        t = torch.full(size, 1)
+        self.assertEqual(t.dtype, dtype)
+
+        # Tests float fill value inference
+        t = torch.full(size, 1.)
+        self.assertEqual(t.dtype, dtype)
+
+        # Tests complex inference
+        t = torch.full(size, (1 + 1j))
+        ctype = torch.complex128 if dtype is torch.double else torch.complex64
+        self.assertEqual(t.dtype, ctype)
+
+        torch.set_default_dtype(prev_default)
+
+    # Full-like precedence is the explicit dtype then the dtype of the "like"
+    # tensor.
+    @onlyOnCPUAndCUDA
+    def test_full_like_inference(self, device):
+        size = (2, 2)
+        like = torch.empty((5,), device=device, dtype=torch.long)
+
+        self.assertEqual(torch.full_like(like, 1.).dtype, torch.long)
+        self.assertEqual(torch.full_like(like, 1., dtype=torch.complex64).dtype,
+                         torch.complex64)
+
+    def test_full_out(self, device):
+        o = torch.empty((5,), device=device, dtype=torch.long)
+
+        # verifies dtype/out conflict throws a RuntimeError
+        with self.assertRaises(RuntimeError):
+            torch.full(o.shape, 1., dtype=torch.float, out=o)
+
+        # verifies out dtype overrides inference
+        self.assertEqual(torch.full(o.shape, 1., out=o).dtype, o.dtype)
+
+
 # NOTE [Linspace+Logspace precision override]
 # Our Linspace and logspace torch.half CUDA kernels are not very precise.
 # Since linspace/logspace are deterministic, we can compute an expected
@@ -15695,7 +15774,7 @@ _types = [
     torch.uint8
 ]
 
-# _types2 adds bfloat16 type to  _types only on ROCm. Should eventually be unified 
+# _types2 adds bfloat16 type to  _types only on ROCm. Should eventually be unified
 # with _types when bfloat16 bringup is complete on all platforms.
 _types2 = _types + [torch.bfloat16] if TEST_WITH_ROCM else _types
 
