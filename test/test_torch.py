@@ -1221,17 +1221,39 @@ class _TestTorchMixin(object):
         s1 = t1.as_subclass(SubTensor)
         s2 = t2.as_subclass(SubTensor)
 
+        # Check that the correct type is returned.
         self.assertTrue(type(s0) is SubTensor)
         self.assertTrue(type(s1) is SubTensor)
         self.assertTrue(type(s2) is SubTensor)
 
+        # Check that the data is equal.
         self.assertEqual(t0, s0)
         self.assertEqual(t1, s1)
         self.assertEqual(t2, s2)
 
+        t0[()] = 1
+        t1[1] = 3
+        t2[1, 1] = 7
+
+        # Check that the data is equal even after modification.
+        self.assertEqual(t0, s0)
+        self.assertEqual(t1, s1)
+        self.assertEqual(t2, s2)
+
+        # Check that member variables are passed through.
         self.assertTrue(s0.member_var is SubTensor.member_var)
         self.assertTrue(s1.member_var is SubTensor.member_var)
         self.assertTrue(s2.member_var is SubTensor.member_var)
+
+        # Test that autograd is propagated.
+        t = torch.tensor(5, dtype=torch.float32, requires_grad=True)
+        t_ = torch.exp(t)
+
+        s_ = t_.as_subclass(SubTensor)
+        s_.backward()
+        t_.backward()
+
+        self.assertEqual(t_.grad, s_.grad)
 
     def test_constructor_dtypes(self):
         default_type = torch.Tensor().type()
