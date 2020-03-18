@@ -272,7 +272,7 @@ __global__ void max_pool_backward_nhwc(const int nthreads, const scalar_t* top_d
         int cached_index = threadIdx.x; 
         for (int c = channel_offset; c < channels; c += blockDim.x*kernel_stride_C) {
           ptr_bottom_diff[c] = out_cached[cached_index];
-          out_cached[c] = scalar_t(0.0);
+          out_cached[cached_index] = scalar_t(0.0);
           cached_index += blockDim.x; 
         }
       } else {
