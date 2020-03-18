@@ -122,6 +122,9 @@ class CAFFE2_API OnnxifiTransformer final : public BackendTransformerBase {
   // Determine backend id
   void getBackendId();
 
+  // Extract partition info from the original net
+  void extractPartitionInfo(const NetDef& net);
+
   // Options
   OnnxifiTransformerOptions opts_;
 
@@ -145,5 +148,8 @@ class CAFFE2_API OnnxifiTransformer final : public BackendTransformerBase {
 
   // A cache for ONNX shape hints
   std::unordered_map<std::string, TensorShape> shape_hints_onnx_;
+
+  // Partition info
+  std::vector<PartitionInfo> partition_infos_;
 };
 } // namespace caffe2
