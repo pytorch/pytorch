@@ -133,7 +133,7 @@ struct TORCH_API Operator {
       //      Instead, we should automatically deregister the JIT wrapper when the c10 op
       //      gets deregistered and remove this isValid() check.
       if (c10Handle_->isValid()) {
-        schema_ = std::make_shared<FunctionSchema>(c10Handle_->schema());
+        schema_->setAliasAnalysis(c10Handle_->schema().aliasAnalysis());
       }
 
       const FunctionSchema& schemaRef = schema();

@@ -1,7 +1,6 @@
 #include <numeric>
 #include <iterator>
 #include <algorithm>
-#include <limits>
 
 #include <ATen/Dispatch.h>
 #include <ATen/cpu/vec256/vec256.h>
@@ -10,6 +9,8 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/SharedReduceOps.h>
 #include <ATen/native/cpu/Reduce.h>
+#include <ATen/native/ReduceOpsUtils.h>
+
 #include <c10/util/Optional.h>
 #include <ATen/AccumulateType.h>
 
@@ -262,20 +263,6 @@ static void max_values_kernel_impl(TensorIterator& iter) {
       [](scalar_t a, scalar_t b) -> scalar_t { return max_impl(a, b); },
       [](Vec256<scalar_t> a, Vec256<scalar_t> b) { return maximum(a, b); });
   });
-}
-
-// Maximum and minimum possible scalar values, including infinities
-
-template <typename scalar_t>
-constexpr scalar_t upper_bound() {
-  using lim = std::numeric_limits<scalar_t>;
-  return lim::has_infinity ? lim::infinity() : lim::max();
-}
-
-template <typename scalar_t>
-constexpr scalar_t lower_bound() {
-  using lim = std::numeric_limits<scalar_t>;
-  return lim::has_infinity ? -lim::infinity() : lim::lowest();
 }
 
 static void argmax_kernel_impl(TensorIterator &iter) {
