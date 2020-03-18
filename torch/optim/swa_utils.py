@@ -120,6 +120,6 @@ class SWALR(_LRScheduler):
             warnings.warn("To get the last learning rate computed by the scheduler, "
                           "please use `get_last_lr()`.", UserWarning)
         
-        if self.start_epoch and self._step_count >= self.start_epoch:
+        if self.start_epoch and self._step_count > self.start_epoch:
             return [self.swa_lr for group in self.optimizer.param_groups]
         return [max(group['lr'], self.swa_lr) for group in self.optimizer.param_groups]

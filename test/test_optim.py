@@ -1344,6 +1344,56 @@ class TestLRScheduler(TestCase):
                 targets[1] += [eta_min + (0.5 - eta_min) * (1 + math.cos(math.pi * T_cur / T_i)) / 2]
             self._test_interleaved_CosineAnnealingWarmRestarts(scheduler, targets, epochs)
 
+    def test_swa_lr(self):
+        epochs = 10
+        single_targets = [0.05] * 5 + [0.01] * 5
+        targets = [single_targets, list(map(lambda x: x * epochs, single_targets))]
+        print("test_swa_lr", targets)
+        scheduler = SWALR(self.opt, start_epoch=5, swa_lr=0.01)
+        self._test(scheduler, targets, epochs)
+
+    def test_compound_swa_lr_multiplicative_with_start_epoch(self):
+        # Testing chaining of SWALR scheduler in case when swa_lr is turned on
+        # at epoch start_epoch
+        epochs = 10
+        mult_factor = 0.9
+        swa_lr = 0.01
+        single_targets = [0.05 * mult_factor**i for i in range(5)] + [swa_lr] * 5
+        targets = [single_targets, list(map(lambda x: x * epochs, single_targets))]
+        lr_lambda = lambda epoch: mult_factor
+        base_scheduler = MultiplicativeLR(opt, lr_lambda=lr_lambda)
+        scheduler = SWALR(self.opt, start_epoch=5, swa_lr=swa_lr)
+        schedulers = [base_scheduler, scheduler]
+        self._test(schedulers, targets, epochs)
+
+    def test_compound_swa_lr_multiplicative_no_start_epoch(self):
+        # Testing chaining of SWALR scheduler in case when start_epoch is
+        # not provided
+        epochs = 10
+        mult_factor = 0.5
+        swa_lr = 0.01
+        single_targets = [max(0.05 * mult_factor**i, swa_lr) for i in range(epochs)]
+        targets = [single_targets, list(map(lambda x: x * epochs, single_targets))]
+        lr_lambda = lambda epoch: mult_factor
+        base_scheduler = MultiplicativeLR(opt, lr_lambda=lr_lambda)
+        scheduler = SWALR(self.opt, start_epoch=None, swa_lr=swa_lr)
+        schedulers = [base_scheduler, scheduler]
+        self._test(schedulers, targets, epochs)
+    
+    def test_compound_swa_lr_multiplicative_start_before_start_epoch(self):
+        # Testing chaining of SWALR scheduler in case when start_epoch is provided
+        # but swa_lr is turned on before start_epoch
+        epochs = 10
+        mult_factor = 0.5
+        swa_lr = 0.01
+        single_targets = [max(0.05 * mult_factor**i, swa_lr) for i in range(epochs)]
+        targets = [single_targets, list(map(lambda x: x * epochs, single_targets))]
+        lr_lambda = lambda epoch: mult_factor
+        base_scheduler = MultiplicativeLR(opt, lr_lambda=lr_lambda)
+        scheduler = SWALR(self.opt, start_epoch=5, swa_lr=swa_lr)
+        schedulers = [base_scheduler, scheduler]
+        self._test(schedulers, targets, epochs)
+
     def test_step_lr_state_dict(self):
         self._check_scheduler_state_dict(
             lambda: StepLR(self.opt, gamma=0.1, step_size=3),
@@ -1403,6 +1453,11 @@ class TestLRScheduler(TestCase):
         self._check_scheduler_state_dict(
             lambda: CosineAnnealingWarmRestarts(self.opt, T_0=10, T_mult=2),
             lambda: CosineAnnealingWarmRestarts(self.opt, T_0=100))
+
+    def test_swa_lr_state_dict(self):
+        self._check_scheduler_state_dict(
+            lambda: SWALR(self.opt, start_epoch=3, swa_lr=0.5),
+            lambda: SWALR(self.opt, swa_lr=5.))
 
     def _check_scheduler_state_dict(self, constr, constr2, epochs=10):
         scheduler = constr()
@@ -1546,6 +1601,151 @@ class TestLRScheduler(TestCase):
             last_lr = optimizer.param_groups[0]["lr"]
 
         self.assertLessEqual(last_lr, max_lr)
+
+
+class TestSWAUtils(TestCase):
+	def _test_bn_update(self, data_tensor, dnn, cuda=False, label_tensor=None):
+        # swa bn_update test
+
+        class DatasetFromTensors(data.Dataset):
+            def __init__(self, X, y=None):
+                self.X = X
+                self.y = y
+                self.N = self.X.shape[0]
+
+            def __getitem__(self, index):
+                x = self.X[index]
+                if self.y is None:
+                    return x
+                else:
+                    y = self.y[index]
+                    return x, y
+
+            def __len__(self):
+                return self.N 
+
+        with_y = label_tensor is not None
+        ds = DatasetFromTensors(data_tensor, y=label_tensor)
+        dl = data.DataLoader(ds, batch_size=5, shuffle=True)
+
+        preactivation_sum = torch.zeros(dnn.n_features)
+        preactivation_squared_sum = torch.zeros(dnn.n_features)
+        if cuda:
+            preactivation_sum = preactivation_sum.cuda()
+            preactivation_squared_sum = preactivation_squared_sum.cuda()
+        total_num = 0
+        for x in dl:
+            if with_y:
+                x, _ = x
+            if cuda:
+                x = x.cuda()
+
+            dnn.forward(x)
+            preactivations = dnn.compute_preactivation(x)
+            if len(preactivations.shape) == 4:
+                preactivations = preactivations.transpose(1, 3)
+            preactivations = preactivations.contiguous().view(-1, dnn.n_features)
+            total_num += preactivations.shape[0]
+
+            preactivation_sum += torch.sum(preactivations, dim=0)
+            preactivation_squared_sum += torch.sum(preactivations**2, dim=0)  
+
+        preactivation_mean = preactivation_sum / total_num
+        preactivation_var = preactivation_squared_sum / total_num 
+        preactivation_var = preactivation_var - preactivation_mean**2
+
+        swa = optim.SWA(optim.SGD(dnn.parameters(), lr=1e-3))
+
+        swa.bn_update(dl, dnn, device=x.device)
+        self.assertEqual(preactivation_mean, dnn.bn.running_mean)
+        self.assertEqual(preactivation_var, dnn.bn.running_var, prec=1e-1)
+
+        # test the swap_swa_sgd_update_bn method
+        def _reset_bn(module):
+            if issubclass(module.__class__, 
+                          torch.nn.modules.batchnorm._BatchNorm):
+                module.running_mean = torch.zeros_like(module.running_mean)
+                module.running_var = torch.ones_like(module.running_var)
+        dnn.apply(_reset_bn)
+
+        swa.update_swa()
+        swa.swap_swa_sgd_update_bn(dl, dnn, device=x.device)
+        self.assertEqual(preactivation_mean, dnn.bn.running_mean)
+        self.assertEqual(preactivation_var, dnn.bn.running_var, prec=1e-1)
+
+    def test_bn_update(self):
+        # Test bn_update for fully-connected and convolutional networks with
+        # BatchNorm1d and BatchNorm2d respectively
+        objects = 100
+        input_features = 5
+        x = torch.rand(objects, input_features)
+        y = torch.rand(objects)
+
+        class DNN(nn.Module):
+            def __init__(self):
+                super(DNN, self).__init__()
+                self.n_features = 100
+                self.fc1 = nn.Linear(input_features, self.n_features)
+                self.bn = nn.BatchNorm1d(self.n_features)
+
+            def compute_preactivation(self, x):
+                return self.fc1(x)
+
+            def forward(self, x):
+                x = self.fc1(x)
+                x = self.bn(x)
+                return x 
+
+        dnn = DNN()
+        dnn.train()
+        self._test_bn_update(x, dnn, False)
+        self._test_bn_update(x, dnn, False, label_tensor=y)
+        if torch.cuda.is_available():
+            self._test_bn_update(x, dnn.cuda(), True)
+            self._test_bn_update(x, dnn.cuda(), True, label_tensor=y)
+        self.assertTrue(dnn.training)
+
+        # Test bn_update for convolutional network and BatchNorm2d
+        objects = 100
+        channels = 3
+        height, width = 5, 5
+        x = torch.rand(objects, channels, height, width)
+        y = torch.rand(objects)
+
+        class CNN(nn.Module):
+            def __init__(self):
+                super(CNN, self).__init__()
+                self.n_features = 10
+                self.conv1 = nn.Conv2d(channels, self.n_features, kernel_size=3, padding=1)
+                self.bn = nn.BatchNorm2d(self.n_features, momentum=0.3)
+
+            def compute_preactivation(self, x):
+                return self.conv1(x)
+
+            def forward(self, x):
+                x = self.conv1(x)
+                x = self.bn(x) 
+                return x
+
+        dnn = CNN()
+        dnn.train()
+        self._test_bn_update(x, dnn, False)
+        self._test_bn_update(x, dnn, False, label_tensor=y)
+        if torch.cuda.is_available():
+            self._test_bn_update(x, dnn.cuda(), True)
+            self._test_bn_update(x, dnn.cuda(), True, label_tensor=y)
+        self.assertTrue(dnn.training)
+
+        # check that bn_update preserves eval mode
+        x = torch.rand(objects, channels, height, width)
+        dnn = CNN()
+        dnn.eval()
+        self._test_bn_update(x, dnn, False)
+        self.assertFalse(dnn.training)
+
+        # check that momentum is preserved
+        self.assertEqual(dnn.bn.momentum, 0.3)
+
 
 if __name__ == '__main__':
     run_tests()
