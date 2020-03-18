@@ -16,8 +16,6 @@ namespace dist_rpc = torch::distributed::rpc;
 namespace torch {
 namespace jit {
 
-using namespace distributed::rpc;
-
 namespace {
 at::Tensor toOptionalTensor(const c10::IValue& v) {
   if (v.isNone()) {
@@ -65,6 +63,22 @@ RegisterOperators reg_rpc_ops(
          },
          aliasAnalysisFromSchema()),
      Operator(
+         "aten::owner(RRef(t) self) -> int",
+         [](Stack& stack) {
+           auto rref = pop(stack).toRRef();
+           push(stack, rref->owner());
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         "aten::owner_name(RRef(t) self) -> str",
+         [](Stack& stack) {
+           auto rref = pop(stack).toRRef();
+           push(stack, rref->ownerName());
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
          "aten::confirmed_by_owner(RRef(t) self) -> bool",
          [](Stack& stack) {
            auto rref = pop(stack).toRRef();
@@ -79,7 +93,7 @@ RegisterOperators reg_rpc_ops(
            return [num_inputs](Stack& stack) {
              // Get inputs from the stack.
              auto stackIter = stack.end() - num_inputs;
-             auto& dstWorkerNameIValue = *stackIter++;
+             auto& dstWorkerIValue = *stackIter++;
              auto& qualifiedNameIValue = *stackIter++;
              IValue emptyTuple(c10::ivalue::Tuple::create({}));
              IValue emptyDict{
@@ -91,7 +105,8 @@ RegisterOperators reg_rpc_ops(
              // `kwargs = kwargs if kwargs is not None else {}`.
              auto& kwargsDictIValue =
                  num_inputs >= 4 ? *stackIter++ : emptyDict;
-             TORCH_INTERNAL_ASSERT(dstWorkerNameIValue.isString());
+             TORCH_INTERNAL_ASSERT(
+                 dstWorkerIValue.isString() || dstWorkerIValue.isInt());
              TORCH_INTERNAL_ASSERT(qualifiedNameIValue.isString());
              TORCH_INTERNAL_ASSERT(argsTupleIValue.isTuple());
              TORCH_INTERNAL_ASSERT(kwargsDictIValue.isGenericDict());
@@ -155,9 +170,21 @@ RegisterOperators reg_rpc_ops(
                    functionSchema.findErrorInKwargs(names));
              }
 
+             // Get destination WorkerName.
+             std::string dstWorkerNameStr;
+             if (dstWorkerIValue.isString()) {
+               // ivalue::ConstantString::str_ is a const member, which can't be
+               // moved, copy it here.
+               dstWorkerNameStr = dstWorkerIValue.toStringRef();
+             } else {
+               dstWorkerNameStr = dist_rpc::RpcAgent::getCurrentRpcAgent()
+                                      ->getWorkerInfo(dstWorkerIValue.toInt())
+                                      .name_;
+             }
+
              // Send RPC request.
-             auto futureIValuePtr = rpcTorchscript(
-                 dstWorkerNameIValue.toStringRef(),
+             auto futureIValuePtr = dist_rpc::rpcTorchscript(
+                 dstWorkerNameStr,
                  qualifiedName,
                  functionSchema,
                  userCallableStack);
