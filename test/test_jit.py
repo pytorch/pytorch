@@ -160,13 +160,6 @@ def doAutodiffCheck(testname):
         return False
     return True
 
-torch._C._jit_set_profiling_executor(GRAPH_EXECUTOR != ProfilingMode.LEGACY)
-# even though FULL_PROFILER should be our default
-# we haven't tested every single test in this file
-# but we enable FULL_PROFILER for a large subset
-# of the tests with "with enable_profiling_mode"
-torch._C._jit_set_profiling_mode(False)
-
 def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
     hx, cx = hidden
     gates = F.linear(input, w_ih, b_ih) + F.linear(hx, w_hh, b_hh)
@@ -303,6 +296,20 @@ class FooToPickle(torch.nn.Module):  # noqa T484
         self.bar = torch.jit.ScriptModule()
 
 class TestJit(JitTestCase):
+    def setUp(self):
+        super(JitTestCase, self).setUp()
+        self.old_prof_exec_state = torch._C._jit_set_profiling_executor(GRAPH_EXECUTOR != ProfilingMode.LEGACY)
+        # even though FULL_PROFILER should be our default
+        # we haven't tested every single test in this file
+        # but we enable FULL_PROFILER for a large subset
+        # of the tests with "with enable_profiling_mode"
+        self.old_prof_mode_state = torch._C._jit_set_profiling_mode(False)
+
+    def tearDown(self):
+        super(JitTestCase, self).tearDown()
+        torch._C._jit_set_profiling_executor(self.old_prof_exec_state)
+        torch._C._jit_set_profiling_mode(self.old_prof_mode_state)
+
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     def test_large_nbr_kernel_args(self):
         class Recurrence(nn.Module):
@@ -4332,6 +4339,20 @@ class TestFrontend(JitTestCase):
 
 
 class TestScript(JitTestCase):
+    def setUp(self):
+        super(JitTestCase, self).setUp()
+        self.old_prof_exec_state = torch._C._jit_set_profiling_executor(GRAPH_EXECUTOR != ProfilingMode.LEGACY)
+        # even though FULL_PROFILER should be our default
+        # we haven't tested every single test in this file
+        # but we enable FULL_PROFILER for a large subset
+        # of the tests with "with enable_profiling_mode"
+        self.old_prof_mode_state = torch._C._jit_set_profiling_mode(False)
+
+    def tearDown(self):
+        super(JitTestCase, self).tearDown()
+        torch._C._jit_set_profiling_executor(self.old_prof_exec_state)
+        torch._C._jit_set_profiling_mode(self.old_prof_mode_state)
+
     def test_inlined_graph(self):
         """
         Check that the `inlined_graph` property correctly returns an inlined
@@ -18266,14 +18287,56 @@ def check_against_reference(self, func, reference_func, args, kwargs=None,
             self.assertTrue(torch.allclose(g2, g2_test, atol=5e-4, rtol=1e-4))
 
 class TestJitGeneratedAutograd(JitTestCase):
+    def setUp(self):
+        super(JitTestCase, self).setUp()
+        self.old_prof_exec_state = torch._C._jit_set_profiling_executor(GRAPH_EXECUTOR != ProfilingMode.LEGACY)
+        # even though FULL_PROFILER should be our default
+        # we haven't tested every single test in this file
+        # but we enable FULL_PROFILER for a large subset
+        # of the tests with "with enable_profiling_mode"
+        self.old_prof_mode_state = torch._C._jit_set_profiling_mode(False)
+
+    def tearDown(self):
+        super(JitTestCase, self).tearDown()
+        torch._C._jit_set_profiling_executor(self.old_prof_exec_state)
+        torch._C._jit_set_profiling_mode(self.old_prof_mode_state)
+
     pass
 
 
 class TestJitGeneratedModule(JitTestCase):
+    def setUp(self):
+        super(JitTestCase, self).setUp()
+        self.old_prof_exec_state = torch._C._jit_set_profiling_executor(GRAPH_EXECUTOR != ProfilingMode.LEGACY)
+        # even though FULL_PROFILER should be our default
+        # we haven't tested every single test in this file
+        # but we enable FULL_PROFILER for a large subset
+        # of the tests with "with enable_profiling_mode"
+        self.old_prof_mode_state = torch._C._jit_set_profiling_mode(False)
+
+    def tearDown(self):
+        super(JitTestCase, self).tearDown()
+        torch._C._jit_set_profiling_executor(self.old_prof_exec_state)
+        torch._C._jit_set_profiling_mode(self.old_prof_mode_state)
+
     pass
 
 
 class TestJitGeneratedFunctional(JitTestCase):
+    def setUp(self):
+        super(JitTestCase, self).setUp()
+        self.old_prof_exec_state = torch._C._jit_set_profiling_executor(GRAPH_EXECUTOR != ProfilingMode.LEGACY)
+        # even though FULL_PROFILER should be our default
+        # we haven't tested every single test in this file
+        # but we enable FULL_PROFILER for a large subset
+        # of the tests with "with enable_profiling_mode"
+        self.old_prof_mode_state = torch._C._jit_set_profiling_mode(False)
+
+    def tearDown(self):
+        super(JitTestCase, self).tearDown()
+        torch._C._jit_set_profiling_executor(self.old_prof_exec_state)
+        torch._C._jit_set_profiling_mode(self.old_prof_mode_state)
+
     pass
 
 

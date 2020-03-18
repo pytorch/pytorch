@@ -126,6 +126,16 @@ if args.ge_config == 'legacy':
 elif args.ge_config == 'simple':
     GRAPH_EXECUTOR = ProfilingMode.SIMPLE
 
+if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
+    torch._C._jit_set_profiling_executor(True)
+    torch._C._jit_set_profiling_mode(True)
+if GRAPH_EXECUTOR == ProfilingMode.SIMPLE:
+    torch._C._jit_set_profiling_executor(True)
+    torch._C._jit_set_profiling_mode(False)
+if GRAPH_EXECUTOR == ProfilingMode.LEGACY:
+    torch._C._jit_set_profiling_executor(False)
+
+
 TEST_BAILOUTS = args.test_bailouts
 TEST_IN_SUBPROCESS = args.subprocess
 SEED = args.seed
