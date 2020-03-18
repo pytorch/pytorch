@@ -41,7 +41,6 @@ struct DictImpl final : public c10::intrusive_ptr_target {
   struct DictElementTypes final {
     TypePtr keyType;
     TypePtr valueType;
-
   };
 
   explicit DictImpl(dict_map_type dict_, DictElementTypes elementTypes_)
