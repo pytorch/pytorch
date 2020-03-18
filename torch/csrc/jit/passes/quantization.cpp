@@ -1085,33 +1085,28 @@ void insertDeQuantCall(Graph* graph,
   }
 }
 
-void insertQuantDeQuantCall(Value* self, Node* observer, bool is_per_channel) {
+void insertQuantDeQuantCall(
+    Value* self,
+    Node* observer,
+    bool is_per_channel,
+    const std::vector<std::string>& qparam_names) {
   Graph* g = observer->owningGraph();
   // Original value that is observed
   Value* v = observer->input(1);
 
-  std::string quantize_func;
-  std::vector<Value*> inputs = {v};
-
   // Inserting before insert point
   WithInsertPoint ins(v->node()->next());
-  std::string prefix = v->debugName();
+  std::vector<Value*> inputs = {v};
   // Insert GetAttr nodes for quantization parameters
+  for (const auto& qparam_name : qparam_names) {
+    inputs.push_back(g->insertGetAttr(self, qparam_name));
+  }
+  std::string quantize_func;
   if (is_per_channel) {
     quantize_func = "quantize_per_channel";
-    inputs.push_back(g->insertGetAttr(self, prefix + "_scale"));
-    inputs.push_back(g->insertGetAttr(self, prefix + "_zero_point"));
-    inputs.push_back(g->insertGetAttr(self, prefix + "_axis"));
   } else {
     quantize_func = "quantize_per_tensor";
-    inputs.push_back(
-        g->insertGetAttr(self, prefix + "_scale")->setType(FloatType::get()));
-    inputs.push_back(g->insertGetAttr(self, prefix + "_zero_point")
-                         ->setType(IntType::get()));
   }
-  inputs.push_back(
-      g->insertGetAttr(self, prefix + "_scalar_type")->setType(IntType::get()));
-
   Node* quant = g->create(at::Symbol::aten(quantize_func), inputs);
   quant->output()->setDebugName(v->debugName() + ".quant");
   g->insertNode(quant);
@@ -1215,7 +1210,10 @@ class InsertQuantDeQuantHelper {
   // Map from Graph to observer node, we can use observer node to
   // get the information of original value that's been observed and
   // the quantization parameters
-  std::unordered_map<Graph*, std::vector<Node*>> observer_nodes_;
+  std::unordered_map<Graph*, std::vector<Node*>> observer_nodes_for_graph_;
+  // A map from qparam name (e.g. _scale) to the attribute name in
+  // the module(e.g. weight_scale_0)
+  std::unordered_map<Node*, std::unordered_map<std::string, std::string>> qparam_name_map_for_node_;
   // Record qscheme for every graph, this is for checking
   // each graph is only quantized with one type of QScheme
   std::unordered_map<Graph*, c10::QScheme> qscheme_for_graph_;
@@ -1244,7 +1242,7 @@ void InsertQuantDeQuantHelper::collectObserverNodesAndValueToQuantize(
   nodes_to_destroy_[g].push_back(observer->inputs()[0]->node());
   Value* original_value = observer->input(1);
   v->replaceAllUsesWith(original_value);
-  observer_nodes_[g].push_back(observer);
+  observer_nodes_for_graph_[g].push_back(observer);
 }
 
 void InsertQuantDeQuantHelper::cleanup(Module& module) {
@@ -1306,22 +1304,29 @@ void InsertQuantDeQuantHelper::quantizeTensors(
     Module& module,
     Graph* g,
     Value* self) {
-  if (!observer_nodes_.count(g)) {
+  if (!observer_nodes_for_graph_.count(g)) {
     return;
   }
-  for (auto* n : observer_nodes_.at(g)) {
+  for (auto* n : observer_nodes_for_graph_.at(g)) {
     auto* original_value = n->input(1);
     auto tp = getQSchemeAndQParamVector(module, n);
     auto qscheme = std::get<0>(tp);
     auto qparam_map = std::get<1>(tp);
     checkQScheme(g, qscheme);
+    std::vector<std::string> qparam_names;
     for (auto& pr : qparam_map) {
       const auto& name = pr.first;
       const auto& qparam = pr.second;
-      module.register_attribute(
-          original_value->debugName() + name, qparam.type(), qparam);
+      size_t uid = 0;
+      auto qparam_name = original_value->debugName() + name + "_" + c10::to_string(uid++);
+      while (module.hasattr(qparam_name)) {
+        qparam_name = original_value->debugName() + name + "_" + c10::to_string(uid++);
+      }
+      qparam_name_map_for_node_[n][name] = qparam_name;
+      module.register_attribute(qparam_name, qparam.type(), qparam);
+      qparam_names.push_back(qparam_name);
     }
-    insertQuantDeQuantCall(self, n, isPerChannel(qscheme));
+    insertQuantDeQuantCall(self, n, isPerChannel(qscheme), qparam_names);
   }
 }
 
@@ -1459,16 +1464,19 @@ void InsertQuantDeQuantHelper::run(
   // We only need to register new parameters if the graph has
   // been quantized before
   // TODO: dedup this part with code in quantizeTensors
-  if (observer_nodes_.count(graph.get())) {
-    for (auto* n : observer_nodes_.at(graph.get())) {
-      auto* original_value = n->input(1);
+  if (observer_nodes_for_graph_.count(graph.get())) {
+    for (auto* n : observer_nodes_for_graph_.at(graph.get())) {
       auto tp = getQSchemeAndQParamVector(module, n);
       checkQScheme(graph.get(), std::get<0>(tp));
       auto qparam_map = std::get<1>(tp);
+      TORCH_INTERNAL_ASSERT(qparam_name_map_for_node_.count(n),
+                            "Expected to have a qparam_name_map for node:",
+                           *n);
+      auto qparam_name_map = qparam_name_map_for_node_.at(n);
       for (auto& pr : qparam_map) {
         const auto& name = pr.first;
         const auto& qparam = pr.second;
-        module._ivalue()->setAttr(original_value->debugName() + name, qparam);
+        module._ivalue()->setAttr(qparam_name_map.at(name), qparam);
       }
     }
     return;
