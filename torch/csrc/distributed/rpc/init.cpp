@@ -191,6 +191,13 @@ PyObject* rpc_init(PyObject* /* unused */) {
                   Returns worker information of the node that owns this ``RRef``.
               )")
           .def(
+              // not releasing GIL here to avoid context switch on getters
+              "owner_name",
+              &PyRRef::ownerName,
+              R"(
+                  Returns worker name of the node that owns this ``RRef``.
+              )")
+          .def(
               "to_here",
               &PyRRef::toHere,
               py::call_guard<py::gil_scoped_release>(),
