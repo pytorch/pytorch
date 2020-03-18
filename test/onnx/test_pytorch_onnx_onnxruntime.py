@@ -3136,7 +3136,7 @@ def setup_unary_floating_ufunc_tests_helper(cls, op_name):
         self.run_test(module(), (x,))
         self.run_test(torch.jit.trace(module(), (x,)), (x,))
 
-    test_name = "test_" + op_name
+    test_name = "test_" + op_name + "_ufunc"
     assert not hasattr(cls, test_name), "{0} already in {1}".format(test_name, cls.__name__)
     setattr(cls, test_name, test_fn)
 

@@ -331,19 +331,17 @@ Tensor& _clamp_min_out_cpu(Tensor& result, const Tensor& self, Scalar min) {
   return result;
 }
 
-static inline void mvlgamma_check(const Tensor& self, int64_t p, bool floating_ufunc=false) {
-  if(!floating_ufunc)
-    TORCH_CHECK(at::isFloatingType(self.scalar_type()),
-            "mvlgamma is not implemented for ", self.scalar_type());
+static inline void mvlgamma_check(const Tensor& self, int64_t p) {
+  TORCH_CHECK(at::isFloatingType(self.scalar_type()),
+          "mvlgamma is not implemented for ", self.scalar_type());
   TORCH_CHECK((self > 0.5f * (p - 1)).all().item<bool>(),
               "All elements must be greater than (p-1)/2");
   TORCH_CHECK(p >= 1, "p has to be greater than or equal to 1");
 }
 
 Tensor mvlgamma(const Tensor& self, int64_t p) {
-  mvlgamma_check(self, p, /*floating_ufunc=*/true);
-  ScalarType dtype = isIntegralType(self.scalar_type(), /*include_bool=*/true) ? typeMetaToScalarType(c10::get_default_dtype()) : self.scalar_type();
-  Tensor args = native::arange(-p / 2. + 0.5, 0.5, 0.5, self.options().dtype(dtype));
+  mvlgamma_check(self, p);
+  Tensor args = native::arange(-p / 2. + 0.5, 0.5, 0.5, self.options());
   args = args.add(self.unsqueeze(-1));
   return args.lgamma_().sum(-1).add_(p * (p - 1) * std::log(M_PI) / 4.);
 }
