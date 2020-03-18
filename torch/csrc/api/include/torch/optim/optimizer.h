@@ -97,9 +97,7 @@ class TORCH_API Optimizer {
   }
 
   /// Constructs the `Optimizer` from a vector of parameters.
-  explicit Optimizer(std::vector<Tensor> parameters) : defaults_(nullptr) {
-    add_param_group(OptimizerParamGroup(parameters));
-  };
+  explicit Optimizer(std::vector<Tensor> parameters, std::unique_ptr<OptimizerOptions> defaults) : Optimizer({std::move(OptimizerParamGroup(parameters))}, std::move(defaults)) {};
 
   /// Adds the given param_group to the optimizer's param_group list.
   void add_param_group(const OptimizerParamGroup& param_group);
