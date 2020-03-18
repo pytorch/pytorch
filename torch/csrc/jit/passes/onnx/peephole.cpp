@@ -51,7 +51,7 @@ std::vector<int64_t> composeTransposes(
   return ret;
 }
 
-const std::vector<size_t>& getBroadcastPositions(Node* node) {
+std::vector<size_t> getBroadcastPositions(Node* node) {
   // Most of the element-wise ops in ONNX supports numpy broadcasting.
   // Only GEMM supports one-directional broadcasting, which broadcasts the bias
   // to the product.
@@ -68,17 +68,17 @@ const std::vector<size_t>& getBroadcastPositions(Node* node) {
           {onnx::Less, {0, 1}},
       };
   static std::vector<size_t> no_positions;
-  static std::vector<size_t> positions;
+  std::vector<size_t> positions;
 
   auto iter = broadcast_positions.find(node->kind());
   if (iter != broadcast_positions.end()) {
-    for (long unsigned int i = 0; i < iter->second.size(); i++) {
-      if (iter->second[i] >= node->inputs().size()){
-        std::copy(iter->second.begin(), iter->second.begin()+i, positions.begin());
-        return positions;
+    // skip optional input if not provided
+    for (size_t position : iter->second) {
+      if (position < node->inputs().size()) {
+        positions.emplace_back(position);
       }              
     }
-    return iter->second;
+    return positions;
   }
   return no_positions;
 }
@@ -110,7 +110,7 @@ void fuseBroadcast(Block* b) {
       fuseBroadcast(child_block);
     }
 
-    auto& broadcast_positions = getBroadcastPositions(n);
+    auto broadcast_positions = getBroadcastPositions(n);
     if (!broadcast_positions.empty()) {
       AT_ASSERT(!n->hasAttribute(attr::axis));
     }
