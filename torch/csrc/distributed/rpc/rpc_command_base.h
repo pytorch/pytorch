@@ -14,9 +14,9 @@ class RpcCommandBase {
   // create a message for the RPC (Hence the &&).
   Message toMessage() && {
     JitRRefPickleGuard jitPickleGuard;
-    return std::move(*this).toMessageInternal();
+    return std::move(*this).toMessageImpl();
   }
-  virtual Message toMessageInternal() && = 0;
+  virtual Message toMessageImpl() && = 0;
   virtual ~RpcCommandBase() = 0;
 };
 

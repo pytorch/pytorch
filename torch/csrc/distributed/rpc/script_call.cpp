@@ -100,7 +100,7 @@ std::unique_ptr<ScriptCall> ScriptCall::fromIValues(
   }
 }
 
-Message ScriptCall::toMessageInternal() && {
+Message ScriptCall::toMessageImpl() && {
   std::vector<IValue> ivalues;
   toIValues(ivalues);
 

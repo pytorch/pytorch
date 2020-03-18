@@ -48,7 +48,7 @@ std::unique_ptr<ScriptRemoteCall> ScriptRemoteCall::fromIValues(
   }
 }
 
-Message ScriptRemoteCall::toMessageInternal() && {
+Message ScriptRemoteCall::toMessageImpl() && {
   std::vector<IValue> ivalues;
   ScriptCall::toIValues(ivalues);
   ivalues.emplace_back(retRRefId_.toIValue());

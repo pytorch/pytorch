@@ -4,8 +4,14 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-// It is declared in torch/csrc/distributed/rpc/types.h
-thread_local bool allowJitRRefPickle = false;
+// Thread local flag to enforce rref JIT pickling to be allowed only
+// in the scope of an rpc call. For other scopes like when model is
+// saved by calling torch.save(), rref is not allowed to be pickled directly.
+static thread_local bool allowJitRRefPickle = false;
+
+bool getAllowJitRRefPickle() {
+  return allowJitRRefPickle;
+}
 
 static_assert(
     std::numeric_limits<local_id_t>::max() <=

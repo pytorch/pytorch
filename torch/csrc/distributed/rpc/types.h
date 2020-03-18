@@ -10,10 +10,7 @@ namespace rpc {
 using worker_id_t = int16_t;
 using local_id_t = int64_t;
 
-// Thread local flag to enforce rref JIT pickling to be allowed only
-// in the scope of an rpc call. For other scopes like when model is
-// saved by calling torch.save(), rref is not allowed to be pickled directly.
-extern thread_local bool allowJitRRefPickle;
+bool getAllowJitRRefPickle();
 
 struct TORCH_API JitRRefPickleGuard {
   JitRRefPickleGuard();
