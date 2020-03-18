@@ -1171,6 +1171,12 @@ class TestCase(expecttest.TestCase):
         # assertNotRegexpMatches renamed to assertNotRegex in 3.5
         assertNotRegex = unittest.TestCase.assertNotRegexpMatches
 
+    if sys.version_info < (3, 4):
+        # Do nothing for backwards compatibility
+        @contextlib.context_manager
+        def subTest(msg=None, **params):
+            yield
+
 
 def download_file(url, binary=True):
     if sys.version_info < (3,):

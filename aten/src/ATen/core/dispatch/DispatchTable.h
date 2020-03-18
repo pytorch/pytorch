@@ -66,6 +66,8 @@ public:
     return kernelCount_;
   }
 
+  std::string dumpState() const;
+
 private:
   std::array<KernelFunction, static_cast<uint8_t>(DispatchKey::NumDispatchKeys)> kernels_;
   size_t kernelCount_;
@@ -206,6 +208,8 @@ class DispatchTable final {
   void deregisterSchema() {
     dispatchKeyExtractor_.deregisterSchema();
   }
+
+  std::string dumpState() const;
 
 private:
 

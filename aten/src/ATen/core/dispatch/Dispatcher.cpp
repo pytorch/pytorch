@@ -256,4 +256,18 @@ void Dispatcher::addRegistrationListener(std::unique_ptr<OpRegistrationListener>
           dispatchTable.listAllDispatchKeys(), ".");
 }
 
+void Dispatcher::checkInvariants() const {
+  for (const auto& op : operators_) {
+    op.op.checkInvariants();
+  }
+  // NB: skip Undefined
+  for (uint8_t i = 1; i < static_cast<uint8_t>(DispatchKey::NumDispatchKeys); i++) {
+    auto k = static_cast<DispatchKey>(i);
+    if (!backendsWithoutFallthrough_.has(k)) {
+      const auto& kernel = backendFallbackKernels_[k];
+      TORCH_INTERNAL_ASSERT(kernel.isFallthrough());
+    }
+  }
+}
+
 }

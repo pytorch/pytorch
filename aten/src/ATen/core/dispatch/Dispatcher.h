@@ -164,6 +164,8 @@ public:
    */
   void addRegistrationListener(std::unique_ptr<OpRegistrationListener> listener);
 
+  void checkInvariants() const;
+
 private:
   Dispatcher();
 
@@ -212,6 +214,10 @@ public:
 
   std::string dumpState() const {
     return operatorIterator_->op.dumpState();
+  }
+
+  void checkInvariants() const {
+    return operatorIterator_->op.checkInvariants();
   }
 
   template<class Return, class... Args>

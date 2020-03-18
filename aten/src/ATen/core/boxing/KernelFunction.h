@@ -209,6 +209,10 @@ public:
   template<bool AllowLegacyTypes = false, class Lambda>
   static KernelFunction makeFromUnboxedLambda(Lambda&& lambda);
 
+  std::string dumpState() const;
+  // For testing internal invariants only
+  bool _equalsBoxedAndUnboxed(const KernelFunction&) const;
+
 private:
 
   explicit KernelFunction(std::function<std::unique_ptr<OperatorKernel>()> functorFactory, std::unique_ptr<OperatorKernel> functor, InternalBoxedKernelFunction* boxed_kernel_func, void* unboxed_kernel_func);

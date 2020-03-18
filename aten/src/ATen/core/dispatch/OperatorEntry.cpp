@@ -61,15 +61,16 @@ namespace {
 
 void OperatorEntry::registerSchema(FunctionSchema&& schema) {
   TORCH_INTERNAL_ASSERT(!schema_.has_value());
-  schema_ = std::move(schema);
-  dispatchTable_.registerSchema(*schema_);
   for (auto i = kernels_.begin(); i != kernels_.end(); ++i) {
     for (auto j = i->second.begin(); j != i->second.end(); ++j) {
       if (j->inferred_function_schema) {
-        checkSchema(name_, *schema_, *j->inferred_function_schema);
+        checkSchema(name_, schema, *j->inferred_function_schema);
       }
     }
   }
+  // NB: don't register schema until after we've checked everything!
+  schema_ = std::move(schema);
+  dispatchTable_.registerSchema(*schema_);
 }
 
 void OperatorEntry::deregisterSchema() {
@@ -137,6 +138,21 @@ void OperatorEntry::updateDispatchTable_(c10::optional<DispatchKey> dispatch_key
   }
 }
 
+void OperatorEntry::checkInvariants() const {
+  if (schema_) {
+    TORCH_INTERNAL_ASSERT(schema_->operator_name() == name_);
+    dispatchTable_.dispatchKeyExtractor().checkInvariants(*schema_);
+  }
+  TORCH_INTERNAL_ASSERT(name_ == dispatchTable_.operatorName());
+  TORCH_INTERNAL_ASSERT(kernels_.find(DispatchKey::Undefined) == kernels_.end());
+  for (const auto& kv : kernels_) {
+    auto mb_dispatch_key = kv.first;
+    TORCH_INTERNAL_ASSERT(kv.second.size() > 0);
+    auto* kernel = mb_dispatch_key ? dispatchTable_.lookup(*mb_dispatch_key) : dispatchTable_.lookupCatchallKernel();
+    TORCH_INTERNAL_ASSERT(kv.second.front().kernel._equalsBoxedAndUnboxed(*kernel));
+  }
+}
+
 std::string OperatorEntry::dumpState() const {
   std::ostringstream oss;
   oss << "name: " << name_ << "\n";
@@ -145,6 +161,23 @@ std::string OperatorEntry::dumpState() const {
   } else {
     oss << "schema: (none)\n";
   }
+  // Iterate over DispatchKey, not the flat hash map, so we have a stable order
+  auto print_key = [&](c10::optional<DispatchKey> k) {
+    auto it = kernels_.find(k);
+    if (it != kernels_.end()) {
+      for (const auto& jt : it->second) {
+        oss << (k ? toString(k) : "catchall") << ": "
+            << jt.kernel.dumpState() << ":: " << toString(*jt.inferred_function_schema) << "\n";
+      }
+    }
+  };
+  for (uint8_t i = 0; i < static_cast<uint8_t>(DispatchKey::NumDispatchKeys); i++) {
+    print_key(static_cast<DispatchKey>(i));
+  }
+  print_key(c10::nullopt);
+  // dispatch table is 100% specified by OperatorEntry; so if you want to check
+  // if it makes sense use checkInvariants
+  // oss << dispatchTable_.dumpState();
   return oss.str();
 }
 

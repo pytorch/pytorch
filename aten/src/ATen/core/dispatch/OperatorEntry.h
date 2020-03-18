@@ -75,6 +75,7 @@ public:
   void deregisterKernel_(c10::optional<DispatchKey> dispatch_key, std::list<KernelSchemaPair>::iterator kernel);
 
   std::string dumpState() const;
+  void checkInvariants() const;
 
 private:
 

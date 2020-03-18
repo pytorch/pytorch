@@ -302,7 +302,7 @@ C10_EXPORT FunctionSchema parseSchema(const std::string& schema) {
 
 C10_EXPORT OperatorName parseName(const std::string& name) {
   auto parsed = parseSchemaOrName(name);
-  TORCH_CHECK(parsed.is_left(), "Tried to parse a name but function schema was given");
+  TORCH_CHECK(parsed.is_left(), "Tried to parse an operator name but function schema was given");
   return parsed.left();
 }
 

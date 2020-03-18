@@ -142,6 +142,9 @@ public:
   // docs on operatorHasKernelForBackend_
   void setOperatorHasKernelForBackend(DispatchKey k, bool has_kernel);
 
+  std::string dumpState() const;
+  void checkInvariants(const FunctionSchema& schema) const;
+
 private:
   // NB: If there is no valid dispatch key, this will return Undefined
   DispatchKey dispatchKeySetToDispatchKey_(DispatchKeySet backendsWithoutFallthrough, const DispatchKeySet& ks) const {
