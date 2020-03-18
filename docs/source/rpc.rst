@@ -1,5 +1,15 @@
 .. _distributed-rpc-framework:
 
+
+* APIs
+    * Distributed RPC Framework (This page)
+* Tutorials
+    * `Getting Started with RPC using Reinforcement Learning and RNN examples. <https://pytorch.org/docs/stable/distributed.html>`__
+* Design Documents:
+    * :ref:`remote-reference-protocol`
+    * :ref:`distributed-autograd-design`
+
+
 Distributed RPC Framework
 =========================
 
@@ -7,7 +17,6 @@ The distributed RPC framework provides mechanisms for multi-machine model
 training through a set of primitives to allow for remote communication, and a
 higher-level API to automatically differentiate models split across several
 machines.
-
 
 
 Basics
