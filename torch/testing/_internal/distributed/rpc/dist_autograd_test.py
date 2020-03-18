@@ -188,26 +188,25 @@ class ExecMode(Enum):
     not torch._six.PY3, "Pytorch distributed autograd package does not support python2"
 )
 class DistAutogradTest(RpcAgentTestFixture):
-    def _exec_func(self, exec_mode, method, *args):
+    def _exec_func_with_dst(self, dst, exec_mode, method, *args):
         if ExecMode.LOCAL == exec_mode:
             if len(args) == 1 and isinstance(args[0], list):
                 return method(*args[0])
             return method(*args)
         elif ExecMode.RPC_SYNC == exec_mode:
-            return rpc.rpc_sync(
-                worker_name(self._next_rank()), method, args=(args)
-            )
+            return rpc.rpc_sync(worker_name(dst), method, args=(args))
         elif ExecMode.REMOTE == exec_mode:
-            return rpc.remote(
-                worker_name(self._next_rank()), method, args=(args)
-            ).to_here()
+            return rpc.remote(worker_name(dst), method, args=(args)).to_here()
         elif ExecMode.RPC_ASYNC == exec_mode:
-            fut = rpc.rpc_async(
-                worker_name(self._next_rank()), method, args=(args)
-            )
+            fut = rpc.rpc_async(worker_name(dst), method, args=(args))
             return fut.wait()
         else:
             raise ValueError("Unrecognized ExecMode {}".format(exec_mode))
+
+    def _exec_func(self, exec_mode, method, *args):
+        return self._exec_func_with_dst(
+            self._next_rank(), exec_mode, method, *args
+        )
 
     def _next_rank(self):
         if hasattr(self, "dst_rank"):
@@ -878,8 +877,7 @@ class DistAutogradTest(RpcAgentTestFixture):
             self.assertEqual(t1_grad_before, t1.grad)
             self.assertEqual(t2_grad_before, t2.grad)
 
-    @dist_init
-    def test_backward_simple(self):
+    def _test_backward_simple(self, dst):
         # Run the same code locally and with dist autograd and verify gradients
         # are same.
         local_grads = None
@@ -887,12 +885,22 @@ class DistAutogradTest(RpcAgentTestFixture):
         t2 = torch.rand((3, 3), requires_grad=True)
         for exec_mode in [ExecMode.LOCAL, ExecMode.RPC_SYNC, ExecMode.REMOTE]:
             with dist_autograd.context() as context_id:
-                ret = self._exec_func(exec_mode, torch.add, t1, t2)
+                ret = self._exec_func_with_dst(
+                    dst, exec_mode, torch.add, t1, t2
+                )
                 loss = ret.sum()
                 ret = self._verify_backwards(
                     exec_mode, [loss], context_id, local_grads, t1, t2
                 )
                 local_grads = ret if ret else local_grads
+
+    @dist_init
+    def test_backward_simple(self):
+        self._test_backward_simple(self._next_rank())
+
+    @dist_init
+    def test_backward_simple_self(self):
+        self._test_backward_simple(self.rank)
 
     # The current rank first creates a tensor on the rref_owner, and then passes
     # the rref with another tensor to the callee to run either my_rref_add or

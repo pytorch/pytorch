@@ -905,6 +905,15 @@ class RpcTest(RpcAgentTestFixture):
         )
         self.assertEqual(rref.to_here(), torch.ones(n, n) * 2)
 
+    @dist_init
+    def test_builtin_remote_self(self):
+        rref = rpc.remote(
+            worker_name(self.rank),
+            torch.add,
+            args=(torch.ones(2, 2), torch.ones(2, 2)),
+        )
+        self.assertEqual(rref.local_value(), torch.ones(2, 2) * 2)
+
     def _test_multi_remote_call(self, fn, args_fn=lambda x: (), kwargs_fn=lambda x: {}):
         m = 10
         n = self.rank + 1
