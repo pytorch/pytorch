@@ -274,51 +274,39 @@ void testLiteInterpreterParams() {
 }
 
 void testLiteInterpreterSetState() {
+  Module m("m");
+  m.register_parameter("foo", torch::ones({}), false);
+  m.define(R"(
+    def __getstate__(self):
+      return self.foo + self.foo
+    def __setstate__(self, a):
+      self.foo = a
+    def forward(self, x):
+      b = 4
+      return self.foo + x + b
+  )");
 
-  auto bc = _load_for_mobile("/Users/myuan/DB/datas/pytorch/data/pytext/BI/bi_pytext_0313.bc");
+  std::vector<IValue> inputs;
+  auto minput = 5 * torch::ones({});
+  inputs.emplace_back(minput);
 
-  auto m = load("/Users/myuan/DB/datas/pytorch/data/pytext/BI/bi_pytext_0220.bc");
-  m.eval();
+  std::stringstream ms;
+  m.save(ms);
+  auto loaded_m = load(ms);
+  auto ref = loaded_m.run_method("forward", minput);
+
   std::stringstream ss;
   m._save_for_mobile(ss);
-  auto v = export_opnames(m);
-  std::cout << "exported names:" << std::endl;
-  for (auto name : v) {
-    std::cout << "\"" << name << "\"," << std::endl;
+  mobile::Module bc = _load_for_mobile(ss);
+  IValue res;
+  for (int i = 0; i < 3; ++i) {
+    auto bcinputs = inputs;
+    res = bc.run_method("forward", bcinputs);
   }
-//  Module m("m");
-//  m.register_parameter("foo", torch::ones({}), false);
-//  m.define(R"(
-//    def __getstate__(self):
-//      return self.foo + self.foo
-//    def __setstate__(self, a):
-//      self.foo = a
-//    def forward(self, x):
-//      b = 4
-//      return self.foo + x + b
-//  )");
-//
-//  std::vector<IValue> inputs;
-//  auto minput = 5 * torch::ones({});
-//  inputs.emplace_back(minput);
-//
-//  std::stringstream ms;
-//  m.save(ms);
-//  auto loaded_m = load(ms);
-//  auto ref = loaded_m.run_method("forward", minput);
-//
-//  std::stringstream ss;
-//  m._save_for_mobile(ss);
-//  mobile::Module bc = _load_for_mobile(ss);
-//  IValue res;
-//  for (int i = 0; i < 3; ++i) {
-//    auto bcinputs = inputs;
-//    res = bc.run_method("forward", bcinputs);
-//  }
-//
-//  auto resd = res.toTensor().item<float>();
-//  auto refd = ref.toTensor().item<float>();
-//  AT_ASSERT(resd == refd);
+
+  auto resd = res.toTensor().item<float>();
+  auto refd = ref.toTensor().item<float>();
+  AT_ASSERT(resd == refd);
 }
 
 class TorchBindLiteInterpreterTestStruct
