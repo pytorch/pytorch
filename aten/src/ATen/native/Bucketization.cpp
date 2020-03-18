@@ -10,7 +10,7 @@
  *   right           - corresponding to lower bound if False and upper bound if True
  *   out_int32       - the output tensor is int64_t type if False and int(32bit normally) type if True.
  *
- * - torch.bucketlize(values, boundaries, right=False, out_int32=False)
+ * - torch.bucketize(values, boundaries, right=False, out_int32=False)
  *   values     - N*D tensor containing the search values
  *   boundaries - 1D tensor containing a sorted sequences
  *   right      - corresponding to lower bound if False and upper bound if True
