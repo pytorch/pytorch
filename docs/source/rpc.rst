@@ -85,10 +85,11 @@ for communication.
 The following APIs allow users to remotely execute functions as well as create
 references (RRefs) to remote data objects. In these APIs, when passing a
 ``Tensor`` as an argument or a return value, the destination worker will try to
-create a ``Tensor`` with the same meta (i.e., device, stride, etc.), which might
-crash if the device lists on source and destination workers are different. In
-such cases, applications can always feed in CPU tensors and manually move it
-to appropriate devices if necessary.
+create a ``Tensor`` with the same meta (i.e., shape, stride, etc.). We
+intentionally disallow transmitting CUDA tensors because it might crash if the
+device lists on source and destination workers do not match. In such cases,
+applications can always explicitly move the input tensors to CPU on the caller
+and move it to the desired devices on the callee if necessary.
 
 .. warning::
   TorchScript support in RPC is experimental and subject to change.
