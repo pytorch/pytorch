@@ -2,7 +2,7 @@
     <<: *binary_linux_build_params
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-    - should_run_job
+    - attach_scripts
     - run:
         <<: *binary_checkout
     - run:
@@ -66,7 +66,7 @@
         image: ubuntu-1604:201903-01
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-    - should_run_job
+    - attach_scripts
     # TODO: We shouldn't attach the workspace multiple times
     - attach_workspace:
         at: /home/circleci/project
@@ -89,7 +89,7 @@
         image: ubuntu-1604:201903-01
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-    - should_run_job
+    - attach_scripts
     - setup_linux_system_environment
     - setup_ci_environment
     - attach_workspace:
@@ -171,7 +171,7 @@
       xcode: "9.4.1"
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-    - should_run_job
+    - attach_scripts
     - run:
         <<: *binary_checkout
     - run:
@@ -212,7 +212,7 @@
       xcode: "9.4.1"
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-    - should_run_job
+    - attach_scripts
     - run:
         <<: *binary_checkout
     - run:
@@ -237,7 +237,7 @@
     steps:
     - attach_workspace:
         at: ~/workspace
-    - should_run_job
+    - attach_scripts
     - checkout
     - run_brew_for_ios_build
     - run:
@@ -265,7 +265,7 @@
     steps:
     - attach_workspace:
         at: ~/workspace
-    - should_run_job
+    - attach_scripts
     - checkout
     - run_brew_for_ios_build
     - run:
