@@ -16386,12 +16386,11 @@ def generate_unary_floating_ufunc_promo_test(cls, op_str):
 
     def test_fn(self, device):
         op = getattr(torch, op_str)
-
-        my_default_types = default_types
-        my_float_types = float_types
+        my_default_types = default_types.copy()
+        my_float_types = float_types.copy()
         if self.device_type == 'cuda':
-            my_default_types = default_types_cuda
-            my_float_types = float_types_cuda
+            my_default_types = default_types_cuda.copy()
+            my_float_types = float_types_cuda.copy()
         if self.device_type in unary_ufuncs[op_str].complex_on:
             my_float_types.extend(complex_types)
 
@@ -16412,13 +16411,16 @@ def generate_unary_floating_ufunc_promo_test(cls, op_str):
         only_out_on_cpu = ['atan', 'cos', 'cosh', 'erf', 'erfc', 'exp', 'tan', 'tanh']
 
         # Test for out= code paths
-        for in_type in my_float_types + int_types:
+        # Choose float types depending on device
+        # Floating unary ufuncs do not support complex types with cuda devices
+        float_types_for_device = float_types_cuda if self.device_type == 'cuda' else my_float_types
+        for in_type in float_types_for_device + int_types:
             # Floating type promotion for out= calls on ops listed in only_out_on_cpu
             # not supported on cuda devices
             if (op_str in only_out_on_cpu and self.device_type == 'cuda'):
-                continue
+                break
             t = torch.tensor((1,), device=device, dtype=in_type)
-            for out_type in my_float_types:
+            for out_type in float_types_for_device:
                 # Floating type promotion does not support out= calls for input as bool tensors
                 # and output as complex tensors
                 if (in_type == torch.bool and out_type in complex_types):
@@ -16428,7 +16430,6 @@ def generate_unary_floating_ufunc_promo_test(cls, op_str):
             for out_type in int_types:
                 out_t = torch.empty((1,), device=device, dtype=out_type)
                 self.assertRaises(RuntimeError, lambda: op(t, out=out_t))
-
         try:
             op_inplace = getattr(torch, op_str + "_")
         except AttributeError:
@@ -16440,10 +16441,9 @@ def generate_unary_floating_ufunc_promo_test(cls, op_str):
             t = torch.tensor((1,), device=device, dtype=in_type)
             self.assertRaises(RuntimeError, lambda: op_inplace(t))
 
-        for in_type in my_float_types:
+        for in_type in float_types_for_device:
             t = torch.tensor((1,), device=device, dtype=in_type)
             self.assertEqual(op_inplace(t).dtype, t.dtype)
-
     test_name = "test_" + op_str + "_dtype_promotion"
     assert not hasattr(cls, test_name), "{0} already in {1}".format(test_name, cls.__name__)
     setattr(cls, test_name, test_fn)
