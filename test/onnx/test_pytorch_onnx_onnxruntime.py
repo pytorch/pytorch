@@ -3112,32 +3112,16 @@ setup_rnn_tests()
 # Unary floating ufunc tests
 # Tests that integral arguments are properly cast to float
 unary_floating_ufuncs = (
-    'cos',
-    'asin',
-    'ceil',
-    'expm1',
-    'floor',
-    'log',
-    'log10',
-    'log1p',
-    'log2',
-    'sin',
-    'sinh',
-    'sqrt',
+    'sin', 'cos', 'tan',
+    'asin', 'acos', 'atan',
+    'sinh', 'cosh', 'tanh',
+    'ceil', 'floor',
+    'exp', 'expm1', 'log', 'log10', 'log1p', 'log2',
+    'sqrt', 'rsqrt',
     'trunc',
-    'atan',
-    'cosh',
-    'exp',
-    'tan',
-    'tanh',
-    'erf',
-    'erfc',
-    'erfinv',
-    'lgamma',
-    'digamma',
-    'rsqrt',
-    'sigmoid',
-    'acos'
+    'erf', 'erfc', 'erfinv',
+    'lgamma', 'digamma',
+    'sigmoid'
 )
 
 def setup_unary_floating_ufunc_tests_helper(cls, op_name):
