@@ -18,18 +18,6 @@ namespace c10 {
 struct Argument;
 struct FunctionSchema;
 
-namespace detail {
-inline bool defaultValueEquals_(
-    const c10::optional<IValue>& lhs,
-    const c10::optional<IValue>& rhs) {
-  if (lhs.has_value()) {
-    return rhs.has_value() && impl::shallowEquals(*lhs, *rhs);
-  } else {
-    return !rhs.has_value();
-  }
-}
-} // namespace detail
-
 bool operator==(const Argument& lhs, const Argument& rhs);
 
 struct Argument {
@@ -124,7 +112,7 @@ inline bool operator==(const Argument& lhs, const Argument& rhs) {
   return lhs.name() == rhs.name()
           && *lhs.type() == *rhs.type()
           && lhs.N() == rhs.N()
-          && detail::defaultValueEquals_(lhs.default_value(), rhs.default_value())
+          && lhs.default_value() == rhs.default_value()
           && lhs.kwarg_only() == rhs.kwarg_only()
           && lhs.alias_info() == rhs.alias_info();
 }
