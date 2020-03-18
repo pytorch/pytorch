@@ -9,7 +9,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.testing import FileCheck
 
-from torch.testing._internal.common_utils import run_tests, IS_SANDCASTLE, ProfilingMode, GRAPH_EXECUTOR, \
+from torch.testing._internal.common_utils import run_tests, IS_SANDCASTLE, ProfilingMode, \
     enable_profiling_mode, graph_executor_mode
 from textwrap import dedent
 from itertools import product, permutations
@@ -17,11 +17,6 @@ from itertools import product, permutations
 from test_jit import JitTestCase, enable_cpu_fuser, RUN_CUDA, RUN_CUDA_HALF, RUN_CUDA_MULTI_GPU, \
     backward_graph, all_backward_graphs, get_lstm_inputs, get_milstm_inputs, \
     LSTMCellC, LSTMCellF, LSTMCellS, MiLSTMCell, _inline_everything
-
-if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
-    torch._C._jit_set_profiling_executor(True)
-    torch._C._jit_set_profiling_mode(True)
-
 
 def strip_profiling_nodes(nodes):
     profiling_opcodes = set(['prim::BailoutTemplate', 'prim::BailOut'])
