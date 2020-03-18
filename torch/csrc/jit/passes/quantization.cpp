@@ -488,7 +488,8 @@ class InsertObserversHelper {
       // in one block it is also observed in another block, we don't want to
       // insert multiple observers for the same value
       std::unordered_set<Value*>& block_observed_values,
-      bool is_entry_point = false);
+      bool is_entry_point = false,
+      bool is_user_defined_function = false);
 
  private:
   ModuleMethodVector getInvokedMethods(
@@ -908,8 +909,9 @@ void InsertObserversHelper::preprocess(
 
 // TODO: remove this as a class method
 bool InsertObserversHelper::valueNeedsToBeQuantized(Value* v) {
-  if (!v->type()->isSubtypeOf(TensorType::get()) ||
-      isBiasOfConvOrLinear(v)) {
+  if (isBiasOfConvOrLinear(v) ||
+      !(v->type()->isSubtypeOf(TensorType::get()) ||
+        v->type()->isSubtypeOf(ListType::ofTensors()))) {
     return false;
   }
   // Check whether producer is quantizable
@@ -1007,7 +1009,8 @@ InsertObserversHelper::insertObserversFor(
       Block* block,
       script::Module& module,
       std::unordered_set<Value*>& block_observed_values,
-      bool is_entry_point) {
+      bool is_entry_point,
+      bool is_user_defined_function) {
   // input/output values, used to skip inserting observers
   // for input and output of the block and the owning graph,
   // we have to insert the observers at call site because
@@ -1091,6 +1094,7 @@ InsertObserversHelper::insertObserversFor(
         script::Module m;
         std::shared_ptr<Graph> g;
         size_t input_offset;
+        bool is_udf_for_subblock = is_user_defined_function;
         if (n->kind() == prim::CallMethod) {
           m = getInvokedModule(module, n, self);
           g = m.get_method(n->s(attr::name)).graph();
@@ -1099,6 +1103,7 @@ InsertObserversHelper::insertObserversFor(
           m = module;
           g = getCallFunctionGraph(n);
           input_offset = 1;
+          is_udf_for_subblock = true;
         }
 
         std::unordered_set<Value*> callee_observed_inputs;
@@ -1109,7 +1114,7 @@ InsertObserversHelper::insertObserversFor(
           }
         }
         auto* subblock = g->block();
-        auto info_from_callee = insertObserversFor(subblock, m, callee_observed_inputs);
+        auto info_from_callee = insertObserversFor(subblock, m, callee_observed_inputs, false, is_udf_for_subblock);
         auto input_observers = std::get<0>(info_from_callee);
         auto output_observers = std::get<1>(info_from_callee);
         auto callee_observed_outputs = std::get<2>(info_from_callee);
@@ -1199,6 +1204,9 @@ InsertObserversHelper::insertObserversFor(
       auto* v = item.first;
       auto observer = item.second;
       if (!values_to_skip_.count(v)) {
+        TORCH_CHECK(!is_user_defined_function,
+                    "Inserting observers for user defined functions is not "
+                    "supported right now");
         insertObserverFor(v, module, observer, observer_name_and_modules);
       }
     }
