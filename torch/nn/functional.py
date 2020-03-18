@@ -3976,11 +3976,11 @@ def multi_head_attention_in_projection(seq, num_heads, in_proj_weight, in_proj_b
 
     """
     if not torch.jit.is_scripting():
-        tens_ops = (query, in_proj_weight)
+        tens_ops = (seq, in_proj_weight)
         if any([type(t) is not Tensor for t in tens_ops]) and has_torch_function(tens_ops):
             return handle_torch_function(
                 multi_head_attention_in_projection, tens_ops,
-                query, num_heads, in_proj_weight, in_proj_bias=in_proj_bias)
+                seq, num_heads, in_proj_weight, in_proj_bias=in_proj_bias)
     seq_len, bsz, _ = seq.size()
     proj_dim = in_proj_weight.size(0)
     assert proj_dim % num_heads == 0, "projection dimension must be divisible by num_heads"
