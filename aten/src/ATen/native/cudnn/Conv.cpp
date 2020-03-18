@@ -691,8 +691,8 @@ public:
       }
     }
     // This error doesn't necessarily mean the error originated from cudnn.
-    // In case where we have concurrent kernel failure outside of cudnn,
-    // we could also get here.
+    // In our asynchronous kernel execution, failure outside of cudnn could
+    // have been caught while host is inside the try block above.
     // One quick trick to rule out that is to set CUDA_LAUNCH_BLOCKING to
     // avoid concurrent kernel execution.
     TORCH_CHECK(false, "run cudnn convolution failed, try set `CUDA_LAUNCH_BLOCKING=0`");
