@@ -532,11 +532,11 @@ def relu(g, input):
 
 
 def ceil(g, input):
-    return sym_help._unary_ufunc_helper(g, self, "Ceil")
+    return sym_help._unary_ufunc_helper(g, input, "Ceil")
 
 
 def floor(g, input):
-    return sym_help._unary_ufunc_helper(g, self, "Floor")
+    return sym_help._unary_ufunc_helper(g, input, "Floor")
 
 
 @parse_args('v', 't', 't')
@@ -1853,7 +1853,7 @@ def log_sigmoid(g, input):
 
 @parse_args('v')
 def erf(g, input):
-    return sym_help._unary_ufunc_helper(g, self, "Erf")
+    return sym_help._unary_ufunc_helper(g, input, "Erf")
 
 
 @parse_args('v', 'i', 'i')
