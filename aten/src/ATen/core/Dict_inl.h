@@ -3,11 +3,31 @@
 #include <ATen/core/ivalue.h>
 
 namespace c10 {
+namespace detail {
+inline bool DictKeyEqualTo::operator()(const IValue& lhs, const IValue& rhs) const {
+  return _fastEqualsForContainer(lhs, rhs);
+}
+inline bool operator==(const DictImpl& lhs, const DictImpl& rhs) {
+  return lhs.elementTypes.keyType == rhs.elementTypes.keyType &&
+      lhs.elementTypes.valueType == rhs.elementTypes.valueType &&
+      lhs.dict.size() == rhs.dict.size() &&
+      // see: [container equality]
+      std::equal(
+             lhs.dict.cbegin(),
+             lhs.dict.cend(),
+             rhs.dict.cbegin(),
+             [](const auto& lhs, const auto& rhs) {
+               return _fastEqualsForContainer(lhs.first, rhs.first) &&
+                   _fastEqualsForContainer(lhs.second, rhs.second);
+             });
+}
+}
 
 template<class T> TypePtr getTypePtr();
 std::string toString(TypePtr typePtr);
 
 namespace impl {
+
 inline bool shallowEquals(const IValue& lhs, const IValue& rhs) {
   if (lhs.isNone()) {
     return rhs.isNone();
@@ -217,28 +237,13 @@ void Dict<Key, Value>::unsafeSetValueType(TypePtr t) {
 
 template <class Key_, class Value_>
 bool operator==(const Dict<Key_, Value_>& lhs, const Dict<Key_, Value_>& rhs) {
+  // Dicts with the same identity trivially compare equal.
   if (lhs.impl_ == rhs.impl_) {
-    // Dicts with the same identity trivially compare equal.
     return true;
   }
 
-  // TODO: when we define equality on IValue, we can just defer to the
-  // operator== implementation of the underlying map.
-  // For now, do the comparison manually to avoid invoking the template
-  // specialization for IValue equality
-  if (lhs.size() != rhs.size()) {
-    return false;
-  }
-  for (const auto& pr : lhs) {
-    auto it = rhs.find(pr.key());
-    if (it == rhs.end()) {
-      return false;
-    }
-    if (it->value() != pr.value()) {
-      return false;
-    }
-  }
-  return true;
+  // Otherwise compare the values
+  return *lhs.impl_ == *rhs.impl_;
 }
 
 template <class Key_, class Value_>

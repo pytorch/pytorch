@@ -1,7 +1,6 @@
 #include <ATen/ATen.h>
 #include <gtest/gtest.h>
 #include <torch/torch.h>
-#include "ATen/core/ivalue.h"
 
 namespace c10 {
 
@@ -140,5 +139,108 @@ TEST(IValueTest, FutureExceptions) {
   ivalue::Future::FutureError err("My Error");
   f3->markCompleted(std::move(err));
   ASSERT_EQ(calledTimes, 1);
+}
+
+TEST(IValueTest, ValueEquality) {
+  ASSERT_EQ(IValue("asdf"), IValue("asdf"));
+  ASSERT_NE(IValue("asdf"), IValue("ASDF"));
+  ASSERT_NE(IValue("2"), IValue(2));
+  ASSERT_EQ(IValue(1), IValue(1));
+
+  // Check the equals() variant that returns an IValue
+  auto res = IValue("asdf").equals("asdf");
+  ASSERT_TRUE(res.isBool());
+  ASSERT_TRUE(res.toBool());
+
+  res = IValue("asdf").equals(1);
+  ASSERT_TRUE(res.isBool());
+  ASSERT_FALSE(res.toBool());
+}
+
+TEST(IValueTest, TensorEquality) {
+  auto rawTensor = torch::zeros({2, 3});
+  auto rawTensorCopy = rawTensor.clone();
+  auto t = IValue(rawTensor);
+  auto tCopy = IValue(rawTensorCopy);
+
+  // This should throw, because elementwise equality is ambiguous for
+  // multi-element Tensors.
+  auto testEquality = []() {
+    return IValue(torch::ones({2, 3})) == IValue(torch::rand({2, 3}));
+  };
+  ASSERT_ANY_THROW(testEquality());
+
+  // equals() should return a tensor of all `true`.
+  IValue eqTensor = t.equals(tCopy);
+  ASSERT_TRUE(eqTensor.isTensor());
+  auto booleanTrue = torch::ones({2, 3}).to(torch::kBool);
+  ASSERT_TRUE(eqTensor.toTensor().equal(booleanTrue));
+
+  // Test identity checking
+  ASSERT_TRUE(t.is(t));
+  ASSERT_FALSE(t.is(tCopy));
+  IValue tReference = t;
+  ASSERT_TRUE(t.is(tReference));
+}
+
+TEST(IValueTest, ListEquality) {
+  IValue c1 = std::vector<int64_t>{0, 1, 2, 3};
+  IValue c2 = std::vector<int64_t>{0, 1, 2, 3};
+  IValue c3 = std::vector<int64_t>{0, 1, 2, 3, 4};
+  ASSERT_EQ(c1, c1);
+  ASSERT_EQ(c1, c2);
+  ASSERT_FALSE(c1.is(c2));
+  ASSERT_NE(c1, c3);
+  ASSERT_NE(c2, c3);
+}
+
+TEST(IValueTest, DictEquality) {
+  auto innerDict = c10::Dict<std::string, std::string>();
+  innerDict.insert("foo", "bar");
+
+  auto d1 = c10::Dict<std::string, c10::Dict<std::string, std::string>>();
+  d1.insert("one", innerDict);
+  d1.insert("two", innerDict);
+  d1.insert("three", innerDict);
+  auto c1 = IValue(d1);
+
+  auto d2 = c10::Dict<std::string, c10::Dict<std::string, std::string>>();
+  d2.insert("one", innerDict.copy());
+  d2.insert("two", innerDict.copy());
+  d2.insert("three", innerDict.copy());
+  auto c2 = IValue(d2);
+
+  auto d3 = c10::Dict<std::string, c10::Dict<std::string, std::string>>();
+  d3.insert("one", innerDict.copy());
+  d3.insert("two", innerDict.copy());
+  d3.insert("three", innerDict.copy());
+  d3.insert("four", innerDict.copy());
+  auto c3 = IValue(d3);
+
+  auto d4 = c10::Dict<std::string, c10::Dict<std::string, std::string>>();
+  d4.insert("one", innerDict.copy());
+  d4.insert("two", innerDict.copy());
+  auto innerDictNotEqual = c10::Dict<std::string, std::string>();
+  innerDictNotEqual.insert("bar", "foo");
+  d4.insert("three", innerDictNotEqual);
+  auto c4 = IValue(d4);
+
+  ASSERT_EQ(c1, c1);
+  ASSERT_EQ(c1, c2);
+  ASSERT_FALSE(c1.is(c2));
+  ASSERT_NE(c1, c3);
+  ASSERT_NE(c2, c3);
+  ASSERT_NE(c1, c4);
+  ASSERT_NE(c2, c4);
+}
+
+TEST(IValueTest, ListNestedEquality) {
+  IValue c1 = std::vector<std::vector<int64_t>>({{0}, {0, 1}, {0, 1, 2}});
+  IValue c2 = std::vector<std::vector<int64_t>>({{0}, {0, 1}, {0, 1, 2}});
+  IValue c3 = std::vector<std::vector<int64_t>>({{1}, {0, 1}, {0, 1, 2}});
+  ASSERT_EQ(c1, c1);
+  ASSERT_EQ(c1, c2);
+  ASSERT_NE(c1, c3);
+  ASSERT_NE(c2, c3);
 }
 } // namespace c10

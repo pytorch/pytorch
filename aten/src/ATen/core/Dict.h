@@ -33,9 +33,7 @@ struct DictKeyHash {
 };
 
 struct DictKeyEqualTo {
-  bool operator()(const IValue& lhs, const IValue& rhs) const {
-    return impl::shallowEquals(lhs, rhs);
-  }
+  bool operator()(const IValue& lhs, const IValue& rhs) const;
 };
 
 struct DictImpl final : public c10::intrusive_ptr_target {
@@ -43,6 +41,7 @@ struct DictImpl final : public c10::intrusive_ptr_target {
   struct DictElementTypes final {
     TypePtr keyType;
     TypePtr valueType;
+
   };
 
   explicit DictImpl(dict_map_type dict_, DictElementTypes elementTypes_)
@@ -53,6 +52,7 @@ struct DictImpl final : public c10::intrusive_ptr_target {
   DictElementTypes elementTypes;
 
   intrusive_ptr<DictImpl> copy() const;
+  friend bool operator==(const DictImpl& lhs, const DictImpl& rhs);
 };
 
 }

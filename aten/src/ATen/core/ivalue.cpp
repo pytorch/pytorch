@@ -6,11 +6,32 @@
 #include <ATen/core/Dict.h>
 
 namespace c10 {
+bool _fastEqualsForContainer(const IValue& lhs, const IValue& rhs) {
+  if (lhs.is(rhs)) {
+    // Like Python, for containers we consider identity equality to be
+    // sufficient but not necessary for value equality
+    return true;
+  }
+  return lhs == rhs;
+}
+
 namespace ivalue {
 
 CAFFE2_API c10::intrusive_ptr<ConstantString> ConstantString::create(
     std::string str_) {
   return c10::make_intrusive<ConstantString>(std::move(str_));
+}
+
+bool operator==(const ivalue::Tuple& lhs, const ivalue::Tuple& rhs) {
+  return lhs.elements_.size() == rhs.elements_.size() &&
+      // see [container equality]
+      std::equal(
+             lhs.elements_.cbegin(),
+             lhs.elements_.cend(),
+             rhs.elements_.cbegin(),
+             [](const auto& lhs, const auto& rhs) {
+               return _fastEqualsForContainer(lhs, rhs);
+             });
 }
 
 TupleTypePtr Tuple::type() const {
@@ -117,6 +138,81 @@ bool IValue::overlaps(const IValue& rhs) const {
     }
   }
   return false;
+}
+
+bool operator!=(const IValue& lhs, const IValue& rhs) {
+  return !(lhs == rhs);
+}
+
+bool operator==(const IValue& lhs, const IValue& rhs) {
+  IValue eq = lhs.equals(rhs);
+  if (eq.isBool()) {
+    return eq.toBool();
+  }
+  // The only case we don't return bool is for tensor comparison. In Python,
+  // `bool()` is called on the return value of `__eq__` if the return value is
+  // not a boolean. Mimic that behavior here.
+  TORCH_INTERNAL_ASSERT(eq.isTensor());
+  return eq.toTensor().is_nonzero();
+}
+
+IValue IValue::equals(const IValue& rhs) const {
+  const IValue& lhs = *this;
+  switch (lhs.tag) {
+    case Tag::None:
+      // In Python you're not supposed to do this comparison apparently. Not
+      // sure if we should warn here or what
+      return rhs.isNone();
+    case Tag::Tensor:
+      if (!rhs.isTensor()){return false;}
+      return lhs.toTensor().eq(rhs.toTensor());
+    case Tag::Double:
+      return rhs.isDouble() && lhs.toDouble() == rhs.toDouble();
+    case Tag::Int:
+      return rhs.isInt() && lhs.toInt() == rhs.toInt();
+    case Tag::Bool:
+      return rhs.isBool() && lhs.toBool() == rhs.toBool();
+    case Tag::String:
+      return rhs.isString() && lhs.toStringRef() == rhs.toStringRef();
+    case Tag::GenericDict:
+      return rhs.isGenericDict() && lhs.toGenericDict() == rhs.toGenericDict();
+    case Tag::Tuple:
+      return rhs.isTuple() && lhs.toTuple() == rhs.toTuple();
+    case Tag::Device:
+      return rhs.isDevice() && lhs.toDevice() == rhs.toDevice();
+    case Tag::GenericList:
+      return rhs.isList() && lhs.toList() == rhs.toList();
+    case Tag::Blob:
+      return rhs.isBlob() && lhs.isAliasOf(rhs);
+    case Tag::Future:
+      return rhs.isFuture() && lhs.isAliasOf(rhs);
+    case Tag::RRef:
+      return rhs.isRRef() && lhs.isAliasOf(rhs);
+    case Tag::Object:
+      return rhs.isObject() && lhs.isAliasOf(rhs);
+    case Tag::PyObject:
+      return rhs.isPyObject() && lhs.isAliasOf(rhs);
+    case Tag::Capsule:
+      return rhs.isCapsule() && lhs.isAliasOf(rhs);
+    case Tag::Uninitialized:
+      TORCH_INTERNAL_ASSERT(
+          false,
+          "Uninitialized IValues are internal-only,",
+          "they should never participate in equality comparison");
+  }
+}
+
+bool IValue::is(const IValue& rhs) const {
+  const IValue& lhs = *this;
+  if (lhs.tag != rhs.tag) {
+    return false;
+  }
+  if (lhs.is_intrusive_ptr) {
+    TORCH_INTERNAL_ASSERT(rhs.is_intrusive_ptr);
+    return lhs.payload.as_intrusive_ptr == rhs.payload.as_intrusive_ptr;
+  }
+  // TODO should we do this?
+  return lhs == rhs;
 }
 
 namespace {
