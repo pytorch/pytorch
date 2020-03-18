@@ -158,6 +158,7 @@ std::string OperatorEntry::dumpState() const {
   oss << "name: " << name_ << "\n";
   if (schema_) {
     oss << "schema: " << *schema_ << "\n";
+    oss << "alias analysis kind: " << toString(schema_->aliasAnalysis()) << (schema_->isDefaultAliasAnalysisKind() ? " (default)" : "") << "\n";
   } else {
     oss << "schema: (none)\n";
   }

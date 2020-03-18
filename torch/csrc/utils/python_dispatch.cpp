@@ -31,6 +31,18 @@ c10::optional<c10::DispatchKey> parseDispatchKey(const std::string& k) {
   }
 }
 
+c10::AliasAnalysisKind parseAliasAnalysisKind(const std::string& k) {
+  static std::unordered_map<std::string, c10::AliasAnalysisKind> key_map = {
+    {"CONSERVATIVE", c10::AliasAnalysisKind::CONSERVATIVE},
+    {"FROM_SCHEMA", c10::AliasAnalysisKind::FROM_SCHEMA},
+    {"PURE_FUNCTION", c10::AliasAnalysisKind::PURE_FUNCTION},
+    {"", c10::AliasAnalysisKind::FROM_SCHEMA},  // default
+  };
+  auto it = key_map.find(k);
+  TORCH_CHECK(it != key_map.end(), "could not parse ", k);
+  return it->second;
+}
+
 
 template <typename Func>
 inline c10::CppFunction dispatch_str(const char* key, Func&& raw_f) {
@@ -43,16 +55,25 @@ inline c10::CppFunction dispatch_str(const char* key, Func&& raw_f) {
   }
 }
 
-
 void initDispatchBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
+  py::class_<c10::OperatorHandle>(m, "_DispatchOperatorHandle")
+    .def("schema", &c10::OperatorHandle::schema);
+
   // TODO: figure out how to do chaining
   py::class_<c10::Module>(m, "_DispatchModule")
-    .def("def_", [](py::object self, const char* schema) {
-      self.cast<c10::Module&>().def(schema);
+    .def("def_", [](py::object self, const char* schema, const char* alias) {
+      self.cast<c10::Module&>().def(torch::schema(schema, parseAliasAnalysisKind(alias)));
       return self;
-    })
+    }, "", py::arg("schema"), py::arg("alias") = "")
+    // Simulated "legacy" def where alias analysis kind is not set.
+    // Ordinarily this can only be exercised from RegisterOperators() API
+    // but I am not going to bind that here
+    .def("def_legacy", [](py::object self, const char* schema) {
+      self.cast<c10::Module&>().def(torch::jit::parseSchema(schema));
+      return self;
+    }, "", py::arg("schema"))
     // We can't conveniently turn Python functions into valid functions
     // in the dispatcher.  So instead we provide a bunch of precanned
     // functions for testing purposes.  You're NOT intended to actually
@@ -61,12 +82,18 @@ void initDispatchBindings(PyObject* module) {
     //
     // Mangling scheme: args_rets.  One character per.
     //  t = Tensor
-    .def("def_t_t", [](py::object self, const char* name, const char* dispatch) {
+    .def("def_name_t_t", [](py::object self, const char* name, const char* dispatch) {
       self.cast<c10::Module&>().def(name, dispatch_str(dispatch, [](const at::Tensor& a) {
         return a;
       }));
       return self;
     }, "", py::arg("name"), py::arg("dispatch") = "")
+    .def("def_schema_t_t", [](py::object self, const char* schema, const char* dispatch, const char* alias) {
+      self.cast<c10::Module&>().def(torch::schema(schema, parseAliasAnalysisKind(alias)), dispatch_str(dispatch, [](const at::Tensor& a) {
+        return a;
+      }));
+      return self;
+    }, "", py::arg("name"), py::arg("dispatch") = "", py::arg("alias") = "")
     .def("impl_t_t", [](py::object self, const char* name, const char* dispatch) {
       self.cast<c10::Module&>().impl(name, dispatch_str(dispatch, [](const at::Tensor& a) {
         return a;

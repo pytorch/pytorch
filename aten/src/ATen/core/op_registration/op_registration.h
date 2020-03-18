@@ -733,6 +733,30 @@ inline CppFunction dispatch_autograd(Func&& raw_f) {
   return dispatch(c10::DispatchKey::VariableTensorId, std::forward<Func>(raw_f));
 }
 
+inline FunctionSchema schema(const char* str, AliasAnalysisKind k) {
+  FunctionSchema s = torch::jit::parseSchema(str);
+  s.setAliasAnalysis(k);
+  return s;
+}
+inline FunctionSchema schema(const char* s) {
+  return schema(s, AliasAnalysisKind::FROM_SCHEMA);
+}
+inline FunctionSchema&& schema(FunctionSchema&& s) { return std::move(s); }
+
+inline c10::either<OperatorName, FunctionSchema> constructSchemaOrName(FunctionSchema&& s) {
+  return c10::make_right<OperatorName, FunctionSchema>(std::move(s));
+}
+inline c10::either<OperatorName, FunctionSchema> constructSchemaOrName(OperatorName&& n) {
+  return c10::make_left<OperatorName, FunctionSchema>(std::move(n));
+}
+inline c10::either<OperatorName, FunctionSchema> constructSchemaOrName(const char* str) {
+  auto s = torch::jit::parseSchemaOrName(str);
+  if (s.is_right()) {
+    s.right().setAliasAnalysis(AliasAnalysisKind::FROM_SCHEMA);
+  }
+  return s;
+}
+
 // Represents a namespace in which we can define operators.  Conventionally
 // constructed using "torch::import".  This object lets you avoid repeatedly
 // having to specify a namespace, instead you specify it once with:
@@ -769,27 +793,67 @@ public:
   Module(Module&&) noexcept;
   Module& operator=(Module&&) noexcept;
 
+  // Some notes about the API design here.  We had the following constraints:
+  //
+  //  - We wanted to support both method chaining to a static variable (&& ref
+  //    qualifier) as well as regular allocate the object and then mutate it (&
+  //    ref qualifier)
+  //  - We need to support multiple "types" of arguments for schema and
+  //    functions (e.g., unnamed lambda types, regular functions, const char*,
+  //    fully instantiated schemas)
+  //  - We don't want to write exponentially many overloads
+  //  - We don't want to rely on implicit conversion to a common type,
+  //    because the C++ compiler will only be willing to do a single
+  //    implicit conversion (reducing the set of valid types which you
+  //    can invoke with); also error messages are worse when an implicit
+  //    conversion is not selected (as the compiler will not explain
+  //    why it didn't select an implicit conversion; this is different
+  //    from overloads where it will explain each candidate overload and
+  //    why it didn't apply)
+  //
+  // To solve all of these constraints at the same time, we use a trick taken
+  // from the pybind11 library: template over the argument in the user visible
+  // API, and inside of the templated function explicitly call an overloaded
+  // function to resolve the argument to a real type.  You get the good error
+  // messages from overloads, but at the same time you only need to write the
+  // overload for any given argument type once.
+  //
+  // We still have to 2x all functions in the API so we can do both && and &
+  // ref qualifiers, c'est la vie.
+
   // Declare an operator with a schema, but don't provide any implementations
   // for it.  You're expected to then provide implementations using the
   // impl() method.
-  Module&& def(const char* schema) &&;
-  Module& def(const char* schema) &;
+  Module&& def(FunctionSchema&& schema) &&;
+  Module& def(FunctionSchema&& schema) &;
+  template <typename Schema>
+  Module&& def(Schema&& raw_schema) && {
+    FunctionSchema s = schema(std::forward<Schema>(raw_schema));
+    return std::move(*this).def(std::move(s));
+  }
+  template <typename Schema>
+  Module& def(Schema&& raw_schema) & {
+    FunctionSchema s = schema(std::forward<Schema>(raw_schema));
+    return def(std::move(s));
+  }
 
   // Convenience method to define an operator for a schema and then register
   // an implementation for it.  def(n, f) is almost equivalent to def(n).impl(f),
   // except that if n is not a schema, then the schema is inferred from the
   // static type of f.
-  Module&& def(const char* name_or_schema, CppFunction&& f) &&;
-  Module& def(const char* name_or_schema, CppFunction&& f) &;
-  template <typename Func>
-  Module&& def(const char* name_or_schema, Func&& raw_f) && {
+  Module&& def(c10::either<OperatorName, FunctionSchema>&&, CppFunction&& f) &&;
+  Module& def(c10::either<OperatorName, FunctionSchema>&&, CppFunction&& f) &;
+  template <typename NameOrSchema, typename Func>
+  Module&& def(NameOrSchema&& raw_name_or_schema, Func&& raw_f) && {
     CppFunction f(std::forward<Func>(raw_f));
-    return std::move(*this).def(name_or_schema, std::move(f));
+    auto name_or_schema = constructSchemaOrName(std::forward<NameOrSchema>(raw_name_or_schema));
+    return std::move(*this).def(std::move(name_or_schema), std::move(f));
   }
-  template <typename Func>
-  Module& def(const char* name_or_schema, Func&& raw_f) & {
+  template <typename NameOrSchema, typename Func>
+  Module& def(NameOrSchema&& raw_name_or_schema, Func&& raw_f) & {
     CppFunction f(std::forward<Func>(raw_f));
-    return def(name_or_schema, std::move(f));
+    auto name_or_schema = constructSchemaOrName(std::forward<NameOrSchema>(raw_name_or_schema));
+    return def(std::move(name_or_schema), std::move(f));
   }
 
   // Register an implementation for an operator.  You may register multiple
@@ -847,5 +911,6 @@ namespace torch {
   // New-style API
   using c10::dispatch;
   using c10::dispatch_autograd;
+  using c10::schema;
   using c10::import;
 }
