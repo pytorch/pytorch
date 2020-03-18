@@ -2034,6 +2034,7 @@ graph(%input, %weight):
                    .check("aten::mean") \
                    .check("aten::reshape") \
                    .check("aten::chunk") \
+                   .check("prim::ListUnpack") \
                    .check("aten::dropout") \
                    .check("aten::dropout") \
                    .run(m.graph)
@@ -2047,6 +2048,7 @@ graph(%input, %weight):
                    .check("aten::mean") \
                    .check("aten::reshape") \
                    .check("aten::chunk") \
+                   .check("prim::ListUnpack") \
                    .check("aten::dropout") \
                    .check("aten::dropout") \
                    .check("dequantize") \
