@@ -813,9 +813,17 @@ void InsertObserversHelper::fillBoundaryValueMap(
           boundary_value_map_[n->input(i)].insert(input_val);
           caller_to_callee_[n->input(i)] = input_val;
         }
-      }
-      for (Block* subblock : n->blocks()) {
-        blocks_to_visit.push(subblock);
+      } else if (n->kind() == prim::If) {
+        for (Block* subblock : n->blocks()) {
+          blocks_to_visit.push(subblock);
+          for (Value* v : n->outputs()) {
+            boundary_value_map_[v].insert(subblock->outputs()[v->offset()]);
+          }
+        }
+      } else {
+        for (Block* subblock : n->blocks()) {
+          blocks_to_visit.push(subblock);
+        }
       }
     }
   }
@@ -1032,7 +1040,7 @@ InsertObserversHelper::insertObserversFor(
         auto m = getInvokedModule(module, n, self);
         std::unordered_set<Value*> callee_observed_inputs;
         for (auto i = 0; i < n->inputs().size(); ++i) {
-          if (isObserved(n->input(i)), block_observed_values) {
+          if (isObserved(n->input(i), block_observed_values)) {
             callee_observed_inputs.insert(caller_to_callee_[n->inputs()[i]]);
           }
         }
@@ -1296,7 +1304,8 @@ class InsertQuantDeQuantHelper {
   // get the information of original value that's been observed and
   // the quantization parameters
   std::unordered_map<Graph*, std::vector<Node*>> observer_nodes_for_graph_;
-  // A map from qparam name (e.g. _scale) to the attribute name in
+  // qparam name map for each observer node, where each qparam name map  maps
+  // from qparam name (e.g. _scale) to the attribute name in
   // the module(e.g. weight_scale_0)
   std::unordered_map<Node*, std::unordered_map<std::string, std::string>> qparam_name_map_for_node_;
   // Record qscheme for every graph, this is for checking
@@ -2434,6 +2443,7 @@ script::Module Finalize(script::Module& module) {
   SwapFunctionalLinear(module);
   auto graph = module.get_method("forward").graph();
   Inline(*graph);
+  ConstantPropagation(graph);
   ReplicateDeQuant(graph);
   SwapDeQuant(graph);
   InsertPrepackUnpack(graph);
