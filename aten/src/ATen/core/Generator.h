@@ -7,6 +7,7 @@
 #include <atomic>
 #include <typeinfo>
 #include <utility>
+#include <cstddef>
 
 #include <c10/util/Exception.h>
 #include <c10/util/C++17.h>
