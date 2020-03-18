@@ -8,7 +8,6 @@
 struct THPGenerator {
   PyObject_HEAD
   at::Generator cdata;
-  // bool owner;  // if true, frees cdata in destructor
 };
 
 // Creates a new Python object wrapping the default at::Generator. The reference is

@@ -60,21 +60,8 @@ struct CAFFE2_API Generator {
     }
   }
 
-  // TODO(pbelevich): delete this after replace Generator generator = nullptr with {}
-  Generator(c10::GeneratorImpl* gen_impl)
-   : impl_(std::shared_ptr<c10::GeneratorImpl>(gen_impl)) {}
-
-  Generator(const Generator&) = default;
-  Generator(Generator&&) = default;
-
-  Generator& operator=(const Generator& x) & {
-    impl_ = x.impl_;
-    return *this;
-  }
-  Generator& operator=(Generator&& x) & {
-    impl_ = std::move(x.impl_);
-    return *this;
-  }
+  // // TODO(pbelevich): delete this after replace Generator generator = nullptr with {}
+  Generator(nullptr_t gen_impl) {}
 
   bool operator==(const Generator& rhs) const {
     return (!(this->impl_) && !(rhs.impl_)) || (this->impl_ == rhs.impl_);
@@ -90,7 +77,8 @@ struct CAFFE2_API Generator {
 
   c10::GeneratorImpl* operator->() const { return impl_.get(); }
 
-  c10::GeneratorImpl* get() const { return impl_.get(); }
+  template<typename T>
+  T* get() const { return static_cast<T*>(impl_.get()); }
 
  private:
   std::shared_ptr<c10::GeneratorImpl> impl_;

@@ -36,7 +36,7 @@ private:
 
 namespace detail {
 
-CAFFE2_API Generator getDefaultCPUGenerator();
+CAFFE2_API const Generator& getDefaultCPUGenerator();
 CAFFE2_API Generator createCPUGenerator(uint64_t seed_val = default_rng_seed_val);
 
 } // namespace detail

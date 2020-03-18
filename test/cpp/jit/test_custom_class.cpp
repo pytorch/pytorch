@@ -33,9 +33,9 @@ struct Foo : torch::CustomClassHolder {
 };
 
 template <class T>
-struct Stack : torch::CustomClassHolder {
+struct MyStackClass : torch::CustomClassHolder {
   std::vector<T> stack_;
-  Stack(std::vector<T> init) : stack_(init.begin(), init.end()) {}
+  MyStackClass(std::vector<T> init) : stack_(init.begin(), init.end()) {}
 
   void push(T x) {
     stack_.push_back(x);
@@ -46,11 +46,11 @@ struct Stack : torch::CustomClassHolder {
     return val;
   }
 
-  c10::intrusive_ptr<Stack> clone() const {
-    return c10::make_intrusive<Stack>(stack_);
+  c10::intrusive_ptr<MyStackClass> clone() const {
+    return c10::make_intrusive<MyStackClass>(stack_);
   }
 
-  void merge(const c10::intrusive_ptr<Stack>& c) {
+  void merge(const c10::intrusive_ptr<MyStackClass>& c) {
     for (auto& elem : c->stack_) {
       push(elem);
     }
@@ -75,28 +75,28 @@ static auto test = torch::class_<Foo>("_TorchScriptTesting_Foo")
                        .def("combine", &Foo::combine);
 
 static auto testStack =
-    torch::class_<Stack<std::string>>("_TorchScriptTesting_StackString")
+    torch::class_<MyStackClass<std::string>>("_TorchScriptTesting_StackString")
         .def(torch::init<std::vector<std::string>>())
-        .def("push", &Stack<std::string>::push)
-        .def("pop", &Stack<std::string>::pop)
-        .def("clone", &Stack<std::string>::clone)
-        .def("merge", &Stack<std::string>::merge)
+        .def("push", &MyStackClass<std::string>::push)
+        .def("pop", &MyStackClass<std::string>::pop)
+        .def("clone", &MyStackClass<std::string>::clone)
+        .def("merge", &MyStackClass<std::string>::merge)
         .def_pickle(
-            [](const c10::intrusive_ptr<Stack<std::string>>& self) {
+            [](const c10::intrusive_ptr<MyStackClass<std::string>>& self) {
               return self->stack_;
             },
             [](std::vector<std::string> state) { // __setstate__
-              return c10::make_intrusive<Stack<std::string>>(
+              return c10::make_intrusive<MyStackClass<std::string>>(
                   std::vector<std::string>{"i", "was", "deserialized"});
             })
-        .def("return_a_tuple", &Stack<std::string>::return_a_tuple)
+        .def("return_a_tuple", &MyStackClass<std::string>::return_a_tuple)
         .def(
             "top",
-            [](const c10::intrusive_ptr<Stack<std::string>>& self)
+            [](const c10::intrusive_ptr<MyStackClass<std::string>>& self)
                 -> std::string { return self->stack_.back(); });
 // clang-format off
         // The following will fail with a static assert telling you you have to
-        // take an intrusive_ptr<Stack> as the first argument.
+        // take an intrusive_ptr<MyStackClass> as the first argument.
         // .def("foo", [](int64_t a) -> int64_t{ return 3;});
 // clang-format on
 
@@ -138,6 +138,39 @@ static auto& ensure_take_instance_registered = register_take_instance();
 
 
 } // namespace
+
+void testTorchbindIValueAPI() {
+  script::Module m("m");
+
+  // test make_custom_class API
+  auto custom_class_obj = make_custom_class<MyStackClass<std::string>>(
+      std::vector<std::string>{"foo", "bar"});
+  m.define(R"(
+    def forward(self, s : __torch__.torch.classes._TorchScriptTesting_StackString):
+      return s.pop(), s
+  )");
+
+  auto test_with_obj = [&m](IValue obj, std::string expected) {
+    auto res = m.run_method("forward", obj);
+    auto tup = res.toTuple();
+    AT_ASSERT(tup->elements().size() == 2);
+    auto str = tup->elements()[0].toStringRef();
+    auto other_obj =
+        tup->elements()[1].toCustomClass<MyStackClass<std::string>>();
+    AT_ASSERT(str == expected);
+    auto ref_obj = obj.toCustomClass<MyStackClass<std::string>>();
+    AT_ASSERT(other_obj.get() == ref_obj.get());
+  };
+
+  test_with_obj(custom_class_obj, "bar");
+
+  // test IValue() API
+  auto my_new_stack = c10::make_intrusive<MyStackClass<std::string>>(
+      std::vector<std::string>{"baz", "boo"});
+  auto new_stack_ivalue = c10::IValue(my_new_stack);
+
+  test_with_obj(new_stack_ivalue, "boo");
+}
 
 } // namespace jit
 } // namespace torch

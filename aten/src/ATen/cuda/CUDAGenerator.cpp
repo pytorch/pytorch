@@ -36,7 +36,7 @@ static void initCUDAGenVector(){
  * getDefaultCUDAGenerator gets the default generator for a particular
  * cuda device.
  */
-Generator getDefaultCUDAGenerator(DeviceIndex device_index) {
+const Generator& getDefaultCUDAGenerator(DeviceIndex device_index) {
   std::call_once(num_gpu_init_flag, initCUDAGenVector);
   DeviceIndex idx = device_index;
   if (idx == -1) {
@@ -62,8 +62,9 @@ Generator createCUDAGenerator(DeviceIndex device_index) {
   }
   TORCH_CHECK(idx >= 0 && idx < num_gpus, "The device_index is invalid.");
   auto gen = make_generator<CUDAGenerator>(idx);
-  check_generator<CUDAGenerator>(gen)->set_current_seed(default_rng_seed_val);
-  check_generator<CUDAGenerator>(gen)->set_philox_offset_per_thread(0);
+  auto cuda_gen = check_generator<CUDAGenerator>(gen);
+  cuda_gen->set_current_seed(default_rng_seed_val);
+  cuda_gen->set_philox_offset_per_thread(0);
   return gen;
 }
 

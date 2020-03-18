@@ -14,7 +14,7 @@ namespace detail {
  * getDefaultCPUGenerator gets the default generator for a particular
  * device.
  */
-Generator getDefaultCPUGenerator() {
+const Generator& getDefaultCPUGenerator() {
   static auto default_gen_cpu = createCPUGenerator(c10::detail::getNonDeterministicRandom());
   return default_gen_cpu;
 }

@@ -31,7 +31,7 @@ private:
 namespace cuda {
 namespace detail {
 
-  TORCH_CUDA_API Generator getDefaultCUDAGenerator(DeviceIndex device_index = -1);
+  TORCH_CUDA_API const Generator& getDefaultCUDAGenerator(DeviceIndex device_index = -1);
   TORCH_CUDA_API Generator createCUDAGenerator(DeviceIndex device_index = -1);
 
 } // namespace detail
