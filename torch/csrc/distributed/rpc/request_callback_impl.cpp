@@ -100,7 +100,7 @@ Message RequestCallbackImpl::handleError(
       DistAutogradContainer::getInstance().getWorkerId(),
       ": ",
       e.what());
-  return createExceptionResponse(messageId, errorMsg);
+  return createExceptionResponse(errorMsg, messageId);
 }
 
 void RequestCallbackImpl::processRpc(
