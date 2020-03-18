@@ -16357,7 +16357,7 @@ unary_ufuncs = {
     'sinh': ufunc_meta(is_floating=True),
     'sqrt': ufunc_meta(is_floating=True),
     'trunc': ufunc_meta(is_floating=True),
-    'digamma': ufunc_meta(is_floating=True),
+    'digamma': ufunc_meta(is_floating=True, complex_on=()),
     'rsqrt': ufunc_meta(is_floating=True, complex_on=('cpu')),
     'sigmoid': ufunc_meta(is_floating=True, complex_on=('cpu')),
     'atan': ufunc_meta(is_floating=True, complex_on=('cpu')),
@@ -16407,6 +16407,32 @@ def generate_unary_floating_ufunc_promo_test(cls, op_str):
         for in_type in my_float_types:
             t = torch.tensor((1,), device=device, dtype=in_type)
             self.assertEqual(op(t).dtype, in_type)
+
+        only_cpu_ops = ['atan', 'cos', 'cosh', 'erf', 'erfc', 'exp', 'tan', 'tanh']
+        for in_type in my_float_types + int_types:
+            if(op_str in only_cpu_ops and self.device_type == 'cuda'): continue
+            t = torch.tensor((1,), device=device, dtype=in_type)
+            for out_type in my_float_types:
+                if(in_type == torch.bool and out_type in complex_types): continue
+                out_t = torch.tensor((), device=device, dtype=out_type)
+                self.assertEqual(op(t, out=out_t).dtype, out_type)
+            for out_type in int_types:
+                out_t = torch.tensor((), device=device, dtype=out_type)
+                self.assertRaises(RuntimeError, lambda: op(t, out=out_t))
+
+        try:
+            op_inplace = getattr(torch, op_str + "_")
+        except AttributeError:
+            # lgamma, digamma and erfinv don't have in-place functions
+            return
+
+        for in_type in int_types:
+            t = torch.tensor((1,), device=device, dtype=in_type)
+            self.assertRaises(RuntimeError, lambda: op_inplace(t))
+
+        for in_type in my_float_types:
+            t = torch.tensor((1,), device=device, dtype=in_type)
+            self.assertEqual(op_inplace(t).dtype, t.dtype)
 
     test_name = "test_" + op_str + "_dtype_promotion"
     assert not hasattr(cls, test_name), "{0} already in {1}".format(test_name, cls.__name__)
