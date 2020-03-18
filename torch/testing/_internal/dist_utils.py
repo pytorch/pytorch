@@ -2,6 +2,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 import time
 from functools import partial, wraps
+import re
 
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
@@ -87,28 +88,43 @@ TEST_CONFIG.build_rpc_backend_options = lambda test_object: rpc.backend_registry
 def noop():
     pass
 
-def wait_until_node_failure(rank):
+def wait_until_node_failure(rank, expected_error_regex=".*"):
     '''
     Loops until an RPC to the given rank fails. This is used to
     indicate that the node has failed in unit tests.
+    Args:
+    rank (int): Rank of the node expected to fail
+    expected_error_regex (optional, str): Regex of exception message expected. Useful to ensure a specific failure
+    occurs, not just any.
     '''
     while True:
         try:
             rpc.rpc_sync("worker{}".format(rank), noop, args=())
-            time.sleep(0.5)
-        except Exception:
-            break
+            time.sleep(0.1)
+        except Exception as e:
+            if re.match(pattern=expected_error_regex, string=str(e)):
+                return str(e)
 
 # Shutdown sequence is not well defined, so we may see any of the following errors
 # When running tests that simulate errors via a shutdown on the remote end.
-def get_shutdown_error_regex():
-    error_regexes = [
-        "Request aborted during client shutdown",
-        "worker.: Error in reponse from worker.: server shutting down",
-        "worker.: Error in response from worker.: Failed to write to remote endpoint",
-        "worker.: Error in response from worker.: AsyncSocketException: recv() failed",
-    ]
+def get_shutdown_error_regex(rpc_backend):
+    """
+    Return various error message we may see from RPC agents while running tests that check for failures. This function
+    is used to match against possible errors to ensure failures were raised properly.
+    """
+    if rpc_backend == "PROCESS_GROUP":
+        error_regexes = ["Encountered exception in ProcessGroupAgent::enqueueSend"]
+    else:
+        error_regexes = [
+            "Request aborted during client shutdown",
+            "worker.: Error in reponse from worker.: server shutting down",
+            "worker.: Error in response from worker.: Failed to write to remote endpoint",
+            "worker.: Error in response from worker.: AsyncSocketException: recv() failed",
+            "worker.: Error in response from worker.: Dropping unsent request"
+        ]
     error_regex = "".join(["({})|".format(error_str) for error_str in error_regexes])
+    # Strip out the last | or else it will match anything
+    error_regex = error_regex[:-1]
     return error_regex
 
 def wait_until_pending_users_flushed():

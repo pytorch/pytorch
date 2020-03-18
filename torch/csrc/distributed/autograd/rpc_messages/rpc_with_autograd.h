@@ -42,6 +42,8 @@ class TORCH_API RpcWithAutograd final : public rpc::RpcCommandBase {
 
   RpcCommandBase& wrappedRpc();
 
+  void setWrappedRpc(std::unique_ptr<RpcCommandBase> wrappedRpc);
+
   std::unique_ptr<RpcCommandBase> moveWrappedRpc() &&;
 
   // Message type of the wrapped RPC.
