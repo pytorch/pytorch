@@ -58,6 +58,9 @@ static inline Tensor& unary_op_impl_(Tensor& self, OutImpl& out_impl) {
   return out_impl(self, self);
 }
 
+// unary_floating_ufunc_* functions are helper functions to support integral and bool Tensors
+// to default floating type promotion for floating ufuncs. For non-floating ufuncs, use existing
+// helper functions (unary_op_impl*) if needed.
 template <typename Stub>
 static inline Tensor& unary_floating_ufunc_op_impl_out(Tensor& result, const Tensor& self, Stub& stub) {
   TORCH_CHECK(!isIntegralType(result.scalar_type(), /*includeBool=*/ true),
