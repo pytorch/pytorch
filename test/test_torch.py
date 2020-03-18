@@ -16423,10 +16423,10 @@ def generate_unary_floating_ufunc_promo_test(cls, op_str):
                 # and output as complex tensors
                 if (in_type == torch.bool and out_type in complex_types):
                     continue
-                out_t = torch.tensor((), device=device, dtype=out_type)
+                out_t = torch.empty((1,), device=device, dtype=out_type)
                 self.assertEqual(op(t, out=out_t).dtype, out_type)
             for out_type in int_types:
-                out_t = torch.tensor((), device=device, dtype=out_type)
+                out_t = torch.empty((1,), device=device, dtype=out_type)
                 self.assertRaises(RuntimeError, lambda: op(t, out=out_t))
 
         try:

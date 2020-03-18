@@ -3132,7 +3132,7 @@ def setup_unary_floating_ufunc_tests_helper(cls, op_name):
             def forward(self, x):
                 return op(x)
 
-        x = (torch.rand(2, 3, 4) * 10).to(torch.int)
+        x = (torch.rand(2, 3, 4) * 10).to(torch.long)
         self.run_test(module(), (x,))
         self.run_test(torch.jit.trace(module(), (x,)), (x,))
 
