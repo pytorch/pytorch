@@ -4331,7 +4331,7 @@ class TestAutogradFunctional(TestCase):
             return a.clone()
 
         inp.requires_grad_()
-        with self.assertRaisesRegex(RuntimeError, "The jacobian of the user-provided function is independent of input 0."):
+        with self.assertRaisesRegex(RuntimeError, "jacobian of the user-provided function is independent of input 0."):
             res = autogradF.vjp(foo, inp, v, create_graph=True, strict=True)
         res = autogradF.vjp(foo, inp, v, create_graph=True, strict=False)
         self._assert_same_struct(res[1], inp)
@@ -4482,7 +4482,7 @@ class TestAutogradFunctional(TestCase):
             return a.clone()
 
         inp.requires_grad_()
-        with self.assertRaisesRegex(RuntimeError, "The jacobian of the user-provided function is independent of input 0."):
+        with self.assertRaisesRegex(RuntimeError, "jacobian of the user-provided function is independent of input 0."):
             res = autogradF.jvp(foo, inp, v, create_graph=True, strict=True)
         res = autogradF.jvp(foo, inp, v, create_graph=True, strict=False)
         self._assert_same_struct(res[1], inp)
@@ -4630,7 +4630,7 @@ class TestAutogradFunctional(TestCase):
             return a.clone()
 
         inp.requires_grad_()
-        with self.assertRaisesRegex(RuntimeError, "The jacobian of the user-provided function is independent of input 0."):
+        with self.assertRaisesRegex(RuntimeError, "jacobian of the user-provided function is independent of input 0."):
             res = autogradF.jacobian(foo, inp, create_graph=True, strict=True)
         res = autogradF.jacobian(foo, inp, create_graph=True, strict=False)
         self._assert_interleaved_struct(res, inp, inp)
@@ -4768,13 +4768,13 @@ class TestAutogradFunctional(TestCase):
         self._assert_interleaved_struct(res, inp, inp)
         self.assertEqual(res.abs().sum(), 0.)
 
-        with self.assertRaisesRegex(RuntimeError, "The jacobian of the user-provided function with respect to input 0"):
+        with self.assertRaisesRegex(RuntimeError, "jacobian of the user-provided function with respect to input 0"):
             res = autogradF.hessian(bar, inp, strict=True)
         res = autogradF.hessian(bar, inp, strict=False)
         self._assert_interleaved_struct(res, inp, inp)
         self.assertEqual(res.abs().sum(), 0.)
 
-        with self.assertRaisesRegex(RuntimeError, "The jacobian of the user-provided function with respect to input 0 is"):
+        with self.assertRaisesRegex(RuntimeError, "jacobian of the user-provided function with respect to input 0 is"):
             res = autogradF.hessian(bar2, inp, strict=True)
         res = autogradF.hessian(bar2, inp, strict=False)
         self._assert_interleaved_struct(res, inp, inp)
@@ -4923,7 +4923,7 @@ class TestAutogradFunctional(TestCase):
         self._assert_same_struct(res[1], inp)
         self.assertEqual(res[1].abs().sum(), 0.)
 
-        with self.assertRaisesRegex(RuntimeError, "The jacobian of the user-provided function with respect to input 0 is"):
+        with self.assertRaisesRegex(RuntimeError, "jacobian of the user-provided function with respect to input 0 is"):
             res = autogradF.vhp(bar2, inp, v, strict=True)
         res = autogradF.vhp(bar2, inp, v, strict=False)
         self._assert_same_struct(res[1], inp)
@@ -5081,7 +5081,7 @@ class TestAutogradFunctional(TestCase):
         self._assert_same_struct(res[1], inp)
         self.assertEqual(res[1].abs().sum(), 0.)
 
-        with self.assertRaisesRegex(RuntimeError, "The jacobian of the user-provided function with respect to input 0 is"):
+        with self.assertRaisesRegex(RuntimeError, "jacobian of the user-provided function with respect to input 0 is"):
             res = autogradF.hvp(bar2, inp, v, strict=True)
         res = autogradF.hvp(bar2, inp, v, strict=False)
         self._assert_same_struct(res[1], inp)
