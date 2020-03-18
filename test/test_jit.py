@@ -1598,7 +1598,7 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
                        .check("quantized::add_relu") \
                        .run(m.graph_for(data, data))
 
-    def test_quantized_cat_fusion(self):
+    def test_quantized_cat(self):
         """ Note that we to support the case that torch.cat is quantized
         indepdently, we need to have an observer that works
         for list of Tensors.
@@ -1616,18 +1616,17 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
 
         m = torch.jit.script(M().eval())
         m = prepare_script(m, {'': script_qconfig(default_qconfig)}, True)
+        # two for input of conv and one for output of cat
+        # this also tests the ListConstruct can preserve the observed property so that
+        # torch.cat knows that inputs are observed
+        assert len(attrs_with_prefix(m, '_observer_')) == 3
         data = torch.randn(1, 1, 10, 10, dtype=torch.float)
         m(data, data)
         m = convert_script(m, True)
-        g = m.graph_for(data, data)
-        # two for input of conv and two for weight of conv
-        # this also tests the ListConstruct can preserve the observed property
-        FileCheck().check_count("aten::quantize_per_tensor", 4, exactly=True) \
-                   .run(g)
 
         FileCheck().check_not("aten::cat") \
                    .check("quantized::cat") \
-                   .run(g)
+                   .run(m.graph_for(data, data))
 
     def test_foldbn_trivial(self):
         # Test trivial case
