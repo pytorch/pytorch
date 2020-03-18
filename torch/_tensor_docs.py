@@ -957,6 +957,20 @@ Example::
 
 """)
 
+add_docstr_all('floor_divide',
+               r"""
+floor_divide(value) -> Tensor
+
+See :func:`torch.floor_divide`
+""")
+
+add_docstr_all('floor_divide_',
+               r"""
+floor_divide_(value) -> Tensor
+
+In-place version of :meth:`~Tensor.floor_divide`
+""")
+
 add_docstr_all('digamma',
                r"""
 digamma() -> Tensor
