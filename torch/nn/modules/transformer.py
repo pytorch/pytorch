@@ -452,7 +452,7 @@ class ScaledDotProduct(Module):
         >>> k = v = torch.randn(256, 21, 3)
         >>> attn_output, attn_weights = SDP(q, k, v)
         >>> print(attn_output.shape, attn_weights.shape)
-        torch.Size([256, 11, 3]) torch.Size([256, 21, 21])
+        torch.Size([256, 21, 3]) torch.Size([256, 21, 21])
     """
     __constants__ = ['num_heads', 'add_zero_attn', 'dropout_p']
 
