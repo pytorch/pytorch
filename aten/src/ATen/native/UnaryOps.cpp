@@ -53,18 +53,6 @@ static inline Tensor unary_op_impl(const Tensor& self, OutImpl& out_impl) {
   return out_impl(result, self);
 }
 
-// This helper function ensures the output type of the unary op is a floating point value.
-// Note that this function is only appropriate for functions like sin() which (mathematically speaking)
-// produces non-integral values. Implementers should continue to use the other unary functions, like unary_op_impl_,
-// since they explicitly specify the output type.
-template <typename OutImpl>
-static inline Tensor unary_float_op_impl(const Tensor& self, OutImpl& out_impl) {
-  Tensor result = isIntegralType(self.scalar_type(), /*include_bool=*/ true) ? \
-                  at::empty({0}, self.options().dtype(typeMetaToScalarType(c10::get_default_dtype()))) : \
-                  at::empty({0}, self.options());
-  return out_impl(result, self);
-}
-
 template <typename OutImpl>
 static inline Tensor& unary_op_impl_(Tensor& self, OutImpl& out_impl) {
   return out_impl(self, self);
@@ -74,8 +62,7 @@ template <typename Stub>
 static inline Tensor& unary_floating_ufunc_op_impl_out(Tensor& result, const Tensor& self, Stub& stub) {
   TORCH_CHECK(!isIntegralType(result.scalar_type(), /*includeBool=*/ true),
     "Attempted to call a function that returns a tensor of floating dtype ",
-    "but requested a tensor of bool or integral dtype. ",
-    "Specify an out tensor with a floating dtype or a floating dtype argument.");
+    "but requested a tensor of bool or integral dtype. ");
 
   auto iter = TensorIterator::unary_floating_ufunc(result, self,
     /*check_mem_overlap=*/true);
