@@ -36,6 +36,7 @@ PyObject * THPGenerator_initDefaultGenerator(at::Generator cdata)
 
 static void THPGenerator_dealloc(THPGenerator* self)
 {
+  self->cdata->set_pyobj(nullptr);
   self->cdata = {};
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
