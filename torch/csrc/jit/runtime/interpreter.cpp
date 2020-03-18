@@ -1147,7 +1147,6 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                     Stack stack)
                     : state_(std::move(state)), stack_(std::move(stack)) {}
                 void operator()() {
-                  int64_t dist_autograd_context_id = -1;
                   at::launch(InterpreterContinuation(
                       state_, std::move(stack_), torch::getThreadLocalState()));
                 }
@@ -1271,7 +1270,6 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             // Move inputs to a separate stack
             InterpreterState forked_interpreter(
                 frames.back().function->code_table_.at(inst.X));
-            int64_t dist_autograd_context_id = -1;
             InterpreterContinuation continuation(
                 forked_interpreter,
                 Stack(stack.end() - inst.N, stack.end()),
