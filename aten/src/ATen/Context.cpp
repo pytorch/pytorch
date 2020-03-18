@@ -171,4 +171,28 @@ struct LegacyDeviceTypeInit : public LegacyDeviceTypeInitInterface {
 };
 REGISTER_LEGACY_TYPE_INIT(LegacyDeviceTypeInit);
 
+namespace detail {
+
+/**
+ * PyTorch maintains a collection of default generators that get
+ * initialized once. The purpose of these default generators is to
+ * maintain a global running state of the pseudo random number generation,
+ * when a user does not explicitly mention any generator.
+ * getDefaultCPUGenerator gets the default generator for a particular
+ * device.
+ */
+const Generator& getDefaultCPUGenerator() {
+  static auto default_gen_cpu = createCPUGenerator(c10::detail::getNonDeterministicRandom());
+  return default_gen_cpu;
+}
+
+/**
+ * Utility to create a CPUGenerator. Returns a shared_ptr
+ */
+Generator createCPUGenerator(uint64_t seed_val) {
+  return make_generator<CPUGenerator>(seed_val);
+}
+
+} // namespace detail
+
 } // namespace at

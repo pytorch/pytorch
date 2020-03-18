@@ -235,4 +235,23 @@ static inline void manual_seed(uint64_t seed) {
   }
 }
 
+namespace detail {
+
+/**
+ * PyTorch maintains a collection of default generators that get
+ * initialized once. The purpose of these default generators is to
+ * maintain a global running state of the pseudo random number generation,
+ * when a user does not explicitly mention any generator.
+ * getDefaultCPUGenerator gets the default generator for a particular
+ * device.
+ */
+const Generator& getDefaultCPUGenerator();
+
+/**
+ * Utility to create a CPUGenerator. Returns a shared_ptr
+ */
+Generator createCPUGenerator(uint64_t seed_val);
+
+} // namespace detail
+
 } // namespace at
