@@ -94,12 +94,15 @@ class Optimizer(object):
             'param_groups': param_groups,
         }
 
-    def load_state_dict(self, state_dict):
+    def load_state_dict(self, state_dict, strict=True):
         r"""Loads the optimizer state.
 
         Arguments:
             state_dict (dict): optimizer state. Should be an object returned
                 from a call to :meth:`state_dict`.
+            strict (bool, optional): whether to strictly enforce that the keys
+                in :attr:`state_dict` match the keys returned by this optimizers's
+                :meth:`~torch.nn.Optimizer.state_dict` function. Default: ``True``
         """
         # deepcopy, to be consistent with module API
         state_dict = deepcopy(state_dict)
@@ -107,14 +110,15 @@ class Optimizer(object):
         groups = self.param_groups
         saved_groups = state_dict['param_groups']
 
-        if len(groups) != len(saved_groups):
-            raise ValueError("loaded state dict has a different number of "
-                             "parameter groups")
-        param_lens = (len(g['params']) for g in groups)
-        saved_lens = (len(g['params']) for g in saved_groups)
-        if any(p_len != s_len for p_len, s_len in zip(param_lens, saved_lens)):
-            raise ValueError("loaded state dict contains a parameter group "
-                             "that doesn't match the size of optimizer's group")
+        if strict:
+            if len(groups) != len(saved_groups):
+                raise ValueError("loaded state dict has a different number of "
+                                 "parameter groups")
+            param_lens = (len(g['params']) for g in groups)
+            saved_lens = (len(g['params']) for g in saved_groups)
+            if any(p_len != s_len for p_len, s_len in zip(param_lens, saved_lens)):
+                raise ValueError("loaded state dict contains a parameter group "
+                                 "that doesn't match the size of optimizer's group")
 
         # Update the state
         id_map = {old_id: p for old_id, p in
