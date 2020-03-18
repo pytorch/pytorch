@@ -447,6 +447,7 @@ class TestTypePromotion(TestCase):
         casting_result = dividend.to(torch.get_default_dtype()) / divisor.to(torch.get_default_dtype())
         self.assertEqual(casting_result, torch.true_divide(dividend, divisor))
 
+    @onlyOnCPUAndCUDA
     @dtypes(torch.bool, torch.short, torch.uint8, torch.int, torch.long)
     def test_true_divide_out(self, device, dtype):
         dividend = torch.randn(5, device=device).to(dtype)
