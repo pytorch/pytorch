@@ -207,6 +207,7 @@ TEST(OptimTest, XORConvergence_SGD) {
 }
 
 TEST(OptimTest, XORConvergence_LBFGS) {
+  ASSERT_TRUE(test_optimizer_xor<LBFGS>(LBFGSOptions(1.0)));
   ASSERT_TRUE(test_optimizer_xor<LBFGS>(LBFGSOptions(1.0).line_search_fn("strong_wolfe")));
 }
 
