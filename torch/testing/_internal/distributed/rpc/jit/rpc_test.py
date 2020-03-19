@@ -2,9 +2,14 @@ import unittest
 from typing import Dict, Tuple
 
 import torch
+import torch.distributed as dist
 import torch.distributed.rpc as rpc
 from torch import Tensor
-from torch.testing._internal.dist_utils import dist_init, worker_name
+from torch.testing._internal.dist_utils import (
+    dist_init,
+    worker_name,
+    initialize_pg,
+)
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
 )
@@ -97,7 +102,7 @@ class LocalRRefTest(RpcAgentTestFixture):
             return
 
         # Create a local RRef<MyModuleInterface>.
-        rref_script_module = rpc.RRef(MyScriptModule(self.rank), MyModuleInterface) 
+        rref_script_module = rpc.RRef(MyScriptModule(self.rank), MyModuleInterface)
         ret = rref_script_module.to_here().forward()
         self.assertEqual(ret, torch.ones(self.rank))
 
@@ -119,10 +124,24 @@ class LocalRRefTest(RpcAgentTestFixture):
 
         # Create a local RRef<MyScripClass> remotely in Python.
         rref = rpc.rpc_sync(dst_worker_name, owner_create_rref_my_script_class, args=(self.rank,))
-        # Use RRef<MyScripClass> remotely in Script.
-        ret = rpc.rpc_sync(
-            rref.owner(), script_run_get_value_rref_my_script_class, args=(rref,)
-        )
+
+        def use_rref_on_owner(rref):
+            # type: (RRef[MyScriptClass]) -> int
+            args = (rref,)
+            kwargs: Dict[str, Any] = {}  # noqa
+            fut = rpc.rpc_async(
+                rref.owner(), script_run_get_value_rref_my_script_class, args, kwargs
+            )
+            ret = fut.wait()
+            return ret
+
+        # Use RRef<MyScripClass> in local Python RPC and remote Script run.
+        ret = use_rref_on_owner(rref)
+        self.assertEqual(ret, self.rank)
+
+        # Use RRef<MyScriptClass> in local Script RPC and remote Script run.
+        use_rref_on_owner_script = torch.jit.script(use_rref_on_owner)
+        ret = use_rref_on_owner_script(rref)
         self.assertEqual(ret, self.rank)
 
     @dist_init
@@ -134,12 +153,25 @@ class LocalRRefTest(RpcAgentTestFixture):
 
         # Create a local RRef<MyModuleInterface> remotely in Python.
         rref = rpc.rpc_sync(dst_worker_name, owner_create_rref_my_script_module, args=(self.rank,))
-        # Use RRef<MyModuleInterface> remotely in Script.
-        ret = rpc.rpc_sync(
-            rref.owner(), script_run_forward_rref_my_script_module, args=(rref,)
-        )
+
+        def use_rref_on_owner(rref):
+            # type: (RRef[MyModuleInterface]) -> Tensor
+            args = (rref,)
+            kwargs: Dict[str, Any] = {}
+            fut = rpc.rpc_async(
+                rref.owner_name(), script_run_forward_rref_my_script_module, args, kwargs
+            )
+            ret = fut.wait()
+            return ret
+
+        # Use RRef<MyScripClass> in local Python RPC and remote Script run.
+        ret = use_rref_on_owner(rref)
         self.assertEqual(ret, torch.ones(self.rank))
 
+        # Use RRef<MyScriptClass> in local Script RPC and remote Script run.
+        use_rref_on_owner_script = torch.jit.script(use_rref_on_owner)
+        ret = use_rref_on_owner_script(rref)
+        self.assertEqual(ret, torch.ones(self.rank))
 
 def python_function():
     return 0
@@ -535,6 +567,11 @@ def rref_script_annotation(rref_var):
     return rref_python_annotation(rref_var).to_here()
 
 
+@torch.jit.script
+def script_check_rref_confirmed(rref):
+    # type: (RRef[Tensor]) -> bool
+    return rref.confirmed_by_owner()
+
 @unittest.skipIf(
     not torch._six.PY3, "Pytorch distributed rpc package does not support python2"
 )
@@ -566,6 +603,15 @@ class JitRpcTest(LocalRRefTest, JitRpcAsyncOpTest, RpcAgentTestFixture):
     def test_torchscript_functions_not_supported(self):
         dst_worker_name = worker_name((self.rank + 1) % self.world_size)
 
+        my_local_script_module = MyScriptModule(self.rank)
+
+        # It is not thread safe to instantiate MyScriptModule in multiple threads,
+        # wait for local MyScriptModule instantiation to finish,
+        # otherwise it could instantiate MyScriptModule in parallel with
+        # server thread in the below
+        initialize_pg(self.init_method, self.rank, self.world_size)
+        dist.barrier()
+
         # rpc_sync still accepts script class and run it in
         # the same code path as python call.
         ret = rpc.rpc_sync(
@@ -586,7 +632,7 @@ class JitRpcTest(LocalRRefTest, JitRpcAsyncOpTest, RpcAgentTestFixture):
             TypeError, "pickle"
         ):
             ret = rpc.rpc_async(
-                dst_worker_name, MyScriptModule(self.rank).forward, args=()
+                dst_worker_name, my_local_script_module.forward, args=()
             )
 
     @dist_init
@@ -626,7 +672,7 @@ class JitRpcTest(LocalRRefTest, JitRpcAsyncOpTest, RpcAgentTestFixture):
 
         api._ignore_rref_leak = True
 
-        local_ret = MyScriptModule(self.rank).forward() + torch.ones(self.rank)
+        local_ret = torch.ones(self.rank) + torch.ones(self.rank)
 
         n = self.rank + 1
         dst_rank = n % self.world_size
@@ -673,3 +719,34 @@ class JitRpcTest(LocalRRefTest, JitRpcAsyncOpTest, RpcAgentTestFixture):
 
         res = rref_script_annotation(rref_var)
         self.assertEqual(res, torch.ones(2, 2) + 1)
+
+
+    def _create_rref(self):
+        owner_rank = (self.rank + 2) % self.world_size
+        return rpc.remote(
+            "worker{}".format(owner_rank),
+            torch.add,
+            args=(torch.zeros(2, 2), 1)
+        )
+
+    @dist_init
+    def test_user_rrefs_confirmed(self):
+        dst_rank = (self.rank + 1) % self.world_size
+        rref = self._create_rref()
+        ret = rpc.rpc_sync(
+            "worker{}".format(dst_rank),
+            script_check_rref_confirmed,
+            args=(rref,)
+        )
+        self.assertEqual(ret, True)
+
+    @dist_init
+    def test_user_rrefs_confirmed_remote(self):
+        dst_rank = (self.rank + 1) % self.world_size
+        rref = self._create_rref()
+        ret_rref = rpc.remote(
+            "worker{}".format(dst_rank),
+            script_check_rref_confirmed,
+            args=(rref,)
+        )
+        self.assertEqual(ret_rref.to_here(), True)
