@@ -131,7 +131,7 @@ void serialize(
 template <typename DerivedOptimizerParamState, typename DerivedOptimizerParamOptions>
 void serialize(
     serialize::OutputArchive& archive,
-    const detail::OptimizerBase& optimizer) {
+    const Optimizer& optimizer) {
   archive.write("pytorch_version", IValue("1.5.0"));
   serialize::OutputArchive state_archive(archive.compilation_unit());
   detail::serialize<DerivedOptimizerParamState>(state_archive, optimizer.state());
@@ -146,7 +146,7 @@ void serialize(
 template <typename DerivedOptimizerParamState, typename DerivedOptimizerParamOptions>
 void serialize(
     serialize::InputArchive& archive,
-    detail::OptimizerBase& optimizer) {
+    Optimizer& optimizer) {
 
     IValue pytorch_version;
     archive.read("pytorch_version", pytorch_version);
