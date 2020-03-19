@@ -12,7 +12,7 @@ string(
   content
   "${content}")
 
-# Protobuf-3.7.0+ pattern
+# protobuf-3.8.0+ pattern
 string(
   REPLACE
   "::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited"
