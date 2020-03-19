@@ -371,15 +371,6 @@ inline void deprecated_AT_INDEX_ERROR() {}
 
 /*
 // Deprecation disabled until we fix sites in our codebase
-C10_DEPRECATED_MESSAGE("AT_WARN is deprecated, use TORCH_WARN instead.")
-*/
-inline void deprecated_AT_WARN() {}
-
-C10_DEPRECATED_MESSAGE("AT_CHECK is deprecated, use TORCH_CHECK instead.")
-inline void deprecated_AT_CHECK() {}
-
-/*
-// Deprecation disabled until we fix sites in our codebase
 C10_DEPRECATED_MESSAGE("AT_ASSERT is deprecated, if you mean to indicate an internal invariant failure, use " \
                        "TORCH_INTERNAL_ASSERT instead; if you mean to do user error checking, use " \
                        "TORCH_CHECK.  See https://github.com/pytorch/pytorch/issues/20287 for more details.")
@@ -395,15 +386,6 @@ C10_DEPRECATED_MESSAGE("AT_ASSERTM is deprecated, if you mean to indicate an int
 inline void deprecated_AT_ASSERTM() {}
 
 }} // namespace c10::detail
-
-// Deprecated alias; this alias was deprecated because it wasn't clear to
-// people that you should use a macro with AT_ prefix inside the torch/csrc
-// directory.  Use TORCH_CHECK instead.
-#define AT_CHECK(...)                                     \
-  do {                                                    \
-    ::c10::detail::deprecated_AT_CHECK();                 \
-    C10_EXPAND_MSVC_WORKAROUND(TORCH_CHECK(__VA_ARGS__)); \
-  } while (false)
 
 // Deprecated alias; this alias was deprecated because people kept mistakenly
 // using it for user error checking.  Use TORCH_INTERNAL_ASSERT or TORCH_CHECK
@@ -444,15 +426,5 @@ inline void deprecated_AT_ASSERTM() {}
     ::c10::detail::deprecated_AT_INDEX_ERROR();                                     \
     C10_EXPAND_MSVC_WORKAROUND(TORCH_CHECK_INDEX(false, ::c10::str(__VA_ARGS__)));  \
   } while (false)
-
-// Deprecated alias; this alias was deprecated because it wasn't clear to
-// people that you should use a macro with AT_ prefix inside the torch/csrc
-// directory.  Use TORCH_WARN instead.
-#define AT_WARN(...)                                      \
-  do {                                                    \
-    ::c10::detail::deprecated_AT_WARN();                  \
-    C10_EXPAND_MSVC_WORKAROUND(TORCH_WARN(__VA_ARGS__));  \
-  } while (false)
-
 
 #endif // C10_UTIL_EXCEPTION_H_

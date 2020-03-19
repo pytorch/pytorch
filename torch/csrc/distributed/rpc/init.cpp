@@ -120,7 +120,14 @@ PyObject* rpc_init(PyObject* /* unused */) {
           application has called a graceful shutdown. Invoking methods on a
           deleted RRef leads to undefined behaviors. RRef implementation only
           offers best-effort error detection, and applications should not use
-          ``UserRRef``s after ``rpc.shutdown()``.
+          ``UserRRefs`` after ``rpc.shutdown()``.
+
+          .. warning::
+              RRefs can only be serialized and deserialized by the RPC module.
+              Serializing and deserializing RRefs without RPC (e.g., Python
+              pickle, torch :meth:`~torch.save` / :meth:`~torch.load`,
+              JIT :meth:`~torch.jit.save` / :meth:`~torch.jit.load`, etc.) will
+              lead to errors.
 
           Example::
               Following examples skip RPC initialization and shutdown code
@@ -169,11 +176,26 @@ PyObject* rpc_init(PyObject* /* unused */) {
                   ``RRef``.
               )")
           .def(
+              "confirmed_by_owner",
+              &PyRRef::confirmedByOwner,
+              R"(
+                  Returns whether this ``RRef`` has been confirmed by the owner.
+                  ``OwnerRRef`` always returns true, while ``UserRRef`` only
+                  returns true when the owner knowns about this ``UserRRef``.
+              )")
+          .def(
               // not releasing GIL here to avoid context switch on getters
               "owner",
               &PyRRef::owner,
               R"(
                   Returns worker information of the node that owns this ``RRef``.
+              )")
+          .def(
+              // not releasing GIL here to avoid context switch on getters
+              "owner_name",
+              &PyRRef::ownerName,
+              R"(
+                  Returns worker name of the node that owns this ``RRef``.
               )")
           .def(
               "to_here",
