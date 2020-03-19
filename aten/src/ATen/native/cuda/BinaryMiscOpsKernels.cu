@@ -52,7 +52,7 @@ void fmod_scalar_kernel_cuda(TensorIterator& iter, Scalar divisor) {
   AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "fmod_scalar_cuda", [&]() {
     using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
     auto div = thrust_t(divisor.to<scalar_t>());
-    gpu_kernel_with_scalars(iter, [div]GPU_LAMBDA(thrust_t a) -> thrust_t {
+    gpu_kernel(iter, [div]GPU_LAMBDA(thrust_t a) -> thrust_t {
       return ::fmod(a, div);
     });
   });
