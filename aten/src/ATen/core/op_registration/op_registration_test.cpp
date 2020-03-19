@@ -1361,7 +1361,7 @@ TEST(NewOperatorRegistrationTest, schema) {
   auto registrar = c10::import("test")
     .def("def1(Tensor self) -> Tensor")
     .def(torch::schema("def2(Tensor self) -> Tensor"))
-    .def(torch::schema("def3(Tensor self) -> Tensor", AliasAnalysisKind::PURE_FUNCTION))
+    .def(torch::schema("def3(Tensor self) -> Tensor", c10::AliasAnalysisKind::PURE_FUNCTION))
     .def(torch::jit::parseSchema("def4(Tensor self) -> Tensor"));
 
   ASSERT_TRUE(Dispatcher::singleton().findSchema({"test::def1", ""}).has_value());
@@ -1369,21 +1369,37 @@ TEST(NewOperatorRegistrationTest, schema) {
   ASSERT_TRUE(Dispatcher::singleton().findSchema({"test::def3", ""}).has_value());
   ASSERT_TRUE(Dispatcher::singleton().findSchema({"test::def4", ""}).has_value());
 
-  EXPECT_EQ(Dispatcher::singleton().findSchema({"test::def1", ""})->schema().aliasAnalysis(), AliasAnalysisKind::FROM_SCHEMA);
-  EXPECT_EQ(Dispatcher::singleton().findSchema({"test::def2", ""})->schema().aliasAnalysis(), AliasAnalysisKind::FROM_SCHEMA);
-  EXPECT_EQ(Dispatcher::singleton().findSchema({"test::def3", ""})->schema().aliasAnalysis(), AliasAnalysisKind::PURE_FUNCTION);
+  EXPECT_EQ(Dispatcher::singleton().findSchema({"test::def1", ""})->schema().aliasAnalysis(), c10::AliasAnalysisKind::FROM_SCHEMA);
+  EXPECT_EQ(Dispatcher::singleton().findSchema({"test::def2", ""})->schema().aliasAnalysis(), c10::AliasAnalysisKind::FROM_SCHEMA);
+  EXPECT_EQ(Dispatcher::singleton().findSchema({"test::def3", ""})->schema().aliasAnalysis(), c10::AliasAnalysisKind::PURE_FUNCTION);
   ASSERT_TRUE(Dispatcher::singleton().findSchema({"test::def4", ""})->schema().isDefaultAliasAnalysisKind());
 }
 
 TEST(NewOperatorRegistrationTest, dispatch) {
+  bool cpu_called = false;
+  bool cuda_called = false;
+  bool autograd_called = false;
   auto registrar = c10::import("test")
-    .def("fn_cpu", torch::dispatch(c10::DispatchKey::CPUTensorId, [](const Tensor& x) { return x; }))
-    .def("fn_cuda", torch::dispatch(kCUDA, [](const Tensor& x) { return x; }))
-    .def("fn_autograd", torch::dispatch_autograd([](const Tensor& x) { return x; }));
+    .def("fn_cpu", torch::dispatch(c10::DispatchKey::CPUTensorId, [&](const Tensor& x) { cpu_called = true; return x; }))
+    .def("fn_cuda", torch::dispatch(c10::kCUDA, [&](const Tensor& x) { cuda_called = true; return x; }))
+    .def("fn_autograd", torch::dispatch_autograd([&](const Tensor& x) { autograd_called = true; return x; }));
 
-  auto op = Dispatcher::singleton().findSchema({"test::fn_cpu", ""});
-  ASSERT_TRUE(op.has_value());
-  callOp(*op, dummyTensor(c10::DispatchKey::CPUTensorId));
+  // TODO: It would be better if we actually tested if the operator was
+  // called but it doesn't seem like it is actually possible to do so
+
+  {
+    auto op = Dispatcher::singleton().findSchema({"test::fn_cpu", ""});
+    ASSERT_TRUE(op.has_value());
+    ASSERT_FALSE(cpu_called);
+    callOp(*op, dummyTensor(c10::DispatchKey::CPUTensorId));
+    ASSERT_TRUE(cpu_called);
+  }
+
+  {
+    auto op = Dispatcher::singleton().findSchema({"test::fn_cuda", ""});
+    ASSERT_TRUE(op.has_value());
+    callOp(*op, dummyTensor(c10::DispatchKey::CUDATensorId));
+  }
 }
 
 // Some internal tests that have to be done from C++
