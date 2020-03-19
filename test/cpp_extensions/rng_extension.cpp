@@ -8,9 +8,15 @@
 
 using namespace at;
 
+static size_t instance_count = 0;
+
 struct TestCPUGenerator : public c10::GeneratorImpl {
-  TestCPUGenerator(uint64_t value) : c10::GeneratorImpl{Device(DeviceType::CPU), DispatchKeySet(DispatchKey::CustomRNGKeyId)}, value_(value) { }
-  ~TestCPUGenerator() = default;
+  TestCPUGenerator(uint64_t value) : c10::GeneratorImpl{Device(DeviceType::CPU), DispatchKeySet(DispatchKey::CustomRNGKeyId)}, value_(value) {
+    ++instance_count;
+  }
+  ~TestCPUGenerator() {
+    --instance_count;
+  }
   uint32_t random() { return static_cast<uint32_t>(value_); }
   uint64_t random64() { return value_; }
   void set_current_seed(uint64_t seed) override { throw std::runtime_error("not implemented"); }
@@ -39,6 +45,14 @@ Generator createTestCPUGenerator(uint64_t value) {
   return at::make_generator<TestCPUGenerator>(value);
 }
 
+Generator identity(Generator g) {
+  return g;
+}
+
+size_t getInstanceCount() {
+  return instance_count;
+}
+
 static auto registry = torch::RegisterOperators()
       .op(torch::RegisterOperators::options()
         .schema("aten::random_.from(Tensor(a!) self, int from, int? to, *, Generator? generator=None) -> Tensor(a!)")
@@ -52,4 +66,6 @@ static auto registry = torch::RegisterOperators()
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("createTestCPUGenerator", &createTestCPUGenerator);
+  m.def("getInstanceCount", &getInstanceCount);
+  m.def("identity", &identity);
 }
