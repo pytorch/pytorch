@@ -134,6 +134,8 @@ std::vector<size_t> getGeneralOpTensorInputIndexes(Node* n) {
       "upsample_bilinear2d",
       "upsample_trilinear3d",
       "upsample_bicubic2d",
+      "dropout",
+      "reshape",
       // TODO: sort returns a tuple of Tensors, we have
       // to extend the API to support that
       // "sort",
@@ -141,6 +143,7 @@ std::vector<size_t> getGeneralOpTensorInputIndexes(Node* n) {
   std::vector<std::string> single_input_call_funcs = {
     "adaptive_avg_pool2d",
     "_max_pool2d",
+    "dropout",
   };
   if (isFunctionNode(
           n,
@@ -2351,6 +2354,7 @@ script::Module Finalize(script::Module& module) {
   SwapFunctionalLinear(module);
   auto graph = module.get_method("forward").graph();
   Inline(*graph);
+  ConstantPropagation(graph);
   ReplicateDeQuant(graph);
   SwapDeQuant(graph);
   InsertPrepackUnpack(graph);
