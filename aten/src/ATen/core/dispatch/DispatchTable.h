@@ -195,7 +195,7 @@ class DispatchTable final {
     return dispatchKeyExtractor_;
   }
 
-  OperatorName operatorName() const {
+  const OperatorName& operatorName() const {
     return operatorName_;
   }
 
