@@ -228,7 +228,7 @@ class TestTypePromotion(TestCase):
     def test_many_promotions(self, device):
         # Can also include half on CPU in cases where it will be promoted to a
         # supported dtype
-        complex_dtypes = get_all_complex_dtypes()
+        complex_dtypes = torch.testing.get_all_complex_dtypes()
         dtypes1 = torch.testing.get_all_math_dtypes('cuda') + complex_dtypes
         dtypes2 = torch.testing.get_all_math_dtypes(device) + complex_dtypes
         ops = [torch.add, torch.sub, torch.mul, torch.div, torch.rsub]
