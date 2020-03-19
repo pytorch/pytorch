@@ -8433,7 +8433,8 @@ a")
         self.assertFalse(test_all_tensor(torch.tensor([True, False], dtype=torch.uint8)))
 
         @torch.jit.script
-        def test_all_bool_list(x: List[bool]):
+        def test_all_bool_list(x):
+            # type: (List[bool]) -> bool
             return all(x)
         self.assertTrue(test_all_bool_list([True, True]))
         self.assertTrue(test_all_bool_list([True, 1]))
@@ -8443,13 +8444,15 @@ a")
         self.assertTrue(test_all_bool_list([]))
 
         @torch.jit.script
-        def test_all_int_list(x: List[int]):
+        def test_all_int_list(x):
+            # type: (List[int]) -> bool
             return all(x)
         self.assertTrue(test_all_int_list([3, 6]))
         self.assertFalse(test_all_int_list([2, 0]))
 
         @torch.jit.script
-        def test_all_float_list(x: List[float]):
+        def test_all_float_list(x):
+            # type: (List[float]) -> bool
             return all(x)
         self.assertTrue(test_all_float_list([3.14, 8.1]))
         self.assertFalse(test_all_float_list([3.14, 0, 8.9]))
