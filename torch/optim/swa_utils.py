@@ -6,61 +6,61 @@ from torch.optim.lr_scheduler import _LRScheduler
 
 class AveragedModel(Module):
     r"""Implements averaged model for Stochastic Weight Averaging (SWA).
-    
-	Stochastic Weight Averaging was proposed in `Averaging Weights Leads to
+
+    Stochastic Weight Averaging was proposed in `Averaging Weights Leads to
     Wider Optima and Better Generalization`_ by Pavel Izmailov, Dmitrii
     Podoprikhin, Timur Garipov, Dmitry Vetrov and Andrew Gordon Wilson
     (UAI 2018).
 
-	AveragedModel class creates a copy of the provided module :attr:`model`
-	on the device :attr:`device` and allows to compute running averages of the 
-	parameters of the :attr:`model`.
+    AveragedModel class creates a copy of the provided module :attr:`model`
+    on the device :attr:`device` and allows to compute running averages of the 
+    parameters of the :attr:`model`.
 
-	Arguments:
-		model (torch.nn.Module): model to use with SWA
-		device (torch.device, optional): if provided, the averaged model will be
-			stored on the :attr:`device` 
+    Arguments:
+        model (torch.nn.Module): model to use with SWA
+        device (torch.device, optional): if provided, the averaged model will be
+            stored on the :attr:`device` 
         avg_fn (function, optional): the averaging function used to update 
             parameters; the function must take in the current value of the 
             :class:`AveragedModel` parameter, the current value of :attr:`model`
             parameter and the number of models laready averaged; if None, 
             equally weighted average is used (default: None)
 
-	Example:
-		>>> loader, optimizer, model = ...
-		>>> swa_model = torch.optim.swa_utils.AveragedModel(model)
+    Example:
+        >>> loader, optimizer, model = ...
+        >>> swa_model = torch.optim.swa_utils.AveragedModel(model)
         >>> # You can use custom averaging functions with `avg_fun` parameter
         >>> ema_avg = lambda p_avg, p, n_avg: 0.1 * p_avg + 0.9 * p
-		>>> ema_model = torch.optim.swa_utils.AveragedModel(model, 
-		>>>										avg_function=ema_avg)
-		>>> scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, 
-		>>>										T_max=300)
-		>>> swa_start = 160
-		>>> swa_scheduler = SWALR(optimizer, start_epoch=swa_start, swa_lr=0.05)
-		>>>
-		>>> for i in range(300):
-		>>>      for input, target in loader:
-		>>>          optimizer.zero_grad()
-		>>>          loss_fn(model(input), target).backward()
-		>>>          optimizer.step()
-		>>>          scheduler.step()
-		>>>          swa_scheduler.step()
-		>>> 
-		>>>      if i > swa_start:
-		>>>          swa_model.update_parameters(model)
-		>>>
-		>>> # Update bn statistics for the swa_model at the end
-		>>> torch.optim.swa_utils.update_bn(loader, swa_model) 
+        >>> ema_model = torch.optim.swa_utils.AveragedModel(model, 
+        >>>                                     avg_function=ema_avg)
+        >>> scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, 
+        >>>                                     T_max=300)
+        >>> swa_start = 160
+        >>> swa_scheduler = SWALR(optimizer, start_epoch=swa_start, swa_lr=0.05)
+        >>>
+        >>> for i in range(300):
+        >>>      for input, target in loader:
+        >>>          optimizer.zero_grad()
+        >>>          loss_fn(model(input), target).backward()
+        >>>          optimizer.step()
+        >>>          scheduler.step()
+        >>>          swa_scheduler.step()
+        >>> 
+        >>>      if i > swa_start:
+        >>>          swa_model.update_parameters(model)
+        >>>
+        >>> # Update bn statistics for the swa_model at the end
+        >>> torch.optim.swa_utils.update_bn(loader, swa_model) 
 
-	.. note::
+    .. note::
         When using SWA with models containing Batch Normalization you may 
-		need to update the activation statistics for Batch Normalization.
+        need to update the activation statistics for Batch Normalization.
         You can do so by using :meth:`torch.optim.swa_utils.update_bn` utility.
-	
-	.. note::
+
+    .. note::
         :attr:`avg_fun` is not saved in the :meth:`state_dict` of the model.
-	
-	.. note::
+
+    .. note::
         When :meth:`update_parameters` is called for the first time (i.e. 
         :attr:`n_averaged` is `0`) the parameters of `model` are copied
         to the parameters of :class:`AveragedModel`. For every subsequent
@@ -85,9 +85,10 @@ class AveragedModel(Module):
             self.module = self.module.to(device)
         self.register_buffer('n_averaged', torch.tensor(0, dtype=torch.long))
         if avg_fun is None:
-            avg_fun = lambda p_avg, p, n_avg: p_avg + (p - p_avg) / (n_avg +1)
+            def avg_fun(p_avg, p, n_avg): 
+                return p_avg + (p - p_avg) / (n_avg + 1)
         self.avg_fun = avg_fun
-        
+
     def forward(self, *args, **kwargs):
         return self.module(*args, **kwargs)
 
@@ -102,7 +103,7 @@ class AveragedModel(Module):
                                               self.n_averaged))
         self.n_averaged += 1
 
-    
+
 def update_bn(loader, model, device=None):
     r"""Updates BatchNorm running_mean, running_var buffers in the model.
 
@@ -118,11 +119,11 @@ def update_bn(loader, model, device=None):
         device (torch.device, optional): If set, data will be trasferred to
             :attr:`device` before being passed into :attr:`model`.
 
-	Example:
-		>>> loader, model = ...
-		>>> torch.optim.swa_utils.update_bn(loader, model) 
+    Example:
+        >>> loader, model = ...
+        >>> torch.optim.swa_utils.update_bn(loader, model) 
 
-	.. note::
+    .. note::
         The `update_bn` utility assumes that each data batch in :attr:`loader`
         is either a tensor or a list or tuple of tensors; in the latter case it 
         is assumed that :meth:`model.forward()` should be called on the first 
@@ -139,7 +140,7 @@ def update_bn(loader, model, device=None):
 
     if not has_bn:
         return
-    
+
     was_training = model.training
     model.train()
     for module in momenta.keys():
@@ -164,7 +165,7 @@ class SWALR(_LRScheduler):
     r"""Sets the learning rate in each parameter group to a fixed value
     after a given number of epochs.
 
-	This learning rate scheduler is meant to be used with Stochastic Weight 
+    This learning rate scheduler is meant to be used with Stochastic Weight 
     Averaging (SWA) method (see `torch.optim.swa_utils.AveragedModel`).
 
     Arguments:
@@ -183,7 +184,7 @@ class SWALR(_LRScheduler):
         >>> base_scheduler = MultiplicativeLR(optimizer, lr_lambda=lr_lambda)
         >>> scheduler = SWALR(optimizer, start_epoch=160, swa_lr=0.05)
 
-	.. note::
+    .. note::
         :class:`SWALR` sets the same learning rate :attr:`swa_lr` for every
         `param_group` in the optimizer; it does not support individual values
         of :attr:`swa_lr` for different `param_groups`.
@@ -195,12 +196,12 @@ class SWALR(_LRScheduler):
         self.swa_lr = swa_lr
         self.start_epoch = start_epoch
         super(SWALR, self).__init__(optimizer, last_epoch)
-    
+
     def get_lr(self):
         if not self._get_lr_called_within_step:
             warnings.warn("To get the last learning rate computed by the scheduler, "
                           "please use `get_last_lr()`.", UserWarning)
-        
+
         if self.start_epoch and self._step_count > self.start_epoch:
             return [self.swa_lr for group in self.optimizer.param_groups]
         return [group['lr'] for group in self.optimizer.param_groups]
