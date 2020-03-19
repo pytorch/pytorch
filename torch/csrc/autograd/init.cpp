@@ -4,8 +4,10 @@
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/autograd/profiler.h>
+#include <torch/csrc/autograd/record_function_ops.h>
 #include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/autograd/function.h>
+#include <torch/csrc/distributed/rpc/message.h>
 
 PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   using namespace torch::autograd::profiler;
@@ -58,6 +60,13 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
 
   py::class_<RecordFunction, std::shared_ptr<RecordFunction>>(m, "_RecordFunction")
     .def(py::init<>());
+
+  m.def(
+      "_call_end_callbacks_on_fut",
+      [](const at::Tensor& handle,
+         const std::shared_ptr<torch::distributed::rpc::FutureMessage>& fut) {
+        torch::autograd::profiler::call_end_callbacks_on_fut(handle, fut);
+      });
 
   Py_RETURN_TRUE;
 }

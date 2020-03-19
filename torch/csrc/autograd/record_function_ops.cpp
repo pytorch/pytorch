@@ -1,6 +1,7 @@
 #include <ATen/cpp_custom_type_hack.h>
 #include <torch/csrc/autograd/record_function.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
+#include <torch/csrc/autograd/record_function_ops.h>
 
 namespace caffe2 {
 // Required for cpp_custom_type_hack to work
@@ -29,13 +30,17 @@ at::Tensor record_function_enter(const std::string& name) {
   return at::cpp_custom_type_hack::create(std::move(rec), at::TensorOptions());
 }
 
+RecordFunction& getRecordFunctionFromTensor(const at::Tensor& handle) {
+  auto& rec = at::cpp_custom_type_hack::cast<RecordFunction>(handle);
+  return rec;
+}
+
 void record_function_exit(const at::Tensor& handle) {
   // We don't actually need to do anything with handle just need to persist the
   // lifetime until now.
-  auto& rec = at::cpp_custom_type_hack::cast<RecordFunction>(handle);
+  auto& rec = getRecordFunctionFromTensor(handle);
   if (auto* current = RecordFunction::current()) {
-    AT_ASSERT(
-        current->name() == StringView("profiler::_record_function_exit"));
+    AT_ASSERT(current->name() == StringView("profiler::_record_function_exit"));
   }
   if (rec.active()) {
     rec.end();

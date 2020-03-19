@@ -688,6 +688,24 @@ class RpcTest(RpcAgentTestFixture):
                                      use_record_function=True)
 
     @dist_init
+    def test_async_record_function(self):
+        num_sleep_seconds = 2
+        if self.rank == 1:
+            with torch.autograd.profiler.profile() as pf:
+                with torch.autograd.profiler.record_function("foo") as rf:
+                    fut = rpc.rpc_async(worker_name(0), my_sleep_func, args=(num_sleep_seconds,))
+                    rf._call_end_callbacks_on_future(fut)
+                # Note: calling fut.wait() outside of record_function to simulate
+                # real usage and to ensure that underlying handles in record_function
+                # are correctly persisted even after python ctx manager has exited
+                fut.wait()
+            # Find recorded event and roughly validate the time.
+            events = pf.function_events
+            rpc_event = [event for event in events if "foo" in event.name][0]
+            self.assertGreaterEqual(rpc_event.cpu_time_total * 1e-6, num_sleep_seconds)
+
+
+    @dist_init
     def test_profiler_with_sync_rpc_builtin(self):
         self._profiler_test_with_rpc(
             RPCExecMode.SYNC, torch.add, args=(torch.ones(1), torch.ones(1))
