@@ -86,9 +86,7 @@ bool Message::isRequest() const {
       MessageType::BACKWARD_AUTOGRAD_REQ == type_ ||
       MessageType::FORWARD_AUTOGRAD_REQ == type_ ||
       // Cleanup Autograd context request
-      MessageType::CLEANUP_AUTOGRAD_CONTEXT_REQ == type_ ||
-      // Autograd Backward Error Notification request
-      MessageType::DIST_AUTOGRAD_FAILURE_REQ == type_;
+      MessageType::CLEANUP_AUTOGRAD_CONTEXT_REQ == type_;
 }
 
 bool Message::isResponse() const {
@@ -103,9 +101,7 @@ bool Message::isResponse() const {
       MessageType::BACKWARD_AUTOGRAD_RESP == type_ ||
       MessageType::FORWARD_AUTOGRAD_RESP == type_ ||
       // Cleanup autograd context response
-      MessageType::CLEANUP_AUTOGRAD_CONTEXT_RESP == type_ ||
-      // Autograd Backward Error Notification response
-      MessageType::DIST_AUTOGRAD_FAILURE_RESP == type_;
+      MessageType::CLEANUP_AUTOGRAD_CONTEXT_RESP == type_;
 }
 
 int64_t Message::id() const {
