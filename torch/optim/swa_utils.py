@@ -20,6 +20,7 @@ class AveragedModel(Module):
 		model (torch.nn.Module): model to use with SWA
 		device (torch.device, optional): if provided, the averaged model will be
 			stored on the :attr:`device` 
+        avg_fn (function, optional):
 
 	Example:
 		>>> loader, optimizer, model = ...

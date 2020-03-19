@@ -13,11 +13,7 @@ from torch import sparse
 from torch.optim.lr_scheduler import LambdaLR, MultiplicativeLR, StepLR, \
     MultiStepLR, ExponentialLR, CosineAnnealingLR, ReduceLROnPlateau, \
     _LRScheduler, CyclicLR, CosineAnnealingWarmRestarts, OneCycleLR
-#from torch.optim.swa_utils import AveragedModel, SWALR, update_bn
-
-import os
-os.sys.path.append("../torch/optim")
-from swa_utils import update_bn, AveragedModel, SWALR 
+from torch.optim.swa_utils import AveragedModel, SWALR, update_bn
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests, \
     skipIfRocm
 
@@ -500,18 +496,18 @@ class SchedulerTestNet(torch.nn.Module):
         return self.conv2(F.relu(self.conv1(x)))
 
 
-#class LambdaLRTestObject:
-#    def __init__(self, value):
-#        self.value = value
-#
-#    def __call__(self, epoch):
-#        return self.value * epoch
-#
-#    def __eq__(self, other):
-#        if isinstance(other, self.__class__):
-#            return self.__dict__ == other.__dict__
-#        else:
-#            return False
+class LambdaLRTestObject:
+    def __init__(self, value):
+        self.value = value
+
+    def __call__(self, epoch):
+        return self.value * epoch
+
+    def __eq__(self, other):
+        if isinstance(other, self.__class__):
+            return self.__dict__ == other.__dict__
+        else:
+            return False
 
 
 class TestLRScheduler(TestCase):
@@ -1398,65 +1394,65 @@ class TestLRScheduler(TestCase):
         schedulers = [base_scheduler, scheduler]
         self._test(schedulers, targets, epochs)
 
-#    def test_step_lr_state_dict(self):
-#        self._check_scheduler_state_dict(
-#            lambda: StepLR(self.opt, gamma=0.1, step_size=3),
-#            lambda: StepLR(self.opt, gamma=0.01 / 2, step_size=1))
-#
-#    def test_multi_step_lr_state_dict(self):
-#        self._check_scheduler_state_dict(
-#            lambda: MultiStepLR(self.opt, gamma=0.1, milestones=[2, 5, 9]),
-#            lambda: MultiStepLR(self.opt, gamma=0.01, milestones=[1, 4, 6]))
-#
-#    def test_exp_step_lr_state_dict(self):
-#        self._check_scheduler_state_dict(
-#            lambda: ExponentialLR(self.opt, gamma=0.1),
-#            lambda: ExponentialLR(self.opt, gamma=0.01))
-#
-#    def test_cosine_lr_state_dict(self):
-#        epochs = 10
-#        eta_min = 1e-10
-#        self._check_scheduler_state_dict(
-#            lambda: CosineAnnealingLR(self.opt, T_max=epochs, eta_min=eta_min),
-#            lambda: CosineAnnealingLR(self.opt, T_max=epochs // 2, eta_min=eta_min / 2),
-#            epochs=epochs)
-#
-#    def test_reduce_lr_on_plateau_state_dict(self):
-#        scheduler = ReduceLROnPlateau(self.opt, mode='min', factor=0.1, patience=2)
-#        for score in [1.0, 2.0, 3.0, 4.0, 3.0, 4.0, 5.0, 3.0, 2.0, 1.0]:
-#            scheduler.step(score)
-#        scheduler_copy = ReduceLROnPlateau(self.opt, mode='max', factor=0.5, patience=10)
-#        scheduler_copy.load_state_dict(scheduler.state_dict())
-#        for key in scheduler.__dict__.keys():
-#            if key not in {'optimizer', 'is_better'}:
-#                self.assertEqual(scheduler.__dict__[key], scheduler_copy.__dict__[key], allow_inf=True)
-#
-#    def test_lambda_lr_state_dict_fn(self):
-#        scheduler = LambdaLR(self.opt, lr_lambda=lambda x: x)
-#        state = scheduler.state_dict()
-#        self.assertIsNone(state['lr_lambdas'][0])
-#
-#        scheduler_copy = LambdaLR(self.opt, lr_lambda=lambda x: x)
-#        scheduler_copy.load_state_dict(state)
-#        for key in scheduler.__dict__.keys():
-#            if key not in {'optimizer', 'lr_lambdas'}:
-#                self.assertEqual(scheduler.__dict__[key], scheduler_copy.__dict__[key], allow_inf=True)
-#
-#    def test_lambda_lr_state_dict_obj(self):
-#        scheduler = LambdaLR(self.opt, lr_lambda=LambdaLRTestObject(10))
-#        state = scheduler.state_dict()
-#        self.assertIsNotNone(state['lr_lambdas'][0])
-#
-#        scheduler_copy = LambdaLR(self.opt, lr_lambda=LambdaLRTestObject(-1))
-#        scheduler_copy.load_state_dict(state)
-#        for key in scheduler.__dict__.keys():
-#            if key not in {'optimizer'}:
-#                self.assertEqual(scheduler.__dict__[key], scheduler_copy.__dict__[key], allow_inf=True)
-#
-#    def test_CosineAnnealingWarmRestarts_lr_state_dict(self):
-#        self._check_scheduler_state_dict(
-#            lambda: CosineAnnealingWarmRestarts(self.opt, T_0=10, T_mult=2),
-#            lambda: CosineAnnealingWarmRestarts(self.opt, T_0=100))
+    def test_step_lr_state_dict(self):
+        self._check_scheduler_state_dict(
+            lambda: StepLR(self.opt, gamma=0.1, step_size=3),
+            lambda: StepLR(self.opt, gamma=0.01 / 2, step_size=1))
+
+    def test_multi_step_lr_state_dict(self):
+        self._check_scheduler_state_dict(
+            lambda: MultiStepLR(self.opt, gamma=0.1, milestones=[2, 5, 9]),
+            lambda: MultiStepLR(self.opt, gamma=0.01, milestones=[1, 4, 6]))
+
+    def test_exp_step_lr_state_dict(self):
+        self._check_scheduler_state_dict(
+            lambda: ExponentialLR(self.opt, gamma=0.1),
+            lambda: ExponentialLR(self.opt, gamma=0.01))
+
+    def test_cosine_lr_state_dict(self):
+        epochs = 10
+        eta_min = 1e-10
+        self._check_scheduler_state_dict(
+            lambda: CosineAnnealingLR(self.opt, T_max=epochs, eta_min=eta_min),
+            lambda: CosineAnnealingLR(self.opt, T_max=epochs // 2, eta_min=eta_min / 2),
+            epochs=epochs)
+
+    def test_reduce_lr_on_plateau_state_dict(self):
+        scheduler = ReduceLROnPlateau(self.opt, mode='min', factor=0.1, patience=2)
+        for score in [1.0, 2.0, 3.0, 4.0, 3.0, 4.0, 5.0, 3.0, 2.0, 1.0]:
+            scheduler.step(score)
+        scheduler_copy = ReduceLROnPlateau(self.opt, mode='max', factor=0.5, patience=10)
+        scheduler_copy.load_state_dict(scheduler.state_dict())
+        for key in scheduler.__dict__.keys():
+            if key not in {'optimizer', 'is_better'}:
+                self.assertEqual(scheduler.__dict__[key], scheduler_copy.__dict__[key], allow_inf=True)
+
+    def test_lambda_lr_state_dict_fn(self):
+        scheduler = LambdaLR(self.opt, lr_lambda=lambda x: x)
+        state = scheduler.state_dict()
+        self.assertIsNone(state['lr_lambdas'][0])
+
+        scheduler_copy = LambdaLR(self.opt, lr_lambda=lambda x: x)
+        scheduler_copy.load_state_dict(state)
+        for key in scheduler.__dict__.keys():
+            if key not in {'optimizer', 'lr_lambdas'}:
+                self.assertEqual(scheduler.__dict__[key], scheduler_copy.__dict__[key], allow_inf=True)
+
+    def test_lambda_lr_state_dict_obj(self):
+        scheduler = LambdaLR(self.opt, lr_lambda=LambdaLRTestObject(10))
+        state = scheduler.state_dict()
+        self.assertIsNotNone(state['lr_lambdas'][0])
+
+        scheduler_copy = LambdaLR(self.opt, lr_lambda=LambdaLRTestObject(-1))
+        scheduler_copy.load_state_dict(state)
+        for key in scheduler.__dict__.keys():
+            if key not in {'optimizer'}:
+                self.assertEqual(scheduler.__dict__[key], scheduler_copy.__dict__[key], allow_inf=True)
+
+    def test_CosineAnnealingWarmRestarts_lr_state_dict(self):
+        self._check_scheduler_state_dict(
+            lambda: CosineAnnealingWarmRestarts(self.opt, T_0=10, T_mult=2),
+            lambda: CosineAnnealingWarmRestarts(self.opt, T_0=100))
 
     def test_swa_lr_state_dict(self):
         self._check_scheduler_state_dict(
@@ -1583,28 +1579,28 @@ class TestLRScheduler(TestCase):
                             batch_num, momentum_target[batch_num], param_group['momentum']), delta=1e-5)
             scheduler.step()
 
-#    def test_cosine_then_cyclic(self):
-#        # https://github.com/pytorch/pytorch/issues/21965
-#
-#        max_lr = 0.3
-#        base_lr = 0.1
-#        optim_lr = 0.5
-#
-#        model = torch.nn.Linear(2, 1)
-#        optimizer = torch.optim.SGD(model.parameters(), lr=optim_lr)
-#        lr_scheduler_1 = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=20, eta_min=0.1)
-#        lr_scheduler_2 = torch.optim.lr_scheduler.CyclicLR(
-#            optimizer, base_lr=base_lr, max_lr=max_lr, step_size_up=1, step_size_down=3
-#        )
-#
-#        for i in range(40):
-#            if i <= lr_scheduler_1.T_max:
-#                lr_scheduler_1.step()
-#            else:
-#                lr_scheduler_2.step()
-#            last_lr = optimizer.param_groups[0]["lr"]
-#
-#        self.assertLessEqual(last_lr, max_lr)
+    def test_cosine_then_cyclic(self):
+        # https://github.com/pytorch/pytorch/issues/21965
+
+        max_lr = 0.3
+        base_lr = 0.1
+        optim_lr = 0.5
+
+        model = torch.nn.Linear(2, 1)
+        optimizer = torch.optim.SGD(model.parameters(), lr=optim_lr)
+        lr_scheduler_1 = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=20, eta_min=0.1)
+        lr_scheduler_2 = torch.optim.lr_scheduler.CyclicLR(
+            optimizer, base_lr=base_lr, max_lr=max_lr, step_size_up=1, step_size_down=3
+        )
+
+        for i in range(40):
+            if i <= lr_scheduler_1.T_max:
+                lr_scheduler_1.step()
+            else:
+                lr_scheduler_2.step()
+            last_lr = optimizer.param_groups[0]["lr"]
+
+        self.assertLessEqual(last_lr, max_lr)
 
 
 class SWATestDNN(torch.nn.Module):
