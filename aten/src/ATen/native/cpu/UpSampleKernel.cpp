@@ -365,7 +365,6 @@ void upsample_nearest3d_kernel_impl(
       cpu_upsample_nearest<scalar_t, scale_t>(output, input, {scales_d, scales_h, scales_w});
     });
   }
-  });
 }
 
 void upsample_nearest1d_backward_kernel_impl(
