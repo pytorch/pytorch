@@ -1306,10 +1306,38 @@
     CPU: floor_out
     CUDA: floor_out
 
-- func: floor_divide(Tensor input, Tensor other) -> Tensor
+- func: floor_divide(Tensor self, Tensor other) -> Tensor
+  variants: function, method
+  dispatch:
+    CPU: floor_divide
+    CUDA: floor_divide
+    SparseCPU: floor_divide_sparse
+    SparseCUDA: floor_divide_sparse
   supports_named_tensor: True
 
-- func: floor_divide.Scalar(Tensor input, Scalar other) -> Tensor
+- func: floor_divide_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  variants: method
+  dispatch:
+    CPU: floor_divide_
+    CUDA: floor_divide_
+    SparseCPU: floor_divide_sparse_
+    SparseCUDA: floor_divide_sparse_
+  supports_named_tensor: True
+
+- func: floor_divide.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: floor_divide_out
+    CUDA: floor_divide_out
+    SparseCPU: floor_divide_out_sparse_zerodim
+    SparseCUDA: floor_divide_out_sparse_zerodim
+  supports_named_tensor: True
+
+- func: floor_divide.Scalar(Tensor self, Scalar other) -> Tensor
+  variants: function, method
+  supports_named_tensor: True
+
+- func: floor_divide_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  variants: method
   supports_named_tensor: True
 
 - func: frac(Tensor self) -> Tensor
@@ -5580,6 +5608,20 @@
   dispatch:
     CPU: glu_backward
     CUDA: legacy::cuda::_thnn_glu_backward
+
+- func: hardsigmoid.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: nn
+
+- func: hardsigmoid(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  python_module: nn
+
+- func: hardsigmoid_(Tensor(a!) self) -> Tensor(a!)
+  python_module: nn
+
+- func: hardsigmoid_backward(Tensor grad_output, Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  python_module: nn
 
 - func: hardtanh.out(Tensor self, Scalar min_val=-1, Scalar max_val=1, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn

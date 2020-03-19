@@ -7367,18 +7367,19 @@ class TestNN(NNTestCase):
         self.assertEqual(out_t_9[:, :, :15], out_t_5)
 
     def test_upsamplingNearest2d(self):
-        m = nn.Upsample(size=4, mode='nearest')
-        in_t = torch.ones(1, 1, 2, 2)
-        with warnings.catch_warnings(record=True) as w:
-            out_t = m(in_t)
-        self.assertEqual(torch.ones(1, 1, 4, 4), out_t.data)
+        for memory_format in [torch.contiguous_format, torch.channels_last]:
+            m = nn.Upsample(size=4, mode='nearest')
+            in_t = torch.ones(1, 1, 2, 2).contiguous(memory_format=memory_format)
+            with warnings.catch_warnings(record=True) as w:
+                out_t = m(in_t)
+            self.assertEqual(torch.ones(1, 1, 4, 4).contiguous(memory_format=memory_format), out_t.data)
 
-        input = torch.randn(1, 1, 2, 2, requires_grad=True)
-        self.assertEqual(
-            F.interpolate(input, 4, mode='nearest'),
-            F.interpolate(input, scale_factor=2, mode='nearest'))
-        gradcheck(lambda x: F.interpolate(x, 4, mode='nearest'), [input])
-        gradgradcheck(lambda x: F.interpolate(x, 4, mode='nearest'), [input])
+            input = torch.randn(1, 1, 2, 2, requires_grad=True).contiguous(memory_format=memory_format)
+            self.assertEqual(
+                F.interpolate(input, 4, mode='nearest'),
+                F.interpolate(input, scale_factor=2, mode='nearest'))
+            gradcheck(lambda x: F.interpolate(x, 4, mode='nearest'), [input])
+            gradgradcheck(lambda x: F.interpolate(x, 4, mode='nearest'), [input])
 
     def test_upsamplingBilinear2d(self):
         for align_corners in [True, False]:
@@ -7486,14 +7487,15 @@ class TestNN(NNTestCase):
         self.assertEqual(out_t_9[:, :, :15, :15], out_t_5)
 
     def test_upsamplingNearest3d(self):
-        m = nn.Upsample(size=4, mode='nearest')
-        in_t = torch.ones(1, 1, 2, 2, 2)
-        with warnings.catch_warnings(record=True) as w:
-            out_t = m(in_t)
-        self.assertEqual(torch.ones(1, 1, 4, 4, 4), out_t.data)
+        for memory_format in [torch.contiguous_format, torch.channels_last_3d]:
+            m = nn.Upsample(size=4, mode='nearest')
+            in_t = torch.ones(1, 1, 2, 2, 2).contiguous(memory_format=memory_format)
+            with warnings.catch_warnings(record=True) as w:
+                out_t = m(in_t)
+            self.assertEqual(torch.ones(1, 1, 4, 4, 4).contiguous(memory_format=memory_format), out_t.data)
 
-        input = torch.randn(1, 1, 2, 2, 2, requires_grad=True)
-        gradcheck(lambda x: F.interpolate(x, 4, mode='nearest'), [input])
+            input = torch.randn(1, 1, 2, 2, 2, requires_grad=True).contiguous(memory_format=memory_format)
+            gradcheck(lambda x: F.interpolate(x, 4, mode='nearest'), [input])
 
     def test_upsamplingTrilinear3d(self):
         for align_corners in [True, False]:
@@ -8291,10 +8293,10 @@ class TestNNInit(TestCase):
             input_tensor, output_tensor = input_var.data, output_var.data  # Variables do not support nonzero
             for g in range(groups):
                 # Assert in_c outputs are preserved (per each group)
-                self.assertEqual(input_tensor[:, :, 1:-1], 
-                                 output_tensor[:, eff_out_c * g:eff_out_c * g + in_c, :])  
+                self.assertEqual(input_tensor[:, :, 1:-1],
+                                 output_tensor[:, eff_out_c * g:eff_out_c * g + in_c, :])
                 # Assert extra outputs are 0
-                assert torch.nonzero(output_tensor[:, eff_out_c * g + in_c:eff_out_c * (g + 1), :]).numel() == 0  
+                assert torch.nonzero(output_tensor[:, eff_out_c * g + in_c:eff_out_c * (g + 1), :]).numel() == 0
 
             # Test 2D
             input_var = torch.randn(batch, in_c, size, size)
@@ -8305,10 +8307,10 @@ class TestNNInit(TestCase):
             input_tensor, output_tensor = input_var.data, output_var.data  # Variables do not support nonzero
             for g in range(groups):
                 # Assert in_c outputs are preserved (per each group)
-                self.assertEqual(input_tensor[:, :, 1:-1, 1:-1], 
-                                 output_tensor[:, eff_out_c * g:eff_out_c * g + in_c, :, :])  
+                self.assertEqual(input_tensor[:, :, 1:-1, 1:-1],
+                                 output_tensor[:, eff_out_c * g:eff_out_c * g + in_c, :, :])
                 # Assert extra outputs are 0
-                assert torch.nonzero(output_tensor[:, eff_out_c * g + in_c:eff_out_c * (g + 1), :, :]).numel() == 0  
+                assert torch.nonzero(output_tensor[:, eff_out_c * g + in_c:eff_out_c * (g + 1), :, :]).numel() == 0
 
             # Test 3D
             input_var = torch.randn(batch, in_c, size, size, size)
@@ -8319,10 +8321,10 @@ class TestNNInit(TestCase):
             input_tensor, output_tensor = input_var.data, output_var.data
             for g in range(groups):
                 # Assert in_c outputs are preserved (per each group)
-                self.assertEqual(input_tensor[:, :, 1:-1, 1:-1, 1:-1], 
-                                 output_tensor[:, eff_out_c * g:eff_out_c * g + in_c, :, :, :])  
+                self.assertEqual(input_tensor[:, :, 1:-1, 1:-1, 1:-1],
+                                 output_tensor[:, eff_out_c * g:eff_out_c * g + in_c, :, :, :])
                 # Assert extra outputs are 0
-                assert torch.nonzero(output_tensor[:, eff_out_c * g + in_c:eff_out_c * (g + 1), :, :, :]).numel() == 0  
+                assert torch.nonzero(output_tensor[:, eff_out_c * g + in_c:eff_out_c * (g + 1), :, :, :]).numel() == 0
 
     def test_dirac_only_works_on_3_4_5d_inputs(self):
         for dims in [1, 2, 6]:
@@ -9364,19 +9366,21 @@ class TestNNDeviceType(NNTestCase):
         test('threshold', 3, 2)
         test('threshold', 3, 2, inplace=True)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @onlyCUDA
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
-    @dtypes(torch.float, torch.double)
-    def test_max_pool2d_nhwc(self, device, dtypes):
-        def helper(n, c, h, w, kernel_size):
-            input = torch.randn(n, c, h, w, dtype=dtypes, device="cuda")
+    def test_max_pool2d_nhwc(self, device, dtype):
+        def helper(n, c, h, w, kernel_size, stride=None):
+            if stride is None:
+                stride = kernel_size
+            input = torch.randn(n, c, h, w, dtype=dtype, device=device)
             input = input.contiguous(memory_format=torch.channels_last).requires_grad_()
-            grad = torch.randn(n, c, h // kernel_size, w // kernel_size, dtype=dtypes, device="cuda")
-            pool = torch.nn.MaxPool2d(kernel_size).cuda()
+            grad = torch.randn(n, c, (h - kernel_size) // stride + 1, (w - kernel_size) // stride + 1,
+                               dtype=dtype, device=device)
+            pool = torch.nn.MaxPool2d(kernel_size, stride).to(device)
 
             ref_input = input.detach().clone().contiguous().requires_grad_(True)
             ref_grad = grad.detach().clone().contiguous()
-            ref_pool = torch.nn.MaxPool2d(kernel_size).cuda()
+            ref_pool = torch.nn.MaxPool2d(kernel_size, stride).to(device)
 
             out = pool(input)
             out.backward(grad)
@@ -9390,6 +9394,9 @@ class TestNNDeviceType(NNTestCase):
 
         helper(4, 8, 8, 8, 7)
         helper(200, 512, 28, 28, 2)
+        helper(4, 8, 7, 7, 3, stride=1)
+        helper(10, 512, 31, 31, 3, stride=2)
+        helper(1, 129, 8, 8, 3, stride=2)
 
     def test_embedding_dense_grad(self, device):
         embd = nn.Embedding(20, 20).to(device)
@@ -10783,7 +10790,7 @@ class TestNNDeviceType(NNTestCase):
     def test_softmax_bfloat16(self, device):
         self._test_bfloat16_ops(torch.nn.Softmax(dim=1), device, inp_dims=(16, 32), prec=1e-2)
 
-    @onlyCUDA    
+    @onlyCUDA
     @skipCUDAIfRocm
     @skipCUDAIfCudnnVersionLessThan(7603)
     def test_conv_cudnn_nhwc(self, device):

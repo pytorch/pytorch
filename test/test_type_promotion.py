@@ -447,6 +447,7 @@ class TestTypePromotion(TestCase):
         casting_result = dividend.to(torch.get_default_dtype()) / divisor.to(torch.get_default_dtype())
         self.assertEqual(casting_result, torch.true_divide(dividend, divisor))
 
+    @onlyOnCPUAndCUDA
     @dtypes(torch.bool, torch.short, torch.uint8, torch.int, torch.long)
     def test_true_divide_out(self, device, dtype):
         dividend = torch.randn(5, device=device).to(dtype)
@@ -592,6 +593,28 @@ class TestTypePromotion(TestCase):
         dividend_sparse = dividend.to_sparse()
         casting_result = dividend.to(torch.get_default_dtype()) / 2
         self.assertEqual(casting_result, torch.true_divide(dividend_sparse, 2).to_dense())
+
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64)
+    def test_integer_div_deprecated(self, device, dtype):
+        a = torch.tensor(1, device=device, dtype=dtype)
+        b = torch.tensor(1, device=device, dtype=dtype)
+        o = torch.empty(1, device=device, dtype=dtype)
+
+        # Tests div (including /) deprecation
+        with self.maybeWarnsRegex(UserWarning, '^Integer division.+is deprecated.+'):
+            c = a / b
+        with self.maybeWarnsRegex(UserWarning, '^Integer division.+is deprecated.+'):
+            c = torch.div(a, b)
+        with self.maybeWarnsRegex(UserWarning, '^Integer division.+is deprecated.+'):
+            torch.div(a, b, out=o)
+
+        # Tests addcdiv deprecation
+        with self.maybeWarnsRegex(UserWarning, '^Integer division.+is deprecated.+'):
+            torch.addcdiv(a, b, b)
+        with self.maybeWarnsRegex(UserWarning, '^Integer division.+is deprecated.+'):
+            torch.addcdiv(a, b, b, out=o)
+
 
 
 instantiate_device_type_tests(TestTypePromotion, globals())
