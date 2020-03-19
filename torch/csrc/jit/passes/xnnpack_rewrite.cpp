@@ -125,7 +125,7 @@ void insertPrePackedOps(std::shared_ptr<Graph>& graph) {
       "XNNPACK is not enabled. Please build with USE_XNNPACK=1");
 }
 
-void insertPrePackOps(script::Module& module) {
+void insertPrePackedOps(script::Module& module) {
   TORCH_INTERNAL_ASSERT(
       "XNNPACK is not enabled. Please build with USE_XNNPACK=1");
 }
