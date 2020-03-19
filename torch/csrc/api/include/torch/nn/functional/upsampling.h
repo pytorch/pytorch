@@ -9,6 +9,7 @@ namespace torch {
 namespace nn {
 namespace functional {
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor interpolate(
   const Tensor& input,
@@ -108,7 +109,19 @@ inline Tensor interpolate(
   }
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.interpolate
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::InterpolateFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::interpolate(input, F::InterpolateFuncOptions().size({4}).mode(torch::kNearest));
+/// ```
 inline Tensor interpolate(const Tensor& input, const InterpolateFuncOptions& options = {}) {
   return detail::interpolate(
     input,
