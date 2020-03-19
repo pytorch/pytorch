@@ -229,8 +229,6 @@ struct RangeEventList {
 
 TORCH_API RangeEventList& getEventList();
 TORCH_API void mark(std::string name, bool include_cuda = true);
-TORCH_API void pushRange(std::string name);
-TORCH_API void popRange();
 
 using thread_event_lists = std::vector<std::vector<Event>>;
 // NOTE: changing profiler modes is **NOT THREAD SAFE**. You should ensure that
