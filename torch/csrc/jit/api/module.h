@@ -96,13 +96,13 @@ struct TORCH_API Module : public Object {
   ~Module() {}
 
   void set_optimized(bool o) {
-    AT_WARN(
+    TORCH_WARN(
         "Module::set_optimized() is deprecated and has no effect. "
         "Please use setGraphExecutorOptimize()");
   }
 
   bool is_optimized() const {
-    AT_WARN(
+    TORCH_WARN(
         "Module::is_optimized() is deprecated and always returns true. "
         "Please use getGraphExecutorOptimize()");
     return true;
@@ -557,6 +557,7 @@ namespace script {
 // We once had a `script::` namespace that was deleted. This is for backcompat
 // of the public API; new code should not use this type alias.
 using Module = ::torch::jit::Module;
+using ExtraFilesMap = ::torch::jit::ExtraFilesMap;
 }
 
 } // namespace jit

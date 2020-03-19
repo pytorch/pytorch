@@ -109,7 +109,8 @@ void check_exact_values(
     auto loss = output.sum();
     loss.backward();
 
-    optimizer.step();
+    auto closure = []() { return torch::tensor({10}); };
+    optimizer.step(closure);
 
     if (i % kSampleEvery == 0) {
       ASSERT_TRUE(
@@ -168,7 +169,7 @@ TEST(OptimTest, OptimizerAccessors) {
 TEST(OptimTest, BasicInterface) {
   struct MyOptimizer : Optimizer {
     using Optimizer::Optimizer;
-    void step() override {}
+    torch::Tensor step(LossClosure closure = nullptr) override { return {};}
   };
   std::vector<torch::Tensor> parameters = {
       torch::ones({2, 3}), torch::zeros({2, 3}), torch::rand({2, 3})};
@@ -299,6 +300,18 @@ TEST(OptimTest, ProducesPyTorchValues_SGDWithWeightDecayAndNesterovMomentum) {
   check_exact_values<SGD>(
       SGDOptions(0.1).weight_decay(1e-6).momentum(0.9).nesterov(true),
       expected_parameters::SGD_with_weight_decay_and_nesterov_momentum());
+}
+
+TEST(OptimTest, ProducesPyTorchValues_LBFGS) {
+  check_exact_values<LBFGS>(
+      LBFGSOptions(1.0),
+      expected_parameters::LBFGS());
+}
+
+TEST(OptimTest, ProducesPyTorchValues_LBFGS_with_line_search) {
+  check_exact_values<LBFGS>(
+      LBFGSOptions(1.0).line_search_fn("strong_wolfe"),
+      expected_parameters::LBFGS_with_line_search());
 }
 
 TEST(OptimTest, ZeroGrad) {
