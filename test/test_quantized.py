@@ -1369,13 +1369,10 @@ class TestQuantizedOps(TestCase):
                                               min_side=1, max_side=32),
                        qparams=hu.qparams()),
            Y_scale=st.floats(0.2, 2.6),
-           Y_zero_point=st.integers(0, 5),
-           qengine=st.sampled_from(("qnnpack", "fbgemm")))
-    def test_batch_norm(self, X, Y_scale, Y_zero_point, qengine):
-        if qengine not in torch.backends.quantized.supported_engines:
-            return
+           Y_zero_point=st.integers(0, 5))
+    def test_batch_norm(self, X, Y_scale, Y_zero_point):
 
-        with override_quantized_engine(qengine):
+        with override_quantized_engine("fbgemm"):
             X, (scale_x, zero_point_x, dtype_x) = X
 
             X = torch.from_numpy(X)
@@ -1398,13 +1395,10 @@ class TestQuantizedOps(TestCase):
                                               min_side=1, max_side=32),
                        qparams=hu.qparams()),
            Y_scale=st.floats(0.2, 2.6),
-           Y_zero_point=st.integers(0, 5),
-           qengine=st.sampled_from(("qnnpack", "fbgemm")))
-    def test_batch_norm_relu(self, X, Y_scale, Y_zero_point, qengine):
-        if qengine not in torch.backends.quantized.supported_engines:
-            return
+           Y_zero_point=st.integers(0, 5))
+    def test_batch_norm_relu(self, X, Y_scale, Y_zero_point):
 
-        with override_quantized_engine(qengine):
+        with override_quantized_engine("fbgemm"):
             X, (scale_x, zero_point_x, dtype_x) = X
 
             X = torch.from_numpy(X)
@@ -1434,13 +1428,10 @@ class TestQuantizedOps(TestCase):
                                               min_side=1, max_side=32),
                        qparams=hu.qparams()),
            Y_scale=st.floats(0.2, 2.6),
-           Y_zero_point=st.integers(0, 5),
-           qengine=st.sampled_from(("qnnpack", "fbgemm")))
-    def test_batch_norm3d(self, X, Y_scale, Y_zero_point, qengine):
-        if qengine not in torch.backends.quantized.supported_engines:
-            return
+           Y_zero_point=st.integers(0, 5))
+    def test_batch_norm3d(self, X, Y_scale, Y_zero_point):
 
-        with override_quantized_engine(qengine):
+        with override_quantized_engine("fbgemm"):
             X, (scale_x, zero_point_x, dtype_x) = X
 
             X = torch.from_numpy(X)
