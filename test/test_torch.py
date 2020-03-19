@@ -6568,11 +6568,19 @@ class TestTorchDeviceType(TestCase):
     @onlyCUDA
     @deviceCountAtLeast(2)
     def test_cat_different_devices(self, devices):
-        t1 = torch.randn((3, 3), device=devices[0])
-        t2 = torch.randn((3, 3), device=devices[1])
+        cuda0 = torch.randn((3, 3), device=devices[0])
+        cuda1 = torch.randn((3, 3), device=devices[1])
         with self.assertRaisesRegex(RuntimeError,
                                     "input tensors must be on the same device"):
-            torch.cat((t1, t2))
+            torch.cat((cuda0, cuda1))
+        cpu = torch.randn(3, 3)
+        with self.assertRaisesRegex(RuntimeError,
+                                    "input tensors must be on the same device"):
+            torch.cat((cuda0, cpu))
+        with self.assertRaisesRegex(RuntimeError,
+                                    "input tensors must be on the same device"):
+            torch.cat((cpu, cuda0))
+
 
     def test_is_set_to(self, device):
         t1 = torch.empty(3, 4, 9, 10, device=device)
