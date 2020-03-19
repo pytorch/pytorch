@@ -14,6 +14,7 @@ from .stubs import QuantStub, DeQuantStub
 DEFAULT_MODULE_MAPPING = {
     nn.Linear: nnq.Linear,
     nn.ReLU: nnq.ReLU,
+    nn.GELU: nnq.GELU,
     nn.ReLU6: nnq.ReLU6,
     nn.Conv2d: nnq.Conv2d,
     nn.Conv3d: nnq.Conv3d,
@@ -52,10 +53,6 @@ DEFAULT_DYNAMIC_MODULE_MAPPING = {
     nn.LSTM: nnqd.LSTM,
 }
 
-# Whitelist for propagating the qconfig
-_EXCLUDE_QCONFIG_PROPAGATE_LIST = {
-    DeQuantStub,
-}
 _INCLUDE_QCONFIG_PROPAGATE_LIST = {
     nn.Sequential,
 }
@@ -64,6 +61,5 @@ DEFAULT_QCONFIG_PROPAGATE_WHITE_LIST = (
     (set(DEFAULT_MODULE_MAPPING.keys()) |
      set(DEFAULT_QAT_MODULE_MAPPING.keys()) |
      set(DEFAULT_DYNAMIC_MODULE_MAPPING.keys()) |
-     _INCLUDE_QCONFIG_PROPAGATE_LIST) -
-    _EXCLUDE_QCONFIG_PROPAGATE_LIST
+     _INCLUDE_QCONFIG_PROPAGATE_LIST)
 )

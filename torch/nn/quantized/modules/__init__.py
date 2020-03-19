@@ -3,7 +3,7 @@
 import torch
 from torch.nn.modules.pooling import MaxPool2d
 
-from .activation import ReLU, ReLU6
+from .activation import ReLU, ReLU6, GELU
 from .batchnorm import BatchNorm2d
 from .conv import Conv2d, Conv3d
 from .linear import Linear
@@ -69,13 +69,28 @@ class DeQuantize(torch.nn.Module):
 
     def __init__(self):
         super(DeQuantize, self).__init__()
-
+        self.scale = 1.0
+        self.zero_point = 0
+        self.register_buffer("dequantize_lut", torch.zeros([256]))
+        self.lut_validate = False
     def forward(self, Xq):
-        return Xq.dequantize()
-
+        #return Xq.dequantize()
+        if not self.lut_validate:
+           mapping_table=[]
+           act_scale = Xq.q_scale()
+           act_zp = Xq.q_zero_point()
+           for i in range(0, 256):
+             self.dequantize_lut[i] = (i - act_zp) * act_scale
+           self.lut_validate = True
+        return torch.quantized_elmentwise_helper(Xq, self.dequantize_lut, self.scale, self.zero_point, True)
     @staticmethod
     def from_float(mod):
-        return DeQuantize()
+        activation_post_process = mod.activation_post_process
+        act_scale, act_zp = activation_post_process.calculate_qparams()
+        dequant = DeQuantize()
+        dequant.scale = float(act_scale)
+        dequant.zero_point = int(act_zp)
+        return  dequant
 
 __all__ = [
     'BatchNorm2d',
@@ -87,6 +102,7 @@ __all__ = [
     'Quantize',
     'ReLU',
     'ReLU6',
+    "GELU",
     # Wrapper modules
     'FloatFunctional',
     'QFunctional',
