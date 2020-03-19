@@ -56,6 +56,8 @@ class class_ {
   /// you pass in "MyStack" here, the class will appear as
   /// `torch.classes.MyStack` in both Python and TorchScript.
   explicit class_(const std::string& namespaceName, const std::string& className) {
+    detail::checkValidIdent(namespaceName, "Namespace name");
+    detail::checkValidIdent(className, "Class name");
     qualClassName = std::string("__torch__.torch.classes.") + namespaceName + "." + className;
 
     classTypePtr = at::ClassType::create(
