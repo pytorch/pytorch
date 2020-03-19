@@ -43,7 +43,8 @@ void searchsorted_generic_template(
   }
 }
 
-bool dims_matched_before_last_dim(const Tensor& boundaries, const Tensor& input) {
+
+inline bool searchsorted_dims_matched_before_last_dim(const Tensor& boundaries, const Tensor& input) {
   if (boundaries.dim() != input.dim()) {
     return false;
   }
@@ -58,7 +59,7 @@ bool dims_matched_before_last_dim(const Tensor& boundaries, const Tensor& input)
   return true;
 }
 
-void searchsorted_pre_check(const Tensor& boundaries, const Tensor& input, const Tensor& output, bool out_int32) {
+inline void searchsorted_pre_check(const Tensor& boundaries, const Tensor& input, const Tensor& output, bool out_int32) {
   TORCH_CHECK(boundaries.device() == input.device(), "boundaries and input value tensors should have same device type, ",
     "but we got boundaries tensor device type ", boundaries.device(), " and input value tensor device type ", input.device());
 
@@ -68,7 +69,7 @@ void searchsorted_pre_check(const Tensor& boundaries, const Tensor& input, const
   TORCH_CHECK(boundaries.dim() != 0 && input.dim() != 0, "boundaries and input value tensors should have positive dimensions, ",
     "but we got boundaries tensor dim(", boundaries.dim(), "), and input value tensor dim(", input.dim(), ")");
 
-  TORCH_CHECK(boundaries.dim() == 1 || dims_matched_before_last_dim(boundaries, input),
+  TORCH_CHECK(boundaries.dim() == 1 || searchsorted_dims_matched_before_last_dim(boundaries, input),
     "boundaries tensor should be 1 dimension or the first N-1 dimensions of boundaries tensor and input value tensor ",
     "must match, but we got boundaries tensor ", boundaries.sizes(), " and input value tensor ", input.sizes());
 
