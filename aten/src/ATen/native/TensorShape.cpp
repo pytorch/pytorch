@@ -375,9 +375,18 @@ static Tensor cat_sparse(TensorList tensors, int64_t dim) {
 }
 
 Tensor cat(TensorList tensors, int64_t dim) {
-  for (size_t i = 0; i < tensors.size()-1; ++i) {
-    TORCH_CHECK(tensors[i].dtype() == tensors[i+1].dtype(), "cat expects all tensors to have the same dtype");
+  std::vector<Tensor> temp_promote;
+  if (tensors.size() > 1) { 
+    ScalarType high_type = tensors[0].scalar_type();
+    for (size_t i = 1; i < tensors.size(); ++i) {
+      high_type = promoteTypes(high_type, tensors[i].scalar_type());
+    }
+    temp_promote.reserve(tensors.size());
+    for (size_t i = 0; i < tensors.size(); ++i) {
+      temp_promote.push_back(tensors[i].toType(high_type));
+    }
   }
+  tensors = TensorList(temp_promote.data(), temp_promote.size());
 
   if (tensors.size() > 0 &&
         tensors[0].is_sparse()) {
