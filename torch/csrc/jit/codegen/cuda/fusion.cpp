@@ -124,9 +124,7 @@ bool Fusion::inFusion(const Statement* stmt) const {
 void Fusion::assertInFusion(const Statement* stmt, const std::string& msg) const {
   if (inFusion(stmt))
     return;
-  std::stringstream errmsg;
-  errmsg << msg << " it was not found in the active fusion.";
-  TORCH_CHECK(false, errmsg.str());
+  TORCH_CHECK(false, msg, " it was not found in the active fusion.");
 }
 
 std::vector<Expr*> Fusion::exprs(bool from_outputs_only, bool breadth_first) {
@@ -148,9 +146,7 @@ void Fusion::print() {
 StmtNameType Fusion::registerVal(Val* val) {
   if (val->fusion()) {
     if (val->fusion() != this) {
-      std::stringstream ss;
-      ss << val << " was not found in the active fusion.";
-      TORCH_CHECK(false, ss.str());
+      TORCH_CHECK(false, val, " was not found in the active fusion.");
     }
     if (inFusion(val)) {
       return val->name();
@@ -163,9 +159,7 @@ StmtNameType Fusion::registerVal(Val* val) {
 StmtNameType Fusion::registerExpr(Expr* expr) {
   if (expr->fusion()) {
     if (expr->fusion() != this) {
-      std::stringstream ss;
-      ss << expr << " was not found in the active fusion.";
-      TORCH_CHECK(false, ss.str());
+      TORCH_CHECK(false, expr, " was not found in the active fusion.");
     }
     if (inFusion(expr)) {
       return expr->name();

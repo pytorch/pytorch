@@ -2,8 +2,6 @@
 #include <torch/csrc/jit/codegen/cuda/iriostream.h>
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
 
-#include <sstream>
-
 namespace torch {
 namespace jit {
 namespace fuser {

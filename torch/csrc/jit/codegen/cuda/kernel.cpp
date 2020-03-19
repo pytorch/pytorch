@@ -128,9 +128,9 @@ void compileKernel(Fusion& fusion, CudaKernel& entry) {
     nvrtc().nvrtcGetProgramLogSize(program, &logsize);
     std::vector<char> log(logsize);
     nvrtc().nvrtcGetProgramLog(program, log.data());
-    std::stringstream cu;
-    cu << "NVRTC COMPILE ERROR: " << log.data();
-    throw std::runtime_error(cu.str());
+    TORCH_INTERNAL_ASSERT(false,
+      "NVRTC COMPILE ERROR: ", log.data()
+    );
   }
   const char* lowered_kernel_name;
   nvrtc().nvrtcGetLoweredName(program, func_name.c_str(), &lowered_kernel_name);

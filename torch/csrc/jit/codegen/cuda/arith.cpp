@@ -3,8 +3,6 @@
 #include <torch/csrc/jit/codegen/cuda/ir_base_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/tensor.h>
 
-#include <sstream>
-
 namespace torch {
 namespace jit {
 namespace fuser {
@@ -27,11 +25,13 @@ TORCH_CUDA_API Val* newValLike(const Val* const val, DataType dtype) {
     default:
       break;
   }
-  std::stringstream err_msg;
-  err_msg << "Could not generate a new value of type "
-          << val->getValType().value() << " with data type "
-          << val->getDataType().value() << std::endl;
-  TORCH_CHECK(false, err_msg.str());
+
+  TORCH_CHECK(
+      false
+    , "Could not generate a new value of type "
+    , val->getValType().value()
+    , " with data type "
+    , val->getDataType().value());
 }
 
 TORCH_CUDA_API Val* newValLike(const Val* const val) {
@@ -62,10 +62,12 @@ TORCH_CUDA_API Val* castOp(DataType dtype, Val* v1) {
     return v1;
 
   if (!is_cast_legal(v1->getDataType().value(), dtype)) {
-    std::stringstream err;
-    err << "Illegal Cast value from  DataType: " << v1->getDataType().value()
-        << " to DataType: " << dtype;
-    TORCH_CHECK(false, err.str());
+    TORCH_CHECK(
+      false
+    , "Illegal Cast value from  DataType: "
+    , v1->getDataType().value()
+    , " to DataType: "
+    , dtype);
   }
 
   Val* out = newValLike(v1, dtype);

@@ -6,13 +6,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_base_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
 
-#include <algorithm>
-#include <deque>
-#include <iostream>
-#include <queue>
 #include <set>
-#include <sstream>
-#include <unordered_map>
 #include <vector>
 
 namespace torch {
