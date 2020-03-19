@@ -489,7 +489,7 @@ class ModuleAPITest(QuantizationTestCase):
 
     def test_quant_dequant_api(self):
         r = torch.tensor([[1., -1.], [1., -1.]], dtype=torch.float)
-        scale, zero_point, dtype = 1.0, 2, torch.qint8
+        scale, zero_point, dtype = 1.0, 2, torch.quint8
         # testing Quantize API
         qr = torch.quantize_per_tensor(r, scale, zero_point, dtype)
         quant_m = nnq.Quantize(scale, zero_point, dtype)

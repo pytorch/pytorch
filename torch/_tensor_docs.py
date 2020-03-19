@@ -21,6 +21,26 @@ new_common_args = parse_kwargs("""
         the pinned memory. Works only for CPU tensors. Default: ``False``.
 """)
 
+add_docstr_all('quantized_elmentwise_helper',
+               r"""
+quantized_elmentwise_helper(Tensor self, Tensor mapping_tensor, float out_scale, int out_zero_point, bool fp32_ouput=False) -> Tensor
+Returns a new Tensor with the LUT result of elementwise operators.
+Args:
+    self: the quantized input of elementwise op
+    mapping_tensor: the LUT table caculated in advance 
+    out_scale: the output scale 
+    out_zero_point: the output zero point
+    fp32_ouput: whether fp32 or uint8 output 
+Example::
+    >>> Xq = torch.ones((2,), dtype=torch.uint8)
+    >>> ct_scale = Xq.q_scale()
+    >>> act_zp = Xq.q_zero_point()
+    >>> for i in range(0, 256):
+    >>>     self.mapping_table.append(torch.tensor((i - act_zp)) * act_scale)
+    >>>     self.int2gelu=torch.tensor(self.mapping_table)
+    >>> return torch.quantized_elmentwise_helper(Xq, self.int2gelu, self.scale, self.zero_point, True)
+""")
+
 add_docstr_all('new_tensor',
                r"""
 new_tensor(data, dtype=None, device=None, requires_grad=False) -> Tensor
@@ -59,6 +79,7 @@ Example::
             [ 2,  3]], dtype=torch.int8)
 
 """.format(**new_common_args))
+
 
 add_docstr_all('new_full',
                r"""

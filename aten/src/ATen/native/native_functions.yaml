@@ -2429,6 +2429,13 @@
     CPU: prelu_backward_cpu
     CUDA: prelu_backward_cuda
 
+- func: quantized_elmentwise_helper(Tensor self, Tensor mapping_tensor, float out_scale, int out_zero_point, bool fp32_ouput=False) -> Tensor
+  supports_named_tensor: True
+  use_c10_dispatcher: full
+  variants: function, method
+  dispatch:
+    QuantizedCPU: quantized_elmentwise_helper
+ 
 - func: gelu(Tensor self) -> Tensor
   use_c10_dispatcher: full
   python_module: nn

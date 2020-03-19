@@ -84,6 +84,52 @@ Tensor qnnpack_relu(Tensor input) {
 }
 #endif
 
+Tensor quantized_elmentwise_helper(const Tensor& qtensor, const Tensor& mapping_tensor, 
+                                   double out_scale, int64_t out_zero_point, bool fp32_output) {
+  TORCH_CHECK(qtensor.is_quantized(),
+           "qtensor should only be quantized Tensor in quantized_elmentwise_helper.");
+  TORCH_CHECK(
+      qtensor.device() == kCPU,
+      "quantized_elmentwise_helper only works for CPU backend right now.");
+  if (fp32_output){
+     TORCH_CHECK(qtensor.is_quantized(),
+           "mapping_tensor should only be Float Tensor when fp32_output is true in quantized_elmentwise_helper.");
+     Tensor out_tensor = at::empty(qtensor.sizes(), qtensor.options().dtype(at::kFloat));
+     float *out_tensor_ptr = out_tensor.data_ptr<float>(); 
+     float *mapping_tensor_ptr = mapping_tensor.data_ptr<float>();
+     auto qtensor_nchw = qtensor.contiguous();
+     const auto* qd = (uint8_t*)qtensor_nchw.data_ptr<c10::quint8>();
+     at::parallel_for(0, qtensor.numel(), 1, [&](int64_t start, int64_t end){
+        for(int i = start; i <end; i++){
+            out_tensor_ptr[i] = mapping_tensor_ptr[qd[i]];
+        }
+     });
+     return out_tensor;
+  }else{
+     TORCH_CHECK(qtensor.is_quantized(),
+           "mapping_tensor should only be quantized Tensor when fp32_output is false in quantized_elmentwise_helper.");    
+     auto qtensor_contigus = qtensor.contiguous(); 
+     Tensor out_tensor = at::_empty_affine_quantized(
+      qtensor_contigus.sizes(),
+      qtensor_contigus.options(),
+      out_scale,
+      out_zero_point
+      );
+     uint8_t *out_tensor_ptr = (uint8_t*)out_tensor.data_ptr<c10::quint8>();
+     uint8_t *mapping_tensor_ptr = (uint8_t*)mapping_tensor.data_ptr<c10::quint8>();
+     const auto* qd = (uint8_t*)qtensor_contigus.data_ptr<c10::quint8>();
+     
+     at::parallel_for(0, qtensor_contigus.numel(), 1, [&](int64_t start, int64_t end){
+         for(int i = start; i <end; i++){
+            out_tensor_ptr[i] = mapping_tensor_ptr[qd[i]];
+         }
+     });
+     return out_tensor;
+  }
+}
+
+
+
 Tensor quantized_relu(const Tensor& qx) {
   #ifdef USE_PYTORCH_QNNPACK
   if (at::globalContext().qEngine() == at::QEngine::QNNPACK && qx.scalar_type() == kQUInt8) {
@@ -94,6 +140,7 @@ Tensor quantized_relu(const Tensor& qx) {
   qrelu_stub(qx.device().type(), qx, qy);
   return qy;
 }
+
 Tensor& quantized_relu_(Tensor& qx) {
   const auto zero_point = qx.q_zero_point();
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qrelu", [&]() {
@@ -156,6 +203,7 @@ Tensor quantized_relu6_(Tensor& qx) {
   });
   return qx;
 }
+
 
 class QRelu6 final : public c10::OperatorKernel {
  public:
