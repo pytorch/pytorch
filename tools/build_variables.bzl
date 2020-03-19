@@ -490,7 +490,7 @@ def add_torch_libs():
         ],
         external_deps = [
             ("cudnn", None, "cudnn-lazy"),
-            ("nccl", None, "nccl-lazy"),
+            ("nccl", "2.4.8", "nccl-lazy"),
             ("cuda", None, "nvToolsExt-lazy"),
             ("cuda", None, "nvrtc-lazy"),
             ("cuda", None, "nvrtc-builtins-lazy"),
