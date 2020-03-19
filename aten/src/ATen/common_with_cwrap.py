@@ -38,6 +38,8 @@ def set_declaration_defaults(declaration):
             declaration['name'], declaration['overload_name'])
     else:
         declaration['type_wrapper_name'] = declaration['name']
+    # TODO: Uggggh, parsing the schema string here, really???
+    declaration['operator_name_with_overload'] = declaration['schema_string'].split('(')[0]
     # Simulate multiple dispatch, even if it's not necessary
     if 'options' not in declaration:
         declaration['options'] = [{'arguments': declaration['arguments']}]

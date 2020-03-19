@@ -48,19 +48,11 @@ Tensor& custom_rng_cauchy_(Tensor& self, double median, double sigma, Generator 
 class RNGTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    static auto registry = torch::RegisterOperators()
-      .op(torch::RegisterOperators::options()
-        .schema("aten::random_.from(Tensor(a!) self, int from, int? to, *, Generator? generator=None) -> Tensor(a!)")
-        .impl_unboxedOnlyKernel<decltype(random_from_to), &random_from_to>(DispatchKey::CustomRNGKeyId))
-      .op(torch::RegisterOperators::options()
-        .schema("aten::random_.to(Tensor(a!) self, int to, *, Generator? generator=None) -> Tensor(a!)")
-        .impl_unboxedOnlyKernel<decltype(random_to), &random_to>(DispatchKey::CustomRNGKeyId))
-      .op(torch::RegisterOperators::options()
-        .schema("aten::random_(Tensor(a!) self, *, Generator? generator=None) -> Tensor(a!)")
-        .impl_unboxedOnlyKernel<decltype(random_), &random_>(DispatchKey::CustomRNGKeyId))
-      .op(torch::RegisterOperators::options()
-        .schema("aten::cauchy_(Tensor(a!) self, float median=0, float sigma=1, *, Generator? generator=None) -> Tensor(a!)")
-        .impl_unboxedOnlyKernel<decltype(custom_rng_cauchy_), &custom_rng_cauchy_>(DispatchKey::CustomRNGKeyId));
+    static auto registry = torch::import("aten")
+      .impl("random_.from", torch::dispatch(DispatchKey::CustomRNGKeyId, CppFunction::makeUnboxedOnly(random_from_to)))
+      .impl("random_.to",   torch::dispatch(DispatchKey::CustomRNGKeyId, CppFunction::makeUnboxedOnly(random_to)))
+      .impl("random_",      torch::dispatch(DispatchKey::CustomRNGKeyId, CppFunction::makeUnboxedOnly(random_)))
+      .impl("cauchy_",      torch::dispatch(DispatchKey::CustomRNGKeyId, CppFunction::makeUnboxedOnly(custom_rng_cauchy_)));
   }
 };
 

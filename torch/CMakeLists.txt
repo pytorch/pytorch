@@ -110,6 +110,7 @@ set(TORCH_PYTHON_SRCS
     ${TORCH_SRC_DIR}/csrc/utils/tensor_new.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_numpy.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_types.cpp
+    ${TORCH_SRC_DIR}/csrc/utils/python_dispatch.cpp
     )
 
 # NB: This has to match the condition under which the JIT test directory

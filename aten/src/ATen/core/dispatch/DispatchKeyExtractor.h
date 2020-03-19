@@ -101,6 +101,18 @@ public:
     return DispatchKeyExtractor(schema.arguments().size());
   }
 
+  static DispatchKeyExtractor makeUninitialized() {
+    return DispatchKeyExtractor(0);
+  }
+
+  void registerSchema(const FunctionSchema& schema) {
+    TORCH_INTERNAL_ASSERT(num_args_ == 0);
+    num_args_ = schema.arguments().size();
+  }
+  void deregisterSchema() {
+    num_args_ = 0;
+  }
+
   DispatchKey getDispatchKeyBoxed(DispatchKeySet backendsWithoutFallthrough, const torch::jit::Stack* stack) const {
     // TODO Unboxed dispatch supports TensorOptions (i.e. ScalarType/Device/Layout) arguments
     //      but boxed doesn't yet. See https://github.com/pytorch/pytorch/issues/26428
@@ -129,6 +141,9 @@ public:
   // Used by DispatchTable to maintain the fallthrough invariant, see
   // docs on operatorHasKernelForBackend_
   void setOperatorHasKernelForBackend(DispatchKey k, bool has_kernel);
+
+  std::string dumpState() const;
+  void checkInvariants(const FunctionSchema& schema) const;
 
 private:
   // NB: If there is no valid dispatch key, this will return Undefined

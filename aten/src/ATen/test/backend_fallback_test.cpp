@@ -110,7 +110,7 @@ void generic_wrapper_fallback(const c10::OperatorHandle& op, torch::jit::Stack* 
 
 TEST(BackendFallbackTest, TestBackendFallbackWithMode) {
   auto registry = c10::Dispatcher::singleton()
-    .registerBackendFallbackKernel(
+    .registerFallback(
       DispatchKey::TESTING_ONLY_GenericModeTensorId,
       KernelFunction::makeFromBoxedFunction<&generic_mode_fallback>()
     );
@@ -124,7 +124,7 @@ TEST(BackendFallbackTest, TestBackendFallbackWithMode) {
 }
 
 TEST(BackendFallbackTest, TestBackendFallbackWithWrapper) {
-  auto registry = c10::Dispatcher::singleton().registerBackendFallbackKernel(
+  auto registry = c10::Dispatcher::singleton().registerFallback(
       DispatchKey::TESTING_ONLY_GenericWrapperTensorId,
       KernelFunction::makeFromBoxedFunction<&generic_wrapper_fallback>()
   );
@@ -137,16 +137,14 @@ TEST(BackendFallbackTest, TestBackendFallbackWithWrapper) {
 
 TEST(BackendFallbackTest, TestFallthroughBackendFallback) {
   // By default fallthrough
-  auto registry = c10::Dispatcher::singleton().registerBackendFallbackKernel(
-      DispatchKey::TESTING_ONLY_GenericModeTensorId,
-      KernelFunction::makeFallthrough()
-  );
-  c10::RegistrationHandleRAII registry3 = c10::Dispatcher::singleton()
-   .registerKernel(
-     c10::Dispatcher::singleton().findSchemaOrThrow("aten::mul", "Tensor"),
-     DispatchKey::TESTING_ONLY_GenericModeTensorId,
-     KernelFunction::makeFromBoxedFunction<&generic_mode_fallback>()
-   );
+  auto registry = c10::import()
+    .fallback(
+          c10::dispatch(DispatchKey::TESTING_ONLY_GenericModeTensorId,
+                        c10::CppFunction::makeFallthrough()))
+    .impl("aten::mul.Tensor",
+          c10::dispatch(DispatchKey::TESTING_ONLY_GenericModeTensorId,
+                        c10::CppFunction::makeFromBoxedFunction<&generic_mode_fallback>()));
+
   c10::impl::IncludeDispatchKeyGuard guard(DispatchKey::TESTING_ONLY_GenericModeTensorId);
 
   override_call_count = 0;
