@@ -2438,11 +2438,11 @@ class TestDistributions(TestCase):
         self._check_log_prob(ContinuousBernoulli(logits=p.log() - (-p).log1p()), ref_log_prob)
 
         # check entropy computation
-        self.assertEqual(ContinuousBernoulli(p).entropy(), torch.tensor([-0.02938, -0.07641, -0.00682]), prec=1e-4)
+        self.assertEqual(ContinuousBernoulli(p).entropy(), torch.tensor([-0.02938, -0.07641, -0.00682]), atol=1e-4)
         # entropy below corresponds to the clamped value of prob when using float 64
         # the value for float32 should be -1.76898
         self.assertEqual(ContinuousBernoulli(torch.tensor([0.0])).entropy(), torch.tensor([-2.58473]))
-        self.assertEqual(ContinuousBernoulli(s).entropy(), torch.tensor(-0.02938), prec=1e-4)
+        self.assertEqual(ContinuousBernoulli(s).entropy(), torch.tensor(-0.02938), atol=1e-4)
 
     def test_continuous_bernoulli_3d(self):
         p = torch.full((2, 3, 5), 0.5).requires_grad_()
@@ -3928,21 +3928,21 @@ class TestNumericalStability(TestCase):
                                  x=tensor_type([1]),
                                  expected_value=tensor_type([expec_val(1, probs=1e-4)]),
                                  expected_gradient=tensor_type(tensor_type([expec_grad(1, probs=1e-4)])),
-                                 prec=1e-3)
+                                 atol=1e-3)
 
             self._test_pdf_score(dist_class=ContinuousBernoulli,
                                  probs=tensor_type([1 - 1e-4]),
                                  x=tensor_type([0.1]),
                                  expected_value=tensor_type([expec_val(0.1, probs=1 - 1e-4)]),
                                  expected_gradient=tensor_type([expec_grad(0.1, probs=1 - 1e-4)]),
-                                 prec=2)
+                                 atol=2)
 
             self._test_pdf_score(dist_class=ContinuousBernoulli,
                                  logits=tensor_type([math.log(9999)]),
                                  x=tensor_type([0]),
                                  expected_value=tensor_type([expec_val(0, logits=math.log(9999))]),
                                  expected_gradient=tensor_type([expec_grad(0, logits=math.log(9999))]),
-                                 prec=1e-3)
+                                 atol=1e-3)
 
             self._test_pdf_score(dist_class=ContinuousBernoulli,
                                  logits=tensor_type([0.001]),
