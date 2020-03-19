@@ -859,7 +859,7 @@ class TestQuantizedOps(TestCase):
                              message=error_message.format(name + '.zero_point', scale,
                              X_hat.q_zero_point()))
 
-    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=5,
+    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=5, max_dims=5,
                                               min_side=5, max_side=10),
                        qparams=hu.qparams(dtypes=torch.quint8)),
            kernel=st.sampled_from((3, 5)),
@@ -892,6 +892,7 @@ class TestQuantizedOps(TestCase):
         X_ref = torch.nn.functional.avg_pool3d(
             X, kernel_size=kernel, stride=stride, padding=padding,
             ceil_mode=ceil_mode, count_include_pad=count_include_pad, divisor_override=divisor_override)
+
         ops_under_test = {
             "nn.functional": torch.nn.functional.avg_pool3d,
             "nn.quantized.functional": torch.nn.quantized.functional.avg_pool3d
@@ -902,7 +903,6 @@ class TestQuantizedOps(TestCase):
                         count_include_pad=count_include_pad, divisor_override=divisor_override)
             qX_ref = torch.quantize_per_tensor(X_ref, scale=qX_hat.q_scale(), zero_point=qX_hat.q_zero_point(),
                                                dtype=torch_type)
-
             self.assertEqual(qX_ref.int_repr().to(torch.double), qX_hat.int_repr().to(torch.double), prec=1.0,
                              message=error_message.format(name, qX_hat.int_repr(), qX_ref.int_repr()))
             self.assertEqual(scale, qX_hat.q_scale(),
