@@ -96,15 +96,16 @@ class class_ {
   /// argument (emulating a `this` argument in a C++ method.)
   ///
   /// Examples:
-  ///      // Exposes method `foo` on C++ class `Foo` as `call_foo()` in
-  ///      // Python and TorchScript
-  ///      .def("call_foo", &Foo::foo)
   ///
-  ///      // Exposes the given lambda expression as method `call_lambda()`
-  ///      // in Python and TorchScript.
-  ///      .def("call_lambda", [](const c10::intrusive_ptr<Foo>& self) {
-  ///        // do something
-  ///      })
+  ///     // Exposes method `foo` on C++ class `Foo` as `call_foo()` in
+  ///     // Python and TorchScript
+  ///     .def("call_foo", &Foo::foo)
+  ///
+  ///     // Exposes the given lambda expression as method `call_lambda()`
+  ///     // in Python and TorchScript.
+  ///     .def("call_lambda", [](const c10::intrusive_ptr<Foo>& self) {
+  ///       // do something
+  ///     })
   template <typename Func>
   class_& def(std::string name, Func f) {
     auto wrapped_f = detail::wrap_func<CurClass, Func>(std::move(f));
