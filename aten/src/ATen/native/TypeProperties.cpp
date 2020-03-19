@@ -57,13 +57,10 @@ static inline ScalarType promote_skip_undefined(ScalarType a, ScalarType b) {
 
 
 static inline ScalarType combine_categories(ScalarType higher, ScalarType lower) {
-  if(isComplexType(higher)) {
+  if (isFloatingType(higher)) {
     return higher;
   }
-  else if(!isComplexType(lower) && isFloatingType(higher)) {
-    return higher;
-  }
-  if (higher == ScalarType::Bool || isFloatingType(lower) || isComplexType(lower)) {
+  if (higher == ScalarType::Bool || isFloatingType(lower)) {
     return promote_skip_undefined(higher, lower);
   }
   if (higher != ScalarType::Undefined) {
@@ -78,14 +75,8 @@ ResultTypeState update_result_type_state(const Tensor& tensor, const ResultTypeS
   }
   ResultTypeState new_state = in_state;
   ScalarType current = tensor.scalar_type();
-  if (tensor.unsafeGetTensorImpl()->is_wrapped_number()) {
-    auto current_default = typeMetaToScalarType(at::get_default_dtype());
-    if(isComplexType(current)) {
-      current = typeMetaToScalarType(at::get_default_complex_dtype());
-    }
-    else if(isFloatingType(current)) {
-      current = current_default;
-    }
+  if (tensor.unsafeGetTensorImpl()->is_wrapped_number() && isFloatingType(current)) {
+    current = typeMetaToScalarType(at::get_default_dtype());
   }
   if ( tensor.dim() > 0 ) {
     new_state.dimResult = promote_skip_undefined(in_state.dimResult, current);
@@ -94,6 +85,7 @@ ResultTypeState update_result_type_state(const Tensor& tensor, const ResultTypeS
   } else {
     new_state.zeroResult = promote_skip_undefined(in_state.zeroResult, current);
   }
+
   return new_state;
 }
 
@@ -106,6 +98,7 @@ ScalarType result_type(TensorList tensors) {
   for (const Tensor& tensor : tensors) {
     state = update_result_type_state(tensor, state);
   }
+
   return result_type(state);
 }
 
