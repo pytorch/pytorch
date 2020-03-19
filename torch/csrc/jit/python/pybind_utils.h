@@ -46,6 +46,14 @@
 namespace torch {
 namespace jit {
 
+// The PythonFutureWrapper for ivalue::Future
+struct PythonFutureWrapper {
+  explicit PythonFutureWrapper(c10::intrusive_ptr<c10::ivalue::Future> fut)
+      : fut(std::move(fut)) {}
+
+  c10::intrusive_ptr<c10::ivalue::Future> fut;
+};
+
 // error reporting: when reporting user-caused errors, these functions should
 // not use AT_ERROR macros, since these macros add stack trace information
 // that is confusing to display to the end user since it always reports
@@ -589,12 +597,14 @@ inline IValue toIValue(
       return IValue::make_capsule(
           py::cast<c10::intrusive_ptr<CustomClassHolder>>(obj));
     } break;
+    case TypeKind::FutureType: {
+      return obj.cast<PythonFutureWrapper>().fut;
+    } break;
     case TypeKind::AnyType:
       return toTypeInferredIValue(obj);
     case TypeKind::FunctionType:
     case TypeKind::GeneratorType:
     case TypeKind::VarType:
-    case TypeKind::FutureType:
     case TypeKind::QSchemeType:
     case TypeKind::AnyListType:
     case TypeKind::AnyTupleType:

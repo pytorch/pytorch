@@ -750,3 +750,20 @@ class JitRpcTest(LocalRRefTest, JitRpcAsyncOpTest, RpcAgentTestFixture):
             args=(rref,)
         )
         self.assertEqual(ret_rref.to_here(), True)
+
+    @dist_init
+    def test_python_future_with_jit(self):
+        dst_rank = (self.rank + 1) % self.world_size
+        rref = self._create_rref()
+        inputs = (torch.tensor([1, 1]), torch.tensor([2, 2]))
+        ret_fut = rpc.rpc_async(
+            "worker{}".format(dst_rank),
+            two_args_two_kwargs,
+            args=inputs
+        )
+        @torch.jit.script
+        def future_wait(fut):
+            # type: (Future[Tensor]) -> Tensor
+            return fut.wait()
+
+        self.assertEqual(future_wait(ret_fut), torch.tensor([10, 10]))

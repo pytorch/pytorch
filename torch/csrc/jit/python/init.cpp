@@ -735,14 +735,20 @@ void initJITBindings(PyObject* module) {
     });
   });
 
-  struct PythonFutureWrapper {
-    explicit PythonFutureWrapper(c10::intrusive_ptr<c10::ivalue::Future> fut)
-        : fut(std::move(fut)) {}
-
-    c10::intrusive_ptr<c10::ivalue::Future> fut;
-  };
-
-  py::class_<PythonFutureWrapper>(m, "Future");
+  py::class_<PythonFutureWrapper>(m, "Future")
+      .def(
+          "wait",
+          [](torch::jit::PythonFutureWrapper& fut) {
+            fut.fut->wait();
+            auto res = fut.fut->value();
+            {
+              // acquiring GIL as torch::jit::toPyObject creates new py::object
+              // without grabbing the GIL.
+              pybind11::gil_scoped_acquire ag;
+              return torch::jit::toPyObject(std::move(res));
+            }
+          },
+          py::call_guard<py::gil_scoped_release>());
 
   m.def("fork", [](py::args args) {
     AT_ASSERT(args.size() >= 1);
