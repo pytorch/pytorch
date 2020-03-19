@@ -516,15 +516,19 @@ class WeightDecayBuilder(Optimizer):
 
 
 class AdagradOptimizer(Optimizer):
-    def __init__(self, alpha=0.01, epsilon=1e-4, decay=1, policy="fixed",
+    def __init__(self, alpha=0.01, epsilon=1e-4, decay=1, weight_decay=0., policy="fixed",
                  sparse_dedup_aggregator=None, rowWise=False, engine='',
                  lars=None, output_effective_lr=False,
                  output_effective_lr_and_update=False,
                  pruning_options=None, **kwargs):
+        for k, v in locals().items():
+            logger.info(f'AdagradOptimizer: input arguments: {k}: {v}')
+
         super(AdagradOptimizer, self).__init__()
         self.alpha = alpha
         self.epsilon = epsilon
         self.decay = decay
+        self.weight_decay = float(weight_decay)
         self.policy = policy
         self.sparse_dedup_aggregator = sparse_dedup_aggregator
         self.rowWise = rowWise
@@ -581,6 +585,8 @@ class AdagradOptimizer(Optimizer):
         self._clear_local_lr_multiplier()
 
         if self.lars is not None and not isinstance(grad, core.GradientSlice):
+            assert self.weight_decay == 0, 'weight decay is not implemented for LARS yet'
+
             assert self.lars >= 0, (
                 'Lars offset must be nonnegative, got {}'.format(self.lars))
             wd, trust, lr_max = self.create_lars_inputs(
@@ -639,6 +645,8 @@ class AdagradOptimizer(Optimizer):
                 assert str(param) in shapes, shapes
                 shape = shapes[str(param)]
 
+                assert self.weight_decay == 0, f'weight decay is not tested for engine: {self.engine}'
+
                 param_squared_sum = param_init_net.Float16ConstantFill(
                     [],
                     str(param) + "_squared_sum",
@@ -653,6 +661,8 @@ class AdagradOptimizer(Optimizer):
                 )
 
         if self.use_mask is True:
+            assert self.weight_decay == 0, 'weight decay is not implemented for use_mask yet'
+
             if self.mask_tensor is not None:
                 if not isinstance(grad, core.GradientSlice):
                     mask_blob = param_init_net.GivenTensorFill([], [str(param) + "_mask"], values=self.mask_tensor, shape=self.mask_tensor.shape)
@@ -678,6 +688,23 @@ class AdagradOptimizer(Optimizer):
                 'If SparseAdagrad with rowWise=True, gradient must be '\
                 'a gradientslice. PLease ensure that rowWise is not enabled '\
                 'for the dense Adagrad optimizer, as it is not supported.'
+
+        shapes, _ = workspace.InferShapesAndTypes([param_init_net])
+        param_shape = shapes[str(param)]
+        weight_decay = 0.
+        if isinstance(grad, core.GradientSlice):
+            if len(param_shape) == 1:
+                logger.warn(f"APPLYING weight decay on 1d sparse param: {str(param)}.shape is {param_shape}")
+            weight_decay = self.weight_decay
+        else:
+            # Skip weight decay for 1d parameters
+            if len(param_shape) == 1:
+                weight_decay = 0.
+                logger.warn(f"SKIPPING weight decay on 1d dense param: {str(param)}.shape is {param_shape}")
+            else:
+                weight_decay = self.weight_decay
+        logger.info(f"weight_decay for {str(param)} (shape:{param_shape}): {weight_decay}")
+
         if isinstance(grad, core.GradientSlice):
             assert self.decay == 1.,\
                 'Decay is not implemented for SparseAdagrad and must be set to 1'
@@ -687,21 +714,34 @@ class AdagradOptimizer(Optimizer):
             if self.rowWise:
                 if self.use_mask is True:
                     op = 'MaskedRowWiseSparseAdagrad'
+                    assert weight_decay == 0, f'weight decay is not implemented for {op} yet'
                     input_args += [mask_blob, mask_changed_blob]
                 else:
                     op = 'RowWiseSparseAdagrad'
             else:
                 if self.use_mask is True:
                     op = 'MaskedSparseAdagrad'
+                    assert weight_decay == 0, f'weight decay is not implemented for {op} yet'
                     input_args += [mask_blob, mask_changed_blob]
                 else:
                     op = 'SparseAdagrad'
-            net.__getattr__(op)(
-                input_args,
-                [param, param_squared_sum],
-                epsilon=self.epsilon,
-                engine=self.engine,
-            )
+            logger.info(f"using {op} for {str(param)}")
+
+            if weight_decay > 0:
+                net.__getattr__(op)(
+                    input_args,
+                    [param, param_squared_sum],
+                    epsilon=self.epsilon,
+                    weight_decay=weight_decay,
+                    engine=self.engine,
+                )
+            else:
+                net.__getattr__(op)(
+                    input_args,
+                    [param, param_squared_sum],
+                    epsilon=self.epsilon,
+                    engine=self.engine,
+                )
         else:
             output_args = [param, param_squared_sum]
             if self.output_effective_lr_and_update:
@@ -715,6 +755,7 @@ class AdagradOptimizer(Optimizer):
                 output_args.append(str(param) + '_effective_lr')
 
             if self.use_mask:
+                assert weight_decay == 0, f'weight decay is not implemented for use_mask yet'
                 net.MaskedAdagrad(
                     [param, param_squared_sum, grad, lr, mask_blob],
                     output_args,
@@ -728,6 +769,7 @@ class AdagradOptimizer(Optimizer):
                     output_args,
                     epsilon=self.epsilon,
                     decay=float(self.decay),
+                    weight_decay=weight_decay,
                     engine=self.engine
                 )
 

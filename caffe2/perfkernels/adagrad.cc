@@ -15,8 +15,10 @@ void adagrad_update__base(
     float* nh,
     float epsilon,
     float decay,
-    const float lr) {
-  internal::adagrad_update_base_inlined(N, w, g, h, nw, nh, decay, epsilon, lr);
+    const float lr,
+    const float weight_decay = 0.f) {
+  internal::adagrad_update_base_inlined(
+      N, w, g, h, nw, nh, decay, epsilon, lr, weight_decay);
 }
 
 void adagrad_update_prefetch__base(
@@ -36,8 +38,9 @@ void adagrad_update_prefetch__base(
     float* /* nh_n */, // prefetch ptr
 
     float epsilon,
-    float lr) {
-  adagrad_update__base(N, w, g, h, nw, nh, epsilon, 1.0f, lr);
+    float lr,
+    float weight_decay = 0.f) {
+  adagrad_update__base(N, w, g, h, nw, nh, epsilon, 1.0f, lr, weight_decay);
 }
 
 void adagrad_fp16_update_prefetch__base(
@@ -52,8 +55,10 @@ void adagrad_fp16_update_prefetch__base(
     at::Half* nh,
     at::Half* /* nh_n */, // prefetch ptr
     float epsilon,
-    float lr) {
-  internal::adagrad_update_base_inlined(N, w, g, h, nw, nh, 1.0f, epsilon, lr);
+    float lr,
+    float weight_decay = 0.f) {
+  internal::adagrad_update_base_inlined(
+      N, w, g, h, nw, nh, 1.0f, epsilon, lr, weight_decay);
 }
 
 // version without prefetching
@@ -67,9 +72,10 @@ void adagrad_update(
     float* nh,
     float epsilon,
     float decay,
-    float lr) {
-  AVX_F16C_DO(adagrad_update, N, w, g, h, nw, nh, epsilon, decay, lr);
-  BASE_DO(adagrad_update, N, w, g, h, nw, nh, epsilon, decay, lr);
+    float lr,
+    float weight_decay) {
+  AVX_F16C_DO(adagrad_update, N, w, g, h, nw, nh, epsilon, decay, lr, weight_decay);
+  BASE_DO(adagrad_update, N, w, g, h, nw, nh, epsilon, decay, lr, weight_decay);
 }
 
 decltype(adagrad_update_prefetch__base) adagrad_update_prefetch__avx_f16c;
@@ -90,7 +96,8 @@ void adagrad_update_prefetch(
     float* nh_n, // prefetch ptr
 
     float epsilon,
-    float lr) {
+    float lr,
+    float weight_decay) {
   AVX_F16C_DO(
       adagrad_update_prefetch,
       N,
@@ -104,7 +111,8 @@ void adagrad_update_prefetch(
       nh,
       nh_n,
       epsilon,
-      lr);
+      lr,
+      weight_decay);
   BASE_DO(
       adagrad_update_prefetch,
       N,
@@ -118,7 +126,8 @@ void adagrad_update_prefetch(
       nh,
       nh_n,
       epsilon,
-      lr);
+      lr,
+      weight_decay);
 }
 
 // Version with prefetching for embeddings and
@@ -137,7 +146,8 @@ void adagrad_fp16_update_prefetch(
     at::Half* nh,
     at::Half* nh_n, // prefetch ptr
     float epsilon,
-    float lr) {
+    float lr,
+    float weight_decay) {
   AVX_F16C_DO(
       adagrad_fp16_update_prefetch,
       N,
@@ -151,7 +161,8 @@ void adagrad_fp16_update_prefetch(
       nh,
       nh_n,
       epsilon,
-      lr);
+      lr,
+      weight_decay);
   BASE_DO(
       adagrad_fp16_update_prefetch,
       N,
@@ -165,7 +176,8 @@ void adagrad_fp16_update_prefetch(
       nh,
       nh_n,
       epsilon,
-      lr);
+      lr,
+      weight_decay);
 }
 
 } // namespace caffe2

@@ -24,9 +24,10 @@ static inline void adagrad_update_base_inlined(
     T* nh,
     float decay,
     float epsilon,
-    float lr) {
+    float lr,
+    float weight_decay = 0.f) {
   for (auto i = 0; i < N; ++i) {
-    float gi = g[i];
+    float gi = g[i] + weight_decay * w[i];
     float hi = decay * h[i] + gi * gi;
     nh[i] = hi;
     nw[i] = w[i] + lr * gi / (std::sqrt(hi) + epsilon);
@@ -83,7 +84,8 @@ inline void adagrad_update_prefetch_inlined(
 #endif
 
     float epsilon,
-    float lr) {
+    float lr,
+    float weight_decay = 0.f) {
   auto i = 0;
 
 #ifdef CAFFE2_PERFKERNELS_ADAGRAD_H_USE_INTRINSIC
@@ -94,9 +96,11 @@ inline void adagrad_update_prefetch_inlined(
     _mm_prefetch(reinterpret_cast<const char*>(&nw_n[i]), _MM_HINT_T0);
     _mm_prefetch(reinterpret_cast<const char*>(&nh_n[i]), _MM_HINT_T0);
 
-    __m256 gi = _mm256_loadu_ps(g + i);
     __m256 hi = _mm256_loadu_ps(h + i);
     __m256 wi = _mm256_loadu_ps(w + i);
+    __m256 gi = _mm256_add_ps(
+        _mm256_loadu_ps(g + i),
+        _mm256_mul_ps(_mm256_set1_ps(weight_decay), wi));
 
     __m256 nhi = _mm256_add_ps(hi, _mm256_mul_ps(gi, gi));
     _mm256_storeu_ps(nh + i, nhi);
@@ -108,7 +112,89 @@ inline void adagrad_update_prefetch_inlined(
 #endif
 
   adagrad_update_base_inlined(
-      N - i, w + i, g + i, h + i, nw + i, nh + i, 1.0f, epsilon, lr);
+      N - i,
+      w + i,
+      g + i,
+      h + i,
+      nw + i,
+      nh + i,
+      1.0f,
+      epsilon,
+      lr,
+      weight_decay);
+}
+
+inline void rowwise_adagrad_update_inlined(
+    int N,
+    float* w,
+#ifdef CAFFE2_PERFKERNELS_ADAGRAD_H_USE_INTRINSIC
+    float* w_n, // prefetch ptr
+#else
+    float* /* unused */,
+#endif
+
+    const float* g,
+
+    float* h,
+#ifdef CAFFE2_PERFKERNELS_ADAGRAD_H_USE_INTRINSIC
+    float* h_n, // prefetch ptr
+#else
+    float* /* unused */,
+#endif
+
+    float epsilon,
+    float lr,
+    float weight_decay = 0.f) {
+  auto i = 0;
+
+#ifdef CAFFE2_PERFKERNELS_ADAGRAD_H_USE_INTRINSIC
+  constexpr int kSize = 8;
+  _mm_prefetch(reinterpret_cast<const char*>(h_n), _MM_HINT_T0);
+  __m256 partial_sum = _mm256_setzero_ps();
+  __m256 weight_decay_m = _mm256_set1_ps(weight_decay);
+  for (; i + kSize <= N; i += kSize) {
+    __m256 wi = _mm256_loadu_ps(w + i);
+    __m256 gi = _mm256_add_ps(
+        _mm256_loadu_ps(g + i), _mm256_mul_ps(weight_decay_m, wi));
+    partial_sum = _mm256_add_ps(partial_sum, _mm256_mul_ps(gi, gi));
+  }
+  // Reduce sum to 1 value
+  __m256 partial_sum_2 = _mm256_hadd_ps(partial_sum, partial_sum);
+  __m256 partial_sum_3 = _mm256_hadd_ps(partial_sum_2, partial_sum_2);
+  float final_sum = _mm_cvtss_f32(_mm256_castps256_ps128(partial_sum_3)) +
+      _mm_cvtss_f32(_mm256_extractf128_ps(partial_sum_3, 1));
+#else
+  float final_sum = 0.0f;
+#endif
+
+  for (; i < N; ++i) {
+    float gi = g[i] + weight_decay * w[i];
+    final_sum += gi * gi;
+  }
+  final_sum /= N;
+
+  float hi = *h = *h + final_sum;
+  float float_step = lr / (std::sqrt(hi) + epsilon);
+
+  i = 0;
+#ifdef CAFFE2_PERFKERNELS_ADAGRAD_H_USE_INTRINSIC
+  __m256 step = _mm256_set1_ps(float_step);
+
+  for (i = 0; i + kSize <= N; i += kSize) {
+    _mm_prefetch(reinterpret_cast<const char*>(&w_n[i]), _MM_HINT_T0);
+
+    __m256 wi = _mm256_loadu_ps(w + i);
+    __m256 gi = _mm256_add_ps(
+        _mm256_loadu_ps(g + i), _mm256_mul_ps(weight_decay_m, wi));
+
+    _mm256_storeu_ps(w + i, _mm256_add_ps(wi, _mm256_mul_ps(gi, step)));
+  }
+#endif
+
+  for (; i < N; ++i) {
+    float gi = g[i] + weight_decay * w[i];
+    w[i] = w[i] + gi * float_step;
+  }
 }
 
 } // namespace internal
@@ -147,7 +233,8 @@ void adagrad_update_prefetch(
     float* nh_n, // prefetch ptr
 
     float epsilon,
-    float lr);
+    float lr,
+    float weight_decay = 0.f);
 
 // Version with prefetching for embeddings and
 // momentum using fp16
@@ -163,7 +250,8 @@ void adagrad_fp16_update_prefetch(
     at::Half* nh,
     at::Half* nh_n, // prefetch ptr
     float epsilon,
-    float lr);
+    float lr,
+    float weight_decay = 0.f);
 
 // version without prefetching
 void adagrad_update(
@@ -175,7 +263,8 @@ void adagrad_update(
     float* nh,
     float epsilon,
     float decay,
-    float lr);
+    float lr,
+    float weight_decay = 0.f);
 
 } // namespace caffe2
 

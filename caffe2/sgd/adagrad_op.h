@@ -73,7 +73,10 @@ class AdagradOp final : public Operator<Context> {
   AdagradOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         epsilon_(this->template GetSingleArgument<T>("epsilon", 1e-5f)),
-        decay_(this->template GetSingleArgument<T>("decay", 1.0f)) {}
+        decay_(this->template GetSingleArgument<T>("decay", 1.0f)) {
+    LOG(INFO) << "gradient optimization operator in use: "
+              << "AdagradOp";
+  }
 
   bool RunOnDevice() override {
     CAFFE_ENFORCE_EQ(
@@ -155,7 +158,10 @@ class SparseAdagradOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   SparseAdagradOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)) {}
+        epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)) {
+    LOG(INFO) << "gradient optimization operator in use: "
+              << "SparseAdagradOp";
+  }
 
   bool RunOnDevice() override {
     // Enforce shapes
@@ -243,7 +249,10 @@ class RowWiseSparseAdagradOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   RowWiseSparseAdagradOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)) {}
+        epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)) {
+    LOG(INFO) << "gradient optimization operator in use: "
+              << "RowWiseSparseAdagradOp";
+  }
 
   bool RunOnDevice() override {
     // Enforce shapes
@@ -330,4 +339,4 @@ class RowWiseSparseAdagradOp final : public Operator<Context> {
   INPUT_TAGS(PARAM, MOMENT_1, INDICES, GRAD, LR);
   OUTPUT_TAGS(OUTPUT_PARAM, OUTPUT_MOMENT_1);
 };
-}
+} // namespace caffe2
