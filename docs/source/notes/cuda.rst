@@ -332,3 +332,6 @@ each GPU has its dedicated process, this avoids the performance burden caused
 by GIL of Python interpreter. Also, each process of
 :class:`~torch.nn.parallel.DistributedDataParallel` do its own optimization step,
 saving the parameter broadcasting.
+
+If you use :class:`~torch.nn.parallel.DistributedDataParallel`, you should launch
+your program with `torch.distributed.launch`, see :ref:`distributed-launch`.
