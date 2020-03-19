@@ -51,7 +51,7 @@ BASE_BUILD_VERSION="1.5.0.dev$DATE"
 # Change BASE_BUILD_VERSION to git tag when on a git tag
 # Use 'git -C' to make doubly sure we're in the correct directory for checking
 # the git tag
-if git -C "${DIR}" describe --tags --exact >/dev/null; then
+if git -C "${workdir}/pytorch" describe --tags --exact >/dev/null; then
   # Switch upload folder to 'test/' if we are on a tag
   PIP_UPLOAD_FOLDER='test/'
   # Grab git tag, remove prefixed v and remove everything after -
