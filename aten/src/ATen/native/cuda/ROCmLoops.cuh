@@ -304,7 +304,7 @@ void gpu_kernel_impl(TensorIterator& iter, func_t f) {
     }
 
     if (needs_dynamic_casting<func_t>::check(iter)) {
-      legacy::launch_kernel<launch_size_1d, 1>(numel, [=]GPU_LAMBDA(int idx) {
+      legacy::launch_kernel<launch_size_1d, 1>(numel, [=]GPU_LAMBDA(int idx) mutable {
         void* out = data[0] + strides[0] * idx;
         arg0_t result = legacy::invoke(f, &data.data[1], &strides.data[1], &dtypes.data[1], idx);
         c10::cast_and_store<arg0_t>(dtypes[0], out, result);
@@ -312,7 +312,7 @@ void gpu_kernel_impl(TensorIterator& iter, func_t f) {
     } else if (iter.has_contiguous_first_dim() && modern::detail::has_same_arg_types<func_t>::value) {
       modern::launch_kernel(numel, f, data);
     } else {
-      legacy::launch_kernel<launch_size_1d, 1>(numel, [=]GPU_LAMBDA(int idx) {
+      legacy::launch_kernel<launch_size_1d, 1>(numel, [=]GPU_LAMBDA(int idx) mutable {
         arg0_t* out = (arg0_t*)(data[0] + strides[0] * idx);
         *out = legacy::invoke(f, &data.data[1], &strides.data[1], idx);
       });
@@ -320,14 +320,14 @@ void gpu_kernel_impl(TensorIterator& iter, func_t f) {
   } else {
     auto offset_calc = legacy::make_offset_calculator<traits::arity + 1>(iter);
     if (needs_dynamic_casting<func_t>::check(iter)) {
-      legacy::launch_kernel<launch_size_nd, launch_bound2>(numel, [=]GPU_LAMBDA(int idx) {
+      legacy::launch_kernel<launch_size_nd, launch_bound2>(numel, [=]GPU_LAMBDA(int idx) mutable {
         auto offsets = offset_calc.get(idx);
         void* out = data[0] + offsets[0];
         arg0_t result = legacy::invoke(f, &data.data[1], &offsets.data[1], &dtypes.data[1], 1);
         c10::cast_and_store<arg0_t>(dtypes[0], out, result);
       });
     } else {
-      legacy::launch_kernel<launch_size_nd, launch_bound2>(numel, [=]GPU_LAMBDA(int idx) {
+      legacy::launch_kernel<launch_size_nd, launch_bound2>(numel, [=]GPU_LAMBDA(int idx) mutable {
         auto offsets = offset_calc.get(idx);
         arg0_t* out = (arg0_t*)(data[0] + offsets[0]);
         *out = legacy::invoke(f, &data.data[1], &offsets.data[1], 1);
