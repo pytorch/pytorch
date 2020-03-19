@@ -45,10 +45,12 @@ class AveragedModel(Module):
 		>>> torch.optim.swa_utils.update_bn(loader, swa_model) 
 
 	.. note::
-            When using SWA with models containing Batch Normalization you may 
-			need to update the activation statistics for Batch Normalization.
-            You can do so by using `torch.optim.swa_utils.update_bn` utility.
+        When using SWA with models containing Batch Normalization you may 
+		need to update the activation statistics for Batch Normalization.
+        You can do so by using :meth:`torch.optim.swa_utils.update_bn` utility.
 	
+	.. note::
+        :attr:`avg_fun` is not saved in the :meth:`state_dict` of the model.
 	
     .. _Averaging Weights Leads to Wider Optima and Better Generalization:
         https://arxiv.org/abs/1803.05407
@@ -61,12 +63,15 @@ class AveragedModel(Module):
         Generalizes Well:
         https://arxiv.org/abs/2001.02312
     """
-    def __init__(self, model, device=None):
+    def __init__(self, model, device=None, avg_fun=None):
         super(AveragedModel, self).__init__()
         self.module = deepcopy(model)
         if device is not None:
             self.module = self.module.to(device)
         self.register_buffer('n_averaged', torch.tensor(0, dtype=torch.long))
+        if avg_fun is None:
+            avg_fun = lambda p_avg, p, n_avg: p_avg + (p - p_avg) / (n_avg +1)
+        self.avg_fun = avg_fun
         
     def forward(self, *args, **kwargs):
         return self.module(*args, **kwargs)
@@ -74,9 +79,8 @@ class AveragedModel(Module):
     def update_parameters(self, model):
         for p_swa, p_model in zip(self.parameters(), model.parameters()):
             device = p_swa.device
-            virtual_decay = 1 / float(self.n_averaged + 1)
-            diff = (p_model.data.to(device) - p_swa.data) * virtual_decay
-            p_swa.data.add_(diff)
+            p_swa.data = self.avg_fun(p_swa.data, p_model.data.to(device), 
+                                      self.n_averaged)
         self.n_averaged += 1
 
     
@@ -112,7 +116,6 @@ def update_bn(loader, model, device=None):
         module.momentum = None
         module.num_batches_tracked *= 0
 
-    print("new bn!")
     for input in loader:
         if isinstance(input, (list, tuple)):
             input = input[0]
