@@ -218,27 +218,28 @@ Tensor run(const ContextConv2D& context, const Tensor& input) {
   return output.contiguous(input.suggest_memory_format());
 }
 
-c10::intrusive_ptr<xnnpack::Conv2dOpContext> Conv2dPrePack::operator()(
-    Tensor weight,
-    c10::optional<Tensor> bias,
-    std::vector<int64_t> stride,
-    std::vector<int64_t> padding,
-    std::vector<int64_t> dilation,
-    int64_t groups,
-    c10::optional<double> output_min,
-    c10::optional<double> output_max) {
-  return xnnpack::XNNPackConv2dOpContext::create_context(
-      std::move(weight),
-      std::move(bias),
-      std::move(padding),
-      std::move(stride),
-      std::move(dilation),
-      groups,
-      output_min,
-      output_max);
+c10::intrusive_ptr<xnnpack::Conv2dOpContext>
+    createConv2dClampPrePackOpContext(
+        Tensor weight,
+        c10::optional<Tensor> bias,
+        std::vector<int64_t> stride,
+        std::vector<int64_t> padding,
+        std::vector<int64_t> dilation,
+        int64_t groups,
+        c10::optional<double> output_min,
+        c10::optional<double> output_max) {
+      return xnnpack::XNNPackConv2dOpContext::create_context(
+          std::move(weight),
+          std::move(bias),
+          std::move(padding),
+          std::move(stride),
+          std::move(dilation),
+          groups,
+          output_min,
+          output_max);
 }
 
-Tensor Conv2dPacked::operator()(
+Tensor Conv2dClampRun::operator()(
     const Tensor& input,
     const c10::intrusive_ptr<xnnpack::Conv2dOpContext>& op_context) {
   return op_context->run(input);

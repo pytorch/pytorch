@@ -67,8 +67,8 @@ class Conv2dOpContext : public torch::jit::CustomClassHolder {
  protected:
   Tensor orig_weight_;
   c10::optional<Tensor> orig_bias_;
-  std::vector<int64_t> padding_;
   std::vector<int64_t> stride_;
+  std::vector<int64_t> padding_;
   std::vector<int64_t> dilation_;
   int64_t groups_;
   c10::optional<double> output_min_;
@@ -79,8 +79,8 @@ class Conv2dOpContext : public torch::jit::CustomClassHolder {
     return std::make_tuple(
         orig_weight_,
         orig_bias_,
-        padding_,
         stride_,
+        padding_,
         dilation_,
         groups_,
         output_min_,
