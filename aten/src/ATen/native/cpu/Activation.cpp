@@ -314,6 +314,50 @@ void GeluBackwardKernelImpl(TensorIterator& it) {
   }
 }
 
+void hardsigmoid_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "hardsigmoid_cpu", [&] {
+    const scalar_t zero(0.0f);
+    const scalar_t three(3.0f);
+    const scalar_t six(6.0f);
+    using Vec = vec256::Vec256<scalar_t>;
+    const Vec kZeroVec(zero);
+    const Vec kThreeVec(three);
+    const Vec kSixVec(six);
+    cpu_kernel_vec(
+        iter,
+        [&](scalar_t self_val) {
+          return std::min(std::max(self_val + three, zero), six) / six;
+        },
+        [&](Vec self_val) {
+          return vec256::minimum(
+            vec256::maximum(self_val + kThreeVec, kZeroVec),
+            kSixVec
+          ) / kSixVec;
+        });
+  });
+}
+
+void hardsigmoid_backward_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "hardsigmoid_backward", [&] {
+    auto zero = scalar_t(0.0f);
+    auto one = scalar_t(1.0f);
+    using Vec = Vec256<scalar_t>;
+    Vec kZeroVec(0.0f);
+    Vec kOneSixthVec(1.0f / 6.0f);
+    cpu_kernel_vec(
+        iter,
+        [=](scalar_t grad_val, scalar_t self_val) {
+          return (self_val >= zero && self_val <= one)
+            ? grad_val / 6.0f
+            : scalar_t(0);
+        },
+        [=](Vec grad_val, Vec self_val) {
+          Vec gradNonZeroMask = (self_val > zero) & (self_val < one);
+          return Vec::blendv(kZeroVec, grad_val * kOneSixthVec, gradNonZeroMask);
+        });
+  });
+}
+
 void hardshrink_kernel(TensorIterator& iter, Scalar lambd) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "hardshrink_cpu", [&] {
     auto lambd_val = lambd.to<scalar_t>();
@@ -492,6 +536,8 @@ REGISTER_DISPATCH(elu_backward_stub, &elu_backward_kernel);
 REGISTER_DISPATCH(GeluKernel, &GeluKernelImpl);
 REGISTER_DISPATCH(GeluBackwardKernel, &GeluBackwardKernelImpl);
 REGISTER_DISPATCH(hardtanh_backward_stub, &hardtanh_backward_kernel);
+REGISTER_DISPATCH(hardsigmoid_stub, &hardsigmoid_kernel);
+REGISTER_DISPATCH(hardsigmoid_backward_stub, &hardsigmoid_backward_kernel);
 REGISTER_DISPATCH(hardshrink_stub, &hardshrink_kernel);
 REGISTER_DISPATCH(softshrink_stub, &softshrink_kernel);
 REGISTER_DISPATCH(shrink_backward_stub, &shrink_backward_kernel);

@@ -793,8 +793,8 @@ public:
   Module(const Module&) = delete;
   Module& operator=(const Module&) = delete;
 
-  Module(Module&&) noexcept;
-  Module& operator=(Module&&) noexcept;
+  Module(Module&&);
+  Module& operator=(Module&&);
 
   // Some notes about the API design here.  We had the following constraints:
   //
