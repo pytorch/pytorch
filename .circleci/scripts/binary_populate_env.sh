@@ -57,7 +57,7 @@ if git -C "${workdir}/pytorch" describe --tags --exact >/dev/null; then
   # Grab git tag, remove prefixed v and remove everything after -
   # Used to clean up tags that are for release candidates like v1.5.0-rc1
   # Turns tag v1.5.0-rc1 -> v1.5.0
-  BASE_BUILD_VERSION="$(git describe --tags | sed -e 's/^v//' -e 's/-.*$//')"
+  BASE_BUILD_VERSION="$(git describe -C "${workdir}/pytorch" --tags | sed -e 's/^v//' -e 's/-.*$//')"
 fi
 if [[ "$(uname)" == 'Darwin' ]] || [[ "$DESIRED_CUDA" == "cu101" ]] || [[ "$PACKAGE_TYPE" == conda ]]; then
   export PYTORCH_BUILD_VERSION="${BASE_BUILD_VERSION}"
