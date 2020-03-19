@@ -857,7 +857,7 @@ inline std::tuple<Tensor, Tensor> fractional_max_pool3d_with_indices(
   if (!_random_samples_.defined()) {
     _random_samples_ = torch::rand({input.size(0), input.size(1), 3}, torch::TensorOptions().dtype(input.dtype()).device(input.device()));
   }
-  return torch::fractional_max_pool3d(input, kernel_size, *output_size, _random_samples_);
+  return torch::fractional_max_pool3d(input, kernel_size, *output_size_, _random_samples_);
 }
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
