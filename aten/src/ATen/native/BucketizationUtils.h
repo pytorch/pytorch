@@ -58,19 +58,24 @@ bool dims_matched_before_last_dim(const Tensor& boundaries, const Tensor& input)
   return true;
 }
 
-void searchsorted_pre_check(const Tensor& boundaries, const Tensor& input, bool out_int32) {
-  TORCH_CHECK(boundaries.device() == input.device(), "boundaries and input value tensors should have same device type, "
+void searchsorted_pre_check(const Tensor& boundaries, const Tensor& input, const Tensor& output, bool out_int32) {
+  TORCH_CHECK(boundaries.device() == input.device(), "boundaries and input value tensors should have same device type, ",
     "but we got boundaries tensor device type ", boundaries.device(), " and input value tensor device type ", input.device());
 
-  TORCH_CHECK(boundaries.dtype() == input.dtype(), "boundaries and input value tensors should have same dtype, "
+  TORCH_CHECK(boundaries.dtype() == input.dtype(), "boundaries and input value tensors should have same dtype, ",
     "but we got boundaries tensor dtype ", boundaries.dtype(), " and input value tensor dtype ", input.dtype());
 
-  TORCH_CHECK(boundaries.dim() != 0 && input.dim() != 0, "boundaries and input value tensors should have positive dimensions ",
+  TORCH_CHECK(boundaries.dim() != 0 && input.dim() != 0, "boundaries and input value tensors should have positive dimensions, ",
     "but we got boundaries tensor dim(", boundaries.dim(), "), and input value tensor dim(", input.dim(), ")");
 
   TORCH_CHECK(boundaries.dim() == 1 || dims_matched_before_last_dim(boundaries, input),
-    "boundaries tensor should be 1 dimension or the first N-1 dimensions of boundaries tensor and input value tensor "
+    "boundaries tensor should be 1 dimension or the first N-1 dimensions of boundaries tensor and input value tensor ",
     "must match, but we got boundaries tensor ", boundaries.sizes(), " and input value tensor ", input.sizes());
+
+  ScalarType output_dtype = typeMetaToScalarType(output.dtype());
+  TORCH_CHECK((output_dtype == ScalarType::Long && !out_int32) || (output_dtype == ScalarType::Int && out_int32),
+    "output tensor's dtype is wrong, it can only be Int(int32) or Long(int64) depending on whether out_int32 flag is True, ",
+    "but we got output tensor's dtype ", output_dtype, " and out_int32 flag is ", (out_int32 ? "True" : "False"));
 
   if (out_int32) {
     int numel_input = input.numel();

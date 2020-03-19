@@ -58,7 +58,7 @@ void searchsorted_cpu_contiguous(Tensor& result, const Tensor& input, const Tens
 }
 
 Tensor& searchsorted_out_cpu(Tensor& result, const Tensor& sorted_sequence, const Tensor& self, bool out_int32, bool right) {
-  searchsorted_pre_check(sorted_sequence, self, out_int32);
+  searchsorted_pre_check(sorted_sequence, self, result, out_int32);
   if (result.numel() == 0) {
     result.resize_(self.sizes());
   }

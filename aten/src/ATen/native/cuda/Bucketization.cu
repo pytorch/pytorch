@@ -42,7 +42,7 @@ __device__ int64_t upper_bound(const input_t *data_ss, int64_t start, int64_t en
 }
 
 template<typename input_t, typename output_t>
-__device__ void searchsorted_cuda_calc_boundary(
+__global__ void searchsorted_cuda_kernel(
   output_t *data_out,
   const input_t *data_in,
   const input_t *data_bd,
@@ -70,51 +70,6 @@ __device__ void searchsorted_cuda_calc_boundary(
 }
 
 template<typename input_t, typename output_t>
-__global__ void searchsorted_cuda_kernel(
-  output_t *data_out,
-  const input_t *data_in,
-  const input_t *data_bd,
-  int64_t idim_in,
-  int64_t idim_bd,
-  int64_t numel_in,
-  bool right,
-  bool is_1d_boundaries) {
-
-  searchsorted_cuda_calc_boundary<input_t, output_t>(
-    data_out, data_in, data_bd, idim_in, idim_bd, numel_in, right, is_1d_boundaries);
-}
-
-template<typename input_t, typename output_t>
-__global__ void searchsorted_cuda_shared_boundaries_kernel(
-  output_t *data_out,
-  const input_t *data_in,
-  const input_t *data_bd,
-  int64_t idim_in,
-  int64_t idim_bd,
-  int64_t numel_in,
-  int64_t numel_bd,
-  int64_t radius, // how many items to copy into shared memory per thread 
-  bool right,
-  bool is_1d_boundaries) {
-
-  extern __shared__ unsigned char temp[];
-  input_t *data_bd_shared = reinterpret_cast<input_t *>(temp);
- 
-  int64_t start = threadIdx.x * radius;
-  int64_t end = start + radius > numel_bd ? numel_bd : start + radius;
-  if (start < end) {
-    #pragma unroll
-    for (int64_t i = start; i < end; ++i) {
-      data_bd_shared[i] = data_bd[i];
-    }
-  }
-  __syncthreads();
- 
-  searchsorted_cuda_calc_boundary<input_t, output_t>(
-    data_out, data_in, data_bd_shared, idim_in, idim_bd, numel_in, right, is_1d_boundaries);
-}
-
-template<typename input_t, typename output_t>
 void searchsorted_cuda_contiguous(Tensor& result, const Tensor& input, const Tensor& boundaries, const bool& right) {
   // inner most dim size of input and boundaries
   int64_t idim_in = input.sizes().back();
@@ -131,29 +86,16 @@ void searchsorted_cuda_contiguous(Tensor& result, const Tensor& input, const Ten
   dim3 block = dim3(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock);
   dim3 grid  = dim3(cuda::ATenCeilDiv<int64_t>(numel_in, block.x));
 
-  int64_t numel_bd = boundaries.numel();
-  // this is a simple optimize strategy mainly aim to optimize 1D boundaries case, open to discuss.
-  // older cuda hardware (compute capacity 1.x) uses 256 bytes shared memory to pass kernel function parameters, exclude it. 
-  // to get better performance, make sure at least 4 different blocks runnig parallel within 1 SM.
-  int64_t usable_shared_mem_per_block = (at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock - 256) / 4; 
-  int64_t boundaries_tensor_size_byte = numel_bd * sizeof(input_t);
-
-  if (boundaries_tensor_size_byte <= usable_shared_mem_per_block) {
-    int64_t radius = numel_bd / block.x + 1;
-    searchsorted_cuda_shared_boundaries_kernel<<<grid, block, boundaries_tensor_size_byte, stream>>>(
-      data_out, data_in, data_bd, idim_in, idim_bd, numel_in, numel_bd, radius, right, boundaries.dim() == 1);
-  }
-  else {
-    searchsorted_cuda_kernel<<<grid, block, 0, stream>>>(
-      data_out, data_in, data_bd, idim_in, idim_bd, numel_in, right, boundaries.dim() == 1);
-  }
+  searchsorted_cuda_kernel<<<grid, block, 0, stream>>>(
+    data_out, data_in, data_bd, idim_in, idim_bd, numel_in, right, boundaries.dim() == 1);
+  
   THCudaCheck(cudaGetLastError());
 }
 
 }
 
 Tensor& searchsorted_out_cuda(Tensor& result, const Tensor& sorted_sequence, const Tensor& self, bool out_int32, bool right) {
-  searchsorted_pre_check(sorted_sequence, self, out_int32);
+  searchsorted_pre_check(sorted_sequence, self, result, out_int32);
   if (result.numel() == 0) {
     result.resize_(self.sizes());
   }
