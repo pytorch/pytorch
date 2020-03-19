@@ -91,6 +91,7 @@ YAML_SOURCES = [
     File("docker_jobs.yml"),
     File("workflows.yml"),
 
+    File("workflows-setup-job.yml"),
     File("windows-build-test.yml"),
     Listgen(pytorch_build_definitions.get_workflow_jobs, 3),
     File("workflows-pytorch-macos-builds.yml"),
