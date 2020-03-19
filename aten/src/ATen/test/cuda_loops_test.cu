@@ -39,7 +39,6 @@ Tensor thread_work_index() {
 TEST(TestLoops, MutableLambda) {
   auto t = thread_work_index();
   for (float i = 0; i < thread_work_size; i++) {
-    ASSERT_TRUE((t == i).any().item<bool>());
     ASSERT_EQ((t == i).to(kLong).sum().item<int64_t>(), 4096);
   }
 }
