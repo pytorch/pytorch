@@ -6,7 +6,6 @@
 
 namespace torch {
 namespace jit {
-namespace script {
 
 struct NoneValue : SugaredValue {
   NoneValue() = default;
@@ -623,6 +622,5 @@ std::shared_ptr<BuiltinFunction> BuiltinFunction::tryCreate(
   return nullptr;
 }
 
-} // namespace script
 } // namespace jit
 } // namespace torch

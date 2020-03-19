@@ -20,8 +20,8 @@ void compute_fused_params(
     const float* mean_data,
     const float* var_data,
     double eps,
-    float input_scale,
-    float output_scale,
+    double input_scale,
+    double output_scale,
     float* alpha_data,
     float* beta_data) {
   // Batch Normalization
@@ -46,7 +46,7 @@ Tensor q_batch_norm_impl(
     Tensor mean,
     Tensor var,
     double eps,
-    float output_scale,
+    double output_scale,
     int64_t output_zero_point) {
 
   if (qx.numel() == 0) {
@@ -112,6 +112,82 @@ Tensor q_batch_norm_impl(
   return qy;
 }
 
+template <bool ReluFused>
+Tensor q_batch_norm3d_impl(
+    Tensor qx,
+    Tensor weight,
+    Tensor bias,
+    Tensor mean,
+    Tensor var,
+    double eps,
+    double output_scale,
+    int64_t output_zero_point) {
+
+  if (qx.numel() == 0) {
+    auto out = qx.clone();
+    return out;
+  }
+  int64_t ndim = qx.dim();
+  TORCH_CHECK(ndim == 5, "Expecting the input tensor of rank 5.");
+  const int64_t N = qx.size(0);
+  const int64_t C = qx.size(1);
+  const int64_t D = qx.size(2);
+  const int64_t H = qx.size(3);
+  const int64_t W = qx.size(4);
+
+  TORCH_CHECK(weight.numel() == C, "Expect weight size to match C");
+  TORCH_CHECK(bias.numel() == C, "Expect weight size to match C");
+
+  const float* weight_data = weight.template data<float>();
+  const float* bias_data = bias.template data<float>();
+
+  TORCH_CHECK(mean.numel() == C, "Mean size must match channel dimension");
+  TORCH_CHECK(var.numel() == C, "Variance size must match channel dimension");
+
+  Tensor alpha = at::empty_like(mean, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  Tensor beta = at::empty_like(mean, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  float* alpha_data = alpha.data_ptr<float>();
+  float* beta_data = beta.data_ptr<float>();
+
+  const float* mean_data = mean.template data<float>();
+  const float* var_data = var.template data<float>();
+
+  auto oSizes = qx.sizes();
+  auto qx_nhwc = qx.contiguous(MemoryFormat::ChannelsLast3d);
+  Tensor qy = at::_empty_affine_quantized(
+      oSizes,
+      at::device(kCPU).dtype(qx_nhwc.scalar_type()),
+      output_scale,
+      output_zero_point,
+      MemoryFormat::ChannelsLast3d);
+
+  compute_fused_params(
+      C,
+      weight_data,
+      bias_data,
+      mean_data,
+      var_data,
+      eps,
+      qx.q_scale(),
+      output_scale,
+      alpha_data,
+      beta_data);
+
+  qbatch_norm_stub(
+      qx.device().type(),
+      N,
+      C,
+      D * H * W,
+      qx.q_zero_point(),
+      output_zero_point,
+      qx_nhwc,
+      alpha,
+      beta,
+      qy);
+
+  return qy;
+}
+
 } // namespace
 
 Tensor quantized_batch_norm(
@@ -131,6 +207,8 @@ Tensor quantized_batch_norm(
 
 // Keep the registry in the anonymous namespace.
 namespace {
+
+template <bool ReLUFused = false>
 class QBatchNorm2d final : public torch::OperatorKernel {
  public:
   Tensor operator()(
@@ -142,7 +220,24 @@ class QBatchNorm2d final : public torch::OperatorKernel {
       double eps,
       double output_scale,
       int64_t output_zero_point) {
-    return q_batch_norm_impl<false>(
+    return q_batch_norm_impl<ReLUFused>(
+        qx, weight, bias, mean, var, eps, output_scale, output_zero_point);
+  }
+};
+
+template <bool ReLUFused = false>
+class QBatchNorm3d final : public torch::OperatorKernel {
+ public:
+  Tensor operator()(
+      Tensor qx,
+      Tensor weight,
+      Tensor bias,
+      Tensor mean,
+      Tensor var,
+      double eps,
+      double output_scale,
+      int64_t output_zero_point) {
+    return q_batch_norm3d_impl<ReLUFused>(
         qx, weight, bias, mean, var, eps, output_scale, output_zero_point);
   }
 };
@@ -156,7 +251,40 @@ static auto registry = torch::RegisterOperators().op(
     "float eps, "
     "float output_scale, "
     "int output_zero_point) -> Tensor",
-    torch::RegisterOperators::options().kernel<QBatchNorm2d>(
+    torch::RegisterOperators::options().kernel<QBatchNorm2d<false>>(
+        DispatchKey::QuantizedCPUTensorId))
+.op(
+    "quantized::batch_norm2d_relu(Tensor qx, "
+    "Tensor weight, "
+    "Tensor bias, "
+    "Tensor mean, "
+    "Tensor var, "
+    "float eps, "
+    "float output_scale, "
+    "int output_zero_point) -> Tensor",
+    torch::RegisterOperators::options().kernel<QBatchNorm2d<true>>(
+        DispatchKey::QuantizedCPUTensorId))
+.op(
+    "quantized::batch_norm3d(Tensor qx, "
+    "Tensor weight, "
+    "Tensor bias, "
+    "Tensor mean, "
+    "Tensor var, "
+    "float eps, "
+    "float output_scale, "
+    "int output_zero_point) -> Tensor",
+    torch::RegisterOperators::options().kernel<QBatchNorm3d<false>>(
+        DispatchKey::QuantizedCPUTensorId))
+.op(
+    "quantized::batch_norm3d_relu(Tensor qx, "
+    "Tensor weight, "
+    "Tensor bias, "
+    "Tensor mean, "
+    "Tensor var, "
+    "float eps, "
+    "float output_scale, "
+    "int output_zero_point) -> Tensor",
+    torch::RegisterOperators::options().kernel<QBatchNorm3d<true>>(
         DispatchKey::QuantizedCPUTensorId));
 
 } // namespace

@@ -33,6 +33,7 @@ namespace c10 {
   _(prim, Eval)                      \
   _(prim, Expand) /* onnx */         \
   _(prim, FusionGroup)               \
+  _(prim, CudaFusionGroup)           \
   _(prim, FunctionalGraph)           \
   _(prim, DifferentiableGraph)       \
   _(prim, If)                        \
@@ -79,6 +80,7 @@ namespace c10 {
   _(prim, dtype)                     \
   _(prim, shape)                     \
   _(prim, requires_grad)             \
+  _(prim, MakeTestTensor) /* test */ \
   _(prim, AutogradAdd)               \
   _(prim, GradOf)                    \
   _(aten, grad)                      \
@@ -129,6 +131,7 @@ namespace c10 {
   _(prim, TracedModuleForward)       \
   _(prim, TracedFork)                \
   _(prim, TracedAttr)                \
+  _(prim, rpc_async)                 \
   _(aten, append)                    \
   _(aten, item)                      \
   _(aten, format)                    \

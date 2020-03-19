@@ -83,6 +83,9 @@ class AliasDb {
   // Do any nodes write to `v`s memory location?
   TORCH_API bool hasWriters(const Value* v) const;
 
+  // Are any of the values in `vs` written to at `n`?
+  TORCH_API bool writtenToAtNode(const at::ArrayRef<Value*> vs, Node* n) const;
+
   // Is the operation in-place? i.e. doesn't write anywhere but locations it
   // reads from.
   TORCH_API bool isMutable(Node* n) const;
@@ -166,6 +169,7 @@ class AliasDb {
   void analyzeBroadcastingChunk(Node* node);
   void analyzeFork(Node* node);
   void analyzeWait(Node* node);
+  void analyzeRpcAsync(Node* node);
   void analyzeGradOf(Node* node);
   void analyzeSetAttr(Node* node);
   void analyzeConservative(Node* node);

@@ -9,8 +9,6 @@
 namespace torch {
 namespace jit {
 
-using namespace torch::jit::script;
-
 static const auto classSrcs1 = R"JIT(
 class FooNestedTest:
     def __init__(self, y):
