@@ -38,7 +38,7 @@ using graph_rewrite_helper::replaceConvolutionWithConv2d;
 // _scalar_type and _axis(for per channel quantization)
 using QParamVector = std::vector<std::pair<std::string, IValue>>;
 
-// This struct contains a compiled IR pattens slated for use in the
+// This struct contains a compiled IR patterns slated for use in the
 // findPatternMatches function. The struct encapsulates the common
 // information from parseIR that is used in conjunction with the
 // pattern matching facility. A const instance of this struct can
@@ -428,7 +428,7 @@ class InsertObserversHelper {
    * graph, we'll postpone inserting observer to caller as much as possible, if
    * we know the current method is the outer most method, then
    * we will insert all observers in the graph instead of postpone this to the
-   * parent, note that this assumes we don't have recurisve method
+   * parent, note that this assumes we don't have recursive method
    * calls
    *
    * returns a tuple of vectors of observer modules for input and output, these
@@ -788,11 +788,11 @@ void InsertObserversHelper::fillBoundaryValueMap(
         auto m = getInvokedModule(module, n, self);
         auto g = m.get_method(n->s(attr::name)).graph();
         // add mapping from callsite value to value in called graph
-        for (auto i = 0; i < g->outputs().size(); ++i) {
+        for (auto i = 0U; i < g->outputs().size(); ++i) {
           auto* return_val = g->outputs()[i];
           boundary_value_map_[n->output(i)].insert(return_val);
         }
-        for (auto i = 0; i < g->inputs().size(); ++i) {
+        for (auto i = 0U; i < g->inputs().size(); ++i) {
           auto* input_val = g->inputs()[i];
           boundary_value_map_[n->input(i)].insert(input_val);
           caller_to_callee_[n->input(i)] = input_val;
@@ -995,7 +995,7 @@ std::tuple<OptionalModuleVector, OptionalModuleVector, std::vector<size_t>> Inse
       if (n->kind() == prim::CallMethod) {
         auto m = getInvokedModule(module, n, self);
         std::unordered_set<Value*> callee_observed_inputs;
-        for (auto i = 0; i < n->inputs().size(); ++i) {
+        for (auto i = 0U; i < n->inputs().size(); ++i) {
           if (graph_observed_values.count(n->inputs()[i])) {
             callee_observed_inputs.insert(caller_to_callee_[n->inputs()[i]]);
           }
@@ -1007,14 +1007,14 @@ std::tuple<OptionalModuleVector, OptionalModuleVector, std::vector<size_t>> Inse
         for (auto idx : callee_observed_outputs) {
           graph_observed_values.insert(n->outputs()[idx]);
         }
-        for (auto i = 0; i < n->inputs().size(); ++i) {
+        for (auto i = 0U; i < n->inputs().size(); ++i) {
           if (input_observers[i] && !graph_inputs_outputs.count(n->inputs()[i])
               && !graph_observed_values.count(n->inputs()[i])) {
             values_to_observe[n->inputs()[i]] = *input_observers[i];
             graph_observed_values.insert(n->inputs()[i]);
           }
         }
-        for (auto i = 0; i < n->outputs().size(); ++i) {
+        for (auto i = 0U; i < n->outputs().size(); ++i) {
           if (output_observers[i] && !graph_inputs_outputs.count(n->outputs()[i])
               && !graph_observed_values.count(n->outputs()[i])) {
             values_to_observe[n->outputs()[i]] = *output_observers[i];
@@ -1038,7 +1038,7 @@ std::tuple<OptionalModuleVector, OptionalModuleVector, std::vector<size_t>> Inse
     }
   }
   std::vector<size_t> output_idxs;
-  for (auto i = 0; i < graph->outputs().size(); ++i) {
+  for (auto i = 0U; i < graph->outputs().size(); ++i) {
     if (graph_observed_values.count(graph->outputs()[i])) {
       output_idxs.push_back(i);
     }
