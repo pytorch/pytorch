@@ -31,7 +31,9 @@ def nll_loss(g, self, target, weight, reduction, ignore_index):
         else:
             return g.op("NegativeLogLikelihoodLoss", self, target, weight, reduction_s=reduction)
 
-    # if ignore_index is specified, set weights to 0 for the ignored index
+    # ignore_index specifies a target value that is ignored (not the index of the ignored value),
+    # if ignore_index is specified, create a not-equal mask on the target and
+    # set targets and weights to 0 for the ignored index
 
     ignore_index = g.op("Constant", value_t=torch.tensor(ignore_index, dtype=torch.int64))
     mask = g.op("Equal", target, ignore_index)
