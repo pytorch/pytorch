@@ -20,12 +20,19 @@ class AveragedModel(Module):
 		model (torch.nn.Module): model to use with SWA
 		device (torch.device, optional): if provided, the averaged model will be
 			stored on the :attr:`device` 
-        avg_fn (function, optional):
+        avg_fn (function, optional): the averaging function used to update 
+            parameters; the function must take in the current value of the 
+            :class:`AveragedModel` parameter, the current value of :attr:`model`
+            parameter and the number of models laready averaged; if None, 
+            equally weighted average is used (default: None)
 
 	Example:
 		>>> loader, optimizer, model = ...
-		>>> swa_model = torch.optim.swa_utils.AveragedModel(model, 
-		>>>										avg_function=<equal averaging>)
+		>>> swa_model = torch.optim.swa_utils.AveragedModel(model)
+        >>> # You can use custom averaging functions with `avg_fun` parameter
+        >>> ema_avg = lambda p_avg, p, n_avg: 0.1 * p_avg + 0.9 * p
+		>>> ema_model = torch.optim.swa_utils.AveragedModel(model, 
+		>>>										avg_function=ema_avg)
 		>>> scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, 
 		>>>										T_max=300)
 		>>> swa_start = 160
@@ -98,6 +105,7 @@ class AveragedModel(Module):
     
 def update_bn(loader, model, device=None):
     r"""Updates BatchNorm running_mean, running_var buffers in the model.
+
     It performs one pass over data in `loader` to estimate the activation
     statistics for BatchNorm layers in the model.
     Args:
@@ -109,6 +117,16 @@ def update_bn(loader, model, device=None):
             statistics.
         device (torch.device, optional): If set, data will be trasferred to
             :attr:`device` before being passed into :attr:`model`.
+
+	Example:
+		>>> loader, model = ...
+		>>> torch.optim.swa_utils.update_bn(loader, model) 
+
+	.. note::
+        The `update_bn` utility assumes that each data batch in :attr:`loader`
+        is either a tensor or a list or tuple of tensors; in the latter case it 
+        is assumed that :meth:`model.forward()` should be called on the first 
+        element of the list or tuple corresponding to the data batch.
     """
     momenta = {}
     has_bn = False
@@ -143,10 +161,15 @@ def update_bn(loader, model, device=None):
 
 
 class SWALR(_LRScheduler):
-    """
+    r"""Sets the learning rate in each parameter group to a fixed value
+    after a given number of epochs.
     ToDo
+
+    .. _Stochastic Weight Averaging in Parallel: Large-Batch Training That 
+        Generalizes Well:
+        https://arxiv.org/abs/2001.02312
     """
-    def __init__(self, optimizer, swa_lr, start_epoch=None, last_epoch=-1):
+    def __init__(self, optimizer, swa_lr, start_epoch, last_epoch=-1):
         self.swa_lr = swa_lr
         self.start_epoch = start_epoch
         super(SWALR, self).__init__(optimizer, last_epoch)
@@ -158,4 +181,4 @@ class SWALR(_LRScheduler):
         
         if self.start_epoch and self._step_count > self.start_epoch:
             return [self.swa_lr for group in self.optimizer.param_groups]
-        return [max(group['lr'], self.swa_lr) for group in self.optimizer.param_groups]
+        return [group['lr'] for group in self.optimizer.param_groups]

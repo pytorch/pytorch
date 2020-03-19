@@ -1366,34 +1366,6 @@ class TestLRScheduler(TestCase):
         schedulers = [base_scheduler, scheduler]
         self._test(schedulers, targets, epochs)
 
-    def test_compound_swa_lr_multiplicative_no_start_epoch(self):
-        # Testing chaining of SWALR scheduler in case when start_epoch is
-        # not provided
-        epochs = 10
-        mult_factor = 0.5
-        swa_lr = 0.01
-        initial_lrs = [group['lr'] for group in self.opt.param_groups]
-        targets = [[max(swa_lr, lr * mult_factor**i) for i in range(10)] for lr in initial_lrs]
-        lr_lambda = lambda epoch: mult_factor
-        base_scheduler = MultiplicativeLR(self.opt, lr_lambda=lr_lambda)
-        scheduler = SWALR(self.opt, start_epoch=None, swa_lr=swa_lr)
-        schedulers = [base_scheduler, scheduler]
-        self._test(schedulers, targets, epochs)
-    
-    def test_compound_swa_lr_multiplicative_start_before_start_epoch(self):
-        # Testing chaining of SWALR scheduler in case when start_epoch is provided
-        # but swa_lr is turned on before start_epoch
-        epochs = 10
-        mult_factor = 0.5
-        swa_lr = 0.01
-        initial_lrs = [group['lr'] for group in self.opt.param_groups]
-        targets = [[max(swa_lr, lr * mult_factor**i) for i in range(10)] for lr in initial_lrs]
-        lr_lambda = lambda epoch: mult_factor
-        base_scheduler = MultiplicativeLR(self.opt, lr_lambda=lr_lambda)
-        scheduler = SWALR(self.opt, start_epoch=7, swa_lr=swa_lr)
-        schedulers = [base_scheduler, scheduler]
-        self._test(schedulers, targets, epochs)
-
     def test_step_lr_state_dict(self):
         self._check_scheduler_state_dict(
             lambda: StepLR(self.opt, gamma=0.1, step_size=3),
@@ -1457,7 +1429,7 @@ class TestLRScheduler(TestCase):
     def test_swa_lr_state_dict(self):
         self._check_scheduler_state_dict(
             lambda: SWALR(self.opt, start_epoch=3, swa_lr=0.5),
-            lambda: SWALR(self.opt, swa_lr=5.))
+            lambda: SWALR(self.opt, start_epoch=7, swa_lr=5.))
 
     def _check_scheduler_state_dict(self, constr, constr2, epochs=10):
         scheduler = constr()
