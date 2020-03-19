@@ -1360,8 +1360,7 @@ class TestLRScheduler(TestCase):
         swa_lr = 0.01
         initial_lrs = [group['lr'] for group in self.opt.param_groups]
         targets = [[lr * mult_factor**i for i in range(5)] + [swa_lr] * 5 for lr in initial_lrs]
-        lr_lambda = lambda epoch: mult_factor
-        base_scheduler = MultiplicativeLR(self.opt, lr_lambda=lr_lambda)
+        base_scheduler = MultiplicativeLR(self.opt, lr_lambda=lambda epoch: mult_factor)
         scheduler = SWALR(self.opt, start_epoch=5, swa_lr=swa_lr)
         schedulers = [base_scheduler, scheduler]
         self._test(schedulers, targets, epochs)
@@ -1629,12 +1628,11 @@ class TestSWAUtils(TestCase):
                 p.data += torch.randn_like(p.data)
                 p_avg += p.data / n_updates
             averaged_dnn.update_parameters(dnn)
-        
+
         for p_avg, p_swa in zip(averaged_params, averaged_dnn.parameters()):
             self.assertAlmostEqual(p_avg, p_swa)
             # Check that AveragedModel is on the correct device
             self.assertTrue(p_swa.device == swa_device)
-        
 
     def test_averaged_model_all_devices(self):
         cpu = torch.device("cpu")
@@ -1662,7 +1660,7 @@ class TestSWAUtils(TestCase):
                 p.data += torch.randn_like(p.data)
                 p_avg += p.data / n_updates
             averaged_dnn.update_parameters(dnn)
-        
+
         for p_avg, p_swa in zip(averaged_params, averaged_dnn.parameters()):
             self.assertAlmostEqual(p_avg, p_swa)
             # Check that AveragedModel is on the correct device
@@ -1681,7 +1679,7 @@ class TestSWAUtils(TestCase):
                 p.data += torch.randn_like(p.data)
             averaged_dnn.update_parameters(dnn)
         averaged_dnn2.load_state_dict(averaged_dnn.state_dict())
-        for p_swa, p_swa2 in zip( averaged_dnn.parameters(), averaged_dnn2.parameters()):
+        for p_swa, p_swa2 in zip(averaged_dnn.parameters(), averaged_dnn2.parameters()):
             self.assertAlmostEqual(p_swa, p_swa2)
         self.assertTrue(averaged_dnn.n_averaged == averaged_dnn2.n_averaged)
 
@@ -1692,7 +1690,9 @@ class TestSWAUtils(TestCase):
             torch.nn.Linear(5, 10)
         )
         alpha = 0.9
-        avg_fun = lambda p_avg, p, n_avg: alpha * p_avg + (1 - alpha) * p
+
+        def avg_fun(p_avg, p, n_avg): 
+            return alpha * p_avg + (1 - alpha) * p
         averaged_dnn = AveragedModel(dnn, avg_fun=avg_fun)
         averaged_params = [torch.zeros_like(param) for param in dnn.parameters()]
         n_updates = 10
@@ -1707,7 +1707,7 @@ class TestSWAUtils(TestCase):
                                                    p * (1 - alpha)).clone())
             averaged_dnn.update_parameters(dnn)
             averaged_params = updated_averaged_params
-        
+
         for p_avg, p_swa in zip(averaged_params, averaged_dnn.parameters()):
             self.assertAlmostEqual(p_avg, p_swa)
 
