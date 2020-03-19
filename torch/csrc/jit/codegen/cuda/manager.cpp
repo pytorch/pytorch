@@ -73,7 +73,7 @@ public:
     runKernel(cuda_kernel_entry, inputs, outputs);
   }
 
-protected:
+private:
 
   std::mutex mutex_;
 
@@ -89,8 +89,6 @@ protected:
 
   std::unordered_map<std::string, int32_t> graph_cache_;
   std::unordered_map<int64_t, CudaKernel> kernel_cache_;
-
-private:
 
   int32_t next_unique_id_ = 0;
 };
