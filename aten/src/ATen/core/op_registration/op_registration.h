@@ -612,11 +612,6 @@ private:
 //    .impl("mul", torch::dispatch(torch::kCPU, &mul_cpu_impl))
 //    .impl("mul", torch::dispatch(torch::kCUDA, &mul_cuda_impl))
 //
-//    // Define an "optimized" operator with extra inlining
-//    // (you can use this with torch::dispatch too); mostly only used for
-//    // our internal stuff
-//    .impl("sub", TORCH_OPTIMIZED_FN(sub_impl))
-//
 // Also, you can omit the top level namespace and specify it explicitly in
 // the sub-definitions, e.g.,  torch::import().impl("aten::mul", ...)
 
@@ -639,6 +634,7 @@ public:
     : func_(c10::KernelFunction::makeFromUnboxedRuntimeFunction(f))
     // TODO: Don't go through WrapRuntimeKernelFunctor
     , schema_(detail::FunctionSchemaInferer<detail::WrapRuntimeKernelFunctor<std::decay_t<Func>>>()())
+    , debug_(std::string(c10::util::get_fully_qualified_type_name<Func>()))
     {}
 
   // This overload accepts lambdas, e.g., CppFunction([](const Tensor& self) { ... })
@@ -647,6 +643,7 @@ public:
     : func_(c10::KernelFunction::makeFromUnboxedLambda(std::forward<Lambda>(f)))
     // TODO: Don't go through WrapRuntimeKernelFunctor
     , schema_(detail::FunctionSchemaInferer<detail::WrapRuntimeKernelFunctor<std::decay_t<Lambda>>>()())
+    , debug_(std::string(c10::util::get_fully_qualified_type_name<Lambda>()))
     {}
 
   // This static factory lets you create CppFunctions that (1) don't have boxing
@@ -658,7 +655,8 @@ public:
   static CppFunction makeUnboxedOnly(Func* f) {
     return CppFunction(
       c10::KernelFunction::makeFromUnboxedOnlyRuntimeFunction(f),
-      /* schema */ nullptr
+      /* schema */ nullptr,
+      std::string(c10::util::get_fully_qualified_type_name<Func>())
     );
   }
 
@@ -666,7 +664,8 @@ public:
   static CppFunction makeFallthrough() {
     return CppFunction(
       c10::KernelFunction::makeFallthrough(),
-      /* schema */ nullptr
+      /* schema */ nullptr,
+      "Fallthrough"
     );
   }
 
@@ -675,14 +674,21 @@ public:
   static CppFunction makeFromBoxedFunction() {
     return CppFunction(
       c10::KernelFunction::makeFromBoxedFunction<func>(),
-      /* schema */ nullptr
+      /* schema */ nullptr,
+      "BoxedFunction" // TODO: make this more descriptive
     );
+  }
+
+  CppFunction&& debug(std::string d) && {
+    debug_ = std::move(d);
+    return std::move(*this);
   }
 
 private:
   c10::optional<c10::DispatchKey> dispatch_key_;
   c10::KernelFunction func_;
   std::unique_ptr<c10::FunctionSchema> schema_;
+  std::string debug_;
 
   // The "setter" for dispatch_key_
   template <typename Func>
@@ -693,7 +699,7 @@ private:
   // want users to use)
   friend class Module;
 
-  CppFunction(KernelFunction func, std::unique_ptr<c10::FunctionSchema> schema);
+  CppFunction(KernelFunction func, std::unique_ptr<c10::FunctionSchema> schema, std::string debug);
 };
 
 // Create a CppFunction which is associated with a specific dispatch key.
@@ -772,18 +778,15 @@ inline c10::either<OperatorName, FunctionSchema> constructSchemaOrName(const cha
 //        .def("aten::mul", ...)
 //
 class CAFFE2_API Module final {
-  // Could be nullptr, in which case it represents the "top-level" namespace
-  // (all subsequent definitions must be explicitly namespaced).
-  // TODO: Could store a optional<std::string> if you want to support dynamically computed
-  // namespaces; for now don't support
-  const char* ns_;
+  c10::optional<std::string> ns_;
 
   std::vector<RegistrationHandleRAII> registrars_;
 
-  Module(const char* ns);
+  Module(std::string ns);
+  Module();
 
   // Use these as the constructors
-  friend Module import(const char* ns);
+  friend Module import(std::string ns);
   friend Module import();
 
 public:
@@ -892,14 +895,14 @@ public:
 };
 
 // Return the namespace corresponding to the string 'ns'
-inline Module import(const char* ns) {
-  return Module(ns);
+inline Module import(std::string ns) {
+  return Module(std::move(ns));
 }
 
 // Return the "top-level" namespace; subsequent definitions must be explicitly
 // namespaced
 inline Module import() {
-  return Module(nullptr);
+  return Module();
 }
 
 } // namespace c10

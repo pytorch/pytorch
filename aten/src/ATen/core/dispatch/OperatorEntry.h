@@ -16,13 +16,18 @@ namespace impl {
 // and its dispatch table. This is not part of the public API.
 class CAFFE2_API OperatorEntry final {
 public:
-  struct KernelSchemaPair {
-    KernelSchemaPair(KernelFunction k, std::unique_ptr<FunctionSchema> s)
+  struct KernelEntry {
+    KernelEntry(KernelFunction k, std::unique_ptr<FunctionSchema> s, std::string d)
       : kernel(std::move(k))
       , inferred_function_schema(std::move(s))
+      , debug(std::move(d))
       {}
     KernelFunction kernel;
     std::unique_ptr<FunctionSchema> inferred_function_schema;
+    // A little debug string to help us identify the kernel in question.
+    // Mostly used in testing but it might be possible to augment
+    // regular registrations with some more info here too
+    std::string debug;
   };
 
   explicit OperatorEntry(FunctionSchema&& schema);
@@ -71,8 +76,8 @@ public:
   void prepareForDeregistration();
 
   // Postcondition: caller is responsible for disposing of the kernel
-  std::list<KernelSchemaPair>::iterator registerKernel(c10::optional<DispatchKey> dispatch_key, KernelFunction kernel, std::unique_ptr<FunctionSchema> inferred_function_schema);
-  void deregisterKernel_(c10::optional<DispatchKey> dispatch_key, std::list<KernelSchemaPair>::iterator kernel);
+  std::list<KernelEntry>::iterator registerKernel(c10::optional<DispatchKey> dispatch_key, KernelFunction kernel, std::unique_ptr<FunctionSchema> inferred_function_schema, std::string debug);
+  void deregisterKernel_(c10::optional<DispatchKey> dispatch_key, std::list<KernelEntry>::iterator kernel);
 
   std::string dumpState() const;
   void checkInvariants() const;
@@ -116,7 +121,7 @@ private:
   // re-executed and then only allow one kernel here, i.e. error if a kernel
   // is already registered, but that's a lot of effort to implement and
   // currently not high-pri.
-  ska::flat_hash_map<c10::optional<DispatchKey>, std::list<KernelSchemaPair>> kernels_;
+  ska::flat_hash_map<c10::optional<DispatchKey>, std::list<KernelEntry>> kernels_;
 
   std::mutex kernelsMutex_; // protects kernels_
 

@@ -13,7 +13,7 @@ namespace {
     }
   }
 
-  std::string listAllDispatchKeys(const ska::flat_hash_map<c10::optional<DispatchKey>, std::list<OperatorEntry::KernelSchemaPair>>& kernels) {
+  std::string listAllDispatchKeys(const ska::flat_hash_map<c10::optional<DispatchKey>, std::list<OperatorEntry::KernelEntry>>& kernels) {
     if (kernels.size() == 0) {
       return "";
     }
@@ -79,10 +79,11 @@ void OperatorEntry::deregisterSchema() {
   dispatchTable_.deregisterSchema();
 }
 
-std::list<OperatorEntry::KernelSchemaPair>::iterator OperatorEntry::registerKernel(
+std::list<OperatorEntry::KernelEntry>::iterator OperatorEntry::registerKernel(
   c10::optional<DispatchKey> dispatch_key,
   KernelFunction kernel,
-  std::unique_ptr<FunctionSchema> inferred_function_schema
+  std::unique_ptr<FunctionSchema> inferred_function_schema,
+  std::string debug
 ) {
   std::unique_lock<std::mutex> lock(kernelsMutex_);
 
@@ -93,8 +94,8 @@ std::list<OperatorEntry::KernelSchemaPair>::iterator OperatorEntry::registerKern
   // Add the kernel to the kernels list,
   // possibly creating the list if this is the first kernel.
   auto& k = kernels_[dispatch_key];
-  k.emplace_front(std::move(kernel), std::move(inferred_function_schema));
-  std::list<OperatorEntry::KernelSchemaPair>::iterator inserted = k.begin();
+  k.emplace_front(std::move(kernel), std::move(inferred_function_schema), std::move(debug));
+  std::list<OperatorEntry::KernelEntry>::iterator inserted = k.begin();
   // update the dispatch table, i.e. re-establish the invariant
   // that the dispatch table points to the newest kernel
   updateDispatchTable_(dispatch_key);
@@ -103,7 +104,7 @@ std::list<OperatorEntry::KernelSchemaPair>::iterator OperatorEntry::registerKern
 
 void OperatorEntry::deregisterKernel_(
   c10::optional<DispatchKey> dispatch_key,
-  std::list<OperatorEntry::KernelSchemaPair>::iterator kernel
+  std::list<OperatorEntry::KernelEntry>::iterator kernel
 ) {
   std::unique_lock<std::mutex> lock(kernelsMutex_);
 
@@ -166,9 +167,14 @@ std::string OperatorEntry::dumpState() const {
   auto print_key = [&](c10::optional<DispatchKey> k) {
     auto it = kernels_.find(k);
     if (it != kernels_.end()) {
+      int64_t i = 0;
       for (const auto& jt : it->second) {
-        oss << (k ? toString(k) : "catchall") << ": "
-            << jt.kernel.dumpState() << ":: " << toString(*jt.inferred_function_schema) << "\n";
+        oss << (k ? toString(k) : "catchall")
+            << (i > 0 ? " (inactive)" : "")
+            << ": "
+            << jt.debug << " :: "
+            << toString(*jt.inferred_function_schema) << " [ " << jt.kernel.dumpState() << "]\n";
+        i++;
       }
     }
   };

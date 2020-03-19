@@ -140,7 +140,7 @@ public:
    */
   // NB: steals the inferred function schema, as we may need to hold on to
   // it for a bit until the real schema turns up
-  RegistrationHandleRAII registerImpl(OperatorName op_name, c10::optional<DispatchKey> dispatch_key, KernelFunction kernel, std::unique_ptr<FunctionSchema> inferred_function_schema);
+  RegistrationHandleRAII registerImpl(OperatorName op_name, c10::optional<DispatchKey> dispatch_key, KernelFunction kernel, std::unique_ptr<FunctionSchema> inferred_function_schema, std::string debug);
 
   /**
    * Register a fallback kernel for a backend.
@@ -173,7 +173,7 @@ private:
   OperatorHandle findOrRegisterName_(const OperatorName& op_name);
 
   void deregisterDef_(const OperatorHandle& op, const OperatorName& op_name);
-  void deregisterImpl_(const OperatorHandle& op, const OperatorName& op_name, c10::optional<DispatchKey> dispatch_key, std::list<impl::OperatorEntry::KernelSchemaPair>::iterator kernel_handle);
+  void deregisterImpl_(const OperatorHandle& op, const OperatorName& op_name, c10::optional<DispatchKey> dispatch_key, std::list<impl::OperatorEntry::KernelEntry>::iterator kernel_handle);
   void deregisterFallback_(DispatchKey dispatchKey);
   void cleanup(const OperatorHandle& op, const OperatorName& op_name);
 

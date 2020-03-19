@@ -82,35 +82,59 @@ void initDispatchBindings(PyObject* module) {
     //
     // Mangling scheme: args_rets.  One character per.
     //  t = Tensor
-    .def("def_name_t_t", [](py::object self, const char* name, const char* dispatch) {
-      self.cast<c10::Module&>().def(name, dispatch_str(dispatch, [](const at::Tensor& a) {
-        return a;
-      }));
+    .def("def_name_t_t", [](py::object self, const char* name, const char* dispatch, const char* debug) {
+      self.cast<c10::Module&>().def(
+        name,
+        dispatch_str(dispatch, [](const at::Tensor& a) {
+          return a;
+        }).debug(debug)
+      );
       return self;
-    }, "", py::arg("name"), py::arg("dispatch") = "")
-    .def("def_schema_t_t", [](py::object self, const char* schema, const char* dispatch, const char* alias) {
-      self.cast<c10::Module&>().def(torch::schema(schema, parseAliasAnalysisKind(alias)), dispatch_str(dispatch, [](const at::Tensor& a) {
-        return a;
-      }));
+    }, "", py::arg("name"),
+           py::arg("dispatch") = "",
+           py::arg("debug") = "default_def_name_t_t")
+    .def("def_schema_t_t", [](py::object self, const char* schema, const char* dispatch, const char* alias, const char* debug) {
+      self.cast<c10::Module&>().def(
+        torch::schema(schema, parseAliasAnalysisKind(alias)),
+        dispatch_str(dispatch, [](const at::Tensor& a) {
+          return a;
+        }).debug(debug)
+      );
       return self;
-    }, "", py::arg("name"), py::arg("dispatch") = "", py::arg("alias") = "")
-    .def("impl_t_t", [](py::object self, const char* name, const char* dispatch) {
-      self.cast<c10::Module&>().impl(name, dispatch_str(dispatch, [](const at::Tensor& a) {
-        return a;
-      }));
+    }, "", py::arg("name"),
+           py::arg("dispatch") = "",
+           py::arg("alias") = "",
+           py::arg("debug") = "default_def_schema_t_t")
+    // TODO: maybe consider deduplicating the definitions here, it's getting
+    // pretty long
+    .def("impl_t_t", [](py::object self, const char* name, const char* dispatch, const char* debug) {
+      self.cast<c10::Module&>().impl(
+        name,
+        dispatch_str(dispatch, [](const at::Tensor& a) {
+          return a;
+        }).debug(debug)
+      );
       return self;
-    }, "", py::arg("name"), py::arg("dispatch") = "")
-    .def("impl_tt_t", [](py::object self, const char* name, const char* dispatch) {
-      self.cast<c10::Module&>().impl(name, dispatch_str(dispatch, [](const at::Tensor& a, const at::Tensor& b) {
-        return a;
-      }));
+    }, "", py::arg("name"),
+           py::arg("dispatch") = "",
+           py::arg("debug") = "impl_t_t")
+    .def("impl_tt_t", [](py::object self, const char* name, const char* dispatch, const char* debug) {
+      self.cast<c10::Module&>().impl(
+        name,
+        dispatch_str(dispatch, [](const at::Tensor& a, const at::Tensor& b) {
+          return a;
+        }).debug(debug)
+      );
       return self;
-    }, "", py::arg("name"), py::arg("dispatch") = "")
+    }, "", py::arg("name"), py::arg("dispatch") = "", py::arg("debug") = "")
   ;
 
-  // NB: no support for namespace because cannot guarantee its lifetime
-  m.def("_dispatch_import", []() {
-    return std::make_unique<c10::Module>(torch::import());
+  m.def("_dispatch_import", [](std::string name) {
+    if (name.empty()) {
+      return std::make_unique<c10::Module>(torch::import());
+    } else {
+      return std::make_unique<c10::Module>(torch::import(name));
+    }
   });
 
   m.def("_dispatch_dump", [](const char* name) -> std::string {
