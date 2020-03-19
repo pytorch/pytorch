@@ -52,8 +52,13 @@ void SGDParamState::serialize(torch::serialize::InputArchive& archive) {
   _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(Tensor, momentum_buffer);
 }
 
-void SGD::step() {
+Tensor SGD::step(LossClosure closure)  {
   NoGradGuard no_grad;
+  Tensor loss = {};
+  if (closure != nullptr) {
+    at::AutoGradMode enable_grad(true);
+    loss = closure();
+  }
   for (auto& group : param_groups_) {
     auto& options = static_cast<SGDOptions&>(group.options());
     auto weight_decay = options.weight_decay();
@@ -90,22 +95,7 @@ void SGD::step() {
       p.data().add_(d_p, -1 * options.lr());
     }
   }
-}
-
-void SGD::add_parameters(const std::vector<Tensor>& parameters) {
-  return _add_parameters_new_design(parameters);
-}
-
-const std::vector<Tensor>& SGD::parameters() const noexcept {
-  return _parameters_new_design();
-}
-
-std::vector<Tensor>& SGD::parameters() noexcept {
-  return _parameters_new_design();
-}
-
-size_t SGD::size() const noexcept {
-  return _size_new_design();
+  return loss;
 }
 
 void SGD::save(serialize::OutputArchive& archive) const {
