@@ -1951,8 +1951,8 @@ private:
   : Type(TypeKind::AnyTupleType) {}
 };
 
-// the common supertype of all lists,
-// List[T] <: AnyList for all T
+// the common supertype of all classes,
+// ClassType <: AnyClassType for all classes
 struct AnyClassType;
 using AnyClassTypePtr = std::shared_ptr<AnyClassType>;
 struct CAFFE2_API AnyClassType : public Type {
