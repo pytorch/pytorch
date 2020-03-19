@@ -2080,7 +2080,7 @@ Example::
 
 add_docstr(torch.floor_divide,
            r"""
-floor_divide(input, other) -> Tensor
+floor_divide(input, other, out=None) -> Tensor
 
 Return the division of the inputs rounded down to the nearest integer. See :func:`torch.div`
 for type promotion and broadcasting rules.
@@ -2092,6 +2092,9 @@ for type promotion and broadcasting rules.
 Args:
     input (Tensor): the numerator tensor
     other (Tensor or Scalar): the denominator
+
+Keyword args:
+    {out}
 
 Example::
 
@@ -6484,6 +6487,13 @@ add_docstr(torch.full,
 full(size, fill_value, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
 Returns a tensor of size :attr:`size` filled with :attr:`fill_value`.
+
+.. warning::
+    In PyTorch 1.5 bool or integral :attr:`fill_value`s will produce a warning if
+    :attr:`dtype` or :attr:`out` are not set.
+    In a future PyTorch release, when :attr:`dtype` and :attr:`out` are not set
+    a bool :attr:`fill_value` will return a tensor of torch.bool dtype,
+    and an integral :attr:`fill_value` will return a tensor of torch.long dtype.
 
 Args:
     size (int...): a list, tuple, or :class:`torch.Size` of integers defining the

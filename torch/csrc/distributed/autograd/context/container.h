@@ -52,6 +52,10 @@ class TORCH_API DistAutogradContainer {
   // Retrieve the autograd context for a given context_id.
   ContextPtr retrieveContext(int64_t context_id);
 
+  // Retrieve the autograd context for a given context_id if it exists,
+  // otherwise return nullptr.
+  ContextPtr retrieveContextIfPresent(int64_t context_id);
+
   // Retrieves the currently active autograd context for the current thread.
   ContextPtr currentContext();
 
