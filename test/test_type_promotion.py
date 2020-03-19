@@ -439,7 +439,7 @@ class TestTypePromotion(TestCase):
         a = torch.tensor([[True, True], [False, True]], device=device)
         self.assertEqual(a.t() == 0, a.t() == False)  # noqa: E712
 
-    @dtypes(torch.bool, torch.short, torch.uint8, torch.int, torch.long)
+    @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
     @float_double_default_dtype
     def test_true_divide(self, device, dtype):
         dividend = (torch.randn(5, device=device) * 100).to(dtype)
@@ -455,7 +455,7 @@ class TestTypePromotion(TestCase):
 
     @onlyOnCPUAndCUDA
     @dtypes(torch.float, torch.double,
-            torch.bool, torch.short, torch.uint8, torch.int, torch.long)
+            torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
     def test_true_divide_out(self, device, dtype):
         dividend = (torch.randn(5, device=device) * 100).to(dtype)
         divisor = torch.arange(1, 6, device=device).to(dtype)
@@ -477,7 +477,7 @@ class TestTypePromotion(TestCase):
                              torch.true_divide(dividend, 2, out=floating_quotient))
 
     @dtypes(torch.float, torch.double,
-            torch.bool, torch.short, torch.uint8, torch.int, torch.long)
+            torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
     def test_true_divide_inplace(self, device, dtype):
         dividend = (torch.randn(5, device=device) * 100).to(dtype)
         divisor = torch.arange(1, 6, device=device).to(dtype)
