@@ -1,10 +1,10 @@
+#include <torch/csrc/jit/frontend/parser.h>
 #include <torch/csrc/jit/frontend/script_type_parser.h>
 #include <torch/csrc/jit/ir/ir.h>
-#include <torch/csrc/jit/frontend/parser.h>
+#include <torch/custom_class.h>
 
 namespace torch {
 namespace jit {
-namespace script {
 const std::unordered_map<std::string, TypePtr>& string_to_type_lut();
 namespace {
 
@@ -178,6 +178,10 @@ TypePtr ScriptTypeParser::parseTypeFromExpr(const Expr& expr) const {
       if (auto typePtr = resolver_->resolveType(*name, expr.range())) {
         return typePtr;
       }
+    }
+
+    if (auto custom_class_type = getCustomClass(*name)) {
+      return custom_class_type;
     }
 
     throw ErrorReport(expr) << "Unknown type name '" << *name << "'";
@@ -355,6 +359,5 @@ c10::IValue ScriptTypeParser::parseClassConstant(const Assign& assign) {
   return *default_val.begin();
 }
 
-} // namespace script
 } // namespace jit
 } // namespace torch

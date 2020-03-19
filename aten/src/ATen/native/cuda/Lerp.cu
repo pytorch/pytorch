@@ -28,15 +28,15 @@ inline void lerp_cuda(at::Tensor& ret, const at::Tensor& self, const at::Tensor&
 
 template <typename scalar_t>
 void lerp_scalar_cuda(at::Tensor& ret, const at::Tensor& self, const at::Tensor& end, scalar_t weight_val) {
-  at::cuda::CUDA_tensor_apply3<scalar_t, scalar_t, scalar_t>(
-      ret, self, end,
-      [=] __device__(
-         scalar_t& ret_val,
-         const scalar_t& self_val,
-         const scalar_t& end_val) {
-        ret_val = (weight_val < 0.5) ?
-            self_val + weight_val * (end_val - self_val) : end_val - (end_val - self_val) * (1 - weight_val);
-      });
+  at::TensorIterator iter;
+  iter.add_output(ret);
+  iter.add_input(self);
+  iter.add_input(end);
+  iter.build();
+  at::native::gpu_kernel(iter,
+    [=] GPU_LAMBDA (scalar_t self_val, scalar_t end_val) {
+      return (weight_val < 0.5) ? self_val + weight_val * (end_val - self_val) : end_val - (end_val - self_val) * (1 - weight_val);
+    });
 }
 } // namespace
 

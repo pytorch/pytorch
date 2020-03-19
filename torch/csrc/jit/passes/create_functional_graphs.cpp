@@ -130,7 +130,8 @@ struct FunctionalGraphSlicer {
   }
 
   bool AnalyzeFunctionalSubset(Node* n) {
-    bool functional_node = true;
+    // TODO: clarify hasSideEffects, isNondeterministic
+    bool is_functional_node = true;
 
     // Functional Graphs are not responsible for maintaining aliasing
     // relationships. If an output of a functional graph escapes scope
@@ -143,30 +144,30 @@ struct FunctionalGraphSlicer {
     // graph
     // - allow functional graphs to have at most one value that can escape scope
     // - allow outputs which alias the wildcard set but do not "re-escape"
-
     for (Value* v : n->outputs()) {
       bool has_writers = aliasDb_->hasWriters(v);
       bool escapes_scope = aliasDb_->escapesScope(v);
       if (has_writers) {
         mutated_values_.insert(v);
       }
-      functional_node = functional_node && !escapes_scope && !has_writers;
+      is_functional_node = is_functional_node && !escapes_scope && !has_writers;
     }
 
     for (Block* block : n->blocks()) {
       auto functional_block = AnalyzeFunctionalSubset(block);
-      functional_node = functional_node && functional_block;
+      is_functional_node = is_functional_node && functional_block;
     }
 
+    // mutated_values_ already populated with inputs to this node
     auto inputs = n->inputs();
-    functional_node = functional_node &&
+    is_functional_node = is_functional_node &&
         std::all_of(inputs.begin(), inputs.end(), [&](Value* v) {
                         return !mutated_values_.count(v);
                       });
-    if (functional_node) {
+    if (is_functional_node) {
       functional_nodes_.insert(n);
     }
-    return functional_node;
+    return is_functional_node;
   }
 
   void AnalyzeFunctionalSubset(at::ArrayRef<Block*> blocks) {
@@ -185,6 +186,9 @@ struct FunctionalGraphSlicer {
         mutated_values_.insert(v);
       }
     }
+    // if a block output is not functional, then the corresponding output for the node 
+    // that contains the block will not be functional either, 
+    // so we do not need to analyze the block outputs here.
     for (Node* n : block->nodes()) {
       bool functional = AnalyzeFunctionalSubset(n);
       is_functional_block = is_functional_block && functional;
@@ -223,12 +227,16 @@ struct MutationRemover {
   }
 
  private:
-  bool uniqueAlias(Value* v) {
+  bool newMemoryLocation(Value* v) {
+    // bail on nodes with side effects, blocks, or graphs
+    Node* n = v->node();
+    bool unhandled_node = n->blocks().size() != 0 ||
+        n->hasAttribute(attr::Subgraph) || n->hasSideEffects();
+
     // if the output isn't contained or alias by the inputs to its node, it's
     // unique
-    bool unique_alias = !aliasDb_->mayContainAlias(v->node()->inputs(), v);
-    // bail on nodes with side effects like prim::If etc
-    return unique_alias && !v->node()->hasSideEffects();
+    return !unhandled_node &&
+        !aliasDb_->mayContainAlias(v->node()->inputs(), v);
   }
 
   bool inplaceOpVariant(Node* n) {
@@ -240,6 +248,28 @@ struct MutationRemover {
     if (!inplace_op) {
       return false;
     }
+
+    // needs to have alias analysis by schema
+    auto op = n->maybeOperator();
+    if (!op) {
+      return false;
+    }
+    if (op->aliasAnalysisKind() != AliasAnalysisKind::FROM_SCHEMA) {
+      return false;
+    }
+
+    // all inplace ops at time of writing have a single input that is mutated
+    // and returned. check that this is true, anything else could have strange
+    // semantics,
+    if (n->outputs().size() != 1 || n->inputs().size() == 0) {
+      return false;
+    }
+    auto inputs = n->inputs();
+    if (!aliasDb_->writtenToAtNode(inputs.at(0), n) ||
+        aliasDb_->writtenToAtNode(inputs.slice(1), n)) {
+      return false;
+    }
+
     auto new_schema = name.substr(0, name.size() - 1);
     return getAllOperatorsFor(Symbol::fromQualString(new_schema)).size() != 0;
   }
@@ -263,7 +293,7 @@ struct MutationRemover {
       // We can only remove mutation to values that are unique aliases in the
       // graph. if x = y[0] or y = self.y, then removing the mutation could
       // change observable semantics
-      if (!uniqueAlias(mutated_value)) {
+      if (!newMemoryLocation(mutated_value)) {
         continue;
       }
 
@@ -271,13 +301,6 @@ struct MutationRemover {
       // subsequent mutation need to be one atomic operation
       if (!aliasDb_->moveBeforeTopologicallyValid(
               mutated_value->node(), node)) {
-        continue;
-      }
-
-      // all inplace ops at time of writing have a single output. new ops with
-      // multiple outputs could have strange aliasing cases so only handle the
-      // single output case
-      if (node->outputs().size() != 1) {
         continue;
       }
 

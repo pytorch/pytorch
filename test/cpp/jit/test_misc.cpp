@@ -69,10 +69,8 @@
 
 namespace torch {
 namespace jit {
-inline c10::OperatorOptions aliasAnalysisFromSchema() {
-  c10::OperatorOptions result;
-  result.setAliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA);
-  return result;
+inline c10::AliasAnalysisKind aliasAnalysisFromSchema() {
+  return c10::AliasAnalysisKind::FROM_SCHEMA;
 }
 
 
@@ -370,7 +368,7 @@ void testCustomFusion() {
       %3 : Tensor = aten::mul(%2, %0)
       return (%3))IR";
   auto g = std::make_shared<Graph>();
-  torch::jit::script::parseIR(graph_string, g.get());
+  torch::jit::parseIR(graph_string, g.get());
 
   torch::jit::overrideCanFuseOnCPU(true);
   CustomFuseGraph(
@@ -414,7 +412,7 @@ void testCustomFusionNestedBlocks() {
     %9 : Tensor = aten::add(%4, %2, %3)
     return (%4))IR";
   auto g = std::make_shared<Graph>();
-  torch::jit::script::parseIR(graph_string, g.get());
+  torch::jit::parseIR(graph_string, g.get());
 
   CustomFuseGraph(
       g,
@@ -491,7 +489,7 @@ void testEvalModeForLoadedModule() {
   if (isSandcastle())
     return; // The module file to load is not generated in Sandcastle
   std::string module_path = "dropout_model.pt";
-  torch::jit::script::Module module = torch::jit::load(module_path);
+  torch::jit::Module module = torch::jit::load(module_path);
   AT_ASSERT(module.attr("dropout").toModule().is_training());
   module.eval();
   AT_ASSERT(!module.attr("dropout").toModule().is_training());
@@ -736,12 +734,12 @@ void checkTracedInputs(const TracedTestInputs& inputs) {
       found_test = true;
       TORCH_CHECK(sizes.size() == 1);
       TORCH_CHECK(sizes[0] == std::vector<int64_t>({1, 2, 3}));
-    } else if (fn == "test::pow") {
+    } else if (fn == "pow") {
       found_pow = true;
       TORCH_CHECK(sizes.size() == 2);
       TORCH_CHECK(sizes[0] == std::vector<int64_t>({1, 2, 3}));
       TORCH_CHECK(sizes[1].empty());
-    } else if (fn.find("::mul") != std::string::npos) {
+    } else if (fn == "mul") {
       found_mul = true;
       TORCH_CHECK(sizes.size() > 1);
       TORCH_CHECK(sizes[0] == std::vector<int64_t>({1, 2, 3}));
@@ -750,19 +748,6 @@ void checkTracedInputs(const TracedTestInputs& inputs) {
   TORCH_CHECK(found_test);
   TORCH_CHECK(found_pow);
   TORCH_CHECK(found_mul);
-}
-
-std::string getFullName(const autograd::profiler::RecordFunction* fn_ptr) {
-  std::string full_name = "";
-  while (fn_ptr != nullptr) {
-    if (!full_name.empty()) {
-      full_name = std::string(fn_ptr->name().str()) + "::" + full_name;
-    } else {
-      full_name = fn_ptr->name().str();
-    }
-    fn_ptr = fn_ptr->parent();
-  }
-  return full_name;
 }
 
 void testRecordFunction() {
@@ -780,7 +765,7 @@ void testRecordFunction() {
           }
         }
         traced_inputs.push_back(
-            std::make_tuple(std::string(getFullName(&fn)), sizes));
+            std::make_tuple(fn.name().str(), sizes));
       },
       [](const autograd::profiler::RecordFunction&) {},
       /* needs_inputs */ true);
@@ -988,7 +973,7 @@ void testNoneSchemaMatch() {
 }
 
 void testModuleDefine() {
-  script::Module m("m");
+  Module m("m");
   m.register_parameter("foo", torch::ones({}), false);
   m.define(R"(
     def add_it(self, x, b : int = 4):
@@ -999,7 +984,7 @@ void testModuleDefine() {
 }
 
 void testModuleConversion() {
-  script::Module m("test");
+  Module m("test");
   {
     // test cuda to cpu for params and buffers
     m.register_parameter("foo", torch::ones({}, at::kCUDA), false);
@@ -1031,7 +1016,7 @@ RegisterPass p(fakePass);
 
 void testPassManagement() {
   std::shared_ptr<Graph> graph = std::make_shared<Graph>();
-  script::parseIR(
+  parseIR(
       R"IR(
 graph(%a):
   return (%a))IR",

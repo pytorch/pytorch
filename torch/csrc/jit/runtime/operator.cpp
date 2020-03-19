@@ -98,7 +98,7 @@ struct OperatorRegistry {
         rankings(cmp);
     static constexpr size_t MAX_EDIT_DIST = 2u;
     for (const auto& op : operators) {
-      auto edit_dist = script::ComputeEditDistance(
+      auto edit_dist = ComputeEditDistance(
           input_op.toQualString(), op.first.toQualString(), MAX_EDIT_DIST);
       if (edit_dist <= MAX_EDIT_DIST) {
         rankings.emplace(edit_dist, op.first);
@@ -158,6 +158,7 @@ bool printerHasSpecialCaseFor(Symbol sym) {
       prim::isinstance,
       prim::unchecked_cast,
       prim::tolist,
+      prim::rpc_async,
   };
 
   // WARNING: by adding a value to this set, you are asserting that your
@@ -171,12 +172,14 @@ bool printerHasSpecialCaseFor(Symbol sym) {
       prim::AutogradAnyNonZero, // temporarily inserted by autograd
       prim::AutogradAdd, // temporarily inserted by autograd
       prim::ConstantChunk, // optimization pass adds it
-      prim::DifferentiableGraph, // optimization pass adds it
+      prim::DifferentiableGraph, // optimization pass adds it,
+      prim::FunctionalGraph, // optimization pass adds it,
       prim::BroadcastSizes, // optimization pass (fuser) adds it
       prim::ChunkSizes, // optimization pass (fuser) adds it
       prim::Drop, // used in interpreter only
       prim::FusedConcat, // optimization pass adds it
       prim::FusionGroup, // optimization pass adds it
+      prim::CudaFusionGroup, // optimization pass adds it
       prim::Load, // used in interpreter only
       prim::MMTreeReduce, // used as an optimization
       prim::MMBatchSide, // used as an optimization
@@ -207,7 +210,9 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::If,
       prim::Loop,
       prim::FusionGroup,
+      prim::CudaFusionGroup,
       prim::DifferentiableGraph,
+      prim::FunctionalGraph,
       prim::Constant,
       prim::Uninitialized,
       prim::DictConstruct,
@@ -241,6 +246,7 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::isinstance,
       prim::unchecked_cast,
       prim::tolist,
+      prim::rpc_async,
   };
 
   // Operators that should not be used by alias analysis

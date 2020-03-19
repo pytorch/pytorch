@@ -35,6 +35,22 @@ class TestScriptPy3(JitTestCase):
         self.assertAlmostEqual(out, out_script)
         self.assertEqual(captured, captured_script)
 
+    @unittest.skipIf(sys.version_info[:2] < (3, 7), "`dataclasses` module not present on < 3.7")
+    def test_dataclass_error(self):
+        from dataclasses import dataclass
+        @dataclass
+        class NormalizationInfo(object):
+            mean: float = 0.0
+
+            def compute(self, total_rows):
+                return self.mean
+
+        def fn():
+            return NormalizationInfo(1, 2, 3, 4, 5)
+
+        with self.assertRaisesRegex(OSError, "NormalizationInfo"):
+            torch.jit.script(fn)
+
     def test_optional_dict_construct(self):
         class M(torch.nn.Module):
             def use(self, buffer: Dict[str, Optional[torch.Tensor]]):
