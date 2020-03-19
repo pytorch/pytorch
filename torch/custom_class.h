@@ -55,7 +55,7 @@ class class_ {
   /// see this class exposed as in Python and TorchScript. For example, if
   /// you pass in "MyStack" here, the class will appear as
   /// `torch.classes.MyStack` in both Python and TorchScript.
-  class_(std::string className_) : className(std::move(className_)) {
+  explicit class_(const std::string& className) : className(std::move(className)) {
     qualClassName = topModule + "." + parentModule + "." + className;
 
     classTypePtr = at::ClassType::create(
@@ -129,6 +129,17 @@ class class_ {
   ///
   /// `T` must be an object that is convertable to IValue by the same rules
   /// for custom op/method registration.
+  ///
+  /// Example:
+  ///     .def_pickle(
+  ///         // __getstate__
+  ///         [](const c10::intrusive_ptr<MyStackClass<std::string>>& self) {
+  ///           return self->stack_;
+  ///         },
+  ///         [](std::vector<std::string> state) { // __setstate__
+  ///            return c10::make_intrusive<MyStackClass<std::string>>(
+  ///               std::vector<std::string>{"i", "was", "deserialized"});
+  ///         })
   template <typename GetStateFn, typename SetStateFn>
   class_& def_pickle(GetStateFn&& get_state, SetStateFn&& set_state) {
     static_assert(
