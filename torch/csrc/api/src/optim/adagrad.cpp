@@ -109,22 +109,6 @@ Tensor Adagrad::step(LossClosure closure) {
   return loss;
 }
 
-void Adagrad::add_parameters(const std::vector<Tensor>& parameters) {
-  return _add_parameters_new_design(parameters);
-}
-
-const std::vector<Tensor>& Adagrad::parameters() const noexcept {
-  return _parameters_new_design();
-}
-
-std::vector<Tensor>& Adagrad::parameters() noexcept {
-  return _parameters_new_design();
-}
-
-size_t Adagrad::size() const noexcept {
-  return _size_new_design();
-}
-
 void Adagrad::save(serialize::OutputArchive& archive) const {
   serialize(*this, archive);
 }

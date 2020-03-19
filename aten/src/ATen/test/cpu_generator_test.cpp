@@ -36,7 +36,7 @@ TEST(CPUGenerator, TestCloning) {
   cpu_gen1->random(); // advance gen1 state
   cpu_gen1->random();
   auto gen2 = at::detail::createCPUGenerator();
-  gen2 = Generator(gen1->clone());
+  gen2 = gen1.clone();
   auto cpu_gen2 = check_generator<CPUGenerator>(gen2);
   ASSERT_EQ(cpu_gen1->random(), cpu_gen2->random());
 }
@@ -57,7 +57,7 @@ TEST(CPUGenerator, TestMultithreadingGetEngineOperator) {
   auto gen2 = at::detail::createCPUGenerator();
   {
     std::lock_guard<std::mutex> lock(gen1->mutex_);
-    gen2 = Generator(gen1->clone()); // capture the current state of default generator
+    gen2 = gen1.clone(); // capture the current state of default generator
   }
   std::thread t0{thread_func_get_engine_op, cpu_gen1};
   std::thread t1{thread_func_get_engine_op, cpu_gen1};
@@ -115,7 +115,7 @@ TEST(CPUGenerator, TestRNGForking) {
   auto current_gen = at::detail::createCPUGenerator();
   {
     std::lock_guard<std::mutex> lock(default_gen->mutex_);
-    current_gen = Generator(default_gen->clone()); // capture the current state of default generator
+    current_gen = default_gen.clone(); // capture the current state of default generator
   }
   auto target_value = at::randn({1000});
   // Dramatically alter the internal state of the main generator

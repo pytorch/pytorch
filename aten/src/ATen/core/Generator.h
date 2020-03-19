@@ -81,6 +81,10 @@ struct CAFFE2_API Generator {
   template<typename T>
   T* get() const { return static_cast<T*>(impl_.get()); }
 
+  Generator clone() const {
+    return Generator(impl_->clone());
+  }
+
  private:
   std::shared_ptr<c10::GeneratorImpl> impl_;
 };
