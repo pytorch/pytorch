@@ -3,8 +3,8 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <vector>
 
-#include "torch/csrc/jit/tensorexpr/expr.h"
-#include "torch/csrc/jit/tensorexpr/function.h"
+#include <torch/csrc/jit/tensorexpr/expr.h>
+#include <torch/csrc/jit/tensorexpr/function.h>
 
 namespace torch {
 namespace jit {

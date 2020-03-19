@@ -3,15 +3,16 @@
 #include <string>
 #include <vector>
 
-#include "torch/csrc/jit/tensorexpr/expr.h"
-#include "torch/csrc/jit/tensorexpr/stmt.h"
+#include <torch/csrc/jit/tensorexpr/exceptions.h>
+#include <torch/csrc/jit/tensorexpr/expr.h>
+#include <torch/csrc/jit/tensorexpr/stmt.h>
 
 namespace torch {
 namespace jit {
 namespace tensorexpr {
 
 enum CompareSelectOperation {
-  kEQ,
+  kEQ = 0,
   kGT,
   kGE,
   kLT,
@@ -66,6 +67,10 @@ class Cast : public ExprNode<Cast> {
   }
   Cast(Dtype dtype, const Expr* src_value)
       : ExprNodeBase(dtype, kCast), src_value_(src_value) {}
+
+  bool isConstant() const override {
+    return src_value_->isConstant();
+  }
 
  private:
   const Expr* src_value_;
@@ -149,8 +154,12 @@ class And : public BinaryOpNode<And> {
  public:
   And(const Expr* lhs, const Expr* rhs)
       : BinaryOpNode(lhs, rhs, IRNodeType::kAnd) {
-    CHECK_EQ(lhs->dtype().scalar_type(), ScalarType::Int);
-    CHECK_EQ(lhs->dtype(), rhs->dtype());
+    if (lhs->dtype().scalar_type() != ScalarType::Int) {
+      throw unsupported_dtype();
+    }
+    if (lhs->dtype() != rhs->dtype()) {
+      throw malformed_input();
+    }
   }
 };
 
@@ -158,8 +167,12 @@ class Or : public BinaryOpNode<Or> {
  public:
   Or(const Expr* lhs, const Expr* rhs)
       : BinaryOpNode(lhs, rhs, IRNodeType::kOr) {
-    CHECK_EQ(lhs->dtype().scalar_type(), ScalarType::Int);
-    CHECK_EQ(lhs->dtype(), rhs->dtype());
+    if (lhs->dtype().scalar_type() != ScalarType::Int) {
+      throw unsupported_dtype();
+    }
+    if (lhs->dtype() != rhs->dtype()) {
+      throw malformed_input();
+    }
   }
 };
 
@@ -167,8 +180,12 @@ class Xor : public BinaryOpNode<Xor> {
  public:
   Xor(const Expr* lhs, const Expr* rhs)
       : BinaryOpNode(lhs, rhs, IRNodeType::kXor) {
-    CHECK_EQ(lhs->dtype().scalar_type(), ScalarType::Int);
-    CHECK_EQ(lhs->dtype(), rhs->dtype());
+    if (lhs->dtype().scalar_type() != ScalarType::Int) {
+      throw unsupported_dtype();
+    }
+    if (lhs->dtype() != rhs->dtype()) {
+      throw malformed_input();
+    }
   }
 };
 
@@ -176,8 +193,12 @@ class Lshift : public BinaryOpNode<Lshift> {
  public:
   Lshift(const Expr* lhs, const Expr* rhs)
       : BinaryOpNode(lhs, rhs, IRNodeType::kLshift) {
-    CHECK_EQ(lhs->dtype().scalar_type(), ScalarType::Int);
-    CHECK_EQ(lhs->dtype(), rhs->dtype());
+    if (lhs->dtype().scalar_type() != ScalarType::Int) {
+      throw unsupported_dtype();
+    }
+    if (lhs->dtype() != rhs->dtype()) {
+      throw malformed_input();
+    }
   }
 };
 
@@ -185,8 +206,12 @@ class Rshift : public BinaryOpNode<Rshift> {
  public:
   Rshift(const Expr* lhs, const Expr* rhs)
       : BinaryOpNode(lhs, rhs, IRNodeType::kRshift) {
-    CHECK_EQ(lhs->dtype().scalar_type(), ScalarType::Int);
-    CHECK_EQ(lhs->dtype(), rhs->dtype());
+    if (lhs->dtype().scalar_type() != ScalarType::Int) {
+      throw unsupported_dtype();
+    }
+    if (lhs->dtype() != rhs->dtype()) {
+      throw malformed_input();
+    }
   }
 };
 
@@ -240,6 +265,9 @@ class Min : public BinaryOpNode<Min> {
    public:                                                    \
     Name##Imm(Type value)                                     \
         : ExprNodeBase(k##Name, kPrimitive), value_(value) {} \
+    bool isConstant() const override {                        \
+      return true;                                            \
+    }                                                         \
     Type value() const {                                      \
       return value_;                                          \
     }                                                         \
@@ -252,6 +280,26 @@ class Min : public BinaryOpNode<Min> {
   };
 AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_DECLARE);
 #undef IMM_DECLARE
+
+// Get immediate by ScalarType.
+template <typename T>
+ExprHandle getImmediateByType(ScalarType immType, T initialVal) {
+  switch (immType) {
+#define TYPE_CASE(Type, Name) \
+  case ScalarType::Name:      \
+    return Name##Imm::make(initialVal);
+    AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
+#undef TYPE_CASE
+    default:
+      throw unsupported_dtype();
+  }
+  return ExprHandle();
+}
+
+template <typename T>
+ExprHandle getImmediateByType(Dtype dtype, T initialVal) {
+  return getImmediateByType<T>(dtype.scalar_type(), initialVal);
+}
 
 // Bind the value to the var and evaluate the body.
 class Let : public ExprNode<Let> {
@@ -310,7 +358,9 @@ class Ramp : public ExprNode<Ramp> {
         base_(base),
         stride_(stride),
         lanes_(lanes) {
-    CHECK_EQ(stride->dtype(), base->dtype());
+    if (stride->dtype() != base->dtype()) {
+      throw malformed_input();
+    }
   }
 
  private:
@@ -404,9 +454,15 @@ class IfThenElse : public ExprNode<IfThenElse> {
 
   IfThenElse(const Expr* c, const Expr* t, const Expr* f)
       : ExprNodeBase(t->dtype()), condition_(c), true_(t), false_(f) {
-    CHECK_EQ(c->dtype().scalar_type(), ScalarType::Int);
-    CHECK_EQ(c->dtype().lanes(), 1);
-    CHECK_EQ(t->dtype(), f->dtype());
+    if (c->dtype().scalar_type() != ScalarType::Int) {
+      throw unsupported_dtype();
+    }
+    if (c->dtype().lanes() != 1) {
+      throw unsupported_dtype();
+    }
+    if (t->dtype() != f->dtype()) {
+      throw malformed_input();
+    }
   }
 
  private:
@@ -489,7 +545,9 @@ class TORCH_API CompareSelect : public ExprNode<CompareSelect> {
       const ExprHandle& lhs,
       const ExprHandle& rhs,
       CompareSelectOperation cmp_op) {
-    CHECK_EQ(lhs.dtype(), rhs.dtype());
+    if (lhs.dtype() != rhs.dtype()) {
+      throw malformed_input();
+    }
     return ExprHandle(new CompareSelect(
         lhs.node(),
         rhs.node(),
@@ -504,8 +562,10 @@ class TORCH_API CompareSelect : public ExprNode<CompareSelect> {
       const ExprHandle& ret_val1,
       const ExprHandle& ret_val2,
       CompareSelectOperation cmp_op) {
-    CHECK_EQ(lhs.dtype(), rhs.dtype());
-    CHECK_EQ(ret_val1.dtype(), ret_val2.dtype());
+    if (lhs.dtype() != rhs.dtype() ||
+        ret_val1.dtype() != ret_val2.dtype()) {
+      throw malformed_input();
+    }
     return ExprHandle(new CompareSelect(
         lhs.node(), rhs.node(), ret_val1.node(), ret_val2.node(), cmp_op));
   }
@@ -516,18 +576,23 @@ class TORCH_API CompareSelect : public ExprNode<CompareSelect> {
   const Expr* ret_val1_;
   const Expr* ret_val2_;
   CompareSelectOperation compare_op_;
+
   CompareSelect(
       const Expr* lhs,
       const Expr* rhs,
       const Expr* ret_val1,
       const Expr* ret_val2,
       CompareSelectOperation cmp_op)
-      : ExprNodeBase(ToDtype<int>()),
+      : ExprNodeBase(ret_val1->dtype()),
         lhs_(lhs),
         rhs_(rhs),
         ret_val1_(ret_val1),
         ret_val2_(ret_val2),
-        compare_op_(cmp_op) {}
+        compare_op_(cmp_op) {
+    if (ret_val1->dtype() != ret_val2->dtype()) {
+      throw malformed_input();
+    }
+  }
 };
 
 enum IntrinsicsOp {
@@ -669,13 +734,17 @@ class Intrinsics : public CallNode<Intrinsics> {
   Intrinsics(IntrinsicsOp op_type, Dtype dtype)
       : BaseClass(IntrinsicsDtype(op_type, dtype), kIntrinsics, {}),
         op_type_(op_type) {
-    CHECK_EQ(OpArgCount(op_type), 0);
+    if (OpArgCount(op_type) != 0) {
+      throw malformed_input();
+    }
   }
 
   Intrinsics(IntrinsicsOp op_type, const Expr* v1)
       : BaseClass(IntrinsicsDtype(op_type, v1->dtype()), kIntrinsics, {v1}),
         op_type_(op_type) {
-    CHECK_EQ(OpArgCount(op_type), 1);
+    if (OpArgCount(op_type) != 1) {
+      throw malformed_input();
+    }
   }
 
   Intrinsics(IntrinsicsOp op_type, const Expr* v1, const Expr* v2)
@@ -684,13 +753,21 @@ class Intrinsics : public CallNode<Intrinsics> {
             kIntrinsics,
             {v1, v2}),
         op_type_(op_type) {
-    CHECK_EQ(OpArgCount(op_type), 2);
+    if (OpArgCount(op_type) != 2) {
+      throw malformed_input();
+    }
   }
 
   Intrinsics(IntrinsicsOp op_type, const std::vector<const Expr*>& params)
       : BaseClass(IntrinsicsDtype(op_type, params), kIntrinsics, params),
         op_type_(op_type) {
-    CHECK_EQ(OpArgCount(op_type), nparams());
+    if (OpArgCount(op_type) != nparams()) {
+      throw malformed_input();
+    }
+  }
+
+  bool isPure() const {
+    return op_type_ != kRand;
   }
 
  private:
@@ -711,6 +788,49 @@ class Intrinsics : public CallNode<Intrinsics> {
       const std::vector<const Expr*>& params);
 
   IntrinsicsOp op_type_;
+};
+
+/* An internal only Expr used in IR simplification.
+ * Encodes relationship y = Ax + B, where A and B are Immediates.
+ * Not required to be implemented by codegen. */
+class LinearForm : public ExprNode<LinearForm> {
+ public:
+  LinearForm(const Expr* x, const Expr* A, const Expr* B)
+      : ExprNodeBase(dtypeFor(x, A, B)), x_(x), A_(A), B_(B) {}
+
+  LinearForm(const Expr* x)
+      : ExprNodeBase(x->dtype()),
+        x_(x),
+        A_(new CharImm(1)),
+        B_(new CharImm(0)) {}
+
+  const Expr* getX() const {
+    return x_;
+  }
+  const Expr* getA() const {
+    return A_;
+  }
+  const Expr* getB() const {
+    return B_;
+  }
+
+  void setA(const Expr* A) {
+    A_ = A;
+  }
+
+  void setB(const Expr* B) {
+    B_ = B;
+  }
+
+  static Dtype dtypeFor(const Expr* A, const Expr* B, const Expr* C) {
+    return ToDtype(promoteTypes(
+        A->dtype().scalar_type(), promoteTypes(B->dtype(), C->dtype())));
+  }
+
+ private:
+  const Expr* x_;
+  const Expr* A_;
+  const Expr* B_;
 };
 
 class FunctionCall;
