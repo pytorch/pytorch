@@ -1,27 +1,125 @@
 #ifdef TORCH_ENABLE_LLVM
 
-#include "torch/csrc/jit/tensorexpr/llvm_codegen.h"
+#include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
+#include <torch/csrc/jit/tensorexpr/llvm_jit.h>
 
 #include <memory>
 
 #include <llvm/Analysis/TargetTransformInfo.h>
 #include <llvm/ExecutionEngine/Orc/JITTargetMachineBuilder.h>
+#include <llvm/ExecutionEngine/Orc/ThreadSafeModule.h>
+#include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/LegacyPassManager.h>
 #include <llvm/IR/Verifier.h>
 #include <llvm/Support/TargetSelect.h>
 #include <llvm/Target/TargetMachine.h>
 #include <llvm/Transforms/IPO/PassManagerBuilder.h>
 
-#include "torch/csrc/jit/tensorexpr/buffer.h"
-#include "torch/csrc/jit/tensorexpr/execution_counter.h"
-#include "torch/csrc/jit/tensorexpr/ir.h"
-#include "torch/csrc/jit/tensorexpr/ir_printer.h"
-#include "torch/csrc/jit/tensorexpr/types.h"
+#include <torch/csrc/jit/tensorexpr/buffer.h>
+#include <torch/csrc/jit/tensorexpr/execution_counter.h>
+#include <torch/csrc/jit/tensorexpr/ir.h>
+#include <torch/csrc/jit/tensorexpr/ir_printer.h>
+#include <torch/csrc/jit/tensorexpr/types.h>
+
+#define DEBUG_PRINT 0
 
 using namespace torch::jit::tensorexpr;
 
 DEFINE_TRIGGER(llvm_codegen_created);
 DEFINE_TRIGGER(llvm_codegen_executed);
+
+namespace torch {
+namespace jit {
+namespace tensorexpr {
+class LLVMCodeGenImpl : public IRVisitor {
+ private:
+  llvm::orc::ThreadSafeContext context_;
+  llvm::IRBuilder<> irb_;
+  std::unique_ptr<llvm::TargetMachine> TM_;
+  std::unique_ptr<llvm::orc::PytorchLLVMJIT> jit_;
+  std::unique_ptr<llvm::Module> module_;
+  llvm::Function* fn_;
+  llvm::BasicBlock* bb_;
+  llvm::Value* value_;
+  llvm::JITTargetAddress kernelAddress_;
+
+#define LLVM_TYPE_DECLARE(_1, Name) llvm::Type* Name##Ty_;
+  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, LLVM_TYPE_DECLARE);
+#undef LLVM_TYPE_DECLARE
+
+  std::unordered_map<const Var*, int> varToArg_;
+  std::unordered_map<const Var*, llvm::Value*> varToVal_;
+
+ private:
+  llvm::LLVMContext& getContext();
+  llvm::Type* dtypeToLLVM(Dtype dtype);
+  llvm::Type* dtypeToLLVMPtr(Dtype dtype);
+  void emitWrapper(const std::vector<llvm::Type*>& params);
+  void emitKernel(Stmt* stmt, const std::vector<llvm::Type*>& params);
+
+ public:
+  LLVMCodeGenImpl(
+      Stmt* stmt,
+      const std::vector<CodeGen::BufferArg>& args,
+      at::Device device,
+      Dtype dtype);
+  ~LLVMCodeGenImpl() = default;
+
+  llvm::JITTargetAddress getKernelAddress() const;
+
+  void visit(const Add* v) override;
+  void visit(const Sub* v) override;
+  void visit(const Mul* v) override;
+  void visit(const Div* v) override;
+  void visit(const Mod* v) override;
+  void visit(const Max* v) override;
+  void visit(const Min* v) override;
+  void visit(const And* v) override;
+  void visit(const Or* v) override;
+  void visit(const Xor* v) override;
+  void visit(const Lshift* v) override;
+  void visit(const Rshift* v) override;
+  void visit(const CompareSelect* v) override;
+
+#define IMM_VISIT_DECLARE(_1, Name) void visit(const Name##Imm* v) override;
+  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_VISIT_DECLARE);
+#undef IMM_VISIT_DECLARE
+
+  void visit(const Cast* v) override;
+  void visit(const Var* v) override;
+  void visit(const Let* v) override;
+  void visit(const LetStmt* v) override;
+  void visit(const Ramp* v) override;
+  void visit(const Load* v) override;
+  void visit(const For* v) override;
+  void visit(const Block* v) override;
+  void visit(const Store* v) override;
+  void visit(const Broadcast* v) override;
+  void visit(const IfThenElse* v) override;
+  void visit(const BaseCallNode* v) override;
+  void visit(const Intrinsics* v) override;
+  void visit(const FunctionCall* v) override;
+  void visit(const Allocate* v) override;
+  void visit(const Free* v) override;
+  void visit(const Cond* v) override;
+
+  llvm::Value* emitUnmaskedLoad(llvm::Value* addr, llvm::Value* idx);
+  llvm::Value* emitMaskedLoad(
+      llvm::Value* addr,
+      llvm::Value* idx,
+      llvm::Value* mask);
+  void emitUnmaskedStore(llvm::Value* base, llvm::Value* idx, llvm::Value* val);
+  void emitMaskedStore(
+      llvm::Value* base,
+      llvm::Value* idx,
+      llvm::Value* mask,
+      llvm::Value* val);
+
+  void optimize(llvm::Module& M);
+};
+} // namespace tensorexpr
+} // namespace jit
+} // namespace torch
 
 static llvm::orc::JITTargetMachineBuilder makeTargetMachineBuilder() {
 #if 0
@@ -50,16 +148,70 @@ static llvm::orc::JITTargetMachineBuilder makeTargetMachineBuilder() {
 #endif
 }
 
+LLVMCodeGen::~LLVMCodeGen() = default;
+
 LLVMCodeGen::LLVMCodeGen(Stmt* stmt)
-    : LLVMCodeGen(stmt, std::vector<BufferArg>()) {}
+    : LLVMCodeGen(stmt, std::vector<CodeGen::BufferArg>()) {}
 
 LLVMCodeGen::LLVMCodeGen(
     Stmt* stmt,
     const std::vector<BufferArg>& args,
+    at::Device device,
     Dtype dtype)
-    : CodeGen(stmt, args),
-      context_(std::make_unique<llvm::LLVMContext>()),
-      irb_(getContext()) {
+    : CodeGen(stmt, args, device),
+      impl_(std::make_unique<LLVMCodeGenImpl>(stmt, args, device, dtype)) {}
+
+static void* argToPtr(
+    const CodeGen::BufferArg& bufferArg,
+    const CodeGen::CallArg& callArg) {
+  if (!bufferArg.isVar()) {
+    return callArg.data();
+  }
+
+  switch (bufferArg.dtype().scalar_type()) {
+#define TYPE_CASE(_1, Name) \
+  case ScalarType::Name:    \
+    return callArg.Name##Ptr();
+    break;
+
+    AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
+#undef TYPE_CASE
+
+    default:
+      throw unsupported_dtype();
+  }
+  return nullptr;
+}
+
+void LLVMCodeGen::call(const std::vector<CallArg>& args) {
+  if (args.size() != buffer_args().size()) {
+    throw malformed_input();
+  }
+
+  std::vector<void*> argv;
+  for (size_t i = 0; i < buffer_args().size(); i++) {
+    auto const& bufferArg = buffer_args()[i];
+    auto const& callArg = args[i];
+    argv.push_back(argToPtr(bufferArg, callArg));
+  }
+  value<float>(argv);
+  USE_TRIGGER(llvm_codegen_executed);
+}
+
+void* LLVMCodeGen::getKernelAddress(LLVMCodeGenImpl* impl) {
+  return (void*)impl->getKernelAddress();
+}
+
+llvm::JITTargetAddress LLVMCodeGenImpl::getKernelAddress() const {
+  return kernelAddress_;
+}
+
+LLVMCodeGenImpl::LLVMCodeGenImpl(
+    Stmt* stmt,
+    const std::vector<CodeGen::BufferArg>& args,
+    at::Device device,
+    Dtype dtype)
+    : context_(std::make_unique<llvm::LLVMContext>()), irb_(getContext()) {
   // Manually map types to LLVM types.
   ByteTy_ = llvm::Type::getInt8Ty(getContext());
   CharTy_ = llvm::Type::getInt8Ty(getContext());
@@ -113,11 +265,11 @@ LLVMCodeGen::LLVMCodeGen(
   USE_TRIGGER(llvm_codegen_created);
 }
 
-llvm::LLVMContext& LLVMCodeGen::getContext() {
+llvm::LLVMContext& LLVMCodeGenImpl::getContext() {
   return *context_.getContext();
 }
 
-llvm::Type* LLVMCodeGen::dtypeToLLVM(Dtype dtype) {
+llvm::Type* LLVMCodeGenImpl::dtypeToLLVM(Dtype dtype) {
   switch (dtype.scalar_type()) {
 #define TYPE_CASE(_1, n) \
   case ScalarType::n:    \
@@ -127,16 +279,16 @@ llvm::Type* LLVMCodeGen::dtypeToLLVM(Dtype dtype) {
     AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
     default:
-      LOG(FATAL) << "Unhandled dtype: " << dtype;
+      throw unsupported_dtype();
   }
   return nullptr;
 }
 
-llvm::Type* LLVMCodeGen::dtypeToLLVMPtr(Dtype dtype) {
+llvm::Type* LLVMCodeGenImpl::dtypeToLLVMPtr(Dtype dtype) {
   return dtypeToLLVM(dtype)->getPointerTo();
 }
 
-void LLVMCodeGen::emitWrapper(const std::vector<llvm::Type*>& params) {
+void LLVMCodeGenImpl::emitWrapper(const std::vector<llvm::Type*>& params) {
   auto voidPtrPtrTy = llvm::Type::getInt8PtrTy(getContext())->getPointerTo();
   auto wrapper = llvm::Function::Create(
       llvm::FunctionType::get(IntTy_, {voidPtrPtrTy}, false),
@@ -163,7 +315,7 @@ void LLVMCodeGen::emitWrapper(const std::vector<llvm::Type*>& params) {
   irb_.CreateRet(cc);
 }
 
-void LLVMCodeGen::emitKernel(
+void LLVMCodeGenImpl::emitKernel(
     Stmt* stmt,
     const std::vector<llvm::Type*>& params) {
   // Set insert point to the real function.
@@ -177,8 +329,9 @@ void LLVMCodeGen::emitKernel(
 #if DEBUG_PRINT
   llvm::errs() << *module_;
 #endif
-  CHECK(!llvm::verifyFunction(*fn_, &llvm::outs()))
-      << "Function verification failed";
+  if (llvm::verifyFunction(*fn_, &llvm::outs())) {
+    throw std::runtime_error("Function verification failed");
+  }
   optimize(*module_);
 
 #if DEBUG_PRINT
@@ -196,51 +349,15 @@ void LLVMCodeGen::emitKernel(
 #endif
 }
 
-static void* argToPtr(
-    const CodeGen::BufferArg& bufferArg,
-    const CodeGen::CallArg& callArg) {
-  if (!bufferArg.isVar()) {
-    return callArg.data();
-  }
-
-  switch (bufferArg.dtype().scalar_type()) {
-#define TYPE_CASE(_1, Name) \
-  case ScalarType::Name:    \
-    return callArg.Name##Ptr();
-    break;
-
-    AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
-#undef TYPE_CASE
-
-    default:
-      LOG(FATAL) << "Unhandled dtype for arg: " << bufferArg.var()->name_hint()
-                 << "dtype=" << bufferArg.var()->dtype();
-  }
-  return nullptr;
-}
-
-void LLVMCodeGen::call(const std::vector<CallArg>& args) {
-  CHECK_EQ(args.size(), buffer_args().size())
-      << "args: " << args.size() << ", buffers: " << buffer_args().size();
-  for (size_t i = 0; i < buffer_args().size(); i++) {
-    auto const& bufferArg = buffer_args()[i];
-    auto const& callArg = args[i];
-    args_.push_back(argToPtr(bufferArg, callArg));
-  }
-  value<float>(args_);
-  args_.clear();
-  USE_TRIGGER(llvm_codegen_executed);
-}
-
 // TODO: The binary ops are copypasta.
 
-void LLVMCodeGen::visit(const Add* v) {
+void LLVMCodeGenImpl::visit(const Add* v) {
   v->lhs()->accept(this);
   auto lhs = this->value_;
-  bool lfp = lhs->getType()->isFloatingPointTy();
+  bool lfp = lhs->getType()->isFPOrFPVectorTy();
   v->rhs()->accept(this);
   auto rhs = this->value_;
-  bool rfp = rhs->getType()->isFloatingPointTy();
+  bool rfp = rhs->getType()->isFPOrFPVectorTy();
 
   // TODO: Handle arg promotion.
   if (lfp && rfp) {
@@ -248,17 +365,17 @@ void LLVMCodeGen::visit(const Add* v) {
   } else if (!lfp && !rfp) {
     value_ = irb_.CreateAdd(lhs, rhs);
   } else {
-    LOG(FATAL) << "Unhandled mismatch add arg types";
+    throw malformed_input(v);
   }
 }
 
-void LLVMCodeGen::visit(const Sub* v) {
+void LLVMCodeGenImpl::visit(const Sub* v) {
   v->lhs()->accept(this);
   auto lhs = this->value_;
-  bool lfp = lhs->getType()->isFloatingPointTy();
+  bool lfp = lhs->getType()->isFPOrFPVectorTy();
   v->rhs()->accept(this);
   auto rhs = this->value_;
-  bool rfp = rhs->getType()->isFloatingPointTy();
+  bool rfp = rhs->getType()->isFPOrFPVectorTy();
 
   // TODO: Handle arg promotion.
   if (lfp && rfp) {
@@ -266,17 +383,17 @@ void LLVMCodeGen::visit(const Sub* v) {
   } else if (!lfp && !rfp) {
     value_ = irb_.CreateSub(lhs, rhs);
   } else {
-    LOG(FATAL) << "Unhandled mismatch sub arg types";
+    throw malformed_input(v);
   }
 }
 
-void LLVMCodeGen::visit(const Mul* v) {
+void LLVMCodeGenImpl::visit(const Mul* v) {
   v->lhs()->accept(this);
   auto lhs = this->value_;
-  bool lfp = lhs->getType()->isFloatingPointTy();
+  bool lfp = lhs->getType()->isFPOrFPVectorTy();
   v->rhs()->accept(this);
   auto rhs = this->value_;
-  bool rfp = rhs->getType()->isFloatingPointTy();
+  bool rfp = rhs->getType()->isFPOrFPVectorTy();
 
   // TODO: Handle arg promotion.
   if (lfp && rfp) {
@@ -284,17 +401,17 @@ void LLVMCodeGen::visit(const Mul* v) {
   } else if (!lfp && !rfp) {
     value_ = irb_.CreateMul(lhs, rhs);
   } else {
-    LOG(FATAL) << "Unhandled mismatch mul arg types";
+    throw malformed_input(v);
   }
 }
 
-void LLVMCodeGen::visit(const Div* v) {
+void LLVMCodeGenImpl::visit(const Div* v) {
   v->lhs()->accept(this);
   auto lhs = this->value_;
-  bool lfp = lhs->getType()->isFloatingPointTy();
+  bool lfp = lhs->getType()->isFPOrFPVectorTy();
   v->rhs()->accept(this);
   auto rhs = this->value_;
-  bool rfp = rhs->getType()->isFloatingPointTy();
+  bool rfp = rhs->getType()->isFPOrFPVectorTy();
 
   // TODO: Handle arg promotion.
   if (lfp && rfp) {
@@ -302,90 +419,90 @@ void LLVMCodeGen::visit(const Div* v) {
   } else if (!lfp && !rfp) {
     value_ = irb_.CreateSDiv(lhs, rhs);
   } else {
-    LOG(FATAL) << "Unhandled mismatch div arg types";
+    throw malformed_input(v);
   }
 }
 
-void LLVMCodeGen::visit(const And* v) {
+void LLVMCodeGenImpl::visit(const And* v) {
   v->lhs()->accept(this);
   auto lhs = this->value_;
-  bool lfp = lhs->getType()->isFloatingPointTy();
+  bool lfp = lhs->getType()->isFPOrFPVectorTy();
   v->rhs()->accept(this);
   auto rhs = this->value_;
-  bool rfp = rhs->getType()->isFloatingPointTy();
+  bool rfp = rhs->getType()->isFPOrFPVectorTy();
 
   if (!lfp && !rfp) {
     value_ = irb_.CreateAnd(lhs, rhs);
   } else {
-    LOG(FATAL) << "Unhandled mismatch And arg types";
+    throw malformed_input(v);
   }
 }
 
-void LLVMCodeGen::visit(const Or* v) {
+void LLVMCodeGenImpl::visit(const Or* v) {
   v->lhs()->accept(this);
   auto lhs = this->value_;
-  bool lfp = lhs->getType()->isFloatingPointTy();
+  bool lfp = lhs->getType()->isFPOrFPVectorTy();
   v->rhs()->accept(this);
   auto rhs = this->value_;
-  bool rfp = rhs->getType()->isFloatingPointTy();
+  bool rfp = rhs->getType()->isFPOrFPVectorTy();
 
   if (!lfp && !rfp) {
     value_ = irb_.CreateOr(lhs, rhs);
   } else {
-    LOG(FATAL) << "Unhandled mismatch Or arg types";
+    throw malformed_input(v);
   }
 }
 
-void LLVMCodeGen::visit(const Xor* v) {
+void LLVMCodeGenImpl::visit(const Xor* v) {
   v->lhs()->accept(this);
   auto lhs = this->value_;
-  bool lfp = lhs->getType()->isFloatingPointTy();
+  bool lfp = lhs->getType()->isFPOrFPVectorTy();
   v->rhs()->accept(this);
   auto rhs = this->value_;
-  bool rfp = rhs->getType()->isFloatingPointTy();
+  bool rfp = rhs->getType()->isFPOrFPVectorTy();
 
   if (!lfp && !rfp) {
     value_ = irb_.CreateXor(lhs, rhs);
   } else {
-    LOG(FATAL) << "Unhandled mismatch And arg types";
+    throw malformed_input(v);
   }
 }
 
-void LLVMCodeGen::visit(const Lshift* v) {
+void LLVMCodeGenImpl::visit(const Lshift* v) {
   v->lhs()->accept(this);
   auto lhs = this->value_;
-  bool lfp = lhs->getType()->isFloatingPointTy();
+  bool lfp = lhs->getType()->isFPOrFPVectorTy();
   v->rhs()->accept(this);
   auto rhs = this->value_;
-  bool rfp = rhs->getType()->isFloatingPointTy();
+  bool rfp = rhs->getType()->isFPOrFPVectorTy();
 
   if (!lfp && !rfp) {
     value_ = irb_.CreateShl(lhs, rhs);
   } else {
-    LOG(FATAL) << "Unhandled mismatch And arg types";
+    throw malformed_input(v);
   }
 }
 
-void LLVMCodeGen::visit(const Rshift* v) {
+void LLVMCodeGenImpl::visit(const Rshift* v) {
   v->lhs()->accept(this);
   auto lhs = this->value_;
-  bool lfp = lhs->getType()->isFloatingPointTy();
+  bool lfp = lhs->getType()->isFPOrFPVectorTy();
   v->rhs()->accept(this);
   auto rhs = this->value_;
-  bool rfp = rhs->getType()->isFloatingPointTy();
+  bool rfp = rhs->getType()->isFPOrFPVectorTy();
 
   if (!lfp && !rfp) {
     value_ = irb_.CreateLShr(lhs, rhs);
   } else {
-    LOG(FATAL) << "Unhandled mismatch And arg types";
+    throw malformed_input(v);
   }
 }
 
-void LLVMCodeGen::visit(const Mod* v) {
+void LLVMCodeGenImpl::visit(const Mod* v) {
   throw std::runtime_error("Mod unsupported in LLVM codegen yet");
 }
 
-void LLVMCodeGen::visit(const Max* v) {
+void LLVMCodeGenImpl::visit(const Max* v) {
   v->lhs()->accept(this);
   auto lhs = this->value_;
   v->rhs()->accept(this);
@@ -406,7 +523,7 @@ void LLVMCodeGen::visit(const Max* v) {
       irb_.CreateFCmp(llvm::FCmpInst::FCMP_OGT, lhs, rhs), lhs, rhs);
 }
 
-void LLVMCodeGen::visit(const Min* v) {
+void LLVMCodeGenImpl::visit(const Min* v) {
   v->lhs()->accept(this);
   auto lhs = this->value_;
   v->rhs()->accept(this);
@@ -427,7 +544,7 @@ void LLVMCodeGen::visit(const Min* v) {
       irb_.CreateFCmp(llvm::FCmpInst::FCMP_OLT, lhs, rhs), lhs, rhs);
 }
 
-void LLVMCodeGen::visit(const CompareSelect* v) {
+void LLVMCodeGenImpl::visit(const CompareSelect* v) {
   v->lhs()->accept(this);
   auto lhs = this->value_;
   v->rhs()->accept(this);
@@ -511,21 +628,21 @@ getFromType(llvm::Type* type, T value) {
 }
 
 #define IMM_VISIT_DECLARE(Type, Name)                  \
-  void LLVMCodeGen::visit(const Name##Imm* v) {        \
+  void LLVMCodeGenImpl::visit(const Name##Imm* v) {    \
     value_ = getFromType<Type>(Name##Ty_, v->value()); \
   }
 AT_FORALL_SCALAR_TYPES(IMM_VISIT_DECLARE);
 #undef IMM_VISIT_DECLARE
 
-void LLVMCodeGen::visit(const HalfImm* v) {
+void LLVMCodeGenImpl::visit(const HalfImm* v) {
   value_ = llvm::ConstantFP::get(HalfTy_, v->value());
 }
 
-void LLVMCodeGen::visit(const BoolImm* v) {
+void LLVMCodeGenImpl::visit(const BoolImm* v) {
   value_ = llvm::ConstantInt::get(BoolTy_, v->value());
 }
 
-void LLVMCodeGen::visit(const Cast* v) {
+void LLVMCodeGenImpl::visit(const Cast* v) {
   v->src_value()->accept(this);
 
   llvm::Type* dstType = dtypeToLLVM(v->dtype());
@@ -542,34 +659,34 @@ void LLVMCodeGen::visit(const Cast* v) {
   bool destUnsigned = v->dtype().scalar_type() == ScalarType::Byte;
 
   // Scalar casts
-  if (srcType->isFloatingPointTy()) {
-    if (dstType->isFloatingPointTy()) {
+  if (srcType->isFPOrFPVectorTy()) {
+    if (dstType->isFPOrFPVectorTy()) {
       value_ = irb_.CreateFPCast(value_, dstType);
-    } else if (dstType->isIntegerTy()) {
+    } else if (dstType->isIntOrIntVectorTy()) {
       if (destUnsigned) {
         value_ = irb_.CreateFPToUI(value_, dstType);
       } else {
         value_ = irb_.CreateFPToSI(value_, dstType);
       }
     } else {
-      LOG(FATAL) << "Unsupported cast!";
+      throw unimplemented_lowering(v);
     }
-  } else if (srcType->isIntegerTy()) {
-    if (dstType->isFloatingPointTy()) {
+  } else if (srcType->isIntOrIntVectorTy()) {
+    if (dstType->isFPOrFPVectorTy()) {
       if (destUnsigned) {
         value_ = irb_.CreateUIToFP(value_, dstType);
       } else {
         value_ = irb_.CreateSIToFP(value_, dstType);
       }
-    } else if (dstType->isIntegerTy()) {
+    } else if (dstType->isIntOrIntVectorTy()) {
       value_ = irb_.CreateIntCast(value_, dstType, !destUnsigned);
     } else {
-      LOG(FATAL) << "Unsupported cast!";
+      throw unimplemented_lowering(v);
     }
   }
 }
 
-void LLVMCodeGen::visit(const Var* v) {
+void LLVMCodeGenImpl::visit(const Var* v) {
   if (varToArg_.count(v)) {
     auto idx = varToArg_.at(v);
     auto arg = fn_->arg_begin() + idx;
@@ -579,9 +696,12 @@ void LLVMCodeGen::visit(const Var* v) {
   }
 }
 
-void LLVMCodeGen::visit(const Let* v) {
+void LLVMCodeGenImpl::visit(const Let* v) {
   const Var* var = dynamic_cast<const Var*>(v->var());
-  CHECK(var != nullptr);
+  if (!var) {
+    throw malformed_input(v);
+  }
+
   v->value()->accept(this);
   auto value = value_;
   if (!varToVal_.count(var)) {
@@ -598,9 +718,12 @@ void LLVMCodeGen::visit(const Let* v) {
 }
 
 // TODO: refactor this and merge with Let
-void LLVMCodeGen::visit(const LetStmt* v) {
+void LLVMCodeGenImpl::visit(const LetStmt* v) {
   const Var* var = v->var();
-  CHECK(var != nullptr);
+  if (!var) {
+    throw malformed_input(v);
+  }
+
   v->value()->accept(this);
   auto value = value_;
   if (!varToVal_.count(var)) {
@@ -616,12 +739,24 @@ void LLVMCodeGen::visit(const LetStmt* v) {
   }
 }
 
-void LLVMCodeGen::visit(const Ramp* v) {
+void LLVMCodeGenImpl::visit(const Ramp* v) {
   v->base()->accept(this);
   auto base = this->value_;
   v->stride()->accept(this);
   auto stride = this->value_;
   int lanes = v->lanes();
+
+  if (llvm::ConstantInt* const_stride = llvm::dyn_cast<llvm::ConstantInt>(stride)) {
+    std::vector<llvm::Constant*> vals = { llvm::ConstantInt::get(base->getType(), 0) };
+    for (int i = 1; i < lanes; ++i) {
+      vals.push_back(llvm::ConstantExpr::getAdd(vals.back(), const_stride));
+    }
+
+    llvm::Value* offsets = llvm::ConstantVector::get(vals);
+    llvm::Value* splat = irb_.CreateVectorSplat(lanes, base);
+    value_ = irb_.CreateAdd(splat, offsets);
+    return;
+  }
 
   llvm::Type* vecType = nullptr;
   switch (v->dtype().scalar_type()) {
@@ -642,14 +777,14 @@ void LLVMCodeGen::visit(const Ramp* v) {
   }
 }
 
-llvm::Value* LLVMCodeGen::emitUnmaskedLoad(
+llvm::Value* LLVMCodeGenImpl::emitUnmaskedLoad(
     llvm::Value* base,
     llvm::Value* idx) {
   auto addr = irb_.CreateGEP(base, idx);
   return irb_.CreateLoad(addr);
 }
 
-llvm::Value* LLVMCodeGen::emitMaskedLoad(
+llvm::Value* LLVMCodeGenImpl::emitMaskedLoad(
     llvm::Value* base,
     llvm::Value* idx,
     llvm::Value* mask) {
@@ -677,19 +812,19 @@ llvm::Value* LLVMCodeGen::emitMaskedLoad(
   return phi;
 }
 
-void LLVMCodeGen::visit(const Load* v) {
-  v->base_handle()->accept(this);
-  auto base = this->value_;
-  v->index()->accept(this);
-  auto idx = this->value_;
-  v->mask()->accept(this);
-  auto mask = this->value_;
-
+void LLVMCodeGenImpl::visit(const Load* v) {
   if (v->dtype().lanes() == 1) {
+    v->base_handle()->accept(this);
+    auto base = this->value_;
+    v->index()->accept(this);
+    auto idx = this->value_;
+
     auto* maskimm = dynamic_cast<const IntImm*>(v->mask());
     if (maskimm && maskimm->value() == 1) {
       value_ = emitUnmaskedLoad(base, idx);
     } else {
+      v->mask()->accept(this);
+      auto mask = this->value_;
       value_ = emitMaskedLoad(base, idx, mask);
     }
     return;
@@ -723,7 +858,11 @@ void LLVMCodeGen::visit(const Load* v) {
   if (unmasked_load && idx_ramp) {
     auto* stride_imm = dynamic_cast<const IntImm*>(idx_ramp->stride());
     if (stride_imm && stride_imm->value() == 1) {
-      auto first_idx = irb_.CreateExtractElement(idx, uint64_t{0ULL});
+      v->base_handle()->accept(this);
+      auto base = this->value_;
+      idx_ramp->base()->accept(this);
+      auto first_idx = this->value_;
+
       auto addr = irb_.CreateGEP(base, first_idx);
       auto vaddr = irb_.CreateBitOrPointerCast(
           addr, llvm::PointerType::get(loadType, 0));
@@ -733,6 +872,13 @@ void LLVMCodeGen::visit(const Load* v) {
   }
 
   // Fallback to a scalar implementation
+  v->base_handle()->accept(this);
+  auto base = this->value_;
+  v->index()->accept(this);
+  auto idx = this->value_;
+  v->mask()->accept(this);
+  auto mask = this->value_;
+
   llvm::Value* load = llvm::UndefValue::get(loadType);
   for (int i = 0; i < v->dtype().lanes(); ++i) {
     auto sub_idx = irb_.CreateExtractElement(idx, i);
@@ -749,7 +895,7 @@ void LLVMCodeGen::visit(const Load* v) {
   value_ = load;
 }
 
-void LLVMCodeGen::visit(const For* v) {
+void LLVMCodeGenImpl::visit(const For* v) {
   // Create "start" and "stop" values.
   v->start()->accept(this);
   auto start = this->value_;
@@ -793,13 +939,13 @@ void LLVMCodeGen::visit(const For* v) {
   value_ = llvm::ConstantInt::get(IntTy_, 0);
 }
 
-void LLVMCodeGen::visit(const Block* v) {
+void LLVMCodeGenImpl::visit(const Block* v) {
   for (Stmt* s : v->stmts()) {
     s->accept(this);
   }
 }
 
-void LLVMCodeGen::emitUnmaskedStore(
+void LLVMCodeGenImpl::emitUnmaskedStore(
     llvm::Value* base,
     llvm::Value* idx,
     llvm::Value* val) {
@@ -807,7 +953,7 @@ void LLVMCodeGen::emitUnmaskedStore(
   irb_.CreateStore(val, addr);
 }
 
-void LLVMCodeGen::emitMaskedStore(
+void LLVMCodeGenImpl::emitMaskedStore(
     llvm::Value* base,
     llvm::Value* idx,
     llvm::Value* mask,
@@ -831,25 +977,26 @@ void LLVMCodeGen::emitMaskedStore(
   irb_.SetInsertPoint(tailblock);
 }
 
-void LLVMCodeGen::visit(const Store* v) {
-  v->base_handle()->accept(this);
-  auto base = this->value_;
-  v->index()->accept(this);
-  auto idx = this->value_;
-  v->mask()->accept(this);
-  auto mask = this->value_;
-  v->value()->accept(this);
-  auto val = this->value_;
-
-  value_ = llvm::ConstantInt::get(IntTy_, 0);
-
+void LLVMCodeGenImpl::visit(const Store* v) {
   if (v->value()->dtype().lanes() == 1) {
+    v->base_handle()->accept(this);
+    auto base = this->value_;
+    v->index()->accept(this);
+    auto idx = this->value_;
+    v->value()->accept(this);
+    auto val = this->value_;
+
     auto* maskimm = dynamic_cast<const IntImm*>(v->mask());
     if (maskimm && maskimm->value() == 1) {
       emitUnmaskedStore(base, idx, val);
     } else {
+      v->mask()->accept(this);
+      auto mask = this->value_;
+
       emitMaskedStore(base, idx, mask, val);
     }
+
+    value_ = llvm::ConstantInt::get(IntTy_, 0);
     return;
   }
 
@@ -863,19 +1010,33 @@ void LLVMCodeGen::visit(const Store* v) {
     }
   }
 
+  v->base_handle()->accept(this);
+  auto base = this->value_;
+  v->value()->accept(this);
+  auto val = this->value_;
+
   // Handle the case where the store is contiguous and unmasked efficiently
   auto* idx_ramp = dynamic_cast<const Ramp*>(v->index());
   if (unmasked_store && idx_ramp) {
     auto* stride_imm = dynamic_cast<const IntImm*>(idx_ramp->stride());
     if (stride_imm && stride_imm->value() == 1) {
-      auto first_idx = irb_.CreateExtractElement(idx, uint64_t{0});
+      idx_ramp->base()->accept(this);
+      auto first_idx = value_;
+
       auto addr = irb_.CreateGEP(base, first_idx);
       auto vaddr = irb_.CreateBitOrPointerCast(
           addr, llvm::PointerType::get(val->getType(), 0));
       irb_.CreateAlignedStore(val, vaddr, 4);
+
+      value_ = llvm::ConstantInt::get(IntTy_, 0);
       return;
     }
   }
+
+  v->index()->accept(this);
+  auto idx = this->value_;
+  v->mask()->accept(this);
+  auto mask = this->value_;
 
   // Fallback to a scalar implementation
   for (int i = 0; i < v->value()->dtype().lanes(); ++i) {
@@ -888,15 +1049,17 @@ void LLVMCodeGen::visit(const Store* v) {
       emitMaskedStore(base, sub_idx, sub_mask, sub_val);
     }
   }
+
+  value_ = llvm::ConstantInt::get(IntTy_, 0);
 }
 
-void LLVMCodeGen::visit(const Broadcast* v) {
+void LLVMCodeGenImpl::visit(const Broadcast* v) {
   v->value()->accept(this);
   int lanes = v->lanes();
   value_ = irb_.CreateVectorSplat(lanes, value_);
 }
 
-void LLVMCodeGen::visit(const IfThenElse* v) {
+void LLVMCodeGenImpl::visit(const IfThenElse* v) {
   v->condition()->accept(this);
   llvm::Value* condition = value_;
   llvm::Value* c =
@@ -926,8 +1089,8 @@ void LLVMCodeGen::visit(const IfThenElse* v) {
   value_ = phi;
 }
 
-void LLVMCodeGen::visit(const BaseCallNode* v) {
-  LOG(FATAL) << "Unimplemented: BaseCall";
+void LLVMCodeGenImpl::visit(const BaseCallNode* v) {
+  throw unimplemented_lowering(v);
 }
 
 static void applyMathFunctionAttributes(llvm::Function* f) {
@@ -940,32 +1103,13 @@ static void applyMathFunctionAttributes(llvm::Function* f) {
   f->addFnAttr(llvm::Attribute::WillReturn);
 }
 
-void LLVMCodeGen::visit(const Intrinsics* v) {
+void LLVMCodeGenImpl::visit(const Intrinsics* v) {
   llvm::FunctionType* call_ty = nullptr;
   llvm::Value* call_fn = nullptr;
+  bool call_simd_sleef = false;
 
   if (v->dtype().scalar_type() == ScalarType::Float) {
     switch (v->op_type()) {
-#define UNARY_INTRIN_CASE(enum, intrin)                 \
-  case enum: {                                          \
-    v->params().front()->accept(this);                  \
-    value_ = irb_.CreateUnaryIntrinsic(intrin, value_); \
-    return;                                             \
-  } break;
-      UNARY_INTRIN_CASE(kLog10, llvm::Intrinsic::log10)
-      UNARY_INTRIN_CASE(kLog, llvm::Intrinsic::log)
-      UNARY_INTRIN_CASE(kLog2, llvm::Intrinsic::log2)
-      UNARY_INTRIN_CASE(kExp, llvm::Intrinsic::exp)
-      UNARY_INTRIN_CASE(kCos, llvm::Intrinsic::cos)
-      UNARY_INTRIN_CASE(kSin, llvm::Intrinsic::sin)
-      UNARY_INTRIN_CASE(kSqrt, llvm::Intrinsic::sqrt)
-      UNARY_INTRIN_CASE(kFabs, llvm::Intrinsic::fabs)
-      UNARY_INTRIN_CASE(kFloor, llvm::Intrinsic::floor)
-      UNARY_INTRIN_CASE(kCeil, llvm::Intrinsic::ceil)
-      UNARY_INTRIN_CASE(kTrunc, llvm::Intrinsic::trunc)
-      UNARY_INTRIN_CASE(kRound, llvm::Intrinsic::round)
-#undef UNARY_INTRIN_CASE
-
       case kRsqrt: {
         v->params().front()->accept(this);
         value_ = irb_.CreateUnaryIntrinsic(llvm::Intrinsic::sqrt, value_);
@@ -977,26 +1121,126 @@ void LLVMCodeGen::visit(const Intrinsics* v) {
         return;
       } break;
 
-#define UNARY_MATH_CASE(enum, name, type)                             \
-  case enum: {                                                        \
-    auto callee = module_->getOrInsertFunction(                       \
-        name, llvm::FunctionType::get(type, {type}, false), {});      \
-    call_ty = callee.getFunctionType();                               \
-    call_fn = callee.getCallee();                                     \
-    applyMathFunctionAttributes(llvm::cast<llvm::Function>(call_fn)); \
+#if defined(__AVX__) && !defined(_MSC_VER)
+#define SIMD_UNARY_MATH_CASE(enum, name, type)                               \
+  case enum: {                                                               \
+    llvm::FunctionCallee callee;                                             \
+    std::string fname;                                                       \
+    if (v->dtype().lanes() == 8) {                                           \
+      fname = "Sleef_" + std::string(name) + "8";                            \
+      llvm::Type* vecType = llvm::VectorType::get(type, v->dtype().lanes()); \
+      callee = module_->getOrInsertFunction(                                 \
+          fname, llvm::FunctionType::get(vecType, {vecType}, false), {});    \
+      call_simd_sleef = true;                                                \
+    } else if (v->dtype().lanes() == 4) {                                    \
+      fname = "Sleef_" + std::string(name) + "4";                            \
+      llvm::Type* vecType = llvm::VectorType::get(type, v->dtype().lanes()); \
+      callee = module_->getOrInsertFunction(                                 \
+          fname, llvm::FunctionType::get(vecType, {vecType}, false), {});    \
+      call_simd_sleef = true;                                                \
+    } else {                                                                 \
+      callee = module_->getOrInsertFunction(                                 \
+          name, llvm::FunctionType::get(type, {type}, false), {});           \
+    }                                                                        \
+    call_ty = callee.getFunctionType();                                      \
+    call_fn = callee.getCallee();                                            \
+    applyMathFunctionAttributes(llvm::cast<llvm::Function>(call_fn));        \
   } break;
-        UNARY_MATH_CASE(kErf, "erff", FloatTy_)
-        UNARY_MATH_CASE(kErfc, "erfcf", FloatTy_)
-        UNARY_MATH_CASE(kTan, "tanf", FloatTy_)
-        UNARY_MATH_CASE(kAcos, "acosf", FloatTy_)
-        UNARY_MATH_CASE(kAsin, "asinf", FloatTy_)
-        UNARY_MATH_CASE(kAtan, "atanf", FloatTy_)
-        UNARY_MATH_CASE(kCosh, "coshf", FloatTy_)
-        UNARY_MATH_CASE(kSinh, "sinhf", FloatTy_)
-        UNARY_MATH_CASE(kTanh, "tanhf", FloatTy_)
-        UNARY_MATH_CASE(kExpm1, "expm1f", FloatTy_)
-        UNARY_MATH_CASE(kLgamma, "lgammaf", FloatTy_)
-#undef UNARY_MATH_CASE
+#else
+#define SIMD_UNARY_MATH_CASE(enum, name, type)                               \
+  case enum: {                                                               \
+    llvm::FunctionCallee callee;                                             \
+    std::string fname;                                                       \
+    if (v->dtype().lanes() == 4) {                                           \
+      fname = "Sleef_" + std::string(name) + "4";                            \
+      llvm::Type* vecType = llvm::VectorType::get(type, v->dtype().lanes()); \
+      callee = module_->getOrInsertFunction(                                 \
+          fname, llvm::FunctionType::get(vecType, {vecType}, false), {});    \
+      call_simd_sleef = true;                                                \
+    } else {                                                                 \
+      callee = module_->getOrInsertFunction(                                 \
+          name, llvm::FunctionType::get(type, {type}, false), {});           \
+    }                                                                        \
+    call_ty = callee.getFunctionType();                                      \
+    call_fn = callee.getCallee();                                            \
+    applyMathFunctionAttributes(llvm::cast<llvm::Function>(call_fn));        \
+  } break;
+#endif
+        SIMD_UNARY_MATH_CASE(kLog10, "log10f", FloatTy_)
+        SIMD_UNARY_MATH_CASE(kLog, "logf", FloatTy_)
+        SIMD_UNARY_MATH_CASE(kLog2, "log2f", FloatTy_)
+        SIMD_UNARY_MATH_CASE(kExp, "expf", FloatTy_)
+        SIMD_UNARY_MATH_CASE(kCos, "cosf", FloatTy_)
+        SIMD_UNARY_MATH_CASE(kSin, "sinf", FloatTy_)
+        SIMD_UNARY_MATH_CASE(kSqrt, "sqrtf", FloatTy_)
+        SIMD_UNARY_MATH_CASE(kFabs, "fabsf", FloatTy_)
+        SIMD_UNARY_MATH_CASE(kFloor, "floorf", FloatTy_)
+        SIMD_UNARY_MATH_CASE(kCeil, "ceilf", FloatTy_)
+        SIMD_UNARY_MATH_CASE(kTrunc, "truncf", FloatTy_)
+        SIMD_UNARY_MATH_CASE(kRound, "roundf", FloatTy_)
+        SIMD_UNARY_MATH_CASE(kErf, "erff", FloatTy_)
+        SIMD_UNARY_MATH_CASE(kErfc, "erfcf", FloatTy_)
+        SIMD_UNARY_MATH_CASE(kTan, "tanf", FloatTy_)
+        SIMD_UNARY_MATH_CASE(kAcos, "acosf", FloatTy_)
+        SIMD_UNARY_MATH_CASE(kAsin, "asinf", FloatTy_)
+        SIMD_UNARY_MATH_CASE(kAtan, "atanf", FloatTy_)
+        SIMD_UNARY_MATH_CASE(kCosh, "coshf", FloatTy_)
+        SIMD_UNARY_MATH_CASE(kSinh, "sinhf", FloatTy_)
+        SIMD_UNARY_MATH_CASE(kTanh, "tanhf", FloatTy_)
+        SIMD_UNARY_MATH_CASE(kExpm1, "expm1f", FloatTy_)
+        SIMD_UNARY_MATH_CASE(kLgamma, "lgammaf", FloatTy_)
+#undef SIMD_UNARY_MATH_CASE
+
+
+#if defined(__AVX__) && !defined(_MSC_VER)
+#define SIMD_BINARY_MATH_CASE(enum, name, type)                               \
+  case enum: {                                                               \
+    llvm::FunctionCallee callee;                                             \
+    std::string fname;                                                       \
+    if (v->dtype().lanes() == 8) {                                           \
+      fname = "Sleef_" + std::string(name) + "8";                            \
+      llvm::Type* vecType = llvm::VectorType::get(type, v->dtype().lanes()); \
+      callee = module_->getOrInsertFunction(                                 \
+          fname, llvm::FunctionType::get(vecType, {vecType, vecType}, false), {});    \
+      call_simd_sleef = true;                                                \
+    } else if (v->dtype().lanes() == 4) {                                    \
+      fname = "Sleef_" + std::string(name) + "4";                            \
+      llvm::Type* vecType = llvm::VectorType::get(type, v->dtype().lanes()); \
+      callee = module_->getOrInsertFunction(                                 \
+          fname, llvm::FunctionType::get(vecType, {vecType, vecType}, false), {});    \
+      call_simd_sleef = true;                                                \
+    } else {                                                                 \
+      callee = module_->getOrInsertFunction(                                 \
+          name, llvm::FunctionType::get(type, {type, type}, false), {});           \
+    }                                                                        \
+    call_ty = callee.getFunctionType();                                      \
+    call_fn = callee.getCallee();                                            \
+    applyMathFunctionAttributes(llvm::cast<llvm::Function>(call_fn));        \
+  } break;
+#else
+#define SIMD_BINARY_MATH_CASE(enum, name, type)                               \
+  case enum: {                                                               \
+    llvm::FunctionCallee callee;                                             \
+    std::string fname;                                                       \
+    if (v->dtype().lanes() == 4) {                                           \
+      fname = "Sleef_" + std::string(name) + "4";                            \
+      llvm::Type* vecType = llvm::VectorType::get(type, v->dtype().lanes()); \
+      callee = module_->getOrInsertFunction(                                 \
+          fname, llvm::FunctionType::get(vecType, {vecType, vecType}, false), {});    \
+      call_simd_sleef = true;                                                \
+    } else {                                                                 \
+      callee = module_->getOrInsertFunction(                                 \
+          name, llvm::FunctionType::get(type, {type, type}, false), {});           \
+    }                                                                        \
+    call_ty = callee.getFunctionType();                                      \
+    call_fn = callee.getCallee();                                            \
+    applyMathFunctionAttributes(llvm::cast<llvm::Function>(call_fn));        \
+  } break;
+#endif
+        SIMD_BINARY_MATH_CASE(kAtan2, "atan2f", FloatTy_)
+        SIMD_BINARY_MATH_CASE(kPow, "powf", FloatTy_)
+        SIMD_BINARY_MATH_CASE(kFmod, "fmodf", FloatTy_)
+#undef SIMD_BINARY_MATH_CASE
 
 #define BINARY_MATH_CASE(enum, name, type)                             \
   case enum: {                                                         \
@@ -1007,36 +1251,85 @@ void LLVMCodeGen::visit(const Intrinsics* v) {
     applyMathFunctionAttributes(llvm::cast<llvm::Function>(call_fn));  \
   } break;
         BINARY_MATH_CASE(kRemainder, "remainderf", FloatTy_)
-        BINARY_MATH_CASE(kAtan2, "atan2f", FloatTy_)
-        BINARY_MATH_CASE(kPow, "powf", FloatTy_)
-        BINARY_MATH_CASE(kFmod, "fmodf", FloatTy_)
 #undef BINARY_MATH_CASE
 
       default: {
-        LOG(FATAL) << "Unimplemented: Intrinsics: " << ExprHandle(v);
+        throw unimplemented_lowering(v);
       } break;
     }
+
+
   } else if (v->dtype().scalar_type() == ScalarType::Double) {
     switch (v->op_type()) {
-#define UNARY_INTRIN_CASE(enum, intrin)                 \
-  case enum: {                                          \
-    v->params().front()->accept(this);                  \
-    value_ = irb_.CreateUnaryIntrinsic(intrin, value_); \
-    return;                                             \
+#if defined(__AVX__) && !defined(_MSC_VER)
+#define SIMD_UNARY_MATH_CASE(enum, name, type)                               \
+  case enum: {                                                               \
+    llvm::FunctionCallee callee;                                             \
+    std::string fname;                                                       \
+    if (v->dtype().lanes() == 4) {                                           \
+      fname = "Sleef_" + std::string(name) + "d4";                           \
+      llvm::Type* vecType = llvm::VectorType::get(type, v->dtype().lanes()); \
+      callee = module_->getOrInsertFunction(                                 \
+          fname, llvm::FunctionType::get(vecType, {vecType}, false), {});    \
+      call_simd_sleef = true;                                                \
+    } else if (v->dtype().lanes() == 2) {                                    \
+      fname = "Sleef_" + std::string(name) + "d2";                           \
+      llvm::Type* vecType = llvm::VectorType::get(type, v->dtype().lanes()); \
+      callee = module_->getOrInsertFunction(                                 \
+          fname, llvm::FunctionType::get(vecType, {vecType}, false), {});    \
+      call_simd_sleef = true;                                                \
+    } else {                                                                 \
+      callee = module_->getOrInsertFunction(                                 \
+          name, llvm::FunctionType::get(type, {type}, false), {});           \
+    }                                                                        \
+    call_ty = callee.getFunctionType();                                      \
+    call_fn = callee.getCallee();                                            \
+    applyMathFunctionAttributes(llvm::cast<llvm::Function>(call_fn));        \
   } break;
-      UNARY_INTRIN_CASE(kLog10, llvm::Intrinsic::log10)
-      UNARY_INTRIN_CASE(kLog, llvm::Intrinsic::log)
-      UNARY_INTRIN_CASE(kLog2, llvm::Intrinsic::log2)
-      UNARY_INTRIN_CASE(kExp, llvm::Intrinsic::exp)
-      UNARY_INTRIN_CASE(kCos, llvm::Intrinsic::cos)
-      UNARY_INTRIN_CASE(kSin, llvm::Intrinsic::sin)
-      UNARY_INTRIN_CASE(kSqrt, llvm::Intrinsic::sqrt)
-      UNARY_INTRIN_CASE(kFabs, llvm::Intrinsic::fabs)
-      UNARY_INTRIN_CASE(kFloor, llvm::Intrinsic::floor)
-      UNARY_INTRIN_CASE(kCeil, llvm::Intrinsic::ceil)
-      UNARY_INTRIN_CASE(kTrunc, llvm::Intrinsic::trunc)
-      UNARY_INTRIN_CASE(kRound, llvm::Intrinsic::round)
-#undef UNARY_INTRIN_CASE
+#else
+#define SIMD_UNARY_MATH_CASE(enum, name, type)                               \
+  case enum: {                                                               \
+    llvm::FunctionCallee callee;                                             \
+    std::string fname;                                                       \
+    if (v->dtype().lanes() == 2) {                                           \
+      fname = "Sleef_" + std::string(name) + "d2";                           \
+      llvm::Type* vecType = llvm::VectorType::get(type, v->dtype().lanes()); \
+      callee = module_->getOrInsertFunction(                                 \
+          fname, llvm::FunctionType::get(vecType, {vecType}, false), {});    \
+      call_simd_sleef = true;                                                \
+    } else {                                                                 \
+      callee = module_->getOrInsertFunction(                                 \
+          name, llvm::FunctionType::get(type, {type}, false), {});           \
+    }                                                                        \
+    call_ty = callee.getFunctionType();                                      \
+    call_fn = callee.getCallee();                                            \
+    applyMathFunctionAttributes(llvm::cast<llvm::Function>(call_fn));        \
+  } break;
+#endif
+        SIMD_UNARY_MATH_CASE(kLog10, "log10", DoubleTy_)
+        SIMD_UNARY_MATH_CASE(kLog, "log", DoubleTy_)
+        SIMD_UNARY_MATH_CASE(kLog2, "log2", DoubleTy_)
+        SIMD_UNARY_MATH_CASE(kExp, "exp", DoubleTy_)
+        SIMD_UNARY_MATH_CASE(kCos, "cos", DoubleTy_)
+        SIMD_UNARY_MATH_CASE(kSin, "sin", DoubleTy_)
+        SIMD_UNARY_MATH_CASE(kSqrt, "sqrt", DoubleTy_)
+        SIMD_UNARY_MATH_CASE(kFabs, "fabs", DoubleTy_)
+        SIMD_UNARY_MATH_CASE(kFloor, "floor", DoubleTy_)
+        SIMD_UNARY_MATH_CASE(kCeil, "ceil", DoubleTy_)
+        SIMD_UNARY_MATH_CASE(kTrunc, "trunc", DoubleTy_)
+        SIMD_UNARY_MATH_CASE(kRound, "round", DoubleTy_)
+        SIMD_UNARY_MATH_CASE(kErf, "erf", DoubleTy_)
+        SIMD_UNARY_MATH_CASE(kErfc, "erfc", DoubleTy_)
+        SIMD_UNARY_MATH_CASE(kTan, "tan", DoubleTy_)
+        SIMD_UNARY_MATH_CASE(kAcos, "acos", DoubleTy_)
+        SIMD_UNARY_MATH_CASE(kAsin, "asin", DoubleTy_)
+        SIMD_UNARY_MATH_CASE(kAtan, "atan", DoubleTy_)
+        SIMD_UNARY_MATH_CASE(kCosh, "cosh", DoubleTy_)
+        SIMD_UNARY_MATH_CASE(kSinh, "sinh", DoubleTy_)
+        SIMD_UNARY_MATH_CASE(kTanh, "tanh", DoubleTy_)
+        SIMD_UNARY_MATH_CASE(kExpm1, "expm1", DoubleTy_)
+        SIMD_UNARY_MATH_CASE(kLgamma, "lgamma", DoubleTy_)
+#undef SIMD_UNARY_MATH_CASE
 
       case kRsqrt: {
         v->params().front()->accept(this);
@@ -1049,26 +1342,55 @@ void LLVMCodeGen::visit(const Intrinsics* v) {
         return;
       } break;
 
-#define UNARY_MATH_CASE(enum, name, type)                             \
-  case enum: {                                                        \
-    auto callee = module_->getOrInsertFunction(                       \
-        name, llvm::FunctionType::get(type, {type}, false), {});      \
-    call_ty = callee.getFunctionType();                               \
-    call_fn = callee.getCallee();                                     \
-    applyMathFunctionAttributes(llvm::cast<llvm::Function>(call_fn)); \
+#if defined(__AVX__) && !defined(_MSC_VER)
+#define SIMD_BINARY_MATH_CASE(enum, name, type)                               \
+  case enum: {                                                               \
+    llvm::FunctionCallee callee;                                             \
+    std::string fname;                                                       \
+    if (v->dtype().lanes() == 4) {                                           \
+      fname = "Sleef_" + std::string(name) + "d4";                            \
+      llvm::Type* vecType = llvm::VectorType::get(type, v->dtype().lanes()); \
+      callee = module_->getOrInsertFunction(                                 \
+          fname, llvm::FunctionType::get(vecType, {vecType, vecType}, false), {});    \
+      call_simd_sleef = true;                                                \
+    } else if (v->dtype().lanes() == 2) {                                    \
+      fname = "Sleef_" + std::string(name) + "d2";                            \
+      llvm::Type* vecType = llvm::VectorType::get(type, v->dtype().lanes()); \
+      callee = module_->getOrInsertFunction(                                 \
+          fname, llvm::FunctionType::get(vecType, {vecType, vecType}, false), {});    \
+      call_simd_sleef = true;                                                \
+    } else {                                                                 \
+      callee = module_->getOrInsertFunction(                                 \
+          name, llvm::FunctionType::get(type, {type, type}, false), {});           \
+    }                                                                        \
+    call_ty = callee.getFunctionType();                                      \
+    call_fn = callee.getCallee();                                            \
+    applyMathFunctionAttributes(llvm::cast<llvm::Function>(call_fn));        \
   } break;
-        UNARY_MATH_CASE(kErf, "erf", DoubleTy_)
-        UNARY_MATH_CASE(kErfc, "erfc", DoubleTy_)
-        UNARY_MATH_CASE(kTan, "tan", DoubleTy_)
-        UNARY_MATH_CASE(kAcos, "acos", DoubleTy_)
-        UNARY_MATH_CASE(kAsin, "asin", DoubleTy_)
-        UNARY_MATH_CASE(kAtan, "atan", DoubleTy_)
-        UNARY_MATH_CASE(kCosh, "cosh", DoubleTy_)
-        UNARY_MATH_CASE(kSinh, "sinh", DoubleTy_)
-        UNARY_MATH_CASE(kTanh, "tanh", DoubleTy_)
-        UNARY_MATH_CASE(kExpm1, "expm1", DoubleTy_)
-        UNARY_MATH_CASE(kLgamma, "lgamma", DoubleTy_)
-#undef UNARY_MATH_CASE
+#else
+#define SIMD_BINARY_MATH_CASE(enum, name, type)                               \
+  case enum: {                                                               \
+    llvm::FunctionCallee callee;                                             \
+    std::string fname;                                                       \
+    if (v->dtype().lanes() == 2) {                                           \
+      fname = "Sleef_" + std::string(name) + "d2";                            \
+      llvm::Type* vecType = llvm::VectorType::get(type, v->dtype().lanes()); \
+      callee = module_->getOrInsertFunction(                                 \
+          fname, llvm::FunctionType::get(vecType, {vecType, vecType}, false), {});    \
+      call_simd_sleef = true;                                                \
+    } else {                                                                 \
+      callee = module_->getOrInsertFunction(                                 \
+          name, llvm::FunctionType::get(type, {type, type}, false), {});           \
+    }                                                                        \
+    call_ty = callee.getFunctionType();                                      \
+    call_fn = callee.getCallee();                                            \
+    applyMathFunctionAttributes(llvm::cast<llvm::Function>(call_fn));        \
+  } break;
+#endif
+        SIMD_BINARY_MATH_CASE(kAtan2, "atan2", DoubleTy_)
+        SIMD_BINARY_MATH_CASE(kPow, "pow", DoubleTy_)
+        SIMD_BINARY_MATH_CASE(kFmod, "fmod", DoubleTy_)
+#undef SIMD_BINARY_MATH_CASE
 
 #define BINARY_MATH_CASE(enum, name, type)                             \
   case enum: {                                                         \
@@ -1079,13 +1401,10 @@ void LLVMCodeGen::visit(const Intrinsics* v) {
     applyMathFunctionAttributes(llvm::cast<llvm::Function>(call_fn));  \
   } break;
         BINARY_MATH_CASE(kRemainder, "remainder", DoubleTy_)
-        BINARY_MATH_CASE(kAtan2, "atan2", DoubleTy_)
-        BINARY_MATH_CASE(kPow, "pow", DoubleTy_)
-        BINARY_MATH_CASE(kFmod, "fmod", DoubleTy_)
 #undef BINARY_MATH_CASE
 
       default: {
-        LOG(FATAL) << "Unimplemented: Intrinsics: " << ExprHandle(v);
+        throw unimplemented_lowering(v);
       } break;
     }
   }
@@ -1096,10 +1415,10 @@ void LLVMCodeGen::visit(const Intrinsics* v) {
     params.push_back(value_);
   }
 
-  if (v->dtype().lanes() == 1) {
+  if (v->dtype().lanes() == 1 || call_simd_sleef == true) {
     value_ = irb_.CreateCall(call_ty, call_fn, params);
   } else {
-    llvm::Type* vecType = llvm::VectorType::get(FloatTy_, v->dtype().lanes());
+    llvm::Type* vecType = params[0]->getType();
     value_ = llvm::UndefValue::get(vecType);
     for (int i = 0; i < v->dtype().lanes(); ++i) {
       std::vector<llvm::Value*> call_operands;
@@ -1113,23 +1432,23 @@ void LLVMCodeGen::visit(const Intrinsics* v) {
   }
 }
 
-void LLVMCodeGen::visit(const FunctionCall* v) {
-  LOG(FATAL) << "Unimplemented: FunctionCall";
+void LLVMCodeGenImpl::visit(const FunctionCall* v) {
+  throw unimplemented_lowering(v);
 }
 
-void LLVMCodeGen::visit(const Allocate* v) {
-  LOG(FATAL) << "Unimplemented: Allocate";
+void LLVMCodeGenImpl::visit(const Allocate* v) {
+  throw unimplemented_lowering(v);
 }
 
-void LLVMCodeGen::visit(const Free* v) {
-  LOG(FATAL) << "Unimplemented: Free";
+void LLVMCodeGenImpl::visit(const Free* v) {
+  throw unimplemented_lowering(v);
 }
 
-void LLVMCodeGen::visit(const Cond* v) {
-  LOG(FATAL) << "Unimplemented: Cond";
+void LLVMCodeGenImpl::visit(const Cond* v) {
+  throw unimplemented_lowering(v);
 }
 
-void LLVMCodeGen::optimize(llvm::Module& M) {
+void LLVMCodeGenImpl::optimize(llvm::Module& M) {
   llvm::legacy::FunctionPassManager FPM(&M);
   llvm::legacy::PassManager PM;
 

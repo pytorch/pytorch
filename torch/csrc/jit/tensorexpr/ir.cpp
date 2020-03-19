@@ -1,6 +1,6 @@
-#include "torch/csrc/jit/tensorexpr/ir.h"
+#include <torch/csrc/jit/tensorexpr/ir.h>
 
-#include "torch/csrc/jit/tensorexpr/buffer.h"
+#include <torch/csrc/jit/tensorexpr/buffer.h>
 
 namespace torch {
 namespace jit {
@@ -26,9 +26,17 @@ Load::Load(
       base_handle_(base_handle),
       index_(index),
       mask_(mask) {
-  CHECK_EQ(base_handle_->dtype(), kHandle);
-  CHECK_EQ(index->dtype().lanes(), mask->dtype().lanes());
-  CHECK_EQ(index->dtype().scalar_type(), ScalarType::Int);
+  if (base_handle->dtype() != kHandle) {
+    throw malformed_input();
+  }
+
+  if (index->dtype().lanes() != mask->dtype().lanes()) {
+    throw malformed_input();
+  }
+
+  if (index->dtype().scalar_type() != ScalarType::Int) {
+    throw unsupported_dtype();
+  }
 }
 
 Store::Store(
@@ -37,8 +45,9 @@ Store::Store(
     const Expr* value,
     const Expr* mask)
     : Store(buffer.data(), index, value, mask) {
-  CHECK_EQ(buffer.dtype().scalar_type(), value->dtype().scalar_type());
-  CHECK_EQ(buffer.dtype().scalar_type(), value->dtype().scalar_type());
+  if (buffer.dtype().scalar_type() != value->dtype().scalar_type()) {
+    throw malformed_input();
+  }
 }
 
 Dtype Intrinsics::IntrinsicsDtype(IntrinsicsOp op_type, Dtype dt1) {
@@ -55,7 +64,10 @@ Dtype Intrinsics::IntrinsicsDtype(
     IntrinsicsOp op_type,
     const std::vector<const Expr*>& params) {
   // TODO: check the op_type an dmake a real decision
-  CHECK_GE(params.size(), 1ULL);
+  if (params.size() == 0) {
+    throw malformed_input();
+  }
+
   return params[0]->dtype();
 }
 

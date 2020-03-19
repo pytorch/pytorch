@@ -923,7 +923,9 @@ def create_script_fn(self, method_name, func_type, output_process_fn):
 # known to be failing in script
 EXCLUDE_SCRIPT = {
     'test_norm_fro_default',
+    'test_norm_fro_cpu',
     'test_norm_nuc',
+    'test_norm_fro',
     'test_norm_nuc_batched',
 
     # aten op has additional cudnn argument
