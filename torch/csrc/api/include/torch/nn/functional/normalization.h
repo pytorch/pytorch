@@ -9,6 +9,7 @@ namespace torch {
 namespace nn {
 namespace functional {
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor normalize(
     const Tensor& input,
@@ -25,7 +26,19 @@ inline Tensor normalize(
     }
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.normalize
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::NormalizeFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::normalize(input, F::NormalizeFuncOptions().p(1).dim(-1));
+/// ```
 inline Tensor normalize(
     const Tensor& input,
     NormalizeFuncOptions options = {}) {
@@ -34,6 +47,7 @@ inline Tensor normalize(
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor layer_norm(const Tensor& input,
                          const std::vector<int64_t>& normalized_shape,
@@ -43,7 +57,19 @@ inline Tensor layer_norm(const Tensor& input,
     return torch::layer_norm(input, normalized_shape, weight, bias, eps);
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.layer_norm
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::LayerNormFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::layer_norm(input, F::LayerNormFuncOptions({2, 2}).eps(2e-5));
+/// ```
 inline Tensor layer_norm(const Tensor& input,
     const LayerNormFuncOptions& options) {
   return detail::layer_norm(input, options.normalized_shape(), options.weight(), options.bias(), options.eps());
@@ -51,6 +77,7 @@ inline Tensor layer_norm(const Tensor& input,
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor local_response_norm(
     const Tensor& input,
@@ -89,7 +116,19 @@ inline Tensor local_response_norm(
     return input / div;
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.local_response_norm
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::LocalResponseNormFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::local_response_norm(x, F::LocalResponseNormFuncOptions(2));
+/// ```
 inline Tensor local_response_norm(
     const Tensor& input,
     const LocalResponseNormFuncOptions& options) {
@@ -98,6 +137,7 @@ inline Tensor local_response_norm(
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor group_norm(
     const Tensor& input,
@@ -109,7 +149,19 @@ inline Tensor group_norm(
                            at::globalContext().userEnabledCuDNN());
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.group_norm
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::GroupNormFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::group_norm(input, F::GroupNormFuncOptions(2).eps(2e-5));
+/// ```
 inline Tensor group_norm(
     const Tensor& input,
     const GroupNormFuncOptions& options) {

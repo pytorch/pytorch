@@ -28,21 +28,23 @@ static const std::unordered_map<int, int> binary_prec = {
     {'|', 5},
     {'^', 6},
     {'&', 7},
-    {'+', 8},
-    {'-', 8},
-    {'*', 9},
-    {'/', 9},
-    {TK_FLOOR_DIV, 9},
-    {'%', 9},
-    {'@', 9},
-    {TK_POW, 10},
+    {TK_LSHIFT, 8},
+    {TK_RSHIFT, 8},
+    {'+', 9},
+    {'-', 9},
+    {'*', 10},
+    {'/', 10},
+    {TK_FLOOR_DIV, 10},
+    {'%', 10},
+    {'@', 10},
+    {TK_POW, 11},
 };
 
 static const std::unordered_map<int, int> unary_prec = {
     {TK_NOT, 3},
     {'~', 3},
-    {'-', 9},
-    {'*', 9},
+    {'-', 10},
+    {'*', 10},
 };
 
 bool SharedParserData::isUnary(int kind, int* prec) {
