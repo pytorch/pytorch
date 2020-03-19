@@ -55,8 +55,8 @@ class class_ {
   /// see this class exposed as in Python and TorchScript. For example, if
   /// you pass in "MyStack" here, the class will appear as
   /// `torch.classes.MyStack` in both Python and TorchScript.
-  explicit class_(const std::string& className) : className(std::move(className)) {
-    qualClassName = topModule + "." + parentModule + "." + className;
+  explicit class_(const std::string& namespaceName, const std::string& className) {
+    qualClassName = std::string("__torch__.torch.classes.") + namespaceName + "." + className;
 
     classTypePtr = at::ClassType::create(
         c10::QualifiedName(qualClassName),
@@ -230,12 +230,8 @@ class class_ {
     classTypePtr->addMethod(method.get());
   }
 
-  std::string className;
   std::string qualClassName;
   at::ClassTypePtr classTypePtr;
-
-  const std::string parentModule = "classes";
-  const std::string topModule = "__torch__.torch";
 };
 
 /// make_custom_class() is a convenient way to create an instance of a registered
