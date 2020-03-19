@@ -2193,44 +2193,6 @@ int hashValue(Stack& stack) {
   return 0;
 }
 
-int64_t getIValueId(const IValue& val) {
-  // id in practice is only used to compare pointer types, and None.
-  // Python gives no guarantees otherwise.
-  if (val.isPtrType()) {
-    return reinterpret_cast<int64_t>(val.internalToPointer());
-  }
-  if (val.isNone()) {
-    return 0;
-  }
-  // For non-None / pointer types, make sure that they don't compute id(0)
-  if (val.isInt()) {
-    // make 2^62 always 1 so id(int) != 0
-    // use value instead of bits so this works on big/little endian machines
-    size_t LAST_BIT_SET = 4611686018427387904;
-    return val.toInt() | LAST_BIT_SET;
-  } else if (val.isDouble()) {
-    int64_t out;
-    double dbl_val = val.toDouble();
-    memcpy(&out, &dbl_val, sizeof(out));
-    int64_t one_bit = 1;
-    out = out | one_bit;
-    return out;
-  } else if (val.isBool()) {
-    int64_t out = val.toBool();
-    return out + 1;
-  } else if (val.isDevice()) {
-    auto device = val.toDevice();
-    int16_t type = static_cast<int16_t>(device.type());
-    int16_t index = static_cast<int16_t>(device.index());
-    int64_t out = 0;
-    out = out | (type << 16);
-    out = out | (index);
-    int64_t one_bit = 1;
-    return out | one_bit;
-  }
-  TORCH_INTERNAL_ASSERT(false, "unexpect ivalue", val.tagKind());
-}
-
 RegisterOperators reg2({
 
 #define DEFINE_STRING_OP(op_name, string_op, result) \
@@ -3045,11 +3007,15 @@ RegisterOperators reg2({
         },
         aliasAnalysisFromSchema()),
     Operator(
-        "prim::id(Any(a!) x) -> int",
+        "prim::id(AnyClassType? x) -> int",
         [](Stack& stack) {
           IValue a;
           pop(stack, a);
-          push(stack, getIValueId(a));
+          if (a.isNone()) {
+            push(stack, 0);
+          } else {
+            push(stack, reinterpret_cast<int64_t>(a.internalToPointer()));
+          }
           return 0;
         },
         aliasAnalysisFromSchema()),

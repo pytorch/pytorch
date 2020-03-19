@@ -15781,16 +15781,10 @@ a")
         tester(str_hash, ("", "hello", "a"))
 
     def test_id(self):
-        @torch.jit.script
-        def test_id_scalars():
-            a = id(None) == id(None)
-            b = id(None) != id(0)
-            c = id(1) != id(0)
-            d = id(None) != id(0.0)
-            f = id(torch.float) != id(torch.double)
-            return a and b and c and d and f
-
-        self.assertTrue(test_id_scalars())
+        with self.assertRaisesRegex(RuntimeError, "Expected a value"): 
+            @torch.jit.script
+            def test_id_scalars():
+                return id(2) == id(None) 
 
         @torch.jit.script
         class FooTest(object):
