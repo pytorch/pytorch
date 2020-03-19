@@ -932,6 +932,20 @@ if(ANDROID)
   list(APPEND Caffe2_DEPENDENCY_LIBS log)
 endif()
 
+# ---[ LLVM
+if (USE_LLVM)
+  message(STATUS "Looking for LLVM in ${USE_LLVM}")
+  find_package(LLVM QUIET PATHS ${USE_LLVM} NO_DEFAULT_PATH)
+
+  if (LLVM_FOUND)
+    message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
+    message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
+
+    include_directories(${LLVM_INCLUDE_DIRS})
+    add_definitions(-DTORCH_ENABLE_LLVM ${LLVM_DEFINITIONS})
+  endif (LLVM_FOUND)
+endif (USE_LLVM)
+
 # ---[ CUDA
 if(USE_CUDA)
   # public/*.cmake uses CAFFE2_USE_*
@@ -1277,7 +1291,7 @@ if (NOT INTERN_BUILD_MOBILE)
   LIST(APPEND CUDA_NVCC_FLAGS ${TORCH_NVCC_FLAGS})
   LIST(APPEND CUDA_NVCC_FLAGS ${NVCC_FLAGS_EXTRA})
   IF (CMAKE_POSITION_INDEPENDENT_CODE AND NOT MSVC)
-    LIST(APPEND CUDA_NVCC_FLAGS "-Xcompiler -fPIC")
+    LIST(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "-fPIC")
   ENDIF()
 
   IF (CUDA_HAS_FP16 OR NOT ${CUDA_VERSION} LESS 7.5)
