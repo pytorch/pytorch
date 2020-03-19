@@ -141,7 +141,7 @@ class Benchmark(object):
                 if callable(getattr(self, "reference", None)):
                     self.check()
                 else:
-                    print(f"Warning: no reference result for {self.module()}")
+                    print("Warning: no reference result for ", self.module())
             z = self.compute()
             if self.mode == "both":
                 if self.result_grad is None:
