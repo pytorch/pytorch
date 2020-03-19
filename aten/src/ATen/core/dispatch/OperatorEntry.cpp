@@ -63,7 +63,7 @@ void OperatorEntry::registerSchema(FunctionSchema&& schema) {
   TORCH_INTERNAL_ASSERT(!schema_.has_value());
   for (auto i = kernels_.begin(); i != kernels_.end(); ++i) {
     for (auto j = i->second.begin(); j != i->second.end(); ++j) {
-      if (j->inferred_function_schema) {
+      if (j->inferred_function_schema != nullptr) {
         checkSchema(name_, schema, *j->inferred_function_schema);
       }
     }

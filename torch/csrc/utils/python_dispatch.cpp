@@ -138,7 +138,7 @@ void initDispatchBindings(PyObject* module) {
   });
 
   m.def("_dispatch_dump", [](const char* name) -> std::string {
-    auto op = c10::Dispatcher::singleton().findSchema(torch::jit::parseName(name));
+    auto op = c10::Dispatcher::singleton().findOperatorByName(torch::jit::parseName(name));
     if (!op) {
       return "";
     } else {
@@ -147,7 +147,7 @@ void initDispatchBindings(PyObject* module) {
   });
 
   m.def("_dispatch_check_invariants", [](const char* name) {
-    auto op = c10::Dispatcher::singleton().findSchema(torch::jit::parseName(name));
+    auto op = c10::Dispatcher::singleton().findOperatorByName(torch::jit::parseName(name));
     if (!op) {
     } else {
       return op->checkInvariants();

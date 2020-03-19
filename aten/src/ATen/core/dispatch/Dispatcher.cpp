@@ -43,7 +43,7 @@ C10_EXPORT Dispatcher& Dispatcher::singleton() {
   return _singleton;
 }
 
-c10::optional<OperatorHandle> Dispatcher::findSchema(const OperatorName& overload_name) {
+c10::optional<OperatorHandle> Dispatcher::findOperatorByName(const OperatorName& overload_name) {
   return operatorLookupTable_.read([&] (const ska::flat_hash_map<OperatorName, OperatorHandle>& operatorLookupTable) -> c10::optional<OperatorHandle> {
     auto found = operatorLookupTable.find(overload_name);
     if (found == operatorLookupTable.end()) {
@@ -53,6 +53,19 @@ c10::optional<OperatorHandle> Dispatcher::findSchema(const OperatorName& overloa
   });
 }
 
+c10::optional<OperatorHandle> Dispatcher::findSchema(const OperatorName& overload_name) {
+  auto it = findOperatorByName(overload_name);
+  if (it.has_value()) {
+    if (it->hasSchema()) {
+      return it;
+    } else {
+      return c10::nullopt;
+    }
+  } else {
+    return it;
+  }
+}
+
 OperatorHandle Dispatcher::findSchemaOrThrow(const char* name, const char* overload_name) {
   return findSchema({name, overload_name}).value();
 }
@@ -60,7 +73,7 @@ OperatorHandle Dispatcher::findSchemaOrThrow(const char* name, const char* overl
 // Postcondition: caller is responsible for disposing of registration when they
 // are done
 OperatorHandle Dispatcher::findOrRegisterName_(const OperatorName& op_name) {
-  const auto found = findSchema(op_name);
+  const auto found = findOperatorByName(op_name);
   if (found != c10::nullopt) {
     return *found;
   }
@@ -80,60 +93,43 @@ RegistrationHandleRAII Dispatcher::registerDef(FunctionSchema schema) {
   std::lock_guard<std::mutex> lock(mutex_);
 
   OperatorName op_name = schema.operator_name();
+  auto op = findOrRegisterName_(op_name);
 
-  const auto found = findSchema(op_name);
-  OperatorHandle op = [&] {
-    if (found == c10::nullopt) {
-      // Initial def
-      operators_.emplace_back(std::move(schema));
-      OperatorHandle op(--operators_.end());
-      operatorLookupTable_.write([&] (ska::flat_hash_map<OperatorName, OperatorHandle>& operatorLookupTable) {
-        operatorLookupTable.emplace(op_name, op);
-      });
-      // Call the hook after the operator is setup!
-      listeners_->callOnOperatorRegistered(op);
-      return op;
+  if (op.operatorIterator_->def_count == 0) {
+    // NB: registerSchema is not idempotent! Only do it once!
+    op.operatorIterator_->op.registerSchema(std::move(schema));
+    listeners_->callOnOperatorRegistered(op);
+  } else {
+    TORCH_CHECK(op.schema() == schema, "Tried to register multiple operators with the same name and the same overload name but different schemas: ", schema, " vs ", op.schema());
+    if (schema.isDefaultAliasAnalysisKind()) {
+      // If the *new* schema is the default alias analysis kind, for BC, we
+      // will accept it.  If we don't accept it, most extensions that override
+      // existing operators will stop working (as they generally did not
+      // specify alias information).  Remove this BC smoothing ASAP, because
+      // if the two incompatible registrations live in the same compilation
+      // unit, the order their static initializers run is unspecified, which
+      // means that you may nondeterministically fail the subsequent test.
+    } else if (op.schema().isDefaultAliasAnalysisKind()) {
+      // If you POST-FACTO specify a non-default alias analysis kind after
+      // we already have a schema for a function, complain loudly about it
+      // (because this new implementation doesn't support merging in this
+      // way).
+      TORCH_CHECK(op.schema().aliasAnalysis() == schema.aliasAnalysis(),
+        "Tried to define the schema for ", toString(op_name),
+        " multiple times without providing an explicit alias analysis kind at each registration site.  "
+        "This was previously permitted, but is now not allowed.  You should either explicitly specify the "
+        "correct alias analysis kind at each site [",
+        toString(op.schema().isDefaultAliasAnalysisKind() ? schema.aliasAnalysis() : op.schema().aliasAnalysis()),
+        "], or use the new Module::impl() API, which permits you to omit the schema entirely when "
+        "specifying further implementations of an operator");
     } else {
-      // Re-registration for BC reasons, test for consistency
-      OperatorHandle op(*found);
-      TORCH_INTERNAL_ASSERT(op.operatorIterator_->def_and_impl_count >= 1);
-      // NB: the operator may have been impl'ed but not def'ed
-      if (op.operatorIterator_->def_count == 0) {
-        op.operatorIterator_->op.registerSchema(std::move(schema));
-      } else {
-        TORCH_CHECK(op.schema() == schema, "Tried to register multiple operators with the same name and the same overload name but different schemas: ", schema, " vs ", op.schema());
-        // If the *new* schema is the default alias analysis kind, for BC, we
-        // will accept it.  If we don't accept it, most extensions that override
-        // existing operators will stop working (as they generally did not
-        // specify alias information).  Remove this BC smoothing ASAP, because
-        // if the two incompatible registrations live in the same compilation
-        // unit, the order their static initializers run is unspecified, which
-        // means that you may nondeterministically fail the subsequent test.
-        if (schema.isDefaultAliasAnalysisKind()) {
-          // OK
-        // If you POST-FACTO specify a non-default alias analysis kind after
-        // we already have a schema for a function, complain loudly about it
-        // (because this new implementation doesn't support merging in this
-        // way).
-        } else if (op.schema().isDefaultAliasAnalysisKind()) {
-          TORCH_CHECK(op.schema().aliasAnalysis() == schema.aliasAnalysis(),
-            "Tried to define the schema for ", toString(op_name),
-            " multiple times without providing an explicit alias analysis kind at each registration site.  "
-            "This was previously permitted, but is now not allowed.  You should either explicitly specify the "
-            "correct alias analysis kind at each site [",
-            toString(op.schema().isDefaultAliasAnalysisKind() ? schema.aliasAnalysis() : op.schema().aliasAnalysis()),
-            "], or use the new Module::impl() API, which permits you to omit the schema entirely when "
-            "specifying further implementations of an operator");
-        } else {
-          TORCH_CHECK(op.schema().aliasAnalysis() == schema.aliasAnalysis(),
-            "Tried to define the schema for ", toString(op_name), " with different alias analysis kinds: ",
-            toString(op.schema().aliasAnalysis()), " vs ", toString(schema.aliasAnalysis()));
-        }
-      }
-      return op;
+      TORCH_CHECK(op.schema().aliasAnalysis() == schema.aliasAnalysis(),
+        "Tried to define the schema for ", toString(op_name), " with different alias analysis kinds: ",
+        toString(op.schema().aliasAnalysis()), " vs ", toString(schema.aliasAnalysis()));
     }
-  }();
+  }
 
+  // NB: do not increment the counts until AFTER error checking
   ++op.operatorIterator_->def_count;
   ++op.operatorIterator_->def_and_impl_count;
 

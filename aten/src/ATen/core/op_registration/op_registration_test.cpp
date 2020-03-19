@@ -39,13 +39,16 @@ private:
   bool* called_;
 };
 
-TEST(OperatorRegistrationTest, whenRegisteringSameSchemaWithAliasAnalysisAfterRegisteringWithoutAliasAnalysis_thenCanBeCalled) {
+TEST(OperatorRegistrationTest, whenRegisteringSameSchemaWithAliasAnalysisAfterRegisteringWithoutAliasAnalysis_thenShouldThrow) {
   {
     auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<DummyKernel>(c10::DispatchKey::CPUTensorId));
     expectThrows<c10::Error>([&] {
       auto registrar2 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<DummyKernel>(c10::DispatchKey::XLATensorId).aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION));
     }, "Tried to define the schema for _test::dummy multiple times without providing an explicit alias analysis kind");
   }
+}
+
+TEST(OperatorRegistrationTest, whenRegisteringSameSchemaWithoutAliasAnalysisAfterRegisteringWithAliasAnalysis_thenCanBeCalled) {
   {
     auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<DummyKernel>(c10::DispatchKey::XLATensorId).aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION));
     // NB: this is OK right now for BC reasons
@@ -1288,10 +1291,7 @@ TEST(NewOperatorRegistrationTest, testBasics) {
     .def("dummy1(Tensor self) -> Tensor")
     .def("dummy2(Tensor self) -> Tensor")
     .def("dummy3(Tensor self, Tensor other) -> Tensor", [](const Tensor& self, const Tensor& other) { return self; })
-    // TODO: This currently does not work, as we need to test if we were given
-    // a schema string or name and then set FROM_SCHEMA or CONSERVATIVE based
-    // on this information
-    // .def("dummy4", [](const Tensor& self, const Tensor& other) { return other; })
+    .def("dummy4", [](const Tensor& self, const Tensor& other) { return other; })
     .impl("dummy", c10::dispatch(c10::DeviceType::CPU, [](const Tensor& self) { return self; }))
     .impl("dummy", c10::dispatch(c10::DeviceType::XLA, [](const Tensor& self) { return self; }))
     // Internal API
@@ -1306,8 +1306,113 @@ TEST(NewOperatorRegistrationTest, testBasics) {
   ASSERT_TRUE(Dispatcher::singleton().findSchema({"_test::dummy1", ""}).has_value());
   ASSERT_TRUE(Dispatcher::singleton().findSchema({"_test::dummy2", ""}).has_value());
   ASSERT_TRUE(Dispatcher::singleton().findSchema({"_test::dummy3", ""}).has_value());
-  // ASSERT_TRUE(Dispatcher::singleton().findSchema({"_test::dummy4", ""}).has_value());
+  ASSERT_TRUE(Dispatcher::singleton().findSchema({"_test::dummy4", ""}).has_value());
   ASSERT_TRUE(Dispatcher::singleton().findSchema({"_test::dummy5", ""}).has_value());
+}
+
+// CppFunction
+//    function pointer
+//    lambda
+//    makeUnboxedOnly
+//    makeFallthrough
+//    makeFromBoxedFunction
+// dispatch(DispatchKey)
+// dispatch(DeviceType)
+// dispatch_autograd
+// Module::def(schema)
+// Module::def(schema, f)
+// Module::def(name, f)
+// Module::impl(name, f)
+// Module::Fallback
+
+TEST(NewOperatorRegistrationTest, importTopLevel) {
+  auto registrar = c10::import()
+    .def("test::def1(Tensor self) -> Tensor")
+    .def("test::def2(Tensor self) -> Tensor", [](const Tensor& x) { return x; })
+    .def("test::def3", [](const Tensor& x) { return x; })
+    .impl("test::impl1", [](const Tensor& x) { return x; });
+  ASSERT_TRUE(Dispatcher::singleton().findSchema({"test::def1", ""}).has_value());
+  ASSERT_TRUE(Dispatcher::singleton().findSchema({"test::def2", ""}).has_value());
+  ASSERT_TRUE(Dispatcher::singleton().findSchema({"test::def3", ""}).has_value());
+  ASSERT_TRUE(Dispatcher::singleton().findOperatorByName({"test::impl1", ""}).has_value());
+}
+
+TEST(NewOperatorRegistrationTest, importNamespace) {
+  auto registrar = c10::import("test")
+    .def("def1(Tensor self) -> Tensor")
+    .def("def2(Tensor self) -> Tensor", [](const Tensor& x) { return x; })
+    .def("def3", [](const Tensor& x) { return x; })
+    .impl("impl1", [](const Tensor& x) { return x; })
+    .def("retest::def1(Tensor self) -> Tensor")
+    .def("retest::def2(Tensor self) -> Tensor", [](const Tensor& x) { return x; })
+    .def("retest::def3", [](const Tensor& x) { return x; })
+    .impl("retest::impl1", [](const Tensor& x) { return x; });
+  ASSERT_TRUE(Dispatcher::singleton().findSchema({"test::def1", ""}).has_value());
+  ASSERT_TRUE(Dispatcher::singleton().findSchema({"test::def2", ""}).has_value());
+  ASSERT_TRUE(Dispatcher::singleton().findSchema({"test::def3", ""}).has_value());
+  ASSERT_TRUE(Dispatcher::singleton().findOperatorByName({"test::impl1", ""}).has_value());
+  ASSERT_TRUE(Dispatcher::singleton().findSchema({"retest::def1", ""}).has_value());
+  ASSERT_TRUE(Dispatcher::singleton().findSchema({"retest::def2", ""}).has_value());
+  ASSERT_TRUE(Dispatcher::singleton().findSchema({"retest::def3", ""}).has_value());
+  ASSERT_TRUE(Dispatcher::singleton().findOperatorByName({"retest::impl1", ""}).has_value());
+}
+
+TEST(NewOperatorRegistrationTest, schema) {
+  auto registrar = c10::import("test")
+    .def("def1(Tensor self) -> Tensor")
+    .def(torch::schema("def2(Tensor self) -> Tensor"))
+    .def(torch::schema("def3(Tensor self) -> Tensor", AliasAnalysisKind::PURE_FUNCTION))
+    .def(torch::jit::parseSchema("def4(Tensor self) -> Tensor"));
+
+  ASSERT_TRUE(Dispatcher::singleton().findSchema({"test::def1", ""}).has_value());
+  ASSERT_TRUE(Dispatcher::singleton().findSchema({"test::def2", ""}).has_value());
+  ASSERT_TRUE(Dispatcher::singleton().findSchema({"test::def3", ""}).has_value());
+  ASSERT_TRUE(Dispatcher::singleton().findSchema({"test::def4", ""}).has_value());
+
+  EXPECT_EQ(Dispatcher::singleton().findSchema({"test::def1", ""})->schema().aliasAnalysis(), AliasAnalysisKind::FROM_SCHEMA);
+  EXPECT_EQ(Dispatcher::singleton().findSchema({"test::def2", ""})->schema().aliasAnalysis(), AliasAnalysisKind::FROM_SCHEMA);
+  EXPECT_EQ(Dispatcher::singleton().findSchema({"test::def3", ""})->schema().aliasAnalysis(), AliasAnalysisKind::PURE_FUNCTION);
+  ASSERT_TRUE(Dispatcher::singleton().findSchema({"test::def4", ""})->schema().isDefaultAliasAnalysisKind());
+}
+
+TEST(NewOperatorRegistrationTest, dispatch) {
+  auto registrar = c10::import("test")
+    .def("fn_cpu", torch::dispatch(c10::DispatchKey::CPUTensorId, [](const Tensor& x) { return x; }))
+    .def("fn_cuda", torch::dispatch(kCUDA, [](const Tensor& x) { return x; }))
+    .def("fn_autograd", torch::dispatch_autograd([](const Tensor& x) { return x; }));
+
+  auto op = Dispatcher::singleton().findSchema({"test::fn_cpu", ""});
+  ASSERT_TRUE(op.has_value());
+  callOp(*op, dummyTensor(c10::DispatchKey::CPUTensorId));
+}
+
+// Some internal tests that have to be done from C++
+
+struct OpRegistrationListenerForDelayedListenerTest : public c10::OpRegistrationListener {
+  int64_t num_registers_ = 0;
+  int64_t num_deregisters_ = 0;
+  void onOperatorRegistered(const OperatorHandle& op) override {
+    num_registers_++;
+  }
+  void onOperatorDeregistered(const OperatorHandle& op) override {
+    num_deregisters_++;
+  }
+};
+
+TEST(NewOperatorRegistrationTest, testDelayedListener) {
+  // THIS IRREVOCABLY UPDATES THE GLOBAL STATE!
+  auto listener = std::make_unique<OpRegistrationListenerForDelayedListenerTest>();
+  auto listener_ptr = listener.get();
+  Dispatcher::singleton().addRegistrationListener(std::move(listener));
+  int64_t initial_num_registers = listener_ptr->num_registers_;
+  int64_t initial_num_deregisters = listener_ptr->num_deregisters_;
+  auto reg1 = c10::import("_test").impl("dummy", [](const Tensor& self) { return self; });
+  EXPECT_EQ(initial_num_registers, listener_ptr->num_registers_);
+  {
+    auto reg2 = c10::import("_test").def("dummy(Tensor self) -> Tensor");
+    EXPECT_EQ(initial_num_registers + 1, listener_ptr->num_registers_);
+  }
+  EXPECT_EQ(initial_num_deregisters + 1, listener_ptr->num_deregisters_);
 }
 
 }

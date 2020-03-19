@@ -13,6 +13,16 @@ struct OperatorName final {
   std::string overload_name;
   OperatorName(std::string name, std::string overload_name)
       : name(std::move(name)), overload_name(std::move(overload_name)) {}
+
+  void setNamespaceIfNotSet(const char* ns) {
+    // TODO: slow!  Fix internal data structures so I don't have to paste the
+    // names together
+    std::ostringstream oss;
+    if (name.find("::") == std::string::npos) {
+      oss << ns << "::" << name;
+      name = oss.str();
+    }
+  }
 };
 
 inline bool operator==(const OperatorName& lhs, const OperatorName& rhs) {

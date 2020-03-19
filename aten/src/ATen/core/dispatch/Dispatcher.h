@@ -80,7 +80,7 @@ public:
 
   /**
    * Looks for an operator schema with the given name and overload name
-   * and returns it if it is registered.
+   * and returns it if it is registered WITH A SCHEMA.
    * Returns nullopt otherwise.
    */
   c10::optional<OperatorHandle> findSchema(const OperatorName& operator_name);
@@ -99,6 +99,9 @@ public:
    * it does throw exceptions.
    */
   OperatorHandle findSchemaOrThrow(const char* name, const char* overload_name);
+
+  // Like findSchema, but also returns OperatorHandle even if there is no schema
+  c10::optional<OperatorHandle> findOperatorByName(const OperatorName& operator_name);
 
   // ------------------------------------------------------------------------
   //
@@ -206,6 +209,10 @@ public:
 
   const OperatorName& operator_name() const {
     return operatorIterator_->op.operator_name();
+  }
+
+  bool hasSchema() const {
+    return operatorIterator_->op.hasSchema();
   }
 
   const FunctionSchema& schema() const {

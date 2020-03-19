@@ -16,7 +16,7 @@ namespace impl {
 // and its dispatch table. This is not part of the public API.
 class CAFFE2_API OperatorEntry final {
 public:
-  struct KernelEntry {
+  struct KernelEntry final {
     KernelEntry(KernelFunction k, std::unique_ptr<FunctionSchema> s, std::string d)
       : kernel(std::move(k))
       , inferred_function_schema(std::move(s))
@@ -41,6 +41,9 @@ public:
   const FunctionSchema& schema() const {
     TORCH_INTERNAL_ASSERT(schema_.has_value());
     return *schema_;
+  }
+  bool hasSchema() const {
+    return schema_.has_value();
   }
 
   // An OperatorEntry may be initialized with only an OperatorName.

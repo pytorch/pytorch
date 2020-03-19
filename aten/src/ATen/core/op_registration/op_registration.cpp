@@ -104,8 +104,8 @@ void RegisterOperators::registerOp_(Options&& options) {
 
 RegisterOperators::RegisterOperators() = default;
 RegisterOperators::~RegisterOperators() = default;
-RegisterOperators::RegisterOperators(RegisterOperators&&) = default;
-RegisterOperators& RegisterOperators::operator=(RegisterOperators&&) = default;
+RegisterOperators::RegisterOperators(RegisterOperators&&) noexcept = default;
+RegisterOperators& RegisterOperators::operator=(RegisterOperators&&) noexcept = default;
 
 
 CppFunction::CppFunction(KernelFunction func, std::unique_ptr<c10::FunctionSchema> schema, std::string debug)
@@ -122,25 +122,11 @@ Module::Module()
   : ns_(c10::nullopt)
   {}
 
-Module::Module(Module&&) noexcept = default;
-Module& Module::operator=(Module&&) noexcept = default;
+Module::Module(Module&&) = default;
+Module& Module::operator=(Module&&) = default;
 
 // TODO: Error if an operator is def'ed multiple times.  Right now we just
 // merge everything
-
-namespace {
-  std::string addNamespace(const c10::optional<std::string>& ns, const char* name_or_schema) {
-    if (ns.has_value()) {
-      // TODO: slow!  Fix internal data structures so I don't have to paste the
-      // names together
-      std::ostringstream oss;
-      oss << *ns << "::" << name_or_schema;
-      return oss.str();
-    } else {
-      return name_or_schema;
-    }
-  }
-}
 
 Module& Module::def(FunctionSchema&& schema) & {
   if (ns_.has_value()) schema.setNamespaceIfNotSet(ns_->c_str());
@@ -179,8 +165,17 @@ Module&& Module::def(c10::either<OperatorName, FunctionSchema>&& name_or_schema,
 }
 
 Module& Module::impl(const char* name_str, CppFunction&& f) & {
-  auto name = torch::jit::parseName(addNamespace(ns_, name_str));
-  registrars_.emplace_back(Dispatcher::singleton().registerImpl(name, f.dispatch_key_, std::move(f.func_), std::move(f.schema_), std::move(f.debug_)));
+  auto name = torch::jit::parseName(name_str);
+  if (ns_.has_value()) name.setNamespaceIfNotSet(ns_->c_str());
+  registrars_.emplace_back(
+    Dispatcher::singleton().registerImpl(
+      std::move(name),
+      f.dispatch_key_,
+      std::move(f.func_),
+      std::move(f.schema_),
+      std::move(f.debug_)
+    )
+  );
   return *this;
 }
 Module&& Module::impl(const char* name_str, CppFunction&& f) && {

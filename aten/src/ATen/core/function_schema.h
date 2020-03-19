@@ -333,13 +333,7 @@ public:
   }
 
   void setNamespaceIfNotSet(const char* ns) {
-    // TODO: slow!  Fix internal data structures so I don't have to paste the
-    // names together
-    std::ostringstream oss;
-    if (name_.name.find("::") == std::string::npos) {
-      oss << ns << "::" << name_.name;
-      name_.name = oss.str();
-    }
+    name_.setNamespaceIfNotSet(ns);
   }
 
   // can a function with this schema be substituted for a function of rhs's
