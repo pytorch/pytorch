@@ -1,5 +1,6 @@
 import torch
 import time
+import argparse
 
 from common import SubTensor, WithTorchFunction, SubWithTorchFunction
 
@@ -22,7 +23,32 @@ def bench(t1, t2):
 
 
 def main():
-    types = [torch.Tensor, SubTensor, WithTorchFunction, SubWithTorchFunction]
+    global NUM_REPEATS
+    global NUM_REPEAT_OF_REPEATS
+
+    parser = argparse.ArgumentParser(
+        description="Run the __torch_function__ benchmarks."
+    )
+    parser.add_argument(
+        "--nreps",
+        "-n",
+        type=int,
+        default=NUM_REPEATS,
+        help="The number of repeats for one measurement.",
+    )
+    parser.add_argument(
+        "--nrepreps",
+        "-m",
+        type=int,
+        default=NUM_REPEAT_OF_REPEATS,
+        help="The number of measurements.",
+    )
+    args = parser.parse_args()
+
+    NUM_REPEATS = args.nreps
+    NUM_REPEAT_OF_REPEATS = args.nrepreps
+
+    types = torch.Tensor, SubTensor, WithTorchFunction, SubWithTorchFunction
 
     for t in types:
         tensor_1 = t(1)
@@ -30,9 +56,9 @@ def main():
 
         bench_min, bench_std = bench(tensor_1, tensor_2)
         print(
-            "Type {0} had a minimum time of {1} μs"
-            " and a standard deviation of {2} μs.".format(
-                t.__name__, (10 ** 6) * bench_min, (10 ** 6) * bench_std,
+            "Type {0} had a minimum time of {1} \u03bcs"
+            " and a standard deviation of {2} \u03bcs.".format(
+                t.__name__, (10 ** 6 * bench_min), (10 ** 6) * bench_std
             )
         )
 
