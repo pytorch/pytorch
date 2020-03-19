@@ -1,8 +1,10 @@
 import torch
 import torch.nn.functional as F
-
+from ._lowrank import svd_lowrank, pca_lowrank
 from ._overrides import has_torch_function, handle_torch_function
 from ._jit_internal import boolean_dispatch, List
+from ._jit_internal import _overload as overload
+from torch._six import PY2
 
 Tensor = torch.Tensor
 from torch import _VF
@@ -18,8 +20,10 @@ __all__ = [
     'lu_unpack',
     'norm',
     'meshgrid',
+    'pca_lowrank',
     'split',
     'stft',
+    'svd_lowrank',
     'tensordot',
     'unique',
     'unique_consecutive',
@@ -55,7 +59,7 @@ def broadcast_tensors(*tensors):
     if not torch.jit.is_scripting():
         if any(type(t) is not Tensor for t in tensors) and has_torch_function(tensors):
             return handle_torch_function(broadcast_tensors, tensors, *tensors)
-    return torch._C._VariableFunctions.broadcast_tensors(tensors)
+    return _VF.broadcast_tensors(tensors)
 
 
 def split(tensor, split_size_or_sections, dim=0):
@@ -285,10 +289,10 @@ Examples::
     if len(operands) == 1 and isinstance(operands[0], (list, tuple)):
         # the old interface of passing the operands as one list argument
         operands = operands[0]
-    return torch._C._VariableFunctions.einsum(equation, operands)
+    return _VF.einsum(equation, operands)
 
 
-def meshgrid(*tensors, **kwargs):
+def meshgrid(*tensors):
     r"""Take :math:`N` tensors, each of which can be either scalar or 1-dimensional
 vector, and create :math:`N` N-dimensional grids, where the :math:`i` :sup:`th` grid is defined by
 expanding the :math:`i` :sup:`th` input over dimensions defined by other inputs.
@@ -319,13 +323,11 @@ expanding the :math:`i` :sup:`th` input over dimensions defined by other inputs.
     """
     if not torch.jit.is_scripting():
         if any(type(t) is not Tensor for t in tensors) and has_torch_function(tensors):
-            return handle_torch_function(meshgrid, tensors, *tensors, **kwargs)
-    if kwargs:
-        raise TypeError("meshgrid() got an unexpected keyword argument '%s'" % (list(kwargs)[0],))
+            return handle_torch_function(meshgrid, tensors, *tensors)
     if len(tensors) == 1 and isinstance(tensors[0], (list, tuple)):
         # the old interface of passing the operands as one list argument
         tensors = tensors[0]
-    return torch._C._VariableFunctions.meshgrid(tensors)
+    return _VF.meshgrid(tensors)
 
 
 def stft(input, n_fft, hop_length=None, win_length=None, window=None,
@@ -496,7 +498,7 @@ def unique(input, sorted=True, return_inverse=False, return_counts=False, dim=No
                 unique, (input,), input, sorted=sorted, return_inverse=return_inverse,
                 return_counts=return_counts, dim=dim)
     if dim is not None:
-        output, inverse_indices, counts = torch._C._VariableFunctions.unique_dim(
+        output, inverse_indices, counts = _VF.unique_dim(
             input,
             dim,
             sorted=sorted,
@@ -575,7 +577,7 @@ def unique_consecutive(input, return_inverse=False, return_counts=False, dim=Non
             return handle_torch_function(
                 unique_consecutive, (input,), input, return_inverse=return_inverse,
                 return_counts=return_counts, dim=dim)
-    output, inverse_indices, counts = torch._C._VariableFunctions.unique_consecutive(
+    output, inverse_indices, counts = _VF.unique_consecutive(
         input, return_inverse=return_inverse, return_counts=return_counts, dim=dim)
     if return_inverse and return_counts:
         return output, inverse_indices, counts
@@ -643,7 +645,7 @@ def tensordot(a, b, dims=2):
             raise RuntimeError("tensordot expects dims >= 0, but got dims={}".format(dims))
         dims_a = list(range(-dims, 0))
         dims_b = list(range(dims))
-    return torch._C._VariableFunctions.tensordot(a, b, dims_a, dims_b)
+    return _VF.tensordot(a, b, dims_a, dims_b)
 
 
 def cartesian_prod(*tensors):
@@ -677,7 +679,7 @@ def cartesian_prod(*tensors):
     if not torch.jit.is_scripting():
         if any(type(t) is not Tensor for t in tensors) and has_torch_function(tensors):
             return handle_torch_function(cartesian_prod, tensors, *tensors)
-    return torch._C._VariableFunctions.cartesian_prod(tensors)
+    return _VF.cartesian_prod(tensors)
 
 
 def cdist(x1, x2, p=2., compute_mode='use_mm_for_euclid_dist_if_necessary'):
@@ -735,8 +737,28 @@ def cdist(x1, x2, p=2., compute_mode='use_mm_for_euclid_dist_if_necessary'):
     else:
         raise ValueError("{} is not a valid value for compute_mode".format(compute_mode))
 
+# TODO: type dim as BroadcastingList when https://github.com/pytorch/pytorch/issues/33782 is fixed
+@overload  # noqa: 749
+def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: 749
+    # type: (Tensor, str, Optional[List[int]], bool, Optional[Tensor], Optional[int]) -> Tensor
+    pass
 
-def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):
+@overload  # noqa: 749
+def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: 749
+    # type: (Tensor, Optional[number], Optional[List[int]], bool, Optional[Tensor], Optional[int]) -> Tensor
+    pass
+
+@overload  # noqa: 749
+def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: 749
+    # type: (Tensor, Optional[number], Optional[int], bool, Optional[Tensor], Optional[int]) -> Tensor
+    pass
+
+@overload  # noqa: 749
+def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: 749
+    # type: (Tensor, str, Optional[int], bool, Optional[Tensor], Optional[int]) -> Tensor
+    pass
+
+def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: 749
     r"""Returns the matrix norm or vector norm of a given tensor.
 
     Args:
@@ -800,42 +822,71 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):
         if type(input) is not Tensor and has_torch_function((input,)):
             return handle_torch_function(
                 norm, (input,), input, p=p, dim=dim, keepdim=keepdim, out=out, dtype=dtype)
+        # py2 considers isinstance(unicodestr, str) == False
+        if PY2 and isinstance(p, unicode):
+            p = str(p)
+
     ndim = input.dim()
 
+
     # catch default case
-    if dim is None and out is None and dtype is None:
-        if p == "fro":
-            return torch._C._VariableFunctions.frobenius_norm(input)
-        elif p != "nuc":
-            return torch._C._VariableFunctions.norm(input, p)
+    if dim is None and out is None and dtype is None and p is not None:
+        if isinstance(p, str):
+            if p == "fro":
+                return _VF.frobenius_norm(input)
+        if not isinstance(p, str):
+            return _VF.norm(input, p)
 
-    if p == "fro":
-        if dtype is not None:
-            raise ValueError("dtype argument is not supported in frobenius norm")
-        if dim is None:
-            dim = tuple(range(ndim))
-        if out is None:
-            return torch._C._VariableFunctions.frobenius_norm(input, dim, keepdim=keepdim)
-        return torch._C._VariableFunctions.frobenius_norm(input, dim, keepdim=keepdim, out=out)
-    elif p == "nuc":
-        if dtype is not None:
-            raise ValueError("dtype argument is not supported in nuclear norm")
-        if dim is None:
-            if out is None:
-                return torch._C._VariableFunctions.nuclear_norm(input, keepdim=keepdim)
-            return torch._C._VariableFunctions.nuclear_norm(input, keepdim=keepdim, out=out)
-        return torch._C._VariableFunctions.nuclear_norm(input, dim, keepdim=keepdim, out=out)
+    # TODO: when https://github.com/pytorch/pytorch/issues/33782 is fixed
+    # remove the overloads where dim is an int and replace with BraodcastingList1
+    # and remove next four lines, replace _dim with dim
+    if dim is not None:
+        if isinstance(dim, int):
+            _dim = [dim]
+        else:
+            _dim = dim
     else:
-        if dim is None:
-            dim = tuple(range(ndim))
-        if out is None and dtype is None:
-            return torch._C._VariableFunctions.norm(input, p, dim, keepdim=keepdim)
-        elif out is None:
-            return torch._C._VariableFunctions.norm(input, p, dim, keepdim=keepdim, dtype=dtype)
-        elif dtype is None:
-            return torch._C._VariableFunctions.norm(input, p, dim, keepdim=keepdim, out=out)
-    return torch._C._VariableFunctions.norm(input, p, dim, keepdim=keepdim, dtype=dtype, out=out)
+        _dim = None
 
+    if isinstance(p, str):
+        if p == "fro":
+            if dtype is not None:
+                raise ValueError("dtype argument is not supported in frobenius norm")
+
+            if _dim is None:
+                _dim = [i for i in range(ndim)]  # noqa: C416 TODO: rewrite as list(range(m))
+            if out is None:
+                return _VF.frobenius_norm(input, _dim, keepdim=keepdim)
+            else:
+                return _VF.frobenius_norm(input, _dim, keepdim=keepdim, out=out)
+        elif p == "nuc":
+            if dtype is not None:
+                raise ValueError("dtype argument is not supported in nuclear norm")
+            if _dim is None:
+                if out is None:
+                    return _VF.nuclear_norm(input, keepdim=keepdim)
+                else:
+                    return _VF.nuclear_norm(input, keepdim=keepdim, out=out)
+            else:
+                if out is None:
+                    return _VF.nuclear_norm(input, _dim, keepdim=keepdim)
+                else:
+                    return _VF.nuclear_norm(input, _dim, keepdim=keepdim, out=out)
+        raise RuntimeError("only valid string values are 'fro' and 'nuc', found {}".format(p))
+    else:
+        if _dim is None:
+            _dim = [i for i in range(ndim)]  # noqa: C416 TODO: rewrite as list(range(m))
+
+        if out is None:
+            if dtype is None:
+                return _VF.norm(input, p, _dim, keepdim=keepdim)
+            else:
+                return _VF.norm(input, p, _dim, keepdim=keepdim, dtype=dtype)
+        else:
+            if dtype is None:
+                return _VF.norm(input, p, _dim, keepdim=keepdim, out=out)
+            else:
+                return _VF.norm(input, p, _dim, keepdim=keepdim, dtype=dtype, out=out)
 
 def chain_matmul(*matrices):
     r"""Returns the matrix product of the :math:`N` 2-D tensors. This product is efficiently computed
@@ -869,7 +920,7 @@ def chain_matmul(*matrices):
     if not torch.jit.is_scripting():
         if any(type(t) is not Tensor for t in matrices) and has_torch_function(matrices):
             return handle_torch_function(chain_matmul, matrices, *matrices)
-    return torch._C._VariableFunctions.chain_matmul(matrices)
+    return _VF.chain_matmul(matrices)
 
 
 def _lu_impl(A, pivot=True, get_infos=False, out=None):

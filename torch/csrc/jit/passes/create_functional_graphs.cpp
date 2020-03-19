@@ -130,7 +130,8 @@ struct FunctionalGraphSlicer {
   }
 
   bool AnalyzeFunctionalSubset(Node* n) {
-    bool functional_node = true;
+    // TODO: clarify hasSideEffects, isNondeterministic
+    bool is_functional_node = true;
 
     // Functional Graphs are not responsible for maintaining aliasing
     // relationships. If an output of a functional graph escapes scope
@@ -143,30 +144,30 @@ struct FunctionalGraphSlicer {
     // graph
     // - allow functional graphs to have at most one value that can escape scope
     // - allow outputs which alias the wildcard set but do not "re-escape"
-
     for (Value* v : n->outputs()) {
       bool has_writers = aliasDb_->hasWriters(v);
       bool escapes_scope = aliasDb_->escapesScope(v);
       if (has_writers) {
         mutated_values_.insert(v);
       }
-      functional_node = functional_node && !escapes_scope && !has_writers;
+      is_functional_node = is_functional_node && !escapes_scope && !has_writers;
     }
 
     for (Block* block : n->blocks()) {
       auto functional_block = AnalyzeFunctionalSubset(block);
-      functional_node = functional_node && functional_block;
+      is_functional_node = is_functional_node && functional_block;
     }
 
+    // mutated_values_ already populated with inputs to this node
     auto inputs = n->inputs();
-    functional_node = functional_node &&
+    is_functional_node = is_functional_node &&
         std::all_of(inputs.begin(), inputs.end(), [&](Value* v) {
                         return !mutated_values_.count(v);
                       });
-    if (functional_node) {
+    if (is_functional_node) {
       functional_nodes_.insert(n);
     }
-    return functional_node;
+    return is_functional_node;
   }
 
   void AnalyzeFunctionalSubset(at::ArrayRef<Block*> blocks) {
@@ -185,6 +186,9 @@ struct FunctionalGraphSlicer {
         mutated_values_.insert(v);
       }
     }
+    // if a block output is not functional, then the corresponding output for the node 
+    // that contains the block will not be functional either, 
+    // so we do not need to analyze the block outputs here.
     for (Node* n : block->nodes()) {
       bool functional = AnalyzeFunctionalSubset(n);
       is_functional_block = is_functional_block && functional;

@@ -89,36 +89,6 @@ THStorage* THStorage_(newWithSize1)(scalar_t data0)
   return self;
 }
 
-THStorage* THStorage_(newWithSize2)(scalar_t data0, scalar_t data1)
-{
-  THStorage *self = THStorage_(newWithSize)(2);
-  scalar_t *data = THStorage_(data)(self);
-  data[0] = data0;
-  data[1] = data1;
-  return self;
-}
-
-THStorage* THStorage_(newWithSize3)(scalar_t data0, scalar_t data1, scalar_t data2)
-{
-  THStorage *self = THStorage_(newWithSize)(3);
-  scalar_t *data = THStorage_(data)(self);
-  data[0] = data0;
-  data[1] = data1;
-  data[2] = data2;
-  return self;
-}
-
-THStorage* THStorage_(newWithSize4)(scalar_t data0, scalar_t data1, scalar_t data2, scalar_t data3)
-{
-  THStorage *self = THStorage_(newWithSize)(4);
-  scalar_t *data = THStorage_(data)(self);
-  data[0] = data0;
-  data[1] = data1;
-  data[2] = data2;
-  data[3] = data3;
-  return self;
-}
-
 void THStorage_(retain)(THStorage *storage)
 {
   THStorage_retain(storage);
