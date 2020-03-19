@@ -26,15 +26,15 @@ void testExprSimple01() {
         return ExprHandle(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
       });
   LoopNest l({tensor});
-  Stmt* x_outer;
-  Stmt* x_inner;
-  Stmt* x_tail;
-  std::vector<Stmt*> loops = l.getLoopStmtsFor(tensor);
+  For* x_outer;
+  For* x_inner;
+  For* x_tail;
+  std::vector<For*> loops = l.getLoopStmtsFor(tensor);
   l.SplitWithTail(loops[0], 2, &x_outer, &x_inner, &x_tail);
 
-  Stmt* x_2;
-  Stmt* x_1;
-  Stmt* x_tail_2;
+  For* x_2;
+  For* x_1;
+  For* x_tail_2;
   l.SplitWithTail(x_outer, 2, &x_2, &x_1, &x_tail_2);
 }
 
@@ -47,7 +47,7 @@ void testExprLower01() {
   LoopNest l({tensor});
   Stmt* stmt = l.root_stmt();
   std::ostringstream oss;
-  oss << stmt;
+  oss << *stmt;
   ASSERT_GT(oss.str().size(), 20);
   ASSERT_LT(oss.str().size(), 200);
 }
@@ -59,17 +59,17 @@ void testExprSimple02() {
   };
   Tensor* tensor = Compute("f", {{26, "x"}, {5, "y"}}, func);
   LoopNest l({tensor});
-  Stmt* x_outer;
-  Stmt* x_inner;
-  Stmt* x_tail;
-  std::vector<Stmt*> loops = l.getLoopStmtsFor(tensor);
+  For* x_outer;
+  For* x_inner;
+  For* x_tail;
+  std::vector<For*> loops = l.getLoopStmtsFor(tensor);
   l.SplitWithTail(loops[0], 4, &x_outer, &x_inner, &x_tail);
 
   Stmt* stmt = l.root_stmt();
   std::ostringstream oss;
   oss << *stmt;
-  //   ASSERT_GT(oss.str().size(), 200);
-  //   ASSERT_LT(oss.str().size(), 600);
+  ASSERT_GT(oss.str().size(), 200);
+  ASSERT_LT(oss.str().size(), 600);
 
   {
     // Compare to a reference loop structure structure.
@@ -80,7 +80,7 @@ void testExprSimple02() {
     VarHandle f("f", kHandle);
     ExprHandle x_1 = x_outer * 4 + x_inner;
     ExprHandle x_outer_end = (ExprHandle(26) - 0) / 4;
-    Stmt* stmt1 = For::make(
+    For* stmt1 = For::make(
         x_outer,
         0,
         x_outer_end,
@@ -91,7 +91,7 @@ void testExprSimple02() {
             For::make(
                 y, 0, 5, Store::make(f, x_1 * 5 + y * 1, func(x_1, y), 1))));
     ExprHandle x_2 = x_tail + x_outer_end * 4;
-    Stmt* stmt2 = For::make(
+    For* stmt2 = For::make(
         x_tail,
         0,
         (ExprHandle(26) - 0) % 4,
@@ -127,15 +127,15 @@ void testExprSplitWithTailNone() {
   };
   Tensor* tensor = Compute("f", {{24, "x"}, {5, "y"}}, func);
   LoopNest l({tensor});
-  Stmt* x_outer;
-  Stmt* x_inner;
-  Stmt* x_tail;
-  std::vector<Stmt*> loops = l.getLoopStmtsFor(tensor);
+  For* x_outer;
+  For* x_inner;
+  For* x_tail;
+  std::vector<For*> loops = l.getLoopStmtsFor(tensor);
   l.SplitWithTail(loops[0], 4, &x_outer, &x_inner, &x_tail);
 
   Stmt* stmt = l.root_stmt();
   std::ostringstream oss;
-  oss << stmt;
+  oss << *stmt;
   ASSERT_GT(oss.str().size(), 200);
   ASSERT_LT(oss.str().size(), 600);
 
@@ -148,7 +148,7 @@ void testExprSplitWithTailNone() {
     VarHandle f("f", kHandle);
     ExprHandle x_1 = x_outer * 4 + x_inner;
     ExprHandle x_outer_end = (ExprHandle(24) - 0) / 4;
-    Stmt* stmt = For::make(
+    For* stmt = For::make(
         x_outer,
         0,
         x_outer_end,
@@ -161,7 +161,7 @@ void testExprSplitWithTailNone() {
     // Stmt stmt = Block::make({stmt1, stmt2});
 
     std::ostringstream oss_ref;
-    oss_ref << stmt;
+    oss_ref << *stmt;
     oss_ref << "\n"; // TODO: fix printing instead of adding \n here
     ASSERT_EQ(oss.str(), oss_ref.str());
   }
@@ -193,11 +193,11 @@ void testExprSplitWithMask01() {
       "f", {{M, "m"}, {N, "n"}}, [&](const ExprHandle& m, const ExprHandle& n) {
         return a_buf(m, n) + b_buf(m, n) + 1.0f;
       });
-  Stmt* n_outer;
-  Stmt* n_inner;
+  For* n_outer;
+  For* n_inner;
 
   LoopNest l({tensor});
-  std::vector<Stmt*> loops = l.getLoopStmtsFor(tensor);
+  std::vector<For*> loops = l.getLoopStmtsFor(tensor);
   l.SplitWithMask(loops[1], 4, &n_outer, &n_inner);
 
   Stmt* stmt = l.root_stmt();
@@ -292,7 +292,7 @@ void testScheduleFunctionCall01() {
   l.ApplyInlines();
   Stmt* stmt = l.root_stmt();
   std::ostringstream oss;
-  oss << stmt;
+  oss << *stmt;
   ASSERT_GT(oss.str().size(), 100);
 
   PaddedBuffer<float> a_v(M, N);
@@ -375,7 +375,7 @@ void InlineFunc01Helper(const std::vector<std::string>& inline_order) {
   Stmt* stmt = l.root_stmt();
 
   std::ostringstream oss;
-  oss << stmt;
+  oss << *stmt;
   std::string str1 = remove_space(oss.str());
 
   {
@@ -432,7 +432,7 @@ void InlineFunc01Helper(const std::vector<std::string>& inline_order) {
     Stmt* stmt2 = l2.root_stmt();
 
     std::ostringstream oss2;
-    oss2 << stmt2;
+    oss2 << *stmt2;
     std::string str2 = remove_space(oss2.str());
 
     ASSERT_EQ(str1, str2);
