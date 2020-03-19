@@ -131,6 +131,7 @@ class class_ {
   /// for custom op/method registration.
   ///
   /// Example:
+  ///
   ///     .def_pickle(
   ///         // __getstate__
   ///         [](const c10::intrusive_ptr<MyStackClass<std::string>>& self) {
