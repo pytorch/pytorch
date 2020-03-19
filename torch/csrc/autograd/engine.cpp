@@ -820,7 +820,7 @@ void Engine::mark_graph_task_completed(std::shared_ptr<GraphTask>& graph_task) {
     graph_task->future_result_->markCompleted(
         std::move(graph_task->captured_vars_));
   } catch (std::exception& e) {
-    graph_task->future_result_->setErrorIfNeeded(e.what());
+    graph_task->future_result_->setError(e.what());
   }
 }
 
