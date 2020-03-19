@@ -120,7 +120,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
           application has called a graceful shutdown. Invoking methods on a
           deleted RRef leads to undefined behaviors. RRef implementation only
           offers best-effort error detection, and applications should not use
-          ``UserRRef``s after ``rpc.shutdown()``.
+          ``UserRRefs`` after ``rpc.shutdown()``.
 
           .. warning::
               RRefs can only be serialized and deserialized by the RPC module.
