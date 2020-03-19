@@ -6003,60 +6003,6 @@ class TestTorchDeviceType(TestCase):
         input_ = layer_norm(input_.transpose(1, 2).contiguous()).contiguous()
         input_.sum().backward()
 
-    def test_future_div(self, device):
-        import torch
-
-        prev_div = torch.div
-        prev_tensor_div = torch.Tensor.div
-        prev_tensor_div_ = torch.Tensor.div_
-        prev_tensor_truediv = torch.Tensor.__truediv__
-
-        # Note: reload required since this test may be run multiple times
-        import torch.future_div
-        import importlib
-        importlib.reload(torch.future_div)
-
-        self.assertTrue(torch.div is torch.true_divide)
-        self.assertTrue(torch.Tensor.div is torch.Tensor.true_divide)
-        self.assertTrue(torch.Tensor.div_ is torch.Tensor.true_divide_)
-        self.assertTrue(torch.Tensor.__truediv__ is torch.Tensor.true_divide)
-
-        # Tests dense tensor behavior
-        t = torch.tensor((2,), device=device, dtype=torch.int)
-        d = torch.tensor((1,), device=device, dtype=torch.int)
-        o = torch.empty((2,), device=device, dtype=torch.int)
-        self.assertTrue((t / d).dtype, torch.get_default_dtype())
-        self.assertTrue((t / 2).dtype, torch.get_default_dtype())
-        self.assertTrue(torch.div(t, d).dtype, torch.get_default_dtype())
-        self.assertTrue(torch.div(t, 2).dtype, torch.get_default_dtype())
-        self.assertTrue(t.div(d).dtype, torch.get_default_dtype())
-        self.assertTrue(t.div(2).dtype, torch.get_default_dtype())
-        with self.assertRaises(RuntimeError):
-            t.div_(d)
-        with self.assertRaises(RuntimeError):
-            t.div_(2)
-        with self.assertRaises(RuntimeError):
-            torch.div(t, d, out=o)
-        with self.assertRaises(RuntimeError):
-            torch.div(t, 2, out=o)
-
-        # Tests sparse tensor behavior
-        s = (torch.rand((5,), device=device) * 10).to(torch.int).to_sparse()
-        o = (torch.empty((5,), device=device) * 10).to(torch.int).to_sparse()
-        self.assertTrue((s / 2).dtype, torch.get_default_dtype())
-        self.assertTrue(torch.div(s, 2).dtype, torch.get_default_dtype())
-        self.assertTrue(s.div(2).dtype, torch.get_default_dtype())
-        with self.assertRaises(RuntimeError):
-            s.div_(2)
-        with self.assertRaises(RuntimeError):
-            torch.div(s, 2, out=o)
-
-        # Undoes torch.future_div import
-        torch.div = prev_div
-        torch.Tensor.div = prev_tensor_div
-        torch.Tensor.div_ = prev_tensor_div_
-        torch.Tensor.__truediv__ = prev_tensor_truediv
-
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     @onlyCPU
     @dtypes(torch.float)

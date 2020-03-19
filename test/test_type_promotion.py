@@ -479,11 +479,18 @@ class TestTypePromotion(TestCase):
     def test_true_divide(self, device, dtype):
         dividend = (torch.randn(5, device=device) * 100).to(dtype)
         divisor = torch.arange(1, 6, device=device).to(dtype)
+
+        # Tests tensor/tensor division
         casting_result = dividend.to(torch.get_default_dtype()) / divisor.to(torch.get_default_dtype())
         self.assertEqual(casting_result, torch.true_divide(dividend, divisor))
 
+        # Tests tensor/scalar division
+        casting_result = dividend.to(torch.get_default_dtype()) / 2
+        self.assertEqual(casting_result, torch.true_divide(dividend, 2.))
+
     @onlyOnCPUAndCUDA
-    @dtypes(torch.bool, torch.short, torch.uint8, torch.int, torch.long)
+    @dtypes(torch.float, torch.double,
+            torch.bool, torch.short, torch.uint8, torch.int, torch.long)
     def test_true_divide_out(self, device, dtype):
         dividend = (torch.randn(5, device=device) * 100).to(dtype)
         divisor = torch.arange(1, 6, device=device).to(dtype)
@@ -493,14 +500,19 @@ class TestTypePromotion(TestCase):
             integral_quotient = torch.empty(5, device=device, dtype=dtype)
             with self.assertRaises(RuntimeError):
                 torch.true_divide(dividend, divisor, out=integral_quotient)
+            with self.assertRaises(RuntimeError):
+                torch.true_divide(dividend, 2, out=integral_quotient)
         else:
             # Tests that requests for a floating quotient succeed
             floating_quotient = torch.empty(5, device=device, dtype=dtype)
             div_result = dividend / divisor
-            self.assertEqual(div_result, torch.true_divide(dividend, divisor, out=floating_quotient))
-            self.assertEqual(dividend / 2, torch.true_divide(dividend, 2, out=floating_quotient))
+            self.assertEqual(div_result,
+                             torch.true_divide(dividend, divisor, out=floating_quotient))
+            self.assertEqual(dividend / 2,
+                             torch.true_divide(dividend, 2, out=floating_quotient))
 
-    @dtypes(torch.float, torch.double, torch.bool, torch.short, torch.uint8, torch.int, torch.long)
+    @dtypes(torch.float, torch.double,
+            torch.bool, torch.short, torch.uint8, torch.int, torch.long)
     def test_true_divide_inplace(self, device, dtype):
         dividend = (torch.randn(5, device=device) * 100).to(dtype)
         divisor = torch.arange(1, 6, device=device).to(dtype)
@@ -509,6 +521,8 @@ class TestTypePromotion(TestCase):
         if dtype in (torch.bool, torch.short, torch.uint8, torch.int, torch.long):
             with self.assertRaises(RuntimeError):
                 dividend.true_divide_(divisor)
+            with self.assertRaises(RuntimeError):
+                dividend.true_divide_(2)
         else:
             # Tests that requests for a floating quotient succeed
             div_result = dividend.clone().div_(divisor)
