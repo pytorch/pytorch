@@ -461,7 +461,7 @@ class TestTypePromotion(TestCase):
         divisor = torch.arange(1, 6, device=device).to(dtype)
 
         # Tests that requests for an integer quotient fail
-        if dtype in (torch.bool, torch.short, torch.uint8, torch.int, torch.long):
+        if not dtype.is_floating_point:
             integral_quotient = torch.empty(5, device=device, dtype=dtype)
             with self.assertRaises(RuntimeError):
                 torch.true_divide(dividend, divisor, out=integral_quotient)
@@ -483,7 +483,7 @@ class TestTypePromotion(TestCase):
         divisor = torch.arange(1, 6, device=device).to(dtype)
 
         # Tests that requests for an integer quotient fail
-        if dtype in (torch.bool, torch.short, torch.uint8, torch.int, torch.long):
+        if not dtype.is_floating_point:
             with self.assertRaises(RuntimeError):
                 dividend.true_divide_(divisor)
             with self.assertRaises(RuntimeError):
