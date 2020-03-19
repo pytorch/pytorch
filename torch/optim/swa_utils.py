@@ -7,8 +7,49 @@ from torch.optim.lr_scheduler import _LRScheduler
 class AveragedModel(Module):
     r"""Implements averaged model for Stochastic Weight Averaging (SWA).
     
+	Stochastic Weight Averaging was proposed in `Averaging Weights Leads to
+    Wider Optima and Better Generalization`_ by Pavel Izmailov, Dmitrii
+    Podoprikhin, Timur Garipov, Dmitry Vetrov and Andrew Gordon Wilson
+    (UAI 2018).
 
-    ToDo
+	AveragedModel class creates a copy of the provided module :attr:`model`
+	on the device :attr:`device` and allows to compute running averages of the 
+	parameters of the :attr:`model`.
+
+	Arguments:
+		model (torch.nn.Module): model to use with SWA
+		device (torch.device, optional): if provided, the averaged model will be
+			stored on the :attr:`device` 
+
+	Example:
+		>>> loader, optimizer, model = ...
+		>>> swa_model = torch.optim.swa_utils.AveragedModel(model, 
+		>>>										avg_function=<equal averaging>)
+		>>> scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, 
+		>>>										T_max=300)
+		>>> swa_start = 160
+		>>> swa_scheduler = SWALR(optimizer, start_epoch=swa_start, swa_lr=0.05)
+		>>>
+		>>> for i in range(300):
+		>>>      for input, target in loader:
+		>>>          optimizer.zero_grad()
+		>>>          loss_fn(model(input), target).backward()
+		>>>          optimizer.step()
+		>>>          scheduler.step()
+		>>>          swa_scheduler.step()
+		>>> 
+		>>>      if i > swa_start:
+		>>>          swa_model.update_parameters(model)
+		>>>
+		>>> # Update bn statistics for the swa_model at the end
+		>>> torch.optim.swa_utils.update_bn(loader, swa_model) 
+
+	.. note::
+            When using SWA with models containing Batch Normalization you may 
+			need to update the activation statistics for Batch Normalization.
+            You can do so by using `torch.optim.swa_utils.update_bn` utility.
+	
+	
     .. _Averaging Weights Leads to Wider Optima and Better Generalization:
         https://arxiv.org/abs/1803.05407
     .. _There Are Many Consistent Explanations of Unlabeled Data: Why You Should
@@ -39,7 +80,7 @@ class AveragedModel(Module):
         self.n_averaged += 1
 
     
-def bn_update(loader, model, device=None):
+def update_bn(loader, model, device=None):
     r"""Updates BatchNorm running_mean, running_var buffers in the model.
     It performs one pass over data in `loader` to estimate the activation
     statistics for BatchNorm layers in the model.
