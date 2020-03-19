@@ -204,17 +204,31 @@ IValue IValue::equals(const IValue& rhs) const {
   TORCH_INTERNAL_ASSERT(false, "we should never reach here")
 }
 
+static bool isUndefinedTensor(const IValue& iv) {
+  return iv.isTensor() && !iv.toTensor().defined();
+}
+
 bool IValue::is(const IValue& rhs) const {
   const IValue& lhs = *this;
+  // Special handling for undefined tensors:
+  // 1. Undefined_tensor is None and vice versa.
+  if ((isUndefinedTensor(lhs) && rhs.isNone()) ||
+      (lhs.isNone() && isUndefinedTensor(rhs))) {
+    return true;
+  }
+  // 2. Undefined_tensor is Undefined_tensor.
+  if (isUndefinedTensor(lhs) && isUndefinedTensor(rhs)) {
+    return true;
+  }
+
   if (lhs.isTensor()) {
-    // Compare the underlying tensor implementations, as we may have two
-    // distinct `at::Tensor` objects pointing to the same impl.
+    // Use the standard way of comparing two tensors for identity
     return rhs.isTensor() && lhs.toTensor().is_same(rhs.toTensor());
   }
 
   if (lhs.is_intrusive_ptr) {
-    TORCH_INTERNAL_ASSERT(rhs.is_intrusive_ptr);
-    return lhs.payload.as_intrusive_ptr == rhs.payload.as_intrusive_ptr;
+    return rhs.is_intrusive_ptr &&
+        lhs.payload.as_intrusive_ptr == rhs.payload.as_intrusive_ptr;
   }
   // TODO should we do this?
   return lhs == rhs;

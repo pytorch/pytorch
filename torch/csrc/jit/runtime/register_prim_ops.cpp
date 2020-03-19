@@ -2835,7 +2835,7 @@ RegisterOperators reg2({
         [](Stack& stack) {
           IValue self, obj;
           pop(stack, self, obj);
-          push(stack, self.isSameIdentity(obj));
+          push(stack, self.is(obj));
           return 0;
         },
         aliasAnalysisFromSchema()),
@@ -2844,7 +2844,7 @@ RegisterOperators reg2({
         [](Stack& stack) {
           IValue self, obj;
           pop(stack, self, obj);
-          push(stack, !self.isSameIdentity(obj));
+          push(stack, !self.is(obj));
           return 0;
         },
         aliasAnalysisFromSchema()),
@@ -3088,7 +3088,7 @@ int sort_op(Stack& stack) {
       g_list.end(),
       [reverse, &sort_stack, &lt_func](IValue a, IValue b) -> bool {
         // "strict weak ordering" issue - see other sort
-        if (a.isSameIdentity(b)) {
+        if (a.is(b)) {
           return false;
         }
         if (!lt_func) {
