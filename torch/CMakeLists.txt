@@ -114,7 +114,7 @@ set(TORCH_PYTHON_SRCS
 
 # NB: This has to match the condition under which the JIT test directory
 #     is included (at the time of writing that's in caffe2/CMakeLists.txt).
-if (BUILD_TEST AND NOT MSVC AND NOT USE_ROCM)
+if (BUILD_TEST AND NOT USE_ROCM)
     add_definitions(-DBUILDING_TESTS)
     list(APPEND TORCH_PYTHON_SRCS
       ${TORCH_ROOT}/test/cpp/jit/torch_python_test.cpp
@@ -160,6 +160,9 @@ set(TORCH_PYTHON_LINK_FLAGS "")
 if (MSVC)
     string(APPEND TORCH_PYTHON_LINK_FLAGS " /NODEFAULTLIB:LIBCMT.LIB")
     list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${PYTHON_LIBRARIES})
+    if (BUILD_TEST)
+      list(APPEND TORCH_PYTHON_LINK_LIBRARIES onnx_library)
+    endif(BUILD_TEST)
     if (NOT ${CMAKE_BUILD_TYPE} MATCHES "Release")
       string(APPEND TORCH_PYTHON_LINK_FLAGS " /DEBUG:FULL")
     endif()
@@ -255,6 +258,8 @@ if (USE_DISTRIBUTED)
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_functions.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_rpc_handler.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/request_callback_impl.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/unpickled_python_call.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/unpickled_python_remote_call.cpp
         ${TORCH_SRC_DIR}/csrc/jit/runtime/register_distributed_ops.cpp
         )
       list(APPEND TORCH_PYTHON_LINK_LIBRARIES c10d)
