@@ -108,7 +108,7 @@ def update_bn(loader, model, device=None):
 
     It performs one pass over data in `loader` to estimate the activation
     statistics for BatchNorm layers in the model.
-    Args:
+    Arguments:
         loader (torch.utils.data.DataLoader): dataset loader to compute the
             activation statistics on. Each data batch should be either a
             tensor, or a list/tuple whose first element is a tensor
@@ -163,11 +163,33 @@ def update_bn(loader, model, device=None):
 class SWALR(_LRScheduler):
     r"""Sets the learning rate in each parameter group to a fixed value
     after a given number of epochs.
-    ToDo
 
-    .. _Stochastic Weight Averaging in Parallel: Large-Batch Training That 
-        Generalizes Well:
-        https://arxiv.org/abs/2001.02312
+	This learning rate scheduler is meant to be used with Stochastic Weight 
+    Averaging (SWA) method (see `torch.optim.swa_utils.AveragedModel`).
+
+    Arguments:
+        optimizer (torch.optim.Optimizer): wrapped optimizer
+        swa_lr (float): the learning rate value
+        start_epoch (int): the epoch number after which the learning rate will
+            be switched to :attr:`swa_lr`
+        last_epoch (int): the index of the last epoch (default: -1)
+
+    The :class:`SWALR` scheduler is meant to be used in compound with other
+    schedulers to switch to a constant learning rate late in the training 
+    (at epoch :attr:`start_epoch`).
+
+    Example:
+        >>> lr_lambda = lambda epoch: 0.9
+        >>> base_scheduler = MultiplicativeLR(optimizer, lr_lambda=lr_lambda)
+        >>> scheduler = SWALR(optimizer, start_epoch=160, swa_lr=0.05)
+
+	.. note::
+        :class:`SWALR` sets the same learning rate :attr:`swa_lr` for every
+        `param_group` in the optimizer; it does not support individual values
+        of :attr:`swa_lr` for different `param_groups`.
+
+    .. _Averaging Weights Leads to Wider Optima and Better Generalization:
+        https://arxiv.org/abs/1803.05407
     """
     def __init__(self, optimizer, swa_lr, start_epoch, last_epoch=-1):
         self.swa_lr = swa_lr
