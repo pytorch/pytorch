@@ -260,7 +260,7 @@ class TestQuantizedOps(TestCase):
         f_min, f_max = 0.0, 1.0
         q_min, q_max = torch.iinfo(torch_type).min, torch.iinfo(torch_type).max
         output_scale = (f_max - f_min) / (q_max - q_min + 1.0)
-        output_zero_point = output_zero_point = 0 if torch_type == torch.qint32 else q_min
+        output_zero_point = 0 if torch_type == torch.qint32 else q_min
         dqY_hat = F.hardsigmoid(dqX)
         qY_hat = torch.quantize_per_tensor(dqY_hat, scale=output_scale,
                                            zero_point=output_zero_point,
