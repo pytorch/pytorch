@@ -874,7 +874,7 @@ Returns the address of the first element of :attr:`self` tensor.
 
 add_docstr_all('dequantize',
                r"""
-dequantize() -> Tensor
+dequantize() -> Tensor or list
 
 Given a quantized Tensor, dequantize it and return the dequantized float Tensor.
 """)
