@@ -336,7 +336,7 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(const Tenso
       return diff_view_meta->grad_fn_;
     }
     auto current_version = self._version();
-    if (diff_view_meta->attr_version != current_version) {
+    if (diff_view_meta->attr_version == 0 && 0 != current_version) {
       // This is an indirect rebase_history due to another view or the base being modified inplace
       handle_view_on_rebase(diff_view_meta, /* indirect */ true);
       TORCH_INTERNAL_ASSERT(diff_view_meta->output_nr_ == 0);
