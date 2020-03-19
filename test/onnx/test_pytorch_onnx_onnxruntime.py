@@ -346,6 +346,7 @@ class TestONNXRuntime(unittest.TestCase):
         return images
 
     @skipIfUnsupportedMinOpsetVersion(11)
+    @unittest.skip("disabled due to removal of aten::__interpolate")
     def test_mask_rcnn(self):
         model = torchvision.models.detection.mask_rcnn.maskrcnn_resnet50_fpn(pretrained=True, min_size=200,
                                                                              max_size=300)
@@ -353,6 +354,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(model, (images,), rtol=1e-3, atol=1e-5)
 
     @skipIfUnsupportedMinOpsetVersion(11)
+    @unittest.skip("Disabled w removal of aten::__interpolate")
     def test_keypoint_rcnn(self):
         class KeyPointRCNN(torch.nn.Module):
             def __init__(self):
@@ -1291,7 +1293,7 @@ class TestONNXRuntime(unittest.TestCase):
         self._interpolate_tests(False)
 
     @skipIfUnsupportedMinOpsetVersion(11)
-    @unittest.skipIf(True, "Interpolate script NYI")
+    @unittest.skip("Interpolate script NYI")
     def test_interpolate_no_shape(self):
         class MyModel(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -1579,6 +1581,30 @@ class TestONNXRuntime(unittest.TestCase):
         input = torch.tensor([[1., 2., 3.], [4., 5., 6.], [7., 8., 9.]])
         indices = torch.tensor([[1, 0], [0, 1], [0, 1]], dtype=torch.int64)
         self.run_test(GatherModel(), input=(input, indices))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_expand(self):
+        class ExpandModel(torch.nn.Module):
+            def forward(self, input):
+                return input.expand(2, 3, -1)
+
+        input = torch.randn(2, 1, 4)
+        self.run_test(ExpandModel(), input=(input))
+
+        class ExpandInferDimModel(torch.nn.Module):
+            def forward(self, input):
+                return input.expand(-1, input.size(0))
+
+        input = torch.randn(3, 1)
+        self.run_test(ExpandInferDimModel(), input=(input))
+
+        class ExpandTensorSizeModel(torch.nn.Module):
+            def forward(self, input, size):
+                return input.expand(size)
+
+        input = torch.randn(3,)
+        size = torch.tensor([-1])
+        self.run_test(ExpandTensorSizeModel(), input=(input, size))
 
     def test_multinomial(self):
         class Multinomial(torch.nn.Module):
