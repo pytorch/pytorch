@@ -1717,6 +1717,32 @@ class TestSWAUtils(TestCase):
             self.assertAlmostEqual(p_swa, p_swa2)
         self.assertTrue(averaged_dnn.n_averaged == averaged_dnn2.n_averaged)
 
+    def test_averaged_model_exponential(self):
+        # Test AveragedModel with EMA as avg_fun
+        dnn = torch.nn.Sequential(
+            torch.nn.Conv2d(1, 5, kernel_size=3),
+            torch.nn.Linear(5, 10)
+        )
+        alpha = 0.9
+        avg_fun = lambda p_avg, p, n_avg: alpha * p_avg + (1 - alpha) * p
+        averaged_dnn = AveragedModel(dnn, avg_fun=avg_fun)
+        averaged_params = [torch.zeros_like(param) for param in dnn.parameters()]
+        n_updates = 10
+        for i in range(n_updates):
+            updated_averaged_params = []
+            for p, p_avg in zip(dnn.parameters(), averaged_params):
+                p.data += torch.randn_like(p.data)
+                if i == 0:
+                    updated_averaged_params.append(p.clone())
+                else:
+                    updated_averaged_params.append((p_avg * alpha + 
+                                                   p * (1 - alpha)).clone())
+            averaged_dnn.update_parameters(dnn)
+            averaged_params = updated_averaged_params
+        
+        for p_avg, p_swa in zip(averaged_params, averaged_dnn.parameters()):
+            self.assertAlmostEqual(p_avg, p_swa)
+
     def _test_update_bn(self, dnn, dl_x, dl_xy, cuda):
 
         preactivation_sum = torch.zeros(dnn.n_features)

@@ -52,6 +52,13 @@ class AveragedModel(Module):
 	.. note::
         :attr:`avg_fun` is not saved in the :meth:`state_dict` of the model.
 	
+	.. note::
+        When :meth:`update_parameters` is called for the first time (i.e. 
+        :attr:`n_averaged` is `0`) the parameters of `model` are copied
+        to the parameters of :class:`AveragedModel`. For every subsequent
+        call of :meth:`update_parameters` the function `avg_fun` is used
+        to update the parameters.
+
     .. _Averaging Weights Leads to Wider Optima and Better Generalization:
         https://arxiv.org/abs/1803.05407
     .. _There Are Many Consistent Explanations of Unlabeled Data: Why You Should
@@ -79,8 +86,12 @@ class AveragedModel(Module):
     def update_parameters(self, model):
         for p_swa, p_model in zip(self.parameters(), model.parameters()):
             device = p_swa.device
-            p_swa.data = self.avg_fun(p_swa.data, p_model.data.to(device), 
-                                      self.n_averaged)
+            p_model_ = p_model.data.to(device)
+            if self.n_averaged == 0:
+                p_swa.data.copy_(p_model_)
+            else:
+                p_swa.data.copy_(self.avg_fun(p_swa.data, p_model_,
+                                              self.n_averaged))
         self.n_averaged += 1
 
     
