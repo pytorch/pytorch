@@ -191,7 +191,7 @@ class TestSparse(TestCase):
         self.assertEqual(x._indices().numel(), 0)
         self.assertEqual(x._values().numel(), 0)
 
-    def test_coalecce(self):
+    def test_coalesce(self):
         for empty_i, empty_v, empty_nnz in itertools.product([True, False], repeat=3):
             sparse_size = [] if empty_i else [2, 1]
             dense_size = [1, 0, 2] if empty_v else [1, 2]
@@ -228,7 +228,7 @@ class TestSparse(TestCase):
             x.to_dense()  # Tests triple to_dense for memory corruption
             x.to_dense()
             x.to_dense()
-            # We dont have to_dense for half types, so we don't request 
+            # We dont have to_dense for half types, so we don't request
             # exact_dtype if res.type is torch.float16.
             dense_x = x.to_dense()
             safe_dense_x = self.safeToDense(x)
@@ -1200,6 +1200,19 @@ class TestSparse(TestCase):
         self.assertEqual(self.safeToDense(y1), expected)
         self.assertEqual(self.safeToDense(y2), expected)
 
+        # Note: true_divide does not have a method variant
+        y1 = torch.true_divide(x1, 37.5)
+        y2 = x1.clone()
+        expected = torch.true_divide(self.safeToDense(x1), 37.5)
+        self.assertEqual(self.safeToDense(y1), expected)
+
+        y1 = x1 // 37.5
+        y2 = x1.clone()
+        y2.floor_divide_(37.5)
+        expected = self.safeToDense(x1) // 37.5
+        self.assertEqual(self.safeToDense(y1), expected)
+        self.assertEqual(self.safeToDense(y2), expected)
+
         # TODO: add back inplace support
         y1 = x1 ** 2
         y2 = x1.clone()
@@ -2143,9 +2156,23 @@ class TestSparse(TestCase):
         self.assertEqual(torch.isnan(t).int(), t_nan.int())
 
     def test_div_by_sparse_error(self):
-        self.assertRaisesRegex(RuntimeError, 'A Sparse Tensor can only be divided',
+        self.assertRaisesRegex(RuntimeError, 'Sparse division requires',
                                lambda: torch.tensor(1., device=self.device).to_sparse()
                                / torch.tensor(1., device=self.device).to_sparse())
+
+    def test_true_divide_by_sparse_error(self):
+        def fn():
+            x = torch.tensor(1., device=self.device).to_sparse()
+            y = torch.tensor(1., device=self.device).to_sparse()
+            torch.true_divide(x, y)
+
+        self.assertRaisesRegex(RuntimeError, 'Sparse true division requires',
+                               fn)
+
+    def test_floor_divide_by_sparse_error(self):
+        self.assertRaisesRegex(RuntimeError, 'Sparse floor division requires',
+                               lambda: torch.tensor(1., device=self.device).to_sparse()
+                               // torch.tensor(1., device=self.device).to_sparse())
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_sparse_to_numpy(self):
