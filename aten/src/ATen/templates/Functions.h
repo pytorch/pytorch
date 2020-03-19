@@ -19,6 +19,8 @@ namespace at {
 
 using native::tensor;
 
+namespace {
+
 ${function_declarations}
 
 inline Tensor from_blob(
@@ -86,9 +88,11 @@ inline int64_t numel(const Tensor& tensor) {
   return tensor.numel();
 }
 
-// function definitions are all static inline because
+// function definitions are all in anonymous namespace because
 // they are one-line statically dispatched functions that
 // invoke the actual dynamic dispatch on the correct argument
 ${function_definitions}
 
-}
+} // anonymous namespace
+
+} // namespace at
