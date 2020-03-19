@@ -3851,13 +3851,9 @@ def multi_head_attention_forward(query,                           # type: Tensor
     q = q * scaling
 
     if attn_mask is not None:
-
-        # convert ByteTensor attn_mask to float
-        if attn_mask.dtype == torch.uint8:
-            attn_mask = torch.zeros(attn_mask.size(),
-                                    device=attn_mask.device).masked_fill_(attn_mask.to(torch.bool),
-                                                                          float('-inf'))
-
+        assert attn_mask.dtype == torch.float32 or attn_mask.dtype == torch.float64 or \
+            attn_mask.dtype == torch.unit8, \
+            'Only float and byte(unit8) type are supported for attn_mask'
         if attn_mask.dim() == 2:
             attn_mask = attn_mask.unsqueeze(0)
             if list(attn_mask.size()) != [1, query.size(0), key.size(0)]:
@@ -3923,7 +3919,11 @@ def multi_head_attention_forward(query,                           # type: Tensor
     assert list(attn_output_weights.size()) == [bsz * num_heads, tgt_len, src_len]
 
     if attn_mask is not None:
-        attn_output_weights += attn_mask
+        if attn_mask.dtype == torch.uint8:
+            attn_output_weights.masked_fill_(attn_mask.to(torch.bool), float('-inf'))
+        else:
+            attn_output_weights += attn_mask
+
 
     if key_padding_mask is not None:
         attn_output_weights = attn_output_weights.view(bsz, num_heads, tgt_len, src_len)
