@@ -3854,9 +3854,9 @@ def multi_head_attention_forward(query,                           # type: Tensor
 
     if attn_mask is not None:
         assert attn_mask.dtype == torch.float32 or attn_mask.dtype == torch.float64 or \
-            attn_mask.dtype == torch.unit8 or attn_mask.dtype == torch.byte, \
+            attn_mask.dtype == torch.uint8 or attn_mask.dtype == torch.byte, \
             'Only float, byte, and bool types are supported for attn_mask'
-        if attn_mask.dtype == unit8:
+        if attn_mask.dtype == torch.uint8:
             attn_mask = attn_mask.to(torch.bool)
 
         if attn_mask.dim() == 2:
