@@ -16338,38 +16338,38 @@ class TestTensorDeviceOps(TestCase):
 
 # Helpers to organize ufunc metadata and improve test readability
 _ufunc_meta = collections.namedtuple('_ufunc_meta',
-                                     'is_floating alt_impl complex_on')
-def ufunc_meta(is_floating=False, alt_impl=None, complex_on=('cpu', 'cuda')):
-    return _ufunc_meta(is_floating, alt_impl, complex_on)
+                                     'is_floating alt_impl complex_on complex_out_cpu')
+def ufunc_meta(is_floating=False, alt_impl=None, complex_on=('cpu', 'cuda'), complex_out_cpu=False):
+    return _ufunc_meta(is_floating, alt_impl, complex_on, complex_out_cpu)
 
 # Dict of unary ufuncs and their associated test metadata
 unary_ufuncs = {
-    'sin': ufunc_meta(is_floating=True, complex_on=('cpu')),
-    'cos': ufunc_meta(is_floating=True, complex_on=('cpu')),
-    'tan': ufunc_meta(is_floating=True, complex_on=('cpu')),
-    'asin': ufunc_meta(is_floating=True, complex_on=('cpu')),
-    'acos': ufunc_meta(is_floating=True, complex_on=('cpu')),
-    'atan': ufunc_meta(is_floating=True, complex_on=('cpu')),
-    'sinh': ufunc_meta(is_floating=True, complex_on=('cpu')),
-    'cosh': ufunc_meta(is_floating=True, complex_on=('cpu')),
-    'tanh': ufunc_meta(is_floating=True, complex_on=('cpu')),
-    'ceil': ufunc_meta(is_floating=True, complex_on=('cpu')),
-    'floor': ufunc_meta(is_floating=True, complex_on=('cpu')),
-    'exp': ufunc_meta(is_floating=True, complex_on=('cpu')),
+    'sin': ufunc_meta(is_floating=True, complex_on=('cpu'), complex_out_cpu=True),
+    'cos': ufunc_meta(is_floating=True, complex_on=('cpu'), complex_out_cpu=True),
+    'tan': ufunc_meta(is_floating=True, complex_on=('cpu'), complex_out_cpu=True),
+    'asin': ufunc_meta(is_floating=True, complex_on=('cpu'), complex_out_cpu=True),
+    'acos': ufunc_meta(is_floating=True, complex_on=('cpu'), complex_out_cpu=True),
+    'atan': ufunc_meta(is_floating=True, complex_on=('cpu'), complex_out_cpu=True),
+    'sinh': ufunc_meta(is_floating=True, complex_on=('cpu'), complex_out_cpu=True),
+    'cosh': ufunc_meta(is_floating=True, complex_on=('cpu'), complex_out_cpu=True),
+    'tanh': ufunc_meta(is_floating=True, complex_on=('cpu'), complex_out_cpu=True),
+    'ceil': ufunc_meta(is_floating=True, complex_on=('cpu'), complex_out_cpu=True),
+    'floor': ufunc_meta(is_floating=True, complex_on=('cpu'), complex_out_cpu=True),
+    'exp': ufunc_meta(is_floating=True, complex_on=('cpu'), complex_out_cpu=True),
     'expm1': ufunc_meta(is_floating=True, complex_on=()),
-    'log': ufunc_meta(is_floating=True, complex_on=('cpu')),
-    'log10': ufunc_meta(is_floating=True, complex_on=('cpu')),
+    'log': ufunc_meta(is_floating=True, complex_on=('cpu'), complex_out_cpu=True),
+    'log10': ufunc_meta(is_floating=True, complex_on=('cpu'), complex_out_cpu=True),
     'log1p': ufunc_meta(is_floating=True, complex_on=()),
-    'log2': ufunc_meta(is_floating=True, complex_on=('cpu')),
-    'sqrt': ufunc_meta(is_floating=True, complex_on=('cpu')),
-    'rsqrt': ufunc_meta(is_floating=True, complex_on=('cpu')),
-    'trunc': ufunc_meta(is_floating=True, complex_on=('cpu')),
+    'log2': ufunc_meta(is_floating=True, complex_on=('cpu'), complex_out_cpu=True),
+    'sqrt': ufunc_meta(is_floating=True, complex_on=('cpu'), complex_out_cpu=True),
+    'rsqrt': ufunc_meta(is_floating=True, complex_on=('cpu'), complex_out_cpu=True),
+    'trunc': ufunc_meta(is_floating=True, complex_on=('cpu'), complex_out_cpu=True),
     'erf': ufunc_meta(is_floating=True, complex_on=()),
     'erfc': ufunc_meta(is_floating=True, complex_on=()),
     'erfinv': ufunc_meta(is_floating=True, complex_on=()),
     'lgamma': ufunc_meta(is_floating=True, complex_on=()),
     'digamma': ufunc_meta(is_floating=True, complex_on=()),
-    'sigmoid': ufunc_meta(is_floating=True, complex_on=('cpu'))
+    'sigmoid': ufunc_meta(is_floating=True, complex_on=('cpu'), complex_out_cpu=True)
 }
 
 # Creates and adds a test of the given unary floating ufunc's type promotion
@@ -16429,26 +16429,24 @@ def generate_unary_floating_ufunc_promo_test(cls, op_str):
                 self.assertRaises(RuntimeError, lambda: op(t, out=out_t))
 
         # Test for out= code paths (with input as float tensors and out as complex tensors)
-        # No unary floating ufuncs support float to complex promotion on CUDA devices
-        # List of unary floating ufuncs which do not support float to complex promotion (on cpu devices)
-        floating_ufuncs_no_float_to_complex = ['expm1', 'log1p', 'erf', 'erfc', 'erfinv', 'lgamma', 'digamma']
+        # Note: No unary floating ufuncs support float to complex promotion on CUDA devices
 
         if (self.device_type == 'cpu'):
             for in_type in my_float_types:
-                if (op_str in floating_ufuncs_no_float_to_complex):
+                if not unary_ufuncs[op_str].complex_out_cpu:
                     break
                 t = torch.tensor((1,), device=device, dtype=in_type)
                 for out_type in complex_types:
                     out_t = torch.empty((1,), device=device, dtype=out_type)
                     self.assertEqual(op(t, out=out_t).dtype, out_type)
 
+        # Test for in-place code paths
         try:
             op_inplace = getattr(torch, op_str + "_")
         except AttributeError:
             # lgamma, digamma and erfinv don't have in-place functions
             return
 
-        # Test for in-place code paths
         for in_type in int_types:
             t = torch.tensor((1,), device=device, dtype=in_type)
             self.assertRaises(RuntimeError, lambda: op_inplace(t))
