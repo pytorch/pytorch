@@ -413,7 +413,6 @@ If the future completes with an error, an exception is thrown.
       py::arg("tensors"),
       py::arg("rf") = nullptr);
 
-
   module.def(
       "_invoke_rpc_torchscript",
       [](const std::string& dstWorkerName,

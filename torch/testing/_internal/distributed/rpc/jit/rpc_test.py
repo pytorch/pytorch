@@ -754,7 +754,6 @@ class JitRpcTest(LocalRRefTest, JitRpcAsyncOpTest, RpcAgentTestFixture):
     @dist_init
     def test_python_future_with_jit(self):
         dst_rank = (self.rank + 1) % self.world_size
-        rref = self._create_rref()
         inputs = (torch.tensor([1, 1]), torch.tensor([2, 2]))
         ret_fut = rpc.rpc_async(
             "worker{}".format(dst_rank),
