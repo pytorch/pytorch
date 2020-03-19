@@ -2208,7 +2208,9 @@ graph(%input, %weight):
         qconfig_dict = {'': default_qconfig}
         model = torch.jit.script(M()).eval()
         model = quantize_script(model, qconfig_dict, _test_only_eval_fn, [data], inplace=False)
-        FileCheck().check("quantized::conv2d") \
+        FileCheck().check_count("aten::quantize_per_tensor", 1, exactly=True) \
+                   .check_not("quantized::conv2d_prepack") \
+                   .check("quantized::conv2d") \
                    .run(model.graph)
 
     def test_finalize_for_linear(self):
@@ -2224,7 +2226,9 @@ graph(%input, %weight):
         qconfig_dict = {'': default_qconfig}
         model = torch.jit.script(M()).eval()
         model = quantize_script(model, qconfig_dict, _test_only_eval_fn, [data], inplace=False)
-        FileCheck().check("quantized::linear") \
+        FileCheck().check_count("aten::quantize_per_tensor", 1, exactly=True) \
+                   .check_not("quantized::linear_prepack") \
+                   .check("quantized::linear") \
                    .run(model.graph)
 
     def test_finalize_debug(self):
@@ -2241,7 +2245,9 @@ graph(%input, %weight):
         model = torch.jit.script(M()).eval()
         model = quantize_script(model, qconfig_dict, _test_only_eval_fn, [data], inplace=False, debug=True)
         FileCheck().check_not("quantized::conv2d") \
+                   .check("aten::quantize_per_tensor") \
                    .check("CallMethod") \
+                   .check("aten::quantize_per_tensor") \
                    .run(model.graph)
 
     def test_pattern_based_rewrite(self):

@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
+#include <torch/csrc/jit/passes/prepack_folding.h>
 
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/irparser.h>
@@ -2560,6 +2561,15 @@ void DedupModuleUses(Module& module) {
   d.dedup();
 }
 
+void FoldQuantizedPrepackingOps(Module& module) {
+  auto filter_fn = [](const Node* n) -> bool {
+    return (
+        (n->kind() == Symbol::fromQualString("quantized::linear_prepack")) ||
+        n->kind() == Symbol::fromQualString("quantized::conv2d_prepack"));
+  };
+  FoldPrePackingOps(module, filter_fn, "quantized");
+}
+
 script::Module Finalize(script::Module& module) {
   SwapFunctionalLinear(module);
   auto graph = module.get_method("forward").graph();
@@ -2571,7 +2581,9 @@ script::Module Finalize(script::Module& module) {
   InsertPrepackUnpack(graph);
   ConstantPropagation(graph);
   QuantFusion(graph);
-  return freeze_module(module);
+  auto frozen = freeze_module(module);
+  FoldQuantizedPrepackingOps(frozen);
+  return frozen;
 }
 
 } // namespace jit
