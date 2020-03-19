@@ -1,7 +1,7 @@
-#include "torch/csrc/jit/tensorexpr/unique_name_manager.h"
+#include <torch/csrc/jit/tensorexpr/unique_name_manager.h>
 
+#include <torch/csrc/jit/tensorexpr/ir.h>
 #include <cctype>
-#include "torch/csrc/jit/tensorexpr/ir.h"
 
 namespace torch {
 namespace jit {

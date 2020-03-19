@@ -1,7 +1,7 @@
 #pragma once
 
-#include "torch/csrc/jit/codegen/fuser/cuda/resource_strings.h"
-#include "torch/csrc/jit/tensorexpr/cuda_codegen.h"
+#include <torch/csrc/jit/codegen/fuser/cuda/resource_strings.h>
+#include <torch/csrc/jit/tensorexpr/cuda_codegen.h>
 
 namespace torch {
 namespace jit {

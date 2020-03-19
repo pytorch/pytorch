@@ -1,7 +1,7 @@
-#include "torch/csrc/jit/tensorexpr/function.h"
+#include <torch/csrc/jit/tensorexpr/function.h>
 
 #include <c10/util/Logging.h>
-#include "torch/csrc/jit/tensorexpr/tensor.h"
+#include <torch/csrc/jit/tensorexpr/tensor.h>
 
 namespace torch {
 namespace jit {
@@ -39,7 +39,10 @@ Tensor* Compute(
     const std::string& func_name,
     const std::vector<DimArg>& dim_args,
     const std::function<ExprHandle(const VarHandle&)>& body_func) {
-  CHECK_EQ(dim_args.size(), 1ULL);
+  if (dim_args.size() != 1) {
+    throw malformed_input();
+  }
+
   std::vector<const Expr*> dims;
   std::vector<const Var*> args;
   unpack_dim_args(dim_args, &dims, &args);
@@ -53,7 +56,9 @@ Tensor* Compute(
     const std::vector<DimArg>& dim_args,
     const std::function<ExprHandle(const VarHandle&, const VarHandle&)>&
         body_func) {
-  CHECK_EQ(dim_args.size(), 2ULL);
+  if (dim_args.size() != 2) {
+    throw malformed_input();
+  }
   std::vector<const Expr*> dims;
   std::vector<const Var*> args;
   unpack_dim_args(dim_args, &dims, &args);
@@ -68,7 +73,9 @@ Tensor* Compute(
     const std::function<
         ExprHandle(const VarHandle&, const VarHandle&, const VarHandle&)>&
         body_func) {
-  CHECK_EQ(dim_args.size(), 3ULL);
+  if (dim_args.size() != 3) {
+    throw malformed_input();
+  }
   std::vector<const Expr*> dims;
   std::vector<const Var*> args;
   unpack_dim_args(dim_args, &dims, &args);
@@ -87,7 +94,9 @@ Tensor* Compute(
         const VarHandle&,
         const VarHandle&,
         const VarHandle&)>& body_func) {
-  CHECK_EQ(dim_args.size(), 4ULL);
+  if (dim_args.size() != 4) {
+    throw malformed_input();
+  }
   std::vector<const Expr*> dims;
   std::vector<const Var*> args_nodes;
   unpack_dim_args(dim_args, &dims, &args_nodes);
