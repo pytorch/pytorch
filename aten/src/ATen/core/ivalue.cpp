@@ -206,14 +206,12 @@ IValue IValue::equals(const IValue& rhs) const {
 
 bool IValue::is(const IValue& rhs) const {
   const IValue& lhs = *this;
-  if (lhs.tag != rhs.tag) {
-    return false;
-  }
-  if (lhs.tag == Tag::Tensor) {
+  if (lhs.isTensor()) {
     // Compare the underlying tensor implementations, as we may have two
     // distinct `at::Tensor` objects pointing to the same impl.
-    return lhs.toTensor().is_same(rhs.toTensor());
+    return rhs.isTensor() && lhs.toTensor().is_same(rhs.toTensor());
   }
+
   if (lhs.is_intrusive_ptr) {
     TORCH_INTERNAL_ASSERT(rhs.is_intrusive_ptr);
     return lhs.payload.as_intrusive_ptr == rhs.payload.as_intrusive_ptr;
