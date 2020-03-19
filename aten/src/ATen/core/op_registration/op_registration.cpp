@@ -104,8 +104,8 @@ void RegisterOperators::registerOp_(Options&& options) {
 
 RegisterOperators::RegisterOperators() = default;
 RegisterOperators::~RegisterOperators() = default;
-RegisterOperators::RegisterOperators(RegisterOperators&&) noexcept = default;
-RegisterOperators& RegisterOperators::operator=(RegisterOperators&&) noexcept = default;
+RegisterOperators::RegisterOperators(RegisterOperators&&) = default;
+RegisterOperators& RegisterOperators::operator=(RegisterOperators&&) = default;
 
 
 CppFunction::CppFunction(KernelFunction func, std::unique_ptr<c10::FunctionSchema> schema, std::string debug)
