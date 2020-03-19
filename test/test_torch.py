@@ -5523,7 +5523,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
 
             # different dtype input tensors
             values_1d_float = values_1d.to(torch.float32)
-            boundaries = torch.tensor([0.9, 1, 2, 2, 3], device=device, dtype=torch.int32)
+            boundaries = torch.tensor([0, 1, 2, 2, 3], device=device, dtype=torch.int32)
             with self.assertRaisesRegex(RuntimeError, "tensors should have same dtype"):
                 torch.searchsorted(boundaries, values_1d_float)
 
