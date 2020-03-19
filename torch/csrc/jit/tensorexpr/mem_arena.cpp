@@ -1,4 +1,4 @@
-#include "torch/csrc/jit/tensorexpr/mem_arena.h"
+#include <torch/csrc/jit/tensorexpr/mem_arena.h>
 
 namespace torch {
 namespace jit {
