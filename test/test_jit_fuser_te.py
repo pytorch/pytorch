@@ -11,13 +11,11 @@ from torch.testing import FileCheck
 
 from torch.testing._internal.common_utils import run_tests, IS_SANDCASTLE, ProfilingMode, GRAPH_EXECUTOR, \
     enable_profiling_mode
-from te_utils import CudaCodeGenCreated, CudaCodeGenExecuted, \
-    LLVMCodeGenCreated, LLVMCodeGenExecuted, SimpleIREvalExecuted
 
 from textwrap import dedent
 from itertools import product, permutations
 
-from test_jit import JitTestCase, enable_cpu_fuser, RUN_CUDA, RUN_CUDA_HALF, RUN_CUDA_MULTI_GPU, \
+from test_jit import JitTestCase, RUN_CUDA, RUN_CUDA_HALF, RUN_CUDA_MULTI_GPU, \
     backward_graph, all_backward_graphs, get_lstm_inputs, get_milstm_inputs, \
     LSTMCellC, LSTMCellF, LSTMCellS, MiLSTMCell, _inline_everything
 
@@ -461,7 +459,7 @@ class TestFuser(JitTestCase):
         graph = ge.graph_for(hx, cx)
         self.assertAllFused(graph)
         # XXX: TE fuser can handle concats in a fusion group.
-        #FileCheck().check("FusedConcat").check_next("return").run(str(graph))
+        # FileCheck().check("FusedConcat").check_next("return").run(str(graph))
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_concat_invariant_cuda(self):
@@ -480,7 +478,7 @@ class TestFuser(JitTestCase):
         graph = ge.graph_for(x, y, z)
         self.assertAllFused(graph, except_for={'aten::add'})
         # XXX: TE fuser can handle concats inside a fusion group.
-        #FileCheck().check("FusedConcat").check_next("return").run(str(graph))
+        # FileCheck().check("FusedConcat").check_next("return").run(str(graph))
 
     @staticmethod
     def fn_test_exp(x, y):
@@ -733,7 +731,7 @@ class TestFuser(JitTestCase):
         ge = self.checkTrace(LSTMCellC, inputs)
         graph = ge.graph_for(*inputs)
         # XXX: TE fuser can handle concats inside a fusion group.
-        #FileCheck().check("FusedConcat").check_next("return").run(str(graph))
+        # FileCheck().check("FusedConcat").check_next("return").run(str(graph))
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_lstm_gates_permutations_cuda(self):
