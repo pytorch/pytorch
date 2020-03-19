@@ -139,6 +139,10 @@ public:
   ListElementReference<T, Iterator> operator*() const {
     return {iterator_};
   }
+  
+  ListElementReference<T, Iterator> operator[](typename List<T>::size_type offset) const {
+    return {iterator_ + offset};
+  }
 
 private:
   explicit ListIterator(Iterator iterator): iterator_(std::move(iterator)) {}
