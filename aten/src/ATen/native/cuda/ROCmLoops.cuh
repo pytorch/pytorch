@@ -271,7 +271,7 @@ static void launch_kernel(int64_t N, func_t f, array_t data) {
 }
 
 template<typename func_t, typename array_t, std::enable_if_t<!detail::has_same_arg_types<func_t>::value, int> = 0>
-static void launch_kernel(int64_t N, func_t&& f, array_t data) {}
+static void launch_kernel(int64_t N, func_t f, array_t data) {}
 
 } // namespace modern
 
