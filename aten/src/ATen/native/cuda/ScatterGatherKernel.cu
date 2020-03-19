@@ -114,5 +114,34 @@ __global__ void scatter_kernel(
     self.data[tensorOffset] = src.data[srcOffset];
   }
 }
+
+template <typename index_t, typename scalar_t, int dims>
+#ifdef __HIP_PLATFORM_HCC__
+C10_LAUNCH_BOUNDS_1(512)
+#endif
+__global__ void scatter_fill_kernel(
+    TensorInfo<scalar_t, index_t> tensor,
+    scalar_t value,
+    TensorInfo<int64_t, index_t> index,
+    const int dim,
+    const index_t totalElements) {
+  for (index_t linearId = blockIdx.x * blockDim.x + threadIdx.x;
+       linearId < totalElements;
+       linearId += gridDim.x * blockDim.x) {
+    index_t tensorOffset = 0;
+    index_t indexOffset = 0;
+
+    IndexToScatterGatherOffsets<index_t, scalar_t, dims>::compute(linearId, dim,
+                                                          index, &indexOffset,
+                                                          tensor, &tensorOffset);
+
+    int64_t indexValue = index.data[indexOffset];
+    CUDA_KERNEL_ASSERT(indexValue >= 0 && indexValue < tensor.sizes[dim]);
+    tensorOffset += indexValue * tensor.strides[dim];
+
+    tensor.data[tensorOffset] = value;
+  }
+}
+
   
 } // anonymous namespace
