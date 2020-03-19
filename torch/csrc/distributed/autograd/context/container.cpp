@@ -165,7 +165,7 @@ void DistAutogradContainer::sendReleaseContextRpc(int64_t context_id) {
   // ungraceful shutdown, where we are shutting down RPC and also processing
   // this message in a separate thread concurrently. In this case, don't throw
   // here.
-  std::shared_ptr<rpc::RpcAgent> agent = nullptr;
+  std::shared_ptr<rpc::RpcAgent> agent;
   try {
     agent = rpc::RpcAgent::getCurrentRpcAgent();
   } catch (const std::exception& e) {
@@ -179,8 +179,8 @@ void DistAutogradContainer::sendReleaseContextRpc(int64_t context_id) {
 
   for (const auto& worker_id : workerIds) {
     try {
-      // Try to send RPC to clear context, though continue attempting to send to
-      // other workers if a certain send fails.
+      // Try to send RPC to clear context. If we fail, don't throw, and continue
+      // sending to the remaining workers.
       agent->send(
           agent->getWorkerInfo(worker_id),
           CleanupAutogradContextReq(context_id).toMessage());
