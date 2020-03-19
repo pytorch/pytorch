@@ -366,12 +366,13 @@ Therefore, for the moment, this is all copy pasted in from VariableTypeEverythin
     &WrapFunction<CastPolicy::POLICY, REGISTER_SIGNATURE, REDISPATCH_SIGNATURE, &REDISPATCH_FUNC>::type::call \
     >(DispatchKey::AutocastTensorId))
 
+using fdsa = at::_convolution;
 /*****************************************
 Explicit registration for out-of-place ops
 *****************************************/
-// auto register_out_of_place = torch::RegisterOperators()
-//   // fp16
-//   KERNEL_UNBOXED_ONLY(at::_convolution, "aten::_convolution(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool benchmark, bool deterministic, bool cudnn_enabled) -> Tensor", Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef, int64_t, bool, bool, bool), fp16)
+auto register_out_of_place = torch::RegisterOperators()
+  // fp16
+  KERNEL_UNBOXED_ONLY(fdsa, "aten::_convolution(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool benchmark, bool deterministic, bool cudnn_enabled) -> Tensor", Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef, int64_t, bool, bool, bool), fp16)
 //   KERNEL_UNBOXED_ONLY(at::_convolution_nogroup, "aten::_convolution_nogroup(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding) -> Tensor", Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef), fp16)
 //   KERNEL_UNBOXED_ONLY(at::conv1d, "aten::conv1d(Tensor input, Tensor weight, Tensor? bias=None, int[1] stride=1, int[1] padding=0, int[1] dilation=1, int groups=1) -> Tensor", Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t), fp16)
 //   KERNEL_UNBOXED_ONLY(at::conv2d, "aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor", Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t), fp16)
@@ -490,7 +491,7 @@ Explicit registration for out-of-place ops
 //   KERNEL_UNBOXED_ONLY(at::cat, "aten::cat.names(Tensor[] tensors, Dimname dim) -> Tensor", Tensor (TensorList, Dimname), promote)
 //   KERNEL_UNBOXED_ONLY(at::_cat, "aten::_cat(Tensor[] tensors, int dim=0) -> Tensor", Tensor (TensorList, int64_t), promote)
 //   KERNEL_UNBOXED_ONLY(at::stack, "aten::stack(Tensor[] tensors, int dim=0) -> Tensor", Tensor (TensorList, int64_t), promote)
-//   ;
+  ;
 
 auto register_banned = torch::RegisterOperators()
   .op(torch::RegisterOperators::options()
