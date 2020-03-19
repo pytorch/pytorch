@@ -3136,7 +3136,7 @@ def setup_unary_floating_ufunc_tests_helper(cls, op_name):
 
     test_name = "test_" + op_name + "_ufunc"
     assert not hasattr(cls, test_name), "{0} already in {1}".format(test_name, cls.__name__)
-    if(op_name in ['erf']):
+    if(op_name in ['erf', 'sinh', 'cosh']):
         setattr(cls, test_name, skipIfUnsupportedMinOpsetVersion(9)(test_fn))
     else:
         setattr(cls, test_name, test_fn)
