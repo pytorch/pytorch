@@ -147,6 +147,9 @@ class TORCH_API RRefContext {
       const ForkId& forkId,
       const c10::intrusive_ptr<RRef>& rref);
   void delPendingUser(const ForkId& forkId);
+  void addConfirmedUser(
+      const ForkId& forkId,
+      const c10::intrusive_ptr<RRef>& rref);
 
   // Start recroding new pending UserRRefs. All pending UserRRefs introduced
   // after this point will be put into the thread_local userTable_, which will
