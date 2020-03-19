@@ -51,13 +51,14 @@ BASE_BUILD_VERSION="1.5.0.dev$DATE"
 # Change BASE_BUILD_VERSION to git tag when on a git tag
 # Use 'git -C' to make doubly sure we're in the correct directory for checking
 # the git tag
-if git -C "${workdir}/pytorch" describe --tags --exact >/dev/null; then
+GIT_DESCRIBE="git --git-dir '${workdir}/pytorch' describe"
+if ${GIT_DESCRIBE} --tags --exact >/dev/null; then
   # Switch upload folder to 'test/' if we are on a tag
   PIP_UPLOAD_FOLDER='test/'
   # Grab git tag, remove prefixed v and remove everything after -
   # Used to clean up tags that are for release candidates like v1.5.0-rc1
   # Turns tag v1.5.0-rc1 -> v1.5.0
-  BASE_BUILD_VERSION="$(git describe -C "${workdir}/pytorch" --tags | sed -e 's/^v//' -e 's/-.*$//')"
+  BASE_BUILD_VERSION="$(${GIT_DESCRIBE} --tags | sed -e 's/^v//' -e 's/-.*$//')"
 fi
 if [[ "$(uname)" == 'Darwin' ]] || [[ "$DESIRED_CUDA" == "cu101" ]] || [[ "$PACKAGE_TYPE" == conda ]]; then
   export PYTORCH_BUILD_VERSION="${BASE_BUILD_VERSION}"
