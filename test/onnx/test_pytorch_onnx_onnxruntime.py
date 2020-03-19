@@ -3136,7 +3136,10 @@ def setup_unary_floating_ufunc_tests_helper(cls, op_name):
 
     test_name = "test_" + op_name + "_ufunc"
     assert not hasattr(cls, test_name), "{0} already in {1}".format(test_name, cls.__name__)
-    setattr(cls, test_name, test_fn)
+    if(op_name in ['erf']):
+        setattr(cls, test_name, skipIfUnsupportedMinOpsetVersion(9)(test_fn))
+    else:
+        setattr(cls, test_name, test_fn)
 
 def setup_unary_floating_ufunc_tests(cls):
     for op_name in unary_floating_ufuncs:
@@ -3148,7 +3151,6 @@ setup_unary_floating_ufunc_tests(TestONNXRuntime)
 TestONNXRuntime_opset7 = type(str("TestONNXRuntime_opset7"),
                               (unittest.TestCase,),
                               dict(TestONNXRuntime.__dict__, opset_version=7))
-
 # opset 8 tests
 TestONNXRuntime_opset8 = type(str("TestONNXRuntime_opset8"),
                               (unittest.TestCase,),
@@ -3199,7 +3201,6 @@ TestONNXRuntime_opset12_IRv4 = type(str("TestONNXRuntime_opset12_IRv4"),
                                     (unittest.TestCase,),
                                     dict(TestONNXRuntime.__dict__, opset_version=12,
                                     keep_initializers_as_inputs=False))
-
 
 if __name__ == '__main__':
     unittest.main()
