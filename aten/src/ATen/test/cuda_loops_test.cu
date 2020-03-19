@@ -27,7 +27,7 @@ void reset_buffers() {
 }
 
 Tensor thread_work_index() {
-  auto t = at::empty({4096}, kCUDA);
+  auto t = at::empty({4096 * thread_work_size}, kCUDA);
   float thread_work_index_ = 0;
   auto iter = TensorIterator::nullary_op(t);
   gpu_kernel(iter, [thread_work_index_]GPU_LAMBDA() mutable -> float {
@@ -40,6 +40,7 @@ TEST(TestLoops, MutableLambda) {
   auto t = thread_work_index();
   for (float i = 0; i < thread_work_size; i++) {
     ASSERT_TRUE((t == i).any().item<bool>());
+    ASSERT_EQ((t == i).to(kLong).sum().item<int64_t>(), 4096);
   }
 }
 
