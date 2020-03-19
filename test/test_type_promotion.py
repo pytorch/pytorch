@@ -205,10 +205,9 @@ class TestTypePromotion(TestCase):
         shape = [5, 5, 5]
         if dtype == torch.bool:
             tensor = torch.randint(int(remove_zeros), 2, shape, device=device, dtype=dtype)
-        elif dtype.is_floating_point or dtype.is_complex:
+        elif dtype.is_complex:
             # "_th_normal_ not supported on CPUType for Half" so simpler create and convert
-            tensor = torch.randn(shape, device=device)
-            tensor = tensor.to(dtype)
+            tensor = torch.randn(shape, dtype=dtype, device=device)
             if remove_zeros:
                 tensor_abs = torch.abs(tensor)
                 if dtype == torch.complex64:
@@ -216,6 +215,12 @@ class TestTypePromotion(TestCase):
                 elif dtype == torch.complex128:
                     tensor_abs = tensor_abs.to(torch.double)
                 tensor[tensor_abs < 0.05] = 5
+        elif dtype.is_floating_point or dtype.is_complex:
+            # "_th_normal_ not supported on CPUType for Half" so simpler create and convert
+            tensor = torch.randn(shape, device=device)
+            tensor = tensor.to(dtype)
+            if remove_zeros:
+                tensor[torch.abs(tensor) < 0.05] = 5
         else:
             tensor = torch.randint(-5 if dtype.is_signed else 0, 10, shape, device=device, dtype=dtype)
             if remove_zeros:
