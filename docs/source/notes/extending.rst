@@ -285,19 +285,24 @@ this time adding a ``__torch_function__`` implementation::
       def tensor(self):
           return self._value * torch.eye(self._N)
 
-      def __torch_function__(self, func, args=(), kwargs=None):
+      def __torch_function__(self, func, types, args=(), kwargs=None):
           if kwargs is None:
               kwargs = {}
-          if func not in HANDLED_FUNCTIONS:
+          if func not in HANDLED_FUNCTIONS or not all(
+              issubclass(t, (torch.Tensor, ScalarTensor))
+              for t in types
+          ):
               return NotImplemented
           return HANDLED_FUNCTIONS[func](*args, **kwargs)
 
-The ``__torch_function__`` method takes three arguments: ``func``, a reference to
-the torch API function that is being overrided, ``args``, the tuple of arguments
-passed to the function, and ``kwargs``, the dict of keyword arguments passed to
-the function. It uses a global dispatch stable named ``HANDLED_FUNCTIONS`` to
-store custom implementations. The keys of this dictionary are functions in the
-``torch`` namespace and the values are implementations for ``ScalarTensor``.
+The ``__torch_function__`` method takes four arguments: ``func``, a reference
+to the torch API function that is being overridden, ``types``, the list of
+types of Tensor-likes that implement ``__torch_function__``, ``args``, the
+tuple of arguments passed to the function, and ``kwargs``, the dict of keyword
+arguments passed to the function. It uses a global dispatch stable named
+``HANDLED_FUNCTIONS`` to store custom implementations. The keys of this
+dictionary are functions in the ``torch`` namespace and the values are
+implementations for ``ScalarTensor``.
 
 .. note:: Using a global dispatch table is not a mandated part of the
           ``__torch_function__`` API, it is just a useful design pattern for
@@ -400,10 +405,13 @@ handled but to instead pass a :class:`Tensor` to the original :mod:`torch`
 function when no override is available. For example, if we change our
 implementation of ``__torch_function__`` for ``ScalarTensor`` to the one below::
 
-  def __torch_function__(self, func, args=(), kwargs=None):
+  def __torch_function__(self, func, types, args=(), kwargs=None):
       if kwargs is None:
           kwargs = {}
-      if func not in HANDLED_FUNCTIONS:
+      if func not in HANDLED_FUNCTIONS or not all(
+              issubclass(t, (torch.Tensor, ScalarTensor))
+              for t in types
+          ):
           args = [a.tensor() if hasattr(a, 'tensor') else a for a in args]
           return func(*args, **kwargs)
       return HANDLED_FUNCTIONS[func](*args, **kwargs)
@@ -440,7 +448,7 @@ implementation more permissive about what operations are allowed::
       def __repr__(self):
           return "Metadata:\n{}\n\ndata:\n{}".format(self._metadata, self._t)
 
-      def __torch_function__(self, func, args=(), kwargs=None):
+      def __torch_function__(self, func, types, args=(), kwargs=None):
           if kwargs is None:
               kwargs = {}
           args = [a._t if hasattr(a, '_t') else a for a in args]

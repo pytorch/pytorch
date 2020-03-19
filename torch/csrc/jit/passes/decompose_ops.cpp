@@ -11,10 +11,8 @@ namespace torch {
 namespace jit {
 
 namespace {
-c10::OperatorOptions aliasAnalysisFromSchema() {
-  c10::OperatorOptions result;
-  result.setAliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA);
-  return result;
+c10::AliasAnalysisKind aliasAnalysisFromSchema() {
+  return c10::AliasAnalysisKind::FROM_SCHEMA;
 }
 } // namespace
 
@@ -86,7 +84,7 @@ RegisterOperators reg_ops(
          },
          aliasAnalysisFromSchema())});
 
-bool DecomposeOps(Block* block, script::CompilationUnit& decompose_funcs) {
+bool DecomposeOps(Block* block, CompilationUnit& decompose_funcs) {
   bool decomposed = false;
   for (auto it = block->nodes().begin(), end = block->nodes().end(); it != end;
       ++it) {
@@ -193,7 +191,7 @@ bool DecomposeOps(Block* block, script::CompilationUnit& decompose_funcs) {
 }
 
 void DecomposeOps(std::shared_ptr<Graph>& graph) {
-  static script::CompilationUnit decompose_funcs(R"SCRIPT(
+  static CompilationUnit decompose_funcs(R"SCRIPT(
       def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta: number = 1.0, alpha: number = 1.0):
           return self + mat1.mm(mat2)
 

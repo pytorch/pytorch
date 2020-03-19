@@ -29,6 +29,7 @@ __all__ = [
     'ShortStorage', 'CharStorage', 'ByteStorage', 'BoolStorage',
     'DoubleTensor', 'FloatTensor', 'LongTensor', 'IntTensor',
     'ShortTensor', 'CharTensor', 'ByteTensor', 'BoolTensor', 'Tensor',
+    'lobpcg',
 ]
 
 ################################################################################
@@ -394,3 +395,7 @@ legacy_contiguous_format = contiguous_format
 from torch.multiprocessing._atfork import register_after_fork
 register_after_fork(torch.get_num_threads)
 del register_after_fork
+
+# Import tools that require fully imported torch (for applying
+# torch.jit.script as a decorator, for instance):
+from ._lobpcg import lobpcg

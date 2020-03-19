@@ -151,6 +151,24 @@ bool AliasDb::writesToAlias(Node* n, const ValueSet& vs) const {
   return false;
 }
 
+bool AliasDb::writtenToAtNode(const at::ArrayRef<Value*> vs, Node* n) const {
+  auto writes = getWrites(n);
+  if (writes.empty()) {
+    return false;
+  }
+  for (Value* v : vs) {
+    auto it = elementMap_.find(v);
+    if (it == elementMap_.end()) {
+      return false;
+    }
+    const auto& writtenMemoryLocations = it->second->getMemoryLocations();
+    if (writes.intersects(writtenMemoryLocations)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 MemoryLocations AliasDb::getWrites(Node* n) const {
   MemoryLocations writes;
   getWritesImpl(n, writes);
@@ -332,6 +350,7 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::Loop:
       return analyzeLoop(node);
     case prim::FusionGroup:
+    case prim::CudaFusionGroup:
     case prim::FunctionalGraph:
     case prim::DifferentiableGraph:
       return analyzeSubgraph(node);
@@ -339,6 +358,8 @@ void AliasDb::analyzeImpl(Node* node) {
       return analyzeFork(node);
     case aten::wait:
       return analyzeWait(node);
+    case prim::rpc_async:
+      return analyzeRpcAsync(node);
     case prim::GradOf:
       return analyzeGradOf(node);
     case prim::Constant:
@@ -685,6 +706,17 @@ void AliasDb::analyzeWait(Node* node) {
   // for safety we just register a write to every wildcard.
   for (const auto& pr : wildcardIndex_) {
     registerWrite(pr.second, node);
+  }
+}
+
+void AliasDb::analyzeRpcAsync(Node* node) {
+  for (const auto input : node->inputs()) {
+    setWildcard(input);
+  }
+
+  // Give the future that the rpc_async emits a fresh value
+  for (const auto output : node->outputs()) {
+    giveFreshAlias(output);
   }
 }
 
