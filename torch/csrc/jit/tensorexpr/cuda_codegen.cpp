@@ -1,11 +1,13 @@
-#include "torch/csrc/jit/tensorexpr/cuda_codegen.h"
-#include "torch/csrc/jit/tensorexpr/cuda_half_support.h"
+#include <torch/csrc/jit/tensorexpr/cuda_codegen.h>
+#include <torch/csrc/jit/tensorexpr/cuda_half_support.h>
 
-#include "ATen/CUDAGenerator.h"
-#include "c10/cuda/CUDAFunctions.h"
-#include "torch/csrc/jit/tensorexpr/cuda_random.h"
-#include "torch/csrc/jit/tensorexpr/eval.h"
-#include "torch/csrc/jit/tensorexpr/execution_counter.h"
+#include <ATen/CUDAGenerator.h>
+#include <c10/cuda/CUDAFunctions.h>
+#include <torch/csrc/jit/tensorexpr/analysis.h>
+#include <torch/csrc/jit/tensorexpr/cuda_random.h>
+#include <torch/csrc/jit/tensorexpr/eval.h>
+#include <torch/csrc/jit/tensorexpr/exceptions.h>
+#include <torch/csrc/jit/tensorexpr/execution_counter.h>
 
 #define DEBUG_PRINT 0
 
@@ -49,7 +51,10 @@ class ScopedVarName {
 
 static int as_int(const Expr* expr) {
   auto v = dynamic_cast<const IntImm*>(expr);
-  TORCH_CHECK(v, "Expression is not an integer constant");
+  if (!v) {
+    throw malformed_input(expr);
+  }
+
   return v->value();
 }
 
@@ -103,7 +108,7 @@ void CudaPrinter::visit(const For* v) {
     if (!is_zero(v->start())) {
       throw std::runtime_error(
           "start must be zero for gpu_block_index: " +
-          std::to_string(ExprHandle(v->start())));
+          std::to_string(v->start()));
     }
     gpu_block_extents_[gpu_block_index] = v->stop();
   } else if (loop_options.is_gpu_thread_index()) {
@@ -117,7 +122,7 @@ void CudaPrinter::visit(const For* v) {
     if (!is_zero(v->start())) {
       throw std::runtime_error(
           "start must be zero for gpu_block_index: " +
-          std::to_string(ExprHandle(v->start())));
+          std::to_string(v->start()));
     }
     gpu_thread_extents_[gpu_thread_index] = v->stop();
   } else {
@@ -388,28 +393,6 @@ class PrioritizeLoad : public IRMutator {
   int nested_if_then_else_ = 0;
 };
 
-class HasRand : public IRVisitor {
- public:
-  HasRand(Stmt* stmt) : stmt_(stmt) {
-    stmt_->accept(this);
-  }
-
-  bool has_rand() const {
-    return has_rand_;
-  }
-
- private:
-  void visit(const Intrinsics* v) override {
-    if (v->op_type() == IntrinsicsOp::kRand) {
-      has_rand_ = true;
-    } else {
-      IRVisitor::visit(v);
-    }
-  }
-  Stmt* stmt_;
-  bool has_rand_ = false;
-};
-
 std::string CudaCodeGen::GetUniqueFuncName(const std::string& func_prefix) {
   // We are using a global counter here to make sure difference instances within
   // CudaCodeGen have different names.
@@ -523,15 +506,19 @@ void CudaCodeGen::Initialize() {
 }
 
 void CudaCodeGen::call(const std::vector<CallArg>& args) {
-  CHECK_EQ(args.size(), buffer_args().size());
+  if (args.size() != buffer_args().size()) {
+    throw malformed_input();
+  }
 
   // TODO: move as much of this into the constructors.
   const std::vector<const Expr*>& gpu_block_extents =
       printer_->gpu_block_extents();
   const std::vector<const Expr*>& gpu_thread_extents =
       printer_->gpu_thread_extents();
-  CHECK(gpu_block_extents.size() <= 3);
-  CHECK(gpu_thread_extents.size() <= 3);
+  if (gpu_block_extents.size() > 3 || gpu_thread_extents.size() > 3) {
+    throw malformed_input();
+  }
+
   std::vector<int> gpu_block_extents_v(3, 1);
   std::vector<int> gpu_thread_extents_v(3, 1);
   // evaluate all the block/thread extents into values
@@ -577,7 +564,7 @@ void CudaCodeGen::call(const std::vector<CallArg>& args) {
         AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
         default:
-          LOG(FATAL) << "Unhandled dtype in argument";
+          throw unsupported_dtype();
       }
     } else {
       args_data[i] = args[i].data();
@@ -617,23 +604,26 @@ void CudaCodeGen::call(const std::vector<CallArg>& args) {
   USE_TRIGGER(cuda_codegen_executed);
 }
 
-void CudaCodeGen::CompileToNVRTC(
-    const std::string& code,
-    const std::string& func_name) {
-  // Initializes driver's API context (if necessary)
-  CUdevice device = 0;
-  CUcontext pctx = 0;
-  AT_CUDA_DRIVER_CHECK(nvrtc().cuCtxGetCurrent(&pctx));
+void CudaSetContext(CUcontext pctx) {
   if (!pctx) {
     std::unique_lock<std::mutex> cudaFreeMutexLock(
         *(c10::cuda::CUDACachingAllocator::getFreeMutex()));
     cudaFree(0);
   }
+}
 
+void CudaCodeGen::CompileToNVRTC(
+    const std::string& code,
+    const std::string& func_name) {
+  CUcontext pctx = 0;
+  AT_CUDA_DRIVER_CHECK(nvrtc().cuCtxGetCurrent(&pctx));
   // Note: hacked at::DeviceGuard since at::DeviceGuard was failing to work
   // properly in some scenarios
   const auto prior_device = at::cuda::current_device();
-  at::cuda::set_device(device);
+  at::cuda::set_device(this->device().index());
+  // cudaSetDevice does not have to really change the underlying device if it
+  // doesn't have to, so calling cudaFree to force that change
+  CudaSetContext(pctx);
 
   // Acquires device and NVRTC properties (for compile arch and occupancy
   // calculations)
@@ -686,6 +676,7 @@ void CudaCodeGen::CompileToNVRTC(
   AT_CUDA_DRIVER_CHECK(nvrtc().cuModuleLoadData(&module, ptx.data()));
   AT_CUDA_DRIVER_CHECK(
       nvrtc().cuModuleGetFunction(&function_, module, func_name.c_str()));
+  at::cuda::set_device(prior_device);
 }
 
 RegisterCodeGen<CudaCodeGen> cuda_codegen_reg("cuda_codegen");
