@@ -7,6 +7,7 @@ from .activation import ReLU, ReLU6
 from .batchnorm import BatchNorm2d
 from .conv import Conv2d, Conv3d
 from .linear import Linear
+from .emb import EmbeddingBag
 
 from .functional_modules import FloatFunctional, QFunctional
 
@@ -79,6 +80,7 @@ class DeQuantize(torch.nn.Module):
 
 __all__ = [
     'BatchNorm2d',
+    'EmbeddingBag',
     'Conv2d',
     'Conv3d',
     'DeQuantize',
