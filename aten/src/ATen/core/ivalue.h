@@ -139,7 +139,7 @@ struct CAFFE2_API IValue final {
    * NOTE: we (like Python) assume that identity equality implies value equality for efficiency.
    * TODO: need to support customizing equality
    */
-  TORCH_API IValue equals(const IValue& rhs) const;
+  IValue equals(const IValue& rhs) const;
   /**
    * This implements the same semantics as `bool(lhs == rhs)` in Python. which
    * is the same as `equals()` except for Tensor types.
@@ -155,7 +155,7 @@ struct CAFFE2_API IValue final {
    * like numbers and strings. Prefer to use `==` unless you really want to
    * check identity equality.
    */
-  TORCH_API bool is(const IValue& rhs) const;
+  bool is(const IValue& rhs) const;
 
   /**
    * @private [doxygen private]
@@ -520,10 +520,6 @@ struct CAFFE2_API IValue final {
   // ToOptional: convert a IValue to the Optional obj that accepts both T and None
   template<typename T>
   optional<T> toOptional();
-
-  /// @private [doxygen private]
-  /// this is a shallow comparison of two IValues to test the object identity
-  bool isSameIdentity(const IValue& rhs) const;
 
   // Computes the "official" string representation of an IValue. This produces a
   // TorchScript expression that can be used to recreate an IValue with the same
