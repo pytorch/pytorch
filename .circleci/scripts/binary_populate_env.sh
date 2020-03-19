@@ -2,7 +2,18 @@
 set -eux -o pipefail
 export TZ=UTC
 
-DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
+tagged_version() {
+  # Grabs version from either the env variable CIRCLE_TAG
+  # or the pytorch git described version
+  GIT_DESCRIBE="git --git-dir ${workdir}/pytorch/.git describe"
+  if [[ -n ${CIRCLE_TAG} ]]; then
+    echo "${CIRCLE_TAG}"
+  elif ${GIT_DESCRIBE} --exact --tags >/dev/null; then
+    ${GIT_DESCRIBE} --tags
+  else
+    return 1
+  fi
+}
 
 # We need to write an envfile to persist these variables to following
 # steps, but the location of the envfile depends on the circleci executor
@@ -51,14 +62,13 @@ BASE_BUILD_VERSION="1.5.0.dev$DATE"
 # Change BASE_BUILD_VERSION to git tag when on a git tag
 # Use 'git -C' to make doubly sure we're in the correct directory for checking
 # the git tag
-GIT_DESCRIBE="git --git-dir ${workdir}/pytorch/.git describe"
-if ${GIT_DESCRIBE} --tags --exact >/dev/null; then
+if tagged_version >/dev/null; then
   # Switch upload folder to 'test/' if we are on a tag
   PIP_UPLOAD_FOLDER='test/'
   # Grab git tag, remove prefixed v and remove everything after -
   # Used to clean up tags that are for release candidates like v1.5.0-rc1
   # Turns tag v1.5.0-rc1 -> v1.5.0
-  BASE_BUILD_VERSION="$(${GIT_DESCRIBE} --tags | sed -e 's/^v//' -e 's/-.*$//')"
+  BASE_BUILD_VERSION="$(tagged_version | sed -e 's/^v//' -e 's/-.*$//')"
 fi
 if [[ "$(uname)" == 'Darwin' ]] || [[ "$DESIRED_CUDA" == "cu101" ]] || [[ "$PACKAGE_TYPE" == conda ]]; then
   export PYTORCH_BUILD_VERSION="${BASE_BUILD_VERSION}"
