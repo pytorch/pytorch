@@ -64,11 +64,11 @@ Tensor _add_scalar_out(Tensor& out, const Tensor& self, Scalar other) {
   // If q_min > z - c_q
   //   s' = [(q_max - (z - c_q)]/[q_max - q_min] * s
   //   z' = q_min
-  //   Xq' = torch.quantize_linear(Xq.dequantize() + c_q.dequantize() , s', z')
+  //   Xq' = at::requantize_from_int(Xq - z + c_q, s/s', z')
   // If q_max < z - c_q
   //   s' = [z - c_q -q_min]/[q_max - q_min] * s
   //   z' = q_max
-  //   Xq' = torch.quantize_linear(Xq.dequantize() + c_q.dequantize(), s', z')
+  //   Xq' = at::requantize_from_int(Xq - z + c_q, s/s', z')
   // Else
   //   s' = s
   //   z' = z - c_q
