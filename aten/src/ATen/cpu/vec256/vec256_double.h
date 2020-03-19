@@ -92,9 +92,9 @@ public:
     return _mm256_movemask_pd(cmp);
   }
   Vec256<double> map(double (*f)(double)) const {
-    __at_align32__ double tmp[4];
+    __at_align32__ double tmp[size()];
     store(tmp);
-    for (int64_t i = 0; i < 4; i++) {
+    for (int64_t i = 0; i < size(); i++) {
       tmp[i] = f(tmp[i]);
     }
     return loadu(tmp);
