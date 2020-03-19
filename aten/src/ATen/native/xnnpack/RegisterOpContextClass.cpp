@@ -1,10 +1,10 @@
 #ifdef USE_XNNPACK
 
+#include <ATen/Tensor.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/native/xnnpack/Convolution.h>
 #include <ATen/native/xnnpack/Linear.h>
 #include <ATen/native/xnnpack/OpContext.h>
-#include <ATen/Tensor.h>
 #include <torch/custom_class.h>
 
 namespace at {
@@ -12,45 +12,35 @@ namespace native {
 namespace xnnpack {
 
 namespace {
-torch::jit::class_<XNNPackLinearOpContext> register_xnnpack_linear_op_context_class() {
+torch::jit::class_<LinearOpContext> register_packed_linear_op_context_class() {
   static auto register_linear_op_context_class =
-      torch::jit::class_<XNNPackLinearOpContext>("XNNPackLinearOpContext")
+      torch::jit::class_<LinearOpContext>("LinearOpContext")
           .def_pickle(
-              [](const c10::intrusive_ptr<XNNPackLinearOpContext>& op_context)
+              [](const c10::intrusive_ptr<LinearOpContext>& op_context)
                   -> SerializationTypeLinearPrePack { // __getstate__
-                Tensor weight;
-                c10::optional<Tensor> bias;
                 return op_context->unpack();
               },
               [](SerializationTypeLinearPrePack state)
-                  -> c10::intrusive_ptr<
-                      XNNPackLinearOpContext> { // __setstate__
+                  -> c10::intrusive_ptr<LinearOpContext> { // __setstate__
                 return XNNPackLinearOpContext::create_context(
                     std::move(std::get<0>(state)),
                     std::move(std::get<1>(state)),
-                    {},
-                    {}
-                    );
-              }
-              );
+                    std::move(std::get<2>(state)),
+                    std::move(std::get<3>(state)));
+              });
   return register_linear_op_context_class;
 }
 
-torch::jit::class_<XNNPackConv2dOpContext> register_xnnpack_conv2d_op_context_class() {
+torch::jit::class_<Conv2dOpContext> register_packed_conv2d_op_context_class() {
   static auto register_conv2d_op_context_class =
-      torch::jit::class_<XNNPackConv2dOpContext>("XNNPackConv2dOpContext")
+      torch::jit::class_<Conv2dOpContext>("Conv2dOpContext")
           .def_pickle(
-              [](const c10::intrusive_ptr<XNNPackConv2dOpContext>& op_context)
+              [](const c10::intrusive_ptr<Conv2dOpContext>& op_context)
                   -> SerializationTypeConv2dPrePack { // __getstate__
-                Tensor weight;
-                std::vector<int64_t> padding, stride, dilation;
-                int64_t groups;
-                c10::optional<Tensor> bias;
-                return  op_context->unpack();
+                return op_context->unpack();
               },
               [](SerializationTypeConv2dPrePack state)
-                  -> c10::intrusive_ptr<
-                      XNNPackConv2dOpContext> { // __setstate__
+                  -> c10::intrusive_ptr<Conv2dOpContext> { // __setstate__
                 return XNNPackConv2dOpContext::create_context(
                     std::move(std::get<0>(state)),
                     std::move(std::get<1>(state)),
@@ -58,52 +48,54 @@ torch::jit::class_<XNNPackConv2dOpContext> register_xnnpack_conv2d_op_context_cl
                     std::move(std::get<3>(state)),
                     std::move(std::get<4>(state)),
                     std::move(std::get<5>(state)),
-                    {},
-                    {}
-                    );
-              }
-              );
+                    std::move(std::get<6>(state)),
+                    std::move(std::get<7>(state)));
+              });
   return register_conv2d_op_context_class;
 }
 
-static auto xnnpack_linear_op_context_class = register_xnnpack_linear_op_context_class();
-static auto xnnpack_conv2d_op_context_class = register_xnnpack_conv2d_op_context_class();
+static auto linear_op_context_class = register_packed_linear_op_context_class();
+static auto conv2d_op_context_class = register_packed_conv2d_op_context_class();
 
 // Op registeration
 static auto registry =
-  // Registering under _xnnpack namespace for now. As we add more backend requiring similar functionality
-  // We can refactor the code and use a better namespace.
+    // Registering under _xnnpack namespace for now. As we add more backend
+    // requiring similar functionality We can refactor the code and use a better
+    // namespace.
     torch::RegisterOperators()
-        .op("_xnnpack::linear_prepack(Tensor W, Tensor? B=None) -> __torch__.torch.classes.XNNPackLinearOpContext",
+        .op("prepacked::linear_clamp_prepack(Tensor W, Tensor? B=None, "
+            "float? output_min=None, float? output_max=None) "
+            "-> __torch__.torch.classes.LinearOpContext",
             torch::RegisterOperators::options()
-            .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
-            .kernel<internal::linear::LinearPrePack>(
-                DispatchKey::CPUTensorId))
-        .op("_xnnpack::linear_packed(Tensor X, __torch__.torch.classes.XNNPackLinearOpContext W_prepack) -> Tensor Y",
+                .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
+                .kernel<internal::linear::LinearPrePack>(
+                    DispatchKey::CPUTensorId))
+        .op("prepacked::linear_clamp_run(Tensor X,"
+            " __torch__.torch.classes.LinearOpContext W_prepack) -> Tensor Y",
             torch::RegisterOperators::options()
-            .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
-            .kernel<internal::linear::LinearPacked>(
-                DispatchKey::CPUTensorId))
-        .op("_xnnpack::conv2d_prepack(Tensor W, Tensor? B, int[2] stride, "
-            "int[2] padding, int[2] dilation, int groups) "
-            "-> __torch__.torch.classes.XNNPackConv2dOpContext",
+                .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
+                .kernel<internal::linear::LinearPacked>(
+                    DispatchKey::CPUTensorId))
+        .op("prepacked::conv2d_clamp_prepack(Tensor W, Tensor? B, int[2] stride, "
+            "int[2] padding, int[2] dilation, int groups, "
+            "float? output_min=None, float? output_max=None) "
+            "-> __torch__.torch.classes.Conv2dOpContext",
             torch::RegisterOperators::options()
-            .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
-            .kernel<internal::convolution2d::Conv2dPrePack>(
-                DispatchKey::CPUTensorId))
-        .op("_xnnpack::conv2d_packed(Tensor X, "
-            "__torch__.torch.classes.XNNPackConv2dOpContext W_prepack) -> Tensor Y",
+                .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
+                .kernel<internal::convolution2d::Conv2dPrePack>(
+                    DispatchKey::CPUTensorId))
+        .op("prepacked::conv2d_clamp_run(Tensor X, "
+            "__torch__.torch.classes.Conv2dOpContext W_prepack) -> Tensor Y",
             torch::RegisterOperators::options()
-            .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
-            .kernel<internal::convolution2d::Conv2dPacked>(
-                DispatchKey::CPUTensorId));
+                .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
+                .kernel<internal::convolution2d::Conv2dPacked>(
+                    DispatchKey::CPUTensorId));
 } // namespace
 
-} // xnnpack
-} // native
-} // at
+} // namespace xnnpack
+} // namespace native
+} // namespace at
 
-namespace {
-}
+namespace {}
 
 #endif /* USE_XNNPACK */
