@@ -3713,8 +3713,7 @@ def multi_head_attention_forward(query,                           # type: Tensor
             be ignored by the attention. This is an binary mask. When the value is True,
             the corresponding value on the attention layer will be filled with -inf.
         need_weights: output attn_output_weights.
-        attn_mask: 2D or 3D mask that prevents attention to certain positions. This is an additive mask
-            (i.e. the values will be added to the attention layer). A 2D mask will be broadcasted for all
+        attn_mask: 2D or 3D mask that prevents attention to certain positions. A 2D mask will be broadcasted for all
             the batches while a 3D mask allows to specify a different mask for the entries of each batch.
         use_separate_proj_weight: the function accept the proj. weights for query, key,
             and value in different forms. If false, in_proj_weight will be used, which is
@@ -3731,12 +3730,15 @@ def multi_head_attention_forward(query,                           # type: Tensor
           the embedding dimension.
         - value: :math:`(S, N, E)` where S is the source sequence length, N is the batch size, E is
           the embedding dimension.
-        - key_padding_mask: :math:`(N, S)`, ByteTensor, where N is the batch size, S is the source sequence length.
-          ``1`` or ``True`` is filled with ``-inf`` while ``0`` or ``False`` is filled with ``0.0``.
+        - key_padding_mask: :math:`(N, S)` where N is the batch size, S is the source sequence length.
+          If a ByteTensor is provided, ``1`` is filled with ``-inf`` while ``0`` is filled with ``0.0``.
+          If a bool Tensor is provided, ``True`` is filled with ``-inf`` while ``False`` is filled with ``0.0``.
         - attn_mask: 2D mask :math:`(L, S)` where L is the target sequence length, S is the source sequence length.
           3D mask :math:`(N*num_heads, L, S)` where N is the batch size, L is the target sequence length,
-          S is the source sequence length. If a ByteTensor is provided, it will be converted to a float tensor.
-          ``1`` is filled with ``-inf`` while ``0`` is filled with ``0.0``.
+          S is the source sequence length. The attn_output_weights value is changed according to attn_mask.
+          If a ByteTensor is provided, ``1`` is filled with ``-inf`` while ``0`` is filled with ``0.0``.
+          If a bool Tensor is provided, ``True`` is filled with ``-inf`` while ``False`` is filled with ``0.0``.
+          If a float Tensor is provided, the attn_mask is added to attn_output_weights.
         - static_k: :math:`(N*num_heads, S, E/num_heads)`, where S is the source sequence length,
           N is the batch size, E is the embedding dimension. E/num_heads is the head dimension.
         - static_v: :math:`(N*num_heads, S, E/num_heads)`, where S is the source sequence length,
@@ -3852,8 +3854,11 @@ def multi_head_attention_forward(query,                           # type: Tensor
 
     if attn_mask is not None:
         assert attn_mask.dtype == torch.float32 or attn_mask.dtype == torch.float64 or \
-            attn_mask.dtype == torch.unit8, \
-            'Only float and byte(unit8) type are supported for attn_mask'
+            attn_mask.dtype == torch.unit8 or attn_mask.dtype == torch.byte, \
+            'Only float, byte, and bool types are supported for attn_mask'
+        if attn_mask.dtype == unit8:
+            attn_mask = attn_mask.to(torch.bool)
+
         if attn_mask.dim() == 2:
             attn_mask = attn_mask.unsqueeze(0)
             if list(attn_mask.size()) != [1, query.size(0), key.size(0)]:
@@ -3919,8 +3924,8 @@ def multi_head_attention_forward(query,                           # type: Tensor
     assert list(attn_output_weights.size()) == [bsz * num_heads, tgt_len, src_len]
 
     if attn_mask is not None:
-        if attn_mask.dtype == torch.uint8:
-            attn_output_weights.masked_fill_(attn_mask.to(torch.bool), float('-inf'))
+        if attn_mask.dtype == torch.bool:
+            attn_output_weights.masked_fill_(attn_mask, float('-inf'))
         else:
             attn_output_weights += attn_mask
 

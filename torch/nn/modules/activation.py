@@ -777,8 +777,7 @@ class MultiheadAttention(Module):
             be ignored by the attention. This is an binary mask. When the value is True,
             the corresponding value on the attention layer will be filled with -inf.
         need_weights: output attn_output_weights.
-        attn_mask: 2D or 3D mask that prevents attention to certain positions. This is an additive mask
-            (i.e. the values will be added to the attention layer). A 2D mask will be broadcasted for all
+        attn_mask: 2D or 3D mask that prevents attention to certain positions. A 2D mask will be broadcasted for all
             the batches while a 3D mask allows to specify a different mask for the entries of each batch.
 
     Shape:
@@ -789,12 +788,15 @@ class MultiheadAttention(Module):
           the embedding dimension.
         - value: :math:`(S, N, E)` where S is the source sequence length, N is the batch size, E is
           the embedding dimension.
-        - key_padding_mask: :math:`(N, S)`, ByteTensor, where N is the batch size, S is the source sequence length.
-          ``1`` is filled with ``-inf`` while ``0`` is filled with ``0.0``.
+        - key_padding_mask: :math:`(N, S)` where N is the batch size, S is the source sequence length.
+          If a ByteTensor is provided, ``1`` is filled with ``-inf`` while ``0`` is filled with ``0.0``.
+          If a bool Tensor is provided, ``True`` is filled with ``-inf`` while ``False`` is filled with ``0.0``.
         - attn_mask: 2D mask :math:`(L, S)` where L is the target sequence length, S is the source sequence length.
           3D mask :math:`(N*num_heads, L, S)` where N is the batch size, L is the target sequence length,
-          S is the source sequence length. If a ByteTensor is provided, it will be converted to a float tensor.
-          ``1`` is filled with ``-inf`` while ``0`` is filled with ``0.0``.
+          S is the source sequence length. The attn_output_weights value is changed according to attn_mask.
+          If a ByteTensor is provided, ``1`` is filled with ``-inf`` while ``0`` is filled with ``0.0``.
+          If a bool Tensor is provided, ``True`` is filled with ``-inf`` while ``False`` is filled with ``0.0``.
+          If a float Tensor is provided, the attn_mask is added to attn_output_weights.
 
         - Outputs:
         - attn_output: :math:`(L, N, E)` where L is the target sequence length, N is the batch size,
