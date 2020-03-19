@@ -396,6 +396,8 @@ class TestModels(JitTestCase):
         self._test_snli(self, device='cpu')
 
     if 'fbgemm' in torch.backends.quantized.supported_engines:
+        # Suppression: this exercises a deprecated API
+        @suppress_warnings
         def test_snli_quantized(self):
             self._test_snli(self, device='cpu', quantized=True)
 
@@ -540,6 +542,8 @@ class TestModels(JitTestCase):
         self._test_vae(self, device='cpu')
 
     if 'fbgemm' in torch.backends.quantized.supported_engines:
+        # Suppression: this exercises a deprecated API
+        @suppress_warnings
         def test_vae_quantized(self):
             self._test_vae(self, device='cpu', quantized=True)
 
@@ -548,6 +552,7 @@ class TestModels(JitTestCase):
         # XXX: export_import on CUDA modules doesn't work (#11480)
         self._test_vae(self, device='cuda', check_export_import=False)
 
+    @slowTest
     @skipIfNoTorchVision
     def test_script_module_trace_resnet18(self):
         x = torch.ones(1, 3, 224, 224)

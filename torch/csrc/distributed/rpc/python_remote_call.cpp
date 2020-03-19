@@ -1,6 +1,6 @@
 #include <torch/csrc/distributed/rpc/python_remote_call.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
-#include <torch/csrc/jit/pickle.h>
+#include <torch/csrc/jit/serialization/pickle.h>
 
 namespace torch {
 namespace distributed {
@@ -15,7 +15,7 @@ PythonRemoteCall::PythonRemoteCall(
       retForkId_(std::move(retForkId)) {}
 
 Message PythonRemoteCall::toMessage() && {
-  std::vector<IValue> ivalues = serializedPyObj_.toIValues();
+  std::vector<IValue> ivalues = std::move(serializedPyObj_).toIValues();
   ivalues.emplace_back(retRRefId_);
   ivalues.emplace_back(retForkId_);
 

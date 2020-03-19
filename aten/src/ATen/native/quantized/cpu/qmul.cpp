@@ -9,6 +9,10 @@
 
 namespace at {
 namespace native {
+
+DEFINE_DISPATCH(qmul_relu_stub);
+DEFINE_DISPATCH(qmul_stub);
+
 namespace {
 
 inline void check_inputs(const Tensor& qa, const Tensor& qb) {
@@ -25,25 +29,11 @@ inline void check_inputs(const Tensor& qa, const Tensor& qb) {
 //       dtype.
 template <bool ReLUFused = false>
 Tensor _mul_out(Tensor& out, const Tensor& self, const Tensor& other) {
-  int64_t zero_point = out.q_zero_point();
-  double scale = out.q_scale();
-  int64_t self_zero_point = self.q_zero_point();
-  double self_scale = self.q_scale();
-  int64_t other_zero_point = other.q_zero_point();
-  double other_scale = other.q_scale();
-
-  auto iter = TensorIterator::binary_op(out, self, other);
-  AT_DISPATCH_QINT_TYPES(out.scalar_type(), "qmul", [&]() {
-    cpu_kernel(iter, [&](scalar_t a, scalar_t b) -> scalar_t {
-      const auto da = at::dequantize_val(self_scale, self_zero_point, a);
-      const auto db = at::dequantize_val(other_scale, other_zero_point, b);
-      float c = da * db;
-      if (ReLUFused) {
-        c = std::max<float>(c, 0.0);
-      }
-      return at::quantize_val<scalar_t>(scale, zero_point, c);
-    });
-  });
+  if (ReLUFused) {
+    qmul_relu_stub(self.device().type(), out, self, other);
+  } else {
+    qmul_stub(self.device().type(), out, self, other);
+  }
   return out;
 }
 
@@ -156,41 +146,51 @@ static auto registry =
     c10::RegisterOperators()
         .op("quantized::mul(Tensor qa, Tensor qb, float scale, int zero_point)"
             "-> Tensor qc",
-            c10::RegisterOperators::options().kernel<QMul</*ReLUFused=*/false>>(
-                DispatchKey::QuantizedCPUTensorId))
+            c10::RegisterOperators::options()
+                .aliasAnalysis(at::AliasAnalysisKind::FROM_SCHEMA)
+                .kernel<QMul</*ReLUFused=*/false>>(
+                    DispatchKey::QuantizedCPUTensorId))
         .op("quantized::mul_relu(Tensor qa, Tensor qb, float scale, int zero_point)"
             "-> Tensor qc",
-            c10::RegisterOperators::options().kernel<QMul</*ReLUFused=*/true>>(
-                DispatchKey::QuantizedCPUTensorId))
-        .op("quantized::mul_out(Tensor qa, Tensor qb, Tensor out)"
-            "-> Tensor out",
             c10::RegisterOperators::options()
+                .aliasAnalysis(at::AliasAnalysisKind::FROM_SCHEMA)
+                .kernel<QMul</*ReLUFused=*/true>>(
+                    DispatchKey::QuantizedCPUTensorId))
+        .op("quantized::mul_out(Tensor qa, Tensor qb, Tensor(a!) out)"
+            "-> Tensor(a!) out",
+            c10::RegisterOperators::options()
+                .aliasAnalysis(at::AliasAnalysisKind::FROM_SCHEMA)
                 .kernel<QMulOut</*ReLUFused=*/false>>(
                     DispatchKey::QuantizedCPUTensorId))
-        .op("quantized::mul_relu_out(Tensor qa, Tensor qb, Tensor out)"
-            "-> Tensor out",
+        .op("quantized::mul_relu_out(Tensor qa, Tensor qb, Tensor(a!) out)"
+            "-> Tensor(a!) out",
             c10::RegisterOperators::options()
+                .aliasAnalysis(at::AliasAnalysisKind::FROM_SCHEMA)
                 .kernel<QMulOut</*ReLUFused=*/true>>(
                     DispatchKey::QuantizedCPUTensorId))
 
         .op("quantized::mul_scalar(Tensor qa, Scalar b)"
             "-> Tensor qc",
             c10::RegisterOperators::options()
+                .aliasAnalysis(at::AliasAnalysisKind::FROM_SCHEMA)
                 .kernel<QMulScalar</*ReLUFused=*/false>>(
                     DispatchKey::QuantizedCPUTensorId))
         .op("quantized::mul_scalar_relu(Tensor qa, Scalar b)"
             "-> Tensor qc",
             c10::RegisterOperators::options()
+                .aliasAnalysis(at::AliasAnalysisKind::FROM_SCHEMA)
                 .kernel<QMulScalar</*ReLUFused=*/true>>(
                     DispatchKey::QuantizedCPUTensorId))
-        .op("quantized::mul_scalar_out(Tensor qa, Scalar b, Tensor out)"
-            "-> Tensor out",
+        .op("quantized::mul_scalar_out(Tensor qa, Scalar b, Tensor(a!) out)"
+            "-> Tensor(a!) out",
             c10::RegisterOperators::options()
+                .aliasAnalysis(at::AliasAnalysisKind::FROM_SCHEMA)
                 .kernel<QMulScalarOut</*ReLUFused=*/false>>(
                     DispatchKey::QuantizedCPUTensorId))
-        .op("quantized::mul_scalar_relu_out(Tensor qa, Scalar b, Tensor out)"
-            "-> Tensor out",
+        .op("quantized::mul_scalar_relu_out(Tensor qa, Scalar b, Tensor(a!) out)"
+            "-> Tensor(a!) out",
             c10::RegisterOperators::options()
+                .aliasAnalysis(at::AliasAnalysisKind::FROM_SCHEMA)
                 .kernel<QMulScalarOut</*ReLUFused=*/true>>(
                     DispatchKey::QuantizedCPUTensorId));
 }  // namespace

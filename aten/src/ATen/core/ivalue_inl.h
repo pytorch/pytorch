@@ -15,9 +15,7 @@
 namespace torch {
 namespace jit {
 struct Function;
-namespace script {
 struct CompilationUnit;
-}
 } // namespace jit
 } // namespace torch
 namespace c10 {
@@ -120,13 +118,13 @@ inline c10::intrusive_ptr<caffe2::Blob> IValue::toBlob() const & {
   AT_ASSERT(isBlob(), "Expected Blob but got ", tagKind());
   return toIntrusivePtr<caffe2::Blob>();;
 }
-inline c10::intrusive_ptr<torch::jit::CustomClassHolder> IValue::toCapsule() && {
+inline c10::intrusive_ptr<torch::CustomClassHolder> IValue::toCapsule() && {
   TORCH_INTERNAL_ASSERT(isCapsule());
-  return moveToIntrusivePtr<torch::jit::CustomClassHolder>();
+  return moveToIntrusivePtr<torch::CustomClassHolder>();
 }
-inline c10::intrusive_ptr<torch::jit::CustomClassHolder> IValue::toCapsule() const & {
+inline c10::intrusive_ptr<torch::CustomClassHolder> IValue::toCapsule() const & {
   TORCH_INTERNAL_ASSERT(isCapsule());
-  return toIntrusivePtr<torch::jit::CustomClassHolder>();
+  return toIntrusivePtr<torch::CustomClassHolder>();
 }
 
 namespace ivalue {
@@ -252,31 +250,43 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     completed_ = true;
     value_ = std::move(value);
 
-    fireCallbacks();
+    std::vector<std::function<void(void)>> cbs;
+    cbs.swap(callbacks_);
+    lock.unlock();
+
     finished_cv_.notify_all();
+    for (auto& callback : cbs) {
+      callback();
+    }
   }
 
   void markCompleted() {
     markCompleted(IValue {});
   }
 
-  void markCompleted(FutureError&& error_) {
+  void markCompleted(FutureError&& error) {
     std::unique_lock<std::mutex> lock(mutex_);
     AT_ASSERT(!completed());
     completed_ = true;
-    has_error = true;
-    error = std::move(error_);
+    has_error_ = true;
+    error_ = std::move(error);
 
-    fireCallbacks();
+    std::vector<std::function<void(void)>> cbs;
+    cbs.swap(callbacks_);
+    lock.unlock();
+
     finished_cv_.notify_all();
+    for (auto& callback : cbs) {
+      callback();
+    }
   }
 
   // Get the result of the current future.
   IValue value() {
     std::unique_lock<std::mutex> lock(mutex_);
     AT_ASSERT(completed());
-    if (has_error) {
-      throw error;
+    if (has_error_) {
+      throw error_;
     }
     return value_;
   }
@@ -294,7 +304,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
       callback();
       return;
     }
-    callbacks.push_back(callback);
+    callbacks_.push_back(callback);
   }
 
   // Check if the current future has completed
@@ -311,25 +321,15 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   }
 
  private:
-  void fireCallbacks() {
-    AT_ASSERT(completed());
-    // There is no need to protect callbacks with the lock.
-    // Once completed_ is set to true, no one can add new callback to the list.
-    for (auto& callback : callbacks) {
-      callback();
-    }
-    callbacks.clear();
-  }
-
   std::mutex mutex_;
   std::atomic_bool completed_ = {false}; // is this future complete
   std::condition_variable finished_cv_;
 
   IValue value_; // when finished the value
   TypePtr type_;
-  std::vector<std::function<void(void)>> callbacks;
-  bool has_error = false;
-  FutureError error;
+  std::vector<std::function<void(void)>> callbacks_;
+  bool has_error_ = false;
+  FutureError error_;
 };
 
 // User-defined object.
@@ -360,7 +360,7 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
       // the slots to the right size
       resizeObject(slot);
     }
-    slots_[slot] = v;
+    slots_[slot] = std::move(v);
   }
 
   const IValue& getSlot(size_t slot) const {
@@ -404,7 +404,7 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
   }
   std::shared_ptr<ClassType> type() const;
 
-  std::shared_ptr<torch::jit::script::CompilationUnit> compilation_unit() {
+  std::shared_ptr<torch::jit::CompilationUnit> compilation_unit() {
     return type_.cu_;
   }
 
@@ -526,7 +526,7 @@ T generic_to(
     IValue ivalue,
     _fake_type<T>) {
     using ElemType = typename std::remove_pointer<T>::type::element_type;
-    auto obj = ivalue.toObject();
+    auto obj = std::move(ivalue).toObject();
     auto capsule = obj->getSlot(0);
     return c10::static_intrusive_pointer_cast<ElemType>(capsule.toCapsule());
 }
@@ -535,7 +535,7 @@ template <typename T>
 tagged_capsule<T> generic_to(
     IValue ivalue,
     _fake_type<tagged_capsule<T>>) {
-    return tagged_capsule<T>{ivalue};
+    return tagged_capsule<T>{std::move(ivalue)};
 }
 
 template <typename Elem>
@@ -774,7 +774,7 @@ inline IValue::IValue(c10::intrusive_ptr<ivalue::PyObjectHolder> v)
 : tag(Tag::PyObject), is_intrusive_ptr(true) {
   payload.as_intrusive_ptr = v.release();
 }
-inline IValue::IValue(c10::intrusive_ptr<torch::jit::CustomClassHolder> v)
+inline IValue::IValue(c10::intrusive_ptr<torch::CustomClassHolder> v)
 : tag(Tag::Capsule), is_intrusive_ptr(true) {
   payload.as_intrusive_ptr = v.release();
 }
@@ -855,7 +855,7 @@ template<class T> struct has_constructor<
 
 template <typename T>
 IValue from_(T x, std::true_type) {
-  return IValue(x);
+  return IValue(std::move(x));
 }
 template <typename T>
 IValue from_(c10::intrusive_ptr<T> x, std::false_type) {
@@ -864,10 +864,14 @@ IValue from_(c10::intrusive_ptr<T> x, std::false_type) {
     throw c10::Error("Trying to return a class that we don't support and isn't a registered custom class.", "");
   }
   auto res = getCustomClassType<inputType>();
-  auto retObject = ivalue::Object::create(res, 1);
-  auto objPtr = c10::static_intrusive_pointer_cast<torch::jit::CustomClassHolder>(x);
+  auto retObject = ivalue::Object::create(
+    StrongTypePtr(
+      std::shared_ptr<torch::jit::CompilationUnit>(),
+      std::move(res)),
+    1);
+  auto objPtr = c10::static_intrusive_pointer_cast<torch::CustomClassHolder>(std::move(x));
 
-  retObject->setSlot(0, IValue(objPtr));
+  retObject->setSlot(0, IValue(std::move(objPtr)));
   auto resIVal = IValue(std::move(retObject));
   return resIVal;
 }
@@ -880,7 +884,7 @@ IValue from_(T x, std::false_type) {
 
 template <typename T>
 IValue from(T x) {
-  return detail::from_(x, detail::has_constructor<T>{});
+  return detail::from_(std::move(x), detail::has_constructor<T>{});
 }
 
 }
