@@ -8,6 +8,19 @@
 namespace c10 {
 namespace ivalue {
 
+// This is in ivalue.cpp because we need to access Type::python_str, which
+// is declared in jit_type.h
+void checkCustomClassType(TypePtr expected_type, TypePtr actual_type) {
+  // NB: doing pointer comparison here
+  // If in the future there ever arises a need to call operator== on custom class
+  // Type's, this needs to be changed!
+  TORCH_CHECK(actual_type == expected_type,
+              "Tried to convert an IValue of type ",
+              actual_type->python_str(),
+              " to custom class type ",
+              expected_type->python_str());
+}
+
 CAFFE2_API c10::intrusive_ptr<ConstantString> ConstantString::create(
     std::string str_) {
   return c10::make_intrusive<ConstantString>(std::move(str_));
@@ -351,16 +364,18 @@ IValue IValue::deepcopy(
     }
       break;
     case IValue::Tag::GenericList: {
-      c10::List<IValue> copied_list;
-      for (IValue v : toList()) {
+      auto list = toList();
+      auto copied_list = c10::impl::GenericList(list.elementType());
+      for (IValue v : list) {
         copied_list.push_back(v.deepcopy(memo));
       }
       copy = IValue(copied_list);
     }
       break;
     case IValue::Tag::GenericDict: {
-      c10::Dict<IValue, IValue> copied_dict;
-      for (const auto& entry : toGenericDict()) {
+      auto dict = toGenericDict();
+      auto copied_dict = c10::impl::GenericDict(dict.keyType(), dict.valueType());
+      for (const auto& entry : dict) {
         copied_dict.insert(entry.key().deepcopy(memo), entry.value().deepcopy(memo));
       }
       copy = IValue(copied_dict);
