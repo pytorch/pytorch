@@ -61,7 +61,8 @@ Tensor& normal_cuda_(Tensor& self, double mean, double std, Generator* gen) {
     auto float_tensor = at::native::view_complex_as_float(self);
     // variance for normal distribution of the real and imaginary values
     // is half of the input variance
-    return normal_cuda_(float_tensor, mean, std/(std::sqrt(2)), gen);
+    normal_cuda_(float_tensor, mean, std/(std::sqrt(2)), gen);
+    return self;
   }
   auto iter = TensorIterator::nullary_op(self);
   normal_kernel_cuda(iter, mean, std, gen);

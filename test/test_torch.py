@@ -2145,8 +2145,8 @@ class _TestTorchMixin(object):
         def common_routine(dtype):
             for device in torch.testing.get_all_device_types():
                 torch.manual_seed(123456)
-                res1 = torch.randn(SIZE, SIZE, dtype=dtype)
-                res2 = torch.tensor([], dtype=dtype)
+                res1 = torch.randn(SIZE, SIZE, dtype=dtype, device=device)
+                res2 = torch.tensor([], dtype=dtype, device=device)
                 torch.manual_seed(123456)
                 torch.randn(SIZE, SIZE, out=res2)
                 self.assertEqual(res1, res2)
