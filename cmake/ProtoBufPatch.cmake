@@ -4,9 +4,18 @@
 
 file(READ ${FILENAME} content)
 
+# protobuf-3.6.0 pattern
 string(
   REPLACE
   "::google::protobuf::internal::GetEmptyStringAlreadyInited"
+  "GetEmptyStringAlreadyInited"
+  content
+  "${content}")
+
+# Protobuf-3.7.0+ pattern
+string(
+  REPLACE
+  "::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited"
   "GetEmptyStringAlreadyInited"
   content
   "${content}")
