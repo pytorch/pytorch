@@ -1426,83 +1426,6 @@ graph(%x : Tensor,
                            .check("return") \
                            .run(conv._get_method('_conv_forward').graph)
 
-    def test_insert_prepack_unpack(self):
-        # Module with linear and per tensor/channel quantized weight
-        class L(torch.nn.Module):
-            def __init__(self):
-                super(L, self).__init__()
-                self.weight = torch.nn.Parameter(torch.rand((5, 5), dtype=torch.float))
-                self.bias = torch.nn.Parameter(torch.rand(5, dtype=torch.float))
-
-            def forward(self, x):
-                xq = torch.quantize_per_tensor(x, 0.2, 1, torch.quint8)
-                wq = torch.quantize_per_tensor(self.weight, 0.2, 1, torch.qint8)
-                r = torch.nn.functional.linear(xq.dequantize(), wq.dequantize(), self.bias)
-                rq = torch.quantize_per_tensor(r, 0.2, 1, torch.quint8)
-                return rq
-
-        class L2(torch.nn.Module):
-            def __init__(self):
-                super(L2, self).__init__()
-                self.weight = torch.nn.Parameter(torch.rand((5, 5), dtype=torch.float))
-                self.bias = torch.nn.Parameter(torch.rand(5, dtype=torch.float))
-
-            def forward(self, x):
-                xq = torch.quantize_per_tensor(x, 0.2, 1, torch.quint8)
-                wq = torch.quantize_per_channel(self.weight,
-                                                torch.tensor([2], dtype=torch.float),
-                                                torch.tensor([0], dtype=torch.long),
-                                                0,
-                                                torch.qint8)
-                r = torch.nn.functional.linear(xq.dequantize(), wq.dequantize(), self.bias)
-                rq = torch.quantize_per_tensor(r, 0.2, 1, torch.quint8)
-                return rq
-
-        for M in [L, L2]:
-            m = torch.jit.script(M())
-            torch._C._jit_pass_insert_prepack_unpack(m._c)
-            FileCheck().check("quantized::linear_prepack") \
-                       .check("quantized::linear_unpack") \
-                       .run(get_forward_graph(m._c))
-
-        # Module with conv2d and per tensor/channel quantized weight
-        class C(torch.nn.Module):
-            def __init__(self):
-                super(C, self).__init__()
-                self.weight = torch.nn.Parameter(torch.rand((5, 5), dtype=torch.float))
-                self.bias = torch.nn.Parameter(torch.rand(5, dtype=torch.float))
-
-            def forward(self, x):
-                xq = torch.quantize_per_tensor(x, 0.2, 1, torch.quint8)
-                wq = torch.quantize_per_tensor(self.weight, 0.2, 1, torch.qint8)
-                r = torch.conv2d(xq.dequantize(), wq.dequantize(), self.bias)
-                rq = torch.quantize_per_tensor(r, 0.2, 1, torch.quint8)
-                return rq
-
-        class C2(torch.nn.Module):
-            def __init__(self):
-                super(C2, self).__init__()
-                self.weight = torch.nn.Parameter(torch.rand((5, 5), dtype=torch.float))
-                self.bias = torch.nn.Parameter(torch.rand(5, dtype=torch.float))
-
-            def forward(self, x):
-                xq = torch.quantize_per_tensor(x, 0.2, 1, torch.quint8)
-                wq = torch.quantize_per_channel(self.weight,
-                                                torch.tensor([2], dtype=torch.float),
-                                                torch.tensor([0], dtype=torch.long),
-                                                0,
-                                                torch.qint8)
-                r = torch.conv2d(xq.dequantize(), wq.dequantize(), self.bias)
-                rq = torch.quantize_per_tensor(r, 0.2, 1, torch.quint8)
-                return rq
-
-        for M in [C, C2]:
-            m = torch.jit.script(M())
-            torch._C._jit_pass_insert_prepack_unpack(m._c)
-            FileCheck().check("quantized::conv2d_prepack") \
-                       .check("quantized::conv2d_unpack") \
-                       .run(get_forward_graph(m._c))
-
     def test_quant_fusion(self):
         input_strs = [
             # aten::conv2d --> quantized::conv2d
@@ -1980,6 +1903,7 @@ graph(%input, %weight):
                 super(M, self).__init__()
                 self.maxpool = torch.nn.MaxPool2d(kernel_size=3)
                 self.adaptive_avgpool = torch.nn.AdaptiveAvgPool2d((1, 1))
+                self.dropout = torch.nn.Dropout()
                 self.avgpool = torch.nn.AvgPool2d(3)
 
             def forward(self, x):
@@ -1991,6 +1915,9 @@ graph(%input, %weight):
                 x = torch.max(x)
                 x = torch.min(x)
                 x = torch.mean(x)
+                x = x.reshape([-1])
+                x = F.dropout(x)
+                x = self.dropout(x)
                 # TODO: uncomment when sort is supported
                 # x, _ = torch.sort(x)
                 x = F.interpolate(x, 4, mode='nearest')
@@ -1998,8 +1925,10 @@ graph(%input, %weight):
                 x = F.upsample_bilinear(x, (32, 32))
                 x = F.upsample_nearest(x, (32, 32))
                 return x
+
         m = torch.jit.script(M())
         torch._C._jit_pass_inline(m.graph)
+        torch._C._jit_pass_constant_propagation(m.graph)
         FileCheck().check("aten::dequantize") \
                    .check("aten::max_pool2d") \
                    .check("aten::adaptive_avg_pool2d") \
@@ -2008,6 +1937,9 @@ graph(%input, %weight):
                    .check("aten::max") \
                    .check("aten::min") \
                    .check("aten::mean") \
+                   .check("aten::reshape") \
+                   .check("aten::dropout") \
+                   .check("aten::dropout") \
                    .run(m.graph)
         torch._C._jit_pass_swap_dequantize(m.graph)
         FileCheck().check("aten::max_pool2d") \
@@ -2017,6 +1949,9 @@ graph(%input, %weight):
                    .check("aten::max") \
                    .check("aten::min") \
                    .check("aten::mean") \
+                   .check("aten::reshape") \
+                   .check("aten::dropout") \
+                   .check("aten::dropout") \
                    .check("dequantize") \
                    .run(m.graph)
 
@@ -2062,6 +1997,22 @@ graph(%input, %weight):
         model = torch.jit.script(M()).eval()
         model = quantize_script(model, qconfig_dict, _test_only_eval_fn, [data], inplace=False)
         FileCheck().check("quantized::conv2d") \
+                   .run(model.graph)
+
+    def test_finalize_for_linear(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.fc = torch.nn.Linear(5, 5).float()
+
+            def forward(self, x):
+                return self.fc(x)
+
+        data = [(torch.rand((1, 5), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        qconfig_dict = {'': default_qconfig}
+        model = torch.jit.script(M()).eval()
+        model = quantize_script(model, qconfig_dict, _test_only_eval_fn, [data], inplace=False)
+        FileCheck().check("quantized::linear") \
                    .run(model.graph)
 
     def test_finalize_debug(self):
@@ -5301,7 +5252,6 @@ def foo(x):
         self.assertFalse("training" in w.state_dict())
 
     @skipIfRocm
-    @unittest.skipIf(IS_WINDOWS, "TODO: Fix this test case")
     def test_torchbind(self):
         def test_equality(f, cmp_key):
             obj1 = f()
@@ -5331,7 +5281,6 @@ def foo(x):
         test_equality(f, lambda x: x)
 
     @skipIfRocm
-    @unittest.skipIf(IS_WINDOWS, "TODO: Fix this test case")
     def test_torchbind_take_as_arg(self):
         global StackString  # see [local resolution in python]
         StackString = torch.classes._TorchScriptTesting_StackString
@@ -5347,7 +5296,6 @@ def foo(x):
         self.assertEqual(script_output.pop(), "lel")
 
     @skipIfRocm
-    @unittest.skipIf(IS_WINDOWS, "TODO: Fix this test case")
     def test_torchbind_return_instance(self):
         def foo():
             ss = torch.classes._TorchScriptTesting_StackString(["hi", "mom"])
@@ -5364,7 +5312,6 @@ def foo(x):
         self.assertEqual(out.pop(), "hi")
 
     @skipIfRocm
-    @unittest.skipIf(IS_WINDOWS, "TODO: Fix this test case")
     def test_torchbind_return_instance_from_method(self):
         def foo():
             ss = torch.classes._TorchScriptTesting_StackString(["hi", "mom"])
@@ -5379,7 +5326,6 @@ def foo(x):
         self.assertEqual(out[1].pop(), "hi")
 
     @skipIfRocm
-    @unittest.skipIf(IS_WINDOWS, "TODO: Fix this test case")
     def test_torchbind_take_instance_as_method_arg(self):
         def foo():
             ss = torch.classes._TorchScriptTesting_StackString(["mom"])
@@ -5393,7 +5339,6 @@ def foo(x):
         self.assertEqual(out.pop(), "mom")
 
     @skipIfRocm
-    @unittest.skipIf(IS_WINDOWS, "TODO: Fix this test case")
     def test_torchbind_return_tuple(self):
         def f():
             val = torch.classes._TorchScriptTesting_StackString(["3", "5"])
@@ -5404,7 +5349,6 @@ def foo(x):
         self.assertEqual(tup, (1337.0, 123))
 
     @skipIfRocm
-    @unittest.skipIf(IS_WINDOWS, "TODO: Fix this test case")
     def test_torchbind_save_load(self):
         def foo():
             ss = torch.classes._TorchScriptTesting_StackString(["mom"])
@@ -5435,7 +5379,6 @@ def foo(x):
         self.assertEqual(scripted(x), eic(x))
 
     @skipIfRocm
-    @unittest.skipIf(IS_WINDOWS, "TODO: Fix this test case")
     def test_torchbind_lambda_method(self):
         def foo():
             ss = torch.classes._TorchScriptTesting_StackString(["mom"])
@@ -5445,7 +5388,6 @@ def foo(x):
         self.assertEqual(scripted(), "mom")
 
     @skipIfRocm
-    @unittest.skipIf(IS_WINDOWS, "TODO: Fix this test case")
     def test_torchbind_class_attribute(self):
         class FooBar1234(torch.nn.Module):
             def __init__(self):
@@ -5463,7 +5405,6 @@ def foo(x):
             assert eic.f.pop() == expected
 
     @skipIfRocm
-    @unittest.skipIf(IS_WINDOWS, "TODO: Fix this test case")
     def test_torchbind_getstate(self):
         class FooBar4321(torch.nn.Module):
             def __init__(self):
@@ -5486,7 +5427,6 @@ def foo(x):
             assert eic.f.pop() == expected
 
     @skipIfRocm
-    @unittest.skipIf(IS_WINDOWS, "TODO: Fix this test case")
     def test_torchbind_tracing(self):
         class TryTracing(torch.nn.Module):
             def __init__(self):
@@ -5500,7 +5440,6 @@ def foo(x):
         self.assertEqual(torch.zeros(4, 4), traced())
 
     @skipIfRocm
-    @unittest.skipIf(IS_WINDOWS, "TODO: Fix this test case")
     def test_torchbind_tracing_nested(self):
         class TryTracingNest(torch.nn.Module):
             def __init__(self):
@@ -5519,7 +5458,6 @@ def foo(x):
         self.assertEqual(torch.zeros(4, 4), traced())
 
     @skipIfRocm
-    @unittest.skipIf(IS_WINDOWS, "TODO: Fix this test case")
     def test_torchbind_pickle_serialization(self):
         nt = torch.classes._TorchScriptTesting_PickleTester([3, 4])
         b = io.BytesIO()
@@ -5530,7 +5468,6 @@ def foo(x):
             self.assertEqual(nt_loaded.pop(), exp)
 
     @skipIfRocm
-    @unittest.skipIf(IS_WINDOWS, "TODO: Fix this test case")
     def test_torchbind_instantiate_missing_class(self):
         with self.assertRaisesRegex(RuntimeError, 'Tried to instantiate class IDontExist but it does not exist!'):
             torch.classes.IDontExist(3, 4, 5)
@@ -7093,6 +7030,20 @@ a")
             # this triggers 2 bailouts
             self.assertEqual(def_in_one_branch(a, True), 3.0)
 
+
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "skip if profiling isn't enabled")
+    def test_maxpool_guard_elimination(self):
+        @torch.jit.script
+        def my_maxpool(x):
+            return F.max_pool1d(x, kernel_size=[1]) + torch.ones([32, 32, 32])
+
+        a = torch.rand(32, 32, 32)
+
+        with enable_profiling_mode():
+            my_maxpool(a)
+            bailout_graph_str = str(my_maxpool.graph_for(a))
+            FileCheck().check_count("prim::BailOut", 1).run(bailout_graph_str)
+
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "skip if profiling isn't enabled")
     def test_slice_guard_elimination(self):
         @torch.jit.script
@@ -8472,15 +8423,40 @@ a")
 
         self.checkScript(not_test, (torch.tensor([2, 4]), ))
 
-    def test_number_all(self):
-        def int1():
-            return all(torch.tensor([1, 2, 3], dtype=torch.uint8))
+    def test_all(self):
+        @torch.jit.script
+        def test_all_tensor(x):
+            return all(x)
+        self.assertFalse(test_all_tensor(torch.tensor([1, 0, 3], dtype=torch.uint8)))
+        self.assertTrue(test_all_tensor(torch.tensor([3.14, 3, 99], dtype=torch.uint8)))
+        self.assertTrue(test_all_tensor(torch.tensor([True, True], dtype=torch.uint8)))
+        self.assertFalse(test_all_tensor(torch.tensor([True, False], dtype=torch.uint8)))
 
-        def int2():
-            return all(torch.tensor([1, 0, 3], dtype=torch.uint8))
+        @torch.jit.script
+        def test_all_bool_list(x):
+            # type: (List[bool]) -> bool
+            return all(x)
+        self.assertTrue(test_all_bool_list([True, True]))
+        self.assertTrue(test_all_bool_list([True, 1]))
+        self.assertFalse(test_all_bool_list([True, False]))
+        self.assertFalse(test_all_bool_list([True, 0]))
+        self.assertFalse(test_all_bool_list([False, 0]))
+        self.assertTrue(test_all_bool_list([]))
 
-        self.checkScript(int1, ())
-        self.checkScript(int2, ())
+        @torch.jit.script
+        def test_all_int_list(x):
+            # type: (List[int]) -> bool
+            return all(x)
+        self.assertTrue(test_all_int_list([3, 6]))
+        self.assertFalse(test_all_int_list([2, 0]))
+
+        @torch.jit.script
+        def test_all_float_list(x):
+            # type: (List[float]) -> bool
+            return all(x)
+        self.assertTrue(test_all_float_list([3.14, 8.1]))
+        self.assertFalse(test_all_float_list([3.14, 0, 8.9]))
+
 
     def test_number_math(self):
         ops_template = dedent('''
