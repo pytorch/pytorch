@@ -492,8 +492,8 @@ scalar_name_to_pytorch = {
     'int64_t': 'Long',
     'int16_t': 'Short',
     'bool': 'Bool',
-    'complex64': '',
-    'complex128': ''
+    'complex64': 'ComplexFloat',
+    'complex128': 'ComplexDouble'
 }
 
 
