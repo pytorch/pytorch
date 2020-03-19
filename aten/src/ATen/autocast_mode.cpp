@@ -366,7 +366,9 @@ Therefore, for the moment, this is all copy pasted in from VariableTypeEverythin
     &WrapFunction<CastPolicy::POLICY, REGISTER_SIGNATURE, REDISPATCH_SIGNATURE, &REDISPATCH_FUNC>::type::call \
     >(DispatchKey::AutocastTensorId))
 
-using fdsa = at::_convolution;
+Tensor fdsa(const Tensor &a, const Tensor &b, const Tensor &c, IntArrayRef d, IntArrayRef e, IntArrayRef f, bool g, IntArrayRef h, int64_t i, bool j, bool k, bool l) {
+  return at::_convolution(a, b, c, d, e, f, g, h, i, j, k, l);
+}
 /*****************************************
 Explicit registration for out-of-place ops
 *****************************************/
