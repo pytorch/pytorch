@@ -14,6 +14,10 @@ from torch.optim.lr_scheduler import LambdaLR, MultiplicativeLR, StepLR, \
     MultiStepLR, ExponentialLR, CosineAnnealingLR, ReduceLROnPlateau, \
     _LRScheduler, CyclicLR, CosineAnnealingWarmRestarts, OneCycleLR
 from torch.optim.swa_utils import AveragedModel, SWALR, bn_update 
+
+#import os
+#os.sys.path.append("../torch/optim")
+#from swa_utils import bn_update 
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests, \
     skipIfRocm
 
@@ -1695,108 +1699,108 @@ class TestSWAUtils(TestCase):
             # Check that AveragedModel is on the correct device
             self.assertTrue(p_avg.device == p_swa.device)
 
-#    def _test_bn_update(self, dnn, dl_x, dl_xy, cuda):
-#
-#        preactivation_sum = torch.zeros(dnn.n_features)
-#        preactivation_squared_sum = torch.zeros(dnn.n_features)
-#        if cuda:
-#            preactivation_sum = preactivation_sum.cuda()
-#            preactivation_squared_sum = preactivation_squared_sum.cuda()
-#        total_num = 0
-#        for x in dl_x:
-#            x = x[0]
-#            if cuda:
-#                x = x.cuda()
-#
-#            dnn.forward(x)
-#            preactivations = dnn.compute_preactivation(x)
-#            if len(preactivations.shape) == 4:
-#                preactivations = preactivations.transpose(1, 3)
-#            preactivations = preactivations.contiguous().view(-1, dnn.n_features)
-#            total_num += preactivations.shape[0]
-#
-#            preactivation_sum += torch.sum(preactivations, dim=0)
-#            preactivation_squared_sum += torch.sum(preactivations**2, dim=0)  
-#
-#        preactivation_mean = preactivation_sum / total_num
-#        preactivation_var = preactivation_squared_sum / total_num 
-#        preactivation_var = preactivation_var - preactivation_mean**2
-#
-#        bn_update(dl_xy, dnn, device=x.device)
-#        self.assertEqual(preactivation_mean, dnn.bn.running_mean)
-#        self.assertEqual(preactivation_var, dnn.bn.running_var, prec=1e-1)
-#
-#        # test the swap_swa_sgd_update_bn method
-#        def _reset_bn(module):
-#            if issubclass(module.__class__, 
-#                          torch.nn.modules.batchnorm._BatchNorm):
-#                module.running_mean = torch.zeros_like(module.running_mean)
-#                module.running_var = torch.ones_like(module.running_var)
-#        # reset batch norm and run bn_update again
-#        dnn.apply(_reset_bn)
-#        bn_update(dl_xy, dnn, device=x.device)
-#        self.assertEqual(preactivation_mean, dnn.bn.running_mean)
-#        self.assertEqual(preactivation_var, dnn.bn.running_var, prec=1e-1)
-#        # using the dl_x loader instead of dl_xy
-#        dnn.apply(_reset_bn)
-#        bn_update(dl_x, dnn, device=x.device)
-#        self.assertEqual(preactivation_mean, dnn.bn.running_mean)
-#        self.assertEqual(preactivation_var, dnn.bn.running_var, prec=1e-1)
-#
-#    def test_bn_update_dnn(self):
-#        # Test bn_update for a fully-connected network with BatchNorm1d
-#        objects, input_features = 100, 5
-#        x = torch.rand(objects, input_features)
-#        y = torch.rand(objects)
-#        ds_x = torch.utils.data.TensorDataset(x)
-#        ds_xy = torch.utils.data.TensorDataset(x, y)
-#        dl_x = torch.utils.data.DataLoader(ds_x, batch_size=5, shuffle=True)
-#        dl_xy = torch.utils.data.DataLoader(ds_xy, batch_size=5, shuffle=True)
-#        dnn = SWATestDNN(input_features=input_features)
-#        dnn.train()
-#        self._test_bn_update(dnn, dl_x, dl_xy, False)
-#        if torch.cuda.is_available():
-#            dnn = SWATestDNN(input_features=input_features)
-#            dnn.train()
-#            self._test_bn_update(dnn.cuda(), dl_x, dl_xy, True)
-#        self.assertTrue(dnn.training)
-#
-#
-#    def test_bn_update_cnn(self):
-#        # Test bn_update for convolutional network and BatchNorm2d
-#        objects = 100
-#        input_channels = 3
-#        height, width = 5, 5
-#        x = torch.rand(objects, input_channels, height, width)
-#        y = torch.rand(objects)
-#        ds_x = torch.utils.data.TensorDataset(x)
-#        ds_xy = torch.utils.data.TensorDataset(x, y)
-#        dl_x = torch.utils.data.DataLoader(ds_x, batch_size=5, shuffle=True)
-#        dl_xy = torch.utils.data.DataLoader(ds_xy, batch_size=5, shuffle=True)
-#        dnn = SWATestCNN(input_channels=input_channels)
-#        dnn.train()
-#        self._test_bn_update(dnn, dl_x, dl_xy, False)
-#        if torch.cuda.is_available():
-#            dnn = SWATestCNN(input_channels=input_channels)
-#            dnn.train()
-#            self._test_bn_update(dnn.cuda(), dl_x, dl_xy, True)
-#        self.assertTrue(dnn.training)
-#
-#    def test_bn_update_eval_momentum(self):
-#        # check that bn_update preserves eval mode
-#        objects = 100
-#        input_channels = 3
-#        height, width = 5, 5
-#        x = torch.rand(objects, input_channels, height, width)
-#        ds_x = torch.utils.data.TensorDataset(x)
-#        dl_x = torch.utils.data.DataLoader(ds_x, batch_size=5, shuffle=True)
-#        dnn = SWATestCNN(input_channels=input_channels)
-#        dnn.eval()
-#        bn_update(dl_x, dnn)
-#        self.assertFalse(dnn.training)
-#
-#        # check that momentum is preserved
-#        self.assertEqual(dnn.bn.momentum, 0.3)
+    def _test_bn_update(self, dnn, dl_x, dl_xy, cuda):
+
+        preactivation_sum = torch.zeros(dnn.n_features)
+        preactivation_squared_sum = torch.zeros(dnn.n_features)
+        if cuda:
+            preactivation_sum = preactivation_sum.cuda()
+            preactivation_squared_sum = preactivation_squared_sum.cuda()
+        total_num = 0
+        for x in dl_x:
+            x = x[0]
+            if cuda:
+                x = x.cuda()
+
+            dnn.forward(x)
+            preactivations = dnn.compute_preactivation(x)
+            if len(preactivations.shape) == 4:
+                preactivations = preactivations.transpose(1, 3)
+            preactivations = preactivations.contiguous().view(-1, dnn.n_features)
+            total_num += preactivations.shape[0]
+
+            preactivation_sum += torch.sum(preactivations, dim=0)
+            preactivation_squared_sum += torch.sum(preactivations**2, dim=0)  
+
+        preactivation_mean = preactivation_sum / total_num
+        preactivation_var = preactivation_squared_sum / total_num 
+        preactivation_var = preactivation_var - preactivation_mean**2
+
+        bn_update(dl_xy, dnn, device=x.device)
+        self.assertEqual(preactivation_mean, dnn.bn.running_mean)
+        self.assertEqual(preactivation_var, dnn.bn.running_var, prec=1e-1)
+
+        # test the swap_swa_sgd_update_bn method
+        def _reset_bn(module):
+            if issubclass(module.__class__, 
+                          torch.nn.modules.batchnorm._BatchNorm):
+                module.running_mean = torch.zeros_like(module.running_mean)
+                module.running_var = torch.ones_like(module.running_var)
+        # reset batch norm and run bn_update again
+        dnn.apply(_reset_bn)
+        bn_update(dl_xy, dnn, device=x.device)
+        self.assertEqual(preactivation_mean, dnn.bn.running_mean)
+        self.assertEqual(preactivation_var, dnn.bn.running_var, prec=1e-1)
+        # using the dl_x loader instead of dl_xy
+        dnn.apply(_reset_bn)
+        bn_update(dl_x, dnn, device=x.device)
+        self.assertEqual(preactivation_mean, dnn.bn.running_mean)
+        self.assertEqual(preactivation_var, dnn.bn.running_var, prec=1e-1)
+
+    def test_bn_update_dnn(self):
+        # Test bn_update for a fully-connected network with BatchNorm1d
+        objects, input_features = 100, 5
+        x = torch.rand(objects, input_features)
+        y = torch.rand(objects)
+        ds_x = torch.utils.data.TensorDataset(x)
+        ds_xy = torch.utils.data.TensorDataset(x, y)
+        dl_x = torch.utils.data.DataLoader(ds_x, batch_size=5, shuffle=True)
+        dl_xy = torch.utils.data.DataLoader(ds_xy, batch_size=5, shuffle=True)
+        dnn = SWATestDNN(input_features=input_features)
+        dnn.train()
+        self._test_bn_update(dnn, dl_x, dl_xy, False)
+        if torch.cuda.is_available():
+            dnn = SWATestDNN(input_features=input_features)
+            dnn.train()
+            self._test_bn_update(dnn.cuda(), dl_x, dl_xy, True)
+        self.assertTrue(dnn.training)
+
+
+    def test_bn_update_cnn(self):
+        # Test bn_update for convolutional network and BatchNorm2d
+        objects = 100
+        input_channels = 3
+        height, width = 5, 5
+        x = torch.rand(objects, input_channels, height, width)
+        y = torch.rand(objects)
+        ds_x = torch.utils.data.TensorDataset(x)
+        ds_xy = torch.utils.data.TensorDataset(x, y)
+        dl_x = torch.utils.data.DataLoader(ds_x, batch_size=5, shuffle=True)
+        dl_xy = torch.utils.data.DataLoader(ds_xy, batch_size=5, shuffle=True)
+        dnn = SWATestCNN(input_channels=input_channels)
+        dnn.train()
+        self._test_bn_update(dnn, dl_x, dl_xy, False)
+        if torch.cuda.is_available():
+            dnn = SWATestCNN(input_channels=input_channels)
+            dnn.train()
+            self._test_bn_update(dnn.cuda(), dl_x, dl_xy, True)
+        self.assertTrue(dnn.training)
+
+    def test_bn_update_eval_momentum(self):
+        # check that bn_update preserves eval mode
+        objects = 100
+        input_channels = 3
+        height, width = 5, 5
+        x = torch.rand(objects, input_channels, height, width)
+        ds_x = torch.utils.data.TensorDataset(x)
+        dl_x = torch.utils.data.DataLoader(ds_x, batch_size=5, shuffle=True)
+        dnn = SWATestCNN(input_channels=input_channels)
+        dnn.eval()
+        bn_update(dl_x, dnn)
+        self.assertFalse(dnn.training)
+
+        # check that momentum is preserved
+        self.assertEqual(dnn.bn.momentum, 0.3)
 
 
 if __name__ == '__main__':

@@ -7,6 +7,7 @@ from torch.optim.lr_scheduler import _LRScheduler
 class AveragedModel(Module):
     r"""Implements averaged model for Stochastic Weight Averaging (SWA).
     
+
     ToDo
     .. _Averaging Weights Leads to Wider Optima and Better Generalization:
         https://arxiv.org/abs/1803.05407
@@ -52,59 +53,37 @@ def bn_update(loader, model, device=None):
         device (torch.device, optional): If set, data will be trasferred to
             :attr:`device` before being passed into :attr:`model`.
     """
-    if not _check_bn(model):
+    momenta = {}
+    has_bn = False
+    for module in model.modules():
+        if isinstance(module, torch.nn.modules.batchnorm._BatchNorm):
+            module.running_mean = torch.zeros_like(module.running_mean)
+            module.running_var = torch.ones_like(module.running_var)
+            momenta[module] = module.momentum
+            has_bn = True
+
+    if not has_bn:
         return
+    
     was_training = model.training
     model.train()
-    momenta = {}
-    model.apply(_reset_bn)
-    model.apply(lambda module: _get_momenta(module, momenta))
-    n = 0
+    for module in momenta.keys():
+        module.momentum = None
+        module.num_batches_tracked *= 0
+
+    print("new bn!")
     for input in loader:
         if isinstance(input, (list, tuple)):
             input = input[0]
-        b = input.size(0)
-
-        momentum = b / float(n + b)
-        for module in momenta.keys():
-            module.momentum = momentum
-
         if device is not None:
             input = input.to(device)
 
         model(input)
-        n += b
 
-    model.apply(lambda module: _set_momenta(module, momenta))
+    for module in model.modules():
+        if isinstance(module, torch.nn.modules.batchnorm._BatchNorm):
+            module.momentum = momenta[module]
     model.train(was_training)
-
-
-# BatchNorm utils
-def _check_bn_apply(module, flag):
-    if issubclass(module.__class__, torch.nn.modules.batchnorm._BatchNorm):
-        flag[0] = True
-
-
-def _check_bn(model):
-    flag = [False]
-    model.apply(lambda module: _check_bn_apply(module, flag))
-    return flag[0]
-
-
-def _reset_bn(module):
-    if issubclass(module.__class__, torch.nn.modules.batchnorm._BatchNorm):
-        module.running_mean = torch.zeros_like(module.running_mean)
-        module.running_var = torch.ones_like(module.running_var)
-
-
-def _get_momenta(module, momenta):
-    if issubclass(module.__class__, torch.nn.modules.batchnorm._BatchNorm):
-        momenta[module] = module.momentum
-
-
-def _set_momenta(module, momenta):
-    if issubclass(module.__class__, torch.nn.modules.batchnorm._BatchNorm):
-        module.momentum = momenta[module]
 
 
 class SWALR(_LRScheduler):
