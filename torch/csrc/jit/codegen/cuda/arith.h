@@ -32,7 +32,6 @@ TORCH_CUDA_API Val* unaryOp(UnaryOpType type, Val* v1);
 TORCH_CUDA_API Val* binaryOp(BinaryOpType type, Val* v1, Val* v2);
 
 TORCH_CUDA_API Val* add(Val* v1, Val* v2);
-TORCH_CUDA_API Val* SomeCrazyName(Val* v1, Val* v2);
 TORCH_CUDA_API Val* sub(Val* v1, Val* v2);
 TORCH_CUDA_API Val* mul(Val* v1, Val* v2);
 TORCH_CUDA_API Val* div(Val* v1, Val* v2);
