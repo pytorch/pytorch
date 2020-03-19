@@ -8,6 +8,7 @@ namespace torch {
 namespace nn {
 namespace functional {
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor l1_loss(
     const Tensor& input,
@@ -19,7 +20,19 @@ inline Tensor l1_loss(
     enumtype::reduction_get_enum(reduction));
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.l1_loss
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::L1LossFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::l1_loss(input, target, F::L1LossFuncOptions(torch::kNone));
+/// ```
 inline Tensor l1_loss(
     const Tensor& input,
     const Tensor& target,
@@ -29,6 +42,7 @@ inline Tensor l1_loss(
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor kl_div(
     const Tensor& input,
@@ -58,7 +72,19 @@ inline Tensor kl_div(
   return reduced;
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.kl_div
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::KLDivFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::kl_div(input, target, F::KLDivFuncOptions(torch::kNone));
+/// ```
 inline Tensor kl_div(
     const Tensor& input,
     const Tensor& target,
@@ -68,6 +94,7 @@ inline Tensor kl_div(
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor mse_loss(
     const Tensor& input,
@@ -97,7 +124,19 @@ inline Tensor mse_loss(
   return ret;
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.mse_loss
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::MSELossFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::mse_loss(input, target, F::MSELossFuncOptions(torch::kNone));
+/// ```
 inline Tensor mse_loss(
     const Tensor& input,
     const Tensor& target,
@@ -107,6 +146,7 @@ inline Tensor mse_loss(
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor binary_cross_entropy(
     const Tensor& input,
@@ -136,7 +176,19 @@ inline Tensor binary_cross_entropy(
   return torch::binary_cross_entropy(input, target, weight_, reduction_enum);
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.binary_cross_entropy
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::BinaryCrossEntropyFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::binary_cross_entropy(input, target, F::BinaryCrossEntropyFuncOptions().weight(weight));
+/// ```
 inline Tensor binary_cross_entropy(
     const Tensor& input,
     const Tensor& target,
@@ -146,6 +198,7 @@ inline Tensor binary_cross_entropy(
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor hinge_embedding_loss(
     const Tensor& input,
@@ -159,7 +212,19 @@ inline Tensor hinge_embedding_loss(
       enumtype::reduction_get_enum(reduction));
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.hinge_embedding_loss
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::HingeEmbeddingLossFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::hinge_embedding_loss(input, target, F::HingeEmbeddingLossFuncOptions().margin(2));
+/// ```
 inline Tensor hinge_embedding_loss(
     const Tensor& input,
     const Tensor& target,
@@ -169,6 +234,7 @@ inline Tensor hinge_embedding_loss(
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor multi_margin_loss(
     const Tensor& input,
@@ -192,7 +258,19 @@ inline Tensor multi_margin_loss(
   );
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.multi_margin_loss
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::MultiMarginLossFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::multi_margin_loss(input, target, F::MultiMarginLossFuncOptions().margin(2).weight(weight));
+/// ```
 inline Tensor multi_margin_loss(
     const Tensor& input,
     const Tensor& target,
@@ -202,6 +280,7 @@ inline Tensor multi_margin_loss(
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor cosine_embedding_loss(
     const Tensor& input1,
@@ -217,7 +296,19 @@ inline Tensor cosine_embedding_loss(
     enumtype::reduction_get_enum(reduction));
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.cosine_embedding_loss
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::CosineEmbeddingLossFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::cosine_embedding_loss(input1, input2, target, F::CosineEmbeddingLossFuncOptions().margin(0.5));
+/// ```
 inline Tensor cosine_embedding_loss(
     const Tensor& input1,
     const Tensor& input2,
@@ -233,6 +324,7 @@ inline Tensor _smooth_l1_loss(const Tensor& input, const Tensor& target) {
     return torch::where(t < 1, 0.5 * torch::pow(t, 2), t - 0.5);
 }
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor smooth_l1_loss(
     const Tensor& input,
@@ -258,7 +350,19 @@ inline Tensor smooth_l1_loss(
   return ret;
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.smooth_l1_loss
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::SmoothL1LossFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::smooth_l1_loss(input, target, F::SmoothL1LossFuncOptions(torch::kNone));
+/// ```
 inline Tensor smooth_l1_loss(
     const Tensor& input,
     const Tensor& target,
@@ -268,6 +372,7 @@ inline Tensor smooth_l1_loss(
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor multilabel_margin_loss(
     const Tensor& input,
@@ -279,7 +384,19 @@ inline Tensor multilabel_margin_loss(
     enumtype::reduction_get_enum(reduction));
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.multilabel_margin_loss
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::MultiLabelMarginLossFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::multilabel_margin_loss(input, target, F::MultiLabelMarginLossFuncOptions(torch::kNone));
+/// ```
 inline Tensor multilabel_margin_loss(
     const Tensor& input,
     const Tensor& target,
@@ -289,6 +406,7 @@ inline Tensor multilabel_margin_loss(
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor soft_margin_loss(
     const Tensor& input,
@@ -300,7 +418,19 @@ inline Tensor soft_margin_loss(
     enumtype::reduction_get_enum(reduction));
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.soft_margin_loss
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::SoftMarginLossFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::soft_margin_loss(input, target, F::SoftMarginLossFuncOptions(torch::kNone));
+/// ```
 inline Tensor soft_margin_loss(
     const Tensor& input,
     const Tensor& target,
@@ -310,6 +440,7 @@ inline Tensor soft_margin_loss(
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor multilabel_soft_margin_loss(
     const Tensor& input,
@@ -341,7 +472,19 @@ inline Tensor multilabel_soft_margin_loss(
   return ret;
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.multilabel_soft_margin_loss
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::MultiLabelSoftMarginLossFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::multilabel_soft_margin_loss(input, target, F::MultiLabelSoftMarginLossFuncOptions().reduction(torch::kNone).weight(weight));
+/// ```
 inline Tensor multilabel_soft_margin_loss(
     const Tensor& input,
     const Tensor& target,
@@ -351,6 +494,7 @@ inline Tensor multilabel_soft_margin_loss(
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor triplet_margin_loss(
     const Tensor& anchor,
@@ -372,7 +516,19 @@ inline Tensor triplet_margin_loss(
       enumtype::reduction_get_enum(reduction));
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.triplet_margin_loss
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::TripletMarginLossFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::triplet_margin_loss(anchor, positive, negative, F::TripletMarginLossFuncOptions().margin(1.0));
+/// ```
 inline Tensor triplet_margin_loss(
     const Tensor& anchor,
     const Tensor& positive,
@@ -391,6 +547,7 @@ inline Tensor triplet_margin_loss(
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor ctc_loss(const Tensor& log_probs,
                        const Tensor& targets,
@@ -409,7 +566,19 @@ inline Tensor ctc_loss(const Tensor& log_probs,
     zero_infinity);
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.ctc_loss
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::CTCLossFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::ctc_loss(log_probs, targets, input_lengths, target_lengths, F::CTCLossFuncOptions().reduction(torch::kNone));
+/// ```
 inline Tensor ctc_loss(const Tensor& log_probs,
                        const Tensor& targets,
                        const Tensor& input_lengths,
@@ -427,6 +596,7 @@ inline Tensor ctc_loss(const Tensor& log_probs,
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor poisson_nll_loss(const Tensor& input,
                                const Tensor& target,
@@ -439,7 +609,19 @@ inline Tensor poisson_nll_loss(const Tensor& input,
     log_input, full, eps, enumtype::reduction_get_enum(reduction));
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.poisson_nll_loss
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::PoissonNLLLossFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::poisson_nll_loss(input, target, F::PoissonNLLLossFuncOptions().reduction(torch::kNone));
+/// ```
 inline Tensor poisson_nll_loss(const Tensor& input, const Tensor& target,
                                const PoissonNLLLossFuncOptions& options = {}) {
   return detail::poisson_nll_loss(
@@ -449,6 +631,7 @@ inline Tensor poisson_nll_loss(const Tensor& input, const Tensor& target,
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor margin_ranking_loss(const Tensor& input1,
                                   const Tensor& input2,
@@ -464,7 +647,19 @@ inline Tensor margin_ranking_loss(const Tensor& input1,
     enumtype::reduction_get_enum(reduction));
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.margin_ranking_loss
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::MarginRankingLossFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::margin_ranking_loss(input1, input2, target, F::MarginRankingLossFuncOptions().margin(0.5).reduction(torch::kSum));
+/// ```
 inline Tensor margin_ranking_loss(const Tensor& input1, const Tensor& input2,
   const Tensor& target, const MarginRankingLossFuncOptions& options = {}) {
   return detail::margin_ranking_loss(input1, input2, target, options.margin(), options.reduction());
@@ -472,6 +667,7 @@ inline Tensor margin_ranking_loss(const Tensor& input1, const Tensor& input2,
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor nll_loss(
     const Tensor& input,
@@ -537,11 +733,23 @@ inline Tensor nll_loss(
   return ret;
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.nll_loss
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::NLLLossFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::nll_loss(input, target, F::NLLLossFuncOptions().ignore_index(-100).reduction(torch::kMean));
+/// ```
 inline Tensor nll_loss(
     const Tensor& input,
     const Tensor& target,
-    const NLLLossOptions& options = {}) {
+    const NLLLossFuncOptions& options = {}) {
   return detail::nll_loss(
     input,
     target,
@@ -552,6 +760,7 @@ inline Tensor nll_loss(
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor cross_entropy(
     const Tensor& input,
@@ -580,7 +789,19 @@ inline Tensor cross_entropy(
     reduction_);
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.cross_entropy
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::CrossEntropyFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::cross_entropy(input, target, F::CrossEntropyFuncOptions().ignore_index(-100).reduction(torch::kMean));
+/// ```
 inline Tensor cross_entropy(
     const Tensor& input,
     const Tensor& target,
@@ -595,10 +816,11 @@ inline Tensor cross_entropy(
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor binary_cross_entropy_with_logits(
   const Tensor& input, const Tensor& target, const Tensor& weight,
-  BCEWithLogitsLossOptions::reduction_t reduction, const Tensor& pos_weight) {
+  BinaryCrossEntropyWithLogitsFuncOptions::reduction_t reduction, const Tensor& pos_weight) {
 
   TORCH_CHECK(target.sizes() == input.sizes(),
     "Target size (", target.sizes(),
@@ -610,7 +832,19 @@ inline Tensor binary_cross_entropy_with_logits(
     weight, pos_weight, enumtype::reduction_get_enum(reduction));
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.binary_cross_entropy_with_logits
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::BinaryCrossEntropyWithLogitsFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::binary_cross_entropy_with_logits(input, target, F::BinaryCrossEntropyWithLogitsFuncOptions().pos_weight(pos_weight).reduction(torch::kSum));
+/// ```
 inline Tensor binary_cross_entropy_with_logits(
   const Tensor& input, const Tensor& target,
   const BinaryCrossEntropyWithLogitsFuncOptions& options = {}) {

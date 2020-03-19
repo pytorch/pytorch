@@ -167,7 +167,7 @@ int createTensorFromList(Stack& stack) {
 
     if (dtype.isNone() && tensor.scalar_type() != default_type &&
         tensor.numel() == 0) {
-      AT_WARN(
+      TORCH_WARN(
           "Creating a tensor from an empty ",
           elem_type->python_str(),
           "list will create a tensor of default floating point type  (currently ",
