@@ -2,9 +2,9 @@
 
 #ifdef USE_XNNPACK
 
-#include <ATen/Tensor.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/native/xnnpack/Common.h>
+#include <ATen/Tensor.h>
 
 namespace at {
 namespace native {

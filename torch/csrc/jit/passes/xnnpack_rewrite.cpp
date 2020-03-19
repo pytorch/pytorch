@@ -68,14 +68,12 @@ void insertPrePackedConv2dOp(std::shared_ptr<Graph>& graph) {
   graph_rewrite_helper::replaceConvolutionWithConv2d(graph);
 
   std::string conv_2d_pattern = R"(
-    graph(%input, %weight, %bias,
-        %stride:int[], %padding:int[], %dilation:int[], %groups:int):
+    graph(%input, %weight, %bias, %stride:int[], %padding:int[], %dilation:int[], %groups:int):
         %r = aten::conv2d(%input, %weight, %bias, %stride, %padding, %dilation, %groups)
         return (%r) )";
 
   std::string prepacked_ops_conv2d_pattern = R"(
-    graph(%input, %weight, %bias,
-        %stride:int[], %padding:int[], %dilation:int[], %groups:int):
+    graph(%input, %weight, %bias, %stride:int[], %padding:int[], %dilation:int[], %groups:int):
         %output_min_max : None = prim::Constant()
         %packed_weight_bias = prepacked::conv2d_clamp_prepack(
             %weight, %bias, %stride, %padding, %dilation, %groups,
@@ -84,8 +82,7 @@ void insertPrePackedConv2dOp(std::shared_ptr<Graph>& graph) {
         return (%r) )";
 
   SubgraphRewriter rewriter;
-  rewriter.RegisterRewritePattern(
-      conv_2d_pattern, prepacked_ops_conv2d_pattern);
+  rewriter.RegisterRewritePattern(conv_2d_pattern, prepacked_ops_conv2d_pattern);
   rewriter.runOnGraph(graph);
 }
 

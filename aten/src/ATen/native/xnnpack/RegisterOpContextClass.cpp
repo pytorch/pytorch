@@ -1,10 +1,10 @@
 #ifdef USE_XNNPACK
 
-#include <ATen/Tensor.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/native/xnnpack/Convolution.h>
 #include <ATen/native/xnnpack/Linear.h>
 #include <ATen/native/xnnpack/OpContext.h>
+#include <ATen/Tensor.h>
 #include <torch/custom_class.h>
 
 namespace at {
@@ -62,45 +62,42 @@ static auto conv2d_op_context_class = register_packed_conv2d_op_context_class();
 
 // Op registeration
 static auto registry =
-    // Registering under _xnnpack namespace for now. As we add more backend
-    // requiring similar functionality We can refactor the code and use a better
-    // namespace.
+  // Registering under _xnnpack namespace for now. As we add more backend requiring similar functionality
+  // We can refactor the code and use a better namespace.
     torch::RegisterOperators()
         .op("prepacked::linear_clamp_prepack(Tensor W, Tensor? B=None, "
             "float? output_min=None, float? output_max=None) "
             "-> __torch__.torch.classes.LinearOpContext",
             torch::RegisterOperators::options()
-                .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
-                .kernel<decltype(createLinearClampPrePackOpContext),
-                    createLinearClampPrePackOpContext>(
-                        DispatchKey::CPUTensorId))
+            .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
+            .kernel<decltype(createLinearClampPrePackOpContext),
+                createLinearClampPrePackOpContext>(
+                    DispatchKey::CPUTensorId))
         .op("prepacked::linear_clamp_run(Tensor X,"
             " __torch__.torch.classes.LinearOpContext W_prepack) -> Tensor Y",
             torch::RegisterOperators::options()
-                .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
-                .kernel<internal::linear::LinearClampRun>(
-                    DispatchKey::CPUTensorId))
+            .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
+            .kernel<internal::linear::LinearClampRun>(
+                DispatchKey::CPUTensorId))
         .op("prepacked::conv2d_clamp_prepack(Tensor W, Tensor? B, int[2] stride, "
             "int[2] padding, int[2] dilation, int groups, "
             "float? output_min=None, float? output_max=None) "
             "-> __torch__.torch.classes.Conv2dOpContext",
             torch::RegisterOperators::options()
-                .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
-                .kernel<decltype(createConv2dClampPrePackOpContext),
-                    createConv2dClampPrePackOpContext>(
-                    DispatchKey::CPUTensorId))
+            .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
+            .kernel<decltype(createConv2dClampPrePackOpContext),
+                createConv2dClampPrePackOpContext>(
+                DispatchKey::CPUTensorId))
         .op("prepacked::conv2d_clamp_run(Tensor X, "
             "__torch__.torch.classes.Conv2dOpContext W_prepack) -> Tensor Y",
             torch::RegisterOperators::options()
-                .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
-                .kernel<internal::convolution2d::Conv2dClampRun>(
-                    DispatchKey::CPUTensorId));
+            .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
+            .kernel<internal::convolution2d::Conv2dClampRun>(
+                DispatchKey::CPUTensorId));
 } // namespace
 
 } // namespace xnnpack
 } // namespace native
 } // namespace at
-
-namespace {}
 
 #endif /* USE_XNNPACK */

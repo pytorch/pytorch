@@ -69,10 +69,10 @@ class TestXNNPACKOps(TestCase):
         strides = (stride_h, stride_w)
         paddings = (pad_h, pad_w)
         dilations = (dilation, dilation)
-        assume(height + 2 * paddings[0]
-               >= dilations[0] * (kernels[0] - 1) + 1)
-        assume(width + 2 * paddings[1]
-               >= dilations[1] * (kernels[1] - 1) + 1)
+        assume(height + 2 * paddings[0] >=
+               dilations[0] * (kernels[0] - 1) + 1)
+        assume(width + 2 * paddings[1] >=
+               dilations[1] * (kernels[1] - 1) + 1)
 
         input_data = torch.rand((batch_size, input_channels, height, width))
         weight = torch.rand((output_channels, input_channels_per_group, kernel_h, kernel_w))
@@ -199,10 +199,10 @@ class TestXNNPACKSerDes(TestCase):
         strides = (stride_h, stride_w)
         paddings = (pad_h, pad_w)
         dilations = (dilation, dilation)
-        assume(height + 2 * paddings[0]
-               >= dilations[0] * (kernels[0] - 1) + 1)
-        assume(width + 2 * paddings[1]
-               >= dilations[1] * (kernels[1] - 1) + 1)
+        assume(height + 2 * paddings[0] >=
+               dilations[0] * (kernels[0] - 1) + 1)
+        assume(width + 2 * paddings[1] >=
+               dilations[1] * (kernels[1] - 1) + 1)
 
         input_data = torch.rand((batch_size, input_channels, height, width))
         weight = torch.rand((output_channels, input_channels_per_group, kernel_h, kernel_w))
@@ -305,10 +305,10 @@ class TestXNNPACKSerDes(TestCase):
         strides = (stride_h, stride_w)
         paddings = (pad_h, pad_w)
         dilations = (dilation, dilation)
-        assume(height + 2 * paddings[0]
-               >= dilations[0] * (kernels[0] - 1) + 1)
-        assume(width + 2 * paddings[1]
-               >= dilations[1] * (kernels[1] - 1) + 1)
+        assume(height + 2 * paddings[0] >=
+               dilations[0] * (kernels[0] - 1) + 1)
+        assume(width + 2 * paddings[1] >=
+               dilations[1] * (kernels[1] - 1) + 1)
 
         input_data = torch.rand((batch_size, input_channels, height, width))
         conv_weight = torch.rand((output_channels, input_channels_per_group, kernel_h, kernel_w))
