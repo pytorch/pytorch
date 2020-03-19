@@ -811,6 +811,7 @@ class TestCase(expecttest.TestCase):
         return (max(a_tol[0], b_tol[0]), max(a_tol[1], b_tol[1]))
 
     def assertEqual(self, x, y, message='', **kwargs):
+        self.assertIsNone(kwargs.get('prec', None), 'prec is no longer supported. Use atol or rtol.')
         rtol = kwargs.get('rtol', None)
         atol = kwargs.get('atol', None)
         allow_inf = kwargs.get('allow_inf', False)

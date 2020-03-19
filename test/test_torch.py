@@ -13693,7 +13693,7 @@ class TestTorchDeviceType(TestCase):
                 self.assertEqual(qform(B, X[:, :k]), I)
 
                 # Check block equation
-                self.assertEqual(qform(A, X[:, :k]) / E[:k], I, prec=0.2)
+                self.assertEqual(qform(A, X[:, :k]) / E[:k], I, atol=0.2)
 
         orig_lobpcg = lobpcg
 
@@ -13726,7 +13726,7 @@ class TestTorchDeviceType(TestCase):
                 E, V = lobpcg(A, k=k, n=n, largest=False)
                 self.assertEqual(E.shape, batches + (k,))
                 self.assertEqual(V.shape, batches + (m, k))
-                self.assertEqual(matmul(A, V), mm(V, E.diag_embed()), prec=prec)
+                self.assertEqual(matmul(A, V), mm(V, E.diag_embed()), atol=prec)
                 e = torch.symeig(A)[0]
                 e_smallest = e[..., :k]
                 self.assertEqual(E, e_smallest)
@@ -13734,17 +13734,17 @@ class TestTorchDeviceType(TestCase):
                 # classical eigenvalue problem, largest eigenvalues
                 E, V = lobpcg(A, k=k, n=n, largest=True)
                 e_largest, _ = torch.sort(e[..., -k:], descending=True)
-                self.assertEqual(E, e_largest, prec=prec)
-                self.assertEqual(matmul(A, V), mm(V, E.diag_embed()), prec=prec)
+                self.assertEqual(E, e_largest, atol=prec)
+                self.assertEqual(matmul(A, V), mm(V, E.diag_embed()), atol=prec)
 
                 # generalized eigenvalue problem, smallest eigenvalues
                 E, V = lobpcg(A, B=B, k=k, n=n, largest=False)
-                self.assertEqual(matmul(A, V), mm(matmul(B, V), E.diag_embed()), prec=prec)
+                self.assertEqual(matmul(A, V), mm(matmul(B, V), E.diag_embed()), atol=prec)
 
                 # generalized eigenvalue problem, largest eigenvalues
                 E, V = lobpcg(A, B=B, k=k, n=n, largest=True)
                 self.assertEqual(matmul(A, V) / E.max(), mm(matmul(B, V), (E / E.max()).diag_embed()),
-                                 prec=prec)
+                                 atol=prec)
 
         # check sparse input
         for m, n, k, density in [
@@ -13766,21 +13766,21 @@ class TestTorchDeviceType(TestCase):
             # classical eigenvalue problem, smallest eigenvalues
             E, V = lobpcg(A, k=k, n=n, largest=False)
             self.assertEqual(E, e_smallest)
-            self.assertEqual(matmul(A, V), mm(V, E.diag_embed()), prec=prec)
+            self.assertEqual(matmul(A, V), mm(V, E.diag_embed()), atol=prec)
 
             # classical eigenvalue problem, largest eigenvalues
             E, V = lobpcg(A, k=k, n=n, largest=True)
-            self.assertEqual(matmul(A, V), mm(V, E.diag_embed()), prec=prec)
+            self.assertEqual(matmul(A, V), mm(V, E.diag_embed()), atol=prec)
             self.assertEqual(E, e_largest)
 
             # generalized eigenvalue problem, smallest eigenvalues
             E, V = lobpcg(A, B=B, k=k, n=n, largest=False)
-            self.assertEqual(matmul(A, V), matmul(B, mm(V, E.diag_embed())), prec=prec)
+            self.assertEqual(matmul(A, V), matmul(B, mm(V, E.diag_embed())), atol=prec)
 
             # generalized eigenvalue problem, largest eigenvalues
             E, V = lobpcg(A, B=B, k=k, n=n, largest=True)
             self.assertEqual(matmul(A, V) / E.max(), mm(matmul(B, V), (E / E.max()).diag_embed()),
-                             prec=prec)
+                             atol=prec)
 
     @skipCPUIfNoLapack
     @onlyCPU
@@ -14598,7 +14598,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             self.assertEqual(torch.baddbmm(1, res2, 0, b1, b2), res2)
 
         res4 = torch.baddbmm(res2, b1, b2, beta=1, alpha=.5)
-        self.assertEqual(res4, res * 3, prec=2e-5)
+        self.assertEqual(res4, res * 3, atol=2e-5)
 
         res5 = torch.baddbmm(res2, b1, b2, beta=0, alpha=1)
         self.assertEqual(res5, res)
@@ -15302,7 +15302,7 @@ class TestDevicePrecision(TestCase):
         index = index.to(device=device)
         out_gpu = inp_tensor.index_add(0, index, t)
 
-        self.assertEqual(out_cpu, out_gpu, prec=1e-2)
+        self.assertEqual(out_cpu, out_gpu, atol=1e-2)
 
     @skipCUDAIfRocm
     @dtypes(torch.double)
