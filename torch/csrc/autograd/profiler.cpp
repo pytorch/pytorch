@@ -63,7 +63,7 @@ bool profilerEnabled() {
   return state != ProfilerState::Disabled;
 }
 
-void pushRangeImpl(
+void pushRange(
     const StringView& name,
     const char* msg = "",
     int64_t sequence_nr = -1,
@@ -151,9 +151,9 @@ void enableProfiler(ProfilerConfig config) {
               inputSizes.emplace_back();
             }
           }
-          pushRangeImpl(fn.name(), msg, fn.seqNr(), std::move(inputSizes));
+          pushRange(fn.name(), msg, fn.seqNr(), std::move(inputSizes));
         } else {
-          pushRangeImpl(fn.name(), msg, fn.seqNr(), {});
+          pushRange(fn.name(), msg, fn.seqNr(), {});
         }
       },
       [](const RecordFunction& fn) {
