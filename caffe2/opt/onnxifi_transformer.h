@@ -113,6 +113,12 @@ class CAFFE2_API OnnxifiTransformer final : public BackendTransformerBase {
       const ShapeInfoMap& shape_hints,
       std::unordered_set<int>* blacklisted_ops) const;
 
+  // For net with partitioning info, blacklist ops that are supposed to run on
+  // CPU, whose partition info will contain empty device_id list.
+  void blacklistCpuPartition(
+      const NetDef& net,
+      std::unordered_set<int>* blacklisted_ops) const;
+
   // Rule based filtering
   void applyFilteringRules(
       const NetDef& net,

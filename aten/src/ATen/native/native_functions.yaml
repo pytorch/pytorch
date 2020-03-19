@@ -3619,12 +3619,12 @@
 - func: to_mkldnn_backward(Tensor grad, Tensor input) -> Tensor
   use_c10_dispatcher: full
 
-- func: quantize_per_tensor(Tensor self, float scale, int zero_point, ScalarType dtype) -> Tensor
+- func: quantize_per_tensor(Tensor(a) self, float scale, int zero_point, ScalarType dtype) -> Tensor(a)
   variants: function
   dispatch:
     CPU: quantize_per_tensor_cpu
 
-- func: quantize_per_channel(Tensor self, Tensor scales, Tensor zero_points, int axis, ScalarType dtype) -> Tensor
+- func: quantize_per_channel(Tensor(a) self, Tensor scales, Tensor zero_points, int axis, ScalarType dtype) -> Tensor(a)
   variants: function
   dispatch:
     CPU: quantize_per_channel_cpu
@@ -5620,6 +5620,9 @@
 - func: hardsigmoid(Tensor self) -> Tensor
   use_c10_dispatcher: full
   python_module: nn
+  dispatch:
+    CPU: hardsigmoid
+    QuantizedCPU: quantized_hardsigmoid
 
 - func: hardsigmoid_(Tensor(a!) self) -> Tensor(a!)
   python_module: nn
