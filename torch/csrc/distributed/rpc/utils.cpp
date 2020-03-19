@@ -2,6 +2,8 @@
 
 #include <torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_req.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_resp.h>
+#include <torch/csrc/distributed/autograd/rpc_messages/dist_autograd_failure_req.h>
+#include <torch/csrc/distributed/autograd/rpc_messages/dist_autograd_failure_resp.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/propagate_gradients_req.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/propagate_gradients_resp.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
@@ -58,6 +60,9 @@ std::unique_ptr<RpcCommandBase> deserializeRequest(const Message& request) {
     case MessageType::CLEANUP_AUTOGRAD_CONTEXT_REQ: {
       return autograd::CleanupAutogradContextReq::fromMessage(request);
     }
+    case MessageType::DIST_AUTOGRAD_FAILURE_REQ: {
+      return autograd::DistAutogradFailureReq::fromMessage(request);
+    }
     default: {
       TORCH_INTERNAL_ASSERT(
           false, "Request type ", request.type(), " not supported.");
@@ -108,6 +113,9 @@ std::unique_ptr<RpcCommandBase> deserializeResponse(
     }
     case MessageType::CLEANUP_AUTOGRAD_CONTEXT_RESP: {
       return autograd::CleanupAutogradContextResp::fromMessage(response);
+    }
+    case MessageType::DIST_AUTOGRAD_FAILURE_RESP: {
+      return autograd::DistAutogradFailureResp::fromMessage(response);
     }
     default: {
       TORCH_INTERNAL_ASSERT(
@@ -220,6 +228,9 @@ c10::List<at::Tensor> cloneSparseTensors(
   // force a clone(). Some Tensors are effectively small views, only using
   // ~1% of the underlying Storage.
   auto worthRecopying = [](const at::Tensor& t) -> bool {
+    if (!t.has_storage()) {
+      return false; // avoid throwing below.
+    }
     auto storageSize = t.storage().elementSize() * t.storage().numel();
     auto usefulSize = t.element_size() * t.numel();
     constexpr size_t kMinMultiple = 2;
@@ -238,6 +249,15 @@ c10::List<at::Tensor> cloneSparseTensors(
 std::string wireSerialize(
     const std::vector<char>& payload,
     const std::vector<at::Tensor>& tensors) {
+  for (const auto& tensor : tensors) {
+    TORCH_CHECK(
+        tensor.device().is_cpu(),
+        "ProcessGroup RPC backend only supports",
+        " CPU tensors, please move your tensors to CPU before sending ",
+        "them over RPC. Found tensor on device: ",
+        tensor.device());
+  }
+
   struct Ent {
     std::string name;
     const char* data;

@@ -242,6 +242,7 @@ PYBIND11_MODULE(dnnlowp_pybind11, m) {
       });
 
   pybind11::class_<dnnlowp::TensorQuantizationParams>(m, "QueryTensorQparam")
+      .def(pybind11::init<float, std::int32_t, int>())
       .def_property_readonly(
           "scale",
           [](dnnlowp::TensorQuantizationParams& qparam) {
@@ -251,6 +252,11 @@ PYBIND11_MODULE(dnnlowp_pybind11, m) {
           "zero_point",
           [](dnnlowp::TensorQuantizationParams& qparam) {
             return qparam.zero_point;
+          })
+      .def_property_readonly(
+          "precision",
+          [](dnnlowp::TensorQuantizationParams& qparam) {
+            return qparam.precision;
           })
       .def_property_readonly(
           "min",
