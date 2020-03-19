@@ -1148,11 +1148,30 @@ void OnnxifiTransformer::tieGatherAndSparseLengthsWeightedSumOps(
   }
 }
 
+void OnnxifiTransformer::blacklistCpuPartition(
+    const NetDef& net,
+    std::unordered_set<int>* blacklisted_ops) const {
+  std::unordered_set<std::string> cpu_partitions;
+  for (const auto& p : partition_infos_) {
+    if (p.device_id_size() == 0) {
+      cpu_partitions.emplace(p.name());
+    }
+  }
+  for (const auto& op : net.op()) {
+    const auto& pname = op.device_option().node_name();
+    if (cpu_partitions.count(pname)) {
+      blacklisted_ops->emplace(
+          ArgumentHelper::GetSingleArgument<OperatorDef, int>(op, kNetPos, -1));
+    }
+  }
+}
+
 void OnnxifiTransformer::applyFilteringRules(
     const NetDef& net,
     const ShapeInfoMap& shape_hints,
     std::unordered_set<int>* blacklisted_ops) const {
   tieGatherAndSparseLengthsWeightedSumOps(net, shape_hints, blacklisted_ops);
+  blacklistCpuPartition(net, blacklisted_ops);
 }
 
 void OnnxifiTransformer::getBackendId() {
