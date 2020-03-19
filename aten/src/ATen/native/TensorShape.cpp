@@ -375,10 +375,15 @@ static Tensor cat_sparse(TensorList tensors, int64_t dim) {
 }
 
 Tensor cat(TensorList tensors, int64_t dim) {
+  for (size_t i = 0; i < tensors.size()-1; ++i) {
+    TORCH_CHECK(tensors[i].dtype() == tensors[i+1].dtype(), "cat expects all tensors to have the same dtype");
+  }
+
   if (tensors.size() > 0 &&
         tensors[0].is_sparse()) {
     return cat_sparse(tensors, dim);
   }
+
   check_cat_no_zero_dim(tensors);
   dim = legacy_cat_wrap_dim(dim, tensors);
   auto maybe_outnames = namedinference::compute_cat_outnames(tensors);

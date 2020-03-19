@@ -15195,6 +15195,12 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         self.assertRaisesRegex(TypeError, 'got None', lambda: torch.cat([x, None]))
 
     @onlyCPU
+    def test_cat_different_dtypes(self, device):
+        x = torch.tensor(0, device=device, dtype=torch.int8)
+        y = torch.tensor(0, device=device, dtype=torch.int32)
+        self.assertRaisesRegex(RuntimeError, 'same dtype', lambda: torch.cat([x, y]))
+
+    @onlyCPU
     def test_cat_scalars(self, device):
         x = torch.tensor(0, device=device)
         y = torch.tensor(1, device=device)
