@@ -1963,8 +1963,12 @@ struct CAFFE2_API AnyClassType : public Type {
   bool operator==(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
-  std::string str() const override {
+  std::string python_str() const override {
     return "Class Type";
+  }
+
+  std::string str() const override {
+    return "AnyClassType";
   }
   static const TypeKind Kind = TypeKind::AnyClassType;
   // global singleton
