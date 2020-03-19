@@ -127,7 +127,7 @@ void insertPrePackedOps(script::Module& module) {
       "XNNPACK is not enabled. Please build with USE_XNNPACK=1");
 }
 
-void FoldXNNPACKPrePackingOps(script::Module& m) {
+void FoldPrePackingOps(script::Module& m) {
   TORCH_INTERNAL_ASSERT(
       "XNNPACK is not enabled. Please build with USE_XNNPACK=1");
 }
