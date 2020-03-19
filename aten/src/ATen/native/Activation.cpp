@@ -21,6 +21,8 @@ DEFINE_DISPATCH(log_sigmoid_cpu_stub);
 DEFINE_DISPATCH(log_sigmoid_backward_cpu_stub);
 DEFINE_DISPATCH(threshold_stub);
 DEFINE_DISPATCH(hardtanh_backward_stub);
+DEFINE_DISPATCH(hardsigmoid_stub);
+DEFINE_DISPATCH(hardsigmoid_backward_stub);
 DEFINE_DISPATCH(hardshrink_stub);
 DEFINE_DISPATCH(softshrink_stub);
 DEFINE_DISPATCH(shrink_backward_stub);
@@ -50,6 +52,33 @@ Tensor hardtanh_backward(const Tensor& grad_output, const Tensor& self, Scalar m
   Tensor result;
   auto iter = TensorIterator::binary_op(result, grad_output, self);
   hardtanh_backward_stub(iter.device_type(), iter, min, max);
+  return iter.output();
+}
+
+Tensor hardsigmoid(const Tensor& self) {
+  Tensor result;
+  auto iter = TensorIterator::unary_op(result, self);
+  hardsigmoid_stub(iter.device_type(), iter);
+  return iter.output();
+}
+
+Tensor& hardsigmoid_out(Tensor& result, const Tensor& self) {
+  auto iter = TensorIterator::unary_op(result, self);
+  hardsigmoid_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor& hardsigmoid_(Tensor& self) {
+  Tensor result;
+  auto iter = TensorIterator::unary_op(self, self);
+  hardsigmoid_stub(iter.device_type(), iter);
+  return self;
+}
+
+Tensor hardsigmoid_backward(const Tensor& grad_output, const Tensor& self) {
+  Tensor result;
+  auto iter = TensorIterator::binary_op(result, grad_output, self);
+  hardsigmoid_backward_stub(iter.device_type(), iter);
   return iter.output();
 }
 

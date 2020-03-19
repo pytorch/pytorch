@@ -277,6 +277,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: float
    .. automethod:: floor
    .. automethod:: floor_
+   .. automethod:: floor_divide
+   .. automethod:: floor_divide_
    .. automethod:: fmod
    .. automethod:: fmod_
    .. automethod:: frac
