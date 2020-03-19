@@ -14,7 +14,9 @@ class ThreadLocalState {
 
  private:
   bool grad_mode_enabled_;
+#ifdef USE_DISTRIBUTED
   int64_t dist_autograd_context_id_;
+#endif
 };
 
 // Guard to set and reset the appropriate thread local state for JIT
