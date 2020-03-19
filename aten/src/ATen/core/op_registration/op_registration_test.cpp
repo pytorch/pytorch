@@ -1310,21 +1310,6 @@ TEST(NewOperatorRegistrationTest, testBasics) {
   ASSERT_TRUE(Dispatcher::singleton().findSchema({"_test::dummy5", ""}).has_value());
 }
 
-// CppFunction
-//    function pointer
-//    lambda
-//    makeUnboxedOnly
-//    makeFallthrough
-//    makeFromBoxedFunction
-// dispatch(DispatchKey)
-// dispatch(DeviceType)
-// dispatch_autograd
-// Module::def(schema)
-// Module::def(schema, f)
-// Module::def(name, f)
-// Module::impl(name, f)
-// Module::Fallback
-
 TEST(NewOperatorRegistrationTest, importTopLevel) {
   auto registrar = c10::import()
     .def("test::def1(Tensor self) -> Tensor")
@@ -1384,9 +1369,6 @@ TEST(NewOperatorRegistrationTest, dispatch) {
     .def("fn_cuda", torch::dispatch(c10::kCUDA, [&](const Tensor& x) { cuda_called = true; return x; }))
     .def("fn_autograd", torch::dispatch_autograd([&](const Tensor& x) { autograd_called = true; return x; }));
 
-  // TODO: It would be better if we actually tested if the operator was
-  // called but it doesn't seem like it is actually possible to do so
-
   {
     auto op = Dispatcher::singleton().findSchema({"test::fn_cpu", ""});
     ASSERT_TRUE(op.has_value());
@@ -1398,9 +1380,51 @@ TEST(NewOperatorRegistrationTest, dispatch) {
   {
     auto op = Dispatcher::singleton().findSchema({"test::fn_cuda", ""});
     ASSERT_TRUE(op.has_value());
+    ASSERT_FALSE(cuda_called);
     callOp(*op, dummyTensor(c10::DispatchKey::CUDATensorId));
+    ASSERT_TRUE(cuda_called);
+  }
+
+  {
+    auto op = Dispatcher::singleton().findSchema({"test::fn_autograd", ""});
+    ASSERT_TRUE(op.has_value());
+    ASSERT_FALSE(autograd_called);
+    callOp(*op, dummyTensor(c10::DispatchKey::VariableTensorId));
+    ASSERT_TRUE(autograd_called);
   }
 }
+
+TEST(NewOperatorRegistrationTest, fallback) {
+  auto registrar = c10::import()
+    .fallback(torch::dispatch(c10::kCPU, c10::CppFunction::makeFromBoxedFunction<&backend_fallback_kernel>()));
+
+  auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy, str input) -> ()");
+  auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
+  ASSERT_TRUE(op.has_value());
+  auto stack = callOp(*op, dummyTensor(c10::DispatchKey::CPUTensorId), "hello ");
+  EXPECT_EQ("hello _test::dummy", stack[1].toString()->string());
+}
+
+Tensor dummy_fn(const Tensor& x) {
+  return x;
+}
+
+TEST(NewOperatorRegistrationTest, CppFunction) {
+  // Just show off the possible ways to register functions
+  auto registrar = c10::import("test")
+    .def("fn1", &dummy_fn)
+    .def("fn2", dummy_fn)
+    .def("fn3", [](const Tensor& x) { return x; })
+    // These require explicit schema
+    .def("fn4(Tensor x) -> Tensor", c10::CppFunction::makeFallthrough())
+    .def("fn5(Tensor x) -> Tensor", c10::CppFunction::makeUnboxedOnly(dummy_fn))
+    .def("fn6(Tensor x) -> Tensor", c10::CppFunction::makeFromBoxedFunction<&backend_fallback_kernel>());
+}
+
+// CppFunction
+//    makeUnboxedOnly
+//    makeFallthrough
+//    makeFromBoxedFunction
 
 // Some internal tests that have to be done from C++
 
