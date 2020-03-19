@@ -16,6 +16,8 @@
 #include <ATen/Dispatch.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 
+#include <THC/THCAtomics.cuh>
+
 #include <type_traits>
 #include <numeric>
 
@@ -279,7 +281,7 @@ std::tuple<Tensor, Tensor> ctc_loss_gpu_template(const Tensor& log_probs, const 
                       log_alpha.stride(0), log_alpha.stride(1), log_alpha.stride(2),
                       tg_batch_offsets.data_ptr<int64_t>(), tg_target_stride,
                       batch_size, BLANK);
-  THCudaCheck(cudaGetLastError()); // catch launch errors
+  AT_CUDA_CHECK(cudaGetLastError()); // catch launch errors
   return std::make_tuple(neg_log_likelihood, log_alpha);
 }
 
@@ -453,7 +455,7 @@ ctc_loss_backward_collect_nonblank_gpu_kernel(scalar_t* __restrict__ gradient_da
 
   for (int64_t t = 0; t < input_length; t++) {
     scalar_t lp = log_probs_data[lp_batch_offset + t * lp_input_stride + lp_char_stride * target];
-    atomicAdd(&gradient_data[gr_batch_offset + t * gr_input_stride + gr_char_stride * target],
+    gpuAtomicAdd(&gradient_data[gr_batch_offset + t * gr_input_stride + gr_char_stride * target],
               -std::exp(log_alpha_data[la_batch_offset + la_input_stride * t + la_target_stride * (s*2+1)]
                         + log_beta_data[lb_batch_offset + lb_input_stride * t + lb_target_stride * (s*2+1)]
                         + nll - lp) * gr);
@@ -631,7 +633,7 @@ Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_
        log_beta.stride(0), log_beta.stride(1), log_beta.stride(2),
        tg_batch_offsets.data_ptr<int64_t>(), tg_target_stride,
        batch_size, BLANK);
-    THCudaCheck(cudaGetLastError()); // catch launch errors
+    AT_CUDA_CHECK(cudaGetLastError()); // catch launch errors
   }
 
   // Very crude heuristic for what is a small problem., based on linearly regressing problem dimensions on
@@ -688,7 +690,7 @@ Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_
        log_beta.stride(0), log_beta.stride(1), log_beta.stride(2),
        tg_batch_offsets.data_ptr<int64_t>(), tg_target_stride,
        batch_size, num_labels, BLANK, zero_infinity);
-    THCudaCheck(cudaGetLastError()); // catch launch errors
+    AT_CUDA_CHECK(cudaGetLastError()); // catch launch errors
   } else { // small problem, use naive algorithm
     // Still no block/grid configuration guru...
     int threads_input = max_threads;
@@ -711,7 +713,7 @@ Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_
        log_beta.stride(0), log_beta.stride(1), log_beta.stride(2),
        tg_batch_offsets.data_ptr<int64_t>(), tg_target_stride,
        batch_size, num_labels, BLANK, zero_infinity);
-    THCudaCheck(cudaGetLastError()); // catch launch errors
+    AT_CUDA_CHECK(cudaGetLastError()); // catch launch errors
   }
 
   // zero those invalid graident elements due to padding
@@ -735,7 +737,7 @@ Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_
       grad.size(1),
       grad.size(2)
     );
-    THCudaCheck(cudaGetLastError());
+    AT_CUDA_CHECK(cudaGetLastError());
   }
 
   return grad;

@@ -6,6 +6,7 @@
 #include <ATen/core/ivalue.h>
 #include <ATen/core/alias_info.h>
 #include <ATen/core/operator_name.h>
+#include <ATen/core/dispatch/OperatorOptions.h>
 #include <unordered_map>
 
 namespace c10 {
@@ -69,6 +70,7 @@ struct Argument {
   bool is_inferred_type() const {
     return is_inferred_type_;
   }
+
   std::string formatTypeMismatchMsg(const std::string& actual_type) const {
     std::string inferred_type_hint;
     if (is_inferred_type()) {
@@ -184,10 +186,17 @@ struct FunctionSchema {
   std::vector<Argument> returns_;
   // if true then this schema takes an arbitrary number of additional arguments
   // after the argument specified in arguments
-  // currently this is used primarily to represent 'primtive' operators whose
+  // currently this is used primarily to represent 'primitive' operators whose
   // arguments are not checked by schema
   bool is_vararg_;
   bool is_varret_;
+
+  // if no alias information is directly specified, what kind of "default"
+  // alias information should we infer?
+  // NB: due to alias analysis kind merging, this may be nullopt.  Eventually
+  // this should always be set no matter what
+  c10::optional<AliasAnalysisKind> alias_kind_;
+
   void checkArg(const IValue& value, const Argument& argument, optional<size_t> pos) const;
 
   void checkSchema() const {
@@ -285,7 +294,7 @@ public:
       std::vector<IValue>& inputs,
       const std::unordered_map<std::string, IValue>& kwargs) const;
 
-  void findErrorInKwargs(const std::vector<std::string>& kwargs) const;
+  std::string findErrorInKwargs(const std::vector<std::string>& kwargs) const;
 
   bool hasAnyAliasInfo() const {
     for (const auto& arg : arguments_) {
@@ -299,6 +308,18 @@ public:
       }
     }
     return false;
+  }
+
+
+  // TODO remove the mutation here
+  bool isDefaultAliasAnalysisKind() const {
+    return !alias_kind_;
+  }
+  AliasAnalysisKind aliasAnalysis() const {
+    return alias_kind_.value_or(AliasAnalysisKind::CONSERVATIVE);
+  }
+  void setAliasAnalysis(AliasAnalysisKind v) {
+    alias_kind_ = v;
   }
 
   // can a function with this schema be substituted for a function of rhs's

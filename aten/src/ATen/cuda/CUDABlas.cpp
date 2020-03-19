@@ -5,11 +5,6 @@
 #include <ATen/cuda/CUDABlas.h>
 #include <ATen/cuda/Exceptions.h>
 
-// In CUDA 8.0, definition of data types for sgemmex changed
-#if CUDA_VERSION < 8000
-#define CUDA_R_16F CUBLAS_DATA_HALF
-#endif
-
 #define CUDABLAS_POSINT_CHECK(FD, X)         \
   TORCH_CHECK(                               \
       (X > 0 && X <= INT_MAX),               \
@@ -125,12 +120,10 @@ const char* _cublasGetErrorEnum(cublasStatus_t error) {
   if (error == CUBLAS_STATUS_INTERNAL_ERROR) {
     return "CUBLAS_STATUS_INTERNAL_ERROR";
   }
-#if CUDA_VERSION >= 6000
   if (error == CUBLAS_STATUS_NOT_SUPPORTED) {
     return "CUBLAS_STATUS_NOT_SUPPORTED";
   }
-#endif
-#if CUDA_VERSION >= 6050
+#ifdef CUBLAS_STATUS_LICENSE_ERROR
   if (error == CUBLAS_STATUS_LICENSE_ERROR) {
     return "CUBLAS_STATUS_LICENSE_ERROR";
   }
@@ -208,8 +201,6 @@ void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
       0,
       0));
 #else
-
-# if CUDA_VERSION >= 9000
   cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   if (prop->major >= 5) {
     TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_TENSOR_OP_MATH));
@@ -235,7 +226,6 @@ void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
         CUBLAS_GEMM_DFALT_TENSOR_OP));
     TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
   } else {
-# endif
     TORCH_CUDABLAS_CHECK(cublasSgemmEx(
         handle,
         opa,
@@ -254,9 +244,7 @@ void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
         c,
         CUDA_R_16F,
         ldc));
-# if CUDA_VERSION >= 9000
   }
-# endif
 #endif
 }
 

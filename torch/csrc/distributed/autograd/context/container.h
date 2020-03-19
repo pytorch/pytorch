@@ -13,7 +13,7 @@ namespace autograd {
 // autograd context for each autograd pass and also cleans up data for an
 // autograd pass once its done.
 //
-// Each autograd pass is assinged a unique autograd_context_id and all data for
+// Each autograd pass is assigned a unique autograd_context_id and all data for
 // that pass (DistAutogradContext) is stored in this container indexed by the
 // autograd_context_id. The autograd_context_id itself is a 64 bit globally
 // unique id. The first 16 bits is the worker_id and the next 48 bits is an
@@ -46,8 +46,15 @@ class TORCH_API DistAutogradContainer {
   // context. Does nothing if it is not present.
   void releaseContextIfPresent(int64_t context_id);
 
+  // Checks if the passed in context_id is valid.
+  void isValidContext(int64_t context_id);
+
   // Retrieve the autograd context for a given context_id.
   ContextPtr retrieveContext(int64_t context_id);
+
+  // Retrieve the autograd context for a given context_id if it exists,
+  // otherwise return nullptr.
+  ContextPtr retrieveContextIfPresent(int64_t context_id);
 
   // Retrieves the currently active autograd context for the current thread.
   ContextPtr currentContext();

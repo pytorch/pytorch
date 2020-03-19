@@ -1,3 +1,5 @@
+#include <limits>
+
 #include <THCUNN/THCUNN.h>
 #include <TH/THHalf.h>
 #include <THC/THCNumerics.cuh>
@@ -113,18 +115,24 @@ __global__ void cunn_SpatialClassNLLCriterion_updateOutput_kernel(
   acc_weight = reduceBlock(partial_sums, blockDim.x, acc_weight, thrust::plus<AccumT>(), AccumT(0));
 
   if (threadIdx.x == 0) {
-    atomicAdd(total_weight, ScalarConvert<AccumT, T>::to(acc_weight));
-    atomicAdd(output, ScalarConvert<AccumT, T>::to(input_sum));
+    gpuAtomicAdd(total_weight, ScalarConvert<AccumT, T>::to(acc_weight));
+    gpuAtomicAdd(output, ScalarConvert<AccumT, T>::to(input_sum));
   }
 }
 
 template<typename T>
 __global__ void cunn_SpatialClassNLLCriterion_sizeAverage_kernel(
           T *output,
-          T *total_weight)
+          T *total_weight,
+          int nElement)
 {
-  if (*total_weight > 0)
+  if (nElement == 0) {
+    // Mean reduction on empty tensors produces NaN
+    *output = std::numeric_limits<double>::quiet_NaN();
+  }
+  if (*total_weight != 0) {
     *output = THCNumerics<T>::div(*output, *total_weight);
+  }
 }
 
 template<typename T>
@@ -164,3 +172,6 @@ __global__ void cunn_SpatialClassNLLCriterion_updateGradInput_kernel(
 
 #include <THCUNN/generic/SpatialClassNLLCriterion.cu>
 #include <THC/THCGenerateFloatTypes.h>
+
+#include <THCUNN/generic/SpatialClassNLLCriterion.cu>
+#include <THC/THCGenerateBFloat16Type.h>

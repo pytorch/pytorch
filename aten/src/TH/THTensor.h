@@ -52,10 +52,6 @@
 #include <TH/generic/THTensorFill.h>
 #include <TH/THGenerateBFloat16Type.h>
 
-/* convolutions */
-#include <TH/generic/THTensorConv.h>
-#include <TH/THGenerateAllTypes.h>
-
 /* lapack support */
 #include <TH/generic/THTensorLapack.h>
 #include <TH/THGenerateFloatTypes.h>

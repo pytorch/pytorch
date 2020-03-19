@@ -12,9 +12,9 @@ from torch.testing import FileCheck
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from jit_utils import JitTestCase
-import jit_utils
-from common_utils import IS_SANDCASTLE
+from torch.testing._internal.jit_utils import JitTestCase
+import torch.testing._internal.jit_utils
+from torch.testing._internal.common_utils import IS_SANDCASTLE
 from typing import List
 
 if __name__ == '__main__':
@@ -261,7 +261,7 @@ class TestClassType(JitTestCase):
 
         # classes are globally registered for now, so we need to clear the JIT
         # registry to simulate loading a new model
-        jit_utils.clear_class_registry()
+        torch.testing._internal.jit_utils.clear_class_registry()
 
         buffer.seek(0)
         m_loaded = torch.jit.load(buffer)
@@ -302,7 +302,7 @@ class TestClassType(JitTestCase):
 
         # classes are globally registered for now, so we need to clear the JIT
         # registry to simulate loading a new model
-        jit_utils.clear_class_registry()
+        torch.testing._internal.jit_utils.clear_class_registry()
 
         buffer.seek(0)
         m_loaded = torch.jit.load(buffer)
@@ -430,6 +430,7 @@ class TestClassType(JitTestCase):
                 li = [NoMethod(), NoMethod()]
                 li.sort()
                 return li
+            test()
 
         @torch.jit.script
         class WrongLt(object):
@@ -446,6 +447,7 @@ class TestClassType(JitTestCase):
                 li = [WrongLt(), WrongLt()]
                 li.sort()
                 return li
+            test()
 
     def test_class_inheritance(self):
         @torch.jit.script
@@ -483,7 +485,7 @@ class TestClassType(JitTestCase):
 
         # classes are globally registered for now, so we need to clear the JIT
         # registry to simulate loading a new model
-        jit_utils.clear_class_registry()
+        torch.testing._internal.jit_utils.clear_class_registry()
 
         buffer.seek(0)
         m_loaded = torch.jit.load(buffer)
@@ -913,3 +915,29 @@ class TestClassType(JitTestCase):
             class Tree(object):  # noqa: B903
                 def __init__(self):
                     self.parent = torch.jit.annotate(Optional[Tree], None)
+
+    def test_class_constant(self):
+        class M(torch.nn.Module):
+            __constants__ = ["w"]
+
+            def __init__(self, w):
+                super(M, self).__init__()
+                self.w = w
+
+            def forward(self, x):
+                # Make sure class constant is accessible in method
+                y = self.w
+                return x, y
+
+        # Test serialization/deserialization of class constant
+        for c in (2, 1.0, None, True, 'str', (2, 3), [5.9, 7.3]):
+            m = torch.jit.script(M(c))
+            buffer = io.BytesIO()
+            torch.jit.save(m, buffer)
+
+            buffer.seek(0)
+            m_loaded = torch.jit.load(buffer)
+            input = torch.rand(2, 3)
+            self.assertEqual(m(input), m_loaded(input))
+            # Make sure class constant is accessible from module
+            self.assertEqual(m.w, m_loaded.w)

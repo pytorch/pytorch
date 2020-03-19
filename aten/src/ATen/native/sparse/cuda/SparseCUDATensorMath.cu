@@ -61,7 +61,7 @@ Tensor& s_addmm_out_sparse_dense_cuda(Tensor& r_, const Tensor& t, const SparseT
   TORCH_CHECK(cuda::check_device({sparse_, r_, t, dense}));
 
   TORCH_CHECK(dense.dim() == 2, "addmm: 2D tensor expected, got ", dense.dim(), "D tensor");
-  TORCH_CHECK(sparse_.sparse_dim() == 2, "addmm: expected first two dims to be sparse (indices has size 2 at first dim), but got ", sparse_.sparse_dim(), " spase dims");
+  TORCH_CHECK(sparse_.sparse_dim() == 2, "addmm: expected first two dims to be sparse (indices has size 2 at first dim), but got ", sparse_.sparse_dim(), " sparse dims");
   // no need to check dense_dim because dense_dim + sparse_dim = dim
 
   // mxk * kxn = mxn
@@ -330,13 +330,15 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, const SparseT
     if (sparse.dense_dim() == 0) {
       TORCH_CHECK(cuda::getApplyGrid(nnz, grid, curDevice), "add: Argument #0: tensor too large or too many dimensions");
 
-      AT_DISPATCH_ALL_TYPES_AND(
-        at::ScalarType::Half, commonDtype, "add_out_dense_sparse_cuda", [&] {
+      AT_DISPATCH_ALL_TYPES_AND2(
+        at::ScalarType::Half, at::ScalarType::BFloat16, commonDtype, "add_out_dense_sparse_cuda", [&] {
+          AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "add_out_dense_sparse_cuda", [&] {
             apply::sparseElementwiseKernelScalar<TensorCAddOp<scalar_t>, uint64_t, scalar_t>
               <<<grid, block, 0, stream>>>(
                 TensorCAddOp<scalar_t>(value.to<scalar_t>()),
                 V_INFO(r), I_INFO(indices), V_INFO(values),
                 static_cast<uint64_t>(nnz));
+            });
           });
     } else {
       TORCH_CHECK(cuda::getApplyGrid(nnz * block.x, grid, curDevice), "add: Argument #0: tensor too large or too many dimensions");
@@ -344,13 +346,15 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, const SparseT
       // sparseElementwiseKernel needs values to be contiguous too
       values = values.contiguous();
 
-      AT_DISPATCH_ALL_TYPES_AND(
-        at::ScalarType::Half, commonDtype, "add_out_dense_sparse_cuda", [&] {
+      AT_DISPATCH_ALL_TYPES_AND2(
+        at::ScalarType::Half, at::ScalarType::BFloat16, commonDtype, "add_out_dense_sparse_cuda", [&] {
+          AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "add_out_dense_sparse_cuda", [&] {
             apply::sparseElementwiseKernel<TensorCAddOp<scalar_t>, uint64_t, scalar_t>
               <<<grid, block, 0, stream>>>(
                 TensorCAddOp<scalar_t>(value.to<scalar_t>()),
                 V_INFO(r), I_INFO(indices), V_INFO(values),
                 static_cast<uint64_t>(nnz));
+            });
           });
     }
   } else {
@@ -359,12 +363,14 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, const SparseT
 
     // FIXME: at some point we can wrap the scale into indexAdd
     // NB: Purposely not inplace!
-    AT_DISPATCH_ALL_TYPES_AND(
-      at::ScalarType::Half, commonDtype, "add_out_dense_sparse_cuda", [&] {
+    AT_DISPATCH_ALL_TYPES_AND2(
+      at::ScalarType::Half, at::ScalarType::BFloat16, commonDtype, "add_out_dense_sparse_cuda", [&] {
+        AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "add_out_dense_sparse_cuda", [&] {
           if (value.to<scalar_t>() != static_cast<scalar_t>(1)) {
             values = values.mul(value);
           }
         });
+      });
 
     int64_t view_rows = 1;
     int64_t view_columns = 1;

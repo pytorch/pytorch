@@ -213,7 +213,7 @@ Disable JIT for Debugging
     Python. Since TorchScript (scripting and tracing) are disabled with this flag,
     you can use tools like ``pdb`` to debug the model code.
 
-    Given an example script::
+    Given an example 
 
         @torch.jit.script
         def scripted_fn(x : torch.Tensor):
@@ -749,7 +749,7 @@ Attributes
 The TorchScript compiler needs to know the types of `module attributes`_. Most types
 can be inferred from the value of the member. Empty lists and dicts cannot have their
 types inferred and must have their types annotated with `PEP 526-style <https://www.python.org/dev/peps/pep-0526/#class-and-instance-variable-annotations>`_ class annotations.
-If a type cannot be inferred and is not explicilty annotated, it will not be added as an attribute
+If a type cannot be inferred and is not explicitly annotated, it will not be added as an attribute
 to the resulting :class:`ScriptModule`
 
 

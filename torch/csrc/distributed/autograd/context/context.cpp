@@ -1,11 +1,15 @@
 #include <functional>
 
 #include <c10/util/Exception.h>
+#include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/distributed/autograd/context/context.h>
+#include <torch/csrc/distributed/autograd/rpc_messages/dist_autograd_failure_req.h>
 
 namespace torch {
 namespace distributed {
 namespace autograd {
+
+using torch::autograd::AccumulateGrad;
 
 DistAutogradContext::DistAutogradContext(int64_t contextId)
     : contextId_(contextId) {}
@@ -63,25 +67,48 @@ DistAutogradContext::recvFunctions() const {
 
 void DistAutogradContext::accumulateGrad(
     const torch::autograd::Variable& variable,
-    const torch::Tensor& grad) {
+    const torch::Tensor& grad,
+    size_t num_expected_refs) {
   TORCH_INTERNAL_ASSERT(grad.defined());
   TORCH_INTERNAL_ASSERT(variable.requires_grad());
 
   std::lock_guard<std::mutex> guard(lock_);
   auto it = accumulatedGrads_.find(variable);
+  at::Tensor old_grad;
   if (it != accumulatedGrads_.end()) {
     // Accumulate multiple grads on the same variable.
-    it->value().add_(grad);
-  } else {
-    // First grad for this variable.
-    accumulatedGrads_.insert(variable, grad);
+    old_grad = it->value();
   }
+
+  // No higher order gradients supported in distributed autograd.
+  AutoGradMode grad_mode(false);
+  // TODO: Need to bump 'num_expected_refs' here when we support post_hooks for
+  // distributed autograd as part of
+  // https://github.com/pytorch/pytorch/issues/33482
+  AccumulateGrad::accumulateGradAndCallHooks(
+      variable,
+      old_grad,
+      grad,
+      // Add +1 here since we can't std::move(grad) since it is a const ref,
+      // which incurs a refcount bump for the Tensor.
+      num_expected_refs + 1,
+      [this, &variable](at::Tensor&& grad_update) {
+        accumulatedGrads_.insert(variable, std::move(grad_update));
+      });
 }
 
 std::shared_ptr<torch::autograd::GraphTask> DistAutogradContext::
     retrieveGraphTask() {
   std::lock_guard<std::mutex> guard(lock_);
   TORCH_INTERNAL_ASSERT(graphTask_);
+  return graphTask_;
+}
+
+std::shared_ptr<torch::autograd::GraphTask> DistAutogradContext::
+    retrieveGraphTaskIfExists() {
+  // Similar to retrieveGraphTask() but does not throw an exception if
+  // GraphTask doesn't exist.
+  std::lock_guard<std::mutex> guard(lock_);
   return graphTask_;
 }
 
@@ -94,6 +121,11 @@ void DistAutogradContext::setGraphTask(
   graphTask_ = std::move(graphTask);
 }
 
+void DistAutogradContext::resetGraphTask() {
+  std::lock_guard<std::mutex> guard(lock_);
+  graphTask_ = nullptr;
+}
+
 void DistAutogradContext::addOutstandingRpc(
     const std::shared_ptr<rpc::FutureMessage>& futureMessage) {
   futureMessage->addCallback(
@@ -102,12 +134,16 @@ void DistAutogradContext::addOutstandingRpc(
           const c10::optional<utils::FutureError>& futErr) {
         if (futErr) {
           // If we have an error, let the local autograd engine know about it.
-          std::runtime_error err((*futErr).what());
-          graphTask_->set_exception(std::make_exception_ptr(err), nullptr);
+          setGraphTaskException((*futErr).what());
         }
       });
   std::lock_guard<std::mutex> guard(lock_);
   outStandingRpcs_.push_back(futureMessage);
+}
+
+void DistAutogradContext::clearOutstandingRpcs() {
+  std::unique_lock<std::mutex> lock(lock_);
+  outStandingRpcs_.clear();
 }
 
 std::shared_ptr<rpc::FutureMessage> DistAutogradContext::
@@ -121,23 +157,66 @@ std::shared_ptr<rpc::FutureMessage> DistAutogradContext::
         : future(std::make_shared<rpc::FutureMessage>()), remaining(count) {}
     std::shared_ptr<rpc::FutureMessage> future;
     std::atomic<int32_t> remaining;
+    std::atomic<bool> alreadySentError{false};
   };
   auto state = std::make_shared<State>(outStandingRpcs.size());
   if (outStandingRpcs.empty()) {
     state->future->markCompleted(rpc::Message());
   } else {
     for (auto& rpc : outStandingRpcs) {
-      rpc->addCallback(
-          [state](
-              const rpc::Message& /* unused */,
-              const c10::optional<utils::FutureError>& /* unused */) {
-            if (--state->remaining == 0) {
-              state->future->markCompleted(rpc::Message());
-            }
-          });
+      rpc->addCallback([state](
+                           const rpc::Message& /* unused */,
+                           const c10::optional<utils::FutureError>& err) {
+        if (err) {
+          // If there's an error, we want to setError() on the future, unless
+          // another error has already been sent - use a CAS to guard.
+          //
+          // Don't decrement num remaining here! (We don't need to, since memory
+          // handling is separate). If we simply don't decrement on errors,
+          // reaching 0 means that there were no errors - and hence, we can just
+          // markCompleted() without any other checking there.
+          bool expectedAlreadySent = false;
+          if (state->alreadySentError.compare_exchange_strong(
+                  expectedAlreadySent, true)) {
+            state->future->setError(err->what());
+          }
+          return;
+        }
+
+        if (--state->remaining == 0) {
+          state->future->markCompleted(rpc::Message());
+        }
+      });
     }
   }
   return state->future;
+}
+
+bool DistAutogradContext::setGraphTaskException(const std::string& errorMsg) {
+  std::unique_lock<std::mutex> lock(lock_);
+  if (graphTask_) {
+    if (graphTask_->has_error_) {
+      lock.unlock();
+      return true;
+    }
+    graphTask_->set_exception_without_signal(nullptr);
+    lock.unlock();
+    graphTask_->future_result_->setErrorIfNeeded(errorMsg);
+    return false;
+  } else {
+    LOG(WARNING) << "Ignoring error since GraphTask is no longer valid: "
+                 << errorMsg;
+    return true;
+  }
+}
+
+void DistAutogradContext::propagateAutogradError(const std::string& errorMsg) {
+  auto neighborNodes = getKnownWorkerIds();
+  auto agent = rpc::RpcAgent::getCurrentRpcAgent();
+  for (const auto& node : neighborNodes) {
+    DistAutogradFailureReq msg(contextId_, errorMsg);
+    agent->send(agent->getWorkerInfo(node), std::move(msg).toMessage());
+  }
 }
 
 std::shared_ptr<SendRpcBackward> DistAutogradContext::retrieveSendFunction(

@@ -57,7 +57,7 @@ def save_to_s3(project, data):
     # and later one we can config docker.pytorch.org to point to the location
 
     client.put_object(
-        Bucket="ossci-docker",
+        Bucket="docker.pytorch.org",
         ACL="public-read",
         Key="{project}.html".format(project=project),
         Body=html_body,

@@ -7,9 +7,6 @@
 namespace torch {
 namespace jit {
 
-using namespace torch::autograd;
-using namespace torch::jit::script;
-
 void testIValue() {
   c10::List<int64_t> foo({3, 4, 5});
   ASSERT_EQ(foo.use_count(), 1);
@@ -25,7 +22,7 @@ void testIValue() {
   ASSERT_TRUE(foo2.isDouble());
   ASSERT_EQ(foo2.toDouble(), 4.0);
   ASSERT_EQ(foo.use_count(), 2);
-  ASSERT_TRUE(baz.toIntListRef().equals({3, 4, 5}));
+  ASSERT_TRUE(baz.toIntVector() == std::vector<int64_t>({3, 4, 5}));
 
   auto move_it = std::move(baz).toIntList();
   ASSERT_EQ(foo.use_count(), 2);
@@ -35,13 +32,13 @@ void testIValue() {
   ASSERT_EQ(i.toInt(), 4);
   IValue dlist(c10::List<double>({3.5}));
   ASSERT_TRUE(dlist.isDoubleList());
-  ASSERT_TRUE(dlist.toDoubleListRef()
-                  .equals({3.5}));
+  ASSERT_TRUE(dlist.toDoubleVector() == std::vector<double>({3.5}));
   std::move(dlist).toDoubleList();
   ASSERT_TRUE(dlist.isNone());
   dlist = IValue(c10::List<double>({3.4}));
-  ASSERT_TRUE(dlist.toDoubleListRef().equals({3.4}));
-  IValue the_list(at::ivalue::Tuple::create({IValue(3.4), IValue(4), IValue(foo)}));
+  ASSERT_TRUE(dlist.toDoubleVector() == std::vector<double>({3.4}));
+  IValue the_list(
+      at::ivalue::Tuple::create({IValue(3.4), IValue(4), IValue(foo)}));
   ASSERT_EQ(foo.use_count(), 3);
   ASSERT_TRUE(the_list.isTuple());
   auto first = the_list.toTuple()->elements()[1];
@@ -90,6 +87,62 @@ void testIValue() {
     std::stringstream ss;
     ss << tp;
     ASSERT_EQ(ss.str(), "(3, 3)");
+  }
+}
+
+void testIValueFuture() {
+  // Basic set value
+  {
+    auto f1 = c10::make_intrusive<ivalue::Future>(IntType::get());
+    ASSERT_FALSE(f1->completed());
+
+    f1->markCompleted(IValue(42));
+    ASSERT_TRUE(f1->completed());
+    ASSERT_EQ(42, f1->value().toInt());
+    IValue iv(f1);
+    ASSERT_EQ(42, iv.toFuture()->value().toInt());
+  }
+
+  // Callbacks
+  {
+    auto f2 = c10::make_intrusive<ivalue::Future>(IntType::get());
+    int calledTimesA = 0;
+    int calledTimesB = 0;
+    f2->addCallback([f2, &calledTimesA]() {
+      ASSERT_TRUE(f2->completed());
+      ASSERT_EQ(f2->value().toInt(), 43);
+      ++calledTimesA;
+    });
+    f2->markCompleted(IValue(43));
+    ASSERT_EQ(calledTimesA, 1);
+    ASSERT_EQ(calledTimesB, 0);
+    // Post-markCompleted()
+    f2->addCallback([f2, &calledTimesB]() {
+      ASSERT_TRUE(f2->completed());
+      ASSERT_EQ(f2->value().toInt(), 43);
+      ++calledTimesB;
+    });
+    ASSERT_EQ(calledTimesA, 1);
+    ASSERT_EQ(calledTimesB, 1);
+  }
+
+  // Exceptions
+  {
+    auto f3 = c10::make_intrusive<ivalue::Future>(IntType::get());
+    int calledTimes = 0;
+    f3->addCallback([f3, &calledTimes]() {
+      ASSERT_TRUE(f3->completed());
+      try {
+        (void)f3->value();
+      } catch (const std::exception& e) {
+        if (std::string(e.what()) == "My Error") {
+          ++calledTimes;
+        }
+      }
+    });
+    ivalue::Future::FutureError err("My Error");
+    f3->markCompleted(std::move(err));
+    ASSERT_EQ(calledTimes, 1);
   }
 }
 

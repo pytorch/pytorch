@@ -59,8 +59,9 @@ DistAutogradContainer& DistAutogradContainer::getInstance() {
 }
 
 DistAutogradContainer& DistAutogradContainer::getInstanceInternal() {
-  static DistAutogradContainer container;
-  return container;
+  // Leaky singleton to avoid module destructor race.
+  static DistAutogradContainer* container = new DistAutogradContainer();
+  return *container;
 }
 
 int64_t DistAutogradContainer::newAutogradMessageId() {
@@ -159,11 +160,21 @@ void DistAutogradContainer::sendReleaseContextRpc(int64_t context_id) {
   // notify other workers to clean up their contexts.
   auto workerIds =
       autograd_context_.find(context_id)->second->getKnownWorkerIds();
-  auto agent = rpc::RpcAgent::getDefaultRpcAgent();
-  for (const auto& worker_id : workerIds) {
-    agent->send(
-        agent->getWorkerInfo(worker_id),
-        CleanupAutogradContextReq(context_id).toMessage());
+  // agent.send() or getCurrentRpcAgent may throw an error in the case of an
+  // ungraceful shutdown, where we are shutting down RPC and also processing
+  // this message in a separate thread concurrently. In this case, don't throw
+  // here.
+  try {
+    auto agent = rpc::RpcAgent::getCurrentRpcAgent();
+    for (const auto& worker_id : workerIds) {
+      agent->send(
+          agent->getWorkerInfo(worker_id),
+          CleanupAutogradContextReq(context_id).toMessage());
+    }
+  } catch (const std::exception& e) {
+    LOG(INFO)
+        << "Failed to send RPC to clear Dist Autograd context to some nodes: "
+        << e.what();
   }
 }
 
@@ -176,6 +187,14 @@ void DistAutogradContainer::eraseContextIdAndReset(int64_t context_id) {
   }
 }
 
+void DistAutogradContainer::isValidContext(int64_t context_id) {
+  std::lock_guard<std::mutex> guard(autograd_context_lock_);
+  TORCH_CHECK(
+      autograd_context_.find(context_id) != autograd_context_.end(),
+      "Could not find autograd context with id: ",
+      context_id);
+}
+
 ContextPtr DistAutogradContainer::retrieveContext(int64_t context_id) {
   std::lock_guard<std::mutex> guard(autograd_context_lock_);
   TORCH_CHECK(
@@ -183,6 +202,16 @@ ContextPtr DistAutogradContainer::retrieveContext(int64_t context_id) {
       "Could not find autograd context with id: ",
       context_id);
   return autograd_context_.at(context_id);
+}
+
+ContextPtr DistAutogradContainer::retrieveContextIfPresent(int64_t context_id) {
+  std::lock_guard<std::mutex> guard(autograd_context_lock_);
+  auto it = autograd_context_.find(context_id);
+  if (it != autograd_context_.end()) {
+    return it->second;
+  } else {
+    return nullptr;
+  }
 }
 
 int64_t DistAutogradContainer::getMaxId() {

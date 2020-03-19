@@ -3,6 +3,7 @@
 #include <caffe2/core/logging.h>
 #include <mutex>
 #include <random>
+#include <array>
 
 namespace caffe2 {
 
@@ -439,8 +440,7 @@ void VideoDecoder::decodeLoop(
     while ((!eof || gotPicture) &&
            /* either you must decode all frames or decode up to maxFrames
             * based on status of the mustDecodeAll flag */
-           (mustDecodeAll ||
-            ((!mustDecodeAll) && (selectiveDecodedFrames < maxFrames))) &&
+           (mustDecodeAll || (selectiveDecodedFrames < maxFrames)) &&
            /* If on the last interval and not autodecoding keyframes and a
             * SpecialFps indicates no more frames are needed, stop decoding */
            !((itvlIter == params.intervals_.end() &&

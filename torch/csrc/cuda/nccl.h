@@ -19,7 +19,7 @@ namespace nccl {
 // Don't use them outside of these files.
 namespace detail {
 
-void throw_nccl_error(ncclResult_t status);
+TORCH_CUDA_API void throw_nccl_error(ncclResult_t status);
 
 static inline void NCCL_CHECK(ncclResult_t status) {
   if (status != ncclSuccess) {

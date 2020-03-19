@@ -11,6 +11,7 @@
 #include <c10/util/Exception.h>
 #include <c10/util/C++17.h>
 #include <c10/core/Device.h>
+#include <c10/core/DispatchKeySet.h>
 
 /**
  * Note [Generator]
@@ -54,7 +55,7 @@ constexpr uint64_t default_rng_seed_val = 67280421310721;
 
 struct CAFFE2_API Generator {
   // Constructors
-  Generator(Device device_in);
+  Generator(Device device_in, DispatchKeySet key_set);
 
   // Delete all copy and move assignment in favor of clone()
   // method
@@ -74,8 +75,11 @@ struct CAFFE2_API Generator {
   // See Note [Acquire lock when using random generators]
   std::mutex mutex_;
 
+  DispatchKeySet key_set() const { return key_set_; }
+
   private:
     Device device_;
+    DispatchKeySet key_set_;
     virtual Generator* clone_impl() const = 0;
 };
 
