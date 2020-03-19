@@ -3,7 +3,6 @@ from torch.testing._internal.common_utils import TestCase, run_tests
 
 import itertools
 import unittest
-import warnings
 
 # TODO: Expand the dispatcher API to be a generic API for interfacing with
 # the dispatcher from Python!
