@@ -1758,24 +1758,66 @@ std::tuple<at::Tensor, at::Tensor> FoldConvBatchNorm2dHelper::
   return std::make_tuple(new_w, new_b);
 }
 
-c10::optional<IValue> extractIValueFromGraph(
-    const script::Module& m,
-    const std::string& aten_op_name,
-    const size_t input_index) {
-  auto graph = m.get_method("forward").graph();
+bool extractOptionalBNParams(
+    const script::Module& bn,
+    ConvBNParameters& r) {
+  auto graph = bn.get_method("forward").graph();
+  const PatternInfo& pattern_bn = PatternInfo::parse_from_str(R"(
+      graph(%a, %weight, %bias, %running_mean, %running_var,
+          %training, %momentum, %eps, %cudnn_enabled):
+        %bn_out = aten::batch_norm(%a, %weight, %bias, %running_mean,
+            %running_var, %training, %momentum, %eps, %cudnn_enabled)
+        return (%bn_out) )");
+  const Graph& pattern_bn_graph = *pattern_bn.pattern_graph;
+  const auto& bn_vmap = pattern_bn.vmap;
 
-  std::stack<Block*> blocks_to_visit;
-  blocks_to_visit.push(graph->block());
-  while (!blocks_to_visit.empty()) {
-    Block* b = blocks_to_visit.top();
-    blocks_to_visit.pop();
-    for (Node* n : b->nodes()) {
-      if (n->kind() == Symbol::aten(aten_op_name)) {
-        return toIValue(n->input(input_index));
-      }
+  const auto& matches = findPatternMatches(pattern_bn_graph, *graph);
+
+  if (matches.size() > 1) {
+    return false;
+  }
+
+  if (bn.hasattr("eps")) {
+    r.bn_eps = bn.attr("eps").toDouble();
+  } else {
+    auto optional_eps = toIValue(matches[0].values_map.at(bn_vmap.at("eps")));
+    if(!optional_eps) {
+      return false;
+    }
+    r.bn_eps = optional_eps.value().toDouble();
+  }
+  r.bn_w = at::ones_like(bn.attr("running_mean").toTensor());
+  if (bn.hasattr("weight")) {
+    if (bn.attr("weight").isTensor()) {
+      r.bn_w = bn.attr("weight").toTensor();
+    }
+  } else {
+    auto optional_bn_weight =
+      toIValue(matches[0].values_map.at(bn_vmap.at("weight")));
+    if (!optional_bn_weight) {
+      return false;
+    }
+    if (optional_bn_weight.value().isTensor()) {
+      r.bn_w = optional_bn_weight.value().toTensor();
     }
   }
-  return {};
+  r.bn_b = at::zeros_like(bn.attr("running_mean").toTensor());
+  if (bn.hasattr("bias")) {
+    if (bn.attr("bias").isTensor()) {
+      r.bn_b = bn.attr("bias").toTensor();
+    }
+  } else {
+    auto optional_bn_bias =
+      toIValue(matches[0].values_map.at(bn_vmap.at("bias")));
+    if (!optional_bn_bias) {
+      return false;
+    }
+
+    if (optional_bn_bias.value().isTensor()) {
+      r.bn_b = optional_bn_bias.value().toTensor();
+    }
+  }
+  return true;
 }
 
 bool FoldConvBatchNorm2dHelper::tryExtractingConvBNParameters(
@@ -1787,53 +1829,10 @@ bool FoldConvBatchNorm2dHelper::tryExtractingConvBNParameters(
     return false;
   }
 
-  static constexpr size_t bn_weight_index = 1;
-  static constexpr size_t bn_bias_index = 2;
-  static constexpr size_t bn_running_mean_index = 3;
-  static constexpr size_t bn_running_var_index  = 4;
-  static constexpr size_t bn_eps_index = 7;
-  static constexpr size_t conv_bias_index = 2;
-
-  std::string bn_op_name("batch_norm");
-
   r.bn_rm = bn.attr("running_mean").toTensor();
   r.bn_rv = bn.attr("running_var").toTensor();
-  if (bn.hasattr("eps")) {
-    r.bn_eps = bn.attr("eps").toDouble();
-  } else {
-    auto optional_eps = extractIValueFromGraph(bn, bn_op_name, bn_eps_index);
-    if (!optional_eps) {
-      return false;
-    }
-    r.bn_eps = optional_eps.value().toDouble();
-  }
-  r.bn_w = at::ones_like(r.bn_rm);
-  if (bn.hasattr("weight")) {
-    if (!bn.attr("weight").isNone()) {
-      r.bn_w = bn.attr("weight").toTensor();
-    }
-  } else {
-    auto optional_bn_weight = extractIValueFromGraph(bn, bn_op_name, bn_weight_index);
-    if (!optional_bn_weight) {
-      return false;
-    }
-    if (!optional_bn_weight.value().isNone()) {
-      r.bn_w = optional_bn_weight.value().toTensor();
-    }
-  }
-  r.bn_b = at::zeros_like(r.bn_rm);
-  if (bn.hasattr("bias")) {
-    if (!bn.attr("bias").isNone()) {
-      r.bn_b = bn.attr("bias").toTensor();
-    }
-  } else {
-    auto optional_bn_bias = extractIValueFromGraph(bn, bn_op_name, bn_bias_index);
-    if (!optional_bn_bias) {
-      return false;
-    }
-    if (!optional_bn_bias.value().isNone()) {
-      r.bn_w = optional_bn_bias.value().toTensor();
-    }
+  if (!extractOptionalBNParams(bn, r)) {
+    return false;
   }
 
   r.conv_w = conv.attr("weight").toTensor();
@@ -1847,11 +1846,14 @@ bool FoldConvBatchNorm2dHelper::tryExtractingConvBNParameters(
 }
 
 void FoldConvBatchNorm2dHelper::analyze(Module& module) {
+  // Dot in the ".Conv2d" and ".BatchNorm2d" is an attempt to
+  // prevent matching module's whose name might end with Conv2d
+  // But are user defined modules.
   const PatternInfo pattern = PatternInfo::parse_from_str(R"IR(
 graph(%self, %x):
-    %conv_submodule = match::module[name="Conv2d"](%self)
+    %conv_submodule = match::module[name=".Conv2d"](%self)
     %conv_out = prim::CallMethod[name="forward"](%conv_submodule, %x)
-    %bn_submodule = match::module[name="BatchNorm2d"](%self)
+    %bn_submodule = match::module[name=".BatchNorm2d"](%self)
     %bn_out = prim::CallMethod[name="forward"](%bn_submodule, %conv_out)
     return (%bn_out))IR");
 
