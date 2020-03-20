@@ -217,6 +217,16 @@ class DistributedDataParallel(Module):
                          are getting different gradients, which should not
                          happen if DistributedDataParallel is correctly used.
                          (default: ``False``)
+        delay_allreduce (bool): Delay allreduce on parameter gradients until the
+                                backward pass finishes, i.e., local backward
+                                computation will not overlap with gradient
+                                communication across processes. This mode is
+                                expected to be slower than the default mode, but
+                                has less constraints on the model structure. For
+                                example, the default mode would fail if one
+                                parameter appears multiple times in the return
+                                value of ``Module.parameters()``, but this mode
+                                can support it. (default: ``False``)
 
     Attributes:
         module (Module): the module to be parallelized
@@ -230,7 +240,8 @@ class DistributedDataParallel(Module):
                  output_device=None, dim=0, broadcast_buffers=True,
                  process_group=None, bucket_cap_mb=25,
                  find_unused_parameters=False,
-                 check_reduction=False):
+                 check_reduction=False,
+                 delay_allreduce=False):
 
         super(DistributedDataParallel, self).__init__()
 
@@ -278,6 +289,7 @@ class DistributedDataParallel(Module):
         self.module = module
         self.broadcast_buffers = broadcast_buffers
         self.find_unused_parameters = find_unused_parameters
+        self.delay_allreduce = delay_allreduce
         self.require_backward_grad_sync = True
         self.require_forward_param_sync = True
 
@@ -379,7 +391,8 @@ class DistributedDataParallel(Module):
             parameters,
             list(reversed(bucket_indices)),
             self.process_group,
-            expect_sparse_gradient)
+            expect_sparse_gradient,
+            delay_allreduce=self.delay_allreduce)
 
         # passing a handle to torch.nn.SyncBatchNorm layer
         self._passing_sync_batchnorm_handle(self._module_copies)

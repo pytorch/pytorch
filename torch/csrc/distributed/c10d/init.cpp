@@ -122,11 +122,13 @@ PyObject* c10d_init(PyObject* _unused) {
               std::vector<std::vector<torch::autograd::Variable>>,
               std::vector<std::vector<size_t>>,
               std::shared_ptr<::c10d::ProcessGroup>,
-              std::vector<std::vector<bool>>>(),
+              std::vector<std::vector<bool>>,
+              bool>(),
           py::arg("replicas"),
           py::arg("bucket_indices"),
           py::arg("process_group"),
-          py::arg("expect_sparse_gradients") = std::vector<std::vector<bool>>())
+          py::arg("expect_sparse_gradients") = std::vector<std::vector<bool>>(),
+          py::arg("delay_allreduce") = false)
       .def(
           "initialize_buckets",
           &::c10d::Reducer::initialize_buckets,
