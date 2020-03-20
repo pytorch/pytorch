@@ -7,7 +7,7 @@ import unittest
 import torch
 import torch.jit
 import torch.nn.functional as F
-from torch.nn.modules.utils import _single, _pair
+from torch.nn.modules.utils import _pair
 
 from hypothesis import settings, HealthCheck
 from hypothesis import assume, given
@@ -1930,8 +1930,8 @@ class TestQuantizedConv(unittest.TestCase):
         X_scale, X_zero_point, W_scale, W_zero_point, Y_scale, Y_zero_point,
         use_bias, use_relu, use_channelwise
     ):
-        (X, W), (X_q, W_q), bias_float = self._make_qconv_tensors(batch_size,
-            input_channels_per_group, input_feature_map_shape,
+        (X, W), (X_q, W_q), bias_float = self._make_qconv_tensors(
+            batch_size, input_channels_per_group, input_feature_map_shape,
             output_channels_per_group, groups, kernels,
             strides, pads, dilations, X_scale, X_zero_point, W_scale,
             W_zero_point, use_bias, use_channelwise)
@@ -2101,8 +2101,6 @@ class TestQuantizedConv(unittest.TestCase):
                 (pad_h, pad_w), channelwise)
 
     """Tests the correctness of quantized 1D convolution op."""
-    from hypothesis import reproduce_failure
-    # @reproduce_failure('4.24.3', b'AXicY2SAAkYG3AAoBwAAcgAE')
     @given(batch_size=st.integers(1, 6),
            input_channels_per_group=st.sampled_from((2, 4, 5, 8, 16, 32)),
            output_channels_per_group=st.sampled_from((2, 4, 5, 8, 16, 32)),
@@ -2150,8 +2148,8 @@ class TestQuantizedConv(unittest.TestCase):
         input_channels = input_channels_per_group * groups
         output_channels = output_channels_per_group * groups
 
-        (X, W), (X_q, W_q), bias_float = self._make_qconv_tensors(batch_size,
-            input_channels_per_group, (length,),
+        (X, W), (X_q, W_q), bias_float = self._make_qconv_tensors(
+            batch_size, input_channels_per_group, (length,),
             output_channels_per_group, groups, kernel, stride, pad,
             dilation, X_scale, X_zero_point, W_scale, W_zero_point,
             use_bias, False)
@@ -2168,8 +2166,9 @@ class TestQuantizedConv(unittest.TestCase):
         true_conv1d.weght = torch.nn.Parameter(W)
         true_conv1d.bias = torch.nn.Parameter(bias_float) if use_bias else None
         true_outp = true_conv1d(X)
-        q_result_ref = torch.quantize_per_tensor(true_outp,
-            scale=Y_scale, zero_point=Y_zero_point, dtype=torch.quint8)
+        q_result_ref = torch.quantize_per_tensor(
+            true_outp, scale=Y_scale, zero_point=Y_zero_point,
+            dtype=torch.quint8)
 
         with override_quantized_engine(qengine):
             conv_op = torch.nn.quantized.Conv1d(

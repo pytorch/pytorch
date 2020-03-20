@@ -12,7 +12,7 @@ import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.qat as nniqat
 
 from torch._ops import ops
-from torch.nn.modules.utils import _single, _pair, _triple
+from torch.nn.modules.utils import _pair, _triple
 from torch.nn.quantized.modules.utils import _quantize_weight
 from torch.nn.utils import fuse_conv_bn_weights
 
