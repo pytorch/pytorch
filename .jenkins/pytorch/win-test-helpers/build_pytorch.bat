@@ -4,7 +4,9 @@ if "%DEBUG%" == "1" (
   set BUILD_TYPE=release
 )
 
-set PATH=C:\Program Files\CMake\bin;C:\Program Files\7-Zip;C:\ProgramData\chocolatey\bin;C:\Program Files\Git\cmd;C:\Program Files\Amazon\AWSCLI;C:\Program Files\Amazon\AWSCLI\bin;%PATH%
+choco install llvm
+
+set PATH=C:\Program Files\LLVM\bin;C:\Program Files\CMake\bin;C:\Program Files\7-Zip;C:\ProgramData\chocolatey\bin;C:\Program Files\Git\cmd;C:\Program Files\Amazon\AWSCLI;C:\Program Files\Amazon\AWSCLI\bin;%PATH%
 
 :: This inflates our log size slightly, but it is REALLY useful to be
 :: able to see what our cl.exe commands are (since you can actually
@@ -82,11 +84,14 @@ set PATH=%TMP_DIR_WIN%\bin;%PATH%
 :: jenkins has M40, which is 5.2
 if "%TORCH_CUDA_ARCH_LIST%" == "" set TORCH_CUDA_ARCH_LIST=5.2
 
+set USE_CUDA=0
+
 sccache --stop-server
 sccache --start-server
 sccache --zero-stats
-set CC=sccache-cl
-set CXX=sccache-cl
+set CC=clang-cl
+set CXX=clang-cl
+set LD=lld-link
 
 set CMAKE_GENERATOR=Ninja
 
