@@ -11,7 +11,6 @@ namespace at {
 namespace native {
 
 DEFINE_DISPATCH(qbatch_norm_stub);
-DEFINE_DISPATCH(qbatch_norm_relu_stub);
 
 namespace {
 void compute_fused_params(
@@ -98,31 +97,18 @@ Tensor q_batch_norm_impl(
       output_scale,
       alpha_data,
       beta_data);
-  if (ReluFused) {
-    qbatch_norm_relu_stub(
-        qx.device().type(),
-        N,
-        C,
-        H * W,
-        qx.q_zero_point(),
-        output_zero_point,
-        qx_nhwc,
-        alpha,
-        beta,
-        qy);
-  } else {
-    qbatch_norm_stub(
-        qx.device().type(),
-        N,
-        C,
-        H * W,
-        qx.q_zero_point(),
-        output_zero_point,
-        qx_nhwc,
-        alpha,
-        beta,
-        qy);
-  }
+
+  qbatch_norm_stub(
+      qx.device().type(),
+      N,
+      C,
+      H * W,
+      qx.q_zero_point(),
+      output_zero_point,
+      qx_nhwc,
+      alpha,
+      beta,
+      qy);
   return qy;
 }
 
@@ -187,31 +173,18 @@ Tensor q_batch_norm3d_impl(
       alpha_data,
       beta_data);
 
-  if (ReluFused) {
-    qbatch_norm_relu_stub(
-        qx.device().type(),
-        N,
-        C,
-        D * H * W,
-        qx.q_zero_point(),
-        output_zero_point,
-        qx_nhwc,
-        alpha,
-        beta,
-        qy);
-  } else {
-    qbatch_norm_stub(
-        qx.device().type(),
-        N,
-        C,
-        D * H * W,
-        qx.q_zero_point(),
-        output_zero_point,
-        qx_nhwc,
-        alpha,
-        beta,
-        qy);
-  }
+  qbatch_norm_stub(
+      qx.device().type(),
+      N,
+      C,
+      D * H * W,
+      qx.q_zero_point(),
+      output_zero_point,
+      qx_nhwc,
+      alpha,
+      beta,
+      qy);
+
   return qy;
 }
 
