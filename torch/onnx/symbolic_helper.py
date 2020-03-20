@@ -208,6 +208,12 @@ def _is_fp(value):
         return (type == 'Float') or (type == 'Double') or (type == 'Half')
     return False
 
+def _ensure_fp(g, input):
+    if _is_fp(input):
+        return input
+
+    return g.op("Cast", input, to_i=scalar_type_to_pytorch_type.index(torch.get_default_dtype()))
+
 
 def _sort_helper(g, input, dim, decending=True, out=None):
     if out is not None:
