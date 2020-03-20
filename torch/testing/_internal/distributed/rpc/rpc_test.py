@@ -26,6 +26,7 @@ from torch.testing._internal.dist_utils import (
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
 )
+from torch.testing._internal.common_utils import TemporaryFileName
 
 
 def foo_add():
@@ -1827,3 +1828,10 @@ class RpcTest(RpcAgentTestFixture):
             args=(rref,)
         )
         self.assertEqual(ret_rref.to_here(), True)
+
+    @dist_init
+    def test_rref_py_pickle_not_supported(self):
+        local_rref = RRef(35)
+        with TemporaryFileName() as fname:
+            with self.assertRaisesRegex(RuntimeError, "Can not pickle rref in python pickler"):
+                torch.save(local_rref, fname)
