@@ -49,6 +49,7 @@ generate_op_dependency_graph() {
       ANALYZE_TORCH=1 \
       "${SRC_ROOT}/tools/code_analyzer/build.sh" -closure=false
   fi
+  cat "$OP_DEPENDENCY"
 }
 
 run_default_build() {
