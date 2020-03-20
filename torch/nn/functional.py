@@ -4098,9 +4098,8 @@ def scaled_dot_product_attention(q,                         # type: Tensor
         attn_output_weights = attn_output_weights.reshape(batch_heads, tgt_len, src_len)
 
     attn_output_weights = softmax(attn_output_weights, dim=-1)
-    attn_output_weights = dropout(attn_output_weights, p=dropout_p, training=training)
 
-    attn_output = torch.matmul(attn_output_weights, v)
+    attn_output = torch.matmul(dropout(attn_output_weights, p=dropout_p, training=training), v)
     return attn_output, attn_output_weights
 
 
