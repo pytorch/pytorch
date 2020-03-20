@@ -43,8 +43,7 @@ TORCH_API rpc::Message getMessageWithAutograd(
     bool forceGradRecording = false);
 
 // Send message after autograd checking
-TORCH_API std::shared_ptr<torch::distributed::rpc::FutureMessage>
-sendMessageWithAutograd(
+TORCH_API rpc::FutureMessagePtr sendMessageWithAutograd(
     rpc::RpcAgent& agent,
     const rpc::WorkerInfo& dst,
     rpc::Message&& wrappedRpcMsg,

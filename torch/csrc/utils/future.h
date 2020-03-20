@@ -26,7 +26,7 @@ class TORCH_API FutureError final : public std::exception {
 // Most implementation is copied from FutureMessage and
 // c10::ivalue::Future
 template <typename T>
-class TORCH_API Future final {
+class TORCH_API Future final : public c10::intrusive_ptr_target {
  public:
   using Callback =
       std::function<void(const T&, const c10::optional<FutureError>&)>;

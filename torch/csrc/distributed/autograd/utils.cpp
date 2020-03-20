@@ -111,7 +111,7 @@ Message getMessageWithAutograd(
   return std::move(*rpcWithAutograd).toMessage();
 }
 
-std::shared_ptr<FutureMessage> sendMessageWithAutograd(
+rpc::FutureMessagePtr sendMessageWithAutograd(
     RpcAgent& agent,
     const WorkerInfo& dst,
     torch::distributed::rpc::Message&& wrappedRpcMsg,

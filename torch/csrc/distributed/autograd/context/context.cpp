@@ -118,7 +118,7 @@ void DistAutogradContext::resetGraphTask() {
 }
 
 void DistAutogradContext::addOutstandingRpc(
-    const std::shared_ptr<rpc::FutureMessage>& futureMessage) {
+    const rpc::FutureMessagePtr& futureMessage) {
   futureMessage->addCallback(
       [this](
           const rpc::Message& /* unused */,
@@ -147,7 +147,7 @@ void DistAutogradContext::clearOutstandingRpcs() {
   outStandingRpcs_.clear();
 }
 
-std::shared_ptr<rpc::FutureMessage> DistAutogradContext::
+rpc::FutureMessagePtr DistAutogradContext::
     clearAndWaitForOutstandingRpcsAsync() {
   std::unique_lock<std::mutex> lock(lock_);
   auto outStandingRpcs = std::move(outStandingRpcs_);
@@ -155,8 +155,8 @@ std::shared_ptr<rpc::FutureMessage> DistAutogradContext::
 
   struct State {
     explicit State(int32_t count)
-        : future(std::make_shared<rpc::FutureMessage>()), remaining(count) {}
-    std::shared_ptr<rpc::FutureMessage> future;
+        : future(rpc::FutureMessagePtr::make()), remaining(count) {}
+    rpc::FutureMessagePtr future;
     std::atomic<int32_t> remaining;
     std::atomic<bool> alreadySentError{false};
   };

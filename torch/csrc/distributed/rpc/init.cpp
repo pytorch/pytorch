@@ -28,6 +28,9 @@ constexpr std::chrono::milliseconds kDeleteAllUsersTimeout(100000);
 template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
 
+template <typename T>
+using intrusive_ptr_class_ = py::class_<T, c10::intrusive_ptr<T>>;
+
 PyObject* rpc_init(PyObject* /* unused */) {
   auto rpc_module =
       THPObjectPtr(PyImport_ImportModule("torch.distributed.rpc"));
@@ -232,15 +235,25 @@ PyObject* rpc_init(PyObject* /* unused */) {
   // pythonRpcHandler is cleaned up in shutdown(), after
   // shutdown(), python objects returned from rpc python call can not be
   // resolved.
-  auto future = shared_ptr_class_<FutureMessage>(module, "Future")
-                    .def(
-                        "wait",
-                        [&](FutureMessage& fut) { return toPyObj(fut.wait()); },
-                        py::call_guard<py::gil_scoped_release>(),
-                        R"(
+  // The wrapper for c10::intrusive_ptr<utils::Future<Message>>
+  struct PythonFutureMessageWrapper {
+    explicit PythonFutureMessageWrapper(FutureMessagePtr futureMessagePtr)
+        : futureMessagePtr_(std::move(futureMessagePtr)) {}
+
+    FutureMessagePtr futureMessagePtr_;
+  };
+
+  py::class_<PythonFutureMessageWrapper>(module, "Future")
+      .def(
+          "wait",
+          [](PythonFutureMessageWrapper& self) {
+            return toPyObj(self.futureMessagePtr_->wait());
+          },
+          py::call_guard<py::gil_scoped_release>(),
+          R"(
 Wait on future to complete and return the object it completed with.
 If the future completes with an error, an exception is thrown.
-              )");
+)");
 
   shared_ptr_class_<ProcessGroupRpcBackendOptions>(
       module,
@@ -391,7 +404,8 @@ If the future completes with an error, an exception is thrown.
          const py::args& args,
          const py::kwargs& kwargs) {
         DCHECK(PyGILState_Check());
-        return pyRpcBuiltin(dst, opName, rf, args, kwargs);
+        return PythonFutureMessageWrapper(
+            pyRpcBuiltin(dst, opName, rf, args, kwargs));
       },
       py::call_guard<py::gil_scoped_acquire>());
 
@@ -402,7 +416,8 @@ If the future completes with an error, an exception is thrown.
          std::vector<torch::Tensor>& tensors,
          const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf) {
         DCHECK(!PyGILState_Check());
-        return pyRpcPythonUdf(dst, pickledPythonUDF, tensors, rf);
+        return PythonFutureMessageWrapper(
+            pyRpcPythonUdf(dst, pickledPythonUDF, tensors, rf));
       },
       py::call_guard<py::gil_scoped_release>(),
       py::arg("dst"),

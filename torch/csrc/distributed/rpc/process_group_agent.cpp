@@ -280,7 +280,7 @@ void ProcessGroupAgent::shutdown() {
   listenerThread_.join();
 }
 
-std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
+FutureMessagePtr ProcessGroupAgent::send(
     const WorkerInfo& to,
     Message&& message) {
   // Throw if we previously encountered an exception in ::listenLoop.
@@ -311,7 +311,7 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
       pg_->getRank());
 
   auto requestId = nextId();
-  auto future = std::make_shared<FutureMessage>();
+  auto future = FutureMessagePtr::make();
   if (message.isRequest()) {
     // millisecond level precision of when request started.
     auto futureStartTime = std::chrono::steady_clock::now();
@@ -491,11 +491,11 @@ int ProcessGroupAgent::handleRecv(RecvWork& work) {
       std::move(data.first), std::move(data.second), work.type_, work.id_);
   if (message.isRequest()) {
     ++serverActiveCalls_;
-    std::shared_ptr<FutureMessage> futureResponse;
+    FutureMessagePtr futureResponse;
     try {
       futureResponse = cb_->operator()(message);
     } catch (const std::exception& e) {
-      futureResponse = std::make_shared<FutureMessage>();
+      futureResponse = FutureMessagePtr();
       futureResponse->setError(e.what());
     }
     if (futureResponse->completed()) {
@@ -533,7 +533,7 @@ int ProcessGroupAgent::handleRecv(RecvWork& work) {
     }
   } else if (message.isResponse()) {
     auto id = message.id();
-    std::shared_ptr<FutureMessage> fm = nullptr;
+    FutureMessagePtr fm;
     {
       std::lock_guard<std::mutex> lock{futureMutex_};
       const auto& futureInfo = futures_.find(id);
@@ -616,7 +616,7 @@ void ProcessGroupAgent::markFutureWithError(Message& message) {
 }
 
 void ProcessGroupAgent::markFutureWithError(int64_t id, std::string errorMsg) {
-  std::shared_ptr<FutureMessage> fm = nullptr;
+  FutureMessagePtr fm;
   {
     std::lock_guard<std::mutex> lock{futureMutex_};
     const auto& futureInfo = futures_.find(id);

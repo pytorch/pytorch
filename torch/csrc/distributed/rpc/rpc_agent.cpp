@@ -36,7 +36,7 @@ void RpcAgent::cleanup() {
   rpcRetryThread_.join();
 }
 
-std::shared_ptr<FutureMessage> RpcAgent::sendWithRetries(
+FutureMessagePtr RpcAgent::sendWithRetries(
     const WorkerInfo& to,
     Message&& message,
     RpcRetryOptions retryOptions) {
@@ -48,7 +48,7 @@ std::shared_ptr<FutureMessage> RpcAgent::sendWithRetries(
       retryOptions.rpcRetryDuration.count() >= 0,
       "rpcRetryDuration cannot be negative.");
 
-  auto originalFuture = std::make_shared<FutureMessage>();
+  auto originalFuture = FutureMessagePtr::make();
   steady_clock_time_point newTime =
       computeNewRpcRetryTime(retryOptions, /* retryCount */ 0);
   // Making a copy of the message so it can be retried after the first send.

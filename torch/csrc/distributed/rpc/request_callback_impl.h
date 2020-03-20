@@ -10,15 +10,14 @@ namespace rpc {
 
 class TORCH_API RequestCallbackImpl : public RequestCallback {
  public:
-  std::shared_ptr<FutureMessage> processMessage(
-      Message& request) const override;
+  FutureMessagePtr processMessage(Message& request) const override;
 
  private:
   void processRpc(
       RpcCommandBase& rpc,
       const MessageType& messageType,
       const int64_t messageId,
-      const std::shared_ptr<FutureMessage>& retFutureMessagge) const;
+      const FutureMessagePtr& retFutureMessagge) const;
 
   Message handleError(
       const std::exception& e,

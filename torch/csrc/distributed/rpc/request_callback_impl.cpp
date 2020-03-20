@@ -107,7 +107,7 @@ void RequestCallbackImpl::processRpc(
     RpcCommandBase& rpc,
     const MessageType& messageType,
     const int64_t messageId,
-    const std::shared_ptr<FutureMessage>& responseFuture) const {
+    const FutureMessagePtr& responseFuture) const {
   auto markComplete = [messageId, &responseFuture](Message m) {
     m.setId(messageId);
     responseFuture->markCompleted(std::move(m));
@@ -363,7 +363,7 @@ void RequestCallbackImpl::processRpc(
       // Process the original RPC.
       auto wrappedMessageType = rpcWithAutograd.wrappedMessageType();
       // Make an overall future for the wrapped response.
-      auto wrappedRpcResponseFuture = std::make_shared<FutureMessage>();
+      auto wrappedRpcResponseFuture = FutureMessagePtr::make();
       // Kick off processing for the nested future and get a Future<T> to the
       // result.
       processRpc(
@@ -448,13 +448,12 @@ void RequestCallbackImpl::processRpc(
   }
 }
 
-std::shared_ptr<FutureMessage> RequestCallbackImpl::processMessage(
-    Message& request) const {
+FutureMessagePtr RequestCallbackImpl::processMessage(Message& request) const {
   // We need two futures here because it could pause twice when processing a
   // RPC message:
   //  1) waiting for all RRefs in the arguments to become confirmed;
   //  2) waiting for processRpc to finish.
-  auto retFuture = std::make_shared<FutureMessage>();
+  auto retFuture = FutureMessagePtr::make();
   auto& rrefContext = RRefContext::getInstance();
   try {
     rrefContext.recordThreadLocalPendingRRefs();

@@ -87,8 +87,7 @@ class ProcessGroupAgent : public RpcAgent {
   // This method wraps the destination information and the message into a
   // SendWork object, and put the SendWork into a queue. Another thread will
   // consume SendWork from the queue and send it out.
-  std::shared_ptr<FutureMessage> send(const WorkerInfo& to, Message&& message)
-      override;
+  FutureMessagePtr send(const WorkerInfo& to, Message&& message) override;
 
  private:
   using steady_clock_time_point =
@@ -127,12 +126,12 @@ class ProcessGroupAgent : public RpcAgent {
   // additional information to manage timeouts and destination information,
   // which is needed for termination detection.
   struct FutureInfo {
-    std::shared_ptr<FutureMessage> future_;
+    FutureMessagePtr future_;
     steady_clock_time_point endTime_;
     int dstRank_;
     std::chrono::milliseconds timeout_;
     FutureInfo(
-        const std::shared_ptr<FutureMessage>& future,
+        const FutureMessagePtr& future,
         const steady_clock_time_point& endTime,
         int dstRank,
         const std::chrono::milliseconds timeout)

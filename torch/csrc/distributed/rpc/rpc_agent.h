@@ -93,7 +93,7 @@ struct TORCH_API RpcRetryInfo {
   RpcRetryInfo(
       const WorkerInfo& to,
       Message&& message,
-      std::shared_ptr<FutureMessage> originalFuture,
+      FutureMessagePtr originalFuture,
       int retryCount,
       RpcRetryOptions options)
       : to_(to),
@@ -105,7 +105,7 @@ struct TORCH_API RpcRetryInfo {
   const WorkerInfo& to_;
   Message message_;
   // Future that is returned to the caller of sendWithRetries().
-  std::shared_ptr<FutureMessage> originalFuture_;
+  FutureMessagePtr originalFuture_;
   // Number of send attempts completed so far.
   int retryCount_;
   RpcRetryOptions options_;
@@ -145,9 +145,7 @@ class TORCH_API RpcAgent {
   // If ``message.isRequest()`` is true, the ``FutureMessage`` will be
   // completed when the response arrives. For other message types, the Future
   // should be ignored by the caller.
-  virtual std::shared_ptr<FutureMessage> send(
-      const WorkerInfo& to,
-      Message&& message) = 0;
+  virtual FutureMessagePtr send(const WorkerInfo& to, Message&& message) = 0;
 
   // Retries sending the message up to maxRetries times until an ACK is
   // receieved. The duration between consecutive sends is increased over
@@ -161,7 +159,7 @@ class TORCH_API RpcAgent {
   // executing a method twice on the remote end (it does not guarantee
   // exactly-once semantics). Therefore, the user must ensure their requests
   // are idempotent.
-  std::shared_ptr<FutureMessage> sendWithRetries(
+  FutureMessagePtr sendWithRetries(
       const WorkerInfo& to,
       Message&& message,
       RpcRetryOptions retryOptions = RpcRetryOptions());
@@ -299,8 +297,7 @@ class TORCH_API RpcAgent {
   std::atomic<bool> rpcAgentRunning_;
 
   // storing futures before adding callback
-  std::vector<
-      std::pair<std::shared_ptr<FutureMessage>, std::shared_ptr<RpcRetryInfo>>>
+  std::vector<std::pair<FutureMessagePtr, std::shared_ptr<RpcRetryInfo>>>
       futures;
 
   // Condition Variable to signal when the rpcRetryMap_ has been populated.

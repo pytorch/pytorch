@@ -129,6 +129,7 @@ TORCH_API Message
 createExceptionResponse(const std::string& exceptionStr, int64_t id);
 
 typedef torch::utils::Future<Message> FutureMessage;
+using FutureMessagePtr = c10::intrusive_ptr<FutureMessage>;
 
 } // namespace rpc
 } // namespace distributed

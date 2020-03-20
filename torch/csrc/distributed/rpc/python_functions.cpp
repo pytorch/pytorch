@@ -59,7 +59,7 @@ std::shared_ptr<Operator> matchBuiltinOp(
       ") to a builtin operator");
 }
 
-std::shared_ptr<FutureMessage> sendPythonRemoteCall(
+FutureMessagePtr sendPythonRemoteCall(
     const WorkerInfo& dst,
     SerializedPyObj serializedPyObj,
     const IValue& rrefId,
@@ -116,7 +116,7 @@ py::object toPyObj(const Message& message) {
   return toPyObjInternal(*response, msgType);
 }
 
-std::shared_ptr<FutureMessage> pyRpcBuiltin(
+FutureMessagePtr pyRpcBuiltin(
     const WorkerInfo& dst,
     const std::string& opName,
     const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf,
@@ -176,7 +176,7 @@ PyRRef pyRemoteBuiltin(
   }
 }
 
-std::shared_ptr<FutureMessage> pyRpcPythonUdf(
+FutureMessagePtr pyRpcPythonUdf(
     const WorkerInfo& dst,
     std::string& pickledPythonUDF,
     std::vector<torch::Tensor>& tensors,
