@@ -172,16 +172,18 @@ void initJITBindings(PyObject* module) {
           [](Module& module,
              const std::string& method_name,
              const py::dict& qconfig_dict,
-             bool inplace) {
+             bool inplace,
+             bool is_dynamic) {
             auto dict = py::cast<std::unordered_map<
                 std::string,
                 std::tuple<Module, Module>>>(qconfig_dict);
-            return InsertObservers(module, method_name, dict, inplace);
+            return InsertObservers(module, method_name, dict, inplace, is_dynamic);
           },
           py::arg("module"),
           py::arg("method_name"),
           py::arg("qconfig_dict"),
-          py::arg("inplace") = false)
+          py::arg("inplace") = false,
+          py::arg("is_dynamic") = false)
       .def(
           "_jit_pass_insert_quant_dequant",
           [](Module& module,
