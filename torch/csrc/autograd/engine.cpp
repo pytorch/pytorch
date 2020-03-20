@@ -867,6 +867,20 @@ void Engine::graph_task_exec_post_processing(
   // while it's waiting.
   std::unique_lock<std::mutex> cb_lock(post_callbacks_lock_);
   // collect depths that indeed has callbacks
+  auto it = final_callbacks_.find(graph_task->reentrant_depth_);
+  if (it != final_callbacks_.end()) {
+    auto& reentrant_final_callbacks = it->second;
+    // WARNING: Don't use a range-for loop here because more callbacks may be
+    // added in between callback calls, so iterators may become invalidated.
+    // NOLINTNEXTLINE(modernize-loop-convert)
+    for (size_t i = 0; i < reentrant_final_callbacks.size(); ++i) {
+      cb_lock.unlock();
+      reentrant_final_callbacks[i]();
+      cb_lock.lock();
+    }
+  }
+
+  /*
   for (auto& entry: final_callbacks_) {
     depths_with_callbacks.push_back(entry.first);
   }
@@ -881,6 +895,7 @@ void Engine::graph_task_exec_post_processing(
       cb_lock.lock();
     }
   }
+  */
 
   // Syncs leaf streams with default streams (if necessary)
   // See note "Streaming backwards"
