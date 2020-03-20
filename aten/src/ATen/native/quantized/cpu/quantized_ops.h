@@ -137,6 +137,7 @@ DECLARE_DISPATCH(qcat_nhwc_fn, qcat_nhwc_stub);
 DECLARE_DISPATCH(qcat_nhwc_fn, qcat_relu_nhwc_stub);
 DECLARE_DISPATCH(qtopk_fn, qtopk_stub);
 DECLARE_DISPATCH(qbatch_norm_fn, qbatch_norm_stub);
+DECLARE_DISPATCH(qbatch_norm_fn, qbatch_norm_relu_stub);
 
 } // namespace native
 } // namespace at
