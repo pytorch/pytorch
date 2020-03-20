@@ -1498,7 +1498,6 @@ class RpcTest(RpcAgentTestFixture):
         rpc.shutdown(graceful=False)
 
     @dist_init
-    @unittest.skip("Test is flaky. see https://github.com/pytorch/pytorch/issues/31846")
     def test_debug_info(self):
         # only test keys in this test case. Values should be covered by
         # individual module debug info tests
@@ -1514,7 +1513,13 @@ class RpcTest(RpcAgentTestFixture):
         expected.update(rref_info)
         expected.update(agent_info)
         expected.update(autograd_info)
-        self.assertEqual(expected.keys(), info.keys())
+        # NB: Key ordering is only preserved in python 3.6+. So here, we
+        # manually check keys are equal.
+        for key in expected.keys():
+            self.assertIn(key, info.keys())
+
+        for key in info.keys():
+            self.assertIn(key, expected.keys())
 
     @dist_init(setup_rpc=False)
     @unittest.skipIf(
