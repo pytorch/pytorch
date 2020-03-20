@@ -185,7 +185,6 @@ public:
     auto o2 = vop(hi);
     return cvtfp32_bf16(o1, o2);
   }
- 
   Vec256<BFloat16> exp() const {
     return map(Sleef_expf8_u10);
   }
@@ -249,6 +248,56 @@ Vec256<BFloat16> inline minimum(const Vec256<BFloat16>& a, const Vec256<BFloat16
   auto o1 = _mm256_or_ps(min_lo, nan_lo);
   auto o2 = _mm256_or_ps(min_hi, nan_hi);
   return cvtfp32_bf16(o1, o2);
+}
+
+template <>
+Vec256<BFloat16> inline clamp(const Vec256<BFloat16>& a,
+    const Vec256<BFloat16>& min, const Vec256<BFloat16>& max) {
+  __m256 a_lo, a_hi;
+  __m256 min_lo, min_hi;
+  __m256 max_lo, max_hi;
+  cvtbf16_fp32(__m256i(a), a_lo, a_hi);
+  cvtbf16_fp32(__m256i(min), min_lo, min_hi);
+  cvtbf16_fp32(__m256i(max), max_lo, max_hi);
+  auto o1 = _mm256_min_ps(max_lo, _mm256_max_ps(min_lo, a_lo));
+  auto o2 = _mm256_min_ps(max_hi, _mm256_max_ps(min_hi, a_hi));
+  return cvtfp32_bf16(o1, o2);
+}
+
+template <>
+Vec256<BFloat16> inline clamp_max(const Vec256<BFloat16>& a, const Vec256<BFloat16>& max) {
+  __m256 a_lo, a_hi;
+  __m256 max_lo, max_hi;
+  cvtbf16_fp32(__m256i(a), a_lo, a_hi);
+  cvtbf16_fp32(__m256i(max), max_lo, max_hi);
+  auto o1 = _mm256_min_ps(max_lo, a_lo);
+  auto o2 = _mm256_min_ps(max_hi, a_hi);
+  return cvtfp32_bf16(o1, o2);
+}
+
+template <>
+Vec256<BFloat16> inline clamp_min(const Vec256<BFloat16>& a, const Vec256<BFloat16>& min) {
+  __m256 a_lo, a_hi;
+  __m256 min_lo, min_hi;
+  cvtbf16_fp32(__m256i(a), a_lo, a_hi);
+  cvtbf16_fp32(__m256i(min), min_lo, min_hi);
+  auto o1 = _mm256_max_ps(min_lo, a_lo);
+  auto o2 = _mm256_max_ps(min_hi, a_hi);
+  return cvtfp32_bf16(o1, o2);
+}
+
+template <>
+inline void convert(const BFloat16* src, BFloat16* dst, int64_t n) {
+  int64_t i;
+#pragma unroll
+  for (i = 0; i <= (n - Vec256<BFloat16>::size()); i += Vec256<BFloat16>::size()) {
+    auto vsrc = _mm256_loadu_si256(reinterpret_cast<__m256i*>((void*)(src + i)));
+    _mm256_storeu_si256(reinterpret_cast<__m256i*>((void*)(dst + i)), vsrc);
+  }
+#pragma unroll
+  for (; i < n; i++) {
+    dst[i] = src[i];
+  }
 }
 
 template <>
