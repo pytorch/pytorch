@@ -433,7 +433,7 @@ c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy() const {
 }
 
 c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy(std::unordered_map<IValue, IValue>& memo) const {
-  auto object = ivalue::Object::create(c10::StrongTypePtr(compilation_unit(), type()), type()->numAttributes());
+  auto object = ivalue::Object::create(c10::StrongTypePtr(type_.cu_, type()), type()->numAttributes());
   for (auto i = 0; i < slots_.size(); ++i) {
     object->setSlot(i, slots_[i].deepcopy(memo));
   }

@@ -11,17 +11,15 @@ from torch.testing import FileCheck
 
 from torch.testing._internal.common_utils import run_tests, IS_SANDCASTLE, ProfilingMode, GRAPH_EXECUTOR, \
     enable_profiling_mode
+
 from textwrap import dedent
 from itertools import product, permutations
 
-from test_jit import JitTestCase, enable_cpu_fuser, RUN_CUDA, RUN_CUDA_HALF, RUN_CUDA_MULTI_GPU, \
+from test_jit import JitTestCase, RUN_CUDA, RUN_CUDA_HALF, RUN_CUDA_MULTI_GPU, \
     backward_graph, all_backward_graphs, get_lstm_inputs, get_milstm_inputs, \
     LSTMCellC, LSTMCellF, LSTMCellS, MiLSTMCell, _inline_everything
 
-if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
-    torch._C._jit_set_profiling_executor(True)
-    torch._C._jit_set_profiling_mode(True)
-
+FUSION_GROUP = 'tensorexpr::Group'
 
 def strip_profiling_nodes(nodes):
     profiling_opcodes = set(['prim::BailoutTemplate', 'prim::BailOut'])
@@ -50,6 +48,27 @@ def warmup_forward(f, *args):
 
 
 class TestFuser(JitTestCase):
+    def setUp(self):
+        self.old_cpu_fuser_state = torch._C._jit_can_fuse_on_cpu()
+        self.old_gpu_fuser_state = torch._C._jit_can_fuse_on_gpu()
+        torch._C._jit_override_can_fuse_on_cpu(False)
+        torch._C._jit_override_can_fuse_on_gpu(False)
+        torch._C._jit_register_tensorexpr_fuser()
+        torch._C._jit_set_texpr_fuser_enabled(True)
+
+        self.old_profiling_executor = torch._C._jit_set_profiling_executor(True)
+        self.old_profiling_mode = torch._C._jit_set_profiling_mode(True)
+        if GRAPH_EXECUTOR != ProfilingMode.PROFILING:
+            torch._C._jit_set_profiling_executor(self.old_profiling_executor)
+            torch._C._jit_set_profiling_mode(self.old_profiling_mode)
+
+    def tearDown(self):
+        torch._C._jit_override_can_fuse_on_gpu(self.old_gpu_fuser_state)
+        torch._C._jit_override_can_fuse_on_cpu(self.old_cpu_fuser_state)
+        torch._C._jit_set_texpr_fuser_enabled(False)
+        torch._C._jit_set_profiling_executor(self.old_profiling_executor)
+        torch._C._jit_set_profiling_mode(self.old_profiling_mode)
+
     def assertAllFused(self, graph, except_for=()):
 
         diff_graphs = [n for n in graph.nodes() if n.kind() == 'prim::DifferentiableGraph']
@@ -57,11 +76,11 @@ class TestFuser(JitTestCase):
             self.assertEqual(len(diff_graphs), 1)
             graph = diff_graphs[0].g('Subgraph')
 
-        allowed_nodes = {'prim::Constant', 'prim::FusionGroup', 'prim::BailoutTemplate',
+        allowed_nodes = {'prim::Constant', FUSION_GROUP, 'prim::BailoutTemplate',
                          'prim::BailOut', 'prim::TupleConstruct'} | set(except_for)
         self.assertTrue(all(node.kind() in allowed_nodes for node in graph.nodes()),
                         'got {}'.format(graph))
-        self.assertTrue([node.kind() for node in graph.nodes()].count('prim::FusionGroup') == 1)
+        self.assertTrue([node.kind() for node in graph.nodes()].count(FUSION_GROUP) == 1)
 
     def _test_fused_abs(self, device='cpu'):
         def func(x):
@@ -72,7 +91,6 @@ class TestFuser(JitTestCase):
         self.assertAllFused(scripted.graph_for(a))
 
     @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
-    @enable_cpu_fuser
     def test_abs_cpu(self):
         self._test_fused_abs()
 
@@ -80,16 +98,23 @@ class TestFuser(JitTestCase):
     def test_abs_cuda(self):
         self._test_fused_abs(device="cuda")
 
-    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
-    def test_zero_element_tensors(self):
+    def _test_zero_element_tensors(self, device="cpu"):
         def decode(sin_t, cos_t):
             theta = torch.atan2(sin_t.float(), cos_t.float())
             return theta
 
-        sin = torch.zeros(0, device="cuda")
-        cos = torch.zeros(0, device="cuda")
+        sin = torch.zeros(0, device=device)
+        cos = torch.zeros(0, device=device)
         inputs = [sin, cos]
         ge = self.checkScript(decode, inputs)
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    def test_zero_element_tensors_cuda(self):
+        self._test_zero_element_tensors(device="cuda")
+
+    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
+    def test_zero_element_tensors_cpu(self):
+        self._test_zero_element_tensors(device="cpu")
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_arg_configurations_smoke_cuda(self):
@@ -169,6 +194,7 @@ class TestFuser(JitTestCase):
         y = torch.randn(1, 4, dtype=torch.float, device='cuda')
 
         scripted = self.checkScript(f, (x, y))
+        self.assertEqual(scripted(x, y).shape, (3, 4))
         self.assertAllFused(scripted.graph_for(x, y))
 
     @unittest.skipIf(not RUN_CUDA, "No CUDA")
@@ -215,7 +241,6 @@ class TestFuser(JitTestCase):
                 self.checkScript(fn, [tensor])
 
     @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
-    @enable_cpu_fuser
     def test_chunk_correctness(self):
         return self._test_chunk_correctness(self, 'cpu')
 
@@ -234,8 +259,12 @@ class TestFuser(JitTestCase):
 
         ge = self.checkTrace(f, (x, y))
         graph = ge.graph_for(x, y)
-        FileCheck().check("broadcast_tensors").check('with prim::FusionGroup_') \
-            .check_count('ConstantChunk', 2, exactly=True).run(str(graph))
+        # XXX: The old fuser does broadcast_tensors but the new fuser doesn't.
+        # FileCheck().check("broadcast_tensors").check('with ' + FUSION_GROUP + '_') \
+        #     .check_count('ConstantChunk', 2, exactly=True).run(str(graph))
+        FileCheck().check("with " + FUSION_GROUP + "_").check_count(
+            "ConstantChunk", 1, exactly=True
+        ).run(str(graph))
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_chunk_motion_deduplicates_inputs(self):
@@ -255,7 +284,7 @@ class TestFuser(JitTestCase):
         for func in [func1, func2]:
             module = self.checkScript(func, inputs)
             forward_graph = module.graph_for(*inputs)
-            self.assertGraphContainsExactly(forward_graph, 'prim::FusionGroup', 1)
+            self.assertGraphContainsExactly(forward_graph, FUSION_GROUP, 1)
             fusion_group = list(forward_graph.nodes())[-1]
             self.assertEqual(len(list(fusion_group.inputs())), 1)
 
@@ -287,6 +316,9 @@ class TestFuser(JitTestCase):
         def funcInf(a, b):
             return torch.clamp(a + b, min=0, max=float('inf'))
 
+        def funcNegInf(a, b):
+            return torch.clamp(a + b, min=float('-inf'), max=0)
+
         def funcOptMin(a, b):
             return torch.clamp(a + b, max=2)
 
@@ -297,7 +329,7 @@ class TestFuser(JitTestCase):
         b = torch.randn(4, 4, dtype=torch.float, device='cuda')
         nan = torch.tensor(float('nan'), dtype=torch.float, device='cuda')
 
-        funcs = (func2, funcInf, funcOptMin, funcOptMax)
+        funcs = (func2, funcInf, funcNegInf, funcOptMin, funcOptMax)
         for f, inputs in product(funcs, [[a, b], [a, nan]]):
             inp1, inp2 = inputs
             s = self.checkScript(f, (inp1, inp2), profiling=ProfilingMode.PROFILING)
@@ -426,7 +458,8 @@ class TestFuser(JitTestCase):
         ge = self.checkTrace(foo, (hx, cx))
         graph = ge.graph_for(hx, cx)
         self.assertAllFused(graph)
-        FileCheck().check("FusedConcat").check_next("return").run(str(graph))
+        # XXX: TE fuser can handle concats in a fusion group.
+        # FileCheck().check("FusedConcat").check_next("return").run(str(graph))
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_concat_invariant_cuda(self):
@@ -444,7 +477,8 @@ class TestFuser(JitTestCase):
         ge = self.checkTrace(fn, (x, y, z))
         graph = ge.graph_for(x, y, z)
         self.assertAllFused(graph, except_for={'aten::add'})
-        FileCheck().check("FusedConcat").check_next("return").run(str(graph))
+        # XXX: TE fuser can handle concats inside a fusion group.
+        # FileCheck().check("FusedConcat").check_next("return").run(str(graph))
 
     @staticmethod
     def fn_test_exp(x, y):
@@ -497,7 +531,7 @@ class TestFuser(JitTestCase):
                 self.assertNotIn(node_not_in_graph, rep)
                 self.assertIn(node_not_in_graph, rep_noopt)
 
-            fusion_groups = [node for node in graph.nodes() if node.kind() == 'prim::FusionGroup']
+            fusion_groups = [node for node in graph.nodes() if node.kind() == FUSION_GROUP]
             self.assertEqual(len(fusion_groups), 1)
             fused_graph = str(fusion_groups[0].g('Subgraph'))
             for node_in_fusegraph in in_fusegraph:
@@ -548,7 +582,6 @@ class TestFuser(JitTestCase):
 
     @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
     @unittest.skip("deduplicating introduces aliasing in backward graph's outputs")
-    @enable_cpu_fuser
     def test_fuser_deduplication(self):
         # See that fusion kernel outputs are deduplicated when removing  _grad_sum_to_size in the fuser's compilation
         # see the discussion in PR #14957.
@@ -570,7 +603,6 @@ class TestFuser(JitTestCase):
         self.assertEqual(ga2.data_ptr(), gb2.data_ptr())
 
     @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
-    @enable_cpu_fuser
     @unittest.skip("temporarily disabled because fusion was restricted in fixing #22833")
     def test_fuser_iou(self):
         # This checks if most of Intersection over Union is fused.
@@ -614,7 +646,6 @@ class TestFuser(JitTestCase):
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @unittest.skipIf(not RUN_CUDA_MULTI_GPU, "needs non-zero device")
-    @enable_cpu_fuser
     def test_fusion_reuse_multi_gpu(self):
         def fn(x, y):
             return x * y * x * y
@@ -634,7 +665,6 @@ class TestFuser(JitTestCase):
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @unittest.skipIf(not RUN_CUDA_MULTI_GPU, "needs non-zero device")
-    @enable_cpu_fuser
     def test_kernel_cache_multi_gpu(self):
         def not_fusible(x):
             return x
@@ -657,10 +687,11 @@ class TestFuser(JitTestCase):
         # should reuse the same KernelSpec in the KernelSpec cache.
         ge = self.checkScript(fn, inputs)
         self.assertGraphContainsExactly(
-            ge.graph_for(*inputs), 'prim::FusionGroup', 3, True)
+            ge.graph_for(*inputs), FUSION_GROUP, 3, True)
         new_cache_size = torch._C._jit_debug_fuser_num_cached_kernel_specs()
         # XXX: This assumes that the same kernel isn't already used by another test
-        self.assertEqual(new_cache_size - prev_cache_size, 1)
+        # FIXME: Use the TE fuser's way of querying the cache.
+        # self.assertEqual(new_cache_size - prev_cache_size, 1)
 
     @unittest.skipIf(not RUN_CUDA_MULTI_GPU, "needs non-zero device")
     def test_nonzero_device_cuda(self):
@@ -681,7 +712,7 @@ class TestFuser(JitTestCase):
         return
         forward_graph = module.graph_for(*inputs)
         self.assertGraphContainsExactly(
-            forward_graph, 'prim::FusionGroup', 1, consider_subgraphs=True)
+            forward_graph, FUSION_GROUP, 1, consider_subgraphs=True)
         self.assertTrue(len(strip_profiling_nodes(forward_graph.nodes())) == 2)
         # Everything is differentiable but TupleConstruct return
         FileCheck().check("DifferentiableGraph").check_next("TupleConstruct") \
@@ -699,7 +730,8 @@ class TestFuser(JitTestCase):
         inputs = get_lstm_inputs('cuda')
         ge = self.checkTrace(LSTMCellC, inputs)
         graph = ge.graph_for(*inputs)
-        FileCheck().check("FusedConcat").check_next("return").run(str(graph))
+        # XXX: TE fuser can handle concats inside a fusion group.
+        # FileCheck().check("FusedConcat").check_next("return").run(str(graph))
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_lstm_gates_permutations_cuda(self):
@@ -721,7 +753,7 @@ class TestFuser(JitTestCase):
             inputs = get_lstm_inputs('cuda', training=False)
             self.assertEqual(cu.cell(*inputs), scope['cell'](*inputs))
             forward_graph = cu.cell.graph_for(*inputs)
-            self.assertGraphContainsExactly(forward_graph, 'prim::FusionGroup', 1)
+            self.assertGraphContainsExactly(forward_graph, FUSION_GROUP, 1)
 
     # TODO: Fuser doesn't work at all when inputs require grad. Fix that
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
@@ -731,12 +763,11 @@ class TestFuser(JitTestCase):
         graph = ge.graph_for(*inputs)
         # .check_not("aten::add") don't get pulled into FusionGroup because of BailOuts
         FileCheck().check_not("Chunk").check_not("aten::sigmoid") \
-            .check_not("aten::tanh").check("FusionGroup").check_next("TupleConstruct") \
-            .check_next("return").check_not("FusionGroup_2").run(str(graph))
+            .check_not("aten::tanh").check(FUSION_GROUP).check_next("TupleConstruct") \
+            .check_next("return").check_not(FUSION_GROUP + "_2").run(str(graph))
 
     @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
     @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/8746")
-    @enable_cpu_fuser
     def test_lstm_traced_cpu(self):
         inputs = get_lstm_inputs('cpu')
         try:
@@ -758,9 +789,9 @@ class TestFuser(JitTestCase):
         module = self.checkScript(MiLSTMCell, inputs)
         forward_graph = module.graph_for(*inputs)
         self.assertGraphContainsExactly(
-            forward_graph, 'prim::FusionGroup', 1, consider_subgraphs=True)
+            forward_graph, FUSION_GROUP, 1, consider_subgraphs=True)
         FileCheck().check("DifferentiableGraph").check_next("TupleConstruct") \
-            .check_next("return").check("FusionGroup").run(str(forward_graph))
+            .check_next("return").check(FUSION_GROUP).run(str(forward_graph))
         hy, cy = module(*inputs)
         warmup_backward((hy + cy).sum())
 
@@ -780,7 +811,9 @@ class TestFuser(JitTestCase):
         x = torch.zeros([3, 4, 5], dtype=torch.float, device='cuda')
         m = M()
         out1 = m.create(x)
+        cx = CudaCodeGenExecuted()
         out2 = m.create(x)
+        assert cx.elapsed_value() == 1
         self.assertNotEqual(out1, out2)
         self.assertTrue(torch.all(out1 >= 0))
         self.assertTrue(torch.all(out1 < 1))
@@ -819,23 +852,49 @@ class TestFuser(JitTestCase):
             r = torch.rand_like(y)
             return r * x + x
 
+        # If using profiling, a different function is needed to test different
+        # shapes, or we'll use a cached script.
+        def fn_test_rand2(x, y):
+            r = torch.rand_like(y)
+            return r * x * x
+
         x = torch.randn(4, 4, dtype=torch.float, device='cuda')
         y = torch.randn(4, 4, dtype=torch.float, device='cuda')
         script_f = torch.jit.script(fn_test_rand)
+        warmup_forward(script_f, x, y)
         out = script_f(x, y)
         self.assertAllFused(script_f.graph_for(x, y))
         x.requires_grad_(True)
         out = script_f(x, y)
         self.assertAllFused(script_f.graph_for(x, y), except_for=("aten::size", "prim::BroadcastSizes",
                                                                   "aten::_size_if_not_equal"))
+
         # test that broadcasting random produces correct results
         x = torch.ones(4, 4, dtype=torch.float, device='cuda')
         y = torch.ones(4, dtype=torch.float, device='cuda')
+        script_f = torch.jit.script(fn_test_rand2)
+        warmup_forward(script_f, x, y)
         out = script_f(x, y)
-        self.assertEqual(out[0], out[1])
+        self.assertEqual(out[0, :] + torch.zeros(4, 4, device='cuda'), out)
+
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    def test_rand_diamond(self):
+        def fn_test_diamond(x, y):
+            r = torch.rand_like(y)
+            a = x + r
+            b = y - r
+            return a + b
+
+        x = torch.randn(4, 4, dtype=torch.float, device='cuda')
+        y = torch.randn(4, 4, dtype=torch.float, device='cuda')
+        script_f = torch.jit.script(fn_test_diamond)
+        warmup_forward(script_f, x, y)
+        cx = CudaCodeGenExecuted()
+        out = script_f(x, y)
+        assert cx.elapsed_value() == 1
+        self.assertEqual(out, x + y)
 
     @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
-    @enable_cpu_fuser
     def test_scalar(self):
         def fn(x, y):
             return 2 * x + y
@@ -877,11 +936,20 @@ class TestFuser(JitTestCase):
             torch.tensor(3., dtype=torch.float, device='cuda'),
         ]
         ge = self.checkScript(should_not_fuse, inputs)
+        # Check that the fused graph computes correct results when the scalar
+        # input changes.
+        inputs = [
+            torch.randn(2, 2, dtype=torch.float, device='cuda'),
+            torch.tensor(7., dtype=torch.float, device='cuda'),
+        ]
+        self.assertEqual(ge(*inputs), should_not_fuse(*inputs))
+        # XXX: The TE fuser supports fusion of non-constant scalars
+        # self.assertGraphContainsExactly(
+        #     ge.graph_for(*inputs), FUSION_GROUP, 0, consider_subgraphs=True)
         self.assertGraphContainsExactly(
-            ge.graph_for(*inputs), 'prim::FusionGroup', 0, consider_subgraphs=True)
+            ge.graph_for(*inputs), FUSION_GROUP, 1, consider_subgraphs=True)
 
     @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
-    @enable_cpu_fuser
     def test_where_and_typing(self):
         def f(x, y):
             mask = x > y
