@@ -18,7 +18,7 @@
 namespace torch {
 namespace jit {
 using namespace torch::jit::tensorexpr;
-using namespace torch::jit::tensorexpr::schedule;
+using namespace torch::jit::tensorexpr;
 
 template <typename ctype>
 void testCudaTestVectorAdd01_impl() {

@@ -14,7 +14,6 @@
 namespace torch {
 namespace jit {
 namespace tensorexpr {
-namespace schedule {
 
 namespace {
 
@@ -870,7 +869,6 @@ bool LoopNest::hasLoopBodyFor(Tensor* t) const {
   return tensor_to_stmt_.count(t) > 0;
 }
 
-
 static void printBufVector(const std::unordered_map<const Var*, Range>& v) {
   std::cerr << "Access vector {\n";
   for (const auto& b : v) {
@@ -950,8 +948,6 @@ std::unordered_map<const Var*, Range> LoopNest::mergeBufVectors(
 
 
 
-
-} // namespace schedule
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
