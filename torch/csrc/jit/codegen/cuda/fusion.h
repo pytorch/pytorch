@@ -8,6 +8,7 @@
 
 #include <set>
 #include <vector>
+#include <unordered_map>
 
 namespace torch {
 namespace jit {

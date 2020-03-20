@@ -229,7 +229,7 @@ libtorch_cuda_sources = [
     "torch/csrc/jit/codegen/cuda/index_compute.cpp",
     "torch/csrc/jit/codegen/cuda/ir_base_nodes.cpp",
     "torch/csrc/jit/codegen/cuda/ir_nodes.cpp",
-    "torch/csrc/jit/codegen/cuda/iriostream.cpp",
+    "torch/csrc/jit/codegen/cuda/ir_iostream.cpp",
     "torch/csrc/jit/codegen/cuda/iter_visitor.cpp",
     "torch/csrc/jit/codegen/cuda/kernel.cpp",
     "torch/csrc/jit/codegen/cuda/manager.cpp",

@@ -6,8 +6,6 @@
 #include <deque>
 #include <iostream>
 
-#include <torch/csrc/jit/codegen/cuda/iriostream.h>
-
 namespace torch {
 namespace jit {
 namespace fuser {

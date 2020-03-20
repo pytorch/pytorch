@@ -2,7 +2,7 @@
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
-#include <torch/csrc/jit/codegen/cuda/iriostream.h>
+#include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 
 #include <iostream>
 

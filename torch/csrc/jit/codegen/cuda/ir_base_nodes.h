@@ -126,7 +126,7 @@ struct TORCH_CUDA_API Statement {
  *     - Implementation of bool sameAs(...)
  * 2) dispatch.h/.cpp must be updated to include dispatch of the new Val
  * 3) Default mutator function should be added to mutator.h/.cpp
- * 4) Printing functions should be added to iriostream.h/.cpp
+ * 4) Printing functions should be added to ir_iostream.h/.cpp
  * 5) An enum value must be added to ValType in type.h
  * 6) A string entry must be added in val_type_string_map
  */
@@ -274,7 +274,7 @@ struct TORCH_CUDA_API IRInputOutput {
  *     - Implementation of bool sameAs(...)
  * 2) dispatch.h/.cpp must be updated to include dispatch of the new Val
  * 3) Default mutator function should be added to mutator.h/.cpp
- * 4) Printing functions should be added to iriostream.h/.cpp
+ * 4) Printing functions should be added to ir_iostream.h/.cpp
  * 5) Lower case convenience functions should be added to arith.h/.cpp
  * 6) An enum value must be added to ExprType in type.h
  * 7) A string entry must be added in expr_type_string_map

@@ -1,6 +1,5 @@
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_printer.h>
-#include <torch/csrc/jit/codegen/cuda/iriostream.h>
 
 namespace torch {
 namespace jit {

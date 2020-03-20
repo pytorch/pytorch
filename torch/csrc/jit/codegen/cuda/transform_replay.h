@@ -9,10 +9,6 @@
 #include <algorithm>
 #include <vector>
 
-// For debug:
-/*
-#include <torch/csrc/jit/codegen/cuda/iriostream.h>
-*/
 namespace torch {
 namespace jit {
 namespace fuser {

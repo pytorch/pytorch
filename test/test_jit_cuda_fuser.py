@@ -17,22 +17,22 @@ if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
     torch._C._jit_set_profiling_executor(True)
     torch._C._jit_set_profiling_mode(True)
 
-@contextmanager
-def enable_new_fuser():
-    old_cpu_fuse = torch._C._jit_override_can_fuse_on_cpu(False)
-    old_gpu_fuse = torch._C._jit_override_can_fuse_on_gpu(False)
-    if(RUN_CUDA):
-        torch._C._jit_register_cuda_fuser()
-    try:
-        yield
-    finally:
+class TestCudaFuser(JitTestCase):
+
+    def setUp(self):
+        super(TestCudaFuser, self).setUp()
+        self.old_cpu_fuse = torch._C._jit_can_fuse_on_cpu(False)
+        self.old_gpu_fuse = torch._C._jit_can_fuse_on_gpu(False)
+        if(RUN_CUDA):
+            torch._C._jit_register_cuda_fuser()
+
+    def tearDown(self):
         if(RUN_CUDA):
             torch._C._jit_clear_cuda_fuser()
-        torch._C._jit_override_can_fuse_on_cpu(old_cpu_fuse)
-        torch._C._jit_override_can_fuse_on_gpu(old_gpu_fuse)
+        torch._C._jit_can_fuse_on_cpu(self.old_cpu_fuse)
+        torch._C._jit_can_fuse_on_gpu(self.old_gpu_fuse)
+        super(TestCudaFuser, self).tearDown()
 
-
-class TestCudaFuser(JitTestCase):
     def _has_cuda_fusion_group(self, graph):
         has_cuda_fusion_group = False
         for n in graph.nodes():
@@ -100,5 +100,4 @@ class TestCudaFuser(JitTestCase):
 
 
 if __name__ == '__main__':
-    with enable_new_fuser():
-        run_tests()
+    run_tests()

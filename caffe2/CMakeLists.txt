@@ -567,7 +567,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/index_compute.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/ir_base_nodes.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/ir_nodes.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/iriostream.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/ir_iostream.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/iter_visitor.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/kernel.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/manager.cpp
