@@ -22,7 +22,6 @@ set(JIT_TEST_SRCS
     ${JIT_TEST_ROOT}/test_interpreter.cpp
     ${JIT_TEST_ROOT}/test_ir.cpp
     ${JIT_TEST_ROOT}/test_irparser.cpp
-    ${JIT_TEST_ROOT}/test_ivalue.cpp
     ${JIT_TEST_ROOT}/test_jit_type.cpp
     ${JIT_TEST_ROOT}/test_lite_interpreter.cpp
     ${JIT_TEST_ROOT}/test_misc.cpp
