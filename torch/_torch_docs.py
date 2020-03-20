@@ -1522,13 +1522,13 @@ Given a quantized Tensor, dequantize it and return an fp32 Tensor
 Args:
     tensor (Tensor): A quantized Tensor
 
-.. function:: dequantize(tensors) -> List of Tensors
+.. function:: dequantize(tensors) -> sequence of Tensors
 
 Given a list of quantized Tensors, dequantize them and return a list of fp32 Tensors
 
 Args:
-     tensors (List of Tensors): A list of quantized Tensors
-""".format(**reduceops_common_args))
+     tensors (sequence of Tensors): A list of quantized Tensors
+""")
 
 add_docstr(torch.diag,
            r"""

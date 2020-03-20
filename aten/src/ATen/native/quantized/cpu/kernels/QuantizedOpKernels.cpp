@@ -1477,6 +1477,7 @@ REGISTER_DISPATCH(qcat_nhwc_stub, &qcat_nhwc_kernel<false>);
 REGISTER_DISPATCH(qcat_relu_nhwc_stub, &qcat_nhwc_kernel<true>);
 REGISTER_DISPATCH(qtopk_stub, &qtopk_kernel);
 REGISTER_DISPATCH(qbatch_norm_stub, &q_batch_norm_kernel<false>);
+REGISTER_DISPATCH(qbatch_norm_relu_stub, &q_batch_norm_kernel<true>);
 REGISTER_DISPATCH(fake_quant_tensor_stub, &fake_quantize_tensor_kernel);
 REGISTER_DISPATCH(fake_quant_grad_tensor_stub, &fake_quantize_grad_tensor_kernel);
 REGISTER_DISPATCH(fake_quant_per_channel_stub, &fake_quant_per_channel_cpu);
