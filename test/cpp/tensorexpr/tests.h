@@ -47,6 +47,7 @@ namespace jit {
   _(ScheduleFuserStyle)          \
   _(ScheduleFuserThreeArg)       \
   _(ScheduleDynamicShape2D)      \
+  _(ScheduleBoundsInference)     \
   _(TypeTest01)                  \
   _(TypePropagation)             \
   _(Cond01)                      \

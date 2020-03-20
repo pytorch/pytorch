@@ -545,5 +545,27 @@ void testScheduleDynamicShape2D() {
   testWithSize(37, 11);
 }
 
+void testScheduleBoundsInference() {
+  KernelScope kernel_scope;
+    VarHandle m("m", kInt);
+    VarHandle n("n", kInt);
+    Buffer a(VarHandle("a", kHandle), kFloat, {m, ExprHandle(100)});
+//     Buffer b(VarHandle("b", kHandle), kFloat, {m, 100});
+    Tensor* c = Compute(
+        "c", {{m, "m"}, {ExprHandle(100), "n"}}, [&](const VarHandle& i, const VarHandle& j) {
+          return a(i, j + 1) + a(i + 1, j);
+        });
+    LoopNest l({c});
+    std::vector<For*> loops = l.getLoopStmtsFor(c);
+    l.inferBounds(loops[0]);
+//     Stmt* s = l.root_stmt();
+//     SimpleIREvaluator cg(s, {a, b, c, m, n});
+//     std::vector<float> aData(M * N, 1.0f);
+// //     std::vector<float> bData(M * N, 2.0f);
+//     std::vector<float> cData(M * N, 0.0f);
+//     cg.call({aData, bData, cData, M, N});
+//     ExpectAllNear(cData, std::vector<float>(M * N, 3.0f), 1e-7);
+}
+
 } // namespace jit
 } // namespace torch

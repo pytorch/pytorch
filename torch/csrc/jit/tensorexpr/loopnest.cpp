@@ -869,6 +869,87 @@ bool LoopNest::hasLoopBodyFor(Tensor* t) const {
   return tensor_to_stmt_.count(t) > 0;
 }
 
+
+static void printBufVector(const std::unordered_map<const Var*, Range>& v) {
+  std::cerr << "Access vector {\n";
+  for (const auto& b : v) {
+    std::cerr << *b.first << " in (" << b.second.start() << "; " << b.second.stop() << ")\n";
+  }
+  std::cerr << "}\n";
+}
+
+std::unordered_map<const Var*, Range> LoopNest::inferBounds(Stmt* s) {
+  std::cerr << "Given stmt:\n" << *s << "\n";
+  if (auto *b = dynamic_cast<Block*>(s)) {
+    return inferBoundsForBlock(b);
+  }
+  auto *f = dynamic_cast<For*>(s);
+  CHECK(f);
+  return inferBoundsForLoop(f);
+}
+
+std::unordered_map<const Var*, Range> LoopNest::inferBoundsForBlock(Block *b) {
+  std::cerr << "Analyzing block:\n" << *b << "\n";
+  std::unordered_map<const Var*, Range> res;
+  for (auto s : b->stmts()) {
+    std::unordered_map<const Var*, Range> stmt_bufs;;
+    if (auto* f = dynamic_cast<For*>(s)) {
+      stmt_bufs = inferBoundsForLoop(f);
+    } else if (auto* st = dynamic_cast<Store*>(s)) {
+      stmt_bufs = inferBoundsForStore(st);
+    } else {
+      std::cerr << "Not analyzing stmt:\n" << *s << "\n";
+    }
+    res = mergeBufVectors(res, stmt_bufs);
+  }
+  std::cerr << "Analyzed block:\n" << *b << "\nResult:\n";
+  printBufVector(res);
+  return res;
+}
+
+std::unordered_map<const Var*, Range> LoopNest::inferBoundsForLoop(For *f) {
+  std::cerr << "Analyzing For loop:\n" << *f << "\n";
+  auto res = inferBoundsForBlock(f->body());
+//   body_inner = Substitute(body_inner, {{f->var(), combined_index}});
+//   ConstantFolder constant_folder;
+  for (const auto& p : res) {
+    const Expr* old_start = p.second.start().node();
+    const Expr* old_stop = p.second.stop().node();
+//     const Expr* new_start = Substitute(old_start, {{f->var(),f->start()}})->accept_mutator(&constant_folder);
+//     const Expr* new_stop = Substitute(old_stop, {{f->var(),new Sub(f->stop(), new IntImm(1))}})->accept_mutator(&constant_folder);
+//     const Expr* new_start = Substitute(&a, {{f->var(),f->start()}});
+//     const Expr* new_stop = Substitute(&b, {{f->var(),f->stop()}});
+//
+    const Expr* new_start = Substitute(old_start, {{f->var(), f->start()}});
+    const Expr* new_stop = Substitute(old_stop, {{f->var(),new Sub(f->stop(), new IntImm(1))}});
+    res[p.first] = Range(ExprHandle(new_start), ExprHandle(new_stop));
+  }
+  std::cerr << "Analyzed For loop:\n" << *f << "\n";
+  printBufVector(res);
+  return res;
+}
+
+std::unordered_map<const Var*, Range> LoopNest::inferBoundsForStore(Store *st) {
+  std::cerr << "Analyzing Store:\n" << *st << "\n";
+  std::unordered_map<const Var*, Range> res;
+  res[st->base_handle()] = Range(ExprHandle(st->index()), ExprHandle(st->index())+1);
+  return res;
+}
+
+std::unordered_map<const Var*, Range> LoopNest::mergeBufVectors(
+    std::unordered_map<const Var*, Range> a,
+    std::unordered_map<const Var*, Range> b) {
+  std::unordered_map<const Var*, Range> res(a);
+  for (const auto& p : b) {
+    res[p.first] = p.second;
+  }
+  return res;
+}
+
+
+
+
+
 } // namespace schedule
 } // namespace tensorexpr
 } // namespace jit

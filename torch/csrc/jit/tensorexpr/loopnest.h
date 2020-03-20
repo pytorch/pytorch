@@ -35,7 +35,17 @@ class TORCH_API LoopNest {
   void SetGPUBlockIndex(For* f, int idx);
   void SetGPUThreadIndex(For* f, int idx);
 
- private:
+  std::unordered_map<const Var*, Range> inferBounds(Stmt* s);
+
+  private:
+  std::unordered_map<const Var*, Range> inferBoundsForBlock(Block* b);
+  std::unordered_map<const Var*, Range> inferBoundsForLoop(For* f);
+  std::unordered_map<const Var*, Range> inferBoundsForStore(Store* st);
+  std::unordered_map<const Var*, Range> mergeBufVectors(
+      std::unordered_map<const Var*, Range> a,
+      std::unordered_map<const Var*, Range> b);
+
+
   std::vector<Tensor*> FindAllNeededTensors(
       const std::vector<Tensor*>& tensors);
   Stmt* LowerToStmt(Tensor* t);
