@@ -11,8 +11,6 @@ if(USE_CUDA)
 elseif(USE_ROCM)
   add_definitions(-DUSE_ROCM=1)
   add_definitions(-D__HIP_PLATFORM_HCC__=1)
-  # same definition as in hip/hip_version.h
-  add_definitions(-DHIP_VERSION=(${HIP_VERSION_MAJOR}*100+${HIP_VERSION_MINOR}))
 else()
   message(STATUS "Building c10d without CUDA/ROCm support")
 endif()

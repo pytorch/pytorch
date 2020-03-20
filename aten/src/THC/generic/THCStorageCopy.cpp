@@ -2,11 +2,13 @@
 #define THC_GENERIC_FILE "THC/generic/THCStorageCopy.cpp"
 #else
 
+#ifdef __HIP_PLATFORM_HCC__                                                                                                                                                 #include <hip/hip_version.h>                                                                                                                                                #endif
+
 void THCStorage_(copyCPU)(THCState *state, THCStorage *self, struct THStorage *src)
 {
   THArgCheck(self->numel() == src->numel(), 2, "size does not match");
   cudaStream_t stream = c10::cuda::getCurrentCUDAStream();
-#if HIP_VERSION >= 310
+#if HIP_VERSION >= 301
   THCudaCheck(hipMemcpyWithStream(THCStorage_(data)(state, self),
                                   THStorage_(data)(src),
                                   self->numel() * sizeof(scalar_t),
@@ -48,7 +50,7 @@ void THStorage_(copyCuda)(THCState *state, THStorage *self, struct THCStorage *s
 {
   THArgCheck(self->numel() == src->numel(), 2, "size does not match");
   cudaStream_t stream = c10::cuda::getCurrentCUDAStream();
-#if HIP_VERSION >= 310
+#if HIP_VERSION >= 301
   THCudaCheck(hipMemcpyWithStream(THStorage_(data)(self),
                                   THCStorage_(data)(state, src),
                                   self->numel() * sizeof(scalar_t),

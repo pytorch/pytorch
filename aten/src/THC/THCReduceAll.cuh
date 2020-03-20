@@ -12,6 +12,8 @@
 #include <THC/THCReduceApplyUtils.cuh>
 #include <c10/macros/Macros.h>
 
+#ifdef __HIP_PLATFORM_HCC__                                                                                                                                                 #include <hip/hip_version.h>                                                                                                                                                #endif
+
 // Size per each reduction block
 #define THC_REDUCE_ALL_BLOCK_SIZE 1024L
 
@@ -320,7 +322,7 @@ bool THC_reduceAll(THCState* state,
   // the host (synchronous!)
   if (!outOnDevice) {
     cudaStream_t stream = c10::cuda::getCurrentCUDAStream();
-#if HIP_VERSION >= 310
+#if HIP_VERSION >= 301
     THCudaCheck(hipMemcpyWithStream(out,
                                     devOut,
                                     sizeof(AccT),

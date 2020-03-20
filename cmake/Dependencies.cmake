@@ -962,8 +962,6 @@ if(USE_ROCM)
     list(APPEND HIP_CXX_FLAGS -DCUDA_HAS_FP16=1)
     list(APPEND HIP_CXX_FLAGS -D__HIP_NO_HALF_OPERATORS__=1)
     list(APPEND HIP_CXX_FLAGS -D__HIP_NO_HALF_CONVERSIONS__=1)
-    # this is the same HIP_VERSION definition as in hip/hip_version.h
-    list(APPEND HIP_CXX_FLAGS -DHIP_VERSION=(${HIP_VERSION_MAJOR}*100+${HIP_VERSION_MINOR}))
     list(APPEND HIP_CXX_FLAGS -Wno-macro-redefined)
     list(APPEND HIP_CXX_FLAGS -Wno-inconsistent-missing-override)
     list(APPEND HIP_CXX_FLAGS -Wno-exceptions)
