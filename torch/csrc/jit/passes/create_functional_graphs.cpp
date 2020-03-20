@@ -265,8 +265,9 @@ struct MutationRemover {
       return false;
     }
     auto inputs = n->inputs();
-    if (!aliasDb_->writtenToAtNode(inputs.at(0), n) ||
-        aliasDb_->writtenToAtNode(inputs.slice(1), n)) {
+    if (!aliasDb_->writesToAlias(n, {inputs.at(0)}) ||
+        aliasDb_->writesToAlias(
+            n, {inputs.slice(1).begin(), inputs.slice(1).end()})) {
       return false;
     }
 
@@ -307,6 +308,11 @@ struct MutationRemover {
       auto schema_name = node->schema().name();
       auto new_schema = schema_name.substr(0, schema_name.size() - 1);
       auto new_node = graph_->create(Symbol::fromQualString(new_schema), 1);
+      new_node->setSourceRange(node->sourceRange());
+      new_node->setScope(node->scope());
+      if (auto cs = node->callstack()) {
+        new_node->setCallStack(*cs);
+      }
       new_node->insertBefore(node);
       for (Value* input : node->inputs()) {
         new_node->addInput(input);
