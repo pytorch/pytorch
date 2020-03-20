@@ -151,24 +151,6 @@ bool AliasDb::writesToAlias(Node* n, const ValueSet& vs) const {
   return false;
 }
 
-bool AliasDb::writtenToAtNode(const at::ArrayRef<Value*> vs, Node* n) const {
-  auto writes = getWrites(n);
-  if (writes.empty()) {
-    return false;
-  }
-  for (Value* v : vs) {
-    auto it = elementMap_.find(v);
-    if (it == elementMap_.end()) {
-      return false;
-    }
-    const auto& writtenMemoryLocations = it->second->getMemoryLocations();
-    if (writes.intersects(writtenMemoryLocations)) {
-      return true;
-    }
-  }
-  return false;
-}
-
 MemoryLocations AliasDb::getWrites(Node* n) const {
   MemoryLocations writes;
   getWritesImpl(n, writes);
