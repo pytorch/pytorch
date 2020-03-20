@@ -19,6 +19,15 @@ namespace multiprocessing {
 namespace {
 
 PyObject* multiprocessing_init(PyObject* _unused, PyObject *noargs) {
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+  TORCH_WARN(
+    "torch.multiprocessing: your pytorch binary has address sanitizer (asan) built in, "
+    "asan is currently not compatiable with spawn-based (start method is 'spawn') multiprocessing "
+    "which is provided in this module, you might get unexpected behavior (eg. missing attribute, crash, etc.), "
+    "please rebuild pytorch without asan if you need spawn-based multiprocessing");
+#endif
+#endif
   auto multiprocessing_module =
       THPObjectPtr(PyImport_ImportModule("torch.multiprocessing"));
   if (!multiprocessing_module) {
