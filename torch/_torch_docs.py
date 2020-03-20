@@ -1515,9 +1515,19 @@ Example::
 
 add_docstr(torch.dequantize,
            r"""
-dequantize(tensor) -> Tensor or List of Tensors
+.. function:: dequantize(tensor) -> Tensor
 
-Given a quantized Tensor or a list of quantized Tensors, dequantize them and return a Tensor or list of dequantized Tensors
+Given a quantized Tensor, dequantize it and return an fp32 Tensor
+
+Args:
+    tensor (Tensor): A quantized Tensor
+
+.. function:: dequantize(tensors) -> List of Tensors
+
+Given a list of quantized Tensors, dequantize them and return a list of fp32 Tensors
+
+Args:
+     tensors (List of Tensors): A list of quantized Tensors
 """.format(**reduceops_common_args))
 
 add_docstr(torch.diag,
