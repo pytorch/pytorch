@@ -2208,6 +2208,8 @@ graph(%input, %weight):
         qconfig_dict = {'': default_qconfig}
         model = torch.jit.script(M()).eval()
         model = quantize_script(model, qconfig_dict, _test_only_eval_fn, [data], inplace=False)
+        # make sure there is only one quantize_per_tensor for input
+        # and conv2d_prepack is folded
         FileCheck().check_count("aten::quantize_per_tensor", 1, exactly=True) \
                    .check_not("quantized::conv2d_prepack") \
                    .check("quantized::conv2d") \
@@ -2226,6 +2228,8 @@ graph(%input, %weight):
         qconfig_dict = {'': default_qconfig}
         model = torch.jit.script(M()).eval()
         model = quantize_script(model, qconfig_dict, _test_only_eval_fn, [data], inplace=False)
+        # make sure there is only one quantize_per_tensor for input
+        # and linear_prepack is folded
         FileCheck().check_count("aten::quantize_per_tensor", 1, exactly=True) \
                    .check_not("quantized::linear_prepack") \
                    .check("quantized::linear") \
