@@ -158,7 +158,7 @@ std::ostream& operator<<(
     const ExpandingArrayWithOptionalElem<D, T>& expanding_array_with_opt_elem) {
   if (expanding_array_with_opt_elem.size() == 1) {
     const auto& elem = expanding_array_with_opt_elem->at(0);
-    stream << elem.has_value() ? c10::str(elem.value()) : "None";
+    stream << (elem.has_value() ? c10::str(elem.value()) : "None");
   } else {
     std::vector<std::string> str_array;
     for (const auto& elem : *expanding_array_with_opt_elem) {
