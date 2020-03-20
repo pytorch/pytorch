@@ -12,7 +12,7 @@ import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.qat as nniqat
 
 from torch._ops import ops
-from torch.nn.modules.utils import _pair, _triple
+from torch.nn.modules.utils import _single, _pair, _triple
 from torch.nn.quantized.modules.utils import _quantize_weight
 from torch.nn.utils import fuse_conv_bn_weights
 
@@ -134,6 +134,126 @@ class _ConvNd(nn.Module):
         self.scale = state[12]
         self.zero_point = state[13]
         self.training = state[14]
+
+
+class Conv1d(_ConvNd):
+    r"""Applies a 1D convolution over a quantized input signal composed of
+    several quantized input planes.
+
+    For details on input arguments, parameters, and implementation see
+    :class:`~torch.nn.Conv1d`.
+
+    .. note::
+        Only `zeros` is supported for the :attr:`padding_mode` argument.
+
+    .. note::
+        Only `torch.quint8` is supported for the input data type.
+
+
+    Attributes:
+        weight (Tensor):     packed tensor derived from the learnable weight
+                             parameter.
+        scale (Tensor):      scalar for the output scale
+        zero_point (Tensor): scalar for the output zero point
+
+    See :class:`~torch.nn.Conv2d` for other attributes.
+
+    Examples::
+
+        >>> m = nn.quantized.Conv1d(16, 33, 3, stride=2)
+        >>> input = torch.randn(20, 16, 100)
+        >>> # quantize input to qint8
+        >>> q_input = torch.quantize_per_tensor(input, scale=1.0, zero_point=0, dtype=torch.qint32)
+        >>> output = m(input)
+
+    """
+
+    _FLOAT_MODULE = nn.Conv1d
+
+    # We are using Conv2d to run the Conv1d. For that we need to know which
+    # dimension is squeezed/unsqueezed.
+    _SQUEEZE_DIM = -2  # -2 is faster than -1.
+
+    def __init__(self, in_channels, out_channels, kernel_size, stride=1,
+                 padding=0, dilation=1, groups=1, bias=True,
+                 padding_mode='zeros'):
+        kernel_size = list(_pair(kernel_size))
+        assert(kernel_size[0] == kernel_size[1])
+        kernel_size[self._SQUEEZE_DIM] = 1
+        kernel_size = tuple(kernel_size)
+
+        # Sanity checks
+        stride = _pair(stride)
+        padding = _pair(padding)
+        dilation = _pair(dilation)
+        assert(stride[0] == stride[1])
+        assert(padding[0] == padding[1])
+        assert(dilation[0] == dilation[1])
+
+        super(Conv1d, self).__init__(
+            in_channels, out_channels, kernel_size, stride, padding, dilation,
+            groups, bias, padding_mode)
+
+    def _get_name(self):
+        return 'QuantizedConv1d'
+
+    def set_weight_bias(self, w, b):
+        # type: (torch.Tensor, Optional[torch.Tensor]) -> None
+        # Check if need to unsqueeze
+        if len(w.shape) == 3:
+            w = w.unsqueeze(dim=self._SQUEEZE_DIM)
+        self._packed_params = torch.ops.quantized.conv2d_prepack(
+            w, b, self.stride, self.padding, self.dilation, self.groups)
+
+    def _weight_bias(self):
+        w, b = torch.ops.quantized.conv2d_unpack(self._packed_params)
+        w = w.squeeze(dim=self._SQUEEZE_DIM)
+        return w, b
+
+    def weight(self):
+        return self._weight_bias()[0]
+
+    def bias(self):
+        return self._weight_bias()[1]
+
+    def forward(self, input):
+        # Temporarily using len(shape) instead of ndim due to JIT issue
+        # https://github.com/pytorch/pytorch/issues/23890
+        if len(input.shape) != 3:
+            raise ValueError("Input shape must be `(N, C, L)`!")
+        input = input.unsqueeze(dim=self._SQUEEZE_DIM)
+        output = ops.quantized.conv2d(
+            input, self._packed_params, self.stride, self.padding,
+            self.dilation, self.groups, self.scale, self.zero_point)
+        return output.squeeze(dim=self._SQUEEZE_DIM)
+
+    @classmethod
+    def from_float(cls, mod):
+        r"""Creates a quantized module from a float module or qparams_dict.
+
+        Args:
+            mod (Module): a float module, either produced by torch.quantization
+              utilities or provided by the user
+        """
+        assert type(mod) == cls._FLOAT_MODULE, \
+            ' nnq.' + cls.__name__ + '.from_float only works for ' + \
+            cls._FLOAT_MODULE.__name__
+        assert hasattr(mod, 'qconfig'), \
+            'Input float module must have qconfig defined.'
+        weight_post_process = mod.qconfig.weight()
+        weight_post_process(mod.weight)
+        act_scale, act_zp = mod.activation_post_process.calculate_qparams()
+        assert weight_post_process.dtype == torch.qint8, \
+            'Weight observer must have a dtype of qint8'
+        qweight = _quantize_weight(mod.weight.float(), weight_post_process)
+        qconv = cls(mod.in_channels, mod.out_channels, mod.kernel_size,
+                    mod.stride, mod.padding, mod.dilation, mod.groups,
+                    mod.bias is not None, mod.padding_mode)
+        qconv.set_weight_bias(qweight, mod.bias)
+        qconv.scale = float(act_scale)
+        qconv.zero_point = int(act_zp)
+
+        return qconv
 
 
 class Conv2d(_ConvNd):
