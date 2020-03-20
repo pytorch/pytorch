@@ -10,6 +10,7 @@ from torch.testing._internal.common_cuda import TEST_MULTIGPU, TEST_CUDA
 from torch.testing._internal.common_utils import run_tests, TestCase, repeat_test_for_types, ALL_TENSORTYPES, PY3
 from torch.testing._internal.common_utils import _assertGradAndGradgradChecks
 from torch.testing._internal.common_utils import dtype2prec_DONTUSE
+from torch.testing._internal.common_utils import skipIfRocm
 import torch.nn.functional as F
 
 torch.set_default_dtype(torch.double)
