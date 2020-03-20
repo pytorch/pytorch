@@ -145,7 +145,7 @@ Reducer::Reducer(
             grad_accumulator->add_post_hook(torch::make_unique<LambdaPostHook>(
                 [=] {
                     if (delay_allreduce_) {
-                      this->delayed_autograd_hook();
+                      this->delayed_autograd_hook(index);
                     } else {
                       this->autograd_hook(index);
                     }
@@ -222,41 +222,6 @@ Reducer::~Reducer() noexcept(false) {
   }
 }
 
-void Reducer::delayed_autograd_hook() {
-  std::lock_guard<std::mutex> lock(this->mutex_);
-
-  // Ignore if we don't expect to be called.
-  // This may be the case if the user wants to accumulate gradients
-  // for number of iterations before reducing them.
-  if (!expect_autograd_hooks_) {
-    return;
-  }
-
-  if (require_final_hook_) {
-    torch::autograd::Engine::get_default_engine().queue_callback([=] {
-      std::lock_guard<std::mutex> lock(this->mutex_);
-
-      const auto replica_count = replicas_.size();
-      grad_accumulators_.resize(replica_count);
-      for (size_t replica_index = 0; replica_index < replica_count;
-           replica_index++) {
-        const auto variable_count = replicas_[replica_index].size();
-        for (size_t variable_index = 0; variable_index < variable_count;
-             variable_index++) {
-          const auto index = VariableIndex{
-              .replica_index = replica_index,
-              .variable_index = variable_index,
-          };
-
-          mark_variable_ready(index);
-        }
-      }
-    });
-    // mark false as the final hook only needs to be inserted once
-    require_final_hook_ = false;
-  }
-}
-
 void Reducer::mark_variable_ready_dense(VariableIndex index) {
   const auto replica_index = index.replica_index;
   const auto variable_index = index.variable_index;
@@ -313,6 +278,53 @@ void Reducer::mark_variable_ready_sparse(VariableIndex index) {
   // struct are empty, and there is no pre-existing accumulation tensor.
   // Directly assign the sparse tensor to the `contents` field.
   replica.contents = grad;
+}
+
+// The function `autograd_hook` is called after the gradient for a
+// model parameter has been accumulated into its gradient tensor.
+// This function is only to be called from the autograd thread.
+// Comared to the vinilla autograd_hook() function, this delayed hook installs
+// a final callback to the autograd engine, and launched all communication in
+// the final callback.
+void Reducer::delayed_autograd_hook(VariableIndex index) {
+  std::lock_guard<std::mutex> lock(this->mutex_);
+
+  // Since it gets here, this param has been used for this iteration. We want
+  // to mark it in local_used_maps_. During no_sync session, the same var can
+  // be set multiple times, which is OK as does not affect correctness. As long
+  // as it is used once during no_sync session, it is marked as used.
+  local_used_maps_[index.replica_index][index.variable_index] = 1;
+
+  // Ignore if we don't expect to be called.
+  // This may be the case if the user wants to accumulate gradients
+  // for number of iterations before reducing them.
+  if (!expect_autograd_hooks_) {
+    return;
+  }
+
+  if (require_final_hook_) {
+    torch::autograd::Engine::get_default_engine().queue_callback([=] {
+      std::lock_guard<std::mutex> lock(this->mutex_);
+
+      const auto replica_count = replicas_.size();
+      grad_accumulators_.resize(replica_count);
+      for (size_t replica_index = 0; replica_index < replica_count;
+           replica_index++) {
+        const auto variable_count = replicas_[replica_index].size();
+        for (size_t variable_index = 0; variable_index < variable_count;
+             variable_index++) {
+          const auto index = VariableIndex{
+              .replica_index = replica_index,
+              .variable_index = variable_index,
+          };
+
+          mark_variable_ready(index);
+        }
+      }
+    });
+    // mark false as the final hook only needs to be inserted once
+    require_final_hook_ = false;
+  }
 }
 
 // The function `autograd_hook` is called after the gradient for a
@@ -772,6 +784,7 @@ void Reducer::finalize_backward() {
       finalize_bucket_dense(bucket);
     }
   }
+
 
   // Reset unused parameter accounting.
   for (auto& local_used : local_used_maps_) {

@@ -104,9 +104,9 @@ class Reducer {
 
   void mark_variable_ready(VariableIndex index);
 
-  void autograd_hook(VariableIndex index);
+  void delayed_autograd_hook(VariableIndex index);
 
-  void delayed_autograd_hook();
+  void autograd_hook(VariableIndex index);
 
   void mark_bucket_ready(size_t bucket_index);
 

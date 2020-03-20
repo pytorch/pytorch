@@ -2989,12 +2989,11 @@ class DistributedDataParallelDelayAllreduceTest(DistributedDataParallelTest):
         # under ``delay_allreduce`` mode
         return True
 
-    @requires_nccl()
     @skip_if_not_multigpu
     def test_checkpoint(self):
         # This test is inspired by the repo in #24005
-        store = c10d.FileStore(self.file.name, self.world_size)
-        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
 
         class CheckpointStep(nn.Module):
 

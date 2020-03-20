@@ -769,6 +769,11 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaC2(
     initialization_list.clear();
   }
 
+  // Add parition info
+  for (const auto& p : partition_infos_) {
+    onnxifi_net.add_partition_info()->CopyFrom(p);
+  }
+
   // Build ONNXIFI Op
   std::vector<std::string> onnxifi_net_inputs(
       onnxifi_net.external_input().begin(), onnxifi_net.external_input().end());
@@ -1143,11 +1148,30 @@ void OnnxifiTransformer::tieGatherAndSparseLengthsWeightedSumOps(
   }
 }
 
+void OnnxifiTransformer::blacklistCpuPartition(
+    const NetDef& net,
+    std::unordered_set<int>* blacklisted_ops) const {
+  std::unordered_set<std::string> cpu_partitions;
+  for (const auto& p : partition_infos_) {
+    if (p.device_id_size() == 0) {
+      cpu_partitions.emplace(p.name());
+    }
+  }
+  for (const auto& op : net.op()) {
+    const auto& pname = op.device_option().node_name();
+    if (cpu_partitions.count(pname)) {
+      blacklisted_ops->emplace(
+          ArgumentHelper::GetSingleArgument<OperatorDef, int>(op, kNetPos, -1));
+    }
+  }
+}
+
 void OnnxifiTransformer::applyFilteringRules(
     const NetDef& net,
     const ShapeInfoMap& shape_hints,
     std::unordered_set<int>* blacklisted_ops) const {
   tieGatherAndSparseLengthsWeightedSumOps(net, shape_hints, blacklisted_ops);
+  blacklistCpuPartition(net, blacklisted_ops);
 }
 
 void OnnxifiTransformer::getBackendId() {
@@ -1220,6 +1244,13 @@ NetDef OnnxifiTransformer::TransformViaOnnx(
       *pred_net, onnx_supports, onnx_converter, opts_.debug);
 }
 
+void OnnxifiTransformer::extractPartitionInfo(const NetDef& net) {
+  partition_infos_.clear();
+  for (const auto& p : net.partition_info()) {
+    partition_infos_.emplace_back(p);
+  }
+}
+
 // Cutting off the runnable part and replace with ONNXIFI ops. Asssume the nets
 // were topologically sorted
 void OnnxifiTransformer::transform(
@@ -1266,6 +1297,7 @@ void OnnxifiTransformer::transform(
   if (opts_.debug) {
     dumpNet(*pred_net, shape_hints, "debug_ssa_net.pb_txt");
   }
+  extractPartitionInfo(*pred_net);
 
   // Get backend id
   getBackendId();
