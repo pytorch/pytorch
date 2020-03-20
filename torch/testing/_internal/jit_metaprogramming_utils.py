@@ -10,6 +10,7 @@ import torch.jit
 import torch.jit._logging
 import torch.jit.frontend
 from copy import deepcopy
+import math  # noqa: F401
 
 # Testing utils
 from torch._six import inf

@@ -3,9 +3,7 @@ from torch._six import PY2
 from torch.autograd import Variable
 from torch.autograd.function import _nested_map
 from torch.jit.annotations import BroadcastingList2, BroadcastingList3  # noqa: F401
-from torch.testing._internal.common_methods_invocations import non_differentiable, create_input, \
-    unpack_variables
-import torch.nn.functional as F
+
 from torch.onnx import OperatorExportTypes
 import torch
 import torch.cuda
@@ -15,12 +13,10 @@ import torch.jit.frontend
 import torch.jit.quantized
 import zipfile
 import functools
-from copy import deepcopy
 
 # Testing utils
 from torch.testing._internal.common_utils import TestCase, IS_WINDOWS, \
     freeze_rng_state, TemporaryFileName, enable_profiling_mode, ProfilingMode, TEST_BAILOUTS
-from torch._six import inf
 
 # Standard library
 from contextlib import contextmanager
