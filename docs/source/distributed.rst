@@ -395,6 +395,8 @@ of 16
 .. autofunction:: all_gather_multigpu
 
 
+.. _distributed-launch:
+
 Launch utility
 --------------
 
