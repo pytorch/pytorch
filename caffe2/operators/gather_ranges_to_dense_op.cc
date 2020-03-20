@@ -3,7 +3,7 @@
 namespace caffe2 {
 namespace {
 
-OPERATOR_SCHEMA(GatherRangesToDense)
+OPERATOR_SCHEMA_NOEXPORT(GatherRangesToDense)
     .NumInputs(2, 3)
     .NumOutputs(1, INT_MAX)
     .SetDoc(R"DOC(
@@ -99,7 +99,7 @@ are sorted by the corresponding KEY.
       return out;
     });
 
-REGISTER_CPU_OPERATOR(GatherRangesToDense, GatherRangesToDenseOp<CPUContext>);
+REGISTER_CPU_OPERATOR_NOIMPORT(GatherRangesToDense, GatherRangesToDenseOp<CPUContext>);
 NO_GRADIENT(GatherRangesToDense);
 
 } // namespace

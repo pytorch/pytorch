@@ -2,11 +2,11 @@
 
 namespace caffe2 {
 namespace {
-REGISTER_CPU_OPERATOR(
+REGISTER_CPU_OPERATOR_NOIMPORT(
     FindDuplicateElements,
     FindDuplicateElementsOp<CPUContext>);
 
-OPERATOR_SCHEMA(FindDuplicateElements)
+OPERATOR_SCHEMA_NOEXPORT(FindDuplicateElements)
     .NumInputs(1)
     .NumOutputs(1)
     .SetDoc(R"DOC(

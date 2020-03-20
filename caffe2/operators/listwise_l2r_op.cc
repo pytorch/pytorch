@@ -232,18 +232,18 @@ bool LambdaRankNdcgGradientOp<float, CPUContext>::RunOnDevice() {
 
 namespace {
 
-REGISTER_CPU_OPERATOR(LambdaRankNdcg, LambdaRankNdcgOp<float, CPUContext>);
-REGISTER_CPU_OPERATOR(
+REGISTER_CPU_OPERATOR_NOIMPORT(LambdaRankNdcg, LambdaRankNdcgOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR_NOIMPORT(
     LambdaRankNdcgGradient,
     LambdaRankNdcgGradientOp<float, CPUContext>);
 
-OPERATOR_SCHEMA(LambdaRankNdcg).NumInputs(3).NumOutputs(2).SetDoc(R"DOC(
+OPERATOR_SCHEMA_NOEXPORT(LambdaRankNdcg).NumInputs(3).NumOutputs(2).SetDoc(R"DOC(
 It implements the LambdaRank as appeared in Wu, Qiang, et al. "Adapting boosting
 for information retrieval measures." Information Retrieval 13.3 (2010): 254-270.
 
 This method heuristically optimizes the NDCG.
 )DOC");
-OPERATOR_SCHEMA(LambdaRankNdcgGradient).NumInputs(4).NumOutputs(1);
+OPERATOR_SCHEMA_NOEXPORT(LambdaRankNdcgGradient).NumInputs(4).NumOutputs(1);
 
 class GetLambdaRankNdcgGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;

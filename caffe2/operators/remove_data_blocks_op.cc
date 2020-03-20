@@ -2,9 +2,9 @@
 
 namespace caffe2 {
 namespace {
-REGISTER_CPU_OPERATOR(RemoveDataBlocks, RemoveDataBlocksOp<CPUContext>);
+REGISTER_CPU_OPERATOR_NOIMPORT(RemoveDataBlocks, RemoveDataBlocksOp<CPUContext>);
 
-OPERATOR_SCHEMA(RemoveDataBlocks)
+OPERATOR_SCHEMA_NOEXPORT(RemoveDataBlocks)
     .NumInputs(2)
     .NumOutputs(1)
     .SetDoc(R"DOC(

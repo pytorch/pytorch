@@ -3,10 +3,10 @@
 namespace caffe2 {
 namespace {
 
-REGISTER_CPU_OPERATOR(Where, WhereOp<CPUContext>);
+REGISTER_CPU_OPERATOR_NOIMPORT(Where, WhereOp<CPUContext>);
 
 // Input: C, X, Y, output: Z
-OPERATOR_SCHEMA(Where)
+OPERATOR_SCHEMA_NOEXPORT(Where)
     .NumInputs(3)
     .NumOutputs(1)
     .AllowInplace({{1, 2}})
@@ -22,10 +22,10 @@ produces one output data (Tensor) where z = c ? x : y is applied elementwise.
 
 SHOULD_NOT_DO_GRADIENT(Where);
 
-REGISTER_CPU_OPERATOR(IsMemberOf, IsMemberOfOp<CPUContext>);
+REGISTER_CPU_OPERATOR_NOIMPORT(IsMemberOf, IsMemberOfOp<CPUContext>);
 
 // Input: X, output: Y
-OPERATOR_SCHEMA(IsMemberOf)
+OPERATOR_SCHEMA_NOEXPORT(IsMemberOf)
     .NumInputs(1)
     .NumOutputs(1)
     .TensorInferenceFunction(

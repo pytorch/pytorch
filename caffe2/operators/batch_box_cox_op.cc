@@ -317,8 +317,8 @@ DEFINE_CACHED_BUFFERS(double, 2);
 
 namespace {
 
-REGISTER_CPU_OPERATOR(BatchBoxCox, BatchBoxCoxOp<CPUContext>);
-OPERATOR_SCHEMA(BatchBoxCox)
+REGISTER_CPU_OPERATOR_NOIMPORT(BatchBoxCox, BatchBoxCoxOp<CPUContext>);
+OPERATOR_SCHEMA_NOEXPORT(BatchBoxCox)
     .NumInputs(3)
     .NumOutputs(1)
     .IdenticalTypeAndShapeOfInput(0)

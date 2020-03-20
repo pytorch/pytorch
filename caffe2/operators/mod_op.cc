@@ -27,8 +27,8 @@ bool ModOp<CPUContext>::DoRunWithType() {
 
 namespace {
 
-REGISTER_CPU_OPERATOR(Mod, ModOp<CPUContext>);
-OPERATOR_SCHEMA(Mod)
+REGISTER_CPU_OPERATOR_NOIMPORT(Mod, ModOp<CPUContext>);
+OPERATOR_SCHEMA_NOEXPORT(Mod)
     .NumInputs(1)
     .NumOutputs(1)
     .Arg("divisor", "*(type: int; default: 0)* Divisor of the modulo operation (must be >= 1).")

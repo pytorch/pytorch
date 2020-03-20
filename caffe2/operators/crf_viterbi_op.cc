@@ -192,8 +192,8 @@ class SwapBestPathOp : public Operator<CPUContext> {
     return true;
   }
 };
-REGISTER_CPU_OPERATOR(ViterbiPath, ViterbiPathOp);
-OPERATOR_SCHEMA(ViterbiPath)
+REGISTER_CPU_OPERATOR_NOIMPORT(ViterbiPath, ViterbiPathOp);
+OPERATOR_SCHEMA_NOEXPORT(ViterbiPath)
     .NumInputs(2)
     .NumOutputs(1)
     .SetDoc(R"DOC(
@@ -204,8 +204,8 @@ score
     .Input(1, "transitions", "D*D transitions matrix")
     .Output(0, "viterbi_path", "N*1 vector holds the best path indices");
 NO_GRADIENT(ViterbiPath);
-REGISTER_CPU_OPERATOR(SwapBestPath, SwapBestPathOp);
-OPERATOR_SCHEMA(SwapBestPath)
+REGISTER_CPU_OPERATOR_NOIMPORT(SwapBestPath, SwapBestPathOp);
+OPERATOR_SCHEMA_NOEXPORT(SwapBestPath)
     .NumInputs(2)
     .NumOutputs(1)
     .SetDoc(R"DOC(

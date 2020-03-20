@@ -64,10 +64,10 @@ bool LpNormGradientOp<float, CPUContext>::RunOnDevice() {
 
 namespace {
 // LpNorm
-REGISTER_CPU_OPERATOR(LpNorm, LpNormOp<float, CPUContext>);
-REGISTER_CPU_OPERATOR(LpNormGradient, LpNormGradientOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR_NOIMPORT(LpNorm, LpNormOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR_NOIMPORT(LpNormGradient, LpNormGradientOp<float, CPUContext>);
 
-OPERATOR_SCHEMA(LpNorm)
+OPERATOR_SCHEMA_NOEXPORT(LpNorm)
     .NumInputs(1)
     .NumOutputs(1)
     .SetDoc(R"DOC(
@@ -139,7 +139,7 @@ Y:
           CreateTensorShape(vector<int64_t>{output_dims}, in[0].data_type())};
     });
 
-OPERATOR_SCHEMA(LpNormGradient)
+OPERATOR_SCHEMA_NOEXPORT(LpNormGradient)
     .NumInputs(2)
     .NumOutputs(1)
     .SetDoc(R"DOC(

@@ -3,12 +3,12 @@
 namespace caffe2 {
 namespace {
 
-REGISTER_CPU_OPERATOR(CopyRowsToTensor, CopyRowsToTensorOp<CPUContext>);
-REGISTER_CPU_GRADIENT_OPERATOR(
+REGISTER_CPU_OPERATOR_NOIMPORT(CopyRowsToTensor, CopyRowsToTensorOp<CPUContext>);
+REGISTER_CPU_GRADIENT_OPERATOR_NOIMPORT(
     CopyRowsToTensorGradient,
     CopyRowsToTensorGradientOp<CPUContext>);
 
-OPERATOR_SCHEMA(CopyRowsToTensor)
+OPERATOR_SCHEMA_NOEXPORT(CopyRowsToTensor)
     .NumInputs(3)
     .NumOutputs(1)
     .EnforceInplace({{0, 0}})
@@ -34,7 +34,7 @@ OPERATOR_SCHEMA(CopyRowsToTensor)
       return out;
     });
 
-GRADIENT_OPERATOR_SCHEMA(CopyRowsToTensorGradient)
+GRADIENT_OPERATOR_SCHEMA_NOEXPORT(CopyRowsToTensorGradient)
     .NumInputs(1)
     .NumOutputs(1)
     .AllowInplace({{0, 0}});

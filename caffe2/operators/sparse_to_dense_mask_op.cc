@@ -3,12 +3,12 @@
 namespace caffe2 {
 namespace {
 
-REGISTER_CPU_OPERATOR(SparseToDenseMask, SparseToDenseMaskOp<CPUContext>);
-REGISTER_CPU_OPERATOR(
+REGISTER_CPU_OPERATOR_NOIMPORT(SparseToDenseMask, SparseToDenseMaskOp<CPUContext>);
+REGISTER_CPU_OPERATOR_NOIMPORT(
     SparseToDenseMaskGradient,
     SparseToDenseMaskGradientOp<CPUContext>);
 
-OPERATOR_SCHEMA(SparseToDenseMask)
+OPERATOR_SCHEMA_NOEXPORT(SparseToDenseMask)
     .NumInputs(3, 4)
     .NumOutputs(1, 2)
     .DisallowInputFillers() // TODO: enable the filler
@@ -92,7 +92,7 @@ of size `len(lengths) X len(mask)`
         "provided the first dimension is omitted). True when a value for given "
         "id was present, false otherwise.");
 
-OPERATOR_SCHEMA(SparseToDenseMaskGradient)
+OPERATOR_SCHEMA_NOEXPORT(SparseToDenseMaskGradient)
     .NumInputs(2, 3)
     .NumOutputs(1)
     .DisallowInputFillers() // TODO: enable the filler

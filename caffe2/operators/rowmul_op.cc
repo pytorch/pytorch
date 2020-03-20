@@ -3,10 +3,10 @@
 namespace caffe2 {
 namespace {
 
-REGISTER_CPU_OPERATOR(ReduceTailSum, ReduceTailSumOp<float, CPUContext>);
-REGISTER_CPU_OPERATOR(RowMul, RowMulOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR_NOIMPORT(ReduceTailSum, ReduceTailSumOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR_NOIMPORT(RowMul, RowMulOp<float, CPUContext>);
 
-OPERATOR_SCHEMA(ReduceTailSum)
+OPERATOR_SCHEMA_NOEXPORT(ReduceTailSum)
     .NumInputs(1, 1)
     .NumOutputs(1)
     .SetDoc(R"DOC(
@@ -15,7 +15,7 @@ Reduce the tailing dimensions
     .Input(0, "mat", "The matrix")
     .Output(0, "output", "Output");
 
-OPERATOR_SCHEMA(RowMul)
+OPERATOR_SCHEMA_NOEXPORT(RowMul)
     .NumInputs(2, 2)
     .NumOutputs(1)
     .SetDoc(R"DOC(

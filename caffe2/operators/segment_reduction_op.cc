@@ -394,6 +394,32 @@ constexpr bool equal(
       .DisallowInputFillers();                                                \
   REGISTER_GRADIENT_STR(string(#segment_name), __VA_ARGS__::GetGradient)
 
+#define REGISTER_SEGMENT_DEF_SCHEMA_GRADIENT_ONLY_NOEXPORT(                   \
+    segment_name, gradient_name, ...)                                         \
+  static_assert(                                                              \
+      equal(#segment_name, __VA_ARGS__::basename, __VA_ARGS__::OpDef::name),  \
+      #segment_name);                                                         \
+  static_assert(                                                              \
+      equal(                                                                  \
+          #gradient_name,                                                     \
+          __VA_ARGS__::basename,                                              \
+          __VA_ARGS__::OpDef::name,                                           \
+          "Gradient"),                                                        \
+      #gradient_name);                                                        \
+  OPERATOR_SCHEMA_NOEXPORT(segment_name)                                      \
+      .NumInputs(__VA_ARGS__::ForwardOp::kNumInputs)                          \
+      .NumOutputs(1)                                                          \
+      .DisallowInputFillers()                                                 \
+      .SetDoc(FormatDoc<__VA_ARGS__>())                                       \
+      .Output(0, "OUTPUT", "Aggregated tensor")                               \
+      .FillUsing(__VA_ARGS__::PopulateSchema);                                \
+  REGISTER_CPU_OPERATOR_STR(string(#gradient_name), __VA_ARGS__::BackwardOp); \
+  OPERATOR_SCHEMA_NOEXPORT(gradient_name)                                     \
+      .NumInputs(__VA_ARGS__::BackwardOp::kNumInputs)                         \
+      .NumOutputs(1)                                                          \
+      .DisallowInputFillers();                                                \
+  REGISTER_GRADIENT_STR(string(#segment_name), __VA_ARGS__::GetGradient)
+
 #define REGISTER_SEGMENT_DEF(segment_name, gradient_name, ...)               \
   static_assert(                                                             \
       equal(#segment_name, __VA_ARGS__::basename, __VA_ARGS__::OpDef::name), \
@@ -402,11 +428,19 @@ constexpr bool equal(
   REGISTER_SEGMENT_DEF_SCHEMA_GRADIENT_ONLY(                                 \
       segment_name, gradient_name, __VA_ARGS__)
 
-REGISTER_SEGMENT_DEF(
+#define REGISTER_SEGMENT_DEF_NOEXPORT(segment_name, gradient_name, ...)      \
+  static_assert(                                                             \
+      equal(#segment_name, __VA_ARGS__::basename, __VA_ARGS__::OpDef::name), \
+      #segment_name);                                                        \
+  REGISTER_CPU_OPERATOR_STR(string(#segment_name), __VA_ARGS__::ForwardOp);  \
+  REGISTER_SEGMENT_DEF_SCHEMA_GRADIENT_ONLY_NOEXPORT(                        \
+      segment_name, gradient_name, __VA_ARGS__)
+
+REGISTER_SEGMENT_DEF_NOEXPORT(
     SortedSegmentRangeSum,
     SortedSegmentRangeSumGradient,
     AbstractSortedSegmentRangeDef<float, int, CPUContext, SumRangeReducerDef>);
-REGISTER_SEGMENT_DEF(
+REGISTER_SEGMENT_DEF_NOEXPORT(
     SortedSegmentRangeLogSumExp,
     SortedSegmentRangeLogSumExpGradient,
     AbstractSortedSegmentRangeDef<
@@ -414,7 +448,7 @@ REGISTER_SEGMENT_DEF(
         int,
         CPUContext,
         LogSumExpRangeReducerDef>);
-REGISTER_SEGMENT_DEF(
+REGISTER_SEGMENT_DEF_NOEXPORT(
     SortedSegmentRangeLogMeanExp,
     SortedSegmentRangeLogMeanExpGradient,
     AbstractSortedSegmentRangeDef<
@@ -422,68 +456,68 @@ REGISTER_SEGMENT_DEF(
         int,
         CPUContext,
         LogMeanExpRangeReducerDef>);
-REGISTER_SEGMENT_DEF(
+REGISTER_SEGMENT_DEF_NOEXPORT(
     SortedSegmentRangeMean,
     SortedSegmentRangeMeanGradient,
     AbstractSortedSegmentRangeDef<float, int, CPUContext, MeanRangeReducerDef>);
-REGISTER_SEGMENT_DEF(
+REGISTER_SEGMENT_DEF_NOEXPORT(
     SortedSegmentRangeMax,
     SortedSegmentRangeMaxGradient,
     AbstractSortedSegmentRangeDef<float, int, CPUContext, MaxRangeReducerDef>);
 
-REGISTER_SEGMENT_DEF(
+REGISTER_SEGMENT_DEF_NOEXPORT(
     SortedSegmentSum,
     SortedSegmentSumGradient,
     AbstractSortedSegmentDef<float, int, CPUContext, SumReducerDef>);
-REGISTER_SEGMENT_DEF(
+REGISTER_SEGMENT_DEF_NOEXPORT(
     SparseSortedSegmentSum,
     SparseSortedSegmentSumGradient,
     AbstractSparseSortedSegmentDef<float, int, CPUContext, SumReducerDef>);
-REGISTER_SEGMENT_DEF(
+REGISTER_SEGMENT_DEF_NOEXPORT(
     UnsortedSegmentSum,
     UnsortedSegmentSumGradient,
     AbstractUnsortedSegmentDef<float, int, CPUContext, SumReducerDef>);
-REGISTER_SEGMENT_DEF(
+REGISTER_SEGMENT_DEF_NOEXPORT(
     SparseUnsortedSegmentSum,
     SparseUnsortedSegmentSumGradient,
     AbstractSparseUnsortedSegmentDef<float, int, CPUContext, SumReducerDef>);
 
-REGISTER_SEGMENT_DEF(
+REGISTER_SEGMENT_DEF_NOEXPORT(
     LengthsSum,
     LengthsSumGradient,
     AbstractLengthsDef<float, int, CPUContext, SumReducerDef, true>);
 
-REGISTER_SEGMENT_DEF(
+REGISTER_SEGMENT_DEF_NOEXPORT(
     SortedSegmentMean,
     SortedSegmentMeanGradient,
     AbstractSortedSegmentDef<float, int, CPUContext, MeanReducerDef>);
-REGISTER_SEGMENT_DEF(
+REGISTER_SEGMENT_DEF_NOEXPORT(
     SparseSortedSegmentMean,
     SparseSortedSegmentMeanGradient,
     AbstractSparseSortedSegmentDef<float, int, CPUContext, MeanReducerDef>);
-REGISTER_SEGMENT_DEF(
+REGISTER_SEGMENT_DEF_NOEXPORT(
     UnsortedSegmentMean,
     UnsortedSegmentMeanGradient,
     AbstractUnsortedSegmentDef<float, int, CPUContext, MeanReducerDef>);
-REGISTER_SEGMENT_DEF(
+REGISTER_SEGMENT_DEF_NOEXPORT(
     SparseUnsortedSegmentMean,
     SparseUnsortedSegmentMeanGradient,
     AbstractSparseUnsortedSegmentDef<float, int, CPUContext, MeanReducerDef>);
 
-REGISTER_SEGMENT_DEF(
+REGISTER_SEGMENT_DEF_NOEXPORT(
     LengthsMean,
     LengthsMeanGradient,
     AbstractLengthsDef<float, int, CPUContext, MeanReducerDef, true>);
 
-REGISTER_SEGMENT_DEF(
+REGISTER_SEGMENT_DEF_NOEXPORT(
     ReduceFrontWeightedSum,
     ReduceFrontWeightedSumGradient,
     AbstractReduceFrontDef<float, CPUContext, WeightedSumReducerDef>);
-REGISTER_SEGMENT_DEF(
+REGISTER_SEGMENT_DEF_NOEXPORT(
     SortedSegmentWeightedSum,
     SortedSegmentWeightedSumGradient,
     AbstractSortedSegmentDef<float, int, CPUContext, WeightedSumReducerDef>);
-REGISTER_SEGMENT_DEF(
+REGISTER_SEGMENT_DEF_NOEXPORT(
     SparseSortedSegmentWeightedSum,
     SparseSortedSegmentWeightedSumGradient,
     AbstractSparseSortedSegmentDef<
@@ -491,11 +525,11 @@ REGISTER_SEGMENT_DEF(
         int,
         CPUContext,
         WeightedSumReducerDef>);
-REGISTER_SEGMENT_DEF(
+REGISTER_SEGMENT_DEF_NOEXPORT(
     UnsortedSegmentWeightedSum,
     UnsortedSegmentWeightedSumGradient,
     AbstractUnsortedSegmentDef<float, int, CPUContext, WeightedSumReducerDef>);
-REGISTER_SEGMENT_DEF(
+REGISTER_SEGMENT_DEF_NOEXPORT(
     SparseUnsortedSegmentWeightedSum,
     SparseUnsortedSegmentWeightedSumGradient,
     AbstractSparseUnsortedSegmentDef<
@@ -503,7 +537,7 @@ REGISTER_SEGMENT_DEF(
         int,
         CPUContext,
         WeightedSumReducerDef>);
-REGISTER_SEGMENT_DEF(
+REGISTER_SEGMENT_DEF_NOEXPORT(
     LengthsWeightedSum,
     LengthsWeightedSumGradient,
     AbstractLengthsDef<float, int, CPUContext, WeightedSumReducerDef, false>);
@@ -523,10 +557,24 @@ REGISTER_SEGMENT_DEF(
       .NumInputs(__VA_ARGS__::WithMainInputBackwardOp::kNumInputs)   \
       .NumOutputs(1, INT_MAX)
 
-REGISTER_GRADIENT_WITH_MAIN_INPUT(
+#define REGISTER_GRADIENT_WITH_MAIN_INPUT_NOEXPORT(gradient_name, ...) \
+  static_assert(                                                     \
+      equal(                                                         \
+          #gradient_name,                                            \
+          __VA_ARGS__::basename,                                     \
+          __VA_ARGS__::OpDef::name,                                  \
+          "WithMainInputGradient"),                                  \
+      #gradient_name);                                               \
+  REGISTER_CPU_OPERATOR_STR(                                         \
+      string(#gradient_name), __VA_ARGS__::WithMainInputBackwardOp); \
+  OPERATOR_SCHEMA_NOEXPORT(gradient_name)                            \
+      .NumInputs(__VA_ARGS__::WithMainInputBackwardOp::kNumInputs)   \
+      .NumOutputs(1, INT_MAX)
+
+REGISTER_GRADIENT_WITH_MAIN_INPUT_NOEXPORT(
     LengthsWeightedSumWithMainInputGradient,
     AbstractLengthsDef<float, int, CPUContext, WeightedSumReducerDef>);
-REGISTER_GRADIENT_WITH_MAIN_INPUT(
+REGISTER_GRADIENT_WITH_MAIN_INPUT_NOEXPORT(
     SparseLengthsWeightedSumWithMainInputGradient,
     AbstractSparseLengthsDef<float, int, CPUContext, WeightedSumReducerDef>);
 } // namespace
@@ -548,6 +596,23 @@ REGISTER_GRADIENT_WITH_MAIN_INPUT(
           __VA_ARGS__::WithMainInputAndForwardOutputBackwardOp::kNumInputs) \
       .NumOutputs(1, INT_MAX)
 
+#define REGISTER_GRADIENT_WITH_MAIN_INPUT_AND_FORWARD_OUTPUT_NOEXPORT(      \
+    gradient_name, ...)                                                     \
+  static_assert(                                                            \
+      equal(                                                                \
+          #gradient_name,                                                   \
+          __VA_ARGS__::basename,                                            \
+          __VA_ARGS__::OpDef::name,                                         \
+          "WithMainInputAndForwardOutputGradient"),                         \
+      #gradient_name);                                                      \
+  REGISTER_CPU_OPERATOR_STR(                                                \
+      string(#gradient_name),                                               \
+      __VA_ARGS__::WithMainInputAndForwardOutputBackwardOp);                \
+  OPERATOR_SCHEMA_NOEXPORT(gradient_name)                                   \
+      .NumInputs(                                                           \
+          __VA_ARGS__::WithMainInputAndForwardOutputBackwardOp::kNumInputs) \
+      .NumOutputs(1, INT_MAX)
+
 #define REGISTER_SEGMENT_DEF_MAIN_INPUT_AND_FORWARD_OUTPUT_GRADIENT(         \
     segment_name, gradient_name, ...)                                        \
   static_assert(                                                             \
@@ -563,6 +628,21 @@ REGISTER_GRADIENT_WITH_MAIN_INPUT(
       gradient_name, __VA_ARGS__);                                           \
   REGISTER_GRADIENT_STR(string(#segment_name), __VA_ARGS__::GetGradient)
 
+#define REGISTER_SEGMENT_DEF_MAIN_INPUT_AND_FORWARD_OUTPUT_GRADIENT_NOEXPORT(         \
+    segment_name, gradient_name, ...)                                        \
+  static_assert(                                                             \
+      equal(#segment_name, __VA_ARGS__::basename, __VA_ARGS__::OpDef::name), \
+      #segment_name);                                                        \
+  OPERATOR_SCHEMA_NOEXPORT(segment_name)                                     \
+      .NumInputs(__VA_ARGS__::ForwardOp::kNumInputs)                         \
+      .NumOutputs(1)                                                         \
+      .SetDoc(FormatDoc<__VA_ARGS__>())                                      \
+      .Output(0, "OUTPUT", "Aggregated tensor")                              \
+      .FillUsing(__VA_ARGS__::PopulateSchema);                               \
+  REGISTER_GRADIENT_WITH_MAIN_INPUT_AND_FORWARD_OUTPUT_NOEXPORT(             \
+      gradient_name, __VA_ARGS__);                                           \
+  REGISTER_GRADIENT_STR(string(#segment_name), __VA_ARGS__::GetGradient)
+
 // This implements and registers a length op with a gradient which requires
 // the main input as well as the output of the forward output.
 #define REGISTER_LENGTHS_OPS_MAIN_INPUT_AND_FORWARD_OUTPUT_GRADIENT(         \
@@ -574,7 +654,18 @@ REGISTER_GRADIENT_WITH_MAIN_INPUT(
   REGISTER_SEGMENT_DEF_MAIN_INPUT_AND_FORWARD_OUTPUT_GRADIENT(               \
       segment_name, gradient_name, __VA_ARGS__)
 
-REGISTER_LENGTHS_OPS_MAIN_INPUT_AND_FORWARD_OUTPUT_GRADIENT(
+// This implements and registers a length op with a gradient which requires
+// the main input as well as the output of the forward output.
+#define REGISTER_LENGTHS_OPS_MAIN_INPUT_AND_FORWARD_OUTPUT_GRADIENT_NOEXPORT(         \
+    segment_name, gradient_name, ...)                                        \
+  static_assert(                                                             \
+      equal(#segment_name, __VA_ARGS__::basename, __VA_ARGS__::OpDef::name), \
+      #segment_name);                                                        \
+  REGISTER_CPU_OPERATOR_STR(string(#segment_name), __VA_ARGS__::ForwardOp);  \
+  REGISTER_SEGMENT_DEF_MAIN_INPUT_AND_FORWARD_OUTPUT_GRADIENT_NOEXPORT(      \
+      segment_name, gradient_name, __VA_ARGS__)
+
+REGISTER_LENGTHS_OPS_MAIN_INPUT_AND_FORWARD_OUTPUT_GRADIENT_NOEXPORT(
     LengthsMax,
     LengthsMaxWithMainInputAndForwardOutputGradient,
     AbstractLengthsDef<float, int, CPUContext, MaxReducerDef>);

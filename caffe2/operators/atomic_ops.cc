@@ -91,9 +91,9 @@ class CheckAtomicBoolOp final : public Operator<CPUContext> {
   }
 };
 
-REGISTER_CPU_OPERATOR(CreateMutex, CreateMutexOp);
-REGISTER_CPU_OPERATOR(AtomicFetchAdd, AtomicFetchAddOp<int32_t>);
-REGISTER_CPU_OPERATOR(AtomicFetchAdd64, AtomicFetchAddOp<int64_t>);
+REGISTER_CPU_OPERATOR_NOIMPORT(CreateMutex, CreateMutexOp);
+REGISTER_CPU_OPERATOR_NOIMPORT(AtomicFetchAdd, AtomicFetchAddOp<int32_t>);
+REGISTER_CPU_OPERATOR_NOIMPORT(AtomicFetchAdd64, AtomicFetchAddOp<int64_t>);
 
 #ifdef CAFFE2_USE_MKLDNN
 REGISTER_IDEEP_OPERATOR(
@@ -101,18 +101,18 @@ REGISTER_IDEEP_OPERATOR(
     IDEEPFallbackOp<CreateMutexOp, SkipIndices<0>>);
 #endif
 
-REGISTER_CPU_OPERATOR(CreateAtomicBool, CreateAtomicBoolOp);
-REGISTER_CPU_OPERATOR(ConditionalSetAtomicBool, ConditionalSetAtomicBoolOp);
-REGISTER_CPU_OPERATOR(CheckAtomicBool, CheckAtomicBoolOp);
+REGISTER_CPU_OPERATOR_NOIMPORT(CreateAtomicBool, CreateAtomicBoolOp);
+REGISTER_CPU_OPERATOR_NOIMPORT(ConditionalSetAtomicBool, ConditionalSetAtomicBoolOp);
+REGISTER_CPU_OPERATOR_NOIMPORT(CheckAtomicBool, CheckAtomicBoolOp);
 
-OPERATOR_SCHEMA(CreateMutex)
+OPERATOR_SCHEMA_NOEXPORT(CreateMutex)
     .NumInputs(0)
     .NumOutputs(1)
     .SetDoc("Creates an unlocked mutex and returns it in a unique_ptr blob.")
     .Output(0, "mutex_ptr", "Blob containing a std::unique_ptr<mutex>.")
     .ScalarType(TensorProto_DataType_UNDEFINED);
 
-OPERATOR_SCHEMA(AtomicFetchAdd)
+OPERATOR_SCHEMA_NOEXPORT(AtomicFetchAdd)
     .NumInputs(3)
     .NumOutputs(2)
     .SetDoc(R"DOC(
@@ -127,7 +127,7 @@ argument. Returns the updated integer and the value prior to the update.
     .Output(1, "fetched_value", "Value of the first operand before sum.")
     .AllowInplace({{1, 0}});
 
-OPERATOR_SCHEMA(AtomicFetchAdd64)
+OPERATOR_SCHEMA_NOEXPORT(AtomicFetchAdd64)
     .NumInputs(3)
     .NumOutputs(2)
     .SetDoc(R"DOC(
@@ -143,13 +143,13 @@ argument. Returns the updated integer and the value prior to the update.
     .Output(1, "fetched_value", "Value of the first operand before sum.")
     .AllowInplace({{1, 0}});
 
-OPERATOR_SCHEMA(CreateAtomicBool)
+OPERATOR_SCHEMA_NOEXPORT(CreateAtomicBool)
     .NumInputs(0)
     .NumOutputs(1)
     .SetDoc("Create an unique_ptr blob to hold an atomic<bool>")
     .Output(0, "atomic_bool", "Blob containing a unique_ptr<atomic<bool>>");
 
-OPERATOR_SCHEMA(ConditionalSetAtomicBool)
+OPERATOR_SCHEMA_NOEXPORT(ConditionalSetAtomicBool)
     .NumInputs(2)
     .NumOutputs(0)
     .SetDoc(R"DOC(
@@ -158,7 +158,7 @@ Set an atomic<bool> to true if the given condition bool variable is true
     .Input(0, "atomic_bool", "Blob containing a unique_ptr<atomic<bool>>")
     .Input(1, "condition", "Blob containing a bool");
 
-OPERATOR_SCHEMA(CheckAtomicBool)
+OPERATOR_SCHEMA_NOEXPORT(CheckAtomicBool)
     .NumInputs(1)
     .NumOutputs(1)
     .SetDoc("Copy the value of an atomic<bool> to a bool")

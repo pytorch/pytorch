@@ -607,10 +607,20 @@ OpSchema::Cost PointwiseCostInference(
   static OpSchema* C10_ANONYMOUS_VARIABLE(name) CAFFE2_UNUSED =     \
       &OpSchemaRegistry::NewSchema(#name, __FILE__, __LINE__)
 
+#define OPERATOR_SCHEMA_NOEXPORT(name)                              \
+  void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name(){};            \
+  static OpSchema* C10_ANONYMOUS_VARIABLE(name) CAFFE2_UNUSED =     \
+      &OpSchemaRegistry::NewSchema(#name, __FILE__, __LINE__)
+
 #else // CAFFE2_NO_OPERATOR_SCHEMA
 
 #define OPERATOR_SCHEMA(name)                                       \
   C10_EXPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name(){}; \
+  static OpSchema* C10_ANONYMOUS_VARIABLE(name) CAFFE2_UNUSED =     \
+      1 ? nullptr : &OpSchemaRegistry::NewSchema(#name, __FILE__, __LINE__)
+
+#define OPERATOR_SCHEMA_NOEXPORT(name)                              \
+  void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name(){};            \
   static OpSchema* C10_ANONYMOUS_VARIABLE(name) CAFFE2_UNUSED =     \
       1 ? nullptr : &OpSchemaRegistry::NewSchema(#name, __FILE__, __LINE__)
 
@@ -623,9 +633,15 @@ OpSchema::Cost PointwiseCostInference(
   static OpSchema* C10_ANONYMOUS_VARIABLE(name) CAFFE2_UNUSED =     \
       1 ? nullptr : &OpSchemaRegistry::NewSchema(#name, __FILE__, __LINE__)
 
+#define GRADIENT_OPERATOR_SCHEMA_NOEXPORT(name)                     \
+  void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name(){};            \
+  static OpSchema* C10_ANONYMOUS_VARIABLE(name) CAFFE2_UNUSED =     \
+      1 ? nullptr : &OpSchemaRegistry::NewSchema(#name, __FILE__, __LINE__)
+
 #else
 
 #define GRADIENT_OPERATOR_SCHEMA(name) OPERATOR_SCHEMA(name)
+#define GRADIENT_OPERATOR_SCHEMA_NOEXPORT(name) OPERATOR_SCHEMA_NOEXPORT(name)
 
 #endif
 #endif // CAFFE2_CORE_OPERATOR_SCHEMA_H_

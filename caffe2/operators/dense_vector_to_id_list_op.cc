@@ -2,9 +2,9 @@
 
 namespace caffe2 {
 namespace {
-REGISTER_CPU_OPERATOR(DenseVectorToIdList, DenseVectorToIdListOp<CPUContext>);
+REGISTER_CPU_OPERATOR_NOIMPORT(DenseVectorToIdList, DenseVectorToIdListOp<CPUContext>);
 
-OPERATOR_SCHEMA(DenseVectorToIdList)
+OPERATOR_SCHEMA_NOEXPORT(DenseVectorToIdList)
     .NumInputs(1)
     .NumOutputs(2)
     .SetDoc(R"DOC(

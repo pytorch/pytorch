@@ -3,9 +3,9 @@
 namespace caffe2 {
 namespace {
 
-REGISTER_CPU_OPERATOR(IndexHash, IndexHashOp<CPUContext>);
+REGISTER_CPU_OPERATOR_NOIMPORT(IndexHash, IndexHashOp<CPUContext>);
 
-OPERATOR_SCHEMA(IndexHash)
+OPERATOR_SCHEMA_NOEXPORT(IndexHash)
     .NumInputs(1)
     .NumOutputs(1)
     .SetDoc(R"DOC(

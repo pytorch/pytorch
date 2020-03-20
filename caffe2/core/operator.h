@@ -1415,6 +1415,12 @@ C10_DECLARE_REGISTRY(
     CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();                \
   }                                                                \
   C10_REGISTER_CLASS(CPUOperatorRegistry, name, __VA_ARGS__)
+#define REGISTER_CPU_OPERATOR_NOIMPORT(name, ...)                  \
+  void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();             \
+  static void CAFFE2_UNUSED CAFFE_ANONYMOUS_VARIABLE_CPU##name() { \
+    CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();                \
+  }                                                                \
+  C10_REGISTER_CLASS(CPUOperatorRegistry, name, __VA_ARGS__)
 #define REGISTER_CPU_OPERATOR_STR(str_name, ...) \
   C10_REGISTER_TYPED_CLASS(CPUOperatorRegistry, str_name, __VA_ARGS__)
 
@@ -1425,9 +1431,12 @@ C10_DECLARE_REGISTRY(
 // excluded from builds that don't need them (e.g., mobile).
 #ifdef CAFFE2_NO_GRADIENT_OPS
 #define REGISTER_CPU_GRADIENT_OPERATOR(...) /* No gradients. */
+#define REGISTER_CPU_GRADIENT_OPERATOR_NOIMPORT(...) /* No gradients. */
 #else
 #define REGISTER_CPU_GRADIENT_OPERATOR(...) \
   C10_MACRO_EXPAND(REGISTER_CPU_OPERATOR(__VA_ARGS__))
+#define REGISTER_CPU_GRADIENT_OPERATOR_NOIMPORT(...) \
+  C10_MACRO_EXPAND(REGISTER_CPU_OPERATOR_NOIMPORT(__VA_ARGS__))
 #endif
 
 #ifdef CAFFE2_NO_GRADIENT_OPS

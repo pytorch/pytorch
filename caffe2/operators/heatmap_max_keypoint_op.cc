@@ -4,13 +4,13 @@
 namespace caffe2 {
 namespace {
 
-REGISTER_CPU_OPERATOR(
+REGISTER_CPU_OPERATOR_NOIMPORT(
     HeatmapMaxKeypoint,
     HeatmapMaxKeypointOp<float, CPUContext>);
 
 // Input: heatmaps [size x size], boxes [x0, y0, x1, y1]
 // Output: keypoints (#rois, 4, #keypoints)
-OPERATOR_SCHEMA(HeatmapMaxKeypoint).NumInputs(2).NumOutputs(1);
+OPERATOR_SCHEMA_NOEXPORT(HeatmapMaxKeypoint).NumInputs(2).NumOutputs(1);
 
 SHOULD_NOT_DO_GRADIENT(HeatmapMaxKeypoint);
 } // namespace

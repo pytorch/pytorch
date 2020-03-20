@@ -24,8 +24,8 @@ class GetAllBlobNamesOp final : public Operator<CPUContext> {
   Workspace* ws_;
 };
 
-REGISTER_CPU_OPERATOR(GetAllBlobNames, GetAllBlobNamesOp);
-OPERATOR_SCHEMA(GetAllBlobNames)
+REGISTER_CPU_OPERATOR_NOIMPORT(GetAllBlobNames, GetAllBlobNamesOp);
+OPERATOR_SCHEMA_NOEXPORT(GetAllBlobNames)
     .NumInputs(0)
     .NumOutputs(1)
     .SetDoc(R"DOC(

@@ -131,13 +131,13 @@ void SparseFtrlOp<T>::DoRun() {
 }
 
 namespace {
-REGISTER_CPU_OPERATOR(Ftrl, FtrlOp<float, CPUContext>);
-OPERATOR_SCHEMA(Ftrl).NumInputs(3, 4).NumOutputs(2).AllowInplace({{0, 0},
-                                                                  {1, 1}});
+REGISTER_CPU_OPERATOR_NOIMPORT(Ftrl, FtrlOp<float, CPUContext>);
+OPERATOR_SCHEMA_NOEXPORT(Ftrl).NumInputs(3, 4).NumOutputs(2).AllowInplace({{0, 0},
+                                                                           {1, 1}});
 SHOULD_NOT_DO_GRADIENT(Ftrl);
 
-REGISTER_CPU_OPERATOR(SparseFtrl, SparseFtrlOp<float>);
-OPERATOR_SCHEMA(SparseFtrl)
+REGISTER_CPU_OPERATOR_NOIMPORT(SparseFtrl, SparseFtrlOp<float>);
+OPERATOR_SCHEMA_NOEXPORT(SparseFtrl)
     .NumInputs(4, 5)
     .NumOutputs(2)
     .EnforceInplace({{0, 0}, {1, 1}});

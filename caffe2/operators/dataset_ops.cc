@@ -1031,25 +1031,25 @@ class TrimDatasetOp : public Operator<CPUContext> {
   int multiple_of_;
 };
 
-REGISTER_CPU_OPERATOR(CreateTreeCursor, CreateTreeCursorOp);
-REGISTER_CPU_OPERATOR(ResetCursor, ResetCursorOp);
-REGISTER_CPU_OPERATOR(ReadNextBatch, ReadNextBatchOp);
-REGISTER_CPU_OPERATOR(GetCursorOffset, GetCursorOffsetOp);
-REGISTER_CPU_OPERATOR(ComputeOffset, ComputeOffsetOp);
-REGISTER_CPU_OPERATOR(SortAndShuffle, SortAndShuffleOp);
-REGISTER_CPU_OPERATOR(ReadRandomBatch, ReadRandomBatchOp);
-REGISTER_CPU_OPERATOR(CheckDatasetConsistency, CheckDatasetConsistencyOp);
-REGISTER_CPU_OPERATOR(Append, AppendOp<CPUContext>);
-REGISTER_CPU_OPERATOR(AtomicAppend, AtomicAppendOp<CPUContext>);
-REGISTER_CPU_OPERATOR(CreateTensorVector, CreateTensorVectorOp<CPUContext>);
-REGISTER_CPU_OPERATOR(TensorVectorSize, TensorVectorSizeOp<CPUContext>);
-REGISTER_CPU_OPERATOR(ConcatTensorVector, ConcatTensorVectorOp<CPUContext>);
-REGISTER_CPU_OPERATOR(CollectTensor, CollectTensorOp<CPUContext>);
-REGISTER_CPU_OPERATOR(PackRecords, PackRecordsOp);
-REGISTER_CPU_OPERATOR(UnPackRecords, UnPackRecordsOp);
-REGISTER_CPU_OPERATOR(TrimDataset, TrimDatasetOp);
+REGISTER_CPU_OPERATOR_NOIMPORT(CreateTreeCursor, CreateTreeCursorOp);
+REGISTER_CPU_OPERATOR_NOIMPORT(ResetCursor, ResetCursorOp);
+REGISTER_CPU_OPERATOR_NOIMPORT(ReadNextBatch, ReadNextBatchOp);
+REGISTER_CPU_OPERATOR_NOIMPORT(GetCursorOffset, GetCursorOffsetOp);
+REGISTER_CPU_OPERATOR_NOIMPORT(ComputeOffset, ComputeOffsetOp);
+REGISTER_CPU_OPERATOR_NOIMPORT(SortAndShuffle, SortAndShuffleOp);
+REGISTER_CPU_OPERATOR_NOIMPORT(ReadRandomBatch, ReadRandomBatchOp);
+REGISTER_CPU_OPERATOR_NOIMPORT(CheckDatasetConsistency, CheckDatasetConsistencyOp);
+REGISTER_CPU_OPERATOR_NOIMPORT(Append, AppendOp<CPUContext>);
+REGISTER_CPU_OPERATOR_NOIMPORT(AtomicAppend, AtomicAppendOp<CPUContext>);
+REGISTER_CPU_OPERATOR_NOIMPORT(CreateTensorVector, CreateTensorVectorOp<CPUContext>);
+REGISTER_CPU_OPERATOR_NOIMPORT(TensorVectorSize, TensorVectorSizeOp<CPUContext>);
+REGISTER_CPU_OPERATOR_NOIMPORT(ConcatTensorVector, ConcatTensorVectorOp<CPUContext>);
+REGISTER_CPU_OPERATOR_NOIMPORT(CollectTensor, CollectTensorOp<CPUContext>);
+REGISTER_CPU_OPERATOR_NOIMPORT(PackRecords, PackRecordsOp);
+REGISTER_CPU_OPERATOR_NOIMPORT(UnPackRecords, UnPackRecordsOp);
+REGISTER_CPU_OPERATOR_NOIMPORT(TrimDataset, TrimDatasetOp);
 
-OPERATOR_SCHEMA(CreateTreeCursor)
+OPERATOR_SCHEMA_NOEXPORT(CreateTreeCursor)
     .NumInputs(0)
     .NumOutputs(1)
     .SetDoc(R"DOC(
@@ -1125,7 +1125,7 @@ to pass a list of blobs containing the data to read for each one of the fields.
         "fields",
         "A list of strings each one representing a field of the dataset.");
 
-OPERATOR_SCHEMA(ResetCursor)
+OPERATOR_SCHEMA_NOEXPORT(ResetCursor)
     .NumInputs(1)
     .NumOutputs(0)
     .SetDoc(R"DOC(
@@ -1133,7 +1133,7 @@ Resets the offsets for the given TreeCursor. This operation is thread safe.
 )DOC")
     .Input(0, "cursor", "A blob containing a pointer to the cursor.");
 
-OPERATOR_SCHEMA(ReadNextBatch)
+OPERATOR_SCHEMA_NOEXPORT(ReadNextBatch)
     .NumInputs(1, INT_MAX)
     .NumOutputs(1, INT_MAX)
     .SetDoc(R"DOC(
@@ -1150,14 +1150,14 @@ ReadNextBatch is thread safe.
     .Output(0, "field_0", "Tensor containing the next batch for field 0.")
     .Arg("batch_size", "Number of top-level entries to read.");
 
-OPERATOR_SCHEMA(GetCursorOffset)
+OPERATOR_SCHEMA_NOEXPORT(GetCursorOffset)
     .NumInputs(1)
     .NumOutputs(1)
     .SetDoc("Get the current offset in the cursor.")
     .Input(0, "cursor", "A blob containing a pointer to the cursor.")
     .Output(0, "offsets", "Tensor containing the offsets for the cursor.");
 
-OPERATOR_SCHEMA(ComputeOffset)
+OPERATOR_SCHEMA_NOEXPORT(ComputeOffset)
     .NumInputs(1, INT_MAX)
     .NumOutputs(1)
     .SetDoc(R"DOC(
@@ -1174,7 +1174,7 @@ ComputeOffset is thread safe.
     .Input(1, "dataset_field_0", "First dataset field")
     .Output(0, "field_0", "Tensor containing offset info for this chunk.");
 
-OPERATOR_SCHEMA(SortAndShuffle)
+OPERATOR_SCHEMA_NOEXPORT(SortAndShuffle)
     .NumInputs(1, INT_MAX)
     .NumOutputs(1)
     .SetDoc(R"DOC(
@@ -1204,7 +1204,7 @@ SortAndShuffle is thread safe.
     .Input(1, "dataset_field_0", "First dataset field")
     .Output(0, "indices", "Tensor containing sorted indices.");
 
-OPERATOR_SCHEMA(ReadRandomBatch)
+OPERATOR_SCHEMA_NOEXPORT(ReadRandomBatch)
     .NumInputs(1, INT_MAX)
     .NumOutputs(1, INT_MAX)
     .SetDoc(R"DOC(
@@ -1227,7 +1227,7 @@ ReadRandomBatch is thread safe.
     .Arg("batch_size", "Number of top-level entries to read.")
     .Arg("loop_over", "(bool) Repeat the dataset indefinitely");
 
-OPERATOR_SCHEMA(CheckDatasetConsistency)
+OPERATOR_SCHEMA_NOEXPORT(CheckDatasetConsistency)
     .NumInputs(1, INT_MAX)
     .NumOutputs(0)
     .SetDoc(R"DOC(
@@ -1242,7 +1242,7 @@ appended to an existing dataset, keeping it consistent.
         "List of strings representing the string names in the format"
         "specified in the doc for CreateTreeCursor.");
 
-OPERATOR_SCHEMA(Append)
+OPERATOR_SCHEMA_NOEXPORT(Append)
     .NumInputs(2)
     .NumOutputs(1)
     .EnforceInplace({{0, 0}})
@@ -1319,24 +1319,24 @@ A:
     .Input(1, "B", "(*Tensor*): second input tensor of shape $(M, d_1, d_2, ..., d_n)$ to be appended to the base")
     .Output(0, "A", "(*Tensor*): output tensor of shape $(N+M, d_1, d_2, ..., d_n)$");
 
-OPERATOR_SCHEMA(AtomicAppend)
+OPERATOR_SCHEMA_NOEXPORT(AtomicAppend)
     .NumInputs(3, INT_MAX)
     .NumOutputs(1, INT_MAX)
     .AllowInplace([](int in, int out) { return in == out + 1; });
 
-OPERATOR_SCHEMA(CreateTensorVector)
+OPERATOR_SCHEMA_NOEXPORT(CreateTensorVector)
     .NumInputs(0)
     .NumOutputs(1)
     .SetDoc("Create a std::unique_ptr<std::vector<Tensor> >");
 
-OPERATOR_SCHEMA(TensorVectorSize)
+OPERATOR_SCHEMA_NOEXPORT(TensorVectorSize)
     .NumInputs(1)
     .NumOutputs(1)
     .SetDoc("Get the size of the input vector")
     .Input(0, "tensor vector", "std::unique_ptr<std::vector<Tensor> >")
     .Output(0, "size", "int32_t size");
 
-OPERATOR_SCHEMA(ConcatTensorVector)
+OPERATOR_SCHEMA_NOEXPORT(ConcatTensorVector)
     .NumInputs(1)
     .NumOutputs(1)
     .SetDoc(R"DOC(
@@ -1346,7 +1346,7 @@ along the first dimension.
     .Input(0, "vector of Tensor", "std::unique_ptr<std::vector<Tensor> >")
     .Output(0, "tensor", "tensor after concatenating");
 
-OPERATOR_SCHEMA(CollectTensor)
+OPERATOR_SCHEMA_NOEXPORT(CollectTensor)
     .NumInputs([](int n) { return n > 0 && n % 2 == 0; })
     .NumOutputs(1, INT_MAX)
     .NumInputsOutputs([](int in, int out) { return in == out * 2; })
@@ -1362,7 +1362,7 @@ output vectors.
 )DOC")
     .Arg("num_to_collect", "The max number of tensors to collect");
 
-OPERATOR_SCHEMA(PackRecords)
+OPERATOR_SCHEMA_NOEXPORT(PackRecords)
     .NumInputs(1, INT_MAX)
     .NumOutputs(1)
     .SetDoc(R"DOC(
@@ -1382,7 +1382,7 @@ operators.
         " In order to reverse it back to the original input it has to be "
         "inserted into UnPackRecordsOp.");
 
-OPERATOR_SCHEMA(TrimDataset)
+OPERATOR_SCHEMA_NOEXPORT(TrimDataset)
     .NumInputs(1, INT_MAX)
     .NumOutputs(1, INT_MAX)
     .SetDoc(R"DOC(
@@ -1396,7 +1396,7 @@ of records that is a multiple of the 'multiple_of' argument.
         "List of strings representing the string names in the format"
         "specified in the doc for CreateTreeCursor.");
 
-OPERATOR_SCHEMA(UnPackRecords)
+OPERATOR_SCHEMA_NOEXPORT(UnPackRecords)
     .NumInputs(1, INT_MAX)
     .NumOutputs(1, INT_MAX)
     .SetDoc(R"DOC(

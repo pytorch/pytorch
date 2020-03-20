@@ -571,16 +571,16 @@ class BRGNCHWCToPackedInt8BGRAStylizerDeprocessOp
 
 namespace {
 
-REGISTER_CPU_OPERATOR(
+REGISTER_CPU_OPERATOR_NOIMPORT(
     PackedInt8BGRANHWCToNCHWCStylizerPreprocess,
     PackedInt8BGRANHWCToNCHWCStylizerPreprocessOp);
-OPERATOR_SCHEMA(PackedInt8BGRANHWCToNCHWCStylizerPreprocess)
+OPERATOR_SCHEMA_NOEXPORT(PackedInt8BGRANHWCToNCHWCStylizerPreprocess)
     .NumInputs(2)
     .NumOutputs(1);
-REGISTER_CPU_OPERATOR(
+REGISTER_CPU_OPERATOR_NOIMPORT(
     BRGNCHWCToPackedInt8BGRAStylizerDeprocess,
     BRGNCHWCToPackedInt8BGRAStylizerDeprocessOp);
-OPERATOR_SCHEMA(BRGNCHWCToPackedInt8BGRAStylizerDeprocess)
+OPERATOR_SCHEMA_NOEXPORT(BRGNCHWCToPackedInt8BGRAStylizerDeprocess)
     .NumInputs(2)
     .NumOutputs(1);
 

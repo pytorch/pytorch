@@ -41,10 +41,10 @@ const std::string doc = R"DOC(
   https://our.intern.facebook.com/intern/dex/caffe2/sparse-operations/
 )DOC";
 
-REGISTER_CPU_OPERATOR(
+REGISTER_CPU_OPERATOR_NOIMPORT(
     MergeSingleScalarFeatureTensors,
     MergeSingleScalarFeatureTensorsOp<CPUContext>);
-OPERATOR_SCHEMA(MergeSingleScalarFeatureTensors)
+OPERATOR_SCHEMA_NOEXPORT(MergeSingleScalarFeatureTensors)
     .SetDoc(
         "Merge given single-feature tensors with scalar features into one "
         "multi-feature tensor." +
@@ -78,10 +78,10 @@ class GetMergeSingleScalarFeatureTensorsGradient : public GradientMakerBase {
   }
 };
 
-REGISTER_CPU_OPERATOR(
+REGISTER_CPU_OPERATOR_NOIMPORT(
     MergeSingleScalarFeatureTensorsGradient,
     MergeSingleScalarFeatureTensorsGradientOp<CPUContext>);
-OPERATOR_SCHEMA(MergeSingleScalarFeatureTensorsGradient)
+OPERATOR_SCHEMA_NOEXPORT(MergeSingleScalarFeatureTensorsGradient)
     .SetDoc(
         "Explode multi-feature tensor of scalar features into one or more"
         "single-feature tensors" +
@@ -97,10 +97,10 @@ REGISTER_GRADIENT(
 
 // ##########################################################
 
-REGISTER_CPU_OPERATOR(
+REGISTER_CPU_OPERATOR_NOIMPORT(
     MergeSingleListFeatureTensors,
     MergeSingleListFeatureTensorsOp<CPUContext>);
-OPERATOR_SCHEMA(MergeSingleListFeatureTensors)
+OPERATOR_SCHEMA_NOEXPORT(MergeSingleListFeatureTensors)
     .SetDoc(
         "Merge given single-feature tensors with list features into one "
         "multi-feature tensor." +
@@ -137,10 +137,10 @@ class GetMergeSingleListFeatureTensorsGradient : public GradientMakerBase {
   }
 };
 
-REGISTER_CPU_OPERATOR(
+REGISTER_CPU_OPERATOR_NOIMPORT(
     MergeSingleListFeatureTensorsGradient,
     MergeSingleListOrMapFeatureTensorsGradientOp<CPUContext>);
-OPERATOR_SCHEMA(MergeSingleListFeatureTensorsGradient)
+OPERATOR_SCHEMA_NOEXPORT(MergeSingleListFeatureTensorsGradient)
     .SetDoc(
         "Explode multi-feature tensors with list features into "
         "single-feature tensors." +
@@ -157,10 +157,10 @@ REGISTER_GRADIENT(
 
 // ##########################################################
 
-REGISTER_CPU_OPERATOR(
+REGISTER_CPU_OPERATOR_NOIMPORT(
     MergeSingleMapFeatureTensors,
     MergeSingleMapFeatureTensorsOp<CPUContext>);
-OPERATOR_SCHEMA(MergeSingleMapFeatureTensors)
+OPERATOR_SCHEMA_NOEXPORT(MergeSingleMapFeatureTensors)
     .SetDoc(
         "Merge given single-feature tensors with map features into one "
         "multi-feature tensor." +
@@ -199,10 +199,10 @@ class GetMergeSingleMapFeatureTensorsGradient : public GradientMakerBase {
   }
 };
 
-REGISTER_CPU_OPERATOR(
+REGISTER_CPU_OPERATOR_NOIMPORT(
     MergeSingleMapFeatureTensorsGradient,
     MergeSingleListOrMapFeatureTensorsGradientOp<CPUContext>);
-OPERATOR_SCHEMA(MergeSingleMapFeatureTensorsGradient)
+OPERATOR_SCHEMA_NOEXPORT(MergeSingleMapFeatureTensorsGradient)
     .SetDoc(
         "Explode given multi-feature tensors with map features into "
         "multiple single-feature tensor." +
@@ -219,10 +219,10 @@ REGISTER_GRADIENT(
 
 // ##########################################################
 
-REGISTER_CPU_OPERATOR(
+REGISTER_CPU_OPERATOR_NOIMPORT(
     MergeMultiScalarFeatureTensors,
     MergeMultiScalarFeatureTensorsOp<CPUContext>);
-OPERATOR_SCHEMA(MergeMultiScalarFeatureTensors)
+OPERATOR_SCHEMA_NOEXPORT(MergeMultiScalarFeatureTensors)
     .SetDoc(
         "Merge given multi-feature tensors with scalar features into one." +
         doc)
@@ -259,10 +259,10 @@ class GetMergeMultiScalarFeatureTensorsGradient : public GradientMakerBase {
   const int kNumTensorsPerInput = 3;
 };
 
-REGISTER_CPU_OPERATOR(
+REGISTER_CPU_OPERATOR_NOIMPORT(
     MergeMultiScalarFeatureTensorsGradient,
     MergeMultiScalarFeatureTensorsGradientOp<CPUContext>);
-OPERATOR_SCHEMA(MergeMultiScalarFeatureTensorsGradient)
+OPERATOR_SCHEMA_NOEXPORT(MergeMultiScalarFeatureTensorsGradient)
     .SetDoc(
         "Explode given multi-feature tensors with scalar features into many." +
         doc)
@@ -277,13 +277,13 @@ REGISTER_GRADIENT(
 
 // ##########################################################
 
-REGISTER_CPU_OPERATOR(
+REGISTER_CPU_OPERATOR_NOIMPORT(
     MergeMultiListFeatureTensors,
     MergeMultiListFeatureTensorsOp<CPUContext>);
-REGISTER_CPU_OPERATOR(
+REGISTER_CPU_OPERATOR_NOIMPORT(
     MergeMultiListFeatureTensorsGradient,
     MergeMultiListOrMapFeatureTensorsGradientOp<CPUContext>);
-OPERATOR_SCHEMA(MergeMultiListFeatureTensors)
+OPERATOR_SCHEMA_NOEXPORT(MergeMultiListFeatureTensors)
     .SetDoc(
         "Merge given multi-feature tensors with list features into one." + doc)
     .NumInputs([](int n) { return n >= 4 && n % 4 == 0; })
@@ -296,7 +296,7 @@ OPERATOR_SCHEMA(MergeMultiListFeatureTensors)
     .Output(1, "out_keys", ".keys")
     .Output(2, "out_values_lengths", ".values.lengths")
     .Output(3, "out_values_values", ".values.values");
-OPERATOR_SCHEMA(MergeMultiListFeatureTensorsGradient)
+OPERATOR_SCHEMA_NOEXPORT(MergeMultiListFeatureTensorsGradient)
     .SetDoc(
         "Explode given multi-feature tensors with list features "
         "into many." +
@@ -339,10 +339,10 @@ REGISTER_GRADIENT(
 
 // ##########################################################
 
-REGISTER_CPU_OPERATOR(
+REGISTER_CPU_OPERATOR_NOIMPORT(
     MergeMultiMapFeatureTensors,
     MergeMultiMapFeatureTensorsOp<CPUContext>);
-OPERATOR_SCHEMA(MergeMultiMapFeatureTensors)
+OPERATOR_SCHEMA_NOEXPORT(MergeMultiMapFeatureTensors)
     .SetDoc(
         "Merge given multi-feature tensors with map features into one." + doc)
     .NumInputs([](int n) { return n >= 5 && n % 5 == 0; })
@@ -383,10 +383,10 @@ class GetMergeMultiMapFeatureTensorsGradient : public GradientMakerBase {
   const int kNumTensorsPerInput = 5;
 };
 
-REGISTER_CPU_OPERATOR(
+REGISTER_CPU_OPERATOR_NOIMPORT(
     MergeMultiMapFeatureTensorsGradient,
     MergeMultiListOrMapFeatureTensorsGradientOp<CPUContext>);
-OPERATOR_SCHEMA(MergeMultiMapFeatureTensorsGradient)
+OPERATOR_SCHEMA_NOEXPORT(MergeMultiMapFeatureTensorsGradient)
     .SetDoc(
         "Explode given multi-feature tensors with map features "
         "into many." +

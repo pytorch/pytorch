@@ -34,8 +34,8 @@ bool InferenceLSTMOp::RunOnDevice() {
   return true;
 }
 
-REGISTER_CPU_OPERATOR(InferenceLSTM, InferenceLSTMOp);
-OPERATOR_SCHEMA(InferenceLSTM)
+REGISTER_CPU_OPERATOR_NOIMPORT(InferenceLSTM, InferenceLSTMOp);
+OPERATOR_SCHEMA_NOEXPORT(InferenceLSTM)
     .NumInputs(1, INT_MAX)
     .NumOutputs(3)
     .Output(0, "output", "the output of the last layer of lstm")

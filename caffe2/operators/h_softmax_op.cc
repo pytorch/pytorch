@@ -545,15 +545,15 @@ bool HuffmanTreeHierarchyOp<T, Context>::RunOnDevice() {
 }
 
 namespace {
-REGISTER_CPU_OPERATOR(HSoftmax, HSoftmaxOp<float, CPUContext>);
-REGISTER_CPU_OPERATOR(HSoftmaxGradient,
+REGISTER_CPU_OPERATOR_NOIMPORT(HSoftmax, HSoftmaxOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR_NOIMPORT(HSoftmaxGradient,
   HSoftmaxGradientOp<float, CPUContext>);
-REGISTER_CPU_OPERATOR(HSoftmaxSearch, HSoftmaxSearchOp<float, CPUContext>);
-REGISTER_CPU_OPERATOR(
+REGISTER_CPU_OPERATOR_NOIMPORT(HSoftmaxSearch, HSoftmaxSearchOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR_NOIMPORT(
     HuffmanTreeHierarchy,
     HuffmanTreeHierarchyOp<int64_t, CPUContext>);
 
-OPERATOR_SCHEMA(HSoftmax)
+OPERATOR_SCHEMA_NOEXPORT(HSoftmax)
     .NumInputs(4)
     .NumOutputs(2)
     .SetDoc(R"DOC(
@@ -596,7 +596,7 @@ used by the gradient operator to compute gradients for all samples in the batch.
         "The outputs from samples are stored in consecutive blocks in the forward "
         "pass and are used in reverse order in the backward gradientOp pass");
 
-OPERATOR_SCHEMA(HSoftmaxGradient).NumInputs(6).NumOutputs(4);
+OPERATOR_SCHEMA_NOEXPORT(HSoftmaxGradient).NumInputs(6).NumOutputs(4);
 
 class GetHSoftmaxGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
@@ -611,7 +611,7 @@ class GetHSoftmaxGradient : public GradientMakerBase {
 };
 REGISTER_GRADIENT(HSoftmax, GetHSoftmaxGradient);
 
-OPERATOR_SCHEMA(HSoftmaxSearch)
+OPERATOR_SCHEMA_NOEXPORT(HSoftmaxSearch)
     .NumInputs(3)
     .NumOutputs(2)
     .SetDoc(R"DOC(
@@ -642,7 +642,7 @@ search tree.
     .Output(1, "Y_scores", "The corresponding scores of Y_names");
 SHOULD_NOT_DO_GRADIENT(HSoftmaxSearch);
 
-OPERATOR_SCHEMA(HuffmanTreeHierarchy)
+OPERATOR_SCHEMA_NOEXPORT(HuffmanTreeHierarchy)
     .NumInputs(1)
     .NumOutputs(1)
     .SetDoc(R"DOC(

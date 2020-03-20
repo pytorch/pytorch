@@ -381,15 +381,15 @@ bool DistributeFpnProposalsOp<CPUContext>::RunOnDevice() {
 
 namespace {
 
-REGISTER_CPU_OPERATOR(
+REGISTER_CPU_OPERATOR_NOIMPORT(
     CollectAndDistributeFpnRpnProposals,
     CollectAndDistributeFpnRpnProposalsOp<CPUContext>);
-REGISTER_CPU_OPERATOR(CollectRpnProposals, CollectRpnProposalsOp<CPUContext>);
-REGISTER_CPU_OPERATOR(
+REGISTER_CPU_OPERATOR_NOIMPORT(CollectRpnProposals, CollectRpnProposalsOp<CPUContext>);
+REGISTER_CPU_OPERATOR_NOIMPORT(
     DistributeFpnProposals,
     DistributeFpnProposalsOp<CPUContext>);
 
-OPERATOR_SCHEMA(CollectAndDistributeFpnRpnProposals)
+OPERATOR_SCHEMA_NOEXPORT(CollectAndDistributeFpnRpnProposals)
     .NumInputs(2, INT_MAX)
     .NumOutputs(3, INT_MAX)
     .SetDoc(R"DOC(
@@ -501,7 +501,7 @@ will change.
 
 SHOULD_NOT_DO_GRADIENT(CollectAndDistributeFpnRpnProposals);
 
-OPERATOR_SCHEMA(CollectRpnProposals)
+OPERATOR_SCHEMA_NOEXPORT(CollectRpnProposals)
     .NumInputs(2, INT_MAX)
     .NumOutputs(1)
     .SetDoc(R"DOC(
@@ -573,7 +573,7 @@ OPERATOR_SCHEMA(CollectRpnProposals)
 
 SHOULD_NOT_DO_GRADIENT(CollectRpnProposals);
 
-OPERATOR_SCHEMA(DistributeFpnProposals)
+OPERATOR_SCHEMA_NOEXPORT(DistributeFpnProposals)
     .NumInputs(1)
     .NumOutputs(2, INT_MAX)
     .SetDoc(R"DOC(

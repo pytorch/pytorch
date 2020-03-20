@@ -100,17 +100,17 @@ using StringElementwiseOp = UnaryElementwiseWithArgsOp<
     ForEach<ScalarFunctor>,
     TypeMap>;
 
-REGISTER_CPU_OPERATOR(StringPrefix, StringElementwiseOp<Prefix>);
-REGISTER_CPU_OPERATOR(StringSuffix, StringElementwiseOp<Suffix>);
-REGISTER_CPU_OPERATOR(
+REGISTER_CPU_OPERATOR_NOIMPORT(StringPrefix, StringElementwiseOp<Prefix>);
+REGISTER_CPU_OPERATOR_NOIMPORT(StringSuffix, StringElementwiseOp<Suffix>);
+REGISTER_CPU_OPERATOR_NOIMPORT(
     StringStartsWith,
     StringElementwiseOp<StartsWith, FixedType<bool>>);
-REGISTER_CPU_OPERATOR(
+REGISTER_CPU_OPERATOR_NOIMPORT(
     StringEndsWith,
     StringElementwiseOp<EndsWith, FixedType<bool>>);
-REGISTER_CPU_OPERATOR(StringJoin, StringJoinOp<CPUContext>);
+REGISTER_CPU_OPERATOR_NOIMPORT(StringJoin, StringJoinOp<CPUContext>);
 
-OPERATOR_SCHEMA(StringPrefix)
+OPERATOR_SCHEMA_NOEXPORT(StringPrefix)
     .NumInputs(1)
     .NumOutputs(1)
     .SetDoc(R"DOC(
@@ -126,7 +126,7 @@ and potentially invalid strings for variable-length encodings such as utf-8.
         "prefixes",
         "Tensor of std::string containing prefixes for each input.");
 
-OPERATOR_SCHEMA(StringSuffix)
+OPERATOR_SCHEMA_NOEXPORT(StringSuffix)
     .NumInputs(1)
     .NumOutputs(1)
     .SetDoc(R"DOC(
@@ -142,7 +142,7 @@ and potentially invalid strings for variable-length encodings such as utf-8.
         "Tensor of std::string containing suffixes for each output.")
     .Arg("length", "Maximum size of the suffix, in bytes.");
 
-OPERATOR_SCHEMA(StringStartsWith)
+OPERATOR_SCHEMA_NOEXPORT(StringStartsWith)
     .NumInputs(1)
     .NumOutputs(1)
     .SetDoc(R"DOC(
@@ -153,7 +153,7 @@ Returns tensor of boolean of the same dimension of input.
     .Input(0, "strings", "Tensor of std::string.")
     .Output(0, "bools", "Tensor of bools of same shape as input.");
 
-OPERATOR_SCHEMA(StringEndsWith)
+OPERATOR_SCHEMA_NOEXPORT(StringEndsWith)
     .NumInputs(1)
     .NumOutputs(1)
     .SetDoc(R"DOC(
@@ -164,7 +164,7 @@ Returns tensor of boolean of the same dimension of input.
     .Input(0, "strings", "Tensor of std::string.")
     .Output(0, "bools", "Tensor of bools of same shape as input.");
 
-OPERATOR_SCHEMA(StringJoin)
+OPERATOR_SCHEMA_NOEXPORT(StringJoin)
     .NumInputs(1)
     .NumOutputs(1)
     .SetDoc(R"DOC(

@@ -4,10 +4,10 @@
 namespace caffe2 {
 namespace {
 
-REGISTER_CPU_OPERATOR(BBoxTransform, BBoxTransformOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR_NOIMPORT(BBoxTransform, BBoxTransformOp<float, CPUContext>);
 
 // Input: box, delta Output: box
-OPERATOR_SCHEMA(BBoxTransform)
+OPERATOR_SCHEMA_NOEXPORT(BBoxTransform)
     .NumInputs(3)
     .NumOutputs(1, 2)
     .SetDoc(R"DOC(

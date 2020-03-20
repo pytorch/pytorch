@@ -92,9 +92,9 @@ bool APMeterOp<float, CPUContext>::RunOnDevice() {
 }
 
 namespace {
-REGISTER_CPU_OPERATOR(APMeter, APMeterOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR_NOIMPORT(APMeter, APMeterOp<float, CPUContext>);
 
-OPERATOR_SCHEMA(APMeter)
+OPERATOR_SCHEMA_NOEXPORT(APMeter)
     .NumInputs(2)
     .NumOutputs(1)
     .ScalarType(TensorProto::FLOAT)

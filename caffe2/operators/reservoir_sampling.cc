@@ -217,9 +217,9 @@ class ReservoirSamplingOp final : public Operator<Context> {
   }
 };
 
-REGISTER_CPU_OPERATOR(ReservoirSampling, ReservoirSamplingOp<CPUContext>);
+REGISTER_CPU_OPERATOR_NOIMPORT(ReservoirSampling, ReservoirSamplingOp<CPUContext>);
 
-OPERATOR_SCHEMA(ReservoirSampling)
+OPERATOR_SCHEMA_NOEXPORT(ReservoirSampling)
     .NumInputs({4, 7})
     .NumOutputs({2, 4})
     .NumInputsOutputs([](int in, int out) { return in / 3 == out / 2; })

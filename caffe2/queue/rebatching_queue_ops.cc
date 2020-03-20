@@ -6,17 +6,17 @@ CAFFE_KNOWN_TYPE(RebatchingQueuePtr);
 
 namespace {
 
-REGISTER_CPU_OPERATOR(CreateRebatchingQueue, CreateRebatchingQueueOp);
-REGISTER_CPU_OPERATOR(EnqueueRebatchingQueue, EnqueueRebatchingQueueOp);
-REGISTER_CPU_OPERATOR(DequeueRebatchingQueue, DequeueRebatchingQueueOp);
-REGISTER_CPU_OPERATOR(CloseRebatchingQueue, CloseRebatchingQueueOp);
+REGISTER_CPU_OPERATOR_NOIMPORT(CreateRebatchingQueue, CreateRebatchingQueueOp);
+REGISTER_CPU_OPERATOR_NOIMPORT(EnqueueRebatchingQueue, EnqueueRebatchingQueueOp);
+REGISTER_CPU_OPERATOR_NOIMPORT(DequeueRebatchingQueue, DequeueRebatchingQueueOp);
+REGISTER_CPU_OPERATOR_NOIMPORT(CloseRebatchingQueue, CloseRebatchingQueueOp);
 
 NO_GRADIENT(CreateRebatchingQueue);
 NO_GRADIENT(EnqueueRebatchingQueue);
 NO_GRADIENT(DequeueRebatchingQueue);
 NO_GRADIENT(CloseRebatchingQueue);
 
-OPERATOR_SCHEMA(CreateRebatchingQueue)
+OPERATOR_SCHEMA_NOEXPORT(CreateRebatchingQueue)
     .NumInputs(0)
     .NumOutputs(1)
     .SetDoc(R"DOC(
@@ -28,7 +28,7 @@ Creates the Queue.
         "capacity",
         "Maximal number of elements the queue can hold at any given point");
 
-OPERATOR_SCHEMA(CloseRebatchingQueue)
+OPERATOR_SCHEMA_NOEXPORT(CloseRebatchingQueue)
     .NumInputs(1)
     .NumOutputs(0)
     .SetDoc(R"DOC(
@@ -36,7 +36,7 @@ Closes the Queue.
 )DOC")
     .Input(0, "queue", "object representing the queue");
 
-OPERATOR_SCHEMA(EnqueueRebatchingQueue)
+OPERATOR_SCHEMA_NOEXPORT(EnqueueRebatchingQueue)
     .NumInputs(2, INT_MAX)
     .NumOutputs(0)
     .SetDoc(R"DOC(
@@ -54,7 +54,7 @@ first dimension to produce single queue elements.
         "Are we enqueuing a batch or just a single element. \
         By default we enqueue single element.");
 
-OPERATOR_SCHEMA(DequeueRebatchingQueue)
+OPERATOR_SCHEMA_NOEXPORT(DequeueRebatchingQueue)
     .NumInputs(1)
     .NumOutputs(1, INT_MAX)
     .SetDoc(R"DOC(

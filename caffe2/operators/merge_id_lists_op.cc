@@ -2,9 +2,9 @@
 
 namespace caffe2 {
 namespace {
-REGISTER_CPU_OPERATOR(MergeIdLists, MergeIdListsOp<CPUContext>);
+REGISTER_CPU_OPERATOR_NOIMPORT(MergeIdLists, MergeIdListsOp<CPUContext>);
 
-OPERATOR_SCHEMA(MergeIdLists)
+OPERATOR_SCHEMA_NOEXPORT(MergeIdLists)
     .NumInputs([](int n) { return (n > 0 && n % 2 == 0); })
     .NumOutputs(2)
     .SetDoc(R"DOC(

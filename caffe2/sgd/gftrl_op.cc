@@ -94,8 +94,8 @@ bool GFtrlOp<T, Context>::RunOnDevice() {
 }
 
 namespace {
-REGISTER_CPU_OPERATOR(GFtrl, GFtrlOp<float, CPUContext>);
-OPERATOR_SCHEMA(GFtrl).NumInputs(3, 4).NumOutputs(2).AllowInplace({{0, 0},
+REGISTER_CPU_OPERATOR_NOIMPORT(GFtrl, GFtrlOp<float, CPUContext>);
+OPERATOR_SCHEMA_NOEXPORT(GFtrl).NumInputs(3, 4).NumOutputs(2).AllowInplace({{0, 0},
                                                                    {1, 1}});
 SHOULD_NOT_DO_GRADIENT(GFtrl);
 

@@ -48,11 +48,11 @@ REGISTER_BLOB_DESERIALIZER(
     (std::unordered_map<int32_t, int64_t>),
     MapDeserializer<int32_t, int64_t>);
 
-REGISTER_CPU_OPERATOR(CreateMap, CreateMapOp<CPUContext>);
-REGISTER_CPU_OPERATOR(KeyValueToMap, KeyValueToMapOp<CPUContext>);
-REGISTER_CPU_OPERATOR(MapToKeyValue, MapToKeyValueOp<CPUContext>);
+REGISTER_CPU_OPERATOR_NOIMPORT(CreateMap, CreateMapOp<CPUContext>);
+REGISTER_CPU_OPERATOR_NOIMPORT(KeyValueToMap, KeyValueToMapOp<CPUContext>);
+REGISTER_CPU_OPERATOR_NOIMPORT(MapToKeyValue, MapToKeyValueOp<CPUContext>);
 
-OPERATOR_SCHEMA(CreateMap)
+OPERATOR_SCHEMA_NOEXPORT(CreateMap)
     .NumInputs(0)
     .NumOutputs(1)
     .SetDoc("Create an empty map blob")
@@ -61,7 +61,7 @@ OPERATOR_SCHEMA(CreateMap)
     .Output(0, "map blob", "Blob reference to the map")
     .ScalarType(TensorProto_DataType_UNDEFINED);
 
-OPERATOR_SCHEMA(KeyValueToMap)
+OPERATOR_SCHEMA_NOEXPORT(KeyValueToMap)
     .NumInputs(2)
     .NumOutputs(1)
     .SetDoc("Convert key and value blob pairs into a map blob")
@@ -69,7 +69,7 @@ OPERATOR_SCHEMA(KeyValueToMap)
     .Input(1, "value blob", "Blob reference to the value")
     .Output(0, "map blob", "Blob reference to the map");
 
-OPERATOR_SCHEMA(MapToKeyValue)
+OPERATOR_SCHEMA_NOEXPORT(MapToKeyValue)
     .NumInputs(1)
     .NumOutputs(2)
     .SetDoc("Convert a map blob into key and value blob pairs")

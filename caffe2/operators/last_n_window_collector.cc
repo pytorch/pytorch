@@ -136,9 +136,9 @@ class LastNWindowCollectorOp : public Operator<Context> {
   OUTPUT_TAGS(LAST_N, NEXT, NUM_VISITED);
 };
 
-REGISTER_CPU_OPERATOR(LastNWindowCollector, LastNWindowCollectorOp<CPUContext>);
+REGISTER_CPU_OPERATOR_NOIMPORT(LastNWindowCollector, LastNWindowCollectorOp<CPUContext>);
 
-OPERATOR_SCHEMA(LastNWindowCollector)
+OPERATOR_SCHEMA_NOEXPORT(LastNWindowCollector)
     .NumInputs({3, 4, 5})
     .NumOutputs(2, 3)
     .EnforceInplace({{0, 0}, {1, 1}, {4, 2}})

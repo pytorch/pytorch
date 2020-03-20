@@ -3,13 +3,13 @@
 namespace caffe2 {
 namespace {
 
-REGISTER_CPU_OPERATOR(TT, TTLinearOp<float, CPUContext>);
-REGISTER_CPU_OPERATOR(TTLinearGradient, TTLinearGradientOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR_NOIMPORT(TT, TTLinearOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR_NOIMPORT(TTLinearGradient, TTLinearGradientOp<float, CPUContext>);
 
 // The TT-layer serves as a low-rank decomposition of a fully connected layer.
 // The inputs are the same as to an FC layer, but the number of the parameters
 // are greatly reduced.
-OPERATOR_SCHEMA(TT)
+OPERATOR_SCHEMA_NOEXPORT(TT)
     .NumInputs(3)
     .NumOutputs(1)
     .SetDoc(R"DOC(
@@ -59,7 +59,7 @@ low-rank decomposition and the speed of the computation.
         "Output tensor from previous layer with size (M x N), "
         "where M is the batch size and N is the output size.");
 
-OPERATOR_SCHEMA(TTLinearGradient);
+OPERATOR_SCHEMA_NOEXPORT(TTLinearGradient);
 
 GRADIENT_NOT_IMPLEMENTED_YET(TT);
 } // namespace

@@ -46,8 +46,8 @@ class NormalizePlanarYUVOp : public Operator<CPUContext> {
   }
 };
 
-REGISTER_CPU_OPERATOR(NormalizePlanarYUV, NormalizePlanarYUVOp);
-OPERATOR_SCHEMA(NormalizePlanarYUV)
+REGISTER_CPU_OPERATOR_NOIMPORT(NormalizePlanarYUV, NormalizePlanarYUVOp);
+OPERATOR_SCHEMA_NOEXPORT(NormalizePlanarYUV)
     .NumInputs(3)
     .NumOutputs(1)
     .AllowInplace({{0, 0}});

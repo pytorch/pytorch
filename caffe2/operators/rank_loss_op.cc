@@ -154,12 +154,12 @@ bool PairWiseLossGradientOp<T, Context>::RunOnDevice() {
 }
 
 namespace {
-REGISTER_CPU_OPERATOR(PairWiseLoss, PairWiseLossOp<float, CPUContext>);
-REGISTER_CPU_OPERATOR(
+REGISTER_CPU_OPERATOR_NOIMPORT(PairWiseLoss, PairWiseLossOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR_NOIMPORT(
     PairWiseLossGradient,
     PairWiseLossGradientOp<float, CPUContext>);
 
-OPERATOR_SCHEMA(PairWiseLoss)
+OPERATOR_SCHEMA_NOEXPORT(PairWiseLoss)
     .NumInputs(2, 3)
     .NumOutputs(1)
     .SetDoc(R"DOC(
@@ -184,7 +184,7 @@ Operator computes the pair wise loss between all pairs within a batch
         "blob has the same size as lengths blob, and the cross entropy"
         "is computed within each session.")
     .Output(0, "Y", "Output blob after the cross entropy computation");
-OPERATOR_SCHEMA(PairWiseLossGradient).NumInputs(3, 4).NumOutputs(1);
+OPERATOR_SCHEMA_NOEXPORT(PairWiseLossGradient).NumInputs(3, 4).NumOutputs(1);
 
 class GetPairWiseLossGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;

@@ -3,12 +3,12 @@
 namespace caffe2 {
 namespace {
 
-REGISTER_CPU_OPERATOR(PackRNNSequence, PackRNNSequenceOpBase<CPUContext, true>);
-REGISTER_CPU_OPERATOR(
+REGISTER_CPU_OPERATOR_NOIMPORT(PackRNNSequence, PackRNNSequenceOpBase<CPUContext, true>);
+REGISTER_CPU_OPERATOR_NOIMPORT(
     UnpackRNNSequence,
     PackRNNSequenceOpBase<CPUContext, false>);
 
-OPERATOR_SCHEMA(PackRNNSequence)
+OPERATOR_SCHEMA_NOEXPORT(PackRNNSequence)
     .NumInputs(2)
     .NumOutputs(1)
     .SetDoc(R"DOC(
@@ -42,7 +42,7 @@ UnpackRNNSequence.
     .Input(1, "lengths", "lengths with each number representing the pack size.")
     .Output(0, "output", "Output tensor after packing");
 
-OPERATOR_SCHEMA(UnpackRNNSequence)
+OPERATOR_SCHEMA_NOEXPORT(UnpackRNNSequence)
     .NumInputs(2)
     .NumOutputs(1)
     .SetDoc(R"DOC(

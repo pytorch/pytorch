@@ -468,7 +468,7 @@ C10_EXPORT void GemmStridedBatched<float, CPUContext>(
 namespace {
 
 template <typename T>
-C10_EXPORT void BroadcastImpl(
+void BroadcastImpl(
     const int X_ndim,
     const int* X_dims,
     const int Y_ndim,
@@ -760,7 +760,7 @@ CAFFE2_SPECIALIZED_CPU_ADD_STRIPED_BATCH(float);
 namespace {
 
 template <typename TIn, typename TOut, class BinaryOperator, bool kBroadcast1st>
-C10_EXPORT void RowwiseBinaryOp(
+void RowwiseBinaryOp(
     const int rows,
     const int cols,
     const BinaryOperator& op,
@@ -778,7 +778,7 @@ C10_EXPORT void RowwiseBinaryOp(
 }
 
 template <typename TIn, typename TOut, class BinaryOperator, bool kBroadcast1st>
-C10_EXPORT void ColwiseBinaryOp(
+void ColwiseBinaryOp(
     const int rows,
     const int cols,
     const BinaryOperator& op,
@@ -796,7 +796,7 @@ C10_EXPORT void ColwiseBinaryOp(
 }
 
 template <typename TIn, typename TOut, class BinaryOperator>
-C10_EXPORT void BroadcastBinaryOpImpl(
+void BroadcastBinaryOpImpl(
     const int ndim,
     const int* A_dims,
     const int* B_dims,
@@ -1571,7 +1571,7 @@ CAFFE2_SPECIALIZED_COPY_MATRIX(std::uint16_t)
 namespace {
 
 template <typename T>
-C10_EXPORT void Im2ColZeroPaddingAndNoDilationNCHW(
+void Im2ColZeroPaddingAndNoDilationNCHW(
     const int C,
     const int H,
     const int W,
@@ -1618,7 +1618,7 @@ C10_EXPORT void Im2ColZeroPaddingAndNoDilationNCHW(
 }
 
 template <typename T>
-C10_EXPORT void Col2ImZeroPaddingAndNoDilationNCHW(
+void Col2ImZeroPaddingAndNoDilationNCHW(
     const int C,
     const int H,
     const int W,
@@ -1654,7 +1654,7 @@ C10_EXPORT void Col2ImZeroPaddingAndNoDilationNCHW(
 }
 
 template <typename T>
-C10_EXPORT void Im2ColZeroPaddingAndNoDilationNHWC(
+void Im2ColZeroPaddingAndNoDilationNHWC(
     const int C,
     const int H,
     const int W,
@@ -1679,7 +1679,7 @@ C10_EXPORT void Im2ColZeroPaddingAndNoDilationNHWC(
 }
 
 template <typename T>
-C10_EXPORT void Col2ImZeroPaddingAndNoDilationNHWC(
+void Col2ImZeroPaddingAndNoDilationNHWC(
     const int C,
     const int H,
     const int W,
@@ -1706,7 +1706,7 @@ C10_EXPORT void Col2ImZeroPaddingAndNoDilationNHWC(
 }
 
 template <typename T, bool kCol2Im>
-C10_EXPORT void Im2ColNdNCHWImpl(
+void Im2ColNdNCHWImpl(
     const int N,
     const int img_size,
     const int col_size,

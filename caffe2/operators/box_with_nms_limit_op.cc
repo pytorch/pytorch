@@ -248,9 +248,9 @@ bool BoxWithNMSLimitOp<CPUContext>::RunOnDevice() {
 
 namespace {
 
-REGISTER_CPU_OPERATOR(BoxWithNMSLimit, BoxWithNMSLimitOp<CPUContext>);
+REGISTER_CPU_OPERATOR_NOIMPORT(BoxWithNMSLimit, BoxWithNMSLimitOp<CPUContext>);
 
-OPERATOR_SCHEMA(BoxWithNMSLimit)
+OPERATOR_SCHEMA_NOEXPORT(BoxWithNMSLimit)
     .NumInputs(2, 3)
     .NumOutputs(3, 6)
     .SetDoc(R"DOC(

@@ -3,11 +3,11 @@
 namespace caffe2 {
 namespace {
 
-REGISTER_CPU_OPERATOR(Partition, PartitionOp);
-REGISTER_CPU_OPERATOR(LengthsPartition, LengthsPartitionOp);
-REGISTER_CPU_OPERATOR(GatherByKey, GatherByKeyOp);
+REGISTER_CPU_OPERATOR_NOIMPORT(Partition, PartitionOp);
+REGISTER_CPU_OPERATOR_NOIMPORT(LengthsPartition, LengthsPartitionOp);
+REGISTER_CPU_OPERATOR_NOIMPORT(GatherByKey, GatherByKeyOp);
 
-OPERATOR_SCHEMA(GatherByKey)
+OPERATOR_SCHEMA_NOEXPORT(GatherByKey)
     .NumInputs(2, INT_MAX)
     .NumOutputs(1)
     .SetDoc(R"DOC(
@@ -28,7 +28,7 @@ Partition.
         "Subsequented inputs are sharded values tensors.")
     .Output(0, "values", "Reconstructed values tensor.");
 
-OPERATOR_SCHEMA(Partition)
+OPERATOR_SCHEMA_NOEXPORT(Partition)
     .NumInputsOutputs([](int in, int out) {
       return in > 0 && out > 0 && out % in == 0;
     })
@@ -65,7 +65,7 @@ X_0_part_0, X_1_part_0, ..., X_N-1_part_0, X_0_part_1, ..., X_N-1_part_K-1
         "Output Partitions. The number of output tensors has to be a "
         "multiple of the number of input tensors.");
 
-OPERATOR_SCHEMA(LengthsPartition)
+OPERATOR_SCHEMA_NOEXPORT(LengthsPartition)
     .NumInputsOutputs([](int in, int out) {
       return in >= 2 && out > 0 && out % in == 0;
     })
