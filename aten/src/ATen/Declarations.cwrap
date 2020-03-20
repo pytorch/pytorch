@@ -266,8 +266,9 @@
 ]]
 [[
   name: _th_min
-  cpu_bool: True
   cuda_bool: True
+  backends:
+    - CUDA
   variants:
     - function
   options:
@@ -295,8 +296,9 @@
 ]]
 [[
   name: _th_max
-  cpu_bool: True
   cuda_bool: True
+  backends:
+    - CUDA
   variants:
     - function
   options:
@@ -354,6 +356,7 @@
 [[
   name: _th_topk
   cname: topk
+  cuda_bfloat16: True
   backends:
     - CUDA
   variants:
