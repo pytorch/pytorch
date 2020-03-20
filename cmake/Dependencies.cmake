@@ -565,6 +565,13 @@ if(USE_FBGEMM)
       "Turn this warning off by USE_FBGEMM=OFF.")
     set(USE_FBGEMM OFF)
   endif()
+  if(MSVC AND "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
+    message(WARNING
+      "FBGEMM does not support Clang-cl. "
+      "Not compiling with FBGEMM. "
+      "Turn this warning off by USE_FBGEMM=OFF.")
+    set(USE_FBGEMM OFF)
+  endif()
   if(USE_FBGEMM AND NOT TARGET fbgemm)
     set(FBGEMM_BUILD_TESTS OFF CACHE BOOL "")
     set(FBGEMM_BUILD_BENCHMARKS OFF CACHE BOOL "")
