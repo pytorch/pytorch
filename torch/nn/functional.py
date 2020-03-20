@@ -2229,7 +2229,7 @@ def poisson_nll_loss(input, target, log_input=True, full=False, size_average=Non
 
 
 def kl_div(input, target, size_average=None, reduce=None, reduction='mean', *, log_target=False):
-    # type: (Tensor, Tensor, Optional[bool], Optional[bool], str, *, bool) -> Tensor
+    # type: (Tensor, Tensor, Optional[bool], Optional[bool], str, bool) -> Tensor
     r"""The `Kullback-Leibler divergence`_ Loss.
 
     See :class:`~torch.nn.KLDivLoss` for details.
