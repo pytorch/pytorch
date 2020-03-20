@@ -85,7 +85,7 @@ static inline void checkSetStorage(Tensor& result, Storage storage, int64_t stor
   }
 
 #ifdef DEBUG
-  TORCH_CHECK(size_.size() <= INT_MAX, "size length (", size.size(), ") greater than INT_MAX");
+  TORCH_CHECK(size.size() <= INT_MAX, "size length (", size.size(), ") greater than INT_MAX");
 #endif
 
   // storage: note this can't be replaced with result.set_(storage) as the semantics of that
