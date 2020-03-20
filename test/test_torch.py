@@ -286,7 +286,7 @@ class _TestTorchMixin(object):
         check_non_contiguous_index(torch.float)
         check_non_contiguous_index(torch.double)
         if torchfn in bf16_math_functions:
-             check_non_contiguous_index(torch.bfloat16)
+            check_non_contiguous_index(torch.bfloat16)
 
         def check_non_contiguous_expand(shape, dtype):
             # TODO: modify it after enabling randn to BFloat16
@@ -11712,7 +11712,8 @@ class TestTorchDeviceType(TestCase):
     def test_unary_out_op_mem_overlap(self, device, dtype):
         sz = 3
         doubles = torch.randn(2 * sz, dtype=dtype, device=device)
-        bfloat16s = doubles.bfloat16() # TODO: modify it after enabling randn to BFloat16
+        # TODO: modify it after enabling randn to BFloat16
+        bfloat16s = doubles.bfloat16()
         positives = torch.randint(1, 100, (2 * sz,), device=device).double()
         ints = torch.randint(-100, 100, (2 * sz,), device=device)
         unary_mem_overlap_cases = [
