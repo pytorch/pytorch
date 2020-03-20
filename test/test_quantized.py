@@ -2163,7 +2163,7 @@ class TestQuantizedConv(unittest.TestCase):
             dilation,
             groups,
         )
-        true_conv1d.weght = torch.nn.Parameter(W)
+        true_conv1d.weight = torch.nn.Parameter(W)
         true_conv1d.bias = torch.nn.Parameter(bias_float) if use_bias else None
         true_outp = true_conv1d(X)
         q_result_ref = torch.quantize_per_tensor(
@@ -2180,7 +2180,11 @@ class TestQuantizedConv(unittest.TestCase):
                 dilation,
                 groups,
             )
+            # Get the quantized weights and the output quantization params.
             conv_op.set_weight_bias(W_q, bias_float)
+            conv_op.scale = float(Y_scale)
+            conv_op.zero_point = int(Y_zero_point)
+
             q_outp = conv_op(X_q)
 
             np.testing.assert_array_almost_equal(
