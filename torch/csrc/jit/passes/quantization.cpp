@@ -1761,7 +1761,8 @@ std::tuple<at::Tensor, at::Tensor> FoldConvBatchNorm2dHelper::
 bool extractOptionalBNParams(
     const script::Module& bn,
     ConvBNParameters& r) {
-  auto graph = bn.get_method("forward").graph();
+  auto bn_forward = bn.get_method("forward");
+  auto graph = bn_forward.graph();
   const PatternInfo& pattern_bn = PatternInfo::parse_from_str(R"(
       graph(%a, %weight, %bias, %running_mean, %running_var,
           %training, %momentum, %eps, %cudnn_enabled):
