@@ -727,16 +727,17 @@ auto Engine::execute(const edge_list& roots,
     return msg;
   });
 
+  const auto reentrant_depth = worker_device == NO_DEVICE ? 0 : total_depth + 1;
   // Callbacks installed in the current depth are only valid for the duration of
   // this run and should always be cleared.
   // See Note [Reentrant backward Callbacks]
   // Lock post_callbacks_lock_ before clearing final_callbacks_
-  ClearCallbacks _cb_guard(final_callbacks_, total_depth+1, post_callbacks_lock_);
+  ClearCallbacks _cb_guard(final_callbacks_, reentrant_depth, post_callbacks_lock_);
 
   auto graph_task = std::make_shared<GraphTask>(
       keep_graph,
       create_graph,
-      worker_device == NO_DEVICE ? 0 : total_depth + 1);
+      reentrant_depth);
 
   // Now compute the dependencies for all executable functions and queue the root
   auto graph_root = std::make_shared<GraphRoot>(roots, inputs);
