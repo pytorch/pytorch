@@ -160,11 +160,21 @@ void DistAutogradContainer::sendReleaseContextRpc(int64_t context_id) {
   // notify other workers to clean up their contexts.
   auto workerIds =
       autograd_context_.find(context_id)->second->getKnownWorkerIds();
-  auto agent = rpc::RpcAgent::getCurrentRpcAgent();
-  for (const auto& worker_id : workerIds) {
-    agent->send(
-        agent->getWorkerInfo(worker_id),
-        CleanupAutogradContextReq(context_id).toMessage());
+  // agent.send() or getCurrentRpcAgent may throw an error in the case of an
+  // ungraceful shutdown, where we are shutting down RPC and also processing
+  // this message in a separate thread concurrently. In this case, don't throw
+  // here.
+  try {
+    auto agent = rpc::RpcAgent::getCurrentRpcAgent();
+    for (const auto& worker_id : workerIds) {
+      agent->send(
+          agent->getWorkerInfo(worker_id),
+          CleanupAutogradContextReq(context_id).toMessage());
+    }
+  } catch (const std::exception& e) {
+    LOG(INFO)
+        << "Failed to send RPC to clear Dist Autograd context to some nodes: "
+        << e.what();
   }
 }
 
@@ -198,6 +208,10 @@ int64_t DistAutogradContainer::getMaxId() {
   return max_id_;
 }
 
+void DistAutogradContainer::forceCurrentContextId(int64_t contextId) {
+  current_context_id_ = contextId;
+}
+
 void DistAutogradContainer::setCurrentContextId(int64_t contextId) {
   TORCH_INTERNAL_ASSERT(
       current_context_id_ == kInvalidContextId,
@@ -212,6 +226,10 @@ void DistAutogradContainer::clearCurrentContext() {
 size_t DistAutogradContainer::numAutogradContexts() const {
   std::lock_guard<std::mutex> guard(autograd_context_lock_);
   return autograd_context_.size();
+}
+
+int64_t DistAutogradContainer::currentContextId() {
+  return current_context_id_;
 }
 
 } // namespace autograd
