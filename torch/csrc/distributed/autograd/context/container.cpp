@@ -208,6 +208,10 @@ int64_t DistAutogradContainer::getMaxId() {
   return max_id_;
 }
 
+void DistAutogradContainer::forceCurrentContextId(int64_t contextId) {
+  current_context_id_ = contextId;
+}
+
 void DistAutogradContainer::setCurrentContextId(int64_t contextId) {
   TORCH_INTERNAL_ASSERT(
       current_context_id_ == kInvalidContextId,
@@ -222,6 +226,10 @@ void DistAutogradContainer::clearCurrentContext() {
 size_t DistAutogradContainer::numAutogradContexts() const {
   std::lock_guard<std::mutex> guard(autograd_context_lock_);
   return autograd_context_.size();
+}
+
+int64_t DistAutogradContainer::currentContextId() {
+  return current_context_id_;
 }
 
 } // namespace autograd
