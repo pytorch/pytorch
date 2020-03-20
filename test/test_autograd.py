@@ -25,6 +25,7 @@ from torch.autograd.function import once_differentiable
 from torch.autograd.profiler import (profile, format_time, EventList,
                                      FunctionEvent, FunctionEventAvg,
                                      record_function, emit_nvtx)
+import torch.autograd.functional as autogradF
 from torch.utils.checkpoint import checkpoint
 from torch.testing._internal.common_utils import (TEST_MKL, TEST_WITH_ROCM, TestCase, run_tests, skipIfNoLapack,
                                                   suppress_warnings, slowTest,
@@ -4238,6 +4239,988 @@ def add_test(
             do_test = skip(do_test)
 
         setattr(TestAutogradDeviceType, test_name, do_test)
+
+
+class TestAutogradFunctional(TestCase):
+    def _assert_same_struct(self, res, base):
+        # base and res should be Tensors or tuple of Tensors with the same size
+        if torch.is_tensor(base):
+            self.assertTrue(torch.is_tensor(res))
+            self.assertEqual(base.size(), res.size())
+        elif isinstance(base, tuple):
+            self.assertTrue(isinstance(res, tuple))
+            self.assertEqual(len(base), len(res))
+            for el_base, el_res in zip(base, res):
+                self.assertTrue(torch.is_tensor(el_base))
+                self.assertTrue(torch.is_tensor(el_res))
+                self.assertEqual(el_base.size(), el_res.size())
+        else:
+            # Wrong base
+            raise RuntimeError("The base given to `_assert_same_struct` doesn't have"
+                               " the right structure.")
+
+    def _assert_interleaved_struct(self, res, base1, base2):
+        # base1 and base2 can be Tensors or tuples of Tensors.
+        # If they are tuples, res should be a tuple as well.
+        # The indexing works as follow for base1, base2 being
+        # - tuple, tuple: res[i][j][k][l] = (base1[i][k], base2[j][l])
+        # - tuple, Tensor: res[i][k][l] = (base1[i][k], base2[l])
+        # - Tensor, tuple: res[i][j][l] = (base1[i], base2[j][l])
+        # - Tensor, Tensor: res[k][l] = (base1[k], base2[l])
+        if torch.is_tensor(base1) and torch.is_tensor(base2):
+            self.assertTrue(torch.is_tensor(res))
+            self.assertEqual(res.size(), base1.size() + base2.size())
+        elif isinstance(base1, tuple) and torch.is_tensor(base2):
+            self.assertTrue(isinstance(res, tuple))
+            self.assertEqual(len(res), len(base1))
+            for el_res, el_base1 in zip(res, base1):
+                self.assertTrue(torch.is_tensor(el_res))
+                self.assertTrue(torch.is_tensor(el_base1))
+                self.assertEqual(el_res.size(), el_base1.size() + base2.size())
+        elif torch.is_tensor(base1) and isinstance(base2, tuple):
+            self.assertTrue(isinstance(res, tuple))
+            self.assertEqual(len(res), len(base2))
+            for el_res, el_base2 in zip(res, base2):
+                self.assertTrue(torch.is_tensor(el_res))
+                self.assertTrue(torch.is_tensor(el_base2))
+                self.assertEqual(el_res.size(), base1.size() + el_base2.size())
+        elif isinstance(base1, tuple) and isinstance(base2, tuple):
+            self.assertTrue(isinstance(res, tuple))
+            self.assertEqual(len(res), len(base1))
+            for el_res, el_base1 in zip(res, base1):
+                self.assertTrue(isinstance(el_res, tuple))
+                self.assertEqual(len(res), len(base2))
+                for el_el_res, el_base2 in zip(el_res, base2):
+                    self.assertTrue(torch.is_tensor(el_el_res))
+                    self.assertTrue(torch.is_tensor(el_base2))
+                    self.assertEqual(el_el_res.size(), el_base1.size() + el_base2.size())
+        else:
+            # Wrong bases
+            raise RuntimeError("The bases given to `_assert_interleaved_struct` don't have"
+                               " the right structure.")
+
+    def test_vjp_err_check(self):
+        def foo(a):
+            return 3 * a.narrow(0, 0, 3)
+
+        def bar(a):
+            return 3 * a.narrow(0, 0, 3), "bar"
+
+        inp = torch.rand(4)
+        v = torch.ones(3)
+        with self.assertRaisesRegex(TypeError, "The inputs given to vjp must be either a Tensor"):
+            res = autogradF.vjp(foo, (inp, 2), v)
+
+        with self.assertRaisesRegex(TypeError, "The outputs of the user-provided function given to vjp must"):
+            res = autogradF.vjp(bar, inp, v)
+
+        with self.assertRaisesRegex(RuntimeError, "The vector v can only be None if the user-provided function returns"):
+            res = autogradF.vjp(foo, inp)
+
+        with self.assertRaisesRegex(RuntimeError, "The given v should contain a single Tensor."):
+            res = autogradF.vjp(foo, inp, (torch.ones_like(inp), torch.ones_like(inp)))
+
+        with self.assertRaisesRegex(RuntimeError, "v has invalid size: should be torch.Size"):
+            res = autogradF.vjp(foo, inp, v[:2])
+
+        res = autogradF.vjp(foo, inp, v)[1]
+        self._assert_same_struct(res, inp)
+
+    def test_vjp_err_check_strict(self):
+        def foo(a):
+            return a.detach()
+
+        def bar(a):
+            # Make a non-leaf Tensor that requires_grad but that is not connected to the input
+            return a.long().float().requires_grad_().clone()
+
+        inp = torch.rand(4)
+        v = torch.rand(4)
+        with self.assertRaisesRegex(RuntimeError, "Output 0 of the user-provided function does not require gradients."):
+            res = autogradF.vjp(foo, inp, v, strict=True)
+        res = autogradF.vjp(foo, inp, v, strict=False)
+        self._assert_same_struct(res[1], inp)
+        self.assertEqual(res[1].abs().sum(), 0.)
+
+        with self.assertRaisesRegex(RuntimeError, "The output of the user-provided function is independent of input 0"):
+            res = autogradF.vjp(bar, inp, v, strict=True)
+        res = autogradF.vjp(bar, inp, v, strict=False)
+        self._assert_same_struct(res[1], inp)
+        self.assertEqual(res[1].abs().sum(), 0.)
+
+        # The Jacobian does not depend on the input
+        def foo(a):
+            return a.clone()
+
+        inp.requires_grad_()
+        with self.assertRaisesRegex(RuntimeError, "jacobian of the user-provided function is independent of input 0."):
+            res = autogradF.vjp(foo, inp, v, create_graph=True, strict=True)
+        res = autogradF.vjp(foo, inp, v, create_graph=True, strict=False)
+        self._assert_same_struct(res[1], inp)
+        self.assertEqual(res[1], v)
+
+    def test_vjp_output(self):
+        def reducer(x):
+            return x.sum(dim=1)
+        inputs = torch.rand(4, 4)
+        v = torch.ones(4)
+        res = autogradF.vjp(reducer, inputs, v)
+        self._assert_same_struct(res[1], inputs)
+        self.assertIsNone(res[0].grad_fn)
+        self.assertIsNone(res[1].grad_fn)
+
+        def adder(x, y):
+            return 2 * x + 3 * y
+
+        inputs = (torch.rand(2), torch.rand(2))
+        v = torch.ones(2)
+        out, vjp_val = autogradF.vjp(adder, inputs, v)
+        self._assert_same_struct(vjp_val, inputs)
+        self.assertIsNone(out.grad_fn)
+        self.assertIsNone(vjp_val[0].grad_fn)
+        self.assertIsNone(vjp_val[1].grad_fn)
+
+        def adder(x, y):
+            return 2 * x + 3 * y, x + y
+
+        inputs = (torch.rand(2), torch.rand(2))
+        v = (torch.tensor([1., 0.]), torch.tensor([1., 0.]))
+        out, vjp_val = autogradF.vjp(adder, inputs, v)
+        self._assert_same_struct(vjp_val, inputs)
+        self.assertIsNone(out[0].grad_fn)
+        self.assertIsNone(out[1].grad_fn)
+        self.assertIsNone(vjp_val[0].grad_fn)
+        self.assertIsNone(vjp_val[1].grad_fn)
+
+    def test_vjp_scalar(self):
+        def reducer(x):
+            return x.sum()
+        inputs = torch.rand(4, 4)
+        v = torch.ones([])
+        res = autogradF.vjp(reducer, inputs, v)
+        self._assert_same_struct(res[0], v)
+        self._assert_same_struct(res[1], inputs)
+
+        res = autogradF.vjp(reducer, inputs)
+        self._assert_same_struct(res[0], v)
+        self._assert_same_struct(res[1], inputs)
+
+        def expander(x):
+            return x.unsqueeze(0).repeat(4)
+        inputs = torch.rand([])
+        v = torch.ones(4)
+        res = autogradF.vjp(expander, inputs, v)
+        self._assert_same_struct(res[0], v)
+        self._assert_same_struct(res[1], inputs)
+
+    def test_vjp_create_graph(self):
+        def reducer(x):
+            return x.sum(dim=1)
+        inputs = torch.rand(2, 2)
+        v = torch.ones(2)
+
+        inputs.requires_grad_()
+        v.requires_grad_()
+        res = autogradF.vjp(reducer, inputs, v, create_graph=True)
+        self._assert_same_struct(res[1], inputs)
+        self.assertIsNotNone(res[0].grad_fn)
+        self.assertIsNotNone(res[1].grad_fn)
+
+        gradcheck(lambda inp, v: autogradF.vjp(reducer, inputs, v, create_graph=True), (inputs, v))
+        gradgradcheck(lambda inp, v: autogradF.vjp(reducer, inputs, v, create_graph=True), (inputs, v))
+
+        def adder(x, y):
+            return 2 * x + 3 * y, x * y
+
+        inputs = (torch.rand(2, requires_grad=True), torch.rand(2, requires_grad=True))
+        v = (torch.tensor([1., 0.], requires_grad=True), torch.tensor([1., 0.], requires_grad=True))
+
+        gradcheck(lambda *args: autogradF.vjp(adder, args[:2], args[2:], create_graph=True)[1], inputs + v)
+        gradgradcheck(lambda *args: autogradF.vjp(adder, args[:2], args[2:], create_graph=True)[1], inputs + v)
+
+        def foo(*args):
+            x, y = args[:2]
+            v = args[2:]
+
+            x = x.cos()
+            val, grad = autogradF.vjp(adder, (x, y), v, create_graph=True)
+
+            return val[0].exp() + val[1].exp() + grad[0].exp() + grad[1].exp() + x.exp() + y.exp()
+
+        gradcheck(foo, inputs + v)
+        gradgradcheck(foo, inputs + v)
+
+    def test_jvp_err_check(self):
+        def foo(a):
+            return 3 * a.narrow(0, 0, 3)
+
+        def bar(a):
+            return 3 * a.narrow(0, 0, 3), "bar"
+
+        inp = torch.rand(4)
+        v = torch.rand(4)
+        with self.assertRaisesRegex(TypeError, "The inputs given to jvp must be either a Tensor"):
+            res = autogradF.jvp(foo, (inp, 2), v)
+
+        with self.assertRaisesRegex(TypeError, "The outputs of the user-provided function given to jvp must"):
+            res = autogradF.jvp(bar, inp, v)
+
+        with self.assertRaisesRegex(RuntimeError, "The vector v can only be None if the input to the user-provided function"):
+            res = autogradF.jvp(foo, inp)
+
+        with self.assertRaisesRegex(RuntimeError, "The given v should contain a single Tensor."):
+            res = autogradF.jvp(foo, inp, (v, v))
+
+        with self.assertRaisesRegex(RuntimeError, "v has invalid size: should be torch.Size"):
+            res = autogradF.jvp(foo, inp, v[:2])
+
+        res = autogradF.jvp(foo, inp, v)[1]
+        self._assert_same_struct(res, foo(inp))
+
+    def test_jvp_err_check_strict(self):
+        def foo(a):
+            return a.detach()
+
+        def bar(a):
+            # Make a non-leaf Tensor that requires_grad but that is not connected to the input
+            return a.long().float().requires_grad_().clone()
+
+        inp = torch.rand(4)
+        v = torch.rand(4)
+        with self.assertRaisesRegex(RuntimeError, "Output 0 of the user-provided function does not require gradients."):
+            res = autogradF.jvp(foo, inp, v, strict=True)
+        res = autogradF.jvp(foo, inp, v, strict=False)
+        self._assert_same_struct(res[1], res[0])
+        self.assertEqual(res[1].abs().sum(), 0.)
+
+        with self.assertRaisesRegex(RuntimeError, "The output of the user-provided function is independent of input 0"):
+            res = autogradF.jvp(bar, inp, v, strict=True)
+        res = autogradF.jvp(bar, inp, v, strict=False)
+        self._assert_same_struct(res[1], res[0])
+        self.assertEqual(res[1].abs().sum(), 0.)
+
+        # The Jacobian does not depend on the input
+        def foo(a):
+            return a.clone()
+
+        inp.requires_grad_()
+        with self.assertRaisesRegex(RuntimeError, "jacobian of the user-provided function is independent of input 0."):
+            res = autogradF.jvp(foo, inp, v, create_graph=True, strict=True)
+        res = autogradF.jvp(foo, inp, v, create_graph=True, strict=False)
+        self._assert_same_struct(res[1], inp)
+        self.assertEqual(res[1], v)
+
+    def test_jvp_output(self):
+        def reducer(x):
+            return x.sum(dim=1)
+        inputs = torch.rand(4, 4)
+        v = torch.ones(4, 4)
+        res = autogradF.jvp(reducer, inputs, v)
+        self._assert_same_struct(res[1], res[0])
+        self.assertIsNone(res[0].grad_fn)
+        self.assertIsNone(res[1].grad_fn)
+
+        def adder(x, y):
+            return 2 * x + 3 * y
+
+        inputs = (torch.rand(2), torch.rand(2))
+        v = (torch.ones(2), torch.ones(2))
+        out, jvp_val = autogradF.jvp(adder, inputs, v)
+        self._assert_same_struct(jvp_val, out)
+        self.assertIsNone(out.grad_fn)
+        self.assertIsNone(jvp_val[0].grad_fn)
+        self.assertIsNone(jvp_val[1].grad_fn)
+
+        def adder(x, y):
+            return 2 * x + 3 * y, x + y
+
+        inputs = (torch.rand(2), torch.rand(2))
+        v = (torch.tensor([1., 0.]), torch.tensor([1., 0.]))
+        out, jvp_val = autogradF.jvp(adder, inputs, v)
+        self._assert_same_struct(jvp_val, out)
+        self.assertIsNone(out[0].grad_fn)
+        self.assertIsNone(out[1].grad_fn)
+        self.assertIsNone(jvp_val[0].grad_fn)
+        self.assertIsNone(jvp_val[1].grad_fn)
+
+    def test_jvp_scalar(self):
+        def reducer(x):
+            return x.sum()
+        inputs = torch.rand(4, 4)
+        v = torch.ones(4, 4)
+        res = autogradF.jvp(reducer, inputs, v)
+        self._assert_same_struct(res[0], torch.zeros([]))
+        self._assert_same_struct(res[1], res[0])
+
+        def expander(x):
+            return x.unsqueeze(0).repeat(4)
+        inputs = torch.rand([])
+        v = torch.ones([])
+        res = autogradF.jvp(expander, inputs, v)
+        self._assert_same_struct(res[0], torch.zeros(4))
+        self._assert_same_struct(res[1], res[0])
+
+        res = autogradF.jvp(expander, inputs)
+        self._assert_same_struct(res[0], torch.zeros(4))
+        self._assert_same_struct(res[1], res[0])
+
+    def test_jvp_create_graph(self):
+        def reducer(x):
+            return x.sum(dim=1)
+        inputs = torch.rand(2, 2)
+        v = torch.ones(2, 2)
+
+        inputs.requires_grad_()
+        v.requires_grad_()
+        res = autogradF.jvp(reducer, inputs, v, create_graph=True)
+        self._assert_same_struct(res[1], res[0])
+        self.assertIsNotNone(res[0].grad_fn)
+        self.assertIsNotNone(res[1].grad_fn)
+
+        gradcheck(lambda inp, v: autogradF.jvp(reducer, inp, v, create_graph=True), (inputs, v))
+        gradgradcheck(lambda inp, v: autogradF.jvp(reducer, inp, v, create_graph=True), (inputs, v))
+
+        def adder(x, y):
+            return 2 * x + 3 * y, x * y
+
+        inputs = (torch.rand(2, requires_grad=True), torch.rand(2, requires_grad=True))
+        v = (torch.tensor([1., 0.], requires_grad=True), torch.tensor([1., 0.], requires_grad=True))
+
+        gradcheck(lambda *args: autogradF.jvp(adder, args[:2], args[2:], create_graph=True)[1], inputs + v)
+        gradgradcheck(lambda *args: autogradF.jvp(adder, args[:2], args[2:], create_graph=True)[1], inputs + v)
+
+        def foo(*args):
+            x, y = args[:2]
+            v = args[2:]
+
+            x = x.cos()
+            val, grad = autogradF.jvp(adder, (x, y), v, create_graph=True)
+
+            return val[0].exp() + val[1].exp() + grad[0].exp() + grad[1].exp() + x.exp() + y.exp()
+
+        gradcheck(foo, inputs + v)
+        gradgradcheck(foo, inputs + v)
+
+    def test_jacobian_err_check(self):
+        def foo(a):
+            return 3 * a.narrow(0, 0, 3)
+
+        def bar(a):
+            return 3 * a.narrow(0, 0, 3), "bar"
+
+        inp = torch.rand(4)
+        with self.assertRaisesRegex(TypeError, "The inputs given to jacobian must be either a Tensor"):
+            res = autogradF.jacobian(foo, (inp, 2))
+
+        with self.assertRaisesRegex(TypeError, "The outputs of the user-provided function given to jacobian must"):
+            res = autogradF.jacobian(bar, inp)
+
+        res = autogradF.jacobian(foo, inp)
+        self._assert_interleaved_struct(res, foo(inp), inp)
+
+        def foo(a, b):
+            return b, 3 * a.narrow(0, 0, 3)
+
+        inp = (torch.rand(4), torch.rand(5))
+
+        res = autogradF.jacobian(foo, inp)
+        self._assert_interleaved_struct(res, foo(*inp), inp)
+
+    def test_jacobian_err_check_strict(self):
+        def foo(a):
+            return a.detach()
+
+        def bar(a):
+            # Make a non-leaf Tensor that requires_grad but that is not connected to the input
+            return a.long().float().requires_grad_().clone()
+
+        inp = torch.rand(4)
+        with self.assertRaisesRegex(RuntimeError, "Output 0 of the user-provided function does not require gradients."):
+            res = autogradF.jacobian(foo, inp, strict=True)
+        res = autogradF.jacobian(foo, inp, strict=False)
+        self._assert_interleaved_struct(res, foo(inp), inp)
+        self.assertEqual(res.abs().sum(), 0.)
+
+        with self.assertRaisesRegex(RuntimeError, "Output 0 of the user-provided function is independent of input 0."):
+            res = autogradF.jacobian(bar, inp, strict=True)
+        res = autogradF.jacobian(bar, inp, strict=False)
+        self._assert_interleaved_struct(res, foo(inp), inp)
+        self.assertEqual(res.abs().sum(), 0.)
+
+        # The Jacobian does not depend on the input
+        def foo(a):
+            return a.clone()
+
+        inp.requires_grad_()
+        with self.assertRaisesRegex(RuntimeError, "jacobian of the user-provided function is independent of input 0."):
+            res = autogradF.jacobian(foo, inp, create_graph=True, strict=True)
+        res = autogradF.jacobian(foo, inp, create_graph=True, strict=False)
+        self._assert_interleaved_struct(res, inp, inp)
+        self.assertEqual(res, torch.eye(4))
+
+    def test_jacobian_output(self):
+        def exp_reducer(x):
+            return x.exp().sum(dim=1)
+
+        inputs = torch.rand(4, 4)
+        res = autogradF.jacobian(exp_reducer, inputs)
+        self._assert_interleaved_struct(res, exp_reducer(inputs), inputs)
+        self.assertIsNone(res.grad_fn)
+
+        def identity(x):
+            return x.clone()
+
+        inputs = torch.rand(4)
+        res = autogradF.jacobian(identity, inputs)
+        self._assert_interleaved_struct(res, identity(inputs), inputs)
+        self.assertIsNone(res.grad_fn)
+        self.assertEqual(res, torch.eye(4))
+
+        def add_exp_reducer(x, y):
+            return (x + y.exp()).sum(dim=1)
+
+        inputs = (torch.rand(4, 4), torch.rand(4, 4))
+        res = autogradF.jacobian(add_exp_reducer, inputs)
+        self._assert_interleaved_struct(res, add_exp_reducer(*inputs), inputs)
+        self.assertIsNone(res[0].grad_fn)
+        self.assertIsNone(res[1].grad_fn)
+
+    def test_jacobian_scalar(self):
+        def reducer(x):
+            return x.sum()
+        inputs = torch.rand(4, 4)
+        res = autogradF.jacobian(reducer, inputs)
+        self._assert_same_struct(res, inputs)
+
+        def expander(x):
+            return x.unsqueeze(0).repeat(4)
+        inputs = torch.rand([])
+        res = autogradF.jacobian(expander, inputs)
+        self._assert_same_struct(res, torch.zeros(4))
+
+    def test_jacobian_create_graph(self):
+        def exp_reducer(x):
+            return x.exp().sum(dim=1)
+
+        inputs = torch.rand(4, 4, requires_grad=True)
+        res = autogradF.jacobian(exp_reducer, inputs, create_graph=True)
+        self._assert_interleaved_struct(res, exp_reducer(inputs), inputs)
+        self.assertIsNotNone(res.grad_fn)
+
+        gradcheck(lambda inp: autogradF.jacobian(exp_reducer, inp, create_graph=True), inputs)
+        gradgradcheck(lambda inp: autogradF.jacobian(exp_reducer, inp, create_graph=True), inputs)
+
+        def add_exp_reducer(x, y):
+            return (x + y).exp().sum(dim=1)
+
+        inputs = (torch.rand(4, 4, requires_grad=True), torch.rand(4, 4, requires_grad=True))
+        res = autogradF.jacobian(add_exp_reducer, inputs, create_graph=True)
+        self._assert_interleaved_struct(res, add_exp_reducer(*inputs), inputs)
+        self.assertIsNotNone(res[0].grad_fn)
+        self.assertIsNotNone(res[1].grad_fn)
+
+        gradcheck(lambda *inp: autogradF.jacobian(add_exp_reducer, inp, create_graph=True), inputs)
+        gradgradcheck(lambda *inp: autogradF.jacobian(add_exp_reducer, inp, create_graph=True), inputs)
+
+        def foo(x, y):
+            x = x.cos()
+            val, jac = autogradF.jacobian(add_exp_reducer, (x, y), create_graph=True)
+
+            res = val[0].exp().sum() + val[1].exp().sum() + jac[0].exp().sum()
+            res = res + jac[1].exp().sum() + x.exp().sum() + y.exp().sum()
+            return res
+
+        gradcheck(foo, inputs)
+        gradgradcheck(foo, inputs)
+
+    def test_hessian_err_check(self):
+        def foo(a):
+            return 3 * a.narrow(0, 0, 3).exp().sum()
+
+        def bar(a):
+            return 3 * a.narrow(0, 0, 3), "bar"
+
+        def bar2(a):
+            return 3 * a.narrow(0, 0, 3)
+
+        def bar3(a):
+            return 3 * a.narrow(0, 0, 3), 3 * a.narrow(0, 0, 3)
+
+        inp = torch.rand(4)
+        with self.assertRaisesRegex(TypeError, "The inputs given to hessian must be either a Tensor"):
+            res = autogradF.hessian(foo, (inp, 2))
+
+        with self.assertRaisesRegex(TypeError, "The outputs of the user-provided function given to hessian must"):
+            res = autogradF.hessian(bar, inp)
+
+        err_msg_out = "The Tensor returned by the function given to hessian should contain a single element"
+        with self.assertRaisesRegex(RuntimeError, err_msg_out):
+            res = autogradF.hessian(bar2, inp)
+
+        with self.assertRaisesRegex(RuntimeError, "The function given to hessian should return a single Tensor"):
+            res = autogradF.hessian(bar3, inp)
+
+        res = autogradF.hessian(foo, inp)
+        self._assert_interleaved_struct(res, inp, inp)
+
+        def foo(a, b):
+            return (3 * b.narrow(0, 0, 3) * a.narrow(0, 0, 3)).sum()
+
+        inp = (torch.rand(4), torch.rand(5))
+
+        res = autogradF.hessian(foo, inp)
+        self._assert_interleaved_struct(res, inp, inp)
+
+    def test_hessian_err_check_strict(self):
+        def foo(a):
+            return a.detach().sum()
+
+        def bar(a):
+            # Make a non-leaf Tensor that requires_grad but that is not connected to the input
+            return a.long().float().requires_grad_().clone().sum()
+
+        def bar2(a):
+            # A Linear function for which the jacobian is independent of the input
+            return (3 * a).sum()
+
+        inp = torch.rand(4)
+        with self.assertRaisesRegex(RuntimeError, "Output 0 of the user-provided function does not require gradients."):
+            res = autogradF.hessian(foo, inp, strict=True)
+        res = autogradF.hessian(foo, inp, strict=False)
+        self._assert_interleaved_struct(res, inp, inp)
+        self.assertEqual(res.abs().sum(), 0.)
+
+        with self.assertRaisesRegex(RuntimeError, "jacobian of the user-provided function with respect to input 0"):
+            res = autogradF.hessian(bar, inp, strict=True)
+        res = autogradF.hessian(bar, inp, strict=False)
+        self._assert_interleaved_struct(res, inp, inp)
+        self.assertEqual(res.abs().sum(), 0.)
+
+        with self.assertRaisesRegex(RuntimeError, "jacobian of the user-provided function with respect to input 0 is"):
+            res = autogradF.hessian(bar2, inp, strict=True)
+        res = autogradF.hessian(bar2, inp, strict=False)
+        self._assert_interleaved_struct(res, inp, inp)
+        self.assertEqual(res.abs().sum(), 0.)
+
+    def test_hessian_output(self):
+        def pow_reducer(x):
+            return x.pow(3).sum()
+
+        inputs = torch.rand(2, 2)
+        res = autogradF.hessian(pow_reducer, inputs)
+        self._assert_interleaved_struct(res, inputs, inputs)
+        self.assertIsNone(res.grad_fn)
+
+        def add_pow_reducer(x, y):
+            return (x + y).pow(3).sum()
+
+        inputs = (torch.rand(2, 2), torch.rand(2, 2))
+        res = autogradF.hessian(add_pow_reducer, inputs)
+        self._assert_interleaved_struct(res, inputs, inputs)
+        self.assertIsNone(res[0][0].grad_fn)
+        self.assertIsNone(res[0][1].grad_fn)
+        self.assertIsNone(res[1][0].grad_fn)
+        self.assertIsNone(res[1][1].grad_fn)
+
+    def test_hessian_scalar(self):
+        def reducer(x):
+            return x.sum()
+        inputs = torch.rand(4, 4)
+        res = autogradF.hessian(reducer, inputs)
+        self._assert_interleaved_struct(res, inputs, inputs)
+
+        inputs = torch.rand([])
+        res = autogradF.hessian(reducer, inputs)
+        self._assert_same_struct(res, inputs)
+
+        def bad_reducer(x):
+            return x.sum().view(1, 1, 1)
+        inputs = torch.rand(4, 4)
+        res = autogradF.hessian(bad_reducer, inputs)
+        self._assert_interleaved_struct(res, inputs, inputs)
+
+    def test_hessian_create_graph(self):
+        def pow_reducer(x):
+            return x.pow(3).sum()
+
+        inputs = torch.rand(2, 2, requires_grad=True)
+        res = autogradF.hessian(pow_reducer, inputs, create_graph=True)
+        self._assert_interleaved_struct(res, inputs, inputs)
+        self.assertIsNotNone(res.grad_fn)
+
+        gradcheck(lambda inp: autogradF.hessian(pow_reducer, inp, create_graph=True), inputs)
+        gradgradcheck(lambda inp: autogradF.hessian(pow_reducer, inp, create_graph=True), inputs)
+
+        def add_pow_reducer(x, y):
+            return (x + y).pow(3).sum()
+
+        inputs = (torch.rand(2, 2, requires_grad=True), torch.rand(2, 2, requires_grad=True))
+        res = autogradF.hessian(add_pow_reducer, inputs, create_graph=True)
+        self._assert_interleaved_struct(res, inputs, inputs)
+        self.assertIsNotNone(res[0][0].grad_fn)
+        self.assertIsNotNone(res[0][1].grad_fn)
+        self.assertIsNotNone(res[1][0].grad_fn)
+        self.assertIsNotNone(res[1][1].grad_fn)
+
+        def flatten(inp):
+            return tuple(el_lvl2 for el_lvl1 in inp for el_lvl2 in el_lvl1)
+
+        gradcheck(lambda *inp: flatten(autogradF.hessian(add_pow_reducer, inp, create_graph=True)), inputs)
+        gradgradcheck(lambda *inp: flatten(autogradF.hessian(add_pow_reducer, inp, create_graph=True)), inputs)
+
+        def foo(x, y):
+            x = x.cos()
+            val, hess = autogradF.hessian(add_pow_reducer, (x, y), create_graph=True)
+
+            res = val[0].cos().sum() + val[1].cos().sum() + hess[0].cos().sum()
+            res = res + hess[1].cos().sum() + x.cos().sum() + y.cos().sum()
+            return res
+
+        gradcheck(foo, inputs)
+        gradgradcheck(foo, inputs)
+
+    def test_vhp_err_check(self):
+        def foo(a):
+            return 3 * a.narrow(0, 0, 3).exp().sum()
+
+        def bar(a):
+            return 3 * a.narrow(0, 0, 3), "bar"
+
+        def bar2(a):
+            return 3 * a.narrow(0, 0, 3)
+
+        inp = torch.rand(4)
+        v = torch.rand(4)
+        with self.assertRaisesRegex(TypeError, "The inputs given to vhp must be either a Tensor"):
+            res = autogradF.vhp(foo, (inp, 2), v)
+
+        with self.assertRaisesRegex(TypeError, "The outputs of the user-provided function given to vhp must"):
+            res = autogradF.vhp(bar, inp, v)
+
+        err_msg_out = "The Tensor returned by the function given to vhp should contain a single element"
+        with self.assertRaisesRegex(RuntimeError, err_msg_out):
+            res = autogradF.vhp(bar2, inp, v)
+
+        with self.assertRaisesRegex(RuntimeError, "v has invalid size:"):
+            res = autogradF.vhp(foo, inp, torch.rand(5))
+
+        with self.assertRaisesRegex(TypeError, "The v given to vhp must be either a Tensor or a tuple of Tensors"):
+            res = autogradF.vhp(foo, inp, (v, 2))
+
+        res = autogradF.vhp(foo, inp, v)
+        self._assert_same_struct(res[1], inp)
+
+        def foo(a, b):
+            return (3 * b.narrow(0, 0, 3) * a.narrow(0, 0, 3)).sum()
+
+        inp = (torch.rand(4), torch.rand(5))
+        v = (torch.rand(4), torch.rand(5))
+
+        res = autogradF.vhp(foo, inp, v)
+        self._assert_same_struct(res[1], inp)
+
+    def test_vhp_err_check_strict(self):
+        def foo(a):
+            return a.detach().sum()
+
+        def bar(a):
+            # Make a non-leaf Tensor that requires_grad but that is not connected to the input
+            return a.long().float().requires_grad_().clone().sum()
+
+        def bar2(a):
+            # A Linear function for which the jacobian is independent of the input
+            return (3 * a).sum()
+
+        inp = torch.rand(4)
+        v = torch.rand(4)
+        with self.assertRaisesRegex(RuntimeError, "Output 0 of the user-provided function does not require gradients."):
+            res = autogradF.vhp(foo, inp, v, strict=True)
+        res = autogradF.vhp(foo, inp, v, strict=False)
+        self._assert_same_struct(res[1], inp)
+        self.assertEqual(res[1].abs().sum(), 0.)
+
+        with self.assertRaisesRegex(RuntimeError, "The output of the user-provided function is independent of input 0"):
+            res = autogradF.vhp(bar, inp, v, strict=True)
+        res = autogradF.vhp(bar, inp, v, strict=False)
+        self._assert_same_struct(res[1], inp)
+        self.assertEqual(res[1].abs().sum(), 0.)
+
+        with self.assertRaisesRegex(RuntimeError, "jacobian of the user-provided function with respect to input 0 is"):
+            res = autogradF.vhp(bar2, inp, v, strict=True)
+        res = autogradF.vhp(bar2, inp, v, strict=False)
+        self._assert_same_struct(res[1], inp)
+        self.assertEqual(res[1].abs().sum(), 0.)
+
+    def test_vhp_output(self):
+        def foo(a):
+            return 3 * a.narrow(0, 0, 3).exp().sum()
+
+        inputs = torch.rand(4, 4)
+        v = torch.ones(4, 4)
+        res = autogradF.vhp(foo, inputs, v)
+        self._assert_same_struct(res[1], inputs)
+        self.assertIsNone(res[0].grad_fn)
+        self.assertIsNone(res[1].grad_fn)
+
+        def bar(a, b):
+            return (a + 3 * b.narrow(0, 0, 3)).exp().sum()
+
+        inputs = (torch.rand(3), torch.rand(4))
+        v = (torch.ones(3), torch.ones(4))
+        out, vhp_val = autogradF.vhp(bar, inputs, v)
+        self._assert_same_struct(vhp_val, inputs)
+        self.assertIsNone(out.grad_fn)
+        self.assertIsNone(vhp_val[0].grad_fn)
+        self.assertIsNone(vhp_val[1].grad_fn)
+
+    def test_vhp_scalar(self):
+        def reducer(x):
+            return x.sum()
+        inputs = torch.rand(4, 4)
+        v = torch.ones(4, 4)
+        res = autogradF.vhp(reducer, inputs, v)
+        self._assert_same_struct(res[1], inputs)
+
+        inputs = torch.rand([])
+        v = torch.rand([])
+        res = autogradF.vhp(reducer, inputs, v)
+        self._assert_same_struct(res[1], inputs)
+
+        res = autogradF.vhp(reducer, inputs)
+        self._assert_same_struct(res[1], inputs)
+
+        def bad_reducer(x):
+            return x.sum().view(1, 1, 1)
+        inputs = torch.rand(4, 4)
+        v = torch.rand(4, 4)
+        res = autogradF.vhp(bad_reducer, inputs, v)
+        self._assert_same_struct(res[1], inputs)
+
+    def test_vhp_create_graph(self):
+        def foo(a):
+            return 3 * a.narrow(0, 0, 3).exp().sum()
+
+        inputs = torch.rand(4, 4, requires_grad=True)
+        v = torch.ones(4, 4, requires_grad=True)
+        res = autogradF.vhp(foo, inputs, v, create_graph=True)
+        self._assert_same_struct(res[1], inputs)
+        self.assertIsNotNone(res[0].grad_fn)
+        self.assertIsNotNone(res[1].grad_fn)
+
+        gradcheck(lambda inp, v: autogradF.vhp(foo, inp, v, create_graph=True), (inputs, v))
+        gradgradcheck(lambda inp, v: autogradF.vhp(foo, inp, v, create_graph=True), (inputs, v))
+
+        def bar(a, b):
+            return (a + 3 * b.narrow(0, 0, 3)).exp().sum()
+
+        inputs = (torch.rand(3, requires_grad=True), torch.rand(4, requires_grad=True))
+        v = (torch.ones(3, requires_grad=True), torch.ones(4, requires_grad=True))
+        out, vhp_val = autogradF.vhp(bar, inputs, v, create_graph=True)
+        self._assert_same_struct(vhp_val, inputs)
+        self.assertIsNotNone(out.grad_fn)
+        self.assertIsNotNone(vhp_val[0].grad_fn)
+        self.assertIsNotNone(vhp_val[1].grad_fn)
+
+        gradcheck(lambda *args: autogradF.vhp(bar, args[:2], args[2:], create_graph=True)[1], inputs + v)
+        gradgradcheck(lambda *args: autogradF.vhp(bar, args[:2], args[2:], create_graph=True)[1], inputs + v)
+
+        def foo(*args):
+            x, y = args[:2]
+            v = args[2:]
+
+            x = x.cos()
+            val, grad = autogradF.vhp(bar, (x, y), v, create_graph=True)
+
+            return val.cos() + grad[0].cos().sum() + grad[1].cos() + x.cos().sum() + y.cos()
+
+        gradcheck(foo, inputs + v)
+        gradgradcheck(foo, inputs + v)
+
+    def test_hvp_err_check(self):
+        def foo(a):
+            return 3 * a.narrow(0, 0, 3).exp().sum()
+
+        def bar(a):
+            return 3 * a.narrow(0, 0, 3), "bar"
+
+        def bar2(a):
+            return 3 * a.narrow(0, 0, 3)
+
+        inp = torch.rand(4)
+        v = torch.rand(4)
+        res = autogradF.hvp(foo, inp, v)
+        with self.assertRaisesRegex(TypeError, "The inputs given to hvp must be either a Tensor"):
+            res = autogradF.hvp(foo, (inp, 2), v)
+
+        with self.assertRaisesRegex(TypeError, "The outputs of the user-provided function given to hvp must"):
+            res = autogradF.hvp(bar, inp, v)
+
+        err_msg_out = "The Tensor returned by the function given to hvp should contain a single element"
+        with self.assertRaisesRegex(RuntimeError, err_msg_out):
+            res = autogradF.hvp(bar2, inp, v)
+
+        with self.assertRaisesRegex(RuntimeError, "v has invalid size:"):
+            res = autogradF.hvp(foo, inp, torch.rand(5))
+
+        with self.assertRaisesRegex(TypeError, "The v given to hvp must be either a Tensor or a tuple of Tensors"):
+            res = autogradF.hvp(foo, inp, (v, 2))
+
+        res = autogradF.hvp(foo, inp, v)
+        self._assert_same_struct(res[1], inp)
+
+        def foo(a, b):
+            return (3 * b.narrow(0, 0, 3) * a.narrow(0, 0, 3)).sum()
+
+        inp = (torch.rand(4), torch.rand(5))
+        v = (torch.rand(4), torch.rand(5))
+
+        res = autogradF.hvp(foo, inp, v)
+        self._assert_same_struct(res[1], inp)
+
+    def test_hvp_err_check_strict(self):
+        def foo(a):
+            return a.detach().sum()
+
+        def bar(a):
+            # Make a non-leaf Tensor that requires_grad but that is not connected to the input
+            return a.long().float().requires_grad_().clone().sum()
+
+        def bar2(a):
+            # A Linear function for which the jacobian is independent of the input
+            return (3 * a).sum()
+
+        inp = torch.rand(4)
+        v = torch.rand(4)
+        with self.assertRaisesRegex(RuntimeError, "Output 0 of the user-provided function does not require gradients."):
+            res = autogradF.hvp(foo, inp, v, strict=True)
+        res = autogradF.hvp(foo, inp, v, strict=False)
+        self._assert_same_struct(res[1], inp)
+        self.assertEqual(res[1].abs().sum(), 0.)
+
+        with self.assertRaisesRegex(RuntimeError, "The output of the user-provided function is independent of input 0"):
+            res = autogradF.hvp(bar, inp, v, strict=True)
+        res = autogradF.hvp(bar, inp, v, strict=False)
+        self._assert_same_struct(res[1], inp)
+        self.assertEqual(res[1].abs().sum(), 0.)
+
+        with self.assertRaisesRegex(RuntimeError, "jacobian of the user-provided function with respect to input 0 is"):
+            res = autogradF.hvp(bar2, inp, v, strict=True)
+        res = autogradF.hvp(bar2, inp, v, strict=False)
+        self._assert_same_struct(res[1], inp)
+        self.assertEqual(res[1].abs().sum(), 0.)
+
+    def test_hvp_output(self):
+        def foo(a):
+            return 3 * a.narrow(0, 0, 3).exp().sum()
+
+        inputs = torch.rand(4, 4)
+        v = torch.ones(4, 4)
+        res = autogradF.hvp(foo, inputs, v)
+        self._assert_same_struct(res[1], inputs)
+        self.assertIsNone(res[0].grad_fn)
+        self.assertIsNone(res[1].grad_fn)
+
+        def bar(a, b):
+            return (a + 3 * b.narrow(0, 0, 3)).exp().sum()
+
+        inputs = (torch.rand(3), torch.rand(4))
+        v = (torch.ones(3), torch.ones(4))
+        out, hvp_val = autogradF.hvp(bar, inputs, v)
+        self._assert_same_struct(hvp_val, inputs)
+        self.assertIsNone(out.grad_fn)
+        self.assertIsNone(hvp_val[0].grad_fn)
+        self.assertIsNone(hvp_val[1].grad_fn)
+
+    def test_hvp_scalar(self):
+        def reducer(x):
+            return x.exp().sum()
+        inputs = torch.rand(4, 4)
+        v = torch.ones(4, 4)
+        res = autogradF.hvp(reducer, inputs, v)
+        self._assert_same_struct(res[1], inputs)
+
+        inputs = torch.rand([])
+        v = torch.rand([])
+        res = autogradF.hvp(reducer, inputs, v)
+        self._assert_same_struct(res[1], inputs)
+
+        res = autogradF.hvp(reducer, inputs)
+        self._assert_same_struct(res[1], inputs)
+
+        def bad_reducer(x):
+            return x.exp().sum().view(1, 1, 1)
+        inputs = torch.rand(4, 4)
+        v = torch.rand(4, 4)
+        res = autogradF.hvp(bad_reducer, inputs, v)
+        self._assert_same_struct(res[1], inputs)
+
+    def test_hvp_create_graph(self):
+        def foo(a):
+            return 3 * a.narrow(0, 0, 3).exp().sum()
+
+        inputs = torch.rand(4, 4, requires_grad=True)
+        v = torch.ones(4, 4, requires_grad=True)
+        res = autogradF.hvp(foo, inputs, v, create_graph=True)
+        self._assert_same_struct(res[1], inputs)
+        self.assertIsNotNone(res[0].grad_fn)
+        self.assertIsNotNone(res[1].grad_fn)
+
+        gradcheck(lambda inp, v: autogradF.hvp(foo, inp, v, create_graph=True), (inputs, v))
+        gradgradcheck(lambda inp, v: autogradF.hvp(foo, inp, v, create_graph=True), (inputs, v))
+
+        def bar(a, b):
+            return (a + 3 * b.narrow(0, 0, 3)).exp().sum()
+
+        inputs = (torch.rand(3, requires_grad=True), torch.rand(4, requires_grad=True))
+        v = (torch.ones(3, requires_grad=True), torch.ones(4, requires_grad=True))
+        out, hvp_val = autogradF.hvp(bar, inputs, v, create_graph=True)
+        self._assert_same_struct(hvp_val, inputs)
+        self.assertIsNotNone(out.grad_fn)
+        self.assertIsNotNone(hvp_val[0].grad_fn)
+        self.assertIsNotNone(hvp_val[1].grad_fn)
+
+        gradcheck(lambda *args: autogradF.hvp(bar, args[:2], args[2:], create_graph=True)[1], inputs + v)
+        gradgradcheck(lambda *args: autogradF.hvp(bar, args[:2], args[2:], create_graph=True)[1], inputs + v)
+
+        def foo(*args):
+            x, y = args[:2]
+            v = args[2:]
+
+            x = x.cos()
+            val, grad = autogradF.hvp(bar, (x, y), v, create_graph=True)
+
+            return val.cos() + grad[0].cos().sum() + grad[1].cos() + x.cos().sum() + y.cos()
+
+        gradcheck(foo, inputs + v)
+        gradgradcheck(foo, inputs + v)
+
+    def test_jacobian_match_vjp_jvp(self):
+        def foo(x):
+            return x ** 3 + x.sum()
+
+        inputs = torch.rand(4)
+        v = torch.rand(4)
+
+        jac = autogradF.jacobian(foo, inputs)
+        jvp = autogradF.jvp(foo, inputs, v)[1]
+        vjp = autogradF.vjp(foo, inputs, v)[1]
+
+        self.assertEqual(jvp, torch.mm(jac, v.unsqueeze(1)).squeeze(1))
+        self.assertEqual(vjp, torch.mm(v.unsqueeze(0), jac).squeeze(0))
+
+    def test_hessian_match_vhp_hvp(self):
+        def foo(a):
+            return 3 * a.narrow(0, 0, 3).exp().sum()
+
+        inputs = torch.rand(4)
+        v = torch.rand(4)
+
+        hes = autogradF.hessian(foo, inputs)
+        hvp = autogradF.hvp(foo, inputs, v)[1]
+        vhp = autogradF.vhp(foo, inputs, v)[1]
+
+        self.assertEqual(hvp, torch.mm(hes, v.unsqueeze(1)).squeeze(1))
+        self.assertEqual(vhp, torch.mm(v.unsqueeze(0), hes).squeeze(0))
 
 
 # Generic device type autograd tests.
