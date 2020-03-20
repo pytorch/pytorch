@@ -344,6 +344,8 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_specialize_autogradzero", specializeAutogradZero)
       .def("_jit_override_can_fuse_on_cpu", &overrideCanFuseOnCPU)
       .def("_jit_override_can_fuse_on_gpu", &overrideCanFuseOnGPU)
+      .def("_jit_can_fuse_on_cpu", &canFuseOnCPU)
+      .def("_jit_can_fuse_on_gpu", &canFuseOnGPU)
       .def("_jit_register_tensorexpr_fuser", &registerTensorExprFuser)
       .def(
           "_jit_differentiate",
@@ -738,14 +740,13 @@ void initJITBindings(PyObject* module) {
   py::class_<PythonFutureWrapper>(m, "Future")
       .def(
           "wait",
-          [](torch::jit::PythonFutureWrapper& fut) {
-            fut.fut->wait();
-            auto res = fut.fut->value();
+          [](PythonFutureWrapper& fut) {
+            auto res = fut.wait();
             {
-              // acquiring GIL as torch::jit::toPyObject creates new py::object
+              // acquiring GIL as toPyObject creates new py::object
               // without grabbing the GIL.
               pybind11::gil_scoped_acquire ag;
-              return torch::jit::toPyObject(std::move(res));
+              return toPyObject(std::move(res));
             }
           },
           py::call_guard<py::gil_scoped_release>());
@@ -804,16 +805,7 @@ void initJITBindings(PyObject* module) {
     }
   });
 
-  m.def("wait", [](PythonFutureWrapper& fut) {
-    if (jit::tracer::isTracing()) {
-      auto graph = jit::tracer::getTracingState()->graph;
-
-      Value* fut_val = jit::tracer::getValueTrace(fut.fut);
-      auto output = graph->insert(aten::wait, {fut_val});
-      jit::tracer::setValueTrace(fut.fut->value(), output);
-    }
-    return fut.fut->value();
-  });
+  m.def("wait", [](PythonFutureWrapper& fut) { return fut.wait(); });
 
   m.def("_jit_assert_is_instance", [](py::object obj, TypePtr type) {
     toIValue(obj, type);

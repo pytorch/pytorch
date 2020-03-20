@@ -231,7 +231,7 @@ class DistAutogradTest(RpcAgentTestFixture):
         )
 
         context_ids = []
-        for i in range(1000):
+        for i in range(200):
             with dist_autograd.context() as context_id:
                 self.assertEqual(
                     context_id,

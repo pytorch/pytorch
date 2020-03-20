@@ -51,6 +51,18 @@ struct PythonFutureWrapper {
   explicit PythonFutureWrapper(c10::intrusive_ptr<c10::ivalue::Future> fut)
       : fut(std::move(fut)) {}
 
+  IValue wait() {
+    fut->wait();
+    if (jit::tracer::isTracing()) {
+      auto graph = jit::tracer::getTracingState()->graph;
+
+      Value* fut_val = jit::tracer::getValueTrace(fut);
+      auto output = graph->insert(aten::wait, {fut_val});
+      jit::tracer::setValueTrace(fut->value(), output);
+    }
+    return fut->value();
+  }
+
   c10::intrusive_ptr<c10::ivalue::Future> fut;
 };
 
