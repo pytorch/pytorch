@@ -45,14 +45,14 @@ using caffe2::serialize::IStreamAdapter;
 using caffe2::serialize::ReadAdapterInterface;
 
 OpCode parseOpCode(const char *str);
-namespace {
 
-IValue expect_field(IValue tup, const std::string& expected_name, size_t entry){
+IValue expect_field(IValue tup, const std::string& expected_name, size_t entry) {
   auto row = tup.toTuple()->elements().at(entry).toTuple();
   TORCH_INTERNAL_ASSERT(row->elements().at(0).toStringRef() == expected_name, "Expected ", expected_name, " found " , row->elements().at(0).toStringRef());
   return row->elements().at(1);
 }
 
+namespace {
 void print_unsupported_ops_and_throw(const std::unordered_set<std::string>& unsupported_ops) {
   std::string error_message("{");
   for (const auto& op_name : unsupported_ops) {

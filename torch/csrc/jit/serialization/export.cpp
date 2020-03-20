@@ -916,23 +916,28 @@ void check_onnx_proto(const std::string& proto_string) {
     onnx::checker::check_model(model);
 }
 
+void moduleMethodsTuple(
+    const Module& module,
+    std::vector<c10::IValue>& elements);
+IValue expect_field(IValue tup, const std::string& expected_name, size_t entry);
+
 namespace {
 void export_opnames(const script::Module& m, std::set<std::string>& opnames) {
-  for (const auto& method : m.get_methods()) {
-    const auto& func = method.function();
-    auto graph = func.graph()->copy();
-    Inline(*graph);
-    torch::jit::Code code(graph, func.name());
-    for (size_t i = 0; i < code.instructions().size(); ++i) {
-      Instruction ins = code.instructions()[i];
-      if (ins.op == OP || ins.op == OPN) {
-        auto node = code.instructions_source()[i];
-        opnames.emplace(toString(node->schema().operator_name()));
-      }
+  std::vector<c10::IValue> elements;
+  moduleMethodsTuple(m, elements);
+  for (const auto& element : elements) {
+    auto table = element.toTuple()->elements()[1];
+    const auto& ops_list =
+        expect_field(table, "operators", 1).toTuple()->elements();
+    for (const auto& op : ops_list) {
+      auto op_item = op.toTuple()->elements();
+      TORCH_CHECK(
+          op_item.size() == 2,
+          "There should be two parts in an operator name.");
+      opnames.emplace(
+          op_item[0].toString()->string() + "," +
+          op_item[1].toString()->string());
     }
-  }
-  for (const auto& sub_m : m.children()) {
-    export_opnames(sub_m, opnames);
   }
 }
 } // namespace

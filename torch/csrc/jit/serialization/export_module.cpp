@@ -133,6 +133,7 @@ void setstateTuple(const IValue& ivalue, std::vector<c10::IValue>& elements) {
     }
   }
 }
+}
 
 void moduleMethodsTuple(const Module& module,
     std::vector<c10::IValue>& elements) {
@@ -144,8 +145,6 @@ void moduleMethodsTuple(const Module& module,
 
   // __setstate__ of all components
   setstateTuple(module._ivalue(), elements);
-}
-
 }
 
 void SetExportModuleExtraFilesHook(ExportModuleExtraFilesHook hook) {
