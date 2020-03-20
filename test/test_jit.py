@@ -2087,14 +2087,17 @@ graph(%input, %weight):
                 # TODO: uncomment when sort is supported
                 # x, _ = torch.sort(x)
                 x = F.interpolate(x, 4, mode='nearest')
-                x = F.upsample(x, (32, 32))
-                x = F.upsample_bilinear(x, (32, 32))
-                x = F.upsample_nearest(x, (32, 32))
+                # x = F.upsample(x, (32, 32))
+                # x = F.upsample_bilinear(x, (32, 32))
+                # x = F.upsample_nearest(x, (32, 32))
                 return x
 
         m = torch.jit.script(M())
+        print('original', m.graph)
         torch._C._jit_pass_inline(m.graph)
         torch._C._jit_pass_constant_propagation(m.graph)
+        torch._C._jit_pass_constant_pooling(m.graph)
+        print(m.graph)
         FileCheck().check("aten::dequantize") \
                    .check("aten::max_pool2d") \
                    .check("aten::adaptive_avg_pool2d") \
@@ -2113,6 +2116,7 @@ graph(%input, %weight):
                    .check("aten::dropout") \
                    .run(m.graph)
         torch._C._jit_pass_swap_dequantize(m.graph)
+        print('after swap:', m.graph)
         FileCheck().check("aten::max_pool2d") \
                    .check("aten::adaptive_avg_pool2d") \
                    .check("aten::avg_pool2d") \
