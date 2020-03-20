@@ -2082,6 +2082,43 @@ void FoldConvBatchNorm2dHelper::transform() {
   }
 }
 
+void swapDeQuant(Block* block) {
+  auto graph = block->owningGraph();
+  for (Node* n : block->nodes()) {
+    auto input_indexes = getGeneralOpTensorInputIndexes(n);
+    if (input_indexes.size() > 0) {
+      bool is_dequantized = true;
+      for (auto i : input_indexes) {
+        is_dequantized &= n->inputs()[i]->node()->kind() == Symbol::aten("dequantize");
+      }
+      if (!is_dequantized) {
+        continue;
+      }
+      // Delete dequantize node, we have one dequantize
+      // for each use of the value
+      for (auto i : input_indexes) {
+        auto* dequantized_val = n->inputs()[i];
+        auto* dequantize_node = dequantized_val->node();
+        TORCH_INTERNAL_ASSERT(dequantized_val->uses().size() == 1,
+                              "Expect to have one dequantize node for each use");
+        // Replace useses of dequantized_val with the input of
+        // dequantize node
+        dequantized_val->replaceAllUsesWith(dequantize_node->inputs()[0]);
+        dequantize_node->removeAllInputs();
+        dequantize_node->destroy();
+      }
+      for (auto* output: n->outputs()) {
+        std::vector<Use> uses = output->uses();
+        // Insert new dequantize node for each use of the output
+        insertDeQuantCall(graph, output, output, uses);
+      }
+    }
+    for (Block* subblock : n->blocks()) {
+      swapDeQuant(subblock);
+    }
+  }
+}
+
 } // namespace
 
 TORCH_API Module InsertObservers(
@@ -2242,45 +2279,7 @@ void ReplicateDeQuant(std::shared_ptr<Graph>& graph) {
 // for example: flatten, average_pool, upsample
 // This is called after inline and before graph execution
 void SwapDeQuant(std::shared_ptr<Graph>& graph) {
-  std::stack<Block*> blocks_to_visit;
-  blocks_to_visit.push(graph->block());
-  while (!blocks_to_visit.empty()) {
-    Block* b = blocks_to_visit.top();
-    blocks_to_visit.pop();
-    for (Node* n : b->nodes()) {
-      auto input_indexes = getGeneralOpTensorInputIndexes(n);
-      if (input_indexes.size() > 0) {
-        bool is_dequantized = true;
-        for (auto i : input_indexes) {
-          is_dequantized &= n->inputs()[i]->node()->kind() == Symbol::aten("dequantize");
-        }
-        if (!is_dequantized) {
-          continue;
-        }
-        // Delete dequantize node, we have one dequantize
-        // for each use of the value
-        for (auto i : input_indexes) {
-          auto* dequantized_val = n->inputs()[i];
-          auto* dequantize_node = dequantized_val->node();
-          TORCH_INTERNAL_ASSERT(dequantized_val->uses().size() == 1,
-                                "Expect to have one dequantize node for each use");
-          // Replace useses of dequantized_val with the input of
-          // dequantize node
-          dequantized_val->replaceAllUsesWith(dequantize_node->inputs()[0]);
-          dequantize_node->removeAllInputs();
-          dequantize_node->destroy();
-        }
-        for (auto* output: n->outputs()) {
-          std::vector<Use> uses = output->uses();
-          // Insert new dequantize node for each use of the output
-          insertDeQuantCall(graph.get(), output, output, uses);
-        }
-      }
-      for (Block* subblock : n->blocks()) {
-        blocks_to_visit.push(subblock);
-      }
-    }
-  }
+  swapDeQuant(graph->block());
 }
 
 void QuantFusion(std::shared_ptr<Graph>& graph) {
