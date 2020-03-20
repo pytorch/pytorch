@@ -27,7 +27,10 @@ static inline std::tuple<Tensor, Tensor> _lu_det_P_diag_U(const Tensor& self) {
   TORCH_CHECK(infos.ge(0).all().item<uint8_t>(), "Invalid argument passed to lu");
   auto n = self.size(-1);
   auto num_exchanges = (at::arange(1, n + 1, pivs.options()) != pivs).sum(-1, /*keepdim=*/false, /*dtype=*/self.scalar_type()).fmod_(2);
-  auto u_diagonal = lu.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1);
+
+  // NB: the `.contiguous()` call is added due to the bug in `.prod()` as reported in
+  // issue #https://github.com/pytorch/pytorch/issues/34061
+  auto u_diagonal = lu.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).contiguous();
 
   // We have to manually set the diagonal to 0 due to an issue with MAGMA's getrf_batched routine
   if (self.dim() > 2 && self.is_cuda()) {
