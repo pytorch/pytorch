@@ -212,7 +212,12 @@ def _ensure_fp(g, input):
     if _is_fp(input):
         return input
 
-    return g.op("Cast", input, to_i=scalar_type_to_pytorch_type.index(torch.get_default_dtype()))
+    scalar_type = torch.get_default_dtype()
+    onnx_scalar_type = cast_pytorch_to_onnx['Float']
+    if torch.get_default_dtype() is torch.double:
+        onnx_scalar_type = cast_pytorch_to_onnx['Double']
+
+    return g.op("Cast", input, to_i=onnx_scalar_type)
 
 
 def _sort_helper(g, input, dim, decending=True, out=None):
