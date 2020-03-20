@@ -3987,26 +3987,26 @@ TEST_F(ModulesTest, PrettyPrintAdaptiveMaxPool) {
       c10::str(AdaptiveMaxPool2d(5)),
       "torch::nn::AdaptiveMaxPool2d(output_size=[5, 5])");
   ASSERT_EQ(
-      c10::str(AdaptiveMaxPool2d(AdaptiveMaxPool2dOptions({5, 6})),
+      c10::str(AdaptiveMaxPool2d(AdaptiveMaxPool2dOptions({5, 6}))),
       "torch::nn::AdaptiveMaxPool2d(output_size=[5, 6])");
   ASSERT_EQ(
-      c10::str(AdaptiveMaxPool2d(AdaptiveMaxPool2dOptions({5, c10::nullopt})),
+      c10::str(AdaptiveMaxPool2d(AdaptiveMaxPool2dOptions({5, c10::nullopt}))),
       "torch::nn::AdaptiveMaxPool2d(output_size=[5, None])");
   ASSERT_EQ(
-      c10::str(AdaptiveMaxPool2d(AdaptiveMaxPool2dOptions({c10::nullopt, c10::nullopt})),
+      c10::str(AdaptiveMaxPool2d(AdaptiveMaxPool2dOptions({c10::nullopt, c10::nullopt}))),
       "torch::nn::AdaptiveMaxPool2d(output_size=[None, None])");
 
   ASSERT_EQ(
       c10::str(AdaptiveMaxPool3d(5)),
       "torch::nn::AdaptiveMaxPool3d(output_size=[5, 5, 5])");
   ASSERT_EQ(
-      c10::str(AdaptiveMaxPool3d(AdaptiveMaxPool3dOptions({5, 6, 7})),
+      c10::str(AdaptiveMaxPool3d(AdaptiveMaxPool3dOptions({5, 6, 7}))),
       "torch::nn::AdaptiveMaxPool3d(output_size=[5, 6, 7])");
   ASSERT_EQ(
-      c10::str(AdaptiveMaxPool3d(AdaptiveMaxPool3dOptions({5, c10::nullopt, 7})),
+      c10::str(AdaptiveMaxPool3d(AdaptiveMaxPool3dOptions({5, c10::nullopt, 7}))),
       "torch::nn::AdaptiveMaxPool3d(output_size=[5, None, 7])");
   ASSERT_EQ(
-      c10::str(AdaptiveMaxPool3d(AdaptiveMaxPool3dOptions({c10::nullopt, c10::nullopt, c10::nullopt})),
+      c10::str(AdaptiveMaxPool3d(AdaptiveMaxPool3dOptions({c10::nullopt, c10::nullopt, c10::nullopt}))),
       "torch::nn::AdaptiveMaxPool3d(output_size=[None, None, None])");
 }
 
