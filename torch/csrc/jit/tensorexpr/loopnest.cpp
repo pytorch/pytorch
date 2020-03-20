@@ -1,4 +1,4 @@
-#include <torch/csrc/jit/tensorexpr/schedule.h>
+#include <torch/csrc/jit/tensorexpr/loopnest.h>
 
 #include <queue>
 #include <stdexcept>
