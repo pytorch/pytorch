@@ -115,10 +115,6 @@ white_list = [
     ('aten::confirmed_by_owner', datetime.date(2020, 3, 17)),
     ('aten::owner', datetime.date(2020, 3, 27)),
     ('aten::owner_name', datetime.date(2020, 3, 27)),
-    ('prepacked::linear_clamp_prepack', datetime.date(2020, 4, 1)),
-    ('prepacked::linear_clamp_run', datetime.date(2020, 4, 1)),
-    ('prepacked::conv2d_clamp_prepack', datetime.date(2020, 4, 1)),
-    ('prepacked::conv2d_clamp_run', datetime.date(2020, 4, 1)),
 ]
 
 
@@ -180,6 +176,9 @@ if __name__ == '__main__':
             line = f.readline()
             if not line:
                 break
+            if "Conv2dOpContext" in line or "LinearOpContext" in line:
+                # Remove this once nightlies pickup this PR.
+                continue
 
             s = parse_schema(line.strip())
             slist = new_schema_dict.get(s.name, [])
