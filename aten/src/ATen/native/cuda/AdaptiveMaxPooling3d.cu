@@ -5,6 +5,7 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
 #include <c10/util/Exception.h>
+#include <THC/THCAtomics.cuh>
 #include <THC/THCGeneral.h>
 #include <THC/THCNumerics.cuh>
 
@@ -133,7 +134,7 @@ void adaptivemaxpool_loop(
 
     totalZ -= 65535;
     offsetZ += 65535;
-    THCudaCheck(cudaGetLastError());
+    AT_CUDA_CHECK(cudaGetLastError());
   }
 }
 
@@ -211,7 +212,7 @@ void adaptivemaxgradinput_loop(
 
     totalZ -= 65535;
     offsetZ += 65535;
-    THCudaCheck(cudaGetLastError());
+    AT_CUDA_CHECK(cudaGetLastError());
   }
 }
 
@@ -262,7 +263,7 @@ __global__ void atomicadaptivemaxgradinput(
       int64_t *ptr_ind = indices_dt + oh*osizeW + ow;
       T grad_delta = *ptr_gradOutput;
       int64_t argmax = (*ptr_ind);
-      atomicAdd(&(gradInput_d[argmax]), grad_delta);
+      gpuAtomicAdd(&(gradInput_d[argmax]), grad_delta);
     }
   }
 }
@@ -288,7 +289,7 @@ void atomicadaptivemaxgradinput_loop(
 
     totalZ -= 65535;
     offsetZ += 65535;
-    THCudaCheck(cudaGetLastError());
+    AT_CUDA_CHECK(cudaGetLastError());
   }
 }
 
@@ -362,16 +363,18 @@ void adaptive_max_pool3d_out_cuda_template(
     totalZ = sizeB * sizeD * osizeT;
   }
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(),
+  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(),
     "adaptive_max_pool3d_cuda",
     [&] {
-      scalar_t *input_data = input.data<scalar_t>();
-      scalar_t *output_data = output.data<scalar_t>();
-      int64_t *indices_data = indices.data<int64_t>();
+      AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "adaptive_max_pool3d_cuda", [&] {
+        scalar_t *input_data = input.data_ptr<scalar_t>();
+        scalar_t *output_data = output.data_ptr<scalar_t>();
+        int64_t *indices_data = indices.data_ptr<int64_t>();
 
-      adaptivemaxpool_loop(
-        input_data, output_data, indices_data, totalZ, isizeT, isizeH, isizeW,
-        osizeT, osizeH, osizeW, istrideD, istrideT, istrideH, istrideW);
+        adaptivemaxpool_loop(
+          input_data, output_data, indices_data, totalZ, isizeT, isizeH, isizeW,
+          osizeT, osizeH, osizeW, istrideD, istrideT, istrideH, istrideW);
+      });
     }
   );
 }
@@ -429,31 +432,35 @@ void adaptive_max_pool3d_backward_out_cuda_template(
   }
 
   if (atomic) {
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(),
+    AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(),
       "adaptive_max_pool3d_backward_cuda",
       [&] {
-        scalar_t *gradInput_data = gradInput.data<scalar_t>();
-        scalar_t *gradOutput_data = gradOutput.data<scalar_t>();
-        int64_t *indices_data = indices.data<int64_t>();
+        AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "adaptive_max_pool3d_backward_cuda", [&] {
+          scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
+          scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
+          int64_t *indices_data = indices.data_ptr<int64_t>();
 
-        atomicadaptivemaxgradinput_loop(
-          gradInput_data, gradOutput_data, indices_data,
-          totalZ,
-          isizeT, isizeH, isizeW, osizeT, osizeH, osizeW);
+          atomicadaptivemaxgradinput_loop(
+            gradInput_data, gradOutput_data, indices_data,
+            totalZ,
+            isizeT, isizeH, isizeW, osizeT, osizeH, osizeW);
+        });
       }
     );
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(),
+    AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(),
       "adaptive_max_pool3d_backward_cuda",
       [&] {
-        scalar_t *gradInput_data = gradInput.data<scalar_t>();
-        scalar_t *gradOutput_data = gradOutput.data<scalar_t>();
-        int64_t *indices_data = indices.data<int64_t>();
+        AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "adaptive_max_pool3d_backward_cuda", [&] {
+          scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
+          scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
+          int64_t *indices_data = indices.data_ptr<int64_t>();
 
-        adaptivemaxgradinput_loop(
-          gradInput_data, gradOutput_data, indices_data,
-          totalZ,
-          isizeT, isizeH, isizeW, osizeT, osizeH, osizeW);
+          adaptivemaxgradinput_loop(
+            gradInput_data, gradOutput_data, indices_data,
+            totalZ,
+            isizeT, isizeH, isizeW, osizeT, osizeH, osizeW);
+        });
       }
     );
   }
@@ -508,7 +515,7 @@ Tensor adaptive_max_pool3d_backward_cuda(
   const Tensor& input,
   const Tensor& indices)
 {
-  auto gradInput = at::zeros_like(input);
+  auto gradInput = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   adaptive_max_pool3d_backward_out_cuda_template(
     gradInput,
     gradOutput_,

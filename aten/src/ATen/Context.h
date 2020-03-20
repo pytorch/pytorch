@@ -11,6 +11,7 @@
 #include <ATen/detail/HIPHooksInterface.h>
 #include <c10/util/Exception.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
+#include <c10/core/QEngine.h>
 
 #include <memory>
 #include <mutex>
@@ -46,6 +47,9 @@ class CAFFE2_API Context {
     } else {
       AT_ERROR(DeviceTypeName(device_type), " device type not enabled.");
     }
+  }
+  bool isPinnedPtr(void* data) {
+    return detail::getCUDAHooks().isPinnedPtr(data);
   }
   bool hasOpenMP() const;
   bool hasMKL() const;
@@ -96,11 +100,18 @@ class CAFFE2_API Context {
   // to test this instead
   bool userEnabledCuDNN() const;
   void setUserEnabledCuDNN(bool e);
+  bool userEnabledMkldnn() const;
+  void setUserEnabledMkldnn(bool e);
   bool benchmarkCuDNN() const;
   void setBenchmarkCuDNN(bool);
   bool deterministicCuDNN() const;
   void setDeterministicCuDNN(bool);
-private:
+  at::QEngine qEngine() const;
+  void setQEngine(at::QEngine e);
+  const std::vector<at::QEngine>& supportedQEngines() const;
+  bool isXNNPACKAvailable() const;
+
+ private:
   void initCUDAIfNeeded(DeviceType p) {
     if (p == DeviceType::CUDA) {
       lazyInitCUDA();
@@ -116,6 +127,8 @@ private:
   bool enabled_cudnn = true;
   bool deterministic_cudnn = false;
   bool benchmark_cudnn = false;
+  bool enabled_mkldnn = true;
+  c10::optional<at::QEngine> quantized_engine = c10::nullopt;
   std::unique_ptr<THCState, void(*)(THCState*)> thc_state;
   std::unique_ptr<THHState, void(*)(THHState*)> thh_state;
 };
@@ -128,24 +141,24 @@ static inline void init() {
 
 CAFFE2_API Allocator* getCPUAllocator();
 
-static inline DeprecatedTypeProperties& getNonVariableDeprecatedTypeProperties(Backend p, ScalarType s) {
+static inline DeprecatedTypeProperties& getDeprecatedTypeProperties(Backend p, ScalarType s) {
   return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
-      p, s, /*is_variable*/false);
+      p, s);
 }
 
 static inline DeprecatedTypeProperties& CPU(ScalarType s) {
   return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
-      Backend::CPU, s, /*is_variable*/false);
+      Backend::CPU, s);
 }
 
 static inline DeprecatedTypeProperties& CUDA(ScalarType s) {
   return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
-      Backend::CUDA, s, /*is_variable*/false);
+      Backend::CUDA, s);
 }
 
 static inline DeprecatedTypeProperties& HIP(ScalarType s) {
   return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
-      Backend::HIP, s, /*is_variable*/false);
+      Backend::HIP, s);
 }
 
 static inline bool hasCUDA() {

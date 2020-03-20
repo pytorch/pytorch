@@ -2,6 +2,7 @@ import torch
 import numbers
 from torch.nn.parameter import Parameter
 from .module import Module
+from ._functions import CrossMapLRN2d as _cross_map_lrn2d
 from .. import functional as F
 from .. import init
 
@@ -61,8 +62,8 @@ class CrossMapLRN2d(Module):
         self.k = k
 
     def forward(self, input):
-        return self._backend.CrossMapLRN2d.apply(input, self.size, self.alpha, self.beta,
-                                                 self.k)
+        return _cross_map_lrn2d.apply(input, self.size, self.alpha, self.beta,
+                                      self.k)
 
     def extra_repr(self):
         return '{size}, alpha={alpha}, beta={beta}, k={k}'.format(**self.__dict__)
@@ -125,7 +126,7 @@ class LayerNorm(Module):
 
     .. _`Layer Normalization`: https://arxiv.org/abs/1607.06450
     """
-    __constants__ = ['normalized_shape', 'weight', 'bias', 'eps', 'elementwise_affine']
+    __constants__ = ['normalized_shape', 'eps', 'elementwise_affine']
 
     def __init__(self, normalized_shape, eps=1e-5, elementwise_affine=True):
         super(LayerNorm, self).__init__()
@@ -198,8 +199,7 @@ class GroupNorm(Module):
 
     .. _`Group Normalization`: https://arxiv.org/abs/1803.08494
     """
-    __constants__ = ['num_groups', 'num_channels', 'eps', 'affine', 'weight',
-                     'bias']
+    __constants__ = ['num_groups', 'num_channels', 'eps', 'affine']
 
     def __init__(self, num_groups, num_channels, eps=1e-5, affine=True):
         super(GroupNorm, self).__init__()

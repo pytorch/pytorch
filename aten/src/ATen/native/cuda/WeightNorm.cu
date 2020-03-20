@@ -321,7 +321,7 @@ std::tuple<Tensor,Tensor> weight_norm_cuda
    const Tensor & g,
    int64_t dim)
 {
-  auto w = at::empty_like(v);
+  auto w = at::empty_like(v, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
   // weight_norm_fused does have a derivative defined in derivatives.yaml, therefore, VariableType.cpp
   // sends the unpacked g.data() as the argument.  In other words, we expect "g" is a bare Tensor here.
@@ -358,10 +358,10 @@ std::tuple<Tensor,Tensor> weight_norm_cuda
               BLOCK,
               BLOCK*sizeof(accscalar_t),
               stream>>>
-           (w.data<scalar_t>(),
-            norms.data<accscalar_t>(),
-            v.data<scalar_t>(),
-            g.data<scalar_t>(),
+           (w.data_ptr<scalar_t>(),
+            norms.data_ptr<accscalar_t>(),
+            v.data_ptr<scalar_t>(),
+            g.data_ptr<scalar_t>(),
             rowSize);
        });
   }
@@ -388,10 +388,10 @@ std::tuple<Tensor,Tensor> weight_norm_cuda
               dim3(TILE_W,TILE_H),
               (TILE_W*TILE_H + TILE_W)*sizeof(accscalar_t),
               stream>>>
-           (w.data<scalar_t>(),
-            norms.data<accscalar_t>(),
-            v.data<scalar_t>(),
-            g.data<scalar_t>(),
+           (w.data_ptr<scalar_t>(),
+            norms.data_ptr<accscalar_t>(),
+            v.data_ptr<scalar_t>(),
+            g.data_ptr<scalar_t>(),
             fast_dim_size,
             slower_dims_size);
        });
@@ -401,7 +401,7 @@ std::tuple<Tensor,Tensor> weight_norm_cuda
   // not the kernel's execution.  Errors in kernel execution aren't guaranteed to be caught
   // until a later error check on a synchronizing CUDA call.  Unfortunately, without manually
   // synchronizing here, this is the best we can do.
-  THCudaCheck(cudaGetLastError());
+  AT_CUDA_CHECK(cudaGetLastError());
 
   return std::tuple<Tensor, Tensor>{w, norms};
 }
@@ -420,8 +420,8 @@ std::tuple<Tensor, Tensor> weight_norm_cuda_backward
   TORCH_CHECK(saved_norms.is_contiguous(), "saved_norms must be contiguous");
   TORCH_CHECK(dim == 0 || dim == saved_v.dim() - 1, "fused kernels can only be applied for first or last dim")
 
-  auto grad_v = at::empty_like(saved_v);
-  auto grad_g = at::empty_like(saved_g);
+  auto grad_v = at::empty_like(saved_v, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto grad_g = at::empty_like(saved_g, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
   const int ndims = saved_v.dim();
 
@@ -446,12 +446,12 @@ std::tuple<Tensor, Tensor> weight_norm_cuda_backward
               BLOCK,
               BLOCK*sizeof(accscalar_t),
               stream>>>
-           (grad_v.data<scalar_t>(),
-            grad_g.data<scalar_t>(),
-            grad_w.data<scalar_t>(),
-            saved_v.data<scalar_t>(),
-            saved_g.data<scalar_t>(),
-            saved_norms.data<accscalar_t>(),
+           (grad_v.data_ptr<scalar_t>(),
+            grad_g.data_ptr<scalar_t>(),
+            grad_w.data_ptr<scalar_t>(),
+            saved_v.data_ptr<scalar_t>(),
+            saved_g.data_ptr<scalar_t>(),
+            saved_norms.data_ptr<accscalar_t>(),
             rowSize);
        });
   }
@@ -478,12 +478,12 @@ std::tuple<Tensor, Tensor> weight_norm_cuda_backward
               dim3(TILE_W,TILE_H),
               (TILE_W*TILE_H + TILE_W)*sizeof(accscalar_t),
               stream>>>
-           (grad_v.data<scalar_t>(),
-            grad_g.data<scalar_t>(),
-            grad_w.data<scalar_t>(),
-            saved_v.data<scalar_t>(),
-            saved_g.data<scalar_t>(),
-            saved_norms.data<accscalar_t>(),
+           (grad_v.data_ptr<scalar_t>(),
+            grad_g.data_ptr<scalar_t>(),
+            grad_w.data_ptr<scalar_t>(),
+            saved_v.data_ptr<scalar_t>(),
+            saved_g.data_ptr<scalar_t>(),
+            saved_norms.data_ptr<accscalar_t>(),
             fast_dim_size,
             slower_dims_size);
        });
@@ -493,7 +493,7 @@ std::tuple<Tensor, Tensor> weight_norm_cuda_backward
   // not the kernel's execution.  Errors in kernel execution aren't guaranteed to be caught
   // until a later error check on a synchronizing CUDA call.  Unfortunately, without manually
   // synchronizing here, this is the best we can do.
-  THCudaCheck(cudaGetLastError());
+  AT_CUDA_CHECK(cudaGetLastError());
 
   return std::tuple<Tensor, Tensor>{grad_v, grad_g};
 }

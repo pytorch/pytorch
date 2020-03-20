@@ -8,11 +8,11 @@ import torch
 import warnings
 
 from .variable import Variable
-from .function import Function, NestedIOFunction  # noqa: F401
-from .gradcheck import gradcheck, gradgradcheck  # noqa: F401
-from .grad_mode import no_grad, enable_grad, set_grad_enabled  # noqa: F401
-from .anomaly_mode import detect_anomaly, set_detect_anomaly  # noqa: F401
-from . import profiler  # noqa: F401
+from .function import Function, NestedIOFunction
+from .gradcheck import gradcheck, gradgradcheck
+from .grad_mode import no_grad, enable_grad, set_grad_enabled
+from .anomaly_mode import detect_anomaly, set_detect_anomaly
+from . import profiler
 
 __all__ = ['Variable', 'Function', 'backward', 'grad_mode']
 
@@ -21,12 +21,18 @@ def _make_grads(outputs, grads):
     new_grads = []
     for out, grad in zip(outputs, grads):
         if isinstance(grad, torch.Tensor):
+            if not out.shape == grad.shape:
+                raise RuntimeError("Mismatch in shape: grad_output["
+                                   + str(grads.index(grad)) + "] has a shape of "
+                                   + str(grad.shape) + " and output["
+                                   + str(outputs.index(out)) + "] has a shape of "
+                                   + str(out.shape) + ".")
             new_grads.append(grad)
         elif grad is None:
             if out.requires_grad:
                 if out.numel() != 1:
                     raise RuntimeError("grad can be implicitly created only for scalar outputs")
-                new_grads.append(torch.ones_like(out))
+                new_grads.append(torch.ones_like(out, memory_format=torch.preserve_format))
             else:
                 new_grads.append(None)
         else:
@@ -133,6 +139,7 @@ def grad(outputs, inputs, grad_outputs=None, retain_graph=None, create_graph=Fal
 
     outputs = (outputs,) if isinstance(outputs, torch.Tensor) else tuple(outputs)
     inputs = (inputs,) if isinstance(inputs, torch.Tensor) else tuple(inputs)
+
     if grad_outputs is None:
         grad_outputs = [None] * len(outputs)
     elif isinstance(grad_outputs, torch.Tensor):
@@ -141,6 +148,7 @@ def grad(outputs, inputs, grad_outputs=None, retain_graph=None, create_graph=Fal
         grad_outputs = list(grad_outputs)
 
     grad_outputs = _make_grads(outputs, grad_outputs)
+
     if retain_graph is None:
         retain_graph = create_graph
 
@@ -170,7 +178,6 @@ def _is_checkpoint_valid():
 def variable(*args, **kwargs):
     warnings.warn("torch.autograd.variable(...) is deprecated, use torch.tensor(...) instead")
     return torch.tensor(*args, **kwargs)
-
 
 if not torch._C._autograd_init():
     raise RuntimeError("autograd initialization failed")

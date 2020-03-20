@@ -104,13 +104,6 @@ void TCPStoreDaemon::run() {
         continue;
       }
 
-      if (fds[fdIdx].revents ^ POLLIN) {
-        throw std::system_error(
-            ECONNABORTED,
-            std::system_category(),
-            "Unexpected poll revent: " + std::to_string(fds[fdIdx].revents) +
-                " on socket: " + std::to_string(fds[fdIdx].fd));
-      }
       // Now query the socket that has the event
       try {
         query(fds[fdIdx].fd);
@@ -279,8 +272,11 @@ TCPStore::TCPStore(
     const std::string& masterAddr,
     PortType masterPort,
     int numWorkers,
-    bool isServer)
-    : isServer_(isServer),
+    bool isServer,
+    const std::chrono::milliseconds& timeout,
+    bool waitWorkers)
+    : Store(timeout),
+      isServer_(isServer),
       tcpStoreAddr_(masterAddr),
       tcpStorePort_(masterPort),
       numWorkers_(numWorkers),
@@ -288,15 +284,18 @@ TCPStore::TCPStore(
       regularPrefix_("/") {
   if (isServer_) {
     // Opening up the listening socket
-    std::tie(masterListenSocket_, std::ignore) = tcputil::listen(masterPort);
+    std::tie(masterListenSocket_, tcpStorePort_) = tcputil::listen(masterPort);
     // Now start the daemon
     tcpStoreDaemon_ = std::unique_ptr<TCPStoreDaemon>(
         new TCPStoreDaemon(masterListenSocket_));
   }
   // Connect to the daemon
-  storeSocket_ = tcputil::connect(tcpStoreAddr_, tcpStorePort_);
+  storeSocket_ = tcputil::connect(
+      tcpStoreAddr_, tcpStorePort_, /* wait= */ true, timeout_);
 
-  waitForWorkers_();
+  if (waitWorkers) {
+    waitForWorkers();
+  }
 }
 
 TCPStore::~TCPStore() {
@@ -309,7 +308,7 @@ TCPStore::~TCPStore() {
   }
 }
 
-void TCPStore::waitForWorkers_() {
+void TCPStore::waitForWorkers() {
   addHelper_(initKey_, 1);
   // Let server block until all workers have completed, this ensures that
   // the server daemon thread is always running until the very end
@@ -422,6 +421,10 @@ void TCPStore::waitHelper_(
   if (waitResponse != WaitResponseType::STOP_WAITING) {
     throw std::runtime_error("Stop_waiting response is expected");
   }
+}
+
+PortType TCPStore::getPort() {
+  return tcpStorePort_;
 }
 
 } // namespace c10d

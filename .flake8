@@ -8,5 +8,6 @@ ignore =
     # these ignores are from flake8-bugbear; please fix!
     B007,B008,
     # these ignores are from flake8-comprehensions; please fix!
-    C400,C401,C402,C403,C404,C405,C407,C411,
-exclude = docs/src,venv,third_party,caffe2,scripts,docs/caffe2,tools/amd_build/pyHIPIFY,torch/lib/include,torch/lib/tmp_install,build,torch/include,*.pyi
+    C400,C401,C402,C403,C404,C405,C407,C411,C413,C414,C415
+per-file-ignores = __init__.py: F401
+exclude = docs/src,venv,third_party,caffe2,scripts,docs/caffe2,torch/lib/include,torch/lib/tmp_install,build,torch/include,*.pyi,.git

@@ -59,22 +59,22 @@ class TORCH_API MemoryDAG {
   bool mayContainAlias(Element* a, Element* b) const;
 
   bool mayContainAlias(
-      const at::ArrayRef<Element*>& a,
-      const at::ArrayRef<Element*>& b) const;
+      const at::ArrayRef<Element*> a,
+      const at::ArrayRef<Element*> b) const;
 
   // Converts from the compressed index representation
   const Element* fromIndex(unsigned x) const;
+  Element* fromIndex(unsigned x);
+  void collectAllContainedMemoryLocations(
+      const Element* elem,
+      MemoryLocations& cont) const;
 
  private:
   bool mayAliasImpl(const Element* a, const Element* b) const;
   bool mayContainAliasImpl(const Element* contained, const Element* container)
       const;
-  void collectAllContainedMemoryLocations(
-    const Element* elem, MemoryLocations& cont) const;
 
-  std::vector<std::unique_ptr<Element>> indexToElementMap;
-
-  friend class AliasDB;
+  std::vector<std::unique_ptr<Element>> indexToElementMap_;
 };
 
 // `Element` represents the vertex in the points-to graph. It represents
@@ -117,6 +117,7 @@ struct Element {
   // Do a breadth-first search over the graph, starting at `this` and
   // traversing in the direction `dir`.`fn` will be run on each element.
   void bfs(BfsDirection dir, MemoryLocations& res) const;
+  friend class MemoryDAG;
 };
 
 } // namespace jit

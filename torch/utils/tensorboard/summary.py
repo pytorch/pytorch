@@ -6,7 +6,6 @@ import json
 import logging
 import numpy as np
 import os
-import re as _re
 
 # pylint: disable=unused-import
 from six.moves import range
@@ -19,35 +18,13 @@ from tensorboard.compat.proto.tensor_shape_pb2 import TensorShapeProto
 from tensorboard.plugins.text.plugin_data_pb2 import TextPluginData
 from tensorboard.plugins.pr_curve.plugin_data_pb2 import PrCurvePluginData
 from tensorboard.plugins.custom_scalar import layout_pb2
-
 from ._convert_np import make_np
 from ._utils import _prepare_video, convert_to_HWC
-
-
-_INVALID_TAG_CHARACTERS = _re.compile(r'[^-/\w\.]')
 
 
 def _calc_scale_factor(tensor):
     converted = tensor.numpy() if not isinstance(tensor, np.ndarray) else tensor
     return 1 if converted.dtype == np.uint8 else 255
-
-
-def _clean_tag(name):
-    # In the past, the first argument to summary ops was a tag, which allowed
-    # arbitrary characters. Now we are changing the first argument to be the node
-    # name. This has a number of advantages (users of summary ops now can
-    # take advantage of the tf name scope system) but risks breaking existing
-    # usage, because a much smaller set of characters are allowed in node names.
-    # This function replaces all illegal characters with _s, and logs a warning.
-    # It also strips leading slashes from the name.
-    if name is not None:
-        new_name = _INVALID_TAG_CHARACTERS.sub('_', name)
-        new_name = new_name.lstrip('/')  # Remove leading slashes
-        if new_name != name:
-            logging.info(
-                'Summary name %s is illegal; using %s instead.' % (name, new_name))
-            name = new_name
-    return name
 
 
 def _draw_single_box(image, xmin, ymin, xmax, ymax, display_str, color='black', color_text='black', thickness=2):
@@ -73,6 +50,112 @@ def _draw_single_box(image, xmin, ymin, xmax, ymax, display_str, color='black', 
     return image
 
 
+def hparams(hparam_dict=None, metric_dict=None):
+    """Outputs three `Summary` protocol buffers needed by hparams plugin.
+    `Experiment` keeps the metadata of an experiment, such as the name of the
+      hyperparameters and the name of the metrics.
+    `SessionStartInfo` keeps key-value pairs of the hyperparameters
+    `SessionEndInfo` describes status of the experiment e.g. STATUS_SUCCESS
+
+    Args:
+      hparam_dict: A dictionary that contains names of the hyperparameters
+        and their values.
+      metric_dict: A dictionary that contains names of the metrics
+        and their values.
+
+    Returns:
+      The `Summary` protobufs for Experiment, SessionStartInfo and
+        SessionEndInfo
+    """
+    import torch
+    from six import string_types
+    from tensorboard.plugins.hparams.api_pb2 import (
+        Experiment, HParamInfo, MetricInfo, MetricName, Status
+    )
+    from tensorboard.plugins.hparams.metadata import (
+        PLUGIN_NAME,
+        PLUGIN_DATA_VERSION,
+        EXPERIMENT_TAG,
+        SESSION_START_INFO_TAG,
+        SESSION_END_INFO_TAG
+    )
+    from tensorboard.plugins.hparams.plugin_data_pb2 import (
+        HParamsPluginData, SessionEndInfo, SessionStartInfo
+    )
+
+    # TODO: expose other parameters in the future.
+    # hp = HParamInfo(name='lr',display_name='learning rate',
+    # type=DataType.DATA_TYPE_FLOAT64, domain_interval=Interval(min_value=10,
+    # max_value=100))
+    # mt = MetricInfo(name=MetricName(tag='accuracy'), display_name='accuracy',
+    # description='', dataset_type=DatasetType.DATASET_VALIDATION)
+    # exp = Experiment(name='123', description='456', time_created_secs=100.0,
+    # hparam_infos=[hp], metric_infos=[mt], user='tw')
+
+    if not isinstance(hparam_dict, dict):
+        logging.warning('parameter: hparam_dict should be a dictionary, nothing logged.')
+        raise TypeError('parameter: hparam_dict should be a dictionary, nothing logged.')
+    if not isinstance(metric_dict, dict):
+        logging.warning('parameter: metric_dict should be a dictionary, nothing logged.')
+        raise TypeError('parameter: metric_dict should be a dictionary, nothing logged.')
+
+    hps = [HParamInfo(name=k) for k in hparam_dict.keys()]
+    mts = [MetricInfo(name=MetricName(tag=k)) for k in metric_dict.keys()]
+
+    exp = Experiment(hparam_infos=hps, metric_infos=mts)
+
+    content = HParamsPluginData(experiment=exp, version=PLUGIN_DATA_VERSION)
+    smd = SummaryMetadata(
+        plugin_data=SummaryMetadata.PluginData(
+            plugin_name=PLUGIN_NAME,
+            content=content.SerializeToString()
+        )
+    )
+    exp = Summary(value=[Summary.Value(tag=EXPERIMENT_TAG, metadata=smd)])
+
+    ssi = SessionStartInfo()
+    for k, v in hparam_dict.items():
+        if isinstance(v, int) or isinstance(v, float):
+            ssi.hparams[k].number_value = v
+            continue
+
+        if isinstance(v, string_types):
+            ssi.hparams[k].string_value = v
+            continue
+
+        if isinstance(v, bool):
+            ssi.hparams[k].bool_value = v
+            continue
+
+        if isinstance(v, torch.Tensor):
+            v = make_np(v)[0]
+            ssi.hparams[k].number_value = v
+            continue
+        raise ValueError('value should be one of int, float, str, bool, or torch.Tensor')
+
+    content = HParamsPluginData(session_start_info=ssi,
+                                version=PLUGIN_DATA_VERSION)
+    smd = SummaryMetadata(
+        plugin_data=SummaryMetadata.PluginData(
+            plugin_name=PLUGIN_NAME,
+            content=content.SerializeToString()
+        )
+    )
+    ssi = Summary(value=[Summary.Value(tag=SESSION_START_INFO_TAG, metadata=smd)])
+
+    sei = SessionEndInfo(status=Status.Value('STATUS_SUCCESS'))
+    content = HParamsPluginData(session_end_info=sei, version=PLUGIN_DATA_VERSION)
+    smd = SummaryMetadata(
+        plugin_data=SummaryMetadata.PluginData(
+            plugin_name=PLUGIN_NAME,
+            content=content.SerializeToString()
+        )
+    )
+    sei = Summary(value=[Summary.Value(tag=SESSION_END_INFO_TAG, metadata=smd)])
+
+    return exp, ssi, sei
+
+
 def scalar(name, scalar, collections=None):
     """Outputs a `Summary` protocol buffer containing a single scalar value.
     The generated Summary has a Tensor.proto containing the input Tensor.
@@ -87,7 +170,6 @@ def scalar(name, scalar, collections=None):
     Raises:
       ValueError: If tensor has the wrong shape or type.
     """
-    name = _clean_tag(name)
     scalar = make_np(scalar)
     assert(scalar.squeeze().ndim == 0), 'scalar should be 0D'
     scalar = float(scalar)
@@ -140,7 +222,6 @@ def histogram(name, values, bins, max_bins=None):
       A scalar `Tensor` of type `string`. The serialized `Summary` protocol
       buffer.
     """
-    name = _clean_tag(name)
     values = make_np(values)
     hist = make_histogram(values.astype(float), bins, max_bins)
     return Summary(value=[Summary.Value(tag=name, histo=hist)])
@@ -217,7 +298,6 @@ def image(tag, tensor, rescale=1, dataformats='NCHW'):
       A scalar `Tensor` of type `string`. The serialized `Summary` protocol
       buffer.
     """
-    tag = _clean_tag(tag)
     tensor = make_np(tensor)
     tensor = convert_to_HWC(tensor, dataformats)
     # Do not assume that user passes in values in [0, 255], use data type to detect
@@ -278,7 +358,6 @@ def make_image(tensor, rescale=1, rois=None):
 
 
 def video(tag, tensor, fps=4):
-    tag = _clean_tag(tag)
     tensor = make_np(tensor)
     tensor = _prepare_video(tensor)
     # If user passes in uint8, then we don't need to rescale by 255
@@ -309,10 +388,13 @@ def make_video(tensor, fps):
     clip = mpy.ImageSequenceClip(list(tensor), fps=fps)
 
     filename = tempfile.NamedTemporaryFile(suffix='.gif', delete=False).name
-    try:  # older version of moviepy does not support progress_bar argument.
-        clip.write_gif(filename, verbose=False, progress_bar=False)
+    try:  # newer version of moviepy use logger instead of progress_bar argument.
+        clip.write_gif(filename, verbose=False, logger=None)
     except TypeError:
-        clip.write_gif(filename, verbose=False)
+        try:  # older version of moviepy does not support progress_bar argument.
+            clip.write_gif(filename, verbose=False, progress_bar=False)
+        except TypeError:
+            clip.write_gif(filename, verbose=False)
 
     with open(filename, 'rb') as f:
         tensor_string = f.read()
@@ -460,7 +542,7 @@ def compute_curve(labels, predictions, num_thresholds=None, weights=None):
     return np.stack((tp, fp, tn, fn, precision, recall))
 
 
-def _get_tensor_summary(name, display_name, description, tensor, content_type, json_config):
+def _get_tensor_summary(name, display_name, description, tensor, content_type, components, json_config):
     """Creates a tensor summary with summary metadata.
 
     Args:
@@ -473,6 +555,8 @@ def _get_tensor_summary(name, display_name, description, tensor, content_type, j
         is supported.
       tensor: Tensor to display in summary.
       content_type: Type of content inside the Tensor.
+      components: Bitmask representing present parts (vertices, colors, etc.) that
+        belong to the summary.
       json_config: A string, JSON-serialized dictionary of ThreeJS classes
         configuration.
 
@@ -488,6 +572,7 @@ def _get_tensor_summary(name, display_name, description, tensor, content_type, j
         name,
         display_name,
         content_type,
+        components,
         tensor.shape,
         description,
         json_config=json_config)
@@ -539,6 +624,7 @@ def mesh(tag, vertices, colors, faces, config_dict, display_name=None, descripti
         Merged summary for mesh/point cloud representation.
       """
     from tensorboard.plugins.mesh.plugin_data_pb2 import MeshPluginData
+    from tensorboard.plugins.mesh import metadata
 
     json_config = _get_json_config(config_dict)
 
@@ -548,11 +634,13 @@ def mesh(tag, vertices, colors, faces, config_dict, display_name=None, descripti
         (faces, MeshPluginData.FACE),
         (colors, MeshPluginData.COLOR)
     ]
+    tensors = [tensor for tensor in tensors if tensor[0] is not None]
+    components = metadata.get_components_bitmask([
+        content_type for (tensor, content_type) in tensors])
 
     for tensor, content_type in tensors:
-        if tensor is None:
-            continue
         summaries.append(
-            _get_tensor_summary(tag, display_name, description, tensor, content_type, json_config))
+            _get_tensor_summary(tag, display_name, description, tensor,
+                                content_type, components, json_config))
 
     return Summary(value=summaries)

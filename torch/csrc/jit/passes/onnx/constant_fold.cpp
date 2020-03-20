@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/onnx/constant_fold.h>
+#include <torch/csrc/jit/passes/onnx/helper.h>
 #include <c10/util/Exception.h>
 
 #include <c10/util/Optional.h>
@@ -33,19 +34,6 @@ std::unordered_map<int, at::ScalarType> onnxTypeToScalarTypeMap = {
     {12, at::kLong},
 };
 
-ValueToParamPairMap buildValueToParamsMap(
-    Block* b,
-    const ParamMap& paramsDict) {
-  ValueToParamPairMap valsToParamsMap;
-  for (auto& input : b->inputs()) {
-    auto it = paramsDict.find(input->debugName());
-    if (it != paramsDict.end()) {
-      valsToParamsMap.emplace(input, *it);
-    }
-  }
-  return valsToParamsMap;
-}
-
 void buildParamsMapFromValueToParamsMap(
     const ValueToParamPairMap& valsToParamsMap,
     ParamMap& paramsDict) {
@@ -75,10 +63,10 @@ void handleNegativeStartEndIndex(int64_t& start, int64_t& end, int64_t& axis,
   // index higher than dimension is treated as the end.
   if (end > tensorSizes[axis]) {
     end = tensorSizes[axis];
-  }      
+  }
 }
 
-c10::optional<at::Tensor> runTorchSlice_opset9(const Node* node, 
+c10::optional<at::Tensor> runTorchSlice_opset9(const Node* node,
                      std::vector<at::Tensor>& inputTensorValues) {
   assert(inputTensorValues.size() == 1);
   if (inputTensorValues.size() != 1) {
@@ -114,26 +102,26 @@ c10::optional<at::Tensor> runTorchSlice_opset9(const Node* node,
   return c10::optional<at::Tensor>(updated_val);
 }
 
-c10::optional<at::Tensor> runTorchSlice_opset10(const Node* node, 
+c10::optional<at::Tensor> runTorchSlice_opset10(const Node* node,
                      std::vector<at::Tensor>& inputTensorValues) {
   if (inputTensorValues.size() < 3 || inputTensorValues.size() > 5) {
-    std::cerr << "Warning: Constant folding - Invalid number of inputs found for opset 10 onnx::Slice op. "
+    std::cerr << "Warning: Constant folding - Invalid number of inputs found for opset 10 or 11 onnx::Slice op. "
               << "Constant folding not applied." << std::endl;
     return c10::nullopt;
   }
   // Checking validity of 'starts' and 'ends' input
   if (inputTensorValues[1].sizes().size() != 1 || inputTensorValues[2].sizes().size() != 1) {
-    std::cerr << "Warning: Constant folding - Invalid 'starts' or 'ends' inputs found for opset 10 onnx::Slice op. "
+    std::cerr << "Warning: Constant folding - Invalid 'starts' or 'ends' inputs found for opset 10 or 11 onnx::Slice op. "
               << "Constant folding not applied." << std::endl;
     return c10::nullopt;
-  }            
+  }
   if (inputTensorValues[1].sizes()[0] != inputTensorValues[2].sizes()[0] ) {
     // Number of elements of 'starts' and 'ends' 1-D input tensors should be the same
     return c10::nullopt;
   }
   // Checking 'axes' input, if available.
   std::vector<int64_t> axes;
-  if (inputTensorValues.size() > 3) { 
+  if (inputTensorValues.size() > 3) {
     if (inputTensorValues[3].sizes().size() != 1) {
       std::cerr << "Warning: Constant folding - Invalid 'axes' input found for opset 10 onnx::Slice op. "
                 << "Constant folding not applied." << std::endl;
@@ -146,7 +134,7 @@ c10::optional<at::Tensor> runTorchSlice_opset10(const Node* node,
       return c10::nullopt;
     }
     auto axes_a = inputTensorValues[3].accessor<int64_t, 1>();
-    axes.reserve(inputTensorValues[3].sizes()[0]); 
+    axes.reserve(inputTensorValues[3].sizes()[0]);
     for (size_t i = 0; i < inputTensorValues[3].sizes()[0]; ++i) {
       axes[i] = axes_a[i];
     }
@@ -198,10 +186,10 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
     int opset_version) {
   at::Tensor updated_val;
   if (node->kind() == onnx::Slice) {
-    if (opset_version == 9) {
+    if (opset_version == ONNX_OPSET_9) {
       return runTorchSlice_opset9(node, inputTensorValues);
     }
-    else if (opset_version == 10) {
+    else if (opset_version == ONNX_OPSET_10 || opset_version == ONNX_OPSET_11) {
       return runTorchSlice_opset10(node, inputTensorValues);
     }
     else {
@@ -215,6 +203,18 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
     }
     updated_val =
         at::cat(at::TensorList(inputTensorValues), node->i(attr::axis));
+    return c10::optional<at::Tensor>(updated_val);
+  } else if (node->kind() == onnx::Sqrt) {
+    updated_val =
+        at::sqrt(inputTensorValues[0]);
+    return c10::optional<at::Tensor>(updated_val);
+  } else if (node->kind() == onnx::Div) {
+    updated_val =
+        at::div(inputTensorValues[0], inputTensorValues[1]);
+    return c10::optional<at::Tensor>(updated_val);
+  } else if (node->kind() == onnx::Mul) {
+    updated_val =
+        at::mul(inputTensorValues[0], inputTensorValues[1]);
     return c10::optional<at::Tensor>(updated_val);
   } else if (node->kind() == onnx::Unsqueeze) {
     assert(inputTensorValues.size() == 1);
@@ -243,6 +243,28 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
       return c10::optional<at::Tensor>(updated_val);
     }
     return c10::nullopt;
+  } else if (node->kind() == onnx::Reshape) {
+    assert(inputTensorValues.size() == 2);
+    updated_val = inputTensorValues[0];
+    std::vector<int64_t> shape(inputTensorValues[1].sizes()[0], 0);
+    auto shape_a = inputTensorValues[1].accessor<int64_t, 1>();
+    for (size_t i = 0; i < inputTensorValues[1].sizes()[0]; ++i) {
+      // All shape dim values should be >= -1
+      // onnx::Reshape supports a shape dim value to be zero, in
+      // which case the actual dim value remains unchanged. However,
+      // at::reshape does not support shape dim value to be zero
+      assert(shape_a[i] >= -1);
+      if (shape_a[i] == 0){
+        if (i >= inputTensorValues[0].sizes().size()){
+          throw std::runtime_error("Dimension with value 0 exceeds the input size dimensions.");
+        }
+        shape[i] = inputTensorValues[0].sizes()[i];
+      }
+      else {
+        shape[i] = shape_a[i];
+      }
+    }
+    return c10::optional<at::Tensor>(at::reshape(updated_val, shape));
   } else {
     return c10::nullopt;
   }
@@ -284,17 +306,6 @@ std::vector<at::Tensor> getValues(
   return inputTensorValues;
 }
 
-void eraseUnusedValuesFromMap(ValueToParamPairMap& valsToParamsMap) {
-  auto it = valsToParamsMap.begin();
-  while (it != valsToParamsMap.end()) {
-    if (!it->first->hasUses()) {
-      it = valsToParamsMap.erase(it);
-    } else {
-      ++it;
-    }
-  }
-}
-
 bool areNodeInputsConstant(
     Node* node,
     const ValueToParamPairMap& valsToParamsMap) {
@@ -322,10 +333,17 @@ std::vector<Node*> getOnnxConstParentsToRemove(Node* node) {
 
 // This method updates the block in-place to fold all the one-time
 // constant-based computations/ops into an initializer node.
+//
+// NB: This is not constant folding in the traditional sense, as we
+// don't try particularly hard to evaluate operations on constant nodes.
+// This is more of a partial evaluation analysis, where operations on constant
+// nodes can be lifted so we run them earlier, before the usual parameters are
+// known.
 void ConstantFoldONNX(Block* b, ParamMap& paramsDict, int opset_version) {
-  if (opset_version != 9 && opset_version != 10) {
+  if (opset_version != ONNX_OPSET_9 && opset_version != ONNX_OPSET_10 &&
+      opset_version != ONNX_OPSET_11) {
     // Number of elements of 'axes' and 'ends' 1-D input tensors should be the same
-    std::cerr << "Warning: Constant folding supported for only opsets 9 and 10. "
+    std::cerr << "Warning: Constant folding supported for only opsets 9, 10, and 11. "
               << "Constant folding not applied." << std::endl;
     return;
   }

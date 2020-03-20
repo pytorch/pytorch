@@ -1,0 +1,200 @@
+  caffe2_linux_build:
+    <<: *caffe2_params
+    machine:
+      image: ubuntu-1604:201903-01
+    steps:
+    # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
+    - attach_scripts
+    - setup_linux_system_environment
+    - checkout
+    - setup_ci_environment
+    - run:
+        name: Build
+        no_output_timeout: "1h"
+        command: |
+          set -e
+          cat >/home/circleci/project/ci_build_script.sh \<<EOL
+          # =================== The following code will be executed inside Docker container ===================
+          set -ex
+          export BUILD_ENVIRONMENT="$BUILD_ENVIRONMENT"
+
+          # Reinitialize submodules
+          git submodule sync && git submodule update -q --init --recursive
+
+          # conda must be added to the path for Anaconda builds (this location must be
+          # the same as that in install_anaconda.sh used to build the docker image)
+          if [[ "${BUILD_ENVIRONMENT}" == conda* ]]; then
+            export PATH=/opt/conda/bin:$PATH
+            sudo chown -R jenkins:jenkins '/opt/conda'
+          fi
+
+          # Build
+          ./.jenkins/caffe2/build.sh
+
+          # Show sccache stats if it is running
+          if pgrep sccache > /dev/null; then
+            sccache --show-stats
+          fi
+          # =================== The above code will be executed inside Docker container ===================
+          EOL
+          chmod +x /home/circleci/project/ci_build_script.sh
+
+          echo "DOCKER_IMAGE: "${DOCKER_IMAGE}
+          time docker pull ${DOCKER_IMAGE} >/dev/null
+          export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
+          docker cp /home/circleci/project/. $id:/var/lib/jenkins/workspace
+
+          export COMMAND='((echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && ./ci_build_script.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
+          echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
+
+          # Push intermediate Docker image for next phase to use
+          if [ -z "${BUILD_ONLY}" ]; then
+            if [[ "$BUILD_ENVIRONMENT" == *cmake* ]]; then
+              export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-cmake-${CIRCLE_SHA1}
+            else
+              export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-${CIRCLE_SHA1}
+            fi
+            docker commit "$id" ${COMMIT_DOCKER_IMAGE}
+            time docker push ${COMMIT_DOCKER_IMAGE}
+          fi
+
+  caffe2_linux_test:
+    <<: *caffe2_params
+    machine:
+      image: ubuntu-1604:201903-01
+    steps:
+    # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
+    - attach_scripts
+    - setup_linux_system_environment
+    - setup_ci_environment
+    - run:
+        name: Test
+        no_output_timeout: "1h"
+        command: |
+          set -e
+          # TODO: merge this into Caffe2 test.sh
+          cat >/home/circleci/project/ci_test_script.sh \<<EOL
+          # =================== The following code will be executed inside Docker container ===================
+          set -ex
+
+          export BUILD_ENVIRONMENT="$BUILD_ENVIRONMENT"
+
+          # libdc1394 (dependency of OpenCV) expects /dev/raw1394 to exist...
+          sudo ln /dev/null /dev/raw1394
+
+          # conda must be added to the path for Anaconda builds (this location must be
+          # the same as that in install_anaconda.sh used to build the docker image)
+          if [[ "${BUILD_ENVIRONMENT}" == conda* ]]; then
+            export PATH=/opt/conda/bin:$PATH
+          fi
+
+          # Upgrade SSL module to avoid old SSL warnings
+          pip -q install --user --upgrade pyOpenSSL ndg-httpsclient pyasn1
+
+          pip -q install --user -b /tmp/pip_install_onnx "file:///var/lib/jenkins/workspace/third_party/onnx#egg=onnx"
+
+          # Build
+          ./.jenkins/caffe2/test.sh
+
+          # Remove benign core dumps.
+          # These are tests for signal handling (including SIGABRT).
+          rm -f ./crash/core.fatal_signal_as.*
+          rm -f ./crash/core.logging_test.*
+          # =================== The above code will be executed inside Docker container ===================
+          EOL
+          chmod +x /home/circleci/project/ci_test_script.sh
+
+          if [[ "$BUILD_ENVIRONMENT" == *cmake* ]]; then
+            export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-cmake-${CIRCLE_SHA1}
+          else
+            export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-${CIRCLE_SHA1}
+          fi
+          echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
+          time docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
+          if [ -n "${USE_CUDA_DOCKER_RUNTIME}" ]; then
+            export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+          else
+            export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+          fi
+          docker cp /home/circleci/project/. "$id:/var/lib/jenkins/workspace"
+
+          export COMMAND='((echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && ./ci_test_script.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
+          echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
+
+  caffe2_macos_build:
+    <<: *caffe2_params
+    macos:
+      xcode: "9.4.1"
+    steps:
+      # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
+      - attach_scripts
+      - checkout
+      - run_brew_for_macos_build
+      - run:
+          name: Build
+          no_output_timeout: "1h"
+          command: |
+            set -e
+
+            export IN_CIRCLECI=1
+
+            brew install cmake
+
+            # Reinitialize submodules
+            git submodule sync && git submodule update -q --init --recursive
+
+            # Reinitialize path (see man page for path_helper(8))
+            eval `/usr/libexec/path_helper -s`
+
+            export PATH=/usr/local/opt/python/libexec/bin:/usr/local/bin:$PATH
+
+            # Install Anaconda if we need to
+            if [ -n "${CAFFE2_USE_ANACONDA}" ]; then
+              rm -rf ${TMPDIR}/anaconda
+              curl --retry 3 -o ${TMPDIR}/conda.sh https://repo.continuum.io/miniconda/Miniconda${ANACONDA_VERSION}-latest-MacOSX-x86_64.sh
+              chmod +x ${TMPDIR}/conda.sh
+              /bin/bash ${TMPDIR}/conda.sh -b -p ${TMPDIR}/anaconda
+              rm -f ${TMPDIR}/conda.sh
+              export PATH="${TMPDIR}/anaconda/bin:${PATH}"
+              source ${TMPDIR}/anaconda/bin/activate
+            fi
+
+            pip -q install numpy
+
+            # Install sccache
+            sudo curl --retry 3 https://s3.amazonaws.com/ossci-macos/sccache --output /usr/local/bin/sccache
+            sudo chmod +x /usr/local/bin/sccache
+            export SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2
+
+            # This IAM user allows write access to S3 bucket for sccache
+            set +x
+            export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V4}
+            export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V4}
+            set -x
+
+            export SCCACHE_BIN=${PWD}/sccache_bin
+            mkdir -p ${SCCACHE_BIN}
+            if which sccache > /dev/null; then
+              printf "#!/bin/sh\nexec sccache $(which clang++) \$*" > "${SCCACHE_BIN}/clang++"
+              chmod a+x "${SCCACHE_BIN}/clang++"
+
+              printf "#!/bin/sh\nexec sccache $(which clang) \$*" > "${SCCACHE_BIN}/clang"
+              chmod a+x "${SCCACHE_BIN}/clang"
+
+              export PATH="${SCCACHE_BIN}:$PATH"
+            fi
+
+            # Build
+            if [ "${BUILD_IOS:-0}" -eq 1 ]; then
+              unbuffer scripts/build_ios.sh 2>&1 | ts
+            elif [ -n "${CAFFE2_USE_ANACONDA}" ]; then
+              # All conda build logic should be in scripts/build_anaconda.sh
+              unbuffer scripts/build_anaconda.sh 2>&1 | ts
+            else
+              unbuffer scripts/build_local.sh 2>&1 | ts
+            fi
+
+            # Show sccache stats if it is running
+            if which sccache > /dev/null; then
+              sccache --show-stats
+            fi

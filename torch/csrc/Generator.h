@@ -21,6 +21,4 @@ THP_API PyObject * THPGenerator_initDefaultGenerator(at::Generator* cdata);
 
 THP_API PyObject *THPGeneratorClass;
 
-#ifdef _THP_CORE
 bool THPGenerator_init(PyObject *module);
-#endif

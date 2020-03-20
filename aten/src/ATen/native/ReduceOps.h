@@ -19,6 +19,8 @@ DECLARE_DISPATCH(reduce_fn, and_stub);
 DECLARE_DISPATCH(reduce_fn, or_stub);
 DECLARE_DISPATCH(reduce_fn, min_values_stub);
 DECLARE_DISPATCH(reduce_fn, max_values_stub);
+DECLARE_DISPATCH(reduce_fn, argmax_stub);
+DECLARE_DISPATCH(reduce_fn, argmin_stub);
 
 using reduce_std_var_function =
   void (*)(TensorIterator&, bool unbiased, bool take_sqrt);
@@ -30,5 +32,9 @@ DECLARE_DISPATCH(reduce_norm_fn, norm_kernel);
 
 using reduce_fn_flag = void(*)(TensorIterator &, Scalar);
 DECLARE_DISPATCH(reduce_fn_flag, norm_stub);
+
+using cum_fn = void (*)(Tensor & result, const Tensor & self, int64_t dim);
+DECLARE_DISPATCH(cum_fn, cumsum_stub);
+DECLARE_DISPATCH(cum_fn, cumprod_stub);
 
 }} // namespace at::native

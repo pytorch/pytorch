@@ -19,7 +19,7 @@ class either final {
   template <
       class Head,
       class... Tail,
-      c10::guts::enable_if_t<
+      std::enable_if_t<
           std::is_constructible<Left, Head, Tail...>::value &&
           !std::is_constructible<Right, Head, Tail...>::value>* = nullptr>
   either(Head&& construct_left_head_arg, Tail&&... construct_left_tail_args)
@@ -32,7 +32,7 @@ class either final {
   template <
       class Head,
       class... Tail,
-      c10::guts::enable_if_t<
+      std::enable_if_t<
           !std::is_constructible<Left, Head, Tail...>::value &&
           std::is_constructible<Right, Head, Tail...>::value>* = nullptr>
   either(Head&& construct_right_head_arg, Tail&&... construct_right_tail_args)
@@ -101,7 +101,7 @@ class either final {
   }
 
   const Left& left() const& {
-    if (!is_left()) {
+    if (C10_UNLIKELY(!is_left())) {
       throw std::logic_error(
           "Tried to get left side of an either which is right.");
     }
@@ -116,7 +116,7 @@ class either final {
   }
 
   const Right& right() const& {
-    if (!is_right()) {
+    if (C10_UNLIKELY(!is_right())) {
       throw std::logic_error(
           "Tried to get right side of an either which is left.");
     }

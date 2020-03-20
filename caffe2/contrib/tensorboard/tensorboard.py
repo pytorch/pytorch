@@ -12,8 +12,21 @@ import os
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core
 import caffe2.contrib.tensorboard.tensorboard_exporter as tb_exporter
-import tensorflow as tf
 
+try:
+    # tensorboard>=1.14.0
+    from tensorboard.compat.proto.summary_pb2 import Summary, HistogramProto
+    from tensorboard.compat.proto.event_pb2 import Event
+    from tensorboard.summary.writer.event_file_writer import EventFileWriter as FileWriter
+except ImportError:
+    from tensorflow.core.framework.summary_pb2 import Summary, HistogramProto
+    from tensorflow.core.util.event_pb2 import Event
+    try:
+        # tensorflow>=1.0.0
+        from tensorflow.summary import FileWriter
+    except ImportError:
+        # tensorflow<=0.12.1
+        from tensorflow.train import SummaryWriter as FileWriter
 
 class Config(object):
     HEIGHT = 600
@@ -81,13 +94,7 @@ def cli():
 
 
 def write_events(tf_dir, events):
-    # tf.summary.FileWriter exists in the current Tensorflow release
-    # tf.train.SummaryWriter is the way in older versions
-    if hasattr(tf.summary, 'FileWriter'):
-        writer = tf.summary.FileWriter(logdir=tf_dir, max_queue=len(events))
-    else:
-        writer = tf.train.SummaryWriter(logdir=tf_dir, max_queue=len(events))
-
+    writer = FileWriter(tf_dir, len(events))
     for event in events:
         writer.add_event(event)
     writer.flush()
@@ -95,7 +102,7 @@ def write_events(tf_dir, events):
 
 
 def graph_def_to_event(step, graph_def):
-    return tf.Event(
+    return Event(
         wall_time=step, step=step, graph_def=graph_def.SerializeToString())
 
 
@@ -151,13 +158,16 @@ def tensorboard_events(c2_dir, tf_dir):
         return [(n, s) for (n, s) in summaries if s]
 
     def inferred_histo(summary, samples=1000):
-        np.random.seed(hash(
-            summary.std + summary.mean + summary.min + summary.max))
+        np.random.seed(
+            hash(
+                summary.std + summary.mean + summary.min + summary.max
+            ) % np.iinfo(np.int32).max
+        )
         samples = np.random.randn(samples) * summary.std + summary.mean
         samples = np.clip(samples, a_min=summary.min, a_max=summary.max)
         (hist, edges) = np.histogram(samples)
         upper_edges = edges[1:]
-        r = tf.HistogramProto(
+        r = HistogramProto(
             min=summary.min,
             max=summary.max,
             num=len(samples),
@@ -173,21 +183,21 @@ def tensorboard_events(c2_dir, tf_dir):
         summaries = list(zip(*summaries))
 
         def event(step, values):
-            s = tf.Summary()
+            s = Summary()
             scalar = [
-                tf.Summary.Value(
+                Summary.Value(
                     tag="{}/{}".format(name, field),
                     simple_value=v)
                 for name, value in zip(names, values)
                 for field, v in value._asdict().items()]
             hist = [
-                tf.Summary.Value(
+                Summary.Value(
                     tag="{}/inferred_normal_hist".format(name),
                     histo=inferred_histo(value))
                 for name, value in zip(names, values)
             ]
             s.value.extend(scalar + hist)
-            return tf.Event(wall_time=int(step), step=step, summary=s)
+            return Event(wall_time=int(step), step=step, summary=s)
 
         return [event(step, values)
                 for step, values in enumerate(summaries, start=1)]

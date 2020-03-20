@@ -2,6 +2,7 @@
 
 #include <torch/serialize/archive.h>
 #include <torch/serialize/tensor.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <utility>
 
@@ -37,7 +38,8 @@ namespace torch {
 /// \endrst
 template <typename Value, typename... SaveToArgs>
 void save(const Value& value, SaveToArgs&&... args) {
-  serialize::OutputArchive archive;
+  serialize::OutputArchive archive(
+      std::make_shared<jit::CompilationUnit>());
   archive << value;
   archive.save_to(std::forward<SaveToArgs>(args)...);
 }
@@ -62,13 +64,17 @@ void save(const Value& value, SaveToArgs&&... args) {
 /// \endrst
 template <typename... SaveToArgs>
 void save(const std::vector<torch::Tensor>& tensor_vec, SaveToArgs&&... args) {
-  serialize::OutputArchive archive;
+  serialize::OutputArchive archive(
+      std::make_shared<jit::CompilationUnit>());
   for (size_t i = 0; i < tensor_vec.size(); i++) {
     auto& value = tensor_vec[i];
-    archive.write(std::to_string(i), value);
+    archive.write(c10::to_string(i), value);
   }
   archive.save_to(std::forward<SaveToArgs>(args)...);
 }
+
+TORCH_API std::vector<char> pickle_save(const torch::IValue& ivalue);
+TORCH_API torch::IValue pickle_load(const std::vector<char>& data);
 
 /// Deserializes the given `value`.
 /// There must be an overload of `operator>>` between `serialize::InputArchive`
@@ -130,7 +136,7 @@ void load(std::vector<torch::Tensor>& tensor_vec, LoadFromArgs&&... args) {
   // the serialized `std::vector<torch::Tensor>`.
   size_t index = 0;
   torch::Tensor value;
-  while (archive.try_read(std::to_string(index), value)) {
+  while (archive.try_read(c10::to_string(index), value)) {
     tensor_vec.push_back(std::move(value));
     value = torch::Tensor();
     index++;

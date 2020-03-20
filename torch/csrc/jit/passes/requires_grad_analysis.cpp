@@ -1,7 +1,7 @@
 #include <ATen/core/jit_type.h>
-#include <torch/csrc/jit/constants.h>
-#include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/ir/constants.h>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/passes/requires_grad_analysis.h>
 
 #include <vector>
@@ -16,7 +16,7 @@ bool getRequiresGrad(Value* value) {
 }
 
 void setRequiresGrad(Value* value, bool req_value) {
-  if (auto type = value->type()->cast<DimensionedTensorType>()) {
+  if (auto type = value->type()->cast<TensorType>()) {
     value->setType(type->withRequiresGrad(req_value));
   }
 }
@@ -58,7 +58,7 @@ void PropagateRequiresGradSimpleNode(Node* node) {
       "aten::ne(Tensor self, Scalar other) -> Tensor",
   };
 
-  if (comparison_ops.find(node)) {
+  if (node->isMemberOf(comparison_ops)) {
     return setRequiresGrad(node->output(), false);
   } else if (node->matches(
                  "aten::type_as(Tensor self, Tensor other) -> Tensor")) {
@@ -72,8 +72,10 @@ void PropagateRequiresGradSimpleNode(Node* node) {
         return setRequiresGrad(node->output(), *const_arg);
       }
     }
-    if (auto type = node->output()->type()->cast<DimensionedTensorType>()) {
-      setRequiresGrad(node->output(), at::isFloatingType(type->scalarType()));
+    if (auto type = node->output()->type()->cast<TensorType>()) {
+      if (type->scalarType()) {
+        setRequiresGrad(node->output(), at::isFloatingType(*type->scalarType()));
+      }
     }
     return;
   }
@@ -83,9 +85,11 @@ void PropagateRequiresGradSimpleNode(Node* node) {
   bool should_require =
       std::any_of(inputs.begin(), inputs.end(), getRequiresGrad);
   for (Value* output : outputs) {
-    if (auto type = output->type()->cast<DimensionedTensorType>()) {
-      setRequiresGrad(
-          output, should_require && at::isFloatingType(type->scalarType()));
+    if (auto type = output->type()->cast<TensorType>()) {
+      if (type->scalarType()) {
+        setRequiresGrad(
+            output, should_require && at::isFloatingType(*type->scalarType()));
+      }
     }
   }
 }
@@ -107,8 +111,9 @@ void PropagateRequiresGrad(Node* node) {
     setRequiresGrad(node, outputs_require);
   } else if (node->kind() == prim::Loop) {
     auto body = node->blocks().at(0);
-    std::vector<bool> body_inputs_require =
+    std::vector<bool> loop_inputs_require =
         fmap(node->inputs().slice(2), getRequiresGrad);
+    std::vector<bool> body_inputs_require = loop_inputs_require;
     std::vector<bool> body_outputs_require(node->outputs().size(), false);
 
     std::vector<bool> new_body_inputs_require = body_inputs_require;
@@ -129,7 +134,7 @@ void PropagateRequiresGrad(Node* node) {
     } while (new_body_inputs_require != body_inputs_require &&
              new_body_outputs_require != body_outputs_require);
 
-    setRequiresGrad(node, body_outputs_require);
+    setRequiresGrad(node, bitwiseOr(body_outputs_require, loop_inputs_require));
   } else {
     PropagateRequiresGradSimpleNode(node);
   }

@@ -12,9 +12,7 @@ $storage_tensor_headers
 #include <c10/core/Allocator.h>
 #include <ATen/DeviceGuard.h>
 #include <ATen/NativeFunctions.h>
-#ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensorUtils.h>
-#endif
 #include <ATen/Utils.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/Dispatch.h>
@@ -22,7 +20,6 @@ $storage_tensor_headers
 #include <c10/core/TensorImpl.h>
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/util/Optional.h>
-#include <ATen/core/ATenDispatch.h>
 
 #include <cstddef>
 #include <functional>
@@ -30,8 +27,16 @@ $storage_tensor_headers
 #include <utility>
 
 #include <ATen/Config.h>
+#include <ATen/core/op_registration/op_registration.h>
 $extra_cuda_headers
 $legacy_th_headers
+
+namespace {
+static const char* named_tensors_unsupported_error =
+  " is not yet supported with named tensors. Please drop names via "
+  "`tensor = tensor.rename(None)`, call the op with an unnamed tensor, "
+  "and set names on the result of the operation.";
+}
 
 namespace at {
 
@@ -42,8 +47,17 @@ Tensor * ${Type}::add(Tensor & a, Tensor & b) {
 }
 */
 
+namespace ${Type} {
+
 ${type_derived_method_definitions}
 
-static auto& registerer = globalATenDispatch()
+}  // namespace ${Type}
+
+#ifndef USE_STATIC_DISPATCH
+namespace {
+auto registerer = torch::import()
   ${function_registrations};
+}
+#endif
+
 }

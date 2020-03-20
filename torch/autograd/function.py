@@ -121,8 +121,6 @@ class Function(with_metaclass(FunctionMeta, _C._FunctionBase, _ContextMethodMixi
     subclasses and defining new operations. This is a recommended way of
     extending torch.autograd.
 
-    Each function object is meant to be used only once (in the forward pass).
-
     Examples::
 
         >>> class Exp(Function):
@@ -137,10 +135,16 @@ class Function(with_metaclass(FunctionMeta, _C._FunctionBase, _ContextMethodMixi
         >>>     def backward(ctx, grad_output):
         >>>         result, = ctx.saved_tensors
         >>>         return grad_output * result
+        >>>
+        >>> #Use it by calling the apply method:
+        >>> output = Exp.apply(input)
     """
 
-    # only for backward compatibility
-    __call__ = _C._FunctionBase._do_forward
+    def __call__(self, *args, **kwargs):
+        raise RuntimeError(
+            "Legacy autograd function with non-static forward method is deprecated. "
+            "Please use new-style autograd function with static forward method. "
+            "(Example: https://pytorch.org/docs/stable/autograd.html#torch.autograd.Function)")
 
     # for the tracer
     is_traceable = False
@@ -157,7 +161,8 @@ class Function(with_metaclass(FunctionMeta, _C._FunctionBase, _ContextMethodMixi
         The context can be used to store tensors that can be then retrieved
         during the backward pass.
         """
-        raise NotImplementedError
+        raise NotImplementedError("You must implement the forward function for custom"
+                                  " autograd.Function.")
 
     @staticmethod
     def backward(ctx, *grad_outputs):
@@ -178,7 +183,8 @@ class Function(with_metaclass(FunctionMeta, _C._FunctionBase, _ContextMethodMixi
         first input to :func:`forward` needs gradient computated w.r.t. the
         output.
         """
-        raise NotImplementedError
+        raise NotImplementedError("You must implement the backward function for custom"
+                                  " autograd.Function.")
 
 
 def once_differentiable(fn):
@@ -254,7 +260,11 @@ def _nested_map(condition, fn, condition_msg=None):
         elif obj is None:
             return None
         elif isinstance(obj, (list, tuple)):
-            return type(obj)(_map(x) for x in obj)
+            mapped = (_map(x) for x in obj)
+            if hasattr(obj, '_fields'):
+                # obj is namedtuple
+                return type(obj)(*mapped)
+            return type(obj)(mapped)
         elif isinstance(obj, dict):
             return {x : _map(obj[x]) for x in obj}
         else:

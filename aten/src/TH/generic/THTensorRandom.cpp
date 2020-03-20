@@ -12,62 +12,6 @@
 #include <ATen/Utils.h>
 #include <TH/THGenerator.hpp>
 
-void THTensor_(random)(THTensor *self, at::Generator *_generator)
-{
-  auto gen = at::get_generator_or_default<at::CPUGenerator>(_generator, at::detail::getDefaultCPUGenerator());
-  // See Note [Acquire lock when using random generators]
-  std::lock_guard<std::mutex> lock(gen->mutex_);
-#if defined(TH_REAL_IS_BYTE)
-  TH_TENSOR_APPLY(scalar_t, self, *self_data = (uint8_t)(gen->random() % (UINT8_MAX + 1)););
-#elif defined(TH_REAL_IS_CHAR)
-  TH_TENSOR_APPLY(scalar_t, self, *self_data = (int8_t)(gen->random() % (INT8_MAX + 1)););
-#elif defined(TH_REAL_IS_SHORT)
-  TH_TENSOR_APPLY(scalar_t, self, *self_data = (int16_t)(gen->random() % (INT16_MAX + 1)););
-#elif defined(TH_REAL_IS_INT)
-  TH_TENSOR_APPLY(scalar_t, self, *self_data = (int32_t)(gen->random() % (INT32_MAX + 1UL)););
-#elif defined(TH_REAL_IS_LONG)
-  TH_TENSOR_APPLY(scalar_t, self, *self_data = (uint64_t)(gen->random64() % (LONG_MAX + 1ULL)););
-#elif defined(TH_REAL_IS_FLOAT)
-  TH_TENSOR_APPLY(scalar_t, self, *self_data = (float)(gen->random() % ((1ULL << FLT_MANT_DIG) + 1)););
-#elif defined(TH_REAL_IS_DOUBLE)
-  TH_TENSOR_APPLY(scalar_t, self, *self_data = (double)(gen->random64() % ((1ULL << DBL_MANT_DIG) + 1)););
-#elif defined(TH_REAL_IS_BOOL)
-  TH_TENSOR_APPLY(scalar_t, self, *self_data = (bool)(gen->random() % 2););
-#else
-#error "Unknown type"
-#endif
-
-}
-
-void THTensor_(clampedRandom)(THTensor *self, at::Generator *_generator, int64_t min, int64_t max) {
-  THArgCheck(max > min, 2, "max must be greater than min, but got: min = %lld, max = %lld", min, max);
-  uint64_t range = max - min;
-  auto gen = at::get_generator_or_default<at::CPUGenerator>(_generator, at::detail::getDefaultCPUGenerator());
-  // See Note [Acquire lock when using random generators]
-  std::lock_guard<std::mutex> lock(gen->mutex_);
-#if defined(TH_REAL_IS_LONG) || defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-    if (range >= 1ULL << 32) {
-      TH_TENSOR_APPLY(scalar_t, self, *self_data = static_cast<scalar_t>(static_cast<int64_t>((gen->random64() % range) + min));)
-      return;
-    }
-#endif
-    TH_TENSOR_APPLY(scalar_t, self, *self_data = static_cast<scalar_t>(static_cast<int64_t>((gen->random() % range) + min));)
-}
-
-void THTensor_(cappedRandom)(THTensor *self, at::Generator *_generator, int64_t max) {
-  THArgCheck(max > 0, 1, "max must be positive, but got: max = %lld", max);
-  THTensor_(clampedRandom)(self, _generator, 0, max);
-}
-
-void THTensor_(geometric)(THTensor *self, at::Generator *_generator, double p)
-{
-  auto gen = at::get_generator_or_default<at::CPUGenerator>(_generator, at::detail::getDefaultCPUGenerator());
-  // See Note [Acquire lock when using random generators]
-  std::lock_guard<std::mutex> lock(gen->mutex_);
-  at::geometric_distribution<double> geometric(p);
-  TH_TENSOR_APPLY(scalar_t, self, *self_data = (scalar_t)geometric(gen););
-}
-
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
 
 #if defined(TH_REAL_IS_FLOAT)
@@ -76,7 +20,7 @@ void THTensor_(geometric)(THTensor *self, at::Generator *_generator, double p)
 #define TH_REAL_MIN DBL_MIN
 #endif
 
-void THTensor_(uniform)(THTensor *self, at::Generator *_generator, double a, double b)
+void THTensor_(uniform)(THTensor *self, double a, double b, at::Generator *_generator)
 {
   auto gen = at::get_generator_or_default<at::CPUGenerator>(_generator, at::detail::getDefaultCPUGenerator());
   // See Note [Acquire lock when using random generators]
@@ -91,75 +35,7 @@ void THTensor_(uniform)(THTensor *self, at::Generator *_generator, double a, dou
   #endif
 }
 
-void THTensor_(normal)(THTensor *self, at::Generator *_generator, double mean, double stddev)
-{
-  const int64_t size = THTensor_(numel)(self);
-  if (size >= 16 && THTensor_(isContiguous)(self)) {
-    THVector_(normal_fill)(THStorage_(data)(THTensor_getStoragePtr(self)) + self->storage_offset(), size, _generator, mean, stddev);
-  } else {
-    auto gen = at::get_generator_or_default<at::CPUGenerator>(_generator, at::detail::getDefaultCPUGenerator());
-    // See Note [Acquire lock when using random generators]
-    std::lock_guard<std::mutex> lock(gen->mutex_);
-
-    at::normal_distribution<double> normal(mean, stddev);
-    TH_TENSOR_APPLY(scalar_t, self, *self_data = (scalar_t)normal(gen););
-  }
-}
-
-void THTensor_(normal_means)(THTensor *self, at::Generator *gen, THTensor *means, double stddev)
-{
-  THTensor_(resizeAs)(self, means);
-  THTensor_(normal)(self, gen, 0, stddev);
-  THTensor_(cadd)(self, self, 1, means);
-}
-
-void THTensor_(normal_stddevs)(THTensor *self, at::Generator *gen, double mean, THTensor *stddevs)
-{
-  THTensor_(resizeAs)(self, stddevs);
-  THTensor_(normal)(self, gen, 0, 1);
-  THTensor_(cmul)(self, self, stddevs);
-  THTensor_(add)(self, self, mean);
-}
-
-void THTensor_(normal_means_stddevs)(THTensor *self, at::Generator *gen, THTensor *means, THTensor *stddevs)
-{
-  THTensor_(resizeAs)(self, means);
-  THTensor_(normal)(self, gen, 0, 1);
-  THTensor_(cmul)(self, self, stddevs);
-  THTensor_(cadd)(self, self, 1, means);
-}
-
-void THTensor_(exponential)(THTensor *self, at::Generator *_generator, double lambda)
-{
-  auto gen = at::get_generator_or_default<at::CPUGenerator>(_generator, at::detail::getDefaultCPUGenerator());
-  // See Note [Acquire lock when using random generators]
-  std::lock_guard<std::mutex> lock(gen->mutex_);
-
-  at::exponential_distribution<double> exponential(lambda);
-  TH_TENSOR_APPLY(scalar_t, self, *self_data = (scalar_t)exponential(gen););
-}
-
 #undef TH_REAL_MIN
-
-void THTensor_(cauchy)(THTensor *self, at::Generator *_generator, double median, double sigma)
-{
-  auto gen = at::get_generator_or_default<at::CPUGenerator>(_generator, at::detail::getDefaultCPUGenerator());
-  // See Note [Acquire lock when using random generators]
-  std::lock_guard<std::mutex> lock(gen->mutex_);
-
-  at::cauchy_distribution<double> cauchy(median, sigma);
-  TH_TENSOR_APPLY(scalar_t, self, *self_data = (scalar_t)cauchy(gen););
-}
-
-void THTensor_(logNormal)(THTensor *self, at::Generator *_generator, double mean, double stdv)
-{
-  auto gen = at::get_generator_or_default<at::CPUGenerator>(_generator, at::detail::getDefaultCPUGenerator());
-  // See Note [Acquire lock when using random generators]
-  std::lock_guard<std::mutex> lock(gen->mutex_);
-  
-  at::lognormal_distribution<double> logNormal(mean, stdv);
-  TH_TENSOR_APPLY(scalar_t, self, *self_data = (scalar_t)logNormal(gen););
-}
 
 void THTensor_(multinomialAliasSetup)(THTensor *probs, THLongTensor *J, THTensor *q)
 {
@@ -251,7 +127,7 @@ void THTensor_(multinomialAliasSetup)(THTensor *probs, THLongTensor *J, THTensor
   THLongTensor_free(smaller);
   THLongTensor_free(larger);
 }
-void THTensor_(multinomialAliasDraw)(THLongTensor *self, at::Generator *_generator, THTensor *q, THLongTensor *J, int n_sample)
+void THTensor_(multinomialAliasDraw)(THLongTensor *self, THTensor *q, THLongTensor *J, int n_sample, at::Generator *_generator)
 {
   THArgCheck(q->dim() == 1, 1,
              "expected 1-D probability table, got %d-D probability table instead",
@@ -285,200 +161,6 @@ void THTensor_(multinomialAliasDraw)(THLongTensor *self, at::Generator *_generat
       THLongTensor_fastSet1d(self, i, sample_idx);
     }
 }
-void THTensor_(multinomial)(THLongTensor *self, at::Generator *_generator, THTensor *prob_dist, int n_sample, int with_replacement)
-{
-  int64_t start_dim = THTensor_(nDimensionLegacyAll)(prob_dist);
-  int64_t n_dist;
-  int64_t n_categories;
-  THDoubleTensor* cum_dist;
-  int64_t i,j,k;
-  auto gen = at::get_generator_or_default<at::CPUGenerator>(_generator, at::detail::getDefaultCPUGenerator());
-  // See Note [Acquire lock when using random generators]
-  std::lock_guard<std::mutex> lock(gen->mutex_);
-
-  if (start_dim == 1)
-  {
-    THTensor_(unsqueeze1d)(prob_dist, prob_dist, 0);
-  }
-
-  n_dist = THTensor_(size)(prob_dist, 0);
-  n_categories = THTensor_(size)(prob_dist, 1);
-
-  THArgCheckWithCleanup(n_sample > 0,
-    THCleanup(if (start_dim == 1) THTensor_(squeeze1d)(prob_dist, prob_dist, 0);),
-    2,
-    "cannot sample n_sample <= 0 samples");
-
-  if (!with_replacement)
-  {
-    THArgCheckWithCleanup((!with_replacement) && (n_sample <= n_categories),
-      THCleanup(if (start_dim == 1) THTensor_(squeeze1d)(prob_dist, prob_dist, 0);),
-      2,
-      "cannot sample n_sample > prob_dist.size(1) samples without replacement");
-  }
-
-  /* cumulative probability distribution vector */
-  cum_dist = THDoubleTensor_newWithSize1d(n_categories);
-
-  /* will contain multinomial samples (category indices to be returned) */
-  THLongTensor_resize2d(self, n_dist , n_sample);
-
-  auto prod_dist_storage = THTensor_getStoragePtr(prob_dist);
-  auto cum_dist_storage = THTensor_getStoragePtr(cum_dist);
-  auto self_storage = THTensor_getStoragePtr(self);
-
-  auto prod_dist_offset = prob_dist->storage_offset();
-  auto prod_dist_stride_0 = prob_dist->stride(0);
-  auto prod_dist_stride_1 = prob_dist->stride(1);
-
-  auto cum_dist_offset = cum_dist->storage_offset();
-  auto cum_dist_stride_0 = cum_dist->stride(0);
-
-  auto self_dist_offset = self->storage_offset();
-  auto self_dist_stride_0 = self->stride(0);
-  auto self_dist_stride_1 = self->stride(1);
-
-  for (i=0; i<n_dist; i++)
-  {
-    /* Get normalized cumulative distribution from prob distribution */
-    double sum = 0;
-    double val;
-    int n_zeros = 0;
-    for (j=0; j<n_categories; j++)
-    {
-      val = THStorage_(get)( \
-        prod_dist_storage, \
-        prod_dist_offset+i*prod_dist_stride_0+j*prod_dist_stride_1 \
-      );
-      THArgCheckWithCleanup((val >= 0),
-                            THCleanup(THDoubleTensor_free(cum_dist); if (start_dim == 1) THTensor_(squeeze1d)(prob_dist, prob_dist, 0);),
-                            2,
-                            "invalid multinomial distribution (encountering probability entry < 0)");
-      THArgCheckWithCleanup((std::isfinite(val)),
-                            THCleanup(THDoubleTensor_free(cum_dist); if (start_dim == 1) THTensor_(squeeze1d)(prob_dist, prob_dist, 0);),
-                            2,
-                            "invalid multinomial distribution (encountering probability entry = infinity or NaN)");
-      sum += val;
-      if (val == 0) {
-        n_zeros += 1;
-      }
-      THDoubleStorage_set(
-        cum_dist_storage, \
-        cum_dist_offset+j*cum_dist_stride_0, \
-        sum \
-      );
-    }
-    THArgCheckWithCleanup((sum > 0),
-                          THCleanup(THDoubleTensor_free(cum_dist); if (start_dim == 1) THTensor_(squeeze1d)(prob_dist, prob_dist, 0);),
-                          2,
-                          "invalid multinomial distribution (sum of probabilities <= 0)");
-    THArgCheckWithCleanup((with_replacement || (n_categories - n_zeros >= n_sample)),
-                          THCleanup(THDoubleTensor_free(cum_dist); if (start_dim == 1) THTensor_(squeeze1d)(prob_dist, prob_dist, 0);),
-                          2,
-                          "invalid multinomial distribution (with replacement=False, not enough non-negative category to sample)");
-    /* normalize cumulative probability distribution so that last val is 1
-    i.e. doesn't assume original prob_dist row sums to one */
-    if ( (sum > 0) || ( ( sum < 1.00001) && (sum > 0.99999) ) )
-    {
-      for (j=0; j<n_categories; j++)
-      {
-        THDoubleTensor_data(cum_dist)[j*cum_dist_stride_0] /= sum;
-      }
-    }
-
-    for (j=0; j<n_sample; j++)
-    {
-      /* sample a probability mass from a uniform distribution */
-      at::uniform_real_distribution<double> uniform(0, 1);
-      double uniform_sample = uniform(gen);
-      /* Do a binary search for the slot in which the prob falls
-      ie cum_dist[row][slot-1] < uniform_prob < cum_distr[row][slot] */
-      int left_pointer = 0;
-      int right_pointer = n_categories;
-      int mid_pointer;
-      double cum_prob;
-      int sample_idx;
-      /* Make sure the last cumulative distribution bucket sums to 1 */
-      THDoubleTensor_data(cum_dist)[(n_categories-1)*cum_dist_stride_0] = 1;
-
-      while(right_pointer - left_pointer > 0)
-      {
-          mid_pointer = left_pointer + (right_pointer - left_pointer) / 2;
-          cum_prob = THDoubleStorage_get( \
-            cum_dist_storage, \
-            cum_dist_offset+mid_pointer*cum_dist_stride_0 \
-          );
-          if (cum_prob < uniform_sample)
-          {
-            left_pointer = mid_pointer + 1;
-          }
-          else
-          {
-            right_pointer = mid_pointer;
-          }
-      }
-      sample_idx = left_pointer;
-
-       /* store in result tensor (will be incremented for lua compat by wrapper) */
-      THLongStorage_set( \
-        self_storage, \
-        self_dist_offset+i*self_dist_stride_0+j*self_dist_stride_1, \
-        sample_idx \
-      );
-
-      /* Once a sample is drawn, it cannot be drawn again. ie sample without replacement */
-      if (!with_replacement && j < n_sample - 1)
-      {
-        /* update cumulative distribution so that sample cannot be drawn again */
-        double diff;
-        double new_val = 0;
-        double sum;
-
-        if (sample_idx != 0)
-        {
-          new_val = THDoubleStorage_get( \
-            cum_dist_storage, \
-            cum_dist_offset+(sample_idx-1)*cum_dist_stride_0 \
-          );
-        }
-        /* marginal cumulative mass (i.e. original probability) of sample */
-        diff = THDoubleStorage_get( \
-          cum_dist_storage, \
-          cum_dist_offset+sample_idx*cum_dist_stride_0 \
-        ) - new_val;
-        /* new sum of marginals is not one anymore... */
-        sum = 1.0 - diff;
-        for (k=0; k<n_categories; k++)
-        {
-          new_val = THDoubleStorage_get( \
-            cum_dist_storage, \
-            cum_dist_offset+k*cum_dist_stride_0 \
-          );
-          if (k >= sample_idx)
-          {
-            /* remove sampled probability mass from later cumulative probabilities */
-            new_val -= diff;
-          }
-          /* make total marginals sum to one */
-          new_val /= sum;
-          THDoubleStorage_set( \
-            cum_dist_storage, \
-            cum_dist_offset+k*cum_dist_stride_0, \
-            new_val \
-          );
-        }
-      }
-    }
-  }
-
-  THDoubleTensor_free(cum_dist);
-
-  if (start_dim == 1)
-  {
-    THLongTensor_resize1d(self, n_sample);
-    THTensor_(squeeze1d)(prob_dist, prob_dist, 0);
-  }
-}
 #endif
 
 #if defined(TH_REAL_IS_BYTE)
@@ -496,7 +178,7 @@ void THTensor_(getRNGState)(at::Generator *_generator, THTensor *self)
   THGeneratorStateNew* rng_state = (THGeneratorStateNew*)self->data<scalar_t>();
 
   // accumulate generator data to be copied into byte tensor
-  auto accum_state = c10::guts::make_unique<THGeneratorStateNew>();
+  auto accum_state = std::make_unique<THGeneratorStateNew>();
   auto cast_generator = at::check_generator<at::CPUGenerator>(_generator);
   auto rng_data = cast_generator->engine().data();
   accum_state->legacy_pod.the_initial_seed = rng_data.seed_;

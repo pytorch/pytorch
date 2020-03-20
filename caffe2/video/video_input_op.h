@@ -532,7 +532,7 @@ void VideoInputOp<Context>::GetLabelsFromProto(
     }
   } else {
     // For multiple label case, output label is a binary vector
-    // where presented concepts are makred 1
+    // where presented concepts are marked 1
     memset(label_data, 0, sizeof(int) * num_of_class_ * num_clips);
     for (int i = 0; i < num_clips; i++) {
       for (int j = 0; j < label_proto.int32_data_size(); j++) {
@@ -573,8 +573,8 @@ bool VideoInputOp<Context>::GetImageAndLabelsFromDBValue(
             &encoded_size,
             CV_8UC1,
             const_cast<char*>(encoded_image_str.data())),
-        CV_LOAD_IMAGE_COLOR);
-    if (src.rows == 0 or src.cols == 0) {
+        cv::IMREAD_COLOR);
+    if (src.rows == 0 || src.cols == 0) {
       throw std::runtime_error("Both rows and cols are 0 for image");
     }
   } else if (image_proto.data_type() == TensorProto::BYTE) {
@@ -606,13 +606,13 @@ bool VideoInputOp<Context>::GetImageAndLabelsFromDBValue(
     img = scaled_img;
   } else {
     cv::cvtColor(
-        scaled_img, img, (channels_rgb_ == 1) ? CV_BGR2GRAY : CV_GRAY2BGR);
+        scaled_img, img, (channels_rgb_ == 1) ? cv::COLOR_BGR2GRAY : cv::COLOR_GRAY2BGR);
   }
 
   cv::Mat rgb_img;
 
   if (channels_rgb_ == 1) {
-    cv::cvtColor(img, rgb_img, CV_BGR2RGB);
+    cv::cvtColor(img, rgb_img, cv::COLOR_BGR2RGB);
   } else {
     rgb_img = img;
   }

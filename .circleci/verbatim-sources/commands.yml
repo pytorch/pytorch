@@ -1,0 +1,86 @@
+commands:
+  # NB: This command must be run as the first command in a job. It
+  # attaches the workspace at ~/workspace; this workspace is generated
+  # by the setup job. Note that ~/workspace is not the default working
+  # directory (that's ~/project).
+  attach_scripts:
+    description: "Attach the scripts that power everything else"
+    steps:
+      - attach_workspace:
+          name: Attaching workspace
+          at: ~/workspace
+
+  # This system setup script is meant to run before the CI-related scripts, e.g.,
+  # installing Git client, checking out code, setting up CI env, and
+  # building/testing.
+  setup_linux_system_environment:
+    steps:
+      - run:
+          name: Set Up System Environment
+          no_output_timeout: "1h"
+          command: ~/workspace/.circleci/scripts/setup_linux_system_environment.sh
+
+  setup_ci_environment:
+    steps:
+      - run:
+          name: Set Up CI Environment After attach_workspace
+          no_output_timeout: "1h"
+          command: ~/workspace/.circleci/scripts/setup_ci_environment.sh
+
+  brew_update:
+    description: "Update Homebrew and install base formulae"
+    steps:
+      - run:
+          name: Update Homebrew
+          no_output_timeout: "10m"
+          command: |
+            set -ex
+
+            # Update repositories manually.
+            # Running `brew update` produces a comparison between the
+            # current checkout and the updated checkout, which takes a
+            # very long time because the existing checkout is 2y old.
+            for path in $(find /usr/local/Homebrew -type d -name .git)
+            do
+            cd $path/..
+            git fetch --depth=1 origin
+            git reset --hard origin/master
+            done
+
+            export HOMEBREW_NO_AUTO_UPDATE=1
+
+            # Install expect and moreutils so that we can call `unbuffer` and `ts`.
+            # moreutils installs a `parallel` executable by default, which conflicts
+            # with the executable from the GNU `parallel`, so we must unlink GNU
+            # `parallel` first, and relink it afterwards.
+            brew unlink parallel
+            brew install moreutils
+            brew link parallel --overwrite
+            brew install expect
+
+  brew_install:
+    description: "Install Homebrew formulae"
+    parameters:
+      formulae:
+        type: string
+        default: ""
+    steps:
+      - run:
+          name: Install << parameters.formulae >>
+          no_output_timeout: "10m"
+          command: |
+            set -ex
+            export HOMEBREW_NO_AUTO_UPDATE=1
+            brew install << parameters.formulae >>
+
+  run_brew_for_macos_build:
+    steps:
+      - brew_update
+      - brew_install:
+          formulae: libomp
+
+  run_brew_for_ios_build:
+    steps:
+      - brew_update
+      - brew_install:
+          formulae: libtool

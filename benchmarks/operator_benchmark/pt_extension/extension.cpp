@@ -12,7 +12,7 @@ Tensor consume(Tensor a) {
 // That caused an issue for our op benchmark which needs to run an op
 // in a loop and report the execution time. This diff resolves that issue by
 // registering this consume op with correct alias information which is DEFAULT.
-auto reg = torch::jit::RegisterOperators()
+auto reg = torch::RegisterOperators()
   .op("operator_benchmark::_consume", &consume);
 
 PYBIND11_MODULE(cpp_extension, m) {

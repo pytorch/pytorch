@@ -13,9 +13,16 @@ import torch.autograd.function as function
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.insert(-1, pytorch_test_dir)
 
-from common_utils import *  # noqa: F401
+from torch.testing._internal.common_utils import *  # noqa: F401
 
 torch.set_default_tensor_type('torch.FloatTensor')
+
+BATCH_SIZE = 2
+
+RNN_BATCH_SIZE = 7
+RNN_SEQUENCE_LENGTH = 11
+RNN_INPUT_SIZE = 5
+RNN_HIDDEN_SIZE = 3
 
 
 def _skipper(condition, reason):
@@ -47,6 +54,15 @@ def skipIfUnsupportedMinOpsetVersion(min_opset_version):
             return func(self)
         return wrapper
     return skip_dec
+
+# Enables tests for scripting, instead of only tracing the model.
+def enableScriptTest():
+    def script_dec(func):
+        def wrapper(self):
+            self.is_script_test_enabled = True
+            return func(self)
+        return wrapper
+    return script_dec
 
 # skips tests for opset_versions listed in unsupported_opset_versions.
 # if the caffe2 test cannot be run for a specific version, add this wrapper

@@ -14,12 +14,14 @@ class Adagrad(Optimizer):
         lr (float, optional): learning rate (default: 1e-2)
         lr_decay (float, optional): learning rate decay (default: 0)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
+        eps (float, optional): term added to the denominator to improve
+            numerical stability (default: 1e-10)
 
     .. _Adaptive Subgradient Methods for Online Learning and Stochastic
         Optimization: http://jmlr.org/papers/v12/duchi11a.html
     """
 
-    def __init__(self, params, lr=1e-2, lr_decay=0, weight_decay=0, initial_accumulator_value=0):
+    def __init__(self, params, lr=1e-2, lr_decay=0, weight_decay=0, initial_accumulator_value=0, eps=1e-10):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= lr_decay:
@@ -28,8 +30,10 @@ class Adagrad(Optimizer):
             raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
         if not 0.0 <= initial_accumulator_value:
             raise ValueError("Invalid initial_accumulator_value value: {}".format(initial_accumulator_value))
+        if not 0.0 <= eps:
+            raise ValueError("Invalid epsilon value: {}".format(eps))
 
-        defaults = dict(lr=lr, lr_decay=lr_decay, weight_decay=weight_decay,
+        defaults = dict(lr=lr, lr_decay=lr_decay, eps=eps, weight_decay=weight_decay,
                         initial_accumulator_value=initial_accumulator_value)
         super(Adagrad, self).__init__(params, defaults)
 
@@ -37,7 +41,7 @@ class Adagrad(Optimizer):
             for p in group['params']:
                 state = self.state[p]
                 state['step'] = 0
-                state['sum'] = torch.full_like(p.data, initial_accumulator_value)
+                state['sum'] = torch.full_like(p, initial_accumulator_value, memory_format=torch.preserve_format)
 
     def share_memory(self):
         for group in self.param_groups:
@@ -45,6 +49,7 @@ class Adagrad(Optimizer):
                 state = self.state[p]
                 state['sum'].share_memory_()
 
+    @torch.no_grad()
     def step(self, closure=None):
         """Performs a single optimization step.
 
@@ -54,22 +59,23 @@ class Adagrad(Optimizer):
         """
         loss = None
         if closure is not None:
-            loss = closure()
+            with torch.enable_grad():
+                loss = closure()
 
         for group in self.param_groups:
             for p in group['params']:
                 if p.grad is None:
                     continue
 
-                grad = p.grad.data
+                grad = p.grad
                 state = self.state[p]
 
                 state['step'] += 1
 
                 if group['weight_decay'] != 0:
-                    if p.grad.data.is_sparse:
+                    if p.grad.is_sparse:
                         raise RuntimeError("weight_decay option is not compatible with sparse gradients")
-                    grad = grad.add(group['weight_decay'], p.data)
+                    grad = grad.add(p, alpha=group['weight_decay'])
 
                 clr = group['lr'] / (1 + (state['step'] - 1) * group['lr_decay'])
 
@@ -86,11 +92,11 @@ class Adagrad(Optimizer):
                         return constructor(grad_indices, values, size)
                     state['sum'].add_(make_sparse(grad_values.pow(2)))
                     std = state['sum'].sparse_mask(grad)
-                    std_values = std._values().sqrt_().add_(1e-10)
-                    p.data.add_(-clr, make_sparse(grad_values / std_values))
+                    std_values = std._values().sqrt_().add_(group['eps'])
+                    p.add_(make_sparse(grad_values / std_values), alpha=-clr)
                 else:
-                    state['sum'].addcmul_(1, grad, grad)
-                    std = state['sum'].sqrt().add_(1e-10)
-                    p.data.addcdiv_(-clr, grad, std)
+                    state['sum'].addcmul_(grad, grad, value=1)
+                    std = state['sum'].sqrt().add_(group['eps'])
+                    p.addcdiv_(grad, std, value=-clr)
 
         return loss

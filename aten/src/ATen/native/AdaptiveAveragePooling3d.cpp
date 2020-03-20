@@ -116,8 +116,8 @@ void adaptive_avg_pool3d_out_cpu_template(
 
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(
         input.scalar_type(), "adaptive_avg_pool3d_cpu", [&] {
-          auto input_data = input.data<scalar_t>();
-          auto output_data = output.data<scalar_t>();
+          auto input_data = input.data_ptr<scalar_t>();
+          auto output_data = output.data_ptr<scalar_t>();
           adaptive_avg_pool3d_out_frame<scalar_t>(
               input_data,
               output_data,
@@ -140,8 +140,8 @@ void adaptive_avg_pool3d_out_cpu_template(
     for (b = 0; b < input.size(0); b++) {
       AT_DISPATCH_FLOATING_TYPES_AND_HALF(
           input.scalar_type(), "adaptive_avg_pool3d_cpu", [&] {
-            auto input_data = input.data<scalar_t>();
-            auto output_data = output.data<scalar_t>();
+            auto input_data = input.data_ptr<scalar_t>();
+            auto output_data = output.data_ptr<scalar_t>();
             adaptive_avg_pool3d_out_frame<scalar_t>(
                 input_data + b * input.stride(0),
                 output_data + b * sizeD * osizeT * osizeH * osizeW,
@@ -236,8 +236,8 @@ Tensor& adaptive_avg_pool3d_backward_out_cpu_template(
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(
         input.scalar_type(), "adaptive_avg_pool3d_backward_cpu", [&] {
           /* get raw pointers */
-          scalar_t* gradInput_data = gradInput.data<scalar_t>();
-          scalar_t* gradOutput_data = gradOutput.data<scalar_t>();
+          scalar_t* gradInput_data = gradInput.data_ptr<scalar_t>();
+          scalar_t* gradOutput_data = gradOutput.data_ptr<scalar_t>();
 
           adaptive_avg_pool3d_backward_out_frame<scalar_t>(
               gradInput_data,
@@ -257,8 +257,8 @@ Tensor& adaptive_avg_pool3d_backward_out_cpu_template(
       AT_DISPATCH_FLOATING_TYPES_AND_HALF(
           input.scalar_type(), "adaptive_avg_pool3d_backward_cpu", [&] {
             /* get raw pointers */
-            scalar_t* gradInput_data = gradInput.data<scalar_t>();
-            scalar_t* gradOutput_data = gradOutput.data<scalar_t>();
+            scalar_t* gradInput_data = gradInput.data_ptr<scalar_t>();
+            scalar_t* gradOutput_data = gradOutput.data_ptr<scalar_t>();
             adaptive_avg_pool3d_backward_out_frame<scalar_t>(
                 gradInput_data + b * sizeD * isizeT * isizeH * isizeW,
                 gradOutput_data + b * sizeD * osizeT * osizeH * osizeW,
@@ -303,7 +303,7 @@ Tensor& adaptive_avg_pool3d_backward_out_cpu(
 Tensor adaptive_avg_pool3d_backward_cpu(
     const Tensor& gradOutput_,
     const Tensor& input) {
-  auto gradInput = at::zeros_like(input);
+  auto gradInput = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   adaptive_avg_pool3d_backward_out_cpu_template(gradInput, gradOutput_, input);
   return gradInput;
 }

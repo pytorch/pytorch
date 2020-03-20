@@ -9,6 +9,7 @@ from .bernoulli import Bernoulli
 from .beta import Beta
 from .binomial import Binomial
 from .categorical import Categorical
+from .continuous_bernoulli import ContinuousBernoulli
 from .dirichlet import Dirichlet
 from .distribution import Distribution
 from .exponential import Exponential
@@ -217,6 +218,14 @@ def _kl_categorical_categorical(p, q):
     return t.sum(-1)
 
 
+@register_kl(ContinuousBernoulli, ContinuousBernoulli)
+def _kl_continuous_bernoulli_continuous_bernoulli(p, q):
+    t1 = p.mean * (p.logits - q.logits)
+    t2 = p._cont_bern_log_norm() + torch.log1p(-p.probs)
+    t3 = - q._cont_bern_log_norm() - torch.log1p(-q.probs)
+    return t1 + t2 + t3
+
+
 @register_kl(Dirichlet, Dirichlet)
 def _kl_dirichlet_dirichlet(p, q):
     # From http://bariskurt.com/kullback-leibler-divergence-between-two-dirichlet-and-beta-distributions/
@@ -245,7 +254,7 @@ def _kl_expfamily_expfamily(p, q):
     q_nparams = q._natural_params
     lg_normal = p._log_normalizer(*p_nparams)
     gradients = torch.autograd.grad(lg_normal.sum(), p_nparams, create_graph=True)
-    result = q._log_normalizer(*q_nparams) - lg_normal.clone()
+    result = q._log_normalizer(*q_nparams) - lg_normal
     for pnp, qnp, g in zip(p_nparams, q_nparams, gradients):
         term = (qnp - pnp) * g
         result -= _sum_rightmost(term, len(q.event_shape))
@@ -445,6 +454,11 @@ def _kl_bernoulli_poisson(p, q):
     return -p.entropy() - (p.probs * q.rate.log() - q.rate)
 
 
+@register_kl(Beta, ContinuousBernoulli)
+def _kl_beta_continuous_bernoulli(p, q):
+    return -p.entropy() - p.mean * q.logits - torch.log1p(-q.probs) - q._cont_bern_log_norm()
+
+
 @register_kl(Beta, Pareto)
 def _kl_beta_infinity(p, q):
     return _infinite_like(p.concentration1)
@@ -484,8 +498,40 @@ def _kl_beta_uniform(p, q):
     result[(q.low > p.support.lower_bound) | (q.high < p.support.upper_bound)] = inf
     return result
 
+# Note that the KL between a ContinuousBernoulli and Beta has no closed form
+
+
+@register_kl(ContinuousBernoulli, Pareto)
+def _kl_continuous_bernoulli_infinity(p, q):
+    return _infinite_like(p.probs)
+
+
+@register_kl(ContinuousBernoulli, Exponential)
+def _kl_continuous_bernoulli_exponential(p, q):
+    return -p.entropy() - torch.log(q.rate) + q.rate * p.mean
+
+# Note that the KL between a ContinuousBernoulli and Gamma has no closed form
+# TODO: Add ContinuousBernoulli-Laplace KL Divergence
+
+
+@register_kl(ContinuousBernoulli, Normal)
+def _kl_continuous_bernoulli_normal(p, q):
+    t1 = -p.entropy()
+    t2 = 0.5 * (math.log(2. * math.pi) + torch.square(q.loc / q.scale)) + torch.log(q.scale)
+    t3 = (p.variance + torch.square(p.mean) - 2. * q.loc * p.mean) / (2.0 * torch.square(q.scale))
+    return t1 + t2 + t3
+
+
+@register_kl(ContinuousBernoulli, Uniform)
+def _kl_continuous_bernoulli_uniform(p, q):
+    result = -p.entropy() + (q.high - q.low).log()
+    return torch.where(torch.max(torch.ge(q.low, p.support.lower_bound),
+                                 torch.le(q.high, p.support.upper_bound)),
+                       torch.ones_like(result) * inf, result)
+
 
 @register_kl(Exponential, Beta)
+@register_kl(Exponential, ContinuousBernoulli)
 @register_kl(Exponential, Pareto)
 @register_kl(Exponential, Uniform)
 def _kl_exponential_infinity(p, q):
@@ -523,6 +569,7 @@ def _kl_exponential_normal(p, q):
 
 
 @register_kl(Gamma, Beta)
+@register_kl(Gamma, ContinuousBernoulli)
 @register_kl(Gamma, Pareto)
 @register_kl(Gamma, Uniform)
 def _kl_gamma_infinity(p, q):
@@ -558,6 +605,7 @@ def _kl_gamma_normal(p, q):
 
 
 @register_kl(Gumbel, Beta)
+@register_kl(Gumbel, ContinuousBernoulli)
 @register_kl(Gumbel, Exponential)
 @register_kl(Gumbel, Gamma)
 @register_kl(Gumbel, Pareto)
@@ -578,6 +626,7 @@ def _kl_gumbel_normal(p, q):
 
 
 @register_kl(Laplace, Beta)
+@register_kl(Laplace, ContinuousBernoulli)
 @register_kl(Laplace, Exponential)
 @register_kl(Laplace, Gamma)
 @register_kl(Laplace, Pareto)
@@ -598,6 +647,7 @@ def _kl_laplace_normal(p, q):
 
 
 @register_kl(Normal, Beta)
+@register_kl(Normal, ContinuousBernoulli)
 @register_kl(Normal, Exponential)
 @register_kl(Normal, Gamma)
 @register_kl(Normal, Pareto)
@@ -620,6 +670,7 @@ def _kl_normal_gumbel(p, q):
 
 
 @register_kl(Pareto, Beta)
+@register_kl(Pareto, ContinuousBernoulli)
 @register_kl(Pareto, Uniform)
 def _kl_pareto_infinity(p, q):
     return _infinite_like(p.scale)
@@ -679,6 +730,14 @@ def _kl_uniform_beta(p, q):
     result = t3 + t4 - t1 - t2
     result[(p.high > q.support.upper_bound) | (p.low < q.support.lower_bound)] = inf
     return result
+
+
+@register_kl(Uniform, ContinuousBernoulli)
+def _kl_uniform_continuous_bernoulli(p, q):
+    result = -p.entropy() - p.mean * q.logits - torch.log1p(-q.probs) - q._cont_bern_log_norm()
+    return torch.where(torch.max(torch.ge(p.high, q.support.upper_bound),
+                                 torch.le(p.low, q.support.lower_bound)),
+                       torch.ones_like(result) * inf, result)
 
 
 @register_kl(Uniform, Exponential)

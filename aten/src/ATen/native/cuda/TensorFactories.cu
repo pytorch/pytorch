@@ -44,8 +44,8 @@ Tensor& eye_out_cuda(Tensor& result, int64_t n, int64_t m) {
 }
 
 Tensor empty_cuda(IntArrayRef size, const TensorOptions& options, c10::optional<MemoryFormat> optional_memory_format) {
-  AT_ASSERT(options.backend() == at::Backend::CUDA);
-  AT_ASSERT(!options.is_variable());  // is_variable should have been 'unpacked'  // TODO: remove this when Variable and Tensor are merged
+  AT_ASSERT(options.device().type() == at::DeviceType::CUDA);
+  TORCH_INTERNAL_ASSERT(impl::variable_excluded_from_dispatch());
   TORCH_CHECK(!options.pinned_memory(), "Only dense CPU tensors can be pinned");
   check_size_nonnegative(size);
 
@@ -59,13 +59,17 @@ Tensor empty_cuda(IntArrayRef size, const TensorOptions& options, c10::optional<
     allocator,
     /*resizeable=*/true);
 
-  auto tensor = detail::make_tensor<TensorImpl>(storage_impl, CUDATensorId());
+  auto tensor = detail::make_tensor<TensorImpl>(storage_impl, DispatchKey::CUDATensorId);
   // Default TensorImpl has size [0]
   if (size.size() != 1 || size[0] != 0) {
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
   }
 
-  auto memory_format = optional_memory_format.value_or(MemoryFormat::Contiguous);
+  TORCH_CHECK(
+    !(options.has_memory_format() && optional_memory_format.has_value()),
+    "Cannot set memory_format both in TensorOptions and explicit argument; please delete "
+    "the redundant setter.");
+  auto memory_format = options.memory_format_opt().value_or(optional_memory_format.value_or(MemoryFormat::Contiguous));
   tensor.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
   return tensor;
 }
@@ -102,17 +106,17 @@ Tensor& randperm_out_cuda(Tensor& result, int64_t n, Generator* generator) {
   AT_DISPATCH_ALL_TYPES(
     result.scalar_type(), "randperm_out_cuda", [&] {
       auto keys = at::empty(result.sizes(), result.options()).random_(generator);
-      auto keys_data = thrust::device_ptr<scalar_t>(keys.data<scalar_t>());
+      auto keys_data = thrust::device_ptr<scalar_t>(keys.data_ptr<scalar_t>());
 
       // shuffled_data points to the underlying data of the output tensor if the tensor is contiguous; otherwise it
       // points to a new tensor.
       Tensor shuffled;
       thrust::device_ptr<scalar_t> shuffled_data;
       if (result.is_contiguous()) {
-        shuffled_data = thrust::device_ptr<scalar_t>(result.data<scalar_t>());
+        shuffled_data = thrust::device_ptr<scalar_t>(result.data_ptr<scalar_t>());
       } else {
         shuffled = at::empty(n, result.options());
-        shuffled_data = thrust::device_ptr<scalar_t>(shuffled.data<scalar_t>());
+        shuffled_data = thrust::device_ptr<scalar_t>(shuffled.data_ptr<scalar_t>());
       }
 
       auto state = globalContext().getTHCState();
@@ -141,7 +145,7 @@ namespace {
 // iterations. This would give the accurate result, but is relatively slow and
 // is an overkill for most cases where double's precision suffice.
 //
-// If we directly use sqrt to calculate the root, the convertion from int64_t
+// If we directly use sqrt to calculate the root, the conversion from int64_t
 // to double would lose 11 bits precision.
 //
 // The following solution uses sqrt directly for most cases, and would only
@@ -211,7 +215,7 @@ inline int64_t resolve_root_int(
 //                       (row + 2f - 1)row <= 2x
 //                  row^2 + (2f-1)row - 2x <= 0.                            [3]
 //
-// Based on ineuqality [3], we have the following coefficients for formula of
+// Based on inequality [3], we have the following coefficients for formula of
 // root:
 //                               a = 1
 //                               b = 2f - 1
@@ -254,7 +258,7 @@ inline void get_coordinate_in_tril_trapezoid(
 //                       (-row + 2f + 1)row <= 2x
 //                   row^2 - (2f+1)row + 2x >= 0.                           [3]
 //
-// Based on ineuqality [3], we have the following coefficients for formula of
+// Based on inequality [3], we have the following coefficients for formula of
 // root:
 //                               a = 1
 //                               b = -1 - 2f
@@ -349,7 +353,7 @@ Tensor tril_indices_cuda(
     AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, tensor.scalar_type(), "tril_indices_cuda", [&] {
       tril_indices_kernel<<<
           dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
-        tensor.data<scalar_t>(),
+        tensor.data_ptr<scalar_t>(),
         trapezoid_row_offset,
         m_first_row,
         col,
@@ -425,7 +429,7 @@ Tensor triu_indices_cuda(
     AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, tensor.scalar_type(), "triu_indices_cuda", [&] {
       triu_indices_kernel<<<
           dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
-        tensor.data<scalar_t>(),
+        tensor.data_ptr<scalar_t>(),
         std::max<int64_t>(0, offset),
         m_first_row,
         col,

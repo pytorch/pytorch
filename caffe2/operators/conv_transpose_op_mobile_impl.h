@@ -548,13 +548,13 @@ bool ConvTransposeMobileOp<T, Context>::RunOnDeviceWithOrderNCHW() {
         "bias dimension must be equal to output channel number");
   }
 
+  auto sizes = ConvTransposeUnpoolBase<Context>::GetOutputSize(X, C);
+  Tensor* Y = Output(0, sizes, at::dtype<T>());
+
   if (X.numel() == 0) {
     VLOG(2) << "Number of elements is 0 in ConvTrasposeOp";
     return true;
   }
-
-  auto sizes = ConvTransposeUnpoolBase<Context>::GetOutputSize(X, C);
-  Tensor* Y = Output(0, sizes, at::dtype<T>());
 
   const int outputH = Y->dim32(2);
   const int outputW = Y->dim32(3);

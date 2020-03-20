@@ -168,34 +168,46 @@ def eye_(tensor):
     return tensor
 
 
-def dirac_(tensor):
+def dirac_(tensor, groups=1):
     r"""Fills the {3, 4, 5}-dimensional input `Tensor` with the Dirac
     delta function. Preserves the identity of the inputs in `Convolutional`
-    layers, where as many input channels are preserved as possible.
+    layers, where as many input channels are preserved as possible. In case
+    of groups>1, each group of channels preserves identity
 
     Args:
         tensor: a {3, 4, 5}-dimensional `torch.Tensor`
-
+        groups (optional): number of groups in the conv layer (default: 1)
     Examples:
         >>> w = torch.empty(3, 16, 5, 5)
         >>> nn.init.dirac_(w)
+        >>> w = torch.empty(3, 24, 5, 5)
+        >>> nn.init.dirac_(w, 3)
     """
     dimensions = tensor.ndimension()
     if dimensions not in [3, 4, 5]:
         raise ValueError("Only tensors with 3, 4, or 5 dimensions are supported")
 
     sizes = tensor.size()
-    min_dim = min(sizes[0], sizes[1])
+
+    if sizes[0] % groups != 0:
+        raise ValueError('dim 0 must be divisible by groups')
+
+    out_chans_per_grp = sizes[0] // groups
+    min_dim = min(out_chans_per_grp, sizes[1])
+
     with torch.no_grad():
         tensor.zero_()
 
-        for d in range(min_dim):
-            if dimensions == 3:  # Temporal convolution
-                tensor[d, d, tensor.size(2) // 2] = 1
-            elif dimensions == 4:  # Spatial convolution
-                tensor[d, d, tensor.size(2) // 2, tensor.size(3) // 2] = 1
-            else:  # Volumetric convolution
-                tensor[d, d, tensor.size(2) // 2, tensor.size(3) // 2, tensor.size(4) // 2] = 1
+        for g in range(groups):
+            for d in range(min_dim):
+                if dimensions == 3:  # Temporal convolution
+                    tensor[g * out_chans_per_grp + d, d, tensor.size(2) // 2] = 1
+                elif dimensions == 4:  # Spatial convolution
+                    tensor[g * out_chans_per_grp + d, d, tensor.size(2) // 2,
+                           tensor.size(3) // 2] = 1
+                else:  # Volumetric convolution
+                    tensor[g * out_chans_per_grp + d, d, tensor.size(2) // 2,
+                           tensor.size(3) // 2, tensor.size(4) // 2] = 1
     return tensor
 
 
@@ -204,17 +216,13 @@ def _calculate_fan_in_and_fan_out(tensor):
     if dimensions < 2:
         raise ValueError("Fan in and fan out can not be computed for tensor with fewer than 2 dimensions")
 
-    if dimensions == 2:  # Linear
-        fan_in = tensor.size(1)
-        fan_out = tensor.size(0)
-    else:
-        num_input_fmaps = tensor.size(1)
-        num_output_fmaps = tensor.size(0)
-        receptive_field_size = 1
-        if tensor.dim() > 2:
-            receptive_field_size = tensor[0][0].numel()
-        fan_in = num_input_fmaps * receptive_field_size
-        fan_out = num_output_fmaps * receptive_field_size
+    num_input_fmaps = tensor.size(1)
+    num_output_fmaps = tensor.size(0)
+    receptive_field_size = 1
+    if tensor.dim() > 2:
+        receptive_field_size = tensor[0][0].numel()
+    fan_in = num_input_fmaps * receptive_field_size
+    fan_out = num_output_fmaps * receptive_field_size
 
     return fan_in, fan_out
 
@@ -292,14 +300,14 @@ def kaiming_uniform_(tensor, a=0, mode='fan_in', nonlinearity='leaky_relu'):
     :math:`\mathcal{U}(-\text{bound}, \text{bound})` where
 
     .. math::
-        \text{bound} = \sqrt{\frac{6}{(1 + a^2) \times \text{fan\_in}}}
+        \text{bound} = \text{gain} \times \sqrt{\frac{3}{\text{fan\_mode}}}
 
     Also known as He initialization.
 
     Args:
         tensor: an n-dimensional `torch.Tensor`
-        a: the negative slope of the rectifier used after this layer (0 for ReLU
-            by default)
+        a: the negative slope of the rectifier used after this layer (only 
+        used with ``'leaky_relu'``)
         mode: either ``'fan_in'`` (default) or ``'fan_out'``. Choosing ``'fan_in'``
             preserves the magnitude of the variance of the weights in the
             forward pass. Choosing ``'fan_out'`` preserves the magnitudes in the
@@ -327,14 +335,14 @@ def kaiming_normal_(tensor, a=0, mode='fan_in', nonlinearity='leaky_relu'):
     :math:`\mathcal{N}(0, \text{std}^2)` where
 
     .. math::
-        \text{std} = \sqrt{\frac{2}{(1 + a^2) \times \text{fan\_in}}}
+        \text{std} = \frac{\text{gain}}{\sqrt{\text{fan\_mode}}}
 
     Also known as He initialization.
 
     Args:
         tensor: an n-dimensional `torch.Tensor`
-        a: the negative slope of the rectifier used after this layer (0 for ReLU
-            by default)
+        a: the negative slope of the rectifier used after this layer (only 
+        used with ``'leaky_relu'``)
         mode: either ``'fan_in'`` (default) or ``'fan_out'``. Choosing ``'fan_in'``
             preserves the magnitude of the variance of the weights in the
             forward pass. Choosing ``'fan_out'`` preserves the magnitudes in the

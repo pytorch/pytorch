@@ -63,7 +63,7 @@ SIGNAL_HANDLER(SIGBUS, handler_SIGBUS, "ERROR: Unexpected bus error encountered 
 SIGNAL_HANDLER(SIGSEGV, handler_SIGSEGV, "ERROR: Unexpected segmentation fault encountered in worker.\n");
 SIGNAL_HANDLER(SIGFPE, handler_SIGFPE, "ERROR: Unexpected floating-point exception encountered in worker.\n");
 
-// When an error happend in DataLoader methods and Python starts to exit, the
+// When an error happened in DataLoader methods and Python starts to exit, the
 // error trace will keep the loader alive, and Python may kill the children
 // processes first before deleting the loader object. Then the cleaning up
 // methods in DataLoader.__del__ are not yet called, and SIGCHILD will print an
@@ -98,7 +98,7 @@ static PyObject *THPModule_setWorkerSignalHandlers(PyObject *module, PyObject *a
 
 static std::map<int64_t, std::set<pid_t>> worker_pids = {};
 
-static PyObject *THPModule_errorIfAnyWorkerFails(PyObject *module) {
+static PyObject *THPModule_errorIfAnyWorkerFails(PyObject *module, PyObject *noargs) {
   HANDLE_TH_ERRORS
   int error;
   std::set<pid_t> *pid_set;
@@ -131,6 +131,10 @@ static PyObject *THPModule_errorIfAnyWorkerFails(PyObject *module) {
         std::ostringstream oss;
         oss << "DataLoader worker (pid " << worker_pid << ") is killed "
             << "by signal: " << strsignal(infop.si_status) << ". ";
+        if (infop.si_status == SIGBUS) {
+            oss << "It is possible that dataloader's workers are out of shared memory. "
+                << "Please try to raise your shared memory limit.";
+        }
         // This is necessary. Otherwise, the runtime error will kill the other
         // workers, and trigger this again.
         pid_set->clear();
@@ -151,7 +155,7 @@ static PyObject *THPModule_setWorkerPIDs(PyObject *module, PyObject *args) {
   }
   int64_t key = THPUtils_unpackLong(PyTuple_GET_ITEM(args, 0));
   if (worker_pids.find(key) != worker_pids.end()) {
-    throw ValueError("_set_worker_pids should be called only once for each _DataLoaderIter.");
+    throw ValueError("_set_worker_pids should be called only once for each _BaseDataLoaderIter.");
   }
   PyObject *child_pids = PyTuple_GET_ITEM(args, 1);
   if (!PyTuple_Check(child_pids)) {
@@ -178,7 +182,7 @@ static PyObject *THPModule_removeWorkerPIDs(PyObject *module, PyObject *loader_i
   int64_t key = THPUtils_unpackLong(loader_id);
   auto it = worker_pids.find(key);
   if (it == worker_pids.end()) {
-    throw ValueError("Cannot find worker information for _DataLoaderIter with id %ld.", key);
+    throw ValueError("Cannot find worker information for _BaseDataLoaderIter with id %" PRId64, key);
   }
   worker_pids.erase(it);
 

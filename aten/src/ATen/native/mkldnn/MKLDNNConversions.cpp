@@ -15,13 +15,15 @@ Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor) {
   Tensor cpu_tensor = at::empty(
     std::vector<int64_t>(dims.begin(), dims.end()),
     mkldnn_tensor.options().layout(c10::kStrided));
-  stensor.to_public(cpu_tensor.template data<float>());
+  stensor.to_public(cpu_tensor.template data_ptr<float>());
   return cpu_tensor;
 }
 
 Tensor dense_to_mkldnn(const Tensor& cpu_tensor) {
-  AT_ASSERTM(cpu_tensor.type_id() == CPUTensorId(),
-             "dense_to_mkldnn expects dense CPU tensor input");
+  AT_ASSERTM(cpu_tensor.device().type() == DeviceType::CPU,
+             "dense_to_mkldnn expects CPU tensor input");
+  AT_ASSERTM(cpu_tensor.layout() == Layout::Strided,
+             "dense_to_mkldnn expects strided tensor input");
   AT_ASSERTM(cpu_tensor.scalar_type() == ScalarType::Float,
              "dense_to_mkldnn expects float tensor input");
   AT_ASSERTM(cpu_tensor.dim() <= 5,
@@ -32,7 +34,7 @@ Tensor dense_to_mkldnn(const Tensor& cpu_tensor) {
   ideep::tensor& dtensor = itensor_from_mkldnn(mkldnn_tensor);
   dtensor.feed_from(dtensor.get_dims(),
                     ideep::tensor::data_type::f32,
-                    (cpu_tensor_cont.template data<float>()));
+                    (cpu_tensor_cont.template data_ptr<float>()));
   return mkldnn_tensor;
 }
 
@@ -54,6 +56,17 @@ Tensor mkldnn_reorder_conv2d_weight(
   auto dilation_vec = expand_param_if_needed(dilation, "dilation", 2);
 
   ideep::tensor w = itensor_from_mkldnn(self).as_weights();
+
+  // Legacy mkldnn conv2d jitted module may contain a 5-d weight with an extra
+  // dimension when groups > 1, having dimension [g, o/g, i, h, w] instead of
+  // [o, i, h, w]. Ideally we should reorder the weight back in serialization.
+  // For backward compatibility, we squash the first two dims (g * o/g) back to
+  // its original form.
+  if (w.ndims() == 5) {
+    auto wdims = w.get_dims();
+    w.reshape({wdims[0] * wdims[1], wdims[2], wdims[3], wdims[4]});
+  }
+
   w.make_group(groups);
   ideep::tensor::descriptor desc =
       ideep::convolution_forward::expected_weights_descriptor(

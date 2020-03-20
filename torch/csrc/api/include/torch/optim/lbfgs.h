@@ -14,59 +14,79 @@
 namespace torch {
 namespace optim {
 
-struct TORCH_API LBFGSOptions {
-  LBFGSOptions(double learning_rate);
-  TORCH_ARG(double, learning_rate);
+struct TORCH_API LBFGSOptions : public OptimizerCloneableOptions<LBFGSOptions> {
+  LBFGSOptions(double lr = 1);
+  TORCH_ARG(double, lr) = 1;
   TORCH_ARG(int64_t, max_iter) = 20;
-  TORCH_ARG(int64_t, max_eval) = 25;
-  TORCH_ARG(float, tolerance_grad) = 1e-5;
-  TORCH_ARG(float, tolerance_change) = 1e-9;
-  TORCH_ARG(size_t, history_size) = 100;
+  TORCH_ARG(c10::optional<int64_t>, max_eval) = c10::nullopt;
+  TORCH_ARG(double, tolerance_grad) = 1e-7;
+  TORCH_ARG(double, tolerance_change) = 1e-9;
+  TORCH_ARG(int64_t, history_size) = 100;
+  TORCH_ARG(c10::optional<std::string>, line_search_fn) = c10::nullopt;
+ public:
+  void serialize(torch::serialize::InputArchive& archive) override;
+  void serialize(torch::serialize::OutputArchive& archive) const override;
+  TORCH_API friend bool operator==(const LBFGSOptions& lhs, const LBFGSOptions& rhs);
+  ~LBFGSOptions() = default;
+};
+
+struct TORCH_API LBFGSParamState : public OptimizerCloneableParamState<LBFGSParamState> {
+  TORCH_ARG(int64_t, func_evals) = 0;
+  TORCH_ARG(int64_t, n_iter) = 0;
+  TORCH_ARG(double, t);
+  TORCH_ARG(double, prev_loss);
+  TORCH_ARG(Tensor, d) = {};
+  TORCH_ARG(Tensor, H_diag) = {};
+  TORCH_ARG(Tensor, prev_flat_grad) = {};
+  TORCH_ARG(std::deque<Tensor>, old_dirs);
+  TORCH_ARG(std::deque<Tensor>, old_stps);
+  TORCH_ARG(std::deque<Tensor>, ro);
+  TORCH_ARG(c10::optional<std::vector<Tensor>>, al) = c10::nullopt;
+
+ public:
+  void serialize(torch::serialize::InputArchive& archive) override;
+  void serialize(torch::serialize::OutputArchive& archive) const override;
+  TORCH_API friend bool operator==(const LBFGSParamState& lhs, const LBFGSParamState& rhs);
+  ~LBFGSParamState() = default;
 };
 
 class TORCH_API LBFGS : public LossClosureOptimizer {
  public:
-  template <typename ParameterContainer>
-  explicit LBFGS(ParameterContainer&& parameters, const LBFGSOptions& options)
-      : LossClosureOptimizer(std::forward<ParameterContainer>(parameters)),
-        options(options),
-        ro(options.history_size_),
-        al(options.history_size_) {}
+   explicit LBFGS(std::vector<OptimizerParamGroup> param_groups,
+       LBFGSOptions defaults) : LossClosureOptimizer(std::move(param_groups), std::make_unique<LBFGSOptions>(defaults)) {
+     TORCH_CHECK(param_groups_.size() == 1, "LBFGS doesn't support per-parameter options (parameter groups)");
+     if (defaults.max_eval() == c10::nullopt) {
+       auto max_eval_val = (defaults.max_iter() * 5) / 4;
+       static_cast<LBFGSOptions&>(param_groups_[0].options()).max_eval(max_eval_val);
+       static_cast<LBFGSOptions&>(*defaults_.get()).max_eval(max_eval_val);
+     }
+     _numel_cache = c10::nullopt;
+   }
+   explicit LBFGS(
+       std::vector<Tensor> params,
+       LBFGSOptions defaults) : LBFGS({std::move(OptimizerParamGroup(params))}, defaults) {}
 
-  torch::Tensor step(LossClosure closure) override;
-
-  LBFGSOptions options;
-
+  Tensor step(LossClosure closure) override;
+  void add_parameters(const std::vector<Tensor>& parameters) override;
+  const std::vector<Tensor>& parameters() const noexcept override;
+  std::vector<Tensor>& parameters() noexcept override;
+  size_t size() const noexcept override;
   void save(serialize::OutputArchive& archive) const override;
   void load(serialize::InputArchive& archive) override;
 
-  Tensor d{torch::empty({0})};
-  Tensor H_diag{torch::empty({0})};
-  Tensor prev_flat_grad{torch::empty({0})};
-  Tensor t{torch::zeros(1)};
-  Tensor prev_loss{torch::zeros(1)};
-  std::vector<Tensor> ro;
-  std::vector<Tensor> al;
-  std::deque<Tensor> old_dirs;
-  std::deque<Tensor> old_stps;
-  int64_t func_evals{0};
-  int64_t state_n_iter{0};
-
  private:
-  LBFGS() : options(0) {}
-
-  Tensor gather_flat_grad();
-  void add_grad(const torch::Tensor& step_size, const Tensor& update);
+  c10::optional<int64_t> _numel_cache;
+  int64_t _numel();
+  Tensor _gather_flat_grad();
+  void _add_grad(const double step_size, const Tensor& update);
+  std::tuple<double, Tensor> _directional_evaluate(
+    const LossClosure& closure, const std::vector<Tensor>& x, double t, const Tensor& d);
+  void _set_param(const std::vector<Tensor>& params_data);
+  std::vector<Tensor> _clone_param();
 
   template <typename Self, typename Archive>
   static void serialize(Self& self, Archive& archive) {
-    archive("d", self.d, /*is_buffer=*/true);
-    archive("t", self.t, /*is_buffer=*/true);
-    archive("H_diag", self.H_diag, /*is_buffer=*/true);
-    archive("prev_flat_grad", self.prev_flat_grad, /*is_buffer=*/true);
-    archive("prev_loss", self.prev_loss, /*is_buffer=*/true);
-    optim::serialize(archive, "old_dirs", self.old_dirs);
-    optim::serialize(archive, "old_stps", self.old_stps);
+    _TORCH_OPTIM_SERIALIZE_WITH_TEMPLATE_ARG(LBFGS);
   }
 };
 } // namespace optim

@@ -1,21 +1,26 @@
 // define constants like M_PI and C keywords for MSVC
 #ifdef _MSC_VER
+#ifndef _USE_MATH_DEFINES
 #define _USE_MATH_DEFINES
+#endif
 #include <math.h>
 #endif
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Dispatch.h>
 #include <ATen/CPUApplyUtils.h>
+#include <ATen/native/BinaryOps.h>
+#include <ATen/native/PointwiseOps.h>
+#include <ATen/native/TensorIterator.h>
+#include <ATen/native/cpu/Loops.h>
 
-#define EPSILON 1e-12
-#define _USE_MATH_DEFINES
+constexpr float EPSILON = 1e-12;
 
 namespace {
   static inline at::Tensor apply_loss_reduction(const at::Tensor& unreduced, int64_t reduction) {
-    if (reduction == Reduction::Mean) {
+    if (reduction == at::Reduction::Mean) {
       return unreduced.mean();
-    } else if (reduction == Reduction::Sum) {
+    } else if (reduction == at::Reduction::Sum) {
       return unreduced.sum();
     }
     return unreduced;
@@ -24,6 +29,11 @@ namespace {
 
 namespace at { namespace native {
 
+DEFINE_DISPATCH(smooth_l1_stub);
+DEFINE_DISPATCH(smooth_l1_backward_stub);
+DEFINE_DISPATCH(mse_stub);
+DEFINE_DISPATCH(mse_backward_stub);
+
 Tensor cosine_embedding_loss(const Tensor& input1, const Tensor& input2, const Tensor& target, double margin, int64_t reduction) {
   auto prod_sum = (input1 * input2).sum(1);
   auto mag_square1 = (input1 * input1).sum(1) + EPSILON;
@@ -31,7 +41,7 @@ Tensor cosine_embedding_loss(const Tensor& input1, const Tensor& input2, const T
   auto denom = (mag_square1 * mag_square2).sqrt_();
   auto cos = prod_sum / denom;
 
-  auto zeros = at::zeros_like(target);
+  auto zeros = at::zeros_like(cos, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   auto pos = 1 - cos;
   auto neg = (cos - margin).clamp_min_(0);
   auto output_pos = at::where(target == 1, pos, zeros);
@@ -41,7 +51,7 @@ Tensor cosine_embedding_loss(const Tensor& input1, const Tensor& input2, const T
 }
 
 Tensor hinge_embedding_loss(const Tensor& self, const Tensor& target, double margin, int64_t reduction) {
-  auto zeros = at::zeros_like(self);
+  auto zeros = at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   auto margin_clamp = (margin - self).clamp_min_(0);
   auto output_margin = at::where(target != 1, margin_clamp, zeros);
   auto output_self = at::where(target != -1, self, zeros);
@@ -67,14 +77,14 @@ Tensor margin_ranking_loss(const Tensor& input1, const Tensor& input2, const Ten
 }
 
 Tensor kl_div(const Tensor& input, const Tensor& target, int64_t reduction) {
-  auto zeros = at::zeros_like(target);
   auto output_pos = target * (at::log(target) - input);
+  auto zeros = at::zeros_like(output_pos, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   auto output = at::where(target > 0, output_pos, zeros);
   return apply_loss_reduction(output, reduction);
 }
 
 Tensor kl_div_backward_cpu(const Tensor& grad, const Tensor& input, const Tensor& target, int64_t reduction) {
-  auto grad_input = at::zeros_like(input);
+  auto grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   auto grad_expand = grad.expand_as(input);
   AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "kl_div_backward_cpu", [&]() {
     at::CPU_tensor_apply3<scalar_t, scalar_t, scalar_t>(
@@ -87,10 +97,90 @@ Tensor kl_div_backward_cpu(const Tensor& grad, const Tensor& input, const Tensor
           }
         });
   });
-  if (reduction == Reduction::Mean) {
+  if (reduction == at::Reduction::Mean) {
     return grad_input / input.numel();
   }
   return grad_input;
+}
+
+Tensor binary_cross_entropy_cpu(const Tensor& input, const Tensor& target, const Tensor& weight, int64_t reduction) {
+    Tensor loss = at::empty_like(input);
+    return at::native::binary_cross_entropy_out_cpu(loss, input, target, weight, reduction);
+}
+
+Tensor& binary_cross_entropy_out_cpu(Tensor& loss, const Tensor& input, const Tensor& target, const Tensor& weight, int64_t reduction) {
+    Tensor loss_squeezed = at::squeeze(loss);
+
+    auto iter = TensorIterator();
+    iter.add_output(loss_squeezed);
+    iter.add_input(at::squeeze(input));
+    iter.add_input(at::squeeze(target));
+    iter.build();
+
+    AT_DISPATCH_FLOATING_TYPES(loss.scalar_type(), "binary_cross_entropy", [&] {
+        at::native::cpu_kernel(
+            iter,
+            [] (scalar_t input_val, scalar_t target_val) {
+                TORCH_CHECK(
+                    (input_val >= 0) && (input_val <= 1),
+                    "all elements of input should be between 0 and 1"
+                );
+
+                // Binary cross entropy tensor is defined by the equation:
+                // L = -w (y ln(x) + (1-y) ln(1-x))
+                return (target_val - scalar_t(1))
+                    * std::max(scalar_t(std::log(scalar_t(1) - input_val)), scalar_t(-100))
+                    - target_val * std::max(scalar_t(std::log(input_val)), scalar_t(-100));
+            }
+        );
+    });
+    if (weight.defined()) {
+        loss.mul_(weight);
+    }
+    if (reduction != at::Reduction::None) {
+        Tensor loss_reduced = apply_loss_reduction(loss, reduction);
+        loss.resize_as_(loss_reduced).copy_(loss_reduced);
+    }
+    return loss;
+}
+
+Tensor binary_cross_entropy_backward_cpu(const Tensor& grad, const Tensor& input, const Tensor& target, const Tensor& weight, int64_t reduction) {
+    Tensor grad_input = at::empty_like(input);
+    return at::native::binary_cross_entropy_backward_out_cpu(grad_input, grad, input, target, weight, reduction);
+}
+
+Tensor& binary_cross_entropy_backward_out_cpu(Tensor& grad_input, const Tensor& grad, const Tensor& input, const Tensor& target, const Tensor& weight, int64_t reduction) {
+    Tensor grad_input_squeezed = at::squeeze(grad_input);
+
+    auto iter = TensorIterator();
+    iter.add_output(grad_input_squeezed);
+    iter.add_input(at::squeeze(grad));
+    iter.add_input(at::squeeze(input));
+    iter.add_input(at::squeeze(target));
+    iter.build();
+
+    AT_DISPATCH_FLOATING_TYPES(grad_input.scalar_type(), "binary_cross_entropy_backward", [&] {
+        at::native::cpu_kernel(
+            iter,
+            [] (scalar_t grad_val, scalar_t input_val, scalar_t target_val) {
+                // The gradient is the partial derivative of BCELoss
+                // with respect to x
+                // d(L)/d(x) = -w (y - x) / (x - x^2)
+                return grad_val * (input_val - target_val)
+                    / (scalar_t(std::max(
+                        (scalar_t(1) - input_val) * input_val,
+                        scalar_t(EPSILON)
+                    )));
+            }
+        );
+    });
+    if (weight.defined()) {
+        grad_input.mul_(weight);
+    }
+    if (reduction == at::Reduction::Mean) {
+        grad_input.div_(input.numel());
+    }
+    return grad_input;
 }
 
 Tensor binary_cross_entropy_with_logits(const Tensor& input, const Tensor& target, const Tensor& weight, const Tensor& pos_weight, int64_t reduction) {
@@ -125,7 +215,7 @@ Tensor binary_cross_entropy_with_logits_backward(const Tensor& grad, const Tenso
         grad_input.mul_(weight);
     }
 
-    if (reduction == Reduction::Mean) {
+    if (reduction == at::Reduction::Mean) {
         return grad_input / input.numel();
     }
 
@@ -140,12 +230,162 @@ Tensor poisson_nll_loss(const Tensor& input, const Tensor& target, const bool lo
     } else {
         loss = input - target * at::log(input + eps);
     }
-    
+
     if (full) {
-        auto mask1 = (target > 1);
-        loss.masked_select(mask1) += (target * at::log(target) - target + 0.5 * at::log(2 * M_PI * target)).masked_select(mask1);
+        auto stirling_term = target * at::log(target) - target + 0.5 * at::log(2 * M_PI * target);
+        loss += stirling_term.masked_fill(target <= 1, 0);
     }
 
     return apply_loss_reduction(loss, reduction);
 }
+
+Tensor& soft_margin_loss_backward_out(Tensor& grad_input, const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction) {
+  auto norm = reduction == Reduction::Mean ? 1. / input.numel() : 1.;
+  auto z = at::exp(-target * input);
+  // inplace version of: grad_input = -norm * target * z / (1. + z) * grad_output;
+  at::mul_out(grad_input, target, z).mul_(-norm);
+  z.add_(1);
+  grad_input.div_(z).mul_(grad_output);
+  return grad_input;
+}
+
+Tensor soft_margin_loss_backward(const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction) {
+  auto grad_input = at::empty({0}, input.options());
+  at::soft_margin_loss_backward_out(grad_input, grad_output, input, target, reduction);
+  return grad_input;
+}
+
+Tensor& soft_margin_loss_out(
+    Tensor& output,
+    const Tensor& input,
+    const Tensor& target,
+    int64_t reduction) {
+  // compute inplace variant of: output = at::log(1. + at::exp(-input * target));
+  at::neg_out(output, input).mul_(target).exp_().add_(1.).log_();
+  if (reduction != Reduction::None) {
+    auto tmp = apply_loss_reduction(output, reduction);
+    output.resize_({});
+    output.copy_(tmp);
+  }
+  return output;
+}
+
+Tensor soft_margin_loss(
+    const Tensor& input,
+    const Tensor& target,
+    int64_t reduction) {
+  auto output = at::empty({0}, input.options());
+  at::soft_margin_loss_out(output, input, target, reduction);
+  return output;
+}
+
+Tensor smooth_l1_loss(const Tensor& input, const Tensor& target, const int64_t reduction) {
+  Tensor loss;
+  auto iter = TensorIterator::binary_op(loss, input, target);
+  smooth_l1_stub(iter.device_type(), iter);
+  return apply_loss_reduction(iter.output(), reduction);
+}
+
+Tensor& smooth_l1_loss_out(Tensor& result, const Tensor& input, const Tensor& target, int64_t reduction) {
+  if (reduction != Reduction::None) {
+    result = at::smooth_l1_loss(input, target, reduction);
+  } else {
+    auto iter = TensorIterator::binary_op(result, input, target);
+    smooth_l1_stub(iter.device_type(), iter);
+  }
+  return result;
+}
+
+Tensor& smooth_l1_loss_backward_out(Tensor& grad_input, const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction) {
+  auto norm = reduction == Reduction::Mean ? 1. / input.numel() : 1.;
+  auto iter = at::TensorIterator();
+  iter.set_check_mem_overlap(true);
+  iter.add_output(grad_input);
+  iter.add_input(input);
+  iter.add_input(target);
+  iter.add_input(grad_output);
+  iter.build();
+  smooth_l1_backward_stub(iter.device_type(), iter, norm);
+  return grad_input;
+}
+
+Tensor smooth_l1_loss_backward(const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction) {
+  auto grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  return at::smooth_l1_loss_backward_out(grad_input, grad_output, input, target, reduction);
+}
+
+Tensor mse_loss(const Tensor& input, const Tensor& target, int64_t reduction) {
+  Tensor loss;
+  auto iter = TensorIterator::binary_op(loss, input, target);
+  mse_stub(iter.device_type(), iter);
+  return apply_loss_reduction(iter.output(), reduction);
+}
+
+Tensor& mse_loss_out(Tensor&result, const Tensor& input, const Tensor& target, int64_t reduction) {
+  if (reduction != Reduction::None) {
+    Tensor loss;
+    auto iter = TensorIterator::binary_op(loss, input, target);
+    mse_stub(iter.device_type(), iter);
+    if (reduction == Reduction::Mean) {
+      at::mean_out(result, iter.output(), 0);
+    } else {
+      at::sum_out(result, iter.output(), 0);
+    }
+  } else {
+    auto iter = TensorIterator::binary_op(result, input, target);
+    mse_stub(iter.device_type(), iter);;
+  }
+  return result;
+}
+
+Tensor mse_loss_backward(const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction) {
+  Tensor grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  return at::mse_loss_backward_out(grad_input, grad_output, input, target, reduction);
+}
+
+Tensor& mse_loss_backward_out(Tensor& grad_input, const Tensor& grad_output,
+    const Tensor& input, const Tensor& target, int64_t reduction) {
+  auto norm = reduction == Reduction::Mean ? 2. / input.numel() : 2.;
+  auto iter = at::TensorIterator();
+  iter.set_check_mem_overlap(true);
+  iter.add_output(grad_input);
+  iter.add_input(input);
+  iter.add_input(target);
+  iter.add_input(grad_output);
+  iter.build();
+  mse_backward_stub(iter.device_type(), iter, norm);
+  return grad_input;
+}
+
+Tensor l1_loss(const Tensor& input, const Tensor& target, int64_t reduction) {
+  auto loss = input.sub(target).abs_();
+  return apply_loss_reduction(loss, reduction);
+}
+
+Tensor& l1_loss_out(Tensor&result, const Tensor& input, const Tensor& target, int64_t reduction) {
+  if (reduction != Reduction::None) {
+    auto loss = input.sub(target).abs_();
+    if (reduction == Reduction::Mean) {
+      at::mean_out(result, loss, 0);
+    } else {
+      at::sum_out(result, loss, 0);
+    }
+  } else {
+    at::sub_out(result, input, target).abs_();
+  }
+  return result;
+}
+
+Tensor l1_loss_backward(const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction) {
+  Tensor grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  return at::l1_loss_backward_out(grad_input, grad_output, input, target, reduction);
+}
+
+Tensor& l1_loss_backward_out(Tensor& grad_input, const Tensor& grad_output,
+    const Tensor& input, const Tensor& target, int64_t reduction) {
+  auto norm = reduction == Reduction::Mean ? grad_output / input.numel() : grad_output;
+  at::sub_out(grad_input, input, target).sign_().mul_(norm);
+  return grad_input;
+}
+
 }}  // namespace at::native

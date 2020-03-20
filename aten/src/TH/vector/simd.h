@@ -3,16 +3,7 @@
 
 #include <stdint.h>
 #include <stdlib.h>
-#if defined(_MSC_VER)
-#include <intrin.h>
-#elif defined(HAVE_GCC_GET_CPUID) && defined(USE_GCC_GET_CPUID)
-#include <cpuid.h>
-#endif
-
-// Can be found on Intel ISA Reference for CPUID
-#define CPUID_AVX2_BIT 0x20       // Bit 5 of EBX for EAX=0x7
-#define CPUID_AVX_BIT  0x10000000 // Bit 28 of ECX for EAX=0x1
-#define CPUID_SSE_BIT  0x2000000  // bit 25 of EDX for EAX=0x1
+#include <ATen/native/DispatchStub.h>
 
 // Helper macros for initialization
 #define FUNCTION_IMPL(NAME, EXT) \
@@ -72,6 +63,13 @@ static inline uint32_t detectHostSIMDExtensions()
 
  #endif
 
+#elif defined(__s390x__)
+
+static inline uint32_t detectHostSIMDExtensions()
+{
+  return SIMDExtension_DEFAULT;
+}
+
 #elif defined(__PPC64__)
 
  #if defined(__VSX__)
@@ -104,67 +102,18 @@ static inline uint32_t detectHostSIMDExtensions()
 }
 
 #else   // x86
-static inline void cpuid(uint32_t *eax, uint32_t *ebx, uint32_t *ecx, uint32_t *edx)
-{
-#if defined(_MSC_VER)
-  uint32_t cpuInfo[4];
-  __cpuid((int *)cpuInfo, *eax);
-  *eax = cpuInfo[0];
-  *ebx = cpuInfo[1];
-  *ecx = cpuInfo[2];
-  *edx = cpuInfo[3];
-#elif defined(HAVE_GCC_GET_CPUID) && defined(USE_GCC_GET_CPUID)
-  uint32_t level = *eax;
-  __get_cpuid (level, eax, ebx, ecx, edx);
-#else
-  uint32_t a = *eax, b, c = *ecx, d;
-  asm volatile ( "cpuid\n\t"
-                 : "+a"(a), "=b"(b), "+c"(c), "=d"(d) );
-  *eax = a;
-  *ebx = b;
-  *ecx = c;
-  *edx = d;
-#endif
-}
 
 static inline uint32_t detectHostSIMDExtensions()
 {
-  uint32_t eax, ebx, ecx, edx;
-  uint32_t hostSimdExts = 0x0;
-  int TH_NO_AVX = 1, TH_NO_AVX2 = 1, TH_NO_SSE = 1;
-  char *evar;
-
-  evar = getenv("TH_NO_AVX2");
-  if (evar == NULL || strncmp(evar, "1", 1) != 0)
-    TH_NO_AVX2 = 0;
-
-  // Check for AVX2. Requires separate CPUID
-  eax = 0x7;
-  ecx = 0x0;
-  cpuid(&eax, &ebx, &ecx, &edx);
-  if ((ebx & CPUID_AVX2_BIT) && TH_NO_AVX2 == 0) {
-    hostSimdExts |= SIMDExtension_AVX2;
+  using at::native::CPUCapability;
+  switch (at::native::get_cpu_capability()) {
+  case CPUCapability::AVX2:
+    return SIMDExtension_AVX2 | SIMDExtension_AVX | SIMDExtension_SSE;
+  case CPUCapability::AVX:
+    return SIMDExtension_AVX | SIMDExtension_SSE;
+  default:
+    return SIMDExtension_SSE;
   }
-
-  // Detect and enable AVX and SSE
-  eax = 0x1;
-  cpuid(&eax, &ebx, &ecx, &edx);
-
-  evar = getenv("TH_NO_AVX");
-  if (evar == NULL || strncmp(evar, "1", 1) != 0)
-    TH_NO_AVX = 0;
-  if (ecx & CPUID_AVX_BIT && TH_NO_AVX == 0) {
-    hostSimdExts |= SIMDExtension_AVX;
-  }
-
-  evar = getenv("TH_NO_SSE");
-  if (evar == NULL || strncmp(evar, "1", 1) != 0)
-    TH_NO_SSE = 0;
-  if (edx & CPUID_SSE_BIT && TH_NO_SSE == 0) {
-    hostSimdExts |= SIMDExtension_SSE;
-  }
-
-  return hostSimdExts;
 }
 
 #endif // end SIMD extension detection code

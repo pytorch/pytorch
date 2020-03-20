@@ -1,4 +1,4 @@
-#ifdef AT_PARALLEL_OPENMP
+#if AT_PARALLEL_OPENMP
 #include <ATen/Parallel.h>
 
 #include <atomic>
@@ -86,7 +86,7 @@ void intraop_launch(std::function<void()> func) {
 std::shared_ptr<c10::ivalue::Future> intraop_launch_future(
     std::function<void()> func) {
   func();
-  auto future = std::make_shared<c10::ivalue::Future>();
+  auto future = std::make_shared<c10::ivalue::Future>(NoneType::get());
   future->markCompleted();
   return future;
 }

@@ -1,24 +1,13 @@
 #!/bin/bash
 
 # shellcheck disable=SC2034
-COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
+source "$(dirname "${BASH_SOURCE[0]}")/macos-common.sh"
 
-source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
-
-export PATH="/usr/local/bin:$PATH"
-
-# Set up conda environment
-export PYTORCH_ENV_DIR="${HOME}/workspace"
-# If a local installation of conda doesn't exist, we download and install conda
-if [ ! -d "${PYTORCH_ENV_DIR}/miniconda3" ]; then
-  mkdir -p ${PYTORCH_ENV_DIR}
-  curl https://repo.continuum.io/miniconda/Miniconda3-latest-MacOSX-x86_64.sh -o ${PYTORCH_ENV_DIR}/miniconda3.sh
-  bash ${PYTORCH_ENV_DIR}/miniconda3.sh -b -p ${PYTORCH_ENV_DIR}/miniconda3
-fi
-export PATH="${PYTORCH_ENV_DIR}/miniconda3/bin:$PATH"
-source ${PYTORCH_ENV_DIR}/miniconda3/bin/activate
-conda install -y mkl mkl-include numpy pyyaml setuptools cmake cffi ninja six
+conda install -y six
 pip install -q hypothesis "librosa>=0.6.2" psutil
+
+# TODO move this to docker
+pip install unittest-xml-reporting
 
 # faulthandler become built-in since 3.3
 if [[ ! $(python -c "import sys; print(int(sys.version_info >= (3, 3)))") == "1" ]]; then
@@ -26,12 +15,12 @@ if [[ ! $(python -c "import sys; print(int(sys.version_info >= (3, 3)))") == "1"
 fi
 
 if [ -z "${IN_CIRCLECI}" ]; then
-  rm -rf ${PYTORCH_ENV_DIR}/miniconda3/lib/python3.6/site-packages/torch*
+  rm -rf ${WORKSPACE_DIR}/miniconda3/lib/python3.6/site-packages/torch*
 fi
 
 git submodule sync --recursive
 git submodule update --init --recursive
-export CMAKE_PREFIX_PATH=${PYTORCH_ENV_DIR}/miniconda3/
+export CMAKE_PREFIX_PATH=${WORKSPACE_DIR}/miniconda3/
 
 # Test PyTorch
 if [ -z "${IN_CIRCLECI}" ]; then
@@ -43,19 +32,12 @@ if [ -z "${IN_CIRCLECI}" ]; then
     export DEVELOPER_DIR=/Applications/Xcode9.app/Contents/Developer
   fi
 fi
-export MACOSX_DEPLOYMENT_TARGET=10.9
-export CXX=clang++
-export CC=clang
-# If we run too many parallel jobs, we will OOM
-export MAX_JOBS=2
-
-export IMAGE_COMMIT_TAG=${BUILD_ENVIRONMENT}-${IMAGE_COMMIT_ID}
 
 # Download torch binaries in the test jobs
 if [ -z "${IN_CIRCLECI}" ]; then
-  rm -rf ${PYTORCH_ENV_DIR}/miniconda3/lib/python3.6/site-packages/torch*
+  rm -rf ${WORKSPACE_DIR}/miniconda3/lib/python3.6/site-packages/torch*
   aws s3 cp s3://ossci-macos-build/pytorch/${IMAGE_COMMIT_TAG}.7z ${IMAGE_COMMIT_TAG}.7z
-  7z x ${IMAGE_COMMIT_TAG}.7z -o"${PYTORCH_ENV_DIR}/miniconda3/lib/python3.6/site-packages"
+  7z x ${IMAGE_COMMIT_TAG}.7z -o"${WORKSPACE_DIR}/miniconda3/lib/python3.6/site-packages"
 fi
 
 # Test that OpenMP is enabled
@@ -67,8 +49,19 @@ fi
 popd
 
 test_python_all() {
+  # The CircleCI worker hostname doesn't resolve to an address.
+  # This environment variable makes ProcessGroupGloo default to
+  # using the address associated with the loopback interface.
+  export GLOO_SOCKET_IFNAME=lo0
   echo "Ninja version: $(ninja --version)"
-  python test/run_test.py --verbose
+
+  if [ -n "$CIRCLE_PULL_REQUEST" ]; then
+    DETERMINE_FROM=$(mktemp)
+    file_diff_from_base "$DETERMINE_FROM"
+  fi
+
+  python test/run_test.py --verbose --determine-from="$DETERMINE_FROM"
+
   assert_git_not_dirty
 }
 

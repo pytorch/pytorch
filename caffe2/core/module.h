@@ -26,10 +26,6 @@ namespace caffe2 {
 class CAFFE2_API ModuleSchema {
  public:
   ModuleSchema(const char* name, const char* description);
-
- private:
-  const char* name_;
-  const char* description_;
 };
 
 

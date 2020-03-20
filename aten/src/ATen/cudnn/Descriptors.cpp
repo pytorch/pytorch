@@ -26,10 +26,14 @@ inline cudnnDataType_t getDataType(const at::Tensor& t) {
 
 
 void TensorDescriptor::set(const at::Tensor &t, size_t pad) {
-  set(getDataType(t), t.sizes(), t.strides(), pad);
+  set(getDataType(t), t.sizes(), t.strides(), pad, t.suggest_memory_format() == at::MemoryFormat::ChannelsLast);
 }
 
 void TensorDescriptor::set(cudnnDataType_t datatype, IntArrayRef t_sizes, IntArrayRef t_strides, size_t pad) {
+  set(datatype, t_sizes, t_strides, pad, is_channels_last_strides_2d(t_sizes, t_strides));
+}
+
+void TensorDescriptor::set(cudnnDataType_t datatype, IntArrayRef t_sizes, IntArrayRef t_strides, size_t pad, bool nhwc) {
   size_t dim = t_sizes.size();
   if (dim > CUDNN_DIM_MAX || pad > CUDNN_DIM_MAX)
 #define _STR(X) #X
@@ -47,7 +51,7 @@ void TensorDescriptor::set(cudnnDataType_t datatype, IntArrayRef t_sizes, IntArr
     size[i] = 1;
     stride[i] = 1;
   }
-  set(datatype, static_cast<int>(std::max(dim, pad)), size, stride);
+  set(datatype, static_cast<int>(std::max(dim, pad)), size, stride, nhwc);
 }
 
 std::string cudnnTypeToString(cudnnDataType_t dtype) {
@@ -102,7 +106,7 @@ std::ostream& operator<<(std::ostream & out, const TensorDescriptor& d) {
 
 void TensorDescriptor::print() { std::cout << *this; }
 
-void FilterDescriptor::set(const at::Tensor &t, int64_t pad) {
+void FilterDescriptor::set(const at::Tensor &t, int64_t pad, bool force_nhwc) {
   auto dim = t.ndimension();
   if (dim > CUDNN_DIM_MAX || pad > CUDNN_DIM_MAX)
 #define _STR(X) #X
@@ -110,13 +114,14 @@ void FilterDescriptor::set(const at::Tensor &t, int64_t pad) {
     throw std::runtime_error("cuDNN supports only up to " STR(CUDNN_DIM_MAX) " dimensions");
 #undef _STR
 #undef STR
-  if (!t.is_contiguous()) {
-    // NB: It is possible for this test to be insufficient, because the
-    // Tensor passed in to set the filter descriptor may not be the actual
-    // Tensor whose data pointer is passed to cuDNN.  Nevertheless,
-    // that is the common case, so we can catch most client errors with this test.
-    throw std::runtime_error("cuDNN filters (a.k.a. weights) must be contiguous");
-  }
+  auto memory_format = force_nhwc ? at::MemoryFormat::ChannelsLast : t.suggest_memory_format();
+  // NB: It is possible for this test to be insufficient, because the
+  // Tensor passed in to set the filter descriptor may not be the actual
+  // Tensor whose data pointer is passed to cuDNN.  Nevertheless,
+  // that is the common case, so we can catch most client errors with this test.
+  TORCH_CHECK(t.is_contiguous(memory_format),
+      "cuDNN filters (a.k.a. weights) must be contiguous in desired memory_format");
+
   int size[CUDNN_DIM_MAX];
   for (int i = 0; i < dim; ++i) {
     size[i] = (int) t.size(i);
@@ -125,7 +130,18 @@ void FilterDescriptor::set(const at::Tensor &t, int64_t pad) {
     size[i] = (int) 1;
   }
   dim = std::max(dim, pad);
-  set(getDataType(t), (int) dim, size);
+  cudnnTensorFormat_t filter_format;
+  switch(memory_format) {
+  case at::MemoryFormat::Contiguous:
+    filter_format = CUDNN_TENSOR_NCHW;
+    break;
+  case at::MemoryFormat::ChannelsLast:
+    filter_format = CUDNN_TENSOR_NHWC;
+    break;
+  default:
+    TORCH_INTERNAL_ASSERT(false, "unsurpported memory_format for cuDNN filters");
+  }
+  set(getDataType(t), (int) dim, size, filter_format);
 }
 
 }}

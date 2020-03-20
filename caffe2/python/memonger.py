@@ -119,7 +119,7 @@ def optimize_inference_for_dag(net, input_blobs, namescope=""):
     ops = list(net.Proto().op)
     op_indices = [index for index, op in enumerate(net.Proto().op)]
 
-    # Sanity check: check that all external inputs are properlyh accounted
+    # Sanity check: check that all external inputs are properly accounted
     # and that no gradient ops are included in 'net'
     for op in ops:
         for b in op.input:
@@ -604,7 +604,7 @@ def compute_assignments_dp(ranges_sorted, init_assignment, counter=None):
             Return -1 if not found.
         '''
         def is_compatible_all(candidate_range, assignments):
-            ''' return true if compatiable for all assignments in assignments '''
+            ''' return true if compatible for all assignments in assignments '''
             return all([is_compatible(candidate_range[1], x, []) for x in assignments])
 
         ii = cur_idx - 1

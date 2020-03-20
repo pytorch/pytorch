@@ -33,6 +33,7 @@ namespace c10 {
   _(prim, Eval)                      \
   _(prim, Expand) /* onnx */         \
   _(prim, FusionGroup)               \
+  _(prim, CudaFusionGroup)           \
   _(prim, DifferentiableGraph)       \
   _(prim, If)                        \
   _(prim, Jump) /* debug */          \
@@ -49,7 +50,7 @@ namespace c10 {
   _(prim, IgnoredPythonOp)           \
   _(prim, Reverse)                   \
   _(prim, Return)                    \
-  _(prim, ReturnStmt)              \
+  _(prim, ReturnStmt)                \
   _(prim, BreakStmt)                 \
   _(prim, ContinueStmt)              \
   _(prim, Store)                     \
@@ -66,17 +67,23 @@ namespace c10 {
   _(prim, StringIndex)               \
   _(prim, NumToTensor)               \
   _(prim, Uninitialized)             \
-  _(prim, ImplicitTensorToNum)       \
   _(aten, Bool)                      \
   _(aten, Int)                       \
+  _(aten, FloatImplicit)             \
+  _(aten, IntImplicit)               \
+  _(aten, ScalarImplicit)            \
   _(aten, Float)                     \
   _(aten, str)                       \
+  _(aten, Delete)                    \
   _(prim, device)                    \
   _(prim, dtype)                     \
   _(prim, shape)                     \
   _(prim, requires_grad)             \
+  _(prim, MakeTestTensor) /* test */ \
   _(prim, AutogradAdd)               \
   _(prim, GradOf)                    \
+  _(aten, grad)                      \
+  _(aten, backward)                  \
   _(prim, Guard)                     \
   _(prim, BailOut)                   \
   _(prim, FusedConcat)               \
@@ -91,6 +98,9 @@ namespace c10 {
   _(prim, enumerate)                 \
   _(prim, range)                     \
   _(prim, rangelist)                 \
+  _(prim, isinstance)                \
+  _(prim, tolist)                    \
+  _(prim, unchecked_cast)            \
   _(aten, _grad_sum_to_size)         \
   _(aten, _size_if_not_equal)        \
   _(aten, _ncf_unsqueeze)            \
@@ -100,6 +110,7 @@ namespace c10 {
   _(aten, __range_length)            \
   _(aten, __derive_index)            \
   _(aten, __round_to_zero_floordiv)  \
+  _(aten, is_scripting)              \
   _(aten, _unwrap_optional)          \
   _(prim, fork)                      \
   _(prim, forkClosure)               \
@@ -108,12 +119,18 @@ namespace c10 {
   _(prim, CreateObject)              \
   _(prim, SetAttr)                   \
   _(prim, GetAttr)                   \
+  _(prim, HasAttr)                   \
   _(prim, profile)                   \
   _(prim, AddStatValue)              \
   _(prim, TimePoint)                 \
   _(prim, CallFunction)              \
   _(prim, CallMethod)                \
   _(prim, LoopContinuation)          \
+  _(prim, annotate)                  \
+  _(prim, TracedModuleForward)       \
+  _(prim, TracedFork)                \
+  _(prim, TracedAttr)                \
+  _(prim, rpc_async)                 \
   _(aten, append)                    \
   _(aten, item)                      \
   _(aten, format)                    \
@@ -156,9 +173,13 @@ namespace c10 {
   _(aten, clear)                     \
   _(aten, setdefault)                \
   _(aten, bin)                       \
+  _(aten, pop)                       \
+  _(aten, insert)                    \
   _(prim, unchecked_unwrap_optional) \
   _(aten, __contains__)              \
   _(prim, BailoutTemplate)           \
+  _(aten, zero_)                     \
+  _(aten, fill_)                     \
   FORALL_ATEN_BASE_SYMBOLS(_)        \
   _(onnx, Add)                       \
   _(onnx, Concat)                    \
@@ -182,6 +203,7 @@ namespace c10 {
   _(onnx, Loop)                      \
   _(onnx, If)                        \
   _(onnx, Reshape)                   \
+  _(onnx, Expand)                    \
   _(onnx, Equal)                     \
   _(onnx, Greater)                   \
   _(onnx, Less)                      \
@@ -190,6 +212,15 @@ namespace c10 {
   _(onnx, Split)                     \
   _(onnx, ConstantOfShape)           \
   _(onnx, Cast)                      \
+  _(onnx, Mod)                       \
+  _(onnx, Sqrt)                      \
+  _(onnx, SplitToSequence)           \
+  _(onnx, SequenceAt)                \
+  _(onnx, SequenceConstruct)         \
+  _(onnx, SequenceEmpty)             \
+  _(onnx, SequenceInsert)            \
+  _(onnx, ConcatFromSequence)        \
+  _(onnx, Identity)                  \
   FORALL_ATTR_BASE_SYMBOLS(_)        \
   _(attr, Subgraph)                  \
   _(attr, ReverseSubgraph)           \
@@ -217,7 +248,12 @@ namespace c10 {
   _(attr, beg)                       \
   _(attr, idx)                       \
   _(attr, split)                     \
-  _(attr, slot)
+  _(attr, slot)                      \
+  _(attr, kinds)                     \
+  _(attr, types)                     \
+  _(attr, scope)                     \
+  _(attr, keepdims)                  \
+  _(attr, new_axis)
 #else
 #define FORALL_NS_SYMBOLS(_) \
   _(namespaces, prim)              \
@@ -296,9 +332,7 @@ struct CAFFE2_API Symbol {
   static Symbol prim(const std::string & s);
   static Symbol user(const std::string & s);
   static Symbol caffe2(const std::string & s);
-#ifdef BUILD_NAMEDTENSOR
   static Symbol dimname(const std::string & s);
-#endif
   // TODO: eliminate me
   static Symbol scope(const std::string & s);
 
@@ -308,9 +342,7 @@ struct CAFFE2_API Symbol {
   bool is_onnx() const;
   bool is_user() const;
   bool is_caffe2() const;
-#ifdef BUILD_NAMEDTENSOR
   bool is_dimname() const;
-#endif
 
   // So we can switch on this
   constexpr operator unique_t() const {
@@ -371,18 +403,14 @@ inline Symbol Symbol::prim(const std::string & s)  { return Symbol::fromQualStri
 inline Symbol Symbol::scope(const std::string & s) { return Symbol::fromQualString("scope::" + s); }
 inline Symbol Symbol::user(const std::string & s) { return Symbol::fromQualString("user::" + s); }
 inline Symbol Symbol::caffe2(const std::string & s) { return Symbol::fromQualString("_caffe2::" + s); }
-#ifdef BUILD_NAMEDTENSOR
 inline Symbol Symbol::dimname(const std::string & s) { return Symbol::fromQualString("dimname::" + s); }
-#endif
 inline bool Symbol::is_attr() const { return ns() == namespaces::attr; }
 inline bool Symbol::is_aten() const { return ns() == namespaces::aten; }
 inline bool Symbol::is_prim() const { return ns() == namespaces::prim; }
 inline bool Symbol::is_onnx() const { return ns() == namespaces::onnx; }
 inline bool Symbol::is_user() const { return ns() == namespaces::user; }
 inline bool Symbol::is_caffe2() const { return ns() == namespaces::_caffe2; }
-#ifdef BUILD_NAMEDTENSOR
 inline bool Symbol::is_dimname() const { return ns() == namespaces::dimname; }
-#endif
 
 } // namespace c10
 

@@ -1,10 +1,10 @@
 #pragma once
 
 #include <ATen/core/ivalue.h>
-#include <torch/csrc/jit/script/module.h>
+#include <torch/csrc/jit/api/module.h>
 #include <pybind11/pybind11.h>
 
-#include <torch/csrc/jit/pybind_utils.h>
+#include <torch/csrc/jit/python/pybind_utils.h>
 
 #include <vector>
 #include <memory>
@@ -59,7 +59,7 @@ namespace detail {
 template <class Input, class Output, class Model>
 class BenchmarkHelper {
 public:
-  BenchmarkHelper(): initialized_{false} {}
+  BenchmarkHelper();
   explicit BenchmarkHelper(Model model): model_(model), initialized_(true) {}
 
   // This method to be used in benchmark() method
@@ -106,9 +106,16 @@ Input cloneInput(const Input& input);
 typedef BenchmarkHelper<
     ScriptModuleInput,
     at::IValue,
-    jit::script::Module>
+    jit::Module>
     ScriptModuleBenchmark;
+template <>
+inline BenchmarkHelper<ScriptModuleInput, at::IValue, jit::Module>::BenchmarkHelper()
+  : model_("Module", std::make_shared<jit::CompilationUnit>()),
+    initialized_(false) {}
 typedef BenchmarkHelper<ModuleInput, py::object, py::object> ModuleBenchmark;
+template <>
+inline BenchmarkHelper<ModuleInput, py::object, py::object>::BenchmarkHelper()
+  : initialized_(false) {}
 
 template <>
 void ScriptModuleBenchmark::runOnce(
@@ -150,7 +157,7 @@ void ModuleBenchmark::addInput(py::args&& args, py::kwargs&& kwargs);
  */
 class C10_HIDDEN ThroughputBenchmark {
  public:
-  explicit ThroughputBenchmark(jit::script::Module module);
+  explicit ThroughputBenchmark(jit::Module module);
   explicit ThroughputBenchmark(py::object module);
 
   // Add one more input example. This input example should be in the exact

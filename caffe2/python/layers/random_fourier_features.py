@@ -23,8 +23,8 @@ class RandomFourierFeatures(ModelLayer):
     Inputs:
         output_dims -- output feature dimensions
         sigma -- bandwidth for the Gaussian kernel estimator
-        w_init -- initalization options for weight parameter
-        b_init -- initalization options for bias parameter
+        w_init -- initialization options for weight parameter
+        b_init -- initialization options for bias parameter
 
     """
     def __init__(

@@ -23,7 +23,10 @@ def generate_code(ninja_global=None,
                   declarations_path=None,
                   nn_path=None,
                   install_dir=None,
-                  subset=None):
+                  subset=None,
+                  disable_autograd=False,
+                  selected_op_list_path=None,
+                  disable_trace=False):
     # cwrap depends on pyyaml, so we can't import it earlier
     root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     sys.path.insert(0, root)
@@ -38,16 +41,22 @@ def generate_code(ninja_global=None,
             os.makedirs(d)
 
     if subset == "pybindings" or not subset:
-        # Build THNN/THCUNN.cwrap and then THNN/THCUNN.cpp. These are primarily
-        # used by the legacy NN bindings.
-        from tools.nnwrap import generate_wrappers as generate_nn_wrappers
-        generate_nn_wrappers(nn_path, install_dir, 'tools/cwrap/plugins/templates')
-
         gen_autograd_python(declarations_path or DECLARATIONS_PATH, autograd_gen_dir, 'tools/autograd')
 
     if subset == "libtorch" or not subset:
-        gen_autograd(declarations_path or DECLARATIONS_PATH, autograd_gen_dir, 'tools/autograd')
-        gen_jit_dispatch(declarations_path or DECLARATIONS_PATH, jit_gen_dir, 'tools/jit/templates')
+        gen_autograd(
+            declarations_path or DECLARATIONS_PATH,
+            autograd_gen_dir,
+            'tools/autograd',
+            disable_autograd=disable_autograd,
+            disable_trace=disable_trace,
+        )
+        gen_jit_dispatch(
+            declarations_path or DECLARATIONS_PATH,
+            jit_gen_dir,
+            'tools/jit/templates',
+            disable_autograd=disable_autograd,
+            selected_op_list_path=selected_op_list_path)
 
 
 def main():
@@ -60,6 +69,22 @@ def main():
         '--subset',
         help='Subset of source files to generate. Can be "libtorch" or "pybindings". Generates both when omitted.'
     )
+    parser.add_argument(
+        '--disable-autograd',
+        default=False,
+        action='store_true',
+        help='It can skip generating autograd related code when the flag is set',
+    )
+    parser.add_argument(
+        '--selected-op-list-path',
+        help='Path to the yaml file that contains the list of operators to include for custom build.',
+    )
+    parser.add_argument(
+        '--disable_gen_tracing',
+        default=False,
+        action='store_true',
+        help='Disable generating the tracing codes.',
+    )
     options = parser.parse_args()
     generate_code(
         options.ninja_global,
@@ -67,6 +92,9 @@ def main():
         options.nn_path,
         options.install_dir,
         options.subset,
+        options.disable_autograd,
+        options.selected_op_list_path,
+        options.disable_gen_tracing,
     )
 
 

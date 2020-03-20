@@ -5,7 +5,8 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python import core, scope, workspace, helpers
+from caffe2.python import core, scope, workspace
+from caffe2.python.helpers.db_input import db_input
 from caffe2.python.modeling import parameter_info
 from caffe2.python.modeling.parameter_sharing import (
     parameter_sharing_context,
@@ -170,7 +171,7 @@ class ModelHelper(object):
         be created in the CurrentNameScope with the respect of all parameter
         sharing logic, i.e. 'resolved_name_scope/param_name'.
 
-        Parameter sharing logic is going to override CurrentNameScope accoring
+        Parameter sharing logic is going to override CurrentNameScope according
         to the rules that are specified through ParameterSharing contexts,
         all ParameterSharing contexts are applied recursively until there are no
         extra overrides present, where on each step the best match will be
@@ -414,7 +415,7 @@ class ModelHelper(object):
             """You cannot pass reader to model_helper.TensorProtosDBInput.
                Use model.net.TensorProtosDBInput instead to create the op."""
 
-        return helpers.db_input.db_input(
+        return db_input(
             self, blob_out, batch_size, db, db_type, **kwargs)
 
     def GetDevices(self):

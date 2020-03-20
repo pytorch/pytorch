@@ -1,0 +1,26 @@
+      # Pytorch iOS PR builds
+      - pytorch_ios_build:
+          name: pytorch_ios_11_2_1_x86_64_build
+          build_environment: "pytorch-ios-11.2.1-x86_64_build"
+          ios_arch: "x86_64"
+          ios_platform: "SIMULATOR"
+          requires:
+            - setup
+      - pytorch_ios_build:
+          name: pytorch_ios_11_2_1_arm64_build
+          context: org-member
+          build_environment: "pytorch-ios-11.2.1-arm64_build"
+          ios_arch: "arm64"
+          ios_platform: "OS"
+          requires:
+            - setup
+      - pytorch_ios_build:
+          name: pytorch_ios_11_2_1_arm64_custom_build
+          context: org-member
+          build_environment: "pytorch-ios-11.2.1-arm64_custom_build"
+          ios_arch: "arm64"
+          ios_platform: "OS"
+          op_list: "mobilenetv2.yaml"
+          requires:
+            - setup
+

@@ -4,6 +4,7 @@
 
 namespace caffe2 {
 
+// Adam
 template <typename Context>
 void adam_update(
     int N,
@@ -73,6 +74,111 @@ void adam_compute_output_grad(
     float mi = nm[i] = m[i] * beta1 + gi * (1 - beta1);
     float vi = nv[i] = v[i] * beta2 + gi * gi * (1 - beta2);
     float ngi = ng[i] = correction * mi / (std::sqrt(vi) + eps_hat);
+    nw[i] = w[i] + lr[0] * ngi;
+  }
+}
+
+// RAdam
+template <typename Context>
+void radam_update(
+    int N,
+    const float* g,
+    const float* m,
+    const float* v,
+    float* ng,
+    float* nm,
+    float* nv,
+    float beta1,
+    float beta2,
+    float eps_hat,
+    float beta1_correction,
+    float correction,
+    float rho_t,
+    float r_correction,
+    const float* lr,
+    Context* /*context*/) {
+  for (auto i = 0; i < N; ++i) {
+    float gi = g[i];
+    float mi = nm[i] = m[i] * beta1 + gi * (1 - beta1);
+    float vi = nv[i] = v[i] * beta2 + gi * gi * (1 - beta2);
+
+    if (rho_t >= 5.) {
+      float r_t =
+          std::sqrt(((rho_t - 4.) * (rho_t - 2.)) / rho_t) * r_correction;
+      ng[i] = lr[0] * r_t * correction * mi / (std::sqrt(vi) + eps_hat);
+    } else {
+      ng[i] = lr[0] * beta1_correction * mi;
+    }
+  }
+}
+
+template <typename Context>
+void radam_compute(
+    int N,
+    const float* w,
+    const float* g,
+    const float* m,
+    const float* v,
+    float* nw,
+    float* nm,
+    float* nv,
+    float beta1,
+    float beta2,
+    float eps_hat,
+    float beta1_correction,
+    float correction,
+    float rho_t,
+    float r_correction,
+    const float* lr,
+    Context* /*context*/) {
+  for (auto i = 0; i < N; ++i) {
+    float gi = g[i];
+    float mi = nm[i] = m[i] * beta1 + gi * (1 - beta1);
+    float vi = nv[i] = v[i] * beta2 + gi * gi * (1 - beta2);
+
+    if (rho_t >= 5.) {
+      float r_t =
+          std::sqrt(((rho_t - 4.) * (rho_t - 2.)) / rho_t) * r_correction;
+      nw[i] = w[i] + lr[0] * r_t * correction * mi / (std::sqrt(vi) + eps_hat);
+    } else {
+      nw[i] = w[i] + lr[0] * beta1_correction * mi;
+    }
+  }
+}
+
+template <typename Context>
+void radam_compute_output_grad(
+    int N,
+    const float* w,
+    const float* g,
+    const float* m,
+    const float* v,
+    float* nw,
+    float* nm,
+    float* nv,
+    float* ng,
+    float beta1,
+    float beta2,
+    float eps_hat,
+    float beta1_correction,
+    float correction,
+    float rho_t,
+    float r_correction,
+    const float* lr,
+    Context* /*context*/) {
+  for (auto i = 0; i < N; ++i) {
+    float gi = g[i];
+    float mi = nm[i] = m[i] * beta1 + gi * (1 - beta1);
+    float vi = nv[i] = v[i] * beta2 + gi * gi * (1 - beta2);
+    float ngi;
+
+    if (rho_t >= 5.) {
+      float r_t =
+          std::sqrt(((rho_t - 4.) * (rho_t - 2.)) / rho_t) * r_correction;
+      ngi = ng[i] = r_t * correction * mi / (std::sqrt(vi) + eps_hat);
+    } else {
+      ngi = ng[i] = beta1_correction * mi;
+    }
     nw[i] = w[i] + lr[0] * ngi;
   }
 }
@@ -158,7 +264,9 @@ class SparseAdamOp final : public Operator<Context> {
       : Operator<Context>(operator_def, ws),
         beta1_(this->template GetSingleArgument<float>("beta1", 0.9f)),
         beta2_(this->template GetSingleArgument<float>("beta2", 0.999f)),
-        epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)) {}
+        epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)),
+        enableRAdam_(
+            this->template GetSingleArgument<bool>("enableRAdam", false)) {}
 
   bool RunOnDevice() override {
     // Enforce shapes
@@ -180,8 +288,15 @@ class SparseAdamOp final : public Operator<Context> {
         OperatorBase::Input<Tensor>(ITER, CPU).template data<int64_t>()[0];
 
     const auto t = iter + 1;
-    const auto correction =
-        std::sqrt(T(1.) - std::pow(beta2_, t)) / (T(1.) - std::pow(beta1_, t));
+    const auto beta1_correction = T(1.) / (T(1.) - std::pow(beta1_, t));
+    const auto beta2_correction =
+        T(1.) / std::sqrt(T(1.) - std::pow(beta2_, t));
+    const auto correction = beta1_correction / beta2_correction;
+    const auto rho_inf = T(2.) / (T(1.) - beta2_) - T(1.);
+    const auto rho_t = rho_inf -
+        T(2.) * t * std::pow(beta2_, t) / (T(1.) - std::pow(beta2_, t));
+    const auto r_correction =
+        std::sqrt(rho_inf / ((rho_inf - T(4.)) * (rho_inf - T(2.))));
 
     auto block_size = Input(PARAM).numel() / Input(PARAM).size(0);
     auto n = Input(GRAD).numel() / block_size;
@@ -205,9 +320,26 @@ class SparseAdamOp final : public Operator<Context> {
               moment1In[idx] * beta1_ + gi * (1 - beta1_);
           float vi = moment2Out[idx] =
               moment2In[idx] * beta2_ + gi * gi * (1 - beta2_);
-          paramOut[idx] = paramIn[idx] +
-              lr[0] * correction * mi / (std::sqrt(vi) + epsilon_);
 
+          if (!enableRAdam_) {
+            paramOut[idx] = paramIn[idx] +
+                lr[0] * correction * mi / (std::sqrt(vi) + epsilon_);
+          } else {
+            // the SMA condition follows author's implementation
+            // 5 is more conservative since it's an approximated value
+            if (rho_t >= T(5.)) {
+              float r_t =
+                  std::sqrt(((rho_t - T(4.)) * (rho_t - T(2.))) / rho_t) *
+                  r_correction;
+              // epsilon_ is not included in paper, but it is added in author's
+              // implementation:
+              // https://github.com/LiyuanLucasLiu/RAdam/blob/master/radam.py#L85
+              paramOut[idx] = paramIn[idx] +
+                  lr[0] * r_t * correction * mi / (std::sqrt(vi) + epsilon_);
+            } else {
+              paramOut[idx] = paramIn[idx] + lr[0] * beta1_correction * mi;
+            }
+          }
         } else {
           auto offsetI = i * block_size;
           auto offsetIdx = idx * block_size;
@@ -232,22 +364,42 @@ class SparseAdamOp final : public Operator<Context> {
               " for input i:",
               i);
 #endif
-
-          adam_compute(
-              block_size,
-              paramIn + offsetIdx,
-              gradIn + offsetI,
-              moment1In + offsetIdx,
-              moment2In + offsetIdx,
-              paramOut + offsetIdx,
-              moment1Out + offsetIdx,
-              moment2Out + offsetIdx,
-              beta1_,
-              beta2_,
-              epsilon_,
-              correction,
-              lr,
-              &context_);
+          if (!enableRAdam_) {
+            adam_compute(
+                block_size,
+                paramIn + offsetIdx,
+                gradIn + offsetI,
+                moment1In + offsetIdx,
+                moment2In + offsetIdx,
+                paramOut + offsetIdx,
+                moment1Out + offsetIdx,
+                moment2Out + offsetIdx,
+                beta1_,
+                beta2_,
+                epsilon_,
+                correction,
+                lr,
+                &context_);
+          } else {
+            radam_compute(
+                block_size,
+                paramIn + offsetIdx,
+                gradIn + offsetI,
+                moment1In + offsetIdx,
+                moment2In + offsetIdx,
+                paramOut + offsetIdx,
+                moment1Out + offsetIdx,
+                moment2Out + offsetIdx,
+                beta1_,
+                beta2_,
+                epsilon_,
+                beta1_correction,
+                correction,
+                rho_t,
+                r_correction,
+                lr,
+                &context_);
+          }
         }
       }
     } else {
@@ -262,9 +414,23 @@ class SparseAdamOp final : public Operator<Context> {
               moment1In[idx] * beta1_ + gi * (1 - beta1_);
           float vi = moment2Out[idx] =
               moment2In[idx] * beta2_ + gi * gi * (1 - beta2_);
-          float ngi = gradOut[i] = correction * mi / (std::sqrt(vi) + epsilon_);
-          paramOut[idx] = paramIn[idx] + lr[0] * ngi;
+          float ngi;
 
+          if (!enableRAdam_) {
+            ngi = gradOut[i] = correction * mi / (std::sqrt(vi) + epsilon_);
+          } else {
+            if (rho_t >= T(5.)) {
+              float r_t =
+                  std::sqrt(((rho_t - T(4.)) * (rho_t - T(2.))) / rho_t) *
+                  r_correction;
+              ngi = gradOut[i] =
+                  r_t * correction * mi / (std::sqrt(vi) + epsilon_);
+            } else {
+              ngi = gradOut[i] = beta1_correction * mi;
+            }
+          }
+
+          paramOut[idx] = paramIn[idx] + lr[0] * ngi;
         } else {
           auto offsetI = i * block_size;
           auto offsetIdx = idx * block_size;
@@ -289,23 +455,44 @@ class SparseAdamOp final : public Operator<Context> {
               " for input i:",
               i);
 #endif
-
-          adam_compute_output_grad(
-              block_size,
-              paramIn + offsetIdx,
-              gradIn + offsetI,
-              moment1In + offsetIdx,
-              moment2In + offsetIdx,
-              paramOut + offsetIdx,
-              moment1Out + offsetIdx,
-              moment2Out + offsetIdx,
-              gradOut + offsetI,
-              beta1_,
-              beta2_,
-              epsilon_,
-              correction,
-              lr,
-              &context_);
+          if (!enableRAdam_) {
+            adam_compute_output_grad(
+                block_size,
+                paramIn + offsetIdx,
+                gradIn + offsetI,
+                moment1In + offsetIdx,
+                moment2In + offsetIdx,
+                paramOut + offsetIdx,
+                moment1Out + offsetIdx,
+                moment2Out + offsetIdx,
+                gradOut + offsetI,
+                beta1_,
+                beta2_,
+                epsilon_,
+                correction,
+                lr,
+                &context_);
+          } else {
+            radam_compute_output_grad(
+                block_size,
+                paramIn + offsetIdx,
+                gradIn + offsetI,
+                moment1In + offsetIdx,
+                moment2In + offsetIdx,
+                paramOut + offsetIdx,
+                moment1Out + offsetIdx,
+                moment2Out + offsetIdx,
+                gradOut + offsetI,
+                beta1_,
+                beta2_,
+                epsilon_,
+                beta1_correction,
+                correction,
+                rho_t,
+                r_correction,
+                lr,
+                &context_);
+          }
         }
       }
     }
@@ -316,6 +503,7 @@ class SparseAdamOp final : public Operator<Context> {
   T beta1_;
   T beta2_;
   T epsilon_;
+  T enableRAdam_;
   INPUT_TAGS(PARAM, MOMENT_1, MOMENT_2, INDICES, GRAD, LR, ITER);
   OUTPUT_TAGS(OUTPUT_PARAM, OUTPUT_MOMENT_1, OUTPUT_MOMENT_2, OUTPUT_GRAD);
 };

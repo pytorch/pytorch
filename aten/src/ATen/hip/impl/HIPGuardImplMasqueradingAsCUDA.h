@@ -8,6 +8,7 @@
 #include <c10/core/DeviceType.h>
 #include <c10/core/impl/InlineDeviceGuard.h>
 #include <c10/core/impl/InlineStreamGuard.h>
+#include <c10/util/Exception.h>
 
 #include <c10/hip/impl/HIPGuardImpl.h>
 
@@ -26,7 +27,7 @@ namespace c10 { namespace hip {
 // HIP occurs; instead, anywhere we see "CUDA", it actually means "HIP".
 // For example, when you use HIPified PyTorch, you say x.cuda() to
 // move a tensor onto ROCm device.  We call this situation "HIP
-// maquerading as CUDA".
+// masquerading as CUDA".
 //
 // This leads to a very awkward situation when we want to call c10_hip
 // code from PyTorch, since c10_hip is expecting things to be called
@@ -43,7 +44,7 @@ namespace c10 { namespace hip {
 // we switch PyTorch to calling a HIP a HIP.
 //
 // When you add a new MasqueradingAsCUDA class/function, you need to
-// also update the rewrite rules in tools/amd_build/pyHIPIFY/cuda_to_hip_mappings.py
+// also update the rewrite rules in torch/utils/hipify/cuda_to_hip_mappings.py
 //
 //
 //
@@ -55,13 +56,13 @@ struct HIPGuardImplMasqueradingAsCUDA final : public c10::impl::DeviceGuardImplI
   static constexpr DeviceType static_type = DeviceType::CUDA;
   HIPGuardImplMasqueradingAsCUDA() {}
   HIPGuardImplMasqueradingAsCUDA(DeviceType t) {
-    AT_ASSERT(t == DeviceType::CUDA);
+    TORCH_INTERNAL_ASSERT(t == DeviceType::CUDA);
   }
   DeviceType type() const override {
     return DeviceType::CUDA;
   }
   Device exchangeDevice(Device d) const override {
-    AT_ASSERT(d.type() == DeviceType::CUDA);
+    TORCH_INTERNAL_ASSERT(d.type() == DeviceType::CUDA);
     Device old_device = getDevice();
     if (old_device.index() != d.index()) {
       C10_HIP_CHECK(hipSetDevice(d.index()));
@@ -74,14 +75,17 @@ struct HIPGuardImplMasqueradingAsCUDA final : public c10::impl::DeviceGuardImplI
     return Device(DeviceType::CUDA, device);
   }
   void setDevice(Device d) const override {
-    AT_ASSERT(d.type() == DeviceType::CUDA);
+    TORCH_INTERNAL_ASSERT(d.type() == DeviceType::CUDA);
     C10_HIP_CHECK(hipSetDevice(d.index()));
   }
   void uncheckedSetDevice(Device d) const noexcept override {
-    hipSetDevice(d.index());
+    C10_HIP_CHECK_WARN(hipSetDevice(d.index()));
   }
   Stream getStream(Device d) const noexcept override {
-    return getCurrentHIPStreamMasqueradingAsCUDA().unwrap();
+    return getCurrentHIPStreamMasqueradingAsCUDA(d.index()).unwrap();
+  }
+  Stream getDefaultStream(Device d) const override {
+    return getDefaultHIPStreamMasqueradingAsCUDA(d.index());
   }
   Stream exchangeStream(Stream s) const noexcept override {
     HIPStreamMasqueradingAsCUDA cs(s);
@@ -93,6 +97,93 @@ struct HIPGuardImplMasqueradingAsCUDA final : public c10::impl::DeviceGuardImplI
     int deviceCnt;
     C10_HIP_CHECK(hipGetDeviceCount(&deviceCnt));
     return deviceCnt;
+  }
+
+  // Event-related functions
+  // Note: hipEventCreateWithFlags should be called on the same device as
+  //  the recording stream's device.
+  void createEvent(
+    hipEvent_t* hip_event,
+    const EventFlag flag) const {
+    // Maps PyTorch's Event::Flag to HIP flag
+    auto hip_flag = hipEventDefault;
+    switch (flag) {
+      case EventFlag::PYTORCH_DEFAULT:
+      case EventFlag::HIP_EVENT_DISABLE_TIMING:
+        hip_flag = hipEventDisableTiming;
+        break;
+      case EventFlag::BACKEND_DEFAULT:
+      case EventFlag::HIP_EVENT_DEFAULT:
+        hip_flag = hipEventDefault;
+        break;
+      default:
+        TORCH_CHECK(false, "HIP event received unknown flag");
+    }
+
+    C10_HIP_CHECK(hipEventCreateWithFlags(hip_event, hip_flag));
+  }
+
+  void destroyEvent(
+    void* event,
+    const DeviceIndex device_index) const noexcept override {
+    if (!event) return;
+    auto hip_event = static_cast<hipEvent_t>(event);
+    int orig_device;
+    C10_HIP_CHECK_WARN(hipGetDevice(&orig_device));
+    C10_HIP_CHECK_WARN(hipSetDevice(device_index));
+    C10_HIP_CHECK_WARN(hipEventDestroy(hip_event));
+    C10_HIP_CHECK_WARN(hipSetDevice(orig_device));
+  }
+
+  void record(void** event,
+    const Stream& stream,
+    const DeviceIndex device_index,
+    const EventFlag flag) const override {
+    TORCH_CHECK(device_index == -1 || device_index == stream.device_index(),
+      "Event device index ",
+      device_index,
+      " does not match recording stream's device index ",
+      stream.device_index(),
+      ".");
+
+    hipEvent_t hip_event = static_cast<hipEvent_t>(*event);
+    HIPStreamMasqueradingAsCUDA hip_stream{stream};
+
+    // Moves to stream's device to record
+    const auto orig_device = getDevice();
+    setDevice(stream.device());
+
+    // Creates the event (lazily)
+    if (!hip_event) createEvent(&hip_event, flag);
+    C10_HIP_CHECK(hipEventRecord(hip_event, hip_stream));
+    // Makes the void* point to the (possibly just allocated) HIP event
+    *event = hip_event;
+
+    // Resets device
+    setDevice(orig_device);
+  }
+
+  void block(
+    void* event,
+    const Stream& stream) const override {
+    if (!event) return;
+    hipEvent_t hip_event = static_cast<hipEvent_t>(event);
+    HIPStreamMasqueradingAsCUDA hip_stream{stream};
+    const auto orig_device = getDevice();
+    setDevice(stream.device());
+    C10_HIP_CHECK(hipStreamWaitEvent(
+      hip_stream,
+      hip_event,
+      /*flags (must be zero)=*/ 0));
+    setDevice(orig_device);
+  }
+
+  bool queryEvent(void* event) const override {
+    if (!event) return true;
+    hipEvent_t hip_event = static_cast<hipEvent_t>(event);
+    const hipError_t err = hipEventQuery(hip_event);
+    if (err != hipErrorNotReady) C10_HIP_CHECK(err);
+    return (err == hipSuccess);
   }
 };
 

@@ -5,15 +5,13 @@
 #include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/ir/ir.h>
 
 #include <list>
 #include <vector>
 
 namespace torch {
 namespace jit {
-
-using ::c10::ProfiledTensorTypePtr;
 
 // Replaces prim::Guard nodes with prim::BailOut nodes and
 // computes sets of inputs needed to resume execution at

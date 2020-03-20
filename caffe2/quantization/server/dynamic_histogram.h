@@ -11,8 +11,6 @@ namespace dnnlowp {
  * with an exception that (nbins - 1)th bin contains
  * [(nbins-1)*bin_width, nbins*bin_width]
  *
- * Make sure to call Finalize before GetHistogram to reduce per-thread
- * histogram.
  */
 class Histogram {
  public:
@@ -23,10 +21,7 @@ class Histogram {
 
   void Add(float f, uint64_t cnt = 1);
   /**
-   * This version collects histogram with multiple threads using per-thread
-   * histogram with privatization.
-   * We should call Finalize before GetHistogram to reduce per-thread
-   * histogram.
+   * This version collects histogram with single thread
    */
   void Add(const float* f, int len);
 
@@ -37,12 +32,6 @@ class Histogram {
     return max_;
   }
 
-  /**
-   * Reduce per-thread histogram. Need to call this before GetHistogram when
-   * the version of Add with multiple threads was used.
-   */
-  void Finalize();
-
   const std::vector<uint64_t>* GetHistogram() const {
     return &histogram_;
   }
@@ -50,7 +39,6 @@ class Histogram {
  private:
   float min_, max_;
   std::vector<uint64_t> histogram_;
-  std::vector<uint64_t> per_thread_histogram_;
 };
 
 /// An equi-width histogram where the spread of bins change over time when
@@ -68,13 +56,13 @@ class DynamicHistogram {
 
  private:
   /// Dynamic histogram is implemented by the series of static histograms
-  /// histograms_[i+1] is a new histogram "expanded" from histograms_[i] when
+  /// and expands from the old histogram to new histogram when
   /// we see a new extremum.
   /// An invariant: the beginning of the first bin of histograms_[i] exactly
   /// matches with the beginning of a bin in histograms_[i+1]. The end of the
   /// last bin of histograms_[i] exactly matches with the end of a bin in
   /// histograms_[i+1].
-  std::vector<Histogram> histograms_;
+  std::unique_ptr<Histogram> histogram_;
   int nbins_;
   float min_, max_;
 

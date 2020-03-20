@@ -8,6 +8,7 @@ from torch.distributions import constraints
 from torch.distributions.utils import (_sum_rightmost, broadcast_all,
                                        lazy_property)
 from torch.nn.functional import pad
+from torch.nn.functional import softplus
 
 __all__ = [
     'AbsTransform',
@@ -18,6 +19,7 @@ __all__ = [
     'LowerCholeskyTransform',
     'PowerTransform',
     'SigmoidTransform',
+    'TanhTransform',
     'SoftmaxTransform',
     'StackTransform',
     'StickBreakingTransform',
@@ -32,7 +34,7 @@ class Transform(object):
     det jacobians. They are primarily used in
     :class:`torch.distributions.TransformedDistribution`.
 
-    Caching is useful for tranforms whose inverses are either expensive or
+    Caching is useful for transforms whose inverses are either expensive or
     numerically unstable. Note that care must be taken with memoized values
     since the autograd graph may be reversed. For example while the following
     works with or without caching::
@@ -373,6 +375,46 @@ class SigmoidTransform(Transform):
         return -F.softplus(-x) - F.softplus(x)
 
 
+class TanhTransform(Transform):
+    r"""
+    Transform via the mapping :math:`y = \tanh(x)`.
+
+    It is equivalent to
+    ```
+    ComposeTransform([AffineTransform(0., 2.), SigmoidTransform(), AffineTransform(-1., 2.)])
+    ```
+    However this might not be numerically stable, thus it is recommended to use `TanhTransform`
+    instead.
+
+    Note that one should use `cache_size=1` when it comes to `NaN/Inf` values.
+
+    """
+    domain = constraints.real
+    codomain = constraints.interval(-1.0, 1.0)
+    bijective = True
+    sign = +1
+
+    @staticmethod
+    def atanh(x):
+        return 0.5 * (x.log1p() - (-x).log1p())
+
+    def __eq__(self, other):
+        return isinstance(other, TanhTransform)
+
+    def _call(self, x):
+        return x.tanh()
+
+    def _inverse(self, y):
+        # We do not clamp to the boundary here as it may degrade the performance of certain algorithms.
+        # one should use `cache_size=1` instead
+        return self.atanh(y)
+
+    def log_abs_det_jacobian(self, x, y):
+        # We use a formula that is more numerically stable, see details in the following link
+        # https://github.com/tensorflow/probability/blob/master/tensorflow_probability/python/bijectors/tanh.py#L69-L80
+        return 2. * (math.log(2.) - x - softplus(-2. * x))
+
+
 class AbsTransform(Transform):
     r"""
     Transform via the mapping :math:`y = |x|`.
@@ -544,19 +586,11 @@ class LowerCholeskyTransform(Transform):
     def __eq__(self, other):
         return isinstance(other, LowerCholeskyTransform)
 
-    def _call_on_event(self, x):
-        return x.tril(-1) + x.diag().exp().diag()
-
-    def _inverse_on_event(self, y):
-        return y.tril(-1) + y.diag().log().diag()
-
     def _call(self, x):
-        flat_x = x.reshape((-1,) + x.shape[-2:])
-        return torch.stack([self._call_on_event(flat_x[i]) for i in range(flat_x.size(0))]).view(x.shape)
+        return x.tril(-1) + x.diagonal(dim1=-2, dim2=-1).exp().diag_embed()
 
     def _inverse(self, y):
-        flat_y = y.reshape((-1,) + y.shape[-2:])
-        return torch.stack([self._inverse_on_event(flat_y[i]) for i in range(flat_y.size(0))]).view(y.shape)
+        return y.tril(-1) + y.diagonal(dim1=-2, dim2=-1).log().diag_embed()
 
 
 class CatTransform(Transform):

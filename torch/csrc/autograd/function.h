@@ -115,6 +115,10 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     RECORD_FUNCTION(
         this, std::vector<c10::IValue>(inputs.begin(), inputs.end()));
 
+    // In the first iteration of named tensors, autograd ignores names and
+    // operates on unnamed tensors. In the long term, autograd should
+    // probably operate with names.
+    at::NoNamesGuard no_names_guard;
     return apply(std::move(inputs));
   }
 
@@ -130,11 +134,11 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   /// Adds the type and shape metadata for a new input. Returns the index of
   /// of the new input.
   uint32_t add_input_metadata(
-    const at::DeprecatedTypeProperties& type
+    const at::TensorOptions& options
   , at::IntArrayRef shape
   , at::Device device) noexcept {
     uint32_t input_nr = input_metadata_.size();
-    input_metadata_.emplace_back(type, shape, device);
+    input_metadata_.emplace_back(options, shape, device);
     return input_nr;
   }
 
@@ -157,6 +161,23 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
 
   const InputMetadata& input_metadata(size_t index) const {
     return input_metadata_[index];
+  }
+
+  /**
+   * Note: Function Streams
+   * A function's stream (for a given device type) is the stream of the first
+   * element of its input buffer on a device of that type.
+   *
+   * If all elements are on the same device they MUST share a stream. If
+   * elements are on different devices (across multiple GPUs, for example)
+   * they may have different streams.
+   */
+  c10::optional<c10::Stream> stream(const c10::DeviceType device_type) {
+    for (const auto& metadata : input_metadata_) {
+      if (metadata.device().type() == device_type) return metadata.stream();
+    }
+
+    return c10::nullopt;
   }
 
   void clear_input_metadata() {
@@ -353,7 +374,7 @@ struct MakeNextFunctionList : IterArgs<MakeNextFunctionList> {
   using IterArgs<MakeNextFunctionList>::operator();
   void operator()(const Variable& variable) {
     if (variable.defined()) {
-      next_edges.push_back(variable.gradient_edge());
+      next_edges.push_back(impl::gradient_edge(variable));
     } else {
       next_edges.emplace_back();
     }
@@ -377,7 +398,7 @@ inline void create_gradient_edge(
     std::shared_ptr<Node> function) {
   // Copy before move.
   const auto input_nr = function->add_input_metadata(variable);
-  variable.set_gradient_edge({std::move(function), input_nr});
+  impl::set_gradient_edge(variable, {std::move(function), input_nr});
 }
 
 /// Return true if any of the variables in the list require a gradient.

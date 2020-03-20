@@ -6,6 +6,7 @@ Tensors
 ----------------------------------
 .. autofunction:: is_tensor
 .. autofunction:: is_storage
+.. autofunction:: is_complex
 .. autofunction:: is_floating_point
 .. autofunction:: set_default_dtype
 .. autofunction:: get_default_dtype
@@ -49,8 +50,11 @@ Creation Ops
 .. autofunction:: eye
 .. autofunction:: empty
 .. autofunction:: empty_like
+.. autofunction:: empty_strided
 .. autofunction:: full
 .. autofunction:: full_like
+.. autofunction:: quantize_per_tensor
+.. autofunction:: quantize_per_channel
 
 Indexing, Slicing, Joining, Mutating Ops
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -90,13 +94,17 @@ Random sampling
 .. autofunction:: set_rng_state
 .. autoattribute:: torch.default_generator
    :annotation:  Returns the default CPU torch.Generator
-.. autoattribute:: torch.cuda.default_generators
-   :annotation:  If cuda is available, returns a tuple of default CUDA torch.Generator-s.
-                 The number of CUDA torch.Generator-s returned is equal to the number of
-                 GPUs available in the system.
+
+.. The following doesn't actually seem to exist.
+   https://github.com/pytorch/pytorch/issues/27780
+   .. autoattribute:: torch.cuda.default_generators
+      :annotation:  If cuda is available, returns a tuple of default CUDA torch.Generator-s.
+                    The number of CUDA torch.Generator-s returned is equal to the number of
+                    GPUs available in the system.
 .. autofunction:: bernoulli
 .. autofunction:: multinomial
 .. autofunction:: normal
+.. autofunction:: poisson
 .. autofunction:: rand
 .. autofunction:: rand_like
 .. autofunction:: randint
@@ -148,8 +156,7 @@ The context managers :func:`torch.no_grad`, :func:`torch.enable_grad`, and
 :func:`torch.set_grad_enabled` are helpful for locally disabling and enabling
 gradient computation. See :ref:`locally-disable-grad` for more details on
 their usage.  These context managers are thread local, so they won't
-work if you send work to another thread using the :module:`threading`
-module, etc.
+work if you send work to another thread using the ``threading`` module, etc.
 
 Examples::
 
@@ -175,6 +182,9 @@ Examples::
   >>> y.requires_grad
   False
 
+.. autofunction:: no_grad
+.. autofunction:: enable_grad
+.. autofunction:: set_grad_enabled
 
 Math operations
 ----------------------------------
@@ -187,11 +197,17 @@ Pointwise Ops
 .. autofunction:: add
 .. autofunction:: addcdiv
 .. autofunction:: addcmul
+.. autofunction:: angle
 .. autofunction:: asin
 .. autofunction:: atan
 .. autofunction:: atan2
+.. autofunction:: bitwise_not
+.. autofunction:: bitwise_and
+.. autofunction:: bitwise_or
+.. autofunction:: bitwise_xor
 .. autofunction:: ceil
 .. autofunction:: clamp
+.. autofunction:: conj
 .. autofunction:: cos
 .. autofunction:: cosh
 .. autofunction:: div
@@ -202,17 +218,26 @@ Pointwise Ops
 .. autofunction:: exp
 .. autofunction:: expm1
 .. autofunction:: floor
+.. autofunction:: floor_divide
 .. autofunction:: fmod
 .. autofunction:: frac
+.. autofunction:: imag
 .. autofunction:: lerp
+.. autofunction:: lgamma
 .. autofunction:: log
 .. autofunction:: log10
 .. autofunction:: log1p
 .. autofunction:: log2
+.. autofunction:: logical_and
+.. autofunction:: logical_not
+.. autofunction:: logical_or
+.. autofunction:: logical_xor
 .. autofunction:: mul
 .. autofunction:: mvlgamma
 .. autofunction:: neg
+.. autofunction:: polygamma
 .. autofunction:: pow
+.. autofunction:: real
 .. autofunction:: reciprocal
 .. autofunction:: remainder
 .. autofunction:: round
@@ -222,8 +247,10 @@ Pointwise Ops
 .. autofunction:: sin
 .. autofunction:: sinh
 .. autofunction:: sqrt
+.. autofunction:: square
 .. autofunction:: tan
 .. autofunction:: tanh
+.. autofunction:: true_divide
 .. autofunction:: trunc
 
 
@@ -231,8 +258,6 @@ Reduction Ops
 ~~~~~~~~~~~~~~~~~~~~~~
 .. autofunction:: argmax
 .. autofunction:: argmin
-.. autofunction:: cumprod
-.. autofunction:: cumsum
 .. autofunction:: dist
 .. autofunction:: logsumexp
 .. autofunction:: mean
@@ -288,8 +313,13 @@ Other Operations
 .. autofunction:: bincount
 .. autofunction:: broadcast_tensors
 .. autofunction:: cartesian_prod
+.. autofunction:: cdist
 .. autofunction:: combinations
 .. autofunction:: cross
+.. autofunction:: cummax
+.. autofunction:: cummin
+.. autofunction:: cumprod
+.. autofunction:: cumsum
 .. autofunction:: diag
 .. autofunction:: diag_embed
 .. autofunction:: diagflat
@@ -320,20 +350,19 @@ BLAS and LAPACK Operations
 .. autofunction:: addr
 .. autofunction:: baddbmm
 .. autofunction:: bmm
-.. autofunction:: bitwise_not
 .. autofunction:: chain_matmul
 .. autofunction:: cholesky
 .. autofunction:: cholesky_inverse
 .. autofunction:: cholesky_solve
 .. autofunction:: dot
 .. autofunction:: eig
-.. autofunction:: gels
 .. autofunction:: geqrf
 .. autofunction:: ger
 .. autofunction:: inverse
 .. autofunction:: det
 .. autofunction:: logdet
 .. autofunction:: slogdet
+.. autofunction:: lstsq
 .. autofunction:: lu
 .. autofunction:: lu_solve
 .. autofunction:: lu_unpack
@@ -348,10 +377,17 @@ BLAS and LAPACK Operations
 .. autofunction:: qr
 .. autofunction:: solve
 .. autofunction:: svd
+.. autofunction:: svd_lowrank
+.. autofunction:: pca_lowrank
 .. autofunction:: symeig
+.. autofunction:: lobpcg
 .. autofunction:: trapz
 .. autofunction:: triangular_solve
+
 
 Utilities
 ----------------------------------
 .. autofunction:: compiled_with_cxx11_abi
+.. autofunction:: result_type
+.. autofunction:: can_cast
+.. autofunction:: promote_types

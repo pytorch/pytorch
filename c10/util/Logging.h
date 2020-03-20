@@ -47,6 +47,13 @@ C10_DECLARE_bool(caffe2_use_fatal_for_enforce);
 #define C10_LOG_FIRST_N(severity, n) LOG(severity)
 #endif
 
+// Same for LOG_EVERY_N
+#ifdef LOG_EVERY_N
+#define C10_LOG_EVERY_N(severity, n) LOG_EVERY_N(severity, n)
+#else
+#define C10_LOG_EVERY_N(severity, n) LOG(severity)
+#endif
+
 namespace c10 {
 
 using std::string;
@@ -55,7 +62,14 @@ using std::string;
 C10_API bool InitCaffeLogging(int* argc, char** argv);
 C10_API void UpdateLoggingLevelsFromFlags();
 
-C10_API C10_NORETURN void ThrowEnforceNotMet(
+[[noreturn]] C10_API void ThrowEnforceNotMet(
+    const char* file,
+    const int line,
+    const char* condition,
+    const std::string& msg,
+    const void* caller = nullptr);
+
+[[noreturn]] C10_API void ThrowEnforceFiniteNotMet(
     const char* file,
     const int line,
     const char* condition,
@@ -91,6 +105,14 @@ using EnforceNotMet = ::c10::Error;
           __FILE__, __LINE__, #condition, ::c10::str(__VA_ARGS__)); \
     }                                                               \
   } while (false)
+
+#define CAFFE_ENFORCE_FINITE(condition, ...)                        \
+    do {                                                            \
+      if (C10_UNLIKELY(!(condition))) {                             \
+        ::c10::ThrowEnforceFiniteNotMet(                            \
+          __FILE__, __LINE__, #condition, ::c10::str(__VA_ARGS__)); \
+      }                                                             \
+    } while (false)
 
 #define CAFFE_ENFORCE_WITH_CALLER(condition, ...)                         \
   do {                                                                    \

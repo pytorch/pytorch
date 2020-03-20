@@ -1,10 +1,13 @@
 #include <torch/csrc/autograd/record_function.h>
 #include <torch/csrc/autograd/function.h>
-
+#include <torch/csrc/autograd/profiler.h>
+#include <torch/csrc/utils/memory.h>
 #include <cstdlib>
 #include <random>
 
-namespace torch { namespace autograd { namespace profiler {
+namespace torch {
+namespace autograd {
+namespace profiler {
 
 namespace {
 
@@ -26,8 +29,7 @@ class CallbackManager {
 
   bool shouldRunSampledCallbacks() {
     return (num_sampled_callbacks > 0) &&
-        (!sampling_prop_set ||
-        (sample_zero_one() < sampling_prob));
+        (!sampling_prop_set || (sample_zero_one() < sampling_prob));
   }
 
   void pushCallback(
@@ -82,12 +84,17 @@ class CallbackManager {
   double sampling_prob = 1.0;
 
   static double sample_zero_one() {
-    static thread_local auto gen = std::mt19937(std::random_device()());
+    static thread_local auto gen =
+        torch::make_unique<std::mt19937>(std::random_device()());
     std::uniform_real_distribution<double> dist(0.0, 1.0);
-    return dist(gen);
+    return dist(*gen);
   }
 };
 
+std::mutex next_thread_id_mutex_;
+uint16_t next_thread_id_ = 0;
+thread_local uint16_t current_thread_id_ = 0;
+// thread_local_func_ points to the currently active RecordFunction.
 thread_local RecordFunction* thread_local_func_ = nullptr;
 
 CallbackManager& manager() {
@@ -115,10 +122,7 @@ void pushCallback(
     bool needs_inputs,
     bool sampled) {
   manager().pushCallback(
-      std::move(start),
-      std::move(end),
-      needs_inputs,
-      sampled);
+      std::move(start), std::move(end), needs_inputs, sampled);
 }
 
 void popCallback() {
@@ -137,6 +141,34 @@ bool hasNonSampledCallbacks() {
   return manager().hasNonSampledCallbacks();
 }
 
+void runBeforeCallbacks(RecordFunction* rf, const std::string& funcName) {
+  TORCH_INTERNAL_ASSERT(
+      rf != nullptr,
+      "The RecordFunction passed to before callbacks should not be null.");
+  if (hasCallbacks()) {
+    auto run_samples = shouldRunSampledCallbacks();
+    if (run_samples || hasNonSampledCallbacks()) {
+      rf->_setRunSampled(run_samples);
+      rf->before(funcName);
+    }
+  }
+}
+
+void RecordFunction::_setCurrent() {
+  parent_ = thread_local_func_;
+  thread_local_func_ = this;
+  is_current_ = true;
+}
+
+/* static */
+uint16_t RecordFunction::getCurrentThreadId() {
+  if (!current_thread_id_) {
+    // happens only once per thread
+    std::lock_guard<std::mutex> guard(next_thread_id_mutex_);
+    current_thread_id_ = ++next_thread_id_;
+  }
+  return current_thread_id_;
+}
 
 void RecordFunction::before(const char* name, int64_t sequence_nr) {
   if (!hasCallbacks()) {
@@ -176,25 +208,46 @@ void RecordFunction::before(Node* fn, int64_t sequence_nr) {
 }
 
 void RecordFunction::processCallbacks() {
-  parent_ = thread_local_func_;
-  thread_local_func_ = this;
-
+  threadId_ = getCurrentThreadId();
   for (size_t idx = 0; idx < manager().start_callbacks.size(); ++idx) {
     if (!manager().is_callback_sampled[idx] || run_sampled_) {
-      manager().start_callbacks[idx](*this);
+      try {
+        manager().start_callbacks[idx](*this);
+      } catch (const std::exception &e) {
+        LOG(INFO) << "Exception in RecordFunction start observer: " << e.what();
+      }
     }
   }
 }
 
 RecordFunction::~RecordFunction() {
+  end();
+}
+
+void RecordFunction::end() {
   if (initialized_) {
     for (size_t idx = 0; idx < manager().end_callbacks.size(); ++idx) {
       if (!manager().is_callback_sampled[idx] || run_sampled_) {
-        manager().end_callbacks[idx](*this);
+        try {
+          manager().end_callbacks[idx](*this);
+        } catch (const std::exception &e) {
+          LOG(INFO) << "Exception in RecordFunction end observer: " << e.what();
+        }
       }
     }
+    initialized_ = false;
+  }
+  if (is_current_) {
     thread_local_func_ = parent_;
+    is_current_ = false;
   }
 }
 
-}}}
+/* static */
+RecordFunction* RecordFunction::current() {
+  return thread_local_func_;
+}
+
+} // namespace profiler
+} // namespace autograd
+} // namespace torch

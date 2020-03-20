@@ -43,6 +43,25 @@ namespace detail {
 
     return res >> 16;
   }
+
+  inline C10_HOST_DEVICE uint16_t round_to_nearest_even(float src) {
+#ifdef __HIP_PLATFORM_HCC__
+    if(src != src) {
+#else
+    if (std::isnan(src)) {
+#endif
+      return UINT16_C(0x7FC0);
+    } else {
+      union {
+        uint32_t U32;
+        float F32;
+      };
+
+      F32 = src;
+      uint32_t rounding_bias = ((U32 >> 16) & 1) + UINT32_C(0x7FFF);
+      return static_cast<uint16_t>((U32 + rounding_bias) >> 16);
+    }
+  }
 } // namespace detail
 
 struct alignas(2) BFloat16 {

@@ -4,7 +4,7 @@
 
 #define RUN(TYPE, DIMS, REAL)                                           \
   THCudaTensor_gatherKernel<TYPE, REAL, DIMS>                                \
-  <<<grid, block, 0, THCState_getCurrentStreamOnDevice(state, curDevice)>>>(               \
+  <<<grid, block, 0, c10::cuda::getCurrentCUDAStream(curDevice)>>>(               \
     tensorInfo, srcInfo, indexInfo, dim, (TYPE)totalElements);
 
 void THCTensor_(gather)(THCState* state, THCTensor *tensor,
@@ -12,6 +12,7 @@ void THCTensor_(gather)(THCState* state, THCTensor *tensor,
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, tensor, src));
   THCAssertSameGPU(THCudaLongTensor_checkGPU(state, 1, index));
 
+  dim = at::maybe_wrap_dim(dim, src);
   THArgCheck(THCudaLongTensor_nDimensionLegacyNoScalars(state, index) == THCTensor_(nDimensionLegacyNoScalars)(state, src), 4,
              "Index tensor must have same dimensions as input tensor");
   THArgCheck(tensor->sizes().equals(index->sizes()), 4,
@@ -100,13 +101,14 @@ void THCTensor_(gather)(THCState* state, THCTensor *tensor,
 
 #define RUN(TYPE, DIMS, REAL)                                           \
   THCudaTensor_scatterKernel<TYPE, REAL, DIMS>                               \
-  <<<grid, block, 0, THCState_getCurrentStreamOnDevice(state, curDevice)>>>(               \
+  <<<grid, block, 0, c10::cuda::getCurrentCUDAStream(curDevice)>>>(               \
     tensorInfo, srcInfo, indexInfo, dim, (TYPE)totalElements);
 
 void THCTensor_(scatter)(THCState* state, THCTensor *tensor, int dim, THCudaLongTensor *index, THCTensor *src) {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, tensor, src));
   THCAssertSameGPU(THCudaLongTensor_checkGPU(state, 1, index));
 
+  dim = at::maybe_wrap_dim(dim, tensor);
   int index_ndim_legacy_all = THCudaLongTensor_nDimensionLegacyAll(state, index);
   THArgCheck(dim >= 0 && dim < THCTensor_(nDimensionLegacyNoScalars)(state, tensor), 2,
              "Index dimension is out of bounds");
@@ -198,13 +200,14 @@ void THCTensor_(scatter)(THCState* state, THCTensor *tensor, int dim, THCudaLong
 
 #define RUN(TYPE, DIMS, REAL)                                           \
   THCudaTensor_scatterAddKernel<TYPE, REAL, DIMS>                               \
-  <<<grid, block, 0, THCState_getCurrentStreamOnDevice(state, curDevice)>>>(               \
+  <<<grid, block, 0, c10::cuda::getCurrentCUDAStream(curDevice)>>>(               \
     tensorInfo, srcInfo, indexInfo, dim, (TYPE)totalElements);
 
 void THCTensor_(scatterAdd)(THCState* state, THCTensor *tensor, int dim, THCudaLongTensor *index, THCTensor *src) {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, tensor, src));
   THCAssertSameGPU(THCudaLongTensor_checkGPU(state, 1, index));
 
+  dim = at::maybe_wrap_dim(dim, tensor);
   THArgCheck(dim >= 0 && dim < THCTensor_(nDimensionLegacyNoScalars)(state, tensor), 2,
              "Index dimension is out of bounds");
   int index_ndim_legacy_all = THCudaLongTensor_nDimensionLegacyAll(state, index);
@@ -297,7 +300,7 @@ void THCTensor_(scatterAdd)(THCState* state, THCTensor *tensor, int dim, THCudaL
 
 #define RUN(TYPE, DIMS, REAL)                                           \
   THCudaTensor_scatterFillKernel<TYPE, REAL, DIMS>                           \
-      <<<grid, block, 0, THCState_getCurrentStreamOnDevice(state, curDevice)>>>(      \
+      <<<grid, block, 0, c10::cuda::getCurrentCUDAStream(curDevice)>>>(      \
           tensorInfo, indexInfo, value, dim, (TYPE)totalElements);
 
 void
@@ -306,6 +309,7 @@ THCTensor_(scatterFill)(THCState* state, THCTensor *tensor,
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, tensor));
   THCAssertSameGPU(THCudaLongTensor_checkGPU(state, 1, index));
 
+  dim = at::maybe_wrap_dim(dim, tensor);
   int index_ndim_legacy_all = THCudaLongTensor_nDimensionLegacyAll(state, index);
   THArgCheck(dim >= 0 && dim < THCTensor_(nDimensionLegacyNoScalars)(state, tensor), 2,
              "Index dimension is out of bounds");
