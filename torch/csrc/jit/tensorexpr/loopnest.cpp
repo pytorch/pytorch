@@ -403,6 +403,7 @@ class FunctionInliner : public IRMutator {
     }
   }
 
+ private:
   std::unordered_map<const Var*, const Expr*> inline_mapping_;
   std::vector<Function*> funcs_;
   std::unordered_set<const Var*> func_var_set_;
