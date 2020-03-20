@@ -29,19 +29,19 @@ for platform in ${CONDA_PLATFORMS}; do
     ))
 done
 
-my_wget() {
+my_curl() {
     local dl_url=$1
     local start=$(date +%s)
-    wget -c -q "${dl_url}"
+    curl -fsSL -O "${dl_url}"
     local end=$(date +%s)
     local diff=$(( end - start ))
     echo "+ ${dl_url} took ${diff}s"
 }
-export -f my_wget
+export -f my_curl
 
 # Download all packages in parallel
 printf '%s\n' "${pkgs_to_download[@]}" \
-    | xargs -P 10 -I % bash -c '(declare -t my_wget); my_wget %'
+    | xargs -P 10 -I % bash -c '(declare -t my_curl); my_curl %'
 
 # dry run by default
 DRY_RUN=${DRY_RUN:-enabled}
