@@ -14226,6 +14226,23 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             self.assertFalse(torch.isnan(ma[i]), "max(a, b): {}, a: {}, b: {}".format(ma[i], a[i], b[i]))
             self.assertFalse(torch.isnan(mi[i]), "min(a, b): {}, a: {}, b: {}".format(mi[i], a[i], b[i]))
 
+    @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @dtypes(torch.float, torch.double)(
+    def test_min_max_empty_element(self, device, dtype):
+        a = torch.rand(0, dtype=dtype, device=device)
+        b = torch.rand(0, 5, dtype=dtype, device=device)
+        c = torch.rand(0, 5, 10, dtype=dtype, device=device)
+        d = torch.rand(0, 5, 10, 15, dtype=dtype, device=device)
+        e = torch.rand(0, 5, 10, 15, 20, dtype=dtype, device=device)
+
+        ident_err = 'operation does not have an identity'
+        self.assertRaisesRegex(RuntimeError, ident_err, a.max())
+        
+        self.assertEqual(b.max(1).values.nelement(), 0)
+        self.assertEqual(c.max(1).values.nelement(), 0)
+        self.assertEqual(d.max(2).values.nelement(), 0)
+        self.assertEqual(e.max(3).values.nelement(), 0)
+        
     @onlyCPU
     @dtypes(*torch.testing.get_all_math_dtypes('cpu'))
     def test_threshold(self, device, dtype):
