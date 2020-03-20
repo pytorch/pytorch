@@ -1153,9 +1153,7 @@ class ShapePropagator {
             "aten::min(Tensor self) -> Tensor",
             "aten::median(Tensor self) -> Tensor",
             "aten::norm(Tensor self, Scalar p) -> Tensor",
-            "aten::std(Tensor self, bool unbiased) -> Tensor",
             "aten::trace(Tensor self) -> Tensor",
-            "aten::var(Tensor self, bool unbiased) -> Tensor",
             "aten::all(Tensor self) -> Tensor",
             "aten::any(Tensor self) -> Tensor",
         },
@@ -1168,7 +1166,33 @@ class ShapePropagator {
 
     // Requirements:
     //   dims           : 0
-    //   scalar type    : dtype if specified, else preserved
+    //   scalar type    : promoted to floating if integral, else preserved
+    //   device         : preserved
+    //   tensor inputs  : 1
+    //   tensor outputs : 1
+    // Additionally:
+    //   - First input should be the only tensor input
+    static const register_formula_for floating_reduce_ops {
+      {
+        "aten::std(Tensor self, bool unbiased) -> Tensor",
+        "aten::var(Tensor self, bool unbiased) -> Tensor",
+      },
+      [](Node* node) -> type_vec_t {
+        if (auto type = node->input(0)->type()->cast<TensorType>()) {
+          auto ret = type->withDim(0);
+          if (isIntegralType(*(type->scalarType()), /*includeBool=*/true)) {
+            const auto default_dtype = at::typeMetaToScalarType(caffe2::get_default_dtype());
+            return {ret->withScalarType(default_dtype)};
+          }
+          return {ret};
+        }
+        return {};
+      }
+    };
+
+    // Requirements:
+    //   dims           : 0
+    //   scalar type    : dtype if specified, promoted to floating if integral, else preserved
     //   device         : preserved
     //   tensor inputs  : 1
     //   tensor outputs : 1
@@ -1182,8 +1206,11 @@ class ShapePropagator {
         at::optional<IValue> maybe_dtype_option = node->get(attr::dtype);
         if (auto type = node->input(0)->type()->cast<TensorType>()) {
           auto ret = type->withDim(0);
-          if(maybe_dtype_option && !maybe_dtype_option->isNone()) {
+          if (maybe_dtype_option && !maybe_dtype_option->isNone()) {
             return {ret->withScalarType(maybe_dtype_option->toScalarType())};
+          } else if (isIntegralType(*(type->scalarType()), /*includeBool=*/true)) {
+            const auto default_dtype = at::typeMetaToScalarType(caffe2::get_default_dtype());
+            return {ret->withScalarType(default_dtype)};
           } else {
             return {ret};
           }

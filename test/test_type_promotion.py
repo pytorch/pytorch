@@ -1,6 +1,7 @@
 from functools import wraps
 import torch
 import itertools
+import collections
 from torch.testing._internal.common_utils import TestCase, run_tests, load_tests
 from torch.testing._internal.common_device_type import (instantiate_device_type_tests, onlyOnCPUAndCUDA,
                                                         dtypes, dtypesIfCUDA)
@@ -592,108 +593,6 @@ class TestTypePromotion(TestCase):
         casting_result = dividend.to(torch.get_default_dtype()) / 2
         self.assertEqual(casting_result, torch.true_divide(dividend_sparse, 2).to_dense())
 
-    _floating_reductions = [
-        (torch.mean, torch.Tensor.mean),
-        (torch.std, torch.Tensor.std),
-        (torch.var, torch.Tensor.var),
-        (torch.logsumexp, torch.Tensor.logsumexp)
-    ]
-
-    _fr_promoting_in_types = [
-        torch.bool, torch.long
-    ]
-
-    _fr_nonpromoting_in_types = [
-        torch.float, torch.complex64
-    ]
-
-    _fr_out_types = (torch.float, torch.double)
-
-    @onlyOnCPUAndCUDA
-    @float_double_default_dtype
-    def test_floating_reductions_promotion(self, device):
-        for fn, meth in self._floating_reductions:
-            # Skips logsumexp, which requires dim
-            if fn is torch.logsumexp:
-                continue
-            for in_type, out_type in itertools.product(self._fr_promoting_in_types,
-                                                       self._fr_out_types):
-                t = torch.tensor((2, 4), device=device, dtype=in_type)
-                self.assertEqual(fn(t).dtype, torch.get_default_dtype())
-                self.assertEqual(meth(t).dtype, torch.get_default_dtype())
-
-    @onlyOnCPUAndCUDA
-    @float_double_default_dtype
-    def test_floating_reductions_promotion_dim(self, device):
-        for fn, meth in self._floating_reductions:
-            for in_type, out_type in itertools.product(self._fr_promoting_in_types,
-                                                       self._fr_out_types):
-                t = torch.tensor((2, 4), device=device, dtype=in_type)
-                self.assertEqual(fn(t, dim=0).dtype, torch.get_default_dtype())
-                self.assertEqual(meth(t, dim=0).dtype, torch.get_default_dtype())
-
-                o = torch.empty((2,), device=device, dtype=in_type)
-                with self.assertRaises(RuntimeError):
-                    fn(t, dim=0, out=o)
-
-                o = torch.empty((2,), device=device, dtype=out_type)
-                self.assertEqual(fn(t, dim=0, out=o).dtype, o.dtype)
-
-    @onlyOnCPUAndCUDA
-    def test_floating_reductions_preserve_float(self, device):
-        for fn, meth in self._floating_reductions:
-            # Skips logsumexp, which requires dim
-            if fn is torch.logsumexp:
-                continue
-            for dtype in self._fr_nonpromoting_in_types:
-                # Skips logsumexp x complex and mean_cuda x complex64
-                if dtype is torch.complex64:
-                    if self.device_type == 'cuda' and fn is torch.mean:
-                        continue
-
-                t = torch.tensor((2, 4), device=device, dtype=dtype)
-                self.assertEqual(fn(t).dtype, dtype)
-                self.assertEqual(meth(t).dtype, dtype)
-
-    @onlyOnCPUAndCUDA
-    def test_floating_reductions_preserve_float_dim(self, device):
-        for fn, meth in self._floating_reductions:
-            for dtype in self._fr_nonpromoting_in_types:
-                # Skips logsumexp x complex and mean_cuda x complex64
-                if dtype is torch.complex64:
-                    if fn is torch.logsumexp:
-                        continue
-                    elif self.device_type == 'cuda' and fn is torch.mean:
-                        continue
-
-                t = torch.tensor((2, 4), device=device, dtype=dtype)
-                self.assertEqual(fn(t, dim=0).dtype, dtype)
-                self.assertEqual(meth(t, dim=0).dtype, dtype)
-
-                o = torch.empty((2, 4), device=device, dtype=dtype)
-                self.assertEqual(fn(t, dim=0, out=o).dtype, o.dtype)
-
-    # Note: mean on CUDA doesn't support complex inputs or outputs
-    @onlyOnCPUAndCUDA
-    def test_mean_dtype(self, device):
-        in_types = self._fr_promoting_in_types + self._fr_nonpromoting_in_types
-        for in_type, out_type in itertools.product(in_types,
-                                                   self._fr_out_types):
-            if self.device_type == 'cuda' and \
-               in_type == torch.complex64 or \
-               out_type == torch.complex64:
-                continue
-
-            t = torch.tensor((2, 4), device=device, dtype=in_type)
-            self.assertEqual(torch.mean(t, dtype=out_type).dtype, out_type)
-
-    @onlyOnCPUAndCUDA
-    @dtypes(torch.bool, torch.long, torch.float, torch.complex64)
-    def test_mean_dtypes_error(self, device, dtype):
-        t = torch.empty((2, 4), device=device, dtype=dtype)
-        with self.assertRaises(RuntimeError):
-            torch.mean(t, dtype=torch.long)
-
     @onlyOnCPUAndCUDA
     @float_double_default_dtype
     @dtypes(torch.bool, torch.long)
@@ -703,12 +602,20 @@ class TestTypePromotion(TestCase):
         self.assertEqual(m[0].dtype, torch.get_default_dtype())
         self.assertEqual(m[1].dtype, torch.get_default_dtype())
 
+        m = torch.std_mean(t, dim=0)
+        self.assertEqual(m[0].dtype, torch.get_default_dtype())
+        self.assertEqual(m[1].dtype, torch.get_default_dtype())
+
     @onlyOnCPUAndCUDA
     @float_double_default_dtype
     @dtypes(torch.bool, torch.long)
     def test_var_mean(self, device, dtype):
         t = torch.tensor((2, 4), device=device, dtype=dtype)
         m = torch.var_mean(t)
+        self.assertEqual(m[0].dtype, torch.get_default_dtype())
+        self.assertEqual(m[1].dtype, torch.get_default_dtype())
+
+        m = torch.var_mean(t, dim=0)
         self.assertEqual(m[0].dtype, torch.get_default_dtype())
         self.assertEqual(m[1].dtype, torch.get_default_dtype())
 
@@ -734,7 +641,162 @@ class TestTypePromotion(TestCase):
             torch.addcdiv(a, b, b, out=o)
 
 
+# Metadata and generators for floating reduction tests
 
+_fr_promoting_in_types = [torch.bool, torch.long]
+
+_fr_nonpromoting_in_types = [torch.float, torch.complex64]
+
+_fr_out_types = [torch.float, torch.double]
+
+# Helpers to organize ufunc metadata and improve test readability
+__fr_meta = collections.namedtuple('_fr_meta',
+                                   'requires_dim complex_on takes_dtype')
+def _fr_meta(requires_dim=False, complex_on=(), takes_dtype=False):
+    return __fr_meta(requires_dim, complex_on, takes_dtype)
+
+# Dict of unary ufuncs and their associated test metadata
+_floating_reductions = {
+    'mean': _fr_meta(complex_on=('cpu'), takes_dtype=True),
+    'std': _fr_meta(complex_on=('cpu', 'cuda')),
+    'var': _fr_meta(complex_on=('cpu', 'cuda')),
+    'logsumexp': _fr_meta(requires_dim=True),
+}
+
+# Creates tests verifying that floating reductions promote integral inputs.
+def _generate_fr_promote_dtype_tests(cls, name, requires_dim):
+    if requires_dim:
+        return
+
+    fn = getattr(torch, name)
+    meth = getattr(torch.Tensor, name)
+
+    @onlyOnCPUAndCUDA
+    @float_double_default_dtype
+    def _test(self, device):
+        for in_type in _fr_promoting_in_types:
+            t = torch.tensor(((2, 4), (3, 5)), device=device, dtype=in_type)
+            self.assertEqual(fn(t).dtype, torch.get_default_dtype())
+            self.assertEqual(meth(t).dtype, torch.get_default_dtype())
+
+    test_name = "test_" + name + "_promotion"
+    assert not hasattr(cls, test_name), "{0} already in {1}".format(test_name, cls.__name__)
+    setattr(cls, test_name, _test)
+
+# Creates tests verifying that floating reductions promote integral inputs
+# when dim and out are set.
+def _generate_fr_promote_dtype_dim_tests(cls, name):
+    fn = getattr(torch, name)
+    meth = getattr(torch.Tensor, name)
+
+    @onlyOnCPUAndCUDA
+    @float_double_default_dtype
+    def _test(self, device):
+        for in_type, out_type in itertools.product(_fr_promoting_in_types,
+                                                   _fr_out_types):
+            t = torch.tensor((2, 4), device=device, dtype=in_type)
+            self.assertEqual(fn(t, dim=0).dtype, torch.get_default_dtype())
+            self.assertEqual(meth(t, dim=0).dtype, torch.get_default_dtype())
+
+            o = torch.empty((2,), device=device, dtype=in_type)
+            with self.assertRaises(RuntimeError):
+                fn(t, dim=0, out=o)
+
+            o = torch.empty((2,), device=device, dtype=out_type)
+            self.assertEqual(fn(t, dim=0, out=o).dtype, o.dtype)
+
+    test_name = "test_" + name + "_promotion_dim"
+    assert not hasattr(cls, test_name), "{0} already in {1}".format(test_name, cls.__name__)
+    setattr(cls, test_name, _test)
+
+# Creates tests verifying that floating reductions preserve float and
+# complex inputs.
+def _generate_fr_preserve_dtype_tests(cls, name, requires_dim, complex_on):
+    if requires_dim:
+        return
+
+    fn = getattr(torch, name)
+    meth = getattr(torch.Tensor, name)
+
+    @onlyOnCPUAndCUDA
+    @dtypes(*_fr_nonpromoting_in_types)
+    def _test(self, device, dtype):
+        # Skips functions that can't handle complex inputs
+        if dtype.is_complex and self.device_type not in complex_on:
+            return
+
+        t = torch.tensor(((2, 4), (3, 5)), device=device, dtype=dtype)
+        self.assertEqual(fn(t).dtype, dtype)
+        self.assertEqual(meth(t).dtype, dtype)
+
+    test_name = "test_" + name + "_preserve_float_and_complex"
+    assert not hasattr(cls, test_name), "{0} already in {1}".format(test_name, cls.__name__)
+    setattr(cls, test_name, _test)
+
+# Creates tests verifying that floating reductions preserve float and
+# complex inputs when dim and out are set.
+def _generate_fr_preserve_dtype_dim_tests(cls, name, complex_on):
+    fn = getattr(torch, name)
+    meth = getattr(torch.Tensor, name)
+
+    @onlyOnCPUAndCUDA
+    @dtypes(*_fr_nonpromoting_in_types)
+    def _test(self, device, dtype):
+        if dtype.is_complex and self.device_type not in complex_on:
+            return
+
+        t = torch.tensor((2, 4), device=device, dtype=dtype)
+        self.assertEqual(fn(t, dim=0).dtype, dtype)
+        self.assertEqual(meth(t, dim=0).dtype, dtype)
+
+        o = torch.empty((2, 4), device=device, dtype=dtype)
+        self.assertEqual(fn(t, dim=0, out=o).dtype, o.dtype)
+
+    test_name = "test_" + name + "_preserve_float_and_complex_dim"
+    assert not hasattr(cls, test_name), "{0} already in {1}".format(test_name, cls.__name__)
+    setattr(cls, test_name, _test)
+
+# Creates tests validating setting the dtype works as expected, and that
+# integral dtypes throw an error when set
+def _generate_fr_dtype_arg_tests(cls, name, complex_on, takes_dtype):
+    if not takes_dtype:
+        return
+
+    fn = getattr(torch, name)
+    meth = getattr(torch.Tensor, name)
+
+    @onlyOnCPUAndCUDA
+    @dtypes(*(_fr_promoting_in_types + [torch.float]))
+    def _test(self, device, dtype):
+        for out_type in _fr_out_types:
+            t = torch.tensor((2, 4), device=device, dtype=in_type)
+            self.assertEqual(fn(t, dtype=out_type).dtype, out_type)
+
+    @onlyOnCPUAndCUDA
+    @dtypes(*(_fr_promoting_in_types + _fr_nonpromoting_in_types))
+    def _test_error(self, device, dtype):
+        t = torch.empty((2, 4), device=device, dtype=dtype)
+        with self.assertRaises(RuntimeError):
+            fn(t, dtype=torch.long)
+
+    test_name = "test_" + name + "_dtypes_arg"
+    assert not hasattr(cls, test_name), "{0} already in {1}".format(test_name, cls.__name__)
+    setattr(cls, test_name, _test)
+
+    test_error_name = "test_" + name + "_dtypes_arg_error"
+    assert not hasattr(cls, test_error_name), "{0} already in {1}".format(test_error_name, cls.__name__)
+    setattr(cls, test_name, _test_error)
+
+def _generate_fr_tests(cls):
+    for k, v in _floating_reductions.items():
+        _generate_fr_promote_dtype_tests(cls, k, v.requires_dim)
+        _generate_fr_promote_dtype_dim_tests(cls, k)
+        _generate_fr_preserve_dtype_tests(cls, k, v.requires_dim, v.complex_on)
+        _generate_fr_preserve_dtype_dim_tests(cls, k, v.complex_on)
+        _generate_fr_dtype_arg_tests(cls, k, v.complex_on, v.takes_dtype)
+
+
+_generate_fr_tests(TestTypePromotion)
 instantiate_device_type_tests(TestTypePromotion, globals())
 
 if __name__ == '__main__':

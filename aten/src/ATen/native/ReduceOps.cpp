@@ -980,6 +980,17 @@ Tensor var(const Tensor& self, bool unbiased) {
       at::_var(self.to(*maybe_dtype), unbiased);
   }
 
+  // Diverts complex types to tensor iterator's impl
+  // Note: _th_var (_var) does not support complex types
+  if (at::isComplexType(self.scalar_type())) {
+    if (trivial_return.has_value()) {
+      return trivial_return.value();
+    }
+
+    Tensor result = at::empty({0}, self.options());
+    return at::native::std_var_out(result, self, {}, unbiased, false, false);
+  }
+
   return trivial_return.has_value() ? trivial_return.value() : at::_var(self, unbiased);
 }
 
@@ -1006,6 +1017,17 @@ Tensor std(const Tensor& self, bool unbiased) {
     return trivial_return.has_value() ?
       trivial_return.value() :
       at::_std(self.to(*maybe_dtype), unbiased);
+  }
+
+  // Diverts complex types to tensor iterator's impl
+  // Note: _th_std (_std) does not support complex types
+  if (at::isComplexType(self.scalar_type())) {
+    if (trivial_return.has_value()) {
+      return trivial_return.value();
+    }
+
+    Tensor result = at::empty({0}, self.options());
+    return at::native::std_var_out(result, self, {}, unbiased, false, true);
   }
 
   return trivial_return.has_value() ? trivial_return.value() : at::_std(self, unbiased);
