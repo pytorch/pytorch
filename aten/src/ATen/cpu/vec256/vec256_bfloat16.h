@@ -287,20 +287,6 @@ Vec256<BFloat16> inline clamp_min(const Vec256<BFloat16>& a, const Vec256<BFloat
 }
 
 template <>
-inline void convert(const BFloat16* src, BFloat16* dst, int64_t n) {
-  int64_t i;
-#pragma unroll
-  for (i = 0; i <= (n - Vec256<BFloat16>::size()); i += Vec256<BFloat16>::size()) {
-    auto vsrc = _mm256_loadu_si256(reinterpret_cast<__m256i*>((void*)(src + i)));
-    _mm256_storeu_si256(reinterpret_cast<__m256i*>((void*)(dst + i)), vsrc);
-  }
-#pragma unroll
-  for (; i < n; i++) {
-    dst[i] = src[i];
-  }
-}
-
-template <>
 Vec256<BFloat16> inline fmadd(const Vec256<BFloat16>& a,
     const Vec256<BFloat16>& b, const Vec256<BFloat16>& c) {
   __m256 a_lo, a_hi;
