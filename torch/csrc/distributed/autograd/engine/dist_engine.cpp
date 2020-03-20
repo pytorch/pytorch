@@ -347,21 +347,10 @@ void DistEngine::execute(
 
   BackwardPassCleanupGuard guard(autogradContext);
 
-  auto execFuture =
-      runEngineAndAccumulateGradients(autogradContext, graphRoot, outputEdges);
-  // This callback propagates the dist autograd error to other nodes if it
-  // encounters a failure.
-  execFuture->addCallback(
-      [autogradContext](
-          const rpc::Message& /* unused */,
-          const c10::optional<torch::utils::FutureError>& error) {
-        if (error) {
-          autogradContext->propagateAutogradError(error->what());
-        }
-      });
   // This needs to be blocking and as a result we wait for the future to
   // complete.
-  execFuture->wait();
+  runEngineAndAccumulateGradients(autogradContext, graphRoot, outputEdges)
+      ->wait();
 
   // Wait for all of the outstanding rpcs to complete.
   autogradContext->clearAndWaitForOutstandingRpcsAsync()->wait();
