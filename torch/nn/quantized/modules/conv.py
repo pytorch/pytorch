@@ -162,7 +162,7 @@ class Conv1d(_ConvNd):
 
         >>> m = nn.quantized.Conv1d(16, 33, 3, stride=2)
         >>> input = torch.randn(20, 16, 100)
-        >>> # quantize input to qint8
+        >>> # quantize input to quint8
         >>> q_input = torch.quantize_per_tensor(input, scale=1.0, zero_point=0,
                                                 dtype=torch.quint32)
         >>> output = m(q_input)
