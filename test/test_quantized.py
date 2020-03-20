@@ -7,7 +7,7 @@ import unittest
 import torch
 import torch.jit
 import torch.nn.functional as F
-from torch.nn.modules.utils import _pair
+from torch.nn.modules.utils import _single, _pair
 
 from hypothesis import settings, HealthCheck
 from hypothesis import assume, given
