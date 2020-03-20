@@ -70,7 +70,6 @@ TESTS = [
     'test_jit_disabled',
     'test_function_schema',
     'test_overrides',
-    'test_jit_fuser_te',
 ]
 
 # skip < 3.3 because mock is added in 3.3 and is used in rpc_spawn
