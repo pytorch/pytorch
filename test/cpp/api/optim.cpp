@@ -131,6 +131,11 @@ void check_exact_values(
   }
 }
 
+struct MyOptimizerOptions : public OptimizerCloneableOptions<MyOptimizerOptions> {
+  MyOptimizerOptions(double lr = 1.0) : lr_(lr) {};
+  TORCH_ARG(double, lr) = 1.0;
+};
+
 TEST(OptimTest, OptimizerAccessors) {
   auto options = AdagradOptions(1.0);
   std::vector<torch::Tensor> params;
@@ -180,11 +185,6 @@ TEST(OptimTest, OptimizerAccessors) {
 }
 
 TEST(OptimTest, OldInterface) {
-  struct MyOptimizerOptions : public OptimizerOptions {
-    MyOptimizerOptions(double lr = 1.0) : lr_(lr) {};
-    TORCH_ARG(double, lr) = 1.0;
-  };
-
   struct MyOptimizer : Optimizer {
     using Optimizer::Optimizer;
     torch::Tensor step(LossClosure closure = nullptr) override { return {};}
