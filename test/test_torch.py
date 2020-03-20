@@ -6565,6 +6565,23 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(res1, res2)
         self.assertTrue(res2.is_contiguous(memory_format=torch.channels_last))
 
+    @onlyCUDA
+    @deviceCountAtLeast(2)
+    def test_cat_different_devices(self, devices):
+        cuda0 = torch.randn((3, 3), device=devices[0])
+        cuda1 = torch.randn((3, 3), device=devices[1])
+        with self.assertRaisesRegex(RuntimeError,
+                                    "input tensors must be on the same device"):
+            torch.cat((cuda0, cuda1))
+        cpu = torch.randn(3, 3)
+        with self.assertRaisesRegex(RuntimeError,
+                                    "input tensors must be on the same device"):
+            torch.cat((cuda0, cpu))
+        with self.assertRaisesRegex(RuntimeError,
+                                    "input tensors must be on the same device"):
+            torch.cat((cpu, cuda0))
+
+
     def test_is_set_to(self, device):
         t1 = torch.empty(3, 4, 9, 10, device=device)
         t2 = torch.empty(3, 4, 9, 10, device=device)
@@ -15990,12 +16007,14 @@ tensor_op_tests = [
         1e-5, 1e-5, 1e-5, _float_types_no_half, False),
     ('addcdiv', '', _small_2d,
         lambda t, d: [_small_2d(t, d),
-                      _small_2d(t, d, has_zeros=False)], 1, 1e-5, 1e-3),
+                      _small_2d(t, d, has_zeros=False)], 1, 1e-5, 1e-3,
+        _types, True,
+        [_wrap_maybe_warns("Integer division .+")]),
     ('addcdiv', 'scalar', _small_2d,
         lambda t, d: [_number(2.8, 1, t), _small_2d(t, d),
                       _small_2d(t, d, has_zeros=False)], 1, 1e-5, 1e-3,
         _types, True,
-        [_wrap_maybe_warns("This overload of addcdiv_? is deprecated")]),
+        [_wrap_maybe_warns("This overload of addcdiv_? is deprecated|Integer division .+")]),
     ('addcmul', '', _small_3d, lambda t, d: [_small_3d(t, d), _small_3d(t, d)], 1e-2, 2e-5, 1e-3),
     ('addcmul', 'scalar', _small_3d,
         lambda t, d: [_number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)], 1e-2,
@@ -16181,11 +16200,11 @@ tensor_op_tests = [
     ('transpose', 'neg_dim', _new_t((1, 2, 3, 4)), lambda t, d: [-1, -2], ),
     ('tolist', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, False),
     ('topk', 'dim_sort', _small_3d_unique, lambda t, d: [2, 1, False, True],
-        1e-5, 1e-5, 1e-5, _types, False),
+        1e-5, 1e-5, 1e-5, _types2, False),
     ('topk', 'neg_dim_sort', _small_3d_unique, lambda t, d: [2, -1, False, True],
-        1e-5, 1e-5, 1e-5, _types, False),
+        1e-5, 1e-5, 1e-5, _types2, False),
     ('topk', 'dim_desc_sort', _small_3d_unique, lambda t, d: [2, 1, True, True],
-        1e-5, 1e-5, 1e-5, _types, False),
+        1e-5, 1e-5, 1e-5, _types2, False),
     ('trace', '', _medium_2d, lambda t, d: [], 1e-3, 1e-5, 1e-5, _types, False),
     ('tril', '', _medium_2d, lambda t, d: [],),
     ('tril', 'zero_stride', _medium_2d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, False),
