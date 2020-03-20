@@ -158,7 +158,7 @@ def createResolutionCallbackFromClosure(fn):
                 return closure[key]
             elif hasattr(builtins, key):
                 return getattr(builtins, key)
-            return None
+            raise KeyError(key)
 
     return createResolutionCallbackFromEnv(closure_lookup())
 

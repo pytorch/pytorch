@@ -54,6 +54,7 @@ class EvalEnv(object):
 
 def get_signature(fn, rcb, loc, is_method):
     # Python 3.5 adds support for the nice annotation syntax, so try that first.
+    print("get_signature of", fn)
     signature = None
     if PY35:
         signature = try_real_annotations(fn, loc)
@@ -158,6 +159,7 @@ def parse_type_line(type_line, rcb, loc):
         arg_ann = (arg_ann,)
 
     try:
+        print("ret_ann_str", ret_ann_str)
         ret_ann = eval(ret_ann_str, {}, EvalEnv(rcb))  # noqa: P204
     except (NameError, SyntaxError) as e:
         raise RuntimeError("Failed to parse the return type of a type annotation: {}".format(str(e)))

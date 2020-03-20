@@ -15,6 +15,37 @@ def rpc_return_rref(dst):
     return rpc.remote(dst, torch.add, args=(torch.ones(2, 2), 1))
 
 
+class AnnotationTest(RpcAgentTestFixture):
+    @dist_init
+    def test_script_call_python_return_future(self):
+        if self.rank != 0:
+            return
+
+        dst_worker_name = worker_name((self.rank + 1) % self.world_size)
+        input_0 = torch.ones(2, 2)
+        input_1 = 1
+        expected_res = torch.add(input_0, input_1)
+
+        @torch.jit.ignore
+        def python_return_future():
+            # type: () -> Future[Tensor]
+            fut = rpc.rpc_async(dst_worker_name, torch.add, (input_0, input_1), {})
+            return fut
+
+        with self.assertRaisesRegex(
+            RuntimeError, "Failed to parse the return type of a type annotation:"
+        ):
+
+            @torch.jit.script
+            def script_use_future():
+                # type: () -> Tensor
+                fut = python_return_future()
+                return fut.wait()
+
+            res = script_use_future()
+            self.assertEqual(res, expected_res)
+
+
 class MyScriptModuleWithRRefs(torch.jit.ScriptModule):
     def __init__(self, dst_worker):
         super().__init__()
@@ -581,7 +612,7 @@ def script_check_rref_confirmed(rref):
 @unittest.skipIf(
     not torch._six.PY3, "Pytorch distributed rpc package does not support python2"
 )
-class JitRpcTest(LocalRRefTest, JitRpcAsyncOpTest, RpcAgentTestFixture):
+class JitRpcTest(AnnotationTest, LocalRRefTest, JitRpcAsyncOpTest, RpcAgentTestFixture):
     @dist_init
     def test_torchscript_function(self):
         dst_worker_name = worker_name((self.rank + 1) % self.world_size)
