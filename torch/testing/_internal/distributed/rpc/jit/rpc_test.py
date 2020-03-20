@@ -5,11 +5,11 @@ import torch
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
 from torch import Tensor
+from torch.testing._internal.common_utils import TemporaryFileName
 from torch.testing._internal.dist_utils import dist_init, initialize_pg, worker_name
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
 )
-from torch.testing._internal.common_utils import TemporaryFileName
 
 
 def rpc_return_rref(dst):
@@ -753,5 +753,7 @@ class JitRpcTest(LocalRRefTest, JitRpcAsyncOpTest, RpcAgentTestFixture):
         dst_rank = n % self.world_size
         rref_var = rpc_return_rref(worker_name(dst_rank))
         with TemporaryFileName() as fname:
-            with self.assertRaisesRegex(RuntimeError, "RRef jit pickling is only allowed inside RPC calls"):
+            with self.assertRaisesRegex(
+                RuntimeError, "RRef jit pickling is only allowed inside RPC calls"
+            ):
                 save_rref(rref_var, fname)
