@@ -352,10 +352,10 @@ def build_deps():
 ################################################################################
 
 # the list of runtime dependencies required by this built package
-install_requires = []
+install_requires = ['future']
 
 if sys.version_info <= (2, 7):
-    install_requires += ['future', 'typing']
+    install_requires += ['typing']
 
 missing_pydep = '''
 Missing build dependency: Unable to `import {importname}`.
