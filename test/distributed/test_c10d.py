@@ -3021,6 +3021,7 @@ class DistributedDataParallelDelayAllreduceTest(DistributedDataParallelTest):
 
             def __init__(self):
                 super(TestModel, self).__init__()
+                self.layer1 = nn.Linear(10, 10)
                 self._reused_net = nn.Sequential(
                     nn.Linear(10, 20),
                     nn.ReLU(),
@@ -3028,6 +3029,7 @@ class DistributedDataParallelDelayAllreduceTest(DistributedDataParallelTest):
                 self.L = 10
 
             def forward(self, x):
+                x = self.layer1(x)
                 y = x.clone().to(x.device)
                 y.requires_grad_()
                 fwd = nn.Sequential(
@@ -3051,17 +3053,24 @@ class DistributedDataParallelDelayAllreduceTest(DistributedDataParallelTest):
         input = torch.rand([batch_size, 10], dtype=torch.float).to(device_id)
         target = torch.rand([batch_size, 10], dtype=torch.float).to(device_id)
 
-        def step(model, input, target):
+        net_optim = torch.optim.Adam(net.parameters(), lr=0.001)
+        ddp_optim = torch.optim.Adam(ddp.parameters(), lr=0.001)
+
+        def step(model, input, target, optim):
             output = model(input)
             loss = loss_fn(output, target)
             loss.backward()
-
-        for _ in range(10):
-            step(ddp, input[self.rank:(self.rank + 1)], target)
-            step(net, input, target)
+            optim.step()
 
         for i, j in zip(ddp.parameters(), net.parameters()):
             self.assertTrue(i.allclose(j))
+
+        for _ in range(10):
+            step(ddp, input[self.rank:(self.rank + 1)], target, ddp_optim)
+            step(net, input, target, net_optim)
+
+        for i, j in zip(ddp.parameters(), net.parameters()):
+            self.assertTrue(i.allclose(j, rtol=0.1, atol=0.1))
 
 
 class ReducerModule(nn.Module):
