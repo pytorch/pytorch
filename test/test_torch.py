@@ -11033,16 +11033,6 @@ class TestTorchDeviceType(TestCase):
                     src = torch.randn(indices_shape, device=device)
                     self.assertEqual(dst, dst.put_(indices, src, accumulate=accumulate))
 
-    def test_scatter_non_unique_index(self, device):
-        height = 512
-        width = 512
-        input = torch.ones(height, width, device=device)
-        index = torch.zeros(height, width, dtype=torch.long, device=device)
-        src = torch.ones(height, width, device=device)
-        input.scatter_(0, index, src)
-
-        self.assertEqual(input, torch.ones(height, width, device=device))
-
     def test_scatter_to_large_input(self, device):
         input = torch.zeros(4, 4, device=device)
         src = torch.ones(2, 2, device=device)
