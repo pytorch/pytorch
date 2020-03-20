@@ -156,7 +156,7 @@ class Conv1d(_ConvNd):
         scale (Tensor):      scalar for the output scale
         zero_point (Tensor): scalar for the output zero point
 
-    See :class:`~torch.nn.Conv2d` for other attributes.
+    See :class:`~torch.nn.Conv1d` for other attributes.
 
     Examples::
 
