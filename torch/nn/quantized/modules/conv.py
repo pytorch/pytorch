@@ -291,9 +291,9 @@ class Conv2d(_ConvNd):
         >>> # non-square kernels and unequal stride and with padding and dilation
         >>> m = nn.quantized.Conv2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2), dilation=(3, 1))
         >>> input = torch.randn(20, 16, 50, 100)
-        >>> # quantize input to qint8
-        >>> q_input = torch.quantize_per_tensor(input, scale=1.0, zero_point=0, dtype=torch.qint32)
-        >>> output = m(input)
+        >>> # quantize input to quint8
+        >>> q_input = torch.quantize_per_tensor(input, scale=1.0, zero_point=0, dtype=torch.quint8)
+        >>> output = m(q_input)
 
     """
 
@@ -417,9 +417,9 @@ class Conv3d(_ConvNd):
         >>> # non-square kernels and unequal stride and with padding and dilation
         >>> m = nn.quantized.Conv3d(16, 33, (3, 5, 5), stride=(1, 2, 2), padding=(1, 2, 2), dilation=(1, 2, 2))
         >>> input = torch.randn(20, 16, 56, 56, 56)
-        >>> # quantize input to qint8
-        >>> q_input = torch.quantize_per_tensor(input, scale=1.0, zero_point=0, dtype=torch.qint32)
-        >>> output = m(input)
+        >>> # quantize input to quint8
+        >>> q_input = torch.quantize_per_tensor(input, scale=1.0, zero_point=0, dtype=torch.quint8)
+        >>> output = m(q_input)
 
     """
 
