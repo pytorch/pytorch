@@ -49,7 +49,7 @@ RpcWithAutograd::RpcWithAutograd(
       messageType_ == MessageType::FORWARD_AUTOGRAD_RESP);
 }
 
-Message RpcWithAutograd::toMessage() && {
+Message RpcWithAutograd::toMessageImpl() && {
   auto messageId = wrappedMessage_.id();
   auto messageType = wrappedMessage_.type();
 

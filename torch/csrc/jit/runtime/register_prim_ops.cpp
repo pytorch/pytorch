@@ -1730,7 +1730,7 @@ template <typename T>
 int listEq(Stack& stack) {
   c10::List<T> b = pop(stack).to<c10::List<T>>();
   c10::List<T> a = pop(stack).to<c10::List<T>>();
-  push(stack, list_is_equal(a, b));
+  push(stack, a == b);
   return 0;
 }
 
@@ -1738,7 +1738,7 @@ template <typename T>
 int listNe(Stack& stack) {
   c10::List<T> b = pop(stack).to<c10::List<T>>();
   c10::List<T> a = pop(stack).to<c10::List<T>>();
-  push(stack, !list_is_equal(a, b));
+  push(stack, a != b);
   return 0;
 }
 
