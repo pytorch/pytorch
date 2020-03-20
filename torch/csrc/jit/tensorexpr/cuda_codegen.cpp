@@ -931,14 +931,6 @@ void CudaCodeGen::call(const std::vector<CallArg>& args) {
   USE_TRIGGER(cuda_codegen_executed);
 }
 
-void CudaSetContext(CUcontext pctx) {
-  if (!pctx) {
-    std::unique_lock<std::mutex> cudaFreeMutexLock(
-        *(c10::cuda::CUDACachingAllocator::getFreeMutex()));
-    cudaFree(0);
-  }
-}
-
 void CudaCodeGen::CompileToNVRTC(
     const std::string& code,
     const std::string& func_name) {
@@ -952,7 +944,6 @@ void CudaCodeGen::CompileToNVRTC(
   }
   // cudaSetDevice does not have to really change the underlying device if it
   // doesn't have to, so calling cudaFree to force that change
-  CudaSetContext(pctx);
   if (!pctx) {
     std::unique_lock<std::mutex> cudaFreeMutexLock(
         *(c10::cuda::CUDACachingAllocator::getFreeMutex()));
