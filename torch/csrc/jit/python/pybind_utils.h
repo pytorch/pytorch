@@ -596,10 +596,10 @@ inline IValue toIValue(
     case TypeKind::CapsuleType: {
       return IValue::make_capsule(
           py::cast<c10::intrusive_ptr<CustomClassHolder>>(obj));
-    } break;
+    }
     case TypeKind::FutureType: {
       return obj.cast<PythonFutureWrapper>().fut;
-    } break;
+    }
     case TypeKind::AnyType:
       return toTypeInferredIValue(obj);
     case TypeKind::FunctionType:
