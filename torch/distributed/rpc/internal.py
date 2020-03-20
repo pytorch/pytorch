@@ -7,6 +7,7 @@ import threading
 import traceback
 
 import torch
+import torch.distributed as dist
 
 
 # Thread local tensor tables to store tensors while pickling torch.Tensor
@@ -43,11 +44,19 @@ class _InternalRPCPickler:
         global _thread_local_tensor_tables
         return _thread_local_tensor_tables.recv_tables[tensor_index]
 
-    def _tensor_reducer(self, obj):
+    def _tensor_reducer(self, tensor):
         global _thread_local_tensor_tables
-        _thread_local_tensor_tables.send_tables.append(obj)
+        _thread_local_tensor_tables.send_tables.append(tensor)
         tensor_index = len(_thread_local_tensor_tables.send_tables) - 1
         return (_InternalRPCPickler._tensor_receiver, (tensor_index,))
+
+    @classmethod
+    def _rref_receiver(cls, rref_fork_data):
+        return dist.rpc.RRef._deserialize(rref_fork_data)
+
+    def _rref_reducer(self, rref):
+        rref_fork_data = rref._serialize()
+        return (_InternalRPCPickler._rref_receiver, (rref_fork_data, ))
 
     def serialize(self, obj):
         r"""
@@ -57,6 +66,14 @@ class _InternalRPCPickler:
         f = io.BytesIO()
         p = pickle.Pickler(f)
         p.dispatch_table = self._dispatch_table
+
+        # rpc api could accept user picklers inheriting from _InternalRPCPickler to serialize rref,
+        # user picklers could have different initialization function from _InternalRPCPickler,
+        # but all the user picklers should call serialize() and use _rref_reducer to pickle rref
+        # in python. also, when _internal_rpc_pickler is imported to rpc/api.py, rpc.RRef is not
+        # compiled yet, it is not good place to acces rpc.RRef inside _InternalRPCPickler constructor,
+        # so puting rref's dispatch table here
+        p.dispatch_table[dist.rpc.RRef] = self._rref_reducer
 
         # save _thread_local_tensor_tables.send_tables if it is in nested call
         global _thread_local_tensor_tables

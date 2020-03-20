@@ -1,6 +1,6 @@
 #pragma once
 
-#include "torch/csrc/jit/tensorexpr/ir.h"
+#include <torch/csrc/jit/tensorexpr/ir.h>
 
 namespace torch {
 namespace jit {
@@ -15,7 +15,10 @@ class Buffer {
       : data_(data.node()),
         dtype_(dtype),
         dims_(ExprHandleVectorToExprVector(dims)) {
-    CHECK_EQ(data.dtype(), kHandle);
+    if (data.dtype() != kHandle) {
+      throw malformed_input();
+    }
+
     std::vector<ExprHandle> stride_handles(dims.size());
     for (int i = ndim() - 1; i >= 0; i--) {
       if (i == ndim() - 1) {
@@ -61,18 +64,24 @@ class Buffer {
 
  private:
   ExprHandle Index(const ExprHandle& x) const {
-    CHECK(ndim() == 1);
+    if (ndim() != 1) {
+      throw malformed_input();
+    }
     return x;
   }
   ExprHandle Index(const ExprHandle& x, const ExprHandle& y) const {
-    CHECK(ndim() == 2);
+    if (ndim() != 2) {
+      throw malformed_input();
+    }
     return x * ExprHandle(strides_[0]) + y;
   }
   ExprHandle Index(
       const ExprHandle& x,
       const ExprHandle& y,
       const ExprHandle& z) const {
-    CHECK(ndim() == 3);
+    if (ndim() != 3) {
+      throw malformed_input();
+    }
     return x * ExprHandle(strides_[0]) + y * ExprHandle(strides_[1]) + z;
   }
   ExprHandle Index(
@@ -80,12 +89,16 @@ class Buffer {
       const ExprHandle& y,
       const ExprHandle& z,
       const ExprHandle& w) const {
-    CHECK(ndim() == 4);
+    if (ndim() != 4) {
+      throw malformed_input();
+    }
     return x * ExprHandle(strides_[0]) + y * ExprHandle(strides_[1]) +
         z * ExprHandle(strides_[2]) + w;
   }
   ExprHandle Index(const std::vector<ExprHandle>& indices) const {
-    CHECK(ndim() == (int)indices.size());
+    if (ndim() != (int)indices.size()) {
+      throw malformed_input();
+    }
     ExprHandle total_index;
     for (size_t i = 0; i < indices.size(); i++) {
       ExprHandle index;

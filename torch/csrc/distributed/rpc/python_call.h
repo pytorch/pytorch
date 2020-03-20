@@ -12,7 +12,7 @@ class TORCH_API PythonCall final : public RpcCommandBase {
  public:
   explicit PythonCall(SerializedPyObj&& serializedPyObj);
 
-  Message toMessage() && override;
+  Message toMessageImpl() && override;
 
   static std::unique_ptr<PythonCall> fromMessage(const Message& message);
 

@@ -267,6 +267,9 @@ struct TORCH_API Engine {
 
   size_t ready_queue_size(const std::shared_ptr<GraphTask>& graph_task, at::Device device);
 
+  // Should be called after fork to notify that worker threads are gone
+  void release_workers();
+
  protected:
   Engine();
   void compute_dependencies(Node* root, GraphTask& task);
@@ -277,12 +280,12 @@ struct TORCH_API Engine {
 
   // initialize the thread local ready queue with the ready queue that is created
   // elsewhere, i.e. thread_init, reentrant_thread_init, etc.
-  std::shared_ptr<ReadyQueue> init_local_ready_queue(std::shared_ptr<ReadyQueue> ready_queue = nullptr);
+  void init_local_ready_queue(std::shared_ptr<ReadyQueue> ready_queue = nullptr);
 
-  ReadyQueue& ready_queue(
+  std::shared_ptr<ReadyQueue> ready_queue(
       const std::shared_ptr<GraphTask>& graph_task,
       at::Device device);
-  ReadyQueue& ready_queue_by_index(
+  std::shared_ptr<ReadyQueue> ready_queue_by_index(
       const std::shared_ptr<GraphTask>& graph_task,
       int device_index);
   // start device threads (CUDA, XLA, etc.) in Engine,
@@ -296,7 +299,7 @@ struct TORCH_API Engine {
   virtual void thread_main(
       const std::shared_ptr<GraphTask>& task,
       bool reentrant_thread);
-  void reentrant_thread_init(const std::shared_ptr<ReadyQueue>& parent_ready_queue);
+  void reentrant_thread_init();
   void add_thread_pool_task(const std::weak_ptr<GraphTask>& graph_task);
   void set_device(int device);
   void initialize_device_threads_pool();
@@ -336,7 +339,14 @@ struct TORCH_API Engine {
  std::shared_ptr<ThreadPoolShared> thread_pool_shared_;
 
 private:
- void execute_graph_task_with_continuation(const std::shared_ptr<GraphTask>& graph_task);
+  // Number of non-reentrant threads
+  std::atomic<uint32_t> non_reentrant_device_thread_count_;
+  // Destructor will wait for non-reentrant threads to finish
+  std::condition_variable non_reentrant_device_thread_finish_;
+  std::mutex non_reentrant_device_thread_finish_mutex_;
+
+ void execute_graph_task_with_continuation(
+     const std::shared_ptr<GraphTask>& graph_task);
  void graph_task_exec_post_processing(
      const std::shared_ptr<GraphTask>& graph_task);
  void mark_graph_task_completed(const std::shared_ptr<GraphTask>& graph_task);
