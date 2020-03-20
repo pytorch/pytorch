@@ -2228,7 +2228,7 @@ def poisson_nll_loss(input, target, log_input=True, full=False, size_average=Non
     return ret
 
 
-def kl_div(input, target, size_average=None, reduce=None, reduction='mean', *, log_target=False):
+def kl_div(input, target, size_average=None, reduce=None, reduction='mean', log_target=False):
     # type: (Tensor, Tensor, Optional[bool], Optional[bool], str, bool) -> Tensor
     r"""The `Kullback-Leibler divergence`_ Loss.
 
