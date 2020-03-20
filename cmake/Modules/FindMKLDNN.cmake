@@ -20,7 +20,7 @@ SET(MKLDNN_INCLUDE_DIR)
 IF(MSVC AND "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
   MESSAGE(STATUS "MKL-DNN (IDEEP) is not supported in clang-cl so far")
   RETURN()
-ENDIF(MSVC)
+ENDIF()
 
 SET(IDEEP_ROOT "${PROJECT_SOURCE_DIR}/third_party/ideep")
 SET(MKLDNN_ROOT "${IDEEP_ROOT}/mkl-dnn")
