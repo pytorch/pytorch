@@ -4066,6 +4066,9 @@ def scaled_dot_product_attention(q,                         # type: Tensor
         else:
             raise RuntimeError("attn_mask's dimension {} is not supported".format(attn_mask.dim()))
         # attn_mask's dim is 3 now.
+        if attn_mask.dtype == torch.bool:
+            attn_mask = torch.where(
+                attn_mask, torch.tensor(float('-inf')), torch.tensor(0.)).to(dtype=q.dtype, device=q.device)
 
     src_len = k.size(1)
 
