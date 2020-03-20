@@ -30,7 +30,7 @@ void div_kernel_cuda(TensorIterator& iter) {
     // optimization for floating-point types: if the second operand is a CPU
     // scalar, compute a * reciprocal(b). Note that this may lose one bit of
     // precision compared to computing the division.
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf, iter.common_dtype(), "div_cuda", [&]() {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, iter.common_dtype(), "div_cuda", [&]() {
       using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
       auto inv_b = thrust_t(1.0) / thrust_t(iter.scalar_value<scalar_t>(2));
       iter.remove_operand(2);
@@ -64,9 +64,34 @@ void mul_kernel_cuda(TensorIterator& iter) {
   }
 }
 
+void remainder_kernel_cuda(TensorIterator& iter) {
+  if (isIntegralType(iter.dtype(), /*includeBool*/ false)) {
+    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "remainder_cuda", [&]() {
+      using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
+      gpu_kernel_with_scalars(iter, []GPU_LAMBDA(thrust_t a, thrust_t b) -> thrust_t {
+        CUDA_KERNEL_ASSERT(b != 0);
+        thrust_t r = a % b;
+        if ((r != 0) && ((r < 0) != (b < 0))) {
+          r += b;
+        }
+        return r;
+      });
+    });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "remainder_cuda", [&]() {
+      using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
+      gpu_kernel_with_scalars(iter,
+        []GPU_LAMBDA(thrust_t a, thrust_t b) __ubsan_ignore_float_divide_by_zero__ -> thrust_t {
+          return a - b * static_cast<thrust_t>(std::floor(a / b));
+        });
+    });
+  }
+}
+
 REGISTER_DISPATCH(add_stub, &add_kernel_cuda);
 REGISTER_DISPATCH(sub_stub, &sub_kernel_cuda);
 REGISTER_DISPATCH(div_stub, &div_kernel_cuda);
 REGISTER_DISPATCH(mul_stub, &mul_kernel_cuda);
+REGISTER_DISPATCH(remainder_stub, &remainder_kernel_cuda);
 
 }} // namespace at::native

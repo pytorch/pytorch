@@ -37,6 +37,7 @@ fi
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # TODO: Move this to Docker
+  sudo apt-get -qq install --no-install-recommends apt-transport-https ca-certificates
   sudo apt-get -qq update
   sudo apt-get -qq install --no-install-recommends libsndfile1
 fi
@@ -117,7 +118,7 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     # Increase stack size, because ASAN red zones use more stack
     ulimit -s 81920
 
-    (cd test && python -c "import torch")
+    (cd test && python -c "import torch; print(torch.__version__, torch.version.git_version)")
     echo "The next three invocations are expected to crash; if they don't that means ASAN/UBSAN is misconfigured"
     (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_csrc_asan(3)")
     (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_csrc_ubsan(0)")
@@ -181,7 +182,7 @@ test_aten() {
 }
 
 test_torchvision() {
-  pip_install --user git+https://github.com/pytorch/vision.git@44a5bae933655ed7ff798669a43452b833f9ce01
+  pip_install --user git+https://github.com/pytorch/vision.git@43e94b39bcdda519c093ca11d99dfa2568aa7258
 }
 
 test_libtorch() {
@@ -269,9 +270,9 @@ elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   # TODO: run some C++ tests
   echo "no-op at the moment"
 elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 ]]; then
-  test_torchvision
   test_python_nn
 elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 ]]; then
+  test_torchvision
   test_python_all_except_nn
   test_aten
   test_libtorch

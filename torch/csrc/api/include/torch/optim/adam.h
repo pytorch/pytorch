@@ -34,7 +34,7 @@ public:
 };
 
 struct TORCH_API AdamParamState : public OptimizerCloneableParamState<AdamParamState> {
-  TORCH_ARG(int64_t, step);
+  TORCH_ARG(int64_t, step) = 0;
   TORCH_ARG(torch::Tensor, exp_avg);
   TORCH_ARG(torch::Tensor, exp_avg_sq);
   TORCH_ARG(torch::Tensor, max_exp_avg_sq) = {};
@@ -61,7 +61,7 @@ class TORCH_API Adam : public Optimizer {
        std::vector<Tensor> params,
        AdamOptions defaults) : Adam({std::move(OptimizerParamGroup(params))}, defaults) {}
 
-  void step() override;
+  torch::Tensor step(LossClosure closure = nullptr) override;
   void save(serialize::OutputArchive& archive) const override;
   void load(serialize::InputArchive& archive) override;
 
