@@ -5,10 +5,15 @@ import torch
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
 from torch import Tensor
-from torch.testing._internal.dist_utils import dist_init, worker_name
+from torch.testing._internal.dist_utils import (
+    dist_init,
+    worker_name,
+    initialize_pg,
+)
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
 )
+from torch.testing._internal.common_utils import TemporaryFileName
 
 
 def rpc_return_rref(dst):
@@ -120,10 +125,24 @@ class LocalRRefTest(RpcAgentTestFixture):
 
         # Create a local RRef<MyScripClass> remotely in Python.
         rref = rpc.rpc_sync(dst_worker_name, owner_create_rref_my_script_class, args=(self.rank,))
-        # Use RRef<MyScripClass> remotely in Script.
-        ret = rpc.rpc_sync(
-            rref.owner(), script_run_get_value_rref_my_script_class, args=(rref,)
-        )
+
+        def use_rref_on_owner(rref):
+            # type: (RRef[MyScriptClass]) -> int
+            args = (rref,)
+            kwargs: Dict[str, Any] = {}  # noqa
+            fut = rpc.rpc_async(
+                rref.owner(), script_run_get_value_rref_my_script_class, args, kwargs
+            )
+            ret = fut.wait()
+            return ret
+
+        # Use RRef<MyScripClass> in local Python RPC and remote Script run.
+        ret = use_rref_on_owner(rref)
+        self.assertEqual(ret, self.rank)
+
+        # Use RRef<MyScriptClass> in local Script RPC and remote Script run.
+        use_rref_on_owner_script = torch.jit.script(use_rref_on_owner)
+        ret = use_rref_on_owner_script(rref)
         self.assertEqual(ret, self.rank)
 
     @dist_init
@@ -135,12 +154,25 @@ class LocalRRefTest(RpcAgentTestFixture):
 
         # Create a local RRef<MyModuleInterface> remotely in Python.
         rref = rpc.rpc_sync(dst_worker_name, owner_create_rref_my_script_module, args=(self.rank,))
-        # Use RRef<MyModuleInterface> remotely in Script.
-        ret = rpc.rpc_sync(
-            rref.owner(), script_run_forward_rref_my_script_module, args=(rref,)
-        )
+
+        def use_rref_on_owner(rref):
+            # type: (RRef[MyModuleInterface]) -> Tensor
+            args = (rref,)
+            kwargs: Dict[str, Any] = {}
+            fut = rpc.rpc_async(
+                rref.owner_name(), script_run_forward_rref_my_script_module, args, kwargs
+            )
+            ret = fut.wait()
+            return ret
+
+        # Use RRef<MyScripClass> in local Python RPC and remote Script run.
+        ret = use_rref_on_owner(rref)
         self.assertEqual(ret, torch.ones(self.rank))
 
+        # Use RRef<MyScriptClass> in local Script RPC and remote Script run.
+        use_rref_on_owner_script = torch.jit.script(use_rref_on_owner)
+        ret = use_rref_on_owner_script(rref)
+        self.assertEqual(ret, torch.ones(self.rank))
 
 def python_function():
     return 0
@@ -541,6 +573,13 @@ def script_check_rref_confirmed(rref):
     # type: (RRef[Tensor]) -> bool
     return rref.confirmed_by_owner()
 
+
+@torch.jit.script
+def save_rref(rref_var, fname):
+    # type: (RRef[Tensor], str) -> None
+    torch.save(rref_var, fname)
+
+
 @unittest.skipIf(
     not torch._six.PY3, "Pytorch distributed rpc package does not support python2"
 )
@@ -578,6 +617,7 @@ class JitRpcTest(LocalRRefTest, JitRpcAsyncOpTest, RpcAgentTestFixture):
         # wait for local MyScriptModule instantiation to finish,
         # otherwise it could instantiate MyScriptModule in parallel with
         # server thread in the below
+        initialize_pg(self.init_method, self.rank, self.world_size)
         dist.barrier()
 
         # rpc_sync still accepts script class and run it in
@@ -688,7 +728,6 @@ class JitRpcTest(LocalRRefTest, JitRpcAsyncOpTest, RpcAgentTestFixture):
         res = rref_script_annotation(rref_var)
         self.assertEqual(res, torch.ones(2, 2) + 1)
 
-
     def _create_rref(self):
         owner_rank = (self.rank + 2) % self.world_size
         return rpc.remote(
@@ -718,3 +757,12 @@ class JitRpcTest(LocalRRefTest, JitRpcAsyncOpTest, RpcAgentTestFixture):
             args=(rref,)
         )
         self.assertEqual(ret_rref.to_here(), True)
+
+    @dist_init
+    def test_rref_jit_pickle_not_supported(self):
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        rref_var = rpc_return_rref(worker_name(dst_rank))
+        with TemporaryFileName() as fname:
+            with self.assertRaisesRegex(RuntimeError, "RRef jit pickling is only allowed inside RPC calls"):
+                save_rref(rref_var, fname)
