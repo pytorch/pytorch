@@ -1,4 +1,4 @@
-#pragma once 
+#pragma once
 
 // This file only exists to provide a workaround for a Visual Studio 2017 (version < 15.8) bug.
 // Apparently, VS2017<15.8 has a hard time templating on functions,
