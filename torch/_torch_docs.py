@@ -261,9 +261,22 @@ addcdiv(input, tensor1, tensor2, *, value=1, out=None) -> Tensor
 Performs the element-wise division of :attr:`tensor1` by :attr:`tensor2`,
 multiply the result by the scalar :attr:`value` and add it to :attr:`input`.
 
+.. warning::
+    Integer division with addcdiv is deprecated, and in a future release
+    addcdiv will perform a true division of :attr:`tensor1` and :attr:`tensor2`.
+    The current addcdiv behavior can be replicated using :func:`floor_divide`
+    for integral inputs
+    (:attr:`input` + :attr:`value` * :attr:`tensor1` // :attr:`tensor2`)
+    and :func:`div` for float inputs
+    (:attr:`input` + :attr:`value` * :attr:`tensor1` / :attr:`tensor2`).
+    The new addcdiv behavior can be implemented with :func:`true_divide`
+    (:attr:`input` + :attr:`value` * torch.true_divide(:attr:`tensor1`,
+    :attr:`tensor2`).
+
 .. math::
     \text{out}_i = \text{input}_i + \text{value} \times \frac{\text{tensor1}_i}{\text{tensor2}_i}
 """ + r"""
+
 The shapes of :attr:`input`, :attr:`tensor1`, and :attr:`tensor2` must be
 :ref:`broadcastable <broadcasting-semantics>`.
 
@@ -1780,6 +1793,12 @@ add_docstr(torch.div,
 Divides each element of the input ``input`` with the scalar ``other`` and
 returns a new resulting tensor.
 
+.. warning::
+    Integer division using div is deprecated, and in a future release div will
+    perform true division like :func:`torch.true_divide`.
+    Use :func:`torch.floor_divide` (// in Python) to perform integer division,
+    instead.
+
 .. math::
     \text{{out}}_i = \frac{{\text{{input}}_i}}{{\text{{other}}}}
 
@@ -2080,7 +2099,7 @@ Example::
 
 add_docstr(torch.floor_divide,
            r"""
-floor_divide(input, other) -> Tensor
+floor_divide(input, other, out=None) -> Tensor
 
 Return the division of the inputs rounded down to the nearest integer. See :func:`torch.div`
 for type promotion and broadcasting rules.
@@ -2092,6 +2111,9 @@ for type promotion and broadcasting rules.
 Args:
     input (Tensor): the numerator tensor
     other (Tensor or Scalar): the denominator
+
+Keyword args:
+    {out}
 
 Example::
 
@@ -6484,6 +6506,13 @@ add_docstr(torch.full,
 full(size, fill_value, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
 Returns a tensor of size :attr:`size` filled with :attr:`fill_value`.
+
+.. warning::
+    In PyTorch 1.5 bool or integral :attr:`fill_value`s will produce a warning if
+    :attr:`dtype` or :attr:`out` are not set.
+    In a future PyTorch release, when :attr:`dtype` and :attr:`out` are not set
+    a bool :attr:`fill_value` will return a tensor of torch.bool dtype,
+    and an integral :attr:`fill_value` will return a tensor of torch.long dtype.
 
 Args:
     size (int...): a list, tuple, or :class:`torch.Size` of integers defining the
