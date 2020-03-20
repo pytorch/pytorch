@@ -4641,7 +4641,7 @@ def foo(x):
         # shouldn't throw a type error
         torch.jit.script(MyMod())
 
-    @_tmp_donotuse_dont_inline_everything
+    @_inline_everything
     def test_lazy_script(self):
         def untraceable(x):
             if x.ndim > 2:
@@ -4660,7 +4660,7 @@ def foo(x):
         FileCheck().check_not("goodbye").check_not("hello").run(traced_bad.graph)
 
         # Working example
-        untraceable = torch.jit._lazy_script_while_tracing(untraceable)
+        untraceable = torch.jit._script_if_tracing(untraceable)
 
         def fn2(x):
             return untraceable(x)
@@ -4668,7 +4668,7 @@ def foo(x):
         with self.capture_stdout():
             traced = torch.jit.trace(fn, [torch.ones(2, 2)])
 
-        FileCheck().check_not("goodbye").check_not("hello").run(traced.graph)
+        FileCheck().check("goodbye").check("hello").run(traced.graph)
 
     def test_big_int_literals(self):
         def ok():

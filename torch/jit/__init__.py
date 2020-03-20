@@ -1322,14 +1322,14 @@ def interface(obj):
     return obj
 
 
-def _lazy_script_while_tracing(fn):
+def _script_if_tracing(fn):
     """
     Compiles ``fn`` when it is first called during tracing. ``torch.jit.script``
     has a non-negligible start up time when it is first called due to
     lazy-initializations of many compiler builtins. Therefore you should not use
     it in library code. However, you may want to have parts of your library work
     in tracing even if they use control flow. In these cases, you should use
-    ``@torch.jit._lazy_script_while_tracing`` to substitute for
+    ``@torch.jit._script_if_tracing`` to substitute for
     ``torch.jit.script``.
     """
     # You can't modify closed-over variables in Python 2, so make this a dict and
@@ -1338,15 +1338,13 @@ def _lazy_script_while_tracing(fn):
 
     @functools.wraps(fn)
     def wrapper(*args):
-        if not torch._C._is_tracing():
+        if not torch._C.is_tracing():
             # Not tracing, don't do anything
             return fn(*args)
 
         if 'fn' not in compiled_fn:
             compiled_fn['fn'] = script(fn, _frames_up=1)
         return compiled_fn['fn'](*args)
-
-    wrapper._torchscript_original_fn = fn
 
     return wrapper
 
