@@ -62,6 +62,7 @@ torch/cmake/
 torch/lib/*.a*
 torch/lib/*.dll*
 torch/lib/*.exe*
+torch/lib/*.pdb*
 torch/lib/*.dylib*
 torch/lib/*.h
 torch/lib/*.lib

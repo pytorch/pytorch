@@ -226,6 +226,7 @@ class CMake:
             var: var for var in
             ('BLAS',
              'BUILDING_WITH_TORCH_LIBS',
+             'CMAKE_NINJA_CMCLDEPS_RC',
              'CUDA_HOST_COMPILER',
              'CUDA_NVCC_EXECUTABLE',
              'CUDA_SEPARABLE_COMPILATION',

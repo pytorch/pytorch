@@ -318,3 +318,8 @@ if(NOT TORCH_PYTHON_LINK_FLAGS STREQUAL "")
 endif()
 
 install(TARGETS torch_python DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+
+# Install PDB files for MSVC builds
+if (MSVC AND BUILD_SHARED_LIBS)
+  install(FILES $<TARGET_PDB_FILE:torch_python> DESTINATION "${TORCH_INSTALL_LIB_DIR}" OPTIONAL)
+endif()
