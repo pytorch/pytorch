@@ -2087,9 +2087,9 @@ graph(%input, %weight):
                 # TODO: uncomment when sort is supported
                 # x, _ = torch.sort(x)
                 x = F.interpolate(x, 4, mode='nearest')
-                # x = F.upsample(x, (32, 32))
-                # x = F.upsample_bilinear(x, (32, 32))
-                # x = F.upsample_nearest(x, (32, 32))
+                x = F.upsample(x, (32, 32))
+                x = F.upsample_bilinear(x, (32, 32))
+                x = F.upsample_nearest(x, (32, 32))
                 return x
 
         m = torch.jit.script(M())
