@@ -321,17 +321,15 @@ requirements exactly, it is likely that your program will have incorrect or
 undefined behavior.
 
 It is recommended to use :class:`~torch.nn.parallel.DistributedDataParallel`,
-instead of :class:`~torch.nn.DataParallel`, to do multi-GPU training, even if
+instead of :class:`~torch.nn.DataParallel` to do multi-GPU training, even if
 there is only a single node.
 
 The difference between :class:`~torch.nn.parallel.DistributedDataParallel` and
 :class:`~torch.nn.DataParallel` is: :class:`~torch.nn.parallel.DistributedDataParallel`
 uses multiprocessing where a process is created for each GPU, while
 :class:`~torch.nn.DataParallel` uses multithreading. By using multiprocessing,
-each GPU has its dedicated process, this avoids the performance burden caused
-by GIL of Python interpreter. Also, each process of
-:class:`~torch.nn.parallel.DistributedDataParallel` do its own optimization step,
-saving the parameter broadcasting.
+each GPU has its dedicated process, this avoids the performance overhead caused
+by GIL of Python interpreter. 
 
-If you use :class:`~torch.nn.parallel.DistributedDataParallel`, you should launch
-your program with `torch.distributed.launch`, see :ref:`distributed-launch`.
+If you use :class:`~torch.nn.parallel.DistributedDataParallel`, you could use 
+`torch.distributed.launch` utility to launch your program, see :ref:`distributed-launch`.
