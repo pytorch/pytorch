@@ -990,7 +990,7 @@ void TensorExprKernel::lowerToBackend(BackendType backendType) {
     }
   }
 
-  torch::jit::tensorexpr::schedule::LoopNest l(tensorOutputs);
+  torch::jit::tensorexpr::LoopNest l(tensorOutputs);
 
   // Compute non-output tensors_ inline
   for (auto& p : tensors_) {
