@@ -30,6 +30,7 @@ class TORCH_API Future final : public c10::intrusive_ptr_target {
  public:
   using Callback =
       std::function<void(const T&, const c10::optional<FutureError>&)>;
+  using NoArgCallback = std::function<void(void)>;
 
   Future() = default;
 
@@ -67,6 +68,7 @@ class TORCH_API Future final : public c10::intrusive_ptr_target {
     // holding a lock
     std::vector<Callback> cbs;
     cbs.swap(callbacks_);
+    std::vector<NoArgCallback> noArgCbs(std::move(noArgCallbacks_));
     lock.unlock();
     finished_cv_.notify_all();
     // There is no need to protect callbacks_ with the lock.
@@ -74,6 +76,9 @@ class TORCH_API Future final : public c10::intrusive_ptr_target {
     // list. pass value_, error_ for callback to easily check state.
     for (auto& callback : cbs) {
       callback(value_, error_);
+    }
+    for (auto& callback : noArgCbs) {
+      callback();
     }
   }
 
@@ -119,6 +124,16 @@ class TORCH_API Future final : public c10::intrusive_ptr_target {
     callbacks_.push_back(callback);
   }
 
+  void addCallback(const NoArgCallback& noArgCallback) {
+    std::unique_lock<std::mutex> lock(mutex_);
+    if (completed_) {
+      lock.unlock();
+      noArgCallback();
+      return;
+    }
+    noArgCallbacks_.push_back(noArgCallback);
+  }
+
  private:
   void setErrorInternal(
       std::string errorMsg,
@@ -130,6 +145,7 @@ class TORCH_API Future final : public c10::intrusive_ptr_target {
     // Move callbacks to a vector on the stack so we can access it without
     // holding a lock
     std::vector<Callback> cbs(std::move(callbacks_));
+    std::vector<NoArgCallback> noArgCbs(std::move(noArgCallbacks_));
     lock.unlock();
     finished_cv_.notify_all();
     // There is no need to protect callbacks_ with the lock.
@@ -138,12 +154,16 @@ class TORCH_API Future final : public c10::intrusive_ptr_target {
     for (auto& callback : cbs) {
       callback(value_, error_);
     }
+    for (auto& callback : noArgCbs) {
+      callback();
+    }
   }
 
   mutable std::mutex mutex_;
   std::atomic_bool completed_{false}; // is this future complete
   std::condition_variable finished_cv_;
   std::vector<Callback> callbacks_;
+  std::vector<NoArgCallback> noArgCallbacks_;
   T value_;
   c10::optional<FutureError> error_;
 };
