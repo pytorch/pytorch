@@ -39,10 +39,11 @@ static constexpr int NO_DEVICE = -2;
 
 // GraphTask holds metadata needed for a single execution of backward()
 struct GraphTask {
+  std::atomic<uint64_t> outstanding_tasks_ = 0;
   // Indicates if an error occurred while executing any task.  When this is
   // true, it signals all threads to stop executing.
-  std::atomic_bool has_error_;
-  std::atomic<uint64_t> outstanding_tasks_;
+  std::atomic_bool has_error_ = false;
+  std::atomic_bool future_completed_ = false;
   // It is safe to read grad_mode_ and keep_graph_ without synchronization
   bool keep_graph_;
   bool grad_mode_;
@@ -120,9 +121,7 @@ struct GraphTask {
       bool grad_mode,
       int reentrant_depth,
       bool exit_on_error = false)
-      : has_error_(false),
-        outstanding_tasks_(0),
-        keep_graph_(keep_graph),
+      : keep_graph_(keep_graph),
         grad_mode_(grad_mode),
         owner_(NO_DEVICE),
         reentrant_depth_(reentrant_depth),

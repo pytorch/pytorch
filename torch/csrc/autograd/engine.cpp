@@ -417,7 +417,9 @@ void GraphTask::set_exception(
     std::exception& e,
     const std::shared_ptr<Node>& fn) {
   set_exception_without_signal(fn);
-  future_result_->setErrorIfNeeded(e.what());
+  if (!future_completed_.exchange(true)) {
+    future_result_->setErrorIfNeeded(e.what());
+  }
 }
 
 static variable_list call_pre_hooks(Node& fn, variable_list inputs) {
@@ -808,19 +810,22 @@ std::shared_ptr<FutureVariableList> Engine::execute_with_graph_task(
 }
 
 void Engine::mark_graph_task_completed(std::shared_ptr<GraphTask>& graph_task) {
-  std::unique_lock<std::mutex> lock(graph_task->mutex_);
-  if (graph_task->future_result_->completed()) {
+  if (graph_task->future_completed_.exchange(true)) {
     // Future is already marked as completed.
     return;
   }
 
+  auto future_result = graph_task->future_result_;
   try {
     // Run post processing, before marking the future as complete.
+    // Drop lock prior to completing, to avoid holding across callbacks.
+    std::unique_lock<std::mutex> lock(graph_task->mutex_);
     graph_task_exec_post_processing(graph_task);
-    graph_task->future_result_->markCompleted(
-        std::move(graph_task->captured_vars_));
+    std::vector<Variable> vars = std::move(graph_task->captured_vars_);
+    lock.unlock();
+    future_result->markCompleted(std::move(vars));
   } catch (std::exception& e) {
-    graph_task->future_result_->setError(e.what());
+    future_result->setError(e.what());
   }
 }
 
