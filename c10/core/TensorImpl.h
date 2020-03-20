@@ -1670,6 +1670,11 @@ protected:
   // which fields are copied by value.
   bool allow_tensor_metadata_change_ = true;
 
+  // 64bit unsigned integer to store tensor permutation info
+  // 4bit for each dimension, can support at most 16 dimension's permutation
+  // eg. dimension 0,1,2 will be stored as 0000 .... 0000 0010 0001 0000
+  uint64_t permutation_info;
+
   // we decide to keep reserved_ and it will
   // live in Tensor after the split
   // The logic is that if Extend() or ReserveSpace() were ever called,
@@ -1734,7 +1739,7 @@ protected:
 //    miscellaneous bitfield
 //
 static_assert(sizeof(void*) != sizeof(int64_t) || // if 64-bit...
-              sizeof(TensorImpl) == sizeof(int64_t) * 31,
+              sizeof(TensorImpl) == sizeof(int64_t) * 32,
               "You changed the size of TensorImpl on 64-bit arch."
               "See Note [TensorImpl size constraints] on how to proceed.");
 } // namespace c10
