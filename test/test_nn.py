@@ -6150,7 +6150,7 @@ class TestNN(NNTestCase):
             a = torch.tensor([[1.0, 2, 3], [5.0, 5, 5]], device=device)
             b = torch.tensor([[1.0, 2, 3], [5.0, 5, 5]], device=device)
             self.assertEqual(
-                torch.kl_div(F.log_softmax(a, 1), F.log_softmax(b, 1), reduction=0, log_target=True),
+                F.kl_div(F.log_softmax(a, 1), F.log_softmax(b, 1), reduction='none', log_target=True),
                 torch.zeros_like(a)
             )
 

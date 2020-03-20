@@ -64,7 +64,7 @@ namespace functional {
 /// Example:
 /// ```
 /// namespace F = torch::nn::functional;
-/// F::kl_div(input, target, F::KLDivFuncOptions(torch::kNone));
+/// F::kl_div(input, target, F::KLDivFuncOptions(torch::kNone), log_target);
 /// ```
 using KLDivFuncOptions = KLDivLossOptions;
 } // namespace functional
