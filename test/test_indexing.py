@@ -1,5 +1,5 @@
-from common_utils import TestCase, run_tests
-from common_device_type import instantiate_device_type_tests, onlyCUDA, dtypes, dtypesIfCPU, dtypesIfCUDA
+from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_device_type import instantiate_device_type_tests, onlyCUDA, dtypes, dtypesIfCPU, dtypesIfCUDA
 import torch
 from torch import tensor
 import unittest
@@ -82,6 +82,23 @@ class TestIndexing(TestCase):
             y.index_put_((mask, ), y[mask], accumulate=True)
             self.assertEqual(y, torch.ones(size=(10, 10), device=device))
             self.assertEquals(len(w), 2)
+
+    def test_index_put_accumulate_large_tensor(self, device): 
+        # This test is for tensors with number of elements >= INT_MAX (2^31 - 1). 
+        N = (1 << 31) + 5
+        dt = torch.int8
+        a = torch.ones(N, dtype=dt, device=device)
+        indices = torch.LongTensor([0, 1, -2, -1])
+        values = torch.tensor([10, 11, 12, 13], dtype=dt, device=device)
+
+        a.index_put_((indices, ), values, accumulate=True)
+
+        self.assertEqual(a[0], 11)
+        self.assertEqual(a[1], 12)
+        self.assertEqual(a[2], 1)
+        self.assertEqual(a[-100], 1)
+        self.assertEqual(a[-2], 13)
+        self.assertEqual(a[-1], 14)
 
     def test_multiple_byte_mask(self, device):
         v = torch.randn(5, 7, 3, device=device)

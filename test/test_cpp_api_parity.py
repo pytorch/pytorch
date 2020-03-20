@@ -9,9 +9,9 @@ import re
 
 import torch
 from torch._six import PY2
-import common_utils as common
-import common_nn
-from common_cuda import TEST_CUDA
+import torch.testing._internal.common_utils as common
+import torch.testing._internal.common_nn as common_nn
+from torch.testing._internal.common_cuda import TEST_CUDA
 import torch.utils.cpp_extension
 from cpp_api_parity import sample_module, torch_nn_modules, TorchNNTestParams, CppArg, parse_parity_tracker_table
 
@@ -138,7 +138,7 @@ TORCH_NN_MODULE_TEST_INIT = Template("""\n
 void ${module_variant_name}_test_init(
     const std::string& saved_module_path,
     const std::string& device) {
-  torch::jit::script::Module m_init_by_python = torch::jit::load(saved_module_path);
+  torch::jit::Module m_init_by_python = torch::jit::load(saved_module_path);
 
   torch::manual_seed(2);
   ${module_qualified_name} m_init_by_cpp${cpp_constructor_args};

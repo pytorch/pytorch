@@ -53,7 +53,7 @@ Elaborating further:
 
 ### A GPU-Ready Tensor Library
 
-If you use NumPy, then you have used Tensors (a.k.a ndarray).
+If you use NumPy, then you have used Tensors (a.k.a. ndarray).
 
 ![Tensor illustration](./docs/source/_static/img/tensor_illustration.png)
 
@@ -280,19 +280,29 @@ ccmake build  # or cmake-gui build
 
 ### Docker Image
 
-Dockerfile is supplied to build images with cuda support and cudnn v7. You can pass `-e PYTHON_VERSION=x.y` flag to specify which Python version is to be used by Miniconda, or leave it unset to use the default. Build from pytorch repo directory as docker needs to copy git repo into docker filesystem while building the image.
-```
-docker build -t pytorch -f docker/pytorch/Dockerfile .  # [optional] --build-arg WITH_TORCHVISION=0
+#### Using pre-built images
+
+You can also pull a pre-built docker image from Docker Hub and run with docker v19.03+
+
+```bash
+docker run --gpus all --rm -ti --ipc=host pytorch/pytorch:latest
 ```
 
-You can also pull a pre-built docker image from Docker Hub and run with nvidia-docker,
-but this is not currently maintained and will pull PyTorch 0.2.
-```
-nvidia-docker run --rm -ti --ipc=host pytorch/pytorch:latest
-```
 Please note that PyTorch uses shared memory to share data between processes, so if torch multiprocessing is used (e.g.
 for multithreaded data loaders) the default shared memory segment size that container runs with is not enough, and you
 should increase shared memory size either with `--ipc=host` or `--shm-size` command line options to `nvidia-docker run`.
+
+#### Building the image yourself
+
+**NOTE:** Must be built with a docker version > 18.06
+
+The `Dockerfile` is supplied to build images with cuda support and cudnn v7.
+You can pass `PYTHON_VERSION=x.y` make variable to specify which Python version is to be used by Miniconda, or leave it
+unset to use the default.
+```bash
+make -f docker.Makefile
+# images are tagged as docker.io/${your_docker_username}/pytorch
+```
 
 ### Building the Documentation
 
@@ -324,6 +334,7 @@ Three pointers to get you started:
 * GitHub issues: bug reports, feature requests, install issues, RFCs, thoughts, etc.
 * Slack: The [PyTorch Slack](https://pytorch.slack.com/) hosts a primary audience of moderate to experienced PyTorch users and developers for general chat, online discussions, collaboration etc. If you are a beginner looking for help, the primary medium is [PyTorch Forums](https://discuss.pytorch.org). If you need a slack invite, please fill this form: https://goo.gl/forms/PP1AGvNHpSaJP8to1
 * newsletter: no-noise, one-way email newsletter with important announcements about pytorch. You can sign-up here: https://eepurl.com/cbG0rv
+* for brand guidelines, please visit our website at [pytorch.org](https://pytorch.org/)
 
 ## Releases and Contributing
 

@@ -29,6 +29,7 @@ __all__ = [
     'ShortStorage', 'CharStorage', 'ByteStorage', 'BoolStorage',
     'DoubleTensor', 'FloatTensor', 'LongTensor', 'IntTensor',
     'ShortTensor', 'CharTensor', 'ByteTensor', 'BoolTensor', 'Tensor',
+    'lobpcg',
 ]
 
 ################################################################################
@@ -36,20 +37,39 @@ __all__ = [
 ################################################################################
 
 if platform.system() == 'Windows':
-    NVTOOLSEXT_PATH = os.getenv('NVTOOLSEXT_PATH', 'C:\\Program Files\\NVIDIA Corporation\\NvToolsExt')
-
-    if os.path.exists(NVTOOLSEXT_PATH):
-        nvtoolsext_lib_path = os.path.join(NVTOOLSEXT_PATH, 'bin', 'x64')
-    else:
-        nvtoolsext_lib_path = ''
-
+    is_conda = os.path.exists(os.path.join(sys.prefix, 'conda-meta'))
     py_dll_path = os.path.join(sys.exec_prefix, 'Library', 'bin')
     th_dll_path = os.path.join(os.path.dirname(__file__), 'lib')
 
-    dll_paths = [th_dll_path, py_dll_path, nvtoolsext_lib_path, os.environ['PATH']]
+    if not os.path.exists(os.path.join(th_dll_path, 'nvToolsExt64_1.dll')) and \
+            not os.path.exists(os.path.join(py_dll_path, 'nvToolsExt64_1.dll')):
+        nvtoolsext_dll_path = os.path.join(
+            os.getenv('NVTOOLSEXT_PATH', 'C:\\Program Files\\NVIDIA Corporation\\NvToolsExt'), 'bin', 'x64')
+    else:
+        nvtoolsext_dll_path = ''
 
-    # then add the path to env
-    os.environ['PATH'] = ';'.join(dll_paths)
+    from .version import cuda as cuda_version
+    import glob
+    if cuda_version and len(glob.glob(os.path.join(th_dll_path, 'cudart64*.dll'))) == 0 and \
+            len(glob.glob(os.path.join(py_dll_path, 'cudart64*.dll'))) == 0:
+        cuda_version_1 = cuda_version.replace('.', '_')
+        cuda_path_var = 'CUDA_PATH_V' + cuda_version_1
+        default_path = 'C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v' + cuda_version
+        cuda_path = os.path.join(os.getenv(cuda_path_var, default_path), 'bin')
+    else:
+        cuda_path = ''
+
+    if sys.version_info >= (3, 8):
+        dll_paths = list(filter(os.path.exists, [th_dll_path, py_dll_path, nvtoolsext_dll_path, cuda_path]))
+
+        for dll_path in dll_paths:
+            os.add_dll_directory(dll_path)
+
+    if is_conda or sys.version_info < (3, 8):
+        dll_paths = [th_dll_path, py_dll_path, nvtoolsext_dll_path, cuda_path]
+        dll_paths = list(filter(os.path.exists, dll_paths)) + [os.environ['PATH']]
+
+        os.environ['PATH'] = ';'.join(dll_paths)
 
 
 # See Note [Global dependencies]
@@ -375,3 +395,7 @@ legacy_contiguous_format = contiguous_format
 from torch.multiprocessing._atfork import register_after_fork
 register_after_fork(torch.get_num_threads)
 del register_after_fork
+
+# Import tools that require fully imported torch (for applying
+# torch.jit.script as a decorator, for instance):
+from ._lobpcg import lobpcg

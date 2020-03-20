@@ -4,7 +4,7 @@ import torch
 import io
 from copy import deepcopy
 
-from common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests
 import tempfile
 
 class Foo(torch.nn.Module):
@@ -167,7 +167,7 @@ class TestQuantizedTensor(TestCase):
         qr = torch.quantize_per_tensor(r, scale, zero_point, torch.qint8)
         qr = qr.transpose(0, 1)
         rqr = qr.dequantize()
-        # compare transpose + dequantized result with orignal transposed result
+        # compare transpose + dequantized result with original transposed result
         self.assertTrue(np.allclose(r.numpy().transpose([1, 0, 2, 3]), rqr.numpy(), atol=2 / scale))
 
         qr = torch.quantize_per_tensor(r, scale, zero_point, torch.qint8)
@@ -237,7 +237,7 @@ class TestQuantizedTensor(TestCase):
 
     def test_qtensor_per_channel_load_save(self):
         r = torch.rand(20, 10, dtype=torch.float) * 4 - 2
-        scales = torch.rand(10) * 0.02 + 0.01
+        scales = torch.rand(10, dtype=torch.double) * 0.02 + 0.01
         zero_points = torch.round(torch.rand(10) * 20 + 1).to(torch.long)
         # quint32 is not supported yet
         for dtype in [torch.quint8, torch.qint8]:

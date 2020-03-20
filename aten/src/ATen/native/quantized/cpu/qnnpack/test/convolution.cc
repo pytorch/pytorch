@@ -40,7 +40,7 @@ TEST(CONVOLUTION_OP, 1x1_runtime_quant) {
       .groupInputChannels(23)
       .groupOutputChannels(19)
       .iterations(3)
-      .testQ8(true);
+      .testQ8(ConvolutionOperatorTester::Mode::Runtime);
 }
 
 TEST(CONVOLUTION_OP, 1x1_with_qmin) {
@@ -216,7 +216,7 @@ TEST(CONVOLUTION_OP, grouped_xzp_1x1_runtime_quant) {
         .groupInputChannels(pytorch_qnnp_params.q8conv_xzp.kthreshold + 1)
         .groupOutputChannels(19)
         .iterations(3)
-        .testQ8(true);
+        .testQ8(ConvolutionOperatorTester::Mode::Runtime);
   }
 }
 
@@ -252,7 +252,7 @@ TEST(CONVOLUTION_OP, grouped_1x3_runtime_quant) {
       .groupInputChannels(17)
       .groupOutputChannels(15)
       .iterations(3)
-      .testQ8(true);
+      .testQ8(ConvolutionOperatorTester::Mode::Runtime);
 }
 
 TEST(CONVOLUTION_OP, 3x1) {
@@ -480,7 +480,7 @@ TEST(CONVOLUTION_OP, depthwise_3x3_runtime_quant) {
       .kernelSize(3, 3)
       .groups(27)
       .iterations(3)
-      .testQ8(true);
+      .testQ8(ConvolutionOperatorTester::Mode::Runtime);
 }
 
 TEST(CONVOLUTION_OP, depthwise_3x3s2) {
@@ -557,7 +557,7 @@ TEST(CONVOLUTION_OP, depthwise_3x3d2x1_runtime_quant) {
       .dilation(2, 1)
       .groups(27)
       .iterations(3)
-      .testQ8(true);
+      .testQ8(ConvolutionOperatorTester::Mode::Runtime);
 }
 
 TEST(CONVOLUTION_OP, depthwise_5x5) {
@@ -644,5 +644,5 @@ TEST(CONVOLUTION_OP, depthwise_5x5d2x1_runtime_quant) {
       .dilation(2, 1)
       .groups(27)
       .iterations(3)
-      .testQ8(true);
+      .testQ8(ConvolutionOperatorTester::Mode::Runtime);
 }

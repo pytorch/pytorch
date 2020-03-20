@@ -153,6 +153,7 @@ SET(PYTORCH_QNNPACK_INIT_SRCS
 SET(PYTORCH_QNNPACK_EXEC_SRCS
   src/conv-run.cc
   src/fc-run.cc
+  src/fc-dynamic-run.cc
   src/indirection.c
   src/operator-run.c)
 

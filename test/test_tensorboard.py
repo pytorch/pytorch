@@ -44,7 +44,7 @@ except ImportError:
 skipIfNoMatplotlib = unittest.skipIf(not TEST_MATPLOTLIB, "no matplotlib")
 
 import torch
-from common_utils import TestCase, run_tests, TEST_WITH_ASAN
+from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_ASAN
 
 def tensor_N(shape, dtype=float):
     numel = np.prod(shape)
@@ -460,13 +460,21 @@ class TestTensorBoardSummary(BaseTestCase):
 def remove_whitespace(string):
     return string.replace(' ', '').replace('\t', '').replace('\n', '')
 
-def read_expected_content(function_ptr):
+def get_expected_file(function_ptr):
     module_id = function_ptr.__class__.__module__
-    test_dir = os.path.dirname(sys.modules[module_id].__file__)
+    test_file = sys.modules[module_id].__file__
+    # Look for the .py file (since __file__ could be pyc).
+    test_file = ".".join(test_file.split('.')[:-1]) + '.py'
+
+    # Use realpath to follow symlinks appropriately.
+    test_dir = os.path.dirname(os.path.realpath(test_file))
     functionName = function_ptr.id().split('.')[-1]
-    expected_file = os.path.join(test_dir,
-                                 "expect",
-                                 'TestTensorBoard.' + functionName + ".expect")
+    return os.path.join(test_dir,
+                        "expect",
+                        'TestTensorBoard.' + functionName + ".expect")
+
+def read_expected_content(function_ptr):
+    expected_file = get_expected_file(function_ptr)
     assert os.path.exists(expected_file)
     with open(expected_file, "r") as f:
         return f.read()
@@ -494,12 +502,7 @@ def compare_proto(str_to_compare, function_ptr):
     return remove_whitespace(str_to_compare) == remove_whitespace(expected)
 
 def write_proto(str_to_compare, function_ptr):
-    module_id = function_ptr.__class__.__module__
-    test_dir = os.path.dirname(sys.modules[module_id].__file__)
-    functionName = function_ptr.id().split('.')[-1]
-    expected_file = os.path.join(test_dir,
-                                 "expect",
-                                 'TestTensorBoard.' + functionName + ".expect")
+    expected_file = get_expected_file(function_ptr)
     with open(expected_file, 'w') as f:
         f.write(str(str_to_compare))
 

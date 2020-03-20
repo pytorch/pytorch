@@ -13,8 +13,8 @@
 #include <torch/csrc/distributed/rpc/script_call.h>
 #include <torch/csrc/distributed/rpc/script_remote_call.h>
 #include <torch/csrc/distributed/rpc/script_resp.h>
-#include <torch/csrc/jit/pickler.h>
-#include <torch/csrc/jit/unpickler.h>
+#include <torch/csrc/jit/serialization/pickler.h>
+#include <torch/csrc/jit/serialization/unpickler.h>
 
 namespace torch {
 namespace distributed {
@@ -220,6 +220,9 @@ c10::List<at::Tensor> cloneSparseTensors(
   // force a clone(). Some Tensors are effectively small views, only using
   // ~1% of the underlying Storage.
   auto worthRecopying = [](const at::Tensor& t) -> bool {
+    if (!t.has_storage()) {
+      return false; // avoid throwing below.
+    }
     auto storageSize = t.storage().elementSize() * t.storage().numel();
     auto usefulSize = t.element_size() * t.numel();
     constexpr size_t kMinMultiple = 2;
@@ -238,6 +241,15 @@ c10::List<at::Tensor> cloneSparseTensors(
 std::string wireSerialize(
     const std::vector<char>& payload,
     const std::vector<at::Tensor>& tensors) {
+  for (const auto& tensor : tensors) {
+    TORCH_CHECK(
+        tensor.device().is_cpu(),
+        "ProcessGroup RPC backend only supports",
+        " CPU tensors, please move your tensors to CPU before sending ",
+        "them over RPC. Found tensor on device: ",
+        tensor.device());
+  }
+
   struct Ent {
     std::string name;
     const char* data;
@@ -331,6 +343,8 @@ std::pair<std::vector<char>, std::vector<at::Tensor>> wireDeserialize(
       return dptr;
     };
 
+    // No need to pass typeResolver here, as it always processes string and
+    // tensors only
     torch::jit::Unpickler unpickler(
         metaDataReadFunc, nullptr, nullptr, sectionReadFunc, {});
     auto ival = unpickler.parse_ivalue();
