@@ -9,7 +9,7 @@ namespace rpc {
 PythonCall::PythonCall(SerializedPyObj&& serializedPyObj)
     : serializedPyObj_(std::move(serializedPyObj)) {}
 
-Message PythonCall::toMessage() && {
+Message PythonCall::toMessageImpl() && {
   auto payload = std::vector<char>(
       serializedPyObj_.payload_.begin(), serializedPyObj_.payload_.end());
   return Message(
