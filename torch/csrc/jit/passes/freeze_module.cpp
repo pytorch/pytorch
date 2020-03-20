@@ -64,7 +64,11 @@ class AttributePropagator {
   // corresponding value. Based on initial test on resnet50 and other torch
   // vision tests. GetAttrs are not too frequent so it is ok to chase GetAttr
   // chain to retrieve their values.
-  bool findConstantAttr(Node* node, std::string& name, Module& attrModule) {
+  bool findConstantAttr(Value* input, std::string& name, Module& attrModule) {
+    if (!input->type()->expect<ClassType>()->is_module()) {
+      return false;
+    }
+    Node* node = input->node();
     names_.clear();
     while (!(node->outputs()[0]->type() == attrModule.type())) {
       if (node->kind() == prim::GetAttr) {
@@ -126,16 +130,15 @@ class AttributePropagator {
         }
         if (n->kind() == prim::SetAttr || n->kind() == prim::GetAttr) {
           // TODO: handle interface attributes. For now, Exit if Module uses
-          // inteface attributes
+          // interface attributes
           if (n->kind() == prim::GetAttr) {
             TORCH_CHECK(
                 !n->output()->type()->cast<InterfaceType>(),
                 "attempted to freeze a module that uses interface attributes");
           }
-          auto inputNode = n->inputs()[0]->node();
           auto name = n->s(attr::name);
           auto attrModule = module_;
-          if (!findConstantAttr(inputNode, name, attrModule)) {
+          if (!findConstantAttr(n->inputs()[0], name, attrModule)) {
             continue;
           }
 
@@ -163,17 +166,18 @@ class AttributePropagator {
     }
     // FIXME: Current Alias analysis fails to track subvalues.
     // This is not a common scenario, for freezing, detect and error out.
-    for (auto it = usedAttrs.begin(); it != usedAttrs.end();) {
-      auto& val = *it;
-      it++;
-      for (auto rhs = it; rhs != usedAttrs.end(); rhs++) {
-        TORCH_CHECK(
-            !val.overlaps(*rhs),
-            "module contains attributes values that overlaps ",
-            val,
-            " and ",
-            *rhs);
-      }
+    IValue::HashAliasedIValues seen;
+    for (auto& val : usedAttrs) {
+      IValue::HashAliasedIValues subValues;
+      val.getSubValues(subValues);
+      TORCH_CHECK(
+          std::all_of(
+              subValues.begin(),
+              subValues.end(),
+              [&seen](const IValue& v) { return seen.count(v) == 0; }),
+          "module contains attributes values that overlaps ",
+          val);
+      seen.insert(subValues.begin(), subValues.end());
     }
   }
 
@@ -211,7 +215,7 @@ class AttributePropagator {
   void propagateAttributes(std::shared_ptr<Graph>& graph) {
     std::unordered_map<ModulePtr, std::unordered_map<std::string, Value*>>
         attrValues;
-    auto isEval = !module_.is_training();
+    auto isEval = !module_.hasattr("training") || !module_.is_training();
     GRAPH_DEBUG("Freezing Module in ", isEval ? "eval mode" : "training mode");
     auto block = graph->block();
     std::stack<Block*> blocks({block});
@@ -235,9 +239,12 @@ class AttributePropagator {
         if (n->kind() == prim::GetAttr) {
           auto name = n->s(attr::name);
           auto attrModule = module_;
-          auto inputNode = n->inputs()[0]->node();
-          if (!findConstantAttr(inputNode, name, attrModule)) {
-            GRAPH_DEBUG("attribute: ", name, " is mutable.")
+          auto input = n->inputs()[0];
+          if (!findConstantAttr(input, name, attrModule)) {
+            GRAPH_DEBUG(
+                input->type()->expect<ClassType>()->is_module()
+                    ? "attribute: " + name + " is mutable."
+                    : "");
             continue;
           }
           TORCH_INTERNAL_ASSERT(attrModule.hasattr(name));
@@ -442,7 +449,7 @@ Module freeze_module(const Module& module) {
   // TODO: Determine if freezing in training mode is useful and further clarify
   // its semantics.
   TORCH_CHECK(
-      !module.is_training(),
+      !module.hasattr("training") || !module.is_training(),
       "Freezing module in training mode is not yet supported");
 
   Method method = module.get_method("forward");
