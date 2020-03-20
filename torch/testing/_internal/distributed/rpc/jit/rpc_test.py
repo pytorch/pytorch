@@ -760,9 +760,22 @@ class JitRpcTest(LocalRRefTest, JitRpcAsyncOpTest, RpcAgentTestFixture):
             two_args_two_kwargs,
             args=inputs
         )
+        expected_res = torch.tensor([10, 10])
         @torch.jit.script
-        def future_wait(fut):
+        def future_wait_in_script(fut):
             # type: (Future[Tensor]) -> Tensor
             return fut.wait()
 
-        self.assertEqual(future_wait(ret_fut), torch.tensor([10, 10]))
+        self.assertEqual(future_wait_in_script(ret_fut), expected_res)
+
+        @torch.jit.script
+        def future_return_to_python(dst_rank, inputs):
+            # type: (int, Tuple[Tensor, Tensor]) -> Future[Tensor]
+            return rpc.rpc_async(
+                "worker{}".format(dst_rank),
+                two_args_two_kwargs,
+                inputs
+            )
+
+        fut_res = future_return_to_python(dst_rank, inputs)
+        self.assertEqual(fut_res.wait(), expected_res)

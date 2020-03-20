@@ -783,6 +783,8 @@ inline py::object toPyObject(IValue ivalue) {
     return py::reinterpret_borrow<py::object>(ivalue.toPyObject());
   } else if (ivalue.isCapsule()) {
     return py::cast(ivalue.toCapsule());
+  } else if (ivalue.isFuture()) {
+    return py::cast(PythonFutureWrapper(ivalue.toFuture()));
   } else if (ivalue.isRRef()) {
 #ifdef USE_DISTRIBUTED
     return py::cast(torch::distributed::rpc::PyRRef(
