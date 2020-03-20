@@ -6487,27 +6487,27 @@ class TestTorchDeviceType(TestCase):
         if device == 'cuda':
             return
         a = torch.randn(4, 4, dtype=torch.float, device=device)
-        a_bf16= a.bfloat16()
+        a_bf16 = a.bfloat16()
         out = torch.clamp(a, min=0, max=2)
-        out_bf16= torch.clamp(a_bf16, min=0, max=2)
+        out_bf16 = torch.clamp(a_bf16, min=0, max=2)
         self.assertEqual(out, out_bf16, prec=0.01, exact_dtype=False)
 
     def test_clamp_min_bfloat16(self, device):
         if device == 'cuda':
             return
         a = torch.randn(4, 4, dtype=torch.float, device=device)
-        a_bf16= a.bfloat16()
+        a_bf16 = a.bfloat16()
         out = torch.clamp_min(a, min=0)
-        out_bf16= torch.clamp_min(a_bf16, min=0)
+        out_bf16 = torch.clamp_min(a_bf16, min=0)
         self.assertEqual(out, out_bf16, prec=0.01, exact_dtype=False)
 
     def test_clamp_max_bfloat16(self, device):
         if device == 'cuda':
             return
         a = torch.randn(4, 4, dtype=torch.float, device=device)
-        a_bf16= a.bfloat16()
+        a_bf16 = a.bfloat16()
         out = torch.clamp_max(a, max=2)
-        out_bf16= torch.clamp_max(a_bf16, max=2)
+        out_bf16 = torch.clamp_max(a_bf16, max=2)
         self.assertEqual(out, out_bf16, prec=0.01, exact_dtype=False)
 
     def test_cat_empty_legacy(self, device):
@@ -16017,12 +16017,14 @@ tensor_op_tests = [
         1e-5, 1e-5, 1e-5, _float_types_no_half, False),
     ('addcdiv', '', _small_2d,
         lambda t, d: [_small_2d(t, d),
-                      _small_2d(t, d, has_zeros=False)], 1, 1e-5, 1e-3),
+                      _small_2d(t, d, has_zeros=False)], 1, 1e-5, 1e-3,
+        _types, True,
+        [_wrap_maybe_warns("Integer division .+")]),
     ('addcdiv', 'scalar', _small_2d,
         lambda t, d: [_number(2.8, 1, t), _small_2d(t, d),
                       _small_2d(t, d, has_zeros=False)], 1, 1e-5, 1e-3,
         _types, True,
-        [_wrap_maybe_warns("This overload of addcdiv_? is deprecated")]),
+        [_wrap_maybe_warns("This overload of addcdiv_? is deprecated|Integer division .+")]),
     ('addcmul', '', _small_3d, lambda t, d: [_small_3d(t, d), _small_3d(t, d)], 1e-2, 2e-5, 1e-3),
     ('addcmul', 'scalar', _small_3d,
         lambda t, d: [_number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)], 1e-2,
@@ -16208,11 +16210,11 @@ tensor_op_tests = [
     ('transpose', 'neg_dim', _new_t((1, 2, 3, 4)), lambda t, d: [-1, -2], ),
     ('tolist', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, False),
     ('topk', 'dim_sort', _small_3d_unique, lambda t, d: [2, 1, False, True],
-        1e-5, 1e-5, 1e-5, _types, False),
+        1e-5, 1e-5, 1e-5, _types2, False),
     ('topk', 'neg_dim_sort', _small_3d_unique, lambda t, d: [2, -1, False, True],
-        1e-5, 1e-5, 1e-5, _types, False),
+        1e-5, 1e-5, 1e-5, _types2, False),
     ('topk', 'dim_desc_sort', _small_3d_unique, lambda t, d: [2, 1, True, True],
-        1e-5, 1e-5, 1e-5, _types, False),
+        1e-5, 1e-5, 1e-5, _types2, False),
     ('trace', '', _medium_2d, lambda t, d: [], 1e-3, 1e-5, 1e-5, _types, False),
     ('tril', '', _medium_2d, lambda t, d: [],),
     ('tril', 'zero_stride', _medium_2d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, False),
