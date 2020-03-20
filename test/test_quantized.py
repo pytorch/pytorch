@@ -2190,7 +2190,7 @@ class TestQuantizedConv(unittest.TestCase):
             np.testing.assert_array_almost_equal(
                 q_result_ref.int_repr().numpy(),
                 q_outp.int_repr().numpy(),
-                decimal=0, err_msg=f'X={X}, qX={X_q}, W={W}, qW={W_q}')
+                decimal=0)
 
     @given(batch_size=st.integers(1, 4),
            input_channels_per_group=st.sampled_from([2, 4, 5, 8, 16]),
