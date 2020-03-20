@@ -627,7 +627,7 @@ std::vector<at::Tensor> flatten_for_scatter_gather(
       }
       // no_copy operation is allowed if other tensor does not share storage with tensors
       // in tensor_list or other tensor is properly aligned according to rank.
-      if (!other[i].storage().is_alias_of(tensor_lists[i][0].storage()) ||
+      if (other[i].storage().is_alias_of(tensor_lists[i][0].storage()) &&
           other[i].storage_offset() != (tensor_lists[i][0].storage_offset() +
             rank * tensor_lists[i][0].numel())) {
         no_copy = false;
