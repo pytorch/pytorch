@@ -1966,7 +1966,6 @@ struct CAFFE2_API AnyClassType : public Type {
   std::string python_str() const override {
     return "Class Type";
   }
-
   std::string str() const override {
     return "AnyClassType";
   }
