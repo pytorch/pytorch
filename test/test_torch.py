@@ -6565,6 +6565,23 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(res1, res2)
         self.assertTrue(res2.is_contiguous(memory_format=torch.channels_last))
 
+    @onlyCUDA
+    @deviceCountAtLeast(2)
+    def test_cat_different_devices(self, devices):
+        cuda0 = torch.randn((3, 3), device=devices[0])
+        cuda1 = torch.randn((3, 3), device=devices[1])
+        with self.assertRaisesRegex(RuntimeError,
+                                    "input tensors must be on the same device"):
+            torch.cat((cuda0, cuda1))
+        cpu = torch.randn(3, 3)
+        with self.assertRaisesRegex(RuntimeError,
+                                    "input tensors must be on the same device"):
+            torch.cat((cuda0, cpu))
+        with self.assertRaisesRegex(RuntimeError,
+                                    "input tensors must be on the same device"):
+            torch.cat((cpu, cuda0))
+
+
     def test_is_set_to(self, device):
         t1 = torch.empty(3, 4, 9, 10, device=device)
         t2 = torch.empty(3, 4, 9, 10, device=device)
