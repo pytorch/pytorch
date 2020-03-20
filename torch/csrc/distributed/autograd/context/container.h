@@ -74,13 +74,21 @@ class TORCH_API DistAutogradContainer {
   rpc::worker_id_t getWorkerId() const;
 
   // Can set current context id if there is no valid context yet
-  void setCurrentContextId(int64_t contextId);
+  static void setCurrentContextId(int64_t contextId);
+
+  // Forcibly sets the thread local current context id. Should only be used in
+  // cases where you know what you're doing and need to override the thread
+  // local. Otherwise, use setCurrentContextId instead.
+  static void forceCurrentContextId(int64_t contextId);
 
   // Clear current context id
   void clearCurrentContext();
 
   // Returns the number of autograd contexts in the container.
   size_t numAutogradContexts() const;
+
+  // Returns the current thread local context id for this thread.
+  static int64_t currentContextId();
 
  private:
   DistAutogradContainer();

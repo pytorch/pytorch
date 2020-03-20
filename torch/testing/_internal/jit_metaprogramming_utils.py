@@ -11,6 +11,7 @@ import torch.jit._logging
 import torch.jit.frontend
 from torch.testing._internal.common_nn import module_tests, new_module_tests
 from copy import deepcopy
+import math  # noqa: F401
 
 # Testing utils
 from torch._six import inf
