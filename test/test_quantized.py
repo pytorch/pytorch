@@ -239,6 +239,38 @@ class TestQuantizedOps(TestCase):
         self.assertEqual(qY, qY_hat,
                          message="Sigmoid failed: {} vs. {}".format(qY, qY_hat))
 
+    """Tests the correctness of the quantized::qhardsigmoid op."""
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
+                       elements=hu.floats(-1e3, 1e3, allow_nan=False, allow_infinity=False),
+                       qparams=hu.qparams()))
+    def test_qhardsigmoid(self, X):
+        X, (scale, zero_point, torch_type) = X
+
+        X = torch.from_numpy(X)
+
+        qX = torch.quantize_per_tensor(X, scale=scale,
+                                       zero_point=zero_point,
+                                       dtype=torch_type)
+        dqX = qX.dequantize()
+
+
+        # Quantize the reference to account for max error.
+        # Note that the output scale has +1, because we use scale of 1.0/2^BITS
+        # in the implementations.
+        f_min, f_max = 0.0, 1.0
+        q_min, q_max = torch.iinfo(torch_type).min, torch.iinfo(torch_type).max
+        output_scale = (f_max - f_min) / (q_max - q_min + 1.0)
+        output_zero_point = 0 if torch_type == torch.qint32 else q_min
+        dqY_hat = F.hardsigmoid(dqX)
+        qY_hat = torch.quantize_per_tensor(dqY_hat, scale=output_scale,
+                                           zero_point=output_zero_point,
+                                           dtype=torch_type)
+
+        qY = torch.nn.quantized.functional.hardsigmoid(qX)
+        self.assertEqual(qY, qY_hat,
+                         message="Hardsigmoid failed: {} vs. {}".format(qY, qY_hat))
+
+
     """Tests the correctness of the quantized::qnnpack_tanh op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
                        qparams=hu.qparams()))
@@ -827,7 +859,7 @@ class TestQuantizedOps(TestCase):
                              message=error_message.format(name + '.zero_point', scale,
                              X_hat.q_zero_point()))
 
-    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=5,
+    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=5, max_dims=5,
                                               min_side=5, max_side=10),
                        qparams=hu.qparams(dtypes=torch.quint8)),
            kernel=st.sampled_from((3, 5)),
@@ -860,6 +892,7 @@ class TestQuantizedOps(TestCase):
         X_ref = torch.nn.functional.avg_pool3d(
             X, kernel_size=kernel, stride=stride, padding=padding,
             ceil_mode=ceil_mode, count_include_pad=count_include_pad, divisor_override=divisor_override)
+
         ops_under_test = {
             "nn.functional": torch.nn.functional.avg_pool3d,
             "nn.quantized.functional": torch.nn.quantized.functional.avg_pool3d
@@ -870,7 +903,6 @@ class TestQuantizedOps(TestCase):
                         count_include_pad=count_include_pad, divisor_override=divisor_override)
             qX_ref = torch.quantize_per_tensor(X_ref, scale=qX_hat.q_scale(), zero_point=qX_hat.q_zero_point(),
                                                dtype=torch_type)
-
             self.assertEqual(qX_ref.int_repr().to(torch.double), qX_hat.int_repr().to(torch.double), prec=1.0,
                              message=error_message.format(name, qX_hat.int_repr(), qX_ref.int_repr()))
             self.assertEqual(scale, qX_hat.q_scale(),

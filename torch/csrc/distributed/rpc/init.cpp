@@ -120,7 +120,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
           application has called a graceful shutdown. Invoking methods on a
           deleted RRef leads to undefined behaviors. RRef implementation only
           offers best-effort error detection, and applications should not use
-          ``UserRRef``s after ``rpc.shutdown()``.
+          ``UserRRefs`` after ``rpc.shutdown()``.
 
           .. warning::
               RRefs can only be serialized and deserialized by the RPC module.
@@ -443,16 +443,17 @@ If the future completes with an error, an exception is thrown.
   module.def(
       "_invoke_rpc_torchscript",
       [](const std::string& dstWorkerName,
-         const std::string& qualifiedNameStr,
-         const py::args& args,
-         const py::kwargs& kwargs) {
+         const py::object& userCallable,
+         const py::tuple& argsTuple,
+         const py::dict& kwargsDict) {
         DCHECK(!PyGILState_Check());
-        const c10::QualifiedName qualifiedName(qualifiedNameStr);
         // No need to catch exception here, if function can not be found,
         // exception will be thrown in get_function() call; if args do not match
         // with function schema, exception will be thrown in
         // createStackForSchema() call.
         auto& pythonRpcHandler = PythonRpcHandler::getInstance();
+        c10::QualifiedName qualifiedName =
+            pythonRpcHandler.getQualifiedName(userCallable);
         c10::FunctionSchema functionSchema =
             pythonRpcHandler.jitCompilationUnit()
                 ->get_function(qualifiedName)
@@ -461,7 +462,10 @@ If the future completes with an error, an exception is thrown.
         {
           py::gil_scoped_acquire acquire;
           stack = torch::jit::createStackForSchema(
-              functionSchema, args, kwargs, c10::nullopt);
+              functionSchema,
+              argsTuple.cast<py::args>(),
+              kwargsDict.cast<py::kwargs>(),
+              c10::nullopt);
         }
         DCHECK(!PyGILState_Check());
         c10::intrusive_ptr<c10::ivalue::Future> fut =

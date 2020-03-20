@@ -326,6 +326,20 @@ binary_mac_params: &binary_mac_params
   environment:
     BUILD_ENVIRONMENT: << parameters.build_environment >>
 
+
+promote_common: &promote_common
+  docker:
+    - image: pytorch/release
+  parameters:
+    package_name:
+      description: "package name to promote"
+      type: string
+      default: ""
+  environment:
+    PACKAGE_NAME: << parameters.package_name >>
+    ANACONDA_API_TOKEN: ${CONDA_PYTORCHBOT_TOKEN}
+    AWS_ACCESS_KEY_ID: ${PYTORCH_BINARY_AWS_ACCESS_KEY_ID}
+    AWS_SECRET_ACCESS_KEY: ${PYTORCH_BINARY_AWS_SECRET_ACCESS_KEY}
 ##############################################################################
 # Job specs
 ##############################################################################
@@ -508,15 +522,28 @@ jobs:
           no_output_timeout: 30m
           command: |
             curl --retry 3 -kLO https://ossci-windows.s3.amazonaws.com/cuda_10.1.243_426.00_win10.exe
+            7z x cuda_10.1.243_426.00_win10.exe -ocuda_10.1.243_426.00_win10
+            cd cuda_10.1.243_426.00_win10
             mkdir cuda_install_logs
-            ./cuda_10.1.243_426.00_win10.exe -s -loglevel:6 -log:"$(pwd -W)/cuda_install_logs"
+            ./setup.exe -s nvcc_10.1 cuobjdump_10.1 nvprune_10.1 cupti_10.1 cublas_10.1 cublas_dev_10.1 cudart_10.1 cufft_10.1 cufft_dev_10.1 curand_10.1 curand_dev_10.1 cusolver_10.1 cusolver_dev_10.1 cusparse_10.1 cusparse_dev_10.1 nvgraph_10.1 nvgraph_dev_10.1 npp_10.1 npp_dev_10.1 nvrtc_10.1 nvrtc_dev_10.1 nvml_dev_10.1 -loglevel:6 -log:"$(pwd -W)/cuda_install_logs"
+            if [[ "${VC_YEAR}" == "2017" ]]; then
+              cp -r CUDAVisualStudioIntegration/extras/visual_studio_integration/MSBuildExtensions/* "C:/Program Files (x86)/Microsoft Visual Studio/2017/BuildTools/Common7/IDE/VC/VCTargets/BuildCustomizations/"
+            else
+              cp -r CUDAVisualStudioIntegration/extras/visual_studio_integration/MSBuildExtensions/* "C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/MSBuild/Microsoft/VC/v160/BuildCustomizations/"
+            fi
+            curl --retry 3 -kLO https://ossci-windows.s3.amazonaws.com/NvToolsExt.7z
+            7z x NvToolsExt.7z -oNvToolsExt
+            mkdir -p "C:/Program Files/NVIDIA Corporation/NvToolsExt"
+            cp -r NvToolsExt/* "C:/Program Files/NVIDIA Corporation/NvToolsExt/"
+            export NVTOOLSEXT_PATH="C:\\Program Files\\NVIDIA Corporation\\NvToolsExt\\"
             cat cuda_install_logs/LOG.setup.exe.log
             if ! ls "/c/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v10.1/bin/nvcc.exe"
             then
               echo "CUDA installation failed"
               exit 1
             fi
-            rm -rf ./cuda_install_logs
+            cd ..
+            rm -rf ./cuda_10.1.243_426.00_win10
             rm -f ./cuda_10.1.243_426.00_win10.exe
       - run:
           name: Install Cudnn
@@ -1528,6 +1555,24 @@ jobs:
             instruments -s -devices
             fastlane scan
 
+  promote_s3:
+    <<: *promote_common
+    steps:
+      - checkout
+      - run:
+          name: Running promote script
+          command: |
+            scripts/release/promote/wheel_to_s3.sh
+
+  promote_conda:
+    <<: *promote_common
+    steps:
+      - checkout
+      - run:
+          name: Running promote script
+          command: |
+            scripts/release/promote/conda_to_conda.sh
+
   # update_s3_htmls job
   # These jobs create html files for every cpu/cu## folder in s3. The html
   # files just store the names of all the files in that folder (which are
@@ -1732,6 +1777,14 @@ jobs:
 workflows:
   build:
     jobs:
+      - setup:
+          # Run this job on everything since it is
+          # the dependency for everything.
+          filters:
+            tags:
+              only: /.*/
+            branches:
+              only: /.*/
       # Warning: indentation here matters!
 
       - pytorch_windows_build:
@@ -1866,7 +1919,6 @@ workflows:
           requires:
             - setup
             - pytorch_windows_vs2019_py36_cuda10.1_build
-      - setup
       - pytorch_linux_build:
           name: pytorch_linux_xenial_py3_5_build
           requires:
@@ -6958,3 +7010,49 @@ workflows:
       - docker_hub_index_job
 
 
+  # Promotion workflow
+  promote:
+    jobs:
+      # Requires manual approval by someone in org-member
+      # CircleCI security context
+      - promote_approval:
+          context: org-member
+          type: approval
+          filters:
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*/
+            branches:
+                ignore: /.*/
+      - promote_s3:
+          context: org-member
+          name: promote_s3_libtorch
+          package_name: libtorch
+          requires:
+            - promote_approval
+          filters:
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*/
+            branches:
+                ignore: /.*/
+      - promote_s3:
+          context: org-member
+          name: promote_s3_torch
+          package_name: torch
+          requires:
+            - promote_approval
+          filters:
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*/
+            branches:
+                ignore: /.*/
+      - promote_conda:
+          context: org-member
+          name: promote_conda_pytorch
+          package_name: pytorch
+          requires:
+            - promote_approval
+          filters:
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*/
+            branches:
+                ignore: /.*/
