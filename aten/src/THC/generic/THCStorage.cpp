@@ -5,7 +5,9 @@
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/typeid.h>
 
-#ifdef __HIP_PLATFORM_HCC__                                                                                                                                                 #include <hip/hip_version.h>                                                                                                                                                #endif
+#ifdef __HIP_PLATFORM_HCC__
+#include <hip/hip_version.h>
+#endif
 
 scalar_t* THCStorage_(data)(THCState *state, const THCStorage *self)
 {

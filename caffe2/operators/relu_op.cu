@@ -6,7 +6,9 @@
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/utils/math.h"
 
-#ifdef __HIP_PLATFORM_HCC__                                                                                                                                                 #include <hip/hip_version.h>                                                                                                                                                #endif
+#ifdef __HIP_PLATFORM_HCC__
+#include <hip/hip_version.h>
+#endif
 
 namespace caffe2 {
 

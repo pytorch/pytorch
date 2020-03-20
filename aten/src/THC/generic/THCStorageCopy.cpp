@@ -2,7 +2,9 @@
 #define THC_GENERIC_FILE "THC/generic/THCStorageCopy.cpp"
 #else
 
-#ifdef __HIP_PLATFORM_HCC__                                                                                                                                                 #include <hip/hip_version.h>                                                                                                                                                #endif
+#ifdef __HIP_PLATFORM_HCC__
+#include <hip/hip_version.h>
+#endif
 
 void THCStorage_(copyCPU)(THCState *state, THCStorage *self, struct THStorage *src)
 {
