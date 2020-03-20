@@ -24,7 +24,7 @@ void THCStorage_(set)(THCState *state, THCStorage *self, ptrdiff_t index, scalar
 {
   THArgCheck((index >= 0) && (index < self->numel()), 2, "index out of bounds");
   cudaStream_t stream = c10::cuda::getCurrentCUDAStream();
-#ifdef __HIP_PLATFORM_HCC__
+#if HIP_VERSION >= 310
   THCudaCheck(hipMemcpyWithStream(THCStorage_(data)(state, self) + index, &value, sizeof(scalar_t),
                                   cudaMemcpyHostToDevice,
                                   stream));
@@ -41,7 +41,7 @@ scalar_t THCStorage_(get)(THCState *state, const THCStorage *self, ptrdiff_t ind
   THArgCheck((index >= 0) && (index < self->numel()), 2, "index out of bounds");
   scalar_t value;
   cudaStream_t stream = c10::cuda::getCurrentCUDAStream();
-#ifdef __HIP_PLATFORM_HCC__
+#if HIP_VERSION >= 310
   THCudaCheck(hipMemcpyWithStream(&value, THCStorage_(data)(state, self) + index, sizeof(scalar_t),
                                   cudaMemcpyDeviceToHost, stream));
 #else

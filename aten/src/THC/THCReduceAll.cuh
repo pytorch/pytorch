@@ -320,7 +320,7 @@ bool THC_reduceAll(THCState* state,
   // the host (synchronous!)
   if (!outOnDevice) {
     cudaStream_t stream = c10::cuda::getCurrentCUDAStream();
-#ifdef __HIP_PLATFORM_HCC__
+#if HIP_VERSION >= 310
     THCudaCheck(hipMemcpyWithStream(out,
                                     devOut,
                                     sizeof(AccT),
