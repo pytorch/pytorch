@@ -778,10 +778,6 @@
 
 - func: conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor
 
-- func: _conv2d_prepack(Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1, float? output_min=None, float? output_max=None) -> Tensor
-
-- func: _conv2d_packed(Tensor packed_weight, Tensor input) -> Tensor
-
 - func: conv3d(Tensor input, Tensor weight, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] dilation=1, int groups=1) -> Tensor
 
 - func: conv_tbc(Tensor self, Tensor weight, Tensor bias, int pad=0) -> Tensor
@@ -1310,10 +1306,38 @@
     CPU: floor_out
     CUDA: floor_out
 
-- func: floor_divide(Tensor input, Tensor other) -> Tensor
+- func: floor_divide(Tensor self, Tensor other) -> Tensor
+  variants: function, method
+  dispatch:
+    CPU: floor_divide
+    CUDA: floor_divide
+    SparseCPU: floor_divide_sparse
+    SparseCUDA: floor_divide_sparse
   supports_named_tensor: True
 
-- func: floor_divide.Scalar(Tensor input, Scalar other) -> Tensor
+- func: floor_divide_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  variants: method
+  dispatch:
+    CPU: floor_divide_
+    CUDA: floor_divide_
+    SparseCPU: floor_divide_sparse_
+    SparseCUDA: floor_divide_sparse_
+  supports_named_tensor: True
+
+- func: floor_divide.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: floor_divide_out
+    CUDA: floor_divide_out
+    SparseCPU: floor_divide_out_sparse_zerodim
+    SparseCUDA: floor_divide_out_sparse_zerodim
+  supports_named_tensor: True
+
+- func: floor_divide.Scalar(Tensor self, Scalar other) -> Tensor
+  variants: function, method
+  supports_named_tensor: True
+
+- func: floor_divide_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  variants: method
   supports_named_tensor: True
 
 - func: frac(Tensor self) -> Tensor
@@ -1576,10 +1600,6 @@
 
 - func: linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor
   python_module: nn
-
-- func: _linear_prepack(Tensor weight, Tensor? bias=None, float? output_min=None, float? output_max=None) -> Tensor
-
-- func: _linear_packed(Tensor packed_weight, Tensor input) -> Tensor
 
 - func: mkldnn_linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor
   python_module: nn
@@ -5054,7 +5074,7 @@
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_min
+    CPU: min
     CUDA: legacy::cuda::_th_min
     QuantizedCPU: min_quant
   supports_named_tensor: True
@@ -5069,7 +5089,7 @@
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_max
+    CPU: max
     CUDA: legacy::cuda::_th_max
     QuantizedCPU: max_quant
   supports_named_tensor: True
@@ -5588,6 +5608,23 @@
   dispatch:
     CPU: glu_backward
     CUDA: legacy::cuda::_thnn_glu_backward
+
+- func: hardsigmoid.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: nn
+
+- func: hardsigmoid(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  python_module: nn
+  dispatch:
+    CPU: hardsigmoid
+    QuantizedCPU: quantized_hardsigmoid
+
+- func: hardsigmoid_(Tensor(a!) self) -> Tensor(a!)
+  python_module: nn
+
+- func: hardsigmoid_backward(Tensor grad_output, Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  python_module: nn
 
 - func: hardtanh.out(Tensor self, Scalar min_val=-1, Scalar max_val=1, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn

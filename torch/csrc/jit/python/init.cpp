@@ -46,6 +46,7 @@
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/passes/utils/check_alias_annotation.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
+#include <torch/csrc/jit/passes/xnnpack_rewrite.h>
 #include <torch/csrc/jit/runtime/print_handler.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/python/python_arg_flatten.h>
@@ -58,6 +59,8 @@
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/python/python_tree_views.h>
 #include <torch/csrc/jit/frontend/tracer.h>
+#include <torch/csrc/jit/tensorexpr/execution_counter.h>
+#include <torch/csrc/jit/tensorexpr/kernel.h>
 
 #include <c10/macros/Export.h>
 #include <caffe2/serialize/inline_container.h>
@@ -97,7 +100,7 @@ bool loadPythonClasses() {
 }
 } // anonymous namespace
 
-#if !defined(_WIN32) && !defined(__HIP_PLATFORM_HCC__)
+#if !defined(__HIP_PLATFORM_HCC__)
 TORCH_API void runJITCPPTests(bool runCuda);
 #endif
 
@@ -304,7 +307,7 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_create_autodiff_subgraphs",
           [](std::shared_ptr<Graph> graph) { CreateAutodiffSubgraphs(graph); })
-#if defined(BUILDING_TESTS) && !defined(_WIN32) && !defined(__HIP_PLATFORM_HCC__)
+#if defined(BUILDING_TESTS) && !defined(__HIP_PLATFORM_HCC__)
       .def(
           "_jit_run_cpp_tests",
           [](bool runCuda) {
@@ -341,6 +344,8 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_specialize_autogradzero", specializeAutogradZero)
       .def("_jit_override_can_fuse_on_cpu", &overrideCanFuseOnCPU)
       .def("_jit_override_can_fuse_on_gpu", &overrideCanFuseOnGPU)
+      .def("_jit_can_fuse_on_cpu", &canFuseOnCPU)
+      .def("_jit_can_fuse_on_gpu", &canFuseOnGPU)
       .def("_jit_register_tensorexpr_fuser", &registerTensorExprFuser)
       .def(
           "_jit_differentiate",
@@ -405,9 +410,69 @@ void initJITBindings(PyObject* module) {
             return nullptr;
           })
       .def(
+          "_jit_get_trigger_value",
+          [](const std::string& trigger_name) {
+            using namespace torch::jit::tensorexpr;
+            ExecutionTrigger* trigger =
+                ExecutionTriggerList::GetInstance().FindByName(trigger_name);
+            return trigger->value();
+          })
+      .def(
+          "_jit_get_te_cuda_pointwise_loop_levels",
+          []() -> int {
+            using namespace torch::jit::tensorexpr;
+            return getTECudaPointwiseLoopLevels();
+          })
+      .def(
+          "_jit_set_te_cuda_pointwise_loop_levels",
+          [](int level) {
+            using namespace torch::jit::tensorexpr;
+            return getTECudaPointwiseLoopLevels() = level;
+          })
+      .def(
+          "_jit_get_te_cuda_pointwise_block_count",
+          []() -> int {
+            using namespace torch::jit::tensorexpr;
+            return getTECudaPointwiseBlockCount();
+          })
+      .def(
+          "_jit_set_te_cuda_pointwise_block_count",
+          [](int block_count) {
+            using namespace torch::jit::tensorexpr;
+            return getTECudaPointwiseBlockCount() = block_count;
+          })
+      .def(
+          "_jit_get_te_cuda_pointwise_block_size",
+          []() -> int {
+            using namespace torch::jit::tensorexpr;
+            return getTECudaPointwiseBlockSize();
+          })
+      .def(
+          "_jit_set_te_cuda_pointwise_block_size",
+          [](int block_size) {
+            using namespace torch::jit::tensorexpr;
+            return getTECudaPointwiseBlockSize() = block_size;
+          })
+      .def("_jit_set_texpr_fuser_enabled", &setTensorExprFuserEnabled)
+      .def(
           "_jit_fuser_get_fused_kernel_code",
           [](Graph& g, std::vector<at::Tensor> inps) {
             return debugGetFusedKernelCode(g, inps);
+          })
+      .def(
+          "_jit_pass_insert_xnnpack_ops",
+          [](std::shared_ptr<Graph>& graph) {
+            return insertXNNPACKOps(graph);
+          })
+      .def(
+          "_jit_pass_insert_xnnpack_ops",
+          [](script::Module& module) {
+            return insertXNNPACKOps(module);
+          })
+      .def(
+          "_jit_pass_fold_xnnpack_prepack_ops",
+          [](script::Module& module) {
+            return FoldXNNPACKPrePackingOps(module);
           })
       .def(
           "_jit_pass_onnx_unpack_quantized_weights",
@@ -595,7 +660,7 @@ void initJITBindings(PyObject* module) {
           std::ostringstream docstring;
           docstring << "Automatically bound operator '" << op_name
                     << "' with schema(s):\n";
-                    
+
           for (const auto& op : operations) {
             docstring << "  " << op->schema() << "\n";
           }

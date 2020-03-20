@@ -13,6 +13,7 @@ import torch.testing._internal.dist_utils as dist_utils
 from torch.distributed.rpc import RRef, _get_debug_info, _rref_context_get_debug_info
 from torch.distributed.rpc.api import _use_rpc_pickler
 from torch.distributed.rpc.internal import PythonUDF, RPCExecMode, _internal_rpc_pickler
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import IS_MACOS, load_tests
 from torch.testing._internal.dist_utils import (
     dist_init,
@@ -257,6 +258,9 @@ def clear_global_rref():
     global global_rref
     global_rref = None
 
+
+def check_rref_confirmed(rref):
+    return rref.confirmed_by_owner()
 
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -901,6 +905,15 @@ class RpcTest(RpcAgentTestFixture):
         )
         self.assertEqual(rref.to_here(), torch.ones(n, n) * 2)
 
+    @dist_init
+    def test_builtin_remote_self(self):
+        rref = rpc.remote(
+            worker_name(self.rank),
+            torch.add,
+            args=(torch.ones(2, 2), torch.ones(2, 2)),
+        )
+        self.assertEqual(rref.local_value(), torch.ones(2, 2) * 2)
+
     def _test_multi_remote_call(self, fn, args_fn=lambda x: (), kwargs_fn=lambda x: {}):
         m = 10
         n = self.rank + 1
@@ -1485,7 +1498,6 @@ class RpcTest(RpcAgentTestFixture):
         rpc.shutdown(graceful=False)
 
     @dist_init
-    @unittest.skip("Test is flaky. see https://github.com/pytorch/pytorch/issues/31846")
     def test_debug_info(self):
         # only test keys in this test case. Values should be covered by
         # individual module debug info tests
@@ -1501,12 +1513,18 @@ class RpcTest(RpcAgentTestFixture):
         expected.update(rref_info)
         expected.update(agent_info)
         expected.update(autograd_info)
-        self.assertEqual(expected.keys(), info.keys())
+        # NB: Key ordering is only preserved in python 3.6+. So here, we
+        # manually check keys are equal.
+        for key in expected.keys():
+            self.assertIn(key, info.keys())
+
+        for key in info.keys():
+            self.assertIn(key, expected.keys())
 
     @dist_init(setup_rpc=False)
     @unittest.skipIf(
         IS_MACOS,
-        "Test is flaky on MacOS, see https://github.com/pytorch/pytorch/issues/32019",
+        "Test is flaky on MacOS since libuv error handling is not as robust as TCP",
     )
     def test_handle_send_exceptions(self):
         # test that if a callee node has gone down, we raise an appropriate
@@ -1518,24 +1536,20 @@ class RpcTest(RpcAgentTestFixture):
             world_size=self.world_size,
             rpc_backend_options=self.rpc_backend_options,
         )
+        rpc._set_rpc_timeout(timedelta(seconds=10))
         # This barrier is needed to ensure that some workers do not exit before
         # others have been brought up, for non ProcessGroupAgent backends.
         initialize_pg(self.init_method, self.rank, self.world_size)
         dist.barrier()
-
         if self.rank == 1:
             dst_rank = (self.rank + 1) % self.world_size
             dst_worker = worker_name(dst_rank)
             # allow destination worker to exit without joining
-            wait_until_node_failure(dst_rank)
+            error_str = get_shutdown_error_regex(dist_utils.TEST_CONFIG.rpc_backend_name)
+            wait_until_node_failure(dst_rank, error_str)
             fut = rpc.rpc_async(dst_worker, torch.add, args=(torch.ones(1), 3))
             # Shutdown sequence is not very well defined and as a result
-            # we can see any of these error messages.
-            error_str = (
-                "Encountered exception in ProcessGroupAgent::enqueueSend"
-                if self.rpc_backend == rpc.backend_registry.BackendType.PROCESS_GROUP
-                else get_shutdown_error_regex()
-            )
+            # we can see any of the error messages defined in get_shutdown_error_regex.
             with self.assertRaisesRegex(RuntimeError, error_str):
                 fut.wait()
         # exit all workers non-gracefully.
@@ -1744,3 +1758,77 @@ class RpcTest(RpcAgentTestFixture):
         ):
             import torch.distributed.rpc.internal as internal
             internal.serialize(rref)
+
+    @staticmethod
+    def _return_gpu_tensor():
+        return torch.rand(3, 3).cuda(0)
+
+    @staticmethod
+    def _return_gpu_tensor_list():
+        return [torch.rand(3, 3).cuda(0), torch.rand(3, 3).cuda(1)]
+
+    @staticmethod
+    def _gpu_tensor_list_arg(tensor_list):
+        return torch.rand(3, 3)
+
+    @skip_if_lt_x_gpu(2)
+    @dist_init
+    def test_cuda(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        t1 = torch.rand(3, 3).cuda(0)
+        t2 = torch.rand(3, 3).cuda(1)
+        t3 = torch.rand(3, 3)
+
+        # cuda tensors as args fail.
+        with self.assertRaisesRegex(RuntimeError, "RPC backend only supports CPU tensors.*Found tensor on device: cuda:0"):
+            rpc.rpc_sync(dst, torch.add, args=(t1, t2))
+
+        # mix of cpu and cuda tensors as args fail.
+        with self.assertRaisesRegex(RuntimeError, "RPC backend only supports CPU tensors.*Found tensor on device: cuda:0"):
+            rpc.rpc_sync(dst, torch.add, args=(t1, t3))
+
+        # gpu tensor list as args fails.
+        with self.assertRaisesRegex(RuntimeError, "RPC backend only supports CPU tensors.*Found tensor on device: cuda:0"):
+            rpc.rpc_sync(dst, RpcTest._gpu_tensor_list_arg, args=([t1, t2]))
+
+        # cuda tensors as return values fail.
+        with self.assertRaisesRegex(RuntimeError, "RPC backend only supports CPU tensors.*Found tensor on device: cuda:0"):
+            rpc.rpc_sync(dst, RpcTest._return_gpu_tensor, args=())
+
+        # cuda tensors as a list of return value fails
+        with self.assertRaisesRegex(RuntimeError, "RPC backend only supports CPU tensors.*Found tensor on device: cuda:0"):
+            rpc.rpc_sync(dst, RpcTest._return_gpu_tensor_list, args=())
+
+        # Sending to self should fail too.
+        with self.assertRaisesRegex(RuntimeError, "RPC backend only supports CPU tensors.*Found tensor on device: cuda:0"):
+            rpc.rpc_sync(worker_name(self.rank), torch.add, args=(t1, t2))
+
+    def _create_rref(self):
+        owner_rank = (self.rank + 2) % self.world_size
+        return rpc.remote(
+            "worker{}".format(owner_rank),
+            torch.add,
+            args=(torch.zeros(2, 2), 1)
+        )
+
+    @dist_init
+    def test_user_rrefs_confirmed(self):
+        dst_rank = (self.rank + 1) % self.world_size
+        rref = self._create_rref()
+        ret = rpc.rpc_sync(
+            "worker{}".format(dst_rank),
+            check_rref_confirmed,
+            args=(rref,)
+        )
+        self.assertEqual(ret, True)
+
+    @dist_init
+    def test_user_rrefs_confirmed_remote(self):
+        dst_rank = (self.rank + 1) % self.world_size
+        rref = self._create_rref()
+        ret_rref = rpc.remote(
+            "worker{}".format(dst_rank),
+            check_rref_confirmed,
+            args=(rref,)
+        )
+        self.assertEqual(ret_rref.to_here(), True)
