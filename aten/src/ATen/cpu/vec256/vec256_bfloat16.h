@@ -185,13 +185,109 @@ public:
     auto o2 = vop(hi);
     return cvtfp32_bf16(o1, o2);
   }
+  Vec256<BFloat16> abs() const {
+    __m256 lo, hi;
+    cvtbf16_fp32(values, lo, hi);
+    auto mask = _mm256_set1_ps(-0.f);
+    auto o1 = _mm256_andnot_ps(mask, lo);
+    auto o2 = _mm256_andnot_ps(mask, hi);
+    return cvtfp32_bf16(o1, o2);
+  }
+  Vec256<BFloat16> angle() const {
+    return _mm256_set1_epi16(0);
+  }
+  Vec256<BFloat16> real() const {
+    return *this;
+  }
+  Vec256<BFloat16> imag() const {
+    return _mm256_set1_epi16(0);
+  }
+  Vec256<BFloat16> conj() const {
+    return *this;
+  }
   Vec256<BFloat16> exp() const {
     return map(Sleef_expf8_u10);
   }
   Vec256<BFloat16> log() const {
     return map(Sleef_logf8_u10);
   }
-
+  Vec256<BFloat16> frac() const;
+  Vec256<BFloat16> floor() const {
+    __m256 lo, hi;
+    cvtbf16_fp32(values, lo, hi);
+    auto o1 = _mm256_floor_ps(lo);
+    auto o2 = _mm256_floor_ps(hi);
+    return cvtfp32_bf16(o1, o2);
+  }
+  Vec256<BFloat16> neg() const {
+    __m256 lo, hi;
+    cvtbf16_fp32(values, lo, hi);
+    auto mask = _mm256_set1_ps(-0.f);
+    auto o1 = _mm256_xor_ps(mask, lo);
+    auto o2 = _mm256_xor_ps(mask, hi);
+    return cvtfp32_bf16(o1, o2);
+  }
+  Vec256<BFloat16> trunc() const {
+    __m256 lo, hi;
+    cvtbf16_fp32(values, lo, hi);
+    auto o1 = _mm256_round_ps(lo, (_MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC));
+    auto o2 = _mm256_round_ps(hi, (_MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC));
+    return cvtfp32_bf16(o1, o2);
+  }
+  Vec256<BFloat16> sqrt() const {
+    __m256 lo, hi;
+    cvtbf16_fp32(values, lo, hi);
+    auto o1 = _mm256_sqrt_ps(lo);
+    auto o2 = _mm256_sqrt_ps(hi);
+    return cvtfp32_bf16(o1, o2);
+  }
+  Vec256<BFloat16> reciprocal() const {
+    __m256 lo, hi;
+    cvtbf16_fp32(values, lo, hi);
+    auto ones = _mm256_set1_ps(1);
+    auto o1 = _mm256_div_ps(ones, lo);
+    auto o2 = _mm256_div_ps(ones, hi);
+    return cvtfp32_bf16(o1, o2);
+  }
+  Vec256<BFloat16> rsqrt() const {
+    __m256 lo, hi;
+    cvtbf16_fp32(values, lo, hi);
+    auto ones = _mm256_set1_ps(1);
+    auto o1 = _mm256_div_ps(ones, _mm256_sqrt_ps(lo));
+    auto o2 = _mm256_div_ps(ones, _mm256_sqrt_ps(hi));
+    return cvtfp32_bf16(o1, o2);
+  }
+  // Comparison using the _CMP_**_OQ predicate.
+  //   `O`: get false if an operand is NaN
+  //   `Q`: do not raise if an operand is NaN
+  template<int imm8>
+  Vec256<BFloat16> compare(const Vec256<BFloat16>& other) const {
+    __m256 a_lo, a_hi;
+    __m256 b_lo, b_hi;
+    cvtbf16_fp32(values, a_lo, a_hi);
+    cvtbf16_fp32(other.values, b_lo, b_hi);
+    auto o1 = _mm256_cmp_ps(a_lo, b_lo, imm8);
+    auto o2 = _mm256_cmp_ps(a_hi, b_hi, imm8);
+    return cvtfp32_bf16(o1, o2);
+  }
+  Vec256<BFloat16> operator==(const Vec256<BFloat16>& other) const {
+    return compare<_CMP_EQ_OQ>(other);
+  }
+  Vec256<BFloat16> operator!=(const Vec256<BFloat16>& other) const {
+    return compare<_CMP_NEQ_OQ>(other);
+  }
+  Vec256<BFloat16> operator<(const Vec256<BFloat16>& other) const {
+    return compare<_CMP_LT_OQ>(other);
+  }
+  Vec256<BFloat16> operator<=(const Vec256<BFloat16>& other) const {
+    return compare<_CMP_LE_OQ>(other);
+  }
+  Vec256<BFloat16> operator>(const Vec256<BFloat16>& other) const {
+    return compare<_CMP_GT_OQ>(other);
+  }
+  Vec256<BFloat16> operator>=(const Vec256<BFloat16>& other) const {
+    return compare<_CMP_GE_OQ>(other);
+  }
 };
 
 #define DEFINE_BF16_OP(op, func)                                                            \
@@ -213,6 +309,11 @@ DEFINE_BF16_OP(/, _mm256_div_ps)
 DEFINE_BF16_OP(&, _mm256_and_ps)
 DEFINE_BF16_OP(|, _mm256_or_ps)
 DEFINE_BF16_OP(^, _mm256_xor_ps)
+
+// frac. Implement this here so we can use subtraction
+Vec256<BFloat16> Vec256<BFloat16>::frac() const {
+  return *this - this->trunc();
+}
 
 // Implements the IEEE 754 201X `maximum` operation, which propagates NaN if
 // either input is a NaN.
