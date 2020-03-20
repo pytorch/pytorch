@@ -660,8 +660,8 @@ Stmt* LoopNest::LowerToStmt(Tensor* t) {
   for (size_t i = 0; i < f->ndim(); i++) {
     // Going in reverse order: from innermost loop to the outermost
     size_t dim_index = f->ndim() - i - 1;
-    Range r(0, ExprHandle(f->dim(dim_index)));
-    body = For::make(VarHandle(f->arg(dim_index)), r.start(), r.stop(), body);
+    Range r(new IntImm(0), f->dim(dim_index));
+    body = new For(f->arg(dim_index), r.start(), r.stop(), body);
   }
   return body;
 }
@@ -913,8 +913,8 @@ std::unordered_map<const Var*, Range> LoopNest::inferBoundsForLoop(For *f) {
 //   body_inner = Substitute(body_inner, {{f->var(), combined_index}});
 //   ConstantFolder constant_folder;
   for (const auto& p : res) {
-    const Expr* old_start = p.second.start().node();
-    const Expr* old_stop = p.second.stop().node();
+    const Expr* old_start = p.second.start();
+    const Expr* old_stop = p.second.stop();
 //     const Expr* new_start = Substitute(old_start, {{f->var(),f->start()}})->accept_mutator(&constant_folder);
 //     const Expr* new_stop = Substitute(old_stop, {{f->var(),new Sub(f->stop(), new IntImm(1))}})->accept_mutator(&constant_folder);
 //     const Expr* new_start = Substitute(&a, {{f->var(),f->start()}});
@@ -922,7 +922,7 @@ std::unordered_map<const Var*, Range> LoopNest::inferBoundsForLoop(For *f) {
 //
     const Expr* new_start = Substitute(old_start, {{f->var(), f->start()}});
     const Expr* new_stop = Substitute(old_stop, {{f->var(),new Sub(f->stop(), new IntImm(1))}});
-    res[p.first] = Range(ExprHandle(new_start), ExprHandle(new_stop));
+    res[p.first] = Range(new_start, new_stop);
   }
   std::cerr << "Analyzed For loop:\n" << *f << "\n";
   printBufVector(res);
@@ -932,7 +932,7 @@ std::unordered_map<const Var*, Range> LoopNest::inferBoundsForLoop(For *f) {
 std::unordered_map<const Var*, Range> LoopNest::inferBoundsForStore(Store *st) {
   std::cerr << "Analyzing Store:\n" << *st << "\n";
   std::unordered_map<const Var*, Range> res;
-  res[st->base_handle()] = Range(ExprHandle(st->index()), ExprHandle(st->index())+1);
+  res[st->base_handle()] = Range(st->index(), new Add(st->index(), new IntImm(1)));
   return res;
 }
 
