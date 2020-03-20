@@ -29,7 +29,7 @@ class TORCH_API PythonRemoteCall : public RpcCommandBase {
     return retForkId_;
   }
 
-  Message toMessage() && override;
+  Message toMessageImpl() && override;
   static std::unique_ptr<PythonRemoteCall> fromMessage(const Message& message);
 
  private:
