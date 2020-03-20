@@ -2102,12 +2102,12 @@ class TestQuantizedConv(unittest.TestCase):
 
     """Tests the correctness of quantized 1D convolution op."""
     from hypothesis import reproduce_failure
-    @reproduce_failure('4.24.3', b'AXicY2SAAkYGnIARKAcAAHYABQ==')
+    # @reproduce_failure('4.24.3', b'AXicY2SAAkYG3AAoBwAAcgAE')
     @given(batch_size=st.integers(1, 6),
            input_channels_per_group=st.sampled_from((2, 4, 5, 8, 16, 32)),
            output_channels_per_group=st.sampled_from((2, 4, 5, 8, 16, 32)),
            groups=st.integers(1, 3),
-           length=st.integers(8, 32),
+           length=st.integers(4, 16),
            kernel=st.integers(1, 7),
            stride=st.integers(1, 2),
            pad=st.integers(0, 2),
@@ -2149,24 +2149,20 @@ class TestQuantizedConv(unittest.TestCase):
 
         input_channels = input_channels_per_group * groups
         output_channels = output_channels_per_group * groups
-        kernels = kernel
-        strides = stride
-        pads = pad
-        dilations = dilation
 
         (X, W), (X_q, W_q), bias_float = self._make_qconv_tensors(batch_size,
             input_channels_per_group, (length,),
-            output_channels_per_group, groups, kernels, strides, pads,
-            dilations, X_scale, X_zero_point, W_scale, W_zero_point,
+            output_channels_per_group, groups, kernel, stride, pad,
+            dilation, X_scale, X_zero_point, W_scale, W_zero_point,
             use_bias, False)
 
         true_conv1d = torch.nn.Conv1d(
             input_channels,
             output_channels,
-            kernels,
-            strides,
-            pads,
-            dilations,
+            kernel,
+            stride,
+            pad,
+            dilation,
             groups,
         )
         true_conv1d.weght = torch.nn.Parameter(W)
@@ -2179,10 +2175,10 @@ class TestQuantizedConv(unittest.TestCase):
             conv_op = torch.nn.quantized.Conv1d(
                 input_channels,
                 output_channels,
-                kernels,
-                strides,
-                pads,
-                dilations,
+                kernel,
+                stride,
+                pad,
+                dilation,
                 groups,
             )
             conv_op.set_weight_bias(W_q, bias_float)
@@ -2191,7 +2187,7 @@ class TestQuantizedConv(unittest.TestCase):
             np.testing.assert_array_almost_equal(
                 q_result_ref.int_repr().numpy(),
                 q_outp.int_repr().numpy(),
-                decimal=0)
+                decimal=0, err_msg=f'X={X}, qX={X_q}, W={W}, qW={W_q}')
 
     @given(batch_size=st.integers(1, 4),
            input_channels_per_group=st.sampled_from([2, 4, 5, 8, 16]),
