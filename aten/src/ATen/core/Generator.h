@@ -65,7 +65,7 @@ struct CAFFE2_API Generator {
   Generator(std::nullptr_t gen_impl) {}
 
   bool operator==(const Generator& rhs) const {
-    return (!(this->impl_) && !(rhs.impl_)) || (this->impl_ == rhs.impl_);
+    return this->impl_ == rhs.impl_;
   }
 
   bool operator!=(const Generator& rhs) const {
@@ -73,7 +73,7 @@ struct CAFFE2_API Generator {
   }
 
   bool defined() const {
-    return (bool)impl_;
+    return static_cast<bool>(impl_);
   }
 
   c10::GeneratorImpl* operator->() const { return impl_.get(); }
