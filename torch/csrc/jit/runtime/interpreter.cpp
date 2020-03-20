@@ -1148,7 +1148,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                   at::launch(InterpreterContinuation(
                       state_,
                       std::move(stack_),
-                      autograd::GradMode::is_enabled()));
+                      torch::ThreadLocalState::getThreadLocalState()));
                 }
 
                private:
@@ -1273,7 +1273,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             InterpreterContinuation continuation(
                 forked_interpreter,
                 Stack(stack.end() - inst.N, stack.end()),
-                autograd::GradMode::is_enabled());
+                torch::ThreadLocalState::getThreadLocalState());
             drop(stack, inst.N);
             push(stack, forked_interpreter.getFuture());
             at::launch(std::move(continuation));
@@ -1290,7 +1290,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                   "", range->filename()->c_str(), uint32_t(line)};
               c10::Warning::warn(location, pop(stack).toStringRef());
             } else {
-              AT_WARN(pop(stack).toStringRef());
+              TORCH_WARN(pop(stack).toStringRef());
             }
             ++af.pc;
           } break;
@@ -1451,7 +1451,7 @@ InterpreterState::InterpreterState(
     : pImpl(std::move(pImpl_)) {}
 
 void InterpreterContinuation::operator()() {
-  autograd::AutoGradMode grad_mode(grad_mode_enabled);
+  torch::ThreadLocalStateGuard guard(thread_local_state);
   state.runAsync(stack);
 }
 } // namespace jit

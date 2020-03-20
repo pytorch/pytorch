@@ -298,6 +298,8 @@ struct Expr : public TreeView {
       case TK_DICT_LITERAL:
       case '@':
       case TK_POW:
+      case TK_LSHIFT:
+      case TK_RSHIFT:
       case TK_FLOOR_DIV:
       case '&':
       case '^':
@@ -739,6 +741,8 @@ struct BinOp : public Expr {
       case '-':
       case '@':
       case TK_POW:
+      case TK_LSHIFT:
+      case TK_RSHIFT:
       case '%':
       case '&':
       case '^':

@@ -115,7 +115,19 @@ PyObject* rpc_init(PyObject* /* unused */) {
       shared_ptr_class_<PyRRef>(module, "RRef", R"(
           A class encapsulating a reference to a value of some type on a remote
           worker. This handle will keep the referenced remote value alive on the
-          worker.
+          worker. A ``UserRRef`` will be deleted when 1) no references to it in
+          both the application code and in the local RRef context, or 2) the
+          application has called a graceful shutdown. Invoking methods on a
+          deleted RRef leads to undefined behaviors. RRef implementation only
+          offers best-effort error detection, and applications should not use
+          ``UserRRefs`` after ``rpc.shutdown()``.
+
+          .. warning::
+              RRefs can only be serialized and deserialized by the RPC module.
+              Serializing and deserializing RRefs without RPC (e.g., Python
+              pickle, torch :meth:`~torch.save` / :meth:`~torch.load`,
+              JIT :meth:`~torch.jit.save` / :meth:`~torch.jit.load`, etc.) will
+              lead to errors.
 
           Example::
               Following examples skip RPC initialization and shutdown code
@@ -164,11 +176,26 @@ PyObject* rpc_init(PyObject* /* unused */) {
                   ``RRef``.
               )")
           .def(
+              "confirmed_by_owner",
+              &PyRRef::confirmedByOwner,
+              R"(
+                  Returns whether this ``RRef`` has been confirmed by the owner.
+                  ``OwnerRRef`` always returns true, while ``UserRRef`` only
+                  returns true when the owner knowns about this ``UserRRef``.
+              )")
+          .def(
               // not releasing GIL here to avoid context switch on getters
               "owner",
               &PyRRef::owner,
               R"(
                   Returns worker information of the node that owns this ``RRef``.
+              )")
+          .def(
+              // not releasing GIL here to avoid context switch on getters
+              "owner_name",
+              &PyRRef::ownerName,
+              R"(
+                  Returns worker name of the node that owns this ``RRef``.
               )")
           .def(
               "to_here",
@@ -190,13 +217,27 @@ PyObject* rpc_init(PyObject* /* unused */) {
           .def(
               py::pickle(
                   [](const PyRRef& self) {
+                    TORCH_CHECK(
+                        false,
+                        "Can not pickle rref in python pickler, rref can only be pickled when using RPC");
                     // __getstate__
                     return self.pickle();
                   },
                   [](py::tuple t) { // NOLINT
+                    TORCH_CHECK(
+                        false,
+                        "Can not unpickle rref in python pickler, rref can only be unpickled when using RPC");
                     // __setstate__
                     return PyRRef::unpickle(t);
                   }),
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "_serialize",
+              &PyRRef::pickle,
+              py::call_guard<py::gil_scoped_release>())
+          .def_static(
+              "_deserialize",
+              &PyRRef::unpickle,
               py::call_guard<py::gil_scoped_release>())
           // not releasing GIL to avoid context switch
           .def("__str__", &PyRRef::str);

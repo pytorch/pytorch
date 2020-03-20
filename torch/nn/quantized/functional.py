@@ -226,7 +226,7 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
 
     .. note:: The input quantization parameters propagate to the output.
 
-    .. note:: Only 2D input is supported for quantized inputs
+    .. note:: Only 2D/3D input is supported for quantized inputs
 
     .. note:: Only the following modes are supported for the quantized inputs:
 
@@ -396,6 +396,17 @@ def elu(input, alpha=1., inplace=False, scale=None, zero_point=None):
         return torch._C._nn.elu_(input, alpha)
     else:
         return torch._C._nn.elu(input, alpha)
+
+def hardsigmoid(input):
+    # type: (Tensor) -> Tensor
+    r"""
+    Applies the quantized element-wise function :math:`\text{Hardsigmoid}(x) = \frac{ReLU6(x + 3)}{6}`
+
+    See :class:`~torch.nn.Hardsigmoid` for more details.
+    """
+    if not input.is_quantized:
+        raise ValueError("Input to 'quantized.hardsigmoid' must be quantized!")
+    return torch._C._nn.hardsigmoid(input)
 
 def clamp(input, min_, max_):
     # type: (Tensor, float, float) -> Tensor
