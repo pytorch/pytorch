@@ -1338,7 +1338,7 @@ def _script_if_tracing(fn):
 
     @functools.wraps(fn)
     def wrapper(*args):
-        if not torch._C.is_tracing():
+        if not is_tracing():
             # Not tracing, don't do anything
             return fn(*args)
 
@@ -1966,6 +1966,14 @@ def is_scripting():
               return unsupported_linear_op(x)
     """
     return False
+
+
+def is_tracing():
+    """
+    Returns ``True`` in tracing (if a function is called during the tracing of
+    code with ``torch.jit.trace``) and ``False`` otherwise.
+    """
+    return torch._C._is_tracing
 
 def _unwrap_optional(x):
     assert x is not None, "Unwrapping null optional"
