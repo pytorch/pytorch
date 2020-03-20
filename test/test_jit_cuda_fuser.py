@@ -4,7 +4,6 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import unittest
-from contextlib import contextmanager
 
 import torch
 
