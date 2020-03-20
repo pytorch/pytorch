@@ -534,7 +534,7 @@ void batch_norm_cuda_template(Tensor& output_, Tensor& save_mean_, Tensor& save_
   auto features = input_reshaped.size(2);
   auto input = input_reshaped.generic_packed_accessor<input_scalar_t, 3, RestrictPtrTraits, index_t>();
   auto input_options = input_.options();
-  if (input_.scalar_type() == at::ScalarType::Half) {
+  if (input_.scalar_type() == at::ScalarType::Half || input_.scalar_type() == at::ScalarType::BFloat16) {
     input_options = input_options.dtype(ScalarType::Float);
   }
   auto output = output_reshaped.generic_packed_accessor<input_scalar_t, 3, RestrictPtrTraits, index_t>();
@@ -571,7 +571,7 @@ void batch_norm_cuda_template(Tensor& output_, Tensor& save_mean_, Tensor& save_
     batch_norm_transform_input_kernel<input_scalar_t, stat_scalar_t, stat_accscalar_t, true, index_t> <<<blocks_trans, threads_trans, 0, stream>>>
       (input, output, save_mean, save_invstd, weight, bias, epsilon);
   }
-  THCudaCheck(cudaGetLastError());
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 template<typename input_scalar_t, typename stat_scalar_t, typename index_t>
@@ -617,7 +617,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda_template(const Tenso
   batch_norm_backward_kernel<input_scalar_t, stat_scalar_t, accscalar_t, index_t> <<<blocks, threads, 0, stream>>>
     (input, grad_output, grad_input, grad_weight, grad_bias, weight, running_mean, running_var,
      save_mean, save_invstd, train, epsilon);
-  THCudaCheck(cudaGetLastError());
+  AT_CUDA_CHECK(cudaGetLastError());
 
   return std::make_tuple(grad_input_, grad_weight_, grad_bias_);
 }
@@ -640,7 +640,7 @@ std::tuple<Tensor, Tensor> batch_norm_stats_cuda_template(const Tensor& input_, 
   dummy_mean_ = at::empty({0}, input_options);
   dummy_var_ = at::empty({0}, input_options);
   // promote only mean_/invstd_ precision
-  if (input_.scalar_type() == at::ScalarType::Half) {
+  if (input_.scalar_type() == at::ScalarType::Half || input_.scalar_type() == at::ScalarType::BFloat16) {
     input_options = input_options.dtype(ScalarType::Float);
   }
   mean_ = at::empty({n_input}, input_options);
@@ -656,7 +656,7 @@ std::tuple<Tensor, Tensor> batch_norm_stats_cuda_template(const Tensor& input_, 
   dim3 threads(tf, std::max<int>(1, MAX_BLOCK_SIZE/tf));
   batch_norm_collect_statistics_kernel<InvStd, scalar_t, scalar_t, accscalar_t, index_t> <<<blocks, threads, 0, stream>>>
     (input, epsilon, 0.0, dummy_mean, dummy_invstd, mean, invstd);
-  THCudaCheck(cudaGetLastError());
+  AT_CUDA_CHECK(cudaGetLastError());
   return std::make_tuple(mean_, invstd_);
 }
 
@@ -674,7 +674,7 @@ void batch_norm_elemt_cuda_template(Tensor& output_, const Tensor& input_, const
   auto features = input_reshaped.size(2);
   auto input = input_reshaped.generic_packed_accessor<input_scalar_t, 3, RestrictPtrTraits, index_t>();
   auto input_options = input_.options();
-  if (input_.scalar_type() == at::ScalarType::Half) {
+  if (input_.scalar_type() == at::ScalarType::Half || input_.scalar_type() == at::ScalarType::BFloat16) {
     input_options = input_options.dtype(ScalarType::Float);
   }
   auto output = output_reshaped.generic_packed_accessor<input_scalar_t, 3, RestrictPtrTraits, index_t>();
@@ -696,7 +696,7 @@ void batch_norm_elemt_cuda_template(Tensor& output_, const Tensor& input_, const
   dim3 threads_trans(tf, tb);
   batch_norm_transform_input_kernel<input_scalar_t, stat_scalar_t, stat_accscalar_t, true, index_t> <<<blocks_trans, threads_trans, 0, stream>>>
     (input, output, mean, invstd, weight, bias, epsilon);
-  THCudaCheck(cudaGetLastError());
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 template<typename scalar_t, typename accscalar_t, typename index_t>
@@ -709,7 +709,7 @@ std::tuple<Tensor, Tensor> batch_norm_gather_stats_cuda_template(const Tensor& m
 
   auto features = mean_.size(1);
   auto input_options = mean_.options();
-  if (mean_.scalar_type() == at::ScalarType::Half) {
+  if (mean_.scalar_type() == at::ScalarType::Half || mean_.scalar_type() == at::ScalarType::BFloat16) {
     input_options = input_options.dtype(ScalarType::Float);
   }
   save_mean_ = at::empty({features}, input_options);
@@ -729,7 +729,7 @@ std::tuple<Tensor, Tensor> batch_norm_gather_stats_cuda_template(const Tensor& m
   int grid = std::max<int>(1, features/block);
   batch_norm_reduce_statistics_kernel<scalar_t, accscalar_t, index_t> <<<grid, block, 0, stream>>>
       (mean, invstd, save_mean, save_invstd, running_mean, running_var, epsilon, momentum, counts);
-  THCudaCheck(cudaGetLastError());
+  AT_CUDA_CHECK(cudaGetLastError());
   return std::make_tuple(save_mean_, save_invstd_);
 }
 
@@ -771,14 +771,15 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> batch_norm_backward_reduce_cuda_templ
   auto feature_size = input_reshaped.size(2);
   auto stream = at::cuda::getCurrentCUDAStream();
 
-  int block_y = std::min<int>(lastPow2(batch_size), MAX_BLOCK_SIZE/32);
-  int block_x = std::min<int>(getNumThreads(feature_size), MAX_BLOCK_SIZE/block_y);
+  int block_y = std::min<int>(lastPow2(batch_size), MAX_BLOCK_SIZE/C10_WARP_SIZE);
+  // We want block_x to be at least a warp width
+  int block_x = std::min<int>(std::max<int>(getNumThreads(feature_size), C10_WARP_SIZE), MAX_BLOCK_SIZE/block_y);
   const dim3 block(block_x, block_y);
   const dim3 grid(n_input);
 
   batch_norm_backward_reduce_kernel<input_scalar_t, stat_scalar_t, stat_accscalar_t, index_t> <<<grid, block, 0, stream>>>
     (input, grad_output, mean, invstd, mean_dy, mean_dy_xmu, grad_weight, grad_bias);
-  THCudaCheck(cudaGetLastError());
+  AT_CUDA_CHECK(cudaGetLastError());
 
   return std::make_tuple(mean_dy_, mean_dy_xmu_, grad_weight_, grad_bias_);
 }
@@ -820,7 +821,7 @@ Tensor batch_norm_backward_elemt_cuda_template(const Tensor& grad_out_, const Te
   dim3 threads_trans(tf, tb);
   batch_norm_backward_elemt_kernel<input_scalar_t, stat_scalar_t, stat_accscalar_t, index_t> <<<blocks_trans, threads_trans, 0, stream>>>
     (input, grad_output, mean, invstd, weight, mean_dy, mean_dy_xmu, grad_input);
-  THCudaCheck(cudaGetLastError());
+  AT_CUDA_CHECK(cudaGetLastError());
   return grad_input_reshaped.view(input_.sizes());
 }
 
@@ -833,7 +834,7 @@ std::tuple<Tensor, Tensor> batch_norm_update_stats_cuda_template(
   auto input_reshaped = input_.reshape({input_.size(0), input_.size(1), -1}); // internally we merge the feature dimensions
 
   auto input_options = input_.options();
-  if (input_.scalar_type() == at::ScalarType::Half) {
+  if (input_.scalar_type() == at::ScalarType::Half || input_.scalar_type() == at::ScalarType::BFloat16) {
     input_options = input_options.dtype(ScalarType::Float);
   }
   Tensor save_mean_ = at::empty({n_channels}, input_options);
@@ -854,7 +855,7 @@ std::tuple<Tensor, Tensor> batch_norm_update_stats_cuda_template(
   // NB: epsilon is unused by the Var transform, so we set it to 0
   batch_norm_collect_statistics_kernel<Var, input_scalar_t, stat_scalar_t, stat_accscalar_t, index_t> <<<blocks, threads, 0, stream>>>
     (input, 0., momentum, running_mean, running_var, save_mean, save_var);
-  THCudaCheck(cudaGetLastError());
+  AT_CUDA_CHECK(cudaGetLastError());
   return std::make_tuple(save_mean_, save_var_);
 }
 

@@ -38,7 +38,7 @@ class BatchNormalization(ModelLayer):
                 raise ValueError("Please specify a correct order")
         else:
             assert len(self.input_shape) == 1, (
-                "This layer supports only 4D or 2D tesnors")
+                "This layer supports only 4D or 2D tensors")
             input_dims = self.input_shape[0]
 
         self.output_schema = schema.Scalar(

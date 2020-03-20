@@ -1,9 +1,9 @@
 #include <torch/csrc/jit/passes/peephole.h>
 #include <ATen/core/jit_type.h>
-#include <torch/csrc/jit/graph_executor.h>
-#include <torch/csrc/jit/ir_views.h>
+#include <torch/csrc/jit/runtime/graph_executor.h>
+#include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/passes/alias_analysis.h>
+#include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/utils/memory.h>
@@ -50,6 +50,18 @@ struct PeepholeOptimizeImpl {
 
       for (Block* sub_block : node->blocks()) {
         run(sub_block);
+      }
+
+      if (node->kind() != prim::Constant) {
+        WithInsertPoint guard(node);
+        // Any Value whose type is None should be replaced with a Constant
+        // This can occur if a module has an optional attribute, and it is
+        // initialized as None.
+        for (Value* output : node->outputs()) {
+          if (output->type()->cast<NoneType>()) {
+            output->replaceAllUsesWith(graph_->insertConstant(IValue()));
+          }
+        }
       }
 
       // XXX: remember that if you want to simplify an expression by combining
@@ -231,12 +243,13 @@ struct PeepholeOptimizeImpl {
         }
       } else if (
           node->kind() == aten::Float || node->kind() == aten::Int ||
-          node->kind() == prim::ImplicitTensorToNum) {
+          node->kind() == aten::FloatImplicit || node->kind() == aten::IntImplicit ||
+          node->kind() == aten::ScalarImplicit) {
         Node* input_node = node->input()->node();
         if (input_node->kind() == prim::NumToTensor) {
           GRAPH_UPDATE(
               *node,
-              " (x.NumToTensor().ImplicitTensorToNum() == x.NumToTensor()) is replaced with ",
+              " (x.NumToTensor().TensorToNum() == x.NumToTensor()) is replaced with ",
               node->input()->debugName());
           node->output()->replaceAllUsesWith(input_node->input());
           changed_ = true;

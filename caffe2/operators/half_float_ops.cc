@@ -40,8 +40,16 @@ bool FloatToHalfOp<CPUContext>::RunOnDevice() {
   auto N = input.numel();
 
 #ifdef USE_FBGEMM
-  fbgemm::FloatToFloat16_simd(
-      data, reinterpret_cast<fbgemm::float16*>(out), N, clip_);
+  // There exists a verion fbgemm::FloatToFloat16_simd which will issue avx-512
+  // instructions when possible. However, this actually doesn't give perf
+  // benefits, according to benchmarks on T1/T6. Hence we stick to avx2 versions
+  // here.
+  if (GetCpuId().avx2()) {
+    fbgemm::FloatToFloat16_avx2(
+        data, reinterpret_cast<fbgemm::float16*>(out), N, clip_);
+  } else {
+    FloatToFloat16_ref(data, out, N, clip_);
+  }
 #else
   FloatToFloat16_ref(data, out, N, clip_);
 #endif
@@ -59,8 +67,13 @@ bool HalfToFloatOp<CPUContext>::RunOnDevice() {
   auto N = input.numel();
 
 #ifdef USE_FBGEMM
-  fbgemm::Float16ToFloat_simd(
-      reinterpret_cast<const fbgemm::float16*>(data), out, N);
+  // Same reasoning of sticking to avx2
+  if (GetCpuId().avx2()) {
+    fbgemm::Float16ToFloat_avx2(
+        reinterpret_cast<const fbgemm::float16*>(data), out, N);
+  } else {
+    Float16ToFloat_ref(data, out, N);
+  }
 #else
   Float16ToFloat_ref(data, out, N);
 #endif

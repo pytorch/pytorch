@@ -280,6 +280,7 @@ _(aten, cudnn_grid_sampler) \
 _(aten, cudnn_grid_sampler_backward) \
 _(aten, cudnn_is_acceptable) \
 _(aten, cummax) \
+_(aten, cummin) \
 _(aten, cumprod) \
 _(aten, cumsum) \
 _(aten, data_ptr) \
@@ -507,6 +508,7 @@ _(aten, bitwise_and) \
 _(aten, bitwise_not) \
 _(aten, bitwise_or) \
 _(aten, bitwise_xor) \
+_(aten, element_size) \
 _(aten, nll_loss) \
 _(aten, nll_loss2d) \
 _(aten, nll_loss2d_backward) \

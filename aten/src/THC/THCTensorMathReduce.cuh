@@ -336,24 +336,24 @@ __forceinline__ __device__ T THCTensor_computeVar(
    to preserve the location of contention (for example min/max operations).
    The structure of the kernels follows the structure of the reduction kernels.
 */
-template <typename K, typename Index, class BinaryFunction>
+template <typename K, typename Index, class BinaryFunction, typename index_t>
 __global__ void
 kernelTransformReduceOuterDimIndex(K *tgt1,
                                    Index *tgt2,
                                    K *src_,
-                                   unsigned num_orows,
-                                   unsigned num_irows,
-                                   unsigned row_size,
+                                   index_t num_orows,
+                                   index_t num_irows,
+                                   index_t row_size,
                                    thrust::pair<K, Index> init,
                                    BinaryFunction binary_op) {
-  for (unsigned orow = blockIdx.x; orow < num_orows; orow += gridDim.x) {
-    for (unsigned irow = blockIdx.y * blockDim.x + threadIdx.x;
+  for (index_t orow = blockIdx.x; orow < num_orows; orow += gridDim.x) {
+    for (index_t irow = blockIdx.y * blockDim.x + threadIdx.x;
          irow < num_irows;
          irow += gridDim.y * blockDim.x) {
       K *src = src_ + orow * row_size * num_irows + irow;
       thrust::pair<K, Index> acc = init;
 
-      for (unsigned col = 0; col < row_size; ++col) {
+      for (index_t col = 0; col < row_size; ++col) {
         // +1 for Lua index
         acc = binary_op(acc,
                         thrust::make_pair<K, Index>(*src, col));
@@ -379,28 +379,43 @@ THC_transformReduceOuterDimIndex(THCState *state,
                                  int64_t rdim,
                                  const thrust::pair<ScalarTypeK, ScalarTypeIndex>& init,
                                  BinaryFunction binary_op) {
-  unsigned ndim = THCTensor_nDimensionLegacyAll(state, src);
-  unsigned num_orows = 1;
-  for (int64_t dim = 0; dim < rdim; dim++) {
+  int ndim = THCTensor_nDimensionLegacyAll(state, src);
+  int64_t num_orows = 1;
+  for (int dim = 0; dim < rdim; dim++) {
     num_orows *= THCTensor_sizeLegacyNoScalars(state, src, dim);
   }
-  unsigned row_size = THCTensor_sizeLegacyNoScalars(state, src, rdim);
-  unsigned num_irows = 1;
-  for (unsigned dim = rdim + 1; dim < ndim; dim++) {
+  int64_t row_size = THCTensor_sizeLegacyNoScalars(state, src, rdim);
+  int64_t num_irows = 1;
+  for (int dim = rdim + 1; dim < ndim; dim++) {
     num_irows *= THCTensor_sizeLegacyNoScalars(state, src, dim);
   }
 
-  dim3 threads(min(512, num_irows));
-  unsigned maxGridDim = 1024;
-  dim3 grid(min(maxGridDim, num_orows),
-            min(maxGridDim, THCCeilDiv(num_irows, threads.x)));
+  int64_t num_threads = std::min(int64_t{512}, num_irows);
+  dim3 threads(num_threads);
+  int64_t maxGridDim = 1024;
+  dim3 grid(std::min(maxGridDim, num_orows),
+        std::min(maxGridDim, THCCeilDiv(num_irows, num_threads)));
+  auto stream = c10::cuda::getCurrentCUDAStream();
 
-  kernelTransformReduceOuterDimIndex
-    <<<grid, threads, 0, THCState_getCurrentStream(state)>>>(
-      tgt1->template data<ScalarTypeK>(),
-      tgt2->template data<ScalarTypeIndex>(),
-      src->template data<ScalarTypeK>(),
-      num_orows, num_irows, row_size, init, binary_op);
+  // Use 32-bit indexing if possible
+  if (THCTensor_canUse32BitIndexMath(state, src)) {
+    kernelTransformReduceOuterDimIndex
+      <<<grid, threads, 0, stream>>>(
+        tgt1->template data<ScalarTypeK>(),
+        tgt2->template data<ScalarTypeIndex>(),
+        src->template data<ScalarTypeK>(),
+        static_cast<unsigned>(num_orows),
+        static_cast<unsigned>(num_irows),
+        static_cast<unsigned>(row_size),
+        init, binary_op);
+  } else {
+    kernelTransformReduceOuterDimIndex
+      <<<grid, threads, 0, stream>>>(
+        tgt1->template data<ScalarTypeK>(),
+        tgt2->template data<ScalarTypeIndex>(),
+        src->template data<ScalarTypeK>(),
+        num_orows, num_irows, row_size, init, binary_op);
+  }
 
   THCudaCheck(cudaGetLastError());
 }
@@ -415,27 +430,27 @@ THC_transformReduceOuterDimIndex(THCState *state,
  *
  * Reduction along other dimensions is handled in a separate kernel.
  */
-template <typename K, typename Index, class BinaryFunction>
+template <typename K, typename Index, class BinaryFunction, typename index_t>
 __global__ void
 kernelTransformReduceInnermostDimIndex(K *tgt1,
                                        Index* tgt2,
                                        K *src_,
-                                       unsigned num_rows,
-                                       unsigned row_size,
+                                       index_t num_rows,
+                                       index_t row_size,
                                        thrust::pair<K, Index> init,
                                        BinaryFunction binary_op) {
   __shared__ K sbuf[32][16 + 1]; // avoid bank conflict
   __shared__ Index ibuf[32][16 + 1]; // avoid bank conflict
 
-  for (unsigned block_row = blockIdx.x * blockDim.y;
+  for (index_t block_row = blockIdx.x * blockDim.y;
        block_row < num_rows;
        block_row += blockDim.y * gridDim.x) {
-    unsigned row = block_row + threadIdx.y;
+    index_t row = block_row + threadIdx.y;
     thrust::pair<K, Index> acc = init;
     if (row < num_rows) {
       K *src = src_ + row * row_size;
       // Sequential reduction within a thread.
-      for (unsigned col = threadIdx.x; col < row_size; col += blockDim.x) {
+      for (index_t col = threadIdx.x; col < row_size; col += blockDim.x) {
         acc = binary_op(acc, thrust::make_pair<K, Index>(src[col], col));
       }
     }
@@ -482,22 +497,36 @@ THC_transformReduceInnermostDimIndex(THCState *state,
                                      TensorTypeK *src,
                                      const thrust::pair<ScalarTypeK, ScalarTypeIndex>& init,
                                      BinaryFunction binary_op) {
-  unsigned ndim = THCTensor_nDimensionLegacyAll(state, src);
-  unsigned num_rows = 1;
-  for (unsigned dim = 0; dim < ndim - 1; dim++) {
+  int ndim = THCTensor_nDimensionLegacyAll(state, src);
+  int64_t num_rows = 1;
+  for (int dim = 0; dim < ndim - 1; dim++) {
     num_rows *= THCTensor_sizeLegacyNoScalars(state, src, dim);
   }
-  unsigned row_size = THCTensor_sizeLegacyNoScalars(state, src, ndim - 1);
+  int64_t row_size = THCTensor_sizeLegacyNoScalars(state, src, ndim - 1);
 
   dim3 threads(16, 32);
-  dim3 grid(min(1024, THCCeilDiv(num_rows, threads.y)));
+  auto stream = c10::cuda::getCurrentCUDAStream();
+  dim3 grid(
+    std::min(int64_t{1024}, THCCeilDiv(num_rows, int64_t{threads.y})));
 
-  kernelTransformReduceInnermostDimIndex
-    <<<grid, threads, 0, THCState_getCurrentStream(state)>>>(
-      tgt1->template data<ScalarTypeK>(),
-      tgt2->template data<ScalarTypeIndex>(),
-      src->template data<ScalarTypeK>(),
-      num_rows, row_size, init, binary_op);
+  // Use 32-bit indexing if possible
+  if (THCTensor_canUse32BitIndexMath(state, src)) {
+    kernelTransformReduceInnermostDimIndex
+      <<<grid, threads, 0, stream>>>(
+        tgt1->template data<ScalarTypeK>(),
+        tgt2->template data<ScalarTypeIndex>(),
+        src->template data<ScalarTypeK>(),
+        static_cast<unsigned>(num_rows),
+        static_cast<unsigned>(row_size),
+        init, binary_op);
+  } else {
+    kernelTransformReduceInnermostDimIndex
+      <<<grid, threads, 0, stream>>>(
+        tgt1->template data<ScalarTypeK>(),
+        tgt2->template data<ScalarTypeIndex>(),
+        src->template data<ScalarTypeK>(),
+        num_rows, row_size, init, binary_op);
+  }
 
   THCudaCheck(cudaGetLastError());
 }
@@ -585,6 +614,20 @@ template <typename T>
 struct MulOp {
   __device__ __forceinline__ T operator()(T const &lhs, T const &rhs) {
     return THCNumerics<T>::mul(lhs, rhs);
+  }
+};
+
+template <typename T>
+struct MaxOp {
+  __device__ __forceinline__ T operator()(T const &lhs, T const &rhs) {
+    return THCNumerics<T>::gt(lhs, rhs) ? lhs : rhs;
+  }
+};
+
+template <typename T>
+struct MinOp {
+  __device__ __forceinline__ T operator()(T const &lhs, T const &rhs) {
+    return THCNumerics<T>::lt(lhs, rhs) ? lhs : rhs;
   }
 };
 

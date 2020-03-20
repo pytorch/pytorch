@@ -37,6 +37,10 @@ inline bool KernelFunction::isValid() const {
     return boxed_kernel_func_ != nullptr || unboxed_kernel_func_ != nullptr;
 }
 
+inline bool KernelFunction::isFallthrough() const {
+    return boxed_kernel_func_ == &fallthrough_kernel;
+}
+
 inline void KernelFunction::callBoxed(const OperatorHandle& opHandle, Stack* stack) const {
     if (C10_UNLIKELY(boxed_kernel_func_ == nullptr)) {
         if (unboxed_kernel_func_ == nullptr) {
@@ -62,7 +66,7 @@ inline Return KernelFunction::callUnboxed(const OperatorHandle& opHandle, Args..
         return (*func)(getFunctor_(), std::forward<Args>(args)...);
     }
 
-    TORCH_INTERNAL_ASSERT(boxed_kernel_func_ != nullptr, "Tried to call KernelFunction::callUnboxed() on an uninitialized KernelFunction.");
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(boxed_kernel_func_ != nullptr, "Tried to call KernelFunction::callUnboxed() on an uninitialized KernelFunction.");
     return impl::boxAndCallBoxedFunc<Return, Args...>(boxed_kernel_func_, getFunctor_(), opHandle, std::forward<Args>(args)...);
 }
 
@@ -72,6 +76,15 @@ inline KernelFunction KernelFunction::makeFromBoxedFunction() {
         nullptr,  // no functorFactory_, this can only be called in a boxed way.
         nullptr,  // no functor_ object either
         &make_boxed_function<func>,
+        nullptr  // no unboxed function pointer
+    );
+}
+
+inline KernelFunction KernelFunction::makeFallthrough() {
+    return KernelFunction(
+        nullptr,  // no functorFactory_, this can only be called in a boxed way.
+        nullptr,  // no functor_ object either
+        &fallthrough_kernel,
         nullptr  // no unboxed function pointer
     );
 }

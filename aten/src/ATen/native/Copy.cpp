@@ -166,8 +166,7 @@ Tensor& copy_(Tensor& self, const Tensor& src, bool non_blocking) {
 static auto registry = torch::RegisterOperators()
   .op(torch::RegisterOperators::options()
     .schema("aten::copy_(Tensor(a!) self, Tensor src, bool non_blocking=False) -> Tensor(a!)")
-    .impl_unboxedOnlyCatchAllKernel<decltype(copy_), &copy_>()
-    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA))
+    .impl_unboxedOnlyCatchAllKernel<decltype(copy_), &copy_>())
   ;
 
 DEFINE_DISPATCH(copy_stub);

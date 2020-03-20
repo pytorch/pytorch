@@ -927,6 +927,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                     # so that it can wake up and check `pin_memory_thread_done_event`
                     self._worker_result_queue.put((None, None))
                     self._pin_memory_thread.join()
+                    self._worker_result_queue.cancel_join_thread()
                     self._worker_result_queue.close()
 
                 # Exit workers now.

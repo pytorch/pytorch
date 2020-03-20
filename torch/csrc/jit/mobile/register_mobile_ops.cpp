@@ -8,6 +8,7 @@ using torch::jit::drop;
 using torch::jit::pack;
 using torch::jit::push;
 using torch::jit::pop;
+using torch::jit::last;
 using at::Tensor;
 using at::Scalar;
 
@@ -31,11 +32,11 @@ void _convolution_kernel(const c10::OperatorHandle& op, Stack* stack) {
       (std::move(peek(*stack, 0, 12))).toTensor(),
       (std::move(peek(*stack, 1, 12))).toTensor(),
       toOptionalTensor((std::move(peek(*stack, 2, 12)))),
-      (std::move(peek(*stack, 3, 12))).toIntListRef(),
-      (std::move(peek(*stack, 4, 12))).toIntListRef(),
-      (std::move(peek(*stack, 5, 12))).toIntListRef(),
+      (std::move(peek(*stack, 3, 12))).toIntVector(),
+      (std::move(peek(*stack, 4, 12))).toIntVector(),
+      (std::move(peek(*stack, 5, 12))).toIntVector(),
       (std::move(peek(*stack, 6, 12))).toBool(),
-      (std::move(peek(*stack, 7, 12))).toIntListRef(),
+      (std::move(peek(*stack, 7, 12))).toIntVector(),
       (std::move(peek(*stack, 8, 12))).toInt(),
       (std::move(peek(*stack, 9, 12))).toBool(),
       (std::move(peek(*stack, 10, 12))).toBool(),
@@ -53,9 +54,9 @@ void conv2d_kernel(const c10::OperatorHandle& op, Stack* stack) {
         (std::move(peek(*stack, 0, 7))).toTensor(),
         (std::move(peek(*stack, 1, 7))).toTensor(),
         toOptionalTensor((std::move(peek(*stack, 2, 7)))),
-        (std::move(peek(*stack, 3, 7))).toIntListRef(),
-        (std::move(peek(*stack, 4, 7))).toIntListRef(),
-        (std::move(peek(*stack, 5, 7))).toIntListRef(),
+        (std::move(peek(*stack, 3, 7))).toIntVector(),
+        (std::move(peek(*stack, 4, 7))).toIntVector(),
+        (std::move(peek(*stack, 5, 7))).toIntVector(),
         (std::move(peek(*stack, 6, 7))).toInt()
         );
     drop(*stack, 7);
@@ -67,7 +68,7 @@ void view_kernel(const c10::OperatorHandle& op, Stack* stack) {
   at::AutoNonVariableTypeMode non_var_type_mode(true);
 #endif
   auto result_ = ((std::move(peek(*stack, 0, 2))).toTensor()).view(
-      (std::move(peek(*stack, 1, 2))).toIntListRef()
+      (std::move(peek(*stack, 1, 2))).toIntVector()
       );
   drop(*stack, 2);
   pack(*stack, std::move(result_));
@@ -75,7 +76,7 @@ void view_kernel(const c10::OperatorHandle& op, Stack* stack) {
 
 void permute_kernel(const c10::OperatorHandle& op, Stack* stack) {
   auto result_ = ((std::move(peek(*stack, 0, 2))).toTensor()).permute(
-      (std::move(peek(*stack, 1, 2))).toIntListRef()
+      (std::move(peek(*stack, 1, 2))).toIntVector()
   );
   drop(*stack, 2);
   pack(*stack, std::move(result_));
@@ -83,7 +84,7 @@ void permute_kernel(const c10::OperatorHandle& op, Stack* stack) {
 
 void cat_kernel(const c10::OperatorHandle& op, Stack* stack) {
   auto result_ = at::cat(
-      (std::move(peek(*stack, 0, 2))).toTensorListRef(),
+      (std::move(peek(*stack, 0, 2))).toTensorVector(),
       (std::move(peek(*stack, 1, 2))).toInt()
   );
   drop(*stack, 2);
@@ -94,6 +95,12 @@ void __is__kernel(const c10::OperatorHandle& op, Stack* stack) {
   c10::IValue self, obj;
   pop(*stack, self, obj);
   push(*stack, self.isSameIdentity(obj));
+}
+
+void __isnot__kernel(const c10::OperatorHandle& op, Stack* stack) {
+  c10::IValue self, obj;
+  pop(*stack, self, obj);
+  push(*stack, !self.isSameIdentity(obj));
 }
 
 void log_softmax_kernel(const c10::OperatorHandle& op, Stack* stack) {
@@ -116,8 +123,84 @@ void softmax_kernel(const c10::OperatorHandle& op, Stack* stack) {
   pack(*stack, std::move(result_));
 }
 
+void upsample_nearest2d_kernel(const c10::OperatorHandle& op, Stack* stack) {
+  auto result_ = at::upsample_nearest2d(
+    (std::move(peek(*stack, 0, 4))).toTensor(),
+    (std::move(peek(*stack, 1, 4))).toIntVector(),
+    (std::move(peek(*stack, 2, 4))).toOptional<double>(),
+    (std::move(peek(*stack, 3, 4))).toOptional<double>()
+  );
+  drop(*stack, 4);
+  pack(*stack, std::move(result_));
+}
+
 void warn_kernel(const c10::OperatorHandle& op, Stack* stack) {
   drop(*stack, 1);
+  pop(*stack);
+}
+
+void tupleunpack_kernel(const c10::OperatorHandle& op, Stack* stack) {
+  auto tuple = pop(*stack).toTuple();
+  stack->insert(
+     stack->end(),
+     tuple->elements().begin(),
+     tuple->elements().end());
+}
+
+void format_kernel(const c10::OperatorHandle& op, Stack* stack) {
+  size_t num_inputs = pop(*stack).toInt();
+  auto format = peek(*stack, 0, num_inputs).toStringRef();
+  auto args = last(*stack, num_inputs - 1);
+  std::stringstream ss;
+  for (size_t begin = 0, used_args = 0; true; ++used_args) {
+    size_t loc = format.find("{}", begin);
+    if (loc == std::string::npos) {
+      ss << format.substr(begin);
+      break;
+    }
+    ss << format.substr(begin, loc - begin);
+    if (used_args >= args.size()) {
+      AT_ERROR("Too few arguments for format string: ", format);
+    }
+    ss << args[used_args];
+    begin = loc + 2;
+  }
+
+  drop(*stack, num_inputs);
+  push(*stack, ss.str());
+}
+
+void to_dtype_kernel(const c10::OperatorHandle& op, Stack* stack) {
+  auto result_ = ((std::move(peek(*stack, 0, 5))).toTensor()).to(
+     (std::move(peek(*stack, 1, 5))).toScalarType(),
+     (std::move(peek(*stack, 2, 5))).toBool(),
+     (std::move(peek(*stack, 3, 5))).toBool(),
+     (std::move(peek(*stack, 4, 5))).toOptional<c10::MemoryFormat>()
+  );
+  drop(*stack, 5);
+  pack(*stack, std::move(result_));
+}
+
+int64_t normalizeIndex(int64_t idx, int64_t list_size) {
+  if (idx < 0) {
+    // Handle negative indexing
+    idx = list_size + idx;
+  }
+  return idx;
+}
+
+void TupleIndex_kernel(const c10::OperatorHandle& op, Stack* stack) {
+   int64_t index = pop(*stack).toInt();
+   auto tuple = pop(*stack).toTuple();
+   auto norm_index = normalizeIndex(index, tuple->elements().size());
+   if (norm_index < 0 ||
+       norm_index > static_cast<int64_t>(tuple->elements().size())) {
+     throw std::out_of_range("Tuple list index out of range");
+   }
+   pack(*stack, tuple->elements()[norm_index]);
+}
+
+void pop_kernel(const c10::OperatorHandle& op, Stack* stack) {
   pop(*stack);
 }
 
@@ -135,6 +218,12 @@ static auto registry = torch::RegisterOperators().op(
   torch::RegisterOperators::options().kernel(c10::DispatchKey::CPUTensorId,
   [](at::Tensor a, at::Tensor b, at::Scalar c) -> at::Tensor {
     return at::add(a, b, c);
+  })
+).op(
+  "_aten::sub.Tensor",
+  torch::RegisterOperators::options().kernel(c10::DispatchKey::CPUTensorId,
+  [](at::Tensor a, at::Tensor b, at::Scalar c) -> at::Tensor {
+    return at::sub(a, b, c);
   })
 ).op(
   "_aten::add.Scalar",
@@ -331,6 +420,12 @@ static auto registry = torch::RegisterOperators().op(
      return at::dropout(input, p, train);
   })
 ).op(
+  "_aten::feature_dropout(Tensor input, float p, bool train) -> Tensor",
+  torch::RegisterOperators::options().kernel(c10::DispatchKey::CPUTensorId,
+  [](const Tensor & input, double p, bool train) {
+     return at::feature_dropout(input, p, train);
+  })
+).op(
   "_aten::permute(Tensor(a) self, int[] dims) -> Tensor(a)",
   torch::RegisterOperators::options()
     .kernel<&permute_kernel>(c10::DispatchKey::CPUTensorId)
@@ -347,6 +442,9 @@ static auto registry = torch::RegisterOperators().op(
   [](const Tensor & self, const Tensor & other) {
      return at::mul(self, other);
   })
+).op(
+  "_aten::upsample_nearest2d(Tensor self, int[2] output_size, float? scales_h=None, float? scales_w=None) -> Tensor",
+  torch::RegisterOperators::options().kernel<&upsample_nearest2d_kernel>(c10::DispatchKey::CPUTensorId)
 ).op(
   "_aten::tanh(Tensor self) -> Tensor",
   torch::RegisterOperators::options().kernel(c10::DispatchKey::CPUTensorId,
@@ -366,11 +464,20 @@ static auto registry = torch::RegisterOperators().op(
   "_aten::__is__(t1 self, t2 obj) -> bool",
   torch::RegisterOperators::options().catchAllKernel<&__is__kernel>()
 ).op(
+  "_aten::__isnot__(t1 self, t2 obj) -> bool",
+  torch::RegisterOperators::options().catchAllKernel<&__isnot__kernel>()
+).op(
   "_aten::log_softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor",
   torch::RegisterOperators::options().kernel<&log_softmax_kernel>(c10::DispatchKey::CPUTensorId)
 ).op(
   "_aten::softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor",
   torch::RegisterOperators::options().kernel<&softmax_kernel>(c10::DispatchKey::CPUTensorId)
+).op(
+  "_aten::softplus(Tensor self, Scalar beta=1, Scalar threshold=20) -> Tensor",
+  torch::RegisterOperators::options().kernel(c10::DispatchKey::CPUTensorId,
+  [](const Tensor& self, Scalar beta, Scalar threshold) {
+    return at::softplus(self, beta, threshold);
+  })
 ).op(
   "_aten::warn() -> void",
   torch::RegisterOperators::options().catchAllKernel<&warn_kernel>()
@@ -385,21 +492,35 @@ static auto registry = torch::RegisterOperators().op(
   []() {
   })
 ).op(
-  "_prim::TupleUnpack",
-  torch::RegisterOperators::options().catchAllKernel(
-  []() {
-  })
+  "_prim::TupleUnpack(any self) -> any",
+  torch::RegisterOperators::options().catchAllKernel<&tupleunpack_kernel>()
 ).op(
-  "_aten::format",
-  torch::RegisterOperators::options().catchAllKernel(
-  []() {
-  })
+  "_aten::format(str self, ...) -> str",
+  torch::RegisterOperators::options().catchAllKernel<&format_kernel>()
+      .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA)
 ).op(
   "_aten::append.Tensor(Tensor self) -> void",
   torch::RegisterOperators::options().kernel<&listAppend<at::Tensor>>(c10::DispatchKey::CPUTensorId)
 ).op(
   "_aten::append.int(int self) -> void",
   torch::RegisterOperators::options().catchAllKernel<&listAppend<int64_t>>()
-);
-
+  // Segmentation
+).op(
+  "_aten::sigmoid(Tensor self) -> Tensor",
+  torch::RegisterOperators::options().kernel(c10::DispatchKey::CPUTensorId,
+  [](const Tensor & self) {
+     return at::sigmoid(self);
+  })
+).op(torch::RegisterOperators::options()
+    .schema("_aten::to.dtype(Tensor self, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor")
+    .kernel<&to_dtype_kernel>(c10::DispatchKey::CPUTensorId)
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+.op(torch::RegisterOperators::options()
+    .schema("_prim::TupleIndex(any self, int index) -> any")
+    .catchAllKernel<&TupleIndex_kernel>())
+.op(torch::RegisterOperators::options()
+    .schema("_prim::RaiseException(str msg) -> ()")
+    .kernel<&pop_kernel>(c10::DispatchKey::CPUTensorId)
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+    ;
 }

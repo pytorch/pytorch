@@ -83,7 +83,7 @@ class InstanceNorm1d(_InstanceNorm):
         have some subtle differences. :class:`InstanceNorm1d` is applied
         on each channel of channeled data like multidimensional time series, but
         :class:`LayerNorm` is usually applied on entire sample and often in NLP
-        tasks. Additionaly, :class:`LayerNorm` applies elementwise affine
+        tasks. Additionally, :class:`LayerNorm` applies elementwise affine
         transform, while :class:`InstanceNorm1d` usually don't apply affine
         transform.
 
@@ -164,7 +164,7 @@ class InstanceNorm2d(_InstanceNorm):
         have some subtle differences. :class:`InstanceNorm2d` is applied
         on each channel of channeled data like RGB images, but
         :class:`LayerNorm` is usually applied on entire sample and often in NLP
-        tasks. Additionaly, :class:`LayerNorm` applies elementwise affine
+        tasks. Additionally, :class:`LayerNorm` applies elementwise affine
         transform, while :class:`InstanceNorm2d` usually don't apply affine
         transform.
 
@@ -238,7 +238,7 @@ class InstanceNorm3d(_InstanceNorm):
         have some subtle differences. :class:`InstanceNorm3d` is applied
         on each channel of channeled data like 3D models with RGB color, but
         :class:`LayerNorm` is usually applied on entire sample and often in NLP
-        tasks. Additionaly, :class:`LayerNorm` applies elementwise affine
+        tasks. Additionally, :class:`LayerNorm` applies elementwise affine
         transform, while :class:`InstanceNorm3d` usually don't apply affine
         transform.
 

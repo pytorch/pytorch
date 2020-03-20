@@ -29,6 +29,7 @@ QNNPACK_SOURCES = {
         "q8gavgpool/up8xm-neon.c",
         "q8gemm/4x-sumrows-neon.c",
         "q8gemm/4x8-neon.c",
+        "q8gemm/4x8-dq-neon.c",
         "q8gemm/4x8c2-xzp-neon.c",
         "q8gemm/6x4-neon.c",
         "q8gemm/8x8-neon.c",
@@ -60,6 +61,7 @@ QNNPACK_SOURCES = {
         "q8gavgpool/up8x7-sse2.c",
         "q8gavgpool/up8xm-sse2.c",
         "q8gemm/2x4c8-sse2.c",
+        "q8gemm/4x4c2-dq-sse2.c",
         "q8gemm/4x4c2-sse2.c",
         "q8vadd/sse2.c",
         "requantization/fp32-sse2.c",
@@ -87,12 +89,14 @@ QNNPACK_SOURCES = {
         "q8conv/4x8-aarch32-neon.S",
         "q8dwconv/up8x9-aarch32-neon.S",
         "q8gemm/4x8-aarch32-neon.S",
+        "q8gemm/4x8-dq-aarch32-neon.S",
         "q8gemm/4x8c2-xzp-aarch32-neon.S",
     ],
     # AArch64-specific uKernels
     "defined(__aarch64__)": [
         "q8conv/8x8-aarch64-neon.S",
         "q8gemm/8x8-aarch64-neon.S",
+        "q8gemm/8x8-dq-aarch64-neon.S",
     ],
 }
 

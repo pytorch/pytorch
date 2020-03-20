@@ -100,7 +100,7 @@ Note that ``*args, **kwargs`` in ``torch.load()`` are used to **instantiate** a 
 After you loaded a model, how can you find out what you can do with the model?
 A suggested workflow is
 
-- ``dir(model)`` to see all avaialble methods of the model.
+- ``dir(model)`` to see all available methods of the model.
 - ``help(model.foo)`` to check what arguments ``model.foo`` takes to run
 
 To help users explore without referring to documentation back and forth, we strongly

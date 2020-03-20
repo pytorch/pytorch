@@ -7,13 +7,12 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 namespace torch {
-namespace jit {
 class CustomClassHolder : public c10::intrusive_ptr_target {};
+namespace jit {
+using ::torch::CustomClassHolder;
 struct Function;
-namespace script {
 struct CompilationUnit;
 struct Module;
-}
 } // namespace jit
 } // namespace torch
 namespace c10 {
@@ -22,13 +21,19 @@ template<class T> class List;
 struct IValue;
 struct ClassType;
 struct Type;
+class RRefInterface;
 using TypePtr = std::shared_ptr<Type>;
+
+struct ClassType;
+using ClassTypePtr = std::shared_ptr<ClassType>;
+
 namespace ivalue {
 struct Tuple;
 struct Future;
 struct ConstantString;
 struct GenericDict;
 struct Object;
+struct PyObjectHolder;
 }
 
 // IValue is the generic tagged union used by the interpreter to hold
@@ -52,8 +57,10 @@ struct Object;
   _(Future) \
   _(Device) \
   _(Object) \
+  _(PyObject) \
   _(Uninitialized) \
-  _(Capsule)
+  _(Capsule) \
+  _(RRef) \
 
 // [doxygen private]
 // These methods are not actually private but we don't want to document them, so
@@ -200,13 +207,24 @@ struct CAFFE2_API IValue final {
   /// @private [doxygen private]
   c10::intrusive_ptr<caffe2::Blob> toBlob() const &;
 
-  // Capsule
-  IValue(intrusive_ptr<torch::jit::CustomClassHolder> blob);
+  // Capsule. Capsule is an internal implementation detail
+  // of custom C++ classes. No new callsites of these APIs should
+  // be introduced.
+  static inline IValue make_capsule(intrusive_ptr<torch::CustomClassHolder> blob);
   bool isCapsule() const {
     return Tag::Capsule == tag;
   }
-  c10::intrusive_ptr<torch::jit::CustomClassHolder> toCapsule() &&;
-  c10::intrusive_ptr<torch::jit::CustomClassHolder> toCapsule() const &;
+  c10::intrusive_ptr<torch::CustomClassHolder> toCapsule() &&;
+  c10::intrusive_ptr<torch::CustomClassHolder> toCapsule() const &;
+
+  // Custom C++ classes
+  template <typename T, std::enable_if_t<std::is_base_of<torch::CustomClassHolder, T>::value, int> = 0>
+  IValue(intrusive_ptr<T> custom_class);
+  bool isCustomClass() const;
+  template <typename T>
+  c10::intrusive_ptr<T> toCustomClass() &&;
+  template <typename T>
+  c10::intrusive_ptr<T> toCustomClass() const &;
 
   // Tuple
   IValue(c10::intrusive_ptr<ivalue::Tuple> v);
@@ -241,6 +259,12 @@ struct CAFFE2_API IValue final {
   c10::intrusive_ptr<ivalue::Future> toFuture() &&;
   c10::intrusive_ptr<ivalue::Future> toFuture() const &;
 
+  // RRef
+  IValue(c10::intrusive_ptr<c10::RRefInterface> v);
+  bool isRRef() const { return Tag::RRef == tag; }
+  c10::intrusive_ptr<c10::RRefInterface> toRRef() &&;
+  c10::intrusive_ptr<c10::RRefInterface> toRRef() const &;
+
   // Int
   IValue(int64_t i)
   : tag(Tag::Int), is_intrusive_ptr(false) {
@@ -273,7 +297,7 @@ struct CAFFE2_API IValue final {
   bool isIntList() const;
   c10::List<int64_t> toIntList() &&;
   c10::List<int64_t> toIntList() const &;
-  std::vector<int64_t> toIntListRef() const;
+  std::vector<int64_t> toIntVector() const;
 
   // ConstantString
   IValue(c10::intrusive_ptr<ivalue::ConstantString> v);
@@ -288,7 +312,7 @@ struct CAFFE2_API IValue final {
   bool isDoubleList() const;
   c10::List<double> toDoubleList() &&;
   c10::List<double> toDoubleList() const &;
-  std::vector<double> toDoubleListRef() const;
+  std::vector<double> toDoubleVector() const;
 
   // BoolList
   bool isBoolList() const;
@@ -299,20 +323,32 @@ struct CAFFE2_API IValue final {
   bool isTensorList() const;
   c10::List<at::Tensor> toTensorList() &&;
   c10::List<at::Tensor> toTensorList() const &;
-  std::vector<at::Tensor> toTensorListRef() const;
+  std::vector<at::Tensor> toTensorVector() const;
 
   //GenericList
   IValue(c10::List<IValue> v);
-  bool isGenericList() const { return Tag::GenericList == tag; }
-  c10::List<IValue> toGenericList() &&;
-  c10::List<IValue> toGenericList() const &;
-  c10::ArrayRef<IValue> toGenericListRef() const;
+  bool isList() const { return Tag::GenericList == tag; }
+  c10::List<IValue> toList() &&;
+  c10::List<IValue> toList() const &;
+  c10::ArrayRef<IValue> toListRef() const;
 
+  // Some template constructors of IValue calls another constructor recursively.
+  // This SNIFAEs the called constructor exists.
   template<class T>
+  using enable_if_ivalue_constructible =
+      std::enable_if_t<std::is_constructible<IValue, T>::value, std::nullptr_t>;
+
+  template <
+      class T,
+      enable_if_ivalue_constructible<T> = nullptr>
   IValue(c10::List<T> v);
-  template<class T>
+  template <
+      class T,
+      enable_if_ivalue_constructible<T> = nullptr>
   IValue(at::ArrayRef<T> v);
-  template<class T>
+  template <
+      class T,
+      enable_if_ivalue_constructible<T> = nullptr>
   IValue(const std::vector<T>& v);
 
   // GenericDict
@@ -330,7 +366,9 @@ struct CAFFE2_API IValue final {
   /// \endcond
   IValue(std::unordered_map<Key, Value> v);
 
-  template<class T>
+  template <
+      class T,
+      enable_if_ivalue_constructible<T> = nullptr>
   IValue(c10::optional<T> v);
   IValue(c10::nullopt_t);
 
@@ -341,8 +379,15 @@ struct CAFFE2_API IValue final {
   c10::intrusive_ptr<ivalue::Object> toObject() const & ;
   const ivalue::Object& toObjectRef() const;
 
-  torch::jit::script::Module toModule() const;
+  torch::jit::Module toModule() const;
   bool isModule() const;
+
+  // PyObject
+  IValue(c10::intrusive_ptr<ivalue::PyObjectHolder> v);
+  bool isPyObject() const { return tag == Tag::PyObject; }
+  c10::intrusive_ptr<ivalue::PyObjectHolder> toPyObjectHolder() &&;
+  c10::intrusive_ptr<ivalue::PyObjectHolder> toPyObjectHolder() const &;
+  PyObject* toPyObject() const;
 
   // None
   IValue() : payload{0}, tag(Tag::None), is_intrusive_ptr(false) {}
@@ -486,11 +531,44 @@ struct CAFFE2_API IValue final {
 
   /// @private [doxygen private]
   const void* internalToPointer() const {
-    TORCH_INTERNAL_ASSERT(isPtrType(), "Can only call internalToPointer() for pointer types");
+    TORCH_INTERNAL_ASSERT(
+        isPtrType(), "Can only call internalToPointer() for pointer types");
     return payload.as_intrusive_ptr;
   }
 
   TypePtr type() const;
+
+  size_t hash() const {
+    return payload.as_int;
+  }
+
+  // Detection Aliased tensors.
+  struct HashIValue {
+    size_t operator()(const IValue& val) const {
+      if (val.isTensor()) {
+        return 0;
+      }
+      return val.hash();
+    }
+  };
+
+  struct CompIValues {
+    bool operator()(const IValue& lhs, const IValue& rhs) const {
+      if (lhs.isTensor() && rhs.isTensor()) {
+        return lhs.isAliasOf(rhs);
+      }
+      return lhs.hash() == rhs.hash();
+    }
+  };
+
+  using HashAliasedIValues = std::unordered_set<IValue, HashIValue, CompIValues>;
+
+  // Chechs if this and rhs has a subvalues in common.
+  // [t1,t2] and [t2, t3] returns true.
+  bool overlaps(const IValue& rhs) const;
+
+  // Inserts all subvalues of this in subValues.
+  void getSubValues(HashAliasedIValues& subValues) const;
 
  private:
   // NOTE: IValue tags are intentionally private. In the future we may encode
@@ -632,27 +710,22 @@ private:
   bool is_intrusive_ptr;
 };
 
-// An owning pointer to a Class. Just a pair of shared_ptrs to the class type
-// and its owning CU, so that the class type is guaranteed to stay alive as long
-// as we hold this object.
-struct StrongTypePtr {
+// An owning pointer to a type. When the type is class type, it requires a pair
+// of shared_ptrs to the class type and its owning CU, so that the class type is
+// guaranteed to stay alive as long as we hold this object.
+struct TORCH_API StrongTypePtr {
   StrongTypePtr(
-      std::shared_ptr<torch::jit::script::CompilationUnit> cu,
-      std::shared_ptr<ClassType> type)
-      : cu_(std::move(cu)), type_(type) {
-    TORCH_INTERNAL_ASSERT(cu_);
-    TORCH_INTERNAL_ASSERT(type_);
-  }
-  std::shared_ptr<torch::jit::script::CompilationUnit> cu_;
-  std::shared_ptr<ClassType> type_;
+      std::shared_ptr<torch::jit::CompilationUnit> cu,
+      std::shared_ptr<Type> type);
+
+  std::shared_ptr<torch::jit::CompilationUnit> cu_;
+  std::shared_ptr<Type> type_;
 };
 
-TORCH_API std::unordered_map<std::string, c10::StrongTypePtr>& getCustomClassTypeMap();
-
-#ifndef C10_MOBILE
+TORCH_API std::unordered_map<std::string, c10::ClassTypePtr>& getCustomClassTypeMap();
 
 template<typename T>
-c10::StrongTypePtr getCustomClassType() {
+c10::ClassTypePtr getCustomClassType() {
   auto tmap = c10::getCustomClassTypeMap();
   auto res = tmap.find(typeid(T).name());
   if (res == tmap.end()) {
@@ -666,20 +739,6 @@ inline bool isCustomClassRegistered() {
   auto tmap = c10::getCustomClassTypeMap();
   return tmap.find(typeid(T).name()) != tmap.end();
 }
-
-#else  // C10_MOBILE
-
-template<typename T>
-c10::StrongTypePtr getCustomClassType() {
-  throw c10::Error("Custom class is not supported on mobile.", "");
-}
-
-template<typename T>
-inline bool isCustomClassRegistered() {
-  return false;
-}
-
-#endif  // C10_MOBILE
 
 TORCH_API std::unordered_map<std::string, std::function<PyObject*(void*)>>&
 getClassConverter();

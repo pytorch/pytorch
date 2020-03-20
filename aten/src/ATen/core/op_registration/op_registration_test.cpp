@@ -46,7 +46,7 @@ TEST(OperatorRegistrationTest, whenRegisteringSameSchemaWithAliasAnalysisAfterRe
 
     auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
     ASSERT_TRUE(op.has_value());
-    EXPECT_EQ(op->options().aliasAnalysis(), at::AliasAnalysisKind::PURE_FUNCTION);
+    EXPECT_EQ(op->schema().aliasAnalysis(), at::AliasAnalysisKind::PURE_FUNCTION);
   }
   {
     auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<DummyKernel>(c10::DispatchKey::XLATensorId).aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION));
@@ -54,7 +54,7 @@ TEST(OperatorRegistrationTest, whenRegisteringSameSchemaWithAliasAnalysisAfterRe
 
     auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
     ASSERT_TRUE(op.has_value());
-    EXPECT_EQ(op->options().aliasAnalysis(), at::AliasAnalysisKind::PURE_FUNCTION);
+    EXPECT_EQ(op->schema().aliasAnalysis(), at::AliasAnalysisKind::PURE_FUNCTION);
   }
 }
 
@@ -64,7 +64,7 @@ TEST(OperatorRegistrationTest, whenRegisteringSameSchemaWithSameAliasAnalysis_th
 
   auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
   ASSERT_TRUE(op.has_value());
-  EXPECT_EQ(op->options().aliasAnalysis(), at::AliasAnalysisKind::PURE_FUNCTION);
+  EXPECT_EQ(op->schema().aliasAnalysis(), at::AliasAnalysisKind::PURE_FUNCTION);
 }
 
 TEST(OperatorRegistrationTest, whenRegisteringSameSchemaWithNoAliasAnalysis_thenCanBeCalled) {
@@ -73,15 +73,15 @@ TEST(OperatorRegistrationTest, whenRegisteringSameSchemaWithNoAliasAnalysis_then
 
   auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
   ASSERT_TRUE(op.has_value());
-  EXPECT_TRUE(op->options().isDefaultAliasAnalysisKind());
-  EXPECT_EQ(op->options().aliasAnalysis(), at::AliasAnalysisKind::CONSERVATIVE);
+  EXPECT_TRUE(op->schema().isDefaultAliasAnalysisKind());
+  EXPECT_EQ(op->schema().aliasAnalysis(), at::AliasAnalysisKind::CONSERVATIVE);
 }
 
 TEST(OperatorRegistrationTest, whenRegisteringSameSchemaWithDifferentAliasAnalysis_thenShouldThrow) {
   expectThrows<c10::Error>([] {
     auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<DummyKernel>(c10::DispatchKey::CPUTensorId).aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION));
     auto registrar2 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<DummyKernel>(c10::DispatchKey::XLATensorId).aliasAnalysis(at::AliasAnalysisKind::CONSERVATIVE));
-  }, "Tried to register multiple operators with the same schema but different options:");
+  }, "Tried to register multiple operators with the same schema but different alias analysis kind:");
 }
 
 TEST(OperatorRegistrationTest, whenRegisteringWithSchemaBeforeKernelInOptionsObject_thenCanBeCalled) {
@@ -513,15 +513,17 @@ TEST(OperatorRegistrationTest, whenRegisteringCPUTensorType_thenCanOnlyCallUnbox
   auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
   ASSERT_TRUE(op.has_value()); // assert schema is registered
 
+  // Ensure that dispatcher doesn't take the dispatch key from the tensor but from the direct argument instead.
   called_kernel_cpu = false;
-  callOpUnboxedWithDispatchKey<void, Tensor>(*op, c10::DispatchKey::CPUTensorId, dummyTensor(c10::DispatchKey::CPUTensorId));
+  callOpUnboxedWithDispatchKey<void, Tensor>(*op, c10::DispatchKey::CPUTensorId, dummyTensor(c10::DispatchKey::CUDATensorId));
   EXPECT_TRUE(called_kernel_cpu);
 
+  // Ensure that disptach key from tensor is not used here.
   called_kernel_cpu = false;
   expectThrows<c10::Error>([&] {
-    callOpUnboxedWithDispatchKey<void, Tensor>(*op, c10::DispatchKey::CUDATensorId, dummyTensor(c10::DispatchKey::CUDATensorId));
+    callOpUnboxedWithDispatchKey<void, Tensor>(*op, c10::DispatchKey::CUDATensorId, dummyTensor(c10::DispatchKey::CPUTensorId));
   }, "Could not run '_test::dummy' with arguments from the 'CUDATensorId'"
-  " backend. '_test::dummy' is only available for these backends: [");
+  " backend. '_test::dummy' is only available for these backends: [CPUTensorId].");
 }
 
 TEST(OperatorRegistrationTest, whenRegisteringMultipleKernelsInSameOpCallAndCalling_thenCallsCorrectKernel) {
@@ -863,6 +865,25 @@ TEST(OperatorRegistrationTest, whenRegisteringAutogradKernelWithCatchAllKernel_t
   EXPECT_FALSE(called_autograd);
 }
 
+TEST(OperatorRegistrationTest, xlaPreAutogradOverridesAutogradKernel) {
+  auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
+    .impl_unboxedOnlyKernel<decltype(nonautograd_kernel), &nonautograd_kernel>(DispatchKey::XLAPreAutograd)
+    .impl_unboxedOnlyKernel<decltype(autograd_kernel), &autograd_kernel>(DispatchKey::VariableTensorId));
+
+  auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
+  ASSERT_TRUE(op.has_value());
+
+  called_nonautograd = called_autograd = false;
+  c10::Dispatcher::singleton().callUnboxed<void, Tensor>(*op, dummyTensor(c10::DispatchKeySet{DispatchKey::XLATensorId, DispatchKey::XLAPreAutograd}));
+  EXPECT_TRUE(called_nonautograd);
+  EXPECT_FALSE(called_autograd);
+
+  called_nonautograd = called_autograd = false;
+  c10::Dispatcher::singleton().callUnboxed<void, Tensor>(*op, dummyTensor(DispatchKey::CPUTensorId));
+  EXPECT_TRUE(called_autograd);
+  EXPECT_FALSE(called_nonautograd);
+}
+
 /**
  * This is used to check that a given type works correctly when passed as input
  * to or as output from a kernel.
@@ -1064,7 +1085,7 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
     "(bool[] a) -> bool[]");
   testArgTypes<c10::List<std::string>>::test(
     c10::List<std::string>(), [] (const c10::List<std::string>& v) {EXPECT_EQ(0, v.size());},
-    c10::List<std::string>(), [] (const IValue& v) {EXPECT_EQ(0, v.toGenericListRef().size());},
+    c10::List<std::string>(), [] (const IValue& v) {EXPECT_EQ(0, v.toListRef().size());},
     "(str[] a) -> str[]");
 
 
@@ -1084,9 +1105,9 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
   testArgTypes<c10::List<std::string>>::test(
     c10::List<std::string>({"first", "second"}), [] (const c10::List<std::string>& v) {expectListEquals({"first", "second"}, v);},
     c10::List<std::string>({"first", "second"}), [] (const IValue& v) {
-      EXPECT_EQ(2, v.toGenericListRef().size());
-      EXPECT_EQ("first", v.toGenericListRef()[0].toStringRef());
-      EXPECT_EQ("second", v.toGenericListRef()[1].toStringRef());
+      EXPECT_EQ(2, v.toListRef().size());
+      EXPECT_EQ("first", v.toListRef()[0].toStringRef());
+      EXPECT_EQ("second", v.toListRef()[1].toStringRef());
     },
     "(str[] a) -> str[]");
   testArgTypes<c10::List<Tensor>>::test(
@@ -1114,7 +1135,7 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
   //Note: vector<bool> is not supported, use List<bool> instead.
   testArgTypes<std::vector<std::string>>::test<TestLegacyAPI>(
     std::vector<std::string>(), [] (const std::vector<std::string>& v) {EXPECT_EQ(0, v.size());},
-    std::vector<std::string>(), [] (const IValue& v) {EXPECT_EQ(0, v.toGenericListRef().size());},
+    std::vector<std::string>(), [] (const IValue& v) {EXPECT_EQ(0, v.toListRef().size());},
     "(str[] a) -> str[]");
 
 
@@ -1131,9 +1152,9 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
   testArgTypes<std::vector<std::string>>::test<TestLegacyAPI>(
     std::vector<std::string>({"first", "second"}), [] (const std::vector<std::string>& v) {expectListEquals({"first", "second"}, v);},
     std::vector<std::string>({"first", "second"}), [] (const IValue& v) {
-      EXPECT_EQ(2, v.toGenericListRef().size());
-      EXPECT_EQ("first", v.toGenericListRef()[0].toStringRef());
-      EXPECT_EQ("second", v.toGenericListRef()[1].toStringRef());
+      EXPECT_EQ(2, v.toListRef().size());
+      EXPECT_EQ("first", v.toListRef()[0].toStringRef());
+      EXPECT_EQ("second", v.toListRef()[1].toStringRef());
     },
     "(str[] a) -> str[]");
   testArgTypes<std::vector<Tensor>>::test<TestLegacyAPI>(
@@ -1264,6 +1285,35 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
     makeDeeplyNestedObject(), [] (const DeeplyNestedType& v) {EXPECT_EQ("1", v.get(0).at("key").get(0).value().at(1));},
     makeDeeplyNestedObject(), [] (const IValue& v) {EXPECT_EQ("1", v.to<DeeplyNestedType>().get(0).at("key").get(0).value().at(1));},
     "(Dict(str, Dict(int, str)?[])[] a) -> Dict(str, Dict(int, str)?[])[]");
+}
+
+TEST(NewOperatorRegistrationTest, testBasics) {
+  auto registrar = c10::import("_test")
+    .def("dummy(Tensor self) -> Tensor")
+    .def("dummy1(Tensor self) -> Tensor")
+    .def("dummy2(Tensor self) -> Tensor")
+    .def("dummy3(Tensor self, Tensor other) -> Tensor", [](const Tensor& self, const Tensor& other) { return self; })
+    // TODO: This currently does not work, as we need to test if we were given
+    // a schema string or name and then set FROM_SCHEMA or CONSERVATIVE based
+    // on this information
+    // .def("dummy4", [](const Tensor& self, const Tensor& other) { return other; })
+    // TODO: skip having to specify schema string redundantly here
+    .impl("dummy(Tensor self) -> Tensor", c10::dispatch(c10::DeviceType::CPU, [](const Tensor& self) { return self; }))
+    .impl("dummy(Tensor self) -> Tensor", c10::dispatch(c10::DeviceType::XLA, [](const Tensor& self) { return self; }))
+    // Internal API
+    .impl("dummy2(Tensor self) -> Tensor", c10::dispatch(c10::DispatchKey::CPUTensorId, [](const Tensor& self) { return self; }))
+    .impl("dummy2(Tensor self) -> Tensor", c10::dispatch(c10::DispatchKey::XLATensorId, [](const Tensor& self) { return self; }));
+
+  auto registrar2 = c10::import()
+    .def("_test::dummy5(Tensor self) -> Tensor");
+
+  ASSERT_TRUE(Dispatcher::singleton().findSchema({"_test::dummy", ""}).has_value());
+  // Should have a schema even if there are no impls
+  ASSERT_TRUE(Dispatcher::singleton().findSchema({"_test::dummy1", ""}).has_value());
+  ASSERT_TRUE(Dispatcher::singleton().findSchema({"_test::dummy2", ""}).has_value());
+  ASSERT_TRUE(Dispatcher::singleton().findSchema({"_test::dummy3", ""}).has_value());
+  // ASSERT_TRUE(Dispatcher::singleton().findSchema({"_test::dummy4", ""}).has_value());
+  ASSERT_TRUE(Dispatcher::singleton().findSchema({"_test::dummy5", ""}).has_value());
 }
 
 }

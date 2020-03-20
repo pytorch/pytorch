@@ -52,7 +52,7 @@ class LSTMBenchmark(op_bench.TorchBenchmarkBase):
 
         self.x = torch.randn(sequence_len,  # sequence length
                              batch_size,    # batch size
-                             I)             # Number of featues in X
+                             I)             # Number of features in X
         self.h = torch.randn(NL * (D + 1),  # layer_num * dir_num
                              batch_size,    # batch size
                              H)             # hidden size
