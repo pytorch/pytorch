@@ -41,17 +41,7 @@ class TORCH_API LoopNest {
   void SetGPUBlockIndex(For* f, int idx);
   void SetGPUThreadIndex(For* f, int idx);
 
-  std::unordered_map<const Var*, Range> inferBounds(Stmt* s);
-
-  private:
-  std::unordered_map<const Var*, Range> inferBoundsForBlock(Block* b);
-  std::unordered_map<const Var*, Range> inferBoundsForLoop(For* f);
-  std::unordered_map<const Var*, Range> inferBoundsForStore(Store* st);
-  std::unordered_map<const Var*, Range> mergeBufVectors(
-      std::unordered_map<const Var*, Range> a,
-      std::unordered_map<const Var*, Range> b);
-
-
+ private:
   std::vector<Tensor*> FindAllNeededTensors(
       const std::vector<Tensor*>& tensors);
   Stmt* LowerToStmt(Tensor* t);
@@ -64,23 +54,6 @@ class TORCH_API LoopNest {
 
   std::unordered_set<Tensor*> output_tensors_;
   std::unordered_set<Tensor*> intermediate_tensors_;
-};
-
-// represent a range [start, stop)
-class Range {
- public:
-  Range() {}
-  Range(const Expr* start, const Expr* stop) : start_(start), stop_(stop) {}
-  const Expr* start() const {
-    return start_;
-  }
-  const Expr* stop() const {
-    return stop_;
-  }
-
- private:
-  const Expr* start_;
-  const Expr* stop_;
 };
 
 } // namespace tensorexpr

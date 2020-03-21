@@ -12,6 +12,7 @@
 #include "torch/csrc/jit/tensorexpr/ir_printer.h"
 #include "torch/csrc/jit/tensorexpr/loopnest.h"
 #include "torch/csrc/jit/tensorexpr/tensor.h"
+#include "torch/csrc/jit/tensorexpr/bounds_inference.h"
 
 namespace torch {
 namespace jit {
@@ -557,7 +558,7 @@ void testScheduleBoundsInference() {
         });
     LoopNest l({c});
     std::vector<For*> loops = l.getLoopStmtsFor(c);
-    l.inferBounds(loops[0]);
+    inferBounds(loops[0]);
 //     Stmt* s = l.root_stmt();
 //     SimpleIREvaluator cg(s, {a, b, c, m, n});
 //     std::vector<float> aData(M * N, 1.0f);
