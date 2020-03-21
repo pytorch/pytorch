@@ -258,7 +258,8 @@ void SimpleValue::setAttr(
       }
     } else {
       throw ErrorReport(loc)
-          << "Tried to set nonexistent attribute: " << field
+          << "Tried to set nonexistent attribute "
+          << "\"" << field << "\" of type \"" << classType->str() << "\""
           << ". Did you forget to initialize it in __init__()?";
     }
   }

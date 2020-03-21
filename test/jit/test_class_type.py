@@ -941,3 +941,11 @@ class TestClassType(JitTestCase):
             self.assertEqual(m(input), m_loaded(input))
             # Make sure class constant is accessible from module
             self.assertEqual(m.w, m_loaded.w)
+
+    def test_nonexistent_attribute(self):
+        class MyCoolModule(torch.nn.Module):
+            def forward(self):
+                self.not_here = 1
+
+        with self.assertRaisesRegex(RuntimeError, "nonexistent.*not_here.*MyCoolModule"):
+            torch.jit.script(MyCoolModule())
