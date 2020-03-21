@@ -1,5 +1,6 @@
 #include <torch/csrc/autograd/symbolic.h>
 #include <torch/csrc/jit/serialization/export.h>
+#include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/onnx/onnx.h>
 
 #include <ATen/core/functional.h>
@@ -928,7 +929,9 @@ void export_opnames(const script::Module& m, std::set<std::string>& opnames) {
   for (const auto& element : elements) {
     auto table = element.toTuple()->elements()[1];
     const auto& ops_list =
-        expect_field(table, "operators", 1).toTuple()->elements();
+        expect_field(table, "operators", BYTECODE_INDEX_OPERATOR)
+            .toTuple()
+            ->elements();
     for (const auto& op : ops_list) {
       auto op_item = op.toTuple()->elements();
       TORCH_CHECK(
