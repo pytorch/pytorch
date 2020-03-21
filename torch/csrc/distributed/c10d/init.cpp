@@ -122,11 +122,13 @@ PyObject* c10d_init(PyObject* _unused) {
               std::vector<std::vector<torch::autograd::Variable>>,
               std::vector<std::vector<size_t>>,
               std::shared_ptr<::c10d::ProcessGroup>,
-              std::vector<std::vector<bool>>>(),
+              std::vector<std::vector<bool>>,
+              int64_t>(),
           py::arg("replicas"),
           py::arg("bucket_indices"),
           py::arg("process_group"),
-          py::arg("expect_sparse_gradients") = std::vector<std::vector<bool>>())
+          py::arg("expect_sparse_gradients") = std::vector<std::vector<bool>>(),
+          py::arg("bucket_bytes_cap") = 25 * 1024 * 1024)
       .def(
           "initialize_buckets",
           &::c10d::Reducer::initialize_buckets,
@@ -668,6 +670,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
       py::arg("tensors"),
       py::arg("bucket_size"),
       py::arg("expect_sparse_gradient") = std::vector<bool>(),
+      py::arg("tensor_indices") = std::vector<int64_t>(),
       py::call_guard<py::gil_scoped_release>());
 
   module.def(

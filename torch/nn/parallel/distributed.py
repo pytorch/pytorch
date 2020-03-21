@@ -379,7 +379,8 @@ class DistributedDataParallel(Module):
             parameters,
             list(reversed(bucket_indices)),
             self.process_group,
-            expect_sparse_gradient)
+            expect_sparse_gradient,
+            self.bucket_bytes_cap)
 
         # passing a handle to torch.nn.SyncBatchNorm layer
         self._passing_sync_batchnorm_handle(self._module_copies)

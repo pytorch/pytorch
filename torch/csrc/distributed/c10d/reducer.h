@@ -23,7 +23,8 @@ class Reducer {
       std::vector<std::vector<torch::autograd::Variable>> replicas,
       std::vector<std::vector<size_t>> bucket_indices,
       std::shared_ptr<c10d::ProcessGroup> process_group,
-      std::vector<std::vector<bool>> expect_sparse_gradients);
+      std::vector<std::vector<bool>> expect_sparse_gradients,
+      int64_t bucket_bytes_cap);
 
   ~Reducer() noexcept(false);
 
@@ -108,6 +109,8 @@ class Reducer {
 
   void finalize_backward();
 
+  void rebuildBuckets();
+
   // A bucket replica represents [1..N] gradients to be reduced,
   // with the same dtype, on the same device.
   //
@@ -186,11 +189,21 @@ class Reducer {
   // the point in time buckets were ready, or ideal bucket assignment/ordering.
   int64_t backward_stats_base_;
   std::vector<std::vector<int64_t>> backward_stats_;
+
+  // Following variables are to help build dynamic bucket order
+  bool was_rebuilt_bucket_;
+  std::vector<at::Tensor> rebuilt_tensors_;
+  std::vector<int64_t> rebuilt_param_indices_;
+  int64_t bucket_bytes_cap_;
 };
 
+// tensor_indices stores the parameter tensor indices of "tensors" in
+// orginal model.parameters() list, if it is empty, then the parameter tensor
+// indices of "tensors" are the indices in "tensor" list.
 std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
     const std::vector<at::Tensor>& tensors,
     const std::vector<size_t>& bucket_size,
-    const std::vector<bool>& expect_sparse_gradient = {});
+    const std::vector<bool>& expect_sparse_gradient = {},
+    const std::vector<int64_t> tensor_indices = {});
 
 } // namespace c10d
