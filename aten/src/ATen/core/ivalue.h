@@ -546,7 +546,7 @@ struct CAFFE2_API IValue final {
       }
       // If it is not a Tensor, then two mutable IValues alias each other only
       // if they are the same pointer.
-      return payload.as_int;
+      return val.payload.as_int;
     }
   };
 
