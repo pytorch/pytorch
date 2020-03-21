@@ -14,7 +14,6 @@
 namespace torch {
 namespace jit {
 namespace tensorexpr {
-namespace schedule {
 
 namespace {
 
@@ -870,7 +869,6 @@ bool LoopNest::hasLoopBodyFor(Tensor* t) const {
   return tensor_to_stmt_.count(t) > 0;
 }
 
-} // namespace schedule
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
