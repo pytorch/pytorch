@@ -2,7 +2,7 @@ import bisect
 import warnings
 
 from torch._utils import _accumulate
-from torch import randperm
+from torch import randperm, default_generator
 
 
 class Dataset(object):
@@ -260,25 +260,20 @@ class Subset(Dataset):
         return len(self.indices)
 
 
-def random_split(dataset, lengths, random_state=None, generator=None):
+def random_split(dataset, lengths, generator=default_generator):
     r"""
     Randomly split a dataset into non-overlapping new datasets of given lengths.
-    Optionally fix the random seed for reproducible results.
+    Optionally fix the generator for reproducible results, e.g.:
+
+    >>> random_split(range(10), [3, 7], generator=torch.Generator().manual_seed(42))
 
     Arguments:
         dataset (Dataset): Dataset to be split
         lengths (sequence): lengths of splits to be produced
-        random_state (int): seed used by the random number generator
+        generator (Generator): Generator used for the random permutation.
     """
     if sum(lengths) != len(dataset):
         raise ValueError("Sum of input lengths does not equal the length of the input dataset!")
 
-    if random_state is not None and generator is not None:
-        raise ValueError("random_state and generator cannot both be set")
-
-    if random_state is not None:
-        generator = torch.Generator()
-        generator.manual_seed(random_state)
-
-    indices = randperm(sum(lengths), generator=generator or torch.default_generator).tolist()
-    return [Subset(dataset, indices[offset - length:offset]) for offset, length in zip(_accumulate(lengths), lengths)]
+    indices = randperm(sum(lengths), generator=generator).tolist()
+    return [Subset(dataset, indices[offset - length : offset]) for offset, length in zip(_accumulate(lengths), lengths)]
