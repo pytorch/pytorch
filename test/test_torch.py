@@ -16454,38 +16454,38 @@ class TestTensorDeviceOps(TestCase):
 
 # Helpers to organize ufunc metadata and improve test readability
 _ufunc_meta = collections.namedtuple('_ufunc_meta',
-                                     'is_floating alt_impl complex_on complex_out')
-def ufunc_meta(is_floating=False, alt_impl=None, complex_on=('cpu', 'cuda'), complex_out=('cpu', 'cuda')):
-    return _ufunc_meta(is_floating, alt_impl, complex_on, complex_out)
+                                     'is_floating complex_on')
+def ufunc_meta(is_floating=False, complex_on=('cpu', 'cuda')):
+    return _ufunc_meta(is_floating, complex_on)
 
 # Dict of unary ufuncs and their associated test metadata
 unary_ufuncs = {
-    'sin': ufunc_meta(is_floating=True, complex_on=('cpu')),
-    'cos': ufunc_meta(is_floating=True, complex_on=('cpu'), complex_out=('cpu')),
-    'tan': ufunc_meta(is_floating=True, complex_on=('cpu'), complex_out=('cpu')),
-    'asin': ufunc_meta(is_floating=True, complex_on=('cpu')),
-    'acos': ufunc_meta(is_floating=True, complex_on=('cpu')),
-    'atan': ufunc_meta(is_floating=True, complex_on=('cpu'), complex_out=('cpu')),
-    'sinh': ufunc_meta(is_floating=True, complex_on=('cpu')),
-    'cosh': ufunc_meta(is_floating=True, complex_on=('cpu'), complex_out=('cpu')),
-    'tanh': ufunc_meta(is_floating=True, complex_on=('cpu'), complex_out=('cpu')),
-    'ceil': ufunc_meta(is_floating=True, complex_on=('cpu')),
-    'floor': ufunc_meta(is_floating=True, complex_on=('cpu')),
-    'exp': ufunc_meta(is_floating=True, complex_on=('cpu'), complex_out=('cpu')),
-    'expm1': ufunc_meta(is_floating=True, complex_on=(), complex_out=()),
-    'log': ufunc_meta(is_floating=True, complex_on=('cpu')),
-    'log10': ufunc_meta(is_floating=True, complex_on=('cpu')),
-    'log1p': ufunc_meta(is_floating=True, complex_on=(), complex_out=()),
-    'log2': ufunc_meta(is_floating=True, complex_on=('cpu')),
-    'sqrt': ufunc_meta(is_floating=True, complex_on=('cpu')),
-    'rsqrt': ufunc_meta(is_floating=True, complex_on=('cpu')),
-    'trunc': ufunc_meta(is_floating=True, complex_on=('cpu')),
-    'erf': ufunc_meta(is_floating=True, complex_on=(), complex_out=()),
-    'erfc': ufunc_meta(is_floating=True, complex_on=(), complex_out=()),
-    'erfinv': ufunc_meta(is_floating=True, complex_on=(), complex_out=()),
-    'lgamma': ufunc_meta(is_floating=True, complex_on=(), complex_out=()),
-    'digamma': ufunc_meta(is_floating=True, complex_on=(), complex_out=()),
-    'sigmoid': ufunc_meta(is_floating=True, complex_on=('cpu'), complex_out=('cpu'))
+    'sin': ufunc_meta(is_floating=True, complex_on=('cpu', 'cuda')),
+    'cos': ufunc_meta(is_floating=True, complex_on=('cpu')),
+    'tan': ufunc_meta(is_floating=True, complex_on=('cpu')),
+    'asin': ufunc_meta(is_floating=True, complex_on=('cpu', 'cuda')),
+    'acos': ufunc_meta(is_floating=True, complex_on=('cpu', 'cuda')),
+    'atan': ufunc_meta(is_floating=True, complex_on=('cpu')),
+    'sinh': ufunc_meta(is_floating=True, complex_on=('cpu', 'cuda')),
+    'cosh': ufunc_meta(is_floating=True, complex_on=('cpu')),
+    'tanh': ufunc_meta(is_floating=True, complex_on=('cpu')),
+    'ceil': ufunc_meta(is_floating=True, complex_on=('cpu', 'cuda')),
+    'floor': ufunc_meta(is_floating=True, complex_on=('cpu', 'cuda')),
+    'exp': ufunc_meta(is_floating=True, complex_on=('cpu')),
+    'expm1': ufunc_meta(is_floating=True, complex_on=()),
+    'log': ufunc_meta(is_floating=True, complex_on=('cpu', 'cuda')),
+    'log10': ufunc_meta(is_floating=True, complex_on=('cpu', 'cuda')),
+    'log1p': ufunc_meta(is_floating=True, complex_on=()),
+    'log2': ufunc_meta(is_floating=True, complex_on=('cpu', 'cuda')),
+    'sqrt': ufunc_meta(is_floating=True, complex_on=('cpu', 'cuda')),
+    'rsqrt': ufunc_meta(is_floating=True, complex_on=('cpu', 'cuda')),
+    'trunc': ufunc_meta(is_floating=True, complex_on=('cpu', 'cuda')),
+    'erf': ufunc_meta(is_floating=True, complex_on=()),
+    'erfc': ufunc_meta(is_floating=True, complex_on=()),
+    'erfinv': ufunc_meta(is_floating=True, complex_on=()),
+    'lgamma': ufunc_meta(is_floating=True, complex_on=()),
+    'digamma': ufunc_meta(is_floating=True, complex_on=()),
+    'sigmoid': ufunc_meta(is_floating=True, complex_on=('cpu'))
 }
 
 # Creates and adds a test of the given unary floating ufunc's type promotion
@@ -16493,7 +16493,7 @@ unary_ufuncs = {
 # the default scalar type.
 def generate_unary_floating_ufunc_promo_test(cls, op_str):
     int_types = [torch.bool, torch.uint8, torch.int8, torch.int16,
-                 torch.int, torch.long]
+                 torch.int32, torch.int64]
     float_types = [torch.float, torch.double]
     float_types_cuda = [torch.half, torch.float, torch.double]
     complex_types = [torch.complex64, torch.complex128]
@@ -16502,6 +16502,7 @@ def generate_unary_floating_ufunc_promo_test(cls, op_str):
 
     def test_fn(self, device):
         op = getattr(torch, op_str)
+        meth = getattr(torch.Tensor, op_str)
         my_default_types = default_types
         my_float_types = float_types
         if self.device_type == 'cuda':
@@ -16516,24 +16517,25 @@ def generate_unary_floating_ufunc_promo_test(cls, op_str):
                 torch.set_default_dtype(def_type)
                 t = torch.tensor((1,), device=device, dtype=in_type)
                 self.assertEqual(op(t).dtype, def_type)
+                self.assertEqual(meth(t).dtype, def_type)
         finally:
             torch.set_default_dtype(prev_def_type)
 
         for in_type in my_float_types:
             t = torch.tensor((1,), device=device, dtype=in_type)
             self.assertEqual(op(t).dtype, in_type)
-
-        # These ops only support out= calls on CPU devices
-        only_out_on_cpu = ['atan', 'cos', 'cosh', 'erf', 'erfc', 'exp', 'tan', 'tanh']
+            self.assertEqual(meth(t).dtype, in_type)
 
         # Test for out= code paths
         for in_type in my_float_types + int_types:
-            # Floating type promotion for out= calls on ops listed in only_out_on_cpu
-            # not supported on cuda devices
-            if (op_str in only_out_on_cpu and self.device_type == 'cuda'):
+            if self.device_type not in unary_ufuncs[op_str].complex_on:
                 break
             t = torch.tensor((1,), device=device, dtype=in_type)
             for out_type in my_float_types:
+                # Temporary work around to avoid complex types casting to complex types on CUDA devices
+                if in_type in complex_types and out_type in complex_types and out_type != in_type \
+                        and self.device_type == 'cuda':
+                    continue
                 out_t = torch.empty((1,), device=device, dtype=out_type)
                 # Floating type promotion does not support out= calls for input as bool tensors
                 # and output as complex tensors
@@ -16545,24 +16547,8 @@ def generate_unary_floating_ufunc_promo_test(cls, op_str):
                 out_t = torch.empty((1,), device=device, dtype=out_type)
                 self.assertRaises(RuntimeError, lambda: op(t, out=out_t))
 
-        # Test for out= code paths (with input as float tensors and out as complex tensors)
-        for in_type in my_float_types:
-            if self.device_type not in unary_ufuncs[op_str].complex_out:
-                break
-            t = torch.tensor((1,), device=device, dtype=in_type)
-            for out_type in complex_types:
-                out_t = torch.empty((1,), device=device, dtype=out_type)
-                if self.device_type not in unary_ufuncs[op_str].complex_out:
-                    self.assertRaises(RuntimeError, lambda: op(t, out=out_t))
-                else:
-                    self.assertEqual(op(t, out=out_t).dtype, out_type)
-
         # Test for in-place code paths
-        try:
-            op_inplace = getattr(torch, op_str + "_")
-        except AttributeError:
-            # lgamma, digamma and erfinv don't have in-place functions
-            return
+        op_inplace = getattr(torch.Tensor, op_str + "_")
 
         for in_type in int_types:
             t = torch.tensor((1,), device=device, dtype=in_type)

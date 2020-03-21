@@ -375,18 +375,10 @@ def _arange_cast_helper(g, end, start=None, step=None, dtype=None):
     step = g.op("Cast", step, to_i=scalar_type_to_onnx[type]) if step else None
     return type, end, start, step
 
-torch_float_dtype_to_onnx = {
-    torch.half: torch.onnx.TensorProtoDataType.FLOAT16,
-    torch.float: torch.onnx.TensorProtoDataType.FLOAT,
-    torch.double: torch.onnx.TensorProtoDataType.DOUBLE
-}
 
 def _unary_ufunc_helper(g, self, op_name):
     if not _is_fp(self):
-        dtype = torch.get_default_dtype()
-        assert dtype in torch_float_dtype_to_onnx.keys()
-        onnx_scalar_type = torch_float_dtype_to_onnx[dtype]
-        self = g.op("Cast", self, to_i=onnx_scalar_type)
+        self = g.op("Cast", self, to_i=scalar_type_to_pytorch_type.index(torch.get_default_dtype()))
 
     return g.op(op_name, self)
 
