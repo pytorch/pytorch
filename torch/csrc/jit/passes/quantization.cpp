@@ -125,11 +125,11 @@ bool isFunctionNode(Node* n,
 }
 
 // If the op doesn't require observation, return
-// the the list of input indexes that we should check to see
+// the the list of input `Value`s that we should check to see
 // if they are observed/quantized, if so, we can say the output
 // of this op is observed/quantized as well, since for these ops we can derive
 // the quantization parameters for output given inputs
-std::vector<size_t> getGeneralOpTensorInputIndexes(Node* n) {
+std::vector<Value*> getGeneralOpTensorInputs(Node* n) {
   std::vector<std::string> single_input_aten_funcs = {
       "max_pool2d",
       "avg_pool2d",
@@ -163,22 +163,22 @@ std::vector<size_t> getGeneralOpTensorInputIndexes(Node* n) {
       // after inline
       /* call_funcs = */ _single_input_general_call_funcs,
       /* aten_funcs = */ {})) {
-    return {1};
+    return {n->input(1)};
   } else if (isFunctionNode(
                  n,
                  // We don't have call functions
                  // after inline
                  /* call_funcs = */ {},
                  /* aten_funcs = */ single_input_aten_funcs)) {
-    return {0};
+    return {n->input(0)};
   } else if (n->kind() == prim::ListUnpack) {
-    return {0};
+    return {n->input(0)};
   } else if (n->kind() == prim::ListConstruct) {
-    std::vector<size_t> indexes;
-    for (auto i = 0; i < n->inputs().size(); ++i) {
-      indexes.push_back(i);
+    std::vector<Value*> inputs;
+    for (auto* v : n->inputs()) {
+      inputs.push_back(v);
     }
-    return indexes;
+    return inputs;
   }
   return {};
 }
@@ -815,10 +815,10 @@ void InsertObserversHelper::fillPassThroughValueMap(const std::shared_ptr<Graph>
         auto g = getCallFunctionGraph(n);
         blocks_to_visit.push(g->block());
       }
-      auto input_indexes = getGeneralOpTensorInputIndexes(n);
-      for (auto i : input_indexes) {
+      auto inputs = getGeneralOpTensorInputs(n);
+      for (auto* input : inputs) {
         for (auto* output : n->outputs()) {
-          pass_through_value_map_[output].push_back(n->input(i));
+          pass_through_value_map_[output].push_back(input);
         }
       }
       for (Block* subblock : n->blocks()) {
@@ -2085,19 +2085,18 @@ void FoldConvBatchNorm2dHelper::transform() {
 void swapDeQuant(Block* block) {
   auto graph = block->owningGraph();
   for (Node* n : block->nodes()) {
-    auto input_indexes = getGeneralOpTensorInputIndexes(n);
-    if (input_indexes.size() > 0) {
+    auto inputs = getGeneralOpTensorInputs(n);
+    if (inputs.size() > 0) {
       bool is_dequantized = true;
-      for (auto i : input_indexes) {
-        is_dequantized &= n->inputs()[i]->node()->kind() == Symbol::aten("dequantize");
+      for (auto* input : inputs) {
+        is_dequantized &= input->node()->kind() == Symbol::aten("dequantize");
       }
       if (!is_dequantized) {
         continue;
       }
       // Delete dequantize node, we have one dequantize
       // for each use of the value
-      for (auto i : input_indexes) {
-        auto* dequantized_val = n->inputs()[i];
+      for (auto* dequantized_val : inputs) {
         auto* dequantize_node = dequantized_val->node();
         TORCH_INTERNAL_ASSERT(dequantized_val->uses().size() == 1,
                               "Expect to have one dequantize node for each use");
