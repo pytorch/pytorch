@@ -92,6 +92,7 @@ blacklist = [
     'div_',
     'div_out',
     'floor_divide', 'floor_divide_', 'floor_divide_out',
+    'dequantize',
 ]
 
 
