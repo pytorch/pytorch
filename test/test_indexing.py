@@ -66,6 +66,12 @@ class TestIndexing(TestCase):
                 'indexing with dtype torch.uint8 is no longer supported'):
             v[mask].shape
 
+        mask = torch.tensor([1, 0, 1, 1, 0], device="cpu", dtype=torch.uint8)
+        with self.assertRaisesRegex(
+                RuntimeError,
+                'indexing with dtype torch.uint8 is no longer supported'):
+            v[mask].shape
+
     def test_index_put_byte_indices(self, device):
         mask = torch.zeros(size=(10, ), dtype=torch.uint8, device=device)
         y = torch.ones(size=(10, 10), device=device)
@@ -91,7 +97,7 @@ class TestIndexing(TestCase):
         self.assertEqual(a[-2], 13)
         self.assertEqual(a[-1], 14)
 
-    def test_byte_mask2d(self, device):
+    def test_bool_mask2d(self, device):
         v = torch.randn(5, 7, 3, device=device)
         c = torch.randn(5, 7, device=device)
         num_ones = (c > 0).sum()
@@ -318,6 +324,18 @@ class TestIndexing(TestCase):
         x[1] = torch.arange(5, 7, device=device)
         self.assertEqual(x.tolist(), [[0, 1], [5, 6]])
 
+    def test_bool_tensor_assignment(self, device):
+        x = torch.arange(0., 16, device=device).view(4, 4)
+        b = torch.BoolTensor([True, False, True, False]).to(device)
+        value = torch.tensor([3., 4., 5., 6.], device=device)
+
+        x[b] = value
+
+        self.assertEqual(x[0], value)
+        self.assertEqual(x[1], torch.arange(4, 8, device=device))
+        self.assertEqual(x[2], value)
+        self.assertEqual(x[3], torch.arange(12, 16, device=device))
+
     def test_variable_slicing(self, device):
         x = torch.arange(0, 16, device=device).view(4, 4)
         indices = torch.IntTensor([0, 1]).to(device)
@@ -504,6 +522,10 @@ class NumpyTests(TestCase):
 
         index = tensor([False] * 6, device=device)
         self.assertRaisesRegex(IndexError, 'mask', lambda: arr[index])
+
+        index = torch.BoolTensor(4, 4).to(device).zero_()
+        self.assertRaisesRegex(IndexError, 'mask', lambda: arr[index])
+        self.assertRaisesRegex(IndexError, 'mask', lambda: arr[(slice(None), index)])
 
     def test_boolean_indexing_onedim(self, device):
         # Indexing a 2-dimensional array with
