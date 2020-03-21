@@ -1401,6 +1401,7 @@ void apply_diag(Tensor& result, const Tensor& self, int64_t dimension) {
     int64_t sz = self_size + std::abs(dimension);
 
     result.resize_({sz, sz});
+    result.zero_();
     auto r_data = result.data_ptr<scalar_t>();
     auto r_stride_0 = result.stride(0);
     auto r_stride_1 = result.stride(1);
@@ -1421,6 +1422,7 @@ void apply_diag(Tensor& result, const Tensor& self, int64_t dimension) {
     }
 
     result.resize_({sz});
+    result.zero_();
     auto r_data = result.data_ptr<scalar_t>();
     auto r_stride_0 = result.stride(0);
     self_data += (dimension >= 0 ? dimension * self_stride_1 : -dimension * self_stride_0);
