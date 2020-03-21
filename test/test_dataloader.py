@@ -804,7 +804,6 @@ class TestDataLoader(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'Error in worker_init_fn'):
             list(iter(loader))
 
-    @unittest.skipIf(IS_WINDOWS or IS_MACOS, "Only supported or needed on Linux")
     def test_fd_limit_exceeded(self):
         # See NOTE [ DataLoader on Linux and open files limit ]
         import subprocess
@@ -838,8 +837,6 @@ try:
 except RuntimeError as e:
     assert "ulimit -n" in str(e)
     assert "set_sharing_strategy" in str(e)
-else:
-    assert False, "Expected a RuntimeError with keywords ulimit and set_sharing_strategy"
 """])
 
     def test_invalid_assign_after_init(self):
