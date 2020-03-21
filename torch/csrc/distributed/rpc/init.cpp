@@ -242,23 +242,6 @@ PyObject* rpc_init(PyObject* /* unused */) {
           // not releasing GIL to avoid context switch
           .def("__str__", &PyRRef::str);
 
-  // future.wait() should not be called after shutdown(), e.g.,
-  // pythonRpcHandler is cleaned up in shutdown(), after
-  // shutdown(), python objects returned from rpc python call can not be
-  // resolved.
-  // TODO Once python object can be tagged as IValue and c10::ivalue::Future is
-  // implemented as generic Future<IValue>, we can consider all rpc call
-  // to return a future<IValue> later on.
-  auto future = shared_ptr_class_<FutureMessage>(module, "Future")
-                    .def(
-                        "wait",
-                        [&](FutureMessage& fut) { return toPyObj(fut.wait()); },
-                        py::call_guard<py::gil_scoped_release>(),
-                        R"(
-Wait on future to complete and return the object it completed with.
-If the future completes with an error, an exception is thrown.
-              )");
-
   shared_ptr_class_<ProcessGroupRpcBackendOptions>(
       module,
       "ProcessGroupRpcBackendOptions",
@@ -342,7 +325,12 @@ If the future completes with an error, an exception is thrown.
       .def(
           "shutdown",
           &ProcessGroupAgent::shutdown,
-          py::call_guard<py::gil_scoped_release>())
+          py::call_guard<py::gil_scoped_release>(),
+          R"(
+          future.wait() should not be called after shutdown(), e.g.,
+          pythonRpcHandler is cleaned up in shutdown(), after
+          shutdown(), python objects returned from rpc python call can not be
+          resolved.)")
       .def(
           "sync",
           &ProcessGroupAgent::sync,
@@ -457,7 +445,7 @@ If the future completes with an error, an exception is thrown.
         DCHECK(!PyGILState_Check());
         c10::intrusive_ptr<c10::ivalue::Future> fut =
             rpcTorchscript(dstWorkerName, qualifiedName, functionSchema, stack);
-        return torch::jit::PythonFutureWrapper(fut);
+        return std::make_shared<jit::PythonFutureWrapper>(fut);
       },
       py::call_guard<py::gil_scoped_release>());
 

@@ -46,12 +46,20 @@
 namespace torch {
 namespace jit {
 
+py::object toPyObject(IValue ivalue);
+
 // The PythonFutureWrapper for ivalue::Future
 struct PythonFutureWrapper {
-  explicit PythonFutureWrapper(c10::intrusive_ptr<c10::ivalue::Future> fut)
-      : fut(std::move(fut)) {}
+  using UnwrapFunc = std::function<void(py::object)>;
 
-  IValue wait() {
+  explicit PythonFutureWrapper(
+      c10::intrusive_ptr<c10::ivalue::Future> fut,
+      c10::optional<UnwrapFunc> unwrap_func = c10::nullopt)
+      : fut(std::move(fut)), unwrap_func(std::move(unwrap_func)) {}
+
+  PythonFutureWrapper(const PythonFutureWrapper&) = delete;
+
+  py::object wait() {
     fut->wait();
     if (jit::tracer::isTracing()) {
       auto graph = jit::tracer::getTracingState()->graph;
@@ -60,10 +68,22 @@ struct PythonFutureWrapper {
       auto output = graph->insert(aten::wait, {fut_val});
       jit::tracer::setValueTrace(fut->value(), output);
     }
-    return fut->value();
+    py::object py_obj;
+    {
+      // acquiring GIL as toPyObject creates new py::object
+      // without grabbing the GIL.
+      py::gil_scoped_acquire acquire;
+      py_obj = toPyObject(std::move(fut->value()));
+      if (unwrap_func) {
+        (*unwrap_func)(py_obj);
+      }
+      return py_obj;
+    }
   }
 
   c10::intrusive_ptr<c10::ivalue::Future> fut;
+  // Could be used to raise Exception is the py::object meets a criteria.
+  c10::optional<UnwrapFunc> unwrap_func;
 };
 
 // error reporting: when reporting user-caused errors, these functions should
@@ -610,7 +630,7 @@ inline IValue toIValue(
           py::cast<c10::intrusive_ptr<CustomClassHolder>>(obj));
     }
     case TypeKind::FutureType: {
-      return obj.cast<PythonFutureWrapper>().fut;
+      return obj.cast<std::shared_ptr<PythonFutureWrapper>>()->fut;
     }
     case TypeKind::AnyType:
       return toTypeInferredIValue(obj);
@@ -651,7 +671,7 @@ inline std::string friendlyTypeName(py::handle obj) {
 }
 
 // Thrown when trying to create a schema for a list of python
-// arguments that cannot be converted. 
+// arguments that cannot be converted.
 // Can be caught by the caller to attempt to use other schema
 // when there is an overloaded operator.
 struct schema_match_error : public std::runtime_error {
@@ -797,7 +817,7 @@ inline py::object toPyObject(IValue ivalue) {
   } else if (ivalue.isCapsule()) {
     return py::cast(ivalue.toCapsule());
   } else if (ivalue.isFuture()) {
-    return py::cast(PythonFutureWrapper(ivalue.toFuture()));
+    return py::cast(std::make_shared<PythonFutureWrapper>(ivalue.toFuture()));
   } else if (ivalue.isRRef()) {
 #ifdef USE_DISTRIBUTED
     return py::cast(torch::distributed::rpc::PyRRef(
@@ -1043,7 +1063,7 @@ inline py::object invokeOperatorFromPython(
     const std::vector<std::shared_ptr<Operator>>& operations,
     py::args args,
     py::kwargs kwargs) {
-  
+
   Stack stack;
 
   if (operations.size() == 1) {
