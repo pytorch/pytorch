@@ -209,6 +209,21 @@ class CAFFE2_API Tensor {
     return impl_->is_non_overlapping_and_dense();
   }
 
+  // Suggests best memory format for output, based on tensor's memory format and strides.
+  // 
+  // Note: If input is arbitrary strided, suggested output would be MemoryFormat::Contiguous
+  //        
+  // Note: Having suggested MemoryFormat::ChannelsLast doesn't necessary mean that input 
+  //       satisfies input.is_contiguous(MemoryFormat::ChannelsLast). 
+  //       ```python
+  //        x = torch.rand(10, 3, 32, 32).contigous(memory_format=torch.channels_last)
+  //        y = x[:,:,:,::2]
+  //        y.is_contiguous(memory_format=torch.channels_last) # False
+  //        z = y + 1
+  //        z.is_contiguous(memory_format=torch.channels_last) 
+  //        # True as suggest_memory_format will return ChannelsLast for y
+  //        ```
+  //
   at::MemoryFormat suggest_memory_format(
       bool channels_last_strides_exact_match = false) const {
     // Setting channels_last_strides_exact_match to true forces function to
