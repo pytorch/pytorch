@@ -804,6 +804,7 @@ class TestDataLoader(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'Error in worker_init_fn'):
             list(iter(loader))
 
+    @unittest.skipIf(IS_WINDOWS, "No 'resource' module on Windows")
     def test_fd_limit_exceeded(self):
         # See NOTE [ DataLoader on Linux and open files limit ]
         import subprocess
