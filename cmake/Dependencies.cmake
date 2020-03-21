@@ -902,6 +902,15 @@ if(USE_OPENMP)
     ENDIF()
   ENDIF()
 
+  IF("${CMAKE_CXX_SIMULATE_ID}" STREQUAL "MSVC"
+    AND "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
+    MESSAGE(STATUS "Setting OpenMP flags for clang-cl")
+    SET(OpenMP_CXX_FLAGS "-Xclang" "-fopenmp")
+    SET(OpenMP_C_FLAGS "-Xclang" "-fopenmp")
+    SET(CHECKED_OPENMP ON CACHE BOOL "already checked for OpenMP")
+    SET(OPENMP_FOUND ON CACHE BOOL "OpenMP Support found")
+  ENDIF()
+
   IF (WITH_OPENMP AND NOT CHECKED_OPENMP)
     FIND_PACKAGE(OpenMP QUIET)
     SET(CHECKED_OPENMP ON CACHE BOOL "already checked for OpenMP")
