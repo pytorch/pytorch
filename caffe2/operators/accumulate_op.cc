@@ -4,10 +4,10 @@ namespace caffe2 {
 REGISTER_CPU_OPERATOR(Accumulate, AccumulateOp<float, CPUContext>);
 
 OPERATOR_SCHEMA(Accumulate)
-  .NumInputs(1)
-  .NumOutputs(1)
-  .IdenticalTypeAndShape()
-  .SetDoc(R"DOC(
+    .NumInputs(1)
+    .NumOutputs(1)
+    .IdenticalTypeAndShape()
+    .SetDoc(R"DOC(
 Accumulate operator accumulates the input tensor to the output tensor. If the
 output tensor already has the right size, we add to it; otherwise, we first
 initialize the output tensor to all zeros, and then do accumulation. Any
@@ -18,12 +18,15 @@ Accumulation is done using Axpby operation as shown:
 where X is the input tensor, Y is the output tensor and gamma is the multiplier
 argument.
 )DOC")
-  .Arg("gamma", "(float, default 1.0) Accumulation multiplier")
-  .Input(0, "input", "The input tensor that has to be accumulated to the "
-         "output tensor. If the output size is not the same as input size, the "
-         "output tensor is first reshaped and initialized to zero, and only "
-         "then, accumulation is done.")
-  .Output(0, "output", "Accumulated output tensor");
+    .Arg("gamma", "(float, default 1.0) Accumulation multiplier")
+    .Input(
+        0,
+        "input",
+        "The input tensor that has to be accumulated to the "
+        "output tensor. If the output size is not the same as input size, the "
+        "output tensor is first reshaped and initialized to zero, and only "
+        "then, accumulation is done.")
+    .Output(0, "output", "Accumulated output tensor");
 
 SHOULD_NOT_DO_GRADIENT(Accumulate);
-}  // namespace caffe2
+} // namespace caffe2

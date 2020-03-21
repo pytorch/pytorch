@@ -45,22 +45,25 @@ class ScopeGuardImpl : public ScopeGuardImplBase {
       std::is_nothrow_copy_constructible<FunctionType>::value)
       : ScopeGuardImpl(
             asConst(fn),
-            makeFailsafe(std::is_nothrow_copy_constructible<FunctionType>{},
-                         &fn)) {}
+            makeFailsafe(
+                std::is_nothrow_copy_constructible<FunctionType>{},
+                &fn)) {}
 
   explicit ScopeGuardImpl(const FunctionType& fn) noexcept(
       std::is_nothrow_copy_constructible<FunctionType>::value)
       : ScopeGuardImpl(
             fn,
-            makeFailsafe(std::is_nothrow_copy_constructible<FunctionType>{},
-                         &fn)) {}
+            makeFailsafe(
+                std::is_nothrow_copy_constructible<FunctionType>{},
+                &fn)) {}
 
   explicit ScopeGuardImpl(FunctionType&& fn) noexcept(
       std::is_nothrow_move_constructible<FunctionType>::value)
       : ScopeGuardImpl(
             std::move_if_noexcept(fn),
-            makeFailsafe(std::is_nothrow_move_constructible<FunctionType>{},
-                         &fn)) {}
+            makeFailsafe(
+                std::is_nothrow_move_constructible<FunctionType>{},
+                &fn)) {}
 
   ScopeGuardImpl(ScopeGuardImpl&& other) noexcept(
       std::is_nothrow_move_constructible<FunctionType>::value)
@@ -99,7 +102,9 @@ class ScopeGuardImpl : public ScopeGuardImplBase {
 
   void* operator new(std::size_t) = delete;
 
-  void execute() noexcept { function_(); }
+  void execute() noexcept {
+    function_();
+  }
 
   FunctionType function_;
 };
@@ -155,4 +160,4 @@ detail::ScopeGuardImplDecay<F> MakeGuard(F&& f) noexcept(
   return detail::ScopeGuardImplDecay<F>(static_cast<F&&>(f));
 }
 
-}  // namespaces
+} // namespace caffe2

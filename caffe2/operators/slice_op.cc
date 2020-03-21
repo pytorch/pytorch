@@ -133,6 +133,6 @@ struct GetSliceGradient : public GradientMakerBase {
     }
   }
 };
-}
+} // namespace
 REGISTER_GRADIENT(Slice, GetSliceGradient);
 } // namespace caffe2

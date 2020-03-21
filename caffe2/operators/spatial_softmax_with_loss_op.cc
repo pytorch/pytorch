@@ -258,5 +258,5 @@ class GetSoftmaxWithLossGradient : public GradientMakerBase {
 };
 
 REGISTER_GRADIENT(SpatialSoftmaxWithLoss, GetSoftmaxWithLossGradient);
-}
+} // namespace
 } // namespace caffe2

@@ -3,10 +3,7 @@
 namespace caffe2 {
 
 REGISTER_CPU_OPERATOR(ZeroGradient, ZeroGradientOp<CPUContext>);
-OPERATOR_SCHEMA(ZeroGradient)
-    .NumInputs(1)
-    .NumOutputs(0)
-    .SetDoc(R"DOC(
+OPERATOR_SCHEMA(ZeroGradient).NumInputs(1).NumOutputs(0).SetDoc(R"DOC(
 ZeroGradient operators doesn't produce any output blobs. One can use
 this operator to produce 0 gradient for the input blob.
 )DOC");

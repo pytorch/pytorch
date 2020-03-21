@@ -236,8 +236,7 @@ class FlattenToVecOp : public Operator<Context> {
   bool RunOnDevice() override {
     auto& input = Input(0);
     auto* output = Output(0);
-    CAFFE_ENFORCE_GE(
-        input.dim(), 1, "The rank of the tensor must be >= 1.");
+    CAFFE_ENFORCE_GE(input.dim(), 1, "The rank of the tensor must be >= 1.");
     output->Resize(input.numel());
 
     context_.CopyItemsSameDevice(
@@ -366,7 +365,8 @@ class WeightedSumOp : public Operator<Context> {
   template <typename T>
   bool DoRunWithType() {
     // the code is written this way because of 10.1 + gcc 7.3.1 compiler bug
-    // as discussed at https://devtalk.nvidia.com/default/topic/1048037/linux/cuda-10-1-nvidia-you-re-now-quot-fixing-quot-gcc-bugs-that-gcc-doesn-t-even-have/
+    // as discussed at
+    // https://devtalk.nvidia.com/default/topic/1048037/linux/cuda-10-1-nvidia-you-re-now-quot-fixing-quot-gcc-bugs-that-gcc-doesn-t-even-have/
     const int input_size = (*this).InputSize();
     CAFFE_ENFORCE_EQ(input_size % 2, 0);
     const auto& X0 = Input(0);
@@ -748,14 +748,14 @@ class ScatterOp : public Operator<CPUContext> {
   template <class... Args>
   explicit ScatterOp(Args&&... args)
       : Operator<CPUContext>(std::forward<Args>(args)...),
-        OP_SINGLE_ARG(int, "axis", axis_, 1) {
-  }
+        OP_SINGLE_ARG(int, "axis", axis_, 1) {}
 
   virtual ~ScatterOp() noexcept override {}
 
   bool RunOnDevice() override {
-
-    TORCH_CHECK(Context::GetDeviceType() == kCPU, "ScatterOp currently only supports CPU.")
+    TORCH_CHECK(
+        Context::GetDeviceType() == kCPU,
+        "ScatterOp currently only supports CPU.")
 
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
         this, this->template Input<Tensor>(INDICES, CPU));
@@ -772,7 +772,8 @@ class ScatterOp : public Operator<CPUContext> {
     // ONNX allows negative axis to index from the back, valid range: [-r, r].
     axis_ = data.canonical_axis_index(axis_);
 
-    CAFFE_ENFORCE_GE(data.dim(), axis_ + 1, "DATA should be at least [axis+1]-D");
+    CAFFE_ENFORCE_GE(
+        data.dim(), axis_ + 1, "DATA should be at least [axis+1]-D");
     CAFFE_ENFORCE_GE(axis_, 0, "Axis should be non-negative");
     CAFFE_ENFORCE_LT(axis_, data.dim(), "Axis out of range");
 
@@ -815,14 +816,20 @@ class ScatterOp : public Operator<CPUContext> {
     // src offset can be computed as i * J_src * K + j * K + k.
     // dst offset can be computed as i * J_dst * K + idxs[idxs_offset] * K + K
     // Note that idxs and src should have the same rank and shape.
-    // dst should have the same rank as idxs and src, but the dimension of dim axis can be different.
-    // That is why in the above equation, there is the difference of J_src and J_dst.
-    for (int64_t outer_batch = 0; outer_batch < outer_dims_product; ++outer_batch) {
+    // dst should have the same rank as idxs and src, but the dimension of dim
+    // axis can be different. That is why in the above equation, there is the
+    // difference of J_src and J_dst.
+    for (int64_t outer_batch = 0; outer_batch < outer_dims_product;
+         ++outer_batch) {
       for (int64_t i = 0; i < N; ++i) {
-        for (int64_t inner_batch = 0; inner_batch < idxs_block_size; ++inner_batch) {
-          auto idxs_elem_idx = outer_batch * idxs_batch_size + i * idxs_block_size + inner_batch;
-          auto src_elem_idx = outer_batch * src_batch_size + i * src_block_size + inner_batch;
-          auto dst_elem_idx = outer_batch * dst_batch_size + idxs[idxs_elem_idx] * dst_block_size + inner_batch;
+        for (int64_t inner_batch = 0; inner_batch < idxs_block_size;
+             ++inner_batch) {
+          auto idxs_elem_idx =
+              outer_batch * idxs_batch_size + i * idxs_block_size + inner_batch;
+          auto src_elem_idx =
+              outer_batch * src_batch_size + i * src_block_size + inner_batch;
+          auto dst_elem_idx = outer_batch * dst_batch_size +
+              idxs[idxs_elem_idx] * dst_block_size + inner_batch;
 
           auto src = src_base + src_elem_idx * item_bytesize;
           auto dst = out + dst_elem_idx * item_bytesize;
@@ -1398,7 +1405,8 @@ class RangeOp : public Operator<Context> {
     T step = 1;
 
     for (int i = 0; i < InputSize(); ++i) {
-      CAFFE_ENFORCE_EQ(Input(i).numel(), 1, "All inputs must be scalar/1D tensor.");
+      CAFFE_ENFORCE_EQ(
+          Input(i).numel(), 1, "All inputs must be scalar/1D tensor.");
     }
 
     switch (InputSize()) {

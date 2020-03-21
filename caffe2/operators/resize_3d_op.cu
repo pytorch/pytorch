@@ -36,8 +36,10 @@ __global__ void NearestNeighbor3DKernel(
     const int in_y = fminf(h / height_scale, input_height - 1);
     const int in_x = fminf(w / width_scale, input_width - 1);
     Y[index] =
-        X[(((n * num_channels + c) * input_frames + in_f) * input_height + in_y)
-          * input_width + in_x];
+        X[(((n * num_channels + c) * input_frames + in_f) * input_height +
+           in_y) *
+              input_width +
+          in_x];
   }
 }
 
@@ -72,7 +74,9 @@ __global__ void NearestNeighbor3DGradientKernel(
     const int out_x = fminf(x / width_scale, output_width - 1);
     const int out_index =
         (((n * num_channels + c) * output_frames + out_f) * output_height +
-          out_y) * output_width + out_x;
+         out_y) *
+            output_width +
+        out_x;
 #if __CUDA_ARCH__ >= 350
     atomicAdd(dX + out_index, __ldg(dY + index));
 #else
@@ -82,7 +86,6 @@ __global__ void NearestNeighbor3DGradientKernel(
 }
 
 } // namespace
-
 
 template <>
 bool ResizeNearest3DOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
@@ -138,7 +141,6 @@ bool ResizeNearest3DOp<float, CUDAContext>::RunOnDevice() {
       CAFFE_THROW("Unknown Storage order: ", order_);
   }
 }
-
 
 template <>
 bool ResizeNearest3DGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {

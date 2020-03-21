@@ -31,4 +31,4 @@ void runWithSharedBuffer<CPUContext>(
       ws->GetBlob("__CAFFE2_SHARED_CONV_BUFFER_CPU__"), CPU);
   f(buffer);
 }
-}
+} // namespace caffe2

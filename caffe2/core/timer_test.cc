@@ -2,8 +2,8 @@
 #include <iostream>
 #include <thread>
 
-#include "caffe2/core/timer.h"
 #include <gtest/gtest.h>
+#include "caffe2/core/timer.h"
 
 namespace caffe2 {
 namespace {
@@ -46,14 +46,16 @@ TEST(TimerTest, TestLatency) {
     timer.Start();
     latency += timer.MicroSeconds();
   }
-  std::cout << "Average microsecond latency is: " << latency / iter << std::endl;
+  std::cout << "Average microsecond latency is: " << latency / iter
+            << std::endl;
   latency = 0;
   for (int i = 0; i < iter; ++i) {
     timer.Start();
     latency += timer.MilliSeconds();
   }
-  std::cout << "Average millisecond latency is: " << latency / iter << std::endl;
+  std::cout << "Average millisecond latency is: " << latency / iter
+            << std::endl;
 }
 
-}  // namespace
-}  // namespace caffe2
+} // namespace
+} // namespace caffe2

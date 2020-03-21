@@ -135,4 +135,4 @@ TEST_F(StringJoinOpTest, testLong2DJoin) {
   EXPECT_EQ(outputData[0], "100,200,");
   EXPECT_EQ(outputData[1], "1000,2000,");
 }
-}
+} // namespace caffe2

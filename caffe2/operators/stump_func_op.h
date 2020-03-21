@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-
 #ifndef CAFFE2_FB_OPERATORS_UTILITY_OPS_H_
 #define CAFFE2_FB_OPERATORS_UTILITY_OPS_H_
 
@@ -66,6 +65,6 @@ class StumpFuncIndexOp final : public Operator<Context> {
   // Input: label, output: indices
 };
 
-} // caffe2
+} // namespace caffe2
 
 #endif // CAFFE2_FB_OPERATORS_UTILITY_OPS_H_

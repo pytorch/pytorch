@@ -1,5 +1,5 @@
-#include "caffe2/utils/eigen_utils.h"
 #include "caffe2/operators/roi_align_op.h"
+#include "caffe2/utils/eigen_utils.h"
 
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/core/flags.h"
@@ -115,15 +115,51 @@ void CreateAndRun(
     std::iota(features.begin(), features.end(), 0);
     // utils::AsEArrXt(features) /= features.size();
     AddInput<Context>(vector<int64_t>{N, C, H, W}, features, "X", &ws);
-    vector<float> rois{0, 0,            0,            79,           59,
-                       0, 0,            5.0005703f,   52.63237f,    43.69501495f,
-                       0, 24.13628387f, 7.51243401f,  79,           46.06628418f,
-                       0, 0,            7.50924301f,  68.47792816f, 46.03357315f,
-                       0, 0,            23.09477997f, 51.61448669f, 59,
-                       0, 0,            39.52141571f, 52.44710541f, 59,
-                       0, 23.57396317f, 29.98791885f, 79,           59,
-                       0, 0,            41.90219116f, 79,           59,
-                       0, 0,            23.30098343f, 79,           59};
+    vector<float> rois{0,
+                       0,
+                       0,
+                       79,
+                       59,
+                       0,
+                       0,
+                       5.0005703f,
+                       52.63237f,
+                       43.69501495f,
+                       0,
+                       24.13628387f,
+                       7.51243401f,
+                       79,
+                       46.06628418f,
+                       0,
+                       0,
+                       7.50924301f,
+                       68.47792816f,
+                       46.03357315f,
+                       0,
+                       0,
+                       23.09477997f,
+                       51.61448669f,
+                       59,
+                       0,
+                       0,
+                       39.52141571f,
+                       52.44710541f,
+                       59,
+                       0,
+                       23.57396317f,
+                       29.98791885f,
+                       79,
+                       59,
+                       0,
+                       0,
+                       41.90219116f,
+                       79,
+                       59,
+                       0,
+                       0,
+                       23.30098343f,
+                       79,
+                       59};
     AddInput<Context>(vector<int64_t>{9, 5}, rois, "R", &ws);
   }
 

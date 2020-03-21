@@ -359,8 +359,8 @@ struct CuDNNAveragePoolFunctor {
       const T* X,
       T* Y,
       CUDAContext* context) const {
-      return avg_pool_functor.GlobalPoolingForward<T, kOrder>(
-          N, C, HxW, X, Y, context);
+    return avg_pool_functor.GlobalPoolingForward<T, kOrder>(
+        N, C, HxW, X, Y, context);
   }
 
   template <typename T, StorageOrder kOrder>
@@ -376,8 +376,8 @@ struct CuDNNAveragePoolFunctor {
       const T* X,
       T* Y,
       CUDAContext* context) const {
-      return avg_pool_functor.Forward<T, kOrder>(
-          N, C, X_dims, Y_dims, kernel, dilation, stride, pads, X, Y, context);
+    return avg_pool_functor.Forward<T, kOrder>(
+        N, C, X_dims, Y_dims, kernel, dilation, stride, pads, X, Y, context);
   }
 
   template <typename T, StorageOrder kOrder>
@@ -390,8 +390,8 @@ struct CuDNNAveragePoolFunctor {
       const T* Y,
       T* dX,
       CUDAContext* context) const {
-      return avg_pool_functor.GlobalPoolingBackward<T, kOrder>(
-          N, C, HxW, dY, X, Y, dX, context);
+    return avg_pool_functor.GlobalPoolingBackward<T, kOrder>(
+        N, C, HxW, dY, X, Y, dX, context);
   }
 
   template <typename T, StorageOrder kOrder>
@@ -409,20 +409,20 @@ struct CuDNNAveragePoolFunctor {
       const T* Y,
       T* dX,
       CUDAContext* context) const {
-      return avg_pool_functor.Backward<T, kOrder>(
-          N,
-          C,
-          X_dims,
-          Y_dims,
-          kernel,
-          dilation,
-          stride,
-          pads,
-          dY,
-          X,
-          Y,
-          dX,
-          context);
+    return avg_pool_functor.Backward<T, kOrder>(
+        N,
+        C,
+        X_dims,
+        Y_dims,
+        kernel,
+        dilation,
+        stride,
+        pads,
+        dY,
+        X,
+        Y,
+        dX,
+        context);
   }
 
   const AveragePoolFunctor<CUDAContext> avg_pool_functor;
@@ -449,8 +449,8 @@ struct CuDNNMaxPoolFunctor {
       const T* X,
       T* Y,
       CUDAContext* context) const {
-      return max_pool_functor.GlobalPoolingForward<T, kOrder>(
-          N, C, HxW, X, Y, context);
+    return max_pool_functor.GlobalPoolingForward<T, kOrder>(
+        N, C, HxW, X, Y, context);
   }
 
   template <typename T, StorageOrder kOrder>
@@ -466,8 +466,8 @@ struct CuDNNMaxPoolFunctor {
       const T* X,
       T* Y,
       CUDAContext* context) const {
-      return max_pool_functor.Forward<T, kOrder>(
-          N, C, X_dims, Y_dims, kernel, dilation, stride, pads, X, Y, context);
+    return max_pool_functor.Forward<T, kOrder>(
+        N, C, X_dims, Y_dims, kernel, dilation, stride, pads, X, Y, context);
   }
 
   template <typename T, StorageOrder kOrder>
@@ -480,8 +480,8 @@ struct CuDNNMaxPoolFunctor {
       const T* Y,
       T* dX,
       CUDAContext* context) const {
-      return max_pool_functor.GlobalPoolingBackward<T, kOrder>(
-          N, C, HxW, dY, X, Y, dX, context);
+    return max_pool_functor.GlobalPoolingBackward<T, kOrder>(
+        N, C, HxW, dY, X, Y, dX, context);
   }
 
   template <typename T, StorageOrder kOrder>
@@ -499,20 +499,20 @@ struct CuDNNMaxPoolFunctor {
       const T* Y,
       T* dX,
       CUDAContext* context) const {
-      return max_pool_functor.Backward<T, kOrder>(
-          N,
-          C,
-          X_dims,
-          Y_dims,
-          kernel,
-          dilation,
-          stride,
-          pads,
-          dY,
-          X,
-          Y,
-          dX,
-          context);
+    return max_pool_functor.Backward<T, kOrder>(
+        N,
+        C,
+        X_dims,
+        Y_dims,
+        kernel,
+        dilation,
+        stride,
+        pads,
+        dY,
+        X,
+        Y,
+        dX,
+        context);
   }
 
   const MaxPoolFunctor<CUDAContext> max_pool_functor;

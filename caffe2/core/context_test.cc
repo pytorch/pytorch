@@ -33,4 +33,4 @@ TEST(CPUContextTest, TestAllocDealloc) {
   // data_ptr is freed when out of scope
 }
 
-}  // namespace caffe2
+} // namespace caffe2

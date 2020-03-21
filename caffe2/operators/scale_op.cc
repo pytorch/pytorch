@@ -23,4 +23,4 @@ class GetScaleGradient : public GradientMakerBase {
   }
 };
 REGISTER_GRADIENT(Scale, GetScaleGradient);
-}  // namespace caffe2
+} // namespace caffe2

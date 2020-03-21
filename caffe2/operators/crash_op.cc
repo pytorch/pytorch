@@ -1,8 +1,8 @@
 #if defined(__linux__)
 
+#include <csignal>
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
-#include <csignal>
 
 namespace caffe2 {
 

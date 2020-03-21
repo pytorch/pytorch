@@ -22,7 +22,7 @@ C10_DEFINE_REGISTRY(Caffe2DBRegistry, DB, const string&, Mode);
 class MiniDBCursor : public Cursor {
  public:
   explicit MiniDBCursor(FILE* f, std::mutex* mutex)
-    : file_(f), lock_(*mutex), valid_(true) {
+      : file_(f), lock_(*mutex), valid_(true) {
     // We call Next() to read in the first entry.
     Next();
   }
@@ -77,7 +77,9 @@ class MiniDBCursor : public Cursor {
     return string(value_.data(), value_len_);
   }
 
-  bool Valid() override { return valid_; }
+  bool Valid() override {
+    return valid_;
+  }
 
  private:
   FILE* file_;
@@ -92,7 +94,7 @@ class MiniDBCursor : public Cursor {
 class MiniDBTransaction : public Transaction {
  public:
   explicit MiniDBTransaction(FILE* f, std::mutex* mutex)
-    : file_(f), lock_(*mutex) {}
+      : file_(f), lock_(*mutex) {}
   ~MiniDBTransaction() override {
     Commit();
   }
@@ -202,10 +204,9 @@ void DBReaderDeserializer::Deserialize(const BlobProto& proto, Blob* blob) {
 
 namespace {
 // Serialize TensorCPU.
-REGISTER_BLOB_SERIALIZER((TypeMeta::Id<DBReader>()),
-                         DBReaderSerializer);
+REGISTER_BLOB_SERIALIZER((TypeMeta::Id<DBReader>()), DBReaderSerializer);
 REGISTER_BLOB_DESERIALIZER(DBReader, DBReaderDeserializer);
-}  // namespace
+} // namespace
 
-}  // namespace db
-}  // namespace caffe2
+} // namespace db
+} // namespace caffe2

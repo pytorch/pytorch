@@ -1,6 +1,6 @@
 #include "caffe2/core/context_gpu.h"
-#include "caffe2/operators/gather_op.h"
 #include "caffe2/operators/gather_op.cuh"
+#include "caffe2/operators/gather_op.h"
 
 namespace caffe2 {
 

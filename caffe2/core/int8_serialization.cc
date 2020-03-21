@@ -1,8 +1,8 @@
+#include <c10/util/typeid.h>
 #include "caffe2/core/blob_serialization.h"
 #include "caffe2/core/common.h"
 #include "caffe2/core/context.h"
 #include "caffe2/core/tensor_int8.h"
-#include <c10/util/typeid.h>
 #include "caffe2/core/types.h"
 
 namespace caffe2 {

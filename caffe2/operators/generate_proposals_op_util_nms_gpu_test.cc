@@ -621,7 +621,8 @@ TEST(UtilsNMSTest, TestPerfRotatedNMS) {
 //     const int ntests = 1;
 //     const float thresh = 0.7;
 //     // Not timing the sort for the CPU
-//     // in the real-world use case scores already have been sorted earlier in the
+//     // in the real-world use case scores already have been sorted earlier in
+//     the
 //     // generate proposals workflow
 //     std::vector<int> indices(nboxes);
 //     std::iota(indices.begin(), indices.end(), 0);

@@ -24,4 +24,4 @@ void runWithSharedBuffer<CUDAContext>(
       ws->GetBlob("__CAFFE2_SHARED_CONV_BUFFER_CUDA__"), CUDA);
   f(buffer);
 }
-}
+} // namespace caffe2

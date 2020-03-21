@@ -9,14 +9,11 @@ namespace caffe2 {
 
 namespace {
 
-__global__ void ErfGradientCUDAKernel(
-    const int N,
-    const float* dY,
-    const float* X,
-    float* dX) {
+__global__ void
+ErfGradientCUDAKernel(const int N, const float* dY, const float* X, float* dX) {
   CUDA_1D_KERNEL_LOOP(i, N) {
 #if __CUDA_ARCH__ >= 350
-    dX[i] = 2.0f / sqrtf(PI) * expf(-powf(__ldg(X+i), 2.0f)) * __ldg(dY + i);
+    dX[i] = 2.0f / sqrtf(PI) * expf(-powf(__ldg(X + i), 2.0f)) * __ldg(dY + i);
 #else
     dX[i] = 2.0f / sqrtf(PI) * expf(-powf(X[i], 2.0f)) * dY[i];
 #endif

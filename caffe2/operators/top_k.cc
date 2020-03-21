@@ -95,7 +95,7 @@ bool TopKOp<T, Context>::RunOnDevice() {
   auto* flatten_indices = OutputSize() > 2 ? Output(2) : nullptr;
 
   int64_t k = k_;
-  if(k == -1 && InputSize() == 2) {
+  if (k == -1 && InputSize() == 2) {
     k = Input(1).template data<int64_t>()[0];
   }
   CAFFE_ENFORCE(k >= 1, "k argument must be >= 1");
@@ -329,13 +329,10 @@ Flattened_indices: [ 1  0  3  4  8  7 10 11 13 14 17 16 20 18 23 22 26 25]
 
   )DOC")
     .Input(
-      0,
-      "X",
-      "(*Tensor`<float>`*): input tensor of shape $(a_1, a_2, ..., a_n, r)$")
-    .Input(
-      1,
-      "k",
-      "(*int*): number of top elements to retrieve")
+        0,
+        "X",
+        "(*Tensor`<float>`*): input tensor of shape $(a_1, a_2, ..., a_n, r)$")
+    .Input(1, "k", "(*int*): number of top elements to retrieve")
     .Output(
         0,
         "Values",

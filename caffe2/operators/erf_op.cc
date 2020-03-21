@@ -19,16 +19,14 @@ bool ErfGradientFunctor<CPUContext>::Forward(
       X_dims.cbegin(), X_dims.cend(), 1, std::multiplies<int>());
   ConstEigenVectorArrayMap<T> dY_arr(dY, size);
   ConstEigenVectorArrayMap<T> X_arr(X, size);
-  EigenVectorMap<T>(dX, size) = T(2) / sqrtf(PI) * (-X_arr.square()).exp() * dY_arr;
+  EigenVectorMap<T>(dX, size) =
+      T(2) / sqrtf(PI) * (-X_arr.square()).exp() * dY_arr;
   return true;
 }
 
 REGISTER_CPU_OPERATOR(
     Erf,
-    UnaryElementwiseOp<
-        TensorTypes<float>,
-        CPUContext,
-        ErfFunctor<CPUContext>>);
+    UnaryElementwiseOp<TensorTypes<float>, CPUContext, ErfFunctor<CPUContext>>);
 REGISTER_CPU_OPERATOR(
     ErfGradient,
     BinaryElementwiseOp<
@@ -49,10 +47,7 @@ Calculates the arcsine of the given input tensor, element-wise.
         "output",
         "The arcsine of the input tensor computed element-wise");
 
-OPERATOR_SCHEMA(ErfGradient)
-    .NumInputs(2)
-    .NumOutputs(1)
-    .IdenticalTypeAndShape();
+OPERATOR_SCHEMA(ErfGradient).NumInputs(2).NumOutputs(1).IdenticalTypeAndShape();
 
 namespace {
 

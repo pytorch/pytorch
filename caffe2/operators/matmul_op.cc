@@ -84,18 +84,9 @@ Y: [[52. 23. 35.]
 </details>
 
 )DOC")
-    .Input(
-        0,
-        "A",
-        "*(type: Tensor`<float>`)* 2D matrix of size (M x K).")
-    .Input(
-        1,
-        "B",
-        "*(type: Tensor`<float>`)* 2D matrix of size (K x N).")
-    .Output(
-        0,
-        "Y",
-        "*(type: Tensor`<float>`)* 2D matrix of size (M x N).")
+    .Input(0, "A", "*(type: Tensor`<float>`)* 2D matrix of size (M x K).")
+    .Input(1, "B", "*(type: Tensor`<float>`)* 2D matrix of size (K x N).")
+    .Output(0, "Y", "*(type: Tensor`<float>`)* 2D matrix of size (M x N).")
     .Arg(
         "axis_a",
         "*(type: int; default: 1)* Exclusive axis that divides the first and "

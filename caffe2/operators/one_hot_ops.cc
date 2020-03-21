@@ -145,15 +145,15 @@ bool BatchBucketOneHotOp<CPUContext>::RunOnDevice() {
     for (int64_t j = 0; j < D; j++) {
       // here we assume the boundary values for each feature are sorted
       int64_t lower_bucket_idx = std::lower_bound(
-                                    boundaries_offset,
-                                    boundaries_offset + lens_data[j],
-                                    input_data[pos]) -
+                                     boundaries_offset,
+                                     boundaries_offset + lens_data[j],
+                                     input_data[pos]) -
           boundaries_offset;
 
       int64_t upper_bucket_idx = std::upper_bound(
-                                    boundaries_offset,
-                                    boundaries_offset + lens_data[j],
-                                    input_data[pos]) -
+                                     boundaries_offset,
+                                     boundaries_offset + lens_data[j],
+                                     input_data[pos]) -
           boundaries_offset;
 
       int64_t bucket_idx = (lower_bucket_idx + upper_bucket_idx) / 2;

@@ -100,7 +100,9 @@ std::function<bool(int64_t)> getContinuationTest(
 
 // if the blob doesn't exist or is not initialized, return false
 inline bool getShouldStop(const Blob* b) {
-  if (!b || b->meta().id() == TypeIdentifier::uninitialized()) { // not exist or uninitialized
+  if (!b ||
+      b->meta().id() ==
+          TypeIdentifier::uninitialized()) { // not exist or uninitialized
     return false;
   }
 
@@ -473,7 +475,7 @@ bool ExecuteStepRecursive(ExecutionStepWrapper& stepWrapper) {
 }
 
 #undef CHECK_SHOULD_STOP
-}
+} // namespace
 
 bool RunPlanOnWorkspace(
     Workspace* ws,
@@ -519,4 +521,4 @@ bool RunPlanOnWorkspace(
   LOG(INFO) << "Plan " << plan.name() << " executed successfully.";
   return true;
 }
-}
+} // namespace caffe2

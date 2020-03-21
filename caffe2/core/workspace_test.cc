@@ -1,7 +1,7 @@
 #include <iostream>
 
-#include "caffe2/core/operator.h"
 #include <gtest/gtest.h>
+#include "caffe2/core/operator.h"
 
 namespace caffe2 {
 
@@ -146,4 +146,4 @@ TEST(WorkspaceTest, ForEach) {
   forEachCheck({});
 }
 
-}  // namespace caffe2
+} // namespace caffe2

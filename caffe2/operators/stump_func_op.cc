@@ -92,4 +92,4 @@ Split the elements and return the indices based on the given threshold.
 
 NO_GRADIENT(StumpFuncIndex);
 
-} // caffe2
+} // namespace caffe2

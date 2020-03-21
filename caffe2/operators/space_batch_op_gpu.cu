@@ -1,6 +1,6 @@
-#include "caffe2/operators/space_batch_op.h"
 #include "caffe2/core/common_gpu.h"
 #include "caffe2/core/context_gpu.h"
+#include "caffe2/operators/space_batch_op.h"
 
 namespace caffe2 {
 
@@ -39,8 +39,7 @@ __global__ void SpaceToBatch(
 
     if (in_h >= 0 && in_w >= 0 && in_h < input_height && in_w < input_width) {
       const auto input_offset =
-          ((in_b * input_depth + d) * input_height + in_h) * input_width +
-          in_w;
+          ((in_b * input_depth + d) * input_height + in_h) * input_width + in_w;
       output[i] = input[input_offset];
     } else {
       output[i] = 0.0;
@@ -87,7 +86,6 @@ void spaceToBatch<CUDAContext>(
       output->template mutable_data<float>());
 }
 
-
 __global__ void BatchToSpace(
     int N,
     int output_batch,
@@ -107,7 +105,7 @@ __global__ void BatchToSpace(
     // Recall:
     // const auto input_offset = ((in_b * input_depth + d) *
     //   input_height + in_h) * input_width + in_w;
-    const int in_w = i  % input_width;
+    const int in_w = i % input_width;
     const int i_2 = i / input_width;
     const int in_h = i_2 % input_height;
     const int i_3 = i_2 / input_height;
@@ -123,8 +121,7 @@ __global__ void BatchToSpace(
     if (out_h >= 0 && out_w >= 0 && out_h < output_height &&
         out_w < output_width) {
       const auto output_offset =
-          ((out_b * output_depth + d) * output_height + out_h) *
-          output_width +
+          ((out_b * output_depth + d) * output_height + out_h) * output_width +
           out_w;
       output[output_offset] = input[i];
     }
@@ -176,4 +173,4 @@ void batchToSpace(
 REGISTER_CUDA_OPERATOR(SpaceToBatch, SpaceToBatchOp<CUDAContext>);
 REGISTER_CUDA_OPERATOR(BatchToSpace, BatchToSpaceOp<CUDAContext>);
 
-}
+} // namespace caffe2

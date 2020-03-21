@@ -74,11 +74,8 @@ bool CastOp<CUDAContext>::DoRunWithDstType<float>() {
 template <>
 template <>
 bool CastOp<CUDAContext>::DoRunWithDstType<at::Half>() {
-  return DispatchHelper<
-      TensorTypes<
-          float,
-          at::Half>,
-      at::Half /* DstType */>::call(this, Input(0));
+  return DispatchHelper<TensorTypes<float, at::Half>, at::Half /* DstType */>::
+      call(this, Input(0));
 }
 template <>
 void CastOp<CUDAContext>::SetBody(TensorProto_DataType to) {
@@ -129,4 +126,4 @@ void CastOp<CUDAContext>::SetBody(TensorProto_DataType to) {
 
 REGISTER_CUDA_OPERATOR(Cast, CastOp<CUDAContext>);
 
-}  // namespace caffe2
+} // namespace caffe2

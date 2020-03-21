@@ -81,9 +81,7 @@ Out:
     .Arg(
         "dtype",
         "The data type for the elements of the output tensor. Strictly must be one of the types from DataType enum in TensorProto.")
-    .Arg(
-        "shape",
-        "*(type: [int])* Desired shape of the *output* tensor.")
+    .Arg("shape", "*(type: [int])* Desired shape of the *output* tensor.")
     .Arg(
         "extra_shape",
         "*(type: [int])* The additional dimensions appended at the end of the *shape* indicated by the input blob. Cannot set the *extra_shape* argument when there is no input blob.")

@@ -52,10 +52,10 @@ NO_GRADIENT(InferenceLSTM);
 C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
     InferenceLSTM,
     "_caffe2::InferenceLSTM("
-      "Tensor[] input_list, "
-      "int num_layers, "
-      "bool has_biases, "
-      "bool batch_first, "
-      "bool bidirectional"
+    "Tensor[] input_list, "
+    "int num_layers, "
+    "bool has_biases, "
+    "bool batch_first, "
+    "bool bidirectional"
     ") -> (Tensor output, Tensor hidden, Tensor cell)",
     caffe2::InferenceLSTMOp);

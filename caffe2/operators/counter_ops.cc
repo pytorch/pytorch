@@ -179,7 +179,7 @@ class CounterDeserializer : public BlobDeserializerBase {
         std::make_unique<Counter<int64_t>>(tensorProto.int64_data(0));
   }
 };
-}
+} // namespace
 
 // TODO(jiayq): deprecate these ops & consolidate them with
 // IterOp/AtomicIterOp
@@ -196,11 +196,13 @@ REGISTER_CPU_OPERATOR(RetrieveCount, RetrieveCountOp<int64_t, CPUContext>);
 OPERATOR_SCHEMA(CreateCounter)
     .NumInputs(0)
     .NumOutputs(1)
-    .SetDoc(R"DOC(
+    .SetDoc(
+        R"DOC(
 Creates a count-down counter with initial value specified by the `init_count`
 argument.
 
-)DOC" + (string) githubLinks + (string) kCountExample)
+)DOC" + (string)githubLinks +
+        (string)kCountExample)
     .Output(
         0,
         "counter",
@@ -212,10 +214,12 @@ argument.
 OPERATOR_SCHEMA(ResetCounter)
     .NumInputs(1)
     .NumOutputs(0, 1)
-    .SetDoc(R"DOC(
+    .SetDoc(
+        R"DOC(
 Resets a count-down counter with initial value specified by the `init_count`
 argument.
-)DOC" + (string) githubLinks + (string) kCountExample)
+)DOC" + (string)githubLinks +
+        (string)kCountExample)
     .Input(
         0,
         "counter",
@@ -231,10 +235,12 @@ argument.
 OPERATOR_SCHEMA(CountDown)
     .NumInputs(1)
     .NumOutputs(1)
-    .SetDoc(R"DOC(
+    .SetDoc(
+        R"DOC(
 If the internal count value > 0, decreases count value by 1 and outputs False,
 otherwise outputs True.
-)DOC" + (string) githubLinks + (string) kCountExample)
+)DOC" + (string)githubLinks +
+        (string)kCountExample)
     .Input(
         0,
         "counter",
@@ -247,9 +253,11 @@ otherwise outputs True.
 OPERATOR_SCHEMA(CheckCounterDone)
     .NumInputs(1)
     .NumOutputs(1)
-    .SetDoc(R"DOC(
+    .SetDoc(
+        R"DOC(
 If the internal count value <= 0, outputs true, otherwise outputs false.
-)DOC" + (string) githubLinks + (string) kCountExample)
+)DOC" + (string)githubLinks +
+        (string)kCountExample)
     .Input(
         0,
         "counter",
@@ -262,9 +270,11 @@ If the internal count value <= 0, outputs true, otherwise outputs false.
 OPERATOR_SCHEMA(CountUp)
     .NumInputs(1)
     .NumOutputs(1)
-    .SetDoc(R"DOC(
+    .SetDoc(
+        R"DOC(
 Increases count value by 1 and outputs the previous value atomically.
-)DOC" + (string) githubLinks + (string) kCountExample)
+)DOC" + (string)githubLinks +
+        (string)kCountExample)
     .Input(
         0,
         "counter",
@@ -278,17 +288,16 @@ OPERATOR_SCHEMA(RetrieveCount)
     .NumInputs(1)
     .NumOutputs(1)
     .ScalarType(TensorProto::INT64)
-    .SetDoc(R"DOC(
+    .SetDoc(
+        R"DOC(
 Retrieve the current value from the counter as an integer.
-)DOC" + (string) githubLinks + (string) kCountExample)
+)DOC" + (string)githubLinks +
+        (string)kCountExample)
     .Input(
         0,
         "counter",
         "*(type: Tensor`<ptr>`)* A blob pointing to an instance of a counter.")
-    .Output(
-        0,
-        "count",
-        "*(type: int)* Current count value.");
+    .Output(0, "count", "*(type: int)* Current count value.");
 
 SHOULD_NOT_DO_GRADIENT(CreateCounter);
 SHOULD_NOT_DO_GRADIENT(ResetCounter);

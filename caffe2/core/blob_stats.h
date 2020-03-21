@@ -1,8 +1,8 @@
 #pragma once
 
+#include <c10/util/typeid.h>
 #include "c10/util/Registry.h"
 #include "caffe2/core/blob.h"
-#include <c10/util/typeid.h>
 
 #include <unordered_map>
 
@@ -42,5 +42,5 @@ namespace BlobStat {
  * If not available, return 0.
  */
 CAFFE2_API size_t sizeBytes(const Blob& blob);
-}
-}
+} // namespace BlobStat
+} // namespace caffe2

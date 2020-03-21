@@ -59,9 +59,7 @@ class HSoftmaxOpBase : public Operator<Context> {
           path.path_nodes().end(),
           0,
           // Output of FC + Output of Softmax
-          [](int sz, PathNodeProto node) {
-            return sz + 2 * node.length();
-          });
+          [](int sz, PathNodeProto node) { return sz + 2 * node.length(); });
     }
     return size;
   }

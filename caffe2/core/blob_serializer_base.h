@@ -1,7 +1,7 @@
 #pragma once
 
-#include <string>
 #include <functional>
+#include <string>
 
 #include "c10/util/Registry.h"
 #include "caffe2/core/common.h"
@@ -28,7 +28,7 @@ class BlobSerializerBase {
  public:
   virtual ~BlobSerializerBase() {}
   using SerializationAcceptor =
-     std::function<void(const std::string& blobName, const std::string& data)>;
+      std::function<void(const std::string& blobName, const std::string& data)>;
   /**
    * @brief The virtual function that returns a serialized string for the input
    * blob.
@@ -73,7 +73,6 @@ inline unique_ptr<BlobSerializerBase> CreateSerializer(TypeIdentifier id) {
   return BlobSerializerRegistry()->Create(id);
 }
 
-
 /**
  * @brief BlobDeserializerBase is an abstract class that deserializes a blob
  * from a BlobProto or a TensorProto.
@@ -93,6 +92,5 @@ C10_DECLARE_REGISTRY(BlobDeserializerRegistry, BlobDeserializerBase);
 inline unique_ptr<BlobDeserializerBase> CreateDeserializer(const string& type) {
   return BlobDeserializerRegistry()->Create(type);
 }
-
 
 } // namespace caffe2

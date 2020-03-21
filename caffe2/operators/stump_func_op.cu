@@ -23,18 +23,18 @@ namespace {
 
 template <typename TIN, typename TOUT>
 __global__ void StumpFuncKernel(
-  const int N,
-  const TIN threshold,
-  const TOUT low_value,
-  const TOUT high_value,
-  const TIN* X,
-  TOUT* Y) {
+    const int N,
+    const TIN threshold,
+    const TOUT low_value,
+    const TOUT high_value,
+    const TIN* X,
+    TOUT* Y) {
   CUDA_1D_KERNEL_LOOP(i, N) {
     Y[i] = (X[i] <= threshold) ? low_value : high_value;
   }
 }
 
-} //
+} // namespace
 
 template <>
 bool StumpFuncOp<float, float, CUDAContext>::RunOnDevice() {
@@ -43,8 +43,11 @@ bool StumpFuncOp<float, float, CUDAContext>::RunOnDevice() {
 
   auto* out = Output(0, in.sizes(), at::dtype<float>());
   float* out_data = out->template mutable_data<float>();
-  StumpFuncKernel<<<CAFFE_GET_BLOCKS(in.numel()), CAFFE_CUDA_NUM_THREADS,
-    0, context_.cuda_stream()>>>(
+  StumpFuncKernel<<<
+      CAFFE_GET_BLOCKS(in.numel()),
+      CAFFE_CUDA_NUM_THREADS,
+      0,
+      context_.cuda_stream()>>>(
       in.numel(), threshold_, low_value_, high_value_, in_data, out_data);
   return true;
 }
@@ -52,4 +55,4 @@ bool StumpFuncOp<float, float, CUDAContext>::RunOnDevice() {
 REGISTER_CUDA_OPERATOR(StumpFunc, StumpFuncOp<float, float, CUDAContext>);
 // NO_GRADIENT(StumpFuncGpu);
 
-} // caffe2
+} // namespace caffe2

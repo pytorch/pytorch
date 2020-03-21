@@ -5,8 +5,13 @@
 namespace caffe2 {
 
 namespace {
-__global__ void MultiClassAccuracyKernel(const int N, const int D, const float* Xdata,
-    const int* labeldata, float* accuracies, int* amounts) {
+__global__ void MultiClassAccuracyKernel(
+    const int N,
+    const int D,
+    const float* Xdata,
+    const int* labeldata,
+    float* accuracies,
+    int* amounts) {
   CUDA_1D_KERNEL_LOOP(i, N) {
     float maxval = Xdata[i * D];
     int maxid = 0;
@@ -24,21 +29,22 @@ __global__ void MultiClassAccuracyKernel(const int N, const int D, const float* 
   }
 }
 __global__ void MultiClassAccuracyDivideKernel(
-  const int D, float* accuracies, const int* amounts) {
+    const int D,
+    float* accuracies,
+    const int* amounts) {
   CUDA_1D_KERNEL_LOOP(i, D) {
     if (amounts[i]) {
       accuracies[i] /= amounts[i];
     }
   }
 }
-}  // namespace
+} // namespace
 
 template <>
 bool MultiClassAccuracyOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(PREDICTION);
   auto& label = Input(LABEL);
-  
-  
+
   DCHECK_EQ(X.dim(), 2);
   // amount, number of instances
   int N = X.dim32(0);
@@ -56,15 +62,20 @@ bool MultiClassAccuracyOp<float, CUDAContext>::RunOnDevice() {
   math::Set<float, CUDAContext>(D, 0.0, accuracies, &context_);
   math::Set<int, CUDAContext>(D, 0, amounts, &context_);
 
-  MultiClassAccuracyKernel<<<CAFFE_GET_BLOCKS(N), CAFFE_CUDA_NUM_THREADS,
-                              0, context_.cuda_stream()>>>(
-      N, D, Xdata, labeldata, accuracies, amounts);
-  MultiClassAccuracyDivideKernel<<<CAFFE_GET_BLOCKS(D), CAFFE_CUDA_NUM_THREADS,
-                                  0, context_.cuda_stream()>>>(
-    D, accuracies, amounts);
+  MultiClassAccuracyKernel<<<
+      CAFFE_GET_BLOCKS(N),
+      CAFFE_CUDA_NUM_THREADS,
+      0,
+      context_.cuda_stream()>>>(N, D, Xdata, labeldata, accuracies, amounts);
+  MultiClassAccuracyDivideKernel<<<
+      CAFFE_GET_BLOCKS(D),
+      CAFFE_CUDA_NUM_THREADS,
+      0,
+      context_.cuda_stream()>>>(D, accuracies, amounts);
   return true;
 }
 
 REGISTER_CUDA_OPERATOR(
-  MultiClassAccuracy, MultiClassAccuracyOp<float, CUDAContext>);
-}  // namespace caffe2
+    MultiClassAccuracy,
+    MultiClassAccuracyOp<float, CUDAContext>);
+} // namespace caffe2

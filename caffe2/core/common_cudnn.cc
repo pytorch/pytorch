@@ -19,8 +19,10 @@ bool PrintCuDNNInfo(int*, char***) {
   return true;
 }
 
-REGISTER_CAFFE2_INIT_FUNCTION(PrintCuDNNInfo, &PrintCuDNNInfo,
-                              "Print CuDNN Info.");
+REGISTER_CAFFE2_INIT_FUNCTION(
+    PrintCuDNNInfo,
+    &PrintCuDNNInfo,
+    "Print CuDNN Info.");
 
-}  // namespace
-}  // namespace caffe2
+} // namespace
+} // namespace caffe2

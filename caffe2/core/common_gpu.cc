@@ -57,8 +57,8 @@ int NumCudaDevices() {
         count = 0;
         break;
 #else // CAFFE2_ASAN_ENABLED
-        // If we are not in ASAN mode and we get cudaErrorMemoryAllocation,
-        // this means that something is wrong before NumCudaDevices() call.
+      // If we are not in ASAN mode and we get cudaErrorMemoryAllocation,
+      // this means that something is wrong before NumCudaDevices() call.
         LOG(FATAL) << "Unexpected error from cudaGetDeviceCount(). Did you run "
                       "some cuda functions before calling NumCudaDevices() "
                       "that might have already set an error? Error: "
@@ -77,7 +77,7 @@ int NumCudaDevices() {
 
 namespace {
 int gDefaultGPUID = 0;
-}  // namespace
+} // namespace
 
 void SetDefaultGPUID(const int deviceid) {
   CAFFE_ENFORCE_LT(
@@ -91,7 +91,9 @@ void SetDefaultGPUID(const int deviceid) {
   gDefaultGPUID = deviceid;
 }
 
-int GetDefaultGPUID() { return gDefaultGPUID; }
+int GetDefaultGPUID() {
+  return gDefaultGPUID;
+}
 
 int CaffeCudaGetDevice() {
   int gpu_id = 0;
@@ -171,18 +173,16 @@ void DeviceQuery(const int device) {
 #endif
   ss << "Maximum threads per block:     " << prop.maxThreadsPerBlock
      << std::endl;
-  ss << "Maximum dimension of block:    "
-     << prop.maxThreadsDim[0] << ", " << prop.maxThreadsDim[1] << ", "
-     << prop.maxThreadsDim[2] << std::endl;
-  ss << "Maximum dimension of grid:     "
-     << prop.maxGridSize[0] << ", " << prop.maxGridSize[1] << ", "
-     << prop.maxGridSize[2] << std::endl;
+  ss << "Maximum dimension of block:    " << prop.maxThreadsDim[0] << ", "
+     << prop.maxThreadsDim[1] << ", " << prop.maxThreadsDim[2] << std::endl;
+  ss << "Maximum dimension of grid:     " << prop.maxGridSize[0] << ", "
+     << prop.maxGridSize[1] << ", " << prop.maxGridSize[2] << std::endl;
   ss << "Clock rate:                    " << prop.clockRate << std::endl;
   ss << "Total constant memory:         " << prop.totalConstMem << std::endl;
 #ifndef __HIP_PLATFORM_HCC__
   ss << "Texture alignment:             " << prop.textureAlignment << std::endl;
-  ss << "Concurrent copy and execution: "
-     << (prop.deviceOverlap ? "Yes" : "No") << std::endl;
+  ss << "Concurrent copy and execution: " << (prop.deviceOverlap ? "Yes" : "No")
+     << std::endl;
 #endif
   ss << "Number of multiprocessors:     " << prop.multiProcessorCount
      << std::endl;
@@ -194,17 +194,17 @@ void DeviceQuery(const int device) {
   return;
 }
 
-bool GetCudaPeerAccessPattern(vector<vector<bool> >* pattern) {
+bool GetCudaPeerAccessPattern(vector<vector<bool>>* pattern) {
   int gpu_count;
-  if (cudaGetDeviceCount(&gpu_count) != cudaSuccess) return false;
+  if (cudaGetDeviceCount(&gpu_count) != cudaSuccess)
+    return false;
   pattern->clear();
   pattern->resize(gpu_count, vector<bool>(gpu_count, false));
   for (int i = 0; i < gpu_count; ++i) {
     for (int j = 0; j < gpu_count; ++j) {
       int can_access = true;
       if (i != j) {
-        if (cudaDeviceCanAccessPeer(&can_access, i, j)
-                 != cudaSuccess) {
+        if (cudaDeviceCanAccessPeer(&can_access, i, j) != cudaSuccess) {
           return false;
         }
       }
@@ -228,43 +228,43 @@ bool TensorCoreAvailable() {
 
 const char* cublasGetErrorString(cublasStatus_t error) {
   switch (error) {
-  case CUBLAS_STATUS_SUCCESS:
-    return "CUBLAS_STATUS_SUCCESS";
-  case CUBLAS_STATUS_NOT_INITIALIZED:
-    return "CUBLAS_STATUS_NOT_INITIALIZED";
-  case CUBLAS_STATUS_ALLOC_FAILED:
-    return "CUBLAS_STATUS_ALLOC_FAILED";
-  case CUBLAS_STATUS_INVALID_VALUE:
-    return "CUBLAS_STATUS_INVALID_VALUE";
-  case CUBLAS_STATUS_ARCH_MISMATCH:
-    return "CUBLAS_STATUS_ARCH_MISMATCH";
+    case CUBLAS_STATUS_SUCCESS:
+      return "CUBLAS_STATUS_SUCCESS";
+    case CUBLAS_STATUS_NOT_INITIALIZED:
+      return "CUBLAS_STATUS_NOT_INITIALIZED";
+    case CUBLAS_STATUS_ALLOC_FAILED:
+      return "CUBLAS_STATUS_ALLOC_FAILED";
+    case CUBLAS_STATUS_INVALID_VALUE:
+      return "CUBLAS_STATUS_INVALID_VALUE";
+    case CUBLAS_STATUS_ARCH_MISMATCH:
+      return "CUBLAS_STATUS_ARCH_MISMATCH";
 #ifndef __HIP_PLATFORM_HCC__
-  case CUBLAS_STATUS_MAPPING_ERROR:
-    return "CUBLAS_STATUS_MAPPING_ERROR";
-  case CUBLAS_STATUS_EXECUTION_FAILED:
-    return "CUBLAS_STATUS_EXECUTION_FAILED";
+    case CUBLAS_STATUS_MAPPING_ERROR:
+      return "CUBLAS_STATUS_MAPPING_ERROR";
+    case CUBLAS_STATUS_EXECUTION_FAILED:
+      return "CUBLAS_STATUS_EXECUTION_FAILED";
 #endif
-  case CUBLAS_STATUS_INTERNAL_ERROR:
-    return "CUBLAS_STATUS_INTERNAL_ERROR";
+    case CUBLAS_STATUS_INTERNAL_ERROR:
+      return "CUBLAS_STATUS_INTERNAL_ERROR";
 #if CUDA_VERSION >= 6000
-  case CUBLAS_STATUS_NOT_SUPPORTED:
-    return "CUBLAS_STATUS_NOT_SUPPORTED";
+    case CUBLAS_STATUS_NOT_SUPPORTED:
+      return "CUBLAS_STATUS_NOT_SUPPORTED";
 #if CUDA_VERSION >= 6050
-  case CUBLAS_STATUS_LICENSE_ERROR:
-    return "CUBLAS_STATUS_LICENSE_ERROR";
-#endif  // CUDA_VERSION >= 6050
-#endif  // CUDA_VERSION >= 6000
+    case CUBLAS_STATUS_LICENSE_ERROR:
+      return "CUBLAS_STATUS_LICENSE_ERROR";
+#endif // CUDA_VERSION >= 6050
+#endif // CUDA_VERSION >= 6000
 #ifdef __HIP_PLATFORM_HCC__
-  case rocblas_status_invalid_size:
-    return "rocblas_status_invalid_size";
-  case rocblas_status_perf_degraded:
-    return "rocblas_status_perf_degraded";
-  case rocblas_status_size_query_mismatch:
-    return "rocblas_status_size_query_mismatch";
-  case rocblas_status_size_increased:
-    return "rocblas_status_size_increased";
-  case rocblas_status_size_unchanged:
-    return "rocblas_status_size_unchanged";
+    case rocblas_status_invalid_size:
+      return "rocblas_status_invalid_size";
+    case rocblas_status_perf_degraded:
+      return "rocblas_status_perf_degraded";
+    case rocblas_status_size_query_mismatch:
+      return "rocblas_status_size_query_mismatch";
+    case rocblas_status_size_increased:
+      return "rocblas_status_size_increased";
+    case rocblas_status_size_unchanged:
+      return "rocblas_status_size_unchanged";
 #endif
   }
   // To suppress compiler warning.
@@ -273,35 +273,35 @@ const char* cublasGetErrorString(cublasStatus_t error) {
 
 const char* curandGetErrorString(curandStatus_t error) {
   switch (error) {
-  case CURAND_STATUS_SUCCESS:
-    return "CURAND_STATUS_SUCCESS";
-  case CURAND_STATUS_VERSION_MISMATCH:
-    return "CURAND_STATUS_VERSION_MISMATCH";
-  case CURAND_STATUS_NOT_INITIALIZED:
-    return "CURAND_STATUS_NOT_INITIALIZED";
-  case CURAND_STATUS_ALLOCATION_FAILED:
-    return "CURAND_STATUS_ALLOCATION_FAILED";
-  case CURAND_STATUS_TYPE_ERROR:
-    return "CURAND_STATUS_TYPE_ERROR";
-  case CURAND_STATUS_OUT_OF_RANGE:
-    return "CURAND_STATUS_OUT_OF_RANGE";
-  case CURAND_STATUS_LENGTH_NOT_MULTIPLE:
-    return "CURAND_STATUS_LENGTH_NOT_MULTIPLE";
-  case CURAND_STATUS_DOUBLE_PRECISION_REQUIRED:
-    return "CURAND_STATUS_DOUBLE_PRECISION_REQUIRED";
-  case CURAND_STATUS_LAUNCH_FAILURE:
-    return "CURAND_STATUS_LAUNCH_FAILURE";
-  case CURAND_STATUS_PREEXISTING_FAILURE:
-    return "CURAND_STATUS_PREEXISTING_FAILURE";
-  case CURAND_STATUS_INITIALIZATION_FAILED:
-    return "CURAND_STATUS_INITIALIZATION_FAILED";
-  case CURAND_STATUS_ARCH_MISMATCH:
-    return "CURAND_STATUS_ARCH_MISMATCH";
-  case CURAND_STATUS_INTERNAL_ERROR:
-    return "CURAND_STATUS_INTERNAL_ERROR";
+    case CURAND_STATUS_SUCCESS:
+      return "CURAND_STATUS_SUCCESS";
+    case CURAND_STATUS_VERSION_MISMATCH:
+      return "CURAND_STATUS_VERSION_MISMATCH";
+    case CURAND_STATUS_NOT_INITIALIZED:
+      return "CURAND_STATUS_NOT_INITIALIZED";
+    case CURAND_STATUS_ALLOCATION_FAILED:
+      return "CURAND_STATUS_ALLOCATION_FAILED";
+    case CURAND_STATUS_TYPE_ERROR:
+      return "CURAND_STATUS_TYPE_ERROR";
+    case CURAND_STATUS_OUT_OF_RANGE:
+      return "CURAND_STATUS_OUT_OF_RANGE";
+    case CURAND_STATUS_LENGTH_NOT_MULTIPLE:
+      return "CURAND_STATUS_LENGTH_NOT_MULTIPLE";
+    case CURAND_STATUS_DOUBLE_PRECISION_REQUIRED:
+      return "CURAND_STATUS_DOUBLE_PRECISION_REQUIRED";
+    case CURAND_STATUS_LAUNCH_FAILURE:
+      return "CURAND_STATUS_LAUNCH_FAILURE";
+    case CURAND_STATUS_PREEXISTING_FAILURE:
+      return "CURAND_STATUS_PREEXISTING_FAILURE";
+    case CURAND_STATUS_INITIALIZATION_FAILED:
+      return "CURAND_STATUS_INITIALIZATION_FAILED";
+    case CURAND_STATUS_ARCH_MISMATCH:
+      return "CURAND_STATUS_ARCH_MISMATCH";
+    case CURAND_STATUS_INTERNAL_ERROR:
+      return "CURAND_STATUS_INTERNAL_ERROR";
 #ifdef __HIP_PLATFORM_HCC__
-  case HIPRAND_STATUS_NOT_IMPLEMENTED:
-    return "HIPRAND_STATUS_NOT_IMPLEMENTED";
+    case HIPRAND_STATUS_NOT_IMPLEMENTED:
+      return "HIPRAND_STATUS_NOT_IMPLEMENTED";
 #endif
   }
   // To suppress compiler warning.
@@ -320,4 +320,4 @@ class CudaRuntimeFlagFlipper {
 static CudaRuntimeFlagFlipper g_flipper;
 } // namespace
 
-}  // namespace caffe2
+} // namespace caffe2

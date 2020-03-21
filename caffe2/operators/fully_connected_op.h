@@ -264,7 +264,8 @@ class FullyConnectedGradientOp : public Operator<Context> {
         &context_,
         math_type);
     if (!bias_multiplier_.has_value()) {
-      bias_multiplier_ = caffe2::empty({M}, at::dtype<T_B>().device(Context::GetDeviceType()));
+      bias_multiplier_ =
+          caffe2::empty({M}, at::dtype<T_B>().device(Context::GetDeviceType()));
       math::Set<T_B, Context>(
           M,
           convert::To<float, T_B>(1),

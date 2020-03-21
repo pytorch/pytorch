@@ -17,7 +17,7 @@ inline T logLogit(T x) {
   }
   return std::log(std::exp(x) + 1);
 }
-}
+} // namespace
 
 template <typename T, class Context>
 bool PairWiseLossOp<T, Context>::RunOnDevice() {

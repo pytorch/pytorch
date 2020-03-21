@@ -31,10 +31,8 @@ __global__ void UpsampleBilinearKernel(
     const float width_scale,
     const float* __restrict__ X,
     float* __restrict__ Y) {
-
-
-    const int size = output_height * output_width;
-    CUDA_1D_KERNEL_LOOP(index, size) {
+  const int size = output_height * output_width;
+  CUDA_1D_KERNEL_LOOP(index, size) {
     int indexTemp = index;
     const int out_x = indexTemp % output_width;
     indexTemp /= output_width;
@@ -43,9 +41,9 @@ __global__ void UpsampleBilinearKernel(
     indexTemp /= num_channels;
 
     const float rheight =
-         output_height > 1 ? (input_height - 1.f) / (output_height - 1.f) : 0.f;
+        output_height > 1 ? (input_height - 1.f) / (output_height - 1.f) : 0.f;
     const float rwidth =
-         output_width > 1 ? (input_width - 1.f) / (output_width - 1.f) : 0.f;
+        output_width > 1 ? (input_width - 1.f) / (output_width - 1.f) : 0.f;
 
     // Compute Y axis lambdas
     const float h1r = rheight * out_y;
@@ -61,17 +59,20 @@ __global__ void UpsampleBilinearKernel(
     const float w1lambda = w1r - w1;
     const float w0lambda = 1.f - w1lambda;
 
-    for (int n = 0; n < num_batch; n++){
+    for (int n = 0; n < num_batch; n++) {
       for (int c = 0; c < num_channels; c++) {
-
-        float X0 = X[idx(n, num_channels, c, input_height, input_width, h1, w1)];
-        float X1 = X[idx(n, num_channels, c, input_height, input_width, h1, w1 + w1p)];
-        float X2 = X[idx(n, num_channels, c, input_height, input_width, h1 + h1p, w1)];
-        float X3 = X[idx(n, num_channels, c, input_height, input_width, h1 + h1p, w1 + w1p)];
+        float X0 =
+            X[idx(n, num_channels, c, input_height, input_width, h1, w1)];
+        float X1 =
+            X[idx(n, num_channels, c, input_height, input_width, h1, w1 + w1p)];
+        float X2 =
+            X[idx(n, num_channels, c, input_height, input_width, h1 + h1p, w1)];
+        float X3 = X[idx(
+            n, num_channels, c, input_height, input_width, h1 + h1p, w1 + w1p)];
 
         Y[idx(n, num_channels, c, output_height, output_width, out_y, out_x)] =
-                    h0lambda * (w0lambda * X0 + w1lambda * X1) +
-                    h1lambda * (w0lambda * X2 + w1lambda * X3);
+            h0lambda * (w0lambda * X0 + w1lambda * X1) +
+            h1lambda * (w0lambda * X2 + w1lambda * X3);
       }
     }
   }

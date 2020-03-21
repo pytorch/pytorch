@@ -112,7 +112,8 @@ void LSTMUnitGradient(
         const T c_prev = C_prev[d];
         const T c = C[d];
         const T host_tanh_c = host_tanh(c);
-        const T c_term_diff = C_diff[d] + H_diff[d] * o * (1 - host_tanh_c * host_tanh_c);
+        const T c_term_diff =
+            C_diff[d] + H_diff[d] * o * (1 - host_tanh_c * host_tanh_c);
         *c_prev_diff = c_term_diff * f;
         *h_prev_diff = 0; // not used in 'valid' case
         *i_diff = c_term_diff * g * i * (1 - i);

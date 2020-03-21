@@ -10,4 +10,4 @@ class PlanDef;
 typedef std::function<bool(int)> ShouldContinue;
 
 bool RunPlanOnWorkspace(Workspace* ws, const PlanDef& plan, ShouldContinue);
-}
+} // namespace caffe2

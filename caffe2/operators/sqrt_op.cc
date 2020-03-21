@@ -64,8 +64,8 @@ Y:
 
 </details>
 )DOC")
-.Input(0, "X", "*(type: Tensor`<float>`)* Input data tensor.")
-.Output(0, "Y", "*(type: Tensor`<float>`)* Output tensor.");
+    .Input(0, "X", "*(type: Tensor`<float>`)* Input data tensor.")
+    .Output(0, "Y", "*(type: Tensor`<float>`)* Output tensor.");
 
 namespace {
 

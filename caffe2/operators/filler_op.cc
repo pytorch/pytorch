@@ -200,10 +200,7 @@ Y: [[[[4. 4.]]
         0,
         "X",
         "*(type: Tensor)* [OPTIONAL] Input tensor to provide shape information.")
-    .Output(
-        0,
-        "Y",
-        "*(type: Tensor)* Output tensor of constant values.");
+    .Output(0, "Y", "*(type: Tensor)* Output tensor of constant values.");
 
 OPERATOR_SCHEMA(DiagonalFill)
     .NumInputs(0, 1)
@@ -334,7 +331,9 @@ output (op_2):
 )DOC")
     .Arg("min", "(*float*): minimum value, inclusive")
     .Arg("max", "(*float*): maximum value, inclusive")
-    .Arg("shape", "(*Tuple(int)*): shape of the output, do not set when `input_as_shape`=1")
+    .Arg(
+        "shape",
+        "(*Tuple(int)*): shape of the output, do not set when `input_as_shape`=1")
     .Arg(
         "input_as_shape",
         "(*int*): set to 1 to use the first input as shape; `shape` input must be in CPU context")
@@ -342,8 +341,14 @@ output (op_2):
         0,
         "shape",
         "(*Tensor`<int>`*): 1-D tensor of the shape of the output, must be used with `input_as_shape` argument")
-    .Input(1, "min", "(*Tensor`<float>`*): scalar tensor containing minimum value, inclusive")
-    .Input(2, "max", "(*Tensor`<float>`*): scalar tensor containing maximum value, inclusive")
+    .Input(
+        1,
+        "min",
+        "(*Tensor`<float>`*): scalar tensor containing minimum value, inclusive")
+    .Input(
+        2,
+        "max",
+        "(*Tensor`<float>`*): scalar tensor containing maximum value, inclusive")
     .Output(0, "output", "(*Tensor`<float>`*): filled output tensor");
 OPERATOR_SCHEMA(UniformIntFill)
     .NumInputs({0, 1, 3})
@@ -431,9 +436,18 @@ output (op_2):
     .Arg(
         "input_as_shape",
         "(*int*): set to 1 to use the first input as shape; `shape` input must be in CPU context")
-    .Input(0, "shape", "(*Tensor`<int>`*): 1-D tensor of the shape of the output, must be used with `input_as_shape` argument")
-    .Input(1, "min", "(*Tensor`<int>`*): scalar tensor containing minimum value, inclusive")
-    .Input(2, "max", "(*Tensor`<int>`*): scalar tensor containing maximum value, inclusive")
+    .Input(
+        0,
+        "shape",
+        "(*Tensor`<int>`*): 1-D tensor of the shape of the output, must be used with `input_as_shape` argument")
+    .Input(
+        1,
+        "min",
+        "(*Tensor`<int>`*): scalar tensor containing minimum value, inclusive")
+    .Input(
+        2,
+        "max",
+        "(*Tensor`<int>`*): scalar tensor containing maximum value, inclusive")
     .Output(0, "output", "(*Tensor`<int>`*): filled output tensor");
 OPERATOR_SCHEMA(UniqueUniformFill)
     .NumInputs(0, 2)
@@ -529,9 +543,7 @@ Out:
     .Arg(
         "std",
         "*(type: float; default: 1.)* Standard deviation of the distribution to draw from.")
-    .Arg(
-        "shape",
-        "*(type: [int])* Desired shape of the *output* tensor.")
+    .Arg("shape", "*(type: [int])* Desired shape of the *output* tensor.")
     .Arg(
         "extra_shape",
         "*(type: [int])* The additional dimensions appended at the end of the *shape* indicated by the input blob. Cannot set the *extra_shape* argument when there is no input blob.")
@@ -596,9 +608,7 @@ Out:
 </details>
 
 )DOC")
-    .Arg(
-        "shape",
-        "*(type: [int])* Desired shape of the *output* tensor.")
+    .Arg("shape", "*(type: [int])* Desired shape of the *output* tensor.")
     .Arg(
         "extra_shape",
         "*(type: [int])* The additional dimensions appended at the end of the *shape* indicated by the input blob. Cannot set the *extra_shape* argument when there is no input blob.")
@@ -690,4 +700,4 @@ range_sequence:
         "1D tensor whose size is the sum of *lengths*");
 NO_GRADIENT(LengthsRangeFill);
 
-}  // namespace caffe2
+} // namespace caffe2

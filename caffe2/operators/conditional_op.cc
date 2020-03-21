@@ -62,4 +62,4 @@ have the exact same shape and type.
 
 NO_GRADIENT(Conditional);
 
-} // caffe2
+} // namespace caffe2

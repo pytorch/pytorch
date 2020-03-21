@@ -1315,9 +1315,18 @@ A:
 </details>
 
 )DOC")
-    .Input(0, "A", "(*Tensor*): base input tensor of shape $(N, d_1, d_2, ..., d_n)$")
-    .Input(1, "B", "(*Tensor*): second input tensor of shape $(M, d_1, d_2, ..., d_n)$ to be appended to the base")
-    .Output(0, "A", "(*Tensor*): output tensor of shape $(N+M, d_1, d_2, ..., d_n)$");
+    .Input(
+        0,
+        "A",
+        "(*Tensor*): base input tensor of shape $(N, d_1, d_2, ..., d_n)$")
+    .Input(
+        1,
+        "B",
+        "(*Tensor*): second input tensor of shape $(M, d_1, d_2, ..., d_n)$ to be appended to the base")
+    .Output(
+        0,
+        "A",
+        "(*Tensor*): output tensor of shape $(N+M, d_1, d_2, ..., d_n)$");
 
 OPERATOR_SCHEMA(AtomicAppend)
     .NumInputs(3, INT_MAX)

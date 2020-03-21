@@ -1,10 +1,10 @@
 #include <cuda.h>
 #include <thrust/device_vector.h>
-#include <thrust/transform_reduce.h>
 #include <thrust/system/cuda/execution_policy.h>
+#include <thrust/transform_reduce.h>
 
-#include "caffe2/operators/summarize_op.h"
 #include "caffe2/core/context_gpu.h"
+#include "caffe2/operators/summarize_op.h"
 
 namespace caffe2 {
 
@@ -27,7 +27,9 @@ struct SummaryStatsData {
     max = std::numeric_limits<T>::min();
   }
 
-  T variance() { return (n == 1 ? 0 : M2 / (n - 1)); }
+  T variance() {
+    return (n == 1 ? 0 : M2 / (n - 1));
+  }
 };
 
 // stats_unary_op is a functor that takes in a value x and
@@ -35,13 +37,13 @@ struct SummaryStatsData {
 template <typename T>
 struct summary_stats_unary_op {
   __host__ __device__ SummaryStatsData<T> operator()(const T& x) const {
-     SummaryStatsData<T> result;
-     result.n    = 1;
-     result.min  = x;
-     result.max  = x;
-     result.mean = x;
-     result.M2   = 0;
-     return result;
+    SummaryStatsData<T> result;
+    result.n = 1;
+    result.min = x;
+    result.max = x;
+    result.mean = x;
+    result.M2 = 0;
+    return result;
   }
 };
 
@@ -50,29 +52,30 @@ struct summary_stats_unary_op {
 // approximation to the summary_stats for
 // all values that have been aggregated so far
 template <typename T>
-struct summary_stats_binary_op
-    : public thrust::binary_function<const SummaryStatsData<T>&,
+struct summary_stats_binary_op : public thrust::binary_function<
                                      const SummaryStatsData<T>&,
-                                           SummaryStatsData<T> > {
+                                     const SummaryStatsData<T>&,
+                                     SummaryStatsData<T>> {
   __host__ __device__ SummaryStatsData<T> operator()(
-      const SummaryStatsData<T>& x, const SummaryStatsData <T>& y) const {
+      const SummaryStatsData<T>& x,
+      const SummaryStatsData<T>& y) const {
     SummaryStatsData<T> result;
-    T n  = x.n + y.n;
-    T delta  = y.mean - x.mean;
-    T delta2 = delta  * delta;
-    result.n   = n;
+    T n = x.n + y.n;
+    T delta = y.mean - x.mean;
+    T delta2 = delta * delta;
+    result.n = n;
     result.min = thrust::min(x.min, y.min);
     result.max = thrust::max(x.max, y.max);
     result.mean = x.mean + delta * y.n / n;
-    result.M2  = x.M2 + y.M2;
+    result.M2 = x.M2 + y.M2;
     result.M2 += delta2 * x.n * y.n / n;
     return result;
   }
 };
 
-}  // namespace
+} // namespace
 
-template<>
+template <>
 bool SummarizeOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);
   const int N = X.numel();
@@ -88,8 +91,12 @@ bool SummarizeOp<float, CUDAContext>::RunOnDevice() {
   SummaryStatsData<float> result = thrust::transform_reduce(
 #if THRUST_VERSION >= 100800
       thrust::cuda::par.on(context_.cuda_stream()),
-#endif  // THRUST_VERSION >= 100800
-      Xdata, Xdata + N, unary_op, init, binary_op);
+#endif // THRUST_VERSION >= 100800
+      Xdata,
+      Xdata + N,
+      unary_op,
+      init,
+      binary_op);
   float standard_deviation = std::sqrt(result.variance());
   if (to_file_) {
     (*log_file_) << result.min << " " << result.max << " " << result.mean << " "
@@ -97,8 +104,8 @@ bool SummarizeOp<float, CUDAContext>::RunOnDevice() {
   }
   if (OutputSize()) {
     auto* Y = Output(0, {4}, at::dtype<float>());
-    float output_buffer[NUM_STATS] = {result.min, result.max, result.mean,
-                               standard_deviation};
+    float output_buffer[NUM_STATS] = {
+        result.min, result.max, result.mean, standard_deviation};
     context_.CopyFromCPU<float>(
         NUM_STATS, output_buffer, Y->template mutable_data<float>());
   }
@@ -106,4 +113,4 @@ bool SummarizeOp<float, CUDAContext>::RunOnDevice() {
 }
 
 REGISTER_CUDA_OPERATOR(Summarize, SummarizeOp<float, CUDAContext>);
-}  // namespace caffe2
+} // namespace caffe2

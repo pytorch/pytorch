@@ -188,5 +188,5 @@ SHOULD_NOT_DO_GRADIENT(StringSuffix);
 SHOULD_NOT_DO_GRADIENT(StringStartsWith);
 SHOULD_NOT_DO_GRADIENT(StringEndsWith);
 SHOULD_NOT_DO_GRADIENT(StringJoin);
-}
+} // namespace
 } // namespace caffe2

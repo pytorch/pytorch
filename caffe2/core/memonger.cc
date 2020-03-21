@@ -288,8 +288,7 @@ class ComputeBlobRecyclingForDag {
         } else {
           NetDef step_net;
           CAFFE_ENFORCE(
-              TextFormat::ParseFromString(
-                  arg->s(), &step_net),
+              TextFormat::ParseFromString(arg->s(), &step_net),
               "Could not parse step net:",
               name);
           step_net = apply_assignments(step_net);
@@ -589,5 +588,5 @@ NetDef compute_blob_recycling_for_dag(
       blob_shapes);
 }
 
-} // memonger
-} // caffe2
+} // namespace memonger
+} // namespace caffe2

@@ -106,8 +106,8 @@ class TextFileReaderReadOp : public Operator<CPUContext> {
             to_string(numFields));
 
     // char* datas[numFields];
-    // MSVC does not allow using const int, so we will need to dynamically allocate
-    // it.
+    // MSVC does not allow using const int, so we will need to dynamically
+    // allocate it.
     std::vector<char*> datas(numFields);
     for (int i = 0; i < numFields; ++i) {
       Output(i)->Resize(batchSize_);

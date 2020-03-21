@@ -214,6 +214,6 @@ bool CuDNNLRNGradientOp::RunOnDevice() {
 namespace {
 REGISTER_CUDNN_OPERATOR(LRN, CuDNNLRNOp);
 REGISTER_CUDNN_OPERATOR(LRNGradient, CuDNNLRNGradientOp);
-}
+} // namespace
 
 }; // namespace caffe2

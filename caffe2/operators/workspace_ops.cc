@@ -13,7 +13,8 @@ class GetAllBlobNamesOp final : public Operator<CPUContext> {
 
   bool RunOnDevice() override {
     const auto& blobs = include_shared_ ? ws_->Blobs() : ws_->LocalBlobs();
-    auto* out = Output(0, {static_cast<int64_t>(blobs.size())}, at::dtype<std::string>());
+    auto* out = Output(
+        0, {static_cast<int64_t>(blobs.size())}, at::dtype<std::string>());
     std::copy(
         blobs.begin(), blobs.end(), out->template mutable_data<std::string>());
     return true;
@@ -38,5 +39,5 @@ of each blob in the active workspace.
         "inherited from parent workspaces.")
     .Output(0, "blob_names", "1D tensor of strings containing blob names.");
 SHOULD_NOT_DO_GRADIENT(GetAllBlobNamesOp);
-}
-}
+} // namespace
+} // namespace caffe2

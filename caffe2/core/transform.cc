@@ -256,4 +256,4 @@ NetDef ApplyTransformIfFaster(
   return netdef;
 }
 
-} // namespace Caffe2
+} // namespace caffe2

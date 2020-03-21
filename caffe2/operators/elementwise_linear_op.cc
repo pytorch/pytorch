@@ -2,8 +2,8 @@
 
 namespace caffe2 {
 
-template<>
-bool ElementwiseLinearOp<float, CPUContext>::RunOnDevice(){
+template <>
+bool ElementwiseLinearOp<float, CPUContext>::RunOnDevice() {
   const auto& X = Input(0);
   const auto& a = Input(1);
   const auto& b = Input(2);
@@ -34,8 +34,8 @@ bool ElementwiseLinearOp<float, CPUContext>::RunOnDevice(){
   return true;
 }
 
-template<>
-bool ElementwiseLinearGradientOp<float, CPUContext>::RunOnDevice(){
+template <>
+bool ElementwiseLinearGradientOp<float, CPUContext>::RunOnDevice() {
   const auto& g_o = Input(0);
   const auto& X = Input(1);
   const auto& a = Input(2);
@@ -74,11 +74,11 @@ bool ElementwiseLinearGradientOp<float, CPUContext>::RunOnDevice(){
 }
 
 REGISTER_CPU_OPERATOR(
-  ElementwiseLinear,
-  ElementwiseLinearOp<float, CPUContext>);
+    ElementwiseLinear,
+    ElementwiseLinearOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(
-  ElementwiseLinearGradient,
-  ElementwiseLinearGradientOp<float, CPUContext>);
+    ElementwiseLinearGradient,
+    ElementwiseLinearGradientOp<float, CPUContext>);
 
 OPERATOR_SCHEMA(ElementwiseLinear)
     .NumInputs(3)
@@ -175,24 +175,19 @@ Y:
         "*(type: int; default: 1)* Describes the axis of the inputs; defaults to one because the 0th axis most likely describes the batch size.")
     .InheritOnnxSchema();
 
-OPERATOR_SCHEMA(ElementwiseLinearGradient)
-  .NumInputs(3)
-  .NumOutputs(3);
+OPERATOR_SCHEMA(ElementwiseLinearGradient).NumInputs(3).NumOutputs(3);
 
 struct GetElementwiseLinearGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
     return SingleGradientDef(
-      "ElementwiseLinearGradient",
-      "",
-      vector<string>{GO(0), I(0), I(1)},
-      vector<string>{GI(0), GI(1), GI(2)});
-    }
+        "ElementwiseLinearGradient",
+        "",
+        vector<string>{GO(0), I(0), I(1)},
+        vector<string>{GI(0), GI(1), GI(2)});
+  }
 };
 
-REGISTER_GRADIENT(
-  ElementwiseLinear,
-  GetElementwiseLinearGradient
-);
+REGISTER_GRADIENT(ElementwiseLinear, GetElementwiseLinearGradient);
 
-}  // namespace caffe2
+} // namespace caffe2

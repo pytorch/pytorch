@@ -13,8 +13,8 @@
 #include <memory>
 #include <mutex>
 
-#include "caffe2/core/common.h"
 #include <c10/util/typeid.h>
+#include "caffe2/core/common.h"
 
 namespace caffe2 {
 
@@ -27,7 +27,6 @@ class CAFFE2_API ModuleSchema {
  public:
   ModuleSchema(const char* name, const char* description);
 };
-
 
 /**
  * @brief Current Modules present in the Caffe2 runtime.
@@ -56,16 +55,17 @@ CAFFE2_API bool HasModule(const string& name);
  *       full path option to only experimental modules.
  *   filename: (optional) a filename that serves as a hint to load the module.
  */
-CAFFE2_API void LoadModule(const string& name, const string& filename="");
+CAFFE2_API void LoadModule(const string& name, const string& filename = "");
 
-
-#define CAFFE2_MODULE(name, description)                                    \
-  extern "C" {                                                              \
-    bool gCaffe2ModuleSanityCheck##name() { return true; }                  \
-  }                                                                         \
-  namespace {                                                               \
-    static ::caffe2::ModuleSchema module_schema_##name(#name, description); \
+#define CAFFE2_MODULE(name, description)                                  \
+  extern "C" {                                                            \
+  bool gCaffe2ModuleSanityCheck##name() {                                 \
+    return true;                                                          \
+  }                                                                       \
+  }                                                                       \
+  namespace {                                                             \
+  static ::caffe2::ModuleSchema module_schema_##name(#name, description); \
   }
 
-}  // namespace caffe2
-#endif  // CAFFE2_CORE_MODULE_H_
+} // namespace caffe2
+#endif // CAFFE2_CORE_MODULE_H_

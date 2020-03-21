@@ -4,9 +4,12 @@
 namespace caffe2 {
 namespace {
 
-
 __global__ void MRCKernel(
-    const int N, const int* Y, const float* X1, const float* X2, const float margin,
+    const int N,
+    const int* Y,
+    const float* X1,
+    const float* X2,
+    const float margin,
     float* output) {
   CUDA_1D_KERNEL_LOOP(i, N) {
     output[i] = fmaxf(0.f, -Y[i] * (X1[i] - X2[i]) + margin);
@@ -14,8 +17,14 @@ __global__ void MRCKernel(
 }
 
 __global__ void MRCGradientKernel(
-    const int N, const int* Y, const float* X1, const float* X2, const float* dOutput,
-    const float margin, float* dX1, float* dX2) {
+    const int N,
+    const int* Y,
+    const float* X1,
+    const float* X2,
+    const float* dOutput,
+    const float margin,
+    float* dX1,
+    float* dX2) {
   CUDA_1D_KERNEL_LOOP(i, N) {
     float dist = -Y[i] * (X1[i] - X2[i]) + margin;
     if (dist < 0.f) {
@@ -26,7 +35,7 @@ __global__ void MRCGradientKernel(
     }
   }
 }
-}  // namespace
+} // namespace
 
 template <>
 bool MarginRankingCriterionOp<CUDAContext>::RunOnDevice() {
@@ -47,8 +56,11 @@ bool MarginRankingCriterionOp<CUDAContext>::RunOnDevice() {
   const int* Ydata = Y.data<int>();
   float* output_data = loss->template mutable_data<float>();
 
-  MRCKernel<<<CAFFE_GET_BLOCKS(X1.numel()), CAFFE_CUDA_NUM_THREADS,
-              0, context_.cuda_stream()>>>(
+  MRCKernel<<<
+      CAFFE_GET_BLOCKS(X1.numel()),
+      CAFFE_CUDA_NUM_THREADS,
+      0,
+      context_.cuda_stream()>>>(
       X1.numel(), Ydata, X1data, X2data, margin_, output_data);
   return true;
 }
@@ -70,10 +82,19 @@ bool MarginRankingCriterionGradientOp<CUDAContext>::RunOnDevice() {
 
   float* dX1_data = dX1->template mutable_data<float>();
   float* dX2_data = dX2->template mutable_data<float>();
-  MRCGradientKernel<<<CAFFE_GET_BLOCKS(X1.numel()), CAFFE_CUDA_NUM_THREADS,
-                      0, context_.cuda_stream()>>>(
-      X1.numel(), Ydata, X1data, X2data,
-      dOutput_data, margin_, dX1_data, dX2_data);
+  MRCGradientKernel<<<
+      CAFFE_GET_BLOCKS(X1.numel()),
+      CAFFE_CUDA_NUM_THREADS,
+      0,
+      context_.cuda_stream()>>>(
+      X1.numel(),
+      Ydata,
+      X1data,
+      X2data,
+      dOutput_data,
+      margin_,
+      dX1_data,
+      dX2_data);
   return true;
 }
 
@@ -83,4 +104,4 @@ REGISTER_CUDA_OPERATOR(
 REGISTER_CUDA_OPERATOR(
     MarginRankingCriterionGradient,
     MarginRankingCriterionGradientOp<CUDAContext>);
-}  // namespace caffe2
+} // namespace caffe2

@@ -151,9 +151,14 @@ Y:  [ 1.  4.  9. 16. 25. 36.]
 
 )DOC")
     .Input(0, "X", "Input data blob to be operated on.")
-    .Input(1, "exponent", "Exponent blob containing the exponent(s) for calculation. Do not use if setting exponent via argument.")
+    .Input(
+        1,
+        "exponent",
+        "Exponent blob containing the exponent(s) for calculation. Do not use if setting exponent via argument.")
     .Output(0, "Y", "Output data blob with the same shape as the input.")
-    .Arg("exponent", "The exponent of the power function. Do not use if setting exponent via input.")
+    .Arg(
+        "exponent",
+        "The exponent of the power function. Do not use if setting exponent via input.")
     .Arg("axis", "*(type: int; default: -1)*")
     .Arg("broadcast", "*(type: bool; default: False)*");
 

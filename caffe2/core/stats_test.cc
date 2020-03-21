@@ -2,8 +2,8 @@
 #include <iostream>
 #include <thread>
 
-#include "caffe2/core/stats.h"
 #include <gtest/gtest.h>
+#include "caffe2/core/stats.h"
 
 namespace caffe2 {
 namespace {

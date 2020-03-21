@@ -1,11 +1,10 @@
 #include <iostream>
 
+#include <gtest/gtest.h>
 #include "caffe2/core/operator.h"
 #include "caffe2/operators/operator_fallback_gpu.h"
-#include <gtest/gtest.h>
 
 namespace caffe2 {
-
 
 class IncrementByOneOp final : public Operator<CPUContext> {
  public:
@@ -25,17 +24,17 @@ class IncrementByOneOp final : public Operator<CPUContext> {
   }
 };
 
-
 OPERATOR_SCHEMA(IncrementByOne)
-    .NumInputs(1).NumOutputs(1).AllowInplace({{0, 0}});
+    .NumInputs(1)
+    .NumOutputs(1)
+    .AllowInplace({{0, 0}});
 
 REGISTER_CPU_OPERATOR(IncrementByOne, IncrementByOneOp);
 REGISTER_CUDA_OPERATOR(IncrementByOne, GPUFallbackOp);
 
 TEST(OperatorFallbackTest, IncrementByOneOp) {
   OperatorDef op_def = CreateOperatorDef(
-      "IncrementByOne", "", vector<string>{"X"},
-      vector<string>{"X"});
+      "IncrementByOne", "", vector<string>{"X"}, vector<string>{"X"});
   Workspace ws;
   Tensor source_tensor(vector<int64_t>{2, 3}, CPU);
   for (int i = 0; i < 6; ++i) {
@@ -55,10 +54,10 @@ TEST(OperatorFallbackTest, IncrementByOneOp) {
 }
 
 TEST(OperatorFallbackTest, GPUIncrementByOneOp) {
-  if (!HasCudaGPU()) return;
+  if (!HasCudaGPU())
+    return;
   OperatorDef op_def = CreateOperatorDef(
-      "IncrementByOne", "", vector<string>{"X"},
-      vector<string>{"X"});
+      "IncrementByOne", "", vector<string>{"X"}, vector<string>{"X"});
   op_def.mutable_device_option()->set_device_type(PROTO_CUDA);
   Workspace ws;
   Tensor source_tensor(vector<int64_t>{2, 3}, CPU);
@@ -79,4 +78,4 @@ TEST(OperatorFallbackTest, GPUIncrementByOneOp) {
   }
 }
 
-}  // namespace caffe2
+} // namespace caffe2

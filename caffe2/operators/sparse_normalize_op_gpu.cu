@@ -3,7 +3,5 @@
 #include "caffe2/operators/sparse_normalize_op.h"
 
 namespace caffe2 {
-REGISTER_CUDA_OPERATOR(
-    SparseNormalize,
-    GPUFallbackOp);
+REGISTER_CUDA_OPERATOR(SparseNormalize, GPUFallbackOp);
 }

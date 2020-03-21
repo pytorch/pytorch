@@ -31,7 +31,9 @@ REGISTER_CPU_OPERATOR(Mod, ModOp<CPUContext>);
 OPERATOR_SCHEMA(Mod)
     .NumInputs(1)
     .NumOutputs(1)
-    .Arg("divisor", "*(type: int; default: 0)* Divisor of the modulo operation (must be >= 1).")
+    .Arg(
+        "divisor",
+        "*(type: int; default: 0)* Divisor of the modulo operation (must be >= 1).")
     .Arg(
         "sign_follow_divisor",
         "*(type: bool; default: False)* If true, sign of output matches divisor, else if false, sign follows dividend.")
@@ -91,8 +93,14 @@ X after running op:
  </details>
 
 )DOC")
-    .Input(0, "X", "*(type: Tensor`<int>`)* Input tensor with int32 or int64 data.")
-    .Output(0, "Y", "*(type: Tensor`<int>`)* Output tensor of data with modulo operation applied.");
+    .Input(
+        0,
+        "X",
+        "*(type: Tensor`<int>`)* Input tensor with int32 or int64 data.")
+    .Output(
+        0,
+        "Y",
+        "*(type: Tensor`<int>`)* Output tensor of data with modulo operation applied.");
 
 SHOULD_NOT_DO_GRADIENT(ModOp);
 } // namespace

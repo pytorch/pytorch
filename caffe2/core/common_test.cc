@@ -3,14 +3,14 @@
 
 #define CAFFE2_TESTONLY_FORCE_STD_STRING_TEST
 
-#include "caffe2/core/common.h"
 #include <gtest/gtest.h>
+#include "caffe2/core/common.h"
 
 namespace caffe2 {
 
 #ifndef __ANDROID__
 
-// Simple tests to make sure that our stoi and stod implementations are 
+// Simple tests to make sure that our stoi and stod implementations are
 // matching the std implementations, but not testing it very extensively
 // as one should be using the std version most of the time.
 TEST(CommonTest, TestStoi) {
@@ -40,6 +40,4 @@ TEST(CommonTest, TestStod) {
 
 #endif // __ANDROID__
 
-}  // namespace caffe2
-
-
+} // namespace caffe2

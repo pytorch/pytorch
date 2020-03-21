@@ -90,8 +90,7 @@ OperatorBase::OperatorBase(const OperatorDef& operator_def, Workspace* ws)
 #if defined(EXPOSE_C2_OPS) || \
     !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
 namespace {
-int
-C10_UNUSED  // Suppress unused function warning on mobile.
+int C10_UNUSED // Suppress unused function warning on mobile.
 compute_input_size_(const std::vector<c10::IValue>& inputs) {
   if (inputs.empty()) {
     return 0;
@@ -246,8 +245,8 @@ unique_ptr<OperatorBase> _CreateOperator(
     } else {
       // If the above fails, we will just return the normal case with the
       // default implementation.
-      VLOG(1) << "Engine " << engine
-              << " is not available for operator " << op_type << ".";
+      VLOG(1) << "Engine " << engine << " is not available for operator "
+              << op_type << ".";
     }
   }
   if (operator_def.engine().size() && !VLOG_IS_ON(1)) {
@@ -407,12 +406,13 @@ C10_DEFINE_REGISTRY(
     const vector<GradientWrapper>&);
 
 GradientOpsMeta GetGradientForOp(
-    const OperatorDef& def, const vector<GradientWrapper>& g_output) {
+    const OperatorDef& def,
+    const vector<GradientWrapper>& g_output) {
   C10_LOG_API_USAGE_ONCE("caffe2.gradient_maker");
   std::unique_ptr<GradientMakerBase> maker(
       GradientRegistry()->Create(def.type(), def, g_output));
-  CAFFE_ENFORCE(maker,
-      "Gradient maker for operator ", def.type(), " not implemented.");
+  CAFFE_ENFORCE(
+      maker, "Gradient maker for operator ", def.type(), " not implemented.");
   GradientOpsMeta meta = maker->Get();
   // Copy device option, engine, and arguments if needed.
   if (maker->CopyDeviceOption() && def.has_device_option()) {
@@ -740,9 +740,7 @@ std::map<string, std::pair<DeviceOption, DeviceOption>> ValidateTensorDevices(
       size_t _capacity;
       DeviceOption blob_device;
       tensor_info_fun(
-          const_cast<Blob&>(blob).GetRaw(),
-          &_capacity,
-          &blob_device);
+          const_cast<Blob&>(blob).GetRaw(), &_capacity, &blob_device);
 
       if ((blob_device.device_type() == PROTO_CUDA ||
            blob_device.device_type() == PROTO_HIP) &&
@@ -813,4 +811,4 @@ C10_DEFINE_TYPED_REGISTRY(
     std::unique_ptr);
 #endif
 
-}  // namespace caffe2
+} // namespace caffe2

@@ -10,4 +10,4 @@ bool ScaleOp<CUDAContext>::RunOnDevice() {
 
 REGISTER_CUDA_OPERATOR(Scale, ScaleOp<CUDAContext>);
 
-}  // namespace caffe2
+} // namespace caffe2

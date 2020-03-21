@@ -26,7 +26,7 @@ static_assert(
 #endif // CUDNN_VERSION < 6000
 
 #define CUDNN_VERSION_MIN(major, minor, patch) \
-  (CUDNN_VERSION >= ((major) * 1000 + (minor) * 100 + (patch)))
+  (CUDNN_VERSION >= ((major)*1000 + (minor)*100 + (patch)))
 
 namespace caffe2 {
 
@@ -104,11 +104,18 @@ inline void CheckCuDNNVersions() {
   //    major and minor match
   bool version_match = cudnnCompiledVersion() == cudnnRuntimeVersion();
   bool compiled_with_7 = cudnnCompiledVersion() >= 7000;
-  bool backwards_compatible_7 = compiled_with_7 && cudnnRuntimeVersion() >= cudnnCompiledVersion();
-  bool patch_compatible = compiled_with_7 && (cudnnRuntimeVersion() / 100) == (cudnnCompiledVersion() / 100);
-  CAFFE_ENFORCE(version_match || backwards_compatible_7 || patch_compatible,
-                "cuDNN compiled (", cudnnCompiledVersion(), ") and "
-                "runtime (", cudnnRuntimeVersion(), ") versions mismatch");
+  bool backwards_compatible_7 =
+      compiled_with_7 && cudnnRuntimeVersion() >= cudnnCompiledVersion();
+  bool patch_compatible = compiled_with_7 &&
+      (cudnnRuntimeVersion() / 100) == (cudnnCompiledVersion() / 100);
+  CAFFE_ENFORCE(
+      version_match || backwards_compatible_7 || patch_compatible,
+      "cuDNN compiled (",
+      cudnnCompiledVersion(),
+      ") and "
+      "runtime (",
+      cudnnRuntimeVersion(),
+      ") versions mismatch");
 }
 
 /**
@@ -314,7 +321,6 @@ class cudnnFilterDescWrapper {
   vector<int> dims_;
   C10_DISABLE_COPY_AND_ASSIGN(cudnnFilterDescWrapper);
 };
-
 
 } // namespace caffe2
 

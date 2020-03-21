@@ -1,8 +1,8 @@
 #ifndef CAFFE2_OPERATORS_SEGMENT_REDUCTION_OP_H_
 #define CAFFE2_OPERATORS_SEGMENT_REDUCTION_OP_H_
 
-#include "caffe2/core/export_caffe2_op_to_c10.h"
 #include "caffe2/core/context.h"
+#include "caffe2/core/export_caffe2_op_to_c10.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/operators/reducer_functors.h"

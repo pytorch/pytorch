@@ -1,10 +1,10 @@
 #include <iostream>
 #include <memory>
 
-#include "caffe2/core/module.h"
-#include "caffe2/core/operator.h"
 #include <gtest/gtest.h>
 #include "caffe2/core/logging.h"
+#include "caffe2/core/module.h"
+#include "caffe2/core/operator.h"
 
 // An explicitly defined module, testing correctness when we statically link a
 // module
@@ -24,7 +24,8 @@ class Caffe2ModuleTestStaticDummyOp : public OperatorBase {
 };
 
 REGISTER_CPU_OPERATOR(
-  Caffe2ModuleTestStaticDummy, Caffe2ModuleTestStaticDummyOp);
+    Caffe2ModuleTestStaticDummy,
+    Caffe2ModuleTestStaticDummyOp);
 OPERATOR_SCHEMA(Caffe2ModuleTestStaticDummy);
 
 TEST(ModuleTest, StaticModule) {
@@ -59,9 +60,7 @@ TEST(ModuleTest, DynamicModule) {
   OperatorDef op_def;
   Workspace ws;
   op_def.set_type("Caffe2ModuleTestDynamicDummy");
-  EXPECT_THROW(
-      CreateOperator(op_def, &ws),
-      EnforceNotMet);
+  EXPECT_THROW(CreateOperator(op_def, &ws), EnforceNotMet);
 
   // LoadModule should load the proper module.
   LoadModule(name);
@@ -74,4 +73,4 @@ TEST(ModuleTest, DynamicModule) {
 }
 #endif
 
-}  // namespace caffe2
+} // namespace caffe2

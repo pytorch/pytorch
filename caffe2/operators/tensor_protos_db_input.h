@@ -37,8 +37,7 @@ TensorProtosDBInput<Context>::TensorProtosDBInput(
     Workspace* ws)
     : PrefetchOperator<Context>(operator_def, ws),
       prefetched_blobs_(operator_def.output_size()),
-      batch_size_(
-          this->template GetSingleArgument<int>("batch_size", 0)) {}
+      batch_size_(this->template GetSingleArgument<int>("batch_size", 0)) {}
 
 template <class Context>
 bool TensorProtosDBInput<Context>::Prefetch() {

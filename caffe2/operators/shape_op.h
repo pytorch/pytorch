@@ -33,7 +33,8 @@ class ShapeOp : public Operator<Context> {
 
     auto* output = Output(0, {numAxes}, at::dtype<int64_t>());
     auto src = reinterpret_cast<const char*>(data.sizes().data());
-    auto out = reinterpret_cast<char*>(output->template mutable_data<int64_t>());
+    auto out =
+        reinterpret_cast<char*>(output->template mutable_data<int64_t>());
     for (int i = 0; i < numAxes; i++) {
       auto axis = axes_[i];
       CAFFE_ENFORCE_LT(axis, numDims, "Axis out of range");

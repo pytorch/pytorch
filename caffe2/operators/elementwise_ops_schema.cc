@@ -214,7 +214,9 @@ C:
 </details>
 )DOC";
 
-std::function<void(OpSchema&)> MathDocGenerator(const char* name, const char* extra) {
+std::function<void(OpSchema&)> MathDocGenerator(
+    const char* name,
+    const char* extra) {
   return [=](OpSchema& schema) {
     string doc = R"DOC(
 Performs element-wise binary {name} (with limited broadcast support).
@@ -226,10 +228,9 @@ Performs element-wise binary {name} (with limited broadcast support).
     c10::ReplaceAll(doc, "{broadcast_doc}", kBroadcastDoc);
     c10::ReplaceAll(doc, "{extra}", extra);
     schema.SetDoc(doc);
-    schema.Arg("broadcast", "*(type: int; default: 0)* Pass 1 to enable broadcasting");
     schema.Arg(
-        "axis",
-        "*(type: int; default: -1)* Axis to concatenate on.");
+        "broadcast", "*(type: int; default: 0)* Pass 1 to enable broadcasting");
+    schema.Arg("axis", "*(type: int; default: -1)* Axis to concatenate on.");
     schema.Input(
         0,
         "A",
@@ -239,7 +240,10 @@ Performs element-wise binary {name} (with limited broadcast support).
         "B",
         "*(type: Tensor`<float>`)* Second operand. With broadcasting can be of smaller size than A. "
         "If broadcasting is disabled it should be of the same size as A.");
-    schema.Output(0, "C", "*(type: Tensor`<float>`)* Output tensor with same dimensions and type as A.");
+    schema.Output(
+        0,
+        "C",
+        "*(type: Tensor`<float>`)* Output tensor with same dimensions and type as A.");
   };
 }
 
@@ -586,10 +590,8 @@ C: [False  True  True False False  True]
 </details>
 )DOC";
 
-std::function<void(OpSchema&)> ComparisonDocGenerator(
-    const char* name,
-    const char* desc,
-    const char* extra) {
+std::function<void(OpSchema&)>
+ComparisonDocGenerator(const char* name, const char* desc, const char* extra) {
   return [=](OpSchema& schema) {
     string doc = R"DOC(
 Performs element-wise {desc} comparison **{name}** (with limited broadcast support).
@@ -603,7 +605,9 @@ Performs element-wise {desc} comparison **{name}** (with limited broadcast suppo
     c10::ReplaceAll(doc, "{broadcast_doc}", kBroadcastDoc);
     c10::ReplaceAll(doc, "{extra}", extra);
     schema.SetDoc(doc);
-    schema.Arg("broadcast", "*(type: int; default: 0)* Pass 1 to enable broadcasting.");
+    schema.Arg(
+        "broadcast",
+        "*(type: int; default: 0)* Pass 1 to enable broadcasting.");
     schema.Arg(
         "axis",
         "*(type: int; default: -1)* Axis to concatenate on. If set, defines the broadcast dimensions.");
@@ -616,39 +620,50 @@ Performs element-wise {desc} comparison **{name}** (with limited broadcast suppo
         "B",
         "*(type: Tensor`<bool>`)* Second operand. With broadcasting can be of smaller size than `A`. "
         "If broadcasting is disabled it should be of the same size.");
-    schema.Output(0, "C", "*(type: Tensor`<bool>`)* Output tensor with same dimensions as `A`.");
+    schema.Output(
+        0,
+        "C",
+        "*(type: Tensor`<bool>`)* Output tensor with same dimensions as `A`.");
   };
 }
 
-#define CAFFE2_SCHEMA_FOR_BINARY_COMPARISON_OP(name, symbol, desc, extra)      \
-  OPERATOR_SCHEMA(name)                                                        \
-      .NumInputs(2)                                                            \
-      .NumOutputs(1)                                                           \
-      .TensorInferenceFunction(                                                \
-          [](const OperatorDef& def, const vector<TensorShape>& in) {          \
-            ArgumentHelper helper(def);                                        \
-            const auto broadcasted =                                           \
-                helper.GetSingleArgument<bool>("broadcast", false);            \
-            if (!broadcasted) {                                                \
-              CAFFE_ENFORCE_EQ(in[0].dims().size(), in[1].dims().size());      \
-              for (int i = 0; i < in[0].dims().size(); ++i) {                  \
-                CAFFE_ENFORCE_EQ(in[0].dims(i), in[1].dims(i));                \
-              }                                                                \
-            }                                                                  \
-            auto output_dims =                                                 \
-                std::vector<int64_t>(in[0].dims().begin(), in[0].dims().end()); \
-            return vector<TensorShape>{                                        \
-                CreateTensorShape(output_dims, TensorProto::BOOL)};            \
-          })                                                                   \
-      .FillUsing(ComparisonDocGenerator(symbol, desc, extra));                 \
+#define CAFFE2_SCHEMA_FOR_BINARY_COMPARISON_OP(name, symbol, desc, extra)   \
+  OPERATOR_SCHEMA(name)                                                     \
+      .NumInputs(2)                                                         \
+      .NumOutputs(1)                                                        \
+      .TensorInferenceFunction([](const OperatorDef& def,                   \
+                                  const vector<TensorShape>& in) {          \
+        ArgumentHelper helper(def);                                         \
+        const auto broadcasted =                                            \
+            helper.GetSingleArgument<bool>("broadcast", false);             \
+        if (!broadcasted) {                                                 \
+          CAFFE_ENFORCE_EQ(in[0].dims().size(), in[1].dims().size());       \
+          for (int i = 0; i < in[0].dims().size(); ++i) {                   \
+            CAFFE_ENFORCE_EQ(in[0].dims(i), in[1].dims(i));                 \
+          }                                                                 \
+        }                                                                   \
+        auto output_dims =                                                  \
+            std::vector<int64_t>(in[0].dims().begin(), in[0].dims().end()); \
+        return vector<TensorShape>{                                         \
+            CreateTensorShape(output_dims, TensorProto::BOOL)};             \
+      })                                                                    \
+      .FillUsing(ComparisonDocGenerator(symbol, desc, extra));              \
   SHOULD_NOT_DO_GRADIENT(name)
 
 CAFFE2_SCHEMA_FOR_BINARY_COMPARISON_OP(EQ, "==", "equal to", kEQExample);
 CAFFE2_SCHEMA_FOR_BINARY_COMPARISON_OP(NE, "!=", "not equal to", kNEExample);
 CAFFE2_SCHEMA_FOR_BINARY_COMPARISON_OP(LT, "<", "less than", kLTExample);
-CAFFE2_SCHEMA_FOR_BINARY_COMPARISON_OP(LE, "<=", "less or equal than", kLEExample);
+CAFFE2_SCHEMA_FOR_BINARY_COMPARISON_OP(
+    LE,
+    "<=",
+    "less or equal than",
+    kLEExample);
 CAFFE2_SCHEMA_FOR_BINARY_COMPARISON_OP(GT, ">", "greater than", kGTExample);
-CAFFE2_SCHEMA_FOR_BINARY_COMPARISON_OP(GE, ">=", "greater or equal than", kGEExample);
+CAFFE2_SCHEMA_FOR_BINARY_COMPARISON_OP(
+    GE,
+    ">=",
+    "greater or equal than",
+    kGEExample);
 
 const char kAndExample[] = R"DOC(
 <details>
@@ -794,7 +809,9 @@ C:
 </details>
 )DOC";
 
-std::function<void(OpSchema&)> LogicalDocGenerator(const char* name, const char* extra) {
+std::function<void(OpSchema&)> LogicalDocGenerator(
+    const char* name,
+    const char* extra) {
   return [=](OpSchema& schema) {
     string doc = R"DOC(
 Performs element-wise logical operation **{name}** (with limited broadcast support).
@@ -808,7 +825,9 @@ Both input operands should be of type `bool`.
     c10::ReplaceAll(doc, "{broadcast_doc}", kBroadcastDoc);
     c10::ReplaceAll(doc, "{extra}", extra);
     schema.SetDoc(doc);
-    schema.Arg("broadcast", "*(type: int; default: 0)* Pass 1 to enable broadcasting.");
+    schema.Arg(
+        "broadcast",
+        "*(type: int; default: 0)* Pass 1 to enable broadcasting.");
     schema.Arg(
         "axis",
         "*(type: int; default: -1)* Axis to concatenate on. If set, defines the broadcast dimensions.");
@@ -818,7 +837,10 @@ Both input operands should be of type `bool`.
         "B",
         "*(type: Tensor`<bool>`)* Second operand. With broadcasting can be of smaller size than `A`. "
         "If broadcasting is disabled it should be of the same size.");
-    schema.Output(0, "C", "*(type: Tensor`<bool>`)* Output tensor of booleans. Has same dimensions as input `A`.");
+    schema.Output(
+        0,
+        "C",
+        "*(type: Tensor`<bool>`)* Output tensor of booleans. Has same dimensions as input `A`.");
   };
 }
 
@@ -847,7 +869,9 @@ Both input operands should be of type `bool`.
     c10::ReplaceAll(doc, "{name}", name);
     c10::ReplaceAll(doc, "{broadcast_doc}", kBroadcastDoc);
     schema.SetDoc(doc);
-    schema.Arg("broadcast", "*(type: int; default: 0)* Pass 1 to enable broadcasting.");
+    schema.Arg(
+        "broadcast",
+        "*(type: int; default: 0)* Pass 1 to enable broadcasting.");
     schema.Arg(
         "axis",
         "*(type: int; default: -1)* Axis to concatenate on. If set, defines the broadcast dimensions.");
@@ -857,7 +881,10 @@ Both input operands should be of type `bool`.
         "B",
         "*(type: Tensor)* Second operand. With broadcasting can be of smaller size than `A`. "
         "If broadcasting is disabled it should be of the same size.");
-    schema.Output(0, "C", "*(type: Tensor)* Output tensor. Has same dimensions as input `A`.");
+    schema.Output(
+        0,
+        "C",
+        "*(type: Tensor)* Output tensor. Has same dimensions as input `A`.");
   };
 }
 

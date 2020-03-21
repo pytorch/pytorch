@@ -1,4 +1,4 @@
-#include <iostream>  // NOLINT
+#include <iostream> // NOLINT
 
 #include <gtest/gtest.h>
 #include "caffe2/core/blob.h"
@@ -10,14 +10,17 @@
 namespace caffe2 {
 namespace {
 
-template <typename T> class TensorGPUTest : public ::testing::Test {};
-template <typename T> class TensorGPUDeathTest : public ::testing::Test {};
+template <typename T>
+class TensorGPUTest : public ::testing::Test {};
+template <typename T>
+class TensorGPUDeathTest : public ::testing::Test {};
 typedef ::testing::Types<char, int, float> TensorTypes;
 TYPED_TEST_CASE(TensorGPUTest, TensorTypes);
 TYPED_TEST_CASE(TensorGPUDeathTest, TensorTypes);
 
 TYPED_TEST(TensorGPUTest, TensorInitializedEmpty) {
-  if (!caffe2::HasCudaGPU()) return;
+  if (!caffe2::HasCudaGPU())
+    return;
   Tensor tensor(CUDA);
   EXPECT_EQ(tensor.numel(), 0);
   EXPECT_EQ(tensor.dim(), 1);
@@ -35,7 +38,8 @@ TYPED_TEST(TensorGPUTest, TensorInitializedEmpty) {
 }
 
 TYPED_TEST(TensorGPUTest, TensorInitializedNonEmpty) {
-  if (!HasCudaGPU()) return;
+  if (!HasCudaGPU())
+    return;
   vector<int> dims(3);
   dims[0] = 2;
   dims[1] = 3;
@@ -62,7 +66,8 @@ TYPED_TEST(TensorGPUTest, TensorInitializedNonEmpty) {
 }
 
 TYPED_TEST(TensorGPUTest, TensorAlias) {
-  if (!HasCudaGPU()) return;
+  if (!HasCudaGPU())
+    return;
   vector<int> dims(3);
   dims[0] = 2;
   dims[1] = 3;
@@ -76,7 +81,8 @@ TYPED_TEST(TensorGPUTest, TensorAlias) {
 }
 
 TYPED_TEST(TensorGPUTest, TensorAliasCanUseDifferentShapes) {
-  if (!HasCudaGPU()) return;
+  if (!HasCudaGPU())
+    return;
   vector<int> dims(3);
   dims[0] = 2;
   dims[1] = 3;
@@ -95,7 +101,8 @@ TYPED_TEST(TensorGPUTest, TensorAliasCanUseDifferentShapes) {
 }
 
 TYPED_TEST(TensorGPUTest, NoLongerAliasAfterNumelChanges) {
-  if (!HasCudaGPU()) return;
+  if (!HasCudaGPU())
+    return;
   vector<int> dims(3);
   dims[0] = 2;
   dims[1] = 3;
@@ -113,7 +120,8 @@ TYPED_TEST(TensorGPUTest, NoLongerAliasAfterNumelChanges) {
 }
 
 TYPED_TEST(TensorGPUDeathTest, CannotAccessDataWhenEmpty) {
-  if (!HasCudaGPU()) return;
+  if (!HasCudaGPU())
+    return;
   ::testing::FLAGS_gtest_death_test_style = "threadsafe";
   Tensor tensor(CUDA);
   EXPECT_EQ(tensor.dim(), 1);
@@ -172,7 +180,8 @@ TEST_SERIALIZATION_GPU_WITH_TYPE(uint16_t, int32_data)
 TEST_SERIALIZATION_GPU_WITH_TYPE(int64_t, int64_data)
 
 TEST(TensorConstruction, ReinitializeTensorTest) {
-  if (!HasCudaGPU()) return;
+  if (!HasCudaGPU())
+    return;
   Tensor x = caffe2::empty({1}, at::dtype<float>().device(CUDA, 0));
   auto* data_before = x.template mutable_data<float>();
   // We'll only compare device_type in ReinitializeTensor,
@@ -211,8 +220,7 @@ TEST(TensorTest, TensorSerializationMultiDevices) {
     blob.Reset();
     EXPECT_NO_THROW(DeserializeBlob(serialized, &blob));
     EXPECT_TRUE(BlobIsTensorType(blob, CUDA));
-    EXPECT_EQ(GetGPUIDForPointer(blob.Get<TensorCUDA>().data<float>()),
-              gpu_id);
+    EXPECT_EQ(GetGPUIDForPointer(blob.Get<TensorCUDA>().data<float>()), gpu_id);
     // Test if we force the restored blob on a different device, we
     // can still get so.
     blob.Reset();
@@ -223,5 +231,5 @@ TEST(TensorTest, TensorSerializationMultiDevices) {
   }
 }
 
-}  // namespace
-}  // namespace caffe2
+} // namespace
+} // namespace caffe2

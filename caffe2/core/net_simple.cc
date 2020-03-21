@@ -86,7 +86,7 @@ template <typename A, typename B>
 bool PairLargerThan(const std::pair<A, B>& x, const std::pair<A, B>& y) {
   return x.second > y.second;
 }
-}
+} // namespace
 
 vector<float> SimpleNet::TEST_Benchmark(
     const int warmup_runs,

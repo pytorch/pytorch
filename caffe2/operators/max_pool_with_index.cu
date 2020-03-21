@@ -6,10 +6,10 @@ namespace caffe2 {
 namespace {
 
 /***
-  * Note: CUDA kernels are minor changes from those at:
-  * https://github.com/BVLC/caffe/blob/master/src/caffe/layers/pooling_layer.cu
-  * Originally licensed under BSD
-  **/
+ * Note: CUDA kernels are minor changes from those at:
+ * https://github.com/BVLC/caffe/blob/master/src/caffe/layers/pooling_layer.cu
+ * Originally licensed under BSD
+ **/
 template <typename Dtype>
 __global__ void MaxPoolForward(
     const int nthreads,
@@ -103,7 +103,7 @@ __global__ void MaxPoolBackward(
     bottom_diff[index] = convert::To<float, Dtype>(gradient);
   }
 }
-};
+}; // namespace
 
 template <typename T>
 bool MaxPoolWithIndexOp::DoRunWithType() {
@@ -164,27 +164,27 @@ bool MaxPoolWithIndexGradientOp::DoRunWithType() {
   auto* dX = Output(0, X.sizes(), at::dtype<T>());
   ConvPoolOpBase<CUDAContext>::ComputePads(vector<int>{X.dim32(2), X.dim32(3)});
 
-  MaxPoolBackward<T><<<
-      CAFFE_GET_BLOCKS(X.numel()),
-      CAFFE_CUDA_NUM_THREADS,
-      0,
-      context_.cuda_stream()>>>(
-      X.numel(),
-      dY.data<T>(),
-      mask.data<int>(),
-      X.dim32(0),
-      X.dim32(1),
-      X.dim32(2),
-      X.dim32(3),
-      dY.dim32(2),
-      dY.dim32(3),
-      kernel_h(),
-      kernel_w(),
-      stride_h(),
-      stride_w(),
-      pad_t(),
-      pad_l(),
-      dX->template mutable_data<T>());
+  MaxPoolBackward<T>
+      <<<CAFFE_GET_BLOCKS(X.numel()),
+         CAFFE_CUDA_NUM_THREADS,
+         0,
+         context_.cuda_stream()>>>(
+          X.numel(),
+          dY.data<T>(),
+          mask.data<int>(),
+          X.dim32(0),
+          X.dim32(1),
+          X.dim32(2),
+          X.dim32(3),
+          dY.dim32(2),
+          dY.dim32(3),
+          kernel_h(),
+          kernel_w(),
+          stride_h(),
+          stride_w(),
+          pad_t(),
+          pad_l(),
+          dX->template mutable_data<T>());
   return true;
 }
 
@@ -252,6 +252,6 @@ OPERATOR_SCHEMA(MaxPoolWithIndex)
         "Mask of location indices of the found maximum values, "
         " used in the gradient operator to accumulate dY values to the "
         "appropriate locations in Y");
-};
+}; // namespace
 
 }; // namespace caffe2

@@ -201,8 +201,8 @@ Y: [[9 5 0]
 class GetCastGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
-
-    vector<OperatorDef> defs = SingleGradientDef("Cast", "", vector<string>{GO(0)}, vector<string>{GI(0)});
+    vector<OperatorDef> defs = SingleGradientDef(
+        "Cast", "", vector<string>{GO(0)}, vector<string>{GI(0)});
 
     // now modify the arguments in defs[0]
     ArgumentHelper argsHelper(def_);
@@ -216,11 +216,11 @@ class GetCastGradient : public GradientMakerBase {
         " is required to get the gradient of CastOp");
 
     auto from_name = cast::GetCastDataType(argsHelper, "from_type");
-    Argument *to = defs[0].add_arg();
+    Argument* to = defs[0].add_arg();
     to->set_name("to");
     to->set_i(from_name);
 
-    Argument *from = defs[0].add_arg();
+    Argument* from = defs[0].add_arg();
     from->set_name("from_type");
     from->set_i(to_name);
 
@@ -234,7 +234,4 @@ class GetCastGradient : public GradientMakerBase {
 
 REGISTER_GRADIENT(Cast, GetCastGradient);
 
-
-
-
-}  // namespace caffe2
+} // namespace caffe2

@@ -22,8 +22,8 @@
 
 #include <c10/core/Device.h>
 #include <c10/core/Stream.h>
-#include <c10/cuda/CUDAStream.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/cuda/CUDAStream.h>
 
 namespace caffe2 {
 
@@ -79,7 +79,8 @@ class CAFFE2_CUDA_API ThreadLocalCUDAObjects {
     while (gpu_streams.size() <= static_cast<size_t>(stream_id)) {
       // NB: This streams are not guaranteed to be unique; we'll
       // wrap around once we run out of streams in the pool.
-      gpu_streams.emplace_back(c10::cuda::getStreamFromPool(/* high priority */ false, gpu));
+      gpu_streams.emplace_back(
+          c10::cuda::getStreamFromPool(/* high priority */ false, gpu));
     }
     return gpu_streams[stream_id];
   }
@@ -166,8 +167,7 @@ class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
   // The default cuda context constructor.
   explicit CUDAContext(DeviceIndex gpu_id = -1);
   explicit CUDAContext(const DeviceOption& option);
-  explicit CUDAContext(Device device)
-      : CUDAContext(DeviceToOption(device)) {}
+  explicit CUDAContext(Device device) : CUDAContext(DeviceToOption(device)) {}
 
   ~CUDAContext() override;
 
@@ -272,9 +272,8 @@ class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
 
   template <typename T, class SrcContext, class DstContext>
   inline void Copy(int n, const T* src, T* dst) {
-    CopyBytes<SrcContext, DstContext>(n * sizeof(T),
-                                 static_cast<const void*>(src),
-                                 static_cast<void*>(dst));
+    CopyBytes<SrcContext, DstContext>(
+        n * sizeof(T), static_cast<const void*>(src), static_cast<void*>(dst));
   }
 
   template <class SrcContext, class DstContext>
@@ -332,6 +331,6 @@ class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
 
 using TensorCUDA = Tensor;
 
-}  // namespace caffe2
+} // namespace caffe2
 
-#endif  // CAFFE2_CORE_CONTEXT_GPU_H_
+#endif // CAFFE2_CORE_CONTEXT_GPU_H_

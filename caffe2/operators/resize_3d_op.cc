@@ -23,14 +23,14 @@ void resizeNearest3DNCHW2x(
   const int output_width = input_width * 2;
   for (int n = 0; n < batch_size; ++n) {
     for (int c = 0; c < num_channels; ++c) {
-      for (int f = 0; f < output_frames; ++f ) {
+      for (int f = 0; f < output_frames; ++f) {
         const int in_f = f / temporal_scale;
         for (int y = 0; y < output_height; ++y) {
           const int in_y = y / 2;
 
           for (int x = 0; x < input_width; ++x) {
             const float v =
-              input[((in_f * input_height) + in_y) * input_width + x];
+                input[((in_f * input_height) + in_y) * input_width + x];
             const int oidx = y * output_width + x * 2;
             output[oidx + 0] = v;
             output[oidx + 1] = v;
@@ -68,12 +68,19 @@ bool ResizeNearest3DOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
 
   // Specialized implementation for fast 2x upsampling
   if (width_scale_ == 2.0 && height_scale_ == 2.0) {
-    CAFFE_ENFORCE(temporal_scale_ == 1 || temporal_scale_ == 2,
-      "temporal_scale must be either 1 or 2");
+    CAFFE_ENFORCE(
+        temporal_scale_ == 1 || temporal_scale_ == 2,
+        "temporal_scale must be either 1 or 2");
 
     resizeNearest3DNCHW2x(
-        batch_size, num_channels, temporal_scale_, input_frames, input_height,
-        input_width, Xdata, Ydata);
+        batch_size,
+        num_channels,
+        temporal_scale_,
+        input_frames,
+        input_height,
+        input_width,
+        Xdata,
+        Ydata);
     return true;
   }
 
@@ -123,7 +130,7 @@ bool ResizeNearest3DGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
     for (int c = 0; c < num_channels; ++c) {
       for (int f = 0; f < input_frames; ++f) {
         const int out_f =
-          std::min((int)(f / temporal_scale_), output_frames - 1);
+            std::min((int)(f / temporal_scale_), output_frames - 1);
         for (int y = 0; y < input_height; ++y) {
           const int out_y =
               std::min((int)(y / height_scale_), (output_height - 1));
@@ -131,7 +138,7 @@ bool ResizeNearest3DGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
             const int out_x =
                 std::min((int)(x / width_scale_), (output_width - 1));
             dXdata[(out_f * output_height + out_y) * output_width + out_x] +=
-              dYdata[(f * input_height + y) * input_width + x];
+                dYdata[(f * input_height + y) * input_width + x];
           }
         }
       }

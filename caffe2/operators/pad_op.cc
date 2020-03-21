@@ -16,8 +16,8 @@ PadMode StringToPadMode(const string& mode) {
   }
 }
 
-using std::min;
 using std::max;
+using std::min;
 
 template <>
 bool PadImageOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {

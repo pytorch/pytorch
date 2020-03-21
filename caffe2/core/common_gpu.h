@@ -25,9 +25,9 @@
 #include "caffe2/core/common.h"
 #include "caffe2/core/logging.h"
 
+#include <c10/cuda/CUDAGuard.h>
 #include "c10/cuda/CUDAMacros.h"
 #include "c10/cuda/CUDAMathCompat.h"
-#include <c10/cuda/CUDAGuard.h>
 
 #define CAFFE2_CUDA_EXPORT C10_EXPORT
 #define CAFFE2_CUDA_API TORCH_CUDA_API

@@ -17,7 +17,7 @@ __global__ void HalfToFloatKernel(const int N, const half* X, float* Y) {
     Y[i] = __half2float(X[i]);
   }
 }
-}
+} // namespace
 
 template <>
 bool FloatToHalfOp<CUDAContext>::RunOnDevice() {

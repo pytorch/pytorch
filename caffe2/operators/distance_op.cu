@@ -12,7 +12,11 @@ namespace {
 
 template <typename T>
 __global__ void SquaredL2DistanceKernel(
-    const int N, const int D, const T* X, const T* Y, T* distance) {
+    const int N,
+    const int D,
+    const T* X,
+    const T* Y,
+    T* distance) {
   typedef cub::BlockReduce<float, CAFFE_CUDA_NUM_THREADS> BlockReduce;
   __shared__ typename BlockReduce::TempStorage temp_storage;
 
@@ -30,7 +34,7 @@ __global__ void SquaredL2DistanceKernel(
     }
   }
 }
-}  // namespace
+} // namespace
 
 template <>
 bool SquaredL2DistanceOp<float, CUDAContext>::RunOnDevice() {
@@ -71,14 +75,13 @@ StripedScaleKernel(const int N, const int D, const T* alpha, const T* x, T* y) {
     y[i] = x[i] * alpha[k];
   }
 }
-}
+} // namespace
 
 template <>
 bool SquaredL2DistanceGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);
   auto& Y = Input(1);
   auto& dDistance = Input(2);
-
 
   int N = X.dim() > 0 ? X.dim32(0) : 1;
   int D = N > 0 ? X.size() / N : 0;
@@ -209,7 +212,6 @@ bool L1DistanceGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);
   auto& Y = Input(1);
   auto& dDistance = Input(2);
-
 
   int N = X.dim() > 0 ? X.dim32(0) : 1;
   int D = N > 0 ? X.size() / N : 0;
@@ -349,7 +351,6 @@ bool CosineSimilarityGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& Y = Input(Y_IN);
   auto& dCos = Input(DER_COS_IN);
 
-
   const int N = X.dim() > 0 ? X.dim32(0) : 1;
   const int D = X.size_from_dim(1);
   CAFFE_ENFORCE(X.dim() == Y.dim());
@@ -404,37 +405,37 @@ bool CosineSimilarityGradientOp<float, CUDAContext>::RunOnDevice() {
       context_.cuda_stream()>>>(N, D, X_data, Y_data, xy);
   math::Div<float, CUDAContext>(N, dCos_data, xyn, scale, &context_);
   // dX
-  BatchedMul<float><<<
-      std::min(N, CAFFE_MAXIMUM_NUM_BLOCKS),
-      CAFFE_CUDA_NUM_THREADS,
-      0,
-      context_.cuda_stream()>>>(N, D, Y_data, scale, dX_data);
-  Scale2AxpyScale<float><<<
-      std::min(N, CAFFE_MAXIMUM_NUM_BLOCKS),
-      CAFFE_CUDA_NUM_THREADS,
-      0,
-      context_.cuda_stream()>>>(N, scale, xy, xn, axpy_scale);
-  BatchedAxpy<float><<<
-      std::min(N, CAFFE_MAXIMUM_NUM_BLOCKS),
-      CAFFE_CUDA_NUM_THREADS,
-      0,
-      context_.cuda_stream()>>>(N, D, axpy_scale, X_data, dX_data);
+  BatchedMul<float>
+      <<<std::min(N, CAFFE_MAXIMUM_NUM_BLOCKS),
+         CAFFE_CUDA_NUM_THREADS,
+         0,
+         context_.cuda_stream()>>>(N, D, Y_data, scale, dX_data);
+  Scale2AxpyScale<float>
+      <<<std::min(N, CAFFE_MAXIMUM_NUM_BLOCKS),
+         CAFFE_CUDA_NUM_THREADS,
+         0,
+         context_.cuda_stream()>>>(N, scale, xy, xn, axpy_scale);
+  BatchedAxpy<float>
+      <<<std::min(N, CAFFE_MAXIMUM_NUM_BLOCKS),
+         CAFFE_CUDA_NUM_THREADS,
+         0,
+         context_.cuda_stream()>>>(N, D, axpy_scale, X_data, dX_data);
   // dY
-  BatchedMul<float><<<
-      std::min(N, CAFFE_MAXIMUM_NUM_BLOCKS),
-      CAFFE_CUDA_NUM_THREADS,
-      0,
-      context_.cuda_stream()>>>(N, D, X_data, scale, dY_data);
-  Scale2AxpyScale<float><<<
-      std::min(N, CAFFE_MAXIMUM_NUM_BLOCKS),
-      CAFFE_CUDA_NUM_THREADS,
-      0,
-      context_.cuda_stream()>>>(N, scale, xy, yn, axpy_scale);
-  BatchedAxpy<float><<<
-      std::min(N, CAFFE_MAXIMUM_NUM_BLOCKS),
-      CAFFE_CUDA_NUM_THREADS,
-      0,
-      context_.cuda_stream()>>>(N, D, axpy_scale, Y_data, dY_data);
+  BatchedMul<float>
+      <<<std::min(N, CAFFE_MAXIMUM_NUM_BLOCKS),
+         CAFFE_CUDA_NUM_THREADS,
+         0,
+         context_.cuda_stream()>>>(N, D, X_data, scale, dY_data);
+  Scale2AxpyScale<float>
+      <<<std::min(N, CAFFE_MAXIMUM_NUM_BLOCKS),
+         CAFFE_CUDA_NUM_THREADS,
+         0,
+         context_.cuda_stream()>>>(N, scale, xy, yn, axpy_scale);
+  BatchedAxpy<float>
+      <<<std::min(N, CAFFE_MAXIMUM_NUM_BLOCKS),
+         CAFFE_CUDA_NUM_THREADS,
+         0,
+         context_.cuda_stream()>>>(N, D, axpy_scale, Y_data, dY_data);
 
   return true;
 }
@@ -495,7 +496,6 @@ bool DotProductGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& Y = Input(Y_IN);
   auto& dDot = Input(DER_DOT_IN);
 
-
   int N, D;
   if (X.size() > 0) {
     N = X.dim() > 0 ? X.dim32(0) : 1;
@@ -527,10 +527,12 @@ bool DotProductGradientOp<float, CUDAContext>::RunOnDevice() {
   return true;
 }
 
-REGISTER_CUDA_OPERATOR(SquaredL2Distance,
-                       SquaredL2DistanceOp<float, CUDAContext>);
-REGISTER_CUDA_OPERATOR(SquaredL2DistanceGradient,
-                       SquaredL2DistanceGradientOp<float, CUDAContext>);
+REGISTER_CUDA_OPERATOR(
+    SquaredL2Distance,
+    SquaredL2DistanceOp<float, CUDAContext>);
+REGISTER_CUDA_OPERATOR(
+    SquaredL2DistanceGradient,
+    SquaredL2DistanceGradientOp<float, CUDAContext>);
 
 REGISTER_CUDA_OPERATOR(L1Distance, L1DistanceOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(
@@ -548,4 +550,4 @@ REGISTER_CUDA_OPERATOR(
 REGISTER_CUDA_OPERATOR(
     CosineSimilarityGradient,
     CosineSimilarityGradientOp<float, CUDAContext>);
-}  // namespace caffe2
+} // namespace caffe2

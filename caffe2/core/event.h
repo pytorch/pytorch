@@ -234,15 +234,12 @@ class CAFFE2_API Event {
 
   static EventCreateFunction event_creator_[MaxDeviceTypes];
   static EventRecordFunction event_recorder_[MaxDeviceTypes];
-  static EventWaitFunction event_waiter_[MaxDeviceTypes]
-                                        [MaxDeviceTypes];
+  static EventWaitFunction event_waiter_[MaxDeviceTypes][MaxDeviceTypes];
   static EventFinishFunction event_finisher_[MaxDeviceTypes];
 
   static EventQueryFunction event_querier_[MaxDeviceTypes];
-  static EventErrorMessageFunction
-      event_err_msg_getter_[MaxDeviceTypes];
-  static EventSetFinishedFunction
-      event_finished_setter_[MaxDeviceTypes];
+  static EventErrorMessageFunction event_err_msg_getter_[MaxDeviceTypes];
+  static EventSetFinishedFunction event_finished_setter_[MaxDeviceTypes];
   static EventResetFunction event_resetter_[MaxDeviceTypes];
 
   static EventSetCallbackFunction event_callback_setter_[MaxDeviceTypes];

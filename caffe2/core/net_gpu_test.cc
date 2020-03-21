@@ -57,7 +57,7 @@ OPERATOR_SCHEMA(NetTestDummy2)
     .NumOutputs(0, INT_MAX)
     .AllowInplace({{1, 0}});
 
-}  // namespace
+} // namespace
 
 void testExecution(std::unique_ptr<NetBase>& net, int num_ops) {
   // Run 100 times

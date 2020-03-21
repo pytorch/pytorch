@@ -191,4 +191,4 @@ class GetExpandDimsGradient : public GradientMakerBase {
   }
 };
 REGISTER_GRADIENT(ExpandDims, GetExpandDimsGradient);
-}
+} // namespace caffe2

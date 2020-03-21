@@ -6,15 +6,13 @@ namespace caffe2 {
 namespace {
 
 template <typename T, typename LengthType>
-__global__
-void ReversePackedSegments_kernel(
-      size_t max_length,
-      size_t batch_size,
-      size_t block_size,
-      const LengthType* lengths_ptr,
-      const T* data_ptr,
-      T* rev_data_ptr) {
-
+__global__ void ReversePackedSegments_kernel(
+    size_t max_length,
+    size_t batch_size,
+    size_t block_size,
+    const LengthType* lengths_ptr,
+    const T* data_ptr,
+    T* rev_data_ptr) {
   const int block_id = blockIdx.x;
 
   // index into [0, batch_size)
@@ -22,23 +20,27 @@ void ReversePackedSegments_kernel(
   // index into [0, segment)
   const int segment = block_id % max_length;
 
-  if (batch >= batch_size || segment >= max_length) return;
+  if (batch >= batch_size || segment >= max_length)
+    return;
 
   const int seg_length = lengths_ptr[batch];
 
   // unique data pointer for this CTA
-  const T* local_data_ptr = data_ptr + (segment * batch_size + batch) * block_size;
+  const T* local_data_ptr =
+      data_ptr + (segment * batch_size + batch) * block_size;
 
   // unique pointer for result
   T* local_rev_data_ptr;
   if (segment < seg_length) {
-    local_rev_data_ptr = rev_data_ptr + ((seg_length - 1 - segment) * batch_size + batch) * block_size;
+    local_rev_data_ptr = rev_data_ptr +
+        ((seg_length - 1 - segment) * batch_size + batch) * block_size;
   } else {
-    local_rev_data_ptr = rev_data_ptr + (segment * batch_size + batch) * block_size;
+    local_rev_data_ptr =
+        rev_data_ptr + (segment * batch_size + batch) * block_size;
   }
 
   // copy using 1 element / thread for now
-  for (int idx = threadIdx.x; idx < block_size; idx+=blockDim.x) {
+  for (int idx = threadIdx.x; idx < block_size; idx += blockDim.x) {
     local_rev_data_ptr[idx] = local_data_ptr[idx];
   }
 }
@@ -76,13 +78,14 @@ void ReversePackedSegsOp<CUDAContext>::DoRunWithLengthType() {
 
   const int grid = max_length * batch_size;
 
-  ReversePackedSegments_kernel<T,LengthType><<<grid, 512, 0, context_.cuda_stream()>>>(
-        max_length,
-        batch_size,
-        block_size,
-        lengths_ptr,
-        data_ptr,
-        rev_data_ptr);
+  ReversePackedSegments_kernel<T, LengthType>
+      <<<grid, 512, 0, context_.cuda_stream()>>>(
+          max_length,
+          batch_size,
+          block_size,
+          lengths_ptr,
+          data_ptr,
+          rev_data_ptr);
 }
 
 REGISTER_CUDA_OPERATOR(ReversePackedSegs, ReversePackedSegsOp<CUDAContext>);

@@ -10,18 +10,28 @@
 namespace caffe2 {
 
 namespace {
-__global__ void ElementwiseLinearKernel(const int N, const int D,
-  const float* X_data, const float* a_data, const float* b_data,
-  float* Y_data) {
-    CUDA_1D_KERNEL_LOOP(i, N * D) {
-      int d = i % D;
-      Y_data[i] = X_data[i] * a_data[d] + b_data[d];
-    }
+__global__ void ElementwiseLinearKernel(
+    const int N,
+    const int D,
+    const float* X_data,
+    const float* a_data,
+    const float* b_data,
+    float* Y_data) {
+  CUDA_1D_KERNEL_LOOP(i, N * D) {
+    int d = i % D;
+    Y_data[i] = X_data[i] * a_data[d] + b_data[d];
+  }
 }
 
-__global__ void ElementwiseLinearGradientKernel(const int N, const int D,
-  const float* g_o_data, const float* X_data, const float* a_data,
-  float* g_X_data, float* g_a_data, float* g_b_data) {
+__global__ void ElementwiseLinearGradientKernel(
+    const int N,
+    const int D,
+    const float* g_o_data,
+    const float* X_data,
+    const float* a_data,
+    float* g_X_data,
+    float* g_a_data,
+    float* g_b_data) {
   int d = blockIdx.x; // One block per D
 
   float g_a_sum = 0;
@@ -46,15 +56,13 @@ __global__ void ElementwiseLinearGradientKernel(const int N, const int D,
   }
 }
 
-}  // namespace
+} // namespace
 
-
-template<>
-bool ElementwiseLinearOp<float, CUDAContext>::RunOnDevice(){
+template <>
+bool ElementwiseLinearOp<float, CUDAContext>::RunOnDevice() {
   const auto& X = Input(0);
   const auto& a = Input(1);
   const auto& b = Input(2);
-  
 
   const auto canonical_axis = X.canonical_axis_index(axis_);
   const int N = X.size_to_dim(canonical_axis);
@@ -81,9 +89,8 @@ bool ElementwiseLinearOp<float, CUDAContext>::RunOnDevice(){
   return true;
 }
 
-
-template<>
-bool ElementwiseLinearGradientOp<float, CUDAContext>::RunOnDevice(){
+template <>
+bool ElementwiseLinearGradientOp<float, CUDAContext>::RunOnDevice() {
   const auto& g_o = Input(0);
   const auto& X = Input(1);
   const auto& a = Input(2);
@@ -95,12 +102,9 @@ bool ElementwiseLinearGradientOp<float, CUDAContext>::RunOnDevice(){
   CAFFE_ENFORCE_EQ(a.dim(), 1, a.dim());
   CAFFE_ENFORCE_EQ(a.dim(0), D, a.dim());
 
-  
-  
-  
   auto* g_X = Output(0, X.sizes(), at::dtype<float>());
-  auto * g_a = Output(1, a.sizes(), at::dtype<float>());
-  auto * g_b = Output(2, a.sizes(), at::dtype<float>());
+  auto* g_a = Output(1, a.sizes(), at::dtype<float>());
+  auto* g_b = Output(2, a.sizes(), at::dtype<float>());
 
   float* g_a_data = g_a->template mutable_data<float>();
   float* g_b_data = g_b->template mutable_data<float>();
@@ -121,9 +125,11 @@ bool ElementwiseLinearGradientOp<float, CUDAContext>::RunOnDevice(){
   return true;
 }
 
-REGISTER_CUDA_OPERATOR(ElementwiseLinear,
-                       ElementwiseLinearOp<float, CUDAContext>);
-REGISTER_CUDA_OPERATOR(ElementwiseLinearGradient,
-                       ElementwiseLinearGradientOp<float, CUDAContext>);
+REGISTER_CUDA_OPERATOR(
+    ElementwiseLinear,
+    ElementwiseLinearOp<float, CUDAContext>);
+REGISTER_CUDA_OPERATOR(
+    ElementwiseLinearGradient,
+    ElementwiseLinearGradientOp<float, CUDAContext>);
 
-}  // namespace caffe2
+} // namespace caffe2

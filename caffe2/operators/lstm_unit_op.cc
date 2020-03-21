@@ -49,4 +49,4 @@ class GetLSTMUnitGradient : public GradientMakerBase {
   }
 };
 REGISTER_GRADIENT(LSTMUnit, GetLSTMUnitGradient);
-}
+} // namespace caffe2

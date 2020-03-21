@@ -4,7 +4,7 @@
 
 #ifdef _OPENMP
 #include "caffe2/core/common_omp.h"
-#endif  // _OPENMP
+#endif // _OPENMP
 
 #ifdef CAFFE2_USE_MKL
 #include <mkl.h>
@@ -42,9 +42,10 @@ bool Caffe2SetOpenMPThreads(int*, char***) {
   VLOG(1) << "Caffe2 running with " << omp_get_max_threads() << " OMP threads";
   return true;
 }
-REGISTER_CAFFE2_INIT_FUNCTION(Caffe2SetOpenMPThreads,
-                              &Caffe2SetOpenMPThreads,
-                              "Set OpenMP threads.");
+REGISTER_CAFFE2_INIT_FUNCTION(
+    Caffe2SetOpenMPThreads,
+    &Caffe2SetOpenMPThreads,
+    "Set OpenMP threads.");
 #endif // _OPENMP
 
 #ifdef CAFFE2_USE_MKL
@@ -75,4 +76,4 @@ REGISTER_CAFFE2_INIT_FUNCTION(
     "Set MKL threads.");
 #endif // CAFFE2_USE_MKL
 
-}  // namespace caffe2
+} // namespace caffe2

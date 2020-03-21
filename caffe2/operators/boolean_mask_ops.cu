@@ -22,7 +22,7 @@ __global__ void BooleanMaskCopyKernel(
     }
   }
 }
-}
+} // namespace
 
 template <>
 class BooleanMaskOp<CUDAContext> final : public Operator<CUDAContext> {
@@ -57,8 +57,8 @@ class BooleanMaskOp<CUDAContext> final : public Operator<CUDAContext> {
         outerSize,
         context_.cuda_stream());
 
-    auto numint64_t =
-        static_cast<int64_t>((numBytes + sizeof(int64_t) - 1) / sizeof(int64_t));
+    auto numint64_t = static_cast<int64_t>(
+        (numBytes + sizeof(int64_t) - 1) / sizeof(int64_t));
     // allocate one more int64_t at the end of scratch for storing numOfOutput
     ReinitializeTensor(
         &scratch_, {numint64_t + 1}, at::dtype<int64_t>().device(CUDA));
@@ -86,7 +86,6 @@ class BooleanMaskOp<CUDAContext> final : public Operator<CUDAContext> {
     auto* destData = (uint8_t*)dest->raw_mutable_data(src.meta());
     const auto* srcData = (uint8_t*)src.raw_data();
     if (OutputSize() == 2) {
-
       auto* indicesOut = Output(1, {numOfOutput}, at::dtype<int64_t>());
       indicesOut->template mutable_data<int64_t>();
     }
@@ -294,7 +293,7 @@ lowerDiagMaskKernel(int N, int M, int B, const T* in, T fill_val, T* out) {
 
 template <>
 bool SequenceMaskOp<CUDAContext>::RunOnDevice() {
-    return DispatchHelper<TensorTypes<at::Half, float>>::call(this, Input(0));
+  return DispatchHelper<TensorTypes<at::Half, float>>::call(this, Input(0));
 }
 
 template <>

@@ -224,7 +224,8 @@ static void Caffe2InitializeCuda() {
             << ", for gpuid " << i << ".";
 
     for (int j = peer_start; j < peer_end; ++j) {
-      if (i == j) continue;
+      if (i == j)
+        continue;
       int can_access;
       CUDA_ENFORCE(cudaDeviceCanAccessPeer(&can_access, i, j));
       if (can_access) {
@@ -244,7 +245,8 @@ static void Caffe2InitializeCuda() {
   }
 
 #ifdef CAFFE2_USE_CUDNN
-  // Check the versions of cuDNN that were compiled and linked with are compatible
+  // Check the versions of cuDNN that were compiled and linked with are
+  // compatible
   CheckCuDNNVersions();
 #endif // CAFFE2_USE_CUDNN
 }
@@ -271,8 +273,9 @@ static void Caffe2SetCUDAMemoryPool() {
       FLAGS_caffe2_cuda_memory_pool == "none") {
     g_cuda_memory_pool_type = CudaMemoryPoolType::NONE;
   } else if (FLAGS_caffe2_cuda_memory_pool == "cnmem") {
-    CAFFE_THROW("CNMEM is no longer used by Caffe2. Use cub instead. "
-                "This error message may go away in the future.");
+    CAFFE_THROW(
+        "CNMEM is no longer used by Caffe2. Use cub instead. "
+        "This error message may go away in the future.");
   } else if (FLAGS_caffe2_cuda_memory_pool == "cub") {
     // Sets up cub.
     g_cuda_memory_pool_type = CudaMemoryPoolType::CUB;
@@ -420,7 +423,7 @@ CUDAContext::CUDAContext(DeviceIndex gpu_id)
 CUDAContext::CUDAContext(const DeviceOption& option)
     : gpu_id_(
           option.has_device_id() ? RectifyGPUID(option.device_id())
-                                   : CaffeCudaGetDevice()),
+                                 : CaffeCudaGetDevice()),
       random_seed_(
           option.has_random_seed() ? option.random_seed()
                                    : RandomNumberSeed()) {
@@ -440,8 +443,9 @@ CUDAContext::~CUDAContext() {
     //   this case there's only one stream id (passed to SwitchToDevice) and
     //   it's preferrable to synchronize in the destructor
     FinishDeviceComputation();
-  } catch (const std::exception& e)  {
-    LOG(ERROR) << "Encountered following in " << __FUNCTION__ << ": " << e.what();
+  } catch (const std::exception& e) {
+    LOG(ERROR) << "Encountered following in " << __FUNCTION__ << ": "
+               << e.what();
   }
 }
 
@@ -492,7 +496,7 @@ void TrackMemoryAlloc(size_t nbytes) {
     g_last_rep = g_total_mem;
   }
 }
-}
+} // namespace
 
 struct DefaultCUDAAllocator final : public at::Allocator {
   DefaultCUDAAllocator() {}
@@ -528,34 +532,30 @@ struct DefaultCUDAAllocator final : public at::Allocator {
           g_size_map[ptr] = nbytes;
         }
         return {ptr, ptr, &Delete, at::Device(CUDA, CaffeCudaGetDevice())};
-      case CudaMemoryPoolType::THC:
-        {
-          // The reason we have this stream guard here is to preserve
-          // the historical behavior of the 'thc' allocator in Caffe2,
-          // which is to put all allocations on the same (default)
-          // stream.  This behavior is morally wrong (since passing
-          // allocations between streams allows for the possibility
-          // of you handing out some memory that an old stream
-          // is still working on), but it doesn't seem to cause issues
-          // in Caffe2 today.  Our hypothesis for why this is the case
-          // is that Caffe2 doesn't really do very many allocations
-          // on the fly; instead they allocate once and then reuse
-          // the allocations for the whole program.  In this case,
-          // the hazard is avoided.
-          //
-          // We intend to remove this stream guard, but the benefit
-          // to putting all allocations on the same stream is it
-          // reduces per-stream fragmentation, and this helps
-          // some models that are currently running with the thc
-          // allocator fit in memory.  We will need to find some
-          // way of resolving this problem.
-          cuda::CUDAStreamGuard g(
-            Stream(
-              Stream::DEFAULT,
-              Device(kCUDA, CaffeCudaGetDevice())
-            ));
-          ptr = cuda::CUDACachingAllocator::raw_alloc(nbytes);
-        }
+      case CudaMemoryPoolType::THC: {
+        // The reason we have this stream guard here is to preserve
+        // the historical behavior of the 'thc' allocator in Caffe2,
+        // which is to put all allocations on the same (default)
+        // stream.  This behavior is morally wrong (since passing
+        // allocations between streams allows for the possibility
+        // of you handing out some memory that an old stream
+        // is still working on), but it doesn't seem to cause issues
+        // in Caffe2 today.  Our hypothesis for why this is the case
+        // is that Caffe2 doesn't really do very many allocations
+        // on the fly; instead they allocate once and then reuse
+        // the allocations for the whole program.  In this case,
+        // the hazard is avoided.
+        //
+        // We intend to remove this stream guard, but the benefit
+        // to putting all allocations on the same stream is it
+        // reduces per-stream fragmentation, and this helps
+        // some models that are currently running with the thc
+        // allocator fit in memory.  We will need to find some
+        // way of resolving this problem.
+        cuda::CUDAStreamGuard g(
+            Stream(Stream::DEFAULT, Device(kCUDA, CaffeCudaGetDevice())));
+        ptr = cuda::CUDACachingAllocator::raw_alloc(nbytes);
+      }
         if (FLAGS_caffe2_gpu_memory_tracking) {
           g_size_map[ptr] = nbytes;
           g_cuda_device_affiliation[ptr] = CaffeCudaGetDevice();

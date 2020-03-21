@@ -32,4 +32,4 @@ void OneHotOp<CUDAContext>::DoOneHotOp(
 }
 
 REGISTER_CUDA_OPERATOR(OneHot, OneHotOp<CUDAContext>);
-} // namespace
+} // namespace caffe2

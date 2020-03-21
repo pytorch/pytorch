@@ -6,8 +6,8 @@
 #include <initializer_list>
 #include <ostream>
 #include <set>
-#include <vector>
 #include <unordered_map>
+#include <vector>
 
 #include "c10/util/Registry.h"
 #include "caffe2/core/common.h"
@@ -274,8 +274,8 @@ class CAFFE2_API OpSchema {
   OpSchema&
   Arg(const char* name, const char* description, bool required = false);
 
-#define DECLARE_STANDARD_ARG(name, str)     \
-  static const char* Arg_##name; \
+#define DECLARE_STANDARD_ARG(name, str) \
+  static const char* Arg_##name;        \
   OpSchema& Arg##name(const char* description);
 
   DECLARE_STANDARD_ARG(IsTest, is_test)
@@ -340,7 +340,9 @@ class CAFFE2_API OpSchema {
     return inplace_enforced_(x, y);
   }
 
-  CAFFE2_API friend std::ostream& operator<<(std::ostream& out, const OpSchema& schema);
+  CAFFE2_API friend std::ostream& operator<<(
+      std::ostream& out,
+      const OpSchema& schema);
 
   const std::vector<Argument>& args() const {
     return args_;
