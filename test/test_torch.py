@@ -15004,6 +15004,33 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         self.assertEqual(result.size(0), SIZE1 + SIZE2)
 
     @onlyCPU
+    def test_cat_bad_dtypes(self, device):
+        def cross_product(a, b, skip_same=True):
+            result = []
+            for dtype_a in a:
+                for dtype_b in b:
+                    if skip_same and (dtype_a == dtype_b):
+                        continue
+                    result.append((dtype_a, dtype_b))
+            return result
+
+        in_shape = (1, 2, 3)
+        out_shape = (2, 2, 3)
+
+        all_dtypes = (torch.uint8, torch.int8, torch.int16, torch.int32,
+                      torch.int64, torch.float, torch.double, torch.half,
+                      torch.bfloat16)
+        all_dtype_combinations = cross_product(all_dtypes, all_dtypes,
+                                               skip_same=True)
+        out = torch.empty(out_shape)
+        for (dtype_a, dtype_b) in all_dtype_combinations:
+            a = torch.ones(in_shape, dtype=dtype_a).to(device)
+            b = torch.ones(in_shape, dtype=dtype_b).to(device)
+            self.assertRaises(RuntimeError, lambda: torch.cat([a, b]))
+            self.assertRaises(RuntimeError, lambda: torch.cat([a, b], out=out))
+
+
+    @onlyCPU
     def test_max_mixed_devices(self, device):
         a = torch.randn(10, device=device)
         if torch.cuda.is_available():

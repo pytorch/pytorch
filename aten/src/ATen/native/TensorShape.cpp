@@ -98,6 +98,15 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
         "output memory locations. Found overlap in input tensor ", i);
   }
 
+  // Dtypes should be the same
+  const auto first_in_cat = tensors[0];
+  for (int64_t i = 1; i < tensors.size(); i++) {
+    TORCH_CHECK(first_in_cat.dtype() == tensors[i].dtype(),
+              "Expected object of scalar type ", first_in_cat.dtype(),
+              " but got scalar type ", tensors[i].dtype(),
+              " for sequence element ", i, ".");
+  }
+
   auto should_skip = [](const Tensor& t) { return t.numel() == 0 && t.dim() == 1; };
   for (auto const &tensor : tensors) {
     if (should_skip(tensor)) {

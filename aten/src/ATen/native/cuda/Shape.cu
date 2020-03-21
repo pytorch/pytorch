@@ -307,6 +307,15 @@ Tensor& cat_out_cuda(Tensor& out, TensorList inputs, int64_t dimension) {
                 "tensor ", i);
   }
 
+  // Dtypes should be the same
+  const auto first_in_cat = inputs[0];
+  for (int64_t i = 1; i < inputs.size(); i++) {
+    TORCH_CHECK(first_in_cat.dtype() == inputs[i].dtype(),
+              "Expected object of scalar type ", first_in_cat.dtype(),
+              " but got scalar type ", inputs[i].dtype(),
+              " for sequence element ", i, ".");
+  }
+
   for (int i = 0; i < inputs.size(); i++)
   {
     if (should_skip(inputs[i])) {
