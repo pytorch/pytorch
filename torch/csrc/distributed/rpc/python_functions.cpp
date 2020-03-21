@@ -22,6 +22,32 @@ namespace rpc {
 
 namespace {
 
+c10::intrusive_ptr<c10::ivalue::Future> wrapFutureMessageInJitFuture(
+    const std::shared_ptr<FutureMessage>& responseMessageFuture) {
+  // Notice, even we can ask for the JIT type of the Python object,
+  // there is no need to do that, because the return value of this utility
+  // will be passed back to Python land eventually.
+
+  // Create a JIT future and add it to FutureMessage's callback to set value
+  // of the JIT future.
+  auto ivalueFuturePtr =
+      c10::make_intrusive<c10::ivalue::Future>(PyObjectType::get());
+  responseMessageFuture->addCallback(
+      [ivalueFuturePtr](
+          const Message& responseMessage,
+          const c10::optional<utils::FutureError>& futErr) {
+        if (futErr) {
+          c10::ivalue::Future::FutureError jitFutErr(
+              std::string(futErr->what()));
+          ivalueFuturePtr->markCompleted(std::move(jitFutErr));
+        } else {
+          ivalueFuturePtr->markCompleted(torch::jit::toIValue(
+              toPyObj(responseMessage), PyObjectType::get()));
+        }
+      });
+  return ivalueFuturePtr;
+}
+
 std::shared_ptr<Operator> matchBuiltinOp(
     const std::string& opName,
     const py::args& args,
@@ -101,7 +127,6 @@ py::object toPyObjInternal(RpcCommandBase& rpc, MessageType messageType) {
       auto& resp = static_cast<PythonResp&>(rpc);
       auto& pythonRpcHandler = PythonRpcHandler::getInstance();
       py::object ret = pythonRpcHandler.deserialize(resp.serializedPyObj());
-      pythonRpcHandler.handleException(ret);
       return ret;
     }
     default: {
@@ -116,7 +141,7 @@ py::object toPyObj(const Message& message) {
   return toPyObjInternal(*response, msgType);
 }
 
-std::shared_ptr<FutureMessage> pyRpcBuiltin(
+std::shared_ptr<jit::PythonFutureWrapper> pyRpcBuiltin(
     const WorkerInfo& dst,
     const std::string& opName,
     const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf,
@@ -128,8 +153,14 @@ std::shared_ptr<FutureMessage> pyRpcBuiltin(
   py::gil_scoped_release release;
   auto scriptCall = std::make_unique<ScriptCall>(op, std::move(stack));
   auto agent = RpcAgent::getCurrentRpcAgent();
-  return sendMessageWithAutograd(
+  auto responseMessageFuture = sendMessageWithAutograd(
       *agent, dst, std::move(*scriptCall).toMessage(), false, rf);
+
+  // Notice, even we can get the JIT type of the Python object from the op
+  // schema, there is no need to do that, because the return value will be
+  // passed back to Python land eventually.
+  return std::make_shared<torch::jit::PythonFutureWrapper>(
+      wrapFutureMessageInJitFuture(responseMessageFuture));
 }
 
 PyRRef pyRemoteBuiltin(
@@ -176,7 +207,7 @@ PyRRef pyRemoteBuiltin(
   }
 }
 
-std::shared_ptr<FutureMessage> pyRpcPythonUdf(
+std::shared_ptr<jit::PythonFutureWrapper> pyRpcPythonUdf(
     const WorkerInfo& dst,
     std::string& pickledPythonUDF,
     std::vector<torch::Tensor>& tensors,
@@ -186,12 +217,20 @@ std::shared_ptr<FutureMessage> pyRpcPythonUdf(
   auto pythonCall = std::make_unique<PythonCall>(std::move(serializedPyObj));
 
   auto agent = RpcAgent::getCurrentRpcAgent();
-  return sendMessageWithAutograd(
+  auto responseMessageFuture = sendMessageWithAutograd(
       *agent,
       dst,
       std::move(*pythonCall).toMessage(),
       true /*forceGradRecording*/,
       rf);
+
+  return std::make_shared<torch::jit::PythonFutureWrapper>(
+      wrapFutureMessageInJitFuture(responseMessageFuture),
+      [](py::object value) {
+        py::gil_scoped_release release;
+        auto& pythonRpcHandler = PythonRpcHandler::getInstance();
+        pythonRpcHandler.handleException(value);
+      });
 }
 
 PyRRef pyRemotePythonUdf(

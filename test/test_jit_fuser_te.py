@@ -19,6 +19,8 @@ from test_jit import JitTestCase, RUN_CUDA, RUN_CUDA_HALF, RUN_CUDA_MULTI_GPU, \
     backward_graph, all_backward_graphs, get_lstm_inputs, get_milstm_inputs, \
     LSTMCellC, LSTMCellF, LSTMCellS, MiLSTMCell, _inline_everything
 
+from te_utils import CudaCodeGenExecuted
+
 FUSION_GROUP = 'tensorexpr::Group'
 
 def strip_profiling_nodes(nodes):

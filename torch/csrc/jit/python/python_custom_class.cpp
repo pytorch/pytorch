@@ -28,20 +28,23 @@ void initPythonCustomClassBindings(PyObject* module) {
   // code object in turn calls __init__. Rather than calling __init__
   // directly, we need a wrapper that at least returns the instance
   // rather than the None return value from __init__
-  m.def("_get_custom_class_python_wrapper", [](const std::string& qualname) {
-    std::string full_qualname = "__torch__.torch.classes." + qualname;
-    auto named_type = getCustomClass(full_qualname);
-    TORCH_CHECK(
-        named_type,
-        "Tried to instantiate class ",
-        qualname,
-        " but it"
-        " does not exist! Ensure that it is registered via torch::jit"
-        "::class_");
-    c10::ClassTypePtr class_type = named_type->cast<ClassType>();
-    return ScriptClass(c10::StrongTypePtr(
-        std::shared_ptr<CompilationUnit>(), std::move(class_type)));
-  });
+  m.def(
+      "_get_custom_class_python_wrapper",
+      [](const std::string& ns, const std::string& qualname) {
+        std::string full_qualname =
+            "__torch__.torch.classes." + ns + "." + qualname;
+        auto named_type = getCustomClass(full_qualname);
+        TORCH_CHECK(
+            named_type,
+            "Tried to instantiate class ",
+            ns + "." + qualname,
+            " but it"
+            " does not exist! Ensure that it is registered via torch::jit"
+            "::class_");
+        c10::ClassTypePtr class_type = named_type->cast<ClassType>();
+        return ScriptClass(c10::StrongTypePtr(
+            std::shared_ptr<CompilationUnit>(), std::move(class_type)));
+      });
 }
 
 } // namespace jit

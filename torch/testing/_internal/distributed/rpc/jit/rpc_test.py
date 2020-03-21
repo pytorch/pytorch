@@ -5,6 +5,7 @@ import torch
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
 from torch import Tensor
+from torch.testing._internal.common_utils import TemporaryFileName
 from torch.testing._internal.dist_utils import dist_init, initialize_pg, worker_name
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
@@ -32,18 +33,14 @@ class AnnotationTest(RpcAgentTestFixture):
             fut = rpc.rpc_async(dst_worker_name, torch.add, (input_0, input_1), {})
             return fut
 
-        with self.assertRaisesRegex(
-            RuntimeError, "Failed to parse the return type of a type annotation:"
-        ):
+        @torch.jit.script
+        def script_use_future():
+            # type: () -> Tensor
+            fut = python_return_future()
+            return fut.wait()
 
-            @torch.jit.script
-            def script_use_future():
-                # type: () -> Tensor
-                fut = python_return_future()
-                return fut.wait()
-
-            res = script_use_future()
-            self.assertEqual(res, expected_res)
+        res = script_use_future()
+        self.assertEqual(res, expected_res)
 
 
 class MyScriptModuleWithRRefs(torch.jit.ScriptModule):
@@ -609,6 +606,12 @@ def script_check_rref_confirmed(rref):
     return rref.confirmed_by_owner()
 
 
+@torch.jit.script
+def save_rref(rref_var, fname):
+    # type: (RRef[Tensor], str) -> None
+    torch.save(rref_var, fname)
+
+
 @unittest.skipIf(
     not torch._six.PY3, "Pytorch distributed rpc package does not support python2"
 )
@@ -770,3 +773,43 @@ class JitRpcTest(AnnotationTest, LocalRRefTest, JitRpcAsyncOpTest, RpcAgentTestF
             "worker{}".format(dst_rank), script_check_rref_confirmed, args=(rref,)
         )
         self.assertEqual(ret_rref.to_here(), True)
+
+    @dist_init
+    def test_rref_jit_pickle_not_supported(self):
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        rref_var = rpc_return_rref(worker_name(dst_rank))
+        with TemporaryFileName() as fname:
+            with self.assertRaisesRegex(
+                RuntimeError, "RRef jit pickling is only allowed inside RPC calls"
+            ):
+                save_rref(rref_var, fname)
+
+    @dist_init
+    def test_python_future_with_jit(self):
+        dst_rank = (self.rank + 1) % self.world_size
+        inputs = (torch.tensor([1, 1]), torch.tensor([2, 2]))
+        ret_fut = rpc.rpc_async(
+            "worker{}".format(dst_rank),
+            two_args_two_kwargs,
+            args=inputs
+        )
+        expected_res = torch.tensor([10, 10])
+        @torch.jit.script
+        def future_wait_in_script(fut):
+            # type: (Future[Tensor]) -> Tensor
+            return fut.wait()
+
+        self.assertEqual(future_wait_in_script(ret_fut), expected_res)
+
+        @torch.jit.script
+        def future_return_to_python(dst_rank, inputs):
+            # type: (int, Tuple[Tensor, Tensor]) -> Future[Tensor]
+            return rpc.rpc_async(
+                "worker{}".format(dst_rank),
+                two_args_two_kwargs,
+                inputs
+            )
+
+        fut_res = future_return_to_python(dst_rank, inputs)
+        self.assertEqual(fut_res.wait(), expected_res)

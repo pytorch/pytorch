@@ -158,7 +158,7 @@ def createResolutionCallbackFromClosure(fn):
                 return closure[key]
             elif hasattr(builtins, key):
                 return getattr(builtins, key)
-            raise KeyError(key)
+            return None
 
     return createResolutionCallbackFromEnv(closure_lookup())
 
@@ -698,6 +698,37 @@ except ImportError:
 
     def is_final(ann):
         return isinstance(ann, FinalInstance)
+
+
+try:
+    from typing import TypeVar, Generic
+
+    T = TypeVar('T')
+
+    class Future(Generic[T]):
+        __slots__ = ['__args__']
+
+        def __init__(self, types):
+            self.__args__ = types
+
+    def is_future(ann):
+        return getattr(ann, "__origin__", None) is Future
+
+except ImportError:
+    class FutureInstance(object):
+        __slots__ = ['__args__']
+
+        def __init__(self, types):
+            self.__args__ = types
+
+    class FutureCls(object):
+        def __getitem__(self, types):
+            return FutureInstance(types)
+
+    Future = FutureCls()  # noqa: T484
+
+    def is_future(ann):
+        return isinstance(ann, FutureInstance)
 
 
 try:

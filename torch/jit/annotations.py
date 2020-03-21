@@ -5,10 +5,10 @@ import re
 import torch
 from .._jit_internal import List, BroadcastingList1, BroadcastingList2, \
     BroadcastingList3, Tuple, is_tuple, is_list, Dict, is_dict, Optional, \
-    is_optional, _qualified_name, Any, RRef, is_rref
+    is_optional, _qualified_name, Any, Future, is_future, RRef, is_rref
 from torch._C import TensorType, TupleType, FloatType, IntType, \
     ListType, StringType, DictType, BoolType, OptionalType, ClassType, InterfaceType, AnyType, NoneType, \
-    DeviceObjType, RRefType
+    DeviceObjType, FutureType, RRefType
 
 from textwrap import dedent
 from torch._six import builtins, PY2
@@ -39,6 +39,7 @@ class EvalEnv(object):
         'List': List,
         'Dict': Dict,
         'Optional': Optional,
+        'Future': Future,
         'RRef': RRef,
     }
 
@@ -54,7 +55,6 @@ class EvalEnv(object):
 
 def get_signature(fn, rcb, loc, is_method):
     # Python 3.5 adds support for the nice annotation syntax, so try that first.
-    print("get_signature of", fn)
     signature = None
     if PY35:
         signature = try_real_annotations(fn, loc)
@@ -159,7 +159,6 @@ def parse_type_line(type_line, rcb, loc):
         arg_ann = (arg_ann,)
 
     try:
-        print("ret_ann_str", ret_ann_str)
         ret_ann = eval(ret_ann_str, {}, EvalEnv(rcb))  # noqa: P204
     except (NameError, SyntaxError) as e:
         raise RuntimeError("Failed to parse the return type of a type annotation: {}".format(str(e)))
@@ -271,6 +270,8 @@ def try_ann_to_type(ann, loc):
             return OptionalType(try_ann_to_type(ann.__args__[0], loc))
         else:
             return OptionalType(try_ann_to_type(ann.__args__[1], loc))
+    elif is_future(ann):
+        return FutureType(try_ann_to_type(ann.__args__[0], loc))
     elif is_rref(ann):
         return RRefType(try_ann_to_type(ann.__args__[0], loc))
     elif ann is float:

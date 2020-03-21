@@ -3850,9 +3850,9 @@
   variants: method
   device_guard: False
   dispatch:
-    CPU: legacy::cpu::_th_set_
-    CUDA: legacy::cuda::_th_set_
-    QuantizedCPU: set_storage
+    CPU: set_storage_cpu_
+    CUDA: set_storage_cuda_
+    QuantizedCPU: set_storage_quantized_cpu_
 
 - func: set_.source_Tensor(Tensor(a!) self, Tensor source) -> Tensor(a!)
   variants: method

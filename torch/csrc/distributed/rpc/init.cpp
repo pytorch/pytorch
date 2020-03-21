@@ -217,30 +217,30 @@ PyObject* rpc_init(PyObject* /* unused */) {
           .def(
               py::pickle(
                   [](const PyRRef& self) {
+                    TORCH_CHECK(
+                        false,
+                        "Can not pickle rref in python pickler, rref can only be pickled when using RPC");
                     // __getstate__
                     return self.pickle();
                   },
                   [](py::tuple t) { // NOLINT
+                    TORCH_CHECK(
+                        false,
+                        "Can not unpickle rref in python pickler, rref can only be unpickled when using RPC");
                     // __setstate__
                     return PyRRef::unpickle(t);
                   }),
               py::call_guard<py::gil_scoped_release>())
+          .def(
+              "_serialize",
+              &PyRRef::pickle,
+              py::call_guard<py::gil_scoped_release>())
+          .def_static(
+              "_deserialize",
+              &PyRRef::unpickle,
+              py::call_guard<py::gil_scoped_release>())
           // not releasing GIL to avoid context switch
           .def("__str__", &PyRRef::str);
-
-  // future.wait() should not be called after shutdown(), e.g.,
-  // pythonRpcHandler is cleaned up in shutdown(), after
-  // shutdown(), python objects returned from rpc python call can not be
-  // resolved.
-  auto future = shared_ptr_class_<FutureMessage>(module, "Future")
-                    .def(
-                        "wait",
-                        [&](FutureMessage& fut) { return toPyObj(fut.wait()); },
-                        py::call_guard<py::gil_scoped_release>(),
-                        R"(
-Wait on future to complete and return the object it completed with.
-If the future completes with an error, an exception is thrown.
-              )");
 
   shared_ptr_class_<ProcessGroupRpcBackendOptions>(
       module,
@@ -325,7 +325,12 @@ If the future completes with an error, an exception is thrown.
       .def(
           "shutdown",
           &ProcessGroupAgent::shutdown,
-          py::call_guard<py::gil_scoped_release>())
+          py::call_guard<py::gil_scoped_release>(),
+          R"(
+          future.wait() should not be called after shutdown(), e.g.,
+          pythonRpcHandler is cleaned up in shutdown(), after
+          shutdown(), python objects returned from rpc python call can not be
+          resolved.)")
       .def(
           "sync",
           &ProcessGroupAgent::sync,
@@ -410,36 +415,6 @@ If the future completes with an error, an exception is thrown.
       py::arg("tensors"),
       py::arg("rf") = nullptr);
 
-  // TODO This python future wrapper wraps c10::ivalue::Future.
-  // Will merge with JIT PythonFutureWrapper while merging generic Future with
-  // c10::ivalue::Future later on.
-  struct PythonFutureWrapper {
-    explicit PythonFutureWrapper(c10::intrusive_ptr<c10::ivalue::Future> fut)
-        : fut(std::move(fut)) {}
-
-    c10::intrusive_ptr<c10::ivalue::Future> fut;
-  };
-
-  // Since FutureMessage is binded to Future, here we need to bind the
-  // PythonFutureWrapper to a different name.
-  // TODO Once python object can be tagged as IValue and c10::ivalue::Future is
-  // implemented as generic Future<IValue>, we can consider all rpc call
-  // to return a future<IValue> later on.
-  shared_ptr_class_<PythonFutureWrapper>(module, "_pyFuture")
-      .def(
-          "wait",
-          [](PythonFutureWrapper& fut) {
-            fut.fut->wait();
-            auto res = fut.fut->value();
-            {
-              // acquiring GIL as torch::jit::toPyObject creates new py::object
-              // without grabbing the GIL.
-              pybind11::gil_scoped_acquire ag;
-              return torch::jit::toPyObject(std::move(res));
-            }
-          },
-          py::call_guard<py::gil_scoped_release>());
-
   module.def(
       "_invoke_rpc_torchscript",
       [](const std::string& dstWorkerName,
@@ -470,7 +445,7 @@ If the future completes with an error, an exception is thrown.
         DCHECK(!PyGILState_Check());
         c10::intrusive_ptr<c10::ivalue::Future> fut =
             rpcTorchscript(dstWorkerName, qualifiedName, functionSchema, stack);
-        return PythonFutureWrapper(fut);
+        return std::make_shared<jit::PythonFutureWrapper>(fut);
       },
       py::call_guard<py::gil_scoped_release>());
 
