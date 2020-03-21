@@ -1,5 +1,6 @@
 #include <queue>
 
+#include <torch/csrc/autograd/functions/utils.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/input_buffer.h>
 #include <torch/csrc/distributed/autograd/context/container.h>
@@ -22,6 +23,38 @@ using torch::autograd::variable_list;
 
 static constexpr char* kNumBackwardPasses = "num_current_backward_passes";
 static constexpr char* kNumAutogradContexts = "num_autograd_contexts";
+
+struct AccumulateGradPreHook : GraphTask::GraphTaskFunctionPreHook {
+  AccumulateGradPreHook(
+      std::shared_ptr<AccumulateGrad> accumulateGrad,
+      ContextPtr autogradContext)
+      : accumulateGrad_(std::move(accumulateGrad)),
+        autogradContext_(std::move(autogradContext)) {}
+
+  void operator()(const variable_list& grads) override {
+    torch::autograd::check_input_variables("AccumulateGrad", grads, 1, 0);
+    const auto& grad = grads[0];
+    // It is possible that the grad is not defined since a separate
+    // invocation of the autograd engine on the same node might actually
+    // compute this gradient. Also accumulate grads only for
+    // AccumulateGrad function.
+    if (!grad.defined()) {
+      return;
+    }
+    autogradContext_->accumulateGrad(
+        accumulateGrad_->variable, grad, 1 /* num_expected_refs */);
+
+    const variable_list kEmptyOuput;
+    for (const auto& hook : accumulateGrad_->post_hooks()) {
+      // Discard the return value.
+      (*hook)(kEmptyOuput, grads);
+    }
+  }
+
+ private:
+  std::shared_ptr<AccumulateGrad> accumulateGrad_;
+  ContextPtr autogradContext_;
+};
 
 DistEngine::DistEngine()
     : initializedContextIds_(), engine_(Engine::get_default_engine()) {}
@@ -186,6 +219,18 @@ void DistEngine::computeDependencies(
     }
   }
 
+  // Install graph task function pre hooks for all AccumulateGrad nodes to
+  // accumulate grads into the RPC context.
+  for (auto& pr : graphTask->exec_info_) {
+    if (auto accumulateGradFn = dynamic_cast<AccumulateGrad*>(pr.first)) {
+      auto& execInfo = pr.second;
+      execInfo.hooks_.push_back(std::make_unique<AccumulateGradPreHook>(
+          std::dynamic_pointer_cast<AccumulateGrad>(
+              accumulateGradFn->shared_from_this()),
+          autogradContext));
+    }
+  }
+
   // Let autograd context take ownership of the GraphTask.
   autogradContext->setGraphTask(std::move(graphTask));
 }
@@ -226,23 +271,6 @@ std::shared_ptr<rpc::FutureMessage> DistEngine::runEngineAndAccumulateGradients(
     try {
       const variable_list& grads = futureGrads.constValue();
       TORCH_INTERNAL_ASSERT(grads.size() == outputEdges.size());
-
-      // Accumulate all the gradients in the context.
-      for (size_t i = 0; i < grads.size(); i++) {
-        // It is possible that the grad is not defined since a separate
-        // invocation of the autograd engine on the same node might actually
-        // compute this gradient. Also accumulate grads only for
-        // AccumulateGrad function.
-        if (grads[i].defined() &&
-            dynamic_cast<AccumulateGrad*>(outputEdges[i].function.get())) {
-          auto& variable =
-              std::static_pointer_cast<AccumulateGrad>(outputEdges[i].function)
-                  ->variable;
-          autogradContext->accumulateGrad(
-              variable, grads[i], 1 /* num_expected_refs */);
-        }
-      }
-
       accumulateGradFuture->markCompleted(rpc::Message());
     } catch (std::exception& e) {
       accumulateGradFuture->setErrorIfNeeded(e.what());

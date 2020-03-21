@@ -33,7 +33,12 @@ struct InputBuffer {
 
   at::Device device() const;
 
-  Variable operator[](size_t pos) { return buffer[pos]; }
+  Variable operator[](size_t pos) {
+    return buffer[pos];
+  }
+  const std::vector<Variable>& toVariables() const {
+    return buffer;
+  }
 
   // Returns the inputs as a list of variables. Destroys given InputBuffer.
   static std::vector<Variable> variables(InputBuffer&& g);

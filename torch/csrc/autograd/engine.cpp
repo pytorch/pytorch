@@ -636,6 +636,9 @@ void Engine::evaluate_function(
             inputs[capture.input_idx_];
       }
     }
+    for (auto& hook : fn_info.hooks_) {
+      (*hook)(inputs.toVariables());
+    }
     if (!fn_info.needed_) {
       // Skip execution if we don't need to execute the function.
       return;

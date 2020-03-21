@@ -62,6 +62,11 @@ struct GraphTask {
   std::unordered_map<Node*, InputBuffer> not_ready_;
   std::unordered_map<Node*, int> dependencies_;
 
+  struct GraphTaskFunctionPreHook {
+    virtual ~GraphTaskFunctionPreHook() = default;
+    virtual void operator()(const variable_list& grads) = 0;
+  };
+
   struct ExecInfo {
     struct Capture {
       Capture(int input_idx, int output_idx)
@@ -76,6 +81,8 @@ struct GraphTask {
 
     bool needed_ = false;
     std::unique_ptr<std::vector<Capture>> captures_;
+    // The hooks will be executed regardless of 'needed_' is true or false.
+    std::vector<std::unique_ptr<GraphTaskFunctionPreHook>> hooks_;
   };
   // Exec info has a bit complicated semantics. If it's empty, it means the task
   // is run in a "default" mode, which means that all next_edges we encounter
