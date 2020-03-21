@@ -1,15 +1,17 @@
 import torch
 import torch.jit
-from torch.jit._recursive import wrap_cpp_module
-from torch.quantization._quantize_script import script_qconfig
-from torch.quantization import default_observer, default_qconfig
-from torch.testing._internal.common_utils import run_tests
 
+from torch.quantization._quantize_script import script_qconfig
+from torch.quantization._quantize_script import prepare_dynamic_script
+from torch.quantization import default_qconfig
+
+from torch.testing._internal.common_utils import run_tests
+from torch.testing import FileCheck
 from torch.testing._internal.jit_utils import attrs_with_prefix
 from torch.testing._internal.jit_utils import JitTestCase
 
 class TestScript(JitTestCase):
-    def test_insert_observers_dynamic(self):
+    def test_prepare_dynamic(self):
         class M(torch.nn.Module):
             def __init__(self):
                 super(M, self).__init__()
@@ -19,16 +21,20 @@ class TestScript(JitTestCase):
                 return self.fc(x)
 
         m = torch.jit.script(M())
-        observer = torch.jit.script(default_observer())
-        qconfig_dict = {'': script_qconfig(default_qconfig)}
-        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False, True))
+        m = prepare_dynamic_script(m, {'': script_qconfig(default_qconfig)}, True)
 
         # for input of FC for dynamic quant
         assert len(attrs_with_prefix(m, '_observer_')) == 1
         # for weight
         assert len(attrs_with_prefix(m.fc, '_observer_')) == 1
+        FileCheck().check('Observer = prim::GetAttr[name="_observer_') \
+                   .check('prim::GetAttr[name="fc"]') \
+                   .check('prim::CallMethod') \
+                   .check_not('Observer = prim::GetAttr[name="_observer_') \
+                   .run(m.graph)
 
-    def test_insert_observers_child_dynamic_qconfig(self):
+
+    def test_prepare_dynamic_child_qconfig(self):
         class Sub(torch.nn.Module):
             def __init__(self):
                 super(Sub, self).__init__()
@@ -47,14 +53,9 @@ class TestScript(JitTestCase):
                 return self.sub(self.conv(x))
 
         m = torch.jit.script(M())
-        qconfig = script_qconfig(default_qconfig)
+        # only quantize child module.
+        m = prepare_dynamic_script(m, {'sub.fc': script_qconfig(default_qconfig)}, True)
 
-        qconfig_dict = {
-            'sub.fc': qconfig
-        }
-        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward",
-                                                                qconfig_dict,
-                                                                False, True))
         # input of sub for dynamic quant
         assert len(attrs_with_prefix(m, '_observer_')) == 1
         # not quantized
@@ -63,6 +64,12 @@ class TestScript(JitTestCase):
         assert len(attrs_with_prefix(m.sub, '_observer_')) == 0
         # weight of linear
         assert len(attrs_with_prefix(m.sub.fc, '_observer_')) == 1
+        FileCheck().check('prim::GetAttr[name="sub') \
+                   .check('prim::CallMethod') \
+                   .check('Observer = prim::GetAttr[name="_observer_') \
+                   .check('prim::CallMethod') \
+                   .check_not('Observer = prim::GetAttr[name="_observer_') \
+                   .run(m.graph)
 
 if __name__ == "__main__":
     run_tests()
