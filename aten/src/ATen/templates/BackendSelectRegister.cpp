@@ -9,6 +9,8 @@
 #include <ATen/core/op_registration/op_registration.h>
 #include <c10/core/TensorOptions.h>
 
+
+#ifndef USE_STATIC_DISPATCH
 namespace at {
 
 namespace {
@@ -21,3 +23,4 @@ static auto registry = torch::RegisterOperators()
 
 } // namespace
 } // at
+#endif
