@@ -477,20 +477,20 @@ class TestCuda(TestCase):
         x = torch.zeros(10000000, dtype=torch.uint8).pin_memory()
         y = torch.ones(10000000, dtype=torch.uint8).cuda()
         _test_copy_non_blocking(x, y)
-    
-    def test_to_non_blocking(self): 
-        def _test_to_non_blocking(a, non_blocking): 
+
+    def test_to_non_blocking(self):
+        def _test_to_non_blocking(a, non_blocking):
             stream = torch.cuda.current_stream()
             with torch.cuda.stream(stream):
                 b = a.to('cuda', non_blocking=non_blocking)
                 self.assertEqual(stream.query(), not non_blocking)
                 stream.synchronize()
                 self.assertEqual(a, b)
-        
+
         # 10MB copies
         x = torch.ones(10000000, dtype=torch.uint8)
         _test_to_non_blocking(x, True)
-        
+
         y = torch.ones(10000000, dtype=torch.uint8)
         _test_to_non_blocking(y, False)
 
