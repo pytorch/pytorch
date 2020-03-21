@@ -343,7 +343,8 @@ void testLiteInterpreterBuiltinFunction() {
 namespace {
 static auto reg =
     torch::jit::class_<TorchBindLiteInterpreterTestStruct>(
-        "_TorchScriptTesting_LiteInterpreterTest")
+        "_TorchScriptTesting",
+        "_LiteInterpreterTest")
         .def("get", &TorchBindLiteInterpreterTestStruct::get)
         .def_pickle(
             // __getattr__
