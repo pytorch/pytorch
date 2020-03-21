@@ -42,6 +42,17 @@ Tensor& set_(Tensor& result, Storage source) {
   return result.set_(source, 0, static_cast<int64_t>(source.size()), {});
 }
 
+// unify with cuda implementation?  This is not done to avoid a dispatch in resize_impl_cpu_
+Tensor& set_storage_cpu_(Tensor& result, Storage storage, int64_t storage_offset, IntArrayRef size, IntArrayRef stride) {
+  checkSetStorage(result, storage, storage_offset, size, stride);
+
+  result.unsafeGetTensorImpl()->set_storage_offset(storage_offset);
+  c10::optional<IntArrayRef> stride_opt = stride.data() != nullptr ?
+                                          c10::optional<IntArrayRef>(stride) : c10::nullopt;
+  at::native::resize_impl_cpu_(result.unsafeGetTensorImpl(), size, stride_opt);
+  return result;
+}
+
 Tensor& set_tensor_(Tensor& result, const Tensor& source) {
   if (result.unsafeGetTensorImpl() != source.unsafeGetTensorImpl()) {
     return result.set_(source.storage(), source.storage_offset(), source.sizes(), source.strides());
