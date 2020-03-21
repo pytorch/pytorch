@@ -293,7 +293,7 @@ TEST_F(FunctionalTest, MultiLabelSoftMarginLossWeightedNoReduction) {
   auto input = torch::tensor({{0., 2., 2., 0.}, {2., 1., 0., 1.}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({{0., 0., 1., 0.}, {1., 0., 1., 1.}}, torch::kFloat);
   auto weight = torch::tensor({0.1, 0.6, 0.4, 0.8}, torch::kFloat);
-  auto options = F::MultiLabelSoftMarginLossFuncOptions().reduction(torch::kNone).weight(weight);
+  auto options = F::MultilabelSoftMarginLossFuncOptions().reduction(torch::kNone).weight(weight);
   auto output =
       F::multilabel_soft_margin_loss(input, target, options);
   auto expected = torch::tensor({0.4876902, 0.3321295}, torch::kFloat);
