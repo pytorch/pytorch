@@ -6,6 +6,7 @@
 #include <ATen/CUDAGenerator.h>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/cuda/DistributionTemplates.h>
+#include <ATen/native/ComplexHelper.h>
 
 #include <curand.h>
 #include <curand_kernel.h>
@@ -55,6 +56,14 @@ void normal_kernel_cuda(TensorIterator& iter, double mean_, double std_, Generat
 
 Tensor& normal_cuda_(Tensor& self, double mean, double std, Generator* gen) {
   TORCH_CHECK(std > 0.0, "normal_ expects std > 0.0, but found std=", std);
+  if(self.is_complex()) {
+    // note: float_tensor lives only as long as the self tensor lives
+    auto float_tensor = at::native::view_complex_as_float(self);
+    // variance for normal distribution of the real and imaginary values
+    // is half of the input variance
+    normal_cuda_(float_tensor, mean, std/(std::sqrt(2)), gen);
+    return self;
+  }
   auto iter = TensorIterator::nullary_op(self);
   normal_kernel_cuda(iter, mean, std, gen);
   return self;
