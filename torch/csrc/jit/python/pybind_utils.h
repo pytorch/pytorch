@@ -49,7 +49,8 @@ namespace jit {
 py::object toPyObject(IValue ivalue);
 
 // The PythonFutureWrapper for ivalue::Future
-struct PythonFutureWrapper {
+class PythonFutureWrapper {
+public:
   using UnwrapFunc = std::function<void(py::object)>;
 
   explicit PythonFutureWrapper(

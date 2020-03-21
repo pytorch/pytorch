@@ -788,16 +788,16 @@ void initJITBindings(PyObject* module) {
       // stuff the ivalue output in the Future
       retval->markCompleted(output_ivalue);
 
-      return PythonFutureWrapper(retval);
+      return std::make_shared<PythonFutureWrapper>(retval);
     } else {
       auto result = toTypeInferredIValue(f(*args_tup));
       auto retval = c10::make_intrusive<c10::ivalue::Future>(result.type());
       retval->markCompleted(std::move(result));
-      return PythonFutureWrapper(retval);
+      return std::make_shared<PythonFutureWrapper>(retval);
     }
   });
 
-  m.def("wait", [](PythonFutureWrapper& fut) { return fut.wait(); });
+  m.def("wait", [](std::shared_ptr<PythonFutureWrapper> fut) { return fut->wait(); });
 
   m.def("_jit_assert_is_instance", [](py::object obj, TypePtr type) {
     toIValue(obj, type);
