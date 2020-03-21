@@ -348,6 +348,8 @@ def add_torch_libs():
         "torch/csrc/distributed/rpc/python_functions.cpp",
         "torch/csrc/distributed/rpc/python_rpc_handler.cpp",
         "torch/csrc/distributed/rpc/request_callback_impl.cpp",
+        "torch/csrc/distributed/rpc/testing/faulty_process_group_agent.cpp",
+        "torch/csrc/distributed/rpc/testing/init.cpp",
         "torch/csrc/distributed/rpc/unpickled_python_call.cpp",
         "torch/csrc/distributed/rpc/unpickled_python_remote_call.cpp",
         "torch/csrc/jit/python/init.cpp",
