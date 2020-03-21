@@ -38,7 +38,8 @@ class Range {
 struct TensorAccess {
   const Var* var;
   TensorAccessKind kind;
-  Range range;
+  const Expr* start;
+  const Expr* stop;
 };
 
 
@@ -46,12 +47,13 @@ TORCH_API std::unordered_map<const Var*, Range> inferBounds(Stmt* s);
 
 class TORCH_API BoundsInference {
  public:
-  std::unordered_map<const Var*, Range> inferBoundsForLoop(For* f);
-  std::unordered_map<const Var*, Range> inferBoundsForBlock(Block* b);
-  std::unordered_map<const Var*, Range> inferBoundsForStore(Store* st);
-  std::unordered_map<const Var*, Range> mergeBufVectors(
-      std::unordered_map<const Var*, Range> a,
-      std::unordered_map<const Var*, Range> b);
+  std::vector<TensorAccess> inferBoundsForLoop(For* f);
+  std::vector<TensorAccess> inferBoundsForBlock(Block* b);
+  std::vector<TensorAccess> inferBoundsForStore(Store* st);
+  std::vector<TensorAccess> mergeBufVectors(
+      std::vector<TensorAccess> a,
+      std::vector<TensorAccess> b);
+  std::unordered_map<Stmt*, std::vector<TensorAccess>> accesses;
 };
 
 } // namespace tensorexpr
