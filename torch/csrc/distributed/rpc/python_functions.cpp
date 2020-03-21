@@ -226,7 +226,7 @@ std::shared_ptr<jit::PythonFutureWrapper> pyRpcPythonUdf(
 
   return std::make_shared<torch::jit::PythonFutureWrapper>(
       wrapFutureMessageInJitFuture(responseMessageFuture),
-      [](py::object value) {
+      [](const py::object& value) {
         py::gil_scoped_release release;
         auto& pythonRpcHandler = PythonRpcHandler::getInstance();
         pythonRpcHandler.handleException(value);

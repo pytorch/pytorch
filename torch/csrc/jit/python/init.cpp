@@ -797,7 +797,7 @@ void initJITBindings(PyObject* module) {
     }
   });
 
-  m.def("wait", [](std::shared_ptr<PythonFutureWrapper> fut) { return fut->wait(); });
+  m.def("wait", [](const std::shared_ptr<PythonFutureWrapper>& fut) { return fut->wait(); });
 
   m.def("_jit_assert_is_instance", [](py::object obj, TypePtr type) {
     toIValue(obj, type);

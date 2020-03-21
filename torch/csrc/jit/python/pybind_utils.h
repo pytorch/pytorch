@@ -49,8 +49,7 @@ namespace jit {
 py::object toPyObject(IValue ivalue);
 
 // The PythonFutureWrapper for ivalue::Future
-class PythonFutureWrapper {
-public:
+struct VISIBILITY_HIDDEN PythonFutureWrapper {
   using UnwrapFunc = std::function<void(py::object)>;
 
   explicit PythonFutureWrapper(
@@ -74,7 +73,7 @@ public:
       // acquiring GIL as toPyObject creates new py::object
       // without grabbing the GIL.
       py::gil_scoped_acquire acquire;
-      py_obj = toPyObject(std::move(fut->value()));
+      py_obj = toPyObject(fut->value());
       if (unwrap_func) {
         (*unwrap_func)(py_obj);
       }
