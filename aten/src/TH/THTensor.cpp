@@ -25,47 +25,8 @@ void THTensor_free(THTensor *self)
 }
 
 void THTensor_setStorage(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_, at::IntArrayRef size_, at::IntArrayRef stride_) {
-  if (stride_.data()) {
-    THArgCheck(size_.size() == stride_.size(), 5, "inconsistent size/stride sizes");
-  }
-
-#ifdef DEBUG
-  THAssert(size_.size() <= INT_MAX);
-#endif
-  THTensor_setStorageNd(self,
-                        storage_,
-                        storageOffset_,
-                        size_.size(),
-                        size_.data(),
-                        stride_.data());
-}
-
-void THTensor_setStorageNd(THTensor *self, THStorage *storage, ptrdiff_t storageOffset, int nDimension, const int64_t *size, const int64_t *stride)
-{
-  /* storage */
-  if(THTensor_getStoragePtr(self) != storage)
-  {
-    if (!THTensor_getStoragePtr(self)) {
-      THError("Tensor: invalid null storage");
-    }
-    if(storage)
-    {
-      c10::raw::intrusive_ptr::incref(storage);
-      THTensor_stealAndSetStoragePtr(self, storage);
-    }
-    else {
-      THError("Tensor: invalid new null storage");
-    }
-  }
-
-  /* storageOffset */
-  if(storageOffset < 0) {
-    THError("Tensor: invalid storage offset");
-  }
-  self->set_storage_offset(storageOffset);
-
-  /* size and stride */
-  THTensor_resizeNd(self, nDimension, size, stride);
+  c10::raw::intrusive_ptr::incref(storage_);
+  THTensor_wrap(self).set_(at::Storage(c10::intrusive_ptr<at::StorageImpl>::reclaim(storage_)), storageOffset_, size_, stride_);
 }
 
 void THTensor_resize(THTensor *self, at::IntArrayRef size, at::IntArrayRef stride)
