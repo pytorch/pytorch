@@ -20,7 +20,7 @@
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <c10/util/Exception.h>
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/ComplexHelper.h>
+#include <ATen/native/ComplexHelper.h>
 
 #include <algorithm>
 #include <cctype>
@@ -477,7 +477,7 @@ Tensor rand(IntArrayRef size, const TensorOptions& options) {
 Tensor rand(IntArrayRef size, Generator* generator, const TensorOptions& options) {
   auto result = at::empty(size, options);
   if (result.is_complex()) {
-    auto float_tensor = at::view_complex_as_float(result);
+    auto float_tensor = at::native::view_complex_as_float(result);
     float_tensor.uniform_(0, 1, generator);
     // we want to return complex tensor not underlaying float tensor.
     return result;
@@ -492,7 +492,7 @@ Tensor& rand_out(Tensor& result, IntArrayRef size) {
 Tensor& rand_out(Tensor& result, IntArrayRef size, Generator* generator) {
   result.resize_(size);
   if (result.is_complex()) {
-    auto float_tensor = at::view_complex_as_float(result);
+    auto float_tensor = at::native::view_complex_as_float(result);
     return float_tensor.uniform_(0, 1, generator);
   }
   return result.uniform_(0, 1, generator);
