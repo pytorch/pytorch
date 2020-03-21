@@ -1405,7 +1405,7 @@ void apply_diag(Tensor& result, const Tensor& self, int64_t dimension) {
     auto r_data = result.data_ptr<scalar_t>();
     auto r_stride_0 = result.stride(0);
     auto r_stride_1 = result.stride(1);
-    r_data += (dimension >= 0 ? dimension*r_stride_0 : -dimension*r_stride_1);
+    r_data += (dimension >= 0 ? dimension*r_stride_1 : -dimension*r_stride_0);
     
     for (i = 0; i < self_size; i++) {
       r_data[i * (r_stride_0 + r_stride_1)] = self_data[i * self_stride];
