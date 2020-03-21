@@ -146,4 +146,4 @@ def _find_builtin(fn):
 # indicates that when resolving, we should skip these so they dispatch to
 # the correct sugared representation
 def _is_python_builtin(maybe_builtin):
-    return hasattr(maybe_builtin, '__name__') and hasattr(builtins, maybe_builtin.__name__)
+    return hasattr(maybe_builtin, '__name__') and getattr(builtins, maybe_builtin.__name__, None) == maybe_builtin
