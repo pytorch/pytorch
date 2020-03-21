@@ -76,10 +76,8 @@ def prepare_script(model, qconfig_dict, inplace=False):
                                                                 False))
     return model
 
-def prepare_dynamic_script(model, qconfig_dict, inplace=False):
+def prepare_dynamic_script(model, qconfig_dict):
     _check_is_script_module(model)
-    if not inplace:
-        model = model.copy()
     model = wrap_cpp_module(torch._C._jit_pass_insert_observers(model._c,
                                                                 'forward',
                                                                 qconfig_dict,

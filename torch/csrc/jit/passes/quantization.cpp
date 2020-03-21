@@ -447,7 +447,7 @@ class InsertObserversHelper {
       std::unordered_set<Value*> graph_observed_values =
           std::unordered_set<Value*>());
 
-  void set_dynamic_flag(bool is_dynamic_);
+  void setDynamicFlag(bool is_dynamic_);
 
  private:
   ModuleMethodVector getInvokedMethods(
@@ -808,7 +808,7 @@ void InsertObserversHelper::fillBoundaryValueMap(
   }
 }
 
-void InsertObserversHelper::set_dynamic_flag(bool is_dynamic_) {
+void InsertObserversHelper::setDynamicFlag(bool is_dynamic_) {
   is_dynamic = is_dynamic_;
 }
 
@@ -1950,7 +1950,7 @@ TORCH_API Module InsertObservers(
   // the qconfig map again
   fillQConfigMap(module, qconfig_dict, module_qconfig_map);
   InsertObserversHelper helper(module_qconfig_map);
-  helper.set_dynamic_flag(is_dynamic);
+  helper.setDynamicFlag(is_dynamic);
   helper.preprocess(module, method_name);
   helper.insertObservers(module, method_name, true);
   return module;
