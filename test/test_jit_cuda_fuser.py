@@ -20,16 +20,19 @@ class TestCudaFuser(JitTestCase):
 
     def setUp(self):
         super(TestCudaFuser, self).setUp()
-        self.old_cpu_fuse = torch._C._jit_can_fuse_on_cpu(False)
-        self.old_gpu_fuse = torch._C._jit_can_fuse_on_gpu(False)
+        self.old_cpu_fuse = torch._C._jit_can_fuse_on_cpu()
+        self.old_gpu_fuse = torch._C._jit_can_fuse_on_gpu()
+        torch._C._jit_override_can_fuse_on_cpu(False)
+        torch._C._jit_override_can_fuse_on_gpu(False)
+        
         if(RUN_CUDA):
             torch._C._jit_register_cuda_fuser()
 
     def tearDown(self):
         if(RUN_CUDA):
             torch._C._jit_clear_cuda_fuser()
-        torch._C._jit_can_fuse_on_cpu(self.old_cpu_fuse)
-        torch._C._jit_can_fuse_on_gpu(self.old_gpu_fuse)
+        torch._C._jit_override_can_fuse_on_cpu(self.old_cpu_fuse)
+        torch._C._jit_override_can_fuse_on_gpu(self.old_gpu_fuse)
         super(TestCudaFuser, self).tearDown()
 
     def _has_cuda_fusion_group(self, graph):
