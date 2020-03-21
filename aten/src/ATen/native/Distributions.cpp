@@ -219,53 +219,39 @@ Tensor& geometric_(Tensor& self, double p, Generator gen) {
   return self;
 }
 
-Tensor& normal_cpu_(Tensor& self, double mean, double std, Generator gen) {
-  TORCH_CHECK(std > 0.0, "normal_ expects std > 0.0, but found std=", std);
-  normal_stub(kCPU, self, mean, std, gen);
-  return self;
-}
-
-Tensor& normal_out_cpu(Tensor& output, const Tensor& mean, double std, Generator gen) {
-  normal_cpu_(output, 0, std, gen);
-  output.add_(mean);
-  return output;
-}
-
-Tensor& normal_out_cpu(Tensor& output, double mean, const Tensor& std, Generator gen) {
-  normal_cpu_(output, 0, 1, gen);
-  auto mean_tensor = at::full({}, mean, output.options());
-  output.mul_(std).add_(mean_tensor);
-  return output;
-}
-
-Tensor& normal_out_cpu(Tensor& output, const Tensor& mean, const Tensor& std, Generator gen) {
-  bool is_deprecated_th_impl = resize_output_for_normal(output, mean, std);
-  normal_cpu_(output, 0, 1, gen);
-  if (is_deprecated_th_impl) {
-    output.mul_(std.reshape(mean.sizes())).add_(mean);
+template<typename RNG>
+struct NormalStub {
+  void operator()(Tensor& self, double mean, double std, Generator gen) {
+    normal_stub(self.device().type(), self, mean, std, gen);
   }
-  else {
-    output.mul_(std).add_(mean);
-  }
-  return output;
+};
+
+Tensor& normal_(Tensor& self, double mean, double std, Generator gen) {
+  return at::native::templates::normal_impl_<NormalStub, Generator>(self, mean, std, gen);
 }
 
-Tensor normal_cpu(const Tensor& mean, double std, Generator gen) {
-  Tensor ret = at::empty_like(mean, MemoryFormat::Contiguous);
-  normal_out_cpu(ret, mean, std, gen);
-  return ret;
+Tensor& normal_out(Tensor& output, const Tensor& mean, double std, Generator gen) {
+  return at::native::templates::normal_out_impl<NormalStub, Generator>(output, mean, std, gen);
 }
 
-Tensor normal_cpu(double mean, const Tensor& std, Generator gen) {
-  Tensor ret = at::empty_like(std, MemoryFormat::Contiguous);
-  normal_out_cpu(ret, mean, std, gen);
-  return ret;
+Tensor& normal_out(Tensor& output, double mean, const Tensor& std, Generator gen) {
+  return at::native::templates::normal_out_impl<NormalStub, Generator>(output, mean, std, gen);
 }
 
-Tensor normal_cpu(const Tensor& mean, const Tensor& std, Generator gen) {
-  Tensor ret = at::empty({0}, mean.options(), MemoryFormat::Contiguous);
-  normal_out_cpu(ret, mean, std, gen);
-  return ret;
+Tensor& normal_out(Tensor& output, const Tensor& mean, const Tensor& std, Generator gen) {
+  return at::native::templates::normal_out_impl<NormalStub, Generator>(output, mean, std, gen);
+}
+
+Tensor normal(const Tensor& mean, double std, Generator gen) {
+  return at::native::templates::normal_impl<NormalStub, Generator>(mean, std, gen);
+}
+
+Tensor normal(double mean, const Tensor& std, Generator gen) {
+  return at::native::templates::normal_impl<NormalStub, Generator>(mean, std, gen);
+}
+
+Tensor normal(const Tensor& mean, const Tensor& std, Generator gen) {
+  return at::native::templates::normal_impl<NormalStub, Generator>(mean, std, gen);
 }
 
 template<typename RNG>

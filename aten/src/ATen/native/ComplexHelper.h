@@ -23,10 +23,10 @@ inline Tensor view_complex_as_float(const Tensor& self) {
   auto new_strides = computeStrideForComplex(self.strides());
   if(self.scalar_type() == at::kComplexFloat) {
     float* data = reinterpret_cast<float*>(self.data_ptr<std::complex<float>>());
-    return at::from_blob(data, new_sizes, new_strides, dtype(at::kFloat));
+    return at::from_blob(data, new_sizes, new_strides, self.options().dtype(at::kFloat));
   } else {
     double* data = reinterpret_cast<double*>(self.data_ptr<std::complex<double>>());
-    return at::from_blob(data, new_sizes, new_strides, dtype(at::kDouble));
+    return at::from_blob(data, new_sizes, new_strides, self.options().dtype(at::kDouble));
   }
 }
 

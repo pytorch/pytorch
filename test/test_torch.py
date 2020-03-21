@@ -5372,6 +5372,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(len(w), 1)
 
     def test_normal_shape(self):
+        warned = False
         for device in torch.testing.get_all_device_types():
             tensor1 = torch.rand(1, device=device)
             tensor4 = torch.rand(4, device=device)
@@ -5399,9 +5400,13 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
 
             # inputs are non-expandable tensors, but they have same number of elements
             # TORCH_WARN_ONCE is used in torch.normal, only 1st assertEqual will show warn msg
-            self.assertWarnsRegex(
-                lambda: self.assertEqual(torch.normal(tensor120, tensor2345).size(), (120,)),
-                "deprecated and the support will be removed")
+            if not warned:
+                self.assertWarnsRegex(
+                    lambda: self.assertEqual(torch.normal(tensor120, tensor2345).size(), (120,)),
+                    "deprecated and the support will be removed")
+                warned = True
+            else:
+                self.assertEqual(torch.normal(tensor120, tensor2345).size(), (120,))
             self.assertEqual(torch.normal(tensor2345, tensor120).size(), (2, 3, 4, 5))
 
             # inputs are non-expandable tensors and they don't have same number of elements
@@ -9738,24 +9743,29 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(1, len(z))
         self.assertEqual(torch.empty(0, dtype=torch.long), z[0])
 
-    def test_normal(self, device):
-        q = torch.empty(100, 100, device=device).normal_()
-        self.assertEqual(q.mean(), 0, 0.2)
+    @dtypes(torch.float, torch.double)
+    # torch.bfloat16: nan not less than or equal to 0.2
+    # torch.half: "sum_cpu" not implemented for 'Half'
+    @dtypesIfCUDA(torch.float, torch.double, torch.half)
+    # torch.bfloat16: "mean_cuda" not implemented for 'BFloat16'
+    def test_normal(self, device, dtype):
+        q = torch.empty(100, 100, dtype=dtype, device=device).normal_()
+        self.assertEqual(q.mean(), 0, 0.2)  # torch.half: "sum_cpu" not implemented for 'Half'   
         self.assertEqual(q.std(), 1, 0.2)
 
         q.normal_(2, 3)
         self.assertEqual(q.mean(), 2, 0.3)
         self.assertEqual(q.std(), 3, 0.3)
 
-        q = torch.empty(100, 100, device=device)
+        q = torch.empty(100, 100, dtype=dtype, device=device)
         q_row1 = q[0:1].clone()
         q[99:100].normal_()
         self.assertEqual(q[99:100].mean(), 0, 0.2)
         self.assertEqual(q[99:100].std(), 1, 0.2)
         self.assertEqual(q[0:1].clone(), q_row1)
 
-        mean = torch.empty(100, 100, device=device)
-        std = torch.empty(100, 100, device=device)
+        mean = torch.empty(100, 100, dtype=dtype, device=device)
+        std = torch.empty(100, 100, dtype=dtype, device=device)
         mean[:50] = 0
         mean[50:] = 1
         std[:, :50] = 4
@@ -9785,6 +9795,26 @@ class TestTorchDeviceType(TestCase):
         r = torch.normal(2, 3, (100, 100))
         self.assertEqual(r.mean(), 2, 0.2)
         self.assertEqual(r.std(), 3, 0.2)
+
+    @dtypes(torch.float, torch.double, torch.bfloat16)
+    # torch.half: "add_cpu/sub_cpu" not implemented for 'Half'
+    @dtypesIfCUDA(torch.float, torch.double, torch.half, torch.bfloat16)
+    def test_normal_2(self, device, dtype):
+        for size in [10, 1000]:
+            t = torch.empty(size, dtype=dtype, device=device)
+            t.normal_()
+            t.normal_(42.0)
+            t.normal_(24.0, 42.0)
+
+            torch.normal(2, 3, size=(size,), out=t)
+            torch.normal(mean=torch.full_like(t, 42.0), out=t)  # torch.half: "add_cpu/sub_cpu" not implemented for 'Half'
+            torch.normal(mean=24.0, std=torch.full_like(t, 42.0), out=t)
+            torch.normal(mean=torch.full_like(t, 24.0), std=torch.full_like(t, 42.0), out=t)
+
+            t = torch.normal(2, 3, size=(size,), dtype=dtype, device=device)
+            t = torch.normal(mean=torch.full_like(t, 42.0))
+            t = torch.normal(mean=24.0, std=torch.full_like(t, 42.0))
+            t = torch.normal(mean=torch.full_like(t, 24.0), std=torch.full_like(t, 42.0))
 
     def test_empty_strided(self, device):
         for shape in [(2, 3, 4), (0, 2, 0)]:

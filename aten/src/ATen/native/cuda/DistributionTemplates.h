@@ -340,4 +340,38 @@ struct RandomKernel {
   }
 };
 
+// =======================================================================================================================================
+
+template<typename RNG>
+void normal_kernel(Tensor& self, double mean_, double std_, RNG gen) {
+  auto iter = TensorIterator::nullary_op(self);
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "normal_cuda", [&] {
+    using accscalar_t = at::acc_type<scalar_t, true>;
+    auto mean = static_cast<accscalar_t>(mean_);
+    auto std = static_cast<accscalar_t>(std_);
+    // define lambda to multiply std and add mean
+    auto normal_func = [mean, std] __device__ (accscalar_t rand) {
+      return static_cast<scalar_t>(rand * std + mean);
+    };
+    if (std::is_same<scalar_t, double>::value) {
+      distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls/2>(iter,
+        gen,
+        [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_normal2_double(state); },
+        normal_func);
+    } else {
+      distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls>(iter,
+        gen,
+        [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_normal4(state); },
+        normal_func);
+    }
+   });
+}
+
+template<typename RNG>
+struct NormalKernel {
+  void operator()(Tensor& self, double mean, double std, Generator gen) {
+    normal_kernel(self, mean, std, check_generator<RNG>(gen));
+  }
+};
+
 }}}}

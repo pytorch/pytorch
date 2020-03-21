@@ -10,6 +10,7 @@
 
 #include <ATen/core/Array.h>
 #include <c10/util/Half.h>
+#include <c10/util/BFloat16.h>
 #include <c10/util/Optional.h>
 #include <type_traits>
 #include <limits>
@@ -60,6 +61,7 @@ struct DistAccumType {  };
 template <> struct DistAccumType<half> { using type = float; };
 #endif
 template <> struct DistAccumType<Half> { using type = float; };
+template <> struct DistAccumType<BFloat16> { using type = float; };
 template <> struct DistAccumType<float> { using type = float; };
 template <> struct DistAccumType<double> { using type = double; };
 
