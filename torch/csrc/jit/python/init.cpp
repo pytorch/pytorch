@@ -737,14 +737,19 @@ void initJITBindings(PyObject* module) {
     });
   });
 
-  struct PythonFutureWrapper {
-    explicit PythonFutureWrapper(c10::intrusive_ptr<c10::ivalue::Future> fut)
-        : fut(std::move(fut)) {}
-
-    c10::intrusive_ptr<c10::ivalue::Future> fut;
-  };
-
-  py::class_<PythonFutureWrapper>(m, "Future");
+  py::class_<PythonFutureWrapper>(m, "Future")
+      .def(
+          "wait",
+          [](PythonFutureWrapper& fut) {
+            auto res = fut.wait();
+            {
+              // acquiring GIL as toPyObject creates new py::object
+              // without grabbing the GIL.
+              pybind11::gil_scoped_acquire ag;
+              return toPyObject(std::move(res));
+            }
+          },
+          py::call_guard<py::gil_scoped_release>());
 
   m.def("fork", [](py::args args) {
     AT_ASSERT(args.size() >= 1);
@@ -800,16 +805,7 @@ void initJITBindings(PyObject* module) {
     }
   });
 
-  m.def("wait", [](PythonFutureWrapper& fut) {
-    if (jit::tracer::isTracing()) {
-      auto graph = jit::tracer::getTracingState()->graph;
-
-      Value* fut_val = jit::tracer::getValueTrace(fut.fut);
-      auto output = graph->insert(aten::wait, {fut_val});
-      jit::tracer::setValueTrace(fut.fut->value(), output);
-    }
-    return fut.fut->value();
-  });
+  m.def("wait", [](PythonFutureWrapper& fut) { return fut.wait(); });
 
   m.def("_jit_assert_is_instance", [](py::object obj, TypePtr type) {
     toIValue(obj, type);
