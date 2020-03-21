@@ -446,8 +446,9 @@ class InsertObserversHelper {
       bool is_entry_point = false,
       std::unordered_set<Value*> graph_observed_values =
           std::unordered_set<Value*>());
-  // Is dynamic quantization enabled for the observer pass.
-  bool is_dynamic = false;
+
+  void set_dynamic_flag(bool is_dynamic_);
+
  private:
   ModuleMethodVector getInvokedMethods(
       Module& module,
@@ -521,6 +522,8 @@ class InsertObserversHelper {
   // Map from graph to a vector of observer name and observer modules we
   // want to add to the module instance that has the graph
   std::unordered_map<Graph*, NameModuleVector> graph_observer_map_;
+  // Is dynamic quantization enabled for the observer pass.
+  bool is_dynamic = false;
   // These are the IR patterns we match to skip inserting observers.
   // They are compiled once on construction and used repeatedly within
   // the pass.
@@ -803,6 +806,10 @@ void InsertObserversHelper::fillBoundaryValueMap(
       }
     }
   }
+}
+
+void InsertObserversHelper::set_dynamic_flag(bool is_dynamic_) {
+  is_dynamic = is_dynamic_;
 }
 
 void InsertObserversHelper::preprocess(
@@ -1943,7 +1950,7 @@ TORCH_API Module InsertObservers(
   // the qconfig map again
   fillQConfigMap(module, qconfig_dict, module_qconfig_map);
   InsertObserversHelper helper(module_qconfig_map);
-  helper.is_dynamic = is_dynamic;
+  helper.set_dynamic_flag(is_dynamic);
   helper.preprocess(module, method_name);
   helper.insertObservers(module, method_name, true);
   return module;
