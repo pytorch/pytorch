@@ -24,20 +24,20 @@ class TORCH_API LoopNest {
   bool hasLoopBodyFor(Tensor*) const;
   std::unordered_map<Tensor*, Stmt*> tensor_to_stmt_;
 
-  void Vectorize(Stmt*);
-  void ComputeInline(Stmt* s);
-  void ComputeInlineWithRandom(Stmt* s);
-  void ApplyInlines();
-  void SplitWithTail(For* f, int factor, For** outer, For** inner, For** tail);
-  void SplitWithMask(For* f, int factor, For** outer, For** inner);
+  void vectorize(Stmt*);
+  void computeInline(Stmt* s);
+  void computeInlineWithRandom(Stmt* s);
+  void prepareForCodegen();
+  void splitWithTail(For* f, int factor, For** outer, For** inner, For** tail);
+  void splitWithMask(For* f, int factor, For** outer, For** inner);
 
-  void SetGPUBlockIndex(For* f, int idx);
-  void SetGPUThreadIndex(For* f, int idx);
+  void setGPUBlockIndex(For* f, int idx);
+  void setGPUThreadIndex(For* f, int idx);
 
  private:
-  std::vector<Tensor*> FindAllNeededTensors(
+  std::vector<Tensor*> findAllNeededTensors(
       const std::vector<Tensor*>& tensors);
-  Stmt* LowerToStmt(Tensor* t);
+  Stmt* lowerToStmt(Tensor* t);
 
   std::unordered_set<Function*> inlined_functions_;
   std::unordered_set<Function*> inlined_random_functions_;

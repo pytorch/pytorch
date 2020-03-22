@@ -30,12 +30,12 @@ void testExprSimple01() {
   For* x_inner;
   For* x_tail;
   std::vector<For*> loops = l.getLoopStmtsFor(tensor);
-  l.SplitWithTail(loops[0], 2, &x_outer, &x_inner, &x_tail);
+  l.splitWithTail(loops[0], 2, &x_outer, &x_inner, &x_tail);
 
   For* x_2;
   For* x_1;
   For* x_tail_2;
-  l.SplitWithTail(x_outer, 2, &x_2, &x_1, &x_tail_2);
+  l.splitWithTail(x_outer, 2, &x_2, &x_1, &x_tail_2);
 }
 
 void testExprLower01() {
@@ -63,7 +63,7 @@ void testExprSimple02() {
   For* x_inner;
   For* x_tail;
   std::vector<For*> loops = l.getLoopStmtsFor(tensor);
-  l.SplitWithTail(loops[0], 4, &x_outer, &x_inner, &x_tail);
+  l.splitWithTail(loops[0], 4, &x_outer, &x_inner, &x_tail);
 
   Stmt* stmt = l.root_stmt();
   std::ostringstream oss;
@@ -131,7 +131,7 @@ void testExprSplitWithTailNone() {
   For* x_inner;
   For* x_tail;
   std::vector<For*> loops = l.getLoopStmtsFor(tensor);
-  l.SplitWithTail(loops[0], 4, &x_outer, &x_inner, &x_tail);
+  l.splitWithTail(loops[0], 4, &x_outer, &x_inner, &x_tail);
 
   Stmt* stmt = l.root_stmt();
   std::ostringstream oss;
@@ -198,7 +198,7 @@ void testExprSplitWithMask01() {
 
   LoopNest l({tensor});
   std::vector<For*> loops = l.getLoopStmtsFor(tensor);
-  l.SplitWithMask(loops[1], 4, &n_outer, &n_inner);
+  l.splitWithMask(loops[1], 4, &n_outer, &n_inner);
 
   Stmt* stmt = l.root_stmt();
 
@@ -289,7 +289,7 @@ void testScheduleFunctionCall01() {
       });
 
   LoopNest l({d});
-  l.ApplyInlines();
+  l.prepareForCodegen();
   Stmt* stmt = l.root_stmt();
   std::ostringstream oss;
   oss << *stmt;
@@ -364,14 +364,14 @@ void InlineFunc01Helper(const std::vector<std::string>& inline_order) {
   LoopNest l({z});
   for (const std::string& order : inline_order) {
     if (order == "x") {
-      l.ComputeInline(l.getLoopBodyFor(x));
+      l.computeInline(l.getLoopBodyFor(x));
     } else if (order == "y") {
-      l.ComputeInline(l.getLoopBodyFor(y));
+      l.computeInline(l.getLoopBodyFor(y));
     } else {
       throw std::runtime_error("Invalid order: " + order);
     }
   }
-  l.ApplyInlines();
+  l.prepareForCodegen();
   Stmt* stmt = l.root_stmt();
 
   std::ostringstream oss;
@@ -467,7 +467,7 @@ void testScheduleFuserStyle() {
       });
 
   LoopNest l({b, c});
-  l.ApplyInlines();
+  l.prepareForCodegen();
   Stmt* s = l.root_stmt();
 
   std::vector<float> a_data(kTotalSize, 7.0f);
@@ -503,9 +503,9 @@ void testScheduleFuserThreeArg() {
   });
 
   LoopNest l({g});
-  l.ComputeInline(l.getLoopBodyFor(e));
-  l.ComputeInline(l.getLoopBodyFor(f));
-  l.ApplyInlines();
+  l.computeInline(l.getLoopBodyFor(e));
+  l.computeInline(l.getLoopBodyFor(f));
+  l.prepareForCodegen();
   Stmt* s = l.root_stmt();
 
   std::vector<float> a_data(kTotalSize, 1.0f);
