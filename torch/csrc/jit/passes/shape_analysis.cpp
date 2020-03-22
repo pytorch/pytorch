@@ -778,6 +778,58 @@ class ShapePropagator {
 
     // Requirements:
     //   dims           : preserved
+    //   scalar type    : promoted to floating if integral/boolean, else preserved
+    //   device         : preserved
+    //   tensor inputs  : 1
+    //   tensor outputs : 1
+    // Additionally:
+    //   - First input should be the only tensor input
+    static const register_formula_for unary_floating_ufuncs{
+      {
+        "aten::acos(Tensor self) -> Tensor",
+        "aten::angle(Tensor self) -> Tensor",
+        "aten::tanh(Tensor self) -> Tensor",
+        "aten::asin(Tensor self) -> Tensor",
+        "aten::atan(Tensor self) -> Tensor",
+        "aten::ceil(Tensor self) -> Tensor",
+        "aten::cos(Tensor self) -> Tensor",
+        "aten::cosh(Tensor self) -> Tensor",
+        "aten::digamma(Tensor self) -> Tensor",
+        "ate::erf(Tensor self) -> Tensor",
+        "aten::erfc(Tensor self) -> Tensor",
+        "aten::erfinv(Tensor self) -> Tensor",
+        "aten::exp(Tensor self) -> Tensor",
+        "aten::expm1(Tensor self) -> Tensor",
+        "aten::log(Tensor self) -> Tensor",
+        "aten::log10(Tensor self) -> Tensor",
+        "aten::log1p(Tensor self) -> Tensor",
+        "aten::log2(Tensor self) -> Tensor",
+        "aten::floor(Tensor self) -> Tensor",
+        "aten::lgamma(Tensor self) -> Tensor",
+        "aten::rsqrt(Tensor self) -> Tensor",
+        "aten::sigmoid(Tensor self) -> Tensor",
+        "aten::sin(Tensor self) -> Tensor",
+        "aten::sinh(Tensor self) -> Tensor",
+        "aten::sqrt(Tensor self) -> Tensor",
+        "aten::tan(Tensor self) -> Tensor",
+        "aten::tanh(Tensor self) -> Tensor",
+        "aten::trunc(Tensor self) -> Tensor",
+      },
+      [](Node* node) -> type_vec_t {
+        if (auto type = node->input(0)->type()->cast<TensorType>()) {
+          auto ret = type->withDim(0);
+          if (isIntegralType(*(type->scalarType()), /*includeBool=*/true)) {
+            const auto default_type = at::typeMetaToScalarType(c10::get_default_dtype());
+            ret = ret->withScalarType(default_dtype);
+            return type_vec_t{ret->dimensionedOnly()};
+          }
+          return type_vec_t{type->dimensionedOnly()};
+        }
+      return type_vec_t{};
+      }};
+
+    // Requirements:
+    //   dims           : preserved
     //   scalar type    : preserved
     //   device         : preserved
     //   tensor inputs  : 1
@@ -787,15 +839,9 @@ class ShapePropagator {
     static const register_formula_for simple_unary_ops{
         {
             "aten::abs(Tensor self) -> Tensor",
-            "aten::acos(Tensor self) -> Tensor",
             "aten::neg(Tensor self) -> Tensor",
             "aten::t(Tensor self) -> Tensor",
-            "aten::sigmoid(Tensor self) -> Tensor",
-            "aten::tanh(Tensor self) -> Tensor",
             "aten::relu(Tensor self) -> Tensor",
-            "aten::asin(Tensor self) -> Tensor",
-            "aten::atan(Tensor self) -> Tensor",
-            "aten::ceil(Tensor self) -> Tensor",
             "aten::clone(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor",
             "aten::contiguous(Tensor self, *, MemoryFormat memory_format=contiguous_format) -> Tensor",
             "aten::bernoulli(Tensor self, *, Generator? generator) -> Tensor",
@@ -805,22 +851,9 @@ class ShapePropagator {
             "aten::clamp_min(Tensor self, Scalar min) -> Tensor",
             "aten::alpha_dropout(Tensor input, float p, bool train) -> Tensor",
             "aten::bernoulli(Tensor self, float p, *, Generator? generator) -> Tensor",
-            "aten::cos(Tensor self) -> Tensor",
-            "aten::cosh(Tensor self) -> Tensor",
-            "aten::digamma(Tensor self) -> Tensor",
             "aten::dropout(Tensor input, float p, bool train) -> Tensor",
             "aten::elu(Tensor self, Scalar alpha, Scalar scale, Scalar input_scale) -> Tensor",
-            "aten::erf(Tensor self) -> Tensor",
-            "aten::erfc(Tensor self) -> Tensor",
-            "aten::erfinv(Tensor self) -> Tensor",
-            "aten::exp(Tensor self) -> Tensor",
-            "aten::expm1(Tensor self) -> Tensor",
-            "aten::log(Tensor self) -> Tensor",
-            "aten::log10(Tensor self) -> Tensor",
-            "aten::log1p(Tensor self) -> Tensor",
-            "aten::log2(Tensor self) -> Tensor",
             "aten::log_sigmoid(Tensor self) -> Tensor",
-            "aten::floor(Tensor self) -> Tensor",
             "aten::frac(Tensor self) -> Tensor",
             "aten::flip(Tensor self, int[] dims) -> Tensor",
             "aten::feature_alpha_dropout(Tensor input, float p, bool train) -> Tensor",
@@ -830,7 +863,6 @@ class ShapePropagator {
             "aten::glu(Tensor self, int dim) -> Tensor",
             "aten::inverse(Tensor self) -> Tensor",
             "aten::leaky_relu(Tensor self, Scalar negative_slope) -> Tensor",
-            "aten::lgamma(Tensor self) -> Tensor",
             "aten::mvlgamma(Tensor self, int p) -> Tensor",
             "aten::normal(float mean, Tensor std, *, Generator? generator) -> Tensor",
             "aten::normal(Tensor mean, float std, *, Generator? generator) -> Tensor",
@@ -841,23 +873,15 @@ class ShapePropagator {
             "aten::relu(Tensor self) -> Tensor",
             "aten::round(Tensor self) -> Tensor",
             "aten::rrelu(Tensor self, Scalar lower, Scalar upper, bool training, Generator? generator) -> Tensor",
-            "aten::rsqrt(Tensor self) -> Tensor",
             "aten::selu(Tensor self) -> Tensor",
             "aten::gelu(Tensor self) -> Tensor",
-            "aten::sigmoid(Tensor self) -> Tensor",
             "aten::sign(Tensor self) -> Tensor",
-            "aten::sin(Tensor self) -> Tensor",
-            "aten::sinh(Tensor self) -> Tensor",
             "aten::softplus(Tensor self, Scalar beta, Scalar threshold) -> Tensor",
             "aten::softshrink(Tensor self, Scalar lambd) -> Tensor",
-            "aten::sqrt(Tensor self) -> Tensor",
-            "aten::tan(Tensor self) -> Tensor",
-            "aten::tanh(Tensor self) -> Tensor",
             "aten::threshold(Tensor self, Scalar threshold, Scalar value) -> Tensor",
             "aten::transpose(Tensor self, int dim0, int dim1) -> Tensor",
             "aten::tril(Tensor self, int diagonal) -> Tensor",
             "aten::triu(Tensor self, int diagonal) -> Tensor",
-            "aten::trunc(Tensor self) -> Tensor",
             "aten::rot90(Tensor self, int k, int[] dims) -> Tensor",
             "aten::narrow(Tensor self, int dim, int start, int length) -> Tensor",
             "aten::slice(Tensor self, int dim, int start, int end, int step) -> Tensor",
