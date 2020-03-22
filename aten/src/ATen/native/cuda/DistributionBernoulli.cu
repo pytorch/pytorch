@@ -77,7 +77,7 @@ void bernoulli_tensor_cuda_kernel(
 
 namespace at { namespace native {
 
-Tensor& bernoulli_tensor_cuda_(Tensor &self, const Tensor& p_, Generator* gen_) {
+Tensor& bernoulli_tensor_cuda_(Tensor &self, const Tensor& p_, Generator gen_) {
   NoNamesGuard guard;
   auto gen = get_generator_or_default<CUDAGenerator>(gen_, cuda::detail::getDefaultCUDAGenerator());
   std::pair<uint64_t, uint64_t> rng_engine_inputs;
@@ -98,7 +98,7 @@ Tensor& bernoulli_tensor_cuda_(Tensor &self, const Tensor& p_, Generator* gen_) 
   return self;
 }
 
-void bernoulli_scalar_cuda_kernel(TensorIterator& iter, double p_, Generator* gen_) {
+void bernoulli_scalar_cuda_kernel(TensorIterator& iter, double p_, Generator gen_) {
   auto gen = get_generator_or_default<CUDAGenerator>(gen_, cuda::detail::getDefaultCUDAGenerator());
   AT_DISPATCH_ALL_TYPES_AND3(
     at::ScalarType::Half, at::ScalarType::BFloat16, at::ScalarType::Bool, iter.dtype(), "bernoulli_scalar_cuda_", [&] {
@@ -124,7 +124,7 @@ void bernoulli_scalar_cuda_kernel(TensorIterator& iter, double p_, Generator* ge
    });
 }
 
-Tensor& bernoulli_scalar_cuda_(Tensor &self, double p, Generator* gen) {
+Tensor& bernoulli_scalar_cuda_(Tensor &self, double p, Generator gen) {
   TORCH_CHECK(0 <= p && p <= 1, "bernoulli_ expects p to be in [0, 1], but got p=", p);
   auto iter = TensorIterator::nullary_op(self);
   bernoulli_scalar_cuda_kernel(iter, p, gen);
