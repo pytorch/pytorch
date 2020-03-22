@@ -77,7 +77,7 @@ def compile_cpp_code_inline(name, cpp_sources, functions):
   return cpp_module
 
 def compute_temp_file_path(cpp_tmp_folder, variant_name, file_suffix):
-  return os.path.join(cpp_tmp_folder, os.sep, '{}_{}.pt'.format(variant_name, file_suffix))
+  return os.path.join(cpp_tmp_folder, '{}_{}.pt'.format(variant_name, file_suffix))
 
 def convert_to_list(python_input):
   if isinstance(python_input, torch.Tensor):

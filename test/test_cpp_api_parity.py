@@ -29,7 +29,7 @@ print_cpp_source = True
 
 devices = ['cpu', 'cuda']
 
-parity_table_path = os.path.join(os.path.dirname(__file__), os.sep, 'cpp_api_parity', os.sep, 'parity-tracker.md')
+parity_table_path = os.path.join(os.path.dirname(__file__), 'cpp_api_parity', 'parity-tracker.md')
 
 parity_table = parse_parity_tracker_table(parity_table_path)
 
