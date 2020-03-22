@@ -9744,10 +9744,7 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(torch.empty(0, dtype=torch.long), z[0])
 
     @dtypes(torch.float, torch.double)
-    # torch.bfloat16: nan not less than or equal to 0.2
-    # torch.half: "sum_cpu" not implemented for 'Half'
-    @dtypesIfCUDA(torch.float, torch.double, torch.half)
-    # torch.bfloat16: "mean_cuda" not implemented for 'BFloat16'
+    @dtypesIfCUDA(torch.float, torch.double)
     def test_normal(self, device, dtype):
         q = torch.empty(100, 100, dtype=dtype, device=device).normal_()
         self.assertEqual(q.mean(), 0, 0.2)  # torch.half: "sum_cpu" not implemented for 'Half'   
@@ -9796,9 +9793,8 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(r.mean(), 2, 0.2)
         self.assertEqual(r.std(), 3, 0.2)
 
-    @dtypes(torch.float, torch.double, torch.bfloat16)
-    # torch.half: "add_cpu/sub_cpu" not implemented for 'Half'
-    @dtypesIfCUDA(torch.float, torch.double, torch.half, torch.bfloat16)
+    @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
+    @dtypesIfCUDA(torch.float, torch.double, torch.complex64, torch.complex128)
     def test_normal_2(self, device, dtype):
         for size in [10, 1000]:
             t = torch.empty(size, dtype=dtype, device=device)
@@ -9807,7 +9803,7 @@ class TestTorchDeviceType(TestCase):
             t.normal_(24.0, 42.0)
 
             torch.normal(2, 3, size=(size,), out=t)
-            torch.normal(mean=torch.full_like(t, 42.0), out=t)  # torch.half: "add_cpu/sub_cpu" not implemented for 'Half'
+            torch.normal(mean=torch.full_like(t, 42.0), out=t)
             torch.normal(mean=24.0, std=torch.full_like(t, 42.0), out=t)
             torch.normal(mean=torch.full_like(t, 24.0), std=torch.full_like(t, 42.0), out=t)
 
