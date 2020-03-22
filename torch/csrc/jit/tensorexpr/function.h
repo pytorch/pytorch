@@ -14,18 +14,17 @@ namespace tensorexpr {
 class Range {
  public:
   Range() {}
-  Range(const ExprHandle& start, const ExprHandle& stop)
-      : start_(start), stop_(stop) {}
-  const ExprHandle& start() const {
+  Range(const Expr* start, const Expr* stop) : start_(start), stop_(stop) {}
+  const Expr* start() const {
     return start_;
   }
-  const ExprHandle& stop() const {
+  const Expr* stop() const {
     return stop_;
   }
 
  private:
-  ExprHandle start_;
-  ExprHandle stop_;
+  const Expr* start_;
+  const Expr* stop_;
 };
 
 class Function : public KernelScopedObject {
