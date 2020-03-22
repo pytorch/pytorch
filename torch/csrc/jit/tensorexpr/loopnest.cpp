@@ -1,4 +1,4 @@
-#include <torch/csrc/jit/tensorexpr/schedule.h>
+#include <torch/csrc/jit/tensorexpr/loopnest.h>
 
 #include <queue>
 #include <stdexcept>
@@ -14,7 +14,6 @@
 namespace torch {
 namespace jit {
 namespace tensorexpr {
-namespace schedule {
 
 namespace {
 
@@ -403,6 +402,7 @@ class FunctionInliner : public IRMutator {
     }
   }
 
+ private:
   std::unordered_map<const Var*, const Expr*> inline_mapping_;
   std::vector<Function*> funcs_;
   std::unordered_set<const Var*> func_var_set_;
@@ -660,8 +660,8 @@ Stmt* LoopNest::LowerToStmt(Tensor* t) {
   for (size_t i = 0; i < f->ndim(); i++) {
     // Going in reverse order: from innermost loop to the outermost
     size_t dim_index = f->ndim() - i - 1;
-    Range r(0, ExprHandle(f->dim(dim_index)));
-    body = For::make(VarHandle(f->arg(dim_index)), r.start(), r.stop(), body);
+    Range r(new IntImm(0), f->dim(dim_index));
+    body = new For(f->arg(dim_index), r.start(), r.stop(), body);
   }
   return body;
 }
@@ -869,7 +869,6 @@ bool LoopNest::hasLoopBodyFor(Tensor* t) const {
   return tensor_to_stmt_.count(t) > 0;
 }
 
-} // namespace schedule
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
