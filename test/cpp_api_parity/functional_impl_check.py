@@ -185,8 +185,6 @@ def add_torch_nn_functional_impl_parity_tests(parity_table, unit_test_class, tes
       "Please add `{}` entry to `torch::nn::functional` section of `test/cpp_api_parity/parity-tracker.md`. (Discovered while processing {}.)".format(
         functional_full_name, test_params_dict)
 
-    has_impl_parity, _ = parity_table['torch::nn::functional'][functional_full_name]
-
     for device in devices:
       test_params = process_test_params_for_functional(
         test_params_dict=test_params_dict,
@@ -199,14 +197,14 @@ def add_torch_nn_functional_impl_parity_tests(parity_table, unit_test_class, tes
       def test_fn(self):
         test_torch_nn_functional_variant(unit_test_class=self, test_params=torch_nn_test_params_map[self._testMethodName])
 
-      test_fn = skip_test_fn_if_needed(
+      test_fn = decorate_test_fn(
         test_fn=test_fn,
-        test_params_dict=test_params_dict,
-        test_cuda=TEST_CUDA,
-        has_impl_parity=has_impl_parity,
+        test_cpp_api_parity=test_params_dict.get('test_cpp_api_parity', True),
+        test_cuda=test_params_dict.get('test_cuda', True),
+        has_impl_parity=parity_table['torch::nn::functional'][functional_full_name][0] and test_params_dict.get('has_parity', True),
         device=device)
-      add_test(unit_test_class, test_name, test_fn)
 
+      add_test(unit_test_class, test_name, test_fn)
 
 def add_tests(unit_test_class, test_params_dicts, test_instance_class, parity_table, devices):
   add_torch_nn_functional_impl_parity_tests(

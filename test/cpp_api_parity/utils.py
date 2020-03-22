@@ -5,6 +5,7 @@ import os
 import torch
 import torch.utils.cpp_extension
 import torch.testing._internal.common_nn as common_nn
+from torch.testing._internal.common_cuda import TEST_CUDA
 
 TorchNNModuleTestParams = namedtuple(
   'TorchNNModuleTestParams',
@@ -208,15 +209,16 @@ def compute_arg_dict(test_params_dict, test_instance):
 
   return arg_dict
 
-def skip_test_fn_if_needed(test_fn, test_params_dict, test_cuda, has_impl_parity, device):
-  test_fn = unittest.skipIf(not test_params_dict.get('test_cpp_api_parity', True), "Excluded from C++ API parity tests")(test_fn)
+def decorate_test_fn(test_fn, test_cpp_api_parity, test_cuda, has_impl_parity, device):
+  test_fn = unittest.skipIf(not test_cpp_api_parity, "Excluded from C++ API parity tests")(test_fn)
 
   if device == 'cuda':
-    test_fn = unittest.skipIf(not test_cuda, "CUDA unavailable")(test_fn)
-    test_fn = unittest.skipIf(not test_params_dict.get('test_cuda', True), "Excluded from CUDA tests")(test_fn)
+    test_fn = unittest.skipIf(not TEST_CUDA, "CUDA unavailable")(test_fn)
+    test_fn = unittest.skipIf(not test_cuda, "Excluded from CUDA tests")(test_fn)
 
   # If `Implementation Parity` entry in parity table for this module is `No`,
-  # we mark the test as expected failure.
+  # or `has_parity` entry in test params dict is `False`, we mark the test as
+  # expected failure.
   if not has_impl_parity:
     test_fn = unittest.expectedFailure(test_fn)
 
