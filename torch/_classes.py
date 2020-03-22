@@ -1,25 +1,15 @@
 import types
 import torch._C
 
-class _ClassNamespace(types.ModuleType):
-    def __init__(self, name):
-        super(_ClassNamespace, self).__init__('torch.classes' + name)
-        self.name = name
-
-    def __getattr__(self, attr):
-        proxy = torch._C._get_custom_class_python_wrapper(self.name, attr)
-        if proxy is None:
-            raise RuntimeError('Class {}.{} not registered!'.format(self.name, attr))
-        return proxy
-
 class _Classes(types.ModuleType):
     def __init__(self):
         super(_Classes, self).__init__('torch.classes')
 
-    def __getattr__(self, name):
-        namespace = _ClassNamespace(name)
-        setattr(self, name, namespace)
-        return namespace
+    def __getattr__(self, attr):
+        proxy = torch._C._get_custom_class_python_wrapper(attr)
+        if proxy is None:
+            raise RuntimeError('Class {} not registered!'.format(attr))
+        return proxy
 
     @property
     def loaded_libraries(self):
