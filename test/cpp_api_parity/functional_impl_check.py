@@ -109,11 +109,7 @@ def test_forward(unit_test_class, test_params):
       torch.allclose(python_output, cpp_output),
       generate_error_msg("forward output", cpp_output, python_output))
 
-  if not test_params.has_parity:
-    with unit_test_class.assertRaisesRegex(AssertionError, "Parity test failed"):
-      run_cpp_test_fn_and_check_output()
-  else:
-    run_cpp_test_fn_and_check_output()
+  run_cpp_test_fn_and_check_output()
 
   # Remove temporary folder that stores C++ outputs
   shutil.rmtree(cpp_tmp_folder)

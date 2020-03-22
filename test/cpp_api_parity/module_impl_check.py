@@ -168,11 +168,7 @@ def test_forward_backward(unit_test_class, test_params):
         torch.allclose(python_grad_dict[key], cpp_grad_dict[key]),
         generate_error_msg("gradient of `{}`".format(key[:-5]), cpp_grad_dict[key], python_grad_dict[key]))
 
-  if not test_params.has_parity:
-    with unit_test_class.assertRaisesRegex(AssertionError, "Parity test failed"):
-      run_cpp_test_fn_and_check_output()
-  else:
-    run_cpp_test_fn_and_check_output()
+  run_cpp_test_fn_and_check_output()
 
   # Remove temporary folder that stores C++ outputs
   shutil.rmtree(cpp_tmp_folder)
