@@ -4,7 +4,7 @@
 #include "torch/csrc/jit/tensorexpr/hash_server.h"
 #include "torch/csrc/jit/tensorexpr/ir_simplifier.h"
 #include "torch/csrc/jit/tensorexpr/llvm_codegen.h"
-#include "torch/csrc/jit/tensorexpr/schedule.h"
+#include "torch/csrc/jit/tensorexpr/loopnest.h"
 
 namespace torch {
 namespace jit {
