@@ -24,6 +24,7 @@ PY36 = sys.version_info >= (3, 6)
 TESTS = [
     'test_autograd',
     'test_complex',
+    'test_cpp_api_parity',
     'test_cpp_extensions_aot_no_ninja',
     'test_cpp_extensions_aot_ninja',
     'test_cpp_extensions_jit',
@@ -124,6 +125,7 @@ ROCM_BLACKLIST = [
 SLOW_TESTS = [
     'test_nn',
     'test_autograd',
+    'test_cpp_api_parity',
     'test_cpp_extensions_jit',
     'test_jit_legacy',
     'test_quantized',
