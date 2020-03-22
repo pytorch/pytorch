@@ -62,6 +62,9 @@ class FC(SamplingTrainableMixin, ModelLayer):
             if clip_max is not None:
                 self.clip_args['max'] = clip_max
 
+        if uniform_weight_init_scale_numerator is None:
+            uniform_weight_init_scale_numerator = 1.0
+
         scale = math.sqrt(uniform_weight_init_scale_numerator / input_dims)
         weight_init = weight_init if weight_init else (
             'UniformFill', {'min': -scale, 'max': scale})
