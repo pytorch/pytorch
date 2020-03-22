@@ -85,7 +85,7 @@ inline void rebase_history(std::vector<Variable>&& vars, std::shared_ptr<Node> g
 }
 
 inline void increment_version(Tensor & t) {
-  impl::bump_version(as_variable_ref(t));
+  impl::bump_version(t);
 }
 
 struct Flatten : IterArgs<Flatten> {
