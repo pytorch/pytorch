@@ -38,6 +38,7 @@ class TORCH_API LoopNest {
   std::vector<Tensor*> findAllNeededTensors(
       const std::vector<Tensor*>& tensors);
   Stmt* lowerToStmt(Tensor* t);
+  Stmt* insertAllocFree(Stmt* stmt);
 
   std::unordered_set<Function*> inlined_functions_;
   std::unordered_set<Function*> inlined_random_functions_;

@@ -675,24 +675,11 @@ void LoopNest::computeInlineWithRandom(Stmt* s) {
   inlined_random_functions_.insert(stmt_to_tensor_.at(s)->function());
 }
 
-void LoopNest::prepareForCodegen() {
-  // TODO: check if `s` is a body of a loop
-  std::vector<Function*> inlined_functions_vec(
-      inlined_functions_.begin(), inlined_functions_.end());
-  std::vector<Function*> inlined_randoms_vec(
-      inlined_random_functions_.begin(), inlined_random_functions_.end());
-  root_stmt_ = InjectInlines(root_stmt_, inlined_functions_vec);
-  root_stmt_ = InlineRandom(root_stmt_, inlined_randoms_vec);
-
-  // Flatten function calls.
-  Flattener flattener;
-  Stmt* core_stmt = root_stmt_->accept_mutator(&flattener);
-
+Stmt* LoopNest::insertAllocFree(Stmt* stmt) {
   // Add allocs and frees for intermediate buffers at the global level.
   // TODO: move allocs and frees to the imemediate areas to reuse buffers.
   if (intermediate_tensors_.size() == 0ULL) {
-    root_stmt_ = core_stmt;
-    return;
+    return stmt;
   }
   std::vector<Stmt*> allocs;
   std::vector<Stmt*> frees;
@@ -717,8 +704,24 @@ void LoopNest::prepareForCodegen() {
   std::reverse(frees.begin(), frees.end());
   Stmt* alloc_block = Block::make(allocs);
   Stmt* free_block = Block::make(frees);
-  Stmt* combined_stmt = Block::make({alloc_block, core_stmt, free_block});
-  root_stmt_ = combined_stmt;
+  Stmt* combined_stmt = Block::make({alloc_block, stmt, free_block});
+  return combined_stmt;
+}
+
+void LoopNest::prepareForCodegen() {
+  std::vector<Function*> inlined_functions_vec(
+      inlined_functions_.begin(), inlined_functions_.end());
+  std::vector<Function*> inlined_randoms_vec(
+      inlined_random_functions_.begin(), inlined_random_functions_.end());
+  root_stmt_ = InjectInlines(root_stmt_, inlined_functions_vec);
+  root_stmt_ = InlineRandom(root_stmt_, inlined_randoms_vec);
+
+  // Flatten function calls.
+  Flattener flattener;
+  root_stmt_ = root_stmt_->accept_mutator(&flattener);
+
+  // Add allocs and frees for intermediate buffers at the global level.
+  root_stmt_ = insertAllocFree(root_stmt_);
 }
 
 void LoopNest::splitWithTail(
