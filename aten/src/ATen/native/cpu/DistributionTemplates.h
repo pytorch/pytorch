@@ -201,8 +201,7 @@ template<typename RNG>
 void normal_kernel(Tensor& self, double mean, double std, RNG generator) {
   auto size = self.numel();
   if (self.scalar_type() == ScalarType::Float && size >= 16 && self.is_contiguous()) {
-// #ifdef __AVX2__
-#if defined(__AVX2__) && !defined(__APPLE__)
+#ifdef __AVX2__
     normal_fill_AVX2(self, static_cast<float>(mean), static_cast<float>(std), generator);
 #else
     normal_fill(self, static_cast<float>(mean), static_cast<float>(std), generator);
