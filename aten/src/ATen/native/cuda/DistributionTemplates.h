@@ -100,7 +100,7 @@ template<typename scalar_t,
          typename dist_t,
          typename transform_t>
 void distribution_nullary_kernel(at::TensorIterator& iter,
-                                 RNG* gen,
+                                 RNG gen,
                                  const dist_t& dist_func,
                                  const transform_t transform_func) {
   static_assert(unroll_factor >= 1, "unroll_factor must be >= 1.");
@@ -167,7 +167,7 @@ namespace templates {
 namespace cuda {
 
 template<typename RNG>
-void random_from_to_kernel(TensorIterator& iter, uint64_t range, int64_t base, RNG* gen) {
+void random_from_to_kernel(TensorIterator& iter, uint64_t range, int64_t base, RNG gen) {
 #ifdef _WIN32
   // TODO: https://github.com/pytorch/pytorch/issues/33793
   if (iter.dtype() == ScalarType::BFloat16) {
@@ -213,7 +213,7 @@ void random_from_to_kernel(TensorIterator& iter, uint64_t range, int64_t base, R
 // from(inclusive) = std::numeric_limits<int64_t>::lowest()
 // to(exclusive) = None (= std::numeric_limits<int64_t>::max() + 1)
 template<typename RNG>
-void random_full_64_bits_range_kernel(TensorIterator& iter, RNG* gen) {
+void random_full_64_bits_range_kernel(TensorIterator& iter, RNG gen) {
 #ifdef _WIN32
   // TODO: https://github.com/pytorch/pytorch/issues/33793
   if (iter.dtype() == ScalarType::BFloat16) {
@@ -246,16 +246,16 @@ void random_full_64_bits_range_kernel(TensorIterator& iter, RNG* gen) {
 
 template<typename RNG>
 struct RandomFromToKernel {
-  void operator()(TensorIterator& iter, uint64_t range, int64_t base, RNG* gen) {
+  void operator()(TensorIterator& iter, uint64_t range, int64_t base, RNG gen) {
     random_from_to_kernel(iter, range, base, gen);
   }
-  void operator()(TensorIterator& iter, RNG* gen) {
+  void operator()(TensorIterator& iter, RNG gen) {
     random_full_64_bits_range_kernel(iter, gen);
   }
 };
 
 template<typename RNG>
-void random_kernel(TensorIterator& iter, RNG* gen) {
+void random_kernel(TensorIterator& iter, RNG gen) {
 #ifdef _WIN32
   // TODO: https://github.com/pytorch/pytorch/issues/33793
   if (iter.dtype() == ScalarType::BFloat16) {
@@ -335,7 +335,7 @@ void random_kernel(TensorIterator& iter, RNG* gen) {
 
 template<typename RNG>
 struct RandomKernel {
-  void operator()(TensorIterator& iter, RNG* gen) {
+  void operator()(TensorIterator& iter, RNG gen) {
     random_kernel(iter, gen);
   }
 };
