@@ -164,6 +164,30 @@ class AllreduceNCCLTest : public NCCLTest {
   }
 };
 
+class AllreduceCoalescedNCCLTest : public NCCLTest {
+ public:
+  AllreduceCoalescedNCCLTest(const std::string& path, int worldSize)
+      : NCCLTest(path, worldSize) {}
+
+  std::shared_ptr<c10d::ProcessGroup::Work> run() {
+    at::cuda::CUDAMultiStreamGuard guard(streams_);
+
+    at::cuda::OptionalCUDAGuard deviceGuard;
+    for (int i = 0; i < numDevices_; i++) {
+      deviceGuard.set_index(i);
+      cudaSleep(streams_[i], 2000 * 1000 * 1000);
+    }
+
+    // Launch value initialization for every tensor
+    for (int i = 0; i < numDevices_; i++) {
+      deviceGuard.set_index(i);
+      tensors_[i].fill_(pg_->getRank() * numDevices_ + i);
+    }
+
+    return pg_->allreduce(tensors_);
+  }
+};
+
 class BroadcastNCCLTest : public NCCLTest {
  public:
   BroadcastNCCLTest(const std::string& path, int worldSize)
@@ -298,6 +322,30 @@ void testAllreduce(const std::string& path, int rank, int size) {
   }
   std::cout << "Allreduce test successful" << std::endl;
 }
+
+void testAllreduceCoalesced(const std::string& path, int rank, int size) {
+  auto test = AllreduceCoalescedNCCLTest(path, size);
+  test.initialize(rank, size);
+  auto work = test.run();
+  // Wait for work to finish
+  test.wait(work);
+
+  // Validation
+  const int totalNumGPUs = test.numDevices() * size;
+  const auto expected = (totalNumGPUs * (totalNumGPUs - 1)) / 2;
+  auto tensors = test.getTensors();
+  for (size_t j = 0; j < tensors.size(); j++) {
+    auto& tensor = tensors[j];
+    auto data = tensor.data_ptr<float>();
+    for (auto k = 0; k < tensor.numel(); k++) {
+      if (data[k] != expected) {
+        throw std::runtime_error("BOOM!");
+      }
+    }
+  }
+  std::cout << "Allreduce coalesced test successful" << std::endl;
+}
+
 
 void testBroadcast(const std::string& path, int rank, int size) {
   auto test = BroadcastNCCLTest(path, size);
@@ -436,6 +484,7 @@ int main(int argc, char** argv) {
   TemporaryFile file;
 
   testAllreduce(file.path, rank, size);
+  testAllreduceCoalesced(file.path, rank, size);
   testBroadcast(file.path, rank, size);
   testReduce(file.path, rank, size);
   testAllgather(file.path, rank, size);
