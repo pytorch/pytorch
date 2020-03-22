@@ -1094,7 +1094,7 @@ def glu(input, dim=-1):
         if type(input) is not Tensor and has_torch_function((input,)):
             return handle_torch_function(glu, (input,), input, dim=dim)
     if input.dim() == 0:
-        raise RuntimeError("glu does not suppport scalars because halving size must be even")
+        raise RuntimeError("glu does not support scalars because halving size must be even")
     return torch._C._nn.glu(input, dim)
 
 
