@@ -116,7 +116,7 @@ def test_forward(unit_test_class, test_params):
     run_cpp_test_fn_and_check_output()
 
   # Remove temporary folder that stores C++ outputs
-  shutil.rmtree(test_params.cpp_tmp_folder)
+  shutil.rmtree(cpp_tmp_folder)
 
 def compute_functional_name(test_params_dict):
   def camel_case_to_snake_case(camel_case_str):
