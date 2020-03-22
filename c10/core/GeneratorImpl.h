@@ -7,13 +7,11 @@
 #include <atomic>
 #include <typeinfo>
 #include <utility>
-#include <cstddef>
 
 #include <c10/util/Exception.h>
 #include <c10/util/C++17.h>
 #include <c10/core/Device.h>
 #include <c10/core/DispatchKeySet.h>
-#include <c10/core/GeneratorImpl.h>
 
 /**
  * Note [Generator]
@@ -49,50 +47,46 @@
  * forks into other threads).
  */
 
-namespace at {
+namespace c10 {
 
-struct CAFFE2_API Generator {
-  Generator() {}
+// The default seed is selected to be a large number
+// with good distribution of 0s and 1s in bit representation
+constexpr uint64_t default_rng_seed_val = 67280421310721;
 
-  explicit Generator(std::shared_ptr<c10::GeneratorImpl> gen_impl)
-   : impl_(std::move(gen_impl)) {
-    if (impl_.get() == nullptr) {
-      throw std::runtime_error("GeneratorImpl with nullptr is not supported");
-    }
-  }
+struct C10_API GeneratorImpl {
+  // Constructors
+  GeneratorImpl(Device device_in, DispatchKeySet key_set);
 
-  // TODO(pbelevich): delete this after replace Generator generator = nullptr with c10::optional<at::Generator> = c10::nullopt
-  Generator(std::nullptr_t gen_impl) {}
+  // Delete all copy and move assignment in favor of clone()
+  // method
+  GeneratorImpl(const GeneratorImpl& other) = delete;
+  GeneratorImpl(GeneratorImpl&& other) = delete;
+  GeneratorImpl& operator=(const GeneratorImpl& other) = delete;
 
-  bool operator==(const Generator& rhs) const {
-    return this->impl_ == rhs.impl_;
-  }
+  virtual ~GeneratorImpl() = default;
+  std::shared_ptr<GeneratorImpl> clone() const;
 
-  bool operator!=(const Generator& rhs) const {
-    return !((*this) == rhs);
-  }
+  // Common methods for all generators
+  virtual void set_current_seed(uint64_t seed) = 0;
+  virtual uint64_t current_seed() const = 0;
+  virtual uint64_t seed() = 0;
+  Device device() const;
 
-  bool defined() const {
-    return static_cast<bool>(impl_);
-  }
+  // See Note [Acquire lock when using random generators]
+  std::mutex mutex_;
 
-  c10::GeneratorImpl* operator->() const { return impl_.get(); }
+  DispatchKeySet key_set() const { return key_set_; }
 
-  template<typename T>
-  T* get() const { return static_cast<T*>(impl_.get()); }
-
-  Generator clone() const {
-    return Generator(impl_->clone());
-  }
-
- private:
-  std::shared_ptr<c10::GeneratorImpl> impl_;
+  private:
+    Device device_;
+    DispatchKeySet key_set_;
+    virtual GeneratorImpl* clone_impl() const = 0;
 };
 
-template<class Impl, class... Args>
-Generator make_generator(Args&&... args) {
-  return Generator(std::make_shared<Impl>(args...));
-}
+namespace detail {
 
-} // namespace at
+CAFFE2_API uint64_t getNonDeterministicRandom(bool is_cuda = false);
 
+} // namespace detail
+
+} // namespace c10
