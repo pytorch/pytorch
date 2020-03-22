@@ -378,7 +378,8 @@ def _arange_cast_helper(g, end, start=None, step=None, dtype=None):
 
 def _unary_ufunc_helper(g, self, op_name):
     if not _is_fp(self):
-        self = g.op("Cast", self, to_i=scalar_type_to_pytorch_type.index(torch.get_default_dtype()))
+        type = scalar_type_to_pytorch_type.index(torch.get_default_dtype())
+        self = g.op("Cast", self, to_i=scalar_type_to_onnx[type])
 
     return g.op(op_name, self)
 
