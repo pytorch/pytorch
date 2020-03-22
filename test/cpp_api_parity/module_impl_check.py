@@ -43,16 +43,20 @@ torch.set_default_dtype(torch.double)
 # ${device}
 # ${cpp_forward_args_symbols}
 TORCH_NN_MODULE_TEST_FORWARD_BACKWARD = Template("""
-void ${module_variant_name}_test_forward_backward() {
+void ${module_variant_name}_test_forward_backward(
+    const std::string& arg_dict_file_path,
+    const std::string& module_file_path,
+    const std::string& forward_output_file_path,
+    const std::string& backward_grad_dict_file_path) {
   pybind11::gil_scoped_release no_gil;
 
   // Declare arguments
-  auto arg_dict = load_dict_from_file("${cpp_tmp_folder}/${module_variant_name}_arg_dict.pt");
+  auto arg_dict = load_dict_from_file(arg_dict_file_path);
   ${cpp_args_construction_stmts};
 
   // Construct module and load params/buffers from Python module
   ${module_qualified_name} module${cpp_constructor_args};
-  torch::load(module, "${cpp_tmp_folder}/${module_variant_name}_module.pt");
+  torch::load(module, module_file_path);
   module->to(std::string("${device}"));
 
   // Some modules (such as `RReLU`) create random tensors in their forward pass.
@@ -64,9 +68,7 @@ void ${module_variant_name}_test_forward_backward() {
   auto cpp_output = module(${cpp_forward_args_symbols});
 
   // Save the output into a file to be compared in Python later
-  write_ivalue_to_file(
-    torch::IValue(cpp_output),
-    "${cpp_tmp_folder}/${module_variant_name}_forward_output.pt");
+  write_ivalue_to_file(torch::IValue(cpp_output), forward_output_file_path);
 
   // Backward pass
   cpp_output.sum().backward();
@@ -81,9 +83,7 @@ void ${module_variant_name}_test_forward_backward() {
     grad_dict.insert(param.key() + "_grad", grad);
   }
 
-  write_ivalue_to_file(
-    torch::IValue(grad_dict),
-    "${cpp_tmp_folder}/${module_variant_name}_backward_grad_dict.pt");
+  write_ivalue_to_file(torch::IValue(grad_dict), backward_grad_dict_file_path);
 }
 """)
 
@@ -125,21 +125,27 @@ def run_python_forward_backward(unit_test_class, test_params):
 
 def test_forward_backward(unit_test_class, test_params):
   module_variant_name = test_params.module_variant_name
+  cpp_tmp_folder = test_params.cpp_tmp_folder
 
   # Run forward and backward on Python module
   script_module, python_output, python_grad_dict = run_python_forward_backward(unit_test_class, test_params)
 
   # Save Python module and arguments to be used from C++ function
-  script_module.save("{}/{}_module.pt".format(test_params.cpp_tmp_folder, module_variant_name))
-  serialize_arg_dict_as_script_module(test_params.arg_dict).save("{}/{}_arg_dict.pt".format(test_params.cpp_tmp_folder, module_variant_name))
+  module_file_path = compute_temp_file_path(cpp_tmp_folder, module_variant_name, 'module')
+  arg_dict_file_path = compute_temp_file_path(cpp_tmp_folder, module_variant_name, 'arg_dict')
+  script_module.save(module_file_path)
+  serialize_arg_dict_as_script_module(test_params.arg_dict).save(arg_dict_file_path)
 
   cpp_test_name = '{}_{}'.format(test_params.module_variant_name, 'test_forward_backward')
   cpp_test_fn = getattr(unit_test_class.module_impl_check_cpp_module, cpp_test_name)
 
   def run_cpp_test_fn_and_check_output():
-    cpp_test_fn()
-    cpp_output = torch.load("{}/{}_forward_output.pt".format(test_params.cpp_tmp_folder, module_variant_name))
-    cpp_grad_dict = torch.load("{}/{}_backward_grad_dict.pt".format(test_params.cpp_tmp_folder, module_variant_name))
+    forward_output_file_path = compute_temp_file_path(cpp_tmp_folder, module_variant_name, 'forward_output')
+    backward_grad_dict_file_path = compute_temp_file_path(cpp_tmp_folder, module_variant_name, 'backward_grad_dict')
+
+    cpp_test_fn(arg_dict_file_path, module_file_path, forward_output_file_path, backward_grad_dict_file_path)
+    cpp_output = torch.load(forward_output_file_path)
+    cpp_grad_dict = torch.load(backward_grad_dict_file_path)
 
     def generate_error_msg(name, cpp_value, python_value):
       return "Parity test failed: {} in C++ has value: {}, which does not match the corresponding value in Python: {}".format(

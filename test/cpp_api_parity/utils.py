@@ -1,5 +1,6 @@
 from collections import namedtuple
 import unittest
+import os
 
 import torch
 import torch.utils.cpp_extension
@@ -74,6 +75,9 @@ def compile_cpp_code_inline(name, cpp_sources, functions):
     verbose=False,
   )
   return cpp_module
+
+def compute_temp_file_path(cpp_tmp_folder, variant_name, file_suffix):
+  return os.path.join(cpp_tmp_folder, os.sep, '{}_{}.pt'.format(variant_name, file_suffix))
 
 def convert_to_list(python_input):
   if isinstance(python_input, torch.Tensor):

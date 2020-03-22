@@ -40,13 +40,15 @@ torch.set_default_dtype(torch.double)
 # ${cpp_args_construction_stmts}
 # ${cpp_function_call}
 TORCH_NN_FUNCTIONAL_TEST_FORWARD = Template("""
-void ${functional_variant_name}_test_forward() {
+void ${functional_variant_name}_test_forward(
+    const std::string& arg_dict_file_path,
+    const std::string& forward_output_file_path) {
   pybind11::gil_scoped_release no_gil;
 
   namespace F = torch::nn::functional;
 
   // Declare arguments
-  auto arg_dict = load_dict_from_file("${cpp_tmp_folder}/${functional_variant_name}_arg_dict.pt");
+  auto arg_dict = load_dict_from_file(arg_dict_file_path);
   ${cpp_args_construction_stmts};
 
   // Some functionals (such as `F::rrelu`) create random tensors in their call path.
@@ -58,9 +60,7 @@ void ${functional_variant_name}_test_forward() {
   auto cpp_output = ${cpp_function_call};
 
   // Save the output into a file to be compared in Python later
-  write_ivalue_to_file(
-    torch::IValue(cpp_output),
-    "${cpp_tmp_folder}/${functional_variant_name}_forward_output.pt");
+  write_ivalue_to_file(torch::IValue(cpp_output), forward_output_file_path);
 }
 """)
 
@@ -82,19 +82,23 @@ def run_forward(unit_test_class, test_params):
 
 def test_forward(unit_test_class, test_params):
   functional_variant_name = test_params.functional_variant_name
+  cpp_tmp_folder = test_params.cpp_tmp_folder
 
   # Run forward on Python functional
   python_output = run_forward(unit_test_class, test_params)
 
   # Save Python arguments to be used from C++ function
-  serialize_arg_dict_as_script_module(test_params.arg_dict).save("{}/{}_arg_dict.pt".format(test_params.cpp_tmp_folder, functional_variant_name))
+  arg_dict_file_path = compute_temp_file_path(cpp_tmp_folder, functional_variant_name, 'arg_dict')
+  serialize_arg_dict_as_script_module(test_params.arg_dict).save(arg_dict_file_path)
 
   cpp_test_name = '{}_{}'.format(test_params.functional_variant_name, 'test_forward')
   cpp_test_fn = getattr(unit_test_class.functional_impl_check_cpp_module, cpp_test_name)
 
   def run_cpp_test_fn_and_check_output():
-    cpp_test_fn()
-    cpp_output = torch.load("{}/{}_forward_output.pt".format(test_params.cpp_tmp_folder, functional_variant_name))
+    forward_output_file_path = compute_temp_file_path(cpp_tmp_folder, functional_variant_name, 'forward_output')
+
+    cpp_test_fn(arg_dict_file_path, forward_output_file_path)
+    cpp_output = torch.load(forward_output_file_path)
 
     def generate_error_msg(name, cpp_value, python_value):
       return "Parity test failed: {} in C++ has value: {}, which does not match the corresponding value in Python: {}".format(
