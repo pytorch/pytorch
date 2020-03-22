@@ -30,7 +30,7 @@
 
 namespace at { namespace native {
 
-void normal_kernel_cuda(TensorIterator& iter, double mean_, double std_, Generator* gen_) {
+void normal_kernel_cuda(TensorIterator& iter, double mean_, double std_, Generator gen_) {
   auto gen = get_generator_or_default<CUDAGenerator>(gen_, cuda::detail::getDefaultCUDAGenerator());
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "normal_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
@@ -54,7 +54,7 @@ void normal_kernel_cuda(TensorIterator& iter, double mean_, double std_, Generat
    });
 }
 
-Tensor& normal_cuda_(Tensor& self, double mean, double std, Generator* gen) {
+Tensor& normal_cuda_(Tensor& self, double mean, double std, Generator gen) {
   TORCH_CHECK(std > 0.0, "normal_ expects std > 0.0, but found std=", std);
   if(self.is_complex()) {
     // note: float_tensor lives only as long as the self tensor lives
@@ -69,13 +69,13 @@ Tensor& normal_cuda_(Tensor& self, double mean, double std, Generator* gen) {
   return self;
 }
 
-Tensor& normal_out_cuda(Tensor& output, const Tensor& mean, double std, Generator* gen) {
+Tensor& normal_out_cuda(Tensor& output, const Tensor& mean, double std, Generator gen) {
   normal_cuda_(output, 0, std, gen);
   output.add_(mean);
   return output;
 }
 
-Tensor& normal_out_cuda(Tensor& output, double mean, const Tensor& std, Generator* gen) {
+Tensor& normal_out_cuda(Tensor& output, double mean, const Tensor& std, Generator gen) {
   normal_cuda_(output, 0, 1, gen);
   auto mean_tensor = at::full({}, mean, output.options());
   // NB: addcmul_out copies the tensor to be added into the output.
@@ -87,7 +87,7 @@ Tensor& normal_out_cuda(Tensor& output, double mean, const Tensor& std, Generato
   return output;
 }
 
-Tensor& normal_out_cuda(Tensor& output, const Tensor& mean, const Tensor& std, Generator* gen) {
+Tensor& normal_out_cuda(Tensor& output, const Tensor& mean, const Tensor& std, Generator gen) {
   bool is_deprecated_th_impl = resize_output_for_normal(output, mean, std);
   normal_cuda_(output, 0, 1, gen);
   // NB: addcmul_out copies the tensor to be added into the output.
@@ -104,19 +104,19 @@ Tensor& normal_out_cuda(Tensor& output, const Tensor& mean, const Tensor& std, G
   return output;
 }
 
-Tensor normal_cuda(const Tensor& mean, double std, Generator* gen) {
+Tensor normal_cuda(const Tensor& mean, double std, Generator gen) {
   Tensor ret = at::empty_like(mean, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   normal_out_cuda(ret, mean, std, gen);
   return ret;
 }
 
-Tensor normal_cuda(double mean, const Tensor& std, Generator* gen) {
+Tensor normal_cuda(double mean, const Tensor& std, Generator gen) {
   Tensor ret = at::empty_like(std, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   normal_out_cuda(ret, mean, std, gen);
   return ret;
 }
 
-Tensor normal_cuda(const Tensor& mean, const Tensor& std, Generator* gen) {
+Tensor normal_cuda(const Tensor& mean, const Tensor& std, Generator gen) {
   Tensor ret = at::empty({0}, mean.options(), LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   normal_out_cuda(ret, mean, std, gen);
   return ret;
