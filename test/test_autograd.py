@@ -3503,10 +3503,15 @@ for shape in [(1,), ()]:
         mean_combined.backward()
 
     def _test_reentrant_with_callbacks(self, install_callbacks_in_depths):
-        counter = [0]
+        counter = {}
+        counter["inner"] = 0
+        counter["outer"] = 0
 
-        def inc_counter():
-            counter[0] += 1
+        def inc_inner_counter():
+            counter["inner"] += 1
+
+        def inc_outer_counter():
+            counter["outer"] += 1
 
         class MyFunc(Function):
             @staticmethod
@@ -3518,7 +3523,7 @@ for shape in [(1,), ()]:
             def backward(ctx, input):
                 if 1 in install_callbacks_in_depths:
                     # Add a callback to execute.
-                    Variable._execution_engine.queue_callback(inc_counter)
+                    Variable._execution_engine.queue_callback(inc_inner_counter)
 
                 return input
 
@@ -3532,7 +3537,7 @@ for shape in [(1,), ()]:
             def backward(ctx, input):
                 if 0 in install_callbacks_in_depths:
                     # Add a callback to execute.
-                    Variable._execution_engine.queue_callback(inc_counter)
+                    Variable._execution_engine.queue_callback(inc_outer_counter)
                 # Reentrant backward call.
                 tmp_inp = input.detach().requires_grad_()
                 with torch.enable_grad():
@@ -3545,24 +3550,25 @@ for shape in [(1,), ()]:
         t3 = t2.sum()
         torch.autograd.backward([t3])
 
-        return counter[0]
+        return counter
 
     def test_reentrant_with_callbacks_depth_0(self):
-        # Verify callback is called twice. The callback is installed in depth 0
-        # which should be called in both depth 1 and depth 0.
-        self.assertEqual(2, self._test_reentrant_with_callbacks([0]))
+        # Verify callback is called only once.
+        ret = self._test_reentrant_with_callbacks([0])
+        self.assertEqual(1, ret["outer"])
+        self.assertEqual(0, ret["inner"])
 
     def test_reentrant_with_callbacks_depth_1(self):
         # Verify callback is called only once.
-        self.assertEqual(1, self._test_reentrant_with_callbacks([1]))
+        ret = self._test_reentrant_with_callbacks([1])
+        self.assertEqual(0, ret["outer"])
+        self.assertEqual(1, ret["inner"])
 
     def test_reentrant_with_callbacks_both_depths(self):
-        # Verify callback is called three times:
-        # 1. backward with depth 1 should call it twice, as two calbacks are
-        #    installed for depth 0 and 1 respectively.
-        # 2. backward with depth 0 should call it once, as the other callback
-        #    should have been deleted on exit of the reentrant backward
-        self.assertEqual(3, self._test_reentrant_with_callbacks([0, 1]))
+        # Verify callback is called twice.
+        ret = self._test_reentrant_with_callbacks([0, 1])
+        self.assertEqual(1, ret["outer"])
+        self.assertEqual(1, ret["inner"])
 
     def test_autograd_views_codegen(self):
         # This is not necessarily the absolute correct behavior, but this is the current
