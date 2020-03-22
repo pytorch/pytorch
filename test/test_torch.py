@@ -52,8 +52,10 @@ if TEST_LIBROSA:
 
 SIZE = 100
 
-# TODO: Enable more bfloat math function
-bf16_math_functions = [torch.frac]
+bf16_math_functions = [torch.sin, torch.asin, torch.cos, torch.acos, torch.tan,
+                       torch.tanh, torch.atan, torch.log, torch.log10, torch.log2,
+                       torch.sqrt, torch.erf, torch.erfc, torch.exp, torch.expm1,
+                       torch.floor, torch.ceil, torch.frac, torch.trunc, torch.round]
 
 # This is intentionally prefixed by an underscore. Otherwise pytest will try to
 # run its methods as test cases.
