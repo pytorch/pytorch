@@ -29,7 +29,7 @@
 
 namespace at { namespace native {
 
-void cauchy_kernel(TensorIterator& iter, double median_, double sigma_, Generator* gen_) {
+void cauchy_kernel(TensorIterator& iter, double median_, double sigma_, Generator gen_) {
   auto gen = get_generator_or_default<CUDAGenerator>(gen_, cuda::detail::getDefaultCUDAGenerator());
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "cauchy_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
