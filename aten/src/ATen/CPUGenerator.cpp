@@ -14,16 +14,16 @@ namespace detail {
  * getDefaultCPUGenerator gets the default generator for a particular
  * device.
  */
-CPUGenerator* getDefaultCPUGenerator() {
-  static CPUGenerator default_gen_cpu(getNonDeterministicRandom());
-  return &default_gen_cpu;
+const Generator& getDefaultCPUGenerator() {
+  static auto default_gen_cpu = createCPUGenerator(c10::detail::getNonDeterministicRandom());
+  return default_gen_cpu;
 }
 
 /**
  * Utility to create a CPUGenerator. Returns a shared_ptr
  */
-std::shared_ptr<CPUGenerator> createCPUGenerator(uint64_t seed_val) {
-  return std::make_shared<CPUGenerator>(seed_val);
+Generator createCPUGenerator(uint64_t seed_val) {
+  return make_generator<CPUGenerator>(seed_val);
 }
 
 /**
@@ -40,7 +40,7 @@ inline uint64_t make64BitsFrom32Bits(uint32_t hi, uint32_t lo) {
  * CPUGenerator class implementation
  */
 CPUGenerator::CPUGenerator(uint64_t seed_in)
-  : Generator{Device(DeviceType::CPU), DispatchKeySet(c10::DispatchKey::CPUTensorId)},
+  : c10::GeneratorImpl{Device(DeviceType::CPU), DispatchKeySet(c10::DispatchKey::CPUTensorId)},
     engine_{seed_in},
     next_float_normal_sample_{c10::optional<float>()},
     next_double_normal_sample_{c10::optional<double>()} { }
@@ -70,7 +70,7 @@ uint64_t CPUGenerator::current_seed() const {
  * in getNonDeterministicRandom is unified for both CPU and CUDA
  */
 uint64_t CPUGenerator::seed() {
-  auto random = detail::getNonDeterministicRandom();
+  auto random = c10::detail::getNonDeterministicRandom();
   this->set_current_seed(random);
   return random;
 }
