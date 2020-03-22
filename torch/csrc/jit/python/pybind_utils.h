@@ -46,6 +46,26 @@
 namespace torch {
 namespace jit {
 
+// The PythonFutureWrapper for ivalue::Future
+struct PythonFutureWrapper {
+  explicit PythonFutureWrapper(c10::intrusive_ptr<c10::ivalue::Future> fut)
+      : fut(std::move(fut)) {}
+
+  IValue wait() {
+    fut->wait();
+    if (jit::tracer::isTracing()) {
+      auto graph = jit::tracer::getTracingState()->graph;
+
+      Value* fut_val = jit::tracer::getValueTrace(fut);
+      auto output = graph->insert(aten::wait, {fut_val});
+      jit::tracer::setValueTrace(fut->value(), output);
+    }
+    return fut->value();
+  }
+
+  c10::intrusive_ptr<c10::ivalue::Future> fut;
+};
+
 // error reporting: when reporting user-caused errors, these functions should
 // not use AT_ERROR macros, since these macros add stack trace information
 // that is confusing to display to the end user since it always reports
@@ -588,16 +608,19 @@ inline IValue toIValue(
     case TypeKind::CapsuleType: {
       return IValue::make_capsule(
           py::cast<c10::intrusive_ptr<CustomClassHolder>>(obj));
-    } break;
+    }
+    case TypeKind::FutureType: {
+      return obj.cast<PythonFutureWrapper>().fut;
+    }
     case TypeKind::AnyType:
       return toTypeInferredIValue(obj);
     case TypeKind::FunctionType:
     case TypeKind::GeneratorType:
     case TypeKind::VarType:
-    case TypeKind::FutureType:
     case TypeKind::QSchemeType:
     case TypeKind::AnyListType:
     case TypeKind::AnyTupleType:
+    case TypeKind::AnyClassType:
       break;
   }
   throw py::cast_error(c10::str("toIValue() cannot handle converting to type: ", type->python_str()));
@@ -773,6 +796,8 @@ inline py::object toPyObject(IValue ivalue) {
     return py::reinterpret_borrow<py::object>(ivalue.toPyObject());
   } else if (ivalue.isCapsule()) {
     return py::cast(ivalue.toCapsule());
+  } else if (ivalue.isFuture()) {
+    return py::cast(PythonFutureWrapper(ivalue.toFuture()));
   } else if (ivalue.isRRef()) {
 #ifdef USE_DISTRIBUTED
     return py::cast(torch::distributed::rpc::PyRRef(
