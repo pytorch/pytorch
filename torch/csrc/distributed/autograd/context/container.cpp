@@ -9,6 +9,7 @@ namespace autograd {
 constexpr int kAutoIncrementBits = 48;
 constexpr int64_t kAutoIncrementMask = (1LL << kAutoIncrementBits) - 1;
 constexpr int kMaxWorkerId = 65535;
+constexpr int kNumCleanupContextRetries = 20;
 
 constexpr int64_t kInvalidContextId = -1;
 
@@ -166,10 +167,26 @@ void DistAutogradContainer::sendReleaseContextRpc(int64_t context_id) {
   // here.
   try {
     auto agent = rpc::RpcAgent::getCurrentRpcAgent();
+    rpc::RpcRetryOptions options;
+    options.maxRetries = kNumCleanupContextRetries;
     for (const auto& worker_id : workerIds) {
-      agent->send(
+      auto cleanupFuture = agent->sendWithRetries(
           agent->getWorkerInfo(worker_id),
-          CleanupAutogradContextReq(context_id).toMessage());
+          CleanupAutogradContextReq(context_id).toMessage(),
+          options);
+
+      cleanupFuture->addCallback(
+          [](const rpc::Message& message /* unused */,
+             const c10::optional<torch::utils::FutureError>& error) {
+            if (error) {
+              std::string errorMsg = c10::str(
+                  "Could not release Dist Autograd Context after ",
+                  kNumCleanupContextRetries,
+                  " attempts.");
+              LOG(ERROR) << errorMsg;
+              return;
+            }
+          });
     }
   } catch (const std::exception& e) {
     LOG(INFO)
