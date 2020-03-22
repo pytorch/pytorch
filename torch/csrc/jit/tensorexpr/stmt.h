@@ -112,6 +112,14 @@ class Block : public StmtNode<Block> {
     return stmts_.size();
   }
 
+  void prepend_stmt(Stmt* s) {
+    if (s->get_parent()) {
+      throw malformed_input(s);
+    }
+
+    stmts_.push_front(s);
+    set_parent(s, this);
+  }
   void append_stmt(Stmt* s) {
     if (s->get_parent()) {
       throw malformed_input(s);

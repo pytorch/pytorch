@@ -681,14 +681,17 @@ Stmt* LoopNest::insertAllocFree(Stmt* stmt) {
   if (intermediate_tensors_.size() == 0ULL) {
     return stmt;
   }
-  std::vector<Stmt*> allocs;
-  std::vector<Stmt*> frees;
+
+  Block* b = dynamic_cast<Block*>(stmt);
+  if (!b) {
+    b = new Block({stmt});
+  }
 
   // TODO: Fix the traversal, currently the order is non-deterministic
   for (Tensor* tensor : intermediate_tensors_) {
     if (inlined_functions_.count(tensor->function()) ||
         inlined_random_functions_.count(tensor->function())) {
-      // No need to allocation memory for intermediate tensors.
+      // No need to allocate memory for intermediate tensors.
       continue;
     }
     if (output_tensors_.count(tensor) > 0) {
@@ -697,15 +700,11 @@ Stmt* LoopNest::insertAllocFree(Stmt* stmt) {
     }
     Stmt* alloc = new Allocate(
         tensor->func_var(), tensor->body()->dtype(), tensor->dims());
-    allocs.push_back(alloc);
     Stmt* free = new Free(tensor->func_var());
-    frees.push_back(free);
+    b->prepend_stmt(alloc);
+    b->append_stmt(free);
   }
-  std::reverse(frees.begin(), frees.end());
-  Stmt* alloc_block = Block::make(allocs);
-  Stmt* free_block = Block::make(frees);
-  Stmt* combined_stmt = Block::make({alloc_block, stmt, free_block});
-  return combined_stmt;
+  return b;
 }
 
 void LoopNest::prepareForCodegen() {
