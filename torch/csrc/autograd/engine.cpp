@@ -859,19 +859,14 @@ void Engine::graph_task_exec_post_processing(
     throw std::runtime_error("could not compute gradients for some functions");
   }
 
-  std::vector<int> depths_with_callbacks;
-  depths_with_callbacks.reserve(graph_task->reentrant_depth_);
   // Lock mutex during each iteration for accessing final_callbacks.size()
   // Unlocking is necessary, because the callback can register
   // more callbacks (or they can be registered from other threads
   // while it's waiting.
   std::unique_lock<std::mutex> cb_lock(post_callbacks_lock_);
-  // collect depths that indeed has callbacks
-  for (auto& entry: final_callbacks_) {
-    depths_with_callbacks.push_back(entry.first);
-  }
-  for (auto& depth: depths_with_callbacks) {
-    auto& reentrant_final_callbacks = final_callbacks_[depth];
+  auto it = final_callbacks_.find(graph_task->reentrant_depth_);
+  if (it != final_callbacks_.end()) {
+    auto& reentrant_final_callbacks = it->second;
     // WARNING: Don't use a range-for loop here because more callbacks may be
     // added in between callback calls, so iterators may become invalidated.
     // NOLINTNEXTLINE(modernize-loop-convert)
