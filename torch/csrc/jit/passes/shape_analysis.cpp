@@ -795,7 +795,7 @@ class ShapePropagator {
         "aten::cos(Tensor self) -> Tensor",
         "aten::cosh(Tensor self) -> Tensor",
         "aten::digamma(Tensor self) -> Tensor",
-        "ate::erf(Tensor self) -> Tensor",
+        "aten::erf(Tensor self) -> Tensor",
         "aten::erfc(Tensor self) -> Tensor",
         "aten::erfinv(Tensor self) -> Tensor",
         "aten::exp(Tensor self) -> Tensor",
