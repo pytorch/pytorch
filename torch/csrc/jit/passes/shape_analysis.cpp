@@ -820,7 +820,7 @@ class ShapePropagator {
           auto ret = type->withDim(0);
           if (isIntegralType(*(type->scalarType()), /*includeBool=*/true)) {
             const auto default_type = at::typeMetaToScalarType(c10::get_default_dtype());
-            ret = ret->withScalarType(default_dtype);
+            ret = ret->withScalarType(default_type);
             return type_vec_t{ret->dimensionedOnly()};
           }
           return type_vec_t{type->dimensionedOnly()};
