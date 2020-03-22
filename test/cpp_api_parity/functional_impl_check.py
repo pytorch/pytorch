@@ -27,7 +27,7 @@ from cpp_api_parity.utils import TorchNNFunctionalTestParams, CppArg, TORCH_NN_C
   compile_cpp_code_inline, convert_to_list, set_python_tensors_requires_grad, move_python_tensors_to_device, \
   has_test, add_test, set_cpp_tensors_requires_grad, move_cpp_tensors_to_device, is_criterion_test, \
   compute_cpp_args_construction_stmts_and_forward_arg_symbols, serialize_arg_dict_as_script_module, \
-  compute_arg_dict, skip_test_fn_if_needed, compute_temp_file_path
+  compute_arg_dict, decorate_test_fn, compute_temp_file_path
 from cpp_api_parity import torch_nn_functionals
 
 # NN tests use double as the default dtype
