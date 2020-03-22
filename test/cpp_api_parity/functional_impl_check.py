@@ -227,6 +227,7 @@ def generate_test_cpp_sources(test_params, template):
   )
   return test_cpp_sources
 
+# Build all C++ tests together, instead of once per test.
 def build_cpp_tests(unit_test_class, print_cpp_source=False):
   if len(torch_nn_test_params_map) > 0:
     cpp_sources = TORCH_NN_COMMON_TEST_HARNESS
