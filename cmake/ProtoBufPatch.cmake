@@ -4,9 +4,18 @@
 
 file(READ ${FILENAME} content)
 
+# protobuf-3.6.0 pattern
 string(
   REPLACE
   "::google::protobuf::internal::GetEmptyStringAlreadyInited"
+  "GetEmptyStringAlreadyInited"
+  content
+  "${content}")
+
+# protobuf-3.8.0+ pattern
+string(
+  REPLACE
+  "::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited"
   "GetEmptyStringAlreadyInited"
   content
   "${content}")
@@ -22,9 +31,9 @@ string(
 # changes PROTOBUF_CONSTEXPR to constexpr, which breaks windows
 # build.
 string(
-  REPLACE
-  "static constexpr int kIndexInFileMessages ="
-  "static int const kIndexInFileMessages ="
+  REGEX REPLACE
+  "static constexpr ([^ ]+) ([^ ]+) ="
+  "static \\1 const \\2 ="
   content
   "${content}")
 
