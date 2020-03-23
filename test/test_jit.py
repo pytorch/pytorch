@@ -1171,6 +1171,22 @@ graph(%x : Tensor,
         assert list(activation_dtypes)[0] != list(weight_dtypes)[0], 'Expected activation dtype to '
         ' be different from wegiht dtype'
 
+    def test_insert_observers_for_reused_weight(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+
+            def forward(self, x, y, weight):
+                x = F.conv2d(x, weight)
+                y = F.conv2d(y, weight)
+                return x + y
+
+        m = torch.jit.script(M()).eval()
+        qconfig_dict = {'' : script_qconfig(default_qconfig)}
+        m = prepare_script(m, qconfig_dict, False)
+        # 3 for x, y, weight, one for output of each F.conv2d
+        assert len(attrs_with_prefix(m, '_observer')) == 5
+
     def test_insert_observers_shared_class_type(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -15948,29 +15964,6 @@ a")
         tester(int_hash, (20, 21, 22))
         tester(float_hash, (20.0, 21.00001, 22.443))
         tester(str_hash, ("", "hello", "a"))
-
-    def test_id(self):
-        with self.assertRaisesRegex(RuntimeError, "Expected a value"): 
-            @torch.jit.script
-            def test_id_scalars():
-                return id(2) == id(None) 
-
-        @torch.jit.script
-        class FooTest(object):
-            def __init__(self, x):
-                self.foo = x
-
-            def getFooTest(self):
-                return self.foo
-
-        def test_id_class_types():
-            a = id(FooTest(torch.tensor(3)))
-            b = id(FooTest(torch.tensor(2)))
-            c = id(None)
-            return a != b and b != c
-
-        script = torch.jit.script(test_id_class_types)
-        self.assertEqual(script(), test_id_class_types())
 
     def test_mutable_dce(self):
         @torch.jit.script
