@@ -3704,7 +3704,7 @@
   use_c10_dispatcher: full
   variants: function
 
-- func: _choose_qparams(Tensor self, bool reduce_range=False) -> (float, int)
+- func: _choose_qparams_per_tensor(Tensor self, bool reduce_range=False) -> (float, int)
   use_c10_dispatcher: full
   variants: function
 

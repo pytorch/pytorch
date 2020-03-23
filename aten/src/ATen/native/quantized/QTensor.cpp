@@ -220,7 +220,7 @@ bool quantized_equal(const Tensor& self, const Tensor& other) {
 }
 
 /* Calculate the quantization params for the activation tensor */
-std::tuple<double, int64_t> _choose_qparams(const Tensor& self, bool reduce_range) {
+std::tuple<double, int64_t> _choose_qparams_per_tensor(const Tensor& self, bool reduce_range) {
   at::Tensor a;
   auto input_contig = self.contiguous();
   float x_min = input_contig.min().item<float>();
@@ -231,7 +231,9 @@ std::tuple<double, int64_t> _choose_qparams(const Tensor& self, bool reduce_rang
         /*max=*/x_max,
         /*qmin=*/0,
         /*qmax=*/255,
-        reduce_range=reduce_range);
+        /*preserve_sparsity=*/false,
+        /*force_scale_power_of_two=*/false,
+        /*reduce_range=*/reduce_range);
 
   return std::make_tuple<double, int64_t>(q_params.scale, q_params.zero_point);
 }
