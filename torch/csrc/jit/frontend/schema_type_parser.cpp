@@ -54,6 +54,7 @@ TypePtr SchemaTypeParser::parseBaseType() {
       {"None", NoneType::get()},
       {"Capsule", CapsuleType::get()},
       {"Any", at::AnyType::get()},
+      {"AnyClassType", at::AnyClassType::get()},
   };
   auto tok = L.cur();
   if (!L.nextIf(TK_NONE)) {
@@ -243,12 +244,16 @@ std::pair<TypePtr, c10::optional<AliasInfo>> SchemaTypeParser::parseType() {
           << "Expected classes namespace but got " << classes_tok.text();
     }
     L.expect('.');
+    auto ns_tok = L.expect(TK_IDENT);
+    L.expect('.');
     auto class_tok = L.expect(TK_IDENT);
     value = getCustomClass(
-        std::string("__torch__.torch.classes.") + class_tok.text());
+        std::string("__torch__.torch.classes.") + ns_tok.text() + "." +
+        class_tok.text());
     if (!value) {
       throw ErrorReport(class_tok.range)
-          << "Unknown custom class type " << class_tok.text()
+          << "Unknown custom class type "
+          << ns_tok.text() + "." + class_tok.text()
           << ". Please ensure it is registered.";
     }
   } else {

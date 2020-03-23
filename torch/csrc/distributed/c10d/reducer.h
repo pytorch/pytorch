@@ -204,6 +204,6 @@ std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
     const std::vector<at::Tensor>& tensors,
     const std::vector<size_t>& bucket_size,
     const std::vector<bool>& expect_sparse_gradient = {},
-    const std::vector<int64_t> tensor_indices = {});
+    const std::vector<int64_t>& tensor_indices = {});
 
 } // namespace c10d

@@ -13,6 +13,10 @@
 #include <torch/csrc/utils/memory.h>
 
 namespace c10d {
+
+constexpr int DEFAULT_FIRST_BUCKET_BYTES = int(1024 * 1024);
+constexpr int DEFAULT_BROADCAST_BUCKET_BYTES = int(250 * 1024 * 1024);
+
 namespace {
 
 // Turns lambda without input/output into a torch::autograd::FunctionPostHook.
@@ -56,7 +60,7 @@ Reducer::Reducer(
       local_used_maps_reduced_(false),
       backward_stats_base_(0),
       was_rebuilt_bucket_(false),
-      bucket_bytes_cap_(std::move(bucket_bytes_cap)) {
+      bucket_bytes_cap_(bucket_bytes_cap) {
   TORCH_CHECK(replicas_.size() >= 1, "Expected at least one model replica.");
   TORCH_CHECK(replicas_[0].size() >= 1, "Expected at least one parameter.");
 
@@ -762,7 +766,7 @@ void Reducer::rebuildBuckets() {
       "rebuild tensor size is not same as rebuild param indices size.");
   std::vector<std::vector<size_t>> rebuilt_bucket_indices;
   std::vector<size_t> bucket_size_limits;
-  bucket_size_limits.push_back(1024 * 1024);
+  bucket_size_limits.push_back(DEFAULT_FIRST_BUCKET_BYTES);
   bucket_size_limits.push_back(bucket_bytes_cap_);
   rebuilt_bucket_indices = compute_bucket_assignment_by_size(
       rebuilt_tensors_,
@@ -773,24 +777,28 @@ void Reducer::rebuildBuckets() {
   // For rebuilt bucket indices, it needs to be synced across all ranks.
   // broadcast the newly rebuilt bucket indices from rank 0 in default.
   // After sync rebuilt bucket indices, initialize buckets for reducer.
-  int64_t broadcast_bucket_size = 250 * 1024 * 1024;
+  int64_t broadcast_bucket_size = DEFAULT_BROADCAST_BUCKET_BYTES;
   auto num_buckets = rebuilt_bucket_indices.size();
   auto num_elem_per_bucket = rebuilt_bucket_indices[0].size();
   int64_t total_size = num_buckets * num_elem_per_bucket;
   at::TensorOptions options;
   options = options.dtype(at::kInt);
   options = options.device(replicas_[0][0].device());
-  auto broadcast_tensor = at::empty({total_size}, options);
-  auto* data = broadcast_tensor.data_ptr<int>();
+  auto broadcast_tensor = at::empty({total_size}, at::kInt);
+  auto accessor = broadcast_tensor.accessor<int, 1>();
   for (size_t i = 0; i < num_buckets; i++) {
     for (size_t j = 0; j < num_elem_per_bucket; j++) {
-      data[i * num_elem_per_bucket + j] = rebuilt_bucket_indices[i][j];
+      accessor[i * num_elem_per_bucket + j] = rebuilt_bucket_indices[i][j];
     }
   }
-  broadcast_coalesced(process_group_, broadcast_tensor, broadcast_bucket_size);
+  auto broadcast_tensor_device = at::empty({total_size}, options);
+  broadcast_tensor_device.copy_(broadcast_tensor, true);
+  broadcast_coalesced(
+      process_group_, broadcast_tensor_device, broadcast_bucket_size);
+  broadcast_tensor.copy_(broadcast_tensor_device);
   for (size_t i = 0; i < num_buckets; i++) {
     for (size_t j = 0; j < num_elem_per_bucket; j++) {
-      rebuilt_bucket_indices[i][j] = data[i * num_elem_per_bucket + j];
+      rebuilt_bucket_indices[i][j] = accessor[i * num_elem_per_bucket + j];
     }
   }
   was_rebuilt_bucket_ = true;
@@ -831,7 +839,7 @@ std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
     const std::vector<at::Tensor>& tensors,
     const std::vector<size_t>& bucket_size_limits,
     const std::vector<bool>& expect_sparse_gradient,
-    const std::vector<int64_t> tensor_indices) {
+    const std::vector<int64_t>& tensor_indices) {
   // Either expect_sparse_gradient is not specified or it has as many elements
   // as the vector with tensors.
   TORCH_INTERNAL_ASSERT(
