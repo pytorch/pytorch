@@ -1465,9 +1465,15 @@ private:
   bool compute_contiguous() const;
 
   bool compute_channels_last_contiguous_2d() const;
+<<<<<<< HEAD
 
   bool compute_channels_last_contiguous_3d() const;
 
+=======
+
+  bool compute_channels_last_contiguous_3d() const;
+
+>>>>>>> pytorch/master
   bool compute_strides_like_channels_last_2d() const;
 
   bool compute_strides_like_channels_last_3d() const;

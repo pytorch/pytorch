@@ -3645,6 +3645,11 @@
   dispatch:
     QuantizedCPU: dequantize_tensors_quant
 
+- func: dequantize.tensors(Tensor[] tensors) -> Tensor[]
+  variants: function
+  dispatch:
+    QuantizedCPU: dequantize_tensors_quant
+
 - func: q_scale(Tensor self) -> float
   use_c10_dispatcher: full
   variants: function, method
