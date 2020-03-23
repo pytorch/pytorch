@@ -4,7 +4,7 @@
 #include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
-#include <torch/csrc/jit/tensorexpr/schedule.h>
+#include <torch/csrc/jit/tensorexpr/loopnest.h>
 
 using namespace torch::jit;
 using namespace torch::jit::tensorexpr;
@@ -990,7 +990,7 @@ void TensorExprKernel::lowerToBackend(BackendType backendType) {
     }
   }
 
-  torch::jit::tensorexpr::schedule::LoopNest l(tensorOutputs);
+  torch::jit::tensorexpr::LoopNest l(tensorOutputs);
 
   // Compute non-output tensors_ inline
   for (auto& p : tensors_) {
