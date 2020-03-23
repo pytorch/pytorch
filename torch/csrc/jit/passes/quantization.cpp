@@ -644,12 +644,6 @@ bool isBiasOfConvOrLinear(Value* v) {
       v,
       AtenFuncArgs({{"conv2d", 2}, {"linear", 2}}),
       CallFuncArgs({{"linear", 3}}));
-  if (result) {
-    TORCH_CHECK(
-        v->uses().size() == 1,
-        "Graph mode quantization only supports conv/linear bias being used by"
-        " one node.");
-  }
   return result;
 }
 
@@ -658,12 +652,6 @@ bool isWeightOfConvOrLinear(Value* v) {
       v,
       AtenFuncArgs({{"conv2d", 1}, {"linear", 1}}),
       CallFuncArgs({{"linear", 2}}));
-  if (result) {
-    TORCH_CHECK(
-        v->uses().size() == 1,
-        "Graph mode quantization only supports conv/linear weight being used by"
-        " one node.");
-  }
   return result;
 }
 
