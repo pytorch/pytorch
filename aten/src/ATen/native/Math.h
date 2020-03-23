@@ -2,6 +2,7 @@
 
 #include <cstdlib>
 #include <cmath>
+#include <cfloat>
 #include <limits>
 #include <type_traits>
 #include <c10/util/math_compat.h>
