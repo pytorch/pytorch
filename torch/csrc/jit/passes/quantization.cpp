@@ -1758,22 +1758,83 @@ std::tuple<at::Tensor, at::Tensor> FoldConvBatchNorm2dHelper::
   return std::make_tuple(new_w, new_b);
 }
 
+bool extractOptionalBNParams(
+    const script::Module& bn,
+    ConvBNParameters& r) {
+  auto bn_forward = bn.get_method("forward");
+  auto graph = bn_forward.graph();
+  const PatternInfo& pattern_bn = PatternInfo::parse_from_str(R"(
+      graph(%a, %weight, %bias, %running_mean, %running_var,
+          %training, %momentum, %eps, %cudnn_enabled):
+        %bn_out = aten::batch_norm(%a, %weight, %bias, %running_mean,
+            %running_var, %training, %momentum, %eps, %cudnn_enabled)
+        return (%bn_out) )");
+  const Graph& pattern_bn_graph = *pattern_bn.pattern_graph;
+  const auto& bn_vmap = pattern_bn.vmap;
+
+  const auto& matches = findPatternMatches(pattern_bn_graph, *graph);
+
+  if (matches.size() > 1) {
+    return false;
+  }
+
+  if (bn.hasattr("eps")) {
+    r.bn_eps = bn.attr("eps").toDouble();
+  } else {
+    auto optional_eps = toIValue(matches[0].values_map.at(bn_vmap.at("eps")));
+    if(!optional_eps) {
+      return false;
+    }
+    r.bn_eps = optional_eps.value().toDouble();
+  }
+  r.bn_w = at::ones_like(bn.attr("running_mean").toTensor());
+  if (bn.hasattr("weight")) {
+    if (bn.attr("weight").isTensor()) {
+      r.bn_w = bn.attr("weight").toTensor();
+    }
+  } else {
+    auto optional_bn_weight =
+      toIValue(matches[0].values_map.at(bn_vmap.at("weight")));
+    if (!optional_bn_weight) {
+      return false;
+    }
+    if (optional_bn_weight.value().isTensor()) {
+      r.bn_w = optional_bn_weight.value().toTensor();
+    }
+  }
+  r.bn_b = at::zeros_like(bn.attr("running_mean").toTensor());
+  if (bn.hasattr("bias")) {
+    if (bn.attr("bias").isTensor()) {
+      r.bn_b = bn.attr("bias").toTensor();
+    }
+  } else {
+    auto optional_bn_bias =
+      toIValue(matches[0].values_map.at(bn_vmap.at("bias")));
+    if (!optional_bn_bias) {
+      return false;
+    }
+
+    if (optional_bn_bias.value().isTensor()) {
+      r.bn_b = optional_bn_bias.value().toTensor();
+    }
+  }
+  return true;
+}
+
 bool FoldConvBatchNorm2dHelper::tryExtractingConvBNParameters(
     Module& conv,
     Module& bn,
     ConvBNParameters& r) {
   if (!hastensor(conv, "weight") || !conv.hasattr("bias") ||
-      !hastensor(bn, "weight") || !hastensor(bn, "bias") ||
-      !hastensor(bn, "running_mean") || !hastensor(bn, "running_var") ||
-      !bn.hasattr("eps")) {
+      !hastensor(bn, "running_mean") || !hastensor(bn, "running_var")) {
     return false;
   }
 
   r.bn_rm = bn.attr("running_mean").toTensor();
   r.bn_rv = bn.attr("running_var").toTensor();
-  r.bn_eps = bn.attr("eps").toDouble();
-  r.bn_w = bn.attr("weight").toTensor();
-  r.bn_b = bn.attr("bias").toTensor();
+  if (!extractOptionalBNParams(bn, r)) {
+    return false;
+  }
 
   r.conv_w = conv.attr("weight").toTensor();
   r.conv_b = at::zeros_like(r.bn_rm);
@@ -1786,11 +1847,14 @@ bool FoldConvBatchNorm2dHelper::tryExtractingConvBNParameters(
 }
 
 void FoldConvBatchNorm2dHelper::analyze(Module& module) {
+  // Dot in the ".Conv2d" and ".BatchNorm2d" is an attempt to
+  // prevent matching module's whose name might end with Conv2d
+  // But are user defined modules.
   const PatternInfo pattern = PatternInfo::parse_from_str(R"IR(
 graph(%self, %x):
-    %conv_submodule = match::module[name="Conv2d"](%self)
+    %conv_submodule = match::module[name=".Conv2d"](%self)
     %conv_out = prim::CallMethod[name="forward"](%conv_submodule, %x)
-    %bn_submodule = match::module[name="BatchNorm2d"](%self)
+    %bn_submodule = match::module[name=".BatchNorm2d"](%self)
     %bn_out = prim::CallMethod[name="forward"](%bn_submodule, %conv_out)
     return (%bn_out))IR");
 
@@ -1918,6 +1982,57 @@ void FoldConvBatchNorm2dHelper::transform() {
   }
   for (auto n : nodes_to_delete_) {
     n->destroy();
+  }
+}
+
+void replaceConv2dBiasWithGetAttr(Module& module) {
+  auto graph = module.get_method("forward").graph();
+  // Only looks fors _convolution pattern.
+  // Thus assumes that tracing will have always gotten rid of aten::conv2d.
+  // If it did not, BN folding will fail.
+  const PatternInfo& pattern_convolution = PatternInfo::parse_from_str(R"(
+      graph(%a, %w, %b, %stride:int[], %padding:int[], %dilation:int[],
+          %transposed:bool, %output_padding:int[], %groups:int, %benchmark:bool,
+          %deterministic:bool, %cudnn_enabled:bool):
+        %conv_out = aten::_convolution(%a, %w, %b, %stride, %padding, %dilation,
+            %transposed, %output_padding, %groups, %benchmark, %deterministic, %cudnn_enabled)
+        return (%conv_out) )");
+  const Graph& pattern_convolution_graph = *pattern_convolution.pattern_graph;
+  const auto& convolution_vmap = pattern_convolution.vmap;
+
+  const auto& matches = findPatternMatches(pattern_convolution_graph, *graph);
+  for (const auto& match : matches) {
+    // We come here only if the bias was not present in the module.
+    // In that case, the corresponding graph will not have getAttr("bias")
+    // Insert that in the graph.
+    // And change _convolution to take the new value.
+    auto conv_node = match.values_map.at(convolution_vmap.at("conv_out"))->node();
+    WithInsertPoint ins(conv_node);
+    Value* bias_attr_val =
+      graph->insertGetAttr(graph->inputs()[0], "bias")
+          ->setType(TensorType::get());
+    constexpr size_t conv_bias_index = 2;
+    conv_node->replaceInput(conv_bias_index, bias_attr_val);
+  }
+}
+
+void addBiasForConv2dIfNone(Module& module) {
+  auto t = module.type()->expect<ClassType>();
+  auto real_typename = t->name()->qualifiedName();
+  const std::string pattern_name("Conv2d");
+  if (real_typename.size() >= pattern_name.size() &&
+      (0 == real_typename.compare(real_typename.size() - pattern_name.size(),
+                                  pattern_name.size(), pattern_name))) {
+    if (!t->hasAttribute("bias")) {
+      auto optional_tensor_type = OptionalType::create(TensorType::get());
+      t->addAttribute("bias", optional_tensor_type, true);
+      auto optional_tensor = c10::optional<at::Tensor>();
+      module.setattr("bias", optional_tensor);
+      replaceConv2dBiasWithGetAttr(module);
+    }
+  }
+  for (Module m : module.children()) {
+    addBiasForConv2dIfNone(m);
   }
 }
 
@@ -2083,6 +2198,7 @@ void QuantFusion(std::shared_ptr<Graph>& graph) {
 Module FoldConvBatchNorm2d(const Module& module) {
   FoldConvBatchNorm2dHelper h;
   Module m = module.clone();
+  addBiasForConv2dIfNone(m);
   h.analyze(m);
   h.transform();
   return m;

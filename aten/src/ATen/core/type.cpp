@@ -214,6 +214,10 @@ AnyTupleTypePtr AnyTupleType::get() {
   return value;
 }
 
+AnyClassTypePtr AnyClassType::get() {
+  static auto value = AnyClassType::create();
+  return value;
+}
 
 c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
   // check direct subtyping relation
@@ -751,6 +755,9 @@ ClassTypePtr ClassType::refine(at::ArrayRef<TypePtr> refined_slots) const {
 }
 
 bool ClassType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
+  if (rhs->cast<AnyClassType>()) {
+    return true;
+  }
   // to improve performance, this check can be cached
   if (auto iface = rhs->cast<InterfaceType>()) {
     // ClassType is not a subtype of InterfaceType if the InterfaceType is a

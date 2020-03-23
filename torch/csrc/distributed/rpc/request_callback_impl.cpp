@@ -337,7 +337,7 @@ void RequestCallbackImpl::processRpc(
     case MessageType::RREF_FORK_REQUEST: {
       auto& rfr = static_cast<RRefForkRequest&>(rpc);
       auto& ctx = RRefContext::getInstance();
-      ctx.addForkOfOwner(rfr.rrefId(), rfr.forkId());
+      ctx.addForkOfOwnerIfNotPresent(rfr.rrefId(), rfr.forkId());
       markComplete(RRefAck().toMessage());
       return;
     }
