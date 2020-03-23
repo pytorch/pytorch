@@ -181,7 +181,7 @@ import glob
 import importlib
 
 from tools.build_pytorch_libs import build_caffe2
-from tools.setup_helpers.env import (IS_WINDOWS, IS_DARWIN,
+from tools.setup_helpers.env import (IS_WINDOWS, IS_DARWIN, IS_LINUX,
                                      check_env_flag, build_type)
 from tools.setup_helpers.cmake import CMake
 
@@ -352,10 +352,10 @@ def build_deps():
 ################################################################################
 
 # the list of runtime dependencies required by this built package
-install_requires = []
+install_requires = ['future']
 
 if sys.version_info <= (2, 7):
-    install_requires += ['future', 'typing']
+    install_requires += ['typing']
 
 missing_pydep = '''
 Missing build dependency: Unable to `import {importname}`.
@@ -377,8 +377,6 @@ class build_ext(setuptools.command.build_ext.build_ext):
         cmake_cache_vars = defaultdict(lambda: False, cmake.get_cmake_cache_variables())
         if cmake_cache_vars['USE_NUMPY']:
             report('-- Building with NumPy bindings')
-            global install_requires
-            install_requires += ['numpy']
         else:
             report('-- NumPy not found')
         if cmake_cache_vars['USE_CUDNN']:
@@ -412,6 +410,12 @@ class build_ext(setuptools.command.build_ext.build_ext):
                 report('-- Building with distributed package ')
         else:
             report('-- Building without distributed package')
+
+        # Do not use clang to compile exensions if `-fstack-clash-protection` is defined
+        # in system CFLAGS
+        system_c_flags = distutils.sysconfig.get_config_var('CFLAGS')
+        if IS_LINUX and '-fstack-clash-protection' in system_c_flags and 'clang' in os.environ.get('CC', ''):
+            os.environ['CC'] = distutils.sysconfig.get_config_var('CC')
 
         # It's an old-style class in Python 2.7...
         setuptools.command.build_ext.build_ext.run(self)
@@ -558,6 +562,7 @@ def configure_extension_build():
     ################################################################################
 
     library_dirs = []
+    extra_install_requires = []
 
     if IS_WINDOWS:
         # /NODEFAULTLIB makes sure we only link to DLL runtime
@@ -618,6 +623,9 @@ def configure_extension_build():
     if cmake_cache_vars['USE_CUDA']:
         library_dirs.append(
             os.path.dirname(cmake_cache_vars['CUDA_CUDA_LIB']))
+
+    if cmake_cache_vars['USE_NUMPY']:
+        extra_install_requires += ['numpy']
 
     if build_type.is_debug():
         if IS_WINDOWS:
@@ -697,7 +705,7 @@ def configure_extension_build():
         ]
     }
 
-    return extensions, cmdclass, packages, entry_points
+    return extensions, cmdclass, packages, entry_points, extra_install_requires
 
 # post run, warnings, printed at the end to make them more visible
 build_update_message = """
@@ -736,7 +744,9 @@ if __name__ == '__main__':
     if RUN_BUILD_DEPS:
         build_deps()
 
-    extensions, cmdclass, packages, entry_points = configure_extension_build()
+    extensions, cmdclass, packages, entry_points, extra_install_requires = configure_extension_build()
+
+    install_requires += extra_install_requires
 
     setup(
         name=package_name,
@@ -787,6 +797,7 @@ if __name__ == '__main__':
                 'include/ATen/native/cpu/*.h',
                 'include/ATen/native/quantized/*.h',
                 'include/ATen/native/quantized/cpu/*.h',
+                'include/ATen/quantized/*.h',
                 'include/caffe2/utils/*.h',
                 'include/caffe2/utils/**/*.h',
                 'include/c10/*.h',
@@ -831,7 +842,12 @@ if __name__ == '__main__':
                 'include/torch/csrc/jit/generated/*.h',
                 'include/torch/csrc/jit/passes/*.h',
                 'include/torch/csrc/jit/passes/utils/*.h',
-                'include/torch/csrc/jit/script/*.h',
+                'include/torch/csrc/jit/runtime/*.h',
+                'include/torch/csrc/jit/ir/*.h',
+                'include/torch/csrc/jit/frontend/*.h',
+                'include/torch/csrc/jit/api/*.h',
+                'include/torch/csrc/jit/serialization/*.h',
+                'include/torch/csrc/jit/python/*.h',
                 'include/torch/csrc/jit/testing/*.h',
                 'include/torch/csrc/onnx/*.h',
                 'include/torch/csrc/utils/*.h',
@@ -847,8 +863,6 @@ if __name__ == '__main__':
                 'include/THH/*.cuh',
                 'include/THH/*.h*',
                 'include/THH/generic/*.h',
-                'include/THNN/*.h',
-                'include/THNN/generic/*.h',
                 'share/cmake/ATen/*.cmake',
                 'share/cmake/Caffe2/*.cmake',
                 'share/cmake/Caffe2/public/*.cmake',
@@ -866,7 +880,7 @@ if __name__ == '__main__':
         download_url='https://github.com/pytorch/pytorch/tags',
         author='PyTorch Team',
         author_email='packages@pytorch.org',
-        python_requires='>=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*, !=3.4.*',
+        python_requires='>=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*, !=3.4.*, !=3.6.0',
         # PyPI package information.
         classifiers=[
             'Development Status :: 5 - Production/Stable',

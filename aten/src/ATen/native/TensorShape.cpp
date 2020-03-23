@@ -14,11 +14,14 @@
 #include <vector>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/native/cpu/CatKernel.h>
 #include <ATen/native/Copy.h>
 #include <ATen/MemoryOverlap.h>
 
 namespace at {
 namespace native {
+
+DEFINE_DISPATCH(cat_serial_stub);
 
 Tensor _reshape_from_tensor(const Tensor& self, const Tensor& shape_tensor) {
   TORCH_CHECK(shape_tensor.dim() == 1);
@@ -37,6 +40,17 @@ Tensor _shape_as_tensor(const Tensor& self) {
 
 Tensor& set_(Tensor& result, Storage source) {
   return result.set_(source, 0, static_cast<int64_t>(source.size()), {});
+}
+
+// unify with cuda implementation?  This is not done to avoid a dispatch in resize_impl_cpu_
+Tensor& set_storage_cpu_(Tensor& result, Storage storage, int64_t storage_offset, IntArrayRef size, IntArrayRef stride) {
+  checkSetStorage(result, storage, storage_offset, size, stride);
+
+  result.unsafeGetTensorImpl()->set_storage_offset(storage_offset);
+  c10::optional<IntArrayRef> stride_opt = stride.data() != nullptr ?
+                                          c10::optional<IntArrayRef>(stride) : c10::nullopt;
+  at::native::resize_impl_cpu_(result.unsafeGetTensorImpl(), size, stride_opt);
+  return result;
 }
 
 Tensor& set_tensor_(Tensor& result, const Tensor& source) {
@@ -83,6 +97,7 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
   // size (i.e. other empty sizes are not skipped).
   // FIXME: warn if this is the case
   bool allSkipped = true;
+  bool allContiguous = true;
   Tensor notSkippedTensor;
 
   // Inputs cannot alias the output tensor
@@ -119,10 +134,16 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
   int64_t cat_dim_size = 0;
   for (auto const &tensor : tensors) {
     if (should_skip(tensor)) {
+      // don't use fast path for empty tensor
+      allContiguous = false;
       continue;
     }
     check_cat_shape_except_dim(notSkippedTensor, tensor, dim);
     cat_dim_size += tensor.size(dim);
+
+    if (!tensor.is_contiguous()) {
+      allContiguous = false;
+    }
 
     if (tensor.sizes() != notSkippedTensor.sizes() ||
         tensor.strides() != notSkippedTensor.strides()) {
@@ -134,6 +155,15 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
   auto result_size = notSkippedTensor.sizes().vec();
   result_size[dim] = cat_dim_size;
   result.resize_(result_size);
+
+  // fast path for single thread when both inputs and result are contiguous and not empty
+  bool use_serial_kernel = result.numel() < at::internal::GRAIN_SIZE || at::get_num_threads() == 1;
+  allContiguous = allContiguous && result.is_contiguous();
+  ScalarType dtype = notSkippedTensor.scalar_type();
+  if (use_serial_kernel && allContiguous && (dtype == ScalarType::Double || dtype == ScalarType::Float)) {
+    cat_serial_stub(kCPU, result, tensors, dim);
+    return result;
+  }
 
   int64_t offset = 0;
   if (reuse_iterator && result.is_contiguous()) {
@@ -183,7 +213,7 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
 
 Tensor _cat_cpu(TensorList tensors, int64_t dim) {
   Tensor result = at::empty({0}, tensors[0].options());
-  return _cat_out_cpu(result, tensors, dim);
+  return native::_cat_out_cpu(result, tensors, dim);
 }
 
 static void check_cat_no_zero_dim(TensorList tensors) {
@@ -566,6 +596,13 @@ Tensor narrow(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
   TORCH_CHECK(length >= 0 && start <= cur_size - length,
            "start (", start, ") + length (", length, ") exceeds dimension size (", cur_size, ").");
   return at::slice(self, dim, start, start + length, 1);
+}
+
+Tensor narrow(const Tensor& self, int64_t dim, const Tensor& start, int64_t length) {
+  TORCH_CHECK(start.dim() == 0 && isIntegralType(start.scalar_type(), /*includeBool=*/false),
+              "start must be an 0-dim integral Tensor.");
+  int64_t st = start.item<int64_t>();
+  return at::narrow(self, dim, st, length);
 }
 
 Tensor permute(const Tensor& self, IntArrayRef dims) {

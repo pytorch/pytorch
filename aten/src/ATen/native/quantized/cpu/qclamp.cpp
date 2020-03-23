@@ -41,6 +41,36 @@ Tensor quantized_clamp(
   return qy;
 }
 
+// hardtanh is clamp with default min==-1.0f and default max==1.0f
+Tensor quantized_hardtanh(
+    const Tensor& qx,
+    Scalar min,
+    Scalar max) {
+  Tensor qy;
+  qy = quantized_clamp_impl(qx, min, max);
+  return qy;
+}
+
+Tensor& quantized_hardtanh_out(
+    Tensor& result,
+    const Tensor& qx,
+    Scalar min,
+    Scalar max) {
+  result = quantized_clamp_impl(qx, min, max);
+  return result;
+}
+
+Tensor& quantized_hardtanh_(
+    Tensor& self,
+    Scalar min,
+    Scalar max) {
+  Tensor qy;
+  qy = quantized_clamp_impl(self, min, max);
+  // This can be optimized in a future PR if it becomes a bottleneck.
+  self.copy_(qy);
+  return self;
+}
+
 // Keep the registry in the anonymous namespace.
 namespace {
 class QClamp final : public c10::OperatorKernel {
@@ -52,8 +82,9 @@ class QClamp final : public c10::OperatorKernel {
 
 static auto registry = c10::RegisterOperators().op(
     "quantized::clamp(Tensor qx, Scalar? min, Scalar? max) -> Tensor qy",
-    c10::RegisterOperators::options().kernel<QClamp>(
-        DispatchKey::QuantizedCPUTensorId));
+    c10::RegisterOperators::options()
+        .aliasAnalysis(at::AliasAnalysisKind::FROM_SCHEMA)
+        .kernel<QClamp>(DispatchKey::QuantizedCPUTensorId));
 } // namespace
 
 } // namespace native

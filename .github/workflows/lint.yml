@@ -105,7 +105,7 @@ jobs:
         run: |
           set -eux
           pip install flake8
-          rm -rf .circleci
+          rm -rf .circleci tools/clang_format_new.py
           flake8 --exit-zero > ${GITHUB_WORKSPACE}/flake8-output.txt
           cat ${GITHUB_WORKSPACE}/flake8-output.txt
       - name: Add annotations
@@ -178,7 +178,6 @@ jobs:
               -s aten/src/ATen \
               -d build/aten/src/ATen \
               aten/src/ATen/Declarations.cwrap \
-              aten/src/THNN/generic/THNN.h \
               aten/src/THCUNN/generic/THCUNN.h \
               aten/src/ATen/nn.yaml \
               aten/src/ATen/native/native_functions.yaml

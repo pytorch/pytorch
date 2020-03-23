@@ -6,6 +6,7 @@ Tensors
 ----------------------------------
 .. autofunction:: is_tensor
 .. autofunction:: is_storage
+.. autofunction:: is_complex
 .. autofunction:: is_floating_point
 .. autofunction:: set_default_dtype
 .. autofunction:: get_default_dtype
@@ -54,6 +55,7 @@ Creation Ops
 .. autofunction:: full_like
 .. autofunction:: quantize_per_tensor
 .. autofunction:: quantize_per_channel
+.. autofunction:: dequantize
 
 Indexing, Slicing, Joining, Mutating Ops
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -181,6 +183,9 @@ Examples::
   >>> y.requires_grad
   False
 
+.. autofunction:: no_grad
+.. autofunction:: enable_grad
+.. autofunction:: set_grad_enabled
 
 Math operations
 ----------------------------------
@@ -246,6 +251,7 @@ Pointwise Ops
 .. autofunction:: square
 .. autofunction:: tan
 .. autofunction:: tanh
+.. autofunction:: true_divide
 .. autofunction:: trunc
 
 
@@ -372,9 +378,13 @@ BLAS and LAPACK Operations
 .. autofunction:: qr
 .. autofunction:: solve
 .. autofunction:: svd
+.. autofunction:: svd_lowrank
+.. autofunction:: pca_lowrank
 .. autofunction:: symeig
+.. autofunction:: lobpcg
 .. autofunction:: trapz
 .. autofunction:: triangular_solve
+
 
 Utilities
 ----------------------------------

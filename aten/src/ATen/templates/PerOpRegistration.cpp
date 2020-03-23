@@ -9,7 +9,7 @@ namespace at {
 
 #ifndef USE_STATIC_DISPATCH
 namespace {
-auto registerer = torch::RegisterOperators()
+auto registerer = torch::import()
   ${function_registrations};
 }
 #endif
