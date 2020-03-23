@@ -213,7 +213,7 @@ Disable JIT for Debugging
     Python. Since TorchScript (scripting and tracing) are disabled with this flag,
     you can use tools like ``pdb`` to debug the model code.
 
-    Given an example script::
+    Given an example 
 
         @torch.jit.script
         def scripted_fn(x : torch.Tensor):
