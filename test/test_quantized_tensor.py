@@ -3,8 +3,12 @@ import numpy as np
 import torch
 import io
 from copy import deepcopy
+from hypothesis import given
 
 from torch.testing._internal.common_utils import TestCase, run_tests
+import torch.testing._internal.hypothesis_utils as hu
+hu.assert_deadline_disabled()
+
 import tempfile
 
 class Foo(torch.nn.Module):
@@ -12,6 +16,35 @@ class Foo(torch.nn.Module):
         super(Foo, self).__init__()
         self.qscheme = torch.per_tensor_symmetric
 
+def _calculate_dynamic_qparams(X, dtype, reduce_range=False):
+    """Calculate the dynamic quantization parameters (scale, zero_point)
+    according to the min and max element of the tensor"""
+    if isinstance(X, torch.Tensor):
+        X = X.numpy()
+    if dtype == torch.qint8:
+        if reduce_range:
+            qmin, qmax = -64, 63
+        else:
+            qmin, qmax = -128, 127
+    else:  # dtype == torch.quint8
+        if reduce_range:
+            qmin, qmax = 0, 127
+        else:
+            qmin, qmax = 0, 255
+    n_levels = 255.0
+    min_val = X.min()
+    max_val = X.max()
+    min_val = min(0.0, min_val)
+    max_val = max(0.0, max_val)
+    if min_val == max_val:
+        scale = 0.1
+        zero_point = 0
+    else:
+        scale = (max_val - min_val) / n_levels
+        zero_point = qmin - round(min_val / scale)
+        zero_point = max(qmin, zero_point)
+        zero_point = min(qmax, zero_point)
+    return [float(scale), int(zero_point)]
 
 class TestQuantizedTensor(TestCase):
     def test_qtensor(self):
@@ -363,6 +396,18 @@ class TestQuantizedTensor(TestCase):
 
         self.assertEqual(f2.qscheme, torch.per_tensor_symmetric)
 
+    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=2, max_dims=4,
+                                              min_side=1, max_side=10),
+                       qparams=hu.qparams()),
+           reduce_range=st.booleans()
+           )
+    def test_choose_qparams(self, X, reduce_range):
+        X, (scale, zero_point, torch_type) = X
+        X = torch.from_numpy(X)
+        X_scale, X_zp = _calculate_dynamic_qparams(X, torch.quint8, reduce_range=reduce_range)
+        qparams = torch._choose_qparams(X, reduce_range)
+        np.testing.assert_array_almost_equal(X_scale, qparams[0], decimal=4)
+        self.assertEqual(X_zp, qparams[1])
 
 if __name__ == "__main__":
     run_tests()
