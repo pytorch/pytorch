@@ -8134,6 +8134,16 @@ class TestNNInit(TestCase):
         p_value = stats.kstest(samples, 'norm', args=(mean, std))[1]
         return p_value > 0.0001
 
+    def _is_trunc_normal(self, tensor, mean, std, a, b):
+        # scipy's trunc norm is suited for data drawn from N(0, 1),
+        # so we need to transform our data to test it using scipy.
+        z_samples = (tensor.view(-1) - mean) / std
+        z_samples = z_samples.tolist()
+        a0 = (a - mean) / std
+        b0 = (b - mean) / std
+        p_value = stats.kstest(z_samples, 'truncnorm', args=(a0, b0))[1]
+        return p_value > 0.0001
+
     def _is_uniform(self, tensor, a, b):
         samples = tensor.view(-1).tolist()
         p_value = stats.kstest(samples, 'uniform', args=(a, (b - a)))[1]
@@ -8206,6 +8216,18 @@ class TestNNInit(TestCase):
             init.normal_(input_tensor, mean=mean, std=std)
 
             assert self._is_normal(input_tensor, mean, std)
+
+    @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
+    def test_trunc_normal(self):
+        for dims in [1, 2, 4]:
+            input_tensor = self._create_random_nd_tensor(dims, size_min=30, size_max=50)
+            mean = self._random_float(-3, 3)
+            std = self._random_float(.01, 1)
+            a = self._random_float(mean - 2 * std, mean)
+            b = self._random_float(mean, mean + 2 * std)
+            init.trunc_normal_(input_tensor, mean=mean, std=std, a=a, b=b)
+
+            assert self._is_trunc_normal(input_tensor, mean, std, a, b)
 
     def test_constant(self):
         for dims in [1, 2, 4]:
