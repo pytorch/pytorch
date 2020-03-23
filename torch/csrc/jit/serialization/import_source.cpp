@@ -267,13 +267,13 @@ struct SourceImporterImpl : public Resolver,
     // Previously we would serialize TorchBind classes as actual
     // classes with methods that delegate to things in the
     // torch.ops.* namespace. We've switched away from this and
-    // now just rely on those classes being present in the class
-    // and emitting code for them based on the ClassType in memory.
+    // now just rely on those classes being present in the binary
+    // and emit code for them based on the ClassType in memory.
     //
     // TODO: remove this once we no longer have old TorchBind code
     // in production models
     {
-      QualifiedName torch_classes_qualname("__torch__.torch.classes");
+      static QualifiedName torch_classes_qualname("__torch__.torch.classes");
       if (torch_classes_qualname.isPrefixOf(qualified_classname)) {
         return;
       }
