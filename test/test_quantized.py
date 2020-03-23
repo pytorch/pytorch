@@ -1403,6 +1403,8 @@ class TestQuantizedOps(TestCase):
            Y_scale=st.floats(0.2, 2.6),
            Y_zero_point=st.integers(0, 5))
     def test_batch_norm(self, X, Y_scale, Y_zero_point):
+        if "fbgemm" not in torch.backends.quantized.supported_engines:
+            return
 
         with override_quantized_engine("fbgemm"):
             X, (scale_x, zero_point_x, dtype_x) = X
@@ -1429,6 +1431,8 @@ class TestQuantizedOps(TestCase):
            Y_scale=st.floats(0.2, 2.6),
            Y_zero_point=st.integers(0, 5))
     def test_batch_norm_relu(self, X, Y_scale, Y_zero_point):
+        if "fbgemm" not in torch.backends.quantized.supported_engines:
+            return
 
         with override_quantized_engine("fbgemm"):
             X, (scale_x, zero_point_x, dtype_x) = X
@@ -1462,6 +1466,8 @@ class TestQuantizedOps(TestCase):
            Y_scale=st.floats(0.2, 2.6),
            Y_zero_point=st.integers(0, 5))
     def test_batch_norm3d(self, X, Y_scale, Y_zero_point):
+        if "fbgemm" not in torch.backends.quantized.supported_engines:
+            return
 
         with override_quantized_engine("fbgemm"):
             X, (scale_x, zero_point_x, dtype_x) = X
