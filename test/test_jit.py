@@ -15882,29 +15882,6 @@ a")
         tester(float_hash, (20.0, 21.00001, 22.443))
         tester(str_hash, ("", "hello", "a"))
 
-    def test_id(self):
-        with self.assertRaisesRegex(RuntimeError, "Expected a value"): 
-            @torch.jit.script
-            def test_id_scalars():
-                return id(2) == id(None) 
-
-        @torch.jit.script
-        class FooTest(object):
-            def __init__(self, x):
-                self.foo = x
-
-            def getFooTest(self):
-                return self.foo
-
-        def test_id_class_types():
-            a = id(FooTest(torch.tensor(3)))
-            b = id(FooTest(torch.tensor(2)))
-            c = id(None)
-            return a != b and b != c
-
-        script = torch.jit.script(test_id_class_types)
-        self.assertEqual(script(), test_id_class_types())
-
     def test_mutable_dce(self):
         @torch.jit.script
         def foo():
