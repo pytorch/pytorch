@@ -19,6 +19,8 @@ However, if any of the above is proven to be too complicated, you can just add
 `test_cpp_api_parity=False` to any failing test params dict in `torch/testing/_internal/common_nn.py`,
 and the C++ API parity test for that test params dict will be skipped accordingly.
 '''
+import cpp_api_parity.utils
+cpp_api_parity.utils.extra_msg_on_failure = MESSAGE_HOW_TO_FIX_CPP_PARITY_TEST_FAILURE
 
 import os
 
@@ -53,7 +55,7 @@ for test_params_dicts, test_instance_class in [
 assert len([name for name in TestCppApiParity.__dict__ if 'SampleModule' in name]) == \
   len(sample_module.module_tests) * len(devices)
 assert len([name for name in TestCppApiParity.__dict__ if 'sample_functional' in name]) == \
-  len(sample_functional.functional_tests) * len(['cpu', 'cuda'])
+  len(sample_functional.functional_tests) * len(devices)
 
 module_impl_check.build_cpp_tests(TestCppApiParity, print_cpp_source=print_cpp_source)
 functional_impl_check.build_cpp_tests(TestCppApiParity, print_cpp_source=print_cpp_source)

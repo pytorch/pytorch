@@ -7,8 +7,6 @@ import torch.utils.cpp_extension
 import torch.testing._internal.common_nn as common_nn
 from torch.testing._internal.common_cuda import TEST_CUDA
 
-from cpp_api_parity import MESSAGE_HOW_TO_FIX_CPP_PARITY_TEST_FAILURE
-
 TorchNNModuleTestParams = namedtuple(
   'TorchNNModuleTestParams',
   [
@@ -226,6 +224,8 @@ def decorate_test_fn(test_fn, test_cpp_api_parity, test_cuda, has_impl_parity, d
 
   return test_fn
 
+extra_msg_on_failure = ''
+
 def generate_error_msg(name, cpp_value, python_value):
   return "Parity test failed: {} in C++ has value: {}, which does not match the corresponding value in Python: {}.\n{}".format(
-    name, cpp_value, python_value, MESSAGE_HOW_TO_FIX_CPP_PARITY_TEST_FAILURE)
+    name, cpp_value, python_value, extra_msg_on_failure)
