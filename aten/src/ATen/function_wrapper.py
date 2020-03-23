@@ -1208,7 +1208,8 @@ def create_generic(top_env, declarations):
             if not option['manual_kernel_registration']:
                 op_registrations.append(OpRegistration(
                     operator_name=OPERATOR_NAME.substitute(option),
-                    registration_code=SCHEMA_REGISTRATION.substitute(option)))
+                    registration_code=SCHEMA_REGISTRATION.substitute(option),
+                    schema_registration_code=SCHEMA_REGISTRATION.substitute(option)))
                 if option['use_c10_dispatcher'] == 'full':
                     op_registrations.append(OpRegistration(
                         operator_name=OPERATOR_NAME.substitute(option),
