@@ -246,13 +246,12 @@ class TestQuantizedTensor(TestCase):
             self.assertEqual(qrv, qrv2)
             self.assertEqual(qr2.storage().data_ptr(), qrv2.storage().data_ptr())
 
-    # quint32 is not supported yet
+    # quint32, cuda is not supported yet
     @given(dtype=st.sampled_from([torch.qint8, torch.quint8]))
     def test_qtensor_per_channel_load_save(self, dtype):
         r = torch.rand(20, 10, dtype=torch.float) * 4 - 2
         scales = torch.rand(10, dtype=torch.double) * 0.02 + 0.01
         zero_points = torch.round(torch.rand(10) * 20 + 1).to(torch.long)
-
         qr = torch.quantize_per_channel(r, scales, zero_points, 1, dtype)
         with tempfile.NamedTemporaryFile() as f:
             # Serializing and Deserializing Tensor
@@ -290,6 +289,7 @@ class TestQuantizedTensor(TestCase):
         with self.assertRaisesRegex(RuntimeError, "please use dequantize"):
             r.copy_(q)
 
+    # cuda is not supported yet
     @given(device=st.sampled_from(['cpu']))
     def test_torch_qtensor_deepcopy(self, device):
         # deep copy
@@ -331,6 +331,7 @@ class TestQuantizedTensor(TestCase):
         self.assertNotEqual(b.stride(), c.stride())
         # size is the same but the underlying data is different
         self.assertNotEqual(b.int_repr(), c.int_repr())
+        # torch.equal is not supported for the cuda backend
         if device == 'cpu':
             self.assertFalse(torch.equal(b, c))
 
@@ -364,6 +365,7 @@ class TestQuantizedTensor(TestCase):
         self.assertEqual(b.q_zero_point(), c.q_zero_point())
         self.assertNotEqual(b.stride(), c.stride())
         self.assertNotEqual(b.int_repr(), c.int_repr())
+        # torch.equal is not supported for the cuda backend
         if device == 'cpu':
             self.assertFalse(torch.equal(b, c))
 

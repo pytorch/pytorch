@@ -69,6 +69,7 @@ void copy_device_to_device(TensorIterator& iter, bool non_blocking) {
       });
     }
   }
+  
   if (src_device != dst_device) {
     // dst waits on src barrier (dst already waits on dst). We cannot
     // operate on dst's copy until the copy is complete.

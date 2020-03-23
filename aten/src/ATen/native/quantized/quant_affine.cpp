@@ -2,19 +2,6 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/native/quantized/quant_affine.h>
 
-// #include <ATen/ATen.h>
-// #include <ATen/Parallel.h>
-// #include <ATen/quantized/Quantizer.h>
-// #include <c10/core/Allocator.h>
-// #include <c10/core/CPUAllocator.h>
-// #include <ATen/Dispatch.h>
-// #include <ATen/NativeFunctions.h>
-// #include <ATen/native/TensorFactories.h>
-// #include <ATen/native/utils/Allocator.h>
-// #include <ATen/quantized/QTensorImpl.h>
-// #include <ATen/core/Tensor.h>
-// #include <typeinfo>
-
 namespace at {
 namespace native {
 
