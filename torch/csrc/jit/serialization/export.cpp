@@ -1,6 +1,7 @@
 #include <torch/csrc/autograd/symbolic.h>
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
+#include <torch/csrc/jit/serialization/import_export_functions.h>
 #include <torch/csrc/onnx/onnx.h>
 
 #include <ATen/core/functional.h>
@@ -916,11 +917,6 @@ void check_onnx_proto(const std::string& proto_string) {
     }
     onnx::checker::check_model(model);
 }
-
-void moduleMethodsTuple(
-    const Module& module,
-    std::vector<c10::IValue>& elements);
-IValue expect_field(IValue tup, const std::string& expected_name, size_t entry);
 
 namespace {
 void export_opnames(const script::Module& m, std::set<std::string>& opnames) {
