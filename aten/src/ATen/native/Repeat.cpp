@@ -1,3 +1,5 @@
+#include <vector>
+
 #include <ATen/ATen.h>
 #include <ATen/native/Repeat.h>
 #include <ATen/Parallel.h>
@@ -16,12 +18,6 @@ static void compute_cpu(int64_t *repeat_ptr, int64_t *cumsum_ptr, int64_t *resul
 }
 
 namespace at { namespace native {
-
-static inline IntArrayRef to_intarrayref(const Tensor& t){
-    TORCH_CHECK(t.dim() == 1, "shape tensor should be a vector");
-    TORCH_CHECK(t.scalar_type() == at::kLong, "shape has to be Long tensor");
-    return IntArrayRef(t.data_ptr<int64_t>(), t.size(0));
-}
 
 Tensor repeat_interleave_cpu(const Tensor &repeat) {
     return repeat_interleave_common<compute_cpu>(repeat);
@@ -45,13 +41,14 @@ Tensor repeat_interleave(const Tensor &self, const Tensor &repeats, c10::optiona
 
     Tensor indices = at::repeat_interleave(repeats_);
 
-    Tensor indices_sizes = at::ones({self.dim()}, TensorOptions(at::kLong));
+    std::vector<int64_t> indices_sizes(/*n=*/self.dim(), /*value=*/1);
     indices_sizes[dim.value()] = indices.size(0);
-    indices = indices.reshape(to_intarrayref(indices_sizes));
+    indices = indices.reshape(indices_sizes);
 
-    Tensor expanded_indices_shape = at::_shape_as_tensor(self).clone();
+    auto self_shape = self.sizes();
+    std::vector<int64_t> expanded_indices_shape(self_shape.begin(), self_shape.end());
     expanded_indices_shape[dim.value()] = -1;
-    indices = indices.expand(to_intarrayref(expanded_indices_shape));
+    indices = indices.expand(IntArrayRef(expanded_indices_shape));
 
     return input.gather(dim.value(), indices);
 }
