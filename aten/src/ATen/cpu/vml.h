@@ -39,13 +39,10 @@
 // https://bugs.launchpad.net/ubuntu/+source/glibc/+bug/1663280. Calling zeroall
 // when using AVX/AVX2 code resolves this.
 #if defined(__AVX__) && defined(__GLIBC__) && __GLIBC_MINOR__ == 23
-#define DL_RUNTIME_BUG(op, type)                              \
-  using value_t = typename at::native::ztype<type>::value_t;  \
-  volatile value_t x = (value_t)(1);                          \
-  x = std::op(x);                                             \
-  _mm256_zeroall();
+// Avoid AVX/SSE transition overhead
+#define DL_RUNTIME_BUG _mm256_zeroall();
 #else
-#define DL_RUNTIME_BUG(op, type)
+#define DL_RUNTIME_BUG
 #endif
 
 namespace at {
@@ -78,7 +75,7 @@ inline void vrsqrt(scalar_t* out, scalar_t* in, int64_t size) {
 #define IMPLEMENT_VML_BUG(op)                                          \
   template <typename scalar_t>                                          \
   inline void v##op(scalar_t* out, const scalar_t* in, int64_t size) {  \
-    DL_RUNTIME_BUG(op, scalar_t)                                        \
+    DL_RUNTIME_BUG                                                      \
     parallel_for(0, size, 2048, [out, in](int64_t begin, int64_t end) { \
       map([](const Vec256<scalar_t>& x) { return x.op(); },             \
           out + begin,                                                  \
