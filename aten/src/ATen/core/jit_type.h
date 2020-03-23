@@ -24,6 +24,7 @@ struct CompilationUnit;
 namespace c10 {
 
 struct FunctionSchema;
+struct NamedType;
 using OptNameList = c10::optional<std::vector<std::string>>;
 
 #define C10_FORALL_TYPES(_) \
@@ -129,6 +130,18 @@ struct CAFFE2_API Type : std::enable_shared_from_this<Type> {
       return std::static_pointer_cast<const T>(shared_from_this());
     }
     return nullptr;
+  }
+  std::shared_ptr<NamedType> cast() {
+    if (kind() == TypeKind::FunctionType || kind() == TypeKind::ClassType ||
+        kind() == TypeKind::InterfaceType) {
+      return std::static_pointer_cast<NamedType>(shared_from_this());
+    }
+  }
+  std::shared_ptr<const NamedType> cast() const {
+    if (kind() == TypeKind::FunctionType || kind() == TypeKind::ClassType ||
+        kind() == TypeKind::InterfaceType) {
+      return std::static_pointer_cast<const NamedType>(shared_from_this());
+    }
   }
   template <typename T>
   std::shared_ptr<T> expect() {
