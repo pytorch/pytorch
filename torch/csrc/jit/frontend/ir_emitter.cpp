@@ -1,9 +1,9 @@
+#include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/frontend/canonicalize_modified_loop.h>
 #include <torch/csrc/jit/frontend/convert_to_ssa.h>
-#include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/frontend/parser.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/frontend/script_type_parser.h>
@@ -1538,9 +1538,9 @@ struct to_ir {
             return false;
           }
           if ((typ->isSubtypeOf(AnyListType::get()) &&
-                  maybeOfKind(ListType::Kind, actual_type)) ||
+               maybeOfKind(ListType::Kind, actual_type)) ||
               (typ->isSubtypeOf(AnyTupleType::get()) &&
-                  maybeOfKind(TupleType::Kind, actual_type))) {
+               maybeOfKind(TupleType::Kind, actual_type))) {
             return false;
           }
         }
@@ -1863,9 +1863,7 @@ struct to_ir {
     environment_stack->setVar(lhs.range(), lhs.name().name(), result);
   }
 
-  Value* emitAugAssignmentHelper(
-      const AugAssign& stmt,
-      Value* lhs) {
+  Value* emitAugAssignmentHelper(const AugAssign& stmt, Value* lhs) {
     if (lhs->type()->kind() == TypeKind::ClassType) {
       // Call `__iadd__` so updates happen in place on class types
       // https://docs.python.org/3/reference/datamodel.html#object.__iadd__
@@ -2803,7 +2801,7 @@ struct to_ir {
       // Unroll args from a Var that is known to be a Tuple.
       auto& args_tree = args_kwargs_trees[0];
       auto entry_sugared_values = emitSugaredExpr(Expr(args_tree), 1)
-                                       ->asTuple(args_tree->range(), method);
+                                      ->asTuple(args_tree->range(), method);
       args.reserve(entry_sugared_values.size());
       for (const auto& entrie_sugared_value : entry_sugared_values) {
         args.emplace_back(
@@ -2815,7 +2813,8 @@ struct to_ir {
       // users can construct kwargs = {"first" + "_arg" : 1}.
       // Notice the key is determined at run time.
       // We can do it at compile time, unless one day the RPC API is
-      // rpc_async(to, user_callable, arg_0, arg_1, kwarg_0="foo", kwarg_1="bar")
+      // rpc_async(to, user_callable, arg_0, arg_1, kwarg_0="foo",
+      // kwarg_1="bar")
     }
     matchSchema(functionSchema, loc, *graphPtr, args, kwargs);
 

@@ -1,9 +1,9 @@
 #pragma once
 
+#include <ATen/ATen.h>
 #include <torch/csrc/jit/tensorexpr/buffer.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
-#include <ATen/ATen.h>
 
 namespace torch {
 namespace jit {
@@ -163,8 +163,12 @@ class RegisterCodeGen {
   explicit RegisterCodeGen(const std::string& name) {
     RegisterCodeGenList& codegen_list = RegisterCodeGenList::GetInstance();
     codegen_list.AddStmtFactoryMethod(
-        name, [](Stmt* stmt, const std::vector<CodeGen::BufferArg>& params, at::Device device) {
-          std::unique_ptr<CodeGen> method(new CodeGenType(stmt, params, device));
+        name,
+        [](Stmt* stmt,
+           const std::vector<CodeGen::BufferArg>& params,
+           at::Device device) {
+          std::unique_ptr<CodeGen> method(
+              new CodeGenType(stmt, params, device));
           return method;
         });
   }

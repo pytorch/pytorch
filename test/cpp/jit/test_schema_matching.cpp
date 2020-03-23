@@ -16,12 +16,13 @@ void testSchemaMatching() {
         Operator(
             "aten::test_vartype(t[] a, t b) -> (t)",
             [](Stack& stack) {
-                c10::List<double> list;
-                double a;
-                pop(stack, list, a);
-                push(stack, a);
-                return 0;
-            }, c10::AliasAnalysisKind::FROM_SCHEMA),
+              c10::List<double> list;
+              double a;
+              pop(stack, list, a);
+              push(stack, a);
+              return 0;
+            },
+            c10::AliasAnalysisKind::FROM_SCHEMA),
     });
     Module m("m");
     m.define(R"(
@@ -42,10 +43,11 @@ void testSchemaMatching() {
     std::string err = "";
     try {
       m.define(error_example);
-    } catch (const std::exception &e) {
+    } catch (const std::exception& e) {
       err = e.what();
     }
-    TORCH_INTERNAL_ASSERT(err.find("previously matched to type") != std::string::npos);
+    TORCH_INTERNAL_ASSERT(
+        err.find("previously matched to type") != std::string::npos);
   }
   {
     RegisterOperators reg({
@@ -57,7 +59,8 @@ void testSchemaMatching() {
               pop(stack, a, list);
               push(stack, a);
               return 0;
-            }, AliasAnalysisKind::FROM_SCHEMA),
+            },
+            AliasAnalysisKind::FROM_SCHEMA),
     });
     Module m("m");
     m.define(R"JIT(
@@ -74,14 +77,14 @@ void testSchemaMatching() {
           return torch.test_vartype2(3.0, a)
     )JIT";
 
-
     std::string err = "";
     try {
       m.define(error_exam2);
-    } catch (const std::exception &e) {
+    } catch (const std::exception& e) {
       err = e.what();
     }
-    TORCH_INTERNAL_ASSERT(err.find("previously matched to type") != std::string::npos);
+    TORCH_INTERNAL_ASSERT(
+        err.find("previously matched to type") != std::string::npos);
   }
 }
 } // namespace jit

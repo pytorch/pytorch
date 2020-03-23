@@ -1,9 +1,9 @@
-#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
+#include <torch/csrc/jit/jit_log.h>
 
-#include <torch/csrc/jit/runtime/graph_executor_impl.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/passes/inliner.h>
+#include <torch/csrc/jit/runtime/graph_executor_impl.h>
 
 #include <stack>
 
@@ -64,10 +64,7 @@ class AttributePropagator {
   // corresponding value. Based on initial test on resnet50 and other torch
   // vision tests. GetAttrs are not too frequent so it is ok to chase GetAttr
   // chain to retrieve their values.
-  bool findConstantAttr(
-      Node* node,
-      std::string& name,
-      Module& attrModule) {
+  bool findConstantAttr(Node* node, std::string& name, Module& attrModule) {
     names_.clear();
     while (!(node->outputs()[0]->type() == attrModule.type())) {
       if (node->kind() == prim::GetAttr) {
@@ -233,9 +230,7 @@ class AttributePropagator {
   }
 
   void propagateAttributes(std::shared_ptr<Graph>& graph) {
-    std::unordered_map<
-        ModulePtr,
-        std::unordered_map<std::string, Value*>>
+    std::unordered_map<ModulePtr, std::unordered_map<std::string, Value*>>
         attrValues;
     auto isEval = !module_.is_training();
     GRAPH_DEBUG("Freezing Module in ", isEval ? "eval mode" : "training mode");
@@ -349,8 +344,7 @@ class AttributePropagator {
   }
 
   // Contains attributes that can't be folded or user directs to keep them.
-  std::unordered_map<ModulePtr, IValue::HashAliasedIValues>
-      preservedAttrs_;
+  std::unordered_map<ModulePtr, IValue::HashAliasedIValues> preservedAttrs_;
   // Tracked immutable types (Scalars) by their attribute names not
   // IValues.
   std::unordered_map<ModulePtr, std::unordered_set<std::string>>

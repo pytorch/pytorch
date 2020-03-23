@@ -1,8 +1,8 @@
 #pragma once
 
-#include <torch/csrc/jit/runtime/operator.h>
-#include <ATen/core/stack.h>
 #include <ATen/core/op_registration/op_registration.h>
+#include <ATen/core/stack.h>
+#include <torch/csrc/jit/runtime/operator.h>
 
 namespace torch {
 namespace jit {

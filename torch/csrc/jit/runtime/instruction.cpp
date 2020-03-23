@@ -1,6 +1,6 @@
 #include <torch/csrc/jit/runtime/instruction.h>
-#include <iostream>
 #include <cstring>
+#include <iostream>
 
 namespace torch {
 namespace jit {
@@ -15,7 +15,7 @@ std::ostream& operator<<(std::ostream& out, OpCode op) {
   return out;
 }
 
-char const * toString(OpCode op) {
+char const* toString(OpCode op) {
   switch (op) {
 #define OP_STRING(x, _) \
   case x:               \
@@ -38,7 +38,9 @@ const char* OpInfo(OpCode op) {
 }
 
 static constexpr size_t instruction_size = 8;
-static_assert(sizeof(Instruction) == instruction_size, "Instructions should be 8 bytes");
+static_assert(
+    sizeof(Instruction) == instruction_size,
+    "Instructions should be 8 bytes");
 std::ostream& operator<<(std::ostream& out, Instruction inst) {
   // TODO: use op info to print out the op in a more user-friendly way
   int nargs = std::strlen(OpInfo(inst.op));
@@ -52,18 +54,17 @@ std::ostream& operator<<(std::ostream& out, Instruction inst) {
   return out;
 }
 
-static constexpr char *strOpCode[] = {
+static constexpr char* strOpCode[] = {
 #define STR_OP(x, _) #x,
     FORALL_OPCODES(STR_OP)
 #undef STR_OP
 };
 
-OpCode parseOpCode(const char *str) {
+OpCode parseOpCode(const char* str) {
   const int n = sizeof(strOpCode) / sizeof(strOpCode[0]);
-  for (int i = 0; i < n; ++i)
-  {
+  for (int i = 0; i < n; ++i) {
     if (strcmp(strOpCode[i], str) == 0)
-      return (OpCode) i;
+      return (OpCode)i;
   }
   return OP;
 }
@@ -76,10 +77,11 @@ bool isOpSupportedInMobile(OpCode op) {
   // clang-format on
 
   for (auto sop : supported_ops_in_mobile) {
-    if (op == sop) return true;
+    if (op == sop)
+      return true;
   }
   return false;
 }
 
-}
-}
+} // namespace jit
+} // namespace torch

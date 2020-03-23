@@ -4,9 +4,9 @@
 #include <aten/src/ATen/ExpandUtils.h>
 #include <torch/csrc/api/include/torch/utils.h>
 #include <torch/csrc/autograd/profiler.h>
+#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/operator.h>
-#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 
 #include <aten/src/ATen/InitialTensorOptions.h>
@@ -50,8 +50,7 @@ at::Tensor castTensorTo(
     const IValue& device) {
   at::ScalarType scalar_type =
       dtype.isNone() ? self.scalar_type() : dtype.toScalarType();
-  c10::Device dev =
-      device.isNone() ? self.device() : device.toDevice();
+  c10::Device dev = device.isNone() ? self.device() : device.toDevice();
   if (scalar_type != self.scalar_type() || dev != self.device()) {
     self = self.to(dev, scalar_type);
   }
@@ -130,59 +129,58 @@ void recursiveStore(
   }
 }
 
-template<bool if_set_requires_grad>
+template <bool if_set_requires_grad>
 int createTensorFromList(Stack& stack) {
-    // torch.tensor has a fourth requires_grad arg but torch.as_tensor not, so
-    // we use the template arg to distinguish between these two cases
-    bool requires_grad;
-    IValue data;
-    IValue dtype;
-    IValue device;
-    if (if_set_requires_grad) {
-      pop(stack, data, dtype, device, requires_grad);
-    } else {
-      pop(stack, data, dtype, device);
-    }
-    auto elem_type = data.type();
-    while (auto list_type = elem_type->cast<ListType>()) {
-      elem_type = list_type->getElementType();
-    }
-    auto sizes = compute_sizes(data);
-    checkListInputType(elem_type, sizes.size() == 1 && sizes[0] == 0);
-    at::ScalarType initial_scalar_type = scalarTypeFromJitType(elem_type);
+  // torch.tensor has a fourth requires_grad arg but torch.as_tensor not, so
+  // we use the template arg to distinguish between these two cases
+  bool requires_grad;
+  IValue data;
+  IValue dtype;
+  IValue device;
+  if (if_set_requires_grad) {
+    pop(stack, data, dtype, device, requires_grad);
+  } else {
+    pop(stack, data, dtype, device);
+  }
+  auto elem_type = data.type();
+  while (auto list_type = elem_type->cast<ListType>()) {
+    elem_type = list_type->getElementType();
+  }
+  auto sizes = compute_sizes(data);
+  checkListInputType(elem_type, sizes.size() == 1 && sizes[0] == 0);
+  at::ScalarType initial_scalar_type = scalarTypeFromJitType(elem_type);
 
-    auto tensor = at::empty(
-        sizes, at::initialTensorOptions().dtype(initial_scalar_type));
+  auto tensor =
+      at::empty(sizes, at::initialTensorOptions().dtype(initial_scalar_type));
 
-    recursiveStore(
-        (char*)tensor.data_ptr(),
-        sizes,
-        tensor.strides(),
-        0,
-        tensor.element_size(),
-        data);
+  recursiveStore(
+      (char*)tensor.data_ptr(),
+      sizes,
+      tensor.strides(),
+      0,
+      tensor.element_size(),
+      data);
 
-    tensor = castTensorTo(tensor, dtype, device);
-    auto default_type = at::typeMetaToScalarType(at::get_default_dtype());
+  tensor = castTensorTo(tensor, dtype, device);
+  auto default_type = at::typeMetaToScalarType(at::get_default_dtype());
 
-    if (dtype.isNone() && tensor.scalar_type() != default_type &&
-        tensor.numel() == 0) {
-      TORCH_WARN(
-          "Creating a tensor from an empty ",
-          elem_type->python_str(),
-          "list will create a tensor of default floating point type  (currently ",
-          default_type,
-          ") in python but a tensor of type ",
-          elem_type->python_str(),
-          " in torchscript.\n",
-          "Pass in a dtype argument to ensure consistent behavior");
-    }
-    if (if_set_requires_grad) {
-      tensor.set_requires_grad(requires_grad);
-    }
-    push(stack, std::move(tensor));
-    return 0;
-
+  if (dtype.isNone() && tensor.scalar_type() != default_type &&
+      tensor.numel() == 0) {
+    TORCH_WARN(
+        "Creating a tensor from an empty ",
+        elem_type->python_str(),
+        "list will create a tensor of default floating point type  (currently ",
+        default_type,
+        ") in python but a tensor of type ",
+        elem_type->python_str(),
+        " in torchscript.\n",
+        "Pass in a dtype argument to ensure consistent behavior");
+  }
+  if (if_set_requires_grad) {
+    tensor.set_requires_grad(requires_grad);
+  }
+  push(stack, std::move(tensor));
+  return 0;
 }
 
 RegisterOperators reg({

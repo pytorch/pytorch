@@ -10,12 +10,13 @@
 #include <torch/csrc/jit/mobile/observer.h>
 #endif
 
-namespace torch{
-namespace jit{
-char const * toString(OpCode op);
+namespace torch {
+namespace jit {
+char const* toString(OpCode op);
 std::ostream& operator<<(std::ostream& out, Instruction inst);
 namespace mobile {
-InterpreterState::InterpreterState(std::shared_ptr<Code> code) : code_(std::move(code)) {
+InterpreterState::InterpreterState(std::shared_ptr<Code> code)
+    : code_(std::move(code)) {
   registers_.resize(code_->register_size_);
 }
 
@@ -24,25 +25,25 @@ bool InterpreterState::run(Stack& stack) {
   while (true) {
     Instruction inst = code_->instructions_[pc];
 
-  //  std::cout << "RUNNING " << pc << " " << code_->instructions_[pc];
-  //  if (inst.op == OP) {
-  //    std::cout << ", " << code_->op_names_[inst.X].name << "." <<
-  //      code_->op_names_[inst.X].overload_name;
-  //  }
-  //  std::cout << std::endl;
-  //  for (auto val : stack) {
-  //    if (val.isTensor()) {
-  //      std::cout << val.toTensor().sizes() << std::endl;
-  //    } else {
-  //      std::cout << val << std::endl;
-  //    }
-  //  }
+    //  std::cout << "RUNNING " << pc << " " << code_->instructions_[pc];
+    //  if (inst.op == OP) {
+    //    std::cout << ", " << code_->op_names_[inst.X].name << "." <<
+    //      code_->op_names_[inst.X].overload_name;
+    //  }
+    //  std::cout << std::endl;
+    //  for (auto val : stack) {
+    //    if (val.isTensor()) {
+    //      std::cout << val.toTensor().sizes() << std::endl;
+    //    } else {
+    //      std::cout << val << std::endl;
+    //    }
+    //  }
     switch (inst.op) {
       case OP: {
 #if defined(PYTORCH_MOBILE_OPERATOR_OBSERVER)
         if (auto debug_info = at::getThreadLocalDebugInfo()) {
-          if (auto* mobile_debug_info = dynamic_cast<MobileDebugInfo*>(
-            debug_info.get())) {
+          if (auto* mobile_debug_info =
+                  dynamic_cast<MobileDebugInfo*>(debug_info.get())) {
             mobile_debug_info->setOpIdx(pc);
           }
         }
@@ -104,8 +105,8 @@ bool InterpreterState::run(Stack& stack) {
       case SET_ATTR: {
         auto v = pop(stack);
         auto userObj = pop(stack).toObject();
-        // Mobile only: since the number of slots is not known, resize the numAttributes
-        // before setSlot.
+        // Mobile only: since the number of slots is not known, resize the
+        // numAttributes before setSlot.
         while (userObj->type()->numAttributes() <= inst.X) {
           std::stringstream ss;
           ss << userObj->type()->numAttributes();
@@ -167,5 +168,5 @@ IValue& InterpreterState::reg(size_t reg) {
 }
 
 } // namespace mobile
-} // namespace torch
 } // namespace jit
+} // namespace torch

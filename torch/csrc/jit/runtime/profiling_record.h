@@ -1,10 +1,10 @@
 #pragma once
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <ATen/ATen.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/ir/ir.h>
 
 #include <list>
@@ -33,12 +33,13 @@ struct ProfilingRecord {
   std::shared_ptr<Graph> graph() const {
     return profiled_graph_;
   }
+
  private:
   ProfileOp* createProfileNode(
       const std::function<void(Stack&)>& fp,
       at::ArrayRef<Value*> inputs);
   void instrumentBlock(Block* block);
-  void insertShapeProfile(Node *n, Value *i);
+  void insertShapeProfile(Node* n, Value* i);
   ProfilingRecord(std::shared_ptr<Graph> g);
 };
 

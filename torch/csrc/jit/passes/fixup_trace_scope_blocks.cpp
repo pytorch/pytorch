@@ -1,10 +1,10 @@
 #include <torch/csrc/jit/passes/fixup_trace_scope_blocks.h>
 
+#include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
-#include <torch/csrc/jit/frontend/schema_matching.h>
 
 #include <algorithm>
 
@@ -428,8 +428,7 @@ void createMethodCalls(const std::shared_ptr<Graph>& g) {
       for (Value* i : n->inputs()) {
         nvs.emplace_back(i->node()->sourceRange(), i);
       }
-      auto schema =
-          matchSchema(f->getSchema(), n->sourceRange(), *g, nvs, {});
+      auto schema = matchSchema(f->getSchema(), n->sourceRange(), *g, nvs, {});
       Value* retval = g->insertMethodCall(f->qualname().name(), schema);
       n->output()->replaceAllUsesWith(retval);
       n->destroy();
@@ -522,9 +521,7 @@ void runCleanupPasses(Module* m) {
 
 } // namespace
 
-void FixupTraceScopeBlocks(
-    std::shared_ptr<Graph>& graph,
-    Module* self) {
+void FixupTraceScopeBlocks(std::shared_ptr<Graph>& graph, Module* self) {
   if (self) {
     ConvertTracedAttrReferences().run(graph);
   } else {

@@ -5,22 +5,25 @@
 #include <torch/custom_class_detail.h>
 #include "interpreter.h"
 
-namespace torch{
-namespace jit{
+namespace torch {
+namespace jit {
 
-char const * toString(OpCode op);
+char const* toString(OpCode op);
 namespace mobile {
 Function::Function(c10::QualifiedName name)
     : name_(name), code_(std::make_shared<Code>()) {}
 
 void Function::append_instruction(OpCode op, int X, int N) {
-  TORCH_CHECK(isOpSupportedInMobile(op), toString(op),
-              " is not supported in mobile module.");
+  TORCH_CHECK(
+      isOpSupportedInMobile(op),
+      toString(op),
+      " is not supported in mobile module.");
   code_->instructions_.emplace_back(op, X, N);
 }
 
-bool Function::append_operator(const std::string& name,
-                               const std::string& overload_name) {
+bool Function::append_operator(
+    const std::string& name,
+    const std::string& overload_name) {
   // Keep the original opname in code_
   code_->op_names_.emplace_back(name, overload_name);
   auto opname = code_->op_names_.back();
@@ -33,8 +36,9 @@ bool Function::append_operator(const std::string& name,
   if (!op.has_value()) {
     return false;
   }
-  // TODO: operator.h now does not depend on Node* so we can also look up operators from
-  // that registry for use in mobile as a way to share implementations.
+  // TODO: operator.h now does not depend on Node* so we can also look up
+  // operators from that registry for use in mobile as a way to share
+  // implementations.
   auto fn = [op](Stack& stack) {
     c10::Dispatcher::singleton().callBoxed(*op, &stack);
   };
@@ -59,5 +63,5 @@ bool Function::run(Stack& stack) const {
   return interp_state.run(stack);
 }
 } // namespace mobile
-} // namespace torch
 } // namespace jit
+} // namespace torch

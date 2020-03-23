@@ -7,13 +7,13 @@ using namespace ::c10::onnx;
 }
 
 // For ONNX opset < 9, constant operator supports only three data types:
-// float16, float, and double. Constants of other data types are exported as float or double
-// and then cast back to their original data type with a cast node.
-// The above transformation is done in this pass.
-// The motivation behind having it as a post process pass opposed to handling in symbolic,
-// is that many constant operators would have already been removed in the export before this step.
-// On the other hand if cast is inserted in symbolic, subsequent node conversion will break
-// if it depends on certain inputs being constant.
+// float16, float, and double. Constants of other data types are exported as
+// float or double and then cast back to their original data type with a cast
+// node. The above transformation is done in this pass. The motivation behind
+// having it as a post process pass opposed to handling in symbolic, is that
+// many constant operators would have already been removed in the export before
+// this step. On the other hand if cast is inserted in symbolic, subsequent node
+// conversion will break if it depends on certain inputs being constant.
 void CastAllConstantToFloating(Block* block) {
   auto graph = block->owningGraph();
   auto it = block->nodes().begin();
@@ -27,20 +27,21 @@ void CastAllConstantToFloating(Block* block) {
     if (node->kind() == onnx::Constant) {
       auto val = node->t(attr::value);
       at::ScalarType dtype = val.scalar_type();
-      if (dtype != at::ScalarType::Double && dtype != at::ScalarType::Float && dtype != at::ScalarType::Half) {
+      if (dtype != at::ScalarType::Double && dtype != at::ScalarType::Float &&
+          dtype != at::ScalarType::Half) {
         int to_type;
-        switch (val.scalar_type()){
+        switch (val.scalar_type()) {
           case at::ScalarType::Byte:
           case at::ScalarType::Char:
           case at::ScalarType::Int:
           case at::ScalarType::Short:
           case at::ScalarType::Bool:
-            to_type = 6;  // ::ONNX_NAMESPACE::TensorProto_DataType_INT32;
+            to_type = 6; // ::ONNX_NAMESPACE::TensorProto_DataType_INT32;
             val = val.to(at::ScalarType::Float);
             break;
 
           case at::ScalarType::Long:
-            to_type = 7;  // ::ONNX_NAMESPACE::TensorProto_DataType_INT64;
+            to_type = 7; // ::ONNX_NAMESPACE::TensorProto_DataType_INT64;
             val = val.to(at::ScalarType::Double);
             break;
 
@@ -58,7 +59,6 @@ void CastAllConstantToFloating(Block* block) {
         // add input from constant to cast node
         cast_node->addInput(node->outputs().at(0));
       }
-
     }
   }
 }

@@ -1,9 +1,9 @@
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/jit/ir/irparser.h>
 #include "test/cpp/jit/test_base.h"
-#include "torch/csrc/jit/runtime/custom_operator.h"
-#include "torch/csrc/jit/ir/alias_analysis.h"
 #include "torch/csrc/jit/frontend/ir_emitter.h"
+#include "torch/csrc/jit/ir/alias_analysis.h"
+#include "torch/csrc/jit/runtime/custom_operator.h"
 #include "torch/csrc/utils/memory.h"
 
 namespace torch {
@@ -391,32 +391,30 @@ void testAliasAnalysis() {
   }
 
   // test none value does not have writers
-  {
-    {
-      auto graph = std::make_shared<Graph>();
-      std::unordered_map<std::string, Value*> vmap;
-      parseIR(
-          R"IR(
+  {{auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  parseIR(
+      R"IR(
     graph():
       %opt : Tensor? = prim::Constant()
       %out : Tensor = prim::unchecked_unwrap_optional(%opt)
       %ret.2 : Tensor = aten::div(%out, %out, %out)
       return (%opt, %out, %ret.2)
       )IR",
-          &*graph,
-          vmap);
+      &*graph,
+      vmap);
 
-      AliasDb aliasDb(graph);
-      AT_ASSERT(!aliasDb.hasWriters(vmap["opt"]->node()));
-    }
-  }
+  AliasDb aliasDb(graph);
+  AT_ASSERT(!aliasDb.hasWriters(vmap["opt"]->node()));
+}
+} // namespace jit
 
-  // test safeToIntroduceAliasingRelationship
-  {
-    auto graph = std::make_shared<Graph>();
-    std::unordered_map<std::string, Value*> vmap;
-    parseIR(
-        R"IR(
+// test safeToIntroduceAliasingRelationship
+{
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  parseIR(
+      R"IR(
   graph(%x : Tensor):
       %3 : int = prim::Constant[value=1]()
       %2 : int = prim::Constant[value=0]()
@@ -428,31 +426,33 @@ void testAliasAnalysis() {
       %14 : (Tensor, Tensor) = prim::TupleConstruct(%b, %c)
       return (%14)
     )IR",
-        &*graph,
-        vmap);
+      &*graph,
+      vmap);
 
-    AliasDb aliasDb(graph);
-    // x, b, c escape scope, so we can't introduce an aliasing relationship
-    TORCH_INTERNAL_ASSERT(!aliasDb.safeToChangeAliasingRelationship(vmap["x"], vmap["b"]));
-    TORCH_INTERNAL_ASSERT(
-        !aliasDb.safeToChangeAliasingRelationship(vmap["b"], vmap["x"]));
-    TORCH_INTERNAL_ASSERT(
-        !aliasDb.safeToChangeAliasingRelationship(vmap["b"], vmap["c"]));
-    TORCH_INTERNAL_ASSERT(
-        !aliasDb.safeToChangeAliasingRelationship(vmap["c"], vmap["b"]));
+  AliasDb aliasDb(graph);
+  // x, b, c escape scope, so we can't introduce an aliasing relationship
+  TORCH_INTERNAL_ASSERT(
+      !aliasDb.safeToChangeAliasingRelationship(vmap["x"], vmap["b"]));
+  TORCH_INTERNAL_ASSERT(
+      !aliasDb.safeToChangeAliasingRelationship(vmap["b"], vmap["x"]));
+  TORCH_INTERNAL_ASSERT(
+      !aliasDb.safeToChangeAliasingRelationship(vmap["b"], vmap["c"]));
+  TORCH_INTERNAL_ASSERT(
+      !aliasDb.safeToChangeAliasingRelationship(vmap["c"], vmap["b"]));
 
-    // e aliases the wildcard set because it's contained in a list
-    TORCH_INTERNAL_ASSERT(
-        !aliasDb.safeToChangeAliasingRelationship(vmap["e"], vmap["x"]));
-    TORCH_INTERNAL_ASSERT(
-        !aliasDb.safeToChangeAliasingRelationship(vmap["x"], vmap["e"]));
+  // e aliases the wildcard set because it's contained in a list
+  TORCH_INTERNAL_ASSERT(
+      !aliasDb.safeToChangeAliasingRelationship(vmap["e"], vmap["x"]));
+  TORCH_INTERNAL_ASSERT(
+      !aliasDb.safeToChangeAliasingRelationship(vmap["x"], vmap["e"]));
 
-    // d is a temporary with no writers, safe to change aliasing relationship here
-    TORCH_INTERNAL_ASSERT(aliasDb.safeToChangeAliasingRelationship(vmap["c"], vmap["d"]));
-    TORCH_INTERNAL_ASSERT(
-        aliasDb.safeToChangeAliasingRelationship(vmap["d"], vmap["c"]));
-  }
+  // d is a temporary with no writers, safe to change aliasing relationship here
+  TORCH_INTERNAL_ASSERT(
+      aliasDb.safeToChangeAliasingRelationship(vmap["c"], vmap["d"]));
+  TORCH_INTERNAL_ASSERT(
+      aliasDb.safeToChangeAliasingRelationship(vmap["d"], vmap["c"]));
 }
+} // namespace torch
 
 void testWriteTracking() {
   RegisterOperators reg({Operator(
@@ -720,7 +720,8 @@ graph():
     %d : Tensor[] = prim::ListConstruct(%y)
     return (%c, %d)
     )IR",
-        &*graph, vmap);
+        &*graph,
+        vmap);
 
     AliasDb aliasDb(graph);
     auto x = vmap["x"];
@@ -1179,11 +1180,10 @@ void testAliasRegistration() {
     auto a = graph->addInput();
     graph->insert(rand_op, {a});
 
-    // Registration time is okay, but throw exception when fetch from registration.
+    // Registration time is okay, but throw exception when fetch from
+    // registration.
     expectThrows<c10::Error>(
-        [&graph] {
-          AliasDb aliasDb(graph);
-        },
+        [&graph] { AliasDb aliasDb(graph); },
         "Tried to register operator foo::rand3(Tensor(a) arg1) -> (Tensor(b)) with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA");
   }
   {
@@ -1199,11 +1199,10 @@ void testAliasRegistration() {
     auto a = graph->addInput();
     graph->insert(rand_op, {a});
 
-    // Registration time is okay, but throw exception when fetch from registration.
+    // Registration time is okay, but throw exception when fetch from
+    // registration.
     expectThrows<c10::Error>(
-        [&graph] {
-          AliasDb aliasDb(graph);
-        },
+        [&graph] { AliasDb aliasDb(graph); },
         "Tried to register operator foo::rand4(Tensor(a) arg1) -> (Tensor(a)) with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA");
   }
   {
@@ -1301,38 +1300,34 @@ void testAliasRegistration() {
     auto registry = torch::RegisterOperators().op(
         "foo::rand11(Tensor(a) arg1) -> Tensor(a)",
         torch::RegisterOperators::options()
-            .catchAllKernel(
-                [](at::Tensor t) -> at::Tensor { return t * 2; })
+            .catchAllKernel([](at::Tensor t) -> at::Tensor { return t * 2; })
             .aliasAnalysis(AliasAnalysisKind::PURE_FUNCTION));
     const auto rand_op = Symbol::fromQualString("foo::rand11");
     auto graph = std::make_shared<Graph>();
     auto a = graph->addInput();
     graph->insert(rand_op, {a});
 
-    // Registration time is okay, but throw exception when fetch from registration.
+    // Registration time is okay, but throw exception when fetch from
+    // registration.
     expectThrows<c10::Error>(
-        [&graph] {
-          AliasDb aliasDb(graph);
-        },
+        [&graph] { AliasDb aliasDb(graph); },
         "Tried to register operator foo::rand11(Tensor(a) arg1) -> (Tensor(a)) with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA");
   }
   {
     auto registry = torch::RegisterOperators().op(
         "foo::rand12(Tensor(a) arg1) -> Tensor(b)",
         torch::RegisterOperators::options()
-            .catchAllKernel(
-                [](at::Tensor t) -> at::Tensor { return t * 2; })
+            .catchAllKernel([](at::Tensor t) -> at::Tensor { return t * 2; })
             .aliasAnalysis(AliasAnalysisKind::PURE_FUNCTION));
     const auto rand_op = Symbol::fromQualString("foo::rand12");
     auto graph = std::make_shared<Graph>();
     auto a = graph->addInput();
     graph->insert(rand_op, {a});
 
-    // Registration time is okay, but throw exception when fetch from registration.
+    // Registration time is okay, but throw exception when fetch from
+    // registration.
     expectThrows<c10::Error>(
-        [&graph] {
-          AliasDb aliasDb(graph);
-        },
+        [&graph] { AliasDb aliasDb(graph); },
         "Tried to register operator foo::rand12(Tensor(a) arg1) -> (Tensor(b)) with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA");
   }
 }

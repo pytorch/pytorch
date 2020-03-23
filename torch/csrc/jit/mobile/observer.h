@@ -1,13 +1,12 @@
 #pragma once
 
-#include <string>
 #include <ATen/ThreadLocalDebugInfo.h>
+#include <string>
 
 namespace torch {
 
-class MobileDebugInfo
-    : public at::ThreadLocalDebugInfoBase {
-public:
+class MobileDebugInfo : public at::ThreadLocalDebugInfoBase {
+ public:
   const std::string& getModelName() {
     return model_name_;
   }
@@ -34,22 +33,24 @@ public:
 
   virtual ~MobileDebugInfo() {}
 
-private:
+ private:
   std::string model_name_;
   std::string method_name_;
   size_t op_idx_ = 0;
 };
 
 class MobileModuleObserver {
-    public:
-    virtual ~MobileModuleObserver() = default;
+ public:
+  virtual ~MobileModuleObserver() = default;
 
-    virtual void onEnter(const std::string& model_name, const std::string& method_name) {}
-    virtual void onExit() {}
+  virtual void onEnter(
+      const std::string& model_name,
+      const std::string& method_name) {}
+  virtual void onExit() {}
 };
 
 class MobileObserverConfig {
-  public:
+ public:
   void setModuleObserver(std::unique_ptr<MobileModuleObserver> reporter) {
     module_observer_ = std::move(reporter);
   }
@@ -57,7 +58,7 @@ class MobileObserverConfig {
     return module_observer_.get();
   }
 
-private:
+ private:
   std::unique_ptr<MobileModuleObserver> module_observer_;
 };
 

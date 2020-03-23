@@ -1,6 +1,6 @@
 #pragma once
-#include <typeinfo>
 #include <stdint.h>
+#include <typeinfo>
 #include <unordered_set>
 
 namespace torch {
@@ -70,5 +70,5 @@ struct Instruction {
 
 bool isOpSupportedInMobile(OpCode op);
 
-}
-}
+} // namespace jit
+} // namespace torch

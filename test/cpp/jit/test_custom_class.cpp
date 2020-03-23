@@ -127,15 +127,14 @@ at::Tensor take_an_instance(const c10::intrusive_ptr<PickleTester>& instance) {
 
 torch::RegisterOperators& register_take_instance() {
   static auto instance_registry = torch::RegisterOperators().op(
-  torch::RegisterOperators::options()
-      .schema(
-          "_TorchScriptTesting::take_an_instance(__torch__.torch.classes._TorchScriptTesting_PickleTester x) -> Tensor Y")
-      .catchAllKernel<decltype(take_an_instance), &take_an_instance>());
+      torch::RegisterOperators::options()
+          .schema(
+              "_TorchScriptTesting::take_an_instance(__torch__.torch.classes._TorchScriptTesting_PickleTester x) -> Tensor Y")
+          .catchAllKernel<decltype(take_an_instance), &take_an_instance>());
   return instance_registry;
 }
 
 static auto& ensure_take_instance_registered = register_take_instance();
-
 
 } // namespace
 

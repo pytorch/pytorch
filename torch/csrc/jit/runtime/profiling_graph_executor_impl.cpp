@@ -1,3 +1,4 @@
+#include <torch/csrc/jit/runtime/profiling_graph_executor_impl.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/bailout_graph.h>
 #include <torch/csrc/jit/passes/canonicalize_ops.h>
@@ -19,12 +20,11 @@
 #include <torch/csrc/jit/passes/requires_grad_analysis.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
-#include <torch/csrc/jit/runtime/profiling_graph_executor_impl.h>
 
 namespace torch {
 namespace jit {
 
-#if defined (FBCODE_CAFFE2) || defined (C10_MOBILE)
+#if defined(FBCODE_CAFFE2) || defined(C10_MOBILE)
 static std::atomic<bool> executor_mode{false};
 static std::atomic<bool> profiling_mode{false};
 #else
@@ -136,7 +136,8 @@ void ProfilingGraphExecutorImpl::runProfilingInsensitiveOptimizations(
 }
 
 ProfilingGraphExecutorImpl::ProfilingGraphExecutorImpl(
-    const std::shared_ptr<Graph>& graph, std::string function_name)
+    const std::shared_ptr<Graph>& graph,
+    std::string function_name)
     : GraphExecutorImplBase(graph, std::move(function_name)) {}
 
 ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(
@@ -177,7 +178,8 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(
   auto copy = pr_->graph()->copy();
   runProfilingOptimizations(copy);
   // cache
-  optimized_plan_ = ExecutionPlan(copy, function_name_, remaining_bailout_depth);
+  optimized_plan_ =
+      ExecutionPlan(copy, function_name_, remaining_bailout_depth);
   return *optimized_plan_;
 }
 

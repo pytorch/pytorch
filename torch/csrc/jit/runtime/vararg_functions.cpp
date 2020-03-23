@@ -5,10 +5,7 @@ namespace jit {
 
 void tupleUnpack(Stack& stack) {
   auto tuple = pop(stack).toTuple();
-  stack.insert(
-     stack.end(),
-     tuple->elements().begin(),
-     tuple->elements().end());
+  stack.insert(stack.end(), tuple->elements().begin(), tuple->elements().end());
 }
 
 void format(Stack& stack, size_t num_inputs) {
@@ -59,7 +56,10 @@ void tupleConstruct(Stack& stack, size_t num_inputs) {
   push(stack, c10::ivalue::Tuple::create(std::move(elems)));
 }
 
-void namedTupleConstruct(Stack& stack, at::TupleTypePtr type, size_t num_inputs) {
+void namedTupleConstruct(
+    Stack& stack,
+    at::TupleTypePtr type,
+    size_t num_inputs) {
   std::vector<IValue> elems{std::make_move_iterator(stack.end() - num_inputs),
                             std::make_move_iterator(stack.end())};
   drop(stack, num_inputs);
@@ -98,9 +98,7 @@ void createObject(Stack& stack, at::ClassTypePtr type) {
   push(stack, std::move(userObj));
 }
 
-void isinstance(
-    Stack& stack,
-    at::ArrayRef<at::TypePtr> types) {
+void isinstance(Stack& stack, at::ArrayRef<at::TypePtr> types) {
   at::TypePtr ty = pop(stack).type();
   for (const at::TypePtr& candidate : types) {
     if (ty->isSubtypeOf(candidate)) {
