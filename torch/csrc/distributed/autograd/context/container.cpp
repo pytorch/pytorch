@@ -9,6 +9,7 @@ namespace autograd {
 constexpr int kAutoIncrementBits = 48;
 constexpr int64_t kAutoIncrementMask = (1LL << kAutoIncrementBits) - 1;
 constexpr int kMaxWorkerId = 65535;
+constexpr int kNumCleanupContextRetries = 20;
 
 constexpr int64_t kInvalidContextId = -1;
 
@@ -177,13 +178,27 @@ void DistAutogradContainer::sendReleaseContextRpc(int64_t context_id) {
 
   TORCH_INTERNAL_ASSERT(agent, "RPC Agent should be set.");
 
+  rpc::RpcRetryOptions options;
+  options.maxRetries = kNumCleanupContextRetries;
   for (const auto& worker_id : workerIds) {
     try {
-      // Try to send RPC to clear context. If we fail, don't throw, and continue
-      // sending to the remaining workers.
-      agent->send(
+      auto cleanupFuture = agent->sendWithRetries(
           agent->getWorkerInfo(worker_id),
-          CleanupAutogradContextReq(context_id).toMessage());
+          CleanupAutogradContextReq(context_id).toMessage(),
+          options);
+
+      cleanupFuture->addCallback(
+          [](const rpc::Message& message /* unused */,
+             const c10::optional<torch::utils::FutureError>& error) {
+            if (error) {
+              std::string errorMsg = c10::str(
+                  "Could not release Dist Autograd Context after ",
+                  kNumCleanupContextRetries,
+                  " attempts.");
+              LOG(ERROR) << errorMsg;
+              return;
+            }
+          });
     } catch (const std::exception& e) {
       LOG(INFO)
           << "Failed to send RPC to clear Dist Autograd context to worker id: "
