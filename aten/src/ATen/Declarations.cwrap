@@ -1,24 +1,4 @@
 [[
-  name: _th_set_
-  cname: set
-  variants: function
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
-  cpu_bfloat16: True
-  cuda_bfloat16: True
-  device_guard: False
-  return: argument 0
-  options:
-    - cname: setStorage
-      arguments:
-        - THTensor* self
-        - THStorage* source
-        - long storage_offset
-        - IntArrayRefSize size
-        - IntArrayRef stride
-]]
-[[
   name: _th_masked_fill_
   cuda_bool: True
   cuda_bfloat16: True
@@ -129,6 +109,7 @@
 [[
   name: _th_index_select
   cuda_bool: True
+  cuda_bfloat16: True
   cname: indexSelect
   variants:
     - function
@@ -265,8 +246,9 @@
 ]]
 [[
   name: _th_min
-  cpu_bool: True
   cuda_bool: True
+  backends:
+    - CUDA
   variants:
     - function
   options:
@@ -294,8 +276,9 @@
 ]]
 [[
   name: _th_max
-  cpu_bool: True
   cuda_bool: True
+  backends:
+    - CUDA
   variants:
     - function
   options:
@@ -353,6 +336,7 @@
 [[
   name: _th_topk
   cname: topk
+  cuda_bfloat16: True
   backends:
     - CUDA
   variants:
@@ -638,43 +622,6 @@
         - THTensor* self
         - real other
     - cname: cfmod
-      arguments:
-        - THTensor* self
-        - arg: THTensor* self
-          broadcast: other inplace fallback
-        - THTensor* other
-]]
-[[
-  name: _th_remainder
-  return: argument 0
-  variants:
-    - function
-  options:
-    - cname: remainder
-      arguments:
-        - arg: THTensor* result
-          output: True
-        - THTensor* self
-        - real other
-    - cname: cremainder
-      arguments:
-        - arg: THTensor* result
-          output: True
-        - arg: THTensor* self
-          broadcast: other fallback
-        - arg: THTensor* other
-]]
-[[
-  name: _th_remainder_
-  return: argument 0
-  variants: function
-  options:
-    - cname: remainder
-      arguments:
-        - THTensor* self
-        - THTensor* self
-        - real other
-    - cname: cremainder
       arguments:
         - THTensor* self
         - arg: THTensor* self
@@ -1112,7 +1059,7 @@
     - THTensor* q
     - THIndexTensor* J
     - long num_samples
-    - THGenerator* generator
+    - Generator generator
 ]]
 [[
   name: _th_uniform_
@@ -1127,7 +1074,7 @@
     - THTensor* self
     - double from
     - double to
-    - THGenerator* generator
+    - Generator generator
 ]]
 
 [[

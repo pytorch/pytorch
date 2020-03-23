@@ -3,7 +3,7 @@
 #ifdef USE_DISTRIBUTED
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #endif
-#include <torch/csrc/jit/api/function.h>
+#include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/jit/mobile/type_parser.h>
 #include <string>
@@ -75,13 +75,15 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
       case AnyType::Kind:
       case AnyListType::Kind:
       case AnyTupleType::Kind:
+      case AnyClassType::Kind:
         // if Any type does show up, we no longer have a way to precisely
         // recover the type information since the w.value may be an untagged
         // List/Dict. We should prevent objects being serialized from having the
         // Any type and if we do allow it in functions limit it to non-heap
         // locations.
         TORCH_INTERNAL_ASSERT(
-            false, "AnyType, AnyTupleType, and AnyListType should not show up in the static type of objects");
+            false,
+            "AnyType, AnyTupleType, AnyListType, and AnyClassType should not show up in the static type of objects");
       case TupleType::Kind: {
         auto t = w.value.toTuple();
         auto ttype = w.static_type->expect<TupleType>();

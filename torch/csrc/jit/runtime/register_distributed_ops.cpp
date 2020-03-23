@@ -16,8 +16,6 @@ namespace dist_rpc = torch::distributed::rpc;
 namespace torch {
 namespace jit {
 
-using namespace distributed::rpc;
-
 namespace {
 at::Tensor toOptionalTensor(const c10::IValue& v) {
   if (v.isNone()) {
@@ -30,43 +28,64 @@ at::Tensor optional_to_tensor(c10::optional<at::Tensor> v) {
   return v.has_value() ? *v : at::Tensor();
 }
 
-c10::OperatorOptions aliasAnalysisFromSchema() {
-  c10::OperatorOptions result;
-  result.setAliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA);
-  return result;
+c10::AliasAnalysisKind aliasAnalysisFromSchema() {
+  return c10::AliasAnalysisKind::FROM_SCHEMA;
 }
 
-c10::OperatorOptions aliasAnalysisSpecialCase() {
-  c10::OperatorOptions result;
-  result.setAliasAnalysis(c10::AliasAnalysisKind::INTERNAL_SPECIAL_CASE);
-  return result;
+c10::AliasAnalysisKind aliasAnalysisSpecialCase() {
+  return c10::AliasAnalysisKind::INTERNAL_SPECIAL_CASE;
 }
 
-RegisterOperators reg_rpc_ops({
-    Operator(
-        "aten::to_here(RRef(t) self) -> t",
-        [](Stack& stack) {
-          auto rref = pop(stack).toRRef();
-          IValue res;
-          if (rref->isOwner()) {
-            res = c10::dynamic_intrusive_pointer_cast<dist_rpc::OwnerRRef>(rref)
-                      ->getValue();
-          } else {
-            res = c10::dynamic_intrusive_pointer_cast<dist_rpc::UserRRef>(rref)
-                      ->toHere();
-          }
-          push(stack, std::move(res));
-          return 0;
-        },
-        aliasAnalysisFromSchema()),
-    Operator(
-        "aten::is_owner(RRef(t) self) -> bool",
-        [](Stack& stack) {
-          auto rref = pop(stack).toRRef();
-          push(stack, rref->isOwner());
-          return 0;
-        },
-        aliasAnalysisFromSchema()),
+RegisterOperators reg_rpc_ops(
+    {Operator(
+         "aten::to_here(RRef(t) self) -> t",
+         [](Stack& stack) {
+           auto rref = pop(stack).toRRef();
+           IValue res;
+           if (rref->isOwner()) {
+             res =
+                 c10::dynamic_intrusive_pointer_cast<dist_rpc::OwnerRRef>(rref)
+                     ->getValue();
+           } else {
+             res = c10::dynamic_intrusive_pointer_cast<dist_rpc::UserRRef>(rref)
+                       ->toHere();
+           }
+           push(stack, std::move(res));
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         "aten::is_owner(RRef(t) self) -> bool",
+         [](Stack& stack) {
+           auto rref = pop(stack).toRRef();
+           push(stack, rref->isOwner());
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         "aten::owner(RRef(t) self) -> int",
+         [](Stack& stack) {
+           auto rref = pop(stack).toRRef();
+           push(stack, rref->owner());
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         "aten::owner_name(RRef(t) self) -> str",
+         [](Stack& stack) {
+           auto rref = pop(stack).toRRef();
+           push(stack, rref->ownerName());
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         "aten::confirmed_by_owner(RRef(t) self) -> bool",
+         [](Stack& stack) {
+           auto rref = pop(stack).toRRef();
+           push(stack, rref->confirmedByOwner());
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
      Operator(
          prim::rpc_async,
          [](const Node* node) -> Operation {
@@ -74,7 +93,7 @@ RegisterOperators reg_rpc_ops({
            return [num_inputs](Stack& stack) {
              // Get inputs from the stack.
              auto stackIter = stack.end() - num_inputs;
-             auto& dstWorkerNameIValue = *stackIter++;
+             auto& dstWorkerIValue = *stackIter++;
              auto& qualifiedNameIValue = *stackIter++;
              IValue emptyTuple(c10::ivalue::Tuple::create({}));
              IValue emptyDict{
@@ -86,7 +105,8 @@ RegisterOperators reg_rpc_ops({
              // `kwargs = kwargs if kwargs is not None else {}`.
              auto& kwargsDictIValue =
                  num_inputs >= 4 ? *stackIter++ : emptyDict;
-             TORCH_INTERNAL_ASSERT(dstWorkerNameIValue.isString());
+             TORCH_INTERNAL_ASSERT(
+                 dstWorkerIValue.isString() || dstWorkerIValue.isInt());
              TORCH_INTERNAL_ASSERT(qualifiedNameIValue.isString());
              TORCH_INTERNAL_ASSERT(argsTupleIValue.isTuple());
              TORCH_INTERNAL_ASSERT(kwargsDictIValue.isGenericDict());
@@ -94,7 +114,7 @@ RegisterOperators reg_rpc_ops({
              // Get FunctionSchema for qualifiedName.
              auto qualifiedName =
                  c10::QualifiedName(qualifiedNameIValue.toStringRef());
-             std::shared_ptr<script::CompilationUnit> cuPtr;
+             std::shared_ptr<CompilationUnit> cuPtr;
              {
                py::gil_scoped_acquire acquire;
                cuPtr = get_python_cu();
@@ -104,9 +124,10 @@ RegisterOperators reg_rpc_ops({
 
              // Build Stack for the user callable.
              // It's similar to
-             // Stack createStackForSchema(FunctionSchema, py::args, py::kwargs).
-             // Instead, it's
-             // Stack createStackForSchema(FunctionSchema, IValue<Tuple>, IValue<Dict>).
+             // Stack createStackForSchema(FunctionSchema, py::args,
+             // py::kwargs). Instead, it's Stack
+             // createStackForSchema(FunctionSchema, IValue<Tuple>,
+             // IValue<Dict>).
              Stack userCallableStack;
              userCallableStack.reserve(functionSchema.arguments().size());
 
@@ -145,12 +166,25 @@ RegisterOperators reg_rpc_ops({
                  const string& keyStr = keyIValue.toStringRef();
                  names.emplace_back(keyStr);
                }
-               functionSchema.findErrorInKwargs(names);
+               throw std::runtime_error(
+                   functionSchema.findErrorInKwargs(names));
+             }
+
+             // Get destination WorkerName.
+             std::string dstWorkerNameStr;
+             if (dstWorkerIValue.isString()) {
+               // ivalue::ConstantString::str_ is a const member, which can't be
+               // moved, copy it here.
+               dstWorkerNameStr = dstWorkerIValue.toStringRef();
+             } else {
+               dstWorkerNameStr = dist_rpc::RpcAgent::getCurrentRpcAgent()
+                                      ->getWorkerInfo(dstWorkerIValue.toInt())
+                                      .name_;
              }
 
              // Send RPC request.
-             auto futureIValuePtr = rpcTorchscript(
-                 dstWorkerNameIValue.toStringRef(),
+             auto futureIValuePtr = dist_rpc::rpcTorchscript(
+                 dstWorkerNameStr,
                  qualifiedName,
                  functionSchema,
                  userCallableStack);
@@ -163,17 +197,16 @@ RegisterOperators reg_rpc_ops({
          },
          aliasAnalysisSpecialCase())});
 
-auto reg_distributed_ops =
-    torch::RegisterOperators()
-        .op("aten::get_gradients(int context_id) -> Dict(Tensor, Tensor)",
-            torch::RegisterOperators::options()
-                .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-                .catchAllKernel([](int64_t context_id) {
-                  const auto& autogradContext =
-                      dist_autograd::DistAutogradContainer::getInstance()
-                          .retrieveContext(context_id);
-                  return autogradContext->getGradients();
-                }));
+auto reg_distributed_ops = torch::RegisterOperators().op(
+    "aten::get_gradients(int context_id) -> Dict(Tensor, Tensor)",
+    torch::RegisterOperators::options()
+        .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
+        .catchAllKernel([](int64_t context_id) {
+          const auto& autogradContext =
+              dist_autograd::DistAutogradContainer::getInstance()
+                  .retrieveContext(context_id);
+          return autogradContext->getGradients();
+        }));
 
 } // namespace
 } // namespace jit
