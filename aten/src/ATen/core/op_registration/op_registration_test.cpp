@@ -1319,6 +1319,9 @@ TEST(NewOperatorRegistrationTest, importTopLevel) {
   ASSERT_TRUE(Dispatcher::singleton().findSchema({"test::def1", ""}).has_value());
   ASSERT_TRUE(Dispatcher::singleton().findSchema({"test::def2", ""}).has_value());
   ASSERT_TRUE(Dispatcher::singleton().findSchema({"test::def3", ""}).has_value());
+  ASSERT_TRUE(Dispatcher::singleton().findOperatorByName({"test::def1", ""}).has_value());
+  ASSERT_TRUE(Dispatcher::singleton().findOperatorByName({"test::def2", ""}).has_value());
+  ASSERT_TRUE(Dispatcher::singleton().findOperatorByName({"test::def3", ""}).has_value());
   ASSERT_TRUE(Dispatcher::singleton().findOperatorByName({"test::impl1", ""}).has_value());
 }
 
@@ -1394,6 +1397,31 @@ TEST(NewOperatorRegistrationTest, dispatch) {
   }
 }
 
+TEST(NewOperatorRegistrationTest, dispatchMultiple) {
+  bool cpu_called = false;
+  bool cuda_called = false;
+  bool autograd_called = false;
+  auto registrar = c10::import("test")
+    .def("fn", torch::dispatch(c10::DispatchKey::CPUTensorId, [&](const Tensor& x) { cpu_called = true; return x; }))
+    .def("fn", torch::dispatch(c10::kCUDA, [&](const Tensor& x) { cuda_called = true; return x; }))
+    .def("fn", torch::dispatch_autograd([&](const Tensor& x) { autograd_called = true; return x; }));
+
+  auto op = Dispatcher::singleton().findSchema({"test::fn", ""});
+  ASSERT_TRUE(op.has_value());
+
+  ASSERT_FALSE(cpu_called);
+  callOp(*op, dummyTensor(c10::DispatchKey::CPUTensorId));
+  ASSERT_TRUE(cpu_called);
+
+  ASSERT_FALSE(cuda_called);
+  callOp(*op, dummyTensor(c10::DispatchKey::CUDATensorId));
+  ASSERT_TRUE(cuda_called);
+
+  ASSERT_FALSE(autograd_called);
+  callOp(*op, dummyTensor(c10::DispatchKey::VariableTensorId));
+  ASSERT_TRUE(autograd_called);
+}
+
 TEST(NewOperatorRegistrationTest, fallback) {
   auto registrar = c10::import()
     .fallback(torch::dispatch(c10::kCPU, c10::CppFunction::makeFromBoxedFunction<&backend_fallback_kernel>()));
@@ -1413,6 +1441,8 @@ TEST(NewOperatorRegistrationTest, CppFunction) {
   // Just show off the possible ways to register functions
   auto registrar = c10::import("test")
     .def("fn1", &dummy_fn)
+    // C++ will implicitly convert function to function pointer
+    // c.f. https://en.cppreference.com/w/cpp/language/implicit_conversion#Function_to_pointer
     .def("fn2", dummy_fn)
     .def("fn3", [](const Tensor& x) { return x; })
     // These require explicit schema
@@ -1420,11 +1450,6 @@ TEST(NewOperatorRegistrationTest, CppFunction) {
     .def("fn5(Tensor x) -> Tensor", c10::CppFunction::makeUnboxedOnly(dummy_fn))
     .def("fn6(Tensor x) -> Tensor", c10::CppFunction::makeFromBoxedFunction<&backend_fallback_kernel>());
 }
-
-// CppFunction
-//    makeUnboxedOnly
-//    makeFallthrough
-//    makeFromBoxedFunction
 
 // Some internal tests that have to be done from C++
 

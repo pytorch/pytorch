@@ -176,9 +176,14 @@ private:
   OperatorHandle findOrRegisterName_(const OperatorName& op_name);
 
   void deregisterDef_(const OperatorHandle& op, const OperatorName& op_name);
-  void deregisterImpl_(const OperatorHandle& op, const OperatorName& op_name, c10::optional<DispatchKey> dispatch_key, std::list<impl::OperatorEntry::KernelEntry>::iterator kernel_handle);
+  void deregisterImpl_(
+    const OperatorHandle& op,
+    const OperatorName& op_name,
+    c10::optional<DispatchKey> dispatch_key,
+    std::list<impl::OperatorEntry::KernelEntry>::iterator kernel_handle);
   void deregisterFallback_(DispatchKey dispatchKey);
   void cleanup(const OperatorHandle& op, const OperatorName& op_name);
+  void checkSchemaCompatibility(const OperatorHandle& op, const FunctionSchema& schema);
 
   [[noreturn]] static void reportError(const DispatchTable& dispatchTable, DispatchKey dispatchKey);
 

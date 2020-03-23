@@ -67,7 +67,19 @@ c10::optional<OperatorHandle> Dispatcher::findSchema(const OperatorName& overloa
 }
 
 OperatorHandle Dispatcher::findSchemaOrThrow(const char* name, const char* overload_name) {
-  return findSchema({name, overload_name}).value();
+  auto it = findSchema({name, overload_name});
+  if (!it.has_value()) {
+    // Check if we have ANYTHING; if that's the case, that means you're
+    // missing schema
+    auto it2 = findOperatorByName({name, overload_name});
+    if (!it2.has_value()) {
+      TORCH_CHECK(false, "Could not find schema for ", name, ".", overload_name);
+    } else {
+      TORCH_CHECK(false, "Could not find schema for ", name, ".", overload_name,
+        " but we found an implementation; did you forget to def() the operator?");
+    }
+  }
+  return it.value();
 }
 
 // Postcondition: caller is responsible for disposing of registration when they
@@ -100,33 +112,7 @@ RegistrationHandleRAII Dispatcher::registerDef(FunctionSchema schema) {
     op.operatorIterator_->op.registerSchema(std::move(schema));
     listeners_->callOnOperatorRegistered(op);
   } else {
-    TORCH_CHECK(op.schema() == schema, "Tried to register multiple operators with the same name and the same overload name but different schemas: ", schema, " vs ", op.schema());
-    if (schema.isDefaultAliasAnalysisKind()) {
-      // If the *new* schema is the default alias analysis kind, for BC, we
-      // will accept it.  If we don't accept it, most extensions that override
-      // existing operators will stop working (as they generally did not
-      // specify alias information).  Remove this BC smoothing ASAP, because
-      // if the two incompatible registrations live in the same compilation
-      // unit, the order their static initializers run is unspecified, which
-      // means that you may nondeterministically fail the subsequent test.
-    } else if (op.schema().isDefaultAliasAnalysisKind()) {
-      // If you POST-FACTO specify a non-default alias analysis kind after
-      // we already have a schema for a function, complain loudly about it
-      // (because this new implementation doesn't support merging in this
-      // way).
-      TORCH_CHECK(op.schema().aliasAnalysis() == schema.aliasAnalysis(),
-        "Tried to define the schema for ", toString(op_name),
-        " multiple times without providing an explicit alias analysis kind at each registration site.  "
-        "This was previously permitted, but is now not allowed.  You should either explicitly specify the "
-        "correct alias analysis kind at each site [",
-        toString(op.schema().isDefaultAliasAnalysisKind() ? schema.aliasAnalysis() : op.schema().aliasAnalysis()),
-        "], or use the new Module::impl() API, which permits you to omit the schema entirely when "
-        "specifying further implementations of an operator");
-    } else {
-      TORCH_CHECK(op.schema().aliasAnalysis() == schema.aliasAnalysis(),
-        "Tried to define the schema for ", toString(op_name), " with different alias analysis kinds: ",
-        toString(op.schema().aliasAnalysis()), " vs ", toString(schema.aliasAnalysis()));
-    }
+    checkSchemaCompatibility(op, schema);
   }
 
   // NB: do not increment the counts until AFTER error checking
@@ -136,6 +122,36 @@ RegistrationHandleRAII Dispatcher::registerDef(FunctionSchema schema) {
   return RegistrationHandleRAII([this, op, op_name] {
     deregisterDef_(op, op_name);
   });
+}
+
+void checkSchemaCompatibility(const OperatorHandle& op, const FunctionSchema& schema) {
+  TORCH_CHECK(op.schema() == schema, "Tried to register multiple operators with the same name and the same overload name but different schemas: ", schema, " vs ", op.schema());
+  if (schema.isDefaultAliasAnalysisKind()) {
+    // If the *new* schema is the default alias analysis kind, for BC, we
+    // will accept it.  If we don't accept it, most extensions that override
+    // existing operators will stop working (as they generally did not
+    // specify alias information).  Remove this BC smoothing ASAP, because
+    // if the two incompatible registrations live in the same compilation
+    // unit, the order their static initializers run is unspecified, which
+    // means that you may nondeterministically fail the subsequent test.
+  } else if (op.schema().isDefaultAliasAnalysisKind()) {
+    // If you POST-FACTO specify a non-default alias analysis kind after
+    // we already have a schema for a function, complain loudly about it
+    // (because this new implementation doesn't support merging in this
+    // way).
+    TORCH_CHECK(op.schema().aliasAnalysis() == schema.aliasAnalysis(),
+      "Tried to define the schema for ", toString(op.operator_name()),
+      " multiple times without providing an explicit alias analysis kind at each registration site.  "
+      "This was previously permitted, but is now not allowed.  You should either explicitly specify the "
+      "correct alias analysis kind at each site [",
+      toString(op.schema().isDefaultAliasAnalysisKind() ? schema.aliasAnalysis() : op.schema().aliasAnalysis()),
+      "], or use the new Module::impl() API, which permits you to omit the schema entirely when "
+      "specifying further implementations of an operator");
+  } else {
+    TORCH_CHECK(op.schema().aliasAnalysis() == schema.aliasAnalysis(),
+      "Tried to define the schema for ", toString(op.operator_name()), " with different alias analysis kinds: ",
+      toString(op.schema().aliasAnalysis()), " vs ", toString(schema.aliasAnalysis()));
+  }
 }
 
 void Dispatcher::deregisterDef_(const OperatorHandle& op, const OperatorName& op_name) {
