@@ -11685,7 +11685,7 @@ class TestTorchDeviceType(TestCase):
         _test((10,), 5, 4, win_sizes=(1, 1), expected_error=RuntimeError)
 
     def test_fft_input_modification(self, device):
-        # FFT functions should not modify their input
+        # FFT functions should not modify their input (gh-34551)
 
         signal = torch.ones((2, 2, 2), device=device)
         signal_copy = signal.clone()
