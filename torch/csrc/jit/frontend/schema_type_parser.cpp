@@ -54,7 +54,6 @@ TypePtr SchemaTypeParser::parseBaseType() {
       {"None", NoneType::get()},
       {"Capsule", CapsuleType::get()},
       {"Any", at::AnyType::get()},
-      {"AnyClassType", at::AnyClassType::get()},
   };
   auto tok = L.cur();
   if (!L.nextIf(TK_NONE)) {
