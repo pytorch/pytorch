@@ -55,6 +55,7 @@ Creation Ops
 .. autofunction:: full_like
 .. autofunction:: quantize_per_tensor
 .. autofunction:: quantize_per_channel
+.. autofunction:: dequantize
 
 Indexing, Slicing, Joining, Mutating Ops
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
