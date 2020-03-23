@@ -30,7 +30,7 @@ from torch.testing._internal.common_utils import TestCase, iter_indices, TEST_NU
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
     skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm, skipCUDAIfNotRocm, onlyCUDA, onlyCPU, \
-    dtypes, dtypesIfCUDA, deviceCountAtLeast, skipCUDAIf, precisionOverride, \
+    dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast, skipCUDAIf, precisionOverride, \
     PYTORCH_CUDA_MEMCHECK, largeCUDATensorTest, onlyOnCPUAndCUDA
 import torch.backends.quantized
 import torch.testing._internal.data
@@ -15457,16 +15457,8 @@ class TestDevicePrecision(TestCase):
         if len(devices) > 1:
             do_test(devices[0], devices[1])
 
-    @dtypes(torch.float, torch.double, torch.bfloat16)
-    def test_abs_zero(self, device, dtype):
-        # Both abs(0.0) and abs(-0.0) should result in 0.0
-        abs_zeros = torch.tensor([0.0, -0.0], device=device, dtype=dtype).abs().tolist()
-        for num in abs_zeros:
-            self.assertGreater(math.copysign(1.0, num), 0.0)
-
-    # will removed after CUDA support bfloat16
-    @onlyCPU
-    @dtypes(torch.bfloat16)
+    @dtypesIfCPU(torch.float, torch.double, torch.bfloat16)
+    @dtypes(torch.float, torch.double)
     def test_abs_zero(self, device, dtype):
         # Both abs(0.0) and abs(-0.0) should result in 0.0
         abs_zeros = torch.tensor([0.0, -0.0], device=device, dtype=dtype).abs().tolist()
