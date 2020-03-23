@@ -13,14 +13,48 @@
 #include <torch/csrc/distributed/rpc/script_call.h>
 #include <torch/csrc/distributed/rpc/script_remote_call.h>
 #include <torch/csrc/distributed/rpc/script_resp.h>
+#include <torch/csrc/distributed/rpc/torchscript_functions.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
+#include <torch/csrc/utils/python_compat.h>
 
 namespace torch {
 namespace distributed {
 namespace rpc {
 
 namespace {
+
+py::object toPyObjInternal(RpcCommandBase& rpc, MessageType messageType) {
+  switch (messageType) {
+    case MessageType::SCRIPT_RET: {
+      auto& ret = static_cast<ScriptResp&>(rpc);
+      Stack stack;
+      stack.push_back(ret.value());
+      {
+        pybind11::gil_scoped_acquire ag;
+        // The createPyObjectForStack does not acquire GIL, but creating a new
+        // py::object requires GIL.
+        return torch::jit::createPyObjectForStack(std::move(stack));
+      }
+    }
+    case MessageType::PYTHON_RET: {
+      // TODO: Try to avoid a copy here.
+      auto& resp = static_cast<PythonResp&>(rpc);
+      auto& pythonRpcHandler = PythonRpcHandler::getInstance();
+      py::object ret = pythonRpcHandler.deserialize(resp.serializedPyObj());
+      return ret;
+    }
+    default: {
+      TORCH_CHECK(false, "Unrecognized response message type ", messageType);
+    }
+  }
+}
+
+py::object toPyObj(const Message& message) {
+  MessageType msgType = message.type();
+  auto response = deserializeResponse(message, msgType);
+  return toPyObjInternal(*response, msgType);
+}
 
 c10::intrusive_ptr<c10::ivalue::Future> wrapFutureMessageInJitFuture(
     const std::shared_ptr<FutureMessage>& responseMessageFuture) {
@@ -108,38 +142,6 @@ std::shared_ptr<FutureMessage> sendPythonRemoteCall(
 } // namespace
 
 using namespace torch::distributed::autograd;
-
-py::object toPyObjInternal(RpcCommandBase& rpc, MessageType messageType) {
-  switch (messageType) {
-    case MessageType::SCRIPT_RET: {
-      auto& ret = static_cast<ScriptResp&>(rpc);
-      Stack stack;
-      stack.push_back(ret.value());
-      {
-        pybind11::gil_scoped_acquire ag;
-        // The createPyObjectForStack does not acquire GIL, but creating a new
-        // py::object requires GIL.
-        return torch::jit::createPyObjectForStack(std::move(stack));
-      }
-    }
-    case MessageType::PYTHON_RET: {
-      // TODO: Try to avoid a copy here.
-      auto& resp = static_cast<PythonResp&>(rpc);
-      auto& pythonRpcHandler = PythonRpcHandler::getInstance();
-      py::object ret = pythonRpcHandler.deserialize(resp.serializedPyObj());
-      return ret;
-    }
-    default: {
-      TORCH_CHECK(false, "Unrecognized response message type ", messageType);
-    }
-  }
-}
-
-py::object toPyObj(const Message& message) {
-  MessageType msgType = message.type();
-  auto response = deserializeResponse(message, msgType);
-  return toPyObjInternal(*response, msgType);
-}
 
 std::shared_ptr<jit::PythonFutureWrapper> pyRpcBuiltin(
     const WorkerInfo& dst,
@@ -229,6 +231,13 @@ std::shared_ptr<jit::PythonFutureWrapper> pyRpcPythonUdf(
       [](const py::object& value) {
         py::gil_scoped_release release;
         auto& pythonRpcHandler = PythonRpcHandler::getInstance();
+        // This will unwrap RemoteException and raise the contained
+        // server-side Python exception on client side. A caveat here is that
+        // the exception must be raise in the client thread calling the pybind
+        // "wait" API, so that it can be correctly shown to user. A wrong way is
+        // to raise it in RPC server thread, where the exception would be
+        // swallowed in the ThreadPool task, and also no pybind handling code
+        // can help shown the Python exception.
         pythonRpcHandler.handleException(value);
       });
 }
@@ -274,6 +283,61 @@ PyRRef pyRemotePythonUdf(
     });
     return PyRRef(ownerRRef);
   }
+}
+
+std::shared_ptr<jit::PythonFutureWrapper> pyRpcTorchscript(
+    const std::string& dstWorkerName,
+    const py::object& userCallable,
+    const py::tuple& argsTuple,
+    const py::dict& kwargsDict) {
+  DCHECK(!PyGILState_Check());
+  // No need to catch exception here, if function can not be found,
+  // exception will be thrown in get_function() call; if args do not match
+  // with function schema, exception will be thrown in
+  // createStackForSchema() call.
+  auto& pythonRpcHandler = PythonRpcHandler::getInstance();
+  c10::QualifiedName qualifiedName =
+      pythonRpcHandler.getQualifiedName(userCallable);
+  c10::FunctionSchema functionSchema = pythonRpcHandler.jitCompilationUnit()
+                                           ->get_function(qualifiedName)
+                                           .getSchema();
+  Stack stack;
+  {
+    py::gil_scoped_acquire acquire;
+    stack = torch::jit::createStackForSchema(
+        functionSchema,
+        argsTuple.cast<py::args>(),
+        kwargsDict.cast<py::kwargs>(),
+        c10::nullopt);
+  }
+  DCHECK(!PyGILState_Check());
+  c10::intrusive_ptr<c10::ivalue::Future> fut =
+      rpcTorchscript(dstWorkerName, qualifiedName, functionSchema, stack);
+  return std::make_shared<jit::PythonFutureWrapper>(fut);
+}
+
+PyRRef pyRemoteTorchscript(
+    const std::string& dstWorkerName,
+    const std::string& qualifiedNameStr,
+    const py::args& args,
+    const py::kwargs& kwargs) {
+  DCHECK(!PyGILState_Check());
+  auto qualifiedName = c10::QualifiedName(qualifiedNameStr);
+  auto functionSchema = PythonRpcHandler::getInstance()
+                            .jitCompilationUnit()
+                            ->get_function(qualifiedName)
+                            .getSchema();
+  Stack stack;
+  // Acquire GIL for py::args and py::kwargs processing.
+  {
+    pybind11::gil_scoped_acquire ag;
+    stack = torch::jit::createStackForSchema(
+        functionSchema, args, kwargs, c10::nullopt);
+  }
+  DCHECK(!PyGILState_Check());
+  auto rrefPtr =
+      remoteTorchscript(dstWorkerName, qualifiedName, functionSchema, stack);
+  return PyRRef(rrefPtr);
 }
 
 } // namespace rpc

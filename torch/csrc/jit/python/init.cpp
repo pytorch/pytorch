@@ -460,19 +460,19 @@ void initJITBindings(PyObject* module) {
             return debugGetFusedKernelCode(g, inps);
           })
       .def(
-          "_jit_pass_insert_xnnpack_ops",
+          "_jit_pass_insert_prepacked_ops",
           [](std::shared_ptr<Graph>& graph) {
-            return insertXNNPACKOps(graph);
+            return insertPrePackedOps(graph);
           })
       .def(
-          "_jit_pass_insert_xnnpack_ops",
+          "_jit_pass_insert_prepacked_ops",
           [](script::Module& module) {
-            return insertXNNPACKOps(module);
+            return insertPrePackedOps(module);
           })
       .def(
-          "_jit_pass_fold_xnnpack_prepack_ops",
+          "_jit_pass_fold_prepacking_ops",
           [](script::Module& module) {
-            return FoldXNNPACKPrePackingOps(module);
+            return FoldPrePackingOps(module);
           })
       .def(
           "_jit_pass_onnx_unpack_quantized_weights",

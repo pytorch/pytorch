@@ -6,7 +6,6 @@
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
-#include <torch/csrc/distributed/rpc/torchscript_functions.h>
 #include <torch/csrc/distributed/rpc/types.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/object_ptr.h>
@@ -325,12 +324,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
       .def(
           "shutdown",
           &ProcessGroupAgent::shutdown,
-          py::call_guard<py::gil_scoped_release>(),
-          R"(
-          future.wait() should not be called after shutdown(), e.g.,
-          pythonRpcHandler is cleaned up in shutdown(), after
-          shutdown(), python objects returned from rpc python call can not be
-          resolved.)")
+          py::call_guard<py::gil_scoped_release>())
       .def(
           "sync",
           &ProcessGroupAgent::sync,
@@ -417,36 +411,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
 
   module.def(
       "_invoke_rpc_torchscript",
-      [](const std::string& dstWorkerName,
-         const py::object& userCallable,
-         const py::tuple& argsTuple,
-         const py::dict& kwargsDict) {
-        DCHECK(!PyGILState_Check());
-        // No need to catch exception here, if function can not be found,
-        // exception will be thrown in get_function() call; if args do not match
-        // with function schema, exception will be thrown in
-        // createStackForSchema() call.
-        auto& pythonRpcHandler = PythonRpcHandler::getInstance();
-        c10::QualifiedName qualifiedName =
-            pythonRpcHandler.getQualifiedName(userCallable);
-        c10::FunctionSchema functionSchema =
-            pythonRpcHandler.jitCompilationUnit()
-                ->get_function(qualifiedName)
-                .getSchema();
-        Stack stack;
-        {
-          py::gil_scoped_acquire acquire;
-          stack = torch::jit::createStackForSchema(
-              functionSchema,
-              argsTuple.cast<py::args>(),
-              kwargsDict.cast<py::kwargs>(),
-              c10::nullopt);
-        }
-        DCHECK(!PyGILState_Check());
-        c10::intrusive_ptr<c10::ivalue::Future> fut =
-            rpcTorchscript(dstWorkerName, qualifiedName, functionSchema, stack);
-        return std::make_shared<jit::PythonFutureWrapper>(fut);
-      },
+      &pyRpcTorchscript,
       py::call_guard<py::gil_scoped_release>());
 
   module.def(
@@ -463,28 +428,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
 
   module.def(
       "_invoke_remote_torchscript",
-      [](const std::string& dstWorkerName,
-         const std::string& qualifiedNameStr,
-         const py::args& args,
-         const py::kwargs& kwargs) {
-        DCHECK(!PyGILState_Check());
-        auto qualifiedName = c10::QualifiedName(qualifiedNameStr);
-        auto functionSchema = PythonRpcHandler::getInstance()
-                                  .jitCompilationUnit()
-                                  ->get_function(qualifiedName)
-                                  .getSchema();
-        Stack stack;
-        // Acquire GIL for py::args and py::kwargs processing.
-        {
-          pybind11::gil_scoped_acquire ag;
-          stack = torch::jit::createStackForSchema(
-              functionSchema, args, kwargs, c10::nullopt);
-        }
-        DCHECK(!PyGILState_Check());
-        auto rrefPtr = remoteTorchscript(
-            dstWorkerName, qualifiedName, functionSchema, stack);
-        return PyRRef(rrefPtr);
-      },
+      &pyRemoteTorchscript,
       py::call_guard<py::gil_scoped_release>());
 
   module.def(

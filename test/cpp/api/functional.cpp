@@ -293,7 +293,7 @@ TEST_F(FunctionalTest, MultiLabelSoftMarginLossWeightedNoReduction) {
   auto input = torch::tensor({{0., 2., 2., 0.}, {2., 1., 0., 1.}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({{0., 0., 1., 0.}, {1., 0., 1., 1.}}, torch::kFloat);
   auto weight = torch::tensor({0.1, 0.6, 0.4, 0.8}, torch::kFloat);
-  auto options = F::MultiLabelSoftMarginLossFuncOptions().reduction(torch::kNone).weight(weight);
+  auto options = F::MultilabelSoftMarginLossFuncOptions().reduction(torch::kNone).weight(weight);
   auto output =
       F::multilabel_soft_margin_loss(input, target, options);
   auto expected = torch::tensor({0.4876902, 0.3321295}, torch::kFloat);
@@ -2328,9 +2328,15 @@ TEST_F(FunctionalTest, AlphaDropout) {
   auto input_std = input.std();
 
   for (const auto rate : {0.2, 0.5, 0.8}) {
-    auto output = F::alpha_dropout(input, F::AlphaDropoutFuncOptions().p(rate).training(false));
-    ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.1));
-    ASSERT_TRUE(torch::allclose(input_std, output.std(), 0.1));
+    for (const auto inplace : {false, true}) {
+      auto input_ = input.clone();
+      auto output = F::alpha_dropout(input_, F::AlphaDropoutFuncOptions().p(rate).training(false).inplace(inplace));
+      ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.1));
+      ASSERT_TRUE(torch::allclose(input_std, output.std(), 0.1));
+      if (inplace) {
+        ASSERT_TRUE(torch::allclose(input_, output));
+      }
+    }
   }
   auto output = F::detail::alpha_dropout(input, 0.5, false, false);
   ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.1));
@@ -2343,9 +2349,15 @@ TEST_F(FunctionalTest, FeatureAlphaDropout) {
   auto input_std = input.std();
 
   for (const auto rate : {0.2, 0.5, 0.8}) {
-    auto output = F::feature_alpha_dropout(input, F::FeatureAlphaDropoutFuncOptions().p(rate).training(false));
-    ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.1));
-    ASSERT_TRUE(torch::allclose(input_std, output.std(), 0.1));
+    for (const auto inplace : {false, true}) {
+      auto input_ = input.clone();
+      auto output = F::feature_alpha_dropout(input_, F::FeatureAlphaDropoutFuncOptions().p(rate).training(false).inplace(inplace));
+      ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.1));
+      ASSERT_TRUE(torch::allclose(input_std, output.std(), 0.1));
+      if (inplace) {
+        ASSERT_TRUE(torch::allclose(input_, output));
+      }
+    }
   }
   auto output = F::feature_alpha_dropout(input);
   ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.1));

@@ -1059,7 +1059,7 @@
     - THTensor* q
     - THIndexTensor* J
     - long num_samples
-    - THGenerator* generator
+    - Generator generator
 ]]
 [[
   name: _th_uniform_
@@ -1074,7 +1074,7 @@
     - THTensor* self
     - double from
     - double to
-    - THGenerator* generator
+    - Generator generator
 ]]
 
 [[

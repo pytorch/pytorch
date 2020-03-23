@@ -11,8 +11,6 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-py::object toPyObj(const Message& message);
-
 std::shared_ptr<jit::PythonFutureWrapper> pyRpcBuiltin(
     const WorkerInfo& dst,
     const std::string& opName,
@@ -26,6 +24,12 @@ std::shared_ptr<jit::PythonFutureWrapper> pyRpcPythonUdf(
     std::vector<torch::Tensor>& tensors,
     const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf);
 
+std::shared_ptr<jit::PythonFutureWrapper> pyRpcTorchscript(
+    const std::string& dstWorkerName,
+    const py::object& userCallable,
+    const py::tuple& argsTuple,
+    const py::dict& kwargsDict);
+
 PyRRef pyRemoteBuiltin(
     const WorkerInfo& dst,
     const std::string& opName,
@@ -38,6 +42,12 @@ PyRRef pyRemotePythonUdf(
     std::string& pickledPythonUDF,
     std::vector<torch::Tensor>& tensors,
     const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf);
+
+PyRRef pyRemoteTorchscript(
+    const std::string& dstWorkerName,
+    const std::string& qualifiedNameStr,
+    const py::args& args,
+    const py::kwargs& kwargs);
 
 } // namespace rpc
 } // namespace distributed

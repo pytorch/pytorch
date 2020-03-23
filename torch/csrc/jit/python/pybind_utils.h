@@ -68,12 +68,11 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper {
       auto output = graph->insert(aten::wait, {fut_val});
       jit::tracer::setValueTrace(fut->value(), output);
     }
-    py::object py_obj;
     {
       // acquiring GIL as toPyObject creates new py::object
       // without grabbing the GIL.
       py::gil_scoped_acquire acquire;
-      py_obj = toPyObject(fut->value());
+      py::object py_obj = toPyObject(fut->value());
       if (unwrap_func) {
         (*unwrap_func)(py_obj);
       }
