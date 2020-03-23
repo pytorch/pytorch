@@ -3969,7 +3969,7 @@ def multi_head_attention_in_projection(seq, num_heads, in_proj_weight, in_proj_b
         - seq: :math:`(S, N, E)`
         - in_proj_weight: :math:`(P, E)`
         - in_proj_bias: :math:`(P)`
-        - Output: :math:`(N * H, S, P / H)`
+        - Output: :math:`(S, N * H, P / H)`
         where S is the sequence length, H is the number of attention heads, N is the
         batch size, P is the projection dimension, and E is the embedding
         dimension.
@@ -3988,7 +3988,7 @@ def multi_head_attention_in_projection(seq, num_heads, in_proj_weight, in_proj_b
 
     q = linear(seq, in_proj_weight, in_proj_bias)
     # Shape of q: (S, N, P)
-    q = q.reshape(seq_len, bsz * num_heads, head_dim).transpose(0, 1)
+    q = q.reshape(seq_len, bsz * num_heads, head_dim)
     return q
 
 
@@ -4016,22 +4016,23 @@ def scaled_dot_product_attention(q,                         # type: Tensor
         dropout_p (float): Probability of an element will be zeroed.
         training (bool): Apply dropout if ``training=True``
         key_padding_mask (Tensor, optional): Specified padding elements in the
-            key will be ignored by the attention. This is a binary mask. When
+            key will be ignored by the attention. This is a boolean mask. When
             the value is True, the corresponding value on the attention layer
             will be set to :math:`-\inf`.
         attn_mask (Tensor, optional): 2D or 3D mask that prevents attention to
-            certain positions. This is an additive mask (i.e. the values will
-            be added to the attention layer). A 2D mask will be broadcasted for
-            all the batches while a 3D mask allows to specify a different mask
-            for the entries of each batch.
+            certain positions. This is a boolean mask. Where the mask value is
+            ``True``, the corresponding attention weight will be set to 
+            :math:`-\inf`. A 2D mask will be broadcasted for all the batches
+            while a 3D mask allows to specify a different mask for the entries
+            of each batch. 
 
     Shape:
-        - q: :math:`(N * H, L, P / H)`
-        - k: :math:`(N * H, S, P / H)`
-        - v: :math:`(N * H, S, P / H)`
+        - q: :math:`(L, N * H, P / H)`
+        - k: :math:`(S, N * H, P / H)`
+        - v: :math:`(S, N * H, P / H)`
         - key_padding_mask: :math:`(N, S)`
-        - attn_mask: :math:`(L, S)` or :math:`(N * H, L, S)`
-        - Output: :math:`(N * H, L, P / H)`, :math:`(N * H, L, S)`
+        - attn_mask: :math:`(L, S)` or :math:`(L, N * H, S)`
+        - Output: :math:`(L, N * H, P / H)`, :math:`(L, N * H, S)`
         where L is the target length, S is the source length, H is the number
         of attention heads, N is the batch size, and P is the projection
         dimension.
@@ -4044,14 +4045,18 @@ def scaled_dot_product_attention(q,                         # type: Tensor
                 scaled_dot_product_attention, tens_ops,
                 q, k, v, num_heads, add_zero_attn, dropout_p,
                 training=training, key_padding_mask=key_padding_mask, attn_mask=attn_mask)
-    batch_heads, tgt_len, head_dim = q.size()
-    assert q.size(0) == k.size(0) == v.size(0), "Dimension 0 of q, k, v must be equal."
-    assert batch_heads % num_heads == 0, "Dimension 0 of q, k, v must be divisible by num_heads"
-    bsz = batch_heads // num_heads
     assert k.size() == v.size(), "Shape of k, v must match"
-    assert q.size(-1) == k.size(-1), "The head dimension of query must be equal to that of key"
-
+    assert q.size(1) % num_heads == 0, "Dimension 1 of q, k, v must be divisible by num_heads"
+    assert q.size(1) == k.size(1), "Number of batch heads for q, k, v must be equal."
+    assert q.size(2) == k.size(2), "The head dimension for q, k, v must be equal."
+    tgt_len, batch_heads, head_dim = q.size()
+    bsz = batch_heads // num_heads
     src_len = k.size(1)
+    # Transpose the batch_heads to be first
+    q = q.transpose(0, 1)
+    k = k.transpose(0, 1)
+    v = v.transpose(0, 1)
+    
 
     # Scale q
     q = q * (float(head_dim) ** -0.5)
@@ -4061,16 +4066,15 @@ def scaled_dot_product_attention(q,                         # type: Tensor
             if list(attn_mask.size()) != [1, tgt_len, src_len]:
                 raise RuntimeError('The size of the 2D attn_mask is not correct.')
         elif attn_mask.dim() == 3:
-            if list(attn_mask.size()) != [batch_heads, tgt_len, src_len]:
+            if list(attn_mask.size()) != [tgt_len, batch_heads, src_len]:
                 raise RuntimeError('The size of the 3D attn_mask is not correct.')
+            attn_mask = attn_mask.transpose(0, 1)
         else:
             raise RuntimeError("attn_mask's dimension {} is not supported".format(attn_mask.dim()))
-        # attn_mask's dim is 3 now.
-        if attn_mask.dtype == torch.bool:
-            attn_mask = torch.where(
-                attn_mask, torch.tensor(float('-inf')), torch.tensor(0.)).to(dtype=q.dtype, device=q.device)
-
-    src_len = k.size(1)
+        # attn_mask is now 3 dimensional. Convert to mask.
+        attn_mask = torch.where(attn_mask,
+                                torch.tensor(float("-inf"), dtype=q.dtype, device=q.device),
+                                torch.tensor(0., dtype=q.dtype, device=q.device))
 
     if key_padding_mask is not None:
         assert key_padding_mask.size(0) == bsz
@@ -4103,6 +4107,10 @@ def scaled_dot_product_attention(q,                         # type: Tensor
     attn_output_weights = softmax(attn_output_weights, dim=-1)
 
     attn_output = torch.matmul(dropout(attn_output_weights, p=dropout_p, training=training), v)
+
+    # Reorder so (target) sequence dimension is first
+    attn_output = attn_output.transpose(0, 1)
+    attn_output_weights = attn_output_weights.transpose(0, 1)
     return attn_output, attn_output_weights
 
 
@@ -4117,7 +4125,7 @@ def multi_head_attention_out_projection(attn_output, num_heads, out_proj_weight,
         out_proj_bias (Tensor, optional): bias used to decode projection.
 
     Shape:
-        - attn_output: :math:`(N * H, S, P / H)`
+        - attn_output: :math:`(S, N * H, P / H)`
         - out_proj_weight: :math:`(E, P)`
         - out_proj_bias: :math:`(E)`
         - Output: :math:`(S, N, E)`
@@ -4136,5 +4144,5 @@ def multi_head_attention_out_projection(attn_output, num_heads, out_proj_weight,
     embed_dim = out_proj_weight.size(0)
     assert batch_heads % num_heads == 0, "dimension 0 of attn_output must be divisible by num_heads"
     bsz = batch_heads // num_heads
-    attn_output = attn_output.transpose(0, 1).reshape(seq_len, bsz, head_dim * num_heads)
+    attn_output = attn_output.reshape(seq_len, bsz, head_dim * num_heads)
     return linear(attn_output, out_proj_weight, out_proj_bias)

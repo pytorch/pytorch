@@ -403,7 +403,7 @@ class MultiheadAttentionInProjection(Module):
         >>> seq = torch.randn(21, 64, 10)
         >>> s = MHA_in(seq)
         >>> print(s.shape)
-        torch.Size([256, 21, 3])
+        torch.Size([21, 256, 3])
     """
     __constants__ = ['embed_dim', 'num_heads', 'head_dim']
 
@@ -419,6 +419,7 @@ class MultiheadAttentionInProjection(Module):
         kaiming_uniform_(self.weight, a=sqrt(5))
 
     def forward(self, seq):
+        # type: Tensor -> Tensor
         return F.multi_head_attention_in_projection(seq, self.num_heads, self.weight, in_proj_bias=None)
 
 
@@ -447,11 +448,11 @@ class ScaledDotProduct(Module):
 
         >>> # S = L = 21; N = 64; E = 10; D = 3; H = 4;
         >>> SDP = nn.ScaledDotProduct(4, False, 0.1)
-        >>> q = torch.randn(256, 21, 3)
-        >>> k = v = torch.randn(256, 21, 3)
+        >>> q = torch.randn(21, 256, 3)
+        >>> k = v = torch.randn(21, 256, 3)
         >>> attn_output, attn_weights = SDP(q, k, v)
         >>> print(attn_output.shape, attn_weights.shape)
-        torch.Size([256, 21, 3]) torch.Size([256, 21, 21])
+        torch.Size([21, 256, 3]) torch.Size([21, 256, 21])
     """
     __constants__ = ['num_heads', 'add_zero_attn', 'dropout_p']
 
@@ -462,6 +463,7 @@ class ScaledDotProduct(Module):
         self.num_heads = num_heads
 
     def forward(self, query, key, value, key_padding_mask=None, attn_mask=None):
+        # type: (Tensor, Tensor, Tensor, Optional[Tensor], Optional[Tensor]) -> Tensor
         attn_output, attn_output_weights = F.scaled_dot_product_attention(
             query, key, value,
             self.num_heads, self.add_zero_attn, self.dropout_p, self.training, key_padding_mask, attn_mask)
@@ -492,7 +494,7 @@ class MultiheadAttentionOutProjection(Module):
 
         >>> # S = 21; N = 64; E = 10; D = 3; H = 4;
         >>> MHA_out = nn.MultiheadAttentionOutProjection(10, 4, 3)
-        >>> attn_seq = torch.randn(256, 21, 3)
+        >>> attn_seq = torch.randn(21, 256, 3)
         >>> a = MHA_out(attn_seq)
         >>> print(a.shape)
         torch.Size([21, 64, 10])
@@ -512,6 +514,7 @@ class MultiheadAttentionOutProjection(Module):
         kaiming_uniform_(self.weight, a=sqrt(5))
 
     def forward(self, attn_output):
+        # type: Tensor -> Tensor
         return F.multi_head_attention_out_projection(attn_output, self.num_heads, self.weight, out_proj_bias=None)
 
 
