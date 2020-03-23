@@ -3,8 +3,10 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
+#include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
 #include <torch/csrc/jit/passes/prepack_folding.h>
+#include <torch/csrc/jit/passes/quantization.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <torch/csrc/jit/passes/xnnpack_rewrite.h>
 
@@ -108,6 +110,13 @@ void FoldPrePackingOps(script::Module& m) {
         n->kind() == Symbol::fromQualString("prepacked::conv2d_clamp_prepack"));
   };
   PrePackingOpsFolder(m, filter_fn, "prepack_folding");
+}
+
+void optimizeForMobile(script::Module& m) {
+  m = FoldConvBatchNorm2d(m);
+  m = freeze_module(m);
+  insertPrePackedOps(m);
+  FoldPrePackingOps(m);
 }
 
 #else
