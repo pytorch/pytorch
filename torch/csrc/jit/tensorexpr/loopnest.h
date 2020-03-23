@@ -11,7 +11,6 @@
 namespace torch {
 namespace jit {
 namespace tensorexpr {
-namespace schedule {
 
 class TORCH_API LoopNest {
  public:
@@ -48,7 +47,6 @@ class TORCH_API LoopNest {
   std::unordered_set<Tensor*> output_tensors_;
   std::unordered_set<Tensor*> intermediate_tensors_;
 };
-} // namespace schedule
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
