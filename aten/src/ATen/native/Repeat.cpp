@@ -39,6 +39,10 @@ Tensor repeat_interleave(const Tensor &self, const Tensor &repeats, c10::optiona
         AT_ERROR("repeats must be 0-dim or 1-dim tensor");
     }
 
+    /* This has the same semantics as:
+     *   `input.index_select(dim.value(), at::repeat_interleave(repeats_))`,
+     * but implementing with gather is faster than `input.index_select`
+     */
     Tensor indices = at::repeat_interleave(repeats_);
 
     std::vector<int64_t> indices_sizes(/*n=*/self.dim(), /*value=*/1);
