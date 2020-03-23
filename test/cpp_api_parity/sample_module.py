@@ -97,7 +97,7 @@ module_tests = [
         cpp_constructor_args='torch::nn::SampleModuleOptions(false, true)',
         input_size=(3, 4),
         cpp_input_args=['torch::randn({3, 4})'],
-        test_cpp_api_parity=True,
+        test_cpp_api_parity=False,
     ),
 ]
 
