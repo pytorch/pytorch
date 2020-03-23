@@ -16,6 +16,8 @@ namespace native {
 
 DEFINE_DISPATCH(qadd_relu_stub);
 DEFINE_DISPATCH(qadd_stub);
+DEFINE_DISPATCH(qadd_scalar_relu_stub);
+DEFINE_DISPATCH(qadd_scalar_stub);
 
 namespace {
 
@@ -46,8 +48,9 @@ Tensor _add_out(Tensor& out, const Tensor& self, const Tensor& other) {
 
 template <bool ReLUFused = false>
 Tensor _add_scalar_out(Tensor& out, const Tensor& self, Scalar other) {
-  TORCH_CHECK(self.qscheme() == kPerTensorAffine,
-              "Only per tensor affine is supported for now!!");
+  TORCH_CHECK(
+      self.qscheme() == kPerTensorAffine,
+      "Only per tensor affine is supported for now!!");
   // To implement tensor-scalar addition in quantized space, we simply
   // adjust the quantization parameters based on the following rules:
   //
@@ -61,11 +64,11 @@ Tensor _add_scalar_out(Tensor& out, const Tensor& self, Scalar other) {
   // If q_min > z - c_q
   //   s' = [(q_max - (z - c_q)]/[q_max - q_min] * s
   //   z' = q_min
-  //   Xq' = torch.quantize_linear(Xq.dequantize() + c_q.dequantize() , s', z')
+  //   Xq' = at::requantize_from_int(Xq - z + c_q, s/s', z')
   // If q_max < z - c_q
   //   s' = [z - c_q -q_min]/[q_max - q_min] * s
   //   z' = q_max
-  //   Xq' = torch.quantize_linear(Xq.dequantize() + c_q.dequantize(), s', z')
+  //   Xq' = at::requantize_from_int(Xq - z + c_q, s/s', z')
   // Else
   //   s' = s
   //   z' = z - c_q
@@ -85,24 +88,29 @@ Tensor _add_scalar_out(Tensor& out, const Tensor& self, Scalar other) {
     if (q_min > z - c_q) {
       s_prime = (((double)q_max - (z - c_q))) / ((double)q_max - q_min) * s;
       z_prime = q_min;
-      auto dequantized_add = self.dequantize() + c_q * s;
+      out.set_quantizer_(make_per_tensor_affine_quantizer(
+          s_prime, z_prime, self.scalar_type()));
       if (ReLUFused) {
-        dequantized_add.relu_();
+        qadd_scalar_relu_stub(self.device().type(), out, self, c_q);
+      } else {
+        qadd_scalar_stub(self.device().type(), out, self, c_q);
       }
-      out.copy_(at::quantize_per_tensor(dequantized_add, s_prime, z_prime, self.scalar_type()));
     } else if (q_max < z - c_q) {
       s_prime = ((double)(z - c_q) - q_min) / ((double)q_max - q_min) * s;
       z_prime = q_max;
-      auto dequantized_add = self.dequantize() + c_q * s;
+      out.set_quantizer_(make_per_tensor_affine_quantizer(
+          s_prime, z_prime, self.scalar_type()));
       if (ReLUFused) {
-        dequantized_add.relu_();
+        qadd_scalar_relu_stub(self.device().type(), out, self, c_q);
+      } else {
+        qadd_scalar_stub(self.device().type(), out, self, c_q);
       }
-      out.copy_(at::quantize_per_tensor(dequantized_add, s_prime, z_prime, self.scalar_type()));
     } else {
       s_prime = s;
       z_prime = z - c_q;
       out.copy_(self);
-      out.set_quantizer_(make_per_tensor_affine_quantizer(s_prime, z_prime, self.scalar_type()));
+      out.set_quantizer_(make_per_tensor_affine_quantizer(
+          s_prime, z_prime, self.scalar_type()));
       if (ReLUFused) {
         at::native::quantized_relu_(out);
       }
