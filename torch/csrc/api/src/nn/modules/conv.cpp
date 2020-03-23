@@ -2,6 +2,7 @@
 #include <torch/nn/functional/padding.h>
 #include <torch/nn/modules/conv.h>
 
+#include <torch/enum.h>
 #include <torch/expanding_array.h>
 #include <torch/nn/init.h>
 #include <torch/types.h>
@@ -14,6 +15,20 @@
 #include <vector>
 
 namespace F = torch::nn::functional;
+
+F::PadFuncOptions::mode_t _get_pad_mode_from_conv_padding_mode(torch::nn::detail::conv_padding_mode_t conv_padding_mode) {
+  F::PadFuncOptions::mode_t pad_mode;
+  if (c10::get_if<torch::enumtype::kReflect>(&conv_padding_mode)) {
+    pad_mode = torch::kReflect;
+  } else if (c10::get_if<torch::enumtype::kReplicate>(&conv_padding_mode)) {
+    pad_mode = torch::kReplicate;
+  } else if (c10::get_if<torch::enumtype::kCircular>(&conv_padding_mode)) {
+    pad_mode = torch::kCircular;
+  } else {
+    TORCH_CHECK(false, "Unsupported conv padding mode: ", torch::enumtype::get_enum_name(conv_padding_mode));
+  }
+  return pad_mode;
+}
 
 namespace torch {
 namespace nn {
@@ -34,10 +49,9 @@ Conv1dImpl::Conv1dImpl(
           .padding_mode(options_.padding_mode())) {}
 
 Tensor Conv1dImpl::forward(const Tensor& input) {
-  if (c10::get_if<enumtype::kCircular>(&options.padding_mode())) {
-    std::vector<int64_t> expanded_padding = {((*options.padding())[0] + 1) / 2, (*options.padding())[0] / 2};
+  if (!c10::get_if<enumtype::kZeros>(&options.padding_mode())) {
     return F::detail::conv1d(
-      F::detail::pad(input, expanded_padding, torch::kCircular, 0),
+      F::pad(input, F::PadFuncOptions(_padding_repeated_twice).mode(_get_pad_mode_from_conv_padding_mode(options.padding_mode()))),
       weight, bias,
       options.stride(),
       /*padding=*/0,
@@ -70,13 +84,10 @@ Conv2dImpl::Conv2dImpl(
           .bias(options_.bias())
           .padding_mode(options_.padding_mode())) {}
 
-Tensor Conv2dImpl::forward(const Tensor& input) {
-  if (c10::get_if<enumtype::kCircular>(&options.padding_mode())) {
-    std::vector<int64_t> expanded_padding = {
-      ((*options.padding())[1] + 1) / 2, (*options.padding())[1] / 2,
-      ((*options.padding())[0] + 1) / 2, (*options.padding())[0] / 2};
+Tensor Conv2dImpl::_conv_forward(const Tensor& input, const Tensor& weight) {
+  if (!c10::get_if<enumtype::kZeros>(&options.padding_mode())) {
     return F::detail::conv2d(
-      F::detail::pad(input, expanded_padding, torch::kCircular, 0),
+      F::pad(input, F::PadFuncOptions(_padding_repeated_twice).mode(_get_pad_mode_from_conv_padding_mode(options.padding_mode()))),
       weight, bias,
       options.stride(),
       /*padding=*/0,
@@ -91,6 +102,10 @@ Tensor Conv2dImpl::forward(const Tensor& input) {
     options.padding(),
     options.dilation(),
     options.groups());
+}
+
+Tensor Conv2dImpl::forward(const Tensor& input) {
+  return _conv_forward(input, weight);
 }
 
 Conv3dImpl::Conv3dImpl(
@@ -110,13 +125,9 @@ Conv3dImpl::Conv3dImpl(
           .padding_mode(options_.padding_mode())) {}
 
 Tensor Conv3dImpl::forward(const Tensor& input) {
-  if (c10::get_if<enumtype::kCircular>(&options.padding_mode())) {
-    std::vector<int64_t> expanded_padding = {
-      ((*options.padding())[2] + 1) / 2, (*options.padding())[2] / 2,
-      ((*options.padding())[1] + 1) / 2, (*options.padding())[1] / 2,
-      ((*options.padding())[0] + 1) / 2, (*options.padding())[0] / 2};
+  if (!c10::get_if<enumtype::kZeros>(&options.padding_mode())) {
     return F::detail::conv3d(
-      F::detail::pad(input, expanded_padding, torch::kCircular, 0),
+      F::pad(input, F::PadFuncOptions(_padding_repeated_twice).mode(_get_pad_mode_from_conv_padding_mode(options.padding_mode()))),
       weight, bias,
       options.stride(),
       /*padding=*/0,
