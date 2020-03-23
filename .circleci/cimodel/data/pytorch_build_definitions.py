@@ -1,6 +1,7 @@
 from collections import OrderedDict
 
 from cimodel.data.pytorch_build_data import TopLevelNode, CONFIG_TREE_DATA
+import cimodel.data.constants as constants
 import cimodel.data.dimensions as dimensions
 import cimodel.lib.conf_tree as conf_tree
 import cimodel.lib.miniutils as miniutils
@@ -112,9 +113,7 @@ class Conf:
 
 
         if not self.is_important:
-            # If you update this, update
-            # caffe2_build_definitions.py too
-            job_def["filters"] = {"branches": {"only": ["master", r"/ci-all\/.*/"]}}
+            job_def["filters"] = constants.NON_PR_FILTERS
         job_def.update(self.gen_workflow_params(phase))
 
         return {job_name : job_def}

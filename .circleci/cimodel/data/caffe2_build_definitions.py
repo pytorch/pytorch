@@ -1,5 +1,6 @@
 from collections import OrderedDict
 
+import cimodel.data.constants as constants
 import cimodel.data.dimensions as dimensions
 import cimodel.lib.conf_tree as conf_tree
 from cimodel.lib.conf_tree import Ver
@@ -129,7 +130,7 @@ class Conf:
             job_name = "caffe2_" + self.get_platform() + "_build"
 
         if not self.is_important:
-            job_def["filters"] = {"branches": {"only": ["master", r"/ci-all\/.*/"]}}
+            job_def["filters"] = constants.NON_PR_FILTERS
         job_def.update(self.gen_workflow_params(phase))
         return {job_name : job_def}
 
