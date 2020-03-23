@@ -124,7 +124,7 @@ RegistrationHandleRAII Dispatcher::registerDef(FunctionSchema schema) {
   });
 }
 
-void checkSchemaCompatibility(const OperatorHandle& op, const FunctionSchema& schema) {
+void Dispatcher::checkSchemaCompatibility(const OperatorHandle& op, const FunctionSchema& schema) {
   TORCH_CHECK(op.schema() == schema, "Tried to register multiple operators with the same name and the same overload name but different schemas: ", schema, " vs ", op.schema());
   if (schema.isDefaultAliasAnalysisKind()) {
     // If the *new* schema is the default alias analysis kind, for BC, we
