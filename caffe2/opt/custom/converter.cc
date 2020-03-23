@@ -152,6 +152,7 @@ class ConcatAddMulReplaceNaNClipConverter : public Converter {
     auto max_arg = op.add_arg();
     max_arg->set_name("clip_max");
     max_arg->set_f(cc_amrc->getClipMax());
+    op.mutable_device_option()->CopyFrom(getDeviceOption(nnOp));
     return op;
   }
   ~ConcatAddMulReplaceNaNClipConverter() override {}
@@ -186,6 +187,7 @@ class SliceConverter : public Converter {
         caffe2::MakeArgument<vector<int64_t>>("starts", slice->getStarts()));
     op.add_arg()->CopyFrom(
         caffe2::MakeArgument<vector<int64_t>>("ends", slice->getEnds()));
+    op.mutable_device_option()->CopyFrom(getDeviceOption(nnOp));
     return op;
   }
 
@@ -236,6 +238,7 @@ class ClipRangesGatherSigridHashConverter : public Converter {
         "max_values", fuse->getMaxValues()));
     op.add_arg()->CopyFrom(caffe2::MakeArgument<bool>(
         "hash_into_int32", fuse->getHashIntoInt32()));
+    op.mutable_device_option()->CopyFrom(getDeviceOption(nnOp));
     return op;
   }
 
@@ -263,6 +266,7 @@ class ClipRangesConverter : public Converter {
     op.set_type("ClipRanges");
     op.add_arg()->CopyFrom(caffe2::MakeArgument<int64_t>(
         "max_length", clipRanges->getMaxLength()));
+    op.mutable_device_option()->CopyFrom(getDeviceOption(nnOp));
     return op;
   }
 
@@ -291,6 +295,7 @@ class SigridHashConverter : public Converter {
         caffe2::MakeArgument<int64_t>("salt", sigridHash->getSalt()));
     op.add_arg()->CopyFrom(
         caffe2::MakeArgument<int64_t>("maxValue", sigridHash->getMaxValue()));
+    op.mutable_device_option()->CopyFrom(getDeviceOption(nnOp));
     return op;
   }
 
