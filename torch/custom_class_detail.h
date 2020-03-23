@@ -122,7 +122,7 @@ struct BoxedProxy<void, Func> {
 } // namespace detail
 
 TORCH_API void registerCustomClass(at::ClassTypePtr class_type);
-TORCH_API void registerCustomClassMethod(std::shared_ptr<jit::Function> method);
+TORCH_API void registerCustomClassMethod(std::unique_ptr<jit::Function> method);
 
 // Given a qualified name (e.g. __torch__.torch.classes.Foo), return
 // the ClassType pointer to the Type that describes that custom class,
