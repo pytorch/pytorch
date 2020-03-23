@@ -1171,6 +1171,22 @@ graph(%x : Tensor,
         assert list(activation_dtypes)[0] != list(weight_dtypes)[0], 'Expected activation dtype to '
         ' be different from wegiht dtype'
 
+    def test_insert_observers_for_reused_weight(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+
+            def forward(self, x, y, weight):
+                x = F.conv2d(x, weight)
+                y = F.conv2d(y, weight)
+                return x + y
+
+        m = torch.jit.script(M()).eval()
+        qconfig_dict = {'' : script_qconfig(default_qconfig)}
+        m = prepare_script(m, qconfig_dict, False)
+        # 3 for x, y, weight, one for output of each F.conv2d and one for output of add
+        assert len(attrs_with_prefix(m, '_observer')) == 6
+
     def test_insert_observers_shared_class_type(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -1423,7 +1439,7 @@ graph(%x : Tensor,
 
         # we just check we have one dequant on every op input, even input
         # is sharded as multi uses
-        FileCheck().check_count("aten::dequantize", 8, exactly=True) \
+        FileCheck().check_count("aten::dequantize", 9, exactly=True) \
                    .run(str(get_forward_graph(m._c)))
 
     def test_insert_quant_dequant_shared_class_type(self):
@@ -2193,9 +2209,10 @@ graph(%input, %weight):
                 self.adaptive_avgpool = torch.nn.AdaptiveAvgPool2d((1, 1))
                 self.dropout = torch.nn.Dropout()
                 self.avgpool = torch.nn.AvgPool2d(3)
+                self.conv = torch.nn.Conv2d(3, 3, 3)
 
             def forward(self, x):
-                x = torch.dequantize(x)
+                x = self.conv(x)
                 x = self.maxpool(x)
                 x = self.adaptive_avgpool(x)
                 x = self.avgpool(x)
@@ -2215,50 +2232,25 @@ graph(%input, %weight):
                 x = F.interpolate(x, 4, mode='nearest')
                 x = F.upsample(x, (32, 32))
                 x = F.upsample_bilinear(x, (32, 32))
-                # x = F.upsample_nearest(x, (32, 32))
+                x = F.upsample_nearest(x, (32, 32))
+                x = self.conv(x)
                 return x
 
         m = torch.jit.script(M())
-        print('original', m.graph)
-        torch._C._jit_pass_inline(m.graph)
-        torch._C._jit_pass_constant_propagation(m.graph)
-        torch._C._jit_pass_constant_pooling(m.graph)
+        qconfig = script_qconfig(default_qconfig)
+        # dummy data to suppress warning
+        data = torch.rand((1, 3, 10, 10))
+        get_forward(qconfig.activation)(data)
+        get_forward(qconfig.weight)(data)
+
+        qconfig_dict = {'': qconfig}
+        m = prepare_script(m, qconfig_dict, inplace=False)
+        m = convert_script(m, True)
         print(m.graph)
-        FileCheck().check("aten::dequantize") \
-                   .check("aten::max_pool2d") \
-                   .check("aten::adaptive_avg_pool2d") \
-                   .check("aten::avg_pool2d") \
-                   .check("aten::flatten") \
-                   .check("aten::max") \
-                   .check("aten::min") \
-                   .check("aten::mean") \
-                   .check("aten::reshape") \
-                   .check("aten::view") \
-                   .check("aten::transpose") \
-                   .check("aten::contiguous") \
-                   .check("aten::chunk") \
-                   .check("prim::ListUnpack") \
-                   .check("aten::dropout") \
-                   .check("aten::dropout") \
-                   .run(m.graph)
-        torch._C._jit_pass_swap_dequantize(m.graph)
-        print('after swap:', m.graph)
-        FileCheck().check("aten::max_pool2d") \
-                   .check("aten::adaptive_avg_pool2d") \
-                   .check("aten::avg_pool2d") \
-                   .check("aten::flatten") \
-                   .check("aten::max") \
-                   .check("aten::min") \
-                   .check("aten::mean") \
-                   .check("aten::reshape") \
-                   .check("aten::view") \
-                   .check("aten::transpose") \
-                   .check("aten::contiguous") \
-                   .check("aten::chunk") \
-                   .check("prim::ListUnpack") \
-                   .check("aten::dropout") \
-                   .check("aten::dropout") \
-                   .check("dequantize") \
+        # two quantize_per_tensor, one for input, one for weight
+        FileCheck().check_count("aten::quantize_per_tensor", 2, exactly=True) \
+                   .check("quantized::conv2d") \
+                   .check("aten::dequantize") \
                    .run(m.graph)
 
     def test_swap_functional_linear(self):
@@ -16107,10 +16099,10 @@ a")
         tester(str_hash, ("", "hello", "a"))
 
     def test_id(self):
-        with self.assertRaisesRegex(RuntimeError, "Expected a value"): 
+        with self.assertRaisesRegex(RuntimeError, "Expected a value"):
             @torch.jit.script
             def test_id_scalars():
-                return id(2) == id(None) 
+                return id(2) == id(None)
 
         @torch.jit.script
         class FooTest(object):
