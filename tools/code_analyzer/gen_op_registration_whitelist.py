@@ -1,7 +1,11 @@
 """
-This util takes the op dependency graph of ATen and the list of root ops, and
-outputs all transitive dependencies of the root ops. It is invoked from cmake
-for custom mobile build.
+This util is invoked from cmake to produce the op registration whitelist param
+for `ATen/gen.py` for custom mobile build.
+For custom build with dynamic dispatch, it takes the op dependency graph of ATen
+and the list of root ops, and outputs all transitive dependencies of the root
+ops as the whitelist.
+For custom build with static dispatch, the op dependency graph will be omitted,
+and it will directly output root ops as the whitelist.
 """
 
 import argparse
@@ -53,12 +57,14 @@ if __name__ == "__main__":
         description='Util to produce transitive dependencies for custom build')
     parser.add_argument(
         '--op-dependency',
-        help='input yaml file of op dependency graph')
+        help='input yaml file of op dependency graph '
+             '- can be omitted for custom build with static dispatch')
     parser.add_argument(
         '--root-ops',
+        required=True,
         help='input yaml file of root (directly used) operators')
     args = parser.parse_args()
 
-    deps = load_op_dep_graph(args.op_dependency)
+    deps = load_op_dep_graph(args.op_dependency) if args.op_dependency else {}
     root_ops = load_root_ops(args.root_ops)
     print(gen_transitive_closure(deps, root_ops))
