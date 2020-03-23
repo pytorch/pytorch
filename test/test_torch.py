@@ -15003,7 +15003,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         result = torch.cat(concat_list)
         self.assertEqual(result.size(0), SIZE1 + SIZE2)
 
-    @onlyCPU
+    @onlyOnCPUAndCUDA
     def test_cat_bad_dtypes(self, device):
         def cross_product(a, b, skip_same=True):
             result = []
