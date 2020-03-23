@@ -9,7 +9,7 @@ namespace torch {
 namespace jit {
 
 // Must run this pass after constant folding.
-void FoldPrePackingOps(
+void PrePackingOpsFolder(
     script::Module& m,
     const PrePackingOpsFilterFn& is_foldable_op,
     const std::string& attr_prefix) {
