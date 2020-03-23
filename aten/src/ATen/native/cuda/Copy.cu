@@ -50,13 +50,16 @@ void copy_device_to_device(TensorIterator& iter, bool non_blocking) {
   }
 
   if (memcpy_eligible) {
-    // Perform the copy
-    AT_CUDA_CHECK(cudaMemcpyAsync(
-        iter.data_ptr(0),
-        iter.data_ptr(1),
-        numel * iter.element_size(0),
-        cudaMemcpyDeviceToDevice,
-        copy_stream));
+    void *dst = iter.data_ptr(0);
+    void *src = iter.data_ptr(1);
+    size_t size = numel * iter.element_size(0);
+    if (src != dst || src_device != dst_device) {
+      // Perform the copy
+      AT_CUDA_CHECK(cudaMemcpyAsync(
+          dst, src, size,
+          cudaMemcpyDeviceToDevice,
+          copy_stream));
+    }
   } else {
     auto dtype = iter.dtype(0);
     if (isQIntType(dtype)) {

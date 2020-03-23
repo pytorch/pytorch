@@ -1,0 +1,46 @@
+  # Promotion workflow
+  promote:
+    jobs:
+      # Requires manual approval by someone in org-member
+      # CircleCI security context
+      - promote_approval:
+          context: org-member
+          type: approval
+          filters:
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*/
+            branches:
+                ignore: /.*/
+      - promote_s3:
+          context: org-member
+          name: promote_s3_libtorch
+          package_name: libtorch
+          requires:
+            - promote_approval
+          filters:
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*/
+            branches:
+                ignore: /.*/
+      - promote_s3:
+          context: org-member
+          name: promote_s3_torch
+          package_name: torch
+          requires:
+            - promote_approval
+          filters:
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*/
+            branches:
+                ignore: /.*/
+      - promote_conda:
+          context: org-member
+          name: promote_conda_pytorch
+          package_name: pytorch
+          requires:
+            - promote_approval
+          filters:
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*/
+            branches:
+                ignore: /.*/

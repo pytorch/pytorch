@@ -11,6 +11,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/native/quantized/quant_affine.h>
 #include <typeinfo>
+#include <cmath>
 
 
 namespace at {

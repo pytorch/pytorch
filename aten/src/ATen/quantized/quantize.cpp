@@ -115,6 +115,16 @@ DST_T requantize_val(double src_scale, int64_t src_zero_point,
   return quantize_val<DST_T>(dst_scale, dst_zero_point, dq);
 }
 
+template <typename DST_T>
+DST_T requantize_from_int(double multiplier, int64_t zero_point, int64_t src) {
+  int64_t quantize_down =
+      zero_point + lrintf(src * static_cast<float>(multiplier));
+  int32_t min = std::numeric_limits<typename DST_T::underlying>::min();
+  int32_t max = std::numeric_limits<typename DST_T::underlying>::max();
+  return static_cast<DST_T>(
+      std::min<int64_t>(std::max<int64_t>(quantize_down, min), max));
+}
+
 template CAFFE2_API qint8 quantize_val<qint8>(double scale, int64_t zero_point, float value);
 template CAFFE2_API quint8 quantize_val<quint8>(double scale, int64_t zero_point, float value);
 template CAFFE2_API qint32 quantize_val<qint32>(double scale, int64_t zero_point, float value);
@@ -135,5 +145,11 @@ template CAFFE2_API qint32 requantize_val<quint8, qint32>(double, int64_t, doubl
 template CAFFE2_API qint8 requantize_val<qint32, qint8>(double, int64_t, double, int64_t, qint32);
 template CAFFE2_API quint8 requantize_val<qint32, quint8>(double, int64_t, double, int64_t, qint32);
 template CAFFE2_API qint32 requantize_val<qint32, qint32>(double, int64_t, double, int64_t, qint32);
+
+template CAFFE2_API qint8 requantize_from_int<qint8>(double, int64_t, int64_t);
+template CAFFE2_API quint8
+requantize_from_int<quint8>(double, int64_t, int64_t);
+template CAFFE2_API qint32
+requantize_from_int<qint32>(double, int64_t, int64_t);
 
 } // namespace at
