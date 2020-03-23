@@ -13,6 +13,7 @@
 #include <ATen/quantized/QTensorImpl.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/native/TypeProperties.h>
 #include <ATen/native/cpu/CatKernel.h>
 #include <ATen/native/Copy.h>
 #include <ATen/MemoryOverlap.h>
@@ -377,10 +378,7 @@ static Tensor cat_sparse(TensorList tensors, int64_t dim) {
 Tensor cat(TensorList tensors, int64_t dim) {
   std::vector<Tensor> temp_promote;
   if (tensors.size() > 1) { 
-    ScalarType high_type = tensors[0].scalar_type();
-    for (size_t i = 1; i < tensors.size(); ++i) {
-      high_type = promoteTypes(high_type, tensors[i].scalar_type());
-    }
+    ScalarType high_type = result_type(tensors);
     temp_promote.reserve(tensors.size());
     for (size_t i = 0; i < tensors.size(); ++i) {
       temp_promote.push_back(tensors[i].toType(high_type));
