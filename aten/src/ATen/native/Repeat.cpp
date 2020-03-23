@@ -1,8 +1,7 @@
-#include <vector>
-
 #include <ATen/ATen.h>
 #include <ATen/native/Repeat.h>
 #include <ATen/Parallel.h>
+#include <c10/util/SmallVector.h>
 
 static void compute_cpu(int64_t *repeat_ptr, int64_t *cumsum_ptr, int64_t *result_ptr, int64_t size) {
     at::parallel_for(0, size, 1, [&](int64_t i_begin, int64_t i_end) {
@@ -45,14 +44,12 @@ Tensor repeat_interleave(const Tensor &self, const Tensor &repeats, c10::optiona
      */
     Tensor indices = at::repeat_interleave(repeats_);
 
-    std::vector<int64_t> indices_sizes(/*n=*/self.dim(), /*value=*/1);
+    SmallVector<int64_t, 4> indices_sizes(/*n=*/self.dim(), /*value=*/1);
     indices_sizes[dim.value()] = indices.size(0);
-    indices = indices.reshape(indices_sizes);
-
-    auto self_shape = self.sizes();
-    std::vector<int64_t> expanded_indices_shape(self_shape.begin(), self_shape.end());
-    expanded_indices_shape[dim.value()] = -1;
-    indices = indices.expand(IntArrayRef(expanded_indices_shape));
+    auto self_sizes = self.sizes();
+    SmallVector<int64_t, 4> expand_sizes(self_sizes.begin(), self_sizes.end());
+    expand_sizes[dim.value()] = indices.size(0);
+    indices = indices.view(indices_sizes).expand(expand_sizes);
 
     return input.gather(dim.value(), indices);
 }
