@@ -346,6 +346,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   set(TORCH_SRCS
     ${GENERATED_CXX_TORCH}
     ${GENERATED_H_TORCH}
+    ${TORCH_SRC_DIR}/csrc/ThreadLocalState.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/anomaly_mode.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/autograd.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/custom_function.cpp
@@ -484,8 +485,8 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/kernel.cpp
     ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_codegen.cpp
     ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_jit.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/loopnest.cpp
     ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/mem_arena.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/schedule.cpp
     ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/tensor.cpp
     ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/types.cpp
     ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/unique_name_manager.cpp
