@@ -1289,6 +1289,36 @@ graph(%x : Tensor,
                    .check('Observer = prim::GetAttr[name="_observer_') \
                    .run(m.graph)
 
+    def test_insert_observers_for_if(self):
+        class Res(torch.nn.Module):
+            def __init__(self, use_skip):
+                super(Res, self).__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 1).float()
+                self.use_skip = use_skip
+
+            def forward(self, x):
+                if self.use_skip:
+                    return self.conv(x)
+                else:
+                    return self.conv(x)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.res1 = Res(True)
+                self.res2 = Res(False)
+
+            def forward(self, x):
+                x = self.res1(x)
+                x = self.res2(x)
+                return x
+
+        data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        qconfig_dict = {'': script_qconfig(default_qconfig)}
+        m = torch.jit.script(M()).eval()
+        m = prepare_script(m, qconfig_dict, inplace=False)
+        assert len(attrs_with_prefix(m, '_observer_',)) == 3
+
     def test_insert_quant_dequant(self):
         class M(torch.nn.Module):
             def __init__(self):
