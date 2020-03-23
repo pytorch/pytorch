@@ -91,6 +91,8 @@ blacklist = [
     'div',
     'div_',
     'div_out',
+    'floor_divide', 'floor_divide_', 'floor_divide_out',
+    'dequantize',
 ]
 
 
@@ -110,7 +112,7 @@ def type_to_python(typename, size=None):
 
     typename = {
         'Device': 'Union[_device, str, None]',
-        'Generator*': 'Generator',
+        'Generator': 'Generator',
         'IntegerTensor': 'Tensor',
         'Scalar': 'Number',
         'ScalarType': '_dtype',
@@ -160,6 +162,8 @@ def arg_to_type_hint(arg):
         elif isinstance(default, str) and default.startswith('{') and default.endswith('}'):
             if arg['dynamic_type'] == 'Tensor' and default == '{}':
                 default = None
+            elif arg['dynamic_type'] == 'Generator' and default == '{}':
+                default = None
             elif arg['dynamic_type'] == 'IntArrayRef':
                 default = '(' + default[1:-1] + ')'
             else:
@@ -175,7 +179,7 @@ def arg_to_type_hint(arg):
 
 
 binary_ops = ('add', 'sub', 'mul', 'div', 'pow', 'lshift', 'rshift', 'mod', 'truediv',
-              'matmul', 'floordiv',
+              'matmul', 'floordiv', 'floor_divide'
               'radd', 'rsub', 'rmul', 'rtruediv', 'rfloordiv', 'rpow',          # reverse arithmetic
               'and', 'or', 'xor',                   # logic
               'iadd', 'iand', 'idiv', 'ilshift', 'imul',
@@ -457,7 +461,7 @@ def gen_pyi(declarations_path, out):
                  .format(FACTORY_PARAMS)],
         'is_grad_enabled': ['def is_grad_enabled() -> _bool: ...']
     })
-    for binop in ['mul', 'div']:
+    for binop in ['mul', 'div', 'floor_divide']:
         unsorted_function_hints[binop].append(
             'def {}(input: Union[Tensor, Number],'
             ' other: Union[Tensor, Number],'
@@ -540,7 +544,7 @@ def gen_pyi(declarations_path, out):
                ],
         'item': ["def item(self) -> Number: ..."],
     })
-    for binop in ['mul', 'div']:
+    for binop in ['mul', 'div', 'floor_divide']:
         for inplace in [False, True]:
             out_suffix = ', *, out: Optional[Tensor]=None'
             if inplace:

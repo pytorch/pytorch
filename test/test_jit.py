@@ -1555,28 +1555,34 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
                 x = self.bn(x)
                 return x
 
-        eager = TestModule()
-        scripted = torch.jit.script(eager)
-        eager.eval()
-        scripted.eval()
-
-        # Check that in the original script module's forward we have two
-        # CallMethod nodes. One of them should be for conv.forward and the other
-        # for bn.forward.
-        FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 2, exactly=True) \
-            .run(str(get_forward(scripted._c).graph))
-
-        # Run FoldConvBatchnorm2d pass.
-        scripted = wrap_cpp_module(torch._C._jit_pass_fold_convbn(scripted._c))
-
-        # Check that after the pass one of the CallMethods is gone (supposedly,
-        # the bn.forward).
-        FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 1, exactly=True) \
-            .run(str(get_forward_graph(scripted._c)))
-
         # Check that the transformation doesn't change numerics
-        x = torch.rand(1, 1, 6, 6)
-        self.assertEqual(eager(x), scripted(x))
+        for tracing_mode in [True, False]:
+            eager = TestModule()
+            eager.eval()
+            if tracing_mode:
+                x = torch.rand(1, 1, 6, 6)
+                scripted_or_traced = torch.jit.trace(eager, x)
+            else:
+                scripted_or_traced = torch.jit.script(eager)
+            scripted_or_traced.eval()
+
+            # Check that in the original script module's forward we have two
+            # CallMethod nodes. One of them should be for conv.forward and the other
+            # for bn.forward.
+            FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 2, exactly=True) \
+                .run(str(get_forward(scripted_or_traced._c).graph))
+
+            # Run FoldConvBatchnorm2d pass.
+            scripted_or_traced = wrap_cpp_module(torch._C._jit_pass_fold_convbn(scripted_or_traced._c))
+
+            # Check that after the pass one of the CallMethods is gone (supposedly,
+            # the bn.forward).
+            FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 1, exactly=True) \
+                .run(str(get_forward_graph(scripted_or_traced._c)))
+
+            # Check that the transformation doesn't change numerics
+            x = torch.rand(1, 1, 6, 6)
+            self.assertEqual(eager(x), scripted_or_traced(x))
 
     def test_foldbn_trivial_nobias(self):
         # Test trivial case
@@ -1594,28 +1600,33 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
                 x = self.bn(x)
                 return x
 
-        eager = TestModule()
-        scripted = torch.jit.script(eager)
-        eager.eval()
-        scripted.eval()
+        for tracing_mode in [True, False]:
+            eager = TestModule()
+            eager.eval()
+            if tracing_mode:
+                x = torch.rand(1, 1, 6, 6)
+                scripted_or_traced = torch.jit.trace(eager, x)
+            else:
+                scripted_or_traced = torch.jit.script(eager)
+            scripted_or_traced.eval()
 
-        # Check that in the original script module's forward we have two
-        # CallMethod nodes. One of them should be for conv.forward and the other
-        # for bn.forward.
-        FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 2, exactly=True) \
-            .run(str(get_forward_graph(scripted._c)))
+            # Check that in the original script module's forward we have two
+            # CallMethod nodes. One of them should be for conv.forward and the other
+            # for bn.forward.
+            FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 2, exactly=True) \
+                .run(str(get_forward_graph(scripted_or_traced._c)))
 
-        # Run FoldConvBatchnorm2d pass.
-        scripted = wrap_cpp_module(torch._C._jit_pass_fold_convbn(scripted._c))
+            # Run FoldConvBatchnorm2d pass.
+            scripted_or_traced = wrap_cpp_module(torch._C._jit_pass_fold_convbn(scripted_or_traced._c))
 
-        # Check that after the pass one of the CallMethods is gone (supposedly,
-        # the bn.forward).
-        FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 1, exactly=True) \
-            .run(str(get_forward_graph(scripted._c)))
+            # Check that after the pass one of the CallMethods is gone (supposedly,
+            # the bn.forward).
+            FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 1, exactly=True) \
+                .run(str(get_forward_graph(scripted_or_traced._c)))
 
-        # Check that the transformation doesn't change numerics
-        x = torch.rand(1, 1, 6, 6)
-        self.assertEqual(eager(x), scripted(x))
+            # Check that the transformation doesn't change numerics
+            x = torch.rand(1, 1, 6, 6)
+            self.assertEqual(eager(x), scripted_or_traced(x))
 
     def test_foldbn_in_submodule(self):
         # Test that we find Conv-BN patterns in submodules
@@ -1639,21 +1650,77 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
                 x = self.sub(x)
                 return x
 
-        eager = TestModule()
-        scripted = torch.jit.script(eager)
-        eager.eval()
-        scripted.eval()
+        for tracing_mode in [True, False]:
+            eager = TestModule()
+            eager.eval()
+            if tracing_mode:
+                x = torch.rand(1, 1, 10, 10)
+                scripted_or_traced = torch.jit.trace(eager, x)
+            else:
+                scripted_or_traced = torch.jit.script(eager)
+            scripted_or_traced.eval()
 
-        FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 2, exactly=True) \
-            .run(str(get_forward_graph(scripted.sub._c)))
+            FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 2, exactly=True) \
+                .run(str(get_forward_graph(scripted_or_traced.sub._c)))
 
-        scripted = wrap_cpp_module(torch._C._jit_pass_fold_convbn(scripted._c))
+            scripted_or_traced = wrap_cpp_module(torch._C._jit_pass_fold_convbn(scripted_or_traced._c))
 
-        FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 1, exactly=True) \
-            .run(str(get_forward_graph(scripted.sub._c)))
+            FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 1, exactly=True) \
+                .run(str(get_forward_graph(scripted_or_traced.sub._c)))
 
-        x = torch.rand(1, 1, 10, 10)
-        self.assertEqual(eager(x), scripted(x))
+            x = torch.rand(1, 1, 10, 10)
+            self.assertEqual(eager(x), scripted_or_traced(x))
+
+    def test_foldbn_in_customConv2D(self):
+        # Make sure a custom Conv2D class is not folded
+        # as we do not know it does.
+        class CustomConv2D(torch.nn.Module):
+            def __init__(self, a, b, c, d):
+                super(CustomConv2D, self).__init__()
+
+            def forward(self, x):
+                return F.relu(x)
+
+        class SubModule(torch.nn.Module):
+            def __init__(self):
+                super(SubModule, self).__init__()
+                self.conv = CustomConv2D(1, 20, 5, 1)
+                self.bn = torch.nn.BatchNorm2d(num_features=20)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.bn(x)
+                return x
+
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super(TestModule, self).__init__()
+                self.sub = SubModule()
+
+            def forward(self, x):
+                x = self.sub(x)
+                return x
+
+        for tracing_mode in [True, False]:
+            eager = TestModule()
+            eager.eval()
+            if tracing_mode:
+                x = torch.rand(1, 20, 10, 10)
+                scripted_or_traced = torch.jit.trace(eager, x)
+            else:
+                scripted_or_traced = torch.jit.script(eager)
+            scripted_or_traced.eval()
+
+            FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 2, exactly=True) \
+                .run(str(get_forward_graph(scripted_or_traced.sub._c)))
+
+            scripted_or_traced = wrap_cpp_module(torch._C._jit_pass_fold_convbn(scripted_or_traced._c))
+
+            FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 2, exactly=True) \
+                .run(str(get_forward_graph(scripted_or_traced.sub._c)))
+
+            x = torch.rand(1, 20, 10, 10)
+            self.assertEqual(eager(x), scripted_or_traced(x))
 
     def test_foldbn_shared_classtype(self):
         class TestModule(torch.nn.Module):
@@ -1678,14 +1745,73 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
                 x = self.bn2(x)
                 x = self.relu(x)
                 return x
-        for bias in [True, False]:
-            eager = TestModule(bias).eval()
-            scripted = torch.jit.script(eager).copy()
-            torch._C._jit_pass_dedup_module_uses(scripted._c)
 
-            folded = wrap_cpp_module(torch._C._jit_pass_fold_convbn(scripted._c))
-            x = torch.rand(1, 5, 6, 6)
-            self.assertEqual(eager(x), scripted(x))
+        for tracing_mode in [True, False]:
+            for bias in [True, False]:
+                eager = TestModule(bias).eval()
+                if tracing_mode:
+                    x = torch.rand(1, 5, 6, 6)
+                    scripted_or_traced = torch.jit.trace(eager, x).copy()
+                else:
+                    scripted_or_traced = torch.jit.script(eager).copy()
+                torch._C._jit_pass_dedup_module_uses(scripted_or_traced ._c)
+                folded = wrap_cpp_module(torch._C._jit_pass_fold_convbn(scripted_or_traced ._c))
+                x = torch.rand(1, 5, 6, 6)
+                self.assertEqual(eager(x), scripted_or_traced(x))
+
+    def test_foldbn_complex_cases(self):
+        # This test case attempt to try combinations of conv2d with bias/nobias
+        # as well as BatchNorm with affine/no-affine along with varying the
+        # number of layers.
+        class SubModule(torch.nn.Module):
+            def __init__(self, num_blocks, enable_bias, enable_affine):
+                super(SubModule, self).__init__()
+                layers = []
+                for i in range(num_blocks):
+                    layers.append(torch.nn.Conv2d(20, 20, 5, 1, bias=enable_bias))
+                    bn_obj = torch.nn.BatchNorm2d(num_features=20, affine=enable_affine)
+                    if enable_affine:
+                        bn_obj.weight = torch.nn.Parameter(torch.rand_like(bn_obj.weight))
+                        bn_obj.bias = torch.nn.Parameter(torch.rand_like(bn_obj.bias))
+                    bn_obj.running_mean = torch.rand_like(bn_obj.running_mean)
+                    bn_obj.running_var = torch.rand_like(bn_obj.running_var)
+                    layers.append(bn_obj)
+                self.layers = nn.Sequential(*layers)
+
+            def forward(self, x):
+                return self.layers(x)
+
+        class TestModule(torch.nn.Module):
+            def __init__(self, num_blocks, enable_bias, enable_affine):
+                super(TestModule, self).__init__()
+                self.sub = SubModule(num_blocks, enable_bias, enable_affine)
+
+            def forward(self, x):
+                x = self.sub(x)
+                return x
+
+        bias_affine_options = itertools.product([True, False], [True, False], [True, False], [1, 2])
+        for (tracing_mode, enable_bias, enable_bn_affine, num_layers) in bias_affine_options:
+            eager = TestModule(num_layers, enable_bias, enable_bn_affine)
+            eager.eval()
+
+            if tracing_mode:
+                x = torch.rand(1, 20, 10, 10)
+                scripted_or_traced = torch.jit.trace(eager, x)
+            else:
+                scripted_or_traced = torch.jit.script(eager)
+            scripted_or_traced.eval()
+
+            FileCheck().check_count("prim::CallMethod[name=\"forward\"]", num_layers * 2, exactly=True) \
+                .run(str(get_forward_graph(scripted_or_traced.sub.layers._c)))
+
+            scripted_or_traced = wrap_cpp_module(torch._C._jit_pass_fold_convbn(scripted_or_traced._c))
+
+            FileCheck().check_count("prim::CallMethod[name=\"forward\"]", num_layers, exactly=True) \
+                .run(str(get_forward_graph(scripted_or_traced.sub.layers._c)))
+
+            x = torch.rand(1, 20, 10, 10)
+            self.assertEqual(eager(x), scripted_or_traced(x))
 
     def test_fuse_linear(self):
         input_strs = ["""
@@ -1903,6 +2029,7 @@ graph(%input, %weight):
                 super(M, self).__init__()
                 self.maxpool = torch.nn.MaxPool2d(kernel_size=3)
                 self.adaptive_avgpool = torch.nn.AdaptiveAvgPool2d((1, 1))
+                self.dropout = torch.nn.Dropout()
                 self.avgpool = torch.nn.AvgPool2d(3)
 
             def forward(self, x):
@@ -1914,6 +2041,9 @@ graph(%input, %weight):
                 x = torch.max(x)
                 x = torch.min(x)
                 x = torch.mean(x)
+                x = x.reshape([-1])
+                x = F.dropout(x)
+                x = self.dropout(x)
                 # TODO: uncomment when sort is supported
                 # x, _ = torch.sort(x)
                 x = F.interpolate(x, 4, mode='nearest')
@@ -1921,8 +2051,10 @@ graph(%input, %weight):
                 x = F.upsample_bilinear(x, (32, 32))
                 x = F.upsample_nearest(x, (32, 32))
                 return x
+
         m = torch.jit.script(M())
         torch._C._jit_pass_inline(m.graph)
+        torch._C._jit_pass_constant_propagation(m.graph)
         FileCheck().check("aten::dequantize") \
                    .check("aten::max_pool2d") \
                    .check("aten::adaptive_avg_pool2d") \
@@ -1931,6 +2063,9 @@ graph(%input, %weight):
                    .check("aten::max") \
                    .check("aten::min") \
                    .check("aten::mean") \
+                   .check("aten::reshape") \
+                   .check("aten::dropout") \
+                   .check("aten::dropout") \
                    .run(m.graph)
         torch._C._jit_pass_swap_dequantize(m.graph)
         FileCheck().check("aten::max_pool2d") \
@@ -1940,6 +2075,9 @@ graph(%input, %weight):
                    .check("aten::max") \
                    .check("aten::min") \
                    .check("aten::mean") \
+                   .check("aten::reshape") \
+                   .check("aten::dropout") \
+                   .check("aten::dropout") \
                    .check("dequantize") \
                    .run(m.graph)
 
@@ -8421,7 +8559,8 @@ a")
         self.assertFalse(test_all_tensor(torch.tensor([True, False], dtype=torch.uint8)))
 
         @torch.jit.script
-        def test_all_bool_list(x: List[bool]):
+        def test_all_bool_list(x):
+            # type: (List[bool]) -> bool
             return all(x)
         self.assertTrue(test_all_bool_list([True, True]))
         self.assertTrue(test_all_bool_list([True, 1]))
@@ -8431,13 +8570,15 @@ a")
         self.assertTrue(test_all_bool_list([]))
 
         @torch.jit.script
-        def test_all_int_list(x: List[int]):
+        def test_all_int_list(x):
+            # type: (List[int]) -> bool
             return all(x)
         self.assertTrue(test_all_int_list([3, 6]))
         self.assertFalse(test_all_int_list([2, 0]))
 
         @torch.jit.script
-        def test_all_float_list(x: List[float]):
+        def test_all_float_list(x):
+            # type: (List[float]) -> bool
             return all(x)
         self.assertTrue(test_all_float_list([3.14, 8.1]))
         self.assertFalse(test_all_float_list([3.14, 0, 8.9]))
@@ -15740,6 +15881,29 @@ a")
         tester(int_hash, (20, 21, 22))
         tester(float_hash, (20.0, 21.00001, 22.443))
         tester(str_hash, ("", "hello", "a"))
+
+    def test_id(self):
+        with self.assertRaisesRegex(RuntimeError, "Expected a value"): 
+            @torch.jit.script
+            def test_id_scalars():
+                return id(2) == id(None) 
+
+        @torch.jit.script
+        class FooTest(object):
+            def __init__(self, x):
+                self.foo = x
+
+            def getFooTest(self):
+                return self.foo
+
+        def test_id_class_types():
+            a = id(FooTest(torch.tensor(3)))
+            b = id(FooTest(torch.tensor(2)))
+            c = id(None)
+            return a != b and b != c
+
+        script = torch.jit.script(test_id_class_types)
+        self.assertEqual(script(), test_id_class_types())
 
     def test_mutable_dce(self):
         @torch.jit.script

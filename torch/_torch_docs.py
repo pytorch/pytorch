@@ -261,9 +261,22 @@ addcdiv(input, tensor1, tensor2, *, value=1, out=None) -> Tensor
 Performs the element-wise division of :attr:`tensor1` by :attr:`tensor2`,
 multiply the result by the scalar :attr:`value` and add it to :attr:`input`.
 
+.. warning::
+    Integer division with addcdiv is deprecated, and in a future release
+    addcdiv will perform a true division of :attr:`tensor1` and :attr:`tensor2`.
+    The current addcdiv behavior can be replicated using :func:`floor_divide`
+    for integral inputs
+    (:attr:`input` + :attr:`value` * :attr:`tensor1` // :attr:`tensor2`)
+    and :func:`div` for float inputs
+    (:attr:`input` + :attr:`value` * :attr:`tensor1` / :attr:`tensor2`).
+    The new addcdiv behavior can be implemented with :func:`true_divide`
+    (:attr:`input` + :attr:`value` * torch.true_divide(:attr:`tensor1`,
+    :attr:`tensor2`).
+
 .. math::
     \text{out}_i = \text{input}_i + \text{value} \times \frac{\text{tensor1}_i}{\text{tensor2}_i}
 """ + r"""
+
 The shapes of :attr:`input`, :attr:`tensor1`, and :attr:`tensor2` must be
 :ref:`broadcastable <broadcasting-semantics>`.
 
@@ -1500,6 +1513,23 @@ Example::
             -1.8209, -2.9780, -3.4022])
 """.format(**reduceops_common_args))
 
+add_docstr(torch.dequantize,
+           r"""
+.. function:: dequantize(tensor) -> Tensor
+
+Given a quantized Tensor, dequantize it and return an fp32 Tensor
+
+Args:
+    tensor (Tensor): A quantized Tensor
+
+.. function:: dequantize(tensors) -> sequence of Tensors
+
+Given a list of quantized Tensors, dequantize them and return a list of fp32 Tensors
+
+Args:
+     tensors (sequence of Tensors): A list of quantized Tensors
+""")
+
 add_docstr(torch.diag,
            r"""
 diag(input, diagonal=0, out=None) -> Tensor
@@ -1779,6 +1809,12 @@ add_docstr(torch.div,
 
 Divides each element of the input ``input`` with the scalar ``other`` and
 returns a new resulting tensor.
+
+.. warning::
+    Integer division using div is deprecated, and in a future release div will
+    perform true division like :func:`torch.true_divide`.
+    Use :func:`torch.floor_divide` (// in Python) to perform integer division,
+    instead.
 
 .. math::
     \text{{out}}_i = \frac{{\text{{input}}_i}}{{\text{{other}}}}
@@ -2080,7 +2116,7 @@ Example::
 
 add_docstr(torch.floor_divide,
            r"""
-floor_divide(input, other) -> Tensor
+floor_divide(input, other, out=None) -> Tensor
 
 Return the division of the inputs rounded down to the nearest integer. See :func:`torch.div`
 for type promotion and broadcasting rules.
@@ -2092,6 +2128,9 @@ for type promotion and broadcasting rules.
 Args:
     input (Tensor): the numerator tensor
     other (Tensor or Scalar): the denominator
+
+Keyword args:
+    {out}
 
 Example::
 
