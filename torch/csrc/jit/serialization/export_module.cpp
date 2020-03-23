@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/serialization/export.h>
 
 #include <c10/util/Exception.h>
+#include <torch/custom_class.h>
 #include <torch/csrc/jit/serialization/import_export_helpers.h>
 #include <torch/csrc/jit/serialization/python_print.h>
 #include <torch/csrc/jit/serialization/pickle.h>
@@ -14,6 +15,7 @@
 
 #include <string>
 #include <vector>
+#include "ATen/core/jit_type.h"
 
 namespace torch {
 namespace jit {
@@ -167,31 +169,51 @@ class ScriptModuleSerializer {
       bool bytecode_format) {
     C10_LOG_API_USAGE_ONCE("torch.script.save");
     writeExtraFiles(module, extra_files);
+
+    auto cu = std::make_shared<CompilationUnit>();
+
+    remapTypes(cu, module.type(), remappedTypes_);
+
     // Serialize the model object
-    writeArchive("data", module._ivalue());
+    writeArchive(cu, "data", module._ivalue());
     // Then we werialize all code info.
-    writeCode(module.type());
+    auto newRootType_ = remappedTypes_.at(module.type());
+    auto newRootType = std::dynamic_pointer_cast<c10::NamedType>(newRootType_);
+
+    TORCH_INTERNAL_ASSERT(newRootType);
+    writeCode(newRootType);
     // The tensor constants from the code are written to a separate archive
     // so loading the code does not depend on loading the data
     std::vector<IValue> ivalue_constants(
         constant_table_.begin(), constant_table_.end());
-    writeArchive("constants", c10::ivalue::Tuple::create(ivalue_constants));
+    writeArchive(cu, "constants", c10::ivalue::Tuple::create(ivalue_constants));
     if (bytecode_format) {
-      writeByteCode(module);
+      writeByteCode(cu, module);
     }
   }
 
  private:
-  void writeArchive(const std::string& archive_name, const IValue& value) {
+
+  std::unordered_map<TypePtr, TypePtr> remappedTypes_;
+
+  void writeArchive(
+      const std::shared_ptr<CompilationUnit>& cu,
+      const std::string& archive_name,
+      const IValue& value) {
     std::vector<char> data;
     // Vector to capture the run-time class types during pickling the IValues
     std::vector<c10::ClassTypePtr> memorizedClassTypes;
+    auto typeRemapper = [&](TypePtr in) {
+      return remapTypes(cu, in, remappedTypes_);
+    };
+
     Pickler data_pickle(
         [&](const char* buf, size_t size) {
           data.insert(data.end(), buf, buf + size);
         },
         nullptr,
-        &memorizedClassTypes);
+        &memorizedClassTypes,
+        typeRemapper);
     data_pickle.protocol();
     data_pickle.pushIValue(value);
     data_pickle.stop();
@@ -265,11 +287,104 @@ class ScriptModuleSerializer {
     }
   }
 
-  void writeByteCode(const Module& module) {
+  void writeByteCode(
+      const std::shared_ptr<CompilationUnit>& cu,
+      const Module& module) {
     std::vector<c10::IValue> elements;
     moduleMethodsTuple(module, elements);
     auto telements = Tup(std::move(elements));
-    writeArchive("bytecode", telements);
+    writeArchive(cu, "bytecode", telements);
+  }
+
+  /**
+   * Takes `origType_` and makes a clone of it in the `cu` CompilationUnit.
+   * `remappedTypes` is filled with a mapping from original types => new types.
+   * The cloning only happens for types that will be serialized (e.g. NamedTypes)
+   * // TODO test for interfaces and functions
+   *
+   * Any types that `origType_` references will be recursively cloned to `cu`.
+   * Any naming collisions will be resolved by mangling.
+   *
+   * At the end, we expect to have all types in the hierarchy live in `cu`
+   */
+  TypePtr remapTypes(
+      const std::shared_ptr<CompilationUnit>& cu,
+      const TypePtr& origType_,
+      std::unordered_map<TypePtr, TypePtr>& remappedTypes) {
+    auto it = remappedTypes.find(origType_);
+    if (it != remappedTypes.end()) {
+      return it->second;
+    }
+    auto origType = origType_->cast<ClassType>();
+    if (origType == nullptr) {
+      // We only remap class types
+      remappedTypes_.emplace(origType_, origType_);
+      return origType_;
+    }
+
+    if (getCustomClass(origType->name()->qualifiedName())) {
+      // We don't need to remap custom classes, because they are not managed by
+      // compilation units
+      remappedTypes_.emplace(origType_, origType_);
+      return origType_;
+    }
+
+    // Mangle the class name if necessary. This can happen when we are
+    // referencing class types with the same name in two different compilation
+    // units.
+    auto className = origType->name().value();
+    if (className.prefix().empty()) {
+      className = c10::QualifiedName("__torch__", className.name());
+    }
+    if (cu->get_class(className) != nullptr) {
+      className = cu->mangle(className);
+    }
+
+    auto newType = ClassType::create(className, cu, origType->is_module());
+
+    // Register the new type. We do this before continuing down TODO
+    cu->register_type(newType);
+    remappedTypes_.emplace(origType, newType);
+
+    for (size_t i = 0; i < origType->numAttributes(); ++i) {
+      auto attrType = origType->getAttribute(i);
+      if (auto classAttr = attrType->cast<ClassType>()){
+        // Remap class types
+        attrType = remapTypes(cu, classAttr, remappedTypes);
+      }
+
+      bool isParameter = false;
+      if (origType->is_module()) {
+        isParameter = origType->is_parameter(i);
+      }
+      newType->addAttribute(
+          origType->getAttributeName(i), attrType, isParameter);
+    }
+
+    for (size_t i = 0; i < origType->numConstants(); ++i) {
+      IValue constant = origType->getConstant(i);
+      TORCH_INTERNAL_ASSERT(
+          constant.type()->cast<ClassType>() == nullptr,
+          "Class types not allowed as constants");
+      newType->addConstant(origType->getConstantName(i), constant);
+    }
+
+    auto typeRemapper = [&](TypePtr in) {
+      return remapTypes(cu, in, remappedTypes);
+    };
+
+    for (Function* method : origType->methods()) {
+      auto graph = method->graph()->copy();
+      graph->remapTypes(typeRemapper);
+      auto schema = method->getSchema().cloneWithRemappedTypes(typeRemapper);
+      const auto newMethodName =
+          QualifiedName(*newType->name(), method->name());
+      auto copied = cu->create_function(newMethodName, graph);
+      newType->addMethod(copied);
+      copied->setSchema(std::move(schema));
+    }
+
+    return newType;
   }
 
   void convertNamedType(const c10::NamedTypePtr& class_type) {

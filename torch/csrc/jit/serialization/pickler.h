@@ -118,11 +118,21 @@ class Pickler {
  public:
   Pickler(
       std::function<void(const char*, size_t)> writer,
-      std::vector<at::Tensor>* tensor_table,
-      std::vector<c10::ClassTypePtr>* memorized_class_types = nullptr)
+      std::vector<at::Tensor>* tensor_table)
       : writer_(writer),
         tensor_table_(tensor_table),
-        memorized_class_types_(memorized_class_types) {}
+        memorized_class_types_(nullptr),
+        type_remapper_(nullptr) {}
+
+  Pickler(
+      std::function<void(const char*, size_t)> writer,
+      std::vector<at::Tensor>* tensor_table,
+      std::vector<c10::ClassTypePtr>* memorized_class_types,
+      std::function<c10::TypePtr(c10::TypePtr)> type_remapper)
+      : writer_(writer),
+        tensor_table_(tensor_table),
+        memorized_class_types_(memorized_class_types),
+        type_remapper_(type_remapper) {}
   ~Pickler();
 
   // Push protocol onto the stack
@@ -243,6 +253,9 @@ class Pickler {
 
   // List of all the types that it wrote, inspect from the IValues it wrote.
   std::vector<c10::ClassTypePtr>* memorized_class_types_;
+
+  // TODO comment
+  std::function<c10::TypePtr(c10::TypePtr)> type_remapper_;
 
   // List of tensor storages to serialize in the same binary as the pickle data
   // similar to ivalues, they are memoized using BINPUT

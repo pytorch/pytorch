@@ -43,8 +43,7 @@ std::vector<char> pickle_save(const at::IValue& ivalue) {
       [&](const char* buf, size_t size) {
         pickle_data.insert(pickle_data.end(), buf, buf + size);
       },
-      /*tensor_table=*/nullptr,
-      /*class_table=*/nullptr);
+      /*tensor_table=*/nullptr);
   pickler.protocol();
   pickler.pushIValue(ivalue);
   pickler.stop();

@@ -99,6 +99,7 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
   } else if (ivalue.isObject()) {
     auto obj = ivalue.toObject();
     auto type = obj->type();
+    type = type_remapper_(type)->expect<ClassType>();
     if (memorized_class_types_ != nullptr) {
       // Memorize every class type the Pickler encountered
       // This is used to make sure we capture all the run-time types
