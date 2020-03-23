@@ -70,6 +70,8 @@ factory_common_args = merge_dicts(common_args, parse_kwargs("""
         returned tensor. Default: ``False``.
     pin_memory (bool, optional): If set, returned tensor would be allocated in
         the pinned memory. Works only for CPU tensors. Default: ``False``.
+    memory_format (:class:`torch.memory_format`, optional): the desired memory format of 
+        returned Tensor. Default: ``torch.contiguous_format``.
 """))
 
 factory_like_common_args = parse_kwargs("""
@@ -84,6 +86,8 @@ factory_like_common_args = parse_kwargs("""
         returned tensor. Default: ``False``.
     pin_memory (bool, optional): If set, returned tensor would be allocated in
         the pinned memory. Works only for CPU tensors. Default: ``False``.
+    memory_format (:class:`torch.memory_format`, optional): the desired memory format of 
+        returned Tensor. Default: ``torch.preserve_format``.
 """)
 
 factory_data_common_args = parse_kwargs("""
@@ -4186,7 +4190,7 @@ Example::
 
 add_docstr(torch.ones_like,
            r"""
-ones_like(input, dtype=None, layout=None, device=None, requires_grad=False) -> Tensor
+ones_like(input, dtype=None, layout=None, device=None, requires_grad=False, memory_format=torch.preserve_format) -> Tensor
 
 Returns a tensor filled with the scalar value `1`, with the same size as
 :attr:`input`. ``torch.ones_like(input)`` is equivalent to
@@ -4203,6 +4207,7 @@ Args:
     {layout}
     {device}
     {requires_grad}
+    {memory_format}
 
 Example::
 
@@ -4519,7 +4524,7 @@ Example::
 
 add_docstr(torch.rand_like,
            r"""
-rand_like(input, dtype=None, layout=None, device=None, requires_grad=False) -> Tensor
+rand_like(input, dtype=None, layout=None, device=None, requires_grad=False, memory_format=torch.preserve_format) -> Tensor
 
 Returns a tensor with the same size as :attr:`input` that is filled with
 random numbers from a uniform distribution on the interval :math:`[0, 1)`.
@@ -4532,6 +4537,7 @@ Args:
     {layout}
     {device}
     {requires_grad}
+    {memory_format}
 
 """.format(**factory_like_common_args))
 
@@ -4580,7 +4586,8 @@ Example::
 
 add_docstr(torch.randint_like,
            r"""
-randint_like(input, low=0, high, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
+randint_like(input, low=0, high, dtype=None, layout=torch.strided, device=None, requires_grad=False,
+memory_format=torch.preserve_format) -> Tensor
 
 Returns a tensor with the same shape as Tensor :attr:`input` filled with
 random integers generated uniformly between :attr:`low` (inclusive) and
@@ -4598,6 +4605,7 @@ Args:
     {layout}
     {device}
     {requires_grad}
+    {memory_format}
 
 """.format(**factory_like_common_args))
 
@@ -4634,7 +4642,7 @@ Example::
 
 add_docstr(torch.randn_like,
            r"""
-randn_like(input, dtype=None, layout=None, device=None, requires_grad=False) -> Tensor
+randn_like(input, dtype=None, layout=None, device=None, requires_grad=False, memory_format=torch.preserve_format) -> Tensor
 
 Returns a tensor with the same size as :attr:`input` that is filled with
 random numbers from a normal distribution with mean 0 and variance 1.
@@ -4647,6 +4655,7 @@ Args:
     {layout}
     {device}
     {requires_grad}
+    {memory_format}
 
 """.format(**factory_like_common_args))
 
@@ -6391,7 +6400,7 @@ Example::
 
 add_docstr(torch.zeros_like,
            r"""
-zeros_like(input, dtype=None, layout=None, device=None, requires_grad=False) -> Tensor
+zeros_like(input, dtype=None, layout=None, device=None, requires_grad=False, memory_format=torch.preserve_format) -> Tensor
 
 Returns a tensor filled with the scalar value `0`, with the same size as
 :attr:`input`. ``torch.zeros_like(input)`` is equivalent to
@@ -6408,6 +6417,7 @@ Args:
     {layout}
     {device}
     {requires_grad}
+    {memory_format}
 
 Example::
 
@@ -6433,6 +6443,7 @@ Args:
     {device}
     {requires_grad}
     {pin_memory}
+    {memory_format}
 
 Example::
 
@@ -6445,7 +6456,7 @@ Example::
 
 add_docstr(torch.empty_like,
            r"""
-empty_like(input, dtype=None, layout=None, device=None, requires_grad=False) -> Tensor
+empty_like(input, dtype=None, layout=None, device=None, requires_grad=False, memory_format=torch.preserve_format) -> Tensor
 
 Returns an uninitialized tensor with the same size as :attr:`input`.
 ``torch.empty_like(input)`` is equivalent to
@@ -6457,6 +6468,7 @@ Args:
     {layout}
     {device}
     {requires_grad}
+    {memory_format}
 
 Example::
 
@@ -6534,7 +6546,8 @@ Example::
 
 add_docstr(torch.full_like,
            r"""
-full_like(input, fill_value, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
+full_like(input, fill_value, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False,
+memory_format=torch.preserve_format) -> Tensor
 
 Returns a tensor with the same size as :attr:`input` filled with :attr:`fill_value`.
 ``torch.full_like(input, fill_value)`` is equivalent to
@@ -6547,6 +6560,7 @@ Args:
     {layout}
     {device}
     {requires_grad}
+    {memory_format}
 """.format(**factory_like_common_args))
 
 add_docstr(torch.det,
