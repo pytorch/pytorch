@@ -254,6 +254,11 @@ static auto registry = c10::RegisterOperators()
     c10::RegisterOperators::options()
       .aliasAnalysis(at::AliasAnalysisKind::FROM_SCHEMA)
       .kernel<QAdd</*ReLUFused=*/false>>(DispatchKey::QuantizedCPUTensorId))
+.op("_quantized::add(Tensor qa, Tensor qb, float scale, int zero_point)"
+     "-> Tensor qc",
+    c10::RegisterOperators::options()
+      .aliasAnalysis(at::AliasAnalysisKind::FROM_SCHEMA)
+      .kernel<QAdd</*ReLUFused=*/false>>(DispatchKey::QuantizedCPUTensorId))
 .op("quantized::add_relu(Tensor qa, Tensor qb, float scale, int zero_point)"
      "-> Tensor qc",
     c10::RegisterOperators::options()

@@ -642,7 +642,13 @@ static auto registry =
         .op("quantized::conv2d",
             c10::RegisterOperators::options().kernel<QConvInt8<2, false>>(
                 DispatchKey::QuantizedCPUTensorId))
+        .op("_quantized::conv2d",
+            c10::RegisterOperators::options().kernel<QConvInt8<2, false>>(
+                DispatchKey::QuantizedCPUTensorId))
         .op("quantized::conv2d_relu",
+            c10::RegisterOperators::options().kernel<QConvInt8<2, true>>(
+                DispatchKey::QuantizedCPUTensorId))
+        .op("_quantized::conv2d_relu",
             c10::RegisterOperators::options().kernel<QConvInt8<2, true>>(
                 DispatchKey::QuantizedCPUTensorId))
         .op("quantized::conv3d",
