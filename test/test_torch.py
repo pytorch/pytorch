@@ -9812,6 +9812,16 @@ class TestTorchDeviceType(TestCase):
             t = torch.normal(mean=24.0, std=torch.full_like(t, 42.0))
             t = torch.normal(mean=torch.full_like(t, 24.0), std=torch.full_like(t, 42.0))
 
+    @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
+    @dtypesIfCUDA(torch.float, torch.double, torch.complex64, torch.complex128)
+    def test_randn_2(self, device, dtype):
+        torch.manual_seed(123456)
+        res1 = torch.randn(SIZE, SIZE, dtype=dtype, device=device)
+        res2 = torch.tensor([], dtype=dtype, device=device)
+        torch.manual_seed(123456)
+        torch.randn(SIZE, SIZE, out=res2)
+        self.assertEqual(res1, res2)
+
     def test_empty_strided(self, device):
         for shape in [(2, 3, 4), (0, 2, 0)]:
             # some of these cases are pretty strange, just verifying that if as_strided
