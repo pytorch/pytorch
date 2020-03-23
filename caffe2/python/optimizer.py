@@ -520,7 +520,7 @@ class AdagradOptimizer(Optimizer):
                  sparse_dedup_aggregator=None, rowWise=False, engine='',
                  lars=None, output_effective_lr=False,
                  output_effective_lr_and_update=False,
-                 pruning_options=None, swa_options=None, weight_scale=None, **kwargs):
+                 pruning_options=None, swa_options=None, **kwargs):
         super(AdagradOptimizer, self).__init__()
         self.alpha = alpha
         self.epsilon = epsilon
@@ -533,7 +533,6 @@ class AdagradOptimizer(Optimizer):
         self.output_effective_lr = output_effective_lr
         self.output_effective_lr_and_update = output_effective_lr_and_update
         self.init_kwargs = kwargs
-        self.weight_scale = weight_scale
 
         self._process_pruning_options(pruning_options)
         self._process_swa_options(swa_options)
@@ -609,7 +608,7 @@ class AdagradOptimizer(Optimizer):
                     and core.IsGPUDeviceType(current_scope.device_type)),
             )
 
-        lr, lr_iteration = self.build_lr(
+        lr, iteration = self.build_lr(
             net, param_init_net,
             base_learning_rate=self.alpha,
             policy=self.policy,
@@ -751,28 +750,14 @@ class AdagradOptimizer(Optimizer):
                         self._aux_params.local.append(param_swa)  
 
                     net.SWA(
-                        [param, param_swa, lr_iteration],
+                        [param, param_swa, iteration],
                         [param, param_swa],
                         avg_start=self.swa_avg_start_it,
                         avg_end=self.swa_avg_end_it,
                         feedback_start=self.swa_feedback_start_it,
                         feedback_step=self.swa_feedback_step,
                         feedback_end=self.swa_feedback_end_it,
-                    )      
-        if self.weight_scale:
-            net.WeightScale(
-                [param, lr_iteration],
-                [param],
-                stepsize=self.weight_scale.stepsize,
-                upper_bound_iter=self.weight_scale.upper_bound_iter,
-                scale=float(self.weight_scale.scale))
-            if self.weight_scale.to_aux:
-                net.WeightScale(
-                    [param_squared_sum, lr_iteration],
-                    [param_squared_sum],
-                    stepsize=self.weight_scale.stepsize,
-                    upper_bound_iter=self.weight_scale.upper_bound_iter,
-                    scale=float(self.weight_scale.scale))   
+                    )
 
     def scale_learning_rate(self, scale):
         self.alpha *= scale
