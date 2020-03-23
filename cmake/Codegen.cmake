@@ -151,22 +151,23 @@ if (INTERN_BUILD_ATEN_OPS)
     set(GEN_ROCM_FLAG --rocm)
   endif()
 
-  set(CUSTOM_BUILD_FLAG)
-  if (SELECTED_OP_LIST AND NOT USE_STATIC_DISPATCH)
-    if (NOT OP_DEPENDENCY)
+  set(CUSTOM_BUILD_FLAGS)
+  if (SELECTED_OP_LIST)
+    if (NOT USE_STATIC_DISPATCH AND NOT OP_DEPENDENCY)
       message(FATAL_ERROR "Must provide op dependency graph .yaml file for custom build with dynamic dispatch!")
     endif()
     EXECUTE_PROCESS(
       COMMAND
-      "${PYTHON_EXECUTABLE}" ${CMAKE_CURRENT_LIST_DIR}/../tools/code_analyzer/gen_transitive_deps.py
+      "${PYTHON_EXECUTABLE}" ${CMAKE_CURRENT_LIST_DIR}/../tools/code_analyzer/gen_op_registration_whitelist.py
       --op-dependency "${OP_DEPENDENCY}"
       --root-ops "${SELECTED_OP_LIST}"
-      OUTPUT_VARIABLE SELECTED_OP_CLOSURE
+      OUTPUT_VARIABLE OP_REGISTRATION_WHITELIST
     )
-    separate_arguments(SELECTED_OP_CLOSURE)
-    message(STATUS "Custom build with selected op closure: ${SELECTED_OP_CLOSURE}")
-    set(CUSTOM_BUILD_FLAG
-      --op_registration_whitelist ${SELECTED_OP_CLOSURE})
+    separate_arguments(OP_REGISTRATION_WHITELIST)
+    message(STATUS "Custom build with op registration whitelist: ${OP_REGISTRATION_WHITELIST}")
+    set(CUSTOM_BUILD_FLAGS
+      --force_schema_registration
+      --op_registration_whitelist ${OP_REGISTRATION_WHITELIST})
   endif()
 
   SET(GEN_COMMAND
@@ -175,7 +176,7 @@ if (INTERN_BUILD_ATEN_OPS)
       --install_dir ${CMAKE_BINARY_DIR}/aten/src/ATen
       ${GEN_ROCM_FLAG}
       ${cwrap_files}
-      ${CUSTOM_BUILD_FLAG}
+      ${CUSTOM_BUILD_FLAGS}
   )
 
   EXECUTE_PROCESS(
