@@ -125,7 +125,6 @@ ROCM_BLACKLIST = [
 SLOW_TESTS = [
     'test_nn',
     'test_autograd',
-    'test_cpp_api_parity',
     'test_cpp_extensions_jit',
     'test_jit_legacy',
     'test_quantized',
