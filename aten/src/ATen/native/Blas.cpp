@@ -11,13 +11,7 @@ Tensor &addmv_out(Tensor& result, const Tensor &self, const Tensor &mat, const T
   { // scope of NoNamesGuard
 
   at::NoNamesGuard guard;
-  auto result_sizes = std::vector<int64_t> {mat.size(0)};
-  if (!result.defined()) {
-    result = at::empty(result_sizes, mat.options());
-  }
-  if (result.sizes() != result_sizes) {
-    result.resize_(result_sizes);
-  }
+  result.resize_({mat.size(0)});
 
   Tensor self_ = self;
   if (self.dim() == 0 || self.size(0) == 1) {
@@ -43,7 +37,7 @@ Tensor &addmv_out(Tensor& result, const Tensor &self, const Tensor &mat, const T
 }
 
 Tensor addmv(const Tensor &self, const Tensor &mat, const Tensor &vec, Scalar beta, Scalar alpha) {
-  Tensor result;
+  Tensor result = at::empty({mat.size(0)}, mat.options());
   return native::addmv_out(result, self, mat, vec, beta, alpha);
 }
 
@@ -56,7 +50,7 @@ Tensor &mv_out(Tensor& result, const Tensor &self, const Tensor &vec) {
 }
 
 Tensor mv(const Tensor &self, const Tensor &vec) {
-  Tensor result;
+  Tensor result = at::empty({self.size(0)}, self.options());
   return native::mv_out(result, self, vec);
 }
 
