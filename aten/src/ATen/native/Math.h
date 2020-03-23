@@ -81,6 +81,7 @@ Date:  February 1996
   T y_abs = std::abs(y);
   if(y_abs > 1.0) return std::numeric_limits<T>::quiet_NaN();
 #ifdef _WIN32
+  // error C2039: '_copysign': is not a member of 'std'
   if(y_abs == 1.0) return copysign(std::numeric_limits<T>::infinity(), y);
 #else
   if(y_abs == 1.0) return std::copysign(std::numeric_limits<T>::infinity(), y);
@@ -96,6 +97,7 @@ Date:  February 1996
     num = ((c[3]*z + c[2])*z + c[1]) * z + c[0];
     dem = (d[1]*z + d[0])*z + static_cast<T>(1.0);
 #ifdef _WIN32
+    // error C2039: '_copysign': is not a member of 'std'
     x = copysign(num, y) / dem;
 #else
     x = std::copysign(num, y) / dem;
