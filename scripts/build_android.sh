@@ -117,6 +117,8 @@ if [ "${ANDROID_DEBUG_SYMBOLS:-}" == '1' ]; then
   CMAKE_ARGS+=("-DANDROID_DEBUG_SYMBOLS=1")
 fi
 
+CMAKE_ARGS+=("-DUSE_LAPACK=ON")
+
 # Use-specified CMake arguments go last to allow overridding defaults
 CMAKE_ARGS+=($@)
 

@@ -89,6 +89,23 @@ if (ANDROID_ABI)
   import_static_lib(libcpuinfo)
   import_static_lib(libclog)
 
+  add_library(libQML STATIC IMPORTED)
+  if (${ANDROID_ABI} STREQUAL "arm64-v8a")
+    set(libQML_path ${CMAKE_CURRENT_LIST_DIR}/../libs/QML-1.4.0-android/opt/Qualcomm/QML/1.4.0/arm64/lp64/lib/libQML-1.4.0.so)
+  elseif  (${ANDROID_ABI} STREQUAL "armeabi-v7a")
+    set(libQML_path ${CMAKE_CURRENT_LIST_DIR}/../libs/QML-1.4.0-android/opt/Qualcomm/QML/1.4.0/arm32/lp64/lib/libQML-1.4.0.so)
+  else()
+    message(FATAL_ERROR "ERROR: No LAPACK implementation for android x86, x86_64, need for USE_LAPACK")
+  endif()
+
+  message(STATUS "ANDROID_ABI:" ${ANDROID_ABI})
+  message(STATUS "libQML_path:" ${libQML_path})
+
+  set_property(
+      TARGET libQML
+      PROPERTY IMPORTED_LOCATION
+      ${libQML_path})
+
     # Link most things statically on Android.
   target_link_libraries(pytorch_jni
       fbjni
@@ -104,6 +121,7 @@ if (ANDROID_ABI)
       libeigen_blas
       libcpuinfo
       libclog
+      libQML
   )
 
 else()
