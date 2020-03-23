@@ -46,6 +46,26 @@
 namespace torch {
 namespace jit {
 
+// The PythonFutureWrapper for ivalue::Future
+struct PythonFutureWrapper {
+  explicit PythonFutureWrapper(c10::intrusive_ptr<c10::ivalue::Future> fut)
+      : fut(std::move(fut)) {}
+
+  IValue wait() {
+    fut->wait();
+    if (jit::tracer::isTracing()) {
+      auto graph = jit::tracer::getTracingState()->graph;
+
+      Value* fut_val = jit::tracer::getValueTrace(fut);
+      auto output = graph->insert(aten::wait, {fut_val});
+      jit::tracer::setValueTrace(fut->value(), output);
+    }
+    return fut->value();
+  }
+
+  c10::intrusive_ptr<c10::ivalue::Future> fut;
+};
+
 // error reporting: when reporting user-caused errors, these functions should
 // not use AT_ERROR macros, since these macros add stack trace information
 // that is confusing to display to the end user since it always reports
@@ -586,20 +606,23 @@ inline IValue toIValue(
       return c10::ivalue::ConcretePyObjectHolder::create(obj.cast<py::object>());
 
     case TypeKind::CapsuleType: {
-      return py::cast<c10::intrusive_ptr<CustomClassHolder>>(obj);
-    } break;
+      return IValue::make_capsule(
+          py::cast<c10::intrusive_ptr<CustomClassHolder>>(obj));
+    }
+    case TypeKind::FutureType: {
+      return obj.cast<PythonFutureWrapper>().fut;
+    }
     case TypeKind::AnyType:
       return toTypeInferredIValue(obj);
     case TypeKind::FunctionType:
     case TypeKind::GeneratorType:
     case TypeKind::VarType:
-    case TypeKind::FutureType:
     case TypeKind::QSchemeType:
     case TypeKind::AnyListType:
     case TypeKind::AnyTupleType:
       break;
   }
-  AT_ERROR("toIValue() cannot handle converting to type: ", type->python_str());
+  throw py::cast_error(c10::str("toIValue() cannot handle converting to type: ", type->python_str()));
 }
 
 // Small wrapper around getting the type name string from Python to make
@@ -626,6 +649,14 @@ inline std::string friendlyTypeName(py::handle obj) {
   }
 }
 
+// Thrown when trying to create a schema for a list of python
+// arguments that cannot be converted. 
+// Can be caught by the caller to attempt to use other schema
+// when there is an overloaded operator.
+struct schema_match_error : public std::runtime_error {
+  using std::runtime_error::runtime_error;
+};
+
 inline IValue argumentToIValue(
     const FunctionSchema& schema,
     size_t argumentPosition,
@@ -634,7 +665,7 @@ inline IValue argumentToIValue(
   try {
     return toIValue(object, argument.type(), argument.N());
   } catch (const py::cast_error& error) {
-    throw std::runtime_error(c10::str(
+    throw schema_match_error(c10::str(
       schema.formatTypeMismatchMsg(
         argument,
         friendlyTypeName(object),
@@ -764,6 +795,8 @@ inline py::object toPyObject(IValue ivalue) {
     return py::reinterpret_borrow<py::object>(ivalue.toPyObject());
   } else if (ivalue.isCapsule()) {
     return py::cast(ivalue.toCapsule());
+  } else if (ivalue.isFuture()) {
+    return py::cast(PythonFutureWrapper(ivalue.toFuture()));
   } else if (ivalue.isRRef()) {
 #ifdef USE_DISTRIBUTED
     return py::cast(torch::distributed::rpc::PyRRef(
@@ -813,7 +846,7 @@ inline Stack createStackForSchema(
     c10::optional<IValue> self) {
   size_t all_arguments = (self ? 1 : 0) + args.size() + kwargs.size();
   if (all_arguments > schema.arguments().size()) {
-    throw std::runtime_error(c10::str(
+    throw schema_match_error(c10::str(
         schema.name(),
         "() expected at most ",
         schema.arguments().size(),
@@ -846,7 +879,7 @@ inline Stack createStackForSchema(
     } else if (arg.default_value()) {
       push(stack, *arg.default_value());
     } else {
-      throw std::runtime_error(c10::str(
+      throw schema_match_error(c10::str(
           schema.name(),
           "() is missing value for argument '",
           arg.name(),
@@ -860,7 +893,7 @@ inline Stack createStackForSchema(
     for (const auto& kwarg : kwargs) {
       names.emplace_back(py::cast<std::string>(kwarg.first));
     }
-    schema.findErrorInKwargs(names);
+    throw schema_match_error(schema.findErrorInKwargs(names));
   }
 
   return stack;
@@ -1006,15 +1039,40 @@ inline py::object invokeScriptMethodFromPython(
 }
 
 inline py::object invokeOperatorFromPython(
-    const Operator& op,
+    const std::vector<std::shared_ptr<Operator>>& operations,
     py::args args,
     py::kwargs kwargs) {
-  // Create a stack full of the arguments and keyword arguments.
-  auto stack = createStackForSchema(
-      op.schema(), std::move(args), std::move(kwargs), c10::nullopt);
+  
+  Stack stack;
 
-  // Invoke the operation, which puts the return values onto the stack.
-  op.getOperation()(stack);
+  if (operations.size() == 1) {
+    const Operator& op = *operations.at(0);
+    // Create a stack full of the arguments and keyword arguments.
+    stack = createStackForSchema(
+        op.schema(), std::move(args), std::move(kwargs), c10::nullopt);
+    op.getOperation()(stack);
+  } else {
+    std::vector<schema_match_error> errors;
+    std::shared_ptr<Operator> found_op = nullptr;
+    for (const auto& op : operations) {
+      try {
+        stack = createStackForSchema(op->schema(), args, kwargs, c10::nullopt);
+        found_op = op;
+        break;
+      } catch(schema_match_error& error) {
+        errors.push_back(std::move(error));
+      }
+    }
+    if (!found_op) {
+      std::stringstream ss;
+      ss << "Overloaded torch operator invoked from Python failed to many any schema:\n";
+      for (const auto& err: errors) {
+        ss << err.what() << "\n\n";
+      }
+      throw std::runtime_error(ss.str());
+    }
+    found_op->getOperation()(stack);
+  }
 
   return createPyObjectForStack(std::move(stack));
 }

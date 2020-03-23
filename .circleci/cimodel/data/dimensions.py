@@ -3,7 +3,6 @@ PHASES = ["build", "test"]
 CUDA_VERSIONS = [
     None,  # cpu build
     "92",
-    "100",
     "101",
     "102",
 ]

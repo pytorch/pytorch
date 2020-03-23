@@ -77,8 +77,7 @@ THTensor *THTensor_(newWithStorage1d)(THStorage *storage, ptrdiff_t storageOffse
     c10::intrusive_ptr<at::StorageImpl>::reclaim(storage),
     at::DispatchKey::CPUTensorId
   ).release();
-  THTensor_(setStorageNd)(self, storage, storageOffset, 1,
-                          &size0, &stride0);
+  THTensor_(setStorage)(self, storage, storageOffset,  {size0}, {stride0});
 
   return self;
 }
@@ -90,7 +89,7 @@ THTensor *THTensor_(newWithSize1d)(int64_t size0)
     c10::intrusive_ptr<at::StorageImpl>::reclaim(new_storage),
     at::DispatchKey::CPUTensorId
   ).release();
-  THTensor_(setStorageNd)(self, new_storage, 0, 1, &size0, nullptr);
+  THTensor_(setStorage)(self, new_storage, 0, {size0}, {});
 
   return self;
 }
@@ -189,12 +188,11 @@ void THTensor_(resize5d)(THTensor *self, int64_t size0, int64_t size1, int64_t s
 void THTensor_(set)(THTensor *self, THTensor *src)
 {
   if(self != src)
-    THTensor_(setStorageNd)(self,
+    THTensor_(setStorage)(self,
                             THTensor_getStoragePtr(src),
                             src->storage_offset(),
-                            src->dim(),
-                            THTensor_getSizePtr(src),
-                            THTensor_getStridePtr(src));
+                            src->sizes(),
+                            src->strides());
 }
 
 void THTensor_(setStorage)(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_, at::IntArrayRef size_, at::IntArrayRef stride_)
@@ -419,11 +417,6 @@ void THTensor_(freeCopyTo)(THTensor *self, THTensor *dst)
 }
 
 /*******************************************************************************/
-
-void THTensor_(setStorageNd)(THTensor *self, THStorage *storage, ptrdiff_t storageOffset, int nDimension, const int64_t *size, const int64_t *stride)
-{
-  return THTensor_setStorageNd(self, storage, storageOffset, nDimension, size, stride);
-}
 
 void THTensor_(resizeNd)(THTensor *self, int nDimension, const int64_t *size, const int64_t *stride)
 {

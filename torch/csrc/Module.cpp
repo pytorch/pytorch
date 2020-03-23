@@ -52,6 +52,7 @@
 #include <torch/csrc/distributed/autograd/autograd.h>
 #include <torch/csrc/distributed/c10d/c10d.h>
 #include <torch/csrc/distributed/rpc/rpc.h>
+#include <torch/csrc/distributed/rpc/testing/testing.h>
 #endif
 #endif
 
@@ -516,6 +517,12 @@ PyObject *THPModule_supportedQEngines(PyObject */* unused */)
   return list.release();
 }
 
+PyObject *THPModule_isEnabledXNNPACK(PyObject * /* unused */)
+{
+  if (at::globalContext().isXNNPACKAvailable()) Py_RETURN_TRUE;
+  else Py_RETURN_FALSE;
+}
+
 //NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays, modernize-avoid-c-arrays)
 static PyMethodDef TorchMethods[] = {
   {"_initExtension",  (PyCFunction)THPModule_initExtension,   METH_O,       nullptr},
@@ -556,6 +563,7 @@ static PyMethodDef TorchMethods[] = {
   {"_get_qengine", (PyCFunction)THPModule_qEngine, METH_NOARGS, nullptr},
   {"_set_qengine", (PyCFunction)THPModule_setQEngine, METH_O, nullptr},
   {"_supported_qengines", (PyCFunction)THPModule_supportedQEngines, METH_NOARGS, nullptr},
+  {"_is_xnnpack_enabled", (PyCFunction)THPModule_isEnabledXNNPACK, METH_NOARGS, nullptr},
   {nullptr, nullptr, 0, nullptr}
 };
 
@@ -631,6 +639,7 @@ PyObject* initModule() {
   THPUtils_addPyMethodDefs(methods, torch::distributed::rpc::python_functions());
   THPUtils_addPyMethodDefs(
       methods, torch::distributed::autograd::python_functions());
+  THPUtils_addPyMethodDefs(methods, torch::distributed::rpc::testing::python_functions());
 #endif
 #endif
 

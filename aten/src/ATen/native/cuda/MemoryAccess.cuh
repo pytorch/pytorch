@@ -50,27 +50,27 @@ struct static_unroll<func, end, end> {
 // helper structs to be used with static_unroll to load arguments
 // one by one
 
-template<int i>
+template<int arg_index>
 struct vectorized_load_helper {
   template <typename args_t, typename policy_t>
   static __device__ void apply(policy_t &self, args_t *args, int idx) {
-    using arg_t = std::tuple_element_t<i, args_t>;
+    using arg_t = std::tuple_element_t<arg_index, args_t>;
     // `data` hold the data_ptr for tensors [output, input0, input1, ...], so we
     // need a +1 offset to get the input
-    auto ptr = reinterpret_cast<arg_t *>(self.data[i + 1]) + block_work_size * idx;
-    auto args_accessor = [&args] __device__ (int index) -> arg_t & { return std::get<i>(args[index]); };
+    auto ptr = reinterpret_cast<arg_t *>(self.data[arg_index + 1]) + block_work_size * idx;
+    auto args_accessor = [&args] __device__ (int thread_unroll_idx) -> arg_t & { return std::get<arg_index>(args[thread_unroll_idx]); };
     self.load1(args_accessor, ptr);
   }
 };
 
-template<int i>
+template<int arg_index>
 struct unroll_load_helper {
   template <typename args_t, typename policy_t, typename offset_t, typename loader_t>
-  static __device__ void apply(policy_t &self, args_t *args, offset_t offset, loader_t loader, int j) {
-    using arg_t = std::tuple_element_t<i, args_t>;
+  static __device__ void apply(policy_t &self, args_t *args, offset_t offset, loader_t loader, int thread_work) {
+    using arg_t = std::tuple_element_t<arg, args_t>;
     // `data` hold the data_ptr for tensors [output, input0, input1, ...], so we
     // need a +1 offset to get the input
-    std::get<i>(args[j]) = loader.template load<arg_t>(self.data[i + 1], offset[i], i);
+    std::get<arg>(args[j]) = loader.template load<arg_t>(self.data[arg + 1], offset[arg], arg);
   }
 };
 
@@ -171,6 +171,7 @@ struct unroll {
   template<typename scalar_t>
   __device__ inline void store(scalar_t *from, int idx) {
     int thread_idx = threadIdx.x;
+    scalar_t *to = reinterpret_cast<scalar_t *>(data[0]) + block_work_size * idx;
     #pragma unroll
     for (int i = 0; i < thread_work_size; i++) {
       if (thread_idx >= remaining) {
@@ -204,7 +205,7 @@ struct vectorized {
   }
 
   template<typename accessor_t, typename scalar_t>
-  __device__ inline void load1(accessor_t to, scalar_t *from) {
+  __device__ inline void load_single_arg(accessor_t to, scalar_t *from) {
     using vec_t = aligned_vector<scalar_t, vec_size>;
     vec_t *from_ = reinterpret_cast<vec_t *>(from);
     int thread_idx = threadIdx.x;

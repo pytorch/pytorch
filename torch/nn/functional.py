@@ -1570,6 +1570,24 @@ def sigmoid(input):
     return input.sigmoid()
 
 
+def hardsigmoid(input, inplace=False):
+    r"""hardsigmoid(input) -> Tensor
+
+    Applies the element-wise function :math:`\text{Hardsigmoid}(x) = \frac{ReLU6(x + 3)}{6}`
+
+    Args:
+        inplace: If set to ``True``, will do this operation in-place. Default: ``False``
+
+    See :class:`~torch.nn.Hardsigmoid` for more details.
+    """
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(hardsigmoid, (input,), input, inplace=inplace)
+    if inplace:
+        return torch._C._nn.hardsigmoid_(input)
+    return torch._C._nn.hardsigmoid(input)
+
+
 def linear(input, weight, bias=None):
     # type: (Tensor, Tensor, Optional[Tensor]) -> Tensor
     r"""
@@ -1821,7 +1839,7 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
         if offsets is None:
             raise ValueError("offsets has to be a 1D Tensor but got None")
         if offsets.dim() != 1:
-            raise ValueError("offsets has to be a 1D Tensor")        
+            raise ValueError("offsets has to be a 1D Tensor")
     else:
         raise ValueError("input has to be 1D or 2D Tensor,"
                          " but got Tensor of dimension {}".format(input.dim()))
