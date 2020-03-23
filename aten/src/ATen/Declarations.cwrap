@@ -584,6 +584,8 @@
   variants:
     - function
   return: accreal
+  backends:
+    - CUDA
   arguments:
     - THTensor* self
 ]]

@@ -1400,4 +1400,31 @@ Tensor unfold(const Tensor& self, int64_t dimension, int64_t size, int64_t step)
   return self.as_strided(new_size, new_stride);
 }
 
+Tensor trace(const Tensor& self) {
+  Tensor result = at::empty({0}, self.options());
+  AT_DISPATCH_ALL_TYPES(self.scalar_type(), "trace", [&] {
+    scalar_t sum = 0;
+    auto t_data = self.data_ptr<scalar_t>();
+    auto r_data = result.data_ptr<scalar_t>();
+
+    int64_t i = 0;
+    int64_t t_stride_0, t_stride_1, t_diag_size;
+
+    TORCH_CHECK(self.dim() == 2, "expected a matrix");
+
+    t_stride_0 = self.stride(0);
+    t_stride_1 = self.stride(1);
+
+    t_diag_size = std::min(self.size(0), self.size(1));
+    while(i < t_diag_size) {
+      sum += t_data[i * (t_stride_0 + t_stride_1)];
+      i++;
+    }
+
+    r_data[0] = sum;
+  });
+
+  return result;
+}
+
 }} // at::native
