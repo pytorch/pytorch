@@ -478,6 +478,7 @@ class TestCuda(TestCase):
         y = torch.ones(10000000, dtype=torch.uint8).cuda()
         _test_copy_non_blocking(x, y)
 
+    @unittest.skip("skipped because test could be flaky, see #35144")
     def test_to_non_blocking(self):
         def _test_to_non_blocking(a, non_blocking):
             stream = torch.cuda.current_stream()
