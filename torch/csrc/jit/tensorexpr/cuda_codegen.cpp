@@ -579,7 +579,7 @@ void CudaCodeGen::call(const std::vector<CallArg>& args) {
     {
       std::lock_guard<std::mutex> lock(gen->mutex_);
       auto philox_engine_inputs =
-          gen->philox_engine_inputs(total_elements_per_thread);
+          at::check_generator<at::CUDAGenerator>(gen)->philox_engine_inputs(total_elements_per_thread);
       rand_seed = philox_engine_inputs.first;
       rand_offset = philox_engine_inputs.second;
     }

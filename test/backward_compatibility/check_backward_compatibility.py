@@ -112,9 +112,14 @@ white_list = [
     ('aten::_linear_prepack', datetime.date(2020, 4, 1)),
     ('aten::_conv2d_packed', datetime.date(2020, 4, 1)),
     ('aten::_conv2d_prepack', datetime.date(2020, 4, 1)),
+    ('aten::dequantize', datetime.date(2020, 4, 1)),
     ('aten::confirmed_by_owner', datetime.date(2020, 3, 17)),
     ('aten::owner', datetime.date(2020, 3, 27)),
     ('aten::owner_name', datetime.date(2020, 3, 27)),
+    ('_xnnpack::conv2d_packed', datetime.date(2020, 4, 2)),
+    ('_xnnpack::conv2d_prepack', datetime.date(2020, 4, 2)),
+    ('_xnnpack::linear_packed', datetime.date(2020, 4, 2)),
+    ('_xnnpack::linear_prepack', datetime.date(2020, 4, 2)),
 ]
 
 
@@ -176,6 +181,9 @@ if __name__ == '__main__':
             line = f.readline()
             if not line:
                 break
+            if "torch.classes" in line:
+                # TODO Fix type __torch__.torch.classes.xxx
+                continue
 
             s = parse_schema(line.strip())
             slist = new_schema_dict.get(s.name, [])
