@@ -26,6 +26,10 @@ import torch.optim as optim
 import torchvision
 
 
+if not torch._six.PY3:
+    raise RuntimeError("DDP benchmark requires Python 3")
+
+
 def allgather_object(obj):
     buffer = io.BytesIO()
     torch.save(obj, buffer)
@@ -122,7 +126,7 @@ def sweep(benchmark):
 
     def local_print(msg):
         if dist.get_rank() == 0:
-            print(msg, end='', flush=True)
+            print(msg, end='', flush=True) # noqa: E999
 
     def print_header():
         local_print("\n")
