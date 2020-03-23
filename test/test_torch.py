@@ -2188,12 +2188,13 @@ class _TestTorchMixin(object):
 
     def test_randn(self):
         def common_routine(dtype):
-            torch.manual_seed(123456)
-            res1 = torch.randn(SIZE, SIZE, dtype=dtype)
-            res2 = torch.tensor([], dtype=dtype)
-            torch.manual_seed(123456)
-            torch.randn(SIZE, SIZE, out=res2)
-            self.assertEqual(res1, res2)
+            for device in torch.testing.get_all_device_types():
+                torch.manual_seed(123456)
+                res1 = torch.randn(SIZE, SIZE, dtype=dtype, device=device)
+                res2 = torch.tensor([], dtype=dtype, device=device)
+                torch.manual_seed(123456)
+                torch.randn(SIZE, SIZE, out=res2)
+                self.assertEqual(res1, res2)
 
         common_routine(dtype=torch.float32)
         common_routine(dtype=torch.float64)
@@ -6145,7 +6146,9 @@ class TestTorchDeviceType(TestCase):
 
     def test_neg(self, device):
         int_types = [torch.int, torch.short, torch.int8, torch.uint8]
-        float_types = [torch.float, torch.double, torch.long, torch.bfloat16]
+        float_types = [torch.float, torch.double, torch.long]
+        if device == 'cpu':
+            float_types += [torch.bfloat16]
 
         # Tests bool tensor negation raises the correct error
         self.assertRaisesRegex(
@@ -15455,6 +15458,15 @@ class TestDevicePrecision(TestCase):
             do_test(devices[0], devices[1])
 
     @dtypes(torch.float, torch.double, torch.bfloat16)
+    def test_abs_zero(self, device, dtype):
+        # Both abs(0.0) and abs(-0.0) should result in 0.0
+        abs_zeros = torch.tensor([0.0, -0.0], device=device, dtype=dtype).abs().tolist()
+        for num in abs_zeros:
+            self.assertGreater(math.copysign(1.0, num), 0.0)
+
+    # will removed after CUDA support bfloat16
+    @onlyCPU
+    @dtypes(torch.bfloat16)
     def test_abs_zero(self, device, dtype):
         # Both abs(0.0) and abs(-0.0) should result in 0.0
         abs_zeros = torch.tensor([0.0, -0.0], device=device, dtype=dtype).abs().tolist()
