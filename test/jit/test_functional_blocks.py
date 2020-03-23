@@ -129,7 +129,7 @@ class TestFunctionalBlocks(JitTestCase):
 
     def test_remove_mutation_lists_append(self):
         def successful_remove():
-            return [i for i in range(5)]
+            return [i for i in range(5)]  # noqa: C416
 
         fn = torch.jit.script(successful_remove)
         graph = fn.graph
