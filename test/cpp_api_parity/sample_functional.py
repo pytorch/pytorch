@@ -63,7 +63,7 @@ functional_tests = [
         cpp_options_args='F::SampleFunctionalFuncOptions(false)',
         input_size=(1, 2, 3),
         fullname='sample_functional_THIS_TEST_SHOULD_BE_SKIPPED',
-        test_cpp_api_parity=False,
+        test_cpp_api_parity=True,
     ),
 ]
 

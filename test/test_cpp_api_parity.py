@@ -1,22 +1,24 @@
-# What should I do when C++ API parity test is failing?
-#
-# - If you are changing the implementation of an existing `torch.nn` module / functional:
-# Answer: Ideally you should also change the C++ API implementation for that module / functional
-# (you can start by searching for the module / functional name in `torch/csrc/api/` folder).
-#
-# - If you are adding a new test params dict for an existing `torch.nn` module / functional:
-# Answer: Ideally you should fix the C++ API implementation for that module / functional
-# to exactly match the Python API implementation (you can start by searching for the module /
-# functional name in `torch/csrc/api/` folder).
-#
-# - If you are adding a test params dict for a *new* `torch.nn` module / functional:
-# Answer: Ideally you should add the corresponding C++ API implementation for that module / functional,
-# and it should exactly match the Python API implementation. (We have done a large effort on this
-# which is tracked at https://github.com/pytorch/pytorch/issues/25883.)
-#
-# However, if any of the above is proven to be too complicated, you can just add
-# `test_cpp_api_parity=False` to any failing test params dict in `torch/testing/_internal/common_nn.py`,
-# and the C++ API parity test for that test params dict will be skipped accordingly.
+MESSAGE_HOW_TO_FIX_CPP_PARITY_TEST_FAILURE = '''
+What should I do when C++ API parity test is failing?
+
+- If you are changing the implementation of an existing `torch.nn` module / functional:
+Answer: Ideally you should also change the C++ API implementation for that module / functional
+(you can start by searching for the module / functional name in `torch/csrc/api/` folder).
+
+- If you are adding a new test params dict for an existing `torch.nn` module / functional:
+Answer: Ideally you should fix the C++ API implementation for that module / functional
+to exactly match the Python API implementation (you can start by searching for the module /
+functional name in `torch/csrc/api/` folder).
+
+- If you are adding a test params dict for a *new* `torch.nn` module / functional:
+Answer: Ideally you should add the corresponding C++ API implementation for that module / functional,
+and it should exactly match the Python API implementation. (We have done a large effort on this
+which is tracked at https://github.com/pytorch/pytorch/issues/25883.)
+
+However, if any of the above is proven to be too complicated, you can just add
+`test_cpp_api_parity=False` to any failing test params dict in `torch/testing/_internal/common_nn.py`,
+and the C++ API parity test for that test params dict will be skipped accordingly.
+'''
 
 import os
 

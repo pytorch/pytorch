@@ -27,7 +27,7 @@ from cpp_api_parity.utils import TorchNNModuleTestParams, CppArg, TORCH_NN_COMMO
   compile_cpp_code_inline, convert_to_list, set_python_tensors_requires_grad, move_python_tensors_to_device, \
   has_test, add_test, set_cpp_tensors_requires_grad, move_cpp_tensors_to_device, is_criterion_test, \
   compute_cpp_args_construction_stmts_and_forward_arg_symbols, serialize_arg_dict_as_script_module, \
-  compute_arg_dict, decorate_test_fn, compute_temp_file_path
+  compute_arg_dict, decorate_test_fn, compute_temp_file_path, generate_error_msg
 from cpp_api_parity import torch_nn_modules
 
 # NN tests use double as the default dtype
@@ -146,10 +146,6 @@ def test_forward_backward(unit_test_class, test_params):
     cpp_test_fn(arg_dict_file_path, module_file_path, forward_output_file_path, backward_grad_dict_file_path)
     cpp_output = torch.load(forward_output_file_path)
     cpp_grad_dict = torch.load(backward_grad_dict_file_path)
-
-    def generate_error_msg(name, cpp_value, python_value):
-      return "Parity test failed: {} in C++ has value: {}, which does not match the corresponding value in Python: {}".format(
-        name, cpp_value, python_value)
 
     # Check that forward outputs are equal
     unit_test_class.assertTrue(
