@@ -447,6 +447,15 @@ class InsertObserversHelper {
       std::unordered_set<Value*> graph_observed_values =
           std::unordered_set<Value*>());
 
+  std::tuple<OptionalModuleVector, OptionalModuleVector, std::vector<size_t>> insertObserversFor(
+      Block* block,
+      script::Module& module,
+      // this is a reference because when we insert observer for a value
+      // in one block it is also observed in another block, we don't want to
+      // insert multiple observers for the same value
+      std::unordered_set<Value*>& block_observed_values,
+      bool is_entry_point = false);
+
  private:
   ModuleMethodVector getInvokedMethods(
       Module& module,
@@ -476,7 +485,7 @@ class InsertObserversHelper {
 
   c10::optional<Module> getObserverFor(Value* v);
 
-  void propagateObservedProperty(Value* output, std::unordered_set<Value*>& graph_observed_values);
+  void propagateObservedProperty(Value* output, std::unordered_set<Value*>& block_observed_values);
 
   void skipValuesInPattern(
       Graph& graph,
@@ -517,9 +526,9 @@ class InsertObserversHelper {
   int uid_ = 0;
   // Set of observer forward call nodes
   std::unordered_set<Node*> observer_nodes_;
-  // Map from graph to a vector of observer name and observer modules we
-  // want to add to the module instance that has the graph
-  std::unordered_map<Graph*, NameModuleVector> graph_observer_map_;
+  // Map from block to a vector of observer name and observer modules we
+  // want to add to the module instance that has the block
+  std::unordered_map<Block*, NameModuleVector> block_observer_map_;
 
   // These are the IR patterns we match to skip inserting observers.
   // They are compiled once on construction and used repeatedly within
@@ -924,36 +933,50 @@ std::tuple<OptionalModuleVector, OptionalModuleVector, std::vector<size_t>> Inse
     bool is_entry_point,
     std::unordered_set<Value*> graph_observed_values) {
   auto graph = module.get_method(method_name).graph();
+  return insertObserversFor(graph->block(), module, graph_observed_values, is_entry_point);
+}
+
+std::tuple<OptionalModuleVector, OptionalModuleVector, std::vector<size_t>>
+InsertObserversHelper::insertObserversFor(
+      Block* block,
+      script::Module& module,
+      std::unordered_set<Value*>& block_observed_values,
+      bool is_entry_point) {
   // graph input/output values, used to skip inserting observers
   // for input and output of the graph, we have to insert the observers
   // at call site because the graph itself can be shared
   std::unordered_set<Value*> graph_inputs_outputs;
   // list of observer modules for input values
-  std::vector<c10::optional<Module>> graph_input_observers;
+  std::vector<c10::optional<Module>> block_input_observers;
   // list of observer modules for output values
-  std::vector<c10::optional<Module>> graph_output_observers;
+  std::vector<c10::optional<Module>> block_output_observers;
 
-  // if the current graph is the entry point graph(the forward graph
-  // of the top level module), we can insert observers in the graph
+  // if the current block is the block for entry point graph(the forward graph
+  // of the top level module), we can insert observers in the block directly
   if (!is_entry_point) {
-    for (auto* v : graph->inputs()) {
-      graph_inputs_outputs.insert(v);
-      graph_input_observers.push_back(getObserverFor(v));
+    auto* graph = block->owningGraph();
+    for (auto list : {graph->inputs(), graph->outputs()}) {
+      for (auto* v : list) {
+        graph_inputs_outputs.insert(v);
+      }
     }
 
-    for (auto* v : graph->outputs()) {
-      graph_inputs_outputs.insert(v);
-      graph_output_observers.push_back(getObserverFor(v));
+    for (auto* v : block->inputs()) {
+      block_input_observers.push_back(getObserverFor(v));
+    }
+
+    for (auto* v : block->outputs()) {
+      block_output_observers.push_back(getObserverFor(v));
     }
   }
 
-  // This means the graph is been processed before, we just
+  // This means the block is been processed before, we just
   // need to attach observer modules and construct the information
   // needed by call site here
-  bool visited = graph_observer_map_.count(graph.get());
+  bool visited = block_observer_map_.count(block);
   if (visited) {
     // instance clone of observer module and setAttr
-    for (const auto& observer_attrs : graph_observer_map_.at(graph.get())) {
+    for (const auto& observer_attrs : block_observer_map_.at(block)) {
       const auto& name = std::get<0>(observer_attrs);
       const auto& observer = std::get<1>(observer_attrs);
       module._ivalue()->setAttr(name, observer.clone_instance()._ivalue());
@@ -965,11 +988,10 @@ std::tuple<OptionalModuleVector, OptionalModuleVector, std::vector<size_t>> Inse
   // outputs that's been observed(third item of the returned result)
   // can change depending on that, so for each graph we'll need to go through
   // the whole process of inserting observers
-  GRAPH_DUMP("inserting observer for:", graph);
 
   std::stack<Block*> blocks_to_visit;
-  blocks_to_visit.push(graph->block());
-  auto* self = graph->inputs()[0];
+  blocks_to_visit.push(block);
+  auto* self = block->inputs()[0];
   // We first construct a map from value to the module, then
   // insert observers for them later, this is to avoid interference
   // of the inserted observers with the analysis to decide where
@@ -978,7 +1000,7 @@ std::tuple<OptionalModuleVector, OptionalModuleVector, std::vector<size_t>> Inse
   // graph
   std::unordered_map<Value*, Module> values_to_observe;
 
-  for (auto* v : graph->inputs()) {
+  for (auto* v : block->inputs()) {
     if (!graph_inputs_outputs.count(v) && !values_to_observe.count(v)) {
       if (auto observer_opt = getObserverFor(v)) {
         values_to_observe[v] = *observer_opt;
@@ -996,38 +1018,39 @@ std::tuple<OptionalModuleVector, OptionalModuleVector, std::vector<size_t>> Inse
         auto m = getInvokedModule(module, n, self);
         std::unordered_set<Value*> callee_observed_inputs;
         for (auto i = 0U; i < n->inputs().size(); ++i) {
-          if (graph_observed_values.count(n->inputs()[i])) {
+          if (block_observed_values.count(n->input(i))) {
             callee_observed_inputs.insert(caller_to_callee_[n->inputs()[i]]);
           }
         }
-        auto info_from_callee = insertObservers(m, n->s(attr::name), false, callee_observed_inputs);
+        auto* subblock = m.get_method(n->s(attr::name)).graph()->block();
+        auto info_from_callee = insertObserversFor(subblock, m, callee_observed_inputs);
         auto input_observers = std::get<0>(info_from_callee);
         auto output_observers = std::get<1>(info_from_callee);
         auto callee_observed_outputs = std::get<2>(info_from_callee);
         for (auto idx : callee_observed_outputs) {
-          graph_observed_values.insert(n->outputs()[idx]);
+          block_observed_values.insert(n->outputs()[idx]);
         }
         for (auto i = 0U; i < n->inputs().size(); ++i) {
-          if (input_observers[i] && !graph_inputs_outputs.count(n->inputs()[i])
-              && !graph_observed_values.count(n->inputs()[i])) {
+          if (input_observers[i] && !graph_inputs_outputs.count(n->input(i))
+              && !block_observed_values.count(n->input(i))) {
             values_to_observe[n->inputs()[i]] = *input_observers[i];
-            graph_observed_values.insert(n->inputs()[i]);
+            block_observed_values.insert(n->input(i));
           }
         }
         for (auto i = 0U; i < n->outputs().size(); ++i) {
-          if (output_observers[i] && !graph_inputs_outputs.count(n->outputs()[i])
-              && !graph_observed_values.count(n->outputs()[i])) {
+          if (output_observers[i] && !graph_inputs_outputs.count(n->output(i))
+              && !block_observed_values.count(n->output(i))) {
             values_to_observe[n->outputs()[i]] = *output_observers[i];
-            graph_observed_values.insert(n->outputs()[i]);
+            block_observed_values.insert(n->output(i));
           }
         }
       } else {
         for (Value* v : n->outputs()) {
-          propagateObservedProperty(v, graph_observed_values);
-          if (!graph_inputs_outputs.count(v) && !graph_observed_values.count(v)) {
+          propagateObservedProperty(v, block_observed_values);
+          if (!graph_inputs_outputs.count(v) && !block_observed_values.count(v)) {
             if (auto observer_opt = getObserverFor(v)) {
               values_to_observe[v] = *observer_opt;
-              graph_observed_values.insert(v);
+              block_observed_values.insert(v);
             }
           }
         }
@@ -1038,8 +1061,8 @@ std::tuple<OptionalModuleVector, OptionalModuleVector, std::vector<size_t>> Inse
     }
   }
   std::vector<size_t> output_idxs;
-  for (auto i = 0U; i < graph->outputs().size(); ++i) {
-    if (graph_observed_values.count(graph->outputs()[i])) {
+  for (auto i = 0U; i < block->outputs().size(); ++i) {
+    if (block_observed_values.count(block->outputs()[i])) {
       output_idxs.push_back(i);
     }
   }
@@ -1052,24 +1075,24 @@ std::tuple<OptionalModuleVector, OptionalModuleVector, std::vector<size_t>> Inse
         insertObserverFor(v, module, observer, observer_name_and_modules);
       }
     }
-    graph_observer_map_[graph.get()] = observer_name_and_modules;
+    block_observer_map_[block] = observer_name_and_modules;
   }
-  return std::make_tuple(graph_input_observers, graph_output_observers, output_idxs);
+  return std::make_tuple(block_input_observers, block_output_observers, output_idxs);
 }
 
 void InsertObserversHelper::propagateObservedProperty(
-    Value* output, std::unordered_set<Value*>& graph_observed_values) {
+    Value* output, std::unordered_set<Value*>& block_observed_values) {
   if (pass_through_value_map_.count(output)) {
     // since the vector is always non-empty, we will
     // not return the initial value
     bool all_observed = true;
     for (Value* v : pass_through_value_map_.at(output)) {
-      all_observed &= observed_values_.count(v) || graph_observed_values.count(v);
+      all_observed &= observed_values_.count(v) || block_observed_values.count(v);
     }
     if (all_observed) {
       // This is to propagate observed property through
       // all ops that doesn't require observation
-      graph_observed_values.insert(output);
+      block_observed_values.insert(output);
     }
   }
 }
