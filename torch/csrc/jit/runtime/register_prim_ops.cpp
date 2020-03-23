@@ -3056,7 +3056,9 @@ RegisterOperators reg2({
           if (a.isNone()) {
             push(stack, 0);
           } else {
-            push(stack, reinterpret_cast<int64_t>(a.internalToPointer()));
+            auto obj = a.toObject();
+            auto ptr = reinterpret_cast<int64_t>(*obj);
+            push(stack, ptr);
           }
           return 0;
         },

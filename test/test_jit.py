@@ -15938,8 +15938,10 @@ a")
             a = id(FooTest(torch.tensor(3)))
             b = id(FooTest(torch.tensor(2)))
             c = id(None)
-            return a != b and b != c
+            print(a != b, b != c)
+            return a != b and b != c, a, b
 
+        print(test_id_class_types.graph)
         self.assertTrue(test_id_class_types())
 
     def test_mutable_dce(self):
