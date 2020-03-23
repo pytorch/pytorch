@@ -1150,7 +1150,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                   at::launch(InterpreterContinuation(
                       state_,
                       std::move(stack_),
-                      autograd::GradMode::is_enabled()));
+                      torch::ThreadLocalState::getThreadLocalState()));
                 }
 
                private:
@@ -1192,11 +1192,18 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             break;
           }
           case GUARD: {
-            auto t = stack.back().toTensor();
-            const TypePtr& expected = af.types[inst.X];
-            bool comp = expected->cast<TensorType>()
-                            ->isCompatibleWithInCurrentExecutionContext(t);
-            push(stack, comp);
+            if (!stack.back().isTensor()) {
+              // stack.back() is an Uninitialized IValue and this is a guard
+              // on a block output. Uninitialized IValues are never used
+              // so it's safe to pass this guard check
+              push(stack, true);
+            } else {
+              auto t = stack.back().toTensor();
+              const TypePtr& expected = af.types[inst.X];
+              bool comp = expected->cast<TensorType>()
+                              ->isCompatibleWithInCurrentExecutionContext(t);
+              push(stack, comp);
+            }
             ++af.pc;
           } break;
           case TAIL_CALL: {
@@ -1268,7 +1275,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             InterpreterContinuation continuation(
                 forked_interpreter,
                 Stack(stack.end() - inst.N, stack.end()),
-                autograd::GradMode::is_enabled());
+                torch::ThreadLocalState::getThreadLocalState());
             drop(stack, inst.N);
             push(stack, forked_interpreter.getFuture());
             at::launch(std::move(continuation));
@@ -1285,7 +1292,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                   "", range->filename()->c_str(), uint32_t(line)};
               c10::Warning::warn(location, pop(stack).toStringRef());
             } else {
-              AT_WARN(pop(stack).toStringRef());
+              TORCH_WARN(pop(stack).toStringRef());
             }
             ++af.pc;
           } break;
@@ -1305,7 +1312,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
       const Frame& frame = frames[i];
       std::string previous_fn_name = frame.function->function_name_;
       size_t pc = frame.pc;
-      // CALL nodes have already advanced the pc, so 
+      // CALL nodes have already advanced the pc, so
       // undo that to report the call node
       if (i + 1 < frames.size()) {
         --pc;
@@ -1440,7 +1447,7 @@ InterpreterState::InterpreterState(
     : pImpl(std::move(pImpl_)) {}
 
 void InterpreterContinuation::operator()() {
-  autograd::AutoGradMode grad_mode(grad_mode_enabled);
+  torch::ThreadLocalStateGuard guard(thread_local_state);
   state.runAsync(stack);
 }
 } // namespace jit

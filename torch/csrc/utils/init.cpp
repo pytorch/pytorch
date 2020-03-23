@@ -23,7 +23,7 @@ void initThroughputBenchmarkBindings(PyObject* module) {
       .def_readonly("num_iters", &BenchmarkExecutionStats::num_iters);
 
   py::class_<ThroughputBenchmark>(m, "ThroughputBenchmark", py::dynamic_attr())
-      .def(py::init<jit::script::Module>())
+      .def(py::init<jit::Module>())
       .def(py::init<py::object>())
       .def(
           "add_input",
