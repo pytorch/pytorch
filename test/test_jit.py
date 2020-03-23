@@ -15933,14 +15933,14 @@ a")
             def getFooTest(self):
                 return self.foo
 
+        @torch.jit.script
         def test_id_class_types():
             a = id(FooTest(torch.tensor(3)))
             b = id(FooTest(torch.tensor(2)))
             c = id(None)
             return a != b and b != c
 
-        script = torch.jit.script(test_id_class_types)
-        self.assertEqual(script(), test_id_class_types())
+        self.assertTrue(test_id_class_types())
 
     def test_mutable_dce(self):
         @torch.jit.script
