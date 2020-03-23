@@ -784,9 +784,9 @@ class TestCase(expecttest.TestCase):
         'float16': (0.001, 1e-5),
         'bfloat16': (0.016, 1e-5),
         'float32': (1.3e-6, 1e-5),
-        'float64': (1e-5, 1e-8),
+        'float64': (1e-5, 1e-7),
         'complex32': (1.3e-6, 1e-5),
-        'complex64': (1e-5, 1e-8),
+        'complex64': (1e-5, 1e-7),
     }
 
     def get_default_tolerance(self, a, b=None):
