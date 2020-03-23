@@ -6,7 +6,7 @@ tagged_version() {
   # Grabs version from either the env variable CIRCLE_TAG
   # or the pytorch git described version
   GIT_DESCRIBE="git --git-dir ${workdir}/pytorch/.git describe"
-  if [[ -n ${CIRCLE_TAG} ]]; then
+  if [[ -n "${CIRCLE_TAG:-}" ]]; then
     echo "${CIRCLE_TAG}"
   elif ${GIT_DESCRIBE} --exact --tags >/dev/null; then
     ${GIT_DESCRIBE} --tags
