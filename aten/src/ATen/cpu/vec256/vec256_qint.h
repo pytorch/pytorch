@@ -2,7 +2,7 @@
 
 #include <ATen/cpu/vec256/intrinsics.h>
 #include <ATen/cpu/vec256/vec256_base.h>
-#include <ATen/quantized/Quantizer.h>
+#include <ATen/quantized/quantize.h>
 #include <c10/util/qint8.h>
 #include <c10/util/quint8.h>
 #include <c10/util/qint32.h>

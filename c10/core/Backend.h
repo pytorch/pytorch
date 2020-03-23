@@ -184,8 +184,9 @@ static inline Backend backendToCPU(Backend b) {
     case Backend::MkldnnCPU:
       return Backend::MkldnnCPU;
     case Backend::QuantizedCPU:
-    case Backend::QuantizedCUDA:
       return Backend::QuantizedCPU;
+    case Backend::QuantizedCUDA:
+      return Backend::QuantizedCUDA;
     case Backend::Undefined:
       return Backend::Undefined;
     default:

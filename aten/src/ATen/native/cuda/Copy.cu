@@ -58,11 +58,17 @@ void copy_device_to_device(TensorIterator& iter, bool non_blocking) {
         cudaMemcpyDeviceToDevice,
         copy_stream));
   } else {
-    AT_DISPATCH_ALL_TYPES_AND3(kHalf, kBool, kBFloat16, iter.dtype(0), "copy_", [&] {
-      gpu_kernel(iter, []GPU_LAMBDA(scalar_t x) { return x; });
-    });
+    auto dtype = iter.dtype(0);
+    if (isQIntType(dtype)) {
+      AT_DISPATCH_QINT_TYPES(dtype, "copy_", [&] {
+        gpu_kernel(iter, []GPU_LAMBDA(scalar_t x) { return x; });
+      });
+    } else {
+      AT_DISPATCH_ALL_TYPES_AND3(kHalf, kBool, kBFloat16, dtype, "copy_", [&] {
+        gpu_kernel(iter, []GPU_LAMBDA(scalar_t x) { return x; });
+      });
+    }
   }
-
   if (src_device != dst_device) {
     // dst waits on src barrier (dst already waits on dst). We cannot
     // operate on dst's copy until the copy is complete.

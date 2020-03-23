@@ -63,48 +63,6 @@ int64_t q_per_channel_axis_quant(const Tensor& self) {
   return static_cast<PerChannelAffineQuantizer*>(quantizer.get())->axis();
 }
 
-// When input Tensor is non-dense, i.e. the allocated memory
-// is larger than the memory used by all the elements, we'll
-// convert it to dense tensor, otherwise we'll keep the memory
-// format of the output the same as input
-Tensor int_repr_quant_cpu(const Tensor& self) {
-  Tensor dst;
-  AT_DISPATCH_QINT_TYPES(self.scalar_type(), "int_repr", [&]() {
-    dst = at::empty(
-        self.sizes(),
-        self.options().dtype(UNDERLYING_TYPE),
-        self.suggest_memory_format());
-    auto iter = TensorIterator();
-    iter.add_output(dst);
-    iter.add_input(self);
-    iter.dont_compute_common_dtype();
-    iter.build();
-    cpu_kernel(iter, [](scalar_t value) -> underlying_t { return value.val_; });
-  });
-  return dst;
-}
-
-Tensor make_per_tensor_quantized_tensor_cpu(
-    const Tensor& self,
-    double scale,
-    int64_t zero_point) {
-  Tensor dst = at::_empty_affine_quantized(
-      self.sizes(),
-      self.options().dtype(toQIntType(self.scalar_type())),
-      scale,
-      zero_point);
-  Tensor self_contig = self.contiguous();
-  AT_DISPATCH_QINT_TYPES(dst.scalar_type(), "make_per_tensor_quantized_tensor", [&]() {
-    underlying_t* self_data = self_contig.data_ptr<underlying_t>();
-    underlying_t* dst_data =
-        reinterpret_cast<underlying_t*>(dst.data_ptr<scalar_t>());
-    if (self.numel() > 0) {
-      memcpy(dst_data, self_data, self.nbytes());
-    }
-  });
-  return dst;
-}
-
 Tensor make_per_channel_quantized_tensor_cpu(
     const Tensor& self,
     const Tensor& scales,
@@ -206,6 +164,7 @@ bool quantized_equal(const Tensor& self, const Tensor& other) {
   auto self_contig = self.contiguous();
   auto other_contig = other.contiguous();
 
+  TORCH_CHECK(!self.is_cuda(), "quantized_equal is implemented only for the QuantizedCPU backend");
   void* self_data = self_contig.data_ptr();
   void* other_data = other_contig.data_ptr();
   return 0 == memcmp(self_data, other_data, self.numel() * self.element_size());

@@ -430,15 +430,15 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   bool is_quantized() const {
     // NB: This method is not virtual and avoid dispatches for performance reasons.
-    return type_set_.has(DispatchKey::QuantizedCPUTensorId) || 
-           type_set_.has(DispatchKey::QuantizedCUDATensorId);
+    return key_set_.has(DispatchKey::QuantizedCPUTensorId) || 
+           key_set_.has(DispatchKey::QuantizedCUDATensorId);
   }
 
   bool is_cuda() const {
     // NB: This method is not virtual and avoid dispatches for performance reasons.
-    return type_set_.has(DispatchKey::CUDATensorId) ||
-           type_set_.has(DispatchKey::SparseCUDATensorId) ||
-           type_set_.has(DispatchKey::QuantizedCUDATensorId);
+    return key_set_.has(DispatchKey::CUDATensorId) ||
+           key_set_.has(DispatchKey::SparseCUDATensorId) ||
+           key_set_.has(DispatchKey::QuantizedCUDATensorId);
   }
 
   bool is_hip() const {

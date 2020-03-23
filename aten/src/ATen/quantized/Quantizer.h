@@ -231,35 +231,6 @@ struct CAFFE2_API PerChannelAffineQuantizer : public AffineQuantizer {
 // This may be called repeatedly, so make sure it's pretty cheap.
 CAFFE2_API QTensorImpl* get_qtensorimpl(const Tensor& self);
 
-// Quantize a float value into a uint value given scale and zero_point
-template <typename T>
-CAFFE2_API T quantize_val(double scale, int64_t zero_point, float value);
-template <typename T, int precision=8>
-void quantize_vec(double scale, int64_t zero_point, const float *src, T *dst, size_t count=8);
-template <typename T>
-CAFFE2_API Tensor quantize_tensor(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point);
-template <typename T>
-CAFFE2_API Tensor quantize_tensor_per_channel_affine(Tensor rtensor,
-                                                     Tensor qtensor,
-                                                     const std::vector<double>& scales,
-                                                     const std::vector<int64_t>& zero_points,
-                                                     int64_t axis);
-template <typename T>
-CAFFE2_API float dequantize_val(double scale, int64_t zero_point, T value);
-template <typename T>
-CAFFE2_API float dequantize_vec(double scale, int64_t zero_point, const T* src, float* dst, size_t count=8);
-template <typename T>
-CAFFE2_API Tensor dequantize_tensor(Tensor qtensor, Tensor rtensor, double scale, int64_t zero_point);
-template <typename T>
-CAFFE2_API Tensor dequantize_tensor_per_channel_affine(Tensor qtensor,
-                                                       Tensor rtensor,
-                                                       const std::vector<double>& scales,
-                                                       const std::vector<int64_t>& zero_points,
-                                                       int64_t axis);
-template <typename SRC_T, typename DST_T>
-CAFFE2_API DST_T requantize_val(double, int64_t, double, int64_t, SRC_T src);
-
-
 // double and int64_t are because of the native function API, we only have these
 // argument types right now in native functions
 CAFFE2_API QuantizerPtr

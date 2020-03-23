@@ -5,8 +5,8 @@ import io
 from copy import deepcopy
 from hypothesis import given
 from hypothesis import strategies as st
-from hypothesis_utils import no_deadline
-
+import torch.testing._internal.hypothesis_utils as hu
+hu.assert_deadline_disabled()
 from torch.testing._internal.common_utils import TestCase, run_tests
 import tempfile
 
@@ -16,7 +16,6 @@ class Foo(torch.nn.Module):
         self.qscheme = torch.per_tensor_symmetric
 
 class TestQuantizedTensor(TestCase):
-    @no_deadline
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            dtype=st.sampled_from([torch.qint8, torch.quint8, torch.qint32]))
     def test_qtensor(self, device, dtype):
@@ -53,7 +52,6 @@ class TestQuantizedTensor(TestCase):
 
     @given(dtype=st.sampled_from([torch.qint8, torch.quint8, torch.qint32]))
     def test_qtensor_float_assignment(self, dtype):
-        return
         # Scalar Tensor
         # item
         scale = 1.0
@@ -77,11 +75,9 @@ class TestQuantizedTensor(TestCase):
                          "quantization_scheme=torch.per_tensor_affine, " +
                          "scale=1.0, zero_point=2)")
 
-    @no_deadline
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            dtype=st.sampled_from([torch.qint8, torch.quint8, torch.qint32]))
     def test_qtensor_quant_dequant(self, device, dtype):
-        return
         r = torch.rand(3, 2, dtype=torch.float, device=device) * 4 - 2
         scale = 0.02
         zero_point = 2
@@ -103,7 +99,6 @@ class TestQuantizedTensor(TestCase):
 
     @given(dtype=st.sampled_from([torch.qint8, torch.quint8]))
     def test_per_channel_qtensor_creation(self, dtype):
-        return
         numel = 10
         ch_axis = 0
         scales = torch.rand(numel)
@@ -122,10 +117,8 @@ class TestQuantizedTensor(TestCase):
         self.assertEqual(zero_points, q.q_per_channel_zero_points())
         self.assertEqual(ch_axis, q.q_per_channel_axis())
 
-    @no_deadline
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']))
     def test_qtensor_creation(self, device):
-        return
         scale = 0.5
         zero_point = 10
         numel = 10
@@ -154,7 +147,6 @@ class TestQuantizedTensor(TestCase):
             torch.empty_like(q, dtype=torch.qint8)
 
     def test_qtensor_quantize_per_channel(self):
-        return
         r = torch.rand(3, 2, dtype=torch.float) * 4 - 2
         scales = torch.tensor([0.2, 0.03], dtype=torch.double)
         zero_points = torch.tensor([5, 10], dtype=torch.long)
@@ -172,11 +164,9 @@ class TestQuantizedTensor(TestCase):
         self.assertTrue(np.allclose(qr.int_repr(), quantize_c(r, scales, zero_points)))
         self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / np.min(scales.numpy())))
 
-    @no_deadline
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            dtype=st.sampled_from([torch.qint8, torch.quint8, torch.qint32]))
     def test_qtensor_permute(self, device, dtype):
-        return
         r = torch.rand(10, 30, 2, 2, device=device, dtype=torch.float) * 4 - 2
         scale = 0.02
         zero_point = 1
@@ -216,9 +206,8 @@ class TestQuantizedTensor(TestCase):
         # should work
         qx.permute([1, 0])
 
-    @given(dtype=st.sampled_from([torch.qint8, torch.quint8, torch.qint32]))
+    @given(dtype=st.sampled_from([torch.qint8]))
     def test_qtensor_per_channel_permute(self, dtype):
-        return
         r = torch.rand(20, 10, 2, 2, dtype=torch.float) * 4 - 2
         scales = torch.rand(10) * 0.02 + 0.01
         zero_points = torch.round(torch.rand(10) * 2 - 1).to(torch.long)
@@ -238,11 +227,10 @@ class TestQuantizedTensor(TestCase):
         self.assertEqual(1, qlast.q_per_channel_axis())
         self.assertEqual(qlast.dequantize(), qr.dequantize())
 
-    @no_deadline
-    @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
+    # storage is not accessible on the cuda right now
+    @given(device=st.sampled_from(['cpu']),
            dtype=st.sampled_from([torch.qint8, torch.quint8, torch.qint32]))
     def test_qtensor_load_save(self, device, dtype):
-        return
         scale = 0.2
         zero_point = 10
         r = torch.rand(15, 2, dtype=torch.float32, device=device) * 2
@@ -250,6 +238,7 @@ class TestQuantizedTensor(TestCase):
         qrv = qr[:, 1]
         with tempfile.NamedTemporaryFile() as f:
             # Serializing and Deserializing Tensor
+            qr.storage()
             torch.save((qr, qrv), f)
             f.seek(0)
             qr2, qrv2 = torch.load(f)
@@ -258,9 +247,8 @@ class TestQuantizedTensor(TestCase):
             self.assertEqual(qr2.storage().data_ptr(), qrv2.storage().data_ptr())
 
     # quint32 is not supported yet
-    @given(dtype=st.sampled_from([torch.qint8, torch.quint8, torch.qint32]))
+    @given(dtype=st.sampled_from([torch.qint8, torch.quint8]))
     def test_qtensor_per_channel_load_save(self, dtype):
-        return
         r = torch.rand(20, 10, dtype=torch.float) * 4 - 2
         scales = torch.rand(10, dtype=torch.double) * 0.02 + 0.01
         zero_points = torch.round(torch.rand(10) * 20 + 1).to(torch.long)
@@ -273,11 +261,9 @@ class TestQuantizedTensor(TestCase):
             qr2 = torch.load(f)
             self.assertEqual(qr, qr2)
 
-    @no_deadline
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            dtype=st.sampled_from([torch.qint8, torch.quint8, torch.qint32]))
     def test_qtensor_copy(self, device, dtype):
-        return
         scale = 0.5
         zero_point = 10
         numel = 10
@@ -298,36 +284,35 @@ class TestQuantizedTensor(TestCase):
         q.copy_(q2)
         # check scale and zero_points has been copied
         self.assertEqual(q, q2)
-        # deep copy
-        q_int = torch.randint(0, 100, [3, 5], device=device, dtype=torch.uint8)
-        scale, zero_point = 2.0, 3
-        q = torch._make_per_tensor_quantized_tensor(q_int, scale=scale, zero_point=zero_point)
-        qc = deepcopy(q)
-        self.assertEqual(qc, q)
-        
         # can't copy from quantized tensor to non-quantized tensor
         r = torch.empty([numel], dtype=torch.float)
         q = torch._empty_affine_quantized([numel], scale=scale, zero_point=zero_point, dtype=torch.quint8)
         with self.assertRaisesRegex(RuntimeError, "please use dequantize"):
             r.copy_(q)
 
-    @no_deadline
-    @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']))
-    def test_qtensor_clone(self, device):
-        return
+    @given(device=st.sampled_from(['cpu']))
+    def test_torch_qtensor_deepcopy(self, device):
+        # deep copy
+        q_int = torch.randint(0, 100, [3, 5], device=device, dtype=torch.uint8)
+        scale, zero_point = 2.0, 3
+        q = torch._make_per_tensor_quantized_tensor(q_int, scale=scale, zero_point=zero_point)
+        qc = deepcopy(q)
+        self.assertEqual(qc, q)
+
+    @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
+           dtype=st.sampled_from([torch.qint8, torch.quint8, torch.qint32]))
+    def test_qtensor_clone(self, device, dtype):
         numel = 10
         scale = 0.5
         zero_point = 10
-        q2 = torch._empty_affine_quantized([numel], scale=scale, zero_point=zero_point, 
-                                           device=device, dtype=torch.quint8)
+        q2 = torch._empty_affine_quantized([numel], scale=scale, zero_point=zero_point,
+                                           device=device, dtype=dtype)
         q = q2.clone()
         # Check to make sure the scale and zero_point has been copied.
         self.assertEqual(q, q2)
 
-    @no_deadline
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']))
     def test_qtensor_view(self, device):
-        return
         scale, zero_point, dtype = 1.0, 2, torch.uint8
         q_int = torch.randint(0, 100, [1, 2, 3], device=device, dtype=dtype)
         q = torch._make_per_tensor_quantized_tensor(q_int, scale=scale, zero_point=zero_point)
@@ -346,7 +331,8 @@ class TestQuantizedTensor(TestCase):
         self.assertNotEqual(b.stride(), c.stride())
         # size is the same but the underlying data is different
         self.assertNotEqual(b.int_repr(), c.int_repr())
-        self.assertFalse(torch.equal(b, c))
+        if device == 'cpu':
+            self.assertFalse(torch.equal(b, c))
 
         # a case can't view non-contiguos Tensor
         a_int = torch.randint(0, 100, [1, 2, 3, 4], device=device, dtype=dtype)
@@ -358,10 +344,8 @@ class TestQuantizedTensor(TestCase):
         # view on contiguous tensor is fine
         b.contiguous().view(1, 4, 2, 3)
 
-    @no_deadline
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']))
     def test_qtensor_reshape(self, device):
-        return
         scale, zero_point, dtype = 1.0, 2, torch.uint8
         q_int = torch.randint(0, 100, [3, 5], dtype=dtype, device=device)
         q = torch._make_per_tensor_quantized_tensor(q_int, scale=scale, zero_point=zero_point)
@@ -380,7 +364,8 @@ class TestQuantizedTensor(TestCase):
         self.assertEqual(b.q_zero_point(), c.q_zero_point())
         self.assertNotEqual(b.stride(), c.stride())
         self.assertNotEqual(b.int_repr(), c.int_repr())
-        self.assertFalse(torch.equal(b, c))
+        if device == 'cpu':
+            self.assertFalse(torch.equal(b, c))
 
         # we can use reshape for non-contiguous Tensor
         a_int = torch.randint(0, 100, [1, 2, 3, 4], dtype=dtype, device=device)

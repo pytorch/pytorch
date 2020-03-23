@@ -9,6 +9,7 @@
 #include <ATen/native/utils/Allocator.h>
 #include <ATen/quantized/QTensorImpl.h>
 #include <ATen/core/Tensor.h>
+#include <ATen/native/quantized/quant_affine.h>
 #include <typeinfo>
 
 
@@ -87,9 +88,7 @@ inline Tensor new_qtensor(
     }
   #endif
 
-
-
-  at::TensorTypeId tensorTypeId = options.computeTensorTypeId();
+  at::DispatchKey tensorDispatchKey = options.computeDispatchKey();
   native::check_size_nonnegative(sizes);
   int64_t nelements = at::prod_intlist(sizes);
   auto dtype = options.dtype();
@@ -101,90 +100,47 @@ inline Tensor new_qtensor(
       allocator->allocate(nelements * dtype.itemsize()),
       allocator,
       /*resizable=*/true);
-  auto tensor = detail::make_tensor<QTensorImpl>(
-      storage, at::DispatchKeySet(at::DispatchKey::QuantizedCPUTensorId), quantizer);
+  auto tensor = detail::make_tensor<QTensorImpl>(storage, at::DispatchKeySet(tensorDispatchKey), quantizer);
   get_qtensorimpl(tensor)->set_sizes_contiguous(sizes);
   get_qtensorimpl(tensor)->empty_tensor_restride(memory_format);
   return tensor;
 }
 
 Tensor PerTensorAffineQuantizer::quantize(Tensor rtensor) {
-  TORCH_CHECK(
-      rtensor.scalar_type() == kFloat,
-      "quantize only works on Float Tensor.");
-  TORCH_CHECK(
-      rtensor.device().is_cpu() || rtensor.device().is_cuda(),
-      "quantize only works for CPU and CUDA backend right now.");
   // Here we need a std::intrusive_ptr<Quantizer>.. but actually "this" is the
   // quantizer that can be reused, so I'm using intrusive_from_this here
   Tensor qtensor = new_qtensor(
       rtensor.sizes(),
       rtensor.options().dtype(scalar_type_),
       intrusive_from_this());
-
   rtensor = rtensor.contiguous();
-  AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), "quantize_tensor", [&]() {
-    qtensor = quantize_tensor<scalar_t>(rtensor, qtensor, scale_, zero_point_);
-  });
+  native::quantize_tensor_affine(rtensor, qtensor, scale_, zero_point_);
   return qtensor;
 }
 
 Tensor PerTensorAffineQuantizer::dequantize(Tensor qtensor) {
-  TORCH_CHECK(qtensor.is_quantized(),
-           "dequantize is only supported in quantized Tensor.");
-  TORCH_CHECK(
-      qtensor.device().is_cpu() || qtensor.device().is_cuda(),
-      "dequantize only works for CPU and CUDA backend right now.");
   Tensor rtensor = at::empty(qtensor.sizes(), qtensor.options().dtype(at::kFloat));
   qtensor = qtensor.contiguous();
-
-  AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), "dequantize_tensor", [&]() {
-    rtensor = dequantize_tensor<scalar_t>(qtensor, rtensor, scale_, zero_point_);
-  });
-
+  native::dequantize_tensor_affine(qtensor, rtensor, scale_, zero_point_);
   return rtensor;
 }
 
 Tensor PerChannelAffineQuantizer::quantize(Tensor rtensor) {
-  TORCH_CHECK(
-      rtensor.scalar_type() == kFloat,
-      "quantize only works on Float Tensor.");
-  TORCH_CHECK(
-      rtensor.device() == kCPU,
-      "quantize only works for CPU backend right now.");
   // Here we need a std::intrusive_ptr<Quantizer>.. but actually "this" is the
   // quantizer that can be reused, so I'm using intrusive_from_this here
   Tensor qtensor = new_qtensor(
       rtensor.sizes(),
       rtensor.options().dtype(scalar_type_),
       intrusive_from_this());
-
   rtensor = rtensor.contiguous();
-  AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(),
-                         "quantize_tensor_per_channel_affine",
-                         [&]() {
-    qtensor = quantize_tensor_per_channel_affine<scalar_t>(
-        rtensor, qtensor, scales_, zero_points_, axis_);
-  });
+  native::quantize_tensor_per_channel_affine(rtensor, qtensor, scales_, zero_points_, axis_);
   return qtensor;
 }
 
 Tensor PerChannelAffineQuantizer::dequantize(Tensor qtensor) {
-  TORCH_CHECK(qtensor.is_quantized(),
-           "dequantize is only supported in quantized Tensor.");
-  TORCH_CHECK(
-      qtensor.device() == kCPU,
-      "dequantize only works for CPU backend right now.");
   Tensor rtensor = at::empty(qtensor.sizes(), qtensor.options().dtype(at::kFloat));
   qtensor = qtensor.contiguous();
-
-  AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(),
-                         "dequantize_tensor_per_channel_affine",
-                         [&]() {
-    rtensor = dequantize_tensor_per_channel_affine<scalar_t>(
-        qtensor, rtensor, scales_, zero_points_, axis_);
-  });
-
+  native::dequantize_tensor_per_channel_affine(qtensor, rtensor, scales_, zero_points_, axis_);
   return rtensor;
 }
 
