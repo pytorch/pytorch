@@ -17,10 +17,15 @@ constexpr int MAX_DIMS = 25;
 
 template <int NARGS, typename index_t = uint32_t>
 struct OffsetCalculator {
-  // The offset for each argument (in bytes). Wrapper around fixed-size array.
-  using offset_type = at::detail::Array<index_t, NARGS>;
+  // The offset for each argument. Wrapper around fixed-size array.
+  // On CUDA, zero sized array is not allowed, so when we are handling nullary
+  // operators, we need to create a size 1 offset to avoid compiler failure.
+  // This size 1 offset is just a placeholder, and we will not use it.
+  using offset_type = at::detail::Array<index_t, std::max<int>(NARGS, 1)>;
 
-  OffsetCalculator(int dims, const int64_t* sizes, const int64_t* const* strides) : dims(dims) {
+  // if element_sizes is nullptr, then the strides will be in bytes, otherwise
+  // the strides will be in # of elements.
+  OffsetCalculator(int dims, const int64_t* sizes, const int64_t* const* strides, const int64_t* element_sizes=nullptr) : dims(dims) {
     TORCH_CHECK(dims <= MAX_DIMS, "tensor has too many (>", MAX_DIMS, ") dims");
     for (int i = 0; i < MAX_DIMS; ++i) {
       if (i < dims) {
@@ -29,7 +34,8 @@ struct OffsetCalculator {
         sizes_[i] = IntDivider<index_t>(1);
       }
       for (int arg = 0; arg < NARGS; arg++) {
-        strides_[i][arg] =  i < dims ? strides[arg][i] : 0;
+        int64_t element_size = (element_sizes == nullptr ? 1LL : element_sizes[arg]);
+        strides_[i][arg] =  i < dims ? strides[arg][i] / element_size : 0;
       }
     }
   }
@@ -60,5 +66,24 @@ struct OffsetCalculator {
 
   int dims;
   IntDivider<index_t> sizes_[MAX_DIMS];
-  index_t strides_[MAX_DIMS][NARGS];
+  index_t strides_[MAX_DIMS][std::max<int>(NARGS, 1)];
+};
+
+template <int NARGS, typename index_t = uint32_t>
+struct TrivialOffsetCalculator {
+  // The offset for each argument. Wrapper around fixed-size array.
+  // The offsets are in # of elements, not in bytes.
+  // On CUDA, zero sized array is not allowed, so when we are handling nullary
+  // operators, we need to create a size 1 offset to avoid compiler failure.
+  // This size 1 offset is just a placeholder, and we will not use it.
+  using offset_type = at::detail::Array<index_t, std::max<int>(NARGS, 1)>;
+
+  C10_HOST_DEVICE offset_type get(index_t linear_idx) const {
+    offset_type offsets;
+    #pragma unroll
+    for (int arg = 0; arg < NARGS; arg++) {
+      offsets[arg] = linear_idx;
+    }
+    return offsets;
+  }
 };
