@@ -45,7 +45,7 @@ the consumer process has references to the tensor, and the refcounting can not
 save you if the consumer process exits abnormally via a fatal signal. See
 :ref:`this section <multiprocessing-cuda-sharing-details>`.
 
-See also: :ref:`cuda-nn-dataparallel-instead`
+See also: :ref:`cuda-nn-ddp-instead`
 
 
 Best practices and tips
