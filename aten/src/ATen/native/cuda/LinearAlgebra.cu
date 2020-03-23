@@ -113,7 +113,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   at::ScalarType scalar_type = self.scalar_type();
 
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, scalar_type, "addmm_cuda", [&] {
-    if (scalar_type == at::ScalarType::BFloat16 || scalar_type == at::ScalarType::Int) {
+    if (scalar_type == at::ScalarType::Half || scalar_type == at::ScalarType::Float) {
       checkCuda90Bug(static_cast<int>(m), static_cast<int>(n), static_cast<int>(k));
     }
     scalar_t alpha_val = alpha.to<scalar_t>();
