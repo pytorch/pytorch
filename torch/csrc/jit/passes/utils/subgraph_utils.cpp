@@ -90,8 +90,8 @@ void collectNestedUses(
 std::unordered_set<Value*> closedOverValues(
     Node* toMerge,
     std::unordered_map<Value*, Value*>& inputsMap) {
-  std::unordered_set<Value*> closed_over_values = {};
-  std::unordered_set<Value*> new_values = {};
+  std::unordered_set<Value*> closed_over_values;
+  std::unordered_set<Value*> new_values;
   collectNestedUses(closed_over_values, new_values, inputsMap, toMerge);
   return closed_over_values;
 }
