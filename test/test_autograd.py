@@ -5317,6 +5317,24 @@ class TestAutogradDeviceType(TestCase):
             m.sum().backward()
 
 
+    @deviceCountAtLeast(2)
+    def test_scalar_different_devices(self, devices):
+        a = torch.rand([], requires_grad=True, device=devices[0])
+        b = torch.rand(10, requires_grad=True, device=devices[1])
+
+        c = a * b
+        c.sum().backward()
+
+
+    @onlyCUDA
+    def test_scalar_different_device_types(self, device):
+        c = torch.tensor(3, device='cpu') * torch.rand(2, 2, device=device)
+        c.sum().backward()
+
+        d = torch.tensor(3, device=device) * torch.rand(2, 2, device='cpu')
+        d.sum().backward()
+
+
     # NOTE: flaky on ROCm CI
     @skipCUDAIfRocm
     def test_sparse_ctor_getter_backward(self, device):
