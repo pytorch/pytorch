@@ -479,7 +479,7 @@ Tensor rand(IntArrayRef size, Generator* generator, const TensorOptions& options
   if (result.is_complex()) {
     auto float_tensor = at::native::view_complex_as_float(result);
     float_tensor.uniform_(0, 1, generator);
-    // we want to return complex tensor not underlaying float tensor.
+    // we want to return complex tensor not underlying float tensor.
     return result;
   }
   return result.uniform_(0, 1, generator);
