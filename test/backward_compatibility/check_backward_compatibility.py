@@ -21,7 +21,6 @@ white_list = [
     # We export some functions and classes for test_jit.py directly from libtorch.so,
     # it's not important to have BC for them
     ('_TorchScriptTesting.*', datetime.date(9999, 1, 1)),
-    ('prim::id*', datetime.date(2020, 4, 1)),
     ('aten::pop*', datetime.date(2020, 4, 1)),
     ('aten::insert*', datetime.date(2020, 4, 1)),
     ('aten::Delete*', datetime.date(2020, 4, 1)),
@@ -124,29 +123,12 @@ white_list = [
 ]
 
 
-# The nightly will fail to parse newly added syntax to schema declarations
-# Add new schemas that will fail the nightly here
-dont_parse_list = [
-    ("prim::id", datetime.date(2020, 4, 1)),
-]
-
-
 def white_listed(schema, white_list):
     for item in white_list:
         if item[1] < datetime.date.today():
             continue
         regexp = re.compile(item[0])
         if regexp.search(schema.name):
-            return True
-    return False
-
-
-def dont_parse(schema_line):
-    for item in dont_parse_list:
-        if item[1] < datetime.date.today():
-            continue
-        regexp = re.compile(item[0])
-        if regexp.search(schema_line):
             return True
     return False
 
@@ -203,9 +185,6 @@ if __name__ == '__main__':
                 # TODO Fix type __torch__.torch.classes.xxx
                 continue
 
-            if dont_parse(line.strip()):
-                print("Not parsing schema line: ", line.strip())
-                continue
             s = parse_schema(line.strip())
             slist = new_schema_dict.get(s.name, [])
             slist.append(s)

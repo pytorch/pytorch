@@ -676,12 +676,6 @@ bool isBiasOfConvOrLinear(Value* v) {
       v,
       AtenFuncArgs({{"conv2d", 2}, {"linear", 2}}),
       CallFuncArgs({{"linear", 3}}));
-  if (result) {
-    TORCH_CHECK(
-        v->uses().size() == 1,
-        "Graph mode quantization only supports conv/linear bias being used by"
-        " one node.");
-  }
   return result;
 }
 
@@ -690,12 +684,6 @@ bool isWeightOfConvOrLinear(Value* v) {
       v,
       AtenFuncArgs({{"conv2d", 1}, {"linear", 1}}),
       CallFuncArgs({{"linear", 2}}));
-  if (result) {
-    TORCH_CHECK(
-        v->uses().size() == 1,
-        "Graph mode quantization only supports conv/linear weight being used by"
-        " one node.");
-  }
   return result;
 }
 
@@ -2681,7 +2669,7 @@ void FoldQuantizedPrepackingOps(Module& module) {
         (n->kind() == Symbol::fromQualString("quantized::linear_prepack")) ||
         n->kind() == Symbol::fromQualString("quantized::conv2d_prepack"));
   };
-  FoldPrePackingOps(module, filter_fn, "quantized");
+  PrePackingOpsFolder(module, filter_fn, "quantized");
 }
 
 script::Module Finalize(script::Module& module) {
