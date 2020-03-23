@@ -163,7 +163,7 @@ class TestMkldnn(TestCase):
                 x = torch.randn(batch, ic, height, width)
             elif ndims == 3:
                 x = torch.randn(batch, ic, depth, height, width)
-            
+
             kwargs = {
                 'in_channels': ic,
                 'out_channels': oc,
@@ -176,7 +176,7 @@ class TestMkldnn(TestCase):
             }
             if transpose:
                 kwargs['output_padding'] = opad
-            
+
             module = func(**kwargs).float()
             module_mkldnn = copy.deepcopy(module)
 
@@ -298,6 +298,25 @@ class TestMkldnn(TestCase):
                         max_pool2d(x),
                         max_pool2d(x.to_mkldnn()).to_dense())
 
+    def test_max_pool3d(self):
+        N = torch.randint(3, 10, (1,)).item()
+        C = torch.randint(3, 10, (1,)).item()
+
+        for stride in [1, 2, 3]:
+            for D, H, W in [(64, 64, 64), (35, 39, 35), (16, 19, 20), [7, 8, 9]]:
+                x = torch.randn(N, C, D, H, W, dtype=torch.float32) * 10
+
+                for ceil_mode in [False, True]:
+                    max_pool3d = torch.nn.MaxPool3d(
+                        kernel_size=3 if not ceil_mode else 7,
+                        stride=stride,
+                        padding=1,
+                        ceil_mode=ceil_mode)
+
+                    self.assertEqual(
+                        max_pool3d(x),
+                        max_pool3d(x.to_mkldnn()).to_dense())
+
     def test_max_pool2d_backward(self):
         x = torch.randn(10, 3, 64, 64, dtype=torch.float32) * 10
         for ceil_mode in [False, True]:
@@ -331,6 +350,22 @@ class TestMkldnn(TestCase):
             self.assertEqual(
                 avg_pool2d(x),
                 avg_pool2d(x.to_mkldnn()).to_dense())
+
+    def test_avg_pool3d(self):
+        N = torch.randint(3, 10, (1,)).item()
+        C = torch.randint(3, 10, (1,)).item()
+        x = torch.randn(N, C, 64, 64, 64, dtype=torch.float32) * 10
+
+        for count_include_pad in [True, False]:
+            avg_pool3d = torch.nn.AvgPool3d(
+                kernel_size=3,
+                stride=2,
+                padding=1,
+                count_include_pad=count_include_pad)
+
+            self.assertEqual(
+                avg_pool3d(x),
+                avg_pool3d(x.to_mkldnn()).to_dense())
 
     def test_avg_pool2d_backward(self):
         x = torch.randn(10, 3, 64, 64, dtype=torch.float32) * 10
@@ -402,6 +437,32 @@ class TestMkldnn(TestCase):
                     if (not train and track_running_stats):
                         self._test_serialization(mkldnn_bn, (x.to_mkldnn(),))
                         self._test_tracing(mkldnn_bn, (x.to_mkldnn(),))
+
+    def test_batch_norm3d(self):
+        x = torch.randn(4, 3, 30, 30, 30, dtype=torch.float32) * 10
+
+        for train in [True, False]:
+            # TODO: support none affine
+            for affine in [True]:
+                for track_running_stats in [True, False]:
+                    bn = torch.nn.BatchNorm3d(
+                        3,
+                        affine=affine,
+                        track_running_stats=track_running_stats).float().train(train)
+                    if (train or not track_running_stats):
+                        mkldnn_bn = copy.deepcopy(bn)
+                    else:
+                        mkldnn_bn = mkldnn_utils.to_mkldnn(copy.deepcopy(bn))
+                    self.assertEqual(
+                        bn(x),
+                        mkldnn_bn(x.to_mkldnn()).to_dense(), prec=1e-4)
+                    if train and track_running_stats:
+                        self.assertEqual(
+                            bn.running_mean,
+                            mkldnn_bn.running_mean)
+                        self.assertEqual(
+                            bn.running_var,
+                            mkldnn_bn.running_var, prec=1e-3)
 
     def test_batch_norm2d_backward(self):
         x = torch.randn(64, 3, 35, 45, dtype=torch.float32) * 10
@@ -612,7 +673,7 @@ class TestMkldnn(TestCase):
             mkldnn_mm = torch.mm(b1_, b2_)
             self.assertEqual(mkldnn_mm.dtype, dtype)
             self.assertEqual(mm, mkldnn_mm.float().to_dense(), prec=5e-02)
-            
+
             y = torch.randn(M, O, dtype=torch.float32)
             mkldnn_y = y.clone().to_mkldnn().to(dtype)
             torch.mm(b1_, b2_, out=mkldnn_y)
@@ -631,23 +692,23 @@ class TestMkldnn(TestCase):
             mkldnn_bmm = torch.bmm(b1_, b2_)
             self.assertEqual(mkldnn_bmm.dtype, dtype)
             self.assertEqual(bmm, mkldnn_bmm.float().to_dense(), prec=6e-02)
-            
+
             y = torch.randn(num_batches, M, O, dtype=torch.float32)
             mkldnn_y = y.clone().to_mkldnn().to(dtype)
             torch.bmm(b1_, b2_, out=mkldnn_y)
             self.assertEqual(mkldnn_y.dtype, dtype)
             self.assertEqual(bmm, mkldnn_y.float().to_dense(), prec=6e-02)
-    ''' 
+    '''
     def test_addmm(self):
         for i in range(8, 14, 2):
             for j in range(8, 14, 2):
                 alpha = i / 10
-                beta = j / 10 
+                beta = j / 10
                 M, N, O = 23, 8, 12
                 b1 = torch.randn(M, N, dtype=torch.float32)
                 b2 = torch.randn(N, O, dtype=torch.float32)
                 res = torch.randn(M, O, dtype=torch.float32)
-        
+
                 addmm = torch.addmm(input=res, mat1=b1, mat2=b2, alpha=alpha, beta=beta)
                 for dtype in [torch.bfloat16, torch.float]:
                     b1_ = b1.clone().to_mkldnn().to(dtype)
@@ -657,7 +718,7 @@ class TestMkldnn(TestCase):
                                    alpha=alpha, beta=beta)
                     self.assertEqual(mkldnn_addmm.dtype, dtype)
                     self.assertEqual(addmm, mkldnn_addmm.float().to_dense(), prec=5e-02)
-          
+
                     y = torch.randn(M, O, dtype=torch.float32)
                     mkldnn_y = y.clone().to_mkldnn().to(dtype)
                     torch.addmm(input=res_, mat1=b1_, mat2=b2_, alpha=alpha, beta=beta, \
@@ -671,13 +732,13 @@ class TestMkldnn(TestCase):
         for i in range(8, 14, 2):
             for j in range(8, 14, 2):
                 alpha = i / 10
-                beta = j / 10 
-                num_batches = 10 
+                beta = j / 10
+                num_batches = 10
                 M, N, O = 23, 8, 12
                 b1 = torch.randn(num_batches, M, N, dtype=torch.float32)
                 b2 = torch.randn(num_batches, N, O, dtype=torch.float32)
                 res = torch.randn(M, O, dtype=torch.float32)
-                
+
                 addbmm = torch.addbmm(res, b1, b2, beta=beta, alpha=alpha)
                 for dtype in [torch.bfloat16, torch.float]:
                     b1_ = b1.clone().to_mkldnn().to(dtype)
@@ -686,25 +747,25 @@ class TestMkldnn(TestCase):
                     mkldnn_addbmm = torch.addbmm(res_, b1_, b2_, beta=beta, alpha=alpha)
                     self.assertEqual(mkldnn_addbmm.dtype, dtype)
                     self.assertEqual(addbmm, mkldnn_addbmm.float().to_dense(), prec=dtype2prec[dtype])
-                       
+
                     y = torch.randn(M, O, dtype=torch.float32)
                     mkldnn_y = y.clone().to_mkldnn().to(dtype)
                     torch.addbmm(res_, b1_, b2_, beta=beta, alpha=alpha, out=mkldnn_y)
                     self.assertEqual(mkldnn_y.dtype, dtype)
                     self.assertEqual(addbmm, mkldnn_y.float().to_dense(), prec=dtype2prec[dtype])
-                    
+
     def test_baddbmm(self):
         dtype2prec = {torch.float: 2e-5, torch.bfloat16: 5e-1}
         for i in range(8, 14, 2):
             for j in range(8, 14, 2):
                 alpha = i / 10
-                beta = j / 10 
+                beta = j / 10
                 num_batches = 10
                 M, N, O = 23, 8, 12
                 b1 = torch.randn(num_batches, M, N, dtype=torch.float32)
                 b2 = torch.randn(num_batches, N, O, dtype=torch.float32)
                 res = torch.randn(num_batches, M, O, dtype=torch.float32)
-        
+
                 baddbmm = torch.baddbmm(res, b1, b2, alpha=alpha, beta=beta)
                 for dtype in [torch.bfloat16, torch.float]:
                     b1_ = b1.clone().to_mkldnn().to(dtype)
@@ -713,13 +774,13 @@ class TestMkldnn(TestCase):
                     mkldnn_baddbmm = torch.baddbmm(res_, b1_, b2_, alpha=alpha, beta=beta)
                     self.assertEqual(mkldnn_baddbmm.dtype, dtype)
                     self.assertEqual(baddbmm, mkldnn_baddbmm.float().to_dense(), prec=dtype2prec[dtype])
-          
+
                     y = torch.randn(num_batches, M, O, dtype=torch.float32)
                     mkldnn_y = y.clone().to_mkldnn().to(dtype)
                     torch.baddbmm(res_, b1_, b2_, alpha=alpha, beta=beta, out=mkldnn_y),
                     self.assertEqual(mkldnn_y.dtype, dtype)
                     self.assertEqual(baddbmm, mkldnn_y.float().to_dense(), prec=dtype2prec[dtype])
-    
+
     def test_softmax(self):
         x = torch.randn(3, 4, 5, dtype=torch.float32) * 10
         for dim in range(x.ndim):
