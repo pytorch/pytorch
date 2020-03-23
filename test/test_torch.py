@@ -14450,7 +14450,9 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         self.assertEqual(r.dtype, a.dtype)
 
     @slowTest
-    def test_mm(self, device):
+    @dtypes(torch.float32, torch.float64, torch.bfloat16, torch.int32, torch.int64)
+    @dtypesIfCUDA(torch.float32, torch.float64)
+    def test_mm(self, device, dtype):
         def _test_mm(n, m, p, dtype, genf):
             # helper function
             def matrixmultiply(mat1, mat2):
@@ -14523,12 +14525,14 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             self.assertEqual(res, res2)
 
         for (n, m, p) in [(20, 10, 5), (15, 5, 10), (5, 18, 10)]:
-            _test_mm(n, m, p, torch.float32, lambda x, y: torch.randn(x, y, dtype=torch.float32, device=device))
-            _test_mm(n, m, p, torch.float64, lambda x, y: torch.randn(x, y, dtype=torch.float64, device=device))
-            if device == 'cpu':
-                _test_mm(n, m, p, torch.int32, lambda x, y: torch.randint(0, 100, (x, y), dtype=torch.int32, device=device))
-                _test_mm(n, m, p, torch.int64, lambda x, y: torch.randint(0, 100, (x, y), dtype=torch.int64, device=device))
-                _test_mm(n, m, p, torch.bfloat16, lambda x, y: torch.randn(x, y, dtype=torch.float32, device=device).bfloat16())
+            if (dtype == torch.int32) or (dtype == torch.int64):
+                genf = lambda x, y: torch.randint(0, 100, (x, y), dtype=dtype, device=device)
+            elif (dtype == torch.bfloat16):
+                genf = lambda x, y: torch.randn(x, y, dtype=torch.float32, device=device).to(dtype)
+            else:
+                genf = lambda x, y: torch.randn(x, y, dtype=dtype, device=device)
+
+            _test_mm(n, m, p, dtype, genf)
 
     @onlyCPU
     @dtypes(torch.float)
