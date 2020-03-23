@@ -50,7 +50,6 @@ TH_API void THTensor_(baddbmm)(THTensor *r_, THTensor *t, THTensor *batch1, THTe
 
 TH_API void THTensor_(kthvalue)(THTensor *values_, THLongTensor *indices_, THTensor *t, int64_t k, int dimension, int keepdim);
 TH_API void THTensor_(mode)(THTensor *values_, THLongTensor *indices_, THTensor *t, int dimension, int keepdim);
-TH_API accreal THTensor_(trace)(THTensor *t);
 
 TH_API void THTensor_(diag)(THTensor *r_, THTensor *t, int k);
 
