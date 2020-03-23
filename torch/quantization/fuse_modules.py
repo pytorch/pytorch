@@ -48,18 +48,14 @@ def fuse_conv_bn_relu(conv, bn, relu):
     """
     assert(conv.training == bn.training == relu.training),\
         "Conv and BN both must be in the same mode (train or eval)."
+    is_3d = isinstance(conv, torch.nn.Conv3d)
     if conv.training:
-        assert not relu.inplace, 'We only support fusion of non-inplace ReLU.'
-        if isinstance(conv, torch.nn.Conv3d):
-            return torch_fused.ConvBnReLU3d(conv, bn, relu)
-        else:
-            return torch_fused.ConvBnReLU2d(conv, bn, relu)
+        return torch_fused.ConvBnReLU3d(conv, bn, relu) if is_3d \
+            else torch_fused.ConvBnReLU2d(conv, bn, relu)
     else:
-        if isinstance(conv, torch.nn.Conv3d):
-            return torch_fused.ConvReLU3d(
-                torch.nn.utils.fusion.fuse_conv_bn_eval(conv, bn), relu)
-        else:
-            return torch_fused.ConvReLU2d(
+        return torch_fused.ConvReLU3d(
+            torch.nn.utils.fusion.fuse_conv_bn_eval(conv, bn), relu) if is_3d \
+            else torch_fused.ConvReLU2d(
                 torch.nn.utils.fusion.fuse_conv_bn_eval(conv, bn), relu)
 
 # Generalization of getattr

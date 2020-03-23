@@ -475,7 +475,7 @@ class ModelForFusion(nn.Module):
         super(ModelForFusion, self).__init__()
         self.conv1 = nn.Conv2d(3, 2, 5, bias=None).to(dtype=torch.float)
         self.bn1 = nn.BatchNorm2d(2).to(dtype=torch.float)
-        self.relu1 = nn.ReLU(inplace=False).to(dtype=torch.float)
+        self.relu1 = nn.ReLU(inplace=True).to(dtype=torch.float)
         self.sub1 = SubModelForFusion()
         self.sub2 = SubModelWithoutFusion()
         self.fc = nn.Linear(72, 10).to(dtype=torch.float)
@@ -484,6 +484,8 @@ class ModelForFusion(nn.Module):
         self.qconfig = qconfig
         self.conv2 = nn.Conv3d(3, 2, (1, 1, 1), bias=None).to(dtype=torch.float)
         self.relu2 = nn.ReLU(inplace=False).to(dtype=torch.float)
+        self.bn2 = nn.BatchNorm3d(2).to(dtype=torch.float)
+        self.relu3 = nn.ReLU(inplace=True).to(dtype=torch.float)
         # don't quantize sub2
         self.sub2.qconfig = None
         self.fc.qconfig = None
@@ -502,6 +504,8 @@ class ModelForFusion(nn.Module):
         y = self.quant(y)
         y = self.conv2(y)
         y = self.relu2(y)
+        y = self.bn2(y)
+        y = self.relu3(y)
         y = self.dequant(y)
         return x
 
