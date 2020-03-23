@@ -3,8 +3,8 @@
 #include <functional>
 #include <vector>
 
-#include "torch/csrc/jit/tensorexpr/expr.h"
-#include "torch/csrc/jit/tensorexpr/ir.h"
+#include <torch/csrc/jit/tensorexpr/expr.h>
+#include <torch/csrc/jit/tensorexpr/ir.h>
 
 namespace torch {
 namespace jit {
@@ -14,18 +14,17 @@ namespace tensorexpr {
 class Range {
  public:
   Range() {}
-  Range(const ExprHandle& start, const ExprHandle& stop)
-      : start_(start), stop_(stop) {}
-  const ExprHandle& start() const {
+  Range(const Expr* start, const Expr* stop) : start_(start), stop_(stop) {}
+  const Expr* start() const {
     return start_;
   }
-  const ExprHandle& stop() const {
+  const Expr* stop() const {
     return stop_;
   }
 
  private:
-  ExprHandle start_;
-  ExprHandle stop_;
+  const Expr* start_;
+  const Expr* stop_;
 };
 
 class Function : public KernelScopedObject {
@@ -57,16 +56,20 @@ class Function : public KernelScopedObject {
     return dims_.size();
   }
   const Expr* dim(int index) const {
-    CHECK_GE(index, 0) << "index out of lower bound";
-    CHECK_LT(index, ndim()) << "index out of upper bound";
+    if (index < 0 || index >= ndim()) {
+      throw out_of_range_index();
+    }
+
     return dims_[index];
   }
   const std::vector<const Expr*>& dims() const {
     return dims_;
   }
   const Var* arg(int index) const {
-    CHECK_GE(index, 0) << "index out of lower bound";
-    CHECK_LT(index, ndim()) << "index out of upper bound";
+    if (index < 0 || index >= ndim()) {
+      throw out_of_range_index();
+    }
+
     return args_[index];
   }
   const std::vector<const Var*>& args() const {
@@ -77,7 +80,10 @@ class Function : public KernelScopedObject {
     return bodies_;
   }
   const Expr* body(size_t index) const {
-    CHECK(index < bodies_.size());
+    if (index >= bodies_.size()) {
+      throw out_of_range_index();
+    }
+
     return bodies_[index];
   }
 
@@ -85,7 +91,9 @@ class Function : public KernelScopedObject {
     return func_vars_;
   }
   const Var* func_var(size_t index) const {
-    CHECK(index < func_vars_.size());
+    if (index >= func_vars_.size()) {
+      throw out_of_range_index();
+    }
     return func_vars_[index];
   }
 

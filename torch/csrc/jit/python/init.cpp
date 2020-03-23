@@ -344,6 +344,8 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_specialize_autogradzero", specializeAutogradZero)
       .def("_jit_override_can_fuse_on_cpu", &overrideCanFuseOnCPU)
       .def("_jit_override_can_fuse_on_gpu", &overrideCanFuseOnGPU)
+      .def("_jit_can_fuse_on_cpu", &canFuseOnCPU)
+      .def("_jit_can_fuse_on_gpu", &canFuseOnGPU)
       .def("_jit_register_tensorexpr_fuser", &registerTensorExprFuser)
       .def(
           "_jit_differentiate",
@@ -419,37 +421,37 @@ void initJITBindings(PyObject* module) {
           "_jit_get_te_cuda_pointwise_loop_levels",
           []() -> int {
             using namespace torch::jit::tensorexpr;
-            return GetTECudaPointwiseLoopLevels();
+            return getTECudaPointwiseLoopLevels();
           })
       .def(
           "_jit_set_te_cuda_pointwise_loop_levels",
           [](int level) {
             using namespace torch::jit::tensorexpr;
-            return GetTECudaPointwiseLoopLevels() = level;
+            return getTECudaPointwiseLoopLevels() = level;
           })
       .def(
           "_jit_get_te_cuda_pointwise_block_count",
           []() -> int {
             using namespace torch::jit::tensorexpr;
-            return GetTECudaPointwiseBlockCount();
+            return getTECudaPointwiseBlockCount();
           })
       .def(
           "_jit_set_te_cuda_pointwise_block_count",
           [](int block_count) {
             using namespace torch::jit::tensorexpr;
-            return GetTECudaPointwiseBlockCount() = block_count;
+            return getTECudaPointwiseBlockCount() = block_count;
           })
       .def(
           "_jit_get_te_cuda_pointwise_block_size",
           []() -> int {
             using namespace torch::jit::tensorexpr;
-            return GetTECudaPointwiseBlockSize();
+            return getTECudaPointwiseBlockSize();
           })
       .def(
           "_jit_set_te_cuda_pointwise_block_size",
           [](int block_size) {
             using namespace torch::jit::tensorexpr;
-            return GetTECudaPointwiseBlockSize() = block_size;
+            return getTECudaPointwiseBlockSize() = block_size;
           })
       .def("_jit_set_texpr_fuser_enabled", &setTensorExprFuserEnabled)
       .def(
@@ -458,19 +460,19 @@ void initJITBindings(PyObject* module) {
             return debugGetFusedKernelCode(g, inps);
           })
       .def(
-          "_jit_pass_insert_xnnpack_ops",
+          "_jit_pass_insert_prepacked_ops",
           [](std::shared_ptr<Graph>& graph) {
-            return insertXNNPACKOps(graph);
+            return insertPrePackedOps(graph);
           })
       .def(
-          "_jit_pass_insert_xnnpack_ops",
+          "_jit_pass_insert_prepacked_ops",
           [](script::Module& module) {
-            return insertXNNPACKOps(module);
+            return insertPrePackedOps(module);
           })
       .def(
-          "_jit_pass_fold_xnnpack_prepack_ops",
+          "_jit_pass_fold_prepacking_ops",
           [](script::Module& module) {
-            return FoldXNNPACKPrePackingOps(module);
+            return FoldPrePackingOps(module);
           })
       .def(
           "_jit_pass_onnx_unpack_quantized_weights",
@@ -658,7 +660,7 @@ void initJITBindings(PyObject* module) {
           std::ostringstream docstring;
           docstring << "Automatically bound operator '" << op_name
                     << "' with schema(s):\n";
-                    
+
           for (const auto& op : operations) {
             docstring << "  " << op->schema() << "\n";
           }
@@ -735,14 +737,19 @@ void initJITBindings(PyObject* module) {
     });
   });
 
-  struct PythonFutureWrapper {
-    explicit PythonFutureWrapper(c10::intrusive_ptr<c10::ivalue::Future> fut)
-        : fut(std::move(fut)) {}
-
-    c10::intrusive_ptr<c10::ivalue::Future> fut;
-  };
-
-  py::class_<PythonFutureWrapper>(m, "Future");
+  py::class_<PythonFutureWrapper>(m, "Future")
+      .def(
+          "wait",
+          [](PythonFutureWrapper& fut) {
+            auto res = fut.wait();
+            {
+              // acquiring GIL as toPyObject creates new py::object
+              // without grabbing the GIL.
+              pybind11::gil_scoped_acquire ag;
+              return toPyObject(std::move(res));
+            }
+          },
+          py::call_guard<py::gil_scoped_release>());
 
   m.def("fork", [](py::args args) {
     AT_ASSERT(args.size() >= 1);
@@ -798,16 +805,7 @@ void initJITBindings(PyObject* module) {
     }
   });
 
-  m.def("wait", [](PythonFutureWrapper& fut) {
-    if (jit::tracer::isTracing()) {
-      auto graph = jit::tracer::getTracingState()->graph;
-
-      Value* fut_val = jit::tracer::getValueTrace(fut.fut);
-      auto output = graph->insert(aten::wait, {fut_val});
-      jit::tracer::setValueTrace(fut.fut->value(), output);
-    }
-    return fut.fut->value();
-  });
+  m.def("wait", [](PythonFutureWrapper& fut) { return fut.wait(); });
 
   m.def("_jit_assert_is_instance", [](py::object obj, TypePtr type) {
     toIValue(obj, type);

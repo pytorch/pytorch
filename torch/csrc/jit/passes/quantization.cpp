@@ -36,9 +36,9 @@ using graph_rewrite_helper::replaceConvolutionWithConv2d;
 // Map of quantization parameter name and value
 // for example _scale, _zero_point,
 // _scalar_type and _axis(for per channel quantization)
-using QParamMap = std::unordered_map<std::string, IValue>;
+using QParamVector = std::vector<std::pair<std::string, IValue>>;
 
-// This struct contains a compiled IR pattens slated for use in the
+// This struct contains a compiled IR patterns slated for use in the
 // findPatternMatches function. The struct encapsulates the common
 // information from parseIR that is used in conjunction with the
 // pattern matching facility. A const instance of this struct can
@@ -134,6 +134,8 @@ std::vector<size_t> getGeneralOpTensorInputIndexes(Node* n) {
       "upsample_bilinear2d",
       "upsample_trilinear3d",
       "upsample_bicubic2d",
+      "dropout",
+      "reshape",
       // TODO: sort returns a tuple of Tensors, we have
       // to extend the API to support that
       // "sort",
@@ -141,6 +143,7 @@ std::vector<size_t> getGeneralOpTensorInputIndexes(Node* n) {
   std::vector<std::string> single_input_call_funcs = {
     "adaptive_avg_pool2d",
     "_max_pool2d",
+    "dropout",
   };
   if (isFunctionNode(
           n,
@@ -225,6 +228,11 @@ Module getInvokedModule(
   auto* instance = n->inputs()[0];
   auto path = getModuleAccessPath(instance, self);
   return findChildModule(module, path);
+}
+
+bool isPerChannel(at::QScheme qscheme) {
+  return qscheme == c10::kPerChannelAffine ||
+    qscheme == c10::kPerChannelSymmetric;
 }
 
 class ModuleCloneHelper {
@@ -420,7 +428,7 @@ class InsertObserversHelper {
    * graph, we'll postpone inserting observer to caller as much as possible, if
    * we know the current method is the outer most method, then
    * we will insert all observers in the graph instead of postpone this to the
-   * parent, note that this assumes we don't have recurisve method
+   * parent, note that this assumes we don't have recursive method
    * calls
    *
    * returns a tuple of vectors of observer modules for input and output, these
@@ -439,12 +447,27 @@ class InsertObserversHelper {
       std::unordered_set<Value*> graph_observed_values =
           std::unordered_set<Value*>());
 
+  std::tuple<OptionalModuleVector, OptionalModuleVector, std::vector<size_t>> insertObserversFor(
+      Block* block,
+      script::Module& module,
+      // this is a reference because when we insert observer for a value
+      // in one block it is also observed in another block, we don't want to
+      // insert multiple observers for the same value
+      std::unordered_set<Value*>& block_observed_values,
+      bool is_entry_point = false);
+
  private:
   ModuleMethodVector getInvokedMethods(
       Module& module,
       const std::string& method_name);
 
   bool valueNeedsToBeQuantized(Value* v);
+
+  bool isObserved(
+      Value* v,
+      const std::unordered_set<Value*>& block_observed_values) {
+    return block_observed_values.count(v) || observed_values_.count(v);
+  }
 
   // Fill the map between the caller input/output to input/output
   // of called graph, this is used to navigate through the graph
@@ -468,7 +491,7 @@ class InsertObserversHelper {
 
   c10::optional<Module> getObserverFor(Value* v);
 
-  void propagateObservedProperty(Value* output, std::unordered_set<Value*>& graph_observed_values);
+  void propagateObservedProperty(Value* output, std::unordered_set<Value*>& block_observed_values);
 
   void skipValuesInPattern(
       Graph& graph,
@@ -509,9 +532,9 @@ class InsertObserversHelper {
   int uid_ = 0;
   // Set of observer forward call nodes
   std::unordered_set<Node*> observer_nodes_;
-  // Map from graph to a vector of observer name and observer modules we
-  // want to add to the module instance that has the graph
-  std::unordered_map<Graph*, NameModuleVector> graph_observer_map_;
+  // Map from block to a vector of observer name and observer modules we
+  // want to add to the module instance that has the block
+  std::unordered_map<Block*, NameModuleVector> block_observer_map_;
 
   // These are the IR patterns we match to skip inserting observers.
   // They are compiled once on construction and used repeatedly within
@@ -618,12 +641,6 @@ bool isBiasOfConvOrLinear(Value* v) {
       v,
       AtenFuncArgs({{"conv2d", 2}, {"linear", 2}}),
       CallFuncArgs({{"linear", 3}}));
-  if (result) {
-    TORCH_CHECK(
-        v->uses().size() == 1,
-        "Graph mode quantization only supports conv/linear bias being used by"
-        " one node.");
-  }
   return result;
 }
 
@@ -632,12 +649,6 @@ bool isWeightOfConvOrLinear(Value* v) {
       v,
       AtenFuncArgs({{"conv2d", 1}, {"linear", 1}}),
       CallFuncArgs({{"linear", 2}}));
-  if (result) {
-    TORCH_CHECK(
-        v->uses().size() == 1,
-        "Graph mode quantization only supports conv/linear weight being used by"
-        " one node.");
-  }
   return result;
 }
 
@@ -716,8 +727,8 @@ void InsertObserversHelper::insertObserverFor(
     // the correct value
     call->replaceInput(1, v);
     observer_nodes_.emplace(call);
+    observed_values_.insert(call->output());
   }
-  observed_values_.insert(v);
 }
 
 void InsertObserversHelper::skipValuesInPattern(
@@ -780,18 +791,26 @@ void InsertObserversHelper::fillBoundaryValueMap(
         auto m = getInvokedModule(module, n, self);
         auto g = m.get_method(n->s(attr::name)).graph();
         // add mapping from callsite value to value in called graph
-        for (auto i = 0; i < g->outputs().size(); ++i) {
+        for (auto i = 0U; i < g->outputs().size(); ++i) {
           auto* return_val = g->outputs()[i];
           boundary_value_map_[n->output(i)].insert(return_val);
         }
-        for (auto i = 0; i < g->inputs().size(); ++i) {
+        for (auto i = 0U; i < g->inputs().size(); ++i) {
           auto* input_val = g->inputs()[i];
           boundary_value_map_[n->input(i)].insert(input_val);
           caller_to_callee_[n->input(i)] = input_val;
         }
-      }
-      for (Block* subblock : n->blocks()) {
-        blocks_to_visit.push(subblock);
+      } else if (n->kind() == prim::If) {
+        for (Block* subblock : n->blocks()) {
+          blocks_to_visit.push(subblock);
+          for (Value* v : n->outputs()) {
+            boundary_value_map_[v].insert(subblock->outputs()[v->offset()]);
+          }
+        }
+      } else {
+        for (Block* subblock : n->blocks()) {
+          blocks_to_visit.push(subblock);
+        }
       }
     }
   }
@@ -824,6 +843,7 @@ void InsertObserversHelper::preprocess(
   }
 }
 
+// TODO: remove this as a class method
 bool InsertObserversHelper::valueNeedsToBeQuantized(Value* v) {
   if (!v->type()->isSubtypeOf(TensorType::get()) ||
       isBiasOfConvOrLinear(v)) {
@@ -916,36 +936,56 @@ std::tuple<OptionalModuleVector, OptionalModuleVector, std::vector<size_t>> Inse
     bool is_entry_point,
     std::unordered_set<Value*> graph_observed_values) {
   auto graph = module.get_method(method_name).graph();
-  // graph input/output values, used to skip inserting observers
-  // for input and output of the graph, we have to insert the observers
-  // at call site because the graph itself can be shared
-  std::unordered_set<Value*> graph_inputs_outputs;
-  // list of observer modules for input values
-  std::vector<c10::optional<Module>> graph_input_observers;
-  // list of observer modules for output values
-  std::vector<c10::optional<Module>> graph_output_observers;
+  return insertObserversFor(graph->block(), module, graph_observed_values, is_entry_point);
+}
 
-  // if the current graph is the entry point graph(the forward graph
-  // of the top level module), we can insert observers in the graph
+std::tuple<OptionalModuleVector, OptionalModuleVector, std::vector<size_t>>
+InsertObserversHelper::insertObserversFor(
+      Block* block,
+      script::Module& module,
+      std::unordered_set<Value*>& block_observed_values,
+      bool is_entry_point) {
+  // input/output values, used to skip inserting observers
+  // for input and output of the block and the owning graph,
+  // we have to insert the observers at call site because
+  // the graph itself can be shared
+  std::unordered_set<Value*> inputs_outputs;
+  // list of observer modules for input values
+  std::vector<c10::optional<Module>> block_input_observers;
+  // list of observer modules for output values
+  std::vector<c10::optional<Module>> block_output_observers;
+
+  // if the current block is the block for entry point graph(the forward graph
+  // of the top level module), we can insert observers in the block directly
   if (!is_entry_point) {
-    for (auto* v : graph->inputs()) {
-      graph_inputs_outputs.insert(v);
-      graph_input_observers.push_back(getObserverFor(v));
+    auto* graph = block->owningGraph();
+    // graph inputs/outputs
+    for (auto list : {graph->inputs(), graph->outputs()}) {
+      for (auto* v : list) {
+        inputs_outputs.insert(v);
+      }
+    }
+    // block outputs
+    for (auto* v : block->outputs()) {
+      inputs_outputs.insert(v);
     }
 
-    for (auto* v : graph->outputs()) {
-      graph_inputs_outputs.insert(v);
-      graph_output_observers.push_back(getObserverFor(v));
+    for (auto* v : block->inputs()) {
+      block_input_observers.push_back(getObserverFor(v));
+    }
+
+    for (auto* v : block->outputs()) {
+      block_output_observers.push_back(getObserverFor(v));
     }
   }
 
-  // This means the graph is been processed before, we just
+  // This means the block is been processed before, we just
   // need to attach observer modules and construct the information
   // needed by call site here
-  bool visited = graph_observer_map_.count(graph.get());
+  bool visited = block_observer_map_.count(block);
   if (visited) {
     // instance clone of observer module and setAttr
-    for (const auto& observer_attrs : graph_observer_map_.at(graph.get())) {
+    for (const auto& observer_attrs : block_observer_map_.at(block)) {
       const auto& name = std::get<0>(observer_attrs);
       const auto& observer = std::get<1>(observer_attrs);
       module._ivalue()->setAttr(name, observer.clone_instance()._ivalue());
@@ -957,11 +997,10 @@ std::tuple<OptionalModuleVector, OptionalModuleVector, std::vector<size_t>> Inse
   // outputs that's been observed(third item of the returned result)
   // can change depending on that, so for each graph we'll need to go through
   // the whole process of inserting observers
-  GRAPH_DUMP("inserting observer for:", graph);
 
   std::stack<Block*> blocks_to_visit;
-  blocks_to_visit.push(graph->block());
-  auto* self = graph->inputs()[0];
+  blocks_to_visit.push(block);
+  auto* self = block->owningGraph()->inputs()[0];
   // We first construct a map from value to the module, then
   // insert observers for them later, this is to avoid interference
   // of the inserted observers with the analysis to decide where
@@ -970,8 +1009,8 @@ std::tuple<OptionalModuleVector, OptionalModuleVector, std::vector<size_t>> Inse
   // graph
   std::unordered_map<Value*, Module> values_to_observe;
 
-  for (auto* v : graph->inputs()) {
-    if (!graph_inputs_outputs.count(v) && !values_to_observe.count(v)) {
+  for (auto* v : block->inputs()) {
+    if (!inputs_outputs.count(v) && !values_to_observe.count(v)) {
       if (auto observer_opt = getObserverFor(v)) {
         values_to_observe[v] = *observer_opt;
       }
@@ -987,51 +1026,91 @@ std::tuple<OptionalModuleVector, OptionalModuleVector, std::vector<size_t>> Inse
       if (n->kind() == prim::CallMethod) {
         auto m = getInvokedModule(module, n, self);
         std::unordered_set<Value*> callee_observed_inputs;
-        for (auto i = 0; i < n->inputs().size(); ++i) {
-          if (graph_observed_values.count(n->inputs()[i])) {
+        for (auto i = 0U; i < n->inputs().size(); ++i) {
+          if (isObserved(n->input(i), block_observed_values)) {
             callee_observed_inputs.insert(caller_to_callee_[n->inputs()[i]]);
           }
         }
-        auto info_from_callee = insertObservers(m, n->s(attr::name), false, callee_observed_inputs);
+        auto* subblock = m.get_method(n->s(attr::name)).graph()->block();
+        auto info_from_callee = insertObserversFor(subblock, m, callee_observed_inputs);
         auto input_observers = std::get<0>(info_from_callee);
         auto output_observers = std::get<1>(info_from_callee);
         auto callee_observed_outputs = std::get<2>(info_from_callee);
         for (auto idx : callee_observed_outputs) {
-          graph_observed_values.insert(n->outputs()[idx]);
+          block_observed_values.insert(n->outputs()[idx]);
         }
-        for (auto i = 0; i < n->inputs().size(); ++i) {
-          if (input_observers[i] && !graph_inputs_outputs.count(n->inputs()[i])
-              && !graph_observed_values.count(n->inputs()[i])) {
+        for (auto i = 0U; i < n->inputs().size(); ++i) {
+          if (input_observers[i] && !inputs_outputs.count(n->input(i)) &&
+              !isObserved(n->input(i), block_observed_values)) {
             values_to_observe[n->inputs()[i]] = *input_observers[i];
-            graph_observed_values.insert(n->inputs()[i]);
+            block_observed_values.insert(n->input(i));
           }
         }
-        for (auto i = 0; i < n->outputs().size(); ++i) {
-          if (output_observers[i] && !graph_inputs_outputs.count(n->outputs()[i])
-              && !graph_observed_values.count(n->outputs()[i])) {
+        for (auto i = 0U; i < n->outputs().size(); ++i) {
+          if (output_observers[i] && !inputs_outputs.count(n->output(i)) &&
+              !isObserved(n->output(i), block_observed_values)) {
             values_to_observe[n->outputs()[i]] = *output_observers[i];
-            graph_observed_values.insert(n->outputs()[i]);
+            block_observed_values.insert(n->output(i));
+          }
+        }
+      } else if (n->kind() == prim::If) {
+        std::vector<size_t> aggregated_observed_outputs;
+        std::vector<c10::optional<script::Module>> aggregated_output_observers;
+        for (Block* subblock : n->blocks()) {
+          // subblock has access to all the values in the scope of prim::If,
+          // so subblock_observed_values == block_observed_values
+          auto info_from_subblock = insertObserversFor(subblock, module, block_observed_values);
+          auto output_observers = std::get<1>(info_from_subblock);
+          auto subblock_observed_outputs = std::get<2>(info_from_subblock);
+          // subblock for prim::If doesn't have inputs
+          if (aggregated_observed_outputs.size() > 0) {
+            TORCH_CHECK(aggregated_observed_outputs == subblock_observed_outputs,
+                        "quantization doesn't work for the case where branches "
+                        "of `if` doesn't both return quantized/non-quantized "
+                        "values");
+          } else {
+            for (auto idx : subblock_observed_outputs) {
+              block_observed_values.insert(n->output(idx));
+            }
+            aggregated_observed_outputs = subblock_observed_outputs;
+          }
+          if (aggregated_output_observers.size() > 0) {
+            TORCH_CHECK(aggregated_output_observers == output_observers,
+                        "quantization doesn't work for the case where branches "
+                        "of `if` doesn't both return values quantized the same "
+                        "way");
+          } else {
+            for (auto i = 0; i < n->outputs().size(); ++i) {
+              if (output_observers[i] && !inputs_outputs.count(n->output(i))
+                  && !block_observed_values.count(n->output(i))
+                  && !observed_values_.count(n->output(i))) {
+                values_to_observe[n->output(i)] = *output_observers[i];
+                block_observed_values.insert(n->output(i));
+              }
+            }
+            aggregated_output_observers = output_observers;
           }
         }
       } else {
         for (Value* v : n->outputs()) {
-          propagateObservedProperty(v, graph_observed_values);
-          if (!graph_inputs_outputs.count(v) && !graph_observed_values.count(v)) {
+          propagateObservedProperty(v, block_observed_values);
+          if (!inputs_outputs.count(v) &&
+              !isObserved(v, block_observed_values)) {
             if (auto observer_opt = getObserverFor(v)) {
               values_to_observe[v] = *observer_opt;
-              graph_observed_values.insert(v);
+              block_observed_values.insert(v);
             }
           }
         }
-      }
-      for (Block* subblock : n->blocks()) {
-        blocks_to_visit.push(subblock);
+        for (Block* subblock : n->blocks()) {
+          blocks_to_visit.push(subblock);
+        }
       }
     }
   }
   std::vector<size_t> output_idxs;
-  for (auto i = 0; i < graph->outputs().size(); ++i) {
-    if (graph_observed_values.count(graph->outputs()[i])) {
+  for (auto i = 0U; i < block->outputs().size(); ++i) {
+    if (isObserved(block->outputs()[i], block_observed_values)) {
       output_idxs.push_back(i);
     }
   }
@@ -1044,24 +1123,24 @@ std::tuple<OptionalModuleVector, OptionalModuleVector, std::vector<size_t>> Inse
         insertObserverFor(v, module, observer, observer_name_and_modules);
       }
     }
-    graph_observer_map_[graph.get()] = observer_name_and_modules;
+    block_observer_map_[block] = observer_name_and_modules;
   }
-  return std::make_tuple(graph_input_observers, graph_output_observers, output_idxs);
+  return std::make_tuple(block_input_observers, block_output_observers, output_idxs);
 }
 
 void InsertObserversHelper::propagateObservedProperty(
-    Value* output, std::unordered_set<Value*>& graph_observed_values) {
+    Value* output, std::unordered_set<Value*>& block_observed_values) {
   if (pass_through_value_map_.count(output)) {
     // since the vector is always non-empty, we will
     // not return the initial value
     bool all_observed = true;
     for (Value* v : pass_through_value_map_.at(output)) {
-      all_observed &= observed_values_.count(v) || graph_observed_values.count(v);
+      all_observed &= observed_values_.count(v) || block_observed_values.count(v);
     }
     if (all_observed) {
       // This is to propagate observed property through
       // all ops that doesn't require observation
-      graph_observed_values.insert(output);
+      block_observed_values.insert(output);
     }
   }
 }
@@ -1071,42 +1150,43 @@ void insertDeQuantCall(Graph* graph,
                        Value* original_val,
                        const std::vector<Use>& uses) {
   for (size_t i = 0; i < uses.size(); ++i) {
+    auto* user = uses[i].user;
+    // Insert dequantize node right before use node, because
+    // we want to make sure use node and dequantize node reside
+    // in the same block so that quant fusion can happen
+    WithInsertPoint ins(user);
     Node* dequant =
       graph->create(Symbol::aten("dequantize"), {quantized_val});
     dequant->output()->setDebugName(
-        original_val->debugName() + ".dequant." + c10::guts::to_string(i));
-    uses[i].user->replaceInputWith(original_val, dequant->output());
+        original_val->debugName() + ".dequant." + c10::guts::to_string(i))
+      ->setType(original_val->type());
+    user->replaceInputWith(original_val, dequant->output());
     graph->insertNode(dequant);
   }
 }
 
-void insertQuantDeQuantCall(Value* self, Node* observer, bool is_per_channel) {
+void insertQuantDeQuantCall(
+    Value* self,
+    Node* observer,
+    bool is_per_channel,
+    const std::vector<std::string>& qparam_names) {
   Graph* g = observer->owningGraph();
   // Original value that is observed
   Value* v = observer->input(1);
 
-  std::string quantize_func;
-  std::vector<Value*> inputs = {v};
-
   // Inserting before insert point
   WithInsertPoint ins(v->node()->next());
-  std::string prefix = v->debugName();
+  std::vector<Value*> inputs = {v};
   // Insert GetAttr nodes for quantization parameters
+  for (const auto& qparam_name : qparam_names) {
+    inputs.push_back(g->insertGetAttr(self, qparam_name));
+  }
+  std::string quantize_func;
   if (is_per_channel) {
     quantize_func = "quantize_per_channel";
-    inputs.push_back(g->insertGetAttr(self, prefix + "_scale"));
-    inputs.push_back(g->insertGetAttr(self, prefix + "_zero_point"));
-    inputs.push_back(g->insertGetAttr(self, prefix + "_axis"));
   } else {
     quantize_func = "quantize_per_tensor";
-    inputs.push_back(
-        g->insertGetAttr(self, prefix + "_scale")->setType(FloatType::get()));
-    inputs.push_back(g->insertGetAttr(self, prefix + "_zero_point")
-                         ->setType(IntType::get()));
   }
-  inputs.push_back(
-      g->insertGetAttr(self, prefix + "_scalar_type")->setType(IntType::get()));
-
   Node* quant = g->create(at::Symbol::aten(quantize_func), inputs);
   quant->output()->setDebugName(v->debugName() + ".quant");
   g->insertNode(quant);
@@ -1169,8 +1249,8 @@ class InsertQuantDeQuantHelper {
   // Get quantization parameter map of the given Value in Graph
   // by searching for observer module of the value and extract the
   // quantization parameters from the observer module
-  std::tuple<c10::QScheme, QParamMap> getQSchemeAndQParamMap(
-      Module& module,
+  std::tuple<c10::QScheme, QParamVector> getQSchemeAndQParamVector(
+      script::Module& module,
       Node* n);
   void checkQScheme(Graph* g, c10::QScheme qscheme) {
     if (qscheme_for_graph_.count(g)) {
@@ -1210,7 +1290,10 @@ class InsertQuantDeQuantHelper {
   // Map from Graph to observer node, we can use observer node to
   // get the information of original value that's been observed and
   // the quantization parameters
-  std::unordered_map<Graph*, std::vector<Node*>> observer_nodes_;
+  std::unordered_map<Graph*, std::vector<Node*>> observer_nodes_for_graph_;
+  // A map from qparam name (e.g. _scale) to the attribute name in
+  // the module(e.g. weight_scale_0)
+  std::unordered_map<Node*, std::unordered_map<std::string, std::string>> qparam_name_map_for_node_;
   // Record qscheme for every graph, this is for checking
   // each graph is only quantized with one type of QScheme
   std::unordered_map<Graph*, c10::QScheme> qscheme_for_graph_;
@@ -1239,7 +1322,7 @@ void InsertQuantDeQuantHelper::collectObserverNodesAndValueToQuantize(
   nodes_to_destroy_[g].push_back(observer->inputs()[0]->node());
   Value* original_value = observer->input(1);
   v->replaceAllUsesWith(original_value);
-  observer_nodes_[g].push_back(observer);
+  observer_nodes_for_graph_[g].push_back(observer);
 }
 
 void InsertQuantDeQuantHelper::cleanup(Module& module) {
@@ -1301,22 +1384,29 @@ void InsertQuantDeQuantHelper::quantizeTensors(
     Module& module,
     Graph* g,
     Value* self) {
-  if (!observer_nodes_.count(g)) {
+  if (!observer_nodes_for_graph_.count(g)) {
     return;
   }
-  for (auto* n : observer_nodes_.at(g)) {
+  for (auto* n : observer_nodes_for_graph_.at(g)) {
     auto* original_value = n->input(1);
-    auto tp = getQSchemeAndQParamMap(module, n);
-    checkQScheme(g, std::get<0>(tp));
+    auto tp = getQSchemeAndQParamVector(module, n);
+    auto qscheme = std::get<0>(tp);
     auto qparam_map = std::get<1>(tp);
+    checkQScheme(g, qscheme);
+    std::vector<std::string> qparam_names;
     for (auto& pr : qparam_map) {
       const auto& name = pr.first;
       const auto& qparam = pr.second;
-      module.register_attribute(
-          original_value->debugName() + name, qparam.type(), qparam);
+      size_t uid = 0;
+      auto qparam_name = original_value->debugName() + name + "_" + c10::to_string(uid++);
+      while (module.hasattr(qparam_name)) {
+        qparam_name = original_value->debugName() + name + "_" + c10::to_string(uid++);
+      }
+      qparam_name_map_for_node_[n][name] = qparam_name;
+      module.register_attribute(qparam_name, qparam.type(), qparam);
+      qparam_names.push_back(qparam_name);
     }
-    bool is_per_channel = qparam_map.at("_scale").isTensor();
-    insertQuantDeQuantCall(self, n, is_per_channel);
+    insertQuantDeQuantCall(self, n, isPerChannel(qscheme), qparam_names);
   }
 }
 
@@ -1352,8 +1442,8 @@ void checkGetQParamsResult(const IValue& qparams) {
   }
 }
 
-std::tuple<c10::QScheme, QParamMap> InsertQuantDeQuantHelper::
-    getQSchemeAndQParamMap(Module& module, Node* n) {
+std::tuple<c10::QScheme, QParamVector> InsertQuantDeQuantHelper::
+    getQSchemeAndQParamVector(script::Module& module, Node* n) {
   // TODO: refactor findObserverName to take Node* as input
   Value* v = n->output();
   TORCH_INTERNAL_ASSERT(
@@ -1376,19 +1466,19 @@ std::tuple<c10::QScheme, QParamMap> InsertQuantDeQuantHelper::
   auto tp = result.toTuple();
   at::Tensor scale = tp->elements()[0].toTensor().to(at::kFloat);
   at::Tensor zero_point = tp->elements()[1].toTensor().to(at::kInt);
-  std::unordered_map<std::string, IValue> qparams = {
-      {"_scalar_type", scalar_type},
-  };
+  // quantization parameters should appear in the same order as
+  // the argument for quantize_per_tensor/quantize_per_channel function
+  QParamVector qparams;
   auto qscheme = observer_module.attr("qscheme").toQScheme();
-  if (qscheme == c10::kPerChannelAffine ||
-      qscheme == c10::kPerChannelSymmetric) {
-    qparams["_scale"] = scale;
-    qparams["_zero_point"] = zero_point;
-    qparams["_axis"] = tp->elements()[2].toInt();
+  if (isPerChannel(qscheme)) {
+    qparams.push_back(std::make_pair("_scale", scale));
+    qparams.push_back(std::make_pair("_zero_point", zero_point));
+    qparams.push_back(std::make_pair("_axis", tp->elements()[2].toInt()));
   } else {
-    qparams["_scale"] = scale.item<double>();
-    qparams["_zero_point"] = zero_point.item<int64_t>();
+    qparams.push_back(std::make_pair("_scale", scale.item<double>()));
+    qparams.push_back(std::make_pair("_zero_point", zero_point.item<int64_t>()));
   }
+  qparams.push_back(std::make_pair("_scalar_type", scalar_type));
   return std::make_tuple(qscheme, qparams);
 }
 
@@ -1454,16 +1544,19 @@ void InsertQuantDeQuantHelper::run(
   // We only need to register new parameters if the graph has
   // been quantized before
   // TODO: dedup this part with code in quantizeTensors
-  if (observer_nodes_.count(graph.get())) {
-    for (auto* n : observer_nodes_.at(graph.get())) {
-      auto* original_value = n->input(1);
-      auto tp = getQSchemeAndQParamMap(module, n);
+  if (observer_nodes_for_graph_.count(graph.get())) {
+    for (auto* n : observer_nodes_for_graph_.at(graph.get())) {
+      auto tp = getQSchemeAndQParamVector(module, n);
       checkQScheme(graph.get(), std::get<0>(tp));
       auto qparam_map = std::get<1>(tp);
+      TORCH_INTERNAL_ASSERT(qparam_name_map_for_node_.count(n),
+                            "Expected to have a qparam_name_map for node:",
+                           *n);
+      auto qparam_name_map = qparam_name_map_for_node_.at(n);
       for (auto& pr : qparam_map) {
         const auto& name = pr.first;
         const auto& qparam = pr.second;
-        module._ivalue()->setAttr(original_value->debugName() + name, qparam);
+        module._ivalue()->setAttr(qparam_name_map.at(name), qparam);
       }
     }
     return;
@@ -1511,34 +1604,22 @@ void InsertQuantDeQuantHelper::run(
 
 void insertPrepackUnpackForLinear(std::shared_ptr<Graph>& graph) {
   std::string linear_with_quant = R"(
-graph(%linear, %a_dequant, %w_quant, %b):
+graph(%a_dequant, %w_quant, %b):
         %w_dequant = aten::dequantize(%w_quant)
-        %r = prim::CallFunction(%linear, %a_dequant, %w_dequant, %b)
+        %r = aten::linear(%a_dequant, %w_dequant, %b)
         return (%r) )";
 
   std::string linear_with_quant_prepack = R"(
-graph(%linear, %a_dequant, %w_quant, %b):
+graph(%a_dequant, %w_quant, %b):
         %packed_params = quantized::linear_prepack(%w_quant, %b)
         %w_quant_unpacked : Tensor, %b_unpacked : Tensor? = quantized::linear_unpack(%packed_params)
         %w_dequant = aten::dequantize(%w_quant_unpacked)
-        %r = prim::CallFunction(%linear, %a_dequant, %w_dequant, %b)
+        %r = aten::linear(%a_dequant, %w_dequant, %b_unpacked)
         return (%r) )";
-
-  // Filter to match linear CallFunction
-  auto filter = [](const Match& match,
-                   const std::unordered_map<std::string, Value*>& vmap) {
-    const auto& match_vmap = match.values_map;
-    auto linear_value = match_vmap.at(vmap.at("linear"));
-    auto func_name = getFuncName(linear_value);
-    if (func_name == "linear") {
-      return true;
-    }
-    return false;
-  };
 
   SubgraphRewriter rewriter;
   rewriter.RegisterRewritePattern(linear_with_quant, linear_with_quant_prepack);
-  rewriter.runOnGraph(graph, filter);
+  rewriter.runOnGraph(graph);
 }
 
 void insertPrepackUnpackForConv2d(std::shared_ptr<Graph>& graph) {
@@ -1754,22 +1835,83 @@ std::tuple<at::Tensor, at::Tensor> FoldConvBatchNorm2dHelper::
   return std::make_tuple(new_w, new_b);
 }
 
+bool extractOptionalBNParams(
+    const script::Module& bn,
+    ConvBNParameters& r) {
+  auto bn_forward = bn.get_method("forward");
+  auto graph = bn_forward.graph();
+  const PatternInfo& pattern_bn = PatternInfo::parse_from_str(R"(
+      graph(%a, %weight, %bias, %running_mean, %running_var,
+          %training, %momentum, %eps, %cudnn_enabled):
+        %bn_out = aten::batch_norm(%a, %weight, %bias, %running_mean,
+            %running_var, %training, %momentum, %eps, %cudnn_enabled)
+        return (%bn_out) )");
+  const Graph& pattern_bn_graph = *pattern_bn.pattern_graph;
+  const auto& bn_vmap = pattern_bn.vmap;
+
+  const auto& matches = findPatternMatches(pattern_bn_graph, *graph);
+
+  if (matches.size() > 1) {
+    return false;
+  }
+
+  if (bn.hasattr("eps")) {
+    r.bn_eps = bn.attr("eps").toDouble();
+  } else {
+    auto optional_eps = toIValue(matches[0].values_map.at(bn_vmap.at("eps")));
+    if(!optional_eps) {
+      return false;
+    }
+    r.bn_eps = optional_eps.value().toDouble();
+  }
+  r.bn_w = at::ones_like(bn.attr("running_mean").toTensor());
+  if (bn.hasattr("weight")) {
+    if (bn.attr("weight").isTensor()) {
+      r.bn_w = bn.attr("weight").toTensor();
+    }
+  } else {
+    auto optional_bn_weight =
+      toIValue(matches[0].values_map.at(bn_vmap.at("weight")));
+    if (!optional_bn_weight) {
+      return false;
+    }
+    if (optional_bn_weight.value().isTensor()) {
+      r.bn_w = optional_bn_weight.value().toTensor();
+    }
+  }
+  r.bn_b = at::zeros_like(bn.attr("running_mean").toTensor());
+  if (bn.hasattr("bias")) {
+    if (bn.attr("bias").isTensor()) {
+      r.bn_b = bn.attr("bias").toTensor();
+    }
+  } else {
+    auto optional_bn_bias =
+      toIValue(matches[0].values_map.at(bn_vmap.at("bias")));
+    if (!optional_bn_bias) {
+      return false;
+    }
+
+    if (optional_bn_bias.value().isTensor()) {
+      r.bn_b = optional_bn_bias.value().toTensor();
+    }
+  }
+  return true;
+}
+
 bool FoldConvBatchNorm2dHelper::tryExtractingConvBNParameters(
     Module& conv,
     Module& bn,
     ConvBNParameters& r) {
   if (!hastensor(conv, "weight") || !conv.hasattr("bias") ||
-      !hastensor(bn, "weight") || !hastensor(bn, "bias") ||
-      !hastensor(bn, "running_mean") || !hastensor(bn, "running_var") ||
-      !bn.hasattr("eps")) {
+      !hastensor(bn, "running_mean") || !hastensor(bn, "running_var")) {
     return false;
   }
 
   r.bn_rm = bn.attr("running_mean").toTensor();
   r.bn_rv = bn.attr("running_var").toTensor();
-  r.bn_eps = bn.attr("eps").toDouble();
-  r.bn_w = bn.attr("weight").toTensor();
-  r.bn_b = bn.attr("bias").toTensor();
+  if (!extractOptionalBNParams(bn, r)) {
+    return false;
+  }
 
   r.conv_w = conv.attr("weight").toTensor();
   r.conv_b = at::zeros_like(r.bn_rm);
@@ -1782,11 +1924,14 @@ bool FoldConvBatchNorm2dHelper::tryExtractingConvBNParameters(
 }
 
 void FoldConvBatchNorm2dHelper::analyze(Module& module) {
+  // Dot in the ".Conv2d" and ".BatchNorm2d" is an attempt to
+  // prevent matching module's whose name might end with Conv2d
+  // But are user defined modules.
   const PatternInfo pattern = PatternInfo::parse_from_str(R"IR(
 graph(%self, %x):
-    %conv_submodule = match::module[name="Conv2d"](%self)
+    %conv_submodule = match::module[name=".Conv2d"](%self)
     %conv_out = prim::CallMethod[name="forward"](%conv_submodule, %x)
-    %bn_submodule = match::module[name="BatchNorm2d"](%self)
+    %bn_submodule = match::module[name=".BatchNorm2d"](%self)
     %bn_out = prim::CallMethod[name="forward"](%bn_submodule, %conv_out)
     return (%bn_out))IR");
 
@@ -1917,6 +2062,57 @@ void FoldConvBatchNorm2dHelper::transform() {
   }
 }
 
+void replaceConv2dBiasWithGetAttr(Module& module) {
+  auto graph = module.get_method("forward").graph();
+  // Only looks fors _convolution pattern.
+  // Thus assumes that tracing will have always gotten rid of aten::conv2d.
+  // If it did not, BN folding will fail.
+  const PatternInfo& pattern_convolution = PatternInfo::parse_from_str(R"(
+      graph(%a, %w, %b, %stride:int[], %padding:int[], %dilation:int[],
+          %transposed:bool, %output_padding:int[], %groups:int, %benchmark:bool,
+          %deterministic:bool, %cudnn_enabled:bool):
+        %conv_out = aten::_convolution(%a, %w, %b, %stride, %padding, %dilation,
+            %transposed, %output_padding, %groups, %benchmark, %deterministic, %cudnn_enabled)
+        return (%conv_out) )");
+  const Graph& pattern_convolution_graph = *pattern_convolution.pattern_graph;
+  const auto& convolution_vmap = pattern_convolution.vmap;
+
+  const auto& matches = findPatternMatches(pattern_convolution_graph, *graph);
+  for (const auto& match : matches) {
+    // We come here only if the bias was not present in the module.
+    // In that case, the corresponding graph will not have getAttr("bias")
+    // Insert that in the graph.
+    // And change _convolution to take the new value.
+    auto conv_node = match.values_map.at(convolution_vmap.at("conv_out"))->node();
+    WithInsertPoint ins(conv_node);
+    Value* bias_attr_val =
+      graph->insertGetAttr(graph->inputs()[0], "bias")
+          ->setType(TensorType::get());
+    constexpr size_t conv_bias_index = 2;
+    conv_node->replaceInput(conv_bias_index, bias_attr_val);
+  }
+}
+
+void addBiasForConv2dIfNone(Module& module) {
+  auto t = module.type()->expect<ClassType>();
+  auto real_typename = t->name()->qualifiedName();
+  const std::string pattern_name("Conv2d");
+  if (real_typename.size() >= pattern_name.size() &&
+      (0 == real_typename.compare(real_typename.size() - pattern_name.size(),
+                                  pattern_name.size(), pattern_name))) {
+    if (!t->hasAttribute("bias")) {
+      auto optional_tensor_type = OptionalType::create(TensorType::get());
+      t->addAttribute("bias", optional_tensor_type, true);
+      auto optional_tensor = c10::optional<at::Tensor>();
+      module.setattr("bias", optional_tensor);
+      replaceConv2dBiasWithGetAttr(module);
+    }
+  }
+  for (Module m : module.children()) {
+    addBiasForConv2dIfNone(m);
+  }
+}
+
 } // namespace
 
 TORCH_API Module InsertObservers(
@@ -2004,7 +2200,6 @@ void ReplicateDeQuant(std::shared_ptr<Graph>& graph) {
     }
   }
   for (Node* n : dequant_nodes_to_rewrite) {
-    WithInsertPoint ins(n->next());
     auto* quantized_val = n->inputs()[0];
     auto* dequantized_val = n->output();
     // copy uses to vector since value->uses() is a reference
@@ -2056,7 +2251,6 @@ void SwapDeQuant(std::shared_ptr<Graph>& graph) {
         TORCH_CHECK(n->outputs().size() == 1, "We only support dequantize swapping for ops"
                     " with one output right now");
         auto* output = n->output();
-        WithInsertPoint ins(n->next());
         std::vector<Use> uses = output->uses();
         // Insert new dequantize node for each use of the output
         insertDeQuantCall(graph.get(), output, output, uses);
@@ -2079,6 +2273,7 @@ void QuantFusion(std::shared_ptr<Graph>& graph) {
 Module FoldConvBatchNorm2d(const Module& module) {
   FoldConvBatchNorm2dHelper h;
   Module m = module.clone();
+  addBiasForConv2dIfNone(m);
   h.analyze(m);
   h.transform();
   return m;
@@ -2350,6 +2545,7 @@ script::Module Finalize(script::Module& module) {
   SwapFunctionalLinear(module);
   auto graph = module.get_method("forward").graph();
   Inline(*graph);
+  ConstantPropagation(graph);
   ReplicateDeQuant(graph);
   SwapDeQuant(graph);
   InsertPrepackUnpack(graph);

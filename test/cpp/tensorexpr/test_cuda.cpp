@@ -9,7 +9,7 @@
 #include "test/cpp/tensorexpr/padded_buffer.h"
 #include "torch/csrc/jit/tensorexpr/buffer.h"
 #include "torch/csrc/jit/tensorexpr/cuda_codegen.h"
-#include "torch/csrc/jit/tensorexpr/schedule.h"
+#include "torch/csrc/jit/tensorexpr/loopnest.h"
 #include "torch/csrc/jit/tensorexpr/tensor.h"
 
 #include <c10/cuda/CUDACachingAllocator.h>
@@ -18,7 +18,7 @@
 namespace torch {
 namespace jit {
 using namespace torch::jit::tensorexpr;
-using namespace torch::jit::tensorexpr::schedule;
+using namespace torch::jit::tensorexpr;
 
 template <typename ctype>
 void testCudaTestVectorAdd01_impl() {
@@ -40,7 +40,7 @@ void testCudaTestVectorAdd01_impl() {
         return a_buf(n, b_id, t_id) + b_buf(n, b_id, t_id);
       });
   LoopNest l({c});
-  std::vector<Stmt*> loops = l.getLoopStmtsFor(c);
+  std::vector<For*> loops = l.getLoopStmtsFor(c);
   l.SetGPUBlockIndex(loops[1], 0);
   l.SetGPUThreadIndex(loops[2], 0);
   Stmt* stmt = l.root_stmt();
@@ -107,9 +107,9 @@ static void testCudaTestVectorAdd02_impl(int N, int block_size) {
       },
       [&](const VarHandle& n) { return a_buf(n) + b_buf(n); });
   LoopNest l({c});
-  Stmt* n_outer;
-  Stmt* n_inner;
-  std::vector<Stmt*> loops = l.getLoopStmtsFor(c);
+  For* n_outer;
+  For* n_inner;
+  std::vector<For*> loops = l.getLoopStmtsFor(c);
   l.SplitWithMask(loops[0], block_size, &n_outer, &n_inner);
   l.SetGPUBlockIndex(n_outer, 0);
   l.SetGPUThreadIndex(n_inner, 0);
@@ -234,7 +234,7 @@ void testCudaTestRand01() {
         return Intrinsics::make(IntrinsicsOp::kRand, kFloat);
       });
   LoopNest l({c});
-  std::vector<Stmt*> loops = l.getLoopStmtsFor(c);
+  std::vector<For*> loops = l.getLoopStmtsFor(c);
   l.SetGPUBlockIndex(loops[1], 0);
   l.SetGPUThreadIndex(loops[2], 0);
   Stmt* stmt = l.root_stmt();
@@ -284,9 +284,9 @@ void testCudaDynamicShapeSplit() {
   Tensor* b =
       Compute("b", {{n, "n"}}, [&](const VarHandle& i) { return a(i) * 2.0f; });
   LoopNest l({b});
-  Stmt* outer;
-  Stmt* inner;
-  std::vector<Stmt*> loops = l.getLoopStmtsFor(b);
+  For* outer;
+  For* inner;
+  std::vector<For*> loops = l.getLoopStmtsFor(b);
   l.SplitWithMask(loops[0], 1024, &outer, &inner);
   l.SetGPUBlockIndex(outer, 0);
   l.SetGPUThreadIndex(inner, 0);
