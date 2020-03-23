@@ -1174,6 +1174,22 @@ graph(%x : Tensor,
         assert list(activation_dtypes)[0] != list(weight_dtypes)[0], 'Expected activation dtype to '
         ' be different from wegiht dtype'
 
+    def test_insert_observers_for_reused_weight(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+
+            def forward(self, x, y, weight):
+                x = F.conv2d(x, weight)
+                y = F.conv2d(y, weight)
+                return x + y
+
+        m = torch.jit.script(M()).eval()
+        qconfig_dict = {'' : script_qconfig(default_qconfig)}
+        m = prepare_script(m, qconfig_dict, False)
+        # 3 for x, y, weight, one for output of each F.conv2d
+        assert len(attrs_with_prefix(m, '_observer')) == 5
+
     def test_insert_observers_shared_class_type(self):
         class M(torch.nn.Module):
             def __init__(self):
