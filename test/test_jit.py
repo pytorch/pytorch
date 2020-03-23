@@ -1991,6 +1991,43 @@ graph(%input, %weight):
         res = get_forward(m._c)(x)
         self.assertEqual(res, ref_res)
 
+    def test_replicate_dequantize_in_block(self):
+        class M(torch.nn.Module):
+            def __init__(self, cond):
+                super(M, self).__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 1).float()
+
+                self.cond = cond
+
+            def forward(self, x):
+                x = torch.dequantize(x)
+                if self.cond:
+                    x = self.conv(x)
+                else:
+                    x = x + 3
+                return x
+
+        x = torch.randn([1, 3, 10, 10], dtype=torch.float)
+        x = torch.quantize_per_tensor(x, 0.5, 1, torch.quint8)
+        m = torch.jit.script(M(True))
+        ref_res = m(x)
+        FileCheck().check_count("aten::dequantize", 1, exactly=True) \
+                   .run(m.graph)
+        torch._C._jit_pass_replicate_dequantize(m.graph)
+        FileCheck().check_count("aten::dequantize", 2, exactly=True) \
+                   .run(m.graph)
+        # check dequantize is right before CallMethod of conv
+        FileCheck().check("aten::dequantize") \
+                   .check_next("CallMethod") \
+                   .run(m.graph)
+        # check dequantize is right before add
+        FileCheck().check("aten::dequantize") \
+                   .check("aten::dequantize") \
+                   .check_next("aten::add") \
+                   .run(m.graph)
+        res = get_forward(m._c)(x)
+        self.assertEqual(res, ref_res)
+
     def test_swap_dequantize(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -15881,29 +15918,6 @@ a")
         tester(int_hash, (20, 21, 22))
         tester(float_hash, (20.0, 21.00001, 22.443))
         tester(str_hash, ("", "hello", "a"))
-
-    def test_id(self):
-        with self.assertRaisesRegex(RuntimeError, "Expected a value"): 
-            @torch.jit.script
-            def test_id_scalars():
-                return id(2) == id(None) 
-
-        @torch.jit.script
-        class FooTest(object):
-            def __init__(self, x):
-                self.foo = x
-
-            def getFooTest(self):
-                return self.foo
-
-        def test_id_class_types():
-            a = id(FooTest(torch.tensor(3)))
-            b = id(FooTest(torch.tensor(2)))
-            c = id(None)
-            return a != b and b != c
-
-        script = torch.jit.script(test_id_class_types)
-        self.assertEqual(script(), test_id_class_types())
 
     def test_mutable_dce(self):
         @torch.jit.script
