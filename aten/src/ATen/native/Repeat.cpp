@@ -49,9 +49,8 @@ Tensor repeat_interleave(const Tensor &self, const Tensor &repeats, c10::optiona
     auto self_sizes = self.sizes();
     SmallVector<int64_t, 4> expand_sizes(self_sizes.begin(), self_sizes.end());
     expand_sizes[dim.value()] = indices.size(0);
-    indices = indices.view(indices_sizes).expand(expand_sizes);
 
-    return input.gather(dim.value(), indices);
+    return input.gather(dim.value(), indices.view(indices_sizes).expand(expand_sizes));
 }
 
 Tensor repeat_interleave(const Tensor &self, int64_t repeats, c10::optional<int64_t> dim) {
