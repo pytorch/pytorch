@@ -548,10 +548,10 @@ void testScheduleDynamicShape2D() {
 
 void testScheduleBoundsInference() {
   KernelScope kernel_scope;
+  {
     VarHandle m("m", kInt);
     VarHandle n("n", kInt);
     Buffer a(VarHandle("a", kHandle), kFloat, {m, ExprHandle(100)});
-//     Buffer b(VarHandle("b", kHandle), kFloat, {m, 100});
     Tensor* c = Compute(
         "c", {{m, "m"}, {ExprHandle(100), "n"}}, [&](const VarHandle& i, const VarHandle& j) {
           return a(i, j + 1) + a(i + 1, j);
@@ -559,13 +559,25 @@ void testScheduleBoundsInference() {
     LoopNest l({c});
     std::vector<For*> loops = l.getLoopStmtsFor(c);
     inferBounds(loops[0]);
-//     Stmt* s = l.root_stmt();
-//     SimpleIREvaluator cg(s, {a, b, c, m, n});
-//     std::vector<float> aData(M * N, 1.0f);
-// //     std::vector<float> bData(M * N, 2.0f);
-//     std::vector<float> cData(M * N, 0.0f);
-//     cg.call({aData, bData, cData, M, N});
-//     ExpectAllNear(cData, std::vector<float>(M * N, 3.0f), 1e-7);
+  }
+  {
+    std::cerr << "==============================\n";
+    VarHandle m("m", kInt);
+    VarHandle n("n", kInt);
+    Buffer a(VarHandle("a", kHandle), kFloat, {m, ExprHandle(100)});
+    Tensor* c = Compute(
+        "c", {{m, "m"}, {ExprHandle(100), "n"}}, [&](const VarHandle& i, const VarHandle& j) {
+          return a(i, j + 1) + a(i + 1, j);
+        });
+    LoopNest l({c});
+    std::vector<For*> loops = l.getLoopStmtsFor(c);
+    For* x_outer;
+    For* x_inner;
+    For* x_tail;
+    l.SplitWithTail(loops[0], 4, &x_outer, &x_inner, &x_tail);
+    inferBounds(x_inner);
+    inferBounds(x_tail);
+  }
 }
 
 } // namespace jit
