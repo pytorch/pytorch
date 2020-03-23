@@ -15935,13 +15935,13 @@ a")
 
         @torch.jit.script
         def test_id_class_types():
-            a = id(FooTest(torch.tensor(3)))
-            b = id(FooTest(torch.tensor(2)))
-            c = id(None)
-            print(a != b, b != c)
-            return a != b and b != c, a, b
+            obj1 = FooTest(torch.tensor(3))
+            obj2 = FooTest(torch.tensor(2))
+            assert obj1 is not obj2
+            assert id(obj1) != id(obj2)
+            assert id(obj1) != id(None)
+            return True
 
-        print(test_id_class_types.graph)
         self.assertTrue(test_id_class_types())
 
     def test_mutable_dce(self):
