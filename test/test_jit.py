@@ -17858,6 +17858,22 @@ a")
         self.assertEqual(out.aux_logits2, vals[1])
         self.assertEqual(out.aux_logits1, vals[2])
 
+    def test_fork_namedtuple(self):
+        _MyForkTuple = namedtuple('_MyForkTuple', ['one', 'two'])
+
+        @torch.jit.script
+        def foo(x):
+            # type: (Tensor) -> (_MyForkTuple)
+            return _MyForkTuple(torch.neg(x), x + 1)
+
+        @torch.jit.script
+        def wait_script(x):
+            fut = torch.jit._fork(foo, x)
+            y = torch.jit._wait(fut)
+            return y
+
+        self.assertIsNotNone(wait_script(torch.tensor(1)).one)
+
     def test_named_tuple_good_error(self):
         global _GoogLeNetOutputs  # see [local resolution in python]
         _GoogLeNetOutputs = namedtuple('GoogLeNetOutputs', ['logits', 'aux_logits2', 'aux_logits1'])
