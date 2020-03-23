@@ -9,6 +9,7 @@ import torch.cuda
 import torch.jit
 import torch.jit._logging
 import torch.jit.frontend
+from torch.testing._internal.common_nn import module_tests, new_module_tests
 from copy import deepcopy
 import math  # noqa: F401
 
@@ -335,3 +336,166 @@ def get_nn_functional_compiled_fn_and_inputs(name, self_size, args, variant_name
     with torch.jit._disable_emit_hooks():
         script_fn, inputs = gen_script_fn_and_args(name, "nn_functional", *f_args_variable)
     return script_fn, inputs
+
+
+# additional modules test
+# TODO: delete this list once we make all nn_tests work
+additional_module_tests = [
+    {
+        'module_name': 'Bilinear',
+        'constructor_args': (S, S, M),
+        'input_size': (S, S),
+        'extra_args': ((S, S),)
+    },
+    {
+        'module_name': 'RNNCell',
+        'constructor_args': (S, S),
+        'input_size': (S, S),
+    },
+    {
+        'module_name': 'LSTMCell',
+        'constructor_args': (S, S),
+        'input_size': (S, S),
+    },
+    {
+        'module_name': 'GRUCell',
+        'constructor_args': (S, S),
+        'input_size': (S, S),
+    },
+    {
+        'module_name': 'MultiheadAttention',
+        'constructor_args': (128, 8),
+        'input_size': (10, 8, 128),
+        'extra_args': (torch.randn(10, 8, 128), torch.randn(10, 8, 128)),
+        'slowTest': True
+    },
+    {
+        'module_name': 'Transformer',
+        'constructor_args': (1, 1, 1, 1, 2),
+        'input_size': (3, 1, 1),
+        'extra_args': (torch.randn(1, 1, 1),),
+        'slowTest': True
+    }
+]
+
+EXCLUDE_SCRIPT_MODULES = {
+    'test_nn_AdaptiveAvgPool2d_tuple_none',
+    'test_nn_AdaptiveAvgPool3d_tuple_none',
+    'test_nn_AdaptiveMaxPool2d_tuple_none',
+    'test_nn_AdaptiveMaxPool3d_tuple_none',
+
+    # Doesn't use future division, so this is not supported
+    'test_nn_CrossMapLRN2d',
+}
+
+script_method_template = '''
+def forward({}):
+    return {}
+'''
+
+def create_script_module(self, nn_module, constructor_args, *args, **kwargs):
+    def script_module(*args, **kwargs):
+        formals, tensors, actuals = get_script_args(args)
+
+        method_args = ', '.join(['self'] + actuals)
+        call_args_str = ', '.join(actuals)
+        call = "self.submodule({})".format(call_args_str)
+        script = script_method_template.format(method_args, call)
+
+        submodule_constants = []
+        if kwargs.get('is_constant'):
+            submodule_constants = ['submodule']
+
+        # Create module to use the script method
+        class TheModule(torch.jit.ScriptModule):
+            __constants__ = submodule_constants
+
+            def __init__(self):
+                super(TheModule, self).__init__()
+                self.submodule = nn_module(*constructor_args)
+
+        def make_module(script):
+            module = TheModule()
+            # check __repr__
+            str(module)
+            module.define(script)
+            return module
+
+        module = make_module(script)
+        if self:
+            self.assertExportImportModule(module, tensors)
+            module(*args)
+        create_script_module.last_graph = module.graph
+        return module
+    return script_module
+
+def get_nn_module_name_from_kwargs(**kwargs):
+    if 'module_name' in kwargs:
+        return kwargs['module_name']
+    elif 'fullname' in kwargs:
+        return kwargs['fullname']
+    elif 'constructor' in kwargs:
+        return kwargs['constructor'].__name__
+
+def get_nn_mod_test_name(**kwargs):
+    name = get_nn_module_name_from_kwargs(**kwargs)
+    test_name = name
+    if 'desc' in kwargs:
+        test_name = "{}_{}".format(test_name, kwargs['desc'])
+    return 'test_nn_{}'.format(test_name)
+
+def try_get_nn_module_compiled_mod_and_inputs(*args, **kwargs):
+    name = get_nn_module_name_from_kwargs(**kwargs)
+
+    if 'desc' in kwargs and 'eval' in kwargs['desc']:
+        # eval() is not supported, so skip these tests
+        return
+
+    test_name = name
+    if 'desc' in kwargs:
+        test_name = "{}_{}".format(test_name, kwargs['desc'])
+    test_name = get_nn_mod_test_name(**kwargs)
+
+    if test_name in EXCLUDE_SCRIPT_MODULES:
+        return
+    if 'constructor' in kwargs:
+        nn_module = kwargs['constructor']
+    else:
+        nn_module = getattr(torch.nn, name)
+
+    if "FunctionalModule" in str(nn_module):
+        return
+
+    if 'constructor_args_fn' in kwargs:
+        constructor_args = kwargs['constructor_args_fn']()
+    else:
+        constructor_args = kwargs.get('constructor_args', ())
+
+    # Set up inputs from tuple of sizes or constructor fn
+    if 'input_fn' in kwargs:
+        input = kwargs['input_fn']()
+    else:
+        input = (kwargs['input_size'],)
+
+    # Extra parameters to forward()
+    if 'extra_args' in kwargs:
+        input = input + kwargs['extra_args']
+
+    if 'target_size' in kwargs:
+        input = input + (kwargs['target_size'],)
+    elif 'target_fn' in kwargs:
+        if torch.is_tensor(input):
+            input = (input,)
+        input = input + (kwargs['target_fn'](),) 
+
+    args_variable, kwargs_variable = create_input(input)
+    f_args_variable = deepcopy(unpack_variables(args_variable))
+    out_var = deepcopy(f_args_variable)
+
+    args, mod = f_args_variable, create_script_module(None, nn_module, constructor_args, *f_args_variable)(*f_args_variable)
+
+    return mod, out_var
+
+
+def get_all_nn_module_tests():
+    return module_tests + new_module_tests + additional_module_tests
