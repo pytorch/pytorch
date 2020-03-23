@@ -77,8 +77,8 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
 
   // If self and result either point to the same data or if beta is zero,
   // we can avoid copying self into result. Otherwise, we need to copy.
-  if (result.data_ptr() != self.data_ptr()) {
-    if (beta.to<double>() != 0.0) {
+  if (beta.to<double>() != 0.0) {
+    if ((result.data_ptr() != self.data_ptr()) || (result.strides() != self.strides())) {
       result.copy_(self);
     }
   }
