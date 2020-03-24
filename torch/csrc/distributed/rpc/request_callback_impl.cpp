@@ -187,16 +187,16 @@ void RequestCallbackImpl::processRpc(
           scriptRemoteCall.op()->getOperation()(stack);
         } else {
           PythonRpcHandler::getInstance()
-            .jitCompilationUnit()
-            ->get_function(scriptRemoteCall.qualifiedName())
-            .run(stack);
+              .jitCompilationUnit()
+              ->get_function(scriptRemoteCall.qualifiedName())
+              .run(stack);
         }
         TORCH_INTERNAL_ASSERT(
-          stack.size() == 1,
-          "Return value of a builtin operator or a "
-          "TorchScript function should be a single IValue, got a vector of "
-          "size ",
-          stack.size());
+            stack.size() == 1,
+            "Return value of a builtin operator or a "
+            "TorchScript function should be a single IValue, got a vector of "
+            "size ",
+            stack.size());
         ownerRRef->setValue(std::move(stack.front()));
       } catch (const std::exception& e) {
         // Don't throw in this call, but rather transfer the exception
@@ -233,8 +233,8 @@ void RequestCallbackImpl::processRpc(
         {
           pybind11::gil_scoped_acquire ag;
           py_ivalue = jit::toIValue(
-            pythonRpcHandler.runPythonUdf(std::move(uprc).movePythonUdf()),
-            PyObjectType::get());
+              pythonRpcHandler.runPythonUdf(std::move(uprc).movePythonUdf()),
+              PyObjectType::get());
         }
         ownerRRef->setValue(std::move(py_ivalue));
       } catch (std::exception& e) {

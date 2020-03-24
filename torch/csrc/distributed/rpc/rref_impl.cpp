@@ -190,7 +190,8 @@ RRefForkData UserRRef::fork() const {
 
 const IValue& OwnerRRef::getValue() const {
   std::unique_lock<std::mutex> lock(mutex_);
-  valueCV_.wait(lock, [this] { return value_.has_value() || error_.has_value(); });
+  valueCV_.wait(
+      lock, [this] { return value_.has_value() || error_.has_value(); });
   if (error_) {
     std::runtime_error err(*error_);
     throw err;
