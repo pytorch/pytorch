@@ -2222,6 +2222,45 @@ graph(%input, %weight):
         res = m(x, weight, bias)
         self.assertEqual(res, ref_res)
 
+    def test_replicate_quantize_for_if(self):
+        """ We want to move quantize nodes for output of prim::If
+        inside the prim::If blocks so that we can match quantization
+        patterns.
+        """
+        class Res(torch.nn.Module):
+            def __init__(self):
+                super(Res, self).__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 1).float()
+                self.use_skip = True
+
+            def forward(self, x, cond):
+                # type: (Tensor, bool) -> Tensor
+                # to avoid being frozen
+                self.use_skip = cond
+                if self.use_skip:
+                    return self.conv(x)
+                else:
+                    return self.conv(x)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.res1 = Res()
+                self.res2 = Res()
+
+            def forward(self, x):
+                x = self.res1(x, True)
+                x = self.res2(x, False)
+                return x
+
+        data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        qconfig_dict = {'': default_qconfig}
+        m = torch.jit.script(M()).eval()
+        m = quantize_script(m, qconfig_dict, _test_only_eval_fn, [data], inplace=False)
+        # make sure patterns in both branches are fused
+        FileCheck().check_count("quantized::conv2d(", 4, exactly=True) \
+                   .run(m.graph)
+
     def test_finalize_for_conv2d(self):
         class M(torch.nn.Module):
             def __init__(self):

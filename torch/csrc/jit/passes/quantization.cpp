@@ -2183,6 +2183,59 @@ graph(%linear, %input, %weight, %bias):
   rewriter.runOnGraph(graph, filter);
 }
 
+void ReplicateQuant(std::shared_ptr<Graph>& graph) {
+    std::stack<Block*> blocks_to_visit;
+  std::vector<Node*> quant_nodes_to_rewrite;
+  blocks_to_visit.push(graph->block());
+  while (!blocks_to_visit.empty()) {
+    Block* b = blocks_to_visit.top();
+    blocks_to_visit.pop();
+    for (Node* n : b->nodes()) {
+      // find quantize node that quantizes the output of if
+      if ((n->kind() == Symbol::aten("quantize_per_tensor") ||
+           n->kind() == Symbol::aten("quantize_per_channel")) &&
+          n->input(0)->node()->kind() == prim::If) {
+        quant_nodes_to_rewrite.push_back(n);
+      }
+      for (Block* subblock : n->blocks()) {
+        blocks_to_visit.push(subblock);
+      }
+    }
+  }
+  for (Node* n : quant_nodes_to_rewrite) {
+    Node* if_node = n->input(0)->node();
+    // move the nodes that produces the quantization parameters before
+    // prim::If
+    for (auto i = 1; i < n->inputs().size(); ++i) {
+      n->input(i)->node()->moveBefore(if_node);
+    }
+    // replace all uses of the quantized node with the output of if node
+    n->output()->replaceAllUsesWith(if_node->output());
+    // add quantize nodes to the end of all blocks
+    for (Block* if_block : if_node->blocks()) {
+      TORCH_CHECK(
+          if_block->outputs().size() == 1,
+          "replicate quantize only works for `if` node with one output right now");
+      // the original return value of the block
+      Value* ret_val = if_block->outputs()[0];
+      std::vector<Value*> quantize_inputs = n->inputs().vec();
+      quantize_inputs[0] = ret_val;
+      WithInsertPoint ins(if_block->return_node());
+      Node* quant = graph->create(n->kind(), quantize_inputs);
+      if_block->replaceOutput(0, quant->output());
+      quant->output()->copyMetadata(ret_val);
+      graph->insertNode(quant);
+    }
+  }
+
+  for (Node* n : quant_nodes_to_rewrite) {
+    n->removeAllInputs();
+  }
+  for (Node* n : quant_nodes_to_rewrite) {
+    n->destroy();
+  }
+}
+
 void ReplicateDeQuant(std::shared_ptr<Graph>& graph) {
   std::stack<Block*> blocks_to_visit;
   std::vector<Node*> dequant_nodes_to_rewrite;
@@ -2547,6 +2600,7 @@ script::Module Finalize(script::Module& module) {
   auto graph = module.get_method("forward").graph();
   Inline(*graph);
   ConstantPropagation(graph);
+  ReplicateQuant(graph);
   ReplicateDeQuant(graph);
   SwapDeQuant(graph);
   InsertPrepackUnpack(graph);
