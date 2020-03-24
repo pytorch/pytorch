@@ -1498,7 +1498,7 @@ Tensor& bmm_out_sparse_cpu(Tensor& result, const SparseTensor& self, const Tenso
   int64_t dim_k = mat2.size(2);
 
   Scalar beta = 0;
-  Tensor t = at::ones({self_coalesced.size(1)});
+  Tensor t_dummy;
   Scalar alpha = 1;
 
   int64_t mat_el_begin_idx = 0;
@@ -1549,7 +1549,7 @@ Tensor& bmm_out_sparse_cpu(Tensor& result, const SparseTensor& self, const Tenso
               sparse_nnz,
               dim_i, dim_j, dim_k,
               result_matrix,
-              beta, t, alpha,
+              beta, t_dummy, alpha,
               sparse_indices, sparse_values,
               dense_matrix
             );
