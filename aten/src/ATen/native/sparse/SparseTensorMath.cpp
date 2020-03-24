@@ -1508,61 +1508,61 @@ Tensor& bmm_out_sparse_cpu(Tensor& result, const SparseTensor& self, const Tenso
   // Iterate through each set of 2D matrices within the 3D
   // tensor inputs, performing a matrix multiply with each one.
   int64_t start_mat_num = indices_dim0_ptr[0];
-  for (int64_t cur_mat_num = 0;
-    (cur_mat_num < num_matrices);
-    cur_mat_num++
-  ) {
-    // If there are sparse matrices at the beginning or end that
-    // have all zero elements, we need to zero out the result matrix.
-    if ((cur_mat_num < start_mat_num) || (mat_el_begin_idx >= nnz)) {
-      result[cur_mat_num].zero_();
-      continue;
+  AT_DISPATCH_ALL_TYPES(
+    values.scalar_type(), "bmm_sparse_dense", [&] {
+      for (int64_t cur_mat_num = 0;
+        (cur_mat_num < num_matrices);
+        cur_mat_num++
+      ) {
+        // If there are sparse matrices at the beginning or end that
+        // have all zero elements, we need to zero out the result matrix.
+        if ((cur_mat_num < start_mat_num) || (mat_el_begin_idx >= nnz)) {
+          result[cur_mat_num].zero_();
+          continue;
+        }
+
+        // Search for the range of sparse tensor elements that
+        // correspond to the current matrix number. We already know
+        // where the current matrix begins, so we just need to find
+        // the end. The search excludes everything to the left of
+        // the starting point, for best performance
+        bool mat_end_found;
+        int64_t mat_el_end_idx = binary_search_strided_rightmost(
+          cur_mat_num,
+          indices_dim0_ptr+(mat_el_begin_idx*indices_dim0_stride),
+          indices_dim0_stride,
+          nnz-mat_el_begin_idx,
+          &mat_end_found
+        ) + mat_el_begin_idx;
+
+        if (mat_end_found) {
+          mat_el_end_idx++;
+
+          // Create tensors to view just the current set of matrices
+          const Tensor dense_matrix = mat2[cur_mat_num];
+          Tensor result_matrix = result[cur_mat_num];
+          LongTensor sparse_indices = indices_dim1_dim2.slice(1, mat_el_begin_idx, mat_el_end_idx);
+          Tensor sparse_values = values.slice(0, mat_el_begin_idx, mat_el_end_idx);
+          int64_t sparse_nnz = mat_el_end_idx - mat_el_begin_idx;
+
+          s_addmm_out_sparse_dense_worker<scalar_t>(
+            sparse_nnz,
+            dim_i, dim_j, dim_k,
+            result_matrix,
+            beta, t_dummy, alpha,
+            sparse_indices, sparse_values,
+            dense_matrix
+          );
+          mat_el_begin_idx = mat_el_end_idx;
+
+        // If no elements for this sparse matrix are found, then
+        // it's a zero matrix and we need to zero out the result
+        } else {
+          result[cur_mat_num].zero_();
+        }
+      }
     }
-
-    // Search for the range of sparse tensor elements that
-    // correspond to the current matrix number. We already know
-    // where the current matrix begins, so we just need to find
-    // the end. The search excludes everything to the left of
-    // the starting point, for best performance
-    bool mat_end_found;
-    int64_t mat_el_end_idx = binary_search_strided_rightmost(
-      cur_mat_num,
-      indices_dim0_ptr+(mat_el_begin_idx*indices_dim0_stride),
-      indices_dim0_stride,
-      nnz-mat_el_begin_idx,
-      &mat_end_found
-    ) + mat_el_begin_idx;
-
-    if (mat_end_found) {
-      mat_el_end_idx++;
-
-      // Create tensors to view just the current set of matrices
-      const Tensor dense_matrix = mat2[cur_mat_num];
-      Tensor result_matrix = result[cur_mat_num];
-      LongTensor sparse_indices = indices_dim1_dim2.slice(1, mat_el_begin_idx, mat_el_end_idx);
-      Tensor sparse_values = values.slice(0, mat_el_begin_idx, mat_el_end_idx);
-      int64_t sparse_nnz = mat_el_end_idx - mat_el_begin_idx;
-
-      AT_DISPATCH_ALL_TYPES(
-          sparse_values.scalar_type(), "addmm_sparse_dense", [&] {
-            s_addmm_out_sparse_dense_worker<scalar_t>(
-              sparse_nnz,
-              dim_i, dim_j, dim_k,
-              result_matrix,
-              beta, t_dummy, alpha,
-              sparse_indices, sparse_values,
-              dense_matrix
-            );
-          }
-      );
-      mat_el_begin_idx = mat_el_end_idx;
-
-    // If no elements for this sparse matrix are found, then
-    // it's a zero matrix and we need to zero out the result
-    } else {
-      result[cur_mat_num].zero_();
-    }
-  }
+  );
   return result;
 }
 

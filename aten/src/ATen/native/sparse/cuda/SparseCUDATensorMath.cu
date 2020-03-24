@@ -877,25 +877,30 @@ Tensor& bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tens
 
   // Iterate through each set of 2D matrices within the 3D
   // tensor inputs, performing a matrix multiply with each
-  for (
-    int64_t cur_mat_num = 0;
-    (cur_mat_num < num_matrices);
-    cur_mat_num++
-  ) {
-    int64_t mat_el_end_idx = mat_el_end_indices[cur_mat_num];
+  AT_DISPATCH_FLOATING_TYPES(
+    values.scalar_type(), "bmm_sparse_cuda", [&] {
+      uint32_t* row_indices_start_ptr = reinterpret_cast<uint32_t*>(indices_dim1.data_ptr());
+      uint32_t* col_indices_start_ptr = reinterpret_cast<uint32_t*>(indices_dim2.data_ptr());
+      scalar_t* values_start_ptr = reinterpret_cast<scalar_t*>(values.data_ptr());
+      scalar_t* mat2_start_ptr = reinterpret_cast<scalar_t*>(mat2_contig.data_ptr());
+      scalar_t* result_start_ptr = reinterpret_cast<scalar_t*>(tmp_result.data_ptr());
+      for (
+        int64_t cur_mat_num = 0;
+        (cur_mat_num < num_matrices);
+        cur_mat_num++
+      ) {
+        int64_t mat_el_end_idx = mat_el_end_indices[cur_mat_num];
 
-    if (mat_el_end_idx != -1) {
-      mat_el_end_idx++;
+        if (mat_el_end_idx != -1) {
+          mat_el_end_idx++;
 
-      // Create tensors to view just the current set of matrices
-      int64_t sparse_nnz = mat_el_end_idx - mat_el_begin_idx;
+          // Create tensors to view just the current set of matrices
+          int64_t sparse_nnz = mat_el_end_idx - mat_el_begin_idx;
 
-      AT_DISPATCH_FLOATING_TYPES(
-        values.scalar_type(), "addmm_sparse_cuda", [&] {
           cudaDataType cuda_data_type = getTensorCudaDataType(mat2_contig);
-          uint32_t* row_indices_ptr = &reinterpret_cast<uint32_t*>(indices_dim1.data_ptr())[mat_el_begin_idx];
-          uint32_t* col_indices_ptr = &reinterpret_cast<uint32_t*>(indices_dim2.data_ptr())[mat_el_begin_idx];
-          scalar_t* values_ptr = &reinterpret_cast<scalar_t*>(values.data_ptr())[mat_el_begin_idx];
+          uint32_t* row_indices_ptr = &row_indices_start_ptr[mat_el_begin_idx];
+          uint32_t* col_indices_ptr = &col_indices_start_ptr[mat_el_begin_idx];
+          scalar_t* values_ptr = &values_start_ptr[mat_el_begin_idx];
 
           cusparseSpMatDescr_t sparse_descr;
           TORCH_CUDASPARSE_CHECK(cusparseCreateCoo(
@@ -910,7 +915,7 @@ Tensor& bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tens
             CUSPARSE_INDEX_BASE_ZERO,
             cuda_data_type
           ));
-          scalar_t* mat2_ptr = &reinterpret_cast<scalar_t*>(mat2_contig.data_ptr())[dim_k*dim_j*cur_mat_num];
+          scalar_t* mat2_ptr = &mat2_start_ptr[dim_k*dim_j*cur_mat_num];
           cusparseDnMatDescr_t dense_descr;
           TORCH_CUDASPARSE_CHECK(cusparseCreateDnMat(
             &dense_descr,
@@ -921,7 +926,7 @@ Tensor& bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tens
             cuda_data_type,
             CUSPARSE_ORDER_COL
           ));
-          scalar_t* result_ptr = &reinterpret_cast<scalar_t*>(tmp_result.data_ptr())[dim_i*dim_k*cur_mat_num];
+          scalar_t* result_ptr = &result_start_ptr[dim_i*dim_k*cur_mat_num];
           cusparseDnMatDescr_t result_descr;
           TORCH_CUDASPARSE_CHECK(cusparseCreateDnMat(
             &result_descr,
@@ -968,14 +973,14 @@ Tensor& bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tens
           TORCH_CUDASPARSE_CHECK(cusparseDestroySpMat(sparse_descr));
           TORCH_CUDASPARSE_CHECK(cusparseDestroyDnMat(dense_descr));
           TORCH_CUDASPARSE_CHECK(cusparseDestroyDnMat(result_descr));
+          mat_el_begin_idx = mat_el_end_idx;
+        } else {
+          workspace_buffers[cur_mat_num] = nullptr;
+          tmp_result[cur_mat_num].zero_();
         }
-      );
-      mat_el_begin_idx = mat_el_end_idx;
-    } else {
-      workspace_buffers[cur_mat_num] = nullptr;
-      tmp_result[cur_mat_num].zero_();
+      }
     }
-  }
+  );
   if (need_copy_result) {
     result.copy_(tmp_result);
   }
