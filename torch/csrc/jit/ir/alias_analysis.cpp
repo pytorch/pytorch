@@ -29,7 +29,6 @@ c10::optional<TypePtr> getMutableTypePtr(const TypePtr& type) {
     case TypeKind::ListType:
     case TypeKind::DictType:
     case TypeKind::ClassType:
-    case TypeKind::FutureType:
       // these types never contain refined tensor types
       // recursing through nested types adds noticeable runtime overhead
       // in the first pass, so make check debug only
@@ -38,6 +37,13 @@ c10::optional<TypePtr> getMutableTypePtr(const TypePtr& type) {
           "These types should not contained refined tensor types",
           type->str());
       return type;
+    case TypeKind::FutureType: {
+      if (auto elem =
+              getMutableTypePtr(type->cast<FutureType>()->getElementType())) {
+        return FutureType::create(*elem);
+      }
+      return c10::nullopt;
+    }
     case TypeKind::TensorType:
       return unshapedType(type);
     case TypeKind::TupleType: {
