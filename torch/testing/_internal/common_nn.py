@@ -3266,7 +3266,7 @@ loss_reference_fns = {
 # NOTE: These are for module tests that need to explicitly pass in a
 # `weight` argument. Instead of creating these weight tensors on the spot
 # during the Python module construction, we should create them here and
-# reference them in both Python and C++ module construction, otherwise
+# reuse them in both Python and C++ module construction, otherwise
 # the weight tensors used in those two modules won't be the same which
 # would cause C++ API parity test failure.
 criterion_weight_rand_zero_dim = torch.rand(()).double()
