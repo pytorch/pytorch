@@ -1606,7 +1606,7 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
                    .check("quantized::conv2d_relu") \
                    .run(m.graph_for(data))
 
-    def test_quantized_add_fusion(self):
+    def test_quantized_add(self):
         class Add(torch.nn.Module):
             def __init__(self):
                 super(Add, self).__init__()
@@ -1625,6 +1625,8 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
         for M in [Add, InplaceAdd]:
             m = torch.jit.script(M()).eval()
             m = prepare_script(m, {'': script_qconfig(default_qconfig)}, True)
+            # two for input tensor, one for output
+            assert len(attrs_with_prefix(m, '_observer')) == 3
             data = torch.randn(1, 1, 10, 10, dtype=torch.float)
             m(data, data)
             m = convert_script(m, True)
@@ -1632,6 +1634,35 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
                        .check_not("aten::add_") \
                        .check("quantized::add") \
                        .run(m.graph_for(data, data))
+
+    def test_quantized_add_scalar(self):
+        class AddScalar(torch.nn.Module):
+            def __init__(self):
+                super(AddScalar, self).__init__()
+
+            def forward(self, x):
+                return x + 3
+
+        class InplaceAddScalar(torch.nn.Module):
+            def __init__(self):
+                super(InplaceAddScalar, self).__init__()
+
+            def forward(self, x):
+                x += 3
+                return x
+
+        for M in [AddScalar, InplaceAddScalar]:
+            m = torch.jit.script(M()).eval()
+            m = prepare_script(m, {'': script_qconfig(default_qconfig)}, True)
+            # for input tensor
+            assert len(attrs_with_prefix(m, '_observer')) == 1
+            data = torch.randn(1, 1, 10, 10, dtype=torch.float)
+            m(data)
+            m = convert_script(m, True)
+            FileCheck().check_not("aten::add") \
+                       .check_not("aten::add_") \
+                       .check("quantized::add_scalar") \
+                       .run(m.graph_for(data))
 
     def test_quantized_add_relu_fusion(self):
         class M(torch.nn.Module):

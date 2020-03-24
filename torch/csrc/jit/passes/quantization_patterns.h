@@ -176,6 +176,32 @@ graph(%a_quant, %b_quant, %alpha, %scale, %zero_point, %dtype):
          return (%r) )";
   // We don't have quantized inplace add right now
 
+  // quantized::add_scalar
+  // TODO: filter
+  std::string add_scalar = R"(
+graph(%a_quant, %b_scalar, %alpha):
+         %a_dequant = aten::dequantize(%a_quant)
+         %r_add = aten::add(%a_dequant, %b_scalar, %alpha)
+         return (%r) )";
+
+  std::string quantized_add_scalar = R"(
+graph(%a_quant, %alpha):
+         %r_add = quantized::add_scalar(%a_dequant, %b_scalar)
+         return (%r) )";
+
+  // quantized::add_scalar_out
+  std::string add_scalar_out = R"(
+graph(%a_quant, %b_scalar, %alpha):
+         %a_dequant = aten::dequantize(%a_quant)
+         %r_add = aten::add_(%a_dequant, %b_scalar, %alpha)
+         return (%r) )";
+
+  std::string quantized_scalar_add_out = R"(
+graph(%a_quant, %b_scalar, %alpha):
+         %a_dequant = aten::dequantize(%a_quant)
+         %r_add = quantized::add_scalar_out(%a_dequant, %b_scalar)
+         return (%r) )";
+
   return {
     {conv2d, quantized_conv2d},
     {conv2d_relu, quantized_conv2d_relu},
