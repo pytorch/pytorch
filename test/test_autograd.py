@@ -2154,10 +2154,10 @@ class TestAutograd(TestCase):
 
         # Parent graph.
         a = torch.rand(3, 3, requires_grad=True)
-        b = torch.rand(3, 3, requires_grad=True)
         c = a * a
 
         # Reentrant child graph.
+        b = torch.rand(3, 3, requires_grad=True)
         e = b * b
         f = BackwardError.apply(e)
         reentrant_root = f.sum()
