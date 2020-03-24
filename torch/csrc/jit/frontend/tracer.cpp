@@ -254,6 +254,17 @@ Value* TracingState::getOutput(const IValue& iv, size_t i) {
       keys.emplace_back(getValue(pair.first));
       values.emplace_back(getOutput(pair.second, i));
     }
+    if (dict.keyType()->cast<TensorType>()) {
+      // First get a permuation that are sorted by the keys Value's unique id
+      std::vector<int64_t> perm(keys.size());
+      std::iota(perm.begin(), perm.end(), 0);
+      std::sort(perm.begin(), perm.end(), [&] (int64_t i, int64_t j) {
+         return keys[i]->unique() < keys[j]->unique();
+      });
+      // Apply the permutation to sort keys and values
+      keys = fmap(perm, [&](int64_t i){return keys[i];});
+      values = fmap(perm, [&](int64_t i){return values[i];});
+    }
     auto dict_node = graph->createDict(key_type, value_type, keys, values);
     graph->insertNode(dict_node);
     return dict_node->output();
