@@ -5810,14 +5810,14 @@ class TestAutogradDeviceType(TestCase):
         # Reentrant starts on CPU thread, finishs on GPU thread
         x = torch.randn(2, 2, requires_grad=True)
         # set ReentrantFunc node to GPU to emit tasks to GPU queue
-        ReentrantFunc._cpu_mode=False
+        ReentrantFunc._cpu_mode = False
         out = ReentrantFunc.apply(x)
         out.sum().backward()
 
         # # Reentrant starts on GPU thread, finishs on CPU thread
         x = torch.randn(2, 2, device=device, requires_grad=True)
         # set ReentrantFunc node to CPU to emit tasks to CPU queue
-        ReentrantFunc._cpu_mode=True
+        ReentrantFunc._cpu_mode = True
         out = ReentrantFunc.apply(x)
         out.sum().backward()
 
