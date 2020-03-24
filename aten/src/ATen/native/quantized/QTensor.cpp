@@ -235,7 +235,7 @@ std::tuple<double, int64_t> _choose_qparams_per_tensor(const Tensor& self, bool 
         /*force_scale_power_of_two=*/false,
         /*reduce_range=*/reduce_range);
 
-  return std::make_tuple<double, int64_t>(q_params.scale, q_params.zero_point);
+  return std::make_tuple(q_params.scale, q_params.zero_point);
 }
 
 } // namespace native
