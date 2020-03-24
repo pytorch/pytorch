@@ -1,5 +1,5 @@
 import numpy as np
-
+import math
 import torch
 import io
 from copy import deepcopy
@@ -33,14 +33,13 @@ def _calculate_dynamic_qparams(X, dtype, reduce_range=False):
             qmin, qmax = 0, 127
         else:
             qmin, qmax = 0, 255
-    n_levels = 255.0
+
     min_val = X.min()
     max_val = X.max()
     min_val = min(0.0, min_val)
     max_val = max(0.0, max_val)
-    scale = (max_val - min_val) / (qmax - qmin)
-    scale = (max_val - min_val) / float(qmax - qmin)
-    if scale == 0.0:
+    scale = (float(max_val) - min_val) / float(qmax - qmin)
+    if scale == 0.0 or math.isinf(1.0 / scale):
         scale = 0.1
         zero_point = 0
 

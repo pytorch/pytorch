@@ -15,7 +15,7 @@ using namespace std;
 // to the real value 0, and 'scale' is the difference of real values
 // corresponding to consecutive quantized values.
 struct TensorQuantizationParams {
-  float scale;
+  double scale;
   std::int32_t zero_point;
   int precision;
 };
@@ -57,7 +57,7 @@ inline TensorQuantizationParams ChooseQuantizationParams(
 
   // Use double precision for intermediate computation but use single precision
   // in final number to reflect the actual number used during quantization.
-  float scale = (static_cast<double>(max) - min) / (qmax - qmin);
+  double scale = (static_cast<double>(max) - min) / (qmax - qmin);
   // If scale is 0 or too small so its reciprocal is infinity, we arbitrary
   // adjust the scale to 0.1 . We want to avoid scale's reciprocal being
   // infinity because some of fbgemm code pre-computes scale's reciprocal to do
@@ -65,7 +65,6 @@ inline TensorQuantizationParams ChooseQuantizationParams(
   if (scale == 0.0f || isinf(1.0f / scale)) {
     scale = 0.1;
   }
-
   TORCH_CHECK(scale > 0, "quantization scale should be > 0");
 
   if (force_scale_power_of_two) {
