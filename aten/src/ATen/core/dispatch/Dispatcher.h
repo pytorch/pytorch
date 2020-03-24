@@ -31,12 +31,14 @@ class SchemaRegistrationHandleRAII;
 
 /**
  * Top-level dispatch interface for dispatching via the dynamic dispatcher.
+ * Most end users shouldn't use this directly; if you're trying to register
+ * ops look in op_registration
  */
 class CAFFE2_API Dispatcher final {
 private:
   struct OperatorDef final {
-    explicit OperatorDef(FunctionSchema&& schema, OperatorOptions&& options)
-    : op(std::move(schema), std::move(options)), refcount(0) {}
+    explicit OperatorDef(FunctionSchema&& schema)
+    : op(std::move(schema)), refcount(0) {}
 
     impl::OperatorEntry op;
     size_t refcount;
@@ -52,18 +54,11 @@ public:
 
   static Dispatcher& singleton();
 
-  /**
-   * Register a new operator schema.
-   *
-   * If a schema with the same operator name and overload name already exists,
-   * this function will check that both schemas are exactly identical.
-   *
-   * @return An OperatorHandle for the registered schema which can be used to
-   *         register kernels for the operator and a RegistrationHandleRAII RAII
-   *         object that manages the lifetime of the registration. Once that
-   *         object is destructed, the kernel will be deregistered.
-   */
-  std::pair<RegistrationHandleRAII, OperatorHandle> registerSchema(FunctionSchema schema, OperatorOptions options);
+  // ------------------------------------------------------------------------
+  //
+  // Accessing operators by schema
+  //
+  // ------------------------------------------------------------------------
 
   /**
    * Looks for an operator schema with the given name and overload name
@@ -87,13 +82,41 @@ public:
    */
   OperatorHandle findSchemaOrThrow(const char* name, const char* overload_name);
 
+  // ------------------------------------------------------------------------
+  //
+  // Invoking operators
+  //
+  // ------------------------------------------------------------------------
+
+  template<class Return, class... Args>
+  Return callUnboxed(const OperatorHandle& op, Args... args) const;
+
+  // Like callUnboxed, but override the default DispatchKey calculation code,
+  // instead dispatching straight to the provided DispatchKey
+  template<class Return, class... Args>
+  Return callUnboxedWithDispatchKey(const OperatorHandle& op, DispatchKey dispatchKey, Args... args) const;
+
+  // Invoke an operator via the boxed calling convention using an IValue stack
+  void callBoxed(const OperatorHandle& op, Stack* stack) const;
+
+  // ------------------------------------------------------------------------
+  //
+  // Performing registrations (NON user public; use op_registration)
+  //
+  // ------------------------------------------------------------------------
+
   /**
-   * Returns true, iff the given operator handle is still valid,
-   * i.e. the operator was not deregistered.
-   * Note that this function is somewhat expensive to call,
-   * so don't do it in a hotpath.
+   * Register a new operator schema.
+   *
+   * If a schema with the same operator name and overload name already exists,
+   * this function will check that both schemas are exactly identical.
+   *
+   * @return An OperatorHandle for the registered schema which can be used to
+   *         register kernels for the operator and a RegistrationHandleRAII RAII
+   *         object that manages the lifetime of the registration. Once that
+   *         object is destructed, the kernel will be deregistered.
    */
-  bool isValid(const OperatorHandle& op) const;
+  std::pair<RegistrationHandleRAII, OperatorHandle> registerSchema(FunctionSchema schema);
 
   /**
    * Register a kernel to the dispatch table for an operator.
@@ -102,17 +125,7 @@ public:
    * @return A RAII object that manages the lifetime of the registration.
    *         Once that object is destructed, the kernel will be deregistered.
    */
-  RegistrationHandleRAII registerKernel(const OperatorHandle& op, DispatchKey dispatch_key, KernelFunction kernel);
-
-  /**
-   * Register a fallback kernel for an operator.
-   * After this, when trying to lookup a kernel for an unknown dispatch key,
-   * it will not fail anymore, but return the fallback kernel instead.
-   *
-   * @return A RAII object that manages the lifetime of the registration.
-   *         Once that object is destructed, the kernel will be deregistered.
-   */
-  RegistrationHandleRAII registerCatchallKernel(const OperatorHandle& op, KernelFunction kernel);
+  RegistrationHandleRAII registerKernel(const OperatorHandle& op, c10::optional<DispatchKey> dispatch_key, KernelFunction kernel);
 
   /**
    * Register a fallback kernel for a backend.
@@ -122,19 +135,11 @@ public:
    */
   RegistrationHandleRAII registerBackendFallbackKernel(DispatchKey dispatch_key, KernelFunction kernel);
 
-  // This function is a temporary hack that allows register_aten_ops.cpp to register its codegen'ed
-  // unboxing wrapper for aten operators. We still need those for some operators because not all work
-  // with the templated unboxing logic yet.
-  // TODO Delete setBoxedKernelFor_ once all operators work with the templated boxing logic
-  void setManuallyBoxedKernelFor_(const OperatorHandle& op, KernelFunction::InternalBoxedKernelFunction* func);
-
-  template<class Return, class... Args>
-  Return callUnboxed(const OperatorHandle& op, Args... args) const;
-
-  template<class Return, class... Args>
-  Return callUnboxedWithDispatchKey(const OperatorHandle& op, DispatchKey dispatchKey, Args... args) const;
-
-  void callBoxed(const OperatorHandle& op, Stack* stack) const;
+  // ------------------------------------------------------------------------
+  //
+  // Listeners on registrations
+  //
+  // ------------------------------------------------------------------------
 
   /**
    * Add a listener that gets called whenever a new op is registered or an existing
@@ -147,7 +152,7 @@ public:
 private:
   Dispatcher();
 
-  OperatorHandle findOrRegisterSchema_(FunctionSchema&& schema, OperatorOptions&& options);
+  OperatorHandle findOrRegisterSchema_(FunctionSchema&& schema);
 
   void deregisterSchema_(const OperatorHandle& op, const OperatorName& op_name);
   void deregisterBackendFallbackKernel_(DispatchKey dispatchKey);
@@ -178,22 +183,8 @@ public:
   OperatorHandle(const OperatorHandle&) = default;
   OperatorHandle& operator=(const OperatorHandle&) = default;
 
-  /**
-   * Returns true iff the operator handle is still valid,
-   * i.e. the operator was not deregistered.
-   * Note that this function is somewhat expensive to call,
-   * so don't do it in a hotpath.
-   */
-  bool isValid() const {
-    return c10::Dispatcher::singleton().isValid(*this);
-  }
-
   const FunctionSchema& schema() const {
     return operatorIterator_->op.schema();
-  }
-
-  const OperatorOptions& options() const {
-    return operatorIterator_->op.options();
   }
 
   template<class Return, class... Args>
