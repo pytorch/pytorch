@@ -6,6 +6,7 @@
 #include <ATen/native/quantized/cpu/quantized_ops.h>
 #include <ATen/quantized/Quantizer.h>
 #include <ATen/native/SortingUtils.h>
+#include <ATen/cpu/vec256/functional.h>
 
 #include <cmath>
 #ifdef USE_FBGEMM
@@ -1497,6 +1498,156 @@ void fake_quant_grad_per_channel_cpu(TensorIterator &iter, int64_t quant_min, in
     });
 }
 
+template <typename T>
+void LayerNormKernelQuantizedImplInternal(
+    const Tensor& X,
+    const Tensor& gamma,
+    const Tensor& beta,
+    int64_t M,
+    int64_t N,
+    float eps,
+    Tensor* Y) {
+
+  using qVec = vec256::Vec256<T>;
+  using fVec = vec256::Vec256<float>;
+
+  DCHECK_EQ(X.numel(), M * N);
+  DCHECK(!gamma.defined() || gamma.numel() == N);
+  DCHECK(!beta.defined() || beta.numel() == N);
+  T* X_data = X.data_ptr<T>();
+  const float* gamma_data = gamma.defined() ? gamma.data_ptr<float>() : nullptr;
+  const float* beta_data = beta.defined() ? beta.data_ptr<float>() : nullptr;
+  T* Y_data = Y->data_ptr<T>();
+  const float c = 1.0f / static_cast<float>(N);
+  const bool gamma_null = gamma_data == nullptr;
+  const bool beta_null = beta_data == nullptr;
+
+  int64_t x_zp = X.q_zero_point();
+  float x_scale = X.q_scale();
+
+  fVec x_zp_vec = fVec((float)x_zp);
+  fVec one_vec = fVec(1.0f);
+  fVec zero_vec = fVec(0.0f);
+
+  float x_fake_scale = 1.0f;
+  fVec x_fake_scale_vec = fVec(x_fake_scale);
+  fVec x_fake_scale_zp_neg_premul_vec = x_fake_scale_vec * x_zp_vec.neg();
+
+  int64_t y_zp = Y->q_zero_point();
+  float y_scale = Y->q_scale();
+  float y_inv_scale = 1.0f / y_scale;
+
+  // 8 floats in a 256 bit Vec256
+  constexpr int kFloatVLen = 8;
+  // N ints in a qVec
+  int64_t kIntVLen = kFloatVLen * qVec::float_num_vecs();
+  // portion of layer that can be vectorized
+  int64_t kNumIntVecInLayer = N / kIntVLen;
+  // remainder of layer that cannot be vectorized
+  int64_t kNonVecRemInLayer = N % kIntVLen;
+
+  at::parallel_for(0, M, 1, [&](int64_t start, int64_t end) {
+    for (int64_t i = start; i < end; ++i) {
+
+      T* X_ptr = X_data + i * N;
+      T* Y_ptr = Y_data + i * N;
+
+      // First pass: calculate mean and variance.
+      // Note: Fake dequant using scale=1.0f because scale_x cancels out
+      //   during normalization, with the exception of epsilon
+
+      // TODO replace with TensorIterator implementation once #33166 is fixed.
+      float layerSum = 0.0f;
+      float layerSumSquares = 0.0f;
+      for (int64_t vecIdx = 0; vecIdx < kNumIntVecInLayer; vecIdx++) {
+        auto qXVec = qVec::loadu(X_ptr + vecIdx * kIntVLen);
+        auto dqXVec = qXVec.dequantize(x_fake_scale_vec, x_zp_vec,
+            x_fake_scale_zp_neg_premul_vec);
+          // sum of vals
+        float thisLayerSum = vec256::reduce_all<float>(
+          [](fVec& x, fVec& y) { return x + y; },
+          (float*)dqXVec.data(),
+          kFloatVLen * dqXVec.size()
+        );
+        layerSum += thisLayerSum;
+        // sum of squares
+        float thisLayerSumSquares = vec256::map_reduce_all<float>(
+          [](fVec x) { return x * x; },
+          [](fVec x, fVec y) { return x + y; },
+          (float*)dqXVec.data(),
+          kFloatVLen * dqXVec.size()
+        );
+        layerSumSquares += thisLayerSumSquares;
+      }
+      for (int64_t remIdx = N - kNonVecRemInLayer; remIdx < N; remIdx++) {
+        auto qXVal = X_ptr[remIdx];
+        float dqXVal = at::dequantize_val(x_fake_scale, x_zp, qXVal);
+        layerSum += dqXVal;
+        layerSumSquares += dqXVal * dqXVal;
+      }
+
+      // mean(dqX) / scale_x
+      float layerMeanDivScaleX = layerSum / N;
+      // var(dqX) / scale_x^2
+      float layerVarDivScaleXSq =
+        std::max(layerSumSquares / N - layerMeanDivScaleX * layerMeanDivScaleX, 0.0f);
+      // scale_x / std(dqX), scale epsilon properly
+      float scaleXDivLayerStd = 1.0f /
+        std::sqrt(layerVarDivScaleXSq + (eps * x_scale * x_scale));
+      fVec layerMeanDivScaleXVec(layerMeanDivScaleX);
+      fVec scaleXDivLayerStdVec(scaleXDivLayerStd);
+
+      // Second pass: normalize
+
+      // TODO replace with TensorIterator implementation once #33166 is fixed.
+      for (int64_t vecIdx = 0; vecIdx < kNumIntVecInLayer; vecIdx++) {
+        int64_t vecStartIdx = vecIdx * kIntVLen;
+        auto qXVec = qVec::loadu(X_ptr + vecStartIdx);
+        auto dqXVec = qXVec.dequantize(x_fake_scale_vec, x_zp_vec,
+            x_fake_scale_zp_neg_premul_vec);
+        for (int dqXVecIdx = 0; dqXVecIdx < dqXVec.size(); dqXVecIdx++) {
+          int64_t vecVecStartIdx = vecStartIdx + dqXVecIdx * kFloatVLen;
+          auto gammaVec = gamma_null
+            ? one_vec
+            : fVec::loadu(gamma_data + vecVecStartIdx);
+          auto betaVec = beta_null
+            ? zero_vec
+            : fVec::loadu(beta_data + vecVecStartIdx);
+          dqXVec[dqXVecIdx] =
+            (dqXVec[dqXVecIdx] - layerMeanDivScaleXVec) *
+              scaleXDivLayerStdVec * gammaVec + betaVec;
+          qVec::quantize(dqXVec, y_scale, y_zp, y_inv_scale)
+            .store(Y_ptr + vecStartIdx);
+        }
+      }
+      for (int64_t remIdx = N - kNonVecRemInLayer; remIdx < N; remIdx++) {
+        const float gamma_v = gamma_null ? 1.0f : gamma_data[remIdx];
+        const float beta_v = beta_null ? 0.0f : beta_data[remIdx];
+        auto qXVal = X_ptr[remIdx];
+        float dqXVal = at::dequantize_val(x_fake_scale, x_zp, qXVal);
+        float dqY =
+          ((dqXVal - layerMeanDivScaleX) * scaleXDivLayerStd) * gamma_v + beta_v;
+        Y_ptr[remIdx] = at::quantize_val<T>(y_scale, y_zp, dqY);
+      }
+
+    }
+  }); // parallel_for
+}
+
+void LayerNormKernelQuantizedImpl(
+    const Tensor& X,
+    const Tensor& gamma,
+    const Tensor& beta,
+    int64_t M,
+    int64_t N,
+    double eps,
+    Tensor* Y) {
+  AT_DISPATCH_QINT_TYPES(X.scalar_type(), "LayerNormKernelImpl", [&]() {
+    LayerNormKernelQuantizedImplInternal<scalar_t>(
+        X, gamma, beta, M, N, static_cast<float>(eps), Y);
+  });
+}
+
 } // namespace
 
 REGISTER_DISPATCH(qrelu_stub, &qrelu_kernel);
@@ -1531,6 +1682,7 @@ REGISTER_DISPATCH(fake_quant_tensor_stub, &fake_quantize_tensor_kernel);
 REGISTER_DISPATCH(fake_quant_grad_tensor_stub, &fake_quantize_grad_tensor_kernel);
 REGISTER_DISPATCH(fake_quant_per_channel_stub, &fake_quant_per_channel_cpu);
 REGISTER_DISPATCH(fake_quant_grad_per_channel_stub, &fake_quant_grad_per_channel_cpu);
+REGISTER_DISPATCH(LayerNormKernelQuantized, &LayerNormKernelQuantizedImpl);
 
 } // namespace native
 } // namespace at

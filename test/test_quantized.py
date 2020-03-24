@@ -271,6 +271,44 @@ class TestQuantizedOps(TestCase):
                          message="Hardsigmoid failed: {} vs. {}".format(qY, qY_hat))
 
 
+    """Tests the correctness of the quantized::qlayer_norm op."""
+    @given(X=hu.tensor(shapes=hu.array_shapes(3, 5, 1, 32),
+                       elements=hu.floats(-1e3, 1e3, allow_nan=False, allow_infinity=False),
+                       qparams=hu.qparams()),
+           Y_scale=st.floats(0.2, 2.6),
+           Y_zero_point=st.integers(0, 5),
+           qengine=st.sampled_from(("qnnpack", "fbgemm")))
+    def test_qlayer_norm(self, X, Y_scale, Y_zero_point, qengine):
+        if qengine not in torch.backends.quantized.supported_engines:
+            return
+
+        with override_quantized_engine(qengine):
+            X, (scale, zero_point, torch_type) = X
+            X = torch.from_numpy(X)
+            qX = torch.quantize_per_tensor(X, scale=scale,
+                                           zero_point=zero_point,
+                                           dtype=torch_type)
+            dqX = qX.dequantize()
+
+            weight = torch.rand(*qX.size()[1:], dtype=torch.float)
+            bias = torch.rand(*qX.size()[1:], dtype=torch.float)
+            epsilon = 1e-5
+
+            qY = torch.ops.quantized.layer_norm(
+                qX, qX.size()[1:], weight=weight, bias=bias, eps=epsilon,
+                output_scale=Y_scale, output_zero_point=Y_zero_point)
+
+            Y_hat = F.layer_norm(
+                dqX, dqX.size()[1:], weight=weight, bias=bias, eps=epsilon)
+            qY_hat = torch.quantize_per_tensor(
+                Y_hat, scale=Y_scale, zero_point=Y_zero_point, dtype=torch_type)
+
+            self.assertEqual(
+                qY,
+                qY_hat,
+                message="LayerNorm failed:\n {} input vs\n {} actual vs \n{} expected".format(X, qY, qY_hat))
+
+
     """Tests the correctness of the quantized::qnnpack_tanh op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
                        qparams=hu.qparams()))

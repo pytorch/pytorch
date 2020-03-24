@@ -1598,6 +1598,11 @@
     CPU: layer_norm_backward_cpu
     CUDA: layer_norm_backward_cuda
 
+- func: quantized_layer_norm(Tensor input, int[] normalized_shape, Tensor? weight, Tensor? bias, float eps, float output_scale, int output_zero_point) -> Tensor
+  requires_tensor: True
+  dispatch:
+    QuantizedCPU: quantized_layer_norm_impl
+
 - func: linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor
   python_module: nn
 
