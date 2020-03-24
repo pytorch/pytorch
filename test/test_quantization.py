@@ -38,6 +38,8 @@ from torch.testing._internal.common_quantization import QuantizationTestCase, \
 
 from torch.testing._internal.common_quantization import AnnotatedTwoLayerLinearModel, AnnotatedNestedModel, \
     AnnotatedSubNestedModel, AnnotatedCustomConfigNestedModel
+from torch.testing._internal.common_quantization import AnnotatedSkipQuantModel
+
 from torch.testing._internal.common_quantized import override_quantized_engine
 from hypothesis import given
 from hypothesis import strategies as st
@@ -242,7 +244,7 @@ class EagerModePostTrainingQuantTest(QuantizationTestCase):
         r"""The case when we want to skip quantizing some layers
         """
 
-        model = SkipQuantModel()
+        model = AnnotatedSkipQuantModel()
         model = prepare(model)
         self.checkObservers(model)
 
@@ -260,7 +262,7 @@ class EagerModePostTrainingQuantTest(QuantizationTestCase):
         checkQuantized(model)
 
         # test one line API
-        model = quantize(SkipQuantModel(), test_only_eval_fn, self.calib_data)
+        model = quantize(AnnotatedSkipQuantModel(), test_only_eval_fn, self.calib_data)
         checkQuantized(model)
 
 
@@ -1045,6 +1047,38 @@ class GraphModePostTrainingQuantTest(QuantizationTestCase):
                 inplace=False)
             self.assertEqual(model_quantized(self.calib_data[0][0]), result_eager)
 
+    def test_skip_quant(self):
+        """ Test None qconfig
+        """
+        # Eager mode
+        eager_model = AnnotatedSkipQuantModel().eval()
+
+        # Graph mode
+        script_model = SkipQuantModel().eval()
+        # Copy weights for eager_model
+        script_model.sub.fc1.weight = torch.nn.Parameter(eager_model.sub.module.fc1.weight.detach())
+        script_model.sub.fc1.bias = torch.nn.Parameter(eager_model.sub.module.fc1.bias.detach())
+        script_model.sub.fc2.weight = torch.nn.Parameter(eager_model.sub.module.fc2.weight.detach())
+        script_model.sub.fc2.bias = torch.nn.Parameter(eager_model.sub.module.fc2.module.bias.detach())
+        script_model.fc.weight = torch.nn.Parameter(eager_model.fc.weight.detach())
+        script_model.fc.bias = torch.nn.Parameter(eager_model.fc.bias.detach())
+
+        model_eager = quantize(eager_model, test_only_eval_fn, self.calib_data)
+        qconfig_dict = {
+            '': defualt_qconfig
+            'fc': None
+        }
+        model_traced = torch.jit.trace(script_model, self.calib_data[0][0])
+        model_script = torch.jit.script(script_model)
+        result_eager = model_eager(self.calib_data[0][0])
+        for model_under_test in [model_traced, model_script]:
+            model_quantized = quantize_script(
+                model_under_test,
+                qconfig_dict,
+                test_only_eval_fn,
+                [self.calib_data],
+                inplace=False)
+            self.assertEqual(model_quantized(self.calib_data[0][0]), result_eager)
 
 class FunctionalModuleTest(QuantizationTestCase):
     # Histogram Observers are slow, so have no-deadline to ensure test doesn't time out
