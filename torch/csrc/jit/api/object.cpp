@@ -39,12 +39,12 @@ void Object::define(const std::string& src, const ResolverPtr& resolver) {
 }
 
 Object Object::deepcopy() const {
-  std::unordered_map<c10::IValue, c10::IValue> memo;
+  c10::IValue::HashAliasedIValueMap memo;
   return deepcopy(memo);
 }
 
 Object Object::deepcopy(
-    std::unordered_map<c10::IValue, c10::IValue>& memo) const {
+    c10::IValue::HashAliasedIValueMap& memo) const {
   Object obj(_ivalue()->compilation_unit(), type());
 
   // Deepcopy slots. If a slot is a module - recursively copy it.

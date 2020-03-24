@@ -131,7 +131,7 @@ struct TORCH_API Object {
   Object deepcopy() const;
 
   Object deepcopy(
-      std::unordered_map<c10::IValue, c10::IValue>& memo) const;
+      c10::IValue::HashAliasedIValueMap& memo) const;
 
  private:
   // mutable be we lazily initialize in module_object.

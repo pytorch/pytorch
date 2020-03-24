@@ -105,9 +105,20 @@ void IValue::getSubValues(HashAliasedIValues& subValues) const {
         pair.key().getSubValues(subValues);
       }
       break;
+    case Tag::Object: {
+      // Record Object IValue and its attributes.
+      subValues.insert(*this);
+      auto obj_type = type()->expect<ClassType>();
+      auto obj_value = toObject();
+      auto attribute_names = obj_type->attributeNames();
+      for (const auto& name: attribute_names) {
+        auto attribute = obj_value->getAttr(name);
+        attribute.getSubValues(subValues);
+      }
+      break;
+    }
     case Tag::Future:
     case Tag::Device:
-    case Tag::Object:
     case Tag::PyObject:
     case Tag::Uninitialized:
     case Tag::Capsule:
@@ -341,12 +352,12 @@ std::shared_ptr<ClassType> ivalue::Object::type() const {
 }
 
 IValue IValue::deepcopy() const {
-  std::unordered_map<IValue, IValue> memo;
+  IValue::HashAliasedIValueMap memo;
   return deepcopy(memo);
 }
 
 IValue IValue::deepcopy(
-    std::unordered_map<IValue, IValue>& memo) const {
+    IValue::HashAliasedIValueMap& memo) const {
   if (memo.count(*this)) {
     return memo.at(*this);
   }
@@ -397,7 +408,7 @@ IValue IValue::deepcopy(
       AT_ERROR("Can't deepcopy IValue with tag: ", tagKind());
     }
   }
-  if (!isSameIdentity(copy)) {
+  if (!isAliasOf(copy)) {
     memo[*this] = copy;
   }
   return copy;
@@ -428,11 +439,11 @@ void ivalue::Object::resizeObject(size_t slot) {
 }
 
 c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy() const {
-  std::unordered_map<IValue, IValue> memo;
+  IValue::HashAliasedIValueMap memo;
   return deepcopy(memo);
 }
 
-c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy(std::unordered_map<IValue, IValue>& memo) const {
+c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy(IValue::HashAliasedIValueMap& memo) const {
   auto object = ivalue::Object::create(c10::StrongTypePtr(type_.cu_, type()), type()->numAttributes());
   for (auto i = 0; i < slots_.size(); ++i) {
     object->setSlot(i, slots_[i].deepcopy(memo));

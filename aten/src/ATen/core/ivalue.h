@@ -525,10 +525,6 @@ struct CAFFE2_API IValue final {
       std::ostream& out,
       const IValue& v);
 
-  bool operator==(const IValue& other) const {
-    return isSameIdentity(other);
-  }
-
   bool isPtrType() const {
     return is_intrusive_ptr;
   }
@@ -542,30 +538,26 @@ struct CAFFE2_API IValue final {
 
   TypePtr type() const;
 
-  size_t hash() const {
-    return payload.as_int;
-  }
-
-  // Detection Aliased tensors.
-  struct HashIValue {
+  // Detect aliased tensors.
+  struct HashAliasedIValue {
     size_t operator()(const IValue& val) const {
       if (val.isTensor()) {
-        return 0;
+        return reinterpret_cast<size_t>(val.toTensor().storage().unsafeGetStorageImpl());
       }
-      return val.hash();
+      // If it is not a Tensor, then two mutable IValues alias each other only
+      // if they are the same pointer.
+      return val.payload.as_int;
     }
   };
 
-  struct CompIValues {
+  struct CompAliasedIValues {
     bool operator()(const IValue& lhs, const IValue& rhs) const {
-      if (lhs.isTensor() && rhs.isTensor()) {
         return lhs.isAliasOf(rhs);
-      }
-      return lhs.hash() == rhs.hash();
     }
   };
 
-  using HashAliasedIValues = std::unordered_set<IValue, HashIValue, CompIValues>;
+  using HashAliasedIValues = std::unordered_set<IValue, HashAliasedIValue, CompAliasedIValues>;
+  using HashAliasedIValueMap = std::unordered_map<IValue, IValue, HashAliasedIValue, CompAliasedIValues>;
 
   // Chechs if this and rhs has a subvalues in common.
   // [t1,t2] and [t2, t3] returns true.
@@ -576,7 +568,7 @@ struct CAFFE2_API IValue final {
 
   IValue deepcopy() const;
   IValue deepcopy(
-      std::unordered_map<IValue, IValue>& memo) const;
+      HashAliasedIValueMap& memo) const;
 
  private:
   // NOTE: IValue tags are intentionally private. In the future we may encode
@@ -750,18 +742,6 @@ inline bool isCustomClassRegistered() {
 
 TORCH_API std::unordered_map<std::string, std::function<PyObject*(void*)>>&
 getClassConverter();
-}
-
-namespace std {
-
-template <>
-struct hash<c10::IValue> {
-  inline size_t operator()(const c10::IValue& arg) const {
-    // TODO: define hash, this is just for compilation
-    return 0;
-  }
-};
-
 }
 
 #include <ATen/core/ivalue_inl.h>
