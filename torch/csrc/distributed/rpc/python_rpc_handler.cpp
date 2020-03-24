@@ -102,17 +102,8 @@ std::shared_ptr<torch::jit::CompilationUnit> PythonRpcHandler::
   return jitCompilationUnit_;
 }
 
-SerializedPyObj PythonRpcHandler::generatePythonUDFResult(
-    const SerializedPyObj& serializedPyObj) {
+py::object PythonRpcHandler::runPythonUdf(py::object&& pythonUdf) {
   PROFILE_GIL_SCOPED_ACQUIRE;
-  auto pythonUdf = deserialize(serializedPyObj);
-  return serialize(pyRunFunction_(std::move(pythonUdf)));
-}
-
-py::object PythonRpcHandler::runPythonUDF(
-    const SerializedPyObj& serializedPyObj) {
-  PROFILE_GIL_SCOPED_ACQUIRE;
-  auto pythonUdf = deserialize(serializedPyObj);
   return pyRunFunction_(std::move(pythonUdf));
 }
 

@@ -80,8 +80,8 @@ class ThroughputBenchmark(object):
         >>> bench = ThroughputBenchmark(my_module)
         >>> # Pre-populate benchmark's data set with the inputs
         >>> for input in inputs:
-            # Both args and kwargs work, same as any PyTorch Module / ScriptModule
-            bench.add_input(input[0], x2=input[1])
+                # Both args and kwargs work, same as any PyTorch Module / ScriptModule
+                bench.add_input(input[0], x2=input[1])
         >>> Inputs supplied above are randomly used during the execution
         >>> stats = bench.benchmark(
                 num_calling_threads=4,
