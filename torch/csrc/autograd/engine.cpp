@@ -831,6 +831,10 @@ std::shared_ptr<FutureVariableList> Engine::execute_with_graph_task(
 }
 
 void Engine::mark_graph_task_completed(std::shared_ptr<GraphTask>& graph_task) {
+  if (graph_task->future_completed_.load()) {
+    // Future is already marked as completed.
+    return;
+  }
   try {
     // Run post processing, before marking the future as complete.
     // Drop lock prior to completing, to avoid holding across callbacks.
