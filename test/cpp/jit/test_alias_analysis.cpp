@@ -1000,7 +1000,7 @@ void testWildcards() {
         &*graph,
         vmap);
     AliasDb aliasDb(graph);
-    AT_ASSERT(aliasDb.mayAlias(vmap["float_3D"], vmap["float_2D"]));
+    AT_ASSERT(aliasDb.mayContainAlias(vmap["float_3D"], vmap["float_2D"]));
   }
 
   {
@@ -1008,15 +1008,13 @@ void testWildcards() {
     std::unordered_map<std::string, Value*> vmap;
     parseIR(
         R"IR(
-  graph(%float_3D_list : Float(*, *, *)[], %float_2D_list : Float(*, *)[], %ten: Tensor):
+  graph(%ten_list : Tensor[], %float_2d: Float(*, *)):
     return ()
     )IR",
         &*graph,
         vmap);
     AliasDb aliasDb(graph);
-    AT_ASSERT(aliasDb.mayAlias(vmap["float_3D_list"], vmap["float_2D_list"]));
-    AT_ASSERT(aliasDb.mayContainAlias(vmap["float_3D_list"], vmap["ten"]));
-    AT_ASSERT(aliasDb.mayContainAlias(vmap["float_2D_list"], vmap["ten"]));
+    AT_ASSERT(aliasDb.mayContainAlias(vmap["float_2d"], vmap["ten_list"]));
   }
 }
 
