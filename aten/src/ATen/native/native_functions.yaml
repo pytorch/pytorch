@@ -196,6 +196,14 @@
 - func: dropout_(Tensor(a!) self, float p, bool train) -> Tensor(a!)
   supports_named_tensor: True
 
+- func: mkldnn_dropout(Tensor self, float ratio) -> (Tensor, Tensor)
+  dispatch:
+    MkldnnCPU: mkldnn_dropout
+
+- func: mkldnn_dropout_backward(Tensor grady, Tensor mask, float ratio) -> Tensor
+  dispatch:
+    MkldnnCPU: mkldnn_dropout_backward
+
 - func: feature_dropout(Tensor input, float p, bool train) -> Tensor
   use_c10_dispatcher: full
 
@@ -2611,6 +2619,7 @@
   dispatch:
     CPU: softmax_backward_cpu
     CUDA: softmax_backward_cuda
+    MkldnnCPU: mkldnn_softmax_backward
 
 - func: split.Tensor(Tensor(a) self, int split_size, int dim=0) -> Tensor(a)[]
   variants: function, method

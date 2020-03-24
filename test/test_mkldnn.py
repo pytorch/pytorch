@@ -789,6 +789,18 @@ class TestMkldnn(TestCase):
                 softmax(x),
                 softmax(x.to_mkldnn()).to_dense())
 
+    def test_softmax_backward(self):
+        x = torch.randn(3, 4, 5, dtype=torch.float32) * 10
+        for dim in range(x.ndim):
+            x1 = x.clone().requires_grad_()
+            x2 = x.clone().to_mkldnn().requires_grad_()
+            softmax = torch.nn.Softmax(dim=dim)
+            y1 = softmax(x1).sum()
+            y2 = softmax(x2).to_dense().sum()
+            y1.backward()
+            y2.backward()
+            self.assertEqual(x1.grad, x2.grad.to_dense())
+
     def test_sigmoid(self):
         x = torch.randn(4, 5, dtype=torch.float32) * 10
         mkldnn_x = x.to_mkldnn()
@@ -896,6 +908,26 @@ class TestMkldnn(TestCase):
     def test_resnext50_32x4d(self):
         model = torchvision.models.resnet.resnext50_32x4d(pretrained=False)
         self._test_imagenet_model(model)
+
+    def test_dropout(self):
+        p = 0.2
+        input = torch.randn(1000, dtype=torch.float32)
+        input = input.fill_(1 - p)
+        module = torch.nn.Dropout(p)
+        input_var = input.clone().to_mkldnn().requires_grad_()
+        output = module(input_var)
+        self.assertLess(abs(output.to_dense().data.mean() - (1 - p)), 0.05)
+        output.backward(input_var)
+        self.assertLess(abs(input_var.grad.to_dense().data.mean() - (1 - p)), 0.05)
+
+        # check eval mode doesn't change anything
+        for inplace in [True, False]:
+            module = torch.nn.Dropout(p, inplace).eval()
+            self.assertEqual(input_var.to_dense(), module(input_var).to_dense())
+
+        # Check that these don't raise errors
+        module.__repr__()
+        str(module)
 
     def test_cat(self):
         x = torch.randn(4, 5, dtype=torch.float32) * 10

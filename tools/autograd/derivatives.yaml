@@ -1552,6 +1552,9 @@
 - name: mkldnn_linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor
   input, weight, bias: mkldnn_linear_backward(input, grad, weight, grad_input_mask)
 
+- name: mkldnn_dropout(Tensor self, float ratio) -> (Tensor, Tensor)
+  self: mkldnn_dropout_backward(grad, result1, ratio)
+  
 - name: _mkldnn_reshape(Tensor self, int[] shape) -> Tensor
   self: grad.reshape(self.sizes())
 
