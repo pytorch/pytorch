@@ -151,6 +151,9 @@
 
             chmod a+x .jenkins/pytorch/macos-test.sh
             unbuffer .jenkins/pytorch/macos-test.sh 2>&1 | ts
+
+            # Temporary fix for permission within workspace
+            chmod a+x workspace/miniconda3/lib/python3.7/site-packages/torch/bin/*
       - store_test_results:
           path: test/test-reports
 
