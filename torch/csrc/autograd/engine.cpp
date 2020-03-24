@@ -76,6 +76,8 @@ static thread_local int current_depth = 0;
 // Total nested reentrant backwards calls over all threads for workder_device
 static thread_local int total_depth = 0;
 
+static thread_local std::shared_ptr<GraphTask> current_graph_task = nullptr;
+
 // Returns true when t2 should be (weakly) BEFORE t1 in the queue.
 // Shutdown tasks are first and then empty NodeTask are next.
 struct CompareNodeTaskTime {
@@ -309,6 +311,25 @@ auto Engine::thread_init(int device) -> void {
   }
 }
 
+struct GraphTaskGuard {
+  GraphTaskGuard(const std::shared_ptr<GraphTask>& graph_task) {
+    set_current_graph_task(graph_task);
+  }
+  ~GraphTaskGuard() { restore_current_graph_task(); }
+
+
+  void set_current_graph_task(const std::shared_ptr<GraphTask>& graph_task) {
+    last_graph_task_ = std::move(current_graph_task);
+    current_graph_task = graph_task;
+  }
+
+  void restore_current_graph_task() {
+    current_graph_task = std::move(last_graph_task_);
+  }
+
+  std::shared_ptr<GraphTask> last_graph_task_;
+};
+
 // NOTE: graph_tasks do not necessarily form a stack. Imagine this
 // case:
 //
@@ -359,6 +380,7 @@ auto Engine::thread_main(
       if (task.fn_ && !local_graph_task->has_error_.load()) {
         AutoGradMode grad_mode(local_graph_task->grad_mode_);
         try {
+          GraphTaskGuard guard(local_graph_task);
           evaluate_function(local_graph_task, task.fn_.get(), task.inputs_);
         } catch (std::exception& e) {
           thread_on_exception(local_graph_task, task.fn_, e);
@@ -717,27 +739,6 @@ auto Engine::compute_dependencies(Node* root, GraphTask& task) -> void {
   }
 }
 
-struct ClearCallbacks {
-  ClearCallbacks(
-      std::unordered_map<int, std::vector<std::function<void()>>>& callbacks,
-      int reentrant_depth,
-      std::mutex &callbacks_lock)
-      : callbacks_(callbacks)
-      , reentrant_depth_(reentrant_depth)
-      , callbacks_lock_(callbacks_lock) { clear(); }
-  ~ClearCallbacks() { clear(); }
-
-  void clear() {
-    std::lock_guard<std::mutex> lock(callbacks_lock_);
-    // only erase the callbacks installed during the current reentrant backward
-    callbacks_.erase(reentrant_depth_);
-  }
-
-  std::unordered_map<int, std::vector<std::function<void()>>>& callbacks_;
-  const int reentrant_depth_;
-  std::mutex& callbacks_lock_;
-};
-
 auto Engine::execute(const edge_list& roots,
                      const variable_list& inputs,
                      bool keep_graph,
@@ -748,17 +749,10 @@ auto Engine::execute(const edge_list& roots,
     return msg;
   });
 
-  const auto reentrant_depth = worker_device == NO_DEVICE ? 0 : total_depth + 1;
-  // Callbacks installed in the current depth are only valid for the duration of
-  // this run and should always be cleared.
-  // See Note [Reentrant backward Callbacks]
-  // Lock post_callbacks_lock_ before clearing final_callbacks_
-  ClearCallbacks _cb_guard(final_callbacks_, reentrant_depth, post_callbacks_lock_);
-
   auto graph_task = std::make_shared<GraphTask>(
       keep_graph,
       create_graph,
-      reentrant_depth);
+      worker_device == NO_DEVICE ? 0 : total_depth + 1);
 
   // Now compute the dependencies for all executable functions and queue the root
   auto graph_root = std::make_shared<GraphRoot>(roots, inputs);
@@ -863,18 +857,15 @@ void Engine::graph_task_exec_post_processing(
   // Unlocking is necessary, because the callback can register
   // more callbacks (or they can be registered from other threads
   // while it's waiting.
-  std::unique_lock<std::mutex> cb_lock(post_callbacks_lock_);
-  auto it = final_callbacks_.find(graph_task->reentrant_depth_);
-  if (it != final_callbacks_.end()) {
-    auto& reentrant_final_callbacks = it->second;
-    // WARNING: Don't use a range-for loop here because more callbacks may be
-    // added in between callback calls, so iterators may become invalidated.
-    // NOLINTNEXTLINE(modernize-loop-convert)
-    for (size_t i = 0; i < reentrant_final_callbacks.size(); ++i) {
-      cb_lock.unlock();
-      reentrant_final_callbacks[i]();
-      cb_lock.lock();
-    }
+  std::unique_lock<std::mutex> cb_lock(graph_task->final_callbacks_lock_);
+  const auto& final_callbacks = graph_task->final_callbacks_;
+  // WARNING: Don't use a range-for loop here because more callbacks may be
+  // added in between callback calls, so iterators may become invalidated.
+  // NOLINTNEXTLINE(modernize-loop-convert)
+  for (size_t i = 0; i < final_callbacks.size(); ++i) {
+    cb_lock.unlock();
+    final_callbacks[i]();
+    cb_lock.lock();
   }
 
   // Syncs leaf streams with default streams (if necessary)
@@ -910,9 +901,12 @@ Engine& Engine::get_default_engine() {
 }
 
 void Engine::queue_callback(std::function<void()> callback) {
-  std::lock_guard<std::mutex> lock(post_callbacks_lock_);
-  // insert the callback to the current depth vector
-  final_callbacks_[total_depth].emplace_back(std::move(callback));
+  TORCH_CHECK(
+      current_graph_task,
+      "Final callbacks can only be installed during backward pass.");
+
+  std::lock_guard<std::mutex> lock(current_graph_task->final_callbacks_lock_);
+  current_graph_task->final_callbacks_.emplace_back(std::move(callback));
 }
 
 bool Engine::is_checkpoint_valid() {
