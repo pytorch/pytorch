@@ -2,11 +2,23 @@
 
 #include <string>
 #include <unordered_map>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/passes/subgraph_rewrite.h>
 
 namespace torch {
 namespace jit {
 
+struct QuantFusionInfo {
+  std::string quantized_op_name;
+  std::string pattern;
+  std::string replacement;
+  std::function<bool(const Match&, const std::unordered_map<std::string, Value*>&)> filter;
+};
+
 std::unordered_map<std::string, std::string> quant_fusion_pattern_and_replacements() {
+  auto default_filter = [](const Match&, const std::unordered_map<std::string, Value*>&) {
+      return true;
+  };
 
   std::string conv2d = R"(
 graph(%a_quant, %packed_params, %r_scale, %r_zero_point, %r_dtype, %stride, %padding, %dilation, %groups):
