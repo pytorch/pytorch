@@ -1,11 +1,22 @@
 #include <torch/csrc/jit/ir/alias_analysis.h>
 
+#include <ATen/core/functional.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/utils/memory.h>
 
 namespace torch {
 namespace jit {
+
+bool assertNoRefinedTensorTypes(const TypePtr& type) {
+  if (type->isSubtypeOf(TensorType::get())) {
+    return *type == *TensorType::get();
+  }
+  return std::all_of(
+      type->containedTypes().begin(),
+      type->containedTypes().end(),
+      assertNoRefinedTensorTypes);
+}
 
 // For any mutable type, map it to a type such that all other types which it can
 // alias will be mapped to the same type. This function follows a similar logic
@@ -18,29 +29,40 @@ c10::optional<TypePtr> getMutableTypePtr(const TypePtr& type) {
     case TypeKind::ListType:
     case TypeKind::DictType:
     case TypeKind::ClassType:
+    case TypeKind::FutureType:
+      // these types never contain refined tensor types
+      // recursing through nested types adds noticeable runtime overhead
+      // in the first pass, so make check debug only
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+          assertNoRefinedTensorTypes(type),
+          "These types should not contained refined tensor types",
+          type);
+      return type;
     case TypeKind::TensorType:
       return unshapedType(type);
-    case TypeKind::OptionalType:
-      return getMutableTypePtr(type->cast<OptionalType>()->getElementType());
-    case TypeKind::FutureType: {
-      if (auto elem = getMutableTypePtr(type->cast<FutureType>()->getElementType())) {
-        return FutureType::create(*elem);
-      }
-      return c10::nullopt;
-    }
     case TypeKind::TupleType: {
-      std::vector<TypePtr> mutable_types;
+      // Tuples should not contain refined tensor types, and two tuples of
+      // a different type cannot alias.
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+          assertNoRefinedTensorTypes(type),
+          "Tuple should not contain refined tensor type",
+          type);
+      bool mutable_type = false;
       for (const auto& elem : type->expect<TupleType>()->elements()) {
         if (auto mut_elem = getMutableTypePtr(elem)) {
-          mutable_types.push_back(*mut_elem);
+          mutable_type = true;
+          break;
         }
       }
-      if (mutable_types.size() == 0) {
-        return c10::nullopt;
+      if (mutable_type) {
+        return type;
       } else {
-        return TupleType::create(mutable_types);
+        return c10::nullopt;
       }
     }
+    case TypeKind::OptionalType:
+      // Optional may contain a refined tensor type because we unify T & None
+      return getMutableTypePtr(type->cast<OptionalType>()->getElementType());
     default:
       return c10::nullopt;
   }
@@ -1334,13 +1356,7 @@ c10::optional<Element*> AliasDb::setWildcard(const Value* v) {
     }
   }
 
-  // We also need to update the write index with new writes to the wildcard set.
-  for (auto& pr : writeIndex_) {
-    auto& writtenTo = pr.second;
-    if (writtenTo.intersects(pointeeSet)) {
-      writtenTo.set(wildcardElement->index);
-    }
-  }
+  // lazily build write cache
   isWriteCacheStale_ = true;
   return wildcardElement;
 }
