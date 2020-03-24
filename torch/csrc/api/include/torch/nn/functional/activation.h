@@ -15,7 +15,7 @@ namespace functional {
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
-inline Tensor elu(Tensor& input, double alpha, bool inplace) {
+inline Tensor elu(Tensor input, double alpha, bool inplace) {
   if (inplace) {
     return torch::elu_(input, alpha);
   } else {
@@ -44,7 +44,7 @@ inline Tensor elu(Tensor input, const ELUFuncOptions& options = {}) {
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
-inline Tensor selu(Tensor& input, bool inplace) {
+inline Tensor selu(Tensor input, bool inplace) {
   if (inplace) {
     return torch::selu_(input);
   } else {
@@ -100,7 +100,7 @@ inline Tensor hardshrink(const Tensor& input,
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
-inline Tensor hardtanh(Tensor& input,
+inline Tensor hardtanh(Tensor input,
                        double min_val,
                        double max_val,
                        bool inplace) {
@@ -132,7 +132,7 @@ inline Tensor hardtanh(Tensor input, const HardtanhFuncOptions& options = {}) {
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
-inline Tensor leaky_relu(Tensor& input,
+inline Tensor leaky_relu(Tensor input,
                          double negative_slope,
                          bool inplace) {
   if (inplace) {
@@ -350,7 +350,7 @@ inline Tensor prelu(const Tensor& input, const Tensor& weight) {
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
-inline Tensor relu(Tensor& input, bool inplace) {
+inline Tensor relu(Tensor input, bool inplace) {
   if (inplace) {
     return torch::relu_(input);
   } else {
@@ -379,7 +379,7 @@ inline Tensor relu(Tensor input, const ReLUFuncOptions& options = {}) {
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
-inline Tensor relu6(Tensor& input, bool inplace) {
+inline Tensor relu6(Tensor input, bool inplace) {
   return detail::hardtanh(input, /*min_val=*/0, /*max_val=*/6, /*inplace=*/inplace);
 }
 } // namespace detail
@@ -404,7 +404,7 @@ inline Tensor relu6(Tensor input, const ReLU6FuncOptions& options = {}) {
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
-inline Tensor rrelu(Tensor& input,
+inline Tensor rrelu(Tensor input,
                     double lower,
                     double upper,
                     bool training,
@@ -437,7 +437,7 @@ inline Tensor rrelu(Tensor input, const RReLUFuncOptions& options = {}) {
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
-inline Tensor celu(Tensor& input,
+inline Tensor celu(Tensor input,
                    double alpha,
                    bool inplace) {
   if (inplace) {
@@ -536,7 +536,7 @@ inline Tensor tanhshrink(const Tensor& input) {
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
-inline Tensor threshold(Tensor& input,
+inline Tensor threshold(Tensor input,
                         double threshold,
                         double value,
                         bool inplace) {

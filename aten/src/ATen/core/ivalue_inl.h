@@ -17,6 +17,7 @@ namespace jit {
 struct Function;
 struct CompilationUnit;
 } // namespace jit
+TORCH_API bool isCustomClass(const c10::IValue& v);
 } // namespace torch
 namespace c10 {
 struct IValue;
@@ -128,6 +129,8 @@ inline c10::intrusive_ptr<torch::CustomClassHolder> IValue::toCapsule() const & 
 }
 
 namespace ivalue {
+
+void CAFFE2_API checkCustomClassType(TypePtr expected_type, TypePtr actual_type);
 
 template <typename T>
 using Shared = c10::intrusive_ptr<T>;
@@ -522,13 +525,41 @@ std::vector<Elem> generic_to(
 }
 
 template <typename T>
+c10::intrusive_ptr<T> IValue::toCustomClass() && {
+  static_assert(std::is_base_of<torch::CustomClassHolder, T>::value == true,
+    "toCustomClass requires that template parameter T must inherit "
+    "from torch::CustomClassHolder");
+  auto obj = toObject();
+  TORCH_CHECK(obj->slots().size() == 1,
+              "Tried to cast IValue to custom class but it did "
+              "not contain a custom class!");
+  auto expected_type = c10::getCustomClassType<c10::intrusive_ptr<T>>();
+  ivalue::checkCustomClassType(expected_type, type());
+  auto userObj = c10::static_intrusive_pointer_cast<T>(obj->getSlot(0).toCapsule());
+  return userObj;
+}
+
+template <typename T>
+c10::intrusive_ptr<T> IValue::toCustomClass() const & {
+  static_assert(std::is_base_of<torch::CustomClassHolder, T>::value == true,
+    "toCustomClass requires that template parameter T must inherit "
+    "from torch::CustomClassHolder");
+  auto obj = toObject();
+  TORCH_CHECK(obj->slots().size() == 1,
+              "Tried to cast IValue to custom class but it did "
+              "not contain a custom class!");
+  auto expected_type = c10::getCustomClassType<c10::intrusive_ptr<T>>();
+  ivalue::checkCustomClassType(expected_type, type());
+  auto userObj = c10::static_intrusive_pointer_cast<T>(obj->getSlot(0).toCapsule());
+  return userObj;
+}
+
+template <typename T>
 T generic_to(
     IValue ivalue,
     _fake_type<T>) {
     using ElemType = typename std::remove_pointer<T>::type::element_type;
-    auto obj = std::move(ivalue).toObject();
-    auto capsule = obj->getSlot(0);
-    return c10::static_intrusive_pointer_cast<ElemType>(capsule.toCapsule());
+    return std::move(ivalue).toCustomClass<ElemType>();
 }
 
 template <typename T>
@@ -722,18 +753,19 @@ inline IValue::IValue(c10::impl::GenericList v)
   payload.as_intrusive_ptr = v.impl_.release();
 }
 
-template<class T> inline IValue::IValue(c10::List<T> v)
+template <class T, IValue::enable_if_ivalue_constructible<T>>
+inline IValue::IValue(c10::List<T> v)
 : IValue(impl::toList<T>(std::move(v))) {}
-template<class T> inline IValue::IValue(at::ArrayRef<T> v)
-: IValue(c10::List<T>()) {
+template <class T, IValue::enable_if_ivalue_constructible<T>>
+inline IValue::IValue(at::ArrayRef<T> v) : IValue(c10::List<T>()) {
   auto list = to<c10::List<T>>();
   list.reserve(v.size());
   for (const auto& e : v) {
     list.push_back(e);
   }
 }
-template<class T> inline IValue::IValue(const std::vector<T>& v)
-: IValue(c10::List<T>()) {
+template <class T, IValue::enable_if_ivalue_constructible<T>>
+inline IValue::IValue(const std::vector<T>& v) : IValue(c10::List<T>()) {
   auto list = to<c10::List<T>>();
   list.reserve(v.size());
   for (const auto& e : v) {
@@ -758,7 +790,8 @@ template<class Key, class Value> inline IValue::IValue(std::unordered_map<Key, V
   }
 }
 
-template<class T> inline IValue::IValue(c10::optional<T> v): IValue() {
+template <class T, IValue::enable_if_ivalue_constructible<T>>
+inline IValue::IValue(c10::optional<T> v) : IValue() {
   if (v.has_value()) {
     *this = IValue(std::move(*v));
   }
@@ -774,10 +807,30 @@ inline IValue::IValue(c10::intrusive_ptr<ivalue::PyObjectHolder> v)
 : tag(Tag::PyObject), is_intrusive_ptr(true) {
   payload.as_intrusive_ptr = v.release();
 }
-inline IValue::IValue(c10::intrusive_ptr<torch::CustomClassHolder> v)
-: tag(Tag::Capsule), is_intrusive_ptr(true) {
-  payload.as_intrusive_ptr = v.release();
+inline IValue IValue::make_capsule(intrusive_ptr<torch::CustomClassHolder> blob) {
+  IValue iv;
+  iv.tag = Tag::Capsule;
+  iv.is_intrusive_ptr = true;
+  iv.payload.as_intrusive_ptr = blob.release();
+  return iv;
 }
+
+template <typename T, std::enable_if_t<std::is_base_of<torch::CustomClassHolder, T>::value, int>>
+IValue::IValue(c10::intrusive_ptr<T> custom_class) {
+  if (!c10::isCustomClassRegistered<c10::intrusive_ptr<T>>()) {
+    throw c10::Error(
+        "Trying to instantiate a class that isn't a registered custom class.",
+        "");
+  }
+  auto classType = c10::getCustomClassType<c10::intrusive_ptr<T>>();
+  auto ivalue_obj = c10::ivalue::Object::create(
+      c10::StrongTypePtr(nullptr, classType), /*num_slots=*/1);
+  ivalue_obj->setSlot(0, IValue::make_capsule(std::move(custom_class)));
+  payload.as_intrusive_ptr = ivalue_obj.release();
+  tag = Tag::Object;
+  is_intrusive_ptr = true;
+}
+
 inline IValue::IValue(c10::intrusive_ptr<ivalue::Future> v)
 : tag(Tag::Future), is_intrusive_ptr(true) {
   payload.as_intrusive_ptr = v.release();
@@ -800,6 +853,10 @@ inline optional<T> IValue::toOptional() {
     return nullopt;
   }
   return this->to<T>();
+}
+
+inline bool IValue::isCustomClass() const {
+  return torch::isCustomClass(*this);
 }
 
 inline bool IValue::isSameIdentity(const IValue& rhs) const {
@@ -863,17 +920,7 @@ IValue from_(c10::intrusive_ptr<T> x, std::false_type) {
   if (!isCustomClassRegistered<inputType>()) {
     throw c10::Error("Trying to return a class that we don't support and isn't a registered custom class.", "");
   }
-  auto res = getCustomClassType<inputType>();
-  auto retObject = ivalue::Object::create(
-    StrongTypePtr(
-      std::shared_ptr<torch::jit::CompilationUnit>(),
-      std::move(res)),
-    1);
-  auto objPtr = c10::static_intrusive_pointer_cast<torch::CustomClassHolder>(std::move(x));
-
-  retObject->setSlot(0, IValue(std::move(objPtr)));
-  auto resIVal = IValue(std::move(retObject));
-  return resIVal;
+  return IValue(x);
 }
 template <typename T>
 IValue from_(T x, std::false_type) {
