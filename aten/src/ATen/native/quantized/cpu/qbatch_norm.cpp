@@ -85,7 +85,8 @@ Tensor q_batch_norm_impl(
         .dtype(qx_nhwc.scalar_type())
         .memory_format(MemoryFormat::ChannelsLast),
       output_scale,
-      output_zero_point);
+      output_zero_point,
+      c10::nullopt);
 
   compute_fused_params(
       C,
@@ -161,7 +162,8 @@ Tensor q_batch_norm3d_impl(
         .dtype(qx_nhwc.scalar_type())
         .memory_format(MemoryFormat::ChannelsLast3d),
       output_scale,
-      output_zero_point);
+      output_zero_point,
+      c10::nullopt);
 
   compute_fused_params(
       C,

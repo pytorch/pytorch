@@ -78,7 +78,8 @@ Tensor qcat_nhwc_kernel(
       {N, C_out, H, W},
       qx0.options().memory_format(MemoryFormat::ChannelsLast),
       scale,
-      zero_point);
+      zero_point,
+      c10::nullopt);
 
   // N, H, and W are explicitly captured here because there's a bug in GCC5
   // which causes an internal compiler error if they're not
@@ -158,7 +159,8 @@ void qrelu_kernel(const Tensor& qx, Tensor& qy) {
         qx.sizes(),
         at::device(kCPU).dtype(SCALAR_TYPE).memory_format(qx.suggest_memory_format()),
         qx.q_scale(),
-        qx.q_zero_point());
+        qx.q_zero_point(),
+        c10::nullopt);
     using Vec = Vec256<scalar_t>;
     auto zero_point_vec = Vec(scalar_t(zero_point));
     auto iter = TensorIterator::unary_op(qy, qx);
@@ -178,7 +180,8 @@ void qrelu6_kernel(const Tensor& qx, Tensor& qy) {
         qx.sizes(),
         at::device(kCPU).dtype(SCALAR_TYPE).memory_format(qx.suggest_memory_format()),
         qx.q_scale(),
-        qx.q_zero_point());
+        qx.q_zero_point(),
+        c10::nullopt);
     using Vec = Vec256<scalar_t>;
     auto iter = TensorIterator::unary_op(qy, qx);
     scalar_t six =
@@ -274,7 +277,8 @@ void qsigmoid_kernel(const Tensor& qx, Tensor& qy) {
         qx.sizes(),
         at::device(kCPU).dtype(SCALAR_TYPE).memory_format(qx.suggest_memory_format()),
         output_scale,
-        output_zero_point);
+        output_zero_point,
+        c10::nullopt);
     auto iter = TensorIterator::unary_op(qy, qx);
 
     using Vec = Vec256<scalar_t>;
@@ -312,7 +316,8 @@ void qclamp_kernel(
         qx.sizes(),
         at::device(kCPU).dtype(SCALAR_TYPE).memory_format(qx.suggest_memory_format()),
         qx.q_scale(),
-        qx.q_zero_point());
+        qx.q_zero_point(),
+        c10::nullopt);
     using Vec = Vec256<scalar_t>;
     auto iter = TensorIterator::unary_op(qy, qx);
     auto min = min_scalar.to<float>();
@@ -363,7 +368,8 @@ void qtanh_kernel(const Tensor& qx, Tensor& qy) {
         qx.sizes(),
         at::device(kCPU).dtype(SCALAR_TYPE).memory_format(qx.suggest_memory_format()),
         output_scale,
-        output_zero_point);
+        output_zero_point,
+        c10::nullopt);
     auto iter = TensorIterator::unary_op(qy, qx);
 
     using Vec = Vec256<scalar_t>;
