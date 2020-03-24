@@ -412,7 +412,7 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
   }
 
   c10::intrusive_ptr<Object> deepcopy() const;
-  c10::intrusive_ptr<Object> deepcopy(std::unordered_map<IValue, IValue>& memo) const;
+  c10::intrusive_ptr<Object> deepcopy(IValue::HashAliasedIValueMap& memo) const;
 
  private:
   void resizeObject(size_t slot);
