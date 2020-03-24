@@ -74,6 +74,7 @@ static bool should_allow_numbers_as_tensors(const std::string& name) {
     "div", "div_", "div_out",
     "mul", "mul_", "mul_out",
     "sub", "sub_", "sub_out",
+    "true_divide", "true_divide_", "true_divide_out",
     "floor_divide", "floor_divide_", "floor_divide_out"
   };
   return allowed.find(name) != allowed.end();

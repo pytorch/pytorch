@@ -1200,11 +1200,13 @@ class TestSparse(TestCase):
         self.assertEqual(self.safeToDense(y1), expected)
         self.assertEqual(self.safeToDense(y2), expected)
 
-        # Note: true_divide does not have a method variant
         y1 = torch.true_divide(x1, 37.5)
         y2 = x1.clone()
+        if y2.dtype.is_floating_point or y2.dtype.is_complex:
+            y2.true_divide_(37.5)
         expected = torch.true_divide(self.safeToDense(x1), 37.5)
         self.assertEqual(self.safeToDense(y1), expected)
+        self.assertEqual(self.safeToDense(y2), expected)
 
         y1 = x1 // 37.5
         y2 = x1.clone()
