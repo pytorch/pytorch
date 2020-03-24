@@ -1247,11 +1247,21 @@ class _TestTorchMixin(object):
 
         # Test that autograd is propagated.
         t = torch.tensor(5, dtype=torch.float32, requires_grad=True)
-        t_ = torch.exp(t)
 
-        s_ = t_.as_subclass(SubTensor)
-        s_.backward()
+        # Run a calculation on the tensor.
+        exp_t = torch.exp(t)
 
+        # Cast exp_t to a subclass.
+        exp_s = exp_t.as_subclass(SubTensor)
+
+        # Make sure that t.grad was initially None
+        self.assertTrue(t.grad is None)
+
+        # Run the autograd calculation.
+        exp_s.backward()
+
+        # Make sure autograd was propagated to the original tensor
+        # declared with requires_grad.
         self.assertTrue(t.grad is not None)
 
     def test_constructor_dtypes(self):
