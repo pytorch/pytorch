@@ -155,7 +155,8 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
     }
 
     if (tensor.sizes() != notSkippedTensor.sizes() ||
-        tensor.strides() != notSkippedTensor.strides()) {
+        tensor.strides() != notSkippedTensor.strides() ||
+        tensor.dtype() != notSkippedTensor.dtype()) {
       reuse_iterator = false;
     }
   }
@@ -211,6 +212,7 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
       iter.dont_resize_outputs();
       iter.add_output(result_slice);
       iter.add_input(tensor);
+      iter.promote_common_dtype();
       iter.build();
       copy_stub(iter.device_type(), iter, false);
       offset += slice_dim_size;
@@ -221,7 +223,8 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
 }
 
 Tensor _cat_cpu(TensorList tensors, int64_t dim) {
-  Tensor result = at::empty({0}, tensors[0].options());
+  ScalarType high_type = result_type(tensors);
+  Tensor result = at::empty({0}, tensors[0].options()).toType(high_type);
   return native::_cat_out_cpu(result, tensors, dim);
 }
 
@@ -376,16 +379,6 @@ static Tensor cat_sparse(TensorList tensors, int64_t dim) {
 }
 
 Tensor cat(TensorList tensors, int64_t dim) {
-  std::vector<Tensor> temp_promote;
-  if (tensors.size() > 1) { 
-    ScalarType high_type = result_type(tensors);
-    temp_promote.reserve(tensors.size());
-    for (size_t i = 0; i < tensors.size(); ++i) {
-      temp_promote.push_back(tensors[i].toType(high_type));
-    }
-  }
-  tensors = TensorList(temp_promote.data(), temp_promote.size());
-
   if (tensors.size() > 0 &&
         tensors[0].is_sparse()) {
     return cat_sparse(tensors, dim);
