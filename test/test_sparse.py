@@ -1504,21 +1504,21 @@ class TestSparse(TestCase):
         self._test_log1p_tensor(input, torch.zeros([5, 6, 0]))
 
     def test_mv(self):
-        def test_shape(di, dj, nnz):
+        def test_shape(di, dj, dk, nnz):
             x, _, _ = self._gen_sparse(2, nnz, [di, dj])
-            t = torch.randn(dj)
+            t = torch.randn(dk, device=self.device)
 
             res = x.matmul(t)
             expected = self.safeToDense(x).matmul(t)
             self.assertEqual(res, expected)
 
-        test_shape(10, 100, 20)
-        test_shape(100, 1000, 20)
-        test_shape(64, 10000, 20)
-        test_shape(0, 100, 0)
-        test_shape(10, 0, 0)
-        test_shape(10, 100, 0)
-        test_shape(10, 100, 20)
+        test_shape(10, 100, 100, 20)
+        test_shape(100, 1000, 1000, 20)
+        test_shape(64, 10000, 10000, 20)
+        test_shape(0, 100, 100, 0)
+        test_shape(10, 0, 0, 0)
+        test_shape(10, 100, 100, 0)
+        test_shape(10, 100, 100, 20)
 
     def test_sparse_add_coalesce(self):
         i = self.index_tensor([[1, 2, 1]])
