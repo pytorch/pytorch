@@ -337,7 +337,7 @@ void RequestCallbackImpl::processRpc(
     case MessageType::RREF_FORK_REQUEST: {
       auto& rfr = static_cast<RRefForkRequest&>(rpc);
       auto& ctx = RRefContext::getInstance();
-      ctx.addForkOfOwner(rfr.rrefId(), rfr.forkId());
+      ctx.addForkOfOwnerIfNotPresent(rfr.rrefId(), rfr.forkId());
       markComplete(RRefAck().toMessage());
       return;
     }
@@ -477,6 +477,16 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processMessage(
             // processMessage().
             ClearAutogradContextGuard guard;
             processRpc(*rpc, messageType, id, retFuture);
+          } catch (py::error_already_set& e) {
+            retFuture->markCompleted(handleError(e, messageType, id));
+            // There are request callback impls in Python, where Python
+            // exceptions could be thrown. For releasing Python exception
+            // py::objects, GIL must be held.
+            py::gil_scoped_acquire acquire;
+            e.restore(); // Release ownership on py::objects and also restore
+                         // Python Error Indicator.
+            PyErr_Clear(); // Clear the Python Error Indicator as we has
+                           // recorded the exception in the response message.
           } catch (std::exception& e) {
             retFuture->markCompleted(handleError(e, messageType, id));
           }

@@ -61,6 +61,11 @@ parser.add_argument(
     action='store_true',
     help='group function registrations by op name and write to separate files; '
          'must also set --op_registration_whitelist param')
+parser.add_argument(
+    '--force_schema_registration',
+    action='store_true',
+    help='force it to generate schema-only registrations for ops that are not'
+         'listed on --op_registration_whitelist')
 options = parser.parse_args()
 # NB: It is mandatory to NOT use os.path.join here, as the install directory
 # will eventually be ingested by cmake, which does not respect Windows style
@@ -255,13 +260,16 @@ def add_op_registrations(per_type_registrations, per_op_registrations, op_regist
         registration = op_registration.registration_code
         # apply whitelist
         if op_registration_whitelist is not None and opname not in op_registration_whitelist:
-            continue
-        if not options.per_op_registration:
-            # per type registration
-            per_type_registrations.append(registration)
-        else:
+            if options.force_schema_registration:
+                registration = op_registration.schema_registration_code
+            else:
+                continue
+        if options.per_op_registration:
             # per op registration
             per_op_registrations[opname].append(registration)
+        else:
+            # per type registration
+            per_type_registrations.append(registration)
 
 
 def generate_storage_type_and_tensor(backend, density, declarations, per_op_registrations):
@@ -407,6 +415,8 @@ def declare_outputs():
     if options.per_op_registration:
         if op_registration_whitelist is None:
             raise Exception("Must set --op_registration_whitelist for per-op registration.")
+        if options.force_schema_registration:
+            raise Exception("Cannot set both --force_schema_registration and --per_op_registration.")
         for whitelisted_op in op_registration_whitelist:
             fname = gen_per_op_registration_filename(whitelisted_op)
             file_manager.will_write(fname)

@@ -34,10 +34,7 @@ struct Vec256i {};  // dummy definition to make Vec256i always defined
 #ifdef __AVX2__
 
 template <>
-class Vec256<int64_t> : public Vec256i {
-private:
-  static const Vec256<int64_t> ones;
-public:
+struct Vec256<int64_t> : public Vec256i {
   using value_type = int64_t;
   static constexpr int size() {
     return 4;
@@ -147,20 +144,10 @@ public:
   Vec256<int64_t> operator>=(const Vec256<int64_t>& other) const {
     return invert(_mm256_cmpgt_epi64(other.values, values));
   }
-
-  Vec256<int64_t> eq(const Vec256<int64_t>& other) const;
-  Vec256<int64_t> ne(const Vec256<int64_t>& other) const;
-  Vec256<int64_t> gt(const Vec256<int64_t>& other) const;
-  Vec256<int64_t> ge(const Vec256<int64_t>& other) const;
-  Vec256<int64_t> lt(const Vec256<int64_t>& other) const;
-  Vec256<int64_t> le(const Vec256<int64_t>& other) const;
 };
 
 template <>
-class Vec256<int32_t> : public Vec256i {
-private:
-  static const Vec256<int32_t> ones;
-public:
+struct Vec256<int32_t> : public Vec256i {
   using value_type = int32_t;
   static constexpr int size() {
     return 8;
@@ -274,12 +261,6 @@ public:
   Vec256<int32_t> operator>=(const Vec256<int32_t>& other) const {
     return invert(_mm256_cmpgt_epi32(other.values, values));
   }
-  Vec256<int32_t> eq(const Vec256<int32_t>& other) const;
-  Vec256<int32_t> ne(const Vec256<int32_t>& other) const;
-  Vec256<int32_t> gt(const Vec256<int32_t>& other) const;
-  Vec256<int32_t> ge(const Vec256<int32_t>& other) const;
-  Vec256<int32_t> lt(const Vec256<int32_t>& other) const;
-  Vec256<int32_t> le(const Vec256<int32_t>& other) const;
 };
 
 template <>
@@ -323,10 +304,7 @@ inline void convert(const int32_t *src, double *dst, int64_t n) {
 }
 
 template <>
-class Vec256<int16_t> : public Vec256i {
-private:
-  static const Vec256<int16_t> ones;
-public:
+struct Vec256<int16_t> : public Vec256i {
   using value_type = int16_t;
   static constexpr int size() {
     return 16;
@@ -489,13 +467,6 @@ public:
   Vec256<int16_t> operator>=(const Vec256<int16_t>& other) const {
     return invert(_mm256_cmpgt_epi16(other.values, values));
   }
-
-  Vec256<int16_t> eq(const Vec256<int16_t>& other) const;
-  Vec256<int16_t> ne(const Vec256<int16_t>& other) const;
-  Vec256<int16_t> gt(const Vec256<int16_t>& other) const;
-  Vec256<int16_t> ge(const Vec256<int16_t>& other) const;
-  Vec256<int16_t> lt(const Vec256<int16_t>& other) const;
-  Vec256<int16_t> le(const Vec256<int16_t>& other) const;
 };
 
 template <>
@@ -734,84 +705,6 @@ inline Vec256<T> operator|(const Vec256<T>& a, const Vec256<T>& b) {
 template<class T, typename std::enable_if_t<std::is_integral<T>::value && std::is_base_of<Vec256i, Vec256<T>>::value, int> = 0>
 inline Vec256<T> operator^(const Vec256<T>& a, const Vec256<T>& b) {
   return _mm256_xor_si256(a, b);
-}
-
-const Vec256<int64_t> Vec256<int64_t>::ones(1);
-
-Vec256<int64_t> Vec256<int64_t>::eq(const Vec256<int64_t>& other) const {
-  return (*this == other) & Vec256<int64_t>::ones;
-}
-
-Vec256<int64_t> Vec256<int64_t>::ne(const Vec256<int64_t>& other) const {
-  return (*this != other) & Vec256<int64_t>::ones;
-}
-
-Vec256<int64_t> Vec256<int64_t>::gt(const Vec256<int64_t>& other) const {
-  return (*this > other) & Vec256<int64_t>::ones;
-}
-
-Vec256<int64_t> Vec256<int64_t>::ge(const Vec256<int64_t>& other) const {
-  return (*this >= other) & Vec256<int64_t>::ones;
-}
-
-Vec256<int64_t> Vec256<int64_t>::lt(const Vec256<int64_t>& other) const {
-  return (*this < other) & Vec256<int64_t>::ones;
-}
-
-Vec256<int64_t> Vec256<int64_t>::le(const Vec256<int64_t>& other) const {
-  return (*this <= other) & Vec256<int64_t>::ones;
-}
-
-const Vec256<int32_t> Vec256<int32_t>::ones(1);
-
-Vec256<int32_t> Vec256<int32_t>::eq(const Vec256<int32_t>& other) const {
-  return (*this == other) & Vec256<int32_t>::ones;
-}
-
-Vec256<int32_t> Vec256<int32_t>::ne(const Vec256<int32_t>& other) const {
-  return (*this != other) & Vec256<int32_t>::ones;
-}
-
-Vec256<int32_t> Vec256<int32_t>::gt(const Vec256<int32_t>& other) const {
-  return (*this > other) & Vec256<int32_t>::ones;
-}
-
-Vec256<int32_t> Vec256<int32_t>::ge(const Vec256<int32_t>& other) const {
-  return (*this >= other) & Vec256<int32_t>::ones;
-}
-
-Vec256<int32_t> Vec256<int32_t>::lt(const Vec256<int32_t>& other) const {
-  return (*this < other) & Vec256<int32_t>::ones;
-}
-
-Vec256<int32_t> Vec256<int32_t>::le(const Vec256<int32_t>& other) const {
-  return (*this <= other) & Vec256<int32_t>::ones;
-}
-
-const Vec256<int16_t> Vec256<int16_t>::ones(1);
-
-Vec256<int16_t> Vec256<int16_t>::eq(const Vec256<int16_t>& other) const {
-  return (*this == other) & Vec256<int16_t>::ones;
-}
-
-Vec256<int16_t> Vec256<int16_t>::ne(const Vec256<int16_t>& other) const {
-  return (*this != other) & Vec256<int16_t>::ones;
-}
-
-Vec256<int16_t> Vec256<int16_t>::gt(const Vec256<int16_t>& other) const {
-  return (*this > other) & Vec256<int16_t>::ones;
-}
-
-Vec256<int16_t> Vec256<int16_t>::ge(const Vec256<int16_t>& other) const {
-  return (*this >= other) & Vec256<int16_t>::ones;
-}
-
-Vec256<int16_t> Vec256<int16_t>::lt(const Vec256<int16_t>& other) const {
-  return (*this < other) & Vec256<int16_t>::ones;
-}
-
-Vec256<int16_t> Vec256<int16_t>::le(const Vec256<int16_t>& other) const {
-  return (*this <= other) & Vec256<int16_t>::ones;
 }
 
 #endif
