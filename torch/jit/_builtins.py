@@ -178,6 +178,7 @@ def _is_python_builtin(maybe_builtin):
             zip,
             enumerate,
             sorted,
+            id,
         ])
 
         if PY2:
