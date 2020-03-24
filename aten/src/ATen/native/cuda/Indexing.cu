@@ -100,10 +100,10 @@ static Tensor wrapIndexOnce(const Tensor & index, int64_t dim, int64_t dim_size,
     auto max_idx = index.max().item<int64_t>();
     auto min_idx = index.min().item<int64_t>();
     if (max_idx >= dim_size) {
-      AT_INDEX_ERROR("index ", max_idx, " is out of bounds for dimension ", dim, " with size ", dim_size);
+      TORCH_CHECK_INDEX(false, "index ", max_idx, " is out of bounds for dimension ", dim, " with size ", dim_size);
     }
     if (min_idx < -dim_size) {
-      AT_INDEX_ERROR("index ", min_idx, " is out of bounds for dimension ", dim, " with size ", dim_size);
+      TORCH_CHECK_INDEX(false, "index ", min_idx, " is out of bounds for dimension ", dim, " with size ", dim_size);
     }
   }
   return index.remainder(dim_size);
@@ -181,7 +181,7 @@ static std::tuple<Tensor, Tensor, int64_t, int64_t, int64_t, std::vector<int64_t
 namespace {
 void index_put_accum_kernel(Tensor & self, TensorList indices, const Tensor & value, bool unsafe) {
   if (indices.size() > (size_t)self.dim()) {
-    AT_INDEX_ERROR("too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
+    TORCH_CHECK_INDEX(false, "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
   }
   auto value_ = value.contiguous();
   Tensor linearIndex, expandedValue, src;

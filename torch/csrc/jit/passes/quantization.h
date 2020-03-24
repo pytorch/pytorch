@@ -94,6 +94,11 @@ TORCH_API void SwapFunctionalLinear(std::shared_ptr<Graph>& graph);
  */
 TORCH_API void SwapFunctionalLinear(Module& module);
 
+/** Replicate quantize node for prim::If blocks, so that we can match
+ *  quantization patterns in prim::If blocks
+ */
+TORCH_API void ReplicateQuant(std::shared_ptr<Graph>& graph);
+
 /** Replicate dequantize node for each use, so that we can match
  *  quantization patterns
  */
