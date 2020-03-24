@@ -2310,12 +2310,15 @@ graph(%input, %weight):
         patterns.
         """
         class Res(torch.nn.Module):
-            def __init__(self, use_skip):
+            def __init__(self):
                 super(Res, self).__init__()
                 self.conv = torch.nn.Conv2d(3, 3, 1).float()
-                self.use_skip = use_skip
+                self.use_skip = True
 
-            def forward(self, x):
+            def forward(self, x, cond):
+                # type: (Tensor, bool) -> Tensor
+                # to avoid being frozen
+                self.use_skip = cond
                 if self.use_skip:
                     return self.conv(x)
                 else:
@@ -2324,12 +2327,12 @@ graph(%input, %weight):
         class M(torch.nn.Module):
             def __init__(self):
                 super(M, self).__init__()
-                self.res1 = Res(True)
-                self.res2 = Res(False)
+                self.res1 = Res()
+                self.res2 = Res()
 
             def forward(self, x):
-                x = self.res1(x)
-                x = self.res2(x)
+                x = self.res1(x, True)
+                x = self.res2(x, False)
                 return x
 
         data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
@@ -16120,6 +16123,31 @@ a")
         tester(int_hash, (20, 21, 22))
         tester(float_hash, (20.0, 21.00001, 22.443))
         tester(str_hash, ("", "hello", "a"))
+
+    def test_id(self):
+        with self.assertRaisesRegex(RuntimeError, "Expected a value"): 
+            @torch.jit.script
+            def test_id_scalars():
+                return id(2) == id(None) 
+
+        @torch.jit.script
+        class FooTest(object):
+            def __init__(self, x):
+                self.foo = x
+
+            def getFooTest(self):
+                return self.foo
+
+        @torch.jit.script
+        def test_id_class_types():
+            obj1 = FooTest(torch.tensor(3))
+            obj2 = FooTest(torch.tensor(2))
+            assert obj1 is not obj2
+            assert id(obj1) != id(obj2)
+            assert id(obj1) != id(None)
+            return True
+
+        self.assertTrue(test_id_class_types())
 
     def test_mutable_dce(self):
         @torch.jit.script
