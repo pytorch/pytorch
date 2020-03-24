@@ -11,12 +11,7 @@ namespace nn {
 
 namespace detail {
 
-typedef c10::variant<
-  enumtype::kZeros,
-  enumtype::kReflect,
-  enumtype::kReplicate,
-  enumtype::kCircular
-> conv_padding_mode_t;
+typedef c10::variant<enumtype::kZeros, enumtype::kCircular> conv_padding_mode_t;
 
 /// Options for a `D`-dimensional convolution or convolution transpose module.
 template <size_t D>
@@ -80,7 +75,7 @@ struct ConvNdOptions {
   /// Changing this parameter after construction __has no effect__.
   TORCH_ARG(bool, bias) = true;
 
-  /// Accepted values `torch::kZeros`, `torch::kReflect`, `torch::kReplicate` or `torch::kCircular`. Default: `torch::kZeros`
+  /// Accepted values `zeros` and `circular` Default: `zeros`
   TORCH_ARG(conv_padding_mode_t, padding_mode) = torch::kZeros;
 };
 
@@ -141,7 +136,7 @@ struct ConvOptions {
   /// Changing this parameter after construction __has no effect__.
   TORCH_ARG(bool, bias) = true;
 
-  /// Accepted values `torch::kZeros`, `torch::kReflect`, `torch::kReplicate` or `torch::kCircular`. Default: `torch::kZeros`
+  /// Accepted values `zeros` and `circular` Default: `zeros`
   TORCH_ARG(padding_mode_t, padding_mode) = torch::kZeros;
 };
 
@@ -288,7 +283,7 @@ struct ConvTransposeOptions {
   /// This parameter __can__ be changed after construction.
   TORCH_ARG(ExpandingArray<D>, dilation) = 1;
 
-  /// Accepted values `torch::kZeros`, `torch::kReflect`, `torch::kReplicate` or `torch::kCircular`. Default: `torch::kZeros`
+  /// Accepted values `zeros` and `circular` Default: `zeros`
   TORCH_ARG(padding_mode_t, padding_mode) = torch::kZeros;
 };
 
