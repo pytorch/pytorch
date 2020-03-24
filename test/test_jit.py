@@ -1655,6 +1655,9 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
                        .check("quantized::add_relu") \
                        .run(m.graph_for(data, data))
 
+    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
+                         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+                         " with instruction set support avx2 or newer.")
     def test_quantized_cat(self):
         """ Note that we to support the case that torch.cat is quantized
         indepdently, we need to have an observer that works
@@ -5012,6 +5015,35 @@ def foo(x):
 
         # shouldn't throw a type error
         torch.jit.script(MyMod())
+
+    @_inline_everything
+    def test_lazy_script(self):
+        def untraceable(x):
+            if x.ndim > 2:
+                print("hello")
+            else:
+                print("goodbye")
+            return x + 2
+
+        # Non-working example
+        def fn(x):
+            return untraceable(x)
+
+        with self.capture_stdout():
+            traced_bad = torch.jit.trace(fn, [torch.ones(2, 2)])
+
+        FileCheck().check_not("goodbye").check_not("hello").run(traced_bad.graph)
+
+        # Working example
+        untraceable = torch.jit._script_if_tracing(untraceable)
+
+        def fn2(x):
+            return untraceable(x)
+
+        with self.capture_stdout():
+            traced = torch.jit.trace(fn, [torch.ones(2, 2)])
+
+        FileCheck().check("goodbye").check("hello").run(traced.graph)
 
     def test_big_int_literals(self):
         def ok():
@@ -16117,10 +16149,10 @@ a")
         tester(str_hash, ("", "hello", "a"))
 
     def test_id(self):
-        with self.assertRaisesRegex(RuntimeError, "Expected a value"):
+        with self.assertRaisesRegex(RuntimeError, "Expected a value"): 
             @torch.jit.script
             def test_id_scalars():
-                return id(2) == id(None)
+                return id(2) == id(None) 
 
         @torch.jit.script
         class FooTest(object):
