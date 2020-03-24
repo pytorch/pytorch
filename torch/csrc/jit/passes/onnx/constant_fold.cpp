@@ -85,6 +85,9 @@ c10::optional<at::Tensor> runTorchSlice_opset9(const Node* node,
   std::vector<int64_t> axesAttr;
   if (node->hasAttributeS("axes")) {
     axesAttr = node->is(attr::axes);
+    for (auto& ax : axesAttr){
+	    ax += ax < 0 ? inputTensorValues[0].sizes().size() : 0;
+    }
   } else {
     axesAttr.resize(startsAttr.size());
     std::iota(axesAttr.begin(), axesAttr.end(), 0);
@@ -97,6 +100,7 @@ c10::optional<at::Tensor> runTorchSlice_opset9(const Node* node,
     int64_t length = end - start;
     if (length < 0 || start > updated_val.sizes()[axis] - length)
       return c10::nullopt;
+
     updated_val = at::narrow(updated_val, axis, start, length);
   }
   return c10::optional<at::Tensor>(updated_val);
@@ -136,7 +140,7 @@ c10::optional<at::Tensor> runTorchSlice_opset10(const Node* node,
     auto axes_a = inputTensorValues[3].accessor<int64_t, 1>();
     axes.reserve(inputTensorValues[3].sizes()[0]);
     for (size_t i = 0; i < inputTensorValues[3].sizes()[0]; ++i) {
-      axes[i] = axes_a[i];
+      axes[i] = axes_a[i] < 0 ? axes_a[i] + inputTensorValues[0].sizes().size() : axes_a[i];
     }
   }
   else {
@@ -265,6 +269,24 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
       }
     }
     return c10::optional<at::Tensor>(at::reshape(updated_val, shape));
+  } else if (node->kind() == onnx::ReduceL1 || node->kind() == onnx::ReduceL2) {
+    assert(inputTensorValues.size() == 1);
+    if (!node->hasAttributeS("axes")) {
+      return c10::nullopt;
+    }
+    if (!node->hasAttributeS("keepdims")) {
+      return c10::nullopt;
+    }
+    int p = node->kind() == onnx::ReduceL1 ? 1 : 2;
+    updated_val = at::norm(inputTensorValues[0], p, node->is(attr::axes), node->i(attr::keepdims));
+    return c10::optional<at::Tensor>(updated_val);
+  } else if (node->kind() == onnx::Gather) {
+    assert(inputTensorValues.size() == 1);
+    if (!node->hasAttributeS("axis")) {
+      return c10::nullopt;
+    }
+    updated_val = at::index_select(inputTensorValues[0], node->i(attr::axis), inputTensorValues[1]);
+    return c10::optional<at::Tensor>(updated_val);
   } else {
     return c10::nullopt;
   }
