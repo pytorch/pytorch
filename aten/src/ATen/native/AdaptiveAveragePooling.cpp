@@ -323,7 +323,7 @@ namespace {
 
   Tensor adaptive_avg_pool2d(at::Tensor const& input, IntArrayRef output_size) {
     if (input.is_mkldnn()) {
-      return at::mkldnn_adaptive_avg_pool2d(input, output_size);
+      return at::mkldnn_adaptive_avg_pooling(input, output_size);
     }
 
     // TODO: fastpath for Channels_last should be explored later;
