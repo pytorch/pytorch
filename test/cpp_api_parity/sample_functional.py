@@ -16,10 +16,10 @@ is different from the C++ equivalent.
 '''
 
 def sample_functional(x, has_parity):
-  if has_parity:
-    return x * 2
-  else:
-    return x * 4
+    if has_parity:
+        return x * 2
+    else:
+        return x * 4
 
 torch.nn.functional.sample_functional = sample_functional
 
@@ -35,7 +35,7 @@ struct C10_EXPORT SampleFunctionalFuncOptions {
 };
 
 Tensor sample_functional(Tensor x, SampleFunctionalFuncOptions options) {
-  return x * 2;
+    return x * 2;
 }
 
 } // namespace functional

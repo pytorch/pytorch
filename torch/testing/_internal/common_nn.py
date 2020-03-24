@@ -294,7 +294,7 @@ def _rand_tensor_non_equal(*size):
 
 
 def wrap_functional(fn, **kwargs):
-    class FunctionalModule(torch.nn.Module):
+    class FunctionalModule(nn.Module):
         def __init__(self):
             super(FunctionalModule, self).__init__()
             self.fn = fn
