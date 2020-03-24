@@ -23,7 +23,6 @@ class ModuleAttributeError(AttributeError):
     attribute that initially raised AttributeError, making the error
     message uninformative. Using `ModuleAttributeError` instead
     fixes this issue."""
-ModuleAttributeError.__module__ = 'torch'
 
 
 def _addindent(s_, numSpaces):
