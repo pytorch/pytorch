@@ -257,7 +257,15 @@ class TestTypePromotion(TestCase):
                 self.assertEqual(not first.is_contiguous(), non_contiguous)
                 self.assertEqual(not second.is_contiguous(), non_contiguous)
                 result = op(first, second)
-                expected = op(first.to(common_dtype), second.to(common_dtype))
+                # TODO: copy_() for complex on cuda issues on github: #33567 #35284
+                if common_dtype.is_complex and first.is_cuda:
+                    first_ = torch.zeros(first.size(), dtype=common_dtype, device=device)
+                    second_ = torch.zeros(second.size(), dtype=common_dtype, device=device)
+                    first_.add_(first)
+                    second_.add_(second)
+                    expected = op(first_, second_)
+                else:
+                    expected = op(first.to(common_dtype), second.to(common_dtype))
                 self.assertEqual(result.dtype, expected.dtype, message='{} with {}, {}'.format(op.__name__, dt1, dt2))
                 self.assertEqual(result, expected, message='{} with {}, {}'.format(op.__name__, dt1, dt2))
 
