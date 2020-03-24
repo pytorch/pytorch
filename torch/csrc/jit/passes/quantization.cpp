@@ -159,6 +159,8 @@ std::vector<size_t> getGeneralOpTensorInputIndexes(Node* n) {
                  /* call_funcs = */ {},
                  /* aten_funcs = */ single_input_aten_funcs)) {
     return {0};
+  } else if (n->kind() == prim::ListUnpack) {
+    return {0};
   }
   return {};
 }
@@ -2302,12 +2304,11 @@ void SwapDeQuant(std::shared_ptr<Graph>& graph) {
           dequantize_node->removeAllInputs();
           dequantize_node->destroy();
         }
-        TORCH_CHECK(n->outputs().size() == 1, "We only support dequantize swapping for ops"
-                    " with one output right now");
-        auto* output = n->output();
-        std::vector<Use> uses = output->uses();
-        // Insert new dequantize node for each use of the output
-        insertDeQuantCall(graph.get(), output, output, uses);
+        for (auto* output: n->outputs()) {
+          std::vector<Use> uses = output->uses();
+          // Insert new dequantize node for each use of the output
+          insertDeQuantCall(graph.get(), output, output, uses);
+        }
       }
       for (Block* subblock : n->blocks()) {
         blocks_to_visit.push(subblock);
