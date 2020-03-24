@@ -533,14 +533,6 @@ void validate_outputs(
       // AT_ERROR(format_error(ss.str()));
       continue;
     }
-    bool moved = false;
-    bool device_inequality_early= (output.device() != metadata.device());
-    bool output_dim_zero_early = (output.dim() == 0);
-    if (output.device() != metadata.device() &&
-        output.dim() == 0) {
-      moved = true;
-      output = output.to(output.options().device(metadata.device()));
-    }
     if (!grads[i].sizes().equals(metadata.shape())) {
       if (!at::is_expandable_to(metadata.shape(), grads[i].sizes())) {
         std::stringstream ss;
@@ -557,20 +549,12 @@ void validate_outputs(
     }
     if (output.device() != metadata.device() &&
         output.dim() == 0) {
-      moved = true;
-      output = output.to(output.options().device(metadata.device()));
+      output = output.to(metadata.device());
     }
     if (!is_compatible_type(metadata.options(), grads[i].options())) {
        std::stringstream ss;
        ss << "invalid gradient at index " << i << " - expected type ";
        ss << metadata.options() << " but got " << grads[i].options();
-       ss << " output.dim()==" << output.dim();
-       ss << " moved==" << moved; 
-       ss << " metadata.device==" << metadata.device(); 
-       ss << " output.device==" << output.device(); 
-       ss << " device_inequlity==" << (output.device() != metadata.device());
-       ss << " device_inequality_early==" << device_inequality_early;
-       ss << " output_dim_zero_early==" << output_dim_zero_early;
        AT_ERROR(format_error(ss.str()));
     }
     auto output_device = output.device();
@@ -625,16 +609,6 @@ static variable_list call_function(
       outputs = fn(std::move(inputs));
     }
   }
-
-  /*
-  const edge_list& edges = fn.next_edges();
-  for (size_t i = 0; i < outputs.size(); i++) {
-    const auto& metadata = edges[i].function->input_metadata(edges[i].input_nr);
-    if (outputs[i].device() != metadata.device() &&
-        outputs[i].dim() == 0)
-      outputs[i] = outputs[i].to(edges[i].device());
-  }
-  */
 
   validate_outputs(fn.next_edges(), outputs, [&](const std::string& msg) {
     std::ostringstream ss;
