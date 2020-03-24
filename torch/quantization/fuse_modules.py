@@ -28,9 +28,8 @@ def fuse_conv_bn(conv, bn):
         assert bn.num_features == conv.out_channels, 'Output channel of Conv2d must match num_features of BatchNorm2d'
         assert bn.affine, 'Only support fusing BatchNorm2d with affine set to True'
         assert bn.track_running_stats, 'Only support fusing BatchNorm2d with tracking_running_stats set to True'
-        if isinstance(conv, torch.nn.Conv3d):
-            return torch.nn.intrinsic.ConvBn3d(conv, bn) if is_3d \
-                else torch.nn.intrinsic.ConvBn2d(conv, bn)
+        return torch.nn.intrinsic.ConvBn3d(conv, bn) if is_3d \
+            else torch.nn.intrinsic.ConvBn2d(conv, bn)
     else:
         return torch.nn.utils.fuse_conv_bn_eval(conv, bn)
 
