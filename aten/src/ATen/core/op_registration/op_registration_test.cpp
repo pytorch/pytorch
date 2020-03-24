@@ -1402,20 +1402,24 @@ TEST(NewOperatorRegistrationTest, dispatchMultiple) {
   bool cuda_called = false;
   bool autograd_called = false;
   auto registrar = c10::import("test")
-    .def("fn", torch::dispatch(c10::DispatchKey::CPUTensorId, [&](const Tensor& x) { cpu_called = true; return x; }))
-    .def("fn", torch::dispatch(c10::kCUDA, [&](const Tensor& x) { cuda_called = true; return x; }))
-    .def("fn", torch::dispatch_autograd([&](const Tensor& x) { autograd_called = true; return x; }));
+    .def("fn(Tensor self) -> Tensor")
+    .impl("fn", torch::dispatch(c10::DispatchKey::CPUTensorId, [&](const Tensor& x) { cpu_called = true; return x; }))
+    .impl("fn", torch::dispatch(c10::kCUDA, [&](const Tensor& x) { cuda_called = true; return x; }))
+    .impl("fn", torch::dispatch_autograd([&](const Tensor& x) { autograd_called = true; return x; }));
 
   auto op = Dispatcher::singleton().findSchema({"test::fn", ""});
   ASSERT_TRUE(op.has_value());
 
-  ASSERT_FALSE(cpu_called);
-  callOp(*op, dummyTensor(c10::DispatchKey::CPUTensorId));
-  ASSERT_TRUE(cpu_called);
+  {
+    at::AutoNonVariableTypeMode _var_guard;
+    ASSERT_FALSE(cpu_called);
+    callOp(*op, dummyTensor(c10::DispatchKey::CPUTensorId));
+    ASSERT_TRUE(cpu_called);
 
-  ASSERT_FALSE(cuda_called);
-  callOp(*op, dummyTensor(c10::DispatchKey::CUDATensorId));
-  ASSERT_TRUE(cuda_called);
+    ASSERT_FALSE(cuda_called);
+    callOp(*op, dummyTensor(c10::DispatchKey::CUDATensorId));
+    ASSERT_TRUE(cuda_called);
+  }
 
   ASSERT_FALSE(autograd_called);
   callOp(*op, dummyTensor(c10::DispatchKey::VariableTensorId));
