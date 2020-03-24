@@ -587,13 +587,21 @@ void validate_outputs(
     if (!edge.is_valid()) continue;
 
     const auto& metadata = edge.function->input_metadata(edge.input_nr);
-    const auto& output = grads[i];
+    auto& output = grads[i];
     if (!output.defined()) {
       // FIXME: TestJit.test_ge_optimized fails this assertion.
       // std::stringstream ss;
       // ss << "undefined gradient at index " << i;
       // AT_ERROR(format_error(ss.str()));
       continue;
+    }
+    bool moved = false;
+    bool device_inequality_early= (output.device() != metadata.device());
+    bool output_dim_zero_early = (output.dim() == 0);
+    if (output.device() != metadata.device() &&
+        output.dim() == 0) {
+      moved = true;
+      output = output.to(output.options().device(metadata.device()));
     }
     if (!grads[i].sizes().equals(metadata.shape())) {
       if (!at::is_expandable_to(metadata.shape(), grads[i].sizes())) {
@@ -613,10 +621,22 @@ void validate_outputs(
     if (c10::typeMetaToScalarType(metadata.options().dtype()) != grads[i].scalar_type()) {
       grads[i] = grads[i].to(c10::typeMetaToScalarType(metadata.options().dtype()));
     }
+    if (output.device() != metadata.device() &&
+        output.dim() == 0) {
+      moved = true;
+      output = output.to(output.options().device(metadata.device()));
+    }
     if (!is_compatible_type(metadata.options(), grads[i].options())) {
        std::stringstream ss;
        ss << "invalid gradient at index " << i << " - expected type ";
        ss << metadata.options() << " but got " << grads[i].options();
+       ss << " output.dim()==" << output.dim();
+       ss << " moved==" << moved; 
+       ss << " metadata.device==" << metadata.device(); 
+       ss << " output.device==" << output.device(); 
+       ss << " device_inequlity==" << (output.device() != metadata.device());
+       ss << " device_inequality_early==" << device_inequality_early;
+       ss << " output_dim_zero_early==" << output_dim_zero_early;
        AT_ERROR(format_error(ss.str()));
     }
     auto output_device = output.device();
@@ -671,6 +691,16 @@ static variable_list call_function(
       outputs = fn(std::move(inputs));
     }
   }
+
+  /*
+  const edge_list& edges = fn.next_edges();
+  for (size_t i = 0; i < outputs.size(); i++) {
+    const auto& metadata = edges[i].function->input_metadata(edges[i].input_nr);
+    if (outputs[i].device() != metadata.device() &&
+        outputs[i].dim() == 0)
+      outputs[i] = outputs[i].to(edges[i].device());
+  }
+  */
 
   validate_outputs(fn.next_edges(), outputs, [&](const std::string& msg) {
     std::ostringstream ss;
