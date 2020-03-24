@@ -475,15 +475,13 @@ void ProcessGroupAgent::enqueueSend(SendWork work) {
         } catch (std::exception& e) {
           auto errorStr = c10::str(
               "Encountered exception in ProcessGroupAgent::enqueueSend: ",
-              e.what());
+              e.what(),
+              " on node: ",
+              RpcAgent::getWorkerInfo().id_);
           auto exceptionMsg =
               rpc::createExceptionResponse(errorStr, work.message_.id());
           if (work.message_.isRequest()) {
-            auto err = c10::str(
-                "Encountered exception in ProcessGroupAgent::enqueueSend: ",
-                e.what());
-            auto exceptionMsg =
-                rpc::createExceptionResponse(err, work.message_.id());
+            // Mark the future with corresponding to this request with an error.
             markFutureWithError(exceptionMsg);
           } else if (work.message_.isResponse()) {
             // Try sending the error along.
