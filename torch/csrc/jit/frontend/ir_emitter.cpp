@@ -463,6 +463,7 @@ struct Environment {
                "__round__",
                std::make_shared<BuiltinFunction>(aten::round, at::nullopt))},
           {"hash", std::make_shared<BuiltinFunction>(aten::hash, at::nullopt)},
+          {"id", std::make_shared<BuiltinFunction>(prim::id, at::nullopt)},
           {"min", std::make_shared<BuiltinFunction>(prim::min, at::nullopt)},
           {"max", std::make_shared<BuiltinFunction>(prim::max, at::nullopt)},
           {"abs", std::make_shared<BuiltinFunction>(prim::abs, at::nullopt)},
