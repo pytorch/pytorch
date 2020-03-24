@@ -154,7 +154,8 @@ Tensor q_maxpool_2d(
           .dtype(toQIntType(qx.scalar_type()))
           .memory_format(qx.suggest_memory_format()),
         qx.q_scale(),
-        qx.q_zero_point());
+        qx.q_zero_point(),
+        c10::nullopt);
     qmaxpool_2d_nhwc_stub(qx.device().type(), qx, iC, iH, iW, oH, oW, kH, kW, sH, sW, pH, pW, dH, dW, qy);
     return qy;
   } else {
