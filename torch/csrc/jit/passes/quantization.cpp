@@ -176,6 +176,8 @@ std::vector<Value*> getGeneralOpTensorInputs(Node* n) {
       "view",
       "transpose",
       "contiguous",
+      "permute",
+      "repeat_interleave",
       // TODO: sort returns a tuple of Tensors, we have
       // to extend the API to support that
       // "sort",

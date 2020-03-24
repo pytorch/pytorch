@@ -2239,6 +2239,8 @@ graph(%input, %weight):
                 x = F.upsample(x, (32, 32))
                 x = F.upsample_bilinear(x, (32, 32))
                 x = F.upsample_nearest(x, (32, 32))
+                x = x.permute(0, 2, 3, 1)
+                x = torch.repeat_interleave(x, 3, 1)
                 x = self.conv(x)
                 return x
 
