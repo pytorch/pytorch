@@ -73,9 +73,7 @@ using namespace ::c10::aten;
 }
 
 struct Function;
-namespace script {
 struct MatchedSchema;
-} // namespace script
 
 // Graph represents one "function" of computation.
 // It uses a simple ownership model where the graph owns all the nodes inside
@@ -1134,10 +1132,10 @@ struct Graph {
 
   TORCH_API Value* insertFunctionCall(
       Function* callee,
-      const script::MatchedSchema& matched);
+      const MatchedSchema& matched);
   TORCH_API Value* insertMethodCall(
       std::string method_name,
-      const script::MatchedSchema& matched);
+      const MatchedSchema& matched);
 
   // Note: defined in python_ir.cpp and can be used only in python extension
   Node* createPythonOp(

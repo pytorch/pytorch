@@ -12,8 +12,22 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+constexpr auto kDefaultNumSendRecvThreads = 4;
+
 struct ProcessGroupRpcBackendOptions : public RpcBackendOptions {
-  ProcessGroupRpcBackendOptions() = default;
+  ProcessGroupRpcBackendOptions(
+      int num_send_recv_threads,
+      std::chrono::milliseconds rpc_timeout,
+      std::string init_method)
+      : RpcBackendOptions(rpc_timeout, init_method),
+        numSendRecvThreads(num_send_recv_threads) {
+    TORCH_CHECK(
+        num_send_recv_threads > 0,
+        "Cannot create ProcessGroup RPC backend with ",
+        num_send_recv_threads,
+        " threads in the thread-pool.");
+  }
+
   int numSendRecvThreads;
 };
 
@@ -138,6 +152,11 @@ class ProcessGroupAgent : public RpcAgent {
   void handleSend(const SendWork& work);
   // put RecvWork into a queue and notify the worker thread
   void enqueueRecv(RecvWork work);
+  // handle a RecvWork request. Return true if we should increment recvCounts,
+  // false if not (i.e. if the RPC timed out and we are getting a result after
+  // the timeout). This ensures that the messages accounted for in
+  // hasPendingMessage() are tallied properly during a graceful shutdown.
+  bool handleRecv(RecvWork& work);
   // Loop for receiving messages. Calls listenLoopInternal and handles errors
   // such as timeouts on the process group.
   virtual void listenLoopInternal();
@@ -160,6 +179,7 @@ class ProcessGroupAgent : public RpcAgent {
   // futures_ map. It is also removed from the futureTimeouts_ map since these
   // maps are kept in sync.
   void markFutureWithError(Message& message);
+  void markFutureWithError(int64_t id, std::string errorMsg);
 
   // Note [Termination Detection]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -217,6 +237,16 @@ class ProcessGroupAgent : public RpcAgent {
   // interruptible in shutdown().
   std::mutex recvWorkMutex_;
   std::shared_ptr<c10d::ProcessGroup::Work> recvWork_;
+  // Map of dst rank to current oustanding sends that we are waiting on. In the
+  // case of a call to ::shutdown() while we are still waiting on these sends,
+  // the pending sends contained in this map will be aborted, allowing the
+  // waiting thread to be unblocked.
+  std::unordered_map<
+      worker_id_t,
+      std::set<std::shared_ptr<c10d::ProcessGroup::Work>>>
+      currentPendingSends_;
+  // Lock to serialize access to the above map.
+  std::mutex pendingSendMutex_;
   // A threadPool that processing both SendWork and RecvWork. There are two
   // motivations for adding a ThreadPool:
   // (1) RPC serialization/deserialization and processing can be expensive,
@@ -250,6 +280,10 @@ class ProcessGroupAgent : public RpcAgent {
   std::mutex metricsMutex_;
   std::vector<std::unique_ptr<AverageMetricsTracker>> metrics_;
   void addGilWaitTime(const std::chrono::microseconds gilWaitTime) override;
+
+  std::atomic<int32_t> clientActiveCalls_{0};
+  std::atomic<int32_t> serverActiveCalls_{0};
+  std::atomic<int32_t> serverActiveAsyncCalls_{0};
 };
 
 } // namespace rpc

@@ -108,7 +108,10 @@ void ThreadPool::main_loop(std::size_t index) {
         } else {
           tasks.no_id();
         }
-      } catch (const std::exception&) {
+      } catch (const std::exception& e) {
+        LOG(ERROR) << "Exception in thread pool task: " << e.what();
+      } catch (...) {
+        LOG(ERROR) << "Exception in thread pool task: unknown";
       }
 
       // Update status of empty, maybe

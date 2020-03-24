@@ -7,9 +7,10 @@ import torch
 from torch import nn
 import torch.nn.parallel as dp
 from torch.testing._internal.common_cuda import TEST_MULTIGPU, TEST_CUDA
-from torch.testing._internal.common_utils import run_tests, TestCase, skipIfRocm, repeat_test_for_types, ALL_TENSORTYPES, PY3
+from torch.testing._internal.common_utils import run_tests, TestCase, repeat_test_for_types, ALL_TENSORTYPES, PY3
 from torch.testing._internal.common_utils import _assertGradAndGradgradChecks
 from torch.testing._internal.common_utils import dtype2prec_DONTUSE
+from torch.testing._internal.common_utils import skipIfRocm
 import torch.nn.functional as F
 
 torch.set_default_dtype(torch.double)
@@ -52,7 +53,7 @@ class TestDataParallel(TestCase):
                 return self.rnn(x)
 
         def step(model):
-            opt = torch.optim.SGD(model.parameters(), lr=0.1)
+            opt = torch.optim.SGD(model.parameters(), lr=10)
             input = torch.ones(4, 4, 300).to(0)
             output = model(input)
             loss = F.mse_loss(output[0], torch.zeros_like(output[0]))
@@ -71,7 +72,7 @@ class TestDataParallel(TestCase):
         step(model_dp)
 
         for p1, p2 in zip(model.parameters(), model_dp.parameters()):
-            p1.allclose(p2)
+            self.assertTrue(p1.allclose(p2))
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_parallel_apply(self):
@@ -257,7 +258,6 @@ class TestDataParallel(TestCase):
         test(s.cuda(1), None, inp, [1, 0], should_fail=False)
 
     @unittest.skipIf(not TEST_MULTIGPU or not PY3, "multi-GPU not supported")
-    @skipIfRocm
     def test_data_parallel_model_no_refcycles(self):
         # Python 2.7 will create reference cycles with the following
         # Module on multiple GPUs, but Python 3 shouldn't unless
@@ -652,6 +652,21 @@ class TestDataParallel(TestCase):
         module = Net(self).cuda()
         dpm = dp.DataParallel(module)
         dpm(torch.rand(4, 3, 6, 5))
+
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skipIfRocm
+    def test_autocast(self):
+        class Model(torch.nn.Linear):
+            def __init__(self):
+                super(Model, self).__init__(8, 8)
+
+            @torch.cuda.amp.autocast()
+            def forward(self, input):
+                return super(Model, self).forward(input)
+
+        model = dp.DataParallel(Model().cuda().to(dtype=torch.float32))
+        input = torch.randn((8, 8), dtype=torch.float32, device="cuda")
+        self.assertTrue(model(input).dtype is torch.float16)
 
 
 if __name__ == '__main__':
