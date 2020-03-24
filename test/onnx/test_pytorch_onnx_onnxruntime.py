@@ -458,6 +458,16 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.arange(-5, 5).to(dtype=torch.float32)
         self.run_test(MyModel(), x)
 
+    @skipIfUnsupportedMinOpsetVersion(12)
+    @unittest.skip("Enable once inverse is supported in ORT")
+    def test_inverse(self):
+        class Inverse(torch.nn.Module):
+            def forward(self, x):
+                return torch.inverse(x)
+
+        x = torch.randn(2, 3, 4, 4)
+        self.run_test(Inverse(), x)
+
     def test_clamp(self):
         class ClampModel(torch.nn.Module):
             def forward(self, x):
