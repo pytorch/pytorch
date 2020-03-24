@@ -181,6 +181,30 @@ class TestAutograd(TestCase):
                 'Legacy autograd function with non-static forward method is deprecated'):
             MyFunction()(torch.randn(3, 4))
 
+    def test_custom_function_exception(self):
+        class SimulateBackwardError(Function):
+            _simulate_error = True
+
+            @staticmethod
+            def forward(ctx, input):
+                return input
+
+            @staticmethod
+            @once_differentiable
+            def backward(ctx, input):
+                if SimulateBackwardError._simulate_error:
+                    raise Exception("Simulate error on backward pass")
+                else:
+                    return input
+
+        t1 = torch.rand((3, 3), requires_grad=True)
+        t2 = torch.rand((3, 3), requires_grad=True)
+
+        tmp = (t1 + t2) * (t1 + t2)
+        t3 = SimulateBackwardError.apply(tmp)
+        with self.assertRaisesRegex(RuntimeError, "Simulate error on backward pass"):
+            t3.sum().backward()
+
     def test_invalid_gradients(self):
         class MyFunction(Function):
             @staticmethod
@@ -5445,6 +5469,8 @@ class TestAutogradDeviceType(TestCase):
         gradgradcheck(where, [cond, x, y], [torch.randn(5, 5, 5, device=device)])
 
     @skipCUDAIfRocm
+    @unittest.skipIf(IS_WINDOWS, """Test is flaky on Windows:
+            https://github.com/pytorch/pytorch/issues/34870""")
     def test_ctc_loss(self, device):
         batch_size = 64
         num_labels = 101

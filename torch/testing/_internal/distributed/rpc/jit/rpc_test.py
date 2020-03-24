@@ -757,3 +757,32 @@ class JitRpcTest(LocalRRefTest, JitRpcAsyncOpTest, RpcAgentTestFixture):
                 RuntimeError, "RRef jit pickling is only allowed inside RPC calls"
             ):
                 save_rref(rref_var, fname)
+
+    @dist_init
+    def test_python_future_with_jit(self):
+        dst_rank = (self.rank + 1) % self.world_size
+        inputs = (torch.tensor([1, 1]), torch.tensor([2, 2]))
+        ret_fut = rpc.rpc_async(
+            "worker{}".format(dst_rank),
+            two_args_two_kwargs,
+            args=inputs
+        )
+        expected_res = torch.tensor([10, 10])
+        @torch.jit.script
+        def future_wait_in_script(fut):
+            # type: (Future[Tensor]) -> Tensor
+            return fut.wait()
+
+        self.assertEqual(future_wait_in_script(ret_fut), expected_res)
+
+        @torch.jit.script
+        def future_return_to_python(dst_rank, inputs):
+            # type: (int, Tuple[Tensor, Tensor]) -> Future[Tensor]
+            return rpc.rpc_async(
+                "worker{}".format(dst_rank),
+                two_args_two_kwargs,
+                inputs
+            )
+
+        fut_res = future_return_to_python(dst_rank, inputs)
+        self.assertEqual(fut_res.wait(), expected_res)

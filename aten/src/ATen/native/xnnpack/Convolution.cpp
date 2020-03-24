@@ -1,5 +1,7 @@
 #ifdef USE_XNNPACK
 
+#include <vector>
+
 #include <ATen/native/xnnpack/Common.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/utils/ParamUtils.h>
@@ -69,7 +71,7 @@ bool available(
 
 // TODO: Decouple and improve error handling and messages.
 bool usable(const Tensor& input) {
-         // Input
+       // Input
   return (4 == input.ndimension()) &&
          (c10::DeviceType::CPU == input.device().type()) &&
          (kFloat == input.scalar_type()) &&
@@ -78,53 +80,6 @@ bool usable(const Tensor& input) {
          (input.size(Layout::Activation4D::height) > 0) &&
          (input.size(Layout::Activation4D::width) > 0) &&
          true;
-}
-
-Tensor run(
-    const ContextConv2D& context,
-    const Tensor& input) {
-  using namespace internal;
-
-  const Tensor input_nhwc = input.contiguous(MemoryFormat::ChannelsLast);
-  const Tensor padded_input_nhwc = allocate_padded_if_needed(input_nhwc);
-
-  TORCH_CHECK(
-      usable(padded_input_nhwc),
-      "XNNPACK Convolution not usable! "
-      "Reason: The provided input tensor is either invalid or unsupported by XNNPACK.");
-
-  Tensor output = empty_with_tail_padding(
-      conv_output_size(
-          padded_input_nhwc.sizes(),
-          context.weight_size_,
-          context.padding_,
-          context.stride_,
-          context.dilation_),
-      padded_input_nhwc.options().dtype(),
-      MemoryFormat::ChannelsLast);
-
-  const xnn_status setup_status = xnn_setup_convolution2d_nhwc_f32(
-      context.op.get(),                                      // operator
-      padded_input_nhwc.size(Layout::Activation4D::batch),   // batch_size
-      padded_input_nhwc.size(Layout::Activation4D::height),  // input_height
-      padded_input_nhwc.size(Layout::Activation4D::width),   // input_width
-      padded_input_nhwc.data_ptr<float>(),                   // input
-      output.data_ptr<float>(),                              // output
-      caffe2::xnnpack_threadpool());                         // threadpool
-
-  TORCH_CHECK(
-      xnn_status_success == setup_status,
-      "xnn_setup_convolution2d_nhwc_f32 failed!");
-
-  const xnn_status run_status = xnn_run_operator(
-      context.op.get(),               // operator
-      caffe2::xnnpack_threadpool());  // threadpool
-
-  TORCH_INTERNAL_ASSERT(
-      xnn_status_success == run_status,
-      "xnn_run_operator failed!");
-
-  return output.contiguous(input.suggest_memory_format());
 }
 
 Tensor create_and_run(
@@ -219,31 +174,78 @@ ContextConv2D create(
   };
 }
 
-c10::intrusive_ptr<xnnpack::XNNPackConv2dOpContext> Conv2dPrePack::operator()(
-  Tensor weight,
-  c10::optional<Tensor> bias,
-  std::vector<int64_t> stride,
-  std::vector<int64_t> padding,
-  std::vector<int64_t> dilation,
-  int64_t groups
-  ) {
-    return xnnpack::XNNPackConv2dOpContext::create_context(
-        std::move(weight),
-        std::move(bias),
-        std::move(padding),
-        std::move(stride),
-        std::move(dilation),
-        groups,
-        {},
-        {});
+Tensor run(
+    const ContextConv2D& context,
+    const Tensor& input) {
+  using namespace internal;
+
+  const Tensor input_nhwc = input.contiguous(MemoryFormat::ChannelsLast);
+  const Tensor padded_input_nhwc = allocate_padded_if_needed(input_nhwc);
+
+  TORCH_CHECK(
+      usable(padded_input_nhwc),
+      "XNNPACK Convolution not usable! "
+      "Reason: The provided input tensor is either invalid or unsupported by XNNPACK.");
+
+  Tensor output = empty_with_tail_padding(
+      conv_output_size(
+          padded_input_nhwc.sizes(),
+          context.weight_size_,
+          context.padding_,
+          context.stride_,
+          context.dilation_),
+      padded_input_nhwc.options().dtype(),
+      MemoryFormat::ChannelsLast);
+
+  const xnn_status setup_status = xnn_setup_convolution2d_nhwc_f32(
+      context.op.get(),                                      // operator
+      padded_input_nhwc.size(Layout::Activation4D::batch),   // batch_size
+      padded_input_nhwc.size(Layout::Activation4D::height),  // input_height
+      padded_input_nhwc.size(Layout::Activation4D::width),   // input_width
+      padded_input_nhwc.data_ptr<float>(),                   // input
+      output.data_ptr<float>(),                              // output
+      caffe2::xnnpack_threadpool());                         // threadpool
+
+  TORCH_CHECK(
+      xnn_status_success == setup_status,
+      "xnn_setup_convolution2d_nhwc_f32 failed!");
+
+  const xnn_status run_status = xnn_run_operator(
+      context.op.get(),               // operator
+      caffe2::xnnpack_threadpool());  // threadpool
+
+  TORCH_INTERNAL_ASSERT(
+      xnn_status_success == run_status,
+      "xnn_run_operator failed!");
+
+  return output.contiguous(input.suggest_memory_format());
 }
 
-Tensor Conv2dPacked::operator()(
-  const Tensor& input,
-  const c10::intrusive_ptr<xnnpack::XNNPackConv2dOpContext>& op_context) {
-    return
-      xnnpack::internal::convolution2d::run(
-          (op_context.get())->get_context(), input);
+c10::intrusive_ptr<xnnpack::Conv2dOpContext>
+    createConv2dClampPrePackOpContext(
+        Tensor weight,
+        c10::optional<Tensor> bias,
+        std::vector<int64_t> stride,
+        std::vector<int64_t> padding,
+        std::vector<int64_t> dilation,
+        int64_t groups,
+        c10::optional<double> output_min,
+        c10::optional<double> output_max) {
+      return xnnpack::XNNPackConv2dOpContext::create_context(
+          std::move(weight),
+          std::move(bias),
+          std::move(padding),
+          std::move(stride),
+          std::move(dilation),
+          groups,
+          output_min,
+          output_max);
+}
+
+Tensor Conv2dClampRun::operator()(
+    const Tensor& input,
+    const c10::intrusive_ptr<xnnpack::Conv2dOpContext>& op_context) {
+  return op_context->run(input);
 }
 
 } // namespace convolution2d
