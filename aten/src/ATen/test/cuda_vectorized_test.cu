@@ -5,7 +5,6 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/core/Array.h>
 
-using namespace at;
 using namespace at::native;
 using namespace at::native::memory;
 
@@ -23,23 +22,6 @@ void reset_buffers() {
     buffer2[2].y = -(i + 0.1);
     buffer2[2].z = -(i + 0.2);
     buffer2[2].w = -(i + 0.3);
-  }
-}
-
-Tensor thread_work_index() {
-  auto t = at::empty({4096 * thread_work_size}, kCUDA);
-  float thread_work_index_ = 0;
-  auto iter = TensorIterator::nullary_op(t);
-  gpu_kernel(iter, [thread_work_index_]GPU_LAMBDA() mutable -> float {
-    return thread_work_index_++;
-  });
-  return t;
-}
-
-TEST(TestLoops, MutableLambda) {
-  auto t = thread_work_index();
-  for (float i = 0; i < thread_work_size; i++) {
-    ASSERT_EQ((t == i).to(kLong).sum().item<int64_t>(), 4096);
   }
 }
 
