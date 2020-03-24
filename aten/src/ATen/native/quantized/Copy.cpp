@@ -1,7 +1,7 @@
 #include <ATen/native/quantized/Copy.h>
 
 #include <ATen/ATen.h>
-#include <ATen/quantized/quantize.h>
+#include <ATen/quantized/Quantizer.h>
 
 namespace at {
 namespace native {

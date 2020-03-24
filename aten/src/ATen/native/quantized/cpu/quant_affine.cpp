@@ -1,6 +1,6 @@
 #include <ATen/Parallel.h>
 #include <ATen/Dispatch.h>
-#include <ATen/quantized/quantize.h>
+#include <ATen/quantized/Quantizer.h>
 #include <ATen/native/quantized/quant_affine.h>
 
 #ifdef USE_FBGEMM
@@ -16,7 +16,7 @@ namespace {
 
 #ifdef USE_FBGEMM
 void quantize_tensor_affine_cpu(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point) {
-  AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), "quantize_tensor_affine", [&]() {  
+  AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), "quantize_tensor_affine_cpu", [&]() {  
     const float* rd = rtensor.data_ptr<float>();
     auto qd = reinterpret_cast<underlying_t*>(qtensor.data_ptr<scalar_t>());
     fbgemm::TensorQuantizationParams qparams;
@@ -39,7 +39,7 @@ void quantize_tensor_affine_cpu(Tensor rtensor, Tensor qtensor, double scale, in
 }
 
 void dequantize_tensor_affine_cpu(Tensor qtensor, Tensor rtensor, double scale, int64_t zero_point) {
-  AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), "dequantize_tensor_affine", [&]() {  
+  AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), "dequantize_tensor_affine_cpu", [&]() {  
     const auto* qd = reinterpret_cast<const underlying_t*>(qtensor.data_ptr<scalar_t>());
     fbgemm::TensorQuantizationParams qparams;
     qparams.scale = scale;
@@ -133,7 +133,7 @@ void quantize_tensor_arm<c10::quint8>(
 #endif // __ARM_NEON__
 
 void quantize_tensor_affine_cpu(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point) {
-  AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), "quantize_tensor_affine", [&]() {
+  AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), "quantize_tensor_affine_cpu", [&]() {
     TORCH_CHECK(rtensor.is_contiguous(), "Float tensor should be contiguous");
     const float* const rdata = rtensor.data_ptr<float>();
     // If QEngine is set to QNNPACK, use caffe2 specialized Int8Quantize implementation on ARM
@@ -151,8 +151,8 @@ void quantize_tensor_affine_cpu(Tensor rtensor, Tensor qtensor, double scale, in
   });
 }
 
-void dequantize_tensor_per_channel_affine_cpudequantize_tensor_affine_cpu(Tensor qtensor, Tensor rtensor, double scale, int64_t zero_point) {
-  AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), "dequantize_tensor_affine", [&]() {
+void dequantize_tensor_affine_cpu(Tensor qtensor, Tensor rtensor, double scale, int64_t zero_point) {
+  AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), "dequantize_tensor_affine_cpu", [&]() {
     const auto* qd = qtensor.data_ptr<scalar_t>();
     float* rd = rtensor.data_ptr<float>();
     auto numel = qtensor.numel();
@@ -169,7 +169,7 @@ void quantize_tensor_per_channel_affine_cpu(Tensor rtensor,
                                           Tensor scales,
                                           Tensor zero_points,
                                           int64_t axis) {
-  AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), "quantize_tensor_per_channel_affine", [&]() {
+  AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), "quantize_tensor_per_channel_affine_cpu", [&]() {
     int64_t batches = size_to_dim_(axis, rtensor.sizes());
     int64_t elements_per_channel = size_from_dim_(axis + 1, rtensor.sizes());
     int64_t channel = rtensor.size(axis);
@@ -193,7 +193,7 @@ void dequantize_tensor_per_channel_affine_cpu(Tensor qtensor,
                                             Tensor scales,
                                             Tensor zero_points,
                                             int64_t axis) {
-  AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), "dequantize_tensor_per_channel_affine", [&]() {
+  AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), "dequantize_tensor_per_channel_affine_cpu", [&]() {
     int64_t batches = size_to_dim_(axis, rtensor.sizes());
     int64_t elements_per_channel = size_from_dim_(axis + 1, rtensor.sizes());
     int64_t channel = rtensor.size(axis);
@@ -215,6 +215,7 @@ void dequantize_tensor_per_channel_affine_cpu(Tensor qtensor,
 }
 } // anonymous namespace
 
+// Note: currently, quantize* functions are naively dispatched to a single realization. Move everything to the QuantizedOpKernels, once optimized versions are available.
 REGISTER_ARCH_DISPATCH(quantize_tensor_affine_stub, DEFAULT,  &quantize_tensor_affine_cpu);
 REGISTER_AVX_DISPATCH(quantize_tensor_affine_stub,  &quantize_tensor_affine_cpu);
 REGISTER_AVX2_DISPATCH(quantize_tensor_affine_stub,  &quantize_tensor_affine_cpu);

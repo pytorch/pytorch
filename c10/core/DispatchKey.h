@@ -208,6 +208,9 @@ static inline DispatchKey XLATensorId() {
 namespace std {
 template <>
 struct hash<c10::DispatchKey> {
+  typedef size_t result_type;
+  typedef c10::DispatchKey argument_type;
+
   size_t operator()(c10::DispatchKey x) const {
     return static_cast<size_t>(x);
   }

@@ -1,7 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/native/UpSample.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
-#include <ATen/quantized/quantize.h>
+#include <ATen/quantized/Quantizer.h>
 
 #include <algorithm>
 #include <cmath>

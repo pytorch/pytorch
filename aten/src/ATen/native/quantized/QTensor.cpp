@@ -1,5 +1,4 @@
 #include <ATen/ATen.h>
-#include <ATen/native/Copy.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
@@ -140,6 +139,8 @@ Tensor quantized_clone(const Tensor& self, c10::optional<c10::MemoryFormat> opti
 }
 
 bool quantized_equal(const Tensor& self, const Tensor& other) {
+  TORCH_CHECK(self.device() == kCPU && other.device() == kCPU, 
+    "quantized_equal is implemented only for the QuantizedCPU backend");
   if (!other.is_quantized()) {
     return false;
   }
@@ -164,7 +165,6 @@ bool quantized_equal(const Tensor& self, const Tensor& other) {
   auto self_contig = self.contiguous();
   auto other_contig = other.contiguous();
 
-  TORCH_CHECK(!self.is_cuda(), "quantized_equal is implemented only for the QuantizedCPU backend");
   void* self_data = self_contig.data_ptr();
   void* other_data = other_contig.data_ptr();
   return 0 == memcmp(self_data, other_data, self.numel() * self.element_size());
