@@ -1504,12 +1504,22 @@ class TestSparse(TestCase):
         self._test_log1p_tensor(input, torch.zeros([5, 6, 0]))
 
     def test_mv(self):
-        i = self.index_tensor([[0, 1, 1], [2, 0, 2]])
-        v = self.value_tensor([3, 4, 5])
-        x = self.sparse_tensor(i, v, torch.Size([2, 3]))
-        y = torch.ones(3, device=self.device)
+        def test_shape(di, dj, nnz):
+            x, _, _ = self._gen_sparse(2, nnz, [di, dj])
+            t = torch.randn(dj)
 
-        self.assertEqual(self.value_tensor([3, 9]), x.matmul(y))
+            res = x.matmul(t)
+            expected = self.safeToDense(x).matmul(t)
+            self.assertEqual(res, expected)
+
+        with self.assertRaisesRegex(RuntimeError, "size or dim is incorrect"):
+            test_shape(10, 100, 20)
+            test_shape(100, 1000, 20)
+            test_shape(64, 10000, 20)
+            test_shape(0, 100, 0)
+            test_shape(10, 0, 0)
+            test_shape(10, 100, 0)
+            test_shape(10, 100, 20)
 
     def test_sparse_add_coalesce(self):
         i = self.index_tensor([[1, 2, 1]])
