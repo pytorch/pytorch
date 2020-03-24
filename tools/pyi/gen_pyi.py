@@ -92,6 +92,7 @@ blacklist = [
     'div_',
     'div_out',
     'floor_divide', 'floor_divide_', 'floor_divide_out',
+    'dequantize',
 ]
 
 
@@ -111,7 +112,7 @@ def type_to_python(typename, size=None):
 
     typename = {
         'Device': 'Union[_device, str, None]',
-        'Generator*': 'Generator',
+        'Generator': 'Generator',
         'IntegerTensor': 'Tensor',
         'Scalar': 'Number',
         'ScalarType': '_dtype',
@@ -161,6 +162,8 @@ def arg_to_type_hint(arg):
         elif isinstance(default, str) and default.startswith('{') and default.endswith('}'):
             if arg['dynamic_type'] == 'Tensor' and default == '{}':
                 default = None
+            elif arg['dynamic_type'] == 'Generator' and default == '{}':
+                default = None
             elif arg['dynamic_type'] == 'IntArrayRef':
                 default = '(' + default[1:-1] + ')'
             else:
@@ -176,7 +179,7 @@ def arg_to_type_hint(arg):
 
 
 binary_ops = ('add', 'sub', 'mul', 'div', 'pow', 'lshift', 'rshift', 'mod', 'truediv',
-              'matmul', 'floordiv', 'floor_divide'
+              'matmul', 'floordiv', 'floor_divide',
               'radd', 'rsub', 'rmul', 'rtruediv', 'rfloordiv', 'rpow',          # reverse arithmetic
               'and', 'or', 'xor',                   # logic
               'iadd', 'iand', 'idiv', 'ilshift', 'imul',
