@@ -204,7 +204,8 @@ Tensor qnnpack_add(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
            .dtype(qa.scalar_type())
            .memory_format(qa.suggest_memory_format()),
         scale,
-        zero_point);
+        zero_point,
+        c10::nullopt);
     return _add_out<ReLUFused>(qc, qa, qb);
   }
 };
