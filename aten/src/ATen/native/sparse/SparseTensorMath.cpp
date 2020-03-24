@@ -1480,13 +1480,7 @@ Tensor& bmm_out_sparse_cpu(Tensor& result, const SparseTensor& self, const Tenso
 
   // First need to coalesce to get all of the first dimension indices
   // in order since we'll be sending each matrix into the MM operation
-  SparseTensor self_coalesced;
-
-  if (!self.is_coalesced()){
-    self_coalesced = self.coalesce();
-  } else {
-    self_coalesced = self;
-  }
+  SparseTensor self_coalesced = self.coalesce();
 
   int64_t nnz =        self_coalesced._nnz();
   LongTensor indices = self_coalesced._indices();
