@@ -44,10 +44,10 @@ Tensor repeat_interleave(const Tensor &self, const Tensor &repeats, c10::optiona
      */
     Tensor indices = at::repeat_interleave(repeats_);
 
-    SmallVector<int64_t, 4> indices_sizes(/*n=*/self.dim(), /*value=*/1);
+    SmallVector<int64_t, 4> indices_sizes(/*n=*/input.dim(), /*value=*/1);
     indices_sizes[dim.value()] = indices.size(0);
-    auto self_sizes = self.sizes();
-    SmallVector<int64_t, 4> expand_sizes(self_sizes.begin(), self_sizes.end());
+    auto input_sizes = input.sizes();
+    SmallVector<int64_t, 4> expand_sizes(input_sizes.begin(), input_sizes.end());
     expand_sizes[dim.value()] = indices.size(0);
 
     return input.gather(dim.value(), indices.view(indices_sizes).expand(expand_sizes));
