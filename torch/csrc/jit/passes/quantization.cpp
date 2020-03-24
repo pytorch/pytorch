@@ -165,6 +165,12 @@ std::vector<size_t> getGeneralOpTensorInputIndexes(Node* n) {
     return {0};
   } else if (n->kind() == prim::ListUnpack) {
     return {0};
+  } else if (n->kind() == prim::ListConstruct) {
+    std::vector<size_t> indexes;
+    for (auto i = 0; i < n->inputs().size(); ++i) {
+      indexes.push_back(i);
+    }
+    return indexes;
   }
   return {};
 }
