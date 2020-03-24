@@ -115,8 +115,10 @@ struct GraphTask {
   // tasks are done.
   std::shared_ptr<FutureVariableList> future_result_;
 
+  // Final callbacks installed during execution of this GraphTask
   std::vector<std::function<void()>> final_callbacks_;
-  // To protect reads and writes to final_callbacks_
+  // To protect reads and writes to final_callbacks_. Intentionally no reusing
+  // mutex_ as the two are protecting different data structures.
   std::mutex final_callbacks_lock_;
 
   GraphTask(
