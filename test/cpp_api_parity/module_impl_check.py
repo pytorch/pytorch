@@ -17,16 +17,12 @@
 import tempfile
 import shutil
 from string import Template
-import unittest
 import types
 
 import torch
-import torch.testing._internal.common_nn as common_nn
-from torch.testing._internal.common_cuda import TEST_CUDA
-from cpp_api_parity.utils import TorchNNModuleTestParams, CppArg, TORCH_NN_COMMON_TEST_HARNESS, \
-    compile_cpp_code_inline, convert_to_list, set_python_tensors_requires_grad, move_python_tensors_to_device, \
-    has_test, add_test, set_cpp_tensors_requires_grad, move_cpp_tensors_to_device, is_criterion_test, \
-    compute_cpp_args_construction_stmts_and_forward_arg_symbols, serialize_arg_dict_as_script_module, \
+from cpp_api_parity.utils import TorchNNModuleTestParams, TORCH_NN_COMMON_TEST_HARNESS, \
+    compile_cpp_code_inline, set_python_tensors_requires_grad, move_python_tensors_to_device, \
+    add_test, compute_cpp_args_construction_stmts_and_forward_arg_symbols, serialize_arg_dict_as_script_module, \
     compute_arg_dict, decorate_test_fn, compute_temp_file_path, generate_error_msg
 from cpp_api_parity import torch_nn_modules
 
@@ -113,7 +109,7 @@ def run_python_forward_backward(unit_test_class, test_params):
     # Put all gradients into a dict, to be compared later
     python_grad_dict = {}
     for name, param in module.named_parameters():
-        grad = param.grad;
+        grad = param.grad
         if grad.is_sparse:
             grad = grad.to_dense()
         python_grad_dict[name + "_grad"] = grad
@@ -170,12 +166,12 @@ def test_torch_nn_module_variant(unit_test_class, test_params):
     test_forward_backward(unit_test_class, test_params)
 
 def compute_module_name(test_params_dict):
-        fullname = test_params_dict.get('fullname', None)
-        if fullname:
-            module_name = fullname.split('_')[0]
-        else:
-            module_name = test_params_dict.get('module_name')
-        return module_name
+    fullname = test_params_dict.get('fullname', None)
+    if fullname:
+        module_name = fullname.split('_')[0]
+    else:
+        module_name = test_params_dict.get('module_name')
+    return module_name
 
 def process_test_params_for_module(test_params_dict, device, test_instance_class):
     module_name = compute_module_name(test_params_dict)
@@ -240,7 +236,7 @@ def add_torch_nn_module_impl_parity_tests(parity_table, unit_test_class, test_pa
                 test_cuda=test_params_dict.get('test_cuda', True),
                 has_impl_parity=parity_table['torch::nn'][module_full_name][0] and test_params_dict.get('has_parity', True),
                 device=device)
-    
+
             add_test(unit_test_class, test_name, test_fn)
 
 def add_tests(unit_test_class, test_params_dicts, test_instance_class, parity_table, devices):
@@ -278,7 +274,7 @@ def build_cpp_tests(unit_test_class, print_cpp_source=False):
         functions = []
         modules_added_metadata_cpp_sources = set()
         for test_name, test_params in torch_nn_test_params_map.items():
-            if not test_params.module_name in modules_added_metadata_cpp_sources:
+            if test_params.module_name not in modules_added_metadata_cpp_sources:
                 cpp_sources += torch_nn_modules.module_metadata_map.get(test_params.module_name, torch_nn_modules.TorchNNModuleMetadata()).cpp_sources
                 modules_added_metadata_cpp_sources.add(test_params.module_name)
             cpp_sources += generate_test_cpp_sources(test_params=test_params, template=TORCH_NN_MODULE_TEST_FORWARD_BACKWARD)

@@ -102,7 +102,7 @@ def add_test(unit_test_class, test_name, test_fn):
 
 def set_cpp_tensors_requires_grad(cpp_tensor_stmts, cpp_tensors):
     assert len(cpp_tensor_stmts) == len(cpp_tensors)
-    return ['{}.requires_grad_(true)'.format(tensor_stmt) if tensor.dtype != torch.long else tensor_stmt \
+    return ['{}.requires_grad_(true)'.format(tensor_stmt) if tensor.dtype != torch.long else tensor_stmt
         for tensor_stmt, (_, tensor) in zip(cpp_tensor_stmts, cpp_tensors)]
 
 def move_cpp_tensors_to_device(cpp_tensor_stmts, device):
@@ -139,11 +139,11 @@ def compute_cpp_args_construction_stmts_and_forward_arg_symbols(test_params):
 
 def serialize_arg_dict_as_script_module(arg_dict):
     arg_dict_flat = {
-        arg_name: arg_value \
-            for arg_name, arg_value in \
-                arg_dict['input'] + \
-                arg_dict['target'] + \
-                arg_dict['extra_args'] + \
+        arg_name: arg_value
+            for arg_name, arg_value in
+                arg_dict['input'] +
+                arg_dict['target'] +
+                arg_dict['extra_args'] +
                 arg_dict['other']
     }
     arg_dict_module = torch.nn.Module()
@@ -187,7 +187,7 @@ def compute_arg_dict(test_params_dict, test_instance):
 
     def put_args_into_arg_dict(arg_type, arg_type_prefix, args):
         for i, arg in enumerate(args):
-            arg_dict[arg_type].append(CppArg(name=arg_type_prefix+str(i), value=arg))
+            arg_dict[arg_type].append(CppArg(name=arg_type_prefix + str(i), value=arg))
 
     put_args_into_arg_dict('input', 'i', convert_to_list(test_instance._get_input()))
     if is_criterion_test(test_instance):

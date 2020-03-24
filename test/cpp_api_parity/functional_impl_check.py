@@ -17,16 +17,12 @@
 import tempfile
 import shutil
 from string import Template
-import unittest
 import re
 
 import torch
-import torch.testing._internal.common_nn as common_nn
-from torch.testing._internal.common_cuda import TEST_CUDA
-from cpp_api_parity.utils import TorchNNFunctionalTestParams, CppArg, TORCH_NN_COMMON_TEST_HARNESS, \
-    compile_cpp_code_inline, convert_to_list, set_python_tensors_requires_grad, move_python_tensors_to_device, \
-    has_test, add_test, set_cpp_tensors_requires_grad, move_cpp_tensors_to_device, is_criterion_test, \
-    compute_cpp_args_construction_stmts_and_forward_arg_symbols, serialize_arg_dict_as_script_module, \
+from cpp_api_parity.utils import TorchNNFunctionalTestParams, TORCH_NN_COMMON_TEST_HARNESS, \
+    compile_cpp_code_inline, set_python_tensors_requires_grad, move_python_tensors_to_device, \
+    add_test, compute_cpp_args_construction_stmts_and_forward_arg_symbols, serialize_arg_dict_as_script_module, \
     compute_arg_dict, decorate_test_fn, compute_temp_file_path, generate_error_msg
 from cpp_api_parity import torch_nn_functionals
 
@@ -159,7 +155,7 @@ def test_torch_nn_functional_variant(unit_test_class, test_params):
 def add_torch_nn_functional_impl_parity_tests(parity_table, unit_test_class, test_params_dicts, test_instance_class, devices):
     for test_params_dict in test_params_dicts:
         # Skip all `torch.nn` module tests, since they are handled by another test suite.
-        if not 'FunctionalModule' in str(test_params_dict.get('constructor', '')):
+        if 'FunctionalModule' not in str(test_params_dict.get('constructor', '')):
             continue
 
         functional_name = compute_functional_name(test_params_dict)
@@ -221,7 +217,7 @@ def build_cpp_tests(unit_test_class, print_cpp_source=False):
         functions = []
         functionals_added_metadata_cpp_sources = set()
         for test_name, test_params in torch_nn_test_params_map.items():
-            if not test_params.functional_name in functionals_added_metadata_cpp_sources:
+            if test_params.functional_name not in functionals_added_metadata_cpp_sources:
                 cpp_sources += torch_nn_functionals.functional_metadata_map.get(test_params.functional_name, torch_nn_functionals.TorchNNFunctionalMetadata()).cpp_sources
                 functionals_added_metadata_cpp_sources.add(test_params.functional_name)
             cpp_sources += generate_test_cpp_sources(test_params=test_params, template=TORCH_NN_FUNCTIONAL_TEST_FORWARD)

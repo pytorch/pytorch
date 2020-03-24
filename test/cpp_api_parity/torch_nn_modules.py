@@ -1,5 +1,4 @@
 from collections import namedtuple
-import torch
 
 TorchNNModuleMetadata = namedtuple(
     'TorchNNModuleMetadata',

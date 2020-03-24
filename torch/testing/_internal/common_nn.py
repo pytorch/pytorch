@@ -2901,8 +2901,8 @@ new_module_tests = [
 
 # add conv padding mode tests:
 for padding_mode, cpp_padding_mode in zip(
-    ['reflect', 'circular', 'replicate', 'zeros'],
-    ['torch::kReflect', 'torch::kCircular', 'torch::kReplicate', 'torch::kZeros']):
+        ['reflect', 'circular', 'replicate', 'zeros'],
+        ['torch::kReflect', 'torch::kCircular', 'torch::kReplicate', 'torch::kZeros']):
     # conv signature:
     #     in_channels, out_channels, kernel_size, stride=1,
     #     padding=0, dilation=1, groups=1,
