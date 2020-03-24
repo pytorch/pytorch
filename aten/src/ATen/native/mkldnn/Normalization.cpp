@@ -34,6 +34,35 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm_backward(
   AT_ERROR("mkldnn_batch_norm_backward: ATen not compiled with MKLDNN support");
 }
 
+std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm_relu(
+    const Tensor& self,
+    const Tensor& weight,
+    const Tensor& bias,
+    const Tensor& running_mean,
+    const Tensor& running_var,
+    bool train,
+    double momentum,
+    double eps,
+    bool fuse_relu) {
+  AT_ERROR("mkldnn_batch_norm_relu: ATen not compiled with MKLDNN support");
+}
+
+std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm_relu_backward(
+    const Tensor& grad_output,
+    const Tensor& input,
+    const Tensor& weight,
+    const Tensor& running_mean,
+    const Tensor& running_var,
+    const Tensor& output,
+    const Tensor& save_mean,
+    const Tensor& save_invstd,
+    bool train,
+    double eps,
+    std::array<bool,3> grad_input_mask,
+    bool fuse_relu) {
+  AT_ERROR("mkldnn_batch_norm_relu_backward: ATen not compiled with MKLDNN support");
+}
+
 } // namespace native
 } // namespace at
 
@@ -53,6 +82,38 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
     bool train,
     double momentum,
     double eps) {
+
+  bool fuse_relu = false;
+  return mkldnn_batch_norm_relu(input, weight, bias, running_mean,
+         running_var, train, momentum, eps, fuse_relu);
+}
+
+std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm_backward(
+    const Tensor& grad_output,
+    const Tensor& input,
+    const Tensor& weight,
+    const Tensor& running_mean,
+    const Tensor& running_var,
+    const Tensor& save_mean,
+    const Tensor& save_invstd,
+    bool train,
+    double eps,
+    std::array<bool,3> grad_input_mask) {
+  bool fuse_relu = false;
+  return mkldnn_batch_norm_relu_backward(grad_output, input, weight, running_mean, 
+    running_var, at::empty({}), save_mean, save_invstd, train, eps, grad_input_mask, fuse_relu);
+}
+
+std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm_relu(
+    const Tensor& input,
+    const Tensor& weight,
+    const Tensor& bias,
+    const Tensor& running_mean,
+    const Tensor& running_var,
+    bool train,
+    double momentum,
+    double eps,
+    bool fuse_relu) {
   TORCH_CHECK(input.dim() == 4 || input.dim() == 5,
              "mkldnn_batch_norm: currently mkldnn only support 2d and 3d batchnorm");
   TORCH_CHECK(weight.defined() && bias.defined(),
@@ -64,12 +125,14 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
 
   bool use_running_stat = (running_mean.defined() && running_var.defined());
   ideep::tensor y;
-
+  
+  auto flags = fuse_relu ? ideep::batch_normalization_flag::fuse_norm_relu
+                         : ideep::batch_normalization_flag::use_scale_shift;
   if (train) {
     ideep::tensor saved_mean;
     ideep::tensor saved_var;
     ideep::batch_normalization_forward_training::compute(
-        x, w, b, y, saved_mean, saved_var, momentum, eps);
+        x, w, b, y, saved_mean, saved_var, momentum, eps, flags);
     if (use_running_stat) {
       auto len = x.get_nelems() / w.get_nelems(); // n*h*w
       ideep::tensor m = itensor_from_tensor(running_mean);
@@ -88,10 +151,10 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
       ideep::tensor m = itensor_from_tensor(running_mean);
       ideep::tensor v = itensor_from_tensor(running_var);
       ideep::batch_normalization_forward_inference::compute(
-          x, m, v, w, b, y, eps);
+          x, m, v, w, b, y, eps, flags);
     } else {
       ideep::batch_normalization_forward_inference::compute(
-          x, w, b, y, eps);
+          x, w, b, y, eps, flags);
     }
     return std::make_tuple(
         new_with_itensor_mkldnn(std::move(y), input.options()),
@@ -100,16 +163,19 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
   }
 }
 
-std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm_backward(const Tensor& grad_output,
+std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm_relu_backward(
+    const Tensor& grad_output,
     const Tensor& input,
     const Tensor& weight,
     const Tensor& running_mean,
     const Tensor& running_var,
+    const Tensor& output,
     const Tensor& save_mean,
     const Tensor& save_invstd,
     bool train,
     double eps,
-    std::array<bool,3> grad_input_mask) {
+    std::array<bool,3> grad_input_mask,
+    bool fuse_relu) {
   TORCH_CHECK(train, "mkldnn_batch_norm_backward: currently mkldnn only support train model");
   ideep::tensor& grady = itensor_from_mkldnn(grad_output);
   ideep::tensor& x = itensor_from_mkldnn(input);
@@ -118,8 +184,15 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm_backward(const Tensor& grad
   ideep::tensor& v = itensor_from_mkldnn(save_invstd);
 
   ideep::tensor gradx, gradw, gradb;
-  ideep::batch_normalization_backward::compute(
-      x, m, v, grady, w, gradx, gradw, gradb, eps);
+  if (fuse_relu) {
+    ideep::tensor& y = itensor_from_mkldnn(output);
+    auto flags = ideep::batch_normalization_flag::fuse_norm_relu;
+    ideep::batch_normalization_backward::compute(
+        x, m, v, grady, w, gradx, gradw, gradb, eps, y, flags);
+  } else {
+    ideep::batch_normalization_backward::compute(
+        x, m, v, grady, w, gradx, gradw, gradb, eps);
+  }
 
   if (weight.is_mkldnn()) {
     return std::make_tuple(

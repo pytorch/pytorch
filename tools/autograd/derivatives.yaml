@@ -610,6 +610,9 @@
 - name: mvlgamma(Tensor self, int p) -> Tensor
   self: mvlgamma_backward(grad, self, p)
 
+- name: batch_norm_relu(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool fuse_relu=True) -> (Tensor, Tensor, Tensor)
+  input, weight, bias: batch_norm_relu_backward(grad, input, weight, running_mean, running_var, result0, result1, result2, training, eps, grad_input_mask, fuse_relu)
+
 - name: native_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)
   input, weight, bias: native_batch_norm_backward(grad, input, weight, running_mean, running_var, result1, result2, training, eps, grad_input_mask)
 
