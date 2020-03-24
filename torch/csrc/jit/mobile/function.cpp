@@ -32,10 +32,9 @@ bool Function::append_operator(
   auto opname_c10 = opname;
   std::function<void(Stack&)> fn;
 
-  //   Add "_" prefix to work around the double registration, for operators
-  //   registered in register_mobile_ops.cpp
-  //   and here. TODO: remove it when we have separate build for lite
-  //   interpreter.
+  // Add "_" prefix to work around the double registration, for operators
+  // registered in register_mobile_ops.cpp.
+  // TODO: remove it when we migrate all c10 ops.
   if (opname_c10.name != "aten::Int") {
     opname_c10.name = "_" + opname_c10.name;
   }
