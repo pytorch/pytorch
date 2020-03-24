@@ -136,6 +136,10 @@ std::vector<size_t> getGeneralOpTensorInputIndexes(Node* n) {
       "upsample_bicubic2d",
       "dropout",
       "reshape",
+      "chunk",
+      "view",
+      "transpose",
+      "contiguous",
       // TODO: sort returns a tuple of Tensors, we have
       // to extend the API to support that
       // "sort",
@@ -159,6 +163,14 @@ std::vector<size_t> getGeneralOpTensorInputIndexes(Node* n) {
                  /* call_funcs = */ {},
                  /* aten_funcs = */ single_input_aten_funcs)) {
     return {0};
+  } else if (n->kind() == prim::ListUnpack) {
+    return {0};
+  } else if (n->kind() == prim::ListConstruct) {
+    std::vector<size_t> indexes;
+    for (auto i = 0; i < n->inputs().size(); ++i) {
+      indexes.push_back(i);
+    }
+    return indexes;
   }
   return {};
 }
@@ -176,7 +188,8 @@ bool nodeQuantizable(Node* n) {
       "relu",
       "addmm",
       "matmul",
-      "add_"
+      "add_",
+      "add",
     });
 }
 
@@ -641,12 +654,6 @@ bool isBiasOfConvOrLinear(Value* v) {
       v,
       AtenFuncArgs({{"conv2d", 2}, {"linear", 2}}),
       CallFuncArgs({{"linear", 3}}));
-  if (result) {
-    TORCH_CHECK(
-        v->uses().size() == 1,
-        "Graph mode quantization only supports conv/linear bias being used by"
-        " one node.");
-  }
   return result;
 }
 
@@ -655,12 +662,6 @@ bool isWeightOfConvOrLinear(Value* v) {
       v,
       AtenFuncArgs({{"conv2d", 1}, {"linear", 1}}),
       CallFuncArgs({{"linear", 2}}));
-  if (result) {
-    TORCH_CHECK(
-        v->uses().size() == 1,
-        "Graph mode quantization only supports conv/linear weight being used by"
-        " one node.");
-  }
   return result;
 }
 
@@ -812,9 +813,17 @@ void InsertObserversHelper::fillBoundaryValueMap(
           boundary_value_map_[n->input(i)].insert(input_val);
           caller_to_callee_[n->input(i)] = input_val;
         }
-      }
-      for (Block* subblock : n->blocks()) {
-        blocks_to_visit.push(subblock);
+      } else if (n->kind() == prim::If) {
+        for (Block* subblock : n->blocks()) {
+          blocks_to_visit.push(subblock);
+          for (Value* v : n->outputs()) {
+            boundary_value_map_[v].insert(subblock->outputs()[v->offset()]);
+          }
+        }
+      } else {
+        for (Block* subblock : n->blocks()) {
+          blocks_to_visit.push(subblock);
+        }
       }
     }
   }
@@ -949,10 +958,11 @@ InsertObserversHelper::insertObserversFor(
       script::Module& module,
       std::unordered_set<Value*>& block_observed_values,
       bool is_entry_point) {
-  // graph input/output values, used to skip inserting observers
-  // for input and output of the graph, we have to insert the observers
-  // at call site because the graph itself can be shared
-  std::unordered_set<Value*> graph_inputs_outputs;
+  // input/output values, used to skip inserting observers
+  // for input and output of the block and the owning graph,
+  // we have to insert the observers at call site because
+  // the graph itself can be shared
+  std::unordered_set<Value*> inputs_outputs;
   // list of observer modules for input values
   std::vector<c10::optional<Module>> block_input_observers;
   // list of observer modules for output values
@@ -962,10 +972,15 @@ InsertObserversHelper::insertObserversFor(
   // of the top level module), we can insert observers in the block directly
   if (!is_entry_point) {
     auto* graph = block->owningGraph();
+    // graph inputs/outputs
     for (auto list : {graph->inputs(), graph->outputs()}) {
       for (auto* v : list) {
-        graph_inputs_outputs.insert(v);
+        inputs_outputs.insert(v);
       }
+    }
+    // block outputs
+    for (auto* v : block->outputs()) {
+      inputs_outputs.insert(v);
     }
 
     for (auto* v : block->inputs()) {
@@ -998,7 +1013,7 @@ InsertObserversHelper::insertObserversFor(
 
   std::stack<Block*> blocks_to_visit;
   blocks_to_visit.push(block);
-  auto* self = block->inputs()[0];
+  auto* self = block->owningGraph()->inputs()[0];
   // We first construct a map from value to the module, then
   // insert observers for them later, this is to avoid interference
   // of the inserted observers with the analysis to decide where
@@ -1008,7 +1023,7 @@ InsertObserversHelper::insertObserversFor(
   std::unordered_map<Value*, Module> values_to_observe;
 
   for (auto* v : block->inputs()) {
-    if (!graph_inputs_outputs.count(v) && !values_to_observe.count(v)) {
+    if (!inputs_outputs.count(v) && !values_to_observe.count(v)) {
       if (auto observer_opt = getObserverFor(v)) {
         values_to_observe[v] = *observer_opt;
       }
@@ -1038,23 +1053,61 @@ InsertObserversHelper::insertObserversFor(
           block_observed_values.insert(n->outputs()[idx]);
         }
         for (auto i = 0U; i < n->inputs().size(); ++i) {
-          if (input_observers[i] && !graph_inputs_outputs.count(n->input(i)) &&
+          if (input_observers[i] && !inputs_outputs.count(n->input(i)) &&
               !isObserved(n->input(i), block_observed_values)) {
             values_to_observe[n->inputs()[i]] = *input_observers[i];
             block_observed_values.insert(n->input(i));
           }
         }
         for (auto i = 0U; i < n->outputs().size(); ++i) {
-          if (output_observers[i] && !graph_inputs_outputs.count(n->output(i)) &&
+          if (output_observers[i] && !inputs_outputs.count(n->output(i)) &&
               !isObserved(n->output(i), block_observed_values)) {
             values_to_observe[n->outputs()[i]] = *output_observers[i];
             block_observed_values.insert(n->output(i));
           }
         }
+      } else if (n->kind() == prim::If) {
+        std::vector<size_t> aggregated_observed_outputs;
+        std::vector<c10::optional<script::Module>> aggregated_output_observers;
+        for (Block* subblock : n->blocks()) {
+          // subblock has access to all the values in the scope of prim::If,
+          // so subblock_observed_values == block_observed_values
+          auto info_from_subblock = insertObserversFor(subblock, module, block_observed_values);
+          auto output_observers = std::get<1>(info_from_subblock);
+          auto subblock_observed_outputs = std::get<2>(info_from_subblock);
+          // subblock for prim::If doesn't have inputs
+          if (aggregated_observed_outputs.size() > 0) {
+            TORCH_CHECK(aggregated_observed_outputs == subblock_observed_outputs,
+                        "quantization doesn't work for the case where branches "
+                        "of `if` doesn't both return quantized/non-quantized "
+                        "values");
+          } else {
+            for (auto idx : subblock_observed_outputs) {
+              block_observed_values.insert(n->output(idx));
+            }
+            aggregated_observed_outputs = subblock_observed_outputs;
+          }
+          if (aggregated_output_observers.size() > 0) {
+            TORCH_CHECK(aggregated_output_observers == output_observers,
+                        "quantization doesn't work for the case where branches "
+                        "of `if` doesn't both return values quantized the same "
+                        "way");
+          } else {
+            for (auto i = 0; i < n->outputs().size(); ++i) {
+              if (output_observers[i] && !inputs_outputs.count(n->output(i))
+                  && !block_observed_values.count(n->output(i))
+                  && !observed_values_.count(n->output(i))) {
+                values_to_observe[n->output(i)] = *output_observers[i];
+                block_observed_values.insert(n->output(i));
+              }
+            }
+            aggregated_output_observers = output_observers;
+          }
+        }
       } else {
         for (Value* v : n->outputs()) {
           propagateObservedProperty(v, block_observed_values);
-          if (!graph_inputs_outputs.count(v) &&
+          if (!inputs_outputs.count(v) &&
               !isObserved(v, block_observed_values)) {
             if (auto observer_opt = getObserverFor(v)) {
               values_to_observe[v] = *observer_opt;
@@ -1062,9 +1115,9 @@ InsertObserversHelper::insertObserversFor(
             }
           }
         }
-      }
-      for (Block* subblock : n->blocks()) {
-        blocks_to_visit.push(subblock);
+        for (Block* subblock : n->blocks()) {
+          blocks_to_visit.push(subblock);
+        }
       }
     }
   }
@@ -2142,6 +2195,59 @@ graph(%linear, %input, %weight, %bias):
   rewriter.runOnGraph(graph, filter);
 }
 
+void ReplicateQuant(std::shared_ptr<Graph>& graph) {
+    std::stack<Block*> blocks_to_visit;
+  std::vector<Node*> quant_nodes_to_rewrite;
+  blocks_to_visit.push(graph->block());
+  while (!blocks_to_visit.empty()) {
+    Block* b = blocks_to_visit.top();
+    blocks_to_visit.pop();
+    for (Node* n : b->nodes()) {
+      // find quantize node that quantizes the output of if
+      if ((n->kind() == Symbol::aten("quantize_per_tensor") ||
+           n->kind() == Symbol::aten("quantize_per_channel")) &&
+          n->input(0)->node()->kind() == prim::If) {
+        quant_nodes_to_rewrite.push_back(n);
+      }
+      for (Block* subblock : n->blocks()) {
+        blocks_to_visit.push(subblock);
+      }
+    }
+  }
+  for (Node* n : quant_nodes_to_rewrite) {
+    Node* if_node = n->input(0)->node();
+    // move the nodes that produces the quantization parameters before
+    // prim::If
+    for (auto i = 1; i < n->inputs().size(); ++i) {
+      n->input(i)->node()->moveBefore(if_node);
+    }
+    // replace all uses of the quantized node with the output of if node
+    n->output()->replaceAllUsesWith(if_node->output());
+    // add quantize nodes to the end of all blocks
+    for (Block* if_block : if_node->blocks()) {
+      TORCH_CHECK(
+          if_block->outputs().size() == 1,
+          "replicate quantize only works for `if` node with one output right now");
+      // the original return value of the block
+      Value* ret_val = if_block->outputs()[0];
+      std::vector<Value*> quantize_inputs = n->inputs().vec();
+      quantize_inputs[0] = ret_val;
+      WithInsertPoint ins(if_block->return_node());
+      Node* quant = graph->create(n->kind(), quantize_inputs);
+      if_block->replaceOutput(0, quant->output());
+      quant->output()->copyMetadata(ret_val);
+      graph->insertNode(quant);
+    }
+  }
+
+  for (Node* n : quant_nodes_to_rewrite) {
+    n->removeAllInputs();
+  }
+  for (Node* n : quant_nodes_to_rewrite) {
+    n->destroy();
+  }
+}
+
 void ReplicateDeQuant(std::shared_ptr<Graph>& graph) {
   std::stack<Block*> blocks_to_visit;
   std::vector<Node*> dequant_nodes_to_rewrite;
@@ -2208,12 +2314,11 @@ void SwapDeQuant(std::shared_ptr<Graph>& graph) {
           dequantize_node->removeAllInputs();
           dequantize_node->destroy();
         }
-        TORCH_CHECK(n->outputs().size() == 1, "We only support dequantize swapping for ops"
-                    " with one output right now");
-        auto* output = n->output();
-        std::vector<Use> uses = output->uses();
-        // Insert new dequantize node for each use of the output
-        insertDeQuantCall(graph.get(), output, output, uses);
+        for (auto* output: n->outputs()) {
+          std::vector<Use> uses = output->uses();
+          // Insert new dequantize node for each use of the output
+          insertDeQuantCall(graph.get(), output, output, uses);
+        }
       }
       for (Block* subblock : n->blocks()) {
         blocks_to_visit.push(subblock);
@@ -2506,6 +2611,7 @@ script::Module Finalize(script::Module& module) {
   auto graph = module.get_method("forward").graph();
   Inline(*graph);
   ConstantPropagation(graph);
+  ReplicateQuant(graph);
   ReplicateDeQuant(graph);
   SwapDeQuant(graph);
   InsertPrepackUnpack(graph);
