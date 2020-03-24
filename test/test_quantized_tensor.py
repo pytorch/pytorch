@@ -34,13 +34,13 @@ def _calculate_dynamic_qparams(X, dtype, reduce_range=False):
         else:
             qmin, qmax = 0, 255
 
-    min_val = X.min()
-    max_val = X.max()
+    min_val = X.min().astype(dtype=np.float32)
+    max_val = X.max().astype(dtype=np.float32)
     min_val = min(0.0, min_val)
     max_val = max(0.0, max_val)
-    scale = (float(max_val) - min_val) / float(qmax - qmin)
+    scale = (np.float64(max_val) - min_val) / (qmax - qmin)
     if scale == 0.0 or math.isinf(1.0 / scale):
-        scale = 0.1
+        scale = np.float64(0.1)
         zero_point = 0
 
     zero_point_from_min = qmin - min_val / float(scale)
@@ -60,7 +60,7 @@ def _calculate_dynamic_qparams(X, dtype, reduce_range=False):
     else:
         nudged_zero_point = int(round(initial_zero_point))
 
-    return [float(scale), int(nudged_zero_point)]
+    return [scale.astype(np.float32), int(nudged_zero_point)]
 
 class TestQuantizedTensor(TestCase):
     def test_qtensor(self):
@@ -422,7 +422,7 @@ class TestQuantizedTensor(TestCase):
         X = torch.from_numpy(X)
         X_scale, X_zp = _calculate_dynamic_qparams(X, torch.quint8, reduce_range=reduce_range)
         qparams = torch._choose_qparams_per_tensor(X, reduce_range)
-        np.testing.assert_array_almost_equal(X_scale, qparams[0], decimal=4)
+        np.testing.assert_array_almost_equal(X_scale, qparams[0], decimal=3)
         self.assertEqual(X_zp, qparams[1])
 
 if __name__ == "__main__":
