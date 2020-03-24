@@ -187,7 +187,7 @@ class CUDASparseAdagradOp final : public Operator<Context> {
 
 template <>
 template <typename SIndex>
-bool RowWiseSparseAdagradOp<float, CUDAContext>::DoRunWithType() {
+bool RowWiseSparseAdagradOp<CUDAContext>::DoRunWithType() {
   auto N = Input(GRAD).size();
   if (N == 0) {
     // empty grad, nothing to do here, not even launching the kernel
@@ -220,9 +220,9 @@ bool RowWiseSparseAdagradOp<float, CUDAContext>::DoRunWithType() {
   return true;
 }
 
-REGISTER_CUDA_OPERATOR(Adagrad, AdagradOp<float, CUDAContext>);
+REGISTER_CUDA_OPERATOR(Adagrad, AdagradOp<CUDAContext>);
 REGISTER_CUDA_OPERATOR(SparseAdagrad, CUDASparseAdagradOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(
     RowWiseSparseAdagrad,
-    RowWiseSparseAdagradOp<float, CUDAContext>);
+    RowWiseSparseAdagradOp<CUDAContext>);
 } // namespace caffe2
