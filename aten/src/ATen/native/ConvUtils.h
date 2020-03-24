@@ -82,7 +82,10 @@ static inline Tensor reshape_bias(int64_t dim, const Tensor& bias) {
 }
 
 static inline bool cudnn_conv_use_channels_last(const at::Tensor& input, const at::Tensor& weight) {
-  if (!detail::getCUDAHooks().compiledWithCuDNN()) {
+  // disable NHWC for float64 input.
+  if (!detail::getCUDAHooks().compiledWithCuDNN() ||
+      input.scalar_type() == at::kDouble ||
+      weight.scalar_type() == at::kDouble) {
     return false;
   }
   long cudnn_version = detail::getCUDAHooks().versionCuDNN();
