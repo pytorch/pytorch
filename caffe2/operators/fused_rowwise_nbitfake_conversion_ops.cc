@@ -1,6 +1,8 @@
 #include "caffe2/operators/fused_rowwise_nbitfake_conversion_ops.h"
 #include <fp16.h>
+#ifdef __AVX__
 #include <immintrin.h>
+#endif
 #include "c10/util/Registry.h"
 
 namespace caffe2 {
