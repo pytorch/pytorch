@@ -5,10 +5,6 @@ IF(C_AVX_FOUND)
   LIST(APPEND extra_src ${CMAKE_CURRENT_SOURCE_DIR}/vector/AVX.cpp)
 ENDIF(C_AVX_FOUND)
 
-IF(C_AVX2_FOUND)
-  LIST(APPEND extra_src ${CMAKE_CURRENT_SOURCE_DIR}/vector/AVX2.cpp)
-ENDIF(C_AVX2_FOUND)
-
 SET(hdr
   THGeneral.h THHalf.h THAllocator.h THStorage.h THStorageFunctions.h THTensor.h THTensorApply.h THBlas.h
   THLapack.h THVector.h )
@@ -92,7 +88,6 @@ INSTALL(FILES
 
 INSTALL(FILES
   vector/AVX.h
-  vector/AVX2.h
   ../ATen/native/cpu/avx_mathfun.h
   DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/TH/vector")
 

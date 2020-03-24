@@ -1187,8 +1187,8 @@ graph(%x : Tensor,
         m = torch.jit.script(M()).eval()
         qconfig_dict = {'' : script_qconfig(default_qconfig)}
         m = prepare_script(m, qconfig_dict, False)
-        # 3 for x, y, weight, one for output of each F.conv2d
-        assert len(attrs_with_prefix(m, '_observer')) == 5
+        # 3 for x, y, weight, one for output of each F.conv2d and one for output of add
+        assert len(attrs_with_prefix(m, '_observer')) == 6
 
     def test_insert_observers_shared_class_type(self):
         class M(torch.nn.Module):
@@ -1404,7 +1404,7 @@ graph(%x : Tensor,
 
         # we just check we have one dequant on every op input, even input
         # is sharded as multi uses
-        FileCheck().check_count("aten::dequantize", 8, exactly=True) \
+        FileCheck().check_count("aten::dequantize", 9, exactly=True) \
                    .run(str(get_forward_graph(m._c)))
 
     def test_insert_quant_dequant_shared_class_type(self):
@@ -1567,6 +1567,33 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
                    .check_not("aten::relu") \
                    .check("quantized::conv2d_relu") \
                    .run(m.graph_for(data))
+
+    def test_quantized_add_fusion(self):
+        class Add(torch.nn.Module):
+            def __init__(self):
+                super(Add, self).__init__()
+
+            def forward(self, x, y):
+                return x + y
+
+        class InplaceAdd(torch.nn.Module):
+            def __init__(self):
+                super(InplaceAdd, self).__init__()
+
+            def forward(self, x, y):
+                x += y
+                return x
+
+        for M in [Add, InplaceAdd]:
+            m = torch.jit.script(M()).eval()
+            m = prepare_script(m, {'': script_qconfig(default_qconfig)}, True)
+            data = torch.randn(1, 1, 10, 10, dtype=torch.float)
+            m(data, data)
+            m = convert_script(m, True)
+            FileCheck().check_not("aten::add") \
+                       .check_not("aten::add_") \
+                       .check("quantized::add") \
+                       .run(m.graph_for(data, data))
 
     def test_quantized_add_relu_fusion(self):
         class M(torch.nn.Module):
@@ -2128,6 +2155,10 @@ graph(%input, %weight):
                 x = torch.min(x)
                 x = torch.mean(x)
                 x = x.reshape([-1])
+                x = x.view(-1)
+                x = x.transpose(1, 2)
+                x = x.contiguous()
+                x, y = torch.chunk(x, 2)
                 x = F.dropout(x)
                 x = self.dropout(x)
                 # TODO: uncomment when sort is supported
@@ -2150,6 +2181,11 @@ graph(%input, %weight):
                    .check("aten::min") \
                    .check("aten::mean") \
                    .check("aten::reshape") \
+                   .check("aten::view") \
+                   .check("aten::transpose") \
+                   .check("aten::contiguous") \
+                   .check("aten::chunk") \
+                   .check("prim::ListUnpack") \
                    .check("aten::dropout") \
                    .check("aten::dropout") \
                    .run(m.graph)
@@ -2162,6 +2198,11 @@ graph(%input, %weight):
                    .check("aten::min") \
                    .check("aten::mean") \
                    .check("aten::reshape") \
+                   .check("aten::view") \
+                   .check("aten::transpose") \
+                   .check("aten::contiguous") \
+                   .check("aten::chunk") \
+                   .check("prim::ListUnpack") \
                    .check("aten::dropout") \
                    .check("aten::dropout") \
                    .check("dequantize") \
@@ -2194,6 +2235,45 @@ graph(%input, %weight):
                    .run(m.graph)
         res = m(x, weight, bias)
         self.assertEqual(res, ref_res)
+
+    def test_replicate_quantize_for_if(self):
+        """ We want to move quantize nodes for output of prim::If
+        inside the prim::If blocks so that we can match quantization
+        patterns.
+        """
+        class Res(torch.nn.Module):
+            def __init__(self):
+                super(Res, self).__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 1).float()
+                self.use_skip = True
+
+            def forward(self, x, cond):
+                # type: (Tensor, bool) -> Tensor
+                # to avoid being frozen
+                self.use_skip = cond
+                if self.use_skip:
+                    return self.conv(x)
+                else:
+                    return self.conv(x)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.res1 = Res()
+                self.res2 = Res()
+
+            def forward(self, x):
+                x = self.res1(x, True)
+                x = self.res2(x, False)
+                return x
+
+        data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        qconfig_dict = {'': default_qconfig}
+        m = torch.jit.script(M()).eval()
+        m = quantize_script(m, qconfig_dict, _test_only_eval_fn, [data], inplace=False)
+        # make sure patterns in both branches are fused
+        FileCheck().check_count("quantized::conv2d(", 4, exactly=True) \
+                   .run(m.graph)
 
     def test_finalize_for_conv2d(self):
         class M(torch.nn.Module):
@@ -5471,23 +5551,23 @@ def foo(x):
             return (cmp_key(obj1), cmp_key(obj2))
 
         def f():
-            val = torch.classes._TorchScriptTesting_Foo(5, 3)
+            val = torch.classes._TorchScriptTesting._Foo(5, 3)
             val.increment(1)
             return val
         test_equality(f, lambda x: x)
 
         with self.assertRaisesRegex(RuntimeError, "Expected a value of type 'int'"):
-            val = torch.classes._TorchScriptTesting_Foo(5, 3)
+            val = torch.classes._TorchScriptTesting._Foo(5, 3)
             val.increment('foo')
 
         def f():
-            ss = torch.classes._TorchScriptTesting_StackString(["asdf", "bruh"])
+            ss = torch.classes._TorchScriptTesting._StackString(["asdf", "bruh"])
             return ss.pop()
         test_equality(f, lambda x: x)
 
         def f():
-            ss1 = torch.classes._TorchScriptTesting_StackString(["asdf", "bruh"])
-            ss2 = torch.classes._TorchScriptTesting_StackString(["111", "222"])
+            ss1 = torch.classes._TorchScriptTesting._StackString(["asdf", "bruh"])
+            ss2 = torch.classes._TorchScriptTesting._StackString(["111", "222"])
             ss1.push(ss2.pop())
             return ss1.pop() + ss2.pop()
         test_equality(f, lambda x: x)
@@ -5495,14 +5575,14 @@ def foo(x):
     @skipIfRocm
     def test_torchbind_take_as_arg(self):
         global StackString  # see [local resolution in python]
-        StackString = torch.classes._TorchScriptTesting_StackString
+        StackString = torch.classes._TorchScriptTesting._StackString
 
         def foo(stackstring):
             # type: (StackString)
             stackstring.push("lel")
             return stackstring
 
-        script_input = torch.classes._TorchScriptTesting_StackString([])
+        script_input = torch.classes._TorchScriptTesting._StackString([])
         scripted = torch.jit.script(foo)
         script_output = scripted(script_input)
         self.assertEqual(script_output.pop(), "lel")
@@ -5510,7 +5590,7 @@ def foo(x):
     @skipIfRocm
     def test_torchbind_return_instance(self):
         def foo():
-            ss = torch.classes._TorchScriptTesting_StackString(["hi", "mom"])
+            ss = torch.classes._TorchScriptTesting._StackString(["hi", "mom"])
             return ss
 
         scripted = torch.jit.script(foo)
@@ -5526,7 +5606,7 @@ def foo(x):
     @skipIfRocm
     def test_torchbind_return_instance_from_method(self):
         def foo():
-            ss = torch.classes._TorchScriptTesting_StackString(["hi", "mom"])
+            ss = torch.classes._TorchScriptTesting._StackString(["hi", "mom"])
             clone = ss.clone()
             ss.pop()
             return ss, clone
@@ -5540,8 +5620,8 @@ def foo(x):
     @skipIfRocm
     def test_torchbind_take_instance_as_method_arg(self):
         def foo():
-            ss = torch.classes._TorchScriptTesting_StackString(["mom"])
-            ss2 = torch.classes._TorchScriptTesting_StackString(["hi"])
+            ss = torch.classes._TorchScriptTesting._StackString(["mom"])
+            ss2 = torch.classes._TorchScriptTesting._StackString(["hi"])
             ss.merge(ss2)
             return ss
 
@@ -5553,7 +5633,7 @@ def foo(x):
     @skipIfRocm
     def test_torchbind_return_tuple(self):
         def f():
-            val = torch.classes._TorchScriptTesting_StackString(["3", "5"])
+            val = torch.classes._TorchScriptTesting._StackString(["3", "5"])
             return val.return_a_tuple()
 
         scripted = torch.jit.script(f)
@@ -5563,8 +5643,8 @@ def foo(x):
     @skipIfRocm
     def test_torchbind_save_load(self):
         def foo():
-            ss = torch.classes._TorchScriptTesting_StackString(["mom"])
-            ss2 = torch.classes._TorchScriptTesting_StackString(["hi"])
+            ss = torch.classes._TorchScriptTesting._StackString(["mom"])
+            ss2 = torch.classes._TorchScriptTesting._StackString(["hi"])
             ss.merge(ss2)
             return ss
 
@@ -5593,7 +5673,7 @@ def foo(x):
     @skipIfRocm
     def test_torchbind_lambda_method(self):
         def foo():
-            ss = torch.classes._TorchScriptTesting_StackString(["mom"])
+            ss = torch.classes._TorchScriptTesting._StackString(["mom"])
             return ss.top()
 
         scripted = torch.jit.script(foo)
@@ -5604,7 +5684,7 @@ def foo(x):
         class FooBar1234(torch.nn.Module):
             def __init__(self):
                 super(FooBar1234, self).__init__()
-                self.f = torch.classes._TorchScriptTesting_StackString(["3", "4"])
+                self.f = torch.classes._TorchScriptTesting._StackString(["3", "4"])
 
             def forward(self):
                 return self.f.top()
@@ -5621,7 +5701,7 @@ def foo(x):
         class FooBar4321(torch.nn.Module):
             def __init__(self):
                 super(FooBar4321, self).__init__()
-                self.f = torch.classes._TorchScriptTesting_PickleTester([3, 4])
+                self.f = torch.classes._TorchScriptTesting._PickleTester([3, 4])
 
             def forward(self):
                 return self.f.top()
@@ -5643,7 +5723,7 @@ def foo(x):
         class TryTracing(torch.nn.Module):
             def __init__(self):
                 super(TryTracing, self).__init__()
-                self.f = torch.classes._TorchScriptTesting_PickleTester([3, 4])
+                self.f = torch.classes._TorchScriptTesting._PickleTester([3, 4])
 
             def forward(self):
                 return torch.ops._TorchScriptTesting.take_an_instance(self.f)
@@ -5656,7 +5736,7 @@ def foo(x):
         class TryTracingNest(torch.nn.Module):
             def __init__(self):
                 super(TryTracingNest, self).__init__()
-                self.f = torch.classes._TorchScriptTesting_PickleTester([3, 4])
+                self.f = torch.classes._TorchScriptTesting._PickleTester([3, 4])
 
         class TryTracing123(torch.nn.Module):
             def __init__(self):
@@ -5671,7 +5751,7 @@ def foo(x):
 
     @skipIfRocm
     def test_torchbind_pickle_serialization(self):
-        nt = torch.classes._TorchScriptTesting_PickleTester([3, 4])
+        nt = torch.classes._TorchScriptTesting._PickleTester([3, 4])
         b = io.BytesIO()
         torch.save(nt, b)
         b.seek(0)
@@ -5681,8 +5761,8 @@ def foo(x):
 
     @skipIfRocm
     def test_torchbind_instantiate_missing_class(self):
-        with self.assertRaisesRegex(RuntimeError, 'Tried to instantiate class IDontExist but it does not exist!'):
-            torch.classes.IDontExist(3, 4, 5)
+        with self.assertRaisesRegex(RuntimeError, 'Tried to instantiate class foo.IDontExist but it does not exist!'):
+            torch.classes.foo.IDontExist(3, 4, 5)
 
     def test_jitter_bug(self):
         @torch.jit.script

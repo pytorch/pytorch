@@ -3144,6 +3144,20 @@ triu_(k=0) -> Tensor
 In-place version of :meth:`~Tensor.triu`
 """)
 
+add_docstr_all('true_divide',
+               r"""
+true_divide(value) -> Tensor
+
+See :func:`torch.true_divide`
+""")
+
+add_docstr_all('true_divide_',
+               r"""
+true_divide_(value) -> Tensor
+
+In-place version of :meth:`~Tensor.true_divide_`
+""")
+
 add_docstr_all('trunc',
                r"""
 trunc() -> Tensor
