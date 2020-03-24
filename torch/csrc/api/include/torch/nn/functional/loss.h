@@ -84,14 +84,13 @@ inline Tensor kl_div(
 /// Example:
 /// ```
 /// namespace F = torch::nn::functional;
-/// F::kl_div(input, target, F::KLDivFuncOptions(torch::kNone), log_target = false);
+/// F::kl_div(input, target, F::KLDivFuncOptions.reduction(torch::kNone).log_target(false));
 /// ```
 inline Tensor kl_div(
     const Tensor& input,
     const Tensor& target,
-    const KLDivFuncOptions& options = {},
-    bool log_target = false) {
-  return detail::kl_div(input, target, options.reduction(), log_target);
+    const KLDivFuncOptions& options = {}) {
+  return detail::kl_div(input, target, options.reduction(), options.log_target());
 }
 
 // ============================================================================
