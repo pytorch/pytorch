@@ -1617,6 +1617,36 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
                        .check("quantized::add_relu") \
                        .run(m.graph_for(data, data))
 
+    def test_quantized_cat(self):
+        """ Note that we to support the case that torch.cat is quantized
+        indepdently, we need to have an observer that works
+        for list of Tensors.
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.conv1 = torch.nn.Conv2d(1, 1, 1).float()
+                self.conv2 = torch.nn.Conv2d(1, 1, 1).float()
+
+            def forward(self, x, y):
+                x = self.conv1(x)
+                y = self.conv2(y)
+                return torch.cat([x, y], 1)
+
+        m = torch.jit.script(M().eval())
+        m = prepare_script(m, {'': script_qconfig(default_qconfig)}, True)
+        # four for input and output of conv and one for output of cat
+        # this also tests the ListConstruct can preserve the observed property so that
+        # torch.cat knows that inputs are observed
+        assert len(attrs_with_prefix(m, '_observer_')) == 5
+        data = torch.randn(1, 1, 10, 10, dtype=torch.float)
+        m(data, data)
+        m = convert_script(m, True)
+
+        FileCheck().check_not("aten::cat") \
+                   .check("quantized::cat") \
+                   .run(m.graph_for(data, data))
+
     def test_foldbn_trivial(self):
         # Test trivial case
         class TestModule(torch.nn.Module):
@@ -4944,6 +4974,35 @@ def foo(x):
 
         # shouldn't throw a type error
         torch.jit.script(MyMod())
+
+    @_inline_everything
+    def test_lazy_script(self):
+        def untraceable(x):
+            if x.ndim > 2:
+                print("hello")
+            else:
+                print("goodbye")
+            return x + 2
+
+        # Non-working example
+        def fn(x):
+            return untraceable(x)
+
+        with self.capture_stdout():
+            traced_bad = torch.jit.trace(fn, [torch.ones(2, 2)])
+
+        FileCheck().check_not("goodbye").check_not("hello").run(traced_bad.graph)
+
+        # Working example
+        untraceable = torch.jit._script_if_tracing(untraceable)
+
+        def fn2(x):
+            return untraceable(x)
+
+        with self.capture_stdout():
+            traced = torch.jit.trace(fn, [torch.ones(2, 2)])
+
+        FileCheck().check("goodbye").check("hello").run(traced.graph)
 
     def test_big_int_literals(self):
         def ok():
@@ -16049,10 +16108,10 @@ a")
         tester(str_hash, ("", "hello", "a"))
 
     def test_id(self):
-        with self.assertRaisesRegex(RuntimeError, "Expected a value"): 
+        with self.assertRaisesRegex(RuntimeError, "Expected a value"):
             @torch.jit.script
             def test_id_scalars():
-                return id(2) == id(None) 
+                return id(2) == id(None)
 
         @torch.jit.script
         class FooTest(object):
