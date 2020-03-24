@@ -63,37 +63,45 @@ class _InternalRPCPickler:
         Serialize non tensor data into binary string, tensor data into
         tensor table
         """
-        f = io.BytesIO()
-        p = pickle.Pickler(f)
-        p.dispatch_table = self._dispatch_table
+        try:
+            f = io.BytesIO()
+            p = pickle.Pickler(f)
+            p.dispatch_table = self._dispatch_table
 
-        # rpc api could accept user picklers inheriting from _InternalRPCPickler to serialize rref,
-        # user picklers could have different initialization function from _InternalRPCPickler,
-        # but all the user picklers should call serialize() and use _rref_reducer to pickle rref
-        # in python. also, when _internal_rpc_pickler is imported to rpc/api.py, rpc.RRef is not
-        # compiled yet, it is not good place to acces rpc.RRef inside _InternalRPCPickler constructor,
-        # so puting rref's dispatch table here
-        p.dispatch_table[dist.rpc.RRef] = self._rref_reducer
+            # rpc api could accept user picklers inheriting from _InternalRPCPickler to serialize rref,
+            # user picklers could have different initialization function from _InternalRPCPickler,
+            # but all the user picklers should call serialize() and use _rref_reducer to pickle rref
+            # in python. also, when _internal_rpc_pickler is imported to rpc/api.py, rpc.RRef is not
+            # compiled yet, it is not good place to acces rpc.RRef inside _InternalRPCPickler constructor,
+            # so puting rref's dispatch table here
+            p.dispatch_table[dist.rpc.RRef] = self._rref_reducer
 
-        # save _thread_local_tensor_tables.send_tables if it is in nested call
-        global _thread_local_tensor_tables
-        if hasattr(_thread_local_tensor_tables, "send_tables"):
-            old_send_tables = _thread_local_tensor_tables.send_tables
-        else:
-            old_send_tables = None
-        _thread_local_tensor_tables.send_tables = []
+            # save _thread_local_tensor_tables.send_tables if it is in nested call
+            global _thread_local_tensor_tables
+            if hasattr(_thread_local_tensor_tables, "send_tables"):
+                old_send_tables = _thread_local_tensor_tables.send_tables
+            else:
+                old_send_tables = None
+            _thread_local_tensor_tables.send_tables = []
 
-        p.dump(obj)
+            p.dump(obj)
 
-        # restore _thread_local_tensor_tables.send_tables if return
-        # from nested call, otherwise clean up the table
-        tensors = _thread_local_tensor_tables.send_tables
-        if old_send_tables is not None:
-            _thread_local_tensor_tables.send_tables = old_send_tables
-        else:
-            del _thread_local_tensor_tables.send_tables
+            # restore _thread_local_tensor_tables.send_tables if return
+            # from nested call, otherwise clean up the table
+            tensors = _thread_local_tensor_tables.send_tables
+            if old_send_tables is not None:
+                _thread_local_tensor_tables.send_tables = old_send_tables
+            else:
+                del _thread_local_tensor_tables.send_tables
 
-        return (f.getvalue(), tensors)
+            return (f.getvalue(), tensors)
+        except Exception as e:
+            # except str = exception info + traceback string
+            except_str = "{}\n{}".format(repr(e), traceback.format_exc())
+            exc = RemoteException(except_str, type(e))
+
+            # For serializing this simple NamedTuple, there is expected to be no exception.
+            return self.serialize(exc)
 
     def deserialize(self, binary_data, tensor_table):
         r"""
