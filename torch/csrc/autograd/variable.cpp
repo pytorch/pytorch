@@ -164,6 +164,16 @@ namespace impl {
     auto* meta = materialize_autograd_meta(self);
     meta->grad_fn_ = std::move(edge.function);
     meta->output_nr_ = edge.input_nr;
+    // For views, make sure this new grad_fn_ is not overwritten unless it is necessary
+    // in the VariableHooks::grad_fn below.
+    // This logic is only relevant for custom autograd Functions for which multiple
+    // operations can happen on a given Tensor before its gradient edge is set when
+    // exiting the custom Function.
+    if (self.is_view()) {
+      // NB: is_view() ==> get_autograd_meta()
+      auto diff_view_meta = static_cast<torch::autograd::DifferentiableViewMeta*>(meta);
+      diff_view_meta->attr_version = self._version();
+    }
   }
 
   Node* grad_fn_unsafe(const Variable& self) {

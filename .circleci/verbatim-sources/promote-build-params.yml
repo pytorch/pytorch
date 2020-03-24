@@ -1,0 +1,14 @@
+
+promote_common: &promote_common
+  docker:
+    - image: pytorch/release
+  parameters:
+    package_name:
+      description: "package name to promote"
+      type: string
+      default: ""
+  environment:
+    PACKAGE_NAME: << parameters.package_name >>
+    ANACONDA_API_TOKEN: ${CONDA_PYTORCHBOT_TOKEN}
+    AWS_ACCESS_KEY_ID: ${PYTORCH_BINARY_AWS_ACCESS_KEY_ID}
+    AWS_SECRET_ACCESS_KEY: ${PYTORCH_BINARY_AWS_SECRET_ACCESS_KEY}

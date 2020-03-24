@@ -26,7 +26,7 @@ foreach(THC_FILE TensorMathPointwise TensorMathReduce TensorMasked)
    LIST(APPEND extra_src "${CMAKE_CURRENT_SOURCE_DIR}/generated/THC${THC_FILE}Bool.cu")
 endforeach()
 
-foreach(THC_FILE TensorMathReduce TensorMasked)
+foreach(THC_FILE TensorMathReduce TensorMasked TensorSort)
    if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/generated/THC${THC_FILE}BFloat16.cu")
       FILE(WRITE "${CMAKE_CURRENT_SOURCE_DIR}/generated/THC${THC_FILE}BFloat16.cu"
         "#include <THC/THC${THC_FILE}.cuh>\n#include <THC/THCTensor.hpp>\n\n#include <THC/generic/THC${THC_FILE}.cu>\n#include <THC/THCGenerateBFloat16Type.h>\n")
