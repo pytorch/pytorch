@@ -85,8 +85,8 @@ c10::optional<at::Tensor> runTorchSlice_opset9(const Node* node,
   std::vector<int64_t> axesAttr;
   if (node->hasAttributeS("axes")) {
     axesAttr = node->is(attr::axes);
-    for (auto& ax : axesAttr){
-	    ax += ax < 0 ? inputTensorValues[0].sizes().size() : 0;
+    for (auto& axis : axesAttr){
+      axis += axis < 0 ? inputTensorValues[0].sizes().size() : 0;
     }
   } else {
     axesAttr.resize(startsAttr.size());
