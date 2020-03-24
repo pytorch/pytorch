@@ -3263,6 +3263,7 @@ loss_reference_fns = {
     'CTCLoss': ctcloss_reference,
 }
 
+
 criterion_tests = [
     dict(
         module_name='L1Loss',
