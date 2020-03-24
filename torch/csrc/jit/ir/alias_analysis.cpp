@@ -36,7 +36,7 @@ c10::optional<TypePtr> getMutableTypePtr(const TypePtr& type) {
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
           assertNoRefinedTensorTypes(type),
           "These types should not contained refined tensor types",
-          type);
+          type->str());
       return type;
     case TypeKind::TensorType:
       return unshapedType(type);
