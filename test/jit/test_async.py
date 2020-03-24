@@ -37,7 +37,6 @@ class TestAsync(JitTestCase):
         # assert nothing, just to make sure python type parsing works
         foo(torch.randn(3, 4))
 
-
     def test_async_parsing(self):
         @torch.jit.script
         def foo(x):
