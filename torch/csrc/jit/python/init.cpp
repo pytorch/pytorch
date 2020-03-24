@@ -738,6 +738,7 @@ void initJITBindings(PyObject* module) {
       return op->schema();
     });
   });
+  m.def("_is_tracing", []() { return jit::tracer::isTracing(); });
 
   py::class_<PythonFutureWrapper>(m, "Future")
       .def(
