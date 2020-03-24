@@ -31,6 +31,14 @@
   #define __ubsan_ignore_undefined__
 #endif
 
+#if defined(__clang__)
+  #define __ubsan_ignore_float_divide_by_zero__ __attribute__((no_sanitize("float-divide-by-zero")))
+  #define __ubsan_ignore_float_cast_overflow__ __attribute__((no_sanitize("float-cast-overflow")))
+#else
+  #define __ubsan_ignore_float_divide_by_zero__
+  #define __ubsan_ignore_float_cast_overflow__
+#endif
+
 // Disable the copy and assignment operator for a class. Note that this will
 // disable the usage of the class in std containers.
 #define C10_DISABLE_COPY_AND_ASSIGN(classname) \
