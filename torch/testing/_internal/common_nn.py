@@ -3263,8 +3263,9 @@ loss_reference_fns = {
     'CTCLoss': ctcloss_reference,
 }
 
-# NOTE: Instead of creating these weight tensors on the spot during
-# the Python module construction, we should create them here and
+# NOTE: These are for module tests that need to explicitly pass in a
+# `weight` argument. Instead of creating these weight tensors on the spot
+# during the Python module construction, we should create them here and
 # reference them in both Python and C++ module construction, otherwise
 # the weight tensors used in those two modules won't be the same which
 # would cause C++ API parity test failure.
