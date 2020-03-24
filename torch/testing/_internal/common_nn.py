@@ -954,7 +954,7 @@ new_module_tests = [
     kldivloss_with_target_no_reduce_test(),
     kldivloss_no_reduce_test(),
     kldivloss_no_reduce_scalar_test(),
-    #kldivloss_with_log_target_no_reduce_test(),
+    kldivloss_with_log_target_no_reduce_test(),
     kldivloss_no_reduce_log_target_test(),
     kldivloss_no_reduce_scalar_log_target_test(),
     l1loss_no_reduce_test(),

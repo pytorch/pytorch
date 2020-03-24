@@ -896,7 +896,7 @@ Tensor kl_div_target_backward(Tensor grad_output, Tensor self, Tensor target, in
     grad_target = grad_output.mul(target.log().add_(1).sub_(self)).masked_fill_(target == 0, 0.);
   }
   else {
-    grad_target = target.exp().mul_(target.add(1).sub_(self)).mul_(grad_output);
+    grad_target = grad_output.mul(target.add(1).sub_(self).mul_(target.exp()));
   }
 
   if (reduction == at::Reduction::Mean) {
