@@ -1187,8 +1187,8 @@ graph(%x : Tensor,
         m = torch.jit.script(M()).eval()
         qconfig_dict = {'' : script_qconfig(default_qconfig)}
         m = prepare_script(m, qconfig_dict, False)
-        # 3 for x, y, weight, one for output of each F.conv2d
-        assert len(attrs_with_prefix(m, '_observer')) == 5
+        # 3 for x, y, weight, one for output of each F.conv2d and one for output of add
+        assert len(attrs_with_prefix(m, '_observer')) == 6
 
     def test_insert_observers_shared_class_type(self):
         class M(torch.nn.Module):
@@ -1404,7 +1404,7 @@ graph(%x : Tensor,
 
         # we just check we have one dequant on every op input, even input
         # is sharded as multi uses
-        FileCheck().check_count("aten::dequantize", 8, exactly=True) \
+        FileCheck().check_count("aten::dequantize", 9, exactly=True) \
                    .run(str(get_forward_graph(m._c)))
 
     def test_insert_quant_dequant_shared_class_type(self):
@@ -1567,6 +1567,33 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
                    .check_not("aten::relu") \
                    .check("quantized::conv2d_relu") \
                    .run(m.graph_for(data))
+
+    def test_quantized_add_fusion(self):
+        class Add(torch.nn.Module):
+            def __init__(self):
+                super(Add, self).__init__()
+
+            def forward(self, x, y):
+                return x + y
+
+        class InplaceAdd(torch.nn.Module):
+            def __init__(self):
+                super(InplaceAdd, self).__init__()
+
+            def forward(self, x, y):
+                x += y
+                return x
+
+        for M in [Add, InplaceAdd]:
+            m = torch.jit.script(M()).eval()
+            m = prepare_script(m, {'': script_qconfig(default_qconfig)}, True)
+            data = torch.randn(1, 1, 10, 10, dtype=torch.float)
+            m(data, data)
+            m = convert_script(m, True)
+            FileCheck().check_not("aten::add") \
+                       .check_not("aten::add_") \
+                       .check("quantized::add") \
+                       .run(m.graph_for(data, data))
 
     def test_quantized_add_relu_fusion(self):
         class M(torch.nn.Module):
