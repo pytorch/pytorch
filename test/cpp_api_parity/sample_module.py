@@ -85,7 +85,7 @@ module_tests = [
     ),
     dict(
         fullname='SampleModule_no_parity',
-        constructor=lambda: SampleModule(False, True),
+        constructor=lambda: SampleModule(has_parity=False, has_submodule=True),
         cpp_constructor_args='torch::nn::SampleModuleOptions(false, true)',
         input_size=(3, 4),
         cpp_input_args=['torch::randn({3, 4})'],
