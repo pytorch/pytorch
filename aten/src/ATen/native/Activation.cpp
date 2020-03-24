@@ -23,6 +23,8 @@ DEFINE_DISPATCH(threshold_stub);
 DEFINE_DISPATCH(hardtanh_backward_stub);
 DEFINE_DISPATCH(hardsigmoid_stub);
 DEFINE_DISPATCH(hardsigmoid_backward_stub);
+DEFINE_DISPATCH(hardswish_stub);
+DEFINE_DISPATCH(hardswish_backward_stub);
 DEFINE_DISPATCH(hardshrink_stub);
 DEFINE_DISPATCH(softshrink_stub);
 DEFINE_DISPATCH(shrink_backward_stub);
@@ -133,6 +135,32 @@ Tensor elu_backward(
   Tensor result;
   auto iter = TensorIterator::binary_op(result, grad_output, output);
   elu_backward_stub(iter.device_type(), iter, alpha, scale, input_scale);
+  return iter.output();
+}
+
+Tensor hardswish(const Tensor& self) {
+  Tensor result;
+  auto iter = TensorIterator::unary_op(result, self);
+  hardswish_stub(iter.device_type(), iter);
+  return iter.output();
+}
+
+Tensor& hardswish_out(Tensor& result, const Tensor& self) {
+  auto iter = TensorIterator::unary_op(result, self);
+  hardswish_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor& hardswish_(Tensor& self) {
+  auto iter = TensorIterator::unary_op(self, self);
+  hardswish_stub(iter.device_type(), iter);
+  return self;
+}
+
+Tensor hardswish_backward(const Tensor& grad_output, const Tensor& self) {
+  Tensor grad_input;
+  auto iter = TensorIterator::binary_op(grad_input, grad_output, self);
+  hardswish_backward_stub(iter.device_type(), iter);
   return iter.output();
 }
 
