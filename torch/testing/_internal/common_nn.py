@@ -3263,16 +3263,6 @@ loss_reference_fns = {
     'CTCLoss': ctcloss_reference,
 }
 
-# NOTE: These are for module tests that need to explicitly pass in a
-# `weight` argument. Instead of creating these weight tensors on the spot
-# during the Python module construction, we should create them here and
-# reuse them in both Python and C++ module construction, otherwise
-# the weight tensors used in those two modules won't be the same which
-# would cause C++ API parity test failure.
-criterion_weight_rand_zero_dim = torch.rand(()).double()
-criterion_weight_rand_3 = torch.rand(3).double()
-criterion_weight_rand_10 = torch.rand(10).double()
-
 criterion_tests = [
     dict(
         module_name='L1Loss',
@@ -3302,11 +3292,10 @@ criterion_tests = [
     ),
     dict(
         module_name='NLLLoss',
-        constructor_args_fn=lambda: (criterion_weight_rand_10,),
-        cpp_constructor_args='torch::nn::NLLLossOptions().weight(weight)',
+        constructor_args_fn=lambda: (torch.rand(10),),
+        cpp_constructor_args='torch::nn::NLLLossOptions().weight(torch::rand(10))',
         input_fn=lambda: torch.rand(15, 10).add(1e-2).log(),
         target_fn=lambda: torch.Tensor(15).uniform_().mul(10).floor().long(),
-        cpp_arg_symbol_map={'weight': criterion_weight_rand_10},
         reference_fn=lambda i, t, m:
             nllloss_reference(i, t, weight=get_weight(m)),
         desc='weights',
@@ -3314,11 +3303,10 @@ criterion_tests = [
     ),
     dict(
         module_name='NLLLoss',
-        constructor_args_fn=lambda: (criterion_weight_rand_10, None, 2),
-        cpp_constructor_args='torch::nn::NLLLossOptions().weight(weight).ignore_index(2)',
+        constructor_args_fn=lambda: (torch.rand(10), None, 2),
+        cpp_constructor_args='torch::nn::NLLLossOptions().weight(torch::rand(10)).ignore_index(2)',
         input_fn=lambda: torch.rand(15, 10).add(1e-2).log(),
         target_fn=lambda: torch.Tensor(15).uniform_().mul(10).floor().long(),
-        cpp_arg_symbol_map={'weight': criterion_weight_rand_10},
         reference_fn=lambda i, t, m:
             nllloss_reference(i, t, weight=get_weight(m), ignore_index=2),
         desc='weights_ignore_index',
@@ -3326,11 +3314,10 @@ criterion_tests = [
     ),
     dict(
         module_name='NLLLoss',
-        constructor_args_fn=lambda: (criterion_weight_rand_10, None, -1),
-        cpp_constructor_args='torch::nn::NLLLossOptions().weight(weight).ignore_index(-1)',
+        constructor_args_fn=lambda: (torch.rand(10), None, -1),
+        cpp_constructor_args='torch::nn::NLLLossOptions().weight(torch::rand(10)).ignore_index(-1)',
         input_fn=lambda: torch.rand(15, 10).add(1e-2).log(),
         target_fn=lambda: torch.Tensor(15).uniform_().mul(10 + 1).floor().long() - 1,
-        cpp_arg_symbol_map={'weight': criterion_weight_rand_10},
         reference_fn=lambda i, t, m:
             nllloss_reference(i, t, weight=get_weight(m), ignore_index=-1),
         desc='weights_ignore_index_neg',
@@ -3363,11 +3350,10 @@ criterion_tests = [
     ),
     dict(
         module_name='BCELoss',
-        constructor_args_fn=lambda: (criterion_weight_rand_10,),
-        cpp_constructor_args='torch::nn::BCELossOptions().weight(weight)',
+        constructor_args_fn=lambda: (torch.rand(10),),
+        cpp_constructor_args='torch::nn::BCELossOptions().weight(torch::rand(10))',
         input_fn=lambda: torch.rand(15, 10).clamp_(1e-2, 1 - 1e-2),
         target_fn=lambda: torch.randn(15, 10).gt(0).double(),
-        cpp_arg_symbol_map={'weight': criterion_weight_rand_10},
         reference_fn=lambda i, t, m: -((t * i.log() + (1 - t) * (1 - i).log()) * get_weight(m)).sum() /
             (i.numel() if get_reduction(m) else 1),
         desc='weights',
@@ -3381,11 +3367,10 @@ criterion_tests = [
     ),
     dict(
         module_name='CrossEntropyLoss',
-        constructor_args_fn=lambda: (criterion_weight_rand_10,),
-        cpp_constructor_args='torch::nn::CrossEntropyLossOptions().weight(weight)',
+        constructor_args_fn=lambda: (torch.rand(10),),
+        cpp_constructor_args='torch::nn::CrossEntropyLossOptions().weight(torch::rand(10))',
         input_size=(15, 10),
         target_fn=lambda: torch.Tensor(15).uniform_().mul(10).floor().long(),
-        cpp_arg_symbol_map={'weight': criterion_weight_rand_10},
         desc='weights',
     ),
     dict(
@@ -3481,12 +3466,11 @@ criterion_tests = [
     ),
     dict(
         module_name='MultiMarginLoss',
-        constructor_args=(1, 1., criterion_weight_rand_10),
-        cpp_constructor_args='torch::nn::MultiMarginLossOptions().p(1).margin(1.).weight(weight)',
+        constructor_args=(1, 1., torch.rand(10)),
+        cpp_constructor_args='torch::nn::MultiMarginLossOptions().p(1).margin(1.).weight(torch::rand(10))',
         legacy_constructor_args=(1, torch.rand(10)),
         input_size=(5, 10),
         target_fn=lambda: torch.rand(5).mul(8).floor().long(),
-        cpp_arg_symbol_map={'weight': criterion_weight_rand_10},
         reference_fn=lambda i, t, m:
             multimarginloss_reference(i, t, weight=get_weight(m), reduction=get_reduction(m)),
         desc='weights',
@@ -3557,20 +3541,18 @@ new_criterion_tests = [
     ),
     dict(
         module_name='BCEWithLogitsLoss',
-        constructor_args=(criterion_weight_rand_10,),
-        cpp_constructor_args='torch::nn::BCEWithLogitsLossOptions().weight(weight)',
+        constructor_args=(torch.rand(10),),
+        cpp_constructor_args='torch::nn::BCEWithLogitsLossOptions().weight(torch::rand(10))',
         input_fn=lambda: torch.rand(15, 10).clamp_(1e-2, 1 - 1e-2),
         target_fn=lambda: torch.randn(15, 10).gt(0).double(),
-        cpp_arg_symbol_map={'weight': criterion_weight_rand_10},
         desc='weights',
     ),
     dict(
         module_name='BCEWithLogitsLoss',
-        constructor_args=(criterion_weight_rand_zero_dim,),
-        cpp_constructor_args='torch::nn::BCEWithLogitsLossOptions().weight(weight)',
+        constructor_args=(torch.rand(()),),
+        cpp_constructor_args='torch::nn::BCEWithLogitsLossOptions().weight(torch::rand({}))',
         input_fn=lambda: torch.rand(()).clamp_(1e-2, 1 - 1e-2),
         target_fn=lambda: torch.randn(()).gt(0).double(),
-        cpp_arg_symbol_map={'weight': criterion_weight_rand_zero_dim},
         desc='scalar_weights'
     ),
     dict(
@@ -3585,11 +3567,10 @@ new_criterion_tests = [
     ),
     dict(
         module_name='NLLLoss',
-        constructor_args_fn=lambda: (criterion_weight_rand_3,),
-        cpp_constructor_args='torch::nn::NLLLossOptions().weight(weight)',
+        constructor_args_fn=lambda: (torch.rand(3),),
+        cpp_constructor_args='torch::nn::NLLLossOptions().weight(torch::rand(3))',
         input_size=(2, 3, 5, 5),
         target=torch.rand(2, 5, 5).mul(3).floor().long(),
-        cpp_arg_symbol_map={'weight': criterion_weight_rand_3},
         reference_fn=lambda i, t, m:
             loss_reference_fns['NLLLossNd'](i, t, weight=get_weight(m)),
         desc='2d_weights',
@@ -3700,11 +3681,10 @@ new_criterion_tests = [
     ),
     dict(
         module_name='BCELoss',
-        constructor_args_fn=lambda: (criterion_weight_rand_zero_dim,),
-        cpp_constructor_args='torch::nn::BCELossOptions().weight(weight)',
+        constructor_args_fn=lambda: (torch.rand(()),),
+        cpp_constructor_args='torch::nn::BCELossOptions().weight(torch::rand({}))',
         input_fn=lambda: torch.rand(()).clamp_(1e-2, 1 - 1e-2),
         target_fn=lambda: torch.rand(()).gt(0).double(),
-        cpp_arg_symbol_map={'weight': criterion_weight_rand_zero_dim},
         reference_fn=lambda i, t, m: -((t * i.log() + (1 - t) * (1 - i).log()) * get_weight(m)).sum() /
             (i.numel() if get_reduction(m) == 'mean' else 1),
         desc='scalar_weights',
@@ -3731,11 +3711,10 @@ new_criterion_tests = [
     ),
     dict(
         module_name='MultiLabelSoftMarginLoss',
-        constructor_args=(criterion_weight_rand_10,),
-        cpp_constructor_args='torch::nn::MultiLabelSoftMarginLossOptions().weight(weight)',
+        constructor_args=(torch.rand(10),),
+        cpp_constructor_args='torch::nn::MultiLabelSoftMarginLossOptions().weight(torch::rand(10))',
         input_fn=lambda: torch.randn(5, 10),
         target_fn=lambda: torch.rand(5, 10).mul(2).floor(),
-        cpp_arg_symbol_map={'weight': criterion_weight_rand_10},
         reference_fn=lambda i, t, m: -((t * i.sigmoid().log() + (1 - t) * (-i).sigmoid().log()) * get_weight(m)).sum() /
             (i.numel() if get_reduction(m) == 'mean' else i.size(1) if get_reduction(m) == 'sum' else 1),
         desc='weights',

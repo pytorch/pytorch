@@ -30,9 +30,6 @@ from cpp_api_parity.utils import TorchNNFunctionalTestParams, CppArg, TORCH_NN_C
     compute_arg_dict, decorate_test_fn, compute_temp_file_path, generate_error_msg
 from cpp_api_parity import torch_nn_functionals
 
-# NN tests use double as the default dtype
-torch.set_default_dtype(torch.double)
-
 # Expected substitutions:
 #
 # ${functional_variant_name}

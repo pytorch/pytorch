@@ -30,9 +30,6 @@ from cpp_api_parity.utils import TorchNNModuleTestParams, CppArg, TORCH_NN_COMMO
     compute_arg_dict, decorate_test_fn, compute_temp_file_path, generate_error_msg
 from cpp_api_parity import torch_nn_modules
 
-# NN tests use double as the default dtype
-torch.set_default_dtype(torch.double)
-
 # Expected substitutions:
 #
 # ${module_variant_name}
@@ -56,8 +53,8 @@ void ${module_variant_name}_test_forward_backward(
 
   // Construct module and load params/buffers from Python module
   ${module_qualified_name} module${cpp_constructor_args};
-  torch::load(module, module_file_path);
   module->to(std::string("${device}"));
+  torch::load(module, module_file_path);
 
   // Some modules (such as `RReLU`) create random tensors in their forward pass.
   // To make sure the random tensors created are the same in Python/C++, we need

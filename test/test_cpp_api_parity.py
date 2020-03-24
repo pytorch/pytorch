@@ -1,3 +1,7 @@
+import torch
+# NN tests use double as the default dtype
+torch.set_default_dtype(torch.double)
+
 MESSAGE_HOW_TO_FIX_CPP_PARITY_TEST_FAILURE = '''
 What should I do when C++ API parity test is failing?
 
