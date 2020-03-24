@@ -100,7 +100,6 @@ c10::optional<at::Tensor> runTorchSlice_opset9(const Node* node,
     int64_t length = end - start;
     if (length < 0 || start > updated_val.sizes()[axis] - length)
       return c10::nullopt;
-
     updated_val = at::narrow(updated_val, axis, start, length);
   }
   return c10::optional<at::Tensor>(updated_val);
