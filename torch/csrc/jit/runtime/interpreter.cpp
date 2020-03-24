@@ -7,16 +7,17 @@
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/jit/api/compilation_unit.h>
+#include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/ir/constants.h>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/passes/bailout_graph.h>
 #include <torch/csrc/jit/runtime/exception_message.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/instruction.h>
-#include <torch/csrc/jit/ir/ir.h>
-#include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/runtime/operator.h>
-#include <torch/csrc/jit/passes/bailout_graph.h>
-#include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/runtime/jit_exception.h>
+#include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 
 #include <exception>
@@ -361,6 +362,7 @@ struct CodeImpl {
   size_t n_outputs;
   size_t n_inputs;
   TypePtr return_type_;
+  std::string function_name_;
 
   // We MUST hold onto graph here because some Operators stored in the
   // instruction lists have dependencies on meta-data stored in the graph
@@ -388,8 +390,12 @@ struct CodeImpl {
   std::vector<std::unique_ptr<Function>> bailout_functions_;
   size_t remaining_bailout_depth_;
 
-  CodeImpl(const std::shared_ptr<Graph>& graph, size_t remaining_bailout_depth)
-      : preprocess_(*graph),
+  CodeImpl(
+      const std::shared_ptr<Graph>& graph,
+      std::string function_name,
+      size_t remaining_bailout_depth)
+      : function_name_(std::move(function_name)),
+        preprocess_(*graph),
         current_node_(preprocess_.graph->return_node()),
         remaining_bailout_depth_(remaining_bailout_depth) {
     graph_ = preprocess_.graph;
@@ -649,13 +655,13 @@ struct CodeImpl {
     TORCH_INTERNAL_ASSERT(bailout_index >= 0);
 
     auto build_bailout_graph = [bailout_index,
-                                unoptimized_graph](Function &func) {
+                                unoptimized_graph](Function& func) {
 
       BuildBailOutGraphFrom(bailout_index, unoptimized_graph, func.graph());
     };
 
     auto empty_graph = std::make_shared<Graph>();
-    auto func = torch::make_unique<Function>(
+    auto func = torch::make_unique<GraphFunction>(
         "bailout", empty_graph, build_bailout_graph);
     function_table_.emplace_back(func.get());
     bailout_functions_.emplace_back(std::move(func));
@@ -746,7 +752,7 @@ struct CodeImpl {
 
   void emitFork(Node* node) {
     emitLoadInputs(node->inputs());
-    code_table_.emplace_back(node->g(attr::Subgraph));
+    code_table_.emplace_back(Code(node->g(attr::Subgraph), "<forked function>"));
     insertInstruction(FORK, code_table_.size() - 1, node->inputs().size());
   }
 
@@ -959,6 +965,32 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     }
   }
 
+  void runBuiltinFunction(Stack &stack, Function *fn, ActiveFrame *af) {
+    // BuiltinOpFunction directly invokes a void(Stack&) to implement
+    // custom C++ classes. Call run() here with the stack, and we will
+    // get the results from that C++ method back in the stack. Advance
+    // the PC by 1 without adding any new frame.
+    fn->run(stack);
+    ++af->pc;
+  }
+
+  void runGraphFunction(Stack &stack, Function *fn, ActiveFrame *af) {
+    const Code& code =
+        // consider passing
+        // `frames.back().function->remaining_bailout_depth_` into
+        // `get_executor().getPlanFor()` to propagate caller's depth
+        // restrictions onto children while this strategy has a
+        // potential to reduce the number of compilations for too
+        // dynamic callers we might miss opportunities where a caller is
+        // dynamic but a callee gets stable arguments
+        fn->get_executor()
+            .getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts())
+            .code;
+    frames.back().pc = af->pc + 1;
+    enterFrame(code, stack.size() - code.num_inputs());
+    *af = ActiveFrame(frames.back());
+  }
+
   bool runImpl(Stack& stack) {
     // if we have never run before, then we might have to return the
     // stack when we suspend, record where it starts so we return the right
@@ -1056,21 +1088,12 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             }
           } break;
           case CALL: {
-            const Code& code =
-                // consider passing
-                // `frames.back().function->remaining_bailout_depth_` into
-                // `get_executor().getPlanFor()` to propagate caller's depth
-                // restrictions onto children while this strategy has a
-                // potential to reduce the number of compilations for too
-                // dynamic callers we might miss opportunities where a caller is
-                // dynamic but a callee gets stable arguments
-                af.functions[inst.X]
-                    ->get_executor()
-                    .getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts())
-                    .code;
-            frames.back().pc = af.pc + 1;
-            enterFrame(code, stack.size() - code.num_inputs());
-            af = ActiveFrame(frames.back());
+            Function* fn = af.functions[inst.X];
+            if (!fn->isGraphFunction()) {
+              runBuiltinFunction(stack, fn, &af);
+            } else {
+              runGraphFunction(stack, fn, &af);
+            }
           } break;
           case INTERFACE_CALL: {
             // note the hash table lookup to find the function
@@ -1089,13 +1112,11 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                                 .toObject()
                                 ->type()
                                 ->getMethod(af.constants[inst.X].toStringRef());
-            const Code& code =
-                function->get_executor()
-                    .getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts())
-                    .code;
-            frames.back().pc = af.pc + 1;
-            enterFrame(code, stack.size() - inst.N);
-            af = ActiveFrame(frames.back());
+            if (!function->isGraphFunction()) {
+              runBuiltinFunction(stack, function, &af);
+            } else {
+              runGraphFunction(stack, function, &af);
+            }
           } break;
           case RET:
             if (frames.size() > 1) {
@@ -1129,7 +1150,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                   at::launch(InterpreterContinuation(
                       state_,
                       std::move(stack_),
-                      autograd::GradMode::is_enabled()));
+                      torch::ThreadLocalState::getThreadLocalState()));
                 }
 
                private:
@@ -1171,11 +1192,18 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             break;
           }
           case GUARD: {
-            auto t = stack.back().toTensor();
-            const TypePtr& expected = af.types[inst.X];
-            bool comp = expected->cast<TensorType>()
-                            ->isCompatibleWithInCurrentExecutionContext(t);
-            push(stack, comp);
+            if (!stack.back().isTensor()) {
+              // stack.back() is an Uninitialized IValue and this is a guard
+              // on a block output. Uninitialized IValues are never used
+              // so it's safe to pass this guard check
+              push(stack, true);
+            } else {
+              auto t = stack.back().toTensor();
+              const TypePtr& expected = af.types[inst.X];
+              bool comp = expected->cast<TensorType>()
+                              ->isCompatibleWithInCurrentExecutionContext(t);
+              push(stack, comp);
+            }
             ++af.pc;
           } break;
           case TAIL_CALL: {
@@ -1247,7 +1275,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             InterpreterContinuation continuation(
                 forked_interpreter,
                 Stack(stack.end() - inst.N, stack.end()),
-                autograd::GradMode::is_enabled());
+                torch::ThreadLocalState::getThreadLocalState());
             drop(stack, inst.N);
             push(stack, forked_interpreter.getFuture());
             at::launch(std::move(continuation));
@@ -1264,7 +1292,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                   "", range->filename()->c_str(), uint32_t(line)};
               c10::Warning::warn(location, pop(stack).toStringRef());
             } else {
-              AT_WARN(pop(stack).toStringRef());
+              TORCH_WARN(pop(stack).toStringRef());
             }
             ++af.pc;
           } break;
@@ -1279,39 +1307,34 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   }
 
   void formatStackTrace(std::ostream& out) {
-    std::string previous_fn_name = "";
-    for (int64_t i = frames.size() - 1; i >= 0; i--) {
-      const Frame& frame = frames[frames.size() - 1 - i];
-      size_t pc = (i == 0) ? frame.pc
-                           : frame.pc -
-              1; // make sure we report the call node, not the node after it
+    std::vector<StackEntry> entries;
+    for (size_t i = 0; i < frames.size(); ++i) {
+      const Frame& frame = frames[i];
+      std::string previous_fn_name = frame.function->function_name_;
+      size_t pc = frame.pc;
+      // CALL nodes have already advanced the pc, so
+      // undo that to report the call node
+      if (i + 1 < frames.size()) {
+        --pc;
+      }
+
       Node* node = frame.function->instructions_source_[pc];
       if (node->callstack()) {
         for (const auto& p : (*node->callstack())->vec()) {
-          p.second.print_with_context(
-              out, /*context=*/3, /*highlight=*/true, previous_fn_name);
+          entries.emplace_back(StackEntry {previous_fn_name, p.second});
           previous_fn_name = p.first->name();
         }
       }
-      node->sourceRange().print_with_context(
-          out, /*context=*/3, /*highlight=*/true, previous_fn_name);
-      if (node->kind() == prim::CallFunction) {
-        previous_fn_name = node->inputs()
-                               .at(0)
-                               ->type()
-                               ->expect<FunctionType>()
-                               ->function()
-                               ->name();
-      }
+      entries.emplace_back(StackEntry {previous_fn_name, node->sourceRange()});
     }
+    format_stack_trace(out, entries);
   }
 
   void handleError(const ExceptionMessage& msg, bool is_jit_exception) {
     std::stringstream ss;
-    ss << msg << "\n";
-    ss << "The above operation failed in interpreter.\n";
-    ss << "Traceback (most recent call last):\n";
+    ss << "The following operation failed in the TorchScript interpreter.\n";
     formatStackTrace(ss);
+    ss << "RuntimeError: " << msg << "\n";
     if (future_) {
       future_->markCompleted(Future::FutureError(ss.str()));
     } else if (is_jit_exception) {
@@ -1359,8 +1382,8 @@ std::ostream& operator<<(std::ostream& out, const Code& code) {
   return out;
 }
 
-Code::Code(const std::shared_ptr<Graph>& graph, size_t remaining_bailout_depth)
-    : pImpl(new CodeImpl(graph, remaining_bailout_depth)) {}
+Code::Code(const std::shared_ptr<Graph>& graph, std::string function_name, size_t remaining_bailout_depth)
+    : pImpl(new CodeImpl(graph, std::move(function_name), remaining_bailout_depth)) {}
 Code::~Code() = default;
 
 const std::vector<GraphExecutor*>& Code::grad_executors() {
@@ -1424,7 +1447,7 @@ InterpreterState::InterpreterState(
     : pImpl(std::move(pImpl_)) {}
 
 void InterpreterContinuation::operator()() {
-  autograd::AutoGradMode grad_mode(grad_mode_enabled);
+  torch::ThreadLocalStateGuard guard(thread_local_state);
   state.runAsync(stack);
 }
 } // namespace jit

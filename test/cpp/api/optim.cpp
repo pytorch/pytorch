@@ -26,7 +26,7 @@ bool test_optimizer_xor(Options options) {
       Linear(8, 1),
       Functional(torch::sigmoid));
 
-  const int64_t kBatchSize = 4;
+  const int64_t kBatchSize = 50;
   const int64_t kMaximumNumberOfEpochs = 3000;
 
   OptimizerClass optimizer(model->parameters(), options);
@@ -40,13 +40,21 @@ bool test_optimizer_xor(Options options) {
       inputs[i] = torch::randint(2, {2}, torch::kInt64);
       labels[i] = inputs[i][0].item<int64_t>() ^ inputs[i][1].item<int64_t>();
     }
-    inputs.set_requires_grad(true);
-    optimizer.zero_grad();
-    auto x = model->forward(inputs);
-    torch::Tensor loss = torch::binary_cross_entropy(x, labels);
-    loss.backward();
 
-    optimizer.step();
+    inputs.set_requires_grad(true);
+
+    auto step = [&](OptimizerClass& optimizer, Sequential model, torch::Tensor inputs, torch::Tensor labels) {
+      auto closure = [&]() {
+        optimizer.zero_grad();
+        auto x = model->forward(inputs);
+        auto loss = torch::binary_cross_entropy(x, labels);
+        loss.backward();
+        return loss;
+      };
+      return optimizer.step(closure);
+    };
+
+    torch::Tensor loss = step(optimizer, model, inputs, labels);
 
     running_loss = running_loss * 0.99 + loss.item<float>() * 0.01;
     if (epoch > kMaximumNumberOfEpochs) {
@@ -109,7 +117,8 @@ void check_exact_values(
     auto loss = output.sum();
     loss.backward();
 
-    optimizer.step();
+    auto closure = []() { return torch::tensor({10}); };
+    optimizer.step(closure);
 
     if (i % kSampleEvery == 0) {
       ASSERT_TRUE(
@@ -168,7 +177,7 @@ TEST(OptimTest, OptimizerAccessors) {
 TEST(OptimTest, BasicInterface) {
   struct MyOptimizer : Optimizer {
     using Optimizer::Optimizer;
-    void step() override {}
+    torch::Tensor step(LossClosure closure = nullptr) override { return {};}
   };
   std::vector<torch::Tensor> parameters = {
       torch::ones({2, 3}), torch::zeros({2, 3}), torch::rand({2, 3})};
@@ -195,6 +204,11 @@ TEST(OptimTest, BasicInterface) {
 TEST(OptimTest, XORConvergence_SGD) {
   ASSERT_TRUE(test_optimizer_xor<SGD>(
       SGDOptions(0.1).momentum(0.9).nesterov(true).weight_decay(1e-6)));
+}
+
+TEST(OptimTest, XORConvergence_LBFGS) {
+  ASSERT_TRUE(test_optimizer_xor<LBFGS>(LBFGSOptions(1.0)));
+  ASSERT_TRUE(test_optimizer_xor<LBFGS>(LBFGSOptions(1.0).line_search_fn("strong_wolfe")));
 }
 
 TEST(OptimTest, XORConvergence_Adagrad) {
@@ -299,6 +313,18 @@ TEST(OptimTest, ProducesPyTorchValues_SGDWithWeightDecayAndNesterovMomentum) {
   check_exact_values<SGD>(
       SGDOptions(0.1).weight_decay(1e-6).momentum(0.9).nesterov(true),
       expected_parameters::SGD_with_weight_decay_and_nesterov_momentum());
+}
+
+TEST(OptimTest, ProducesPyTorchValues_LBFGS) {
+  check_exact_values<LBFGS>(
+      LBFGSOptions(1.0),
+      expected_parameters::LBFGS());
+}
+
+TEST(OptimTest, ProducesPyTorchValues_LBFGS_with_line_search) {
+  check_exact_values<LBFGS>(
+      LBFGSOptions(1.0).line_search_fn("strong_wolfe"),
+      expected_parameters::LBFGS_with_line_search());
 }
 
 TEST(OptimTest, ZeroGrad) {

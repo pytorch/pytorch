@@ -70,14 +70,6 @@ if (INTERN_BUILD_ATEN_OPS)
     ENDIF(MSVC)
   ENDIF(C_AVX_FOUND)
 
-  IF(C_AVX2_FOUND)
-    IF(MSVC)
-      SET_SOURCE_FILES_PROPERTIES(${CMAKE_CURRENT_LIST_DIR}/../aten/src/TH/vector/AVX2.cpp PROPERTIES COMPILE_FLAGS "${OPT_FLAG}/arch:AVX2 ${CXX_AVX2_FLAGS}")
-    ELSE(MSVC)
-      SET_SOURCE_FILES_PROPERTIES(${CMAKE_CURRENT_LIST_DIR}/../aten/src/TH/vector/AVX2.cpp PROPERTIES COMPILE_FLAGS "${OPT_FLAG} ${CXX_AVX2_FLAGS}")
-    ENDIF(MSVC)
-  ENDIF(C_AVX2_FOUND)
-
   IF(NOT MSVC AND NOT "${CMAKE_C_COMPILER_ID}" MATCHES "Clang")
     SET_SOURCE_FILES_PROPERTIES(${CMAKE_CURRENT_LIST_DIR}/../aten/src/TH/THAllocator.cpp PROPERTIES COMPILE_FLAGS "-fno-openmp")
   ENDIF()
@@ -151,12 +143,32 @@ if (INTERN_BUILD_ATEN_OPS)
     set(GEN_ROCM_FLAG --rocm)
   endif()
 
+  set(CUSTOM_BUILD_FLAGS)
+  if (SELECTED_OP_LIST)
+    if (NOT USE_STATIC_DISPATCH AND NOT OP_DEPENDENCY)
+      message(FATAL_ERROR "Must provide op dependency graph .yaml file for custom build with dynamic dispatch!")
+    endif()
+    EXECUTE_PROCESS(
+      COMMAND
+      "${PYTHON_EXECUTABLE}" ${CMAKE_CURRENT_LIST_DIR}/../tools/code_analyzer/gen_op_registration_whitelist.py
+      --op-dependency "${OP_DEPENDENCY}"
+      --root-ops "${SELECTED_OP_LIST}"
+      OUTPUT_VARIABLE OP_REGISTRATION_WHITELIST
+    )
+    separate_arguments(OP_REGISTRATION_WHITELIST)
+    message(STATUS "Custom build with op registration whitelist: ${OP_REGISTRATION_WHITELIST}")
+    set(CUSTOM_BUILD_FLAGS
+      --force_schema_registration
+      --op_registration_whitelist ${OP_REGISTRATION_WHITELIST})
+  endif()
+
   SET(GEN_COMMAND
       "${PYTHON_EXECUTABLE}" ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/gen.py
       --source-path ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen
       --install_dir ${CMAKE_BINARY_DIR}/aten/src/ATen
       ${GEN_ROCM_FLAG}
       ${cwrap_files}
+      ${CUSTOM_BUILD_FLAGS}
   )
 
   EXECUTE_PROCESS(

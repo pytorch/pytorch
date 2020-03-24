@@ -119,7 +119,7 @@ Tensor new_with_storage(c10::DispatchKey dispatch_key, at::ScalarType scalar_typ
 Tensor new_with_tensor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, const Tensor& other) {
   if (legacyExtractDispatchKey(other.key_set()) != dispatch_key) {
     // In temporary expression lifetime we trust
-    throw TypeError("expected %s (got %s)", dispatch_key, toString(other.key_set()).c_str());
+    throw TypeError("expected %s (got %s)", toString(dispatch_key), toString(other.key_set()).c_str());
   }
   if (other.scalar_type() != scalar_type) {
     throw TypeError("expected %s (got %s)", toString(scalar_type), toString(other.scalar_type()));
@@ -173,7 +173,7 @@ ScalarType infer_scalar_type(PyObject *obj) {
     switch (torch::tensors::get_default_scalar_type()) {
       case ScalarType::Float: return ScalarType::ComplexFloat;
       case ScalarType::Double: return ScalarType::ComplexDouble;
-      default: AT_CHECK(0, "invalid default scalar type for complex");
+      default: TORCH_CHECK(false, "invalid default scalar type for complex");
     }
   }
   if (THPVariable_Check(obj)) {
