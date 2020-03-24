@@ -6,7 +6,7 @@ import torch.jit._recursive
 
 from torch.jit._recursive import ScriptMethodStub
 from torch.jit._builtins import _find_builtin, _get_builtin_table, _register_builtin  # noqa
-from torch._jit_internal import _qualified_name
+from torch._jit_internal import Future, _qualified_name
 from torch.autograd import Variable, function
 from torch.jit.frontend import get_jit_class_def, get_jit_def, get_default_args
 from torch.nn import Module
@@ -62,7 +62,6 @@ _jit_script_class_compile = torch._C._jit_script_class_compile
 # destruction order issues.
 _python_cu = torch._C.CompilationUnit()
 
-Future = torch._C.Future
 set_module(Future, "torch.jit")
 _fork = torch._C.fork
 _wait = torch._C.wait
@@ -1322,6 +1321,32 @@ def interface(obj):
     return obj
 
 
+def _script_if_tracing(fn):
+    """
+    Compiles ``fn`` when it is first called during tracing. ``torch.jit.script``
+    has a non-negligible start up time when it is first called due to
+    lazy-initializations of many compiler builtins. Therefore you should not use
+    it in library code. However, you may want to have parts of your library work
+    in tracing even if they use control flow. In these cases, you should use
+    ``@torch.jit._script_if_tracing`` to substitute for
+    ``torch.jit.script``.
+    """
+    # You can't modify closed-over variables in Python 2, so make this a dict and
+    # mutate it
+    compiled_fn = {}
+
+    @functools.wraps(fn)
+    def wrapper(*args):
+        if not is_tracing():
+            # Not tracing, don't do anything
+            return fn(*args)
+
+        if 'fn' not in compiled_fn:
+            compiled_fn['fn'] = script(fn, _frames_up=1)
+        return compiled_fn['fn'](*args)
+
+    return wrapper
+
 
 def script_method(fn):
     if not _enabled:
@@ -1940,6 +1965,14 @@ def is_scripting():
               return unsupported_linear_op(x)
     """
     return False
+
+
+def is_tracing():
+    """
+    Returns ``True`` in tracing (if a function is called during the tracing of
+    code with ``torch.jit.trace``) and ``False`` otherwise.
+    """
+    return torch._C._is_tracing
 
 def _unwrap_optional(x):
     assert x is not None, "Unwrapping null optional"

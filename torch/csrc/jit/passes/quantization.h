@@ -60,6 +60,7 @@ TORCH_API void FoldQuantNodesIntoInputsOutputs(std::shared_ptr<Graph>& graph);
  * each module is going to be quantized
  * \param inplace whether we want to do inplace modification to the input module
  * or clone the module
+ * \param is_dynamic whether the dynamic quantization script is being used.
  */
 TORCH_API Module InsertObservers(
     Module& module,
@@ -67,7 +68,8 @@ TORCH_API Module InsertObservers(
     const std::unordered_map<
         std::string,
         std::tuple<Module, Module>>& qconfig_dict,
-    bool inplace = false);
+    bool inplace = false,
+    bool is_dynamic = false);
 
 /** \brief Insert quantize - int_repr - dequantize calls to the Tensors
  *  that are observed in insert_observers pass
