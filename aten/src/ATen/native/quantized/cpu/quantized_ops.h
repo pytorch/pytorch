@@ -22,6 +22,9 @@ using qelu_fn = void(*)(
     at::Tensor& /*qy*/);
 using qbinary_fn =
     void (*)(Tensor& /*out*/, const Tensor& /*self*/, const Tensor& /*other*/);
+using qadd_scalar_fn =
+    void (*)(Tensor& /*out*/, const Tensor& /*self*/, Scalar other /*other*/);
+using qhardswish_fn = void (*)(const at::Tensor& /*qx*/, at::Tensor& /*qy*/);
 using qmaxpool_2d_fn = void (*)(
     const Tensor& qx,
     int64_t iC, // input/output channels
@@ -127,6 +130,9 @@ DECLARE_DISPATCH(qbinary_fn, qadd_stub);
 DECLARE_DISPATCH(qbinary_fn, qadd_relu_stub);
 DECLARE_DISPATCH(qbinary_fn, qmul_stub);
 DECLARE_DISPATCH(qbinary_fn, qmul_relu_stub);
+DECLARE_DISPATCH(qadd_scalar_fn, qadd_scalar_stub);
+DECLARE_DISPATCH(qadd_scalar_fn, qadd_scalar_relu_stub);
+DECLARE_DISPATCH(qhardswish_fn, qhardswish_stub);
 DECLARE_DISPATCH(qelu_fn, qelu_stub);
 DECLARE_DISPATCH(qmaxpool_2d_fn, qmaxpool_2d_nhwc_stub);
 DECLARE_DISPATCH(qadaptive_avg_pool2d_fn, qadaptive_avg_pool2d_nhwc_stub);
@@ -137,6 +143,7 @@ DECLARE_DISPATCH(qcat_nhwc_fn, qcat_nhwc_stub);
 DECLARE_DISPATCH(qcat_nhwc_fn, qcat_relu_nhwc_stub);
 DECLARE_DISPATCH(qtopk_fn, qtopk_stub);
 DECLARE_DISPATCH(qbatch_norm_fn, qbatch_norm_stub);
+DECLARE_DISPATCH(qbatch_norm_fn, qbatch_norm_relu_stub);
 
 } // namespace native
 } // namespace at
