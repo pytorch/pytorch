@@ -106,8 +106,20 @@ void RpcAgent::retryExpiredRpcs() {
       auto& earliestRpc = *it;
       // Making a copy of the message so it can be retried in the future.
       Message msgCopy = earliestRpc->message_;
-      auto fm = send(earliestRpc->to_, std::move(msgCopy));
-      futures.emplace_back(fm, earliestRpc);
+      std::shared_ptr<FutureMessage> fm;
+
+      // send() will throw an exception if an RPC is retried while the agent is
+      // shutdown. We must catch this exception and mark the original future
+      // with an error, since this RPC never succeeded and can no longer be
+      // retried.
+      try {
+        fm = send(earliestRpc->to_, std::move(msgCopy));
+        futures.emplace_back(fm, earliestRpc);
+      } catch (std::exception& e) {
+        std::string errorMsg =
+            c10::str("send() failed while retrying RPC with error: ", e.what());
+        earliestRpc->originalFuture_->setError(errorMsg);
+      }
 
       // A callback will be attached to all futures for the retries in this
       // list. Thus they will either be rescheduled for future retries or they
