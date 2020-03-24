@@ -1035,8 +1035,8 @@
   self: not_implemented("embedding_renorm")
 
 - name: kl_div(Tensor self, Tensor target, int reduction=Mean, *, bool log_target=False) -> Tensor
-  self: kl_div_backward(grad, self, target, reduction, log_target)
-  target: kl_div_target_backward(grad, self, target, reduction, log_target)
+  self: kl_div_backward(grad, self, target, reduction, log_target=log_target)
+  target: kl_div_target_backward(grad, self, target, reduction, log_target=log_target)
 
 - name: l1_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
   self: l1_loss_backward(grad, self, target, reduction)
