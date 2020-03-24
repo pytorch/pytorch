@@ -1512,14 +1512,13 @@ class TestSparse(TestCase):
             expected = self.safeToDense(x).matmul(t)
             self.assertEqual(res, expected)
 
-        with self.assertRaisesRegex(RuntimeError, "size or dim is incorrect"):
-            test_shape(10, 100, 20)
-            test_shape(100, 1000, 20)
-            test_shape(64, 10000, 20)
-            test_shape(0, 100, 0)
-            test_shape(10, 0, 0)
-            test_shape(10, 100, 0)
-            test_shape(10, 100, 20)
+        test_shape(10, 100, 20)
+        test_shape(100, 1000, 20)
+        test_shape(64, 10000, 20)
+        test_shape(0, 100, 0)
+        test_shape(10, 0, 0)
+        test_shape(10, 100, 0)
+        test_shape(10, 100, 20)
 
     def test_sparse_add_coalesce(self):
         i = self.index_tensor([[1, 2, 1]])
