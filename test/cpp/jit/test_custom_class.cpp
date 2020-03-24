@@ -66,7 +66,7 @@ struct PickleTester : torch::CustomClassHolder {
   std::vector<int64_t> vals;
 };
 
-static auto test = torch::class_<Foo>("_TorchScriptTesting", "_Foo")
+static auto test = torch::class_<Foo>("_TorchScriptTesting_Foo")
                        .def(torch::init<int64_t, int64_t>())
                        // .def(torch::init<>())
                        .def("info", &Foo::info)
@@ -75,9 +75,7 @@ static auto test = torch::class_<Foo>("_TorchScriptTesting", "_Foo")
                        .def("combine", &Foo::combine);
 
 static auto testStack =
-    torch::class_<MyStackClass<std::string>>(
-        "_TorchScriptTesting",
-        "_StackString")
+    torch::class_<MyStackClass<std::string>>("_TorchScriptTesting_StackString")
         .def(torch::init<std::vector<std::string>>())
         .def("push", &MyStackClass<std::string>::push)
         .def("pop", &MyStackClass<std::string>::pop)
@@ -103,7 +101,7 @@ static auto testStack =
 // clang-format on
 
 static auto testPickle =
-    torch::class_<PickleTester>("_TorchScriptTesting", "_PickleTester")
+    torch::class_<PickleTester>("_TorchScriptTesting_PickleTester")
         .def(torch::init<std::vector<int64_t>>())
         .def_pickle(
             [](c10::intrusive_ptr<PickleTester> self) { // __getstate__
@@ -129,10 +127,10 @@ at::Tensor take_an_instance(const c10::intrusive_ptr<PickleTester>& instance) {
 
 torch::RegisterOperators& register_take_instance() {
   static auto instance_registry = torch::RegisterOperators().op(
-      torch::RegisterOperators::options()
-          .schema(
-              "_TorchScriptTesting::take_an_instance(__torch__.torch.classes._TorchScriptTesting._PickleTester x) -> Tensor Y")
-          .catchAllKernel<decltype(take_an_instance), &take_an_instance>());
+  torch::RegisterOperators::options()
+      .schema(
+          "_TorchScriptTesting::take_an_instance(__torch__.torch.classes._TorchScriptTesting_PickleTester x) -> Tensor Y")
+      .catchAllKernel<decltype(take_an_instance), &take_an_instance>());
   return instance_registry;
 }
 
@@ -148,7 +146,7 @@ void testTorchbindIValueAPI() {
   auto custom_class_obj = make_custom_class<MyStackClass<std::string>>(
       std::vector<std::string>{"foo", "bar"});
   m.define(R"(
-    def forward(self, s : __torch__.torch.classes._TorchScriptTesting._StackString):
+    def forward(self, s : __torch__.torch.classes._TorchScriptTesting_StackString):
       return s.pop(), s
   )");
 
