@@ -197,6 +197,7 @@ def run_test(executable, test_module, test_directory, options, *extra_unittest_a
     argv = [test_module + '.py'] + unittest_args + list(extra_unittest_args)
 
     command = executable + argv
+    print(command)
     return shell(command, test_directory)
 
 
