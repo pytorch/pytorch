@@ -43,11 +43,10 @@
 #include <utility>
 #include <vector>
 
-PYBIND11_MAKE_OPAQUE(torch::jit::script::ExtraFilesMap);
+PYBIND11_MAKE_OPAQUE(torch::jit::ExtraFilesMap);
 
 namespace torch {
 namespace jit {
-namespace script {
 
 using ::c10::Argument;
 using ::c10::FunctionSchema;
@@ -99,16 +98,9 @@ struct PythonResolver : public Resolver {
         py::hasattr(obj, "_fields");
   }
 
-  TypePtr resolveType(const std::string& name, const SourceRange& loc)
-      override {
-    if (classType_ && name == classname_) {
-      return classType_;
-    }
-    pybind11::gil_scoped_acquire ag;
-    py::object obj = rcb_(name);
-    if (obj.is(py::none())) {
-      return nullptr;
-    }
+  TypePtr resolveTypeFromObject(
+      const py::object& obj,
+      const SourceRange& loc) {
 
     if (py::isinstance<ScriptClass>(obj)) {
       auto script_class = py::cast<ScriptClass>(obj);
@@ -166,6 +158,26 @@ struct PythonResolver : public Resolver {
       return tt;
     }
     return get_python_cu()->get_type(qualifiedName);
+  }
+
+  TypePtr resolveType(const std::string& name, const SourceRange& loc)
+      override {
+    if (classType_ && name == classname_) {
+      return classType_;
+    }
+
+    pybind11::gil_scoped_acquire ag;
+    py::object obj = rcb_(name);
+    if (obj.is(py::none())) {
+      return nullptr;
+    }
+
+    auto annotation_type = py::module::import("torch.jit.annotations")
+                               .attr("try_ann_to_type")(obj, loc);
+    if (!annotation_type.is_none()) {
+      return py::cast<TypePtr>(annotation_type);
+    }
+    return resolveTypeFromObject(obj, loc);
   }
 
  private:
@@ -594,7 +606,7 @@ bool ivalue_tags_match(const Module& lhs, const Module& rhs) {
 // inside of script nn.Module
 template <typename Policy>
 struct slot_dict_impl {
-  slot_dict_impl(script::ModulePtr module) : module_(std::move(module)) {}
+  slot_dict_impl(ModulePtr module) : module_(std::move(module)) {}
   bool contains(const std::string& name) const {
     if (auto slot = module_->type()->findAttributeSlot(name)) {
       if (Policy::valid(module_->type(), *slot, module_->getSlot(*slot))) {
@@ -618,11 +630,11 @@ struct slot_dict_impl {
 
   void setattr(const std::string& name, py::object value) {
     const TypePtr& type = module_->type()->getAttribute(name);
-    script::Module(module_).setattr(name, toIValue(std::move(value), type));
+    Module(module_).setattr(name, toIValue(std::move(value), type));
   }
 
   py::object getattr(const std::string& name) {
-    return toPyObject(script::Module(module_).attr(name));
+    return toPyObject(Module(module_).attr(name));
   }
 
   static void bind(const py::module& m, const char* name) {
@@ -636,7 +648,7 @@ struct slot_dict_impl {
   }
 
  private:
-  script::ModulePtr module_;
+  ModulePtr module_;
 };
 
 template <typename T>
@@ -766,7 +778,7 @@ void initJitScriptBindings(PyObject* module) {
             py::object state;
             std::string qualname;
             std::tie(state, qualname) = state_tup;
-            auto class_type = classCU()->get_class(qualname);
+            auto class_type = getCustomClass(qualname);
             TORCH_CHECK(
                 class_type,
                 "Tried to deserialize class ",
@@ -775,8 +787,11 @@ void initJitScriptBindings(PyObject* module) {
                 "If this is a custom C++ class, make "
                 "sure the appropriate code is linked.");
 
-            auto self = script::Object(c10::ivalue::Object::create(
-                c10::StrongTypePtr(classCU(), class_type), 1));
+            auto self = Object(c10::ivalue::Object::create(
+                c10::StrongTypePtr(
+                    std::shared_ptr<torch::jit::CompilationUnit>(),
+                    class_type),
+                1));
             if (auto setstate_method = self.find_method("__setstate__")) {
               auto setstate_schema = setstate_method->function().getSchema();
               TORCH_INTERNAL_ASSERT(
@@ -908,13 +923,14 @@ void initJitScriptBindings(PyObject* module) {
       .def("_clone", &Module::clone)
       .def("_clone_instance", &Module::clone_instance);
 
-  slot_dict_impl<script::detail::ParameterPolicy>::bind(m, "ParameterDict");
-  slot_dict_impl<script::detail::BufferPolicy>::bind(m, "BufferDict");
-  slot_dict_impl<script::detail::ModulePolicy>::bind(m, "ModuleDict");
+  slot_dict_impl<detail::ParameterPolicy>::bind(m, "ParameterDict");
+  slot_dict_impl<detail::BufferPolicy>::bind(m, "BufferDict");
+  slot_dict_impl<detail::ModulePolicy>::bind(m, "ModuleDict");
 
   py::class_<ErrorReport, std::shared_ptr<ErrorReport>>(m, "ErrorReport")
       .def(py::init<SourceRange>())
-      .def("what", &ErrorReport::what);
+      .def("what", &ErrorReport::what)
+      .def_static("call_stack", ErrorReport::current_call_stack);
 
   py::class_<CompilationUnit, std::shared_ptr<CompilationUnit>>(
       m, "CompilationUnit")
@@ -1279,7 +1295,7 @@ void initJitScriptBindings(PyObject* module) {
     return Module(get_python_cu(), type);
   });
 
-  m.def("_export_opnames", [](script::Module& sm) {
+  m.def("_export_opnames", [](Module& sm) {
     return debugMakeList(torch::jit::export_opnames(sm));
   });
 
@@ -1378,6 +1394,11 @@ void initJitScriptBindings(PyObject* module) {
       [](const std::string& name, SourceRange range, ResolutionCallback rcb) {
         return pythonResolver(rcb)->resolveType(name, range);
       });
+  m.def(
+      "_resolve_type_from_object",
+      [](const py::object& obj, SourceRange range, ResolutionCallback rcb) {
+        return pythonResolver(rcb)->resolveTypeFromObject(obj, range);
+      });
 
   m.def(
       "_run_emit_module_hook", [](const Module& m) { didFinishEmitModule(m); });
@@ -1405,9 +1426,8 @@ void initJitScriptBindings(PyObject* module) {
       [](const std::string& proto_string) { check_onnx_proto(proto_string); },
       py::arg("proto_string"));
   m.def("_jit_is_script_object", [](const py::object& obj) {
-    return py::isinstance<script::Object>(obj);
+    return py::isinstance<Object>(obj);
   });
 }
-} // namespace script
 } // namespace jit
 } // namespace torch
