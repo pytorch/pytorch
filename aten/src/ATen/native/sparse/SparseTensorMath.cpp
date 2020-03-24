@@ -1423,7 +1423,9 @@ Tensor bmm_sparse_cpu(const SparseTensor& self, const Tensor& mat2, optional<boo
 }
 
 // Search a sorted strided array for the rightmost instance of a value.
-// Array must be sorted from lowest to highest
+// Array must be sorted from lowest to highest.
+// Returns the index of the found element.
+// Returns by reference `found`, true if search value was found, false otherwise
 template<typename scalar_t>
 scalar_t binary_search_strided_rightmost(scalar_t search_val, scalar_t* sorted_arr, int64_t sorted_arr_stride, int64_t length, bool* found) {
   if (length == 0) {
