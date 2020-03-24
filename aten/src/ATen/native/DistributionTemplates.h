@@ -208,6 +208,7 @@ Tensor& normal_out_impl(Tensor& output, const Tensor& mean, double std, Generato
 
 template<template<typename> class normal_kernel, typename RNG>
 Tensor& normal_out_impl(Tensor& output, double mean, const Tensor& std, Generator gen) {
+  TORCH_CHECK(!std.is_complex(), "normal expects standard deviation to be non-complex");
   normal_impl_<normal_kernel, RNG>(output, 0, 1, gen);
   auto mean_tensor = at::full({}, mean, output.options());
   // CUDA NB: addcmul_out copies the tensor to be added into the output.
@@ -221,6 +222,7 @@ Tensor& normal_out_impl(Tensor& output, double mean, const Tensor& std, Generato
 
 template<template<typename> class normal_kernel, typename RNG>
 Tensor& normal_out_impl(Tensor& output, const Tensor& mean, const Tensor& std, Generator gen) {
+  TORCH_CHECK(!std.is_complex(), "normal expects standard deviation to be non-complex");
   bool is_deprecated_th_impl = resize_output_for_normal(output, mean, std);
   normal_impl_<normal_kernel, RNG>(output, 0, 1, gen);
   // CUDA NB: addcmul_out copies the tensor to be added into the output.

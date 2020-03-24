@@ -2141,21 +2141,6 @@ class _TestTorchMixin(object):
             self.assertTrue((res1 < 6).all().item())
             self.assertTrue((res1 >= 0).all().item())
 
-    def test_randn(self):
-        def common_routine(dtype):
-            for device in torch.testing.get_all_device_types():
-                torch.manual_seed(123456)
-                res1 = torch.randn(SIZE, SIZE, dtype=dtype, device=device)
-                res2 = torch.tensor([], dtype=dtype, device=device)
-                torch.manual_seed(123456)
-                torch.randn(SIZE, SIZE, out=res2)
-                self.assertEqual(res1, res2)
-
-        common_routine(dtype=torch.float32)
-        common_routine(dtype=torch.float64)
-        common_routine(dtype=torch.complex64)
-        common_routine(dtype=torch.complex128)
-
     def test_slice(self):
         empty = torch.empty(0, 4)
         x = torch.arange(0., 16).view(4, 4)
@@ -6009,7 +5994,6 @@ class TestTorchDeviceType(TestCase):
         input_ = layer_norm(input_.transpose(1, 2).contiguous()).contiguous()
         input_.sum().backward()
 
-
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     @onlyCPU
     @dtypes(torch.float)
@@ -9743,78 +9727,123 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(1, len(z))
         self.assertEqual(torch.empty(0, dtype=torch.long), z[0])
 
-    @dtypes(torch.float, torch.double)
-    @dtypesIfCUDA(torch.float, torch.double)
+    @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
+    @dtypesIfCUDA(torch.float, torch.double, torch.complex64, torch.complex128)
     def test_normal(self, device, dtype):
-        q = torch.empty(100, 100, dtype=dtype, device=device).normal_()
-        self.assertEqual(q.mean(), 0, 0.2)  # torch.half: "sum_cpu" not implemented for 'Half'   
-        self.assertEqual(q.std(), 1, 0.2)
 
-        q.normal_(2, 3)
-        self.assertEqual(q.mean(), 2, 0.3)
-        self.assertEqual(q.std(), 3, 0.3)
+        def helper(self, device, dtype, ptype, t_transform, std_transform):
+            q = torch.empty(100, 100, dtype=dtype, device=device)
 
-        q = torch.empty(100, 100, dtype=dtype, device=device)
-        q_row1 = q[0:1].clone()
-        q[99:100].normal_()
-        self.assertEqual(q[99:100].mean(), 0, 0.2)
-        self.assertEqual(q[99:100].std(), 1, 0.2)
-        self.assertEqual(q[0:1].clone(), q_row1)
+            q.normal_()
+            self.assertEqual(t_transform(q).mean(), 0, 0.2)
+            self.assertEqual(t_transform(q).std(), std_transform(1), 0.2)
 
-        mean = torch.empty(100, 100, dtype=dtype, device=device)
-        std = torch.empty(100, 100, dtype=dtype, device=device)
-        mean[:50] = 0
-        mean[50:] = 1
-        std[:, :50] = 4
-        std[:, 50:] = 1
+            q.normal_(2, 3)
+            self.assertEqual(t_transform(q).mean(), 2, 0.3)
+            self.assertEqual(t_transform(q).std(), std_transform(3), 0.3)
 
-        r = torch.normal(mean)
-        self.assertEqual(r[:50].mean(), 0, 0.2)
-        self.assertEqual(r[50:].mean(), 1, 0.2)
-        self.assertEqual(r.std(), 1, 0.2)
+            q = torch.empty(100, 100, dtype=dtype, device=device)
+            q_row1 = q[0:1].clone()
+            q[99:100].normal_()
+            self.assertEqual(t_transform(q[99:100]).mean(), 0, 0.2)
+            self.assertEqual(t_transform(q[99:100]).std(), std_transform(1), 0.2)
+            self.assertEqual(t_transform(q[0:1]).clone(), t_transform(q_row1))
 
-        r = torch.normal(mean, 3)
-        self.assertEqual(r[:50].mean(), 0, 0.2)
-        self.assertEqual(r[50:].mean(), 1, 0.2)
-        self.assertEqual(r.std(), 3, 0.2)
+            mean = torch.empty(100, 100, dtype=dtype, device=device)
+            mean[:50].fill_(ptype(0))
+            mean[50:].fill_(ptype(1))
 
-        r = torch.normal(2, std)
-        self.assertEqual(r.mean(), 2, 0.2)
-        self.assertEqual(r[:, :50].std(), 4, 0.3)
-        self.assertEqual(r[:, 50:].std(), 1, 0.2)
+            std = torch.empty(100, 100, dtype=torch.float, device=device)
+            std[:, :50] = 4
+            std[:, 50:] = 1
 
-        r = torch.normal(mean, std)
-        self.assertEqual(r[:50].mean(), 0, 0.2)
-        self.assertEqual(r[50:].mean(), 1, 0.2)
-        self.assertEqual(r[:, :50].std(), 4, 0.3)
-        self.assertEqual(r[:, 50:].std(), 1, 0.2)
+            r = torch.normal(mean)
+            self.assertEqual(r.dtype, dtype)
+            self.assertEqual(str(r.device), device)
+            self.assertEqual(t_transform(r[:50]).mean(), 0, 0.2)
+            self.assertEqual(t_transform(r[50:]).mean(), 1, 0.2)
+            self.assertEqual(t_transform(r).std(), std_transform(1), 0.2)
 
-        r = torch.normal(2, 3, (100, 100))
-        self.assertEqual(r.mean(), 2, 0.2)
-        self.assertEqual(r.std(), 3, 0.2)
+            r.fill_(42)
+            r = torch.normal(mean, 3)
+            self.assertEqual(r.dtype, dtype)
+            self.assertEqual(str(r.device), device)
+            self.assertEqual(t_transform(r[:50]).mean(), 0, 0.2)
+            self.assertEqual(t_transform(r[50:]).mean(), 1, 0.2)
+            self.assertEqual(t_transform(r).std(), std_transform(3), 0.2)
+
+            r.fill_(42)
+            torch.normal(mean, 3, out=r)
+            self.assertEqual(r.dtype, dtype)
+            self.assertEqual(str(r.device), device)
+            self.assertEqual(t_transform(r[:50]).mean(), 0, 0.2)
+            self.assertEqual(t_transform(r[50:]).mean(), 1, 0.2)
+            self.assertEqual(t_transform(r).std(), std_transform(3), 0.2)
+
+            r.fill_(42)
+            r = torch.normal(2, std)
+            self.assertFalse(r.dtype.is_complex)
+            self.assertEqual(str(r.device), device)
+            self.assertEqual(r.mean(), 2, 0.2)
+            self.assertEqual(r[:, :50].std(), 4, 0.3)
+            self.assertEqual(r[:, 50:].std(), 1, 0.2)
+
+            r.fill_(42)
+            torch.normal(2, std, out=r)
+            self.assertFalse(r.dtype.is_complex)
+            self.assertEqual(str(r.device), device)
+            self.assertEqual(r.mean(), 2, 0.2)
+            self.assertEqual(r[:, :50].std(), 4, 0.3)
+            self.assertEqual(r[:, 50:].std(), 1, 0.2)
+
+            r.fill_(42)
+            r = torch.normal(mean, std)
+            self.assertEqual(r.dtype, dtype)
+            self.assertEqual(str(r.device), device)
+            self.assertEqual(t_transform(r[:50]).mean(), 0, 0.2)
+            self.assertEqual(t_transform(r[50:]).mean(), 1, 0.2)
+            self.assertEqual(t_transform(r[:, :50]).std(), std_transform(4), 0.3)
+            self.assertEqual(t_transform(r[:, 50:]).std(), std_transform(1), 0.2)
+
+            r.fill_(42)
+            torch.normal(mean, std, out=r)
+            self.assertEqual(r.dtype, dtype)
+            self.assertEqual(str(r.device), device)
+            self.assertEqual(t_transform(r[:50]).mean(), 0, 0.2)
+            self.assertEqual(t_transform(r[50:]).mean(), 1, 0.2)
+            self.assertEqual(t_transform(r[:, :50]).std(), std_transform(4), 0.3)
+            self.assertEqual(t_transform(r[:, 50:]).std(), std_transform(1), 0.2)
+
+            r.fill_(42)
+            r = torch.normal(2, 3, (100, 100), dtype=dtype, device=device)
+            self.assertEqual(r.dtype, dtype)
+            self.assertEqual(str(r.device), device)
+            self.assertEqual(t_transform(r).mean(), 2, 0.3)
+            self.assertEqual(t_transform(r).std(), std_transform(3), 0.3)
+
+            r.fill_(42)
+            torch.normal(2, 3, (100, 100), dtype=dtype, device=device, out=r)
+            self.assertEqual(r.dtype, dtype)
+            self.assertEqual(str(r.device), device)
+            self.assertEqual(t_transform(r).mean(), 2, 0.3)
+            self.assertEqual(t_transform(r).std(), std_transform(3), 0.3)
+
+        if dtype.is_complex:
+            helper(self, device, dtype, lambda x: complex(x, x), lambda t: t.real().to(torch.float), lambda mean: mean / math.sqrt(2))
+            helper(self, device, dtype, lambda x: complex(x, x), lambda t: t.imag().to(torch.float), lambda mean: mean / math.sqrt(2))
+            self.assertRaisesRegex(
+                RuntimeError, "normal expects standard deviation to be non-complex",
+                lambda: torch.normal(0, torch.empty(100, 100, dtype=dtype, device=device)))
+            out = torch.empty(100, 100, dtype=dtype, device=device)
+            self.assertRaisesRegex(
+                RuntimeError, "normal expects standard deviation to be non-complex",
+                lambda: torch.normal(0, torch.empty(100, 100, dtype=dtype, device=device), out=out))
+        else:
+            helper(self, device, dtype, lambda x: x, lambda t: t, lambda mean: mean)
 
     @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
     @dtypesIfCUDA(torch.float, torch.double, torch.complex64, torch.complex128)
-    def test_normal_2(self, device, dtype):
-        for size in [10, 1000]:
-            t = torch.empty(size, dtype=dtype, device=device)
-            t.normal_()
-            t.normal_(42.0)
-            t.normal_(24.0, 42.0)
-
-            torch.normal(2, 3, size=(size,), out=t)
-            torch.normal(mean=torch.full_like(t, 42.0), out=t)
-            torch.normal(mean=24.0, std=torch.full_like(t, 42.0), out=t)
-            torch.normal(mean=torch.full_like(t, 24.0), std=torch.full_like(t, 42.0), out=t)
-
-            t = torch.normal(2, 3, size=(size,), dtype=dtype, device=device)
-            t = torch.normal(mean=torch.full_like(t, 42.0))
-            t = torch.normal(mean=24.0, std=torch.full_like(t, 42.0))
-            t = torch.normal(mean=torch.full_like(t, 24.0), std=torch.full_like(t, 42.0))
-
-    @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
-    @dtypesIfCUDA(torch.float, torch.double, torch.complex64, torch.complex128)
-    def test_randn_2(self, device, dtype):
+    def test_randn(self, device, dtype):
         torch.manual_seed(123456)
         res1 = torch.randn(SIZE, SIZE, dtype=dtype, device=device)
         res2 = torch.tensor([], dtype=dtype, device=device)
@@ -12012,6 +12041,25 @@ class TestTorchDeviceType(TestCase):
         _test((10,), 3, win_length=5, expected_error=RuntimeError)
         _test((10,), 5, 4, win_sizes=(11,), expected_error=RuntimeError)
         _test((10,), 5, 4, win_sizes=(1, 1), expected_error=RuntimeError)
+
+    def test_fft_input_modification(self, device):
+        # FFT functions should not modify their input (gh-34551)
+
+        signal = torch.ones((2, 2, 2), device=device)
+        signal_copy = signal.clone()
+        spectrum = torch.fft(signal, 2)
+        self.assertEqual(signal, signal_copy)
+
+        spectrum_copy = spectrum.clone()
+        _ = torch.ifft(spectrum, 2)
+        self.assertEqual(spectrum, spectrum_copy)
+
+        half_spectrum = torch.rfft(signal, 2)
+        self.assertEqual(signal, signal_copy)
+
+        half_spectrum_copy = half_spectrum.clone()
+        _ = torch.irfft(half_spectrum_copy, 2, signal_sizes=(2, 2))
+        self.assertEqual(half_spectrum, half_spectrum_copy)
 
     @skipCUDAIfRocm
     def test_blas_empty(self, device):
@@ -16020,9 +16068,16 @@ tensor_op_tests = [
     ('div', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-1),
     ('div', 'tensor', _small_3d,
         lambda t, d: [_small_3d(t, d, has_zeros=False)], 1e-1),
-    # Note: precision for floor_divide is 1 since a small (1e-5, for example)
-    # error in division can lead to an difference of 1 post-truncation
-    # (e.g. .9999 vs 1 post truncation is 0 vs 1)
+    ('true_divide', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-1,
+        1e-5, 1e-5, _types, False),
+    ('true_divide', 'with_inplace', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-1,
+        1e-5, 1e-5, _float_types),
+    ('true_divide', 'tensor', _small_3d,
+        lambda t, d: [_small_3d(t, d, has_zeros=False)], 1e-1,
+        1e-5, 1e-5, _types, False),
+    ('true_divide', 'tensor_with_inplace', _small_3d,
+        lambda t, d: [_small_3d(t, d, has_zeros=False)], 1e-1,
+        1e-5, 1e-5, _float_types),
     ('floor_divide', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1, 1e-5, 1e-5, _types),
     ('floor_divide', 'tensor', _small_3d,
         lambda t, d: [_small_3d(t, d, has_zeros=False)], 1, 1e-5, 1e-5, _types),

@@ -365,12 +365,6 @@ inline void deprecated_AT_ERROR() {}
 
 /*
 // Deprecation disabled until we fix sites in our codebase
-C10_DEPRECATED_MESSAGE("AT_INDEX_ERROR(msg) is deprecated, use TORCH_CHECK_INDEX(false, msg) instead.")
-*/
-inline void deprecated_AT_INDEX_ERROR() {}
-
-/*
-// Deprecation disabled until we fix sites in our codebase
 C10_DEPRECATED_MESSAGE("AT_ASSERT is deprecated, if you mean to indicate an internal invariant failure, use " \
                        "TORCH_INTERNAL_ASSERT instead; if you mean to do user error checking, use " \
                        "TORCH_CHECK.  See https://github.com/pytorch/pytorch/issues/20287 for more details.")
@@ -418,13 +412,6 @@ inline void deprecated_AT_ASSERTM() {}
   do {                                                                        \
     ::c10::detail::deprecated_AT_ERROR();                                     \
     C10_EXPAND_MSVC_WORKAROUND(TORCH_CHECK(false, ::c10::str(__VA_ARGS__)));  \
-  } while (false)
-
-// Deprecated alias; this alias was deprecated for consistency with TORCH_CHECK.
-#define AT_INDEX_ERROR(...)                                                         \
-  do {                                                                              \
-    ::c10::detail::deprecated_AT_INDEX_ERROR();                                     \
-    C10_EXPAND_MSVC_WORKAROUND(TORCH_CHECK_INDEX(false, ::c10::str(__VA_ARGS__)));  \
   } while (false)
 
 #endif // C10_UTIL_EXCEPTION_H_
