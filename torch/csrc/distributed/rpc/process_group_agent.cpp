@@ -430,14 +430,12 @@ void ProcessGroupAgent::handleSend(const SendWork& work) {
   }
   // Write pendingSends to a global map so that they can be interrupted by
   // ::shutdown().
-  std::unique_lock<std::mutex> pendingSendGuard(pendingSendMutex_);
-
-  for (auto& p : pendingSends) {
-    currentPendingSends_[dst].insert(p);
+  {
+    std::lock_guard<std::mutex> pendingSendGuard(pendingSendMutex_);
+    for (auto& p : pendingSends) {
+      currentPendingSends_[dst].insert(p);
+    }
   }
-
-  // Unlock to call into wait, otherwise shutdown() cannot interrupt here.
-  pendingSendGuard.unlock();
 
   for (auto& pendingSend : pendingSends) {
     if (!rpcRunning_.load() || !pendingSend->wait()) {
@@ -447,12 +445,14 @@ void ProcessGroupAgent::handleSend(const SendWork& work) {
   }
 
   // Erase the pending sends that we added since we have returned from wait.
-  pendingSendGuard.lock();
-  // NB: We cannot just erase all of currentPendingSends[dst], since this might
-  // preemptively remove sends from other threads.
-  auto& set = currentPendingSends_[dst];
-  for (auto& p : pendingSends) {
-    set.erase(p);
+  {
+    std::lock_guard<std::mutex> pendingSendGuard(pendingSendMutex_);
+    // NB: We cannot just erase all of currentPendingSends[dst], since this
+    // might preemptively remove sends from other threads.
+    auto& set = currentPendingSends_[dst];
+    for (auto& p : pendingSends) {
+      set.erase(p);
+    }
   }
 }
 
@@ -484,7 +484,7 @@ void ProcessGroupAgent::enqueueSend(SendWork work) {
       std::move(work)));
 }
 
-int ProcessGroupAgent::handleRecv(RecvWork& work) {
+bool ProcessGroupAgent::handleRecv(RecvWork& work) {
   torch::Tensor& payload = work.payload_;
   auto data = wireDeserialize(payload.storage().data(), payload.numel());
   Message message(
@@ -538,11 +538,11 @@ int ProcessGroupAgent::handleRecv(RecvWork& work) {
       std::lock_guard<std::mutex> lock{futureMutex_};
       const auto& futureInfo = futures_.find(id);
       if (futureInfo == futures_.end()) {
-        // Received a completion for a timed out future, drop the recv.
-        // RecvCounts will not be incremented here, it will be
-        // incremented by the sender who has determined the future has
-        // timed out.
-        return 0;
+        // Received a completion for an already-processed future (such as one
+        // that timed out), drop the recv. By returning false, recvCounts will
+        // not be incremented, it will be incremented by the thread that
+        // determined that the future timed out.
+        return false;
       }
       // Use futureInfo before destructing it.
       fm = futureInfo->second.future_;
@@ -573,15 +573,17 @@ int ProcessGroupAgent::handleRecv(RecvWork& work) {
     // TODO: pass the error back to the caller instead of crashing here.
     TORCH_INTERNAL_ASSERT(false, "unrecognized message type ", message.type());
   }
-  return 1;
+  return true;
 }
 
 void ProcessGroupAgent::enqueueRecv(RecvWork work) {
   threadPool_.run(std::bind(
       [&](RecvWork& work) {
         try {
-          auto shouldIncr = handleRecv(work);
-          if (shouldIncr) {
+          // Only increment recvCounts if handleRecv() tells us to. We may not,
+          // i.e. if we process work corresponding to a future that has already
+          // been processed.
+          if (handleRecv(work)) {
             recvCounts_.increment(work.from_.id_);
           }
         } catch (const std::exception& e) {
@@ -771,12 +773,12 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
         --clientActiveCalls_;
         timedOutFuture.future_->setError(std::string(
             exceptionMsg.payload().begin(), exceptionMsg.payload().end()));
+        // The future timed out and will not be processed by handleRecv(), even
+        // if we eventually get a response. In order to keep track of all
+        // send/recv pairs, we increment the count here.
+        const int dst = timedOutFuture.dstRank_;
+        recvCounts_.increment(dst);
       }
-      // The future timed out and will not be processed by handleRecv(), even if
-      // we eventually get a response. In order to keep track of all send/recv
-      // pairs, we increment the count here.
-      const int dst = timedOutFuture.dstRank_;
-      recvCounts_.increment(dst);
     }
   }
 }
