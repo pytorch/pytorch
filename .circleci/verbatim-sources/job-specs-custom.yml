@@ -150,7 +150,7 @@
             cp -a ~/workspace/project/. ~/project
 
             # Temporary fix for permission within workspace
-            chmod a+x workspace/miniconda3/lib/python3.7/site-packages/torch/bin/*
+            chmod a+x ~/workspace/miniconda3/lib/python3.7/site-packages/torch/bin/*
 
             chmod a+x .jenkins/pytorch/macos-test.sh
             unbuffer .jenkins/pytorch/macos-test.sh 2>&1 | ts
