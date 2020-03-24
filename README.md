@@ -95,7 +95,7 @@ Our goal is to not reinvent the wheel where appropriate.
 
 ### Imperative Experiences
 
-PyTorch is designed to be intuitive, linear in thought and easy to use.
+PyTorch is designed to be intuitive, linear in thought, and easy to use.
 When you execute a line of code, it gets executed. There isn't an asynchronous view of the world.
 When you drop into a debugger, or receive error messages and stack traces, understanding them is straightforward.
 The stack trace points to exactly where your code was defined.
