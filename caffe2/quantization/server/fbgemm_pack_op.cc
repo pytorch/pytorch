@@ -327,6 +327,33 @@ bool FullyConnectedDNNLowPPackWeightOp::RunOnDevice() {
     Y->bias = nullptr;
   }
 
+  // Output quantized bias if we specify a second output. This output is meant
+  // to be consumed by accelerator instead of CPU ops.
+  if (OutputSize() >= 2) {
+    CAFFE_ENFORCE(Y->bias, "Bias is not quantized");
+    // The reason we don't support this is basically due to limitation of
+    // Int8TensorCPU only support single scale and zero_point. If we choose to
+    // output bias as Int8FCDNNLowPPackedWeightBlob with original layout,
+    // everything should still work for accelerator.
+    CAFFE_ENFORCE_EQ(
+        1,
+        Y->qparams.size(),
+        "We don't support outputing channelwise quantized bias yet");
+    auto quantized_bias = Y->bias;
+    float in_scale = GetSingleArgument<float>("in_scale", 0);
+    float bias_scale = in_scale * Y->qparams.front().scale;
+    LOG(INFO) << "Bias scale " << bias_scale << ": input scale " << in_scale
+              << " weight scale " << Y->qparams.front().scale;
+    auto* Bq = this->Output<int8::Int8TensorCPU>(1);
+    std::vector<int64_t> shape = {static_cast<int64_t>(quantized_bias->size())};
+    Bq->t.Resize(shape);
+    Bq->scale = bias_scale;
+    Bq->zero_point = 0;
+    auto* data = Bq->t.template mutable_data<int32_t>();
+    context_.template CopySameDevice<int32_t>(
+        quantized_bias->size(), quantized_bias->data(), data);
+  }
+
   return true;
 }
 
@@ -832,11 +859,12 @@ REGISTER_CPU_OPERATOR_WITH_ENGINE(
 
 OPERATOR_SCHEMA(Int8FCPackWeight)
     .NumInputs(1, 2)
-    .NumOutputs(1)
+    .NumOutputs(1, 2)
     .SetDoc(R"DOC(Prepack weight for Int8FC)DOC")
     .Input(0, "W", "Weight tensor in KRSC layout")
     .Input(1, "b", "Bias tensor")
-    .Output(0, "W_q", "Weight/bias tensor in a packed format");
+    .Output(0, "W_q", "Weight/bias tensor in a packed format")
+    .Output(1, "B_q", "Bias int32 quantized tensor");
 
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Int8ConvPackWeight,

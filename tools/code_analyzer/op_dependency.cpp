@@ -137,7 +137,7 @@ cl::opt<OutputFormatType> OutputFormat(
 cl::opt<bool> TransitiveClosure(
     "closure",
     cl::desc("Output transitive closure."),
-    cl::init(true));
+    cl::init(false));
 
 cl::opt<int> Verbose(
     "v",
