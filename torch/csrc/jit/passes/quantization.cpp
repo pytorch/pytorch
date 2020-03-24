@@ -437,7 +437,7 @@ class InsertObserversHelper {
    * arguemnt: is_entry_point means whether the current method is the forward
    * method of the top level module.
    *
-   *Since we want to insert observers in the call site instead of in the called
+   * Since we want to insert observers in the call site instead of in the called
    * graph, we'll postpone inserting observer to caller as much as possible, if
    * we know the current method is the outer most method, then
    * we will insert all observers in the graph instead of postpone this to the
@@ -468,6 +468,7 @@ class InsertObserversHelper {
       // insert multiple observers for the same value
       std::unordered_set<Value*>& block_observed_values,
       bool is_entry_point = false);
+  void setDynamicFlag(bool is_dynamic_);
 
  private:
   ModuleMethodVector getInvokedMethods(
@@ -549,6 +550,8 @@ class InsertObserversHelper {
   // want to add to the module instance that has the block
   std::unordered_map<Block*, NameModuleVector> block_observer_map_;
 
+  // Is dynamic quantization enabled for the observer pass.
+  bool is_dynamic = false;
   // These are the IR patterns we match to skip inserting observers.
   // They are compiled once on construction and used repeatedly within
   // the pass.
@@ -829,6 +832,10 @@ void InsertObserversHelper::fillBoundaryValueMap(
   }
 }
 
+void InsertObserversHelper::setDynamicFlag(bool is_dynamic_) {
+  is_dynamic = is_dynamic_;
+}
+
 void InsertObserversHelper::preprocess(
     Module& module,
     const std::string& method_name) {
@@ -862,9 +869,13 @@ bool InsertObserversHelper::valueNeedsToBeQuantized(Value* v) {
       isBiasOfConvOrLinear(v)) {
     return false;
   }
-  // Check whether producer is quantizable
-  if (nodeQuantizable(v->node())) {
-    return true;
+  // For dynamic quantization we only insert observers at the input
+  // of the quantizable function.
+  if (!is_dynamic) {
+    // Check whether producer is quantizable
+    if (nodeQuantizable(v->node())) {
+      return true;
+    }
   }
   // Check whether user is quantizable
   for (const auto& use : v->uses()) {
@@ -2132,7 +2143,8 @@ TORCH_API Module InsertObservers(
     Module& input_module,
     const std::string& method_name,
     const QConfigDict& qconfig_dict,
-    bool inplace) {
+    bool inplace,
+    bool is_dynamic) {
   ModuleQConfigMap map_before_clone;
   fillQConfigMap(input_module, qconfig_dict, map_before_clone);
   ModuleCloneHelper mh;
@@ -2143,6 +2155,7 @@ TORCH_API Module InsertObservers(
   // the qconfig map again
   fillQConfigMap(module, qconfig_dict, module_qconfig_map);
   InsertObserversHelper helper(module_qconfig_map);
+  helper.setDynamicFlag(is_dynamic);
   helper.preprocess(module, method_name);
   helper.insertObservers(module, method_name, true);
   return module;
