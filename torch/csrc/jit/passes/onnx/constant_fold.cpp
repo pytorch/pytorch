@@ -285,7 +285,14 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
     if (!node->hasAttributeS("axis")) {
       return c10::nullopt;
     }
-    updated_val = at::index_select(inputTensorValues[0], node->i(attr::axis), inputTensorValues[1]);
+    auto axis = node->i(attr::axis);
+    at::Tensor indices = inputTensorValues[1];
+    // If indices input for onnx::Gather has a value less than 0,
+    // It needs to be adjusted (+= dim value) for aten op
+    auto less_mask = at::lt(indices, 0);
+    auto indices_corr = at::add(indices, inputTensorValues[0].sizes()[axis]);
+    auto indices_masked = at::where(less_mask, indices_corr, indices);
+    updated_val = at::index_select(inputTensorValues[0], axis, indices_masked);
     return c10::optional<at::Tensor>(updated_val);
   } else {
     return c10::nullopt;

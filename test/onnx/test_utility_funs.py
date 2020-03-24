@@ -174,9 +174,9 @@ class TestUtilityFuns(TestCase):
         class GatherModule(torch.nn.Module):
             def forward(self, x):
                 a = torch.tensor([[1., 2., 3.], [4., 5., 6.]])
-                b = torch.select(a, dim=-1, index=-2)
+                b = torch.select(a, dim=1, index=-2)
                 c = torch.index_select(a, dim=-2, index=torch.tensor([0, 1]))
-                return b, c + x
+                return b + 1, c + x
 
         _set_opset_version(self.opset_version)
         _set_operator_export_type(OperatorExportTypes.ONNX)
@@ -189,7 +189,7 @@ class TestUtilityFuns(TestCase):
                                              operator_export_type=OperatorExportTypes.ONNX)
         for node in graph.nodes():
             assert node.kind() != "onnx::Gather"
-        assert len(list(graph.nodes())) == 2
+        assert len(list(graph.nodes())) == 3
 
     def test_constant_fold_unsqueeze(self):
         class UnsqueezeModule(torch.nn.Module):
