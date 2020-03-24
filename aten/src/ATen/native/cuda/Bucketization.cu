@@ -31,7 +31,7 @@ template<typename input_t>
 __device__ int64_t upper_bound(const input_t *data_ss, int64_t start, int64_t end, input_t val) {
   while (start < end) {
     int64_t mid = start + ((end - start) >> 1);
-    if (data_ss[mid] <= val) {
+    if (!(data_ss[mid] > val)) {
       start = mid + 1;
     }
     else {
@@ -71,24 +71,36 @@ __global__ void searchsorted_cuda_kernel(
 
 template<typename input_t, typename output_t>
 void searchsorted_cuda_contiguous(Tensor& result, const Tensor& input, const Tensor& boundaries, const bool& right) {
+  int64_t numel_in = input.numel();
+  bool is_scalar_input = input.dim() == 0 && numel_in == 1;
   // inner most dim size of input and boundaries
-  int64_t idim_in = input.sizes().back();
+  int64_t idim_in = is_scalar_input ? 1 : input.sizes().back();
   int64_t idim_bd = boundaries.sizes().back();
 
   const input_t *data_in = input.data_ptr<input_t>();
   const input_t *data_bd = boundaries.data_ptr<input_t>();
-
   output_t *data_out = result.data_ptr<output_t>();
-  int64_t numel_in = input.numel();
-
-  at::cuda::CUDAStream stream = at::cuda::getCurrentCUDAStream();
 
   dim3 block = dim3(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock);
   dim3 grid  = dim3(cuda::ATenCeilDiv<int64_t>(numel_in, block.x));
+  at::cuda::CUDAStream stream = at::cuda::getCurrentCUDAStream();
 
   searchsorted_cuda_kernel<<<grid, block, 0, stream>>>(
     data_out, data_in, data_bd, idim_in, idim_bd, numel_in, right, boundaries.dim() == 1);
   THCudaCheck(cudaGetLastError());
+}
+
+void dispatch(Tensor& result, const Tensor& input, const Tensor& boundaries, bool out_int32, bool right) {
+  if (!out_int32) {
+    AT_DISPATCH_ALL_TYPES(input.scalar_type(), "searchsorted_out_cuda", [&] {
+      searchsorted_cuda_contiguous<scalar_t, int64_t>(result, input, boundaries, right);
+    });
+  }
+  else {
+    AT_DISPATCH_ALL_TYPES(input.scalar_type(), "searchsorted_out_cuda", [&] {
+      searchsorted_cuda_contiguous<scalar_t, int>(result, input, boundaries, right);
+    });
+  }
 }
 
 }
@@ -101,15 +113,17 @@ Tensor& searchsorted_out_cuda(Tensor& result, const Tensor& sorted_sequence, con
   if (self.numel() == 0) {
     return result;
   }
+  if (sorted_sequence.is_contiguous() && self.is_contiguous() && sorted_sequence.dtype() == self.dtype()) {
+    dispatch(result, self, sorted_sequence, out_int32, right);
+    return result;
+  }
 
-  AT_DISPATCH_ALL_TYPES(self.scalar_type(), "searchsorted_out_cuda", [&] {
-    if (out_int32) {
-      searchsorted_generic_template(result, self, sorted_sequence, right, searchsorted_cuda_contiguous<scalar_t, int>);
-    }
-    else {
-      searchsorted_generic_template(result, self, sorted_sequence, right, searchsorted_cuda_contiguous<scalar_t, int64_t>);
-    }
-  });
+  Tensor trimmed_input;
+  Tensor trimmed_boundaries;
+  searchsorted_maybe_trim_input_tensors(trimmed_input, trimmed_boundaries, self, sorted_sequence);
+  const Tensor& final_input = trimmed_input.defined() ? trimmed_input : self;
+  const Tensor& final_boundaries = trimmed_boundaries.defined() ? trimmed_boundaries : sorted_sequence;
+  dispatch(result, final_input, final_boundaries, out_int32, right);
   return result;
 }
 
@@ -119,6 +133,10 @@ Tensor searchsorted_cuda(const Tensor& sorted_sequence, const Tensor& self, bool
   Tensor result = at::empty({0}, options, MemoryFormat::Contiguous);
   searchsorted_out_cuda(result, sorted_sequence, self, out_int32, right);
   return result;
+}
+
+Tensor searchsorted_cuda(const Tensor& sorted_sequence, Scalar self, bool out_int32, bool right) {
+  return searchsorted_cuda(sorted_sequence, c10::scalar_to_tensor(self, sorted_sequence.device()), out_int32, right);
 }
 
 Tensor& bucketize_out_cuda(Tensor& result, const Tensor& self, const Tensor& boundaries, bool out_int32, bool right) {
@@ -133,6 +151,10 @@ Tensor bucketize_cuda(const Tensor& self, const Tensor& boundaries, bool out_int
   Tensor result = at::empty({0}, options, MemoryFormat::Contiguous);
   bucketize_out_cuda(result, self, boundaries, out_int32, right);
   return result;
+}
+
+Tensor bucketize_cuda(Scalar self, const Tensor& boundaries, bool out_int32, bool right) {
+  return bucketize_cuda(c10::scalar_to_tensor(self, boundaries.device()), boundaries, out_int32, right);
 }
 
 }} // namespace at::native

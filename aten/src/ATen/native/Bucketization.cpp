@@ -5,17 +5,18 @@
 /* Implement a TF like searchsorted and a bucketize function running on cpu
  *
  * - torch.searchsorted(sorted_sequence, values, right=False, out_int32=False)
- *   sorted_sequence - N*D tensor containing sorted sequences in last dimension
- *   values          - N*D tensor containing the search values
+ *   sorted_sequence - N*D or 1D (apply to all values) tensor containing sorted sequences in last dimension
+ *   values          - N*D tensor or a Scalar (when sorted_sequence is 1D) containing the search values
  *   right           - corresponding to lower bound if False and upper bound if True
  *   out_int32       - the output tensor is int64_t type if False and int(32bit normally) type if True.
  *
  * - torch.bucketize(values, boundaries, right=False, out_int32=False)
- *   values     - N*D tensor containing the search values
+ *   values     - N*D tensor or a Scalar containing the search value
  *   boundaries - 1D tensor containing a sorted sequences
  *   right      - corresponding to lower bound if False and upper bound if True
  *   out_int32  - the output tensor is int64_t type if False and int(32bit normally) type if True.
  *
+ * - Scalar version has no out_int32, and can only output 64bit integer Scalar as result
  * - Restrictions are defined in searchsorted_pre_check()
  */
 
@@ -29,16 +30,17 @@ constexpr int64_t SEARCHSORTED_GRAIN_SIZE = 200;
 
 template<typename input_t, typename output_t>
 void searchsorted_cpu_contiguous(Tensor& result, const Tensor& input, const Tensor& boundaries, const bool& right) {
-  bool is_1d_boundaries = boundaries.dim() == 1;
+  int64_t numel_in = input.numel();
+  bool is_scalar_input = input.dim() == 0 && numel_in == 1;
   // inner most dim size of input and boundaries
-  int64_t idim_in = input.sizes().back();
+  int64_t idim_in = is_scalar_input ? 1 : input.sizes().back();
   int64_t idim_bd = boundaries.sizes().back();
 
   const input_t *data_in = input.data_ptr<input_t>();
   const input_t *data_bd = boundaries.data_ptr<input_t>();
   output_t *data_out = result.data_ptr<output_t>();
 
-  int64_t numel_in = input.numel();
+  bool is_1d_boundaries = boundaries.dim() == 1;
   at::parallel_for(0, numel_in, SEARCHSORTED_GRAIN_SIZE, [&](int64_t start, int64_t end) {
     for (int64_t i = start; i < end; ++i) {
       // If boundaries tensor is 1d, we always search the entire boundary tensor
@@ -55,6 +57,19 @@ void searchsorted_cpu_contiguous(Tensor& result, const Tensor& input, const Tens
   });
 }
 
+void dispatch(Tensor& result, const Tensor& input, const Tensor& boundaries, bool out_int32, bool right) {
+  if (!out_int32) {
+    AT_DISPATCH_ALL_TYPES(input.scalar_type(), "searchsorted_out_cpu", [&] {
+      searchsorted_cpu_contiguous<scalar_t, int64_t>(result, input, boundaries, right);
+    });
+  }
+  else {
+    AT_DISPATCH_ALL_TYPES(input.scalar_type(), "searchsorted_out_cpu", [&] {
+      searchsorted_cpu_contiguous<scalar_t, int>(result, input, boundaries, right);
+    });
+  }
+}
+
 }
 
 Tensor& searchsorted_out_cpu(Tensor& result, const Tensor& sorted_sequence, const Tensor& self, bool out_int32, bool right) {
@@ -65,15 +80,17 @@ Tensor& searchsorted_out_cpu(Tensor& result, const Tensor& sorted_sequence, cons
   if (self.numel() == 0) {
     return result;
   }
+  if (sorted_sequence.is_contiguous() && self.is_contiguous() && sorted_sequence.dtype() == self.dtype()) {
+    dispatch(result, self, sorted_sequence, out_int32, right);
+    return result;
+  }
 
-  AT_DISPATCH_ALL_TYPES(self.scalar_type(), "searchsorted_out_cpu", [&] {
-    if (out_int32) {
-      searchsorted_generic_template(result, self, sorted_sequence, right, searchsorted_cpu_contiguous<scalar_t, int>);
-    }
-    else {
-      searchsorted_generic_template(result, self, sorted_sequence, right, searchsorted_cpu_contiguous<scalar_t, int64_t>);
-    }
-  });
+  Tensor trimmed_input;
+  Tensor trimmed_boundaries;
+  searchsorted_maybe_trim_input_tensors(trimmed_input, trimmed_boundaries, self, sorted_sequence);
+  const Tensor& final_input = trimmed_input.defined() ? trimmed_input : self;
+  const Tensor& final_boundaries = trimmed_boundaries.defined() ? trimmed_boundaries : sorted_sequence;
+  dispatch(result, final_input, final_boundaries, out_int32, right);
   return result;
 }
 
@@ -83,6 +100,10 @@ Tensor searchsorted_cpu(const Tensor& sorted_sequence, const Tensor& self, bool 
   Tensor result = at::empty({0}, options, MemoryFormat::Contiguous);
   searchsorted_out_cpu(result, sorted_sequence, self, out_int32, right);
   return result;
+}
+
+Tensor searchsorted_cpu(const Tensor& sorted_sequence, Scalar self, bool out_int32, bool right) {
+  return searchsorted_cpu(sorted_sequence, c10::scalar_to_tensor(self, sorted_sequence.device()), out_int32, right);
 }
 
 Tensor& bucketize_out_cpu(Tensor& result, const Tensor& self, const Tensor& boundaries, bool out_int32, bool right) {
@@ -97,6 +118,10 @@ Tensor bucketize_cpu(const Tensor& self, const Tensor& boundaries, bool out_int3
   Tensor result = at::empty({0}, options, MemoryFormat::Contiguous);
   bucketize_out_cpu(result, self, boundaries, out_int32, right);
   return result;
+}
+
+Tensor bucketize_cpu(Scalar self, const Tensor& boundaries, bool out_int32, bool right) {
+  return bucketize_cpu(c10::scalar_to_tensor(self, boundaries.device()), boundaries, out_int32, right);
 }
 
 }} // namespace at::native

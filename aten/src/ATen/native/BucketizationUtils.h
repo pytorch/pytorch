@@ -5,44 +5,37 @@
 namespace at {
 namespace native {
 
-template<typename F>
-void searchsorted_generic_template(
-  Tensor& result,
-  const Tensor& input,
-  const Tensor& boundaries,
-  bool right,
-  F&& contiguous_solver) {
+void searchsorted_maybe_trim_input_tensors(
+  Tensor& trimmed_input,
+  Tensor& trimmed_boundaries,
+  const Tensor& raw_input,
+  const Tensor& raw_boundaries) {
 
-  bool in_is_contiguous = input.is_contiguous();
-  bool bd_is_contiguous = boundaries.is_contiguous();
+  bool in_is_contiguous = raw_input.is_contiguous();
+  bool bd_is_contiguous = raw_boundaries.is_contiguous();
 
-  if (in_is_contiguous && bd_is_contiguous) {
-    contiguous_solver(result, input, boundaries, right);
-    return;
+  if (!in_is_contiguous) {
+    TORCH_WARN_ONCE("input value tensor is non-contiguous, this will lower the performance due to extra data copy "
+      "when converting non-contiguous tensor to contiguous, please use contiguous input value tensor if possible");
+    trimmed_input = raw_input.contiguous();
   }
-
-  TORCH_WARN_ONCE("contiguous input tensors are expected, but got boundaries tensor ",
-    (bd_is_contiguous ? "is contiguous" : "is not contiguous"), " and input value tensor ",
-    (in_is_contiguous ? "is contiguous" : "is not contiguous"), " the non-contiguous tensors "
-    "have been temporarily duplicated into contiguous tensors, this process has data copy between "
-    "tensors which lower the performance, please make sure the input tensors are contiguous!");
-
-  if (!in_is_contiguous && bd_is_contiguous) {
-    Tensor input_cont = input.contiguous();
-    contiguous_solver(result, input_cont, boundaries, right);
-    return;
+  if (!bd_is_contiguous) {
+    TORCH_WARN_ONCE("input value tensor is non-contiguous, this will lower the performance due to extra data copy "
+      "when converting non-contiguous tensor to contiguous, please use contiguous input value tensor if possible");
+    trimmed_boundaries = raw_boundaries.contiguous();
   }
-
-  Tensor boundaries_cont = boundaries.contiguous();
-  if (in_is_contiguous) {
-    contiguous_solver(result, input, boundaries, right);
-  }
-  else {
-    Tensor input_cont = input.contiguous();
-    contiguous_solver(result, input_cont, boundaries_cont, right);
+  if (raw_input.dtype() != raw_boundaries.dtype()) {
+    ScalarType input_stype = raw_input.scalar_type();
+    ScalarType boundaries_stype = raw_boundaries.scalar_type();
+    ScalarType common_stype = c10::promoteTypes(input_stype, boundaries_stype);
+    if (common_stype != input_stype) {
+      trimmed_input = in_is_contiguous ? raw_input.to(common_stype) : trimmed_input.to(common_stype);
+    }
+    if (common_stype != boundaries_stype) {
+      trimmed_boundaries = bd_is_contiguous ? raw_boundaries.to(common_stype) : trimmed_boundaries.to(common_stype);
+    }
   }
 }
-
 
 inline bool searchsorted_dims_matched_before_last_dim(const Tensor& boundaries, const Tensor& input) {
   if (boundaries.dim() != input.dim()) {
@@ -63,17 +56,17 @@ inline void searchsorted_pre_check(const Tensor& boundaries, const Tensor& input
   TORCH_CHECK(boundaries.device() == input.device(), "boundaries and input value tensors should have same device type, ",
     "but we got boundaries tensor device type ", boundaries.device(), " and input value tensor device type ", input.device());
 
-  TORCH_CHECK(boundaries.dtype() == input.dtype(), "boundaries and input value tensors should have same dtype, ",
-    "but we got boundaries tensor dtype ", boundaries.dtype(), " and input value tensor dtype ", input.dtype());
+  TORCH_CHECK(input.dim() > 0 || (input.dim() == 0 && input.numel() == 1 && boundaries.dim() == 1),
+    "input value can be a scalar only when boundaries tensor dimension is 1, but we got boundaries tensor ",
+    "dim(", boundaries.dim(), ") and input value's dim(", input.dim(), ") numel(", input.numel(), ")");
 
-  TORCH_CHECK(boundaries.dim() != 0 && input.dim() != 0, "boundaries and input value tensors should have positive dimensions, ",
-    "but we got boundaries tensor dim(", boundaries.dim(), "), and input value tensor dim(", input.dim(), ")");
+  TORCH_CHECK(boundaries.dim() != 0, "boundaries tensor should have positive dimension, but got 0 dimension");
 
   TORCH_CHECK(boundaries.dim() == 1 || searchsorted_dims_matched_before_last_dim(boundaries, input),
     "boundaries tensor should be 1 dimension or the first N-1 dimensions of boundaries tensor and input value tensor ",
     "must match, but we got boundaries tensor ", boundaries.sizes(), " and input value tensor ", input.sizes());
 
-  ScalarType output_dtype = typeMetaToScalarType(output.dtype());
+  ScalarType output_dtype = output.scalar_type();
   TORCH_CHECK((output_dtype == ScalarType::Long && !out_int32) || (output_dtype == ScalarType::Int && out_int32),
     "output tensor's dtype is wrong, it can only be Int(int32) or Long(int64) depending on whether out_int32 flag is True, ",
     "but we got output tensor's dtype ", output_dtype, " and out_int32 flag is ", (out_int32 ? "True" : "False"));
