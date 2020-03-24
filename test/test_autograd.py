@@ -5793,10 +5793,10 @@ class TestAutogradDeviceType(TestCase):
                 with torch.enable_grad():
                     new_param = ctx.output_var.detach().requires_grad_()
                     if ReentrantFunc._cpu_mode:
-                        new_param = ctx.output_var.cpu()
+                        new_param = new_param.cpu()
                         (new_param ** 2).sum().backward()
                     else:
-                        new_param = ctx.output_var.cuda()
+                        new_param = new_param.cuda()
                         (new_param ** 2).sum().backward()
                 return grad_output
 
