@@ -318,6 +318,33 @@ class Tanh(Module):
         return torch.tanh(input)
 
 
+class Hardswish(Module):
+    r"""Applies the hardswish function, element-wise, as described in the paper:
+
+    `Searching for MobileNetV3`_.
+
+    .. math::
+        \text{Hardswish}(x) = x * \frac{ReLU6(x + 3)}{6}
+
+    Shape:
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions
+        - Output: :math:`(N, *)`, same shape as the input
+
+    Examples::
+
+        >>> m = nn.Hardswish()
+        >>> input = torch.randn(2)
+        >>> output = m(input)
+
+    .. _`Searching for MobileNetV3`:
+        https://arxiv.org/abs/1905.02244
+    """
+
+    def forward(self, input):
+        return F.hardswish(input)
+
+
 class ELU(Module):
     r"""Applies the element-wise function:
 

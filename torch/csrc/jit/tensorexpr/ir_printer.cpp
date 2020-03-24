@@ -1,5 +1,7 @@
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 
+#include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
+
 namespace torch {
 namespace jit {
 namespace tensorexpr {
@@ -198,7 +200,7 @@ template <
     typename T,
     std::enable_if_t<!std::is_floating_point<T>::value>* = nullptr>
 static void formatImm(std::ostream& os, T v) {
-  os << v;
+  os << +v;
 }
 
 // NOLINTNEXTLINE
@@ -368,9 +370,33 @@ void IRPrinter::visit(const Cond* v) {
   }
 }
 
-void IRPrinter::visit(const LinearForm* v) {
-  os() << "(" << *v->getA() << ") * (" << *v->getX() << ") + (" << *v->getB()
-       << ")" << std::endl;
+void IRPrinter::visit(const Term* v) {
+  os() << "Term(";
+  v->scalar()->accept(this);
+  for (auto* t : v->variables()) {
+    os() << ",";
+    t->accept(this);
+  }
+  os() << ")";
+}
+
+void IRPrinter::visit(const Polynomial* v) {
+  bool first = true;
+  os() << "Polynomial(";
+  for (auto* t : v->variables()) {
+    emitIndent();
+    if (!first) {
+      os() << " + ";
+    }
+    first = false;
+    t->accept(this);
+  }
+
+  if (!first) {
+    os() << " + ";
+  }
+  v->scalar()->accept(this);
+  os() << ")";
 }
 
 void IRPrinter::emitIndent() {

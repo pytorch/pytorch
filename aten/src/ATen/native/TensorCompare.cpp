@@ -5,15 +5,14 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/ReduceOpsUtils.h>
 #include <c10/util/Exception.h>
-#include <ATen/native/cpu/TensorCompareKernel.h>
+#include <ATen/native/TensorCompare.h>
 #include <ATen/NamedTensorUtils.h>
-
 
 namespace at { namespace native {
 
 DEFINE_DISPATCH(where_kernel);
-DEFINE_DISPATCH(max_kernel);
-DEFINE_DISPATCH(min_kernel);
+DEFINE_DISPATCH(max_stub);
+DEFINE_DISPATCH(min_stub);
 
 bool allclose(const Tensor& self, const Tensor& other, double rtol, double atol, bool equal_nan) {
   return at::isclose(self, other, rtol, atol, equal_nan).all().item<uint8_t>();
@@ -167,17 +166,14 @@ std::tuple<Tensor &,Tensor &> mode_out(Tensor& values, Tensor& indices,
 
 std::tuple<Tensor &,Tensor &> _max_out_cpu(Tensor& max, Tensor& max_indices,
                                         const Tensor& self, int64_t dim, bool keepdim) {
-  if (self.is_contiguous() && max.is_contiguous() && max_indices.is_contiguous()) {
-    _dimreduce_setup(max, self, dim);
-    _dimreduce_setup(max_indices, self, dim);
-    max_kernel(kCPU, max, max_indices, self, dim);
-    if (!keepdim) {
-      max.squeeze_(dim);
-      max_indices.squeeze_(dim);
-    }
-    return std::tuple<Tensor &,Tensor &>{max, max_indices};
-  }
-  return at::_max_out(max, max_indices, self, dim, keepdim);
+  max_stub(kCPU, max, max_indices, self, dim, keepdim);
+  return std::tuple<Tensor &,Tensor &>{max, max_indices};
+}
+
+std::tuple<Tensor, Tensor> _max_cpu(const Tensor& self, int64_t dim, bool keepdim) {
+  Tensor min_indices = at::empty({0}, self.options().dtype(kLong));
+  Tensor min = at::empty({0}, self.options());
+  return at::native::_max_out_cpu(min, min_indices, self, dim, keepdim);
 }
 
 std::tuple<Tensor, Tensor> max(const Tensor& self, int64_t dim, bool keepdim) {
@@ -188,7 +184,7 @@ std::tuple<Tensor, Tensor> max(const Tensor& self, int64_t dim, bool keepdim) {
     // TODO: qscheme
     return std::tuple<Tensor, Tensor>(at::_make_per_tensor_quantized_tensor(max, self.q_scale(), self.q_zero_point()), max_indices);
   } else {
-    Tensor  max = at::empty({0}, self.options());
+    Tensor max = at::empty({0}, self.options());
     return at::native::max_out(max, max_indices, self, dim, keepdim);
   }
 }
@@ -211,11 +207,7 @@ static std::tuple<Tensor &,Tensor &> max_out_impl(Tensor& max, Tensor& max_indic
     max_indices.resize_({}).fill_(0);
     return std::forward_as_tuple(max, max_indices);
   } else {
-    if (self.is_cuda()) {
-      return at::_max_out(max, max_indices, self, dim, keepdim);
-    } else {
-      return _max_out_cpu(max, max_indices, self, dim, keepdim);
-    }
+    return at::_max_out(max, max_indices, self, dim, keepdim);
   }
 }
 
@@ -232,17 +224,14 @@ std::tuple<Tensor&,Tensor&> max_out(Tensor& max, Tensor& max_indices,
 
 std::tuple<Tensor &,Tensor &> _min_out_cpu(Tensor& min, Tensor& min_indices,
                                         const Tensor& self, int64_t dim, bool keepdim) {
-  if (self.is_contiguous() && min.is_contiguous() && min_indices.is_contiguous()) {
-    _dimreduce_setup(min, self, dim);
-    _dimreduce_setup(min_indices, self, dim);
-    min_kernel(kCPU, min, min_indices, self, dim);
-    if (!keepdim) {
-      min.squeeze_(dim);
-      min_indices.squeeze_(dim);
-    }
-    return std::tuple<Tensor &,Tensor &>{min, min_indices};
-  }
-  return at::_min_out(min, min_indices, self, dim, keepdim);
+  min_stub(kCPU, min, min_indices, self, dim, keepdim);
+  return std::tuple<Tensor &,Tensor &>{min, min_indices};
+}
+
+std::tuple<Tensor, Tensor> _min_cpu(const Tensor& self, int64_t dim, bool keepdim) {
+  Tensor min_indices = at::empty({0}, self.options().dtype(kLong));
+  Tensor min = at::empty({0}, self.options());
+  return at::native::_min_out_cpu(min, min_indices, self, dim, keepdim);
 }
 
 std::tuple<Tensor, Tensor> min(const Tensor& self, int64_t dim, bool keepdim) {
@@ -275,11 +264,7 @@ static std::tuple<Tensor &,Tensor &> min_out_impl(Tensor& min, Tensor& min_indic
     min_indices.resize_({}).fill_(0);
     return std::forward_as_tuple(min, min_indices);
   } else {
-    if (self.is_cuda()) {
-      return at::_min_out(min, min_indices, self, dim, keepdim);
-    } else {
-      return _min_out_cpu(min, min_indices, self, dim, keepdim);
-    }
+    return at::_min_out(min, min_indices, self, dim, keepdim);
   }
 }
 
