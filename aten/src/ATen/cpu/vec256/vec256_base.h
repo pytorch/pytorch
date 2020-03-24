@@ -15,6 +15,7 @@
 #include <c10/util/math_compat.h>
 #include <ATen/native/cpu/zmath.h>
 #include <c10/util/TypeCast.h>
+#include <c10/macros/Macros.h>
 
 #if defined(__GNUC__)
 #define __at_align32__ __attribute__((aligned(32)))

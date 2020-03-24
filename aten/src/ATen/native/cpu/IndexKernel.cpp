@@ -6,6 +6,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/Parallel.h>
 #include <ATen/cpu/vec256/vec256.h>
+#include <ATen/native/cpu/AtomicAddFloat.h>
 
 namespace at { namespace native {
 namespace {
@@ -62,6 +63,10 @@ void cpu_index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef 
                       const func_t& f, bool serial_execution=false)
 {
   int ntensor = iter.ntensors();
+  // When launch the index parallel version, set a relative samll grain size less than the INTERNAL::GRAIN_SIZE
+  // to make the whole available thread numbers get more balanced work load and a better cache location.
+  // The grain size here is chosen by the op benchmark to overcome the thread launch overhead
+  const int index_parallel_grain_size = 3000;
   auto loop = [&](char** data, const int64_t* strides, int64_t n) {
     auto indexer = Indexer(ntensor - 2, &data[2], &strides[2], index_size, index_stride);
     char* dst = data[0];
@@ -88,7 +93,7 @@ void cpu_index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef 
   if (serial_execution) {
     iter.serial_for_each(loop, {0, iter.numel()});
   } else {
-    iter.for_each(loop);
+    iter.for_each(loop, index_parallel_grain_size);
   }
 }
 
@@ -106,11 +111,18 @@ void index_put_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef 
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
     iter.dtype(), "index_put", [&] {
     if (accumulate) {
-      // TODO: investigate parallelization of the accumulate kernel. Unlike the non-accumulate case,
-      // this needs to be thread-safe.
-      cpu_index_kernel<scalar_t>(iter, index_size, index_stride, [](char* dst, char* src, int64_t offset) {
-        *(scalar_t*)(dst + offset) += *(scalar_t*)src;
-      }, /*serial_execution=*/true);
+      bool use_parallel_for = ((iter.numel() >= internal::GRAIN_SIZE) && (at::get_num_threads() > 1));
+      if (iter.dtype() == at::ScalarType::Float && use_parallel_for) {
+        cpu_index_kernel<float>(iter, index_size, index_stride, [](char* dst, char* src, int64_t offset) {
+          cpu_atomic_add_float((float*)(dst + offset), *(float*)src);
+        });
+      } else {
+        // TODO: investigate parallelization of the accumulate kernel. Unlike the non-accumulate case,
+        // this needs to be thread-safe.
+        cpu_index_kernel<scalar_t>(iter, index_size, index_stride, [](char* dst, char* src, int64_t offset) {
+          *(scalar_t*)(dst + offset) += *(scalar_t*)src;
+        }, /*serial_execution=*/true);
+      }
     } else {
       cpu_index_kernel<scalar_t>(iter, index_size, index_stride, [](char* dst, char* src, int64_t offset) {
         *(scalar_t*)(dst + offset) = *(scalar_t*)src;
