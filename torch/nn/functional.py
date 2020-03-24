@@ -1637,6 +1637,27 @@ def bilinear(input1, input2, weight, bias=None):
     return torch.bilinear(input1, input2, weight, bias)
 
 
+def hardswish(input, inplace=False):
+    r"""Applies the hardswish function, element-wise, as described in the paper:
+
+    `Searching for MobileNetV3`_.
+
+    .. math::
+        \text{Hardswish}(x) = x * \frac{ReLU6(x + 3)}{6}
+
+    See :class:`~torch.nn.Hardswish` for more details.
+
+    .. _`Searching for MobileNetV3`:
+        https://arxiv.org/abs/1905.02244
+    """
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(hardswish, (input,), input, inplace=inplace)
+    if inplace:
+        return torch._C._nn.hardswish_(input)
+    return torch._C._nn.hardswish(input)
+
+
 def _no_grad_embedding_renorm_(weight, input, max_norm, norm_type):
     # type: (Tensor, Tensor, float, float) -> Tensor
     with torch.no_grad():
@@ -2821,7 +2842,7 @@ def _interp_output_size(dim, closed_over_args):  # noqa: F811
     if size is None and scale_factor is None:
         raise ValueError('either size or scale_factor should be defined')
     if size is not None and scale_factor is not None:
-        raise ValueError('only one of size or scale_factor should be defined')   
+        raise ValueError('only one of size or scale_factor should be defined')
     if scale_factor is not None:
         if isinstance(scale_factor, (list, tuple)):
             if len(scale_factor) != dim:
@@ -2987,7 +3008,7 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
     if input.dim() == 3 and mode == 'nearest':
         return torch._C._nn.upsample_nearest1d(input, _interp_output_size(1, closed_over_args), scale_factor_list[0])
     elif input.dim() == 4 and mode == 'nearest':
-        return torch._C._nn.upsample_nearest2d(input, _interp_output_size(2, closed_over_args), 
+        return torch._C._nn.upsample_nearest2d(input, _interp_output_size(2, closed_over_args),
                                                scale_factor_list[0], scale_factor_list[1])
     elif input.dim() == 5 and mode == 'nearest':
         return torch._C._nn.upsample_nearest3d(input, _interp_output_size(3, closed_over_args),
@@ -3009,7 +3030,7 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
         raise NotImplementedError("Got 4D input, but linear mode needs 3D input")
     elif input.dim() == 4 and mode == 'bilinear':
         assert align_corners is not None
-        return torch._C._nn.upsample_bilinear2d(input, _interp_output_size(2, closed_over_args), align_corners, 
+        return torch._C._nn.upsample_bilinear2d(input, _interp_output_size(2, closed_over_args), align_corners,
                                                 scale_factor_list[0], scale_factor_list[1])
     elif input.dim() == 4 and mode == 'trilinear':
         raise NotImplementedError("Got 4D input, but trilinear mode needs 5D input")
@@ -3023,7 +3044,7 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
                                                  scale_factor_list[0], scale_factor_list[1], scale_factor_list[2])
     elif input.dim() == 4 and mode == 'bicubic':
         assert align_corners is not None
-        return torch._C._nn.upsample_bicubic2d(input, _interp_output_size(2, closed_over_args), align_corners, 
+        return torch._C._nn.upsample_bicubic2d(input, _interp_output_size(2, closed_over_args), align_corners,
                                                scale_factor_list[0], scale_factor_list[1])
     else:
         raise NotImplementedError("Input Error: Only 3D, 4D and 5D input Tensors supported"

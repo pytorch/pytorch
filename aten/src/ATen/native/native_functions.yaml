@@ -5676,6 +5676,20 @@
     CUDA: hardtanh_
     QuantizedCPU: quantized_hardtanh_
 
+- func: hardswish.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: nn
+
+- func: hardswish(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  python_module: nn
+
+- func: hardswish_(Tensor(a!) self) -> Tensor(a!)
+  python_module: nn
+
+- func: hardswish_backward(Tensor grad_output, Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  python_module: nn
+
 - func: leaky_relu.out(Tensor self, Scalar negative_slope=0.01, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
   dispatch:

@@ -412,6 +412,67 @@ void hardtanh_backward_kernel(TensorIterator& iter, Scalar min, Scalar max) {
   });
 }
 
+void hardswish_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "hardswish_cpu", [&]() {
+    const scalar_t zero(0.0f);
+    const scalar_t three(3.0f);
+    const scalar_t six(6.0f);
+    using Vec = vec256::Vec256<scalar_t>;
+    const Vec kZeroVec(zero);
+    const Vec kThreeVec(three);
+    const Vec kSixVec(six);
+    cpu_kernel_vec(
+      iter,
+      [&](scalar_t x) {
+        return x * std::min(std::max(x + three, zero), six) / six;
+      },
+      [&](Vec x_vec) {
+        return x_vec * vec256::minimum(
+          vec256::maximum(x_vec + kThreeVec, kZeroVec),
+          kSixVec
+        ) / kSixVec;
+      }
+    );
+  });
+}
+
+void hardswish_backward_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "hardswish_backward_cpu", [&]() {
+    const scalar_t zero(0.0f);
+    const scalar_t three(3.0f);
+    const scalar_t neg_three(-3.0f);
+    const scalar_t one_half(0.5f);
+    using Vec = vec256::Vec256<scalar_t>;
+    const Vec kZeroVec(zero);
+    const Vec kThreeVec(three);
+    const Vec kNegThreeVec(neg_three);
+    const Vec kOneHalfVec(one_half);
+    cpu_kernel_vec(
+      iter,
+      [&](scalar_t grad_val, scalar_t self_val) {
+        if (self_val < neg_three) {
+          return zero;
+        } else if (self_val <= three) {
+          return grad_val * ((self_val / three) + one_half);
+        } else {
+          return grad_val;
+        }
+      },
+      [&](Vec grad_val, Vec self_val) {
+        return Vec::blendv(
+          Vec::blendv(
+            grad_val * ((self_val / kThreeVec) + kOneHalfVec),
+            grad_val,
+            self_val >= kThreeVec
+          ),
+          kZeroVec,
+          self_val < kNegThreeVec
+        );
+      }
+    );
+  });
+}
+
 static void leaky_relu_kernel(TensorIterator& iter, Scalar negval_) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "leaky_relu_cpu", [&] {
     using Vec = Vec256<scalar_t>;
@@ -538,6 +599,8 @@ REGISTER_DISPATCH(GeluBackwardKernel, &GeluBackwardKernelImpl);
 REGISTER_DISPATCH(hardtanh_backward_stub, &hardtanh_backward_kernel);
 REGISTER_DISPATCH(hardsigmoid_stub, &hardsigmoid_kernel);
 REGISTER_DISPATCH(hardsigmoid_backward_stub, &hardsigmoid_backward_kernel);
+REGISTER_DISPATCH(hardswish_stub, &hardswish_kernel);
+REGISTER_DISPATCH(hardswish_backward_stub, &hardswish_backward_kernel);
 REGISTER_DISPATCH(hardshrink_stub, &hardshrink_kernel);
 REGISTER_DISPATCH(softshrink_stub, &softshrink_kernel);
 REGISTER_DISPATCH(shrink_backward_stub, &shrink_backward_kernel);
