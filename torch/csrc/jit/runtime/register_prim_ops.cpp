@@ -1,4 +1,5 @@
 #include <aten/src/ATen/Context.h>
+#include <c10/core/DeviceType.h>
 #include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/function.h>
@@ -1730,7 +1731,7 @@ template <typename T>
 int listEq(Stack& stack) {
   c10::List<T> b = pop(stack).to<c10::List<T>>();
   c10::List<T> a = pop(stack).to<c10::List<T>>();
-  push(stack, list_is_equal(a, b));
+  push(stack, a == b);
   return 0;
 }
 
@@ -1738,7 +1739,7 @@ template <typename T>
 int listNe(Stack& stack) {
   c10::List<T> b = pop(stack).to<c10::List<T>>();
   c10::List<T> a = pop(stack).to<c10::List<T>>();
-  push(stack, !list_is_equal(a, b));
+  push(stack, a != b);
   return 0;
 }
 
@@ -2876,7 +2877,7 @@ RegisterOperators reg2({
         },
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::all(int[] self) -> bool",
+        "aten::all.int(int[] self) -> bool",
         [](Stack& stack) {
           c10::List<int64_t> l = pop(stack).toIntList();
           for(const auto& elem: l) {
@@ -2890,7 +2891,7 @@ RegisterOperators reg2({
         },
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::all(float[] self) -> bool",
+        "aten::all.float(float[] self) -> bool",
         [](Stack& stack) {
           c10::List<double> l = pop(stack).toDoubleList();
           for(const auto& elem: l) {
@@ -2904,7 +2905,7 @@ RegisterOperators reg2({
         },
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::all(bool[] self) -> bool",
+        "aten::all.bool(bool[] self) -> bool",
         [](Stack& stack) {
           c10::List<bool> l = pop(stack).toBoolList();
           for(const auto& elem: l) {
@@ -3047,6 +3048,20 @@ RegisterOperators reg2({
           return 0;
         },
         aliasAnalysisFromSchema()),
+    Operator(
+        "prim::id(AnyClassType? x) -> int",
+        [](Stack& stack) {
+          IValue a;
+          pop(stack, a);
+          if (a.isNone()) {
+            push(stack, 0);
+          } else {
+            push(stack, reinterpret_cast<int64_t>(a.internalToPointer()));
+          }
+          return 0;
+        },
+        aliasAnalysisFromSchema()),
+
 #define DEFINE_DIVMOD_MIXED_OP(type_a, type_b)                           \
   Operator(                                                              \
       "aten::divmod(" #type_a " x," #type_b " y) -> (float, float)",     \
