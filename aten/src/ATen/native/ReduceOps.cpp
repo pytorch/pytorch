@@ -19,6 +19,7 @@
 #include <map>
 #include <cmath>
 #include <cfloat>
+#include <type_traits>
 
 namespace at {
 namespace native {
@@ -34,6 +35,8 @@ DEFINE_DISPATCH(min_values_stub);
 DEFINE_DISPATCH(max_values_stub);
 DEFINE_DISPATCH(argmax_stub);
 DEFINE_DISPATCH(argmin_stub);
+DEFINE_DISPATCH(cumsum_stub);
+DEFINE_DISPATCH(cumprod_stub);
 
 #define OPTION_TYPE_EQUALITY_CHECK(option, out, self) \
 { \
@@ -183,6 +186,17 @@ static TensorIterator make_reduction(
   return TensorIterator::reduce_op(viewed_result1, viewed_result2, self.to(dtype));
 }
 
+Tensor _cumsum_cpu(const Tensor& self, int64_t dim) {
+  Tensor result = at::empty_like(self, MemoryFormat::Contiguous);
+  cumsum_stub(self.device().type(), result, self, dim);
+  return result;
+}
+
+Tensor& _cumsum_out_cpu(Tensor& result, const Tensor& self, int64_t dim) {
+  cumsum_stub(self.device().type(), result, self, dim);
+  return result;
+}
+
 Tensor cumsum(const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
   auto result = [&]() {
     NoNamesGuard guard;
@@ -206,6 +220,17 @@ Tensor& cumsum_out(Tensor& result, const Tensor& self, int64_t dim, c10::optiona
     at::_cumsum_out(result, self.toType(result.scalar_type()), dim);
   }
   namedinference::propagate_names(result, self);
+  return result;
+}
+
+Tensor _cumprod_cpu(const Tensor& self, int64_t dim) {
+  Tensor result = at::empty_like(self, MemoryFormat::Contiguous);
+  cumprod_stub(self.device().type(), result, self, dim);
+  return result;
+}
+
+Tensor& _cumprod_out_cpu(Tensor& result, const Tensor& self, int64_t dim) {
+  cumprod_stub(self.device().type(), result, self, dim);
   return result;
 }
 
@@ -235,6 +260,25 @@ Tensor& cumprod_out(Tensor& result, const Tensor& self, int64_t dim, c10::option
   return result;
 }
 
+// Implement std::is_nan<IntegralType> for MSVC.
+namespace {
+#ifdef _MSC_VER
+template<typename T>
+inline typename std::enable_if<std::is_integral<T>::value, bool>::type isnan_(T x) {
+  return false;
+}
+template<typename T>
+inline typename std::enable_if<!std::is_integral<T>::value, bool>::type isnan_(T x) {
+  return std::isnan(x);
+}
+#else
+template<typename T>
+inline bool isnan_(T x) {
+  return std::isnan(x);
+}
+#endif
+}
+
 template<typename T1, typename T2, typename Operation>
 void cummax_cummin_helper(const T1* self_data, T1* values_data, T2* indices_data,
           int self_dim_size, int self_stride, int values_stride, int indices_stride) {
@@ -243,7 +287,7 @@ void cummax_cummin_helper(const T1* self_data, T1* values_data, T2* indices_data
       int idx = 0;
       for(int i = 0; i < self_dim_size; i++) {
         T1 curr_elem = self_data[i*self_stride];
-        if(std::isnan(curr_elem) || (!std::isnan(out) && op(curr_elem, out))) {
+        if(isnan_(curr_elem) || (!isnan_(out) && op(curr_elem, out))) {
             out = self_data[i*self_stride];
             idx = i;
         }
@@ -697,6 +741,7 @@ Tensor min_values(const Tensor& self, DimnameList dims, bool keepdim) {
   TORCH_CHECK(false, "NYI: min_values with names");
   return at::min_values(self, dimnames_to_positions(self, dims), keepdim);
 }
+
 Tensor max_values(const Tensor& self, DimnameList dims, bool keepdim) {
   TORCH_CHECK(false, "NYI: max_values with names");
   return at::max_values(self, dimnames_to_positions(self, dims), keepdim);

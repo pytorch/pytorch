@@ -119,83 +119,6 @@ void THTensor_(maskedSelectBool)(THTensor *tensor, THTensor *src, THBoolTensor *
                    });
 }
 
-void THTensor_(scatterFill)(THTensor *tensor, int dim, THLongTensor *index, scalar_t val)
-{
-  int64_t elems_per_row, i, idx;
-  dim = at::maybe_wrap_dim(dim, tensor);
-  int index_ndim_legacy_all = THLongTensor_nDimensionLegacyAll(index);
-
-  THArgCheck(dim < THTensor_(nDimensionLegacyAll)(tensor), 2, "Index dimension is out of bounds");
-  THArgCheck(index_ndim_legacy_all == 0 || index_ndim_legacy_all == THLongTensor_nDimensionLegacyAll(tensor), 3,
-             "Index tensor must either be empty or have same dimensions as output tensor");
-
-  // no-op if index is empty
-  if (index_ndim_legacy_all == 0)
-      return;
-
-  elems_per_row = THTensor_sizeLegacyNoScalars(index, dim);
-
-  TH_TENSOR_DIM_APPLY2(scalar_t, tensor, int64_t, index, dim,
-                       for (i = 0; i < elems_per_row; ++i)
-                       {
-                         idx = *(index_data + i*index_stride);
-                         if (idx < 0 || idx >= tensor_size)
-                         {
-                           THFree(TH_TENSOR_DIM_APPLY_counter);
-                           THError("Invalid index in scatter");
-                         }
-                         tensor_data[idx * tensor_stride] = val;
-                       })
-}
-
-void THTensor_(maskedFill)(THTensor *tensor, THByteTensor *mask, scalar_t value)
-{
-  at::NoNamesGuard guard;
-  int64_t tensor_size = THTensor_(nElement)(tensor);
-  int tensor_contig = THTensor_(isContiguous)(tensor);
-  int mask_contig = THTensor_(isContiguous)(mask);
-  if (tensor_contig && mask_contig) {
-    TH_TENSOR_APPLY2_PARALLEL(tensor_size, tensor_contig, mask_contig,
-      scalar_t, tensor, unsigned char, mask,
-      if (*mask_data > 1) {
-        THError("Mask tensor can take 0 and 1 values only");
-      } else if (*mask_data == 1) {
-        *tensor_data = value;
-      },
-      TH_OMP_OVERHEAD_THRESHOLD);
-  } else {
-    TH_TENSOR_APPLY2(scalar_t, tensor, unsigned char, mask,
-      if (*mask_data > 1) {
-        THFree(mask_counter);
-        THFree(tensor_counter);
-        THError("Mask tensor can take 0 and 1 values only");
-      } else if (*mask_data == 1) {
-        *tensor_data = value;
-      });
-    }
-}
-
-void THTensor_(maskedFillBool)(THTensor *tensor, THBoolTensor *mask, scalar_t value)
-{
-  at::NoNamesGuard guard;
-  int64_t tensor_size = THTensor_(nElement)(tensor);
-  int tensor_contig = THTensor_(isContiguous)(tensor);
-  int mask_contig = THTensor_(isContiguous)(mask);
-  if (tensor_contig && mask_contig) {
-    TH_TENSOR_APPLY2_PARALLEL(tensor_size, tensor_contig, mask_contig,
-      scalar_t, tensor, bool, mask,
-      if (*mask_data) {
-        *tensor_data = value;
-      },
-      TH_OMP_OVERHEAD_THRESHOLD);
-  } else {
-    TH_TENSOR_APPLY2(scalar_t, tensor, bool, mask,
-      if (*mask_data) {
-        *tensor_data = value;
-      });
-    }
-}
-
 void THTensor_(maskedCopy)(THTensor *tensor, THByteTensor *mask, THTensor* src )
 {
   THTensor *srct = THTensor_(newContiguous)(src);
@@ -273,18 +196,6 @@ void THTensor_(mul)(THTensor *r_, THTensor *t, scalar_t value)
   }
 }
 
-void THTensor_(div)(THTensor *r_, THTensor *t, scalar_t value)
-{
-  THTensor_(resizeAs)(r_, t);
-  int64_t r_Size = THTensor_(nElement)(r_);
-  int r_Contig = THTensor_(isContiguous)(r_);
-  int tContig = THTensor_(isContiguous)(t);
-  if (r_Contig && tContig) {
-    TH_TENSOR_APPLY2_CONTIG(scalar_t, r_, scalar_t, t, THVector_(divs)(r__data, t_data, value, r__len););
-  } else {
-    TH_TENSOR_APPLY2_PARALLEL(r_Size, r_Contig, tContig, scalar_t, r_, scalar_t, t, *r__data = *t_data / value;, ORDIN_TH_OMP_OVERHEAD_THRESHOLD)
-  }
-}
 #endif
 
 #if !defined(TH_REAL_IS_BFLOAT16) /* non bfloat16 part*/
@@ -510,39 +421,6 @@ void THTensor_(indexFill)(THTensor *tensor, int dim, THLongTensor *index, scalar
   THLongTensor_free(index);
 }
 
-void THTensor_(scatter)(THTensor *tensor, int dim, THLongTensor *index, THTensor *src)
-{
-  int64_t elems_per_row, i, idx;
-  dim = at::maybe_wrap_dim(dim, tensor);
-  int index_ndim_legacy_all = THTensor_nDimensionLegacyAll(index);
-
-  THArgCheck(dim < THTensor_(nDimensionLegacyNoScalars)(tensor), 2, "Index dimension is out of bounds");
-  THArgCheck(index_ndim_legacy_all == 0
-             || THLongTensor_nDimensionLegacyNoScalars(index) == THTensor_(nDimensionLegacyNoScalars)(tensor), 3,
-             "Index tensor must be either empty or have same dimensions as output tensor");
-  THArgCheck(THTensor_(nDimensionLegacyNoScalars)(src) == THTensor_(nDimensionLegacyNoScalars)(tensor), 4,
-             "Input tensor must have same dimensions as output tensor");
-
-  // no-op if index is empty
-  if (index_ndim_legacy_all == 0)
-      return;
-
-  elems_per_row = THTensor_sizeLegacyNoScalars(index, dim);
-
-  TH_TENSOR_DIM_APPLY3(int64_t, index, scalar_t, tensor, scalar_t, src, dim,
-                       TH_TENSOR_DIM_APPLY3_SIZE_SCATTER,
-                       for (i = 0; i < elems_per_row; ++i)
-                       {
-                         idx = *(index_data + i*index_stride);
-                         if (idx < 0 || idx >= tensor_size)
-                         {
-                           THFree(TH_TENSOR_DIM_APPLY_counter);
-                           THError("Invalid index in scatter");
-                         }
-                         tensor_data[idx * tensor_stride] = *(src_data + i*src_stride);
-                       })
-}
-
 #if !defined(TH_REAL_IS_BOOL)
 
 accreal THTensor_(dot)(THTensor *tensor, THTensor *src)
@@ -563,73 +441,6 @@ accreal THTensor_(dot)(THTensor *tensor, THTensor *src)
                    src_data += sz*src_stride;
                    break;);
   return sum;
-}
-
-void THTensor_(fmod)(THTensor *r_, THTensor *t, scalar_t value)
-{
-  THTensor_(resizeAs)(r_, t);
-  int64_t r_Size = THTensor_(nElement)(r_);
-  int r_Contig = THTensor_(isContiguous)(r_);
-  int tContig = THTensor_(isContiguous)(t);
-  if (r_Contig && tContig) {
-    scalar_t *tp = t->data<scalar_t>();
-    scalar_t *rp = r_->data<scalar_t>();
-    at::parallel_for(0, r_Size, TH_OMP_OVERHEAD_THRESHOLD,
-        [&](int64_t start, int64_t end) {
-      for (auto i = start; i < end; i++) {
-#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-        rp[i] = fmod(tp[i], value);
-#else
-        rp[i] = tp[i] % value;
-#endif
-      }
-    });
-  } else {
-
-#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-    TH_TENSOR_APPLY2_PARALLEL(r_Size, r_Contig, tContig, scalar_t, r_, scalar_t, t, *r__data = fmod(*t_data, value);, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
-#else
-    TH_TENSOR_APPLY2_PARALLEL(r_Size, r_Contig, tContig, scalar_t, r_, scalar_t, t, *r__data = (*t_data % value);, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
-#endif
-  }
-}
-
-// Should wrap if the value (a) has a different sign than the divisor (b), but is not 0.
-static inline bool modulo_wrap(scalar_t a, scalar_t b) {
-  return (a != 0) && (a < 0) != (b < 0);
-}
-
-void THTensor_(remainder)(THTensor *r_, THTensor *t, scalar_t value)
-{
-  THTensor_(resizeAs)(r_, t);
-  int64_t r_Size = THTensor_(nElement)(r_);
-  int r_Contig = THTensor_(isContiguous)(r_);
-  int tContig = THTensor_(isContiguous)(t);
-  if (r_Contig && tContig) {
-    scalar_t *tp = t->data<scalar_t>();
-    scalar_t *rp = r_->data<scalar_t>();
-    at::parallel_for(0, r_Size, TH_OMP_OVERHEAD_THRESHOLD,
-        [&](size_t start, size_t end) {
-      for (auto i = start; i < end; i++) {
-#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-        rp[i] = (value == 0)? NAN : tp[i] - value * floor(tp[i] / value);
-#else
-        // There is no NAN for integers
-        rp[i] = tp[i] % value;
-        if (modulo_wrap(rp[i], value))
-          rp[i] += value;
-#endif
-      }
-    });
-  } else {
-#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-    TH_TENSOR_APPLY2_PARALLEL(r_Size, r_Contig, tContig, scalar_t, r_, scalar_t, t, *r__data = (value == 0)? NAN : *t_data - value * floor(*t_data / value);, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
-#else
-    // There is no NAN for integers
-    TH_TENSOR_APPLY2_PARALLEL(r_Size, r_Contig, tContig, scalar_t, r_, scalar_t, t, *r__data = *t_data % value;
-        if (modulo_wrap(*r__data, value)) *r__data += value;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
-#endif
-  }
 }
 
 #endif

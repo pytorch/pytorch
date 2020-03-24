@@ -1,5 +1,6 @@
 #include <torch/csrc/distributed/autograd/rpc_messages/propagate_gradients_req.h>
-#include <torch/csrc/jit/pickle.h>
+#include <torch/csrc/distributed/rpc/rpc_agent.h>
+#include <torch/csrc/jit/serialization/pickle.h>
 
 namespace torch {
 namespace distributed {
@@ -17,7 +18,7 @@ PropagateGradientsReq::PropagateGradientsReq(
       grads_(std::move(grads)),
       retainGraph_(retainGraph) {}
 
-Message PropagateGradientsReq::toMessage() && {
+Message PropagateGradientsReq::toMessageImpl() && {
   std::vector<at::IValue> ivalues;
   // Add all the grad tensors.
   for (const auto& grad : grads_) {
@@ -47,8 +48,11 @@ std::unique_ptr<PropagateGradientsReq> PropagateGradientsReq::fromMessage(
   // Unpickle the message and retrieve tupleElements.
   auto payload = static_cast<const char*>(message.payload().data());
   auto payload_size = message.payload().size();
-  IValue tuple =
-      jit::unpickle(payload, payload_size, nullptr, &message.tensors());
+  IValue tuple = jit::unpickle(
+      payload,
+      payload_size,
+      *rpc::RpcAgent::getCurrentRpcAgent()->getTypeResolver(),
+      &message.tensors());
   std::vector<at::IValue> tupleElements = tuple.toTuple()->elements();
 
   // Build PropagateGradientsReq.

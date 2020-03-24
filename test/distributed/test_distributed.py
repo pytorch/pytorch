@@ -289,13 +289,13 @@ class _DistTestBase(object):
         return (group, group_id, rank)
 
     def _init_full_group_test(self, **kwargs):
-        group = [i for i in range(0, dist.get_world_size())]
+        group = list(range(0, dist.get_world_size()))
         group_id = dist.new_group(**kwargs)
         rank = dist.get_rank()
         return (group, group_id, rank)
 
     def _init_global_test(self):
-        group = [i for i in range(0, dist.get_world_size())]
+        group = list(range(0, dist.get_world_size()))
         group_id = dist.group.WORLD
         rank = dist.get_rank()
         return (group, group_id, rank)
@@ -1731,7 +1731,8 @@ class _DistTestBase(object):
     def _model_step(self, model):
         for param in model.parameters():
             if param.grad is not None:
-                param.data += param.grad
+                with torch.no_grad():
+                    param += param.grad
                 param.grad = None
 
     def _prepare_dummy_data(self, local_bs):
@@ -2157,7 +2158,7 @@ if BACKEND == "gloo" or BACKEND == "nccl":
                     first_process.exitcode == SKIP_IF_NO_GPU_EXIT_CODE or
                     first_process.exitcode == SKIP_IF_SMALL_WORLDSIZE_EXIT_CODE or
                     first_process.exitcode == SKIP_IF_ROCM_EXIT_CODE
-                )
+                ), "unexpected exit code {}".format(first_process.exitcode)
 
                 if first_process.exitcode == SKIP_IF_NO_CUDA_EXIT_CODE:
                     raise unittest.SkipTest("cuda is not available")
@@ -2170,7 +2171,11 @@ if BACKEND == "gloo" or BACKEND == "nccl":
                 if first_process.exitcode == SKIP_IF_ROCM_EXIT_CODE:
                     raise unittest.SkipTest("Test skipped for ROCm")
 
-            self.assertEqual(first_process.exitcode, 0)
+            self.assertEqual(
+                first_process.exitcode,
+                0,
+                "Expect 0 exit code, but got {}".format(first_process.exitcode)
+            )
 
 
 elif BACKEND == "mpi":

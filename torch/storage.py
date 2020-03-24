@@ -47,7 +47,7 @@ class _StorageBase(object):
 
     def tolist(self):
         """Returns a list containing the elements of this storage"""
-        return [v for v in self]
+        return list(self)
 
     def cpu(self):
         """Returns a CPU copy of this storage if it's not already on the CPU"""

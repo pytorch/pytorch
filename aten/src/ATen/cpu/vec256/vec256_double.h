@@ -63,8 +63,9 @@ public:
 
 
     __at_align32__ double tmp_values[size()];
-    // Ensure uninitialized memory does not change the output value
-    // See https://github.com/pytorch/pytorch/issues/32502 for more details
+    // Ensure uninitialized memory does not change the output value See https://github.com/pytorch/pytorch/issues/32502
+    // for more details. We do not initialize arrays to zero using "={0}" because gcc would compile it to two
+    // instructions while a loop would be compiled to one instruction.
     for (auto i = 0; i < size(); ++i) {
       tmp_values[i] = 0.0;
     }
@@ -91,9 +92,9 @@ public:
     return _mm256_movemask_pd(cmp);
   }
   Vec256<double> map(double (*f)(double)) const {
-    __at_align32__ double tmp[4];
+    __at_align32__ double tmp[size()];
     store(tmp);
-    for (int64_t i = 0; i < 4; i++) {
+    for (int64_t i = 0; i < size(); i++) {
       tmp[i] = f(tmp[i]);
     }
     return loadu(tmp);
@@ -140,6 +141,9 @@ public:
   }
   Vec256<double> expm1() const {
     return Vec256<double>(Sleef_expm1d4_u10(values));
+  }
+  Vec256<double> fmod(const Vec256<double>& q) const {
+    return Vec256<double>(Sleef_fmodd4(values, q));
   }
   Vec256<double> log() const {
     return Vec256<double>(Sleef_logd4_u10(values));

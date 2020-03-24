@@ -234,6 +234,8 @@ class CMake:
              'EXPERIMENTAL_SINGLE_THREAD_POOL',
              'INSTALL_TEST',
              'JAVA_HOME',
+             'INTEL_MKL_DIR',
+             'INTEL_OMP_DIR',
              'MKL_THREADING',
              'MKLDNN_THREADING',
              'MSVC_Z7_OVERRIDE',

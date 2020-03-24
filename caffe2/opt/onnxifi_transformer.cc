@@ -587,7 +587,6 @@ OperatorDef OnnxifiTransformer::buildOnnxifiOp(
   }
 
   // Add the input/output
-  std::unordered_map<std::string, int> input_pos_map;
   int idx = 0;
   auto* input_names = op.add_arg();
   input_names->set_name("input_names");
@@ -595,7 +594,6 @@ OperatorDef OnnxifiTransformer::buildOnnxifiOp(
     if (!initialization_list.count(input)) {
       op.add_input(input);
       input_names->add_strings(input);
-      input_pos_map.emplace(input, idx++);
     }
   }
   auto* output_names = op.add_arg();
@@ -769,6 +767,11 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaC2(
         &new_shape_hints,
         opts_.bound_shape_spec.max_batch_size);
     initialization_list.clear();
+  }
+
+  // Add parition info
+  for (const auto& p : partition_infos_) {
+    onnxifi_net.add_partition_info()->CopyFrom(p);
   }
 
   // Build ONNXIFI Op
@@ -1145,11 +1148,30 @@ void OnnxifiTransformer::tieGatherAndSparseLengthsWeightedSumOps(
   }
 }
 
+void OnnxifiTransformer::blacklistCpuPartition(
+    const NetDef& net,
+    std::unordered_set<int>* blacklisted_ops) const {
+  std::unordered_set<std::string> cpu_partitions;
+  for (const auto& p : partition_infos_) {
+    if (p.device_id_size() == 0) {
+      cpu_partitions.emplace(p.name());
+    }
+  }
+  for (const auto& op : net.op()) {
+    const auto& pname = op.device_option().node_name();
+    if (cpu_partitions.count(pname)) {
+      blacklisted_ops->emplace(
+          ArgumentHelper::GetSingleArgument<OperatorDef, int>(op, kNetPos, -1));
+    }
+  }
+}
+
 void OnnxifiTransformer::applyFilteringRules(
     const NetDef& net,
     const ShapeInfoMap& shape_hints,
     std::unordered_set<int>* blacklisted_ops) const {
   tieGatherAndSparseLengthsWeightedSumOps(net, shape_hints, blacklisted_ops);
+  blacklistCpuPartition(net, blacklisted_ops);
 }
 
 void OnnxifiTransformer::getBackendId() {
@@ -1222,6 +1244,13 @@ NetDef OnnxifiTransformer::TransformViaOnnx(
       *pred_net, onnx_supports, onnx_converter, opts_.debug);
 }
 
+void OnnxifiTransformer::extractPartitionInfo(const NetDef& net) {
+  partition_infos_.clear();
+  for (const auto& p : net.partition_info()) {
+    partition_infos_.emplace_back(p);
+  }
+}
+
 // Cutting off the runnable part and replace with ONNXIFI ops. Asssume the nets
 // were topologically sorted
 void OnnxifiTransformer::transform(
@@ -1268,6 +1297,7 @@ void OnnxifiTransformer::transform(
   if (opts_.debug) {
     dumpNet(*pred_net, shape_hints, "debug_ssa_net.pb_txt");
   }
+  extractPartitionInfo(*pred_net);
 
   // Get backend id
   getBackendId();

@@ -121,6 +121,9 @@ TEST(AutogradAPITests, GradUnreachableTest) {
 
   ASSERT_VARIABLE_EQ(grad_res[0], x * 2);
   ASSERT_FALSE(grad_res[1].defined());
+
+  // allow_unused=False, but grads contains None inside, should throw
+  ASSERT_THROWS_WITH(grad({x * 2}, {x, y}, {}, {}, false, false), "Set allow_unused=True");
 }
 
 TEST(AutogradAPITests, RetainGrad) {

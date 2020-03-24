@@ -93,6 +93,14 @@ static void sum_kernel_cuda(TensorIterator& iter) {
     // type promotion that does cast and reduction in a single kernel
     return sum_kernel_impl<at::Half, float, float>(iter);
   }
+  #ifdef __HIP_PLATFORM_HCC__
+  else if (iter.dtype() == kBFloat16) {
+    return sum_kernel_impl<at::BFloat16, float>(iter);
+  } else if (iter.dtype(1) == kBFloat16 && iter.dtype() == kFloat) {
+    // type promotion that does cast and reduction in a single kernel
+    return sum_kernel_impl<at::BFloat16, float, float>(iter);
+  }
+  #endif
   AT_DISPATCH_ALL_TYPES_AND(ScalarType::Bool, iter.dtype(), "sum_cuda", [&]() {
     sum_kernel_impl<scalar_t>(iter);
   });
@@ -105,6 +113,14 @@ static void prod_kernel_cuda(TensorIterator& iter) {
     // type promotion that does cast and reduction in a single kernel
     return prod_kernel_impl<at::Half, float, float>(iter);
   }
+  #ifdef __HIP_PLATFORM_HCC__
+  else if (iter.dtype() == kBFloat16) {
+    return prod_kernel_impl<at::BFloat16, float>(iter);
+  } else if (iter.dtype(1) == kBFloat16 && iter.dtype() == kFloat) {
+    // type promotion that does cast and reduction in a single kernel
+    return prod_kernel_impl<at::BFloat16, float, float>(iter);
+  }
+  #endif
   AT_DISPATCH_ALL_TYPES(iter.dtype(), "prod_cuda", [&]() {
     prod_kernel_impl<scalar_t>(iter);
   });
@@ -117,6 +133,14 @@ static void mean_kernel_cuda(TensorIterator& iter) {
     // type promotion that does cast and reduction in a single kernel
     return mean_kernel_impl<at::Half, float, float>(iter);
   }
+  #ifdef __HIP_PLATFORM_HCC__
+  else if(iter.dtype() == kBFloat16) {
+    return mean_kernel_impl<at::BFloat16, float>(iter);
+  } else if (iter.dtype(1) == kBFloat16 && iter.dtype() == kFloat) {
+    // type promotion that does cast and reduction in a single kernel
+    return mean_kernel_impl<at::BFloat16, float, float>(iter);
+  }
+  #endif
   AT_DISPATCH_ALL_TYPES(iter.dtype(), "mean_cuda", [&]() {
     mean_kernel_impl<scalar_t>(iter);
   });
@@ -129,6 +153,14 @@ static void norm_kernel_cuda(TensorIterator& iter, Scalar p) {
     // type promotion that does cast and reduction in a single kernel
     return norm_kernel_cuda_impl<at::Half, float, float>(iter, p);
   }
+  #ifdef __HIP_PLATFORM_HCC__
+  else if(iter.dtype() == kBFloat16) {
+    return norm_kernel_cuda_impl<at::BFloat16, float>(iter, p);
+  } else if (iter.dtype(1) == kBFloat16 && iter.dtype() == kFloat) {
+    // type promotion that does cast and reduction in a single kernel
+    return norm_kernel_cuda_impl<at::BFloat16, float, float>(iter, p);
+  }
+  #endif
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "norm_cuda", [&]() {
     norm_kernel_cuda_impl<scalar_t>(iter, p);
   });
@@ -226,7 +258,7 @@ void argmin_kernel_cuda(TensorIterator& iter) {
 
 template<typename scalar_t, typename idx_t, typename BinaryOperation>
 __device__ void binary_op_update(const scalar_t lhs, scalar_t& rhs, const idx_t lhs_idx, idx_t& rhs_idx, BinaryOperation binary_op) {
-  if(!std::isnan(rhs) && (std::isnan(lhs) || !binary_op(rhs, lhs))) {
+  if(!THCNumerics<scalar_t>::isnan(rhs) && (THCNumerics<scalar_t>::isnan(lhs) || !binary_op(rhs, lhs))) {
     rhs = lhs;
     rhs_idx = lhs_idx;
   }
@@ -348,7 +380,7 @@ __global__ void tensor_kernel_scan_outer_dim_with_indices(scalar_t *self_, scala
       int64_t out_idx = 0;
 
       for (int64_t col = 0; col < row_size; ++col) {
-        if(std::isnan(*self) || (!std::isnan(out) && binary_op(*self, out))) {
+        if(THCNumerics<scalar_t>::isnan(*self) || (!THCNumerics<scalar_t>::isnan(out) && binary_op(*self, out))) {
           out = *self;
           out_idx = col;
         }

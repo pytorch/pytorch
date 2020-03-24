@@ -338,6 +338,25 @@ public:
    */
   void reserve(size_type count) const;
 
+  /**
+   * Value equality comparison. This function implements Python-like semantics for
+   * equality: two dicts with the same identity (e.g. same pointer) trivially
+   * compare equal, otherwise each element is compared for equality.
+   */
+  template <class Key_, class Value_>
+  friend bool operator==(
+      const Dict<Key_, Value_>& lhs,
+      const Dict<Key_, Value_>& rhs);
+  template <class Key_, class Value_>
+  friend bool operator!=(
+      const Dict<Key_, Value_>& lhs,
+      const Dict<Key_, Value_>& rhs);
+
+  /**
+   * Identity comparison. Returns true if and only if `rhs` represents the same
+   * Dict object as `this`.
+   */
+  bool is(const Dict& rhs) const;
 
   // private API for now because the return type will change to TypePtr
   // instead of optional<TypePtr> once types are mandatory.

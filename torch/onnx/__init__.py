@@ -32,7 +32,7 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
            operator_export_type=None, opset_version=None, _retain_param_name=True,
            do_constant_folding=True, example_outputs=None, strip_doc_string=True,
            dynamic_axes=None, keep_initializers_as_inputs=None, custom_opsets=None,
-           enable_onnx_checker=True):
+           enable_onnx_checker=True, use_external_data_format=False):
     r"""
     Export a model into ONNX format.  This exporter runs your model
     once in order to get a trace of its execution to be exported;
@@ -147,6 +147,16 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
             to 1 by default.
         enable_onnx_checker (bool, default True): If True the onnx model checker will be run
             as part of the export, to ensure the exported model is a valid ONNX model.
+        external_data_format (bool, default False): If True, then the model is exported
+            in ONNX external data format, in which case some of the model parameters are stored
+            in external binary files and not in the ONNX model file itself. See link for format
+            details: 
+            https://github.com/onnx/onnx/blob/8b3f7e2e7a0f2aba0e629e23d89f07c7fc0e6a5e/onnx/onnx.proto#L423
+            Also, in this case,  argument 'f' must be a string specifying the location of the model.
+            The external binary files will be stored in the same location specified by the model 
+            location 'f'. If False, then the model is stored in regular format, i.e. model and
+            parameters are all in one file. This argument is ignored for all export types other
+            than ONNX. 
     """
 
     from torch.onnx import utils
@@ -155,7 +165,7 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
                         operator_export_type, opset_version, _retain_param_name,
                         do_constant_folding, example_outputs,
                         strip_doc_string, dynamic_axes, keep_initializers_as_inputs,
-                        custom_opsets, enable_onnx_checker)
+                        custom_opsets, enable_onnx_checker, use_external_data_format)
 
 
 def export_to_pretty_string(*args, **kwargs):
