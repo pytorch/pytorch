@@ -93,6 +93,37 @@ If your GPU memory isn't freed even after Python quits, it is very likely that
 some Python subprocesses are still alive. You may find them via
 ``ps -elf | grep python`` and manually kill them with ``kill -9 [pid]``.
 
+My out of memory exception handler can't allocate memory
+-------------------------------------------------------
+You may have some code that tries to recover from out of memory errors.
+
+.. code-block:: python
+
+    try:
+        run_model(batch_size)
+    except RuntimeError: # Out of memory
+        for _ in range(batch_size):
+            run_model(1)
+
+But find that when you do run out of memory, your recovery code can't allocate
+either. That's because the python exception object holds a reference to the
+stack frame where the error was raised. Which prevents the original tensor
+objects from being freed. The solution is to move you OOM recovery code outside
+of the ``except`` clause.
+
+.. code-block:: python
+
+    oom = False
+    try:
+        run_model(batch_size)
+    except RuntimeError: # Out of memory
+        oom = True
+
+    if oom:
+        for _ in range(batch_size):
+            run_model(1)
+
+
 .. _dataloader-workers-random-seed:
 
 My data loader workers return identical random numbers
