@@ -849,7 +849,7 @@ Tensor& bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tens
   }
 
   // Dense matrices have to be contiguous for cusparseSpMM to work
-  const Tensor mat2_contig = mat2.is_contiguous() ? mat2 : mat2.clone(at::MemoryFormat::Contiguous);
+  const Tensor mat2_contig = mat2.contiguous();
   auto cusparse_handle = at::cuda::getCurrentCUDASparseHandle();
 
   // First need to coalesce to get all of the first dimension indices
