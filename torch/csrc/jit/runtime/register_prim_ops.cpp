@@ -1730,7 +1730,7 @@ template <typename T>
 int listEq(Stack& stack) {
   c10::List<T> b = pop(stack).to<c10::List<T>>();
   c10::List<T> a = pop(stack).to<c10::List<T>>();
-  push(stack, list_is_equal(a, b));
+  push(stack, a == b);
   return 0;
 }
 
@@ -1738,7 +1738,7 @@ template <typename T>
 int listNe(Stack& stack) {
   c10::List<T> b = pop(stack).to<c10::List<T>>();
   c10::List<T> a = pop(stack).to<c10::List<T>>();
-  push(stack, !list_is_equal(a, b));
+  push(stack, a != b);
   return 0;
 }
 
@@ -2872,6 +2872,48 @@ RegisterOperators reg2({
             t[i] = l.get(i);
           }
           push(stack, std::move(t));
+          return 0;
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::all.int(int[] self) -> bool",
+        [](Stack& stack) {
+          c10::List<int64_t> l = pop(stack).toIntList();
+          for(const auto& elem: l) {
+            if(!elem){
+              push(stack, false);
+              return 0;
+            }
+          }
+          push(stack, true);
+          return 0;
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::all.float(float[] self) -> bool",
+        [](Stack& stack) {
+          c10::List<double> l = pop(stack).toDoubleList();
+          for(const auto& elem: l) {
+            if(!elem){
+              push(stack, false);
+              return 0;
+            }
+          }
+          push(stack, true);
+          return 0;
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::all.bool(bool[] self) -> bool",
+        [](Stack& stack) {
+          c10::List<bool> l = pop(stack).toBoolList();
+          for(const auto& elem: l) {
+            if(!elem){
+              push(stack, false);
+              return 0;
+            }
+          }
+          push(stack, true);
           return 0;
         },
         aliasAnalysisFromSchema()),

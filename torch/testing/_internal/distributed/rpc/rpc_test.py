@@ -905,6 +905,15 @@ class RpcTest(RpcAgentTestFixture):
         )
         self.assertEqual(rref.to_here(), torch.ones(n, n) * 2)
 
+    @dist_init
+    def test_builtin_remote_self(self):
+        rref = rpc.remote(
+            worker_name(self.rank),
+            torch.add,
+            args=(torch.ones(2, 2), torch.ones(2, 2)),
+        )
+        self.assertEqual(rref.local_value(), torch.ones(2, 2) * 2)
+
     def _test_multi_remote_call(self, fn, args_fn=lambda x: (), kwargs_fn=lambda x: {}):
         m = 10
         n = self.rank + 1
@@ -1489,7 +1498,6 @@ class RpcTest(RpcAgentTestFixture):
         rpc.shutdown(graceful=False)
 
     @dist_init
-    @unittest.skip("Test is flaky. see https://github.com/pytorch/pytorch/issues/31846")
     def test_debug_info(self):
         # only test keys in this test case. Values should be covered by
         # individual module debug info tests
@@ -1505,12 +1513,18 @@ class RpcTest(RpcAgentTestFixture):
         expected.update(rref_info)
         expected.update(agent_info)
         expected.update(autograd_info)
-        self.assertEqual(expected.keys(), info.keys())
+        # NB: Key ordering is only preserved in python 3.6+. So here, we
+        # manually check keys are equal.
+        for key in expected.keys():
+            self.assertIn(key, info.keys())
+
+        for key in info.keys():
+            self.assertIn(key, expected.keys())
 
     @dist_init(setup_rpc=False)
     @unittest.skipIf(
         IS_MACOS,
-        "Test is flaky on MacOS, see https://github.com/pytorch/pytorch/issues/32019",
+        "Test is flaky on MacOS since libuv error handling is not as robust as TCP",
     )
     def test_handle_send_exceptions(self):
         # test that if a callee node has gone down, we raise an appropriate
@@ -1522,24 +1536,20 @@ class RpcTest(RpcAgentTestFixture):
             world_size=self.world_size,
             rpc_backend_options=self.rpc_backend_options,
         )
+        rpc._set_rpc_timeout(timedelta(seconds=10))
         # This barrier is needed to ensure that some workers do not exit before
         # others have been brought up, for non ProcessGroupAgent backends.
         initialize_pg(self.init_method, self.rank, self.world_size)
         dist.barrier()
-
         if self.rank == 1:
             dst_rank = (self.rank + 1) % self.world_size
             dst_worker = worker_name(dst_rank)
             # allow destination worker to exit without joining
-            wait_until_node_failure(dst_rank)
+            error_str = get_shutdown_error_regex(dist_utils.TEST_CONFIG.rpc_backend_name)
+            wait_until_node_failure(dst_rank, error_str)
             fut = rpc.rpc_async(dst_worker, torch.add, args=(torch.ones(1), 3))
             # Shutdown sequence is not very well defined and as a result
-            # we can see any of these error messages.
-            error_str = (
-                "Encountered exception in ProcessGroupAgent::enqueueSend"
-                if self.rpc_backend == rpc.backend_registry.BackendType.PROCESS_GROUP
-                else get_shutdown_error_regex()
-            )
+            # we can see any of the error messages defined in get_shutdown_error_regex.
             with self.assertRaisesRegex(RuntimeError, error_str):
                 fut.wait()
         # exit all workers non-gracefully.
