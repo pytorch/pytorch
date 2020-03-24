@@ -42,6 +42,17 @@ Tensor& set_(Tensor& result, Storage source) {
   return result.set_(source, 0, static_cast<int64_t>(source.size()), {});
 }
 
+// unify with cuda implementation?  This is not done to avoid a dispatch in resize_impl_cpu_
+Tensor& set_storage_cpu_(Tensor& result, Storage storage, int64_t storage_offset, IntArrayRef size, IntArrayRef stride) {
+  checkSetStorage(result, storage, storage_offset, size, stride);
+
+  result.unsafeGetTensorImpl()->set_storage_offset(storage_offset);
+  c10::optional<IntArrayRef> stride_opt = stride.data() != nullptr ?
+                                          c10::optional<IntArrayRef>(stride) : c10::nullopt;
+  at::native::resize_impl_cpu_(result.unsafeGetTensorImpl(), size, stride_opt);
+  return result;
+}
+
 Tensor& set_tensor_(Tensor& result, const Tensor& source) {
   if (result.unsafeGetTensorImpl() != source.unsafeGetTensorImpl()) {
     return result.set_(source.storage(), source.storage_offset(), source.sizes(), source.strides());
@@ -202,7 +213,7 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
 
 Tensor _cat_cpu(TensorList tensors, int64_t dim) {
   Tensor result = at::empty({0}, tensors[0].options());
-  return _cat_out_cpu(result, tensors, dim);
+  return native::_cat_out_cpu(result, tensors, dim);
 }
 
 static void check_cat_no_zero_dim(TensorList tensors) {
@@ -587,6 +598,13 @@ Tensor narrow(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
   return at::slice(self, dim, start, start + length, 1);
 }
 
+Tensor narrow(const Tensor& self, int64_t dim, const Tensor& start, int64_t length) {
+  TORCH_CHECK(start.dim() == 0 && isIntegralType(start.scalar_type(), /*includeBool=*/false),
+              "start must be an 0-dim integral Tensor.");
+  int64_t st = start.item<int64_t>();
+  return at::narrow(self, dim, st, length);
+}
+
 Tensor permute(const Tensor& self, IntArrayRef dims) {
   auto nDims = self.dim();
   TORCH_CHECK(dims.size() == (size_t)nDims,
@@ -736,16 +754,16 @@ static Tensor select_sparse(const Tensor& self, int64_t dim, int64_t index) {
 Tensor select(const Tensor& self, int64_t dim, int64_t index) {
   int64_t ndim = self.dim();
   if (ndim == 0) {
-    AT_INDEX_ERROR("select() cannot be applied to a 0-dim tensor.");
+    TORCH_CHECK_INDEX(false, "select() cannot be applied to a 0-dim tensor.");
   }
   dim = maybe_wrap_dim(dim, ndim);
   auto size = self.size(dim);
   if (index < -size || index >= size) {
     if (self.has_names() && self.names()[dim] != Dimname::wildcard()) {
-      AT_INDEX_ERROR("select(): index ", index, " out of range for tensor of size ",
+      TORCH_CHECK_INDEX(false, "select(): index ", index, " out of range for tensor of size ",
                      self.sizes(), " at dimension ", self.names()[dim]);
     }
-    AT_INDEX_ERROR("select(): index ", index, " out of range for tensor of size ",
+    TORCH_CHECK_INDEX(false, "select(): index ", index, " out of range for tensor of size ",
                    self.sizes(), " at dimension ", dim);
   }
   if (index < 0) {
@@ -793,10 +811,10 @@ Tensor index_select_sparse(const Tensor& self, int64_t dim, const Tensor& index)
     */
   auto ndim = self.dim();
   if (ndim == 0) {
-    AT_INDEX_ERROR("index_select() cannot be applied to a 0-dim tensor.");
+    TORCH_CHECK_INDEX(false, "index_select() cannot be applied to a 0-dim tensor.");
   }
   if (!(index.dim() == 1 && index.dtype() == at::kLong)) {
-    AT_INDEX_ERROR("index_select() argument index must be 1-D long-tensor.");
+    TORCH_CHECK_INDEX(false, "index_select() argument index must be 1-D long-tensor.");
   }
   dim = maybe_wrap_dim(dim, ndim);
   auto size = self.size(dim);
@@ -817,7 +835,7 @@ Tensor index_select_sparse(const Tensor& self, int64_t dim, const Tensor& index)
     for (int64_t i=0; i < new_sizes[dim]; i++) {
       auto idx = index[i].item<int64_t>();
       if (idx < -size || idx >= size) {
-        AT_INDEX_ERROR("index_select(): index contains ", idx, " that is out of range for tensor of size ",
+        TORCH_CHECK_INDEX(false, "index_select(): index contains ", idx, " that is out of range for tensor of size ",
                    self.sizes(), " at dimension ", dim);
       }
       if (idx < 0) {
@@ -856,7 +874,7 @@ Tensor index_select_sparse(const Tensor& self, int64_t dim, const Tensor& index)
 Tensor slice(const Tensor& self, int64_t dim, int64_t start, int64_t end, int64_t step) {
   int64_t ndim = self.dim();
   if (ndim == 0) {
-    AT_INDEX_ERROR("slice() cannot be applied to a 0-dim tensor.");
+    TORCH_CHECK_INDEX(false, "slice() cannot be applied to a 0-dim tensor.");
   }
   dim = maybe_wrap_dim(dim, ndim);
   auto sizes = self.sizes().vec();

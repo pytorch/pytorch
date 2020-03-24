@@ -1,10 +1,11 @@
 #include "import.h"
 #include <ATen/core/ivalue.h>
-#include <torch/csrc/jit/api/compilation_unit.h>
-#include <torch/csrc/jit/serialization/unpickler.h>
 #include <caffe2/serialize/inline_container.h>
-#include <torch/csrc/jit/runtime/instruction.h>
+#include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/mobile/type_parser.h>
+#include <torch/csrc/jit/runtime/instruction.h>
+#include <torch/csrc/jit/serialization/unpickler.h>
+#include <torch/custom_class.h>
 
 #include <fstream>
 #include <string>
@@ -32,6 +33,11 @@
 // This format and process need to be revisted and redesigned if we want to
 // support backward compatibility in future.
 
+namespace c10 {
+//std::string serializeType(const Type &t);
+TypePtr parseType(const std::string& pythonStr);
+}
+
 namespace torch {
 namespace jit {
 using caffe2::serialize::PyTorchStreamReader;
@@ -47,7 +53,18 @@ IValue expect_field(IValue tup, const std::string& expected_name, size_t entry){
   return row->elements().at(1);
 }
 
-void parseMethods(const std::vector<IValue>& vals, mobile::CompilationUnit& mcu) {
+void print_unsupported_ops_and_throw(const std::unordered_set<std::string>& unsupported_ops) {
+  std::string error_message("{");
+  for (const auto& op_name : unsupported_ops) {
+    error_message += op_name + ", ";
+  }
+  error_message += "}";
+  TORCH_CHECK(false, "Following ops cannot be found:", error_message);
+}
+
+void parseMethods(
+    const std::vector<IValue>& vals,
+    mobile::CompilationUnit& mcu) {
   for (const auto& element : vals) {
     const auto& m_tuple = element.toTuple()->elements();
     const std::string& function_name = m_tuple[0].toStringRef();
@@ -72,13 +89,21 @@ void parseMethods(const std::vector<IValue>& vals, mobile::CompilationUnit& mcu)
       function->append_instruction(op_code, X, N);
     }
 
+    std::unordered_set<std::string> unsupported_op_names;
     for (const auto& op : ops_list) {
       auto op_item = op.toTuple()->elements();
       TORCH_CHECK(op_item.size() == 2,
                   "There should be two parts in an operator name.");
-      function->append_operator(op_item[0].toString()->string(),
+      auto op_found = function->append_operator(op_item[0].toString()->string(),
                            op_item[1].toString()->string());
+      if (!op_found) {
+        unsupported_op_names.emplace(op_item[0].toString()->string() + "." + op_item[1].toString()->string());
+      }
     }
+
+    if (!unsupported_op_names.empty()) {
+      print_unsupported_ops_and_throw(unsupported_op_names);
+    };
 
     for (const auto& constant : consts_list) {
       function->append_constant(constant);
@@ -101,26 +126,28 @@ class BytecodeDeserializer final {
   mobile::Module deserialize(c10::optional<at::Device> device);
 
  private:
-  c10::IValue readArchive(const std::string& archive_name);
-  std::shared_ptr<script::CompilationUnit> compilation_unit_;
+  c10::IValue readArchive(const std::string& archive_name,
+    std::shared_ptr<mobile::CompilationUnit> mcu);
+  std::shared_ptr<CompilationUnit> compilation_unit_;
   std::unordered_set<std::string> imported_libs_;
   std::unique_ptr<PyTorchStreamReader> reader_;
   c10::optional<at::Device> device_;
 };
 
 BytecodeDeserializer::BytecodeDeserializer(std::unique_ptr<PyTorchStreamReader> reader)
-    : compilation_unit_(std::make_shared<script::CompilationUnit>()), reader_(std::move(reader)) {}
+    : compilation_unit_(std::make_shared<CompilationUnit>()), reader_(std::move(reader)) {}
 
 mobile::Module BytecodeDeserializer::deserialize(c10::optional<at::Device> device) {
   device_ = device;
-  auto bvals = readArchive("bytecode").toTuple()->elements();
   auto mcu = std::make_shared<mobile::CompilationUnit>();
+  auto bvals = readArchive("bytecode", mcu).toTuple()->elements();
   parseMethods(bvals, *mcu);
 
-  return mobile::Module(readArchive("data").toObject(), mcu);
+  return mobile::Module(readArchive("data", mcu).toObject(), mcu);
 }
 
-c10::IValue BytecodeDeserializer::readArchive(const std::string& archive_name) {
+c10::IValue BytecodeDeserializer::readArchive(const std::string& archive_name,
+    std::shared_ptr<mobile::CompilationUnit> mcu) {
   std::stringstream picklename;
   picklename << archive_name << ".pkl";
   at::DataPtr pickle_ptr;
@@ -151,15 +178,39 @@ c10::IValue BytecodeDeserializer::readArchive(const std::string& archive_name) {
   };
 
   auto obj_loader = [&](at::StrongTypePtr type, IValue input) {
-    auto dict = std::move(input).toGenericDict();
-    size_t ndict = dict.size();
-    auto obj = c10::ivalue::Object::create(type, ndict);
-    auto it = dict.begin();
-    for (size_t i = 0; i < ndict; ++i) {
-      obj->setSlot(i, it->value());
-      ++it;
+    auto cls = type.type_->expect<at::ClassType>();
+    auto qn = cls->name();
+    c10::QualifiedName method_name(qn.value(), "__setstate__");
+    auto setstate = mcu->find_function(method_name);
+    auto find_custom_class_with_setstate = [&qn]() -> c10::ClassTypePtr {
+      auto custom_class_type = torch::jit::getCustomClass(qn->qualifiedName());
+      if (custom_class_type && custom_class_type->getMethod("__setstate__")) {
+        return custom_class_type;
+      }
+      return nullptr;
+    };
+    if (setstate) {
+      auto obj = c10::ivalue::Object::create(type, 0);
+      Stack stack({obj, input});
+      setstate->run(stack);
+      return obj;
+    } else if (auto custom_class_type = find_custom_class_with_setstate()) {
+      auto obj = c10::ivalue::Object::create(
+          c10::StrongTypePtr(nullptr, custom_class_type), 1);
+      Stack stack({obj, input});
+      custom_class_type->getMethod("__setstate__")->run(stack);
+      return obj;
+    } else {
+      auto dict = std::move(input).toGenericDict();
+      size_t ndict = dict.size();
+      auto obj = c10::ivalue::Object::create(type, ndict);
+      auto it = dict.begin();
+      for (size_t i = 0; i < ndict; ++i) {
+        obj->setSlot(i, it->value());
+        ++it;
+      }
+      return obj;
     }
-    return obj;
   };
 
   auto read_record = [&](const std::string& name) {

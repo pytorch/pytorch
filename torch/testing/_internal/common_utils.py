@@ -211,8 +211,8 @@ def run_tests(argv=UNITTEST_ARGS):
             else:
                 if not os.path.exists(test_report_path):
                     os.makedirs(test_report_path)
-
-            unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(output=test_report_path))
+            verbose = '--verbose' in argv or '-v' in argv
+            unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(output=test_report_path, verbosity=2 if verbose else 1))
         else:
             unittest.main(argv=argv)
 
@@ -638,6 +638,7 @@ class TestCase(expecttest.TestCase):
     maxDiff = None
     _do_cuda_memory_leak_check = False
     _do_cuda_non_default_stream = False
+    exact_dtype = False
 
     def __init__(self, method_name='runTest'):
         super(TestCase, self).__init__(method_name)
@@ -776,7 +777,10 @@ class TestCase(expecttest.TestCase):
 
         return tg
 
-    def assertEqual(self, x, y, prec=None, message='', allow_inf=False):
+    def assertEqual(self, x, y, prec=None, message='', allow_inf=False, exact_dtype=None):
+        if exact_dtype is None:
+            exact_dtype = self.exact_dtype
+
         if isinstance(prec, str) and message == '':
             message = prec
             prec = None
@@ -785,19 +789,21 @@ class TestCase(expecttest.TestCase):
 
         if isinstance(x, torch.Tensor) and isinstance(y, Number):
             self.assertEqual(x.item(), y, prec=prec, message=message,
-                             allow_inf=allow_inf)
+                             allow_inf=allow_inf, exact_dtype=exact_dtype)
         elif isinstance(y, torch.Tensor) and isinstance(x, Number):
             self.assertEqual(x, y.item(), prec=prec, message=message,
-                             allow_inf=allow_inf)
+                             allow_inf=allow_inf, exact_dtype=exact_dtype)
         elif isinstance(x, torch.Tensor) and isinstance(y, numpy.bool_):
             self.assertEqual(x.item(), y, prec=prec, message=message,
-                             allow_inf=allow_inf)
+                             allow_inf=allow_inf, exact_dtype=exact_dtype)
         elif isinstance(y, torch.Tensor) and isinstance(x, numpy.bool_):
             self.assertEqual(x, y.item(), prec=prec, message=message,
-                             allow_inf=allow_inf)
+                             allow_inf=allow_inf, exact_dtype=exact_dtype)
         elif isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
             def assertTensorsEqual(a, b):
                 super(TestCase, self).assertEqual(a.size(), b.size(), message)
+                if exact_dtype:
+                    self.assertEqual(a.dtype, b.dtype)
                 if a.numel() > 0:
                     if (a.device.type == 'cpu' and (a.dtype == torch.float16 or a.dtype == torch.bfloat16)):
                         # CPU half and bfloat16 tensors don't have the methods we need below
@@ -849,25 +855,29 @@ class TestCase(expecttest.TestCase):
                 assertTensorsEqual(x._values(), y._values())
             elif x.is_quantized and y.is_quantized:
                 self.assertEqual(x.qscheme(), y.qscheme(), prec=prec,
-                                 message=message, allow_inf=allow_inf)
+                                 message=message, allow_inf=allow_inf,
+                                 exact_dtype=exact_dtype)
                 if x.qscheme() == torch.per_tensor_affine:
                     self.assertEqual(x.q_scale(), y.q_scale(), prec=prec,
-                                     message=message, allow_inf=allow_inf)
+                                     message=message, allow_inf=allow_inf,
+                                     exact_dtype=exact_dtype)
                     self.assertEqual(x.q_zero_point(), y.q_zero_point(),
                                      prec=prec, message=message,
-                                     allow_inf=allow_inf)
+                                     allow_inf=allow_inf, exact_dtype=exact_dtype)
                 elif x.qscheme() == torch.per_channel_affine:
                     self.assertEqual(x.q_per_channel_scales(), y.q_per_channel_scales(), prec=prec,
-                                     message=message, allow_inf=allow_inf)
+                                     message=message, allow_inf=allow_inf,
+                                     exact_dtype=exact_dtype)
                     self.assertEqual(x.q_per_channel_zero_points(), y.q_per_channel_zero_points(),
                                      prec=prec, message=message,
-                                     allow_inf=allow_inf)
+                                     allow_inf=allow_inf, exact_dtype=exact_dtype)
                     self.assertEqual(x.q_per_channel_axis(), y.q_per_channel_axis(),
                                      prec=prec, message=message)
                 self.assertEqual(x.dtype, y.dtype)
                 self.assertEqual(x.int_repr().to(torch.int32),
                                  y.int_repr().to(torch.int32), prec=prec,
-                                 message=message, allow_inf=allow_inf)
+                                 message=message, allow_inf=allow_inf,
+                                 exact_dtype=exact_dtype)
             else:
                 assertTensorsEqual(x, y)
         elif isinstance(x, string_classes) and isinstance(y, string_classes):
@@ -877,20 +887,22 @@ class TestCase(expecttest.TestCase):
         elif isinstance(x, dict) and isinstance(y, dict):
             if isinstance(x, OrderedDict) and isinstance(y, OrderedDict):
                 self.assertEqual(x.items(), y.items(), prec=prec,
-                                 message=message, allow_inf=allow_inf)
+                                 message=message, allow_inf=allow_inf,
+                                 exact_dtype=exact_dtype)
             else:
                 self.assertEqual(set(x.keys()), set(y.keys()), prec=prec,
-                                 message=message, allow_inf=allow_inf)
+                                 message=message, allow_inf=allow_inf,
+                                 exact_dtype=exact_dtype)
                 key_list = list(x.keys())
                 self.assertEqual([x[k] for k in key_list],
                                  [y[k] for k in key_list],
                                  prec=prec, message=message,
-                                 allow_inf=allow_inf)
+                                 allow_inf=allow_inf, exact_dtype=exact_dtype)
         elif is_iterable(x) and is_iterable(y):
             super(TestCase, self).assertEqual(len(x), len(y), message)
             for x_, y_ in zip(x, y):
                 self.assertEqual(x_, y_, prec=prec, message=message,
-                                 allow_inf=allow_inf)
+                                 allow_inf=allow_inf, exact_dtype=exact_dtype)
         elif isinstance(x, bool) and isinstance(y, bool):
             super(TestCase, self).assertEqual(x, y, message)
         elif isinstance(x, Number) and isinstance(y, Number):
@@ -1223,6 +1235,25 @@ def retry_on_connect_failures(func=None, connect_errors=(ADDRESS_IN_USE)):
     return wrapper
 
 
+# Decorator to retry upon certain Exceptions.
+def retry(ExceptionToCheck, tries=3, delay=3):
+    def deco_retry(f):
+        @wraps(f)
+        def f_retry(*args, **kwargs):
+            mtries, mdelay = tries, delay
+            while mtries > 1:
+                try:
+                    return f(*args, **kwargs)
+                except ExceptionToCheck as e:
+                    msg = "%s, Retrying in %d seconds..." % (str(e), mdelay)
+                    print(msg)
+                    time.sleep(mdelay)
+                    mtries -= 1
+            return f(*args, **kwargs)
+        return f_retry  # true decorator
+    return deco_retry
+
+
 # Methods for matrix generation
 # Used in test_autograd.py and test_torch.py
 def prod_single_zero(dim_size):
@@ -1300,6 +1331,13 @@ def random_fullrank_matrix_distinct_singular_value(matrix_size, *batch_dims,
 
 
 def random_matrix(rows, columns, *batch_dims, **kwargs):
+    """Return rectangular matrix or batches of rectangular matrices.
+
+    Parameters:
+      dtype - the data type
+      device - the device kind
+      singular - when True, the output will be singular
+    """
     dtype = kwargs.get('dtype', torch.double)
     device = kwargs.get('device', 'cpu')
     silent = kwargs.get("silent", False)
@@ -1312,7 +1350,7 @@ def random_matrix(rows, columns, *batch_dims, **kwargs):
     s = torch.zeros(rows, columns, dtype=dtype, device=device)
     k = min(rows, columns)
     for i in range(k):
-        s[i, i] = (i + 1) / (k + 1)
+        s[i, i] = float(i + 1) / (k + 1)
     if singular:
         # make matrix singular
         s[k - 1, k - 1] = 0
@@ -1321,6 +1359,98 @@ def random_matrix(rows, columns, *batch_dims, **kwargs):
             # in LU factorization will be non-trivial
             s[0, 0] = 0
     return u.matmul(s.expand(batch_dims + (rows, columns)).matmul(v.transpose(-2, -1)))
+
+
+def random_lowrank_matrix(rank, rows, columns, *batch_dims, **kwargs):
+    """Return rectangular matrix or batches of rectangular matrices with
+    given rank.
+    """
+    B = random_matrix(rows, rank, *batch_dims, **kwargs)
+    C = random_matrix(rank, columns, *batch_dims, **kwargs)
+    return B.matmul(C)
+
+
+def random_sparse_matrix(rows, columns, density=0.01, **kwargs):
+    """Return rectangular random sparse matrix within given density.
+
+    The density of the result approaches to given density as the size
+    of the matrix is increased and a relatively small value of density
+    is specified but higher than min(rows, columns)/(rows * columns)
+    for non-singular matrices.
+    """
+    dtype = kwargs.get('dtype', torch.double)
+    device = kwargs.get('device', 'cpu')
+    singular = kwargs.get("singular", False)
+
+    k = min(rows, columns)
+    nonzero_elements = max(min(rows, columns), int(rows * columns * density))
+
+    row_indices = [i % rows for i in range(nonzero_elements)]
+    column_indices = [i % columns for i in range(nonzero_elements)]
+    random.shuffle(column_indices)
+    indices = [row_indices, column_indices]
+    values = torch.randn(nonzero_elements, dtype=dtype, device=device)
+    # ensure that the diagonal dominates
+    values *= torch.tensor([-float(i - j)**2 for i, j in zip(*indices)], dtype=dtype, device=device).exp()
+    A = torch.sparse_coo_tensor(indices, values, (rows, columns), device=device)
+    return A.coalesce()
+
+
+def random_sparse_pd_matrix(matrix_size, density=0.01, **kwargs):
+    """Return random sparse positive-definite matrix with given density.
+
+    The eigenvalues of the matrix are defined as::
+      arange(1, matrix_size+1)/matrix_size
+
+    Algorithm:
+      A = diag(arange(1, matrix_size+1)/matrix_size)
+      while <A density is smaller than required>:
+          <choose random i, j in range(matrix_size), theta in [0, 2*pi]>
+          R = <rotation matrix (i,j,theta)>
+          A = R^T A R
+    """
+    import math
+    torch = kwargs.get('torch', globals()['torch'])
+    dtype = kwargs.get('dtype', torch.double)
+    device = kwargs.get('device', 'cpu')
+    data = dict([((i, i), float(i + 1) / matrix_size)
+                 for i in range(matrix_size)])
+
+
+    def multiply(data, N, i, j, cs, sn, left=True):
+        for k in range(N):
+            if left:
+                ik, jk = (k, i), (k, j)
+            else:
+                ik, jk = (i, k), (j, k)
+            aik, ajk = data.get(ik, 0), data.get(jk, 0)
+            aik, ajk = cs * aik + sn * ajk, -sn * aik + cs * ajk
+            if aik:
+                data[ik] = aik
+            else:
+                data.pop(ik, None)
+            if ajk:
+                data[jk] = ajk
+            else:
+                data.pop(jk, None)
+
+    target_nnz = density * matrix_size * matrix_size
+    while len(data) < target_nnz:
+        i = random.randint(0, matrix_size - 1)
+        j = random.randint(0, matrix_size - 1)
+        if i != j:
+            theta = random.uniform(0, 2 * math.pi)
+            cs = math.cos(theta)
+            sn = math.sin(theta)
+            multiply(data, matrix_size, i, j, cs, sn, left=True)
+            multiply(data, matrix_size, i, j, cs, sn, left=False)
+    icoords, jcoords, values = [], [], []
+    for (i, j), v in sorted(data.items()):
+        icoords.append(i)
+        jcoords.append(j)
+        values.append(v)
+    indices = [icoords, jcoords]
+    return torch.sparse_coo_tensor(indices, values, (matrix_size, matrix_size), dtype=dtype, device=device)
 
 
 def do_test_dtypes(self, dtypes, layout, device):
