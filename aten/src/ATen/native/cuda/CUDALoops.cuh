@@ -66,6 +66,27 @@ static constexpr int launch_bound2 = 4;
 
 namespace at { namespace native {
 
+template<int N>
+static OffsetCalculator<N> make_input_offset_calculator(const TensorIterator& iter) {
+  // array size can not be 0, this happens when N == 0
+  constexpr int array_size = std::max<int>(N, 1);
+  TORCH_INTERNAL_ASSERT(N == iter.ntensors() - 1);
+  std::array<const int64_t*, array_size> strides;
+  int64_t element_sizes[array_size];
+  for (int i = 0; i < N; i++) {
+    strides[i] = iter.strides(i + 1).data();
+    element_sizes[i] = iter.element_size(i + 1);
+  }
+  return OffsetCalculator<N>(iter.ndim(), iter.shape().data(), strides.data(), element_sizes);
+}
+
+static OffsetCalculator<1> make_output_offset_calculator(const TensorIterator& iter) {
+  std::array<const int64_t*, 1> strides;
+  strides[0] = iter.strides(0).data();
+  int64_t element_size = iter.element_size(0);
+  return OffsetCalculator<1>(iter.ndim(), iter.shape().data(), strides.data(), &element_size);
+}
+
 // NOTE: @zasdfgbnm is currently working on rewriting the gpu loops.
 // Some of the old codes has been moved to namespace legacy, and
 // new codes will be put into namespace modern. These two namespaces
@@ -100,7 +121,7 @@ static OffsetCalculator<N> make_offset_calculator(const TensorIterator& iter) {
 }
 
 template<int nt, int vt, typename func_t>
-static void launch_kernel(int64_t N, const func_t& f) {
+static void launch_kernel(int64_t N, func_t &&f) {
   TORCH_INTERNAL_ASSERT(N >= 0 && N <= std::numeric_limits<int32_t>::max());
   if (N == 0) {
     return;
@@ -108,34 +129,34 @@ static void launch_kernel(int64_t N, const func_t& f) {
   dim3 block(nt);
   dim3 grid((N + block.x * vt - 1) / (block.x * vt));
   auto stream = at::cuda::getCurrentCUDAStream();
-  elementwise_kernel<nt, vt, func_t><<<grid, block, 0, stream>>>(N, f);
+  elementwise_kernel<nt, vt, func_t><<<grid, block, 0, stream>>>(N, std::move(f));
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
 template <typename traits, typename func_t, typename index_t, size_t... INDEX>
 C10_HOST_DEVICE typename traits::result_type
-invoke_impl(const func_t &f, char *const C10_RESTRICT data[], const index_t strides[], int i,
+invoke_impl(func_t &f, char *const C10_RESTRICT data[], const index_t strides[], int i,
             std::index_sequence<INDEX...>) {
   return f(*(typename traits::template arg<INDEX>::type*)(data[INDEX] + i * strides[INDEX])...);
 }
 
 template <typename func_t, typename index_t, typename traits = function_traits<func_t>>
 C10_HOST_DEVICE typename traits::result_type
-invoke(const func_t &f, char *const C10_RESTRICT data[], const index_t strides[], int i) {
+invoke(func_t &f, char *const C10_RESTRICT data[], const index_t strides[], int i) {
   using Indices = std::make_index_sequence<traits::arity>;
   return invoke_impl<traits>(f, data, strides, i, Indices{});
 }
 
 template <typename traits, typename func_t, typename index_t, size_t... I>
 C10_HOST_DEVICE typename traits::result_type
-invoke_impl(const func_t &f, char *const C10_RESTRICT data[], const index_t strides[], const ScalarType dtypes[], int i,
+invoke_impl(func_t &f, char *const C10_RESTRICT data[], const index_t strides[], const ScalarType dtypes[], int i,
             std::index_sequence<I...>) {
   return f(c10::fetch_and_cast<typename traits::template arg<I>::type>(dtypes[I], data[I] + i * strides[I])...);
 }
 
 template <typename func_t, typename index_t, typename traits = function_traits<func_t>>
 C10_HOST_DEVICE typename traits::result_type
-invoke(const func_t &f, char *const C10_RESTRICT data[], const index_t strides[], const ScalarType dtypes[], int i) {
+invoke(func_t &f, char *const C10_RESTRICT data[], const index_t strides[], const ScalarType dtypes[], int i) {
   using Indices = std::make_index_sequence<traits::arity>;
   return invoke_impl<traits>(f, data, strides, dtypes, i, Indices{});
 }
@@ -146,7 +167,7 @@ invoke(const func_t &f, char *const C10_RESTRICT data[], const index_t strides[]
 namespace modern {
 
 template<typename func_t, typename policy_t>
-__device__ inline void elementwise_kernel_helper(func_t f, policy_t policy) {
+__device__ inline void elementwise_kernel_helper(func_t &f, policy_t policy) {
   using traits = function_traits<func_t>;
   using return_t = typename traits::result_type;
   using args_t = typename traits::ArgsTuple;
@@ -175,32 +196,37 @@ __device__ inline void elementwise_kernel_helper(func_t f, policy_t policy) {
 template<int vec_size, typename func_t, typename array_t>
 C10_LAUNCH_BOUNDS_1(num_threads)
 __global__ void vectorized_elementwise_kernel(int N, func_t f, array_t data) {
+  using traits = function_traits<func_t>;
   int remaining = N - block_work_size * blockIdx.x;
 
   if (remaining < block_work_size) {  // if this block handles the reminder, just do a naive unrolled loop
-    elementwise_kernel_helper(f, typename memory::policies::unroll<array_t>(data, remaining));
+    auto input_calc = TrivialOffsetCalculator<traits::arity>();
+    auto output_calc = TrivialOffsetCalculator<1>();
+    auto policy = memory::policies::unroll<array_t, decltype(input_calc), decltype(output_calc)>(data, remaining, input_calc, output_calc);
+    elementwise_kernel_helper(f, policy);
   } else {  // if this block has a full `block_work_size` data to handle, use vectorized memory access
-    elementwise_kernel_helper(f, typename memory::policies::template vectorized<vec_size, array_t>(data));
+    elementwise_kernel_helper(f, memory::policies::vectorized<vec_size, array_t>(data));
   }
 }
 
-template<typename func_t, typename array_t>
+template<typename func_t, typename array_t, typename inp_calc_t, typename out_calc_t>
 C10_LAUNCH_BOUNDS_1(num_threads)
-__global__ void unrolled_elementwise_kernel(int N, func_t f, array_t data) {
+__global__ void unrolled_elementwise_kernel(int N, func_t f, array_t data, inp_calc_t ic, out_calc_t oc) {
   int remaining = N - block_work_size * blockIdx.x;
-  elementwise_kernel_helper(f, typename memory::policies::unroll<array_t>(data, remaining));
+  elementwise_kernel_helper(f, memory::policies::unroll<array_t, inp_calc_t, out_calc_t>(data, remaining, ic, oc));
 }
 
-// TODO (@zasdfgbnm): this function assume trivial 1d and no dynamic casting
+// this function assume trivial 1d and no dynamic casting
 template<typename func_t, typename array_t>
-static void launch_kernel(int64_t N, const func_t& f, array_t data) {
-  TORCH_INTERNAL_ASSERT(N >= 0 && N <= std::numeric_limits<int32_t>::max());
-  if (N == 0) {
-    return;
-  }
+static inline void launch_vectorized_kernel(int64_t N, func_t& f, array_t data) {
+  TORCH_INTERNAL_ASSERT(N > 0 && N <= std::numeric_limits<int32_t>::max());
+  using traits = function_traits<func_t>;
   int64_t grid = (N + block_work_size - 1) / block_work_size;
   auto stream = at::cuda::getCurrentCUDAStream();
   int vec_size = memory::can_vectorize_up_to<func_t>(data);
+  auto input_calc = TrivialOffsetCalculator<traits::arity>();
+  auto output_calc = TrivialOffsetCalculator<1>();
+
   switch (vec_size) {
   case 4:
     vectorized_elementwise_kernel<4, func_t, array_t><<<grid, num_threads, 0, stream>>>(N, f, data);
@@ -209,7 +235,7 @@ static void launch_kernel(int64_t N, const func_t& f, array_t data) {
     vectorized_elementwise_kernel<2, func_t, array_t><<<grid, num_threads, 0, stream>>>(N, f, data);
     break;
   case 1:
-    unrolled_elementwise_kernel<func_t, array_t><<<grid, num_threads, 0, stream>>>(N, f, data);
+    unrolled_elementwise_kernel<func_t, array_t><<<grid, num_threads, 0, stream>>>(N, f, data, input_calc, output_calc);
     break;
   default:
     TORCH_INTERNAL_ASSERT(false, "Unexpected vectorization size");
@@ -217,11 +243,20 @@ static void launch_kernel(int64_t N, const func_t& f, array_t data) {
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
+template<typename func_t, typename array_t, typename inp_calc_t, typename out_calc_t>
+static inline void launch_unrolled_kernel(int64_t N, const func_t& f, array_t data, inp_calc_t ic, out_calc_t oc) {
+  TORCH_INTERNAL_ASSERT(N > 0 && N <= std::numeric_limits<int32_t>::max());
+  int64_t grid = (N + block_work_size - 1) / block_work_size;
+  auto stream = at::cuda::getCurrentCUDAStream();
+  unrolled_elementwise_kernel<func_t, array_t><<<grid, num_threads, 0, stream>>>(N, f, data, ic, oc);
+  AT_CUDA_CHECK(cudaGetLastError());
+}
+
 } // namespace modern
 
 
 template <typename func_t>
-void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
+void gpu_kernel_impl(TensorIterator& iter, func_t f) {
   using traits = function_traits<func_t>;
   using arg0_t = typename traits::result_type;
   constexpr int ntensors = traits::arity + 1;
@@ -234,12 +269,29 @@ void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
     data[i] = (char*)iter.data_ptr(i);
   }
 
+  int64_t numel = iter.numel();
+
+  bool contiguous = iter.is_contiguous();
+  bool dynamic_casting = needs_dynamic_casting<func_t>::check(iter);
+
+  if (contiguous && !dynamic_casting) {
+    modern::launch_vectorized_kernel(numel, f, data);
+    return;
+  }
+
+  if (!dynamic_casting) {
+    // !contiguous
+    auto input_offset_calculator = make_input_offset_calculator<traits::arity>(iter);
+    auto output_offset_calculator = make_output_offset_calculator(iter);
+    modern::launch_unrolled_kernel(numel, f, data, input_offset_calculator, output_offset_calculator);
+    return;
+  }
+
   at::detail::Array<ScalarType, ntensors> dtypes;
   for (int i = 0; i < ntensors; i++) {
     dtypes[i] = iter.tensor(i).scalar_type();
   }
 
-  int64_t numel = iter.numel();
   if (iter.is_trivial_1d()) {
     auto inner_strides = iter.get_inner_strides();
     at::detail::Array<int, ntensors> strides;
@@ -248,15 +300,13 @@ void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
     }
 
     if (needs_dynamic_casting<func_t>::check(iter)) {
-      legacy::launch_kernel<launch_size_1d, 1>(numel, [=]GPU_LAMBDA(int idx) {
+      legacy::launch_kernel<launch_size_1d, 1>(numel, [=]GPU_LAMBDA(int idx) mutable {
         void* out = data[0] + strides[0] * idx;
         arg0_t result = legacy::invoke(f, &data.data[1], &strides.data[1], &dtypes.data[1], idx);
         c10::cast_and_store<arg0_t>(dtypes[0], out, result);
       });
-    } else if (iter.has_contiguous_first_dim()) {
-      modern::launch_kernel(numel, f, data);
     } else {
-      legacy::launch_kernel<launch_size_1d, 1>(numel, [=]GPU_LAMBDA(int idx) {
+      legacy::launch_kernel<launch_size_1d, 1>(numel, [=]GPU_LAMBDA(int idx) mutable {
         arg0_t* out = (arg0_t*)(data[0] + strides[0] * idx);
         *out = legacy::invoke(f, &data.data[1], &strides.data[1], idx);
       });
@@ -264,14 +314,14 @@ void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
   } else {
     auto offset_calc = legacy::make_offset_calculator<traits::arity + 1>(iter);
     if (needs_dynamic_casting<func_t>::check(iter)) {
-      legacy::launch_kernel<launch_size_nd, launch_bound2>(numel, [=]GPU_LAMBDA(int idx) {
+      legacy::launch_kernel<launch_size_nd, launch_bound2>(numel, [=]GPU_LAMBDA(int idx) mutable {
         auto offsets = offset_calc.get(idx);
         void* out = data[0] + offsets[0];
         arg0_t result = legacy::invoke(f, &data.data[1], &offsets.data[1], &dtypes.data[1], 1);
         c10::cast_and_store<arg0_t>(dtypes[0], out, result);
       });
     } else {
-      legacy::launch_kernel<launch_size_nd, launch_bound2>(numel, [=]GPU_LAMBDA(int idx) {
+      legacy::launch_kernel<launch_size_nd, launch_bound2>(numel, [=]GPU_LAMBDA(int idx) mutable {
         auto offsets = offset_calc.get(idx);
         arg0_t* out = (arg0_t*)(data[0] + offsets[0]);
         *out = legacy::invoke(f, &data.data[1], &offsets.data[1], 1);
