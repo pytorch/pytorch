@@ -24,7 +24,7 @@ class TestCudaFuser(JitTestCase):
         self.old_gpu_fuse = torch._C._jit_can_fuse_on_gpu()
         torch._C._jit_override_can_fuse_on_cpu(False)
         torch._C._jit_override_can_fuse_on_gpu(False)
-        
+
         if(RUN_CUDA):
             torch._C._jit_register_cuda_fuser()
 
