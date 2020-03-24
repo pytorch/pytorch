@@ -38,7 +38,7 @@
 
 # NOTE: we treat noise as an input (it's really a buffer) because the codegen
 # can't handle in-place functions that have buffers
-- name: _thnn_rrelu_with_noise(Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training, Generator* generator)
+- name: _thnn_rrelu_with_noise(Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training, Generator generator)
   cname: RReLU
   has_inplace: True
 

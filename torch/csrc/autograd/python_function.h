@@ -36,6 +36,7 @@ struct PyNode : public Node {
   // capture Python Error in autograd, remove this when c10 thread pool
   // allow to do one time initialization.
   // see discussion in https://github.com/pytorch/pytorch/pull/34845
+  // Follow up issue: https://github.com/pytorch/pytorch/issues/35006
   void throw_python_error();
   void release_variables() override;
   std::string name() const override;

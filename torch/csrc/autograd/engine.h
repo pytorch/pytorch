@@ -279,7 +279,8 @@ struct TORCH_API Engine {
       InputBuffer& inputs);
 
   // initialize the thread local ready queue with the ready queue that is created
-  // elsewhere, i.e. thread_init, reentrant_thread_init, etc.
+  // elsewhere (i.e. thread_init, Engine::execute, etc), or create a new
+  // ready queue if ready_queue is not provided.
   void init_local_ready_queue(std::shared_ptr<ReadyQueue> ready_queue = nullptr);
 
   std::shared_ptr<ReadyQueue> ready_queue(

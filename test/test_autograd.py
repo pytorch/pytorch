@@ -2162,6 +2162,7 @@ class TestAutograd(TestCase):
                     ctx.output_var.sum().backward()
                 return ctx.x.grad * grad_output
 
+        # Reentrant starts on CPU thread, finishs on GPU thread
         x = torch.randn(2, 2, requires_grad=True)
         out = Reenter.apply(x)
         out.sum().backward()
@@ -3452,10 +3453,16 @@ for shape in [(1,), ()]:
                     DeepReentrant.apply(ctx.x).sum().backward()
                 return x
 
+        # Test stack overflow escape mechanism
         v = torch.tensor(2000.0, requires_grad=True)
         # This will cause stack overflow if reentrant calls are handled
         # in the same thread recursively
         DeepReentrant.apply(v).sum().backward()
+
+        # Test stack overflow escape mechanism multiple times
+        # to ensure reusing workers in the pool works fine
+        v2 = torch.tensor(200.0, requires_grad=True)
+        DeepReentrant.apply(v2).sum().backward()
 
     def test_reentrant_priority(self):
         order = []
@@ -3569,6 +3576,54 @@ for shape in [(1,), ()]:
 
         # Verify callback is called only once.
         self.assertEqual(1, counter[0])
+
+    def test_reentrant_with_leaf_variable_hook(self):
+        handle = None
+        param = torch.rand(10, requires_grad=True)
+
+        def add_gradient_penalty_to_grad(grad):
+            handle.remove()
+            old_param_grad = grad
+            param.grad = None
+            # Add some sort of gradient penalty by directly updating the gradients
+            with torch.enable_grad():
+                g = grad.detach().requires_grad_()
+                new_param = param.detach().requires_grad_()
+                out = ((g * 2) + new_param).sum()
+                out.backward()
+            res = g.grad + grad
+            param.grad = old_param_grad
+            return res
+
+        handle = param.register_hook(add_gradient_penalty_to_grad)
+        # Forward pass
+        tmp = (param * param)
+        loss = tmp.sum()
+        # Compute the gradients
+        loss.backward()
+
+    def test_reentrant_with_non_leaf_variable_hook(self):
+        handle = None
+        param = torch.rand(10, requires_grad=True)
+
+        def manual_increase_gradient(grad):
+            handle.remove()
+            old_grad = grad
+            # Add some sort of gradient penalty by directly updating the gradients
+            with torch.enable_grad():
+                g = grad.detach().requires_grad_()
+                out = ((g * 2) + 5).sum()
+                out.backward()
+            res = g.grad + grad
+            return res
+
+        # Forward pass
+        tmp = (param * param)
+        handle = tmp.register_hook(manual_increase_gradient)
+        loss = tmp.sum()
+        # Compute the gradients
+        loss.backward()
+        self.assertEqual(param.grad, 6 * param)
 
     def test_autograd_views_codegen(self):
         # This is not necessarily the absolute correct behavior, but this is the current
@@ -5471,6 +5526,8 @@ class TestAutogradDeviceType(TestCase):
         gradgradcheck(where, [cond, x, y], [torch.randn(5, 5, 5, device=device)])
 
     @skipCUDAIfRocm
+    @unittest.skipIf(IS_WINDOWS, """Test is flaky on Windows:
+            https://github.com/pytorch/pytorch/issues/34870""")
     def test_ctc_loss(self, device):
         batch_size = 64
         num_labels = 101
@@ -5720,6 +5777,49 @@ class TestAutogradDeviceType(TestCase):
             self.assertTrue(y.requires_grad)
             z = x.to(torch.bfloat16)
             self.assertTrue(z.requires_grad)
+
+    @onlyCUDA
+    def test_simple_reentrant_cross_device(self, device):
+        class ReentrantFunc(Function):
+            _cpu_mode = True
+            @staticmethod
+            def forward(ctx, x):
+                with torch.enable_grad():
+                    ctx.x = Variable(x, requires_grad=True)
+                    ctx.y = Variable(x + 2, requires_grad=True)
+                    ctx.output_var = ctx.x * ctx.y
+                return ctx.output_var.detach()
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                with torch.enable_grad():
+                    new_param = ctx.output_var.detach().requires_grad_()
+                    if ReentrantFunc._cpu_mode:
+                        new_param = ctx.output_var.cpu()
+                        (new_param ** 2).sum().backward()
+                    else:
+                        new_param = ctx.output_var.cuda()
+                        (new_param ** 2).sum().backward()
+                return grad_output
+
+        # Reentrant starts on GPU thread, finishs on GPU thread
+        x = torch.randn(2, 2, device=device, requires_grad=True)
+        out = ReentrantFunc.apply(x)
+        out.sum().backward()
+
+        # Reentrant starts on CPU thread, finishs on GPU thread
+        x = torch.randn(2, 2, requires_grad=True)
+        # set ReentrantFunc node to GPU to emit tasks to GPU queue
+        ReentrantFunc._cpu_mode=False
+        out = ReentrantFunc.apply(x)
+        out.sum().backward()
+
+        # # Reentrant starts on GPU thread, finishs on CPU thread
+        x = torch.randn(2, 2, device=device, requires_grad=True)
+        # set ReentrantFunc node to CPU to emit tasks to CPU queue
+        ReentrantFunc._cpu_mode=True
+        out = ReentrantFunc.apply(x)
+        out.sum().backward()
 
     @onlyCUDA
     def test_cross_device_reentrant_autograd(self, device):

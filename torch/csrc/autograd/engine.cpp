@@ -407,7 +407,7 @@ auto Engine::thread_main(
 
 
 // Reentrant call will re-use the graph_task's owner thread ready_queue for
-// queueing tasks (NOTE: this is not true in the async_mode of engine).
+// queueing tasks (NOTE: this is not true in the async_mode of the engine).
 // While we can create separate ready queue for each new reentrant
 // thread, but sharing the same cpu_ready_queue with parent thread is a
 // performance improvement and cuda thread still have to do the same thing.
@@ -429,7 +429,7 @@ void Engine::reentrant_thread_init() {
     }
     set_device(graph_task->owner_);
     // set the local_ready_queue to the ready queue on the graph_task->owner_ device
-    init_local_ready_queue(ready_queue_by_index(graph_task, graph_task->owner_));
+    local_ready_queue = ready_queue_by_index(graph_task, graph_task->owner_);
     total_depth = graph_task->reentrant_depth_;
     thread_main(graph_task, /* reentrant thread*/ true);
   }
@@ -1008,7 +1008,7 @@ bool Engine::is_checkpoint_valid() {
 void Engine::init_local_ready_queue(std::shared_ptr<ReadyQueue> ready_queue) {
   if (ready_queue) {
     // if ready_queue provided in the caller, use the caller's ready_queue to initialize local_ready_queue
-    TORCH_INTERNAL_ASSERT(!local_ready_queue);
+    // TORCH_INTERNAL_ASSERT(!local_ready_queue);
     local_ready_queue = std::move(ready_queue);
   } else if (!local_ready_queue){
     // otherwise if local_ready_queue not allocated, allocate a new ready_queue
