@@ -1883,7 +1883,7 @@ TEST_F(FunctionalTest, Interpolate) {
     // 1D interpolation
     auto input = torch::ones({1, 1, 2});
     auto options = F::InterpolateFuncOptions()
-                       .size(std::vector<int64_t>({4}))
+                       .size({4})
                        .mode(torch::kNearest);
     auto output = F::interpolate(input, options);
     auto expected = torch::ones({1, 1, 4});
@@ -1897,7 +1897,7 @@ TEST_F(FunctionalTest, Interpolate) {
       for (const auto scale_factor : {0.5, 1.5, 2.0}) {
         auto input = torch::ones({1, 1, 2, 2});
         auto options = F::InterpolateFuncOptions()
-                           .scale_factor(std::vector<double>({scale_factor, scale_factor}))
+                           .scale_factor({scale_factor, scale_factor})
                            .mode(torch::kBilinear)
                            .align_corners(align_corners);
         auto output = F::interpolate(input, options);
@@ -1916,7 +1916,7 @@ TEST_F(FunctionalTest, Interpolate) {
         auto input = torch::ones({1, 1, 2, 2, 2});
         auto options =
             F::InterpolateFuncOptions()
-                .scale_factor(std::vector<double>({scale_factor, scale_factor, scale_factor}))
+                .scale_factor({scale_factor, scale_factor, scale_factor})
                 .mode(torch::kTrilinear)
                 .align_corners(align_corners);
         auto output = F::interpolate(input, options);
@@ -1932,13 +1932,13 @@ TEST_F(FunctionalTest, Interpolate) {
   {
     auto input = torch::randn({3, 2, 2});
     ASSERT_THROWS_WITH(
-        F::interpolate(input[0], F::InterpolateFuncOptions().size(std::vector<int64_t>({4, 4}))),
+        F::interpolate(input[0], F::InterpolateFuncOptions().size({4, 4})),
         "Input Error: Only 3D, 4D and 5D input Tensors supported (got 2D) "
         "for the modes: nearest | linear | bilinear | bicubic | trilinear (got kNearest)");
     ASSERT_THROWS_WITH(
         F::interpolate(
             torch::reshape(input, {1, 1, 1, 3, 2, 2}),
-            F::InterpolateFuncOptions().size(std::vector<int64_t>({1, 1, 1, 3, 4, 4}))),
+            F::InterpolateFuncOptions().size({1, 1, 1, 3, 4, 4})),
         "Input Error: Only 3D, 4D and 5D input Tensors supported (got 6D) "
         "for the modes: nearest | linear | bilinear | bicubic | trilinear (got kNearest)");
     ASSERT_THROWS_WITH(
@@ -1947,12 +1947,12 @@ TEST_F(FunctionalTest, Interpolate) {
     ASSERT_THROWS_WITH(
         F::interpolate(
             input,
-            F::InterpolateFuncOptions().size(std::vector<int64_t>({3, 4, 4})).scale_factor(std::vector<double>({0.5}))),
+            F::InterpolateFuncOptions().size({3, 4, 4}).scale_factor({0.5})),
         "only one of size or scale_factor should be defined");
     ASSERT_THROWS_WITH(
-        F::interpolate(input, F::InterpolateFuncOptions().scale_factor(std::vector<double>({3, 2}))),
+        F::interpolate(input, F::InterpolateFuncOptions().scale_factor({3, 2})),
         "scale_factor shape must match input shape. "
-        "Input is 1D, scale_factor size is [3, 2]");
+        "Input is 1D, scale_factor size is 2");
     ASSERT_THROWS_WITH(
         F::interpolate(
             input,
