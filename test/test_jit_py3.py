@@ -454,12 +454,12 @@ class TestScriptPy3(JitTestCase):
             return mod_list[0].forward(x) + mod_list[1].forward(x)
 
         scripted_M_mod = torch.jit.script(M())
-        self.assertEqual(torch.jit.export_opnames(scripted_M_mod),
-                         ['aten::mul.Scalar', 'aten::mul.Tensor', 'aten::reciprocal'])
+        self.assertTrue(set(['aten::mul.Scalar', 'aten::mul.Tensor', 'aten::reciprocal']).issubset(
+            set(torch.jit.export_opnames(scripted_M_mod))))
 
         scripted_M_mod.sub = torch.jit.script(FooMod())
-        self.assertEqual(torch.jit.export_opnames(scripted_M_mod),
-                         ['aten::add.Tensor', 'aten::mul.Scalar'])
+        self.assertTrue(set(['aten::add.Tensor', 'aten::mul.Scalar']).issubset(
+            set(torch.jit.export_opnames(scripted_M_mod))))
 
 
 if __name__ == '__main__':
