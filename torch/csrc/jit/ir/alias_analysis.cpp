@@ -41,23 +41,16 @@ c10::optional<TypePtr> getMutableTypePtr(const TypePtr& type) {
     case TypeKind::TensorType:
       return unshapedType(type);
     case TypeKind::TupleType: {
-      // Tuples should not contain refined tensor types, and two tuples of
-      // a different type cannot alias.
-      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-          assertNoRefinedTensorTypes(type),
-          "Tuple should not contain refined tensor type",
-          type);
-      bool mutable_type = false;
+      std::vector<TypePtr> mutable_types;
       for (const auto& elem : type->expect<TupleType>()->elements()) {
         if (auto mut_elem = getMutableTypePtr(elem)) {
-          mutable_type = true;
-          break;
+          mutable_types.push_back(*mut_elem);
         }
       }
-      if (mutable_type) {
-        return type;
-      } else {
+      if (mutable_types.size() == 0) {
         return c10::nullopt;
+      } else {
+        return TupleType::create(mutable_types);
       }
     }
     case TypeKind::OptionalType:
@@ -1356,7 +1349,14 @@ c10::optional<Element*> AliasDb::setWildcard(const Value* v) {
     }
   }
 
-  // lazily build write cache
+  // We also need to update the write index with new writes to the wildcard set.
+  for (auto& pr : writeIndex_) {
+    auto& writtenTo = pr.second;
+    if (writtenTo.intersects(pointeeSet)) {
+      writtenTo.set(wildcardElement->index);
+    }
+  }
+
   isWriteCacheStale_ = true;
   return wildcardElement;
 }

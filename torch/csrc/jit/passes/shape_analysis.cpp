@@ -609,6 +609,27 @@ class ShapePropagator {
         }
         return propagateTorchTensorShape(node);
       }
+      case prim::TupleConstruct: {
+        // We refresh the tuple type, because the input types could have been
+        // refined.
+        auto orig_type = node->output()->type()->expect<TupleType>();
+        auto new_types =
+            fmap(node->inputs(), [](Value* v) { return v->type(); });
+        node->output()->setType(
+            orig_type->createWithContained(std::move(new_types)));
+        return;
+      }
+      case prim::TupleUnpack: {
+        auto tuple_type = node->input()->type()->cast<TupleType>();
+        AT_ASSERT(
+            tuple_type &&
+            tuple_type->elements().size() == node->outputs().size());
+        auto elems = tuple_type->elements();
+        for (size_t i = 0; i < node->outputs().size(); ++i) {
+          node->output(i)->setType(elems[i]);
+        }
+        return;
+      }
       case prim::Constant: {
         if (node->output()->type()->isSubtypeOf(TensorType::get())) {
           node->output()->inferTypeFrom(node->t(attr::value));
