@@ -2144,7 +2144,7 @@ class TestAutograd(TestCase):
             y = x * 2
         self.assertTrue(y.requires_grad)
 
-    def test_reentrant(self):
+    def test_simple_reentrant(self):
         y_data = torch.randn(2, 2)
 
         class Reenter(Function):
@@ -3608,7 +3608,6 @@ for shape in [(1,), ()]:
 
         def manual_increase_gradient(grad):
             handle.remove()
-            old_grad = grad
             # Add some sort of gradient penalty by directly updating the gradients
             with torch.enable_grad():
                 g = grad.detach().requires_grad_()
@@ -5785,20 +5784,17 @@ class TestAutogradDeviceType(TestCase):
             @staticmethod
             def forward(ctx, x):
                 with torch.enable_grad():
-                    ctx.x = Variable(x, requires_grad=True)
-                    ctx.y = Variable(x + 2, requires_grad=True)
-                    ctx.output_var = ctx.x * ctx.y
+                    ctx.output_var = x * (x + 2) 
                 return ctx.output_var.detach()
 
             @staticmethod
             def backward(ctx, grad_output):
                 with torch.enable_grad():
-                    new_param = ctx.output_var.detach().requires_grad_()
                     if ReentrantFunc._cpu_mode:
-                        new_param = new_param.cpu()
+                        new_param = torch.randn(2, 2, requires_grad=True)
                         (new_param ** 2).sum().backward()
                     else:
-                        new_param = new_param.cuda()
+                        new_param = torch.randn(2, 2, device=device, requires_grad=True)
                         (new_param ** 2).sum().backward()
                 return grad_output
 
@@ -5814,7 +5810,7 @@ class TestAutogradDeviceType(TestCase):
         out = ReentrantFunc.apply(x)
         out.sum().backward()
 
-        # # Reentrant starts on GPU thread, finishs on CPU thread
+        # Reentrant starts on GPU thread, finishs on CPU thread
         x = torch.randn(2, 2, device=device, requires_grad=True)
         # set ReentrantFunc node to CPU to emit tasks to CPU queue
         ReentrantFunc._cpu_mode = True
