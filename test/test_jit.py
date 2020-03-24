@@ -27,7 +27,7 @@ from jit.test_freezing import TestFreezing  # noqa: F401
 # Torch
 from torch import Tensor
 from torch._C import TensorType, BoolType, parse_ir, _propagate_shapes
-from torch._six import inf, PY2, PY37, StringIO
+from torch._six import PY2, PY37, StringIO
 from torch.autograd import Variable, Function
 from torch.jit.annotations import BroadcastingList2, BroadcastingList3, Any  # noqa: F401
 from torch.onnx import OperatorExportTypes
@@ -70,10 +70,14 @@ from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, dis
     get_forward, get_forward_graph, get_module_method, \
     RUN_CUDA, RUN_CUDA_MULTI_GPU
 from torch.testing._internal.jit_utils import attrs_with_prefix
+from torch.testing._internal.jit_metaprogramming_utils import create_script_fn, nn_functional_tests, get_script_args, \
+    get_call, script_template, EXCLUDE_SCRIPT, additional_module_tests, EXCLUDE_SCRIPT_MODULES, \
+    get_nn_module_name_from_kwargs, script_method_template
+
 from torch.testing._internal.common_nn import module_tests, new_module_tests, criterion_tests
 from torch.testing._internal.common_methods_invocations import method_tests as autograd_method_tests
 from torch.testing._internal.common_methods_invocations import create_input, unpack_variables, \
-    exclude_tensor_method, non_differentiable, EXCLUDE_GRADCHECK, EXCLUDE_FUNCTIONAL
+    exclude_tensor_method, EXCLUDE_GRADCHECK, EXCLUDE_FUNCTIONAL
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 
 # For testing truediv in python 2
@@ -83,7 +87,6 @@ from torch.testing._internal.test_module.no_future_div import div_int_nofuture, 
 # Standard library
 from collections import namedtuple, OrderedDict
 from copy import deepcopy
-from functools import wraps
 from itertools import product, chain
 import itertools
 from textwrap import dedent
@@ -1171,6 +1174,22 @@ graph(%x : Tensor,
         assert list(activation_dtypes)[0] != list(weight_dtypes)[0], 'Expected activation dtype to '
         ' be different from wegiht dtype'
 
+    def test_insert_observers_for_reused_weight(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+
+            def forward(self, x, y, weight):
+                x = F.conv2d(x, weight)
+                y = F.conv2d(y, weight)
+                return x + y
+
+        m = torch.jit.script(M()).eval()
+        qconfig_dict = {'' : script_qconfig(default_qconfig)}
+        m = prepare_script(m, qconfig_dict, False)
+        # 3 for x, y, weight, one for output of each F.conv2d and one for output of add
+        assert len(attrs_with_prefix(m, '_observer')) == 6
+
     def test_insert_observers_shared_class_type(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -1385,7 +1404,7 @@ graph(%x : Tensor,
 
         # we just check we have one dequant on every op input, even input
         # is sharded as multi uses
-        FileCheck().check_count("aten::dequantize", 8, exactly=True) \
+        FileCheck().check_count("aten::dequantize", 9, exactly=True) \
                    .run(str(get_forward_graph(m._c)))
 
     def test_insert_quant_dequant_shared_class_type(self):
@@ -1548,6 +1567,33 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
                    .check_not("aten::relu") \
                    .check("quantized::conv2d_relu") \
                    .run(m.graph_for(data))
+
+    def test_quantized_add_fusion(self):
+        class Add(torch.nn.Module):
+            def __init__(self):
+                super(Add, self).__init__()
+
+            def forward(self, x, y):
+                return x + y
+
+        class InplaceAdd(torch.nn.Module):
+            def __init__(self):
+                super(InplaceAdd, self).__init__()
+
+            def forward(self, x, y):
+                x += y
+                return x
+
+        for M in [Add, InplaceAdd]:
+            m = torch.jit.script(M()).eval()
+            m = prepare_script(m, {'': script_qconfig(default_qconfig)}, True)
+            data = torch.randn(1, 1, 10, 10, dtype=torch.float)
+            m(data, data)
+            m = convert_script(m, True)
+            FileCheck().check_not("aten::add") \
+                       .check_not("aten::add_") \
+                       .check("quantized::add") \
+                       .run(m.graph_for(data, data))
 
     def test_quantized_add_relu_fusion(self):
         class M(torch.nn.Module):
@@ -2109,6 +2155,10 @@ graph(%input, %weight):
                 x = torch.min(x)
                 x = torch.mean(x)
                 x = x.reshape([-1])
+                x = x.view(-1)
+                x = x.transpose(1, 2)
+                x = x.contiguous()
+                x, y = torch.chunk(x, 2)
                 x = F.dropout(x)
                 x = self.dropout(x)
                 # TODO: uncomment when sort is supported
@@ -2131,6 +2181,11 @@ graph(%input, %weight):
                    .check("aten::min") \
                    .check("aten::mean") \
                    .check("aten::reshape") \
+                   .check("aten::view") \
+                   .check("aten::transpose") \
+                   .check("aten::contiguous") \
+                   .check("aten::chunk") \
+                   .check("prim::ListUnpack") \
                    .check("aten::dropout") \
                    .check("aten::dropout") \
                    .run(m.graph)
@@ -2143,6 +2198,11 @@ graph(%input, %weight):
                    .check("aten::min") \
                    .check("aten::mean") \
                    .check("aten::reshape") \
+                   .check("aten::view") \
+                   .check("aten::transpose") \
+                   .check("aten::contiguous") \
+                   .check("aten::chunk") \
+                   .check("prim::ListUnpack") \
                    .check("aten::dropout") \
                    .check("aten::dropout") \
                    .check("dequantize") \
@@ -2175,6 +2235,45 @@ graph(%input, %weight):
                    .run(m.graph)
         res = m(x, weight, bias)
         self.assertEqual(res, ref_res)
+
+    def test_replicate_quantize_for_if(self):
+        """ We want to move quantize nodes for output of prim::If
+        inside the prim::If blocks so that we can match quantization
+        patterns.
+        """
+        class Res(torch.nn.Module):
+            def __init__(self):
+                super(Res, self).__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 1).float()
+                self.use_skip = True
+
+            def forward(self, x, cond):
+                # type: (Tensor, bool) -> Tensor
+                # to avoid being frozen
+                self.use_skip = cond
+                if self.use_skip:
+                    return self.conv(x)
+                else:
+                    return self.conv(x)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.res1 = Res()
+                self.res2 = Res()
+
+            def forward(self, x):
+                x = self.res1(x, True)
+                x = self.res2(x, False)
+                return x
+
+        data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        qconfig_dict = {'': default_qconfig}
+        m = torch.jit.script(M()).eval()
+        m = quantize_script(m, qconfig_dict, _test_only_eval_fn, [data], inplace=False)
+        # make sure patterns in both branches are fused
+        FileCheck().check_count("quantized::conv2d(", 4, exactly=True) \
+                   .run(m.graph)
 
     def test_finalize_for_conv2d(self):
         class M(torch.nn.Module):
@@ -5452,23 +5551,23 @@ def foo(x):
             return (cmp_key(obj1), cmp_key(obj2))
 
         def f():
-            val = torch.classes._TorchScriptTesting_Foo(5, 3)
+            val = torch.classes._TorchScriptTesting._Foo(5, 3)
             val.increment(1)
             return val
         test_equality(f, lambda x: x)
 
         with self.assertRaisesRegex(RuntimeError, "Expected a value of type 'int'"):
-            val = torch.classes._TorchScriptTesting_Foo(5, 3)
+            val = torch.classes._TorchScriptTesting._Foo(5, 3)
             val.increment('foo')
 
         def f():
-            ss = torch.classes._TorchScriptTesting_StackString(["asdf", "bruh"])
+            ss = torch.classes._TorchScriptTesting._StackString(["asdf", "bruh"])
             return ss.pop()
         test_equality(f, lambda x: x)
 
         def f():
-            ss1 = torch.classes._TorchScriptTesting_StackString(["asdf", "bruh"])
-            ss2 = torch.classes._TorchScriptTesting_StackString(["111", "222"])
+            ss1 = torch.classes._TorchScriptTesting._StackString(["asdf", "bruh"])
+            ss2 = torch.classes._TorchScriptTesting._StackString(["111", "222"])
             ss1.push(ss2.pop())
             return ss1.pop() + ss2.pop()
         test_equality(f, lambda x: x)
@@ -5476,14 +5575,14 @@ def foo(x):
     @skipIfRocm
     def test_torchbind_take_as_arg(self):
         global StackString  # see [local resolution in python]
-        StackString = torch.classes._TorchScriptTesting_StackString
+        StackString = torch.classes._TorchScriptTesting._StackString
 
         def foo(stackstring):
             # type: (StackString)
             stackstring.push("lel")
             return stackstring
 
-        script_input = torch.classes._TorchScriptTesting_StackString([])
+        script_input = torch.classes._TorchScriptTesting._StackString([])
         scripted = torch.jit.script(foo)
         script_output = scripted(script_input)
         self.assertEqual(script_output.pop(), "lel")
@@ -5491,7 +5590,7 @@ def foo(x):
     @skipIfRocm
     def test_torchbind_return_instance(self):
         def foo():
-            ss = torch.classes._TorchScriptTesting_StackString(["hi", "mom"])
+            ss = torch.classes._TorchScriptTesting._StackString(["hi", "mom"])
             return ss
 
         scripted = torch.jit.script(foo)
@@ -5507,7 +5606,7 @@ def foo(x):
     @skipIfRocm
     def test_torchbind_return_instance_from_method(self):
         def foo():
-            ss = torch.classes._TorchScriptTesting_StackString(["hi", "mom"])
+            ss = torch.classes._TorchScriptTesting._StackString(["hi", "mom"])
             clone = ss.clone()
             ss.pop()
             return ss, clone
@@ -5521,8 +5620,8 @@ def foo(x):
     @skipIfRocm
     def test_torchbind_take_instance_as_method_arg(self):
         def foo():
-            ss = torch.classes._TorchScriptTesting_StackString(["mom"])
-            ss2 = torch.classes._TorchScriptTesting_StackString(["hi"])
+            ss = torch.classes._TorchScriptTesting._StackString(["mom"])
+            ss2 = torch.classes._TorchScriptTesting._StackString(["hi"])
             ss.merge(ss2)
             return ss
 
@@ -5534,7 +5633,7 @@ def foo(x):
     @skipIfRocm
     def test_torchbind_return_tuple(self):
         def f():
-            val = torch.classes._TorchScriptTesting_StackString(["3", "5"])
+            val = torch.classes._TorchScriptTesting._StackString(["3", "5"])
             return val.return_a_tuple()
 
         scripted = torch.jit.script(f)
@@ -5544,8 +5643,8 @@ def foo(x):
     @skipIfRocm
     def test_torchbind_save_load(self):
         def foo():
-            ss = torch.classes._TorchScriptTesting_StackString(["mom"])
-            ss2 = torch.classes._TorchScriptTesting_StackString(["hi"])
+            ss = torch.classes._TorchScriptTesting._StackString(["mom"])
+            ss2 = torch.classes._TorchScriptTesting._StackString(["hi"])
             ss.merge(ss2)
             return ss
 
@@ -5574,7 +5673,7 @@ def foo(x):
     @skipIfRocm
     def test_torchbind_lambda_method(self):
         def foo():
-            ss = torch.classes._TorchScriptTesting_StackString(["mom"])
+            ss = torch.classes._TorchScriptTesting._StackString(["mom"])
             return ss.top()
 
         scripted = torch.jit.script(foo)
@@ -5585,7 +5684,7 @@ def foo(x):
         class FooBar1234(torch.nn.Module):
             def __init__(self):
                 super(FooBar1234, self).__init__()
-                self.f = torch.classes._TorchScriptTesting_StackString(["3", "4"])
+                self.f = torch.classes._TorchScriptTesting._StackString(["3", "4"])
 
             def forward(self):
                 return self.f.top()
@@ -5602,7 +5701,7 @@ def foo(x):
         class FooBar4321(torch.nn.Module):
             def __init__(self):
                 super(FooBar4321, self).__init__()
-                self.f = torch.classes._TorchScriptTesting_PickleTester([3, 4])
+                self.f = torch.classes._TorchScriptTesting._PickleTester([3, 4])
 
             def forward(self):
                 return self.f.top()
@@ -5624,7 +5723,7 @@ def foo(x):
         class TryTracing(torch.nn.Module):
             def __init__(self):
                 super(TryTracing, self).__init__()
-                self.f = torch.classes._TorchScriptTesting_PickleTester([3, 4])
+                self.f = torch.classes._TorchScriptTesting._PickleTester([3, 4])
 
             def forward(self):
                 return torch.ops._TorchScriptTesting.take_an_instance(self.f)
@@ -5637,7 +5736,7 @@ def foo(x):
         class TryTracingNest(torch.nn.Module):
             def __init__(self):
                 super(TryTracingNest, self).__init__()
-                self.f = torch.classes._TorchScriptTesting_PickleTester([3, 4])
+                self.f = torch.classes._TorchScriptTesting._PickleTester([3, 4])
 
         class TryTracing123(torch.nn.Module):
             def __init__(self):
@@ -5652,7 +5751,7 @@ def foo(x):
 
     @skipIfRocm
     def test_torchbind_pickle_serialization(self):
-        nt = torch.classes._TorchScriptTesting_PickleTester([3, 4])
+        nt = torch.classes._TorchScriptTesting._PickleTester([3, 4])
         b = io.BytesIO()
         torch.save(nt, b)
         b.seek(0)
@@ -5662,8 +5761,8 @@ def foo(x):
 
     @skipIfRocm
     def test_torchbind_instantiate_missing_class(self):
-        with self.assertRaisesRegex(RuntimeError, 'Tried to instantiate class IDontExist but it does not exist!'):
-            torch.classes.IDontExist(3, 4, 5)
+        with self.assertRaisesRegex(RuntimeError, 'Tried to instantiate class foo.IDontExist but it does not exist!'):
+            torch.classes.foo.IDontExist(3, 4, 5)
 
     def test_jitter_bug(self):
         @torch.jit.script
@@ -15949,6 +16048,31 @@ a")
         tester(float_hash, (20.0, 21.00001, 22.443))
         tester(str_hash, ("", "hello", "a"))
 
+    def test_id(self):
+        with self.assertRaisesRegex(RuntimeError, "Expected a value"): 
+            @torch.jit.script
+            def test_id_scalars():
+                return id(2) == id(None) 
+
+        @torch.jit.script
+        class FooTest(object):
+            def __init__(self, x):
+                self.foo = x
+
+            def getFooTest(self):
+                return self.foo
+
+        @torch.jit.script
+        def test_id_class_types():
+            obj1 = FooTest(torch.tensor(3))
+            obj2 = FooTest(torch.tensor(2))
+            assert obj1 is not obj2
+            assert id(obj1) != id(obj2)
+            assert id(obj1) != id(None)
+            return True
+
+        self.assertTrue(test_id_class_types())
+
     def test_mutable_dce(self):
         @torch.jit.script
         def foo():
@@ -18250,26 +18374,6 @@ EXCLUDE_TYPE_CHECK = {
     'test_slogdet_batched_distinct_singular_values'
 }
 
-# known to be failing in script
-EXCLUDE_SCRIPT = {
-    'test_norm_fro',
-    'test_norm_fro_default',
-    'test_norm_nuc',
-    'test_norm_nuc_batched',
-
-    # aten op has additional cudnn argument
-    'test_nn_unfold',
-
-    # flaky test - TODO fix
-    'test_nn_ctc_loss',
-
-    # unknown builtin op
-    'test_nn_fold',
-
-    # jit doesn't support sparse tensors.
-    'test_to_sparse'
-}
-
 # chunk returns a list in scripting and we don't unpack the list,
 # Thus it won't be replaced by ConstantChunk and run AD.
 # It's explicitly checked in test_chunk_constant_script_ad
@@ -18295,17 +18399,6 @@ EXCLUDE_PYTHON_PRINT = {
     'test_nn_max_pool3d',
     'test_nn_max_pool1d_with_indices',
 }
-
-EXCLUDE_SCRIPT_MODULES = {
-    'test_nn_AdaptiveAvgPool2d_tuple_none',
-    'test_nn_AdaptiveAvgPool3d_tuple_none',
-    'test_nn_AdaptiveMaxPool2d_tuple_none',
-    'test_nn_AdaptiveMaxPool3d_tuple_none',
-
-    # Doesn't use future division, so this is not supported
-    'test_nn_CrossMapLRN2d',
-}
-
 
 # make a new function where all non-tensor arguments in 'args' have been partially
 # applied, and all tensor arguments remain.
@@ -18333,79 +18426,6 @@ def create_traced_fn(self, fn):
         traced_fn.last_graph = traced.graph_for(*inputs_tensors)
         return output
     return traced_fn
-
-script_template = '''
-def the_method({}):
-    return {}
-'''
-
-script_method_template = '''
-def forward({}):
-    return {}
-'''
-
-
-def get_constant(x):
-    if x == inf:
-        return 'float(\'inf\')' if PY2 else 'math.inf'
-    if x == -inf:
-        return 'float(\'-inf\')' if PY2 else '-math.inf'
-    return x
-
-
-def get_script_args(args):
-    formals = []
-    tensors = []
-    actuals = []
-    for arg in args:
-        if isinstance(arg, torch.Tensor):
-            name = 'i{}'.format(len(formals))
-            formals.append(name)
-            actuals.append(name)
-            tensors.append(arg)
-        elif isinstance(arg, str):
-            actuals.append("'{}'".format(arg))
-        else:
-            actuals.append(str(get_constant(arg)))
-    return (formals, tensors, actuals)
-
-
-def get_call(method_name, func_type, args, kwargs):
-    kwargs_str = ', '.join([k + '=' + str(v) for k, v in kwargs.items()])
-    self_arg = args[0]
-    if(func_type == 'method'):
-        args = args[1:]
-
-    argument_str = ', '.join(args)
-    argument_str += ', ' if len(args) and len(kwargs) else ''
-    argument_str += kwargs_str
-
-    if func_type == 'functional':
-        call = 'torch.{}({})'.format(method_name, argument_str)
-    elif func_type == 'method':
-        call = '{}.{}({})'.format(self_arg, method_name, argument_str)
-    elif func_type == 'nn_functional':
-        call = 'torch.nn.functional.{}({})'.format(method_name, argument_str)
-    else:
-        raise 'Unsupported function type'
-
-    return call
-
-# create a script function from (name, func_type, output_process_fn),
-# returns a function takes in (args, kwargs) and runs the compiled function and
-# then applies the post process fn to the outputs
-def create_script_fn(self, method_name, func_type, output_process_fn):
-    def script_fn(*args, **kwargs):
-        formals, tensors, actuals = get_script_args(args)
-        call = get_call(method_name, func_type, actuals, kwargs)
-        script = script_template.format(', '.join(formals), call)
-
-        CU = torch.jit.CompilationUnit(script)
-        self.assertExportImport(CU.the_method.graph, tensors)
-        output = output_process_fn(CU.the_method(*tensors))
-        script_fn.last_graph = CU.the_method.graph_for(*tensors)
-        return output
-    return script_fn
 
 
 def check_alias_annotation(method_name, args, kwargs):
@@ -18549,218 +18569,6 @@ L = 20
 M = 10
 S = 5
 
-#  module cannot be exported /imported currently
-EXCLUDE_MODULE_EXPORT_IMPORT = {
-    'EmbeddingBag',
-    'MaxPool1d',
-    'MaxPool2d',
-    'MaxPool3d',
-    'AdaptiveAvgPool2d',
-    'AdaptiveAvgPool3d',
-    'Fold',
-    'Unfold',
-}
-
-# NB: JIT script tests for all nn functional interfaces, script mode does
-# not support in_place operations yet, so no inplace operation tests added.
-# removed all the deprecated functions
-#
-# (
-#   method name,
-#   input size/constructing fn,
-#   args (tuple represents shape of a tensor arg),
-#   test variant name(will be used at test name suffix,
-#       'inplace' skips grad tests),                         // optional
-#   (True, nonfusible_nodes, fusible_nodes) for autodiff     // optional
-#   fn to determine if test should be skipped,               // optional
-#   fn mapping output to part that should be gradcheck'ed,   // optional
-#   kwargs for function,                                     // optional
-# )
-nn_functional_tests = [
-    ('conv1d', (S, S, S), ((S, S, S),)),
-    ('conv2d', (S, S, S, S), ((S, S, S, S),)),
-    ('conv3d', (S, S, S, S, S), ((S, S, S, S, S),)),
-    ('conv_transpose1d', (S, S, S), ((S, S, S),)),
-    ('conv_transpose2d', (S, S, S, S), ((S, S, S, S),)),
-    ('conv_transpose3d', (S, S, S, S, S), ((S, S, S, S, S),)),
-    ('conv_tbc', (S, S, S), ((S, S, S), (S,), 2)),
-    ('avg_pool1d', (S, S, S), (3,)),
-    ('avg_pool2d', (S, S, S, S), (3,), '', (True,)),
-    ('avg_pool3d', (S, S, S, S, S), (3,)),
-    ('fractional_max_pool2d', (S, S, S, S), (3, [2, 3],)),
-    ('max_pool1d', (S, S, S), (2, 1)),
-    ('max_pool1d', (S, S, S), (2, 1, 1, 1, False, True), 'with_indices'),
-    ('max_pool2d', (S, S, S, S), (2, 1), '', (True, 'aten::max_pool2d_with_indices')),
-    ('max_pool2d', (S, S, S, S), (2, 1, 1, 1, False, True), 'with_indices', (True, 'aten::max_pool2d_with_indices')),
-    ('max_pool3d', (S, S, S, S, S), (2, 1)),
-    ('max_unpool1d', torch.tensor([[[2., 4]]]), (torch.tensor([[[1, 3]]]), 2, 2, 0)),
-    ('max_unpool2d', torch.tensor([[[[2., 4]]]]), (torch.tensor([[[[1, 3]]]]), 2, 2, 0)),
-    ('max_unpool3d', torch.tensor([[[[[2., 4]]]]]), (torch.tensor([[[[[1, 3]]]]]), 2, 2, 0)),
-    ('lp_pool1d', (S, S, S), (2., 3, 2,)),
-    ('lp_pool2d', (S, S, S, S), (2., 3, 2,)),
-    ('adaptive_max_pool1d', (S, S, S), (5,)),
-    ('adaptive_max_pool2d', (S, S, S, S), ([5, 7],)),
-    ('adaptive_max_pool3d', (S, S, S, S, S), ([3, 2, 2],)),
-    ('adaptive_avg_pool1d', (S, S, S), (5,), '', (True,)),
-    ('adaptive_avg_pool2d', (S, S, S, S), ([5, 7],), '', (True,)),
-    ('adaptive_avg_pool3d', (S, S, S, S, S), ([3, 2, 2],), '', (True,)),
-    ('dropout', (S, S, S), (0.5,), '', (True,
-                                        ['aten::bernoulli_',
-                                         'aten::empty_like', 'aten::mul', 'aten::div'])),
-    ('alpha_dropout', (S, S, S), (0.5,)),
-    ('dropout2d', (S, S, S), (0.5,)),
-    ('dropout3d', (S, S, S), (0.5,)),
-    ('feature_alpha_dropout', (S, S, S), (0.5,)),
-    ('threshold', (S, S, S), (0.1, 2.), '', (True,)),
-    ('threshold', (S, S, S), (0.1, 2., True), 'inplace'),
-    ('relu', (S, S, S), (), '', (True,)),
-    ('relu', (S, S, S), (), 'inplace'),
-    ('glu', (S - 1, S - 1, S - 1), (),),
-    ('hardtanh', (S, S, S), (-0.5, 0.5),),
-    ('hardtanh', (S, S, S), (-0.5, 0.5, True), 'inplace'),
-    ('relu6', (S, S, S), (),),
-    ('relu6', (S, S, S), (True), 'inplace'),
-    ('elu', (S, S, S), (0.9,),),
-    ('elu', (S, S, S), (0.9, True), 'inplace'),
-    ('selu', (S, S, S), (),),
-    ('selu', (S, S, S), (True), 'inplace'),
-    ('celu', (S, S, S), (0.9,),),
-    ('celu', (S, S, S), (0.9, True), 'inplace'),
-    ('leaky_relu', (S, S, S), (0.02,),),
-    ('leaky_relu', (S, S, S), (0.02,), 'inplace'),
-    ('rrelu', (S, S), (0.1, 0.3, False),),
-    ('rrelu', (S, S), (0.1, 0.3, False, True), 'inplace'),
-    ('hardshrink', (S, S, S), (0.4,),),
-    ('tanhshrink', (S, S, S), (),),
-    ('softsign', (S, S, S), (),),
-    ('softplus', (S, S, S), (),),
-    ('softmin', (S, S, S), (0,),),
-    ('softmax', (S, S, S), (0,), '', (True,)),
-    ('softmax', (S, S, S), (0, 3, torch.double), 'with_all_args', (True,)),
-    ('tanh', (S, S, S), (), '', (True,)),
-    ('sigmoid', (S, S, S), (), '', (True,)),
-    ('log_softmax', (S, S, S), (0,), '', (True,)),
-    ('linear', (S, S), ((M, S),), '', (True, ['aten::t', 'aten::matmul'])),
-    ('linear', (S, S), ((M, S), (M,)), 'addmm', (True, ['aten::add', 'aten::mm'])),
-    ('bilinear', (S, S, S), ((S, S, M), torch.zeros(M, S, M),),),
-    ('embedding', torch.tensor([[1, 2, 4, 5], [4, 3, 2, 5]]), (torch.rand(6, 3), ), '', (True,)),
-    ('embedding_bag', torch.tensor([1, 2, 4, 2]), (torch.rand(5, 3), torch.tensor([0, 4]),),),
-    ('batch_norm', (S, S), (non_differentiable(torch.randn(S)), non_differentiable(torch.ones(S)), ),
-        '', (False, 'aten::_batch_norm_impl_index')),
-    ('instance_norm', (S, S, S), (non_differentiable(torch.zeros(S)), non_differentiable(torch.ones(S))),),
-    ('layer_norm', (S, S, S, S), ([5],), '',
-     (False, ['aten::contiguous', 'aten::_batch_norm_impl_index'])),
-    ('layer_norm', (S, S, S, S), ([5], non_differentiable(torch.rand(S)),), 'with_only_weight',
-     (False, ['aten::contiguous', 'aten::_batch_norm_impl_index'])),
-    ('layer_norm', (S, S, S, S), ([5], None, non_differentiable(torch.rand(S)),), 'with_only_bias',
-     (False, ['aten::contiguous', 'aten::_batch_norm_impl_index'])),
-    ('layer_norm', (S, S, S, S), ([5], non_differentiable(torch.rand(S)),
-                                  non_differentiable(torch.rand(S))), 'with_weight_and_bias',
-     (False, ['aten::contiguous', 'aten::_batch_norm_impl_index', 'aten::addcmul'])),
-    ('group_norm', (S, S, S), (1, torch.rand(5),),),
-    ('local_response_norm', (S, S, S), (2, ),),
-    ('nll_loss', F.log_softmax(torch.randn(3, 5), dim=0), (torch.tensor([1, 0, 4]),), '', (True, 'aten::nll_loss_forward')),
-    ('poisson_nll_loss', torch.rand(S, 2), (torch.rand(S, 2),),),
-    ('poisson_nll_loss', torch.rand(S, 2), (torch.rand(S, 2), True, True), 'full'),
-    ('kl_div', F.log_softmax(torch.randn(S, 10), 1), (F.softmax(torch.randn(S, 10), 1),),),
-    ('cross_entropy', (3, S), (torch.randint(S, (3,), dtype=torch.int64),),),
-    ('binary_cross_entropy_with_logits', (3,), (torch.empty(3).random_(2), ),),
-    ('smooth_l1_loss', (3, S), (non_differentiable(torch.rand(3, S)),),),
-    ('l1_loss', (3, S), (non_differentiable(torch.rand(3, S)),),),
-    ('mse_loss', (3, S), (non_differentiable(torch.rand(3, S)),),),
-    ('smooth_l1_loss', (3, S), ((torch.rand(3, S)),), 'with_grad'),
-    ('l1_loss', (3, S), ((torch.rand(3, S)),), 'with_grad'),
-    ('mse_loss', (3, S), ((torch.rand(3, S)),), 'with_grad'),
-    ('margin_ranking_loss', (3, S), ((3, S), (S,)),),
-    ('hinge_embedding_loss', (3, S), (non_differentiable(torch.rand(3, S)),),),
-    ('soft_margin_loss', (3, S), (non_differentiable(torch.rand(3, S)),),),
-    ('multilabel_soft_margin_loss', (3, S), (non_differentiable(torch.rand(3, S)),),),
-    ('cosine_embedding_loss', (S, S), ((S, S), non_differentiable(torch.rand(S,))),),
-    ('pixel_shuffle', (1, 9, 4, 4), (3,),),
-    ('affine_grid', (S, 2, 3), (torch.Size([S, 1, 7, 7]),),),
-    ('pad', (3, 3, 4, 2), ([1, 1],),),
-    ('pairwise_distance', (S, S), ((S, S),),),
-    ('pdist', (S, S), (),),
-    ('cosine_similarity', (S, S), ((S, S),),),
-    ('triplet_margin_loss', (S, S), ((S, S), (S, S)),),
-    ('normalize', (S, S, S), (),),
-    ('unfold', (S, S, S, S), ([2, 3]),),
-    ('fold', (1, 3 * 2 * 2, 12), ([4, 5], [2, 2]),),
-    ('grid_sample', (S, S, S, S), (non_differentiable(torch.rand(S, S, S, 2)),),),
-    ('gumbel_softmax', (S, S), (2.,), '', (True, ['aten::softmax', 'aten::add', 'aten::div'], ['aten::neg'])),
-    ('gumbel_softmax', (S, S), (2., True,), 'hard', (True, ['aten::softmax', 'aten::add', 'aten::div'], ['aten::neg'])),
-    ('multilabel_margin_loss', torch.tensor([[0.2, -0.2, 0.07]]), (torch.tensor([[0, 0, 1]]),),),
-    ('multi_margin_loss', (S, S), (non_differentiable(torch.randint(S, (S, ), dtype=torch.int64)),
-                                   1, 1., non_differentiable(torch.randn(S))),),
-    ('binary_cross_entropy', torch.randn(3, 2).sigmoid(), (non_differentiable(torch.rand(3, 2)),
-                                                           non_differentiable(torch.randn(3, 2))),),
-    ('binary_cross_entropy', torch.randn(3, 2).sigmoid(),
-        (non_differentiable(torch.rand(3, 2)),
-         non_differentiable(torch.randn(3, 2)), None, None, 'mean'), 'size_average'),
-    ('ctc_loss', torch.rand(S, S, S).log_softmax(2).detach().requires_grad_(),
-     (torch.randint(1, S, (S, S), dtype=torch.long), torch.full((S,), S, dtype=torch.long),
-      torch.randint(1, S, (S,), dtype=torch.long))),
-    ('upsample', torch.randn(S, S, M, M), (None, 2.), 'with_scale'),
-    ('upsample', torch.randn(S, S, M, M), (4,), 'with_size'),
-    ('interpolate', torch.zeros(3, 3).view(1, 1, 3, 3), (2,), 'nearest_4d'),
-    ('interpolate', torch.randn(S, S, M, M), (None, 2.), 'nearest_4d_with_scale'),
-    ('interpolate', torch.randn(S, S, M, M), (4,), 'nearest_4d_with_size'),
-    ('interpolate', torch.zeros(3, 3).view(1, 1, 3, 3), (2,), 'area_4d'),
-    ('interpolate', torch.randn(S, S, M, M), (None, 2.), 'area_4d_with_scale'),
-    ('interpolate', torch.randn(S, S, M, M), (4,), 'area_4d_with_size'),
-    ('interpolate', torch.zeros(3, 3).view(1, 1, 3, 3), (2,), 'bilinear_4d'),
-    ('interpolate', torch.randn(S, S, M, M), (None, 2.), 'bilinear_4d_with_scale'),
-    ('interpolate', torch.randn(S, S, M, M), (4,), 'bilinear_4d_with_size'),
-    ('interpolate', torch.zeros(3, 3).view(1, 1, 3, 3), (2,), 'bicubic_4d'),
-    ('interpolate', torch.randn(S, S, M, M), (None, 2.), 'bicubic_4d_with_scale'),
-    ('interpolate', torch.randn(S, S, M, M), (4,), 'bicubic_4d_with_size'),
-    ('interpolate', torch.zeros(3, 3).view(1, 3, 3), (2,), 'nearest_3d'),
-    ('interpolate', torch.randn(S, M, M), (None, 2.), 'nearest_3d_with_scale'),
-    ('interpolate', torch.randn(S, M, M), (4,), 'nearest_3d_with_size'),
-    ('interpolate', torch.zeros(3, 3).view(1, 3, 3), (2,), 'area_3d'),
-    ('interpolate', torch.randn(S, M, M), (None, 2.), 'area_3d_with_scale'),
-    ('interpolate', torch.randn(S, M, M), (4,), 'area_3d_with_size'),
-    ('interpolate', torch.zeros(3, 3).view(1, 3, 3), (2,), 'linear_3d'),
-    ('interpolate', torch.randn(S, M, M), (None, 2.), 'linear_3d_with_scale'),
-    ('interpolate', torch.randn(S, M, M), (4,), 'linear_3d_with_size'),
-    ('interpolate', torch.randn(S, M, M, M, M), (None, 2.), 'nearest_5d_with_scale'),
-    ('interpolate', torch.randn(S, M, M, M, M), (4,), 'nearest_5d_with_size'),
-    ('interpolate', torch.zeros(3, 3, 3).view(1, 1, 3, 3, 3), (2,), 'area_5d'),
-    ('interpolate', torch.randn(S, M, M, M, M), (None, 2.), 'area_5d_with_scale'),
-    ('interpolate', torch.randn(S, M, M, M, M), (4,), 'area_5d_with_size'),
-    ('interpolate', torch.zeros(3, 3, 3).view(1, 1, 3, 3, 3), (2,), 'trilinear_5d'),
-    ('interpolate', torch.randn(S, M, M, M, M), (None, 2.), 'trilinear_5d_with_scale'),
-    ('interpolate', torch.randn(S, M, M, M, M), (4,), 'trilinear_5d_with_size'),
-    ('interpolate', torch.zeros(3, 3).view(1, 1, 3, 3), (2, None, 'nearest', None, False),
-     'nearest_4d_not_recompute_scale_factor'),
-    ('interpolate', torch.randn(S, S, M, M), (4, None, 'nearest', None, False),
-     'nearest_4d_with_size_not_recompute_scale_factor'),
-    ('interpolate', torch.randn(S, S, M, M), (None, 2., 'bilinear', None, False),
-     'bilinear_4d_with_scale_not_recompute_scale_factor'),
-    ('interpolate', torch.randn(S, S, M, M), (4, None, 'bilinear', None, False),
-     'bilinear_4d_with_size_not_recompute_scale_factor'),
-    ('interpolate', torch.randn(S, S, M, M), (None, 2., 'bicubic', None, False),
-     'bicubic_4d_with_scale_not_recompute_scale_factor'),
-    ('interpolate', torch.randn(S, S, M, M), (4, None, 'bicubic', None, False),
-     'bicubic_4d_with_size_not_recompute_scale_factor'),
-    ('interpolate', torch.randn(S, M, M), (None, 2., 'nearest', None, False),
-     'nearest_3d_with_scale_not_recompute_scale_factor'),
-    ('interpolate', torch.randn(S, M, M), (4, None, 'nearest', None, False),
-     'nearest_3d_with_size_not_recompute_scale_factor'),
-    ('interpolate', torch.randn(S, M, M), (None, 2., 'linear', None, False),
-     'linear_3d_with_scale_not_recompute_scale_factor'),
-    ('interpolate', torch.randn(S, M, M), (4, None, 'linear', None, False),
-     'linear_3d_with_size_not_recompute_scale_factor'),
-    ('interpolate', torch.randn(S, M, M, M, M), (None, 2., 'nearest', None, False),
-     'nearest_5d_with_scale_not_recompute_scale_factor'),
-    ('interpolate', torch.randn(S, M, M, M, M), (4, None, 'nearest', None, False),
-     'nearest_5d_with_size_not_recompute_scale_factor'),
-    ('interpolate', torch.randn(S, M, M, M, M), (None, 2., 'trilinear', None, False),
-     'trilinear_5d_with_scale_not_recompute_scale_factor'),
-    ('interpolate', torch.randn(S, M, M, M, M), (4, None, 'trilinear', None, False),
-     'trilinear_5d_with_size_not_recompute_scale_factor'),
-]
-
 
 # Test names in this set are only checked for a single derivative
 nn_functional_single_grad = frozenset('test_nn_' + name for name in [
@@ -18773,46 +18581,6 @@ nn_functional_single_grad = frozenset('test_nn_' + name for name in [
     'ctc_loss',
     'grid_sample',
 ])
-
-# additional modules test
-# TODO: delete this list once we make all nn_tests work
-additional_module_tests = [
-    {
-        'module_name': 'Bilinear',
-        'constructor_args': (S, S, M),
-        'input_size': (S, S),
-        'extra_args': ((S, S),)
-    },
-    {
-        'module_name': 'RNNCell',
-        'constructor_args': (S, S),
-        'input_size': (S, S),
-    },
-    {
-        'module_name': 'LSTMCell',
-        'constructor_args': (S, S),
-        'input_size': (S, S),
-    },
-    {
-        'module_name': 'GRUCell',
-        'constructor_args': (S, S),
-        'input_size': (S, S),
-    },
-    {
-        'module_name': 'MultiheadAttention',
-        'constructor_args': (128, 8),
-        'input_size': (10, 8, 128),
-        'extra_args': (torch.randn(10, 8, 128), torch.randn(10, 8, 128)),
-        'slowTest': True
-    },
-    {
-        'module_name': 'Transformer',
-        'constructor_args': (1, 1, 1, 1, 2),
-        'input_size': (3, 1, 1),
-        'extra_args': (torch.randn(1, 1, 1),),
-        'slowTest': True
-    }
-]
 
 
 def add_autograd_test(
@@ -18939,14 +18707,6 @@ def add_autograd_test(
         post_add_test(test_name, skipTestIf, do_test, TestJitGeneratedAutograd)
 
 
-def suppress_warnings(fn):
-    @wraps(fn)
-    def wrapper(*args, **kwargs):
-        with warnings.catch_warnings(record=True):
-            return fn(*args, **kwargs)
-    return wrapper
-
-
 def add_nn_functional_test(name, self_size, args, variant_name='', check_ad=(), skipTestIf=(),
                            output_process_fn=lambda x: x, kwargs=None):
     test_name = 'test_nn_' + name
@@ -19000,16 +18760,9 @@ def add_nn_functional_test(name, self_size, args, variant_name='', check_ad=(), 
 
 
 def add_nn_module_test(*args, **kwargs):
-    if 'module_name' in kwargs:
-        name = kwargs['module_name']
-    elif 'fullname' in kwargs:
-        name = kwargs['fullname']
-    elif 'constructor' in kwargs:
-        name = kwargs['constructor'].__name__
+    name = get_nn_module_name_from_kwargs(**kwargs)
 
     no_grad = False if 'no_grad' not in kwargs else kwargs['no_grad']
-
-    module_name = name.split("_")[0]
 
     if 'desc' in kwargs and 'eval' in kwargs['desc']:
         # eval() is not supported, so skip these tests
@@ -19036,6 +18789,8 @@ def add_nn_module_test(*args, **kwargs):
             constructor_args = kwargs['constructor_args_fn']()
         else:
             constructor_args = kwargs.get('constructor_args', ())
+
+        module_name = get_nn_module_name_from_kwargs(**kwargs)
 
         # Construct a script module that passes arguments through
         # to self.submodule
@@ -19066,17 +18821,10 @@ def add_nn_module_test(*args, **kwargs):
                 module.define(script)
                 return module
 
-            # module cannot be imported / exported
-            if module_name in EXCLUDE_MODULE_EXPORT_IMPORT:
-                with torch.jit._disable_emit_hooks():
-                    module = make_module(script)
-                    create_script_module.last_graph = module.graph
-                    mod = module(*args)
-            else:
-                module = make_module(script)
-                self.assertExportImportModule(module, tensors)
-                create_script_module.last_graph = module.graph
-                mod = module(*args)
+            module = make_module(script)
+            self.assertExportImportModule(module, tensors)
+            create_script_module.last_graph = module.graph
+            mod = module(*args)
             return mod
 
         # Construct a normal nn module to stay consistent with create_script_module
