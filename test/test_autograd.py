@@ -5289,10 +5289,10 @@ class TestAutogradDeviceType(TestCase):
 
     @onlyCUDA
     def test_scalar_different_device_types(self, device):
-        c = torch.tensor(3, device='cpu') * torch.rand(2, 2, device=device)
+        c = torch.tensor(3.0, device='cpu', requires_grad=True) * torch.rand(2, 2, device=device)
         c.sum().backward()
 
-        d = torch.tensor(3, device=device) * torch.rand(2, 2, device='cpu')
+        d = torch.tensor(3.0, device=device, requires_grad=True) * torch.rand(2, 2, device='cpu')
         d.sum().backward()
 
 
