@@ -40,28 +40,46 @@ namespace api {
 
 template <typename T>
 struct iterator {
-  typedef iterator self_type;
   typedef T value_type;
   typedef T& reference;
   typedef T* pointer;
   typedef std::forward_iterator_tag iterator_category;
 
-  iterator();
+  iterator() = default;
+  iterator(pointer the_pointer) : pointer_(std::move(the_pointer)) {}
 
-  reference operator*() const;
-  pointer operator->() const;
+  reference operator*() const {
+    return *pointer_;
+  }
+  pointer operator->() const {
+    return *pointer_;
+  }
 
-  self_type operator++();
-  self_type operator++(int);
+  iterator operator++() {
+    ++pointer_;
+  }
 
-  bool operator==(const self_type& rhs);
-  bool operator!=(const self_type& rhs);
+  bool operator==(const iterator& rhs) {
+    return rhs.pointer_ == pointer_;
+  }
+  bool operator!=(const iterator& rhs) {
+    return !(this == rhs);
+  }
+
+private:
+  pointer pointer_;
 };
 
 template <typename T>
 struct iterable {
+  iterable(iterator<T> begin, iterator<T> end)
+      : end_(std::move(end)), begin_(std::move(begin)) {}
   iterator<T> begin() const;
   iterator<T> end() const;
+
+private:
+  iterator<T> begin_;
+  iterator<T> end_;
 };
 
 template <typename T>
@@ -75,6 +93,7 @@ struct List;
 struct Tuple;
 struct Object;
 struct Value;
+struct ClassType;
 struct ListType;
 struct DictType;
 struct TupleType;
@@ -87,7 +106,9 @@ struct Type {
 
   /// Type casting
   template<typename T>
-  T expect();
+  T expect() {
+
+  }
 
   std::string python_str() const noexcept;
 
@@ -97,9 +118,49 @@ struct Type {
   static const Type Int();
   static const Type Layout();
   static const Type None();
-  static const Type Optional();
   static const Type String();
   static const Type Tensor();
+
+protected:
+  Type(c10::TypePtr type) : type_(std::move(type)) {}
+  c10::TypePtr type_;
+  friend struct ClassType;
+};
+
+struct class_attribute_type_iterator : iterator<Field<Type>> {
+  class_attribute_type_iterator(c10::ClassTypePtr type, size_t index)
+      : type_(type), index_(std::move(index)) {
+    set_current_field();
+  }
+
+  reference operator*() const {
+    return current_field_;
+  }
+  pointer operator->() const {
+    return &current_field_;
+  }
+
+  class_attribute_type_iterator operator++() {
+    ++index_;
+    set_current_field();
+  }
+
+  bool operator==(const class_attribute_type_iterator& rhs) {
+    return rhs.type_->isSubtypeOf(type_) && type_->isSubtypeOf(rhs.type_) &&
+        rhs.index_ == index_;
+  }
+  bool operator!=(const class_attribute_type_iterator& rhs) {
+    return !(*this == rhs);
+  }
+
+private:
+  void set_current_field() {
+    current_field_ = Field<Type>{type_->attributeNames().at(index_),
+                                 type_->containedTypes().at(index_)};
+  }
+  Field<Type> current_field_;
+  c10::ClassTypePtr type_;
+  size_t index_;
 };
 
 /// TODO: How to query for class types by qualified name?
@@ -107,6 +168,9 @@ struct ClassType : public Type {
   Type attr(const std::string& name);
   bool hasattr(const std::string& name);
   iterable<Field<Type>> attributes();
+
+private:
+  ClassType(c10::ClassTypePtr type) : Type(std::move(type)) {}
 };
 
 struct ListType : public Type {
@@ -254,8 +318,8 @@ struct List : public Value {
   List(std::initializer_list<Value>);
   ListAccessor operator[](size_t i) const;
   size_t size();
-  iterable<Value> begin();
-  iterable<Value> end();
+  iterator<Value> begin();
+  iterator<Value> end();
   void append(Value v);
 };
 
@@ -353,6 +417,6 @@ struct Module : public Object {
 Module load(const std::string& path);
 
 
-}
+} // namespace api
 } // namespace jit
 } // namespace torch

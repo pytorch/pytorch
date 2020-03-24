@@ -82,6 +82,7 @@ libtorch_sources = [
     "torch/csrc/jit/runtime/argument_spec.cpp",
     "torch/csrc/jit/ir/constants.cpp",
     "torch/csrc/jit/api/function_impl.cpp",
+    "torch/csrc/jit/api/api.cpp",
     "torch/csrc/jit/ir/node_hashing.cpp",
     "torch/csrc/jit/ir/type_hashing.cpp",
     "torch/csrc/jit/serialization/export.cpp",

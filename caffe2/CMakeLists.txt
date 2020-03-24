@@ -468,6 +468,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/codegen/fuser/codegen.cpp
     ${TORCH_SRC_DIR}/csrc/jit/codegen/fuser/fallback.cpp
     ${TORCH_SRC_DIR}/csrc/jit/api/function_impl.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/api/api.cpp
     ${TORCH_SRC_DIR}/csrc/jit/runtime/vararg_functions.cpp
 
     ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/mem_arena.cpp
