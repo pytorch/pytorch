@@ -9,6 +9,10 @@
 
 namespace at {
 namespace native {
+
+DEFINE_DISPATCH(qmul_relu_stub);
+DEFINE_DISPATCH(qmul_stub);
+
 namespace {
 
 inline void check_inputs(const Tensor& qa, const Tensor& qb) {
@@ -25,25 +29,11 @@ inline void check_inputs(const Tensor& qa, const Tensor& qb) {
 //       dtype.
 template <bool ReLUFused = false>
 Tensor _mul_out(Tensor& out, const Tensor& self, const Tensor& other) {
-  int64_t zero_point = out.q_zero_point();
-  double scale = out.q_scale();
-  int64_t self_zero_point = self.q_zero_point();
-  double self_scale = self.q_scale();
-  int64_t other_zero_point = other.q_zero_point();
-  double other_scale = other.q_scale();
-
-  auto iter = TensorIterator::binary_op(out, self, other);
-  AT_DISPATCH_QINT_TYPES(out.scalar_type(), "qmul", [&]() {
-    cpu_kernel(iter, [&](scalar_t a, scalar_t b) -> scalar_t {
-      const auto da = at::dequantize_val(self_scale, self_zero_point, a);
-      const auto db = at::dequantize_val(other_scale, other_zero_point, b);
-      float c = da * db;
-      if (ReLUFused) {
-        c = std::max<float>(c, 0.0);
-      }
-      return at::quantize_val<scalar_t>(scale, zero_point, c);
-    });
-  });
+  if (ReLUFused) {
+    qmul_relu_stub(self.device().type(), out, self, other);
+  } else {
+    qmul_stub(self.device().type(), out, self, other);
+  }
   return out;
 }
 
@@ -112,11 +102,14 @@ Tensor _mul_scalar_out(Tensor& out, const Tensor& self, Scalar other) {
 template <bool ReLUFused = false>
 class QMul final : public c10::OperatorKernel {
  public:
-  Tensor operator()(Tensor qa, Tensor qb,
-                    double scale, int64_t zero_point) {
+  Tensor operator()(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
     check_inputs(qa, qb);
-    auto qc = at::_empty_affine_quantized(qa.sizes(),
-      at::device(kCPU).dtype(qa.scalar_type()), scale, zero_point);
+    auto qc = at::_empty_affine_quantized(
+        qa.sizes(),
+        at::device(kCPU).dtype(qa.scalar_type()),
+        scale,
+        zero_point,
+        qa.suggest_memory_format());
     return _mul_out<ReLUFused>(qc, qa, qb);
   }
 };
@@ -138,7 +131,7 @@ class QMulScalar final : public c10::OperatorKernel {
     TORCH_CHECK(qa.qscheme() == kPerTensorAffine ||
               qa.qscheme() == kPerTensorSymmetric,
               "Only per tensor quantization is suuported in Mul.");
-    auto qc = at::empty_like(qa, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    auto qc = at::empty_like(qa, qa.suggest_memory_format());
     return _mul_scalar_out<ReLUFused>(qc, qa, b);
   }
 };

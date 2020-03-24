@@ -35,7 +35,7 @@ public:
 
 struct TORCH_API AdagradParamState : public OptimizerCloneableParamState<AdagradParamState> {
   TORCH_ARG(torch::Tensor, sum);
-  TORCH_ARG(int64_t, step);
+  TORCH_ARG(int64_t, step) = 0;
 
 public:
   void serialize(torch::serialize::InputArchive& archive) override;
@@ -68,7 +68,7 @@ class TORCH_API Adagrad : public Optimizer {
       std::vector<Tensor> params,
       AdagradOptions defaults) : Adagrad({std::move(OptimizerParamGroup(params))}, defaults) {}
 
-  void step() override;
+  torch::Tensor step(LossClosure closure = nullptr) override;
 
   /// Adds the given vector of parameters to the optimizer's parameter list.
   void add_parameters(const std::vector<Tensor>& parameters) override;

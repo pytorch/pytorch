@@ -428,6 +428,23 @@ CUDAContext::CUDAContext(const DeviceOption& option)
   DCHECK_EQ(option.device_type(), PROTO_CUDA);
 }
 
+CUDAContext::~CUDAContext() {
+  try {
+    if (curand_generator_) {
+      CURAND_CHECK(curandDestroyGenerator(curand_generator_));
+    }
+    // CUDAContext is used in 2 cases now:
+    // - long-lived instance inside OperatorBase in which case what happens in
+    //   destructor doesn't really matter
+    // - short-lived on-the-fly instances that are utilized as CUDAGuard - in
+    //   this case there's only one stream id (passed to SwitchToDevice) and
+    //   it's preferrable to synchronize in the destructor
+    FinishDeviceComputation();
+  } catch (const std::exception& e)  {
+    LOG(ERROR) << "Encountered following in " << __FUNCTION__ << ": " << e.what();
+  }
+}
+
 // shared mutex to lock out alloc / free during NCCL launches
 std::mutex& CUDAContext::mutex() {
   static std::mutex m;
