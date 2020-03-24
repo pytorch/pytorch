@@ -2658,7 +2658,6 @@ def kldivloss_reference(input, target, reduction='mean'):
     return result
 
 def kldivloss_log_target_reference(input, target, reduction='mean'):
-    torch.autograd.set_detect_anomaly(True)
     result = torch.exp(target) * (target - input)
     if reduction == 'mean':
         return result.mean()
