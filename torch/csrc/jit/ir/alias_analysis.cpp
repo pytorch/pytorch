@@ -110,9 +110,7 @@ bool AliasDb::hasWriters(const Value* v) const {
     return false;
   }
 
-  if (isWriteCacheStale_) {
-    rebuildWriteCache();
-  }
+  rebuildWriteCache();
   const auto& el = it->second;
   return writeCache_.intersects(el->getMemoryLocations());
 }
@@ -137,6 +135,7 @@ bool AliasDb::writesToAlias(Node* n, const ValueSet& vs) const {
     return false;
   }
 
+  rebuildWriteCache();
   MemoryLocations locs;
   for (const auto v : vs) {
     auto it = elementMap_.find(v);
@@ -153,6 +152,7 @@ bool AliasDb::writesToAlias(Node* n, const ValueSet& vs) const {
 
 MemoryLocations AliasDb::getWrites(Node* n) const {
   MemoryLocations writes;
+  rebuildWriteCache();
   getWritesImpl(n, writes);
   return writes;
 }
@@ -1249,6 +1249,7 @@ bool AliasDb::writesToWildcard(Node* n) const {
     return false;
   }
   const auto& writes = writeIndex_.at(n);
+  rebuildWriteCache();
 
   // Are any of these memoryLocs a wildcard element?
   for (const auto& pr : wildcardIndex_) {
@@ -1335,23 +1336,19 @@ c10::optional<Element*> AliasDb::setWildcard(const Value* v) {
     }
   }
 
-  // We also need to update the write index with new writes to the wildcard set.
-  for (auto& pr : writeIndex_) {
-    auto& writtenTo = pr.second;
-    if (writtenTo.intersects(pointeeSet)) {
-      writtenTo.set(wildcardElement->index);
-    }
-  }
+  // lazily build write cache
   isWriteCacheStale_ = true;
   return wildcardElement;
 }
 
 void AliasDb::rebuildWriteCache() const {
-  for (const auto& pr : writeIndex_) {
-    const auto& writtenLocs = pr.second;
+  if (isWriteCacheStale_) {
+    for (const auto& pr : writeIndex_) {
+      const auto& writtenLocs = pr.second;
       writeCache_ |= writtenLocs;
     }
-  isWriteCacheStale_ = false;
+    isWriteCacheStale_ = false;
+  }
 }
 } // namespace jit
 } // namespace torch
