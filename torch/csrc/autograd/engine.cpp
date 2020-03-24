@@ -320,7 +320,8 @@ auto Engine::thread_init(int device, const std::shared_ptr<ReadyQueue>& ready_qu
 // thread_main is used by:
 // 1). autograd threads for devices (i.e. CUDA, XLA)
 // 2). the caller/owning thread of the backward call on CPU (sync mode)
-// The exit conditions are different for the above two cases.
+// 3). Renetrant backward that invoked by either 1) or 2)
+// The exit conditions are different for the above three cases.
 // For 1), we are spinning on running the thread_main on device autograd
 //         threads throughout the Engine lifetime, thread_main will get
 //         terminated during Engine destruction by pushing shutdown tasks
@@ -328,6 +329,10 @@ auto Engine::thread_init(int device, const std::shared_ptr<ReadyQueue>& ready_qu
 //         synchronously until the graph_task of that owning thread is
 //         completed and exit the thread_main to continue executing the
 //         result of caller's code.
+// For 3), the reentrant backward (with reentrant_thread=true) that invokes
+//         thread_main, either from 1) or 2), will not spin and will exit as
+//         long as graph_task is completed and notify the owning thread as
+//         needed.
 auto Engine::thread_main(
     const std::shared_ptr<GraphTask>& graph_task,
     bool reentrant_thread) -> void {
@@ -380,8 +385,9 @@ auto Engine::thread_main(
       mark_graph_task_completed(local_graph_task);
 
       // The CPU worker thread is actually the thread that initially requested
-      // the autograd computation. Now that we're done, we need to break out of
-      // the worker loop so we can continue executing the rest of the calling code!
+      // the autograd computation (i.e. `backward()/grad()` starts on CPU). Now
+      // that we're done, we need to break out of the worker loop so we can
+      // continue executing the rest of the calling code!
       if (worker_device == CPU_DEVICE) {
         break;
       }
@@ -1008,7 +1014,7 @@ bool Engine::is_checkpoint_valid() {
 void Engine::init_local_ready_queue(std::shared_ptr<ReadyQueue> ready_queue) {
   if (ready_queue) {
     // if ready_queue provided in the caller, use the caller's ready_queue to initialize local_ready_queue
-    // TORCH_INTERNAL_ASSERT(!local_ready_queue);
+    TORCH_INTERNAL_ASSERT(!local_ready_queue);
     local_ready_queue = std::move(ready_queue);
   } else if (!local_ready_queue){
     // otherwise if local_ready_queue not allocated, allocate a new ready_queue
