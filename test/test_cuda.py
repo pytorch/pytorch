@@ -280,6 +280,21 @@ class TestCuda(TestCase):
         for _ in self._test_memory_stats_generator(self):
             self._check_memory_stat_consistency()
 
+    def test_memory_allocation(self):
+        gc.collect()
+        torch.cuda.empty_cache()
+        mem = None
+        size = 1
+        prev = 0
+        try:
+            prev = torch.cuda.memory_allocated()
+            mem = torch.cuda.caching_allocator_alloc(size)
+            self.assertGreater(torch.cuda.memory_allocated(), prev)
+        finally:
+            if mem is not None:
+                torch.cuda.caching_allocator_delete(mem)
+                self.assertEqual(torch.cuda.memory_allocated(), prev)
+
     def test_cuda_get_device_name(self):
         # Testing the behaviour with None as an argument
         current_device = torch.cuda.current_device()
@@ -462,6 +477,23 @@ class TestCuda(TestCase):
         x = torch.zeros(10000000, dtype=torch.uint8).pin_memory()
         y = torch.ones(10000000, dtype=torch.uint8).cuda()
         _test_copy_non_blocking(x, y)
+
+    @unittest.skip("skipped because test could be flaky, see #35144")
+    def test_to_non_blocking(self):
+        def _test_to_non_blocking(a, non_blocking):
+            stream = torch.cuda.current_stream()
+            with torch.cuda.stream(stream):
+                b = a.to('cuda', non_blocking=non_blocking)
+                self.assertEqual(stream.query(), not non_blocking)
+                stream.synchronize()
+                self.assertEqual(a, b)
+
+        # 10MB copies
+        x = torch.ones(10000000, dtype=torch.uint8)
+        _test_to_non_blocking(x, True)
+
+        y = torch.ones(10000000, dtype=torch.uint8)
+        _test_to_non_blocking(y, False)
 
     def test_serialization_array_with_storage(self):
         x = torch.randn(5, 5).cuda()

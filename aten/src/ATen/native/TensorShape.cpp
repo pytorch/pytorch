@@ -42,6 +42,17 @@ Tensor& set_(Tensor& result, Storage source) {
   return result.set_(source, 0, static_cast<int64_t>(source.size()), {});
 }
 
+// unify with cuda implementation?  This is not done to avoid a dispatch in resize_impl_cpu_
+Tensor& set_storage_cpu_(Tensor& result, Storage storage, int64_t storage_offset, IntArrayRef size, IntArrayRef stride) {
+  checkSetStorage(result, storage, storage_offset, size, stride);
+
+  result.unsafeGetTensorImpl()->set_storage_offset(storage_offset);
+  c10::optional<IntArrayRef> stride_opt = stride.data() != nullptr ?
+                                          c10::optional<IntArrayRef>(stride) : c10::nullopt;
+  at::native::resize_impl_cpu_(result.unsafeGetTensorImpl(), size, stride_opt);
+  return result;
+}
+
 Tensor& set_tensor_(Tensor& result, const Tensor& source) {
   if (result.unsafeGetTensorImpl() != source.unsafeGetTensorImpl()) {
     return result.set_(source.storage(), source.storage_offset(), source.sizes(), source.strides());
@@ -202,7 +213,7 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
 
 Tensor _cat_cpu(TensorList tensors, int64_t dim) {
   Tensor result = at::empty({0}, tensors[0].options());
-  return _cat_out_cpu(result, tensors, dim);
+  return native::_cat_out_cpu(result, tensors, dim);
 }
 
 static void check_cat_no_zero_dim(TensorList tensors) {
@@ -585,6 +596,13 @@ Tensor narrow(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
   TORCH_CHECK(length >= 0 && start <= cur_size - length,
            "start (", start, ") + length (", length, ") exceeds dimension size (", cur_size, ").");
   return at::slice(self, dim, start, start + length, 1);
+}
+
+Tensor narrow(const Tensor& self, int64_t dim, const Tensor& start, int64_t length) {
+  TORCH_CHECK(start.dim() == 0 && isIntegralType(start.scalar_type(), /*includeBool=*/false),
+              "start must be an 0-dim integral Tensor.");
+  int64_t st = start.item<int64_t>();
+  return at::narrow(self, dim, st, length);
 }
 
 Tensor permute(const Tensor& self, IntArrayRef dims) {

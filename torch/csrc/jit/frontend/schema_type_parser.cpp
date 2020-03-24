@@ -2,10 +2,10 @@
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/jit_type.h>
 #include <c10/util/string_utils.h>
-#include <torch/csrc/jit/api/custom_class.h>
 #include <torch/csrc/jit/frontend/lexer.h>
 #include <torch/csrc/jit/frontend/parse_string_literal.h>
 #include <torch/csrc/jit/frontend/schema_type_parser.h>
+#include <torch/custom_class.h>
 #include <string>
 
 using c10::AliasInfo;
@@ -31,7 +31,6 @@ using c10::VarType;
 
 namespace torch {
 namespace jit {
-namespace script {
 
 TypePtr SchemaTypeParser::parseBaseType() {
   static std::unordered_map<std::string, TypePtr> type_map = {
@@ -55,6 +54,7 @@ TypePtr SchemaTypeParser::parseBaseType() {
       {"None", NoneType::get()},
       {"Capsule", CapsuleType::get()},
       {"Any", at::AnyType::get()},
+      {"AnyClassType", at::AnyClassType::get()},
   };
   auto tok = L.cur();
   if (!L.nextIf(TK_NONE)) {
@@ -292,6 +292,5 @@ void SchemaTypeParser::parseList(
     L.expect(end);
 }
 
-} // namespace script
 } // namespace jit
 } // namespace torch

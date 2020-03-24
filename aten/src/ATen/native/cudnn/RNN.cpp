@@ -1236,7 +1236,7 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
   auto weight_buf = try_get_weight_buf(
       input, params, has_biases, mode, hidden_size, num_layers, bidirectional);
   if (!weight_buf.defined()) {
-    AT_WARN(WEIGHT_FORMAT_WARN);
+    TORCH_WARN(WEIGHT_FORMAT_WARN);
   }
 
   TORCH_CHECK(_batch_sizes.dim() == 1, "batch_sizes tensor should be 1D");
@@ -1266,7 +1266,7 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
   auto weight_buf = try_get_weight_buf(
       input, params, has_biases, mode, hidden_size, num_layers, bidirectional);
   if (!weight_buf.defined()) {
-    AT_WARN(WEIGHT_FORMAT_WARN);
+    TORCH_WARN(WEIGHT_FORMAT_WARN);
   }
 
   auto & dropout_state = get_dropout_state(dropout_p, train, input.options());

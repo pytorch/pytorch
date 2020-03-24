@@ -271,10 +271,10 @@ void THTensor_(addr)(THTensor *r_, THTensor *t, THTensor *vec1, THTensor *vec2, 
   if(t->dim() != 2)
     THError("expected matrix, got %dD tensor for t", t->dim());
 
-  auto vec1_size = THTensor_sizeLegacyNoScalars(vec1, 0);
-  auto vec2_size = THTensor_sizeLegacyNoScalars(vec2, 0);
-  auto vec1_stride = THTensor_strideLegacyNoScalars(vec1, 0);
-  auto vec2_stride = THTensor_strideLegacyNoScalars(vec2, 0);
+  auto vec1_size = THTensor_(size)(vec1, 0);
+  auto vec2_size = THTensor_(size)(vec2, 0);
+  auto vec1_stride = THTensor_(stride)(vec1, 0);
+  auto vec2_stride = THTensor_(stride)(vec2, 0);
 
   if( (t->size(0) != vec1_size) || (t->size(1) != vec2_size) ) {
     THDescBuff bt  = THTensor_(sizeDesc)(t);
@@ -330,57 +330,6 @@ void THTensor_(addr)(THTensor *r_, THTensor *t, THTensor *vec1, THTensor *vec2, 
 }
 
 #ifndef TH_REAL_IS_BFLOAT16 /* non bfloat16 only part */
-
-// Should wrap if the value (a) has a different sign than the divisor (b), but is not 0.
-static inline bool modulo_wrap(scalar_t a, scalar_t b) {
-  return (a != 0) && (a < 0) != (b < 0);
-}
-
-void THTensor_(cremainder)(THTensor *r_, THTensor *t, THTensor *src)
-{
-  THTensor_(resizeAs)(r_, t);
-  int64_t r_Size = THTensor_(nElement)(r_);
-  int64_t srcSize = THTensor_(nElement)(src);
-  int r_Contig = THTensor_(isContiguous)(r_);
-  int tContig = THTensor_(isContiguous)(t);
-  int srcContig = THTensor_(isContiguous)(src);
-  if (srcSize == r_Size){
-    if (r_Contig && tContig && srcContig) {
-      scalar_t *tp = t->data<scalar_t>();
-      scalar_t *sp = src->data<scalar_t>();
-      scalar_t *rp = r_->data<scalar_t>();
-      at::parallel_for(0, r_Size, TH_OMP_OVERHEAD_THRESHOLD,
-          [&](int64_t start, int64_t end) {
-        for (auto i = start; i < end; i++) {
-  #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-          rp[i] = (sp[i] == 0)? NAN : tp[i] - sp[i] * floor(tp[i] / sp[i]);
-  #else
-          // There is no NAN for integers
-          rp[i] = tp[i] % sp[i];
-          if (modulo_wrap(rp[i], sp[i]))
-            rp[i] += sp[i];
-  #endif
-        }
-      });
-    } else {
-#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-      TH_TENSOR_APPLY3_PARALLEL(r_Size, r_Contig, tContig, srcContig, scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = (*src_data == 0)? NAN : *t_data - *src_data * floor(*t_data / *src_data);, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
-#else
-      TH_TENSOR_APPLY3_PARALLEL(r_Size, r_Contig, tContig, srcContig, scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data % *src_data;
-                                                    if (modulo_wrap(*r__data, *src_data)) *r__data += *src_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
-#endif
-    }
-  } else {
-#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-    TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = (*src_data == 0)? NAN : *t_data - *src_data * floor(*t_data / *src_data););
-#else
-    // There is no NAN for integers
-    TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data % *src_data;
-                                                     if (modulo_wrap(*r__data, *src_data)) *r__data += *src_data;);
-#endif
-
-  }
-}
 
 void THTensor_(addbmm)(THTensor *result, THTensor *t, THTensor *batch1, THTensor *batch2, scalar_t beta, scalar_t alpha)
 {
