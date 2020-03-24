@@ -364,6 +364,36 @@ class TestQuantizedOps(TestCase):
             op_(qY_hat, min_val, max_val, inplace=True)
             self.assertEqual(qY, qY_hat, message="{} hardtanh failed".format(name))
 
+    """Tests the correctness of the quantized::hardswish op."""
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 8, 1, 8),
+                       elements=hu.floats(-1e6, 1e6, allow_nan=False, allow_infinity=False),
+                       qparams=hu.qparams()))
+    def test_hardswish(self, X):
+        X, (scale, zero_point, torch_type) = X
+        X = torch.from_numpy(X)
+        qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
+                                       dtype=torch_type)
+        dqX = qX.dequantize()
+
+        output_scale = scale
+        output_zero_point = zero_point
+
+        dqY_hat = F.hardswish(dqX)
+        qY_hat = torch.quantize_per_tensor(dqY_hat, scale=output_scale,
+                                           zero_point=output_zero_point,
+                                           dtype=torch_type)
+
+        # regular
+        qY = torch.nn.quantized.functional.hardswish(qX)
+        self.assertEqual(qY, qY_hat,
+                         message="Hardswish failed: {} vs {}".format(qY, qY_hat))
+
+        # inplace
+        qX_copy = qX.clone().detach()
+        torch.nn.quantized.functional.hardswish(qX_copy, inplace=True)
+        self.assertEqual(qX_copy, qY_hat,
+                         message="inplace Hardswish failed: {} vs {}".format(qY, qY_hat))
+
     """Tests the correctness of the scalar addition."""
     @given(A=hu.tensor(shapes=hu.array_shapes(1, 4, 1, 5),
                        elements=hu.floats(-1e6, 1e6, allow_nan=False),
