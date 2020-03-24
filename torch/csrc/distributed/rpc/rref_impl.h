@@ -344,6 +344,7 @@ class TORCH_API OwnerRRef final : public RRef {
   // Set the value of this ``OwnerRRef``. This method does not need GIL as it
   // does not create any new py::object.
   void setValue(IValue&& value);
+  void setError(std::string err);
 
   // Has a value been set?
   bool hasValue() const;
@@ -354,6 +355,7 @@ class TORCH_API OwnerRRef final : public RRef {
   friend class RRefContext;
 
   c10::optional<IValue> value_;
+  c10::optional<std::string> error_;
   mutable std::mutex mutex_;
   mutable std::condition_variable valueCV_;
   std::shared_ptr<FutureMessage> future_;
