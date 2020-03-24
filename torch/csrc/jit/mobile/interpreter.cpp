@@ -146,8 +146,16 @@ bool InterpreterState::run(Stack& stack) {
         listConstruct(stack, type, inst.N);
         ++pc;
       } break;
+      case LIST_UNPACK: {
+        listUnpack(stack, inst.X);
+        ++pc;
+      } break;
       case TUPLE_CONSTRUCT: {
         tupleConstruct(stack, inst.X);
+        ++pc;
+      } break;
+      case TUPLE_SLICE: {
+        tupleSlice(stack, inst.X, inst.X + inst.N);
         ++pc;
       } break;
       case WARN: {
