@@ -2206,7 +2206,7 @@ void ReplicateQuant(std::shared_ptr<Graph>& graph) {
   }
   for (Node* n : quant_nodes_to_rewrite) {
     Node* if_node = n->input(0)->node();
-    // move the nodes that produces the quantization paramters before
+    // move the nodes that produces the quantization parameters before
     // prim::If
     for (auto i = 1; i < n->inputs().size(); ++i) {
       n->input(i)->node()->moveBefore(if_node);
