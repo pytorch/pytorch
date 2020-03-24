@@ -151,18 +151,6 @@ SparseTensor pow_sparse_scalar(const SparseTensor& t, Scalar value) {
 // div(SparseTensor, Scalar)
 // --------------------------------------------------------------------
 
-SparseTensor& div_out_sparse_zerodim(SparseTensor& r, const SparseTensor& t, const Tensor& value);
-
-Tensor div_sparse(const Tensor& self, const Tensor& value) {
-  auto commonDtype = at::result_type(self, value);
-  Tensor result = at::empty({0}, self.options().dtype(commonDtype));
-  return div_out_sparse_zerodim(result, self, value);
-}
-
-Tensor& div_sparse_(Tensor& self, const Tensor& value) {
-  return div_out_sparse_zerodim(self, self, value);
-}
-
 static SparseTensor& coalesce_(SparseTensor& tensor) {
   SparseTensor coalesced = tensor.coalesce();
   tensor._values().resize_as_(coalesced._values());
@@ -173,18 +161,28 @@ static SparseTensor& coalesce_(SparseTensor& tensor) {
   return tensor;
 }
 
+// Note [Sparse Floor Division]
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// Uncoalesced sparse tensors cannot be floor divided correctly. Integer
+// division is considered a special-case of floor division for purposes of
+// this note.
+// For example, an integer tensor with values=[3, 3] divided by 2 would produce
+// values=[1, 1], which sum to 2 instead of 3 (=6/2).
+// A float tensor with values=[3., 3.] floor divided by 2 would also produce
+// values=[1., 1.] (after truncation), which sum to 2.f instead of 3.f.
+// To perform floor division the sparse tensor must be coalesced first.
+
 SparseTensor& div_out_sparse_zerodim(SparseTensor& r, const SparseTensor& t, const Tensor& value) {
-  TORCH_CHECK(value.dim() == 0, "sparse division only supports division by a scalar (got shape ",
-      value.sizes(), " for argument 'other')");
-  TORCH_CHECK(!value.is_sparse(), "A Sparse Tensor can only be divided by a scalar or zero-dim dense tensor");
+  TORCH_CHECK(value.dim() == 0, "Sparse division requires a scalar or ",
+    "zero-dim dense tensor divisor (got shape ", value.sizes(), " for divisor)");
+  TORCH_CHECK(!value.is_sparse(), "Sparse division requires a scalar or ",
+    "zero-dim dense tensor divisor (got a sparse divisor)");
 
   AT_ASSERT(r.is_sparse());
   AT_ASSERT(t.is_sparse());
 
   if (is_same_tensor(r, t)) {
-    // Can't divide an uncoalesced integral tensor accurately. e.g. for a sparse int tensor with value 6
-    // represented as values=[3, 3], integer division by 2 would give values=[1, 1] => 2 instead
-    // of 6 / 2 => 3
+    // See note "Sparse Floor Division"
     if (!r.is_coalesced() && isIntegralType(r.scalar_type(), /*includeBool=*/true)) {
       coalesce_(r);
     }
@@ -206,6 +204,16 @@ SparseTensor& div_out_sparse_zerodim(SparseTensor& r, const SparseTensor& t, con
   return r;
 }
 
+Tensor div_sparse(const Tensor& self, const Tensor& value) {
+  auto commonDtype = at::result_type(self, value);
+  Tensor result = at::empty({0}, self.options().dtype(commonDtype));
+  return div_out_sparse_zerodim(result, self, value);
+}
+
+Tensor& div_sparse_(Tensor& self, const Tensor& value) {
+  return div_out_sparse_zerodim(self, self, value);
+}
+
 SparseTensor& div_out_sparse_scalar(SparseTensor& r, const SparseTensor& t, Scalar value) {
   return div_out_sparse_zerodim(r, t, wrapped_scalar_tensor(value));
 }
@@ -214,26 +222,14 @@ SparseTensor& div_out_sparse_scalar(SparseTensor& r, const SparseTensor& t, Scal
 // true_divide(SparseTensor, Scalar)
 // --------------------------------------------------------------------
 
-Tensor true_divide_sparse(const Tensor& self, const Tensor& value) {
-  auto commonDtype = at::result_type(self, value);
-
-  // Ensures floating dtype
-  if (isIntegralType(commonDtype, /*includeBool=*/ true)) {
-    commonDtype = typeMetaToScalarType(c10::get_default_dtype());
-  }
-
-  Tensor result = at::empty({0}, self.options().dtype(commonDtype));
-  return div_out_sparse_zerodim(result, self, value);
-}
-
 SparseTensor& true_divide_out_sparse_zerodim(
     SparseTensor& result,
     const SparseTensor& dividend,
     const Tensor& divisor) {
-  TORCH_CHECK(divisor.dim() == 0, "Sparse true division only supports",
-    " scalar or zero-dim dense tensor divisors (got shape ", divisor.sizes());
-  TORCH_CHECK(!divisor.is_sparse(), "A Sparse Tensor can only be divided by",
-    " a scalar or zero-dim dense tensor divisor, but got a sparse divisor.");
+  TORCH_CHECK(divisor.dim() == 0, "Sparse true division requires a scalar or ",
+    "zero-dim dense tensor divisor (got shape ", divisor.sizes(), " for divisor)");
+  TORCH_CHECK(!divisor.is_sparse(), "Sparse true division requires a scalar or ",
+    "zero-dim dense tensor divisor (got a sparse divisor)");
 
   AT_ASSERT(result.is_sparse());
   AT_ASSERT(dividend.is_sparse());
@@ -246,7 +242,7 @@ SparseTensor& true_divide_out_sparse_zerodim(
     Tensor dividend_tmp = dividend;
     result.resize_as_(dividend_tmp);
     auto indices = result._indices();
-    indices.resize_as_(dividend_tmp.indices());
+    indices.resize_as_(dividend_tmp._indices());
     indices.copy_(dividend_tmp._indices());
     Tensor result_values = result._values();
     at::true_divide_out(result_values, dividend_tmp._values(), divisor);
@@ -257,11 +253,87 @@ SparseTensor& true_divide_out_sparse_zerodim(
   return result;
 }
 
+Tensor true_divide_sparse(const Tensor& self, const Tensor& value) {
+  auto commonDtype = at::result_type(self, value);
+
+  // Ensures floating dtype
+  if (isIntegralType(commonDtype, /*includeBool=*/ true)) {
+    commonDtype = typeMetaToScalarType(c10::get_default_dtype());
+  }
+
+  Tensor result = at::empty({0}, self.options().dtype(commonDtype));
+  return true_divide_out_sparse_zerodim(result, self, value);
+}
+
 SparseTensor& true_divide_out_sparse_scalar(
     SparseTensor& result,
     const SparseTensor& dividend,
     Scalar divisor) {
   return true_divide_out_sparse_zerodim(result, dividend, wrapped_scalar_tensor(divisor));
+}
+
+// --------------------------------------------------------------------
+// floor_divide(SparseTensor, Scalar)
+// --------------------------------------------------------------------
+
+SparseTensor& floor_divide_out_sparse_zerodim(
+  SparseTensor& result,
+  const SparseTensor& dividend,
+  const Tensor& divisor) {
+  TORCH_CHECK(divisor.dim() == 0, "Sparse floor division requires a scalar or ",
+    "zero-dim dense tensor divisor (got shape ", divisor.sizes(), " for divisor)");
+  TORCH_CHECK(!divisor.is_sparse(), "Sparse floor division requires a scalar or ",
+    "zero-dim dense tensor divisor (got a sparse divisor)");
+
+  AT_ASSERT(result.is_sparse());
+  AT_ASSERT(dividend.is_sparse());
+
+  // Case 1: result and dividend are the same tensor
+  // Performs floor division in-place
+  if (is_same_tensor(result, dividend)) {
+
+    // See note "Sparse Floor Division"
+    if (!result.is_coalesced()) {
+      coalesce_(result);
+    }
+
+    result._values().floor_divide_(divisor);
+    return result;
+  }
+
+  // Case 2: result and dividend are different tensors
+  Tensor dividend_tmp = dividend;
+
+  // Ensures dividend_tmp is coalesced (see note above)
+  if (!dividend.is_coalesced()) {
+    dividend_tmp = dividend.coalesce();
+  }
+
+  // Resizes and indexes result like dividend_tmp
+  result.resize_as_(dividend_tmp);
+  result._indices().resize_as_(dividend_tmp._indices());
+  result._indices().copy_(dividend_tmp._indices());
+
+  // Computes result
+  Tensor result_values = result._values();
+  at::floor_divide_out(result_values, dividend_tmp._values(), divisor);
+  get_sparse_impl(result)->set_nnz_and_narrow(dividend_tmp._nnz());
+  result._coalesced_(dividend_tmp.is_coalesced());
+  return result;
+}
+
+Tensor floor_divide_sparse(const Tensor& self, const Tensor& value) {
+  auto commonDtype = at::result_type(self, value);
+  Tensor result = at::empty({0}, self.options().dtype(commonDtype));
+  return floor_divide_out_sparse_zerodim(result, self, value);
+}
+
+Tensor& floor_divide_sparse_(Tensor& self, const Tensor& value) {
+  return floor_divide_out_sparse_zerodim(self, self, value);
+}
+
+SparseTensor& floor_divide_out_sparse_scalar(SparseTensor& r, const SparseTensor& t, Scalar value) {
+  return floor_divide_out_sparse_zerodim(r, t, wrapped_scalar_tensor(value));
 }
 
 // --------------------------------------------------------------------

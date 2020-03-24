@@ -33,7 +33,7 @@ static inline Tensor to_impl(const Tensor& self, const TensorOptions& options, b
     if (self.is_non_overlapping_and_dense()) {
       // Copy all strides
       auto r = at::empty_strided(self.sizes(), self.strides(), options.memory_format(c10::nullopt));
-      r.copy_(self);
+      r.copy_(self, non_blocking);
       return r;
     } else {
       memory_format = self.suggest_memory_format();

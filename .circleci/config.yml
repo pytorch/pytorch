@@ -32,16 +32,12 @@ commands:
   # attaches the workspace at ~/workspace; this workspace is generated
   # by the setup job. Note that ~/workspace is not the default working
   # directory (that's ~/project).
-  should_run_job:
-    description: "Test if the job should run or not"
+  attach_scripts:
+    description: "Attach the scripts that power everything else"
     steps:
       - attach_workspace:
           name: Attaching workspace
           at: ~/workspace
-      - run:
-          name: Should run job
-          no_output_timeout: "2m"
-          command: ~/workspace/.circleci/scripts/should_run_job.sh
 
   # This system setup script is meant to run before the CI-related scripts, e.g.,
   # installing Git client, checking out code, setting up CI env, and
@@ -330,6 +326,20 @@ binary_mac_params: &binary_mac_params
   environment:
     BUILD_ENVIRONMENT: << parameters.build_environment >>
 
+
+promote_common: &promote_common
+  docker:
+    - image: pytorch/release
+  parameters:
+    package_name:
+      description: "package name to promote"
+      type: string
+      default: ""
+  environment:
+    PACKAGE_NAME: << parameters.package_name >>
+    ANACONDA_API_TOKEN: ${CONDA_PYTORCHBOT_TOKEN}
+    AWS_ACCESS_KEY_ID: ${PYTORCH_BINARY_AWS_ACCESS_KEY_ID}
+    AWS_SECRET_ACCESS_KEY: ${PYTORCH_BINARY_AWS_SECRET_ACCESS_KEY}
 ##############################################################################
 # Job specs
 ##############################################################################
@@ -340,7 +350,7 @@ jobs:
       image: ubuntu-1604:201903-01
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-    - should_run_job
+    - attach_scripts
     - setup_linux_system_environment
     - checkout
     - setup_ci_environment
@@ -423,7 +433,7 @@ jobs:
       image: ubuntu-1604:201903-01
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-    - should_run_job
+    - attach_scripts
     - setup_linux_system_environment
     - setup_ci_environment
     - run:
@@ -512,7 +522,28 @@ jobs:
           no_output_timeout: 30m
           command: |
             curl --retry 3 -kLO https://ossci-windows.s3.amazonaws.com/cuda_10.1.243_426.00_win10.exe
-            ./cuda_10.1.243_426.00_win10.exe -s
+            7z x cuda_10.1.243_426.00_win10.exe -ocuda_10.1.243_426.00_win10
+            cd cuda_10.1.243_426.00_win10
+            mkdir cuda_install_logs
+            ./setup.exe -s nvcc_10.1 cuobjdump_10.1 nvprune_10.1 cupti_10.1 cublas_10.1 cublas_dev_10.1 cudart_10.1 cufft_10.1 cufft_dev_10.1 curand_10.1 curand_dev_10.1 cusolver_10.1 cusolver_dev_10.1 cusparse_10.1 cusparse_dev_10.1 nvgraph_10.1 nvgraph_dev_10.1 npp_10.1 npp_dev_10.1 nvrtc_10.1 nvrtc_dev_10.1 nvml_dev_10.1 -loglevel:6 -log:"$(pwd -W)/cuda_install_logs"
+            if [[ "${VC_YEAR}" == "2017" ]]; then
+              cp -r CUDAVisualStudioIntegration/extras/visual_studio_integration/MSBuildExtensions/* "C:/Program Files (x86)/Microsoft Visual Studio/2017/BuildTools/Common7/IDE/VC/VCTargets/BuildCustomizations/"
+            else
+              cp -r CUDAVisualStudioIntegration/extras/visual_studio_integration/MSBuildExtensions/* "C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/MSBuild/Microsoft/VC/v160/BuildCustomizations/"
+            fi
+            curl --retry 3 -kLO https://ossci-windows.s3.amazonaws.com/NvToolsExt.7z
+            7z x NvToolsExt.7z -oNvToolsExt
+            mkdir -p "C:/Program Files/NVIDIA Corporation/NvToolsExt"
+            cp -r NvToolsExt/* "C:/Program Files/NVIDIA Corporation/NvToolsExt/"
+            export NVTOOLSEXT_PATH="C:\\Program Files\\NVIDIA Corporation\\NvToolsExt\\"
+            cat cuda_install_logs/LOG.setup.exe.log
+            if ! ls "/c/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v10.1/bin/nvcc.exe"
+            then
+              echo "CUDA installation failed"
+              exit 1
+            fi
+            cd ..
+            rm -rf ./cuda_10.1.243_426.00_win10
             rm -f ./cuda_10.1.243_426.00_win10.exe
       - run:
           name: Install Cudnn
@@ -580,7 +611,7 @@ jobs:
       image: ubuntu-1604:201903-01
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-    - should_run_job
+    - attach_scripts
     - setup_linux_system_environment
     - checkout
     - setup_ci_environment
@@ -640,7 +671,7 @@ jobs:
       image: ubuntu-1604:201903-01
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-    - should_run_job
+    - attach_scripts
     - setup_linux_system_environment
     - setup_ci_environment
     - run:
@@ -703,7 +734,7 @@ jobs:
       xcode: "9.4.1"
     steps:
       # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-      - should_run_job
+      - attach_scripts
       - checkout
       - run_brew_for_macos_build
       - run:
@@ -778,7 +809,7 @@ jobs:
     <<: *binary_linux_build_params
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-    - should_run_job
+    - attach_scripts
     - run:
         <<: *binary_checkout
     - run:
@@ -842,7 +873,7 @@ jobs:
         image: ubuntu-1604:201903-01
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-    - should_run_job
+    - attach_scripts
     # TODO: We shouldn't attach the workspace multiple times
     - attach_workspace:
         at: /home/circleci/project
@@ -865,7 +896,7 @@ jobs:
         image: ubuntu-1604:201903-01
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-    - should_run_job
+    - attach_scripts
     - setup_linux_system_environment
     - setup_ci_environment
     - attach_workspace:
@@ -947,7 +978,7 @@ jobs:
       xcode: "9.4.1"
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-    - should_run_job
+    - attach_scripts
     - run:
         <<: *binary_checkout
     - run:
@@ -988,7 +1019,7 @@ jobs:
       xcode: "9.4.1"
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-    - should_run_job
+    - attach_scripts
     - run:
         <<: *binary_checkout
     - run:
@@ -1013,7 +1044,7 @@ jobs:
     steps:
     - attach_workspace:
         at: ~/workspace
-    - should_run_job
+    - attach_scripts
     - checkout
     - run_brew_for_ios_build
     - run:
@@ -1041,7 +1072,7 @@ jobs:
     steps:
     - attach_workspace:
         at: ~/workspace
-    - should_run_job
+    - attach_scripts
     - checkout
     - run_brew_for_ios_build
     - run:
@@ -1091,7 +1122,7 @@ jobs:
       image: ubuntu-1604:201903-01
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-    - should_run_job
+    - attach_scripts
     - setup_linux_system_environment
     - setup_ci_environment
     - run:
@@ -1136,7 +1167,7 @@ jobs:
       image: ubuntu-1604:201903-01
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-    - should_run_job
+    - attach_scripts
     - setup_linux_system_environment
     - setup_ci_environment
     - run:
@@ -1179,7 +1210,7 @@ jobs:
       xcode: "9.4.1"
     steps:
       # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-      - should_run_job
+      - attach_scripts
       - checkout
       - run_brew_for_macos_build
       - run:
@@ -1220,7 +1251,7 @@ jobs:
     steps:
       # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
       # This workspace also carries binaries from the build job
-      - should_run_job
+      - attach_scripts
       - run_brew_for_macos_build
       - run:
           name: Test
@@ -1246,7 +1277,7 @@ jobs:
     machine:
       image: ubuntu-1604:201903-01
     steps:
-    - should_run_job
+    - attach_scripts
     - setup_linux_system_environment
     - checkout
     - setup_ci_environment
@@ -1332,7 +1363,7 @@ jobs:
     machine:
       image: ubuntu-1604:201903-01
     steps:
-    - should_run_job
+    - attach_scripts
     - setup_linux_system_environment
     - checkout
     - setup_ci_environment
@@ -1368,7 +1399,7 @@ jobs:
     machine:
       image: ubuntu-1604:201903-01
     steps:
-    - should_run_job
+    - attach_scripts
     - run:
         name: filter out not PR runs
         no_output_timeout: "5m"
@@ -1411,7 +1442,7 @@ jobs:
       xcode: "11.2.1"
     steps:
       # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-      - should_run_job
+      - attach_scripts
       - checkout
       - run_brew_for_ios_build
       - run:
@@ -1523,6 +1554,24 @@ jobs:
             cd ${PROJ_ROOT}/ios/TestApp
             instruments -s -devices
             fastlane scan
+
+  promote_s3:
+    <<: *promote_common
+    steps:
+      - checkout
+      - run:
+          name: Running promote script
+          command: |
+            scripts/release/promote/wheel_to_s3.sh
+
+  promote_conda:
+    <<: *promote_common
+    steps:
+      - checkout
+      - run:
+          name: Running promote script
+          command: |
+            scripts/release/promote/conda_to_conda.sh
 
   # update_s3_htmls job
   # These jobs create html files for every cpu/cu## folder in s3. The html
@@ -1728,6 +1777,14 @@ jobs:
 workflows:
   build:
     jobs:
+      - setup:
+          # Run this job on everything since it is
+          # the dependency for everything.
+          filters:
+            tags:
+              only: /.*/
+            branches:
+              only: /.*/
       # Warning: indentation here matters!
 
       - pytorch_windows_build:
@@ -1862,11 +1919,15 @@ workflows:
           requires:
             - setup
             - pytorch_windows_vs2019_py36_cuda10.1_build
-      - setup
       - pytorch_linux_build:
           name: pytorch_linux_xenial_py3_5_build
           requires:
             - setup
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
           build_environment: "pytorch-linux-xenial-py3.5-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.5:f990c76a-a798-42bb-852f-5be5006f8026"
       - pytorch_linux_test:
@@ -1874,6 +1935,11 @@ workflows:
           requires:
             - setup
             - pytorch_linux_xenial_py3_5_build
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
           build_environment: "pytorch-linux-xenial-py3.5-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.5:f990c76a-a798-42bb-852f-5be5006f8026"
           resource_class: large
@@ -1933,6 +1999,11 @@ workflows:
           name: pytorch_paralleltbb_linux_xenial_py3_6_gcc5_4_build
           requires:
             - setup
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
           build_environment: "pytorch-paralleltbb-linux-xenial-py3.6-gcc5.4-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:f990c76a-a798-42bb-852f-5be5006f8026"
       - pytorch_linux_test:
@@ -1940,6 +2011,11 @@ workflows:
           requires:
             - setup
             - pytorch_paralleltbb_linux_xenial_py3_6_gcc5_4_build
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
           build_environment: "pytorch-paralleltbb-linux-xenial-py3.6-gcc5.4-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:f990c76a-a798-42bb-852f-5be5006f8026"
           resource_class: large
@@ -1947,6 +2023,11 @@ workflows:
           name: pytorch_parallelnative_linux_xenial_py3_6_gcc5_4_build
           requires:
             - setup
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
           build_environment: "pytorch-parallelnative-linux-xenial-py3.6-gcc5.4-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:f990c76a-a798-42bb-852f-5be5006f8026"
       - pytorch_linux_test:
@@ -1954,6 +2035,11 @@ workflows:
           requires:
             - setup
             - pytorch_parallelnative_linux_xenial_py3_6_gcc5_4_build
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
           build_environment: "pytorch-parallelnative-linux-xenial-py3.6-gcc5.4-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:f990c76a-a798-42bb-852f-5be5006f8026"
           resource_class: large
@@ -2234,11 +2320,19 @@ workflows:
             - pytorch_macos_10_13_py3_build
       - pytorch_android_gradle_build-x86_32:
           name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build-x86_32
+          filters:
+            branches:
+              only:
+                - master
           requires:
             - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_32_build
 
       - pytorch_android_gradle_build:
           name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build
+          filters:
+            branches:
+              only:
+                - master
           requires:
             - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_32_build
             - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_64_build
@@ -2367,6 +2461,8 @@ workflows:
           build_environment: "caffe2-onnx-ort2-py3.6-clang7-ubuntu16.04-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py3.6-clang7-ubuntu16.04:345"
           resource_class: large
+      # TODO: Refactor circleci/cimodel/data/binary_build_data.py to generate this file
+      #       instead of doing one offs here
       # Binary builds (subset, to smoke test that they'll work)
       #
       # NB: If you modify this file, you need to also modify
@@ -2386,6 +2482,10 @@ workflows:
           requires:
             - setup
           docker_image: "pytorch/manylinux-cuda102"
+          filters:
+            branches:
+              only:
+                - master
       - binary_linux_build:
           name: binary_linux_conda_2_7_cpu_devtoolset7_build
           build_environment: "conda 2.7 cpu devtoolset7"
@@ -2415,11 +2515,19 @@ workflows:
           build_environment: "wheel 3.6 cpu"
           requires:
             - setup
+          filters:
+            branches:
+              only:
+                - master
       - binary_mac_build:
           name: binary_macos_conda_2_7_cpu_build
           build_environment: "conda 2.7 cpu"
           requires:
             - setup
+          filters:
+            branches:
+              only:
+                - master
       # This job has an average run time of 3 hours o.O
       # Now only running this on master to reduce overhead
       - binary_mac_build:
@@ -2438,6 +2546,10 @@ workflows:
             - setup
             - binary_linux_manywheel_2_7mu_cpu_devtoolset7_build
           docker_image: "pytorch/manylinux-cuda102"
+          filters:
+            branches:
+              only:
+                - master
       - binary_linux_test:
           name: binary_linux_manywheel_3_7m_cu102_devtoolset7_test
           build_environment: "manywheel 3.7m cu102 devtoolset7"
@@ -2447,6 +2559,10 @@ workflows:
           docker_image: "pytorch/manylinux-cuda102"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
+          filters:
+            branches:
+              only:
+                - master
       - binary_linux_test:
           name: binary_linux_conda_2_7_cpu_devtoolset7_test
           build_environment: "conda 2.7 cpu devtoolset7"
@@ -2529,6 +2645,17 @@ workflows:
               only: postnightly
           docker_image: "pytorch/manylinux-cuda102"
       - smoke_linux_test:
+          name: smoke_linux_manywheel_3_8m_cpu_devtoolset7_nightly
+          build_environment: "manywheel 3.8m cpu devtoolset7"
+          requires:
+            - setup
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          docker_image: "pytorch/manylinux-cuda102"
+      - smoke_linux_test:
           name: smoke_linux_manywheel_2_7m_cu92_devtoolset7_nightly
           build_environment: "manywheel 2.7m cu92 devtoolset7"
           requires:
@@ -2583,6 +2710,19 @@ workflows:
       - smoke_linux_test:
           name: smoke_linux_manywheel_3_7m_cu92_devtoolset7_nightly
           build_environment: "manywheel 3.7m cu92 devtoolset7"
+          requires:
+            - setup
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          docker_image: "pytorch/manylinux-cuda92"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_linux_test:
+          name: smoke_linux_manywheel_3_8m_cu92_devtoolset7_nightly
+          build_environment: "manywheel 3.8m cu92 devtoolset7"
           requires:
             - setup
             - update_s3_htmls_for_nightlies
@@ -2659,6 +2799,19 @@ workflows:
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
+          name: smoke_linux_manywheel_3_8m_cu101_devtoolset7_nightly
+          build_environment: "manywheel 3.8m cu101 devtoolset7"
+          requires:
+            - setup
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          docker_image: "pytorch/manylinux-cuda101"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_linux_test:
           name: smoke_linux_manywheel_2_7m_cu102_devtoolset7_nightly
           build_environment: "manywheel 2.7m cu102 devtoolset7"
           requires:
@@ -2713,6 +2866,19 @@ workflows:
       - smoke_linux_test:
           name: smoke_linux_manywheel_3_7m_cu102_devtoolset7_nightly
           build_environment: "manywheel 3.7m cu102 devtoolset7"
+          requires:
+            - setup
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          docker_image: "pytorch/manylinux-cuda102"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_linux_test:
+          name: smoke_linux_manywheel_3_8m_cu102_devtoolset7_nightly
+          build_environment: "manywheel 3.8m cu102 devtoolset7"
           requires:
             - setup
             - update_s3_htmls_for_nightlies
@@ -3571,6 +3737,17 @@ workflows:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/manylinux-cuda102"
       - binary_linux_build:
+          name: binary_linux_manywheel_3_8m_cpu_devtoolset7_nightly_build
+          build_environment: "manywheel 3.8m cpu devtoolset7"
+          requires:
+            - setup
+          filters:
+            branches:
+              only: nightly
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          docker_image: "pytorch/manylinux-cuda102"
+      - binary_linux_build:
           name: binary_linux_manywheel_2_7m_cu92_devtoolset7_nightly_build
           build_environment: "manywheel 2.7m cu92 devtoolset7"
           requires:
@@ -3617,6 +3794,17 @@ workflows:
       - binary_linux_build:
           name: binary_linux_manywheel_3_7m_cu92_devtoolset7_nightly_build
           build_environment: "manywheel 3.7m cu92 devtoolset7"
+          requires:
+            - setup
+          filters:
+            branches:
+              only: nightly
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          docker_image: "pytorch/manylinux-cuda92"
+      - binary_linux_build:
+          name: binary_linux_manywheel_3_8m_cu92_devtoolset7_nightly_build
+          build_environment: "manywheel 3.8m cu92 devtoolset7"
           requires:
             - setup
           filters:
@@ -3681,6 +3869,17 @@ workflows:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/manylinux-cuda101"
       - binary_linux_build:
+          name: binary_linux_manywheel_3_8m_cu101_devtoolset7_nightly_build
+          build_environment: "manywheel 3.8m cu101 devtoolset7"
+          requires:
+            - setup
+          filters:
+            branches:
+              only: nightly
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
           name: binary_linux_manywheel_2_7m_cu102_devtoolset7_nightly_build
           build_environment: "manywheel 2.7m cu102 devtoolset7"
           requires:
@@ -3727,6 +3926,17 @@ workflows:
       - binary_linux_build:
           name: binary_linux_manywheel_3_7m_cu102_devtoolset7_nightly_build
           build_environment: "manywheel 3.7m cu102 devtoolset7"
+          requires:
+            - setup
+          filters:
+            branches:
+              only: nightly
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          docker_image: "pytorch/manylinux-cuda102"
+      - binary_linux_build:
+          name: binary_linux_manywheel_3_8m_cu102_devtoolset7_nightly_build
+          build_environment: "manywheel 3.8m cu102 devtoolset7"
           requires:
             - setup
           filters:
@@ -4602,6 +4812,18 @@ workflows:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/manylinux-cuda102"
       - binary_linux_test:
+          name: binary_linux_manywheel_3_8m_cpu_devtoolset7_nightly_test
+          build_environment: "manywheel 3.8m cpu devtoolset7"
+          requires:
+            - setup
+            - binary_linux_manywheel_3_8m_cpu_devtoolset7_nightly_build
+          filters:
+            branches:
+              only: nightly
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          docker_image: "pytorch/manylinux-cuda102"
+      - binary_linux_test:
           name: binary_linux_manywheel_2_7m_cu92_devtoolset7_nightly_test
           build_environment: "manywheel 2.7m cu92 devtoolset7"
           requires:
@@ -4663,6 +4885,20 @@ workflows:
           requires:
             - setup
             - binary_linux_manywheel_3_7m_cu92_devtoolset7_nightly_build
+          filters:
+            branches:
+              only: nightly
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          docker_image: "pytorch/manylinux-cuda92"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - binary_linux_test:
+          name: binary_linux_manywheel_3_8m_cu92_devtoolset7_nightly_test
+          build_environment: "manywheel 3.8m cu92 devtoolset7"
+          requires:
+            - setup
+            - binary_linux_manywheel_3_8m_cu92_devtoolset7_nightly_build
           filters:
             branches:
               only: nightly
@@ -4742,6 +4978,20 @@ workflows:
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
+          name: binary_linux_manywheel_3_8m_cu101_devtoolset7_nightly_test
+          build_environment: "manywheel 3.8m cu101 devtoolset7"
+          requires:
+            - setup
+            - binary_linux_manywheel_3_8m_cu101_devtoolset7_nightly_build
+          filters:
+            branches:
+              only: nightly
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          docker_image: "pytorch/manylinux-cuda101"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - binary_linux_test:
           name: binary_linux_manywheel_2_7m_cu102_devtoolset7_nightly_test
           build_environment: "manywheel 2.7m cu102 devtoolset7"
           requires:
@@ -4803,6 +5053,20 @@ workflows:
           requires:
             - setup
             - binary_linux_manywheel_3_7m_cu102_devtoolset7_nightly_build
+          filters:
+            branches:
+              only: nightly
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          docker_image: "pytorch/manylinux-cuda102"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - binary_linux_test:
+          name: binary_linux_manywheel_3_8m_cu102_devtoolset7_nightly_test
+          build_environment: "manywheel 3.8m cu102 devtoolset7"
+          requires:
+            - setup
+            - binary_linux_manywheel_3_8m_cu102_devtoolset7_nightly_build
           filters:
             branches:
               only: nightly
@@ -5614,6 +5878,18 @@ workflows:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
       - binary_linux_upload:
+          name: binary_linux_manywheel_3_8m_cpu_devtoolset7_nightly_upload
+          build_environment: "manywheel 3.8m cpu devtoolset7"
+          requires:
+            - setup
+            - binary_linux_manywheel_3_8m_cpu_devtoolset7_nightly_test
+          filters:
+            branches:
+              only: nightly
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          context: org-member
+      - binary_linux_upload:
           name: binary_linux_manywheel_2_7m_cu92_devtoolset7_nightly_upload
           build_environment: "manywheel 2.7m cu92 devtoolset7"
           requires:
@@ -5667,6 +5943,18 @@ workflows:
           requires:
             - setup
             - binary_linux_manywheel_3_7m_cu92_devtoolset7_nightly_test
+          filters:
+            branches:
+              only: nightly
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          context: org-member
+      - binary_linux_upload:
+          name: binary_linux_manywheel_3_8m_cu92_devtoolset7_nightly_upload
+          build_environment: "manywheel 3.8m cu92 devtoolset7"
+          requires:
+            - setup
+            - binary_linux_manywheel_3_8m_cu92_devtoolset7_nightly_test
           filters:
             branches:
               only: nightly
@@ -5734,6 +6022,18 @@ workflows:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           context: org-member
       - binary_linux_upload:
+          name: binary_linux_manywheel_3_8m_cu101_devtoolset7_nightly_upload
+          build_environment: "manywheel 3.8m cu101 devtoolset7"
+          requires:
+            - setup
+            - binary_linux_manywheel_3_8m_cu101_devtoolset7_nightly_test
+          filters:
+            branches:
+              only: nightly
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          context: org-member
+      - binary_linux_upload:
           name: binary_linux_manywheel_2_7m_cu102_devtoolset7_nightly_upload
           build_environment: "manywheel 2.7m cu102 devtoolset7"
           requires:
@@ -5787,6 +6087,18 @@ workflows:
           requires:
             - setup
             - binary_linux_manywheel_3_7m_cu102_devtoolset7_nightly_test
+          filters:
+            branches:
+              only: nightly
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          context: org-member
+      - binary_linux_upload:
+          name: binary_linux_manywheel_3_8m_cu102_devtoolset7_nightly_upload
+          build_environment: "manywheel 3.8m cu102 devtoolset7"
+          requires:
+            - setup
+            - binary_linux_manywheel_3_8m_cu102_devtoolset7_nightly_test
           filters:
             branches:
               only: nightly
@@ -6698,3 +7010,49 @@ workflows:
       - docker_hub_index_job
 
 
+  # Promotion workflow
+  promote:
+    jobs:
+      # Requires manual approval by someone in org-member
+      # CircleCI security context
+      - promote_approval:
+          context: org-member
+          type: approval
+          filters:
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*/
+            branches:
+                ignore: /.*/
+      - promote_s3:
+          context: org-member
+          name: promote_s3_libtorch
+          package_name: libtorch
+          requires:
+            - promote_approval
+          filters:
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*/
+            branches:
+                ignore: /.*/
+      - promote_s3:
+          context: org-member
+          name: promote_s3_torch
+          package_name: torch
+          requires:
+            - promote_approval
+          filters:
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*/
+            branches:
+                ignore: /.*/
+      - promote_conda:
+          context: org-member
+          name: promote_conda_pytorch
+          package_name: pytorch
+          requires:
+            - promote_approval
+          filters:
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*/
+            branches:
+                ignore: /.*/
