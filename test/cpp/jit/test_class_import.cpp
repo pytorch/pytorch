@@ -9,8 +9,6 @@
 namespace torch {
 namespace jit {
 
-using namespace torch::jit::script;
-
 static const auto classSrcs1 = R"JIT(
 class FooNestedTest:
     def __init__(self, y):
@@ -140,7 +138,7 @@ void testClassDerive() {
 static const auto torchbindSrc = R"JIT(
 class FooBar1234(Module):
   __parameters__ = []
-  f : __torch__.torch.classes._TorchScriptTesting_StackString
+  f : __torch__.torch.classes._TorchScriptTesting._StackString
   training : bool
   def forward(self: __torch__.FooBar1234) -> str:
     return (self.f).top()
