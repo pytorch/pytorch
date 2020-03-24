@@ -136,6 +136,7 @@ std::vector<size_t> getGeneralOpTensorInputIndexes(Node* n) {
       "upsample_bicubic2d",
       "dropout",
       "reshape",
+      "chunk",
       // TODO: sort returns a tuple of Tensors, we have
       // to extend the API to support that
       // "sort",
