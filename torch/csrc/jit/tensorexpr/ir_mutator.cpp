@@ -2,6 +2,7 @@
 
 #include <torch/csrc/jit/tensorexpr/eval.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
+#include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 
 namespace torch {
 namespace jit {
@@ -214,6 +215,7 @@ const Expr* IRMutator::mutate(const IfThenElse* v) {
   const Expr* condition_new = condition->accept_mutator(this);
   const Expr* true_value_new = true_value->accept_mutator(this);
   const Expr* false_value_new = false_value->accept_mutator(this);
+
   if (condition == condition_new && true_value == true_value_new &&
       false_value == false_value_new) {
     return v;
@@ -232,11 +234,24 @@ const Expr* IRMutator::mutate(const FunctionCall* v) {
   return this->mutate(base);
 }
 
-const Expr* IRMutator::mutate(const LinearForm* v) {
-  const Expr* new_x = v->getX()->accept_mutator(this);
-  const Expr* new_a = v->getA()->accept_mutator(this);
-  const Expr* new_b = v->getB()->accept_mutator(this);
-  return new LinearForm(new_x, new_a, new_b);
+const Expr* IRMutator::mutate(const Term* v) {
+  const Expr* newScalar = v->scalar()->accept_mutator(this);
+
+  std::vector<const Expr*> variables;
+  for (const auto* t : v->variables()) {
+    variables.push_back(t->accept_mutator(this));
+  }
+  return new Term(v->hasher(), newScalar, variables);
+}
+
+const Expr* IRMutator::mutate(const Polynomial* v) {
+  const Expr* newScalar = v->scalar()->accept_mutator(this);
+
+  std::vector<const Term*> variables;
+  for (const auto* t : v->variables()) {
+    variables.push_back(static_cast<const Term*>(t->accept_mutator(this)));
+  }
+  return new Polynomial(v->hasher(), newScalar, variables);
 }
 
 const Expr* IRMutator::mutate(const BaseCallNode* v) {

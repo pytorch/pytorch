@@ -136,6 +136,12 @@ void FoldPrePackingOps(script::Module& m) {
       "XNNPACK is not enabled. Please build with USE_XNNPACK=1");
 }
 
+void optimizeForMobile(script::Module& m) {
+  TORCH_INTERNAL_ASSERT(
+      "Mobile optimizaiton only available with XNNPACK at the moment. "
+      "XNNPACK is not enabled. Please build with USE_XNNPACK=1");
+}
+
 #endif
 } // namespace jit
 } // namespace torch
