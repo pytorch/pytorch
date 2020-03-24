@@ -285,6 +285,9 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
       return c10::nullopt;
     }
     auto axis = node->i(attr::axis);
+    // If axis attribute for onnx::Gather has a value less than 0,
+    // It needs to be adjusted (+= dim sizes) for aten op
+    axis += axis < 0 ? inputTensorValues[0].sizes().size() : 0;
     at::Tensor indices = inputTensorValues[1];
     // If indices input for onnx::Gather has a value less than 0,
     // It needs to be adjusted (+= dim value) for aten op

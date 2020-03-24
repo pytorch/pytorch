@@ -155,7 +155,8 @@ class TestUtilityFuns(TestCase):
                 a = torch.tensor([[1., 2., 3.], [4., 5., 6.]])
                 b = a[0:-1]        # index relative to the end
                 c = torch.select(a, dim=-1, index=-2)
-                return b + x, c
+                d = torch.select(a, dim=1, index=0)
+                return b + x, c + d
 
         _set_opset_version(self.opset_version)
         _set_operator_export_type(OperatorExportTypes.ONNX)
@@ -168,7 +169,6 @@ class TestUtilityFuns(TestCase):
             assert node.kind() != "onnx::Slice"
             assert node.kind() != "onnx::Cast"
             assert node.kind() != "onnx::Constant"
-        assert len(list(graph.nodes())) == 2
 
     def test_constant_fold_gather(self):
         class GatherModule(torch.nn.Module):
