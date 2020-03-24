@@ -1417,7 +1417,7 @@ Tensor any_sparse(const Tensor& self) {
   return at::any(self._values());
 }
 
-Tensor bmm_sparse_cpu(const SparseTensor& self, const Tensor& mat2) {
+Tensor bmm_sparse_cpu(const SparseTensor& self, const Tensor& mat2, optional<bool> deterministic_opt) {
   Tensor result = at::empty({}, mat2.options());
   return bmm_out_sparse_cpu(result, self, mat2);
 }
@@ -1461,7 +1461,7 @@ scalar_t binary_search_strided_rightmost(scalar_t search_val, scalar_t* sorted_a
   return mid_ind;
 }
 
-Tensor& bmm_out_sparse_cpu(Tensor& result, const SparseTensor& self, const Tensor& mat2) {
+Tensor& bmm_out_sparse_cpu(Tensor& result, const SparseTensor& self, const Tensor& mat2, optional<bool> deterministic_opt) {
   TORCH_CHECK(!mat2.is_sparse(), "bmm_sparse: Tensor 'mat2' must be dense");
 
   TORCH_CHECK(self.dense_dim() == 0, "bmm_sparse: Tensor 'self' must have 0 dense dims, but has ", self.dense_dim());

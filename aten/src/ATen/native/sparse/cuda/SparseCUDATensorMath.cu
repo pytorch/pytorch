@@ -722,15 +722,15 @@ Tensor _sparse_sum_backward_cuda(const Tensor& grad_, const SparseTensor& input_
   }
 }
 
-Tensor bmm_sparse_cuda(const SparseTensor& self, const Tensor& mat2) {
+Tensor bmm_sparse_cuda(const SparseTensor& self, const Tensor& mat2, optional<bool> deterministic_opt) {
   Tensor result = at::empty({self.size(0), mat2.size(2), self.size(1)}, mat2.options(), at::MemoryFormat::Contiguous);
-  return _bmm_out_sparse_cuda(result, self, mat2, false);
+  return bmm_out_sparse_cuda(result, self, mat2, deterministic_opt);
 }
 
-Tensor _bmm_sparse_cuda(const SparseTensor& self, const Tensor& mat2, bool deterministic) {
-  Tensor result = at::empty({self.size(0), mat2.size(2), self.size(1)}, mat2.options(), at::MemoryFormat::Contiguous);
-  return _bmm_out_sparse_cuda(result, self, mat2, deterministic);
-}
+// Tensor _bmm_sparse_cuda(const SparseTensor& self, const Tensor& mat2, bool deterministic) {
+//   Tensor result = at::empty({self.size(0), mat2.size(2), self.size(1)}, mat2.options(), at::MemoryFormat::Contiguous);
+//   return _bmm_out_sparse_cuda(result, self, mat2, deterministic);
+// }
 
 #ifndef __HIP_PLATFORM_HCC__
 __global__ void search_end_matrix_indices_cuda_kernel(
@@ -810,11 +810,8 @@ cudaDataType getTensorCudaDataType(Tensor self) {
 }
 #endif
 
-Tensor& bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tensor& mat2) {
-  return _bmm_out_sparse_cuda(result, self, mat2, false);
-}
-
-Tensor& _bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tensor& mat2, bool deterministic) {
+Tensor& bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tensor& mat2, optional<bool> deterministic_opt) {
+  bool deterministic = deterministic_opt.has_value() ? deterministic_opt.value() : false;
 #ifdef __HIP_PLATFORM_HCC__
   TORCH_CHECK(false, "bmm sparse-dense is not supported on HIP")
 #else

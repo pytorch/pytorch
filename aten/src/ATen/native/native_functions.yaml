@@ -666,7 +666,7 @@
 - func: blackman_window.periodic(int window_length, bool periodic, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   use_c10_dispatcher: unboxed_only
 
-- func: bmm(Tensor self, Tensor mat2) -> Tensor
+- func: bmm(Tensor self, Tensor mat2, *, bool? deterministic=False) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
@@ -676,26 +676,13 @@
     SparseCUDA: bmm_sparse_cuda
   supports_named_tensor: True
 
-- func: _bmm(Tensor self, Tensor mat2, bool deterministic) -> Tensor
-  use_c10_dispatcher: full
-  variants: function
-  dispatch:
-    SparseCUDA: _bmm_sparse_cuda
-  supports_named_tensor: True
-
-- func: bmm.out(Tensor self, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
+- func: bmm.out(Tensor self, Tensor mat2, *, bool? deterministic=False, Tensor(a!) out) -> Tensor(a!)
   variants: function
   dispatch:
     CPU: bmm_out_cpu
     CUDA: bmm_out_cuda
     SparseCPU: bmm_out_sparse_cpu
     SparseCUDA: bmm_out_sparse_cuda
-  supports_named_tensor: True
-
-- func: _bmm.out(Tensor self, Tensor mat2, bool deterministic, *, Tensor(a!) out) -> Tensor(a!)
-  variants: function
-  dispatch:
-    SparseCUDA: _bmm_out_sparse_cuda
   supports_named_tensor: True
 
 - func: broadcast_tensors(Tensor[] tensors) -> Tensor[]
