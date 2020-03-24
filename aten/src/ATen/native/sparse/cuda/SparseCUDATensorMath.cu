@@ -727,11 +727,6 @@ Tensor bmm_sparse_cuda(const SparseTensor& self, const Tensor& mat2, optional<bo
   return bmm_out_sparse_cuda(result, self, mat2, deterministic_opt);
 }
 
-// Tensor _bmm_sparse_cuda(const SparseTensor& self, const Tensor& mat2, bool deterministic) {
-//   Tensor result = at::empty({self.size(0), mat2.size(2), self.size(1)}, mat2.options(), at::MemoryFormat::Contiguous);
-//   return _bmm_out_sparse_cuda(result, self, mat2, deterministic);
-// }
-
 #ifndef __HIP_PLATFORM_HCC__
 __global__ void search_end_matrix_indices_cuda_kernel(
   int64_t* mat_el_end_indices,
