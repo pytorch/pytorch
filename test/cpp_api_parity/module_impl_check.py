@@ -172,12 +172,9 @@ def test_torch_nn_module_variant(unit_test_class, test_params):
 def compute_module_name(test_params_dict):
         fullname = test_params_dict.get('fullname', None)
         if fullname:
-                # NOTE: This doesn't work for some of the `wrap_functional` module tests such as "interpolate_nearest_1d",
-                # because in that case the module `interpolate` is not in `torch.nn` but rather in `torch.nn.functional`.
-                # We will fix this when we have parity tests for `torch.nn.functional` modules.
-                module_name = fullname.split('_')[0]
+            module_name = fullname.split('_')[0]
         else:
-                module_name = test_params_dict.get('module_name')
+            module_name = test_params_dict.get('module_name')
         return module_name
 
 def process_test_params_for_module(test_params_dict, device, test_instance_class):
