@@ -145,7 +145,7 @@ void testCustomOperatorAliasing() {
 
   {
     auto graph = std::make_shared<Graph>();
-    script::parseIR(
+    parseIR(
         R"IR(
 graph(%x: Tensor, %y: Tensor):
   %ret : Tensor = foo::aliasing(%x, %y)
@@ -172,7 +172,7 @@ graph(%x: Tensor, %y: Tensor):
   %ret : Tensor = foo::aliasing(%x, %y)
   return (%x)
   )IR";
-    script::parseIR(text, graph.get());
+    parseIR(text, graph.get());
     EliminateDeadCode(graph);
 
     testing::FileCheck().run(text, *graph);

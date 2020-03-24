@@ -377,6 +377,9 @@ void initPythonIRBindings(PyObject* module_) {
           "createFusionGroup",
           [](Graph& g) { return g.createWithSubgraph(prim::FusionGroup); })
       .def(
+          "createCudaFusionGroup",
+          [](Graph& g) { return g.createWithSubgraph(prim::CudaFusionGroup); })
+      .def(
           "createClone",
           [](Graph& g, Node* n, py::object fn) {
             return g.createClone(

@@ -6,7 +6,6 @@
 
 namespace torch {
 namespace jit {
-namespace script {
 
 struct NoneValue : SugaredValue {
   NoneValue() = default;
@@ -79,31 +78,40 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
     }
   }
   // accessing properties of Tensor and Device that are implemented as
-  // prim:: operators
-  using PropertiesLookup = std::
-      unordered_map<TypeKind, std::unordered_set<std::string>, EnumClassHash>;
+  // prim:: or aten:: operators
+  using PropertiesLookup = std::unordered_map<
+      TypeKind,
+      std::unordered_map<std::string, std::string>,
+      EnumClassHash>;
   static const PropertiesLookup builtin_properties = {
       {TypeKind::TensorType,
        {
-           "dtype",
-           "device",
-           "grad",
-           "data",
-           "shape",
-           "is_cuda",
-           "is_sparse",
-           "is_mkldnn",
-           "is_quantized",
-           "requires_grad",
-           "layout",
+           {"dtype", "prim"},
+           {"device", "prim"},
+           {"grad", "prim"},
+           {"data", "prim"},
+           {"shape", "prim"},
+           {"is_cuda", "prim"},
+           {"is_sparse", "prim"},
+           {"is_mkldnn", "prim"},
+           {"is_quantized", "prim"},
+           {"is_leaf", "aten"},
+           {"requires_grad", "prim"},
+           {"layout", "prim"},
+           {"T", "prim"},
+           {"ndim", "prim"},
+           {"name", "prim"},
        }},
-      {TypeKind::DeviceObjType, {"type", "index"}}};
+      {TypeKind::DeviceObjType, {{"type", "prim"}, {"index", "prim"}}}};
   auto kind = value_->type()->kind();
-  auto builtin_entry = builtin_properties.find(kind);
-  if (builtin_entry != builtin_properties.end()) {
-    if (builtin_entry->second.count(field) > 0) {
-      auto r =
-          m.graph()->insert(Symbol::fromQualString("prim::" + field), {value_});
+  auto types_for_builtin = builtin_properties.find(kind);
+  if (types_for_builtin != builtin_properties.end()) {
+    auto builtin_entry = types_for_builtin->second.find(field);
+    if (builtin_entry != types_for_builtin->second.end()) {
+      // A builtin was found, add it to the graph
+      auto the_namespace = builtin_entry->second;
+      auto r = m.graph()->insert(
+          Symbol::fromQualString(the_namespace + "::" + field), {value_});
       return std::make_shared<SimpleValue>(r);
     }
   }
@@ -614,6 +622,5 @@ std::shared_ptr<BuiltinFunction> BuiltinFunction::tryCreate(
   return nullptr;
 }
 
-} // namespace script
 } // namespace jit
 } // namespace torch
