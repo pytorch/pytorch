@@ -189,7 +189,6 @@ class TestUtilityFuns(TestCase):
                                              operator_export_type=OperatorExportTypes.ONNX)
         for node in graph.nodes():
             assert node.kind() != "onnx::Gather"
-        assert len(list(graph.nodes())) == 3
 
     def test_constant_fold_unsqueeze(self):
         class UnsqueezeModule(torch.nn.Module):
