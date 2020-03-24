@@ -458,6 +458,8 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/frontend/edit_distance.cpp
     ${TORCH_SRC_DIR}/csrc/jit/runtime/logging.cpp
     ${TORCH_SRC_DIR}/csrc/jit/api/module.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/mobile/register_mobile_ops.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/mobile/register_mobile_autograd.cpp
     ${TORCH_SRC_DIR}/csrc/jit/api/object.cpp
     ${TORCH_SRC_DIR}/csrc/jit/runtime/jit_exception.cpp
     ${TORCH_SRC_DIR}/csrc/jit/frontend/string_to_type.cpp
@@ -473,7 +475,6 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/codegen/fuser/fallback.cpp
     ${TORCH_SRC_DIR}/csrc/jit/api/function_impl.cpp
     ${TORCH_SRC_DIR}/csrc/jit/runtime/vararg_functions.cpp
-
     ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/codegen.cpp
     ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/eval.cpp
     ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/expr.cpp
