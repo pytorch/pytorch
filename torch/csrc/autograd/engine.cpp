@@ -76,6 +76,8 @@ static thread_local int current_depth = 0;
 // Total nested reentrant backwards calls over all threads for workder_device
 static thread_local int total_depth = 0;
 
+// The current GraphTask been executed by this thread. This helps
+// queue_callback() to find the target GraphTask to append final callbacks.
 static thread_local std::shared_ptr<GraphTask> current_graph_task = nullptr;
 
 // Returns true when t2 should be (weakly) BEFORE t1 in the queue.
@@ -311,17 +313,13 @@ auto Engine::thread_init(int device) -> void {
   }
 }
 
+// The guard that sets and restores current_graph_task.
 struct GraphTaskGuard {
   GraphTaskGuard(const std::shared_ptr<GraphTask>& graph_task) {
-    set_current_graph_task(graph_task);
-  }
-  ~GraphTaskGuard() { restore_current_graph_task(); }
-
-
-  void set_current_graph_task(const std::shared_ptr<GraphTask>& graph_task) {
     last_graph_task_ = std::move(current_graph_task);
     current_graph_task = graph_task;
   }
+  ~GraphTaskGuard() { restore_current_graph_task(); }
 
   void restore_current_graph_task() {
     current_graph_task = std::move(last_graph_task_);
@@ -380,6 +378,10 @@ auto Engine::thread_main(
       if (task.fn_ && !local_graph_task->has_error_.load()) {
         AutoGradMode grad_mode(local_graph_task->grad_mode_);
         try {
+          // The guard sets the thread_local current_graph_task on construction
+          // and restores it on exit. The current_graph_task variable helps
+          // queue_callback() to find the target GraphTask to append final
+          // callbacks.
           GraphTaskGuard guard(local_graph_task);
           evaluate_function(local_graph_task, task.fn_.get(), task.inputs_);
         } catch (std::exception& e) {
