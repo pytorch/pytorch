@@ -58,6 +58,9 @@ functional_tests = [
         fullname='sample_functional_no_parity',
         has_parity=False,
     ),
+    # This is to test that setting the `test_cpp_api_parity=False` flag skips
+    # the C++ API parity test accordingly (otherwise this test would run and
+    # throw a parity error).
     dict(
         constructor=wrap_functional(F.sample_functional, has_parity=False),
         cpp_options_args='F::SampleFunctionalFuncOptions(false)',

@@ -91,6 +91,9 @@ module_tests = [
         cpp_input_args=['torch::randn({3, 4})'],
         has_parity=False,
     ),
+    # This is to test that setting the `test_cpp_api_parity=False` flag skips
+    # the C++ API parity test accordingly (otherwise this test would run and
+    # throw a parity error).
     dict(
         fullname='SampleModule_THIS_TEST_SHOULD_BE_SKIPPED',
         constructor=lambda: SampleModule(False, True),
