@@ -26,6 +26,10 @@
 #include <mkl.h>
 #endif
 
+#ifdef __AVX2__
+#include <ATen/native/cpu/avx_mathfun.h>
+#endif
+
 namespace at { namespace native {
 namespace {
 
@@ -352,7 +356,6 @@ static void log_normal_kernel(TensorIterator& iter, double mean, double std, Gen
 }
 
 #ifdef __AVX2__
-#include <ATen/native/cpu/avx_mathfun.h>
 
 static void normal_fill_16_AVX2(float *data,
                          const __m256* two_pi,
