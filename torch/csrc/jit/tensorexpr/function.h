@@ -10,24 +10,6 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
-// represent a range [start, stop)
-class Range {
- public:
-  Range() {}
-  Range(const ExprHandle& start, const ExprHandle& stop)
-      : start_(start), stop_(stop) {}
-  const ExprHandle& start() const {
-    return start_;
-  }
-  const ExprHandle& stop() const {
-    return stop_;
-  }
-
- private:
-  ExprHandle start_;
-  ExprHandle stop_;
-};
-
 class Function : public KernelScopedObject {
  public:
   Function(
