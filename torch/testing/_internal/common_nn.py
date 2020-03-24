@@ -295,11 +295,8 @@ def _rand_tensor_non_equal(*size):
 
 def wrap_functional(fn, **kwargs):
     class FunctionalModule(nn.Module):
-        def __init__(self):
-            super(FunctionalModule, self).__init__()
-            self.fn = fn
         def forward(self, *args):
-            return self.fn(*args, **kwargs)
+            return fn(*args, **kwargs)
     return FunctionalModule
 
 
