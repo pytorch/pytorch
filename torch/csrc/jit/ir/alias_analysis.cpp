@@ -41,6 +41,9 @@ c10::optional<TypePtr> getMutableTypePtr(const TypePtr& type) {
     case TypeKind::TensorType:
       return unshapedType(type);
     case TypeKind::TupleType: {
+      // Refined tensor types are created in shape_analysis, constant insertion,
+      // maybe others.
+      // TODO: revisit removing  those locations
       std::vector<TypePtr> mutable_types;
       for (const auto& elem : type->expect<TupleType>()->elements()) {
         if (auto mut_elem = getMutableTypePtr(elem)) {
