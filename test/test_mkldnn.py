@@ -483,6 +483,54 @@ class TestMkldnn(TestCase):
                 y2.backward()
                 self.assertEqual(x1.grad, x2.grad.to_dense())
 
+    def test_batch_norm2d_relu(self):
+        input = torch.randn(2, 10, 35, 35, dtype=torch.float32)
+        input_mkldnn=input.to_mkldnn()
+        weight = torch.randn(10, dtype=torch.float32)
+        bias = torch.randn(10, dtype=torch.float32)
+        running_mean = torch.randn(10, dtype=torch.float32)
+        running_var = torch.randn(10, dtype=torch.float32)
+        momentum = 1.0
+        eps = 1.0
+        cudnn_enabled = False
+
+        for is_training in [True, False]:
+            out = torch.batch_norm(input, weight, bias, \
+			    running_mean, running_var, is_training, \
+			    momentum, eps, cudnn_enabled)
+            out = torch.relu(out)
+                    
+            out_mkldnn = torch._C._nn.batch_norm_relu(input_mkldnn, \
+			    weight, bias, running_mean, running_var, \
+			    is_training, momentum, eps) 
+            self.assertEqual(out, out_mkldnn[0].to_dense())
+
+    def test_batch_norm2d_relu_backward(self):
+        input = torch.randn(2, 10, 35, 35, dtype=torch.float32)
+        input_grad = input.clone().requires_grad_()
+        input_mkldnn=input.clone().to_mkldnn().requires_grad_()
+        input_perf=input.clone().to_mkldnn().requires_grad_()
+        weight = torch.randn(10, dtype=torch.float32)
+        bias = torch.randn(10, dtype=torch.float32)
+        running_mean = torch.randn(10, dtype=torch.float32)
+        running_var = torch.randn(10, dtype=torch.float32)
+        is_training = True
+        momentum = 1.0
+        eps = 1.0
+        cudnn_enabled = False
+        
+        out = torch.batch_norm(input_grad, weight, bias,
+              running_mean, running_var, is_training, momentum, eps, cudnn_enabled)
+        out = torch.relu(out)
+        y1 = out.sum()
+        y1.backward()
+
+        out_mkldnn = torch._C._nn.batch_norm_relu(input_mkldnn, 
+              weight, bias, running_mean, running_var, is_training, momentum, eps) 
+        y2 = out_mkldnn[0].to_dense().sum()
+        y2.backward()
+        self.assertEqual(input_grad.grad, input_mkldnn.grad.to_dense())
+
     def test_add(self):
         N = torch.randint(3, 10, (1,)).item()
         C = torch.randint(3, 100, (1,)).item()

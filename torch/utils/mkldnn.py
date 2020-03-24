@@ -91,7 +91,6 @@ class MkldnnBatchNorm2d(torch.jit.ScriptModule):
     def __init__(self, dense_module):
         super(MkldnnBatchNorm2d, self).__init__()
 
-        assert(not dense_module.training)
         assert(dense_module.track_running_stats)
         assert(dense_module.affine)
 
