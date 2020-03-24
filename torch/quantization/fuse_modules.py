@@ -21,15 +21,16 @@ def fuse_conv_bn(conv, bn):
     assert(conv.training == bn.training),\
         "Conv and BN both must be in the same mode (train or eval)."
 
+    is_3d = isinstance(conv, torch.nn.Conv3d)
+
     if conv.training:
         assert conv.bias is None, 'Only support fusing Conv2d that does not have bias'
         assert bn.num_features == conv.out_channels, 'Output channel of Conv2d must match num_features of BatchNorm2d'
         assert bn.affine, 'Only support fusing BatchNorm2d with affine set to True'
         assert bn.track_running_stats, 'Only support fusing BatchNorm2d with tracking_running_stats set to True'
         if isinstance(conv, torch.nn.Conv3d):
-            return torch.nn.intrinsic.ConvBn3d(conv, bn)
-        else:
-            return torch.nn.intrinsic.ConvBn2d(conv, bn)
+            return torch.nn.intrinsic.ConvBn3d(conv, bn) if is_3d \
+                else torch.nn.intrinsic.ConvBn2d(conv, bn)
     else:
         return torch.nn.utils.fuse_conv_bn_eval(conv, bn)
 
@@ -50,6 +51,11 @@ def fuse_conv_bn_relu(conv, bn, relu):
         "Conv and BN both must be in the same mode (train or eval)."
     is_3d = isinstance(conv, torch.nn.Conv3d)
     if conv.training:
+        assert conv.bias is None, 'Only support fusing Conv that does not have bias'
+        assert bn.num_features == conv.out_channels, 'Output channel of Conv must match num_features of BatchNorm'
+        assert bn.affine, 'Only support fusing BatchNorm with affine set to True'
+        assert bn.track_running_stats, 'Only support fusing BatchNorm with tracking_running_stats set to True'
+
         return torch_fused.ConvBnReLU3d(conv, bn, relu) if is_3d \
             else torch_fused.ConvBnReLU2d(conv, bn, relu)
     else:
@@ -135,6 +141,7 @@ def fuse_modules(model, modules_to_fuse, inplace=False, fuser_func=fuse_known_mo
     conv, bn, relu
     conv, relu
     linear, relu
+    bn, relu
     All other sequences are left unchanged.
     For these sequences, replaces the first item in the list
     with the fused module, replacing the rest of the modules

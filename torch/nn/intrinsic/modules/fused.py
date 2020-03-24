@@ -67,7 +67,7 @@ class ConvBnReLU3d(torch.nn.Sequential):
 
 
 class BNReLU2d(torch.nn.Sequential):
-    r"""This is a sequential container which calls the Conv 2d and ReLU modules.
+    r"""This is a sequential container which calls the BatchNorm 2d and ReLU modules.
     During quantization this will be replaced with the corresponding fused module."""
     def __init__(self, batch_norm, relu):
         assert type(batch_norm) == BatchNorm2d and type(relu) == ReLU, \
@@ -76,7 +76,7 @@ class BNReLU2d(torch.nn.Sequential):
         super(BNReLU2d, self).__init__(batch_norm, relu)
 
 class BNReLU3d(torch.nn.Sequential):
-    r"""This is a sequential container which calls the Conv 2d and ReLU modules.
+    r"""This is a sequential container which calls the BatchNorm 3d and ReLU modules.
     During quantization this will be replaced with the corresponding fused module."""
     def __init__(self, batch_norm, relu):
         assert type(batch_norm) == BatchNorm3d and type(relu) == ReLU, \
