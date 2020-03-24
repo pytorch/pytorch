@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/tensorexpr/ir_visitor.h>
 
 #include <torch/csrc/jit/tensorexpr/ir.h>
+#include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
 namespace torch {
@@ -176,10 +177,18 @@ void IRVisitor::visit(const Cond* v) {
   }
 }
 
-void IRVisitor::visit(const LinearForm* v) {
-  v->getA()->accept(this);
-  v->getX()->accept(this);
-  v->getB()->accept(this);
+void IRVisitor::visit(const Term* v) {
+  v->scalar()->accept(this);
+  for (auto* t : v->variables()) {
+    t->accept(this);
+  }
+}
+
+void IRVisitor::visit(const Polynomial* v) {
+  v->scalar()->accept(this);
+  for (auto* t : v->variables()) {
+    t->accept(this);
+  }
 }
 
 } // namespace tensorexpr
