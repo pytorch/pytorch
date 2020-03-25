@@ -6205,6 +6205,15 @@ class TestTorchDeviceType(TestCase):
         expected_inv = torch.as_tensor(inv(matrices.cpu().numpy()))
         self.assertEqual(matrices_inverse, expected_inv.to(device))
 
+    @dtypes(torch.int8, torch.int16, torch.int32, torch.int64)
+    def test_signed_shift(self, device, dtype):
+        "Ensure that signed integer bit shifting works as expected."
+        a = torch.tensor([-10, 10], device=device, dtype=dtype)  # [11...1110110, 1010]
+        expected_l = torch.tensor([-40, 40], device=device, dtype=dtype)  # [11...11011000, 101000]
+        self.assertEqual(a << 2, expected_l)
+        expected_r = torch.tensor([torch.iinfo(dtype).max - 4, 5], device=device, dtype=dtype) # [1111...111011, 101]
+        self.assertEqual(a >> 1, expected_r)
+
     def test_bitwise_not(self, device):
         res = 0xffff - torch.arange(127, dtype=torch.int8, device=device)
         for dtype in (torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64):
