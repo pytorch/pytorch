@@ -65,6 +65,11 @@ struct PatternsAndModules {
   Module packed_params_module;
 };
 
+// These are the prim::CallFunctions that doesn't require observation and
+// have a single input Tensor
+// example: `prim::CallFunction(%dropout, %input_tensor, ...)
+// so we propagate observed property from %input_tensor to the
+// output of the `prim::CallFunction`
 std::vector<std::string> _single_input_general_call_funcs = {
   "adaptive_avg_pool2d",
   "_max_pool2d",
@@ -236,6 +241,8 @@ bool nodeQuantizable(Node* n) {
     });
 }
 
+// We don't want to analyze the graph for some `builtin` CallFunctions
+// like `linear` because we want to preserve the op boundary
 bool userDefinedCallFunction(Node* n) {
   return n->kind() == prim::CallFunction &&
     !isFunctionNode(
