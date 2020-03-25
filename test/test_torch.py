@@ -12559,6 +12559,19 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(top1, top2)
         self.assertEqual(idx1, idx2)
 
+    def test_topk_nonfinite(self, device):
+        for dtype in (torch.float, torch.double):
+            x = torch.tensor([float('nan'), float('inf'), 1e10, 0, -1e10, -float('inf')], device=device)
+            val, idx = x.topk(4)
+            expect = torch.tensor([float('nan'), float('inf'), 1e10, 0], device=device)
+            self.assertEqual(val, expect, allow_inf=True)
+            self.assertEqual(idx, [0, 1, 2, 3])
+
+            val, idx = x.topk(4, largest=False)
+            expect = torch.tensor([-float('inf'), -1e10, 0, 1e10], device=device)
+            self.assertEqual(val, expect, allow_inf=True)
+            self.assertEqual(idx, [5, 4, 3, 2])
+
     def test_is_signed(self, device):
         self.assertEqual(torch.IntTensor(5).to(device).is_signed(), True)
         self.assertEqual(torch.ByteTensor(5).to(device).is_signed(), False)
@@ -14162,6 +14175,29 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
     @onlyCPU
     @dtypes(torch.float, torch.double)
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_hardswish(self, device, dtype):
+        inputValues = [-1000, -4, -3, -2, 0, 2, 3, 4, 1000]
+        expectedOutput = np.multiply(
+            inputValues,
+            np.minimum(np.maximum((np.add(inputValues, 3)), 0), 6) / 6.0)
+        precision_4dps = 0.0002
+
+        inputTensor = torch.tensor(inputValues, dtype=dtype, device=device)
+        expectedOutputTensor = \
+            torch.tensor(expectedOutput, dtype=dtype, device=device)
+
+        # normal
+        self.assertEqual(torch.nn.functional.hardswish(inputTensor),
+                         expectedOutputTensor, precision_4dps)
+
+        # inplace
+        inputTensorCpy = inputTensor.clone().detach()
+        torch.nn.functional.hardswish(inputTensorCpy, inplace=True)
+        self.assertEqual(inputTensorCpy, expectedOutputTensor, precision_4dps)
+
+    @onlyCPU
+    @dtypes(torch.float, torch.double)
     def test_sigmoid(self, device, dtype):
         # TODO: why not simulate math.sigmoid like with rsqrt?
         inputValues = [-1000, -1, 0, 0.5, 1, 2, 1000]
@@ -15070,6 +15106,33 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         concat_list.append(torch.ones((SIZE2, 1024 * 512), dtype=torch.uint8, device=device))
         result = torch.cat(concat_list)
         self.assertEqual(result.size(0), SIZE1 + SIZE2)
+
+    @onlyOnCPUAndCUDA
+    def test_cat_bad_dtypes(self, device):
+        def cross_product(a, b, skip_same=True):
+            result = []
+            for dtype_a in a:
+                for dtype_b in b:
+                    if skip_same and (dtype_a == dtype_b):
+                        continue
+                    result.append((dtype_a, dtype_b))
+            return result
+
+        in_shape = (1, 2, 3)
+        out_shape = (2, 2, 3)
+
+        all_dtypes = (torch.uint8, torch.int8, torch.int16, torch.int32,
+                      torch.int64, torch.float, torch.double, torch.half,
+                      torch.bfloat16)
+        all_dtype_combinations = cross_product(all_dtypes, all_dtypes,
+                                               skip_same=True)
+        out = torch.empty(out_shape)
+        for (dtype_a, dtype_b) in all_dtype_combinations:
+            a = torch.ones(in_shape, dtype=dtype_a).to(device)
+            b = torch.ones(in_shape, dtype=dtype_b).to(device)
+            self.assertRaises(RuntimeError, lambda: torch.cat([a, b]))
+            self.assertRaises(RuntimeError, lambda: torch.cat([a, b], out=out))
+
 
     @onlyCPU
     def test_max_mixed_devices(self, device):
