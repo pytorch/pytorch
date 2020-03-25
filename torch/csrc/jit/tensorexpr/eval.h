@@ -796,15 +796,14 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
       internal_buffers_;
 };
 
-using VarMapping = std::vector<std::pair<ExprHandle, ExprHandle>>;
+using VarMapping = std::vector<std::pair<const Var*, const Expr*>>;
 
 class VarSubMutator : public IRMutator {
  public:
   VarSubMutator(const VarMapping& var_mapping) {
     for (const auto& entry : var_mapping) {
-      const ExprHandle& key = entry.first;
-      const ExprHandle& value = entry.second;
-      const Var* key_var = key.AsNode<Var>();
+      const Var* key_var = entry.first;
+      const Expr* value = entry.second;
       if (!key_var) {
         throw malformed_input();
       }
@@ -815,13 +814,13 @@ class VarSubMutator : public IRMutator {
   const Expr* mutate(const Var* var) override {
     auto iter = var_mapping_.find(var);
     if (iter == var_mapping_.end()) {
-      return const_cast<Var*>(var);
+      return var;
     }
-    return iter->second.node();
+    return iter->second;
   }
 
  private:
-  std::unordered_map<const Var*, ExprHandle> var_mapping_;
+  std::unordered_map<const Var*, const Expr*> var_mapping_;
 };
 
 template <class CodeGenType>
