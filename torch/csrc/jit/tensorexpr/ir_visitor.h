@@ -42,8 +42,7 @@ class FunctionCall;
 class Allocate;
 class Free;
 class Cond;
-class Term;
-class Polynomial;
+class LinearForm;
 
 class TORCH_API IRVisitor {
  public:
@@ -91,8 +90,7 @@ class TORCH_API IRVisitor {
   virtual void visit(const Allocate* v);
   virtual void visit(const Free* v);
   virtual void visit(const Cond* v);
-  virtual void visit(const Term* v);
-  virtual void visit(const Polynomial* v);
+  virtual void visit(const LinearForm* v);
 };
 
 } // namespace tensorexpr
