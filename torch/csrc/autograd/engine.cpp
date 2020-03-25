@@ -76,7 +76,7 @@ static thread_local int current_depth = 0;
 // Total nested reentrant backwards calls over all threads for workder_device
 static thread_local int total_depth = 0;
 
-// The current GraphTask been executed by this thread. This helps
+// The current GraphTask being executed by this thread. This helps
 // queue_callback() to find the target GraphTask to append final callbacks.
 static thread_local std::shared_ptr<GraphTask> current_graph_task = nullptr;
 
