@@ -3,7 +3,6 @@
 
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/native/TensorIterator.h>
-#include <ATen/native/cuda/zmath.cuh>
 
 namespace at { namespace native {
 
@@ -103,3 +102,6 @@ void gpu_kernel_with_scalars(TensorIterator& iter, const func_t& f) {
 }
 
 }} //namespace at::native
+
+//avoid include interaction
+#include <ATen/native/cuda/zmath.cuh>
