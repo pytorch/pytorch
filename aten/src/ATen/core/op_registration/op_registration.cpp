@@ -133,10 +133,6 @@ Module& Module::def(FunctionSchema&& schema) & {
   registrars_.emplace_back(Dispatcher::singleton().registerDef(std::move(schema)));
   return *this;
 }
-Module&& Module::def(FunctionSchema&& schema) && {
-  def(std::move(schema));
-  return std::move(*this);
-}
 
 Module& Module::def(c10::either<OperatorName, FunctionSchema>&& name_or_schema, CppFunction&& f) & {
   FunctionSchema schema = [&] {
@@ -159,10 +155,6 @@ Module& Module::def(c10::either<OperatorName, FunctionSchema>&& name_or_schema, 
   registrars_.emplace_back(Dispatcher::singleton().registerImpl(name, f.dispatch_key_, std::move(f.func_), std::move(f.schema_), std::move(f.debug_)));
   return *this;
 }
-Module&& Module::def(c10::either<OperatorName, FunctionSchema>&& name_or_schema, CppFunction&& f) && {
-  def(std::move(name_or_schema), std::move(f));
-  return std::move(*this);
-}
 
 Module& Module::impl(const char* name_str, CppFunction&& f) & {
   auto name = torch::jit::parseName(name_str);
@@ -178,20 +170,12 @@ Module& Module::impl(const char* name_str, CppFunction&& f) & {
   );
   return *this;
 }
-Module&& Module::impl(const char* name_str, CppFunction&& f) && {
-  impl(name_str, std::move(f));
-  return std::move(*this);
-}
 
 Module& Module::fallback(CppFunction&& f) & {
   TORCH_CHECK(!ns_, "Cannot define fallbacks from namespaces, use c10::import().fallback() instead");
   TORCH_CHECK(f.dispatch_key_, "Fallback for catch all function not supported");
   registrars_.emplace_back(Dispatcher::singleton().registerFallback(*f.dispatch_key_, std::move(f.func_)));
   return *this;
-}
-Module&& Module::fallback(CppFunction&& f) && {
-  fallback(std::move(f));
-  return std::move(*this);
 }
 
 }

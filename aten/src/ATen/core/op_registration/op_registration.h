@@ -749,18 +749,22 @@ inline FunctionSchema schema(const char* s) {
 }
 inline FunctionSchema&& schema(FunctionSchema&& s) { return std::move(s); }
 
-inline c10::either<OperatorName, FunctionSchema> constructSchemaOrName(FunctionSchema&& s) {
-  return c10::make_right<OperatorName, FunctionSchema>(std::move(s));
-}
-inline c10::either<OperatorName, FunctionSchema> constructSchemaOrName(OperatorName&& n) {
-  return c10::make_left<OperatorName, FunctionSchema>(std::move(n));
-}
-inline c10::either<OperatorName, FunctionSchema> constructSchemaOrName(const char* str) {
-  auto s = torch::jit::parseSchemaOrName(str);
-  if (s.is_right()) {
-    s.right().setAliasAnalysis(AliasAnalysisKind::FROM_SCHEMA);
+namespace detail {
+
+  inline c10::either<OperatorName, FunctionSchema> constructSchemaOrName(FunctionSchema&& s) {
+    return c10::make_right<OperatorName, FunctionSchema>(std::move(s));
   }
-  return s;
+  inline c10::either<OperatorName, FunctionSchema> constructSchemaOrName(OperatorName&& n) {
+    return c10::make_left<OperatorName, FunctionSchema>(std::move(n));
+  }
+  inline c10::either<OperatorName, FunctionSchema> constructSchemaOrName(const char* str) {
+    auto s = torch::jit::parseSchemaOrName(str);
+    if (s.is_right()) {
+      s.right().setAliasAnalysis(AliasAnalysisKind::FROM_SCHEMA);
+    }
+    return s;
+  }
+
 }
 
 // Represents a namespace in which we can define operators.  Conventionally
@@ -827,70 +831,65 @@ public:
   // Declare an operator with a schema, but don't provide any implementations
   // for it.  You're expected to then provide implementations using the
   // impl() method.
-  Module&& def(FunctionSchema&& schema) &&;
   Module& def(FunctionSchema&& schema) &;
-  template <typename Schema>
-  Module&& def(Schema&& raw_schema) && {
-    FunctionSchema s = schema(std::forward<Schema>(raw_schema));
-    return std::move(*this).def(std::move(s));
-  }
   template <typename Schema>
   Module& def(Schema&& raw_schema) & {
     FunctionSchema s = schema(std::forward<Schema>(raw_schema));
     return def(std::move(s));
+  }
+  template <typename Schema>
+  Module&& def(Schema&& raw_schema) && {
+    def(std::forward<Schema>(raw_schema));
+    return std::move(*this);
   }
 
   // Convenience method to define an operator for a schema and then register
   // an implementation for it.  def(n, f) is almost equivalent to def(n).impl(f),
   // except that if n is not a schema, then the schema is inferred from the
   // static type of f.
-  Module&& def(c10::either<OperatorName, FunctionSchema>&&, CppFunction&& f) &&;
   Module& def(c10::either<OperatorName, FunctionSchema>&&, CppFunction&& f) &;
-  template <typename NameOrSchema, typename Func>
-  Module&& def(NameOrSchema&& raw_name_or_schema, Func&& raw_f) && {
-    CppFunction f(std::forward<Func>(raw_f));
-    auto name_or_schema = constructSchemaOrName(std::forward<NameOrSchema>(raw_name_or_schema));
-    return std::move(*this).def(std::move(name_or_schema), std::move(f));
-  }
   template <typename NameOrSchema, typename Func>
   Module& def(NameOrSchema&& raw_name_or_schema, Func&& raw_f) & {
     CppFunction f(std::forward<Func>(raw_f));
-    auto name_or_schema = constructSchemaOrName(std::forward<NameOrSchema>(raw_name_or_schema));
+    auto name_or_schema = detail::constructSchemaOrName(std::forward<NameOrSchema>(raw_name_or_schema));
     return def(std::move(name_or_schema), std::move(f));
+  }
+  template <typename NameOrSchema, typename Func>
+  Module&& def(NameOrSchema&& raw_name_or_schema, Func&& raw_f) && {
+    def(std::forward<NameOrSchema>(raw_name_or_schema), std::forward<Func>(raw_f));
+    return std::move(*this);
   }
 
   // Register an implementation for an operator.  You may register multiple
   // implementations for a single operator at different dispatch keys
   // (see torch::dispatch).  Implementations must have a corresponding
   // declaration (from def), otherwise they are invalid.
-  Module&& impl(const char* name, CppFunction&& f) &&;
   Module& impl(const char* name, CppFunction&& f) &;
-  template <typename Func>
-  Module&& impl(const char* name, Func&& raw_f) && {
-    CppFunction f(std::forward<Func>(raw_f));
-    return std::move(*this).impl(name, std::move(f));
-  }
   template <typename Func>
   Module& impl(const char* name, Func&& raw_f) & {
     CppFunction f(std::forward<Func>(raw_f));
     return impl(name, std::move(f));
+  }
+  template <typename Func>
+  Module&& impl(const char* name, Func&& raw_f) && {
+    impl(name, std::forward<Func>(raw_f));
+    return std::move(*this);
   }
 
   // Register a fallback implementation for all operators which will be used
   // if there is not a specific implementation for an operator available.
   // At the moment, you must specify a dispatch key (see torch::dispatch) for
   // your fallback.
-  Module&& fallback(CppFunction&& f) &&;
   Module& fallback(CppFunction&& f) &;
-  template <typename Func>
-  Module&& fallback(Func&& raw_f) && {
-    CppFunction f(std::forward<Func>(raw_f));
-    return std::move(*this).fallback(std::move(f));
-  }
   template <typename Func>
   Module& fallback(Func&& raw_f) & {
     CppFunction f(std::forward<Func>(raw_f));
     return fallback(std::move(f));
+  }
+  template <typename Func>
+  Module&& fallback(Func&& raw_f) && {
+    fallback(std::forward<Func>(raw_f));
+    return std::move(*this);
   }
 };
 
