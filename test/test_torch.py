@@ -15207,8 +15207,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     def test_float_to_int_conversion_precision(self, device, dtype):
         min = np.finfo(np.float32).min
         max = np.finfo(np.float32).max
-        t = torch.tensor((min, max), device=device, dtype=torch.float)
-        a = np.array((min, max), dtype=np.float32)
+        t = torch.tensor((float('-inf'), min, max, float('inf')), device=device, dtype=torch.float)
+        a = np.array((float('-inf'), min, max, float('inf')), dtype=np.float32)
 
         torch_to_np = {
             torch.bool  : np.bool,
