@@ -6211,7 +6211,7 @@ class TestTorchDeviceType(TestCase):
         a = torch.tensor([-10, 10], device=device, dtype=dtype)  # [11...1110110, 1010]
         expected_l = torch.tensor([-40, 40], device=device, dtype=dtype)  # [11...11011000, 101000]
         self.assertEqual(a << 2, expected_l)
-        expected_r = torch.tensor([torch.iinfo(dtype).max - 4, 5], device=device, dtype=dtype) # [1111...111011, 101]
+        expected_r = torch.tensor([torch.iinfo(dtype).max - 4, 5], device=device, dtype=dtype)  # [1111...111011, 101]
         self.assertEqual(a >> 1, expected_r)
 
     def test_bitwise_not(self, device):
