@@ -281,8 +281,11 @@ void ProcessGroupAgent::shutdown() {
       }
     }
   }
-  threadPool_.waitWorkComplete();
   listenerThread_.join();
+  // Note: calling threadPool_.waitWorkComplete() after listenerThread.join() so
+  // that we can finish any possible work enqueued into the thread pool, before
+  // python RPC handler is shutdown (see shutdown in rpc/api.py).
+  threadPool_.waitWorkComplete();
 }
 
 std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
