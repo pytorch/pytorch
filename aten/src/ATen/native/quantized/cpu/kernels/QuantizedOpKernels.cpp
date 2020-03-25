@@ -404,6 +404,46 @@ void qclamp_kernel(
   });
 }
 
+void qhardswish_kernel(const Tensor& qx, Tensor& qy) {
+  const auto i_scale = qx.q_scale();
+  const auto i_zero_point = qx.q_zero_point();
+
+  const auto o_scale = qy.q_scale();
+  const auto o_zero_point = qy.q_zero_point();
+  const float o_inv_scale = 1.0 / o_scale;
+
+  using fVec = Vec256<float>;
+  fVec i_scale_vec(i_scale);
+  fVec i_zero_point_vec(i_zero_point);
+  fVec i_scale_neg_zp_premul_vec = i_scale_vec * i_zero_point_vec.neg();
+  fVec zero_vec(0.0f);
+  fVec three_vec(3.0f);
+  fVec six_vec(6.0f);
+
+  AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qhardswish", [&]() {
+    using qVec = Vec256<scalar_t>;
+    auto iter = TensorIterator::unary_op(qy, qx);
+    cpu_kernel_vec(
+        iter,
+        [&](scalar_t value) -> scalar_t {
+          const auto x = at::dequantize_val(i_scale, i_zero_point, value);
+          const auto y = x * std::min(std::max(x + 3.0f, 0.0f), 6.0f) / 6.0f;
+          return at::quantize_val<scalar_t>(o_scale, o_zero_point, y);
+        },
+        [&](qVec value) -> qVec {
+          auto value_dx = value.dequantize(i_scale_vec, i_zero_point_vec,
+                                           i_scale_neg_zp_premul_vec);
+          for (int idx = 0; idx < value_dx.size(); idx++) {
+            value_dx[idx] = value_dx[idx] * vec256::minimum(
+              vec256::maximum(value_dx[idx] + three_vec, zero_vec),
+              six_vec
+            ) / six_vec;
+          }
+          return qVec::quantize(value_dx, o_scale, o_zero_point, o_inv_scale);
+        });
+  });
+}
+
 
 void qtanh_kernel(const Tensor& qx, Tensor& qy) {
   int64_t zero_point = qx.q_zero_point();
@@ -1506,6 +1546,7 @@ REGISTER_DISPATCH(qsigmoid_stub, &qsigmoid_kernel);
 REGISTER_DISPATCH(qhardsigmoid_stub, &qhardsigmoid_kernel);
 REGISTER_DISPATCH(qclamp_stub, &qclamp_kernel);
 REGISTER_DISPATCH(qtanh_stub, &qtanh_kernel);
+REGISTER_DISPATCH(qhardswish_stub, &qhardswish_kernel);
 REGISTER_DISPATCH(qelu_stub, &qelu_kernel);
 REGISTER_DISPATCH(qadd_relu_stub, &qadd_kernel<true>);
 REGISTER_DISPATCH(qadd_stub, &qadd_kernel<false>);
