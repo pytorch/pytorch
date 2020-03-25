@@ -99,9 +99,9 @@ public:
     return _mm256_movemask_ps(cmp);
   }
   Vec256<float> map(float (*f)(float)) const {
-    __at_align32__ float tmp[8];
+    __at_align32__ float tmp[size()];
     store(tmp);
-    for (int64_t i = 0; i < 8; i++) {
+    for (int64_t i = 0; i < size(); i++) {
       tmp[i] = f(tmp[i]);
     }
     return loadu(tmp);

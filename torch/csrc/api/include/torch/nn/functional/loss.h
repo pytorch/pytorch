@@ -377,7 +377,7 @@ namespace detail {
 inline Tensor multilabel_margin_loss(
     const Tensor& input,
     const Tensor& target,
-    MultiLabelMarginLossFuncOptions::reduction_t reduction) {
+    MultilabelMarginLossFuncOptions::reduction_t reduction) {
   return torch::multilabel_margin_loss(
     input,
     target,
@@ -389,18 +389,18 @@ inline Tensor multilabel_margin_loss(
 /// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.multilabel_margin_loss
 /// about the exact behavior of this functional.
 ///
-/// See the documentation for `torch::nn::functional::MultiLabelMarginLossFuncOptions` class to learn what
+/// See the documentation for `torch::nn::functional::MultilabelMarginLossFuncOptions` class to learn what
 /// optional arguments are supported for this functional.
 ///
 /// Example:
 /// ```
 /// namespace F = torch::nn::functional;
-/// F::multilabel_margin_loss(input, target, F::MultiLabelMarginLossFuncOptions(torch::kNone));
+/// F::multilabel_margin_loss(input, target, F::MultilabelMarginLossFuncOptions(torch::kNone));
 /// ```
 inline Tensor multilabel_margin_loss(
     const Tensor& input,
     const Tensor& target,
-    const MultiLabelMarginLossFuncOptions& options = {}) {
+    const MultilabelMarginLossFuncOptions& options = {}) {
   return detail::multilabel_margin_loss(input, target, options.reduction());
 }
 
@@ -446,7 +446,7 @@ inline Tensor multilabel_soft_margin_loss(
     const Tensor& input,
     const Tensor& target,
     const Tensor& weight,
-    MultiLabelSoftMarginLossFuncOptions::reduction_t reduction) {
+    MultilabelSoftMarginLossFuncOptions::reduction_t reduction) {
   auto loss = -(target * torch::log_sigmoid(input) + (1 - target) * torch::log_sigmoid(-input));
   if (weight.defined()) {
     loss = loss * weight;
@@ -477,18 +477,18 @@ inline Tensor multilabel_soft_margin_loss(
 /// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.multilabel_soft_margin_loss
 /// about the exact behavior of this functional.
 ///
-/// See the documentation for `torch::nn::functional::MultiLabelSoftMarginLossFuncOptions` class to learn what
+/// See the documentation for `torch::nn::functional::MultilabelSoftMarginLossFuncOptions` class to learn what
 /// optional arguments are supported for this functional.
 ///
 /// Example:
 /// ```
 /// namespace F = torch::nn::functional;
-/// F::multilabel_soft_margin_loss(input, target, F::MultiLabelSoftMarginLossFuncOptions().reduction(torch::kNone).weight(weight));
+/// F::multilabel_soft_margin_loss(input, target, F::MultilabelSoftMarginLossFuncOptions().reduction(torch::kNone).weight(weight));
 /// ```
 inline Tensor multilabel_soft_margin_loss(
     const Tensor& input,
     const Tensor& target,
-    const MultiLabelSoftMarginLossFuncOptions& options = {}) {
+    const MultilabelSoftMarginLossFuncOptions& options = {}) {
   return detail::multilabel_soft_margin_loss(input, target, options.weight(), options.reduction());
 }
 

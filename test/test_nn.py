@@ -40,11 +40,11 @@ from torch.autograd.gradcheck import gradgradcheck
 from torch.nn import Parameter
 from torch.nn.parallel._functions import Broadcast
 from torch.testing._internal.common_utils import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, skipIfRocm, \
-    TEST_NUMPY, TEST_SCIPY, TEST_WITH_ROCM, download_file, PY3, to_gpu, \
+    TEST_NUMPY, TEST_SCIPY, TEST_WITH_ROCM, download_file, PY3, \
     get_function_arglist, load_tests, repeat_test_for_types, ALL_TENSORTYPES, \
     ALL_TENSORTYPES2, TemporaryFileName, TEST_WITH_UBSAN, IS_PPC
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, TEST_CUDNN_VERSION
-from torch.testing._internal.common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
+from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, NewCriterionTest, \
     module_tests, criterion_tests, new_criterion_tests, loss_reference_fns, \
     ctcloss_reference, new_module_tests
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, \
@@ -200,269 +200,6 @@ class PackedSequenceTest(TestCase):
         for param in m.parameters():
             if param.dim() == 4:
                 self.assertTrue(param.is_contiguous(memory_format=torch.channels_last))
-
-
-class InputVariableMixin(object):
-    def _get_input(self):
-        input = TestBase._get_input(self, False)
-
-        def map_variables(i):
-            if isinstance(i, torch.Tensor):
-                if i.is_floating_point():
-                    i.requires_grad = True
-                return i
-            else:
-                return type(i)(map_variables(elem) for elem in i)
-
-        return map_variables(input)
-
-
-class NewModuleTest(InputVariableMixin, ModuleTest):
-    def __init__(self, *args, **kwargs):
-        super(NewModuleTest, self).__init__(*args, **kwargs)
-        self.cudnn = kwargs.get('cudnn', False)
-        self.check_inplace = kwargs.get('check_inplace', False)
-        self.check_gradgrad = kwargs.get('check_gradgrad', True)
-        self.skip_double = kwargs.get('skip_double', False)
-
-    def _do_test(self, test_case, module, input):
-        test_case.check_jacobian(module, input, self.jacobian_input)
-
-        if self.check_gradgrad:
-            # could probably unify check_jacobian above with this.
-            params = tuple(x for x in module.parameters())
-            _assertGradAndGradgradChecks(test_case,
-                                         lambda x, *args, **kw: test_case._forward(module, x), (input,) + params)
-
-        # check if module can be printed
-        module.__repr__()
-
-        if self.check_inplace:
-            # check if the inplace variant of the module gives the same result
-            # as the out-of-place
-
-            module_ip = self.constructor(*self.constructor_args, inplace=True)
-
-            input_version = input._version
-            with freeze_rng_state():
-                output = module(input)
-            test_case.assertEqual(input._version, input_version)
-
-            input_ip = deepcopy(input)
-            input_ip_clone = input_ip.clone()
-            with freeze_rng_state():
-                output_ip = module_ip(input_ip_clone)
-            test_case.assertNotEqual(input_ip_clone._version, input_version)
-            test_case.assertEqual(output, output_ip)
-            grad = output.data.clone().normal_()
-            input.grad.data.zero_()
-            output.backward(grad)
-            output_ip.backward(grad)
-            test_case.assertEqual(input.grad, input_ip.grad)
-
-        if isinstance(input, torch.LongTensor) and TEST_CUDA:
-            # check that cuda() moves module parameters to correct GPU device,
-            # and that float() casts parameters correctly
-
-            input = input.cuda()
-            module.float().cuda()
-            module(input)
-            for p in module.parameters():
-                test_case.assertIsInstance(p, torch.cuda.FloatTensor)
-                test_case.assertEqual(p.get_device(), 0)
-
-            if torch.cuda.device_count() > 1:
-                input = input.cuda(1)
-                module.cuda(1)
-                with torch.cuda.device(1):
-                    module(input)
-                for p in module.parameters():
-                    test_case.assertIsInstance(p, torch.cuda.FloatTensor)
-                    test_case.assertEqual(p.get_device(), 1)
-        else:
-            # check that float()/double() casters work correctly
-
-            # to float
-            if not isinstance(input, torch.LongTensor):
-                input = input.float()
-            module.float()
-            module(input)
-            for p in module.parameters():
-                test_case.assertIsInstance(p, torch.FloatTensor)
-
-            # and back to double
-            if not isinstance(input, torch.LongTensor):
-                input = input.double()
-            module.double()
-            module(input)
-            for p in module.parameters():
-                test_case.assertIsInstance(p, torch.DoubleTensor)
-
-            if TEST_CUDA and self.should_test_cuda:
-                # check that cuda() moves module parameters to correct GPU device,
-                # and that float() casts parameters correctly
-
-                # to GPU0
-                input = input.float().cuda()
-                module.float().cuda()
-                module(input)
-                for p in module.parameters():
-                    test_case.assertIsInstance(p, torch.cuda.FloatTensor)
-                    test_case.assertEqual(p.get_device(), 0)
-
-                # to CPU
-                input = input.cpu()
-                module.cpu()
-                module(input)
-                for p in module.parameters():
-                    test_case.assertIsInstance(p, torch.FloatTensor)
-
-                # back to GPU0
-                input = input.cuda()
-                module.cuda()
-                module(input)
-                for p in module.parameters():
-                    test_case.assertIsInstance(p, torch.cuda.FloatTensor)
-                    test_case.assertEqual(p.get_device(), 0)
-
-                # test that forwards of module runs correctly without cuDNN
-                if self.cudnn:
-                    with torch.backends.cudnn.flags(enabled=False):
-                        module(input)
-                        for p in module.parameters():
-                            test_case.assertIsInstance(p, torch.cuda.FloatTensor)
-                            test_case.assertEqual(p.get_device(), 0)
-
-                if torch.cuda.device_count() >= 2:
-                    # test cross-GPU transfer works
-                    # to GPU1
-                    input = input.cuda(1)
-                    module.cuda(1)
-                    with torch.cuda.device(1):
-                        module(input)
-                    for p in module.parameters():
-                        test_case.assertIsInstance(p, torch.cuda.FloatTensor)
-                        test_case.assertEqual(p.get_device(), 1)
-
-                if not self.skip_double:
-                    # test double()
-                    input = input.double().cuda()
-                    module.double().cuda()
-                    module(input)
-                    for p in module.parameters():
-                        test_case.assertIsInstance(p, torch.cuda.DoubleTensor)
-                        test_case.assertEqual(p.get_device(), 0)
-
-                # test half()
-                input = input.half().cuda()
-                module.half().cuda()
-                module(input)
-                for p in module.parameters():
-                    test_case.assertIsInstance(p, torch.cuda.HalfTensor)
-                    test_case.assertEqual(p.get_device(), 0)
-
-    def _get_target(self):
-        return self._get_arg('target', False)
-
-    @property
-    def constructor_args(self):
-        return self._get_arg('constructor_args', False)
-
-
-class NewCriterionTest(InputVariableMixin, CriterionTest):
-    # TODO: check that criterions don't ignore grad_output
-
-    def __init__(self, *args, **kwargs):
-        super(NewCriterionTest, self).__init__(*args, **kwargs)
-        self.check_gradgrad = kwargs.get('check_gradgrad', True)
-        self.check_half = kwargs.get('check_half', True)
-        self.check_bfloat16 = kwargs.get('check_bfloat16', False)
-        self.convert_target = kwargs.get('convert_target', True)
-
-    def _do_extra_tests(self, test_case, module, input, target):
-        if not self.check_gradgrad:
-            return
-
-        test_case.assertFalse(target.requires_grad)
-
-        params = tuple(x for x in module.parameters())
-        if not isinstance(input, tuple):
-            inputs = (input,) + params
-
-            def apply_fn(input, *params):
-                return module(input, target)
-        else:
-            inputs = input + params
-
-            def apply_fn(input1, input2, *params):
-                return module(input1, input2, target)
-
-        # TODO: we don't pass `target` as part of inputs because we don't
-        # currently compute the gradient w.r.t. target for loss functions.
-        gradcheck(apply_fn, inputs)
-        gradgradcheck(apply_fn, inputs)
-
-    def test_cuda(self, test_case, dtype=None, extra_args=None):
-        def convert_dtype(obj, dtype, requires_grad=False):
-            if isinstance(obj, torch.Tensor):
-                return obj.detach().to(dtype=dtype).requires_grad_(requires_grad)
-            elif isinstance(obj, torch.Tensor):
-                return obj.to(dtype)
-            elif isinstance(obj, tuple):
-                return tuple(convert_dtype(o, dtype, requires_grad) for o in obj)
-            else:
-                return obj
-
-        if not TEST_CUDA or not self.should_test_cuda:
-            raise unittest.SkipTest('Excluded from CUDA tests')
-        try:
-            cpu_input = self._get_input()
-            cpu_target = self._get_target()
-            cpu_module = self.constructor(*self.constructor_args)
-            gpu_module = self.constructor(*self.constructor_args)
-
-            # Convert input, target and module parameters to dtype
-            if dtype is not None:
-                cpu_input = convert_dtype(cpu_input, dtype, True)
-                # NLLLoss requires target to be LongTensor
-                if not isinstance(cpu_target, torch.LongTensor) and self.convert_target:
-                    cpu_target = convert_dtype(cpu_target, dtype)
-                cpu_module.type(dtype)
-                gpu_module.type(dtype)
-
-            # GPU setup
-            gpu_input = to_gpu(cpu_input)
-            gpu_target = to_gpu(cpu_target)
-            gpu_module.cuda()
-
-            # torch.HalfTensor doesn't support most operations, converting back to default
-            if dtype in {torch.half, torch.bfloat16}:
-                cpu_input = self._get_input()
-                cpu_target = self._get_target()
-                # Loss modules with weights require consistent input/module weight types
-                cpu_module = self.constructor(*self.constructor_args)
-
-            cpu_output = test_case._forward_criterion(cpu_module, cpu_input, cpu_target, extra_args=extra_args)
-            gpu_output = test_case._forward_criterion(gpu_module, gpu_input, gpu_target, extra_args=extra_args)
-            # dtype can be None, so set precision in this way instead of a precision map
-            test_case.assertEqual(cpu_output, gpu_output, 1e-1 if dtype in {torch.half, torch.bfloat16} else 4e-4)
-
-            cpu_gradInput = test_case._backward_criterion(cpu_module, cpu_input, cpu_target, extra_args=extra_args)
-            gpu_gradInput = test_case._backward_criterion(gpu_module, gpu_input, gpu_target, extra_args=extra_args)
-            test_case.assertEqual(cpu_gradInput, gpu_gradInput, 1e-1 if dtype in {torch.half, torch.bfloat16} else 4e-4)
-        except NotImplementedError:
-            pass
-
-    def _get_target(self):
-        return self._get_arg('target', False)
-
-    @property
-    def constructor_args(self):
-        return self._get_arg('constructor_args', False)
-
-    @property
-    def extra_args(self):
-        return self._get_arg('extra_args', False)
 
 class TestAvgPool(TestCase):
     def _sum_pool2d(self, x, kernel_size):
@@ -8134,6 +7871,16 @@ class TestNNInit(TestCase):
         p_value = stats.kstest(samples, 'norm', args=(mean, std))[1]
         return p_value > 0.0001
 
+    def _is_trunc_normal(self, tensor, mean, std, a, b):
+        # scipy's trunc norm is suited for data drawn from N(0, 1),
+        # so we need to transform our data to test it using scipy.
+        z_samples = (tensor.view(-1) - mean) / std
+        z_samples = z_samples.tolist()
+        a0 = (a - mean) / std
+        b0 = (b - mean) / std
+        p_value = stats.kstest(z_samples, 'truncnorm', args=(a0, b0))[1]
+        return p_value > 0.0001
+
     def _is_uniform(self, tensor, a, b):
         samples = tensor.view(-1).tolist()
         p_value = stats.kstest(samples, 'uniform', args=(a, (b - a)))[1]
@@ -8206,6 +7953,18 @@ class TestNNInit(TestCase):
             init.normal_(input_tensor, mean=mean, std=std)
 
             assert self._is_normal(input_tensor, mean, std)
+
+    @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
+    def test_trunc_normal(self):
+        for dims in [1, 2, 4]:
+            input_tensor = self._create_random_nd_tensor(dims, size_min=30, size_max=50)
+            mean = self._random_float(-3, 3)
+            std = self._random_float(.01, 1)
+            a = self._random_float(mean - 2 * std, mean)
+            b = self._random_float(mean, mean + 2 * std)
+            init.trunc_normal_(input_tensor, mean=mean, std=std, a=a, b=b)
+
+            assert self._is_trunc_normal(input_tensor, mean, std, a, b)
 
     def test_constant(self):
         for dims in [1, 2, 4]:
