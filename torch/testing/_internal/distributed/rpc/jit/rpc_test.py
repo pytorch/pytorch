@@ -16,6 +16,55 @@ def rpc_return_rref(dst):
     return rpc.remote(dst, torch.add, args=(torch.ones(2, 2), 1))
 
 
+@torch.jit.script
+def rref_local_value(rref):
+    # type: (RRef[Tensor]) -> Tensor
+    return rref.local_value()
+
+
+class RRefAPITest:
+    @dist_init
+    def test_rref_is_owner(self):
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        rref_var = rpc_return_rref(worker_name(dst_rank))
+
+        @torch.jit.script
+        def rref_tensor_is_owner(rref_var):
+            # type: (RRef[Tensor]) -> bool
+            return rref_var.is_owner()
+
+        res = rref_tensor_is_owner(rref_var)
+        self.assertEqual(res, False)
+
+    @dist_init
+    def test_rref_local_value(self):
+        if self.rank != 0:
+            return
+
+        dst_worker_name = worker_name((self.rank + 1) % self.world_size)
+        rref = rpc_return_rref(dst_worker_name)
+
+        @torch.jit.script
+        def local_call_rref_local_value(rref):
+            # type: (RRef[Tensor]) -> Tensor
+            return rref_local_value(rref)
+
+        with self.assertRaisesRegex(RuntimeError, ""):
+            local_call_rref_local_value(rref)
+
+        @torch.jit.script
+        def remote_call_rref_local_value(dst_worker_name, rref):
+            # type: (str, RRef[Tensor]) -> Tensor
+            args = (rref,)
+            kwargs = {}
+            fut = rpc.rpc_async(dst_worker_name, rref_local_value, args, kwargs)
+            ret = fut.wait()
+            return ret
+
+        remote_call_rref_local_value(dst_worker_name, rref)
+
+
 class MyScriptModuleWithRRefs(torch.jit.ScriptModule):
     def __init__(self, dst_worker):
         super().__init__()
@@ -82,7 +131,7 @@ def script_run_forward_rref_my_script_module(rref):
     return rref.to_here().forward()
 
 
-class LocalRRefTest(RpcAgentTestFixture):
+class LocalRRefTest:
     @dist_init
     def test_create_local_script_class_rref_in_py(self):
         if self.rank != 0:
@@ -588,7 +637,7 @@ def save_rref(rref_var, fname):
 @unittest.skipIf(
     not torch._six.PY3, "Pytorch distributed rpc package does not support python2"
 )
-class JitRpcTest(LocalRRefTest, JitRpcAsyncOpTest, RpcAgentTestFixture):
+class JitRpcTest(RRefAPITest, LocalRRefTest, JitRpcAsyncOpTest, RpcAgentTestFixture):
     @dist_init
     def test_torchscript_function(self):
         dst_worker_name = worker_name((self.rank + 1) % self.world_size)
@@ -692,20 +741,6 @@ class JitRpcTest(LocalRRefTest, JitRpcAsyncOpTest, RpcAgentTestFixture):
         self.assertEqual(ret, local_ret)
 
     @dist_init
-    def test_rref_is_owner(self):
-        n = self.rank + 1
-        dst_rank = n % self.world_size
-        rref_var = rpc_return_rref(worker_name(dst_rank))
-
-        @torch.jit.script
-        def rref_tensor_is_owner(rref_var):
-            # type: (RRef[Tensor]) -> bool
-            return rref_var.is_owner()
-
-        res = rref_tensor_is_owner(rref_var)
-        self.assertEqual(res, False)
-
-    @dist_init
     def test_my_script_module_with_rrefs(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
@@ -763,11 +798,10 @@ class JitRpcTest(LocalRRefTest, JitRpcAsyncOpTest, RpcAgentTestFixture):
         dst_rank = (self.rank + 1) % self.world_size
         inputs = (torch.tensor([1, 1]), torch.tensor([2, 2]))
         ret_fut = rpc.rpc_async(
-            "worker{}".format(dst_rank),
-            two_args_two_kwargs,
-            args=inputs
+            "worker{}".format(dst_rank), two_args_two_kwargs, args=inputs
         )
         expected_res = torch.tensor([10, 10])
+
         @torch.jit.script
         def future_wait_in_script(fut):
             # type: (Future[Tensor]) -> Tensor
@@ -779,9 +813,7 @@ class JitRpcTest(LocalRRefTest, JitRpcAsyncOpTest, RpcAgentTestFixture):
         def future_return_to_python(dst_rank, inputs):
             # type: (int, Tuple[Tensor, Tensor]) -> Future[Tensor]
             return rpc.rpc_async(
-                "worker{}".format(dst_rank),
-                two_args_two_kwargs,
-                inputs
+                "worker{}".format(dst_rank), two_args_two_kwargs, inputs
             )
 
         fut_res = future_return_to_python(dst_rank, inputs)
