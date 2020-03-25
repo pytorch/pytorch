@@ -1,7 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/native/Repeat.h>
 #include <ATen/Parallel.h>
-#include <c10/util/SmallVector.h>
 
 static void compute_cpu(int64_t *repeat_ptr, int64_t *cumsum_ptr, int64_t *result_ptr, int64_t size) {
     at::parallel_for(0, size, 1, [&](int64_t i_begin, int64_t i_end) {
@@ -38,7 +37,7 @@ Tensor repeat_interleave(const Tensor &self, const Tensor &repeats, c10::optiona
         AT_ERROR("repeats must be 0-dim or 1-dim tensor");
     }
 
-    return input.index_select(dim.value(), at::repeat_interleave(repeats_);
+    return input.index_select(dim.value(), at::repeat_interleave(repeats_));
 }
 
 Tensor repeat_interleave(const Tensor &self, int64_t repeats, c10::optional<int64_t> dim) {
