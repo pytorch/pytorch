@@ -3490,7 +3490,8 @@ c10::QualifiedName CompilationUnit::mangle(
       newAtomPrefix.append(manglePrefix);
       atom = newAtomPrefix + c10::to_string(mangleIndex_++);
       // increment mangleIndex_ until the type is not defined
-      while (get_type(QualifiedName(atoms))) {
+      while (get_type(QualifiedName(atoms)) ||
+             find_function(QualifiedName(atoms))) {
         atom = newAtomPrefix + c10::to_string(mangleIndex_++);
       }
       return QualifiedName(atoms);
@@ -3500,6 +3501,12 @@ c10::QualifiedName CompilationUnit::mangle(
   // Otherwise add a mangle namespace right before the basename
   TORCH_INTERNAL_ASSERT(!atoms.empty());
   atoms.insert(atoms.end() - 1, manglePrefix + c10::to_string(mangleIndex_++));
+  // Re-mangle if we need to.
+  while (get_type(QualifiedName(atoms)) ||
+         find_function(QualifiedName(atoms))) {
+    return mangle(name);
+  }
+
   return QualifiedName(atoms);
 }
 

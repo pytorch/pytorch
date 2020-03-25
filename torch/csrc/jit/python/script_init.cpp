@@ -559,7 +559,11 @@ bool ivalue_tags_match(const Module& lhs, const Module& rhs) {
       visited.emplace(item.a.internalToPointer());
     }
     if (*unshapedType(item.a.type()) != *unshapedType(item.b.type())) {
-      return false;
+      if (!item.a.type()->cast<ClassType>()) {
+        // Since classes are saved and loaded in the test suite, we cannot expect
+        // them to be equal. We should still check their slots however.
+        return false;
+      }
     }
     // check tags for objects that contain subobjects
     if (item.a.isObject()) {
@@ -921,7 +925,10 @@ void initJitScriptBindings(PyObject* module) {
           })
       .def("apply", &Module::apply)
       .def("_clone", &Module::clone)
-      .def("_clone_instance", &Module::clone_instance);
+      .def("_clone_instance", &Module::clone_instance)
+      .def_property_readonly("qualified_name", [](const Module& self) {
+        return self.type()->name()->qualifiedName();
+      });
 
   slot_dict_impl<detail::ParameterPolicy>::bind(m, "ParameterDict");
   slot_dict_impl<detail::BufferPolicy>::bind(m, "BufferDict");

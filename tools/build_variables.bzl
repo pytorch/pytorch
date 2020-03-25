@@ -90,6 +90,7 @@ libtorch_sources = [
     "torch/csrc/jit/passes/pass_manager.cpp",
     "torch/csrc/jit/serialization/pickler.cpp",
     "torch/csrc/jit/serialization/unpickler.cpp",
+    "torch/csrc/jit/serialization/type_importer.cpp",
     "torch/csrc/jit/runtime/graph_executor.cpp",
     "torch/csrc/jit/serialization/import.cpp",
     "torch/csrc/jit/serialization/import_legacy.cpp",

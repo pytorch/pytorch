@@ -24,6 +24,7 @@ struct CompilationUnit;
 namespace c10 {
 
 struct FunctionSchema;
+struct NamedType;
 using OptNameList = c10::optional<std::vector<std::string>>;
 
 #define C10_FORALL_TYPES(_) \
@@ -127,6 +128,22 @@ struct CAFFE2_API Type : std::enable_shared_from_this<Type> {
   std::shared_ptr<const T> cast() const {
     if (T::Kind == kind()) {
       return std::static_pointer_cast<const T>(shared_from_this());
+    }
+    return nullptr;
+  }
+  template<>
+  std::shared_ptr<NamedType> cast<NamedType>() {
+    if (kind() == TypeKind::TupleType || kind() == TypeKind::FunctionType ||
+        kind() == TypeKind::ClassType || kind() == TypeKind::InterfaceType) {
+      return std::static_pointer_cast<NamedType>(shared_from_this());
+    }
+    return nullptr;
+  }
+  template<>
+  std::shared_ptr<const NamedType> cast<NamedType>() const {
+    if (kind() == TypeKind::TupleType || kind() == TypeKind::FunctionType ||
+        kind() == TypeKind::ClassType || kind() == TypeKind::InterfaceType) {
+      return std::static_pointer_cast<const NamedType>(shared_from_this());
     }
     return nullptr;
   }
@@ -831,7 +848,13 @@ using NamedTypePtr = std::shared_ptr<NamedType>;
 
 struct CAFFE2_API NamedType : public Type {
   NamedType(TypeKind tk, c10::optional<QualifiedName> name)
-      : Type(tk), name_(std::move(name)) {}
+      : Type(tk), name_(std::move(name)) {
+    TORCH_INTERNAL_ASSERT(
+        tk == TypeKind::TupleType || tk == TypeKind::FunctionType ||
+            tk == TypeKind::ClassType || tk == TypeKind::InterfaceType,
+        "If you add a new kind of NamedType, ",
+        "please update the cast<NamedType> specialization and this assert");
+  }
 
   // Fully qualified name of type
   // Looks like: "foo.bar.Baz".

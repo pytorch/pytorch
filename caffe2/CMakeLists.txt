@@ -370,6 +370,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/passes/pass_manager.cpp
     ${TORCH_SRC_DIR}/csrc/jit/serialization/pickler.cpp
     ${TORCH_SRC_DIR}/csrc/jit/serialization/unpickler.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/serialization/type_importer.cpp
     ${TORCH_SRC_DIR}/csrc/jit/runtime/graph_executor.cpp
     ${TORCH_SRC_DIR}/csrc/jit/serialization/import_source.cpp
     ${TORCH_SRC_DIR}/csrc/jit/serialization/import.cpp
