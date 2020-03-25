@@ -124,7 +124,8 @@ Tensor run(
   Tensor output_padded_contig = empty_with_tail_padding(
       output_size,
       input_padded_contig.options().dtype(),
-      input_padded_contig.suggest_memory_format());
+      input_padded_contig.suggest_memory_format(),
+      input_padded_contig.names());
 
   const xnn_status setup_status = xnn_setup_fully_connected_nc_f32(
       context.op.get(),                                         // operator

@@ -199,7 +199,8 @@ Tensor run(
           context.stride_,
           context.dilation_),
       input_padded_contig_nhwc.options().dtype(),
-      MemoryFormat::ChannelsLast);
+      MemoryFormat::ChannelsLast,
+      input_padded_contig_nhwc.names());
 
   const xnn_status setup_status = xnn_setup_convolution2d_nhwc_f32(
       context.op.get(),                                             // operator
