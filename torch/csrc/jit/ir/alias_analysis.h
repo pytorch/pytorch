@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/utils/memory_dag.h>
 #include <torch/csrc/jit/ir/type_hashing.h>
+#include <torch/csrc/jit/passes/create_functional_graphs.h>
 
 namespace torch {
 namespace jit {
@@ -119,6 +120,8 @@ class AliasDb {
   static bool mutableType(const Value* v);
   static bool mutableType(const TypePtr& type);
 
+  friend struct MutationRemover;
+
  private:
   // Helper for topologically-safe node moves.
   class WorkingSet;
@@ -187,6 +190,7 @@ class AliasDb {
   void mapAliases(at::ArrayRef<Value*> to, at::ArrayRef<Value*> from);
   void giveFreshAlias(const Value* value);
   Element* getOrCreateElement(const Value* value);
+  void replaceMemoryLocation(Value * existing, Value* new_value);
 
   static c10::optional<TypeKind> getMutableTypeKind(const TypePtr& type);
 

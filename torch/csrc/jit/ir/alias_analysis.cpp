@@ -123,11 +123,11 @@ void AliasDb::getWritesImpl(Node* n, MemoryLocations& ret) const {
     ret |= writes;
   }
 
-    for (auto block : n->blocks()) {
-      for (auto node : block->nodes()) {
-        getWritesImpl(node, ret);
-      }
+  for (auto block : n->blocks()) {
+    for (auto node : block->nodes()) {
+      getWritesImpl(node, ret);
     }
+  }
 }
 
 // Does `n` write to an alias of one of the values in `vs`?
@@ -932,6 +932,16 @@ Element* AliasDb::getOrCreateElement(const Value* value) {
   return elementMap_.at(value);
 }
 
+void AliasDb::replaceMemoryLocation(Value * existing, Value* new_value) {
+  if (!mutableType(existing)) {
+    return;
+  }
+  auto existing_elem = getOrCreateElement(existing);
+  elementMap_[new_value] = existing_elem;
+  elementMap_.erase(existing);
+  existing_elem->value = new_value;
+}
+
 bool AliasDb::moveAfterTopologicallyValid(Node* n, Node* movePoint) {
   return tryMove(n, movePoint, MoveSide::AFTER, /*dryRun=*/false);
 }
@@ -1355,10 +1365,11 @@ c10::optional<Element*> AliasDb::setWildcard(const Value* v) {
 }
 
 void AliasDb::rebuildWriteCache() const {
+  writeCache_ = {};
   for (const auto& pr : writeIndex_) {
     const auto& writtenLocs = pr.second;
-      writeCache_ |= writtenLocs;
-    }
+    writeCache_ |= writtenLocs;
+  }
   isWriteCacheStale_ = false;
 }
 } // namespace jit
