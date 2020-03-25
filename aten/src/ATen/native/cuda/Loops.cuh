@@ -3,6 +3,7 @@
 
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/native/cuda/zmath.cuh>
 
 namespace at { namespace native {
 
