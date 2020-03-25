@@ -9830,9 +9830,9 @@ class TestTorchDeviceType(TestCase):
 
         if dtype.is_complex:
             helper(self, device, dtype, lambda x: complex(x, x),
-                lambda t: t.real().to(torch.float), lambda mean: mean / math.sqrt(2))
+                   lambda t: t.real().to(torch.float), lambda mean: mean / math.sqrt(2))
             helper(self, device, dtype, lambda x: complex(x, x),
-                lambda t: t.imag().to(torch.float), lambda mean: mean / math.sqrt(2))
+                   lambda t: t.imag().to(torch.float), lambda mean: mean / math.sqrt(2))
             self.assertRaisesRegex(
                 RuntimeError, "normal expects standard deviation to be non-complex",
                 lambda: torch.normal(0, torch.empty(100, 100, dtype=dtype, device=device)))
