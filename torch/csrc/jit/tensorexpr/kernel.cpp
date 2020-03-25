@@ -999,14 +999,14 @@ void TensorExprKernel::lowerToBackend(BackendType backendType) {
     }
     Stmt* loop = l.getLoopBodyFor(p.second);
     if (torch::jit::tensorexpr::HasRand(loop).has_rand()) {
-      l.ComputeInlineWithRandom(loop);
+      l.computeInlineWithRandom(loop);
     } else {
-      l.ComputeInline(loop);
+      l.computeInline(loop);
     }
   }
   if (backendType == kCudaCodeGen) {
     for (size_t i = 0; i < tensorOutputs_.size(); i++) {
-      l.ComputeInline(l.getLoopBodyFor(tensorOutputs_[i]));
+      l.computeInline(l.getLoopBodyFor(tensorOutputs_[i]));
 
       Tensor* tensor = tensorOutputs[i];
       const Var* index = tensor->arg(0);
@@ -1024,9 +1024,9 @@ void TensorExprKernel::lowerToBackend(BackendType backendType) {
           blockSize = kDefaultBlockSize;
         }
         std::vector<For*> loops = l.getLoopStmtsFor(tensor);
-        l.SplitWithMask(loops[0], blockSize, &outer, &inner);
-        l.SetGPUBlockIndex(outer, 0);
-        l.SetGPUThreadIndex(inner, 0);
+        l.splitWithMask(loops[0], blockSize, &outer, &inner);
+        l.setGPUBlockIndex(outer, 0);
+        l.setGPUThreadIndex(inner, 0);
       } else if (loopLevels == 3) {
         For* outer;
         For* inner;
@@ -1038,17 +1038,17 @@ void TensorExprKernel::lowerToBackend(BackendType backendType) {
         blockCount = (blockCount > 0) ? blockCount : kDefaultBlockCount;
         blockSize = (blockSize > 0) ? blockSize : kDefaultBlockSize;
         std::vector<For*> loops = l.getLoopStmtsFor(tensor);
-        l.SplitWithMask(loops[0], blockCount * blockSize, &outer, &inner);
-        l.SplitWithMask(inner, blockSize, &inner1, &inner2);
-        l.SetGPUBlockIndex(inner1, 0);
-        l.SetGPUThreadIndex(inner2, 0);
+        l.splitWithMask(loops[0], blockCount * blockSize, &outer, &inner);
+        l.splitWithMask(inner, blockSize, &inner1, &inner2);
+        l.setGPUBlockIndex(inner1, 0);
+        l.setGPUThreadIndex(inner2, 0);
       } else {
         throw std::runtime_error(
             "Invalid loop-level: " + std::to_string(loopLevels));
       }
     }
   } else if (backendType == kLLVMCodeGen) {
-    l.ApplyInlines();
+    l.prepareForCodegen();
 
     std::vector<For*> innerLoops;
     std::vector<For*> worklist;
@@ -1093,26 +1093,26 @@ void TensorExprKernel::lowerToBackend(BackendType backendType) {
       }
     }
 
-    // Vectorize inner loops.
+    // vectorize inner loops.
     for (For* loop : innerLoops) {
       For* outer1;
       For* split1;
       For* tail1;
 
-      l.SplitWithTail(loop, 8, &outer1, &split1, &tail1);
-      l.Vectorize(split1);
+      l.splitWithTail(loop, 8, &outer1, &split1, &tail1);
+      l.vectorize(split1);
 
       if (tail1) {
         For* outer2;
         For* split2;
         For* tail2;
-        l.SplitWithTail(tail1, 4, &outer2, &split2, &tail2);
-        l.Vectorize(split2);
+        l.splitWithTail(tail1, 4, &outer2, &split2, &tail2);
+        l.vectorize(split2);
       }
     }
   }
 
-  l.ApplyInlines();
+  l.prepareForCodegen();
   Stmt* stmt = l.root_stmt();
   stmt = IRSimplifier::simplify(stmt);
 
