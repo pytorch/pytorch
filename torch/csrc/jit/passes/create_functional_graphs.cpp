@@ -224,6 +224,7 @@ struct MutationRemover {
 
   void run() {
     RemoveAtenMutation(graph_->block());
+    RemoveListMutation(graph_->block());
   }
 
  private:
@@ -275,6 +276,55 @@ struct MutationRemover {
     return getAllOperatorsFor(Symbol::fromQualString(new_schema)).size() != 0;
   }
 
+  bool listAppendFollowingListConstruct(Node* n) {
+    return n->kind() == aten::append &&
+        n->inputs().at(0)->node()->kind() == prim::ListConstruct;
+  }
+
+  bool tryMakeCreationAndMutationAtomic(
+      Value* mutated_value,
+      Node* mutating_op) {
+    // We can only remove mutation to values that are unique aliases in the
+    // graph. if x = y[0] or y = self.y, then removing the mutation could
+    // change observable semantics
+    if (!newMemoryLocation(mutated_value)) {
+      return false;
+    }
+
+    // In order to safely remove a mutation, the creation of a tensor and its
+    // subsequent mutation need to be one atomic operation
+    return aliasDb_->moveBeforeTopologicallyValid(
+        mutated_value->node(), mutating_op);
+  }
+
+  void RemoveListMutation(Block* block) {
+    for (auto it = block->nodes().begin(); it != block->nodes().end();) {
+      auto* node = *it;
+      it++;
+
+      for (Block* sub_block : node->blocks()) {
+        RemoveListMutation(sub_block);
+      }
+
+      if (!listAppendFollowingListConstruct(node)) {
+        continue;
+      }
+
+      Value* mutated_value = node->inputs().at(0);
+      if (!tryMakeCreationAndMutationAtomic(mutated_value, node)) {
+        continue;
+      }
+
+      Node* list_construct = mutated_value->node();
+      list_construct->addInput(node->inputs().at(1));
+      node->output()->replaceAllUsesWith(mutated_value);
+      node->destroy();
+
+      // :(  TODO: incremental update ?
+      aliasDb_ = torch::make_unique<AliasDb>(graph_);
+    }
+  }
+
   void RemoveAtenMutation(Block* block) {
     for (auto it = block->nodes().begin(); it != block->nodes().end();) {
       auto* node = *it;
@@ -290,18 +340,7 @@ struct MutationRemover {
       }
 
       Value* mutated_value = node->inputs().at(0);
-
-      // We can only remove mutation to values that are unique aliases in the
-      // graph. if x = y[0] or y = self.y, then removing the mutation could
-      // change observable semantics
-      if (!newMemoryLocation(mutated_value)) {
-        continue;
-      }
-
-      // In order to safely remove a mutation, the creation of a tensor and its
-      // subsequent mutation need to be one atomic operation
-      if (!aliasDb_->moveBeforeTopologicallyValid(
-              mutated_value->node(), node)) {
+      if (!tryMakeCreationAndMutationAtomic(mutated_value, node)) {
         continue;
       }
 
