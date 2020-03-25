@@ -158,18 +158,30 @@ void DistAutogradContainer::releaseContext(int64_t context_id) {
 }
 
 void DistAutogradContainer::sendReleaseContextRpc(int64_t context_id) {
-  // notify other workers to clean up their contexts.
+  // Best-effort notification to other workers to clean up their Dist autograd
+  // context, in order to reduce memory usage.
   auto workerIds =
       autograd_context_.find(context_id)->second->getKnownWorkerIds();
   // agent.send() or getCurrentRpcAgent may throw an error in the case of an
   // ungraceful shutdown, where we are shutting down RPC and also processing
   // this message in a separate thread concurrently. In this case, don't throw
   // here.
+  std::shared_ptr<rpc::RpcAgent> agent;
   try {
-    auto agent = rpc::RpcAgent::getCurrentRpcAgent();
-    rpc::RpcRetryOptions options;
-    options.maxRetries = kNumCleanupContextRetries;
-    for (const auto& worker_id : workerIds) {
+    agent = rpc::RpcAgent::getCurrentRpcAgent();
+  } catch (const std::exception& e) {
+    LOG(INFO)
+        << "Failed to send RPC to clear Dist Autograd context to all workers: "
+        << e.what();
+    return;
+  }
+
+  TORCH_INTERNAL_ASSERT(agent, "RPC Agent should be set.");
+
+  rpc::RpcRetryOptions options;
+  options.maxRetries = kNumCleanupContextRetries;
+  for (const auto& worker_id : workerIds) {
+    try {
       auto cleanupFuture = agent->sendWithRetries(
           agent->getWorkerInfo(worker_id),
           CleanupAutogradContextReq(context_id).toMessage(),
@@ -187,11 +199,11 @@ void DistAutogradContainer::sendReleaseContextRpc(int64_t context_id) {
               return;
             }
           });
+    } catch (const std::exception& e) {
+      LOG(INFO)
+          << "Failed to send RPC to clear Dist Autograd context to worker id: "
+          << worker_id << " : " << e.what();
     }
-  } catch (const std::exception& e) {
-    LOG(INFO)
-        << "Failed to send RPC to clear Dist Autograd context to some nodes: "
-        << e.what();
   }
 }
 

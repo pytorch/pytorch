@@ -2158,7 +2158,7 @@ if BACKEND == "gloo" or BACKEND == "nccl":
                     first_process.exitcode == SKIP_IF_NO_GPU_EXIT_CODE or
                     first_process.exitcode == SKIP_IF_SMALL_WORLDSIZE_EXIT_CODE or
                     first_process.exitcode == SKIP_IF_ROCM_EXIT_CODE
-                )
+                ), "unexpected exit code {}".format(first_process.exitcode)
 
                 if first_process.exitcode == SKIP_IF_NO_CUDA_EXIT_CODE:
                     raise unittest.SkipTest("cuda is not available")
@@ -2171,7 +2171,11 @@ if BACKEND == "gloo" or BACKEND == "nccl":
                 if first_process.exitcode == SKIP_IF_ROCM_EXIT_CODE:
                     raise unittest.SkipTest("Test skipped for ROCm")
 
-            self.assertEqual(first_process.exitcode, 0)
+            self.assertEqual(
+                first_process.exitcode,
+                0,
+                "Expect 0 exit code, but got {}".format(first_process.exitcode)
+            )
 
 
 elif BACKEND == "mpi":
