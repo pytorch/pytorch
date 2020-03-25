@@ -32,7 +32,6 @@ ContextLinear create(
     const float output_max);
 
 Tensor run(const ContextLinear& context, const Tensor& input);
-
 } // namespace linear
 } // namespace internal
 } // namespace xnnpack

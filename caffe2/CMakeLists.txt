@@ -399,6 +399,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/passes/constant_pooling.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/common_subexpression_elimination.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/create_autodiff_subgraphs.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/create_functional_graphs.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/inline_autodiff_subgraphs.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/insert_guards.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/inliner.cpp
@@ -473,7 +474,6 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/codegen/fuser/fallback.cpp
     ${TORCH_SRC_DIR}/csrc/jit/api/function_impl.cpp
     ${TORCH_SRC_DIR}/csrc/jit/runtime/vararg_functions.cpp
-
     ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/codegen.cpp
     ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/eval.cpp
     ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/expr.cpp
@@ -481,7 +481,6 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/ir.cpp
     ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/ir_mutator.cpp
     ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/ir_printer.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/ir_simplifier.cpp
     ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/ir_visitor.cpp
     ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/kernel.cpp
     ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_codegen.cpp
