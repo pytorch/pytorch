@@ -32,7 +32,7 @@ c10::optional<TypePtr> getMutableTypePtr(const TypePtr& type) {
       // these types never contain refined tensor types
       // recursing through nested types adds noticeable runtime overhead
       // in the first pass, so make check debug only
-      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      TORCH_INTERNAL_ASSERT(
           assertNoRefinedTensorTypes(type),
           "These types should not contained refined tensor types",
           type->str());
