@@ -1370,7 +1370,6 @@ class ObserverTest(QuantizationTestCase):
         qparams = obs.calculate_qparams()
         ref = torch._choose_qparams_per_tensor(x, reduce_range)
 
-        np.testing.assert_array_almost_equal(ref[0], qparams[0], decimal=4)
         self.assertEqual(ref[0], qparams[0])
         self.assertEqual(ref[1], qparams[1])
 
