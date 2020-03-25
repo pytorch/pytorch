@@ -46,7 +46,7 @@ inline Tensor& Tensor::operator/=(Scalar other) {
 }
 inline Tensor Tensor::operator[](Scalar index) const {
   if (!index.isIntegral(false)) {
-    AT_INDEX_ERROR("Can only index tensors with integral scalars");
+    TORCH_CHECK_INDEX(false, "Can only index tensors with integral scalars");
   }
   return select(0, index.toLong());
 }
@@ -54,10 +54,10 @@ inline Tensor Tensor::operator[](Tensor index) const {
   // These properties are checked in the Scalar constructor, but we already
   // check them here to provide more useful diagnostics for the user.
   if (!index.defined()) {
-    AT_INDEX_ERROR("Can only index with tensors that are defined");
+    TORCH_CHECK_INDEX(false, "Can only index with tensors that are defined");
   }
   if (index.dim() != 0) {
-    AT_INDEX_ERROR(
+    TORCH_CHECK_INDEX(false,
       "Can only index with tensors that are scalars (zero-dim)");
   }
   // The Scalar(Tensor) constructor is explicit, so we need to call it.
