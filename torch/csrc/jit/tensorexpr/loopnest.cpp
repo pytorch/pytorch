@@ -284,7 +284,7 @@ class Vectorizer : public IRMutator {
   const Expr* start_ = nullptr;
 };
 
-void LoopNest::Vectorize(Stmt* stmt) {
+void LoopNest::vectorize(Stmt* stmt) {
   For* f = dynamic_cast<For*>(stmt);
   if (!f) {
     return;
@@ -573,7 +573,7 @@ class DepTracker : public IRVisitor {
   std::vector<Tensor*> used_tensors;
 };
 
-std::vector<Tensor*> LoopNest::FindAllNeededTensors(
+std::vector<Tensor*> LoopNest::findAllNeededTensors(
     const std::vector<Tensor*>& tensors) {
   DepTracker d;
   std::queue<Tensor*> q;
@@ -624,7 +624,7 @@ LoopNest::LoopNest(const std::vector<Tensor*>& output_tensors)
   // Find all tensors we need to compute (including dependencies) and put them
   // in a topological order
   std::vector<Tensor*> tensors_to_compute =
-      FindAllNeededTensors(output_tensors);
+      findAllNeededTensors(output_tensors);
 
   // Find all intermediate tensors, we'll need that for inserting alloc/free
   // statements
@@ -638,13 +638,13 @@ LoopNest::LoopNest(const std::vector<Tensor*>& output_tensors)
 
   std::vector<Stmt*> loops;
   for (Tensor* t : tensors_to_compute) {
-    Stmt* loop = LowerToStmt(t);
+    Stmt* loop = lowerToStmt(t);
     loops.push_back(loop);
   }
   root_stmt_ = new Block(loops);
 }
 
-Stmt* LoopNest::LowerToStmt(Tensor* t) {
+Stmt* LoopNest::lowerToStmt(Tensor* t) {
   Function* f = t->function();
   // TODO: Support multiple-output functions
   Stmt* body = f->ElementStmt(0);
@@ -669,16 +669,16 @@ Stmt* LoopNest::LowerToStmt(Tensor* t) {
   return body;
 }
 
-void LoopNest::ComputeInline(Stmt* s) {
+void LoopNest::computeInline(Stmt* s) {
   // TODO: check if `s` is a body of a loop
   inlined_functions_.insert(stmt_to_tensor_.at(s)->function());
 }
 
-void LoopNest::ComputeInlineWithRandom(Stmt* s) {
+void LoopNest::computeInlineWithRandom(Stmt* s) {
   inlined_random_functions_.insert(stmt_to_tensor_.at(s)->function());
 }
 
-void LoopNest::ApplyInlines() {
+void LoopNest::prepareForCodegen() {
   // TODO: check if `s` is a body of a loop
   std::vector<Function*> inlined_functions_vec(
       inlined_functions_.begin(), inlined_functions_.end());
@@ -724,7 +724,7 @@ void LoopNest::ApplyInlines() {
   root_stmt_ = combined_stmt;
 }
 
-void LoopNest::SplitWithTail(
+void LoopNest::splitWithTail(
     For* f,
     int factor,
     For** outer,
@@ -790,7 +790,7 @@ void LoopNest::SplitWithTail(
   // TODO: record history of transformations
 }
 
-void LoopNest::SplitWithMask(For* f, int factor, For** outer, For** inner) {
+void LoopNest::splitWithMask(For* f, int factor, For** outer, For** inner) {
   Block* p = dynamic_cast<Block*>(f->get_parent());
   if (!p) {
     std::cerr << "Parent is not a Block!\n";
@@ -861,11 +861,11 @@ std::vector<For*> LoopNest::getLoopStmtsFor(Tensor* t) const {
   return std::vector<For*>(result.rbegin(), result.rend());
 }
 
-void LoopNest::SetGPUBlockIndex(For* f, int block_index) {
+void LoopNest::setGPUBlockIndex(For* f, int block_index) {
   f->set_gpu_block_index(block_index);
 }
 
-void LoopNest::SetGPUThreadIndex(For* f, int thread_index) {
+void LoopNest::setGPUThreadIndex(For* f, int thread_index) {
   f->set_gpu_thread_index(thread_index);
 }
 
