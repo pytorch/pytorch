@@ -474,6 +474,8 @@ struct Environment {
           {"ord", std::make_shared<BuiltinFunction>(aten::ord, at::nullopt)},
           {"chr", std::make_shared<BuiltinFunction>(aten::chr, at::nullopt)},
           {"bin", std::make_shared<BuiltinFunction>(aten::bin, at::nullopt)},
+          // Only AssertionError is bound so that we can use it from emitAssert,
+          // all other exceptions should be resolved at the Python level
           {"AssertionError",
            std::make_shared<ExceptionValue>("AssertionError")},
           {"range", SpecialFormValue::create(prim::range)},
