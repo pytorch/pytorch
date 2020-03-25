@@ -207,7 +207,7 @@ Tensor run(
       input_padded_contig_nhwc.size(Layout::Activation4D::height),  // input_height
       input_padded_contig_nhwc.size(Layout::Activation4D::width),   // input_width
       input_padded_contig_nhwc.data_ptr<float>(),                   // input
-      output_padded_contig_nhwc.data_ptr<float>(),                         // output
+      output_padded_contig_nhwc.data_ptr<float>(),                  // output
       caffe2::xnnpack_threadpool());                                // threadpool
 
   TORCH_CHECK(
