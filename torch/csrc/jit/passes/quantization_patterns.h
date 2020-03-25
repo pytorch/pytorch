@@ -3,6 +3,7 @@
 #include <string>
 #include <unordered_map>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 
 namespace torch {
@@ -12,14 +13,12 @@ struct QuantFusionInfo {
   std::string quantized_op_name;
   std::string pattern;
   std::string replacement;
-  std::function<bool(const Match&, const std::unordered_map<std::string, Value*>&)> filter;
+  std::function<bool(const Match&, const std::unordered_map<std::string, Value*>&)> filter = [](const Match&, const std::unordered_map<std::string, Value*>&) {
+     return true;
+  };
 };
 
-std::unordered_map<std::string, std::string> quant_fusion_pattern_and_replacements() {
-  auto default_filter = [](const Match&, const std::unordered_map<std::string, Value*>&) {
-      return true;
-  };
-
+std::vector<QuantFusionInfo> quant_fusion_pattern_and_replacements() {
   std::string conv2d = R"(
 graph(%a_quant, %packed_params, %r_scale, %r_zero_point, %r_dtype, %stride, %padding, %dilation, %groups):
         %a_dequant = aten::dequantize(%a_quant)
@@ -177,44 +176,54 @@ graph(%a_quant, %b_quant, %alpha, %scale, %zero_point, %dtype):
   // We don't have quantized inplace add right now
 
   // quantized::add_scalar
-  // TODO: filter
   std::string add_scalar = R"(
 graph(%a_quant, %b_scalar, %alpha):
-         %a_dequant = aten::dequantize(%a_quant)
-         %r_add = aten::add(%a_dequant, %b_scalar, %alpha)
+         %r = aten::add(%a_quant, %b_scalar, %alpha)
          return (%r) )";
 
   std::string quantized_add_scalar = R"(
-graph(%a_quant, %alpha):
-         %r_add = quantized::add_scalar(%a_dequant, %b_scalar)
+graph(%a_quant, %b_scalar, %alpha):
+         %r = quantized::add_scalar(%a_quant, %b_scalar)
          return (%r) )";
+
+  // filter that checks %alpha is constant 1 and %b_scalar is a scalar
+  auto add_scalar_filter = [](const Match& match,
+                   const std::unordered_map<std::string, Value*>& vmap) {
+    const auto& match_vmap = match.values_map;
+    auto alpha = toIValue(match_vmap.at(vmap.at("alpha")));
+    auto b_scalar = match_vmap.at(vmap.at("b_scalar"));
+    return alpha && alpha->isInt() && alpha->toInt() == 1 &&
+      b_scalar->type()->isSubtypeOf(NumberType::get());
+  };
 
   // quantized::add_scalar_out
   std::string add_scalar_out = R"(
 graph(%a_quant, %b_scalar, %alpha):
-         %a_dequant = aten::dequantize(%a_quant)
-         %r_add = aten::add_(%a_dequant, %b_scalar, %alpha)
+         %r = aten::add_(%a_quant, %b_scalar, %alpha)
          return (%r) )";
 
-  std::string quantized_scalar_add_out = R"(
+  std::string quantized_add_scalar_out = R"(
 graph(%a_quant, %b_scalar, %alpha):
-         %a_dequant = aten::dequantize(%a_quant)
-         %r_add = quantized::add_scalar_out(%a_dequant, %b_scalar)
+         %r = quantized::add_scalar_out(%a_quant, %b_scalar, %a_quant)
          return (%r) )";
 
   return {
-    {conv2d, quantized_conv2d},
-    {conv2d_relu, quantized_conv2d_relu},
-    {conv2d_inplace_relu, quantized_conv2d_relu},
-    {addmm, quantized_linear},
-    {matmul_with_bias, quantized_linear},
-    {matmul_no_bias, quantized_linear_no_bias},
-    {aten_linear, quantized_aten_linear},
-    {add_relu, quantized_add_relu},
-    {add_inplace_relu, quantized_add_relu},
-    {add, quantized_add},
-    {inplace_add, quantized_add},
-    {cat, quantized_cat},
+    {"quantized::conv2d", conv2d, quantized_conv2d},
+    {"quantized::conv2d_relu", conv2d_relu, quantized_conv2d_relu},
+    {"quantized::conv2d_relu", conv2d_inplace_relu, quantized_conv2d_relu},
+    {"quantized::linear", addmm, quantized_linear},
+    {"quantized::linear", matmul_with_bias, quantized_linear},
+    {"quantized::linear", matmul_no_bias, quantized_linear_no_bias},
+    {"quantized::linear", aten_linear, quantized_aten_linear},
+    {"quantized::add_relu", add_relu, quantized_add_relu},
+    {"quantized::add_relu", add_inplace_relu, quantized_add_relu},
+    {"quantized::add", add, quantized_add},
+    {"quantized::add", inplace_add, quantized_add},
+    {"quantized::cat", cat, quantized_cat},
+    {"quantized::add_scalar", add_scalar,
+     quantized_add_scalar, add_scalar_filter},
+    {"quantized::add_scalar_out", add_scalar_out,
+     quantized_add_scalar_out, add_scalar_filter},
   };
 
 }

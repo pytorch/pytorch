@@ -75,12 +75,12 @@ def _canonicalize_qconfig_dict(module, qconfig_dict, canonicalized, qconfig_pare
     module_qconfig = qconfig_dict.get(type(module), qconfig_parent)
     module_qconfig = qconfig_dict.get(prefix, qconfig_parent)
     module_qconfig = getattr(module, 'qconfig', module_qconfig)
-    if prefix and module_qconfig:
+    if module_qconfig:
         canonicalized[prefix] = module_qconfig
 
     for name, child in module.named_children():
         module_prefix = prefix + '.' + name if prefix else name
-        canonicalize_qconfig_dict(child, qconfig_dict, canonicalized, module_qconfig, module_prefix)
+        _canonicalize_qconfig_dict(child, qconfig_dict, canonicalized, module_qconfig, module_prefix)
 
 def prepare_script(model, qconfig_dict, inplace=False):
     _check_is_script_module(model)
