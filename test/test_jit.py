@@ -23,6 +23,7 @@ from jit.test_class_type import TestClassType  # noqa: F401
 from jit.test_builtins import TestBuiltins, TestTensorBuiltins  # noqa: F401
 from jit.test_unsupported_ops import TestUnsupportedOps  # noqa: F401
 from jit.test_freezing import TestFreezing  # noqa: F401
+from jit.test_functional_blocks import TestFunctionalBlocks  # noqa: F401
 
 # Torch
 from torch import Tensor
@@ -1703,7 +1704,7 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
                 return torch.cat([x, y], 1)
 
         m = torch.jit.script(M().eval())
-        m = prepare_script(m, {'': script_qconfig(default_qconfig)}, True)
+        m = prepare_script(m, {'': default_qconfig}, True)
         # four for input and output of conv and one for output of cat
         # this also tests the ListConstruct can preserve the observed property so that
         # torch.cat knows that inputs are observed
