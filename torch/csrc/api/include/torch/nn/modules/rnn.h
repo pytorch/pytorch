@@ -24,7 +24,7 @@ namespace nn {
 namespace detail {
 /// Base class for all RNN implementations (intended for code sharing).
 template <typename Derived>
-class TORCH_API RNNImplBase : public torch::nn::Cloneable<Derived> {
+class RNNImplBase : public torch::nn::Cloneable<Derived> {
  public:
   explicit RNNImplBase(const RNNOptionsBase& options_);
 
@@ -226,7 +226,7 @@ TORCH_MODULE(GRU);
 namespace detail {
 /// Base class for all RNNCell implementations (intended for code sharing).
 template <typename Derived>
-class TORCH_API RNNCellImplBase : public torch::nn::Cloneable<Derived> {
+class RNNCellImplBase : public torch::nn::Cloneable<Derived> {
  public:
   explicit RNNCellImplBase(const RNNCellOptionsBase& options_);
 

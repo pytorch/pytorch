@@ -13,7 +13,7 @@ namespace nn {
 
 /// Base class for all (dimension-specialized) avgpool modules.
 template <size_t D, typename Derived>
-class TORCH_API AvgPoolImpl : public torch::nn::Cloneable<Derived> {
+class AvgPoolImpl : public torch::nn::Cloneable<Derived> {
  public:
   AvgPoolImpl(ExpandingArray<D> kernel_size)
       : AvgPoolImpl(AvgPoolOptions<D>(kernel_size)) {}
@@ -110,7 +110,7 @@ TORCH_MODULE(AvgPool3d);
 
 /// Base class for all (dimension-specialized) maxpool modules.
 template <size_t D, typename Derived>
-class TORCH_API MaxPoolImpl : public torch::nn::Cloneable<Derived> {
+class MaxPoolImpl : public torch::nn::Cloneable<Derived> {
  public:
   MaxPoolImpl(ExpandingArray<D> kernel_size)
       : MaxPoolImpl(MaxPoolOptions<D>(kernel_size)) {}
@@ -219,7 +219,7 @@ TORCH_MODULE(MaxPool3d);
 
 /// Base class for all (dimension-specialized) adaptive maxpool modules.
 template <size_t D, typename output_size_t, typename Derived>
-class TORCH_API AdaptiveMaxPoolImpl : public torch::nn::Cloneable<Derived> {
+class AdaptiveMaxPoolImpl : public torch::nn::Cloneable<Derived> {
  public:
   AdaptiveMaxPoolImpl(output_size_t output_size)
       : AdaptiveMaxPoolImpl(AdaptiveMaxPoolOptions<output_size_t>(output_size)) {}
@@ -338,7 +338,7 @@ TORCH_MODULE(AdaptiveMaxPool3d);
 
 /// Base class for all (dimension-specialized) adaptive avgpool modules.
 template <size_t D, typename output_size_t, typename Derived>
-class TORCH_API AdaptiveAvgPoolImpl : public torch::nn::Cloneable<Derived> {
+class AdaptiveAvgPoolImpl : public torch::nn::Cloneable<Derived> {
  public:
   AdaptiveAvgPoolImpl(output_size_t output_size)
       : AdaptiveAvgPoolImpl(AdaptiveAvgPoolOptions<output_size_t>(output_size)) {}
@@ -445,7 +445,7 @@ TORCH_MODULE(AdaptiveAvgPool3d);
 
 /// Base class for all (dimension-specialized) maxunpool modules.
 template <size_t D, typename Derived>
-class TORCH_API MaxUnpoolImpl : public torch::nn::Cloneable<Derived> {
+class MaxUnpoolImpl : public torch::nn::Cloneable<Derived> {
  public:
   MaxUnpoolImpl(ExpandingArray<D> kernel_size)
       : MaxUnpoolImpl(MaxUnpoolOptions<D>(kernel_size)) {}
@@ -637,7 +637,7 @@ TORCH_MODULE(FractionalMaxPool3d);
 
 /// Base class for all (dimension-specialized) lppool modules.
 template <size_t D, typename Derived>
-class TORCH_API LPPoolImpl : public torch::nn::Cloneable<Derived> {
+class LPPoolImpl : public torch::nn::Cloneable<Derived> {
  public:
   LPPoolImpl(double norm_type, ExpandingArray<D> kernel_size)
       : LPPoolImpl(LPPoolOptions<D>(norm_type, kernel_size)) {}

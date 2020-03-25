@@ -12,7 +12,7 @@ namespace nn {
 
 /// Options for a `D`-dimensional ReflectionPad module.
 template <size_t D>
-struct TORCH_API ReflectionPadOptions {
+struct ReflectionPadOptions {
   ReflectionPadOptions(ExpandingArray<D*2> padding) : padding_(padding) {}
 
   /// The size of the padding.
@@ -42,7 +42,7 @@ using ReflectionPad2dOptions = ReflectionPadOptions<2>;
 
 /// Options for a `D`-dimensional ReplicationPad module.
 template <size_t D>
-struct TORCH_API ReplicationPadOptions {
+struct ReplicationPadOptions {
   ReplicationPadOptions(ExpandingArray<D*2> padding) : padding_(padding) {}
 
   /// The size of the padding.
@@ -99,7 +99,7 @@ struct TORCH_API ZeroPad2dOptions {
 
 /// Options for a `D`-dimensional ConstantPad module.
 template <size_t D>
-struct TORCH_API ConstantPadOptions {
+struct ConstantPadOptions {
   ConstantPadOptions(ExpandingArray<D*2> padding, double value) : padding_(padding), value_(value) {}
 
   /// The size of the padding.
