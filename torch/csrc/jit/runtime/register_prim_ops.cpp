@@ -28,6 +28,7 @@
 #include <c10/core/thread_pool.h>
 #include <c10/util/SmallVector.h>
 #include <c10/util/math_compat.h>
+#include <c10/util/string_utils.h>
 
 #include <algorithm>
 #include <bitset>
@@ -480,7 +481,7 @@ RegisterOperators reg(
          [](Stack& stack) {
            auto s = pop(stack).toString();
            std::string::size_type sz;
-           double b = std::stod(s->string(), &sz);
+           double b = c10::stod(s->string(), &sz);
            if (sz == s->string().size()) {
              push(stack, b);
            } else {
