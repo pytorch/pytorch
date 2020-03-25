@@ -44,7 +44,7 @@ Typical Mixed Precision Training
 
             # Scales loss.  Calls backward() on scaled loss to create scaled gradients.
             # Backward passes under autocast are not recommended.
-            # Backward ops run in the same precision that autocast used for corresponding forward ops.
+            # Backward ops run in the same dtype that autocast used for corresponding forward ops.
             scaler.scale(loss).backward()
 
             # scaler.step() first unscales the gradients of the optimizer's assigned params.
@@ -331,7 +331,7 @@ the relevant case below.
 Functions with multiple inputs or autocastable ops
 --------------------------------------------------
 
-Apply :func:`custom_fwd` and :func:`custom_bwd` (with no arguments) to ``forward`` and ``backward``
+Apply :func:`custom_fwd<custom_fwd>` and :func:`custom_bwd<custom_bwd>` (with no arguments) to ``forward`` and ``backward``
 respectively.  These ensure ``forward`` executes with the current autocast state and ``backward``
 executes with the same autocast state as ``forward`` (which can prevent type mismatch errors)::
 
