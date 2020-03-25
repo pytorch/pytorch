@@ -39,6 +39,7 @@ import __main__
 import errno
 
 from torch.testing._internal import expecttest
+from torch.testing import get_all_dtypes
 
 import torch
 import torch.cuda
@@ -789,6 +790,11 @@ class TestCase(expecttest.TestCase):
         'complex64': (1e-5, 1e-7),
     }
 
+    # todo: implement numpy-like issubdtype
+    def is_integral(self, dtype):
+        dtypes = get_all_dtypes()
+        return dtype in dtypes and not dtype.is_floating_point
+
     def get_default_tolerance(self, a, b=None):
         if b is None:
             dtype = torch.float
@@ -801,8 +807,8 @@ class TestCase(expecttest.TestCase):
                     dtype = torch.float
                 else:
                     dtype = torch.from_numpy(a).dtype
-
-            # todo: set 0-tolerance for integral type.
+            if self.is_integral(dtype):
+                return (0, 0)
             dtype = str(dtype).split('.')[-1]
             return self.dtype_precisions.get(dtype, (self.precision, self.precision))
 

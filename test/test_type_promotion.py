@@ -28,7 +28,6 @@ def float_double_default_dtype(fn):
 
     return wrapped_fn
 
-
 class TestTypePromotion(TestCase):
 
     # In-place operations don't promote.
@@ -81,14 +80,44 @@ class TestTypePromotion(TestCase):
 
     @float_double_default_dtype
     def test_float_promotion(self, device):
-        a = torch.ones([4, 4, 4], dtype=torch.float, device=device)
-        b = torch.ones([4, 4, 4], dtype=torch.double, device=device)
-        c = a + b
-        self.assertEqual(c, b + b)
-        self.assertEqual(c.dtype, torch.double)
-        c = b + a
-        self.assertEqual(c, b + b)
-        self.assertEqual(c.dtype, torch.double)
+        def test_promotion(dtype_float, dtype_double):
+            a = torch.ones([4, 4, 4], dtype=dtype_float, device=device)
+            b = torch.ones([4, 4, 4], dtype=dtype_double, device=device)
+            c = a + b
+            self.assertEqual(c, b + b)
+            self.assertEqual(c.dtype, dtype_double)
+            c = b + a
+            self.assertEqual(c, b + b)
+            self.assertEqual(c.dtype, dtype_double)
+        test_promotion(torch.float, torch.double)
+
+    @float_double_default_dtype
+    def test_complex_promotion(self, device):
+        def test_promotion(dtype_float, dtype_double):
+            a = torch.ones([4, 4, 4], dtype=dtype_float, device=device)
+            b = torch.ones([4, 4, 4], dtype=dtype_double, device=device)
+            c = a + b
+            self.assertEqual(c, b + b)
+            self.assertEqual(c.dtype, dtype_double)
+            c = b + a
+            self.assertEqual(c, b + b)
+            self.assertEqual(c.dtype, dtype_double)
+
+        test_promotion(torch.complex64, torch.complex128)
+
+        a = torch.randn(3, dtype=torch.complex64, device=device)
+        self.assertEqual((a * 5).dtype, torch.complex64)
+        # not a "wrapped number"
+        other = torch.tensor(5.5, dtype=torch.double, device=device)
+        self.assertEqual((a + other).dtype, torch.complex64)
+
+    @float_double_default_dtype
+    def test_complex_scalar_mult_tensor_promotion(self, device):
+        a = 1j * torch.ones(2, device=device)
+        a = a + 1j
+        b = torch.tensor([2j, 2j], device=device)
+        self.assertEqual(a, b)
+        self.assertEqual(a.dtype, b.dtype)
 
     @float_double_default_dtype
     def test_add_wrapped(self, device):
@@ -176,7 +205,17 @@ class TestTypePromotion(TestCase):
         shape = [5, 5, 5]
         if dtype == torch.bool:
             tensor = torch.randint(int(remove_zeros), 2, shape, device=device, dtype=dtype)
-        elif dtype.is_floating_point:
+        elif dtype.is_complex:
+            # "_th_normal_ not supported on CPUType for Half" so simpler create and convert
+            tensor = torch.randn(shape, dtype=dtype, device=device)
+            if remove_zeros:
+                tensor_abs = torch.abs(tensor)
+                if dtype == torch.complex64:
+                    tensor_abs = tensor_abs.to(torch.float)
+                elif dtype == torch.complex128:
+                    tensor_abs = tensor_abs.to(torch.double)
+                tensor[tensor_abs < 0.05] = 5
+        elif dtype.is_floating_point or dtype.is_complex:
             # "_th_normal_ not supported on CPUType for Half" so simpler create and convert
             tensor = torch.randn(shape, device=device)
             tensor = tensor.to(dtype)
@@ -194,8 +233,9 @@ class TestTypePromotion(TestCase):
     def test_many_promotions(self, device):
         # Can also include half on CPU in cases where it will be promoted to a
         # supported dtype
-        dtypes1 = torch.testing.get_all_math_dtypes('cuda')
-        dtypes2 = torch.testing.get_all_math_dtypes(device)
+        complex_dtypes = torch.testing.get_all_complex_dtypes()
+        dtypes1 = torch.testing.get_all_math_dtypes('cuda') + complex_dtypes
+        dtypes2 = torch.testing.get_all_math_dtypes(device) + complex_dtypes
         ops = [torch.add, torch.sub, torch.mul, torch.div, torch.rsub]
         for dt1, dt2 in itertools.product(dtypes1, dtypes2):
             for op, non_contiguous in itertools.product(ops, [True, False]):
@@ -217,7 +257,15 @@ class TestTypePromotion(TestCase):
                 self.assertEqual(not first.is_contiguous(), non_contiguous)
                 self.assertEqual(not second.is_contiguous(), non_contiguous)
                 result = op(first, second)
-                expected = op(first.to(common_dtype), second.to(common_dtype))
+                # TODO: copy_() for complex on cuda issues on github: #33567 #35284
+                if common_dtype.is_complex and first.is_cuda:
+                    first_ = torch.zeros(first.size(), dtype=common_dtype, device=device)
+                    second_ = torch.zeros(second.size(), dtype=common_dtype, device=device)
+                    first_.add_(first)
+                    second_.add_(second)
+                    expected = op(first_, second_)
+                else:
+                    expected = op(first.to(common_dtype), second.to(common_dtype))
                 self.assertEqual(result.dtype, expected.dtype, message='{} with {}, {}'.format(op.__name__, dt1, dt2))
                 self.assertEqual(result, expected, message='{} with {}, {}'.format(op.__name__, dt1, dt2))
 
