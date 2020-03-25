@@ -327,6 +327,7 @@ void AliasDb::analyzeImpl(Node* node) {
       return analyzeLoop(node);
     case prim::FusionGroup:
     case prim::CudaFusionGroup:
+    case prim::FunctionalGraph:
     case prim::DifferentiableGraph:
       return analyzeSubgraph(node);
     case prim::fork:
@@ -1144,7 +1145,9 @@ bool AliasDb::tryMove(
     Node* movePoint,
     MoveSide moveSide,
     bool dryRun) {
-  TORCH_INTERNAL_ASSERT(toMove->owningBlock() == movePoint->owningBlock());
+  if (toMove->owningBlock() != movePoint->owningBlock()) {
+    return false;
+  }
   if (toMove == movePoint) {
     return true;
   }
