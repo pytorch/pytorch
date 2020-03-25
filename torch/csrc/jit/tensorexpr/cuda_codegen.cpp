@@ -604,14 +604,6 @@ void CudaCodeGen::call(const std::vector<CallArg>& args) {
   USE_TRIGGER(cuda_codegen_executed);
 }
 
-void CudaSetContext(CUcontext pctx) {
-  if (!pctx) {
-    std::unique_lock<std::mutex> cudaFreeMutexLock(
-        *(c10::cuda::CUDACachingAllocator::getFreeMutex()));
-    cudaFree(0);
-  }
-}
-
 void CudaCodeGen::CompileToNVRTC(
     const std::string& code,
     const std::string& func_name) {
@@ -620,11 +612,17 @@ void CudaCodeGen::CompileToNVRTC(
   // Note: hacked at::DeviceGuard since at::DeviceGuard was failing to work
   // properly in some scenarios
   const auto prior_device = at::cuda::current_device();
-  at::cuda::set_device(this->device().index());
+  if (prior_device != this->device().index()) {
+    at::cuda::set_device(this->device().index());
+  }
   // cudaSetDevice does not have to really change the underlying device if it
   // doesn't have to, so calling cudaFree to force that change
-  CudaSetContext(pctx);
-
+  if (!pctx) {
+    std::unique_lock<std::mutex> cudaFreeMutexLock(
+        *(c10::cuda::CUDACachingAllocator::getFreeMutex()));
+    cudaFree(nullptr);
+    AT_CUDA_DRIVER_CHECK(nvrtc().cuCtxGetCurrent(&pctx));
+  }
   // Acquires device and NVRTC properties (for compile arch and occupancy
   // calculations)
   cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
@@ -676,7 +674,9 @@ void CudaCodeGen::CompileToNVRTC(
   AT_CUDA_DRIVER_CHECK(nvrtc().cuModuleLoadData(&module, ptx.data()));
   AT_CUDA_DRIVER_CHECK(
       nvrtc().cuModuleGetFunction(&function_, module, func_name.c_str()));
-  at::cuda::set_device(prior_device);
+  if (prior_device != this->device().index()) {
+    at::cuda::set_device(prior_device);
+  }
 }
 
 RegisterCodeGen<CudaCodeGen> cuda_codegen_reg("cuda_codegen");
