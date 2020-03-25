@@ -1325,6 +1325,16 @@ TEST(NewOperatorRegistrationTest, importTopLevel) {
   ASSERT_TRUE(Dispatcher::singleton().findOp({"test::impl1", ""}).has_value());
 }
 
+TEST(NewOperatorRegistrationTest, overload) {
+  auto registrar = c10::import("test")
+    .def("fn(Tensor self) -> Tensor")
+    .def("fn.overload1(Tensor self, Tensor other) -> Tensor")
+    .def("fn.overload2(Tensor self, Tensor other, Tensor alpha) -> Tensor");
+  ASSERT_TRUE(Dispatcher::singleton().findSchema({"test::fn", ""}).has_value());
+  ASSERT_TRUE(Dispatcher::singleton().findSchema({"test::fn", "overload1"}).has_value());
+  ASSERT_TRUE(Dispatcher::singleton().findSchema({"test::fn", "overload2"}).has_value());
+}
+
 TEST(NewOperatorRegistrationTest, importNamespace) {
   auto registrar = c10::import("test")
     .def("def1(Tensor self) -> Tensor")
