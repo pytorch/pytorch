@@ -570,7 +570,8 @@ std::shared_ptr<SugaredValue> ClassValue::attr(
     Function& m,
     const std::string& field) {
   if (field != "__new__") {
-    throw ErrorReport(loc) << "Tried to lookup unknown attribute on class";
+    throw ErrorReport(loc) << "Tried to lookup unknown attribute on class "
+                           << type_->python_str();
   }
   return SpecialFormValue::create(prim::CreateObject);
 }
