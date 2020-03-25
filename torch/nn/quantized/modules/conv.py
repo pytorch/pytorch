@@ -18,7 +18,9 @@ from torch.nn.utils import fuse_conv_bn_weights
 
 class _ConvNd(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
-                 padding=0, dilation=1, groups=1, bias=True,
+                 padding=0, dilation=1,
+                 transposed=False, output_padding=False,
+                 groups=1, bias=True,
                  padding_mode='zeros'):
         super(_ConvNd, self).__init__()
         if padding_mode != 'zeros':
@@ -34,8 +36,8 @@ class _ConvNd(nn.Module):
         self.stride = stride
         self.padding = padding
         self.dilation = dilation
-        self.transposed = False
-        self.output_padding = 0
+        self.transposed = transposed
+        self.output_padding = output_padding
         self.groups = groups
         self.padding_mode = padding_mode
         # Initialize as NCHW. set_weight will internally transpose to NHWC.
@@ -56,6 +58,8 @@ class _ConvNd(nn.Module):
             s += ', padding={padding}'
         if self.dilation != (1,) * len(self.dilation):
             s += ', dilation={dilation}'
+        if self.output_padding != (0,) * len(self.output_padding):
+            s += ', output_padding={output_padding}'
         if self.groups != 1:
             s += ', groups={groups}'
         if self.bias() is None:
@@ -196,7 +200,8 @@ class Conv1d(_ConvNd):
 
         super(Conv1d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
-            groups, bias, padding_mode)
+            groups, bias, padding_mode,
+            transposed=False, output_padding=_single(0))
 
     def _get_name(self):
         return 'QuantizedConv1d'
@@ -308,7 +313,8 @@ class Conv2d(_ConvNd):
         dilation = _pair(dilation)
         super(Conv2d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
-            groups, bias, padding_mode)
+            groups, bias, padding_mode,
+            transposed=False, output_padding=_pair(0))
 
     def _get_name(self):
         return 'QuantizedConv2d'
@@ -434,7 +440,8 @@ class Conv3d(_ConvNd):
         dilation = _triple(dilation)
         super(Conv3d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
-            groups, bias, padding_mode)
+            groups, bias, padding_mode,
+            transposed=False, output_padding=_triple(0))
 
     def _get_name(self):
         return 'QuantizedConv3d'
@@ -498,3 +505,56 @@ class Conv3d(_ConvNd):
         qconv.zero_point = int(act_zp)
 
         return qconv
+
+
+# === Transposed Convolutions ===
+
+class _ConvTransposeNd(_ConvNd):
+    def __init__(self, in_channels, out_channels, kernel_size, stride,
+                 padding, dilation, transposed, output_padding,
+                 groups, bias, padding_mode):
+        if padding_mode != 'zeros':
+            raise ValueError('Only "zeros" padding mode is supported for {}'.format(self.__class__.__name__))
+
+        super(_ConvTransposeNd, self).__init__(
+            in_channels, out_channels, kernel_size, stride, padding, dilation,
+            groups, bias, padding_mode,
+            transposed=True, output_padding=output_padding)
+
+    def _output_padding(self, input, output_size, stride, padding, kernel_size):
+        # type: (Tensor, Optional[List[int]], List[int], List[int], List[int]) -> List[int]
+        if output_size is None:
+            ret = _single(self.output_padding)  # converting to list if was not already
+        else:
+            k = input.dim() - 2
+            if len(output_size) == k + 2:
+                output_size = output_size[2:]
+            if len(output_size) != k:
+                raise ValueError(
+                    "output_size must have {} or {} elements (got {})"
+                    .format(k, k + 2, len(output_size)))
+
+            min_sizes = torch.jit.annotate(List[int], [])
+            max_sizes = torch.jit.annotate(List[int], [])
+            for d in range(k):
+                dim_size = ((input.size(d + 2) - 1) * stride[d] -
+                            2 * padding[d] + kernel_size[d])
+                min_sizes.append(dim_size)
+                max_sizes.append(min_sizes[d] + stride[d] - 1)
+
+            for i in range(len(output_size)):
+                size = output_size[i]
+                min_size = min_sizes[i]
+                max_size = max_sizes[i]
+                if size < min_size or size > max_size:
+                    raise ValueError((
+                        "requested an output size of {}, but valid sizes range "
+                        "from {} to {} (for an input of {})").format(
+                            output_size, min_sizes, max_sizes, input.size()[2:]))
+
+            res = torch.jit.annotate(List[int], [])
+            for d in range(k):
+                res.append(output_size[d] - min_sizes[d])
+
+            ret = res
+        return ret
