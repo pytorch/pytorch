@@ -9829,8 +9829,10 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(t_transform(r).std(), std_transform(3), 0.3)
 
         if dtype.is_complex:
-            helper(self, device, dtype, lambda x: complex(x, x), lambda t: t.real().to(torch.float), lambda mean: mean / math.sqrt(2))
-            helper(self, device, dtype, lambda x: complex(x, x), lambda t: t.imag().to(torch.float), lambda mean: mean / math.sqrt(2))
+            helper(self, device, dtype, lambda x: complex(x, x),
+                lambda t: t.real().to(torch.float), lambda mean: mean / math.sqrt(2))
+            helper(self, device, dtype, lambda x: complex(x, x),
+                lambda t: t.imag().to(torch.float), lambda mean: mean / math.sqrt(2))
             self.assertRaisesRegex(
                 RuntimeError, "normal expects standard deviation to be non-complex",
                 lambda: torch.normal(0, torch.empty(100, 100, dtype=dtype, device=device)))
@@ -14224,6 +14226,29 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         a = torch.exp(torch.ones(2 ** 31, dtype=dtype, device=device))
         b = torch.exp(torch.ones(1, dtype=dtype, device=device))
         self.assertEqual(a, b.expand(2 ** 31))
+
+    @onlyCPU
+    @dtypes(torch.float, torch.double)
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_hardswish(self, device, dtype):
+        inputValues = [-1000, -4, -3, -2, 0, 2, 3, 4, 1000]
+        expectedOutput = np.multiply(
+            inputValues,
+            np.minimum(np.maximum((np.add(inputValues, 3)), 0), 6) / 6.0)
+        precision_4dps = 0.0002
+
+        inputTensor = torch.tensor(inputValues, dtype=dtype, device=device)
+        expectedOutputTensor = \
+            torch.tensor(expectedOutput, dtype=dtype, device=device)
+
+        # normal
+        self.assertEqual(torch.nn.functional.hardswish(inputTensor),
+                         expectedOutputTensor, precision_4dps)
+
+        # inplace
+        inputTensorCpy = inputTensor.clone().detach()
+        torch.nn.functional.hardswish(inputTensorCpy, inplace=True)
+        self.assertEqual(inputTensorCpy, expectedOutputTensor, precision_4dps)
 
     @onlyCPU
     @dtypes(torch.float, torch.double)

@@ -12,6 +12,8 @@ namespace native {
 namespace templates {
 namespace cpu {
 
+// ==================================================== Random ========================================================
+
 template<typename RNG>
 void random_from_to_kernel(TensorIterator& iter, uint64_t range, int64_t base, RNG generator) {
   AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Bool, at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "random_from_to_kernel_cpu", [&] {
@@ -106,7 +108,7 @@ struct RandomKernel {
   }
 };
 
-// =======================================================================================================================================
+// ==================================================== Normal ========================================================
 
 #ifdef __AVX2__
 #include <ATen/native/cpu/avx_mathfun.h>
@@ -231,7 +233,7 @@ struct NormalKernel {
   }
 };
 
-// =======================================================================================================================================
+// ==================================================== Cauchy ========================================================
 
 template<typename RNG>
 void cauchy_kernel(TensorIterator& iter, double median, double sigma, RNG generator) {

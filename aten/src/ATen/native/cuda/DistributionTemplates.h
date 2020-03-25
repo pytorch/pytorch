@@ -176,6 +176,8 @@ namespace native {
 namespace templates {
 namespace cuda {
 
+// ==================================================== Random ========================================================
+
 template<typename RNG>
 void random_from_to_kernel(TensorIterator& iter, uint64_t range, int64_t base, RNG gen) {
 #ifdef _WIN32
@@ -350,7 +352,7 @@ struct RandomKernel {
   }
 };
 
-// =======================================================================================================================================
+// ==================================================== Normal ========================================================
 
 template<typename RNG>
 void normal_kernel(Tensor& self, double mean_, double std_, RNG gen) {

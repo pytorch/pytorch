@@ -35,6 +35,8 @@ struct TestCPUGenerator : public c10::GeneratorImpl {
   c10::optional<double> next_double_normal_sample_;
 };
 
+// ==================================================== Random ========================================================
+
 Tensor& random_(Tensor& self, Generator generator) {
   return at::native::templates::random_impl<native::templates::cpu::RandomKernel, TestCPUGenerator>(self, generator);
 }
@@ -47,7 +49,7 @@ Tensor& random_to(Tensor& self, int64_t to, Generator generator) {
   return random_from_to(self, 0, to, generator);
 }
 
-// =======================================================================================================================================
+// ==================================================== Normal ========================================================
 
 Tensor& normal_(Tensor& self, double mean, double std, Generator gen) {
   return at::native::templates::normal_impl_<native::templates::cpu::NormalKernel, TestCPUGenerator>(self, mean, std, gen);
@@ -77,7 +79,7 @@ Tensor normal_Tensor_Tensor(const Tensor& mean, const Tensor& std, Generator gen
   return at::native::templates::normal_impl<native::templates::cpu::NormalKernel, TestCPUGenerator>(mean, std, gen);
 }
 
-// =======================================================================================================================================
+// ==================================================== Cauchy ========================================================
 
 Tensor& custom_rng_cauchy_(Tensor& self, double median, double sigma, Generator generator) {
   auto iter = TensorIterator::nullary_op(self);
@@ -89,6 +91,7 @@ class RNGTest : public ::testing::Test {
  protected:
   void SetUp() override {
     static auto registry = torch::RegisterOperators()
+// ==================================================== Random ========================================================
       .op(torch::RegisterOperators::options()
         .schema("aten::random_.from(Tensor(a!) self, int from, int? to, *, Generator? generator=None) -> Tensor(a!)")
         .impl_unboxedOnlyKernel<decltype(random_from_to), &random_from_to>(DispatchKey::CustomRNGKeyId))
@@ -98,7 +101,7 @@ class RNGTest : public ::testing::Test {
       .op(torch::RegisterOperators::options()
         .schema("aten::random_(Tensor(a!) self, *, Generator? generator=None) -> Tensor(a!)")
         .impl_unboxedOnlyKernel<decltype(random_), &random_>(DispatchKey::CustomRNGKeyId))
-// =======================================================================================================================================
+// ==================================================== Normal ========================================================
       .op(torch::RegisterOperators::options()
         .schema("aten::normal_(Tensor(a!) self, float mean=0, float std=1, *, Generator? generator=None) -> Tensor(a!)")
         .impl_unboxedOnlyKernel<decltype(normal_), &normal_>(DispatchKey::CustomRNGKeyId))
@@ -120,12 +123,14 @@ class RNGTest : public ::testing::Test {
       .op(torch::RegisterOperators::options()
         .schema("aten::normal.Tensor_Tensor(Tensor mean, Tensor std, *, Generator? generator=None) -> Tensor")
         .impl_unboxedOnlyKernel<decltype(normal_Tensor_Tensor), &normal_Tensor_Tensor>(DispatchKey::CustomRNGKeyId))
-// =======================================================================================================================================
+// ==================================================== Cauchy ========================================================
       .op(torch::RegisterOperators::options()
         .schema("aten::cauchy_(Tensor(a!) self, float median=0, float sigma=1, *, Generator? generator=None) -> Tensor(a!)")
         .impl_unboxedOnlyKernel<decltype(custom_rng_cauchy_), &custom_rng_cauchy_>(DispatchKey::CustomRNGKeyId));
   }
 };
+
+// ==================================================== Random ========================================================
 
 TEST_F(RNGTest, RandomFromTo) {
   const at::Device device("cpu");
@@ -160,7 +165,7 @@ TEST_F(RNGTest, Random64bits) {
   ASSERT_EQ(static_cast<uint64_t>(actual[0].item<int64_t>()), std::numeric_limits<uint64_t>::max());
 }
 
-// =======================================================================================================================================
+// ==================================================== Normal ========================================================
 
 TEST_F(RNGTest, Normal) {
   const auto mean = 123.45;
@@ -257,7 +262,7 @@ TEST_F(RNGTest, Normal_Tensor_Tensor) {
   ASSERT_TRUE(torch::allclose(actual, expected));
 }
 
-// =======================================================================================================================================
+// ==================================================== Cauchy ========================================================
 
 TEST_F(RNGTest, Cauchy) {
   const auto median = 123.45;

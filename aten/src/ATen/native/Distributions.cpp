@@ -219,6 +219,8 @@ Tensor& geometric_(Tensor& self, double p, Generator gen) {
   return self;
 }
 
+// ==================================================== Normal ========================================================
+
 template<typename RNG>
 struct NormalStub {
   void operator()(Tensor& self, double mean, double std, Generator gen) {
@@ -254,6 +256,8 @@ Tensor normal(const Tensor& mean, const Tensor& std, Generator gen) {
   return at::native::templates::normal_impl<NormalStub, Generator>(mean, std, gen);
 }
 
+// ==================================================== Random ========================================================
+
 template<typename RNG>
 struct RandomStub {
   void operator()(TensorIterator& iter, at::Generator gen) {
@@ -282,6 +286,8 @@ Tensor& random_(Tensor& self, int64_t from, optional<int64_t> to, Generator gen)
 Tensor& random_(Tensor& self, int64_t to, Generator gen) {
   return random_(self, 0, to, gen);
 }
+
+// ====================================================================================================================
 
 Tensor _standard_gamma_grad_cpu(const Tensor& self, const Tensor& output) {
   Tensor ret = at::empty(self.sizes(), self.options());

@@ -13,6 +13,8 @@ namespace at {
 namespace native {
 namespace templates {
 
+// ==================================================== Random ========================================================
+
 // The purpose of `update_from` and `update_to` is to find the closest valid int64_t number that can be used as actual `from`.
 // The current implementation of `random_` uses uint64_t arithmetics and casts the result to the target dtype(scalar_t).
 // This casting can result in generating numbers that happen to be greater or equal to `to` value. For instance:
@@ -141,7 +143,7 @@ at::Tensor& random_from_to_impl(at::Tensor& self, int64_t from, c10::optional<in
   return self;
 }
 
-// =======================================================================================================================================
+// ==================================================== Normal ========================================================
 
 // This function computes broadcasted size of mean and std, resize the output to the broadcasted size if it was empty
 // [Note] The following features will be deprecated in version 1.6 release and function signature will be changed after
