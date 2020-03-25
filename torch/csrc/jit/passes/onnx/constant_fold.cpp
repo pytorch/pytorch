@@ -265,6 +265,10 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
       }
     }
     return c10::optional<at::Tensor>(at::reshape(updated_val, shape));
+  } else if (node->kind() == onnx::Shape) {
+    assert(inputTensorValues.size() == 1);
+    updated_val = at::_shape_as_tensor(inputTensorValues[0]);
+    return c10::optional<at::Tensor>(updated_val);
   } else {
     return c10::nullopt;
   }
