@@ -190,7 +190,6 @@ bool nodeQuantizable(Node* n) {
       "matmul",
       "add_",
       "add",
-      "cat",
     });
 }
 
@@ -866,9 +865,8 @@ void InsertObserversHelper::preprocess(
 
 // TODO: remove this as a class method
 bool InsertObserversHelper::valueNeedsToBeQuantized(Value* v) {
-  if (isBiasOfConvOrLinear(v) ||
-      !(v->type()->isSubtypeOf(TensorType::get()) ||
-        v->type()->isSubtypeOf(ListType::ofTensors()))) {
+  if (!v->type()->isSubtypeOf(TensorType::get()) ||
+      isBiasOfConvOrLinear(v)) {
     return false;
   }
   // For dynamic quantization we only insert observers at the input
