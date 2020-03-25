@@ -12,7 +12,7 @@ import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.qat as nniqat
 
 from torch._ops import ops
-from torch.nn.modules.utils import _pair, _triple
+from torch.nn.modules.utils import _single, _pair, _triple
 from torch.nn.quantized.modules.utils import _quantize_weight
 from torch.nn.utils import fuse_conv_bn_weights
 
@@ -38,10 +38,19 @@ class _ConvNd(nn.Module):
         self.output_padding = 0
         self.groups = groups
         self.padding_mode = padding_mode
+
+        # Although not necessary for PTQ, for debugging purposes set the scale
+        # to be able to represent real defaults.
+        fan_in_factor = in_channels
+        for k in _single(self.kernel_size):
+            fan_in_factor *= k
+        fan_in_factor = (1.0 / fan_in_factor) ** 0.5
+        default_scale = 2.0 * fan_in_factor / 256.0
+
         # Initialize as NCHW. set_weight will internally transpose to NHWC.
         qweight = torch._empty_affine_quantized(
             [out_channels, in_channels // self.groups] + list(kernel_size),
-            scale=1, zero_point=0, dtype=torch.qint8)
+            scale=default_scale, zero_point=0, dtype=torch.qint8)
         bias_float = (
             torch.zeros(out_channels, dtype=torch.float) if bias else None)
 
