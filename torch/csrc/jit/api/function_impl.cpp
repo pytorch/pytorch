@@ -68,7 +68,7 @@ void preoptimizeGraph(std::shared_ptr<Graph>& graph) {
   PeepholeOptimize(graph);
   // AliasDb construction can be slow, so run it just on immutable types
   // to clean up constant Ifs & other easy wins
-  ConstantPropImmutableTypes(graph);
+  ConstantPropagationImmutableTypes(graph);
   Inline(*graph);
 }
 
