@@ -12558,6 +12558,19 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(top1, top2)
         self.assertEqual(idx1, idx2)
 
+    def test_topk_nonfinite(self, device):
+        for dtype in (torch.float, torch.double):
+            x = torch.tensor([float('nan'), float('inf'), 1e10, 0, -1e10, -float('inf')], device=device)
+            val, idx = x.topk(4)
+            expect = torch.tensor([float('nan'), float('inf'), 1e10, 0], device=device)
+            self.assertEqual(val, expect, allow_inf=True)
+            self.assertEqual(idx, [0, 1, 2, 3])
+
+            val, idx = x.topk(4, largest=False)
+            expect = torch.tensor([-float('inf'), -1e10, 0, 1e10], device=device)
+            self.assertEqual(val, expect, allow_inf=True)
+            self.assertEqual(idx, [5, 4, 3, 2])
+
     def test_is_signed(self, device):
         self.assertEqual(torch.IntTensor(5).to(device).is_signed(), True)
         self.assertEqual(torch.ByteTensor(5).to(device).is_signed(), False)
