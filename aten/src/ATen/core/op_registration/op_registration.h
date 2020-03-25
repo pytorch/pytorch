@@ -21,6 +21,7 @@ std::unique_ptr<FunctionSchema> inferFunctionSchemaFromFunctor() {
   using func_type = typename c10::guts::infer_function_traits_t<KernelFunctor>::func_type;
   return std::make_unique<FunctionSchema>(inferFunctionSchemaFlattenedReturns<func_type>("", ""));
 }
+}
 
 /**
  * An instance of this class handles the registration for one or more operators.
