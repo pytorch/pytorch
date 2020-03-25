@@ -75,10 +75,10 @@ if platform.system() == 'Windows':
 # See Note [Global dependencies]
 def _load_global_deps():
     lib_name = {
-        'Darwin': 'libtorch_global_deps.dylib', 
+        'Darwin': 'libtorch_global_deps.dylib',
         'Linux': 'libtorch_global_deps.so',
         'Windows': 'torch_global_deps.dll',
-         }.get(platform.system(), 'UNKNOWN')
+    }.get(platform.system(), 'UNKNOWN')
     here = os.path.abspath(__file__)
     lib_path = os.path.join(os.path.dirname(here), 'lib', lib_name)
 
