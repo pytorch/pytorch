@@ -521,6 +521,14 @@ class _ConvTransposeNd(_ConvNd):
             groups, bias, padding_mode,
             transposed=True, output_padding=output_padding)
 
+    def _input_padding(self, kernel_size, dilation, padding):
+        # type: (List[int], List[int], List[int]) -> List[int]
+        res = torch.jit.annotate(List[int], [])
+        for kdx in range(len(kernel_size)):
+            pad = (dilation[kdx] * (kernel_size[kdx] - 1) - padding[kdx])
+            res.append(pad)
+        return res
+
     def _output_padding(self, input, output_size, stride, padding, kernel_size):
         # type: (Tensor, Optional[List[int]], List[int], List[int], List[int]) -> List[int]
         if output_size is None:
