@@ -92,12 +92,6 @@ struct PythonResolver : public Resolver {
     return toSugaredValue(obj, m, loc);
   }
 
-  static bool isNamedTupleClass(py::object obj) {
-    auto tuple_type = reinterpret_cast<PyObject*>(&PyTuple_Type);
-    return PyObject_IsSubclass(obj.ptr(), tuple_type) &&
-        py::hasattr(obj, "_fields");
-  }
-
   TypePtr resolveTypeFromObject(
       const py::object& obj,
       const SourceRange& loc) {
@@ -112,51 +106,13 @@ struct PythonResolver : public Resolver {
       return nullptr;
     }
 
+    if (isNamedTupleClass(obj)) {
+      return registerNamedTuple(obj, loc);
+    }
+
     auto qualifiedName = c10::QualifiedName(py::cast<std::string>(
         py::module::import("torch.jit").attr("_qualified_name")(obj)));
 
-    if (isNamedTupleClass(obj)) {
-      // Currently don't support default values
-      if (py::hasattr(obj, "_field_defaults")) {
-        auto default_dict = py::cast<std::map<std::string, py::object>>(
-            py::getattr(obj, "_field_defaults"));
-        if (default_dict.size()) {
-          std::string error_msg =
-              "Default values are currently not supported"
-              " on NamedTuple fields in TorchScript. Fields "
-              "with default values: [";
-          bool first = true;
-          for (const auto& kv : default_dict) {
-            if (!first) {
-              error_msg += ", ";
-            }
-            error_msg += kv.first;
-          }
-          error_msg += "]";
-          throw ErrorReport(loc) << error_msg;
-        }
-      }
-
-      py::object props = py::module::import("torch.jit")
-                             .attr("_get_named_tuple_properties")(obj);
-      std::string unqualName;
-      std::vector<std::string> fields;
-      std::vector<TypePtr> annotations;
-      std::tie(unqualName, fields, annotations) = py::cast<
-          std::tuple<std::string, decltype(fields), decltype(annotations)>>(
-          props);
-
-      auto tt = TupleType::createNamed(qualifiedName, fields, annotations);
-      if (auto type = get_python_cu()->get_type(qualifiedName)) {
-        TORCH_CHECK(
-            type->isSubtypeOf(tt),
-            "Can't to redefine NamedTuple: ",
-            tt->python_str());
-        return type;
-      }
-      get_python_cu()->register_type(tt);
-      return tt;
-    }
     return get_python_cu()->get_type(qualifiedName);
   }
 
