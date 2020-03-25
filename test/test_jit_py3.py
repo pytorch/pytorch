@@ -205,6 +205,7 @@ class TestScriptPy3(JitTestCase):
                 return TheType
 
         some_module = MyModule()
+
         def fn() -> some_module.Type:
             return some_module.Type(1)
 
