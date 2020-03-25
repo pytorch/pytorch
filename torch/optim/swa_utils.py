@@ -1,4 +1,5 @@
 import torch
+import math
 from torch.nn import Module
 from copy import deepcopy
 from torch.optim.lr_scheduler import _LRScheduler
@@ -27,27 +28,29 @@ class AveragedModel(Module):
             equally weighted average is used (default: None)
 
     Example:
-        >>> loader, optimizer, model = ...
+        >>> loader, optimizer, model, loss_fn = ...
         >>> swa_model = torch.optim.swa_utils.AveragedModel(model)
+        >>> # swa_model computes an equally-weighted average of the weights
         >>> # You can use custom averaging functions with `avg_fun` parameter
         >>> ema_avg = lambda p_avg, p, n_avg: 0.1 * p_avg + 0.9 * p
         >>> ema_model = torch.optim.swa_utils.AveragedModel(model, 
-        >>>                                     avg_function=ema_avg)
+        >>>                                     avg_fun=ema_avg)
+        >>> # ema_model computes exponential moving averages of the weights
         >>> scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, 
         >>>                                     T_max=300)
         >>> swa_start = 160
-        >>> swa_scheduler = SWALR(optimizer, start_epoch=swa_start, swa_lr=0.05)
-        >>>
+        >>> swa_scheduler = SWALR(optimizer, swa_lr=0.05)
         >>> for i in range(300):
         >>>      for input, target in loader:
         >>>          optimizer.zero_grad()
         >>>          loss_fn(model(input), target).backward()
         >>>          optimizer.step()
-        >>>          scheduler.step()
-        >>>          swa_scheduler.step()
-        >>> 
         >>>      if i > swa_start:
         >>>          swa_model.update_parameters(model)
+        >>>          ema_model.update_parameters(model)
+        >>>          swa_scheduler.step()
+        >>>      else:
+        >>>          scheduler.step()
         >>>
         >>> # Update bn statistics for the swa_model at the end
         >>> torch.optim.swa_utils.update_bn(loader, swa_model) 
@@ -130,15 +133,13 @@ def update_bn(loader, model, device=None):
         element of the list or tuple corresponding to the data batch.
     """
     momenta = {}
-    has_bn = False
     for module in model.modules():
         if isinstance(module, torch.nn.modules.batchnorm._BatchNorm):
             module.running_mean = torch.zeros_like(module.running_mean)
             module.running_var = torch.ones_like(module.running_var)
             momenta[module] = module.momentum
-            has_bn = True
 
-    if not has_bn:
+    if not momenta:
         return
 
     was_training = model.training
@@ -155,53 +156,107 @@ def update_bn(loader, model, device=None):
 
         model(input)
 
-    for module in model.modules():
-        if isinstance(module, torch.nn.modules.batchnorm._BatchNorm):
-            module.momentum = momenta[module]
+    for bn_module in momenta.keys():
+        bn_module.momentum = momenta[bn_module]
     model.train(was_training)
 
 
 class SWALR(_LRScheduler):
-    r"""Sets the learning rate in each parameter group to a fixed value
-    after a given number of epochs.
+    r"""Anneals the learning rate in each parameter group to a fixed value.
 
     This learning rate scheduler is meant to be used with Stochastic Weight 
     Averaging (SWA) method (see `torch.optim.swa_utils.AveragedModel`).
 
     Arguments:
         optimizer (torch.optim.Optimizer): wrapped optimizer
-        swa_lr (float): the learning rate value
-        start_epoch (int): the epoch number after which the learning rate will
-            be switched to :attr:`swa_lr`
-        last_epoch (int): the index of the last epoch (default: -1)
+        swa_lrs (float or list): the learning rate value for all param groups
+            together or separately for each group.
+        annealing_epochs (int): number of epochs in the annealing phase 
+            (default: 10)
+        annealing_strategy (str): "cos" or "linear"; specifies the annealing 
+            strategy: "cos" for cosine annealing, "linear" for linear annealing
+            (default: "cos")
+        last_epoch (int): the index of the last epoch (default: 'cos')
 
-    The :class:`SWALR` scheduler is meant to be used in compound with other
+    The :class:`SWALR` scheduler is can be used together with other
     schedulers to switch to a constant learning rate late in the training 
-    (at epoch :attr:`start_epoch`).
+    as in the example below.
 
     Example:
+        >>> loader, optimizer, model = ...
         >>> lr_lambda = lambda epoch: 0.9
-        >>> base_scheduler = MultiplicativeLR(optimizer, lr_lambda=lr_lambda)
-        >>> scheduler = SWALR(optimizer, start_epoch=160, swa_lr=0.05)
-
-    .. note::
-        :class:`SWALR` sets the same learning rate :attr:`swa_lr` for every
-        `param_group` in the optimizer; it does not support individual values
-        of :attr:`swa_lr` for different `param_groups`.
+        >>> scheduler = torch.optim.lr_scheduler.MultiplicativeLR(optimizer, 
+        >>>        lr_lambda=lr_lambda)
+        >>> swa_scheduler = torch.optim.swa_utils.SWALR(optimizer, 
+        >>>        anneal_strategy="linear", anneal_epochs=20, swa_lr=0.05)
+        >>> swa_start = 160
+        >>> for i in range(300):
+        >>>      for input, target in loader:
+        >>>          optimizer.zero_grad()
+        >>>          loss_fn(model(input), target).backward()
+        >>>          optimizer.step()
+        >>>      if i > swa_start:
+        >>>          swa_scheduler.step()
+        >>>      else:
+        >>>          scheduler.step()
 
     .. _Averaging Weights Leads to Wider Optima and Better Generalization:
         https://arxiv.org/abs/1803.05407
     """
-    def __init__(self, optimizer, swa_lr, start_epoch, last_epoch=-1):
-        self.swa_lr = swa_lr
-        self.start_epoch = start_epoch
+    def __init__(self, optimizer, swa_lr, anneal_epochs=10, anneal_strategy='cos', last_epoch=-1):
+        swa_lrs = self._format_param(optimizer, swa_lr)
+        for swa_lr, group in zip(swa_lrs, optimizer.param_groups):
+            group['swa_lr'] = swa_lr
+        if anneal_strategy not in ['cos', 'linear']:
+            raise ValueError("anneal_strategy must by one of 'cos' or 'linear', "
+                             "instead got {}".format(anneal_strategy))
+        elif anneal_strategy == 'cos':
+            self.anneal_func = self._cosine_anneal
+        elif anneal_strategy == 'linear':
+            self.anneal_func = self._linear_anneal
+        if not isinstance(anneal_epochs, int) or anneal_epochs < 1:
+            raise ValueError("anneal_epochs must be a positive integer, got {}".format(
+                             anneal_epochs)) 
+        self.anneal_epochs = anneal_epochs
+
         super(SWALR, self).__init__(optimizer, last_epoch)
+
+    @staticmethod
+    def _format_param(optimizer, swa_lrs):
+        if isinstance(swa_lrs, (list, tuple)):
+            if len(swa_lrs) != len(optimizer.param_groups):
+                raise ValueError("swa_lr must have the same length as "
+                                 "optimizer.param_groups: swa_lr has {}, "
+                                 "optimizer.param_groups has {}".format(
+                                     len(swa_lrs), len(optimizer.param_groups)))
+            return swa_lrs
+        else:
+            return [swa_lrs] * len(optimizer.param_groups)
+
+    @staticmethod
+    def _linear_anneal(t):
+        return t
+
+    @staticmethod
+    def _cosine_anneal(t):
+        return (1 - math.cos(math.pi * t)) / 2
+
+    @staticmethod
+    def _get_initial_lr(lr, swa_lr, alpha):
+        if alpha == 1:
+            return swa_lr
+        return (lr - alpha * swa_lr) / (1 - alpha)
 
     def get_lr(self):
         if not self._get_lr_called_within_step:
             warnings.warn("To get the last learning rate computed by the scheduler, "
                           "please use `get_last_lr()`.", UserWarning)
-
-        if self.start_epoch and self._step_count > self.start_epoch:
-            return [self.swa_lr for group in self.optimizer.param_groups]
-        return [group['lr'] for group in self.optimizer.param_groups]
+        step = self._step_count - 1
+        prev_t = max(0, min(1, (step - 1) / self.anneal_epochs))
+        prev_alpha = self.anneal_func(prev_t)
+        prev_lrs = [self._get_initial_lr(group['lr'], group['swa_lr'], prev_alpha)
+                    for group in self.optimizer.param_groups]
+        t = max(0, min(1, step / self.anneal_epochs))
+        alpha = self.anneal_func(t)
+        return [group['swa_lr'] * alpha + lr * (1 - alpha) 
+                for group, lr in zip(self.optimizer.param_groups, prev_lrs)]

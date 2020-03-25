@@ -1345,25 +1345,79 @@ class TestLRScheduler(TestCase):
                 targets[1] += [eta_min + (0.5 - eta_min) * (1 + math.cos(math.pi * T_cur / T_i)) / 2]
             self._test_interleaved_CosineAnnealingWarmRestarts(scheduler, targets, epochs)
 
-    def test_swa_lr(self):
-        epochs = 10
+    def test_swalr_no_anneal(self):
+        epochs, swa_start, swa_lr = 10, 5, 0.01
         initial_lrs = [group['lr'] for group in self.opt.param_groups]
-        targets = [[lr] * 5 + [0.01] * 5 for lr in initial_lrs]
-        scheduler = SWALR(self.opt, start_epoch=5, swa_lr=0.01)
-        self._test(scheduler, targets, epochs)
+        targets = [[lr] * (swa_start + 1) + [swa_lr] * (epochs - swa_start - 1) 
+                   for lr in initial_lrs]
+        swa_scheduler = SWALR(self.opt, anneal_epochs=1, swa_lr=swa_lr)
+        self._test_swalr(swa_scheduler, None, targets, swa_start, epochs)
 
-    def test_compound_swa_lr_multiplicative_with_start_epoch(self):
-        # Testing chaining of SWALR scheduler in case when swa_lr is turned on
-        # at epoch start_epoch
-        epochs = 10
+    def test_swalr_cosine_anneal_after_multiplicative(self):
+        # same swa_lr for different param_groups
+        epochs, swa_start, swa_lr, anneal_epochs = 15, 5, 0.01, 5
         mult_factor = 0.9
-        swa_lr = 0.01
+        scheduler = MultiplicativeLR(self.opt, lr_lambda=lambda epoch: mult_factor)
+        swa_scheduler = SWALR(self.opt, anneal_epochs=anneal_epochs, swa_lr=swa_lr)
+
+        def anneal_coef(t):
+            if t + 1 >= anneal_epochs:
+                return 0.
+            return (1 + math.cos(math.pi * (t + 1) / anneal_epochs)) / 2
+
         initial_lrs = [group['lr'] for group in self.opt.param_groups]
-        targets = [[lr * mult_factor**i for i in range(5)] + [swa_lr] * 5 for lr in initial_lrs]
-        base_scheduler = MultiplicativeLR(self.opt, lr_lambda=lambda epoch: mult_factor)
-        scheduler = SWALR(self.opt, start_epoch=5, swa_lr=swa_lr)
-        schedulers = [base_scheduler, scheduler]
-        self._test(schedulers, targets, epochs)
+        targets_before_swa = [[lr * mult_factor**i for i in range(swa_start + 1)]
+                              for lr in initial_lrs]
+        swa_epochs = epochs - swa_start - 1
+        targets = [lrs + [lrs[-1] * anneal_coef(t) + swa_lr * (1 - anneal_coef(t)) for t in range(swa_epochs)]
+                   for lrs in targets_before_swa]
+
+        self._test_swalr(swa_scheduler, scheduler, targets, swa_start, epochs)
+
+    def test_swalr_linear_anneal_after_multiplicative(self):
+        # separate swa_lr for different param_groups
+        epochs, swa_start, swa_lrs, anneal_epochs = 15, 5, [0.01, 0.02], 4
+        mult_factor = 0.9
+        scheduler = MultiplicativeLR(self.opt, lr_lambda=lambda epoch: mult_factor)
+        swa_scheduler = SWALR(self.opt, anneal_epochs=anneal_epochs, 
+                              anneal_strategy="linear", swa_lr=swa_lrs)
+
+        def anneal_coef(t):
+            if t + 1 >= anneal_epochs:
+                return 0.
+            return 1 - (t + 1) / anneal_epochs
+
+        initial_lrs = [group['lr'] for group in self.opt.param_groups]
+        targets_before_swa = [[lr * mult_factor**i for i in range(swa_start + 1)]
+                              for lr in initial_lrs]
+        swa_epochs = epochs - swa_start - 1
+        targets = [lrs + [lrs[-1] * anneal_coef(t) + swa_lr * (1 - anneal_coef(t)) for t in range(swa_epochs)]
+                   for lrs, swa_lr in zip(targets_before_swa, swa_lrs)]
+
+        self._test_swalr(swa_scheduler, scheduler, targets, swa_start, epochs)
+
+    def _test_swalr(self, swa_scheduler, scheduler, targets, swa_start, epochs):
+        for epoch in range(epochs):
+            for param_group, target in zip(self.opt.param_groups, targets):
+                self.assertAlmostEqual(target[epoch], param_group['lr'],
+                                       msg='LR is wrong in epoch {}: expected {}, got {}'.format(
+                                           epoch, target[epoch], param_group['lr']), delta=1e-5)
+            if epoch >= swa_start:
+                swa_scheduler.step()
+            elif scheduler is not None:
+                scheduler.step()
+
+    def test_swalr_hypers(self):
+        # Test that SWALR raises errors for incorrect hyper-parameters
+        with self.assertRaisesRegex(ValueError, "anneal_strategy must"):
+            swa_scheduler = SWALR(self.opt, anneal_strategy="exponential", swa_lr=1.)
+
+        with self.assertRaisesRegex(ValueError, "anneal_epochs must"):
+            swa_scheduler = SWALR(self.opt, anneal_epochs=-1, swa_lr=1.)
+        with self.assertRaisesRegex(ValueError, "anneal_epochs must"):
+            swa_scheduler = SWALR(self.opt, anneal_epochs=1.7, swa_lr=1.)
+        with self.assertRaisesRegex(ValueError, "swa_lr must"):
+            swa_scheduler = SWALR(self.opt, swa_lr=[1., 0.1, 0.01])
 
     def test_step_lr_state_dict(self):
         self._check_scheduler_state_dict(
@@ -1427,8 +1481,8 @@ class TestLRScheduler(TestCase):
 
     def test_swa_lr_state_dict(self):
         self._check_scheduler_state_dict(
-            lambda: SWALR(self.opt, start_epoch=3, swa_lr=0.5),
-            lambda: SWALR(self.opt, start_epoch=7, swa_lr=5.))
+            lambda: SWALR(self.opt, anneal_epochs=3, swa_lr=0.5),
+            lambda: SWALR(self.opt, anneal_epochs=10, anneal_strategy="linear", swa_lr=5.))
 
     def _check_scheduler_state_dict(self, constr, constr2, epochs=10):
         scheduler = constr()
