@@ -269,21 +269,21 @@ def generate_test_cpp_sources(test_params, template):
 
 # Build all C++ tests together, instead of once per test.
 def build_cpp_tests(unit_test_class, print_cpp_source=False):
-    if len(torch_nn_test_params_map) > 0:
-        cpp_sources = TORCH_NN_COMMON_TEST_HARNESS
-        functions = []
-        modules_added_metadata_cpp_sources = set()
-        for test_name, test_params in torch_nn_test_params_map.items():
-            if test_params.module_name not in modules_added_metadata_cpp_sources:
-                cpp_sources += torch_nn_modules.module_metadata_map.get(test_params.module_name, torch_nn_modules.TorchNNModuleMetadata()).cpp_sources
-                modules_added_metadata_cpp_sources.add(test_params.module_name)
-            cpp_sources += generate_test_cpp_sources(test_params=test_params, template=TORCH_NN_MODULE_TEST_FORWARD_BACKWARD)
-            functions.append('{}_{}'.format(test_params.module_variant_name, 'test_forward_backward'))
-        if print_cpp_source:
-            print(cpp_sources)
+    assert len(torch_nn_test_params_map) > 0
+    cpp_sources = TORCH_NN_COMMON_TEST_HARNESS
+    functions = []
+    modules_added_metadata_cpp_sources = set()
+    for test_name, test_params in torch_nn_test_params_map.items():
+        if test_params.module_name not in modules_added_metadata_cpp_sources:
+            cpp_sources += torch_nn_modules.module_metadata_map.get(test_params.module_name, torch_nn_modules.TorchNNModuleMetadata()).cpp_sources
+            modules_added_metadata_cpp_sources.add(test_params.module_name)
+        cpp_sources += generate_test_cpp_sources(test_params=test_params, template=TORCH_NN_MODULE_TEST_FORWARD_BACKWARD)
+        functions.append('{}_{}'.format(test_params.module_variant_name, 'test_forward_backward'))
+    if print_cpp_source:
+        print(cpp_sources)
 
-        cpp_module = compile_cpp_code_inline(
-            name='module_impl_check',
-            cpp_sources=cpp_sources,
-            functions=functions)
-        unit_test_class.module_impl_check_cpp_module = cpp_module
+    cpp_module = compile_cpp_code_inline(
+        name='module_impl_check',
+        cpp_sources=cpp_sources,
+        functions=functions)
+    unit_test_class.module_impl_check_cpp_module = cpp_module

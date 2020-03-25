@@ -2,31 +2,6 @@ import torch
 # NN tests use double as the default dtype
 torch.set_default_dtype(torch.double)
 
-MESSAGE_HOW_TO_FIX_CPP_PARITY_TEST_FAILURE = '''
-What should I do when C++ API parity test is failing?
-
-- If you are changing the implementation of an existing `torch.nn` module / `torch.nn.functional` function:
-Answer: Ideally you should also change the C++ API implementation for that module / function
-(you can start by searching for the module / function name in `torch/csrc/api/` folder).
-
-- If you are adding a new test for an existing `torch.nn` module / `torch.nn.functional` function:
-Answer: Ideally you should fix the C++ API implementation for that module / function
-to exactly match the Python API implementation (you can start by searching for the module /
-function name in `torch/csrc/api/` folder).
-
-- If you are adding a test for a *new* `torch.nn` module / `torch.nn.functional` function:
-Answer: Ideally you should add the corresponding C++ API implementation for that module / function,
-and it should exactly match the Python API implementation. (We have done a large effort on this
-which is tracked at https://github.com/pytorch/pytorch/issues/25883.)
-
-However, if any of the above is proven to be too complicated, you can just add
-`test_cpp_api_parity=False` to any failing test in `torch/testing/_internal/common_nn.py`,
-and the C++ API parity test will be skipped accordingly. Note that you should
-also file an issue when you do this.
-'''
-import cpp_api_parity.utils
-cpp_api_parity.utils.extra_msg_on_failure = MESSAGE_HOW_TO_FIX_CPP_PARITY_TEST_FAILURE
-
 import os
 
 import torch.testing._internal.common_utils as common
