@@ -64,4 +64,59 @@ _bincount_cpu(const Tensor& self, const Tensor& weights, int64_t minlength) {
   });
 }
 
+template <typename scalar_t>
+scalar_t minall(const Tensor& self) {
+  scalar_t the_min;
+  scalar_t value;
+
+  TORCH_CHECK(self.numel() > 0, 
+      "cannot perform reduction function min "
+      "on tensor with no elements because the "
+      "operation does not have an identity"
+  );
+
+
+}
+
+
+Tensor histc(const Tensor& self, int64_t nbins, Scalar_t minvalue, Scalar_t maxvalue) {
+  const Tensor& input = self.contiguous();
+
+  Tensor hist = at::empty({0}, input.options());
+
+  hist.resize_({nbins});
+  hist.zero_();
+
+  AT_DISPATCH_ALL_TYPES(input.scalar_type(), "histc_cpu", [&]() -> void {
+    scalar_t minval;
+    scalar_t maxval;
+    scalar_t *h_data;
+
+    minval = minvalue;
+    maxval = maxvalue;
+
+    if (minval == maxval) {
+      minval = input.min()[0];
+      maxval = input.max()[0];
+    }
+    if (minval == maxval) {
+      minval = minval - 1;
+      maxval = maxval + 1;
+    }
+
+    TORCH_CHECK(!(std::isinf(minval) || std::isinf(maxval) || std::isnan(minval) || std::isnan(maxval)), "range of [", minval, ", ", maxval, "] is not finite");
+    TORCH_CHECK(minval < maxval, "max must be larger than min");
+
+    h_data = hist.data_ptr<scalar_t>();
+    input_data = input.data_ptr<scalar_t>();
+
+    for(int64_t i=0; i < input.numel(); i++) {
+      if (input_data[i] >= minval && input_data[i] <= maxval) {
+        const int bin = (int)((input_data[i]-minval) / (maxval-minval) * nbins);
+        h_data[THMin(bin, nbins-1)] += 1;
+      }
+    }
+  });
+}
+
 }} // namespace at::native
