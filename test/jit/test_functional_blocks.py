@@ -61,7 +61,7 @@ class TestFunctionalBlocks(JitTestCase):
             out2 = foo(input)
         self.assertEqual(out1, out2)
 
-    def test_remove_mutation(self):
+    def test_remove_mutation_aten_inplace(self):
         def test_not_new_alias(x):
             y = x[0]
             y.add_(2)
@@ -126,3 +126,29 @@ class TestFunctionalBlocks(JitTestCase):
         # its intermediary use (so long as aliasing is safe)
         FileCheck().check_count("aten::add_", 1).run(graph)
         self.assertEqual(test_intermediary_use(), fn())
+
+    def test_remove_mutation_lists_append(self):
+        def successful_remove():
+            return [i for i in range(5)]  # noqa: C416
+
+        fn = torch.jit.script(successful_remove)
+        graph = fn.graph
+        self.run_pass('loop_unrolling', graph)
+        self.run_pass('remove_mutation', graph)
+        self.run_pass('constant_propagation', graph)
+        FileCheck().check("graph").check_next("Constant").check_next("return").run(graph)
+        self.assertEqual(successful_remove(), successful_remove())
+
+        def intermediary_use():
+            a = [1, 2]
+            b = len(a)
+            a.append(3)
+            return a
+
+        fn = torch.jit.script(intermediary_use)
+        graph = fn.graph
+        FileCheck().check("append").run(graph)
+        self.run_pass('remove_mutation', graph)
+        # it is possible to remove the append here but don't currently have the logic for it
+        FileCheck().check_not("append").run(graph)
+        self.assertEqual(intermediary_use(), fn())
