@@ -91,9 +91,9 @@ class TestScript(JitTestCase):
         data = torch.randn(1, 3, 10, 10, dtype=torch.float)
 
         get_forward(m._c)(data)
-        print("After insert obs ", m.graph)
+
         m = wrap_cpp_module(torch._C._jit_pass_insert_quant_dequant(m._c, "forward", False, True))
-        print(m.graph)
+
         assert len(m._modules._c.items()) == 1, \
             'Expected to have single submodule of conv'
 

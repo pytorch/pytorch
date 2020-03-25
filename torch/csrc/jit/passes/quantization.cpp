@@ -1264,7 +1264,6 @@ void insertChooseQParamsQuantDeQuantCall(
     choose_qparams = g->create(at::Symbol::aten(choose_qparams_func), v, 2);
     choose_qparams->addInput(reduce_range);
 
-    std::cout << " Inserting value name " << v->node()->kind().toQualString() <<std::endl;
     choose_qparams->output(0)->setDebugName(v->debugName() + ".scale_");
     choose_qparams->output(0)->setType(FloatType::get());
     choose_qparams->output(1)->setDebugName(v->debugName() + ".zero_point");
