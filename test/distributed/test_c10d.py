@@ -2962,6 +2962,19 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         self.assertEqual(vanilla_parameter.grad, ddp_parameter.grad)
 
 
+class CheckpointModel(nn.Module):
+
+    def __init__(self):
+        super(CheckpointModel, self).__init__()
+        self.L = 10
+        self.seq = nn.Sequential(
+            *[nn.Linear(10, 10) for _ in range(self.L)]
+        )
+
+    def forward(self, x):
+        return checkpoint_sequential(self.seq, self.L, x)
+
+
 class DistributedDataParallelDelayAllreduceTest(DistributedDataParallelTest):
 
     @property
@@ -3018,19 +3031,7 @@ class DistributedDataParallelDelayAllreduceTest(DistributedDataParallelTest):
     def test_checkpoint(self):
         torch.manual_seed(1337)
 
-        class TestModel(nn.Module):
-
-            def __init__(self):
-                super(TestModel, self).__init__()
-                self.L = 10
-                self.seq = nn.Sequential(
-                    *[nn.Linear(10, 10) for _ in range(self.L)]
-                )
-
-            def forward(self, x):
-                return checkpoint_sequential(self.seq, self.L, x)
-
-        net = TestModel()
+        net = CheckpointModel()
         self._test_checkpoint(net)
 
     @skip_if_not_multigpu
@@ -3092,6 +3093,58 @@ class DistributedDataParallelDelayAllreduceTest(DistributedDataParallelTest):
         net = TestModel().float().to(device_id)
         self._test_checkpoint(net, device_id)
 
+    def _assert_consistent_grad(self, model):
+        for p in model.parameters():
+            grad_list = [torch.empty_like(p) for _ in range(self.world_size)]
+            c10d.all_gather(grad_list, p.grad)
+            for g in grad_list:
+                if self.rank == 0:
+                    if not g.allclose(grad_list[0]):
+                        print(g)
+                        print(grad_list[0])
+                self.assertEqual(g, grad_list[0])
+
+    def test_grad_consistency(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
+        torch.manual_seed(1337)
+
+        ddp = DistributedDataParallel(
+            CheckpointModel(),
+            process_group=process_group,
+            # find_unused_parameters arg is no longer necessary as
+            # delay_allreduce would always mark all grads as ready when the
+            # backward pass finishes.
+            # find_unused_parameters=True,
+            delay_allreduce=self.delay_allreduce,
+        )
+
+        batch_size = self.world_size
+        loss_fn = nn.MSELoss()
+        inp = torch.rand([1, 10], dtype=torch.float)
+        target = torch.rand([1, 10], dtype=torch.float)
+        optim = torch.optim.Adam(ddp.parameters(), lr=0.001)
+
+        for _ in range(4):
+            print("000")
+            out = ddp(inp)
+            print("111")
+            loss = loss_fn(out, target)
+            print("222")
+            try:
+                loss.backward()
+            except Exception as e:
+                print(e)
+                logging.error(traceback.format_exc())
+                # Logs the error appropriately.
+            print("333")
+            self._assert_consistent_grad(ddp)
+            print("444")
+            optim.step()
+            print("555")
+            optim.zero_grad()
+
+        print(333)
 
 class ReducerModule(nn.Module):
     def __init__(self):

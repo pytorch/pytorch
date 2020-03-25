@@ -855,6 +855,9 @@ void Engine::graph_task_exec_post_processing(
     throw std::runtime_error("could not compute gradients for some functions");
   }
 
+  // set the thread_local current_graph_task_ as more callbacks can be installed
+  // by existing final callbacks.
+  GraphTaskGuard guard(graph_task);
   // Lock mutex during each iteration for accessing final_callbacks.size()
   // Unlocking is necessary, because the callback can register
   // more callbacks (or they can be registered from other threads
