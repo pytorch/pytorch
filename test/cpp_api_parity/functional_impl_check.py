@@ -157,6 +157,13 @@ def add_torch_nn_functional_impl_parity_tests(parity_table, unit_test_class, tes
         if 'FunctionalModule' not in str(test_params_dict.get('constructor', '')):
             continue
 
+        assert 'cpp_options_args' in test_params_dict or 'cpp_function_call' in test_params_dict, \
+            "`cpp_options_args` or `cpp_function_call` entry must be present in test params dict: {}".format(
+                test_params_dict))
+        assert not ('cpp_options_args' in test_params_dict and 'cpp_function_call' in test_params_dict), \
+            "Only one of `cpp_options_args` and `cpp_function_call` entries should be present in test params dict: {}".format(
+                test_params_dict)
+
         functional_name = compute_functional_name(test_params_dict)
 
         assert hasattr(torch.nn.functional, functional_name), \
