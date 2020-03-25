@@ -2,12 +2,13 @@ import os
 import sys
 
 import torch
+from torch.nn import functional as F
 from torch.testing import FileCheck
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from torch.testing._internal.jit_utils import JitTestCase
+from torch.testing._internal.jit_utils import JitTestCase, freeze_rng_state
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
@@ -39,3 +40,89 @@ class TestFunctionalBlocks(JitTestCase):
 
         # z + 1, z.add_(2) z * z considered non functional
         FileCheck().check("add").check("add_").check("mul").check("FunctionalGraph").run(graph)
+
+    def test_lower_linear(self):
+        # linear is one of main use cases of removing mutation so add test so it doesnt regress
+        @torch.jit.script
+        def foo(x):
+            return F.linear(x, torch.randn(20, 20), torch.randn(20))
+
+        self.run_pass('inline', foo.graph)
+        self.run_pass('peephole', foo.graph)
+        self.run_pass('constant_propagation', foo.graph)
+        FileCheck().check("aten::add_").run(foo.graph)
+        input = torch.randn(20, 20)
+        with freeze_rng_state():
+            out1 = foo(input)
+
+        self.run_pass('remove_mutation', foo.graph)
+        FileCheck().check_not("aten::add_").run(foo.graph)
+        with freeze_rng_state():
+            out2 = foo(input)
+        self.assertEqual(out1, out2)
+
+    def test_remove_mutation(self):
+        def test_not_new_alias(x):
+            y = x[0]
+            y.add_(2)
+            return y
+
+        fn = torch.jit.script(test_not_new_alias)
+        graph = fn.graph
+        self.run_pass('remove_mutation', graph)
+        FileCheck().check("aten::add_").run(graph)
+        self.assertEqual(fn(torch.ones([2, 2])), test_not_new_alias(torch.ones([2, 2])))
+
+        def test_no_lowering():
+            x = torch.tensor([2, 2])
+            x[0] = 3
+            return x
+
+        # there is no functional equivalent of x[0] = ...
+        fn = torch.jit.script(test_no_lowering)
+        graph = fn.graph
+        self.run_pass('remove_mutation', graph)
+        FileCheck().check("aten::copy_").run(graph)
+        self.assertEqual(fn(), test_no_lowering())
+
+        def test_move_before_not_valid():
+            y = torch.tensor([2, 2])
+            z = y + 2
+            y.add_(2)
+            return y, z
+
+        fn = torch.jit.script(test_move_before_not_valid)
+        graph = fn.graph
+        self.run_pass('remove_mutation', graph)
+        FileCheck().check("aten::add_").run(graph)
+        self.assertEqual(fn(), test_move_before_not_valid())
+
+        def test_successful():
+            x = torch.tensor([2, 2])
+            x.add_(1)
+            x.add_(3)
+            y = x + 4
+            return x, y
+
+        fn = torch.jit.script(test_successful)
+        graph = fn.graph
+        self.run_pass('remove_mutation', graph)
+        FileCheck().check_not("aten::add_").run(graph)
+        self.assertEqual(test_successful(), fn())
+
+        def test_intermediary_use():
+            x = torch.tensor([2, 2])
+            x.add_(1)
+            y = x + 4
+            x.add_(3)
+            return x, y
+
+        fn = torch.jit.script(test_intermediary_use)
+        graph = fn.graph
+        FileCheck().check_count("aten::add_", 2).run(graph)
+        self.run_pass('remove_mutation', graph)
+        # Unable to remove the second add_ because of the y = x + 4 use
+        # In the future we could duplicating the value of x as a temporary and replacing
+        # its intermediary use (so long as aliasing is safe)
+        FileCheck().check_count("aten::add_", 1).run(graph)
+        self.assertEqual(test_intermediary_use(), fn())

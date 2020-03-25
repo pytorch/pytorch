@@ -216,6 +216,122 @@ void InlineFunctionalGraphs(Block* block) {
   }
 }
 
+struct MutationRemover {
+  MutationRemover(const std::shared_ptr<Graph>& graph)
+      : aliasDb_(nullptr), graph_(graph) {
+    aliasDb_ = torch::make_unique<AliasDb>(graph_);
+  }
+
+  void run() {
+    RemoveAtenMutation(graph_->block());
+  }
+
+ private:
+  bool newMemoryLocation(Value* v) {
+    // bail on nodes with side effects, blocks, or graphs
+    Node* n = v->node();
+    bool unhandled_node = n->blocks().size() != 0 ||
+        n->hasAttribute(attr::Subgraph) || n->hasSideEffects();
+
+    // if the output isn't contained or alias by the inputs to its node, it's
+    // unique
+    return !unhandled_node &&
+        !aliasDb_->mayContainAlias(v->node()->inputs(), v);
+  }
+
+  bool inplaceOpVariant(Node* n) {
+    if (!n->kind().is_aten()) {
+      return false;
+    }
+    auto name = n->schema().name();
+    bool inplace_op = name.at(name.size() - 1) == '_';
+    if (!inplace_op) {
+      return false;
+    }
+
+    // needs to have alias analysis by schema
+    auto op = n->maybeOperator();
+    if (!op) {
+      return false;
+    }
+    if (op->aliasAnalysisKind() != AliasAnalysisKind::FROM_SCHEMA) {
+      return false;
+    }
+
+    // all inplace ops at time of writing have a single input that is mutated
+    // and returned. check that this is true, anything else could have strange
+    // semantics,
+    if (n->outputs().size() != 1 || n->inputs().size() == 0) {
+      return false;
+    }
+    auto inputs = n->inputs();
+    if (!aliasDb_->writesToAlias(n, {inputs.at(0)}) ||
+        aliasDb_->writesToAlias(
+            n, {inputs.slice(1).begin(), inputs.slice(1).end()})) {
+      return false;
+    }
+
+    auto new_schema = name.substr(0, name.size() - 1);
+    return getAllOperatorsFor(Symbol::fromQualString(new_schema)).size() != 0;
+  }
+
+  void RemoveAtenMutation(Block* block) {
+    for (auto it = block->nodes().begin(); it != block->nodes().end();) {
+      auto* node = *it;
+      it++;
+
+      for (Block* sub_block : node->blocks()) {
+        RemoveAtenMutation(sub_block);
+      }
+
+      // TODO: out op variants
+      if (!inplaceOpVariant(node)) {
+        continue;
+      }
+
+      Value* mutated_value = node->inputs().at(0);
+
+      // We can only remove mutation to values that are unique aliases in the
+      // graph. if x = y[0] or y = self.y, then removing the mutation could
+      // change observable semantics
+      if (!newMemoryLocation(mutated_value)) {
+        continue;
+      }
+
+      // In order to safely remove a mutation, the creation of a tensor and its
+      // subsequent mutation need to be one atomic operation
+      if (!aliasDb_->moveBeforeTopologicallyValid(
+              mutated_value->node(), node)) {
+        continue;
+      }
+
+      auto schema_name = node->schema().name();
+      auto new_schema = schema_name.substr(0, schema_name.size() - 1);
+      auto new_node = graph_->create(Symbol::fromQualString(new_schema), 1);
+      new_node->setSourceRange(node->sourceRange());
+      new_node->setScope(node->scope());
+      if (auto cs = node->callstack()) {
+        new_node->setCallStack(*cs);
+      }
+      new_node->insertBefore(node);
+      for (Value* input : node->inputs()) {
+        new_node->addInput(input);
+      }
+      new_node->output()->setType(node->output()->type());
+      mutated_value->replaceAllUsesAfterNodeWith(node, new_node->output());
+      node->output()->replaceAllUsesWith(new_node->output());
+      node->destroy();
+
+      // :(  TODO: incremental update ?
+      aliasDb_ = torch::make_unique<AliasDb>(graph_);
+    }
+  }
+
+ private:
+  std::unique_ptr<AliasDb> aliasDb_ = nullptr;
+  std::shared_ptr<Graph> graph_;
+};
+
 } // namespace
 
 void CreateFunctionalGraphs(const std::shared_ptr<Graph>& graph) {
@@ -229,6 +345,11 @@ void CreateFunctionalGraphs(const std::shared_ptr<Graph>& graph) {
 
 void InlineFunctionalGraphs(const std::shared_ptr<Graph>& graph) {
   InlineFunctionalGraphs(graph->block());
+}
+
+void RemoveMutation(const std::shared_ptr<Graph>& graph) {
+  MutationRemover mr(graph);
+  mr.run();
 }
 
 } // namespace jit
