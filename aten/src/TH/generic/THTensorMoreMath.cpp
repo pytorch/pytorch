@@ -146,56 +146,6 @@ accreal THTensor_(trace)(THTensor *t)
   return sum;
 }
 
-void THTensor_(diag)(THTensor *r_, THTensor *t, int k)
-{
-  THArgCheck(THTensor_(nDimension)(t) == 1 || THTensor_(nDimension)(t) == 2, 1, "matrix or a vector expected");
-
-  if(THTensor_(nDimension)(t) == 1)
-  {
-    scalar_t *t_data = t->data<scalar_t>();
-    int64_t t_stride_0 = THTensor_(stride)(t, 0);
-    int64_t t_size = THTensor_(size)(t, 0);
-    int64_t sz = t_size + (k >= 0 ? k : -k);
-    scalar_t *r__data;
-    int64_t r__stride_0;
-    int64_t r__stride_1;
-    int64_t i;
-
-    THTensor_(resize2d)(r_, sz, sz);
-    THTensor_(zero)(r_);
-    r__data = r_->data<scalar_t>();
-    r__stride_0 = THTensor_(stride)(r_, 0);
-    r__stride_1 = THTensor_(stride)(r_, 1);
-    r__data += (k >= 0 ? k*r__stride_1 : -k*r__stride_0);
-
-    for(i = 0; i < t_size; i++)
-      r__data[i*(r__stride_0+r__stride_1)] = t_data[i*t_stride_0];
-  }
-  else
-  {
-    scalar_t *t_data = t->data<scalar_t>();
-    int64_t t_stride_0 = THTensor_(stride)(t, 0);
-    int64_t t_stride_1 = THTensor_(stride)(t, 1);
-    int64_t sz;
-    scalar_t *r__data;
-    int64_t r__stride_0;
-    int64_t i;
-
-    if(k >= 0)
-      sz = THMin(THTensor_(size)(t, 0), THTensor_(size)(t, 1)-k);
-    else
-      sz = THMin(THTensor_(size)(t, 0)+k, THTensor_(size)(t, 1));
-    THTensor_(resize1d)(r_, sz);
-    r__data = r_->data<scalar_t>();
-    r__stride_0 = THTensor_(stride)(r_, 0);
-
-    t_data += (k >= 0 ? k*t_stride_1 : -k*t_stride_0);
-    for(i = 0; i < sz; i++)
-      r__data[i*r__stride_0] = t_data[i*(t_stride_0+t_stride_1)];
-  }
-}
-
-
 /* I cut and pasted (slightly adapted) the quicksort code from
    Sedgewick's 1978 "Implementing Quicksort Programs" article
    http://www.csie.ntu.edu.tw/~b93076/p847-sedgewick.pdf
