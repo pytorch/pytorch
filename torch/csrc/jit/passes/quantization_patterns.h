@@ -150,6 +150,7 @@ graph(%input_quant, %dim, %r_scale, %r_zero_point, %r_dtype):
          %r_quant = quantized::cat(%input_quant, %dim, %r_scale, %r_zero_point)
          return (%r_quant) )";
 
+  // aten::add
   std::string add = R"(
 graph(%a_quant, %b_quant, %alpha, %scale, %zero_point, %dtype):
          %a_dequant = aten::dequantize(%a_quant)
@@ -160,12 +161,20 @@ graph(%a_quant, %b_quant, %alpha, %scale, %zero_point, %dtype):
 
   // TODO: add %dtype after when https://github.com/pytorch/pytorch/issues/34351
   // is fixed
-  // TODO: add filter for %alpha
+  // quantized::add
   std::string quantized_add = R"(
 graph(%a_quant, %b_quant, %alpha, %scale, %zero_point, %dtype):
-         %r_add = quantized::add(%a_quant, %b_quant, %scale, %zero_point)
-         return (%r_add) )";
+         %r = quantized::add(%a_quant, %b_quant, %scale, %zero_point)
+         return (%r) )";
 
+  auto add_filter = [](const Match& match,
+                   const std::unordered_map<std::string, Value*>& vmap) {
+    const auto& match_vmap = match.values_map;
+    auto alpha = toIValue(match_vmap.at(vmap.at("alpha")));
+    return alpha && alpha->isInt() && alpha->toInt() == 1;
+  };
+
+  // aten::add_
   std::string inplace_add = R"(
 graph(%a_quant, %b_quant, %alpha, %scale, %zero_point, %dtype):
          %a_dequant = aten::dequantize(%a_quant)
@@ -173,7 +182,6 @@ graph(%a_quant, %b_quant, %alpha, %scale, %zero_point, %dtype):
          %r_add = aten::add_(%a_dequant, %b_dequant, %alpha)
          %r = aten::quantize_per_tensor(%r_add, %scale, %zero_point, %dtype)
          return (%r) )";
-  // We don't have quantized inplace add right now
 
   // quantized::add_scalar
   std::string add_scalar = R"(
