@@ -1401,7 +1401,7 @@ Tensor unfold(const Tensor& self, int64_t dimension, int64_t size, int64_t step)
 }
 
 Tensor trace(const Tensor& self) {
-  Tensor result = at::empty({0}, self.options());
+  Tensor result = at::empty({1}, self.options());
   AT_DISPATCH_ALL_TYPES(self.scalar_type(), "trace", [&] {
     scalar_t sum = 0;
     auto t_data = self.data_ptr<scalar_t>();
