@@ -257,7 +257,15 @@ void parallel_cat(Tensor &out, const TensorList &inputs, int64_t dimension,
 } // namespace
 
 Tensor cat_cuda(TensorList inputs, int64_t dimension) {
-  Tensor out = at::empty({0}, inputs.front().options());
+  // Ideally we would like to obtain the type using `result_type`
+  // But some linker error prevent us from using it here
+  // ScalarType high_type = at::native::result_type(inputs);
+  ScalarType high_type = inputs.front().scalar_type();
+  for (size_t i = 1; i < inputs.size(); ++i) {
+    high_type = promoteTypes(high_type, inputs[i].scalar_type());
+  }
+
+  Tensor out = at::empty({0}, inputs.front().options().dtype(high_type));
   cat_out_cuda(out, inputs, dimension);
   return out;
 }
@@ -379,12 +387,18 @@ Tensor& cat_out_cuda(Tensor& out, TensorList inputs, int64_t dimension) {
     [=](const Tensor& t) {
       return !t.defined() || t.is_contiguous(memory_format);
     });
+  ScalarType firstType = inputs[0].scalar_type();
+  const bool allSameType = std::all_of(inputs.begin(), inputs.end(),
+    [firstType](const Tensor& t) {
+      return t.scalar_type() == firstType;
+    });
   if (inputs.size() > 1 &&
       !hasSkippedInput &&
       out.dim() <= CAT_ARRAY_MAX_INPUT_DIMS &&
       at::cuda::detail::canUse32BitIndexMath(out) &&
       allContiguous &&
-      all32BitIndexable) {
+      all32BitIndexable &&
+      allSameType) {
 
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
         at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,

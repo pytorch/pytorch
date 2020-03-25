@@ -224,7 +224,7 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
 
 Tensor _cat_cpu(TensorList tensors, int64_t dim) {
   ScalarType high_type = result_type(tensors);
-  Tensor result = at::empty({0}, tensors[0].options()).toType(high_type);
+  Tensor result = at::empty({0}, tensors[0].options().dtype(high_type));
   return native::_cat_out_cpu(result, tensors, dim);
 }
 
