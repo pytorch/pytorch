@@ -18,9 +18,9 @@ from torch.nn.utils import fuse_conv_bn_weights
 
 class _ConvNd(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
-                 padding=0, dilation=1,
-                 transposed=False, output_padding=0,
-                 groups=1, bias=True,
+                 padding, dilation,
+                 transposed, output_padding,
+                 groups, bias,
                  padding_mode='zeros'):
         super(_ConvNd, self).__init__()
         if padding_mode != 'zeros':
@@ -200,8 +200,7 @@ class Conv1d(_ConvNd):
 
         super(Conv1d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
-            groups=groups, bias=bias, padding_mode=padding_mode,
-            transposed=False, output_padding=_single(0))
+            False, _single(0), groups, bias, padding_mode)
 
     def _get_name(self):
         return 'QuantizedConv1d'
@@ -313,8 +312,7 @@ class Conv2d(_ConvNd):
         dilation = _pair(dilation)
         super(Conv2d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
-            groups, bias, padding_mode,
-            transposed=False, output_padding=_pair(0))
+            False, _pair(0), groups, bias, padding_mode)
 
     def _get_name(self):
         return 'QuantizedConv2d'
@@ -440,8 +438,7 @@ class Conv3d(_ConvNd):
         dilation = _triple(dilation)
         super(Conv3d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
-            groups, bias, padding_mode,
-            transposed=False, output_padding=_triple(0))
+            False, _triple(0), groups, bias, padding_mode)
 
     def _get_name(self):
         return 'QuantizedConv3d'
@@ -517,9 +514,9 @@ class _ConvTransposeNd(_ConvNd):
             raise ValueError('Only "zeros" padding mode is supported for {}'.format(self.__class__.__name__))
 
         super(_ConvTransposeNd, self).__init__(
-            in_channels, out_channels, kernel_size, stride, padding, dilation,
-            groups, bias, padding_mode,
-            transposed=True, output_padding=output_padding)
+            in_channels, out_channels, kernel_size, stride,
+            padding, dilation, transposed, output_padding,
+            groups, bias, padding_mode)
 
     def _input_padding(self, kernel_size, dilation, padding):
         # type: (List[int], List[int], List[int]) -> List[int]
@@ -639,8 +636,7 @@ class ConvTranspose2d(_ConvNd):
 
         super(ConvTranspose2d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
-            groups=groups, bias=bias, padding_mode=padding_mode,
-            transposed=True, output_padding=output_padding)
+            True, output_padding, groups, bias, padding_mode)
 
     def _get_name(self):
         return 'QuantizedConvTranpose2d'
