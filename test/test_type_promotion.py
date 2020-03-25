@@ -4,7 +4,7 @@ import itertools
 import collections
 from torch.testing._internal.common_utils import TestCase, run_tests, load_tests
 from torch.testing._internal.common_device_type import (instantiate_device_type_tests, onlyOnCPUAndCUDA,
-                                                        dtypes)
+                                                        dtypes, strings)
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -641,162 +641,121 @@ class TestTypePromotion(TestCase):
             torch.addcdiv(a, b, b, out=o)
 
 
-# Metadata and generators for floating reduction tests
+    # Floating reduction tests
+    class _fr_meta:
 
-_fr_promoting_in_types = [torch.bool, torch.long]
+        def __init__(self, requires_dim=False, takes_dtype=False,
+                     fails_on=()):
+            self.requires_dim = requires_dim
+            self.takes_dtype = takes_dtype
+            self.fails_on = fails_on
 
-_fr_nonpromoting_in_types = [torch.float, torch.complex64]
+        def _fn_helper(self, namespace, variant, **kwargs):
+            def dim_fn(x, dim=None, **kwargs):
+                if dim is None and not self.requires_dim and not kwargs:
+                    return getattr(namespace, variant)(x)
+                else:
+                    dim = 0 if dim is None else dim
+                    return getattr(namespace, variant)(x, dim, **kwargs)
+            return dim_fn
 
-_fr_out_types = [torch.float, torch.double]
+        def fn(self, variant, **kwargs):
+            return self._fn_helper(torch, variant, **kwargs)
 
-# Helpers to organize ufunc metadata and improve test readability
-__fr_meta = collections.namedtuple('_fr_meta',
-                                   'requires_dim complex_on takes_dtype')
-def _fr_meta(requires_dim=False, complex_on=(), takes_dtype=False):
-    return __fr_meta(requires_dim, complex_on, takes_dtype)
 
-# Dict of unary ufuncs and their associated test metadata
-_floating_reductions = {
-    'mean': _fr_meta(complex_on=('cpu'), takes_dtype=True),
-    'std': _fr_meta(complex_on=('cpu', 'cuda')),
-    'var': _fr_meta(complex_on=('cpu', 'cuda')),
-    'logsumexp': _fr_meta(requires_dim=True),
-}
+        def meth(self, variant, **kwargs):
+            return self._fn_helper(torch.Tensor, variant, **kwargs)
 
-# Creates tests verifying that floating reductions promote integral inputs.
-def _generate_fr_promote_dtype_tests(cls, name, requires_dim):
-    if requires_dim:
-        return
+        def willFail(self, device_type, dtype):
+            if (device_type, dtype) in self.fails_on:
+                return True
+            return False
 
-    fn = getattr(torch, name)
-    meth = getattr(torch.Tensor, name)
+
+    _floating_reductions = {
+        'mean': _fr_meta(takes_dtype=True,
+                         fails_on=[('cpu', torch.half),
+                                   ('cuda', torch.bfloat16),
+                                   ('cuda', torch.complex64),
+                                   ('cuda', torch.complex128)]),
+        'std': _fr_meta(fails_on=[('cpu', torch.bfloat16),
+                                  ('cuda', torch.bfloat16)]),
+        'var': _fr_meta(fails_on=[('cpu', torch.bfloat16),
+                                  ('cuda', torch.bfloat16)]),
+        'logsumexp': _fr_meta(requires_dim=True,
+                              fails_on=[('cpu', torch.half),
+                                        ('cpu', torch.bfloat16),
+                                        ('cpu', torch.complex64),
+                                        ('cpu', torch.complex128),
+                                        ('cuda', torch.bfloat16),
+                                        ('cuda', torch.complex64),
+                                        ('cuda', torch.complex128)]),
+    }
 
     @onlyOnCPUAndCUDA
     @float_double_default_dtype
-    def _test(self, device):
-        for in_type in _fr_promoting_in_types:
-            t = torch.tensor(((2, 4), (3, 5)), device=device, dtype=in_type)
+    @strings('mean', 'std', 'var', 'logsumexp')
+    @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
+            torch.half, torch.bfloat16, torch.float, torch.double,
+            torch.complex64, torch.complex128)
+    def test_floating_reduction_promotion(self, device, dtype, fn_name):
+        meta = self._floating_reductions[fn_name]
+        fn = meta.fn(fn_name)
+        meth = meta.meth(fn_name)
+
+        # Validates integral->default_scalar_type promotion
+        t = torch.tensor(((2, 4), (3, 5)), device=device, dtype=dtype)
+        if not dtype.is_floating_point and not dtype.is_complex:
+            # Tests integral dtypes
             self.assertEqual(fn(t).dtype, torch.get_default_dtype())
             self.assertEqual(meth(t).dtype, torch.get_default_dtype())
 
-    test_name = "test_" + name + "_promotion"
-    assert not hasattr(cls, test_name), "{0} already in {1}".format(test_name, cls.__name__)
-    setattr(cls, test_name, _test)
-
-# Creates tests verifying that floating reductions promote integral inputs
-# when dim and out are set.
-def _generate_fr_promote_dtype_dim_tests(cls, name):
-    fn = getattr(torch, name)
-    meth = getattr(torch.Tensor, name)
-
-    @onlyOnCPUAndCUDA
-    @float_double_default_dtype
-    def _test(self, device):
-        for in_type, out_type in itertools.product(_fr_promoting_in_types,
-                                                   _fr_out_types):
-            t = torch.tensor((2, 4), device=device, dtype=in_type)
+            # Tests dim variants
             self.assertEqual(fn(t, dim=0).dtype, torch.get_default_dtype())
             self.assertEqual(meth(t, dim=0).dtype, torch.get_default_dtype())
+        else:
+            # Tests floating and complex dtypes
+            if meta.willFail(self.device_type, dtype):
+                with self.assertRaises(Exception):
+                    fn(t)
+                with self.assertRaises(Exception):
+                    fn(t, dim=0)
+                with self.assertRaises(Exception):
+                    meth(t)
+                with self.assertRaises(Exception):
+                    meth(t, dim=0)
+            else:
+                self.assertEqual(fn(t).dtype, dtype)
+                self.assertEqual(fn(t, dim=0).dtype, dtype)
+                self.assertEqual(meth(t).dtype, dtype)
+                self.assertEqual(meth(t, dim=0).dtype, dtype)
 
-            o = torch.empty((2,), device=device, dtype=in_type)
-            with self.assertRaises(RuntimeError):
-                fn(t, dim=0, out=o)
+        # Verfies integral out fails
+        o = torch.empty(t.size(), device=device, dtype=torch.long)
+        with self.assertRaises(Exception):
+            fn(t, keepdim=False, out=o)
 
-            o = torch.empty((2,), device=device, dtype=out_type)
-            self.assertEqual(fn(t, dim=0, out=o).dtype, o.dtype)
-
-    test_name = "test_" + name + "_promotion_dim"
-    assert not hasattr(cls, test_name), "{0} already in {1}".format(test_name, cls.__name__)
-    setattr(cls, test_name, _test)
-
-# Creates tests verifying that floating reductions preserve float and
-# complex inputs.
-def _generate_fr_preserve_dtype_tests(cls, name, requires_dim, complex_on):
-    if requires_dim:
-        return
-
-    fn = getattr(torch, name)
-    meth = getattr(torch.Tensor, name)
-
-    @onlyOnCPUAndCUDA
-    @dtypes(*_fr_nonpromoting_in_types)
-    def _test(self, device, dtype):
-        # Skips functions that can't handle complex inputs
-        if dtype.is_complex and self.device_type not in complex_on:
-            return
-
-        t = torch.tensor(((2, 4), (3, 5)), device=device, dtype=dtype)
-        self.assertEqual(fn(t).dtype, dtype)
-        self.assertEqual(meth(t).dtype, dtype)
-
-    test_name = "test_" + name + "_preserve_float_and_complex"
-    assert not hasattr(cls, test_name), "{0} already in {1}".format(test_name, cls.__name__)
-    setattr(cls, test_name, _test)
-
-# Creates tests verifying that floating reductions preserve float and
-# complex inputs when dim and out are set.
-def _generate_fr_preserve_dtype_dim_tests(cls, name, complex_on):
-    fn = getattr(torch, name)
-    meth = getattr(torch.Tensor, name)
-
-    @onlyOnCPUAndCUDA
-    @dtypes(*_fr_nonpromoting_in_types)
-    def _test(self, device, dtype):
-        if dtype.is_complex and self.device_type not in complex_on:
-            return
-
-        t = torch.tensor((2, 4), device=device, dtype=dtype)
-        self.assertEqual(fn(t, dim=0).dtype, dtype)
-        self.assertEqual(meth(t, dim=0).dtype, dtype)
-
-        o = torch.empty((2, 4), device=device, dtype=dtype)
-        self.assertEqual(fn(t, dim=0, out=o).dtype, o.dtype)
-
-    test_name = "test_" + name + "_preserve_float_and_complex_dim"
-    assert not hasattr(cls, test_name), "{0} already in {1}".format(test_name, cls.__name__)
-    setattr(cls, test_name, _test)
-
-# Creates tests validating setting the dtype works as expected, and that
-# integral dtypes throw an error when set
-def _generate_fr_dtype_arg_tests(cls, name, complex_on, takes_dtype):
-    if not takes_dtype:
-        return
-
-    fn = getattr(torch, name)
-    meth = getattr(torch.Tensor, name)
-
-    @onlyOnCPUAndCUDA
-    @dtypes(*(_fr_promoting_in_types + [torch.float]))
-    def _test(self, device, dtype):
-        for out_type in _fr_out_types:
-            t = torch.tensor((2, 4), device=device, dtype=in_type)
-            self.assertEqual(fn(t, dtype=out_type).dtype, out_type)
-
-    @onlyOnCPUAndCUDA
-    @dtypes(*(_fr_promoting_in_types + _fr_nonpromoting_in_types))
-    def _test_error(self, device, dtype):
-        t = torch.empty((2, 4), device=device, dtype=dtype)
-        with self.assertRaises(RuntimeError):
+        # Verifies integral dtype fails
+        with self.assertRaises(Exception):
             fn(t, dtype=torch.long)
 
-    test_name = "test_" + name + "_dtypes_arg"
-    assert not hasattr(cls, test_name), "{0} already in {1}".format(test_name, cls.__name__)
-    setattr(cls, test_name, _test)
+        # Tests valid dtype out
+        out_type = dtype if (dtype.is_floating_point or dtype.is_complex) else torch.get_default_dtype()
+        o = torch.empty(t.size(), device=device, dtype=out_type)
+        if meta.willFail(self.device_type, out_type):
+            with self.assertRaises(Exception):
+                fn(t, keepdim=False, out=o)
+        else:
+            self.assertEqual(fn(t, keepdim=False, out=o).dtype, out_type)
 
-    test_error_name = "test_" + name + "_dtypes_arg_error"
-    assert not hasattr(cls, test_error_name), "{0} already in {1}".format(test_error_name, cls.__name__)
-    setattr(cls, test_name, _test_error)
-
-def _generate_fr_tests(cls):
-    for k, v in _floating_reductions.items():
-        _generate_fr_promote_dtype_tests(cls, k, v.requires_dim)
-        _generate_fr_promote_dtype_dim_tests(cls, k)
-        _generate_fr_preserve_dtype_tests(cls, k, v.requires_dim, v.complex_on)
-        _generate_fr_preserve_dtype_dim_tests(cls, k, v.complex_on)
-        _generate_fr_dtype_arg_tests(cls, k, v.complex_on, v.takes_dtype)
+        # Tests valid dtype arg
+        if meta.willFail(self.device_type, out_type) or not meta.takes_dtype:
+            with self.assertRaises(Exception):
+                fn(t, dtype=out_type)
+        else:
+            self.assertEqual(fn(t, dtype=out_type).dtype, out_type)
 
 
-_generate_fr_tests(TestTypePromotion)
 instantiate_device_type_tests(TestTypePromotion, globals())
 
 if __name__ == '__main__':

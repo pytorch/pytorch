@@ -383,10 +383,10 @@ static ScalarType get_dtype(Tensor& result, const Tensor& self, optional<ScalarT
   return src_type;
 }
 
-// Returns the appropriate floating dtype for the (floating) reduction's result
-// If the optional dtype argument is specified, that is the output dtype
-// Otherwise, the dtype of self is used, unless...
-//  (1) It is an integral type, in which case the result has the default scalar type
+// Returns the appropriate floating dtype for the (floating) reduction's result.
+// If the optional dtype argument is specified, that is the output dtype.
+// Otherwise, the dtype of self is used, unless it's an integral type,
+// in which case the result has the default scalar type.
 static c10::optional<ScalarType> get_floating_promotion_dtype(
     const Tensor& self,
     const optional<ScalarType>& dtype) {
@@ -479,9 +479,10 @@ Tensor& prod_out(Tensor& result, const Tensor& self, Dimname dim,
 Tensor &mean_out_cpu_gpu(Tensor &result, const Tensor &self, IntArrayRef dim,
                  bool keepdim, c10::optional<ScalarType> opt_dtype) {
   ScalarType dtype = get_dtype(result, self, opt_dtype);
-  TORCH_CHECK(!at::isIntegralType(dtype, /*includeBool=*/true),
-    "mean requires either a floating output dtype (works on CPU and CUDA) ",
-    "or a complex dtype argument (only on CPU), but got ", dtype);
+  TORCH_CHECK(!(self.is_cuda() && at::isComplexType(dtype)),
+    "means requires a floating point output on CUDA")
+  TORCH_CHECK(at::isFloatingType(dtype) || at::isComplexType(dtype),
+    "mean requires either a floating point or complex output type")
 
   // TODO: the TensorIterator reduction implementation of mean
   // (mean_kernel_impl()) is unvectorized and leads to very poor performance
@@ -540,11 +541,14 @@ static Tensor squeeze_multiple(const Tensor& self, IntArrayRef dims) {
 }
 
 static Tensor& logsumexp_out_impl(Tensor& result, const Tensor& self, IntArrayRef dims, bool keepdim) {
-  TORCH_CHECK(!at::isIntegralType(result.scalar_type(), /*includeBool=*/true),
-    "logsumexp requires a floating output type, but got ",
+  TORCH_CHECK(at::isFloatingType(result.scalar_type()),
+    "logsumexp requires a floating point or output type, but got ",
     result.scalar_type());
 
   // Casts integral inputs to the appropriate (floating) type
+  // TODO: remove this once unary floating ufuncs promote
+  // since log is composed of unary floating ufuncs it should inherit the
+  // the correct behavior from them.
   Tensor cast_self;
   if (at::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
     cast_self = self.to(result.scalar_type());
@@ -836,8 +840,8 @@ static Tensor &std_var_out(Tensor &result, const Tensor &self, IntArrayRef dim, 
               "std and var only supports CPU AND CUDA device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               "std and var only supports strided layout, got: ", self.layout());
-  TORCH_CHECK(!at::isIntegralType(result.scalar_type(), /*includeBool=*/true),
-               "std and var only support floating type outputs");
+  TORCH_CHECK(at::isFloatingType(result.scalar_type()) || at::isComplexType(result.scalar_type()),
+               "std and var only support floating point or complex output types");
 
   if (at::isComplexType(self.scalar_type())){
     ScalarType dtype = c10::toValueType(get_dtype(result, self, {}, true));
@@ -877,15 +881,17 @@ static std::tuple<Tensor&,Tensor&> std_var_mean_out(const char* fname, Tensor &r
               fname, " only supports CPU AND CUDA device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               fname, " only supports strided layout, got: ", self.layout());
-  TORCH_CHECK(!at::isIntegralType(result1.scalar_type(), /*includeBool=*/true) ||
-              !at::isIntegralType(result2.scalar_type(), /*includeBool=*/true),
-               fname, " only supports floating type outputs");
   TORCH_CHECK(result1.scalar_type() == result2.scalar_type(),
            "provided by result1 dtype must match dtype of result2. Got ",
            toString(result1.scalar_type()),
            " and ",
            toString(result2.scalar_type()),
            ".");
+  TORCH_CHECK(!(result1.is_cuda() && at::isComplexType(result1.scalar_type())),
+    fname, " only supports floating point output types on CUDA");
+  TORCH_CHECK(at::isFloatingType(result1.scalar_type()) || at::isComplexType(result1.scalar_type()),
+    fname, " only supports floating point or complex output types");
+
   if (at::isComplexType(self.scalar_type())){
     ScalarType dtype = c10::toValueType(get_dtype(result1, self, {}, true));
     Tensor real_in = self.real().to(dtype);
@@ -982,7 +988,8 @@ Tensor var(const Tensor& self, bool unbiased) {
 
   // Diverts complex types to tensor iterator's impl
   // Note: _th_var (_var) does not support complex types
-  if (at::isComplexType(self.scalar_type())) {
+  if (at::isComplexType(self.scalar_type()) ||
+      (self.scalar_type() == kHalf && self.device().is_cpu())) {
     if (trivial_return.has_value()) {
       return trivial_return.value();
     }
@@ -1019,9 +1026,10 @@ Tensor std(const Tensor& self, bool unbiased) {
       at::_std(self.to(*maybe_dtype), unbiased);
   }
 
-  // Diverts complex types to tensor iterator's impl
-  // Note: _th_std (_std) does not support complex types
-  if (at::isComplexType(self.scalar_type())) {
+  // Diverts complex types and half types on CPU to tensor iterator's impl
+  // Note: _th_std (_std) does not support complex types or half types on CPU
+  if (at::isComplexType(self.scalar_type()) ||
+      (self.scalar_type() == kHalf && self.device().is_cpu())) {
     if (trivial_return.has_value()) {
       return trivial_return.value();
     }

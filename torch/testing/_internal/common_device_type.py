@@ -12,38 +12,31 @@ from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, TEST_
 # [WRITING TESTS]
 #
 # Write your test class as usual except:
-#   (1) Each test method should have one of four signatures:
+#   (1) Each test method should have one of the following signatures:
 #
-#           (1a) testX(self, device)
+#           (1a) testX(self, device/s)
+#           (1b) testX(self, device/s, dtype)
+#           (1c) testX(self, device/s, string)
+#           (1d) testX(self, device/s, dtype, string)
 #
-#           (1b) @deviceCountAtLeast(<minimum number of devices to run test with>)
-#                testX(self, devices)
-#
-#           (1c) @dtypes(<list of dtypes>)
-#                testX(self, device, dtype)
-#
-#           (1d) @deviceCountAtLeast(<minimum number of devices to run test with>)
-#                @dtypes(<list of dtypes>)
-#                testX(self, devices, dtype)
-#
-#
-#       Note that the decorators are required for signatures (1b), (1c) and
-#       (1d).
+#       Where taking multiple devices requires the @deviceCountAtLeast decorator,
+#       taking dtypes requires the @dtypes decorator, and taking strings
+#       requires the @strings decorator.
 #
 #       When a test like (1a) is called it will be given a device string,
-#       like 'cpu' or 'cuda:0.'
+#       like 'cpu' or 'cuda:0', or a list of device strings if the
+#       @deviceCountAtLeast decorator is used, like ['cuda:0', 'cuda:1'].
 #
-#       Tests like (1b) are called with a list of device strings, like
-#       ['cuda:0', 'cuda:1']. The first device string will be the
-#       primary device. These tests will be skipped if the device type
-#       has fewer available devices than the argument to @deviceCountAtLeast.
+#       Tests like (1b) are called with a device string (or list of device
+#       strings) and a torch.dtype from the list of dtypes specified in the
+#       @dtypes decorator. Device-specific dtype overrides can be specified
+#       using @dtypesIfCPU and @dtypesIfCUDA.
 #
-#       Tests like (1c) are called with a device string and a torch.dtype from
-#       the list of dtypes specified in the @dtypes decorator. Device-specific
-#       dtype overrides can be specified using @dtypesIfCPU and @dtypesIfCUDA.
+#       Tests like (1c) are called with a device string (or list of device
+#       strings) and a string from the list of strings specified in the
+#       @strings decorator.
 #
-#       Tests like (1d) take a devices argument like (1b) and a dtype
-#       argument from (1c).
+#       Tests like (1d) combine all of the above.
 #
 #   (2) Prefer using test decorators defined in this file to others.
 #       For example, using the @skipIfNoLapack decorator instead of the
@@ -148,7 +141,6 @@ from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, TEST_
 # you should check if it's available and (if it is) add it to this list.
 device_type_test_bases = []
 
-
 class DeviceTypeTestBase(TestCase):
     device_type = 'generic_device_type'
 
@@ -192,42 +184,91 @@ class DeviceTypeTestBase(TestCase):
             return self.precision
         return test.precision_overrides.get(dtype, self.precision)
 
+    @classmethod
+    def _get_strings(cls, test):
+        if not hasattr(test, 'strings'):
+            return None
+        return test.strings
+
     # Creates device-specific tests.
     @classmethod
     def instantiate_test(cls, name, test):
         test_name = name + "_" + cls.device_type
 
+        strings = cls._get_strings(test)
         dtypes = cls._get_dtypes(test)
-        if dtypes is None:  # Test has no dtype variants
-            assert not hasattr(cls, test_name), "Redefinition of test {0}".format(test_name)
 
-            @wraps(test)
-            def instantiated_test(self, test=test):
-                device_arg = cls.get_primary_device() if not hasattr(test, 'num_required_devices') else cls.get_all_devices()
-                return test(self, device_arg)
+        if strings is not None:
+            for string in strings:
+                string_test_name = test_name + "_" + string
 
-            setattr(cls, test_name, instantiated_test)
-        else:  # Test has dtype variants
-            for dtype in dtypes:
-                dtype_str = str(dtype).split('.')[1]
-                dtype_test_name = test_name + "_" + dtype_str
-                assert not hasattr(cls, dtype_test_name), "Redefinition of test {0}".format(dtype_test_name)
+                if dtypes is None:
+                    assert not hasattr(cls, string_test_name), "Redefinition of test {0}".format(string_test_name)
+
+                    @wraps(test)
+                    def instantiated_test(self, test=test, string=string):
+                        device_arg = cls.get_primary_device() if not hasattr(test, 'num_required_devices') else cls.get_all_devices()
+                        return test(self, device_arg, string)
+
+                    setattr(cls, test_name, instantiated_test)
+                else:  # has dtypes")
+                    for dtype in dtypes:
+                        if isinstance(dtype, (list, tuple)):
+                            dtype_test_name = string_test_name + "_" + "_".join(str(d).split('.')[1] for d in dtype)
+                        else:
+                            dtype_test_name = string_test_name + "_" + str(dtype).split('.')[1]
+                        assert not hasattr(cls, dtype_test_name), "Redefinition of test {0}".format(dtype_test_name)
+
+                        @wraps(test)
+                        def instantiated_test(self, test=test, dtype=dtype, string=string):
+                            device_arg = cls.get_primary_device() if not hasattr(test, 'num_required_devices') else cls.get_all_devices()
+                            # Sets precision and runs test
+                            # Note: precision is reset after the test is run
+                            guard_precision = self.precision
+                            try :
+                                self.precision = self._get_precision_override(test, dtype)
+                                result = test(self, device_arg, dtype, string)
+                            finally:
+                                self.precision = guard_precision
+
+                            return result
+
+                        setattr(cls, dtype_test_name, instantiated_test)
+        else:  # strings is None
+            if dtypes is None:  # Test has no dtype variants
+                assert not hasattr(cls, test_name), "Redefinition of test {0}".format(test_name)
 
                 @wraps(test)
-                def instantiated_test(self, test=test, dtype=dtype):
+                def instantiated_test(self, test=test):
                     device_arg = cls.get_primary_device() if not hasattr(test, 'num_required_devices') else cls.get_all_devices()
-                    # Sets precision and runs test
-                    # Note: precision is reset after the test is run
-                    guard_precision = self.precision
-                    try :
-                        self.precision = self._get_precision_override(test, dtype)
-                        result = test(self, device_arg, dtype)
-                    finally:
-                        self.precision = guard_precision
+                    return test(self, device_arg)
 
-                    return result
+                setattr(cls, test_name, instantiated_test)
+            else:  # Test has multiple dtypes
+                for dtype in dtypes:
+                    if isinstance(dtype, (list, tuple)):
+                        dtype_str = "_".join(str(d).split('.')[1] for d in dtype)
+                    else:
+                        dtype_str = "_" + str(dtype).split('.')[1]
 
-                setattr(cls, dtype_test_name, instantiated_test)
+                    dtype_test_name = test_name + "_" + dtype_str
+                    assert not hasattr(cls, dtype_test_name), "Redefinition of test {0}".format(dtype_test_name)
+
+                    @wraps(test)
+                    def instantiated_test(self, test=test, dtype=dtype):
+                        device_arg = cls.get_primary_device() if not hasattr(test, 'num_required_devices') else cls.get_all_devices()
+                        # Sets precision and runs test
+                        # Note: precision is reset after the test is run
+                        guard_precision = self.precision
+                        try :
+                            self.precision = self._get_precision_override(test, dtype)
+                            result = test(self, device_arg, dtype)
+                        finally:
+                            self.precision = guard_precision
+
+                        return result
+
+                    setattr(cls, dtype_test_name, instantiated_test)
 
 
 class CPUTestBase(DeviceTypeTestBase):
@@ -506,7 +547,15 @@ class dtypes(object):
     # Python 3 allows (self, *args, device_type='all').
     def __init__(self, *args, **kwargs):
         assert args is not None and len(args) != 0, "No dtypes given"
-        assert all(isinstance(arg, torch.dtype) for arg in args), "Unknown dtype in {0}".format(str(args))
+        if isinstance(args[0], (list, tuple)):
+            for arg in args:
+                assert isinstance(arg, (list, tuple)), \
+                    "When one dtype variant is a tuple or list, " \
+                    "all dtype variants must be. " \
+                    "Received non-list non-tuple dtype {0}".format(str(arg))
+                assert all(isinstance(dtype, torch.dtype) for dtype in arg), "Unknown dtype in {0}".format(str(arg))
+        else:
+            assert all(isinstance(arg, torch.dtype) for arg in args), "Unknown dtype in {0}".format(str(args))
         self.args = args
         self.device_type = kwargs.get('device_type', 'all')
 
@@ -530,6 +579,22 @@ class dtypesIfCUDA(dtypes):
 
     def __init__(self, *args):
         super(dtypesIfCUDA, self).__init__(*args, device_type='cuda')
+
+
+# Decorator that instantiates a variant of the test for each given string.
+class strings(object):
+
+    # Note: *args, **kwargs for Python2 compat.
+    def __init__(self, *args, **kwargs):
+        assert args is not None and len(args) != 0, "No strings given"
+        assert all(isinstance(arg, str) for arg in args), "Non-string variant in {0}".format(str(args))
+        self.args = args
+
+    def __call__(self, fn):
+        assert not hasattr(fn, 'strings'), "strings redefinition!"
+        strings = getattr(fn, 'strings', {})
+        fn.strings = self.args
+        return fn
 
 
 def onlyCPU(fn):
