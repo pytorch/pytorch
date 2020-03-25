@@ -25,7 +25,7 @@ from cpp_api_parity.utils import TorchNNFunctionalTestParams, TORCH_NN_COMMON_TE
     compile_cpp_code_inline, set_python_tensors_requires_grad, move_python_tensors_to_device, \
     add_test, compute_cpp_args_construction_stmts_and_forward_arg_symbols, serialize_arg_dict_as_script_module, \
     compute_arg_dict, decorate_test_fn, compute_temp_file_path, generate_error_msg
-from cpp_api_parity import torch_nn_functionals
+import cpp_api_parity
 
 # Expected substitutions:
 #
@@ -225,7 +225,7 @@ def build_cpp_tests(unit_test_class, print_cpp_source=False):
     functionals_added_cpp_sources = set()
     for test_name, test_params in torch_nn_test_params_map.items():
         if test_params.functional_name not in functionals_added_cpp_sources:
-            cpp_sources += torch_nn_functionals.functional_cpp_sources.get(test_params.functional_name, '')
+            cpp_sources += cpp_api_parity.functional_cpp_sources.get(test_params.functional_name, '')
             functionals_added_cpp_sources.add(test_params.functional_name)
         cpp_sources += generate_test_cpp_sources(test_params=test_params, template=TORCH_NN_FUNCTIONAL_TEST_FORWARD)
         functions.append('{}_{}'.format(test_params.functional_variant_name, 'test_forward'))
