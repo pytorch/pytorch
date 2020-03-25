@@ -1,16 +1,24 @@
 #pragma once
 
-#include <memory>
+#include <vector>
 #include <unordered_map>
+#include <unordered_set>
 
-#include <c10/util/Logging.h>
-#include <torch/csrc/jit/tensorexpr/expr.h>
-#include <torch/csrc/jit/tensorexpr/ir.h>
-#include <torch/csrc/jit/tensorexpr/tensor.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 
 namespace torch {
 namespace jit {
 namespace tensorexpr {
+
+class Expr;
+class Var;
+class Tensor;
+class Function;
+class Stmt;
+class For;
+class Block;
+class Store;
+class Range;
 
 class TORCH_API LoopNest {
  public:
@@ -22,7 +30,6 @@ class TORCH_API LoopNest {
   std::vector<For*> getLoopStmtsFor(Tensor*) const;
   Stmt* getLoopBodyFor(Tensor*) const;
   bool hasLoopBodyFor(Tensor*) const;
-  std::unordered_map<Tensor*, Stmt*> tensor_to_stmt_;
 
   void Vectorize(Stmt*);
   void ComputeInline(Stmt* s);
@@ -41,12 +48,31 @@ class TORCH_API LoopNest {
 
   std::unordered_set<Function*> inlined_functions_;
   std::unordered_set<Function*> inlined_random_functions_;
+  std::unordered_map<Tensor*, Stmt*> tensor_to_stmt_;
   std::unordered_map<Stmt*, Tensor*> stmt_to_tensor_;
   Stmt* root_stmt_;
 
   std::unordered_set<Tensor*> output_tensors_;
   std::unordered_set<Tensor*> intermediate_tensors_;
 };
+
+// represent a range [start, stop)
+class Range {
+ public:
+  Range() {}
+  Range(const Expr* start, const Expr* stop) : start_(start), stop_(stop) {}
+  const Expr* start() const {
+    return start_;
+  }
+  const Expr* stop() const {
+    return stop_;
+  }
+
+ private:
+  const Expr* start_;
+  const Expr* stop_;
+};
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch

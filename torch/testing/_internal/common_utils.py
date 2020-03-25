@@ -211,8 +211,8 @@ def run_tests(argv=UNITTEST_ARGS):
             else:
                 if not os.path.exists(test_report_path):
                     os.makedirs(test_report_path)
-
-            unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(output=test_report_path))
+            verbose = '--verbose' in argv or '-v' in argv
+            unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(output=test_report_path, verbosity=2 if verbose else 1))
         else:
             unittest.main(argv=argv)
 
