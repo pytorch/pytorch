@@ -331,9 +331,9 @@ recording can't sneak in ahead of autocast.  This mirrors Apex most closely.
 I think Option 2 is the right answer for all ops, not just convolutions.  Option 2 is what I implement here.
 *****************************************************************************************************************/
 
-auto register_fallthrough = c10::Dispatcher::singleton()
-  .registerBackendFallbackKernel(DispatchKey::AutocastTensorId,
-                                 KernelFunction::makeFallthrough());
+auto register_fallthrough = c10::import()
+  .fallback(c10::dispatch(c10::DispatchKey::AutocastTensorId,
+                          c10::CppFunction::makeFallthrough()));
 
 /********************************************************************************************************************
 Explicit registration for out-of-place ops
