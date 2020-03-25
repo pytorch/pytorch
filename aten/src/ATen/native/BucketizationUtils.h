@@ -5,7 +5,7 @@
 namespace at {
 namespace native {
 
-void searchsorted_maybe_trim_input_tensors(
+inline void searchsorted_maybe_trim_input_tensors(
   Tensor& trimmed_input,
   Tensor& trimmed_boundaries,
   const Tensor& raw_input,
