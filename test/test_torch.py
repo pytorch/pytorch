@@ -14161,6 +14161,29 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
     @onlyCPU
     @dtypes(torch.float, torch.double)
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_hardswish(self, device, dtype):
+        inputValues = [-1000, -4, -3, -2, 0, 2, 3, 4, 1000]
+        expectedOutput = np.multiply(
+            inputValues,
+            np.minimum(np.maximum((np.add(inputValues, 3)), 0), 6) / 6.0)
+        precision_4dps = 0.0002
+
+        inputTensor = torch.tensor(inputValues, dtype=dtype, device=device)
+        expectedOutputTensor = \
+            torch.tensor(expectedOutput, dtype=dtype, device=device)
+
+        # normal
+        self.assertEqual(torch.nn.functional.hardswish(inputTensor),
+                         expectedOutputTensor, precision_4dps)
+
+        # inplace
+        inputTensorCpy = inputTensor.clone().detach()
+        torch.nn.functional.hardswish(inputTensorCpy, inplace=True)
+        self.assertEqual(inputTensorCpy, expectedOutputTensor, precision_4dps)
+
+    @onlyCPU
+    @dtypes(torch.float, torch.double)
     def test_sigmoid(self, device, dtype):
         # TODO: why not simulate math.sigmoid like with rsqrt?
         inputValues = [-1000, -1, 0, 0.5, 1, 2, 1000]
