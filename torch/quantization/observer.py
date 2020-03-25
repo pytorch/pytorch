@@ -483,13 +483,16 @@ class MinMaxDynamicQuantObserver(MinMaxObserver):
             else:
                 qmin, qmax = 0, 255
 
-        max_val, min_val = float(self.max_val), float(self.min_val)
+        max_val, min_val = self.max_val.to(dtype=torch.float), self.min_val.to(dtype=torch.float)
+
         # Extend the min_val and max_val to ensure that it contains 0.
-        min_val = min(0.0, min_val)
-        max_val = max(0.0, max_val)
-        scale = (max_val - min_val) / float(qmax - qmin)
-        if scale == 0.0:
-            scale = 0.1
+        min_val = torch.min(min_val, torch.tensor(0.).to(dtype=torch.float))
+        max_val = torch.max(max_val, torch.tensor(0.).to(dtype=torch.float))
+
+        scale = (max_val.to(dtype=torch.double) - min_val) / float(qmax - qmin)
+
+        if scale == 0.0 or torch.isinf(1.0 / scale):
+            scale = torch.tensor(0.1).to(dtype=torch.float)
             zero_point = 0
 
         zero_point_from_min = qmin - min_val / float(scale)
@@ -507,9 +510,9 @@ class MinMaxDynamicQuantObserver(MinMaxObserver):
         elif initial_zero_point > qmax:
             nudged_zero_point = qmax
         else:
-            nudged_zero_point = int(round(initial_zero_point))
+            nudged_zero_point = int(initial_zero_point.round())
 
-        return torch.tensor([scale]), torch.tensor([nudged_zero_point])
+        return scale.to(dtype=torch.float), torch.tensor([nudged_zero_point])
 
 class PerChannelMinMaxObserver(_ObserverBase):
     r"""Observer module for computing the quantization parameters based on the
