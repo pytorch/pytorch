@@ -50,11 +50,11 @@ Tensor& custom_rng_cauchy_(Tensor& self, double median, double sigma, Generator 
 class RNGTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    static auto registry = torch::import("aten")
-      .impl("random_.from", torch::dispatch(DispatchKey::CustomRNGKeyId, CppFunction::makeUnboxedOnly(random_from_to)))
-      .impl("random_.to",   torch::dispatch(DispatchKey::CustomRNGKeyId, CppFunction::makeUnboxedOnly(random_to)))
-      .impl("random_",      torch::dispatch(DispatchKey::CustomRNGKeyId, CppFunction::makeUnboxedOnly(random_)))
-      .impl("cauchy_",      torch::dispatch(DispatchKey::CustomRNGKeyId, CppFunction::makeUnboxedOnly(custom_rng_cauchy_)));
+    static auto registry = torch::import()
+      .impl("aten::random_.from", torch::dispatch(DispatchKey::CustomRNGKeyId, CppFunction::makeUnboxedOnly(random_from_to)))
+      .impl("aten::random_.to",   torch::dispatch(DispatchKey::CustomRNGKeyId, CppFunction::makeUnboxedOnly(random_to)))
+      .impl("aten::random_",      torch::dispatch(DispatchKey::CustomRNGKeyId, CppFunction::makeUnboxedOnly(random_)))
+      .impl("aten::cauchy_",      torch::dispatch(DispatchKey::CustomRNGKeyId, CppFunction::makeUnboxedOnly(custom_rng_cauchy_)));
   }
 };
 

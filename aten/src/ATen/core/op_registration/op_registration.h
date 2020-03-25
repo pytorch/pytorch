@@ -790,7 +790,7 @@ class CAFFE2_API Module final {
   Module();
 
   // Use these as the constructors
-  friend Module import(std::string ns);
+  friend Module _import_DOES_NOT_WORK_WITH_MOBILE_CUSTOM_BUILD(std::string ns);
   friend Module import();
 
 public:
@@ -893,8 +893,16 @@ public:
   }
 };
 
+// TODO: We'd like to support this, but custom mobile build doesn't
+// understand how to interpret registration calls that have a namespace
+// call (as this requires some non-local reasoning.)  Tracked in
+// https://github.com/pytorch/pytorch/issues/35397
+//
+// So for now, we give this a scary internal name to discourage people
+// from using it
+
 // Return the namespace corresponding to the string 'ns'
-inline Module import(std::string ns) {
+inline Module _import_DOES_NOT_WORK_WITH_MOBILE_CUSTOM_BUILD(std::string ns) {
   return Module(std::move(ns));
 }
 
