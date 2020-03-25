@@ -268,14 +268,14 @@ TensorView* TransformReplay::runReplay(
    * JIT graph, we are using symbolic sizes for each tensor individually, so
    * they won't all have the same size.
    */
-  
+
   // for (decltype(axis_map.size()) i{0}; i < axis_map.size(); i++) {
   //   TORCH_CHECK(
   //       ref_root->axis(i)->size()->same_as(
   //           target_root->axis(axis_map[i])->size()),
   //       "Transforms cannot be replayed as source and destinations do not have the same root sizes.");
   // }
-  
+
   /* STEP 3 */
   // Replay operations while forward propagating influence. The resulting
   // influence can be different in forward propagation, than in backward
@@ -316,3 +316,4 @@ TensorView* TransformReplay::fullReplay(
 } // namespace fuser
 } // namespace jit
 } // namespace torch
+

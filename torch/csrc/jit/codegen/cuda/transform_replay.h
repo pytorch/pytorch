@@ -40,7 +40,7 @@ namespace fuser {
  * unnecessary parts of the domain.
  *
  * EXAMPLES:
- * 
+ *
  * ANOTHER ITER EXAMPLE:
  *   T2[I, J, K] = T1[I, J, K] * 2.0
  * T2.split(axis = 0, factor = ...)
@@ -182,3 +182,4 @@ struct TORCH_CUDA_API TransformReplay : public TransformIter {
 } // namespace fuser
 } // namespace jit
 } // namespace torch
+

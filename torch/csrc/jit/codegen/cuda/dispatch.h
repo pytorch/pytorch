@@ -7,7 +7,7 @@
  * wants to define how to process a series of nodes. dispatch.h provides 4
  * classes that can be inherited providing a means to override functions on a
  * per-node basis. There are currently 4 provided dispatch mechanisms:
- * 
+ *
  * OptOutDispatch:
  *
  * provides the functions:
@@ -29,13 +29,13 @@
  * handle any type of node it encounters.
  *
  * OptOutMutator:
- * 
+ *
  * This class is similar to OptOutDispatch except the functions provided are of type:
  * virtual Statement* mutate(Statement*)
  * this is useful for when we want to have an IR node result from our overloaded functions.
- * 
+ *
  * OptInMutator:
- * 
+ *
  * This class is similar to OptInDispatch except the functions provided are of type:
  * virtual Statement* mutate(Statement*)
  * this is useful for when we want to have an IR node result from our overloaded functions.
@@ -284,3 +284,4 @@ struct TORCH_CUDA_API OptInMutator {
 } // namespace fuser
 } // namespace jit
 } // namespace torch
+

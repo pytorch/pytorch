@@ -163,3 +163,4 @@ bool Reorder::sameAs(const Reorder* const other) const {
 } // namespace fuser
 } // namespace jit
 } // namespace torch
+

@@ -48,3 +48,4 @@ struct IndexCompute : public TransformIter {
 } // namespace fuser
 } // namespace jit
 } // namespace torch
+
