@@ -71,7 +71,7 @@ class TORCH_API DistAutogradContext {
   friend class BackwardPassCleanupGuard;
   friend class DistEngine;
   friend class RecvRpcBackward;
-  friend class AccumulateGradPreHook;
+  friend class DistAccumulateGradPreHook;
 
   // Record that we would like to accumulate the provided gradient on the given
   // variable.

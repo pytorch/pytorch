@@ -637,7 +637,7 @@ void Engine::evaluate_function(
       }
     }
     for (auto& hook : fn_info.hooks_) {
-      (*hook)(inputs.toVariables());
+      (*hook)(inputs.getInputs());
     }
     if (!fn_info.needed_) {
       // Skip execution if we don't need to execute the function.

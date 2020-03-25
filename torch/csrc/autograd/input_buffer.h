@@ -36,7 +36,7 @@ struct InputBuffer {
   Variable operator[](size_t pos) {
     return buffer[pos];
   }
-  const std::vector<Variable>& toVariables() const {
+  const std::vector<Variable>& getInputs() const {
     return buffer;
   }
 

@@ -2091,6 +2091,20 @@ class DistAutogradTest(RpcAgentTestFixture):
             # refcount.
             self.assertTrue(p_g == p_a)
 
+    @dist_init
+    def test_post_hooks(self):
+        linear = torch.nn.Linear(1, 1, bias=False)
+        self.hook_called_times = 0
+        def post_hook(m, grad_input, grad_output):
+            self.hook_called_times += 1
+        # Note: this actually doesn't install a post hook in AccumulateGrad.
+        linear.register_backward_hook(post_hook)
+        linear.register_backward_hook(post_hook)
+        with dist_autograd.context() as context_id:
+            loss = linear(torch.ones((1)))
+            dist_autograd.backward(context_id, [loss])
+            self.assertEqual(2, self.hook_called_times)
+
 @unittest.skipIf(
     not torch._six.PY3,
     "Pytorch distributed autograd package does not support python2",

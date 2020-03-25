@@ -62,6 +62,8 @@ struct GraphTask {
   std::unordered_map<Node*, InputBuffer> not_ready_;
   std::unordered_map<Node*, int> dependencies_;
 
+  // This hook will be executed when the grad is ready for an function
+  // node regardless of whether the node will be applied.
   struct GraphTaskFunctionPreHook {
     virtual ~GraphTaskFunctionPreHook() = default;
     virtual void operator()(const variable_list& grads) = 0;
