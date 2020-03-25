@@ -184,7 +184,7 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
 
   Variable grad_;
   std::shared_ptr<Node> grad_fn_;
-  std::weak_ptr<Node> grad_accumulator_;
+  std::weak_ptr<Node> grad_accumulator_; //Note-to-self
 
   std::vector<std::shared_ptr<FunctionPreHook>> hooks_;
   std::shared_ptr<hooks_list> cpp_hooks_list;
