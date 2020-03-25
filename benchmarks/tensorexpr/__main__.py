@@ -90,7 +90,7 @@ Works only with Python3.\n A few examples:
     if args.cuda_fuser == "te":
         import torch
 
-        torch._C._jit_register_tensorexpr_fuser()
+        torch._C._jit_set_texpr_fuser_enabled(True)
 
     def set_global_threads(num_threads):
         os.environ["OMP_NUM_THREADS"] = str(num_threads)
