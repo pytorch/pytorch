@@ -25,7 +25,7 @@ class TestXNNPACKOps(TestCase):
     def test_linear(self, batch_size, data_shape, weight_output_dim, use_bias, format):
         data_shape = [batch_size] + list(data_shape)
         input_data = torch.rand(data_shape)
-        if ((format != None) and ((format != torch.channels_last) or (len(data_shape) == 4))):
+        if ((format is not None) and ((format != torch.channels_last) or (len(data_shape) == 4))):
             input_data = input_data.contiguous(memory_format=format)
         weight = torch.rand((weight_output_dim, data_shape[-1]))
         if use_bias:
@@ -80,7 +80,7 @@ class TestXNNPACKOps(TestCase):
                dilations[1] * (kernels[1] - 1) + 1)
 
         input_data = torch.rand((batch_size, input_channels, height, width))
-        if (format != None):
+        if (format is not None):
             input_data = input_data.contiguous(memory_format=format)
         weight = torch.rand((output_channels, input_channels_per_group, kernel_h, kernel_w))
         bias = None
@@ -131,7 +131,7 @@ class TestXNNPACKSerDes(TestCase):
         scripted_linear = torch.jit.script(Linear(weight, bias))
         scripted_linear_clamp_prepacked = torch.jit.script(LinearPrePacked(weight, bias))
         input_data = torch.rand(data_shape)
-        if ((format != None) and ((format != torch.channels_last) or (len(data_shape) == 4))):
+        if ((format is not None) and ((format != torch.channels_last) or (len(data_shape) == 4))):
             input_data = input_data.contiguous(memory_format=format)
         ref_result = scripted_linear(input_data)
         output_linearprepacked = scripted_linear_clamp_prepacked(input_data)
@@ -139,7 +139,7 @@ class TestXNNPACKSerDes(TestCase):
 
         # Serialize the modules and then deserialize
         input_data = torch.rand(data_shape)
-        if ((format != None) and ((format != torch.channels_last) or (len(data_shape) == 4))):
+        if ((format is not None) and ((format != torch.channels_last) or (len(data_shape) == 4))):
             input_data = input_data.contiguous(memory_format=format)
         buffer = io.BytesIO()
         torch.jit.save(scripted_linear, buffer)
@@ -219,7 +219,7 @@ class TestXNNPACKSerDes(TestCase):
                dilations[1] * (kernels[1] - 1) + 1)
 
         input_data = torch.rand((batch_size, input_channels, height, width))
-        if (format != None):
+        if (format is not None):
             input_data = input_data.contiguous(memory_format=format)
         weight = torch.rand((output_channels, input_channels_per_group, kernel_h, kernel_w))
         bias = None
@@ -236,7 +236,7 @@ class TestXNNPACKSerDes(TestCase):
 
         # Serialize the modules and then deserialize
         input_data = torch.rand((batch_size, input_channels, height, width))
-        if (format != None):
+        if (format is not None):
             input_data = input_data.contiguous(memory_format=format)
         buffer = io.BytesIO()
         torch.jit.save(scripted_conv2d, buffer)
@@ -331,7 +331,7 @@ class TestXNNPACKSerDes(TestCase):
                dilations[1] * (kernels[1] - 1) + 1)
 
         input_data = torch.rand((batch_size, input_channels, height, width))
-        if (format != None):
+        if (format is not None):
             input_data = input_data.contiguous(memory_format=format)
         conv_weight = torch.rand((output_channels, input_channels_per_group, kernel_h, kernel_w))
         conv_bias = None
