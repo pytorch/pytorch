@@ -13,14 +13,12 @@ struct TORCH_API AccumulateGrad : public Node {
 
   variable_list apply(variable_list&& grads) override;
 
-  static at::Tensor callHooks(
+  static void callHooks(
       const Variable& variable,
-      const at::Tensor& new_grad) {
-    at::Tensor grad_updated = new_grad;
+      at::Tensor& new_grad) {
     for (auto& hook : impl::hooks(variable)) {
-      grad_updated = (*hook)({grad_updated})[0];
+      new_grad = (*hook)({new_grad})[0];
     }
-    return grad_updated;
   }
 
   // Given a variable with its current grad as variable_grad, accumulates
