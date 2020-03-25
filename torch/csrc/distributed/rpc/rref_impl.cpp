@@ -217,7 +217,7 @@ std::shared_ptr<FutureMessage> OwnerRRef::getFuture() {
   } else if (error_.has_value()) {
     auto err = *error_;
     lock.unlock();
-    ret->setError(err);
+    ret->setError(std::move(err));
   }
   return ret;
 }
@@ -234,7 +234,7 @@ void OwnerRRef::setValue(IValue&& value) {
   }
 }
 
-void OwnerRRef::setError(std::string error) {
+void OwnerRRef::setError(const std::string& error) {
   std::unique_lock<std::mutex> lock(mutex_);
   error_ = error;
   std::shared_ptr<FutureMessage> future;
