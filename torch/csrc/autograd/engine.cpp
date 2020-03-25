@@ -315,9 +315,9 @@ auto Engine::thread_init(int device) -> void {
 
 // The guard that sets and restores current_graph_task.
 struct GraphTaskGuard {
-  GraphTaskGuard(const std::shared_ptr<GraphTask>& graph_task) {
+  GraphTaskGuard(std::shared_ptr<GraphTask> graph_task) {
     last_graph_task_ = std::move(current_graph_task);
-    current_graph_task = graph_task;
+    current_graph_task = std::move(graph_task);
   }
   ~GraphTaskGuard() { restore_current_graph_task(); }
 
