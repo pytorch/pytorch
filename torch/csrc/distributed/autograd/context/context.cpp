@@ -81,13 +81,16 @@ void DistAutogradContext::accumulateGrad(
 
   // No higher order gradients supported in distributed autograd.
   AutoGradMode grad_mode(false);
+
+  at::Tensor new_grad = AccumulateGrad::callHooks(variable, grad);
+
   // TODO: Need to bump 'num_expected_refs' here when we support post_hooks for
   // distributed autograd as part of
   // https://github.com/pytorch/pytorch/issues/33482
-  AccumulateGrad::accumulateGradAndCallHooks(
+  AccumulateGrad::accumulateGrad(
       variable,
       old_grad,
-      grad,
+      new_grad,
       // Add +1 here since we can't std::move(grad) since it is a const ref,
       // which incurs a refcount bump for the Tensor.
       num_expected_refs + 1,

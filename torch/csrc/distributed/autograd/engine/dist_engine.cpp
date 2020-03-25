@@ -375,7 +375,7 @@ void DistEngine::cleanupBackwardPass(const ContextPtr& autogradContext) {
   // references left to the gradients for the backward pass.
   //
   // This ensures our 'use_count' checks in
-  // AccumulateGrad::accumulateGradAndCallHooks are correct and we're
+  // AccumulateGrad::accumulateGrad are correct and we're
   // not leaking any references to the gradients anywhere else.
   const auto& futureGrads =
       autogradContext->retrieveGraphTask()->future_result_;

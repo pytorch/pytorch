@@ -2168,6 +2168,42 @@ class TestAutograd(TestCase):
         out.sum().backward()
         self.assertEqual(x.grad, y_data)
 
+    def test_reentrant_child_error(self):
+        class BackwardError(Function):
+            @staticmethod
+            def forward(ctx, inp):
+                return inp
+
+            @staticmethod
+            def backward(ctx, grad):
+                raise Exception('simulate error')
+
+        # Parent graph.
+        a = torch.rand(3, 3, requires_grad=True)
+        c = a * a
+
+        # Reentrant child graph.
+        b = torch.rand(3, 3, requires_grad=True)
+        e = b * b
+        f = BackwardError.apply(e)
+        reentrant_root = f.sum()
+
+        class ReentrantFunc(Function):
+
+            @staticmethod
+            def forward(ctx, inp):
+                return inp
+
+            @staticmethod
+            def backward(ctx, grad):
+                # Reentrant backward in child will throw an error.
+                reentrant_root.backward()
+                return grad
+
+        d = ReentrantFunc.apply(c)
+        with self.assertRaisesRegex(RuntimeError, 'simulate error'):
+            d.sum().backward()
+
     def test_broadcast_tensors(self):
         f_args_variable = (torch.randn(3, requires_grad=True),
                            torch.randn(1, 2, 1, requires_grad=True),
@@ -5783,9 +5819,7 @@ class TestAutogradDeviceType(TestCase):
             _cpu_mode = True
             @staticmethod
             def forward(ctx, x):
-                with torch.enable_grad():
-                    ctx.output_var = x * (x + 2) 
-                return ctx.output_var.detach()
+                return x * (x + 2)
 
             @staticmethod
             def backward(ctx, grad_output):
