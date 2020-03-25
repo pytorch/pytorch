@@ -9728,7 +9728,6 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(torch.empty(0, dtype=torch.long), z[0])
 
     @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
-    @dtypesIfCUDA(torch.float, torch.double, torch.complex64, torch.complex128)
     def test_normal(self, device, dtype):
 
         def helper(self, device, dtype, ptype, t_transform, std_transform):
@@ -9844,7 +9843,6 @@ class TestTorchDeviceType(TestCase):
             helper(self, device, dtype, lambda x: x, lambda t: t, lambda mean: mean)
 
     @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
-    @dtypesIfCUDA(torch.float, torch.double, torch.complex64, torch.complex128)
     def test_randn(self, device, dtype):
         torch.manual_seed(123456)
         res1 = torch.randn(SIZE, SIZE, dtype=dtype, device=device)
@@ -15160,6 +15158,33 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         concat_list.append(torch.ones((SIZE2, 1024 * 512), dtype=torch.uint8, device=device))
         result = torch.cat(concat_list)
         self.assertEqual(result.size(0), SIZE1 + SIZE2)
+
+    @onlyOnCPUAndCUDA
+    def test_cat_bad_dtypes(self, device):
+        def cross_product(a, b, skip_same=True):
+            result = []
+            for dtype_a in a:
+                for dtype_b in b:
+                    if skip_same and (dtype_a == dtype_b):
+                        continue
+                    result.append((dtype_a, dtype_b))
+            return result
+
+        in_shape = (1, 2, 3)
+        out_shape = (2, 2, 3)
+
+        all_dtypes = (torch.uint8, torch.int8, torch.int16, torch.int32,
+                      torch.int64, torch.float, torch.double, torch.half,
+                      torch.bfloat16)
+        all_dtype_combinations = cross_product(all_dtypes, all_dtypes,
+                                               skip_same=True)
+        out = torch.empty(out_shape)
+        for (dtype_a, dtype_b) in all_dtype_combinations:
+            a = torch.ones(in_shape, dtype=dtype_a).to(device)
+            b = torch.ones(in_shape, dtype=dtype_b).to(device)
+            self.assertRaises(RuntimeError, lambda: torch.cat([a, b]))
+            self.assertRaises(RuntimeError, lambda: torch.cat([a, b], out=out))
+
 
     @onlyCPU
     def test_max_mixed_devices(self, device):
