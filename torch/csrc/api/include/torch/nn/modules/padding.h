@@ -11,7 +11,7 @@ namespace nn {
 
 /// Base class for all (dimension-specialized) ReflectionPad modules.
 template <size_t D, typename Derived>
-class TORCH_API ReflectionPadImpl : public torch::nn::Cloneable<Derived> {
+class ReflectionPadImpl : public torch::nn::Cloneable<Derived> {
  public:
   ReflectionPadImpl(ExpandingArray<D*2> padding)
       : ReflectionPadImpl(ReflectionPadOptions<D>(padding)) {}
@@ -82,7 +82,7 @@ TORCH_MODULE(ReflectionPad2d);
 
 /// Base class for all (dimension-specialized) ReplicationPad modules.
 template <size_t D, typename Derived>
-class TORCH_API ReplicationPadImpl : public torch::nn::Cloneable<Derived> {
+class ReplicationPadImpl : public torch::nn::Cloneable<Derived> {
  public:
   ReplicationPadImpl(ExpandingArray<D*2> padding)
       : ReplicationPadImpl(ReplicationPadOptions<D>(padding)) {}
@@ -215,7 +215,7 @@ TORCH_MODULE(ZeroPad2d);
 
 /// Base class for all (dimension-specialized) ConstantPad modules.
 template <size_t D, typename Derived>
-class TORCH_API ConstantPadImpl : public torch::nn::Cloneable<Derived> {
+class ConstantPadImpl : public torch::nn::Cloneable<Derived> {
  public:
   ConstantPadImpl(ExpandingArray<D*2> padding, double value)
       : ConstantPadImpl(ConstantPadOptions<D>(padding, value)) {}
