@@ -1231,6 +1231,77 @@ void insertQuantDeQuantCall(
   insertDeQuantCall(g, quant->output(), v, uses);
 }
 
+void insertChooseQParamsQuantDeQuantCall(
+    Value* self,
+    Node* observer,
+    bool is_per_channel,
+    const std::vector<std::string>& qparam_names) {
+  Graph* g = observer->owningGraph();
+  // Original value that is observed
+  Value* v = observer->input(1);
+
+  // Inserting before insert point
+  WithInsertPoint ins(v->node()->next());
+
+  std::vector<Value*> inputs = {v};
+  // Insert GetAttr nodes for quantization parameters
+  for (const auto& qparam_name : qparam_names) {
+    inputs.push_back(g->insertGetAttr(self, qparam_name));
+  }
+
+  std::string quantize_func;
+  if (is_per_channel) {
+    quantize_func = "quantize_per_channel";
+  } else {
+    quantize_func = "quantize_per_tensor";
+  }
+
+  Node *quant, *choose_qparams;
+
+  if (v->node()->kind() != prim::GetAttr){
+    std::string choose_qparams_func = "_choose_qparams_per_tensor";
+    auto reduce_range = g->insertConstant(false);
+    choose_qparams = g->create(at::Symbol::aten(choose_qparams_func), v, 2);
+    choose_qparams->addInput(reduce_range);
+
+    std::cout << " Inserting value name " << v->node()->kind().toQualString() <<std::endl;
+    choose_qparams->output(0)->setDebugName(v->debugName() + ".scale_");
+    choose_qparams->output(0)->setType(FloatType::get());
+    choose_qparams->output(1)->setDebugName(v->debugName() + ".zero_point");
+    choose_qparams->output(1)->setType(IntType::get());
+
+    g->insertNode(choose_qparams);
+
+    std::vector<Value*> quant_inputs = {v};
+    for (auto& out : choose_qparams->outputs()) {
+      quant_inputs.push_back(out);
+    }
+    // Last argument is dtype.
+    quant_inputs.push_back(inputs.back());
+    quant = g->create(at::Symbol::aten(quantize_func), quant_inputs);
+    g->insertNode(quant);
+  } else {
+    quant = g->create(at::Symbol::aten(quantize_func), inputs);
+    g->insertNode(quant);
+  }
+  quant->output()->setDebugName(v->debugName() + ".quant");
+  // two passes to insert the dequant for every usage
+  // in first pass, identify all the nodes using "v"
+  std::vector<Use> uses;
+  for (const auto& use : v->uses()) {
+    // Skip quant node and observer node (we need to keep
+    // observer nodes around since we need them to
+    // find the quantization parameters)
+    if (use.user != quant && use.user != observer && use.user != choose_qparams) {
+      uses.push_back(use);
+    }
+  }
+
+  // in second pass, replace the input "v" with dequant output
+  insertDeQuantCall(g, quant->output(), v, uses);
+}
+
+
 // find the observer for Value `v` and return the name of the observer
 c10::optional<std::string> findObserverName(Value* v) {
   // Note that here we just check for the name of observer, but the ideally
@@ -1302,6 +1373,7 @@ class InsertQuantDeQuantHelper {
   void cleanup(Module& module, Graph* g);
   void quantizeTensors(Module& module, Graph* g, Value* self);
 
+  void setDynamicFlag(bool is_dynamic_);
  private:
   std::unordered_map<Graph*, std::vector<std::string>>
       observer_modules_to_remove_;
@@ -1321,7 +1393,13 @@ class InsertQuantDeQuantHelper {
   // Record qscheme for every graph, this is for checking
   // each graph is only quantized with one type of QScheme
   std::unordered_map<Graph*, c10::QScheme> qscheme_for_graph_;
+
+  bool is_dynamic = false;
 };
+
+void InsertQuantDeQuantHelper::setDynamicFlag(bool is_dynamic_) {
+  is_dynamic = is_dynamic_;
+}
 
 void InsertQuantDeQuantHelper::collectObserverNodesAndValueToQuantize(
     Module& module,
@@ -1430,7 +1508,11 @@ void InsertQuantDeQuantHelper::quantizeTensors(
       module.register_attribute(qparam_name, qparam.type(), qparam);
       qparam_names.push_back(qparam_name);
     }
-    insertQuantDeQuantCall(self, n, isPerChannel(qscheme), qparam_names);
+    if (is_dynamic) {
+      insertChooseQParamsQuantDeQuantCall(self, n, isPerChannel(qscheme), qparam_names); 
+    } else {
+      insertQuantDeQuantCall(self, n, isPerChannel(qscheme), qparam_names);
+    }
   }
 }
 
@@ -1623,6 +1705,7 @@ void InsertQuantDeQuantHelper::run(
   GRAPH_DUMP("Before Quantize Tensors:", graph);
   Value* self = graph->inputs()[0];
   quantizeTensors(module, graph.get(), self);
+
   GRAPH_DUMP("After Quantize Tensors:", graph);
 }
 
@@ -2164,9 +2247,11 @@ TORCH_API Module InsertObservers(
 Module InsertQuantDeQuant(
     Module& input_module,
     const std::string& method_name,
-    bool inplace) {
+    bool inplace,
+    bool is_dynamic) {
   Module module = inplace ? input_module : input_module.clone();
   InsertQuantDeQuantHelper h;
+  h.setDynamicFlag(is_dynamic);
   h.run(module, method_name);
   h.cleanup(module);
   return module;
