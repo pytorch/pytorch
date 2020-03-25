@@ -4389,14 +4389,14 @@
 
 - func: diag.out(Tensor self, int diagonal=0, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_diag_out
+    CPU: diag_out
     CUDA: legacy::cuda::_th_diag_out
 
 - func: diag(Tensor self, int diagonal=0) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_diag
+    CPU: diag
     CUDA: legacy::cuda::_th_diag
 
 - func: cross.out(Tensor self, Tensor other, int? dim=None, *, Tensor(a!) out) -> Tensor(a!)
