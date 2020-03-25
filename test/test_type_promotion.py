@@ -1,7 +1,6 @@
 from functools import wraps
 import torch
 import itertools
-import collections
 from torch.testing._internal.common_utils import TestCase, run_tests, load_tests
 from torch.testing._internal.common_device_type import (instantiate_device_type_tests, onlyOnCPUAndCUDA,
                                                         dtypes, strings)
@@ -694,7 +693,7 @@ class TestTypePromotion(TestCase):
 
     @onlyOnCPUAndCUDA
     @float_double_default_dtype
-    @strings('mean', 'std', 'var', 'logsumexp')
+    @strings('mean', 'std', 'var', 'logsumexp')t
     @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
             torch.half, torch.bfloat16, torch.float, torch.double,
             torch.complex64, torch.complex128)
