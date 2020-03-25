@@ -620,6 +620,7 @@ inline IValue toIValue(
     case TypeKind::QSchemeType:
     case TypeKind::AnyListType:
     case TypeKind::AnyTupleType:
+    case TypeKind::AnyClassType:
       break;
   }
   throw py::cast_error(c10::str("toIValue() cannot handle converting to type: ", type->python_str()));

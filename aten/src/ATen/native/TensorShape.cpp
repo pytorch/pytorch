@@ -754,16 +754,16 @@ static Tensor select_sparse(const Tensor& self, int64_t dim, int64_t index) {
 Tensor select(const Tensor& self, int64_t dim, int64_t index) {
   int64_t ndim = self.dim();
   if (ndim == 0) {
-    AT_INDEX_ERROR("select() cannot be applied to a 0-dim tensor.");
+    TORCH_CHECK_INDEX(false, "select() cannot be applied to a 0-dim tensor.");
   }
   dim = maybe_wrap_dim(dim, ndim);
   auto size = self.size(dim);
   if (index < -size || index >= size) {
     if (self.has_names() && self.names()[dim] != Dimname::wildcard()) {
-      AT_INDEX_ERROR("select(): index ", index, " out of range for tensor of size ",
+      TORCH_CHECK_INDEX(false, "select(): index ", index, " out of range for tensor of size ",
                      self.sizes(), " at dimension ", self.names()[dim]);
     }
-    AT_INDEX_ERROR("select(): index ", index, " out of range for tensor of size ",
+    TORCH_CHECK_INDEX(false, "select(): index ", index, " out of range for tensor of size ",
                    self.sizes(), " at dimension ", dim);
   }
   if (index < 0) {
@@ -811,10 +811,10 @@ Tensor index_select_sparse(const Tensor& self, int64_t dim, const Tensor& index)
     */
   auto ndim = self.dim();
   if (ndim == 0) {
-    AT_INDEX_ERROR("index_select() cannot be applied to a 0-dim tensor.");
+    TORCH_CHECK_INDEX(false, "index_select() cannot be applied to a 0-dim tensor.");
   }
   if (!(index.dim() == 1 && index.dtype() == at::kLong)) {
-    AT_INDEX_ERROR("index_select() argument index must be 1-D long-tensor.");
+    TORCH_CHECK_INDEX(false, "index_select() argument index must be 1-D long-tensor.");
   }
   dim = maybe_wrap_dim(dim, ndim);
   auto size = self.size(dim);
@@ -835,7 +835,7 @@ Tensor index_select_sparse(const Tensor& self, int64_t dim, const Tensor& index)
     for (int64_t i=0; i < new_sizes[dim]; i++) {
       auto idx = index[i].item<int64_t>();
       if (idx < -size || idx >= size) {
-        AT_INDEX_ERROR("index_select(): index contains ", idx, " that is out of range for tensor of size ",
+        TORCH_CHECK_INDEX(false, "index_select(): index contains ", idx, " that is out of range for tensor of size ",
                    self.sizes(), " at dimension ", dim);
       }
       if (idx < 0) {
@@ -874,7 +874,7 @@ Tensor index_select_sparse(const Tensor& self, int64_t dim, const Tensor& index)
 Tensor slice(const Tensor& self, int64_t dim, int64_t start, int64_t end, int64_t step) {
   int64_t ndim = self.dim();
   if (ndim == 0) {
-    AT_INDEX_ERROR("slice() cannot be applied to a 0-dim tensor.");
+    TORCH_CHECK_INDEX(false, "slice() cannot be applied to a 0-dim tensor.");
   }
   dim = maybe_wrap_dim(dim, ndim);
   auto sizes = self.sizes().vec();
