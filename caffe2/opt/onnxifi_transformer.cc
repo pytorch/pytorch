@@ -677,8 +677,9 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaC2(
   // We already have all the ops and external inputs and outputs!
   NetDef onnxifi_net(net);
 
-  // Remove the second output of Concat/Reshape from external_output. In
-  // addition, we remove those outputs from the Onnxifi op too.
+  // Remove the second output of Concat/Reshape from external_output. Remove
+  // rest of the outputs of LayerNorm too. In addition, we remove those outputs
+  // from the Onnxifi op too.
   // TODO: This approach is a bit hacky as we assume that the second output is
   // never used. A more appropriate approach can be learned from the ONNX path,
   // where we statically computes the split_info given input shape and insert a
@@ -711,6 +712,10 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaC2(
           indices_shape.dims_size() == 1 && lengths_shape.dims_size() == 1 &&
           indices_shape.dims(0) == lengths_shape.dims(0)) {
         op.add_arg()->CopyFrom(MakeArgument<int>("length1", 1));
+      }
+    } else if (op.type() == "LayerNorm" && op.output_size() > 1) {
+      for (int i = 1; i < op.output_size(); ++i) {
+        split_infos.emplace(op.output(i));
       }
     }
   }
@@ -1053,6 +1058,11 @@ bool OnnxifiTransformer::supportOpC2(
     if ((op.type() == "Concat" || op.type() == "Reshape") &&
         op.output_size() == 2) {
       net.mutable_external_output()->RemoveLast();
+    } else if (op.type() == "LayerNorm" && op.output_size() > 1) {
+      int remove = op.output_size() - 1;
+      for (int i = 0; i < remove; ++i) {
+        net.mutable_external_output()->RemoveLast();
+      }
     }
 
     // Encode the input/output shapes to an argument
