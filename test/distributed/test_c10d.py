@@ -3093,15 +3093,11 @@ class DistributedDataParallelDelayAllreduceTest(DistributedDataParallelTest):
         net = TestModel().float().to(device_id)
         self._test_checkpoint(net, device_id)
 
-    def _assert_consistent_grad(self, model):
+    def _assert_consistent_grad(self, process_group, model):
         for p in model.parameters():
             grad_list = [torch.empty_like(p) for _ in range(self.world_size)]
-            c10d.all_gather(grad_list, p.grad)
+            c10d.all_gather(grad_list, p.grad, group=process_group)
             for g in grad_list:
-                if self.rank == 0:
-                    if not g.allclose(grad_list[0]):
-                        print(g)
-                        print(grad_list[0])
                 self.assertEqual(g, grad_list[0])
 
     def test_grad_consistency(self):
@@ -3109,13 +3105,10 @@ class DistributedDataParallelDelayAllreduceTest(DistributedDataParallelTest):
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
         torch.manual_seed(1337)
 
+
         ddp = DistributedDataParallel(
             CheckpointModel(),
             process_group=process_group,
-            # find_unused_parameters arg is no longer necessary as
-            # delay_allreduce would always mark all grads as ready when the
-            # backward pass finishes.
-            # find_unused_parameters=True,
             delay_allreduce=self.delay_allreduce,
         )
 
@@ -3125,26 +3118,15 @@ class DistributedDataParallelDelayAllreduceTest(DistributedDataParallelTest):
         target = torch.rand([1, 10], dtype=torch.float)
         optim = torch.optim.Adam(ddp.parameters(), lr=0.001)
 
-        for _ in range(4):
-            print("000")
+        inp.requires_grad = True
+        for _ in range(10):
             out = ddp(inp)
-            print("111")
             loss = loss_fn(out, target)
-            print("222")
-            try:
-                loss.backward()
-            except Exception as e:
-                print(e)
-                logging.error(traceback.format_exc())
-                # Logs the error appropriately.
-            print("333")
-            self._assert_consistent_grad(ddp)
-            print("444")
+            loss.backward()
+            self._assert_consistent_grad(process_group, ddp)
             optim.step()
-            print("555")
             optim.zero_grad()
 
-        print(333)
 
 class ReducerModule(nn.Module):
     def __init__(self):
