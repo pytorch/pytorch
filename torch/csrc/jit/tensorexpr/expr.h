@@ -31,8 +31,6 @@ enum IRNodeType {
   kCompareSelect,
   kLet,
   kCast,
-  kBroadcast,
-  kRamp,
   kNone
 };
 
