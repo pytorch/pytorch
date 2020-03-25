@@ -17,7 +17,7 @@ from torch.nn.quantized.modules.utils import _quantize_weight
 from torch.nn.utils import fuse_conv_bn_weights
 
 class _ConvNd(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size, stride=1,
+    def __init__(self, in_channels, out_channels, kernel_size, stride,
                  padding, dilation,
                  transposed, output_padding,
                  groups, bias,
