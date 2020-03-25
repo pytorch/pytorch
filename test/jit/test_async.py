@@ -10,6 +10,7 @@ pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import JitTestCase, _inline_everything
 from torch.testing._internal.common_utils import TemporaryFileName
+from typing import List
 
 class TestAsync(JitTestCase):
     def test_async_python(self):
@@ -22,6 +23,19 @@ class TestAsync(JitTestCase):
         y_hat = foo(x)
         y = torch.jit._wait(fut)
         # assert nothing; only to make sure the fake python path works
+
+    def test_async_future_type_python(self):
+        def foo(inp):
+            futures = torch.jit.annotate(List[torch.jit.Future[torch.Tensor]], [])
+            for i in range(5):
+                futures.append(torch.jit._fork(lambda x: x, inp))
+            all_outputs = []
+            for future in futures:
+                all_outputs.append(torch.jit._wait(future))
+            return all_outputs
+
+        # assert nothing, just to make sure python type parsing works
+        foo(torch.randn(3, 4))
 
     def test_async_parsing(self):
         @torch.jit.script

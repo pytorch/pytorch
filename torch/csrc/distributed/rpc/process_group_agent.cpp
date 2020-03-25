@@ -174,21 +174,26 @@ void ProcessGroupAgent::join() {
 
 bool ProcessGroupAgent::hasPendingMessage() {
   const auto worldSize = pg_->getSize();
-  std::vector<int64_t> snapshot;
-  snapshot.reserve(2 * worldSize);
+  auto snapshot = std::make_unique<std::vector<int64_t>>();
+  snapshot->reserve(2 * worldSize);
   auto recvSnapshot = recvCounts_.snapshot();
   auto sendSnapshot = sendCounts_.snapshot();
-  snapshot.insert(
-      snapshot.end(),
+  snapshot->insert(
+      snapshot->end(),
       std::make_move_iterator(recvSnapshot.begin()),
       std::make_move_iterator(recvSnapshot.end()));
-  snapshot.insert(
-      snapshot.end(),
+  snapshot->insert(
+      snapshot->end(),
       std::make_move_iterator(sendSnapshot.begin()),
       std::make_move_iterator(sendSnapshot.end()));
 
-  std::vector<torch::Tensor> inputSnapshot = {
-      torch::from_blob(snapshot.data(), {2, worldSize}, {torch::kInt64})};
+  auto snapshotData = snapshot->data();
+  auto deleteWhenDone = snapshot.release();
+  std::vector<torch::Tensor> inputSnapshot = {torch::from_blob(
+      snapshotData,
+      {2, worldSize},
+      [deleteWhenDone](void*) { delete deleteWhenDone; },
+      {torch::kInt64})};
   // allgather both send and recv messages in one shot
   std::vector<std::vector<torch::Tensor>> outputSnapshots(1);
 
@@ -401,12 +406,12 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
 }
 
 void ProcessGroupAgent::handleSend(const SendWork& work) {
-  std::string serializedPayload =
-      wireSerialize(work.message_.payload(), work.message_.tensors());
+  auto serializedPayload = std::make_unique<std::string>(std::move(
+      wireSerialize(work.message_.payload(), work.message_.tensors())));
 
   std::vector<torch::Tensor> preamble = {torch::tensor(
       {(int64_t)pg_->getRank(),
-       (int64_t)serializedPayload.length(),
+       (int64_t)serializedPayload->length(),
        (int64_t)work.message_.type(),
        (int64_t)work.message_.id()},
       {torch::kInt64})};
@@ -415,9 +420,14 @@ void ProcessGroupAgent::handleSend(const SendWork& work) {
   // hence the lock
   std::vector<std::shared_ptr<c10d::ProcessGroup::Work>> pendingSends;
   const auto dst = work.to_.id_;
+
+  auto serializedPayloadData = const_cast<char*>(serializedPayload->data());
+  auto serializedPayloadSize = serializedPayload->size();
+  std::string* deleteWhenDone = serializedPayload.release();
   std::vector<torch::Tensor> payload = {torch::from_blob(
-      (void*)serializedPayload.c_str(),
-      serializedPayload.length(),
+      reinterpret_cast<void*>(serializedPayloadData),
+      serializedPayloadSize,
+      [deleteWhenDone](void*) { delete deleteWhenDone; },
       {torch::kChar})};
   pendingSends.reserve(2);
 

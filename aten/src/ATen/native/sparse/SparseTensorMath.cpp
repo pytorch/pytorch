@@ -272,6 +272,10 @@ SparseTensor& true_divide_out_sparse_scalar(
   return true_divide_out_sparse_zerodim(result, dividend, wrapped_scalar_tensor(divisor));
 }
 
+Tensor& true_divide_sparse_(Tensor& self, const Tensor& divisor) {
+  return true_divide_out_sparse_zerodim(self, self, divisor);
+}
+
 // --------------------------------------------------------------------
 // floor_divide(SparseTensor, Scalar)
 // --------------------------------------------------------------------

@@ -136,6 +136,10 @@ std::vector<size_t> getGeneralOpTensorInputIndexes(Node* n) {
       "upsample_bicubic2d",
       "dropout",
       "reshape",
+      "chunk",
+      "view",
+      "transpose",
+      "contiguous",
       // TODO: sort returns a tuple of Tensors, we have
       // to extend the API to support that
       // "sort",
@@ -159,6 +163,14 @@ std::vector<size_t> getGeneralOpTensorInputIndexes(Node* n) {
                  /* call_funcs = */ {},
                  /* aten_funcs = */ single_input_aten_funcs)) {
     return {0};
+  } else if (n->kind() == prim::ListUnpack) {
+    return {0};
+  } else if (n->kind() == prim::ListConstruct) {
+    std::vector<size_t> indexes;
+    for (auto i = 0; i < n->inputs().size(); ++i) {
+      indexes.push_back(i);
+    }
+    return indexes;
   }
   return {};
 }
@@ -425,7 +437,7 @@ class InsertObserversHelper {
    * arguemnt: is_entry_point means whether the current method is the forward
    * method of the top level module.
    *
-   *Since we want to insert observers in the call site instead of in the called
+   * Since we want to insert observers in the call site instead of in the called
    * graph, we'll postpone inserting observer to caller as much as possible, if
    * we know the current method is the outer most method, then
    * we will insert all observers in the graph instead of postpone this to the
@@ -456,6 +468,7 @@ class InsertObserversHelper {
       // insert multiple observers for the same value
       std::unordered_set<Value*>& block_observed_values,
       bool is_entry_point = false);
+  void setDynamicFlag(bool is_dynamic_);
 
  private:
   ModuleMethodVector getInvokedMethods(
@@ -537,6 +550,8 @@ class InsertObserversHelper {
   // want to add to the module instance that has the block
   std::unordered_map<Block*, NameModuleVector> block_observer_map_;
 
+  // Is dynamic quantization enabled for the observer pass.
+  bool is_dynamic = false;
   // These are the IR patterns we match to skip inserting observers.
   // They are compiled once on construction and used repeatedly within
   // the pass.
@@ -817,6 +832,10 @@ void InsertObserversHelper::fillBoundaryValueMap(
   }
 }
 
+void InsertObserversHelper::setDynamicFlag(bool is_dynamic_) {
+  is_dynamic = is_dynamic_;
+}
+
 void InsertObserversHelper::preprocess(
     Module& module,
     const std::string& method_name) {
@@ -850,9 +869,13 @@ bool InsertObserversHelper::valueNeedsToBeQuantized(Value* v) {
       isBiasOfConvOrLinear(v)) {
     return false;
   }
-  // Check whether producer is quantizable
-  if (nodeQuantizable(v->node())) {
-    return true;
+  // For dynamic quantization we only insert observers at the input
+  // of the quantizable function.
+  if (!is_dynamic) {
+    // Check whether producer is quantizable
+    if (nodeQuantizable(v->node())) {
+      return true;
+    }
   }
   // Check whether user is quantizable
   for (const auto& use : v->uses()) {
@@ -2120,7 +2143,8 @@ TORCH_API Module InsertObservers(
     Module& input_module,
     const std::string& method_name,
     const QConfigDict& qconfig_dict,
-    bool inplace) {
+    bool inplace,
+    bool is_dynamic) {
   ModuleQConfigMap map_before_clone;
   fillQConfigMap(input_module, qconfig_dict, map_before_clone);
   ModuleCloneHelper mh;
@@ -2131,6 +2155,7 @@ TORCH_API Module InsertObservers(
   // the qconfig map again
   fillQConfigMap(module, qconfig_dict, module_qconfig_map);
   InsertObserversHelper helper(module_qconfig_map);
+  helper.setDynamicFlag(is_dynamic);
   helper.preprocess(module, method_name);
   helper.insertObservers(module, method_name, true);
   return module;
@@ -2181,6 +2206,59 @@ graph(%linear, %input, %weight, %bias):
   rewriter.RegisterRewritePattern(functional_linear, aten_linear);
   // TODO: runOnGraph takes const ref?
   rewriter.runOnGraph(graph, filter);
+}
+
+void ReplicateQuant(std::shared_ptr<Graph>& graph) {
+    std::stack<Block*> blocks_to_visit;
+  std::vector<Node*> quant_nodes_to_rewrite;
+  blocks_to_visit.push(graph->block());
+  while (!blocks_to_visit.empty()) {
+    Block* b = blocks_to_visit.top();
+    blocks_to_visit.pop();
+    for (Node* n : b->nodes()) {
+      // find quantize node that quantizes the output of if
+      if ((n->kind() == Symbol::aten("quantize_per_tensor") ||
+           n->kind() == Symbol::aten("quantize_per_channel")) &&
+          n->input(0)->node()->kind() == prim::If) {
+        quant_nodes_to_rewrite.push_back(n);
+      }
+      for (Block* subblock : n->blocks()) {
+        blocks_to_visit.push(subblock);
+      }
+    }
+  }
+  for (Node* n : quant_nodes_to_rewrite) {
+    Node* if_node = n->input(0)->node();
+    // move the nodes that produces the quantization parameters before
+    // prim::If
+    for (auto i = 1; i < n->inputs().size(); ++i) {
+      n->input(i)->node()->moveBefore(if_node);
+    }
+    // replace all uses of the quantized node with the output of if node
+    n->output()->replaceAllUsesWith(if_node->output());
+    // add quantize nodes to the end of all blocks
+    for (Block* if_block : if_node->blocks()) {
+      TORCH_CHECK(
+          if_block->outputs().size() == 1,
+          "replicate quantize only works for `if` node with one output right now");
+      // the original return value of the block
+      Value* ret_val = if_block->outputs()[0];
+      std::vector<Value*> quantize_inputs = n->inputs().vec();
+      quantize_inputs[0] = ret_val;
+      WithInsertPoint ins(if_block->return_node());
+      Node* quant = graph->create(n->kind(), quantize_inputs);
+      if_block->replaceOutput(0, quant->output());
+      quant->output()->copyMetadata(ret_val);
+      graph->insertNode(quant);
+    }
+  }
+
+  for (Node* n : quant_nodes_to_rewrite) {
+    n->removeAllInputs();
+  }
+  for (Node* n : quant_nodes_to_rewrite) {
+    n->destroy();
+  }
 }
 
 void ReplicateDeQuant(std::shared_ptr<Graph>& graph) {
@@ -2249,12 +2327,11 @@ void SwapDeQuant(std::shared_ptr<Graph>& graph) {
           dequantize_node->removeAllInputs();
           dequantize_node->destroy();
         }
-        TORCH_CHECK(n->outputs().size() == 1, "We only support dequantize swapping for ops"
-                    " with one output right now");
-        auto* output = n->output();
-        std::vector<Use> uses = output->uses();
-        // Insert new dequantize node for each use of the output
-        insertDeQuantCall(graph.get(), output, output, uses);
+        for (auto* output: n->outputs()) {
+          std::vector<Use> uses = output->uses();
+          // Insert new dequantize node for each use of the output
+          insertDeQuantCall(graph.get(), output, output, uses);
+        }
       }
       for (Block* subblock : n->blocks()) {
         blocks_to_visit.push(subblock);
@@ -2547,6 +2624,7 @@ script::Module Finalize(script::Module& module) {
   auto graph = module.get_method("forward").graph();
   Inline(*graph);
   ConstantPropagation(graph);
+  ReplicateQuant(graph);
   ReplicateDeQuant(graph);
   SwapDeQuant(graph);
   InsertPrepackUnpack(graph);
