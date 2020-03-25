@@ -1,5 +1,3 @@
-#pragma once
-
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/ir_visitor.h>
@@ -318,13 +316,6 @@ class HashProvider : public IRVisitor {
     putHash(v, hash);
   }
 
-  template <typename... Types>
-  SimplifierHashType hash_combine(const Types&... args) {
-    SimplifierHashType seed = 0;
-    _hash_combine(seed, args...);
-    return seed;
-  }
-
  private:
   SimplifierHashType hashOf(const Expr* e) {
     auto it = exprToHash_.find(e);
@@ -380,10 +371,6 @@ class HashProvider : public IRVisitor {
         (seed << 7) + (seed >> 4);
   }
 
-  void _hash_combine(SimplifierHashType& seed, const Expr* e) {
-    _hash_combine(seed, hash(e));
-  }
-
   template <typename T, typename... Types>
   void _hash_combine(
       SimplifierHashType& seed,
@@ -391,6 +378,13 @@ class HashProvider : public IRVisitor {
       const Types&... args) {
     _hash_combine(seed, val);
     _hash_combine(seed, args...);
+  }
+
+  template <typename... Types>
+  SimplifierHashType hash_combine(const Types&... args) {
+    SimplifierHashType seed = 0;
+    _hash_combine(seed, args...);
+    return seed;
   }
 
   void putHash(const KernelScopedObject* e, SimplifierHashType h) {
