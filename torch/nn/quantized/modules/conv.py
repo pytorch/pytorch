@@ -295,9 +295,9 @@ class Conv2d(_ConvNd):
         >>> # non-square kernels and unequal stride and with padding and dilation
         >>> m = nn.quantized.Conv2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2), dilation=(3, 1))
         >>> input = torch.randn(20, 16, 50, 100)
-        >>> # quantize input to qint8
-        >>> q_input = torch.quantize_per_tensor(input, scale=1.0, zero_point=0, dtype=torch.qint32)
-        >>> output = m(input)
+        >>> # quantize input to quint8
+        >>> q_input = torch.quantize_per_tensor(input, scale=1.0, zero_point=0, dtype=torch.quint8)
+        >>> output = m(q_input)
 
     """
 
@@ -421,9 +421,9 @@ class Conv3d(_ConvNd):
         >>> # non-square kernels and unequal stride and with padding and dilation
         >>> m = nn.quantized.Conv3d(16, 33, (3, 5, 5), stride=(1, 2, 2), padding=(1, 2, 2), dilation=(1, 2, 2))
         >>> input = torch.randn(20, 16, 56, 56, 56)
-        >>> # quantize input to qint8
-        >>> q_input = torch.quantize_per_tensor(input, scale=1.0, zero_point=0, dtype=torch.qint32)
-        >>> output = m(input)
+        >>> # quantize input to quint8
+        >>> q_input = torch.quantize_per_tensor(input, scale=1.0, zero_point=0, dtype=torch.quint8)
+        >>> output = m(q_input)
 
     """
 
@@ -631,7 +631,7 @@ class ConvTranspose2d(_ConvNd):
             raise NotImplementedError("Non-zero output padding is still WIP...")
 
         # Current implementation reuses the Conv2d.
-        # This rrequires different padding.
+        # This requires different padding.
         padding = self._input_padding(padding)
 
         super(ConvTranspose2d, self).__init__(
@@ -643,15 +643,34 @@ class ConvTranspose2d(_ConvNd):
 
     def set_weight_bias(self, w, b):
         # type: (torch.Tensor, Optional[torch.Tensor]) -> None
+
+        # TODO(z-a-f): Once the quantized `.flip` is implemented,
+        #              we can remove the requantization
+        qscale = w.q_scale()
+        qzp = w.q_zero_point()
+        w = w.dequantize()
+
         w = w.transpose(0, 1)
         w = w.flip(2, 3)
+
+        w = torch.quantize_per_tensor(w, scale=qscale, zero_point=qzp,
+                                      dtype=torch.quint8)
         self._packed_params = torch.ops.quantized.conv2d_prepack(
             w, b, self.stride, self.padding, self.dilation, self.groups)
 
     def _weight_bias(self):
         w, b = torch.ops.quantized.conv2d_unpack(self._packed_params)
+        # TODO(z-a-f): Once the quantized `.flip` is implemented,
+        #              we can remove the requantization
+        qscale = w.q_scale()
+        qzp = w.q_zero_point()
+        w = w.dequantize()
+
         w = w.flip(2, 3)
         w = w.transpose(0, 1)
+
+        w = torch.quantize_per_tensor(w, scale=qscale, zero_point=qzp,
+                                      dtype=torch.quint8)
         return w, b
 
     def weight(self):
@@ -691,8 +710,8 @@ class ConvTranspose2d(_ConvNd):
             'Weight observer must have a dtype of qint8'
         qweight = _quantize_weight(mod.weight.float(), weight_post_process)
         qconv = cls(mod.in_channels, mod.out_channels, mod.kernel_size,
-                    mod.stride, mod.padding, mod.dilation, mod.groups,
-                    mod.bias is not None, mod.padding_mode)
+                    mod.stride, mod.padding, mod.output_padding, mod.groups,
+                    mod.bias, mod.dilation, mod.padding_mode)
         qconv.set_weight_bias(qweight, mod.bias)
         qconv.scale = float(act_scale)
         qconv.zero_point = int(act_zp)
