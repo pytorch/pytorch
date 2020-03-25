@@ -63,8 +63,8 @@ namespace detail {
         ts = ts | x.key_set();
       }
     }
-    void operator()(at::Generator* gen) {
-      if (gen != nullptr) {
+    void operator()(at::Generator gen) {
+      if (gen.defined()) {
         ts = ts | gen->key_set();
       }
     }

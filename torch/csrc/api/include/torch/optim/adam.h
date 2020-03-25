@@ -61,7 +61,7 @@ class TORCH_API Adam : public Optimizer {
        std::vector<Tensor> params,
        AdamOptions defaults) : Adam({std::move(OptimizerParamGroup(params))}, defaults) {}
 
-  void step() override;
+  torch::Tensor step(LossClosure closure = nullptr) override;
   void save(serialize::OutputArchive& archive) const override;
   void load(serialize::InputArchive& archive) override;
 

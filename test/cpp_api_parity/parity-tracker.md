@@ -81,9 +81,9 @@ torch::nn::InstanceNorm3d|Yes|No
 torch::nn::LayerNorm|Yes|No
 torch::nn::LocalResponseNorm|Yes|No
 torch::nn::CrossMapLRN2d|Yes|No
-torch::nn::RNN|No|No
-torch::nn::LSTM|No|No
-torch::nn::GRU|No|No
+torch::nn::RNN|Yes|No
+torch::nn::LSTM|Yes|No
+torch::nn::GRU|Yes|No
 torch::nn::RNNCell|Yes|No
 torch::nn::LSTMCell|Yes|No
 torch::nn::GRUCell|Yes|No

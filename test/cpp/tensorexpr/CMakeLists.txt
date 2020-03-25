@@ -6,6 +6,7 @@ set(TENSOREXPR_TEST_SRCS ${TENSOREXPR_TEST_SRCS} PARENT_SCOPE)
 add_executable(test_tensorexpr
   ${TORCH_ROOT}/test/cpp/common/main.cpp
   ${TENSOREXPR_TEST_ROOT}/gtest.cpp
+  ${TENSOREXPR_TEST_ROOT}/padded_buffer.cpp
   ${TENSOREXPR_TEST_SRCS})
 
 target_link_libraries(test_tensorexpr PRIVATE torch gtest)

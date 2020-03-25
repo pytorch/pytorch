@@ -340,6 +340,15 @@ def expand(g, self, size, implicit):
     size = sym_help._maybe_get_const(size, 'is')
     if not sym_help._is_value(size):
         size = g.op("Constant", value_t=torch.LongTensor(size))
+    elif sym_help._is_packed_list(size):
+        # Expand with -1 dim value means dim is unchanged.
+        # Since onnx::expand supports two-way broadcasting,
+        # -1 dim value can be exported to onnx as 1
+        size = view(g, stack(g, size, 0), [-1])
+    dtype = 4  # dim type is int64
+    ones = ones_like(g, size, dtype)
+    neg_ones = mul(g, ones, g.op("Constant", value_t=torch.tensor(-1)))
+    size = where(g, g.op("Equal", size, neg_ones), ones, size)
     return g.op("Expand", self, size)
 
 
@@ -1412,14 +1421,14 @@ def ones_like(g, input, dtype=None, layout=None, device=None, pin_memory=False, 
 
 
 def full(g, sizes, value, dtype, layout, device, pin_memory=False):
-    if dtype is None:
-        dtype = 6  # float
     const_value = sym_help._maybe_get_const(value, 't')
     if sym_help._is_value(const_value):
+        dtype = 6 if dtype is None else dtype
         tmp = zeros(g, sizes, dtype, layout, device)
         return add(g, tmp, value, g.op("Constant", value_t=torch.tensor(1)))
     else:
         dtype = sym_help._get_const(dtype, 'i', 'dtype')
+        dtype = 6 if dtype is None else dtype
         return g.op("ConstantOfShape", sizes,
                     value_t=torch.tensor([const_value], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
 

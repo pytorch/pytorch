@@ -929,7 +929,8 @@ void initJitScriptBindings(PyObject* module) {
 
   py::class_<ErrorReport, std::shared_ptr<ErrorReport>>(m, "ErrorReport")
       .def(py::init<SourceRange>())
-      .def("what", &ErrorReport::what);
+      .def("what", &ErrorReport::what)
+      .def_static("call_stack", ErrorReport::current_call_stack);
 
   py::class_<CompilationUnit, std::shared_ptr<CompilationUnit>>(
       m, "CompilationUnit")

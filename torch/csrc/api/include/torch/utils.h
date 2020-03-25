@@ -2,6 +2,7 @@
 
 #include <ATen/Parallel.h>
 #include <torch/csrc/autograd/grad_mode.h>
+#include <torch/csrc/api/include/torch/types.h>
 #include <cstdint>
 
 namespace torch {
@@ -25,5 +26,10 @@ using at::get_num_interop_threads;
 
 // Sets the number of threads to be used for inter-op parallelism.
 using at::set_num_interop_threads;
+
+// Returns true if both t1, t2 are undefined or both are defined and equal
+inline bool equal_if_defined(Tensor t1, Tensor t2) {
+  return ((!t1.defined() && !t2.defined()) || (t1.defined() && t2.defined() && torch::equal(t1, t2)));
+}
 
 } // namespace torch

@@ -1,6 +1,3 @@
-.. warning::
-  The :ref:`distributed-rpc-framework` is experimental and subject to change.
-
 .. _distributed-autograd-design:
 
 Distributed Autograd Design
@@ -315,8 +312,8 @@ The :class:`~torch.distributed.optim.DistributedOptimizer` operates as follows:
    each of the worker nodes and holds an ``RRef`` to them.
 4. When :meth:`torch.distributed.optim.DistributedOptimizer.step` is invoked,
    the distributed optimizer uses RPC to remotely execute all the local
-   optimizers on the appropriate remote workers. A distributed autograd 
-   ``context_id`` must be provided as input to 
+   optimizers on the appropriate remote workers. A distributed autograd
+   ``context_id`` must be provided as input to
    :meth:`torch.distributed.optim.DistributedOptimizer.step`. This is used
    by local optimizers to apply gradients stored in the corresponding
    context.

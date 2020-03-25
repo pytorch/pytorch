@@ -324,7 +324,7 @@ C10_DEVICE static inline scalar_t _beta_grad_alpha_mid(accscalar_t x, accscalar_
 // This function inputs total=alpha+beta to make it easy to implement
 // Dirichlet reparameterized gradients in terms of Betas.
 template<typename scalar_t, typename accscalar_t>
-C10_DEVICE static inline scalar_t dirichlet_grad_one(scalar_t x, scalar_t alpha, scalar_t total) {
+C10_HOST_DEVICE static inline scalar_t dirichlet_grad_one(scalar_t x, scalar_t alpha, scalar_t total) {
   accscalar_t x_ = static_cast<accscalar_t>(x);
   accscalar_t alpha_ = static_cast<accscalar_t>(alpha);
   accscalar_t total_ = static_cast<accscalar_t>(total);

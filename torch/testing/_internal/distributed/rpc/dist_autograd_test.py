@@ -3,14 +3,16 @@ import threading
 import time
 import unittest
 from enum import Enum
-
 import torch
+from datetime import timedelta
 import torch.distributed as dist
 import torch.distributed.autograd as dist_autograd
 import torch.distributed.rpc as rpc
 import torch.testing._internal.dist_utils
 from torch.autograd import Function
 from torch.autograd.function import once_differentiable
+from torch.testing._internal.common_utils import IS_MACOS
+import torch.testing._internal.dist_utils as dist_utils
 from torch.testing._internal.dist_utils import (
     dist_init,
     get_shutdown_error_regex,
@@ -20,6 +22,9 @@ from torch.testing._internal.dist_utils import (
 )
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
+)
+from torch.testing._internal.distributed.rpc.faulty_rpc_agent_test_fixture import (
+    FaultyRpcAgentTestFixture,
 )
 
 
@@ -188,26 +193,25 @@ class ExecMode(Enum):
     not torch._six.PY3, "Pytorch distributed autograd package does not support python2"
 )
 class DistAutogradTest(RpcAgentTestFixture):
-    def _exec_func(self, exec_mode, method, *args):
+    def _exec_func_with_dst(self, dst, exec_mode, method, *args):
         if ExecMode.LOCAL == exec_mode:
             if len(args) == 1 and isinstance(args[0], list):
                 return method(*args[0])
             return method(*args)
         elif ExecMode.RPC_SYNC == exec_mode:
-            return rpc.rpc_sync(
-                worker_name(self._next_rank()), method, args=(args)
-            )
+            return rpc.rpc_sync(worker_name(dst), method, args=(args))
         elif ExecMode.REMOTE == exec_mode:
-            return rpc.remote(
-                worker_name(self._next_rank()), method, args=(args)
-            ).to_here()
+            return rpc.remote(worker_name(dst), method, args=(args)).to_here()
         elif ExecMode.RPC_ASYNC == exec_mode:
-            fut = rpc.rpc_async(
-                worker_name(self._next_rank()), method, args=(args)
-            )
+            fut = rpc.rpc_async(worker_name(dst), method, args=(args))
             return fut.wait()
         else:
             raise ValueError("Unrecognized ExecMode {}".format(exec_mode))
+
+    def _exec_func(self, exec_mode, method, *args):
+        return self._exec_func_with_dst(
+            self._next_rank(), exec_mode, method, *args
+        )
 
     def _next_rank(self):
         if hasattr(self, "dst_rank"):
@@ -230,7 +234,7 @@ class DistAutogradTest(RpcAgentTestFixture):
         )
 
         context_ids = []
-        for i in range(1000):
+        for i in range(200):
             with dist_autograd.context() as context_id:
                 self.assertEqual(
                     context_id,
@@ -878,8 +882,7 @@ class DistAutogradTest(RpcAgentTestFixture):
             self.assertEqual(t1_grad_before, t1.grad)
             self.assertEqual(t2_grad_before, t2.grad)
 
-    @dist_init
-    def test_backward_simple(self):
+    def _test_backward_simple(self, dst):
         # Run the same code locally and with dist autograd and verify gradients
         # are same.
         local_grads = None
@@ -887,12 +890,22 @@ class DistAutogradTest(RpcAgentTestFixture):
         t2 = torch.rand((3, 3), requires_grad=True)
         for exec_mode in [ExecMode.LOCAL, ExecMode.RPC_SYNC, ExecMode.REMOTE]:
             with dist_autograd.context() as context_id:
-                ret = self._exec_func(exec_mode, torch.add, t1, t2)
+                ret = self._exec_func_with_dst(
+                    dst, exec_mode, torch.add, t1, t2
+                )
                 loss = ret.sum()
                 ret = self._verify_backwards(
                     exec_mode, [loss], context_id, local_grads, t1, t2
                 )
                 local_grads = ret if ret else local_grads
+
+    @dist_init
+    def test_backward_simple(self):
+        self._test_backward_simple(self._next_rank())
+
+    @dist_init
+    def test_backward_simple_self(self):
+        self._test_backward_simple(self.rank)
 
     # The current rank first creates a tensor on the rref_owner, and then passes
     # the rref with another tensor to the callee to run either my_rref_add or
@@ -1169,19 +1182,18 @@ class DistAutogradTest(RpcAgentTestFixture):
                 # Run backwards, and validate we receive an error.
                 dist_autograd.backward(context_id, [val.sum()])
 
-    @unittest.skipIf(
-        torch.testing._internal.dist_utils.TEST_CONFIG.rpc_backend_name
-        == "PROCESS_GROUP",
-        "Skipping this test temporarily since ProcessGroupAgent does not report errors on node failures",
-    )
     @dist_init(clean_shutdown=False)
+    @unittest.skipIf(
+        IS_MACOS,
+        "Test is flaky on MacOS since libuv error handling is not as robust as TCP",
+    )
     def test_backward_node_failure(self):
+        rpc._set_rpc_timeout(timedelta(milliseconds=5000))
         initialize_pg(self.init_method, self.rank, self.world_size)
 
         with dist_autograd.context() as context_id:
             t1 = torch.rand((3, 3), requires_grad=True)
             t2 = torch.rand((3, 3), requires_grad=True)
-
             res = rpc.rpc_sync(
                 worker_name(self._next_rank()), torch.add, args=(t1, t2)
             )
@@ -1191,14 +1203,15 @@ class DistAutogradTest(RpcAgentTestFixture):
 
             # Kill all odd rank nodes.
             if self.rank % 2 == 0:
+                shutdown_error_regex = get_shutdown_error_regex(dist_utils.TEST_CONFIG.rpc_backend_name)
                 # Wait for all other nodes to die.
                 for rank in range(self.world_size):
                     if rank % 2 != 0:
-                        wait_until_node_failure(rank)
+                        wait_until_node_failure(rank, shutdown_error_regex)
 
                 # Shutdown sequence is not very well defined and as a result
                 # we might see any error given by get_shutdown_error_regex()
-                with self.assertRaisesRegex(RuntimeError, get_shutdown_error_regex()):
+                with self.assertRaisesRegex(RuntimeError, shutdown_error_regex):
                     # Run backwards, and validate we receive an error since all
                     # other nodes are dead.
                     dist_autograd.backward(context_id, [res.sum()])
@@ -1400,14 +1413,14 @@ class DistAutogradTest(RpcAgentTestFixture):
         while not DistAutogradTest._backward_done:
             time.sleep(0.1)
 
-    @unittest.skipIf(
-        torch.testing._internal.dist_utils.TEST_CONFIG.rpc_backend_name
-        == "PROCESS_GROUP",
-        "Skipping this test temporarily since ProcessGroupAgent "
-        + "does not report errors on node failures",
-    )
     @dist_init(clean_shutdown=False)
+    @unittest.skipIf(
+        IS_MACOS,
+        "Test is flaky on MacOS since libuv error handling is not as robust as TCP",
+    )
     def test_backward_node_failure_python_udf(self):
+        # Set a short timeout to quickly time out failed RPCs.
+        rpc._set_rpc_timeout(timedelta(milliseconds=5000))
         initialize_pg(self.init_method, self.rank, self.world_size)
 
         with dist_autograd.context() as context_id:
@@ -1421,7 +1434,6 @@ class DistAutogradTest(RpcAgentTestFixture):
                 args=(t1, t2, dst, self.world_size, 1),
             )
 
-            # Wait for all RPCs to be done.
             dist.barrier()
 
             # Kill rank 2 (last hop of nested rpc) and verify rank 0 receives an error.
@@ -1430,22 +1442,28 @@ class DistAutogradTest(RpcAgentTestFixture):
 
             if self.rank == 0:
                 # Wait for rank 2 to die.
-                wait_until_node_failure(2)
-
+                shutdown_error_regex = get_shutdown_error_regex(dist_utils.TEST_CONFIG.rpc_backend_name)
+                wait_until_node_failure(2, shutdown_error_regex)
                 # Shutdown sequence is not very well defined and as a result
                 # we might see any error given by get_shutdown_error_regex().
-                with self.assertRaisesRegex(RuntimeError, get_shutdown_error_regex()):
+                with self.assertRaisesRegex(RuntimeError, shutdown_error_regex):
                     # Run backwards, and validate we receive an error since rank 2 is dead.
                     dist_autograd.backward(context_id, [res.sum()])
 
                 # Tell other nodes RPC is done.
                 for i in range(self.world_size):
                     if i != self.rank and i != 2:
-                        rpc.rpc_sync(
-                            worker_name(i),
-                            DistAutogradTest._set_backward_done,
-                            args=(),
-                        )
+                        # Due to non-graceful shutdown of workers, this RPC may not return successfully.
+                        # For example, the destination worker could process the RPC, exit and begin shutdown, and
+                        # shutdown RPC before responding and satisfying this RPC. Therefore, we swallow possible errors here.
+                        try:
+                            rpc.rpc_sync(
+                                "worker{}".format(i),
+                                DistAutogradTest._set_backward_done,
+                                args=(),
+                            )
+                        except Exception as e:
+                            pass
             else:
                 # Wait for backward to finish on rank 0.
                 DistAutogradTest._wait_backward_done()
@@ -1812,11 +1830,6 @@ class DistAutogradTest(RpcAgentTestFixture):
             for i in range(1000):
                 dist_autograd.backward(context_id, [loss], retain_graph=True)
 
-    @unittest.skipIf(
-        torch.testing._internal.dist_utils.TEST_CONFIG.rpc_backend_name
-        == "PROCESS_GROUP",
-        "Skipping this test temporarily, see https://github.com/pytorch/pytorch/issues/33208",
-    )
     @dist_init(clean_shutdown=False)
     def test_multiple_backward_with_errors(self):
         initialize_pg(self.init_method, self.rank, self.world_size)
@@ -2051,3 +2064,51 @@ class DistAutogradTest(RpcAgentTestFixture):
             # static_grad_values_ref are holding onto views and don't bump the
             # refcount.
             self.assertTrue(p_g == p_a)
+
+@unittest.skipIf(
+    not torch._six.PY3,
+    "Pytorch distributed autograd package does not support python2",
+)
+class FaultyAgentDistAutogradTest(FaultyRpcAgentTestFixture):
+    # Reusing a simplified helper function from DistAutogradTest to ensure
+    # autograd context is successfully cleaned up even when RPCs are failing.
+    def context_cleanup_test_helper(self, rpc_args, func):
+        initialize_pg(self.init_method, self.rank, self.world_size)
+
+        # test that in dist autograd, in the case that tensors communicated over RPC do
+        # NOT require grad, we still cleanup the dist autograd contexts created
+        # on other nodes. This is because the autograd context is still
+        # communicated over RPC even if tensor arguments do not require grad, as
+        # it is possible that the response could.
+        dst_ranks = {rank for rank in range(self.world_size) if rank != self.rank}
+
+        with dist_autograd.context() as context_id:
+            for dst_rank in dst_ranks:
+                rpc.rpc_sync("worker{}".format(dst_rank), func, args=rpc_args)
+                rpc.rpc_sync(
+                    "worker{}".format(dst_rank), _set_rpc_done, args=(context_id, 1)
+                )
+        # the thread's context id should be cleaned up
+        with self.assertRaises(RuntimeError):
+            dist_autograd._retrieve_context(context_id)
+        # Ensure all peers have finished mutating the
+        # `known_context_ids` set.
+        dist.barrier()
+        # check that all contexts have been cleaned up.
+        success = _all_contexts_cleaned_up()
+        self.assertTrue(success)
+
+    # no faulty_messages defined so this fails all retryable messages - see
+    # faulty_rpc_agent_test_fixture.py for the list of retryable messages.
+    @dist_init
+    def test_context_cleanup_tensor_with_grad(self):
+        t1 = torch.ones(3, 3, requires_grad=True)
+        t2 = torch.zeros(3, 3, requires_grad=True)
+        self.context_cleanup_test_helper(rpc_args=(t1, t2), func=torch.add)
+
+    @dist_init
+    def test_verify_backend_options(self):
+        self.assertEqual(self.rpc_backend, rpc.backend_registry.BackendType.FAULTY_PROCESS_GROUP)
+        self.assertEqual(self.rpc_backend_options.num_send_recv_threads, 8)
+        self.assertEqual(self.rpc_backend_options.num_fail_sends, 3)
+        self.assertEqual(len(self.rpc_backend_options.messages_to_fail), 4)

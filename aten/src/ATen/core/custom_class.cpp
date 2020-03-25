@@ -6,7 +6,6 @@
 #include <unordered_map>
 
 namespace torch {
-namespace jit {
 
 std::unordered_map<std::string, at::ClassTypePtr>& customClasses() {
   static std::unordered_map<std::string, at::ClassTypePtr> customClasses;
@@ -21,6 +20,10 @@ void registerCustomClass(at::ClassTypePtr class_type) {
 }
 
 at::ClassTypePtr getCustomClass(const std::string& name) {
+  // BC hack so we can upgrade a binary internally
+  if (name == "__torch__.torch.classes.SentencePiece") {
+    return getCustomClass("__torch__.torch.classes.fb.SentencePiece");
+  }
   return customClasses().count(name) ? customClasses()[name] : nullptr;
 }
 
@@ -29,14 +32,13 @@ bool isCustomClass(const c10::IValue& v) {
       getCustomClass(v.toObject()->type()->name()->qualifiedName());
 }
 
-std::vector<std::shared_ptr<Function>>& customClassMethods() {
-  static std::vector<std::shared_ptr<Function>> customClassMethods;
+std::vector<std::shared_ptr<jit::Function>>& customClassMethods() {
+  static std::vector<std::shared_ptr<jit::Function>> customClassMethods;
   return customClassMethods;
 }
 
-void registerCustomClassMethod(std::shared_ptr<Function> fn) {
+void registerCustomClassMethod(std::shared_ptr<jit::Function> fn) {
   customClassMethods().emplace_back(std::move(fn));
 }
 
-} // namespace jit
 } // namespace torch

@@ -778,10 +778,6 @@
 
 - func: conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor
 
-- func: _conv2d_prepack(Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1, float? output_min=None, float? output_max=None) -> Tensor
-
-- func: _conv2d_packed(Tensor packed_weight, Tensor input) -> Tensor
-
 - func: conv3d(Tensor input, Tensor weight, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] dilation=1, int groups=1) -> Tensor
 
 - func: conv_tbc(Tensor self, Tensor weight, Tensor bias, int pad=0) -> Tensor
@@ -1310,10 +1306,38 @@
     CPU: floor_out
     CUDA: floor_out
 
-- func: floor_divide(Tensor input, Tensor other) -> Tensor
+- func: floor_divide(Tensor self, Tensor other) -> Tensor
+  variants: function, method
+  dispatch:
+    CPU: floor_divide
+    CUDA: floor_divide
+    SparseCPU: floor_divide_sparse
+    SparseCUDA: floor_divide_sparse
   supports_named_tensor: True
 
-- func: floor_divide.Scalar(Tensor input, Scalar other) -> Tensor
+- func: floor_divide_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  variants: method
+  dispatch:
+    CPU: floor_divide_
+    CUDA: floor_divide_
+    SparseCPU: floor_divide_sparse_
+    SparseCUDA: floor_divide_sparse_
+  supports_named_tensor: True
+
+- func: floor_divide.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: floor_divide_out
+    CUDA: floor_divide_out
+    SparseCPU: floor_divide_out_sparse_zerodim
+    SparseCUDA: floor_divide_out_sparse_zerodim
+  supports_named_tensor: True
+
+- func: floor_divide.Scalar(Tensor self, Scalar other) -> Tensor
+  variants: function, method
+  supports_named_tensor: True
+
+- func: floor_divide_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  variants: method
   supports_named_tensor: True
 
 - func: frac(Tensor self) -> Tensor
@@ -1576,10 +1600,6 @@
 
 - func: linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor
   python_module: nn
-
-- func: _linear_prepack(Tensor weight, Tensor? bias=None, float? output_min=None, float? output_max=None) -> Tensor
-
-- func: _linear_packed(Tensor packed_weight, Tensor input) -> Tensor
 
 - func: mkldnn_linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor
   python_module: nn
@@ -2852,12 +2872,21 @@
 
 - func: true_divide.Tensor(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
-  variants: function
+  variants: function, method
   dispatch:
     CPU: true_divide
     CUDA: true_divide
     SparseCPU: true_divide_sparse
     SparseCUDA: true_divide_sparse
+  supports_named_tensor: True
+
+- func: true_divide_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  variants: method
+  dispatch:
+    CPU: true_divide_
+    CUDA: true_divide_
+    SparseCPU: true_divide_sparse_
+    SparseCUDA: true_divide_sparse_
   supports_named_tensor: True
 
 - func: true_divide.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
@@ -2870,7 +2899,11 @@
 
 - func: true_divide.Scalar(Tensor self, Scalar other) -> Tensor
   use_c10_dispatcher: full
-  variants: function
+  variants: function, method
+  supports_named_tensor: True
+
+- func: true_divide_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  variants: method
   supports_named_tensor: True
 
 - func: trunc(Tensor self) -> Tensor
@@ -3609,11 +3642,16 @@
   dispatch:
     CPU: quantize_per_channel_cpu
 
-- func: dequantize(Tensor self) -> Tensor
+- func: dequantize.self(Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
     QuantizedCPU: dequantize_quant
+
+- func: dequantize.tensors(Tensor[] tensors) -> Tensor[]
+  variants: function
+  dispatch:
+    QuantizedCPU: dequantize_tensors_quant
 
 - func: q_scale(Tensor self) -> float
   use_c10_dispatcher: full
@@ -3830,9 +3868,9 @@
   variants: method
   device_guard: False
   dispatch:
-    CPU: legacy::cpu::_th_set_
-    CUDA: legacy::cuda::_th_set_
-    QuantizedCPU: set_storage
+    CPU: set_storage_cpu_
+    CUDA: set_storage_cuda_
+    QuantizedCPU: set_storage_quantized_cpu_
 
 - func: set_.source_Tensor(Tensor(a!) self, Tensor source) -> Tensor(a!)
   variants: method
@@ -5054,7 +5092,7 @@
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_min
+    CPU: min
     CUDA: legacy::cuda::_th_min
     QuantizedCPU: min_quant
   supports_named_tensor: True
@@ -5069,7 +5107,7 @@
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_max
+    CPU: max
     CUDA: legacy::cuda::_th_max
     QuantizedCPU: max_quant
   supports_named_tensor: True
@@ -5324,22 +5362,22 @@
 
 - func: _max(Tensor self, int dim, bool keepdim=False) -> (Tensor, Tensor)
   dispatch:
-    CPU: legacy::cpu::_th_max
+    CPU: _max_cpu
     CUDA: legacy::cuda::_th_max
 
 - func: _max.max(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) max, Tensor(b!) max_indices) -> (Tensor(a!), Tensor(b!))
   dispatch:
-    CPU: legacy::cpu::_th_max_out
+    CPU: _max_out_cpu
     CUDA: legacy::cuda::_th_max_out
 
 - func: _min(Tensor self, int dim, bool keepdim=False) -> (Tensor, Tensor)
   dispatch:
-    CPU: legacy::cpu::_th_min
+    CPU: _min_cpu
     CUDA: legacy::cuda::_th_min
 
 - func: _min.min(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) min, Tensor(b!) min_indices) -> (Tensor(a!), Tensor(b!))
   dispatch:
-    CPU: legacy::cpu::_th_min_out
+    CPU: _min_out_cpu
     CUDA: legacy::cuda::_th_min_out
 
 ## NN wrappers
@@ -5589,6 +5627,23 @@
     CPU: glu_backward
     CUDA: legacy::cuda::_thnn_glu_backward
 
+- func: hardsigmoid.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: nn
+
+- func: hardsigmoid(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  python_module: nn
+  dispatch:
+    CPU: hardsigmoid
+    QuantizedCPU: quantized_hardsigmoid
+
+- func: hardsigmoid_(Tensor(a!) self) -> Tensor(a!)
+  python_module: nn
+
+- func: hardsigmoid_backward(Tensor grad_output, Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  python_module: nn
+
 - func: hardtanh.out(Tensor self, Scalar min_val=-1, Scalar max_val=1, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
   dispatch:
@@ -5620,6 +5675,26 @@
     CPU: hardtanh_
     CUDA: hardtanh_
     QuantizedCPU: quantized_hardtanh_
+
+- func: hardswish.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: nn
+
+- func: hardswish(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  python_module: nn
+  dispatch:
+    CPU: hardswish
+    QuantizedCPU: quantized_hardswish
+
+- func: hardswish_(Tensor(a!) self) -> Tensor(a!)
+  python_module: nn
+  dispatch:
+    CPU: hardswish_
+    QuantizedCPU: quantized_hardswish_
+
+- func: hardswish_backward(Tensor grad_output, Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  python_module: nn
 
 - func: leaky_relu.out(Tensor self, Scalar negative_slope=0.01, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn

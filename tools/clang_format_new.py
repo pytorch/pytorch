@@ -8,11 +8,11 @@ If clang-format is not available, the script also downloads a platform-appropria
 and S3 bucket and verifies it against a precommited set of blessed binary hashes.
 """
 import argparse
+import asyncio
 import hashlib
 import os
 import platform
 import stat
-import subprocess
 import re
 import sys
 import urllib.request
@@ -80,7 +80,45 @@ def get_whitelisted_files():
     return set(matches)
 
 
-def run_clang_format(diff=False, verbose=False):
+async def run_clang_format_on_file(filename, semaphore, verbose=False):
+    """
+    Run clang-format on the provided file.
+    """
+    # -style=file picks up the closest .clang-format, -i formats the files inplace.
+    cmd = "{} -style=file -i {}".format(CLANG_FORMAT_PATH, filename)
+    async with semaphore:
+        proc = await asyncio.create_subprocess_shell(cmd)
+        _ = await proc.wait()
+    if verbose:
+        print("Formatted {}".format(filename))
+
+
+async def file_clang_formatted_correctly(filename, semaphore, verbose=False):
+    """
+    Checks if a file is formatted correctly and returns True if so.
+    """
+    ok = True
+    # -style=file picks up the closest .clang-format
+    cmd = "{} -style=file {}".format(CLANG_FORMAT_PATH, filename)
+
+    async with semaphore:
+        proc = await asyncio.create_subprocess_shell(cmd, stdout=asyncio.subprocess.PIPE)
+        # Read back the formatted file.
+        stdout, _ = await proc.communicate()
+
+    formatted_contents = stdout.decode()
+    # Compare the formatted file to the original file.
+    with open(filename) as orig:
+        orig_contents = orig.read()
+        if formatted_contents != orig_contents:
+            ok = False
+            if verbose:
+                print("{} is not formatted correctly".format(filename))
+
+    return ok
+
+
+async def run_clang_format(max_processes, diff=False, verbose=False):
     """
     Run clang-format to all files in CLANG_FORMAT_WHITELIST that match CPP_FILE_REGEX.
     """
@@ -97,43 +135,20 @@ def run_clang_format(diff=False, verbose=False):
 
     ok = True
 
-    # Format files.
-    for f in get_whitelisted_files():
-        args.append(f)
-        # This is equivalent to "{CLANG_FORMAT_PATH} {opts} {file}"
-        if diff:
-            # The formatted file will be written to stdout.
-            formatted_contents = subprocess.check_output(args).decode()
-            # Check if the formatted and original files are identical.
-            with open(f) as orig:
-                orig_contents = orig.read()
-                if formatted_contents != orig_contents:
-                    ok = False
-                    if verbose:
-                        print("{} is not formatted correctly".format(f))
+    # Semaphore to bound the number of subprocesses that can be created at once to format files.
+    semaphore = asyncio.Semaphore(max_processes)
+
+    # Format files in parallel.
+    if diff:
+        for f in asyncio.as_completed([file_clang_formatted_correctly(f, semaphore, verbose) for f in get_whitelisted_files()]):
+            ok &= await f
+
+        if ok:
+            print("All files formatted correctly")
         else:
-            _ = subprocess.call(args)
-            if verbose:
-                print("Formatted {}".format(f))
-
-        args.pop()
-
-    return ok
-
-
-def get_clang_format_diff(filename, lines):
-    """
-    Return a diff of the changes that running clang-format would make (or None).
-    """
-    formatted_text = run_clang_format(filename, lines, in_place=False)
-    with open(filename) as orig:
-        orig_text = orig.read()
-        if formatted_text != orig_text:
-            orig_lines = orig_text.split("\n")
-            formatted_lines = formatted_text.split("\n")
-            return difflib.unified_diff(
-                orig_lines, formatted_lines, "original", "formatted"
-            )
+            print("Some files not formatted correctly")
+    else:
+        await asyncio.gather(*[run_clang_format_on_file(f, semaphore, verbose) for f in get_whitelisted_files()])
 
 
 def report_download_progress(chunk_number, chunk_size, file_size):
@@ -263,6 +278,8 @@ def parse_args(args):
         help="Determine whether running clang-format would produce changes",
     )
     parser.add_argument("--verbose", "-v", action="store_true", default=False)
+    parser.add_argument("--max-processes", type=int, default=50,
+                        help="Maximum number of subprocesses to create to format files in parallel")
     return parser.parse_args(args)
 
 
@@ -273,12 +290,7 @@ def main(args):
     ok = get_and_check_clang_format(options.verbose)
     # Invoke clang-format on all files in the directories in the whitelist.
     if ok:
-        ok = run_clang_format(options.diff, options.verbose)
-
-    # If --diff was passed, print out whether or not clang-format will generate changes.
-    if options.diff:
-        if ok:
-            print("All files are formatted correctly")
+        ok = asyncio.run(run_clang_format(options.max_processes, options.diff, options.verbose))
 
     # We have to invert because False -> 0, which is the code to be returned if everything is okay.
     return not ok
