@@ -30,7 +30,6 @@ from cpp_api_parity import torch_nn_modules
 #
 # ${module_variant_name}
 # ${module_qualified_name}
-# ${cpp_tmp_folder}
 # ${cpp_args_construction_stmts}
 # ${cpp_constructor_args}
 # ${device}
@@ -266,7 +265,6 @@ def generate_test_cpp_sources(test_params, template):
         cpp_args_construction_stmts=";\n  ".join(cpp_args_construction_stmts),
         cpp_constructor_args=cpp_constructor_args,
         cpp_forward_args_symbols=", ".join(cpp_forward_args_symbols),
-        cpp_tmp_folder=test_params.cpp_tmp_folder,
         device=device,
     )
     return test_cpp_sources

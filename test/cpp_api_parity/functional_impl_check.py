@@ -29,7 +29,6 @@ from cpp_api_parity import torch_nn_functionals
 # Expected substitutions:
 #
 # ${functional_variant_name}
-# ${cpp_tmp_folder}
 # ${cpp_args_construction_stmts}
 # ${cpp_function_call}
 TORCH_NN_FUNCTIONAL_TEST_FORWARD = Template("""
@@ -206,7 +205,6 @@ def generate_test_cpp_sources(test_params, template):
         functional_variant_name=test_params.functional_variant_name,
         cpp_args_construction_stmts=";\n  ".join(cpp_args_construction_stmts),
         cpp_function_call=test_params.cpp_function_call,
-        cpp_tmp_folder=test_params.cpp_tmp_folder,
     )
     return test_cpp_sources
 
