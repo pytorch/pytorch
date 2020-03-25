@@ -71,6 +71,11 @@ if platform.system() == 'Windows':
 
         os.environ['PATH'] = ';'.join(dll_paths)
 
+    import glob
+    dlls = glob.glob(os.path.join(th_dll_path, '*.dll'))
+    for dll in dlls:
+        ctypes.CDLL(dll)
+
 
 # See Note [Global dependencies]
 def _load_global_deps():
