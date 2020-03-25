@@ -9,7 +9,6 @@ namespace native {
 namespace xnnpack {
 namespace internal {
 namespace linear {
-
 namespace {
 
 // Supports NHWC and NCHW FP32 linear operators.
@@ -109,28 +108,30 @@ Tensor run(
     const Tensor& input) {
   using namespace internal;
 
-  const Tensor padded_input = allocate_padded_if_needed(input.contiguous());
+  const Tensor input_padded_contig = allocate_padded_contiguous_if_needed(
+      input,
+      input.suggest_memory_format());
 
   TORCH_CHECK(
-      usable(padded_input),
+      usable(input_padded_contig),
       "XNNPACK Linear not usable! "
       "Reason: The provided input tensor is either invalid or unsupported by XNNPACK.");
 
-  const IntArrayRef input_size = padded_input.sizes();
+  const IntArrayRef input_size = input_padded_contig.sizes();
   std::vector<int64_t> output_size(input_size.cbegin(), input_size.cend());
   output_size.back() = context.output_channels;
 
-  Tensor output = empty_with_tail_padding(
+  Tensor output_padded_contig = empty_with_tail_padding(
       output_size,
-      padded_input.options().dtype(),
-      padded_input.suggest_memory_format());
+      input_padded_contig.options().dtype(),
+      input_padded_contig.suggest_memory_format());
 
   const xnn_status setup_status = xnn_setup_fully_connected_nc_f32(
-      context.op.get(),                                   // operator
-      Layout::ActivationND::batch(padded_input.sizes()),  // Batch,
-      padded_input.data_ptr<float>(),                     // input
-      output.data_ptr<float>(),                           // output
-      caffe2::xnnpack_threadpool());                      // threadpool
+      context.op.get(),                                         // operator
+      Layout::ActivationND::batch(input_padded_contig.sizes()), // Batch,
+      input_padded_contig.data_ptr<float>(),                    // input
+      output_padded_contig.data_ptr<float>(),                   // output
+      caffe2::xnnpack_threadpool());                            // threadpool
 
   TORCH_CHECK(
       xnn_status_success == setup_status,
@@ -144,7 +145,7 @@ Tensor run(
       xnn_status_success == run_status,
       "xnn_run_operator failed!");
 
-  return output;
+  return output_padded_contig;
 }
 
 c10::intrusive_ptr<xnnpack::LinearOpContext> createLinearClampPrePackOpContext(
@@ -191,7 +192,6 @@ Tensor linear(
 }
 
 } // namespace xnnpack
-
 } // namespace native
 } // namespace at
 

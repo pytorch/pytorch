@@ -15,6 +15,7 @@ using SerializationTypeLinearPrePack = std::tuple<
     c10::optional<Tensor>,
     c10::optional<double>,
     c10::optional<double>>;
+
 using SerializationTypeConv2dPrePack = std::tuple<
     Tensor,
     c10::optional<Tensor>,

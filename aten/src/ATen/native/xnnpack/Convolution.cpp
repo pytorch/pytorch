@@ -13,7 +13,6 @@ namespace native {
 namespace xnnpack {
 namespace internal {
 namespace convolution2d {
-
 namespace {
 
 // Supports NHWC and NCHW FP32 convolutions with any valid
@@ -119,11 +118,11 @@ ContextConv2D create(
   const auto padding_expanded = expand_param_if_needed(padding, "padding", 2);
   const auto stride_expanded = expand_param_if_needed(stride, "stride", 2);
   const auto dilation_expanded = expand_param_if_needed(dilation, "dilation", 2);
-  const Tensor weight_nhwc = weight.contiguous(MemoryFormat::ChannelsLast);
+  const Tensor weight_contig_nhwc = weight.contiguous(MemoryFormat::ChannelsLast);
 
   TORCH_CHECK(
       available(
-          weight_nhwc,
+          weight_contig_nhwc,
           bias,
           padding_expanded,
           stride_expanded,
@@ -142,18 +141,18 @@ ContextConv2D create(
       padding_expanded[Layout::Parameter::width],                     // input_padding_right
       padding_expanded[Layout::Parameter::height],                    // input_padding_bottom
       padding_expanded[Layout::Parameter::width],                     // input_padding_left
-      weight_nhwc.size(Layout::Filter::height),                       // kernel_height
-      weight_nhwc.size(Layout::Filter::width),                        // kernel_width
+      weight_contig_nhwc.size(Layout::Filter::height),                // kernel_height
+      weight_contig_nhwc.size(Layout::Filter::width),                 // kernel_width
       stride_expanded[Layout::Parameter::height],                     // subsampling_height
       stride_expanded[Layout::Parameter::width],                      // subsampling_width
       dilation_expanded[Layout::Parameter::height],                   // dilation_height
       dilation_expanded[Layout::Parameter::width],                    // dilation_width
       groups,                                                         // groups
-      weight_nhwc.size(Layout::Filter::input),                        // group_input_channels
-      weight_nhwc.size(Layout::Filter::output) / groups,              // group_output_channels
-      weight_nhwc.size(Layout::Filter::input) * groups,               // input_pixel_stride
-      weight_nhwc.size(Layout::Filter::output),                       // output_pixel_stride
-      weight_nhwc.data_ptr<float>(),                                  // kernel
+      weight_contig_nhwc.size(Layout::Filter::input),                 // group_input_channels
+      weight_contig_nhwc.size(Layout::Filter::output) / groups,       // group_output_channels
+      weight_contig_nhwc.size(Layout::Filter::input) * groups,        // input_pixel_stride
+      weight_contig_nhwc.size(Layout::Filter::output),                // output_pixel_stride
+      weight_contig_nhwc.data_ptr<float>(),                           // kernel
       (bias && bias->defined()) ? bias->data_ptr<float>() : nullptr,  // bias
       output_min,                                                     // output_min
       output_max,                                                     // output_max
@@ -166,8 +165,12 @@ ContextConv2D create(
 
   return ContextConv2D{
       Operator(convolution_op),
-      {weight_nhwc.sizes()[0], weight_nhwc.sizes()[1],
-          weight_nhwc.sizes()[2], weight_nhwc.sizes()[3]},
+      {
+          weight_contig_nhwc.sizes()[0],
+          weight_contig_nhwc.sizes()[1],
+          weight_contig_nhwc.sizes()[2],
+          weight_contig_nhwc.sizes()[3],
+      },
       {padding_expanded[0], padding_expanded[1]},
       {stride_expanded[0], stride_expanded[1]},
       {dilation_expanded[0], dilation_expanded[1]}
@@ -179,32 +182,33 @@ Tensor run(
     const Tensor& input) {
   using namespace internal;
 
-  const Tensor input_nhwc = input.contiguous(MemoryFormat::ChannelsLast);
-  const Tensor padded_input_nhwc = allocate_padded_if_needed(input_nhwc);
+  const Tensor input_padded_contig_nhwc = allocate_padded_contiguous_if_needed(
+      input,
+      MemoryFormat::ChannelsLast);
 
   TORCH_CHECK(
-      usable(padded_input_nhwc),
+      usable(input_padded_contig_nhwc),
       "XNNPACK Convolution not usable! "
       "Reason: The provided input tensor is either invalid or unsupported by XNNPACK.");
 
-  Tensor output = empty_with_tail_padding(
+  Tensor output_padded_contig_nhwc = empty_with_tail_padding(
       conv_output_size(
-          padded_input_nhwc.sizes(),
+          input_padded_contig_nhwc.sizes(),
           context.weight_size_,
           context.padding_,
           context.stride_,
           context.dilation_),
-      padded_input_nhwc.options().dtype(),
+      input_padded_contig_nhwc.options().dtype(),
       MemoryFormat::ChannelsLast);
 
   const xnn_status setup_status = xnn_setup_convolution2d_nhwc_f32(
-      context.op.get(),                                      // operator
-      padded_input_nhwc.size(Layout::Activation4D::batch),   // batch_size
-      padded_input_nhwc.size(Layout::Activation4D::height),  // input_height
-      padded_input_nhwc.size(Layout::Activation4D::width),   // input_width
-      padded_input_nhwc.data_ptr<float>(),                   // input
-      output.data_ptr<float>(),                              // output
-      caffe2::xnnpack_threadpool());                         // threadpool
+      context.op.get(),                                             // operator
+      input_padded_contig_nhwc.size(Layout::Activation4D::batch),   // batch_size
+      input_padded_contig_nhwc.size(Layout::Activation4D::height),  // input_height
+      input_padded_contig_nhwc.size(Layout::Activation4D::width),   // input_width
+      input_padded_contig_nhwc.data_ptr<float>(),                   // input
+      output_padded_contig_nhwc.data_ptr<float>(),                         // output
+      caffe2::xnnpack_threadpool());                                // threadpool
 
   TORCH_CHECK(
       xnn_status_success == setup_status,
@@ -218,7 +222,7 @@ Tensor run(
       xnn_status_success == run_status,
       "xnn_run_operator failed!");
 
-  return output.contiguous(input.suggest_memory_format());
+  return output_padded_contig_nhwc.contiguous(input.suggest_memory_format());
 }
 
 c10::intrusive_ptr<xnnpack::Conv2dOpContext>
@@ -292,7 +296,6 @@ Tensor convolution2d(
 }
 
 } // namespace xnnpack
-
 } // namespace native
 } // namespace at
 
