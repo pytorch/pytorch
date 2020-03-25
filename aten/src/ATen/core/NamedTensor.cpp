@@ -58,7 +58,7 @@ void check_names_valid_for(const Tensor& tensor, DimnameList names) {
   return impl::check_names_valid_for(tensor.unsafeGetTensorImpl(), names);
 }
 
-void check_names_valid_for(int64_t tensor_dim, DimnameList names) {
+void check_names_valid_for(size_t tensor_dim, DimnameList names) {
   TORCH_CHECK(
       tensor_dim <= kMaxNamedTensorDim,
       "Named tensors only support up to ", kMaxNamedTensorDim, " dims: "

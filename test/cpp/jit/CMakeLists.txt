@@ -8,7 +8,13 @@ add_executable(test_jit
   ${JIT_TEST_ROOT}/gtest.cpp
   ${JIT_TEST_SRCS})
 
-target_link_libraries(test_jit PRIVATE torch gtest)
+set(JIT_TEST_DEPENDENCIES torch gtest)
+
+if(MSVC)
+  list(APPEND JIT_TEST_DEPENDENCIES onnx_library)
+endif(MSVC)
+
+target_link_libraries(test_jit PRIVATE ${JIT_TEST_DEPENDENCIES})
 target_include_directories(test_jit PRIVATE ${ATen_CPU_INCLUDE})
 
 if (USE_CUDA)

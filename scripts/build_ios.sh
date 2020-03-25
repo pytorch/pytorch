@@ -9,22 +9,22 @@
 
 CAFFE2_ROOT="$( cd "$(dirname "$0")"/.. ; pwd -P)"
 
-# Now, actually build the iOS target.
-BUILD_ROOT=${BUILD_ROOT:-"$CAFFE2_ROOT/build_ios"}
-INSTALL_PREFIX=${BUILD_ROOT}/install
-mkdir -p $BUILD_ROOT
-cd $BUILD_ROOT
-
 CMAKE_ARGS=()
 
-if [ -n "${BUILD_PYTORCH_MOBILE:-}" ]; then
-  CMAKE_ARGS+=("-DBUILD_CAFFE2_MOBILE=OFF")
+if [ -z "${BUILD_CAFFE2_MOBILE:-}" ]; then
+  # Build PyTorch mobile
   CMAKE_ARGS+=("-DUSE_STATIC_DISPATCH=ON")
   CMAKE_ARGS+=("-DCMAKE_PREFIX_PATH=$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')")
   CMAKE_ARGS+=("-DPYTHON_EXECUTABLE=$(python -c 'import sys; print(sys.executable)')")
   CMAKE_ARGS+=("-DBUILD_CUSTOM_PROTOBUF=OFF")
   # custom build with selected ops
   if [ -n "${SELECTED_OP_LIST}" ]; then
+    SELECTED_OP_LIST="$(cd $(dirname $SELECTED_OP_LIST); pwd -P)/$(basename $SELECTED_OP_LIST)"
+    echo "Choose SELECTED_OP_LIST file: $SELECTED_OP_LIST"
+    if [ ! -r ${SELECTED_OP_LIST} ]; then
+      echo "Error: SELECTED_OP_LIST file ${SELECTED_OP_LIST} not found."
+      exit 1
+    fi
     CMAKE_ARGS+=("-DSELECTED_OP_LIST=${SELECTED_OP_LIST}")
   fi
   # bitcode
@@ -33,6 +33,8 @@ if [ -n "${BUILD_PYTORCH_MOBILE:-}" ]; then
     CMAKE_ARGS+=("-DCMAKE_CXX_FLAGS=-fembed-bitcode")
   fi
 else
+  # Build Caffe2 mobile
+  CMAKE_ARGS+=("-DBUILD_CAFFE2_MOBILE=ON")
   # Build protobuf from third_party so we have a host protoc binary.
   echo "Building protoc"
   BITCODE_FLAGS="-DCMAKE_C_FLAGS=-fembed-bitcode -DCMAKE_CXX_FLAGS=-fembed-bitcode "
@@ -104,6 +106,11 @@ if [ "${VERBOSE:-}" == '1' ]; then
   CMAKE_ARGS+=("-DCMAKE_VERBOSE_MAKEFILE=1")
 fi
 
+# Now, actually build the iOS target.
+BUILD_ROOT=${BUILD_ROOT:-"$CAFFE2_ROOT/build_ios"}
+INSTALL_PREFIX=${BUILD_ROOT}/install
+mkdir -p $BUILD_ROOT
+cd $BUILD_ROOT
 cmake "$CAFFE2_ROOT" \
     -DCMAKE_INSTALL_PREFIX=$INSTALL_PREFIX \
     -DCMAKE_BUILD_TYPE=MinSizeRel \

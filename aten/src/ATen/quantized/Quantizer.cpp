@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <ATen/Parallel.h>
 #include <ATen/quantized/Quantizer.h>
 #include <c10/core/Allocator.h>
 #include <c10/core/CPUAllocator.h>
@@ -9,6 +10,7 @@
 #include <ATen/quantized/QTensorImpl.h>
 #include <ATen/core/Tensor.h>
 #include <typeinfo>
+#include <cmath>
 
 #ifdef USE_FBGEMM
 #include <fbgemm/QuantUtils.h>
@@ -126,10 +128,18 @@ Tensor quantize_tensor(Tensor rtensor, Tensor qtensor, double scale, int64_t zer
   qparams.scale = scale;
   qparams.zero_point = zero_point;
   qparams.precision = CHAR_BIT * sizeof(typename T::underlying);
-  fbgemm::Quantize<typename T::underlying>(/*src=*/rd,
-                             /*dst=*/qd,
-                             /*len=*/rtensor.numel(),
-                             /*qparams=*/qparams);
+  int num_tasks = at::get_num_threads();
+  at::parallel_for(0, num_tasks, 1, [&](int64_t begin, int64_t end) {
+    for (int task_id = begin; task_id < end; ++task_id) {
+      fbgemm::Quantize<typename T::underlying>(
+          rd, /*src=*/
+          qd, /*dst=*/
+          rtensor.numel(), /*len*/
+          qparams, /*qparams=*/
+          task_id, /*thread_id*/
+          num_tasks /*num_threads*/);
+    }
+  });
   return qtensor;
 }
 
@@ -153,10 +163,18 @@ Tensor dequantize_tensor(Tensor qtensor, Tensor rtensor, double scale, int64_t z
   qparams.zero_point = zero_point;
   qparams.precision = CHAR_BIT * sizeof(typename T::underlying);
   float* rd = rtensor.data_ptr<float>();
-  fbgemm::Dequantize<typename T::underlying>(/*src=*/qd,
-                              /*dst=*/rd,
-                              /*len=*/qtensor.numel(),
-                              /*qparams=*/qparams);
+  int num_tasks = at::get_num_threads();
+  at::parallel_for(0, num_tasks, 1, [&](int64_t begin, int64_t end) {
+    for (int task_id = begin; task_id < end; ++task_id) {
+      fbgemm::Dequantize<typename T::underlying>(
+          qd, /*src=*/
+          rd, /*dst=*/
+          qtensor.numel(), /*len=*/
+          qparams, /*qparams=*/
+          task_id, /*thread_id*/
+          num_tasks /*num_threads*/);
+    }
+  });
   return rtensor;
 }
 #else  // USE_FBGEMM
@@ -335,6 +353,16 @@ DST_T requantize_val(double src_scale, int64_t src_zero_point,
   return quantize_val<DST_T>(dst_scale, dst_zero_point, dq);
 }
 
+template <typename DST_T>
+DST_T requantize_from_int(double multiplier, int64_t zero_point, int64_t src) {
+  int64_t quantize_down =
+      zero_point + lrintf(src * static_cast<float>(multiplier));
+  int32_t min = std::numeric_limits<typename DST_T::underlying>::min();
+  int32_t max = std::numeric_limits<typename DST_T::underlying>::max();
+  return static_cast<DST_T>(
+      std::min<int64_t>(std::max<int64_t>(quantize_down, min), max));
+}
+
 template CAFFE2_API qint8 quantize_val<qint8>(double scale, int64_t zero_point, float value);
 template CAFFE2_API quint8 quantize_val<quint8>(double scale, int64_t zero_point, float value);
 template CAFFE2_API qint32 quantize_val<qint32>(double scale, int64_t zero_point, float value);
@@ -361,6 +389,12 @@ template CAFFE2_API qint32 requantize_val<quint8, qint32>(double, int64_t, doubl
 template CAFFE2_API qint8 requantize_val<qint32, qint8>(double, int64_t, double, int64_t, qint32);
 template CAFFE2_API quint8 requantize_val<qint32, quint8>(double, int64_t, double, int64_t, qint32);
 template CAFFE2_API qint32 requantize_val<qint32, qint32>(double, int64_t, double, int64_t, qint32);
+
+template CAFFE2_API qint8 requantize_from_int<qint8>(double, int64_t, int64_t);
+template CAFFE2_API quint8
+requantize_from_int<quint8>(double, int64_t, int64_t);
+template CAFFE2_API qint32
+requantize_from_int<qint32>(double, int64_t, int64_t);
 
 // TODO: add fbgemm for per channel
 template <typename T>
@@ -487,9 +521,10 @@ using QAllocator = native::GuardingAllocator<8u, 0u>;
 inline Tensor new_qtensor_cpu(
     IntArrayRef sizes,
     const TensorOptions& options,
-    QuantizerPtr quantizer,
-    MemoryFormat memory_format=MemoryFormat::Contiguous) {
+    QuantizerPtr quantizer) {
   AT_ASSERT(options.device().is_cpu());
+
+  auto memory_format = options.memory_format_opt().value_or(MemoryFormat::Contiguous);
 
   at::Allocator* allocator = at::getCPUAllocator();
 

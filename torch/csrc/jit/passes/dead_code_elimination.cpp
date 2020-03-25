@@ -1,8 +1,8 @@
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 
-#include <torch/csrc/jit/ir_views.h>
+#include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/passes/alias_analysis.h>
+#include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/utils/memory.h>
 
 #include <unordered_map>
@@ -289,9 +289,7 @@ class DeadCodeEliminator {
     if (!aliasDb_) {
       // If we don't have alias information, all mutable ops have unknown
       // effects and can't be considered for elimination.
-      if (!node->kind().is_aten() && !node->kind().is_prim()) {
-        return false;
-      }
+
       // onnx export calls EliminateDeadCode but sometimes passes invalid
       // aten operators. So we call maybeSchema so we handle the cases when
       // there is no valid schema for a node

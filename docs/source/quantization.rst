@@ -253,7 +253,7 @@ Quantized version of standard NN layers.
 * :class:`~torch.nn.quantized.Quantize` — Quantization layer, used to automatically replace :class:`~torch.quantization.QuantStub`
 * :class:`~torch.nn.quantized.DeQuantize` — Dequantization layer, used to replace :class:`~torch.quantization.DeQuantStub`
 * :class:`~torch.nn.quantized.FloatFunctional` — Wrapper class to make stateless float operations stateful so that they can be replaced with quantized versions
-* :class:`~torch.nn.quantized.QFunctional` — Wrapper class for quantized versions of stateless operations like ```torch.add``
+* :class:`~torch.nn.quantized.QFunctional` — Wrapper class for quantized versions of stateless operations like ``torch.add``
 * :class:`~torch.nn.quantized.Conv2d` — 2D convolution
 * :class:`~torch.nn.quantized.Conv3d` — 3D convolution
 * :class:`~torch.nn.quantized.Linear` — Linear (fully-connected) layer

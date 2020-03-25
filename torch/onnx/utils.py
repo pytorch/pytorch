@@ -252,7 +252,7 @@ def _decide_external_data_format(use_external_data_format, operator_export_type,
     val_use_external_data_format = _resolve_args_by_export_type("use_external_data_format",
                                                                 use_external_data_format,
                                                                 operator_export_type)
-    # f can be a non-string in regular-sized model export case, but for large model export, f must be a non-empty 
+    # f can be a non-string in regular-sized model export case, but for large model export, f must be a non-empty
     # string specifying the location of the model. For large model cases, if f is not a non-empty string,
     # then this method returns an empty string, which is an error condition for the large model export code
     # path later (but not for regular model export code path).
@@ -392,7 +392,8 @@ def export_to_pretty_string(model, args, f, export_params=True, verbose=False, t
                             operator_export_type=None, export_type=ExportTypes.PROTOBUF_FILE,
                             example_outputs=None, propagate=False, google_printer=False,
                             opset_version=None, _retain_param_name=True,
-                            keep_initializers_as_inputs=None, custom_opsets=None):
+                            keep_initializers_as_inputs=None, custom_opsets=None, add_node_names=True,
+                            do_constant_folding=True):
     if aten or export_raw_ir:
         assert operator_export_type is None
         assert aten ^ export_raw_ir
@@ -403,6 +404,8 @@ def export_to_pretty_string(model, args, f, export_params=True, verbose=False, t
                                     input_names, output_names, operator_export_type,
                                     export_type, example_outputs, propagate, google_printer,
                                     opset_version, _retain_param_name,
+                                    do_constant_folding=do_constant_folding,
+                                    add_node_names=add_node_names,
                                     keep_initializers_as_inputs=keep_initializers_as_inputs,
                                     custom_opsets=custom_opsets)
 

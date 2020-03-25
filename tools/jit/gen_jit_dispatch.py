@@ -404,6 +404,7 @@ def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False, s
         ('strides', 'aten::strides(Tensor self) -> int'),
         ('dim', 'aten::dim(Tensor self) -> int'),
         ('numel', 'aten::numel(Tensor self) -> int'),
+        ('element_size', 'aten::element_size(Tensor self) -> int'),
     ]]
 
     aten_decls = load_aten_declarations(declarations) + tensor_impl_methods
@@ -505,7 +506,7 @@ def is_kwarg_only(a):
 
 NEEDS_HACKED_TWIN_NAMES = [
     "aten::_index_put_impl_",
-    "aten::index.Tensor", 
+    "aten::index.Tensor",
     "aten::index_put",
     "aten::index_put_",
 ]

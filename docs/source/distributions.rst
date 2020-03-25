@@ -77,6 +77,15 @@ Probability distributions - torch.distributions
     :undoc-members:
     :show-inheritance:
 
+:hidden:`ContinuousBernoulli`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: torch.distributions.continuous_bernoulli
+.. autoclass:: ContinuousBernoulli
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
 :hidden:`Dirichlet`
 ~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -311,6 +320,15 @@ Probability distributions - torch.distributions
     :undoc-members:
     :show-inheritance:
 
+:hidden:`VonMises`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: torch.distributions.von_mises
+.. autoclass:: VonMises
+    :members:
+    :undoc-members:
+    :show-inheritance:
+    
 :hidden:`Weibull`
 ~~~~~~~~~~~~~~~~~~~~~~~
 

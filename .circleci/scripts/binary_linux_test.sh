@@ -13,7 +13,13 @@ elif [[ "$DESIRED_PYTHON" == 2.7mu ]]; then
   export PATH="/opt/python/cp27-cp27mu/bin:\$PATH"
 elif [[ "$PACKAGE_TYPE" != libtorch ]]; then
   python_nodot="\$(echo $DESIRED_PYTHON | tr -d m.u)"
-  export PATH="/opt/python/cp\$python_nodot-cp\${python_nodot}m/bin:\$PATH"
+  python_path="/opt/python/cp\$python_nodot-cp\${python_nodot}"
+  # Prior to Python 3.8 paths were suffixed with an 'm'
+  if [[ -d  "\${python_path}/bin" ]]; then
+    export PATH="\${python_path}/bin:\$PATH"
+  elif [[ -d "\${python_path}m/bin" ]]; then
+    export PATH="\${python_path}m/bin:\$PATH"
+  fi
 fi
 
 # Install the package
@@ -30,7 +36,7 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
   fi
   retry conda install -yq future numpy protobuf six
   if [[ "$DESIRED_CUDA" != 'cpu' ]]; then
-    # DESIRED_CUDA is in format cu90 or cu100
+    # DESIRED_CUDA is in format cu90 or cu102
     if [[ "${#DESIRED_CUDA}" == 4 ]]; then
       cu_ver="${DESIRED_CUDA:2:1}.${DESIRED_CUDA:3}"
     else

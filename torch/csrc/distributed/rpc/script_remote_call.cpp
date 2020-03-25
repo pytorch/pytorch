@@ -2,7 +2,7 @@
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 
 #include <c10/util/C++17.h>
-#include <torch/csrc/jit/pickle.h>
+#include <torch/csrc/jit/serialization/pickle.h>
 
 namespace torch {
 namespace distributed {
@@ -48,7 +48,7 @@ std::unique_ptr<ScriptRemoteCall> ScriptRemoteCall::fromIValues(
   }
 }
 
-Message ScriptRemoteCall::toMessage() && {
+Message ScriptRemoteCall::toMessageImpl() && {
   std::vector<IValue> ivalues;
   ScriptCall::toIValues(ivalues);
   ivalues.emplace_back(retRRefId_.toIValue());

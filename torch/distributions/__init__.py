@@ -78,6 +78,7 @@ from .categorical import Categorical
 from .cauchy import Cauchy
 from .chi2 import Chi2
 from .constraint_registry import biject_to, transform_to
+from .continuous_bernoulli import ContinuousBernoulli
 from .dirichlet import Dirichlet
 from .distribution import Distribution
 from .exp_family import ExponentialFamily
@@ -108,6 +109,7 @@ from .studentT import StudentT
 from .transformed_distribution import TransformedDistribution
 from .transforms import *
 from .uniform import Uniform
+from .von_mises import VonMises
 from .weibull import Weibull
 
 __all__ = [
@@ -117,6 +119,7 @@ __all__ = [
     'Categorical',
     'Cauchy',
     'Chi2',
+    'ContinuousBernoulli',
     'Dirichlet',
     'Distribution',
     'Exponential',
@@ -144,6 +147,7 @@ __all__ = [
     'StudentT',
     'Poisson',
     'Uniform',
+    'VonMises',
     'Weibull',
     'TransformedDistribution',
     'biject_to',

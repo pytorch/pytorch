@@ -291,7 +291,7 @@ if(CAFFE2_STATIC_LINK_CUDA AND NOT WIN32)
     set_property(
         TARGET caffe2::cublas PROPERTY INTERFACE_LINK_LIBRARIES
         "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcublas_static.a")
-    if (CUDA_VERSION VERSION_EQUAL 10.1)
+    if (CUDA_VERSION VERSION_GREATER_EQUAL 10.1)
       set_property(
         TARGET caffe2::cublas APPEND PROPERTY INTERFACE_LINK_LIBRARIES
         "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcublasLt_static.a")

@@ -1,6 +1,6 @@
 #include <torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_req.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
-#include <torch/csrc/jit/pickle.h>
+#include <torch/csrc/jit/serialization/pickle.h>
 
 namespace torch {
 namespace distributed {
@@ -13,7 +13,7 @@ int64_t CleanupAutogradContextReq::getContextId() {
   return context_id_;
 }
 
-rpc::Message CleanupAutogradContextReq::toMessage() && {
+rpc::Message CleanupAutogradContextReq::toMessageImpl() && {
   // pickle context_id using JIT pickler.
   std::vector<torch::Tensor> tensorTable;
   std::vector<char> payload =

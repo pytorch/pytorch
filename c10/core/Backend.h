@@ -80,7 +80,7 @@ static inline Backend dispatchKeyToBackend(DispatchKey t) {
     return Backend::HIP;
   } else if (t == DispatchKey::MSNPUTensorId) {
     return Backend::MSNPU;
-  } else if (t == DispatchKey::XLATensorId) {
+  } else if (t == DispatchKey::XLATensorId || t == DispatchKey::XLAPreAutograd) {
     return Backend::XLA;
   } else if (t == DispatchKey::SparseCPUTensorId) {
     return Backend::SparseCPU;

@@ -508,6 +508,7 @@ _(aten, bitwise_and) \
 _(aten, bitwise_not) \
 _(aten, bitwise_or) \
 _(aten, bitwise_xor) \
+_(aten, element_size) \
 _(aten, nll_loss) \
 _(aten, nll_loss2d) \
 _(aten, nll_loss2d_backward) \

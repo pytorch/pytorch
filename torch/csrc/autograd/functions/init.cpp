@@ -8,7 +8,7 @@
 #ifdef USE_DISTRIBUTED
 #include <torch/csrc/distributed/autograd/functions/sendrpc_backward.h>
 #endif
-#include <torch/csrc/jit/python_tracer.h>
+#include <torch/csrc/jit/python/python_tracer.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/python_numbers.h>

@@ -58,7 +58,8 @@ OperatorBase::OperatorBase(const OperatorDef& operator_def, Workspace* ws)
       device_option_(
           operator_def.has_device_option() ? operator_def.device_option()
                                            : DeviceOption()),
-#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
+#if defined(EXPOSE_C2_OPS) || \
+    !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
       newstyle_outputs_(),
 #endif
       input_size_(operator_def.input_size()),
@@ -86,7 +87,8 @@ OperatorBase::OperatorBase(const OperatorDef& operator_def, Workspace* ws)
   type_ = operator_def.type();
 }
 
-#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
+#if defined(EXPOSE_C2_OPS) || \
+    !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
 namespace {
 int
 C10_UNUSED  // Suppress unused function warning on mobile.
@@ -793,7 +795,8 @@ std::function<void(const OperatorDef&)> GetOperatorLogger() {
 
 c10::optional<int> OperatorBase::argumentIndexWithName(
     const std::string& name) const {
-#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
+#if defined(EXPOSE_C2_OPS) || \
+    !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
   return getFunctionSchema().argumentIndexWithName(name);
 #else
   CAFFE_THROW("Non-legacy operators are not legal in xplat/caffe2");

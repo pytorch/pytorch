@@ -197,7 +197,7 @@ namespace detail {
   template<class T, bool AllowDeprecatedTypes>
   IValue return_to_ivalue(T&& v) {
     assert_is_valid_output_type<T, AllowDeprecatedTypes>();
-    return c10::ivalue::from(v);
+    return c10::ivalue::from(std::forward<T>(v));
   }
 
   template<class Functor, bool AllowDeprecatedTypes, size_t... ivalue_arg_indices>
@@ -297,8 +297,8 @@ namespace detail {
   };
 
   template<class FuncType>
-  std::unique_ptr<FunctionSchema> inferFunctionSchema_() {
-    return std::make_unique<FunctionSchema>(inferFunctionSchema<FuncType>("", ""));
+  std::unique_ptr<FunctionSchema> inferFunctionSchemaFlattenedReturns_() {
+    return std::make_unique<FunctionSchema>(inferFunctionSchemaFlattenedReturns<FuncType>("", ""));
   }
 
   template<class KernelFunctor>
@@ -306,7 +306,7 @@ namespace detail {
   public:
     using func_type = typename c10::guts::infer_function_traits_t<KernelFunctor>::func_type;
     std::unique_ptr<FunctionSchema> operator()() const {
-      return inferFunctionSchema_<func_type>();
+      return inferFunctionSchemaFlattenedReturns_<func_type>();
     }
   };
 }

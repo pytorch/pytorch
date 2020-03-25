@@ -15,8 +15,20 @@
 namespace torch {
 namespace nn {
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ L1Loss ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 /// Creates a criterion that measures the mean absolute error (MAE) between each
 /// element in the input : math :`x` and target : `y`.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.L1Loss to learn
+/// about the exact behavior of this module.
+///
+/// See the documentation for `torch::nn::L1LossOptions` class to learn what
+/// constructor arguments are supported for this module.
+///
+/// Example:
+/// ```
+/// L1Loss model(L1LossOptions(torch::kNone));
+/// ```
 struct TORCH_API L1LossImpl : Cloneable<L1LossImpl> {
   explicit L1LossImpl(const L1LossOptions& options_ = {});
 
@@ -33,24 +45,24 @@ struct TORCH_API L1LossImpl : Cloneable<L1LossImpl> {
 
 /// A `ModuleHolder` subclass for `L1LossImpl`.
 /// See the documentation for `L1LossImpl` class to learn what methods it
-/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
+/// provides, and examples of how to use `L1Loss` with `torch::nn::L1LossOptions`.
+/// See the documentation for `ModuleHolder` to learn about PyTorch's
 /// module storage semantics.
 TORCH_MODULE(L1Loss);
 
-// ============================================================================
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ KLDivLoss ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 /// The `Kullback-Leibler divergence`_ Loss
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.KLDivLoss to learn
+/// about the exact behavior of this module.
 ///
-/// KL divergence is a useful distance measure for continuous distributions
-/// and is often useful when performing direct regression over the space of
-/// (discretely sampled) continuous output distributions.
+/// See the documentation for `torch::nn::KLDivLossOptions` class to learn what
+/// constructor arguments are supported for this module.
 ///
-/// As with :class:`~torch.nn.NLLLoss`, the `input` given is expected to contain
-/// *log-probabilities* and is not restricted to a 2D Tensor.
-/// The targets are given as *probabilities* (i.e. without taking the
-/// logarithm).
-///
-/// This criterion expects a `target` `Tensor` of the same size as the
-/// `input` `Tensor`.
+/// Example:
+/// ```
+/// KLDivLoss model(KLDivLossOptions(torch::kNone));
+/// ```
 struct TORCH_API KLDivLossImpl : Cloneable<KLDivLossImpl> {
   explicit KLDivLossImpl(const KLDivLossOptions& options_ = {});
 
@@ -67,14 +79,25 @@ struct TORCH_API KLDivLossImpl : Cloneable<KLDivLossImpl> {
 
 /// A `ModuleHolder` subclass for `KLDivLossImpl`.
 /// See the documentation for `KLDivLossImpl` class to learn what methods it
-/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
+/// provides, and examples of how to use `KLDivLoss` with `torch::nn::KLDivLossOptions`.
+/// See the documentation for `ModuleHolder` to learn about PyTorch's
 /// module storage semantics.
 TORCH_MODULE(KLDivLoss);
 
-// ============================================================================
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ MSELoss ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Creates a criterion that measures the mean squared error (squared L2 norm)
 /// between each element in the input :math:`x` and target :math:`y`.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.MSELoss to learn
+/// about the exact behavior of this module.
+///
+/// See the documentation for `torch::nn::MSELossOptions` class to learn what
+/// constructor arguments are supported for this module.
+///
+/// Example:
+/// ```
+/// MSELoss model(MSELossOptions(torch::kNone));
+/// ```
 struct TORCH_API MSELossImpl : Cloneable<MSELossImpl> {
   explicit MSELossImpl(const MSELossOptions& options_ = {});
 
@@ -91,14 +114,25 @@ struct TORCH_API MSELossImpl : Cloneable<MSELossImpl> {
 
 /// A `ModuleHolder` subclass for `MSELossImpl`.
 /// See the documentation for `MSELossImpl` class to learn what methods it
-/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
+/// provides, and examples of how to use `MSELoss` with `torch::nn::MSELossOptions`.
+/// See the documentation for `ModuleHolder` to learn about PyTorch's
 /// module storage semantics.
 TORCH_MODULE(MSELoss);
 
-// ============================================================================
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ BCELoss ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Creates a criterion that measures the Binary Cross Entropy
 /// between the target and the output.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.BCELoss to learn
+/// about the exact behavior of this module.
+///
+/// See the documentation for `torch::nn::BCELossOptions` class to learn what
+/// constructor arguments are supported for this module.
+///
+/// Example:
+/// ```
+/// BCELoss model(BCELossOptions().reduction(torch::kNone).weight(weight));
+/// ```
 struct TORCH_API BCELossImpl : Cloneable<BCELossImpl> {
   explicit BCELossImpl(const BCELossOptions& options_ = {});
 
@@ -115,17 +149,25 @@ struct TORCH_API BCELossImpl : Cloneable<BCELossImpl> {
 
 /// A `ModuleHolder` subclass for `BCELossImpl`.
 /// See the documentation for `BCELossImpl` class to learn what methods it
-/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
+/// provides, and examples of how to use `BCELoss` with `torch::nn::BCELossOptions`.
+/// See the documentation for `ModuleHolder` to learn about PyTorch's
 /// module storage semantics.
 TORCH_MODULE(BCELoss);
 
-// ============================================================================
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ HingeEmbeddingLoss ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Creates a criterion that measures the loss given an input tensor :math:`x`
-/// and a labels tensor :math:`y` (containing 1 or -1). This is usually used for
-/// measuring whether two inputs are similar or dissimilar, e.g. using the L1
-/// pairwise distance as :math:`x`, and is typically used for learning nonlinear
-/// embeddings or semi-supervised learning.
+/// and a labels tensor :math:`y` (containing 1 or -1).
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.HingeEmbeddingLoss to learn
+/// about the exact behavior of this module.
+///
+/// See the documentation for `torch::nn::HingeEmbeddingLossOptions` class to learn what
+/// constructor arguments are supported for this module.
+///
+/// Example:
+/// ```
+/// HingeEmbeddingLoss model(HingeEmbeddingLossOptions().margin(4).reduction(torch::kNone));
+/// ```
 struct TORCH_API HingeEmbeddingLossImpl : Cloneable<HingeEmbeddingLossImpl> {
   explicit HingeEmbeddingLossImpl(
       const HingeEmbeddingLossOptions& options_ = {});
@@ -142,17 +184,28 @@ struct TORCH_API HingeEmbeddingLossImpl : Cloneable<HingeEmbeddingLossImpl> {
 };
 
 /// A `ModuleHolder` subclass for `HingeEmbeddingLossImpl`.
-/// See the documentation for `HingeEmbeddingLossImpl` class to learn what
-/// methods it provides, or the documentation for `ModuleHolder` to learn about
-/// PyTorch's module storage semantics.
+/// See the documentation for `HingeEmbeddingLossImpl` class to learn what methods it
+/// provides, and examples of how to use `HingeEmbeddingLoss` with `torch::nn::HingeEmbeddingLossOptions`.
+/// See the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
 TORCH_MODULE(HingeEmbeddingLoss);
 
-// ============================================================================
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ MultiMarginLoss ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Creates a criterion that optimizes a multi-class classification hinge
 /// loss (margin-based loss) between input :math:`x` (a 2D mini-batch `Tensor`) and
 /// output :math:`y` (which is a 1D tensor of target class indices,
-/// :math:`0 \leq y \leq \text{x.size}(1)-1`):
+/// :math:`0 \leq y \leq \text{x.size}(1)-1`).
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.MultiMarginLoss to learn
+/// about the exact behavior of this module.
+///
+/// See the documentation for `torch::nn::MultiMarginLossOptions` class to learn what
+/// constructor arguments are supported for this module.
+///
+/// Example:
+/// ```
+/// MultiMarginLoss model(MultiMarginLossOptions().margin(2).weight(weight));
+/// ```
 struct TORCH_API MultiMarginLossImpl : public Cloneable<MultiMarginLossImpl> {
   explicit MultiMarginLossImpl(
       const MultiMarginLossOptions& options_ = {});
@@ -169,18 +222,29 @@ struct TORCH_API MultiMarginLossImpl : public Cloneable<MultiMarginLossImpl> {
 };
 
 /// A `ModuleHolder` subclass for `MultiMarginLossImpl`.
-/// See the documentation for `MultiMarginLossImpl` class to learn what
-/// methods it provides, or the documentation for `ModuleHolder` to learn about
-/// PyTorch's module storage semantics.
+/// See the documentation for `MultiMarginLossImpl` class to learn what methods it
+/// provides, and examples of how to use `MultiMarginLoss` with `torch::nn::MultiMarginLossOptions`.
+/// See the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
 TORCH_MODULE(MultiMarginLoss);
 
-// ============================================================================
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CosineEmbeddingLoss ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Creates a criterion that measures the loss given input tensors
 /// `input1`, `input2`, and a `Tensor` label `target` with values 1 or
 /// -1. This is used for measuring whether two inputs are similar or
 /// dissimilar, using the cosine distance, and is typically used for learning
 /// nonlinear embeddings or semi-supervised learning.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.CosineEmbeddingLoss to learn
+/// about the exact behavior of this module.
+///
+/// See the documentation for `torch::nn::CosineEmbeddingLossOptions` class to learn what
+/// constructor arguments are supported for this module.
+///
+/// Example:
+/// ```
+/// CosineEmbeddingLoss model(CosineEmbeddingLossOptions().margin(0.5));
+/// ```
 struct TORCH_API CosineEmbeddingLossImpl : public Cloneable<CosineEmbeddingLossImpl> {
   explicit CosineEmbeddingLossImpl(
       const CosineEmbeddingLossOptions& options_ = {});
@@ -200,18 +264,29 @@ struct TORCH_API CosineEmbeddingLossImpl : public Cloneable<CosineEmbeddingLossI
 };
 
 /// A `ModuleHolder` subclass for `CosineEmbeddingLossImpl`.
-/// See the documentation for `CosineEmbeddingLossImpl` class to learn what
-/// methods it provides, or the documentation for `ModuleHolder` to learn about
-/// PyTorch's module storage semantics.
+/// See the documentation for `CosineEmbeddingLossImpl` class to learn what methods it
+/// provides, and examples of how to use `CosineEmbeddingLoss` with `torch::nn::CosineEmbeddingLossOptions`.
+/// See the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
 TORCH_MODULE(CosineEmbeddingLoss);
 
-// ============================================================================
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ SmoothL1Loss ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Creates a criterion that uses a squared term if the absolute
 /// element-wise error falls below 1 and an L1 term otherwise.
 /// It is less sensitive to outliers than the `MSELoss` and in some cases
 /// prevents exploding gradients (e.g. see `Fast R-CNN` paper by Ross Girshick).
 /// Also known as the Huber loss.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.SmoothL1Loss to learn
+/// about the exact behavior of this module.
+///
+/// See the documentation for `torch::nn::SmoothL1LossOptions` class to learn what
+/// constructor arguments are supported for this module.
+///
+/// Example:
+/// ```
+/// SmoothL1Loss model(SmoothL1LossOptions(torch::kNone));
+/// ```
 struct TORCH_API SmoothL1LossImpl : public Cloneable<SmoothL1LossImpl> {
   explicit SmoothL1LossImpl(const SmoothL1LossOptions& options_ = {});
 
@@ -228,15 +303,26 @@ struct TORCH_API SmoothL1LossImpl : public Cloneable<SmoothL1LossImpl> {
 
 /// A `ModuleHolder` subclass for `SmoothL1LossImpl`.
 /// See the documentation for `SmoothL1LossImpl` class to learn what methods it
-/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
+/// provides, and examples of how to use `SmoothL1Loss` with `torch::nn::SmoothL1LossOptions`.
+/// See the documentation for `ModuleHolder` to learn about PyTorch's
 /// module storage semantics.
 TORCH_MODULE(SmoothL1Loss);
 
-// ============================================================================
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ MultiLabelMarginLoss ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
   
 /// Creates a criterion that optimizes a multi-class multi-classification
 /// hinge loss (margin-based loss) between input :math:`x` (a 2D mini-batch `Tensor`)
 /// and output :math:`y` (which is a 2D `Tensor` of target class indices).
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.MultiLabelMarginLoss to learn
+/// about the exact behavior of this module.
+///
+/// See the documentation for `torch::nn::MultiLabelMarginLossOptions` class to learn what
+/// constructor arguments are supported for this module.
+///
+/// Example:
+/// ```
+/// MultiLabelMarginLoss model(MultiLabelMarginLossOptions(torch::kNone));
+/// ```
 struct TORCH_API MultiLabelMarginLossImpl : public Cloneable<MultiLabelMarginLossImpl> {
   explicit MultiLabelMarginLossImpl(
     const MultiLabelMarginLossOptions& options_ = {});
@@ -254,15 +340,26 @@ struct TORCH_API MultiLabelMarginLossImpl : public Cloneable<MultiLabelMarginLos
 
 /// A `ModuleHolder` subclass for `MultiLabelMarginLossImpl`.
 /// See the documentation for `MultiLabelMarginLossImpl` class to learn what methods it
-/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
+/// provides, and examples of how to use `MultiLabelMarginLoss` with `torch::nn::MultiLabelMarginLossOptions`.
+/// See the documentation for `ModuleHolder` to learn about PyTorch's
 /// module storage semantics.
 TORCH_MODULE(MultiLabelMarginLoss);
 
-// ============================================================================
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ SoftMarginLoss ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Creates a criterion that optimizes a two-class classification
 /// logistic loss between input tensor :math:`x` and target tensor :math:`y`
 /// (containing 1 or -1).
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.SoftMarginLoss to learn
+/// about the exact behavior of this module.
+///
+/// See the documentation for `torch::nn::SoftMarginLossOptions` class to learn what
+/// constructor arguments are supported for this module.
+///
+/// Example:
+/// ```
+/// SoftMarginLoss model(SoftMarginLossOptions(torch::kNone));
+/// ```
 struct TORCH_API SoftMarginLossImpl : public Cloneable<SoftMarginLossImpl> {
   explicit SoftMarginLossImpl(const SoftMarginLossOptions& options_ = {});
 
@@ -279,15 +376,26 @@ struct TORCH_API SoftMarginLossImpl : public Cloneable<SoftMarginLossImpl> {
 
 /// A `ModuleHolder` subclass for `SoftMarginLossImpl`.
 /// See the documentation for `SoftMarginLossImpl` class to learn what methods it
-/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
+/// provides, and examples of how to use `SoftMarginLoss` with `torch::nn::SoftMarginLossOptions`.
+/// See the documentation for `ModuleHolder` to learn about PyTorch's
 /// module storage semantics.
 TORCH_MODULE(SoftMarginLoss);
 
-// ============================================================================
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ MultiLabelSoftMarginLoss ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Creates a criterion that optimizes a multi-label one-versus-all
 /// loss based on max-entropy, between input :math:`x` and target :math:`y` of size
 /// :math:`(N, C)`.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.MultiLabelSoftMarginLoss to learn
+/// about the exact behavior of this module.
+///
+/// See the documentation for `torch::nn::MultiLabelSoftMarginLossOptions` class to learn what
+/// constructor arguments are supported for this module.
+///
+/// Example:
+/// ```
+/// MultiLabelSoftMarginLoss model(MultiLabelSoftMarginLossOptions().reduction(torch::kNone).weight(weight));
+/// ```
 struct TORCH_API MultiLabelSoftMarginLossImpl : public Cloneable<MultiLabelSoftMarginLossImpl> {
   explicit MultiLabelSoftMarginLossImpl(
     const MultiLabelSoftMarginLossOptions& options_ = {});
@@ -305,18 +413,29 @@ struct TORCH_API MultiLabelSoftMarginLossImpl : public Cloneable<MultiLabelSoftM
 
 /// A `ModuleHolder` subclass for `MultiLabelSoftMarginLossImpl`.
 /// See the documentation for `MultiLabelSoftMarginLossImpl` class to learn what methods it
-/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
+/// provides, and examples of how to use `MultiLabelSoftMarginLoss` with `torch::nn::MultiLabelSoftMarginLossOptions`.
+/// See the documentation for `ModuleHolder` to learn about PyTorch's
 /// module storage semantics.
 TORCH_MODULE(MultiLabelSoftMarginLoss);
 
-// ============================================================================
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ TripletMarginLoss ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Creates a criterion that measures the triplet loss given an input
 /// tensors :math:`x1`, :math:`x2`, :math:`x3` and a margin with a value greater 
 /// than :math:`0`. This is used for measuring a relative similarity between
 /// samples. A triplet is composed by `a`, `p` and `n` (i.e., `anchor`, 
 /// `positive examples` and `negative examples` respectively). The
-/// shapes of all input tensors should be :math:`(N, D)`
+/// shapes of all input tensors should be :math:`(N, D)`.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.TripletMarginLoss to learn
+/// about the exact behavior of this module.
+///
+/// See the documentation for `torch::nn::TripletMarginLossOptions` class to learn what
+/// constructor arguments are supported for this module.
+///
+/// Example:
+/// ```
+/// TripletMarginLoss model(TripletMarginLossOptions().margin(3).p(2).eps(1e-06).swap(false));
+/// ```
 struct TORCH_API TripletMarginLossImpl : public Cloneable<TripletMarginLossImpl> {
   explicit TripletMarginLossImpl(
       const TripletMarginLossOptions& options_ = {});
@@ -335,20 +454,26 @@ struct TORCH_API TripletMarginLossImpl : public Cloneable<TripletMarginLossImpl>
   TripletMarginLossOptions options;
 };
 
-/// A `ModuleHolder` subclass for `TripletMarginLoss`.
-/// See the documentation for `TripletMarginLossImpl` class to learn what
-/// methods it provides, or the documentation for `ModuleHolder` to learn about
-/// PyTorch's module storage semantics.
+/// A `ModuleHolder` subclass for `TripletMarginLossImpl`.
+/// See the documentation for `TripletMarginLossImpl` class to learn what methods it
+/// provides, and examples of how to use `TripletMarginLoss` with `torch::nn::TripletMarginLossOptions`.
+/// See the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
 TORCH_MODULE(TripletMarginLoss);
 
-// ============================================================================
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CTCLoss ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-/// Calculates loss between a continuous (unsegmented) time series and a target
-/// sequence. CTCLoss sums over the probability of possible alignments of input
-/// to target, producing a loss value which is differentiable with respect
-/// to each input node. The alignment of input to target is assumed
-/// to be "many-to-one", which limits the length of the target sequence
-/// such that it must be less than or equal to the input length.
+/// The Connectionist Temporal Classification loss.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.CTCLoss to learn
+/// about the exact behavior of this module.
+///
+/// See the documentation for `torch::nn::CTCLossOptions` class to learn what
+/// constructor arguments are supported for this module.
+///
+/// Example:
+/// ```
+/// CTCLoss model(CTCLossOptions().blank(42).zero_infinity(false).reduction(torch::kSum));
+/// ```
 struct TORCH_API CTCLossImpl : public Cloneable<CTCLossImpl> {
 
   explicit CTCLossImpl(const CTCLossOptions& options_ = {});
@@ -366,13 +491,25 @@ struct TORCH_API CTCLossImpl : public Cloneable<CTCLossImpl> {
 };
 
 /// A `ModuleHolder` subclass for `CTCLossImpl`.
-/// See the documentation for `CTCLoss` class to learn what
-/// methods it provides, or the documentation for `ModuleHolder` to learn about
-/// PyTorch's module storage semantics.
+/// See the documentation for `CTCLossImpl` class to learn what methods it
+/// provides, and examples of how to use `CTCLoss` with `torch::nn::CTCLossOptions`.
+/// See the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
 TORCH_MODULE(CTCLoss);
 
-// ============================================================================
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ PoissonNLLLoss ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+/// Negative log likelihood loss with Poisson distribution of target.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.PoissonNLLLoss to learn
+/// about the exact behavior of this module.
+///
+/// See the documentation for `torch::nn::PoissonNLLLossOptions` class to learn what
+/// constructor arguments are supported for this module.
+///
+/// Example:
+/// ```
+/// PoissonNLLLoss model(PoissonNLLLossOptions().log_input(false).full(true).eps(0.42).reduction(torch::kSum));
+/// ```
 struct TORCH_API PoissonNLLLossImpl : public Cloneable<PoissonNLLLossImpl> {
   explicit PoissonNLLLossImpl(const PoissonNLLLossOptions& options_ = {});
 
@@ -388,13 +525,27 @@ struct TORCH_API PoissonNLLLossImpl : public Cloneable<PoissonNLLLossImpl> {
 };
 
 /// A `ModuleHolder` subclass for `PoissonNLLLossImpl`.
-/// See the documentation for `PoissonNLLLoss` class to learn what
-/// methods it provides, or the documentation for `ModuleHolder` to learn about
-/// PyTorch's module storage semantics.
+/// See the documentation for `PoissonNLLLossImpl` class to learn what methods it
+/// provides, and examples of how to use `PoissonNLLLoss` with `torch::nn::PoissonNLLLossOptions`.
+/// See the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
 TORCH_MODULE(PoissonNLLLoss);
 
-// ============================================================================
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ MarginRankingLoss ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+/// Creates a criterion that measures the loss given
+/// inputs :math:`x1`, :math:`x2`, two 1D mini-batch `Tensors`,
+/// and a label 1D mini-batch tensor :math:`y` (containing 1 or -1).
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.MarginRankingLoss to learn
+/// about the exact behavior of this module.
+///
+/// See the documentation for `torch::nn::MarginRankingLossOptions` class to learn what
+/// constructor arguments are supported for this module.
+///
+/// Example:
+/// ```
+/// MarginRankingLoss model(MarginRankingLossOptions().margin(0.5).reduction(torch::kSum));
+/// ```
 struct TORCH_API MarginRankingLossImpl : public Cloneable<MarginRankingLossImpl> {
   explicit MarginRankingLossImpl(const MarginRankingLossOptions& options_ = {});
 
@@ -411,18 +562,26 @@ struct TORCH_API MarginRankingLossImpl : public Cloneable<MarginRankingLossImpl>
 };
 
 /// A `ModuleHolder` subclass for `MarginRankingLossImpl`.
-/// See the documentation for `MarginRankingLoss` class to learn what
-/// methods it provides, or the documentation for `ModuleHolder` to learn about
-/// PyTorch's module storage semantics.
+/// See the documentation for `MarginRankingLossImpl` class to learn what methods it
+/// provides, and examples of how to use `MarginRankingLoss` with `torch::nn::MarginRankingLossOptions`.
+/// See the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
 TORCH_MODULE(MarginRankingLoss);
 
-// ============================================================================
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ NLLLoss ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// The negative log likelihood loss. It is useful to train a classification
-/// problem with `C` classes. The `input` given through a forward call is expected
-/// to contain log-probabilities of each class. `input` has to be a Tensor of size
-/// either :math:`(minibatch, C)` or :math:`(minibatch, C, d_1, d_2, ..., d_K)`
-/// with :math:`K \geq 1` for the `K`-dimensional case (described later).
+/// problem with `C` classes.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.NLLLoss to learn
+/// about the exact behavior of this module.
+///
+/// See the documentation for `torch::nn::NLLLossOptions` class to learn what
+/// constructor arguments are supported for this module.
+///
+/// Example:
+/// ```
+/// NLLLoss model(NLLLossOptions().ignore_index(-100).reduction(torch::kMean));
+/// ```
 struct TORCH_API NLLLossImpl : public Cloneable<NLLLossImpl> {
   explicit NLLLossImpl(
       const NLLLossOptions& options_ = {});
@@ -443,18 +602,27 @@ struct TORCH_API NLLLossImpl : public Cloneable<NLLLossImpl> {
   Tensor weight;
 };
 
-/// A `ModuleHolder` subclass for `NLLLoss`.
-/// See the documentation for `NLLLossImpl` class to learn what
-/// methods it provides, or the documentation for `ModuleHolder` to learn about
-/// PyTorch's module storage semantics.
+/// A `ModuleHolder` subclass for `NLLLossImpl`.
+/// See the documentation for `NLLLossImpl` class to learn what methods it
+/// provides, and examples of how to use `NLLLoss` with `torch::nn::NLLLossOptions`.
+/// See the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
 TORCH_MODULE(NLLLoss);
 
-// ============================================================================
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CrossEntropyLoss ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Creates a criterion that combines :func:`nn.LogSoftmax` and
-/// :func:`nn.NLLLoss` in one single class. It is useful when training a 
-/// classification problem with `C` classes. If provided, the optional argument
-/// :attr:`weight` should be a 1D `Tensor` assigning weight to each of the classes.
+/// :func:`nn.NLLLoss` in one single class.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.CrossEntropyLoss to learn
+/// about the exact behavior of this module.
+///
+/// See the documentation for `torch::nn::CrossEntropyLossOptions` class to learn what
+/// constructor arguments are supported for this module.
+///
+/// Example:
+/// ```
+/// CrossEntropyLoss model(CrossEntropyLossOptions().ignore_index(-100).reduction(torch::kMean));
+/// ```
 struct TORCH_API CrossEntropyLossImpl : public Cloneable<CrossEntropyLossImpl> {
   explicit CrossEntropyLossImpl(
       const CrossEntropyLossOptions& options_ = {});
@@ -475,14 +643,29 @@ struct TORCH_API CrossEntropyLossImpl : public Cloneable<CrossEntropyLossImpl> {
   Tensor weight;
 };
 
-/// A `ModuleHolder` subclass for `CrossEntropyLoss`.
-/// See the documentation for `CrossEntropyLossImpl` class to learn what
-/// methods it provides, or the documentation for `ModuleHolder` to learn about
-/// PyTorch's module storage semantics.
+/// A `ModuleHolder` subclass for `CrossEntropyLossImpl`.
+/// See the documentation for `CrossEntropyLossImpl` class to learn what methods it
+/// provides, and examples of how to use `CrossEntropyLoss` with `torch::nn::CrossEntropyLossOptions`.
+/// See the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
 TORCH_MODULE(CrossEntropyLoss);
 
-// ============================================================================
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ BCEWithLogitsLoss ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+/// This loss combines a `Sigmoid` layer and the `BCELoss` in one single
+/// class. This version is more numerically stable than using a plain `Sigmoid`
+/// followed by a `BCELoss` as, by combining the operations into one layer,
+/// we take advantage of the log-sum-exp trick for numerical stability.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.BCEWithLogitsLoss to learn
+/// about the exact behavior of this module.
+///
+/// See the documentation for `torch::nn::BCEWithLogitsLossOptions` class to learn what
+/// constructor arguments are supported for this module.
+///
+/// Example:
+/// ```
+/// BCEWithLogitsLoss model(BCEWithLogitsLossOptions().reduction(torch::kNone).weight(weight));
+/// ```
 struct TORCH_API BCEWithLogitsLossImpl : public Cloneable<BCEWithLogitsLossImpl> {
   explicit BCEWithLogitsLossImpl(const BCEWithLogitsLossOptions& options_ = {});
 
@@ -504,9 +687,10 @@ struct TORCH_API BCEWithLogitsLossImpl : public Cloneable<BCEWithLogitsLossImpl>
 };
 
 /// A `ModuleHolder` subclass for `BCEWithLogitsLossImpl`.
-/// See the documentation for `BCEWithLogitsLoss` class to learn what
-/// methods it provides, or the documentation for `ModuleHolder` to learn about
-/// PyTorch's module storage semantics.
+/// See the documentation for `BCEWithLogitsLossImpl` class to learn what methods it
+/// provides, and examples of how to use `BCEWithLogitsLoss` with `torch::nn::BCEWithLogitsLossOptions`.
+/// See the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
 TORCH_MODULE(BCEWithLogitsLoss);
 
 } // namespace nn

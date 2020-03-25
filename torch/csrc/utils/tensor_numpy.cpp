@@ -76,13 +76,13 @@ static std::vector<int64_t> seq_to_aten_shape(PyObject *py_seq) {
 PyObject* tensor_to_numpy(const at::Tensor& tensor) {
   if (tensor.device().type() != DeviceType::CPU) {
     throw TypeError(
-      "can't convert non-cpu tensor to numpy. Use Tensor.cpu() to "
-      "copy the tensor to host memory first.");
+      "can't convert %s device type tensor to numpy. Use Tensor.cpu() to "
+      "copy the tensor to host memory first.", tensor.device().str().c_str());
   }
   if (tensor.layout() != Layout::Strided) {
       throw TypeError(
-        "can't convert non-strided tensor to numpy."
-        "convert the tensor to a strided layout first.");
+        "can't convert %s layout tensor to numpy."
+        "convert the tensor to a strided layout first.", c10::str(tensor.layout()).c_str());
   }
   if (tensor.requires_grad()) {
     throw std::runtime_error(
@@ -129,8 +129,19 @@ at::Tensor tensor_from_numpy(PyObject* obj) {
   if (!PyArray_Check(obj)) {
     throw TypeError("expected np.ndarray (got %s)", Py_TYPE(obj)->tp_name);
   }
-
   auto array = (PyArrayObject*)obj;
+
+  if (!PyArray_ISWRITEABLE(array)) {
+    TORCH_WARN_ONCE(
+      "The given NumPy array is not writeable, and PyTorch does "
+      "not support non-writeable tensors. This means you can write to the "
+      "underlying (supposedly non-writeable) NumPy array using the tensor. "
+      "You may want to copy the array to protect its data or make it writeable "
+      "before converting it to a tensor. This type of warning will be "
+      "suppressed for the rest of this program.");
+
+  }
+
   int ndim = PyArray_NDIM(array);
   auto sizes = to_aten_shape(ndim, PyArray_DIMS(array));
   auto strides = to_aten_shape(ndim, PyArray_STRIDES(array));
@@ -191,7 +202,7 @@ int aten_to_numpy_dtype(const ScalarType scalar_type) {
     case kByte: return NPY_UINT8;
     case kBool: return NPY_BOOL;
     default:
-      throw TypeError("Got unsupported ScalarType ", toString(scalar_type));
+      throw TypeError("Got unsupported ScalarType %s", toString(scalar_type));
   }
 }
 

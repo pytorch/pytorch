@@ -237,7 +237,7 @@ class TestQuantizedTensor(TestCase):
 
     def test_qtensor_per_channel_load_save(self):
         r = torch.rand(20, 10, dtype=torch.float) * 4 - 2
-        scales = torch.rand(10) * 0.02 + 0.01
+        scales = torch.rand(10, dtype=torch.double) * 0.02 + 0.01
         zero_points = torch.round(torch.rand(10) * 20 + 1).to(torch.long)
         # quint32 is not supported yet
         for dtype in [torch.quint8, torch.qint8]:

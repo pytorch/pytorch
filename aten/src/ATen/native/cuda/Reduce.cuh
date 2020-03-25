@@ -303,9 +303,20 @@ struct ReduceOp {
   bool final_output;
   int noutputs;
 
-  ReduceOp(ops_t ops, ReduceConfig config, InputCalculator input_calc, OutputCalculator output_calc,
-      const void* src, char* dst0, optional<char*> dst1, void* acc_buf, void* cta_buf, int* semaphores,
-      arg_t ident, int noutputs, int64_t base_idx)
+  ReduceOp(
+      ops_t ops,
+      ReduceConfig config,
+      InputCalculator input_calc,
+      OutputCalculator output_calc,
+      const void* src,
+      char* dst0,
+      optional<char*> dst1,
+      void* acc_buf,
+      void* cta_buf,
+      int* semaphores,
+      arg_t ident,
+      int noutputs,
+      int64_t base_idx)
       : ops(ops),
         ident(ident),
         config(config),
@@ -315,8 +326,8 @@ struct ReduceOp {
         acc_buf(acc_buf),
         cta_buf(cta_buf),
         semaphores(semaphores),
-        noutputs(noutputs),
-        base_idx(base_idx){
+        base_idx(base_idx),
+        noutputs(noutputs) {
     dst[0] = dst0;
     if (dst1.has_value()) {
       dst[1] = dst1.value();

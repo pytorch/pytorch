@@ -93,33 +93,33 @@ struct TORCH_API RecordFunction {
     return inputs_;
   }
 
-  inline const RecordFunction* parent() const {
-    return parent_;
-  }
-
   bool active() const {
     return initialized_;
   }
 
-  void setRunSampled(bool run_sampled) {
+  // Internal, only for the use within RECORD_FUNCTION macro;
+  // enables this record function to run sampled callbacks
+  void _setRunSampled(bool run_sampled) {
     run_sampled_ = run_sampled;
   }
 
+  // Internal, only for the use within RECORD_FUNCTION macro;
+  // sets this function as the current() thread local function;
+  // original value of current() is restored in destructor
+  void _setCurrent();
+
+  // Executes end callbacks
   void end();
 
-  // Saves the thread_id that this RecordFunction was created with. This is
-  // needed so that we can access Events created by the original thread in a
-  // different thread, since they are thread-local. This should be used to call
-  // RecordFunction::end() in a different thread.
-  void setThreadId();
-
-  // Retrieves the thread_id that this RecordFunction was created with. Useful
-  // if we need to access Events created by the original thread in a different
-  // thread. The threadId_ should only be set (via setThreadId) in cases where
-  // RecordFunction::end is called in a different thread.
-  inline uint16_t getThreadId() const {
+  // Retrieves the thread_id that this RecordFunction ran start callbacks with.
+  // Useful for writing thread safe end callbacks that may be potentially
+  // executed in a different thread (async ops)
+  inline uint16_t getStartCallbacksThreadId() const {
     return threadId_;
   }
+
+  // Get logical thread_id for the current thread
+  static uint16_t getCurrentThreadId();
 
  private:
   void processCallbacks();
@@ -128,14 +128,20 @@ struct TORCH_API RecordFunction {
   StringView name_;
   int64_t sequence_nr_ = -1;
   std::vector<c10::IValue> inputs_;
-  // parent_ points to the parent RecordFunction and must out live this.
+  // parent_ points to the parent RecordFunction and must out live this;
+  // only to be used together with RECORD_FUNCTION macro
   RecordFunction* parent_ = nullptr;
 
   bool initialized_ = false;
   bool run_sampled_ = false;
-  // The thread_id that this RecordFunction was created with. If 0, this means
-  // that it was not set with setThreadId() and this RecordFunction's callbacks
-  // cannot be invoked from a separate thread.
+
+  // is_current_ true means that this record function updates thread local
+  // current record function pointer;
+  // true only in case of scope-based record functions, i.e.
+  // RECORD_FUNCTION macro
+  bool is_current_ = false;
+
+  // The logical thread_id that this RecordFunction was created with.
   uint16_t threadId_ = 0;
 };
 
@@ -159,7 +165,8 @@ TORCH_API void runBeforeCallbacks(
   if (torch::autograd::profiler::hasCallbacks()) { \
     auto run_sampled = torch::autograd::profiler::shouldRunSampledCallbacks(); \
     if (run_sampled || torch::autograd::profiler::hasNonSampledCallbacks()) { \
-      guard.setRunSampled(run_sampled); \
+      guard._setCurrent(); \
+      guard._setRunSampled(run_sampled); \
       if (torch::autograd::profiler::needsInputs()) { \
         guard.before(fn, inputs, ##__VA_ARGS__); \
       } else { \

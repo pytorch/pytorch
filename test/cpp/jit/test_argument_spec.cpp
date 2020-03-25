@@ -1,6 +1,6 @@
 #include <torch/jit.h>
 #include "test/cpp/jit/test_utils.h"
-#include "torch/csrc/jit/argument_spec.h"
+#include "torch/csrc/jit/runtime/argument_spec.h"
 
 namespace torch {
 namespace jit {

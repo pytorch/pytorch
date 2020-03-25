@@ -14,10 +14,10 @@ void THNN_(RReLU_updateOutput)(
            double upper,
            bool train,
            bool inplace,
-           void *generator)
+           at::Generator generator)
 {
   THCUNN_assertSameGPU(state, 3, input, output, noise);
-  auto gen = at::cuda::detail::getDefaultCUDAGenerator();
+  auto gen = at::get_generator_or_default<at::CUDAGenerator>(generator, at::cuda::detail::getDefaultCUDAGenerator());
   if (train)
   {
     input = THCTensor_(newContiguous)(state, input);

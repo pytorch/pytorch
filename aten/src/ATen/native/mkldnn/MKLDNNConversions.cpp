@@ -56,6 +56,17 @@ Tensor mkldnn_reorder_conv2d_weight(
   auto dilation_vec = expand_param_if_needed(dilation, "dilation", 2);
 
   ideep::tensor w = itensor_from_mkldnn(self).as_weights();
+
+  // Legacy mkldnn conv2d jitted module may contain a 5-d weight with an extra
+  // dimension when groups > 1, having dimension [g, o/g, i, h, w] instead of
+  // [o, i, h, w]. Ideally we should reorder the weight back in serialization.
+  // For backward compatibility, we squash the first two dims (g * o/g) back to
+  // its original form.
+  if (w.ndims() == 5) {
+    auto wdims = w.get_dims();
+    w.reshape({wdims[0] * wdims[1], wdims[2], wdims[3], wdims[4]});
+  }
+
   w.make_group(groups);
   ideep::tensor::descriptor desc =
       ideep::convolution_forward::expected_weights_descriptor(

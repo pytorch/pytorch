@@ -1,10 +1,13 @@
 import torch
 import torch.nn.functional as F
-from itertools import product
-
+from ._lowrank import svd_lowrank, pca_lowrank
 from ._overrides import has_torch_function, handle_torch_function
+from ._jit_internal import boolean_dispatch, List
+from ._jit_internal import _overload as overload
+from torch._six import PY2
 
 Tensor = torch.Tensor
+from torch import _VF
 
 __all__ = [
     'align_tensors',
@@ -17,8 +20,10 @@ __all__ = [
     'lu_unpack',
     'norm',
     'meshgrid',
+    'pca_lowrank',
     'split',
     'stft',
+    'svd_lowrank',
     'tensordot',
     'unique',
     'unique_consecutive',
@@ -54,7 +59,7 @@ def broadcast_tensors(*tensors):
     if not torch.jit.is_scripting():
         if any(type(t) is not Tensor for t in tensors) and has_torch_function(tensors):
             return handle_torch_function(broadcast_tensors, tensors, *tensors)
-    return torch._C._VariableFunctions.broadcast_tensors(tensors)
+    return _VF.broadcast_tensors(tensors)
 
 
 def split(tensor, split_size_or_sections, dim=0):
@@ -85,8 +90,28 @@ def split(tensor, split_size_or_sections, dim=0):
     # call here.
     return tensor.split(split_size_or_sections, dim)
 
+# equivalent to itertools.product(indices)
+def _indices_product(indices):
+    # type: (List[int]) -> (List[List[int]])
+    empty_list = torch.jit.annotate(List[int], [])
+    result = [empty_list]
+    for idx in indices:
+        result_temp = torch.jit.annotate(List[List[int]], [])
+        for res in result:
+            for i in range(idx):
+                result_temp.append(res + [i])
+        result = result_temp
+    return result
+
+def _index_tensor_with_indices_list(tensor, indices):
+    # type: (Tensor, List[int]) -> Tensor
+    out = tensor
+    for index in indices:
+        out = out[index]
+    return out
 
 def lu_unpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
+    # type: (Tensor, Tensor, bool, bool) ->  (Tuple[Optional[Tensor], Optional[Tensor], Optional[Tensor]])
     r"""Unpacks the data and pivots from a LU factorization of a tensor.
 
     Returns a tuple of tensors as ``(the pivots, the L tensor, the U tensor)``.
@@ -138,7 +163,7 @@ def lu_unpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
     """
     if not torch.jit.is_scripting():
         tens_ops = (LU_data, LU_pivots)
-        if any(type(t) is not Tensor for t in tens_ops) and has_torch_function(tens_ops):
+        if any([type(t) is not Tensor for t in tens_ops]) and has_torch_function(tens_ops):
             return handle_torch_function(
                 lu_unpack, tens_ops, LU_data, LU_pivots, unpack_data=unpack_data,
                 unpack_pivots=unpack_pivots)
@@ -168,14 +193,20 @@ def lu_unpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
             P = torch.eye(m, device=LU_data.device, dtype=LU_data.dtype) \
                      .expand(shape[:-1] + (m,)) \
                      .clone(memory_format=torch.contiguous_format)
-            for idx in product(*map(lambda x: list(range(x)), shape[:-2])):
-                final_order = list(range(m))
-                for k, j in enumerate(LU_pivots_zero_idx[idx]):
+
+            # TODO: rewrite when TorchScript supports product and map as
+            # product(*map(lambda x: list(range(x)), shape[:-2])) when issue 33781 is fixed
+            indices = _indices_product(shape[:-2])
+            for idx in indices:
+                final_order = [i for i in range(m)]  # noqa: C416 TODO: rewrite as list(range(m))
+                for k, j in enumerate(_index_tensor_with_indices_list(LU_pivots_zero_idx, idx)):
                     final_order[k], final_order[j] = final_order[j], final_order[k]
-                P[idx] = P[idx].index_select(1, torch.as_tensor(final_order, device=LU_pivots.device))
+                # TODO: remove _index_tensor_with_indices_list when TorchScript supports indexing Tensor with list
+                p_idx = _index_tensor_with_indices_list(P, idx)
+                p_idx.copy_(p_idx.index_select(1, torch.as_tensor(final_order, device=LU_pivots.device)))
         else:
             P = torch.eye(m, device=LU_data.device, dtype=LU_data.dtype)
-            final_order = list(range(m))
+            final_order = [i for i in range(m)]  # noqa: C416 TODO: rewrite as list(range(m))
             for k, j, in enumerate(LU_pivots_zero_idx):
                 final_order[k], final_order[j] = final_order[j], final_order[k]
             P = P.index_select(1, torch.as_tensor(final_order, device=LU_pivots.device))
@@ -258,10 +289,10 @@ Examples::
     if len(operands) == 1 and isinstance(operands[0], (list, tuple)):
         # the old interface of passing the operands as one list argument
         operands = operands[0]
-    return torch._C._VariableFunctions.einsum(equation, operands)
+    return _VF.einsum(equation, operands)
 
 
-def meshgrid(*tensors, **kwargs):
+def meshgrid(*tensors):
     r"""Take :math:`N` tensors, each of which can be either scalar or 1-dimensional
 vector, and create :math:`N` N-dimensional grids, where the :math:`i` :sup:`th` grid is defined by
 expanding the :math:`i` :sup:`th` input over dimensions defined by other inputs.
@@ -292,14 +323,11 @@ expanding the :math:`i` :sup:`th` input over dimensions defined by other inputs.
     """
     if not torch.jit.is_scripting():
         if any(type(t) is not Tensor for t in tensors) and has_torch_function(tensors):
-            return handle_torch_function(meshgrid, tensors, *tensors, **kwargs)
-    if kwargs:
-        raise TypeError("meshgrid() got an unexpected keyword argument '%s'" % (list(kwargs)[0],))
+            return handle_torch_function(meshgrid, tensors, *tensors)
     if len(tensors) == 1 and isinstance(tensors[0], (list, tuple)):
         # the old interface of passing the operands as one list argument
         tensors = tensors[0]
-    return torch._C._VariableFunctions.meshgrid(tensors)
-
+    return _VF.meshgrid(tensors)
 
 
 def stft(input, n_fft, hop_length=None, win_length=None, window=None,
@@ -399,7 +427,7 @@ def stft(input, n_fft, hop_length=None, win_length=None, window=None,
         pad = int(n_fft // 2)
         input = F.pad(input.view(extended_shape), (pad, pad), pad_mode)
         input = input.view(input.shape[-signal_dim:])
-    return torch._C._VariableFunctions.stft(input, n_fft, hop_length, win_length, window, normalized, onesided)
+    return _VF.stft(input, n_fft, hop_length, win_length, window, normalized, onesided)
 
 
 del torch.unique_dim
@@ -470,7 +498,7 @@ def unique(input, sorted=True, return_inverse=False, return_counts=False, dim=No
                 unique, (input,), input, sorted=sorted, return_inverse=return_inverse,
                 return_counts=return_counts, dim=dim)
     if dim is not None:
-        output, inverse_indices, counts = torch._C._VariableFunctions.unique_dim(
+        output, inverse_indices, counts = _VF.unique_dim(
             input,
             dim,
             sorted=sorted,
@@ -549,7 +577,7 @@ def unique_consecutive(input, return_inverse=False, return_counts=False, dim=Non
             return handle_torch_function(
                 unique_consecutive, (input,), input, return_inverse=return_inverse,
                 return_counts=return_counts, dim=dim)
-    output, inverse_indices, counts = torch._C._VariableFunctions.unique_consecutive(
+    output, inverse_indices, counts = _VF.unique_consecutive(
         input, return_inverse=return_inverse, return_counts=return_counts, dim=dim)
     if return_inverse and return_counts:
         return output, inverse_indices, counts
@@ -617,7 +645,7 @@ def tensordot(a, b, dims=2):
             raise RuntimeError("tensordot expects dims >= 0, but got dims={}".format(dims))
         dims_a = list(range(-dims, 0))
         dims_b = list(range(dims))
-    return torch._C._VariableFunctions.tensordot(a, b, dims_a, dims_b)
+    return _VF.tensordot(a, b, dims_a, dims_b)
 
 
 def cartesian_prod(*tensors):
@@ -651,10 +679,11 @@ def cartesian_prod(*tensors):
     if not torch.jit.is_scripting():
         if any(type(t) is not Tensor for t in tensors) and has_torch_function(tensors):
             return handle_torch_function(cartesian_prod, tensors, *tensors)
-    return torch._C._VariableFunctions.cartesian_prod(tensors)
+    return _VF.cartesian_prod(tensors)
 
 
-def cdist(x1, x2, p=2, compute_mode='use_mm_for_euclid_dist_if_necessary'):
+def cdist(x1, x2, p=2., compute_mode='use_mm_for_euclid_dist_if_necessary'):
+    # type: (Tensor, Tensor, float, str) -> (Tensor)
     r"""Computes batched the p-norm distance between each pair of the two collections of row vectors.
 
     Args:
@@ -700,16 +729,36 @@ def cdist(x1, x2, p=2, compute_mode='use_mm_for_euclid_dist_if_necessary'):
             return handle_torch_function(
                 cdist, (x1, x2), x1, x2, p=p, compute_mode=compute_mode)
     if compute_mode == 'use_mm_for_euclid_dist_if_necessary':
-        return torch._C._VariableFunctions.cdist(x1, x2, p, None)
+        return _VF.cdist(x1, x2, p, None)
     elif compute_mode == 'use_mm_for_euclid_dist':
-        return torch._C._VariableFunctions.cdist(x1, x2, p, 1)
+        return _VF.cdist(x1, x2, p, 1)
     elif compute_mode == 'donot_use_mm_for_euclid_dist':
-        return torch._C._VariableFunctions.cdist(x1, x2, p, 2)
+        return _VF.cdist(x1, x2, p, 2)
     else:
         raise ValueError("{} is not a valid value for compute_mode".format(compute_mode))
 
+# TODO: type dim as BroadcastingList when https://github.com/pytorch/pytorch/issues/33782 is fixed
+@overload  # noqa: 749
+def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: 749
+    # type: (Tensor, str, Optional[List[int]], bool, Optional[Tensor], Optional[int]) -> Tensor
+    pass
 
-def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):
+@overload  # noqa: 749
+def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: 749
+    # type: (Tensor, Optional[number], Optional[List[int]], bool, Optional[Tensor], Optional[int]) -> Tensor
+    pass
+
+@overload  # noqa: 749
+def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: 749
+    # type: (Tensor, Optional[number], Optional[int], bool, Optional[Tensor], Optional[int]) -> Tensor
+    pass
+
+@overload  # noqa: 749
+def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: 749
+    # type: (Tensor, str, Optional[int], bool, Optional[Tensor], Optional[int]) -> Tensor
+    pass
+
+def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: 749
     r"""Returns the matrix norm or vector norm of a given tensor.
 
     Args:
@@ -773,42 +822,71 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):
         if type(input) is not Tensor and has_torch_function((input,)):
             return handle_torch_function(
                 norm, (input,), input, p=p, dim=dim, keepdim=keepdim, out=out, dtype=dtype)
+        # py2 considers isinstance(unicodestr, str) == False
+        if PY2 and isinstance(p, unicode):
+            p = str(p)
+
     ndim = input.dim()
 
+
     # catch default case
-    if dim is None and out is None and dtype is None:
-        if p == "fro":
-            return torch._C._VariableFunctions.frobenius_norm(input)
-        elif p != "nuc":
-            return torch._C._VariableFunctions.norm(input, p)
+    if dim is None and out is None and dtype is None and p is not None:
+        if isinstance(p, str):
+            if p == "fro":
+                return _VF.frobenius_norm(input)
+        if not isinstance(p, str):
+            return _VF.norm(input, p)
 
-    if p == "fro":
-        if dtype is not None:
-            raise ValueError("dtype argument is not supported in frobenius norm")
-        if dim is None:
-            dim = tuple(range(ndim))
-        if out is None:
-            return torch._C._VariableFunctions.frobenius_norm(input, dim, keepdim=keepdim)
-        return torch._C._VariableFunctions.frobenius_norm(input, dim, keepdim=keepdim, out=out)
-    elif p == "nuc":
-        if dtype is not None:
-            raise ValueError("dtype argument is not supported in nuclear norm")
-        if dim is None:
-            if out is None:
-                return torch._C._VariableFunctions.nuclear_norm(input, keepdim=keepdim)
-            return torch._C._VariableFunctions.nuclear_norm(input, keepdim=keepdim, out=out)
-        return torch._C._VariableFunctions.nuclear_norm(input, dim, keepdim=keepdim, out=out)
+    # TODO: when https://github.com/pytorch/pytorch/issues/33782 is fixed
+    # remove the overloads where dim is an int and replace with BraodcastingList1
+    # and remove next four lines, replace _dim with dim
+    if dim is not None:
+        if isinstance(dim, int):
+            _dim = [dim]
+        else:
+            _dim = dim
     else:
-        if dim is None:
-            dim = tuple(range(ndim))
-        if out is None and dtype is None:
-            return torch._C._VariableFunctions.norm(input, p, dim, keepdim=keepdim)
-        elif out is None:
-            return torch._C._VariableFunctions.norm(input, p, dim, keepdim=keepdim, dtype=dtype)
-        elif dtype is None:
-            return torch._C._VariableFunctions.norm(input, p, dim, keepdim=keepdim, out=out)
-    return torch._C._VariableFunctions.norm(input, p, dim, keepdim=keepdim, dtype=dtype, out=out)
+        _dim = None
 
+    if isinstance(p, str):
+        if p == "fro":
+            if dtype is not None:
+                raise ValueError("dtype argument is not supported in frobenius norm")
+
+            if _dim is None:
+                _dim = [i for i in range(ndim)]  # noqa: C416 TODO: rewrite as list(range(m))
+            if out is None:
+                return _VF.frobenius_norm(input, _dim, keepdim=keepdim)
+            else:
+                return _VF.frobenius_norm(input, _dim, keepdim=keepdim, out=out)
+        elif p == "nuc":
+            if dtype is not None:
+                raise ValueError("dtype argument is not supported in nuclear norm")
+            if _dim is None:
+                if out is None:
+                    return _VF.nuclear_norm(input, keepdim=keepdim)
+                else:
+                    return _VF.nuclear_norm(input, keepdim=keepdim, out=out)
+            else:
+                if out is None:
+                    return _VF.nuclear_norm(input, _dim, keepdim=keepdim)
+                else:
+                    return _VF.nuclear_norm(input, _dim, keepdim=keepdim, out=out)
+        raise RuntimeError("only valid string values are 'fro' and 'nuc', found {}".format(p))
+    else:
+        if _dim is None:
+            _dim = [i for i in range(ndim)]  # noqa: C416 TODO: rewrite as list(range(m))
+
+        if out is None:
+            if dtype is None:
+                return _VF.norm(input, p, _dim, keepdim=keepdim)
+            else:
+                return _VF.norm(input, p, _dim, keepdim=keepdim, dtype=dtype)
+        else:
+            if dtype is None:
+                return _VF.norm(input, p, _dim, keepdim=keepdim, out=out)
+            else:
+                return _VF.norm(input, p, _dim, keepdim=keepdim, dtype=dtype, out=out)
 
 def chain_matmul(*matrices):
     r"""Returns the matrix product of the :math:`N` 2-D tensors. This product is efficiently computed
@@ -842,10 +920,11 @@ def chain_matmul(*matrices):
     if not torch.jit.is_scripting():
         if any(type(t) is not Tensor for t in matrices) and has_torch_function(matrices):
             return handle_torch_function(chain_matmul, matrices, *matrices)
-    return torch._C._VariableFunctions.chain_matmul(matrices)
+    return _VF.chain_matmul(matrices)
 
 
-def lu(A, pivot=True, get_infos=False, out=None):
+def _lu_impl(A, pivot=True, get_infos=False, out=None):
+    # type: (Tensor, bool, bool, Any) -> Tuple[Tensor, Tensor, Tensor] 
     r"""Computes the LU factorization of a matrix or batches of matrices
     :attr:`A`. Returns a tuple containing the LU factorization and
     pivots of :attr:`A`.  Pivoting is done if :attr:`pivot` is set to
@@ -912,25 +991,61 @@ def lu(A, pivot=True, get_infos=False, out=None):
         ...   print('LU factorization succeeded for all samples!')
         LU factorization succeeded for all samples!
     """
+    # If get_infos is True, then we don't need to check for errors and vice versa
+    return torch._lu_with_info(A, pivot=pivot, check_errors=(not get_infos))
+
+def _check_list_size(out_len, get_infos, out):
+    # type: (int, bool, List[Tensor]) -> None   
+    get_infos_int = 1 if get_infos else 0
+    if out_len - get_infos_int != 2:
+        raise TypeError("expected tuple of {} elements but got {}"
+                        .format(2 + int(get_infos), len(out_len)))
+    if not isinstance(out, (tuple, list)):
+        raise TypeError("argument 'out' must be tuple of Tensors, not {}"
+                        .format(type(out).__name__))
+
+def _lu_with_infos(A, pivot=True, get_infos=False, out=None):
+    # type: (Tensor, bool, bool, Optional[Tuple[Tensor, Tensor, Tensor]]) -> Tuple[Tensor, Tensor, Tensor]
     if not torch.jit.is_scripting():
         if type(A) is not Tensor and has_torch_function((A,)):
             return handle_torch_function(
                 lu, (A,), A, pivot=pivot, get_infos=get_infos, out=out)
-    # If get_infos is True, then we don't need to check for errors and vice versa
-    result = torch._lu_with_info(A, pivot=pivot, check_errors=(not get_infos))
+    result = _lu_impl(A, pivot, get_infos, out)
     if out is not None:
-        if not isinstance(out, (tuple, list)):
-            raise TypeError("argument 'out' must be tuple of Tensors, not {}"
-                            .format(type(out).__name__))
-        if len(out) - int(get_infos) != 2:
-            raise TypeError("expected tuple of {} elements but got {}"
-                            .format(2 + int(get_infos), len(out)))
-        return (out[i].resize_as_(result[i]).copy_(result[i]) for i in range(len(out)))
-    if get_infos:
+        _check_list_size(len(out), get_infos, out)
+        for i in range(len(out)):
+            out[i].resize_as_(result[i]).copy_(result[i])
+        return out
+    else:
         return result  # A_LU, pivots, infos
+
+def _lu_no_infos(A, pivot=True, get_infos=False, out=None):
+    # type: (Tensor, bool, bool, Optional[Tuple[Tensor, Tensor]]) -> Tuple[Tensor, Tensor] 
+    # need to check for torch_function here so that we exit if 
+    if not torch.jit.is_scripting():
+        if type(A) is not Tensor and has_torch_function((A,)):
+            return handle_torch_function(
+                lu, (A,), A, pivot=pivot, get_infos=get_infos, out=out)
+    result = _lu_impl(A, pivot, get_infos, out)
+    if out is not None:
+        _check_list_size(len(out), get_infos, out)
+        for i in range(len(out)):
+            out[i].resize_as_(result[i]).copy_(result[i])
+        return out
     else:
         return result[0], result[1]  # A_LU, pivots
 
+# The return type of lu depends on `get_infos`, so in order to resolve the output type
+# of lu in TorchScript we need to statically know the value of `get_infos` 
+lu = boolean_dispatch(
+    arg_name='get_infos',
+    arg_index=2,
+    default=False,
+    if_true=_lu_with_infos,
+    if_false=_lu_no_infos,
+    module_name=__name__,
+    func_name='lu')
+lu.__doc__ = _lu_impl.__doc__
 
 def align_tensors(*tensors):
     raise RuntimeError('`align_tensors` not yet implemented.')

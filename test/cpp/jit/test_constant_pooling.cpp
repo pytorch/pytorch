@@ -1,5 +1,5 @@
-#include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/irparser.h>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/testing/file_check.h>
@@ -14,7 +14,7 @@ namespace jit {
 void testConstantPooling() {
   {
     auto graph = std::make_shared<Graph>();
-    script::parseIR(
+    parseIR(
         R"IR(
 graph():
   %8 : int = prim::Constant[value=1]()
@@ -29,7 +29,7 @@ graph():
   }
   {
     auto graph = std::make_shared<Graph>();
-    script::parseIR(
+    parseIR(
         R"IR(
 graph(%cond : Tensor):
   %a : str = prim::Constant[value="bcd"]()
@@ -53,7 +53,7 @@ graph(%cond : Tensor):
   }
   {
     auto graph = std::make_shared<Graph>();
-    script::parseIR(
+    parseIR(
         R"IR(
 graph():
   %2 : int = prim::Constant[value=2]()

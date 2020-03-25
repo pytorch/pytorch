@@ -20,6 +20,7 @@ MKL and MAGMA. Here are the steps to build with them.
 
     REM Download MAGMA files
     REM version available:
+    REM 2.5.2 (CUDA 9.2 10.0 10.1 10.2) x (Debug Release)
     REM 2.5.1 (CUDA 9.2 10.0 10.1 10.2) x (Debug Release)
     REM 2.5.0 (CUDA 9.0 9.2 10.0 10.1) x (Debug Release)
     REM 2.4.0 (CUDA 8.0 9.2) x (Release)

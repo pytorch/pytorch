@@ -1,6 +1,6 @@
 #include <torch/csrc/distributed/rpc/script_call.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
-#include <torch/csrc/jit/pickle.h>
+#include <torch/csrc/jit/serialization/pickle.h>
 
 namespace torch {
 namespace distributed {
@@ -100,7 +100,7 @@ std::unique_ptr<ScriptCall> ScriptCall::fromIValues(
   }
 }
 
-Message ScriptCall::toMessage() && {
+Message ScriptCall::toMessageImpl() && {
   std::vector<IValue> ivalues;
   toIValues(ivalues);
 

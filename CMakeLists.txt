@@ -121,7 +121,7 @@ option(BUILD_CUSTOM_PROTOBUF "Build and use Caffe2's own protobuf under third_pa
 option(BUILD_PYTHON "Build Python binaries" ON)
 option(BUILD_CAFFE2_OPS "Build Caffe2 operators" ON)
 option(BUILD_SHARED_LIBS "Build libcaffe2.so" ON)
-option(BUILD_CAFFE2_MOBILE "Build libcaffe2 for mobile (deprecating)" ON)
+option(BUILD_CAFFE2_MOBILE "Build libcaffe2 for mobile (deprecating)" OFF)
 option(USE_STATIC_DISPATCH "Use static dispatch for ATen operators" OFF)
 cmake_dependent_option(
     CAFFE2_LINK_LOCAL_PROTOBUF "If set, build protobuf inside libcaffe2.so." ON
@@ -136,6 +136,7 @@ cmake_dependent_option(
     "BUILD_TEST" OFF)
 option(COLORIZE_OUTPUT "Colorize output during compilation" ON)
 option(USE_ASAN "Use Address Sanitizer" OFF)
+option(USE_TSAN "Use Thread Sanitizer" OFF)
 option(USE_CUDA "Use CUDA" ON)
 option(USE_ROCM "Use ROCm" ON)
 option(CAFFE2_STATIC_LINK_CUDA "Statically link CUDA libraries" OFF)
@@ -219,6 +220,8 @@ cmake_dependent_option(
 set(ONNX_NAMESPACE "onnx_torch" CACHE STRING "A namespace for ONNX; needed to build with other frameworks that share ONNX.")
 set(SELECTED_OP_LIST "" CACHE STRING
     "Path to the yaml file that contains the list of operators to include for custom build. Include all operators by default.")
+set(OP_DEPENDENCY "" CACHE STRING
+    "Path to the yaml file that contains the op dependency graph for custom build.")
 
 # This is a fix for a rare build issue on Ubuntu:
 # symbol lookup error: miniconda3/envs/pytorch-py3.7/lib/libmkl_intel_lp64.so: undefined symbol: mkl_blas_dsyrk
@@ -273,7 +276,7 @@ if (MSVC)
 
     # /bigobj increases number of sections in .obj file, which is needed to link
     # against libraries in Python 2.7 under Windows
-    # For Visual Studio generators, if /MP is not added, then we may need 
+    # For Visual Studio generators, if /MP is not added, then we may need
     # to add /MP to the flags.
     # For other generators like ninja, we don't need to add /MP because it is
     # already handled by the generator itself.
@@ -304,23 +307,23 @@ if (MSVC)
 endif(MSVC)
 
 IF(NOT MSVC)
-  SET(CUDA_NVCC_FLAGS_DEBUG "${CUDA_NVCC_FLAGS_DEBUG} -g -G --source-in-ptx")
-  SET(CUDA_NVCC_FLAGS_RELWITHDEBINFO "${CUDA_NVCC_FLAGS_RELWITHDEBINFO} -g -lineinfo --source-in-ptx")
+  list(APPEND CUDA_NVCC_FLAGS_DEBUG "-g" "-lineinfo" "--source-in-ptx")
+  list(APPEND CUDA_NVCC_FLAGS_RELWITHDEBINFO "-g" "-lineinfo" "--source-in-ptx")
 ENDIF(NOT MSVC)
 
 # Set INTERN_BUILD_MOBILE for all mobile builds. Components that are not
 # applicable to mobile are disabled by this variable.
-if (ANDROID OR IOS)
+# Setting `BUILD_PYTORCH_MOBILE_WITH_HOST_TOOLCHAIN` environment variable can
+# force it to do mobile build with host toolchain - which is useful for testing
+# purpose.
+if (ANDROID OR IOS OR DEFINED ENV{BUILD_PYTORCH_MOBILE_WITH_HOST_TOOLCHAIN})
   set(INTERN_BUILD_MOBILE ON)
-  # Disable developing mobile interpreter for actual mobile build. Enable it elsewhere to capture build error.
-  set(INTERN_DISABLE_MOBILE_INTERP ON)
-endif()
 
-# Setting `PYTORCH_BUILD_MOBILE` environment variable can force it to do mobile
-# build with host toolchain.
-if (DEFINED ENV{PYTORCH_BUILD_MOBILE})
-  set(INTERN_BUILD_MOBILE ON)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DC10_MOBILE")
+  if (DEFINED ENV{BUILD_PYTORCH_MOBILE_WITH_HOST_TOOLCHAIN})
+    # C10_MOBILE is derived from Android/iOS toolchain macros in
+    # c10/macros/Macros.h, so it needs to be explicitly set here.
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DC10_MOBILE")
+  endif()
 endif()
 
 # INTERN_BUILD_ATEN_OPS is used to control whether to build ATen/TH operators.
@@ -349,6 +352,9 @@ if (INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
   set(INTERN_DISABLE_ONNX ON)
   set(INTERN_DISABLE_AUTOGRAD ON)
   set(INTERN_USE_EIGEN_BLAS ON)
+  # Disable developing mobile interpreter for actual mobile build.
+  # Enable it elsewhere to capture build error.
+  set(INTERN_DISABLE_MOBILE_INTERP ON)
 endif()
 
 # ---[ Utils
@@ -418,7 +424,7 @@ if(USE_PYTORCH_QNNPACK)
 endif()
 
 if(USE_XNNPACK)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_XNNPACK")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_XNNPACK -DUSE_INTERNAL_THREADPOOL_IMPL")
 endif()
 
 # ---[ Whitelist file if whitelist is specified
@@ -440,6 +446,7 @@ if(NOT MSVC)
   # Details at http://eigen.tuxfamily.org/bz/show_bug.cgi?id=1459
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wextra")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror=return-type")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-missing-field-initializers")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-type-limits")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-array-bounds")
@@ -501,6 +508,10 @@ if(NOT MSVC)
   set (CMAKE_LINKER_FLAGS_DEBUG "${CMAKE_STATIC_LINKER_FLAGS_DEBUG} -fno-omit-frame-pointer -O0")
   set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-math-errno")
   set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-trapping-math")
+  check_cxx_compiler_flag("-Werror=format" HAS_WERROR_FORMAT)
+  if (HAS_WERROR_FORMAT)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror=format")
+  endif()
 endif()
 
 if (USE_ASAN)

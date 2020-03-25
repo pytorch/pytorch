@@ -1,7 +1,7 @@
 #include "test/cpp/jit/test_base.h"
 #include "test/cpp/jit/test_utils.h"
-#include "torch/csrc/jit/argument_spec.h"
-#include "torch/csrc/jit/autodiff.h"
+#include "torch/csrc/jit/runtime/argument_spec.h"
+#include "torch/csrc/jit/runtime/autodiff.h"
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
 #include "torch/csrc/jit/passes/constant_propagation.h"
 #include "torch/csrc/jit/passes/create_autodiff_subgraphs.h"
@@ -11,7 +11,7 @@
 #include "torch/csrc/jit/passes/requires_grad_analysis.h"
 #include "torch/csrc/jit/passes/shape_analysis.h"
 #include "torch/csrc/jit/passes/utils/subgraph_utils.h"
-#include "torch/csrc/jit/tracer.h"
+#include "torch/csrc/jit/frontend/tracer.h"
 
 #include <ATen/ATen.h>
 #include "torch/csrc/autograd/engine.h"
@@ -28,8 +28,8 @@ using var_meta_list = std::vector<var_meta_type>;
 using test_fn_type = std::function<variable_list(const variable_list&)>;
 
 struct ADTestSpec {
-  ADTestSpec(const char* name, var_meta_list input_meta, test_fn_type test_fn)
-      : name(name), input_meta(input_meta), test_fn(test_fn) {}
+  ADTestSpec(const char* name, var_meta_list input_meta, test_fn_type test_fn, float clampMax = -1.0f)
+      : name(name), input_meta(input_meta), test_fn(test_fn), clampMax(clampMax) {}
 
   variable_list operator()(const variable_list& inputs) const {
     return test_fn(inputs);
@@ -38,6 +38,10 @@ struct ADTestSpec {
   std::vector<Variable> make_vars() const {
     std::vector<Variable> out;
     for (const auto& m : input_meta) {
+      if (clampMax > 0.0f) {
+        out.push_back(torch::randn(m, at::requires_grad(true)).clamp(-clampMax, clampMax));
+        continue;
+      }
       out.push_back(torch::randn(m, at::requires_grad(true)));
     }
     return out;
@@ -46,6 +50,7 @@ struct ADTestSpec {
   const char* name;
   var_meta_list input_meta;
   test_fn_type test_fn;
+  float clampMax;
 };
 
 variable_list get_grad_outputs(const variable_list& vars) {
@@ -88,9 +93,11 @@ void testADFormulas() {
       {"sigmoid",
        unary_pointwise,
        [](const VL& v) -> VL { return {v[0].sigmoid()}; }},
+      // Clamp tanh input tensor values to [-3, 3]
+      // to set a minimum on gradient absolute values
       {"tanh",
        unary_pointwise,
-       [](const VL& v) -> VL { return {v[0].tanh()}; }},
+       [](const VL& v) -> VL { return {v[0].tanh()}; }, 3.0f},
       {"t", unary_pointwise_2d, [](const VL& v) -> VL { return {v[0].t()}; }},
       {"view",
        unary_pointwise_2d,
@@ -213,7 +220,7 @@ void testDifferentiateWithRequiresGrad() {
       %7 : Tensor = aten::add(%6, %1, %2)
       return (%4, %7))IR";
   auto g = std::make_shared<Graph>();
-  torch::jit::script::parseIR(graph_string, g.get());
+  torch::jit::parseIR(graph_string, g.get());
 
   auto a_var = autograd::make_variable(
       at::empty_strided(2, 2, at::CPU(at::kFloat).options()), true);

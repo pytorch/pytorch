@@ -21,42 +21,113 @@ white_list = [
     # We export some functions and classes for test_jit.py directly from libtorch.so,
     # it's not important to have BC for them
     ('_TorchScriptTesting.*', datetime.date(9999, 1, 1)),
-    ('aten::tril_indices', datetime.date(2020, 3, 1)),
-    ('aten::triu_indices', datetime.date(2020, 3, 1)),
-    ('prim::Drop', datetime.date(2020, 3, 1)),
-    ('prim::Store', datetime.date(2020, 3, 1)),
-    ('aten::_ncf_view', datetime.date(2020, 3, 1)),
-    ('aten::_ncf_unsqueeze', datetime.date(2020, 3, 1)),
-    ('prim::Load', datetime.date(2020, 3, 1)),
-    ('prim::ImplicitTensorToNum', datetime.date(2020, 3, 1)),
-    ('aten::is_owner', datetime.date(2020, 3, 1)),
-    ('aten::to_here', datetime.date(2020, 3, 1)),
-    ('prim::isinstance', datetime.date(2020, 3, 1)),
-    ('prim::CreateObject', datetime.date(2020, 3, 1)),
-    ('prim::Uninitialized', datetime.date(2020, 3, 1)),
-    ('prim::fork', datetime.date(2020, 3, 1)),
-    ('prim::unchecked_cast', datetime.date(2020, 3, 1)),
-    ('prim::DictConstruct', datetime.date(2020, 3, 1)),
-    ('prim::ListConstruct', datetime.date(2020, 3, 1)),
-    ('prim::ListUnpack', datetime.date(2020, 3, 1)),
-    ('prim::TupleConstruct', datetime.date(2020, 3, 1)),
-    ('prim::TupleIndex', datetime.date(2020, 3, 1)),
-    ('prim::TupleSlice', datetime.date(2020, 3, 1)),
-    ('prim::TupleUnpack', datetime.date(2020, 3, 1)),
-    ('prim::AutogradAdd', datetime.date(2020, 3, 1)),
-    ('prim::AutogradAnyNonZero', datetime.date(2020, 3, 1)),
-    ('onnx::Shape', datetime.date(2020, 3, 1)),
-    ('onnx::Reshape', datetime.date(2020, 3, 1)),
-    ('prim::BroadcastSizes', datetime.date(2020, 3, 1)),
-    ('prim::Print', datetime.date(2020, 3, 1)),
-    ('prim::MMTreeReduce', datetime.date(2020, 3, 1)),
-    ('prim::Constant', datetime.date(2020, 3, 1)),
-    ('_prim::TupleUnpack', datetime.date(2020, 3, 1)),
-    ('_aten::format', datetime.date(2020, 3, 1)),
-    ('aten::random_', datetime.date(2020, 3, 1)),
-    ('quantized::add_(scalar_)?(relu_)?out', datetime.date(2020, 3, 1)),
-    ('quantized::cat_(relu_)?out', datetime.date(2020, 3, 1)),
-    ('quantized::mul_(scalar_)?(relu_)?out', datetime.date(2020, 3, 1)),
+    ('prim::id*', datetime.date(2020, 4, 1)),
+    ('aten::pop*', datetime.date(2020, 4, 1)),
+    ('aten::insert*', datetime.date(2020, 4, 1)),
+    ('aten::Delete*', datetime.date(2020, 4, 1)),
+    ('aten::clear*', datetime.date(2020, 4, 1)),
+    ('aten::_set_item*', datetime.date(2020, 4, 1)),
+    ('aten::copy*', datetime.date(2020, 4, 1)),
+    ('aten::extend*', datetime.date(2020, 4, 1)),
+    ('aten::reverse*', datetime.date(2020, 4, 1)),
+    ('aten::append*', datetime.date(2020, 4, 1)),
+    ('aten::list*', datetime.date(2020, 4, 1)),
+    ('aten::__getitem__*', datetime.date(2020, 4, 1)),
+    ('aten::len*', datetime.date(2020, 4, 1)),
+    ('aten::mul_*', datetime.date(2020, 4, 1)),
+    ('aten::slice*', datetime.date(2020, 4, 1)),
+    ('aten::add*', datetime.date(2020, 4, 1)),
+    ('aten::mul*', datetime.date(2020, 4, 1)),
+    ('aten::select*', datetime.date(2020, 4, 1)),
+    ('aten::add_*', datetime.date(2020, 4, 1)),
+    # _like default change, see https://github.com/pytorch/pytorch/issues/33580
+    ('aten::randn_like', datetime.date(2020, 3, 15)),
+    ('aten::full_like', datetime.date(2020, 3, 15)),
+    ('aten::empty_like', datetime.date(2020, 3, 15)),
+    ('aten::rand_like', datetime.date(2020, 3, 15)),
+    ('aten::ones_like', datetime.date(2020, 3, 15)),
+    ('aten::randint_like', datetime.date(2020, 3, 15)),
+    ('aten::zeros_like', datetime.date(2020, 3, 15)),
+    ('aten::floor_divide', datetime.date(2020, 4, 1)),
+    ('aten::Bool', datetime.date(2020, 4, 1)),
+    ('aten::Float', datetime.date(2020, 4, 1)),
+    ('aten::to', datetime.date(2020, 4, 1)),
+    ('aten::backward', datetime.date(2020, 4, 1)),
+    ('aten::len', datetime.date(2020, 4, 1)),
+    ('aten::remove', datetime.date(2020, 4, 1)),
+    ('aten::index', datetime.date(2020, 4, 1)),
+    ('aten::count', datetime.date(2020, 4, 1)),
+    ('aten::__contains__', datetime.date(2020, 4, 1)),
+    ('aten::sort', datetime.date(2020, 4, 1)),
+    ('aten::sorted', datetime.date(2020, 4, 1)),
+    ('aten::eq', datetime.date(2020, 4, 1)),
+    ('aten::ne', datetime.date(2020, 4, 1)),
+    ('aten::lt', datetime.date(2020, 4, 1)),
+    ('aten::gt', datetime.date(2020, 4, 1)),
+    ('aten::le', datetime.date(2020, 4, 1)),
+    ('aten::ge', datetime.date(2020, 4, 1)),
+    ('aten::divmod', datetime.date(2020, 4, 1)),
+    ('aten::__upsample_bilinear', datetime.date(2020, 4, 1)),
+    ('aten::__upsample', datetime.date(2020, 4, 1)),
+    ('aten::__upsample_nearest', datetime.date(2020, 4, 1)),
+    ('aten::__interpolate', datetime.date(2020, 4, 1)),
+    ('aten::fabs', datetime.date(2020, 4, 1)),
+    ('aten::gamma', datetime.date(2020, 4, 1)),
+    ('prim::abs', datetime.date(2020, 4, 1)),
+    ('aten::factorial', datetime.date(2020, 4, 1)),
+    ('aten::radians', datetime.date(2020, 4, 1)),
+    ('aten::degrees', datetime.date(2020, 4, 1)),
+    ('prim::acosh', datetime.date(2020, 4, 1)),
+    ('prim::atanh', datetime.date(2020, 4, 1)),
+    ('aten::asinh', datetime.date(2020, 4, 1)),
+    ('aten::floordiv', datetime.date(2020, 4, 1)),
+    ('prim::NumToTensor', datetime.date(2020, 4, 1)),
+    ('aten::sin', datetime.date(2020, 4, 1)),
+    ('aten::round', datetime.date(2020, 4, 1)),
+    ('aten::remainder', datetime.date(2020, 4, 1)),
+    ('aten::isfinite', datetime.date(2020, 4, 1)),
+    ('aten::sub', datetime.date(2020, 4, 1)),
+    ('aten::sqrt', datetime.date(2020, 4, 1)),
+    ('aten::log1p', datetime.date(2020, 4, 1)),
+    ('aten::acos', datetime.date(2020, 4, 1)),
+    ('aten::floor', datetime.date(2020, 4, 1)),
+    ('aten::exp', datetime.date(2020, 4, 1)),
+    ('aten::tan', datetime.date(2020, 4, 1)),
+    ('aten::sinh', datetime.date(2020, 4, 1)),
+    ('aten::ceil', datetime.date(2020, 4, 1)),
+    ('aten::atan', datetime.date(2020, 4, 1)),
+    ('aten::erf', datetime.date(2020, 4, 1)),
+    ('aten::erfc', datetime.date(2020, 4, 1)),
+    ('aten::cosh', datetime.date(2020, 4, 1)),
+    ('aten::expm1', datetime.date(2020, 4, 1)),
+    ('aten::isinf', datetime.date(2020, 4, 1)),
+    ('aten::lgamma', datetime.date(2020, 4, 1)),
+    ('aten::asin', datetime.date(2020, 4, 1)),
+    ('aten::log', datetime.date(2020, 4, 1)),
+    ('aten::log10', datetime.date(2020, 4, 1)),
+    ('aten::cos', datetime.date(2020, 4, 1)),
+    ('aten::tanh', datetime.date(2020, 4, 1)),
+    ('prim::min', datetime.date(2020, 4, 1)),
+    ('prim::max', datetime.date(2020, 4, 1)),
+    ('aten::_linear_packed', datetime.date(2020, 4, 1)),
+    ('aten::_linear_prepack', datetime.date(2020, 4, 1)),
+    ('aten::_conv2d_packed', datetime.date(2020, 4, 1)),
+    ('aten::_conv2d_prepack', datetime.date(2020, 4, 1)),
+    ('aten::dequantize', datetime.date(2020, 4, 1)),
+    ('aten::confirmed_by_owner', datetime.date(2020, 3, 17)),
+    ('aten::owner', datetime.date(2020, 3, 27)),
+    ('aten::owner_name', datetime.date(2020, 3, 27)),
+    ('_xnnpack::conv2d_packed', datetime.date(2020, 4, 2)),
+    ('_xnnpack::conv2d_prepack', datetime.date(2020, 4, 2)),
+    ('_xnnpack::linear_packed', datetime.date(2020, 4, 2)),
+    ('_xnnpack::linear_prepack', datetime.date(2020, 4, 2)),
+]
+
+
+# The nightly will fail to parse newly added syntax to schema declarations
+# Add new schemas that will fail the nightly here
+dont_parse_list = [
+    ("prim::id", datetime.date(2020, 4, 1)),
 ]
 
 
@@ -66,6 +137,16 @@ def white_listed(schema, white_list):
             continue
         regexp = re.compile(item[0])
         if regexp.search(schema.name):
+            return True
+    return False
+
+
+def dont_parse(schema_line):
+    for item in dont_parse_list:
+        if item[1] < datetime.date.today():
+            continue
+        regexp = re.compile(item[0])
+        if regexp.search(schema_line):
             return True
     return False
 
@@ -118,12 +199,13 @@ if __name__ == '__main__':
             line = f.readline()
             if not line:
                 break
-            if "torch.classes" in line or "RRef" in line or "Any" in line:
+            if "torch.classes" in line:
                 # TODO Fix type __torch__.torch.classes.xxx
-                # TODO Delete RRef special case after add the RRef type
-                # TODO: wait until nightly knows how to parse Any
                 continue
 
+            if dont_parse(line.strip()):
+                print("Not parsing schema line: ", line.strip())
+                continue
             s = parse_schema(line.strip())
             slist = new_schema_dict.get(s.name, [])
             slist.append(s)

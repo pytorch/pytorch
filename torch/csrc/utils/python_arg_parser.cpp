@@ -74,6 +74,8 @@ static bool should_allow_numbers_as_tensors(const std::string& name) {
     "div", "div_", "div_out",
     "mul", "mul_", "mul_out",
     "sub", "sub_", "sub_out",
+    "true_divide", "true_divide_", "true_divide_out",
+    "floor_divide", "floor_divide_", "floor_divide_out"
   };
   return allowed.find(name) != allowed.end();
 }
@@ -135,9 +137,18 @@ auto handle_torch_function(PythonArgs &r, PyObject* args, PyObject* kwargs, PyOb
   py::object torch_api_function = PyObject_FastGetAttrString(torch_api, (char*)r.get_func_name().c_str());
   TORCH_INTERNAL_ASSERT(torch_api_function.ptr() != nullptr, "torch API function must exist");
   py::object ret;
+
+  // overloaded_args already all have unique types
+  std::vector<py::object> overloaded_types;
+  overloaded_types.reserve(r.signature.overloaded_args.size());
+  for (auto &arg : r.signature.overloaded_args) {
+    overloaded_types.push_back(py::reinterpret_borrow<py::object>((PyObject *) Py_TYPE(arg.ptr())));
+  }
+  py::tuple py_types = py::cast(overloaded_types);
+
   for (auto &arg : r.signature.overloaded_args) {
     py::object torch_function = PyObject_FastGetAttrString(arg.ptr(), "__torch_function__");
-    ret = py::reinterpret_steal<py::object>(PyObject_CallFunctionObjArgs(torch_function.ptr(), torch_api_function.ptr(), args, kwargs, NULL));
+    ret = py::reinterpret_steal<py::object>(PyObject_CallFunctionObjArgs(torch_function.ptr(), torch_api_function.ptr(), py_types.ptr(), args, kwargs, NULL));
     if (ret.ptr() != Py_NotImplemented) {
       // Return the reference to the result. This also covers the case where ret
       // is NULL and __torch_function__ raised an exception, which we throw below
@@ -413,11 +424,11 @@ void FunctionParameter::set_default_str(const std::string& str) {
     }
   } else if (type_ == ParameterType::LAYOUT) {
     if (str == "None") {
-      default_layout = nullptr;
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(allow_none);
     } else if (str == "torch.strided") {
-      default_layout = torch::getLayout(at::Backend::CPU);
+      default_layout = at::Layout::Strided;
     } else if (str == "torch.sparse_coo") {
-      default_layout = torch::getLayout(at::Backend::SparseCPU);
+      default_layout = at::Layout::Sparse;
     } else {
       throw std::runtime_error("invalid default value for layout: " + str);
     }
@@ -516,16 +527,17 @@ std::string FunctionSignature::toString() const {
 
 [[noreturn]]
 static void extra_args(const FunctionSignature& signature, ssize_t nargs) {
-  auto max_pos_args = signature.max_pos_args;
-  auto min_args = signature.min_args;
+  const long max_pos_args = signature.max_pos_args;
+  const long min_args = signature.min_args;
+  const long nargs_ = nargs;
   if (min_args != max_pos_args) {
-    throw TypeError("%s() takes from %d to %d positional arguments but %d were given",
-        signature.name.c_str(), min_args, max_pos_args, nargs);
+    throw TypeError("%s() takes from %ld to %ld positional arguments but %ld were given",
+        signature.name.c_str(), min_args, max_pos_args, nargs_);
   }
-  throw TypeError("%s() takes %d positional argument%s but %d %s given",
+  throw TypeError("%s() takes %ld positional argument%s but %ld %s given",
       signature.name.c_str(),
       max_pos_args, max_pos_args == 1 ? "" : "s",
-      nargs, nargs == 1 ? "was" : "were");
+      nargs_, nargs == 1 ? "was" : "were");
 }
 
 [[noreturn]]
@@ -671,8 +683,8 @@ bool FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
             Py_TYPE(obj)->tp_name);
       } else {
         // foo(): argument 'other' (position 2) must be str, not int
-        throw TypeError("%s(): argument '%s' (position %d) must be %s, not %s",
-            name.c_str(), param.name.c_str(), arg_pos + 1,
+        throw TypeError("%s(): argument '%s' (position %ld) must be %s, not %s",
+            name.c_str(), param.name.c_str(), static_cast<long>(arg_pos + 1),
             param.type_name().c_str(), Py_TYPE(obj)->tp_name);
       }
     } else {

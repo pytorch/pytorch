@@ -19,7 +19,7 @@ struct PyAnomalyMetadata : public AnomalyMetadata {
     Py_DECREF(dict_);
   }
   void store_stack() override;
-  void print_stack() override;
+  void print_stack(const std::string& current_node_name) override;
 
   PyObject* dict() {
     return dict_;

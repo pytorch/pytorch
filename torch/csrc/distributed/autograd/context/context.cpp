@@ -1,11 +1,14 @@
 #include <functional>
 
 #include <c10/util/Exception.h>
+#include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/distributed/autograd/context/context.h>
 
 namespace torch {
 namespace distributed {
 namespace autograd {
+
+using torch::autograd::AccumulateGrad;
 
 DistAutogradContext::DistAutogradContext(int64_t contextId)
     : contextId_(contextId) {}
@@ -63,24 +66,34 @@ DistAutogradContext::recvFunctions() const {
 
 void DistAutogradContext::accumulateGrad(
     const torch::autograd::Variable& variable,
-    const torch::Tensor& grad) {
+    const torch::Tensor& grad,
+    size_t num_expected_refs) {
   TORCH_INTERNAL_ASSERT(grad.defined());
   TORCH_INTERNAL_ASSERT(variable.requires_grad());
 
   std::lock_guard<std::mutex> guard(lock_);
   auto it = accumulatedGrads_.find(variable);
+  at::Tensor old_grad;
   if (it != accumulatedGrads_.end()) {
     // Accumulate multiple grads on the same variable.
-    it->value().add_(grad);
-  } else {
-    // First grad for this variable.
-    if (grad.is_sparse()) {
-      accumulatedGrads_.insert(variable, grad.clone());
-    } else {
-      accumulatedGrads_.insert(
-          variable, grad.clone(at::MemoryFormat::Contiguous));
-    }
+    old_grad = it->value();
   }
+
+  // No higher order gradients supported in distributed autograd.
+  AutoGradMode grad_mode(false);
+  // TODO: Need to bump 'num_expected_refs' here when we support post_hooks for
+  // distributed autograd as part of
+  // https://github.com/pytorch/pytorch/issues/33482
+  AccumulateGrad::accumulateGradAndCallHooks(
+      variable,
+      old_grad,
+      grad,
+      // Add +1 here since we can't std::move(grad) since it is a const ref,
+      // which incurs a refcount bump for the Tensor.
+      num_expected_refs + 1,
+      [this, &variable](at::Tensor&& grad_update) {
+        accumulatedGrads_.insert(variable, std::move(grad_update));
+      });
 }
 
 std::shared_ptr<torch::autograd::GraphTask> DistAutogradContext::
@@ -100,6 +113,7 @@ void DistAutogradContext::setGraphTask(
 }
 
 void DistAutogradContext::resetGraphTask() {
+  std::lock_guard<std::mutex> guard(lock_);
   graphTask_ = nullptr;
 }
 
@@ -112,11 +126,25 @@ void DistAutogradContext::addOutstandingRpc(
         if (futErr) {
           // If we have an error, let the local autograd engine know about it.
           std::runtime_error err((*futErr).what());
-          graphTask_->set_exception(err, nullptr);
+          std::unique_lock<std::mutex> lock(lock_);
+          if (graphTask_) {
+            graphTask_->set_exception_without_signal(nullptr);
+            lock.unlock();
+            graphTask_->future_result_->setErrorIfNeeded(err.what());
+          } else {
+            LOG(WARNING)
+                << "Ignoring error since GraphTask is no longer valid: "
+                << err.what();
+          }
         }
       });
   std::lock_guard<std::mutex> guard(lock_);
   outStandingRpcs_.push_back(futureMessage);
+}
+
+void DistAutogradContext::clearOutstandingRpcs() {
+  std::unique_lock<std::mutex> lock(lock_);
+  outStandingRpcs_.clear();
 }
 
 std::shared_ptr<rpc::FutureMessage> DistAutogradContext::
