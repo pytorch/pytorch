@@ -749,36 +749,38 @@ void LoopNest::SplitWithTail(
     }
   }
 
-  auto const& size = ExprHandle(f->stop()) - ExprHandle(f->start());
-  auto const& split_count = size / factor;
-  auto const& tail_size = size % factor;
+  const IntImm* factor_expr = new IntImm(factor);
+  const Expr* size = new Sub(f->stop(), f->start());
+  const Expr* split_count = new Div(size, factor_expr);
+  const Expr* tail_size = new Mod(size, factor_expr);
 
   const std::string& loop_var_name = f->var()->name_hint();
   Dtype loop_var_dtype = f->var()->dtype();
 
-  VarHandle i_inner(loop_var_name + "_inner", loop_var_dtype);
-  VarHandle i_outer(loop_var_name + "_outer", loop_var_dtype);
+  const Var* i_inner = new Var(loop_var_name + "_inner", loop_var_dtype);
+  const Var* i_outer = new Var(loop_var_name + "_outer", loop_var_dtype);
 
   // x -> x.outer * inner.size + x.inner
-  auto combined_index1 = i_outer * factor + i_inner;
+  const Expr* combined_index1 = new Add(new Mul(i_outer, factor_expr), i_inner);
 
   Stmt* body_inner =
       Substitute(Stmt::clone(f->body()), {{f->var(), combined_index1}});
 
-  *inner = For::make(i_inner, 0, factor, body_inner);
-  *outer = For::make(i_outer, 0, split_count, *inner);
+  *inner = new For(i_inner, new IntImm(0), factor_expr, body_inner);
+  *outer = new For(i_outer, new IntImm(0), split_count, *inner);
 
   // TODO: cleanup API for adding/removing statements
   p->replace_stmt(f, *outer);
 
   if (tail_is_needed) {
-    VarHandle i_tail(loop_var_name + "_tail", loop_var_dtype);
+    const Var* i_tail = new Var(loop_var_name + "_tail", loop_var_dtype);
     // x -> x.tail + outer.size * inner.size
-    auto combined_index2 = i_tail + split_count * factor;
+    const Expr* combined_index2 =
+        new Add(i_tail, new Mul(split_count, factor_expr));
 
     Stmt* body_tail =
         Substitute(Stmt::clone(f->body()), {{f->var(), combined_index2}});
-    *tail = For::make(i_tail, 0, tail_size, body_tail);
+    *tail = new For(i_tail, new IntImm(0), tail_size, body_tail);
 
     p->append_stmt(*tail);
   } else {
@@ -807,17 +809,20 @@ void LoopNest::SplitWithMask(For* f, int factor, For** outer, For** inner) {
     }
   }
 
-  auto const& size = ExprHandle(f->stop()) - ExprHandle(f->start());
-  auto const& split_count = (size + factor - 1) / factor;
+  const IntImm* factor_expr = new IntImm(factor);
+  const Expr* size = new Sub(f->stop(), f->start());
+  // split_count = (size + factor - 1) / factor
+  const Expr* split_count =
+      new Div(new Sub(new Add(size, factor_expr), new IntImm(1)), factor_expr);
 
   const std::string& loop_var_name = f->var()->name_hint();
   Dtype loop_var_dtype = f->var()->dtype();
 
-  VarHandle i_inner(loop_var_name + "_inner", loop_var_dtype);
-  VarHandle i_outer(loop_var_name + "_outer", loop_var_dtype);
+  const Var* i_inner = new Var(loop_var_name + "_inner", loop_var_dtype);
+  const Var* i_outer = new Var(loop_var_name + "_outer", loop_var_dtype);
 
   // x -> x.outer * inner.size + x.inner
-  auto combined_index = i_outer * factor + i_inner;
+  const Expr* combined_index = new Add(new Mul(i_outer, factor_expr), i_inner);
 
   Stmt* body_inner = Stmt::clone(f->body());
   // TODO: is it ok that we're doing it eagerly? In the other implementation we
@@ -835,8 +840,8 @@ void LoopNest::SplitWithMask(For* f, int factor, For** outer, For** inner) {
   }
   body_inner = Substitute(body_inner, {{f->var(), combined_index}});
 
-  *inner = For::make(i_inner, 0, factor, body_inner);
-  *outer = For::make(i_outer, 0, split_count, *inner);
+  *inner = new For(i_inner, new IntImm(0), factor_expr, body_inner);
+  *outer = new For(i_outer, new IntImm(0), split_count, *inner);
 
   // TODO: cleanup API for adding/removing statements
   p->replace_stmt(f, *outer);
