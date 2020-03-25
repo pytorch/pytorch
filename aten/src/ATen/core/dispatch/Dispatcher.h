@@ -101,7 +101,7 @@ public:
   OperatorHandle findSchemaOrThrow(const char* name, const char* overload_name);
 
   // Like findSchema, but also returns OperatorHandle even if there is no schema
-  c10::optional<OperatorHandle> findOperatorByName(const OperatorName& operator_name);
+  c10::optional<OperatorHandle> findOp(const OperatorName& operator_name);
 
   // ------------------------------------------------------------------------
   //

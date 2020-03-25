@@ -43,7 +43,7 @@ C10_EXPORT Dispatcher& Dispatcher::singleton() {
   return _singleton;
 }
 
-c10::optional<OperatorHandle> Dispatcher::findOperatorByName(const OperatorName& overload_name) {
+c10::optional<OperatorHandle> Dispatcher::findOp(const OperatorName& overload_name) {
   return operatorLookupTable_.read([&] (const ska::flat_hash_map<OperatorName, OperatorHandle>& operatorLookupTable) -> c10::optional<OperatorHandle> {
     auto found = operatorLookupTable.find(overload_name);
     if (found == operatorLookupTable.end()) {
@@ -54,7 +54,7 @@ c10::optional<OperatorHandle> Dispatcher::findOperatorByName(const OperatorName&
 }
 
 c10::optional<OperatorHandle> Dispatcher::findSchema(const OperatorName& overload_name) {
-  auto it = findOperatorByName(overload_name);
+  auto it = findOp(overload_name);
   if (it.has_value()) {
     if (it->hasSchema()) {
       return it;
@@ -71,7 +71,7 @@ OperatorHandle Dispatcher::findSchemaOrThrow(const char* name, const char* overl
   if (!it.has_value()) {
     // Check if we have ANYTHING; if that's the case, that means you're
     // missing schema
-    auto it2 = findOperatorByName({name, overload_name});
+    auto it2 = findOp({name, overload_name});
     if (!it2.has_value()) {
       TORCH_CHECK(false, "Could not find schema for ", name, ".", overload_name);
     } else {
@@ -85,7 +85,7 @@ OperatorHandle Dispatcher::findSchemaOrThrow(const char* name, const char* overl
 // Postcondition: caller is responsible for disposing of registration when they
 // are done
 OperatorHandle Dispatcher::findOrRegisterName_(const OperatorName& op_name) {
-  const auto found = findOperatorByName(op_name);
+  const auto found = findOp(op_name);
   if (found != c10::nullopt) {
     return *found;
   }

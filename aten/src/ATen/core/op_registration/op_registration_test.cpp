@@ -1319,10 +1319,10 @@ TEST(NewOperatorRegistrationTest, importTopLevel) {
   ASSERT_TRUE(Dispatcher::singleton().findSchema({"test::def1", ""}).has_value());
   ASSERT_TRUE(Dispatcher::singleton().findSchema({"test::def2", ""}).has_value());
   ASSERT_TRUE(Dispatcher::singleton().findSchema({"test::def3", ""}).has_value());
-  ASSERT_TRUE(Dispatcher::singleton().findOperatorByName({"test::def1", ""}).has_value());
-  ASSERT_TRUE(Dispatcher::singleton().findOperatorByName({"test::def2", ""}).has_value());
-  ASSERT_TRUE(Dispatcher::singleton().findOperatorByName({"test::def3", ""}).has_value());
-  ASSERT_TRUE(Dispatcher::singleton().findOperatorByName({"test::impl1", ""}).has_value());
+  ASSERT_TRUE(Dispatcher::singleton().findOp({"test::def1", ""}).has_value());
+  ASSERT_TRUE(Dispatcher::singleton().findOp({"test::def2", ""}).has_value());
+  ASSERT_TRUE(Dispatcher::singleton().findOp({"test::def3", ""}).has_value());
+  ASSERT_TRUE(Dispatcher::singleton().findOp({"test::impl1", ""}).has_value());
 }
 
 TEST(NewOperatorRegistrationTest, importNamespace) {
@@ -1338,11 +1338,11 @@ TEST(NewOperatorRegistrationTest, importNamespace) {
   ASSERT_TRUE(Dispatcher::singleton().findSchema({"test::def1", ""}).has_value());
   ASSERT_TRUE(Dispatcher::singleton().findSchema({"test::def2", ""}).has_value());
   ASSERT_TRUE(Dispatcher::singleton().findSchema({"test::def3", ""}).has_value());
-  ASSERT_TRUE(Dispatcher::singleton().findOperatorByName({"test::impl1", ""}).has_value());
+  ASSERT_TRUE(Dispatcher::singleton().findOp({"test::impl1", ""}).has_value());
   ASSERT_TRUE(Dispatcher::singleton().findSchema({"retest::def1", ""}).has_value());
   ASSERT_TRUE(Dispatcher::singleton().findSchema({"retest::def2", ""}).has_value());
   ASSERT_TRUE(Dispatcher::singleton().findSchema({"retest::def3", ""}).has_value());
-  ASSERT_TRUE(Dispatcher::singleton().findOperatorByName({"retest::impl1", ""}).has_value());
+  ASSERT_TRUE(Dispatcher::singleton().findOp({"retest::impl1", ""}).has_value());
 }
 
 TEST(NewOperatorRegistrationTest, schema) {
