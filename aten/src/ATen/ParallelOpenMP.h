@@ -21,39 +21,37 @@ inline void parallel_for(
   TORCH_CHECK(grain_size >= 0);
   if (begin >= end) {
     return;
-  }
-#ifdef _OPENMP
-  std::atomic_flag err_flag = ATOMIC_FLAG_INIT;
-  std::exception_ptr eptr;
+  } else if (in_parallel_region() || get_num_threads() == 1) {
+    return f(begin, end);
+  } else {
+    std::atomic_flag err_flag = ATOMIC_FLAG_INIT;
+    std::exception_ptr eptr;
+#pragma omp parallel if ((end - begin) > grain_size)
+    {
+      // choose number of tasks based on grain size and number of threads
+      // can't use num_threads clause due to bugs in GOMP's thread pool (See #32008)
+      int64_t num_threads = get_num_threads();
+      if (grain_size > 0) {
+        num_threads = std::min(num_threads, divup((end - begin), grain_size));
+      }
 
-#pragma omp parallel if (!omp_in_parallel() && ((end - begin) > grain_size))
-  {
-    // choose number of tasks based on grain size and number of threads
-    // can't use num_threads clause due to bugs in GOMP's thread pool (See #32008)
-    int64_t num_threads = omp_get_num_threads();
-    if (grain_size > 0) {
-      num_threads = std::min(num_threads, divup((end - begin), grain_size));
-    }
-
-    int64_t tid = omp_get_thread_num();
-    int64_t chunk_size = divup((end - begin), num_threads);
-    int64_t begin_tid = begin + tid * chunk_size;
-    if (begin_tid < end) {
-      try {
-        f(begin_tid, std::min(end, chunk_size + begin_tid));
-      } catch (...) {
-        if (!err_flag.test_and_set()) {
-          eptr = std::current_exception();
+      int64_t tid = get_thread_num();
+      int64_t chunk_size = divup((end - begin), num_threads);
+      int64_t begin_tid = begin + tid * chunk_size;
+      if (begin_tid < end) {
+        try {
+          f(begin_tid, std::min(end, chunk_size + begin_tid));
+        } catch (...) {
+          if (!err_flag.test_and_set()) {
+            eptr = std::current_exception();
+          }
         }
       }
     }
+    if (eptr) {
+      std::rethrow_exception(eptr);
+    }
   }
-  if (eptr) {
-    std::rethrow_exception(eptr);
-  }
-#else
-  f(begin, end);
-#endif
 }
 
 template <class scalar_t, class F, class SF>

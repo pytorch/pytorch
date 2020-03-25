@@ -122,6 +122,12 @@ struct GraphTask {
   // tasks are done.
   std::shared_ptr<FutureVariableList> future_result_;
 
+  // Final callbacks installed during execution of this GraphTask
+  std::vector<std::function<void()>> final_callbacks_;
+  // To protect reads and writes to final_callbacks_. Intentionally no reusing
+  // mutex_ as the two are protecting different data structures.
+  std::mutex final_callbacks_lock_;
+
   GraphTask(
       bool keep_graph,
       bool grad_mode,
@@ -309,6 +315,7 @@ struct TORCH_API Engine {
   std::once_flag start_device_threads_flag_;
   // Safe to read device_ready_queues_ without synchronization after intialization
   std::vector<std::shared_ptr<ReadyQueue>> device_ready_queues_;
+
   std::vector<std::function<void()>> final_callbacks_;
   // To protect reads and writes to final_callbacks_
   std::mutex post_callbacks_lock_;
