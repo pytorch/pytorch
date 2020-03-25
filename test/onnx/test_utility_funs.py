@@ -326,8 +326,8 @@ class TestUtilityFuns(TestCase):
                                              _disable_torch_constant_prop=True,
                                              operator_export_type=OperatorExportTypes.ONNX)
 
-        #for node in graph.nodes():
-           # assert node.kind() != "onnx::Shape"
+        for node in graph.nodes():
+            assert node.kind() != "onnx::Shape"
         assert len(list(graph.nodes())) == 1
 
     def test_strip_doc_string(self):
