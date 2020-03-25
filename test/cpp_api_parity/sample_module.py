@@ -1,6 +1,6 @@
 import torch
 
-from cpp_api_parity import torch_nn_modules
+import cpp_api_parity
 
 '''
 `SampleModule` is used by `test_cpp_api_parity.py` to test that Python / C++ API
@@ -104,4 +104,4 @@ module_tests = [
     ),
 ]
 
-torch_nn_modules.module_cpp_sources['SampleModule'] = SAMPLE_MODULE_CPP_SOURCE
+cpp_api_parity.module_cpp_sources['SampleModule'] = SAMPLE_MODULE_CPP_SOURCE
