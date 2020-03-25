@@ -12,14 +12,14 @@ import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.qat as nniqat
 
 from torch._ops import ops
-from torch.nn.modules.utils import _pair, _triple
+from torch.nn.modules.utils import _single, _pair, _triple
 from torch.nn.quantized.modules.utils import _quantize_weight
 from torch.nn.utils import fuse_conv_bn_weights
 
 class _ConvNd(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1,
-                 transposed=False, output_padding=False,
+                 transposed=False, output_padding=0,
                  groups=1, bias=True,
                  padding_mode='zeros'):
         super(_ConvNd, self).__init__()
@@ -200,7 +200,7 @@ class Conv1d(_ConvNd):
 
         super(Conv1d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
-            groups, bias, padding_mode,
+            groups=groups, bias=bias, padding_mode=padding_mode,
             transposed=False, output_padding=_single(0))
 
     def _get_name(self):
@@ -639,7 +639,7 @@ class ConvTranspose2d(_ConvNd):
 
         super(ConvTranspose2d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
-            groups, bias, padding_mode,
+            groups=groups, bias=bias, padding_mode=padding_mode,
             transposed=True, output_padding=output_padding)
 
     def _get_name(self):
