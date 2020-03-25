@@ -31,7 +31,7 @@ class TestDispatch(TestCase):
     # don't commute, you can still run commute with a fixed ctor_order
     # so that you can test that the destructors still commute
     def run_ops(self, name, ops, ctor_order=None, dtor_order=None,
-                results=None, raises=False):
+                results=None, expect_raises=False):
         """
         Given a list of operator registrations, run the registrations in the
         order specified by ctor_order, and then run the deregistrations in
@@ -45,7 +45,7 @@ class TestDispatch(TestCase):
         where provenance is a string that describes how exactly we got this
         string.
 
-        If raises is True, it is not an error to raise an exception.  Instead,
+        If expect_raises is True, it is not an error to raise an exception.  Instead,
         we'll store the exception string (instead of the dispatcher state)
         in results.  In principle we should flag these differently, but it's
         very obvious when you get an error in one case but not another.
@@ -97,7 +97,7 @@ class TestDispatch(TestCase):
                 ops[op_ix](refs[op_ix])
                 check_invariants("running ctors {}".format(ctor_order[:i + 1]))
             except RuntimeError as e:
-                if not raises:
+                if not expect_raises:
                     raise
                 actual = str(e).replace(test_namespace, "test")
                 expected, expected_provenance = results.setdefault(
@@ -116,7 +116,7 @@ class TestDispatch(TestCase):
                     .format(ctor_order[:i], op_ix))
                 break
         last_ctor = i
-        if raises and len(active_ops) == len(ops):
+        if expect_raises and len(active_ops) == len(ops):
             # Destroy references first, as some test frameworks (like pytest)
             # will retain references in the exception raised by assertTrue! EW!
             refs = None
@@ -130,7 +130,7 @@ class TestDispatch(TestCase):
             refs[op_ix] = None
             # discard not remove, since we may not have actually deregistered
             # anything if there was an error raised
-            if raises:
+            if expect_raises:
                 active_ops.discard(op_ix)
             else:
                 active_ops.remove(op_ix)
@@ -162,14 +162,14 @@ class TestDispatch(TestCase):
     #
     # NB: checking all permutations means this function is exponential in
     # the length of ops!  So don't pass too many ops to this function!
-    def commute(self, name, ops, ctor_order=None, raises=False):
+    def commute(self, name, ops, ctor_order=None, expect_raises=False):
         results = {}
 
         def go(ctor_order):
             for dtor_order in itertools.permutations(range(len(ops))):
                 self.run_ops(
                     name, ops, ctor_order, dtor_order,
-                    results=results, raises=raises)
+                    results=results, expect_raises=expect_raises)
 
         if ctor_order is not None:
             go(ctor_order)
@@ -210,7 +210,7 @@ catchall: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
             lambda m: m.def_("foo(Tensor x, Tensor y) -> Tensor"),
             # m.impl("foo", [](const Tensor & x) { return x })
             lambda m: m.impl_t_t("foo"),
-        ], raises=True)
+        ], expect_raises=True)
         self.assertExpectedInline(r, '''In registration for test::foo: expected schema of operator to be "test::foo(Tensor x, Tensor y) -> (Tensor)", but got inferred schema "(Tensor _0) -> (Tensor _0)". The number of arguments is different. 2 vs 1.''')  # noqa
 
     def test_def_with_inference(self):
@@ -262,7 +262,7 @@ catchall: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
             lambda m: m.def_("foo(Tensor x, Tensor y) -> Tensor"),
             # m.def("foo(Tensor x, Tensor y) -> Tensor")
             lambda m: m.def_("foo(Tensor x, Tensor y) -> Tensor"),
-        ], raises=True)
+        ], expect_raises=True)
         # TODO: fill in the error message here
         # self.assertExpectedInline(r, '''''')
 
@@ -290,11 +290,11 @@ alias analysis kind: PURE_FUNCTION
             lambda m: m.def_("foo(Tensor x) -> Tensor"),
         ]
         self.assertExpectedInline(
-            self.commute("foo", ops, ctor_order=(0, 1), raises=True),
+            self.commute("foo", ops, ctor_order=(0, 1), expect_raises=True),
             '''Tried to register multiple operators with the same name and the same overload name but different schemas: test::foo(Tensor x) -> (Tensor) vs test::foo(Tensor x, Tensor y) -> (Tensor)'''  # noqa
         )
         self.assertExpectedInline(
-            self.commute("foo", ops, ctor_order=(1, 0), raises=True),
+            self.commute("foo", ops, ctor_order=(1, 0), expect_raises=True),
             '''Tried to register multiple operators with the same name and the same overload name but different schemas: test::foo(Tensor x, Tensor y) -> (Tensor) vs test::foo(Tensor x) -> (Tensor)'''  # noqa
         )
 
@@ -316,7 +316,7 @@ alias analysis kind: PURE_FUNCTION
 '''
         )
         self.assertExpectedInline(
-            self.commute("foo", ops, ctor_order=(1, 0), raises=True),
+            self.commute("foo", ops, ctor_order=(1, 0), expect_raises=True),
             '''Tried to define the schema for test::foo multiple times without providing an explicit alias analysis kind at each registration site.  This was previously permitted, but is now not allowed.  You should either explicitly specify the correct alias analysis kind at each site [PURE_FUNCTION], or use the new Module::impl() API, which permits you to omit the schema entirely when specifying further implementations of an operator'''  # noqa
         )
 
@@ -331,11 +331,11 @@ alias analysis kind: PURE_FUNCTION
             lambda m: m.def_("foo(Tensor x) -> Tensor", alias="CONSERVATIVE"),
         ]
         self.assertExpectedInline(
-            self.commute("foo", ops, ctor_order=(0, 1), raises=True),
+            self.commute("foo", ops, ctor_order=(0, 1), expect_raises=True),
             '''Tried to define the schema for test::foo with different alias analysis kinds: PURE_FUNCTION vs CONSERVATIVE'''  # noqa
         )
         self.assertExpectedInline(
-            self.commute("foo", ops, ctor_order=(1, 0), raises=True),
+            self.commute("foo", ops, ctor_order=(1, 0), expect_raises=True),
             '''Tried to define the schema for test::foo with different alias analysis kinds: CONSERVATIVE vs PURE_FUNCTION'''  # noqa
         )
 
