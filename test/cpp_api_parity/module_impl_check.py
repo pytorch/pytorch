@@ -28,8 +28,8 @@ from cpp_api_parity import torch_nn_modules
 
 # Expected substitutions:
 #
-# ${module_variant_name}
-# ${module_qualified_name}
+# ${module_variant_name}  (e.g. `Linear_no_bias_cpu`)
+# ${module_qualified_name}  (e.g. `torch::nn::Linear`)
 # ${cpp_args_construction_stmts}
 # ${cpp_constructor_args}
 # ${device}

@@ -28,7 +28,7 @@ from cpp_api_parity import torch_nn_functionals
 
 # Expected substitutions:
 #
-# ${functional_variant_name}
+# ${functional_variant_name}  (e.g. `BCELoss_no_reduce`)
 # ${cpp_args_construction_stmts}
 # ${cpp_function_call}
 TORCH_NN_FUNCTIONAL_TEST_FORWARD = Template("""
