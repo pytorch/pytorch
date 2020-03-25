@@ -18,6 +18,7 @@ import tempfile
 import shutil
 from string import Template
 import re
+import os
 
 import torch
 from cpp_api_parity.utils import TorchNNFunctionalTestParams, TORCH_NN_COMMON_TEST_HARNESS, \
@@ -100,6 +101,7 @@ def test_forward(unit_test_class, test_params):
     run_cpp_test_fn_and_check_output()
 
     # Remove temporary folder that stores C++ outputs
+    assert os.path.exists(cpp_tmp_folder)
     shutil.rmtree(cpp_tmp_folder)
 
 def compute_functional_name(test_params_dict):
