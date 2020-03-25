@@ -225,7 +225,7 @@ auto ReadyQueue::pop() -> NodeTask {
 }
 
 // This limit is based on the default python recursion limit which is 1000
-Engine::Engine() : max_recursion_depth_(100) {}
+Engine::Engine() : max_recursion_depth_(100), non_reentrant_thread_count_(0) {}
 
 // Send shutdown tasks to all ReadyQueues if no backward tasks are running
 // Even though readyQueue should be empty, shutdown tasks have the highest
@@ -240,8 +240,23 @@ Engine::~Engine() {
     for (auto& queue : ready_queues_) {
      queue->pushShutdownTask();
     }
+    // Do not wait for termination of global threads on Windows
+    // Because CRT terminates DLL threads before calling
+    // global object destructors
+#if !defined(_WIN32) || !defined(C10_BUILD_SHARED_LIBS)
+    std::unique_lock<std::mutex> lk(non_reentrant_thread_finish_mutex_);
+    while(non_reentrant_thread_count_.load() != 0) {
+      non_reentrant_thread_finish_.wait(lk);
+    }
+#endif
   }
-  // Othewise threads are leaked
+  // Otherwise threads are leaked
+}
+
+void Engine::release_workers() {
+  std::unique_lock<std::mutex> lk(non_reentrant_thread_finish_mutex_);
+  non_reentrant_thread_count_.store(0);
+  non_reentrant_thread_finish_.notify_one();
 }
 
 void Engine::set_device(int device) {
@@ -286,6 +301,12 @@ auto Engine::thread_init(int device) -> void {
   set_device(device);
   std::shared_ptr<GraphTask> graph_task = nullptr;
   thread_main(graph_task, /* reentrant_thread */ false);
+  // Notify about shutdown
+  {
+    std::unique_lock<std::mutex> lk(non_reentrant_thread_finish_mutex_);
+    non_reentrant_thread_count_.fetch_sub(1);
+    non_reentrant_thread_finish_.notify_one();
+  }
 }
 
 // NOTE: graph_tasks do not necessarily form a stack. Imagine this
@@ -376,7 +397,7 @@ auto Engine::thread_main(
 
 void Engine::reentrant_thread_init() {
   at::init_num_threads();
-  auto tp_shared= thread_pool_shared_;
+  auto tp_shared = thread_pool_shared_;
   while(true) {
     std::unique_lock<std::mutex> lk(tp_shared->mutex_);
     ++thread_pool_shared_->num_workers_;
@@ -930,6 +951,7 @@ auto Engine::start_threads() -> void {
 
   thread_pool_shared_ = std::make_shared<ThreadPoolShared>();
 
+  non_reentrant_thread_count_.store(num_threads);
   for (int i = 0; i < num_threads; ++i) {
     std::thread t(&Engine::thread_init, this, i - 1);
     t.detach();

@@ -9,7 +9,7 @@
 #include "test/cpp/tensorexpr/padded_buffer.h"
 #include "torch/csrc/jit/tensorexpr/buffer.h"
 #include "torch/csrc/jit/tensorexpr/cuda_codegen.h"
-#include "torch/csrc/jit/tensorexpr/schedule.h"
+#include "torch/csrc/jit/tensorexpr/loopnest.h"
 #include "torch/csrc/jit/tensorexpr/tensor.h"
 
 #include <c10/cuda/CUDACachingAllocator.h>
@@ -18,7 +18,7 @@
 namespace torch {
 namespace jit {
 using namespace torch::jit::tensorexpr;
-using namespace torch::jit::tensorexpr::schedule;
+using namespace torch::jit::tensorexpr;
 
 template <typename ctype>
 void testCudaTestVectorAdd01_impl() {

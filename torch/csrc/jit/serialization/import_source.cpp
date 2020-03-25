@@ -262,6 +262,22 @@ struct SourceImporterImpl : public Resolver,
       const QualifiedName& qualified_classname,
       const ClassDef& class_def,
       bool is_module) {
+    // BC for TorchBind classes
+    //
+    // Previously we would serialize TorchBind classes as actual
+    // classes with methods that delegate to things in the
+    // torch.ops.* namespace. We've switched away from this and
+    // now just rely on those classes being present in the binary
+    // and emit code for them based on the ClassType in memory.
+    //
+    // TODO: remove this once we no longer have old TorchBind code
+    // in production models
+    {
+      static QualifiedName torch_classes_qualname("__torch__.torch.classes");
+      if (torch_classes_qualname.isPrefixOf(qualified_classname)) {
+        return;
+      }
+    }
     auto class_type = ClassType::create(
         c10::QualifiedName(qualified_classname), cu_, is_module);
 
