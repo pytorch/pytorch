@@ -80,7 +80,7 @@ struct TORCH_API RpcRetryOptions {
   // sendWithRetries function.
   RpcRetryOptions() = default;
   // Maximum number of times we will retry the RPC
-  int maxRetries{3};
+  int maxRetries{5};
   // Initial duration between consecutive RPC send attempts
   std::chrono::milliseconds rpcRetryDuration{std::chrono::milliseconds(1000)};
   // Constant for exponential backoff used while calculating future wait
@@ -155,7 +155,7 @@ class TORCH_API RpcAgent {
   //
   // Sends ``message`` to the ``RpcAgent`` of id ``to`` and returns a
   // ``FutureMessage`` ptr, just like send(). Caller can specify the maximum
-  // number of retries for this RPC (default is 3), initial duration between
+  // number of retries for this RPC (default is 5), initial duration between
   // sends (default is 1000ms), and backoff constant (default is 1.5) by
   // passing in the RpcRetryOptions struct. This API might end up
   // executing a method twice on the remote end (it does not guarantee

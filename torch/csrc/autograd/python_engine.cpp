@@ -38,6 +38,7 @@ Engine& PythonEngine::get_python_engine() {
   // backwards threads hold a lock, we'll probably deadlock in the engine
   // destructor.
   if (_reinitialize_engine) {
+    engine.release_workers();
     engine.~PythonEngine();
     new (&engine) torch::autograd::python::PythonEngine();
     _reinitialize_engine = false;

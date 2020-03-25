@@ -42,7 +42,7 @@ class DistributedDataParallel(Module):
 
     The batch size should be larger than the number of GPUs used locally.
 
-    See also: :ref:`distributed-basics` and :ref:`cuda-nn-dataparallel-instead`.
+    See also: :ref:`distributed-basics` and :ref:`cuda-nn-ddp-instead`.
     The same constraints on input as in :class:`torch.nn.DataParallel` apply.
 
     Creation of this class requires that ``torch.distributed`` to be already

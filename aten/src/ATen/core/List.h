@@ -181,7 +181,6 @@ template<class T> List<T> toTypedList(List<IValue> list);
 template<class T> List<IValue> toList(List<T> list);
 const IValue* ptr_to_first_element(const List<IValue>& list);
 }
-template<class T> bool list_is_equal(const List<T>& lhs, const List<T>& rhs);
 
 /**
  * An object of this class stores a list of values of type T.
@@ -396,12 +395,21 @@ public:
   void resize(size_type count, const T& value) const;
 
   /**
-   * Compares two lists for equality. Two lists are equal if they have the
-   * same number of elements and for each list position the elements at
-   * that position are equal.
+   * Value equality comparison. This function implements Python-like semantics for
+   * equality: two lists with the same identity (e.g. same pointer) trivially
+   * compare equal, otherwise each element is compared for equality.
    */
-  friend bool list_is_equal<T>(const List& lhs, const List& rhs);
+  template <class T_>
+  friend bool operator==(const List<T_>& lhs, const List<T_>& rhs);
 
+  template <class T_>
+  friend bool operator!=(const List<T_>& lhs, const List<T_>& rhs);
+
+  /**
+   * Identity comparison. Returns true if and only if `rhs` represents the same
+   * List object as `this`.
+   */
+  bool is(const List<T>& rhs) const;
 
   std::vector<T> vec() const;
 

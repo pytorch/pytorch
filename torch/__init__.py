@@ -74,10 +74,11 @@ if platform.system() == 'Windows':
 
 # See Note [Global dependencies]
 def _load_global_deps():
-    if platform.system() == 'Windows':
-        return
-
-    lib_name = 'libtorch_global_deps' + ('.dylib' if platform.system() == 'Darwin' else '.so')
+    ext_dict = {'Darwin': '.dylib', 'Windows': '.dll'}
+    cur_platform = platform.system()
+    lib_name_prefix = '' if cur_platform == 'Windows' else 'lib'
+    lib_name_suffix = ext_dict.get(cur_platform, '.so')
+    lib_name = lib_name_prefix + 'torch_global_deps' + lib_name_suffix
     here = os.path.abspath(__file__)
     lib_path = os.path.join(os.path.dirname(here), 'lib', lib_name)
 
