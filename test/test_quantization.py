@@ -1059,13 +1059,13 @@ class GraphModePostTrainingQuantTest(QuantizationTestCase):
         script_model.sub.fc1.weight = torch.nn.Parameter(eager_model.sub.module.fc1.weight.detach())
         script_model.sub.fc1.bias = torch.nn.Parameter(eager_model.sub.module.fc1.bias.detach())
         script_model.sub.fc2.weight = torch.nn.Parameter(eager_model.sub.module.fc2.weight.detach())
-        script_model.sub.fc2.bias = torch.nn.Parameter(eager_model.sub.module.fc2.module.bias.detach())
+        script_model.sub.fc2.bias = torch.nn.Parameter(eager_model.sub.module.fc2.bias.detach())
         script_model.fc.weight = torch.nn.Parameter(eager_model.fc.weight.detach())
         script_model.fc.bias = torch.nn.Parameter(eager_model.fc.bias.detach())
 
         model_eager = quantize(eager_model, test_only_eval_fn, self.calib_data)
         qconfig_dict = {
-            '': defualt_qconfig
+            '': default_qconfig,
             'fc': None
         }
         model_traced = torch.jit.trace(script_model, self.calib_data[0][0])

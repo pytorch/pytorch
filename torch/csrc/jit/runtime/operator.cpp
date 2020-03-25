@@ -172,7 +172,8 @@ bool printerHasSpecialCaseFor(Symbol sym) {
       prim::AutogradAnyNonZero, // temporarily inserted by autograd
       prim::AutogradAdd, // temporarily inserted by autograd
       prim::ConstantChunk, // optimization pass adds it
-      prim::DifferentiableGraph, // optimization pass adds it
+      prim::DifferentiableGraph, // optimization pass adds it,
+      prim::FunctionalGraph, // optimization pass adds it,
       prim::BroadcastSizes, // optimization pass (fuser) adds it
       prim::ChunkSizes, // optimization pass (fuser) adds it
       prim::Drop, // used in interpreter only
@@ -211,6 +212,7 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::FusionGroup,
       prim::CudaFusionGroup,
       prim::DifferentiableGraph,
+      prim::FunctionalGraph,
       prim::Constant,
       prim::Uninitialized,
       prim::DictConstruct,
