@@ -202,7 +202,6 @@ class TestScriptPy3(JitTestCase):
                 super(MyModule, self).__init__('MyModule')
 
             def __getattr__(self, attr):
-                print('getting attr', attr)
                 return TheType
 
         some_module = MyModule()
