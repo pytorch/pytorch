@@ -359,7 +359,8 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::ListUnpack:
     case prim::PythonOp:
     case prim::GetAttr:
-      if (isFrozen_ && node->kind() == prim::GetAttr)
+      if (isFrozen_ && node->kind() == prim::GetAttr &&
+          node->input()->type()->expect<ClassType>()->is_module())
         return analyzeCreator(node);
       return analyzeExtractor(node);
     case prim::unchecked_cast:
