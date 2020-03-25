@@ -71,9 +71,11 @@ void ${module_variant_name}_test_forward_backward(
   for (const auto& param : module->named_parameters()) {
     torch::Tensor grad = param.value().grad();
     if (grad.is_sparse()) {
-      grad = grad.to_dense();
+      grad_dict.insert(param.key() + "_grad_indices", grad.coalesce().indices());
+      grad_dict.insert(param.key() + "_grad_values", grad.coalesce().values());
+    } else {
+      grad_dict.insert(param.key() + "_grad", grad);
     }
-    grad_dict.insert(param.key() + "_grad", grad);
   }
 
   write_ivalue_to_file(torch::IValue(grad_dict), backward_grad_dict_file_path);
@@ -111,8 +113,10 @@ def run_python_forward_backward(unit_test_class, test_params):
     for name, param in module.named_parameters():
         grad = param.grad
         if grad.is_sparse:
-            grad = grad.to_dense()
-        python_grad_dict[name + "_grad"] = grad
+            python_grad_dict[name + "_grad_indices"] = grad.coalesce().indices()
+            python_grad_dict[name + "_grad_values"] = grad.coalesce().values()
+        else:
+            python_grad_dict[name + "_grad"] = grad
 
     return script_module, python_output, python_grad_dict
 
