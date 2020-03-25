@@ -2348,7 +2348,7 @@ Args:
 
 add_docstr_all('resize_',
                r"""
-resize_(*sizes) -> Tensor
+resize_(*sizes, memory_format=torch.contiguous_format) -> Tensor
 
 Resizes :attr:`self` tensor to the specified size. If the number of elements is
 larger than the current storage size, then the underlying storage is resized
@@ -2367,6 +2367,9 @@ memory is uninitialized.
 
 Args:
     sizes (torch.Size or int...): the desired size
+    memory_format (:class:`torch.memory_format`, optional): the desired memory format of 
+        Tensor. Default: ``torch.contiguous_format``. Note that memory format of 
+        :attr:`self` is going to be unaffected if ``self.size()`` matches ``sizes``.
 
 Example::
 
@@ -2378,10 +2381,16 @@ Example::
 
 add_docstr_all('resize_as_',
                r"""
-resize_as_(tensor) -> Tensor
+resize_as_(tensor, memory_format=torch.contiguous_format) -> Tensor
 
 Resizes the :attr:`self` tensor to be the same size as the specified
 :attr:`tensor`. This is equivalent to ``self.resize_(tensor.size())``.
+
+Args:
+    memory_format (:class:`torch.memory_format`, optional): the desired memory format of 
+        Tensor. Default: ``torch.contiguous_format``. Note that memory format of 
+        :attr:`self` is going to be unaffected if ``self.size()`` matches ``tensor.size()``.
+
 """)
 
 add_docstr_all('rot90',
