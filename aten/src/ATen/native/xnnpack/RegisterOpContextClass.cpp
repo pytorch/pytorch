@@ -15,6 +15,7 @@ using internal::linear::createLinearClampPrePackOpContext;
 using internal::convolution2d::createConv2dClampPrePackOpContext;
 
 namespace {
+
 torch::jit::class_<LinearOpContext> register_packed_linear_op_context_class() {
   static auto register_linear_op_context_class =
       torch::jit::class_<LinearOpContext>("xnnpack", "LinearOpContext")
@@ -94,8 +95,8 @@ static auto registry =
             .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
             .kernel<internal::convolution2d::Conv2dClampRun>(
                 DispatchKey::CPUTensorId));
-} // namespace
 
+} // namespace
 } // namespace xnnpack
 } // namespace native
 } // namespace at
