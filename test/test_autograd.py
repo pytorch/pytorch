@@ -2145,7 +2145,7 @@ class TestAutograd(TestCase):
     class BackwardError(Function):
         @staticmethod
         def forward(ctx, inp):
-            return inp
+            return inp.clone()
 
         @staticmethod
         def backward(ctx, grad):
@@ -2154,10 +2154,10 @@ class TestAutograd(TestCase):
     def test_reentrant_child_error(self):
         # Parent graph.
         a = torch.rand(3, 3, requires_grad=True)
-        b = torch.rand(3, 3, requires_grad=True)
         c = a * a
 
         # Reentrant child graph.
+        b = torch.rand(3, 3, requires_grad=True)
         e = b * b
         f = TestAutograd.BackwardError.apply(e)
         reentrant_root = f.sum()
@@ -2166,7 +2166,7 @@ class TestAutograd(TestCase):
 
             @staticmethod
             def forward(ctx, inp):
-                return inp
+                return inp.clone()
 
             @staticmethod
             def backward(ctx, grad):
@@ -5462,16 +5462,15 @@ class TestAutogradDeviceType(TestCase):
         t5 = TestAutograd.BackwardError.apply(t4)
 
         # Child gpu graph (much longer than parent graph).
-        computations = []
-        computations.append(t2 * t2)
+        prev = t2 * t2
         for i in range(10):
-            computations.append(computations[-1] * t2)
-        reentrant_root = computations[-1].sum()
+            prev = prev * t2
+        reentrant_root = prev
 
         class ReentrantFunc(Function):
             @staticmethod
             def forward(ctx, inp):
-                return inp
+                return inp.clone()
 
             @staticmethod
             def backward(ctx, grad):
@@ -5497,8 +5496,8 @@ class TestAutogradDeviceType(TestCase):
         after = CudaMemoryLeakCheck.get_cuda_memory_usage()
         start = time.time()
         while before != after and time.time() - start < 30:
-            after = CudaMemoryLeakCheck.get_cuda_memory_usage()
             time.sleep(1)
+            after = CudaMemoryLeakCheck.get_cuda_memory_usage()
 
     # test for backward in https://github.com/pytorch/pytorch/issues/15511
     def test_pdist_large(self, device):
