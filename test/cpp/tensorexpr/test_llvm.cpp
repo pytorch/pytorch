@@ -393,7 +393,7 @@ void testLLVMVectorizerLoadStoreTest() {
   Buffer c_buf(VarHandle(c->func_var()), kInt, {4});
   LoopNest l({c});
   Stmt* s = l.root_stmt();
-  l.Vectorize(*dynamic_cast<Block*>(s)->stmts().begin());
+  l.vectorize(*dynamic_cast<Block*>(s)->stmts().begin());
 
   EXPECT_TRUE(dynamic_cast<For*>(*dynamic_cast<Block*>(s)->stmts().begin()) == nullptr);
 
