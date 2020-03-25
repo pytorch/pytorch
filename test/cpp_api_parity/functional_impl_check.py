@@ -159,7 +159,7 @@ def add_torch_nn_functional_impl_parity_tests(parity_table, unit_test_class, tes
 
         assert 'cpp_options_args' in test_params_dict or 'cpp_function_call' in test_params_dict, \
             "`cpp_options_args` or `cpp_function_call` entry must be present in test params dict: {}".format(
-                test_params_dict))
+                test_params_dict)
         assert not ('cpp_options_args' in test_params_dict and 'cpp_function_call' in test_params_dict), \
             "Only one of `cpp_options_args` and `cpp_function_call` entries should be present in test params dict: {}".format(
                 test_params_dict)
