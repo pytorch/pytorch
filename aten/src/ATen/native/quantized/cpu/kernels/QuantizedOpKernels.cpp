@@ -1553,44 +1553,24 @@ void LayerNormKernelQuantizedImplInternal(
       T* Y_ptr = Y_data + i * N;
 
       // First pass: calculate mean and variance.
-      // Note: Fake dequant using scale=1.0f because scale_x cancels out
-      //   during normalization, with the exception of epsilon
 
-      // TODO replace with TensorIterator implementation once #33166 is fixed.
-      float layerSum = 0.0f;
-      float layerSumSquares = 0.0f;
-      for (int64_t vecIdx = 0; vecIdx < kNumIntVecInLayer; vecIdx++) {
-        auto qXVec = qVec::loadu(X_ptr + vecIdx * kIntVLen);
-        auto dqXVec = qXVec.dequantize(x_fake_scale_vec, x_zp_vec,
-            x_fake_scale_zp_neg_premul_vec);
-          // sum of vals
-        float thisLayerSum = vec256::reduce_all<float>(
-          [](fVec& x, fVec& y) { return x + y; },
-          (float*)dqXVec.data(),
-          kFloatVLen * dqXVec.size()
-        );
-        layerSum += thisLayerSum;
-        // sum of squares
-        float thisLayerSumSquares = vec256::map_reduce_all<float>(
-          [](fVec x) { return x * x; },
-          [](fVec x, fVec y) { return x + y; },
-          (float*)dqXVec.data(),
-          kFloatVLen * dqXVec.size()
-        );
-        layerSumSquares += thisLayerSumSquares;
+      // this is faster than using vec256::reduce_all because we can do it in
+      // one pass
+      float layerSumShifted = 0.0f;
+      float layerSumSquaresShifted = 0.0f;
+      for (int64_t idx = 0; idx < N; idx++) {
+        auto qXVal = X_ptr[idx].val_;
+        layerSumShifted += qXVal;
+        layerSumSquaresShifted += qXVal * qXVal;
       }
-      for (int64_t remIdx = N - kNonVecRemInLayer; remIdx < N; remIdx++) {
-        auto qXVal = X_ptr[remIdx];
-        float dqXVal = at::dequantize_val(x_fake_scale, x_zp, qXVal);
-        layerSum += dqXVal;
-        layerSumSquares += dqXVal * dqXVal;
-      }
+      float layerMeanShiftedDivScaleX = layerSumShifted / N;
 
       // mean(dqX) / scale_x
-      float layerMeanDivScaleX = layerSum / N;
+      float layerMeanDivScaleX = layerMeanShiftedDivScaleX - x_zp;
       // var(dqX) / scale_x^2
       float layerVarDivScaleXSq =
-        std::max(layerSumSquares / N - layerMeanDivScaleX * layerMeanDivScaleX, 0.0f);
+        std::max(layerSumSquaresShifted / N -
+            layerMeanShiftedDivScaleX * layerMeanShiftedDivScaleX, 0.0f);
       // scale_x / std(dqX), scale epsilon properly
       float scaleXDivLayerStd = 1.0f /
         std::sqrt(layerVarDivScaleXSq + (eps * x_scale * x_scale));
@@ -1629,6 +1609,7 @@ void LayerNormKernelQuantizedImplInternal(
           ((dqXVal - layerMeanDivScaleX) * scaleXDivLayerStd) * gamma_v + beta_v;
         Y_ptr[remIdx] = at::quantize_val<T>(y_scale, y_zp, dqY);
       }
+
 
     }
   }); // parallel_for

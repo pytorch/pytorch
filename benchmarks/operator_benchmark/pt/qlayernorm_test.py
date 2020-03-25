@@ -10,21 +10,21 @@ import torch
 
 """Microbenchmarks for quantized layernorm operator."""
 
-layernorm_configs_long = op_bench.cross_product_configs(
+layernorm_configs_short = op_bench.cross_product_configs(
     dims=(
-        (64, 224, 224),
-        (128, 112, 112),
-        (256, 56, 56),
+        (1, 8, 16),
+        (8, 8, 16),
+        (32, 8, 16),
+        (64, 128, 56, 56),
     ),
     dtype=(torch.qint8,),
     tags=["short"],
 )
 
 
-class LayerNormBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, dims, dtype):
-        print(dims, dtype)
+class QLayerNormBenchmark(op_bench.TorchBenchmarkBase):
 
+    def init(self, dims, dtype):
         X = (torch.rand(*dims) - 0.5) * 256
         scale = 1.0
         zero_point = 0
@@ -43,7 +43,7 @@ class LayerNormBenchmark(op_bench.TorchBenchmarkBase):
             output_zero_point=self.Y_zero_point)
 
 
-op_bench.generate_pt_test(layernorm_configs_long, LayerNormBenchmark)
+op_bench.generate_pt_test(layernorm_configs_short, QLayerNormBenchmark)
 
 
 if __name__ == "__main__":
