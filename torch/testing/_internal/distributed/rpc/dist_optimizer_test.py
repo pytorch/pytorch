@@ -19,8 +19,9 @@ class MyModule:
 
     def __init__(self):
         # cannot directly use torch.manual_seed(0) as all threads share the same
-        # same default generator. The race from multiple RPC threads could mess
-        # up the draw order from the RNG, leading to non-deterministic behavior.
+        # default generator. The race from multiple RPC threads could mess up
+        # the draw order from the default RNG instance, leading to
+        # non-deterministic behavior. Hence, create a dedicated RNG here.
         g_cpu = torch.Generator()
         g_cpu.manual_seed(0)
         self.w = torch.rand((3, 3), requires_grad=True, generator=g_cpu)
