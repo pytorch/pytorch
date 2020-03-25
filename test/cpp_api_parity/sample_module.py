@@ -104,6 +104,4 @@ module_tests = [
     ),
 ]
 
-torch_nn_modules.module_metadata_map['SampleModule'] = torch_nn_modules.TorchNNModuleMetadata(
-    cpp_sources=SAMPLE_MODULE_CPP_SOURCE,
-)
+torch_nn_modules.module_cpp_sources['SampleModule'] = SAMPLE_MODULE_CPP_SOURCE

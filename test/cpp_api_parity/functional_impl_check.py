@@ -222,11 +222,11 @@ def build_cpp_tests(unit_test_class, print_cpp_source=False):
     assert len(torch_nn_test_params_map) > 0
     cpp_sources = TORCH_NN_COMMON_TEST_HARNESS
     functions = []
-    functionals_added_metadata_cpp_sources = set()
+    functionals_added_cpp_sources = set()
     for test_name, test_params in torch_nn_test_params_map.items():
-        if test_params.functional_name not in functionals_added_metadata_cpp_sources:
-            cpp_sources += torch_nn_functionals.functional_metadata_map.get(test_params.functional_name, torch_nn_functionals.TorchNNFunctionalMetadata()).cpp_sources
-            functionals_added_metadata_cpp_sources.add(test_params.functional_name)
+        if test_params.functional_name not in functionals_added_cpp_sources:
+            cpp_sources += torch_nn_functionals.functional_cpp_sources.get(test_params.functional_name, '')
+            functionals_added_cpp_sources.add(test_params.functional_name)
         cpp_sources += generate_test_cpp_sources(test_params=test_params, template=TORCH_NN_FUNCTIONAL_TEST_FORWARD)
         functions.append('{}_{}'.format(test_params.functional_variant_name, 'test_forward'))
     if print_cpp_source:
