@@ -316,8 +316,8 @@ class TestUtilityFuns(TestCase):
                 self.register_buffer("weight", torch.ones(5))
 
             def forward(self, x):
-                shape = torch.tensor(list(self.weight.shape))
-                return x * shape
+                shape = self.weight.shape[0]
+                return x + shape
 
         x = torch.randn(2, 5)
         _set_opset_version(self.opset_version)
@@ -328,7 +328,7 @@ class TestUtilityFuns(TestCase):
 
         for node in graph.nodes():
             assert node.kind() != "onnx::Shape"
-        assert len(list(graph.nodes())) == 1
+        assert len(list(graph.nodes())) == 4
 
     def test_strip_doc_string(self):
         class MyModule(torch.nn.Module):
