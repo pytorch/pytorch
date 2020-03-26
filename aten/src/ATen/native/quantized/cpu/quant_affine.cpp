@@ -143,7 +143,7 @@ void quantize_tensor_affine_cpu(Tensor rtensor, Tensor qtensor, double scale, in
         return qtensor;
       }
     #endif
-    auto qdata = qtensor.data_ptr<>();
+    auto qdata = qtensor.data_ptr<scalar_t>();
     auto numel = rtensor.numel();
     for (int i = 0; i < numel; ++i) {
       qdata[i] = quantize_val<scalar_t>(scale, zero_point, rdata[i]);
