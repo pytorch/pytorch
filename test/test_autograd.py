@@ -6,7 +6,6 @@ import tempfile
 import time
 import unittest
 import warnings
-import threading
 from copy import deepcopy
 from collections import OrderedDict
 from itertools import product
@@ -4044,56 +4043,6 @@ for shape in [(1,), ()]:
         out = model_end(middle)
         out.register_hook(my_hook)
         out.sum().backward()
-
-    def test_engine_shared_graph_threading(self):
-        # This test tries a "worst case scenario" to make sure that we don't call a single Node concurrently
-        # from multiple threads while multiple backward passes are running.
-        class MyFunction(torch.autograd.Function):
-            in_use = False
-
-            @staticmethod
-            def forward(ctx, inp):
-                return inp.clone()
-
-            @staticmethod
-            def backward(ctx, grad_output):
-                # Make sure nothing else enters here before we're done
-                if MyFunction.in_use:
-                    raise RuntimeError("A single node is entered concurrently")
-                MyFunction.in_use = True
-                # Note that time.sleep release the GIL
-                time.sleep(0.2)
-                MyFunction.in_use = False
-                return grad_output
-
-        class MyMod(nn.Module):
-            def forward(self, inp):
-                return MyFunction.apply(inp)
-
-        model_shared = nn.Sequential()
-        for i in range(10):
-            if i == 5:
-                model_shared.add_module(str(i) + "_custom", MyMod())
-            model_shared.add_module(str(i), nn.Linear(5, 5))
-            model_shared.add_module(str(i) + "_relu", nn.ReLU())
-
-        model_end = nn.Linear(5, 1)
-
-        inp = torch.rand(2, 5)
-        middle = model_shared(inp)
-
-        def run_backward():
-            out = model_end(middle)
-            grads = torch.autograd.grad(out.sum(), model_shared.parameters(), retain_graph=True)
-
-        threads = []
-        for _ in range(5):
-            p = threading.Thread(target=run_backward)
-            p.start()
-            threads.append(p)
-
-        for p in threads:
-            p.join()
 
 
 def index_variable(shape, max_indices):
