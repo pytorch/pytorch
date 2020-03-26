@@ -66,7 +66,7 @@ template <typename T>
 void checkZeroPoints(std::string fn_name, Tensor zero_points) {
   auto zero_points_data = zero_points.data_ptr<int64_t>();
   for (size_t i = 0; i < zero_points.numel(); ++i) {
-    checkZeroPoint<T>(fn_name, zero_points_data[i]);
+    native::checkZeroPoint<T>(fn_name, zero_points_data[i]);
   }
 }
 
@@ -87,7 +87,7 @@ Tensor quantize_tensor_affine(Tensor rtensor, Tensor qtensor, double scale, int6
 
   AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), fn_name, [&]() {  
     checkQuantizedTensor<scalar_t>(fn_name, qtensor);
-    checkZeroPoint<underlying_t>(fn_name, zero_point);
+    native::checkZeroPoint<underlying_t>(fn_name, zero_point);
   });
 
   quantize_tensor_affine_stub(rtensor.device().type(), rtensor, qtensor, scale, zero_point);
@@ -108,7 +108,7 @@ Tensor quantize_tensor_per_channel_affine(Tensor rtensor,
 
   AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), fn_name, [&]() {  
     checkQuantizedTensor<scalar_t>(fn_name, qtensor);
-    checkZeroPoints<underlying_t>(fn_name, zero_points);
+    native::checkZeroPoints<underlying_t>(fn_name, zero_points);
   });
 
   TORCH_CHECK(0 <= axis && axis < rtensor.dim(), "Channel axis out of range in per channel affine quantization.");
@@ -128,7 +128,7 @@ Tensor dequantize_tensor_affine(Tensor qtensor, Tensor rtensor, double scale, in
 
   AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), fn_name, [&]() {  
     checkQuantizedTensor<scalar_t>(fn_name, qtensor);
-    checkZeroPoint<underlying_t>(fn_name, zero_point);
+    native::checkZeroPoint<underlying_t>(fn_name, zero_point);
   });
 
   dequantize_tensor_affine_stub(qtensor.device().type(), qtensor, rtensor, scale, zero_point);
@@ -149,7 +149,7 @@ Tensor dequantize_tensor_per_channel_affine(Tensor qtensor,
 
   AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), fn_name, [&]() {  
     checkQuantizedTensor<scalar_t>(fn_name, qtensor);
-    checkZeroPoints<underlying_t>(fn_name, zero_points);
+    native::checkZeroPoints<underlying_t>(fn_name, zero_points);
   });
 
   TORCH_CHECK(0 <= axis && axis < qtensor.dim(), "Channel axis out of range in per channel affine dequantization.");
