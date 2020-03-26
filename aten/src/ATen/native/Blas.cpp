@@ -23,7 +23,7 @@ Tensor &addmv_out(Tensor& result, const Tensor &self, const Tensor &mat, const T
   TORCH_CHECK((mat.size(1) == vec.size(0) && mat.size(0) == self_.size(0)),
     "size mismatch, get ", self_.size(0), ", ", mat.size(0), "x", mat.size(1), ",", vec.size(0));
 
-  if (&result != &self_) {
+  if (!result.is_same(self_)) {
     at::native::copy_(result, self_);
   }
 
