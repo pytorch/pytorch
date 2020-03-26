@@ -4,16 +4,12 @@
 #include "ATen/core/interned_strings.h"
 #include "torch/csrc/autograd/generated/variable_factories.h"
 #include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/jit/runtime/argument_spec.h"
-#include "torch/csrc/jit/ir/attributes.h"
-#include "torch/csrc/jit/runtime/autodiff.h"
-#include "torch/csrc/jit/frontend/code_template.h"
-#include "torch/csrc/jit/runtime/custom_operator.h"
 #include "torch/csrc/jit/codegen/fuser/interface.h"
-#include "torch/csrc/jit/serialization/import.h"
-#include "torch/csrc/jit/ir/irparser.h"
-#include "torch/csrc/jit/runtime/interpreter.h"
+#include "torch/csrc/jit/frontend/code_template.h"
+#include "torch/csrc/jit/frontend/tracer.h"
 #include "torch/csrc/jit/ir/alias_analysis.h"
+#include "torch/csrc/jit/ir/attributes.h"
+#include "torch/csrc/jit/ir/irparser.h"
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
 #include "torch/csrc/jit/passes/constant_propagation.h"
 #include "torch/csrc/jit/passes/create_autodiff_subgraphs.h"
@@ -24,19 +20,21 @@
 #include "torch/csrc/jit/passes/requires_grad_analysis.h"
 #include "torch/csrc/jit/passes/shape_analysis.h"
 #include "torch/csrc/jit/passes/utils/subgraph_utils.h"
+#include "torch/csrc/jit/runtime/argument_spec.h"
+#include "torch/csrc/jit/runtime/autodiff.h"
+#include "torch/csrc/jit/runtime/custom_operator.h"
+#include "torch/csrc/jit/runtime/interpreter.h"
 #include "torch/csrc/jit/runtime/symbolic_script.h"
-#include "torch/csrc/jit/frontend/tracer.h"
-
-
+#include "torch/csrc/jit/serialization/import.h"
 
 #include "torch/csrc/autograd/engine.h"
 #include "torch/csrc/autograd/variable.h"
 
 #include <torch/csrc/jit/testing/file_check.h>
 #include "ATen/core/ivalue.h"
-#include "torch/csrc/jit/runtime/graph_executor.h"
-#include "torch/csrc/jit/frontend/ir_emitter.h"
 #include "torch/csrc/jit/api/module.h"
+#include "torch/csrc/jit/frontend/ir_emitter.h"
+#include "torch/csrc/jit/runtime/graph_executor.h"
 
 #include "onnx/onnx_pb.h"
 
@@ -159,10 +157,10 @@ void testFusion() {
   auto b = at::rand({4, 3, 5}, at::kCUDA).transpose(0, 1);
   const auto o_r = a * b;
 
-  std::vector<std::string> graph_strings{graph_string0,
-                                         graph_string1,
-                                         graph_string2};
-  for (auto i = decltype(graph_strings.size()){0}; i < graph_strings.size(); ++i) {
+  std::vector<std::string> graph_strings{
+      graph_string0, graph_string1, graph_string2};
+  for (auto i = decltype(graph_strings.size()){0}; i < graph_strings.size();
+       ++i) {
     Graph g;
     torch::jit::parseIR(graph_strings[i], &g);
 
