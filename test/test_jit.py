@@ -1680,6 +1680,36 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
                        .check("quantized::add_relu") \
                        .run(m.graph_for(data, data))
 
+    def test_quantized_add_scalar_relu(self):
+        class AddScalar(torch.nn.Module):
+            def __init__(self):
+                super(AddScalar, self).__init__()
+
+            def forward(self, x):
+                return F.relu(x + 3)
+
+        class InplaceAddScalar(torch.nn.Module):
+            def __init__(self):
+                super(InplaceAddScalar, self).__init__()
+
+            def forward(self, x):
+                x += 3
+                return F.relu(x)
+
+        for M in [AddScalar, InplaceAddScalar]:
+            m = torch.jit.script(M()).eval()
+            m = prepare_script(m, {'': default_qconfig}, True)
+            # for input tensor
+            assert len(attrs_with_prefix(m, '_observer')) == 1
+            data = torch.randn(1, 1, 10, 10, dtype=torch.float)
+            m(data)
+            m = convert_script(m, True)
+            FileCheck().check_not("aten::add") \
+                       .check_not("aten::add_") \
+                       .check_not("aten::relu") \
+                       .check("quantized::add_scalar_relu") \
+                       .run(m.graph_for(data))
+
     @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
                          " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
                          " with instruction set support avx2 or newer.")
