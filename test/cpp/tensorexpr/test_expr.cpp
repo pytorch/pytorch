@@ -269,19 +269,21 @@ void testExprCompareSelectEQ() {
 
 void testExprSubstitute01() {
   KernelScope kernel_scope;
-  ExprHandle x = Var::make("x", kFloat);
-  ExprHandle y = Var::make("y", kFloat);
-  ExprHandle e = (x - 1.0f) * (x + y + 2.0f);
+  const Var* x = new Var("x", kFloat);
+  const Var* y = new Var("y", kFloat);
+  const Expr* e = new Mul(new Sub(x, new FloatImm(1.0f)), new Add(x, y));
 
-  ExprHandle z = Var::make("z", kFloat);
-  ExprHandle e2(Substitute(e.node(), {{x, z + 1.0f}}));
-  ExprHandle e2_ref = ((z + 1.0f) - 1.0f) * ((z + 1.0f) + y + 2.0f);
+  const Var* z = new Var("z", kFloat);
+  const Expr* e2 = Substitute(e, {{x, new Add(z, new FloatImm(5.0f))}});
+  const Expr* e2_ref = new Mul(
+      new Sub(new Add(z, new FloatImm(5.0f)), new FloatImm(1.0f)),
+      new Add(new Add(z, new FloatImm(5.0f)), y));
   std::ostringstream oss;
-  oss << e2;
+  oss << *e2;
   std::string e2_str = oss.str();
 
   oss.str("");
-  oss << e2_ref;
+  oss << *e2_ref;
   std::string e2_ref_str = oss.str();
   ASSERT_EQ(e2_str, e2_ref_str);
 }

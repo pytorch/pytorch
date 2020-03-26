@@ -12,6 +12,5 @@ namespace jit {
 // produced from the (now-inlined) forked section.
 TORCH_API void InlineForkWait(const std::shared_ptr<Graph>& graph);
 
-
 } // namespace jit
 } // namespace torch
