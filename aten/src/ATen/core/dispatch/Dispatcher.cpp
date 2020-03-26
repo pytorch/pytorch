@@ -4,10 +4,19 @@
 namespace c10 {
 
 namespace detail {
+
 class RegistrationListenerList final {
 public:
-  void addListener(std::unique_ptr<OpRegistrationListener> listener) {
+  RegistrationHandleRAII addListener(std::unique_ptr<OpRegistrationListener> listener) {
+    auto raw_ptr = listener.get();
     listeners_.push_back(std::move(listener));
+    return RegistrationHandleRAII([this, raw_ptr] {
+        const auto& found_it = std::find_if(listeners_.begin(), listeners_.end(), [raw_ptr](auto& it) {
+            return it.get() == raw_ptr;
+        });
+        TORCH_CHECK(found_it != listeners_.end(), "Failed to find listener to deregister");
+        listeners_.erase(found_it);
+    });
   }
 
   void callOnOperatorRegistered(const OperatorHandle& op) {
@@ -150,14 +159,14 @@ RegistrationHandleRAII Dispatcher::registerKernel(const OperatorHandle& op, c10:
   return op.operatorIterator_->op.registerKernel(dispatch_key, std::move(kernel));
 }
 
-void Dispatcher::addRegistrationListener(std::unique_ptr<OpRegistrationListener> listener) {
+RegistrationHandleRAII Dispatcher::addRegistrationListener(std::unique_ptr<OpRegistrationListener> listener) {
   std::lock_guard<std::mutex> lock(mutex_);
 
   for (auto iter = operators_.begin(); iter != operators_.end(); ++iter) {
     listener->onOperatorRegistered(OperatorHandle(iter));
   }
 
-  listeners_->addListener(std::move(listener));
+  return listeners_->addListener(std::move(listener));
 }
 
 [[noreturn]] void Dispatcher::reportError(const DispatchTable& dispatchTable, DispatchKey dispatchKey) {
