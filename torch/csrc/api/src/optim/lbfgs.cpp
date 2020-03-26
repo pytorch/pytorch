@@ -552,22 +552,6 @@ Tensor LBFGS::step(LossClosure closure) {
   return orig_loss;
 }
 
-void LBFGS::add_parameters(const std::vector<Tensor>& parameters) {
-  return _add_parameters_new_design(parameters);
-}
-
-const std::vector<Tensor>& LBFGS::parameters() const noexcept {
-  return _parameters_new_design();
-}
-
-std::vector<Tensor>& LBFGS::parameters() noexcept {
-  return _parameters_new_design();
-}
-
-size_t LBFGS::size() const noexcept {
-  return _size_new_design();
-}
-
 void LBFGS::save(serialize::OutputArchive& archive) const {
   serialize(*this, archive);
 }
