@@ -6,6 +6,7 @@ from torch.nn.modules.pooling import MaxPool2d
 from .activation import ReLU, ReLU6
 from .batchnorm import BatchNorm2d, BatchNorm3d
 from .conv import Conv1d, Conv2d, Conv3d
+from .conv import ConvTranspose2d
 from .linear import Linear
 
 from .functional_modules import FloatFunctional, QFunctional
@@ -83,6 +84,7 @@ __all__ = [
     'Conv1d',
     'Conv2d',
     'Conv3d',
+    'ConvTranspose2d',
     'DeQuantize',
     'Linear',
     'MaxPool2d',

@@ -589,6 +589,10 @@ class ConvTranspose2d(_ConvTransposeNd):
         dilation = _pair(dilation)
         output_padding = _pair(output_padding)
 
+        if stride != _pair(1):
+            raise NotImplementedError(
+                "Non-unity strides are not yet supported...")
+
         if groups > 1:
             raise NotImplementedError("Groups are not yet implemented...")
 
