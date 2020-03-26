@@ -71,24 +71,8 @@ def script_qconfig(qconfig):
         activation=torch.jit.script(qconfig.activation())._c,
         weight=torch.jit.script(qconfig.weight())._c)
 
-def _canonicalize_qconfig_dict(module, qconfig_dict, canonicalized, qconfig_parent=None, prefix=''):
-    module_qconfig = qconfig_dict.get(type(module), qconfig_parent)
-    module_qconfig = qconfig_dict.get(prefix, qconfig_parent)
-    module_qconfig = getattr(module, 'qconfig', module_qconfig)
-    is_leaf = len(list(module.children())) == 0
-    if module_qconfig:
-        canonicalized[prefix] = module_qconfig
-
-    for name, child in module.named_children():
-        module_prefix = prefix + '.' + name if prefix else name
-        _canonicalize_qconfig_dict(child, qconfig_dict, canonicalized, module_qconfig, module_prefix)
-
 def prepare_script(model, qconfig_dict, inplace=False):
     _check_is_script_module(model)
-    # canonicalized = {}
-    # _canonicalize_qconfig_dict(model, qconfig_dict, canonicalized)
-    # print(canonicalized)
-    print(qconfig_dict)
     scripted_qconfig_dict = {k: script_qconfig(v) if v else None for k, v in qconfig_dict.items()}
     if not inplace:
         model = model.copy()
