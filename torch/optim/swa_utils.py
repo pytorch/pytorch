@@ -48,7 +48,7 @@ class AveragedModel(Module):
         >>> # Update bn statistics for the swa_model at the end
         >>> torch.optim.swa_utils.update_bn(loader, swa_model) 
 
-    You can use custom averaging functions with `avg_fun` parameter.
+    You can use custom averaging functions with `avg_fn` parameter.
     If no averaging function is provided, the default is to compute
     equally-weighted average of the weights.
 
@@ -56,7 +56,7 @@ class AveragedModel(Module):
         >>> # ema_model computes exponential moving averages of the weights
         >>> ema_avg = lambda averaged_model_parameter, model_parameter, num_averaged:\
                             0.1 * averaged_model_parameter + 0.9 * model_parameter
-        >>> ema_model = torch.optim.swa_utils.AveragedModel(model, avg_function=ema_avg)
+        >>> ema_model = torch.optim.swa_utils.AveragedModel(model, avg_fn=ema_avg)
 
     .. note::
         When using SWA with models containing Batch Normalization you may 
@@ -64,13 +64,13 @@ class AveragedModel(Module):
         You can do so by using :meth:`torch.optim.swa_utils.update_bn` utility.
 
     .. note::
-        :attr:`avg_fun` is not saved in the :meth:`state_dict` of the model.
+        :attr:`avg_fn` is not saved in the :meth:`state_dict` of the model.
 
     .. note::
         When :meth:`update_parameters` is called for the first time (i.e. 
         :attr:`n_averaged` is `0`) the parameters of `model` are copied
         to the parameters of :class:`AveragedModel`. For every subsequent
-        call of :meth:`update_parameters` the function `avg_fun` is used
+        call of :meth:`update_parameters` the function `avg_fn` is used
         to update the parameters.
 
     .. _Averaging Weights Leads to Wider Optima and Better Generalization:
@@ -84,16 +84,16 @@ class AveragedModel(Module):
         Generalizes Well:
         https://arxiv.org/abs/2001.02312
     """
-    def __init__(self, model, device=None, avg_fun=None):
+    def __init__(self, model, device=None, avg_fn=None):
         super(AveragedModel, self).__init__()
         self.module = deepcopy(model)
         if device is not None:
             self.module = self.module.to(device)
         self.register_buffer('n_averaged', torch.tensor(0, dtype=torch.long))
-        if avg_fun is None:
-            def avg_fun(p_avg, p, n_avg): 
+        if avg_fn is None:
+            def avg_fn(p_avg, p, n_avg):
                 return p_avg + (p - p_avg) / (n_avg + 1)
-        self.avg_fun = avg_fun
+        self.avg_fn = avg_fn
 
     def forward(self, *args, **kwargs):
         return self.module(*args, **kwargs)
@@ -105,8 +105,8 @@ class AveragedModel(Module):
             if self.n_averaged == 0:
                 p_swa.detach().copy_(p_model_)
             else:
-                p_swa.detach().copy_(self.avg_fun(p_swa.detach(), p_model_,
-                                                  self.n_averaged))
+                p_swa.detach().copy_(self.avg_fn(p_swa.detach(), p_model_,
+                                                 self.n_averaged))
         self.n_averaged += 1
 
 

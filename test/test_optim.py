@@ -1738,16 +1738,16 @@ class TestSWAUtils(TestCase):
         self.assertTrue(averaged_dnn.n_averaged == averaged_dnn2.n_averaged)
 
     def test_averaged_model_exponential(self):
-        # Test AveragedModel with EMA as avg_fun
+        # Test AveragedModel with EMA as avg_fn
         dnn = torch.nn.Sequential(
             torch.nn.Conv2d(1, 5, kernel_size=3),
             torch.nn.Linear(5, 10)
         )
         alpha = 0.9
 
-        def avg_fun(p_avg, p, n_avg): 
+        def avg_fn(p_avg, p, n_avg):
             return alpha * p_avg + (1 - alpha) * p
-        averaged_dnn = AveragedModel(dnn, avg_fun=avg_fun)
+        averaged_dnn = AveragedModel(dnn, avg_fn=avg_fn)
         averaged_params = [torch.zeros_like(param) for param in dnn.parameters()]
         n_updates = 10
         for i in range(n_updates):
