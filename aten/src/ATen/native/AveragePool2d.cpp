@@ -4,6 +4,8 @@
 #include <ATen/native/Pool.h>
 #include <tuple>
 
+#include <ATen/core/op_registration/op_registration.h>
+
 
 namespace at {
 namespace native {
@@ -97,54 +99,25 @@ void avg_pool2d_out_cpu_template(
           bool count_include_pad,
           c10::optional<int64_t> divisor_override)
 {
-  // #20866, #22032: Guarantee this for the official C++ API?
-  TORCH_CHECK(kernel_size.size() == 1 || kernel_size.size() == 2,
-    "avg_pool2d: kernel_size must either be a single int, or a tuple of two ints");
   const int kH = safe_downcast<int, int64_t>(kernel_size[0]);
-  const int kW = kernel_size.size() == 1 ? kH : safe_downcast<int, int64_t>(kernel_size[1]);
+  const int kW = safe_downcast<int, int64_t>(kernel_size[1]);
 
-  TORCH_CHECK(stride.empty() || stride.size() == 1 || stride.size() == 2,
-    "avg_pool2d: stride must either be omitted, a single int, or a tuple of two ints");
-  const int dH = stride.empty() ? kH : safe_downcast<int, int64_t>(stride[0]);
-  const int dW = stride.empty() ? kW :
-                 stride.size() == 1 ? dH : safe_downcast<int, int64_t>(stride[1]);
+  const int dH = safe_downcast<int, int64_t>(stride[0]);
+  const int dW = safe_downcast<int, int64_t>(stride[1]);
 
-  TORCH_CHECK(padding.size() == 1 || padding.size() == 2,
-    "avg_pool2d: padding must either be a single int, or a tuple of two ints");
   const int padH = safe_downcast<int, int64_t>(padding[0]);
-  const int padW = padding.size() == 1 ? padH : safe_downcast<int, int64_t>(padding[1]);
-
-  TORCH_CHECK((input_.ndimension() == 3 || input_.ndimension() == 4),
-    "non-empty 2D or 3D (batch mode) tensor expected for input");
-
-  TORCH_CHECK(!divisor_override.has_value() || divisor_override.value() != 0,
-    "divisor must be not zero");
+  const int padW = safe_downcast<int, int64_t>(padding[1]);
 
   /* sizes */
   const int64_t nbatch = input_.ndimension() == 4 ? input_.size(-4) : 1;
   const int64_t nInputPlane = input_.size(-3);
   const int64_t inputHeight = input_.size(-2);
   const int64_t inputWidth = input_.size(-1);
+  const int64_t outputHeight = output.size(-2);
+  const int64_t outputWidth = output.size(-1);
 
-  const int64_t outputHeight = pooling_output_shape<int64_t>(inputHeight, kH, padH, dH, 1, ceil_mode);
-  const int64_t outputWidth = pooling_output_shape<int64_t>(inputWidth, kW, padW, dW, 1, ceil_mode);
-
-  pool2d_shape_check(
-    input_,
-    kH, kW, dH, dW, padH, padW, 1, 1,
-    nInputPlane,
-    inputHeight, inputWidth,
-    outputHeight, outputWidth);
-
-  if (input_.ndimension() == 3) {
-    output.resize_({nInputPlane, outputHeight, outputWidth});
-  }
-  else {
-    output.resize_({nbatch, nInputPlane, outputHeight, outputWidth});
-  }
-
+  // TODO: stop doing this
   TORCH_CHECK(output.is_contiguous(), "avg_pool2d: output must be contiguous");
-
   Tensor input = input_.contiguous();
 
   AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Long, input.scalar_type(),
@@ -258,19 +231,19 @@ Tensor& avg_pool2d_backward_out_cpu_template(
   // #20866, #22032: Guarantee this for the official C++ API?
   TORCH_CHECK(kernel_size.size() == 1 || kernel_size.size() == 2,
     "avg_pool2d: kernel_size must either be a single int, or a tuple of two ints");
-  const int kH = safe_downcast<int, int64_t>(kernel_size[0]);
-  const int kW = kernel_size.size() == 1 ? kH : safe_downcast<int, int64_t>(kernel_size[1]);
+  const int kH = kernel_size[0];
+  const int kW = kernel_size.size() == 1 ? kH : kernel_size[1];
 
   TORCH_CHECK(stride.empty() || stride.size() == 1 || stride.size() == 2,
     "avg_pool2d: stride must either be omitted, a single int, or a tuple of two ints");
-  const int dH = stride.empty() ? kH : safe_downcast<int, int64_t>(stride[0]);
+  const int dH = stride.empty() ? kH : stride[0];
   const int dW = stride.empty() ? kW :
-                 stride.size() == 1 ? dH : safe_downcast<int, int64_t>(stride[1]);
+                 stride.size() == 1 ? dH : stride[1];
 
   TORCH_CHECK(padding.size() == 1 || padding.size() == 2,
     "avg_pool2d: padding must either be a single int, or a tuple of two ints");
-  const int padH = safe_downcast<int, int64_t>(padding[0]);
-  const int padW = padding.size() == 1 ? padH : safe_downcast<int, int64_t>(padding[1]);
+  const int padH = padding[0];
+  const int padW = padding.size() == 1 ? padH : padding[1];
 
   const int64_t ndim = input.ndimension();
 
@@ -329,6 +302,72 @@ Tensor& avg_pool2d_backward_out_cpu_template(
 }
 
 } // namespace
+
+
+Tensor& avg_pool2d_out_generic(
+  Tensor& output,
+  const Tensor& input,
+  IntArrayRef kernel_size,
+  IntArrayRef stride,
+  IntArrayRef padding,
+  bool ceil_mode,
+  bool count_include_pad,
+  c10::optional<int64_t> divisor_override)
+{
+  // #20866, #22032: Guarantee this for the official C++ API?
+  TORCH_CHECK(kernel_size.size() == 1 || kernel_size.size() == 2,
+    "avg_pool2d: kernel_size must either be a single int, or a tuple of two ints");
+  const int kH = safe_downcast<int, int64_t>(kernel_size[0]);
+  const int kW = kernel_size.size() == 1 ? kH : safe_downcast<int, int64_t>(kernel_size[1]);
+
+  TORCH_CHECK(stride.empty() || stride.size() == 1 || stride.size() == 2,
+    "avg_pool2d: stride must either be omitted, a single int, or a tuple of two ints");
+  const int dH = stride.empty() ? kH : safe_downcast<int, int64_t>(stride[0]);
+  const int dW = stride.empty() ? kW :
+                 stride.size() == 1 ? dH : safe_downcast<int, int64_t>(stride[1]);
+
+  TORCH_CHECK(padding.size() == 1 || padding.size() == 2,
+    "avg_pool2d: padding must either be a single int, or a tuple of two ints");
+  const int padH = safe_downcast<int, int64_t>(padding[0]);
+  const int padW = padding.size() == 1 ? padH : safe_downcast<int, int64_t>(padding[1]);
+
+  TORCH_CHECK((input.ndimension() == 3 || input.ndimension() == 4),
+    "non-empty 2D or 3D (batch mode) tensor expected for input");
+
+  TORCH_CHECK(!divisor_override.has_value() || divisor_override.value() != 0,
+    "divisor must be not zero");
+
+  const int64_t nbatch = input.ndimension() == 4 ? input.size(-4) : 1;
+  const int64_t nInputPlane = input.size(-3);
+  const int64_t inputHeight = input.size(-2);
+  const int64_t inputWidth = input.size(-1);
+
+  const int64_t outputHeight = pooling_output_shape<int64_t>(inputHeight, kH, padH, dH, 1, ceil_mode);
+  const int64_t outputWidth = pooling_output_shape<int64_t>(inputWidth, kW, padW, dW, 1, ceil_mode);
+
+  pool2d_shape_check(
+    input,
+    kH, kW, dH, dW, padH, padW, 1, 1,
+    nInputPlane,
+    inputHeight, inputWidth,
+    outputHeight, outputWidth);
+
+  if (input.ndimension() == 3) {
+    output.resize_({nInputPlane, outputHeight, outputWidth});
+  }
+  else {
+    output.resize_({nbatch, nInputPlane, outputHeight, outputWidth});
+  }
+
+  static auto op = c10::Dispatcher::singleton().findSchemaOrThrow("aten::avg_pool2d", "out");
+  return c10::Dispatcher::singleton().callUnboxedRedispatch<Tensor&, Tensor&, const Tensor&, IntArrayRef, IntArrayRef, IntArrayRef, bool, bool, c10::optional<int64_t>>(op, c10::DispatchKey::BackendGeneric, output, input, {kH, kW}, {dH, dW}, {padH, padW}, ceil_mode, count_include_pad, divisor_override);
+}
+
+static auto registry = c10::import()
+  .impl("aten::avg_pool2d.out",
+        torch::dispatch(c10::DispatchKey::BackendGeneric,
+                        c10::CppFunction::makeUnboxedOnly(avg_pool2d_out_generic)))
+;
 
 Tensor& avg_pool2d_out_cpu(
   Tensor& output,
