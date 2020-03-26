@@ -1427,7 +1427,7 @@ Tensor bmm_sparse_cpu(const SparseTensor& self, const Tensor& mat2, optional<boo
 // Returns the index of the found element.
 // Returns by reference `found`, true if search value was found, false otherwise
 template<typename scalar_t>
-scalar_t binary_search_strided_rightmost(scalar_t search_val, scalar_t* sorted_arr, int64_t sorted_arr_stride, int64_t length, bool* found) {
+scalar_t binary_search_strided_rightmost(scalar_t search_val, TensorAccessor<scalar_t, 1>& sorted_arr_accessor, int64_t sorted_arr_begin_idx, int64_t length, bool* found) {
   if (length == 0) {
     *found = false;
     return -1;
@@ -1440,12 +1440,12 @@ scalar_t binary_search_strided_rightmost(scalar_t search_val, scalar_t* sorted_a
 
   while (!done_searching) {
     mid_ind = (left_ind+right_ind) >> 1;
-    scalar_t mid_val = sorted_arr[mid_ind*sorted_arr_stride];
+    scalar_t mid_val = sorted_arr_accessor[sorted_arr_begin_idx + mid_ind];
 
     if (mid_val > search_val) {
       right_ind = mid_ind-1;
     } else if((mid_val == search_val) && (
-      (mid_ind == length - 1) || (sorted_arr[(mid_ind+1)*sorted_arr_stride] != search_val)
+      (mid_ind == length - 1) || (sorted_arr_accessor[sorted_arr_begin_idx + mid_ind + 1] != search_val)
     )) {
       done_searching = true;
       *found = true;
@@ -1489,8 +1489,7 @@ Tensor& bmm_out_sparse_cpu(Tensor& result, const SparseTensor& self, const Tenso
   Tensor values =      self_coalesced._values();
 
   LongTensor indices_dim0 = indices[0];
-  int64_t indices_dim0_stride = indices_dim0.stride(0);
-  int64_t* indices_dim0_ptr = indices_dim0.data_ptr<int64_t>();
+  auto indices_dim0_accessor = indices_dim0.accessor<int64_t, 1>();
   LongTensor indices_dim1_dim2 = indices.slice(0, 1, 3);
 
   int64_t dim_i = self_coalesced.size(1);
@@ -1507,7 +1506,7 @@ Tensor& bmm_out_sparse_cpu(Tensor& result, const SparseTensor& self, const Tenso
 
   // Iterate through each set of 2D matrices within the 3D
   // tensor inputs, performing a matrix multiply with each one.
-  int64_t start_mat_num = indices_dim0_ptr[0];
+  int64_t start_mat_num = indices_dim0_accessor[0];
   AT_DISPATCH_ALL_TYPES(
     values.scalar_type(), "bmm_sparse_dense", [&] {
       for (int64_t cur_mat_num = 0;
@@ -1529,8 +1528,8 @@ Tensor& bmm_out_sparse_cpu(Tensor& result, const SparseTensor& self, const Tenso
         bool mat_end_found;
         int64_t mat_el_end_idx = binary_search_strided_rightmost(
           cur_mat_num,
-          indices_dim0_ptr+(mat_el_begin_idx*indices_dim0_stride),
-          indices_dim0_stride,
+          indices_dim0_accessor,
+          mat_el_begin_idx,
           nnz-mat_el_begin_idx,
           &mat_end_found
         ) + mat_el_begin_idx;
