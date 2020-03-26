@@ -15,10 +15,6 @@ def einsum(g, equation, tensor_list):
     return g.op("Einsum", *tensors, equation_s=equation)
 
 
-def inverse(g, self):
-    return g.op("Inverse", self)
-
-
 def nll_loss(g, self, target, weight, reduction, ignore_index):
     # none reduction : onnx::Constant[value={0}]
     # mean reduction : onnx::Constant[value={1}]
