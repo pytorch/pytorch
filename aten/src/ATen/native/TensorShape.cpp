@@ -43,7 +43,7 @@ Tensor& set_(Tensor& result, Storage source) {
 }
 
 // unify with cuda implementation?  This is not done to avoid a dispatch in resize_impl_cpu_
-Tensor& set_storage_cpu_(Tensor& result, Storage storage, int64_t storage_offset, IntArrayRef size, IntArrayRef stride) {
+Tensor& set_storage_cpu_(Tensor& result, Storage storage, int64_t storage_offset, IntArrayRef size, IntArrayRef stride) { //Note-to-self all CPU set_ use this one
   checkSetStorage(result, storage, storage_offset, size, stride);
 
   result.unsafeGetTensorImpl()->set_storage_offset(storage_offset);
