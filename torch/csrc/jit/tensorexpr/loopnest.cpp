@@ -936,19 +936,19 @@ std::vector<TensorAccess> mergeTensorAccesses(std::vector<TensorAccess> a) {
  * for i in 0..100:
  *   for j in 0..200:
  *     A[i,j] = sin(i*j)
- * for i in 0..99:
- *   for j in 0..200:
+ * for i in 0..100:
+ *   for j in 0..199:
  *     B[i,j] = A[i,j] + A[i, j+1]
  *
  * If we compute these loops as is, we would have to allocate two buffers:
- * 100x200 for A and 99x200 for B. To decrease the memory usage one can use
+ * 100x200 for A and 100x199 for B. To decrease the memory usage one can use
  * compute_inline primitive, which would result in the following:
  *
- * for i in 0..99:
- *   for j in 0..200:
+ * for i in 0..100:
+ *   for j in 0..199:
  *     B[i,j] = sin(i*j) + sin(i*(j+1))
  *
- * We now need only one buffer - 99x200 for B. However, we're now doing some
+ * We now need only one buffer - 100x199 for B. However, we're now doing some
  * redundant computations: we're calling `sin` twice as much as in the first
  * version.
  *
@@ -959,10 +959,10 @@ std::vector<TensorAccess> mergeTensorAccesses(std::vector<TensorAccess> a) {
  * is required for a computation of part of B, e.g. for a single row of B. The
  * code would then look like:
  *
- * for i in 0..99:
+ * for i in 0..100:
  *   for j in 0..200:
  *     A[j] = sin(i*j)
- *   for j in 0..200:
+ *   for j in 0..199:
  *     B[i,j] = A[j] + A[j+1]
  *
  * In this case we're only using 1x200 for A, and we're avoiding redundant
@@ -971,7 +971,7 @@ std::vector<TensorAccess> mergeTensorAccesses(std::vector<TensorAccess> a) {
  * The purpose of `compute_at` is to achieve exactly this transformation.
  *
  * compute_at requires to specify What to compute and Where to compute: in our
- * example we would call compute_at(What=`A[i,j] = sin(i*j)`, Where=`for i in 0..99`).
+ * example we would call compute_at(What=`A[i,j] = sin(i*j)`, Where=`for i in 0..100`).
  *
  * More info about compute_at could be found in Halide's tutorials:
  * https://halide-lang.org/tutorials/tutorial_lesson_08_scheduling_2.html
