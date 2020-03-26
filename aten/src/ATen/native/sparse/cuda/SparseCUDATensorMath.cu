@@ -879,6 +879,8 @@ Tensor& bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tens
   // tensor inputs, performing a matrix multiply with each
   AT_DISPATCH_FLOATING_TYPES(
     values.scalar_type(), "bmm_sparse_cuda", [&] {
+      scalar_t alpha_val = alpha.to<scalar_t>();
+      scalar_t beta_val = beta.to<scalar_t>();
       uint32_t* row_indices_start_ptr = reinterpret_cast<uint32_t*>(indices_dim1.data_ptr());
       uint32_t* col_indices_start_ptr = reinterpret_cast<uint32_t*>(indices_dim2.data_ptr());
       scalar_t* values_start_ptr = reinterpret_cast<scalar_t*>(values.data_ptr());
@@ -937,8 +939,6 @@ Tensor& bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tens
             cuda_data_type,
             CUSPARSE_ORDER_COL
           ));
-          scalar_t alpha_val = alpha.to<scalar_t>();
-          scalar_t beta_val = beta.to<scalar_t>();
           size_t required_workspace_buffer_size = 0;
           TORCH_CUDASPARSE_CHECK(cusparseSpMM_bufferSize(
             cusparse_handle,
