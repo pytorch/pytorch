@@ -31,6 +31,7 @@ double getScaleFromInput(Node* input_node) {
   c10::optional<IValue> scale;
   std::string input_name = input_node->kind().toQualString();
   std::unordered_set<std::string> noscale_ops = {"quantized::max_pool2d",
+                                                 "aten::max_pool2d",
                                                  "aten::relu",
                                                  "prim::ListUnpack",
                                                  "aten::split_with_sizes",

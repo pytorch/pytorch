@@ -29,17 +29,17 @@
 
 namespace at { namespace native {
 
-void random_from_to_kernel(TensorIterator& iter, uint64_t range, int64_t base, Generator* gen_) {
+void random_from_to_kernel(TensorIterator& iter, uint64_t range, int64_t base, Generator gen_) {
   auto gen = get_generator_or_default<CUDAGenerator>(gen_, cuda::detail::getDefaultCUDAGenerator());
   at::native::templates::cuda::random_from_to_kernel(iter, range, base, gen);
 }
 
-void random_full_64_bits_range_kernel(TensorIterator& iter, Generator* gen_) {
+void random_full_64_bits_range_kernel(TensorIterator& iter, Generator gen_) {
   auto gen = get_generator_or_default<CUDAGenerator>(gen_, cuda::detail::getDefaultCUDAGenerator());
   at::native::templates::cuda::random_full_64_bits_range_kernel(iter, gen);
 }
 
-void random_kernel(TensorIterator& iter, Generator* gen_) {
+void random_kernel(TensorIterator& iter, Generator gen_) {
   auto gen = get_generator_or_default<CUDAGenerator>(gen_, cuda::detail::getDefaultCUDAGenerator());
   at::native::templates::cuda::random_kernel(iter, gen);
 }

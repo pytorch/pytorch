@@ -96,10 +96,24 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
 #endif
 
   static void preModuleLoadSetupOnce() {
+    auto qengines = at::globalContext().supportedQEngines();
+    if (std::find(qengines.begin(), qengines.end(), at::QEngine::QNNPACK) !=
+        qengines.end()) {
+      at::globalContext().setQEngine(at::QEngine::QNNPACK);
+    }
+
 #ifdef __ANDROID__
     torch::jit::setPrintHandler([](const std::string& s) {
       __android_log_print(ANDROID_LOG_DEBUG, "pytorch-print", "%s", s.c_str());
     });
+#endif
+
+#ifdef TRACE_ENABLED
+    torch::autograd::profiler::pushCallback(
+        &onFunctionEnter,
+        &onFunctionExit,
+        /* need_inputs */ false,
+        /* sampled */ false);
 #endif
   }
 
@@ -109,14 +123,6 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
       return 0;
     }();
     ((void)once);
-
-#ifdef TRACE_ENABLED
-    torch::autograd::profiler::pushCallback(
-        &onFunctionEnter,
-        &onFunctionExit,
-        /* need_inputs */ false,
-        /* sampled */ false);
-#endif
   }
 
   PytorchJni(facebook::jni::alias_ref<jstring> modelPath) {

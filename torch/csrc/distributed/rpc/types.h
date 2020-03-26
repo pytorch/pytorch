@@ -10,6 +10,13 @@ namespace rpc {
 using worker_id_t = int16_t;
 using local_id_t = int64_t;
 
+bool getAllowJitRRefPickle();
+
+struct TORCH_API JitRRefPickleGuard {
+  JitRRefPickleGuard();
+  ~JitRRefPickleGuard();
+};
+
 struct TORCH_API GloballyUniqueId final {
   GloballyUniqueId(worker_id_t createdOn, local_id_t localId);
   GloballyUniqueId(const GloballyUniqueId& other) = default;

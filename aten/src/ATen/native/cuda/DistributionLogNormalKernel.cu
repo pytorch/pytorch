@@ -29,7 +29,7 @@
 
 namespace at { namespace native {
 
-void log_normal_kernel(TensorIterator& iter, double mean_, double std_, Generator* gen_) {
+void log_normal_kernel(TensorIterator& iter, double mean_, double std_, Generator gen_) {
   auto gen = get_generator_or_default<CUDAGenerator>(gen_, cuda::detail::getDefaultCUDAGenerator());
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "log_normal_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;

@@ -31,9 +31,9 @@ string(
 # changes PROTOBUF_CONSTEXPR to constexpr, which breaks windows
 # build.
 string(
-  REPLACE
-  "static constexpr int kIndexInFileMessages ="
-  "static int const kIndexInFileMessages ="
+  REGEX REPLACE
+  "static constexpr ([^ ]+) ([^ ]+) ="
+  "static \\1 const \\2 ="
   content
   "${content}")
 
