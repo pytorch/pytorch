@@ -3,8 +3,8 @@
 #include <ATen/core/alias_info.h>
 #include <c10/util/flat_hash_map.h>
 #include <torch/csrc/jit/ir/ir.h>
-#include <torch/csrc/jit/passes/utils/memory_dag.h>
 #include <torch/csrc/jit/ir/type_hashing.h>
+#include <torch/csrc/jit/passes/utils/memory_dag.h>
 
 namespace torch {
 namespace jit {
@@ -87,6 +87,8 @@ class AliasDb {
   // reads from.
   TORCH_API bool isMutable(Node* n) const;
 
+  TORCH_API bool escapesScope(const at::ArrayRef<Value*>& vs) const;
+
   // Is it safe to change whether `a` and `b` alias each other ?
   TORCH_API bool safeToChangeAliasingRelationship(
       const at::ArrayRef<Value*>& a,
@@ -147,8 +149,6 @@ class AliasDb {
 
   // Is this a value which will not alias
   bool nonAliasingValue(const Value* elem) const;
-
-  bool escapesScope(const at::ArrayRef<Value*>& vs) const;
 
   /**
    * Special analysis methods
