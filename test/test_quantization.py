@@ -1370,6 +1370,7 @@ class ObserverTest(QuantizationTestCase):
         ref = torch._choose_qparams_per_tensor(x, reduce_range)
 
         self.assertEqual(ref[0], qparams[0])
+        print("scale zp ", ref[0], ref[1])
         self.assertEqual(ref[1], qparams[1])
 
 
