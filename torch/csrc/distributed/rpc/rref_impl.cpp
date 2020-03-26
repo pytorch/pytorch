@@ -115,6 +115,19 @@ IValue UserRRef::toHere() {
       " and ForkId=",
       forkId(),
       " has been deleted. Cannot call to_here() on it after deletion.");
+  TORCH_CHECK(
+      !type_->is_module(),
+      "User RRef with RRefId=",
+      rrefId(),
+      " and ForkId=",
+      forkId(),
+      " is an RRef to a ScriptModule. "
+      "It can't be sent through RPC "
+      "from owner, ",
+      ownerName(),
+      ", to user, ",
+      RpcAgent::getCurrentRpcAgent()->getWorkerInfo().name_,
+      ".");
 
   auto agent = RpcAgent::getCurrentRpcAgent();
 
