@@ -99,7 +99,9 @@ public:
   InlineDeviceGuard& operator=(InlineDeviceGuard<T>&& other) = delete;
 
   ~InlineDeviceGuard() {
-    impl_.exchangeDevice(original_device_);
+    if (current_device_ != original_device_) {
+      impl_.uncheckedSetDevice(original_device_);
+    }
   }
 
   /// Sets the device to the given one.
