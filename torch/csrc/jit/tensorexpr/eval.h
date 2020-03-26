@@ -4,6 +4,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include <c10/macros/Macros.h>
 #include <c10/util/Logging.h>
 #include <torch/csrc/jit/tensorexpr/buffer.h>
 #include <torch/csrc/jit/tensorexpr/codegen.h>
@@ -106,15 +107,9 @@ inline typename std::enable_if<std::is_integral<T>::value, T>::type div_value(
   return lhs / rhs;
 }
 
-template <typename T>
+__ubsan_ignore_float_divide_by_zero__ template <typename T>
 inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
 div_value(T lhs, T rhs) {
-  if (rhs == static_cast<T>(0)) {
-    auto inf_is_negative = std::signbit(lhs) ^ std::signbit(rhs);
-    return inf_is_negative ? -1 * std::numeric_limits<float>::infinity()
-                           : std::numeric_limits<float>::infinity();
-  }
-
   return lhs / rhs;
 }
 
