@@ -1,3 +1,4 @@
+#include <cmath> 
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/quantized/quant_affine.h>
