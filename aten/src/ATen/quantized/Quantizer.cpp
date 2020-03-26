@@ -104,7 +104,7 @@ T quantize_val(double scale, int64_t zero_point, float value) {
 
 template <typename T, int precision>
 void quantize_vec(double scale, int64_t zero_point, const float *src, T *dst, size_t count) {
-  checkZeroPoint<typename T::underlying>("quantize_vec", zero_point);
+  native::checkZeroPoint<typename T::underlying>("quantize_vec", zero_point);
   for (int64_t i = 0; i < count; ++i) {
     dst[i] = quantize_val<T>(scale, zero_point, src[i]);
   }
