@@ -59,24 +59,24 @@ class Value {
   void* ptr;
 };
 
-#define VALUE_AS_DISPATCH(Type, Name)             \
-  template <>                                     \
-  inline Type Value::as<Type>() const {           \
-    if (dtype_ != k##Name) {                      \
-      throw unsupported_dtype();                  \
-    }                                             \
-    return Name##values[0];                       \
+#define VALUE_AS_DISPATCH(Type, Name)   \
+  template <>                           \
+  inline Type Value::as<Type>() const { \
+    if (dtype_ != k##Name) {            \
+      throw unsupported_dtype();        \
+    }                                   \
+    return Name##values[0];             \
   }
 AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, VALUE_AS_DISPATCH);
 #undef VALUE_AS_DISPATCH
 
-#define VALUE_AS_VEC_DISPATCH(Type, Name)                                \
-  template <>                                                            \
-  inline const std::vector<Type>& Value::as_vec<Type>() const {          \
-    if (dtype_.scalar_type() != ScalarType::Name) {                      \
-      throw unsupported_dtype();                                         \
-    }                                                                    \
-    return Name##values;                                                 \
+#define VALUE_AS_VEC_DISPATCH(Type, Name)                       \
+  template <>                                                   \
+  inline const std::vector<Type>& Value::as_vec<Type>() const { \
+    if (dtype_.scalar_type() != ScalarType::Name) {             \
+      throw unsupported_dtype();                                \
+    }                                                           \
+    return Name##values;                                        \
   }
 AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, VALUE_AS_VEC_DISPATCH);
 #undef VALUE_AS_VEC_DISPATCH
@@ -478,7 +478,6 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     if (src_dtype.lanes() != dst_dtype.lanes()) {
       throw malformed_input(v);
     }
-
 
     if (src_dtype != dst_dtype) {
       switch (src_dtype.scalar_type()) {
