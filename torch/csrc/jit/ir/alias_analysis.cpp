@@ -42,19 +42,12 @@ class MutableTypePtrHelper {
     switch (type->kind()) {
       case TypeKind::ListType:
       case TypeKind::DictType:
-      case TypeKind::ClassType: {
-        std::vector<TypePtr> mutable_types;
-        for (const auto& type : type->containedTypes()) {
-          auto mut_type = getMutableType(type);
-          if (mut_type) {
-            mutable_types.push_back(*mut_type);
-          } else {
-            mutable_types.push_back(type);
-          }
-        }
-        return type->withContained(mutable_types);
-      }
+      case TypeKind::ClassType:
       case TypeKind::TensorType:
+        // TODO: lookup cached contained types. this is kind of tricky
+        // because a List[Optional[T]] should still be
+        // List[Optional[Unshaped(T)]], however the getMutableType(Optional[T])
+        // == T
         return unshapedType(type);
       case TypeKind::OptionalType:
         return getMutableType(type->cast<OptionalType>()->getElementType());
@@ -82,7 +75,6 @@ class MutableTypePtrHelper {
         return c10::nullopt;
     }
   }
-
   std::unordered_map<TypePtr, TypePtr>* mutable_type_cache_;
 };
 
