@@ -3,6 +3,7 @@
 #else
 
 #include <ATen/core/Reduction.h>
+#include <ATen/Generator.h>
 
 THC_API void THNN_(ClassNLLCriterion_updateOutput)(
                   THCState *state,
@@ -188,7 +189,7 @@ THC_API void THNN_(RReLU_updateOutput)(
                   double upper,
                   bool train,
                   bool inplace,
-                  void *generator);
+                  at::Generator generator);
 
 THC_API void THNN_(RReLU_updateGradInput)(
                   THCState *state,

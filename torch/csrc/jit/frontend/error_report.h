@@ -32,6 +32,8 @@ struct CAFFE2_API ErrorReport : public std::exception {
     static void update_pending_range(const SourceRange& range);
   };
 
+  static std::string current_call_stack();
+
  private:
   template <typename T>
   friend const ErrorReport& operator<<(const ErrorReport& e, const T& t);

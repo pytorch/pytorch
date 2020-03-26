@@ -11,12 +11,19 @@ import torch.distributed as dist
 import torch.distributed.rpc as rpc
 import torch.testing._internal.dist_utils as dist_utils
 from torch.distributed.rpc import RRef, _get_debug_info, _rref_context_get_debug_info
-from torch.distributed.rpc.api import _use_rpc_pickler
-from torch.distributed.rpc.internal import PythonUDF, RPCExecMode, _internal_rpc_pickler
+from torch.distributed.rpc.api import _delete_all_user_rrefs, _use_rpc_pickler
+from torch.distributed.rpc.internal import (
+    PythonUDF,
+    RPCExecMode,
+    _disable_profiling_for_testing,
+    _internal_rpc_pickler,
+    build_rpc_profiling_key,
+)
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import IS_MACOS, load_tests
 from torch.testing._internal.dist_utils import (
     dist_init,
+    get_function_event,
     get_shutdown_error_regex,
     initialize_pg,
     wait_until_node_failure,
@@ -25,6 +32,10 @@ from torch.testing._internal.dist_utils import (
 )
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
+)
+from torch.testing._internal.common_utils import TemporaryFileName
+from torch.testing._internal.distributed.rpc.faulty_rpc_agent_test_fixture import (
+    FaultyRpcAgentTestFixture,
 )
 
 
@@ -627,6 +638,16 @@ class RpcTest(RpcAgentTestFixture):
         )
         self.assertEqual(ret, my_function(n, n + 1, n + 2))
 
+    def test_build_rpc_profiling_key(self):
+        # Tests that the name that shows up as an Event in profiling RPCs has all
+        # the necessary information.
+        for exec_mode in [RPCExecMode.SYNC, RPCExecMode.ASYNC, RPCExecMode.REMOTE]:
+            rpc_profiling_key = build_rpc_profiling_key(exec_mode, "foo", "worker0", "worker1")
+            self.assertIn(exec_mode.value, rpc_profiling_key)
+            self.assertIn("foo", rpc_profiling_key)
+            self.assertIn("worker0", rpc_profiling_key)
+            self.assertIn("worker1", rpc_profiling_key)
+
     def _profiler_test_with_rpc(self, rpc_exec_mode, func, args, use_record_function=False):
         dst = (self.rank + 1) % self.world_size
         # only run profiler on rank 1.
@@ -656,11 +677,9 @@ class RpcTest(RpcAgentTestFixture):
                     record_function.__exit__()
 
             events = prof.function_events
-            rpc_event = [
-                event for event in events if rpc_exec_mode.value in event.name
-            ][0]
+            rpc_event = get_function_event(events, rpc_exec_mode.value)
             if use_record_function:
-                scope_event = [event for event in events if "foo" in event.name][0]
+                scope_event = get_function_event(events, "foo")
                 # Since RPC call is within the scope, its CPU interval should be
                 # contained within foo's interval.
                 self.assertTrue(scope_event.cpu_interval.start < rpc_event.cpu_interval.start)
@@ -686,24 +705,6 @@ class RpcTest(RpcAgentTestFixture):
         self._profiler_test_with_rpc(RPCExecMode.SYNC, my_sleep_func, args=(1,))
         self._profiler_test_with_rpc(RPCExecMode.SYNC, my_sleep_func, args=(1,),
                                      use_record_function=True)
-
-    @dist_init
-    def test_async_record_function(self):
-        num_sleep_seconds = 2
-        if self.rank == 1:
-            with torch.autograd.profiler.profile() as pf:
-                with torch.autograd.profiler.record_function("foo") as rf:
-                    fut = rpc.rpc_async(worker_name(0), my_sleep_func, args=(num_sleep_seconds,))
-                    rf._call_end_callbacks_on_future(fut)
-                # Note: calling fut.wait() outside of record_function to simulate
-                # real usage and to ensure that underlying handles in record_function
-                # are correctly persisted even after python ctx manager has exited
-                fut.wait()
-            # Find recorded event and roughly validate the time.
-            events = pf.function_events
-            rpc_event = [event for event in events if "foo" in event.name][0]
-            self.assertGreaterEqual(rpc_event.cpu_time_total * 1e-6, num_sleep_seconds)
-
 
     @dist_init
     def test_profiler_with_sync_rpc_builtin(self):
@@ -746,6 +747,84 @@ class RpcTest(RpcAgentTestFixture):
             RPCExecMode.REMOTE, torch.add, args=(torch.ones(1), torch.ones(1)),
             use_record_function=True
         )
+
+    @dist_init
+    def test_async_record_function_double_end_callbacks(self):
+        # We need to disable the internal profiling implementation so we can check
+        # it here without any duplicated calls.
+        _disable_profiling_for_testing()
+        num_sleep_seconds = 2
+        if self.rank == 1:
+            # Validate that calling the function twice results in an error.
+            with torch.autograd.profiler.profile() as pf:
+                with torch.autograd.profiler.record_function("foo") as rf:
+                    fut = rpc.rpc_async(
+                        worker_name(0), my_sleep_func, args=(num_sleep_seconds,)
+                    )
+                    rf._call_end_callbacks_on_future(fut)
+                    with self.assertRaisesRegex(
+                        RuntimeError, "can only be called once."
+                    ):
+                        rf._call_end_callbacks_on_future(fut)
+                fut.wait()
+
+    @dist_init
+    def test_async_record_function_no_end_callbacks(self):
+        # We need to disable the internal profiling implementation so we can check
+        # it here without any duplicated calls.
+        _disable_profiling_for_testing()
+        num_sleep_seconds = 1
+        if self.rank == 1:
+            # Check that if we don't call rf._call_end_callbacks_on_future, then
+            # there are no errors raised, but the reported time will not be accurate
+            # and will only include the async dispatch.
+            with torch.autograd.profiler.profile() as pf:
+                with torch.autograd.profiler.record_function("foo") as rf:
+                    fut = rpc.rpc_async(
+                        worker_name(0), my_sleep_func, args=(num_sleep_seconds,)
+                    )
+                # Note that we do not call rf._call_end_callbacks, so the time will be recorded
+                # when exiting the ctx manager.
+                fut.wait()
+            events = pf.function_events
+            rpc_event = get_function_event(events, "foo")
+            # This should be a small amount of time and much less than
+            # num_sleep_seconds
+            self.assertLess(
+                rpc_event.cpu_time_total * 1e-6,
+                num_sleep_seconds,
+                "RPC event should be more than {} but got {}".format(
+                    num_sleep_seconds, rpc_event.cpu_time_total * 1e-6
+                ),
+            )
+
+    @dist_init
+    def test_async_record_function_end_callbacks(self):
+        # We need to disable the internal profiling implementation so we can check
+        # it here without any duplicated calls.
+        _disable_profiling_for_testing()
+        num_sleep_seconds = 1
+        if self.rank == 1:
+            with torch.autograd.profiler.profile() as pf:
+                with torch.autograd.profiler.record_function("foo") as rf:
+                    fut = rpc.rpc_async(
+                        worker_name(0), my_sleep_func, args=(num_sleep_seconds,)
+                    )
+                    rf._call_end_callbacks_on_future(fut)
+                # Note: calling fut.wait() outside of record_function to simulate
+                # real usage and to ensure that underlying handles in record_function
+                # are correctly persisted even after python ctx manager has exited
+                fut.wait()
+            # Find recorded event and roughly validate the time.
+            events = pf.function_events
+            rpc_event = get_function_event(events, "foo")
+            self.assertGreaterEqual(
+                rpc_event.cpu_time_total * 1e-6,
+                num_sleep_seconds,
+                "RPC event time should be more than {} but got {}".format(
+                    num_sleep_seconds, rpc_event.cpu_time_total * 1e-6
+                ),
+            )
 
     @dist_init
     def test_py_class_constructor(self):
@@ -1342,6 +1421,21 @@ class RpcTest(RpcAgentTestFixture):
         )
 
     @dist_init
+    def test_rref_get_future(self):
+        # Tests that we can obtain the future corresponding to the creation of
+        # the RRef on remote end
+        if self.rank == 0:
+            rref = rpc.remote(worker_name(1), torch.add, args=(1,1))
+            here = rref.to_here()
+            fut = rref._get_creating_future()
+            self.assertIsInstance(fut, torch.distributed.rpc.Future)
+
+            rref = rpc.remote(worker_name(1), foo_add, args=())
+            here = rref.to_here()
+            fut = rref._get_creating_future()
+            self.assertIsInstance(fut, torch.distributed.rpc.Future)
+
+    @dist_init
     def test_rref_context_debug_info(self):
         # This test checks local states that are modified by remote workers.
         # This means that we would need barrier before and after every check.
@@ -1516,7 +1610,6 @@ class RpcTest(RpcAgentTestFixture):
         rpc.shutdown(graceful=False)
 
     @dist_init
-    @unittest.skip("Test is flaky. see https://github.com/pytorch/pytorch/issues/31846")
     def test_debug_info(self):
         # only test keys in this test case. Values should be covered by
         # individual module debug info tests
@@ -1532,7 +1625,13 @@ class RpcTest(RpcAgentTestFixture):
         expected.update(rref_info)
         expected.update(agent_info)
         expected.update(autograd_info)
-        self.assertEqual(expected.keys(), info.keys())
+        # NB: Key ordering is only preserved in python 3.6+. So here, we
+        # manually check keys are equal.
+        for key in expected.keys():
+            self.assertIn(key, info.keys())
+
+        for key in info.keys():
+            self.assertIn(key, expected.keys())
 
     @dist_init(setup_rpc=False)
     @unittest.skipIf(
@@ -1845,3 +1944,40 @@ class RpcTest(RpcAgentTestFixture):
             args=(rref,)
         )
         self.assertEqual(ret_rref.to_here(), True)
+
+    @dist_init
+    def test_rref_py_pickle_not_supported(self):
+        local_rref = RRef(35)
+        with TemporaryFileName() as fname:
+            with self.assertRaisesRegex(RuntimeError, "Can not pickle rref in python pickler"):
+                torch.save(local_rref, fname)
+
+@unittest.skipIf(
+    not torch._six.PY3,
+    "Pytorch distributed autograd package does not support python2",
+)
+class FaultyAgentRpcTest(FaultyRpcAgentTestFixture):
+
+    # no faulty_messages defined so this fails all retryable messages - see
+    # faulty_rpc_agent_test_fixture.py for the list of retryable messages.
+    @dist_init
+    def test_check_failed_messages(self):
+        if self.rank == 0:
+            dst_worker_b = "worker{}".format((self.rank + 1) % self.world_size)
+            dst_worker_c = "worker{}".format((self.rank + 2) % self.world_size)
+
+            # Worker0 sends RPC to Worker1 and creates an RRef there
+            rref = rpc.remote(dst_worker_b, torch.add, args=(torch.ones(2, 2), torch.ones(2, 2)))
+            # Worker0 sends an RPC to Worker2 with the RRef as an arg
+            rpc.remote(dst_worker_c, add_rref_to_value, args=(rref, torch.ones(2, 2)))
+            # check if the output is as expected
+            self.assertEqual(rref.to_here(), torch.add(torch.ones(2, 2), torch.ones(2, 2)))
+        # explicitly delete all User RRefs
+        _delete_all_user_rrefs()
+
+    @dist_init
+    def test_verify_backend_options(self):
+        self.assertEqual(self.rpc_backend, rpc.backend_registry.BackendType.FAULTY_PROCESS_GROUP)
+        self.assertEqual(self.rpc_backend_options.num_send_recv_threads, 8)
+        self.assertEqual(self.rpc_backend_options.num_fail_sends, 3)
+        self.assertEqual(len(self.rpc_backend_options.messages_to_fail), 4)

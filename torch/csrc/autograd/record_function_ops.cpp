@@ -41,6 +41,7 @@ void record_function_exit(const at::Tensor& handle) {
   auto& rec = getRecordFunctionFromTensor(handle);
   if (auto* current = RecordFunction::current()) {
     AT_ASSERT(current->name() == StringView("profiler::_record_function_exit"));
+    current->end();
   }
   if (rec.active()) {
     rec.end();

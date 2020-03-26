@@ -7,7 +7,7 @@ namespace autograd {
 namespace profiler {
 // Creates a new profiling scope using RecordFunction and invokes its starting
 // callbacks.
-TORCH_API at::Tensor record_function_enter(const std::string& name);
+at::Tensor record_function_enter(const std::string& name);
 
 // Cast Tensor that was created with at::cpp_custom_type_hack back to
 // RecordFunction. This is a temporary workaround until RecordFunction is
@@ -16,7 +16,7 @@ TORCH_API RecordFunction& getRecordFunctionFromTensor(const at::Tensor& handle);
 
 // Schedules RecordFunction's end callbacks to be run on completion of a future.
 template <typename T>
-TORCH_API void call_end_callbacks_on_fut(
+TORCH_API void _call_end_callbacks_on_fut(
     const at::Tensor& handle,
     const std::shared_ptr<torch::utils::Future<T>> fut) {
   // Add a callback onto the future to mark run RecordFunction's end callbacks
@@ -38,7 +38,7 @@ TORCH_API void call_end_callbacks_on_fut(
 }
 
 // Ends the profiling scope created with record_function_enter.
-TORCH_API void record_function_exit(const at::Tensor& handle);
+void record_function_exit(const at::Tensor& handle);
 
 } // namespace profiler
 } // namespace autograd

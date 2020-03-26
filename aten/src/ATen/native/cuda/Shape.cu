@@ -325,6 +325,12 @@ Tensor& cat_out_cuda(Tensor& out, TensorList inputs, int64_t dimension) {
   TORCH_CHECK(inputs.size() > 0, "invalid number of inputs ", inputs.size());
   TORCH_CHECK(dimension >= 0, "invalid dimension ", dimension);
 
+  for (const Tensor& t: inputs) {
+    TORCH_CHECK(t.device() == notSkippedTensor->device(),
+                "All input tensors must be on the same device. Received ",
+                t.device(), " and ", notSkippedTensor->device());
+  }
+
   c10::MemoryFormat memory_format = compute_output_memory_format(inputs);
 
   std::vector<int64_t> size(notSkippedTensor->sizes().vec());
@@ -355,16 +361,10 @@ Tensor& cat_out_cuda(Tensor& out, TensorList inputs, int64_t dimension) {
   // 4. The number of dimensions is <= 4
   // 5. All input tensors are contiguous (output tensor may be non-contig)
   // 6. All input tensors can use 32-bit indexing
-  // 7. All input tensors are on the same device
 
   const bool all32BitIndexable = std::all_of(inputs.begin(), inputs.end(),
     [] (const Tensor& t) {
       return at::cuda::detail::canUse32BitIndexMath(t);
-    });
-  Device firstDevice = notSkippedTensor->device();
-  const bool allSameDevice = std::all_of(inputs.begin(), inputs.end(),
-    [firstDevice](const Tensor& t) {
-      return t.device() == firstDevice;
     });
   const bool allContiguous = std::all_of(inputs.begin(), inputs.end(),
     [=](const Tensor& t) {
@@ -375,8 +375,7 @@ Tensor& cat_out_cuda(Tensor& out, TensorList inputs, int64_t dimension) {
       out.dim() <= CAT_ARRAY_MAX_INPUT_DIMS &&
       at::cuda::detail::canUse32BitIndexMath(out) &&
       allContiguous &&
-      all32BitIndexable &&
-      allSameDevice) {
+      all32BitIndexable) {
 
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
         at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,

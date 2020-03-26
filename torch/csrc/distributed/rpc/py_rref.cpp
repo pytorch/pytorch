@@ -95,7 +95,10 @@ TypePtr tryInferTypeWithTypeHint(
 
 ///////////////////////////  PyRRef  //////////////////////////////////
 
-PyRRef::PyRRef(c10::intrusive_ptr<RRef> rref) : rref_(std::move(rref)) {
+PyRRef::PyRRef(
+    c10::intrusive_ptr<RRef> rref,
+    const std::shared_ptr<FutureMessage> fm)
+    : rref_(std::move(rref)), fm_(fm) {
   TORCH_CHECK(rref_, "PyRRef must not wrap nullptr");
 }
 
@@ -108,6 +111,10 @@ PyRRef::PyRRef(const py::object& value, const py::object& type_hint)
         rref->setValue(std::move(ivalue));
         return rref;
       }()) {}
+
+const std::shared_ptr<FutureMessage> PyRRef::getFuture() {
+  return fm_;
+}
 
 bool PyRRef::isOwner() const {
   return rref_->isOwner();
@@ -184,10 +191,6 @@ std::string PyRRef::str() const {
 
 py::tuple PyRRef::pickle() const {
   auto& ctx = RRefContext::getInstance();
-  // TODO: use a dispatch table to pickle/unpickle an RRef, and only only
-  // install the dispatch table only when there are indeed RPC activities. As
-  // a counter example, checkpointing a model with RRefs should not trigger
-  // forks to be added as a fork or a child.
   auto rrefForkData = ctx.prepareChildFork(rref_);
   return toPyTuple(rrefForkData);
 }
