@@ -691,6 +691,16 @@ class JitRpcTest(LocalRRefTest, JitRpcAsyncOpTest, RpcAgentTestFixture):
         )
         self.assertEqual(ret, local_ret)
 
+        # pass rref arg to self/user
+        with self.assertRaisesRegex(
+            RuntimeError, "is an RRef to a ScriptModule. It can't be sent through RPC from owner,"
+        ):
+            ret = rpc.rpc_sync(
+                worker_name(self.rank),
+                run_ref_script_module,
+                args=(remote_ref, torch.ones(self.rank)),
+            )
+
     @dist_init
     def test_rref_is_owner(self):
         n = self.rank + 1
