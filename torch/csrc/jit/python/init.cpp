@@ -496,6 +496,11 @@ void initJITBindings(PyObject* module) {
             return FoldPrePackingOps(module);
           })
       .def(
+          "_jit_pass_optimize_for_mobile",
+          [](script::Module& module) {
+            return optimizeForMobile(module);
+          })
+      .def(
           "_jit_pass_onnx_unpack_quantized_weights",
           [](std::shared_ptr<Graph>& graph,
              std::map<std::string, at::Tensor>& paramsDict) {

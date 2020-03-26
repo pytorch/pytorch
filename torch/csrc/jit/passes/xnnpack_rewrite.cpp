@@ -3,8 +3,10 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
+#include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
 #include <torch/csrc/jit/passes/prepack_folding.h>
+#include <torch/csrc/jit/passes/quantization.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <torch/csrc/jit/passes/xnnpack_rewrite.h>
 
@@ -110,6 +112,13 @@ void FoldPrePackingOps(script::Module& m) {
   PrePackingOpsFolder(m, filter_fn, "prepack_folding");
 }
 
+void optimizeForMobile(script::Module& m) {
+  m = FoldConvBatchNorm2d(m);
+  m = freeze_module(m);
+  insertPrePackedOps(m);
+  FoldPrePackingOps(m);
+}
+
 #else
 
 void insertPrePackedOps(std::shared_ptr<Graph>& graph) {
@@ -124,6 +133,12 @@ void insertPrePackedOps(script::Module& module) {
 
 void FoldPrePackingOps(script::Module& m) {
   TORCH_INTERNAL_ASSERT(
+      "XNNPACK is not enabled. Please build with USE_XNNPACK=1");
+}
+
+void optimizeForMobile(script::Module& m) {
+  TORCH_INTERNAL_ASSERT(
+      "Mobile optimizaiton only available with XNNPACK at the moment. "
       "XNNPACK is not enabled. Please build with USE_XNNPACK=1");
 }
 
