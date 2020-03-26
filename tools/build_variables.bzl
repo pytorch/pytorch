@@ -433,7 +433,7 @@ def add_torch_libs():
                 "-Wno-unknown-pragmas",
             ],
         },
-        "headers": native.glob(["torch/csrc/**/*.h", "torch/csrc/generic/*.cpp", "test/cpp/jit/*.h"]),
+        "headers": native.glob(["torch/csrc/**/*.h", "torch/csrc/generic/*.cpp", "test/cpp/jit/*.h", "test/cpp/tensorexpr/*.h"]),
     }
     propagated_pp_flags = [
         "-Icaffe2",
