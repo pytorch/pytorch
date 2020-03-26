@@ -743,7 +743,7 @@ bool isWeightOfConvOrLinear(Value* v) {
       CallFuncArgs({{"linear", 2}}));
 
   const auto& call_methods = getCallMethods(v);
-  result = result || matchCallMethodPattern(v, CallFuncArgs({{"_conv_forward", 2}}), call_methods);
+  result |= matchCallMethodPattern(v, CallFuncArgs({{"_conv_forward", 2}}), call_methods);
   return result;
 }
 
