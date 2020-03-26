@@ -150,6 +150,8 @@ async def run_clang_format(max_processes, diff=False, verbose=False):
     else:
         await asyncio.gather(*[run_clang_format_on_file(f, semaphore, verbose) for f in get_whitelisted_files()])
 
+    return ok
+
 
 def report_download_progress(chunk_number, chunk_size, file_size):
     """
