@@ -15,6 +15,7 @@
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/create_autodiff_subgraphs.h>
+#include <torch/csrc/jit/passes/create_functional_graphs.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/decompose_ops.h>
 #include <torch/csrc/jit/passes/erase_number_types.h>
@@ -172,16 +173,18 @@ void initJITBindings(PyObject* module) {
           [](Module& module,
              const std::string& method_name,
              const py::dict& qconfig_dict,
-             bool inplace) {
+             bool inplace,
+             bool is_dynamic) {
             auto dict = py::cast<std::unordered_map<
                 std::string,
                 std::tuple<Module, Module>>>(qconfig_dict);
-            return InsertObservers(module, method_name, dict, inplace);
+            return InsertObservers(module, method_name, dict, inplace, is_dynamic);
           },
           py::arg("module"),
           py::arg("method_name"),
           py::arg("qconfig_dict"),
-          py::arg("inplace") = false)
+          py::arg("inplace") = false,
+          py::arg("is_dynamic") = false)
       .def(
           "_jit_pass_insert_quant_dequant",
           [](Module& module,
@@ -256,6 +259,15 @@ void initJITBindings(PyObject* module) {
           "_jit_pass_remove_inplace_ops",
           [](std::shared_ptr<Graph> g) { return RemoveInplaceOps(g); })
       .def("_jit_pass_constant_pooling", ConstantPooling)
+      .def(
+          "_jit_pass_create_functional_graphs",
+          [](std::shared_ptr<Graph>& g) { return CreateFunctionalGraphs(g); })
+      .def(
+          "_jit_pass_remove_mutation",
+          [](std::shared_ptr<Graph>& g) { return RemoveMutation(g); })
+      .def(
+          "_jit_pass_inline_functional_graphs",
+          [](std::shared_ptr<Graph>& g) { return InlineFunctionalGraphs(g); })
       .def(
           "_jit_pass_peephole",
           [](const std::shared_ptr<Graph>& g, bool addmm_fusion_enabled) {
@@ -344,6 +356,8 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_specialize_autogradzero", specializeAutogradZero)
       .def("_jit_override_can_fuse_on_cpu", &overrideCanFuseOnCPU)
       .def("_jit_override_can_fuse_on_gpu", &overrideCanFuseOnGPU)
+      .def("_jit_can_fuse_on_cpu", &canFuseOnCPU)
+      .def("_jit_can_fuse_on_gpu", &canFuseOnGPU)
       .def("_jit_register_tensorexpr_fuser", &registerTensorExprFuser)
       .def(
           "_jit_differentiate",
@@ -458,19 +472,24 @@ void initJITBindings(PyObject* module) {
             return debugGetFusedKernelCode(g, inps);
           })
       .def(
-          "_jit_pass_insert_xnnpack_ops",
+          "_jit_pass_insert_prepacked_ops",
           [](std::shared_ptr<Graph>& graph) {
-            return insertXNNPACKOps(graph);
+            return insertPrePackedOps(graph);
           })
       .def(
-          "_jit_pass_insert_xnnpack_ops",
+          "_jit_pass_insert_prepacked_ops",
           [](script::Module& module) {
-            return insertXNNPACKOps(module);
+            return insertPrePackedOps(module);
           })
       .def(
-          "_jit_pass_fold_xnnpack_prepack_ops",
+          "_jit_pass_fold_prepacking_ops",
           [](script::Module& module) {
-            return FoldXNNPACKPrePackingOps(module);
+            return FoldPrePackingOps(module);
+          })
+      .def(
+          "_jit_pass_optimize_for_mobile",
+          [](script::Module& module) {
+            return optimizeForMobile(module);
           })
       .def(
           "_jit_pass_onnx_unpack_quantized_weights",
@@ -734,15 +753,21 @@ void initJITBindings(PyObject* module) {
       return op->schema();
     });
   });
+  m.def("_is_tracing", []() { return jit::tracer::isTracing(); });
 
-  struct PythonFutureWrapper {
-    explicit PythonFutureWrapper(c10::intrusive_ptr<c10::ivalue::Future> fut)
-        : fut(std::move(fut)) {}
-
-    c10::intrusive_ptr<c10::ivalue::Future> fut;
-  };
-
-  py::class_<PythonFutureWrapper>(m, "Future");
+  py::class_<PythonFutureWrapper>(m, "Future")
+      .def(
+          "wait",
+          [](PythonFutureWrapper& fut) {
+            auto res = fut.wait();
+            {
+              // acquiring GIL as toPyObject creates new py::object
+              // without grabbing the GIL.
+              pybind11::gil_scoped_acquire ag;
+              return toPyObject(std::move(res));
+            }
+          },
+          py::call_guard<py::gil_scoped_release>());
 
   m.def("fork", [](py::args args) {
     AT_ASSERT(args.size() >= 1);
@@ -798,16 +823,7 @@ void initJITBindings(PyObject* module) {
     }
   });
 
-  m.def("wait", [](PythonFutureWrapper& fut) {
-    if (jit::tracer::isTracing()) {
-      auto graph = jit::tracer::getTracingState()->graph;
-
-      Value* fut_val = jit::tracer::getValueTrace(fut.fut);
-      auto output = graph->insert(aten::wait, {fut_val});
-      jit::tracer::setValueTrace(fut.fut->value(), output);
-    }
-    return fut.fut->value();
-  });
+  m.def("wait", [](PythonFutureWrapper& fut) { return fut.wait(); });
 
   m.def("_jit_assert_is_instance", [](py::object obj, TypePtr type) {
     toIValue(obj, type);

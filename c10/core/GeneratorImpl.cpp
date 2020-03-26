@@ -1,4 +1,4 @@
-#include <ATen/core/Generator.h>
+#include <c10/core/GeneratorImpl.h>
 #include <chrono>
 #include <random>
 
@@ -7,26 +7,26 @@
 #include <unistd.h>
 #endif
 
-namespace at {
+namespace c10 {
 
 /**
- * Generator class implementation
+ * GeneratorImpl class implementation
  */
-Generator::Generator(Device device_in, DispatchKeySet key_set)
+GeneratorImpl::GeneratorImpl(Device device_in, DispatchKeySet key_set)
  : device_{device_in}, key_set_(key_set) {}
 
 /**
  * Clone this generator. Note that clone() is the only
  * method for copying for Generators in ATen.
  */
-std::shared_ptr<Generator> Generator::clone() const {
-  return std::shared_ptr<Generator>(static_cast<Generator*>(this->clone_impl()));
+std::shared_ptr<GeneratorImpl> GeneratorImpl::clone() const {
+  return std::shared_ptr<GeneratorImpl>(static_cast<GeneratorImpl*>(this->clone_impl()));
 }
 
 /**
  * Gets the device of a generator.
  */
-Device Generator::device() const {
+Device GeneratorImpl::device() const {
   return device_;
 }
 
@@ -81,5 +81,4 @@ uint64_t getNonDeterministicRandom(bool is_cuda) {
 }
 
 } // namespace detail
-} // namespace at
-
+} // namespace c10

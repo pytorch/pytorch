@@ -9,7 +9,7 @@
 #include "torch/csrc/jit/tensorexpr/ir.h"
 #include "torch/csrc/jit/tensorexpr/ir_printer.h"
 #include "torch/csrc/jit/tensorexpr/llvm_codegen.h"
-#include "torch/csrc/jit/tensorexpr/schedule.h"
+#include "torch/csrc/jit/tensorexpr/loopnest.h"
 #include "torch/csrc/jit/tensorexpr/tensor.h"
 
 #include <numeric>
@@ -17,7 +17,7 @@
 namespace torch {
 namespace jit {
 using namespace torch::jit::tensorexpr;
-using namespace torch::jit::tensorexpr::schedule;
+using namespace torch::jit::tensorexpr;
 
 using LLVMExprEval = ExprEval<LLVMCodeGen>;
 
@@ -393,7 +393,7 @@ void testLLVMVectorizerLoadStoreTest() {
   Buffer c_buf(VarHandle(c->func_var()), kInt, {4});
   LoopNest l({c});
   Stmt* s = l.root_stmt();
-  l.Vectorize(*dynamic_cast<Block*>(s)->stmts().begin());
+  l.vectorize(*dynamic_cast<Block*>(s)->stmts().begin());
 
   EXPECT_TRUE(dynamic_cast<For*>(*dynamic_cast<Block*>(s)->stmts().begin()) == nullptr);
 

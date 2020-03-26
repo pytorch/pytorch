@@ -115,6 +115,12 @@ struct GraphTask {
   // tasks are done.
   std::shared_ptr<FutureVariableList> future_result_;
 
+  // Final callbacks installed during execution of this GraphTask
+  std::vector<std::function<void()>> final_callbacks_;
+  // To protect reads and writes to final_callbacks_. Intentionally no reusing
+  // mutex_ as the two are protecting different data structures.
+  std::mutex final_callbacks_lock_;
+
   GraphTask(
       bool keep_graph,
       bool grad_mode,
@@ -209,6 +215,9 @@ struct TORCH_API Engine {
 
   size_t ready_queue_size(at::Device device);
 
+  // Should be called after fork to notify that worker threads are gone
+  void release_workers();
+
  protected:
   Engine();
   void compute_dependencies(Node* root, GraphTask& task);
@@ -236,9 +245,6 @@ struct TORCH_API Engine {
   std::once_flag start_threads_flag_;
   // Safe to read ready_queues_ without synchronization after intialization
   std::vector<std::shared_ptr<ReadyQueue>> ready_queues_;
-  std::vector<std::function<void()>> final_callbacks_;
-  // To protect reads and writes to final_callbacks_
-  std::mutex post_callbacks_lock_;
   // How many nested reentrant calls are allowed until a new thread is used
   int max_recursion_depth_;
 
@@ -266,6 +272,12 @@ struct TORCH_API Engine {
  std::shared_ptr<ThreadPoolShared> thread_pool_shared_;
 
 private:
+  // Number of non-reentrant threads
+  std::atomic<uint32_t> non_reentrant_thread_count_;
+  // Destructor will wait for non-reentrant threads to finish
+  std::condition_variable non_reentrant_thread_finish_;
+  std::mutex non_reentrant_thread_finish_mutex_;
+
  void graph_task_exec_post_processing(
      const std::shared_ptr<GraphTask>& graph_task);
  void mark_graph_task_completed(std::shared_ptr<GraphTask>& graph_task);
