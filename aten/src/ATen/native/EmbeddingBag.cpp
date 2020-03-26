@@ -77,7 +77,7 @@ void index_select_add<float>(const Tensor &select_indices,
   auto* output_data = output.data_ptr<float>();
 
   if (isFastPathIndexSelect(src, output)) {
-    int64_t output_size = offsets.numel() - 1;
+    int64_t output_size;
     auto* offsets_data = offsets.data_ptr<int64_t>();
     std::vector<int64_t> offsets_include_last;
 
@@ -85,17 +85,18 @@ void index_select_add<float>(const Tensor &select_indices,
       output_size = offsets.numel() - 1;
     } else {
       output_size = offsets.numel();
-      offsets_include_last.resize(offsets.numel() + 1);
+      offsets_include_last.resize(output_size + 1);
+      auto* offsets_include_last_data = offsets_include_last.data();
       std::memcpy(
-          offsets_include_last.data(),
-          offsets.data_ptr<int64_t>(),
-          sizeof(int64_t) * offsets.numel());
-      offsets_include_last[offsets.numel()] = select_indices.numel();
-      offsets_data = offsets_include_last.data();
+          offsets_include_last_data,
+          offsets_data,
+          sizeof(int64_t) * output_size);
+      offsets_include_last[output_size] = select_indices.numel();
+      offsets_data = offsets_include_last_data;
     }
 
     at::parallel_for(
-        0, output_size, 1, [&](int64_t start_idx, int64_t end_idx) {
+        0, output_size, 64, [&](int64_t start_idx, int64_t end_idx) {
           caffe2::EmbeddingLookupIdx(
               /*block_size=*/ddim,
               /*output_size=*/end_idx - start_idx,
@@ -142,23 +143,24 @@ void index_select_add<int8_t>(const Tensor &select_indices,  //input
   auto output_data = output.data_ptr<float>();
   auto scales = src.q_per_channel_scales();
   auto scales_data = scales.data_ptr<double>();
-  int64_t output_size = offsets.numel() - 1;
+  int64_t output_size;
   auto* offsets_data = offsets.data_ptr<int64_t>();
   std::vector<int64_t> offsets_include_last;
   if (include_last_offset) {
     output_size = offsets.numel() - 1;
   } else {
     output_size = offsets.numel();
-    offsets_include_last.resize(offsets.numel() + 1);
+    offsets_include_last.resize(output_size + 1);
+    auto* offsets_include_last_data = offsets_include_last.data();
     std::memcpy(
-        offsets_include_last.data(),
+        offsets_include_last_data,
         offsets.data_ptr<int64_t>(),
         sizeof(int64_t) * offsets.numel());
     offsets_include_last[offsets.numel()] = select_indices.numel();
-    offsets_data = offsets_include_last.data();
+    offsets_data = offsets_include_last_data;
   }
   at::parallel_for(
-        0, output_size, 1, [&](int64_t start_idx, int64_t end_idx) {
+        0, output_size, 64, [&](int64_t start_idx, int64_t end_idx) {
       caffe2::pt_EmbeddingLookupIdx(
           /*block_size=*/src.size(1),
           /*output_size=*/end_idx - start_idx,
@@ -229,7 +231,7 @@ void index_select_scale_add<float>(const Tensor &select_indices,
   auto* output_data = output.data_ptr<float>();
 
   if (isFastPathIndexSelectScale(src, scale, output)) {
-    int64_t output_size = offsets.numel() - 1;
+    int64_t output_size;
     auto* offsets_data = offsets.data_ptr<int64_t>();
     std::vector<int64_t> offsets_include_last;
 
@@ -247,7 +249,7 @@ void index_select_scale_add<float>(const Tensor &select_indices,
     }
 
     at::parallel_for(
-        0, output_size, 1, [&](int64_t start_idx, int64_t end_idx) {
+        0, output_size, 64, [&](int64_t start_idx, int64_t end_idx) {
           caffe2::EmbeddingLookupIdx(
               /*block_size=*/ddim,
               /*output_size=*/end_idx - start_idx,
@@ -627,7 +629,7 @@ static inline bool _embedding_bag_fast_path_sum(const Tensor& grad,
 
   if (at::get_num_threads() == 1) return false;
   if (offset2bag.numel() != 0 || indices.numel() == 0) return false;
-  if (mode != MODE_SUM || grad.scalar_type() != kFloat || grad.stride(1) != 1) return false;
+  if (mode != MODE_SUM || grad.scalar_type() != kFloat) return false;
   if (per_sample_weights.defined() || scale_grad_by_freq) return false;
   return true;
 }
@@ -652,9 +654,9 @@ Tensor _embedding_bag_backward_cpu(const Tensor &grad, const Tensor &indices,
 
   if (_embedding_bag_fast_path_sum(grad, indices, offset2bag, per_sample_weights, scale_grad_by_freq, mode)) {
     if (sparse) {
-      return _embedding_bag_sparse_backward_cpu_sum_fast(grad, indices, offsets, num_weights, mode, per_sample_weights);
+      return _embedding_bag_sparse_backward_cpu_sum_fast(grad.contiguous(), indices, offsets, num_weights, mode, per_sample_weights);
     } else {
-      return _embedding_bag_dense_backward_cpu_sum_fast(grad, indices, offsets, num_weights, mode, per_sample_weights);
+      return _embedding_bag_dense_backward_cpu_sum_fast(grad.contiguous(), indices, offsets, num_weights, mode, per_sample_weights);
     }
   }
 
