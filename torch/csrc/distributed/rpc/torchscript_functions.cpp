@@ -94,10 +94,8 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
         auto rr = RemoteRet::fromMessage(message);
         TORCH_INTERNAL_ASSERT(rr->forkId() == forkId);
       }
-      // Unconditionally delete the pending user.
       RRefContext::getInstance().delPendingUser(forkId);
-      // Instead propagate this to userRRefPtr?
-      RRefContext::handleException(futErr);
+      RRefContext::handleException(futErr); // Propagate to userRRefPtr?
     });
 
     return userRRefPtr;

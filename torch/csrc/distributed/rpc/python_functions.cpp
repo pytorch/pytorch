@@ -164,10 +164,8 @@ PyRRef pyRemoteBuiltin(
         auto rr = RemoteRet::fromMessage(message);
         TORCH_INTERNAL_ASSERT(rr->forkId() == forkId);
       }
-      // Unconditionally delete the pending user.
       RRefContext::getInstance().delPendingUser(forkId);
-      // Instead propagate this to userRRef?
-      RRefContext::handleException(futErr);
+      RRefContext::handleException(futErr); // Propagate to userRRef?
     });
     return PyRRef(userRRef);
   } else {
@@ -230,10 +228,8 @@ PyRRef pyRemotePythonUdf(
         auto rr = RemoteRet::fromMessage(message);
         TORCH_INTERNAL_ASSERT(rr->forkId() == forkId);
       }
-      // Unconditionally delete the pending user.
       RRefContext::getInstance().delPendingUser(forkId);
-      // Instead propagate this to userRRef?
-      RRefContext::handleException(futErr);
+      RRefContext::handleException(futErr); // Propagate to userRRef?
     });
     return PyRRef(userRRef);
   } else {
