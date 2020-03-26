@@ -1476,12 +1476,13 @@ struct OpRegistrationListenerForDelayedListenerTest : public c10::OpRegistration
 };
 
 TEST(NewOperatorRegistrationTest, testDelayedListener) {
-  // THIS IRREVOCABLY UPDATES THE GLOBAL STATE!
   auto listener = std::make_unique<OpRegistrationListenerForDelayedListenerTest>();
   auto listener_ptr = listener.get();
-  Dispatcher::singleton().addRegistrationListener(std::move(listener));
+  auto registry = Dispatcher::singleton().addRegistrationListener(std::move(listener));
   int64_t initial_num_registers = listener_ptr->num_registers_;
   int64_t initial_num_deregisters = listener_ptr->num_deregisters_;
+  auto op = Dispatcher::singleton().findOp({"_test::dummy", ""});
+  ASSERT_FALSE(op.has_value());
   auto reg1 = c10::import().impl("_test::dummy", [](const Tensor& self) { return self; });
   EXPECT_EQ(initial_num_registers, listener_ptr->num_registers_);
   {
