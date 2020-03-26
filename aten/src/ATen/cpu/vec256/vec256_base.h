@@ -176,6 +176,14 @@ public:
     }
     return mask;
   }
+  float hsum() const {
+    // Returns a horizontal sum of the elements
+    float sum = 0.0f;
+    for (int i = 0; i < size(); ++i) {
+      sum += values[i];
+    }
+    return sum;
+  }
   Vec256<T> map(T (*f)(T)) const {
     Vec256<T> ret;
     for (int64_t i = 0; i != size(); i++) {

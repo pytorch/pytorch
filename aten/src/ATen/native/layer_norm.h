@@ -40,7 +40,7 @@ using forward_quantized_fn = void (*)(
 
 DECLARE_DISPATCH(forward_fn, LayerNormKernel);
 DECLARE_DISPATCH(backward_fn, LayerNormBackwardKernel);
-DECLARE_DISPATCH(forward_quantized_fn, LayerNormKernelQuantized);
+DECLARE_DISPATCH(forward_quantized_fn, quantized_layer_norm_stub);
 
 } // namespace native
 } // namespace at

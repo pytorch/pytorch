@@ -165,7 +165,7 @@ Tensor quantized_layer_norm_impl(
     X.suggest_memory_format());
 
   if (M > 0) {
-    LayerNormKernelQuantized(kCPU, X, gamma, beta, M, N, eps, &Y);
+    quantized_layer_norm_stub(kCPU, X, gamma, beta, M, N, eps, &Y);
   }
   return Y;
 }
@@ -202,7 +202,7 @@ static auto registry = torch::RegisterOperators().op(
 
 DEFINE_DISPATCH(LayerNormKernel);
 DEFINE_DISPATCH(LayerNormBackwardKernel);
-DEFINE_DISPATCH(LayerNormKernelQuantized);
+DEFINE_DISPATCH(quantized_layer_norm_stub);
 
 } // namespace native
 } // namespace at

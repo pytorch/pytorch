@@ -6,7 +6,6 @@
 #include <ATen/native/quantized/cpu/quantized_ops.h>
 #include <ATen/quantized/Quantizer.h>
 #include <ATen/native/SortingUtils.h>
-#include <ATen/cpu/vec256/functional.h>
 
 #include <cmath>
 #ifdef USE_FBGEMM
@@ -1499,7 +1498,7 @@ void fake_quant_grad_per_channel_cpu(TensorIterator &iter, int64_t quant_min, in
 }
 
 template <typename T>
-void LayerNormKernelQuantizedImplInternal(
+void quantized_layer_norm_kernel_impl(
     const Tensor& X,
     const Tensor& gamma,
     const Tensor& beta,
@@ -1511,9 +1510,11 @@ void LayerNormKernelQuantizedImplInternal(
   using qVec = vec256::Vec256<T>;
   using fVec = vec256::Vec256<float>;
 
-  DCHECK_EQ(X.numel(), M * N);
-  DCHECK(!gamma.defined() || gamma.numel() == N);
-  DCHECK(!beta.defined() || beta.numel() == N);
+  TORCH_INTERNAL_ASSERT(X.numel() == M * N, "Unexpected num elements in X");
+  TORCH_INTERNAL_ASSERT(!gamma.defined() || gamma.numel() == N,
+      "Unexpected size of gamma");
+  TORCH_INTERNAL_ASSERT(!beta.defined() || beta.numel() == N,
+      "Unexpected size of beta");
   T* X_data = X.data_ptr<T>();
   const float* gamma_data = gamma.defined() ? gamma.data_ptr<float>() : nullptr;
   const float* beta_data = beta.defined() ? beta.data_ptr<float>() : nullptr;
@@ -1532,6 +1533,10 @@ void LayerNormKernelQuantizedImplInternal(
   float x_fake_scale = 1.0f;
   fVec x_fake_scale_vec = fVec(x_fake_scale);
   fVec x_fake_scale_zp_neg_premul_vec = x_fake_scale_vec * x_zp_vec.neg();
+
+  float x_fake_zp = 0.0f;
+  fVec x_fake_zp_vec(x_fake_zp);
+  fVec x_fake_scale_fake_zp_neg_premul_vec = x_fake_scale_vec * x_fake_zp_vec.neg();
 
   int64_t y_zp = Y->q_zero_point();
   float y_scale = Y->q_scale();
@@ -1554,17 +1559,25 @@ void LayerNormKernelQuantizedImplInternal(
 
       // First pass: calculate mean and variance.
 
-      // this is faster than using vec256::reduce_all because we can do it in
-      // one pass
       float layerSumShifted = 0.0f;
       float layerSumSquaresShifted = 0.0f;
-      for (int64_t idx = 0; idx < N; idx++) {
-        auto qXVal = X_ptr[idx].val_;
+      for (int64_t vecIdx = 0; vecIdx < kNumIntVecInLayer; vecIdx++) {
+        int64_t vecStartIdx = vecIdx * kIntVLen;
+        auto qXVec = qVec::loadu(X_ptr + vecStartIdx);
+        auto dqXVec = qXVec.dequantize(x_fake_scale_vec, x_fake_zp_vec,
+            x_fake_scale_fake_zp_neg_premul_vec);
+        for (int dqXVecIdx = 0; dqXVecIdx < dqXVec.size(); dqXVecIdx++) {
+          layerSumShifted += dqXVec[dqXVecIdx].hsum();
+          layerSumSquaresShifted += (dqXVec[dqXVecIdx] * dqXVec[dqXVecIdx]).hsum();
+        }
+      }
+      for (int64_t remIdx = N - kNonVecRemInLayer; remIdx < N; remIdx++) {
+        auto qXVal = X_ptr[remIdx].val_;
         layerSumShifted += qXVal;
         layerSumSquaresShifted += qXVal * qXVal;
       }
-      float layerMeanShiftedDivScaleX = layerSumShifted / N;
 
+      float layerMeanShiftedDivScaleX = layerSumShifted / N;
       // mean(dqX) / scale_x
       float layerMeanDivScaleX = layerMeanShiftedDivScaleX - x_zp;
       // var(dqX) / scale_x^2
@@ -1610,12 +1623,11 @@ void LayerNormKernelQuantizedImplInternal(
         Y_ptr[remIdx] = at::quantize_val<T>(y_scale, y_zp, dqY);
       }
 
-
     }
   }); // parallel_for
 }
 
-void LayerNormKernelQuantizedImpl(
+void quantized_layer_norm_kernel(
     const Tensor& X,
     const Tensor& gamma,
     const Tensor& beta,
@@ -1623,8 +1635,8 @@ void LayerNormKernelQuantizedImpl(
     int64_t N,
     double eps,
     Tensor* Y) {
-  AT_DISPATCH_QINT_TYPES(X.scalar_type(), "LayerNormKernelImpl", [&]() {
-    LayerNormKernelQuantizedImplInternal<scalar_t>(
+  AT_DISPATCH_QINT_TYPES(X.scalar_type(), "quantized_layer_norm_kernel_impl_cpu", [&]() {
+    quantized_layer_norm_kernel_impl<scalar_t>(
         X, gamma, beta, M, N, static_cast<float>(eps), Y);
   });
 }
@@ -1663,7 +1675,7 @@ REGISTER_DISPATCH(fake_quant_tensor_stub, &fake_quantize_tensor_kernel);
 REGISTER_DISPATCH(fake_quant_grad_tensor_stub, &fake_quantize_grad_tensor_kernel);
 REGISTER_DISPATCH(fake_quant_per_channel_stub, &fake_quant_per_channel_cpu);
 REGISTER_DISPATCH(fake_quant_grad_per_channel_stub, &fake_quant_grad_per_channel_cpu);
-REGISTER_DISPATCH(LayerNormKernelQuantized, &LayerNormKernelQuantizedImpl);
+REGISTER_DISPATCH(quantized_layer_norm_stub, &quantized_layer_norm_kernel);
 
 } // namespace native
 } // namespace at
