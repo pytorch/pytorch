@@ -793,7 +793,7 @@ class RpcTest(RpcAgentTestFixture):
             self.assertLess(
                 rpc_event.cpu_time_total * 1e-6,
                 num_sleep_seconds,
-                "RPC event should be more than {} but got {}".format(
+                "RPC event should be less than {} but got {}".format(
                     num_sleep_seconds, rpc_event.cpu_time_total * 1e-6
                 ),
             )
@@ -1425,7 +1425,7 @@ class RpcTest(RpcAgentTestFixture):
         # Tests that we can obtain the future corresponding to the creation of
         # the RRef on remote end
         if self.rank == 0:
-            rref = rpc.remote(worker_name(1), torch.add, args=(1,1))
+            rref = rpc.remote(worker_name(1), torch.add, args=(1, 1))
             here = rref.to_here()
             fut = rref._get_creating_future()
             self.assertIsInstance(fut, torch.distributed.rpc.Future)

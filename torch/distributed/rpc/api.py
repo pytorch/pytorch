@@ -425,7 +425,8 @@ def remote(to, func, args=None, kwargs=None):
     """
     qualified_name = torch.jit._find_builtin(func)
     dst_worker_info = _to_worker_info(to)
-
+    # _profiling_enabled is only false in certain unittests where we check the
+    # profiling implementation on a more granular basis.
     should_profile = torch.autograd._profiler_enabled() and _profiling_enabled()
 
     ctx_manager = contextlib.suppress()
@@ -502,7 +503,7 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None):
                 PythonUDF(func, args, kwargs)
             )
             fut = _invoke_rpc_python_udf(dst_worker_info, pickled_python_udf, tensors)
-        # NOTE: profiling not yet supported for JIT futures (link gh here)
+        # NOTE: profiling not yet supported for JIT futures (https://github.com/pytorch/pytorch/issues/34997)
         if should_profile and isinstance(fut, torch.distributed.rpc.Future):
             assert rf is not None
             # Schedule profiling callbacks to run when the future completes.

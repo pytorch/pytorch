@@ -27,6 +27,7 @@ class PyRRef {
   py::tuple pickle() const;
   static PyRRef unpickle(const py::tuple& t);
   c10::IValue toIValue();
+  // Future that is associated with the creation of this RRef on the remote end.
   const std::shared_ptr<FutureMessage> getFuture();
 
  private:
