@@ -128,6 +128,12 @@ def get_ignored_functions():
         torch.nn.functional.sigmoid,
         torch.nn.functional.hardsigmoid,
         torch.nn.functional.tanh,
+        torch.set_autocast_enabled,
+        torch.is_autocast_enabled,
+        torch.clear_autocast_cache,
+        torch.autocast_increment_nesting,
+        torch.autocast_decrement_nesting,
+        torch.nn.functional.hardswish,
     )
 
 def get_testing_overrides():

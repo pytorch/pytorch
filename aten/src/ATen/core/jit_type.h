@@ -1364,7 +1364,7 @@ struct getTypePtr_<c10::QScheme> final {
   }
 };
 template <>
-struct getTypePtr_<at::Generator*> final {
+struct getTypePtr_<at::Generator> final {
   static TypePtr call() {
     return OptionalType::create(GeneratorType::get());
   }
