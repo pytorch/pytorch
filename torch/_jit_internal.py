@@ -560,16 +560,22 @@ def _get_overloaded_methods(method, mod_class):
 
 def is_tuple(ann):
     # For some reason Python 3.7 violates the Type[A, B].__origin__ == Type rule
+    if not hasattr(ann, '__module__'):
+        return False
     return ann.__module__ == 'typing' and \
         (getattr(ann, '__origin__', None) is Tuple or
             getattr(ann, '__origin__', None) is tuple)
 
 def is_list(ann):
+    if not hasattr(ann, '__module__'):
+        return False
     return ann.__module__ == 'typing' and \
         (getattr(ann, '__origin__', None) is List or
             getattr(ann, '__origin__', None) is list)
 
 def is_dict(ann):
+    if not hasattr(ann, '__module__'):
+        return False
     return ann.__module__ == 'typing' and \
         (getattr(ann, '__origin__', None) is Dict or
             getattr(ann, '__origin__', None) is dict)
@@ -583,8 +589,12 @@ def is_optional(ann):
             return False
         return issubclass(the_type, super_type)
 
+    if not hasattr(ann, '__module__'):
+        return False
+
     union_optional = False
-    if ann.__module__ == 'typing' and (getattr(ann, '__origin__', None) is Union):
+    if ann.__module__ == 'typing' and \
+       (getattr(ann, '__origin__', None) is Union):
         args = getattr(ann, '__args__', ())
         if len(args) == 2:
             union_optional = (safe_is_subclass(args[1], type(None)) and not safe_is_subclass(args[0], type(None))) \
