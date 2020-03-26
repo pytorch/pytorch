@@ -121,5 +121,52 @@ class TestScript(JitTestCase):
                    .check("return") \
                    .run(str(get_module_method(m, 'conv', '_conv_forward').graph))
 
+    def test_insert_quant_dequant_linear_dynamic(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.fc1 = torch.nn.Linear(5, 5).float()
+                self.fc2 = torch.nn.Linear(5, 5).float()
+
+            def forward(self, x):
+                x = self.fc1(x)
+                return self.fc2(x)
+
+        m = torch.jit.script(M())
+        qconfig = default_qconfig
+        qconfig_dict = {
+            '': script_qconfig(qconfig)
+        }
+        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False, True))
+        data = torch.randn(5, 5, dtype=torch.float)
+
+        get_forward(m._c)(data)
+
+        m = wrap_cpp_module(torch._C._jit_pass_insert_quant_dequant(m._c, "forward", False, True))
+
+        assert len(m._modules._c.items()) == 2, \
+            'Expected to have two submodule of linear'
+
+        get_forward(m._c)(data)
+        quant_func = "aten::quantize_per_tensor"
+
+        # quantizing activations
+        FileCheck().check("aten::_choose_qparams_per_tensor") \
+                   .check(quant_func) \
+                   .check("prim::CallMethod[name=\"forward\"]") \
+                   .check("aten::_choose_qparams_per_tensor") \
+                   .check(quant_func) \
+                   .check("prim::CallMethod[name=\"forward\"]") \
+                   .check_not(quant_func) \
+                   .check("return") \
+                   .run(str(get_forward_graph(m._c)))
+        # quantizing weight in forward function of fc module, no choose_qparams
+        FileCheck().check_not("aten::_choose_qparams_per_tensor") \
+                   .check(quant_func) \
+                   .check("prim::CallFunction") \
+                   .check_not(quant_func) \
+                   .check("return") \
+                   .run(str(get_forward_graph(m.fc1._c)))
+
 if __name__ == "__main__":
     run_tests()
