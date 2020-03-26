@@ -1,8 +1,7 @@
 #include <torch/csrc/jit/api/function_impl.h>
-#include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/passes/inliner.h>
-#include <torch/csrc/jit/passes/peephole.h>
-#include "torch/csrc/jit/passes/constant_propagation.h"
+
+#include <torch/csrc/jit/frontend/error_report.h>
 
 namespace torch {
 namespace jit {
@@ -63,12 +62,8 @@ const c10::FunctionSchema& GraphFunction::getSchema() const {
 }
 
 void preoptimizeGraph(std::shared_ptr<Graph>& graph) {
-  // Peephole Optimize cleans up many "is None" checks and creates constant prop
-  // opportunities
-  PeepholeOptimize(graph);
-  // AliasDb construction can be slow, so run it just on immutable types
-  // to clean up constant Ifs & other easy wins
-  ConstantPropagationImmutableTypes(graph);
+  // TODO: Invoke cleanup passes before and after inlining to reduce amount of
+  // code we're copying.
   Inline(*graph);
 }
 
