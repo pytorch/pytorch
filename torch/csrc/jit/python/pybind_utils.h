@@ -651,7 +651,7 @@ inline std::string friendlyTypeName(py::handle obj) {
 }
 
 // Thrown when trying to create a schema for a list of python
-// arguments that cannot be converted. 
+// arguments that cannot be converted.
 // Can be caught by the caller to attempt to use other schema
 // when there is an overloaded operator.
 struct schema_match_error : public std::runtime_error {
@@ -1043,7 +1043,7 @@ inline py::object invokeOperatorFromPython(
     const std::vector<std::shared_ptr<Operator>>& operations,
     py::args args,
     py::kwargs kwargs) {
-  
+
   Stack stack;
 
   if (operations.size() == 1) {
