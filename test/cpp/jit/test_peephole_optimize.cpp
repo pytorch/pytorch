@@ -8,8 +8,6 @@
 namespace torch {
 namespace jit {
 
-using namespace script;
-
 
 void testPeepholeOptimize() {
   // test is / is not none optimization

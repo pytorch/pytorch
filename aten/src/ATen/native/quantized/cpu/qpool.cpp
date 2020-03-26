@@ -402,7 +402,7 @@ class QMaxPool2D_arr_args final : public torch::OperatorKernel {
       std::vector<int64_t> dilation,
       bool ceil_mode) {
     #ifdef USE_PYTORCH_QNNPACK
-    if (at::globalContext().qEngine() == at::QEngine::QNNPACK && qx.scalar_type() == kQUInt8) {
+    if (at::globalContext().qEngine() == at::QEngine::QNNPACK && qx.scalar_type() == kQUInt8 && !ceil_mode) {
       return qnnpack_maxpool(qx, kernel_size, stride, padding, dilation, ceil_mode);
     }
     #endif

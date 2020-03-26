@@ -3,15 +3,20 @@
 #ifdef USE_DISTRIBUTED
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #endif
-#include <torch/csrc/jit/api/function.h>
-#include <torch/csrc/jit/serialization/pickler.h>
 #include <aten/src/ATen/quantized/Quantizer.h>
+#include <torch/csrc/jit/api/function_impl.h>
+#include <torch/csrc/jit/serialization/pickler.h>
 #include <string>
 
 namespace torch {
 namespace jit {
 
 using ::c10::IValue;
+
+thread_local bool add_type_tags = false;
+bool getTypeTags() {
+  return add_type_tags;
+}
 
 // Protocol 2 is the highest that can be decoded by Python 2
 // See https://docs.python.org/3/library/pickle.html#data-stream-format
@@ -126,11 +131,14 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
         err << " " << qualname->qualifiedName();
       }
     }
-    err << ". Please define serialization methods via torch::jit::pickle_ for "
+    err << ". Please define serialization methods via def_pickle() for "
            "this class.";
     AT_ERROR(err.str());
   } else if (ivalue.isRRef()) {
 #ifdef USE_DISTRIBUTED
+    TORCH_CHECK(
+        torch::distributed::rpc::getAllowJitRRefPickle() == true,
+        "RRef jit pickling is only allowed inside RPC calls.");
     pushRRef(ivalue);
 #else
     TORCH_CHECK(
@@ -480,25 +488,53 @@ void Pickler::pushTensorReference(const IValue& ivalue) {
   push<PickleOpCode>(PickleOpCode::REDUCE);
 }
 
-void Pickler::pushEmptyDict() {
-  push<PickleOpCode>(PickleOpCode::EMPTY_DICT);
+// startTypeTag() and endTypeTag() must be called in a pair, with 1 argument
+// pushed on the stack in between them. They will add the type of a container
+// ivalue to the stack as a string so we can preserve type tags across
+// serialization
+void Pickler::startTypeTag() {
+  if (getTypeTags()) {
+    pushGlobal("torch.jit._pickle", "restore_type_tag");
+  }
 }
+
+// See startTypeTag
+void Pickler::endTypeTag(const IValue& ivalue) {
+  if (getTypeTags()) {
+    TORCH_INTERNAL_ASSERT(ivalue.isGenericDict() || ivalue.isList());
+
+    // Push the dict type
+    TORCH_INTERNAL_ASSERT(ivalue.type());
+    pushString(ivalue.type()->python_str());
+
+    // Pop the dict and type into a tuple
+    push<PickleOpCode>(PickleOpCode::TUPLE2);
+
+    // Call function via reduce
+    push<PickleOpCode>(PickleOpCode::REDUCE);
+  }
+}
+
 void Pickler::pushDict(const IValue& ivalue) {
-  pushEmptyDict();
   auto dict_items = iterationOrder(ivalue.toGenericDict());
-  if (dict_items.size() == 0) {
-    return;
+
+  startTypeTag();
+
+  push<PickleOpCode>(PickleOpCode::EMPTY_DICT);
+
+  if (dict_items.size() >= 0) {
+    push<PickleOpCode>(PickleOpCode::MARK);
+
+    // Sort the dict for deterministic keys
+    for (const auto& pair : dict_items) {
+      pushIValue(pair.first);
+      pushIValue(pair.second);
+    }
+
+    push<PickleOpCode>(PickleOpCode::SETITEMS);
   }
 
-  push<PickleOpCode>(PickleOpCode::MARK);
-
-  // Sort the dict for deterministic keys
-  for (const auto& pair : dict_items) {
-    pushIValue(pair.first);
-    pushIValue(pair.second);
-  }
-
-  push<PickleOpCode>(PickleOpCode::SETITEMS);
+  endTypeTag(ivalue);
 }
 
 size_t Pickler::pushNextBinPut() {
@@ -517,15 +553,17 @@ size_t Pickler::pushNextBinPut() {
 
 void Pickler::pushGenericList(const IValue& ivalue) {
   auto list = ivalue.toListRef();
+  startTypeTag();
+
+  // Push the list items
   push<PickleOpCode>(PickleOpCode::EMPTY_LIST);
-
   push<PickleOpCode>(PickleOpCode::MARK);
-
   for (const IValue& item : list) {
     pushIValue(item);
   }
-
   push<PickleOpCode>(PickleOpCode::APPENDS);
+
+  endTypeTag(ivalue);
 }
 
 void Pickler::pushTuple(const IValue& ivalue) {

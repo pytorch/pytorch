@@ -4,13 +4,14 @@
 namespace torch {
 namespace jit {
 
-#if defined(_WIN32)
-void runJITCPPTests(bool runCuda) {
-  TORCH_INTERNAL_ASSERT(false, "JIT tests not yet supported on Windows");
-}
+#ifdef _MSC_VER
+#define JIT_TEST_API
 #else
+#define JIT_TEST_API TORCH_API
+#endif
+
 #define JIT_TEST(name) test##name();
-TORCH_API void runJITCPPTests(bool runCuda) {
+JIT_TEST_API void runJITCPPTests(bool runCuda) {
   TH_FORALL_TESTS(JIT_TEST)
   if (runCuda) {
     TH_FORALL_TESTS_CUDA(JIT_TEST)
@@ -24,6 +25,5 @@ TORCH_API void runJITCPPTests(bool runCuda) {
   testTorchSaveError();
 }
 #undef JIT_TEST
-#endif
 } // namespace jit
 } // namespace torch

@@ -76,6 +76,10 @@ static thread_local int current_depth = 0;
 // Total nested reentrant backwards calls over all threads for workder_device
 static thread_local int total_depth = 0;
 
+// The current GraphTask being executed by this thread. This helps
+// queue_callback() to find the target GraphTask to append final callbacks.
+static thread_local std::shared_ptr<GraphTask> current_graph_task = nullptr;
+
 // Returns true when t2 should be (weakly) BEFORE t1 in the queue.
 // Shutdown tasks are first and then empty NodeTask are next.
 struct CompareNodeTaskTime {
@@ -225,7 +229,7 @@ auto ReadyQueue::pop() -> NodeTask {
 }
 
 // This limit is based on the default python recursion limit which is 1000
-Engine::Engine() : max_recursion_depth_(100) {}
+Engine::Engine() : max_recursion_depth_(100), non_reentrant_thread_count_(0) {}
 
 // Send shutdown tasks to all ReadyQueues if no backward tasks are running
 // Even though readyQueue should be empty, shutdown tasks have the highest
@@ -240,8 +244,23 @@ Engine::~Engine() {
     for (auto& queue : ready_queues_) {
      queue->pushShutdownTask();
     }
+    // Do not wait for termination of global threads on Windows
+    // Because CRT terminates DLL threads before calling
+    // global object destructors
+#if !defined(_WIN32) || !defined(C10_BUILD_SHARED_LIBS)
+    std::unique_lock<std::mutex> lk(non_reentrant_thread_finish_mutex_);
+    while(non_reentrant_thread_count_.load() != 0) {
+      non_reentrant_thread_finish_.wait(lk);
+    }
+#endif
   }
-  // Othewise threads are leaked
+  // Otherwise threads are leaked
+}
+
+void Engine::release_workers() {
+  std::unique_lock<std::mutex> lk(non_reentrant_thread_finish_mutex_);
+  non_reentrant_thread_count_.store(0);
+  non_reentrant_thread_finish_.notify_one();
 }
 
 void Engine::set_device(int device) {
@@ -286,7 +305,28 @@ auto Engine::thread_init(int device) -> void {
   set_device(device);
   std::shared_ptr<GraphTask> graph_task = nullptr;
   thread_main(graph_task, /* reentrant_thread */ false);
+  // Notify about shutdown
+  {
+    std::unique_lock<std::mutex> lk(non_reentrant_thread_finish_mutex_);
+    non_reentrant_thread_count_.fetch_sub(1);
+    non_reentrant_thread_finish_.notify_one();
+  }
 }
+
+// The guard that sets and restores current_graph_task.
+struct GraphTaskGuard {
+  GraphTaskGuard(std::shared_ptr<GraphTask> graph_task) {
+    last_graph_task_ = std::move(current_graph_task);
+    current_graph_task = std::move(graph_task);
+  }
+  ~GraphTaskGuard() { restore_current_graph_task(); }
+
+  void restore_current_graph_task() {
+    current_graph_task = std::move(last_graph_task_);
+  }
+
+  std::shared_ptr<GraphTask> last_graph_task_;
+};
 
 // NOTE: graph_tasks do not necessarily form a stack. Imagine this
 // case:
@@ -313,33 +353,40 @@ auto Engine::thread_main(
   // Why the test on graph_task->outstanding_tasks_?  See
   // Note [Reentrant backwards]
   while (!reentrant_thread || graph_task->outstanding_tasks_ > 0) {
-    NodeTask task = queue->pop();
-    // This will only work if the worker is running a non backward task
-    // TODO Needs to be fixed this to work in all cases
-    if (task.isShutdownTask_) {
-      C10_LOG_API_USAGE_ONCE("torch.autograd.thread_shutdown");
-      break;
-    }
-
     // local_graph_task represents the graph_task we retrieve from the queue.
     // The outer graph_task represents the overall graph_task we need to execute
     // for reentrant execution.
     std::shared_ptr<GraphTask> local_graph_task;
-    if (!(local_graph_task = task.base_.lock())) {
-      // Reentrant thread's graph task should not expire since we hold a
-      // reference to it in this method.
-      TORCH_INTERNAL_ASSERT(!reentrant_thread);
-      LOG(INFO) << "GraphTask for function " << task.fn_->name()
-                << " is no longer valid, skipping execution";
-      continue;
-    }
+    {
+      // Scope this block of execution since NodeTask is not needed after this
+      // block and can be deallocated (release any references to grad tensors
+      // as part of inputs_).
+      NodeTask task = queue->pop();
+      // This will only work if the worker is running a non backward task
+      // TODO Needs to be fixed this to work in all cases
+      if (task.isShutdownTask_) {
+        C10_LOG_API_USAGE_ONCE("torch.autograd.thread_shutdown");
+        break;
+      }
 
-    if (task.fn_ && !local_graph_task->has_error_.load()) {
-      AutoGradMode grad_mode(local_graph_task->grad_mode_);
-      try {
-        evaluate_function(local_graph_task, task.fn_.get(), task.inputs_);
-      } catch (std::exception& e) {
-        thread_on_exception(local_graph_task, task.fn_, e);
+      if (!(local_graph_task = task.base_.lock())) {
+        // GraphTask for function is no longer valid, skipping further
+        // execution.
+        continue;
+      }
+
+      if (task.fn_ && !local_graph_task->has_error_.load()) {
+        AutoGradMode grad_mode(local_graph_task->grad_mode_);
+        try {
+          // The guard sets the thread_local current_graph_task on construction
+          // and restores it on exit. The current_graph_task variable helps
+          // queue_callback() to find the target GraphTask to append final
+          // callbacks.
+          GraphTaskGuard guard(local_graph_task);
+          evaluate_function(local_graph_task, task.fn_.get(), task.inputs_);
+        } catch (std::exception& e) {
+          thread_on_exception(local_graph_task, task.fn_, e);
+        }
       }
     }
 
@@ -374,7 +421,7 @@ auto Engine::thread_main(
 
 void Engine::reentrant_thread_init() {
   at::init_num_threads();
-  auto tp_shared= thread_pool_shared_;
+  auto tp_shared = thread_pool_shared_;
   while(true) {
     std::unique_lock<std::mutex> lk(tp_shared->mutex_);
     ++thread_pool_shared_->num_workers_;
@@ -395,33 +442,27 @@ void Engine::reentrant_thread_init() {
 }
 
 void Engine::thread_on_exception(
-    std::shared_ptr<GraphTask>& graph_task,
+    std::shared_ptr<GraphTask> graph_task,
     const std::shared_ptr<Node>& fn,
     std::exception& e) {
   graph_task->set_exception(e, fn);
 }
 
-void GraphTask::set_exception(
-    std::exception& e,
-    const std::shared_ptr<Node>& fn) {
+void GraphTask::set_exception_without_signal(const std::shared_ptr<Node>& fn) {
   std::unique_lock<std::mutex> lock(mutex_);
   if (!has_error_.load()) {
     if (AnomalyMode::is_enabled() && fn) {
-      fn->metadata()->print_stack();
+      fn->metadata()->print_stack(fn->name());
     }
     has_error_ = true;
-    // Careful: setting the future_result_ can trigger DistAutogradContext to
-    // resetGraphTask(), sometimes deleting this underlying GraphTask.
-    // Don't touch *this after setError() below, and release the lock early, to
-    // avoid unlocking this->mutex_ after setting the future.
-    std::shared_ptr<FutureVariableList> future_result = future_result_;
-    lock.unlock();
-    if (!future_result->completed()) {
-      future_result->setError(e.what());
-    } else {
-      TORCH_INTERNAL_ASSERT(future_result->hasError());
-    }
   }
+}
+
+void GraphTask::set_exception(
+    std::exception& e,
+    const std::shared_ptr<Node>& fn) {
+  set_exception_without_signal(fn);
+  future_result_->setErrorIfNeeded(e.what());
 }
 
 static variable_list call_pre_hooks(Node& fn, variable_list inputs) {
@@ -700,22 +741,6 @@ auto Engine::compute_dependencies(Node* root, GraphTask& task) -> void {
   }
 }
 
-struct ClearCallbacks {
-  ClearCallbacks(std::vector<std::function<void()>>& callbacks,
-                 std::mutex &callbacks_lock)
-    : callbacks_(callbacks)
-    , callbacks_lock_(callbacks_lock) { clear(); }
-  ~ClearCallbacks() { clear(); }
-
-  void clear() {
-    std::lock_guard<std::mutex> lock(callbacks_lock_);
-    callbacks_.clear();
-  }
-
-  std::vector<std::function<void()>>& callbacks_;
-  std::mutex& callbacks_lock_;
-};
-
 auto Engine::execute(const edge_list& roots,
                      const variable_list& inputs,
                      bool keep_graph,
@@ -725,10 +750,6 @@ auto Engine::execute(const edge_list& roots,
   validate_outputs(roots, const_cast<variable_list&>(inputs), [](const std::string& msg) {
     return msg;
   });
-
-  // Callbacks are only valid for the duration of this run and should always be cleared
-  // Lock post_callbacks_lock_ before clearing final_callbacks_
-  ClearCallbacks _cb_guard(final_callbacks_, post_callbacks_lock_);
 
   auto graph_task = std::make_shared<GraphTask>(
       keep_graph,
@@ -819,30 +840,36 @@ void Engine::mark_graph_task_completed(std::shared_ptr<GraphTask>& graph_task) {
   }
 
   try {
-    auto val = graph_task_exec_post_processing(graph_task);
-    graph_task->future_result_->markCompleted(val);
+    // Run post processing, before marking the future as complete.
+    graph_task_exec_post_processing(graph_task);
+    graph_task->future_result_->markCompleted(
+        std::move(graph_task->captured_vars_));
   } catch (std::exception& e) {
     graph_task->future_result_->setError(e.what());
   }
 }
 
-variable_list Engine::graph_task_exec_post_processing(
+void Engine::graph_task_exec_post_processing(
     const std::shared_ptr<GraphTask>& graph_task) {
   if (!graph_task->not_ready_.empty()) {
     throw std::runtime_error("could not compute gradients for some functions");
   }
 
+  // set the thread_local current_graph_task_ as more callbacks can be installed
+  // by existing final callbacks.
+  GraphTaskGuard guard(graph_task);
   // Lock mutex during each iteration for accessing final_callbacks.size()
   // Unlocking is necessary, because the callback can register
   // more callbacks (or they can be registered from other threads
   // while it's waiting.
-  std::unique_lock<std::mutex> cb_lock(post_callbacks_lock_);
+  std::unique_lock<std::mutex> cb_lock(graph_task->final_callbacks_lock_);
+  const auto& final_callbacks = graph_task->final_callbacks_;
   // WARNING: Don't use a range-for loop here because more callbacks may be
   // added in between callback calls, so iterators may become invalidated.
   // NOLINTNEXTLINE(modernize-loop-convert)
-  for (size_t i = 0; i < final_callbacks_.size(); ++i) {
+  for (size_t i = 0; i < final_callbacks.size(); ++i) {
     cb_lock.unlock();
-    final_callbacks_[i]();
+    final_callbacks[i]();
     cb_lock.lock();
   }
 
@@ -857,20 +884,17 @@ variable_list Engine::graph_task_exec_post_processing(
       default_stream.wait(event);
     }
   }
-
-  return graph_task->captured_vars_;
 }
-
 
 // note that when python is present, this base engine will be overriden
 // with a PythonEngine. Because this typically happens before get_default_engine
 // is called, this base engine will never be created.
-static Engine& get_base_engine() {
+Engine& Engine::get_base_engine() {
   static Engine engine;
   return engine;
 }
 
-std::atomic<EngineStub> engine_stub(get_base_engine);
+std::atomic<EngineStub> engine_stub(Engine::get_base_engine);
 
 void set_default_engine_stub(EngineStub stub) {
   engine_stub.store(stub);
@@ -882,8 +906,12 @@ Engine& Engine::get_default_engine() {
 }
 
 void Engine::queue_callback(std::function<void()> callback) {
-  std::lock_guard<std::mutex> lock(post_callbacks_lock_);
-  final_callbacks_.emplace_back(std::move(callback));
+  TORCH_CHECK(
+      current_graph_task,
+      "Final callbacks can only be installed during backward pass.");
+
+  std::lock_guard<std::mutex> lock(current_graph_task->final_callbacks_lock_);
+  current_graph_task->final_callbacks_.emplace_back(std::move(callback));
 }
 
 bool Engine::is_checkpoint_valid() {
@@ -935,6 +963,7 @@ auto Engine::start_threads() -> void {
 
   thread_pool_shared_ = std::make_shared<ThreadPoolShared>();
 
+  non_reentrant_thread_count_.store(num_threads);
   for (int i = 0; i < num_threads; ++i) {
     std::thread t(&Engine::thread_init, this, i - 1);
     t.detach();

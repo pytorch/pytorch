@@ -3,6 +3,7 @@ from torch._six import PY2
 from torch.autograd import Variable
 from torch.autograd.function import _nested_map
 from torch.jit.annotations import BroadcastingList2, BroadcastingList3  # noqa: F401
+
 from torch.onnx import OperatorExportTypes
 import torch
 import torch.cuda
@@ -634,3 +635,7 @@ def get_forward_graph(c):
 
 def get_module_method(m, module, method):
     return m._c.getattr(module)._get_method(method)
+
+def attrs_with_prefix(module, prefix):
+    return [x for x, _ in module._modules._c.items()
+            if x.startswith(prefix)]

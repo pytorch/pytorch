@@ -429,7 +429,7 @@ void createMethodCalls(const std::shared_ptr<Graph>& g) {
         nvs.emplace_back(i->node()->sourceRange(), i);
       }
       auto schema =
-          script::matchSchema(f->getSchema(), n->sourceRange(), *g, nvs, {});
+          matchSchema(f->getSchema(), n->sourceRange(), *g, nvs, {});
       Value* retval = g->insertMethodCall(f->qualname().name(), schema);
       n->output()->replaceAllUsesWith(retval);
       n->destroy();
@@ -492,7 +492,7 @@ void runCleanupPasses(const std::shared_ptr<Graph>& g) {
   for (Node* n : g->nodes()) {
     if (n->kind() == prim::TracedFork) {
       auto subgraph = n->g(attr::Subgraph);
-      if (script::getInlineEverythingMode()) {
+      if (getInlineEverythingMode()) {
         Inline(*subgraph);
       }
       convertTracedForksToRealForks(subgraph);
@@ -501,7 +501,7 @@ void runCleanupPasses(const std::shared_ptr<Graph>& g) {
       LintGraph(subgraph);
     }
   }
-  if (script::getInlineEverythingMode()) {
+  if (getInlineEverythingMode()) {
     Inline(*g);
   }
   convertTracedForksToRealForks(g);
@@ -510,7 +510,7 @@ void runCleanupPasses(const std::shared_ptr<Graph>& g) {
   LintGraph(g);
 }
 
-void runCleanupPasses(script::Module* m) {
+void runCleanupPasses(Module* m) {
   auto methods = m->get_methods();
   for (auto module : m->children()) {
     runCleanupPasses(&module);
@@ -524,7 +524,7 @@ void runCleanupPasses(script::Module* m) {
 
 void FixupTraceScopeBlocks(
     std::shared_ptr<Graph>& graph,
-    script::Module* self) {
+    Module* self) {
   if (self) {
     ConvertTracedAttrReferences().run(graph);
   } else {

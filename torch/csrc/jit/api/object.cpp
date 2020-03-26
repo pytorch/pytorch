@@ -7,7 +7,6 @@
 
 namespace torch {
 namespace jit {
-namespace script {
 
 Object::Object(
     std::shared_ptr<CompilationUnit> cu,
@@ -35,10 +34,9 @@ void Object::define(const std::string& src, const ResolverPtr& resolver) {
   _ivalue()->compilation_unit()->define(
       *type()->name(),
       src,
-      resolver ? resolver : script::nativeResolver(),
+      resolver ? resolver : nativeResolver(),
       &self);
 }
 
-} // namespace script
 } // namespace jit
 } // namespace torch

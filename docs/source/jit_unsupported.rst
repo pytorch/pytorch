@@ -24,7 +24,6 @@ The following functions will fail if used in TorchScript, either because they
 are not bound on `torch` or because Python expects a different schema than
 TorchScript.
 
-  * :func:`torch.norm`
   * :func:`torch.tensordot`
   * :func:`torch.unique`
   * :func:`torch.unique_consecutive`
@@ -73,13 +72,7 @@ argument, except for `torch.tensor`. This covers the following ops:
 The following functions require `dtype`, `layout`, `device` as parameters in TorchScript,
 but these parameters are optional in Python.
 
-  * :func:`torch.empty_like`
-  * :func:`torch.full_like`
-  * :func:`torch.ones_like`
-  * :func:`torch.rand_like`
   * :func:`torch.randint`
-  * :func:`torch.randn_like`
-  * :func:`torch.zeros_like`
   * :func:`torch.sparse_coo_tensor`
   * :meth:`~torch.Tensor.to`
 

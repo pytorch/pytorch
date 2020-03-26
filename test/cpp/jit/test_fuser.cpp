@@ -67,7 +67,7 @@ void testFusion() {
         %2 : Tensor = aten::mul(%0, %1)
         return (%2))IR";
     Graph graph;
-    torch::jit::script::parseIR(graph_string, &graph);
+    torch::jit::parseIR(graph_string, &graph);
 
     auto a = at::rand({3, 4}, at::kCUDA);
     auto b = at::rand({4, 3}, at::kCUDA).transpose(0, 1);
@@ -100,7 +100,7 @@ void testFusion() {
         %14 : Tensor = aten::mul(%8, %13)
         return (%14, %12))IR";
     Graph graph;
-    torch::jit::script::parseIR(graph_string, &graph);
+    torch::jit::parseIR(graph_string, &graph);
 
     graph.lint();
 
@@ -164,7 +164,7 @@ void testFusion() {
                                          graph_string2};
   for (auto i = decltype(graph_strings.size()){0}; i < graph_strings.size(); ++i) {
     Graph g;
-    torch::jit::script::parseIR(graph_strings[i], &g);
+    torch::jit::parseIR(graph_strings[i], &g);
 
     auto outputs = debugLaunchGraph(g, {a, b});
     ASSERT_EQ(outputs.size(), 2);
@@ -187,7 +187,7 @@ void testRegisterFusionCachesKernel() {
       %d0 : Float(2, 3, 4) = aten::mul(%c0, %0)
       return (%d0))IR";
   auto g0 = std::make_shared<Graph>();
-  torch::jit::script::parseIR(graph0_string, g0.get());
+  torch::jit::parseIR(graph0_string, g0.get());
 
   const auto graph1_string = R"IR(
     graph(%0 : Float(2, 3, 4),
@@ -196,7 +196,7 @@ void testRegisterFusionCachesKernel() {
       %d1 : Float(2, 3, 4) = aten::mul(%c1, %0)
       return (%d1))IR";
   auto g1 = std::make_shared<Graph>();
-  torch::jit::script::parseIR(graph1_string, g1.get());
+  torch::jit::parseIR(graph1_string, g1.get());
 
   auto getFusionGroup = [](const std::shared_ptr<Graph>& graph) {
     const auto& nodes = graph->nodes();

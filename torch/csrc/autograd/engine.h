@@ -75,6 +75,9 @@ struct GraphTask {
   // means it's .backward(), otherwise it's .grad(). exec_info_ is safe to read
   // without synchronization
   std::unordered_map<Node*, ExecInfo> exec_info_;
+  // Captures variables are grads captured that we return to the user. After
+  // execution of the GraphTask is completed, the captured_vars_ are moved
+  // out of the GraphTask and are no longer valid.
   std::vector<Variable> captured_vars_;
   std::shared_ptr<at::ThreadLocalDebugInfoBase> debug_info_ =
       at::getThreadLocalDebugInfo();
@@ -97,6 +100,12 @@ struct GraphTask {
   // running the provided function.
   void set_exception(std::exception& e, const std::shared_ptr<Node>& fn);
 
+  // Set an appropriate exception on this graph_task which was encountered while
+  // running the provided function. But doesn't signal completion on
+  // 'future_result_' right away. The user needs to explicitly mark
+  // 'future_result_' completed with an appropriate exception.
+  void set_exception_without_signal(const std::shared_ptr<Node>& fn);
+
   // Whether or not to stop execution for this GraphTask when an error is
   // encountered. When set to true, this would cause Engine::execute() to throw
   // an exception as soon as the autograd engine receives an exception.
@@ -105,6 +114,12 @@ struct GraphTask {
   // Future representing the completion of the graph task. Notified when all
   // tasks are done.
   std::shared_ptr<FutureVariableList> future_result_;
+
+  // Final callbacks installed during execution of this GraphTask
+  std::vector<std::function<void()>> final_callbacks_;
+  // To protect reads and writes to final_callbacks_. Intentionally no reusing
+  // mutex_ as the two are protecting different data structures.
+  std::mutex final_callbacks_lock_;
 
   GraphTask(
       bool keep_graph,
@@ -151,7 +166,10 @@ struct TORCH_API Engine {
   /// Returns a reference to a static `Engine` instance.
   static Engine& get_default_engine();
 
-  Engine();
+  static Engine& get_base_engine();
+
+  Engine(const Engine&) = delete;
+  Engine(Engine&&) = delete;
   virtual ~Engine();
 
   using ready_queue_type = std::deque<std::pair<std::shared_ptr<Node>, InputBuffer>>;
@@ -197,7 +215,11 @@ struct TORCH_API Engine {
 
   size_t ready_queue_size(at::Device device);
 
+  // Should be called after fork to notify that worker threads are gone
+  void release_workers();
+
  protected:
+  Engine();
   void compute_dependencies(Node* root, GraphTask& task);
   void evaluate_function(
       std::shared_ptr<GraphTask>& graph_task,
@@ -208,7 +230,7 @@ struct TORCH_API Engine {
   void start_threads();
   virtual void thread_init(int device);
   virtual void thread_on_exception(
-      std::shared_ptr<GraphTask>& graph_task,
+      std::shared_ptr<GraphTask> graph_task,
       const std::shared_ptr<Node>& fn,
       std::exception& e);
   virtual void thread_main(
@@ -223,9 +245,6 @@ struct TORCH_API Engine {
   std::once_flag start_threads_flag_;
   // Safe to read ready_queues_ without synchronization after intialization
   std::vector<std::shared_ptr<ReadyQueue>> ready_queues_;
-  std::vector<std::function<void()>> final_callbacks_;
-  // To protect reads and writes to final_callbacks_
-  std::mutex post_callbacks_lock_;
   // How many nested reentrant calls are allowed until a new thread is used
   int max_recursion_depth_;
 
@@ -253,7 +272,13 @@ struct TORCH_API Engine {
  std::shared_ptr<ThreadPoolShared> thread_pool_shared_;
 
 private:
- variable_list graph_task_exec_post_processing(
+  // Number of non-reentrant threads
+  std::atomic<uint32_t> non_reentrant_thread_count_;
+  // Destructor will wait for non-reentrant threads to finish
+  std::condition_variable non_reentrant_thread_finish_;
+  std::mutex non_reentrant_thread_finish_mutex_;
+
+ void graph_task_exec_post_processing(
      const std::shared_ptr<GraphTask>& graph_task);
  void mark_graph_task_completed(std::shared_ptr<GraphTask>& graph_task);
 };

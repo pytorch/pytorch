@@ -106,11 +106,11 @@ Input cloneInput(const Input& input);
 typedef BenchmarkHelper<
     ScriptModuleInput,
     at::IValue,
-    jit::script::Module>
+    jit::Module>
     ScriptModuleBenchmark;
 template <>
-inline BenchmarkHelper<ScriptModuleInput, at::IValue, jit::script::Module>::BenchmarkHelper()
-  : model_("Module", std::make_shared<jit::script::CompilationUnit>()),
+inline BenchmarkHelper<ScriptModuleInput, at::IValue, jit::Module>::BenchmarkHelper()
+  : model_("Module", std::make_shared<jit::CompilationUnit>()),
     initialized_(false) {}
 typedef BenchmarkHelper<ModuleInput, py::object, py::object> ModuleBenchmark;
 template <>
@@ -157,7 +157,7 @@ void ModuleBenchmark::addInput(py::args&& args, py::kwargs&& kwargs);
  */
 class C10_HIDDEN ThroughputBenchmark {
  public:
-  explicit ThroughputBenchmark(jit::script::Module module);
+  explicit ThroughputBenchmark(jit::Module module);
   explicit ThroughputBenchmark(py::object module);
 
   // Add one more input example. This input example should be in the exact

@@ -13,7 +13,46 @@ c10::optional<SourceRange> Source::findSourceRangeThatGenerated(
 }
 
 C10_EXPORT void SourceRange::highlight(std::ostream& out) const {
+  // Retrieve original SourceRange, if present.
+  if (auto orig_source_range = findSourceRangeThatGenerated()) {
+    orig_source_range->highlight(out);
+    out << "Serialized ";
+  }
   print_with_context(out, CONTEXT, true, "");
+}
+
+C10_EXPORT void format_stack_trace(std::ostream& out, const std::vector<StackEntry>& entries) {
+  bool has_orig_ranges = false;
+  std::vector<SourceRange> orig_ranges;
+  // gather original ranges. if we have a situation where we do not have orig
+  // ranges for some frames, we still want to report them for the frames we do
+  // have,
+  //  so substitute the current range for that frame
+  for (const StackEntry& entry : entries) {
+    if (auto orig_source_range = entry.range.findSourceRangeThatGenerated()) {
+      orig_ranges.emplace_back(std::move(orig_source_range.value()));
+      has_orig_ranges = true;
+    } else {
+      orig_ranges.emplace_back(entry.range);
+    }
+  }
+  out << "Traceback of TorchScript";
+  if (has_orig_ranges) {
+    out << ", serialized code";
+  }
+  out << " (most recent call last):\n";
+  for (const StackEntry& entry : entries) {
+    entry.range.print_with_context(
+        out, SourceRange::CONTEXT, true, entry.filename);
+  }
+  if (has_orig_ranges) {
+    out << "\nTraceback of TorchScript, original code (most recent call last):\n";
+    auto it = entries.begin();
+    for (const SourceRange& range : orig_ranges) {
+      range.print_with_context(
+          out, SourceRange::CONTEXT, true, (*it++).filename);
+    }
+  }
 }
 
 C10_EXPORT void SourceRange::print_with_context(
@@ -25,11 +64,7 @@ C10_EXPORT void SourceRange::print_with_context(
   if (!source_) {
     return;
   }
-  // Retrieve original SourceRange, if present.
-  if (auto orig_source_range = findSourceRangeThatGenerated()) {
-    orig_source_range->highlight(out);
-    out << "Serialized ";
-  }
+
   const std::string& str = source_->text();
   if (size() == str.size()) {
     // this is just the entire file, not a subset, so print it out.

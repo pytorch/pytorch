@@ -100,6 +100,29 @@ bool ivaluesEqual(const IValue& a1, const IValue& a2) {
     at::ArrayRef<IValue> a2_elem = a2.toTuple()->elements();
     return attributesEqual(a1_elem, a2_elem);
   }
+  if (a1.isGenericDict()) {
+    auto a1_dict = a1.toGenericDict();
+    auto a2_dict = a2.toGenericDict();
+    if (a1_dict.size() != a2_dict.size()) {
+      return false;
+    }
+
+    auto it_a1 = a1_dict.begin();
+    auto it_a2 = a2_dict.begin();
+
+    while (it_a1 != a1_dict.end()) {
+      const auto& e_a1 = *it_a1;
+      const auto& e_a2 = *it_a2;
+
+      if (!ivaluesEqual(e_a1.key(), e_a2.key()) &&
+          !ivaluesEqual(e_a1.value(), e_a2.value())) {
+        return false;
+      }
+      it_a1++;
+      it_a2++;
+    }
+    return true;
+  }
   TORCH_INTERNAL_ASSERT(false);
 }
 

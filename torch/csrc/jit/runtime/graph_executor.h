@@ -18,8 +18,9 @@ struct ExecutionPlan {
   ExecutionPlan() = default;
   ExecutionPlan(
       std::shared_ptr<Graph> graph,
+      std::string function_name,
       size_t remaining_bailout_depth = 0)
-      : code(graph, remaining_bailout_depth), graph(std::move(graph)) {}
+      : code(graph, std::move(function_name), remaining_bailout_depth), graph(std::move(graph)) {}
 
   operator bool() const {
     return static_cast<bool>(graph);
@@ -42,7 +43,7 @@ struct GraphExecutorState {
 struct GraphExecutorImplBase;
 struct TORCH_API GraphExecutor {
   GraphExecutor() = default;
-  GraphExecutor(std::shared_ptr<Graph> graph);
+  GraphExecutor(std::shared_ptr<Graph> graph, std::string function_name);
   void run(Stack& inputs);
   // `remaining_bailout_depth` stands for the maximum number of profiled and
   // specialized recompilations allowed for the current `GraphExecutor`. if

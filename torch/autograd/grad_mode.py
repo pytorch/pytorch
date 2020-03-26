@@ -45,7 +45,7 @@ class no_grad(_DecoratorContextManager):
     This context manager is thread local; it will not affect computation
     in other threads.
 
-    Also functions as a decorator.
+    Also functions as a decorator. (Make sure to instantiate with parenthesis.)
 
 
     Example::
@@ -80,7 +80,7 @@ class enable_grad(_DecoratorContextManager):
     This context manager is thread local; it will not affect computation
     in other threads.
 
-    Also functions as a decorator.
+    Also functions as a decorator. (Make sure to instantiate with parenthesis.)
 
 
     Example::

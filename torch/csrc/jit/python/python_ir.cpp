@@ -377,6 +377,9 @@ void initPythonIRBindings(PyObject* module_) {
           "createFusionGroup",
           [](Graph& g) { return g.createWithSubgraph(prim::FusionGroup); })
       .def(
+          "createCudaFusionGroup",
+          [](Graph& g) { return g.createWithSubgraph(prim::CudaFusionGroup); })
+      .def(
           "createClone",
           [](Graph& g, Node* n, py::object fn) {
             return g.createClone(
@@ -750,6 +753,11 @@ void initPythonIRBindings(PyObject* module_) {
   py::class_<RRefType, Type, std::shared_ptr<RRefType>>(m, "RRefType")
       .def(py::init([](TypePtr a) { return RRefType::create(a); }))
       .def("getElementType", &RRefType::getElementType);
+
+  py::class_<FutureType, Type, std::shared_ptr<FutureType>>(
+      m, "FutureType")
+      .def(py::init([](TypePtr a) { return FutureType::create(a); }))
+      .def("getElementType", &FutureType::getElementType);
 
   py::class_<ClassType, Type, std::shared_ptr<ClassType>>(m, "ClassType")
       .def(py::init([](const std::string& qualified_name) {

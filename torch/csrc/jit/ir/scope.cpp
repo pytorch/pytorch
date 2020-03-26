@@ -1,5 +1,5 @@
 #include <torch/csrc/jit/ir/scope.h>
-#include <torch/csrc/jit/api/function.h>
+#include <ATen/core/function.h>
 
 namespace torch {
 namespace jit {

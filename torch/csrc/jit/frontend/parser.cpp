@@ -7,7 +7,6 @@
 
 namespace torch {
 namespace jit {
-namespace script {
 
 Decl mergeTypesFromTypeComment(
     const Decl& decl,
@@ -735,6 +734,5 @@ Expr Parser::parseExp() {
   return pImpl->parseExp();
 }
 
-} // namespace script
 } // namespace jit
 } // namespace torch

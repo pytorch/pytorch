@@ -57,26 +57,27 @@ OperatorHandle Dispatcher::findSchemaOrThrow(const char* name, const char* overl
   return findSchema({name, overload_name}).value();
 }
 
-OperatorHandle Dispatcher::findOrRegisterSchema_(FunctionSchema&& schema, OperatorOptions&& options) {
+OperatorHandle Dispatcher::findOrRegisterSchema_(FunctionSchema&& schema) {
   const auto found = findSchema(schema.operator_name());
   if (found != c10::nullopt) {
     if (found->schema() != schema) {
       TORCH_CHECK(false, "Tried to register multiple operators with the same name and the same overload name but different schemas: ", schema, " vs ", found->schema());
     }
-    if (options.isDefaultAliasAnalysisKind()) {
+    if (schema.isDefaultAliasAnalysisKind()) {
       // just do nothing and let it pass.
-    } else if (found->options().isDefaultAliasAnalysisKind()) {
-      found->operatorIterator_->op.updateOptionsAliasAnalysis(options.aliasAnalysis());
+    } else if (found->schema().isDefaultAliasAnalysisKind()) {
+      found->operatorIterator_->op.updateSchemaAliasAnalysis(schema.aliasAnalysis());
     } else {
+      // TODO: This error message is crappy
       TORCH_CHECK(
-        found->options() == options,
-        "Tried to register multiple operators with the same schema but different options: ", toString(schema));
+        found->schema().aliasAnalysis() == schema.aliasAnalysis(),
+        "Tried to register multiple operators with the same schema but different alias analysis kind: ", toString(schema));
     }
     return *found;
   }
 
   OperatorName op_name = schema.operator_name();
-  operators_.emplace_back(std::move(schema), std::move(options));
+  operators_.emplace_back(std::move(schema));
   OperatorHandle handle(--operators_.end());
   operatorLookupTable_.write([&] (ska::flat_hash_map<OperatorName, OperatorHandle>& operatorLookupTable) {
     operatorLookupTable.emplace(op_name, handle);
@@ -85,13 +86,13 @@ OperatorHandle Dispatcher::findOrRegisterSchema_(FunctionSchema&& schema, Operat
   return handle;
 }
 
-std::pair<RegistrationHandleRAII, OperatorHandle> Dispatcher::registerSchema(FunctionSchema schema, OperatorOptions options) {
+std::pair<RegistrationHandleRAII, OperatorHandle> Dispatcher::registerSchema(FunctionSchema schema) {
   // we need a lock to avoid concurrent writes
   std::lock_guard<std::mutex> lock(mutex_);
 
   OperatorName op_name = schema.operator_name();
 
-  auto op = findOrRegisterSchema_(std::move(schema), std::move(options));
+  auto op = findOrRegisterSchema_(std::move(schema));
 
   ++op.operatorIterator_->refcount;
   if (1 == op.operatorIterator_->refcount) {
@@ -144,14 +145,9 @@ void Dispatcher::deregisterBackendFallbackKernel_(DispatchKey dispatchKey) {
   TORCH_INTERNAL_ASSERT(result == impl::KernelFunctionTable::RemoveKernelIfExistsResult::REMOVED_KERNEL, "Tried to deregister a backend fallback kernel for ", dispatchKey, " but there was none registered.");
 }
 
-RegistrationHandleRAII Dispatcher::registerKernel(const OperatorHandle& op, DispatchKey dispatch_key, KernelFunction kernel) {
+RegistrationHandleRAII Dispatcher::registerKernel(const OperatorHandle& op, c10::optional<DispatchKey> dispatch_key, KernelFunction kernel) {
   // note: this doesn't need the mutex to protect the iterator because write operations on the list keep iterators intact.
-  return op.operatorIterator_->op.registerKernel(std::move(dispatch_key), std::move(kernel));
-}
-
-RegistrationHandleRAII Dispatcher::registerCatchallKernel(const OperatorHandle& op, KernelFunction kernel) {
-  // note: this doesn't need the mutex to protect the iterator because write operations on the list keep iterators intact.
-  return op.operatorIterator_->op.registerCatchallKernel(std::move(kernel));
+  return op.operatorIterator_->op.registerKernel(dispatch_key, std::move(kernel));
 }
 
 void Dispatcher::addRegistrationListener(std::unique_ptr<OpRegistrationListener> listener) {
@@ -178,19 +174,6 @@ void Dispatcher::addRegistrationListener(std::unique_ptr<OpRegistrationListener>
           " from the '", dispatchKeyStr, "' backend. '",
           dispatchTable.operatorName(), "' is only available for these backends: ",
           dispatchTable.listAllDispatchKeys(), ".");
-}
-
-void Dispatcher::setManuallyBoxedKernelFor_(const OperatorHandle& op, KernelFunction::InternalBoxedKernelFunction* func) {
-  op.operatorIterator_->op.setManuallyBoxedKernel_(func);
-}
-
-bool Dispatcher::isValid(const OperatorHandle& op) const {
-  for (auto iter = operators_.begin(); iter != operators_.end(); ++iter) {
-    if (iter == op.operatorIterator_) {
-      return true;
-    }
-  }
-  return false;
 }
 
 }

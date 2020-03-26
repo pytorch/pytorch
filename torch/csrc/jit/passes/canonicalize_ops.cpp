@@ -14,7 +14,8 @@ static c10::optional<std::vector<ChunkOutput>> getChunkOutputs(Node* chunk) {
   std::vector<ChunkOutput> outputs;
   for (auto list_use : chunk->output()->uses()) {
     if (list_use.user->matches(
-            "aten::select(Tensor[] list, int idx) -> Tensor", attr::idx)) {
+            "aten::select(t[] list, int idx) -> t", attr::idx) &&
+        list_use.user->output()->type()->cast<TensorType>()) {
       outputs.emplace_back(
           list_use.user->output(),
           list_use.user->get<int64_t>(attr::idx).value());

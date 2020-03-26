@@ -63,7 +63,8 @@ bool AliasDb::isContainerType(const TypePtr& type) {
 
 AliasDb::~AliasDb() = default;
 
-AliasDb::AliasDb(std::shared_ptr<Graph> graph) : graph_(std::move(graph)) {
+AliasDb::AliasDb(std::shared_ptr<Graph> graph, bool isFrozen)
+    : graph_(std::move(graph)), isFrozen_(isFrozen) {
   memoryDAG_ = torch::make_unique<MemoryDAG>();
   analyze(graph_);
   GRAPH_DEBUG(toString());
@@ -304,11 +305,18 @@ void AliasDb::analyzeImpl(Node* node) {
           c10::toString(analysis));
     }
   } else {
-    TORCH_INTERNAL_ASSERT(
-        hasSpecialCase,
-        "We don't have an op for ",
-        node->kind().toDisplayString(),
-        " but it isn't a special case.");
+    if (!hasSpecialCase) {
+      std::ostringstream oss;
+      for (const auto input : node->inputs()) {
+        oss << input->type()->str() << ", ";
+      }
+      TORCH_INTERNAL_ASSERT(
+          0,
+          "We don't have an op for ",
+          node->kind().toDisplayString(),
+          " but it isn't a special case.  ",
+          "Argument types: ", oss.str());
+    }
   }
 
   // These nodes are not schematized, so we need to handle them specially
@@ -318,12 +326,16 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::Loop:
       return analyzeLoop(node);
     case prim::FusionGroup:
+    case prim::CudaFusionGroup:
+    case prim::FunctionalGraph:
     case prim::DifferentiableGraph:
       return analyzeSubgraph(node);
     case prim::fork:
       return analyzeFork(node);
     case aten::wait:
       return analyzeWait(node);
+    case prim::rpc_async:
+      return analyzeRpcAsync(node);
     case prim::GradOf:
       return analyzeGradOf(node);
     case prim::Constant:
@@ -348,6 +360,9 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::ListUnpack:
     case prim::PythonOp:
     case prim::GetAttr:
+      if (isFrozen_ && node->kind() == prim::GetAttr &&
+          node->input()->type()->expect<ClassType>()->is_module())
+        return analyzeCreator(node);
       return analyzeExtractor(node);
     case prim::unchecked_cast:
       return makePointerTo(node->output(), node->input());
@@ -671,6 +686,17 @@ void AliasDb::analyzeWait(Node* node) {
   }
 }
 
+void AliasDb::analyzeRpcAsync(Node* node) {
+  for (const auto input : node->inputs()) {
+    setWildcard(input);
+  }
+
+  // Give the future that the rpc_async emits a fresh value
+  for (const auto output : node->outputs()) {
+    giveFreshAlias(output);
+  }
+}
+
 // SetAttr: writes to the `self` field
 void AliasDb::analyzeSetAttr(Node* node) {
   const auto self = node->inputs().at(0);
@@ -769,8 +795,18 @@ void AliasDb::makePointerTo(const Value* from, const Value* to) {
     return;
   }
 
+  // covariant type containers can be point to types which are not
+  // also mutable/immutable because we unify the contained types
+  if (mutableType(from) != mutableType(to)) {
+    auto from_kind = from->type()->kind();
+    TORCH_INTERNAL_ASSERT(
+        from_kind == TypeKind::OptionalType ||
+        from_kind == TypeKind::FutureType || from_kind == TypeKind::TupleType);
+    return;
+  }
+
+  // both immutable
   if (!mutableType(from)) {
-    TORCH_INTERNAL_ASSERT(!mutableType(to));
     return;
   }
 
@@ -778,16 +814,7 @@ void AliasDb::makePointerTo(const Value* from, const Value* to) {
     return;
   }
 
-  // Special case: if `from` is an optional, `to` could be a None. Don't
-  // create a pointer in that case
-  if (from->type()->kind() == TypeKind::OptionalType &&
-      to->type()->kind() == TypeKind::NoneType) {
-    return;
-  }
-
-  // At this point, we should be dealing with two mutable types.
-  TORCH_INTERNAL_ASSERT(mutableType(from) && mutableType(to));
-
+  // At this point, we are dealing with two mutable types.
   auto fromEl = getOrCreateElement(from);
   auto toEl = getOrCreateElement(to);
 
@@ -1118,7 +1145,9 @@ bool AliasDb::tryMove(
     Node* movePoint,
     MoveSide moveSide,
     bool dryRun) {
-  TORCH_INTERNAL_ASSERT(toMove->owningBlock() == movePoint->owningBlock());
+  if (toMove->owningBlock() != movePoint->owningBlock()) {
+    return false;
+  }
   if (toMove == movePoint) {
     return true;
   }

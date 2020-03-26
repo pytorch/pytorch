@@ -54,7 +54,7 @@ std::pair<std::shared_ptr<Graph>, Stack> createGraphByTracing(
     Stack trace_inputs,
     const py::function& var_name_lookup_fn,
     bool force_outplace,
-    script::Module* self) {
+    Module* self) {
   C10_LOG_API_USAGE_ONCE("torch.tracer");
 
   auto lookup_fn_adapter =

@@ -6,11 +6,12 @@
 
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
-#include <torch/csrc/jit/api/function.h>
+#include <ATen/core/function.h>
+#include <torch/csrc/jit/api/function_impl.h>
+#include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/serialization/python_print.h>
-#include <torch/csrc/jit/frontend/error_report.h>
 
 namespace torch {
 namespace jit {
@@ -76,7 +77,7 @@ bool is_enabled(const char *cfname, JitLoggingLevels level) {
 // we won't have access to an original function, so we have to construct
 // a dummy function to give to PythonPrint
 std::string log_function(const std::shared_ptr<torch::jit::Graph> &graph) {
-  torch::jit::Function func("source_dump", graph, nullptr);
+  torch::jit::GraphFunction func("source_dump", graph, nullptr);
   std::vector<at::Tensor> tensors;
   std::vector<c10::NamedTypePtr> deps;
   PythonPrint pp(tensors, deps, false);

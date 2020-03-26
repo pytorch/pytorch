@@ -119,6 +119,6 @@
     path = android/libs/fbjni
     url = https://github.com/facebookincubator/fbjni.git
 [submodule "third_party/XNNPACK"]
+    ignore = dirty
     path = third_party/XNNPACK
-    url = https://github.com/AshkanAliabadi/XNNPACK.git
-    branch = xnnpack_pytorch_merge_temp
+    url = https://github.com/google/XNNPACK.git

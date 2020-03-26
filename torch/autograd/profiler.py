@@ -147,7 +147,7 @@ class EventList(list):
                     f.write('{"name": "%s", '
                             '"ph": "f", '
                             '"ts": %s, '
-                            'tid": %s, '
+                            '"tid": %s, '
                             '"pid": "CUDA functions", '
                             '"id": %s, '
                             '"cat": "cpu_to_cuda", '
@@ -787,7 +787,8 @@ def parse_nvprof_trace(path):
     unique = EnforceUnique()
     for row in conn.execute(kernel_query):
         unique.see(row['marker_id'], row['runtime_id'])
-        assert row['cbid'] == 13  # 13 == Launch
+        # 211 is cudaKernelLaunch for cuda >= 9.2; 13 is for older cuda versions
+        assert (row['cbid'] == 211) or (row['cbid'] == 13)
         evt = functions_map[row['marker_id']]
         evt.append_kernel(row['kernel_name'],
                           0,

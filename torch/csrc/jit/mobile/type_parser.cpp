@@ -1,17 +1,16 @@
 #include <ATen/core/jit_type.h>
 #include <torch/csrc/jit/frontend/parser_constants.h>
+#include <torch/csrc/jit/mobile/type_parser.h>
 #include <queue>
 
 namespace torch {
 namespace jit {
-namespace script {
 const std::unordered_map<std::string, c10::TypePtr> &string_to_type_lut();
 }
 }
-}
 
-using torch::jit::script::string_to_type_lut;
-using torch::jit::script::valid_single_char_tokens;
+using torch::jit::string_to_type_lut;
+using torch::jit::valid_single_char_tokens;
 
 namespace c10 {
 namespace {

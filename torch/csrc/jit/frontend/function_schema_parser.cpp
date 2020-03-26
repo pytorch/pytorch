@@ -22,7 +22,6 @@ using at::TypeKind;
 namespace torch {
 namespace jit {
 
-namespace script {
 namespace {
 struct SchemaParser {
   SchemaParser(const std::string& str)
@@ -290,10 +289,9 @@ struct SchemaParser {
   SchemaTypeParser type_parser;
 };
 } // namespace
-} // namespace script
 
 C10_EXPORT either<OperatorName, FunctionSchema> parseSchemaOrName(const std::string& schemaOrName) {
-  return script::SchemaParser(schemaOrName).parseDeclarations().at(0);
+  return SchemaParser(schemaOrName).parseDeclarations().at(0);
 }
 
 C10_EXPORT FunctionSchema parseSchema(const std::string& schema) {

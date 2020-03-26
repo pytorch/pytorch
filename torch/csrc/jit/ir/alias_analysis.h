@@ -36,7 +36,9 @@ namespace jit {
  */
 class AliasDb {
  public:
-  TORCH_API explicit AliasDb(std::shared_ptr<Graph> graph);
+  TORCH_API explicit AliasDb(
+      std::shared_ptr<Graph> graphi,
+      bool isFrozen = false);
   TORCH_API ~AliasDb();
 
   // There are limitations to what effects the alias analysis can track. Two
@@ -84,6 +86,8 @@ class AliasDb {
   // Is the operation in-place? i.e. doesn't write anywhere but locations it
   // reads from.
   TORCH_API bool isMutable(Node* n) const;
+
+  TORCH_API bool escapesScope(const at::ArrayRef<Value*>& vs) const;
 
   // Is it safe to change whether `a` and `b` alias each other ?
   TORCH_API bool safeToChangeAliasingRelationship(
@@ -146,8 +150,6 @@ class AliasDb {
   // Is this a value which will not alias
   bool nonAliasingValue(const Value* elem) const;
 
-  bool escapesScope(const at::ArrayRef<Value*>& vs) const;
-
   /**
    * Special analysis methods
    */
@@ -164,6 +166,7 @@ class AliasDb {
   void analyzeBroadcastingChunk(Node* node);
   void analyzeFork(Node* node);
   void analyzeWait(Node* node);
+  void analyzeRpcAsync(Node* node);
   void analyzeGradOf(Node* node);
   void analyzeSetAttr(Node* node);
   void analyzeConservative(Node* node);
@@ -187,6 +190,11 @@ class AliasDb {
   static bool isContainerType(const TypePtr& type);
 
   std::shared_ptr<Graph> graph_;
+
+  // If the Module is frozen then consider attributes as freshly created
+  // objects. Freezing API invokes alias analysis to check if they are mutated
+  // internally.
+  bool isFrozen_;
 
   // The points-to graph that stores aliasing relationships
   std::unique_ptr<MemoryDAG> memoryDAG_;

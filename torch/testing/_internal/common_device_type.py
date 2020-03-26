@@ -115,6 +115,33 @@ from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, TEST_
 # setUpClass is called AFTER tests have been created and BEFORE and ONLY IF
 # they are run. This makes it useful for initializing devices and dependencies.
 #
+# Note [Overriding methods in generic tests]
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Device generic tests look a lot like normal test classes, but they differ
+# from ordinary classes in some important ways.  In particular, overriding
+# methods in generic tests doesn't work quite the way you expect.
+#
+#     class TestFooDeviceType(TestCase):
+#         # Intention is to override
+#         def assertEqual(self, x, y):
+#             # This DOESN'T WORK!
+#             super(TestFooDeviceType, self).assertEqual(x, y)
+#
+# If you try to run this code, you'll get an error saying that TestFooDeviceType
+# is not in scope.  This is because after instantiating our classes, we delete
+# it from the parent scope.  Instead, you need to hardcode a direct invocation
+# of the desired subclass call, e.g.,
+#
+#     class TestFooDeviceType(TestCase):
+#         # Intention is to override
+#         def assertEqual(self, x, y):
+#             TestCase.assertEqual(x, y)
+#
+# However, a less error-prone way of customizing the behavior of TestCase
+# is to either (1) add your functionality to TestCase and make it toggled
+# by a class attribute, or (2) create your own subclass of TestCase, and
+# then inherit from it for your generic test.
+#
 
 # List of device type test bases that can be used to instantiate tests.
 # See below for how this list is populated. If you're adding a device type
@@ -270,7 +297,8 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None):
     empty_class = type(empty_name, generic_test_class.__bases__, {})
 
     # Acquires members names
-    generic_members = set(dir(generic_test_class)) - set(dir(empty_class))
+    # See Note [Overriding methods in generic tests]
+    generic_members = set(generic_test_class.__dict__.keys()) - set(empty_class.__dict__.keys())
     generic_tests = [x for x in generic_members if x.startswith('test')]
 
     # Creates device-specific test cases
@@ -294,7 +322,7 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None):
                 # Instantiates the device-specific tests
                 device_type_test_class.instantiate_test(name, test)
             else:  # Ports non-test member
-                assert not hasattr(device_type_test_class, name), "Redefinition of non-test member {0}".format(name)
+                assert name not in device_type_test_class.__dict__, "Redefinition of directly defined member {0}".format(name)
 
                 # Unwraps to functions (when available) for Python2 compat
                 nontest = getattr(generic_test_class, name)

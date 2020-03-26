@@ -12,7 +12,8 @@ namespace jit {
 // Autograd-aware
 bool canRunWithAutograd(Node* node) {
   auto kind = node->kind();
-  return kind != prim::FusionGroup && (kind.is_aten() || kind.is_prim());
+  return kind != prim::FusionGroup && kind != prim::CudaFusionGroup &&
+         (kind.is_aten() || kind.is_prim());
 }
 
 namespace {

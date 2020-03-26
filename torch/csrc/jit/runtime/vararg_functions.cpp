@@ -18,7 +18,7 @@ void format(Stack& stack, size_t num_inputs) {
   // // "StdRegexIsAwful" internal Lint error, to prevent sev
   // // of std::regex from PT mobile.
   // if (std::regex_search(format, unsupported_options)) {
-  //   AT_WARN("Format options are not supported.");
+  //   TORCH_WARN("Format options are not supported.");
   // }
 
   auto args = last(stack, num_inputs - 1);

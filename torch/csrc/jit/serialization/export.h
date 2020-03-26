@@ -52,21 +52,21 @@ TORCH_API std::string pretty_print_onnx(
     bool add_node_names = true);
 
 TORCH_API void ExportModule(
-    const script::Module& module,
+    const Module& module,
     std::ostream& out,
-    const script::ExtraFilesMap& metadata = script::ExtraFilesMap(),
+    const ExtraFilesMap& metadata = ExtraFilesMap(),
     bool bytecode_format = false);
 
 TORCH_API void ExportModule(
-    const script::Module& module,
+    const Module& module,
     const std::string& filename,
-    const script::ExtraFilesMap& metadata = script::ExtraFilesMap(),
+    const ExtraFilesMap& metadata = ExtraFilesMap(),
     bool bytecode_format = false);
 
 TORCH_API void ExportModule(
-    const script::Module& module,
+    const Module& module,
     const std::function<size_t(const void*, size_t)>& writer_func,
-    const script::ExtraFilesMap& metadata = script::ExtraFilesMap(),
+    const ExtraFilesMap& metadata = ExtraFilesMap(),
     bool bytecode_format = false);
 
 // Write the bytes of a pickle archive and the tensors referenced inside that
@@ -81,11 +81,11 @@ TORCH_API void writeArchiveAndTensors(
 // Surrounding system can install an additional hook to produce extra files
 // with metadata based on environment every time a module is serialized.
 using ExportModuleExtraFilesHook =
-    std::function<script::ExtraFilesMap(const script::Module&)>;
+    std::function<ExtraFilesMap(const Module&)>;
 TORCH_API void SetExportModuleExtraFilesHook(ExportModuleExtraFilesHook hook);
 
 // Returns a list of names of all operators in the module and its submodules.
-TORCH_API std::vector<std::string> export_opnames(const script::Module& m);
+TORCH_API std::vector<std::string> export_opnames(const Module& m);
 
 } // namespace jit
 } // namespace torch

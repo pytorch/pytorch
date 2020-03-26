@@ -10,7 +10,6 @@
 
 namespace torch {
 namespace jit {
-namespace script {
 
 using SugaredValuePtr = std::shared_ptr<SugaredValue>;
 
@@ -237,16 +236,16 @@ struct TORCH_API SugaredTupleValue : public SugaredValue {
 
   SugaredValuePtr getitem(const SourceRange& loc, Function& m, Value* idx)
       override {
-    TORCH_INTERNAL_ASSERT(
-        idx->type()->cast<IntType>() && toIValue(idx),
-        loc,
-        "Expected integer literal for Sugared Tuple");
+    if (!(idx->type()->cast<IntType>() && toIValue(idx))) {
+      throw ErrorReport(loc) << "Expected integer literal for index";
+    }
     auto index = toIValue(idx)->toInt();
-    TORCH_INTERNAL_ASSERT(
-        index >= 0 && index < static_cast<int64_t>(tup_.size()),
-        loc,
-        "Index out of range of Sugared Tuple");
-    return tup_.at(index);
+    int64_t adj_index = (index < 0) ? index + static_cast<int64_t>(tup_.size()) : index;
+    if (!(adj_index >= 0 && adj_index < static_cast<int64_t>(tup_.size()))) {
+      throw ErrorReport(loc)
+          << "Index " << index << " out of range of length " << tup_.size();
+    }
+    return tup_.at(adj_index);
   }
 
   // This function is called when a SugaredValue is used to convert a
@@ -365,7 +364,7 @@ struct FunctionValue : public SugaredValue {
       try {
         callee->ensure_defined();
       } catch (const RecursiveMethodCallError&) {
-        throw script::ErrorReport(loc)
+        throw ErrorReport(loc)
             << " function '" << callee->name() << "' is called recursively. "
             << "Recursive calls are not supported";
       }
@@ -377,6 +376,10 @@ struct FunctionValue : public SugaredValue {
     output->node()->setSourceRange(loc);
     return std::make_shared<SimpleValue>(output);
   }
+
+ const std::vector<Function*>& callees() {
+   return callees_;
+ }
 
  private:
   std::vector<Function*> callees_;
@@ -424,7 +427,7 @@ struct MethodValue : public SugaredValue {
         try {
           method->ensure_defined();
         } catch (const RecursiveMethodCallError&) {
-          throw script::ErrorReport(loc)
+          throw ErrorReport(loc)
               << " method '" << method->name() << "' is called recursively. "
               << "Recursive calls are not supported";
         }
@@ -648,6 +651,5 @@ struct SimpleSelf : public Self {
  private:
   ClassTypePtr classType_;
 };
-} // namespace script
 } // namespace jit
 } // namespace torch

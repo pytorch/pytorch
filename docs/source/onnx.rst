@@ -404,6 +404,7 @@ The following operators are supported:
 * to
 * topk
 * transpose
+* true_divide
 * type_as
 * unbind
 * unfold (experimental support with ATen-Caffe2 integration)

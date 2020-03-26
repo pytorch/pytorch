@@ -10,7 +10,6 @@
 
 namespace torch {
 namespace jit {
-namespace script {
 
 // clang-format off
 // TreeView provides a statically-typed way to traverse the tree, which should
@@ -299,6 +298,8 @@ struct Expr : public TreeView {
       case TK_DICT_LITERAL:
       case '@':
       case TK_POW:
+      case TK_LSHIFT:
+      case TK_RSHIFT:
       case TK_FLOOR_DIV:
       case '&':
       case '^':
@@ -740,6 +741,8 @@ struct BinOp : public Expr {
       case '-':
       case '@':
       case TK_POW:
+      case TK_LSHIFT:
+      case TK_RSHIFT:
       case '%':
       case '&':
       case '^':
@@ -813,7 +816,7 @@ struct Const : public Expr {
     // We can't pass in nullptr as the dummy pointer gets dereferenced for
     // Android version of strtod_c().
     char* dummy;
-    return torch::jit::script::strtod_c(
+    return torch::jit::strtod_c(
         subtree(0)->stringValue().c_str(), &dummy);
   }
   const std::string& text() const {
@@ -1045,14 +1048,13 @@ struct Delete : public Stmt {
   }
 };
 
-} // namespace script
 } // namespace jit
 } // namespace torch
 
 namespace std {
 
 template <typename T>
-struct iterator_traits<torch::jit::script::ListIterator<T>>
-    : std::iterator_traits<torch::jit::script::TreeList::const_iterator> {};
+struct iterator_traits<torch::jit::ListIterator<T>>
+    : std::iterator_traits<torch::jit::TreeList::const_iterator> {};
 
 } // namespace std

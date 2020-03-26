@@ -1223,136 +1223,6 @@ const std::vector<std::string> functions = {
                 grad_self = torch.max_pool2d_with_indices_backward(grad_output, self, kernel_size, stride, padding, dilation, ceil_mode, indices)
                 return grad_self, None, None, None, None, None
             return output, indices, backward
-
-        def AD_interpolate_scales_list(input,
-                                       scale_factor: Optional[List[float]],
-                                       recompute_scale_factor: bool):
-            input_dim = len(input.size())
-            if scale_factor is None or recompute_scale_factor:
-                scales = [-1.0 for i in range(input_dim-2)]
-            else:
-                scales = [scale_factor[i] for i in range(input_dim-2)]
-            return scales
-
-        def AD_interpolate_scales_float(input,
-                                        scale_factor: Optional[float],
-                                        recompute_scale_factor: bool):
-            input_dim = len(input.size())
-            if scale_factor is None or recompute_scale_factor:
-                scales = [-1.0 for i in range(input_dim-2)]
-            else:
-                scales = [scale_factor for i in range(input_dim-2)]
-            return scales
-
-        def AD_interpolate_backward(grad,
-                                    input,
-                                    mode: str,
-                                    align_corners: bool,
-                                    scale_factor: List[float]):
-            output_size = grad.size()[2:]
-            input_size = input.size()
-            input_dim = len(input_size)
-            if input_dim == 3 and mode == 'nearest':
-                grad_input = torch.upsample_nearest1d_backward(grad, output_size, input_size,
-                                                               scale_factor[0])
-            elif input_dim == 4 and mode == 'nearest':
-                grad_input = torch.upsample_nearest2d_backward(grad, output_size, input_size,
-                                                               scale_factor[0], scale_factor[1])
-            elif input_dim == 5 and mode == 'nearest':
-                grad_input = torch.upsample_nearest3d_backward(grad, output_size, input_size,
-                                                               scale_factor[0], scale_factor[1], scale_factor[2])
-            elif input_dim == 3 and mode == 'linear':
-                grad_input = torch.upsample_linear1d_backward(grad, output_size, input_size, align_corners,
-                                                              scale_factor[0])
-            elif input_dim == 4 and mode == 'bilinear':
-                grad_input = torch.upsample_bilinear2d_backward(grad, output_size, input_size, align_corners,
-                                                                scale_factor[0], scale_factor[1])
-            elif input_dim == 5 and mode == 'trilinear':
-                grad_input = torch.upsample_trilinear3d_backward(grad, output_size, input_size, align_corners,
-                                                                 scale_factor[0], scale_factor[1], scale_factor[2])
-            elif input_dim == 4 and mode == 'bicubic':
-                grad_input = torch.upsample_bicubic2d_backward(grad, output_size, input_size, align_corners,
-                                                               scale_factor[0], scale_factor[1])
-            elif input_dim == 3 and mode == 'area':
-                grad_input = AD_adaptive_avg_pool1d_backward(grad, input, output_size)
-            elif input_dim == 4 and mode == 'area':
-                grad_input = AD_adaptive_avg_pool2d_backward(grad, input, output_size)
-            elif input_dim == 5 and mode == 'area':
-                grad_input = torch.adaptive_avg_pool3d_backward(grad, input)
-            else:
-                # NEVER REACH HERE
-                grad_input = torch.zeros_like(input, memory_format=1)
-                raise RuntimeError('Input Error: Only 3D, 4D and 5D input Tensors supported')
-
-            return grad_input
-
-        def __interpolate_0(input,
-                            size: Optional[int],
-                            scale_factor: Optional[List[float]],
-                            mode: str,
-                            align_corners: Optional[bool],
-                            recompute_scale_factor: Optional[bool]):
-            def backward(grad_output):
-                if align_corners is None:
-                    align_corners = False
-                if recompute_scale_factor is None:
-                    recompute_scale_factor = True
-                scales = AD_interpolate_scales_list(input, scale_factor, recompute_scale_factor)
-                grad_self = AD_interpolate_backward(grad_output, input, mode, align_corners, scales)
-                return grad_self, None, None, None, None, None
-
-            return torch.__interpolate(input, size, scale_factor, mode, align_corners), backward
-
-        def __interpolate_1(input,
-                            size: Optional[List[int]],
-                            scale_factor: Optional[List[float]],
-                            mode: str,
-                            align_corners: Optional[bool],
-                            recompute_scale_factor: Optional[bool]):
-            def backward(grad_output):
-                if align_corners is None:
-                    align_corners = False
-                if recompute_scale_factor is None:
-                    recompute_scale_factor = True
-                scales = AD_interpolate_scales_list(input, scale_factor, recompute_scale_factor)
-                grad_self = AD_interpolate_backward(grad_output, input, mode, align_corners, scales)
-                return grad_self, None, None, None, None, None
-
-            return torch.__interpolate(input, size, scale_factor, mode, align_corners), backward
-
-        def __interpolate_2(input,
-                            size: Optional[int],
-                            scale_factor: Optional[float],
-                            mode: str,
-                            align_corners: Optional[bool],
-                            recompute_scale_factor: Optional[bool]):
-            def backward(grad_output):
-                if align_corners is None:
-                    align_corners = False
-                if recompute_scale_factor is None:
-                    recompute_scale_factor = True
-                scales = AD_interpolate_scales_float(input, scale_factor, recompute_scale_factor)
-                grad_self = AD_interpolate_backward(grad_output, input, mode, align_corners, scales)
-                return grad_self, None, None, None, None, None
-
-            return torch.__interpolate(input, size, scale_factor, mode, align_corners), backward
-
-        def __interpolate_3(input,
-                            size: Optional[List[int]],
-                            scale_factor: Optional[float],
-                            mode: str,
-                            align_corners: Optional[bool],
-                            recompute_scale_factor: Optional[bool]):
-            def backward(grad_output):
-                if align_corners is None:
-                    align_corners = False
-                if recompute_scale_factor is None:
-                    recompute_scale_factor = True
-                scales = AD_interpolate_scales_float(input, scale_factor, recompute_scale_factor)
-                grad_self = AD_interpolate_backward(grad_output, input, mode, align_corners, scales)
-                return grad_self, None, None, None, None, None
-
-            return torch.__interpolate(input, size, scale_factor, mode, align_corners), backward
       )",
     R"(
         def AD_sizes_if_not_equal_multi_1(t1, t2, res):
@@ -1488,7 +1358,7 @@ std::unordered_map<std::string, GradientPair> schema_to_graphs;
 std::unordered_map<const FunctionSchema*, GradientPair> cached_gradient_pairs;
 
 // CompilationUnit that holds all these Functions and keeps them alive.
-script::CompilationUnit compilation_unit;
+CompilationUnit compilation_unit;
 } // anonymous namespace
 
 std::pair<std::shared_ptr<Graph>, Value*> extractClosure(Value* closure) {
@@ -1538,7 +1408,7 @@ bool isHelperFunction(const std::string& method_name) {
   return method_name.compare(0, helper_prefix.length(), helper_prefix) == 0;
 }
 
-void loadModule(const script::CompilationUnit& module) {
+void loadModule(const CompilationUnit& module) {
   for (const auto& method : module.get_functions()) {
     if (isHelperFunction(method->name()))
       continue;
@@ -1550,7 +1420,7 @@ void loadModule(const script::CompilationUnit& module) {
     Node* forward_tuple = pair.forward->outputs().at(0)->node();
 
     if (forward_tuple->kind() != prim::TupleConstruct) {
-      throw script::ErrorReport(forward_tuple->sourceRange())
+      throw ErrorReport(forward_tuple->sourceRange())
           << "gradient must return literal a tuple";
     }
 
@@ -1591,7 +1461,7 @@ void loadModule(const script::CompilationUnit& module) {
 
 void loadFunctions() {
   for (const std::string& str : functions) {
-    compilation_unit.define(c10::nullopt, str, script::nativeResolver(), nullptr);
+    compilation_unit.define(c10::nullopt, str, nativeResolver(), nullptr);
   }
   loadModule(compilation_unit);
 }

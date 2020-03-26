@@ -552,6 +552,7 @@ class TestModels(JitTestCase):
         # XXX: export_import on CUDA modules doesn't work (#11480)
         self._test_vae(self, device='cuda', check_export_import=False)
 
+    @slowTest
     @skipIfNoTorchVision
     def test_script_module_trace_resnet18(self):
         x = torch.ones(1, 3, 224, 224)

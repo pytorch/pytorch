@@ -11,7 +11,6 @@
 
 namespace torch {
 namespace jit {
-namespace script {
 
 // Tree's are used to represent all forms of TC IR, pre- and post- typechecking.
 // Rather than have a full class hierarchy for all TC statements,
@@ -221,6 +220,5 @@ static inline std::ostream& operator<<(std::ostream& out, const TreeRef& t) {
   return out << pretty_tree(t);
 }
 
-} // namespace script
 } // namespace jit
 } // namespace torch

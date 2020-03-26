@@ -45,13 +45,13 @@ def type_argument_translations(arg):
     nullable = (t != 'Generator?' and '?' in t)
 
     # This enables "Generator? x = None and translates to legacy
-    # "Generator* x = nullptr". See [temp translations].
+    # "Generator x = nullptr". See [temp translations].
     if t == 'Generator?' and default == 'None':
-        t = 'Generator*'
-        default = 'nullptr'
+        t = 'Generator'
+        default = 'nullptr'  # TODO(pbelevich): replace with {}
     # Enables Generator? by translating to legacy Generator*.
     elif t == "Generator?":
-        t = 'Generator*'
+        t = 'Generator'
     # Enables Tensor[] by translating to legacy TensorList.
     elif t == 'Tensor[]' or t == 'Tensor?[]':
         t = 'TensorList'
@@ -102,10 +102,6 @@ def type_argument_translations(arg):
         match = re.match(r'Dimname\[(\d+)\]', t)
         t = 'DimnameList'
         size = int(match.group(1))
-
-    # Legacy type sanitization. TODO: Do we really need this?
-    if t == 'Generator*':
-        t = 'Generator *'
 
     if not default:
         pass
@@ -422,8 +418,8 @@ def run(paths):
                 declaration['deprecated'] = func.get('deprecated', False)
                 declaration['device_guard'] = func.get('device_guard', True)
                 declaration['supports_named_tensor'] = func.get('supports_named_tensor', False)
-                declaration['use_c10_dispatcher'] = func.get('use_c10_dispatcher', 'with_codegenerated_unboxing_wrapper')
-                assert declaration['use_c10_dispatcher'] in ['unboxed_only', 'with_codegenerated_unboxing_wrapper', 'full']
+                declaration['use_c10_dispatcher'] = func.get('use_c10_dispatcher', 'unboxed_only')
+                assert declaration['use_c10_dispatcher'] in ['unboxed_only', 'full']
                 declaration['manual_kernel_registration'] = func.get('manual_kernel_registration', False)
                 declaration['category_override'] = func.get('category_override', '')
                 declaration['arguments'] = func.get('arguments', arguments)

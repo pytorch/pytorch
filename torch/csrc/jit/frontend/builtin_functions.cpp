@@ -5,7 +5,6 @@
 
 namespace torch {
 namespace jit {
-namespace script {
 
 auto scalar_operators_source = CodeTemplate(
     R"SCRIPT(
@@ -43,6 +42,14 @@ def floordiv(self : Tensor, other : ${Rhs_Type}) -> Tensor:
   return torch.floor_divide(self, other)
 )SCRIPT");
 
+auto tensor_properties =
+    R"SCRIPT(
+def ndim(a : Tensor) -> int:
+  return a.dim()
+def T(a : Tensor) -> Tensor:
+  return a.numpy_T()
+)SCRIPT";
+
 struct BuiltinFunctionRegistry {
   const std::vector<Function*>& getAllBuiltinFunctionsFor(
       Symbol name) {
@@ -69,13 +76,14 @@ struct BuiltinFunctionRegistry {
   }
 
  private:
-  void loadSource(const std::string& source) {
+  void loadSource(const std::string& source, const std::string& the_namespace) {
     std::shared_ptr<CompilationUnit> cu = std::make_shared<CompilationUnit>();
     modules.emplace_back(cu);
     cu->define(
-        c10::nullopt, source, script::nativeResolver(), /*self=*/nullptr);
+        c10::nullopt, source, nativeResolver(), /*self=*/nullptr);
     for (auto& method : cu->get_functions()) {
-      builtins_by_name_[Symbol::fromQualString("aten::" + method->name())]
+      builtins_by_name_[Symbol::fromQualString(
+                            the_namespace + "::" + method->name())]
           .push_back(method);
     }
   }
@@ -83,7 +91,7 @@ struct BuiltinFunctionRegistry {
     for (auto scalar : {"float", "int"}) {
       TemplateEnv env;
       env.s("Scalar", scalar);
-      loadSource(scalar_operators_source.format(env));
+      loadSource(scalar_operators_source.format(env), "aten");
     }
 
     using str_pair = std::pair<std::string, std::string>;
@@ -99,14 +107,18 @@ struct BuiltinFunctionRegistry {
         env.s("Scalar", scalar);
         env.s("name", pair.first);
         env.s("Length", pair.second);
-        loadSource(_ntuple_ops.format(env));
+        loadSource(_ntuple_ops.format(env), "aten");
       }
     }
     for (auto rhs : {"number", "Tensor"}) {
       TemplateEnv env;
       env.s("Rhs_Type", rhs);
-      loadSource(floordiv.format(env));
+      loadSource(floordiv.format(env), "aten");
     }
+
+    // These are under `prim` instead of `aten` since they exist to bind certain
+    // tensor property getters to correpsonding methods
+    loadSource(tensor_properties, "prim");
   }
   enum { UNINITIALIZED, INTIIALIZING, INITIALIZED } state = UNINITIALIZED;
   std::recursive_mutex mutex;
@@ -121,6 +133,5 @@ const std::vector<Function*>& getAllBuiltinFunctionsFor(
   return registry.getAllBuiltinFunctionsFor(name);
 }
 
-} // namespace script
 } // namespace jit
 } // namespace torch

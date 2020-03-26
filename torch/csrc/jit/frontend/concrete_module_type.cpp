@@ -3,7 +3,6 @@
 
 namespace torch {
 namespace jit {
-namespace script {
 
 ClassTypePtr ConcreteModuleTypeBuilder::createTypeFromThis() const {
   auto cu = get_python_cu();
@@ -22,9 +21,9 @@ ClassTypePtr ConcreteModuleTypeBuilder::createTypeFromThis() const {
 
   // populate type with info from the concrete type information
   for (const auto& pr : attributes_) {
-    const auto& name = pr.first;
-    const auto& type = pr.second.type_;
-    const auto& isParameter = pr.second.isParam_;
+    const auto& name = pr.key();
+    const auto& type = pr.value().type_;
+    const auto& isParameter = pr.value().isParam_;
 
     cls->addAttribute(name, type, isParameter);
   }
@@ -200,7 +199,7 @@ void ConcreteModuleTypeBuilder::addAttribute(
   TORCH_INTERNAL_ASSERT(type);
   // Function attributes should be handled separately
   TORCH_INTERNAL_ASSERT(type->cast<FunctionType>() == nullptr);
-  attributes_.emplace(
+  attributes_.insert(
       std::move(name),
       ConcreteModuleTypeBuilder::Attribute(unshapedType(type), isParameter));
 }
@@ -250,7 +249,7 @@ void ConcreteModuleType::dump() const {
   }
   std::cout << "\nAttributes: \n";
   for (const auto& pr : data_.attributes_) {
-    std::cout << "\t" << pr.first << ": " << pr.second.type_->python_str()
+    std::cout << "\t" << pr.key() << ": " << pr.value().type_->python_str()
               << "\n";
   }
   std::cout << "\nSubmodules: \n";
@@ -287,8 +286,8 @@ std::unordered_map<std::string, std::pair<TypePtr, bool>> ConcreteModuleType::
   std::unordered_map<std::string, std::pair<TypePtr, bool>> ret;
   for (auto& pr : data_.attributes_) {
     ret.emplace(
-        pr.first,
-        std::pair<TypePtr, bool>(pr.second.type_, pr.second.isParam_));
+        pr.key(),
+        std::pair<TypePtr, bool>(pr.value().type_, pr.value().isParam_));
   }
   return ret;
 }
@@ -303,6 +302,5 @@ ConcreteModuleType::getModulesPy() const {
   return ret;
 }
 
-} // namespace script
 } // namespace jit
 } // namespace torch

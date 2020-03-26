@@ -24,7 +24,7 @@ at::Tensor record_function_enter(const std::string& name) {
     // a direct child of the parent RecordFunction.
     current->end();
 
-    rec->before(name);
+    runBeforeCallbacks(rec.get(), name);
   }
   return at::cpp_custom_type_hack::create(std::move(rec), at::TensorOptions());
 }
@@ -33,14 +33,11 @@ void record_function_exit(const at::Tensor& handle) {
   // We don't actually need to do anything with handle just need to persist the
   // lifetime until now.
   auto& rec = at::cpp_custom_type_hack::cast<RecordFunction>(handle);
-  auto* current = RecordFunction::current();
-  if (rec.active() && current) {
-    if (current != &rec) {
-      AT_ASSERT(current->parent() == &rec, "rec must be parent");
-      AT_ASSERT(
-          current->name() == StringView("profiler::_record_function_exit"));
-      current->end();
-    }
+  if (auto* current = RecordFunction::current()) {
+    AT_ASSERT(
+        current->name() == StringView("profiler::_record_function_exit"));
+  }
+  if (rec.active()) {
     rec.end();
   }
 }

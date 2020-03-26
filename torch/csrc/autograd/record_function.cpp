@@ -91,6 +91,9 @@ class CallbackManager {
   }
 };
 
+std::mutex next_thread_id_mutex_;
+uint16_t next_thread_id_ = 0;
+thread_local uint16_t current_thread_id_ = 0;
 // thread_local_func_ points to the currently active RecordFunction.
 thread_local RecordFunction* thread_local_func_ = nullptr;
 
@@ -145,10 +148,26 @@ void runBeforeCallbacks(RecordFunction* rf, const std::string& funcName) {
   if (hasCallbacks()) {
     auto run_samples = shouldRunSampledCallbacks();
     if (run_samples || hasNonSampledCallbacks()) {
-      rf->setRunSampled(run_samples);
+      rf->_setRunSampled(run_samples);
       rf->before(funcName);
     }
   }
+}
+
+void RecordFunction::_setCurrent() {
+  parent_ = thread_local_func_;
+  thread_local_func_ = this;
+  is_current_ = true;
+}
+
+/* static */
+uint16_t RecordFunction::getCurrentThreadId() {
+  if (!current_thread_id_) {
+    // happens only once per thread
+    std::lock_guard<std::mutex> guard(next_thread_id_mutex_);
+    current_thread_id_ = ++next_thread_id_;
+  }
+  return current_thread_id_;
 }
 
 void RecordFunction::before(const char* name, int64_t sequence_nr) {
@@ -189,55 +208,42 @@ void RecordFunction::before(Node* fn, int64_t sequence_nr) {
 }
 
 void RecordFunction::processCallbacks() {
-  parent_ = thread_local_func_;
-  thread_local_func_ = this;
-
+  threadId_ = getCurrentThreadId();
   for (size_t idx = 0; idx < manager().start_callbacks.size(); ++idx) {
     if (!manager().is_callback_sampled[idx] || run_sampled_) {
-      manager().start_callbacks[idx](*this);
+      try {
+        manager().start_callbacks[idx](*this);
+      } catch (const std::exception &e) {
+        LOG(INFO) << "Exception in RecordFunction start observer: " << e.what();
+      }
     }
   }
 }
 
-void RecordFunction::setThreadId() {
-  auto threadId = torch::autograd::profiler::getThreadId();
-  TORCH_INTERNAL_ASSERT(
-      threadId != 0,
-      "Can only call RecordFunction::setThreadId after RecordFunction::before has been run in this thread.");
-  threadId_ = threadId;
-}
-
 RecordFunction::~RecordFunction() {
-  try {
-    end();
-  } catch (const std::exception &e) {
-    LOG(INFO) << "Exception in RecordFunction::end(): " << e.what();
-  }
+  end();
 }
 
 void RecordFunction::end() {
   if (initialized_) {
     for (size_t idx = 0; idx < manager().end_callbacks.size(); ++idx) {
       if (!manager().is_callback_sampled[idx] || run_sampled_) {
-        manager().end_callbacks[idx](*this);
+        try {
+          manager().end_callbacks[idx](*this);
+        } catch (const std::exception &e) {
+          LOG(INFO) << "Exception in RecordFunction end observer: " << e.what();
+        }
       }
     }
-
-    // In the case that RecordFunction::end is called from a different thread,
-    // thread_local_func will not be this, so assert that we have overridden the
-    // thread id (by ensuring it is nonzero) and thread_local_func is null.
-    TORCH_INTERNAL_ASSERT(
-        (thread_local_func_ == this) ||
-            (thread_local_func_ == nullptr && threadId_ != 0),
-        name_,
-        ": must be top of stack. If you are calling RecordFunction::end in a"
-        "separate thread, call RecordFunction::setThreadId() in the creating"
-        "thread.");
-    thread_local_func_ = parent_;
     initialized_ = false;
+  }
+  if (is_current_) {
+    thread_local_func_ = parent_;
+    is_current_ = false;
   }
 }
 
+/* static */
 RecordFunction* RecordFunction::current() {
   return thread_local_func_;
 }

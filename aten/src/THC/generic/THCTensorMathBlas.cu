@@ -413,8 +413,6 @@ static void THCTensor_(addmmImpl)(THCState *state, THCTensor *r_, THCTensor *t, 
                    beta,
                    THCTensor_(data)(state, r__),
                    r__->stride((transpose_r == 'n' ? 1 : 0)));
-#else
-  TORCH_CHECK(false, "Bgemm not supported on at::BFloat16 type");
 #endif // __HIP_PLATFORM_HCC__
 #elif defined(THC_REAL_IS_DOUBLE)
   THCudaBlas_Dgemm(state,
@@ -445,6 +443,12 @@ static void THCTensor_(addmmImpl)(THCState *state, THCTensor *r_, THCTensor *t, 
   if(r__ != r_) {
     THCTensor_(freeCopyTo)(state, r__, r_);
   }
+
+#if defined(THC_REAL_IS_BFLOAT16) && !defined(__HIP_PLATFORM_HCC__)
+  // To avoid "variable was set but never used" warning
+  [&transpose_m1, &transpose_m2]{}();
+  TORCH_CHECK(false, "Bgemm not supported on at::BFloat16 type");
+#endif
 #else
   ERROR_ONLY_FP_TYPES("addmm");
 #endif
@@ -793,8 +797,6 @@ void THCTensor_(baddbmm)(THCState *state, THCTensor *result, THCTensor *t,
       beta,
       THCTensor_(data)(state, result_), ldc, result_->stride(0),
       num_batches);
-#else
-  TORCH_CHECK(false, "BgemmStridedBatched is not supported with at::BFloat16 type");
 #endif // __HIP_PLATFORM_HCC__
 #endif
 
@@ -809,8 +811,16 @@ void THCTensor_(baddbmm)(THCState *state, THCTensor *result, THCTensor *t,
   if (result_ != result) {
     THCTensor_(freeCopyTo)(state, result_, result);
   }
+
+#if defined(THC_REAL_IS_BFLOAT16) && !defined(__HIP_PLATFORM_HCC__)
+  // To avoid "variable was set but never used" warning
+  [&transpose_batch1, &transpose_batch2, &lda, &ldb, &ldc]{}();
+  TORCH_CHECK(false, "BgemmStridedBatched is not supported with at::BFloat16 type");
+#endif
   }
+#if !defined(THC_REAL_IS_BFLOAT16) || defined(__HIP_PLATFORM_HCC__)
   at::namedinference::propagate_names_if_nonempty(result, maybe_outnames);
+#endif
 
 #else
   ERROR_ONLY_FP_TYPES("baddbmm");
