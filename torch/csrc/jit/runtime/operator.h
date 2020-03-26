@@ -178,6 +178,7 @@ TORCH_API std::shared_ptr<Operator> findOperatorFor(const c10::OperatorName& ful
 TORCH_API std::vector<Symbol> findSimilarOperators(Symbol input_op);
 
 TORCH_API void registerOperator(Operator&& op);
+TORCH_API void deregisterOperator(const FunctionSchema& schema);
 
 // XXX: this function is meant to be used with string literals only!
 std::shared_ptr<Operator> getOperatorForLiteral(const char* signature);

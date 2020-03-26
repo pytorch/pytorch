@@ -12,15 +12,6 @@ thread_local std::vector<std::shared_ptr<RRefContext::PendingUserState>>
 thread_local bool RRefContext::recording = false;
 
 namespace callback {
-void confirmPendingUser(
-    const rpc::Message& message,
-    const c10::optional<utils::FutureError>& futErr) {
-  RRefContext::handleException(futErr);
-  auto rr = RemoteRet::fromMessage(message);
-  auto& ctx = RRefContext::getInstance();
-  ctx.delPendingUser(rr->forkId());
-}
-
 c10::intrusive_ptr<RRef> finishCreatingOwnerRRef(
     const Message& message,
     const c10::optional<utils::FutureError>& futErr) {

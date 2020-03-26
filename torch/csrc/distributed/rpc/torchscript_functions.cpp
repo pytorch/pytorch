@@ -87,7 +87,18 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
         nullptr);
 
     ctx.addPendingUser(userRRefPtr->forkId(), userRRefPtr);
-    fm->addCallback(callback::confirmPendingUser);
+    fm->addCallback([forkId{userRRefPtr->forkId()}](
+                        const rpc::Message& message,
+                        const c10::optional<utils::FutureError>& futErr) {
+      if (!futErr) {
+        auto rr = RemoteRet::fromMessage(message);
+        TORCH_INTERNAL_ASSERT(rr->forkId() == forkId);
+      }
+      // Unconditionally delete the pending user.
+      RRefContext::getInstance().delPendingUser(forkId);
+      // Instead propagate this to userRRefPtr?
+      RRefContext::handleException(futErr);
+    });
 
     return userRRefPtr;
   } else {
