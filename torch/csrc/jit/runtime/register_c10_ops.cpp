@@ -159,7 +159,7 @@ class RegistrationListener final : public c10::OpRegistrationListener {
   }
 
   void onOperatorDeregistered(const c10::OperatorHandle& op) override {
-    if(at::is_aten_op(op.schema().operator_name())) {
+    if (at::is_aten_op(op.schema().operator_name())) {
       return;
     }
     torch::jit::deregisterOperator(op.schema());
@@ -167,12 +167,11 @@ class RegistrationListener final : public c10::OpRegistrationListener {
 };
 
 struct Registerer final {
-    // this immediately calls the listener on all existing ops,
-    // and calls it in future whenever a new op is registered
-  Registerer(): listenerRAII(c10::Dispatcher::singleton().addRegistrationListener(
-      std::make_unique<RegistrationListener>()
-    )) {
-  }
+  // this immediately calls the listener on all existing ops,
+  // and calls it in future whenever a new op is registered
+  Registerer()
+      : listenerRAII(c10::Dispatcher::singleton().addRegistrationListener(
+            std::make_unique<RegistrationListener>())) {}
   c10::RegistrationHandleRAII listenerRAII;
 };
 
