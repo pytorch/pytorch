@@ -64,6 +64,23 @@ struct PatternsAndModules {
   Module packed_params_module;
 };
 
+// These are the prim::CallFunctions that doesn't require observation and
+// have a single input Tensor
+// example: `prim::CallFunction(%dropout, %input_tensor, ...)
+// so we propagate observed property from %input_tensor to the
+// output of the `prim::CallFunction`
+std::vector<std::string> _single_input_general_call_funcs = {
+  "adaptive_avg_pool2d",
+  "_max_pool2d",
+  "dropout",
+};
+
+std::vector<std::string> _quantizable_call_funcs = {
+  "conv2d",
+  "linear",
+  "relu",
+};
+
 void fillQConfigMap(
     const Module& module,
     const QConfigDict& qconfig_dict,
@@ -144,16 +161,11 @@ std::vector<size_t> getGeneralOpTensorInputIndexes(Node* n) {
       // to extend the API to support that
       // "sort",
   };
-  std::vector<std::string> single_input_call_funcs = {
-    "adaptive_avg_pool2d",
-    "_max_pool2d",
-    "dropout",
-  };
   if (isFunctionNode(
           n,
       // We don't have call functions
       // after inline
-      /* call_funcs = */ single_input_call_funcs,
+      /* call_funcs = */ _single_input_general_call_funcs,
       /* aten_funcs = */ {})) {
     return {1};
   } else if (isFunctionNode(
@@ -178,11 +190,9 @@ std::vector<size_t> getGeneralOpTensorInputIndexes(Node* n) {
 bool nodeQuantizable(Node* n) {
   return isFunctionNode(
       n,
-      /* call_funcs = */ {
-      "conv2d",
-      "linear",
-      "relu",
-    }, /* aten_funcs = */ {
+      /* call_funcs = */
+      _quantizable_call_funcs,
+      /* aten_funcs = */ {
       "conv2d",
       "linear",
       "relu",
@@ -190,7 +200,25 @@ bool nodeQuantizable(Node* n) {
       "matmul",
       "add_",
       "add",
+      "cat",
     });
+}
+
+// We don't want to analyze the graph for some `builtin` CallFunctions
+// like `linear` because we want to preserve the op boundary
+bool userDefinedCallFunction(Node* n) {
+  return n->kind() == prim::CallFunction &&
+    !isFunctionNode(
+        n, _single_input_general_call_funcs, {}) &&
+    !isFunctionNode(
+        n, _quantizable_call_funcs, {});
+}
+
+std::shared_ptr<Graph> getCallFunctionGraph(Node* n) {
+  auto* func_node = n->input(0)->node();
+  auto func = func_node->output()->type()->expect<FunctionType>()->function();
+  TORCH_CHECK(func->isGraphFunction(), "Quantization only works for graph function");
+  return func->graph();
 }
 
 Module findChildModule(
@@ -437,7 +465,7 @@ class InsertObserversHelper {
    * arguemnt: is_entry_point means whether the current method is the forward
    * method of the top level module.
    *
-   *Since we want to insert observers in the call site instead of in the called
+   * Since we want to insert observers in the call site instead of in the called
    * graph, we'll postpone inserting observer to caller as much as possible, if
    * we know the current method is the outer most method, then
    * we will insert all observers in the graph instead of postpone this to the
@@ -467,7 +495,10 @@ class InsertObserversHelper {
       // in one block it is also observed in another block, we don't want to
       // insert multiple observers for the same value
       std::unordered_set<Value*>& block_observed_values,
-      bool is_entry_point = false);
+      bool is_entry_point = false,
+      bool is_user_defined_function = false);
+
+  void setDynamicFlag(bool is_dynamic_);
 
  private:
   ModuleMethodVector getInvokedMethods(
@@ -525,7 +556,6 @@ class InsertObserversHelper {
   std::unordered_set<Value*> values_to_skip_;
   std::unordered_set<Graph*> visited_graph_of_observer_map_;
   std::unordered_map<Value*, Module> observer_for_value_;
-  std::unordered_map<Value*, Value*> caller_to_callee_;
   // Map from values from callsite into the values in the CallMethod graph
   std::unordered_map<Value*, std::unordered_set<Value*>> boundary_value_map_;
   std::unordered_set<Value*> observed_values_;
@@ -549,6 +579,8 @@ class InsertObserversHelper {
   // want to add to the module instance that has the block
   std::unordered_map<Block*, NameModuleVector> block_observer_map_;
 
+  // Is dynamic quantization enabled for the observer pass.
+  bool is_dynamic = false;
   // These are the IR patterns we match to skip inserting observers.
   // They are compiled once on construction and used repeatedly within
   // the pass.
@@ -777,6 +809,10 @@ void InsertObserversHelper::fillPassThroughValueMap(const std::shared_ptr<Graph>
     Block* b = blocks_to_visit.top();
     blocks_to_visit.pop();
     for (Node* n : b->nodes()) {
+      if (userDefinedCallFunction(n)) {
+        auto g = getCallFunctionGraph(n);
+        blocks_to_visit.push(g->block());
+      }
       auto input_indexes = getGeneralOpTensorInputIndexes(n);
       for (auto i : input_indexes) {
         for (auto* output : n->outputs()) {
@@ -800,18 +836,30 @@ void InsertObserversHelper::fillBoundaryValueMap(
     Block* b = blocks_to_visit.top();
     blocks_to_visit.pop();
     for (Node* n : b->nodes()) {
-      if (n->kind() == prim::CallMethod) {
-        auto m = getInvokedModule(module, n, self);
-        auto g = m.get_method(n->s(attr::name)).graph();
+      if (n->kind() == prim::CallMethod || userDefinedCallFunction(n)) {
+        std::shared_ptr<Graph> g;
+        // offset of input for the caller node, since the first
+        // input of CallFunction is the function node and the graph
+        // for CallFunction start with actual input
+        size_t input_offset;
+        if (n->kind() == prim::CallMethod) {
+          auto m = getInvokedModule(module, n, self);
+          g = m.get_method(n->s(attr::name)).graph();
+          input_offset = 0;
+        } else {
+          g = getCallFunctionGraph(n);
+          input_offset = 1;
+        }
         // add mapping from callsite value to value in called graph
         for (auto i = 0U; i < g->outputs().size(); ++i) {
           auto* return_val = g->outputs()[i];
           boundary_value_map_[n->output(i)].insert(return_val);
         }
         for (auto i = 0U; i < g->inputs().size(); ++i) {
+          auto caller_input_index = i + input_offset;
+          auto* caller_input = n->input(caller_input_index);
           auto* input_val = g->inputs()[i];
-          boundary_value_map_[n->input(i)].insert(input_val);
-          caller_to_callee_[n->input(i)] = input_val;
+          boundary_value_map_[caller_input].insert(input_val);
         }
       } else if (n->kind() == prim::If) {
         for (Block* subblock : n->blocks()) {
@@ -827,6 +875,10 @@ void InsertObserversHelper::fillBoundaryValueMap(
       }
     }
   }
+}
+
+void InsertObserversHelper::setDynamicFlag(bool is_dynamic_) {
+  is_dynamic = is_dynamic_;
 }
 
 void InsertObserversHelper::preprocess(
@@ -858,13 +910,18 @@ void InsertObserversHelper::preprocess(
 
 // TODO: remove this as a class method
 bool InsertObserversHelper::valueNeedsToBeQuantized(Value* v) {
-  if (!v->type()->isSubtypeOf(TensorType::get()) ||
-      isBiasOfConvOrLinear(v)) {
+  if (isBiasOfConvOrLinear(v) ||
+      !(v->type()->isSubtypeOf(TensorType::get()) ||
+        v->type()->isSubtypeOf(ListType::ofTensors()))) {
     return false;
   }
-  // Check whether producer is quantizable
-  if (nodeQuantizable(v->node())) {
-    return true;
+  // For dynamic quantization we only insert observers at the input
+  // of the quantizable function.
+  if (!is_dynamic) {
+    // Check whether producer is quantizable
+    if (nodeQuantizable(v->node())) {
+      return true;
+    }
   }
   // Check whether user is quantizable
   for (const auto& use : v->uses()) {
@@ -957,7 +1014,8 @@ InsertObserversHelper::insertObserversFor(
       Block* block,
       script::Module& module,
       std::unordered_set<Value*>& block_observed_values,
-      bool is_entry_point) {
+      bool is_entry_point,
+      bool is_user_defined_function) {
   // input/output values, used to skip inserting observers
   // for input and output of the block and the owning graph,
   // we have to insert the observers at call site because
@@ -1036,27 +1094,43 @@ InsertObserversHelper::insertObserversFor(
       if (observer_nodes_.count(n)) {
         continue;
       }
-      if (n->kind() == prim::CallMethod) {
-        auto m = getInvokedModule(module, n, self);
+      if (n->kind() == prim::CallMethod || userDefinedCallFunction(n)) {
+        script::Module m;
+        std::shared_ptr<Graph> g;
+        size_t input_offset;
+        bool is_udf_for_subblock = is_user_defined_function;
+        if (n->kind() == prim::CallMethod) {
+          m = getInvokedModule(module, n, self);
+          g = m.get_method(n->s(attr::name)).graph();
+          input_offset = 0;
+        } else { // CallFunction
+          m = module;
+          g = getCallFunctionGraph(n);
+          input_offset = 1;
+          is_udf_for_subblock = true;
+        }
+
         std::unordered_set<Value*> callee_observed_inputs;
-        for (auto i = 0U; i < n->inputs().size(); ++i) {
-          if (isObserved(n->input(i), block_observed_values)) {
-            callee_observed_inputs.insert(caller_to_callee_[n->inputs()[i]]);
+        for (auto i = 0U; i < g->inputs().size(); ++i) {
+          auto* node_input = n->input(i + input_offset);
+          if (isObserved(node_input, block_observed_values)) {
+            callee_observed_inputs.insert(g->inputs()[i]);
           }
         }
-        auto* subblock = m.get_method(n->s(attr::name)).graph()->block();
-        auto info_from_callee = insertObserversFor(subblock, m, callee_observed_inputs);
+        auto* subblock = g->block();
+        auto info_from_callee = insertObserversFor(subblock, m, callee_observed_inputs, false, is_udf_for_subblock);
         auto input_observers = std::get<0>(info_from_callee);
         auto output_observers = std::get<1>(info_from_callee);
         auto callee_observed_outputs = std::get<2>(info_from_callee);
         for (auto idx : callee_observed_outputs) {
           block_observed_values.insert(n->outputs()[idx]);
         }
-        for (auto i = 0U; i < n->inputs().size(); ++i) {
-          if (input_observers[i] && !inputs_outputs.count(n->input(i)) &&
-              !isObserved(n->input(i), block_observed_values)) {
-            values_to_observe[n->inputs()[i]] = *input_observers[i];
-            block_observed_values.insert(n->input(i));
+        for (auto i = 0U; i < g->inputs().size(); ++i) {
+          auto* node_input = n->input(i + input_offset);
+          if (input_observers[i] && !inputs_outputs.count(node_input) &&
+              !isObserved(node_input, block_observed_values)) {
+            values_to_observe[node_input] = *input_observers[i];
+            block_observed_values.insert(node_input);
           }
         }
         for (auto i = 0U; i < n->outputs().size(); ++i) {
@@ -1133,6 +1207,9 @@ InsertObserversHelper::insertObserversFor(
       auto* v = item.first;
       auto observer = item.second;
       if (!values_to_skip_.count(v)) {
+        TORCH_CHECK(!is_user_defined_function,
+                    "Inserting observers for user defined functions is not "
+                    "supported right now");
         insertObserverFor(v, module, observer, observer_name_and_modules);
       }
     }
@@ -2132,7 +2209,8 @@ TORCH_API Module InsertObservers(
     Module& input_module,
     const std::string& method_name,
     const QConfigDict& qconfig_dict,
-    bool inplace) {
+    bool inplace,
+    bool is_dynamic) {
   ModuleQConfigMap map_before_clone;
   fillQConfigMap(input_module, qconfig_dict, map_before_clone);
   ModuleCloneHelper mh;
@@ -2143,6 +2221,7 @@ TORCH_API Module InsertObservers(
   // the qconfig map again
   fillQConfigMap(module, qconfig_dict, module_qconfig_map);
   InsertObserversHelper helper(module_qconfig_map);
+  helper.setDynamicFlag(is_dynamic);
   helper.preprocess(module, method_name);
   helper.insertObservers(module, method_name, true);
   return module;
