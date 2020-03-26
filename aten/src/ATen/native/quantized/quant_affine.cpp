@@ -5,6 +5,20 @@
 namespace at {
 namespace native {
 
+template <typename T>
+void checkZeroPoint(std::string fn_name, int64_t zero_point) {
+  TORCH_CHECK(zero_point <= std::numeric_limits<T>::max(),
+              fn_name,
+              " zero_point ",
+              zero_point,
+              " is out of range.");
+  TORCH_CHECK(zero_point >= std::numeric_limits<T>::min(),
+              fn_name,
+              " zero_point ",
+              zero_point,
+              " is out of range.");
+}
+
 DEFINE_DISPATCH(quantize_tensor_affine_stub);
 DEFINE_DISPATCH(quantize_tensor_per_channel_affine_stub);
 DEFINE_DISPATCH(dequantize_tensor_affine_stub);
@@ -46,20 +60,6 @@ void checkQuantizedTensor(std::string fn_name, Tensor t) {
   TORCH_CHECK(t.is_cuda() || t.device() == kCPU,
            fn_name,
            " expects a CUDA or CPU quantized Tensor");
-}
-
-template <typename T>
-void checkZeroPoint(std::string fn_name, int64_t zero_point) {
-  TORCH_CHECK(zero_point <= std::numeric_limits<T>::max(),
-              fn_name,
-              " zero_point ",
-              zero_point,
-              " is out of range.");
-  TORCH_CHECK(zero_point >= std::numeric_limits<T>::min(),
-              fn_name,
-              " zero_point ",
-              zero_point,
-              " is out of range.");
 }
 
 template <typename T>
