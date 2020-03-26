@@ -441,6 +441,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/runtime/print_handler.cpp
     ${TORCH_SRC_DIR}/csrc/jit/codegen/fuser/interface.cpp
     ${TORCH_SRC_DIR}/csrc/jit/runtime/register_prim_ops.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/runtime/register_prim_ops_fulljit.cpp
     ${TORCH_SRC_DIR}/csrc/jit/runtime/register_prim_ops_c10.cpp
     ${TORCH_SRC_DIR}/csrc/jit/runtime/register_string_ops.cpp
     ${TORCH_SRC_DIR}/csrc/jit/runtime/register_special_ops.cpp
