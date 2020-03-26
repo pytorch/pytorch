@@ -827,25 +827,6 @@
     - CONSTANT AS_REAL(1)
 ]]
 [[
-  name: _th_mm
-  cuda_bfloat16: True
-  variants: function
-  backends:
-    - CUDA
-  return: argument 0
-  options:
-    - cname: addmm
-      arguments:
-        - arg: THTensor* result
-          output: True
-          resize: [ [self, 0], [mat2,1] ]
-        - argument 0
-        - THTensor* self
-        - THTensor* mat2
-        - CONSTANT AS_REAL(0)
-        - CONSTANT AS_REAL(1)
-]]
-[[
   name: _th_bmm
   cuda_bfloat16: True
   cname: baddbmm
