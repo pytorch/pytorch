@@ -24,18 +24,12 @@ class AveragedModel(Module):
         avg_fn (function, optional): the averaging function used to update 
             parameters; the function must take in the current value of the 
             :class:`AveragedModel` parameter, the current value of :attr:`model`
-            parameter and the number of models laready averaged; if None, 
+            parameter and the number of models already averaged; if None, 
             equally weighted average is used (default: None)
 
     Example:
         >>> loader, optimizer, model, loss_fn = ...
         >>> swa_model = torch.optim.swa_utils.AveragedModel(model)
-        >>> # swa_model computes an equally-weighted average of the weights
-        >>> # You can use custom averaging functions with `avg_fun` parameter
-        >>> ema_avg = lambda p_avg, p, n_avg: 0.1 * p_avg + 0.9 * p
-        >>> ema_model = torch.optim.swa_utils.AveragedModel(model, 
-        >>>                                     avg_fun=ema_avg)
-        >>> # ema_model computes exponential moving averages of the weights
         >>> scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, 
         >>>                                     T_max=300)
         >>> swa_start = 160
@@ -47,13 +41,22 @@ class AveragedModel(Module):
         >>>          optimizer.step()
         >>>      if i > swa_start:
         >>>          swa_model.update_parameters(model)
-        >>>          ema_model.update_parameters(model)
         >>>          swa_scheduler.step()
         >>>      else:
         >>>          scheduler.step()
         >>>
         >>> # Update bn statistics for the swa_model at the end
         >>> torch.optim.swa_utils.update_bn(loader, swa_model) 
+
+    You can use custom averaging functions with `avg_fun` parameter.
+    If no averaging function is provided, the default is to compute
+    equally-weighted average of the weights.
+
+    Example:
+        >>> # ema_model computes exponential moving averages of the weights
+        >>> ema_avg = lambda averaged_model_parameter, model_parameter, num_averaged:\
+                            0.1 * averaged_model_parameter + 0.9 * model_parameter
+        >>> ema_model = torch.optim.swa_utils.AveragedModel(model, avg_function=ema_avg)
 
     .. note::
         When using SWA with models containing Batch Normalization you may 
@@ -98,12 +101,12 @@ class AveragedModel(Module):
     def update_parameters(self, model):
         for p_swa, p_model in zip(self.parameters(), model.parameters()):
             device = p_swa.device
-            p_model_ = p_model.data.to(device)
+            p_model_ = p_model.detach().to(device)
             if self.n_averaged == 0:
-                p_swa.data.copy_(p_model_)
+                p_swa.detach().copy_(p_model_)
             else:
-                p_swa.data.copy_(self.avg_fun(p_swa.data, p_model_,
-                                              self.n_averaged))
+                p_swa.detach().copy_(self.avg_fun(p_swa.detach(), p_model_,
+                                                  self.n_averaged))
         self.n_averaged += 1
 
 
