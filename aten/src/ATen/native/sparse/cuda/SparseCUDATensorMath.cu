@@ -870,8 +870,8 @@ Tensor& bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tens
   Scalar alpha = 1;
 
   int64_t mat_el_begin_idx = 0;
-  size_t* workspace_buffer_sizes = new size_t[num_matrices];
-  void** workspace_buffers = new void*[num_matrices];
+  size_t workspace_buffer_size = 0;
+  void* workspace_buffer = nullptr;
 
   cusparseSpMMAlg_t mm_alg = deterministic ? CUSPARSE_COOMM_ALG2 : CUSPARSE_COOMM_ALG1;
 
@@ -939,6 +939,7 @@ Tensor& bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tens
           ));
           scalar_t alpha_val = alpha.to<scalar_t>();
           scalar_t beta_val = beta.to<scalar_t>();
+          size_t required_workspace_buffer_size = 0;
           TORCH_CUDASPARSE_CHECK(cusparseSpMM_bufferSize(
             cusparse_handle,
             CUSPARSE_OPERATION_NON_TRANSPOSE,
@@ -950,12 +951,14 @@ Tensor& bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tens
             result_descr,
             cuda_data_type,
             mm_alg,
-            &workspace_buffer_sizes[cur_mat_num]
+            &required_workspace_buffer_size
           ));
-          if (workspace_buffer_sizes[cur_mat_num] > 0) {
-            cudaMallocManaged(&(workspace_buffers[cur_mat_num]), workspace_buffer_sizes[cur_mat_num]);
-          } else {
-            workspace_buffers[cur_mat_num] = nullptr;
+          if (required_workspace_buffer_size > workspace_buffer_size) {
+            if (workspace_buffer != nullptr) {
+              cudaFree(workspace_buffer);
+            }
+            workspace_buffer_size = required_workspace_buffer_size;
+            cudaMallocManaged(&workspace_buffer, workspace_buffer_size);
           }
           TORCH_CUDASPARSE_CHECK(cusparseSpMM(
             cusparse_handle,
@@ -968,14 +971,13 @@ Tensor& bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tens
             result_descr,
             cuda_data_type,
             mm_alg,
-            workspace_buffers[cur_mat_num]
+            workspace_buffer
           ));
           TORCH_CUDASPARSE_CHECK(cusparseDestroySpMat(sparse_descr));
           TORCH_CUDASPARSE_CHECK(cusparseDestroyDnMat(dense_descr));
           TORCH_CUDASPARSE_CHECK(cusparseDestroyDnMat(result_descr));
           mat_el_begin_idx = mat_el_end_idx;
         } else {
-          workspace_buffers[cur_mat_num] = nullptr;
           tmp_result[cur_mat_num].zero_();
         }
       }
@@ -990,16 +992,9 @@ Tensor& bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tens
 
   cudaFree(mat_el_end_indices);
 
-  // The overall operation is significantly faster if all the
-  // workspace buffers are freed at the end
-  for (int64_t mat_num = 0; mat_num < num_matrices; mat_num++) {
-    if (workspace_buffers[mat_num] != nullptr) {
-      cudaFree(workspace_buffers[mat_num]);
-    }
+  if (workspace_buffer != nullptr) {
+    cudaFree(workspace_buffer);
   }
-  delete [] workspace_buffers;
-  delete [] workspace_buffer_sizes;
-
 #endif
 
   return result;
