@@ -530,7 +530,7 @@ class _ConvTransposeNd(_ConvNd, nn._ConvTransposeNd):
         return res
 
 
-class ConvTranspose2d(_ConvNd):
+class ConvTranspose2d(_ConvTransposeNd):
     r"""Applies a 2D transposed convolution operator over an input image
     composed of several input planes.
 
