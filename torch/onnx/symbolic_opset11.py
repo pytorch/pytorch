@@ -449,8 +449,11 @@ def _dim_arange(g, like, dim):
     return arange(g, stop, 4, None, None, None)
 
 
-def size(g, self, dim):
-    return sym_help._size_helper(g, self, dim)
+def size(g, self, dim=None):
+    if dim is None:
+        return g.op("Shape", self)
+    else:
+        return sym_help._size_helper(g, self, dim)
 
 
 def squeeze(g, self, dim=None):
