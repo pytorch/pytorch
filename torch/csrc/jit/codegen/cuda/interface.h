@@ -36,6 +36,6 @@ C10_EXPORT bool isFusable(const Node* const fusion, const Node* const node);
 // redirect to compileCudaFusionGroup (manager.h)
 C10_EXPORT void compileFusionGroup(Node* fusion_node);
 // redirect to runCudaFusionGroup (manager.h)
-C10_EXPORT void runFusionGroup(const Node* const fusion_node, Stack& stack);
+C10_EXPORT void runFusionGroup(const Node* fusion_node, Stack& stack);
 
 }}}} // namespace torch::jit::fuser::cuda

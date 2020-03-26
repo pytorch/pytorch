@@ -25,7 +25,7 @@ void compileFusionGroup(Node* fusion_node) {
   getFuserInterface()->fn_compile_n_(fusion_node);
 }
 
-void runFusionGroup(const Node* const fusion_node, Stack& stack) {
+void runFusionGroup(const Node* fusion_node, Stack& stack) {
   TORCH_CHECK(getFuserInterface()->fn_run_n_s_ != nullptr, "fn_run_n_s_ not initialized");
   getFuserInterface()->fn_run_n_s_(fusion_node, stack);
 }
