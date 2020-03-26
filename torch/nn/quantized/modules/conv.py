@@ -509,7 +509,7 @@ class Conv3d(_ConvNd):
 # Note: The MRO should make sure that the `super` in the `_ConvNd` will be
 #       called, while the one in the `nn._ConvTransposeNd` it won't.
 
-class _ConvTransposeNd(_ConvNd, nn._ConvTransposeNd):
+class _ConvTransposeNd(_ConvNd, nn.modules.conv._ConvTransposeNd):
     def __init__(self, in_channels, out_channels, kernel_size, stride,
                  padding, dilation, transposed, output_padding,
                  groups, bias, padding_mode):
