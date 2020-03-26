@@ -21,6 +21,7 @@ white_list = [
     # We export some functions and classes for test_jit.py directly from libtorch.so,
     # it's not important to have BC for them
     ('_TorchScriptTesting.*', datetime.date(9999, 1, 1)),
+    ('prim::id*', datetime.date(2020, 4, 1)),
     ('aten::pop*', datetime.date(2020, 4, 1)),
     ('aten::insert*', datetime.date(2020, 4, 1)),
     ('aten::Delete*', datetime.date(2020, 4, 1)),
@@ -48,6 +49,7 @@ white_list = [
     ('aten::randint_like', datetime.date(2020, 3, 15)),
     ('aten::zeros_like', datetime.date(2020, 3, 15)),
     ('aten::_assert_int_or_pair', datetime.date(9999, 1, 1)),
+    ('aten::floor_divide', datetime.date(2020, 4, 1)),
     ('aten::Bool', datetime.date(2020, 4, 1)),
     ('aten::Float', datetime.date(2020, 4, 1)),
     ('aten::to', datetime.date(2020, 4, 1)),
@@ -112,9 +114,22 @@ white_list = [
     ('aten::_linear_prepack', datetime.date(2020, 4, 1)),
     ('aten::_conv2d_packed', datetime.date(2020, 4, 1)),
     ('aten::_conv2d_prepack', datetime.date(2020, 4, 1)),
+    ('aten::dequantize', datetime.date(2020, 4, 1)),
     ('aten::confirmed_by_owner', datetime.date(2020, 3, 17)),
     ('aten::owner', datetime.date(2020, 3, 27)),
     ('aten::owner_name', datetime.date(2020, 3, 27)),
+    ('_xnnpack::conv2d_packed', datetime.date(2020, 4, 2)),
+    ('_xnnpack::conv2d_prepack', datetime.date(2020, 4, 2)),
+    ('_xnnpack::linear_packed', datetime.date(2020, 4, 2)),
+    ('_xnnpack::linear_prepack', datetime.date(2020, 4, 2)),
+    ('_aten', datetime.date(2020, 4, 15)),
+]
+
+
+# The nightly will fail to parse newly added syntax to schema declarations
+# Add new schemas that will fail the nightly here
+dont_parse_list = [
+    ("prim::id", datetime.date(2020, 4, 1)),
 ]
 
 
@@ -124,6 +139,16 @@ def white_listed(schema, white_list):
             continue
         regexp = re.compile(item[0])
         if regexp.search(schema.name):
+            return True
+    return False
+
+
+def dont_parse(schema_line):
+    for item in dont_parse_list:
+        if item[1] < datetime.date.today():
+            continue
+        regexp = re.compile(item[0])
+        if regexp.search(schema_line):
             return True
     return False
 
@@ -176,7 +201,13 @@ if __name__ == '__main__':
             line = f.readline()
             if not line:
                 break
+            if "torch.classes" in line:
+                # TODO Fix type __torch__.torch.classes.xxx
+                continue
 
+            if dont_parse(line.strip()):
+                print("Not parsing schema line: ", line.strip())
+                continue
             s = parse_schema(line.strip())
             slist = new_schema_dict.get(s.name, [])
             slist.append(s)

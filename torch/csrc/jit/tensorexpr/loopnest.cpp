@@ -1,4 +1,4 @@
-#include <torch/csrc/jit/tensorexpr/schedule.h>
+#include <torch/csrc/jit/tensorexpr/loopnest.h>
 
 #include <queue>
 #include <stdexcept>
@@ -6,7 +6,10 @@
 #include <unordered_set>
 #include <vector>
 
+#include <c10/util/Logging.h>
 #include <torch/csrc/jit/tensorexpr/eval.h>
+#include <torch/csrc/jit/tensorexpr/expr.h>
+#include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/ir_mutator.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
@@ -14,7 +17,6 @@
 namespace torch {
 namespace jit {
 namespace tensorexpr {
-namespace schedule {
 
 namespace {
 
@@ -282,7 +284,7 @@ class Vectorizer : public IRMutator {
   const Expr* start_ = nullptr;
 };
 
-void LoopNest::Vectorize(Stmt* stmt) {
+void LoopNest::vectorize(Stmt* stmt) {
   For* f = dynamic_cast<For*>(stmt);
   if (!f) {
     return;
@@ -403,6 +405,7 @@ class FunctionInliner : public IRMutator {
     }
   }
 
+ private:
   std::unordered_map<const Var*, const Expr*> inline_mapping_;
   std::vector<Function*> funcs_;
   std::unordered_set<const Var*> func_var_set_;
@@ -570,7 +573,7 @@ class DepTracker : public IRVisitor {
   std::vector<Tensor*> used_tensors;
 };
 
-std::vector<Tensor*> LoopNest::FindAllNeededTensors(
+std::vector<Tensor*> LoopNest::findAllNeededTensors(
     const std::vector<Tensor*>& tensors) {
   DepTracker d;
   std::queue<Tensor*> q;
@@ -621,7 +624,7 @@ LoopNest::LoopNest(const std::vector<Tensor*>& output_tensors)
   // Find all tensors we need to compute (including dependencies) and put them
   // in a topological order
   std::vector<Tensor*> tensors_to_compute =
-      FindAllNeededTensors(output_tensors);
+      findAllNeededTensors(output_tensors);
 
   // Find all intermediate tensors, we'll need that for inserting alloc/free
   // statements
@@ -635,13 +638,13 @@ LoopNest::LoopNest(const std::vector<Tensor*>& output_tensors)
 
   std::vector<Stmt*> loops;
   for (Tensor* t : tensors_to_compute) {
-    Stmt* loop = LowerToStmt(t);
+    Stmt* loop = lowerToStmt(t);
     loops.push_back(loop);
   }
   root_stmt_ = new Block(loops);
 }
 
-Stmt* LoopNest::LowerToStmt(Tensor* t) {
+Stmt* LoopNest::lowerToStmt(Tensor* t) {
   Function* f = t->function();
   // TODO: Support multiple-output functions
   Stmt* body = f->ElementStmt(0);
@@ -660,23 +663,54 @@ Stmt* LoopNest::LowerToStmt(Tensor* t) {
   for (size_t i = 0; i < f->ndim(); i++) {
     // Going in reverse order: from innermost loop to the outermost
     size_t dim_index = f->ndim() - i - 1;
-    Range r(0, ExprHandle(f->dim(dim_index)));
-    body = For::make(VarHandle(f->arg(dim_index)), r.start(), r.stop(), body);
+    Range r(new IntImm(0), f->dim(dim_index));
+    body = new For(f->arg(dim_index), r.start(), r.stop(), body);
   }
   return body;
 }
 
-void LoopNest::ComputeInline(Stmt* s) {
+void LoopNest::computeInline(Stmt* s) {
   // TODO: check if `s` is a body of a loop
   inlined_functions_.insert(stmt_to_tensor_.at(s)->function());
 }
 
-void LoopNest::ComputeInlineWithRandom(Stmt* s) {
+void LoopNest::computeInlineWithRandom(Stmt* s) {
   inlined_random_functions_.insert(stmt_to_tensor_.at(s)->function());
 }
 
-void LoopNest::ApplyInlines() {
-  // TODO: check if `s` is a body of a loop
+Stmt* LoopNest::insertAllocFree(Stmt* stmt) {
+  // Add allocs and frees for intermediate buffers at the global level.
+  // TODO: move allocs and frees to the imemediate areas to reuse buffers.
+  if (intermediate_tensors_.size() == 0ULL) {
+    return stmt;
+  }
+
+  Block* b = dynamic_cast<Block*>(stmt);
+  if (!b) {
+    b = new Block({stmt});
+  }
+
+  // TODO: Fix the traversal, currently the order is non-deterministic
+  for (Tensor* tensor : intermediate_tensors_) {
+    if (inlined_functions_.count(tensor->function()) ||
+        inlined_random_functions_.count(tensor->function())) {
+      // No need to allocate memory for intermediate tensors.
+      continue;
+    }
+    if (output_tensors_.count(tensor) > 0) {
+      // No need to allocate memory if the tensors are given as input/output.
+      continue;
+    }
+    Stmt* alloc = new Allocate(
+        tensor->func_var(), tensor->body()->dtype(), tensor->dims());
+    Stmt* free = new Free(tensor->func_var());
+    b->prepend_stmt(alloc);
+    b->append_stmt(free);
+  }
+  return b;
+}
+
+void LoopNest::prepareForCodegen() {
   std::vector<Function*> inlined_functions_vec(
       inlined_functions_.begin(), inlined_functions_.end());
   std::vector<Function*> inlined_randoms_vec(
@@ -686,42 +720,13 @@ void LoopNest::ApplyInlines() {
 
   // Flatten function calls.
   Flattener flattener;
-  Stmt* core_stmt = root_stmt_->accept_mutator(&flattener);
+  root_stmt_ = root_stmt_->accept_mutator(&flattener);
 
   // Add allocs and frees for intermediate buffers at the global level.
-  // TODO: move allocs and frees to the imemediate areas to reuse buffers.
-  if (intermediate_tensors_.size() == 0ULL) {
-    root_stmt_ = core_stmt;
-    return;
-  }
-  std::vector<Stmt*> allocs;
-  std::vector<Stmt*> frees;
-
-  // TODO: Fix the traversal, currently the order is non-deterministic
-  for (Tensor* tensor : intermediate_tensors_) {
-    if (inlined_functions_.count(tensor->function()) ||
-        inlined_random_functions_.count(tensor->function())) {
-      // No need to allocation memory for intermediate tensors.
-      continue;
-    }
-    if (output_tensors_.count(tensor) > 0) {
-      // No need to allocate memory if the tensors are given as input/output.
-      continue;
-    }
-    Stmt* alloc = new Allocate(
-        tensor->func_var(), tensor->body()->dtype(), tensor->dims());
-    allocs.push_back(alloc);
-    Stmt* free = new Free(tensor->func_var());
-    frees.push_back(free);
-  }
-  std::reverse(frees.begin(), frees.end());
-  Stmt* alloc_block = Block::make(allocs);
-  Stmt* free_block = Block::make(frees);
-  Stmt* combined_stmt = Block::make({alloc_block, core_stmt, free_block});
-  root_stmt_ = combined_stmt;
+  root_stmt_ = insertAllocFree(root_stmt_);
 }
 
-void LoopNest::SplitWithTail(
+void LoopNest::splitWithTail(
     For* f,
     int factor,
     For** outer,
@@ -746,36 +751,38 @@ void LoopNest::SplitWithTail(
     }
   }
 
-  auto const& size = ExprHandle(f->stop()) - ExprHandle(f->start());
-  auto const& split_count = size / factor;
-  auto const& tail_size = size % factor;
+  const IntImm* factor_expr = new IntImm(factor);
+  const Expr* size = new Sub(f->stop(), f->start());
+  const Expr* split_count = new Div(size, factor_expr);
+  const Expr* tail_size = new Mod(size, factor_expr);
 
   const std::string& loop_var_name = f->var()->name_hint();
   Dtype loop_var_dtype = f->var()->dtype();
 
-  VarHandle i_inner(loop_var_name + "_inner", loop_var_dtype);
-  VarHandle i_outer(loop_var_name + "_outer", loop_var_dtype);
+  const Var* i_inner = new Var(loop_var_name + "_inner", loop_var_dtype);
+  const Var* i_outer = new Var(loop_var_name + "_outer", loop_var_dtype);
 
   // x -> x.outer * inner.size + x.inner
-  auto combined_index1 = i_outer * factor + i_inner;
+  const Expr* combined_index1 = new Add(new Mul(i_outer, factor_expr), i_inner);
 
   Stmt* body_inner =
       Substitute(Stmt::clone(f->body()), {{f->var(), combined_index1}});
 
-  *inner = For::make(i_inner, 0, factor, body_inner);
-  *outer = For::make(i_outer, 0, split_count, *inner);
+  *inner = new For(i_inner, new IntImm(0), factor_expr, body_inner);
+  *outer = new For(i_outer, new IntImm(0), split_count, *inner);
 
   // TODO: cleanup API for adding/removing statements
   p->replace_stmt(f, *outer);
 
   if (tail_is_needed) {
-    VarHandle i_tail(loop_var_name + "_tail", loop_var_dtype);
+    const Var* i_tail = new Var(loop_var_name + "_tail", loop_var_dtype);
     // x -> x.tail + outer.size * inner.size
-    auto combined_index2 = i_tail + split_count * factor;
+    const Expr* combined_index2 =
+        new Add(i_tail, new Mul(split_count, factor_expr));
 
     Stmt* body_tail =
         Substitute(Stmt::clone(f->body()), {{f->var(), combined_index2}});
-    *tail = For::make(i_tail, 0, tail_size, body_tail);
+    *tail = new For(i_tail, new IntImm(0), tail_size, body_tail);
 
     p->append_stmt(*tail);
   } else {
@@ -785,7 +792,7 @@ void LoopNest::SplitWithTail(
   // TODO: record history of transformations
 }
 
-void LoopNest::SplitWithMask(For* f, int factor, For** outer, For** inner) {
+void LoopNest::splitWithMask(For* f, int factor, For** outer, For** inner) {
   Block* p = dynamic_cast<Block*>(f->get_parent());
   if (!p) {
     std::cerr << "Parent is not a Block!\n";
@@ -804,17 +811,20 @@ void LoopNest::SplitWithMask(For* f, int factor, For** outer, For** inner) {
     }
   }
 
-  auto const& size = ExprHandle(f->stop()) - ExprHandle(f->start());
-  auto const& split_count = (size + factor - 1) / factor;
+  const IntImm* factor_expr = new IntImm(factor);
+  const Expr* size = new Sub(f->stop(), f->start());
+  // split_count = (size + factor - 1) / factor
+  const Expr* split_count =
+      new Div(new Sub(new Add(size, factor_expr), new IntImm(1)), factor_expr);
 
   const std::string& loop_var_name = f->var()->name_hint();
   Dtype loop_var_dtype = f->var()->dtype();
 
-  VarHandle i_inner(loop_var_name + "_inner", loop_var_dtype);
-  VarHandle i_outer(loop_var_name + "_outer", loop_var_dtype);
+  const Var* i_inner = new Var(loop_var_name + "_inner", loop_var_dtype);
+  const Var* i_outer = new Var(loop_var_name + "_outer", loop_var_dtype);
 
   // x -> x.outer * inner.size + x.inner
-  auto combined_index = i_outer * factor + i_inner;
+  const Expr* combined_index = new Add(new Mul(i_outer, factor_expr), i_inner);
 
   Stmt* body_inner = Stmt::clone(f->body());
   // TODO: is it ok that we're doing it eagerly? In the other implementation we
@@ -832,8 +842,8 @@ void LoopNest::SplitWithMask(For* f, int factor, For** outer, For** inner) {
   }
   body_inner = Substitute(body_inner, {{f->var(), combined_index}});
 
-  *inner = For::make(i_inner, 0, factor, body_inner);
-  *outer = For::make(i_outer, 0, split_count, *inner);
+  *inner = new For(i_inner, new IntImm(0), factor_expr, body_inner);
+  *outer = new For(i_outer, new IntImm(0), split_count, *inner);
 
   // TODO: cleanup API for adding/removing statements
   p->replace_stmt(f, *outer);
@@ -853,11 +863,11 @@ std::vector<For*> LoopNest::getLoopStmtsFor(Tensor* t) const {
   return std::vector<For*>(result.rbegin(), result.rend());
 }
 
-void LoopNest::SetGPUBlockIndex(For* f, int block_index) {
+void LoopNest::setGPUBlockIndex(For* f, int block_index) {
   f->set_gpu_block_index(block_index);
 }
 
-void LoopNest::SetGPUThreadIndex(For* f, int thread_index) {
+void LoopNest::setGPUThreadIndex(For* f, int thread_index) {
   f->set_gpu_thread_index(thread_index);
 }
 
@@ -869,7 +879,6 @@ bool LoopNest::hasLoopBodyFor(Tensor* t) const {
   return tensor_to_stmt_.count(t) > 0;
 }
 
-} // namespace schedule
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch

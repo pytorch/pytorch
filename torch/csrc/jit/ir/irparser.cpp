@@ -1,8 +1,8 @@
 #include <torch/csrc/jit/ir/irparser.h>
-#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/frontend/lexer.h>
 #include <torch/csrc/jit/frontend/parse_string_literal.h>
 #include <torch/csrc/jit/frontend/schema_type_parser.h>
+#include <torch/csrc/jit/ir/ir.h>
 
 #include <string>
 #include <vector>

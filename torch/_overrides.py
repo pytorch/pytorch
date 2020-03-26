@@ -13,6 +13,9 @@ https://github.com/pytorch/pytorch/issues/24015 and
 https://www.numpy.org/neps/nep-0018-array-function-protocol.html
 )
 
+If changing this file in a way that can affect ``__torch_function__`` overhead,
+please report the benchmarks in ``benchmarks/overrides_benchmark``. See the
+instructions in the ``README.md`` in that directory.
 """
 
 import __future__
@@ -133,6 +136,7 @@ def get_ignored_functions():
         torch.clear_autocast_cache,
         torch.autocast_increment_nesting,
         torch.autocast_decrement_nesting,
+        torch.nn.functional.hardswish,
     )
 
 def get_testing_overrides():
