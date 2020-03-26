@@ -109,6 +109,12 @@ inline typename std::enable_if<std::is_integral<T>::value, T>::type div_value(
 template <typename T>
 inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
 div_value(T lhs, T rhs) {
+  if (rhs == static_cast<T>(0)) {
+    auto inf_is_negative = std::signbit(lhs) ^ std::signbit(rhs);
+    return inf_is_negative ? -1 * std::numeric_limits<float>::infinity()
+                           : std::numeric_limits<float>::infinity();
+  }
+
   return lhs / rhs;
 }
 
