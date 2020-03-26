@@ -1,47 +1,10 @@
 set(JIT_TEST_ROOT ${TORCH_ROOT}/test/cpp/jit)
 
-#file(GLOB JIT_TEST_SRCS ${JIT_TEST_ROOT}/test_*.cpp)
-set(JIT_TEST_SRCS
-    ${JIT_TEST_ROOT}/test_alias_analysis.cpp
-    ${JIT_TEST_ROOT}/test_argument_spec.cpp
-    ${JIT_TEST_ROOT}/test_autodiff.cpp
-    ${JIT_TEST_ROOT}/test_base.cpp
-    ${JIT_TEST_ROOT}/test_class_import.cpp
-    ${JIT_TEST_ROOT}/test_class_parser.cpp
-    ${JIT_TEST_ROOT}/test_class_type.cpp
-    ${JIT_TEST_ROOT}/test_code_template.cpp
-    ${JIT_TEST_ROOT}/test_constant_pooling.cpp
-    ${JIT_TEST_ROOT}/test_create_autodiff_subgraphs.cpp
-    ${JIT_TEST_ROOT}/test_custom_class.cpp
-    ${JIT_TEST_ROOT}/test_custom_operators.cpp
-    ${JIT_TEST_ROOT}/test_dce.cpp
-    ${JIT_TEST_ROOT}/test_fuser.cpp
-    ${JIT_TEST_ROOT}/test_graph_executor.cpp
-    ${JIT_TEST_ROOT}/test_inliner.cpp
-    ${JIT_TEST_ROOT}/test_interface.cpp
-    ${JIT_TEST_ROOT}/test_interpreter.cpp
-    ${JIT_TEST_ROOT}/test_ir.cpp
-    ${JIT_TEST_ROOT}/test_irparser.cpp
-    ${JIT_TEST_ROOT}/test_jit_type.cpp
-    ${JIT_TEST_ROOT}/test_lite_interpreter.cpp
-    ${JIT_TEST_ROOT}/test_misc.cpp
-    ${JIT_TEST_ROOT}/test_mobile_type_parser.cpp
-    ${JIT_TEST_ROOT}/test_module_api.cpp
-    ${JIT_TEST_ROOT}/test_peephole_optimize.cpp
-    ${JIT_TEST_ROOT}/test_qualified_name.cpp
-    ${JIT_TEST_ROOT}/test_save_load.cpp
-    ${JIT_TEST_ROOT}/test_schema_matching.cpp
-    ${JIT_TEST_ROOT}/test_subgraph_matcher.cpp
-    ${JIT_TEST_ROOT}/test_subgraph_rewriter.cpp
-    ${JIT_TEST_ROOT}/test_subgraph_utils.cpp
-    ${JIT_TEST_ROOT}/test_utils.cpp
-    ${JIT_TEST_ROOT}/torch_python_test.cpp
-    )
+file(GLOB JIT_TEST_SRCS "${JIT_TEST_ROOT}/test*\.cpp")
 
-if (USE_CUDA AND NOT USE_ROCM)
-  list (APPEND JIT_TEST_SRCS
-      ${JIT_TEST_ROOT}/test_gpu_fusion.cpp
-  )
+if (NOT USE_CUDA OR USE_ROCM)
+  file(GLOB JIT_GPU_TEST_SRCS "${JIT_TEST_ROOT}/test_gpu*\.cpp")
+  list(REMOVE_ITEM JIT_TEST_SRCS ${JIT_GPU_TEST_SRCS})
 endif() #USE_CUDA
 
 set(JIT_TEST_SRCS ${JIT_TEST_SRCS} PARENT_SCOPE)
