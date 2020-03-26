@@ -49,24 +49,10 @@ class RRefAPITest:
         dst_worker_name = worker_name((self.rank + 1) % self.world_size)
         rref = rpc_return_rref(dst_worker_name)
 
-        @torch.jit.script
-        def local_call_rref_local_value(rref):
-            # type: (RRef[Tensor]) -> Tensor
-            return rref_local_value(rref)
-
         with self.assertRaisesRegex(RuntimeError, r"Can't call RRef.local_value\(\) on a non-owner RRef"):
-            local_call_rref_local_value(rref)
+            rref_local_value(rref)
 
-        @torch.jit.script
-        def remote_call_rref_local_value(dst_worker_name, rref):
-            # type: (str, RRef[Tensor]) -> Tensor
-            args = (rref,)
-            kwargs = {}
-            fut = rpc.rpc_async(dst_worker_name, rref_local_value, args, kwargs)
-            ret = fut.wait()
-            return ret
-
-        ret = remote_call_rref_local_value(dst_worker_name, rref)
+        ret = ret = rpc.rpc_sync(dst_worker_name, rref_local_value, (rref,))
         self.assertEqual(ret, torch.add(torch.ones(2, 2), 1))
 
     @dist_init
@@ -76,11 +62,6 @@ class RRefAPITest:
 
         dst_worker_name = worker_name(self.rank)
         rref = rpc.remote(dst_worker_name, return_value, (5,), {})
-
-        @torch.jit.script
-        def rref_local_value(rref):
-            # type: (RRef[int]) -> int
-            return rref.local_value()
 
         ret = rref_local_value(rref)
         self.assertEqual(ret, 5)
