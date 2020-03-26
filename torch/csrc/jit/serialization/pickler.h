@@ -254,7 +254,9 @@ class Pickler {
   // List of all the types that it wrote, inspect from the IValues it wrote.
   std::vector<c10::ClassTypePtr>* memorized_class_types_;
 
-  // TODO comment
+  // Before any objects are pickled, run their type through this remapper. We do
+  // this to ensure that all types being serialized are imported into the same
+  // compilation unit, so that names can be uniqued.
   std::function<c10::TypePtr(c10::TypePtr)> type_remapper_;
 
   // List of tensor storages to serialize in the same binary as the pickle data

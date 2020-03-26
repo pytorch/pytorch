@@ -21,7 +21,7 @@ namespace jit {
    * We need to fix this for this pass to be totally correct. The known places
    * that should be fixed up are annotated inline.
    */
-class TypeImporter {
+class TORCH_API TypeImporter {
  public:
   explicit TypeImporter(std::shared_ptr<CompilationUnit> cu)
       : cu_(std::move(cu)) {}
