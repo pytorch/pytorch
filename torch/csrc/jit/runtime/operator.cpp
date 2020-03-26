@@ -50,6 +50,49 @@ struct OperatorRegistry {
     to_register.push_back(std::make_shared<Operator>(std::move(op)));
   }
 
+  void deregisterOperator(const FunctionSchema& schema) {
+    Symbol sym = Symbol::fromQualString(schema.name());
+    auto sig = canonicalSchemaString(schema);
+
+    std::lock_guard<std::mutex> guard(lock);
+    // Try removing from pending operators list first
+    auto pending_it = to_register.begin();
+    while (pending_it != to_register.end() && (*pending_it)->schema() != schema)
+      ++pending_it;
+
+    if (pending_it != to_register.end()) {
+      to_register.erase(pending_it);
+      return;
+    }
+
+    // Remove operator from signature map
+    auto sig_it = operators_by_sig.find(sig);
+    if (sig_it == operators_by_sig.end()) {
+      return;
+    }
+
+    operators_by_sig.erase(sig_it);
+
+    // Remove operator from symbol map
+    auto op_it = operators.find(sym);
+    TORCH_CHECK(
+      op_it != operators.end(),
+      "operator with signature ",
+      sig,
+      " is missing from symbol registry");
+
+    auto& op_vec = op_it->second;
+    auto it = op_vec.begin();
+    while (it != op_vec.end() && (*it)->schema() != schema)
+      ++it;
+    if (it != op_vec.end()) {
+      op_vec.erase(it);
+    }
+    if (op_vec.empty()) {
+      operators.erase(op_it);
+    }
+  }
+
   const std::shared_ptr<Operator>& lookupByLiteral(const char* name) {
     std::lock_guard<std::mutex> guard(lock);
     registerPendingOperators();
@@ -289,6 +332,11 @@ void registerOperator(Operator&& op) {
     }
   }
   getRegistry().registerOperator(std::move(op));
+}
+
+void deregisterOperator(const FunctionSchema& schema)
+{
+  getRegistry().deregisterOperator(schema);
 }
 
 const std::vector<std::shared_ptr<Operator>> getAllOperators() {

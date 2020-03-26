@@ -797,6 +797,7 @@ class TestFuser(JitTestCase):
         hy, cy = module(*inputs)
         warmup_backward((hy + cy).sum())
 
+    @skipIfRocm
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
     def test_rand_cuda(self):

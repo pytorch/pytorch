@@ -1,6 +1,9 @@
 #include "test/cpp/tensorexpr/padded_buffer.h"
 
 #include <sstream>
+
+#include <gtest/gtest.h>
+
 #include <c10/util/Logging.h>
 
 namespace torch {
