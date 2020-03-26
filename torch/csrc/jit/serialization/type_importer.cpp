@@ -1,4 +1,4 @@
-#include <torch/csrc/jit/serialization/type_remapper.h>
+#include <torch/csrc/jit/serialization/type_importer.h>
 
 #include <torch/custom_class.h>
 

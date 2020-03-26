@@ -172,6 +172,8 @@ class ScriptModuleSerializer {
     C10_LOG_API_USAGE_ONCE("torch.script.save");
     writeExtraFiles(module, extra_files);
 
+    // Import all types used by this module into a fresh CU to resolve any name
+    // collisions.
     auto newRootType =
         typeImporter_.import(module.type())->cast<c10::NamedType>();
     TORCH_INTERNAL_ASSERT(newRootType);

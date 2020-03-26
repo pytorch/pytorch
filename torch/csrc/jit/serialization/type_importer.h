@@ -14,9 +14,9 @@ namespace jit {
    * - Primitive types have global singletons representing them.
    * - ClassTypes are equal only to themselves
    * - etc.
-   * So storing a type remapping of TypePtr => TypePtr is tricky, because there
-   * are all sorts of cases where TypePtr hashing/equality does not map onto
-   * Type hashing/equality.
+   *
+   * Our current equality functions aren't quite right, so we should fix them
+   * and just use TypeEquals here.
    *
    * We need to fix this for this pass to be totally correct. The known places
    * that should be fixed up are annotated inline.
@@ -28,13 +28,14 @@ class TypeImporter {
 
   /**
    * Given `origType`, clone the type into the CompilationUnit `cu_` and return
-   * the the new type.
+   * the the new type. Note that this function is idempotent because we cache
+   * the mapping of old type -> imported type.
    *
    * The cloning only happens for types that will be serialized (e.g.
    * NamedTypes). Any types that `origType` references will be recursively
    * cloned to `cu_`. Any naming collisions will be resolved by mangling.
    *
-   * At the end, we expect to have all types in the hierarchy live in `cu_`
+   * At the end, we expect to have all types in the hierarchy live in `cu_`.
    */
   TypePtr import(const TypePtr& origType);
 

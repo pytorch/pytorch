@@ -131,22 +131,7 @@ struct CAFFE2_API Type : std::enable_shared_from_this<Type> {
     }
     return nullptr;
   }
-  template<>
-  std::shared_ptr<NamedType> cast<NamedType>() {
-    if (kind() == TypeKind::TupleType || kind() == TypeKind::FunctionType ||
-        kind() == TypeKind::ClassType || kind() == TypeKind::InterfaceType) {
-      return std::static_pointer_cast<NamedType>(shared_from_this());
-    }
-    return nullptr;
-  }
-  template<>
-  std::shared_ptr<const NamedType> cast<NamedType>() const {
-    if (kind() == TypeKind::TupleType || kind() == TypeKind::FunctionType ||
-        kind() == TypeKind::ClassType || kind() == TypeKind::InterfaceType) {
-      return std::static_pointer_cast<const NamedType>(shared_from_this());
-    }
-    return nullptr;
-  }
+
   template <typename T>
   std::shared_ptr<T> expect() {
     auto r = cast<T>();
@@ -2017,4 +2002,21 @@ inline bool IValue::isBoolList() const {
   return isList() && static_cast<detail::ListImpl*>(payload.as_intrusive_ptr)->elementType->kind() == BoolType::Kind;
 }
 
+template<>
+inline std::shared_ptr<NamedType> Type::cast() {
+  if (kind() == TypeKind::TupleType || kind() == TypeKind::FunctionType ||
+      kind() == TypeKind::ClassType || kind() == TypeKind::InterfaceType) {
+    return std::static_pointer_cast<NamedType>(shared_from_this());
+  }
+  return nullptr;
+}
+
+template<>
+inline std::shared_ptr<const NamedType> Type::cast<NamedType>() const {
+  if (kind() == TypeKind::TupleType || kind() == TypeKind::FunctionType ||
+      kind() == TypeKind::ClassType || kind() == TypeKind::InterfaceType) {
+    return std::static_pointer_cast<const NamedType>(shared_from_this());
+  }
+  return nullptr;
+}
 } // namespace c10
