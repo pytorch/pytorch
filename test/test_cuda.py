@@ -478,6 +478,23 @@ class TestCuda(TestCase):
         y = torch.ones(10000000, dtype=torch.uint8).cuda()
         _test_copy_non_blocking(x, y)
 
+    @unittest.skip("skipped because test could be flaky, see #35144")
+    def test_to_non_blocking(self):
+        def _test_to_non_blocking(a, non_blocking):
+            stream = torch.cuda.current_stream()
+            with torch.cuda.stream(stream):
+                b = a.to('cuda', non_blocking=non_blocking)
+                self.assertEqual(stream.query(), not non_blocking)
+                stream.synchronize()
+                self.assertEqual(a, b)
+
+        # 10MB copies
+        x = torch.ones(10000000, dtype=torch.uint8)
+        _test_to_non_blocking(x, True)
+
+        y = torch.ones(10000000, dtype=torch.uint8)
+        _test_to_non_blocking(y, False)
+
     def test_serialization_array_with_storage(self):
         x = torch.randn(5, 5).cuda()
         y = torch.IntTensor(2, 5).fill_(0).cuda()

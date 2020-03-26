@@ -6004,7 +6004,6 @@ class TestTorchDeviceType(TestCase):
         input_ = layer_norm(input_.transpose(1, 2).contiguous()).contiguous()
         input_.sum().backward()
 
-
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     @onlyCPU
     @dtypes(torch.float)
@@ -11977,6 +11976,25 @@ class TestTorchDeviceType(TestCase):
         _test((10,), 5, 4, win_sizes=(11,), expected_error=RuntimeError)
         _test((10,), 5, 4, win_sizes=(1, 1), expected_error=RuntimeError)
 
+    def test_fft_input_modification(self, device):
+        # FFT functions should not modify their input (gh-34551)
+
+        signal = torch.ones((2, 2, 2), device=device)
+        signal_copy = signal.clone()
+        spectrum = torch.fft(signal, 2)
+        self.assertEqual(signal, signal_copy)
+
+        spectrum_copy = spectrum.clone()
+        _ = torch.ifft(spectrum, 2)
+        self.assertEqual(spectrum, spectrum_copy)
+
+        half_spectrum = torch.rfft(signal, 2)
+        self.assertEqual(signal, signal_copy)
+
+        half_spectrum_copy = half_spectrum.clone()
+        _ = torch.irfft(half_spectrum_copy, 2, signal_sizes=(2, 2))
+        self.assertEqual(half_spectrum, half_spectrum_copy)
+
     @skipCUDAIfRocm
     def test_blas_empty(self, device):
 
@@ -15984,9 +16002,16 @@ tensor_op_tests = [
     ('div', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-1),
     ('div', 'tensor', _small_3d,
         lambda t, d: [_small_3d(t, d, has_zeros=False)], 1e-1),
-    # Note: precision for floor_divide is 1 since a small (1e-5, for example)
-    # error in division can lead to an difference of 1 post-truncation
-    # (e.g. .9999 vs 1 post truncation is 0 vs 1)
+    ('true_divide', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-1,
+        1e-5, 1e-5, _types, False),
+    ('true_divide', 'with_inplace', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-1,
+        1e-5, 1e-5, _float_types),
+    ('true_divide', 'tensor', _small_3d,
+        lambda t, d: [_small_3d(t, d, has_zeros=False)], 1e-1,
+        1e-5, 1e-5, _types, False),
+    ('true_divide', 'tensor_with_inplace', _small_3d,
+        lambda t, d: [_small_3d(t, d, has_zeros=False)], 1e-1,
+        1e-5, 1e-5, _float_types),
     ('floor_divide', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1, 1e-5, 1e-5, _types),
     ('floor_divide', 'tensor', _small_3d,
         lambda t, d: [_small_3d(t, d, has_zeros=False)], 1, 1e-5, 1e-5, _types),
