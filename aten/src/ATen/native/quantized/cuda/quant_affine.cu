@@ -1,4 +1,4 @@
-#include <cmath> 
+#include <math.h> 
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/quantized/quant_affine.h>
@@ -19,7 +19,7 @@ void quantize_tensor_affine_cuda(Tensor rtensor, Tensor qtensor, double scale, i
         float& rtensor_val,
         scalar_t& qtensor_val) {
           int64_t qvalue;
-          qvalue = static_cast<int64_t>(std::nearbyint(rtensor_val / scale + zero_point));
+          qvalue = static_cast<int64_t>(nearbyint(rtensor_val / scale + zero_point));
           qvalue = std::max<int64_t>(qvalue, qmin);
           qvalue = std::min<int64_t>(qvalue, qmax);
           qtensor_val.val_ = qvalue;

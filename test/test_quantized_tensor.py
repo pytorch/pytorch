@@ -2,6 +2,7 @@ import numpy as np
 import math
 import torch
 import io
+import unittest
 from copy import deepcopy
 from hypothesis import given
 from hypothesis import strategies as st
@@ -395,6 +396,8 @@ class TestQuantizedTensor(TestCase):
         # torch.equal is not supported for the cuda backend
         if device == 'cpu':
             self.assertFalse(torch.equal(b, c))
+        else:
+            self.assertRaises(RuntimeError, lambda: torch.equal(b, c))
 
         # a case can't view non-contiguos Tensor
         a_int = torch.randint(0, 100, [1, 2, 3, 4], device=device, dtype=dtype)
@@ -429,6 +432,8 @@ class TestQuantizedTensor(TestCase):
         # torch.equal is not supported for the cuda backend
         if device == 'cpu':
             self.assertFalse(torch.equal(b, c))
+        else:
+            self.assertRaises(RuntimeError, lambda: torch.equal(b, c))
 
         # we can use reshape for non-contiguous Tensor
         a_int = torch.randint(0, 100, [1, 2, 3, 4], dtype=dtype, device=device)
@@ -458,6 +463,21 @@ class TestQuantizedTensor(TestCase):
         qparams = torch._choose_qparams_per_tensor(X, reduce_range)
         np.testing.assert_array_almost_equal(X_scale, qparams[0], decimal=3)
         self.assertEqual(X_zp, qparams[1])
+
+    @unittest.skipIf(not torch.cuda.is_available(), 'CUDA not available')
+    @given(dtype=st.sampled_from([torch.qint8]))
+    def test_cuda_cpu_implementation_consistency(self, dtype):
+        scale = 0.02
+        zero_point = 2
+        numel = 100
+        r = torch.rand(numel, dtype=torch.float32, device='cpu') * 25 - 4
+        qr_cpu = torch.quantize_per_tensor(r, scale, zero_point, dtype=dtype)
+        qr_cuda = torch.quantize_per_tensor(r.cuda(), scale, zero_point, dtype=dtype)
+        # intr repr must be the same
+        self.assertTrue(np.allclose(qr_cpu.int_repr().numpy(), qr_cuda.int_repr().cpu().numpy()))
+        # dequantized values must be the same
+        r_cpu, r_cuda = qr_cpu.dequantize().numpy(), qr_cuda.dequantize().cpu().numpy()
+        np.testing.assert_almost_equal(r_cuda, r_cpu, decimal=6)
 
 if __name__ == "__main__":
     run_tests()
