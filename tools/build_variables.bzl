@@ -404,6 +404,7 @@ def add_torch_libs():
     ]
 
     libtorch_python_sources.extend(native.glob(["test/cpp/jit/test_*.cpp"]))
+    libtorch_python_sources.extend(native.glob(["test/cpp/tensorexpr/test_*.cpp"]))
 
     compiler_flags_cpu = [
         "-DUSE_C10D",
