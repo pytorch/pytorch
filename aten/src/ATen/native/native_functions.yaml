@@ -3884,8 +3884,8 @@
   dispatch:
     CPU: set_storage_cpu_
     CUDA: set_storage_cuda_
-    QuantizedCPU: set_storage_quantized_cpu_
-    QuantizedCUDA: set_storage_quantized_cuda_
+    QuantizedCPU: set_storage_quantized_
+    QuantizedCUDA: set_storage_quantized_
 
 - func: set_.source_Tensor(Tensor(a!) self, Tensor source) -> Tensor(a!)
   variants: method

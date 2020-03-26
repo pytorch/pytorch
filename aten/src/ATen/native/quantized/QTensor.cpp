@@ -95,7 +95,7 @@ Tensor make_per_channel_quantized_tensor_cpu(
   return dst;
 }
 
-Tensor& set_storage_quantized_cpu_(
+Tensor& set_storage_quantized_(
     Tensor& self,
     Storage storage,
     int64_t storage_offset,
