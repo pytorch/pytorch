@@ -40,7 +40,7 @@ class TORCH_API OptimizerParamState {
 };
 
 template <typename Derived>
-class OptimizerCloneableParamState : public OptimizerParamState {
+class TORCH_API OptimizerCloneableParamState : public OptimizerParamState {
   std::unique_ptr<OptimizerParamState> clone() const override {
     return std::make_unique<Derived>(static_cast<const Derived&>(*this));
   }
@@ -55,7 +55,7 @@ class TORCH_API OptimizerOptions {
 };
 
 template <typename Derived>
-class OptimizerCloneableOptions : public OptimizerOptions {
+class TORCH_API OptimizerCloneableOptions : public OptimizerOptions {
   std::unique_ptr<OptimizerOptions> clone() const override {
     return std::make_unique<Derived>(static_cast<const Derived&>(*this));
   }
@@ -81,45 +81,58 @@ class TORCH_API OptimizerParamGroup {
   std::unique_ptr<OptimizerOptions> options_;
 };
 
-class TORCH_API Optimizer {
+namespace detail {
+
+/// Base class for all optimizers, that does not yet define a `step()`
+/// mechanism. All it specifies is that optimizers must be supplied with a
+/// vector of parameters. It also defines certain methods that all optimizers
+/// shall have, such as `zero_grad`.
+class TORCH_API OptimizerBase {
  public:
   // The copy constructor is deleted, because the user should use the
   // `state_dict` / `load_state_dict` API to copy an optimizer instead.
-  Optimizer(const Optimizer& optimizer) = delete;
-  Optimizer(Optimizer&& optimizer) = default;
+  OptimizerBase(const OptimizerBase& optimizer_base) = delete;
+  OptimizerBase(OptimizerBase&& optimizer_base) = default;
 
-  explicit Optimizer(std::vector<OptimizerParamGroup> param_groups, std::unique_ptr<OptimizerOptions> defaults) : defaults_(std::move(defaults)) {
+  /// Constructs the `Optimizer` from a vector of parameters.
+  explicit OptimizerBase(std::vector<Tensor> parameters);
+
+  explicit OptimizerBase(std::vector<OptimizerParamGroup> param_groups, std::unique_ptr<OptimizerOptions> defaults) : defaults_(std::move(defaults)) {
     for (const auto& param_group : param_groups) {
       add_param_group(param_group);
     }
   }
 
-  /// Constructs the `Optimizer` from a vector of parameters.
-  explicit Optimizer(std::vector<Tensor> parameters, std::unique_ptr<OptimizerOptions> defaults) : Optimizer({std::move(OptimizerParamGroup(parameters))}, std::move(defaults)) {};
-
   /// Adds the given param_group to the optimizer's param_group list.
   void add_param_group(const OptimizerParamGroup& param_group);
 
-  virtual ~Optimizer() = default;
+  virtual ~OptimizerBase() = default;
 
-  using LossClosure = std::function<Tensor()>;
-  /// A loss function closure, which is expected to return the loss value.
-  virtual Tensor step(LossClosure closure = nullptr) = 0;
+  // TODO: when all optimizers use the new design, we can devirtualize some of the following methods
+  // such as add_parameters() / parameters() / size()
 
   /// Adds the given vector of parameters to the optimizer's parameter list.
-  void add_parameters(const std::vector<Tensor>& parameters);
+  virtual void add_parameters(const std::vector<Tensor>& parameters);
+
+  virtual void _add_parameters_new_design(const std::vector<Tensor>& parameters);
 
   /// Zeros out the gradients of all parameters.
-  void zero_grad();
+  virtual void zero_grad();
 
-  /// Provides a const reference to the parameters in the first param_group this optimizer holds.
-  const std::vector<Tensor>& parameters() const noexcept;
+  /// Provides a const reference to the parameters this optimizer holds.
+  virtual const std::vector<Tensor>& parameters() const noexcept;
 
-  /// Provides a reference to the parameters in the first param_group this optimizer holds.
-  std::vector<Tensor>& parameters() noexcept;
+  virtual const std::vector<Tensor>& _parameters_new_design() const noexcept;
+
+  /// Provides a reference to the parameters this optimizer holds.
+  virtual std::vector<Tensor>& parameters() noexcept;
+
+  virtual std::vector<Tensor>& _parameters_new_design() noexcept;
 
   /// Returns the number of parameters referenced by the optimizer.
-  size_t size() const noexcept;
+  virtual size_t size() const noexcept;
+
+  virtual size_t _size_new_design() const noexcept;
 
   OptimizerOptions& defaults() noexcept;
 
@@ -147,6 +160,27 @@ class TORCH_API Optimizer {
    std::vector<OptimizerParamGroup> param_groups_;
    ska::flat_hash_map<std::string, std::unique_ptr<OptimizerParamState>> state_;
    std::unique_ptr<OptimizerOptions> defaults_;
+   OptimizerBase() = default;
+
+  /// Accesses a buffer at the given index.
+  /// Additionally, zeros out the buffers when this is called on the index
+  template <typename T>
+  T& buffer_at(std::vector<T>& buffers, size_t index) {
+    if (buffers.size() <= index) {
+      const auto old_size = buffers.size();
+      buffers.resize(index + 1);
+      std::fill(buffers.begin() + old_size, buffers.end(), T{0});
+    }
+    return buffers[index];
+  }
+
+  /// Accesses a buffer at the given index, converts it to the type of the
+  /// parameter at the corresponding index (a no-op if they match).
+  /// Additionally, zeros out the buffers when this is called on the index
+  Tensor& buffer_at(std::vector<Tensor>& buffers, size_t index);
+
+  /// The parameters this optimizer optimizes.
+  std::vector<Tensor> parameters_;
 };
 
 /* How do we decide whether to serialize undefined tensors or
@@ -167,15 +201,39 @@ b) For c10::nullopt value: in param state, c10::nullopt value in C++ impl is equ
    missing key in Python impl. Since we don't serialize missing keys in Python API,
    we skip c10::nullopt values when serializing the param state. */
 
-/// Serializes an `Optimizer` into an `OutputArchive`.
+/// Serializes an `OptimizerBase` into an `OutputArchive`.
 TORCH_API serialize::OutputArchive& operator<<(
     serialize::OutputArchive& archive,
-    const Optimizer& optimizer);
+    const OptimizerBase& optimizer);
 
 /// Deserializes a `Tensor` from an `InputArchive`.
 TORCH_API serialize::InputArchive& operator>>(
     serialize::InputArchive& archive,
-    Optimizer& optimizer);
+    OptimizerBase& optimizer);
+} // namespace detail
+
+/// Optimizer that can optionally take a loss function in `step()` method
+/// and returns the loss value. The only side effect is that parameters are updated
+/// according to the concrete optimization algorithm.
+class Optimizer : public detail::OptimizerBase {
+ public:
+   /// A loss function closure, which is expected to return the loss value.
+   using LossClosure = std::function<Tensor()>;
+   using detail::OptimizerBase::OptimizerBase;
+   virtual Tensor step(LossClosure closure = nullptr) = 0;
+};
+
+/// Optimizer that requires the loss function to be supplied to the `step()`
+/// function, as it may evaluate the loss function multiple times per step.
+/// Examples of such algorithms are conjugate gradient and LBFGS. The `step()`
+/// function also returns the loss value.
+class LossClosureOptimizer : public detail::OptimizerBase {
+ public:
+  /// A loss function closure, which is expected to return the loss value.
+  using LossClosure = std::function<Tensor()>;
+  using detail::OptimizerBase::OptimizerBase;
+  virtual Tensor step(LossClosure closure) = 0;
+};
 
 } // namespace optim
 } // namespace torch

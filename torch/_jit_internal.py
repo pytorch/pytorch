@@ -10,7 +10,7 @@ import warnings
 import torch
 from torch._six import builtins
 from torch._utils_internal import get_source_lines_and_file
-from typing import Tuple, List, Dict, Optional, Union, Any, TypeVar, Generic # noqa: F401
+from typing import Tuple, List, Dict, Optional, Union, Any, TypeVar, Generic  # noqa: F401
 
 # Wrapper functions that can call either of 2 functions depending on a boolean
 # argument

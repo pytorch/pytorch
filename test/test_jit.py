@@ -20,7 +20,6 @@ from jit.test_autodiff_subgraph_slicing import TestAutodiffSubgraphSlicing  # no
 from jit.test_custom_operators import TestCustomOperators  # noqa: F401
 from jit.test_export_modes import TestExportModes  # noqa: F401
 from jit.test_class_type import TestClassType  # noqa: F401
-from jit.test_module_interface import TestModuleInterface  # noqa: F401
 from jit.test_builtins import TestBuiltins, TestTensorBuiltins  # noqa: F401
 from jit.test_unsupported_ops import TestUnsupportedOps  # noqa: F401
 from jit.test_freezing import TestFreezing  # noqa: F401
