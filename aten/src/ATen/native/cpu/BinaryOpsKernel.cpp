@@ -14,7 +14,7 @@ namespace {
 
 using namespace vec256;
 
-void add_kernel(TensorIterator& iter, Scalar alpha_scalar) {
+__ubsan_ignore_undefined__ void add_kernel(TensorIterator& iter, Scalar alpha_scalar) {
   if (iter.dtype() == ScalarType::Bool) {
       using scalar_t = bool;
       auto alpha = alpha_scalar.to<scalar_t>();
