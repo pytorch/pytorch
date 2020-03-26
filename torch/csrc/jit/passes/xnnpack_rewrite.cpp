@@ -81,7 +81,8 @@ void insertPrePackedConv2dOp(std::shared_ptr<Graph>& graph) {
         return (%r) )";
 
   SubgraphRewriter rewriter;
-  rewriter.RegisterRewritePattern(conv_2d_pattern, prepacked_ops_conv2d_pattern);
+  rewriter.RegisterRewritePattern(
+      conv_2d_pattern, prepacked_ops_conv2d_pattern);
   rewriter.runOnGraph(graph);
 }
 
