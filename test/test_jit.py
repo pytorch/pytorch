@@ -1310,6 +1310,40 @@ graph(%x : Tensor,
                    .check('Observer = prim::GetAttr[name="_observer_') \
                    .run(m.graph)
 
+    def test_insert_observers_propagate_observed_for_function(self):
+        def channel_shuffle(x, groups):
+            # type: (torch.Tensor, int) -> torch.Tensor
+            batchsize, num_channels, height, width = x.data.size()
+            channels_per_group = num_channels // groups
+            # reshape
+            x = x.view(batchsize, groups,
+                       channels_per_group, height, width)
+            x = torch.transpose(x, 1, 2).contiguous()
+            # flatten
+            x = x.view(batchsize, -1, height, width)
+            return x
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.conv1 = torch.nn.Conv2d(3, 3, 1).float()
+                self.conv2 = torch.nn.Conv2d(3, 3, 1).float()
+
+            def forward(self, x):
+                x = self.conv1(x)
+                x = channel_shuffle(x, 1)
+                x = self.conv2(x)
+                return x
+
+        data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        qconfig_dict = {'': script_qconfig(default_qconfig)}
+        m = torch.jit.script(M()).eval()
+        m = prepare_script(m, qconfig_dict, inplace=False)
+        # we want to test that channel_shuffle is going to pass
+        # the observed property from the output of conv1 to input of conv2
+        # so that we don't insert observers for input of conv2
+        assert len(attrs_with_prefix(m, '_observer_',)) == 3
+
     def test_insert_observers_for_if(self):
         class Res(torch.nn.Module):
             def __init__(self, use_skip):
