@@ -98,6 +98,25 @@ inline bool mod_value(bool lhs, bool rhs) {
   throw std::runtime_error("Attempted modulus of bool");
 }
 
+template <typename T>
+inline typename std::enable_if<std::is_integral<T>::value, T>::type div_value(
+    T lhs,
+    T rhs) {
+  TORCH_CHECK(rhs != 0, "Division by zero");
+  return lhs / rhs;
+}
+
+template <typename T>
+inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
+div_value(T lhs, T rhs) {
+  return lhs / rhs;
+}
+
+inline bool div_value(bool lhs, bool rhs) {
+  LOG(FATAL) << "Attempted division of bool";
+  return false;
+}
+
 class SimpleIREvaluator : public CodeGen, public IRVisitor {
  public:
   using CodeGen::CodeGen;
@@ -205,7 +224,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
           result_v[i] = lhs_v[i] * rhs_v[i];
           break;
         case IRNodeType::kDiv:
-          result_v[i] = lhs_v[i] / rhs_v[i];
+          result_v[i] = div_value(lhs_v[i], rhs_v[i]);
           break;
         case IRNodeType::kMod:
           result_v[i] = mod_value(lhs_v[i], rhs_v[i]);
@@ -796,15 +815,14 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
       internal_buffers_;
 };
 
-using VarMapping = std::vector<std::pair<ExprHandle, ExprHandle>>;
+using VarMapping = std::vector<std::pair<const Var*, const Expr*>>;
 
 class VarSubMutator : public IRMutator {
  public:
   VarSubMutator(const VarMapping& var_mapping) {
     for (const auto& entry : var_mapping) {
-      const ExprHandle& key = entry.first;
-      const ExprHandle& value = entry.second;
-      const Var* key_var = key.AsNode<Var>();
+      const Var* key_var = entry.first;
+      const Expr* value = entry.second;
       if (!key_var) {
         throw malformed_input();
       }
@@ -815,13 +833,13 @@ class VarSubMutator : public IRMutator {
   const Expr* mutate(const Var* var) override {
     auto iter = var_mapping_.find(var);
     if (iter == var_mapping_.end()) {
-      return const_cast<Var*>(var);
+      return var;
     }
-    return iter->second.node();
+    return iter->second;
   }
 
  private:
-  std::unordered_map<const Var*, ExprHandle> var_mapping_;
+  std::unordered_map<const Var*, const Expr*> var_mapping_;
 };
 
 template <class CodeGenType>
