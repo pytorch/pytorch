@@ -113,8 +113,8 @@ class AliasDb {
   TORCH_API void dump();
   TORCH_API std::string toString();
 
-  static bool mutableType(const Value* v);
-  static bool mutableType(const TypePtr& type);
+  static bool isMutableType(const Value* v);
+  static bool isMutableType(const TypePtr& type);
 
  private:
   // Helper for topologically-safe node moves.
@@ -123,6 +123,9 @@ class AliasDb {
   bool tryMove(Node* toMove, Node* movePoint, MoveSide moveSide, bool dryRun);
   void move(Node* toMove, Node* movePoint, MoveSide moveSide);
   bool isBeforeOrAfter(const Node* n, MoveSide moveSide);
+
+  bool isMutableTypeInternal(const Value* v);
+  bool isMutableTypeInternal(const TypePtr& type);
 
   /**
    * Write and read internal API
@@ -185,9 +188,9 @@ class AliasDb {
   void giveFreshAlias(const Value* value);
   Element* getOrCreateElement(const Value* value);
 
-  static c10::optional<TypeKind> getMutableTypeKind(const TypePtr& type);
+  c10::optional<TypePtr> getMutableTypePtr(const TypePtr& type);
 
-  static bool isContainerType(const TypePtr& type);
+  bool isContainerType(const TypePtr& type);
 
   std::shared_ptr<Graph> graph_;
 
@@ -212,6 +215,9 @@ class AliasDb {
   bool mayAliasWildcard(const Value* v);
   bool mayAliasWildcard(const at::ArrayRef<Value*> vs);
   bool hasWriters(const at::ArrayRef<Value*>& values);
+
+  // cached mapping of type ptrs to their mutable types
+  std::unordered_map<TypePtr, TypePtr> mapped_mutable_types_;
 
   /**
    * State for tracking write info.
