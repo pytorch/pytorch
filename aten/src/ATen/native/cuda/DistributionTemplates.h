@@ -1,9 +1,9 @@
 #pragma once
 
 #include <ATen/Dispatch.h>
-#include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/TensorIterator.h>
 #include <c10/util/Half.h>
+#include <ATen/cuda/detail/OffsetCalculator.cuh>
 
 #include <curand.h>
 #include <curand_kernel.h>
@@ -77,6 +77,16 @@ __global__ void distribution_elementwise_grid_stride_kernel(int numel,
   }
 }
 
+template<int N>
+static OffsetCalculator<N> make_offset_calculator(const at::TensorIterator& iter) {
+  AT_ASSERT(N == iter.ntensors());
+  std::array<const int64_t*, N> strides;
+  for (int i = 0; i < N; i++) {
+    strides[i] = iter.strides(i).data();
+  }
+  return OffsetCalculator<N>(iter.ndim(), iter.shape().data(), strides.data());
+}
+
 /**
  * distribution_nullary_kernel is analogous to gpu_kernel in
  * ATen/native/cuda/Loops.cuh. Like gpu_kernel, it uses
@@ -144,7 +154,7 @@ void distribution_nullary_kernel(at::TensorIterator& iter,
       }
     );
   } else {
-    auto offset_calc = at::native::legacy::make_offset_calculator<1>(iter);
+    auto offset_calc = make_offset_calculator<1>(iter);
     distribution_elementwise_grid_stride_kernel<accscalar_t, unroll_factor><<<grid, block, 0, stream>>>(
       numel,
       rng_engine_inputs,

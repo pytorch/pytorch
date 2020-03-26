@@ -118,6 +118,7 @@ libtorch_sources = [
     "torch/csrc/jit/passes/constant_propagation.cpp",
     "torch/csrc/jit/passes/constant_pooling.cpp",
     "torch/csrc/jit/passes/create_autodiff_subgraphs.cpp",
+    "torch/csrc/jit/passes/create_functional_graphs.cpp",
     "torch/csrc/jit/passes/dead_code_elimination.cpp",
     "torch/csrc/jit/passes/erase_number_types.cpp",
     "torch/csrc/jit/passes/fixup_trace_scope_blocks.cpp",
@@ -154,6 +155,7 @@ libtorch_sources = [
     "torch/csrc/jit/passes/freeze_module.cpp",
     "torch/csrc/jit/runtime/print_handler.cpp",
     "torch/csrc/jit/runtime/register_prim_ops.cpp",
+    "torch/csrc/jit/runtime/register_prim_ops_fulljit.cpp",
     "torch/csrc/jit/runtime/register_prim_ops_c10.cpp",
     "torch/csrc/jit/runtime/register_string_ops.cpp",
     "torch/csrc/jit/runtime/register_special_ops.cpp",
@@ -432,7 +434,7 @@ def add_torch_libs():
                 "-Wno-unknown-pragmas",
             ],
         },
-        "headers": native.glob(["torch/csrc/**/*.h", "torch/csrc/generic/*.cpp", "test/cpp/jit/*.h"]),
+        "headers": native.glob(["torch/csrc/**/*.h", "torch/csrc/generic/*.cpp", "test/cpp/jit/*.h", "test/cpp/tensorexpr/*.h"]),
     }
     propagated_pp_flags = [
         "-Icaffe2",
