@@ -1469,12 +1469,12 @@ Tensor trace(const Tensor& self) {
   Tensor result = at::empty({}, self.options());
   AT_DISPATCH_ALL_TYPES(self.scalar_type(), "trace", [&] {
     scalar_t sum = 0;
-    auto t_data = self.data_ptr<scalar_t>();
+    const auto* t_data = self.data_ptr<scalar_t>();
 
     int64_t i = 0;
     int64_t t_stride_0, t_stride_1, t_diag_size;
 
-    TORCH_CHECK(self.dim() == 2, "expected a matrix");
+    TORCH_CHECK(self.dim() == 2, "trace: expected a matrix, but got tensor with dim %d", self.dim());
 
     t_stride_0 = self.stride(0);
     t_stride_1 = self.stride(1);
@@ -1485,7 +1485,7 @@ Tensor trace(const Tensor& self) {
       i++;
     }
 
-    result.fill_(sum);
+    *result.data_ptr<scalar_t>() = sum;
   });
 
   return result;
