@@ -3,6 +3,8 @@
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <THC/THCAtomics.cuh>
 
+#define GRIDSAMPLER_NOINLINE __attribute__((noinline))
+
 namespace at { namespace native {
 
 namespace detail {
@@ -199,12 +201,12 @@ scalar_t grid_sampler_compute_source_index_set_grad(
   return coord;
 }
 
-static __forceinline__ __device__
+static GRIDSAMPLER_NOINLINE __device__
 bool within_bounds_2d(int h, int w, int H, int W) {
   return h >= 0 && h < H && w >= 0 && w < W;
 }
 
-static __forceinline__ __device__
+static GRIDSAMPLER_NOINLINE __device__
 bool within_bounds_3d(int d, int h, int w, int D, int H, int W) {
   return d >= 0 && d < D && h >= 0 && h < H && w >= 0 && w < W;
 }
