@@ -611,6 +611,9 @@ class ConvTranspose2d(_ConvTransposeNd):
 
         # TODO(z-a-f): Once the quantized `.flip` is implemented,
         #              we can remove the requantization
+        if w.qscheme != torch.per_tensor_affine:
+            raise NotImplementedError(
+                "Only per-tensor quantization is supported.")
         qscale = w.q_scale()
         qzp = w.q_zero_point()
         w = w.dequantize()
