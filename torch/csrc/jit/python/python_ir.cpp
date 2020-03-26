@@ -1,14 +1,14 @@
 #include <torch/csrc/jit/python/python_ir.h>
 
 #include <pybind11/pybind11.h>
-#include <torch/csrc/jit/runtime/argument_spec.h>
-#include <torch/csrc/jit/serialization/export.h>
-#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
-#include <torch/csrc/jit/serialization/python_print.h>
+#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/python/pybind.h>
 #include <torch/csrc/jit/python/python_tracer.h>
+#include <torch/csrc/jit/runtime/argument_spec.h>
+#include <torch/csrc/jit/serialization/export.h>
+#include <torch/csrc/jit/serialization/python_print.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_strings.h>
@@ -210,15 +210,8 @@ void initPythonIRBindings(PyObject* module_) {
 #define GS(name) def(#name, &Graph ::name)
   py::class_<Graph, std::shared_ptr<Graph>>(m, "Graph")
       .def(py::init<>())
-      .def(
-          "__repr__",
-          [](Graph& g) {
-            return g.toString();
-          })
-      .def(
-          "str",
-          &Graph::toString,
-          py::arg("print_source_ranges") = true)
+      .def("__repr__", [](Graph& g) { return g.toString(); })
+      .def("str", &Graph::toString, py::arg("print_source_ranges") = true)
       .def(
           "dump_alias_db",
           [](std::shared_ptr<Graph> g) {
@@ -230,7 +223,9 @@ void initPythonIRBindings(PyObject* module_) {
           [](const std::shared_ptr<Graph> g,
              const std::map<std::string, at::Tensor>& initializers,
              int64_t onnx_opset_version,
-             const std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>& dynamic_axes,
+             const std::unordered_map<
+                 std::string,
+                 std::unordered_map<int64_t, std::string>>& dynamic_axes,
              bool defer_weight_export,
              ::torch::onnx::OperatorExportTypes operator_export_type,
              bool strip_doc_string,
@@ -469,11 +464,7 @@ void initPythonIRBindings(PyObject* module_) {
             ss << n;
             return ss.str();
           })
-      .def(
-          "sourceRange",
-          [](Node& n) {
-            return n.sourceRange().str();
-          })
+      .def("sourceRange", [](Node& n) { return n.sourceRange().str(); })
       .def("hasMultipleOutputs", [](Node& n) { return n.outputs().size() > 1; })
       .def("outputsSize", [](Node& n) { return n.outputs().size(); })
       .NS(kind)
@@ -626,7 +617,9 @@ void initPythonIRBindings(PyObject* module_) {
                 .cast<py::object>();
           })
       .def("cconv", [](Node& n) { return n.expect<ConcretePythonOp>()->cconv; })
-      .def("pyname", [](Node& n) { return n.expect<ConcretePythonOp>()->name(); })
+      .def(
+          "pyname",
+          [](Node& n) { return n.expect<ConcretePythonOp>()->name(); })
       .def("scalar_args", [](Node& n) {
         auto op = n.expect<ConcretePythonOp>();
         auto scalars = py::list();
@@ -716,7 +709,8 @@ void initPythonIRBindings(PyObject* module_) {
       .def_static("get", &BoolType::get);
   py::class_<StringType, Type, std::shared_ptr<StringType>>(m, "StringType")
       .def_static("get", &StringType::get);
-  py::class_<DeviceObjType, Type, std::shared_ptr<DeviceObjType>>(m, "DeviceObjType")
+  py::class_<DeviceObjType, Type, std::shared_ptr<DeviceObjType>>(
+      m, "DeviceObjType")
       .def_static("get", &DeviceObjType::get);
   py::class_<PyObjectType, Type, std::shared_ptr<PyObjectType>>(
       m, "PyObjectType")
@@ -754,8 +748,7 @@ void initPythonIRBindings(PyObject* module_) {
       .def(py::init([](TypePtr a) { return RRefType::create(a); }))
       .def("getElementType", &RRefType::getElementType);
 
-  py::class_<FutureType, Type, std::shared_ptr<FutureType>>(
-      m, "FutureType")
+  py::class_<FutureType, Type, std::shared_ptr<FutureType>>(m, "FutureType")
       .def(py::init([](TypePtr a) { return FutureType::create(a); }))
       .def("getElementType", &FutureType::getElementType);
 
