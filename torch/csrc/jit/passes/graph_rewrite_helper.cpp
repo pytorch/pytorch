@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
+#include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 
@@ -34,6 +35,7 @@ c10::optional<IValue> getIValue(
 }
 
 void replaceConvolutionWithConv2d(std::shared_ptr<Graph>& graph) {
+  ConstantPropagation(graph);
   std::string convolution = R"(
       graph(%a, %w, %b, %stride:int[], %padding:int[], %dilation:int[],
           %transposed:bool, %output_padding:int[], %groups:int, %benchmark:bool,

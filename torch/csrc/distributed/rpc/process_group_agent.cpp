@@ -75,7 +75,7 @@ void ProcessGroupAgent::collectNames() {
   pg_->allgather(outputNames, inputName)->wait();
 
   // convert collected name tensors into string names
-  for (int i = 0; i < worldSize; ++i) {
+  for (worker_id_t i = 0; i < worldSize; ++i) {
     torch::Tensor& tensor = outputNames[0][i];
     std::string peerName((const char*)tensor.storage().data<signed char>());
 
@@ -95,7 +95,7 @@ ProcessGroupAgent::ProcessGroupAgent(
     int numSendRecvThreads,
     std::chrono::milliseconds rpcTimeout)
     : RpcAgent(
-          WorkerInfo(std::move(workerName), pg->getRank()),
+          WorkerInfo(std::move(workerName), (int64_t)pg->getRank()),
           std::make_unique<RequestCallbackImpl>(),
           rpcTimeout),
       pg_(std::move(pg)),
@@ -135,7 +135,7 @@ ProcessGroupAgent::ProcessGroupAgent(
   }
 
   allWorkerInfo_.reserve(pg_->getSize());
-  for (int rank = 0; rank < (int)tmpWorkerIds.size(); ++rank) {
+  for (worker_id_t rank = 0; rank < (int)tmpWorkerIds.size(); ++rank) {
     allWorkerInfo_.emplace_back(std::move(tmpWorkerIds[rank]), rank);
   }
 }
