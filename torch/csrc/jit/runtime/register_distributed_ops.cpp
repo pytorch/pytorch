@@ -60,9 +60,9 @@ RegisterOperators reg_rpc_ops(
            auto rref = pop(stack).toRRef();
            TORCH_CHECK(
                rref->isOwner(),
-               "Can't call RRef.to_here() on a non-owner RRef.");
+               "Can't call RRef.local_value() on a non-owner RRef.");
            IValue res =
-               c10::dynamic_intrusive_pointer_cast<dist_rpc::OwnerRRef>(rref)
+               c10::static_intrusive_pointer_cast<dist_rpc::OwnerRRef>(rref)
                    ->getValue();
            push(stack, std::move(res));
            return 0;
