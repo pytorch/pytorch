@@ -57,10 +57,9 @@ int64_t update_to(int64_t to) {
 }
 
 template<template<typename> class random_kernel, typename RNG>
-at::Tensor& random_impl(at::Tensor& self, at::Generator* generator) {
-  auto gen = (RNG*)generator;
+at::Tensor& random_impl(at::Tensor& self, at::Generator generator) {
   auto iter = at::TensorIterator::nullary_op(self);
-  random_kernel<RNG>()(iter, gen);
+  random_kernel<RNG>()(iter, generator);
   return self;
 }
 
@@ -93,8 +92,7 @@ static void check_from_to_in_range(int64_t from, int64_t to_inc, caffe2::TypeMet
 #undef CHECK_OUT_OF_BOUNDS_AND_SHOW_WARNING
 
 template<template<typename> class random_from_to_kernel, typename RNG>
-at::Tensor& random_from_to_impl(at::Tensor& self, int64_t from, c10::optional<int64_t> to_opt, at::Generator* generator) {
-  auto gen = (RNG*)generator;
+at::Tensor& random_from_to_impl(at::Tensor& self, int64_t from, c10::optional<int64_t> to_opt, at::Generator generator) {
   uint64_t range = 0;
   auto iter = at::TensorIterator::nullary_op(self);
   if (to_opt.has_value()) {
@@ -110,7 +108,7 @@ at::Tensor& random_from_to_impl(at::Tensor& self, int64_t from, c10::optional<in
     }
     check_from_to_in_range(from, to - 1, self.dtype());
     range = static_cast<uint64_t>(to) - static_cast<uint64_t>(from);
-    random_from_to_kernel<RNG>()(iter, range, from, gen);
+    random_from_to_kernel<RNG>()(iter, range, from, generator);
   } else if (from != std::numeric_limits<int64_t>::lowest()) {
     // [from, std::numeric_limits<int64_t>::max()]
     int64_t to_inc = 0;
@@ -133,11 +131,11 @@ at::Tensor& random_from_to_impl(at::Tensor& self, int64_t from, c10::optional<in
     }
     check_from_to_in_range(from, to_inc, self.dtype());
     range = static_cast<uint64_t>(to_inc) - static_cast<uint64_t>(from) + 1;
-    random_from_to_kernel<RNG>()(iter, range, from, gen);
+    random_from_to_kernel<RNG>()(iter, range, from, generator);
   } else {
     // [std::numeric_limits<int64_t>::lowest(), std::numeric_limits<int64_t>::max()]
     // range = 2^64
-    random_from_to_kernel<RNG>()(iter, gen);
+    random_from_to_kernel<RNG>()(iter, generator);
   }
   return self;
 }

@@ -259,8 +259,9 @@
 ]]
 [[
   name: _th_min
-  cpu_bool: True
   cuda_bool: True
+  backends:
+    - CUDA
   variants: function
   options:
     - cname: min
@@ -289,8 +290,9 @@
 ]]
 [[
   name: _th_max
-  cpu_bool: True
   cuda_bool: True
+  backends:
+    - CUDA
   variants: function
   options:
     - cname: max
@@ -704,6 +706,8 @@
       output: True
     - THTensor* self
     - long diagonal
+  backends:
+    - CUDA
 ]]
 [[
   name: _th_addmm
@@ -1059,7 +1063,7 @@
     - THTensor* q
     - THIndexTensor* J
     - long num_samples
-    - THGenerator* generator
+    - Generator generator
 ]]
 [[
   name: _th_uniform_
@@ -1074,7 +1078,7 @@
     - THTensor* self
     - double from
     - double to
-    - THGenerator* generator
+    - Generator generator
 ]]
 
 [[
