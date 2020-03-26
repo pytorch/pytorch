@@ -1,7 +1,7 @@
 #pragma once
 
-#include <vector>
 #include <unordered_map>
+#include <vector>
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/tensorexpr/ir_visitor.h>
@@ -22,7 +22,7 @@ enum TensorAccessKind { kLoad, kStore };
 // represent a range [start, stop)
 class Range {
  public:
-   Range() {};
+  Range(){};
   Range(const Expr* start, const Expr* stop) : start_(start), stop_(stop) {}
   const Expr* start() const {
     return start_;
@@ -42,7 +42,6 @@ struct TensorAccess {
   std::vector<const Expr*> start;
   std::vector<const Expr*> stop;
 };
-
 
 TORCH_API std::unordered_map<const Var*, Range> inferBounds(Stmt* s);
 
@@ -70,8 +69,6 @@ class AccessFinder : public IRVisitor {
 // TODO: remove/cleanup this
 TORCH_API void printBufVector(const std::vector<TensorAccess>& v);
 
-
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
-
