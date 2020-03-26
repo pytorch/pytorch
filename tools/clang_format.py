@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """
 A script that runs clang-format on all C/C++ files in CLANG_FORMAT_WHITELIST. There is
 also a diff mode which simply checks if clang-format would make any changes, which is useful for 
