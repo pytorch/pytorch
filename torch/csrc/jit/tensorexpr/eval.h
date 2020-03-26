@@ -107,9 +107,10 @@ inline typename std::enable_if<std::is_integral<T>::value, T>::type div_value(
   return lhs / rhs;
 }
 
-__ubsan_ignore_float_divide_by_zero__ template <typename T>
-inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
-div_value(T lhs, T rhs) {
+template <typename T>
+inline typename std::enable_if<std::is_floating_point<T>::value, T>::
+    type __ubsan_ignore_float_divide_by_zero__
+    div_value(T lhs, T rhs) {
   return lhs / rhs;
 }
 
