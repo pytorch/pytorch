@@ -15,7 +15,7 @@ namespace {
 void ConstantPooling(
     Block* block,
     std::unordered_set<Node*, HashNode, EqualNode>& constants,
-    const AliasDb& aliasDb) {
+    AliasDb& aliasDb) {
   for (auto it = block->nodes().begin(); it != block->nodes().end();) {
     auto node = *it;
     // node may be moved to a different block so advance iterator now

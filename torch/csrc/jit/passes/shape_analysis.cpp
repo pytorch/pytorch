@@ -87,7 +87,7 @@ class ShapePropagator {
 
  private:
   ValueSet resized_alias_set;
-  const AliasDb aliasDb_;
+  AliasDb aliasDb_;
 
   bool resizesInput(Node* n) {
     static std::unordered_set<Symbol> resize_ops{

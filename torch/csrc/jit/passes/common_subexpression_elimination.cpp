@@ -15,7 +15,7 @@ namespace {
 // Since the nodes are visited in topological order, one pass is enough.
 void EliminateCommonSubexpression(
     Block* block,
-    const AliasDb& aliasDb,
+    AliasDb& aliasDb,
     std::function<Node*(Node*)> parent_lookup_fn) {
   std::unordered_set<Node*, HashNode, EqualNode> subexprs;
   for (auto it = block->nodes().begin(); it != block->nodes().end(); ++it) {
