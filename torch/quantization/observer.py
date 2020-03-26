@@ -495,14 +495,16 @@ class MinMaxDynamicQuantObserver(MinMaxObserver):
             scale = torch.tensor(0.1).to(dtype=torch.float)
             zero_point = 0
 
-        zero_point_from_min = qmin - min_val / float(scale)
-        zero_point_from_max = qmax - max_val / float(scale)
-        zero_point_from_min_error = abs(qmin) - abs(min_val / float(scale))
-        zero_point_from_max_error = abs(qmax) - abs(max_val / float(scale))
+        zero_point_from_min = qmin - min_val / scale.to(dtype=torch.double)
+        zero_point_from_max = qmax - max_val / scale.to(dtype=torch.double)
+        zero_point_from_min_error = abs(qmin) - abs(min_val / scale.to(dtype=torch.double))
+        zero_point_from_max_error = abs(qmax) - abs(max_val / scale.to(dtype=torch.double))
+
         if zero_point_from_min_error < zero_point_from_max_error:
             initial_zero_point = zero_point_from_min
         else:
             initial_zero_point = zero_point_from_max
+
         nudged_zero_point = 0
 
         if initial_zero_point < qmin:
