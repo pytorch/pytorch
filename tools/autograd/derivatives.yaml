@@ -1312,7 +1312,7 @@
   self: zeros_like(grad, at::MemoryFormat::Preserve)
 
 - name: kl_div_backward(Tensor grad_output, Tensor self, Tensor target, int reduction=Mean, *, bool log_target=False) -> Tensor
-  grad_output: kl_div_double_backward_grad_output(grad, self, target, reduction, log_target=log_target)
+  grad_output: kl_div_double_backward_grad_output(grad, self, target, reduction, log_target)
   self: zeros_like(grad, at::MemoryFormat::Preserve)
   target: zeros_like(grad, at::MemoryFormat::Preserve)
 
