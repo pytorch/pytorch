@@ -1466,11 +1466,10 @@ Tensor& diag_out(Tensor &result, const Tensor& self, int64_t dimension) {
 }
 
 Tensor trace(const Tensor& self) {
-  Tensor result = at::empty({1}, self.options());
+  Tensor result = at::empty({}, self.options());
   AT_DISPATCH_ALL_TYPES(self.scalar_type(), "trace", [&] {
     scalar_t sum = 0;
     auto t_data = self.data_ptr<scalar_t>();
-    auto r_data = result.data_ptr<scalar_t>();
 
     int64_t i = 0;
     int64_t t_stride_0, t_stride_1, t_diag_size;
@@ -1486,7 +1485,7 @@ Tensor trace(const Tensor& self) {
       i++;
     }
 
-    r_data[0] = sum;
+    result.fill_(sum);
   });
 
   return result;
