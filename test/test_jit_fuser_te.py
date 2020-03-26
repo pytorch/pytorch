@@ -10,7 +10,7 @@ import torch.nn.functional as F
 from torch.testing import FileCheck
 
 from torch.testing._internal.common_utils import run_tests, IS_SANDCASTLE, ProfilingMode, GRAPH_EXECUTOR, \
-    enable_profiling_mode
+    enable_profiling_mode, skipIfRocm
 
 from textwrap import dedent
 from itertools import product, permutations
@@ -797,7 +797,9 @@ class TestFuser(JitTestCase):
         hy, cy = module(*inputs)
         warmup_backward((hy + cy).sum())
 
+    @skipIfRocm
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
     def test_rand_cuda(self):
         class M(torch.jit.ScriptModule):
             __constants__ = ['d']
@@ -880,6 +882,7 @@ class TestFuser(JitTestCase):
         self.assertEqual(out[0, :] + torch.zeros(4, 4, device='cuda'), out)
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
     def test_rand_diamond(self):
         def fn_test_diamond(x, y):
             r = torch.rand_like(y)

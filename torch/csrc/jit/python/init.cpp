@@ -15,6 +15,7 @@
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/create_autodiff_subgraphs.h>
+#include <torch/csrc/jit/passes/create_functional_graphs.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/decompose_ops.h>
 #include <torch/csrc/jit/passes/erase_number_types.h>
@@ -259,6 +260,15 @@ void initJITBindings(PyObject* module) {
           [](std::shared_ptr<Graph> g) { return RemoveInplaceOps(g); })
       .def("_jit_pass_constant_pooling", ConstantPooling)
       .def(
+          "_jit_pass_create_functional_graphs",
+          [](std::shared_ptr<Graph>& g) { return CreateFunctionalGraphs(g); })
+      .def(
+          "_jit_pass_remove_mutation",
+          [](std::shared_ptr<Graph>& g) { return RemoveMutation(g); })
+      .def(
+          "_jit_pass_inline_functional_graphs",
+          [](std::shared_ptr<Graph>& g) { return InlineFunctionalGraphs(g); })
+      .def(
           "_jit_pass_peephole",
           [](const std::shared_ptr<Graph>& g, bool addmm_fusion_enabled) {
             return PeepholeOptimize(g, addmm_fusion_enabled);
@@ -475,6 +485,11 @@ void initJITBindings(PyObject* module) {
           "_jit_pass_fold_prepacking_ops",
           [](script::Module& module) {
             return FoldPrePackingOps(module);
+          })
+      .def(
+          "_jit_pass_optimize_for_mobile",
+          [](script::Module& module) {
+            return optimizeForMobile(module);
           })
       .def(
           "_jit_pass_onnx_unpack_quantized_weights",
@@ -738,6 +753,7 @@ void initJITBindings(PyObject* module) {
       return op->schema();
     });
   });
+  m.def("_is_tracing", []() { return jit::tracer::isTracing(); });
 
   py::class_<PythonFutureWrapper>(m, "Future")
       .def(

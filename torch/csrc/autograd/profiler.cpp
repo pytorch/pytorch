@@ -4,7 +4,7 @@
 
 #include <torch/csrc/jit/runtime/operator.h>
 
-#include <c10/core/DispatchKey.h>
+#include <ATen/core/op_registration/op_registration.h>
 
 #include <fstream>
 #include <list>
@@ -380,8 +380,5 @@ void profile_wrapper(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   callBoxedWorkaround(op, stack);
 }
 
-auto registry = c10::Dispatcher::singleton()
-  .registerBackendFallbackKernel(
-    c10::DispatchKey::Profiler,
-    c10::KernelFunction::makeFromBoxedFunction<&profile_wrapper>()
-  );
+auto registry = c10::import()
+  .fallback(c10::dispatch(c10::DispatchKey::Profiler, c10::CppFunction::makeFromBoxedFunction<&profile_wrapper>()));

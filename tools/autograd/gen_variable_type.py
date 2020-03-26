@@ -23,8 +23,7 @@
 #     differentiable subcomponents.
 #
 from __future__ import print_function
-from .utils import CodeTemplate, nested_dict, write, uninplace_api_name, \
-    is_tensor_method
+from .utils import CodeTemplate, nested_dict, write, uninplace_api_name
 from .gen_autograd import VIEW_FUNCTIONS
 from .gen_autograd_functions import uses_single_grad
 
@@ -184,16 +183,17 @@ ${return_type} ${type_wrapper_name}(${type_method_formals}) {
 """)
 
 UNBOXEDONLY_WRAPPER_REGISTRATION = CodeTemplate("""\
-.op(torch::RegisterOperators::options()
-  .schema("${schema_string}")
-  .impl_unboxedOnlyKernel<decltype(VariableType::${type_wrapper_name}),
-      &VariableType::${type_wrapper_name}>(DispatchKey::VariableTensorId))
+.impl("${operator_name_with_overload}",
+      torch::dispatch_autograd(
+        CppFunction::makeUnboxedOnly(VariableType::${type_wrapper_name})
+      ))
 """)
 
 WRAPPER_REGISTRATION = CodeTemplate("""\
-.op(torch::RegisterOperators::options()
-  .schema("${schema_string}")
-  .kernel(DispatchKey::VariableTensorId, &VariableType::${type_wrapper_name}))
+.impl("${operator_name_with_overload}",
+      torch::dispatch_autograd(
+        &VariableType::${type_wrapper_name}
+     ))
 """)
 
 UNPACK_TENSOR = CodeTemplate("""\
@@ -314,29 +314,27 @@ ${return_type} ${api_name}(${type_method_formals}); // {"schema": "${schema_stri
 """)
 
 # ProfiledType templates
-PROFILE_DISPATCH_TO_NON_VAR_TYPE = CodeTemplate("""\
-{
-    AutoNonProfileTypeMode non_prof_type_mode;
-    RECORD_FUNCTION("${name}", std::vector<c10::IValue>({${input_names}}), Node::peek_at_next_sequence_nr());
-    return ${base_type_call};
-}
+PROFILE_DISPATCH_UNBOXED = CodeTemplate("""\
+auto op = c10::Dispatcher::singleton().findSchema({"aten::${operator_name}", "${overload_name}"});
+TORCH_INTERNAL_ASSERT(op);
+RECORD_FUNCTION("${name}", std::vector<c10::IValue>({${input_names}}), Node::peek_at_next_sequence_nr());
+return c10::Dispatcher::singleton().callUnboxedRedispatch<${ret_and_arg_types}>(${profiled_dispatch_args});
 """)
 
-PROFILE_CALL_DISPATCH_VIA_METHOD = CodeTemplate("""\
-self.${api_name}(${unpacked_method_args})""")
-
 PROFILE_UNBOXEDONLY_WRAPPER_REGISTRATION = CodeTemplate("""\
-.op(torch::RegisterOperators::options()
-  .schema("${schema_string}")
-  .impl_unboxedOnlyKernel<${return_type} (${formal_types}), &ProfiledType::${type_wrapper_name}>(DispatchKey::Profiler)
-  .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+.impl("${operator_name_with_overload}",
+      torch::dispatch(
+        c10::DispatchKey::Profiler,
+        CppFunction::makeUnboxedOnly(&ProfiledType::${type_wrapper_name})
+     ))
 """)
 
 PROFILE_WRAPPER_REGISTRATION = CodeTemplate("""\
-.op(torch::RegisterOperators::options()
-  .schema("${schema_string}")
-  .kernel<${return_type} (${formal_types})>(DispatchKey::Profiler, &ProfiledType::${type_wrapper_name})
-  .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+.impl("${operator_name_with_overload}",
+      torch::dispatch(
+        c10::DispatchKey::Profiler,
+        &ProfiledType::${type_wrapper_name}
+     ))
 """)
 
 FACTORY_FUNCTION_NAMES = None
@@ -612,16 +610,12 @@ def emit_profiled_body(declaration):
     for a in arguments:
         processed_args.append('{}'.format(a['name']))
 
-    if is_tensor_method(declaration):
-        base_type_call = PROFILE_CALL_DISPATCH_VIA_METHOD.substitute(
-            api_name=name,
-            unpacked_method_args=processed_args[1:]
-        )
-    else:
-        base_type_call = CALL_DISPATCH_VIA_NAMESPACE.substitute(
-            api_name=name,
-            unpacked_args=processed_args
-        )
+    # for k,v in declaration.items():
+    #     print(k, v)
+
+    # abort()
+
+    ret_and_arg_types = ', '.join([declaration['return_type']] + [a['type'] for a in declaration['arguments']])
 
     def check_record_function_input_type(simple_type):
         return simple_type in ['Tensor', 'Scalar']
@@ -631,10 +625,14 @@ def emit_profiled_body(declaration):
             arg['name'] for arg in declaration['arguments']
             if check_record_function_input_type(arg['simple_type'])])
 
-    call = PROFILE_DISPATCH_TO_NON_VAR_TYPE.substitute(
-        base_type_call=base_type_call,
+    profiled_dispatch_args = ['*op', 'c10::DispatchKey::Profiler'] + declaration['args']
+
+    call = PROFILE_DISPATCH_UNBOXED.substitute(
+        declaration,
         name=name,
         input_names=record_function_input_names(),
+        ret_and_arg_types=ret_and_arg_types,
+        profiled_dispatch_args=profiled_dispatch_args,
     )
 
     return [call]

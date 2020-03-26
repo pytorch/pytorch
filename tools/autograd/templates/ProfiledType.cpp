@@ -35,17 +35,6 @@ namespace torch {
 
 namespace ProfiledType {
 
-struct AutoNonProfileTypeMode {
-  AutoNonProfileTypeMode() {
-    orig_state = c10::impl::tls_is_dispatch_key_included(c10::DispatchKey::Profiler);
-    c10::impl::tls_set_dispatch_key_included(c10::DispatchKey::Profiler, false);
-  }
-  ~AutoNonProfileTypeMode() {
-    c10::impl::tls_set_dispatch_key_included(c10::DispatchKey::Profiler, orig_state);
-  }
-  bool orig_state;
-};
-
 namespace {
 ${profiled_method_definitions}
 }  // namespace
@@ -53,7 +42,7 @@ ${profiled_method_definitions}
 
 namespace {
 
-auto registerer = torch::RegisterOperators()
+auto registerer = torch::import()
   ${profiled_wrapper_registrations};
 
 }  // namespace
