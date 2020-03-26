@@ -3058,6 +3058,15 @@ criterion_tests = [
         check_sum_reduction=True,
     ),
     dict(
+        module_name='KLDivLoss',
+        input_fn=lambda: torch.rand(10, 10).log(),
+        target_fn=lambda: torch.rand(10, 10),
+        reference_fn=lambda i, t, m:
+            kldivloss_log_target_reference(i, t.log(), get_reduction(m)),
+        check_sum_reduction=True,
+        desc='log_target',
+    ),
+    dict(
         module_name='MSELoss',
         input_size=(2, 3, 4, 5),
         target_size=(2, 3, 4, 5),
@@ -3370,6 +3379,15 @@ new_criterion_tests = [
             kldivloss_reference(i, t, get_reduction(m)),
         check_sum_reduction=True,
         desc='scalar',
+    ),
+    dict(
+        module_name='KLDivLoss',
+        input_fn=lambda: torch.rand(()).log(),
+        target_fn=lambda: torch.rand(()),
+        reference_fn=lambda i, t, m:
+            kldivloss_log_target_reference(i, t.log(), get_reduction(m)),
+        check_sum_reduction=True,
+        desc='scalar_log_target',
     ),
     dict(
         module_name='MSELoss',
