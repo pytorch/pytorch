@@ -817,7 +817,6 @@ class ShapePropagator {
       },
       [](Node* node) -> type_vec_t {
         if (auto type = node->input(0)->type()->cast<TensorType>()) {
-          auto ret = type->withDim(0);
           if (isIntegralType(*(type->scalarType()), /*includeBool=*/true)) {
             const auto default_type = at::typeMetaToScalarType(c10::get_default_dtype());
             ret = ret->withScalarType(default_type);
