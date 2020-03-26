@@ -706,6 +706,8 @@
       output: True
     - THTensor* self
     - long diagonal
+  backends:
+    - CUDA
 ]]
 [[
   name: _th_addmm
