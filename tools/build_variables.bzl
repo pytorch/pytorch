@@ -154,6 +154,7 @@ libtorch_sources = [
     "torch/csrc/jit/passes/freeze_module.cpp",
     "torch/csrc/jit/runtime/print_handler.cpp",
     "torch/csrc/jit/runtime/register_prim_ops.cpp",
+    "torch/csrc/jit/runtime/register_prim_ops_fulljit.cpp",
     "torch/csrc/jit/runtime/register_prim_ops_c10.cpp",
     "torch/csrc/jit/runtime/register_string_ops.cpp",
     "torch/csrc/jit/runtime/register_special_ops.cpp",

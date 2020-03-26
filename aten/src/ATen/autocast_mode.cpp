@@ -496,7 +496,9 @@ auto register_out_of_place = c10::import()
   ;
 
 auto register_banned = torch::import()
-  .impl("aten::binary_cross_entropy", CppFunction::makeUnboxedOnly(&at::autocast::binary_cross_entropy_banned));
+  .impl("aten::binary_cross_entropy",
+    torch::dispatch(DispatchKey::AutocastTensorId,
+                    CppFunction::makeUnboxedOnly(&at::autocast::binary_cross_entropy_banned)));
 }
 #endif
 
