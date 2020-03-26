@@ -1,12 +1,12 @@
 #include <torch/csrc/jit/serialization/export.h>
 
 #include <c10/util/Exception.h>
-#include <torch/csrc/jit/serialization/import_export_helpers.h>
-#include <torch/csrc/jit/serialization/python_print.h>
-#include <torch/csrc/jit/serialization/pickle.h>
-#include <torch/csrc/jit/serialization/source_range_serialization.h>
-#include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/passes/inliner.h>
+#include <torch/csrc/jit/runtime/instruction.h>
+#include <torch/csrc/jit/serialization/import_export_helpers.h>
+#include <torch/csrc/jit/serialization/pickle.h>
+#include <torch/csrc/jit/serialization/python_print.h>
+#include <torch/csrc/jit/serialization/source_range_serialization.h>
 
 #include <caffe2/serialize/inline_container.h>
 
@@ -18,7 +18,7 @@
 namespace torch {
 namespace jit {
 
-char const * toString(OpCode op);
+char const* toString(OpCode op);
 
 namespace {
 ExportModuleExtraFilesHook& GetExtraFilesHook() {
@@ -30,7 +30,8 @@ static IValue Tup(std::vector<IValue> ivalues) {
   return c10::ivalue::Tuple::create(std::move(ivalues));
 }
 
-static IValue Table(const std::vector<std::pair<std::string, IValue>>& entries) {
+static IValue Table(
+    const std::vector<std::pair<std::string, IValue>>& entries) {
   std::vector<IValue> ivalue_entries;
   for (const auto& e : entries) {
     ivalue_entries.push_back(Tup({e.first, e.second}));
@@ -66,8 +67,9 @@ c10::IValue getFunctionTuple(const Function& func) {
         auto method_name_idx =
             code.constant_table().size() + method_names.size();
         method_names.emplace_back(node->s(attr::name));
-        Instruction new_instr{
-            INTERFACE_CALL, static_cast<int32_t>(method_name_idx), static_cast<uint16_t>(node->inputs().size())};
+        Instruction new_instr{INTERFACE_CALL,
+                              static_cast<int32_t>(method_name_idx),
+                              static_cast<uint16_t>(node->inputs().size())};
         instructions_copy[i] = std::move(new_instr);
       } else {
         TORCH_INTERNAL_ASSERT(
@@ -106,7 +108,8 @@ c10::IValue getFunctionTuple(const Function& func) {
     types.emplace_back(t->python_str());
   }
 
-  // since the register location is embedded into the bytecode, pass the register size
+  // since the register location is embedded into the bytecode, pass the
+  // register size
   auto register_size = static_cast<int>(code.register_size());
 
   auto table = Table({{"instructions", Tup(instructions)},
@@ -119,11 +122,12 @@ c10::IValue getFunctionTuple(const Function& func) {
 }
 
 void setstateTuple(const IValue& ivalue, std::vector<c10::IValue>& elements) {
-  if (!ivalue.isObject()) return;
+  if (!ivalue.isObject())
+    return;
   auto obj = ivalue.toObject();
   auto type = obj->type();
   if (checkHasValidSetGetState(type)) {
-    Function *setstate = type->getMethod("__setstate__");
+    Function* setstate = type->getMethod("__setstate__");
     if (setstate->isGraphFunction()) {
       elements.push_back(getFunctionTuple(*setstate));
     }
@@ -134,7 +138,8 @@ void setstateTuple(const IValue& ivalue, std::vector<c10::IValue>& elements) {
   }
 }
 
-void moduleMethodsTuple(const Module& module,
+void moduleMethodsTuple(
+    const Module& module,
     std::vector<c10::IValue>& elements) {
   auto methods = module.get_methods();
   // top level methods
@@ -146,7 +151,7 @@ void moduleMethodsTuple(const Module& module,
   setstateTuple(module._ivalue(), elements);
 }
 
-}
+} // namespace
 
 void SetExportModuleExtraFilesHook(ExportModuleExtraFilesHook hook) {
   GetExtraFilesHook() = hook;
@@ -158,7 +163,7 @@ class ScriptModuleSerializer {
       : writer_(filename) {}
 
   explicit ScriptModuleSerializer(
-      const std::function<size_t(const void *, size_t)>& writer_func)
+      const std::function<size_t(const void*, size_t)>& writer_func)
       : writer_(writer_func) {}
 
   void serialize(
@@ -210,9 +215,7 @@ class ScriptModuleSerializer {
     }
   }
 
-  void writeExtraFiles(
-      const Module& module,
-      const ExtraFilesMap& extra_files) {
+  void writeExtraFiles(const Module& module, const ExtraFilesMap& extra_files) {
     // Write out extra files.
     for (const auto& kv : extra_files) {
       const std::string key = "extra/" + kv.first;
@@ -249,14 +252,15 @@ class ScriptModuleSerializer {
       static constexpr size_t kMinToCompress = 200;
 
       writer_.writeRecord(
-          filename, src.c_str(), src.size(),
+          filename,
+          src.c_str(),
+          src.size(),
           src.size() > kMinToCompress /*compress*/);
 
       // Write out the debug information
       std::string debugFilename = filename + ".debug_pkl";
       SourceRangePickler source_range_pickler;
-      auto range_data =
-          source_range_pickler.pickle(item.value().ranges());
+      auto range_data = source_range_pickler.pickle(item.value().ranges());
       writer_.writeRecord(
           debugFilename,
           range_data.data(),
@@ -304,10 +308,10 @@ void ExportModule(
     const ExtraFilesMap& extra_files,
     bool bytecode_format) {
   ScriptModuleSerializer serializer(
-    [&](const void* buf, size_t nbytes) -> size_t {
-      out.write(static_cast<const char *>(buf), nbytes);
-      return !out ? 0 : nbytes;
-    });
+      [&](const void* buf, size_t nbytes) -> size_t {
+        out.write(static_cast<const char*>(buf), nbytes);
+        return !out ? 0 : nbytes;
+      });
   serializer.serialize(module, extra_files, bytecode_format);
 }
 
