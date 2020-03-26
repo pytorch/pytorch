@@ -135,7 +135,7 @@ ProcessGroupAgent::ProcessGroupAgent(
   }
 
   allWorkerInfo_.reserve(pg_->getSize());
-  for (worker_id_t rank = 0; rank < (int)tmpWorkerIds.size(); ++rank) {
+  for (worker_id_t rank = 0; rank < tmpWorkerIds.size(); ++rank) {
     allWorkerInfo_.emplace_back(std::move(tmpWorkerIds[rank]), rank);
   }
 }
