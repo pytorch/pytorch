@@ -126,6 +126,30 @@ Tensor& mkldnn_addbmm_(
 namespace at {
 namespace native {
 
+void matmul_common(
+    const ideep::tensor &x,
+    const ideep::tensor &w,
+    const ideep::tensor &bias, 
+    ideep::tensor &y,
+    Scalar beta=1,
+    Scalar alpha=1, 
+    const ideep::attr_t& attr = ideep::attr_t()) {
+  float dst_coeff = alpha.to<float>();
+  float sum_coeff = beta.to<float>();
+  if (!bias.is_empty()) { 
+    // DNNL only supports bias in 1xN dims
+    // use bias for sum can save tensor memory copy 
+    if (dst_coeff == 1.0f  && sum_coeff == 1.0f && bias.get_dim(0) == 1) {
+      ideep::matmul_forward::compute(x, w, bias, y);
+      return;
+    }
+    ideep::direct_copy::compute(bias, y);
+  }
+
+  ideep::matmul_forward::compute(x, w, y, dst_coeff, sum_coeff,
+      ideep::scale_t(), ideep::scale_t(), ideep::scale_t(), attr);
+}
+
 Tensor mkldnn_bmm(
     const Tensor& self, 
     const Tensor& mat2) {
@@ -141,9 +165,9 @@ Tensor& mkldnn_bmm_out(
     const Tensor& batch1, 
     const Tensor& batch2) {
   const ideep::tensor x = itensor_from_mkldnn(batch1);
-  const ideep::tensor w = itensor_from_tensor(batch2);
+  const ideep::tensor w = itensor_from_mkldnn(batch2);
   ideep::tensor& y = itensor_from_mkldnn(result);
-  ideep::matmul_forward::compute(x, w, y);
+  matmul_common(x, w, ideep::tensor(), y);
   return result;
 }
 
@@ -160,41 +184,6 @@ Tensor& mkldnn_mm_out(
   return at::native::mkldnn_bmm_out(result, self, mat2);
 }
 
-Tensor mkldnn_baddbmm(
-    const Tensor& self,
-    const Tensor& batch1,
-    const Tensor & batch2,
-    Scalar beta,
-    Scalar alpha) {
-    Tensor result = empty_mkldnn(self.sizes(), self.options());
-    return at::native::mkldnn_baddbmm_out(result, self, batch1, batch2, beta, alpha);
-}
-
-Tensor& baddbmm_common(
-    Tensor &result,
-    const ideep::tensor &bias, 
-    const ideep::tensor &x,
-    const ideep::tensor &w,
-    Scalar beta,
-    Scalar alpha) {
-    
-    ideep::tensor& y = itensor_from_mkldnn(result);
-    float dst_coeff = alpha.to<float>();
-    float sum_coeff = beta.to<float>();
-    // DNNL only supports bias in 1xN dims
-    // use bias for sum can save tensor memory copy 
-    if (dst_coeff == 1.0f  && sum_coeff == 1.0f && bias.get_dim(0) == 1) {
-      ideep::matmul_forward::compute(x, w, bias, y);
-      return result;
-    }
-
-    ideep::direct_copy::compute(bias, y);
-    auto attr_ = ideep::attr_t::fuse_sum();
-    ideep::matmul_forward::compute(x, w, y, dst_coeff, sum_coeff,
-        ideep::scale_t(), ideep::scale_t(), ideep::scale_t(), attr_);
-    return result;
-}
-
 Tensor& mkldnn_baddbmm_out(
     Tensor &result, 
     const Tensor& self, 
@@ -202,15 +191,31 @@ Tensor& mkldnn_baddbmm_out(
     const Tensor& batch2, 
     Scalar beta, 
     Scalar alpha) {
-    const ideep::tensor x = itensor_from_mkldnn(batch1);
-    const ideep::tensor w = itensor_from_tensor(batch2);
-    ideep::tensor bias = itensor_from_tensor(self);
-    if (bias.get_dims().size() < x.get_dims().size()) {
+  const ideep::tensor x = itensor_from_mkldnn(batch1);
+  const ideep::tensor w = itensor_from_mkldnn(batch2);
+  ideep::tensor bias;
+  if (self.numel() != 0) {
+    bias = itensor_from_mkldnn(self);
+    if (bias.ndims() < x.ndims()) {
       auto bias_dims = bias.get_dims();
       bias_dims.insert(bias_dims.begin(), 1);
       bias.reshape(bias_dims);
     }
-    return baddbmm_common(result, bias, x, w, beta, alpha);
+  }
+  ideep::tensor& y = itensor_from_mkldnn(result);
+  auto attr_ = ideep::attr_t::fuse_sum();
+  matmul_common(x, w, bias, y, beta, alpha, attr_);
+  return result;
+}
+
+Tensor mkldnn_baddbmm(
+    const Tensor& self,
+    const Tensor& batch1,
+    const Tensor & batch2,
+    Scalar beta,
+    Scalar alpha) {
+  Tensor result = empty_mkldnn(self.sizes(), self.options());
+  return at::native::mkldnn_baddbmm_out(result, self, batch1, batch2, beta, alpha);
 }
 
 Tensor& mkldnn_baddbmm_(
@@ -219,25 +224,8 @@ Tensor& mkldnn_baddbmm_(
     const Tensor& batch2,
     Scalar beta,
     Scalar alpha) {
-    const ideep::tensor x = itensor_from_mkldnn(batch1);
-    const ideep::tensor w = itensor_from_tensor(batch2);
-    ideep::tensor y = itensor_from_mkldnn(self);
-    float dst_coeff = alpha.to<float>();
-    float sum_coeff = beta.to<float>();
-    auto attr_ = ideep::attr_t::fuse_sum();
-    ideep::matmul_forward::compute(x, w, y, dst_coeff, sum_coeff,
-        ideep::scale_t(), ideep::scale_t(), ideep::scale_t(), attr_);
-    return self;
-}
-
-// mkldnn_addmm will go to DNNL matmul jit path
-Tensor mkldnn_addmm(
-    const Tensor& self,
-    const Tensor& batch1,
-    const Tensor & batch2,
-    Scalar beta,
-    Scalar alpha) {
-    return at::native::mkldnn_baddbmm(self, batch1, batch2, beta, alpha);
+  Tensor result = at::empty({0}, self.options());
+  return mkldnn_baddbmm_out(self, result, batch1, batch2, beta, alpha);
 }
 
 Tensor& mkldnn_addmm_out(
@@ -250,6 +238,15 @@ Tensor& mkldnn_addmm_out(
   return at::native::mkldnn_baddbmm_out(result, self, mat1, mat2, beta, alpha);
 }
 
+Tensor mkldnn_addmm(
+    const Tensor& self,
+    const Tensor& batch1,
+    const Tensor & batch2,
+    Scalar beta,
+    Scalar alpha) {
+  return at::native::mkldnn_baddbmm(self, batch1, batch2, beta, alpha);
+}
+
 Tensor& mkldnn_addmm_(
     Tensor& self,
     const Tensor& batch1,
@@ -257,16 +254,6 @@ Tensor& mkldnn_addmm_(
     Scalar beta,
     Scalar alpha) {
   return at::native::mkldnn_baddbmm_(self, batch1, batch2, beta, alpha);
-}
-
-Tensor mkldnn_addbmm(
-    const Tensor &self,
-    const Tensor &batch1,
-    const Tensor &batch2,
-    Scalar beta,
-    Scalar alpha) {
-  Tensor result = empty_mkldnn(self.sizes(), self.options());
-  return mkldnn_addbmm_out(result, self, batch1, batch2, beta, alpha);
 }
 
 Tensor& mkldnn_addbmm_out(
@@ -281,26 +268,40 @@ Tensor& mkldnn_addbmm_out(
   // For batch1: reorder from [b, n, m] to [n, b, m], reshape to [n, b*m]
   // For batch2: reshape from [b, m, p] to [b*m, p]
   const ideep::tensor x = itensor_from_mkldnn(batch1);
-  ideep::tensor w = itensor_from_tensor(batch2);
+  ideep::tensor w = itensor_from_mkldnn(batch2);
 
   auto x_ = x;
   if (x.get_dim(0) > 1) {
-    auto x_desc = ideep::tensor::desc(x.get_dims(), x.get_data_type(), ideep::tag::bac);
-    x_ = x.reorder_if_differ_in(x_desc);
+    x_ = x.transpose(0, 1);
   }
   ideep::dims x_dims = {x.get_dim(1), x.get_dim(0) * x.get_dim(2)};
   x_ = x_.reshape(x_dims);
-
   ideep::dims w_dims = {w.get_dim(0) * w.get_dim(1), w.get_dim(2)};
   auto w_ = w.reshape(w_dims);
-   
-  ideep::tensor bias = itensor_from_tensor(self);
-  if (bias.get_dims().size() < x_.get_dims().size()) {
-    auto bias_dims = bias.get_dims();
-    bias_dims.insert(bias_dims.begin(), 1);
-    bias.reshape(bias_dims);
+  ideep::tensor& y = itensor_from_mkldnn(result);
+  auto attr_ = ideep::attr_t::fuse_sum();
+ 
+  ideep::tensor bias; 
+  if (self.numel() != 0) {
+    bias = itensor_from_mkldnn(self);
+    if (bias.ndims() < x_.ndims()) {
+      auto bias_dims = bias.get_dims();
+      bias_dims.insert(bias_dims.begin(), 1);
+      bias.reshape(bias_dims);
+    }
   }
-  return baddbmm_common(result, bias, x_, w_, beta, alpha);
+  matmul_common(x_, w_, bias, y, beta, alpha, attr_);
+  return result;
+}
+
+Tensor mkldnn_addbmm(
+    const Tensor &self,
+    const Tensor &batch1,
+    const Tensor &batch2,
+    Scalar beta,
+    Scalar alpha) {
+  Tensor result = empty_mkldnn(self.sizes(), self.options());
+  return mkldnn_addbmm_out(result, self, batch1, batch2, beta, alpha);
 }
 
 Tensor& mkldnn_addbmm_(
@@ -309,27 +310,8 @@ Tensor& mkldnn_addbmm_(
     const Tensor& batch2,
     Scalar beta,
     Scalar alpha) {
-  const ideep::tensor x = itensor_from_mkldnn(batch1);
-  ideep::tensor w = itensor_from_tensor(batch2);
-
-  auto x_ = x;
-  if (x.get_dim(0) > 1) {
-    auto x_desc = ideep::tensor::desc(x.get_dims(), x.get_data_type(), ideep::tag::bac);
-    x_ = x.reorder_if_differ_in(x_desc);
-  }
-  ideep::dims x_dims = {x.get_dim(1), x.get_dim(0) * x.get_dim(2)};
-  x_ = x_.reshape(x_dims);
-
-  ideep::dims w_dims = {w.get_dim(0) * w.get_dim(1), w.get_dim(2)};
-  auto w_ = w.reshape(w_dims);
-
-  ideep::tensor y = itensor_from_mkldnn(self);
-  float dst_coeff = alpha.to<float>();
-  float sum_coeff = beta.to<float>();
-  auto attr_ = ideep::attr_t::fuse_sum();
-  ideep::matmul_forward::compute(x_, w_, y, dst_coeff, sum_coeff,
-      ideep::scale_t(), ideep::scale_t(), ideep::scale_t(), attr_);
-  return self;
+  Tensor result = at::empty({0}, self.options());
+  return mkldnn_addbmm_out(self, result, batch1, batch2, beta, alpha);
 }
 
 } // namespace native
