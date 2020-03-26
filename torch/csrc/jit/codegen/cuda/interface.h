@@ -25,17 +25,17 @@ struct CudaFuserInterface {
 };
 
 // Get interface, this is used by registration and user facing API internally
-TORCH_API CudaFuserInterface* getFuserInterface();
+C10_EXPORT CudaFuserInterface* getFuserInterface();
 
 // Customer facing APIs vvv
 
 // Query if node is fusable for cuda codegen
-TORCH_API bool isFusable(const Node* const node);
-TORCH_API bool isFusable(const Node* const fusion, const Node* const node);
+C10_EXPORT bool isFusable(const Node* const node);
+C10_EXPORT bool isFusable(const Node* const fusion, const Node* const node);
 
 // redirect to compileCudaFusionGroup (manager.h)
-TORCH_API void compileFusionGroup(Node* fusion_node);
+C10_EXPORT void compileFusionGroup(Node* fusion_node);
 // redirect to runCudaFusionGroup (manager.h)
-TORCH_API void runFusionGroup(const Node* const fusion_node, Stack& stack);
+C10_EXPORT void runFusionGroup(const Node* const fusion_node, Stack& stack);
 
 }}}} // namespace torch::jit::fuser::cuda
