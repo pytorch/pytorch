@@ -795,15 +795,14 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
       internal_buffers_;
 };
 
-using VarMapping = std::vector<std::pair<ExprHandle, ExprHandle>>;
+using VarMapping = std::vector<std::pair<const Var*, const Expr*>>;
 
 class VarSubMutator : public IRMutator {
  public:
   VarSubMutator(const VarMapping& var_mapping) {
     for (const auto& entry : var_mapping) {
-      const ExprHandle& key = entry.first;
-      const ExprHandle& value = entry.second;
-      const Var* key_var = key.AsNode<Var>();
+      const Var* key_var = entry.first;
+      const Expr* value = entry.second;
       if (!key_var) {
         throw malformed_input();
       }
@@ -814,13 +813,13 @@ class VarSubMutator : public IRMutator {
   const Expr* mutate(const Var* var) override {
     auto iter = var_mapping_.find(var);
     if (iter == var_mapping_.end()) {
-      return const_cast<Var*>(var);
+      return var;
     }
-    return iter->second.node();
+    return iter->second;
   }
 
  private:
-  std::unordered_map<const Var*, ExprHandle> var_mapping_;
+  std::unordered_map<const Var*, const Expr*> var_mapping_;
 };
 
 template <class CodeGenType>
@@ -909,28 +908,6 @@ inline const Expr* Substitute(const Expr* expr, const VarMapping& var_mapping) {
 inline Stmt* Substitute(Stmt* stmt, const VarMapping& var_mapping) {
   VarSubMutator var_sub(var_mapping);
   return stmt->accept_mutator(&var_sub);
-}
-
-// Uses the evaluator to fold an Expression with constant terms.
-// E.g. evaluateOp(Add(3, 4)) => 7.
-// Expr v must not have any unbound Vars.
-static Expr* evaluateOp(const Expr* v) {
-  ExprHandle handle(v);
-  ExprEval<SimpleIREvaluator> eval(handle);
-
-  switch (v->dtype().scalar_type()) {
-#define TYPE_CASE(Type, Name)                                 \
-  case ScalarType::Name: {                                    \
-    Type val = eval.value<Type>();                            \
-    return getImmediateByType(v->dtype().scalar_type(), val); \
-  }
-    AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
-#undef TYPE_CASE
-    default:
-      LOG(FATAL) << "Unsupported datatype: " << v->dtype();
-      return nullptr;
-  }
-  return nullptr;
 }
 
 } // namespace tensorexpr
