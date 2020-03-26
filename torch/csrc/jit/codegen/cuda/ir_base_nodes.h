@@ -98,7 +98,7 @@ struct TORCH_CUDA_API Statement {
   }
 
   // Return if this statement is the same as another statement
-  virtual bool sameAs(const Statement* const other) const {
+  bool sameAs(const Statement* const other) const {
     return this == other;
   }
 
@@ -298,7 +298,7 @@ struct TORCH_CUDA_API Expr : public Statement, IRInputOutput {
     return type_;
   }
 
-  virtual bool sameAs(const Expr* const other) const {
+  bool sameAs(const Expr* const other) const {
     if (getExprType() != other->getExprType())
       return false;
     if (inputs().size() != other->inputs().size() ||
