@@ -61,6 +61,7 @@ SKIP_PYTHON_BINDINGS = [
     '_cumsum.*', '_cumprod.*', '_sum.*', '_prod.*',
     '_th_.*', '_thnn_.*',
     'arange.*', 'range.*', '_solve.*', '_inverse.*',
+    'full(_out)?',
     '_cholesky.*', '_triangular_solve.*', '_qr.*', '_symeig.*', '_svd.*',
     'slice', 'randint(_out)?',
     'item', '_local_scalar_dense', 'to',
@@ -215,7 +216,7 @@ def create_python_bindings(python_functions, is_python_method, module):
 UNPACK_METHODS = {
     'const Tensor &': 'tensor',
     'Tensor &': 'tensor',
-    'Generator *': 'generator',
+    'Generator': 'generator',
     'Storage': 'storage',
     'Storage &': 'storage',
     'const ScalarType &': 'scalartype',

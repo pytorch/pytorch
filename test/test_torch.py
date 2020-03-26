@@ -31,7 +31,7 @@ from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
     skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm, skipCUDAIfNotRocm, onlyCUDA, onlyCPU, \
     dtypes, dtypesIfCUDA, deviceCountAtLeast, skipCUDAIf, precisionOverride, \
-    PYTORCH_CUDA_MEMCHECK, largeCUDATensorTest
+    PYTORCH_CUDA_MEMCHECK, largeCUDATensorTest, onlyOnCPUAndCUDA
 import torch.backends.quantized
 import torch.testing._internal.data
 
@@ -2143,12 +2143,13 @@ class _TestTorchMixin(object):
 
     def test_randn(self):
         def common_routine(dtype):
-            torch.manual_seed(123456)
-            res1 = torch.randn(SIZE, SIZE, dtype=dtype)
-            res2 = torch.tensor([], dtype=dtype)
-            torch.manual_seed(123456)
-            torch.randn(SIZE, SIZE, out=res2)
-            self.assertEqual(res1, res2)
+            for device in torch.testing.get_all_device_types():
+                torch.manual_seed(123456)
+                res1 = torch.randn(SIZE, SIZE, dtype=dtype, device=device)
+                res2 = torch.tensor([], dtype=dtype, device=device)
+                torch.manual_seed(123456)
+                torch.randn(SIZE, SIZE, out=res2)
+                self.assertEqual(res1, res2)
 
         common_routine(dtype=torch.float32)
         common_routine(dtype=torch.float64)
@@ -6003,7 +6004,6 @@ class TestTorchDeviceType(TestCase):
         input_ = layer_norm(input_.transpose(1, 2).contiguous()).contiguous()
         input_.sum().backward()
 
-
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     @onlyCPU
     @dtypes(torch.float)
@@ -6564,6 +6564,23 @@ class TestTorchDeviceType(TestCase):
         res2 = torch.cat((x.contiguous(memory_format=torch.channels_last), y.contiguous(memory_format=torch.channels_last)))
         self.assertEqual(res1, res2)
         self.assertTrue(res2.is_contiguous(memory_format=torch.channels_last))
+
+    @onlyCUDA
+    @deviceCountAtLeast(2)
+    def test_cat_different_devices(self, devices):
+        cuda0 = torch.randn((3, 3), device=devices[0])
+        cuda1 = torch.randn((3, 3), device=devices[1])
+        with self.assertRaisesRegex(RuntimeError,
+                                    "input tensors must be on the same device"):
+            torch.cat((cuda0, cuda1))
+        cpu = torch.randn(3, 3)
+        with self.assertRaisesRegex(RuntimeError,
+                                    "input tensors must be on the same device"):
+            torch.cat((cuda0, cpu))
+        with self.assertRaisesRegex(RuntimeError,
+                                    "input tensors must be on the same device"):
+            torch.cat((cpu, cuda0))
+
 
     def test_is_set_to(self, device):
         t1 = torch.empty(3, 4, 9, 10, device=device)
@@ -11959,6 +11976,25 @@ class TestTorchDeviceType(TestCase):
         _test((10,), 5, 4, win_sizes=(11,), expected_error=RuntimeError)
         _test((10,), 5, 4, win_sizes=(1, 1), expected_error=RuntimeError)
 
+    def test_fft_input_modification(self, device):
+        # FFT functions should not modify their input (gh-34551)
+
+        signal = torch.ones((2, 2, 2), device=device)
+        signal_copy = signal.clone()
+        spectrum = torch.fft(signal, 2)
+        self.assertEqual(signal, signal_copy)
+
+        spectrum_copy = spectrum.clone()
+        _ = torch.ifft(spectrum, 2)
+        self.assertEqual(spectrum, spectrum_copy)
+
+        half_spectrum = torch.rfft(signal, 2)
+        self.assertEqual(signal, signal_copy)
+
+        half_spectrum_copy = half_spectrum.clone()
+        _ = torch.irfft(half_spectrum_copy, 2, signal_sizes=(2, 2))
+        self.assertEqual(half_spectrum, half_spectrum_copy)
+
     @skipCUDAIfRocm
     def test_blas_empty(self, device):
 
@@ -13756,7 +13792,7 @@ class TestTorchDeviceType(TestCase):
 
             # classical eigenvalue problem, smallest eigenvalues
             E, V = lobpcg(A, k=k, n=n, largest=False)
-            self.assertEqual(E, e_smallest)            
+            self.assertEqual(E, e_smallest)
             self.assertEqual(matmul(A, V), mm(V, E.diag_embed()), prec=prec)
 
             # classical eigenvalue problem, largest eigenvalues
@@ -14125,6 +14161,29 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
     @onlyCPU
     @dtypes(torch.float, torch.double)
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_hardswish(self, device, dtype):
+        inputValues = [-1000, -4, -3, -2, 0, 2, 3, 4, 1000]
+        expectedOutput = np.multiply(
+            inputValues,
+            np.minimum(np.maximum((np.add(inputValues, 3)), 0), 6) / 6.0)
+        precision_4dps = 0.0002
+
+        inputTensor = torch.tensor(inputValues, dtype=dtype, device=device)
+        expectedOutputTensor = \
+            torch.tensor(expectedOutput, dtype=dtype, device=device)
+
+        # normal
+        self.assertEqual(torch.nn.functional.hardswish(inputTensor),
+                         expectedOutputTensor, precision_4dps)
+
+        # inplace
+        inputTensorCpy = inputTensor.clone().detach()
+        torch.nn.functional.hardswish(inputTensorCpy, inplace=True)
+        self.assertEqual(inputTensorCpy, expectedOutputTensor, precision_4dps)
+
+    @onlyCPU
+    @dtypes(torch.float, torch.double)
     def test_sigmoid(self, device, dtype):
         # TODO: why not simulate math.sigmoid like with rsqrt?
         inputValues = [-1000, -1, 0, 0.5, 1, 2, 1000]
@@ -14263,17 +14322,48 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                              0.01)
             self.assertEqual(a1.div(a2), a1 / a2)
 
-    @onlyCPU
+    @dtypesIfCUDA(*torch.testing.get_all_math_dtypes('cuda'))
     @dtypes(*torch.testing.get_all_math_dtypes('cpu'))
-    def test_floordiv(self, device, dtype):
-        if dtype is torch.float16:
-            return
+    def test_floor_divide_tensor(self, device, dtype):
+        x = torch.randn(10, device=device).mul(30).to(dtype)
+        y = torch.arange(1, 11, dtype=dtype, device=device)
 
+        z = x // y
+        z_alt = torch.trunc(x.double() / y.double()).to(dtype)
+
+        self.assertEqual(z.dtype, x.dtype)
+        self.assertEqual(z, z_alt)
+
+    @dtypesIfCUDA(*torch.testing.get_all_math_dtypes('cuda'))
+    @dtypes(*torch.testing.get_all_math_dtypes('cpu'))
+    def test_floor_divide_scalar(self, device, dtype):
         x = torch.randn(100, device=device).mul(10).to(dtype)
-        y = x // 3
-        self.assertEqual(y.dtype, x.dtype)
-        z = torch.tensor([math.trunc(v.item() / 3.) for v in x], dtype=y.dtype, device=device)
-        self.assertEqual(y, z)
+
+        z = x // 3
+        z_alt = torch.tensor([math.trunc(v.item() / 3.) for v in x], dtype=x.dtype, device=device)
+
+        self.assertEqual(z.dtype, x.dtype)
+        self.assertEqual(z, z_alt)
+
+    # Note: this tests fails on XLA
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.float, torch.long)
+    def test_floor_divide_out(self, device, dtype):
+        x = torch.randn(10, device=device).mul(10).to(dtype)
+        y = torch.arange(1, 11, dtype=dtype, device=device)
+        o = torch.empty(10, dtype=dtype, device=device)
+
+        torch.floor_divide(x, y, out=o)
+        self.assertEqual(o, x // y)
+
+        # Tests scalar with out
+        torch.floor_divide(x, 2, out=o)
+        self.assertEqual(o, x // 2)
+
+        if dtype == torch.int:
+            o = torch.empty(10, dtype=torch.float, device=device)
+            torch.floor_divide(x, y, out=o)
+            self.assertEqual(o, torch.floor_divide(x.float(), y.float()))
 
     @onlyCPU
     @dtypes(*torch.testing.get_all_math_dtypes('cpu'))
@@ -15021,6 +15111,96 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             self.assertRaises(RuntimeError,
                               lambda: torch.min(a, 0, out=(values, indices)))
 
+    def test_full_deprecation_warning(self, device):
+        size = (2, 2)
+        # Tests bool and integer fill_values deprecated without specific dtype set
+        with self.maybeWarnsRegex(UserWarning, 'Deprecation warning: .+'):
+            self.assertEqual(torch.full(size, True).dtype, torch.float)
+        with self.maybeWarnsRegex(UserWarning, 'Deprecation warning: .+'):
+            self.assertEqual(torch.full(size, 1).dtype, torch.float)
+
+        # Explicitly setting the dtype doesn't warn
+        with self.maybeWarnsRegex(UserWarning, ''):
+            self.assertEqual(torch.full(size, 1, dtype=torch.long).dtype, torch.long)
+        with self.maybeWarnsRegex(UserWarning, ''):
+            self.assertEqual(torch.full(size, True, dtype=torch.bool).dtype,
+                             torch.bool)
+
+        # Performs same tests with named tensor
+        with self.maybeWarnsRegex(UserWarning, 'Deprecation warning: .+|Named tensors .+'):
+            self.assertEqual(torch.full(size, True, names=('a', 'b')).dtype, torch.float)
+        with self.maybeWarnsRegex(UserWarning, 'Deprecation warning: .+|Named tensors .+'):
+            self.assertEqual(torch.full(size, 1, names=('a', 'b')).dtype, torch.float)
+
+        with self.maybeWarnsRegex(UserWarning, 'Named tensors .+'):
+            dt = torch.full(size, True, names=('a', 'b'), dtype=torch.bool).dtype
+            self.assertEqual(dt, torch.bool)
+        with self.maybeWarnsRegex(UserWarning, 'Named tensors .+'):
+            dt = torch.full(size, 1, names=('a', 'b'), dtype=torch.long).dtype
+            self.assertEqual(dt, torch.long)
+
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.half, torch.float, torch.double)
+    def test_full_inference(self, device, dtype):
+        size = (2, 2)
+
+        prev_default = torch.get_default_dtype()
+        torch.set_default_dtype(dtype)
+
+        # Tests bool fill value inference
+        # Note: in the future this will return a tensor of torch.bool dtype
+        t = torch.full(size, True)
+        self.assertEqual(t.dtype, dtype)
+
+        # Tests integer fill value inference
+        # Note: in the future this will return a tensor of torch.long dtype
+        t = torch.full(size, 1)
+        self.assertEqual(t.dtype, dtype)
+
+        # Tests float fill value inference
+        t = torch.full(size, 1.)
+        self.assertEqual(t.dtype, dtype)
+
+        # Tests complex inference
+        t = torch.full(size, (1 + 1j))
+        ctype = torch.complex128 if dtype is torch.double else torch.complex64
+        self.assertEqual(t.dtype, ctype)
+
+        torch.set_default_dtype(prev_default)
+
+    # Full-like precedence is the explicit dtype then the dtype of the "like"
+    # tensor.
+    @onlyOnCPUAndCUDA
+    def test_full_like_inference(self, device):
+        size = (2, 2)
+        like = torch.empty((5,), device=device, dtype=torch.long)
+
+        self.assertEqual(torch.full_like(like, 1.).dtype, torch.long)
+        self.assertEqual(torch.full_like(like, 1., dtype=torch.complex64).dtype,
+                         torch.complex64)
+
+    def test_full_out(self, device):
+        o = torch.empty((5,), device=device, dtype=torch.long)
+
+        # verifies dtype/out conflict throws a RuntimeError
+        with self.assertRaises(RuntimeError):
+            torch.full(o.shape, 1., dtype=torch.float, out=o)
+
+        # verifies out dtype overrides inference
+        self.assertEqual(torch.full(o.shape, 1., out=o).dtype, o.dtype)
+
+    # Checks that float->integer casts don't produce undefined behavior errors.
+    # Note: In C++, casting from a floating value to an integral dtype
+    # is undefined if the floating point value is not within the integral
+    # dtype's dynamic range. This can (and should) cause undefined behavior
+    # errors with UBSAN. These casts are deliberate in PyTorch, however, and
+    # NumPy has the same behavior.
+    @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
+    def test_float_to_int_undefined_conversion(self, device, dtype):
+        t = torch.tensor((-3.40282e+38, 3.40282e+38), device=device, dtype=torch.float)
+        self.assertEqual(t.to(dtype).dtype, dtype)
+
+
 # NOTE [Linspace+Logspace precision override]
 # Our Linspace and logspace torch.half CUDA kernels are not very precise.
 # Since linspace/logspace are deterministic, we can compute an expected
@@ -15695,7 +15875,7 @@ _types = [
     torch.uint8
 ]
 
-# _types2 adds bfloat16 type to  _types only on ROCm. Should eventually be unified 
+# _types2 adds bfloat16 type to  _types only on ROCm. Should eventually be unified
 # with _types when bfloat16 bringup is complete on all platforms.
 _types2 = _types + [torch.bfloat16] if TEST_WITH_ROCM else _types
 
@@ -15845,6 +16025,19 @@ tensor_op_tests = [
     ('div', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-1),
     ('div', 'tensor', _small_3d,
         lambda t, d: [_small_3d(t, d, has_zeros=False)], 1e-1),
+    ('true_divide', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-1,
+        1e-5, 1e-5, _types, False),
+    ('true_divide', 'with_inplace', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-1,
+        1e-5, 1e-5, _float_types),
+    ('true_divide', 'tensor', _small_3d,
+        lambda t, d: [_small_3d(t, d, has_zeros=False)], 1e-1,
+        1e-5, 1e-5, _types, False),
+    ('true_divide', 'tensor_with_inplace', _small_3d,
+        lambda t, d: [_small_3d(t, d, has_zeros=False)], 1e-1,
+        1e-5, 1e-5, _float_types),
+    ('floor_divide', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1, 1e-5, 1e-5, _types),
+    ('floor_divide', 'tensor', _small_3d,
+        lambda t, d: [_small_3d(t, d, has_zeros=False)], 1, 1e-5, 1e-5, _types),
     ('pow', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-1, 1e-5, 1e-5, _float_types),
     ('pow', '1', _small_3d, lambda t, d: [_number(1., 1, t)], 1e-1),
     ('pow', '2', _small_3d, lambda t, d: [_number(2., 2, t)], 1e-1),
@@ -15874,12 +16067,14 @@ tensor_op_tests = [
         1e-5, 1e-5, 1e-5, _float_types_no_half, False),
     ('addcdiv', '', _small_2d,
         lambda t, d: [_small_2d(t, d),
-                      _small_2d(t, d, has_zeros=False)], 1, 1e-5, 1e-3),
+                      _small_2d(t, d, has_zeros=False)], 1, 1e-5, 1e-3,
+        _types, True,
+        [_wrap_maybe_warns("Integer division .+")]),
     ('addcdiv', 'scalar', _small_2d,
         lambda t, d: [_number(2.8, 1, t), _small_2d(t, d),
                       _small_2d(t, d, has_zeros=False)], 1, 1e-5, 1e-3,
         _types, True,
-        [_wrap_maybe_warns("This overload of addcdiv_? is deprecated")]),
+        [_wrap_maybe_warns("This overload of addcdiv_? is deprecated|Integer division .+")]),
     ('addcmul', '', _small_3d, lambda t, d: [_small_3d(t, d), _small_3d(t, d)], 1e-2, 2e-5, 1e-3),
     ('addcmul', 'scalar', _small_3d,
         lambda t, d: [_number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)], 1e-2,
@@ -16065,11 +16260,11 @@ tensor_op_tests = [
     ('transpose', 'neg_dim', _new_t((1, 2, 3, 4)), lambda t, d: [-1, -2], ),
     ('tolist', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, False),
     ('topk', 'dim_sort', _small_3d_unique, lambda t, d: [2, 1, False, True],
-        1e-5, 1e-5, 1e-5, _types, False),
+        1e-5, 1e-5, 1e-5, _types2, False),
     ('topk', 'neg_dim_sort', _small_3d_unique, lambda t, d: [2, -1, False, True],
-        1e-5, 1e-5, 1e-5, _types, False),
+        1e-5, 1e-5, 1e-5, _types2, False),
     ('topk', 'dim_desc_sort', _small_3d_unique, lambda t, d: [2, 1, True, True],
-        1e-5, 1e-5, 1e-5, _types, False),
+        1e-5, 1e-5, 1e-5, _types2, False),
     ('trace', '', _medium_2d, lambda t, d: [], 1e-3, 1e-5, 1e-5, _types, False),
     ('tril', '', _medium_2d, lambda t, d: [],),
     ('tril', 'zero_stride', _medium_2d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, False),

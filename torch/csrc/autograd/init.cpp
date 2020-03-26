@@ -3,6 +3,7 @@
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/autograd/grad_mode.h>
+#include <ATen/autocast_mode.h>
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/autograd/function.h>
@@ -52,8 +53,6 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   m.def("_disable_profiler", disableProfiler);
   m.def("_profiler_enabled", profilerEnabled);
 
-  m.def("_push_range", [](std::string name) { pushRange(std::move(name)); });
-  m.def("_pop_range", []() { popRange(); });
   m.def("_run_before_callbacks", runBeforeCallbacks);
 
   py::class_<RecordFunction, std::shared_ptr<RecordFunction>>(m, "_RecordFunction")
@@ -63,6 +62,45 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
 }
 
 namespace torch { namespace autograd {
+
+static PyObject * set_autocast_enabled(PyObject* _unused, PyObject *arg) {
+  HANDLE_TH_ERRORS
+  if (!PyBool_Check(arg)) {
+    throw TypeError("enabled must be a bool (got %s)", Py_TYPE(arg)->tp_name);
+  }
+  at::autocast::set_enabled(arg == Py_True);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * is_autocast_enabled(PyObject* _unused, PyObject *arg) {
+  HANDLE_TH_ERRORS
+  if (at::autocast::is_enabled()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * clear_autocast_cache(PyObject* _unused, PyObject *arg) {
+  HANDLE_TH_ERRORS
+  at::autocast::clear_cache();
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * autocast_increment_nesting(PyObject* _unused, PyObject *arg) {
+  HANDLE_TH_ERRORS
+  return THPUtils_packInt64(at::autocast::increment_nesting());
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * autocast_decrement_nesting(PyObject* _unused, PyObject *arg) {
+  HANDLE_TH_ERRORS
+  return THPUtils_packInt64(at::autocast::decrement_nesting());
+  END_HANDLE_TH_ERRORS
+}
 
 static PyObject * set_grad_enabled(PyObject* _unused, PyObject *arg) {
   HANDLE_TH_ERRORS
@@ -108,6 +146,11 @@ static PyObject * is_anomaly_mode_enabled(PyObject* _unused, PyObject *arg) {
 static PyMethodDef methods[] = {
   {"set_grad_enabled", (PyCFunction)set_grad_enabled, METH_O, nullptr},
   {"is_grad_enabled", (PyCFunction)is_grad_enabled, METH_NOARGS, nullptr},
+  {"set_autocast_enabled", (PyCFunction)set_autocast_enabled, METH_O, nullptr},
+  {"is_autocast_enabled", (PyCFunction)is_autocast_enabled, METH_NOARGS, nullptr},
+  {"clear_autocast_cache", (PyCFunction)clear_autocast_cache, METH_NOARGS, nullptr},
+  {"autocast_increment_nesting", (PyCFunction)autocast_increment_nesting, METH_NOARGS, nullptr},
+  {"autocast_decrement_nesting", (PyCFunction)autocast_decrement_nesting, METH_NOARGS, nullptr},
   {"set_anomaly_enabled", (PyCFunction)set_anomaly_mode_enabled, METH_O, nullptr},
   {"is_anomaly_enabled", (PyCFunction)is_anomaly_mode_enabled, METH_NOARGS, nullptr},
   {nullptr, nullptr, 0, nullptr}

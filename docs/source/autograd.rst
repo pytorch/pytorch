@@ -11,6 +11,37 @@ Automatic differentiation package - torch.autograd
 
 .. autofunction:: grad
 
+.. _functional-api:
+
+Functional higher level API
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. warning::
+    This API is experimental.
+
+This section contains the higher level API for the autograd that builds on the basic API above
+and allows you to compute jacobians, hessians, etc.
+
+This API works with user-provided functions that take only Tensors as input and return
+only Tensors.
+If your function takes other arguments that are not Tensors or Tensors for which you don't require gradients,
+you can use a lambda to capture them.
+For example, for a function ``f`` that takes three inputs, a Tensor for which we want the jacobian, another
+tensor that should be considered constant and a boolean flag as ``f(input, constant, flag=flag)``
+you can use it as ``functional.jacobian(lambda x: f(x, constant, flag=flag), input)``.
+
+.. autofunction:: torch.autograd.functional.jacobian
+
+.. autofunction:: torch.autograd.functional.hessian
+
+.. autofunction:: torch.autograd.functional.vjp
+
+.. autofunction:: torch.autograd.functional.jvp
+
+.. autofunction:: torch.autograd.functional.vhp
+
+.. autofunction:: torch.autograd.functional.hvp
+
 .. _locally-disable-grad:
 
 Locally disabling gradient computation
