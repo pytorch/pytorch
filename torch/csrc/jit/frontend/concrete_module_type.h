@@ -1,8 +1,8 @@
 #pragma once
 
-#include <torch/csrc/jit/python/pybind_utils.h>
-#include <torch/csrc/jit/api/module.h>
 #include <aten/src/ATen/core/ivalue.h>
+#include <torch/csrc/jit/api/module.h>
+#include <torch/csrc/jit/python/pybind_utils.h>
 #include <memory>
 #include <string>
 #include <vector>
@@ -47,7 +47,8 @@ class ConcreteModuleType;
 // ConcreteModuleType has two phases.
 // 1. Creation: First we build it up, during the ScriptModule conversion
 // process. This is represented by ConcreteModuleTypeBuilder.
-//    ...then the converter calls ConcreteModuleTypeBuilder::build(), producing a
+//    ...then the converter calls ConcreteModuleTypeBuilder::build(), producing
+//    a
 //       ConcreteModuleType ready for querying.
 // 2. Querying: We use ConcreteModuleType as a source of truth for
 // ModuleValue::attr calls during method compilation.
@@ -75,8 +76,8 @@ class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
   void addFailedAttribute(std::string name, std::string failureReason);
   void setIterableModuleKind(IterableModuleKind kind);
 
-  // If a ConcreteModuleType is poisoned, it will never compare equal to any other
-  // concrete type
+  // If a ConcreteModuleType is poisoned, it will never compare equal to any
+  // other concrete type
   void setPoisoned();
 
   std::shared_ptr<ConcreteModuleType> build() const {
@@ -157,9 +158,9 @@ class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
   // Any function attributes. These are special right now because functions are
   // not first-class in the type system.
   std::unordered_map<std::string, FunctionAttribute> functionAttributes_;
-  // Function attributes that are calls to builtin functions. These get de-sugared
-  // directly into the corresponding aten:: call.
-  // The map is attribute name -> aten symbol name
+  // Function attributes that are calls to builtin functions. These get
+  // de-sugared directly into the corresponding aten:: call. The map is
+  // attribute name -> aten symbol name
   std::unordered_map<std::string, c10::Symbol> builtinFunctions_;
   // The concrete types of any submodules
   std::vector<ModuleInfo> modules_;
