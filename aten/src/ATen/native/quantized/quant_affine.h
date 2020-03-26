@@ -52,5 +52,10 @@ DECLARE_DISPATCH(quantize_tensor_per_channel_affine_fn, quantize_tensor_per_chan
 DECLARE_DISPATCH(dequantize_tensor_affine_fn, dequantize_tensor_affine_stub);
 DECLARE_DISPATCH(dequantize_tensor_per_channel_affine_fn, dequantize_tensor_per_channel_affine_stub);
 
+// Should we separate zero-point checks as it is a more or less general thing for quantization?
+// This function is used in the Quantizer.cpp for quant_vec
+template <typename T>
+void checkZeroPoint(std::string fn_name, int64_t zero_point);
+
 } // namespace native
 } // namespace at

@@ -11,6 +11,7 @@ DEFINE_DISPATCH(dequantize_tensor_affine_stub);
 DEFINE_DISPATCH(dequantize_tensor_per_channel_affine_stub);
 
 namespace {
+
 void checkCPUTensor(std::string fn_name, Tensor t) {
   TORCH_CHECK(
       t.device() == kCPU,
@@ -78,8 +79,7 @@ void checkSameSize(std::string fn_name, Tensor qt, Tensor rt) {
 
 } // anonymous namespace
 
-Tensor quantize_tensor_affine(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point)
-{
+Tensor quantize_tensor_affine(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point) {
   auto fn_name = "quantize_tensor_affine";
   checkFloatTensor(fn_name, rtensor);
   checkSameDevice(fn_name, rtensor, qtensor);
@@ -98,8 +98,7 @@ Tensor quantize_tensor_per_channel_affine(Tensor rtensor,
                                                      Tensor qtensor,
                                                      Tensor scales,
                                                      Tensor zero_points,
-                                                     int64_t axis)
-{
+                                                     int64_t axis) {
   auto fn_name = "quantize_tensor_per_channel_affine";
 
   checkFloatTensor(fn_name, rtensor);
@@ -121,8 +120,7 @@ Tensor quantize_tensor_per_channel_affine(Tensor rtensor,
   return qtensor;
 }
 
-Tensor dequantize_tensor_affine(Tensor qtensor, Tensor rtensor, double scale, int64_t zero_point)
-{
+Tensor dequantize_tensor_affine(Tensor qtensor, Tensor rtensor, double scale, int64_t zero_point) {
   auto fn_name = "dequantize_tensor_affine";
   checkFloatTensor(fn_name, rtensor);
   checkSameDevice(fn_name, rtensor, qtensor);
@@ -141,8 +139,7 @@ Tensor dequantize_tensor_per_channel_affine(Tensor qtensor,
                                             Tensor rtensor,
                                             Tensor scales,
                                             Tensor zero_points,
-                                            int64_t axis)
-{
+                                            int64_t axis) {
   auto fn_name = "dequantize_tensor_per_channel_affine";
 
   checkFloatTensor(fn_name, rtensor);
@@ -162,6 +159,7 @@ Tensor dequantize_tensor_per_channel_affine(Tensor qtensor,
 
   dequantize_tensor_per_channel_affine_stub(qtensor.device().type(), qtensor, rtensor, scales, zero_points, axis);
   return rtensor;
+
 }
 
 } // native
