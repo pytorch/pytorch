@@ -16371,12 +16371,20 @@ tensor_op_tests = [
     ('div', 'tensor', _small_3d,
         lambda t, d: [_small_3d(t, d, has_zeros=False)], 1e-1),
     ('true_divide', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-1,
+<<<<<<< HEAD
         1e-5, 1e-5, _types, _cpu_types, False),
+=======
+        1e-5, 1e-5, _types, False),
+>>>>>>> 7100f0be13... ports true_divide method variant to 1.5 (#35390)
     ('true_divide', 'with_inplace', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-1,
         1e-5, 1e-5, _float_types),
     ('true_divide', 'tensor', _small_3d,
         lambda t, d: [_small_3d(t, d, has_zeros=False)], 1e-1,
+<<<<<<< HEAD
         1e-5, 1e-5, _types, _cpu_types, False),
+=======
+        1e-5, 1e-5, _types, False),
+>>>>>>> 7100f0be13... ports true_divide method variant to 1.5 (#35390)
     ('true_divide', 'tensor_with_inplace', _small_3d,
         lambda t, d: [_small_3d(t, d, has_zeros=False)], 1e-1,
         1e-5, 1e-5, _float_types),
