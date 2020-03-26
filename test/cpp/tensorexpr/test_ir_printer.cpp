@@ -18,7 +18,7 @@ void testIRPrinterBasicValueTest() {
 
   std::stringstream ss;
   ss << c;
-  EXPECT_EQ(ss.str(), "2 + 3");
+  ASSERT_EQ(ss.str(), "2 + 3");
 }
 
 void testIRPrinterBasicValueTest02() {
@@ -31,7 +31,7 @@ void testIRPrinterBasicValueTest02() {
 
   std::stringstream ss;
   ss << f;
-  EXPECT_EQ(ss.str(), "(2.f + 3.f) - (4.f + 5.f)");
+  ASSERT_EQ(ss.str(), "(2.f + 3.f) - (4.f + 5.f)");
 }
 
 void testIRPrinterLetTest01() {
@@ -43,7 +43,7 @@ void testIRPrinterLetTest01() {
 
   std::stringstream ss;
   ss << result;
-  EXPECT_EQ(ss.str(), "let x = 3.f in 2.f + (x * 3.f + 4.f)");
+  ASSERT_EQ(ss.str(), "let x = 3.f in 2.f + (x * 3.f + 4.f)");
 }
 
 void testIRPrinterLetTest02() {
@@ -58,7 +58,7 @@ void testIRPrinterLetTest02() {
 
   std::stringstream ss;
   ss << e2;
-  EXPECT_EQ(
+  ASSERT_EQ(
       ss.str(), "let y = 6.f in (let x = 3.f in 2.f + (x * 3.f + 4.f * y))");
 }
 
@@ -74,7 +74,7 @@ void testIRPrinterCastTest() {
 
   std::stringstream ss;
   ss << e2;
-  EXPECT_EQ(
+  ASSERT_EQ(
       ss.str(),
       "let y = 6.f in (let x = int(3.f) in 2.f + (x * 3.f + 4.f * y))");
 }
