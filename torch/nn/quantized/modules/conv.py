@@ -506,7 +506,10 @@ class Conv3d(_ConvNd):
 
 # === Transposed Convolutions ===
 
-class _ConvTransposeNd(_ConvNd):
+# Note: The MRO should make sure that the `super` in the `_ConvNd` will be
+#       called, while the one in the `nn._ConvTransposeNd` it won't.
+
+class _ConvTransposeNd(_ConvNd, nn._ConvTransposeNd):
     def __init__(self, in_channels, out_channels, kernel_size, stride,
                  padding, dilation, transposed, output_padding,
                  groups, bias, padding_mode):
@@ -525,44 +528,6 @@ class _ConvTransposeNd(_ConvNd):
             pad = (dilation[kdx] * (kernel_size[kdx] - 1) - padding[kdx])
             res.append(pad)
         return res
-
-    def _output_padding(self, input, output_size, stride, padding, kernel_size):
-        # type: (Tensor, Optional[List[int]], List[int], List[int], List[int]) -> List[int]
-        if output_size is None:
-            ret = _single(self.output_padding)  # converting to list if was not already
-        else:
-            k = input.dim() - 2
-            if len(output_size) == k + 2:
-                output_size = output_size[2:]
-            if len(output_size) != k:
-                raise ValueError(
-                    "output_size must have {} or {} elements (got {})"
-                    .format(k, k + 2, len(output_size)))
-
-            min_sizes = torch.jit.annotate(List[int], [])
-            max_sizes = torch.jit.annotate(List[int], [])
-            for d in range(k):
-                dim_size = ((input.size(d + 2) - 1) * stride[d] -
-                            2 * padding[d] + kernel_size[d])
-                min_sizes.append(dim_size)
-                max_sizes.append(min_sizes[d] + stride[d] - 1)
-
-            for i in range(len(output_size)):
-                size = output_size[i]
-                min_size = min_sizes[i]
-                max_size = max_sizes[i]
-                if size < min_size or size > max_size:
-                    raise ValueError((
-                        "requested an output size of {}, but valid sizes range "
-                        "from {} to {} (for an input of {})").format(
-                            output_size, min_sizes, max_sizes, input.size()[2:]))
-
-            res = torch.jit.annotate(List[int], [])
-            for d in range(k):
-                res.append(output_size[d] - min_sizes[d])
-
-            ret = res
-        return ret
 
 
 class ConvTranspose2d(_ConvNd):
