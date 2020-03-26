@@ -11192,12 +11192,12 @@ a")
 
     @unittest.skipIf(not TEST_MKL, "PyTorch is built without MKL support")
     def test_torch_functional(self):
-        def foo(input, n_fft):
-            # type: (Tensor, int) -> Tensor
-            return torch.stft(input, n_fft)
+        # def foo(input, n_fft):
+        #     # type: (Tensor, int) -> Tensor
+        #     return torch.stft(input, n_fft)
 
-        inps = (torch.randn(10), 7)
-        self.assertEqual(foo(*inps), torch.jit.script(foo)(*inps))
+        # inps = (torch.randn(10), 7)
+        # self.assertEqual(foo(*inps), torch.jit.script(foo)(*inps))
 
         def lu(x):
             # type: (Tensor) -> Tuple[Tensor, Tensor]
@@ -15774,6 +15774,13 @@ a")
 
         with self.assertRaisesRegex(torch.jit.Error, "hello, goodbye"):
             tuple_fn()
+
+        @torch.jit.script
+        def no_message():
+            raise RuntimeError
+
+        with self.assertRaisesRegex(torch.jit.Error, "RuntimeError"):
+            no_message()
 
     def test_assertions(self):
         cu = torch.jit.CompilationUnit('''

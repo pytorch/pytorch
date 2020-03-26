@@ -554,6 +554,9 @@ std::shared_ptr<SugaredValue> PythonExceptionValue::call(
     at::ArrayRef<NamedValue> inputs,
     at::ArrayRef<NamedValue> attributes,
     size_t n_binders) {
+  if (attributes.size() != 0) {
+    throw ErrorReport(loc) << "Exceptions cannot take attribute arguments";
+  }
   Value* error_message;
   if (inputs.size() == 0) {
     error_message = insertConstant(*caller.graph(), "", loc);

@@ -999,7 +999,7 @@ def _check_list_size(out_len, get_infos, out):
     get_infos_int = 1 if get_infos else 0
     if out_len - get_infos_int != 2:
         raise TypeError("expected tuple of {} elements but got {}"
-                        .format(2 + int(get_infos), len(out_len)))
+                        .format(2 + int(get_infos), out_len))
     if not isinstance(out, (tuple, list)):
         raise TypeError("argument 'out' must be tuple of Tensors, not {}"
                         .format(type(out).__name__))
