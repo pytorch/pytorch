@@ -15,6 +15,7 @@
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/create_autodiff_subgraphs.h>
+#include <torch/csrc/jit/passes/create_functional_graphs.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/decompose_ops.h>
 #include <torch/csrc/jit/passes/erase_number_types.h>
@@ -102,6 +103,7 @@ bool loadPythonClasses() {
 
 #if !defined(__HIP_PLATFORM_HCC__)
 TORCH_API void runJITCPPTests(bool runCuda);
+TORCH_API void runTENSOREXPRCPPTests(bool runCuda);
 #endif
 
 void initJITBindings(PyObject* module) {
@@ -172,21 +174,21 @@ void initJITBindings(PyObject* module) {
           [](Module& module,
              const std::string& method_name,
              const py::dict& qconfig_dict,
-             bool inplace) {
+             bool inplace,
+             bool is_dynamic) {
             auto dict = py::cast<std::unordered_map<
                 std::string,
                 std::tuple<Module, Module>>>(qconfig_dict);
-            return InsertObservers(module, method_name, dict, inplace);
+            return InsertObservers(module, method_name, dict, inplace, is_dynamic);
           },
           py::arg("module"),
           py::arg("method_name"),
           py::arg("qconfig_dict"),
-          py::arg("inplace") = false)
+          py::arg("inplace") = false,
+          py::arg("is_dynamic") = false)
       .def(
           "_jit_pass_insert_quant_dequant",
-          [](Module& module,
-             const std::string& method_name,
-             bool inplace) {
+          [](Module& module, const std::string& method_name, bool inplace) {
             return InsertQuantDeQuant(module, method_name, inplace);
           },
           py::arg("module"),
@@ -202,10 +204,9 @@ void initJITBindings(PyObject* module) {
           "_jit_pass_quant_fusion",
           [](std::shared_ptr<Graph>& g) { return QuantFusion(g); })
       .def("_jit_pass_fold_convbn", &FoldConvBatchNorm2d)
-      .def("_freeze_module",
-          [](Module& module) {
-            return freeze_module(module);
-          },
+      .def(
+          "_freeze_module",
+          [](Module& module) { return freeze_module(module); },
           py::arg("module"))
       .def("_jit_pass_fuse_linear", &FuseLinear)
       .def(
@@ -217,14 +218,12 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_dedup_module_uses", &DedupModuleUses)
       .def("_jit_pass_replicate_dequantize", &ReplicateDeQuant)
       .def("_jit_pass_swap_dequantize", &SwapDeQuant)
-      .def("_jit_pass_swap_functional_linear",
-           [](std::shared_ptr<Graph>& graph) {
-             SwapFunctionalLinear(graph);
-           })
-      .def("_jit_pass_swap_functional_linear",
-           [](Module& module) {
-             SwapFunctionalLinear(module);
-           })
+      .def(
+          "_jit_pass_swap_functional_linear",
+          [](std::shared_ptr<Graph>& graph) { SwapFunctionalLinear(graph); })
+      .def(
+          "_jit_pass_swap_functional_linear",
+          [](Module& module) { SwapFunctionalLinear(module); })
       .def("_jit_pass_quant_finalize", &Finalize)
       .def(
           "_jit_pass_pattern_based_rewrite",
@@ -256,6 +255,15 @@ void initJITBindings(PyObject* module) {
           "_jit_pass_remove_inplace_ops",
           [](std::shared_ptr<Graph> g) { return RemoveInplaceOps(g); })
       .def("_jit_pass_constant_pooling", ConstantPooling)
+      .def(
+          "_jit_pass_create_functional_graphs",
+          [](std::shared_ptr<Graph>& g) { return CreateFunctionalGraphs(g); })
+      .def(
+          "_jit_pass_remove_mutation",
+          [](std::shared_ptr<Graph>& g) { return RemoveMutation(g); })
+      .def(
+          "_jit_pass_inline_functional_graphs",
+          [](std::shared_ptr<Graph>& g) { return InlineFunctionalGraphs(g); })
       .def(
           "_jit_pass_peephole",
           [](const std::shared_ptr<Graph>& g, bool addmm_fusion_enabled) {
@@ -320,9 +328,23 @@ void initJITBindings(PyObject* module) {
           },
           py::arg("run_cuda"))
       .def("_jit_has_cpp_tests", []() { return true; })
+      .def(
+          "_run_tensorexpr_cpp_tests",
+          [](bool runCuda) {
+            // We have to release the GIL inside this method, because if we
+            // happen to initialize the autograd engine in these tests, the
+            // newly spawned worker threads will try to initialize their
+            // PyThreadState*, and they need the GIL for this.
+            pybind11::gil_scoped_release _no_gil;
+            return runTENSOREXPRCPPTests(runCuda);
+          },
+          py::arg("run_cuda"))
+      .def("_has_tensorexpr_cpp_tests", []() { return true; })
 #else
       .def("_jit_run_cpp_tests", []() { throw std::exception(); })
       .def("_jit_has_cpp_tests", []() { return false; })
+      .def("_run_tensorexpr_cpp_tests", []() { throw std::exception(); })
+      .def("_has_tensorexpr_cpp_tests", []() { return false; })
 #endif
       .def(
           "_jit_flatten",
@@ -739,6 +761,7 @@ void initJITBindings(PyObject* module) {
       return op->schema();
     });
   });
+  m.def("_is_tracing", []() { return jit::tracer::isTracing(); });
 
   py::class_<PythonFutureWrapper>(m, "Future")
       .def(
