@@ -20,9 +20,11 @@ from jit.test_autodiff_subgraph_slicing import TestAutodiffSubgraphSlicing  # no
 from jit.test_custom_operators import TestCustomOperators  # noqa: F401
 from jit.test_export_modes import TestExportModes  # noqa: F401
 from jit.test_class_type import TestClassType  # noqa: F401
+from jit.test_module_interface import TestModuleInterface  # noqa: F401
 from jit.test_builtins import TestBuiltins, TestTensorBuiltins  # noqa: F401
 from jit.test_unsupported_ops import TestUnsupportedOps  # noqa: F401
 from jit.test_freezing import TestFreezing  # noqa: F401
+from jit.test_functional_blocks import TestFunctionalBlocks  # noqa: F401
 
 # Torch
 from torch import Tensor
@@ -1308,6 +1310,40 @@ graph(%x : Tensor,
                    .check('Observer = prim::GetAttr[name="_observer_') \
                    .run(m.graph)
 
+    def test_insert_observers_propagate_observed_for_function(self):
+        def channel_shuffle(x, groups):
+            # type: (torch.Tensor, int) -> torch.Tensor
+            batchsize, num_channels, height, width = x.data.size()
+            channels_per_group = num_channels // groups
+            # reshape
+            x = x.view(batchsize, groups,
+                       channels_per_group, height, width)
+            x = torch.transpose(x, 1, 2).contiguous()
+            # flatten
+            x = x.view(batchsize, -1, height, width)
+            return x
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.conv1 = torch.nn.Conv2d(3, 3, 1).float()
+                self.conv2 = torch.nn.Conv2d(3, 3, 1).float()
+
+            def forward(self, x):
+                x = self.conv1(x)
+                x = channel_shuffle(x, 1)
+                x = self.conv2(x)
+                return x
+
+        data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        qconfig_dict = {'': script_qconfig(default_qconfig)}
+        m = torch.jit.script(M()).eval()
+        m = prepare_script(m, qconfig_dict, inplace=False)
+        # we want to test that channel_shuffle is going to pass
+        # the observed property from the output of conv1 to input of conv2
+        # so that we don't insert observers for input of conv2
+        assert len(attrs_with_prefix(m, '_observer_',)) == 3
+
     def test_insert_observers_for_if(self):
         class Res(torch.nn.Module):
             def __init__(self, use_skip):
@@ -1616,6 +1652,39 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
                        .check_not("aten::relu_") \
                        .check("quantized::add_relu") \
                        .run(m.graph_for(data, data))
+
+    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
+                         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+                         " with instruction set support avx2 or newer.")
+    def test_quantized_cat(self):
+        """ Note that we to support the case that torch.cat is quantized
+        indepdently, we need to have an observer that works
+        for list of Tensors.
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.conv1 = torch.nn.Conv2d(1, 1, 1).float()
+                self.conv2 = torch.nn.Conv2d(1, 1, 1).float()
+
+            def forward(self, x, y):
+                x = self.conv1(x)
+                y = self.conv2(y)
+                return torch.cat([x, y], 1)
+
+        m = torch.jit.script(M().eval())
+        m = prepare_script(m, {'': script_qconfig(default_qconfig)}, True)
+        # four for input and output of conv and one for output of cat
+        # this also tests the ListConstruct can preserve the observed property so that
+        # torch.cat knows that inputs are observed
+        assert len(attrs_with_prefix(m, '_observer_')) == 5
+        data = torch.randn(1, 1, 10, 10, dtype=torch.float)
+        m(data, data)
+        m = convert_script(m, True)
+
+        FileCheck().check_not("aten::cat") \
+                   .check("quantized::cat") \
+                   .run(m.graph_for(data, data))
 
     def test_foldbn_trivial(self):
         # Test trivial case
