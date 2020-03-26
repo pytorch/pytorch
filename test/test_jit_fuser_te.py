@@ -799,6 +799,7 @@ class TestFuser(JitTestCase):
 
     @skipIfRocm
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
     def test_rand_cuda(self):
         class M(torch.jit.ScriptModule):
             __constants__ = ['d']
@@ -881,6 +882,7 @@ class TestFuser(JitTestCase):
         self.assertEqual(out[0, :] + torch.zeros(4, 4, device='cuda'), out)
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
     def test_rand_diamond(self):
         def fn_test_diamond(x, y):
             r = torch.rand_like(y)
