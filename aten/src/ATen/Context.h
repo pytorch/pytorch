@@ -25,14 +25,14 @@ class CAFFE2_API Context {
  public:
   Context();
 
-  Generator & defaultGenerator(Device device) {
+  const Generator& defaultGenerator(Device device) {
     DeviceType device_type = device.type();
     initCUDAIfNeeded(device_type);
     initHIPIfNeeded(device_type);
     if (device_type == at::kCPU) {
-      return *at::detail::getDefaultCPUGenerator();
+      return at::detail::getDefaultCPUGenerator();
     } else if (device_type == at::kCUDA) {
-      return *at::detail::getCUDAHooks().getDefaultCUDAGenerator(device.index());
+      return at::detail::getCUDAHooks().getDefaultCUDAGenerator(device.index());
     } else {
       AT_ERROR(DeviceTypeName(device_type), " device type not enabled.");
     }
@@ -214,22 +214,22 @@ static inline bool hasMKLDNN() {
 }
 
 static inline void manual_seed(uint64_t seed) {
-  auto& gen = globalContext().defaultGenerator(DeviceType::CPU);
+  auto gen = globalContext().defaultGenerator(DeviceType::CPU);
   {
     // See Note [Acquire lock when using random generators]
-    std::lock_guard<std::mutex> lock(gen.mutex_);
-    gen.set_current_seed(seed);
+    std::lock_guard<std::mutex> lock(gen->mutex_);
+    gen->set_current_seed(seed);
   }
   // NB: Sometimes we build with CUDA, but we don't have any GPUs
   // available. In that case, we must not seed CUDA; it will fail!
   int num_gpus = detail::getCUDAHooks().getNumGPUs();
   if (hasCUDA() && num_gpus > 0) {
     for (int i = 0; i < num_gpus; i++) {
-      auto& cuda_gen = globalContext().defaultGenerator(Device(at::kCUDA, i));
+      auto cuda_gen = globalContext().defaultGenerator(Device(at::kCUDA, i));
       {
         // See Note [Acquire lock when using random generators]
-        std::lock_guard<std::mutex> lock(cuda_gen.mutex_);
-        cuda_gen.set_current_seed(seed);
+        std::lock_guard<std::mutex> lock(cuda_gen->mutex_);
+        cuda_gen->set_current_seed(seed);
       }
     }
   }

@@ -1,19 +1,66 @@
 import numpy as np
-
+import math
 import torch
 import io
 from copy import deepcopy
 from hypothesis import given
 from hypothesis import strategies as st
-import torch.testing._internal.hypothesis_utils as hu
-hu.assert_deadline_disabled()
+
 from torch.testing._internal.common_utils import TestCase, run_tests
+import torch.testing._internal.hypothesis_utils as hu
+
+hu.assert_deadline_disabled()
+
 import tempfile
 
 class Foo(torch.nn.Module):
     def __init__(self):
         super(Foo, self).__init__()
         self.qscheme = torch.per_tensor_symmetric
+
+def _calculate_dynamic_qparams(X, dtype, reduce_range=False):
+    """Calculate the dynamic quantization parameters (scale, zero_point)
+    according to the min and max element of the tensor"""
+    if isinstance(X, torch.Tensor):
+        X = X.numpy()
+    if dtype == torch.qint8:
+        if reduce_range:
+            qmin, qmax = -64, 63
+        else:
+            qmin, qmax = -128, 127
+    else:  # dtype == torch.quint8
+        if reduce_range:
+            qmin, qmax = 0, 127
+        else:
+            qmin, qmax = 0, 255
+
+    min_val = X.min().astype(dtype=np.float32)
+    max_val = X.max().astype(dtype=np.float32)
+    min_val = min(0.0, min_val)
+    max_val = max(0.0, max_val)
+    scale = (np.float64(max_val) - min_val) / (qmax - qmin)
+    if scale == 0.0 or math.isinf(1.0 / scale):
+        scale = np.float64(0.1)
+        zero_point = 0
+
+    zero_point_from_min = qmin - min_val / float(scale)
+    zero_point_from_max = qmax - max_val / float(scale)
+    zero_point_from_min_error = abs(qmin) - abs(min_val / float(scale))
+    zero_point_from_max_error = abs(qmax) - abs(max_val / float(scale))
+    if zero_point_from_min_error < zero_point_from_max_error:
+        initial_zero_point = zero_point_from_min
+    else:
+        initial_zero_point = zero_point_from_max
+    nudged_zero_point = 0
+
+    if initial_zero_point < qmin:
+        nudged_zero_point = qmin
+    elif initial_zero_point > qmax:
+        nudged_zero_point = qmax
+    else:
+        nudged_zero_point = int(round(initial_zero_point))
+
+    return [scale.astype(np.float32), int(nudged_zero_point)]
 
 class TestQuantizedTensor(TestCase):
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
@@ -30,6 +77,7 @@ class TestQuantizedTensor(TestCase):
         self.assertFalse(r.is_quantized)
         self.assertEqual(qr.qscheme(), torch.per_tensor_affine)
         self.assertTrue(isinstance(qr.qscheme(), torch.qscheme))
+        # slicing and int_repr
         int_repr = qr.int_repr()
         for num in int_repr:
             self.assertEqual(num, 3)
@@ -146,6 +194,20 @@ class TestQuantizedTensor(TestCase):
         with self.assertRaises(RuntimeError):
             torch.empty_like(q, dtype=torch.qint8)
 
+    def test_qtensor_dtypes(self):
+        r = torch.rand(3, 2, dtype=torch.float) * 4 - 2
+        scale = 0.2
+        zero_point = 2
+        qr = torch.quantize_per_tensor(r, scale, zero_point, torch.qint8)
+        rqr = qr.dequantize()
+        self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
+        qr = torch.quantize_per_tensor(r, scale, zero_point, torch.quint8)
+        rqr = qr.dequantize()
+        self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
+        qr = torch.quantize_per_tensor(r, scale, zero_point, torch.qint32)
+        rqr = qr.dequantize()
+        self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
+
     def test_qtensor_quantize_per_channel(self):
         r = torch.rand(3, 2, dtype=torch.float) * 4 - 2
         scales = torch.tensor([0.2, 0.03], dtype=torch.double)
@@ -238,7 +300,6 @@ class TestQuantizedTensor(TestCase):
         qrv = qr[:, 1]
         with tempfile.NamedTemporaryFile() as f:
             # Serializing and Deserializing Tensor
-            qr.storage()
             torch.save((qr, qrv), f)
             f.seek(0)
             qr2, qrv2 = torch.load(f)
@@ -385,6 +446,18 @@ class TestQuantizedTensor(TestCase):
 
         self.assertEqual(f2.qscheme, torch.per_tensor_symmetric)
 
+    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=2, max_dims=4,
+                                              min_side=1, max_side=10),
+                       qparams=hu.qparams()),
+           reduce_range=st.booleans()
+           )
+    def test_choose_qparams(self, X, reduce_range):
+        X, (scale, zero_point, torch_type) = X
+        X = torch.from_numpy(X)
+        X_scale, X_zp = _calculate_dynamic_qparams(X, torch.quint8, reduce_range=reduce_range)
+        qparams = torch._choose_qparams_per_tensor(X, reduce_range)
+        np.testing.assert_array_almost_equal(X_scale, qparams[0], decimal=3)
+        self.assertEqual(X_zp, qparams[1])
 
 if __name__ == "__main__":
     run_tests()

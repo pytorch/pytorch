@@ -199,14 +199,17 @@ struct RangeEventList {
   }
 
   std::vector<Event> consolidate() {
-    std::lock_guard<std::mutex> guard(mutex_);
+    std::unique_lock<std::mutex> lock(mutex_);
+    std::forward_list<block_type> localBlocks;
+    localBlocks.swap(blocks);
+    lock.unlock();
     std::vector<Event> result;
-    for (auto & block : blocks) {
+
+    for (auto & block : localBlocks) {
       result.insert(result.begin(),
                     std::make_move_iterator(block.begin()),
                     std::make_move_iterator(block.end()));
     }
-    blocks.clear();
     return result;
   }
 
@@ -229,8 +232,6 @@ struct RangeEventList {
 
 TORCH_API RangeEventList& getEventList();
 TORCH_API void mark(std::string name, bool include_cuda = true);
-TORCH_API void pushRange(std::string name);
-TORCH_API void popRange();
 
 using thread_event_lists = std::vector<std::vector<Event>>;
 // NOTE: changing profiler modes is **NOT THREAD SAFE**. You should ensure that
