@@ -61,7 +61,7 @@ Tensor allocate_padded_contiguous_if_needed(
       input.sizes(),
       input.options().dtype(),
       memory_format,
-      input.names());
+      input.names()).set_requires_grad(input.requires_grad());
 
   return padded_input.copy_(input);
 }
