@@ -34,6 +34,7 @@ namespace c10 {
 class DispatchKeySet final {
 public:
   enum Full { FULL };
+  enum FullAfter { FULL_AFTER };
   enum Raw { RAW };
 
   // NB: default constructor representation as zero is MANDATORY as
@@ -42,6 +43,9 @@ public:
     : repr_(0) {}
   DispatchKeySet(Full)
     : repr_(std::numeric_limits<decltype(repr_)>::max()) {}
+  DispatchKeySet(FullAfter, DispatchKey t)
+    // LSB after t are OK, but not t itself.
+    : repr_((1ULL << (static_cast<uint8_t>(t) - 1)) - 1) {}
   // Public version of DispatchKeySet(uint64_t) API; external users
   // must be explicit when they do this!
   DispatchKeySet(Raw, uint64_t x)
