@@ -12,7 +12,9 @@
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/ir_mutator.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
+#include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
+#include <torch/csrc/jit/tensorexpr/bounds_inference.h>
 
 namespace torch {
 namespace jit {
@@ -869,6 +871,167 @@ Stmt* LoopNest::getLoopBodyFor(Tensor* t) const {
 
 bool LoopNest::hasLoopBodyFor(Tensor* t) const {
   return tensor_to_stmt_.count(t) > 0;
+}
+
+const Expr* computeMin(const Expr* a, const Expr* b) {
+  const Expr* diff = IRSimplifier::simplify(new Sub(a, b));
+  if (auto diff_imm = dynamic_cast<const IntImm*>(diff)) {
+    if (diff_imm->value() < 0) {
+      return a;
+    } else {
+      return b;
+    }
+  }
+  return new Min(a, b, true);
+}
+const Expr* computeMax(const Expr* a, const Expr* b) {
+  const Expr* diff = IRSimplifier::simplify(new Sub(a, b));
+  if (auto diff_imm = dynamic_cast<const IntImm*>(diff)) {
+    if (diff_imm->value() > 0) {
+      return a;
+    } else {
+      return b;
+    }
+  }
+  return new Max(a, b, true);
+}
+
+std::vector<TensorAccess> mergeTensorAccesses(std::vector<TensorAccess> a) {
+  std::vector<TensorAccess> res;
+  std::unordered_map<const Var*, TensorAccess> merged;
+  for (const auto& t : a) {
+    if (!merged.count(t.var)) {
+      merged[t.var] = t;
+      continue;
+    }
+
+    // We already have some range for this var, try to merge them
+    TensorAccess old_t = merged.at(t.var);
+    TensorAccess new_t = t;
+
+    for (size_t i = 0; i < old_t.start.size(); i++) {
+      new_t.start[i] = computeMin(old_t.start[i], new_t.start[i]);
+    }
+    for (size_t i = 0; i < old_t.stop.size(); i++) {
+      new_t.stop[i] = computeMax(old_t.stop[i], new_t.stop[i]);
+    }
+    merged[t.var] = new_t;
+  }
+
+  std::unordered_set<const Var*> added;
+  for (const auto& t : a) {
+    if (added.insert(t.var).second) {
+      res.push_back(merged.at(t.var));
+    }
+  }
+  return res;
+}
+
+/*
+ * WHAT COMPUTE_AT DOES
+ * ====================
+ *
+ * Suppose we have two loops:
+ *
+ * for i in 0..100:
+ *   for j in 0..200:
+ *     A[i,j] = sin(i*j)
+ * for i in 0..99:
+ *   for j in 0..200:
+ *     B[i,j] = A[i,j] + A[i, j+1]
+ *
+ * If we compute these loops as is, we would have to allocate two buffers:
+ * 100x200 for A and 99x200 for B. To decrease the memory usage one can use
+ * compute_inline primitive, which would result in the following:
+ *
+ * for i in 0..99:
+ *   for j in 0..200:
+ *     B[i,j] = sin(i*j) + sin(i*(j+1))
+ *
+ * We now need only one buffer - 99x200 for B. However, we're now doing some
+ * redundant computations: we're calling `sin` twice as much as in the first
+ * version.
+ *
+ * Ultimately, we nede to choose at what point we prefer to compute values of
+ * A[i,j] - we can do it in the very beginning for the entire buffer A (the
+ * first option) or compute it on the fly when we compute B (the second option).
+ * There are also options in between those two: we can compute a part of B which
+ * is required for a computation of part of B, e.g. for a single row of B. The
+ * code would then look like:
+ *
+ * for i in 0..99:
+ *   for j in 0..200:
+ *     A[j] = sin(i*j)
+ *   for j in 0..200:
+ *     B[i,j] = A[j] + A[j+1]
+ *
+ * In this case we're only using 1x200 for A, and we're avoiding redundant
+ * computations.
+ *
+ * The purpose of `compute_at` is to achieve exactly this transformation.
+ *
+ * compute_at requires to specify What to compute and Where to compute: in our
+ * example we would call compute_at(What=`A[i,j] = sin(i*j)`, Where=`for i in 0..99`).
+ *
+ * More info about compute_at could be found in Halide's tutorials:
+ * https://halide-lang.org/tutorials/tutorial_lesson_08_scheduling_2.html
+ *
+ * HOW COMPUTE_AT WORKS
+ * ====================
+ *
+ * The most important part of compute_at is bounds inference: we need to figure
+ * out what part of the used tensors we need to compute when we move the
+ * computation to a new scope. In the example above, we need bounds inference to
+ * tell us that in order to compute A at each iteration of the outer loop, we
+ * need to compute A within indices [i:i+1,0:200].
+ *
+ * This info allows us to conclude that we need a temp buffer of size 1x200.
+ *
+ * Once this is known we need to insert statements for allocation and freeing
+ * the temporary buffer and copy the original computation to fill the temp
+ * buffer with proper values. When we copy the computation we also must rewrite
+ * indices used in it: old indices are referring to the old loop and are not
+ * valid in the new loop.
+ */
+void LoopNest::computeAt(Stmt* s, For* f) {
+  std::cerr << "COMPUTE AT:\n";
+  BoundsInference bi;
+  auto bi_result = bi.inferBoundsForLoop(f);
+
+  AccessFinder ac;
+  s->accept(&ac);
+
+  std::unordered_map<const Var*, TensorAccess>
+      required_computations; // What tensor are accessed in the loop F
+  std::vector<const Var*>
+      computations_to_move; // What tensor are produced in stmt S
+  std::cerr << "Accesses in stmt:\n";
+  for (auto t : ac.accesses) {
+    printBufVector({t});
+    if (t.kind == kStore) {
+      computations_to_move.push_back(t.var);
+      std::cerr << "Store\n";
+    }
+  }
+
+  auto merged_bi_result = mergeTensorAccesses(bi_result);
+
+  std::cerr << "Accesses in the loop:\n";
+  printBufVector(merged_bi_result);
+  for (auto p : merged_bi_result) {
+    required_computations[p.var] = p;
+  }
+
+  std::vector<TensorAccess> to_move;
+  for (auto c : computations_to_move) {
+    if (!required_computations.count(c)) {
+      continue;
+    }
+    to_move.push_back(required_computations.at(c));
+  }
+  std::cerr << "Gonna generate allocs for the following:\n";
+  std::cerr << "\n";
+  printBufVector(to_move);
 }
 
 

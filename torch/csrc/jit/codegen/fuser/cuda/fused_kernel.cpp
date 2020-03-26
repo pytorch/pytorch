@@ -180,7 +180,7 @@ void FusedKernelCUDA::launch_raw(
     {
       // See Note [Acquire lock when using random generators]
       std::lock_guard<std::mutex> lock(gen->mutex_);
-      philox_engine_inputs = gen->philox_engine_inputs(rand_offset);
+      philox_engine_inputs = at::check_generator<at::CUDAGenerator>(gen)->philox_engine_inputs(rand_offset);
     }
     arguments.push_back(&philox_engine_inputs.first);
     arguments.push_back(&philox_engine_inputs.second);

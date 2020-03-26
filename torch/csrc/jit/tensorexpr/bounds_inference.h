@@ -4,6 +4,7 @@
 #include <unordered_map>
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/jit/tensorexpr/ir_visitor.h>
 
 namespace torch {
 namespace jit {
@@ -38,8 +39,8 @@ class Range {
 struct TensorAccess {
   const Var* var;
   TensorAccessKind kind;
-  const Expr* start;
-  const Expr* stop;
+  std::vector<const Expr*> start;
+  std::vector<const Expr*> stop;
 };
 
 
@@ -55,6 +56,20 @@ class TORCH_API BoundsInference {
       std::vector<TensorAccess> b);
   std::unordered_map<Stmt*, std::vector<TensorAccess>> accesses;
 };
+
+class AccessFinder : public IRVisitor {
+ public:
+  AccessFinder() {}
+
+  void visit(const FunctionCall* v);
+  void visit(const Load* v) override;
+  void visit(const Store* v) override;
+  std::vector<TensorAccess> accesses;
+};
+
+// TODO: remove/cleanup this
+TORCH_API void printBufVector(const std::vector<TensorAccess>& v);
+
 
 } // namespace tensorexpr
 } // namespace jit

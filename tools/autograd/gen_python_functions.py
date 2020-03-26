@@ -216,7 +216,7 @@ def create_python_bindings(python_functions, is_python_method, module):
 UNPACK_METHODS = {
     'const Tensor &': 'tensor',
     'Tensor &': 'tensor',
-    'Generator *': 'generator',
+    'Generator': 'generator',
     'Storage': 'storage',
     'Storage &': 'storage',
     'const ScalarType &': 'scalartype',
@@ -349,6 +349,7 @@ SUPPORTED_RETURN_TYPES = {
     'std::tuple<Tensor,Tensor,double,int64_t>',
     'std::tuple<Tensor,Tensor,Tensor,Tensor,int64_t>',
     'std::tuple<Tensor,Tensor,double,Tensor,int64_t>',
+    'std::tuple<double,int64_t>',
     'std::vector<Tensor>',
     'Scalar', 'bool', 'int64_t', 'void*', 'void',
     'QScheme', 'double',

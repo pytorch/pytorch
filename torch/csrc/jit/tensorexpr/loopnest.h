@@ -41,6 +41,8 @@ class TORCH_API LoopNest {
   void SetGPUBlockIndex(For* f, int idx);
   void SetGPUThreadIndex(For* f, int idx);
 
+  void computeAt(Stmt* s, For* at);
+
  private:
   std::vector<Tensor*> FindAllNeededTensors(
       const std::vector<Tensor*>& tensors);

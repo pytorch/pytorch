@@ -578,6 +578,24 @@ void testScheduleBoundsInference() {
     inferBounds(x_inner);
     inferBounds(x_tail);
   }
+  {
+    std::cerr << "---------------------------------\n";
+    VarHandle m("m", kInt);
+    VarHandle n("n", kInt);
+    Buffer a(VarHandle("a", kHandle), kFloat, {m, ExprHandle(100)});
+    Tensor* d = Compute(
+        "d", {{m, "m"}, {ExprHandle(100), "n"}}, [&](const VarHandle& i, const VarHandle& j) {
+          return i + j;
+        });
+    Tensor* c = Compute(
+        "c", {{m, "m"}, {ExprHandle(100), "n"}}, [&](const VarHandle& i, const VarHandle& j) {
+          return d->call(i, j + 1) + d->call(i + 1, j);
+        });
+    LoopNest l({c});
+    std::vector<For*> loops = l.getLoopStmtsFor(c);
+    l.computeAt(l.getLoopBodyFor(d), loops[1]);
+    std::cerr << "****\n" << *l.root_stmt() << "\n";
+  }
 }
 
 } // namespace jit

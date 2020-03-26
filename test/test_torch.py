@@ -6004,7 +6004,6 @@ class TestTorchDeviceType(TestCase):
         input_ = layer_norm(input_.transpose(1, 2).contiguous()).contiguous()
         input_.sum().backward()
 
-
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     @onlyCPU
     @dtypes(torch.float)
@@ -11977,6 +11976,25 @@ class TestTorchDeviceType(TestCase):
         _test((10,), 5, 4, win_sizes=(11,), expected_error=RuntimeError)
         _test((10,), 5, 4, win_sizes=(1, 1), expected_error=RuntimeError)
 
+    def test_fft_input_modification(self, device):
+        # FFT functions should not modify their input (gh-34551)
+
+        signal = torch.ones((2, 2, 2), device=device)
+        signal_copy = signal.clone()
+        spectrum = torch.fft(signal, 2)
+        self.assertEqual(signal, signal_copy)
+
+        spectrum_copy = spectrum.clone()
+        _ = torch.ifft(spectrum, 2)
+        self.assertEqual(spectrum, spectrum_copy)
+
+        half_spectrum = torch.rfft(signal, 2)
+        self.assertEqual(signal, signal_copy)
+
+        half_spectrum_copy = half_spectrum.clone()
+        _ = torch.irfft(half_spectrum_copy, 2, signal_sizes=(2, 2))
+        self.assertEqual(half_spectrum, half_spectrum_copy)
+
     @skipCUDAIfRocm
     def test_blas_empty(self, device):
 
@@ -14143,6 +14161,29 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
     @onlyCPU
     @dtypes(torch.float, torch.double)
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_hardswish(self, device, dtype):
+        inputValues = [-1000, -4, -3, -2, 0, 2, 3, 4, 1000]
+        expectedOutput = np.multiply(
+            inputValues,
+            np.minimum(np.maximum((np.add(inputValues, 3)), 0), 6) / 6.0)
+        precision_4dps = 0.0002
+
+        inputTensor = torch.tensor(inputValues, dtype=dtype, device=device)
+        expectedOutputTensor = \
+            torch.tensor(expectedOutput, dtype=dtype, device=device)
+
+        # normal
+        self.assertEqual(torch.nn.functional.hardswish(inputTensor),
+                         expectedOutputTensor, precision_4dps)
+
+        # inplace
+        inputTensorCpy = inputTensor.clone().detach()
+        torch.nn.functional.hardswish(inputTensorCpy, inplace=True)
+        self.assertEqual(inputTensorCpy, expectedOutputTensor, precision_4dps)
+
+    @onlyCPU
+    @dtypes(torch.float, torch.double)
     def test_sigmoid(self, device, dtype):
         # TODO: why not simulate math.sigmoid like with rsqrt?
         inputValues = [-1000, -1, 0, 0.5, 1, 2, 1000]
@@ -15052,6 +15093,33 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         result = torch.cat(concat_list)
         self.assertEqual(result.size(0), SIZE1 + SIZE2)
 
+    @onlyOnCPUAndCUDA
+    def test_cat_bad_dtypes(self, device):
+        def cross_product(a, b, skip_same=True):
+            result = []
+            for dtype_a in a:
+                for dtype_b in b:
+                    if skip_same and (dtype_a == dtype_b):
+                        continue
+                    result.append((dtype_a, dtype_b))
+            return result
+
+        in_shape = (1, 2, 3)
+        out_shape = (2, 2, 3)
+
+        all_dtypes = (torch.uint8, torch.int8, torch.int16, torch.int32,
+                      torch.int64, torch.float, torch.double, torch.half,
+                      torch.bfloat16)
+        all_dtype_combinations = cross_product(all_dtypes, all_dtypes,
+                                               skip_same=True)
+        out = torch.empty(out_shape)
+        for (dtype_a, dtype_b) in all_dtype_combinations:
+            a = torch.ones(in_shape, dtype=dtype_a).to(device)
+            b = torch.ones(in_shape, dtype=dtype_b).to(device)
+            self.assertRaises(RuntimeError, lambda: torch.cat([a, b]))
+            self.assertRaises(RuntimeError, lambda: torch.cat([a, b], out=out))
+
+
     @onlyCPU
     def test_max_mixed_devices(self, device):
         a = torch.randn(10, device=device)
@@ -15147,6 +15215,17 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
         # verifies out dtype overrides inference
         self.assertEqual(torch.full(o.shape, 1., out=o).dtype, o.dtype)
+
+    # Checks that float->integer casts don't produce undefined behavior errors.
+    # Note: In C++, casting from a floating value to an integral dtype
+    # is undefined if the floating point value is not within the integral
+    # dtype's dynamic range. This can (and should) cause undefined behavior
+    # errors with UBSAN. These casts are deliberate in PyTorch, however, and
+    # NumPy has the same behavior.
+    @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
+    def test_float_to_int_undefined_conversion(self, device, dtype):
+        t = torch.tensor((-3.40282e+38, 3.40282e+38), device=device, dtype=torch.float)
+        self.assertEqual(t.to(dtype).dtype, dtype)
 
 
 # NOTE [Linspace+Logspace precision override]
@@ -15973,9 +16052,16 @@ tensor_op_tests = [
     ('div', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-1),
     ('div', 'tensor', _small_3d,
         lambda t, d: [_small_3d(t, d, has_zeros=False)], 1e-1),
-    # Note: precision for floor_divide is 1 since a small (1e-5, for example)
-    # error in division can lead to an difference of 1 post-truncation
-    # (e.g. .9999 vs 1 post truncation is 0 vs 1)
+    ('true_divide', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-1,
+        1e-5, 1e-5, _types, False),
+    ('true_divide', 'with_inplace', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-1,
+        1e-5, 1e-5, _float_types),
+    ('true_divide', 'tensor', _small_3d,
+        lambda t, d: [_small_3d(t, d, has_zeros=False)], 1e-1,
+        1e-5, 1e-5, _types, False),
+    ('true_divide', 'tensor_with_inplace', _small_3d,
+        lambda t, d: [_small_3d(t, d, has_zeros=False)], 1e-1,
+        1e-5, 1e-5, _float_types),
     ('floor_divide', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1, 1e-5, 1e-5, _types),
     ('floor_divide', 'tensor', _small_3d,
         lambda t, d: [_small_3d(t, d, has_zeros=False)], 1, 1e-5, 1e-5, _types),
