@@ -3,9 +3,6 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
-#include <torch/csrc/jit/passes/constant_pooling.h>
-#include <torch/csrc/jit/passes/constant_propagation.h>
-#include <torch/csrc/jit/passes/fuse_linear.h>
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
 #include <torch/csrc/jit/passes/prepack_folding.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
@@ -89,8 +86,6 @@ void insertPrePackedConv2dOp(std::shared_ptr<Graph>& graph) {
 } // namespace
 
 void insertPrePackedOps(std::shared_ptr<Graph>& graph) {
-  ConstantPooling(graph);
-  ConstantPropagation(graph);
   insertPrePackedLinearOp(graph);
   insertPrePackedConv2dOp(graph);
 }
