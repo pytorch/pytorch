@@ -53,6 +53,8 @@ if TEST_LIBROSA:
 SIZE = 100
 
 
+import usage_checker
+
 # This is intentionally prefixed by an underscore. Otherwise pytest will try to
 # run its methods as test cases.
 class _TestTorchMixin(object):

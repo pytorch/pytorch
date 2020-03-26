@@ -74,6 +74,7 @@ NO_HALF_TENSORTYPES = [torch.float,
 
 DOUBLE_TENSORTYPES = [torch.double]
 
+import usage_checker
 
 # WARNING: If you add a new top-level test case to this file, you MUST
 # update test/run_test.py to list it, otherwise it will NOT be run in
