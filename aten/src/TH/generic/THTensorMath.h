@@ -55,7 +55,6 @@ TH_API void THTensor_(sort)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int d
 
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
 
-TH_API void THTensor_(renorm)(THTensor *r_, THTensor *t, scalar_t value, int dimension, scalar_t maxnorm);
 TH_API void THTensor_(histc)(THTensor *hist, THTensor *tensor, int64_t nbins, scalar_t minvalue, scalar_t maxvalue);
 
 TH_API accreal THTensor_(meanall)(THTensor *self);
