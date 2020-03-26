@@ -7,53 +7,122 @@
 namespace torch {
 namespace jit {
 
+namespace {
+
 // For any mutable type, map it to a type such that all other types which it can
 // alias will be mapped to the same type. This function follows a similar logic
 // to `unifyTypes` because any two mutable types which can be unified
 // can alias each other.
 // getMutableTypePtr(Optional[List[int]]) == getMutableTypePtr([List[int]])
 // If a type is not mutable, return nullopt
-c10::optional<TypePtr> getMutableTypePtr(const TypePtr& type) {
-  switch (type->kind()) {
-    case TypeKind::ListType:
-    case TypeKind::DictType:
-    case TypeKind::ClassType:
-    case TypeKind::TensorType:
-      return unshapedType(type);
-    case TypeKind::OptionalType:
-      return getMutableTypePtr(type->cast<OptionalType>()->getElementType());
-    case TypeKind::FutureType: {
-      if (auto elem = getMutableTypePtr(type->cast<FutureType>()->getElementType())) {
-        return FutureType::create(*elem);
+// This class helps convert types to their mutable equivalent by looking up
+// cached conversions.
+class MutableTypePtrHelper {
+ public:
+  explicit MutableTypePtrHelper(
+      std::unordered_map<TypePtr, TypePtr>* mutable_type_cache)
+      : mutable_type_cache_(mutable_type_cache) {}
+
+  c10::optional<TypePtr> getMutableType(const TypePtr& type) {
+    if (mutable_type_cache_) {
+      auto maybe_type = mutable_type_cache_->find(type);
+      if (maybe_type != mutable_type_cache_->end()) {
+        return maybe_type->second;
       }
-      return c10::nullopt;
     }
-    case TypeKind::TupleType: {
-      std::vector<TypePtr> mutable_types;
-      for (const auto& elem : type->expect<TupleType>()->elements()) {
-        if (auto mut_elem = getMutableTypePtr(elem)) {
-          mutable_types.push_back(*mut_elem);
+    auto mutable_type = getMutableTypeImpl(type);
+    if (mutable_type_cache_ && mutable_type) {
+      mutable_type_cache_->emplace(type, *mutable_type);
+    }
+    return mutable_type;
+  }
+
+ private:
+  c10::optional<TypePtr> getMutableTypeImpl(const TypePtr& type) {
+    switch (type->kind()) {
+      case TypeKind::ListType:
+      case TypeKind::DictType:
+      case TypeKind::ClassType: {
+        std::vector<TypePtr> mutable_types;
+        for (const auto& type : type->containedTypes()) {
+          auto mut_type = getMutableType(type);
+          if (mut_type) {
+            mutable_types.push_back(*mut_type);
+          } else {
+            mutable_types.push_back(type);
+          }
+        }
+        return type->withContained(mutable_types);
+      }
+      case TypeKind::TensorType:
+        return unshapedType(type);
+      case TypeKind::OptionalType:
+        return getMutableType(type->cast<OptionalType>()->getElementType());
+      case TypeKind::FutureType: {
+        if (auto elem =
+                getMutableType(type->cast<FutureType>()->getElementType())) {
+          return FutureType::create(*elem);
+        }
+        return c10::nullopt;
+      }
+      case TypeKind::TupleType: {
+        std::vector<TypePtr> mutable_types;
+        for (const auto& elem : type->expect<TupleType>()->elements()) {
+          if (auto mut_elem = getMutableType(elem)) {
+            mutable_types.push_back(*mut_elem);
+          }
+        }
+        if (mutable_types.size() == 0) {
+          return c10::nullopt;
+        } else {
+          return TupleType::create(mutable_types);
         }
       }
-      if (mutable_types.size() == 0) {
+      default:
         return c10::nullopt;
-      } else {
-        return TupleType::create(mutable_types);
-      }
     }
-    default:
-      return c10::nullopt;
   }
+
+  std::unordered_map<TypePtr, TypePtr>* mutable_type_cache_;
+};
+
+bool isMutableTypeImpl(
+    const TypePtr& type,
+    std::unordered_map<TypePtr, TypePtr>* mutable_type_cache) {
+  // check common cases to avoid recursively constructing type in
+  // getMutableTypePtrImpl
+  auto kind = type->kind();
+  if (kind == TypeKind::TensorType || kind == TypeKind::ListType ||
+      kind == TypeKind::ClassType || kind == TypeKind::DictType) {
+    return true;
+  }
+  MutableTypePtrHelper helper(mutable_type_cache);
+  return helper.getMutableType(type) != c10::nullopt;
 }
 
-bool AliasDb::mutableType(const TypePtr& type) {
-  return getMutableTypePtr(type) != c10::nullopt;
+} // namespace
+
+// static isMutableType does not use cache of type -> mutable type equivalent
+bool AliasDb::isMutableType(const TypePtr& type) {
+  return isMutableTypeImpl(type, nullptr);
 }
 
-// We only need to annotate values that either are mutable or could contain
-// mutable types.
-bool AliasDb::mutableType(const Value* v) {
-  return mutableType(v->type());
+bool AliasDb::isMutableType(const Value* v) {
+  return isMutableType(v->type());
+}
+
+// makes use of type -> mutable cache
+bool AliasDb::isMutableTypeInternal(const TypePtr& type) {
+  return isMutableTypeImpl(type, &mapped_mutable_types_);
+}
+
+bool AliasDb::isMutableTypeInternal(const Value* v) {
+  return isMutableTypeInternal(v->type());
+}
+
+c10::optional<TypePtr> AliasDb::getMutableTypePtr(const TypePtr& type) {
+  MutableTypePtrHelper helper(&mapped_mutable_types_);
+  return helper.getMutableType(type);
 }
 
 bool AliasDb::isContainerType(const TypePtr& type) {
@@ -70,7 +139,7 @@ AliasDb::AliasDb(std::shared_ptr<Graph> graph, bool isFrozen)
   GRAPH_DEBUG(toString());
 }
 
-bool AliasDb::isMutable(Node* n) const {
+bool AliasDb::isMutable(Node* n) {
   ValueSet vs;
   for (const auto input : n->inputs()) {
     vs.insert(input);
@@ -78,7 +147,7 @@ bool AliasDb::isMutable(Node* n) const {
   return writesToAlias(n, vs);
 }
 
-bool AliasDb::hasInputWriters(const Node* n) const {
+bool AliasDb::hasInputWriters(const Node* n) {
   for (const auto input : n->inputs()) {
     if (hasWriters(input)) {
       return true;
@@ -87,7 +156,7 @@ bool AliasDb::hasInputWriters(const Node* n) const {
   return false;
 }
 
-bool AliasDb::hasOutputWriters(const Node* n) const {
+bool AliasDb::hasOutputWriters(const Node* n) {
   for (const auto output : n->outputs()) {
     if (hasWriters(output)) {
       return true;
@@ -96,11 +165,11 @@ bool AliasDb::hasOutputWriters(const Node* n) const {
   return false;
 }
 
-bool AliasDb::hasWriters(const Node* n) const {
+bool AliasDb::hasWriters(const Node* n) {
   return hasInputWriters(n) || hasOutputWriters(n);
 }
 
-bool AliasDb::hasWriters(const Value* v) const {
+bool AliasDb::hasWriters(const Value* v) {
   if (v->mustBeNone()) {
     return false;
   }
@@ -117,7 +186,7 @@ bool AliasDb::hasWriters(const Value* v) const {
   return writeCache_.intersects(el->getMemoryLocations());
 }
 
-void AliasDb::getWritesImpl(Node* n, MemoryLocations& ret) const {
+void AliasDb::getWritesImpl(Node* n, MemoryLocations& ret) {
   if (writeIndex_.count(n)) {
     const auto& writes = writeIndex_.at(n);
     ret |= writes;
@@ -131,7 +200,7 @@ void AliasDb::getWritesImpl(Node* n, MemoryLocations& ret) const {
 }
 
 // Does `n` write to an alias of one of the values in `vs`?
-bool AliasDb::writesToAlias(Node* n, const ValueSet& vs) const {
+bool AliasDb::writesToAlias(Node* n, const ValueSet& vs) {
   const auto writtenTo = getWrites(n);
   if (writtenTo.empty()) {
     return false;
@@ -151,13 +220,13 @@ bool AliasDb::writesToAlias(Node* n, const ValueSet& vs) const {
   return false;
 }
 
-MemoryLocations AliasDb::getWrites(Node* n) const {
+MemoryLocations AliasDb::getWrites(Node* n) {
   MemoryLocations writes;
   getWritesImpl(n, writes);
   return writes;
 }
 
-void AliasDb::getReadsImpl(Node* n, MemoryLocations& ret) const {
+void AliasDb::getReadsImpl(Node* n, MemoryLocations& ret) {
   for (const auto input : n->inputs()) {
     auto it = elementMap_.find(input);
     if (it != elementMap_.end()) {
@@ -181,13 +250,13 @@ void AliasDb::getReadsImpl(Node* n, MemoryLocations& ret) const {
   }
 }
 
-MemoryLocations AliasDb::getReads(Node* n) const {
+MemoryLocations AliasDb::getReads(Node* n) {
   MemoryLocations reads;
   getReadsImpl(n, reads);
   return reads;
 }
 
-std::string AliasDb::getElementName(const Element* e) const {
+std::string AliasDb::getElementName(const Element* e) {
   if (e->value == nullptr) {
     // not the most efficient way, but given the fact there are
     // not too many types and even fewer of them will end up in
@@ -204,11 +273,11 @@ std::string AliasDb::getElementName(const Element* e) const {
   }
 }
 
-void AliasDb::dump() const {
+void AliasDb::dump() {
   std::cout << toString();
 }
 
-std::string AliasDb::toString() const {
+std::string AliasDb::toString() {
   std::stringstream ss{};
 
   ss << "\n===1. GRAPH===\n";
@@ -459,7 +528,7 @@ void AliasDb::analyzeImpl(Node* node) {
     }
 
     // If this type cannot alias, continue. Can occur with a VarType schema
-    if (!mutableType(actualValue)) {
+    if (!isMutableType(actualValue)) {
       continue;
     }
 
@@ -511,7 +580,7 @@ void AliasDb::analyzeImpl(Node* node) {
     }
 
     // If this type cannot alias, continue. Can occur with a VarType schema
-    if (!mutableType(actual)) {
+    if (!isMutableType(actual)) {
       continue;
     }
 
@@ -559,7 +628,7 @@ void AliasDb::analyzeImpl(Node* node) {
 
 // Register the fact that `n` writes to `v`.
 void AliasDb::registerWrite(const Value* v, Node* n) {
-  if (!mutableType(v)) {
+  if (!isMutableTypeInternal(v)) {
     // don't need to register a write if the value isn't mutable
     return;
   }
@@ -710,7 +779,7 @@ void AliasDb::analyzeSetAttr(Node* node) {
 // may write to any input and produce wildcards
 void AliasDb::analyzeConservative(Node* node) {
   for (const auto input : node->inputs()) {
-    if (!mutableType(input)) {
+    if (!isMutableTypeInternal(input)) {
       continue;
     }
     auto elem = elementMap_.at(input);
@@ -743,7 +812,7 @@ void AliasDb::analyzeContainerConstruct(Node* node) {
       node->kind() == prim::TupleConstruct);
 
   // tuples which contain immutable types are immutable
-  if (!mutableType(node->output())) {
+  if (!isMutableTypeInternal(node->output())) {
     return;
   }
 
@@ -775,7 +844,7 @@ void AliasDb::analyzeBroadcastingChunk(Node* node) {
   }
 }
 
-bool AliasDb::nonAliasingValue(const Value* elem) const {
+bool AliasDb::nonAliasingValue(const Value* elem) {
   // these are values which can point to aliasing types in the graph,
   // as with a None value pointing to an optional if node output,
   // but will never alias themselves
@@ -796,7 +865,7 @@ void AliasDb::makePointerTo(const Value* from, const Value* to) {
 
   // covariant type containers can be point to types which are not
   // also mutable/immutable because we unify the contained types
-  if (mutableType(from) != mutableType(to)) {
+  if (isMutableTypeInternal(from) != isMutableTypeInternal(to)) {
     auto from_kind = from->type()->kind();
     TORCH_INTERNAL_ASSERT(
         from_kind == TypeKind::OptionalType ||
@@ -805,7 +874,7 @@ void AliasDb::makePointerTo(const Value* from, const Value* to) {
   }
 
   // both immutable
-  if (!mutableType(from)) {
+  if (!isMutableTypeInternal(from)) {
     return;
   }
 
@@ -823,7 +892,7 @@ void AliasDb::makePointerTo(const Value* from, const Value* to) {
 void AliasDb::addToContainedElements(
     const Value* elem,
     const Value* container) {
-  if (!mutableType(elem)) {
+  if (!isMutableTypeInternal(elem)) {
     return;
   }
 
@@ -835,15 +904,15 @@ void AliasDb::addToContainedElements(
   memoryDAG_->addToContainedElements(elemEl, contEl);
 }
 
-bool AliasDb::mayAlias(const Value* a, const Value* b) const {
-  if (!mutableType(a) || !mutableType(b)) {
+bool AliasDb::mayAlias(const Value* a, const Value* b) {
+  if (!isMutableTypeInternal(a) || !isMutableTypeInternal(b)) {
     return false;
   }
 
   return memoryDAG_->mayAlias(elementMap_.at(a), elementMap_.at(b));
 }
 
-bool AliasDb::mayAlias(const ValueSet& a, const ValueSet& b) const {
+bool AliasDb::mayAlias(const ValueSet& a, const ValueSet& b) {
   if (a.empty() || b.empty()) {
     return false;
   }
@@ -870,17 +939,17 @@ bool AliasDb::mayAlias(const ValueSet& a, const ValueSet& b) const {
   return false;
 }
 
-bool AliasDb::mayContainAlias(Value* a, Value* b) const {
+bool AliasDb::mayContainAlias(Value* a, Value* b) {
   const std::vector<Value*> a_vec = {a};
   const std::vector<Value*> b_vec = {b};
 
   return mayContainAlias(a_vec, b_vec);
 }
 
-std::vector<Element*> AliasDb::getElements(at::ArrayRef<Value*> vs) const {
+std::vector<Element*> AliasDb::getElements(at::ArrayRef<Value*> vs) {
   std::vector<Element*> elements;
   for (const auto& val : vs) {
-    if (mutableType(val)) {
+    if (isMutableTypeInternal(val)) {
       elements.push_back(elementMap_.at(val));
     }
   }
@@ -889,7 +958,7 @@ std::vector<Element*> AliasDb::getElements(at::ArrayRef<Value*> vs) const {
 
 bool AliasDb::mayContainAlias(
     const at::ArrayRef<Value*> a,
-    const at::ArrayRef<Value*> b) const {
+    const at::ArrayRef<Value*> b) {
   auto a_elems = getElements(a);
   return a_elems.size() == 0 ? false : memoryDAG_->mayContainAlias(a_elems, getElements(b));
 }
@@ -949,13 +1018,13 @@ bool AliasDb::couldMoveBeforeTopologically(Node* n, Node* movePoint) {
   return tryMove(n, movePoint, MoveSide::BEFORE, /*dryRun=*/true);
 }
 
-bool AliasDb::hasWriters(const at::ArrayRef<Value*>& values) const {
+bool AliasDb::hasWriters(const at::ArrayRef<Value*>& values) {
   return std::any_of(values.begin(), values.end(), [&](Value* value) {
     return hasWriters(value);
   });
 }
 
-bool AliasDb::escapesScope(const at::ArrayRef<Value*>& vs) const {
+bool AliasDb::escapesScope(const at::ArrayRef<Value*>& vs) {
   return mayContainAlias(graph_->inputs(), vs) ||
       mayContainAlias(graph_->outputs(), vs) || mayAliasWildcard(vs);
 }
@@ -966,7 +1035,7 @@ bool AliasDb::escapesScope(const at::ArrayRef<Value*>& vs) const {
 // by aliasing a graph output or input, or by aliasing the wildcard set.
 bool AliasDb::safeToChangeAliasingRelationship(
     const at::ArrayRef<Value*>& a,
-    const at::ArrayRef<Value*>& b) const {
+    const at::ArrayRef<Value*>& b) {
   if (hasWriters(a) || hasWriters(b)) {
     return false;
   }
@@ -977,7 +1046,7 @@ bool AliasDb::safeToChangeAliasingRelationship(
 // Helper for topologically-safe node moves. See `tryMove()` for details.
 class AliasDb::WorkingSet {
  public:
-  explicit WorkingSet(Node* mover, const AliasDb& aliasDb) : aliasDb_(aliasDb) {
+  explicit WorkingSet(Node* mover, AliasDb& aliasDb) : aliasDb_(aliasDb) {
     mover_ = mover;
     for (const auto user : getUsersSameBlock(mover_)) {
       moverUsers_.insert(user);
@@ -1009,7 +1078,7 @@ class AliasDb::WorkingSet {
   }
 
   // Does the working set depend on `n`?
-  bool dependsOn(Node* n) const {
+  bool dependsOn(Node* n) {
     if (!mover_ && nodes_.empty()) {
       return false;
     }
@@ -1018,7 +1087,7 @@ class AliasDb::WorkingSet {
   }
 
  private:
-  bool hasDataDependency(Node* n) const {
+  bool hasDataDependency(Node* n) {
     if (!mover_ && nodes_.empty()) {
       return false;
     }
@@ -1030,7 +1099,7 @@ class AliasDb::WorkingSet {
     }
   }
 
-  bool hasMutabilityDependency(Node* n) const {
+  bool hasMutabilityDependency(Node* n) {
     // Check that `n` does not write to anything used by the working set
     const auto& nWrites = aliasDb_.getWrites(n);
     if (reads_.intersects(nWrites)) {
@@ -1052,7 +1121,7 @@ class AliasDb::WorkingSet {
   }
 
   // Does the working set produce any values consumed by `n`?
-  bool producesFor(Node* n) const {
+  bool producesFor(Node* n) {
     // This equivalent to asking: does the total use-set of all the nodes in the
     // working set include `n`?
     if (mover_ && moverUsers_.count(n)) {
@@ -1062,7 +1131,7 @@ class AliasDb::WorkingSet {
   }
 
   // Does the working set consume any values produced by `n`?
-  bool consumesFrom(Node* n) const {
+  bool consumesFrom(Node* n) {
     const auto users = getUsersSameBlock(n);
 
     if (mover_ && users.count(mover_)) {
@@ -1076,7 +1145,7 @@ class AliasDb::WorkingSet {
   // Get all users of outputs of `n`, in the same block as `n`.
   // This means if there is an `if` node that uses an output of `n` in some
   // inner sub-block, we will consider the whole `if` node a user of `n`.
-  std::unordered_set<Node*> getUsersSameBlock(Node* n) const {
+  std::unordered_set<Node*> getUsersSameBlock(Node* n) {
     std::unordered_set<Node*> users;
     for (const auto output : n->outputs()) {
       for (const auto& use : output->uses()) {
@@ -1112,7 +1181,7 @@ class AliasDb::WorkingSet {
     }
   }
 
-  const AliasDb& aliasDb_;
+  AliasDb& aliasDb_;
   std::vector<Node*> nodes_;
 
   // Mover dependencies. We track these separately since we may erase the mover
@@ -1244,7 +1313,7 @@ void AliasDb::move(Node* toMove, Node* movePoint, MoveSide moveSide) {
   }
 }
 
-bool AliasDb::writesToWildcard(Node* n) const {
+bool AliasDb::writesToWildcard(Node* n) {
   if (!writeIndex_.count(n)) {
     return false;
   }
@@ -1260,7 +1329,7 @@ bool AliasDb::writesToWildcard(Node* n) const {
   return false;
 }
 
-bool AliasDb::mayAliasWildcard(const Value* v) const {
+bool AliasDb::mayAliasWildcard(const Value* v) {
   if (auto e = getWildcard(v->type())) {
     return memoryDAG_->mayAlias(elementMap_.at(v), e);
   }
@@ -1268,7 +1337,7 @@ bool AliasDb::mayAliasWildcard(const Value* v) const {
   return false;
 }
 
-bool AliasDb::mayAliasWildcard(const at::ArrayRef<Value*> vs) const {
+bool AliasDb::mayAliasWildcard(const at::ArrayRef<Value*> vs) {
   return std::any_of(
       vs.begin(), vs.end(), [&](Value* v) { return mayAliasWildcard(v); });
 }
@@ -1303,7 +1372,7 @@ void AliasDb::addContainedTypesToFreshElement(
 
 // Search the wildcard index for an element that corresponds to the given type.
 // Const version returns nullptr
-Element* AliasDb::getWildcard(const TypePtr& type) const {
+Element* AliasDb::getWildcard(const TypePtr& type) {
   auto maybe_mut_type = getMutableTypePtr(type);
   if (!maybe_mut_type) {
     return nullptr;
@@ -1346,11 +1415,11 @@ c10::optional<Element*> AliasDb::setWildcard(const Value* v) {
   return wildcardElement;
 }
 
-void AliasDb::rebuildWriteCache() const {
+void AliasDb::rebuildWriteCache() {
   for (const auto& pr : writeIndex_) {
     const auto& writtenLocs = pr.second;
       writeCache_ |= writtenLocs;
-    }
+  }
   isWriteCacheStale_ = false;
 }
 } // namespace jit
