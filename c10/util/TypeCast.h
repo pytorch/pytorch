@@ -26,12 +26,13 @@ struct maybe_real<true, src_t> {
   }
 };
 
-// Note: deliberately ignores undefined behavior caused by casting
-// float values to integral dtypes whose dynamic range does not contain
-// the value.
+// Note: deliberately ignores undefined behavior caused by:
+// (1) float to integral overflow
+// (2) signed integer overflow
+// This behavior is consistent with NumPy.
 template <typename dest_t, typename src_t>
 struct static_cast_with_inter_type {
-  C10_HOST_DEVICE __ubsan_ignore_float_cast_overflow__ static inline dest_t apply(src_t src) {
+  C10_HOST_DEVICE __ubsan_ignore_float_cast_overflow__ __ubsan_ignore_signed_integer_overflow__ static inline dest_t apply(src_t src) {
     constexpr bool real = needs_real<dest_t, src_t>::value;
     return static_cast<dest_t>(maybe_real<real, src_t>::apply(src));
   }
