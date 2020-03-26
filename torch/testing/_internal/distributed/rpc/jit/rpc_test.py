@@ -22,12 +22,16 @@ def rref_local_value(rref):
     return rref.local_value()
 
 
+def return_value(value):
+    # type: (int) -> int
+    return value
+
+
 class RRefAPITest:
     @dist_init
     def test_rref_is_owner(self):
-        n = self.rank + 1
-        dst_rank = n % self.world_size
-        rref_var = rpc_return_rref(worker_name(dst_rank))
+        dst_worker_name = worker_name((self.rank + 1) % self.world_size)
+        rref_var = rpc_return_rref(dst_worker_name)
 
         @torch.jit.script
         def rref_tensor_is_owner(rref_var):
@@ -50,7 +54,7 @@ class RRefAPITest:
             # type: (RRef[Tensor]) -> Tensor
             return rref_local_value(rref)
 
-        with self.assertRaisesRegex(RuntimeError, ""):
+        with self.assertRaisesRegex(RuntimeError, r"Can't call RRef.local_value\(\) on a non-owner RRef"):
             local_call_rref_local_value(rref)
 
         @torch.jit.script
@@ -62,7 +66,24 @@ class RRefAPITest:
             ret = fut.wait()
             return ret
 
-        remote_call_rref_local_value(dst_worker_name, rref)
+        ret = remote_call_rref_local_value(dst_worker_name, rref)
+        self.assertEqual(ret, torch.add(torch.ones(2, 2), 1))
+
+    @dist_init
+    def test_local_rref_local_value(self):
+        if self.rank != 0:
+            return
+
+        dst_worker_name = worker_name(self.rank)
+        rref = rpc.remote(dst_worker_name, return_value, (5,), {})
+
+        @torch.jit.script
+        def rref_local_value(rref):
+            # type: (RRef[int]) -> int
+            return rref.local_value()
+
+        ret = rref_local_value(rref)
+        self.assertEqual(ret, 5)
 
 
 class MyScriptModuleWithRRefs(torch.jit.ScriptModule):
@@ -739,6 +760,16 @@ class JitRpcTest(RRefAPITest, LocalRRefTest, JitRpcAsyncOpTest, RpcAgentTestFixt
             args=(remote_ref, torch.ones(self.rank)),
         )
         self.assertEqual(ret, local_ret)
+
+        # pass rref arg to self/user
+        with self.assertRaisesRegex(
+            RuntimeError, "is an RRef to a ScriptModule. It can't be sent through RPC from owner,"
+        ):
+            ret = rpc.rpc_sync(
+                worker_name(self.rank),
+                run_ref_script_module,
+                args=(remote_ref, torch.ones(self.rank)),
+            )
 
     @dist_init
     def test_my_script_module_with_rrefs(self):
