@@ -808,7 +808,7 @@ class TestDataLoader(TestCase):
     def test_fd_limit_exceeded(self):
         # See NOTE [ DataLoader on Linux and open files limit ]
         import subprocess
-        subprocess.check_call([sys.executable, '-c', """\
+        subprocess.check_output([sys.executable, '-c', """\
 import torch
 import resource
 from torch.utils.data import DataLoader, IterableDataset
