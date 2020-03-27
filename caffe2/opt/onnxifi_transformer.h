@@ -34,6 +34,9 @@ struct OnnxifiTransformerOptions final : public BackendTransformOptions {
 
   // Enter loop test mode
   bool loop_test{false};
+
+  // Whether the net has been ssaRewritten
+  bool predictor_net_ssa_rewritten{false};
 };
 
 class CAFFE2_API OnnxifiTransformer final : public BackendTransformerBase {
