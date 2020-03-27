@@ -276,7 +276,7 @@ class _TestTorchMixin(object):
 
         def check_non_contiguous_index(dtype):
             # TODO: modify it after enabling randn to BFloat16
-            if dtype is torch.bfloat16:
+            if dtype == torch.bfloat16:
                 contig = torch.randn((2, 2, 1, 2)).bfloat16()
             else:
                 contig = torch.randn((2, 2, 1, 2), dtype=dtype)
@@ -292,7 +292,7 @@ class _TestTorchMixin(object):
 
         def check_non_contiguous_expand(shape, dtype):
             # TODO: modify it after enabling randn to BFloat16
-            if dtype is torch.bfloat16:
+            if dtype == torch.bfloat16:
                 contig = torch.randn(shape).bfloat16()
             else:
                 contig = torch.randn(shape, dtype=dtype)
@@ -316,7 +316,7 @@ class _TestTorchMixin(object):
         # The code needs to be able to handle this
         def check_contiguous_size1(dtype):
             # TODO: modify it after enabling randn to BFloat16
-            if dtype is torch.bfloat16:
+            if dtype == torch.bfloat16:
                 contig = torch.randn((5, 100)).bfloat16()
             else:
                 contig = torch.randn((5, 100), dtype=dtype)
@@ -334,7 +334,7 @@ class _TestTorchMixin(object):
 
         def check_contiguous_size1_largedim(dtype):
             # TODO: modify it after enabling randn to BFloat16
-            if dtype is torch.bfloat16:
+            if dtype == torch.bfloat16:
                 contig = torch.randn((5, 2, 3, 1, 4, 5, 3, 2, 1, 2, 3, 4)).bfloat16()
             else:
                 contig = torch.randn((5, 2, 3, 1, 4, 5, 3, 2, 1, 2, 3, 4), dtype=dtype)
@@ -352,7 +352,7 @@ class _TestTorchMixin(object):
 
         def check_large(dtype):
             # TODO: modify it after enabling randn to BFloat16
-            if dtype is torch.bfloat16:
+            if dtype == torch.bfloat16:
                 input = torch.randn(1024, 512).bfloat16()
             else:
                 input = torch.randn(1024, 512, dtype=dtype)
@@ -6142,7 +6142,7 @@ class TestTorchDeviceType(TestCase):
     def test_neg(self, device):
         int_types = [torch.int, torch.short, torch.int8, torch.uint8]
         float_types = [torch.float, torch.double, torch.long]
-        if device == 'cpu':
+        if self.device_type == 'cpu':
             float_types += [torch.bfloat16]
 
         # Tests bool tensor negation raises the correct error
@@ -9975,7 +9975,7 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(a, a_target, 'sign_ device={} dtype={}'.format(device, dtype))
 
         # include test for bfloat16 dtype
-        if device == 'cpu':
+        if self.device_type == 'cpu':
             a = torch.tensor([float('nan'), -12, 0, 71], device='cpu', dtype=torch.bfloat16)
             a_target = torch.tensor([0, -1, 0, 1], device='cpu', dtype=torch.bfloat16)
             self.assertEqual(a.sign(), a_target, 'sign device={} dtype=bfloat16'.format('cpu'))
@@ -14350,22 +14350,15 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
     @onlyCPU
     @dtypes(torch.float, torch.double, torch.bfloat16)
+    @precisionOverride({torch.float: 0.0002, torch.double: 0.0002, torch.bfloat16: 0.01})
     def test_sigmoid(self, device, dtype):
-        def checkType(tensor, inputVals, expecVals, precision_thres):
-            self.assertEqual(torch.tensor(inputValues, dtype=dtype, device=device).sigmoid(),
-                             torch.tensor(expecVals, dtype=dtype, device=device), precision_thres)
-
         # TODO: why not simulate math.sigmoid like with rsqrt?
         inputValues = [-1000, -1, 0, 0.5, 1, 2, 1000]
         expectedOutput = [0.0000, 0.2689, 0.5, 0.6225, 0.7311, 0.8808, 1.000]
         bf16ExpectedOutput = [0.0000, 0.2695, 0.5000, 0.6211, 0.7305, 0.8828, 1.0000]
-        if dtype == torch.bfloat16:
-            precision_3dps = 0.0021
-            checkType(torch.BFloat16Tensor, inputValues, bf16ExpectedOutput, precision_3dps)
-        else:
-            precision_4dps = 0.0002
-            checkType(torch.FloatTensor, inputValues, expectedOutput, precision_4dps)
-            checkType(torch.DoubleTensor, inputValues, expectedOutput, precision_4dps)
+
+        self.assertEqual(torch.tensor(inputValues, dtype=dtype, device=device).sigmoid(),
+                         torch.tensor(expectedOutput, dtype=dtype, device=device))
 
     @onlyCPU
     @dtypes(torch.float, torch.double)
@@ -15418,6 +15411,21 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         t = torch.tensor((-3.40282e+38, 3.40282e+38), device=device, dtype=torch.float)
         self.assertEqual(t.to(dtype).dtype, dtype)
 
+
+    @onlyOnCPUAndCUDA
+    def test_complex_type_conversions(self, device):
+        dtypes = [torch.float, torch.complex64, torch.complex128]
+        for from_type in dtypes:
+            for to_type in dtypes:
+                from_tensor = torch.randn(4, dtype=from_type, device=device)
+                to_tensor = from_tensor.to(to_type)
+                if from_type.is_complex and not to_type.is_complex:
+                    self.assertEqual(from_tensor.real(), to_tensor, exact_dtype=False)
+                elif not from_type.is_complex and to_type.is_complex:
+                    self.assertEqual(from_tensor, to_tensor.real(), exact_dtype=False)
+                    self.assertEqual(torch.zeros_like(to_tensor.imag()), to_tensor.imag(), exact_dtype=False)
+                else:
+                    self.assertEqual(from_tensor, to_tensor, exact_dtype=False)
 
 # NOTE [Linspace+Logspace precision override]
 # Our Linspace and logspace torch.half CUDA kernels are not very precise.

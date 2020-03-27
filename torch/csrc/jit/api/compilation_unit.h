@@ -1,6 +1,6 @@
 #pragma once
-#include <c10/util/Exception.h>
 #include <ATen/core/function.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/frontend/source_range.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -75,7 +75,7 @@ struct TORCH_API CompilationUnit {
         "Please use setGraphExecutorOptimize()");
   }
 
-   bool is_optimized() const {
+  bool is_optimized() const {
     TORCH_WARN(
         "CompilationUnit::is_optimized() is deprecated and always returns true. "
         "Please use getGraphExecutorOptimize()");
@@ -284,9 +284,7 @@ struct TORCH_API CompilationUnit {
 // owning CU. We need this because pybind requires a ref-counted way to refer to
 // Functions.
 struct StrongFunctionPtr {
-  StrongFunctionPtr(
-      std::shared_ptr<CompilationUnit> cu,
-      Function* function)
+  StrongFunctionPtr(std::shared_ptr<CompilationUnit> cu, Function* function)
       : cu_(std::move(cu)), function_(function) {
     TORCH_INTERNAL_ASSERT(cu_);
     TORCH_INTERNAL_ASSERT(function_);
@@ -299,6 +297,6 @@ namespace script {
 // We once had a `script::` namespace that was deleted. This is for backcompat
 // of the public API; new code should not use this type alias.
 using CompilationUnit = ::torch::jit::CompilationUnit;
-}
+} // namespace script
 } // namespace jit
 } // namespace torch
