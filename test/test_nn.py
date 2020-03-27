@@ -6413,8 +6413,8 @@ class TestNN(NNTestCase):
             grid[:, 1, 1, 1, 0] = float('inf')
             result = torch.nn.functional.grid_sample(image, grid, padding_mode='zeros')
             self.assertEqual(result, torch.tensor([[[[[27., 26., 25.], [24., 23., 22.], [21., 20., 19.]],
-                                                     [[18., 17., 16.], [15.,  0., 13.], [12., 11., 10.]],
-                                                     [[ 9.,  8.,  7.], [ 6.,  5.,  4.], [ 3.,  2.,  1.]]]]], 
+                                                     [[18., 17., 16.], [15., 0., 13.], [12., 11., 10.]],
+                                                     [[9., 8., 7.], [6., 5., 4.], [3., 2., 1.]]]]], 
                                                   device='cuda', dtype=torch.float))
         issue_24823_1()
 
