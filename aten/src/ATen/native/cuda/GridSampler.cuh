@@ -3,7 +3,12 @@
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <THC/THCAtomics.cuh>
 
+#ifdef _MSC_VER
+#define GRIDSAMPLER_NOINLINE __declspec(noinline)
+#else 
 #define GRIDSAMPLER_NOINLINE __attribute__((noinline))
+#endif
+
 
 namespace at { namespace native {
 
