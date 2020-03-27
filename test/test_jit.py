@@ -3066,6 +3066,22 @@ graph(%Ra, %Rb):
         torch._C._jit_run_cpp_tests(run_cuda=True)
         tests_setup.shutdown()
 
+    @unittest.skipIf(IS_SANDCASTLE, "gtest runs these in sandcastle")
+    @unittest.skipIf(RUN_CUDA, "covered by test_tensorexpr_cuda")
+    @unittest.skipIf(IS_WINDOWS, "enable on windows")
+    @unittest.skipIf(not torch._C._has_tensorexpr_cpp_tests(), "Tests were not built, use BUILD_TEST=1")
+    @skipIfRocm
+    def test_tensorexpr_cpp(self):
+        torch._C._run_tensorexpr_cpp_tests(run_cuda=False)
+
+    @unittest.skipIf(IS_SANDCASTLE, "gtest runs these in sandcastle")
+    @unittest.skipIf(not RUN_CUDA, "covered by test_tensorexpr")
+    @unittest.skipIf(IS_WINDOWS, "enable on windows")
+    @unittest.skipIf(not torch._C._has_tensorexpr_cpp_tests(), "Tests were not built, use BUILD_TEST=1")
+    @skipIfRocm
+    def test_tensorexpr_cpp_cuda(self):
+        torch._C._run_tensorexpr_cpp_tests(run_cuda=True)
+
     def test_batchnorm(self):
         x = torch.ones(2, 2, 2, 2)
         g, outputs, inputs = torch.jit._get_trace_graph(nn.BatchNorm2d(2), x,
@@ -4627,6 +4643,7 @@ graph(%Ra, %Rb):
                 super(Bar, self).__init__()
                 self.sub = Foo()
 
+            @torch.jit.script_method
             def forward(self, x):
                 # type: (Tensor) -> Tensor
                 return self.sub.forward(x)
@@ -4634,7 +4651,7 @@ graph(%Ra, %Rb):
         bar = Bar()
         ops = torch.jit.export_opnames(bar)
         expected = ['aten::add.Tensor', 'aten::mul.Scalar']
-        self.assertEqual(ops, expected)
+        self.assertTrue(set(expected).issubset(set(ops)))
 
     def test_pytorch_jit_env_off(self):
         import subprocess
@@ -6618,6 +6635,26 @@ a")
             return a + a + a
         s = Variable(torch.rand(2))
         self.assertEqual(s + s + s, foo(s))
+
+    def test_str_to_float(self):
+        @torch.jit.script
+        def foo(a):
+            return 0.5 == float('0.5 hello')
+        s = torch.rand(1)
+        with self.assertRaisesRegex(RuntimeError, "only accepts a string of single float number"):
+            self.assertTrue(foo(s))
+
+        @torch.jit.script
+        def foo(a):
+            return 0.5 == float('0.5')
+        s = torch.rand(1)
+        self.assertTrue(foo(s))
+
+        @torch.jit.script
+        def foo(a):
+            return 0. == float('0')
+        s = torch.rand(1)
+        self.assertTrue(foo(s))
 
     def test_inf(self):
         @torch.jit.script
@@ -16158,10 +16195,10 @@ a")
         tester(str_hash, ("", "hello", "a"))
 
     def test_id(self):
-        with self.assertRaisesRegex(RuntimeError, "Expected a value"): 
+        with self.assertRaisesRegex(RuntimeError, "Expected a value"):
             @torch.jit.script
             def test_id_scalars():
-                return id(2) == id(None) 
+                return id(2) == id(None)
 
         @torch.jit.script
         class FooTest(object):

@@ -386,7 +386,9 @@ def embedding_bag(g,
                 include_last_offset_i=include_last_offset)
 
 
-def size(g, self, dim):
+def size(g, self, dim=None):
+    if dim is None:
+        return g.op("Shape", self)
     if sym_help._maybe_get_const(dim, 'i') < 0:
         rank = self.type().dim()
         if rank:

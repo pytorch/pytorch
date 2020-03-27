@@ -902,6 +902,32 @@ if(USE_OPENMP)
     ENDIF()
   ENDIF()
 
+  IF("${CMAKE_CXX_SIMULATE_ID}" STREQUAL "MSVC"
+    AND "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
+    MESSAGE(STATUS "Setting OpenMP flags for clang-cl")
+    SET(OpenMP_CXX_FLAGS "-Xclang -fopenmp")
+    SET(OpenMP_C_FLAGS "-Xclang -fopenmp")
+    SET(CHECKED_OPENMP ON CACHE BOOL "already checked for OpenMP")
+    SET(OPENMP_FOUND ON CACHE BOOL "OpenMP Support found")
+    if (NOT MKL_FOUND)
+      execute_process(COMMAND ${CMAKE_CXX_COMPILER} --version OUTPUT_VARIABLE clang_version_output)
+      string (REGEX REPLACE ".*InstalledDir: ([^\n]+).*" "\\1" CLANG_BINDIR ${clang_version_output})
+    
+      get_filename_component(CLANG_ROOT ${CLANG_BINDIR} DIRECTORY)
+      set(CLANG_OPENMP_LIBRARY "${CLANG_ROOT}/lib/libiomp5md.lib")
+
+      if(NOT TARGET caffe2::openmp)
+        add_library(caffe2::openmp INTERFACE IMPORTED)
+      endif()
+
+      set_property(
+        TARGET caffe2::openmp PROPERTY INTERFACE_LINK_LIBRARIES
+        ${CLANG_OPENMP_LIBRARY})
+
+      LIST(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS caffe2::openmp)
+    endif()
+  ENDIF()
+
   IF (WITH_OPENMP AND NOT CHECKED_OPENMP)
     FIND_PACKAGE(OpenMP QUIET)
     SET(CHECKED_OPENMP ON CACHE BOOL "already checked for OpenMP")
@@ -1007,7 +1033,6 @@ if(USE_ROCM)
     list(APPEND HIP_CXX_FLAGS -DCUDA_HAS_FP16=1)
     list(APPEND HIP_CXX_FLAGS -D__HIP_NO_HALF_OPERATORS__=1)
     list(APPEND HIP_CXX_FLAGS -D__HIP_NO_HALF_CONVERSIONS__=1)
-    list(APPEND HIP_CXX_FLAGS -DHIP_VERSION=${HIP_VERSION_MAJOR})
     list(APPEND HIP_CXX_FLAGS -Wno-macro-redefined)
     list(APPEND HIP_CXX_FLAGS -Wno-inconsistent-missing-override)
     list(APPEND HIP_CXX_FLAGS -Wno-exceptions)
