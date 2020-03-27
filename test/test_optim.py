@@ -1689,6 +1689,7 @@ class TestSWAUtils(TestCase):
             # Check that AveragedModel is on the correct device
             self.assertTrue(p_swa.device == swa_device)
             self.assertTrue(p.device == net_device)
+        self.assertTrue(averaged_dnn.n_averaged.device == swa_device)
 
     def test_averaged_model_all_devices(self):
         cpu = torch.device("cpu")

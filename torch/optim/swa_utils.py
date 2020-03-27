@@ -89,7 +89,8 @@ class AveragedModel(Module):
         self.module = deepcopy(model)
         if device is not None:
             self.module = self.module.to(device)
-        self.register_buffer('n_averaged', torch.tensor(0, dtype=torch.long))
+        self.register_buffer('n_averaged',
+                             torch.tensor(0, dtype=torch.long, device=device))
         if avg_fn is None:
             def avg_fn(p_avg, p, n_avg):
                 return p_avg + (p - p_avg) / (n_avg + 1)
