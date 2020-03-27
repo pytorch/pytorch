@@ -20,6 +20,7 @@ import copy
 import functools
 import inspect
 import os
+import pathlib
 import pickle
 import re
 import sys
@@ -31,9 +32,6 @@ import weakref
 # These are imported so users can access them from the `torch.jit` module
 from torch._jit_internal import Final, _overload, _overload_method
 from torch._jit_internal import ignore, export, unused
-
-if sys.version_info[0] > 2:
-    import pathlib
 
 def _parse_env(name, default, true_message, false_message):
     value = os.environ.get(name)
@@ -143,9 +141,7 @@ def save(m, f, _extra_files=DEFAULT_EXTRA_FILES_MAP):
             extra_files['foo.txt'] = 'bar'
             torch.jit.save(m, 'scriptmodule.pt', _extra_files=extra_files)
     """
-    if isinstance(f, str) or \
-            (sys.version_info[0] == 2 and isinstance(f, unicode)) or \
-            (sys.version_info[0] == 3 and isinstance(f, pathlib.Path)):
+    if isinstance(f, str) or isinstance(f, pathlib.Path):
         m.save(f, _extra_files=_extra_files)
     else:
         ret = m.save_to_buffer(_extra_files=_extra_files)
@@ -227,9 +223,7 @@ def load(f, map_location=None, _extra_files=DEFAULT_EXTRA_FILES_MAP):
         validate_cuda_device(map_location)
 
     cu = torch._C.CompilationUnit()
-    if isinstance(f, str) or \
-            (sys.version_info[0] == 2 and isinstance(f, unicode)) or \
-            (sys.version_info[0] == 3 and isinstance(f, pathlib.Path)):
+    if isinstance(f, str) or isinstance(f, pathlib.Path):
         cpp_module = torch._C.import_ir_module(cu, f, map_location, _extra_files)
     else:
         cpp_module = torch._C.import_ir_module_from_buffer(cu, f.read(), map_location, _extra_files)
