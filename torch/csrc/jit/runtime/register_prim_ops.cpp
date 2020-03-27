@@ -283,8 +283,8 @@ int64_t normalizeIndex(int64_t idx, int64_t list_size) {
   return idx;
 }
 
-RegisterOperators reg({
-     Operator(
+RegisterOperators reg(
+    {Operator(
          "prim::rangelist(int n) -> int[]",
          [](Stack& stack) {
            int64_t n;
@@ -1011,8 +1011,6 @@ RegisterOperators reg({
            return 0;
          },
          aliasAnalysisSpecialCase())});
-
-
 
 // define implementations for primitive number ops
 #define DEFINE_GENERIC_OP(aten_op, int_op, float_op, int_result, float_result) \
@@ -2644,8 +2642,8 @@ RegisterOperators reg2({
         "aten::all.int(int[] self) -> bool",
         [](Stack& stack) {
           c10::List<int64_t> l = pop(stack).toIntList();
-          for(const auto& elem: l) {
-            if(!elem){
+          for (const auto& elem : l) {
+            if (!elem) {
               push(stack, false);
               return 0;
             }
@@ -2658,8 +2656,8 @@ RegisterOperators reg2({
         "aten::all.float(float[] self) -> bool",
         [](Stack& stack) {
           c10::List<double> l = pop(stack).toDoubleList();
-          for(const auto& elem: l) {
-            if(!elem){
+          for (const auto& elem : l) {
+            if (!elem) {
               push(stack, false);
               return 0;
             }
@@ -2672,8 +2670,8 @@ RegisterOperators reg2({
         "aten::all.bool(bool[] self) -> bool",
         [](Stack& stack) {
           c10::List<bool> l = pop(stack).toBoolList();
-          for(const auto& elem: l) {
-            if(!elem){
+          for (const auto& elem : l) {
+            if (!elem) {
               push(stack, false);
               return 0;
             }

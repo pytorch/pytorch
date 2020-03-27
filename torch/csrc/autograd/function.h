@@ -347,6 +347,44 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   // fields.
   const uint64_t sequence_nr_;
 
+  // Note [Thread Safety on Autograd Node]
+  // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  // Autograd Engine let the owning thread which calls Engine::execute to drive the
+  // GraphTask execution, there might be cases that part of the GraphTask is shared
+  // across different `backward()` or `grad()` calls, i.e. fork new threads in the
+  // middle of the forward and call `backward()` separately from different threads.
+  // We need to protect the thread safety on NodeTask to prevent data racing on
+  // shared variables read/write.
+  //
+  // NB: This is only needed for Autograd Nodes that runs on CPU, technically "CUDA",
+  // "XLA" nodes don't need locking because device threads are always single threaded.
+  //
+  // Here we add a thread mutex to help protect the Node's thread safety, so that
+  // different threads cannot race the shared data when executing the same NodeTask
+  // from multiple CPU threads. It IS the user/developer responsibility to take
+  // advantage of this mutex to protect the thread safety of their autograd Node.
+  // The general strategy of thread safety on autograd Node:
+  //
+  // 1. User should lock the mutex during Node::release_variables() if the Node needs
+  //    to release the variables on the fly, this serve the purpose that when we release
+  //    saved_variables from one thread, no other threads can release the saved variables
+  //    concurrently. call
+  //    the Node::apply(),
+  // 2. User should lock the mutex during Node::apply(), this is to ensure Node that
+  //    writing to the shared variable are not racing across threads (i.e. AccumulateGrad
+  //    and custom C++ Autograd Node if writing to shared variables )
+  // 3. item 2 and item 3 should work together so that when we release saved variables
+  //    from one thread, no other threads can call Node::apply(), this ensures the variable
+  //    references from other threads aren't dangling.
+  // 4. if the Node don't release any variables and no shared data read/write in the Node
+  //    i.e. purely functional, user don't need to lock the mutex
+  //
+  // This way we could protect the thread safety on Autograd Node, but we could still
+  // not protect the thread safety on Node pre/post C++ hooks (python hooks are
+  // automatically thread safe), we rely on the user to write thread safe C++ hooks
+  // if they want the hook to be correctly applied in multithreading environment.
+  std::mutex mutex_;
+
   edge_list next_edges_;
   PyObject* pyobj_ = nullptr; // weak reference
   std::unique_ptr<AnomalyMetadata> anomaly_metadata_ = nullptr;
