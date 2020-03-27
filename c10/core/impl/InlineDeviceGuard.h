@@ -99,7 +99,7 @@ public:
   InlineDeviceGuard& operator=(InlineDeviceGuard<T>&& other) = delete;
 
   ~InlineDeviceGuard() {
-    if (current_device_ != original_device_) {
+    if (current_device_.index() != original_device_.index()) {
       impl_.uncheckedSetDevice(original_device_);
     }
   }
