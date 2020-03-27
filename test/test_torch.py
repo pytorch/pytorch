@@ -15773,11 +15773,19 @@ class TestViewOps(TestCase):
         s = torch.real(t)
         self.assertTrue(s is t)
 
+        # TODO: update when the imag attribute is implemented
+        self.assertTrue(not hasattr(t, 'real'))
+
     # TODO: update after torch.real is implemented for complex tensors
     def test_real_view(self, device):
         t = torch.tensor((1 + 1j), device=device)
         with self.assertRaises(RuntimeError):
-            torch.real(t)
+            v = torch.real(t)
+            self.assertTrue(self.is_view_of(t, v))
+
+            v[0] = 0
+            self.assertEqual(t.float()[0], v[0])
+            self.assertTrue(t[0] == complex(0, 1))
 
     def test_imag_new(self, device):
         t = torch.ones((5, 5), device=device)
@@ -15788,11 +15796,18 @@ class TestViewOps(TestCase):
         self.assertTrue(i.dtype is t.dtype)
         self.assertTrue(torch.equal(i, torch.zeros_like(t)))
 
+        # TODO: update when the imag attribute is implemented
+        self.assertTrue(not hasattr(t, 'imag'))
+
     # TODO: update after torch.imag is implemented for complex tensors
     def test_imag_view(self, device):
         t = torch.tensor((1 + 1j), device=device)
         with self.assertRaises(RuntimeError):
-            torch.imag(t)
+            v = torch.imag(t)
+            self.assertTrue(self.is_view_of(t, v))
+
+            v[0] = 0
+            self.assertTrue(t[0] == complex(1, 0))
 
     def test_diagonal_view(self, device):
         t = torch.ones((5, 5), device=device)

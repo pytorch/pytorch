@@ -731,7 +731,7 @@
   self: zeros_like(grad, at::MemoryFormat::Preserve)
 
 - name: real(Tensor self) -> Tensor
-  self: real(grad)
+  self: at::real(grad)
 
 - name: reciprocal(Tensor self) -> Tensor
   self: -grad * result * result
