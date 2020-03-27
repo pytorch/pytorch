@@ -838,10 +838,11 @@ void Engine::mark_graph_task_completed(std::shared_ptr<GraphTask>& graph_task) {
   try {
     // Run post processing, before marking the future as complete.
     graph_task_exec_post_processing(graph_task);
+    lock.unlock();
     graph_task->future_result_->markCompleted(
         std::move(graph_task->captured_vars_));
   } catch (std::exception& e) {
-    graph_task->future_result_->setError(e.what());
+    graph_task->future_result_->setErrorIfNeeded(e.what());
   }
 }
 

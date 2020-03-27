@@ -233,6 +233,16 @@ ContextPtr DistAutogradContainer::retrieveContext(int64_t context_id) {
   return autograd_context_.at(context_id);
 }
 
+ContextPtr DistAutogradContainer::retrieveContextIfPresent(int64_t context_id) {
+  std::lock_guard<std::mutex> guard(autograd_context_lock_);
+  auto it = autograd_context_.find(context_id);
+  if (it != autograd_context_.end()) {
+    return it->second;
+  } else {
+    return nullptr;
+  }
+}
+
 int64_t DistAutogradContainer::getMaxId() {
   return max_id_;
 }

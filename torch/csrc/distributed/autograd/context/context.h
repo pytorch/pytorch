@@ -67,6 +67,17 @@ class TORCH_API DistAutogradContext {
   // These are the different workers that this context has sent RPCs to.
   std::unordered_set<rpc::worker_id_t> getKnownWorkerIds() const;
 
+  // Propagates the Autograd Failure message to all known nodes.
+  void propagateAutogradError(const std::string& errorMsg);
+
+  // Sets an error on the Graph Task (assuming the graphTask hasn't already
+  // been set with an error). Returns false if the failure message should not
+  // be propagated further. This is the case if the graphTask was already
+  // marked with an exception or the graphTask was invalid. Returns true if the
+  // failure message should be propagated (this happens if the graphTask was
+  // marked with an exception).
+  bool setGraphTaskException(const std::string& errorMsg);
+
  private:
   friend class BackwardPassCleanupGuard;
   friend class DistEngine;
@@ -81,6 +92,12 @@ class TORCH_API DistAutogradContext {
 
   // Retrieve the GraphTask.
   std::shared_ptr<torch::autograd::GraphTask> retrieveGraphTask();
+
+  // An idempotent function for retrieving the GraphTask. Since notifying
+  // neighbors of errors during autograd is recursive, it is possible that this
+  // function is called multiple times. Thus, it should not crash if the
+  // GraphTask has already been set with an error by a previous RPC.
+  std::shared_ptr<torch::autograd::GraphTask> retrieveGraphTaskIfExists();
 
   // Set the appropriate graph task for the backward pass. Can be called only
   // once.

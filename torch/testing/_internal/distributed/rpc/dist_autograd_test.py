@@ -1,4 +1,3 @@
-import sys
 import threading
 import time
 import unittest
@@ -1182,6 +1181,37 @@ class DistAutogradTest(RpcAgentTestFixture):
                 # Run backwards, and validate we receive an error.
                 dist_autograd.backward(context_id, [val.sum()])
 
+    @dist_init
+    def test_backward_intermediate_autograd_engine_error(self):
+        with dist_autograd.context() as context_id:
+            t1 = torch.rand((3, 3), requires_grad=True)
+            t2 = torch.rand((3, 3), requires_grad=True)
+            # Perform some ops before error simulation.
+            tmp = (t1 + t2) * (t1 + t2)
+            t3 = SimulateBackwardError.apply(tmp)
+
+            # Run multiple round trips across different nodes and verify the
+            # original node receives an error thrown at some intermediate node
+            # in the chain.
+            val = rpc.rpc_sync(
+                "worker{}".format(self._next_rank()), torch.add, args=(t2, t1)
+            )
+            val = rpc.rpc_sync(
+                "worker{}".format(self._next_rank()), torch.mul, args=(val, t3)
+            )
+            val = rpc.rpc_sync(
+                "worker{}".format(self._next_rank()), torch.matmul, args=(val, t2)
+            )
+            val = rpc.rpc_sync(
+                "worker{}".format(self._next_rank()), torch.div, args=(val, t2)
+            )
+
+            with self.assertRaises(RuntimeError):
+                # Run backwards, and validate we receive an error.
+                dist_autograd.backward(context_id, [val.sum()])
+
+            self.assertTrue(_all_contexts_cleaned_up())
+
     @dist_init(clean_shutdown=False)
     @unittest.skipIf(
         IS_MACOS,
@@ -1572,17 +1602,6 @@ class DistAutogradTest(RpcAgentTestFixture):
             "Could not find autograd context with id: {}".format(context_id),
         ):
             dist_autograd.backward(context_id, [t1.sum()])
-
-        # HACK: Killing workers since otherwise the autograd engine gets stuck on
-        # other nodes. The proper fix would be addressing:
-        # https://github.com/pytorch/pytorch/issues/27643, which would inform
-        # other nodes about the failure.
-        # The autograd engine gets stuck on other nodes since they're waiting to
-        # receive gradients from the node that received an error (and as a
-        # result it didn't execute the rest of the graph).
-        dist.barrier()
-        rpc.shutdown(graceful=False)
-        sys.exit(0)
 
     @classmethod
     def _call_remote_embedding(cls, embedding_rref, input, offsets, per_sample_weights):

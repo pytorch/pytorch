@@ -6,6 +6,8 @@
 #include <torch/csrc/distributed/autograd/engine/dist_engine.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_req.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_resp.h>
+#include <torch/csrc/distributed/autograd/rpc_messages/dist_autograd_failure_req.h>
+#include <torch/csrc/distributed/autograd/rpc_messages/dist_autograd_failure_resp.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/propagate_gradients_req.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/propagate_gradients_resp.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
@@ -396,11 +398,22 @@ void RequestCallbackImpl::processRpc(
     case MessageType::BACKWARD_AUTOGRAD_REQ: {
       auto& gradientsCall = static_cast<PropagateGradientsReq&>(rpc);
       const auto& autogradMetadata = gradientsCall.getAutogradMetadata();
+      std::shared_ptr<DistAutogradContext> autogradContext;
 
-      // Retrieve the appropriate autograd context.
-      auto autogradContext =
-          DistAutogradContainer::getInstance().retrieveContext(
+      // In rare cases, a BACKWARD_AUTOGRAD_REQ may arrive after the
+      // context has been cleaned up due to an error during the backward pass.
+      // In such situations, we can ignore this message since no further
+      // gradient computations should take place on this context.
+      autogradContext =
+          DistAutogradContainer::getInstance().retrieveContextIfPresent(
               autogradMetadata.autogradContextId);
+      if (!autogradContext) {
+        LOG(INFO) << "Ignoring Backward Autograd Request. Context "
+                  << autogradMetadata.autogradContextId
+                  << " already cleaned up due to autograd error";
+        markComplete(std::move(PropagateGradientsResp()).toMessage());
+        return;
+      }
 
       // Lookup the appropriate 'send' function to enqueue.
       std::shared_ptr<SendRpcBackward> sendFunction =
@@ -439,6 +452,33 @@ void RequestCallbackImpl::processRpc(
       DistAutogradContainer::getInstance().releaseContextIfPresent(
           cleanupContextId);
       markComplete(std::move(CleanupAutogradContextResp()).toMessage());
+      return;
+    }
+    case MessageType::DIST_AUTOGRAD_FAILURE_REQ: {
+      auto& backwardFailureReq = static_cast<DistAutogradFailureReq&>(rpc);
+      auto errorContextId = backwardFailureReq.getContextId();
+      auto errorMsg = backwardFailureReq.getErrorMsg();
+      // Mark the given context's graphTask with an error if the context has
+      // not been cleaned up yet. Then use the given error message and
+      // propagate it to all known neighbor workers.
+      std::shared_ptr<DistAutogradContext> autogradContext;
+      autogradContext =
+          DistAutogradContainer::getInstance().retrieveContextIfPresent(
+              errorContextId);
+      if (!autogradContext) {
+        LOG(INFO) << "Ignoring Dist Autograd Failure Request. Context "
+                  << errorContextId
+                  << " already cleaned up due to autograd error";
+        markComplete(std::move(DistAutogradFailureResp()).toMessage());
+        return;
+      }
+      // Mark the graphTask with an exception.
+      bool graphTaskHadError = autogradContext->setGraphTaskException(errorMsg);
+      // Propagate the dist autograd failure message to known workers.
+      if (graphTaskHadError) {
+        autogradContext->propagateAutogradError(errorMsg);
+      }
+      markComplete(std::move(DistAutogradFailureResp()).toMessage());
       return;
     }
     default: {

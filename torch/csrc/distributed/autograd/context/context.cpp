@@ -3,6 +3,7 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/distributed/autograd/context/context.h>
+#include <torch/csrc/distributed/autograd/rpc_messages/dist_autograd_failure_req.h>
 
 namespace torch {
 namespace distributed {
@@ -103,6 +104,14 @@ std::shared_ptr<torch::autograd::GraphTask> DistAutogradContext::
   return graphTask_;
 }
 
+std::shared_ptr<torch::autograd::GraphTask> DistAutogradContext::
+    retrieveGraphTaskIfExists() {
+  // Similar to retrieveGraphTask() but does not throw an exception if
+  // GraphTask doesn't exist.
+  std::lock_guard<std::mutex> guard(lock_);
+  return graphTask_;
+}
+
 void DistAutogradContext::setGraphTask(
     std::shared_ptr<torch::autograd::GraphTask> graphTask) {
   std::lock_guard<std::mutex> guard(lock_);
@@ -125,17 +134,7 @@ void DistAutogradContext::addOutstandingRpc(
           const c10::optional<utils::FutureError>& futErr) {
         if (futErr) {
           // If we have an error, let the local autograd engine know about it.
-          std::runtime_error err((*futErr).what());
-          std::unique_lock<std::mutex> lock(lock_);
-          if (graphTask_) {
-            graphTask_->set_exception_without_signal(nullptr);
-            lock.unlock();
-            graphTask_->future_result_->setErrorIfNeeded(err.what());
-          } else {
-            LOG(WARNING)
-                << "Ignoring error since GraphTask is no longer valid: "
-                << err.what();
-          }
+          setGraphTaskException((*futErr).what());
         }
       });
   std::lock_guard<std::mutex> guard(lock_);
@@ -191,6 +190,32 @@ std::shared_ptr<rpc::FutureMessage> DistAutogradContext::
     }
   }
   return state->future;
+}
+
+bool DistAutogradContext::setGraphTaskException(const std::string& errorMsg) {
+  std::unique_lock<std::mutex> lock(lock_);
+  if (graphTask_) {
+    if (graphTask_->has_error_) {
+      return false;
+    }
+    graphTask_->set_exception_without_signal(nullptr);
+    lock.unlock();
+    graphTask_->future_result_->setErrorIfNeeded(errorMsg);
+    return true;
+  } else {
+    LOG(WARNING) << "Ignoring error since GraphTask is no longer valid: "
+                 << errorMsg;
+    return false;
+  }
+}
+
+void DistAutogradContext::propagateAutogradError(const std::string& errorMsg) {
+  auto neighborNodes = getKnownWorkerIds();
+  auto agent = rpc::RpcAgent::getCurrentRpcAgent();
+  for (const auto& node : neighborNodes) {
+    DistAutogradFailureReq msg(contextId_, errorMsg);
+    agent->send(agent->getWorkerInfo(node), std::move(msg).toMessage());
+  }
 }
 
 std::shared_ptr<SendRpcBackward> DistAutogradContext::retrieveSendFunction(
