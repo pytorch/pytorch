@@ -1307,9 +1307,15 @@ void OnnxifiTransformer::transform(
   std::unordered_set<std::string> weights(
       weight_names.begin(), weight_names.end());
 
-  // SSA Rewrite the net
-  auto shape_hints_mapped =
-      ssaRewriteAndMapNames(ws, pred_net, input_shape_hints);
+  // SSA Rewrite the net if it has not been rewritten
+  ShapeInfoMap shape_hints_mapped;
+  if (opts_.predictor_net_ssa_rewritten) {
+    LOG(INFO) << "predictor net has been ssaRewritten, skip rewritting here";
+    annotateOpIndex(pred_net);
+    shape_hints_mapped = input_shape_hints;
+  } else {
+    shape_hints_mapped = ssaRewriteAndMapNames(ws, pred_net, input_shape_hints);
+  }
 
   // Populate shape info
   // TODO(yingz): We should not need to create mapped_ws since we did not change
