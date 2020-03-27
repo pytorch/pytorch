@@ -90,12 +90,7 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
     fm->addCallback([forkId{userRRefPtr->forkId()}](
                         const rpc::Message& message,
                         const c10::optional<utils::FutureError>& futErr) {
-      if (!futErr) {
-        auto rr = RemoteRet::fromMessage(message);
-        TORCH_INTERNAL_ASSERT(rr->forkId() == forkId);
-      }
-      RRefContext::getInstance().delPendingUser(forkId);
-      RRefContext::handleException(futErr); // Propagate to userRRefPtr?
+      callback::confirmPendingUser(message, futErr, forkId);
     });
 
     return userRRefPtr;

@@ -237,6 +237,12 @@ void RequestCallbackImpl::processRpc(
               PyObjectType::get());
         }
         ownerRRef->setValue(std::move(py_ivalue));
+      } catch (py::error_already_set& e) {
+        // py::error_already_set requires GIL to destruct, take special care.
+        ownerRRef->setError(e.what());
+        py::gil_scoped_acquire acquire;
+        e.restore();
+        PyErr_Clear();
       } catch (std::exception& e) {
         ownerRRef->setError(e.what());
       }

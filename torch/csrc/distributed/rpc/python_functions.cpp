@@ -160,12 +160,7 @@ PyRRef pyRemoteBuiltin(
     fm->addCallback([forkId{userRRef->forkId()}](
                         const rpc::Message& message,
                         const c10::optional<utils::FutureError>& futErr) {
-      if (!futErr) {
-        auto rr = RemoteRet::fromMessage(message);
-        TORCH_INTERNAL_ASSERT(rr->forkId() == forkId);
-      }
-      RRefContext::getInstance().delPendingUser(forkId);
-      RRefContext::handleException(futErr); // Propagate to userRRef?
+      callback::confirmPendingUser(message, futErr, forkId);
     });
     return PyRRef(userRRef);
   } else {
@@ -224,12 +219,7 @@ PyRRef pyRemotePythonUdf(
     fm->addCallback([forkId{userRRef->forkId()}](
                         const rpc::Message& message,
                         const c10::optional<utils::FutureError>& futErr) {
-      if (!futErr) {
-        auto rr = RemoteRet::fromMessage(message);
-        TORCH_INTERNAL_ASSERT(rr->forkId() == forkId);
-      }
-      RRefContext::getInstance().delPendingUser(forkId);
-      RRefContext::handleException(futErr); // Propagate to userRRef?
+      callback::confirmPendingUser(message, futErr, forkId);
     });
     return PyRRef(userRRef);
   } else {
