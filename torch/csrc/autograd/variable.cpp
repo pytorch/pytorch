@@ -384,6 +384,20 @@ unsigned VariableHooks::_register_hook(const Tensor& self, std::function<Tensor(
 }
 
 void handle_view_on_rebase(DifferentiableViewMeta* diff_view_meta, bool indirect) {
+  // TODO: Remove this warning once we allow XLA to workaround CopySlices.
+  if (diff_view_meta->base_.device().type() == c10::DeviceType::XLA) {
+    std::string msg;
+    if (indirect) {
+      msg = "This view requires gradients but its base or another view of the same base has been modified inplace. ";
+    } else {
+      msg = "This view requires gradients and it's being modified inplace. ";
+    }
+    msg = c10::str(msg, "Backward through inplace update on view tensors is WIP for XLA backwend. "
+                   "Gradient might be wrong in certain cases. Running forward alone is fine. "
+                   "To work around it, please replace the inplace operation by an out-of-place one.");
+    TORCH_WARN(msg);
+  }
+
   /// See NOTE [ View + Inplace detection ] for justification of the logic below
   if (diff_view_meta->creation_meta != CreationMeta::DEFAULT) {
     auto grad_fn = diff_view_meta->grad_fn_.get();
