@@ -63,13 +63,13 @@ const c10::FunctionSchema& GraphFunction::getSchema() const {
 }
 
 void preoptimizeGraph(std::shared_ptr<Graph>& graph) {
+  Inline(*graph);
   // Peephole Optimize cleans up many "is None" checks and creates constant prop
   // opportunities
   PeepholeOptimize(graph);
-  // AliasDb construction can be slow, so run it just on immutable types
-  // to clean up constant Ifs & other easy wins
+  // // AliasDb construction can be slow, so run it just on immutable types
+  // // to clean up constant Ifs & other easy wins
   ConstantPropagationImmutableTypes(graph);
-  Inline(*graph);
 }
 
 } // namespace jit

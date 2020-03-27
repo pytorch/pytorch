@@ -11263,6 +11263,18 @@ a")
         imported = self.getExportImportCopy(traced)
         check(imported)
 
+    def test_inlining_cleanup(self):
+        def foo(x):
+            return F.linear(x, x)
+
+        @torch.jit.script
+        def fee(x):
+            return foo(x)
+
+        # inlining optimizations should have cleaned up linear if statement
+        self.run_pass("inline", fee.graph)
+        FileCheck().check_not("prim::If").run(fee.graph)
+
     def test_trace_export_fns_recursive(self):
         class Foo(torch.nn.Module):
             def __init__(self):
