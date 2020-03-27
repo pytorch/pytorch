@@ -16714,6 +16714,10 @@ def generate_unary_floating_ufunc_promo_test(cls, op_str):
         if self.device_type == 'cuda':
             my_default_types = default_types_cuda
             my_float_types = float_types_cuda
+            # angle_cuda is not implemented for torch.half
+            if op_str == 'angle':
+                my_default_types = [type for type in default_types_cuda if type != torch.half]
+                my_float_types = [type for type in float_types_cuda if type != torch.half]
         if self.device_type in unary_ufuncs[op_str].complex_on:
             my_float_types.extend(complex_types)
 
