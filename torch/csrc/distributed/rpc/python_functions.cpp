@@ -149,6 +149,7 @@ std::shared_ptr<jit::PythonFutureWrapper> pyRpcBuiltin(
     const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf,
     const py::args& args,
     const py::kwargs& kwargs) {
+  DCHECK(PyGILState_Check());
   Stack stack;
   auto op = matchBuiltinOp(opName, args, kwargs, stack);
   // Release GIL since args and kwargs processing is done.
@@ -163,6 +164,71 @@ std::shared_ptr<jit::PythonFutureWrapper> pyRpcBuiltin(
   // passed back to Python land eventually.
   return std::make_shared<torch::jit::PythonFutureWrapper>(
       wrapFutureMessageInJitFuture(responseMessageFuture));
+}
+
+std::shared_ptr<jit::PythonFutureWrapper> pyRpcPythonUdf(
+    const WorkerInfo& dst,
+    std::string& pickledPythonUDF,
+    std::vector<torch::Tensor>& tensors,
+    const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf) {
+  DCHECK(!PyGILState_Check());
+  auto serializedPyObj =
+      SerializedPyObj(std::move(pickledPythonUDF), std::move(tensors));
+  auto pythonCall = std::make_unique<PythonCall>(std::move(serializedPyObj));
+
+  auto agent = RpcAgent::getCurrentRpcAgent();
+  auto responseMessageFuture = sendMessageWithAutograd(
+      *agent,
+      dst,
+      std::move(*pythonCall).toMessage(),
+      true /*forceGradRecording*/,
+      rf);
+
+  return std::make_shared<torch::jit::PythonFutureWrapper>(
+      wrapFutureMessageInJitFuture(responseMessageFuture),
+      [](const py::object& value) {
+        py::gil_scoped_release release;
+        auto& pythonRpcHandler = PythonRpcHandler::getInstance();
+        // This will unwrap RemoteException and raise the contained
+        // server-side Python exception on client side. A caveat here is that
+        // the exception must be raise in the client thread calling the pybind
+        // "wait" API, so that it can be correctly shown to user. A wrong way is
+        // to raise it in RPC server thread, where the exception would be
+        // swallowed in the ThreadPool task, and also no pybind handling code
+        // can help shown the Python exception.
+        pythonRpcHandler.handleException(value);
+      });
+}
+
+std::shared_ptr<jit::PythonFutureWrapper> pyRpcTorchscript(
+    const std::string& dstWorkerName,
+    const py::object& userCallable,
+    const py::tuple& argsTuple,
+    const py::dict& kwargsDict) {
+  DCHECK(!PyGILState_Check());
+  // No need to catch exception here, if function can not be found,
+  // exception will be thrown in get_function() call; if args do not match
+  // with function schema, exception will be thrown in
+  // createStackForSchema() call.
+  auto& pythonRpcHandler = PythonRpcHandler::getInstance();
+  c10::QualifiedName qualifiedName =
+      pythonRpcHandler.getQualifiedName(userCallable);
+  c10::FunctionSchema functionSchema = pythonRpcHandler.jitCompilationUnit()
+                                           ->get_function(qualifiedName)
+                                           .getSchema();
+  Stack stack;
+  {
+    py::gil_scoped_acquire acquire;
+    stack = torch::jit::createStackForSchema(
+        functionSchema,
+        argsTuple.cast<py::args>(),
+        kwargsDict.cast<py::kwargs>(),
+        c10::nullopt);
+  }
+  DCHECK(!PyGILState_Check());
+  c10::intrusive_ptr<c10::ivalue::Future> fut =
+      rpcTorchscript(dstWorkerName, qualifiedName, functionSchema, stack);
+  return std::make_shared<jit::PythonFutureWrapper>(fut);
 }
 
 PyRRef pyRemoteBuiltin(
@@ -209,39 +275,6 @@ PyRRef pyRemoteBuiltin(
   }
 }
 
-std::shared_ptr<jit::PythonFutureWrapper> pyRpcPythonUdf(
-    const WorkerInfo& dst,
-    std::string& pickledPythonUDF,
-    std::vector<torch::Tensor>& tensors,
-    const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf) {
-  auto serializedPyObj =
-      SerializedPyObj(std::move(pickledPythonUDF), std::move(tensors));
-  auto pythonCall = std::make_unique<PythonCall>(std::move(serializedPyObj));
-
-  auto agent = RpcAgent::getCurrentRpcAgent();
-  auto responseMessageFuture = sendMessageWithAutograd(
-      *agent,
-      dst,
-      std::move(*pythonCall).toMessage(),
-      true /*forceGradRecording*/,
-      rf);
-
-  return std::make_shared<torch::jit::PythonFutureWrapper>(
-      wrapFutureMessageInJitFuture(responseMessageFuture),
-      [](const py::object& value) {
-        py::gil_scoped_release release;
-        auto& pythonRpcHandler = PythonRpcHandler::getInstance();
-        // This will unwrap RemoteException and raise the contained
-        // server-side Python exception on client side. A caveat here is that
-        // the exception must be raise in the client thread calling the pybind
-        // "wait" API, so that it can be correctly shown to user. A wrong way is
-        // to raise it in RPC server thread, where the exception would be
-        // swallowed in the ThreadPool task, and also no pybind handling code
-        // can help shown the Python exception.
-        pythonRpcHandler.handleException(value);
-      });
-}
-
 PyRRef pyRemotePythonUdf(
     const WorkerInfo& dst,
     std::string& pickledPythonUDF,
@@ -285,37 +318,6 @@ PyRRef pyRemotePythonUdf(
   }
 }
 
-std::shared_ptr<jit::PythonFutureWrapper> pyRpcTorchscript(
-    const std::string& dstWorkerName,
-    const py::object& userCallable,
-    const py::tuple& argsTuple,
-    const py::dict& kwargsDict) {
-  DCHECK(!PyGILState_Check());
-  // No need to catch exception here, if function can not be found,
-  // exception will be thrown in get_function() call; if args do not match
-  // with function schema, exception will be thrown in
-  // createStackForSchema() call.
-  auto& pythonRpcHandler = PythonRpcHandler::getInstance();
-  c10::QualifiedName qualifiedName =
-      pythonRpcHandler.getQualifiedName(userCallable);
-  c10::FunctionSchema functionSchema = pythonRpcHandler.jitCompilationUnit()
-                                           ->get_function(qualifiedName)
-                                           .getSchema();
-  Stack stack;
-  {
-    py::gil_scoped_acquire acquire;
-    stack = torch::jit::createStackForSchema(
-        functionSchema,
-        argsTuple.cast<py::args>(),
-        kwargsDict.cast<py::kwargs>(),
-        c10::nullopt);
-  }
-  DCHECK(!PyGILState_Check());
-  c10::intrusive_ptr<c10::ivalue::Future> fut =
-      rpcTorchscript(dstWorkerName, qualifiedName, functionSchema, stack);
-  return std::make_shared<jit::PythonFutureWrapper>(fut);
-}
-
 PyRRef pyRemoteTorchscript(
     const std::string& dstWorkerName,
     const std::string& qualifiedNameStr,
@@ -328,8 +330,8 @@ PyRRef pyRemoteTorchscript(
                             ->get_function(qualifiedName)
                             .getSchema();
   Stack stack;
-  // Acquire GIL for py::args and py::kwargs processing.
   {
+    // Acquire GIL for py::args and py::kwargs processing.
     pybind11::gil_scoped_acquire ag;
     stack = torch::jit::createStackForSchema(
         functionSchema, args, kwargs, c10::nullopt);

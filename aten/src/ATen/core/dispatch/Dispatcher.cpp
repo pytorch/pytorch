@@ -1,13 +1,19 @@
 #include <ATen/core/dispatch/Dispatcher.h>
+#include <list>
 #include <sstream>
 
 namespace c10 {
 
 namespace detail {
+
 class RegistrationListenerList final {
 public:
-  void addListener(std::unique_ptr<OpRegistrationListener> listener) {
+  std::function<void()> addListener(std::unique_ptr<OpRegistrationListener> listener) {
     listeners_.push_back(std::move(listener));
+    auto delete_it = --listeners_.end();
+    return [this, delete_it] {
+        listeners_.erase(delete_it);
+    };
   }
 
   void callOnOperatorRegistered(const OperatorHandle& op) {
@@ -22,7 +28,7 @@ public:
     }
   }
 private:
-  std::vector<std::unique_ptr<OpRegistrationListener>> listeners_;
+  std::list<std::unique_ptr<OpRegistrationListener>> listeners_;
 };
 }
 
@@ -150,14 +156,18 @@ RegistrationHandleRAII Dispatcher::registerKernel(const OperatorHandle& op, c10:
   return op.operatorIterator_->op.registerKernel(dispatch_key, std::move(kernel));
 }
 
-void Dispatcher::addRegistrationListener(std::unique_ptr<OpRegistrationListener> listener) {
+RegistrationHandleRAII Dispatcher::addRegistrationListener(std::unique_ptr<OpRegistrationListener> listener) {
   std::lock_guard<std::mutex> lock(mutex_);
 
   for (auto iter = operators_.begin(); iter != operators_.end(); ++iter) {
     listener->onOperatorRegistered(OperatorHandle(iter));
   }
 
-  listeners_->addListener(std::move(listener));
+  auto removeListener = listeners_->addListener(std::move(listener));
+  return RegistrationHandleRAII([this, removeListener] {
+      std::lock_guard<std::mutex> lock(mutex_);
+      removeListener();
+  });
 }
 
 [[noreturn]] void Dispatcher::reportError(const DispatchTable& dispatchTable, DispatchKey dispatchKey) {

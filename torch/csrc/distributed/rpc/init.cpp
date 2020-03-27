@@ -7,10 +7,8 @@
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/types.h>
-#include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/pybind.h>
-#include <torch/csrc/utils/python_compat.h>
 #include <torch/types.h>
 
 #include <pybind11/chrono.h>
@@ -384,25 +382,12 @@ PyObject* rpc_init(PyObject* /* unused */) {
 
   module.def(
       "_invoke_rpc_builtin",
-      [](const WorkerInfo& dst,
-         const std::string& opName,
-         const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf,
-         const py::args& args,
-         const py::kwargs& kwargs) {
-        DCHECK(PyGILState_Check());
-        return pyRpcBuiltin(dst, opName, rf, args, kwargs);
-      },
+      &pyRpcBuiltin,
       py::call_guard<py::gil_scoped_acquire>());
 
   module.def(
       "_invoke_rpc_python_udf",
-      [](const WorkerInfo& dst,
-         std::string& pickledPythonUDF,
-         std::vector<torch::Tensor>& tensors,
-         const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf) {
-        DCHECK(!PyGILState_Check());
-        return pyRpcPythonUdf(dst, pickledPythonUDF, tensors, rf);
-      },
+      &pyRpcPythonUdf,
       py::call_guard<py::gil_scoped_release>(),
       py::arg("dst"),
       py::arg("pickledPythonUDF"),
@@ -416,35 +401,22 @@ PyObject* rpc_init(PyObject* /* unused */) {
 
   module.def(
       "_invoke_remote_builtin",
-      [](const WorkerInfo& dst,
-         const std::string& opName,
-         const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf,
-         const py::args& args,
-         const py::kwargs& kwargs) {
-        DCHECK(PyGILState_Check());
-        return pyRemoteBuiltin(dst, opName, rf, args, kwargs);
-      },
+      &pyRemoteBuiltin,
       py::call_guard<py::gil_scoped_acquire>());
 
   module.def(
-      "_invoke_remote_torchscript",
-      &pyRemoteTorchscript,
-      py::call_guard<py::gil_scoped_release>());
-
-  module.def(
       "_invoke_remote_python_udf",
-      [](const WorkerInfo& dst,
-         std::string& pickledPythonUDF,
-         std::vector<torch::Tensor>& tensors,
-         const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf) {
-        DCHECK(!PyGILState_Check());
-        return pyRemotePythonUdf(dst, pickledPythonUDF, tensors, rf);
-      },
+      &pyRemotePythonUdf,
       py::call_guard<py::gil_scoped_release>(),
       py::arg("dst"),
       py::arg("pickledPythonUDF"),
       py::arg("tensors"),
       py::arg("rf") = nullptr);
+
+  module.def(
+      "_invoke_remote_torchscript",
+      &pyRemoteTorchscript,
+      py::call_guard<py::gil_scoped_release>());
 
   module.def(
       "get_rpc_timeout",
