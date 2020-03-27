@@ -961,7 +961,7 @@ endif()
 # ---[ LLVM
 if (USE_LLVM)
   message(STATUS "Looking for LLVM in ${USE_LLVM}")
-  find_package(LLVM QUIET PATHS ${USE_LLVM} NO_DEFAULT_PATH)
+  find_package(LLVM PATHS ${USE_LLVM} NO_DEFAULT_PATH)
 
   if (LLVM_FOUND)
     message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
