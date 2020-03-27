@@ -122,10 +122,10 @@ struct alignas(sizeof(T) * 2) complex_common {
   constexpr complex_common(): storage{T(), T()} {}
   constexpr complex_common(const T& re, const T& im = T()): storage{re, im} {}
   template<typename U>
-  constexpr complex_common(const std::complex<U> &other): complex_common(other.real(), other.imag()) {}
+  explicit constexpr complex_common(const std::complex<U> &other): complex_common(other.real(), other.imag()) {}
 #if defined(__CUDACC__) || defined(__HIPCC__)
   template<typename U>
-  C10_HOST_DEVICE complex_common(const thrust::complex<U> &other): complex_common(other.real(), other.imag()) {}
+  explicit C10_HOST_DEVICE complex_common(const thrust::complex<U> &other): complex_common(other.real(), other.imag()) {}
 #endif
 
   constexpr complex<T> &operator =(T re) {
