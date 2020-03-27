@@ -11263,6 +11263,19 @@ a")
         imported = self.getExportImportCopy(traced)
         check(imported)
 
+    def test_elias(self):
+        import torchvision
+        # import pdb; pdb.set_trace()
+        model = torch.jit.script(torchvision.models.detection.maskrcnn_resnet50_fpn())
+        # model = torch.jit.script(torchvision.models.maskrc  ())
+        # model = torch.jit.load("fairseq_model")
+        import time
+        print("HI")
+        tic = time.perf_counter()
+        self.run_pass("inline", model.forward.graph)
+        toc = time.perf_counter()
+        print(toc - tic)
+
     def test_trace_export_fns_recursive(self):
         class Foo(torch.nn.Module):
             def __init__(self):

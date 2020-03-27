@@ -393,7 +393,7 @@ struct PeepholeOptimizeImpl {
 
       // these transformations rely on AA for correctness
       // see `runAliasingSensitivePeepholeTransformations` for more details
-      runAliasingSensitivePeepholeTransformations(node);
+      // runAliasingSensitivePeepholeTransformations(node);
     }
   }
 

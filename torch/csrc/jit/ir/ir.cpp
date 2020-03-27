@@ -10,6 +10,9 @@
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/serialization/python_print.h>
+#include <torch/csrc/jit/passes/peephole.h>
+#include <torch/csrc/jit/passes/constant_pooling.h>
+#include <torch/csrc/jit/passes/constant_propagation.h>
 
 #include <algorithm>
 #include <iostream>
@@ -1819,10 +1822,32 @@ at::ArrayRef<Value*> createTupleUnpack(Value* v) {
   return g.insertNode(g.createTupleUnpack(v))->outputs();
 }
 
+size_t node_count(Block * b) {
+  size_t count = 0;
+  for (Node * n: b->nodes()) {
+    count += 1;
+    for (Block * block: n->blocks()) {
+      count += node_count(block);
+    }
+  }
+  return count;
+}
+
 std::vector<Value*> inlineCallTo(Node* to_replace, Function* callee) {
   WithInsertPoint guard(to_replace);
   TORCH_INTERNAL_ASSERT(callee->isGraphFunction());
   std::unordered_map<Value*, Value*> value_map;
+  std::shared_ptr<Graph> graph = callee->optimized_graph();
+  // PeepholeOptimize(graph);
+  // ConstantPropagationImmutableTypes(graph);
+  auto schema = callee->pretty_print_schema();
+  if (schema.find("__torch__.torch.nn.modules.activation.ReLU self") != std::string::npos) {
+    std::cout << " hi \n";
+  }
+
+  std::cout << callee->pretty_print_schema() << "\n";
+  std::cout << "Num nodes: " << node_count(graph->block()) << "\n";
+  // ConstantPooling(graph);
   auto new_outputs = insertGraph(
       *to_replace->owningGraph(),
       *(callee->optimized_graph()),
