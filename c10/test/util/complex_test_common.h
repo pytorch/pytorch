@@ -2,9 +2,10 @@
 #include <tuple>
 #include <sstream>
 #include <c10/util/complex.h>
+#include <c10/macros/Macros.h>
 #include <gtest/gtest.h>
 
-#if (defined(__CUDACC__) || defined(__HIPCC__)) && !defined(C10_HOST_DEVICE)
+#if (defined(__CUDACC__) || defined(__HIPCC__))
 #define MAYBE_GLOBAL __global__
 #else
 #define MAYBE_GLOBAL
@@ -153,7 +154,7 @@ MAYBE_GLOBAL void test_assign_std() {
 }
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
-std::tuple<c10::complex<double>, c10::complex<float>> one_two_thrust() {
+C10_HOST_DEVICE std::tuple<c10::complex<double>, c10::complex<float>> one_two_thrust() {
   thrust::complex<float> src(1, 2);
   c10::complex<double> ret0;
   c10::complex<float> ret1;
@@ -249,7 +250,7 @@ constexpr c10::complex<scalar_t> d(scalar_t value) {
 }
 
 template<typename scalar_t>
-MAYBE_GLOBAL void test_arithmetic_assign_scalar() {
+C10_HOST_DEVICE void test_arithmetic_assign_scalar() {
   constexpr c10::complex<scalar_t> x = p(scalar_t(1));
   static_assert(x.real() == scalar_t(3), "");
   static_assert(x.imag() == scalar_t(2), "");
@@ -293,7 +294,7 @@ constexpr c10::complex<scalar_t> d(scalar_t real, scalar_t imag, c10::complex<rh
 }
 
 template<typename scalar_t>
-void test_arithmetic_assign_complex() {
+C10_HOST_DEVICE void test_arithmetic_assign_complex() {
   using namespace c10::complex_literals;
   constexpr c10::complex<scalar_t> x2 = p(scalar_t(2), scalar_t(2), 1.0_if);
   static_assert(x2.real() == scalar_t(2), "");

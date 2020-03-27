@@ -1,7 +1,6 @@
 # ---[ Test binaries.
 
 set(C10_CUDA_ALL_TEST_FILES
-    cuda_complex_test.cu
     impl/CUDATest.cpp
 )
 if (BUILD_TEST)

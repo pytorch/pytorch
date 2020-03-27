@@ -48,7 +48,8 @@ list(APPEND ATen_CUDA_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_packedtensoraccessor_test.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_tensor_interop_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_vectorized_test.cu
-  ${CMAKE_CURRENT_SOURCE_DIR}/cuda_generator_test.cu)
+  ${CMAKE_CURRENT_SOURCE_DIR}/cuda_generator_test.cu
+  ${CMAKE_CURRENT_SOURCE_DIR}/cuda_complex_test.cu)
 if (CAFFE2_USE_CUDNN)
   list(APPEND ATen_CUDA_TEST_SRCS
     ${CMAKE_CURRENT_SOURCE_DIR}/cuda_cudnn_test.cpp)
