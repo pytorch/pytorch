@@ -179,7 +179,7 @@ ${return_call} TypeDefault::${type_wrapper_name}(${native_arguments});
 STATIC_DISPATCH_FUNCTION_SWITCH_BODY = CodeTemplate("""\
 at::AutoNonVariableTypeMode _var_guard(true);
 switch(dispatchKeyToBackend(c10::impl::dispatchTypeId(${key_set},
-                            c10::DispatchKeySet(c10::DispatchKeySet::FULL).remove(DispatchKey::BackendSelect)))) {
+                            c10::DispatchKeySet(c10::DispatchKeySet::FULL).remove(DispatchKey::BackendSelect).remove(DispatchKey::Profiler)))) {
     ${static_dispatch_function_switches}
     default:
         AT_ERROR("${api_name} not implemented for ", at::toString(${key_set}));
