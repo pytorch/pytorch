@@ -59,24 +59,24 @@ class Value {
   void* ptr;
 };
 
-#define VALUE_AS_DISPATCH(Type, Name)             \
-  template <>                                     \
-  inline Type Value::as<Type>() const {           \
-    if (dtype_ != k##Name) {                      \
-      throw unsupported_dtype();                  \
-    }                                             \
-    return Name##values[0];                       \
+#define VALUE_AS_DISPATCH(Type, Name)   \
+  template <>                           \
+  inline Type Value::as<Type>() const { \
+    if (dtype_ != k##Name) {            \
+      throw unsupported_dtype();        \
+    }                                   \
+    return Name##values[0];             \
   }
 AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, VALUE_AS_DISPATCH);
 #undef VALUE_AS_DISPATCH
 
-#define VALUE_AS_VEC_DISPATCH(Type, Name)                                \
-  template <>                                                            \
-  inline const std::vector<Type>& Value::as_vec<Type>() const {          \
-    if (dtype_.scalar_type() != ScalarType::Name) {                      \
-      throw unsupported_dtype();                                         \
-    }                                                                    \
-    return Name##values;                                                 \
+#define VALUE_AS_VEC_DISPATCH(Type, Name)                       \
+  template <>                                                   \
+  inline const std::vector<Type>& Value::as_vec<Type>() const { \
+    if (dtype_.scalar_type() != ScalarType::Name) {             \
+      throw unsupported_dtype();                                \
+    }                                                           \
+    return Name##values;                                        \
   }
 AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, VALUE_AS_VEC_DISPATCH);
 #undef VALUE_AS_VEC_DISPATCH
@@ -479,7 +479,6 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
       throw malformed_input(v);
     }
 
-
     if (src_dtype != dst_dtype) {
       switch (src_dtype.scalar_type()) {
 #define SRC_TYPE_CASE(Type, Name)                      \
@@ -796,15 +795,14 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
       internal_buffers_;
 };
 
-using VarMapping = std::vector<std::pair<ExprHandle, ExprHandle>>;
+using VarMapping = std::vector<std::pair<const Var*, const Expr*>>;
 
 class VarSubMutator : public IRMutator {
  public:
   VarSubMutator(const VarMapping& var_mapping) {
     for (const auto& entry : var_mapping) {
-      const ExprHandle& key = entry.first;
-      const ExprHandle& value = entry.second;
-      const Var* key_var = key.AsNode<Var>();
+      const Var* key_var = entry.first;
+      const Expr* value = entry.second;
       if (!key_var) {
         throw malformed_input();
       }
@@ -815,13 +813,13 @@ class VarSubMutator : public IRMutator {
   const Expr* mutate(const Var* var) override {
     auto iter = var_mapping_.find(var);
     if (iter == var_mapping_.end()) {
-      return const_cast<Var*>(var);
+      return var;
     }
-    return iter->second.node();
+    return iter->second;
   }
 
  private:
-  std::unordered_map<const Var*, ExprHandle> var_mapping_;
+  std::unordered_map<const Var*, const Expr*> var_mapping_;
 };
 
 template <class CodeGenType>

@@ -281,11 +281,8 @@ void ProcessGroupAgent::shutdown() {
       }
     }
   }
-  listenerThread_.join();
-  // Note: calling threadPool_.waitWorkComplete() after listenerThread.join() so
-  // that we can finish any possible work enqueued into the thread pool, before
-  // python RPC handler is shutdown (see shutdown in rpc/api.py).
   threadPool_.waitWorkComplete();
+  listenerThread_.join();
 }
 
 std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
@@ -478,15 +475,13 @@ void ProcessGroupAgent::enqueueSend(SendWork work) {
         } catch (std::exception& e) {
           auto errorStr = c10::str(
               "Encountered exception in ProcessGroupAgent::enqueueSend: ",
-              e.what());
+              e.what(),
+              " on node: ",
+              RpcAgent::getWorkerInfo().id_);
           auto exceptionMsg =
               rpc::createExceptionResponse(errorStr, work.message_.id());
           if (work.message_.isRequest()) {
-            auto err = c10::str(
-                "Encountered exception in ProcessGroupAgent::enqueueSend: ",
-                e.what());
-            auto exceptionMsg =
-                rpc::createExceptionResponse(err, work.message_.id());
+            // Mark the future with corresponding to this request with an error.
             markFutureWithError(exceptionMsg);
           } else if (work.message_.isResponse()) {
             // Try sending the error along.
@@ -683,14 +678,14 @@ void ProcessGroupAgent::listenLoop() {
       listenLoopException_ = std::current_exception();
     }
   } catch (...) {
-    std::string unknownErrorMsg =
-        "Unknown exception occured in "
-        "ProcessGroupAgent::listenLoop. RPC Agent is in an unhealthy state and "
-        "unusable.";
-    LOG(ERROR) << unknownErrorMsg;
     {
       // Lock write to listenLoopException_ since ::send() reads from it.
       std::lock_guard<std::mutex> guard(listenLoopExceptionMutex_);
+      std::string unknownErrorMsg =
+          "Unknown exception occured in "
+          "ProcessGroupAgent::listenLoop. RPC Agent is in an unhealthy state and "
+          "unusable.";
+      LOG(ERROR) << unknownErrorMsg;
       listenLoopException_ =
           std::make_exception_ptr(std::runtime_error(unknownErrorMsg));
     }
