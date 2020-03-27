@@ -707,7 +707,15 @@ bool isWeight(Module& module, Value* v) {
     if (n->kind() == prim::CallMethod) {
       auto m = getInvokedModule(module, n, self);
       std::shared_ptr<Graph> g = m.get_method(n->s(attr::name)).graph();
-      result |= isWeight(m, g->inputs()[u.offset]);
+      auto call_method_result = isWeight(m, g->inputs()[u.offset]);
+      if (!call_method_result) {
+        if (result) {
+          TORCH_CHECK(call_method_result == result,
+                      "Expected all CallMethods in the graph to produce same result.")
+        }
+      } else {
+        result = call_method_result;
+      }
     }
   }
   return result;
@@ -1291,9 +1299,8 @@ void insertQuantDeQuantCall(
     Module& module,
     bool is_dynamic=false) {
   Graph* g = observer->owningGraph();
-  // Original value that is observed
-  Value* v = observer->input(1);
-
+  // Observer output
+  Value* v = observer->output();
   // Inserting before insert point
   WithInsertPoint ins(v->node()->next());
 
@@ -1336,10 +1343,13 @@ void insertQuantDeQuantCall(
     quant->output()->setDebugName(v->debugName() + ".quant");
     g->insertNode(quant);
   }
+  Value* original_val = observer->input(1);
+  v->replaceAllUsesWith(original_val);
+
   // two passes to insert the dequant for every usage
-  // in first pass, identify all the nodes using "v"
+  // in first pass, identify all the nodes using original observed value.
   std::vector<Use> uses;
-  for (const auto& use : v->uses()) {
+  for (const auto& use : original_val->uses()) {
     // Skip quant node and observer node (we need to keep
     // observer nodes around since we need them to
     // find the quantization parameters)
@@ -1347,8 +1357,8 @@ void insertQuantDeQuantCall(
       uses.push_back(use);
     }
   }
-  // in second pass, replace the input "v" with dequant output
-  insertDeQuantCall(g, quant->output(), v, uses);
+  // in second pass, replace the original observed value with dequant output
+  insertDeQuantCall(g, quant->output(), original_val, uses);
 }
 
 // find the observer for Value `v` and return the name of the observer
@@ -1472,8 +1482,8 @@ void InsertQuantDeQuantHelper::collectObserverNodesAndValueToQuantize(
   nodes_to_destroy_[g].push_back(observer);
   // GetAttr node for observer module
   nodes_to_destroy_[g].push_back(observer->inputs()[0]->node());
-  Value* original_value = observer->input(1);
-  v->replaceAllUsesWith(original_value);
+  //Value* original_value = observer->input(1);
+  //v->replaceAllUsesWith(original_value);
   observer_nodes_for_graph_[g].push_back(observer);
 }
 
