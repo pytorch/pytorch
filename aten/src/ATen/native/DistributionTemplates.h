@@ -266,8 +266,14 @@ Tensor normal_impl(const Tensor& mean, const Tensor& std, Generator gen) {
 
 template<template<typename> class uniform_kernel, typename RNG>
 at::Tensor& uniform_impl_(at::Tensor& self, double from, double to, at::Generator generator) {
-  auto iter = at::TensorIterator::nullary_op(self);
-  uniform_kernel<RNG>()(iter, from, to, generator);
+  if (self.is_complex()) {
+    auto float_tensor = at::native::view_complex_as_float(self);
+    auto iter = at::TensorIterator::nullary_op(float_tensor);
+    uniform_kernel<RNG>()(iter, from, to, generator);
+  } else {
+    auto iter = at::TensorIterator::nullary_op(self);
+    uniform_kernel<RNG>()(iter, from, to, generator);
+  }
   return self;
 }
 
