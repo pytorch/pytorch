@@ -1,14 +1,10 @@
-#include <ATen/core/dispatch/Dispatcher.h>
-
-using c10::DispatchKey;
-using c10::Dispatcher;
-using c10::KernelFunction;
+#include <ATen/core/op_registration/op_registration.h>
 
 namespace {
 
-static auto registry = Dispatcher::singleton().registerBackendFallbackKernel(
-    DispatchKey::BackendSelect,
-    KernelFunction::makeFallthrough()
-);
+static auto registry = c10::import()
+  .fallback(c10::dispatch(c10::DispatchKey::BackendSelect, c10::CppFunction::makeFallthrough()))
+  .fallback(c10::dispatch(c10::DispatchKey::BackendGeneric, c10::CppFunction::makeFallthrough()))
+;
 
 }

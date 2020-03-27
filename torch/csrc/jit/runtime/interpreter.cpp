@@ -20,6 +20,11 @@
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 
+#ifdef USE_DISTRIBUTED
+#include <torch/csrc/distributed/autograd/context/container.h>
+using torch::distributed::autograd::DistAutogradContainer;
+#endif
+
 #include <exception>
 #include <iostream>
 #include <memory>
@@ -207,6 +212,14 @@ void insertLastUses(Graph& g) {
   };
 
   InsertLastUses ilu(g);
+}
+
+inline int64_t getDistAutogradContextId() {
+#ifdef USE_DISTRIBUTED
+  return DistAutogradContainer::currentContextId();
+#else
+  return 0;
+#endif
 }
 } // namespace
 
@@ -1148,7 +1161,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                   at::launch(InterpreterContinuation(
                       state_,
                       std::move(stack_),
-                      torch::ThreadLocalState::getThreadLocalState()));
+                      getDistAutogradContextId()));
                 }
 
                private:
@@ -1273,7 +1286,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             InterpreterContinuation continuation(
                 forked_interpreter,
                 Stack(stack.end() - inst.N, stack.end()),
-                torch::ThreadLocalState::getThreadLocalState());
+                getDistAutogradContextId());
             drop(stack, inst.N);
             push(stack, forked_interpreter.getFuture());
             at::launch(std::move(continuation));
@@ -1451,8 +1464,14 @@ InterpreterState::InterpreterState(
     : pImpl(std::move(pImpl_)) {}
 
 void InterpreterContinuation::operator()() {
-  torch::ThreadLocalStateGuard guard(thread_local_state);
+#ifdef USE_DISTRIBUTED
+  auto prev_dist_id = DistAutogradContainer::currentContextId();
+  DistAutogradContainer::forceCurrentContextId(dist_autograd_context_id_);
+#endif
   state.runAsync(stack);
+#ifdef USE_DISTRIBUTED
+  DistAutogradContainer::forceCurrentContextId(prev_dist_id);
+#endif
 }
 } // namespace jit
 } // namespace torch
