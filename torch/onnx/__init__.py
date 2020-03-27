@@ -28,7 +28,7 @@ def _export(*args, **kwargs):
     return result
 
 
-def export(model, args, f, export_params=True, verbose=False, training=False,
+def export(model, args, f, export_params=True, verbose=False, training=TrainingMode.EVAL,
            input_names=None, output_names=None, aten=False, export_raw_ir=False,
            operator_export_type=None, opset_version=None, _retain_param_name=True,
            do_constant_folding=True, example_outputs=None, strip_doc_string=True,
