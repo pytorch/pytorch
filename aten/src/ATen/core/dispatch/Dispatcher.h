@@ -147,7 +147,7 @@ public:
    * for all previously registered ops, so it can be used to keep track of ops
    * registered with this dispatcher.
    */
-  void addRegistrationListener(std::unique_ptr<OpRegistrationListener> listener);
+  RegistrationHandleRAII addRegistrationListener(std::unique_ptr<OpRegistrationListener> listener);
 
 private:
   Dispatcher();

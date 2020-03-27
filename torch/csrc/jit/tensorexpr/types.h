@@ -136,7 +136,6 @@ inline Dtype BinaryOpDtype(
     throw malformed_input();
   }
 
-
   if (lanes == 1) {
     // Use the fixed scalar Dtypes.
     return ToDtype(resultType);
