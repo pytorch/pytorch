@@ -1,9 +1,9 @@
-#include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/OpsAlreadyMovedToC10.h>
+#include <ATen/core/dispatch/Dispatcher.h>
 #include <torch/csrc/autograd/record_function.h>
-#include <torch/csrc/jit/runtime/operator.h>
-#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/frontend/tracer.h>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/runtime/operator.h>
 #include <unordered_set>
 
 namespace torch {
@@ -146,9 +146,9 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
 }
 
 class RegistrationListener final : public c10::OpRegistrationListener {
-public:
+ public:
   void onOperatorRegistered(const c10::OperatorHandle& op) override {
-    if(at::is_aten_op(op.schema().operator_name())) {
+    if (at::is_aten_op(op.schema().operator_name())) {
       // Ignore ATen ops for now because they have their own code
       // to expose them to JIT in register_aten_ops.cpp
       // TODO Remove register_aten_ops.cpp and also use this registration here
@@ -158,7 +158,7 @@ public:
   }
 
   void onOperatorDeregistered(const c10::OperatorHandle& op) override {
-    if(at::is_aten_op(op.schema().operator_name())) {
+    if (at::is_aten_op(op.schema().operator_name())) {
       return;
     }
     torch::jit::deregisterOperator(op.schema());
@@ -166,12 +166,11 @@ public:
 };
 
 struct Registerer final {
-    // this immediately calls the listener on all existing ops,
-    // and calls it in future whenever a new op is registered
-  Registerer(): listenerRAII(c10::Dispatcher::singleton().addRegistrationListener(
-      std::make_unique<RegistrationListener>()
-    )) {
-  }
+  // this immediately calls the listener on all existing ops,
+  // and calls it in future whenever a new op is registered
+  Registerer()
+      : listenerRAII(c10::Dispatcher::singleton().addRegistrationListener(
+            std::make_unique<RegistrationListener>())) {}
   c10::RegistrationHandleRAII listenerRAII;
 };
 
@@ -190,4 +189,4 @@ void ensure_c10_registerer_defined() {
 }
 
 } // namespace jit
-}
+} // namespace torch

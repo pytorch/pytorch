@@ -32,7 +32,6 @@ libtorch_sources = [
     ":generate-code=VariableType_2.cpp",
     ":generate-code=VariableType_3.cpp",
     ":generate-code=VariableType_4.cpp",
-    "torch/csrc/ThreadLocalState.cpp",
     "torch/csrc/autograd/VariableTypeManual.cpp",
     "torch/csrc/autograd/anomaly_mode.cpp",
     "torch/csrc/autograd/autograd.cpp",
