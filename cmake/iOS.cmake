@@ -40,10 +40,10 @@ set (CMAKE_OSX_DEPLOYMENT_TARGET "" CACHE STRING "Force unset of the deployment 
 
 # Determine the cmake host system version so we know where to find the iOS SDKs
 find_program (CMAKE_UNAME uname /bin /usr/bin /usr/local/bin)
-if (CMAKE_UNAME)
+if(CMAKE_UNAME)
     exec_program(uname ARGS -r OUTPUT_VARIABLE CMAKE_HOST_SYSTEM_VERSION)
     string (REGEX REPLACE "^([0-9]+)\\.([0-9]+).*$" "\\1" DARWIN_MAJOR_VERSION "${CMAKE_HOST_SYSTEM_VERSION}")
-endif (CMAKE_UNAME)
+endif(CMAKE_UNAME)
 
 # Force the compilers to gcc for iOS
 set(CMAKE_C_COMPILER /usr/bin/gcc CACHE STRING "")
@@ -53,35 +53,35 @@ set(CMAKE_RANLIB ranlib CACHE FILEPATH "" FORCE)
 set(PKG_CONFIG_EXECUTABLE pkg-config CACHE FILEPATH "" FORCE)
 
 # Setup iOS platform unless specified manually with IOS_PLATFORM
-if (NOT DEFINED IOS_PLATFORM)
+if(NOT DEFINED IOS_PLATFORM)
     set (IOS_PLATFORM "OS")
-endif (NOT DEFINED IOS_PLATFORM)
+endif(NOT DEFINED IOS_PLATFORM)
 set (IOS_PLATFORM ${IOS_PLATFORM} CACHE STRING "Type of iOS Platform")
 
 # Check the platform selection and setup for developer root
-if (${IOS_PLATFORM} STREQUAL "OS")
+if(${IOS_PLATFORM} STREQUAL "OS")
     set (IOS_PLATFORM_LOCATION "iPhoneOS.platform")
     set (XCODE_IOS_PLATFORM iphoneos)
 
     # This causes the installers to properly locate the output libraries
     set (CMAKE_XCODE_EFFECTIVE_PLATFORMS "-iphoneos")
-elseif (${IOS_PLATFORM} STREQUAL "SIMULATOR")
+elseif(${IOS_PLATFORM} STREQUAL "SIMULATOR")
     set (IOS_PLATFORM_LOCATION "iPhoneSimulator.platform")
     set (XCODE_IOS_PLATFORM iphonesimulator)
 
     # This causes the installers to properly locate the output libraries
     set (CMAKE_XCODE_EFFECTIVE_PLATFORMS "-iphonesimulator")
-elseif (${IOS_PLATFORM} STREQUAL "WATCHOS")
+elseif(${IOS_PLATFORM} STREQUAL "WATCHOS")
     set (IOS_PLATFORM_LOCATION "WatchOS.platform")
     set (XCODE_IOS_PLATFORM watchos)
 
     # This causes the installers to properly locate the output libraries
     set (CMAKE_XCODE_EFFECTIVE_PLATFORMS "-watchos")
-else (${IOS_PLATFORM} STREQUAL "OS")
+else(${IOS_PLATFORM} STREQUAL "OS")
     message (FATAL_ERROR
              "Unsupported IOS_PLATFORM value selected. "
              "Please choose OS, SIMULATOR, or WATCHOS.")
-endif ()
+endif()
 
 # All iOS/Darwin specific settings - some may be redundant
 set (CMAKE_SHARED_LIBRARY_PREFIX "lib")
@@ -96,7 +96,7 @@ set (CMAKE_C_OSX_CURRENT_VERSION_FLAG "-current_version ")
 set (CMAKE_CXX_OSX_COMPATIBILITY_VERSION_FLAG "${CMAKE_C_OSX_COMPATIBILITY_VERSION_FLAG}")
 set (CMAKE_CXX_OSX_CURRENT_VERSION_FLAG "${CMAKE_C_OSX_CURRENT_VERSION_FLAG}")
 
-if (IOS_DEPLOYMENT_TARGET)
+if(IOS_DEPLOYMENT_TARGET)
   set(XCODE_IOS_PLATFORM_VERSION_FLAGS "-m${XCODE_IOS_PLATFORM}-version-min=${IOS_DEPLOYMENT_TARGET}")
 endif()
 
@@ -118,9 +118,9 @@ set (CMAKE_FIND_LIBRARY_SUFFIXES ".dylib" ".so" ".a")
 # (where install_name_tool was hardcoded) and where CMAKE_INSTALL_NAME_TOOL isn't in the cache
 # and still cmake didn't fail in CMakeFindBinUtils.cmake (because it isn't rerun)
 # hardcode CMAKE_INSTALL_NAME_TOOL here to install_name_tool, so it behaves as it did before, Alex
-if (NOT DEFINED CMAKE_INSTALL_NAME_TOOL)
+if(NOT DEFINED CMAKE_INSTALL_NAME_TOOL)
     find_program(CMAKE_INSTALL_NAME_TOOL install_name_tool)
-endif (NOT DEFINED CMAKE_INSTALL_NAME_TOOL)
+endif(NOT DEFINED CMAKE_INSTALL_NAME_TOOL)
 
 # Setup iOS deployment target
 set (IOS_DEPLOYMENT_TARGET ${IOS_DEPLOYMENT_TARGET} CACHE STRING "Minimum iOS version")
@@ -130,40 +130,40 @@ set (IOS_DEPLOYMENT_TARGET ${IOS_DEPLOYMENT_TARGET} CACHE STRING "Minimum iOS ve
 exec_program(/usr/bin/xcode-select ARGS -print-path OUTPUT_VARIABLE CMAKE_XCODE_DEVELOPER_DIR)
 set (XCODE_POST_43_ROOT "${CMAKE_XCODE_DEVELOPER_DIR}/Platforms/${IOS_PLATFORM_LOCATION}/Developer")
 set (XCODE_PRE_43_ROOT "/Developer/Platforms/${IOS_PLATFORM_LOCATION}/Developer")
-if (NOT DEFINED CMAKE_IOS_DEVELOPER_ROOT)
-    if (EXISTS ${XCODE_POST_43_ROOT})
+if(NOT DEFINED CMAKE_IOS_DEVELOPER_ROOT)
+    if(EXISTS ${XCODE_POST_43_ROOT})
         set (CMAKE_IOS_DEVELOPER_ROOT ${XCODE_POST_43_ROOT})
     elseif(EXISTS ${XCODE_PRE_43_ROOT})
         set (CMAKE_IOS_DEVELOPER_ROOT ${XCODE_PRE_43_ROOT})
-    endif (EXISTS ${XCODE_POST_43_ROOT})
-endif (NOT DEFINED CMAKE_IOS_DEVELOPER_ROOT)
+    endif(EXISTS ${XCODE_POST_43_ROOT})
+endif(NOT DEFINED CMAKE_IOS_DEVELOPER_ROOT)
 set (CMAKE_IOS_DEVELOPER_ROOT ${CMAKE_IOS_DEVELOPER_ROOT} CACHE PATH "Location of iOS Platform")
 
 # Find and use the most recent iOS sdk unless specified manually with CMAKE_IOS_SDK_ROOT
-if (NOT DEFINED CMAKE_IOS_SDK_ROOT)
+if(NOT DEFINED CMAKE_IOS_SDK_ROOT)
     file (GLOB _CMAKE_IOS_SDKS "${CMAKE_IOS_DEVELOPER_ROOT}/SDKs/*")
-    if (_CMAKE_IOS_SDKS) 
+    if(_CMAKE_IOS_SDKS) 
         list (SORT _CMAKE_IOS_SDKS)
         list (REVERSE _CMAKE_IOS_SDKS)
         list (GET _CMAKE_IOS_SDKS 0 CMAKE_IOS_SDK_ROOT)
-    else (_CMAKE_IOS_SDKS)
+    else(_CMAKE_IOS_SDKS)
         message (FATAL_ERROR "No iOS SDK's found in default search path ${CMAKE_IOS_DEVELOPER_ROOT}. Manually set CMAKE_IOS_SDK_ROOT or install the iOS SDK.")
-    endif (_CMAKE_IOS_SDKS)
+    endif(_CMAKE_IOS_SDKS)
     message (STATUS "Toolchain using default iOS SDK: ${CMAKE_IOS_SDK_ROOT}")
-endif (NOT DEFINED CMAKE_IOS_SDK_ROOT)
+endif(NOT DEFINED CMAKE_IOS_SDK_ROOT)
 set (CMAKE_IOS_SDK_ROOT ${CMAKE_IOS_SDK_ROOT} CACHE PATH "Location of the selected iOS SDK")
 
 # Set the sysroot default to the most recent SDK
 set (CMAKE_OSX_SYSROOT ${CMAKE_IOS_SDK_ROOT} CACHE PATH "Sysroot used for iOS support")
 
 # set the architecture for iOS 
-if (IOS_PLATFORM STREQUAL "OS")
+if(IOS_PLATFORM STREQUAL "OS")
     set (DEFAULT_IOS_ARCH "arm64")
-elseif (IOS_PLATFORM STREQUAL "SIMULATOR")
+elseif(IOS_PLATFORM STREQUAL "SIMULATOR")
     set (DEFAULT_IOS_ARCH "x86_64")
-elseif (IOS_PLATFORM STREQUAL "WATCHOS")
+elseif(IOS_PLATFORM STREQUAL "WATCHOS")
     set (DEFAULT_IOS_ARCH "armv7k;arm64_32")
-endif ()
+endif()
 
 set (IOS_ARCH ${DEFAULT_IOS_ARCH} CACHE string  "Build architecture for iOS")
 set (CMAKE_OSX_ARCHITECTURES ${IOS_ARCH} CACHE string  "Build architecture for iOS")
