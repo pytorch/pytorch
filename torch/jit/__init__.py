@@ -6,7 +6,7 @@ import torch.jit._recursive
 
 from torch.jit._recursive import ScriptMethodStub
 from torch.jit._builtins import _find_builtin, _get_builtin_table, _register_builtin  # noqa
-from torch._jit_internal import _qualified_name
+from torch._jit_internal import Future, _qualified_name
 from torch.autograd import Variable, function
 from torch.jit.frontend import get_jit_class_def, get_jit_def, get_default_args
 from torch.nn import Module
@@ -20,6 +20,7 @@ import copy
 import functools
 import inspect
 import os
+import pathlib
 import pickle
 import re
 import sys
@@ -31,9 +32,6 @@ import weakref
 # These are imported so users can access them from the `torch.jit` module
 from torch._jit_internal import Final, _overload, _overload_method
 from torch._jit_internal import ignore, export, unused
-
-if sys.version_info[0] > 2:
-    import pathlib
 
 def _parse_env(name, default, true_message, false_message):
     value = os.environ.get(name)
@@ -62,7 +60,6 @@ _jit_script_class_compile = torch._C._jit_script_class_compile
 # destruction order issues.
 _python_cu = torch._C.CompilationUnit()
 
-Future = torch._C.Future
 set_module(Future, "torch.jit")
 _fork = torch._C.fork
 _wait = torch._C.wait
@@ -144,9 +141,7 @@ def save(m, f, _extra_files=DEFAULT_EXTRA_FILES_MAP):
             extra_files['foo.txt'] = 'bar'
             torch.jit.save(m, 'scriptmodule.pt', _extra_files=extra_files)
     """
-    if isinstance(f, str) or \
-            (sys.version_info[0] == 2 and isinstance(f, unicode)) or \
-            (sys.version_info[0] == 3 and isinstance(f, pathlib.Path)):
+    if isinstance(f, str) or isinstance(f, pathlib.Path):
         m.save(f, _extra_files=_extra_files)
     else:
         ret = m.save_to_buffer(_extra_files=_extra_files)
@@ -228,9 +223,7 @@ def load(f, map_location=None, _extra_files=DEFAULT_EXTRA_FILES_MAP):
         validate_cuda_device(map_location)
 
     cu = torch._C.CompilationUnit()
-    if isinstance(f, str) or \
-            (sys.version_info[0] == 2 and isinstance(f, unicode)) or \
-            (sys.version_info[0] == 3 and isinstance(f, pathlib.Path)):
+    if isinstance(f, str) or isinstance(f, pathlib.Path):
         cpp_module = torch._C.import_ir_module(cu, f, map_location, _extra_files)
     else:
         cpp_module = torch._C.import_ir_module_from_buffer(cu, f.read(), map_location, _extra_files)
@@ -1322,6 +1315,32 @@ def interface(obj):
     return obj
 
 
+def _script_if_tracing(fn):
+    """
+    Compiles ``fn`` when it is first called during tracing. ``torch.jit.script``
+    has a non-negligible start up time when it is first called due to
+    lazy-initializations of many compiler builtins. Therefore you should not use
+    it in library code. However, you may want to have parts of your library work
+    in tracing even if they use control flow. In these cases, you should use
+    ``@torch.jit._script_if_tracing`` to substitute for
+    ``torch.jit.script``.
+    """
+    # You can't modify closed-over variables in Python 2, so make this a dict and
+    # mutate it
+    compiled_fn = {}
+
+    @functools.wraps(fn)
+    def wrapper(*args):
+        if not is_tracing():
+            # Not tracing, don't do anything
+            return fn(*args)
+
+        if 'fn' not in compiled_fn:
+            compiled_fn['fn'] = script(fn, _frames_up=1)
+        return compiled_fn['fn'](*args)
+
+    return wrapper
+
 
 def script_method(fn):
     if not _enabled:
@@ -1345,7 +1364,7 @@ def script_method(fn):
 
 
 # These OrderedDictWrapper classes replace the actual OrderedDicts in
-# module with versions that get/set properties inside of script::Module.
+# module with versions that get/set properties inside of Module.
 # This allows us to reuse most of nn.Module while still storing the
 # data in C++.
 # Each OrderedDict needs to support:
@@ -1398,7 +1417,7 @@ class OrderedModuleDict(OrderedDictWrapper):
         # contains _both_ script modules and non-script python-only modules
 
         # because script modules are subclassed in python and the
-        # C++ script::Module class will not hold references to them,
+        # C++ Module class will not hold references to them,
         # to ensure that you always get the same python value here
         # we store it in the python dict as well
         self._python_modules = python_dict
@@ -1504,7 +1523,7 @@ if _enabled:
 
     class ScriptModule(with_metaclass(ScriptMeta, Module)):
         """
-        ``ScriptModule``s wrap a C++ ``torch::jit::script::Module``. ``ScriptModule``s
+        ``ScriptModule``s wrap a C++ ``torch::jit::Module``. ``ScriptModule``s
         contain methods, attributes, parameters, and
         constants. These can be accessed the same as on a normal ``nn.Module``.
         """
@@ -1604,7 +1623,7 @@ if _enabled:
             control of how the RecursiveScriptModule instance is created).
 
             Arguments:
-                cpp_module:  The C++ script::Module that will hold the actual state of
+                cpp_module:  The C++ Module that will hold the actual state of
                              this RecursiveScriptModule instance.
                 init_fn:  Lambda that initializes the RecursiveScriptModule passed to it.
             """
@@ -1853,7 +1872,16 @@ class TracedModule(ScriptModule):
         # Copy a subset of `orig` to a temporary nn.Module.
         # This is a way to customize what will actually get compiled by create_script_module
         id_set = set()
-        tmp_module = Module()
+
+        # This allows us to preserve the original module's qualified name by defining a new
+        # type with the attribute _jit_override_qualname. In torch._jit_internal._qualified_name
+        # we have a special case that will look up this attribute to override whatever qualname
+        # we would get from the python type system
+        class QualnameWrapper(torch.nn.Module):
+            pass
+        QualnameWrapper._jit_override_qualname = torch._jit_internal._qualified_name(type(orig))
+
+        tmp_module = QualnameWrapper()
 
         def check_unique(param):
             if param in id_set:
@@ -1880,8 +1908,6 @@ class TracedModule(ScriptModule):
         for name, submodule in orig._modules.items():
             tmp_module._modules[name] = make_module(submodule, TracedModule, _compilation_unit=None)
 
-        # TODO: this way of doing it means we lose name information on the class,
-        # since the qualname is basically "nn.Module"
         script_module = torch.jit._recursive.create_script_module(tmp_module, lambda module: (), share_types=False)
 
         self.__dict__['_name'] = type(orig).__name__
@@ -1933,6 +1959,14 @@ def is_scripting():
               return unsupported_linear_op(x)
     """
     return False
+
+
+def is_tracing():
+    """
+    Returns ``True`` in tracing (if a function is called during the tracing of
+    code with ``torch.jit.trace``) and ``False`` otherwise.
+    """
+    return torch._C._is_tracing
 
 def _unwrap_optional(x):
     assert x is not None, "Unwrapping null optional"

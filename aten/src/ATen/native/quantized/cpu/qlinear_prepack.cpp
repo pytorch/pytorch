@@ -308,18 +308,22 @@ static auto siof = register_linear_params();
 
 static auto registry =
     c10::RegisterOperators()
-        .op("quantized::linear_prepack(Tensor W, Tensor? B=None) -> __torch__.torch.classes.LinearPackedParamsBase W_prepack",
-            c10::RegisterOperators::options().kernel<QLinearPackWeightInt8>(
-                DispatchKey::QuantizedCPUTensorId))
-        .op("quantized::linear_prepack_fp16(Tensor W, Tensor? B=None) -> __torch__.torch.classes.LinearPackedParamsBase W_prepack",
-            c10::RegisterOperators::options().kernel<QLinearPackWeightFp16>(
-                DispatchKey::CPUTensorId))
-        .op("_quantized::linear_prepack(Tensor W, Tensor? B=None) -> __torch__.torch.classes.LinearPackedParamsBase W_prepack",
-            c10::RegisterOperators::options().kernel<QLinearPackWeightInt8>(
-                DispatchKey::QuantizedCPUTensorId))
-        .op("_quantized::linear_prepack_fp16(Tensor W, Tensor? B=None) -> __torch__.torch.classes.LinearPackedParamsBase W_prepack",
-            c10::RegisterOperators::options().kernel<QLinearPackWeightFp16>(
-                DispatchKey::CPUTensorId));
+        .op("quantized::linear_prepack(Tensor W, Tensor? B=None) -> __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack",
+            c10::RegisterOperators::options()
+            .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
+            .kernel<QLinearPackWeightInt8>(DispatchKey::QuantizedCPUTensorId))
+        .op("quantized::linear_prepack_fp16(Tensor W, Tensor? B=None) -> __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack",
+            c10::RegisterOperators::options()
+            .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
+            .kernel<QLinearPackWeightFp16>(DispatchKey::CPUTensorId))
+        .op("_quantized::linear_prepack(Tensor W, Tensor? B=None) -> __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack",
+            c10::RegisterOperators::options()
+            .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
+            .kernel<QLinearPackWeightInt8>(DispatchKey::QuantizedCPUTensorId))
+        .op("_quantized::linear_prepack_fp16(Tensor W, Tensor? B=None) -> __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack",
+            c10::RegisterOperators::options()
+            .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
+            .kernel<QLinearPackWeightFp16>(DispatchKey::CPUTensorId));
 
 } // namespace
 } // namespace native

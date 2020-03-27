@@ -210,7 +210,7 @@ Tensor ConvertToChannelsLast3dTensor(const Tensor& src) {
 torch::jit::class_<LinearPackedParamsBase> register_linear_params() {
   using SerializationType = std::tuple<at::Tensor, c10::optional<at::Tensor>, std::string, std::string>;
   static auto register_linear_params =
-      torch::jit::class_<LinearPackedParamsBase>("LinearPackedParamsBase")
+      torch::jit::class_<LinearPackedParamsBase>("quantized", "LinearPackedParamsBase")
           .def_pickle(
               [](const c10::intrusive_ptr<LinearPackedParamsBase>& params)
                   -> SerializationType { // __getstate__

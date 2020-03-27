@@ -1,5 +1,6 @@
 #pragma once
 
+#include <string>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 namespace torch { namespace autograd {
@@ -20,7 +21,7 @@ private:
 struct TORCH_API AnomalyMetadata {
   virtual ~AnomalyMetadata();
   virtual void store_stack() = 0;
-  virtual void print_stack() = 0;
+  virtual void print_stack(const std::string& current_node_name) = 0;
 };
 
 }}

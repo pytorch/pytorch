@@ -99,9 +99,10 @@ py::object toPyObjInternal(RpcCommandBase& rpc, MessageType messageType) {
     case MessageType::PYTHON_RET: {
       // TODO: Try to avoid a copy here.
       auto& resp = static_cast<PythonResp&>(rpc);
-
-      return PythonRpcHandler::getInstance().loadPythonUDFResult(
-          resp.pickledPayload(), resp.tensors());
+      auto& pythonRpcHandler = PythonRpcHandler::getInstance();
+      py::object ret = pythonRpcHandler.deserialize(resp.serializedPyObj());
+      pythonRpcHandler.handleException(ret);
+      return ret;
     }
     default: {
       TORCH_CHECK(false, "Unrecognized response message type ", messageType);
@@ -144,22 +145,35 @@ PyRRef pyRemoteBuiltin(
   TypePtr returnType = op->schema().returns()[0].type();
 
   auto& ctx = RRefContext::getInstance();
-  // TODO: support creating RRefs on a local object.
-  TORCH_INTERNAL_ASSERT(
-      ctx.getWorkerId() != dst.id_,
-      "Does not support creating RRef on self yet.");
-  auto userRRef = ctx.createUserRRef(dst.id_, returnType);
-
-  auto scriptRemoteCall = std::make_unique<ScriptRemoteCall>(
-      op, std::move(stack), userRRef->rrefId(), userRRef->forkId());
-
   auto agent = RpcAgent::getCurrentRpcAgent();
-  auto fm = sendMessageWithAutograd(
-      *agent, dst, std::move(*scriptRemoteCall).toMessage(), false, rf);
 
-  ctx.addPendingUser(userRRef->forkId(), userRRef);
-  fm->addCallback(callback::confirmPendingUser);
-  return PyRRef(userRRef);
+  if (ctx.getWorkerId() != dst.id_) {
+    auto userRRef = ctx.createUserRRef(dst.id_, returnType);
+
+    auto scriptRemoteCall = std::make_unique<ScriptRemoteCall>(
+        op, std::move(stack), userRRef->rrefId(), userRRef->forkId());
+
+    auto fm = sendMessageWithAutograd(
+        *agent, dst, std::move(*scriptRemoteCall).toMessage(), false, rf);
+
+    ctx.addPendingUser(userRRef->forkId(), userRRef);
+    fm->addCallback(callback::confirmPendingUser);
+    return PyRRef(userRRef);
+  } else {
+    auto ownerRRef = ctx.createOwnerRRef(returnType);
+    // prevent this owner RRef being deleted due to other forks
+    ctx.addSelfAsFork(ownerRRef);
+
+    auto scriptRemoteCall = std::make_unique<ScriptRemoteCall>(
+        op, std::move(stack), ownerRRef->rrefId(), ownerRRef->rrefId());
+    auto fm = sendMessageWithAutograd(
+        *agent, dst, std::move(*scriptRemoteCall).toMessage(), false, rf);
+
+    // Builtin operators does not return py::object, and hence does not require
+    // GIL for destructing the potentially deleted OwerRRef.
+    fm->addCallback(callback::finishCreatingOwnerRRef);
+    return PyRRef(ownerRRef);
+  }
 }
 
 std::shared_ptr<FutureMessage> pyRpcPythonUdf(
@@ -167,9 +181,9 @@ std::shared_ptr<FutureMessage> pyRpcPythonUdf(
     std::string& pickledPythonUDF,
     std::vector<torch::Tensor>& tensors,
     const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf) {
-  auto pythonCall = std::make_unique<PythonCall>(
-      std::vector<char>(pickledPythonUDF.begin(), pickledPythonUDF.end()),
-      tensors);
+  auto serializedPyObj =
+      SerializedPyObj(std::move(pickledPythonUDF), std::move(tensors));
+  auto pythonCall = std::make_unique<PythonCall>(std::move(serializedPyObj));
 
   auto agent = RpcAgent::getCurrentRpcAgent();
   return sendMessageWithAutograd(
@@ -202,7 +216,7 @@ PyRRef pyRemotePythonUdf(
     return PyRRef(userRRef);
   } else {
     auto ownerRRef = ctx.createOwnerRRef(PyObjectType::get());
-    // prevent this owner RRef be deleted due to other forks
+    // prevent this owner RRef being deleted due to other forks
     ctx.addSelfAsFork(ownerRRef);
     auto fm = sendPythonRemoteCall(
         dst,

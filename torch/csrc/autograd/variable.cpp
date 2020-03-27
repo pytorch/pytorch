@@ -164,6 +164,16 @@ namespace impl {
     auto* meta = materialize_autograd_meta(self);
     meta->grad_fn_ = std::move(edge.function);
     meta->output_nr_ = edge.input_nr;
+    // For views, make sure this new grad_fn_ is not overwritten unless it is necessary
+    // in the VariableHooks::grad_fn below.
+    // This logic is only relevant for custom autograd Functions for which multiple
+    // operations can happen on a given Tensor before its gradient edge is set when
+    // exiting the custom Function.
+    if (self.is_view()) {
+      // NB: is_view() ==> get_autograd_meta()
+      auto diff_view_meta = static_cast<torch::autograd::DifferentiableViewMeta*>(meta);
+      diff_view_meta->attr_version = self._version();
+    }
   }
 
   Node* grad_fn_unsafe(const Variable& self) {
@@ -374,6 +384,20 @@ unsigned VariableHooks::_register_hook(const Tensor& self, std::function<Tensor(
 }
 
 void handle_view_on_rebase(DifferentiableViewMeta* diff_view_meta, bool indirect) {
+  // TODO: Remove this warning once we allow XLA to workaround CopySlices.
+  if (diff_view_meta->base_.device().type() == c10::DeviceType::XLA) {
+    std::string msg;
+    if (indirect) {
+      msg = "This view requires gradients but its base or another view of the same base has been modified inplace. ";
+    } else {
+      msg = "This view requires gradients and it's being modified inplace. ";
+    }
+    msg = c10::str(msg, "Backward through inplace update on view tensors is WIP for XLA backwend. "
+                   "Gradient might be wrong in certain cases. Running forward alone is fine. "
+                   "To work around it, please replace the inplace operation by an out-of-place one.");
+    TORCH_WARN(msg);
+  }
+
   /// See NOTE [ View + Inplace detection ] for justification of the logic below
   if (diff_view_meta->creation_meta != CreationMeta::DEFAULT) {
     auto grad_fn = diff_view_meta->grad_fn_.get();

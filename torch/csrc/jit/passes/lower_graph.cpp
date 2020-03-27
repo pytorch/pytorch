@@ -1,7 +1,7 @@
 #include <torch/csrc/jit/api/object.h>
+#include <torch/csrc/jit/passes/lower_graph.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/passes/inliner.h>
-#include <torch/csrc/jit/passes/lower_graph.h>
 #include <torch/custom_class.h>
 #include <unordered_map>
 
@@ -80,11 +80,10 @@ std::pair<std::shared_ptr<Graph>, std::vector<Slot>> lower_graph(
       continue;
     }
     if (e.n->kind() == prim::PythonOp) {
-      throw script::ErrorReport(e.n->sourceRange())
-          << "Couldn't export Python method.";
+      throw ErrorReport(e.n->sourceRange()) << "Couldn't export Python method.";
     }
     if (e.n->kind() != prim::GetAttr) {
-      throw script::ErrorReport(e.n->sourceRange())
+      throw ErrorReport(e.n->sourceRange())
           << "temporary: the only valid use of a module is looking up an "
              "attribute but found "
           << *e.n;
@@ -128,7 +127,7 @@ static std::vector<IValue> loadTensors(const std::vector<Slot>& slots) {
       auto type = obj.type();
       TORCH_CHECK(
           type ==
-              getCustomClass("__torch__.torch.classes.LinearPackedParamsBase"),
+              getCustomClass("__torch__.torch.classes.quantized.LinearPackedParamsBase"),
           "Unknown type ",
           type->python_str(),
           " encountered in graph lowering. This type is not supported in ONNX export.");

@@ -89,6 +89,13 @@ void BoundShapeInferencer::InferOps(
     InferGivenTensorFill(op);
   } else if (op.type() == "Shape") {
     InferShape(op);
+  } else if (
+      op.type() == "FloatToFused8BitRowwiseQuantized" ||
+      op.type() == "HalfFloatToFused8BitRowwiseQuantized" ||
+      op.type() == "FloatToFused4BitRowwiseQuantized" ||
+      op.type() == "HalfToFused4BitRowwiseQuantized" ||
+      op.type() == "FloatToHalf" || op.type() == "FbGemmPack") {
+    InferQuantizationTransformation(op);
   } else {
     InferCommonOp(op);
   }
@@ -309,8 +316,8 @@ void BoundShapeInferencer::InferSparseLengthsSum(const OperatorDef& op) {
     output_dim1 -= 8;
   }
   // If the op is SparseLengthsSumFused4BitRowwise, we need to extract 2 bytes
-  // for fp16 scale and 2 bytes for fp16 bias. Then we double it because we pack
-  // 2 entries into 1 uint8 element of the embedding table.
+  // for fp16 scale and 2 bytes for fp16 bias. Then we double it because we
+  // pack 2 entries into 1 uint8 element of the embedding table.
   // (https://fburl.com/diffusion/stmsyz74)
   else if (is4bit) {
     output_dim1 -= 4;
@@ -559,6 +566,30 @@ void BoundShapeInferencer::InferFC(const OperatorDef& op) {
       ConvertToVec(output_shapes[0].dims()),
       output_data_type,
       int8_fc ? true : false);
+}
+
+// Infers shapes for operators which are used to transform non-quantized
+// operators (e.g. SparseLengthsSum) into quantized operators (e.g.
+// SparseLengthsSumFused8BitRowwise) at model training time. If we're doing
+// quantization for CONSTANTS (eg. embedding tables), current_dim_type_ should
+// be set to CONSTANT.
+void BoundShapeInferencer::InferQuantizationTransformation(
+    const OperatorDef& op) {
+  bool all_constant = true;
+  for (const auto& input : op.input()) {
+    const auto it = shape_info_.find(input);
+    if (it == shape_info_.end() ||
+        it->second.getDimType(0) != TensorBoundShape_DimType_CONSTANT) {
+      all_constant = false;
+      break;
+    }
+  }
+  const auto previous_dim_type = current_dim_type_;
+  if (all_constant) {
+    current_dim_type_ = TensorBoundShape_DimType_CONSTANT;
+  }
+  InferCommonOp(op);
+  current_dim_type_ = previous_dim_type;
 }
 
 void BoundShapeInferencer::InferCommonOp(const OperatorDef& op) {

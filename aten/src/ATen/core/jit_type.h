@@ -17,9 +17,7 @@
 struct ClassType;
 namespace torch {
 namespace jit {
-namespace script {
 struct CompilationUnit;
-}
 } // namespace jit
 } // namespace torch
 
@@ -55,7 +53,8 @@ using OptNameList = c10::optional<std::vector<std::string>>;
   _(LayoutType)             \
   _(ScalarTypeType)         \
   _(AnyListType)            \
-  _(AnyTupleType)
+  _(AnyTupleType)           \
+  _(AnyClassType)
 
 enum class TypeKind {
 #define DEFINE_TYPE(T) T,
@@ -1347,6 +1346,12 @@ struct getTypePtr_<int64_t> final {
   }
 };
 template <>
+struct getTypePtr_<c10::ScalarType> final {
+  static TypePtr call() {
+    return IntType::get();
+  }
+};
+template <>
 struct getTypePtr_<bool> final {
   static TypePtr call() {
     return BoolType::get();
@@ -1365,7 +1370,7 @@ struct getTypePtr_<c10::QScheme> final {
   }
 };
 template <>
-struct getTypePtr_<at::Generator*> final {
+struct getTypePtr_<at::Generator> final {
   static TypePtr call() {
     return OptionalType::create(GeneratorType::get());
   }
@@ -1483,6 +1488,7 @@ matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type_env);
 // does not appear in `type_env`
 CAFFE2_API TypePtr tryEvalTypeVariables(TypePtr type, TypeEnv& type_env);
 
+CAFFE2_API bool elementTypeCanBeInferredFromMembers(const TypePtr& elem_type);
 
 /**
  * User Defined Types
@@ -1490,7 +1496,7 @@ CAFFE2_API TypePtr tryEvalTypeVariables(TypePtr type, TypeEnv& type_env);
 
 struct ClassType;
 using ClassTypePtr = std::shared_ptr<ClassType>;
-using ::torch::jit::script::CompilationUnit;
+using ::torch::jit::CompilationUnit;
 
 // This represents a class in TorchScript.
 struct CAFFE2_API ClassType : public NamedType {
@@ -1800,7 +1806,7 @@ struct CAFFE2_API ClassType : public NamedType {
 
 struct InterfaceType;
 using InterfaceTypePtr = std::shared_ptr<InterfaceType>;
-using ::torch::jit::script::CompilationUnit;
+using ::torch::jit::CompilationUnit;
 
 // Interfaces are a list of abstract methods that a class might meet.
 // If a class provides those methods, it implicitly meets the interface.
@@ -1951,6 +1957,31 @@ private:
   : Type(TypeKind::AnyTupleType) {}
 };
 
+// the common supertype of all classes,
+// ClassType <: AnyClassType for all classes
+struct AnyClassType;
+using AnyClassTypePtr = std::shared_ptr<AnyClassType>;
+struct CAFFE2_API AnyClassType : public Type {
+  static AnyClassTypePtr create() {
+    return AnyClassTypePtr(
+        new AnyClassType()); // NOLINT(modernize-make-shared)
+  }
+  bool operator==(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  std::string python_str() const override {
+    return "Class Type";
+  }
+  std::string str() const override {
+    return "AnyClassType";
+  }
+  static const TypeKind Kind = TypeKind::AnyClassType;
+  // global singleton
+  static AnyClassTypePtr get();
+private:
+  AnyClassType()
+  : Type(TypeKind::AnyClassType) {}
+};
 
 inline bool IValue::isDoubleList() const {
   // note: avoids calling type() to avoid extra referencing counting for the returned type.

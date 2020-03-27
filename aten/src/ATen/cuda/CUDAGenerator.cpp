@@ -1,5 +1,6 @@
 #include <ATen/CUDAGenerator.h>
 #include <c10/cuda/CUDAFunctions.h>
+#include <ATen/Utils.h>
 
 namespace at {
 
@@ -15,7 +16,7 @@ static int64_t num_gpus;
 static std::deque<std::once_flag> cuda_gens_init_flag;
 
 // Default, global CUDA generators, one per GPU.
-static std::vector<std::shared_ptr<CUDAGenerator>> default_gens_cuda;
+static std::vector<Generator> default_gens_cuda;
 
 /* 
 * Populates the global variables related to CUDA generators
@@ -35,7 +36,7 @@ static void initCUDAGenVector(){
  * getDefaultCUDAGenerator gets the default generator for a particular
  * cuda device.
  */
-CUDAGenerator* getDefaultCUDAGenerator(DeviceIndex device_index) {
+const Generator& getDefaultCUDAGenerator(DeviceIndex device_index) {
   std::call_once(num_gpu_init_flag, initCUDAGenVector);
   DeviceIndex idx = device_index;
   if (idx == -1) {
@@ -44,25 +45,26 @@ CUDAGenerator* getDefaultCUDAGenerator(DeviceIndex device_index) {
     TORCH_CHECK(idx >= 0 && idx < num_gpus);
   }
   std::call_once(cuda_gens_init_flag[idx], [&] {
-    default_gens_cuda[idx] = std::make_shared<CUDAGenerator>(idx);
+    default_gens_cuda[idx] = make_generator<CUDAGenerator>(idx);
     default_gens_cuda[idx]->seed();
   });
-  return default_gens_cuda[idx].get();
+  return default_gens_cuda[idx];
 }
 
 /**
  * Utility to create a CUDAGenerator. Returns a shared_ptr
  */
-std::shared_ptr<CUDAGenerator> createCUDAGenerator(DeviceIndex device_index) {
+Generator createCUDAGenerator(DeviceIndex device_index) {
   std::call_once(num_gpu_init_flag, initCUDAGenVector);
   DeviceIndex idx = device_index;
   if (idx == -1) {
     idx = c10::cuda::current_device();
   }
   TORCH_CHECK(idx >= 0 && idx < num_gpus, "The device_index is invalid.");
-  auto gen = std::make_shared<CUDAGenerator>(idx);
-  gen->set_current_seed(default_rng_seed_val);
-  gen->set_philox_offset_per_thread(0);
+  auto gen = make_generator<CUDAGenerator>(idx);
+  auto cuda_gen = check_generator<CUDAGenerator>(gen);
+  cuda_gen->set_current_seed(default_rng_seed_val);
+  cuda_gen->set_philox_offset_per_thread(0);
   return gen;
 }
 
@@ -73,7 +75,7 @@ std::shared_ptr<CUDAGenerator> createCUDAGenerator(DeviceIndex device_index) {
  * CUDAGenerator class implementation
  */
 CUDAGenerator::CUDAGenerator(DeviceIndex device_index)
-  : Generator{Device(DeviceType::CUDA, device_index),
+  : c10::GeneratorImpl{Device(DeviceType::CUDA, device_index),
               DispatchKeySet(c10::DispatchKey::CUDATensorId)} { }
 
 /**
@@ -102,7 +104,7 @@ uint64_t CUDAGenerator::current_seed() const {
  * in getNonDeterministicRandom is unified for both CPU and CUDA
  */
 uint64_t CUDAGenerator::seed() {
-  auto random = detail::getNonDeterministicRandom(true);
+  auto random = c10::detail::getNonDeterministicRandom(true);
   this->set_current_seed(random);
   return random;
 }

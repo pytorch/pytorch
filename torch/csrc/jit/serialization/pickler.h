@@ -109,6 +109,9 @@ struct WriteableTensorData {
   uint64_t size_;
 };
 
+void setTypeTags(bool state);
+bool getTypeTags();
+
 class Pickler {
   TH_DISALLOW_COPY_AND_ASSIGN(Pickler);
 
@@ -144,6 +147,8 @@ class Pickler {
 
  private:
   void pushIValueImpl(const IValue& ivalue);
+  void startTypeTag();
+  void endTypeTag(const IValue& value);
   void pushBool(bool value);
   void pushDouble(double value);
   void pushGenericList(const IValue& ivalue);
@@ -155,9 +160,9 @@ class Pickler {
   void pushTuple(const IValue& ivalue);
   void pushString(const std::string& string);
   void pushDevice(const IValue& ivalue);
-  #ifdef USE_DISTRIBUTED
-    void pushRRef(const IValue& ivalue);
-  #endif
+#ifdef USE_DISTRIBUTED
+  void pushRRef(const IValue& ivalue);
+#endif
   // unmemoized version
   void pushStringImpl(const std::string& string);
   void pushStorageOfTensor(const at::Tensor& tensor);

@@ -11,7 +11,6 @@
 
 namespace torch {
 namespace jit {
-namespace script {
 
 struct OpsValue : public SugaredValue {
   OpsValue(size_t version) : version_(version) {}
@@ -179,7 +178,7 @@ struct SourceImporterImpl : public Resolver,
   }
 
   void LEGACY_import_methods(
-      const script::Module& mod,
+      const Module& mod,
       const std::shared_ptr<Source>& src) {
     auto self = SimpleSelf(mod.type());
     c10::QualifiedName prefix = *mod.type()->name();
@@ -252,9 +251,11 @@ struct SourceImporterImpl : public Resolver,
       // ClassTypes)
       return importNamedTuple(qualified_name, class_def);
     } else if (superclass_name == "Interface") {
-      cu_->define_interface(qualified_name, class_def, shared_from_this(), /*is_module=*/false);
+      cu_->define_interface(
+          qualified_name, class_def, shared_from_this(), /*is_module=*/false);
     } else if (superclass_name == "ModuleInterface") {
-      cu_->define_interface(qualified_name, class_def, shared_from_this(), /*is_module=*/true);
+      cu_->define_interface(
+          qualified_name, class_def, shared_from_this(), /*is_module=*/true);
     } else {
       throw ErrorReport(class_def.range())
           << "Torchscript does not support class inheritance.";
@@ -280,7 +281,7 @@ struct SourceImporterImpl : public Resolver,
       if (lhs.name().name() == "_packed_params" &&
           type.name().name() == "Tensor") {
         std::string packed_params_typename =
-            "__torch__.torch.classes.LinearPackedParamsBase";
+            "__torch__.torch.classes.quantized.LinearPackedParamsBase";
         Parser p(std::make_shared<Source>(std::move(packed_params_typename)));
         auto typename_expr = p.parseExp();
         auto maybe_typename =
@@ -296,6 +297,22 @@ struct SourceImporterImpl : public Resolver,
       const QualifiedName& qualified_classname,
       const ClassDef& class_def,
       bool is_module) {
+    // BC for TorchBind classes
+    //
+    // Previously we would serialize TorchBind classes as actual
+    // classes with methods that delegate to things in the
+    // torch.ops.* namespace. We've switched away from this and
+    // now just rely on those classes being present in the binary
+    // and emit code for them based on the ClassType in memory.
+    //
+    // TODO: remove this once we no longer have old TorchBind code
+    // in production models
+    {
+      static QualifiedName torch_classes_qualname("__torch__.torch.classes");
+      if (torch_classes_qualname.isPrefixOf(qualified_classname)) {
+        return;
+      }
+    }
     auto class_type = ClassType::create(
         c10::QualifiedName(qualified_classname), cu_, is_module);
 
@@ -520,12 +537,11 @@ TypePtr SourceImporter::loadNamedType(const QualifiedName& name) const {
 }
 
 void SourceImporter::LEGACY_import_methods(
-    const script::Module& mod,
+    const Module& mod,
     const std::shared_ptr<Source>& src) {
   pImpl->LEGACY_import_methods(mod, src);
 }
 SourceImporter::~SourceImporter() = default;
 
-} // namespace script
 } // namespace jit
 } // namespace torch

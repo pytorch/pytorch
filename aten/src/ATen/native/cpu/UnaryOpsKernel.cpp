@@ -253,19 +253,19 @@ static void clamp_min_kernel(TensorIterator& iter, Scalar min_scalar) {
   });
 }
 
-static void cauchy_kernel(TensorIterator& iter, double median, double sigma, Generator* gen) {
+static void cauchy_kernel(TensorIterator& iter, double median, double sigma, Generator gen) {
   CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
   templates::cpu::cauchy_kernel(iter, median, sigma, generator);
 }
 
 #if !AT_MKL_ENABLED()
-void bernoulli_mkl_kernel(Tensor &output, const double p, Generator* gen) {
+void bernoulli_mkl_kernel(Tensor &output, const double p, Generator gen) {
   // Use AT_ASSERTM because this should never be reached, and AT_ASSERTM tells
   // users to report this as a bug.
   AT_ASSERTM(false, "ATen not compiled with MKL");
 }
 #else
-void bernoulli_mkl_kernel(Tensor &self, const double p, Generator* gen) {
+void bernoulli_mkl_kernel(Tensor &self, const double p, Generator gen) {
   CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
   int64_t seed;
   {
@@ -317,7 +317,7 @@ void bernoulli_mkl_kernel(Tensor &self, const double p, Generator* gen) {
 }
 #endif
 
-static void exponential_kernel(TensorIterator& iter, double lambda, Generator* gen) {
+static void exponential_kernel(TensorIterator& iter, double lambda, Generator gen) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "exponential_cpu", [&]() {
     CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
     std::lock_guard<std::mutex> lock(generator->mutex_);
@@ -328,7 +328,7 @@ static void exponential_kernel(TensorIterator& iter, double lambda, Generator* g
   });
 }
 
-static void geometric_kernel(TensorIterator& iter, double p, Generator* gen) {
+static void geometric_kernel(TensorIterator& iter, double p, Generator gen) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "geometric_cpu", [&]() {
     CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
     std::lock_guard<std::mutex> lock(generator->mutex_);
@@ -339,7 +339,7 @@ static void geometric_kernel(TensorIterator& iter, double p, Generator* gen) {
   });
 }
 
-static void log_normal_kernel(TensorIterator& iter, double mean, double std, Generator* gen) {
+static void log_normal_kernel(TensorIterator& iter, double mean, double std, Generator gen) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "log_normal_cpu", [&]() {
     CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
     std::lock_guard<std::mutex> lock(generator->mutex_);
@@ -350,160 +350,17 @@ static void log_normal_kernel(TensorIterator& iter, double mean, double std, Gen
   });
 }
 
-#ifdef __AVX2__
-#include <ATen/native/cpu/avx_mathfun.h>
-
-static void normal_fill_16_AVX2(float *data,
-                         const __m256* two_pi,
-                         const __m256* one,
-                         const __m256* minus_two,
-                         const __m256* mean,
-                         const __m256* std_v) {
-  const __m256 u1 = _mm256_sub_ps(*one, _mm256_loadu_ps(data));
-  const __m256 u2 = _mm256_loadu_ps(data + 8);
-  // sincos256_ps and log256_ps are from avx_mathfun.h
-  const __m256 radius = _mm256_sqrt_ps(_mm256_mul_ps(*minus_two, log256_ps(u1)));
-  const __m256 theta = _mm256_mul_ps(*two_pi, u2);
-  __m256 sintheta, costheta;
-  sincos256_ps(theta, &sintheta, &costheta);
-  const __m256 n1 = _mm256_mul_ps(radius, costheta);
-  const __m256 n2 = _mm256_mul_ps(radius, sintheta);
-  _mm256_storeu_ps(data, _mm256_fmadd_ps(n1, *std_v, *mean));
-  _mm256_storeu_ps(data + 8, _mm256_fmadd_ps(n2, *std_v, *mean));
-}
-
-void normal_fill_AVX2(Tensor& self, const float mean, const float std, Generator* gen) {
-  float *data = self.data_ptr<float>();
-  auto size = self.numel();
+void normal_kernel(Tensor& self, double mean, double std, Generator gen) {
   CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
-  std::lock_guard<std::mutex> lock(generator->mutex_);
-  for (int64_t i = 0; i < size; ++i) {
-    at::uniform_real_distribution<float> uniform(0, 1);
-    data[i] = uniform(generator);
-  }
-   const __m256 two_pi = _mm256_set1_ps(2.0f * M_PI);
-  const __m256 one = _mm256_set1_ps(1.0f);
-  const __m256 minus_two = _mm256_set1_ps(-2.0f);
-  const __m256 mean_v = _mm256_set1_ps(mean);
-  const __m256 std_v = _mm256_set1_ps(std);
-
-  for (int64_t i = 0; i < size - 15; i += 16) {
-    normal_fill_16_AVX2(data + i, &two_pi, &one, &minus_two, &mean_v, &std_v);
-  }
-
-  if (size % 16 != 0) {
-    // Recompute the last 16 values.
-    data = data + size - 16;
-    for (int64_t i = 0; i < 16; ++i) {
-      at::uniform_real_distribution<float> uniform(0, 1);
-      data[i] = uniform(generator);
-    }
-    normal_fill_16_AVX2(data, &two_pi, &one, &minus_two, &mean_v, &std_v);
-  }
-}
-#endif
-
-template <typename scalar_t>
-static void normal_fill_16(scalar_t *data, const scalar_t mean, const scalar_t std) {
-  for (int j = 0; j < 8; ++j) {
-    const scalar_t u1 = 1 - data[j]; // [0, 1) -> (0, 1] for log.
-    const scalar_t u2 = data[j + 8];
-    const scalar_t radius = std::sqrt(-2 * std::log(u1));
-    const scalar_t theta = 2.0f * M_PI * u2;
-    data[j] = radius * std::cos(theta) * std + mean;
-    data[j + 8] = radius * std::sin(theta) * std + mean;
-  }
+  templates::cpu::normal_kernel(self, mean, std, generator);
 }
 
-template <typename scalar_t>
-void normal_fill(Tensor& self, const scalar_t mean, const scalar_t std, Generator* gen) {
-  scalar_t *data = self.data_ptr<scalar_t>();
-  auto size = self.numel();
-  CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
-  std::lock_guard<std::mutex> lock(generator->mutex_);
-  for (int64_t i = 0; i < size; ++i) {
-    at::uniform_real_distribution<scalar_t> uniform(0, 1);
-    data[i] = uniform(generator);
-  }
-
-  for (int64_t i = 0; i < size - 15; i += 16) {
-    normal_fill_16<scalar_t>(data + i, mean, std);
-  }
-  if (size % 16 != 0) {
-    // Recompute the last 16 values.
-    data = data + size - 16;
-    for (int64_t i = 0; i < 16; ++i) {
-      at::uniform_real_distribution<scalar_t> uniform(0, 1);
-      data[i] = uniform(generator);
-    }
-    normal_fill_16<scalar_t>(data, mean, std);
-  }
-}
-
-std::vector<int64_t> computeStrideForComplex(IntArrayRef oldstride) {
-  auto res = oldstride.vec();
-  for(size_t i = 0; i < res.size(); i++) {
-    res[i] = res[i] * 2;
-  }
-  res.emplace_back(1);
-  return res;
-}
-
-// expects as input a complex tensor and returns back a float tensor
-// containing the complex values in the last two dimensions
-Tensor view_complex_as_float(const Tensor& self) {
-  TORCH_INTERNAL_ASSERT(self.is_complex());
-  auto new_sizes = self.sizes().vec();
-  // last dimension will always have two elements containing the real and imag vals
-  new_sizes.emplace_back(2);
-  auto new_strides = computeStrideForComplex(self.strides());
-  if(self.scalar_type() == at::kComplexFloat) {
-    float* data = reinterpret_cast<float*>(self.data_ptr<std::complex<float>>());
-    return at::from_blob(data, new_sizes, new_strides, dtype(at::kFloat));
-  } else {
-    double* data = reinterpret_cast<double*>(self.data_ptr<std::complex<double>>());
-    return at::from_blob(data, new_sizes, new_strides, dtype(at::kDouble));
-  }
-}
-
-void normal_kernel(Tensor& self, double mean, double std, Generator* gen) {
-  if(self.is_complex()) {
-    // note: float_tensor lives only as long as the self tensor lives
-    auto float_tensor = at::native::view_complex_as_float(self);
-    // variance for normal distribution of the real and imaginary values
-    // is half of the input variance
-    return normal_kernel(float_tensor, mean, std/(std::sqrt(2)), gen);
-  }
-  auto size = self.numel();
-  if (self.scalar_type() == ScalarType::Float && size >= 16 && self.is_contiguous()) {
-#ifdef __AVX2__
-    normal_fill_AVX2(self, static_cast<float>(mean), static_cast<float>(std), gen);
-#else
-    normal_fill(self, static_cast<float>(mean), static_cast<float>(std), gen);
-#endif
-  } else {
-    AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "norma_cpu", [&] {
-      if (size >= 16 && self.is_contiguous()) {
-        normal_fill<scalar_t>(self, static_cast<scalar_t>(mean), static_cast<scalar_t>(std), gen);
-      } else {
-        auto iter = TensorIterator::nullary_op(self);
-        CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
-        std::lock_guard<std::mutex> lock(generator->mutex_);
-        cpu_serial_kernel(iter, [mean, std, generator]() -> scalar_t {
-          at::normal_distribution<double> normal(mean, std);
-          return (scalar_t)normal(generator);
-        });
-      }
-    });
-  }
-}
-
-static void random_from_to_kernel(TensorIterator& iter, uint64_t range, int64_t base, Generator* gen) {
+static void random_from_to_kernel(TensorIterator& iter, uint64_t range, int64_t base, Generator gen) {
   CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
   templates::cpu::random_from_to_kernel(iter, range, base, generator);
 }
 
-static void random_kernel(TensorIterator& iter, Generator* gen) {
+static void random_kernel(TensorIterator& iter, Generator gen) {
   CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
   templates::cpu::random_kernel(iter, generator);
 }
@@ -511,7 +368,7 @@ static void random_kernel(TensorIterator& iter, Generator* gen) {
 // This is the special kernel to handle single specific case:
 // from(inclusive) = std::numeric_limits<int64_t>::lowest()
 // to(exclusive) = None (= std::numeric_limits<int64_t>::max() + 1)
-static void random_full_64_bits_range_kernel(TensorIterator& iter, Generator* gen) {
+static void random_full_64_bits_range_kernel(TensorIterator& iter, Generator gen) {
   CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
   templates::cpu::random_full_64_bits_range_kernel(iter, generator);
 }

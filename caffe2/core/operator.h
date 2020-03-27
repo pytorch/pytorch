@@ -28,9 +28,11 @@
 #include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/proto_utils.h"
 
-#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
-#include <ATen/core/Tensor.h>
+#if defined(EXPOSE_C2_OPS) || \
+    !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
+#include <ATen/core/TensorBody.h>
 #include <ATen/core/ivalue.h>
+#include <ATen/core/function_schema.h>
 #endif
 
 C10_DECLARE_bool(caffe2_operator_throw_if_fp_exceptions);
@@ -59,7 +61,8 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
    * Alternatively, inputs can be one tensor list ivalue followed by non-tensors
    * to represent operators with a variable number of inputs.
    */
-#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
+#if defined(EXPOSE_C2_OPS) || \
+    !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
   explicit OperatorBase(
       const c10::FunctionSchema& schema,
       std::vector<c10::IValue> inputs,
@@ -72,7 +75,8 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
    * New operators should be instantiated with FunctionSchema
    */
   bool isLegacyOperator() const {
-#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
+#if defined(EXPOSE_C2_OPS) || \
+    !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
     return !fn_schema_;
 #else
     return true;
@@ -81,7 +85,8 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
 
   const c10::FunctionSchema& getFunctionSchema() const {
     CAFFE_ENFORCE(!isLegacyOperator());
-#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
+#if defined(EXPOSE_C2_OPS) || \
+    !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
     return *fn_schema_.get();
 #else
     CAFFE_THROW("Non-legacy operators are not legal in xplat/caffe2");
@@ -107,7 +112,8 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
       return ArgumentHelper::GetSingleArgument<OperatorDef, T>(
           *operator_def_, name, default_value);
     }
-#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
+#if defined(EXPOSE_C2_OPS) || \
+    !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
     auto index = argumentIndexWithName(name);
     CAFFE_ENFORCE(index.has_value(), "Couldn't get index for argument!", name);
     const auto& value = newstyle_inputs_[index.value()];
@@ -123,7 +129,8 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
     return ArgumentHelper::HasSingleArgumentOfType<OperatorDef, T>(
         *operator_def_, name);
   }
-#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
+#if defined(EXPOSE_C2_OPS) || \
+    !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
   template <typename T>
   inline vector<T> GetVectorFromIValueList(const c10::IValue& value) const {
     return value.template to<List<T>>().vec();
@@ -180,7 +187,8 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
         throw enf;
       }
     }
-#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
+#if defined(EXPOSE_C2_OPS) || \
+    !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
     DCHECK_LT(0, newstyle_inputs_.size());
     IValue ival;
     if (newstyle_inputs_[0].isTensorList()) {
@@ -230,7 +238,8 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
       // When you get a Tensor here it is not fully initialized
       return BlobGetMutableTensor(outputs_.at(idx), type);
     }
-#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
+#if defined(EXPOSE_C2_OPS) || \
+    !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
     at::Tensor output = newstyle_outputs_[idx];
     Tensor tensor = caffe2::Tensor(output);
     if (!tensor.defined() || tensor.GetDeviceType() != type) {
@@ -260,7 +269,8 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
 
   void SetOutputTensor(int idx, Tensor tensor) {
     if (!isLegacyOperator()) {
-#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
+#if defined(EXPOSE_C2_OPS) || \
+    !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
       newstyle_outputs_[idx] = at::Tensor(tensor);
 
       // also update the tensor in the hack
@@ -289,7 +299,8 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
           "device must be provided in options.");
       return BlobGetMutableTensor(outputs_.at(idx), dims, options);
     }
-#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
+#if defined(EXPOSE_C2_OPS) || \
+    !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
     at::Tensor output = newstyle_outputs_[idx];
     Tensor tensor =
         GetSizedTensorWithOptions(caffe2::Tensor(output), dims, options);
@@ -413,7 +424,8 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
     if (isLegacyOperator()) {
       return outputs_.size();
     }
-#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
+#if defined(EXPOSE_C2_OPS) || \
+    !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
     return newstyle_outputs_.size();
 #else
     CAFFE_THROW("Non-legacy operators are not legal in xplat/caffe2");
@@ -628,7 +640,8 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
     return helper_;
   }
 
-#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
+#if defined(EXPOSE_C2_OPS) || \
+    !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
   c10::List<at::Tensor> move_newstyle_outputs() && {
     return std::move(newstyle_outputs_);
   }
@@ -646,7 +659,8 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   vector<const Blob*> inputs_;
   vector<Blob*> outputs_;
   // Preferably use c10::optional, but nvcc doesn't work
-#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
+#if defined(EXPOSE_C2_OPS) || \
+    !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
   std::unique_ptr<const c10::FunctionSchema> fn_schema_;
   vector<c10::IValue> newstyle_inputs_;
   c10::List<at::Tensor> newstyle_outputs_;
@@ -710,7 +724,8 @@ inline NetDef OperatorBase::GetSingleArgument<NetDef>(
   return NetDef();
 }
 
-#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
+#if defined(EXPOSE_C2_OPS) || \
+    !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
 template <>
 inline vector<int> OperatorBase::GetVectorFromIValueList<int>(
     const c10::IValue& value) const {
@@ -798,7 +813,8 @@ inline vector<T> OperatorBase::GetRepeatedArgument(
     return ArgumentHelper::GetRepeatedArgument<OperatorDef, T>(
         *operator_def_, name, default_value);
   }
-#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
+#if defined(EXPOSE_C2_OPS) || \
+    !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
   auto index = argumentIndexWithName(name);
   CAFFE_ENFORCE(index.has_value(), "Couldn't get index for argument!", name);
   const auto& value = newstyle_inputs_[index.value()];
@@ -819,7 +835,8 @@ inline vector<int16_t> OperatorBase::GetRepeatedArgument<int16_t>(
     return ArgumentHelper::GetRepeatedArgument<OperatorDef, int16_t>(
         *operator_def_, name, default_value);
   }
-#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
+#if defined(EXPOSE_C2_OPS) || \
+    !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
   auto index = argumentIndexWithName(name);
   CAFFE_ENFORCE(index.has_value(), "Couldn't get index for argument!", name);
   const auto& value = newstyle_inputs_[index.value()];
@@ -847,7 +864,8 @@ class Operator : public OperatorBase {
     // constructors will run on that device.
     context_.SwitchToDevice();
   }
-#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
+#if defined(EXPOSE_C2_OPS) || \
+    !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
   explicit Operator(
       const c10::FunctionSchema& fn_schema,
       std::vector<c10::IValue> inputs,
@@ -1378,6 +1396,12 @@ struct CAFFE2_API DeviceTypeRegisterer {
       DeviceType)(type, &registry_function);                \
   }
 
+#if defined(_MSC_VER)
+#define IMPORT_IF_NOT_MSVC
+#else
+#define IMPORT_IF_NOT_MSVC C10_IMPORT
+#endif
+
 // The operator registry. Since we are not expecting a great number of devices,
 // we will simply have an if-then type command and allocate the actual
 // generation to device-specific registerers.
@@ -1392,11 +1416,11 @@ C10_DECLARE_REGISTRY(
     Workspace*);
 #define REGISTER_CPU_OPERATOR_CREATOR(key, ...) \
   C10_REGISTER_CREATOR(CPUOperatorRegistry, key, __VA_ARGS__)
-#define REGISTER_CPU_OPERATOR(name, ...)                           \
-  C10_IMPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();  \
-  static void CAFFE2_UNUSED CAFFE_ANONYMOUS_VARIABLE_CPU##name() { \
-    CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();                \
-  }                                                                \
+#define REGISTER_CPU_OPERATOR(name, ...)                                   \
+  IMPORT_IF_NOT_MSVC void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();  \
+  static void CAFFE2_UNUSED CAFFE_ANONYMOUS_VARIABLE_CPU##name() {         \
+    CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();                        \
+  }                                                                        \
   C10_REGISTER_CLASS(CPUOperatorRegistry, name, __VA_ARGS__)
 #define REGISTER_CPU_OPERATOR_STR(str_name, ...) \
   C10_REGISTER_TYPED_CLASS(CPUOperatorRegistry, str_name, __VA_ARGS__)
@@ -1427,11 +1451,11 @@ C10_DECLARE_REGISTRY(
     Workspace*);
 #define REGISTER_CUDA_OPERATOR_CREATOR(key, ...) \
   C10_REGISTER_CREATOR(CUDAOperatorRegistry, key, __VA_ARGS__)
-#define REGISTER_CUDA_OPERATOR(name, ...)                           \
-  C10_IMPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();   \
-  static void CAFFE2_UNUSED CAFFE_ANONYMOUS_VARIABLE_CUDA##name() { \
-    CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();                 \
-  }                                                                 \
+#define REGISTER_CUDA_OPERATOR(name, ...)                                  \
+  IMPORT_IF_NOT_MSVC void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();  \
+  static void CAFFE2_UNUSED CAFFE_ANONYMOUS_VARIABLE_CUDA##name() {        \
+    CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();                        \
+  }                                                                        \
   C10_REGISTER_CLASS(CUDAOperatorRegistry, name, __VA_ARGS__)
 #define REGISTER_CUDA_OPERATOR_STR(str_name, ...) \
   C10_REGISTER_TYPED_CLASS(CUDAOperatorRegistry, str_name, __VA_ARGS__)
@@ -1451,11 +1475,11 @@ C10_DECLARE_REGISTRY(
     Workspace*);
 #define REGISTER_HIP_OPERATOR_CREATOR(key, ...) \
   C10_REGISTER_CREATOR(HIPOperatorRegistry, key, __VA_ARGS__)
-#define REGISTER_HIP_OPERATOR(name, ...)                           \
-  C10_IMPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();  \
-  static void CAFFE2_UNUSED CAFFE_ANONYMOUS_VARIABLE_HIP##name() { \
-    CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();                \
-  }                                                                \
+#define REGISTER_HIP_OPERATOR(name, ...)                                   \
+  IMPORT_IF_NOT_MSVC void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();  \
+  static void CAFFE2_UNUSED CAFFE_ANONYMOUS_VARIABLE_HIP##name() {         \
+    CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();                        \
+  }                                                                        \
   C10_REGISTER_CLASS(HIPOperatorRegistry, name, __VA_ARGS__)
 #define REGISTER_HIP_OPERATOR_STR(str_name, ...) \
   C10_REGISTER_TYPED_CLASS(HIPOperatorRegistry, str_name, __VA_ARGS__)

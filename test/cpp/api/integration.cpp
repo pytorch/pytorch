@@ -284,10 +284,10 @@ TEST_F(IntegrationTest, MNISTBatchNorm_CUDA) {
   torch::manual_seed(0);
   auto model = std::make_shared<SimpleContainer>();
   auto conv1 = model->add(Conv2d(1, 10, 5), "conv1");
-  auto batchnorm2d = model->add(BatchNorm(10), "batchnorm2d");
+  auto batchnorm2d = model->add(BatchNorm2d(10), "batchnorm2d");
   auto conv2 = model->add(Conv2d(10, 20, 5), "conv2");
   auto linear1 = model->add(Linear(320, 50), "linear1");
-  auto batchnorm1 = model->add(BatchNorm(50), "batchnorm1");
+  auto batchnorm1 = model->add(BatchNorm1d(50), "batchnorm1");
   auto linear2 = model->add(Linear(50, 10), "linear2");
 
   auto forward = [&](torch::Tensor x) {
