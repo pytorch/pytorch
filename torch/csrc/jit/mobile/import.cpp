@@ -45,9 +45,12 @@ using caffe2::serialize::IStreamAdapter;
 using caffe2::serialize::PyTorchStreamReader;
 using caffe2::serialize::ReadAdapterInterface;
 
-OpCode parseOpCode(const char *str);
+OpCode parseOpCode(const char* str);
 
-IValue expect_field(IValue tup, const std::string& expected_name, size_t entry) {
+IValue expect_field(
+    IValue tup,
+    const std::string& expected_name,
+    size_t entry) {
   auto row = tup.toTuple()->elements().at(entry).toTuple();
   TORCH_INTERNAL_ASSERT(
       row->elements().at(0).toStringRef() == expected_name,
@@ -59,7 +62,8 @@ IValue expect_field(IValue tup, const std::string& expected_name, size_t entry) 
 }
 
 namespace {
-void print_unsupported_ops_and_throw(const std::unordered_set<std::string>& unsupported_ops) {
+void print_unsupported_ops_and_throw(
+    const std::unordered_set<std::string>& unsupported_ops) {
   std::string error_message("{");
   for (const auto& op_name : unsupported_ops) {
     error_message += op_name + ", ";

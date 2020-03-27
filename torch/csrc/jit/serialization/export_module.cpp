@@ -137,7 +137,7 @@ void setstateTuple(const IValue& ivalue, std::vector<c10::IValue>& elements) {
     }
   }
 }
-}
+} // namespace
 
 void moduleMethodsTuple(
     const Module& module,
