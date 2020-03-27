@@ -1010,7 +1010,7 @@ void fakePass(std::shared_ptr<Graph>& g) {
 }
 
 
-RegisterPass(fakePass);
+RegisterPass p(fakePass);
 
 void testPassManagement() {
 
