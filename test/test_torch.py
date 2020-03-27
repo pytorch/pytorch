@@ -2106,12 +2106,18 @@ class _TestTorchMixin(object):
                 self.assertEqual(x.select(dim, i), res2[i])
 
     def test_rand(self):
-        torch.manual_seed(123456)
-        res1 = torch.rand(SIZE, SIZE)
-        res2 = torch.Tensor()
-        torch.manual_seed(123456)
-        torch.rand(SIZE, SIZE, out=res2)
-        self.assertEqual(res1, res2)
+        def common_routine(dtype):
+            torch.manual_seed(123456)
+            res1 = torch.rand(SIZE, SIZE, dtype=dtype)
+            res2 = torch.tensor([], dtype=dtype)
+            torch.manual_seed(123456)
+            torch.rand(SIZE, SIZE, out=res2)
+            self.assertEqual(res1, res2)
+
+        common_routine(dtype=torch.float32)
+        common_routine(dtype=torch.float64)
+        common_routine(dtype=torch.complex64)
+        common_routine(dtype=torch.complex128)
 
     def test_randint(self):
         def seed(generator):
@@ -12072,6 +12078,7 @@ class TestTorchDeviceType(TestCase):
         _test((10,), 5, 4, win_sizes=(11,), expected_error=RuntimeError)
         _test((10,), 5, 4, win_sizes=(1, 1), expected_error=RuntimeError)
 
+    @skipCUDAIfRocm
     def test_fft_input_modification(self, device):
         # FFT functions should not modify their input (gh-34551)
 
@@ -14582,8 +14589,9 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         self.assertEqual(r.dtype, a.dtype)
 
     @slowTest
-    @onlyCPU
-    def test_mm(self, device):
+    @dtypes(torch.float32, torch.float64, torch.bfloat16, torch.int32, torch.int64)
+    @dtypesIfCUDA(torch.float32, torch.float64)
+    def test_mm(self, device, dtype):
         def _test_mm(n, m, p, dtype, genf):
             # helper function
             def matrixmultiply(mat1, mat2):
@@ -14655,12 +14663,24 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             res2 = matrixmultiply(mat1, mat2)
             self.assertEqual(res, res2)
 
+        def genf_int(x, y):
+            return torch.randint(0, 100, (x, y), dtype=dtype, device=device)
+
+        def genf_bfloat(x, y):
+            return torch.randn(x, y, dtype=torch.float32, device=device).to(dtype)
+
+        def genf_float(x, y):
+            return torch.randn(x, y, dtype=dtype, device=device)
+
         for (n, m, p) in [(20, 10, 5), (15, 5, 10), (5, 18, 10)]:
-            _test_mm(n, m, p, torch.float32, lambda x, y: torch.randn(x, y, dtype=torch.float32, device=device))
-            _test_mm(n, m, p, torch.float64, lambda x, y: torch.randn(x, y, dtype=torch.float64, device=device))
-            _test_mm(n, m, p, torch.int32, lambda x, y: torch.randint(0, 100, (x, y), dtype=torch.int32, device=device))
-            _test_mm(n, m, p, torch.int64, lambda x, y: torch.randint(0, 100, (x, y), dtype=torch.int64, device=device))
-            _test_mm(n, m, p, torch.bfloat16, lambda x, y: torch.randn(x, y, dtype=torch.float32, device=device).bfloat16())
+            if (dtype == torch.int32) or (dtype == torch.int64):
+                genf = genf_int
+            elif (dtype == torch.bfloat16):
+                genf = genf_bfloat
+            else:
+                genf = genf_float
+
+            _test_mm(n, m, p, dtype, genf)
 
     @onlyCPU
     @dtypes(torch.float)
@@ -15336,6 +15356,21 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         t = torch.tensor((-3.40282e+38, 3.40282e+38), device=device, dtype=torch.float)
         self.assertEqual(t.to(dtype).dtype, dtype)
 
+
+    @onlyOnCPUAndCUDA
+    def test_complex_type_conversions(self, device):
+        dtypes = [torch.float, torch.complex64, torch.complex128]
+        for from_type in dtypes:
+            for to_type in dtypes:
+                from_tensor = torch.randn(4, dtype=from_type, device=device)
+                to_tensor = from_tensor.to(to_type)
+                if from_type.is_complex and not to_type.is_complex:
+                    self.assertEqual(from_tensor.real(), to_tensor, exact_dtype=False)
+                elif not from_type.is_complex and to_type.is_complex:
+                    self.assertEqual(from_tensor, to_tensor.real(), exact_dtype=False)
+                    self.assertEqual(torch.zeros_like(to_tensor.imag()), to_tensor.imag(), exact_dtype=False)
+                else:
+                    self.assertEqual(from_tensor, to_tensor, exact_dtype=False)
 
 # NOTE [Linspace+Logspace precision override]
 # Our Linspace and logspace torch.half CUDA kernels are not very precise.
