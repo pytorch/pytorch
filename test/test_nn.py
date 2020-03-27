@@ -9624,7 +9624,7 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(y_draw.sum(), count_expected, prec=torch.finfo(y_draw.dtype).eps)
 
     def _test_gumbel_softmax_straight_through(self, device, dtype):
-        num_draws = 100
+        num_draws = 10
 
         logits = torch.tensor([[0.2, 0.8, 0.1]], device=device)
         logits = logits.reshape([1, 3])
@@ -9634,9 +9634,14 @@ class TestNNDeviceType(NNTestCase):
         counts = torch.zeros_like(logits)
         for _ in range(num_draws):
             y_draw = F.gumbel_softmax(logits, hard=True)
+            print(y_draw)
             counts = counts + y_draw
 
         # All values positive
+        print("y_draw::")
+        print(y_draw)
+        print("counts::")
+        print(counts)
         self.assertGreaterEqual(y_draw.min(), 0)
         # Each experiment should result in 1 draw.
         self.assertEqual(counts.sum(), num_draws, prec=torch.finfo(counts.dtype).eps)
@@ -9645,6 +9650,10 @@ class TestNNDeviceType(NNTestCase):
         expected = probs * num_draws
         # ~z is approximately N(0,1) for unbiased count
         z = (counts - expected) / (expected * (1 - probs)).sqrt()
+        print("z::")
+        print(z)
+        print("expected::")
+        print(expected)
         # A (lazy) approximate 99% two-sided test:
         # occurs with prob alpha~>=0.01 if unbiased
         self.assertLess(z.abs().max().item(), 2.58)

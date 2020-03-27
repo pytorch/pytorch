@@ -10,6 +10,9 @@ namespace {
     int64_t block = 512;
     int64_t grid = std::min<int64_t>((numel + block - 1) / block, 2048L);
 
+    if (self.is_non_overlapping_and_dense()) {
+      std::cout << "self is non overlapping and dense.\n";
+    }
     if (numel > 0) {
       AT_DISPATCH_ALL_TYPES_AND2(ScalarType::Bool,
         ScalarType::Half,

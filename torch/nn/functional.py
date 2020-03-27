@@ -1500,6 +1500,8 @@ def gumbel_softmax(logits, tau=1, hard=False, eps=1e-10, dim=-1):
     if hard:
         # Straight through.
         index = y_soft.max(dim, keepdim=True)[1]
+        print("index:")
+        print(index)
         y_hard = torch.zeros_like(logits, memory_format=torch.legacy_contiguous_format).scatter_(dim, index, 1.0)
         ret = y_hard - y_soft.detach() + y_soft
     else:
