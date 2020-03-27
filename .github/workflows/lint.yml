@@ -160,6 +160,7 @@ jobs:
             -g"-torch/csrc/jit/export.cpp"            \
             -g"-torch/csrc/jit/import.cpp"            \
             -g"-torch/csrc/jit/netdef_converter.cpp"  \
+            -g"-torch/csrc/onnx/init.cpp"             \
             "$@" > ${GITHUB_WORKSPACE}/clang-tidy-output.txt
 
           cat ${GITHUB_WORKSPACE}/clang-tidy-output.txt
