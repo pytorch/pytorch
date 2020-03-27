@@ -108,7 +108,11 @@ void index_put_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef 
       bool use_parallel_for = ((iter.numel() >= internal::GRAIN_SIZE) && (at::get_num_threads() > 1));
       if (iter.dtype() == at::ScalarType::Float && use_parallel_for) {
         cpu_index_kernel<float>(iter, index_size, index_stride, [](char* dst, char* src, int64_t offset) {
-          cpu_atomic_add_float((float*)(dst + offset), *(float*)src);
+          cpu_atomic_add<float, uint32_t>((float*)(dst + offset), *(float*)src);
+        });
+      } else if (iter.dtype() == at::ScalarType::BFloat16 && use_parallel_for) {
+        cpu_index_kernel<BFloat16>(iter, index_size, index_stride, [](char* dst, char* src, int64_t offset) {
+          cpu_atomic_add<BFloat16, uint16_t>((BFloat16*)(dst + offset), *(BFloat16*)src);
         });
       } else {
         // TODO: investigate parallelization of the accumulate kernel. Unlike the non-accumulate case,
