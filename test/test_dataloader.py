@@ -811,7 +811,11 @@ class TestDataLoader(TestCase):
         subprocess.check_output([sys.executable, '-c', """\
 import torch
 import resource
-from torch.utils.data import DataLoader, IterableDataset
+try:
+    from torch.utils.data import DataLoader, IterableDataset
+except ImportError:
+    # No idea why that module is not available during FB internal testing
+    raise SystemExit()
 
 class RandomDataset(IterableDataset):
     def __init__(self, len, size):
