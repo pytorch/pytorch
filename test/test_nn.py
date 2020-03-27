@@ -9348,6 +9348,7 @@ class TestNNDeviceType(NNTestCase):
             out2 = conv1(input_c)
             self.assertEqual(out1, out2)
 
+    @onlyCUDA
     def test_grid_sample_large(self, device):
         def issue_35202():
             input_tensor = torch.rand(1, 1, 480, 640, dtype=torch.float, device=device)
