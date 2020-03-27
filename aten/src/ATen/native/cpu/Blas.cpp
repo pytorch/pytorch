@@ -7,20 +7,18 @@ namespace at { namespace native {
 namespace blas_impl {
 
 template <typename scalar_t>
-constexpr inline bool scal_use_fast_path(int64_t n, int64_t incx);
+bool scal_use_fast_path(int64_t n, int64_t incx);
 
 template <typename scalar_t>
-constexpr inline bool gemv_use_fast_path(int64_t m, int64_t n, int64_t lda, int64_t incx, int64_t incy);
+bool gemv_use_fast_path(int64_t m, int64_t n, int64_t lda, int64_t incx, int64_t incy);
 
 template <typename scalar_t>
-inline void scal_fast_path(int *n, scalar_t *a, scalar_t *x, int *incx);
+void scal_fast_path(int *n, scalar_t *a, scalar_t *x, int *incx);
 
 template <typename scalar_t>
-inline void gemv_fast_path(char *trans, int *m, int *n, scalar_t *alpha, scalar_t *a, int *lda, scalar_t *x, int *incx, scalar_t *beta, scalar_t *y, int *incy);
+void gemv_fast_path(char *trans, int *m, int *n, scalar_t *alpha, scalar_t *a, int *lda, scalar_t *x, int *incx, scalar_t *beta, scalar_t *y, int *incy);
 
 }  // namespace blas_impl
-
-namespace {
 
 template <typename scalar_t>
 inline void scal(int64_t n, scalar_t a, scalar_t *x, int64_t incx)
@@ -42,7 +40,7 @@ inline void scal(int64_t n, scalar_t a, scalar_t *x, int64_t incx)
 }
 
 template<typename scalar_t>
-inline bool gemv(char trans, int64_t m, int64_t n, scalar_t alpha, scalar_t *a, int64_t lda, scalar_t *x, int64_t incx, scalar_t beta, scalar_t *y, int64_t incy) {
+bool gemv(char trans, int64_t m, int64_t n, scalar_t alpha, scalar_t *a, int64_t lda, scalar_t *x, int64_t incx, scalar_t beta, scalar_t *y, int64_t incy) {
   if(n == 1) lda = m;
 
   if (blas_impl::gemv_use_fast_path<scalar_t>(m, n, lda, incx, incy)) {
@@ -83,6 +81,13 @@ inline bool gemv(char trans, int64_t m, int64_t n, scalar_t alpha, scalar_t *a, 
   }
   return false;
 }
+
+#define INSTANTIATE(scalar_t, _) \
+template bool gemv<scalar_t>(char trans, int64_t m, int64_t n, scalar_t alpha, scalar_t *a, int64_t lda, scalar_t *x, int64_t incx, scalar_t beta, scalar_t *y, int64_t incy);
+AT_FORALL_SCALAR_TYPES_AND(BFloat16, INSTANTIATE);
+#undef INSTANTIATE
+
+namespace {
 
 constexpr inline bool lda_cond(int64_t m, int64_t n, int64_t lda) {
   return n == 1 || lda > std::max<int64_t>(1L, m);
