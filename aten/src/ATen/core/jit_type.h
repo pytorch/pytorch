@@ -53,7 +53,8 @@ using OptNameList = c10::optional<std::vector<std::string>>;
   _(LayoutType)             \
   _(ScalarTypeType)         \
   _(AnyListType)            \
-  _(AnyTupleType)
+  _(AnyTupleType)           \
+  _(AnyClassType)
 
 enum class TypeKind {
 #define DEFINE_TYPE(T) T,
@@ -1363,7 +1364,7 @@ struct getTypePtr_<c10::QScheme> final {
   }
 };
 template <>
-struct getTypePtr_<at::Generator*> final {
+struct getTypePtr_<at::Generator> final {
   static TypePtr call() {
     return OptionalType::create(GeneratorType::get());
   }
@@ -1950,6 +1951,31 @@ private:
   : Type(TypeKind::AnyTupleType) {}
 };
 
+// the common supertype of all classes,
+// ClassType <: AnyClassType for all classes
+struct AnyClassType;
+using AnyClassTypePtr = std::shared_ptr<AnyClassType>;
+struct CAFFE2_API AnyClassType : public Type {
+  static AnyClassTypePtr create() {
+    return AnyClassTypePtr(
+        new AnyClassType()); // NOLINT(modernize-make-shared)
+  }
+  bool operator==(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  std::string python_str() const override {
+    return "Class Type";
+  }
+  std::string str() const override {
+    return "AnyClassType";
+  }
+  static const TypeKind Kind = TypeKind::AnyClassType;
+  // global singleton
+  static AnyClassTypePtr get();
+private:
+  AnyClassType()
+  : Type(TypeKind::AnyClassType) {}
+};
 
 inline bool IValue::isDoubleList() const {
   // note: avoids calling type() to avoid extra referencing counting for the returned type.
