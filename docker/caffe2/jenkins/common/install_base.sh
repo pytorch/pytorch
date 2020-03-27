@@ -30,7 +30,7 @@ install_ubuntu() {
   apt-get update
   apt-get install -y --no-install-recommends \
           autoconf \
-	  apt-transport-https \
+          apt-transport-https \
           build-essential \
           ca-certificates \
           cmake \
