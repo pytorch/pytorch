@@ -482,11 +482,16 @@ class ModelForFusion(nn.Module):
         self.quant = QuantStub()
         self.dequant = DeQuantStub()
         self.qconfig = qconfig
+        self.conv2 = nn.Conv3d(3, 2, (1, 1, 1), bias=None).to(dtype=torch.float)
+        self.relu2 = nn.ReLU(inplace=False).to(dtype=torch.float)
+        self.bn2 = nn.BatchNorm3d(2).to(dtype=torch.float)
+        self.relu3 = nn.ReLU(inplace=True).to(dtype=torch.float)
         # don't quantize sub2
         self.sub2.qconfig = None
         self.fc.qconfig = None
 
     def forward(self, x):
+        y = x.unsqueeze(2)
         x = self.quant(x)
         x = self.conv1(x)
         x = self.bn1(x)
@@ -496,6 +501,12 @@ class ModelForFusion(nn.Module):
         x = self.sub2(x)
         x = x.view(-1, 72).contiguous()
         x = self.fc(x)
+        y = self.quant(y)
+        y = self.conv2(y)
+        y = self.relu2(y)
+        y = self.bn2(y)
+        y = self.relu3(y)
+        y = self.dequant(y)
         return x
 
 class ConvBNReLU(nn.Sequential):

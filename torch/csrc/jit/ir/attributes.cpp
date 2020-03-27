@@ -16,6 +16,5 @@ std::unique_ptr<AttributeValue> GraphsAttr::clone() const {
   return Ptr(new GraphsAttr(name, std::move(copy)));
 }
 
-
 } // namespace jit
 } // namespace torch
