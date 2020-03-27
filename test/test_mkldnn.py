@@ -230,6 +230,24 @@ class TestMkldnn(TestCase):
                 self._test_serialization(mkldnn_conv2d, (x.to_mkldnn(),))
                 self._test_tracing(mkldnn_conv2d, (x.to_mkldnn(),))
 
+    def test_conv3d_jit(self):
+        for groups in [1, 4]:
+            N = torch.randint(3, 10, (1,)).item()
+            C = torch.randint(1, 3, (1,)).item() * groups
+            M = torch.randint(1, 3, (1,)).item() * groups
+            x = torch.randn(N, C, 112, 112, 112, dtype=torch.float32)
+            for bias in [True, False]:
+                conv3d = torch.nn.Conv3d(in_channels=C,
+                                         out_channels=M,
+                                         kernel_size=3,
+                                         stride=2,
+                                         padding=1,
+                                         bias=bias,
+                                         groups=groups).float()
+                mkldnn_conv3d = mkldnn_utils.to_mkldnn(copy.deepcopy(conv3d))
+                self._test_serialization(mkldnn_conv3d, (x.to_mkldnn(),))
+                self._test_tracing(mkldnn_conv3d, (x.to_mkldnn(),))
+
     def test_conv2d_legacy_jit_model(self):
         g = 4
         conv2d = torch.nn.Conv2d(16, 16, 3, groups=g)
@@ -463,6 +481,9 @@ class TestMkldnn(TestCase):
                         self.assertEqual(
                             bn.running_var,
                             mkldnn_bn.running_var, prec=1e-3)
+                    if (not train and track_running_stats):
+                        self._test_serialization(mkldnn_bn, (x.to_mkldnn(),))
+                        self._test_tracing(mkldnn_bn, (x.to_mkldnn(),))
 
     def test_batch_norm2d_backward(self):
         x = torch.randn(64, 3, 35, 45, dtype=torch.float32) * 10
@@ -499,10 +520,10 @@ class TestMkldnn(TestCase):
 			    running_mean, running_var, is_training, \
 			    momentum, eps, cudnn_enabled)
             out = torch.relu(out)
-                    
+
             out_mkldnn = torch._C._nn.batch_norm_relu(input_mkldnn, \
 			    weight, bias, running_mean, running_var, \
-			    is_training, momentum, eps) 
+			    is_training, momentum, eps)
             self.assertEqual(out, out_mkldnn[0].to_dense())
 
     def test_batch_norm2d_relu_backward(self):
@@ -518,15 +539,15 @@ class TestMkldnn(TestCase):
         momentum = 1.0
         eps = 1.0
         cudnn_enabled = False
-        
+
         out = torch.batch_norm(input_grad, weight, bias,
               running_mean, running_var, is_training, momentum, eps, cudnn_enabled)
         out = torch.relu(out)
         y1 = out.sum()
         y1.backward()
 
-        out_mkldnn = torch._C._nn.batch_norm_relu(input_mkldnn, 
-              weight, bias, running_mean, running_var, is_training, momentum, eps) 
+        out_mkldnn = torch._C._nn.batch_norm_relu(input_mkldnn,
+              weight, bias, running_mean, running_var, is_training, momentum, eps)
         y2 = out_mkldnn[0].to_dense().sum()
         y2.backward()
         self.assertEqual(input_grad.grad, input_mkldnn.grad.to_dense())
