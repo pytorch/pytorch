@@ -288,8 +288,6 @@ class TestUtilityFuns(TestCase):
             assert node.kind() != "onnx::Transpose"
         assert len(list(graph.nodes())) == 1
 
-    # TODO we need to figure out the root cause and fix the problem
-    @skip("causing segmentation fault")
     def test_constant_fold_reshape(self):
         class ReshapeModule(torch.nn.Module):
             def __init__(self, ):
