@@ -156,7 +156,8 @@ void RpcAgent::rpcRetryCallback(
     // just the retry count.
     LOG(INFO) << "Send try " << std::to_string(earliestRpc->retryCount_ + 1)
               << " failed";
-    if (earliestRpc->retryCount_ < earliestRpc->options_.maxRetries) {
+    if (earliestRpc->retryCount_ < earliestRpc->options_.maxRetries &&
+        rpcAgentRunning_.load()) {
       // If the previous future completed with an error and we haven't
       // completed maxRetries send attempts, we move the earliestRpc
       // struct to a new time point in the retry map (effectively
