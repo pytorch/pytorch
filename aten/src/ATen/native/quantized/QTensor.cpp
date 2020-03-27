@@ -179,10 +179,10 @@ Tensor quantized_clone(const Tensor& self, c10::optional<c10::MemoryFormat> opti
 
   Tensor dst = at::_empty_affine_quantized(
       self.sizes(),
-      self.options(),
+      self.options().memory_format(memory_format),
       self.q_scale(),
       self.q_zero_point(),
-      memory_format);
+      c10::nullopt);
 
   at::native::copy_(dst, self, false);
 
