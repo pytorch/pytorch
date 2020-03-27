@@ -1,28 +1,28 @@
 #include <torch/csrc/jit/python/script_init.h>
 
 #include <torch/csrc/Device.h>
-#include <torch/csrc/jit/serialization/import.h>
-#include <torch/csrc/jit/python/python_ivalue.h>
-#include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/api/module.h>
-#include <torch/csrc/jit/python/module_python.h>
-#include <torch/csrc/jit/python/python_sugared_value.h>
+#include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/frontend/sugared_value.h>
+#include <torch/csrc/jit/python/module_python.h>
+#include <torch/csrc/jit/python/python_ivalue.h>
+#include <torch/csrc/jit/python/python_sugared_value.h>
+#include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/testing/file_check.h>
 
-#include <torch/csrc/jit/ir/constants.h>
-#include <torch/csrc/jit/serialization/export.h>
-#include <torch/csrc/jit/runtime/graph_executor.h>
-#include <torch/csrc/jit/testing/hooks_for_testing.h>
-#include <torch/csrc/jit/serialization/import_source.h>
-#include <torch/csrc/jit/ir/irparser.h>
-#include <torch/csrc/jit/passes/inliner.h>
-#include <torch/csrc/jit/serialization/python_print.h>
-#include <torch/csrc/jit/python/pybind_utils.h>
-#include <torch/csrc/jit/python/python_tracer.h>
-#include <torch/csrc/jit/runtime/logging.h>
 #include <torch/csrc/jit/frontend/parser.h>
 #include <torch/csrc/jit/frontend/tracer.h>
+#include <torch/csrc/jit/ir/constants.h>
+#include <torch/csrc/jit/ir/irparser.h>
+#include <torch/csrc/jit/passes/inliner.h>
+#include <torch/csrc/jit/python/pybind_utils.h>
+#include <torch/csrc/jit/python/python_tracer.h>
+#include <torch/csrc/jit/runtime/graph_executor.h>
+#include <torch/csrc/jit/runtime/logging.h>
+#include <torch/csrc/jit/serialization/export.h>
+#include <torch/csrc/jit/serialization/import_source.h>
+#include <torch/csrc/jit/serialization/python_print.h>
+#include <torch/csrc/jit/testing/hooks_for_testing.h>
 
 #include <torch/csrc/api/include/torch/ordered_dict.h>
 
@@ -98,10 +98,7 @@ struct PythonResolver : public Resolver {
         py::hasattr(obj, "_fields");
   }
 
-  TypePtr resolveTypeFromObject(
-      const py::object& obj,
-      const SourceRange& loc) {
-
+  TypePtr resolveTypeFromObject(const py::object& obj, const SourceRange& loc) {
     if (py::isinstance<ScriptClass>(obj)) {
       auto script_class = py::cast<ScriptClass>(obj);
       return script_class.class_type_.type_;
@@ -789,8 +786,7 @@ void initJitScriptBindings(PyObject* module) {
 
             auto self = Object(c10::ivalue::Object::create(
                 c10::StrongTypePtr(
-                    std::shared_ptr<torch::jit::CompilationUnit>(),
-                    class_type),
+                    std::shared_ptr<torch::jit::CompilationUnit>(), class_type),
                 1));
             if (auto setstate_method = self.find_method("__setstate__")) {
               auto setstate_schema = setstate_method->function().getSchema();

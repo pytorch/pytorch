@@ -562,8 +562,7 @@ class TORCH_API CompareSelect : public ExprNode<CompareSelect> {
       const ExprHandle& ret_val1,
       const ExprHandle& ret_val2,
       CompareSelectOperation cmp_op) {
-    if (lhs.dtype() != rhs.dtype() ||
-        ret_val1.dtype() != ret_val2.dtype()) {
+    if (lhs.dtype() != rhs.dtype() || ret_val1.dtype() != ret_val2.dtype()) {
       throw malformed_input();
     }
     return ExprHandle(new CompareSelect(
