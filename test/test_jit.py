@@ -2290,7 +2290,7 @@ graph(%input, %weight):
                 x = F.dropout(x)
                 x = self.dropout(x)
                 # TODO: uncomment when sort is supported
-                # x, _ = torch.sort(x)
+                x, _ = torch.sort(x)
                 x = F.interpolate(x, 4, mode='nearest')
                 x = F.upsample(x, (32, 32))
                 x = F.upsample_bilinear(x, (32, 32))
@@ -2307,7 +2307,7 @@ graph(%input, %weight):
         get_forward(qconfig.activation)(data)
         get_forward(qconfig.weight)(data)
 
-        m = prepare_script(m, {'': qconfig}, inplace=False)
+        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, 'forward', {'': qconfig}, inplace=False))
         m = convert_script(m, True)
         # This checks that the dequantize from the output of first conv
         # is being propagated to the end, so that we don't insert extra
