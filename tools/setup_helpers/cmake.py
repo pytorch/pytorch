@@ -237,7 +237,7 @@ class CMake:
              'INTEL_MKL_DIR',
              'INTEL_OMP_DIR',
              'MKL_THREADING',
-             'MKLDNN_THREADING',
+             'MKLDNN_CPU_RUNTIME',
              'MSVC_Z7_OVERRIDE',
              'Numa_INCLUDE_DIR',
              'Numa_LIBRARIES',
