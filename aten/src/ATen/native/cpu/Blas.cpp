@@ -1,8 +1,8 @@
-#include <ATen/ATen.h>	
-#include <ATen/Dispatch.h>	
+#include <ATen/ATen.h>
+#include <ATen/Dispatch.h>
 #include <ATen/native/Blas.h>
 
-namespace at { namespace native {	
+namespace at { namespace native {
 
 namespace blas_impl {
 
@@ -123,10 +123,10 @@ void addmv_impl_cpu(Tensor& result, const Tensor &self, const Tensor &mat, const
       }
     }
   });
-}	
+}
 
-} // anonymous namespace	
+} // anonymous namespace
 
-REGISTER_DISPATCH(addmv_stub, &addmv_impl_cpu);	
+REGISTER_DISPATCH(addmv_stub, &addmv_impl_cpu);
 
 }} // namespace at::native
