@@ -12790,64 +12790,90 @@ class TestTorchDeviceType(TestCase):
 
         def test_helper(x, y, memory_format):
             fns = [
-                # lambda x, y: x.clone(),
+                lambda x, y: x.clone(),
                 lambda x, y: x + 3,
                 lambda x, y: 3 * x,
                 lambda x, y: x + y,
                 lambda x, y: y + x,
                 lambda x, y: x * y,
                 lambda x, y: y * x,
-                lambda x, y: x.sin(),
-                lambda x, y: x.sinh(),
-                lambda x, y: x.sqrt(),
-                # lambda x, y: abs(x), # https://github.com/pytorch/pytorch/issues/24531
-                # lambda x, y: x.abs(), # https://github.com/pytorch/pytorch/issues/24531
-                # lambda x, y: x.acos(), # https://github.com/pytorch/pytorch/issues/24532
+                lambda x, y: abs(x),
+                lambda x, y: x.abs(),
+                lambda x, y: x.abs_(),
+                lambda x, y: x.acos(),
+                lambda x, y: x.acos_(),
                 lambda x, y: x.add(y, alpha=3),
+                lambda x, y: x.add_(y, alpha=3),
                 lambda x, y: x.addcdiv(y, y, value=2),
+                lambda x, y: x.addcdiv_(y, y, value=2),
                 lambda x, y: y.addcdiv(x, y, value=2),
                 lambda x, y: x.addcmul(y, y, value=2),
+                lambda x, y: x.addcmul_(y, y, value=2),
                 lambda x, y: y.addcmul(x, y, value=2),
                 lambda x, y: x.asin(),
+                lambda x, y: x.asin_(),
                 # lambda x, y: x.atan(), # https://github.com/pytorch/pytorch/issues/24538
                 lambda x, y: x.atan2(y),
+                lambda x, y: x.atan2_(y),
                 lambda x, y: x.ceil(),
+                lambda x, y: x.ceil_(),
                 # lambda x, y: x.clamp(-1, 1), # https://github.com/pytorch/pytorch/issues/24544
                 # lambda x, y: x.cos(), # https://github.com/pytorch/pytorch/issues/24545
                 # lambda x, y: x.cosh(), # https://github.com/pytorch/pytorch/issues/24546
                 lambda x, y: x.div(0.5),
+                lambda x, y: x.div_(0.5),
                 lambda x, y: x.div(y),
+                lambda x, y: x.div_(y),
                 lambda x, y: x.digamma(),
+                lambda x, y: x.digamma_(),
                 # lambda x, y: x.erf(), # https://github.com/pytorch/pytorch/issues/24558
                 # lambda x, y: x.erfc(), # https://github.com/pytorch/pytorch/issues/24559
                 lambda x, y: x.erfinv(),
+                lambda x, y: x.erfinv_(),
                 # lambda x, y: x.exp(), # https://github.com/pytorch/pytorch/issues/24561
                 lambda x, y: x.expm1(),
+                lambda x, y: x.expm1_(),
                 lambda x, y: x.floor(),
+                lambda x, y: x.floor_(),
                 # lambda x, y: x.fmod(2), # https://github.com/pytorch/pytorch/issues/24565
                 # lambda x, y: x.frac(), # https://github.com/pytorch/pytorch/issues/24566
                 # lambda x, y: x.lerp(y, 0.5), #  Need to update Lerp.cu with TensorIterator
                 lambda x, y: x.log(),
+                lambda x, y: x.log_(),
                 lambda x, y: x.log10(),
+                lambda x, y: x.log10_(),
                 lambda x, y: x.log1p(),
+                lambda x, y: x.log1p_(),
                 lambda x, y: x.log2(),
+                lambda x, y: x.log2_(),
                 lambda x, y: x.mul(3),
+                lambda x, y: x.mul_(3),
                 lambda x, y: x.neg(),
+                lambda x, y: x.neg_(),
                 lambda x, y: x.pow(3),
+                lambda x, y: x.pow_(3),
                 # lambda x, y: x.pow(0.0), # Need to make resize_as_ memory format aware
                 # lambda x, y: x.pow(1.0), # Need to make resize_as_ memory format aware
                 # lambda x, y: x.reciprocal(), # Not migrated for CUDA
                 # lambda x, y: x.remainder(2),  # https://github.com/pytorch/pytorch/issues/24615
                 lambda x, y: x.round(),
+                lambda x, y: x.round_(),
                 lambda x, y: x.rsqrt(),
-                # lambda x, y: x.sigmoid(), # https://github.com/pytorch/pytorch/issues/24624
+                lambda x, y: x.rsqrt_(),
+                lambda x, y: x.sigmoid(),
+                lambda x, y: x.sigmoid_(),
                 lambda x, y: x.sign(),
+                lambda x, y: x.sign_(),
                 lambda x, y: x.sin(),
+                lambda x, y: x.sin_(),
                 lambda x, y: x.sinh(),
+                lambda x, y: x.sinh_(),
                 lambda x, y: x.sqrt(),
+                lambda x, y: x.sqrt_(),
                 # lambda x, y: x.tan(), # https://github.com/pytorch/pytorch/issues/24641
                 # lambda x, y: x.tanh(), # https://github.com/pytorch/pytorch/issues/24642
                 lambda x, y: x.trunc(),
+                lambda x, y: x.trunc_(),
                 chunk_op,
                 unsqueeze_op_add,
                 # unsqueeze_op_clone,
