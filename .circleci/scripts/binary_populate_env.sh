@@ -70,7 +70,7 @@ if tagged_version >/dev/null; then
   # Turns tag v1.6.0-rc1 -> v1.6.0
   BASE_BUILD_VERSION="$(tagged_version | sed -e 's/^v//' -e 's/-.*$//')"
 fi
-if [[ "$(uname)" == 'Darwin' ]] || [[ "$DESIRED_CUDA" == "cu101" ]] || [[ "$PACKAGE_TYPE" == conda ]]; then
+if [[ "$(uname)" == 'Darwin' ]] || [[ "$DESIRED_CUDA" == "cu102" ]] || [[ "$PACKAGE_TYPE" == conda ]]; then
   export PYTORCH_BUILD_VERSION="${BASE_BUILD_VERSION}"
 else
   export PYTORCH_BUILD_VERSION="${BASE_BUILD_VERSION}+$DESIRED_CUDA"
