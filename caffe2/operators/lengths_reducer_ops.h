@@ -49,10 +49,6 @@ class CPUSparseLengthsReductionOp : public Operator<CPUContext> {
     auto& indicesInput = Input(INDICES);
     auto& lengthsInput = Input(LENGTHS);
 
-    CAFFE_ENFORCE_EQ(1, indicesInput.dim(), "INDICES must be a vector");
-    CAFFE_ENFORCE_EQ(1, lengthsInput.dim(), "LENGTHS must be a vector");
-    const int64_t N = dataInput.size(0);
-    const int D = dataInput.size_from_dim(1);
     const int64_t M = lengthsInput.size(0);
     const int64_t indices_size = indicesInput.numel();
 
@@ -60,6 +56,18 @@ class CPUSparseLengthsReductionOp : public Operator<CPUContext> {
     shape[0] = M;
     auto* output = Output(0, shape, at::dtype<T>());
     T* out_data = output->template mutable_data<T>();
+
+    if (indices_size == 0) {
+      if (M > 0) {
+        memset(out_data, 0, output->numel() * sizeof(T));
+      }
+      return true;
+    }
+
+    CAFFE_ENFORCE_EQ(1, indicesInput.dim(), "INDICES must be a vector");
+    CAFFE_ENFORCE_EQ(1, lengthsInput.dim(), "LENGTHS must be a vector");
+    const int64_t N = dataInput.size(0);
+    const int D = dataInput.size_from_dim(1);
 
     const InputType* in_data = dataInput.template data<InputType>();
     const IndexType* indices = indicesInput.template data<IndexType>();
