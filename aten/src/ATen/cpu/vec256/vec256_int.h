@@ -691,42 +691,19 @@ Vec256<int16_t> inline operator/(const Vec256<int16_t>& a, const Vec256<int16_t>
   return intdiv_256(a, b);
 }
 
-template<class T, typename std::enable_if_t<std::is_integral<T>::value && std::is_base_of<Vec256i, Vec256<T>>::value, int> = 0>
+template<class T, typename std::enable_if_t<std::is_base_of<Vec256i, Vec256<T>>::value, int> = 0>
 inline Vec256<T> operator&(const Vec256<T>& a, const Vec256<T>& b) {
   return _mm256_and_si256(a, b);
 }
-template<class T, typename std::enable_if_t<std::is_integral<T>::value && std::is_base_of<Vec256i, Vec256<T>>::value, int> = 0>
+template<class T, typename std::enable_if_t<std::is_base_of<Vec256i, Vec256<T>>::value, int> = 0>
 inline Vec256<T> operator|(const Vec256<T>& a, const Vec256<T>& b) {
   return _mm256_or_si256(a, b);
 }
-template<class T, typename std::enable_if_t<std::is_integral<T>::value && std::is_base_of<Vec256i, Vec256<T>>::value, int> = 0>
+template<class T, typename std::enable_if_t<std::is_base_of<Vec256i, Vec256<T>>::value, int> = 0>
 inline Vec256<T> operator^(const Vec256<T>& a, const Vec256<T>& b) {
   return _mm256_xor_si256(a, b);
 }
 
 #endif
-
-template <class T, typename Op,
-          typename std::enable_if_t<std::is_integral<T>::value && !std::is_base_of<Vec256i, Vec256<T>>::value, int> = 0>
-static inline Vec256<T> bitwise_binary_op(const Vec256<T> &a, const Vec256<T> &b, Op op) {
-  Vec256<T> res;
-  for (int i = 0; i < Vec256<T>::size(); ++ i) {
-    res[i] = op(a[i], b[i]);
-  }
-  return res;
-}
-
-template<class T, typename std::enable_if_t<std::is_integral<T>::value && !std::is_base_of<Vec256i, Vec256<T>>::value, int> = 0>
-inline Vec256<T> operator&(const Vec256<T>& a, const Vec256<T>& b) {
-  return bitwise_binary_op(a, b, std::bit_and<T>());
-}
-template<class T, typename std::enable_if_t<std::is_integral<T>::value && !std::is_base_of<Vec256i, Vec256<T>>::value, int> = 0>
-inline Vec256<T> operator|(const Vec256<T>& a, const Vec256<T>& b) {
-  return bitwise_binary_op(a, b, std::bit_or<T>());
-}
-template<class T, typename std::enable_if_t<std::is_integral<T>::value && !std::is_base_of<Vec256i, Vec256<T>>::value, int> = 0>
-inline Vec256<T> operator^(const Vec256<T>& a, const Vec256<T>& b) {
-  return bitwise_binary_op(a, b, std::bit_xor<T>());
-}
 
 }}}
