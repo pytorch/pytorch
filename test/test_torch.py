@@ -16674,6 +16674,7 @@ unary_ufuncs = {
     'sinh': ufunc_meta(is_floating=True, complex_on=('cpu', 'cuda')),
     'cosh': ufunc_meta(is_floating=True, complex_on=('cpu')),
     'tanh': ufunc_meta(is_floating=True, complex_on=('cpu')),
+    'angle': ufunc_meta(is_floating=True, complex_on=('cpu', 'cuda')),
     'ceil': ufunc_meta(is_floating=True, complex_on=('cpu', 'cuda')),
     'floor': ufunc_meta(is_floating=True, complex_on=('cpu', 'cuda')),
     'exp': ufunc_meta(is_floating=True, complex_on=('cpu')),
