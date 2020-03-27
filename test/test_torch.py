@@ -4527,6 +4527,8 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             np.double,
             np.float,
             np.float16,
+            np.complex64,
+            np.complex128,
             np.int64,
             np.int32,
             np.int16,
@@ -4535,6 +4537,11 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             np.longlong,
             np.bool,
         ]
+        complex_dtypes = [
+            np.complex64,
+            np.complex128,
+        ]
+
         for dtype in dtypes:
             array = np.array([1, 2, 3, 4], dtype=dtype)
             tensor_from_array = torch.from_numpy(array)
@@ -4542,15 +4549,17 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             # implements `==`
             for i in range(len(array)):
                 self.assertEqual(tensor_from_array[i], array[i])
-            # This is a special test case for Windows
-            # https://github.com/pytorch/pytorch/issues/22615
-            array2 = array % 2
-            tensor_from_array2 = torch.from_numpy(array2)
-            for i in range(len(array2)):
-                self.assertEqual(tensor_from_array2[i], array2[i])
+            # ufunc 'remainder' not supported for complex dtypes
+            if dtype not in complex_dtypes:
+                # This is a special test case for Windows
+                # https://github.com/pytorch/pytorch/issues/22615
+                array2 = array % 2
+                tensor_from_array2 = torch.from_numpy(array2)
+                for i in range(len(array2)):
+                    self.assertEqual(tensor_from_array2[i], array2[i])
 
         # Test unsupported type
-        array = np.array([1, 2, 3, 4], dtype=np.complex)
+        array = np.array([1, 2, 3, 4], dtype=np.uint16)
         with self.assertRaises(TypeError):
             tensor_from_array = torch.from_numpy(array)
 
