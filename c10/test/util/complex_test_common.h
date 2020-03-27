@@ -295,9 +295,6 @@ constexpr c10::complex<scalar_t> d(scalar_t real, scalar_t imag, c10::complex<rh
 template<typename scalar_t>
 void test_arithmetic_assign_complex() {
   using namespace c10::complex_literals;
-  constexpr c10::complex<scalar_t> x1 = p(scalar_t(2), scalar_t(2), 1.0_ih);
-  static_assert(x1.real() == scalar_t(2), "");
-  static_assert(x1.imag() == scalar_t(3), "");
   constexpr c10::complex<scalar_t> x2 = p(scalar_t(2), scalar_t(2), 1.0_if);
   static_assert(x2.real() == scalar_t(2), "");
   static_assert(x2.imag() == scalar_t(3), "");
@@ -308,9 +305,6 @@ void test_arithmetic_assign_complex() {
   static_assert(x3.imag() == scalar_t(3), "");
 #endif
 
-  constexpr c10::complex<scalar_t> y1 = m(scalar_t(2), scalar_t(2), 1.0_ih);
-  static_assert(y1.real() == scalar_t(2), "");
-  static_assert(y1.imag() == scalar_t(1), "");
   constexpr c10::complex<scalar_t> y2 = m(scalar_t(2), scalar_t(2), 1.0_if);
   static_assert(y2.real() == scalar_t(2), "");
   static_assert(y2.imag() == scalar_t(1), "");
@@ -321,9 +315,6 @@ void test_arithmetic_assign_complex() {
   static_assert(y3.imag() == scalar_t(1), "");
 #endif
 
-  constexpr c10::complex<scalar_t> z1 = t(scalar_t(1), scalar_t(-2), 1.0_ih);
-  static_assert(z1.real() == scalar_t(2), "");
-  static_assert(z1.imag() == scalar_t(1), "");
   constexpr c10::complex<scalar_t> z2 = t(scalar_t(1), scalar_t(-2), 1.0_if);
   static_assert(z2.real() == scalar_t(2), "");
   static_assert(z2.imag() == scalar_t(1), "");
@@ -331,9 +322,6 @@ void test_arithmetic_assign_complex() {
   static_assert(z3.real() == scalar_t(2), "");
   static_assert(z3.imag() == scalar_t(1), "");
 
-  constexpr c10::complex<scalar_t> t1 = d(scalar_t(-1), scalar_t(2), 1.0_ih);
-  static_assert(t1.real() == scalar_t(2), "");
-  static_assert(t1.imag() == scalar_t(1), "");
   constexpr c10::complex<scalar_t> t2 = d(scalar_t(-1), scalar_t(2), 1.0_if);
   static_assert(t2.real() == scalar_t(2), "");
   static_assert(t2.imag() == scalar_t(1), "");
