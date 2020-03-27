@@ -1,14 +1,18 @@
 .. _rpc-index:
 
-torch.distributed.rpc
-===========================
+Distributed RPC Framework
+==============================
 
 The distributed RPC framework provides mechanisms for multi-machine model training through a set of primitives to allow for remote communication, and a higher-level API to automatically differentiate
 models split across several machines.
 
-.. toctree::
-  :maxdepth: 1
-  
-  rpc.rst
-  distributed_autograd.rst
-  rref.rst
+- :ref:`distributed-rpc-framework`
+Design Notes
+-----------
+The distributed autograd design note covers the design of the RPC-based distributed autograd framework that is useful for applications such as model parallel training.
+
+-  :ref:`distributed-autograd-design`
+
+The RRef design note convers the design of the :ref:`rref` (Remote REFerence) protocol used to refer to values on remote workers by the framework.
+
+-  :ref:`remote-reference-protocol`
