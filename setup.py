@@ -42,7 +42,7 @@
 #   USE_MKLDNN=0
 #     disables use of MKLDNN
 #
-#   MKLDNN_THREADING
+#   MKLDNN_CPU_RUNTIME
 #     MKL-DNN threading mode: TBB or OMP (default)
 #
 #   USE_NNPACK=0
