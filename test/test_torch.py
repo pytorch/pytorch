@@ -990,10 +990,6 @@ class _TestTorchMixin(object):
         expected = torch.tensor([[0.]], dtype=torch.bfloat16)
         self.assertEqual(bfloat16Tensor, expected)
 
-        complexTensor = torch.zeros(2, 2, dtype=torch.complex64)
-        expected = torch.tensor([[0., 0.], [0., 0.]], dtype=torch.complex64)
-        self.assertEqual(complexTensor, expected)
-
     def test_zeros_out(self):
         shape = (3, 4)
         out = torch.zeros(shape)
@@ -1354,7 +1350,6 @@ class _TestTorchMixin(object):
         def test_inference(default_dtype):
             saved_dtype = torch.get_default_dtype()
             torch.set_default_dtype(default_dtype)
-            default_complex_dtype = torch.complex64 if default_dtype == torch.float32 else torch.complex128
             self.assertIs(default_dtype, torch.tensor(()).dtype)
             self.assertIs(default_dtype, torch.tensor(5.).dtype)
             self.assertIs(torch.int64, torch.tensor(5).dtype)
@@ -1363,7 +1358,6 @@ class _TestTorchMixin(object):
             self.assertIs(default_dtype, torch.tensor(((7, 5), (9, 5.))).dtype)
             self.assertIs(default_dtype, torch.tensor(((5., 5), (3, 5))).dtype)
             self.assertIs(torch.int64, torch.tensor(((5, 3), (3, 5))).dtype)
-            self.assertIs(default_complex_dtype, torch.tensor(((5, 3 + 2j), (3, 5 + 4j))).dtype)
 
             if TEST_NUMPY:
                 self.assertIs(torch.float64, torch.tensor(np.array(())).dtype)
@@ -2152,8 +2146,6 @@ class _TestTorchMixin(object):
 
         common_routine(dtype=torch.float32)
         common_routine(dtype=torch.float64)
-        common_routine(dtype=torch.complex64)
-        common_routine(dtype=torch.complex128)
 
     def test_slice(self):
         empty = torch.empty(0, 4)
@@ -15159,11 +15151,6 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         t = torch.full(size, 1.)
         self.assertEqual(t.dtype, dtype)
 
-        # Tests complex inference
-        t = torch.full(size, (1 + 1j))
-        ctype = torch.complex128 if dtype is torch.double else torch.complex64
-        self.assertEqual(t.dtype, ctype)
-
         torch.set_default_dtype(prev_default)
 
     # Full-like precedence is the explicit dtype then the dtype of the "like"
@@ -15174,8 +15161,6 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         like = torch.empty((5,), device=device, dtype=torch.long)
 
         self.assertEqual(torch.full_like(like, 1.).dtype, torch.long)
-        self.assertEqual(torch.full_like(like, 1., dtype=torch.complex64).dtype,
-                         torch.complex64)
 
     def test_full_out(self, device):
         o = torch.empty((5,), device=device, dtype=torch.long)

@@ -70,7 +70,7 @@ factory_common_args = merge_dicts(common_args, parse_kwargs("""
         returned tensor. Default: ``False``.
     pin_memory (bool, optional): If set, returned tensor would be allocated in
         the pinned memory. Works only for CPU tensors. Default: ``False``.
-    memory_format (:class:`torch.memory_format`, optional): the desired memory format of 
+    memory_format (:class:`torch.memory_format`, optional): the desired memory format of
         returned Tensor. Default: ``torch.contiguous_format``.
 """))
 
@@ -86,7 +86,7 @@ factory_like_common_args = parse_kwargs("""
         returned tensor. Default: ``False``.
     pin_memory (bool, optional): If set, returned tensor would be allocated in
         the pinned memory. Works only for CPU tensors. Default: ``False``.
-    memory_format (:class:`torch.memory_format`, optional): the desired memory format of 
+    memory_format (:class:`torch.memory_format`, optional): the desired memory format of
         returned Tensor. Default: ``torch.preserve_format``.
 """)
 
@@ -2618,13 +2618,6 @@ one of ``torch.float64``, ``torch.float32`` and ``torch.float16``.
 Args:
     input (Tensor): the PyTorch tensor to test
 """)
-
-add_docstr(torch.is_complex,
-           r"""
-is_complex(input) -> (bool)
-
-Returns True if the data type of :attr:`input` is a floating point data type i.e.,
-one of ``torch.complex64``, and ``torch.float128``.
 
 Args:
     input (Tensor): the PyTorch tensor to test

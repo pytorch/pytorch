@@ -99,7 +99,8 @@ Tensor _dim_arange(const Tensor& like, int64_t dim) {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ empty ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Tensor empty_cpu(IntArrayRef size, const TensorOptions& options_, c10::optional<c10::MemoryFormat> optional_memory_format) {
-
+  TORCH_CHECK((options_.dtype() != caffe2::TypeMeta::Make<std::complex<float>>()) &&
+    (options_.dtype() != caffe2::TypeMeta::Make<std::complex<double>>()), "Complex dtype not supported.");
   TORCH_CHECK(
     !(options_.has_memory_format() && optional_memory_format.has_value()),
     "Cannot set memory_format both in TensorOptions and explicit argument; please delete "
