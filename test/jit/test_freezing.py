@@ -47,14 +47,14 @@ class TestFreezing(JitTestCase):
                 self.e = [1.0, 1.1]  # folded
                 self.f = ["hello", "world"]  # folded
                 self.g = ([1, 2], 3.2, "4.4", torch.tensor([5.5], requires_grad=True))     # folded
-                self.h = {"layer" : "dict"}   # not folded. dictionary not yet supported
+                self.h = {"layer" : [torch.tensor([7.7], requires_grad=True)]}
                 self.t = torch.tensor([1.2, 2.4], requires_grad=True)  # folded
                 self.ts = [torch.tensor([1.0, 2.0], requires_grad=True), torch.tensor([3.0, 4.0], requires_grad=True)]  # folded
                 self.tt = [[torch.tensor([3.3, 2.3], requires_grad=True), None]]  # not folded. Generic list not yet folded
 
             def forward(self, x):
                 return str(self.a) + str(self.b) + self.c + str(self.d) + \
-                    str(self.e) + str(self.f) + str(self.g) + self.h['layer'] + str(self.t) + str(self.ts) + str(self.tt)
+                    str(self.e) + str(self.f) + str(self.g) + str(self.h['layer']) + str(self.t) + str(self.ts) + str(self.tt)
 
 
         m = torch.jit.script(M())
@@ -69,7 +69,7 @@ class TestFreezing(JitTestCase):
         self.assertFalse(m._c.hasattr('e'))
         self.assertFalse(m._c.hasattr('f'))
         self.assertFalse(m._c.hasattr('g'))
-        self.assertTrue(m._c.hasattr('h'))
+        self.assertFalse(m._c.hasattr('h'))
         self.assertFalse(m._c.hasattr('t'))
         self.assertFalse(m._c.hasattr('ts'))
         self.assertTrue(m._c.hasattr('tt'))
@@ -226,7 +226,7 @@ class TestFreezing(JitTestCase):
         m_f = torch._C._freeze_module(m_s._c)
         m.a["layer2"] += "2"
         m_s.modify_a(t)
-        self.assertTrue(m_f.hasattr('a'))
+        self.assertFalse(m_f.hasattr('a'))
         out = m_f.forward(t)
         expected = {"layer" : "411", "layer2" : "3"}
         self.assertEqual(out, expected)
@@ -560,7 +560,7 @@ class TestFreezing(JitTestCase):
         model = torch.jit.script(Net())
         model.train()
 
-        with self.assertRaisesRegex(RuntimeError, '!module.is_training()'):
+        with self.assertRaisesRegex(RuntimeError, 'Freezing module in training mode is not yet supported'):
             mTrain_freezed = torch._C._freeze_module(model._c)
 
         model.eval()

@@ -1,11 +1,10 @@
+#include <torch/csrc/jit/frontend/builtin_functions.h>
 #include <torch/csrc/api/include/torch/jit.h>
 #include <torch/csrc/jit/frontend/code_template.h>
-#include <torch/csrc/jit/frontend/builtin_functions.h>
 #include <torch/csrc/jit/frontend/resolver.h>
 
 namespace torch {
 namespace jit {
-namespace script {
 
 auto scalar_operators_source = CodeTemplate(
     R"SCRIPT(
@@ -49,11 +48,12 @@ def ndim(a : Tensor) -> int:
   return a.dim()
 def T(a : Tensor) -> Tensor:
   return a.numpy_T()
+def shape(a : Tensor) -> List[int]:
+  return a.size()
 )SCRIPT";
 
 struct BuiltinFunctionRegistry {
-  const std::vector<Function*>& getAllBuiltinFunctionsFor(
-      Symbol name) {
+  const std::vector<Function*>& getAllBuiltinFunctionsFor(Symbol name) {
     const static std::vector<Function*> empty;
     // when initializing the builtin function library, we will re-enter
     // getAllBuiltinFunctionsFor since it is called in the compiler to
@@ -80,8 +80,7 @@ struct BuiltinFunctionRegistry {
   void loadSource(const std::string& source, const std::string& the_namespace) {
     std::shared_ptr<CompilationUnit> cu = std::make_shared<CompilationUnit>();
     modules.emplace_back(cu);
-    cu->define(
-        c10::nullopt, source, script::nativeResolver(), /*self=*/nullptr);
+    cu->define(c10::nullopt, source, nativeResolver(), /*self=*/nullptr);
     for (auto& method : cu->get_functions()) {
       builtins_by_name_[Symbol::fromQualString(
                             the_namespace + "::" + method->name())]
@@ -124,16 +123,13 @@ struct BuiltinFunctionRegistry {
   enum { UNINITIALIZED, INTIIALIZING, INITIALIZED } state = UNINITIALIZED;
   std::recursive_mutex mutex;
   std::vector<std::shared_ptr<CompilationUnit>> modules;
-  std::unordered_map<Symbol, std::vector<Function*>>
-      builtins_by_name_;
+  std::unordered_map<Symbol, std::vector<Function*>> builtins_by_name_;
 };
 
-const std::vector<Function*>& getAllBuiltinFunctionsFor(
-    Symbol name) {
+const std::vector<Function*>& getAllBuiltinFunctionsFor(Symbol name) {
   static BuiltinFunctionRegistry registry;
   return registry.getAllBuiltinFunctionsFor(name);
 }
 
-} // namespace script
 } // namespace jit
 } // namespace torch

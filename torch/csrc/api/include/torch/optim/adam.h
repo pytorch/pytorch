@@ -34,7 +34,7 @@ public:
 };
 
 struct TORCH_API AdamParamState : public OptimizerCloneableParamState<AdamParamState> {
-  TORCH_ARG(int64_t, step);
+  TORCH_ARG(int64_t, step) = 0;
   TORCH_ARG(torch::Tensor, exp_avg);
   TORCH_ARG(torch::Tensor, exp_avg_sq);
   TORCH_ARG(torch::Tensor, max_exp_avg_sq) = {};
@@ -49,7 +49,7 @@ public:
 class TORCH_API Adam : public Optimizer {
  public:
    explicit Adam(std::vector<OptimizerParamGroup> param_groups,
-       AdamOptions defaults) : Optimizer(std::move(param_groups), std::make_unique<AdamOptions>(defaults)) {
+       AdamOptions defaults = {}) : Optimizer(std::move(param_groups), std::make_unique<AdamOptions>(defaults)) {
      TORCH_CHECK(defaults.lr() >= 0, "Invalid learning rate: ", defaults.lr());
      TORCH_CHECK(defaults.eps() >= 0, "Invalid epsilon value: ", defaults.eps());
      auto betas = defaults.betas();
@@ -59,16 +59,11 @@ class TORCH_API Adam : public Optimizer {
    }
    explicit Adam(
        std::vector<Tensor> params,
-       AdamOptions defaults) : Adam({std::move(OptimizerParamGroup(params))}, defaults) {}
+       AdamOptions defaults = {}) : Adam({std::move(OptimizerParamGroup(params))}, defaults) {}
 
-  void step() override;
+  torch::Tensor step(LossClosure closure = nullptr) override;
   void save(serialize::OutputArchive& archive) const override;
   void load(serialize::InputArchive& archive) override;
-
-  void add_parameters(const std::vector<Tensor>& parameters) override;
-  const std::vector<Tensor>& parameters() const noexcept override;
-  std::vector<Tensor>& parameters() noexcept override;
-  size_t size() const noexcept override;
 
  private:
   template <typename Self, typename Archive>

@@ -138,7 +138,7 @@ TORCH_NN_MODULE_TEST_INIT = Template("""\n
 void ${module_variant_name}_test_init(
     const std::string& saved_module_path,
     const std::string& device) {
-  torch::jit::script::Module m_init_by_python = torch::jit::load(saved_module_path);
+  torch::jit::Module m_init_by_python = torch::jit::load(saved_module_path);
 
   torch::manual_seed(2);
   ${module_qualified_name} m_init_by_cpp${cpp_constructor_args};

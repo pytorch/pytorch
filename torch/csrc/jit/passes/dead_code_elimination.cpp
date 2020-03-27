@@ -1,8 +1,8 @@
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 
+#include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/utils/memory.h>
 
 #include <unordered_map>
@@ -16,10 +16,13 @@ using namespace ::c10::prim;
 
 class DeadCodeEliminator {
  public:
-  explicit DeadCodeEliminator(std::shared_ptr<Graph> graph, DCESideEffectPolicy sideEffectPolicy)
-      : sideEffectPolicy_(sideEffectPolicy), aliasDb_(torch::make_unique<AliasDb>(std::move(graph))) {}
+  explicit DeadCodeEliminator(
+      std::shared_ptr<Graph> graph,
+      DCESideEffectPolicy sideEffectPolicy)
+      : sideEffectPolicy_(sideEffectPolicy),
+        aliasDb_(torch::make_unique<AliasDb>(std::move(graph))) {}
   DeadCodeEliminator(DCESideEffectPolicy sideEffectPolicy)
-  : sideEffectPolicy_(sideEffectPolicy) {}
+      : sideEffectPolicy_(sideEffectPolicy) {}
 
   // The algorithm is an inverse mark-and-sweep. Starting from the return node,
   // we mark "live" nodes that are necessary for the output. Nodes that have
@@ -289,9 +292,7 @@ class DeadCodeEliminator {
     if (!aliasDb_) {
       // If we don't have alias information, all mutable ops have unknown
       // effects and can't be considered for elimination.
-      if (!node->kind().is_aten() && !node->kind().is_prim()) {
-        return false;
-      }
+
       // onnx export calls EliminateDeadCode but sometimes passes invalid
       // aten operators. So we call maybeSchema so we handle the cases when
       // there is no valid schema for a node
@@ -411,12 +412,18 @@ class DeadCodeEliminator {
       [](const std::unordered_set<const Value*>&) {};
 };
 
-void EliminateDeadCode(const std::shared_ptr<Graph>& graph, DCESideEffectPolicy sideEffectPolicy) {
-  DeadCodeEliminator(graph, sideEffectPolicy).run(graph->block(), /*recurse=*/true);
+void EliminateDeadCode(
+    const std::shared_ptr<Graph>& graph,
+    DCESideEffectPolicy sideEffectPolicy) {
+  DeadCodeEliminator(graph, sideEffectPolicy)
+      .run(graph->block(), /*recurse=*/true);
   GRAPH_DUMP("After EliminateDeadCode: ", graph);
 }
 
-void EliminateDeadCode(Block* block, bool recurse, DCESideEffectPolicy sideEffectPolicy) {
+void EliminateDeadCode(
+    Block* block,
+    bool recurse,
+    DCESideEffectPolicy sideEffectPolicy) {
   DeadCodeEliminator(sideEffectPolicy).run(block, recurse);
 }
 

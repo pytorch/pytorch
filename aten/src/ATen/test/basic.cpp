@@ -7,7 +7,7 @@
 
 // for TH compat test only...
 struct THFloatTensor;
-extern "C" THFloatTensor * THFloatTensor_newWithSize2d(size_t a, size_t b);
+extern "C" THFloatTensor * THFloatTensor_newWithSize1d(size_t a, size_t b);
 extern "C" void THFloatTensor_fill(THFloatTensor *, float v);
 
 #include <iostream>
@@ -207,7 +207,7 @@ void TestZeroDim(DeprecatedTypeProperties& type) {
 
 void TestTensorFromTH() {
   int a = 4;
-  THFloatTensor* t = THFloatTensor_newWithSize2d(a, a);
+  THFloatTensor* t = THFloatTensor_newWithSize1d(a, a);
   THFloatTensor_fill(t, a);
   ASSERT_NO_THROW(at::unsafeTensorFromTH(t, false));
 }

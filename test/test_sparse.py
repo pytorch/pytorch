@@ -47,6 +47,7 @@ class TestSparse(TestCase):
         self.is_cuda = False
         self.is_uncoalesced = False
         self.device = 'cpu'
+        self.exact_dtype = True
         self.value_dtype = torch.float64
         self.index_tensor = lambda *args: torch.tensor(*args, dtype=torch.int64, device=self.device)
         self.value_empty = lambda *args: torch.empty(*args, dtype=self.value_dtype, device=self.device)
@@ -190,7 +191,7 @@ class TestSparse(TestCase):
         self.assertEqual(x._indices().numel(), 0)
         self.assertEqual(x._values().numel(), 0)
 
-    def test_coalecce(self):
+    def test_coalesce(self):
         for empty_i, empty_v, empty_nnz in itertools.product([True, False], repeat=3):
             sparse_size = [] if empty_i else [2, 1]
             dense_size = [1, 0, 2] if empty_v else [1, 2]
@@ -227,8 +228,18 @@ class TestSparse(TestCase):
             x.to_dense()  # Tests triple to_dense for memory corruption
             x.to_dense()
             x.to_dense()
-            self.assertEqual(res, x.to_dense())
-            self.assertEqual(res, self.safeToDense(x))
+            # We dont have to_dense for half types, so we don't request
+            # exact_dtype if res.type is torch.float16.
+            dense_x = x.to_dense()
+            safe_dense_x = self.safeToDense(x)
+            if (res.dtype == torch.float16):
+                exact_dtype = False
+            else:
+                exact_dtype = True
+                dense_x = dense_x.to(res.dtype)
+                safe_dense_x = safe_dense_x.to(res.dtype)
+            self.assertEqual(res, dense_x, exact_dtype=exact_dtype)
+            self.assertEqual(res, safe_dense_x, exact_dtype=exact_dtype)
 
             def fn(x):
                 return x.to_dense()
@@ -242,7 +253,7 @@ class TestSparse(TestCase):
         ])
         # we don't have to_dense for half types on CPU because it is implemented
         # with a slower add_ operation
-        for dtype in [torch.float16, torch.float64] if self.device != 'cpu' else [torch.float64]:
+        for dtype in [torch.float16, torch.float32, torch.float64] if self.device != 'cpu' else [torch.float32, torch.float64]:
             v = self.value_tensor([2, 1, 3, 4]).to(dtype=dtype)
             x = self.sparse_tensor(i, v, torch.Size([3, 4, 5]))
             res = self.value_tensor([
@@ -1135,7 +1146,7 @@ class TestSparse(TestCase):
         # sum an empty tensor
         empty_S = torch.sparse_coo_tensor(size=with_size)
         self.assertRaises(RuntimeError, lambda: torch.sparse.sum(empty_S, [0]))
-        self.assertEqual(torch.sparse.sum(empty_S), torch.tensor(0,))
+        self.assertEqual(torch.sparse.sum(empty_S), torch.tensor(0, dtype=torch.float64))
         empty_S.requires_grad_(True)
         empty_S_sum = torch.sparse.sum(empty_S)
         empty_S_sum.backward()
@@ -1186,6 +1197,21 @@ class TestSparse(TestCase):
         y2 = x1.clone()
         y2.div_(37.5)
         expected = self.safeToDense(x1) / 37.5
+        self.assertEqual(self.safeToDense(y1), expected)
+        self.assertEqual(self.safeToDense(y2), expected)
+
+        y1 = torch.true_divide(x1, 37.5)
+        y2 = x1.clone()
+        if y2.dtype.is_floating_point or y2.dtype.is_complex:
+            y2.true_divide_(37.5)
+        expected = torch.true_divide(self.safeToDense(x1), 37.5)
+        self.assertEqual(self.safeToDense(y1), expected)
+        self.assertEqual(self.safeToDense(y2), expected)
+
+        y1 = x1 // 37.5
+        y2 = x1.clone()
+        y2.floor_divide_(37.5)
+        expected = self.safeToDense(x1) // 37.5
         self.assertEqual(self.safeToDense(y1), expected)
         self.assertEqual(self.safeToDense(y2), expected)
 
@@ -1468,7 +1494,7 @@ class TestSparse(TestCase):
             torch.FloatTensor([3, 4, 5]),
             torch.Size([3]),
             device=self.device)
-        self._test_log1p_tensor(input, torch.as_tensor([3., 4., 5.]))
+        self._test_log1p_tensor(input, torch.as_tensor([3, 4, 5], dtype=torch.float32))
 
         # test uncoalesced input
         input_uncoalesced = torch.sparse_coo_tensor(
@@ -1476,7 +1502,7 @@ class TestSparse(TestCase):
             torch.FloatTensor([2, 3, 4, 1, 1, 1]),
             torch.Size([3]),
             device=self.device)
-        self._test_log1p_tensor(input_uncoalesced, torch.as_tensor([3., 4., 5.]))
+        self._test_log1p_tensor(input_uncoalesced, torch.as_tensor([3, 4, 5], dtype=torch.float32))
 
         input = torch.sparse_coo_tensor(
             torch.zeros([2, 0]),
@@ -1713,8 +1739,8 @@ class TestSparse(TestCase):
                 t = torch.sparse_coo_tensor(torch.empty(i_shape), torch.empty(v_shape), torch.Size(size), device=device)
             else:
                 t = torch.sparse_coo_tensor(torch.empty(i_shape), torch.empty(v_shape), device=device)
-            expected_indices = torch.empty(i_shape, device=device)
-            expected_values = torch.empty(v_shape, device=device)
+            expected_indices = torch.empty(i_shape, device=device, dtype=torch.int64)
+            expected_values = torch.empty(v_shape, device=device, dtype=torch.float64)
             expected_size = torch.Size(expected_size)
             self.assertEqual(t._indices(), expected_indices)
             self.assertEqual(t._values(), expected_values)
@@ -2132,9 +2158,23 @@ class TestSparse(TestCase):
         self.assertEqual(torch.isnan(t).int(), t_nan.int())
 
     def test_div_by_sparse_error(self):
-        self.assertRaisesRegex(RuntimeError, 'A Sparse Tensor can only be divided',
+        self.assertRaisesRegex(RuntimeError, 'Sparse division requires',
                                lambda: torch.tensor(1., device=self.device).to_sparse()
                                / torch.tensor(1., device=self.device).to_sparse())
+
+    def test_true_divide_by_sparse_error(self):
+        def fn():
+            x = torch.tensor(1., device=self.device).to_sparse()
+            y = torch.tensor(1., device=self.device).to_sparse()
+            torch.true_divide(x, y)
+
+        self.assertRaisesRegex(RuntimeError, 'Sparse true division requires',
+                               fn)
+
+    def test_floor_divide_by_sparse_error(self):
+        self.assertRaisesRegex(RuntimeError, 'Sparse floor division requires',
+                               lambda: torch.tensor(1., device=self.device).to_sparse()
+                               // torch.tensor(1., device=self.device).to_sparse())
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_sparse_to_numpy(self):

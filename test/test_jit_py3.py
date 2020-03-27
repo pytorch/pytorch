@@ -35,6 +35,22 @@ class TestScriptPy3(JitTestCase):
         self.assertAlmostEqual(out, out_script)
         self.assertEqual(captured, captured_script)
 
+    @unittest.skipIf(sys.version_info[:2] < (3, 7), "`dataclasses` module not present on < 3.7")
+    def test_dataclass_error(self):
+        from dataclasses import dataclass
+        @dataclass
+        class NormalizationInfo(object):
+            mean: float = 0.0
+
+            def compute(self, total_rows):
+                return self.mean
+
+        def fn():
+            return NormalizationInfo(1, 2, 3, 4, 5)
+
+        with self.assertRaisesRegex(OSError, "NormalizationInfo"):
+            torch.jit.script(fn)
+
     def test_optional_dict_construct(self):
         class M(torch.nn.Module):
             def use(self, buffer: Dict[str, Optional[torch.Tensor]]):
@@ -438,12 +454,16 @@ class TestScriptPy3(JitTestCase):
             return mod_list[0].forward(x) + mod_list[1].forward(x)
 
         scripted_M_mod = torch.jit.script(M())
-        self.assertEqual(torch.jit.export_opnames(scripted_M_mod),
-                         ['aten::mul.Scalar', 'aten::mul.Tensor', 'aten::reciprocal'])
+        # Temporarily test empty output because lite interpreter does not support interface call
+        # Replace it with the issubset call when interface call is supported.
+        self.assertTrue(len(torch.jit.export_opnames(scripted_M_mod)) == 0)
+        # self.assertTrue(set(['aten::mul.Scalar', 'aten::mul.Tensor', 'aten::reciprocal']).issubset(
+        #     set(torch.jit.export_opnames(scripted_M_mod))))
 
         scripted_M_mod.sub = torch.jit.script(FooMod())
-        self.assertEqual(torch.jit.export_opnames(scripted_M_mod),
-                         ['aten::add.Tensor', 'aten::mul.Scalar'])
+        self.assertTrue(len(torch.jit.export_opnames(scripted_M_mod)) == 0)
+        # self.assertTrue(set(['aten::add.Tensor', 'aten::mul.Scalar']).issubset(
+        #     set(torch.jit.export_opnames(scripted_M_mod))))
 
 
 if __name__ == '__main__':

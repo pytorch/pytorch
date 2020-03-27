@@ -1,9 +1,9 @@
+#include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/frontend/canonicalize_modified_loop.h>
 #include <torch/csrc/jit/frontend/convert_to_ssa.h>
-#include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/frontend/parser.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/frontend/script_type_parser.h>
@@ -30,7 +30,6 @@
 
 namespace torch {
 namespace jit {
-namespace script {
 
 using FunctionTable = std::unordered_map<std::string, Function&>;
 using ValueTable = std::unordered_map<std::string, SugaredValuePtr>;
@@ -464,6 +463,7 @@ struct Environment {
                "__round__",
                std::make_shared<BuiltinFunction>(aten::round, at::nullopt))},
           {"hash", std::make_shared<BuiltinFunction>(aten::hash, at::nullopt)},
+          {"id", std::make_shared<BuiltinFunction>(prim::id, at::nullopt)},
           {"min", std::make_shared<BuiltinFunction>(prim::min, at::nullopt)},
           {"max", std::make_shared<BuiltinFunction>(prim::max, at::nullopt)},
           {"abs", std::make_shared<BuiltinFunction>(prim::abs, at::nullopt)},
@@ -491,7 +491,7 @@ struct Environment {
     if (!retval) {
       if (auto type = resolver->resolveType(ident, range)) {
         if (auto tuple_type = type->cast<TupleType>()) {
-          retval = std::make_shared<script::NamedTupleConstructor>(tuple_type);
+          retval = std::make_shared<NamedTupleConstructor>(tuple_type);
         }
       }
     }
@@ -503,7 +503,7 @@ struct Environment {
     if (!retval) {
       if (auto type = resolver->resolveType(ident, range)) {
         if (auto class_type = type->cast<ClassType>()) {
-          retval = std::make_shared<script::ClassValue>(class_type);
+          retval = std::make_shared<ClassValue>(class_type);
         }
       }
     }
@@ -1539,9 +1539,9 @@ struct to_ir {
             return false;
           }
           if ((typ->isSubtypeOf(AnyListType::get()) &&
-                  maybeOfKind(ListType::Kind, actual_type)) ||
+               maybeOfKind(ListType::Kind, actual_type)) ||
               (typ->isSubtypeOf(AnyTupleType::get()) &&
-                  maybeOfKind(TupleType::Kind, actual_type))) {
+               maybeOfKind(TupleType::Kind, actual_type))) {
             return false;
           }
         }
@@ -1864,9 +1864,7 @@ struct to_ir {
     environment_stack->setVar(lhs.range(), lhs.name().name(), result);
   }
 
-  Value* emitAugAssignmentHelper(
-      const AugAssign& stmt,
-      Value* lhs) {
+  Value* emitAugAssignmentHelper(const AugAssign& stmt, Value* lhs) {
     if (lhs->type()->kind() == TypeKind::ClassType) {
       // Call `__iadd__` so updates happen in place on class types
       // https://docs.python.org/3/reference/datamodel.html#object.__iadd__
@@ -2279,6 +2277,10 @@ struct to_ir {
         return aten::__not__;
       case TK_FLOOR_DIV:
         return aten::floordiv;
+      case TK_LSHIFT:
+        return aten::__lshift__;
+      case TK_RSHIFT:
+        return aten::__rshift__;
       case '&':
         return aten::__and__;
       case '|':
@@ -2330,6 +2332,10 @@ struct to_ir {
         return "__xor__";
       case TK_IN:
         return "__contains__";
+      case TK_LSHIFT:
+        return "__lshift__";
+      case TK_RSHIFT:
+        return "__rshift__";
       default:
         throw std::runtime_error("unknown kind " + c10::to_string(kind));
     }
@@ -2661,6 +2667,9 @@ struct to_ir {
         auto apply = Apply(tree);
         return emitApplyExpr(apply, n_binders, type_hint);
       } break;
+      case TK_SUBSCRIPT: {
+        return emitSubscript(Subscript(tree));
+      } break;
       default:
         return std::make_shared<SimpleValue>(emitSimpleExpr(tree, type_hint));
     }
@@ -2793,7 +2802,7 @@ struct to_ir {
       // Unroll args from a Var that is known to be a Tuple.
       auto& args_tree = args_kwargs_trees[0];
       auto entry_sugared_values = emitSugaredExpr(Expr(args_tree), 1)
-                                       ->asTuple(args_tree->range(), method);
+                                      ->asTuple(args_tree->range(), method);
       args.reserve(entry_sugared_values.size());
       for (const auto& entrie_sugared_value : entry_sugared_values) {
         args.emplace_back(
@@ -2805,7 +2814,8 @@ struct to_ir {
       // users can construct kwargs = {"first" + "_arg" : 1}.
       // Notice the key is determined at run time.
       // We can do it at compile time, unless one day the RPC API is
-      // rpc_async(to, user_callable, arg_0, arg_1, kwarg_0="foo", kwarg_1="bar")
+      // rpc_async(to, user_callable, arg_0, arg_1, kwarg_0="foo",
+      // kwarg_1="bar")
     }
     matchSchema(functionSchema, loc, *graphPtr, args, kwargs);
 
@@ -2866,7 +2876,9 @@ struct to_ir {
       case '%':
       case '&':
       case '|':
-      case '^': {
+      case '^':
+      case TK_LSHIFT:
+      case TK_RSHIFT: {
         const auto& inputs = tree->trees();
         auto kind = getNodeKind(tree->kind(), inputs.size());
         auto overload = getOperatorOverload(tree->kind(), inputs.size());
@@ -2911,9 +2923,6 @@ struct to_ir {
       } break;
       case TK_NONE: {
         return graph->insertConstant(IValue(), tree->range());
-      } break;
-      case TK_SUBSCRIPT: {
-        return emitSubscript(Subscript(tree));
       } break;
       case TK_IF_EXPR: {
         return emitTernaryIf(TernaryIf(tree));
@@ -3394,18 +3403,18 @@ struct to_ir {
         ->output();
   }
 
-  Value* emitSubscript(const Subscript& subscript) {
+  std::shared_ptr<SugaredValue> emitSubscript(const Subscript& subscript) {
     const SugaredValuePtr sv = emitSugaredExpr(subscript.value(), 1);
     const List<Expr>& subscript_exprs = subscript.subscript_exprs();
     const SourceRange& range = subscript.range();
     const SourceRange& val_range = subscript.value().range();
     if (subscript_exprs.size() != 1) {
-      return emitMultidimSlicing(
-          range, sv->asValue(val_range, method), subscript_exprs);
+      return std::make_shared<SimpleValue>(emitMultidimSlicing(
+          range, sv->asValue(val_range, method), subscript_exprs));
     }
     if (subscript_exprs[0].kind() == TK_SLICE_EXPR) {
-      return emitBasicSlice(
-          range, sv->asValue(val_range, method), subscript_exprs);
+      return std::make_shared<SimpleValue>(emitBasicSlice(
+          range, sv->asValue(val_range, method), subscript_exprs));
     } else {
       // Desugars gather syntactic sugar foo[i]
       Value* idx = emitExpr(subscript_exprs[0]);
@@ -3413,11 +3422,13 @@ struct to_ir {
       AT_ASSERT(subscript_exprs.size() == 1);
 
       if (val->type()->cast<TupleType>()) {
-        return emitTupleIndex(range, sv->asValue(val_range, method), idx);
+        return std::make_shared<SimpleValue>(
+            emitTupleIndex(range, sv->asValue(val_range, method), idx));
       } else if (val->type()->isSubtypeOf(TensorType::get())) {
-        return emitMultidimSlicing(range, val, subscript_exprs);
+        return std::make_shared<SimpleValue>(
+            emitMultidimSlicing(range, val, subscript_exprs));
       } else {
-        return sv->getitem(range, method, idx)->asValue(range, method);
+        return sv->getitem(range, method, idx);
       }
     }
   }
@@ -3596,7 +3607,7 @@ std::vector<Function*> CompilationUnit::define(
 void runCleanupPasses(std::shared_ptr<Graph>& to_clean) {
   liftClosures(to_clean);
   inlineForkedClosures(to_clean);
-  if (script::getInlineEverythingMode()) {
+  if (getInlineEverythingMode()) {
     Inline(*to_clean);
   }
   // remove any uses of tuples that we inserted that are not needed
@@ -3667,6 +3678,5 @@ void CompilationUnit::define_interface(
   this->register_type(iface);
 }
 
-} // namespace script
 } // namespace jit
 } // namespace torch
