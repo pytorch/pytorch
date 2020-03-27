@@ -9354,7 +9354,6 @@ class TestNNDeviceType(NNTestCase):
             coords = torch.tensor([[-10059144, 67680944], [67680944, 67680944]], dtype=torch.float, device=device)
             coords = coords.unsqueeze(0).unsqueeze(0).repeat(1, 1, 1, 1)
             result = torch.nn.functional.grid_sample(input_tensor, coords)
-            torch.cuda.synchronize()
             self.assertEqual(result, torch.tensor([[[[0., 0.]]]], dtype=torch.float, device=device))
         issue_35202()
 
@@ -9384,7 +9383,8 @@ class TestNNDeviceType(NNTestCase):
             w = torch.randn(8, 1024, 1024, 2, dtype=torch.float, device=device)
             w[:, 64, 64] = float("inf")
             torch.nn.functional.grid_sample(x, w)
-            torch.cuda.synchronize()
+            if self.device_type == 'cuda':
+                torch.cuda.synchronize()
             # just to make sure this does not crash
         issue_24823_3()
 
