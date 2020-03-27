@@ -23,11 +23,9 @@ __global__ void test_thrust_kernel() {
 }
 
 __global__ void test_std_functions_kernel() {
-  assert(std::abs(c10::complex<c10::Half>(3, 4)) == c10::Half(5));
   assert(std::abs(c10::complex<float>(3, 4)) == float(5));
   assert(std::abs(c10::complex<double>(3, 4)) == double(5));
 
-  // FIXME: assert(std::abs(std::arg(c10::complex<c10::Half>(0, 1)) - PI / 2) < 1e-6);
   assert(std::abs(std::arg(c10::complex<float>(0, 1)) - PI / 2) < 1e-6);
   assert(std::abs(std::arg(c10::complex<double>(0, 1)) - PI / 2) < 1e-6);
 

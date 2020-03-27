@@ -4,7 +4,6 @@
 #include <iostream>
 
 #include <c10/macros/Macros.h>
-#include <c10/util/Half.h>
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
 #include <thrust/complex.h>
@@ -33,7 +32,7 @@ namespace c10 {
 //
 // Converting constructors: 
 // - std::complex defines converting constructor between float/double/long double,
-//   while we define converting constructor between c10::Half/float/double.
+//   while we define converting constructor between float/double.
 // - For these converting constructors, upcasting is implicit, downcasting is
 //   explicit.
 // - We also define explicit casting from std::complex/thrust::complex
@@ -53,7 +52,7 @@ namespace c10 {
 // - Assign a real value from the same scalar type
 //   - In std, this is templated as complex& operator=(const T& x)
 //     with specialization `complex& operator=(T x)` for float/double/long double
-//     Since we only support c10::Half, float and double, on will use `complex& operator=(T x)`
+//     Since we only support float and double, on will use `complex& operator=(T x)`
 // - Copy assignment operator and converting assignment operator
 //   - There is no specialization of converting assignemnt operators, which type is
 //     convertible is soly depend on whether the scalar type is convertable
@@ -70,7 +69,7 @@ namespace c10 {
 //
 // std::complex has custom literals `i`, `if` and `if` defined in namespace `std::literals::complex_literals`.
 // We define our own custom literals in the namespace `c10::complex_literals`. Our custom literals does not
-// follow the same behavior as in std::complex, instead, we define _ih, _if, _id to construct half/float/double
+// follow the same behavior as in std::complex, instead, we define _if, _id to construct float/double
 // complex literals.
 //
 //
@@ -111,6 +110,13 @@ namespace c10 {
 // [Operator <<, >>]
 //
 // These are implemented by casting to std::complex
+//
+//
+//
+//
+// TODO(@zasdfgbnm): c10::complex<c10::Half> is not currently supported, because:
+//  - lots of members and functions of c10::Half are not constexpr
+//  - thrust::complex only support float and double
 
 template<typename T>
 struct complex;
@@ -243,19 +249,11 @@ struct alignas(sizeof(T) * 2) complex_common {
   }
 };
 
-template<>
-struct alignas(4) complex<c10::Half>: public complex_common<c10::Half> {
-  using complex_common<c10::Half>::complex_common;
-  constexpr complex(): complex_common() {}; // needed by CUDA 9.x
-  explicit constexpr complex(const complex<float> &other);
-  explicit constexpr complex(const complex<double> &other);
-};
 
 template<>
 struct alignas(8) complex<float>: public complex_common<float> {
   using complex_common<float>::complex_common;
   constexpr complex(): complex_common() {}; // needed by CUDA 9.x
-  constexpr complex(const complex<c10::Half> &other);
   explicit constexpr complex(const complex<double> &other);
 };
 
@@ -263,22 +261,13 @@ template<>
 struct alignas(16) complex<double>: public complex_common<double> {
   using complex_common<double>::complex_common;
   constexpr complex(): complex_common() {}; // needed by CUDA 9.x
-  constexpr complex(const complex<c10::Half> &other);
   constexpr complex(const complex<float> &other);
 };
 
-constexpr complex<c10::Half>::complex(const complex<float> &other): complex_common(other.real(), other.imag()) {}
-constexpr complex<c10::Half>::complex(const complex<double> &other): complex_common(other.real(), other.imag()) {}
-constexpr complex<float>::complex(const complex<c10::Half> &other): complex_common(other.real(), other.imag()) {}
 constexpr complex<float>::complex(const complex<double> &other): complex_common(other.real(), other.imag()) {}
-constexpr complex<double>::complex(const complex<c10::Half> &other): complex_common(other.real(), other.imag()) {}
 constexpr complex<double>::complex(const complex<float> &other): complex_common(other.real(), other.imag()) {}
 
 namespace complex_literals {
-
-constexpr complex<c10::Half> operator"" _ih(long double imag) {
-  return complex<c10::Half>(c10::Half(), static_cast<c10::Half>(imag));
-}
 
 constexpr complex<float> operator"" _if(long double imag) {
   return complex<float>(float(), static_cast<float>(imag));
@@ -474,7 +463,6 @@ namespace c10 {
 template<typename T>
 C10_HOST_DEVICE c10::complex<T> polar(const T& r, const T& theta = T()) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
-  // TODO(@zasdfgbnm): thrust::complex only support float and double, how do we handle c10::Half?
   return static_cast<c10::complex<T>>(thrust::polar(r, theta));
 #else
   return static_cast<c10::complex<T>>(std::polar(r, theta));

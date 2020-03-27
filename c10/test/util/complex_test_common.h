@@ -15,13 +15,11 @@ const double PI = 3.141592653589793238463;
 namespace memory {
 
 MAYBE_GLOBAL void test_size() {
-  static_assert(sizeof(c10::complex<c10::Half>) == 4, "");
   static_assert(sizeof(c10::complex<float>) == 8, "");
   static_assert(sizeof(c10::complex<double>) == 16, "");
 }
 
 MAYBE_GLOBAL void test_align() {
-  static_assert(alignof(c10::complex<c10::Half>) == 4, "");
   static_assert(alignof(c10::complex<float>) == 8, "");
   static_assert(alignof(c10::complex<double>) == 16, "");
 }
@@ -54,37 +52,21 @@ C10_HOST_DEVICE void test_construct_from_other() {
 }
 
 MAYBE_GLOBAL void test_convert_constructors() {
-  test_construct_from_scalar<c10::Half>();
   test_construct_from_scalar<float>();
   test_construct_from_scalar<double>();
 
-  static_assert(std::is_convertible<c10::complex<c10::Half>, c10::complex<c10::Half>>::value, "");
-  static_assert(!std::is_convertible<c10::complex<float>, c10::complex<c10::Half>>::value, "");
-  static_assert(!std::is_convertible<c10::complex<double>, c10::complex<c10::Half>>::value, "");
-  static_assert(std::is_convertible<c10::complex<c10::Half>, c10::complex<float>>::value, "");
   static_assert(std::is_convertible<c10::complex<float>, c10::complex<float>>::value, "");
   static_assert(!std::is_convertible<c10::complex<double>, c10::complex<float>>::value, "");
-  static_assert(std::is_convertible<c10::complex<c10::Half>, c10::complex<double>>::value, "");
   static_assert(std::is_convertible<c10::complex<float>, c10::complex<double>>::value, "");
   static_assert(std::is_convertible<c10::complex<double>, c10::complex<double>>::value, "");
 
-  static_assert(std::is_constructible<c10::complex<c10::Half>, c10::complex<c10::Half>>::value, "");
-  static_assert(std::is_constructible<c10::complex<float>, c10::complex<c10::Half>>::value, "");
-  static_assert(std::is_constructible<c10::complex<double>, c10::complex<c10::Half>>::value, "");
-  static_assert(std::is_constructible<c10::complex<c10::Half>, c10::complex<float>>::value, "");
   static_assert(std::is_constructible<c10::complex<float>, c10::complex<float>>::value, "");
   static_assert(std::is_constructible<c10::complex<double>, c10::complex<float>>::value, "");
-  static_assert(std::is_constructible<c10::complex<c10::Half>, c10::complex<double>>::value, "");
   static_assert(std::is_constructible<c10::complex<float>, c10::complex<double>>::value, "");
   static_assert(std::is_constructible<c10::complex<double>, c10::complex<double>>::value, "");
 
-  test_construct_from_other<c10::Half, c10::Half>();
-  test_construct_from_other<c10::Half, float>();
-  test_construct_from_other<c10::Half, double>();
-  test_construct_from_other<float, c10::Half>();
   test_construct_from_other<float, float>();
   test_construct_from_other<float, double>();
-  test_construct_from_other<double, c10::Half>();
   test_construct_from_other<double, float>();
   test_construct_from_other<double, double>();
 }
@@ -114,7 +96,6 @@ void test_construct_from_thrust() {
 
 TEST(TestConstructors, FromThrust) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
-  // TODO(@zasdfgbnm): thrust::complex only support float and double, how do we handle c10::Half?
   test_construct_from_thrust<float>();
   test_construct_from_thrust<double>();
 #endif
@@ -133,50 +114,42 @@ constexpr c10::complex<scalar_t> one() {
 }
 
 MAYBE_GLOBAL void test_assign_real() {
-  static_assert(one<c10::Half>().real() == c10::Half(1), "");
-  static_assert(one<c10::Half>().imag() == c10::Half(), "");
   static_assert(one<float>().real() == float(1), "");
   static_assert(one<float>().imag() == float(), "");
   static_assert(one<double>().real() == double(1), "");
   static_assert(one<double>().imag() == double(), "");
 }
 
-constexpr std::tuple<c10::complex<double>, c10::complex<float>, c10::complex<c10::Half>> ones() {
-  constexpr c10::complex<c10::Half> src(1, 1);
+constexpr std::tuple<c10::complex<double>, c10::complex<float>> one_two() {
+  constexpr c10::complex<float> src(1, 2);
   c10::complex<double> ret0;
   c10::complex<float> ret1;
-  c10::complex<c10::Half> ret2;
-  ret0 = ret1 = ret2 = src;
-  return std::make_tuple(ret0, ret1, ret2);
+  ret0 = ret1 = src;
+  return std::make_tuple(ret0, ret1);
 }
 
 MAYBE_GLOBAL void test_assign_other() {
-  constexpr auto tup = ones();
+  constexpr auto tup = one_two();
   static_assert(std::get<c10::complex<double>>(tup).real() == double(1), "");
-  static_assert(std::get<c10::complex<double>>(tup).imag() == double(1), "");
+  static_assert(std::get<c10::complex<double>>(tup).imag() == double(2), "");
   static_assert(std::get<c10::complex<float>>(tup).real() == float(1), "");
-  static_assert(std::get<c10::complex<float>>(tup).imag() == float(1), "");
-  static_assert(std::get<c10::complex<c10::Half>>(tup).real() == c10::Half(1), "");
-  static_assert(std::get<c10::complex<c10::Half>>(tup).imag() == c10::Half(1), "");
+  static_assert(std::get<c10::complex<float>>(tup).imag() == float(2), "");
 }
 
-constexpr std::tuple<c10::complex<double>, c10::complex<float>, c10::complex<c10::Half>> ones_std() {
-  constexpr std::complex<c10::Half> src(1, 1);
+constexpr std::tuple<c10::complex<double>, c10::complex<float>> one_two_std() {
+  constexpr std::complex<float> src(1, 1);
   c10::complex<double> ret0;
   c10::complex<float> ret1;
-  c10::complex<c10::Half> ret2;
-  ret0 = ret1 = ret2 = src;
-  return std::make_tuple(ret0, ret1, ret2);
+  ret0 = ret1 = src;
+  return std::make_tuple(ret0, ret1);
 }
 
 MAYBE_GLOBAL void test_assign_std() {
-  constexpr auto tup = ones_std();
+  constexpr auto tup = one_two();
   static_assert(std::get<c10::complex<double>>(tup).real() == double(1), "");
-  static_assert(std::get<c10::complex<double>>(tup).imag() == double(1), "");
+  static_assert(std::get<c10::complex<double>>(tup).imag() == double(2), "");
   static_assert(std::get<c10::complex<float>>(tup).real() == float(1), "");
-  static_assert(std::get<c10::complex<float>>(tup).imag() == float(1), "");
-  static_assert(std::get<c10::complex<c10::Half>>(tup).real() == c10::Half(1), "");
-  static_assert(std::get<c10::complex<c10::Half>>(tup).imag() == c10::Half(1), "");
+  static_assert(std::get<c10::complex<float>>(tup).imag() == float(2), "");
 }
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
@@ -205,9 +178,6 @@ namespace literals {
 
 MAYBE_GLOBAL void test_complex_literals() {
   using namespace c10::complex_literals;
-  static_assert(std::is_same<decltype(0.5_ih), c10::complex<c10::Half>>::value, "");
-  static_assert((0.5_ih).real() == c10::Half(), "");
-  static_assert((0.5_ih).imag() == c10::Half(0.5), "");
   static_assert(std::is_same<decltype(0.5_if), c10::complex<float>>::value, "");
   static_assert((0.5_if).real() == float(), "");
   static_assert((0.5_if).imag() == float(0.5), "");
@@ -235,15 +205,11 @@ constexpr c10::complex<scalar_t> one_zero() {
 }
 
 MAYBE_GLOBAL void test_real_imag_modify() {
-  static_assert(zero_one<c10::Half>().real() == c10::Half(0), "");
-  static_assert(zero_one<c10::Half>().imag() == c10::Half(1), "");
   static_assert(zero_one<float>().real() == float(0), "");
   static_assert(zero_one<float>().imag() == float(1), "");
   static_assert(zero_one<double>().real() == double(0), "");
   static_assert(zero_one<double>().imag() == double(1), "");
 
-  static_assert(one_zero<c10::Half>().real() == c10::Half(1), "");
-  static_assert(one_zero<c10::Half>().imag() == c10::Half(0), "");
   static_assert(one_zero<float>().real() == float(1), "");
   static_assert(one_zero<float>().imag() == float(0), "");
   static_assert(one_zero<double>().real() == double(1), "");
@@ -377,10 +343,8 @@ void test_arithmetic_assign_complex() {
 }
 
 MAYBE_GLOBAL void test_arithmetic_assign() {
-  test_arithmetic_assign_scalar<c10::Half>();
   test_arithmetic_assign_scalar<float>();
   test_arithmetic_assign_scalar<double>();
-  test_arithmetic_assign_complex<c10::Half>();
   test_arithmetic_assign_complex<float>();
   test_arithmetic_assign_complex<double>();
 }
@@ -412,7 +376,6 @@ C10_HOST_DEVICE void test_arithmetic_() {
 }
 
 MAYBE_GLOBAL void test_arithmetic() {
-  test_arithmetic_<c10::Half>();
   test_arithmetic_<float>();
   test_arithmetic_<double>();
 }
@@ -428,7 +391,6 @@ C10_HOST_DEVICE void test_equality_() {
 }
 
 MAYBE_GLOBAL void test_equality() {
-  test_equality_<c10::Half>();
   test_equality_<float>();
   test_equality_<double>();
 }
@@ -465,13 +427,11 @@ C10_HOST_DEVICE void test_callable_() {
   std::arg(c10::complex<scalar_t>(1, 2));
   static_assert(std::norm(c10::complex<scalar_t>(3, 4)) == scalar_t(25), "");
   static_assert(std::conj(c10::complex<scalar_t>(3, 4)) == c10::complex<scalar_t>(3, -4), "");
-  // TODO(@zasdfgbnm): thrust::complex only support float and double, how do we handle c10::Half?
   c10::polar(float(1), float(PI / 2));
   c10::polar(double(1), double(PI / 2));
 }
 
 MAYBE_GLOBAL void test_callable() {
-  test_callable_<c10::Half>();
   test_callable_<float>();
   test_callable_<double>();
 }
@@ -484,9 +444,6 @@ void test_values_() {
 }
 
 TEST(TestStd, BasicFunctions) {
-  ASSERT_EQ(std::abs(c10::complex<c10::Half>(3, 4)), c10::Half(5));
-  // FIXME: ASSERT_LT(std::abs(std::arg(c10::complex<c10::Half>(0, 1)) - PI / 2), 1e-6);
-  // TODO(@zasdfgbnm): thrust::complex only support float and double, how do we handle c10::Half?
   test_values_<float>();
   test_values_<double>();
 }
