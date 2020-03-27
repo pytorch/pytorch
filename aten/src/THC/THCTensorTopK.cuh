@@ -52,7 +52,6 @@ __global__ void gatherTopK(TensorInfo<T, IndexType> input,
     inputSliceStart, outputSliceSize,
     inputSliceSize, inputWithinSliceStride,
     smem, &topKValue);
-  const auto topKConverted = at::native::TopKTypeConfig<T>::convert(topKValue);
 
   // Every value that is strictly less/greater than `pattern`
   // (depending on sort dir) in sorted int format is in the top-K.
@@ -75,12 +74,11 @@ __global__ void gatherTopK(TensorInfo<T, IndexType> input,
     bool inRange = (i < inputSliceSize);
     T v =
       inRange ? doLdg(&inputSliceStart[i * inputWithinSliceStride]) : ScalarConvert<int, T>::to(0);
-    const auto convertedV = at::native::TopKTypeConfig<T>::convert(v);
     bool hasTopK;
     if (Order) {
-      hasTopK = inRange && (convertedV > topKConverted);
+      hasTopK = inRange && (THCNumerics<T>::gt(v, topKValue));
     } else {
-      hasTopK = inRange && (convertedV < topKConverted);
+      hasTopK = inRange && (THCNumerics<T>::lt(v, topKValue));
     }
 
     int index;
@@ -113,8 +111,7 @@ __global__ void gatherTopK(TensorInfo<T, IndexType> input,
     bool inRange = (i < inputSliceSize);
     T v =
       inRange ? doLdg(&inputSliceStart[i * inputWithinSliceStride]) : ScalarConvert<int, T>::to(0);
-    const auto convertedV = at::native::TopKTypeConfig<T>::convert(v);
-    bool hasTopK = inRange && (convertedV == topKConverted);
+    bool hasTopK = inRange && (THCNumerics<T>::eq(v, topKValue));
 
     int index;
     int carry;
