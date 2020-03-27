@@ -531,15 +531,6 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         "prim::shape(Tensor a) -> int[]",
-         [](Stack& stack) {
-           at::Tensor a;
-           pop(stack, a);
-           push(stack, a.sizes());
-           return 0;
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
          "prim::grad(Tensor a) -> Tensor(*)",
          [](Stack& stack) {
            at::Tensor a;
