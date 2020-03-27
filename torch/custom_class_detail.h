@@ -119,6 +119,20 @@ struct BoxedProxy<void, Func> {
   }
 };
 
+inline bool validIdent(size_t i, char n) {
+  return isalpha(n) || n == '_' || (i > 0 && isdigit(n));
+}
+
+inline void checkValidIdent(const std::string& str, const char *type) {
+  for (size_t i = 0; i < str.size(); ++i) {
+    TORCH_CHECK(validIdent(i, str[i]),
+      type,
+      " must be a valid Python/C++ identifier."
+      " Character '", str[i], "' at index ",
+      i, " is illegal.");
+  }
+}
+
 } // namespace detail
 
 TORCH_API void registerCustomClass(at::ClassTypePtr class_type);
