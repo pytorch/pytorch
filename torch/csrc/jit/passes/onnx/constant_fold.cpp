@@ -90,9 +90,6 @@ c10::optional<at::Tensor> runTorchSlice_opset9(
   std::vector<int64_t> axesAttr;
   if (node->hasAttributeS("axes")) {
     axesAttr = node->is(attr::axes);
-    for (auto& axis : axesAttr){
-      axis += axis < 0 ? inputTensorValues[0].sizes().size() : 0;
-    }
   } else {
     axesAttr.resize(startsAttr.size());
     std::iota(axesAttr.begin(), axesAttr.end(), 0);
@@ -101,6 +98,8 @@ c10::optional<at::Tensor> runTorchSlice_opset9(
   for (size_t i = 0; i < axesAttr.size(); ++i) {
     // ONNX slice accepts negative starts and ends values.
     int64_t axis = axesAttr[i], start = startsAttr[i], end = endsAttr[i];
+    // ONNX slice accepts negative axis, fix this for aten op
+    axis += axis < 0 ? inputTensorValues[0].sizes().size() : 0;
     handleNegativeStartEndIndex(start, end, axis, updated_val.sizes());
     int64_t length = end - start;
     if (length < 0 || start > updated_val.sizes()[axis] - length)
@@ -151,6 +150,7 @@ c10::optional<at::Tensor> runTorchSlice_opset10(
     }
     auto axes_a = inputTensorValues[3].accessor<int64_t, 1>();
     axes.reserve(inputTensorValues[3].sizes()[0]);
+    // ONNX slice accepts negative axis, fix this for aten op
     for (size_t i = 0; i < inputTensorValues[3].sizes()[0]; ++i) {
       axes[i] = axes_a[i] < 0 ? axes_a[i] + inputTensorValues[0].sizes().size() : axes_a[i];
     }
