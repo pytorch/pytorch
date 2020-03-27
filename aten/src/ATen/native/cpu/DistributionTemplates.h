@@ -7,6 +7,11 @@
 #include <limits>
 #include <mutex>
 
+#ifdef __AVX2__
+#include <ATen/native/cpu/avx_mathfun.h>
+#endif
+
+
 namespace at {
 namespace native {
 namespace templates {
@@ -111,8 +116,6 @@ struct RandomKernel {
 // ==================================================== Normal ========================================================
 
 #ifdef __AVX2__
-#include <ATen/native/cpu/avx_mathfun.h>
-
 static void normal_fill_16_AVX2(float *data,
                          const __m256* two_pi,
                          const __m256* one,
