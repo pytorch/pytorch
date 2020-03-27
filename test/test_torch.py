@@ -16674,7 +16674,7 @@ unary_ufuncs = {
     'sinh': ufunc_meta(is_floating=True, complex_on=('cpu', 'cuda')),
     'cosh': ufunc_meta(is_floating=True, complex_on=('cpu')),
     'tanh': ufunc_meta(is_floating=True, complex_on=('cpu')),
-    'angle': ufunc_meta(is_floating=True, complex_on=('cpu', 'cuda')),
+    'angle': ufunc_meta(is_floating=True, complex_on=('cpu')),
     'ceil': ufunc_meta(is_floating=True, complex_on=('cpu', 'cuda')),
     'floor': ufunc_meta(is_floating=True, complex_on=('cpu', 'cuda')),
     'exp': ufunc_meta(is_floating=True, complex_on=('cpu')),
@@ -16754,7 +16754,10 @@ def generate_unary_floating_ufunc_promo_test(cls, op_str):
                 self.assertRaises(RuntimeError, lambda: op(t, out=out_t))
 
         # Test for in-place code paths
-        op_inplace = getattr(torch.Tensor, op_str + "_")
+        try:
+            op_inplace = getattr(torch.Tensor, op_str + "_")
+        except AttributeError:
+            return
 
         for in_type in int_types:
             t = torch.tensor((1,), device=device, dtype=in_type)
