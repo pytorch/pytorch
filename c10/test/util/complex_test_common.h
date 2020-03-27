@@ -375,7 +375,11 @@ namespace equality {
 template<typename scalar_t>
 C10_HOST_DEVICE void test_equality_() {
   static_assert(c10::complex<scalar_t>(1, 2) == c10::complex<scalar_t>(1, 2), "");
+  static_assert(c10::complex<scalar_t>(1, 0) == scalar_t(1), "");
+  static_assert(scalar_t(1) == c10::complex<scalar_t>(1, 0), "");
   static_assert(c10::complex<scalar_t>(1, 2) != c10::complex<scalar_t>(3, 4), "");
+  static_assert(c10::complex<scalar_t>(1, 2) != scalar_t(1), "");
+  static_assert(scalar_t(1) != c10::complex<scalar_t>(1, 2), "");
 }
 
 MAYBE_GLOBAL void test_equality() {
@@ -395,7 +399,7 @@ void test_io_() {
   ASSERT_EQ(ss.str(), "(1,2)");
   ss.str("(3,4)");
   ss >> a;
-  ASSERT_EQ(a, c10::complex<scalar_t>(3, 4));
+  ASSERT_TRUE(a == c10::complex<scalar_t>(3, 4));
 }
 
 TEST(TestIO, All) {
