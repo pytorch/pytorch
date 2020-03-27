@@ -58,7 +58,7 @@ Tensor dense_to_mkldnn(const Tensor& cpu_tensor, c10::optional<ScalarType> dtype
   return mkldnn_tensor;
 }
 
-// Mkldnn tensor has special non-public format for conv2d weights
+// Mkldnn tensor has special non-public format for conv weights
 // (dense_to_mkldnn only converts dense tensor to mkldnn tensor with
 // public format). Ideep conv kernel will do implicit reorder if the
 // weight is not already in this optimized format. By the time I'm
@@ -80,9 +80,10 @@ Tensor mkldnn_reorder_conv_weight(
 
   // Legacy mkldnn conv2d jitted module may contain a 5-d weight with an extra
   // dimension when groups > 1, having dimension [g, o/g, i, h, w] instead of
-  // [o, i, h, w]. Now we no longer dinstinguish these two formats. 
-  // For backward compatibility, we squash the first two dims (g * o/g) back to
-  // its original form. for conv3d always 5-d
+  // [o, i, h, w]. Ideally we should reorder the weight back in serialization.
+  // For backward compatibility, we squash the first two dims (g * o/g) of
+  // conv2d weights back to its original form. This does not apply to conv3d in
+  // which weights is always 5d.
   if (w.ndims() == 5 && dims == 2) {
     auto wdims = w.get_dims();
     w.reshape({wdims[0] * wdims[1], wdims[2], wdims[3], wdims[4]});
