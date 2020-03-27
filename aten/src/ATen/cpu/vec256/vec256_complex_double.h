@@ -131,6 +131,18 @@ public:
     auto angle = _mm256_permute_pd(angle_(), 0x05); // angle    90-angle
     return _mm256_and_pd(angle, real_mask);         // angle    0
   }
+  __m256d polar_() const {
+    const __m256d real_mask = _mm256_castsi256_pd(_mm256_setr_epi64x(0xFFFFFFFFFFFFFFFF, 0x0000000000000000,
+                                                                     0xFFFFFFFFFFFFFFFF, 0x0000000000000000));
+    const __m256d imag_mask = _mm256_castsi256_pd(_mm256_setr_epi64x(0x0000000000000000, 0xFFFFFFFFFFFFFFFF,
+                                                                     0x0000000000000000, 0xFFFFFFFFFFFFFFFF));
+    auto angle = _mm256_and_pd(angle_(), imag_mask); // 0     angle
+    auto abs = _mm256_and_pd(abs_(), real_mask);     // abs   0
+    return _mm256_add_pd(abs, angle);
+  }
+  Vec256<std::complex<double>> polar() const {
+    return polar_();
+  }
   __m256d real_() const {
     const __m256d real_mask = _mm256_castsi256_pd(_mm256_setr_epi64x(0xFFFFFFFFFFFFFFFF, 0x0000000000000000,
                                                                      0xFFFFFFFFFFFFFFFF, 0x0000000000000000));

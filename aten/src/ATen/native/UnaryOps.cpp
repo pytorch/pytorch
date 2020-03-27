@@ -236,6 +236,9 @@ Tensor& sinh_(Tensor& self) { return unary_op_impl_(self, at::sinh_out); }
 Tensor& cosh_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, cosh_stub); }
 Tensor cosh(const Tensor& self) { return unary_op_impl(self, at::cosh_out); }
 Tensor& cosh_(Tensor& self) { return unary_op_impl_(self, at::cosh_out); }
+Tensor& polar_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, polar_stub); }
+Tensor polar(const Tensor& self) { return unary_op_impl(self, at::polar_out); }
+Tensor& polar_(Tensor& self) { return unary_op_impl_(self, at::polar_out); }
 
 Tensor& sqrt_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, sqrt_stub); }
 Tensor sqrt(const Tensor& self) { return unary_op_impl(self, at::sqrt_out); }
@@ -482,6 +485,7 @@ DEFINE_DISPATCH(log1p_stub);
 DEFINE_DISPATCH(log2_stub);
 DEFINE_DISPATCH(logical_not_stub);
 DEFINE_DISPATCH(neg_stub);
+DEFINE_DISPATCH(polar_stub);
 DEFINE_DISPATCH(polygamma_stub);
 DEFINE_DISPATCH(reciprocal_stub);
 DEFINE_DISPATCH(round_stub);

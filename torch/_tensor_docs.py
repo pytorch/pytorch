@@ -2056,6 +2056,20 @@ Example:
     torch.Size([5, 2, 3])
 """)
 
+add_docstr_all('polar',
+               r"""
+polar() -> Tensor
+
+See :func:`torch.polar`
+""")
+
+add_docstr_all('polar_',
+               r"""
+polar_(n) -> Tensor
+
+In-place version of :meth:`~Tensor.polar`
+""")
+
 add_docstr_all('polygamma',
                r"""
 polygamma(n) -> Tensor

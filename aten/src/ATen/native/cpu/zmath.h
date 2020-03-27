@@ -238,5 +238,15 @@ inline TYPE min_impl (TYPE a, TYPE b) {
   }
 }
 
+template <typename TYPE, std::enable_if_t<!c10::is_complex_t<TYPE>::value, int> = 0>
+inline std::complex<TYPE> polar_impl (TYPE a) {
+  return std::complex<TYPE> (std::abs(a), std::arg(a));
+}
+
+template <typename TYPE, std::enable_if_t<c10::is_complex_t<TYPE>::value, int> = 0>
+inline TYPE polar_impl (TYPE a) {
+  return TYPE(std::abs(a), std::arg(a));
+}
+
 } // end namespace
 }} //end at::native

@@ -4365,6 +4365,32 @@ Example::
             [2., 1., 4., 2.]])
 """.format(**common_args))
 
+add_docstr(torch.polar,
+           r"""
+polar(input, out=None) -> Tensor
+
+Returns a new tensor in the polar form of the elements of
+:attr:`input`. Magnitude is stored in real value and angle in imageniry.
+
+Args:
+    {input}
+    {out}
+
+Example::
+
+    >>> a = torch.randn(4, dtype=torch.complex64)
+    >>> a
+    tensor([                       (-1.1573 - 1.0926j),
+                                    (0.0899 + 0.3232j),
+                                    (0.9718 + 0.1947j),
+                                    (0.2349 + 0.1463j)], dtype=torch.complex64)
+    >>> a.polar()
+    tensor([                       (1.5916 - 2.3849j),
+                                   (0.3354 + 1.2995j),
+                                   (0.9911 + 0.1977j),
+                                   (0.2767 + 0.5571j)], dtype=torch.complex64)
+""".format(**common_args))
+
 add_docstr(torch.polygamma,
            r"""
 polygamma(n, input, out=None) -> Tensor
