@@ -6,6 +6,7 @@
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
 #include <ATen/native/c10_utils.h>
+#include <ATen/core/op_registration/op_registration.h>
 
 namespace at { namespace native {
 
@@ -1182,11 +1183,13 @@ Tensor rnn_relu_cell(
 // an int8 or float16 quantized weight. This is advantageous in small-batch-size
 // scenarios where runtime is dominated by memory fetches of the weight matrix.
 
-std::tuple<Tensor, Tensor, Tensor> quantized_lstm(
-      const Tensor& _input, TensorList hx,
-      TensorList _params, bool has_biases,
+std::tuple<Tensor, Tensor, Tensor> quantized_lstm_tensor(
+      const Tensor& _input, c10::List<at::Tensor> hx_,
+      c10::List<at::Tensor> _params_, bool has_biases,
       int64_t num_layers, double dropout_p, bool train, bool bidirectional,
       bool batch_first, c10::optional<ScalarType> dtype, bool use_dynamic) {
+  auto hx = hx_.vec();
+  auto _params = _params_.vec();
   TORCH_CHECK(hx.size() == 2, "lstm expects two hidden states");
   if (at::cudnn_is_acceptable(_input)) {
     Tensor output, hy, cy;
@@ -1227,14 +1230,15 @@ std::tuple<Tensor, Tensor, Tensor> quantized_lstm(
     std::get<0>(results) = std::get<0>(results).transpose(0, 1);
   }
   return results;
-
 }
 
-std::tuple<Tensor, Tensor, Tensor> quantized_lstm(
-      const Tensor& data, const Tensor& batch_sizes, TensorList hx,
-      TensorList _params, bool has_biases,
+std::tuple<Tensor, Tensor, Tensor> quantized_lstm_data(
+      const Tensor& data, const Tensor& batch_sizes, c10::List<at::Tensor> hx_,
+      c10::List<at::Tensor> _params_, bool has_biases,
       int64_t num_layers, double dropout_p, bool train, bool bidirectional,
       c10::optional<ScalarType> dtype, bool use_dynamic) {
+  auto hx = hx_.vec();
+  auto _params = _params_.vec();
   TORCH_CHECK(hx.size() == 2, "lstm expects two hidden states");
   if (at::cudnn_is_acceptable(data)) {
     Tensor output, hy, cy;
@@ -1329,5 +1333,18 @@ DEFINE_QUANTIZED_RNN_CELL(quantized_rnn_relu_cell, simple_hx_type, quantized_rnn
 // Quantized RNN w/ tanh cell
 using quantized_rnn_tanh_cell_type = SimpleCell<tanh_f, QuantizedCellParams>;
 DEFINE_QUANTIZED_RNN_CELL(quantized_rnn_tanh_cell, simple_hx_type, quantized_rnn_tanh_cell_type, Tensor, prepare_quantized_hx);
+
+namespace {
+
+static auto registry =
+    torch::RegisterOperators()
+        .op("aten::quantized_lstm(Tensor input, Tensor[] hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first, *, ScalarType? dtype=None, bool use_dynamic=False) -> (Tensor, Tensor, Tensor)",
+            torch::RegisterOperators::options().kernel<decltype(quantized_lstm_tensor), quantized_lstm_tensor>(
+                DispatchKey::CPUTensorId))
+        .op("aten::quantized_lstm.data(Tensor data, Tensor batch_sizes, Tensor[] hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, *, ScalarType? dtype=None, bool use_dynamic=False) -> (Tensor, Tensor, Tensor)",
+            torch::RegisterOperators::options().kernel<decltype(quantized_lstm_data), quantized_lstm_data>(
+                DispatchKey::CPUTensorId));
+
+}  // namespace
 
 }}  // namespace at::native

@@ -404,3 +404,5 @@ del register_after_fork
 # Import tools that require fully imported torch (for applying
 # torch.jit.script as a decorator, for instance):
 from ._lobpcg import lobpcg
+
+quantized_lstm = torch.ops.aten.quantized_lstm
