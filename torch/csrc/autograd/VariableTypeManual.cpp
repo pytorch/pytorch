@@ -352,38 +352,60 @@ Tensor & detach_(Tensor & self) {
 // Unfortunately, this setup doesn't work in NonVariableTypeMode because that will
 // skip past variable kernels. So for ops that we want to use in NonVariableTypeMode
 // (and that don't use dispatch), we register them as catch-all kernels instead.
-// TODO(ezyang): With fallthrough, we should put things that are registered as
-// catch-all in a generic dispatch key which falls through by default, so they
-// get no matter the setting of NonVariableTypeMode
-static auto registry = torch::import()
-  .impl("aten::resize_",    torch::dispatch_autograd(c10::CppFunction::makeUnboxedOnly(VariableType::resize_)))
-  .impl("aten::resize_as_", torch::dispatch_autograd(c10::CppFunction::makeUnboxedOnly(VariableType::resize_as_)))
-  .impl("aten::detach",     torch::dispatch_autograd(VariableType::detach))
-  .impl("aten::detach_",    torch::dispatch_autograd(c10::CppFunction::makeUnboxedOnly(VariableType::detach_)))
-  .impl("aten::copy_",      torch::dispatch_autograd(c10::CppFunction::makeUnboxedOnly(VariableType::copy_)))
-  // For backward(), we need the catch-all kernel (see comment above), but we also need the VariableTensorId backend
-  // kernel, because when called with a VariableTensorId tensor, it goes through the variable fallback kernel,
-  // which calls callBoxed(), which doesn't support optional tensor arguments yet and backward() has an optional
-  // tensor argument.
-  // TODO Once callBoxed() supports optional tensor arguments, we can enable `use_c10_dispatcher: full` for backward()
-  //      and remove the backend VariableTensorId kernel here, only leaving the catch-all kernel.
-  .impl("aten::backward",   torch::dispatch_autograd(c10::CppFunction::makeUnboxedOnly(VariableType::backward)))
-  .impl("aten::backward",   c10::CppFunction::makeUnboxedOnly(VariableType::backward))
-  .impl("aten::set_data",   VariableType::set_data)
-  .impl("aten::data",       VariableType::data)
-  .impl("aten::is_leaf",    VariableType::is_leaf)
-  .impl("aten::output_nr",  VariableType::output_nr)
-  .impl("aten::_version",   VariableType::_version)
-  // For requires_grad_(), we need the catch-all kernel (see comment above), but we also need the VariableTensorId backend
-  // kernel, because when called with a VariableTensorId tensor, it goes through the variable fallback kernel,
-  // which calls callBoxed(), which doesn't support mutable tensor arguments yet and requires_grad_() has a mutable
-  // tensor argument.
-  // TODO Once callBoxed() supports mutable tensor arguments, we can enable `use_c10_dispatcher: full` for requires_grad_()
-  //      and remove the backend VariableTensorId kernel here, only leaving the catch-all kernel.
-  .impl("aten::requires_grad_", torch::dispatch_autograd(c10::CppFunction::makeUnboxedOnly(VariableType::requires_grad_)))
-  .impl("aten::requires_grad_", c10::CppFunction::makeUnboxedOnly(VariableType::requires_grad_))
-  // TODO: Shouldn't this have a trailing underscore???
-  .impl("aten::retain_grad", VariableType::retain_grad)
+static auto registry = torch::RegisterOperators()
+  .op(torch::RegisterOperators::options()
+    .schema("aten::resize_(Tensor(a!) self, int[] size, *, MemoryFormat? memory_format=None) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<decltype(VariableType::resize_), &VariableType::resize_>(DispatchKey::VariableTensorId))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::resize_as_(Tensor(a!) self, Tensor the_template, *, MemoryFormat? memory_format=None) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<decltype(VariableType::resize_as_), &VariableType::resize_as_>(DispatchKey::VariableTensorId))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::detach(Tensor self) -> Tensor")
+    .kernel<decltype(VariableType::detach)>(DispatchKey::VariableTensorId, &VariableType::detach))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::detach_(Tensor(a!) self) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<decltype(VariableType::detach_), &VariableType::detach_>(DispatchKey::VariableTensorId))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::copy_(Tensor(a!) self, Tensor src, bool non_blocking=False) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<decltype(VariableType::copy_), &VariableType::copy_>(DispatchKey::VariableTensorId))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::backward(Tensor self, Tensor? gradient=None, bool keep_graph=False, bool create_graph=False) -> ()")
+    // For backward(), we need the catch-all kernel (see comment above), but we also need the VariableTensorId backend
+    // kernel, because when called with a VariableTensorId tensor, it goes through the variable fallback kernel,
+    // which calls callBoxed(), which doesn't support optional tensor arguments yet and backward() has an optional
+    // tensor argument.
+    // TODO Once callBoxed() supports optional tensor arguments, we can enable `use_c10_dispatcher: full` for backward()
+    //      and remove the backend VariableTensorId kernel here, only leaving the catch-all kernel.
+    .impl_unboxedOnlyKernel<decltype(VariableType::backward), &VariableType::backward>(DispatchKey::VariableTensorId)
+    .impl_unboxedOnlyCatchAllKernel<decltype(VariableType::backward), &VariableType::backward>())
+  .op(torch::RegisterOperators::options()
+    .schema("aten::set_data(Tensor(a!) self, Tensor new_data) -> ()")
+    .catchAllKernel<decltype(VariableType::set_data), &VariableType::set_data>())
+  .op(torch::RegisterOperators::options()
+    .schema("aten::data(Tensor self) -> Tensor")
+    .catchAllKernel<decltype(VariableType::data), &VariableType::data>())
+  .op(torch::RegisterOperators::options()
+    .schema("aten::is_leaf(Tensor self) -> bool")
+    .catchAllKernel<decltype(VariableType::is_leaf), &VariableType::is_leaf>())
+  .op(torch::RegisterOperators::options()
+    .schema("aten::output_nr(Tensor self) -> int")
+    .catchAllKernel<decltype(VariableType::output_nr), &VariableType::output_nr>())
+  .op(torch::RegisterOperators::options()
+    .schema("aten::_version(Tensor self) -> int")
+    .catchAllKernel<decltype(VariableType::_version), &VariableType::_version>())
+  .op(torch::RegisterOperators::options()
+    .schema("aten::requires_grad_(Tensor(a!) self, bool _requires_grad=True) -> Tensor(a!)")
+    // For requires_grad_(), we need the catch-all kernel (see comment above), but we also need the VariableTensorId backend
+    // kernel, because when called with a VariableTensorId tensor, it goes through the variable fallback kernel,
+    // which calls callBoxed(), which doesn't support mutable tensor arguments yet and requires_grad_() has a mutable
+    // tensor argument.
+    // TODO Once callBoxed() supports mutable tensor arguments, we can enable `use_c10_dispatcher: full` for requires_grad_()
+    //      and remove the backend VariableTensorId kernel here, only leaving the catch-all kernel.
+    .impl_unboxedOnlyKernel<decltype(VariableType::requires_grad_), &VariableType::requires_grad_>(DispatchKey::VariableTensorId)
+    .impl_unboxedOnlyCatchAllKernel<decltype(VariableType::requires_grad_), &VariableType::requires_grad_>())
+  .op(torch::RegisterOperators::options()
+    .schema("aten::retain_grad(Tensor(a!) self) -> ()")
+    .catchAllKernel<decltype(VariableType::retain_grad), &VariableType::retain_grad>())
   ;
 
 }  // namespace
