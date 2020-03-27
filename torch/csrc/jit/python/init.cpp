@@ -103,6 +103,7 @@ bool loadPythonClasses() {
 
 #if !defined(__HIP_PLATFORM_HCC__)
 TORCH_API void runJITCPPTests(bool runCuda);
+TORCH_API void runTENSOREXPRCPPTests(bool runCuda);
 #endif
 
 void initJITBindings(PyObject* module) {
@@ -328,9 +329,23 @@ void initJITBindings(PyObject* module) {
           },
           py::arg("run_cuda"))
       .def("_jit_has_cpp_tests", []() { return true; })
+      .def(
+          "_run_tensorexpr_cpp_tests",
+          [](bool runCuda) {
+            // We have to release the GIL inside this method, because if we
+            // happen to initialize the autograd engine in these tests, the
+            // newly spawned worker threads will try to initialize their
+            // PyThreadState*, and they need the GIL for this.
+            pybind11::gil_scoped_release _no_gil;
+            return runTENSOREXPRCPPTests(runCuda);
+          },
+          py::arg("run_cuda"))
+      .def("_has_tensorexpr_cpp_tests", []() { return true; })
 #else
       .def("_jit_run_cpp_tests", []() { throw std::exception(); })
       .def("_jit_has_cpp_tests", []() { return false; })
+      .def("_run_tensorexpr_cpp_tests", []() { throw std::exception(); })
+      .def("_has_tensorexpr_cpp_tests", []() { return false; })
 #endif
       .def(
           "_jit_flatten",
