@@ -4,6 +4,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include <c10/macros/Macros.h>
 #include <c10/util/Logging.h>
 #include <torch/csrc/jit/tensorexpr/buffer.h>
 #include <torch/csrc/jit/tensorexpr/codegen.h>
@@ -96,6 +97,26 @@ mod_value(T lhs, T rhs) {
 
 inline bool mod_value(bool lhs, bool rhs) {
   throw std::runtime_error("Attempted modulus of bool");
+}
+
+template <typename T>
+inline typename std::enable_if<std::is_integral<T>::value, T>::type div_value(
+    T lhs,
+    T rhs) {
+  TORCH_CHECK(rhs != 0, "Division by zero");
+  return lhs / rhs;
+}
+
+template <typename T>
+inline typename std::enable_if<std::is_floating_point<T>::value, T>::
+    type __ubsan_ignore_float_divide_by_zero__
+    div_value(T lhs, T rhs) {
+  return lhs / rhs;
+}
+
+inline bool div_value(bool lhs, bool rhs) {
+  LOG(FATAL) << "Attempted division of bool";
+  return false;
 }
 
 class SimpleIREvaluator : public CodeGen, public IRVisitor {
@@ -205,7 +226,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
           result_v[i] = lhs_v[i] * rhs_v[i];
           break;
         case IRNodeType::kDiv:
-          result_v[i] = lhs_v[i] / rhs_v[i];
+          result_v[i] = div_value(lhs_v[i], rhs_v[i]);
           break;
         case IRNodeType::kMod:
           result_v[i] = mod_value(lhs_v[i], rhs_v[i]);
