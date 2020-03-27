@@ -1321,7 +1321,6 @@ void insertQuantDeQuantCall(
     choose_qparams->output(0)->setType(FloatType::get());
     choose_qparams->output(1)->setDebugName(v->debugName() + ".zero_point");
     choose_qparams->output(1)->setType(IntType::get());
-
     g->insertNode(choose_qparams);
 
     std::vector<Value*> quant_inputs = {v};
@@ -1332,6 +1331,7 @@ void insertQuantDeQuantCall(
     auto dtype = g->insertGetAttr(self, qparam_names.back());
     quant_inputs.push_back(dtype);
     quant = g->create(at::Symbol::aten(quantize_func), quant_inputs);
+    quant->output()->setDebugName(v->debugName() + ".quant");
     g->insertNode(quant);
   } else {
     std::vector<Value*> inputs = {v};
@@ -1482,8 +1482,6 @@ void InsertQuantDeQuantHelper::collectObserverNodesAndValueToQuantize(
   nodes_to_destroy_[g].push_back(observer);
   // GetAttr node for observer module
   nodes_to_destroy_[g].push_back(observer->inputs()[0]->node());
-  //Value* original_value = observer->input(1);
-  //v->replaceAllUsesWith(original_value);
   observer_nodes_for_graph_[g].push_back(observer);
 }
 
