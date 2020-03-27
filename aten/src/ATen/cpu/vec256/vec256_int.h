@@ -63,7 +63,8 @@ struct Vec256<int64_t> : public Vec256i {
                                 const Vec256<int64_t>& mask) {
     return _mm256_blendv_epi8(a.values, b.values, mask.values);
   }
-  static Vec256<int64_t> arange(int64_t base = 0, int64_t step = 1) {
+  template <typename step_t>
+  static Vec256<int64_t> arange(int64_t base = 0, step_t step = static_cast<step_t>(1)) {
     return Vec256<int64_t>(base, base + step, base + 2 * step, base + 3 * step);
   }
   static Vec256<int64_t>
@@ -166,7 +167,8 @@ struct Vec256<int32_t> : public Vec256i {
                                 const Vec256<int32_t>& mask) {
     return _mm256_blendv_epi8(a.values, b.values, mask.values);
   }
-  static Vec256<int32_t> arange(int32_t base = 0, int32_t step = 1) {
+  template <typename step_t>
+  static Vec256<int32_t> arange(int32_t base = 0, step_t step = static_cast<step_t>(1)) {
     return Vec256<int32_t>(
       base,            base +     step, base + 2 * step, base + 3 * step,
       base + 4 * step, base + 5 * step, base + 6 * step, base + 7 * step);
@@ -359,7 +361,8 @@ struct Vec256<int16_t> : public Vec256i {
                                 const Vec256<int16_t>& mask) {
     return _mm256_blendv_epi8(a.values, b.values, mask.values);
   }
-  static Vec256<int16_t> arange(int16_t base = 0, int16_t step = 1) {
+  template <typename step_t>
+  static Vec256<int16_t> arange(int16_t base = 0, step_t step = static_cast<step_t>(1)) {
     return Vec256<int16_t>(
       base,             base +      step, base +  2 * step, base +  3 * step,
       base +  4 * step, base +  5 * step, base +  6 * step, base +  7 * step,
