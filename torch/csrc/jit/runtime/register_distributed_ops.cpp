@@ -55,6 +55,20 @@ RegisterOperators reg_rpc_ops(
          },
          aliasAnalysisFromSchema()),
      Operator(
+         "aten::local_value(RRef(t) self) -> t",
+         [](Stack& stack) {
+           auto rref = pop(stack).toRRef();
+           TORCH_CHECK(
+               rref->isOwner(),
+               "Can't call RRef.local_value() on a non-owner RRef.");
+           IValue res =
+               c10::static_intrusive_pointer_cast<dist_rpc::OwnerRRef>(rref)
+                   ->getValue();
+           push(stack, std::move(res));
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
          "aten::is_owner(RRef(t) self) -> bool",
          [](Stack& stack) {
            auto rref = pop(stack).toRRef();

@@ -23,6 +23,7 @@ from jit.test_class_type import TestClassType  # noqa: F401
 from jit.test_builtins import TestBuiltins, TestTensorBuiltins  # noqa: F401
 from jit.test_unsupported_ops import TestUnsupportedOps  # noqa: F401
 from jit.test_freezing import TestFreezing  # noqa: F401
+from jit.test_functional_blocks import TestFunctionalBlocks  # noqa: F401
 
 # Torch
 from torch import Tensor
@@ -1308,6 +1309,40 @@ graph(%x : Tensor,
                    .check('Observer = prim::GetAttr[name="_observer_') \
                    .run(m.graph)
 
+    def test_insert_observers_propagate_observed_for_function(self):
+        def channel_shuffle(x, groups):
+            # type: (torch.Tensor, int) -> torch.Tensor
+            batchsize, num_channels, height, width = x.data.size()
+            channels_per_group = num_channels // groups
+            # reshape
+            x = x.view(batchsize, groups,
+                       channels_per_group, height, width)
+            x = torch.transpose(x, 1, 2).contiguous()
+            # flatten
+            x = x.view(batchsize, -1, height, width)
+            return x
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.conv1 = torch.nn.Conv2d(3, 3, 1).float()
+                self.conv2 = torch.nn.Conv2d(3, 3, 1).float()
+
+            def forward(self, x):
+                x = self.conv1(x)
+                x = channel_shuffle(x, 1)
+                x = self.conv2(x)
+                return x
+
+        data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        qconfig_dict = {'': script_qconfig(default_qconfig)}
+        m = torch.jit.script(M()).eval()
+        m = prepare_script(m, qconfig_dict, inplace=False)
+        # we want to test that channel_shuffle is going to pass
+        # the observed property from the output of conv1 to input of conv2
+        # so that we don't insert observers for input of conv2
+        assert len(attrs_with_prefix(m, '_observer_',)) == 3
+
     def test_insert_observers_for_if(self):
         class Res(torch.nn.Module):
             def __init__(self, use_skip):
@@ -1616,6 +1651,39 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
                        .check_not("aten::relu_") \
                        .check("quantized::add_relu") \
                        .run(m.graph_for(data, data))
+
+    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
+                         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+                         " with instruction set support avx2 or newer.")
+    def test_quantized_cat(self):
+        """ Note that we to support the case that torch.cat is quantized
+        indepdently, we need to have an observer that works
+        for list of Tensors.
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.conv1 = torch.nn.Conv2d(1, 1, 1).float()
+                self.conv2 = torch.nn.Conv2d(1, 1, 1).float()
+
+            def forward(self, x, y):
+                x = self.conv1(x)
+                y = self.conv2(y)
+                return torch.cat([x, y], 1)
+
+        m = torch.jit.script(M().eval())
+        m = prepare_script(m, {'': script_qconfig(default_qconfig)}, True)
+        # four for input and output of conv and one for output of cat
+        # this also tests the ListConstruct can preserve the observed property so that
+        # torch.cat knows that inputs are observed
+        assert len(attrs_with_prefix(m, '_observer_')) == 5
+        data = torch.randn(1, 1, 10, 10, dtype=torch.float)
+        m(data, data)
+        m = convert_script(m, True)
+
+        FileCheck().check_not("aten::cat") \
+                   .check("quantized::cat") \
+                   .run(m.graph_for(data, data))
 
     def test_foldbn_trivial(self):
         # Test trivial case
@@ -4559,6 +4627,7 @@ graph(%Ra, %Rb):
                 super(Bar, self).__init__()
                 self.sub = Foo()
 
+            @torch.jit.script_method
             def forward(self, x):
                 # type: (Tensor) -> Tensor
                 return self.sub.forward(x)
@@ -4566,7 +4635,7 @@ graph(%Ra, %Rb):
         bar = Bar()
         ops = torch.jit.export_opnames(bar)
         expected = ['aten::add.Tensor', 'aten::mul.Scalar']
-        self.assertEqual(ops, expected)
+        self.assertTrue(set(expected).issubset(set(ops)))
 
     def test_pytorch_jit_env_off(self):
         import subprocess
@@ -4944,6 +5013,35 @@ def foo(x):
 
         # shouldn't throw a type error
         torch.jit.script(MyMod())
+
+    @_inline_everything
+    def test_lazy_script(self):
+        def untraceable(x):
+            if x.ndim > 2:
+                print("hello")
+            else:
+                print("goodbye")
+            return x + 2
+
+        # Non-working example
+        def fn(x):
+            return untraceable(x)
+
+        with self.capture_stdout():
+            traced_bad = torch.jit.trace(fn, [torch.ones(2, 2)])
+
+        FileCheck().check_not("goodbye").check_not("hello").run(traced_bad.graph)
+
+        # Working example
+        untraceable = torch.jit._script_if_tracing(untraceable)
+
+        def fn2(x):
+            return untraceable(x)
+
+        with self.capture_stdout():
+            traced = torch.jit.trace(fn, [torch.ones(2, 2)])
+
+        FileCheck().check("goodbye").check("hello").run(traced.graph)
 
     def test_big_int_literals(self):
         def ok():
@@ -5551,23 +5649,23 @@ def foo(x):
             return (cmp_key(obj1), cmp_key(obj2))
 
         def f():
-            val = torch.classes._TorchScriptTesting_Foo(5, 3)
+            val = torch.classes._TorchScriptTesting._Foo(5, 3)
             val.increment(1)
             return val
         test_equality(f, lambda x: x)
 
         with self.assertRaisesRegex(RuntimeError, "Expected a value of type 'int'"):
-            val = torch.classes._TorchScriptTesting_Foo(5, 3)
+            val = torch.classes._TorchScriptTesting._Foo(5, 3)
             val.increment('foo')
 
         def f():
-            ss = torch.classes._TorchScriptTesting_StackString(["asdf", "bruh"])
+            ss = torch.classes._TorchScriptTesting._StackString(["asdf", "bruh"])
             return ss.pop()
         test_equality(f, lambda x: x)
 
         def f():
-            ss1 = torch.classes._TorchScriptTesting_StackString(["asdf", "bruh"])
-            ss2 = torch.classes._TorchScriptTesting_StackString(["111", "222"])
+            ss1 = torch.classes._TorchScriptTesting._StackString(["asdf", "bruh"])
+            ss2 = torch.classes._TorchScriptTesting._StackString(["111", "222"])
             ss1.push(ss2.pop())
             return ss1.pop() + ss2.pop()
         test_equality(f, lambda x: x)
@@ -5575,14 +5673,14 @@ def foo(x):
     @skipIfRocm
     def test_torchbind_take_as_arg(self):
         global StackString  # see [local resolution in python]
-        StackString = torch.classes._TorchScriptTesting_StackString
+        StackString = torch.classes._TorchScriptTesting._StackString
 
         def foo(stackstring):
             # type: (StackString)
             stackstring.push("lel")
             return stackstring
 
-        script_input = torch.classes._TorchScriptTesting_StackString([])
+        script_input = torch.classes._TorchScriptTesting._StackString([])
         scripted = torch.jit.script(foo)
         script_output = scripted(script_input)
         self.assertEqual(script_output.pop(), "lel")
@@ -5590,7 +5688,7 @@ def foo(x):
     @skipIfRocm
     def test_torchbind_return_instance(self):
         def foo():
-            ss = torch.classes._TorchScriptTesting_StackString(["hi", "mom"])
+            ss = torch.classes._TorchScriptTesting._StackString(["hi", "mom"])
             return ss
 
         scripted = torch.jit.script(foo)
@@ -5606,7 +5704,7 @@ def foo(x):
     @skipIfRocm
     def test_torchbind_return_instance_from_method(self):
         def foo():
-            ss = torch.classes._TorchScriptTesting_StackString(["hi", "mom"])
+            ss = torch.classes._TorchScriptTesting._StackString(["hi", "mom"])
             clone = ss.clone()
             ss.pop()
             return ss, clone
@@ -5620,8 +5718,8 @@ def foo(x):
     @skipIfRocm
     def test_torchbind_take_instance_as_method_arg(self):
         def foo():
-            ss = torch.classes._TorchScriptTesting_StackString(["mom"])
-            ss2 = torch.classes._TorchScriptTesting_StackString(["hi"])
+            ss = torch.classes._TorchScriptTesting._StackString(["mom"])
+            ss2 = torch.classes._TorchScriptTesting._StackString(["hi"])
             ss.merge(ss2)
             return ss
 
@@ -5633,7 +5731,7 @@ def foo(x):
     @skipIfRocm
     def test_torchbind_return_tuple(self):
         def f():
-            val = torch.classes._TorchScriptTesting_StackString(["3", "5"])
+            val = torch.classes._TorchScriptTesting._StackString(["3", "5"])
             return val.return_a_tuple()
 
         scripted = torch.jit.script(f)
@@ -5643,8 +5741,8 @@ def foo(x):
     @skipIfRocm
     def test_torchbind_save_load(self):
         def foo():
-            ss = torch.classes._TorchScriptTesting_StackString(["mom"])
-            ss2 = torch.classes._TorchScriptTesting_StackString(["hi"])
+            ss = torch.classes._TorchScriptTesting._StackString(["mom"])
+            ss2 = torch.classes._TorchScriptTesting._StackString(["hi"])
             ss.merge(ss2)
             return ss
 
@@ -5673,7 +5771,7 @@ def foo(x):
     @skipIfRocm
     def test_torchbind_lambda_method(self):
         def foo():
-            ss = torch.classes._TorchScriptTesting_StackString(["mom"])
+            ss = torch.classes._TorchScriptTesting._StackString(["mom"])
             return ss.top()
 
         scripted = torch.jit.script(foo)
@@ -5684,7 +5782,7 @@ def foo(x):
         class FooBar1234(torch.nn.Module):
             def __init__(self):
                 super(FooBar1234, self).__init__()
-                self.f = torch.classes._TorchScriptTesting_StackString(["3", "4"])
+                self.f = torch.classes._TorchScriptTesting._StackString(["3", "4"])
 
             def forward(self):
                 return self.f.top()
@@ -5701,7 +5799,7 @@ def foo(x):
         class FooBar4321(torch.nn.Module):
             def __init__(self):
                 super(FooBar4321, self).__init__()
-                self.f = torch.classes._TorchScriptTesting_PickleTester([3, 4])
+                self.f = torch.classes._TorchScriptTesting._PickleTester([3, 4])
 
             def forward(self):
                 return self.f.top()
@@ -5723,7 +5821,7 @@ def foo(x):
         class TryTracing(torch.nn.Module):
             def __init__(self):
                 super(TryTracing, self).__init__()
-                self.f = torch.classes._TorchScriptTesting_PickleTester([3, 4])
+                self.f = torch.classes._TorchScriptTesting._PickleTester([3, 4])
 
             def forward(self):
                 return torch.ops._TorchScriptTesting.take_an_instance(self.f)
@@ -5736,7 +5834,7 @@ def foo(x):
         class TryTracingNest(torch.nn.Module):
             def __init__(self):
                 super(TryTracingNest, self).__init__()
-                self.f = torch.classes._TorchScriptTesting_PickleTester([3, 4])
+                self.f = torch.classes._TorchScriptTesting._PickleTester([3, 4])
 
         class TryTracing123(torch.nn.Module):
             def __init__(self):
@@ -5751,7 +5849,7 @@ def foo(x):
 
     @skipIfRocm
     def test_torchbind_pickle_serialization(self):
-        nt = torch.classes._TorchScriptTesting_PickleTester([3, 4])
+        nt = torch.classes._TorchScriptTesting._PickleTester([3, 4])
         b = io.BytesIO()
         torch.save(nt, b)
         b.seek(0)
@@ -5761,8 +5859,8 @@ def foo(x):
 
     @skipIfRocm
     def test_torchbind_instantiate_missing_class(self):
-        with self.assertRaisesRegex(RuntimeError, 'Tried to instantiate class IDontExist but it does not exist!'):
-            torch.classes.IDontExist(3, 4, 5)
+        with self.assertRaisesRegex(RuntimeError, 'Tried to instantiate class foo.IDontExist but it does not exist!'):
+            torch.classes.foo.IDontExist(3, 4, 5)
 
     def test_jitter_bug(self):
         @torch.jit.script
@@ -6521,6 +6619,26 @@ a")
             return a + a + a
         s = Variable(torch.rand(2))
         self.assertEqual(s + s + s, foo(s))
+
+    def test_str_to_float(self):
+        @torch.jit.script
+        def foo(a):
+            return 0.5 == float('0.5 hello')
+        s = torch.rand(1)
+        with self.assertRaisesRegex(RuntimeError, "only accepts a string of single float number"):
+            self.assertTrue(foo(s))
+
+        @torch.jit.script
+        def foo(a):
+            return 0.5 == float('0.5')
+        s = torch.rand(1)
+        self.assertTrue(foo(s))
+
+        @torch.jit.script
+        def foo(a):
+            return 0. == float('0')
+        s = torch.rand(1)
+        self.assertTrue(foo(s))
 
     def test_inf(self):
         @torch.jit.script
@@ -16049,10 +16167,10 @@ a")
         tester(str_hash, ("", "hello", "a"))
 
     def test_id(self):
-        with self.assertRaisesRegex(RuntimeError, "Expected a value"): 
+        with self.assertRaisesRegex(RuntimeError, "Expected a value"):
             @torch.jit.script
             def test_id_scalars():
-                return id(2) == id(None) 
+                return id(2) == id(None)
 
         @torch.jit.script
         class FooTest(object):
