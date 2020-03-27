@@ -449,7 +449,6 @@ void test_io_() {
 }
 
 TEST(TestIO, All) {
-  test_io_<c10::Half>();
   test_io_<float>();
   test_io_<double>();
 }
