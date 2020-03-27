@@ -26,7 +26,7 @@ std::shared_ptr<jit::PythonFutureWrapper> pyRpcPythonUdf(
 
 std::shared_ptr<jit::PythonFutureWrapper> pyRpcTorchscript(
     const std::string& dstWorkerName,
-    const py::object& userCallable,
+    const std::string& qualifiedNameStr,
     const py::tuple& argsTuple,
     const py::dict& kwargsDict);
 

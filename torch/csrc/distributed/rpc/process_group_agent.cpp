@@ -678,14 +678,14 @@ void ProcessGroupAgent::listenLoop() {
       listenLoopException_ = std::current_exception();
     }
   } catch (...) {
+    std::string unknownErrorMsg =
+        "Unknown exception occured in "
+        "ProcessGroupAgent::listenLoop. RPC Agent is in an unhealthy state and "
+        "unusable.";
+    LOG(ERROR) << unknownErrorMsg;
     {
       // Lock write to listenLoopException_ since ::send() reads from it.
       std::lock_guard<std::mutex> guard(listenLoopExceptionMutex_);
-      std::string unknownErrorMsg =
-          "Unknown exception occured in "
-          "ProcessGroupAgent::listenLoop. RPC Agent is in an unhealthy state and "
-          "unusable.";
-      LOG(ERROR) << unknownErrorMsg;
       listenLoopException_ =
           std::make_exception_ptr(std::runtime_error(unknownErrorMsg));
     }

@@ -202,22 +202,22 @@ std::shared_ptr<jit::PythonFutureWrapper> pyRpcPythonUdf(
 
 std::shared_ptr<jit::PythonFutureWrapper> pyRpcTorchscript(
     const std::string& dstWorkerName,
-    const py::object& userCallable,
+    const std::string& qualifiedNameStr,
     const py::tuple& argsTuple,
     const py::dict& kwargsDict) {
-  DCHECK(!PyGILState_Check());
   // No need to catch exception here, if function can not be found,
   // exception will be thrown in get_function() call; if args do not match
   // with function schema, exception will be thrown in
   // createStackForSchema() call.
-  auto& pythonRpcHandler = PythonRpcHandler::getInstance();
-  c10::QualifiedName qualifiedName =
-      pythonRpcHandler.getQualifiedName(userCallable);
-  c10::FunctionSchema functionSchema = pythonRpcHandler.jitCompilationUnit()
-                                           ->get_function(qualifiedName)
-                                           .getSchema();
+  DCHECK(!PyGILState_Check());
+  const c10::QualifiedName qualifiedName(qualifiedNameStr);
+  auto functionSchema = PythonRpcHandler::getInstance()
+                            .jitCompilationUnit()
+                            ->get_function(qualifiedName)
+                            .getSchema();
   Stack stack;
   {
+    // Acquire GIL for py::args and py::kwargs processing.
     py::gil_scoped_acquire acquire;
     stack = torch::jit::createStackForSchema(
         functionSchema,
