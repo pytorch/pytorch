@@ -187,12 +187,12 @@ TEST(OptimTest, OptimizerAccessors) {
   1);\
 }
 
-TEST(OptimTest, OldInterface) {
-  struct MyOptimizerOptions : public OptimizerCloneableOptions<MyOptimizerOptions> {
-    MyOptimizerOptions(double lr = 1.0) : lr_(lr) {};
-    TORCH_ARG(double, lr) = 1.0;
-  };
+struct MyOptimizerOptions : public OptimizerCloneableOptions<MyOptimizerOptions> {
+  MyOptimizerOptions(double lr = 1.0) : lr_(lr) {};
+  TORCH_ARG(double, lr) = 1.0;
+};
 
+TEST(OptimTest, OldInterface) {
   struct MyOptimizer : Optimizer {
     using Optimizer::Optimizer;
     torch::Tensor step(LossClosure closure = nullptr) override { return {};}
