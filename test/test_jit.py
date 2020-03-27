@@ -20,7 +20,6 @@ from jit.test_autodiff_subgraph_slicing import TestAutodiffSubgraphSlicing  # no
 from jit.test_custom_operators import TestCustomOperators  # noqa: F401
 from jit.test_export_modes import TestExportModes  # noqa: F401
 from jit.test_class_type import TestClassType  # noqa: F401
-from jit.test_module_interface import TestModuleInterface  # noqa: F401
 from jit.test_builtins import TestBuiltins, TestTensorBuiltins  # noqa: F401
 from jit.test_unsupported_ops import TestUnsupportedOps  # noqa: F401
 from jit.test_freezing import TestFreezing  # noqa: F401
@@ -3066,22 +3065,6 @@ graph(%Ra, %Rb):
         tests_setup.setup()
         torch._C._jit_run_cpp_tests(run_cuda=True)
         tests_setup.shutdown()
-
-    @unittest.skipIf(IS_SANDCASTLE, "gtest runs these in sandcastle")
-    @unittest.skipIf(RUN_CUDA, "covered by test_tensorexpr_cuda")
-    @unittest.skipIf(IS_WINDOWS, "enable on windows")
-    @unittest.skipIf(not torch._C._has_tensorexpr_cpp_tests(), "Tests were not built, use BUILD_TEST=1")
-    @skipIfRocm
-    def test_tensorexpr_cpp(self):
-        torch._C._run_tensorexpr_cpp_tests(run_cuda=False)
-
-    @unittest.skipIf(IS_SANDCASTLE, "gtest runs these in sandcastle")
-    @unittest.skipIf(not RUN_CUDA, "covered by test_tensorexpr")
-    @unittest.skipIf(IS_WINDOWS, "enable on windows")
-    @unittest.skipIf(not torch._C._has_tensorexpr_cpp_tests(), "Tests were not built, use BUILD_TEST=1")
-    @skipIfRocm
-    def test_tensorexpr_cpp_cuda(self):
-        torch._C._run_tensorexpr_cpp_tests(run_cuda=True)
 
     def test_batchnorm(self):
         x = torch.ones(2, 2, 2, 2)

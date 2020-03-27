@@ -3,16 +3,6 @@ set(TENSOREXPR_TEST_ROOT ${TORCH_ROOT}/test/cpp/tensorexpr)
 file(GLOB TENSOREXPR_TEST_SRCS ${TENSOREXPR_TEST_ROOT}/test_*.cpp)
 set(TENSOREXPR_TEST_SRCS ${TENSOREXPR_TEST_SRCS} PARENT_SCOPE)
 
-# this is used for running cpp tests from python as part of test_jit.TestJit.test_tensorexpr_cpp
-set(TENSOREXPR_TEST_SRCS_WITH_PADDED ${TENSOREXPR_TEST_SRCS} ${TENSOREXPR_TEST_ROOT}/padded_buffer.cpp)
-if(NOT USE_CUDA)
-  list(REMOVE_ITEM TENSOREXPR_TEST_SRCS_WITH_PADDED ${TENSOREXPR_TEST_ROOT}/test_cuda.cpp)
-endif()
-if(NOT USE_LLVM)
-  list(REMOVE_ITEM TENSOREXPR_TEST_SRCS_WITH_PADDED ${TENSOREXPR_TEST_ROOT}/test_llvm.cpp)
-endif()
-set(TENSOREXPR_TEST_SRCS_WITH_PADDED ${TENSOREXPR_TEST_SRCS_WITH_PADDED} PARENT_SCOPE)
-
 add_executable(test_tensorexpr
   ${TORCH_ROOT}/test/cpp/common/main.cpp
   ${TENSOREXPR_TEST_ROOT}/gtest.cpp

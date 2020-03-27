@@ -4,8 +4,8 @@
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #endif
 #include <torch/csrc/jit/api/function_impl.h>
-#include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/jit/mobile/type_parser.h>
+#include <torch/csrc/jit/serialization/pickler.h>
 #include <string>
 #include "unpickler.h"
 
@@ -160,7 +160,6 @@ void restoreContainerTypeTags(IValue& ivalue, TypePtr type) {
     AT_ERROR("Unknown type for tag restoration: " + type->python_str());
   }
 }
-
 
 IValue Unpickler::parse_ivalue() {
   run();
@@ -626,11 +625,7 @@ void Unpickler::rebuildTensor(bool quantized) {
           const auto& zero_points = qparams.at(2).toTensor();
           int64_t axis = qparams.at(3).toInt();
           result = at::_empty_per_channel_affine_quantized(
-              {0},
-              scales,
-              zero_points,
-              axis,
-              storage_tensor.options());
+              {0}, scales, zero_points, axis, storage_tensor.options());
         } break;
         default:
           TORCH_CHECK(
