@@ -18,10 +18,10 @@ namespace cuda {
 
 // dummy struct to allow API registration
 struct CudaFuserInterface {
-  bool (*fn_is_fusible_n_)(const Node* const) = nullptr;
-  bool (*fn_is_fusible_n_n_)(const Node* const, const Node* const) = nullptr;
+  bool (*fn_is_fusible_n_)(const Node*) = nullptr;
+  bool (*fn_is_fusible_n_n_)(const Node*, const Node*) = nullptr;
   void (*fn_compile_n_)(Node*) = nullptr;
-  void (*fn_run_n_s_)(const Node* const, Stack&) = nullptr;
+  void (*fn_run_n_s_)(const Node*, Stack&) = nullptr;
 };
 
 // Get interface, this is used by registration and user facing API internally
@@ -30,8 +30,8 @@ C10_EXPORT CudaFuserInterface* getFuserInterface();
 // Customer facing APIs vvv
 
 // Query if node is fusable for cuda codegen
-C10_EXPORT bool isFusable(const Node* const node);
-C10_EXPORT bool isFusable(const Node* const fusion, const Node* const node);
+C10_EXPORT bool isFusable(const Node* node);
+C10_EXPORT bool isFusable(const Node* fusion, const Node* node);
 
 // redirect to compileCudaFusionGroup (manager.h)
 C10_EXPORT void compileFusionGroup(Node* fusion_node);

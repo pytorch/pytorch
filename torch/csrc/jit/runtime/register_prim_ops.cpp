@@ -300,7 +300,15 @@ RegisterOperators reg(
          prim::CudaFusionGroup,
          [](const Node* node) -> Operation {
            return [node](Stack& stack) {
+#ifndef C10_MOBILE
              fuser::cuda::runFusionGroup(node, stack);
+#else
+             // WAR for linker error for runFusionGroup on MOBILE build.
+             // We suspect the issue is name mangling, but we haven't got a fix
+             // yet. As CudaFusionGroup is not supposed to be on mobile build,
+             // this should be safe.
+             TORCH_INTERNAL_ASSERT(false);
+#endif
              return 0;
            };
          },
