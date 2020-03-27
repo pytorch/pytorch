@@ -1680,8 +1680,8 @@ class TestSWAUtils(TestCase):
         n_updates = 10
         for i in range(n_updates):
             for p, p_avg in zip(dnn.parameters(), averaged_params):
-                p.data += torch.randn_like(p.data)
-                p_avg += p.data / n_updates
+                p.detach().add_(torch.randn_like(p))
+                p_avg += p.detach() / n_updates
             averaged_dnn.update_parameters(dnn)
 
         for p_avg, p_swa in zip(averaged_params, averaged_dnn.parameters()):
@@ -1714,8 +1714,8 @@ class TestSWAUtils(TestCase):
         n_updates = 10
         for i in range(n_updates):
             for p, p_avg in zip(dnn.parameters(), averaged_params):
-                p.data += torch.randn_like(p.data)
-                p_avg += p.data / n_updates
+                p.detach().add_(torch.randn_like(p))
+                p_avg += p.detach() / n_updates
             averaged_dnn.update_parameters(dnn)
 
         for p_avg, p_swa in zip(averaged_params, averaged_dnn.parameters()):
@@ -1733,7 +1733,7 @@ class TestSWAUtils(TestCase):
         n_updates = 10
         for i in range(n_updates):
             for p in dnn.parameters():
-                p.data += torch.randn_like(p.data)
+                p.detach().add_(torch.randn_like(p))
             averaged_dnn.update_parameters(dnn)
         averaged_dnn2.load_state_dict(averaged_dnn.state_dict())
         for p_swa, p_swa2 in zip(averaged_dnn.parameters(), averaged_dnn2.parameters()):
@@ -1756,7 +1756,7 @@ class TestSWAUtils(TestCase):
         for i in range(n_updates):
             updated_averaged_params = []
             for p, p_avg in zip(dnn.parameters(), averaged_params):
-                p.data += torch.randn_like(p.data)
+                p.detach().add_(torch.randn_like(p))
                 if i == 0:
                     updated_averaged_params.append(p.clone())
                 else:
