@@ -1673,7 +1673,8 @@ class TestSWAUtils(TestCase):
             torch.nn.Linear(5, 5),
             torch.nn.ReLU(),
             torch.nn.Linear(5, 10)
-        )
+        ).to(net_device)
+
         averaged_dnn = AveragedModel(dnn, device=swa_device)
         averaged_params = [torch.zeros_like(param) for param in dnn.parameters()]
         n_updates = 10
@@ -1687,6 +1688,7 @@ class TestSWAUtils(TestCase):
             self.assertAlmostEqual(p_avg, p_swa)
             # Check that AveragedModel is on the correct device
             self.assertTrue(p_swa.device == swa_device)
+            self.assertTrue(p.device == net_device)
 
     def test_averaged_model_all_devices(self):
         cpu = torch.device("cpu")
