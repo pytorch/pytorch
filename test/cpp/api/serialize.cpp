@@ -64,7 +64,7 @@ void is_optimizer_state_equal(
 }
 
 template <typename OptimizerClass, typename DerivedOptimizerOptions, typename DerivedOptimizerParamState>
-void test_serialize_optimizer(DerivedOptimizerOptions options) {
+void test_serialize_optimizer(DerivedOptimizerOptions options, bool only_has_global_state = false) {
   auto model1 = Linear(5, 2);
   auto model2 = Linear(5, 2);
   auto model3 = Linear(5, 2);
@@ -125,9 +125,11 @@ void test_serialize_optimizer(DerivedOptimizerOptions options) {
   auto& optim3_2_state = optim3_2.state();
   auto& optim3_state = optim3.state();
 
-  // optim3_2 and optim1 should have param_groups and state of size 1 and 2 respectively
+  // optim3_2 and optim1 should have param_groups and state of size 1 and state_size respectively
   ASSERT_TRUE(optim3_2_param_groups.size() == 1);
-  ASSERT_TRUE(optim3_2_state.size() == 2);
+  // state_size = 2 for all optimizers except LBFGS as LBFGS only maintains one global state
+  int state_size = only_has_global_state ? 1 : 2;
+  ASSERT_TRUE(optim3_2_state.size() == state_size);
 
   // optim3_2 and optim1 should have param_groups and state of same size
   ASSERT_TRUE(optim3_2_param_groups.size() == optim3_param_groups.size());
@@ -668,39 +670,16 @@ TEST(SerializeTest, Optim_RMSprop) {
 }
 
 TEST(SerializeTest, Optim_LBFGS) {
-  auto options = LBFGSOptions();
+  test_serialize_optimizer<LBFGS, LBFGSOptions, LBFGSParamState>(LBFGSOptions(), true);
+  // bc compatibility check
   auto model1 = Linear(5, 2);
-  auto model2 = Linear(5, 2);
-  auto model3 = Linear(5, 2);
-
-  // Models 1, 2, 3 will have the same parameters.
-  auto model_tempfile = c10::make_tempfile();
-  torch::save(model1, model_tempfile.name);
-  torch::load(model2, model_tempfile.name);
-  torch::load(model3, model_tempfile.name);
-
-  auto param1 = model1->named_parameters();
-  auto param2 = model2->named_parameters();
-  auto param3 = model3->named_parameters();
-  for (const auto& p : param1) {
-    ASSERT_TRUE(p->allclose(param2[p.key()]));
-    ASSERT_TRUE(param2[p.key()].allclose(param3[p.key()]));
-  }
-  // Make some optimizers
-  auto optim1 = LBFGS(
-      {torch::optim::OptimizerParamGroup(model1->parameters())}, options);
-  auto optim2 = LBFGS(
-      model2->parameters(), options);
-  auto optim2_2 = LBFGS(
-      model2->parameters(), options);
-  auto optim3 = LBFGS(
-      model3->parameters(), options);
-  auto optim3_2 = LBFGS(
-      model3->parameters(), options);
+  auto model1_params = model1->parameters();
+  // added a tensor for lazy init check - when all params do not have entry in buffers
+  model1_params.emplace_back(torch::randn({2,3}));
+  auto optim1 = torch::optim::LBFGS(model1_params, torch::optim::LBFGSOptions());
 
   auto x = torch::ones({10, 5});
-
-  auto step = [&x](torch::optim::LossClosureOptimizer& optimizer, Linear model) {
+  auto step = [&x](torch::optim::Optimizer& optimizer, Linear model) {
     optimizer.zero_grad();
     auto y = model->forward(x).sum();
     y.backward();
@@ -708,56 +687,47 @@ TEST(SerializeTest, Optim_LBFGS) {
     optimizer.step(closure);
   };
 
-  // Do 2 steps of model1
-  step(optim1, model1);
   step(optim1, model1);
 
-  // Do 2 steps of model 2 without saving the optimizer
-  step(optim2, model2);
-  step(optim2_2, model2);
+  at::Tensor d, t, H_diag, prev_flat_grad, prev_loss;
+  std::deque<at::Tensor> old_dirs, old_stps;
 
-  // Do 1 step of model 3
-  step(optim3, model3);
+  const auto& params_ = optim1.param_groups()[0].params();
+  auto key_ = c10::guts::to_string(params_[0].unsafeGetTensorImpl());
+  const auto& optim1_state = static_cast<const LBFGSParamState&>(*(optim1.state().at(key_).get()));
+  d = optim1_state.d();
+  t = at::tensor(optim1_state.t());
+  H_diag = optim1_state.H_diag();
+  prev_flat_grad = optim1_state.prev_flat_grad();
+  prev_loss = at::tensor(optim1_state.prev_loss());
+  old_dirs = optim1_state.old_dirs();
 
-  // save the optimizer
-  auto optim_tempfile = c10::make_tempfile();
-  torch::save(optim3, optim_tempfile.name);
-  torch::load(optim3_2, optim_tempfile.name);
+  // write buffers to the file
+  auto optim_tempfile_old_format = c10::make_tempfile();
+  torch::serialize::OutputArchive output_archive;
+  output_archive.write("d", d, /*is_buffer=*/true);
+  output_archive.write("t", t, /*is_buffer=*/true);
+  output_archive.write("H_diag", H_diag, /*is_buffer=*/true);
+  output_archive.write("prev_flat_grad", prev_flat_grad, /*is_buffer=*/true);
+  output_archive.write("prev_loss", prev_loss, /*is_buffer=*/true);
+  write_tensors_to_archive(output_archive, "old_dirs", old_dirs);
+  write_tensors_to_archive(output_archive, "old_stps", old_stps);
+  output_archive.save_to(optim_tempfile_old_format.name);
 
-  auto& optim3_2_param_groups = optim3_2.param_groups();
-  auto& optim3_param_groups = optim3.param_groups();
-  auto& optim3_2_state = optim3_2.state();
-  auto& optim3_state = optim3.state();
+  auto optim1_2 = LBFGS(model1_params, torch::optim::LBFGSOptions());
+  OLD_SERIALIZATION_LOGIC_WARNING_CHECK(torch::load, optim1_2, optim_tempfile_old_format.name);
 
-  // LBFGS only supports 1 param_group
-  // optim3_2 and optim1 should have param_groups of size 1
-  ASSERT_TRUE(optim3_param_groups.size() == 1);
-  ASSERT_TRUE(optim3_2_param_groups.size() == 1);
-  // LBFGS only maintains one global state
-  ASSERT_TRUE(optim3_2_state.size() == 1);
-  ASSERT_TRUE(optim3_state.size() == 1);
+  const auto& params1_2_ = optim1_2.param_groups()[0].params();
+  auto param_key = c10::guts::to_string(params1_2_[0].unsafeGetTensorImpl());
+  auto& optim1_2_state = static_cast<LBFGSParamState&>(*(optim1_2.state().at(param_key).get()));
 
-  // checking correctness of serialization logic for optimizer.param_groups_ and optimizer.state_
-  for (int i = 0; i < optim3_2_param_groups.size(); i++) {
-    is_optimizer_param_group_equal<LBFGSOptions>(
-      optim3_2_param_groups[i], optim3_param_groups[i]);
-    is_optimizer_state_equal<LBFGSParamState>(optim3_2_state, optim3_state);
-  }
+  // old LBFGS didn't track func_evals, n_iter, ro, al values
+  optim1_2_state.func_evals(optim1_state.func_evals());
+  optim1_2_state.n_iter(optim1_state.n_iter());
+  optim1_2_state.ro(optim1_state.ro());
+  optim1_2_state.al(optim1_state.al());
 
-  // Do step2 for model 3
-  step(optim3_2, model3);
-
-  param1 = model1->named_parameters();
-  param2 = model2->named_parameters();
-  param3 = model3->named_parameters();
-  for (const auto& p : param1) {
-    const auto& name = p.key();
-    // Model 1 and 3 should be the same
-    ASSERT_TRUE(
-        param1[name].norm().item<float>() == param3[name].norm().item<float>());
-    ASSERT_TRUE(
-        param1[name].norm().item<float>() != param2[name].norm().item<float>());
-  }
+  is_optimizer_state_equal<LBFGSParamState>(optim1.state(), optim1_2.state());
 }
 
 TEST(SerializeTest, XOR_CUDA) {
