@@ -6619,6 +6619,26 @@ a")
         s = Variable(torch.rand(2))
         self.assertEqual(s + s + s, foo(s))
 
+    def test_str_to_float(self):
+        @torch.jit.script
+        def foo(a):
+            return 0.5 == float('0.5 hello')
+        s = torch.rand(1)
+        with self.assertRaisesRegex(RuntimeError, "only accepts a string of single float number"):
+            self.assertTrue(foo(s))
+
+        @torch.jit.script
+        def foo(a):
+            return 0.5 == float('0.5')
+        s = torch.rand(1)
+        self.assertTrue(foo(s))
+
+        @torch.jit.script
+        def foo(a):
+            return 0. == float('0')
+        s = torch.rand(1)
+        self.assertTrue(foo(s))
+
     def test_inf(self):
         @torch.jit.script
         def foo(a):
@@ -16146,10 +16166,10 @@ a")
         tester(str_hash, ("", "hello", "a"))
 
     def test_id(self):
-        with self.assertRaisesRegex(RuntimeError, "Expected a value"): 
+        with self.assertRaisesRegex(RuntimeError, "Expected a value"):
             @torch.jit.script
             def test_id_scalars():
-                return id(2) == id(None) 
+                return id(2) == id(None)
 
         @torch.jit.script
         class FooTest(object):
