@@ -308,7 +308,12 @@ static auto registry =
             c10::RegisterOperators::options()
             .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
             .kernel<QConvPackWeightInt8<2>>(DispatchKey::QuantizedCPUTensorId))
-        .op("quantized::conv2d_prepack", // We use  conv2d_prepack to be
+        .op("quantized::conv2d_prepack", // We use conv2d_prepack to be
+                                         // consistent with conv3d_prepack
+            c10::RegisterOperators::options()
+            .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
+            .kernel<QConvPackWeightInt8<2>>(DispatchKey::QuantizedCPUTensorId))
+        .op("_quantized::conv2d_prepack", // We use conv2d_prepack to be
                                          // consistent with conv3d_prepack
             c10::RegisterOperators::options()
             .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
