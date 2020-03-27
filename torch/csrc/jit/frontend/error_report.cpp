@@ -33,17 +33,13 @@ ErrorReport::CallStack::~CallStack() {
   calls.pop_back();
 }
 #else // defined C10_MOBILE
-ErrorReport::ErrorReport(SourceRange r)
-    : context(std::move(r)) {}
+ErrorReport::ErrorReport(SourceRange r) : context(std::move(r)) {}
 
-void ErrorReport::CallStack::update_pending_range(const SourceRange& range) {
-}
+void ErrorReport::CallStack::update_pending_range(const SourceRange& range) {}
 
-ErrorReport::CallStack::CallStack(const std::string& name) {
-}
+ErrorReport::CallStack::CallStack(const std::string& name) {}
 
-ErrorReport::CallStack::~CallStack() {
-}
+ErrorReport::CallStack::~CallStack() {}
 #endif // C10_MOBILE
 
 std::string get_stacked_errors(const std::vector<Call>& error_stack) {
