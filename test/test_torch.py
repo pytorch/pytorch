@@ -12042,7 +12042,7 @@ class TestTorchDeviceType(TestCase):
         _test((10,), 5, 4, win_sizes=(11,), expected_error=RuntimeError)
         _test((10,), 5, 4, win_sizes=(1, 1), expected_error=RuntimeError)
 
-    @skipCUDAIfRocm
+    @skipIfRocm
     def test_fft_input_modification(self, device):
         # FFT functions should not modify their input (gh-34551)
 
