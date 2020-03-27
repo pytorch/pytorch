@@ -182,27 +182,24 @@ class TestAutograd(TestCase):
                 'Legacy autograd function with non-static forward method is deprecated'):
             MyFunction()(torch.randn(3, 4))
 
+    class SimulateBackwardError(Function):
+
+        @staticmethod
+        def forward(ctx, input):
+            return input.clone()
+
+        @staticmethod
+        @once_differentiable
+        def backward(ctx, input):
+            raise Exception("Simulate error on backward pass")
+
     def test_custom_function_exception(self):
-        class SimulateBackwardError(Function):
-            _simulate_error = True
-
-            @staticmethod
-            def forward(ctx, input):
-                return input
-
-            @staticmethod
-            @once_differentiable
-            def backward(ctx, input):
-                if SimulateBackwardError._simulate_error:
-                    raise Exception("Simulate error on backward pass")
-                else:
-                    return input
 
         t1 = torch.rand((3, 3), requires_grad=True)
         t2 = torch.rand((3, 3), requires_grad=True)
 
         tmp = (t1 + t2) * (t1 + t2)
-        t3 = SimulateBackwardError.apply(tmp)
+        t3 = TestAutograd.SimulateBackwardError.apply(tmp)
         with self.assertRaisesRegex(RuntimeError, "Simulate error on backward pass"):
             t3.sum().backward()
 
@@ -2168,15 +2165,6 @@ class TestAutograd(TestCase):
         out.sum().backward()
         self.assertEqual(x.grad, y_data)
 
-    class BackwardError(Function):
-        @staticmethod
-        def forward(ctx, inp):
-            return inp.clone()
-
-        @staticmethod
-        def backward(ctx, grad):
-            raise Exception('simulate error')
-
     def test_reentrant_child_error(self):
         # Parent graph.
         a = torch.rand(3, 3, requires_grad=True)
@@ -2185,7 +2173,7 @@ class TestAutograd(TestCase):
         # Reentrant child graph.
         b = torch.rand(3, 3, requires_grad=True)
         e = b * b
-        f = TestAutograd.BackwardError.apply(e)
+        f = TestAutograd.SimulateBackwardError.apply(e)
         reentrant_root = f.sum()
 
         class ReentrantFunc(Function):
@@ -2201,7 +2189,7 @@ class TestAutograd(TestCase):
                 return grad
 
         d = ReentrantFunc.apply(c)
-        with self.assertRaisesRegex(RuntimeError, 'simulate error'):
+        with self.assertRaisesRegex(RuntimeError, 'Simulate error'):
             d.sum().backward()
 
     def test_broadcast_tensors(self):
@@ -5556,16 +5544,14 @@ class TestAutogradDeviceType(TestCase):
         a.sum().backward()
         self.assertEqual(x.grad, torch.ones(n, 1, device=device))
 
-    @onlyCUDA
-    def test_reentrant_parent_error_on_cpu(self, device):
-        before = CudaMemoryLeakCheck.get_cuda_memory_usage()
+    def _test_reentrant_parent_error_on_cpu(self, device):
         t1 = torch.rand([3, 3], requires_grad=True)
         t2 = torch.rand([3, 3], device=device, requires_grad=True)
         t3 = torch.rand([3, 3], device=device, requires_grad=True)
 
         # Parent graph cpu graph.
         t4 = t1 * t1
-        t5 = TestAutograd.BackwardError.apply(t4)
+        t5 = TestAutograd.SimulateBackwardError.apply(t4)
 
         # Child gpu graph (much longer than parent graph).
         prev = t2 * t2
@@ -5589,7 +5575,7 @@ class TestAutogradDeviceType(TestCase):
         t7 = t6 * t6
 
         # Parent graph will error out first, while child graph will continue executing.
-        with self.assertRaisesRegex(RuntimeError, "simulate error"):
+        with self.assertRaisesRegex(RuntimeError, "Simulate error"):
             torch.autograd.backward([t5.sum(), t7.sum()])
 
         # No grads should be accumulated since child graph will stop execution
@@ -5598,17 +5584,22 @@ class TestAutogradDeviceType(TestCase):
         self.assertIsNone(t1.grad)
         self.assertIsNone(t3.grad)
 
+    @onlyCUDA
+    def test_reentrant_parent_error_on_cpu(self, device):
+        before = CudaMemoryLeakCheck.get_cuda_memory_usage()
+
+        # Run as separate function so that gc can clean up everything when we
+        # check for memory usage.
+        self._test_reentrant_parent_error_on_cpu(device)
+
         # Wait for autograd thread to cleanup failed tasks.
         after = CudaMemoryLeakCheck.get_cuda_memory_usage()
         start = time.time()
         while before != after and time.time() - start < 30:
-            time.sleep(1)
+            time.sleep(0.1)
             after = CudaMemoryLeakCheck.get_cuda_memory_usage()
 
-        # If the autograd thread fails to cleanup the thread within the
-        # timeout specified in the loop above, the unit test would fail
-        # since CudaMemoryLeakCheck.__exit__ is executed after the unit
-        # test is done.
+        self.assertEqual(before, after)
 
     # test for backward in https://github.com/pytorch/pytorch/issues/15511
     def test_pdist_large(self, device):
