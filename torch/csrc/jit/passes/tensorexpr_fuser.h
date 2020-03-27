@@ -21,7 +21,7 @@ struct TORCH_API RegisterTensorExprFuser
     PassManager::clearPass();
   }
 };
-
+  
 TORCH_API void setTensorExprFuserEnabled(bool val);
 
 } // namespace jit

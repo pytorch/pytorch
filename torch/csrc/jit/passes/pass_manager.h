@@ -47,6 +47,15 @@ TORCH_API void clearPrePass(GraphPassNameType p);
 TORCH_API void clearAllPostPasses();
 TORCH_API void clearAllPrePasses();
 
+
+// LEGACY CALL
+struct TORCH_API RegisterPostPass
+{
+ RegisterPostPass(GraphPass p);
+};
+
+using RegisterPass = RegisterPostPass;
+
 /*
  * PassManager is a wrapper on the register/clear PostPass functions above. It
  * will register the pass provided in "registerPass" and will hold on to its
@@ -61,7 +70,7 @@ TORCH_API void clearAllPrePasses();
  * types.
  */
 template <typename DerivedType>
-struct TORCH_API PassManager {
+struct C10_EXPORT PassManager {
  private:
   // We want this class to be abstract because it's
   virtual void abstract() = 0;

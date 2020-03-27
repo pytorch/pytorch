@@ -391,6 +391,8 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_register_cuda_fuser", &RegisterCudaFuseGraph::registerPass)
       .def(
+          "_jit_clear_cuda_fuser", &RegisterCudaFuseGraph::clearPass)
+      .def(
           "_jit_set_profiling_mode",
           [](bool profiling_flag) {
             bool oldState = getProfilingMode();

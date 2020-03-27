@@ -59,5 +59,11 @@ void clearAllPrePasses() {
   passes.erase(passes.begin(), passes.end());
 }
 
+
+//LEGACY CALL
+RegisterPostPass::RegisterPostPass(GraphPass p){
+  registerPass(p);
+}
+
 } // namespace jit
 } // namespace torch

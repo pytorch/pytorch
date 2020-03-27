@@ -22,6 +22,10 @@ struct TORCH_API RegisterCudaFuseGraph : public PassManager<RegisterCudaFuseGrap
         "CudaFuseGraph is not supported for HIP.");
     PassManager::registerPass(CudaFuseGraph);
   }
+
+  static void clearPass() {
+    PassManager::clearPass();
+  }
 };
 
 } // namespace jit
