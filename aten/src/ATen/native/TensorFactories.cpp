@@ -20,6 +20,7 @@
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <c10/util/Exception.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/native/ComplexHelper.h>
 
 #include <algorithm>
 #include <cctype>
@@ -473,8 +474,14 @@ Tensor rand(IntArrayRef size, const TensorOptions& options) {
   return native::rand(size, nullptr, options);
 }
 
-Tensor rand(IntArrayRef size, Generator* generator, const TensorOptions& options) {
+Tensor rand(IntArrayRef size, Generator generator, const TensorOptions& options) {
   auto result = at::empty(size, options);
+  if (result.is_complex()) {
+    auto float_tensor = at::native::view_complex_as_float(result);
+    float_tensor.uniform_(0, 1, generator);
+    // we want to return complex tensor not underlying float tensor.
+    return result;
+  }
   return result.uniform_(0, 1, generator);
 }
 
@@ -482,8 +489,12 @@ Tensor& rand_out(Tensor& result, IntArrayRef size) {
   return native::rand_out(result, size, nullptr);
 }
 
-Tensor& rand_out(Tensor& result, IntArrayRef size, Generator* generator) {
+Tensor& rand_out(Tensor& result, IntArrayRef size, Generator generator) {
   result.resize_(size);
+  if (result.is_complex()) {
+    auto float_tensor = at::native::view_complex_as_float(result);
+    return float_tensor.uniform_(0, 1, generator);
+  }
   return result.uniform_(0, 1, generator);
 }
 
@@ -504,7 +515,7 @@ Tensor randint(int64_t high, IntArrayRef size, const TensorOptions& options) {
 Tensor randint(
     int64_t high,
     IntArrayRef size,
-    Generator* generator,
+    Generator generator,
     const TensorOptions& options) {
   return native::randint(0, high, size, generator, options);
 }
@@ -521,7 +532,7 @@ Tensor randint(
     int64_t low,
     int64_t high,
     IntArrayRef size,
-    Generator* generator,
+    Generator generator,
     const TensorOptions& options) {
   auto result = at::empty(size, options);
   return result.random_(low, high, generator);
@@ -535,7 +546,7 @@ Tensor& randint_out(
     Tensor& result,
     int64_t high,
     IntArrayRef size,
-    Generator* generator) {
+    Generator generator) {
   result.resize_(size);
   return result.random_(0, high, generator);
 }
@@ -549,7 +560,7 @@ Tensor& randint_out(
     int64_t low,
     int64_t high,
     IntArrayRef size,
-    Generator* generator) {
+    Generator generator) {
   result.resize_(size);
   return result.random_(low, high, generator);
 }
@@ -579,7 +590,7 @@ Tensor randn(IntArrayRef size, const TensorOptions& options) {
   return native::randn(size, nullptr, options);
 }
 
-Tensor randn(IntArrayRef size, Generator* generator, const TensorOptions& options) {
+Tensor randn(IntArrayRef size, Generator generator, const TensorOptions& options) {
   auto result = at::empty(size, options);
   return result.normal_(0, 1, generator);
 }
@@ -588,19 +599,19 @@ Tensor& randn_out(Tensor& result, IntArrayRef size) {
   return native::randn_out(result, size, nullptr);
 }
 
-Tensor& randn_out(Tensor& result, IntArrayRef size, Generator* generator) {
+Tensor& randn_out(Tensor& result, IntArrayRef size, Generator generator) {
   result.resize_(size);
   return result.normal_(0, 1, generator);
 }
 
 Tensor normal(double mean, double std, IntArrayRef size,
-              Generator* generator, const TensorOptions& options) {
+              Generator generator, const TensorOptions& options) {
   auto result = at::empty(size, options);
   return result.normal_(mean, std, generator);
 }
 
 Tensor& normal_out(Tensor& result, double mean, double std,
-                   IntArrayRef size, Generator* generator) {
+                   IntArrayRef size, Generator generator) {
   result.resize_(size);
   return result.normal_(mean, std, generator);
 }
@@ -643,7 +654,7 @@ Tensor randperm(int64_t n, const TensorOptions& options) {
   return native::randperm(n, nullptr, options);
 }
 
-Tensor randperm(int64_t n, Generator* generator, const TensorOptions& options) {
+Tensor randperm(int64_t n, Generator generator, const TensorOptions& options) {
   auto tensor = at::empty(n, options);
   return at::randperm_out(tensor, n, generator);
 }
@@ -652,7 +663,7 @@ Tensor& randperm_out(Tensor& result, int64_t n) {
   return at::randperm_out(result, n, nullptr);
 }
 
-Tensor& randperm_out_cpu(Tensor& result, int64_t n, Generator* generator) {
+Tensor& randperm_out_cpu(Tensor& result, int64_t n, Generator generator) {
   TORCH_CHECK(n >= 0, "n must be non-negative, got", n);
   check_supported_max_int_with_precision(n, result);
   result.resize_({n});
@@ -1021,7 +1032,7 @@ Tensor randn(
 
 Tensor randn(
     IntArrayRef size,
-    Generator* generator,
+    Generator generator,
     optional<DimnameList> names,
     const TensorOptions& options) {
   auto result = at::empty(size, names, options);
@@ -1037,7 +1048,7 @@ Tensor rand(
 
 Tensor rand(
     IntArrayRef size,
-    Generator* generator,
+    Generator generator,
     optional<DimnameList> names,
     const TensorOptions& options) {
   auto result = at::empty(size, names, options);
