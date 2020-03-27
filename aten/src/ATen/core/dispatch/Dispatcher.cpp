@@ -133,26 +133,15 @@ RegistrationHandleRAII Dispatcher::registerDef(FunctionSchema schema) {
 void Dispatcher::checkSchemaCompatibility(const OperatorHandle& op, const FunctionSchema& schema) {
   TORCH_CHECK(op.schema() == schema, "Tried to register multiple operators with the same name and the same overload name but different schemas: ", schema, " vs ", op.schema());
   if (schema.isDefaultAliasAnalysisKind()) {
-    // If the *new* schema is the default alias analysis kind, for BC, we
-    // will accept it.  If we don't accept it, most extensions that override
-    // existing operators will stop working (as they generally did not
-    // specify alias information).  Remove this BC smoothing ASAP, because
-    // if the two incompatible registrations live in the same compilation
-    // unit, the order their static initializers run is unspecified, which
-    // means that you may nondeterministically fail the subsequent test.
+    // [BACKWARDS COMPAT] If the *new* schema is the default alias analysis
+    // kind, for BC, we will accept it.  If we don't accept it, most extensions
+    // that override existing operators will stop working (as they generally did
+    // not specify alias information).
   } else if (op.schema().isDefaultAliasAnalysisKind()) {
-    // If you POST-FACTO specify a non-default alias analysis kind after
-    // we already have a schema for a function, complain loudly about it
-    // (because this new implementation doesn't support merging in this
-    // way).
-    TORCH_CHECK(op.schema().aliasAnalysis() == schema.aliasAnalysis(),
-      "Tried to define the schema for ", toString(op.operator_name()),
-      " multiple times without providing an explicit alias analysis kind at each registration site.  "
-      "This was previously permitted, but is now not allowed.  You should either explicitly specify the "
-      "correct alias analysis kind at each site [",
-      toString(op.schema().isDefaultAliasAnalysisKind() ? schema.aliasAnalysis() : op.schema().aliasAnalysis()),
-      "], or use the new Module::impl() API, which permits you to omit the schema entirely when "
-      "specifying further implementations of an operator");
+    // [BACKWARDS COMPAT] If you POST-FACTO specify a non-default alias analysis
+    // kind after we already have a schema for a function, bong it in for BC
+    // reasons.
+    op.operatorIterator_->op.updateSchemaAliasAnalysis(schema.aliasAnalysis());
   } else {
     TORCH_CHECK(op.schema().aliasAnalysis() == schema.aliasAnalysis(),
       "Tried to define the schema for ", toString(op.operator_name()), " with different alias analysis kinds: ",

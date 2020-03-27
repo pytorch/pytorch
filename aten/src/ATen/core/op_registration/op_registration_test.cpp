@@ -39,12 +39,13 @@ private:
   bool* called_;
 };
 
-TEST(OperatorRegistrationTest, whenRegisteringSameSchemaWithAliasAnalysisAfterRegisteringWithoutAliasAnalysis_thenShouldThrow) {
+TEST(OperatorRegistrationTest, whenRegisteringSameSchemaWithAliasAnalysisAfterRegisteringWithoutAliasAnalysis_thenCanBeCalled) {
   {
     auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<DummyKernel>(c10::DispatchKey::CPUTensorId));
-    expectThrows<c10::Error>([&] {
+    // NB: this is OK right now for BC reasons
+    // expectThrows<c10::Error>([&] {
       auto registrar2 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<DummyKernel>(c10::DispatchKey::XLATensorId).aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION));
-    }, "Tried to define the schema for _test::dummy multiple times without providing an explicit alias analysis kind");
+    // }, "Tried to define the schema for _test::dummy multiple times without providing an explicit alias analysis kind");
   }
 }
 

@@ -82,6 +82,11 @@ public:
   std::list<KernelEntry>::iterator registerKernel(c10::optional<DispatchKey> dispatch_key, KernelFunction kernel, std::unique_ptr<FunctionSchema> inferred_function_schema, std::string debug);
   void deregisterKernel_(c10::optional<DispatchKey> dispatch_key, std::list<KernelEntry>::iterator kernel);
 
+  void updateSchemaAliasAnalysis(AliasAnalysisKind a) {
+    TORCH_INTERNAL_ASSERT(schema_.has_value());
+    schema_->setAliasAnalysis(a);
+  }
+
   std::string dumpState() const;
   void checkInvariants() const;
 
