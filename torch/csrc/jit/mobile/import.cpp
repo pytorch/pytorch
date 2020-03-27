@@ -35,21 +35,26 @@
 // support backward compatibility in future.
 
 namespace c10 {
-//std::string serializeType(const Type &t);
+// std::string serializeType(const Type &t);
 TypePtr parseType(const std::string& pythonStr);
-}
+} // namespace c10
 
 namespace torch {
 namespace jit {
-using caffe2::serialize::PyTorchStreamReader;
 using caffe2::serialize::IStreamAdapter;
+using caffe2::serialize::PyTorchStreamReader;
 using caffe2::serialize::ReadAdapterInterface;
 
 OpCode parseOpCode(const char *str);
 
 IValue expect_field(IValue tup, const std::string& expected_name, size_t entry) {
   auto row = tup.toTuple()->elements().at(entry).toTuple();
-  TORCH_INTERNAL_ASSERT(row->elements().at(0).toStringRef() == expected_name, "Expected ", expected_name, " found " , row->elements().at(0).toStringRef());
+  TORCH_INTERNAL_ASSERT(
+      row->elements().at(0).toStringRef() == expected_name,
+      "Expected ",
+      expected_name,
+      " found ",
+      row->elements().at(0).toStringRef());
   return row->elements().at(1);
 }
 
@@ -92,8 +97,9 @@ void parseMethods(
 
     for (const auto& ins : ins_list) {
       auto ins_item = ins.toTuple()->elements();
-      TORCH_CHECK(ins_item.size() == 3,
-                  "There should be three parts in an instruction.");
+      TORCH_CHECK(
+          ins_item.size() == 3,
+          "There should be three parts in an instruction.");
       OpCode op_code = parseOpCode(ins_item[0].toString()->string().c_str());
       int X = ins_item[1].toInt();
       int N = ins_item[2].toInt();
@@ -103,12 +109,15 @@ void parseMethods(
     std::unordered_set<std::string> unsupported_op_names;
     for (const auto& op : ops_list) {
       auto op_item = op.toTuple()->elements();
-      TORCH_CHECK(op_item.size() == 2,
-                  "There should be two parts in an operator name.");
-      auto op_found = function->append_operator(op_item[0].toString()->string(),
-                           op_item[1].toString()->string());
+      TORCH_CHECK(
+          op_item.size() == 2,
+          "There should be two parts in an operator name.");
+      auto op_found = function->append_operator(
+          op_item[0].toString()->string(), op_item[1].toString()->string());
       if (!op_found) {
-        unsupported_op_names.emplace(op_item[0].toString()->string() + "." + op_item[1].toString()->string());
+        unsupported_op_names.emplace(
+            op_item[0].toString()->string() + "." +
+            op_item[1].toString()->string());
       }
     }
 
@@ -137,18 +146,22 @@ class BytecodeDeserializer final {
   mobile::Module deserialize(c10::optional<at::Device> device);
 
  private:
-  c10::IValue readArchive(const std::string& archive_name,
-    std::shared_ptr<mobile::CompilationUnit> mcu);
+  c10::IValue readArchive(
+      const std::string& archive_name,
+      std::shared_ptr<mobile::CompilationUnit> mcu);
   std::shared_ptr<CompilationUnit> compilation_unit_;
   std::unordered_set<std::string> imported_libs_;
   std::unique_ptr<PyTorchStreamReader> reader_;
   c10::optional<at::Device> device_;
 };
 
-BytecodeDeserializer::BytecodeDeserializer(std::unique_ptr<PyTorchStreamReader> reader)
-    : compilation_unit_(std::make_shared<CompilationUnit>()), reader_(std::move(reader)) {}
+BytecodeDeserializer::BytecodeDeserializer(
+    std::unique_ptr<PyTorchStreamReader> reader)
+    : compilation_unit_(std::make_shared<CompilationUnit>()),
+      reader_(std::move(reader)) {}
 
-mobile::Module BytecodeDeserializer::deserialize(c10::optional<at::Device> device) {
+mobile::Module BytecodeDeserializer::deserialize(
+    c10::optional<at::Device> device) {
   device_ = device;
   auto mcu = std::make_shared<mobile::CompilationUnit>();
   auto bvals = readArchive("bytecode", mcu).toTuple()->elements();
@@ -157,7 +170,8 @@ mobile::Module BytecodeDeserializer::deserialize(c10::optional<at::Device> devic
   return mobile::Module(readArchive("data", mcu).toObject(), mcu);
 }
 
-c10::IValue BytecodeDeserializer::readArchive(const std::string& archive_name,
+c10::IValue BytecodeDeserializer::readArchive(
+    const std::string& archive_name,
     std::shared_ptr<mobile::CompilationUnit> mcu) {
   std::stringstream picklename;
   picklename << archive_name << ".pkl";
@@ -230,8 +244,12 @@ c10::IValue BytecodeDeserializer::readArchive(const std::string& archive_name,
     return std::get<0>(reader_->getRecord(ss.str()));
   };
 
-  Unpickler unpickler(reader, std::move(class_resolver),
-                      std::move(obj_loader), std::move(read_record), device_);
+  Unpickler unpickler(
+      reader,
+      std::move(class_resolver),
+      std::move(obj_loader),
+      std::move(read_record),
+      device_);
   return unpickler.parse_ivalue();
 }
 
@@ -240,8 +258,7 @@ c10::IValue BytecodeDeserializer::readArchive(const std::string& archive_name,
 mobile::Module _load_for_mobile(
     std::istream& in,
     c10::optional<at::Device> device) {
-  std::unique_ptr<IStreamAdapter> rai =
-      std::make_unique<IStreamAdapter>(&in);
+  std::unique_ptr<IStreamAdapter> rai = std::make_unique<IStreamAdapter>(&in);
   auto module = _load_for_mobile(std::move(rai), device);
   return module;
 }

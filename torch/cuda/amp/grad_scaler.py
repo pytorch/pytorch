@@ -1,6 +1,7 @@
 import torch
 from collections import defaultdict
 from torch._six import container_abcs
+import warnings
 
 
 class _MultiDeviceReplicator(object):
@@ -29,7 +30,7 @@ class GradScaler(object):
     * ``scaler.step(optimizer)`` safely unscales gradients and calls ``optimizer.step()``.
     * ``scaler.update()`` updates ``scaler``'s scale factor.
 
-    Typical use::
+    Example::
 
         # Creates a GradScaler once at the beginning of training.
         scaler = GradScaler()
@@ -40,22 +41,23 @@ class GradScaler(object):
                 output = model(input)
                 loss = loss_fn(output, target)
 
-                # Scales the loss, and calls backward() on the scaled loss to create scaled gradients.
+                # Scales loss.  Calls backward() on scaled loss to create scaled gradients.
                 scaler.scale(loss).backward()
 
-                # scaler.step() first unscales the gradients of the optimizer's assigned params.
-                # If these gradients do not contain infs or NaNs, optimizer.step() is then called,
+                # scaler.step() first unscales gradients of the optimizer's params.
+                # If gradients don't contain infs/NaNs, optimizer.step() is then called,
                 # otherwise, optimizer.step() is skipped.
                 scaler.step(optimizer)
 
                 # Updates the scale for next iteration.
                 scaler.update()
 
-    See the :ref:`Gradient Scaling Examples<gradient-scaling-examples>` for usage in more complex cases like
-    gradient clipping, gradient penalty, and multiple losses/optimizers.
+    See the :ref:`Automatic Mixed Precision examples<amp-examples>` for usage
+    (along with autocasting) in more complex cases like gradient clipping, gradient penalty,
+    and multiple losses/optimizers.
 
     ``scaler`` dynamically estimates the scale factor each iteration.  To minimize gradient underflow,
-    a large scale factor should be used.  However, ``torch.float16`` values can "overflow" (become inf or NaN) if
+    a large scale factor should be used.  However, ``float16`` values can "overflow" (become inf or NaN) if
     the scale factor is too large.  Therefore, the optimal scale factor is the largest factor that can be used
     without incurring inf or NaN gradient values.
     ``scaler`` approximates the optimal scale factor over time by checking the gradients for infs and NaNs during every
@@ -94,8 +96,13 @@ class GradScaler(object):
                  backoff_factor=0.5,
                  growth_interval=2000,
                  enabled=True):
-        self._enabled = enabled
-        if enabled:
+        if enabled and not torch.cuda.is_available():
+            warnings.warn("torch.cuda.amp.GradScaler is enabled, but CUDA is not available.  Disabling.")
+            self._enabled = False
+        else:
+            self._enabled = enabled
+
+        if self._enabled:
             assert growth_factor > 1.0, "The growth factor must be > 1.0."
             assert backoff_factor < 1.0, "The backoff factor must be < 1.0."
 
