@@ -14355,7 +14355,6 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         # TODO: why not simulate math.sigmoid like with rsqrt?
         inputValues = [-1000, -1, 0, 0.5, 1, 2, 1000]
         expectedOutput = [0.0000, 0.2689, 0.5, 0.6225, 0.7311, 0.8808, 1.000]
-        bf16ExpectedOutput = [0.0000, 0.2695, 0.5000, 0.6211, 0.7305, 0.8828, 1.0000]
 
         self.assertEqual(torch.tensor(inputValues, dtype=dtype, device=device).sigmoid(),
                          torch.tensor(expectedOutput, dtype=dtype, device=device))
