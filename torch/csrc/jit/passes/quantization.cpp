@@ -744,7 +744,7 @@ bool matchArgPattern(
 bool isBiasOfConvOrLinear(Value* v) {
   bool result = matchArgPattern(
       v,
-      AtenFuncArgs({{"conv2d", 2}, {"linear", 2}}),
+      AtenFuncArgs({{"conv2d", 2}, {"conv3d", 2}, {"linear", 2}}),
       CallFuncArgs({{"linear", 3}}));
   return result;
 }
@@ -752,7 +752,7 @@ bool isBiasOfConvOrLinear(Value* v) {
 bool isWeightOfConvOrLinear(Value* v) {
   bool result = matchArgPattern(
       v,
-      AtenFuncArgs({{"conv2d", 1}, {"linear", 1}}),
+      AtenFuncArgs({{"conv2d", 1}, {"conv3d", 1}, {"linear", 1}}),
       CallFuncArgs({{"linear", 2}}));
   return result;
 }
@@ -2814,7 +2814,8 @@ void FoldQuantizedPrepackingOps(Module& module) {
   auto filter_fn = [](const Node* n) -> bool {
     return (
         (n->kind() == Symbol::fromQualString("quantized::linear_prepack")) ||
-        n->kind() == Symbol::fromQualString("quantized::conv2d_prepack"));
+        n->kind() == Symbol::fromQualString("quantized::conv2d_prepack") ||
+        n->kind() == Symbol::fromQualString("quantized::conv3d_prepack"));
   };
   PrePackingOpsFolder(module, filter_fn, "quantized");
 }
