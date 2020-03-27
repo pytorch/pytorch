@@ -14,7 +14,7 @@ from torch.quantization import \
     default_dynamic_qconfig, per_channel_dynamic_qconfig, HistogramObserver, MinMaxObserver, \
     PerChannelMinMaxObserver, RecordingObserver, MovingAverageMinMaxObserver, \
     MovingAveragePerChannelMinMaxObserver, QuantWrapper, default_eval_fn, \
-    float16_dynamic_qconfig
+    float16_dynamic_qconfig, MinMaxDynamicQuantObserver
 
 from torch.quantization import QConfig
 from torch.quantization import default_histogram_observer
@@ -1353,6 +1353,26 @@ class ObserverTest(QuantizationTestCase):
             self.assertEqual(myobs.max_val, loaded_obs.max_val)
             self.assertEqual(myobs.calculate_qparams(), loaded_obs.calculate_qparams())
 
+
+    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=2, max_dims=4,
+                                              min_side=1, max_side=10),
+                       qparams=hu.qparams()),
+           reduce_range=st.booleans())
+    def test_per_tensor_dynamic_quant_observers(self, X, reduce_range):
+
+        X, (scale, zero_point, torch_type) = X
+        x = torch.from_numpy(X)
+
+        obs = MinMaxDynamicQuantObserver(dtype=torch.quint8, reduce_range=reduce_range)
+
+        result = obs(x)
+        qparams = obs.calculate_qparams()
+        ref = torch._choose_qparams_per_tensor(x, reduce_range)
+
+        self.assertEqual(ref[0], qparams[0])
+        self.assertEqual(ref[1], qparams[1])
+
+
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
            qscheme=st.sampled_from((torch.per_channel_affine, torch.per_channel_symmetric)),
            ch_axis=st.sampled_from((0, 1, 2, 3)), reduce_range=st.booleans())
@@ -1448,7 +1468,7 @@ class ObserverTest(QuantizationTestCase):
             self.assertEqual(myobs.calculate_qparams(), loaded_obs.calculate_qparams())
 
     def test_observer_scriptable(self):
-        obs_list = [MinMaxObserver(), MovingAverageMinMaxObserver()]
+        obs_list = [MinMaxObserver(), MovingAverageMinMaxObserver(), MinMaxDynamicQuantObserver()]
         for obs in obs_list:
             scripted = torch.jit.script(obs)
 
