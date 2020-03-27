@@ -104,7 +104,7 @@ MAYBE_GLOBAL void test_std_conversion() {
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
 template<typename scalar_t>
-C10_HOST_DEVICE void test_construct_from_thrust() {
+void test_construct_from_thrust() {
   constexpr scalar_t num1 = scalar_t(1.23);
   constexpr scalar_t num2 = scalar_t(4.56);
   ASSERT_EQ(c10::complex<scalar_t>(thrust::complex<scalar_t>(num1, num2)).real(), num1);
@@ -112,7 +112,7 @@ C10_HOST_DEVICE void test_construct_from_thrust() {
 }
 #endif
 
-C10_HOST_DEVICE void test_thrust_conversion() {
+TEST(TestConstructors, FromThrust) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
   // TODO(@zasdfgbnm): thrust::complex only support float and double, how do we handle c10::Half?
   test_construct_from_thrust<float>();
@@ -180,7 +180,7 @@ MAYBE_GLOBAL void test_assign_std() {
 }
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
-C10_HOST_DEVICE std::tuple<c10::complex<double>, c10::complex<float>> one_two_thrust() {
+std::tuple<c10::complex<double>, c10::complex<float>> one_two_thrust() {
   thrust::complex<float> src(1, 2);
   c10::complex<double> ret0;
   c10::complex<float> ret1;
@@ -189,7 +189,7 @@ C10_HOST_DEVICE std::tuple<c10::complex<double>, c10::complex<float>> one_two_th
 }
 #endif
 
-C10_HOST_DEVICE void test_assign_thrust() {
+TEST(TestAssignment, FromThrust) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
   auto tup = one_two_thrust();
   ASSERT_EQ(std::get<c10::complex<double>>(tup).real(), double(1));
@@ -448,7 +448,7 @@ void test_io_() {
   ASSERT_EQ(a, c10::complex<scalar_t>(3, 4));
 }
 
-void test_io() {
+TEST(TestIO, All) {
   test_io_<c10::Half>();
   test_io_<float>();
   test_io_<double>();
@@ -484,7 +484,7 @@ void test_values_() {
   ASSERT_LT(std::abs(c10::polar(scalar_t(1), scalar_t(PI / 2)) - c10::complex<scalar_t>(0, 1)), 1e-6);
 }
 
-void test_values() {
+TEST(TestStd, BasicFunctions) {
   ASSERT_EQ(std::abs(c10::complex<c10::Half>(3, 4)), c10::Half(5));
   // FIXME: ASSERT_LT(std::abs(std::arg(c10::complex<c10::Half>(0, 1)) - PI / 2), 1e-6);
   // TODO(@zasdfgbnm): thrust::complex only support float and double, how do we handle c10::Half?
@@ -493,10 +493,3 @@ void test_values() {
 }
 
 } // namespace test_std
-
-void run_all_host_tests() {
-  constructors::test_thrust_conversion();
-  assignment::test_assign_thrust();
-  io::test_io();
-  test_std::test_values();
-}

@@ -1,9 +1,5 @@
 #include <c10/test/util/complex_test_common.h>
 
-TEST(HostTests, all) {
-  run_all_host_tests();
-}
-
 __global__ void test_thrust_kernel() {
   // thrust conversion
   {
@@ -51,10 +47,4 @@ TEST(DeviceTests, StdFunctions) {
   test_std_functions_kernel<<<1, 1>>>();
   cudaDeviceSynchronize();
   ASSERT_EQ(cudaGetLastError(), cudaSuccess);
-}
-
-int main() {
-  HostTests_all();
-  DeviceTests_ThrustConversion();
-  DeviceTests_StdFunctions();
 }
