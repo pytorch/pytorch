@@ -40,6 +40,7 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   c10::optional<Device> uncheckedGetDevice() const noexcept {
     int device;
     auto err = cudaGetDevice(&device);
+    C10_CUDA_CHECK_WARN(err);
     if (err != cudaSuccess) {
       return c10::nullopt;
     }
