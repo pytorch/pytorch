@@ -1,10 +1,10 @@
 #pragma once
 
+#include <caffe2/serialize/inline_container.h>
+#include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/serialization/pickler.h>
-#include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/onnx/onnx.h>
-#include <caffe2/serialize/inline_container.h>
 
 #include <ostream>
 
@@ -25,7 +25,9 @@ TORCH_API std::tuple<std::string, RawDataExportMap> export_onnx(
     const std::shared_ptr<Graph>& graph,
     const std::map<std::string, at::Tensor>& initializers,
     int64_t onnx_opset_version,
-    const std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>& dynamic_axes,
+    const std::unordered_map<
+        std::string,
+        std::unordered_map<int64_t, std::string>>& dynamic_axes,
     bool defer_weight_export = false,
     ::torch::onnx::OperatorExportTypes operator_export_type =
         ::torch::onnx::OperatorExportTypes::ONNX,
@@ -80,8 +82,7 @@ TORCH_API void writeArchiveAndTensors(
 
 // Surrounding system can install an additional hook to produce extra files
 // with metadata based on environment every time a module is serialized.
-using ExportModuleExtraFilesHook =
-    std::function<ExtraFilesMap(const Module&)>;
+using ExportModuleExtraFilesHook = std::function<ExtraFilesMap(const Module&)>;
 TORCH_API void SetExportModuleExtraFilesHook(ExportModuleExtraFilesHook hook);
 
 // Returns a list of names of all operators in the module and its submodules.

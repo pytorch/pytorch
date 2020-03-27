@@ -1961,7 +1961,7 @@
   variants: function, method
   dispatch:
     CPU: mm_cpu
-    CUDA: legacy::cuda::_th_mm
+    CUDA: mm_cuda
     SparseCPU: _sparse_mm
     SparseCUDA: _sparse_mm
   supports_named_tensor: True
@@ -1969,7 +1969,7 @@
 - func: mm.out(Tensor self, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: mm_cpu_out
-    CUDA: legacy::cuda::_th_mm_out
+    CUDA: mm_out_cuda
     SparseCPU: _sparse_mm_out
     SparseCUDA: _sparse_mm_out
   supports_named_tensor: True
