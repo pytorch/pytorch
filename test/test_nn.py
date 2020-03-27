@@ -9388,7 +9388,6 @@ class TestNNDeviceType(NNTestCase):
             # just to make sure this does not crash
         issue_24823_3()
 
-
     @largeCUDATensorTest('12GB')
     def test_conv_transposed_large(self, device):
         dtype = torch.half if self.device_type == 'cuda' else torch.float
