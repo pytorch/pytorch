@@ -79,7 +79,7 @@ void gemv_fast_path<float>(char *trans, int *m, int *n, float *alpha, float *a, 
 }
 #endif // AT_BLAS_ENABLED
 
-#define INSTANTIATE(scalar_t, _)                                                                                                                                                  \	
+#define INSTANTIATE(scalar_t, _)                                                                                                                                                  \
 template bool scal_use_fast_path<scalar_t>(int64_t n, int64_t incx);                                                                                                              \
 template bool gemv_use_fast_path<scalar_t>(int64_t m, int64_t n, int64_t lda, int64_t incx, int64_t incy);                                                                        \
 template void gemv_fast_path<scalar_t>(char *trans, int *m, int *n, scalar_t *alpha, scalar_t *a, int *lda, scalar_t *x, int *incx, scalar_t *beta, scalar_t *y, int *incy);      \
