@@ -630,29 +630,6 @@ graph(%self, %a, %b, %inplace):
   };
 };
 
-std::vector<Node*> getCallMethods(Value* v) {
-  Graph* g = v->owningGraph();
-  std::stack<Block*> pending_blocks;
-  std::vector<Node*> call_nodes;
-  pending_blocks.push(g->block());
-
-  while(!pending_blocks.empty()) {
-    Block* b = pending_blocks.top();
-    pending_blocks.pop();
-
-    for(auto n : b->nodes()) {
-      if (n->kind() == prim::CallMethod) {
-        call_nodes.push_back(n);
-      }
-
-      for (auto next_b : n->blocks()) {
-        pending_blocks.push(next_b);
-      }
-    }
-  }
-  return call_nodes;
-}
-
 // Check if `use` is an aten function of name `func_name` and if value
 // `v` is the nth argument of the function
 bool isAtenFuncNthArg(
@@ -672,15 +649,6 @@ bool isCallFunctionNthArg(
     int n) {
   return use->kind() == prim::CallFunction &&
       getFuncName(use->inputs()[0]) == func_name && v == use->inputs().at(n);
-}
-
-bool isCallMethodNthArg(
-    Value* v,
-    Node* use,
-    const std::string& func_name,
-    int n) {
-  return use->kind() == prim::CallMethod &&
-      use->s(attr::name) == func_name && v == use->inputs().at(n);
 }
 
 struct FuncArg {
@@ -713,21 +681,6 @@ bool matchArgPattern(
   return false;
 }
 
-bool matchCallMethodPattern(
-  Value* v,
-  const CallFuncArgs& call_func_args,
-  const std::vector<Node*>& call_methods) {
-    for (const auto& node : call_methods) {
-      for (const auto& arg : call_func_args) {
-        if (isCallMethodNthArg(
-          v, node, arg.func_name, arg.arg_index)) {
-            return true;
-          }
-      }
-    }
-    return false;
-  }
-
 bool isBiasOfConvOrLinear(Value* v) {
   bool result = matchArgPattern(
       v,
@@ -742,8 +695,28 @@ bool isWeightOfConvOrLinear(Value* v) {
       AtenFuncArgs({{"conv2d", 1}, {"linear", 1}}),
       CallFuncArgs({{"linear", 2}}));
 
-  const auto& call_methods = getCallMethods(v);
-  result |= matchCallMethodPattern(v, CallFuncArgs({{"_conv_forward", 2}}), call_methods);
+  return result;
+}
+
+bool checkValueIsWeight(Module& module, Graph* graph, Value* v) {
+  if (isWeightOfConvOrLinear(v)) {
+    return true;
+  }
+  bool result = false;
+  auto* self = graph->inputs()[0]; 
+  for (const Use& u : v->uses()) {
+    Node* n = u.user;
+    if (n->kind() == prim::CallMethod) {
+      auto m = getInvokedModule(module, n, self);
+      std::shared_ptr<Graph> g = m.get_method(n->s(attr::name)).graph();
+
+      for (int i = 0; i < n->inputs().size(); ++i) {
+        if (n->inputs()[i] == v) {
+          result |= checkValueIsWeight(m, g.get(), g->inputs()[i]);
+        }
+      }
+    }
+  }
   return result;
 }
 
@@ -1304,12 +1277,12 @@ void insertDeQuantCall(Graph* graph,
   }
 }
 
-
 void insertQuantDeQuantCall(
     Value* self,
     Node* observer,
     bool is_per_channel,
     const std::vector<std::string>& qparam_names,
+    Module& module,
     bool is_dynamic=false) {
   Graph* g = observer->owningGraph();
   // Original value that is observed
@@ -1329,13 +1302,14 @@ void insertQuantDeQuantCall(
     quantize_func = "quantize_per_tensor";
   }
   Node *quant, *choose_qparams;
-  if (is_dynamic && !isWeightOfConvOrLinear(v)) {
+  
+  if (is_dynamic && !checkValueIsWeight(module, g, v)) {
     std::string choose_qparams_func = "_choose_qparams_per_tensor";
     auto reduce_range = g->insertConstant(false);
-    choose_qparams = g->create(at::Symbol::aten(choose_qparams_func), v, 2);
-    choose_qparams->addInput(reduce_range);
+    // choose_qparams_per_tensor has 2 outputs, (scale, zero_point).
+    choose_qparams = g->create(at::Symbol::aten(choose_qparams_func), {v, reduce_range}, 2);
 
-    choose_qparams->output(0)->setDebugName(v->debugName() + ".scale_");
+    choose_qparams->output(0)->setDebugName(v->debugName() + ".scale");
     choose_qparams->output(0)->setType(FloatType::get());
     choose_qparams->output(1)->setDebugName(v->debugName() + ".zero_point");
     choose_qparams->output(1)->setType(IntType::get());
@@ -1577,7 +1551,7 @@ void InsertQuantDeQuantHelper::quantizeTensors(
       module.register_attribute(qparam_name, qparam.type(), qparam);
       qparam_names.push_back(qparam_name);
     }
-    insertQuantDeQuantCall(self, n, isPerChannel(qscheme), qparam_names, is_dynamic);
+    insertQuantDeQuantCall(self, n, isPerChannel(qscheme), qparam_names, module, is_dynamic);
   }
 }
 
@@ -1770,7 +1744,6 @@ void InsertQuantDeQuantHelper::run(
   GRAPH_DUMP("Before Quantize Tensors:", graph);
   Value* self = graph->inputs()[0];
   quantizeTensors(module, graph.get(), self);
-
   GRAPH_DUMP("After Quantize Tensors:", graph);
 }
 
