@@ -129,13 +129,14 @@ ProcessGroupAgent::ProcessGroupAgent(
       pg_->getRank());
 
   // tmp vector to sort names in rank's order
-  std::vector<std::string> tmpWorkerIds(pg_->getSize());
+  const auto worldSize = pg_->getSize();
+  std::vector<std::string> tmpWorkerIds(worldSize);
   for (auto& entry : nameMap_) {
     tmpWorkerIds[entry.second] = entry.first;
   }
 
-  allWorkerInfo_.reserve(pg_->getSize());
-  for (worker_id_t rank = 0; rank < tmpWorkerIds.size(); ++rank) {
+  allWorkerInfo_.reserve(worldSize);
+  for (worker_id_t rank = 0; rank < worldSize; ++rank) {
     allWorkerInfo_.emplace_back(std::move(tmpWorkerIds[rank]), rank);
   }
 }
