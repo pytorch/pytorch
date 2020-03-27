@@ -5,11 +5,12 @@
 
 namespace at { namespace native {
 namespace {
-  void scatter_cuda_(Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
+  void scatter_cuda_(Tensor& self, int dim, const Tensor& index, const Tensor& src) {
     int64_t numel = index.numel();
     int64_t block = 512;
     int64_t grid = std::min<int64_t>((numel + block - 1) / block, 2048L);
-
+    dim = at::maybe_wrap_dim(dim, self);
+    
     if (numel > 0) {
       AT_DISPATCH_ALL_TYPES_AND2(ScalarType::Bool,
         ScalarType::Half,
@@ -52,10 +53,11 @@ namespace {
     }
   }
 
-  void scatter_fill_cuda_(Tensor& self, int64_t dim, const Tensor& index, Scalar value) {
+  void scatter_fill_cuda_(Tensor& self, int dim, const Tensor& index, Scalar value) {
     int64_t numel = index.numel();
     int64_t block = 512;
     int64_t grid = std::min<int64_t>((numel + block - 1) / block, 2048L);
+    dim = at::maybe_wrap_dim(dim, self);
 
     if (numel > 0) {
       AT_DISPATCH_ALL_TYPES_AND2(ScalarType::Bool,
