@@ -1474,7 +1474,7 @@ Tensor trace(const Tensor& self) {
     int64_t i = 0;
     int64_t t_stride_0, t_stride_1, t_diag_size;
 
-    TORCH_CHECK(self.dim() == 2, "trace: expected a matrix, but got tensor with dim %d", self.dim());
+    TORCH_CHECK(self.dim() == 2, "trace: expected a matrix, but got tensor with dim ", self.dim());
 
     t_stride_0 = self.stride(0);
     t_stride_1 = self.stride(1);
