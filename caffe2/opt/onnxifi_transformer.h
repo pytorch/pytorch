@@ -16,6 +16,10 @@ namespace onnx {
 class OnnxExporter;
 }
 
+// Split SparseLengthsSumSparse into SparseLengthsSumSparseLookup +
+// SparseLengthsSum
+CAFFE2_API void splitSparseLengthsSumSparse(NetDef* net, const Workspace& ws);
+
 struct OnnxifiTransformerOptions final : public BackendTransformOptions {
   explicit OnnxifiTransformerOptions() : BackendTransformOptions() {}
 
