@@ -1114,6 +1114,7 @@ void TensorExprKernel::lowerToBackend(BackendType backendType) {
 
   l.prepareForCodegen();
   Stmt* stmt = l.root_stmt();
+  // Arithmetic Simplification.
   stmt = IRSimplifier::simplify(stmt);
 
   // Set up formal params (inputs, then outputs) for kernel.

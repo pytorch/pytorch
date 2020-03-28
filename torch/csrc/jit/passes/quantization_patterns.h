@@ -186,7 +186,8 @@ graph(%a_quant, %b_quant, %alpha, %scale, %zero_point, %dtype):
   // quantized::add_scalar
   std::string add_scalar = R"(
 graph(%a_quant, %b_scalar, %alpha):
-         %r = aten::add(%a_quant, %b_scalar, %alpha)
+         %a_dequant = aten::dequantize(%a_quant)
+         %r = aten::add(%a_dequant, %b_scalar, %alpha)
          return (%r) )";
 
   std::string quantized_add_scalar = R"(
@@ -207,7 +208,8 @@ graph(%a_quant, %b_scalar, %alpha):
   // quantized::add_scalar_out
   std::string add_scalar_out = R"(
 graph(%a_quant, %b_scalar, %alpha):
-         %r = aten::add_(%a_quant, %b_scalar, %alpha)
+         %a_dequant = aten::dequantize(%a_quant)
+         %r = aten::add_(%a_dequant, %b_scalar, %alpha)
          return (%r) )";
 
   std::string quantized_add_scalar_out = R"(
