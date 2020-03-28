@@ -72,9 +72,9 @@ if(APPLE)
   set(CMAKE_FIND_APPBUNDLE LAST)
 
   # Get clang version on macOS
-  EXECUTE_PROCESS( COMMAND ${CMAKE_CXX_COMPILER} --version OUTPUT_VARIABLE clang_full_version_string )
+  execute_process( COMMAND ${CMAKE_CXX_COMPILER} --version OUTPUT_VARIABLE clang_full_version_string )
   string(REGEX REPLACE "Apple LLVM version ([0-9]+\\.[0-9]+).*" "\\1" CLANG_VERSION_STRING ${clang_full_version_string})
-  MESSAGE( STATUS "CLANG_VERSION_STRING:         " ${CLANG_VERSION_STRING} )
+  message( STATUS "CLANG_VERSION_STRING:         " ${CLANG_VERSION_STRING} )
 
 
   # RPATH stuff
