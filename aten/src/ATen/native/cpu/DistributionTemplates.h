@@ -239,8 +239,14 @@ struct NormalKernel {
 // ==================================================== Uniform =======================================================
 
 template<typename RNG>
-void uniform_kernel(TensorIterator& iter, double from, double to, RNG generator) {
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "uniform_kernel_cpu", [&]() {
+void uniform_kernel(TensorIterator& iter, double from_, double to_, RNG generator) {
+  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Half, iter.dtype(), "uniform_kernel_cpu", [&]() {
+    TORCH_CHECK((to_ - from_) <= std::numeric_limits<scalar_t>::max(),
+          "uniform_ expects to-from <= std::numeric_limits<", toString(iter.dtype()),
+          ">::max(), but found to=", to_, " and from=", from_,
+          " which result in to-from to exceed the limit");
+    auto from = static_cast<scalar_t>(from_);
+    auto to = static_cast<scalar_t>(to_);
     std::lock_guard<std::mutex> lock(generator->mutex_);
     at::uniform_real_distribution<scalar_t> uniform(static_cast<scalar_t>(from), static_cast<scalar_t>(to));
     cpu_serial_kernel(iter, [&uniform, generator]() -> scalar_t {

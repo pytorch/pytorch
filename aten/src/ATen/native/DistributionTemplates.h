@@ -266,6 +266,8 @@ Tensor normal_impl(const Tensor& mean, const Tensor& std, Generator gen) {
 
 template<template<typename> class uniform_kernel, typename RNG>
 at::Tensor& uniform_impl_(at::Tensor& self, double from, double to, at::Generator generator) {
+  TORCH_CHECK(from <= to,
+    "uniform_ expects to return a [from, to) range, but found from=", from, " > to=", to);
   auto iter = at::TensorIterator::nullary_op(self);
   uniform_kernel<RNG>()(iter, from, to, generator);
   return self;

@@ -26,7 +26,7 @@ from torch.testing._internal.common_utils import TestCase, iter_indices, TEST_NU
     TEST_LIBROSA, TEST_WITH_ROCM, run_tests, skipIfNoLapack, suppress_warnings, \
     IS_WINDOWS, PY3, NO_MULTIPROCESSING_SPAWN, do_test_dtypes, do_test_empty_full, \
     IS_SANDCASTLE, load_tests, slowTest, skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, \
-    BytesIOContext, skipIfRocm
+    BytesIOContext, skipIfRocm, numpy_dtype
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
     skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm, skipCUDAIfNotRocm, onlyCUDA, onlyCPU, \
@@ -9857,6 +9857,69 @@ class TestTorchDeviceType(TestCase):
         else:
             helper(self, device, dtype, lambda x: x, lambda t: t, lambda mean: mean)
 
+    @dtypes(torch.float, torch.double, torch.half)
+    @dtypesIfCUDA(torch.float, torch.double, torch.half, torch.bfloat16)
+    def test_uniform_from_to(self, device, dtype):
+        size = 2000
+        alpha = 0.1
+
+        float_min = torch.finfo(torch.float).min
+        float_max = torch.finfo(torch.float).max
+        double_min = torch.finfo(torch.double).min
+        double_max = torch.finfo(torch.double).max
+
+        if dtype == torch.bfloat16:
+            dtype_min = -3.389531389251535e+38
+            dtype_max = 3.389531389251535e+38
+        else:
+            dtype_min = torch.finfo(dtype).min
+            dtype_max = torch.finfo(dtype).max
+
+        values = [
+            double_min, float_min,
+            -42, 0, 42,
+            float_max, double_max
+        ]
+
+        for from_ in values:
+            for to_ in values:
+                t = torch.empty(size, dtype=dtype, device=device)
+                if to_ >= from_:
+                    range_ = to_ - from_
+                    if range_ <= dtype_max:
+                        if from_ >= dtype_min and to_ <= dtype_max:
+                            t.uniform_(from_, to_)
+                            if not dtype == torch.bfloat16 and not (dtype == torch.half and device == 'cpu') and not torch.isnan(t).all():
+                                delta = alpha * range_
+                                double_t = t.to(torch.double)
+                                if range_ == 0:
+                                    self.assertTrue(double_t.min() == from_)
+                                    self.assertTrue(double_t.max() == to_)
+                                elif dtype == torch.half:
+                                    self.assertTrue(from_ <= double_t.min() <= (from_ + delta))
+                                    self.assertTrue((to_ - delta) <= double_t.max() <= to_)
+                                else:
+                                    self.assertTrue(from_ <= double_t.min() <= (from_ + delta))
+                                    self.assertTrue((to_ - delta) <= double_t.max() < to_)
+                        elif device == 'cpu':
+                            self.assertRaisesRegex(
+                                RuntimeError,
+                                "Expected b_in-a_in",
+                                lambda: t.uniform_(from_, to_)
+                            )
+                    else:
+                        self.assertRaisesRegex(
+                            RuntimeError,
+                            "uniform_ expects to-from",
+                            lambda: t.uniform_(from_, to_)
+                        )
+                else:
+                    self.assertRaisesRegex(
+                        RuntimeError,
+                        "uniform_ expects to return",
+                        lambda: t.uniform_(from_, to_)
+                    )
+
     @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
     def test_randn(self, device, dtype):
         torch.manual_seed(123456)
@@ -10989,6 +11052,36 @@ class TestTorchDeviceType(TestCase):
         x = torch.zeros(2, 3, device=device, dtype=dtype)
         y = torch.linspace(0, 3, 4, out=x.narrow(1, 1, 2), dtype=dtype)
         self.assertEqual(x, torch.tensor(((0, 0, 1), (0, 2, 3)), device=device, dtype=dtype), 0)
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @precisionOverride({torch.float: 1e-8, torch.double: 1e-10})
+    @dtypes(torch.float, torch.double)
+    def test_linspace_vs_numpy(self, device, dtype):
+        start = -0.0316082797944545745849609375
+        end = .0315315723419189453125
+
+        for steps in [1, 2, 3, 5, 11, 256, 257, 2**22]:
+            t = torch.linspace(start, end, steps, device=device, dtype=dtype)
+            a = np.linspace(start, end, steps, dtype=numpy_dtype(dtype))
+            t = t.cpu()
+            self.assertEqual(t, torch.from_numpy(a))
+            self.assertTrue(t[0] == a[0])
+            self.assertTrue(t[steps - 1] == a[steps - 1])
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @precisionOverride({torch.float: 1e-6, torch.double: 1e-10})
+    @dtypes(torch.float, torch.double)
+    def test_logspace_vs_numpy(self, device, dtype):
+        start = -0.0316082797944545745849609375
+        end = .0315315723419189453125
+
+        for steps in [1, 2, 3, 5, 11, 256, 257, 2**22]:
+            t = torch.logspace(start, end, steps, device=device, dtype=dtype)
+            a = np.logspace(start, end, steps, dtype=numpy_dtype(dtype))
+            t = t.cpu()
+            self.assertEqual(t, torch.from_numpy(a))
+            self.assertEqual(t[0], a[0])
+            self.assertEqual(t[steps - 1], a[steps - 1])
 
     @largeCUDATensorTest('16GB')
     def test_range_factories_64bit_indexing(self, device):
@@ -15358,8 +15451,33 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     # NumPy has the same behavior.
     @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
     def test_float_to_int_undefined_conversion(self, device, dtype):
-        t = torch.tensor((-3.40282e+38, 3.40282e+38), device=device, dtype=torch.float)
+        min = torch.finfo(torch.float).min
+        max = torch.finfo(torch.float).max
+        t = torch.tensor((min, max), device=device, dtype=torch.float)
         self.assertEqual(t.to(dtype).dtype, dtype)
+
+    # Note: CUDA will fail this test on most dtypes, often dramatically.
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @onlyCPU
+    @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
+    def test_float_to_int_conversion_precision(self, device, dtype):
+        min = np.finfo(np.float32).min
+        max = np.finfo(np.float32).max
+        t = torch.tensor((float('-inf'), min, max, float('inf'), float('nan')), device=device, dtype=torch.float)
+        a = np.array((float('-inf'), min, max, float('inf'), float('nan')), dtype=np.float32)
+
+        torch_to_np = {
+            torch.bool  : np.bool,
+            torch.uint8 : np.uint8,
+            torch.int8  : np.int8,
+            torch.int16 : np.int16,
+            torch.int32 : np.int32,
+            torch.int64 : np.int64
+        }
+
+        torch_result = t.to(dtype)
+        numpy_result = torch.from_numpy(a.astype(torch_to_np[dtype]))
+        self.assertEqual(torch_result, numpy_result)
 
 
     @onlyOnCPUAndCUDA

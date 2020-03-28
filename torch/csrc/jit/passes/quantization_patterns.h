@@ -2,12 +2,23 @@
 
 #include <string>
 #include <unordered_map>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/ir/subgraph_matcher.h>
+#include <torch/csrc/jit/passes/subgraph_rewrite.h>
 
 namespace torch {
 namespace jit {
 
-std::unordered_map<std::string, std::string>
-quant_fusion_pattern_and_replacements() {
+struct QuantFusionInfo {
+  std::string quantized_op_name;
+  std::string pattern;
+  std::string replacement;
+  std::function<bool(const Match&, const std::unordered_map<std::string, Value*>&)> filter = [](const Match&, const std::unordered_map<std::string, Value*>&) {
+     return true;
+  };
+};
+
+std::vector<QuantFusionInfo> quant_fusion_pattern_and_replacements() {
   std::string conv2d = R"(
 graph(%a_quant, %packed_params, %r_scale, %r_zero_point, %r_dtype, %stride, %padding, %dilation, %groups):
         %a_dequant = aten::dequantize(%a_quant)
@@ -165,18 +176,18 @@ graph(%a_quant, %b_quant, %alpha, %scale, %zero_point, %dtype):
   // We don't have quantized inplace add right now
 
   return {
-      {conv2d, quantized_conv2d},
-      {conv2d_relu, quantized_conv2d_relu},
-      {conv2d_inplace_relu, quantized_conv2d_relu},
-      {addmm, quantized_linear},
-      {matmul_with_bias, quantized_linear},
-      {matmul_no_bias, quantized_linear_no_bias},
-      {aten_linear, quantized_aten_linear},
-      {add_relu, quantized_add_relu},
-      {add_inplace_relu, quantized_add_relu},
-      {add, quantized_add},
-      {inplace_add, quantized_add},
-      {cat, quantized_cat},
+      {"quantized::conv2d", conv2d, quantized_conv2d},
+      {"quantized::conv2d_relu", conv2d_relu, quantized_conv2d_relu},
+      {"quantized::conv2d_relu", conv2d_inplace_relu, quantized_conv2d_relu},
+      {"quantized::linear", addmm, quantized_linear},
+      {"quantized::linear", matmul_with_bias, quantized_linear},
+      {"quantized::linear", matmul_no_bias, quantized_linear_no_bias},
+      {"quantized::linear", aten_linear, quantized_aten_linear},
+      {"quantized::add_relu", add_relu, quantized_add_relu},
+      {"quantized::add_relu", add_inplace_relu, quantized_add_relu},
+      {"quantized::add", add, quantized_add},
+      {"quantized::add", inplace_add, quantized_add},
+      {"quantized::cat", cat, quantized_cat},
   };
 }
 
