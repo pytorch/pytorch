@@ -2,7 +2,6 @@ import torch._C as _C
 
 TensorProtoDataType = _C._onnx.TensorProtoDataType
 OperatorExportTypes = _C._onnx.OperatorExportTypes
-TrainingMode = _C._onnx.TrainingMode
 PYTORCH_ONNX_CAFFE2_BUNDLE = _C._onnx.PYTORCH_ONNX_CAFFE2_BUNDLE
 
 ONNX_ARCHIVE_MODEL_PROTO_NAME = "__MODEL_PROTO"
@@ -29,7 +28,7 @@ def _export(*args, **kwargs):
     return result
 
 
-def export(model, args, f, export_params=True, verbose=False, training=TrainingMode.EVAL,
+def export(model, args, f, export_params=True, verbose=False, training=False,
            input_names=None, output_names=None, aten=False, export_raw_ir=False,
            operator_export_type=None, opset_version=None, _retain_param_name=True,
            do_constant_folding=True, example_outputs=None, strip_doc_string=True,
@@ -60,11 +59,9 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
             as arguments, the ordering as specified by ``model.state_dict().values()``
         verbose (bool, default False): if specified, we will print out a debug
             description of the trace being exported.
-        training (enum, default TrainingMode.EVAL):
-            TrainingMode.EVAL: export the model in inference mode.
-            TrainingMode.PRESERVE: export the model in inference mode if model.training is
-            False and to a training friendly mode if model.training is True.
-            TrainingMode.TRAINING: export the model in a training friendly mode.
+        training (bool, default False): export the model in training mode.  At
+            the moment, ONNX is oriented towards exporting models for inference
+            only, so you will generally not need to set this to True.
         input_names(list of strings, default empty list): names to assign to the
             input nodes of the graph, in order
         output_names(list of strings, default empty list): names to assign to the
@@ -187,7 +184,7 @@ def _optimize_trace(graph, operator_export_type):
     return utils._optimize_graph(graph, operator_export_type)
 
 
-def select_model_mode_for_export(model, mode):
+def set_training(model, mode):
     r"""
     A context manager to temporarily set the training mode of 'model'
     to 'mode', resetting it when we exit the with-block.  A no-op if
@@ -195,7 +192,7 @@ def select_model_mode_for_export(model, mode):
     """
 
     from torch.onnx import utils
-    return utils.select_model_mode_for_export(model, mode)
+    return utils.set_training(model, mode)
 
 
 def _run_symbolic_function(*args, **kwargs):

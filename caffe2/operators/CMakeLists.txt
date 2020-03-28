@@ -18,12 +18,7 @@ file(GLOB tmp *.cu)
 # TODO: when we move to explicit file list, this would not be needed.
 file(GLOB tmp_cudnn *_cudnn.cu)
 exclude(tmp "${tmp}" ${tmp_cudnn})
-# Exclude top_k.cu and unique_ops.cu for separate compilation
-file(GLOB tmp_w_sort_by_key "top_k.cu" "unique_ops.cu")
-exclude(tmp "${tmp}" ${tmp_w_sort_by_key})
-
 set(Caffe2_GPU_SRCS ${Caffe2_GPU_SRCS} ${tmp})
-set(Caffe2_GPU_SRCS_W_SORT_BY_KEY ${Caffe2_GPU_SRCS_W_SORT_BY_KEY} ${tmp_w_sort_by_key})
 # exclude test files
 file(GLOB tmp *_test.cc)
 exclude(Caffe2_GPU_SRCS "${Caffe2_GPU_SRCS}" ${tmp})
@@ -99,7 +94,6 @@ exclude(Caffe2_CPU_TEST_SRCS "${Caffe2_CPU_TEST_SRCS}" ${Caffe2_GPU_TEST_SRCS} $
 # ---[ Send the lists to the parent scope.
 set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS} PARENT_SCOPE)
 set(Caffe2_GPU_SRCS ${Caffe2_GPU_SRCS} PARENT_SCOPE)
-set(Caffe2_GPU_SRCS_W_SORT_BY_KEY ${Caffe2_GPU_SRCS_W_SORT_BY_KEY} PARENT_SCOPE)
 set(Caffe2_HIP_SRCS ${Caffe2_HIP_SRCS} PARENT_SCOPE)
 set(Caffe2_CPU_TEST_SRCS ${Caffe2_CPU_TEST_SRCS} PARENT_SCOPE)
 set(Caffe2_GPU_TEST_SRCS ${Caffe2_GPU_TEST_SRCS} PARENT_SCOPE)
