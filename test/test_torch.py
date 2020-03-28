@@ -9875,7 +9875,8 @@ class TestTorchDeviceType(TestCase):
                     if range_ <= dtype_max:
                         if from_ >= dtype_min and to_ <= dtype_max:
                             t.uniform_(from_, to_)
-                            if not dtype == torch.bfloat16 and not (dtype == torch.half and device == 'cpu') and not torch.isnan(t).all():
+                            if not dtype == torch.bfloat16 and not (
+                                    dtype == torch.half and device == 'cpu') and not torch.isnan(t).all():
                                 delta = alpha * range_
                                 double_t = t.to(torch.double)
                                 if range_ == 0:
