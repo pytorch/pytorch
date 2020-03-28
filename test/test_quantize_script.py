@@ -170,7 +170,7 @@ class TestScript(JitTestCase):
                    .check("return") \
                    .run(str(get_forward_graph(m.fc1._c)))
 
-    def test_finalize_for_linear(self):
+    def test_finalize_for_linear_dynamic(self):
         class M(torch.nn.Module):
             def __init__(self):
                 super(M, self).__init__()
