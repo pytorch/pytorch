@@ -1,5 +1,4 @@
 # Torch
-from torch._six import PY2
 from torch.autograd import Variable
 from torch.autograd.function import _nested_map
 from torch.jit.annotations import BroadcastingList2, BroadcastingList3  # noqa: F401
@@ -37,10 +36,7 @@ RUN_CUDA = torch.cuda.is_available()
 RUN_CUDA_MULTI_GPU = RUN_CUDA and torch.cuda.device_count() > 1
 
 def execWrapper(code, glob, loc):
-    if PY2:
-        exec(code) in glob, loc
-    else:
-        exec(code, glob, loc)
+    exec(code, glob, loc)
 
 def do_input_map(fn, input):
     return _nested_map(lambda t: isinstance(t, torch.Tensor), fn)(input)
@@ -110,12 +106,6 @@ class JitTestCase(TestCase):
         return False
 
     def _compared_saved_loaded(self, m):
-        if PY2:
-            # Disable for Python 2, which does not allow manipulation of multiple objects
-            # returned by zipfile.open().
-            # See: https://docs.python.org/2.7/library/zipfile.html#zipfile.ZipFile.open
-            return
-
         def extract_files(buffer):
             # crack open the zip format to get at the main module code
             archive = zipfile.ZipFile(buffer)

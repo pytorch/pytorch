@@ -636,9 +636,6 @@ def save_rref(rref_var, fname):
     torch.save(rref_var, fname)
 
 
-@unittest.skipIf(
-    not torch._six.PY3, "Pytorch distributed rpc package does not support python2"
-)
 class JitRpcTest(RRefAPITest, LocalRRefTest, JitRpcAsyncOpTest, RpcAgentTestFixture):
     @dist_init
     def test_torchscript_function(self):

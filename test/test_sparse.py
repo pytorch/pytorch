@@ -2109,10 +2109,7 @@ class TestSparse(TestCase):
         self.assertEqual(list(t.coalesce().values().size()), [1, 3])
 
     def test_pickle(self):
-        if sys.version_info[0] == 2:
-            import cPickle as pickle
-        else:
-            import pickle
+        import pickle
 
         shape_sparse_dim_nnz = [
             ((), 0, 2),

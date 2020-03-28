@@ -281,17 +281,7 @@ def storage_from_cache(cls, key):
 
 
 def rebuild_storage_fd(cls, df, size):
-    if sys.version_info[0] == 2:
-        while True:
-            try:
-                fd = multiprocessing.reduction.rebuild_handle(df)
-                break
-            except OSError as e:
-                # Retry on EINTR for platforms that support it
-                if e.errno != getattr(errno, 'EINTR', None):
-                    raise
-    else:
-        fd = df.detach()
+    fd = df.detach()
     try:
         storage = storage_from_cache(cls, fd_id(fd))
         if storage is not None:
@@ -331,10 +321,7 @@ def reduce_storage(storage):
         return (rebuild_storage_empty, (type(storage),))
     else:
         fd, size = storage._share_fd_()
-        if sys.version_info[0] == 2:
-            df = multiprocessing.reduction.reduce_handle(fd)
-        else:
-            df = multiprocessing.reduction.DupFd(fd)
+        df = multiprocessing.reduction.DupFd(fd)
         cache_key = fd_id(fd)
         metadata = (df, size)
         rebuild = rebuild_storage_fd

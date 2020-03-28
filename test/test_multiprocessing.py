@@ -22,7 +22,6 @@ load_tests = load_tests
 TEST_REPEATS = 30
 HAS_SHM_FILES = os.path.isdir('/dev/shm')
 TEST_CUDA_IPC = torch.cuda.is_available() and \
-    sys.version_info[0] == 3 and \
     sys.platform != 'darwin' and \
     sys.platform != 'win32'
 TEST_MULTIGPU = TEST_CUDA_IPC and torch.cuda.device_count() > 1

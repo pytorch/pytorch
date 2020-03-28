@@ -8,7 +8,6 @@ import inspect
 import re
 
 import torch
-from torch._six import PY2
 import torch.testing._internal.common_utils as common
 import torch.testing._internal.common_nn as common_nn
 from torch.testing._internal.common_cuda import TEST_CUDA
@@ -249,10 +248,7 @@ class TestCppApiParity(common.TestCase):
 
     def _get_python_module_init_arg_spec(self, module_name):
         python_module_class = getattr(torch.nn, module_name)
-        if PY2:
-            init_arg_spec = inspect.getargspec(python_module_class.__init__)
-        else:
-            init_arg_spec = inspect.getfullargspec(python_module_class.__init__)
+        init_arg_spec = inspect.getfullargspec(python_module_class.__init__)
         return init_arg_spec
 
     def _prepare_tensors_for_module_input_or_target(self, test_params, tensors):

@@ -317,13 +317,8 @@ class TestONNXRuntime(unittest.TestCase):
     def get_image_from_url(self, url):
         import sys
         import os
-        if sys.version_info < (3,):
-            from urlparse import urlsplit
-            import urllib2
-            request = urllib2
-        else:
-            from urllib.parse import urlsplit
-            from urllib import request
+        from urllib.parse import urlsplit
+        from urllib import request
         from PIL import Image
         from torchvision import transforms
         from torch._utils_internal import get_writable_path

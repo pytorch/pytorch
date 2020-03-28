@@ -110,7 +110,6 @@ def get_all_examples():
 
 
 class TestTypeHints(TestCase):
-    @unittest.skipIf(sys.version_info[0] == 2, "no type hints for Python 2")
     @unittest.skipIf(not HAVE_MYPY, "need mypy")
     def test_doc_examples(self):
         """
@@ -170,7 +169,6 @@ class TestTypeHints(TestCase):
             except subprocess.CalledProcessError as e:
                 raise AssertionError("mypy failed.  Look above this error for mypy's output.")
 
-    @unittest.skipIf(sys.version_info[0] == 2, "no type hints for Python 2")
     @unittest.skipIf(not HAVE_MYPY, "need mypy")
     def test_type_hint_examples(self):
         """

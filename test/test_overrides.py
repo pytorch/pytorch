@@ -463,10 +463,7 @@ class TestTorchFunctionOverride(TestCase):
 
 def generate_tensor_like_override_tests(cls):
     def test_generator(func, override):
-        if torch._six.PY3:
-            args = inspect.getfullargspec(override)
-        else:
-            args = inspect.getargspec(override)
+        args = inspect.getfullargspec(override)
         nargs = len(args.args)
         if args.defaults is not None:
             nargs -= len(args.defaults)

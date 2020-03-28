@@ -272,9 +272,6 @@ def check_rref_confirmed(rref):
 load_tests = load_tests
 
 
-@unittest.skipIf(
-    not torch._six.PY3, "Pytorch distributed rpc package does not support python2"
-)
 class RpcTest(RpcAgentTestFixture):
     @dist_init
     def test_worker_id(self):
@@ -1844,10 +1841,6 @@ class RpcTest(RpcAgentTestFixture):
             with self.assertRaisesRegex(RuntimeError, "Can not pickle rref in python pickler"):
                 torch.save(local_rref, fname)
 
-@unittest.skipIf(
-    not torch._six.PY3,
-    "Pytorch distributed autograd package does not support python2",
-)
 class FaultyAgentRpcTest(FaultyRpcAgentTestFixture):
 
     # no faulty_messages defined so this fails all retryable messages - see

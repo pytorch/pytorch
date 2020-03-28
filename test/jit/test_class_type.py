@@ -6,7 +6,6 @@ import unittest
 
 import torch
 import torch.nn as nn
-from torch._six import PY2
 from torch.testing import FileCheck
 
 # Make the helper files in test/ importable
@@ -802,8 +801,7 @@ class TestClassType(JitTestCase):
 
         ops = [add, sub, mul, pow, ne, eq, lt, gt, le, ge, _and, _or, _xor, getitem, setitem, call]
 
-        if not PY2:
-            ops.append(truediv)
+        ops.append(truediv)
         for func in ops:
             self.checkScript(func, ())
 

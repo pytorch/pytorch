@@ -15,7 +15,7 @@ from torch.utils.data import _utils, Dataset, IterableDataset, TensorDataset, Da
 from torch.utils.data._utils import MP_STATUS_CHECK_INTERVAL
 from torch.utils.data.dataset import random_split
 from torch._utils import ExceptionWrapper
-from torch.testing._internal.common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS, PY3,
+from torch.testing._internal.common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS,
                                                   IS_PYTORCH_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm,
                                                   load_tests, TEST_WITH_TSAN)
 
@@ -1495,7 +1495,7 @@ class TestDataLoader(TestCase):
                                 if 'DataLoader worker (pid' not in str(loader_p.exception):
                                     fail('loader process did not raise expected exception, but had {}'.format(
                                         loader_p.exception))
-                            elif PY3 and isinstance(loader_p.exception, ConnectionRefusedError):
+                            elif isinstance(loader_p.exception, ConnectionRefusedError):
                                 # Sometimes, when the worker is being killed and is freeing its
                                 # resources, the unpickling in loader process will be met an
                                 # a `ConnectionRefusedError` as it can not open a socket to receive
@@ -1504,12 +1504,6 @@ class TestDataLoader(TestCase):
                                 # handler. So we permit this as an allowed error as well.
                                 # After all, we are happy as long as it terminates.
                                 pass
-                            elif not PY3 and isinstance(loader_p.exception, OSError):
-                                # Same reasoning as the above if-block for Py2,
-                                # where ConnectionRefusedError isn't a thing.
-                                if loader_p.exception.errno != errno.ECONNREFUSED:
-                                    fail('loader process did not raise expected exception, but had {}'.format(
-                                        loader_p.exception))
                             else:
                                 fail('loader process did not raise expected exception, but had {}'.format(
                                     loader_p.exception))
