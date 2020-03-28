@@ -131,6 +131,25 @@ bool isFunctionNode(
   return is_quantizable;
 }
 
+// checks if a block will always raise an Exception
+bool alwaysRaisesException(Block* block) {
+  for (Node* n : block->nodes()) {
+    if (n->kind() == prim::RaiseException) {
+      return true;
+    }
+    if (n->kind() == prim::If) {
+      bool exception = true;
+      for (Block* b : n->blocks()) {
+        exception &= alwaysRaisesException(b);
+      }
+      if (exception) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 // If the op doesn't require observation, return
 // the the list of input `Value`s that we should check to see
 // if they are observed/quantized, if so, we can say the output
@@ -178,6 +197,17 @@ std::vector<Value*> getGeneralOpTensorInputs(Node* n) {
                  /* call_funcs = */ {},
                  /* aten_funcs = */ single_input_aten_funcs)) {
     return {n->input(0)};
+  } else if (n->kind() == prim::If &&
+             n->outputs().size() == 1) {
+    std::vector<Value*> inputs;
+    for (Block* subblock : n->blocks()) {
+      if (alwaysRaisesException(subblock)) {
+        continue;
+      }
+      auto* output = subblock->outputs()[0];
+      inputs.push_back(output);
+    }
+    return inputs;
   } else if (n->kind() == prim::ListUnpack) {
     return {n->input(0)};
   } else if (n->kind() == prim::ListConstruct) {
@@ -2224,10 +2254,27 @@ void addBiasForConv2dIfNone(Module& module) {
 void swapDeQuant(Block* block) {
   auto graph = block->owningGraph();
   for (Node* n : block->nodes()) {
+    if (n->kind() == prim::If) {
+      for (Block* subblock : n->blocks()) {
+        swapDeQuant(subblock);
+      }
+      if (n->outputs().size() == 0) {
+        continue;
+      }
+      if (n->outputs().size() > 1) {
+        // Factoring out dequantize for if blocks with multiple outputs
+        // is not supported right now
+        continue;
+      }
+    }
     auto inputs = getGeneralOpTensorInputs(n);
     if (inputs.size() > 0) {
       bool is_dequantized = true;
       for (auto* input : inputs) {
+        // note that we don't need to recursively check for prim::If
+        // here because if all inputs of a prim::If is dequantized
+        // the dequantize will be factored out before we get to this
+        // point
         is_dequantized &= input->node()->kind() == Symbol::aten("dequantize");
       }
       if (!is_dequantized) {
@@ -2250,9 +2297,6 @@ void swapDeQuant(Block* block) {
         // Insert new dequantize node for each use of the output
         insertDeQuantCall(graph, output, output, uses);
       }
-    }
-    for (Block* subblock : n->blocks()) {
-      swapDeQuant(subblock);
     }
   }
 }
