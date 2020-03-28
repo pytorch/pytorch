@@ -178,6 +178,40 @@ graph(%a_quant, %b_quant, %alpha, %scale, %zero_point, %dtype):
          return (%r) )";
   // We don't have quantized inplace add right now
 
+  // quantized::add_scalar
+  std::string add_scalar = R"(
+graph(%a_quant, %b_scalar, %alpha):
+         %a_dequant = aten::dequantize(%a_quant)
+         %r = aten::add(%a_dequant, %b_scalar, %alpha)
+         return (%r) )";
+
+  std::string quantized_add_scalar = R"(
+graph(%a_quant, %b_scalar, %alpha):
+         %r = quantized::add_scalar(%a_quant, %b_scalar)
+         return (%r) )";
+
+  // filter that checks %alpha is constant 1 and %b_scalar is a scalar
+  auto add_scalar_filter = [](const Match& match,
+                   const std::unordered_map<std::string, Value*>& vmap) {
+    const auto& match_vmap = match.values_map;
+    auto alpha = toIValue(match_vmap.at(vmap.at("alpha")));
+    auto b_scalar = match_vmap.at(vmap.at("b_scalar"));
+    return alpha && alpha->isInt() && alpha->toInt() == 1 &&
+      b_scalar->type()->isSubtypeOf(NumberType::get());
+  };
+
+  // quantized::add_scalar_out
+  std::string add_scalar_out = R"(
+graph(%a_quant, %b_scalar, %alpha):
+         %a_dequant = aten::dequantize(%a_quant)
+         %r = aten::add_(%a_dequant, %b_scalar, %alpha)
+         return (%r) )";
+
+  std::string quantized_add_scalar_out = R"(
+graph(%a_quant, %b_scalar, %alpha):
+         %r = quantized::add_scalar_out(%a_quant, %b_scalar, %a_quant)
+         return (%r) )";
+
   return {
       {"quantized::conv2d", conv2d, quantized_conv2d},
       {"quantized::conv2d_relu", conv2d_relu, quantized_conv2d_relu},
@@ -191,6 +225,10 @@ graph(%a_quant, %b_quant, %alpha, %scale, %zero_point, %dtype):
       {"quantized::add", add, quantized_add},
       {"quantized::add", inplace_add, quantized_add},
       {"quantized::cat", cat, quantized_cat},
+      {"quantized::add_scalar", add_scalar,
+       quantized_add_scalar, add_scalar_filter},
+      {"quantized::add_scalar_out", add_scalar_out,
+       quantized_add_scalar_out, add_scalar_filter},
   };
 }
 

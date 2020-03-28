@@ -154,6 +154,13 @@ bool alwaysRaisesException(Block* block) {
   return false;
 }
 
+bool isAddScalar(Node* n) {
+  return (n->kind() == Symbol::aten("add") ||
+          n->kind() == Symbol::aten("add_")) &&
+    n->input(0)->type()->isSubtypeOf(TensorType::get()) &&
+    n->input(1)->type()->isSubtypeOf(NumberType::get());
+}
+
 // If the op doesn't require observation, return
 // the the list of input `Value`s that we should check to see
 // if they are observed/quantized, if so, we can say the output
@@ -223,6 +230,10 @@ std::vector<Value*> getGeneralOpTensorInputs(Node* n) {
     return inputs;
   }
   return {};
+}
+
+bool mayRequireObservation(Value* v) {
+  return !isAddScalar(v->node());
 }
 
 bool nodeQuantizable(Node* n) {
@@ -956,7 +967,8 @@ bool InsertObserversHelper::valueNeedsToBeQuantized(Value* v) {
   // of the quantizable function.
   if (!is_dynamic) {
     // Check whether producer is quantizable
-    if (nodeQuantizable(v->node())) {
+    if (mayRequireObservation(v) &&
+        nodeQuantizable(v->node())) {
       return true;
     }
   }
