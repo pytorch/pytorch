@@ -294,7 +294,7 @@ public:
       std::vector<IValue>& inputs,
       const std::unordered_map<std::string, IValue>& kwargs) const;
 
-  void findErrorInKwargs(const std::vector<std::string>& kwargs) const;
+  std::string findErrorInKwargs(const std::vector<std::string>& kwargs) const;
 
   bool hasAnyAliasInfo() const {
     for (const auto& arg : arguments_) {

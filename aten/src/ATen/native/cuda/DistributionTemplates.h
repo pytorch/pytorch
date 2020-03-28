@@ -1,9 +1,9 @@
 #pragma once
 
 #include <ATen/Dispatch.h>
-#include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/TensorIterator.h>
 #include <c10/util/Half.h>
+#include <ATen/cuda/detail/OffsetCalculator.cuh>
 
 #include <curand.h>
 #include <curand_kernel.h>
@@ -77,6 +77,16 @@ __global__ void distribution_elementwise_grid_stride_kernel(int numel,
   }
 }
 
+template<int N>
+static OffsetCalculator<N> make_offset_calculator(const at::TensorIterator& iter) {
+  AT_ASSERT(N == iter.ntensors());
+  std::array<const int64_t*, N> strides;
+  for (int i = 0; i < N; i++) {
+    strides[i] = iter.strides(i).data();
+  }
+  return OffsetCalculator<N>(iter.ndim(), iter.shape().data(), strides.data());
+}
+
 /**
  * distribution_nullary_kernel is analogous to gpu_kernel in
  * ATen/native/cuda/Loops.cuh. Like gpu_kernel, it uses
@@ -100,7 +110,7 @@ template<typename scalar_t,
          typename dist_t,
          typename transform_t>
 void distribution_nullary_kernel(at::TensorIterator& iter,
-                                 RNG* gen,
+                                 RNG gen,
                                  const dist_t& dist_func,
                                  const transform_t transform_func) {
   static_assert(unroll_factor >= 1, "unroll_factor must be >= 1.");
@@ -144,7 +154,7 @@ void distribution_nullary_kernel(at::TensorIterator& iter,
       }
     );
   } else {
-    auto offset_calc = at::native::legacy::make_offset_calculator<1>(iter);
+    auto offset_calc = make_offset_calculator<1>(iter);
     distribution_elementwise_grid_stride_kernel<accscalar_t, unroll_factor><<<grid, block, 0, stream>>>(
       numel,
       rng_engine_inputs,
@@ -166,8 +176,10 @@ namespace native {
 namespace templates {
 namespace cuda {
 
+// ==================================================== Random ========================================================
+
 template<typename RNG>
-void random_from_to_kernel(TensorIterator& iter, uint64_t range, int64_t base, RNG* gen) {
+void random_from_to_kernel(TensorIterator& iter, uint64_t range, int64_t base, RNG gen) {
 #ifdef _WIN32
   // TODO: https://github.com/pytorch/pytorch/issues/33793
   if (iter.dtype() == ScalarType::BFloat16) {
@@ -213,7 +225,7 @@ void random_from_to_kernel(TensorIterator& iter, uint64_t range, int64_t base, R
 // from(inclusive) = std::numeric_limits<int64_t>::lowest()
 // to(exclusive) = None (= std::numeric_limits<int64_t>::max() + 1)
 template<typename RNG>
-void random_full_64_bits_range_kernel(TensorIterator& iter, RNG* gen) {
+void random_full_64_bits_range_kernel(TensorIterator& iter, RNG gen) {
 #ifdef _WIN32
   // TODO: https://github.com/pytorch/pytorch/issues/33793
   if (iter.dtype() == ScalarType::BFloat16) {
@@ -246,16 +258,16 @@ void random_full_64_bits_range_kernel(TensorIterator& iter, RNG* gen) {
 
 template<typename RNG>
 struct RandomFromToKernel {
-  void operator()(TensorIterator& iter, uint64_t range, int64_t base, RNG* gen) {
+  void operator()(TensorIterator& iter, uint64_t range, int64_t base, RNG gen) {
     random_from_to_kernel(iter, range, base, gen);
   }
-  void operator()(TensorIterator& iter, RNG* gen) {
+  void operator()(TensorIterator& iter, RNG gen) {
     random_full_64_bits_range_kernel(iter, gen);
   }
 };
 
 template<typename RNG>
-void random_kernel(TensorIterator& iter, RNG* gen) {
+void random_kernel(TensorIterator& iter, RNG gen) {
 #ifdef _WIN32
   // TODO: https://github.com/pytorch/pytorch/issues/33793
   if (iter.dtype() == ScalarType::BFloat16) {
@@ -335,8 +347,42 @@ void random_kernel(TensorIterator& iter, RNG* gen) {
 
 template<typename RNG>
 struct RandomKernel {
-  void operator()(TensorIterator& iter, RNG* gen) {
+  void operator()(TensorIterator& iter, RNG gen) {
     random_kernel(iter, gen);
+  }
+};
+
+// ==================================================== Normal ========================================================
+
+template<typename RNG>
+void normal_kernel(Tensor& self, double mean_, double std_, RNG gen) {
+  auto iter = TensorIterator::nullary_op(self);
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "normal_kernel_cuda", [&] {
+    using accscalar_t = at::acc_type<scalar_t, true>;
+    auto mean = static_cast<accscalar_t>(mean_);
+    auto std = static_cast<accscalar_t>(std_);
+    // define lambda to multiply std and add mean
+    auto normal_func = [mean, std] __device__ (accscalar_t rand) {
+      return static_cast<scalar_t>(rand * std + mean);
+    };
+    if (std::is_same<scalar_t, double>::value) {
+      distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls/2>(iter,
+        gen,
+        [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_normal2_double(state); },
+        normal_func);
+    } else {
+      distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls>(iter,
+        gen,
+        [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_normal4(state); },
+        normal_func);
+    }
+   });
+}
+
+template<typename RNG>
+struct NormalKernel {
+  void operator()(Tensor& self, double mean, double std, Generator gen) {
+    normal_kernel(self, mean, std, check_generator<RNG>(gen));
   }
 };
 

@@ -7,9 +7,9 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 namespace torch {
-namespace jit {
 class CustomClassHolder : public c10::intrusive_ptr_target {};
-
+namespace jit {
+using ::torch::CustomClassHolder;
 struct Function;
 struct CompilationUnit;
 struct Module;
@@ -207,13 +207,24 @@ struct CAFFE2_API IValue final {
   /// @private [doxygen private]
   c10::intrusive_ptr<caffe2::Blob> toBlob() const &;
 
-  // Capsule
-  IValue(intrusive_ptr<torch::jit::CustomClassHolder> blob);
+  // Capsule. Capsule is an internal implementation detail
+  // of custom C++ classes. No new callsites of these APIs should
+  // be introduced.
+  static inline IValue make_capsule(intrusive_ptr<torch::CustomClassHolder> blob);
   bool isCapsule() const {
     return Tag::Capsule == tag;
   }
-  c10::intrusive_ptr<torch::jit::CustomClassHolder> toCapsule() &&;
-  c10::intrusive_ptr<torch::jit::CustomClassHolder> toCapsule() const &;
+  c10::intrusive_ptr<torch::CustomClassHolder> toCapsule() &&;
+  c10::intrusive_ptr<torch::CustomClassHolder> toCapsule() const &;
+
+  // Custom C++ classes
+  template <typename T, std::enable_if_t<std::is_base_of<torch::CustomClassHolder, T>::value, int> = 0>
+  IValue(intrusive_ptr<T> custom_class);
+  bool isCustomClass() const;
+  template <typename T>
+  c10::intrusive_ptr<T> toCustomClass() &&;
+  template <typename T>
+  c10::intrusive_ptr<T> toCustomClass() const &;
 
   // Tuple
   IValue(c10::intrusive_ptr<ivalue::Tuple> v);
@@ -321,11 +332,23 @@ struct CAFFE2_API IValue final {
   c10::List<IValue> toList() const &;
   c10::ArrayRef<IValue> toListRef() const;
 
+  // Some template constructors of IValue calls another constructor recursively.
+  // This SNIFAEs the called constructor exists.
   template<class T>
+  using enable_if_ivalue_constructible =
+      std::enable_if_t<std::is_constructible<IValue, T>::value, std::nullptr_t>;
+
+  template <
+      class T,
+      enable_if_ivalue_constructible<T> = nullptr>
   IValue(c10::List<T> v);
-  template<class T>
+  template <
+      class T,
+      enable_if_ivalue_constructible<T> = nullptr>
   IValue(at::ArrayRef<T> v);
-  template<class T>
+  template <
+      class T,
+      enable_if_ivalue_constructible<T> = nullptr>
   IValue(const std::vector<T>& v);
 
   // GenericDict
@@ -343,7 +366,9 @@ struct CAFFE2_API IValue final {
   /// \endcond
   IValue(std::unordered_map<Key, Value> v);
 
-  template<class T>
+  template <
+      class T,
+      enable_if_ivalue_constructible<T> = nullptr>
   IValue(c10::optional<T> v);
   IValue(c10::nullopt_t);
 
@@ -513,30 +538,25 @@ struct CAFFE2_API IValue final {
 
   TypePtr type() const;
 
-  size_t hash() const {
-    return payload.as_int;
-  }
-
-  // Detection Aliased tensors.
-  struct HashIValue {
+  // Detect aliased tensors.
+  struct HashAliasedIValue {
     size_t operator()(const IValue& val) const {
       if (val.isTensor()) {
-        return 0;
+        return reinterpret_cast<size_t>(val.toTensor().storage().unsafeGetStorageImpl());
       }
-      return val.hash();
+      // If it is not a Tensor, then two mutable IValues alias each other only
+      // if they are the same pointer.
+      return val.payload.as_int;
     }
   };
 
-  struct CompIValues {
+  struct CompAliasedIValues {
     bool operator()(const IValue& lhs, const IValue& rhs) const {
-      if (lhs.isTensor() && rhs.isTensor()) {
         return lhs.isAliasOf(rhs);
-      }
-      return lhs.hash() == rhs.hash();
     }
   };
 
-  using HashAliasedIValues = std::unordered_set<IValue, HashIValue, CompIValues>;
+  using HashAliasedIValues = std::unordered_set<IValue, HashAliasedIValue, CompAliasedIValues>;
 
   // Chechs if this and rhs has a subvalues in common.
   // [t1,t2] and [t2, t3] returns true.

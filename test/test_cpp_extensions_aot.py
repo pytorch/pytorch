@@ -11,6 +11,7 @@ import torch.utils.cpp_extension
 try:
     import torch_test_cpp_extension.cpp as cpp_extension
     import torch_test_cpp_extension.msnpu as msnpu_extension
+    import torch_test_cpp_extension.rng as rng_extension
 except ImportError:
     raise RuntimeError(
         "test_cpp_extensions_aot.py cannot be invoked directly. Run "
@@ -140,6 +141,37 @@ class TestMSNPUTensor(common.TestCase):
         self.assertEqual(msnpu_extension.get_test_int(), 3)
         self.assertEqual(grad[0].shape, input.shape)
 
+
+class TestRNGExtension(common.TestCase):
+
+    def test_rng(self):
+        fourty_two = torch.full((10,), 42, dtype=torch.int64)
+
+        t = torch.empty(10, dtype=torch.int64).random_()
+        self.assertNotEqual(t, fourty_two)
+
+        gen = torch.Generator(device='cpu')
+        t = torch.empty(10, dtype=torch.int64).random_(generator=gen)
+        self.assertNotEqual(t, fourty_two)
+
+        self.assertEqual(rng_extension.getInstanceCount(), 0)
+        gen = rng_extension.createTestCPUGenerator(42)
+        self.assertEqual(rng_extension.getInstanceCount(), 1)
+        copy = gen
+        self.assertEqual(rng_extension.getInstanceCount(), 1)
+        self.assertEqual(gen, copy)
+        copy2 = rng_extension.identity(copy)
+        self.assertEqual(rng_extension.getInstanceCount(), 1)
+        self.assertEqual(gen, copy2)
+        t = torch.empty(10, dtype=torch.int64).random_(generator=gen)
+        self.assertEqual(rng_extension.getInstanceCount(), 1)
+        self.assertEqual(t, fourty_two)
+        del gen
+        self.assertEqual(rng_extension.getInstanceCount(), 1)
+        del copy
+        self.assertEqual(rng_extension.getInstanceCount(), 1)
+        del copy2
+        self.assertEqual(rng_extension.getInstanceCount(), 0)
 
 if __name__ == "__main__":
     common.run_tests()

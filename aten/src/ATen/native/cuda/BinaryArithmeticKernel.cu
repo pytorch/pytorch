@@ -4,6 +4,7 @@
 #include <ATen/native/cuda/zmath.cuh>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/BinaryOps.h>
+#include <c10/macros/Macros.h>
 
 
 // NOTE: CUDA on Windows requires that the enclosing function

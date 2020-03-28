@@ -67,12 +67,21 @@ struct maybe_real<true, src_t> {
 
 template <typename dest_t, typename src_t>
 struct static_cast_with_inter_type {
-  C10_HOST_DEVICE static inline dest_t apply(src_t src) {
+  C10_HOST_DEVICE __ubsan_ignore_float_cast_overflow__ static inline dest_t apply(src_t src) {
     constexpr bool real = needs_real<dest_t, src_t>::value;
     return static_cast<dest_t>(
       static_cast<inter_copy_type_t<dest_t>>(maybe_real<real, src_t>::apply(src)));
   }
 };
+
+#if defined(__CUDACC__) || defined(__HIPCC__)
+template <typename dest_value_t, typename src_value_t>
+  struct static_cast_with_inter_type<std::complex<dest_value_t>, std::complex<src_value_t>> {
+    C10_HOST_DEVICE static inline std::complex<dest_value_t> apply(std::complex<src_value_t> src) {
+      return std::complex<dest_value_t>(src.real(), src.imag());
+    }
+};
+#endif
 
 // Dynamic type casting utils:
 // - fetch_and_cast

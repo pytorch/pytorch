@@ -3,8 +3,8 @@
 /**
  * See README.md for instructions on how to add a new test.
  */
-#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <c10/macros/Export.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 
 namespace torch {
 namespace jit {
@@ -26,8 +26,6 @@ namespace jit {
   _(DifferentiateWithRequiresGrad)     \
   _(FromQualString)                    \
   _(InternedStrings)                   \
-  _(IValue)                            \
-  _(IValueFuture)                      \
   _(PassManagement)                    \
   _(Proto)                             \
   _(RegisterFusionCachesKernel)        \
@@ -78,16 +76,17 @@ namespace jit {
   _(LiteInterpreterConv)               \
   _(LiteInterpreterInline)             \
   _(LiteInterpreterTuple)              \
-  _(LiteInterpreterPrimOverload)       \
   _(LiteInterpreterUpsampleNearest2d)  \
   _(CommonAncestor)                    \
   _(AutogradSymbols)                   \
   _(MobileTypeParser)                  \
+  _(LiteInterpreterBuiltinFunction)    \
   _(LiteInterpreterPrim)               \
   _(LiteInterpreterLoadOrigJit)        \
   _(LiteInterpreterWrongMethodName)    \
   _(LiteInterpreterParams)             \
-  _(LiteInterpreterSetState)
+  _(LiteInterpreterSetState)           \
+  _(TorchbindIValueAPI)
 
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \

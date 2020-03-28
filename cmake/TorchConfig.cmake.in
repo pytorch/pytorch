@@ -16,7 +16,7 @@
 
 include(FindPackageHandleStandardArgs)
 
-if (DEFINED ENV{TORCH_INSTALL_PREFIX})
+if(DEFINED ENV{TORCH_INSTALL_PREFIX})
   set(TORCH_INSTALL_PREFIX $ENV{TORCH_INSTALL_PREFIX})
 else()
   # Assume we are in <install-prefix>/share/cmake/Torch/TorchConfig.cmake
@@ -25,7 +25,7 @@ else()
 endif()
 
 # Include directories.
-if (EXISTS "${TORCH_INSTALL_PREFIX}/include")
+if(EXISTS "${TORCH_INSTALL_PREFIX}/include")
   set(TORCH_INCLUDE_DIRS
     ${TORCH_INSTALL_PREFIX}/include
     ${TORCH_INSTALL_PREFIX}/include/torch/csrc/api/include)
@@ -36,7 +36,7 @@ else()
 endif()
 
 # Library dependencies.
-if (@BUILD_SHARED_LIBS@)
+if(@BUILD_SHARED_LIBS@)
   find_package(Caffe2 REQUIRED PATHS ${CMAKE_CURRENT_LIST_DIR}/../Caffe2)
   set(TORCH_LIBRARIES torch ${Caffe2_MAIN_LIBS})
 else()
@@ -50,26 +50,26 @@ list(APPEND TORCH_LIBRARIES ${C10_LIBRARY})
 # We need manually add dependent libraries when they are not linked into the
 # shared library.
 # TODO: this list might be incomplete.
-if (NOT @BUILD_SHARED_LIBS@)
+if(NOT @BUILD_SHARED_LIBS@)
   find_library(TORCH_CPU_LIBRARY torch_cpu PATHS "${TORCH_INSTALL_PREFIX}/lib")
   list(APPEND TORCH_LIBRARIES ${TORCH_CPU_LIBRARY})
 
-  if (@USE_NNPACK@)
+  if(@USE_NNPACK@)
     find_library(NNPACK_LIBRARY nnpack PATHS "${TORCH_INSTALL_PREFIX}/lib")
     list(APPEND TORCH_LIBRARIES ${NNPACK_LIBRARY})
   endif()
 
-  if (@USE_PYTORCH_QNNPACK@)
+  if(@USE_PYTORCH_QNNPACK@)
     find_library(PYTORCH_QNNPACK_LIBRARY pytorch_qnnpack PATHS "${TORCH_INSTALL_PREFIX}/lib")
     list(APPEND TORCH_LIBRARIES ${PYTORCH_QNNPACK_LIBRARY})
   endif()
 
-  if (@USE_XNNPACK@)
+  if(@USE_XNNPACK@)
     find_library(XNNPACK_LIBRARY XNNPACK PATHS "${TORCH_INSTALL_PREFIX}/lib")
     list(APPEND TORCH_LIBRARIES ${XNNPACK_LIBRARY})
   endif()
 
-  if (@INTERN_USE_EIGEN_BLAS@)
+  if(@INTERN_USE_EIGEN_BLAS@)
     find_library(EIGEN_BLAS_LIBRARY eigen_blas PATHS "${TORCH_INSTALL_PREFIX}/lib")
     list(APPEND TORCH_LIBRARIES ${EIGEN_BLAS_LIBRARY})
   endif()
@@ -81,10 +81,10 @@ if (NOT @BUILD_SHARED_LIBS@)
   list(APPEND TORCH_LIBRARIES ${CLOG_LIBRARY})
 endif()
 
-if (@USE_CUDA@)
+if(@USE_CUDA@)
   if(MSVC)
     set(NVTOOLEXT_HOME "C:/Program Files/NVIDIA Corporation/NvToolsExt")
-    if ($ENV{NVTOOLEXT_HOME})
+    if($ENV{NVTOOLEXT_HOME})
       set(NVTOOLEXT_HOME $ENV{NVTOOLEXT_HOME})
     endif()
     set(TORCH_CUDA_LIBRARIES
@@ -113,7 +113,7 @@ if (@USE_CUDA@)
 endif()
 
 # When we build libtorch with the old GCC ABI, dependent libraries must too.
-if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
+if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
   set(TORCH_CXX_FLAGS "-D_GLIBCXX_USE_CXX11_ABI=@GLIBCXX_USE_CXX11_ABI@")
 endif()
 
@@ -123,8 +123,8 @@ set_target_properties(torch PROPERTIES
     INTERFACE_INCLUDE_DIRECTORIES "${TORCH_INCLUDE_DIRS}"
     CXX_STANDARD 14
 )
-if (TORCH_CXX_FLAGS)
+if(TORCH_CXX_FLAGS)
   set_property(TARGET torch PROPERTY INTERFACE_COMPILE_OPTIONS "${TORCH_CXX_FLAGS}")
 endif()
 
-find_package_handle_standard_args(torch DEFAULT_MSG TORCH_LIBRARY TORCH_INCLUDE_DIRS)
+find_package_handle_standard_args(Torch DEFAULT_MSG TORCH_LIBRARY TORCH_INCLUDE_DIRS)
