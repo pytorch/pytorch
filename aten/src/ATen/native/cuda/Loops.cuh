@@ -9,6 +9,12 @@ namespace at { namespace native {
 constexpr int num_threads = C10_WARP_SIZE * 2;
 constexpr int thread_work_size = 4;
 constexpr int block_work_size = thread_work_size * num_threads;
+// Below is a macro version of the same thing, this is needed because
+// the global constants above is not available on device code
+// If you change any of them, please make sure you change both copy
+#define NUM_THREADS (C10_WARP_SIZE * 2)
+#define THREAD_WORK_SIZE 4
+#define BLOCK_WORK_SIZE (THREAD_WORK_SIZE * num_threads)
 
 // `needs_dynamic_casting` compares the types expected by iterator
 // (i.e. dtypes of the operands) with the actual type of the arguments
