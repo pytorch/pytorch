@@ -209,8 +209,7 @@ std::vector<Value*> getGeneralOpTensorInputs(Node* n) {
                  // We don't have call functions
                  // after inline
                  /* call_funcs = */ {},
-                 /* aten_funcs = */ single_input_aten_funcs) ||
-             isAddScalar(n)) {
+                 /* aten_funcs = */ single_input_aten_funcs)) {
     return {n->input(0)};
   } else if (n->kind() == prim::If &&
              n->outputs().size() == 1) {
@@ -235,8 +234,8 @@ std::vector<Value*> getGeneralOpTensorInputs(Node* n) {
   return {};
 }
 
-bool isGeneralOp(Node* n) {
-  return getGeneralOpTensorInputs(n).size() > 0;
+bool mayRequireObservation(Value* v) {
+  return !isAddScalar(v->node());
 }
 
 bool nodeQuantizable(Node* n) {
@@ -983,7 +982,7 @@ bool InsertObserversHelper::valueNeedsToBeQuantized(Value* v) {
   // of the quantizable function.
   if (!is_dynamic) {
     // Check whether producer is quantizable
-    if (!isGeneralOp(v->node()) &&
+    if (mayRequireObservation(v) &&
         nodeQuantizable(v->node())) {
       return true;
     }

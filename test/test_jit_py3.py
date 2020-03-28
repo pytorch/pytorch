@@ -9,6 +9,7 @@ import sys
 import torch
 import torch.testing._internal.jit_utils
 import torch.nn as nn
+import types
 
 class TestScriptPy3(JitTestCase):
     def test_joined_str(self):
@@ -191,6 +192,24 @@ class TestScriptPy3(JitTestCase):
         foo = torch.jit.script(Foo())
         y = foo(torch.randn(2, 2), torch.randn(2, 2))
 
+
+    def test_named_tuple_resolution(self):
+        class TheType(NamedTuple):
+            t: int
+
+        class MyModule(types.ModuleType):
+            def __init__(self):
+                super(MyModule, self).__init__('MyModule')
+
+            def __getattr__(self, attr):
+                return TheType
+
+        some_module = MyModule()
+
+        def fn() -> some_module.Type:
+            return some_module.Type(1)
+
+        self.checkScript(fn, [])
 
     def test_ignore_with_types(self):
         @torch.jit.ignore
