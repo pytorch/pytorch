@@ -70,7 +70,7 @@ Tensor& abs_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(r
 Tensor abs(const Tensor& self) { return unary_op_impl(self, at::abs_out); }
 Tensor& abs_(Tensor& self) { return unary_op_impl_(self, at::abs_out); }
 
-Tensor& angle_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, angle_stub); }
+Tensor& angle_out(Tensor& result, const Tensor& self) { Ureturn unary_op_impl_out(result, self, angle_stub); }
 Tensor angle(const Tensor& self) { return unary_op_impl(self, at::angle_out); }
 
 Tensor& real_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, real_stub); }
@@ -89,7 +89,7 @@ Tensor& bitwise_not_(Tensor& self) { return unary_op_impl_(self, at::bitwise_not
 Tensor& ceil_out(Tensor& result, const Tensor& self) {
   // Note: this is consistent with NumPy
   TORCH_CHECK(!self.is_complex(),
-    "trunc is not supported for complex inputs");
+    "ceil is not supported for complex inputs");
 
   return unary_op_impl_out(result, self, ceil_stub);
 }
