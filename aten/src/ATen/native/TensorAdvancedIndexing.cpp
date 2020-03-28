@@ -461,11 +461,15 @@ Tensor & index_select_out_cpu_(Tensor & result, const Tensor & self, int64_t dim
     AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool, self.scalar_type(), "index_select", [&] {
       auto self_stride = self.dim() == 0 ? 1 : self.stride(dim);
       auto result_stride = result.dim() == 0 ? 1 : result.stride(dim);
+
+      auto self_data_ptr = self.data_ptr<scalar_t>();
+      auto result_data_ptr = result.data_ptr<scalar_t>();
+      auto self_numel = self.numel();
       for (auto i = 0; i < numel; i++) {
         auto self_i = index_data[i];
-        TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self.numel()), "index out of range in self");
-        scalar_t *self_ip = self.data_ptr<scalar_t>() + self_i * self_stride;
-        *(result.data_ptr<scalar_t>() + i * result_stride) = *self_ip;
+        TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self_numel), "index out of range in self");
+        scalar_t *self_ip = self_data_ptr + self_i * self_stride;
+        *(result_data_ptr + i * result_stride) = *self_ip;
       }
     });
   }

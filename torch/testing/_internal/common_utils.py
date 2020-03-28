@@ -294,6 +294,17 @@ TEST_SKIP_FAST = os.getenv('PYTORCH_TEST_SKIP_FAST', '0') == '1'
 if TEST_NUMPY:
     import numpy
 
+def numpy_dtype(dtype):
+    assert TEST_NUMPY
+
+    torch_to_numpy_dtype = {
+        torch.half   : numpy.float16,
+        torch.float  : numpy.float32,
+        torch.double : numpy.float64
+    }
+
+    return torch_to_numpy_dtype[dtype]
+
 ALL_TENSORTYPES = [torch.float,
                    torch.double,
                    torch.half]
@@ -338,7 +349,6 @@ def skipIfCompiledWithoutNumpy(fn):
         else:
             fn(*args, **kwargs)
     return wrapper
-
 
 def _test_function(fn, device):
     def run_test_function(self):

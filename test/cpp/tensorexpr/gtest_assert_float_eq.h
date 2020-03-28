@@ -40,8 +40,8 @@ using Bits = uint32_t;
 // this avoids the "dereferencing type-punned pointer
 // will break strict-aliasing rules" error
 union Float {
-  Bits bits_;
-  float float_;
+    float float_;
+    Bits bits_;
 };
 
 // # of bits in a number.
