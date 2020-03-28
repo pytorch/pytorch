@@ -30,8 +30,14 @@ def set_declaration_defaults(declaration):
         declaration['cname'] = declaration['name']
     if 'backends' not in declaration:
         declaration['backends'] = ['CPU', 'CUDA']
-    if 'api_name' not in declaration:
-        declaration['api_name'] = declaration['name']
+    assert 'api_name' not in declaration
+    declaration['api_name'] = declaration['name']
+    # NB: keep this in sync with gen_autograd.py
+    if declaration.get('overload_name'):
+        declaration['type_wrapper_name'] = "{}_{}".format(
+            declaration['name'], declaration['overload_name'])
+    else:
+        declaration['type_wrapper_name'] = declaration['name']
     # Simulate multiple dispatch, even if it's not necessary
     if 'options' not in declaration:
         declaration['options'] = [{'arguments': declaration['arguments']}]

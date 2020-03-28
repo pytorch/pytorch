@@ -14,11 +14,14 @@
 #include <vector>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/native/cpu/CatKernel.h>
 #include <ATen/native/Copy.h>
 #include <ATen/MemoryOverlap.h>
 
 namespace at {
 namespace native {
+
+DEFINE_DISPATCH(cat_serial_stub);
 
 Tensor _reshape_from_tensor(const Tensor& self, const Tensor& shape_tensor) {
   TORCH_CHECK(shape_tensor.dim() == 1);
@@ -37,6 +40,24 @@ Tensor _shape_as_tensor(const Tensor& self) {
 
 Tensor& set_(Tensor& result, Storage source) {
   return result.set_(source, 0, static_cast<int64_t>(source.size()), {});
+}
+
+// unify with cuda implementation?  This is not done to avoid a dispatch in resize_impl_cpu_
+Tensor& set_storage_cpu_(Tensor& result, Storage storage, int64_t storage_offset, IntArrayRef size, IntArrayRef stride) {
+  checkSetStorage(result, storage, storage_offset, size, stride);
+
+  result.unsafeGetTensorImpl()->set_storage_offset(storage_offset);
+  c10::optional<IntArrayRef> stride_opt = stride.data() != nullptr ?
+                                          c10::optional<IntArrayRef>(stride) : c10::nullopt;
+  at::native::resize_impl_cpu_(result.unsafeGetTensorImpl(), size, stride_opt);
+  return result;
+}
+
+Tensor& set_tensor_(Tensor& result, const Tensor& source) {
+  if (result.unsafeGetTensorImpl() != source.unsafeGetTensorImpl()) {
+    return result.set_(source.storage(), source.storage_offset(), source.sizes(), source.strides());
+  }
+  return result;
 }
 
 // this needs to be split along CPU/CUDA lines because we don't have a consistent
@@ -76,6 +97,7 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
   // size (i.e. other empty sizes are not skipped).
   // FIXME: warn if this is the case
   bool allSkipped = true;
+  bool allContiguous = true;
   Tensor notSkippedTensor;
 
   // Inputs cannot alias the output tensor
@@ -85,6 +107,15 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
         lap != at::MemOverlapStatus::FULL, 0,
         "unsupported operation: the input tensors cannot refer to any of the "
         "output memory locations. Found overlap in input tensor ", i);
+  }
+
+  // Dtypes should be the same
+  const auto first_in_cat = tensors[0];
+  for (int64_t i = 1; i < tensors.size(); i++) {
+    TORCH_CHECK(first_in_cat.dtype() == tensors[i].dtype(),
+              "Expected object of scalar type ", first_in_cat.dtype(),
+              " but got scalar type ", tensors[i].dtype(),
+              " for sequence element ", i, ".");
   }
 
   auto should_skip = [](const Tensor& t) { return t.numel() == 0 && t.dim() == 1; };
@@ -112,10 +143,16 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
   int64_t cat_dim_size = 0;
   for (auto const &tensor : tensors) {
     if (should_skip(tensor)) {
+      // don't use fast path for empty tensor
+      allContiguous = false;
       continue;
     }
     check_cat_shape_except_dim(notSkippedTensor, tensor, dim);
     cat_dim_size += tensor.size(dim);
+
+    if (!tensor.is_contiguous()) {
+      allContiguous = false;
+    }
 
     if (tensor.sizes() != notSkippedTensor.sizes() ||
         tensor.strides() != notSkippedTensor.strides()) {
@@ -127,6 +164,15 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
   auto result_size = notSkippedTensor.sizes().vec();
   result_size[dim] = cat_dim_size;
   result.resize_(result_size);
+
+  // fast path for single thread when both inputs and result are contiguous and not empty
+  bool use_serial_kernel = result.numel() < at::internal::GRAIN_SIZE || at::get_num_threads() == 1;
+  allContiguous = allContiguous && result.is_contiguous();
+  ScalarType dtype = notSkippedTensor.scalar_type();
+  if (use_serial_kernel && allContiguous && (dtype == ScalarType::Double || dtype == ScalarType::Float)) {
+    cat_serial_stub(kCPU, result, tensors, dim);
+    return result;
+  }
 
   int64_t offset = 0;
   if (reuse_iterator && result.is_contiguous()) {
@@ -176,7 +222,7 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
 
 Tensor _cat_cpu(TensorList tensors, int64_t dim) {
   Tensor result = at::empty({0}, tensors[0].options());
-  return _cat_out_cpu(result, tensors, dim);
+  return native::_cat_out_cpu(result, tensors, dim);
 }
 
 static void check_cat_no_zero_dim(TensorList tensors) {
@@ -561,6 +607,13 @@ Tensor narrow(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
   return at::slice(self, dim, start, start + length, 1);
 }
 
+Tensor narrow(const Tensor& self, int64_t dim, const Tensor& start, int64_t length) {
+  TORCH_CHECK(start.dim() == 0 && isIntegralType(start.scalar_type(), /*includeBool=*/false),
+              "start must be an 0-dim integral Tensor.");
+  int64_t st = start.item<int64_t>();
+  return at::narrow(self, dim, st, length);
+}
+
 Tensor permute(const Tensor& self, IntArrayRef dims) {
   auto nDims = self.dim();
   TORCH_CHECK(dims.size() == (size_t)nDims,
@@ -710,16 +763,16 @@ static Tensor select_sparse(const Tensor& self, int64_t dim, int64_t index) {
 Tensor select(const Tensor& self, int64_t dim, int64_t index) {
   int64_t ndim = self.dim();
   if (ndim == 0) {
-    AT_INDEX_ERROR("select() cannot be applied to a 0-dim tensor.");
+    TORCH_CHECK_INDEX(false, "select() cannot be applied to a 0-dim tensor.");
   }
   dim = maybe_wrap_dim(dim, ndim);
   auto size = self.size(dim);
   if (index < -size || index >= size) {
     if (self.has_names() && self.names()[dim] != Dimname::wildcard()) {
-      AT_INDEX_ERROR("select(): index ", index, " out of range for tensor of size ",
+      TORCH_CHECK_INDEX(false, "select(): index ", index, " out of range for tensor of size ",
                      self.sizes(), " at dimension ", self.names()[dim]);
     }
-    AT_INDEX_ERROR("select(): index ", index, " out of range for tensor of size ",
+    TORCH_CHECK_INDEX(false, "select(): index ", index, " out of range for tensor of size ",
                    self.sizes(), " at dimension ", dim);
   }
   if (index < 0) {
@@ -767,10 +820,10 @@ Tensor index_select_sparse(const Tensor& self, int64_t dim, const Tensor& index)
     */
   auto ndim = self.dim();
   if (ndim == 0) {
-    AT_INDEX_ERROR("index_select() cannot be applied to a 0-dim tensor.");
+    TORCH_CHECK_INDEX(false, "index_select() cannot be applied to a 0-dim tensor.");
   }
   if (!(index.dim() == 1 && index.dtype() == at::kLong)) {
-    AT_INDEX_ERROR("index_select() argument index must be 1-D long-tensor.");
+    TORCH_CHECK_INDEX(false, "index_select() argument index must be 1-D long-tensor.");
   }
   dim = maybe_wrap_dim(dim, ndim);
   auto size = self.size(dim);
@@ -791,7 +844,7 @@ Tensor index_select_sparse(const Tensor& self, int64_t dim, const Tensor& index)
     for (int64_t i=0; i < new_sizes[dim]; i++) {
       auto idx = index[i].item<int64_t>();
       if (idx < -size || idx >= size) {
-        AT_INDEX_ERROR("index_select(): index contains ", idx, " that is out of range for tensor of size ",
+        TORCH_CHECK_INDEX(false, "index_select(): index contains ", idx, " that is out of range for tensor of size ",
                    self.sizes(), " at dimension ", dim);
       }
       if (idx < 0) {
@@ -830,7 +883,7 @@ Tensor index_select_sparse(const Tensor& self, int64_t dim, const Tensor& index)
 Tensor slice(const Tensor& self, int64_t dim, int64_t start, int64_t end, int64_t step) {
   int64_t ndim = self.dim();
   if (ndim == 0) {
-    AT_INDEX_ERROR("slice() cannot be applied to a 0-dim tensor.");
+    TORCH_CHECK_INDEX(false, "slice() cannot be applied to a 0-dim tensor.");
   }
   dim = maybe_wrap_dim(dim, ndim);
   auto sizes = self.sizes().vec();
@@ -1354,6 +1407,62 @@ Tensor unfold(const Tensor& self, int64_t dimension, int64_t size, int64_t step)
   }
 
   return self.as_strided(new_size, new_stride);
+}
+
+template <typename scalar_t>
+void apply_diag(Tensor& result, const Tensor& self, int64_t dimension) {
+  TORCH_CHECK(self.dim() == 1 || self.dim() == 2, "matrix or a vector expected");
+
+  int64_t i;
+  auto self_data = self.data_ptr<scalar_t>();
+  if (self.dim() == 1) {
+    auto self_size = self.size(0);
+    auto self_stride = self.stride(0);
+    int64_t sz = self_size + std::abs(dimension);
+
+    result.resize_({sz, sz});
+    result.zero_();
+    auto r_data = result.data_ptr<scalar_t>();
+    auto r_stride_0 = result.stride(0);
+    auto r_stride_1 = result.stride(1);
+    r_data += (dimension >= 0 ? dimension*r_stride_1 : -dimension*r_stride_0);
+    
+    for (i = 0; i < self_size; i++) {
+      r_data[i * (r_stride_0 + r_stride_1)] = self_data[i * self_stride];
+    }
+  } else {
+    auto self_stride_0 = self.stride(0);
+    auto self_stride_1 = self.stride(1);
+
+    int64_t sz;
+    if (dimension >= 0) {
+      sz = std::min(self.size(0), self.size(1) - dimension);
+    } else {
+      sz = std::min(self.size(0) + dimension, self.size(1));
+    }
+
+    result.resize_({sz});
+    result.zero_();
+    auto r_data = result.data_ptr<scalar_t>();
+    auto r_stride_0 = result.stride(0);
+    self_data += (dimension >= 0 ? dimension * self_stride_1 : -dimension * self_stride_0);
+    for (i = 0; i < sz; i++) {
+      r_data[i * r_stride_0] = self_data[i * (self_stride_0 + self_stride_1)];
+    }
+  }
+}
+
+Tensor diag(const Tensor& self, int64_t dimension) {
+  Tensor result = at::empty({0}, self.options());
+  at::diag_out(result, self, dimension);
+  return result;
+}
+
+Tensor& diag_out(Tensor &result, const Tensor& self, int64_t dimension) {
+  AT_DISPATCH_ALL_TYPES(self.scalar_type(), "diag", [&] {
+    apply_diag<scalar_t>(result, self, dimension);
+  });
+  return result;
 }
 
 }} // at::native

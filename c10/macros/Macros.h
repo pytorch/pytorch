@@ -23,6 +23,14 @@
 
 #include "c10/macros/Export.h"
 
+#if defined(__clang__)
+  #define __ubsan_ignore_float_divide_by_zero__ __attribute__((no_sanitize("float-divide-by-zero")))
+  #define __ubsan_ignore_float_cast_overflow__ __attribute__((no_sanitize("float-cast-overflow")))
+#else
+  #define __ubsan_ignore_float_divide_by_zero__
+  #define __ubsan_ignore_float_cast_overflow__
+#endif
+
 // Disable the copy and assignment operator for a class. Note that this will
 // disable the usage of the class in std containers.
 #define C10_DISABLE_COPY_AND_ASSIGN(classname) \
@@ -84,8 +92,8 @@
 #endif
 
 // suppress an unused variable.
-#ifdef _MSC_VER
-#define C10_UNUSED
+#if defined(_MSC_VER) && !defined(__clang__)
+#define C10_UNUSED __pragma(warning(suppress: 4100 4101))
 #else
 #define C10_UNUSED __attribute__((__unused__))
 #endif //_MSC_VER
@@ -192,6 +200,10 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 #define C10_WARP_SIZE 32
 #endif
 
+#if defined(_MSC_VER) && _MSC_VER <= 1900
+#define __func__ __FUNCTION__
+#endif
+
 // CUDA_KERNEL_ASSERT is a macro that wraps an assert() call inside cuda
 // kernels. This is not supported by Apple platforms so we special case it.
 // See http://docs.nvidia.com/cuda/cuda-c-programming-guide/#assertion
@@ -199,6 +211,41 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 #define CUDA_KERNEL_ASSERT(...)
 #else // __APPLE__
 #define CUDA_KERNEL_ASSERT(...) assert(__VA_ARGS__)
+#endif // __APPLE__
+
+// CUDA_ALWAYS_ASSERT is similar to CUDA_KERNEL_ASSERT but checks the assertion
+// even when NDEBUG is defined. This is useful for important assertions in CUDA
+// code that when building Release.
+#if defined(__APPLE__) || defined(__HIP_PLATFORM_HCC__)
+// Those platforms do not support assert()
+#define CUDA_ALWAYS_ASSERT(cond)
+#elif defined(_MSC_VER)
+// TODO: This should be defined but I don't have the environment to properly
+// test it. See e.g., https://github.com/pytorch/pytorch/pull/32719#discussion_r379918384
+#define CUDA_ALWAYS_ASSERT(cond)
+#else // __APPLE__, _MSC_VER
+#if defined(NDEBUG)
+extern "C" {
+#if !defined(__CUDA_ARCH__)  || !defined(__clang__)
+  [[noreturn]]
+#endif
+#if (defined(__CUDA_ARCH__) && !(defined(__clang__) && defined(__CUDA__))) || \
+    defined(__HIP_ARCH__) || defined(__HIP__)
+__host__ __device__
+#endif // __CUDA_ARCH__
+    void
+    __assert_fail(
+        const char* assertion,
+        const char* file,
+        unsigned int line,
+        const char* function) throw();
+}
+#endif // NDEBUG
+#define CUDA_ALWAYS_ASSERT(cond)                                         \
+  if (C10_UNLIKELY(!(cond))) {                                           \
+    __assert_fail(#cond, __FILE__, static_cast<unsigned int>(__LINE__),  \
+                  __func__);                                             \
+  }
 #endif // __APPLE__
 
 #ifdef __APPLE__
@@ -218,7 +265,7 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 #endif // ANDROID / IOS / MACOS
 
 // Portably determine if a type T is trivially copyable or not.
-#if __GNUG__ && __GNUC__ < 5
+#if defined(__GNUG__) && __GNUC__ < 5
 #define C10_IS_TRIVIALLY_COPYABLE(T) __has_trivial_copy(T)
 #else
 #define C10_IS_TRIVIALLY_COPYABLE(T) std::is_trivially_copyable<T>::value

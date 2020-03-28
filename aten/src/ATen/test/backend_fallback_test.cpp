@@ -3,7 +3,7 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/core/op_registration/op_registration.h>
-#include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/runtime/operator.h>
 
 using namespace at;
 

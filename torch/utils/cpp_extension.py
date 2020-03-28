@@ -50,8 +50,46 @@ def _find_cuda_home():
         print("No CUDA runtime is found, using CUDA_HOME='{}'".format(cuda_home))
     return cuda_home
 
+def _find_rocm_home():
+    '''Finds the ROCm install path.'''
+    # Guess #1
+    rocm_home = os.environ.get('ROCM_HOME') or os.environ.get('ROCM_PATH')
+    if rocm_home is None:
+        # Guess #2
+        try:
+            hipcc = subprocess.check_output(
+                ['which', 'hipcc']).decode().rstrip('\r\n')
+            # this will be either <ROCM_HOME>/hip/bin/hipcc or <ROCM_HOME>/bin/hipcc
+            rocm_home = os.path.dirname(os.path.dirname(hipcc))
+            if os.path.basename(rocm_home) == 'hip':
+                rocm_home = os.path.dirname(rocm_home)
+        except Exception:
+            # Guess #3
+            rocm_home = '/opt/rocm'
+            if not os.path.exists(rocm_home):
+                rocm_home = None
+    if rocm_home and torch.version.hip is None:
+        print("No ROCm runtime is found, using ROCM_HOME='{}'".format(rocm_home))
+    return rocm_home
 
-MINIMUM_GCC_VERSION = (4, 9, 0)
+
+def _join_rocm_home(*paths):
+    '''
+    Joins paths with ROCM_HOME, or raises an error if it ROCM_HOME is not set.
+
+    This is basically a lazy way of raising an error for missing $ROCM_HOME
+    only once we need to get any ROCm-specific path.
+    '''
+    if ROCM_HOME is None:
+        raise EnvironmentError('ROCM_HOME environment variable is not set. '
+                               'Please set it to your ROCm install root.')
+    elif IS_WINDOWS:
+        raise EnvironmentError('Building PyTorch extensions using '
+                               'ROCm and Windows is not supported.')
+    return os.path.join(ROCM_HOME, *paths)
+
+
+MINIMUM_GCC_VERSION = (5, 0, 0)
 MINIMUM_MSVC_VERSION = (19, 0, 24215)
 ABI_INCOMPATIBILITY_WARNING = '''
 
@@ -59,11 +97,11 @@ ABI_INCOMPATIBILITY_WARNING = '''
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 Your compiler ({}) may be ABI-incompatible with PyTorch!
-Please use a compiler that is ABI-compatible with GCC 4.9 and above.
+Please use a compiler that is ABI-compatible with GCC 5.0 and above.
 See https://gcc.gnu.org/onlinedocs/libstdc++/manual/abi.html.
 
 See https://gist.github.com/goldsborough/d466f43e8ffc948ff92de7486c5216d6
-for instructions on how to install GCC 4.9 or higher.
+for instructions on how to install GCC 5 or higher.
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
                               !! WARNING !!
@@ -85,6 +123,9 @@ with compiling PyTorch from source.
 
                               !! WARNING !!
 '''
+ROCM_HOME = _find_rocm_home()
+MIOPEN_HOME = _join_rocm_home('miopen') if ROCM_HOME else None
+IS_HIP_EXTENSION = True if ((ROCM_HOME is not None) and (torch.version.hip is not None)) else False
 CUDA_HOME = _find_cuda_home()
 CUDNN_HOME = os.environ.get('CUDNN_HOME') or os.environ.get('CUDNN_PATH')
 # PyTorch releases have the version pattern major.minor.patch, whereas when
@@ -92,7 +133,7 @@ CUDNN_HOME = os.environ.get('CUDNN_HOME') or os.environ.get('CUDNN_PATH')
 # it the below pattern.
 BUILT_FROM_SOURCE_VERSION_PATTERN = re.compile(r'\d+\.\d+\.\d+\w+\+\w+')
 
-COMMON_MSVC_FLAGS = ['/MD', '/wd4819', '/EHsc']
+COMMON_MSVC_FLAGS = ['/MD', '/wd4819', '/wd4251', '/EHsc']
 
 COMMON_NVCC_FLAGS = [
     '-D__CUDA_NO_HALF_OPERATORS__',
@@ -101,25 +142,13 @@ COMMON_NVCC_FLAGS = [
     '--expt-relaxed-constexpr'
 ]
 
-# See comment in load_inline for more information
-# The goal is to be able to call the safe version of the
-# function exactly as if it was the original one.
-# We need to create a pointer to this new function to give
-# it to pybind later.
-
-SAFE_FUNCTION_DEFINITION = '''
-#include <functional>
-
-template <typename Ret, typename ...Args>
-auto _get_safe_version(Ret (*f)(Args...)) -> std::function<Ret(Args...)> {{
-    return [f](Args&& ...args) -> Ret {{
-        HANDLE_TH_ERRORS
-        return f(std::forward<Args>(args)...);
-        END_HANDLE_TH_ERRORS_PYBIND
-    }};
-}}
-
-'''
+COMMON_HIPCC_FLAGS = [
+    '-fPIC',
+    '-D__HIP_PLATFORM_HCC__=1',
+    '-DCUDA_HAS_FP16=1',
+    '-D__HIP_NO_HALF_OPERATORS__=1',
+    '-D__HIP_NO_HALF_CONVERSIONS__=1',
+]
 
 JIT_EXTENSION_VERSIONER = ExtensionVersioner()
 
@@ -239,6 +268,12 @@ class BuildExtension(build_ext, object):
     attempt to build using the Ninja backend. Ninja greatly speeds up
     compilation compared to the standard ``setuptools.build_ext``.
     Fallbacks to the standard distutils backend if Ninja is not available.
+
+    .. note::
+        By default, the Ninja backend uses #CPUS + 2 workers to build the
+        extension. This may use up too many resources on some systems. One
+        can control the number of workers by setting the `MAX_JOBS` environment
+        variable to a non-negative number.
     '''
 
     @classmethod
@@ -257,12 +292,15 @@ class BuildExtension(build_ext, object):
         super(BuildExtension, self).__init__(*args, **kwargs)
         self.no_python_abi_suffix = kwargs.get("no_python_abi_suffix", False)
 
-        self.use_ninja = kwargs.get('use_ninja', True)
+        self.use_ninja = kwargs.get('use_ninja', False if IS_HIP_EXTENSION else True)
         if self.use_ninja:
             # Test if we can use ninja. Fallback otherwise.
             msg = ('Attempted to use ninja as the BuildExtension backend but '
                    '{}. Falling back to using the slow distutils backend.')
-            if not _is_ninja_available():
+            if IS_HIP_EXTENSION:
+                warnings.warn(msg.format('HIP extensions is not supported yet for ninja.'))
+                self.use_ninja = False
+            elif not _is_ninja_available():
                 warnings.warn(msg.format('we could not find ninja.'))
                 self.use_ninja = False
 
@@ -273,8 +311,8 @@ class BuildExtension(build_ext, object):
             self._define_torch_extension_name(extension)
             self._add_gnu_cpp_abi_flag(extension)
 
-        # Register .cu and .cuh as valid source extensions.
-        self.compiler.src_extensions += ['.cu', '.cuh']
+        # Register .cu, .cuh and .hip as valid source extensions.
+        self.compiler.src_extensions += ['.cu', '.cuh', '.hip']
         # Save the original _compile method for later.
         if self.compiler.compiler_type == 'msvc':
             self.compiler._cpp_extensions += ['.cu', '.cuh']
@@ -303,15 +341,20 @@ class BuildExtension(build_ext, object):
             try:
                 original_compiler = self.compiler.compiler_so
                 if _is_cuda_file(src):
-                    nvcc = _join_cuda_home('bin', 'nvcc')
+                    nvcc = (_join_rocm_home('bin', 'hipcc') if IS_HIP_EXTENSION else _join_cuda_home('bin', 'nvcc'))
                     if not isinstance(nvcc, list):
                         nvcc = [nvcc]
                     self.compiler.set_executable('compiler_so', nvcc)
                     if isinstance(cflags, dict):
                         cflags = cflags['nvcc']
-                    cflags = unix_cuda_flags(cflags)
+                    if IS_HIP_EXTENSION:
+                        cflags = cflags + _get_rocm_arch_flags(cflags)
+                    else:
+                        cflags = unix_cuda_flags(cflags)
                 elif isinstance(cflags, dict):
                     cflags = cflags['cxx']
+                if IS_HIP_EXTENSION:
+                    cflags = cflags + COMMON_HIPCC_FLAGS
                 append_std14_if_no_std_present(cflags)
 
                 original_compile(obj, src, ext, cc_args, cflags, pp_opts)
@@ -468,13 +511,13 @@ class BuildExtension(build_ext, object):
                                              include_dirs, sources,
                                              depends, extra_postargs)
             common_cflags = extra_preargs or []
-            common_cflags.append('/c')
+            cflags = []
             if debug:
-                common_cflags.extend(self.compiler.compile_options_debug)
+                cflags.extend(self.compiler.compile_options_debug)
             else:
-                common_cflags.extend(self.compiler.compile_options)
+                cflags.extend(self.compiler.compile_options)
             common_cflags.extend(COMMON_MSVC_FLAGS)
-            cflags = common_cflags + pp_opts
+            cflags = cflags + common_cflags + pp_opts
             with_cuda = any(map(_is_cuda_file, sources))
 
             # extra_postargs can be either:
@@ -491,11 +534,8 @@ class BuildExtension(build_ext, object):
             if with_cuda:
                 cuda_cflags = []
                 for common_cflag in common_cflags:
-                    if common_cflag == '/c':
-                        cuda_cflags.append('-c')
-                    else:
-                        cuda_cflags.append('-Xcompiler')
-                        cuda_cflags.append(common_cflag)
+                    cuda_cflags.append('-Xcompiler')
+                    cuda_cflags.append(common_cflag)
                 cuda_cflags.extend(pp_opts)
                 if isinstance(extra_postargs, dict):
                     cuda_post_cflags = extra_postargs['nvcc']
@@ -666,13 +706,17 @@ def CUDAExtension(name, sources, *args, **kwargs):
     kwargs['library_dirs'] = library_dirs
 
     libraries = kwargs.get('libraries', [])
-    libraries.append('cudart')
     libraries.append('c10')
-    libraries.append('c10_cuda')
     libraries.append('torch')
     libraries.append('torch_cpu')
-    libraries.append('torch_cuda')
     libraries.append('torch_python')
+    if IS_HIP_EXTENSION:
+        libraries.append('c10_hip')
+        libraries.append('torch_hip')
+    else:
+        libraries.append('cudart')
+        libraries.append('c10_cuda')
+        libraries.append('torch_cuda')
     kwargs['libraries'] = libraries
 
     include_dirs = kwargs.get('include_dirs', [])
@@ -706,7 +750,12 @@ def include_paths(cuda=False):
         os.path.join(lib_include, 'TH'),
         os.path.join(lib_include, 'THC')
     ]
-    if cuda:
+    if cuda and IS_HIP_EXTENSION:
+        paths.append(os.path.join(lib_include, 'THH'))
+        paths.append(_join_rocm_home('include'))
+        if MIOPEN_HOME is not None:
+            paths.append(os.path.join(MIOPEN_HOME, 'include'))
+    elif cuda:
         cuda_home_include = _join_cuda_home('include')
         # if we have the Debian/Ubuntu packages for cuda, we get /usr as cuda home.
         # but gcc doesn't like having /usr/include passed explicitly
@@ -735,7 +784,10 @@ def library_paths(cuda=False):
     lib_path = os.path.join(torch_path, 'lib')
     paths.append(lib_path)
 
-    if cuda:
+    if cuda and IS_HIP_EXTENSION:
+        lib_dir = 'lib'
+        paths.append(_join_rocm_home(lib_dir))
+    elif cuda:
         if IS_WINDOWS:
             lib_dir = 'lib/x64'
         else:
@@ -922,6 +974,12 @@ def load_inline(name,
         >>> module = load_inline(name='inline_extension',
                                  cpp_sources=[source],
                                  functions=['sin_add'])
+
+    .. note::
+        By default, the Ninja backend uses #CPUS + 2 workers to build the
+        extension. This may use up too many resources on some systems. One
+        can control the number of workers by setting the `MAX_JOBS` environment
+        variable to a non-negative number.
     '''
     build_directory = build_directory or _get_build_directory(name, verbose)
 
@@ -932,11 +990,6 @@ def load_inline(name,
         cuda_sources = [cuda_sources]
 
     cpp_sources.insert(0, '#include <torch/extension.h>')
-
-    # Adds a new `_get_safe_version(foo)` function that returns a new function
-    # that performs the same operation as `foo` but with pytorch error handling
-    # macros.
-    cpp_sources.append(SAFE_FUNCTION_DEFINITION)
 
     # If `functions` is supplied, we create the pybind11 bindings for the user.
     # Here, `functions` is (or becomes, after some processing) a map from
@@ -955,8 +1008,9 @@ def load_inline(name,
                     type(functions)))
         for function_name, docstring in functions.items():
             if with_pytorch_error_handling:
-                module_def.append('m.def("{0}", _get_safe_version({0}), "{1}");'.format(
-                    function_name, docstring))
+                module_def.append(
+                    'm.def("{0}", torch::wrap_pybind_function({0}), "{1}");'
+                    .format(function_name, docstring))
             else:
                 module_def.append('m.def("{0}", {0}, "{1}");'.format(function_name, docstring))
         module_def.append('}')
@@ -1166,6 +1220,9 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose):
         extra_ldflags.append('torch_cpu.lib')
         if with_cuda:
             extra_ldflags.append('torch_cuda.lib')
+            # /INCLUDE is used to ensure torch_cuda is linked against in a project that relies on it.
+            # Related issue: https://github.com/pytorch/pytorch/issues/31611
+            extra_ldflags.append('/INCLUDE:\"?warp_size@cuda@at@@YAHXZ\"')
         extra_ldflags.append('torch.lib')
         extra_ldflags.append('torch_python.lib')
         extra_ldflags.append('/LIBPATH:{}'.format(python_lib_path))
@@ -1266,6 +1323,22 @@ def _get_cuda_arch_flags(cflags=None):
     return list(set(flags))
 
 
+def _get_rocm_arch_flags(cflags=None):
+    # If cflags is given, there may already be user-provided arch flags in it
+    # (from `extra_compile_args`)
+    if cflags is not None:
+        for flag in cflags:
+            if 'amdgpu-target' in flag:
+                return ['-fno-gpu-rdc']
+    return [
+        '--amdgpu-target=gfx803',
+        '--amdgpu-target=gfx900',
+        '--amdgpu-target=gfx906',
+        '--amdgpu-target=gfx908',
+        '-fno-gpu-rdc'
+    ]
+
+
 def _get_build_directory(name, verbose):
     root_extensions_directory = os.environ.get('TORCH_EXTENSIONS_DIR')
     if root_extensions_directory is None:
@@ -1285,7 +1358,23 @@ def _get_build_directory(name, verbose):
     return build_directory
 
 
+def _get_num_workers(verbose):
+    max_jobs = os.environ.get('MAX_JOBS')
+    if max_jobs is not None and max_jobs.isdigit():
+        if verbose:
+            print('Using envvar MAX_JOBS ({}) as the number of workers...'.format(max_jobs))
+        return int(max_jobs)
+    if verbose:
+        print('Allowing ninja to set a default number of workers... '
+              '(overridable by setting the environment variable MAX_JOBS=N)')
+    return None
+
+
 def _run_ninja_build(build_directory, verbose, error_prefix):
+    command = ['ninja', '-v']
+    num_workers = _get_num_workers(verbose)
+    if num_workers is not None:
+        command.extend(['-j', str(num_workers)])
     try:
         sys.stdout.flush()
         sys.stderr.flush()
@@ -1304,14 +1393,14 @@ def _run_ninja_build(build_directory, verbose, error_prefix):
             # it is valid.
             stdout_fileno = 1
             subprocess.run(
-                ['ninja', '-v'],
+                command,
                 stdout=stdout_fileno if verbose else subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 cwd=build_directory,
                 check=True)
         else:
             subprocess.check_output(
-                ['ninja', '-v'],
+                command,
                 stderr=subprocess.STDOUT,
                 cwd=build_directory)
     except subprocess.CalledProcessError:
@@ -1566,4 +1655,7 @@ def _join_cuda_home(*paths):
 
 
 def _is_cuda_file(path):
-    return os.path.splitext(path)[1] in ['.cu', '.cuh']
+    valid_ext = ['.cu', '.cuh']
+    if IS_HIP_EXTENSION:
+        valid_ext.append('.hip')
+    return os.path.splitext(path)[1] in valid_ext

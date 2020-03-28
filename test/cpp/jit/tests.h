@@ -3,8 +3,8 @@
 /**
  * See README.md for instructions on how to add a new test.
  */
-#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <c10/macros/Export.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 
 namespace torch {
 namespace jit {
@@ -26,7 +26,6 @@ namespace jit {
   _(DifferentiateWithRequiresGrad)     \
   _(FromQualString)                    \
   _(InternedStrings)                   \
-  _(IValue)                            \
   _(PassManagement)                    \
   _(Proto)                             \
   _(RegisterFusionCachesKernel)        \
@@ -42,7 +41,6 @@ namespace jit {
   _(MemoryDAG)                         \
   _(IRParser)                          \
   _(ConstantPooling)                   \
-  _(NetDefConverter)                   \
   _(THNNConv)                          \
   _(ATenNativeBatchNorm)               \
   _(NoneSchemaMatch)                   \
@@ -58,12 +56,15 @@ namespace jit {
   _(SubgraphRewriter)                  \
   _(ModuleClone)                       \
   _(ModuleCloneInstance)               \
+  _(ModuleConstant)                    \
+  _(ModuleParameter)                   \
   _(ModuleDefine)                      \
   _(QualifiedName)                     \
   _(ClassImport)                       \
   _(ProfiledTensorTypeHashing)         \
   _(ScriptObject)                      \
   _(SaveExtraFilesHook)                \
+  _(TypeTags)                          \
   _(DCE)                               \
   _(CustomFusionNestedBlocks)          \
   _(ClassDerive)                       \
@@ -75,12 +76,17 @@ namespace jit {
   _(LiteInterpreterConv)               \
   _(LiteInterpreterInline)             \
   _(LiteInterpreterTuple)              \
-  _(LiteInterpreterPrimOverload)       \
   _(LiteInterpreterUpsampleNearest2d)  \
   _(CommonAncestor)                    \
   _(AutogradSymbols)                   \
   _(MobileTypeParser)                  \
-  _(LiteInterpreterPrim)
+  _(LiteInterpreterBuiltinFunction)    \
+  _(LiteInterpreterPrim)               \
+  _(LiteInterpreterLoadOrigJit)        \
+  _(LiteInterpreterWrongMethodName)    \
+  _(LiteInterpreterParams)             \
+  _(LiteInterpreterSetState)           \
+  _(TorchbindIValueAPI)
 
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \

@@ -70,6 +70,8 @@ factory_common_args = merge_dicts(common_args, parse_kwargs("""
         returned tensor. Default: ``False``.
     pin_memory (bool, optional): If set, returned tensor would be allocated in
         the pinned memory. Works only for CPU tensors. Default: ``False``.
+    memory_format (:class:`torch.memory_format`, optional): the desired memory format of
+        returned Tensor. Default: ``torch.contiguous_format``.
 """))
 
 factory_like_common_args = parse_kwargs("""
@@ -84,6 +86,8 @@ factory_like_common_args = parse_kwargs("""
         returned tensor. Default: ``False``.
     pin_memory (bool, optional): If set, returned tensor would be allocated in
         the pinned memory. Works only for CPU tensors. Default: ``False``.
+    memory_format (:class:`torch.memory_format`, optional): the desired memory format of
+        returned Tensor. Default: ``torch.preserve_format``.
 """)
 
 factory_data_common_args = parse_kwargs("""
@@ -204,7 +208,7 @@ Example::
             [-1.7724],
             [-0.5811],
             [-0.8017]])
-    >>> torch.add(a, 10, b)
+    >>> torch.add(a, b, alpha=10)
     tensor([[  2.7695,   3.3930,   4.3672,   4.1450],
             [-18.6971, -18.0736, -17.0994, -17.3216],
             [ -6.7845,  -6.1610,  -5.1868,  -5.4090],
@@ -261,9 +265,22 @@ addcdiv(input, tensor1, tensor2, *, value=1, out=None) -> Tensor
 Performs the element-wise division of :attr:`tensor1` by :attr:`tensor2`,
 multiply the result by the scalar :attr:`value` and add it to :attr:`input`.
 
+.. warning::
+    Integer division with addcdiv is deprecated, and in a future release
+    addcdiv will perform a true division of :attr:`tensor1` and :attr:`tensor2`.
+    The current addcdiv behavior can be replicated using :func:`floor_divide`
+    for integral inputs
+    (:attr:`input` + :attr:`value` * :attr:`tensor1` // :attr:`tensor2`)
+    and :func:`div` for float inputs
+    (:attr:`input` + :attr:`value` * :attr:`tensor1` / :attr:`tensor2`).
+    The new addcdiv behavior can be implemented with :func:`true_divide`
+    (:attr:`input` + :attr:`value` * torch.true_divide(:attr:`tensor1`,
+    :attr:`tensor2`).
+
 .. math::
     \text{out}_i = \text{input}_i + \text{value} \times \frac{\text{tensor1}_i}{\text{tensor2}_i}
 """ + r"""
+
 The shapes of :attr:`input`, :attr:`tensor1`, and :attr:`tensor2` must be
 :ref:`broadcastable <broadcasting-semantics>`.
 
@@ -1382,16 +1399,20 @@ Example::
 add_docstr(torch.cummax,
            r"""
 cummax(input, dim, out=None) -> (Tensor, LongTensor)
-Returns a namedtuple ``(values, indices)`` where ``values``is the cumulative maximum of
+Returns a namedtuple ``(values, indices)`` where ``values`` is the cumulative maximum of
 elements of :attr:`input` in the dimension :attr:`dim`. And ``indices`` is the index
 location of each maximum value found in the dimension :attr:`dim`.
+
 .. math::
     y_i = max(x_1, x_2, x_3, \dots, x_i)
+
 Args:
     {input}
     dim  (int): the dimension to do the operation over
     out (tuple, optional): the result tuple of two output tensors (values, indices)
+
 Example::
+
     >>> a = torch.randn(10)
     >>> a
     tensor([-0.3449, -1.5447,  0.0685, -1.5104, -1.1706,  0.2259,  1.4696, -1.3284,
@@ -1406,16 +1427,20 @@ Example::
 add_docstr(torch.cummin,
            r"""
 cummin(input, dim, out=None) -> (Tensor, LongTensor)
-Returns a namedtuple ``(values, indices)`` where ``values``is the cumulative maximum of
+Returns a namedtuple ``(values, indices)`` where ``values`` is the cumulative minimum of
 elements of :attr:`input` in the dimension :attr:`dim`. And ``indices`` is the index
 location of each maximum value found in the dimension :attr:`dim`.
+
 .. math::
-    y_i = max(x_1, x_2, x_3, \dots, x_i)
+    y_i = min(x_1, x_2, x_3, \dots, x_i)
+
 Args:
     {input}
     dim  (int): the dimension to do the operation over
     out (tuple, optional): the result tuple of two output tensors (values, indices)
+
 Example::
+
     >>> a = torch.randn(10)
     >>> a
     tensor([-0.2284, -0.6628,  0.0975,  0.2680, -1.3298, -0.4220, -0.3885,  1.1762,
@@ -1491,6 +1516,23 @@ Example::
     tensor([-0.8286, -1.3175, -0.8020,  0.0423,  0.2289,  0.0537, -2.0058,
             -1.8209, -2.9780, -3.4022])
 """.format(**reduceops_common_args))
+
+add_docstr(torch.dequantize,
+           r"""
+.. function:: dequantize(tensor) -> Tensor
+
+Given a quantized Tensor, dequantize it and return an fp32 Tensor
+
+Args:
+    tensor (Tensor): A quantized Tensor
+
+.. function:: dequantize(tensors) -> sequence of Tensors
+
+Given a list of quantized Tensors, dequantize them and return a list of fp32 Tensors
+
+Args:
+     tensors (sequence of Tensors): A list of quantized Tensors
+""")
 
 add_docstr(torch.diag,
            r"""
@@ -1771,6 +1813,12 @@ add_docstr(torch.div,
 
 Divides each element of the input ``input`` with the scalar ``other`` and
 returns a new resulting tensor.
+
+.. warning::
+    Integer division using div is deprecated, and in a future release div will
+    perform true division like :func:`torch.true_divide`.
+    Use :func:`torch.floor_divide` (// in Python) to perform integer division,
+    instead.
 
 .. math::
     \text{{out}}_i = \frac{{\text{{input}}_i}}{{\text{{other}}}}
@@ -2072,7 +2120,7 @@ Example::
 
 add_docstr(torch.floor_divide,
            r"""
-floor_divide(input, other) -> Tensor
+floor_divide(input, other, out=None) -> Tensor
 
 Return the division of the inputs rounded down to the nearest integer. See :func:`torch.div`
 for type promotion and broadcasting rules.
@@ -2084,6 +2132,9 @@ for type promotion and broadcasting rules.
 Args:
     input (Tensor): the numerator tensor
     other (Tensor or Scalar): the denominator
+
+Keyword args:
+    {out}
 
 Example::
 
@@ -2148,8 +2199,9 @@ the tensor will be reflected in the :attr:`ndarray` and vice versa. The returned
 tensor is not resizable.
 
 It currently accepts :attr:`ndarray` with dtypes of ``numpy.float64``,
-``numpy.float32``, ``numpy.float16``, ``numpy.int64``, ``numpy.int32``,
-``numpy.int16``, ``numpy.int8``, ``numpy.uint8``, and ``numpy.bool``.
+``numpy.float32``, ``numpy.float16``, ``numpy.complex64``, ``numpy.complex128``,
+``numpy.int64``, ``numpy.int32``, ``numpy.int16``, ``numpy.int8``, ``numpy.uint8``,
+and ``numpy.bool``.
 
 Example::
 
@@ -2414,6 +2466,8 @@ The elements are sorted into equal width bins between :attr:`min` and
 :attr:`max`. If :attr:`min` and :attr:`max` are both zero, the minimum and
 maximum values of the data are used.
 
+Elements lower than min and higher than max are ignored.
+
 Args:
     {input}
     bins (int): number of histogram bins
@@ -2580,6 +2634,17 @@ is_floating_point(input) -> (bool)
 
 Returns True if the data type of :attr:`input` is a floating point data type i.e.,
 one of ``torch.float64``, ``torch.float32`` and ``torch.float16``.
+
+Args:
+    input (Tensor): the PyTorch tensor to test
+""")
+
+add_docstr(torch.is_complex,
+           r"""
+is_complex(input) -> (bool)
+
+Returns True if the data type of :attr:`input` is a floating point data type i.e.,
+one of ``torch.complex64``, and ``torch.float128``.
 
 Args:
     input (Tensor): the PyTorch tensor to test
@@ -4145,7 +4210,7 @@ Example::
 
 add_docstr(torch.ones_like,
            r"""
-ones_like(input, dtype=None, layout=None, device=None, requires_grad=False) -> Tensor
+ones_like(input, dtype=None, layout=None, device=None, requires_grad=False, memory_format=torch.preserve_format) -> Tensor
 
 Returns a tensor filled with the scalar value `1`, with the same size as
 :attr:`input`. ``torch.ones_like(input)`` is equivalent to
@@ -4162,6 +4227,7 @@ Args:
     {layout}
     {device}
     {requires_grad}
+    {memory_format}
 
 Example::
 
@@ -4478,7 +4544,7 @@ Example::
 
 add_docstr(torch.rand_like,
            r"""
-rand_like(input, dtype=None, layout=None, device=None, requires_grad=False) -> Tensor
+rand_like(input, dtype=None, layout=None, device=None, requires_grad=False, memory_format=torch.preserve_format) -> Tensor
 
 Returns a tensor with the same size as :attr:`input` that is filled with
 random numbers from a uniform distribution on the interval :math:`[0, 1)`.
@@ -4491,6 +4557,7 @@ Args:
     {layout}
     {device}
     {requires_grad}
+    {memory_format}
 
 """.format(**factory_like_common_args))
 
@@ -4539,7 +4606,8 @@ Example::
 
 add_docstr(torch.randint_like,
            r"""
-randint_like(input, low=0, high, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
+randint_like(input, low=0, high, dtype=None, layout=torch.strided, device=None, requires_grad=False,
+memory_format=torch.preserve_format) -> Tensor
 
 Returns a tensor with the same shape as Tensor :attr:`input` filled with
 random integers generated uniformly between :attr:`low` (inclusive) and
@@ -4557,6 +4625,7 @@ Args:
     {layout}
     {device}
     {requires_grad}
+    {memory_format}
 
 """.format(**factory_like_common_args))
 
@@ -4593,7 +4662,7 @@ Example::
 
 add_docstr(torch.randn_like,
            r"""
-randn_like(input, dtype=None, layout=None, device=None, requires_grad=False) -> Tensor
+randn_like(input, dtype=None, layout=None, device=None, requires_grad=False, memory_format=torch.preserve_format) -> Tensor
 
 Returns a tensor with the same size as :attr:`input` that is filled with
 random numbers from a normal distribution with mean 0 and variance 1.
@@ -4606,6 +4675,7 @@ Args:
     {layout}
     {device}
     {requires_grad}
+    {memory_format}
 
 """.format(**factory_like_common_args))
 
@@ -5610,7 +5680,7 @@ Example::
     >>> x
     tensor([ 2.4320, -0.4608,  0.7702])
     >>> torch.t(x)
-    tensor([.2.4320,.-0.4608,..0.7702])
+    tensor([ 2.4320, -0.4608,  0.7702])
     >>> x = torch.randn(2, 3)
     >>> x
     tensor([[ 0.4875,  0.9158, -0.5872],
@@ -6144,6 +6214,35 @@ Example::
             [1, 2, 2]])
 """.format(**factory_common_args))
 
+add_docstr(torch.true_divide,
+           r"""
+true_divide(dividend, divisor) -> Tensor
+
+Performs "true division" that always computes the division
+in floating point. Analogous to division in Python 3 and equivalent to
+:func:`torch.div` except when both inputs have bool or integer scalar types,
+in which case they are cast to the default (floating) scalar type before the division.
+
+.. math::
+    \text{{out}}_i = \frac{{\text{{dividend}}_i}}{{\text{{divisor}}}}
+
+Args:
+    dividend (Tensor): the dividend
+    divisor (Tensor or Scalar): the divisor
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> dividend = torch.tensor([5, 3], dtype=torch.int)
+    >>> divisor = torch.tensor([3, 2], dtype=torch.int)
+    >>> torch.true_divide(dividend, divisor)
+    tensor([1.6667, 1.5000])
+    >>> torch.true_divide(dividend, 2)
+    tensor([2.5000, 1.5000])
+""".format(**common_args))
+
 add_docstr(torch.trunc,
            r"""
 trunc(input, out=None) -> Tensor
@@ -6166,7 +6265,7 @@ Example::
 
 add_docstr(torch.unsqueeze,
            r"""
-unsqueeze(input, dim, out=None) -> Tensor
+unsqueeze(input, dim) -> Tensor
 
 Returns a new tensor with a dimension of size one inserted at the
 specified position.
@@ -6180,7 +6279,6 @@ applied at :attr:`dim` = ``dim + input.dim() + 1``.
 Args:
     {input}
     dim (int): the index at which to insert the singleton dimension
-    {out}
 
 Example::
 
@@ -6322,7 +6420,7 @@ Example::
 
 add_docstr(torch.zeros_like,
            r"""
-zeros_like(input, dtype=None, layout=None, device=None, requires_grad=False) -> Tensor
+zeros_like(input, dtype=None, layout=None, device=None, requires_grad=False, memory_format=torch.preserve_format) -> Tensor
 
 Returns a tensor filled with the scalar value `0`, with the same size as
 :attr:`input`. ``torch.zeros_like(input)`` is equivalent to
@@ -6339,6 +6437,7 @@ Args:
     {layout}
     {device}
     {requires_grad}
+    {memory_format}
 
 Example::
 
@@ -6364,6 +6463,7 @@ Args:
     {device}
     {requires_grad}
     {pin_memory}
+    {memory_format}
 
 Example::
 
@@ -6376,7 +6476,7 @@ Example::
 
 add_docstr(torch.empty_like,
            r"""
-empty_like(input, dtype=None, layout=None, device=None, requires_grad=False) -> Tensor
+empty_like(input, dtype=None, layout=None, device=None, requires_grad=False, memory_format=torch.preserve_format) -> Tensor
 
 Returns an uninitialized tensor with the same size as :attr:`input`.
 ``torch.empty_like(input)`` is equivalent to
@@ -6388,6 +6488,7 @@ Args:
     {layout}
     {device}
     {requires_grad}
+    {memory_format}
 
 Example::
 
@@ -6438,6 +6539,13 @@ full(size, fill_value, out=None, dtype=None, layout=torch.strided, device=None, 
 
 Returns a tensor of size :attr:`size` filled with :attr:`fill_value`.
 
+.. warning::
+    In PyTorch 1.5 a bool or integral :attr:`fill_value` will produce a warning if
+    :attr:`dtype` or :attr:`out` are not set.
+    In a future PyTorch release, when :attr:`dtype` and :attr:`out` are not set
+    a bool :attr:`fill_value` will return a tensor of torch.bool dtype,
+    and an integral :attr:`fill_value` will return a tensor of torch.long dtype.
+
 Args:
     size (int...): a list, tuple, or :class:`torch.Size` of integers defining the
         shape of the output tensor.
@@ -6458,7 +6566,8 @@ Example::
 
 add_docstr(torch.full_like,
            r"""
-full_like(input, fill_value, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
+full_like(input, fill_value, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False,
+memory_format=torch.preserve_format) -> Tensor
 
 Returns a tensor with the same size as :attr:`input` filled with :attr:`fill_value`.
 ``torch.full_like(input, fill_value)`` is equivalent to
@@ -6471,6 +6580,7 @@ Args:
     {layout}
     {device}
     {requires_grad}
+    {memory_format}
 """.format(**factory_like_common_args))
 
 add_docstr(torch.det,

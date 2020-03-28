@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/ATen.h>
+#include <ATen/ExpandUtils.h>
 #include <c10/macros/Macros.h>
 
 // ROCM hcc doesn't work well with using std:: in kernel functions
@@ -176,7 +177,7 @@ C10_DEVICE static inline scalar_t digamma_one(scalar_t x) {
 // Computes the reparameterized gradient -(d/dalpha cdf(x;alpha)) / pdf(x;alpha)
 // for random number x drawn from a standard Gamma distribution Gamma(alpha).
 template <typename scalar_t, typename accscalar_t>
-C10_DEVICE scalar_t standard_gamma_grad_one(scalar_t alpha_, scalar_t x_) {
+C10_HOST_DEVICE scalar_t standard_gamma_grad_one(scalar_t alpha_, scalar_t x_) {
   // Use a Taylor series expansion for small x.
   accscalar_t x = static_cast<accscalar_t>(x_);
   accscalar_t alpha = static_cast<accscalar_t>(alpha_);
@@ -323,7 +324,7 @@ C10_DEVICE static inline scalar_t _beta_grad_alpha_mid(accscalar_t x, accscalar_
 // This function inputs total=alpha+beta to make it easy to implement
 // Dirichlet reparameterized gradients in terms of Betas.
 template<typename scalar_t, typename accscalar_t>
-C10_DEVICE static inline scalar_t dirichlet_grad_one(scalar_t x, scalar_t alpha, scalar_t total) {
+C10_HOST_DEVICE static inline scalar_t dirichlet_grad_one(scalar_t x, scalar_t alpha, scalar_t total) {
   accscalar_t x_ = static_cast<accscalar_t>(x);
   accscalar_t alpha_ = static_cast<accscalar_t>(alpha);
   accscalar_t total_ = static_cast<accscalar_t>(total);

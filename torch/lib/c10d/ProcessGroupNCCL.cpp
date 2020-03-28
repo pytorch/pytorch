@@ -328,10 +328,10 @@ void ProcessGroupNCCL::ncclCommWatchdogInternal() {
         }
 
         if (checkForNCCLErrors(ncclComms)) {
-          LOG(INFO) << "Received NCCL errors for communicators in the cache, "
-                       "aborting the communicators.";
+          LOG(INFO) << "Received NCCL errors for communicators in the cache";
 
           if (blockingWait_) {
+            LOG(INFO) << "Aborting communicators that received errors";
             // We should not abort the communicators if we are performing a
             // non-blocking wait(). The reason for this is that if we abort the
             // nccl communicator, wait() might not throw exceptions and
@@ -450,7 +450,7 @@ void ProcessGroupNCCL::broadcastUniqueNCCLID(ncclUniqueId* ncclID) {
     store_->set(storeKey, vec);
   } else {
     auto vec = store_->get(storeKey);
-    AT_CHECK(vec.size() == NCCL_UNIQUE_ID_BYTES);
+    TORCH_CHECK(vec.size() == NCCL_UNIQUE_ID_BYTES);
     std::memcpy(ncclID, vec.data(), vec.size());
   }
 }

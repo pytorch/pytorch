@@ -22,7 +22,7 @@ CAFFE2_API void init_num_threads();
 // Sets the number of threads to be used in parallel region
 CAFFE2_API void set_num_threads(int);
 
-// Returns the number of threads used in parallel region
+// Returns the maximum number of threads that may be used in a parallel region
 CAFFE2_API int get_num_threads();
 
 // Returns the current thread number (starting from 0)

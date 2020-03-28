@@ -41,7 +41,8 @@ public:
                               const Vec256<float>& mask) {
     return _mm256_blendv_ps(a.values, b.values, mask.values);
   }
-  static Vec256<float> arange(float base = 0.f, float step = 1.f) {
+  template<typename step_t>
+  static Vec256<float> arange(float base = 0.f, step_t step = static_cast<step_t>(1)) {
     return Vec256<float>(
       base,            base +     step, base + 2 * step, base + 3 * step,
       base + 4 * step, base + 5 * step, base + 6 * step, base + 7 * step);
@@ -72,8 +73,9 @@ public:
     if (count == size())
       return _mm256_loadu_ps(reinterpret_cast<const float*>(ptr));
     __at_align32__ float tmp_values[size()];
-    // Ensure uninitialized memory does not change the output value
-    // See https://github.com/pytorch/pytorch/issues/32502 for more details
+    // Ensure uninitialized memory does not change the output value See https://github.com/pytorch/pytorch/issues/32502
+    // for more details. We do not initialize arrays to zero using "={0}" because gcc would compile it to two
+    // instructions while a loop would be compiled to one instruction.
     for (auto i = 0; i < size(); ++i) {
       tmp_values[i] = 0.0;
     }
@@ -98,9 +100,9 @@ public:
     return _mm256_movemask_ps(cmp);
   }
   Vec256<float> map(float (*f)(float)) const {
-    __at_align32__ float tmp[8];
+    __at_align32__ float tmp[size()];
     store(tmp);
-    for (int64_t i = 0; i < 8; i++) {
+    for (int64_t i = 0; i < size(); i++) {
       tmp[i] = f(tmp[i]);
     }
     return loadu(tmp);
@@ -147,6 +149,9 @@ public:
   }
   Vec256<float> expm1() const {
     return Vec256<float>(Sleef_expm1f8_u10(values));
+  }
+  Vec256<float> fmod(const Vec256<float>& q) const {
+    return Vec256<float>(Sleef_fmodf8(values, q));
   }
   Vec256<float> log() const {
     return Vec256<float>(Sleef_logf8_u10(values));

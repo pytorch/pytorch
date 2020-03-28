@@ -33,7 +33,10 @@ class TORCH_API DistEngine {
   // these variables and accumulate all the gradients in the current autograd
   // context on each node. This method is used to kickoff distributed autograd
   // on a single node.
-  void execute(const torch::autograd::variable_list& roots, bool retainGraph);
+  void execute(
+      int64_t context_id,
+      const torch::autograd::variable_list& roots,
+      bool retainGraph);
 
   // Given a send function to execute in the autograd engine, ensures we compute
   // dependencies once for this node and enqueues the send function for execute

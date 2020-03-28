@@ -257,7 +257,8 @@ class QLinearPackWeightFp16 final : public c10::OperatorKernel {
     const unsigned short significand_bits = value & 0x3ff;
 
     const float sign = sign_bits ? -1 : 1;
-    const float significand = 1 + significand_bits * 0x1p-10;
+    const float significand = 1 +
+        significand_bits * 0.0009765625f; // 0.0009765625f = 0x1p-10 = 2^-10;
     const float exponent = exponent_bits - 0xf;
 
     return sign * std::ldexp(significand, exponent);
@@ -297,11 +298,21 @@ class QLinearPackWeightFp16 final : public c10::OperatorKernel {
 static auto registry =
     c10::RegisterOperators()
         .op("quantized::linear_prepack(Tensor W, Tensor? B=None) -> Tensor W_prepack",
-            c10::RegisterOperators::options().kernel<QLinearPackWeightInt8>(
-                DispatchKey::QuantizedCPUTensorId))
+            c10::RegisterOperators::options()
+            .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
+            .kernel<QLinearPackWeightInt8>(DispatchKey::QuantizedCPUTensorId))
         .op("quantized::linear_prepack_fp16(Tensor W, Tensor? B=None) -> Tensor W_prepack",
-            c10::RegisterOperators::options().kernel<QLinearPackWeightFp16>(
-                DispatchKey::CPUTensorId));
+            c10::RegisterOperators::options()
+            .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
+            .kernel<QLinearPackWeightFp16>(DispatchKey::CPUTensorId))
+        .op("_quantized::linear_prepack(Tensor W, Tensor? B=None) -> Tensor W_prepack",
+            c10::RegisterOperators::options()
+            .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
+            .kernel<QLinearPackWeightInt8>(DispatchKey::QuantizedCPUTensorId))
+        .op("_quantized::linear_prepack_fp16(Tensor W, Tensor? B=None) -> Tensor W_prepack",
+            c10::RegisterOperators::options()
+            .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
+            .kernel<QLinearPackWeightFp16>(DispatchKey::CPUTensorId));
 
 } // namespace
 } // namespace native

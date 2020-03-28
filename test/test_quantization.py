@@ -14,7 +14,7 @@ from torch.quantization import \
     default_dynamic_qconfig, per_channel_dynamic_qconfig, HistogramObserver, MinMaxObserver, \
     PerChannelMinMaxObserver, RecordingObserver, MovingAverageMinMaxObserver, \
     MovingAveragePerChannelMinMaxObserver, QuantWrapper, default_eval_fn, \
-    float16_dynamic_qconfig
+    float16_dynamic_qconfig, MinMaxDynamicQuantObserver
 
 from torch.quantization import QConfig
 from torch.quantization import default_histogram_observer
@@ -23,7 +23,7 @@ from torch.quantization import default_per_channel_weight_observer
 from torch.quantization import default_per_channel_qconfig
 from torch.quantization._quantize_script import quantize_script
 
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, TEST_WITH_UBSAN, IS_WINDOWS
 from torch.testing._internal.common_quantization import QuantizationTestCase, \
     AnnotatedSingleLayerLinearModel, SingleLayerLinearModel, \
     AnnotatedConvModel, ConvModel, \
@@ -311,6 +311,44 @@ class EagerModePostTrainingQuantTest(QuantizationTestCase):
 
         checkQuantized(model)
 
+    @given(qengine=st.sampled_from(("qnnpack", "fbgemm")))
+    def test_save_load_state_dict(self, qengine):
+        r"""Test PTQ flow of creating a model and quantizing it and saving the quantized state_dict
+        Load the quantized state_dict for eval and compare results against original model
+        """
+        if qengine == 'qnnpack':
+            if IS_WINDOWS or TEST_WITH_UBSAN:
+                return
+        with override_quantized_engine(qengine):
+            model = TwoLayerLinearModel()
+            model = torch.quantization.QuantWrapper(model)
+            model.qconfig = torch.quantization.get_default_qconfig(qengine)
+
+            model = prepare(model)
+            # calibrate
+            test_only_eval_fn(model, self.calib_data)
+            model = convert(model)
+            x = torch.rand(2, 5, dtype=torch.float)
+            ref = model(x)
+
+            quant_state_dict = model.state_dict()
+
+            # Create model again for eval
+            model = TwoLayerLinearModel()
+            model = torch.quantization.QuantWrapper(model)
+            model.qconfig = torch.quantization.get_default_qconfig(qengine)
+            model = prepare(model)
+            model = convert(model)
+            new_state_dict = model.state_dict()
+
+            # Check to make sure the state dict keys match original model after convert.
+            self.assertEqual(set(new_state_dict.keys()), set(quant_state_dict.keys()))
+
+            model.load_state_dict(quant_state_dict)
+
+            out = model(x)
+            self.assertEqual(ref, out)
+
 @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
                      " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
                      " with instruction set support avx2 or newer.")
@@ -535,9 +573,12 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
         checkQuantized(model)
 
     @unittest.skip("temporarily disable the test")
-    @given(qengine=st.sampled_from(("qnnpack", "fbgemm")))
+    @given(qengine=st.sampled_from(("fbgemm",)))
     def test_quantized_rnn(self, qengine):
         d_in, d_hid = 2, 2
+
+        # TODO: qlinear_prepack_fp16 currently doesn't support QNNPACK
+        # re-add "qnnpack" to the engine set when this is supported
 
         with override_quantized_engine(qengine):
             model = LSTMDynamicModel().eval()
@@ -793,6 +834,59 @@ class EagerModeQuantizationAwareTrainingTest(QuantizationTestCase):
         model = quantize_qat(model, test_only_train_fn, self.img_data)
         checkQuantized(model)
 
+    @given(qengine=st.sampled_from(("qnnpack", "fbgemm")))
+    def test_train_save_load_eval(self, qengine):
+        r"""Test QAT flow of creating a model, doing QAT and saving the quantized state_dict
+        During eval, we first call prepare_qat and conver on the model and then load the state_dict
+        and compare results against original model
+        """
+        if qengine == 'qnnpack':
+            if IS_WINDOWS or TEST_WITH_UBSAN:
+                return
+        with override_quantized_engine(qengine):
+            model = TwoLayerLinearModel()
+            model = torch.quantization.QuantWrapper(model)
+            model.qconfig = torch.quantization.get_default_qat_qconfig(qengine)
+            model = prepare_qat(model)
+
+            fq_state_dict = model.state_dict()
+
+            test_only_train_fn(model, self.train_data)
+            model = convert(model)
+
+            quant_state_dict = model.state_dict()
+
+            x = torch.rand(2, 5, dtype=torch.float)
+            ref = model(x)
+
+            # Create model again for eval. Check result using quantized state_dict
+            model = TwoLayerLinearModel()
+            model = torch.quantization.QuantWrapper(model)
+            model.qconfig = torch.quantization.get_default_qat_qconfig(qengine)
+            torch.quantization.prepare_qat(model, inplace=True)
+            new_state_dict = model.state_dict()
+
+            # Check to make sure the model after prepare_qat has the same state_dict as original.
+            self.assertEqual(set(fq_state_dict.keys()), set(new_state_dict.keys()))
+
+            torch.quantization.convert(model, inplace=True)
+            model.eval()
+            model.load_state_dict(quant_state_dict)
+            out = model(x)
+            self.assertEqual(ref, out)
+
+            # Check model created using prepare has same state dict as quantized state_dict
+            model = TwoLayerLinearModel()
+            model.eval()
+            model = torch.quantization.QuantWrapper(model)
+            model.qconfig = torch.quantization.get_default_qconfig(qengine)
+            torch.quantization.prepare(model, inplace=True)
+            torch.quantization.convert(model, inplace=True)
+            self.assertEqual(set(model.state_dict().keys()), set(quant_state_dict.keys()))
+            model.eval()
+            model.load_state_dict(quant_state_dict)
+            out = model(x)
+            self.assertEqual(ref, out)
 
 @unittest.skipUnless(
     'fbgemm' in torch.backends.quantized.supported_engines,
@@ -805,8 +899,8 @@ class GraphModePostTrainingQuantTest(QuantizationTestCase):
         eager mode and graph mode
         """
         # eager mode
-        annotated_linear_model = AnnotatedSingleLayerLinearModel()
-        linear_model = SingleLayerLinearModel()
+        annotated_linear_model = AnnotatedSingleLayerLinearModel().eval()
+        linear_model = SingleLayerLinearModel().eval()
         # copy the weight from eager mode so that we can
         # compare the result of the two quantized models later
         linear_model.fc1.weight = torch.nn.Parameter(annotated_linear_model.fc1.module.weight.detach())
@@ -920,10 +1014,10 @@ class GraphModePostTrainingQuantTest(QuantizationTestCase):
 
     def test_nested(self):
         # Eager mode
-        eager_model = AnnotatedNestedModel()
+        eager_model = AnnotatedNestedModel().eval()
 
         # Graph mode
-        script_model = NestedModel()
+        script_model = NestedModel().eval()
         # Copy weights for eager_model
         script_model.sub1.fc.weight = torch.nn.Parameter(eager_model.sub1.fc.weight.detach())
         script_model.sub1.fc.bias = torch.nn.Parameter(eager_model.sub1.fc.bias.detach())
@@ -1044,6 +1138,8 @@ class FusionTest(QuantizationTestCase):
         model = ModelForFusion(default_qconfig)
         model.eval()
         model = fuse_modules(model, [['conv1', 'bn1', 'relu1'] ,
+                             ['conv2', 'relu2'],
+                             ['bn2', 'relu3'],
                              ['sub1.conv', 'sub1.bn']])
         self.assertEqual(type(model.conv1), nni.ConvReLU2d,
                          "Fused Conv + BN + Relu first layer (BN is folded)")
@@ -1054,6 +1150,18 @@ class FusionTest(QuantizationTestCase):
         self.assertEqual(type(model.bn1), nn.Identity,
                          "Fused Conv + BN + Relu second layer (Skipped BN)")
         self.assertEqual(type(model.relu1), nn.Identity,
+                         "Fused Conv + BN + Relu second layer (Skipped Relu)")
+        self.assertEqual(type(model.conv2), nni.ConvReLU3d,
+                         "Fused Conv + BN + Relu first layer (BN is folded)")
+        self.assertEqual(type(model.bn2), nni.BNReLU3d,
+                         "Fused BN + Relu first layer (Relu is folded))")
+        self.assertEqual(type(model.relu3), nn.Identity,
+                         "Fused BN + Relu second layer (Skipped Relu)")
+        self.assertEqual(type(model.conv2[0]), nn.Conv3d,
+                         "Fused Conv + BN + Relu (Conv + folded BN only)")
+        self.assertEqual(type(model.conv2[1]), nn.ReLU,
+                         "Fused Conv + BN + Relu second layer (Relu only)")
+        self.assertEqual(type(model.relu2), nn.Identity,
                          "Fused Conv + BN + Relu second layer (Skipped Relu)")
 
         self.assertEqual(type(model.sub1.conv), nn.Conv2d,
@@ -1078,11 +1186,14 @@ class FusionTest(QuantizationTestCase):
             self.assertEqual(type(model.sub1.bn), nn.Identity)
             self.assertEqual(type(model.sub2.conv), nn.Conv2d)
             self.assertEqual(type(model.sub2.relu), nn.ReLU)
+            self.assertEqual(type(model.bn2), nniq.BNReLU3d)
             test_only_eval_fn(model, self.img_data)
         checkQuantized(model)
 
         model = ModelForFusion(default_qconfig).eval()
         model = fuse_modules(model, [['conv1', 'bn1', 'relu1'],
+                             ['conv2', 'relu2'],
+                             ['bn2', 'relu3'],
                              ['sub1.conv', 'sub1.bn']])
         model = quantize(model, test_only_eval_fn, self.img_data)
         checkQuantized(model)
@@ -1242,6 +1353,26 @@ class ObserverTest(QuantizationTestCase):
             self.assertEqual(myobs.max_val, loaded_obs.max_val)
             self.assertEqual(myobs.calculate_qparams(), loaded_obs.calculate_qparams())
 
+
+    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=2, max_dims=4,
+                                              min_side=1, max_side=10),
+                       qparams=hu.qparams()),
+           reduce_range=st.booleans())
+    def test_per_tensor_dynamic_quant_observers(self, X, reduce_range):
+
+        X, (scale, zero_point, torch_type) = X
+        x = torch.from_numpy(X)
+
+        obs = MinMaxDynamicQuantObserver(dtype=torch.quint8, reduce_range=reduce_range)
+
+        result = obs(x)
+        qparams = obs.calculate_qparams()
+        ref = torch._choose_qparams_per_tensor(x, reduce_range)
+
+        self.assertEqual(ref[0], qparams[0])
+        self.assertEqual(ref[1], qparams[1])
+
+
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
            qscheme=st.sampled_from((torch.per_channel_affine, torch.per_channel_symmetric)),
            ch_axis=st.sampled_from((0, 1, 2, 3)), reduce_range=st.booleans())
@@ -1337,7 +1468,7 @@ class ObserverTest(QuantizationTestCase):
             self.assertEqual(myobs.calculate_qparams(), loaded_obs.calculate_qparams())
 
     def test_observer_scriptable(self):
-        obs_list = [MinMaxObserver(), MovingAverageMinMaxObserver()]
+        obs_list = [MinMaxObserver(), MovingAverageMinMaxObserver(), MinMaxDynamicQuantObserver()]
         for obs in obs_list:
             scripted = torch.jit.script(obs)
 
@@ -1406,9 +1537,10 @@ class RecordHistogramObserverTest(QuantizationTestCase):
         myobs = HistogramObserver(bins=3, dtype=qdtype, qscheme=qscheme, reduce_range=reduce_range)
         # Calculate qparams should work for empty observers
         qparams = myobs.calculate_qparams()
-        x = torch.tensor([2.0, 3.0, 4.0, 5.0])
+        x = torch.tensor([2.0, 3.0, 4.0, 5.0], requires_grad=True)
         y = torch.tensor([5.0, 6.0, 7.0, 8.0])
-        myobs(x)
+        out_x = myobs(x)
+        self.assertTrue(out_x.requires_grad)
         myobs(y)
         self.assertEqual(myobs.min_val, 2.0)
         self.assertEqual(myobs.max_val, 8.0)

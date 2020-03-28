@@ -95,8 +95,8 @@ void DynamicHistogram::Add(float f) {
   max_ = std::max(max_, f);
 
   if (histogram_ == nullptr) {
-    histogram_ = std::make_unique<Histogram>(
-        nbins_ * OVER_BINNING_FACTOR, min_, max_);
+    histogram_ =
+        std::make_unique<Histogram>(nbins_ * OVER_BINNING_FACTOR, min_, max_);
     histogram_->Add(f);
     return;
   }
@@ -119,6 +119,8 @@ void DynamicHistogram::Add(float f) {
             ceil((f - curr_hist.Max()) / old_spread) * old_spread;
       }
     }
+    new_min = std::max(numeric_limits<float>::lowest(), new_min);
+    new_max = std::min(numeric_limits<float>::max(), new_max);
     histogram_.reset(
         new Histogram(curr_hist.GetHistogram()->size(), new_min, new_max));
     RemapHistograms(curr_hist, *histogram_);
@@ -132,12 +134,12 @@ void DynamicHistogram::Add(const float* f, int len) {
     minimum = std::min(f[i], minimum);
     maximum = std::max(f[i], maximum);
   }
-  min_ = minimum;
-  max_ = maximum;
+  min_ = std::max(numeric_limits<float>::lowest(), minimum);
+  max_ = std::min(numeric_limits<float>::max(), maximum);
 
   if (histogram_ == nullptr) {
-    histogram_ = std::make_unique<Histogram>(
-        nbins_ * OVER_BINNING_FACTOR, min_, max_);
+    histogram_ =
+        std::make_unique<Histogram>(nbins_ * OVER_BINNING_FACTOR, min_, max_);
     histogram_->Add(f, len);
     return;
   }
@@ -162,6 +164,8 @@ void DynamicHistogram::Add(const float* f, int len) {
             ceil((max_ - curr_hist.Max()) / old_spread) * old_spread;
       }
     }
+    new_min = std::max(numeric_limits<float>::lowest(), new_min);
+    new_max = std::min(numeric_limits<float>::max(), new_max);
     histogram_.reset(
         new Histogram(curr_hist.GetHistogram()->size(), new_min, new_max));
     RemapHistograms(curr_hist, *histogram_);

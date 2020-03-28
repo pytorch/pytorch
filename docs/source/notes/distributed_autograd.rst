@@ -1,6 +1,3 @@
-.. warning::
-  The :ref:`distributed-rpc-framework` is experimental and subject to change.
-
 .. _distributed-autograd-design:
 
 Distributed Autograd Design
@@ -113,7 +110,12 @@ From the user's perspective the autograd context is setup as follows:
   import torch.distributed.autograd as dist_autograd
   with dist_autograd.context() as context_id:
     loss = model.forward()
-    dist_autograd.backward(loss)
+    dist_autograd.backward(context_id, loss)
+
+It is important to note that your model's forward pass must be invoked within
+the distributed autograd context manager, as a valid context is needed in
+order to ensure that all ``send`` and ``recv`` functions are stored properly
+to run the backward pass across all participating nodes.
 
 Distributed Backward Pass
 ^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -185,8 +187,9 @@ limitations. This algorithm is called the `FAST mode algorithm`_ and is
 described in detail below.
 
 In the general case it might not be necessary that every ``send`` and ``recv``
-function is valid as part of the backward pass. To address this, we also have
-a `SMART mode algorithm`_ which is described in a later section.
+function is valid as part of the backward pass. To address this, we have
+proposed a `SMART mode algorithm`_ which is described in a later section.
+Please note that currently, only the `FAST` mode algorithm is implemented.
 
 .. _fast-mode-algorithm:
 
@@ -242,7 +245,9 @@ As an example the complete code with distributed autograd would be as follows:
 
   # On worker 0:
 
-  # Setup the autograd context.
+  # Setup the autograd context. Computations that take
+  # part in the distributed backward pass must be within
+  # the distributed autograd context manager.
   with dist_autograd.context() as context_id:
     t1 = torch.rand((3, 3), requires_grad=True)
     t2 = torch.rand((3, 3), requires_grad=True)
@@ -258,7 +263,7 @@ As an example the complete code with distributed autograd would be as follows:
     loss = t5.sum()
 
     # Run the backward pass.
-    dist_autograd.backward([loss])
+    dist_autograd.backward(context_id, [loss])
 
     # Retrieve the gradients from the context.
     dist_autograd.get_gradients(context_id)
@@ -307,7 +312,11 @@ The :class:`~torch.distributed.optim.DistributedOptimizer` operates as follows:
    each of the worker nodes and holds an ``RRef`` to them.
 4. When :meth:`torch.distributed.optim.DistributedOptimizer.step` is invoked,
    the distributed optimizer uses RPC to remotely execute all the local
-   optimizers on the appropriate remote workers.
+   optimizers on the appropriate remote workers. A distributed autograd
+   ``context_id`` must be provided as input to
+   :meth:`torch.distributed.optim.DistributedOptimizer.step`. This is used
+   by local optimizers to apply gradients stored in the corresponding
+   context.
 5. If multiple concurrent distributed optimizers are updating the same
    parameters on a worker, these updates are serialized via a lock.
 
@@ -350,7 +359,7 @@ file called "dist_autograd_simple.py", it can be run with the command
           loss = rref1.to_here() + rref2.to_here()
 
           # Backward pass (run distributed autograd).
-          dist_autograd.backward([loss.sum()])
+          dist_autograd.backward(context_id, [loss.sum()])
 
           # Build DistributedOptimizer.
           dist_optim = DistributedOptimizer(
@@ -360,7 +369,7 @@ file called "dist_autograd_simple.py", it can be run with the command
           )
 
           # Run the distributed optimizer step.
-          dist_optim.step()
+          dist_optim.step(context_id)
 
   def run_process(rank, world_size):
       dst_rank = (rank + 1) % world_size

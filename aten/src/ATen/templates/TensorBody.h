@@ -30,6 +30,11 @@ struct Type;
 class DeprecatedTypeProperties;
 class Tensor;
 } // namespace at
+namespace at {
+namespace indexing {
+struct TensorIndex;
+} // namespace indexing
+} // namespace at
 
 namespace torch { namespace autograd {
 
@@ -51,7 +56,12 @@ using ConstQuantizerPtr = const c10::intrusive_ptr<Quantizer>&;
 
 namespace impl {
 inline bool variable_excluded_from_dispatch() {
+#ifdef C10_MOBILE
+  // Please read the comment in `VariableFallbackKernel.cpp` about the background of this change.
+  return true;
+#else
   return c10::impl::tls_local_dispatch_key_set().excluded_.has(DispatchKey::VariableTensorId);
+#endif
 }
 }
 
@@ -207,10 +217,19 @@ class CAFFE2_API Tensor {
   at::MemoryFormat suggest_memory_format(
       bool channels_last_strides_exact_match = false) const {
     // Setting channels_last_strides_exact_match to true forces function to
-    // check 0,1 - sized dimention strides.
-    if (!is_mkldnn() && !is_sparse() && impl_->is_strides_like_channels_last()) {
-      if (!channels_last_strides_exact_match || get_channels_last_strides(sizes()) == strides()) {
-        return at::MemoryFormat::ChannelsLast;
+    // check 0,1 - sized dimension strides.
+    if (!is_mkldnn() && !is_sparse()) {
+      if (impl_->is_strides_like_channels_last()) {
+        if (!channels_last_strides_exact_match ||
+            get_channels_last_strides_2d(sizes()) == strides()) {
+          return at::MemoryFormat::ChannelsLast;
+        }
+      }
+      else if (impl_->is_strides_like_channels_last_3d()) {
+        if (!channels_last_strides_exact_match ||
+            get_channels_last_strides_3d(sizes()) == strides()) {
+          return at::MemoryFormat::ChannelsLast3d;
+        }
       }
     }
     return at::MemoryFormat::Contiguous;
@@ -222,6 +241,10 @@ class CAFFE2_API Tensor {
   // it reports the memory the tensor would take *if* it were contiguous.
   // Defined to be numel() * itemsize()
   size_t nbytes() const {
+    TORCH_CHECK(layout () != at::kSparse,
+                "nbytes is not defined for sparse tensors.  If you want the size of the constituent " \
+                "tensors, add the nbytes of the indices and values.  If you want the size of the  " \
+                "equivalent dense tensor, multiply numel() by element_size()");
     return impl_->numel() * impl_->itemsize();
   }
 
@@ -236,8 +259,8 @@ class CAFFE2_API Tensor {
   }
 
   // Same as itemsize().  This is the PyTorch naming.
-  size_t element_size() const {
-    return impl_->itemsize();
+  int64_t element_size() const {
+    return static_cast<int64_t>(impl_->itemsize());
   }
 
   C10_DEPRECATED_MESSAGE("Tensor.type() is deprecated. Instead use Tensor.options(), which in many cases (e.g. in a constructor) is a drop-in replacement. If you were using data from type(), that is now available from Tensor itself, so instead of tensor.type().scalar_type(), use tensor.scalar_type() instead and instead of tensor.type().backend() use tensor.device().")
@@ -391,6 +414,14 @@ class CAFFE2_API Tensor {
   Tensor operator[](Tensor index) const;
   Tensor operator[](int64_t index) const;
 
+  Tensor index(ArrayRef<at::indexing::TensorIndex> indices) const;
+  Tensor index(std::initializer_list<at::indexing::TensorIndex> indices) const;
+
+  Tensor & index_put_(ArrayRef<at::indexing::TensorIndex> indices, Tensor const & rhs);
+  Tensor & index_put_(ArrayRef<at::indexing::TensorIndex> indices, Scalar v);
+  Tensor & index_put_(std::initializer_list<at::indexing::TensorIndex> indices, Tensor const & rhs);
+  Tensor & index_put_(std::initializer_list<at::indexing::TensorIndex> indices, Scalar v);
+
   Tensor cpu() const;
   Tensor cuda() const;
   Tensor hip() const;
@@ -503,7 +534,7 @@ public:
 
   /// Returns the `Variable` that this `Variable` is a view of. If this
   /// `Variable` is not a view, throw a `std::runtime_error`.
-  const Tensor& base() const;
+  const Tensor& _base() const;
 
   // Miscellaneous
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

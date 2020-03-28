@@ -34,7 +34,7 @@
 #include "caffe2/utils/proto_convert.h"
 #include "caffe2/utils/string_utils.h"
 #include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/jit/script/module_python.h"
+#include "torch/csrc/jit/python/module_python.h"
 
 // Because of CMake setup, we can't depend on script module here just yet -
 // it pulls in generated files from a different directory and it
@@ -94,12 +94,12 @@ REGISTER_BLOB_FETCHER((TypeMeta::Id<string>()), StringFetcher);
 class ScriptModuleFetcher : public BlobFetcherBase {
  public:
   pybind11::object Fetch(const Blob& blob) override {
-    return py::cast(*blob.Get<std::unique_ptr<torch::jit::script::Module>>());
+    return py::cast(*blob.Get<std::unique_ptr<torch::jit::Module>>());
   }
 };
 
 REGISTER_BLOB_FETCHER(
-    (TypeMeta::Id<std::unique_ptr<torch::jit::script::Module>>()),
+    (TypeMeta::Id<std::unique_ptr<torch::jit::Module>>()),
     caffe2::python::ScriptModuleFetcher);
 #endif
 
@@ -113,6 +113,8 @@ int CaffeToNumpyType(const TypeMeta& meta) {
       {TypeMeta::Id<bool>(), NPY_BOOL},
       {TypeMeta::Id<double>(), NPY_DOUBLE},
       {TypeMeta::Id<float>(), NPY_FLOAT},
+      {TypeMeta::Id<std::complex<double>>(), NPY_COMPLEX128},
+      {TypeMeta::Id<std::complex<float>>(), NPY_COMPLEX64},
       {TypeMeta::Id<at::Half>(), NPY_FLOAT16},
       {TypeMeta::Id<int>(), NPY_INT},
       {TypeMeta::Id<int8_t>(), NPY_INT8},
@@ -247,9 +249,9 @@ bool feedBlob(
     return true;
   }
 #ifdef FBCODE_CAFFE2
-  if (auto module = torch::jit::script::as_module(arg)) {
-    blob->GetMutable<std::unique_ptr<torch::jit::script::Module>>()->reset(
-        new torch::jit::script::Module(*module));
+  if (auto module = torch::jit::as_module(arg)) {
+    blob->GetMutable<std::unique_ptr<torch::jit::Module>>()->reset(
+        new torch::jit::Module(*module));
     return true;
   }
 #endif
@@ -1524,6 +1526,14 @@ void addGlobalMethods(py::module& m) {
         CAFFE_ENFORCE(blob_info.SerializeToString(&protob));
         return py::bytes(protob);
       });
+  m.def("ssa_rewrite", [](const py::bytes& net_proto) {
+    auto net_def = std::make_unique<NetDef>();
+    CAFFE_ENFORCE(net_def->ParseFromString(net_proto));
+    onnx::SsaRewrite(nullptr, net_def.get());
+    std::string output_net_proto;
+    CAFFE_ENFORCE(net_def->SerializeToString(&output_net_proto));
+    return py::bytes(output_net_proto);
+  });
   m.def("create_blob", [](const std::string& name) {
     CAFFE_ENFORCE(gWorkspace);
     CAFFE_ENFORCE(gWorkspace->CreateBlob(name));

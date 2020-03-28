@@ -302,6 +302,13 @@ Example (refining types on parameters and locals):
 
 TorchScript Classes
 ^^^^^^^^^^^^^^^^^^^
+
+.. warning::
+
+    TorchScript class support is experimental. Currently it is best suited
+    for simple record-like types (think a ``NamedTuple`` with methods
+    attached).
+
 Python classes can be used in TorchScript if they are annotated with :func:`@torch.jit.script <torch.jit.script>`,
 similar to how you would declare a TorchScript function:
 

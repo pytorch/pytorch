@@ -1,11 +1,11 @@
 #include <torch/csrc/jit/passes/peephole.h>
 #include <ATen/core/jit_type.h>
-#include <torch/csrc/jit/graph_executor.h>
-#include <torch/csrc/jit/ir_views.h>
+#include <torch/csrc/jit/ir/alias_analysis.h>
+#include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/passes/alias_analysis.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/peephole.h>
+#include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/utils/memory.h>
 
 namespace torch {
@@ -19,13 +19,11 @@ static bool mustBeEqual(const c10::optional<T>& a, const c10::optional<T>& b) {
 }
 
 struct PeepholeOptimizeImpl {
-  PeepholeOptimizeImpl(
-      const std::shared_ptr<Graph>& graph,
-      bool addmm_fusion_enabled)
+  PeepholeOptimizeImpl(const std::shared_ptr<Graph>& graph, bool onnx_export)
       : aliasDb_(nullptr),
         graph_(graph),
         changed_(true),
-        addmm_fusion_enabled_(addmm_fusion_enabled) {
+        onnx_export_(onnx_export) {
     run(graph->block());
   }
 
@@ -38,7 +36,8 @@ struct PeepholeOptimizeImpl {
   //
   // TODO: Decide what kind of fixed point strategy we will have
   //
-  // The parameter `addmm_fusion_enabled` exists because, as it is today, fusing
+  // The parameter `onnx_export` exists because, we do some optimizations only
+  // for onnx. as it is today, fusing
   // add + mm has no benefit within PyTorch running ATen ops. However, we rely
   // on seeing the fused version of addmm for ONNX export, since after ONNX
   // translation we would see redundant Gemm ops with sub-optimal inputs. This
@@ -50,6 +49,18 @@ struct PeepholeOptimizeImpl {
 
       for (Block* sub_block : node->blocks()) {
         run(sub_block);
+      }
+
+      if (node->kind() != prim::Constant) {
+        WithInsertPoint guard(node);
+        // Any Value whose type is None should be replaced with a Constant
+        // This can occur if a module has an optional attribute, and it is
+        // initialized as None.
+        for (Value* output : node->outputs()) {
+          if (output->type()->cast<NoneType>()) {
+            output->replaceAllUsesWith(graph_->insertConstant(IValue()));
+          }
+        }
       }
 
       // XXX: remember that if you want to simplify an expression by combining
@@ -71,7 +82,7 @@ struct PeepholeOptimizeImpl {
         // doesn't even result in fewer reads, because mm won't even load C
         // (because beta
         // == 0 for it).
-        if (addmm_fusion_enabled_ &&
+        if (onnx_export_ &&
             node->get<at::Scalar>(attr::alpha).value().toDouble() == 1.) {
           // Look for mm from both sides of the add
           for (size_t mm_side = 0; mm_side < 2; mm_side++) {
@@ -231,12 +242,14 @@ struct PeepholeOptimizeImpl {
         }
       } else if (
           node->kind() == aten::Float || node->kind() == aten::Int ||
-          node->kind() == prim::ImplicitTensorToNum) {
+          node->kind() == aten::FloatImplicit ||
+          node->kind() == aten::IntImplicit ||
+          node->kind() == aten::ScalarImplicit) {
         Node* input_node = node->input()->node();
         if (input_node->kind() == prim::NumToTensor) {
           GRAPH_UPDATE(
               *node,
-              " (x.NumToTensor().ImplicitTensorToNum() == x.NumToTensor()) is replaced with ",
+              " (x.NumToTensor().TensorToNum() == x.NumToTensor()) is replaced with ",
               node->input()->debugName());
           node->output()->replaceAllUsesWith(input_node->input());
           changed_ = true;
@@ -449,7 +462,7 @@ struct PeepholeOptimizeImpl {
   std::unique_ptr<AliasDb> aliasDb_ = nullptr;
   std::shared_ptr<Graph> graph_;
   bool changed_;
-  bool addmm_fusion_enabled_;
+  bool onnx_export_;
 };
 
 void PeepholeOptimize(

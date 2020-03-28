@@ -32,7 +32,7 @@ from torch.testing._internal.common_distributed import MultiProcessTestCase, \
     simple_sparse_reduce_tests
 
 from torch.testing._internal.common_utils import TestCase, load_tests, run_tests, \
-    retry_on_address_already_in_use_error, TEST_WITH_TSAN
+    retry_on_connect_failures, ADDRESS_IN_USE, CONNECT_TIMEOUT, TEST_WITH_TSAN
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -330,7 +330,7 @@ class RendezvousTest(TestCase):
 
 
 class RendezvousEnvTest(TestCase):
-    @retry_on_address_already_in_use_error
+    @retry_on_connect_failures
     def test_common_errors(self):
         # TODO remove this hack
         if not hasattr(c10d, "ProcessGroupNCCL"):
@@ -422,7 +422,7 @@ class RendezvousEnvTest(TestCase):
             self.assertEqual(rank, 0)
             self.assertEqual(size, 1)
 
-    @retry_on_address_already_in_use_error
+    @retry_on_connect_failures
     def test_nominal(self):
         os.environ['WORLD_SIZE'] = '1'
         os.environ['MASTER_ADDR'] = '127.0.0.1'
@@ -475,6 +475,13 @@ class RendezvousFileTest(TestCase):
 
 
 class RendezvousTCPTest(TestCase):
+
+    def create_tcp_url(self):
+        addr = "localhost"
+        port = common.find_free_port()
+        url = 'tcp://%s:%d?world_size=%d' % (addr, port, 1)
+        return url
+
     def test_common_errors(self):
         with self.assertRaisesRegex(ValueError, 'port number missing'):
             gen = c10d.rendezvous('tcp://127.0.0.1?rank=0&world_size=1')
@@ -486,11 +493,9 @@ class RendezvousTCPTest(TestCase):
             gen = c10d.rendezvous('tcp://127.0.0.1:23456?rank=0')
             next(gen)
 
-    @retry_on_address_already_in_use_error
+    @retry_on_connect_failures
     def test_nominal(self):
-        addr = 'localhost'
-        port = common.find_free_port()
-        url = 'tcp://%s:%d?world_size=%d' % (addr, port, 1)
+        url = self.create_tcp_url()
         gen0 = c10d.rendezvous(url + "&rank=0")
         store0, rank0, size0 = next(gen0)
         self.assertEqual(0, rank0)
@@ -501,6 +506,22 @@ class RendezvousTCPTest(TestCase):
 
         # check with get
         self.assertEqual(b"value0", store0.get("key0"))
+
+    @retry_on_connect_failures(connect_errors=(CONNECT_TIMEOUT, ADDRESS_IN_USE))
+    def test_tcp_store_timeout_set(self):
+        url = self.create_tcp_url()
+        test_store_timeout = timedelta(seconds=10)
+        gen0 = c10d.rendezvous(url + "&rank=0", timeout=test_store_timeout)
+        store0, rank0, size0 = next(gen0)
+        # this should time out in 10s. If the timeout passed into rendezvous was
+        # not respected, it will take much longer to timeout.
+        start = time.time()
+        with self.assertRaisesRegex(RuntimeError, "Timeout"):
+            store0.get("nonexistant key")
+
+        end = time.time()
+        time_diff = end - start
+        self.assertGreater(test_store_timeout.seconds * 10, time_diff)
 
 
 class TimeoutTest(TestCase):
@@ -542,18 +563,18 @@ class TimeoutTest(TestCase):
                 # waiting time should be 1s, use 3s to rule out false alarm
                 self.assertGreater(3, c2p[0])
             elif isinstance(c2p[0], RuntimeError):
-                # let @retry_on_address_already_in_use_error handle the error
+                # let @retry_on_connect_failures handle the error
                 raise c2p[0]
             else:
                 raise RuntimeError("Unexpected type {}".format(type(c2p[0])))
 
     @requires_nccl()
-    @retry_on_address_already_in_use_error
+    @retry_on_connect_failures
     def test_default_store_timeout_nccl(self):
         self._test_default_store_timeout('nccl')
 
     @requires_gloo()
-    @retry_on_address_already_in_use_error
+    @retry_on_connect_failures
     def test_default_store_timeout_gloo(self):
         self._test_default_store_timeout('gloo')
 
@@ -684,7 +705,6 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         self._test_broadcast_basics(lambda t: t.clone())
 
     @skip_if_not_multigpu
-    @skip_if_rocm
     def test_broadcast_basics_cuda(self):
         self._test_broadcast_basics(lambda t: t.clone().cuda())
 
@@ -770,7 +790,6 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         self._test_allreduce_basics(lambda t: t.clone())
 
     @skip_if_not_multigpu
-    @skip_if_rocm
     def test_allreduce_basics_cuda(self):
         self._test_allreduce_basics(lambda t: t.clone().cuda())
 
@@ -794,7 +813,6 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         self._test_allreduce_stress(inputs)
 
     @skip_if_not_multigpu
-    @skip_if_rocm
     def test_allreduce_stress_cuda(self):
         inputs = [torch.tensor([i + self.rank]).cuda() for i in range(1000)]
         self._test_allreduce_stress(inputs)
@@ -1012,7 +1030,6 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         self._test_scatter_basics(lambda t: t.clone())
 
     @skip_if_not_multigpu
-    @skip_if_rocm
     def test_scatter_basics_cuda(self):
         self._test_scatter_basics(lambda t: t.clone().cuda())
 
@@ -1157,7 +1174,6 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         self._test_gather_basics(lambda t: t.clone())
 
     @skip_if_not_multigpu
-    @skip_if_rocm
     def test_gather_basics_cuda(self):
         self._test_gather_basics(lambda t: t.clone().cuda())
 
@@ -1268,7 +1284,6 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         self._test_allgather_basics(lambda t: t.clone())
 
     @skip_if_not_multigpu
-    @skip_if_rocm
     def test_allgather_basics_cuda(self):
         self._test_allgather_basics(lambda t: t.clone().cuda())
 
@@ -1393,7 +1408,6 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         self._test_reduce_basics(lambda t: t.clone())
 
     @skip_if_not_multigpu
-    @skip_if_rocm
     def test_reduce_basics_cuda(self):
         self._test_reduce_basics(lambda t: t.clone().cuda())
 
@@ -1472,26 +1486,6 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             if i == self.rank:
                 continue
             self.assertEqual(torch.tensor([i]), outputs[i])
-
-    @unittest.skipIf(platform == 'darwin', 'ProcessGroup timeout not yet supported on macOS')
-    def test_timeout_kwarg(self):
-        store = c10d.FileStore(self.file_name, self.world_size)
-        pg = c10d.ProcessGroupGloo(
-            store,
-            self.rank,
-            self.world_size,
-            timeout=timedelta(seconds=0.5))
-
-        # Wait on barrier
-        pg.barrier().wait()
-
-        # Sleep on one of the processes to trigger barrier timeout
-        if self.rank == 0:
-            time.sleep(1.0)
-
-        # The barrier will now time out
-        with self.assertRaisesRegex(RuntimeError, " (Timed out|closed) "):
-            pg.barrier().wait()
 
     def test_barrier_implies_wait(self):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -1959,7 +1953,8 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
         def update_parameters(model):
             for param in model.parameters():
-                param.data -= param.grad
+                with torch.no_grad():
+                    param -= param.grad
                 param.grad = None
 
         # check two model parameters over 2 iterations
@@ -2043,7 +2038,6 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
-    @skip_if_rocm
     def test_nccl_backend_2gpu_module(self):
         int_devices = gpus_for_rank(self.world_size)[self.rank][:2]
         devices = list([torch.device('cuda:' + str(i)) for i in int_devices])
@@ -2051,7 +2045,6 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(8)
-    @skip_if_rocm
     def test_nccl_backend_4gpu_module(self):
         int_devices = gpus_for_rank(self.world_size)[self.rank][:4]
         devices = list([torch.device('cuda:' + str(i)) for i in int_devices])
@@ -2127,7 +2120,6 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_gloo()
     @skip_if_not_multigpu
-    @skip_if_rocm
     def test_dist_broadcast_coalesced_gloo(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         options = c10d.ProcessGroupGloo.Options()
@@ -2194,7 +2186,6 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_gloo()
     @skip_if_not_multigpu
-    @skip_if_rocm
     def test_sync_params_with_buffers(self, dtype=torch.double):
         store = c10d.FileStore(self.file_name, self.world_size)
         options = c10d.ProcessGroupGloo.Options()
@@ -2233,7 +2224,6 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_not_multigpu
-    @skip_if_rocm
     def test_fp16(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
@@ -2265,7 +2255,6 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_not_multigpu
-    @skip_if_rocm
     def test_queue_reduction(self):
         # Set up process group.
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -2294,7 +2283,6 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_not_multigpu
-    @skip_if_rocm
     def test_sync_reduction(self):
         # Set up process group.
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -2314,7 +2302,6 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_not_multigpu
-    @skip_if_rocm
     def test_arbitrary_forward_return_value(self):
         """
         Note: this test can be sped up by only running it on a CPU module
@@ -2405,7 +2392,6 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_not_multigpu
-    @skip_if_rocm
     def test_find_unused_parameters_kwarg(self):
         """
         Note: this test can be sped up by only running it on a CPU module
@@ -2552,7 +2538,6 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_not_multigpu
-    @skip_if_rocm
     def test_multiple_outputs_multiple_backward(self):
         """
         Note: this test can be sped up by only running it on a CPU module
@@ -2603,7 +2588,6 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_not_multigpu
-    @skip_if_rocm
     def test_no_grad(self):
         """
         Note: this test can be sped up by only running it on a CPU module
@@ -2756,6 +2740,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             torch.manual_seed(1337 + iteration)
             input = input[torch.randperm(global_batch_size)]
 
+    @requires_gloo()
     def test_ignored_output(self):
         """
         Test that the output of a model can be ignored and that there is no
@@ -2797,6 +2782,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             loss = criterion(output, target)
             loss.backward()
 
+    @requires_gloo()
     def test_ignored_output_with_unused_parameters(self):
         """
         Test that the output of a model can be ignored and that there is no
@@ -2843,7 +2829,6 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_not_multigpu
-    @skip_if_rocm
     def test_failure_recovery(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
@@ -3172,7 +3157,6 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
     @requires_nccl()
     @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
-    @skip_if_rocm
     def test_nccl_errors_nonblocking(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
@@ -3353,7 +3337,6 @@ class CommTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_not_multigpu
-    @skip_if_rocm
     def test_broadcast_coalesced_nccl(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)

@@ -1,6 +1,6 @@
 #include <torch/jit.h>
 #include "test/cpp/jit/test_utils.h"
-#include "torch/csrc/jit/argument_spec.h"
+#include "torch/csrc/jit/runtime/argument_spec.h"
 
 namespace torch {
 namespace jit {
@@ -29,7 +29,10 @@ bool isEqual(const ArgumentInfo& ti, const autograd::Variable& v) {
       ti.type() == v.scalar_type() && ti.dim() == v.dim();
 }
 
-autograd::Variable var(at::TensorOptions t, at::IntArrayRef sizes, bool requires_grad) {
+autograd::Variable var(
+    at::TensorOptions t,
+    at::IntArrayRef sizes,
+    bool requires_grad) {
   return autograd::make_variable(at::rand(sizes, t), requires_grad);
 }
 autograd::Variable undef() {
@@ -156,7 +159,6 @@ void testArgumentSpec() {
                             var(GD, {4, 5, 6}, false),
                             undef()});
   list2[1].toTensor().transpose_(0, 1);
-
 
   ArgumentSpec a = arg_spec_creator.create(true, list);
   ArgumentSpec b = arg_spec_creator.create(true, list);

@@ -1,3 +1,4 @@
+#include <utility>
 
 class Relu : public NeuralNetOperator {
  public:
@@ -50,15 +51,15 @@ class Conv : public NeuralNetOperator {
   }
 
   void setKernelShape(vector<int> kernelShape) {
-    kernelShape_ = kernelShape;
+    kernelShape_ = std::move(kernelShape);
   }
 
   void setPads(vector<int> pads) {
-    pads_ = pads;
+    pads_ = std::move(pads);
   }
 
   void setStrides(vector<int> strides) {
-    strides_ = strides;
+    strides_ = std::move(strides);
   }
 
   void setGroup(int group) {
@@ -66,7 +67,7 @@ class Conv : public NeuralNetOperator {
   }
 
   void setDilations(vector<int> dilations) {
-    dilations_ = dilations;
+    dilations_ = std::move(dilations);
   }
 
  private:

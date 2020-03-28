@@ -8,14 +8,15 @@ import torch
 import tarfile
 import tempfile
 import warnings
-import copyreg
 from contextlib import closing, contextmanager
 from ._utils import _import_dotted_name
-from ._six import string_classes as _string_classes
+from ._six import string_classes as _string_classes, PY2
 from torch._utils_internal import get_source_lines_and_file
-if sys.version_info[0] == 2:
+if PY2:
+    import copy_reg as copyreg
     import cPickle as pickle
 else:
+    import copyreg
     import pickle
     import pathlib
 
@@ -517,7 +518,7 @@ def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
     object, already moved to the right device. Otherwise, :func:`torch.load` will
     fall back to the default behavior, as if :attr:`map_location` wasn't specified.
 
-    If :attr:`map_location` is a :class:`torch.device` object or a string contraining
+    If :attr:`map_location` is a :class:`torch.device` object or a string containing
     a device tag, it indicates the location where all tensors should be loaded.
 
     Otherwise, if :attr:`map_location` is a dict, it will be used to remap location tags
@@ -752,6 +753,12 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
                     "{filename} is a zip archive (did you mean to use torch.jit.load()?)".format(filename=f.name))
             # if not a tarfile, reset file offset and proceed
             f.seek(0)
+
+    if not hasattr(f, 'readinto') and (3, 8, 0) <= sys.version_info < (3, 8, 2):
+        raise RuntimeError(
+            "torch.load does not work with file-like objects that do not implement readinto on Python 3.8.0 and 3.8.1. "
+            "Received object of type \"{}\". Please update to Python 3.8.2 or newer to restore this "
+            "functionality.".format(type(f)))
 
     magic_number = pickle_module.load(f, **pickle_load_args)
     if magic_number != MAGIC_NUMBER:

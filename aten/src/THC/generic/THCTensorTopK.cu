@@ -9,6 +9,9 @@ void THCTensor_(topk)(THCState* state,
                       THCudaLongTensor *indices,
                       THCTensor *input_,
                       int64_t k, int dim, int dir, int sorted) {
+  #if defined(THC_REAL_IS_BFLOAT16) && !defined(__HIP_PLATFORM_HCC__)
+  TORCH_CHECK(false, "topk not suppported with BFloat16");
+  #else
   THAssert(topK != NULL && indices != NULL && input_ != NULL);
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, topK, indices, input_));
   dim = at::maybe_wrap_dim(dim, input_);
@@ -38,7 +41,7 @@ void THCTensor_(topk)(THCState* state,
 
 #define RUN_K(INDEX_T, DIM, DIR)                                        \
   gatherTopK<scalar_t, INDEX_T, DIM, DIR>                                   \
-    <<<grid, block, 0, THCState_getCurrentStream(state)>>>(             \
+    <<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(             \
       inputInfo,                                                        \
       static_cast<INDEX_T>(sliceSize),                                  \
       static_cast<INDEX_T>(k),                                          \
@@ -183,6 +186,7 @@ void THCTensor_(topk)(THCState* state,
   THCudaLongTensor_free(state, input);
 
   THCudaCheck(cudaGetLastError());
+  #endif // THC_REAL_IS_BFLOAT16 && !__HIP_PLATFORM_HCC__
 }
 
 #endif // THC_GENERIC_FILE

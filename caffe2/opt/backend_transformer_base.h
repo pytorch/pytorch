@@ -64,10 +64,10 @@ class BackendTransformerBase {
 
   static void annotateOpIndex(NetDef* net);
 
- protected:
   // Get model ID from the NetDef
-  std::string getModelId(const NetDef& net);
+  static std::string getModelId(const NetDef& net);
 
+ protected:
   // add shape info to the net
   void addShapeToNet(NetDef& shape_net, const ShapeInfoMap& shape_hints) const;
 

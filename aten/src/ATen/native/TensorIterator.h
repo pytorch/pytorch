@@ -9,6 +9,7 @@
 #include <c10/util/Optional.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/Parallel.h>
 
 // TensorIterator is a helper class for element-wise operations, such as
 // arithmetic, comparisons, and trigonometric functions. It handles
@@ -132,6 +133,13 @@ struct CAFFE2_API OperandInfo {
 
 struct SplitUntil32Bit;
 
+enum class FastSetupType : uint8_t {
+  NONE,
+  CONTIGUOUS,
+  CHANNELS_LAST,
+  NON_OVERLAPPING_DENSE
+};
+
 enum class CommonDTypeStrategy : uint8_t {
   NONE, // Do not compute a common dtype
   CHECK, // Compute and validate a common dtype but don't promote.
@@ -179,6 +187,7 @@ struct CAFFE2_API TensorIterator {
   int ntensors() const { return operands_.size(); }
   int noutputs() const { return num_outputs_; }
   int ninputs() const { return ntensors() - noutputs(); }
+  IntArrayRef view_offsets() const { return view_offsets_; }
 
   /// number of elements in the output operand. this is the same as numel() for
   /// operations that are not reductions.
@@ -255,8 +264,8 @@ struct CAFFE2_API TensorIterator {
     return c10::fetch_and_cast<T>(op.tensor.scalar_type(), op.data);
   }
 
-  void for_each(loop_t loop);
-  void for_each(loop2d_t loop);
+  void for_each(loop_t loop, int64_t grain_size = at::internal::GRAIN_SIZE);
+  void for_each(loop2d_t loop, int64_t grain_size = at::internal::GRAIN_SIZE);
 
   void parallel_reduce(loop2d_t loop);
 
@@ -360,8 +369,8 @@ protected:
   void compute_types();
   std::tuple<Device, ScalarType, bool> compute_common_type();
   void allocate_outputs();
-  void fast_set_up();
-  bool can_use_fast_set_up();
+  bool fast_set_up();
+  FastSetupType compute_fast_setup_type();
   void compute_names();
   void propagate_names_to_outputs();
   void coalesce_dimensions();
@@ -370,6 +379,8 @@ protected:
 protected:
   DimVector shape_;
   DimVector perm_;
+  /// The index offsets into the original tensors for each dimension
+  DimVector view_offsets_;
   NameVector names_;
   SmallVector<OperandInfo, 4> operands_;
   int num_outputs_ = 0;
@@ -385,6 +396,7 @@ protected:
   bool check_mem_overlap_ = false;
   bool all_ops_same_shape_ = false;
   bool requires_channels_last_output_ = false;
+  bool requires_channels_last_3d_output_ = false;
 };
 /// A container-like struct that acts as if it contains splits of a
 /// TensorIterator that can use 32-bit indexing. Taken together the splits cover

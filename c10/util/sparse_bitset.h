@@ -192,7 +192,6 @@
      bool changed = false;
      bool allzero = true;
 
-     BecameZero = false;
      for (unsigned i = 0; i < BITWORDS_PER_ELEMENT; ++i) {
        BitWord old = changed ? 0 : Bits[i];
 
@@ -215,7 +214,6 @@
      bool changed = false;
      bool allzero = true;
 
-     BecameZero = false;
      for (unsigned i = 0; i < BITWORDS_PER_ELEMENT; ++i) {
        BitWord old = changed ? 0 : Bits[i];
 
@@ -237,7 +235,6 @@
                                 bool &BecameZero) {
      bool allzero = true;
 
-     BecameZero = false;
      for (unsigned i = 0; i < BITWORDS_PER_ELEMENT; ++i) {
        Bits[i] = RHS1.Bits[i] & ~RHS2.Bits[i];
        if (Bits[i] != 0)

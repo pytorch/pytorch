@@ -17,6 +17,8 @@ DEFAULT_MODULE_MAPPING = {
     nn.ReLU6: nnq.ReLU6,
     nn.Conv2d: nnq.Conv2d,
     nn.Conv3d: nnq.Conv3d,
+    nn.BatchNorm2d: nnq.BatchNorm2d,
+    nn.BatchNorm3d: nnq.BatchNorm3d,
     QuantStub: nnq.Quantize,
     DeQuantStub: nnq.DeQuantize,
     # Wrapper Modules:
@@ -25,6 +27,8 @@ DEFAULT_MODULE_MAPPING = {
     nni.ConvReLU2d: nniq.ConvReLU2d,
     nni.ConvReLU3d: nniq.ConvReLU3d,
     nni.LinearReLU: nniq.LinearReLU,
+    nni.BNReLU2d: nniq.BNReLU2d,
+    nni.BNReLU3d: nniq.BNReLU3d,
     nniqat.ConvReLU2d: nniq.ConvReLU2d,
     nniqat.LinearReLU: nniq.LinearReLU,
     nniqat.ConvBn2d: nnq.Conv2d,

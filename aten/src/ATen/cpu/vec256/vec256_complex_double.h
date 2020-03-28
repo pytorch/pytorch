@@ -56,7 +56,8 @@ public:
     return _mm256_blendv_pd(a.values, b.values, mask_);
 
   }
-  static Vec256<std::complex<double>> arange(std::complex<double> base = 0., std::complex<double> step = 1.) {
+  template<typename step_t>
+  static Vec256<std::complex<double>> arange(std::complex<double> base = 0., step_t step = static_cast<step_t>(1)) {
     return Vec256<std::complex<double>>(base,
                                         base + step);
   }
@@ -75,8 +76,9 @@ public:
       return _mm256_loadu_pd(reinterpret_cast<const double*>(ptr));
 
     __at_align32__ double tmp_values[2*size()];
-    // Ensure uninitialized memory does not change the output value
-    // See https://github.com/pytorch/pytorch/issues/32502 for more details
+    // Ensure uninitialized memory does not change the output value See https://github.com/pytorch/pytorch/issues/32502
+    // for more details. We do not initialize arrays to zero using "={0}" because gcc would compile it to two
+    // instructions while a loop would be compiled to one instruction.
     for (auto i = 0; i < 2*size(); ++i) {
       tmp_values[i] = 0.0;
     }

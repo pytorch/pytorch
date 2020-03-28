@@ -92,13 +92,20 @@ void SetAPIUsageLogger(std::function<void(const std::string&)> logger) {
   *GetAPIUsageLogger() = logger;
 }
 
-void LogAPIUsage(const std::string& event) {
-  (*GetAPIUsageLogger())(event);
+void LogAPIUsage(const std::string& event) try {
+  if (auto logger = GetAPIUsageLogger())
+    (*logger)(event);
+} catch (std::bad_function_call&) {
+  // static destructor race
 }
 
 namespace detail {
-bool LogAPIUsageFakeReturn(const std::string& event) {
-  (*GetAPIUsageLogger())(event);
+bool LogAPIUsageFakeReturn(const std::string& event) try {
+  if (auto logger = GetAPIUsageLogger())
+    (*logger)(event);
+  return true;
+} catch (std::bad_function_call&) {
+  // static destructor race
   return true;
 }
 } // namespace detail

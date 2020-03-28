@@ -124,7 +124,7 @@ class TestConcatSplitOps(serial.SerializedTestCase):
                 for i in range(len(split))
             ]
         outputs_with_grad = range(len(split_info))
-        self.assertReferenceChecks(gc, op, input_tensors, split_ref)
+        self.assertReferenceChecks(gc, op, input_tensors, split_ref, ensure_outputs_are_inferred=True)
         self.assertDeviceChecks(dc, op, input_tensors, outputs_with_grad)
         self.assertGradientChecks(gc, op, input_tensors, 0, outputs_with_grad)
 
