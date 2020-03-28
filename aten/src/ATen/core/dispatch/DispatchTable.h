@@ -66,8 +66,6 @@ public:
     return kernelCount_;
   }
 
-  std::string dumpState() const;
-
 private:
   std::array<KernelFunction, static_cast<uint8_t>(DispatchKey::NumDispatchKeys)> kernels_;
   size_t kernelCount_;
@@ -89,16 +87,7 @@ class DispatchTable final {
   : kernels_()
   , catchallKernel_()
   , dispatchKeyExtractor_(DispatchKeyExtractor::make(schema))
-  , operatorName_(schema.operator_name()) {}
-
-  // a dispatch table may be default constructed with only an
-  // operator name.  Such a dispatch table is not callable until
-  // the schema is provided
-  DispatchTable(OperatorName op_name)
-  : kernels_()
-  , catchallKernel_()
-  , dispatchKeyExtractor_(DispatchKeyExtractor::makeUninitialized())
-  , operatorName_(std::move(op_name)) {}
+  , operatorName_(toString(schema.operator_name())) {}
 
   /**
    * Register a kernel in the table at some dispatch key.
@@ -109,7 +98,7 @@ class DispatchTable final {
     auto result = kernels_.setKernel(dispatchKey, std::move(kernel));
     dispatchKeyExtractor_.setOperatorHasKernelForBackend(dispatchKey, true);
     if (result == impl::KernelFunctionTable::SetKernelResult::OVERWROTE_EXISTING_KERNEL) {
-      TORCH_WARN("Registered a kernel for operator ", operatorName_, " with dispatch key ", dispatchKey, " that overwrote a previously registered kernel with the same dispatch key for the same operator.");
+      TORCH_WARN("Registered a kernel for operator ", operatorName_, " with dispatch key ", toString(dispatchKey), " that overwrote a previously registered kernel with the same dispatch key for the same operator.");
     }
   }
 
@@ -160,7 +149,7 @@ class DispatchTable final {
       if (has_kernels) {
         str << ", ";
       }
-      str << static_cast<DispatchKey>(iter);
+      str << toString(static_cast<DispatchKey>(iter));
       has_kernels = true;
     }
 
@@ -176,7 +165,6 @@ class DispatchTable final {
 
   const KernelFunction* lookup(DispatchKey dispatchKey) const {
     auto& slot = kernels_[dispatchKey];
-    // TODO: this condition shouldn't be necessary
     if (slot.isValid()) {
       return &slot;
     } else {
@@ -185,7 +173,6 @@ class DispatchTable final {
   }
 
   const KernelFunction* lookupCatchallKernel() const {
-    // TODO: this condition shouldn't be necessary
     if (!catchallKernel_.isValid()) {
       return nullptr;
     }
@@ -197,26 +184,16 @@ class DispatchTable final {
     return dispatchKeyExtractor_;
   }
 
-  const OperatorName& operatorName() const {
+  const std::string& operatorName() const {
     return operatorName_;
   }
-
-  void registerSchema(const FunctionSchema& schema) {
-    dispatchKeyExtractor_.registerSchema(schema);
-  }
-
-  void deregisterSchema() {
-    dispatchKeyExtractor_.deregisterSchema();
-  }
-
-  std::string dumpState() const;
 
 private:
 
   impl::KernelFunctionTable kernels_;
   KernelFunction catchallKernel_;
   DispatchKeyExtractor dispatchKeyExtractor_;
-  OperatorName operatorName_;
+  std::string operatorName_;
 };
 
 } // namespace c10

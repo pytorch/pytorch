@@ -303,13 +303,5 @@ C10_EXPORT FunctionSchema parseSchema(const std::string& schema) {
   return parsed.right();
 }
 
-C10_EXPORT OperatorName parseName(const std::string& name) {
-  auto parsed = parseSchemaOrName(name);
-  TORCH_CHECK(
-      parsed.is_left(),
-      "Tried to parse an operator name but function schema was given");
-  return parsed.left();
-}
-
 } // namespace jit
 } // namespace torch
