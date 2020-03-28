@@ -7,7 +7,8 @@ namespace autograd {
 namespace profiler {
 // Creates a new profiling scope using RecordFunction and invokes its starting
 // callbacks.
-at::Tensor record_function_enter(const std::string& name);
+c10::intrusive_ptr<RecordFunction> record_function_enter(
+    const std::string& name);
 
 // Cast Tensor that was created with at::cpp_custom_type_hack back to
 // RecordFunction. This is a temporary workaround until RecordFunction is
@@ -38,7 +39,8 @@ TORCH_API void _call_end_callbacks_on_fut(
 }
 
 // Ends the profiling scope created with record_function_enter.
-void record_function_exit(const at::Tensor& handle);
+void record_function_exit(
+    const c10::intrusive_ptr<RecordFunction>& instance);
 
 } // namespace profiler
 } // namespace autograd

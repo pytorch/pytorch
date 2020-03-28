@@ -3,6 +3,7 @@
 #include <ATen/core/ivalue.h>
 #include <c10/util/SmallVector.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/custom_class.h>
 
 namespace torch { namespace autograd {
 

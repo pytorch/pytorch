@@ -1,7 +1,7 @@
+#include <torch/csrc/autograd/record_function_ops.h>
 #include <ATen/cpp_custom_type_hack.h>
 #include <torch/csrc/autograd/record_function.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
-#include <torch/csrc/autograd/record_function_ops.h>
 
 namespace caffe2 {
 // Required for cpp_custom_type_hack to work
@@ -13,8 +13,9 @@ namespace torch {
 namespace autograd {
 namespace profiler {
 
-at::Tensor record_function_enter(const std::string& name) {
-  auto rec = std::make_unique<RecordFunction>();
+c10::intrusive_ptr<RecordFunction> record_function_enter(
+    const std::string& name) {
+  auto rec = c10::make_intrusive<RecordFunction>();
   // Only add new scope if profiling is enabled.
   if (auto* current = RecordFunction::current()) {
     AT_ASSERT(
@@ -27,7 +28,7 @@ at::Tensor record_function_enter(const std::string& name) {
 
     runBeforeCallbacks(rec.get(), name);
   }
-  return at::cpp_custom_type_hack::create(std::move(rec), at::TensorOptions());
+  return rec;
 }
 
 RecordFunction& getRecordFunctionFromTensor(const at::Tensor& handle) {
@@ -35,23 +36,40 @@ RecordFunction& getRecordFunctionFromTensor(const at::Tensor& handle) {
   return rec;
 }
 
-void record_function_exit(const at::Tensor& handle) {
-  // We don't actually need to do anything with handle just need to persist the
-  // lifetime until now.
-  auto& rec = getRecordFunctionFromTensor(handle);
+void record_function_exit(const c10::intrusive_ptr<RecordFunction>& instance) {
+  // End the current RecordFunction, which should be
+  // profiler::_record_function_exit to ensure the creating scope outlives it.
   if (auto* current = RecordFunction::current()) {
     AT_ASSERT(current->name() == StringView("profiler::_record_function_exit"));
     current->end();
   }
-  if (rec.active()) {
-    rec.end();
+  if (instance->active()) {
+    instance->end();
   }
 }
 
+// The following will bind the class to TorchScript with the qualified name
+// torch.classes.profiler.RecordFunction.
+static auto torchScriptRecordFunction =
+    torch::class_<RecordFunction>("profiler", "RecordFunction")
+        .def(torch::init<>());
+
 static auto registry =
     RegisterOperators()
-        .op("profiler::_record_function_enter", &record_function_enter)
-        .op("profiler::_record_function_exit", &record_function_exit);
+        .op(RegisterOperators()
+                .options()
+                .schema(
+                    "profiler::_record_function_enter(str x) -> __torch__.torch.classes.profiler.RecordFunction y")
+                .catchAllKernel<
+                    decltype(record_function_enter),
+                    &record_function_enter>())
+        .op(RegisterOperators()
+                .options()
+                .schema(
+                    "profiler::_record_function_exit(__torch__.torch.classes.profiler.RecordFunction x) -> ()")
+                .catchAllKernel<
+                    decltype(record_function_exit),
+                    &record_function_exit>());
 
 } // namespace profiler
 } // namespace autograd
