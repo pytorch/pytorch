@@ -1,3 +1,4 @@
+#include <c10/test/util/Macros.h>
 #include <gtest/gtest.h>
 #include "caffe2/core/common.h"
 #include "caffe2/core/logging.h"
@@ -296,7 +297,10 @@ TEST(BoundShapeInference, ConcatMissingInput) {
       {spec.max_batch_size, 2, 60});
 }
 
-TEST(BoundShapeInference, Int8QuantizeInferInputBackwards) {
+// See https://github.com/pytorch/pytorch/issues/35544
+TEST(
+    BoundShapeInference,
+    DISABLED_ON_WINDOWS(Int8QuantizeInferInputBackwards)) {
   NetDef net;
   net.add_op()->CopyFrom(CreateOperatorDef(
       "Int8Quantize",

@@ -52,6 +52,15 @@ def shape(a : Tensor) -> List[int]:
   return a.size()
 )SCRIPT";
 
+
+// This is only here for backwards-compatibility with the aten::_assert_int_or_pair
+// op which was removed once we were able to compile torch.nn.functional.assert_int_or_pair
+auto aten_ops =
+    R"SCRIPT(
+def _assert_int_or_pair(vals: List[int], name: str, message: str):
+  pass
+)SCRIPT";
+
 struct BuiltinFunctionRegistry {
   const std::vector<Function*>& getAllBuiltinFunctionsFor(Symbol name) {
     const static std::vector<Function*> empty;
@@ -115,6 +124,8 @@ struct BuiltinFunctionRegistry {
       env.s("Rhs_Type", rhs);
       loadSource(floordiv.format(env), "aten");
     }
+
+    loadSource(aten_ops, "aten");
 
     // These are under `prim` instead of `aten` since they exist to bind certain
     // tensor property getters to correpsonding methods
