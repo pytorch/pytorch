@@ -304,6 +304,8 @@ def convert(module, mapping=None, inplace=False):
     SWAPPABLE_MODULES = (nni.ConvBn2d,
                          nni.ConvBnReLU2d,
                          nni.LinearReLU,
+                         nni.BNReLU2d,
+                         nni.BNReLU3d,
                          nni.ConvReLU2d,
                          nni.ConvReLU3d)
 

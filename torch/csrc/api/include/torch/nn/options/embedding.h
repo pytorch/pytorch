@@ -58,6 +58,13 @@ struct TORCH_API EmbeddingFromPretrainedOptions {
 
 namespace functional {
 
+/// Options for `torch::nn::functional::embedding`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::embedding(input, weight, F::EmbeddingFuncOptions().norm_type(2.5).scale_grad_by_freq(true).sparse(true));
+/// ```
 struct TORCH_API EmbeddingFuncOptions {
   /// If given, pads the output with the embedding vector at `padding_idx` (initialized to zeros) whenever it encounters the index.
   TORCH_ARG(c10::optional<int64_t>, padding_idx) = c10::nullopt;
@@ -141,6 +148,13 @@ struct TORCH_API EmbeddingBagFromPretrainedOptions {
 
 namespace functional {
 
+/// Options for `torch::nn::functional::embedding_bag`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::embedding_bag(input, weight, F::EmbeddingBagFuncOptions().mode(torch::kSum).offsets(offsets));
+/// ```
 struct TORCH_API EmbeddingBagFuncOptions {
   /// Only used when `input` is 1D. `offsets` determines
   /// the starting index position of each bag (sequence) in `input`.

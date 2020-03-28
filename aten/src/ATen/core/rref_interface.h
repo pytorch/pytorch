@@ -24,8 +24,15 @@ class C10_EXPORT RRefInterface : public c10::intrusive_ptr_target {
   // returns the worker id of the owner
   virtual worker_id_t owner() const = 0;
 
+  // returns the worker name of the owner
+  virtual std::string ownerName() const = 0;
+
   // Returns true if this is the ``OwnerRRef``
   virtual bool isOwner() const = 0;
+
+  // Returns true if this is an ``OwnerRRef`` or if this ``UserRRef`` has been
+  // confirmed by its owner.
+  virtual bool confirmedByOwner() const = 0;
 
   virtual const TypePtr type() const = 0;
 };

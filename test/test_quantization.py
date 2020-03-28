@@ -14,7 +14,7 @@ from torch.quantization import \
     default_dynamic_qconfig, per_channel_dynamic_qconfig, HistogramObserver, MinMaxObserver, \
     PerChannelMinMaxObserver, RecordingObserver, MovingAverageMinMaxObserver, \
     MovingAveragePerChannelMinMaxObserver, QuantWrapper, default_eval_fn, \
-    float16_dynamic_qconfig
+    float16_dynamic_qconfig, MinMaxDynamicQuantObserver
 
 from torch.quantization import QConfig
 from torch.quantization import default_histogram_observer
@@ -899,8 +899,8 @@ class GraphModePostTrainingQuantTest(QuantizationTestCase):
         eager mode and graph mode
         """
         # eager mode
-        annotated_linear_model = AnnotatedSingleLayerLinearModel()
-        linear_model = SingleLayerLinearModel()
+        annotated_linear_model = AnnotatedSingleLayerLinearModel().eval()
+        linear_model = SingleLayerLinearModel().eval()
         # copy the weight from eager mode so that we can
         # compare the result of the two quantized models later
         linear_model.fc1.weight = torch.nn.Parameter(annotated_linear_model.fc1.module.weight.detach())
@@ -1014,10 +1014,10 @@ class GraphModePostTrainingQuantTest(QuantizationTestCase):
 
     def test_nested(self):
         # Eager mode
-        eager_model = AnnotatedNestedModel()
+        eager_model = AnnotatedNestedModel().eval()
 
         # Graph mode
-        script_model = NestedModel()
+        script_model = NestedModel().eval()
         # Copy weights for eager_model
         script_model.sub1.fc.weight = torch.nn.Parameter(eager_model.sub1.fc.weight.detach())
         script_model.sub1.fc.bias = torch.nn.Parameter(eager_model.sub1.fc.bias.detach())
@@ -1138,6 +1138,8 @@ class FusionTest(QuantizationTestCase):
         model = ModelForFusion(default_qconfig)
         model.eval()
         model = fuse_modules(model, [['conv1', 'bn1', 'relu1'] ,
+                             ['conv2', 'relu2'],
+                             ['bn2', 'relu3'],
                              ['sub1.conv', 'sub1.bn']])
         self.assertEqual(type(model.conv1), nni.ConvReLU2d,
                          "Fused Conv + BN + Relu first layer (BN is folded)")
@@ -1148,6 +1150,18 @@ class FusionTest(QuantizationTestCase):
         self.assertEqual(type(model.bn1), nn.Identity,
                          "Fused Conv + BN + Relu second layer (Skipped BN)")
         self.assertEqual(type(model.relu1), nn.Identity,
+                         "Fused Conv + BN + Relu second layer (Skipped Relu)")
+        self.assertEqual(type(model.conv2), nni.ConvReLU3d,
+                         "Fused Conv + BN + Relu first layer (BN is folded)")
+        self.assertEqual(type(model.bn2), nni.BNReLU3d,
+                         "Fused BN + Relu first layer (Relu is folded))")
+        self.assertEqual(type(model.relu3), nn.Identity,
+                         "Fused BN + Relu second layer (Skipped Relu)")
+        self.assertEqual(type(model.conv2[0]), nn.Conv3d,
+                         "Fused Conv + BN + Relu (Conv + folded BN only)")
+        self.assertEqual(type(model.conv2[1]), nn.ReLU,
+                         "Fused Conv + BN + Relu second layer (Relu only)")
+        self.assertEqual(type(model.relu2), nn.Identity,
                          "Fused Conv + BN + Relu second layer (Skipped Relu)")
 
         self.assertEqual(type(model.sub1.conv), nn.Conv2d,
@@ -1172,11 +1186,14 @@ class FusionTest(QuantizationTestCase):
             self.assertEqual(type(model.sub1.bn), nn.Identity)
             self.assertEqual(type(model.sub2.conv), nn.Conv2d)
             self.assertEqual(type(model.sub2.relu), nn.ReLU)
+            self.assertEqual(type(model.bn2), nniq.BNReLU3d)
             test_only_eval_fn(model, self.img_data)
         checkQuantized(model)
 
         model = ModelForFusion(default_qconfig).eval()
         model = fuse_modules(model, [['conv1', 'bn1', 'relu1'],
+                             ['conv2', 'relu2'],
+                             ['bn2', 'relu3'],
                              ['sub1.conv', 'sub1.bn']])
         model = quantize(model, test_only_eval_fn, self.img_data)
         checkQuantized(model)
@@ -1336,6 +1353,26 @@ class ObserverTest(QuantizationTestCase):
             self.assertEqual(myobs.max_val, loaded_obs.max_val)
             self.assertEqual(myobs.calculate_qparams(), loaded_obs.calculate_qparams())
 
+
+    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=2, max_dims=4,
+                                              min_side=1, max_side=10),
+                       qparams=hu.qparams()),
+           reduce_range=st.booleans())
+    def test_per_tensor_dynamic_quant_observers(self, X, reduce_range):
+
+        X, (scale, zero_point, torch_type) = X
+        x = torch.from_numpy(X)
+
+        obs = MinMaxDynamicQuantObserver(dtype=torch.quint8, reduce_range=reduce_range)
+
+        result = obs(x)
+        qparams = obs.calculate_qparams()
+        ref = torch._choose_qparams_per_tensor(x, reduce_range)
+
+        self.assertEqual(ref[0], qparams[0])
+        self.assertEqual(ref[1], qparams[1])
+
+
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
            qscheme=st.sampled_from((torch.per_channel_affine, torch.per_channel_symmetric)),
            ch_axis=st.sampled_from((0, 1, 2, 3)), reduce_range=st.booleans())
@@ -1431,7 +1468,7 @@ class ObserverTest(QuantizationTestCase):
             self.assertEqual(myobs.calculate_qparams(), loaded_obs.calculate_qparams())
 
     def test_observer_scriptable(self):
-        obs_list = [MinMaxObserver(), MovingAverageMinMaxObserver()]
+        obs_list = [MinMaxObserver(), MovingAverageMinMaxObserver(), MinMaxDynamicQuantObserver()]
         for obs in obs_list:
             scripted = torch.jit.script(obs)
 

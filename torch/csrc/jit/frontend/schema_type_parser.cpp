@@ -1,10 +1,10 @@
+#include <torch/csrc/jit/frontend/schema_type_parser.h>
 #include <ATen/core/alias_info.h>
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/jit_type.h>
 #include <c10/util/string_utils.h>
 #include <torch/csrc/jit/frontend/lexer.h>
 #include <torch/csrc/jit/frontend/parse_string_literal.h>
-#include <torch/csrc/jit/frontend/schema_type_parser.h>
 #include <torch/custom_class.h>
 #include <string>
 
@@ -21,10 +21,10 @@ using c10::ListType;
 using c10::NoneType;
 using c10::NumberType;
 using c10::OptionalType;
+using c10::QSchemeType;
 using c10::RRefType;
 using c10::StringType;
 using c10::Symbol;
-using c10::QSchemeType;
 using c10::TensorType;
 using c10::TupleType;
 using c10::VarType;
@@ -54,6 +54,7 @@ TypePtr SchemaTypeParser::parseBaseType() {
       {"None", NoneType::get()},
       {"Capsule", CapsuleType::get()},
       {"Any", at::AnyType::get()},
+      {"AnyClassType", at::AnyClassType::get()},
   };
   auto tok = L.cur();
   if (!L.nextIf(TK_NONE)) {
@@ -243,12 +244,16 @@ std::pair<TypePtr, c10::optional<AliasInfo>> SchemaTypeParser::parseType() {
           << "Expected classes namespace but got " << classes_tok.text();
     }
     L.expect('.');
+    auto ns_tok = L.expect(TK_IDENT);
+    L.expect('.');
     auto class_tok = L.expect(TK_IDENT);
     value = getCustomClass(
-        std::string("__torch__.torch.classes.") + class_tok.text());
+        std::string("__torch__.torch.classes.") + ns_tok.text() + "." +
+        class_tok.text());
     if (!value) {
       throw ErrorReport(class_tok.range)
-          << "Unknown custom class type " << class_tok.text()
+          << "Unknown custom class type "
+          << ns_tok.text() + "." + class_tok.text()
           << ". Please ensure it is registered.";
     }
   } else {

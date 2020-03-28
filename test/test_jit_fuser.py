@@ -316,7 +316,7 @@ class TestFuser(JitTestCase):
             return torch.nn.functional.relu(x)
 
         a = torch.randn(4, 4, dtype=torch.float, device='cuda', requires_grad=True)
-        s = torch.jit.script(func, (a,))
+        s = torch.jit.script(func)
         c = s(a)
         c = s(a)
         warmup_backward(c.sum())
@@ -541,7 +541,7 @@ class TestFuser(JitTestCase):
             # type: (Tensor, float) -> Tensor
             return p * (x * x + x)
 
-        scripted = torch.jit.script(fn_test_scalar_arg_requires_grad, (x, p))
+        scripted = torch.jit.script(fn_test_scalar_arg_requires_grad)
         out = scripted(x, p)
         self.assertAllFused(scripted.graph_for(x, p), except_for=("aten::size", "prim::BroadcastSizes",
                                                                   "aten::_size_if_not_equal"))
@@ -821,7 +821,7 @@ class TestFuser(JitTestCase):
 
         x = torch.randn(4, 4, dtype=torch.float, device='cuda')
         y = torch.randn(4, 4, dtype=torch.float, device='cuda')
-        script_f = torch.jit.script(fn_test_rand, (x, y))
+        script_f = torch.jit.script(fn_test_rand)
         out = script_f(x, y)
         self.assertAllFused(script_f.graph_for(x, y))
         x.requires_grad_(True)
