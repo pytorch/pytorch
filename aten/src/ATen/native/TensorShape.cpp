@@ -1467,6 +1467,7 @@ Tensor& diag_out(Tensor &result, const Tensor& self, int64_t dimension) {
 
 template <typename scalar_t>
 void apply_renorm(Tensor &res, const Tensor& src, scalar_t value, int64_t dimension, scalar_t maxnorm) {
+  dimension = at::maybe_wrap_dim(dimension, src);
   TORCH_CHECK(dimension >= 0 && dimension < src.dim(), "invalid dimension ",
       dimension);
   TORCH_CHECK(value > 0, "non-positive-norm not supported");
