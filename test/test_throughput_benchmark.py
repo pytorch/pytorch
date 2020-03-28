@@ -1,5 +1,3 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
-
 import torch
 from torch.utils import ThroughputBenchmark
 from torch.testing import assert_allclose

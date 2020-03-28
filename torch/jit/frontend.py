@@ -1,4 +1,3 @@
-import __future__
 import torch
 import sys
 import ast

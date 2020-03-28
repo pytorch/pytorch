@@ -1,9 +1,4 @@
 r""" Functional interface (quantized)."""
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 import torch
 from torch._jit_internal import List as _List
 from torch.nn.modules.utils import _pair, _triple
