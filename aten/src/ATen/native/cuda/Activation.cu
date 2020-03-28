@@ -121,7 +121,7 @@ Tensor prelu_cuda(const Tensor& self, const Tensor& weight_) {
 // prelu backward
 // -----------------------------------
 template<typename scalar_t, typename inp_offset_calc_t, typename out_offset_calc_t>
-__global__ prelu_cuda_backward_share_weights_kernel(
+__global__ void prelu_cuda_backward_share_weights_kernel(
   int numel,
   const scalar_t *input_data,
   const scalar_t *grad_out_data,
@@ -129,19 +129,19 @@ __global__ prelu_cuda_backward_share_weights_kernel(
   scalar_t *weight_grad_collector_data,
   const scalar_t *weight_data,
   inp_offset_calc_t inp_calc,
-  out_offset_calc_t out_calc,
+  out_offset_calc_t out_calc
 ) {
-  scalar_t inputs[thread_work_size];
-  scalar_t grad_outs[thread_work_size];
+  scalar_t inputs[THREAD_WORK_SIZE];
+  scalar_t grad_outs[THREAD_WORK_SIZE];
   scalar_t weight = *weight_data;
 
-  int base_index = block_work_size * blockIdx.x;
-  int remaining = std::min<int>(numel - base_index, block_work_size);
+  int base_index = BLOCK_WORK_SIZE * blockIdx.x;
+  int remaining = std::min<int>(numel - base_index, BLOCK_WORK_SIZE);
 
   // load data into registers
   int thread_idx = threadIdx.x;
   #pragma unroll
-  for(int i = 0; i < thread_work_size; i++) {
+  for(int i = 0; i < THREAD_WORK_SIZE; i++) {
     if (thread_idx >= remaining) {
       break;
     }
@@ -153,24 +153,25 @@ __global__ prelu_cuda_backward_share_weights_kernel(
   }
 
   // compute and store
-  int thread_idx = threadIdx.x;
+  thread_idx = threadIdx.x;
   #pragma unroll
-  for(int i = 0; i < thread_work_size; i++) {
+  for(int i = 0; i < THREAD_WORK_SIZE; i++) {
     if (thread_idx >= remaining) {
       break;
     }
     int input_idx = thread_idx + base_index;
     auto offsets = out_calc.get(input_idx);
-    input_grad_data[offsets[0]] = (input_val > 0) ? grad_out_val : *weight_data * grad_out_val;
-    weight_grad_collector_data[offsets[1]] = (input_val > 0) ? scalar_t(0) : input_val * grad_out_val;
+    input_grad_data[offsets[0]] = (inputs[i] > 0) ? grad_outs[i] : weight * grad_outs[i];
+    weight_grad_collector_data[offsets[1]] = (inputs[i] > 0) ? scalar_t(0) : inputs[i] * grad_outs[i];
     thread_idx += num_threads;
   }
 }
 
+template<typename scalar_t>
 void launch_prelu_cuda_backward_share_weights_kernel(TensorIterator &iter, const scalar_t* weight_data) {
   if (!iter.can_use_32bit_indexing()) {
     for (auto& sub_iter : iter.with_32bit_indexing()) {
-      launch_prelu_cuda_backward_share_weights_kernel(iter);
+      launch_prelu_cuda_backward_share_weights_kernel(iter, weight_data);
     }
     return;
   }
@@ -185,7 +186,7 @@ void launch_prelu_cuda_backward_share_weights_kernel(TensorIterator &iter, const
   const scalar_t *input_data = static_cast<const scalar_t *>(iter.data_ptr(2));
   const scalar_t *grad_out_data = static_cast<const scalar_t *>(iter.data_ptr(3));
 
-  int64_t grid = (N + block_work_size - 1) / block_work_size;
+  int64_t grid = (numel + block_work_size - 1) / block_work_size;
   auto stream = at::cuda::getCurrentCUDAStream();
 
   if (iter.is_contiguous()) {
@@ -193,13 +194,13 @@ void launch_prelu_cuda_backward_share_weights_kernel(TensorIterator &iter, const
       numel, input_data, grad_out_data, input_grad_data, weight_grad_collector_data, weight_data,
       TrivialOffsetCalculator<2>(), TrivialOffsetCalculator<2>()
     );
-  else {
+  } else {
     std::array<const int64_t*, 2> out_strides = {iter.strides(0).data(), iter.strides(1).data()};
     std::array<const int64_t*, 2> inp_strides = {iter.strides(2).data(), iter.strides(3).data()};
     prelu_cuda_backward_share_weights_kernel<scalar_t><<<grid, num_threads, 0, stream>>>(
       numel, input_data, grad_out_data, input_grad_data, weight_grad_collector_data, weight_data,
-      OffsetCalculator<2>(iter.ndim(), iter.shape().data(), inp_strides),
-      OffsetCalculator<2>(iter.ndim(), iter.shape().data(), out_strides)
+      OffsetCalculator<2>(iter.ndim(), iter.shape().data(), inp_strides.data()),
+      OffsetCalculator<2>(iter.ndim(), iter.shape().data(), out_strides.data())
     );
   }
 }
