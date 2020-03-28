@@ -209,8 +209,7 @@ std::vector<Value*> getPassThroughInputs(Value* v) {
                  // We don't have call functions
                  // after inline
                  /* call_funcs = */ {},
-                 /* aten_funcs = */ single_input_aten_funcs) ||
-             isAddScalar(n)) {
+                 /* aten_funcs = */ single_input_aten_funcs)) {
     return {n->input(0)};
   } else if (n->kind() == prim::If &&
              n->outputs().size() == 1) {
@@ -236,7 +235,7 @@ std::vector<Value*> getPassThroughInputs(Value* v) {
 }
 
 bool mayRequireObservation(Value* v) {
-  return getPassThroughInputs(v).size() == 0;
+  return !isAddScalar(v->node());
 }
 
 bool nodeQuantizable(Node* n) {
