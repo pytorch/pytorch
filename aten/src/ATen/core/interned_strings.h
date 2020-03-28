@@ -34,6 +34,7 @@ namespace c10 {
   _(prim, Expand) /* onnx */         \
   _(prim, FusionGroup)               \
   _(prim, CudaFusionGroup)           \
+  _(prim, FunctionalGraph)           \
   _(prim, DifferentiableGraph)       \
   _(prim, If)                        \
   _(prim, Jump) /* debug */          \
@@ -77,7 +78,7 @@ namespace c10 {
   _(aten, Delete)                    \
   _(prim, device)                    \
   _(prim, dtype)                     \
-  _(prim, shape)                     \
+  _(prim, id)                        \
   _(prim, requires_grad)             \
   _(prim, MakeTestTensor) /* test */ \
   _(prim, AutogradAdd)               \
@@ -221,9 +222,6 @@ namespace c10 {
   _(onnx, SequenceInsert)            \
   _(onnx, ConcatFromSequence)        \
   _(onnx, Identity)                  \
-  _(onnx, SoftmaxCrossEntropyLoss)   \
-  _(onnx, NegativeLogLikelihoodLoss) \
-  _(onnx, LogSoftmax)                \
   FORALL_ATTR_BASE_SYMBOLS(_)        \
   _(attr, Subgraph)                  \
   _(attr, ReverseSubgraph)           \

@@ -298,6 +298,8 @@ struct Expr : public TreeView {
       case TK_DICT_LITERAL:
       case '@':
       case TK_POW:
+      case TK_LSHIFT:
+      case TK_RSHIFT:
       case TK_FLOOR_DIV:
       case '&':
       case '^':
@@ -739,6 +741,8 @@ struct BinOp : public Expr {
       case '-':
       case '@':
       case TK_POW:
+      case TK_LSHIFT:
+      case TK_RSHIFT:
       case '%':
       case '&':
       case '^':
@@ -795,7 +799,8 @@ struct Const : public Expr {
   }
   bool isFloatingPoint() const {
     bool is_inf = subtree(0)->stringValue() == "inf";
-    return is_inf || subtree(0)->stringValue().find_first_of(".eE") != std::string::npos;
+    return is_inf ||
+        subtree(0)->stringValue().find_first_of(".eE") != std::string::npos;
   }
   bool isIntegral() const {
     return !isFloatingPoint();
@@ -812,8 +817,7 @@ struct Const : public Expr {
     // We can't pass in nullptr as the dummy pointer gets dereferenced for
     // Android version of strtod_c().
     char* dummy;
-    return torch::jit::strtod_c(
-        subtree(0)->stringValue().c_str(), &dummy);
+    return torch::jit::strtod_c(subtree(0)->stringValue().c_str(), &dummy);
   }
   const std::string& text() const {
     return subtree(0)->stringValue();

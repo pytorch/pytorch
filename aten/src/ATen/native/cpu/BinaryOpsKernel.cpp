@@ -7,6 +7,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/cpu/Loops.h>
+#include <c10/macros/Macros.h>
 
 namespace at { namespace native {
 namespace {

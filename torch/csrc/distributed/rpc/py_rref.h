@@ -16,7 +16,9 @@ class PyRRef {
   explicit PyRRef(c10::intrusive_ptr<RRef> rref);
 
   bool isOwner() const;
+  bool confirmedByOwner() const;
   WorkerInfo owner() const;
+  std::string ownerName() const;
   py::object toHere();
   py::object localValue();
   std::string str() const;

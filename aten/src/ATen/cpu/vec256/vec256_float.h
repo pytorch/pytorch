@@ -41,7 +41,8 @@ public:
                               const Vec256<float>& mask) {
     return _mm256_blendv_ps(a.values, b.values, mask.values);
   }
-  static Vec256<float> arange(float base = 0.f, float step = 1.f) {
+  template<typename step_t>
+  static Vec256<float> arange(float base = 0.f, step_t step = static_cast<step_t>(1)) {
     return Vec256<float>(
       base,            base +     step, base + 2 * step, base + 3 * step,
       base + 4 * step, base + 5 * step, base + 6 * step, base + 7 * step);
@@ -99,9 +100,9 @@ public:
     return _mm256_movemask_ps(cmp);
   }
   Vec256<float> map(float (*f)(float)) const {
-    __at_align32__ float tmp[8];
+    __at_align32__ float tmp[size()];
     store(tmp);
-    for (int64_t i = 0; i < 8; i++) {
+    for (int64_t i = 0; i < size(); i++) {
       tmp[i] = f(tmp[i]);
     }
     return loadu(tmp);

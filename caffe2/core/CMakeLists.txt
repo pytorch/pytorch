@@ -1,4 +1,4 @@
-if (INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
+if(INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
   list(APPEND Caffe2_CPU_SRCS
     "${CMAKE_CURRENT_SOURCE_DIR}/common.cc"
   )
@@ -8,7 +8,7 @@ endif()
 
 # ---[ GPU files
 # ------[ cuDNN
-if (USE_CUDNN)
+if(USE_CUDNN)
   file(GLOB tmp *_cudnn.cc)
   set(Caffe2_GPU_SRCS ${Caffe2_GPU_SRCS} ${tmp})
 endif()

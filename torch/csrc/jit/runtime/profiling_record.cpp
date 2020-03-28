@@ -1,7 +1,7 @@
 #include <torch/csrc/jit/runtime/profiling_record.h>
+#include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
-#include <torch/csrc/jit/passes/constant_propagation.h>
 
 namespace torch {
 namespace jit {
@@ -20,7 +20,7 @@ ProfileOp* ProfilingRecord::createProfileNode(
   return pn;
 }
 
-static void unprofileGraphInputs(const std::shared_ptr<Graph> &graph) {
+static void unprofileGraphInputs(const std::shared_ptr<Graph>& graph) {
   for (auto i : graph->inputs()) {
     if (i->type()->isSubtypeOf(TensorType::get())) {
       i->setType(unshapedType(i->type()));
@@ -47,44 +47,41 @@ static void unprofileBlock(Block* start_block) {
   }
 }
 
-void ProfilingRecord::insertShapeProfile(Node *n, Value *i) {
-
+void ProfilingRecord::insertShapeProfile(Node* n, Value* i) {
   auto pn = createProfileNode(nullptr, {i});
   auto pno = pn->addOutput();
   bool first = true;
   pno->setType(TensorType::get());
-  std::function<void(Stack &)> shape_profiler = [this, pno,
-                                                 first](Stack &stack) mutable {
-    IValue t;
-    pop(stack, t);
-    if (t.isTensor()) {
-
-      if (t.toTensor().defined()) {
-        auto pttp = tensorTypeInCurrentExecutionContext(t.toTensor());
-        std::lock_guard<std::mutex> lock(this->mutex_);
-        if (auto type = pno->type()->cast<TensorType>()) {
-          if (!first) {
-            pttp = pttp->merge(type);
+  std::function<void(Stack&)> shape_profiler =
+      [this, pno, first](Stack& stack) mutable {
+        IValue t;
+        pop(stack, t);
+        if (t.isTensor()) {
+          if (t.toTensor().defined()) {
+            auto pttp = tensorTypeInCurrentExecutionContext(t.toTensor());
+            std::lock_guard<std::mutex> lock(this->mutex_);
+            if (auto type = pno->type()->cast<TensorType>()) {
+              if (!first) {
+                pttp = pttp->merge(type);
+              }
+              pno->setType(pttp);
+              first = false;
+            }
+          } else {
+            pno->setType(TensorType::get()->withUndefined());
           }
-          pno->setType(pttp);
-          first = false;
         }
-      } else {
-        pno->setType(TensorType::get()->withUndefined());
-      }
-    }
 
-    // passing t through
-    push(stack, t);
-
-  };
+        // passing t through
+        push(stack, t);
+      };
 
   pn->setCallback(shape_profiler);
   pn->insertBefore(n);
   n->replaceInputWith(i, pn->output());
 }
 
-void ProfilingRecord::instrumentBlock(Block *block) {
+void ProfilingRecord::instrumentBlock(Block* block) {
   for (auto it = block->nodes().begin(); it != block->nodes().end(); ++it) {
     auto n = *it;
     for (auto i : n->inputs()) {
@@ -124,9 +121,8 @@ std::unique_ptr<ProfilingRecord> ProfilingRecord::instrumentGraph(
 
   std::function<void(Stack&)> counter = [raw_pr](Stack&) {
     std::lock_guard<std::mutex> lock(raw_pr->mutex_);
-    if (raw_pr->profiling_count_ > 0)
-    {
-        raw_pr->profiling_count_--;
+    if (raw_pr->profiling_count_ > 0) {
+      raw_pr->profiling_count_--;
     }
   };
 
