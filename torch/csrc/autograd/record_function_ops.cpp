@@ -49,7 +49,8 @@ void record_function_exit(const c10::intrusive_ptr<RecordFunction>& instance) {
 }
 
 // The following will bind the class to TorchScript with the qualified name
-// torch.classes.profiler.RecordFunction.
+// torch.classes.profiler.RecordFunction. Note that this class is only meant to
+// be used in conjunction with the record_function python context manager.
 static auto torchScriptRecordFunction =
     torch::class_<RecordFunction>("profiler", "RecordFunction")
         .def(torch::init<>());
