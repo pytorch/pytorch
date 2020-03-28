@@ -20,7 +20,6 @@ from jit.test_autodiff_subgraph_slicing import TestAutodiffSubgraphSlicing  # no
 from jit.test_custom_operators import TestCustomOperators  # noqa: F401
 from jit.test_export_modes import TestExportModes  # noqa: F401
 from jit.test_class_type import TestClassType  # noqa: F401
-from jit.test_module_interface import TestModuleInterface  # noqa: F401
 from jit.test_builtins import TestBuiltins, TestTensorBuiltins  # noqa: F401
 from jit.test_unsupported_ops import TestUnsupportedOps  # noqa: F401
 from jit.test_freezing import TestFreezing  # noqa: F401
@@ -2357,7 +2356,11 @@ graph(%input, %weight):
         qconfig_dict = {'': default_qconfig}
         model = torch.jit.script(M()).eval()
         model = quantize_script(model, qconfig_dict, _test_only_eval_fn, [data], inplace=False)
-        FileCheck().check("quantized::conv2d") \
+        # make sure there is only one quantize_per_tensor for input
+        # and conv2d_prepack is folded
+        FileCheck().check_count("aten::quantize_per_tensor", 1, exactly=True) \
+                   .check_not("quantized::conv2d_prepack") \
+                   .check("quantized::conv2d") \
                    .run(model.graph)
 
     def test_finalize_for_linear(self):
@@ -2373,7 +2376,11 @@ graph(%input, %weight):
         qconfig_dict = {'': default_qconfig}
         model = torch.jit.script(M()).eval()
         model = quantize_script(model, qconfig_dict, _test_only_eval_fn, [data], inplace=False)
-        FileCheck().check("quantized::linear") \
+        # make sure there is only one quantize_per_tensor for input
+        # and linear_prepack is folded
+        FileCheck().check_count("aten::quantize_per_tensor", 1, exactly=True) \
+                   .check_not("quantized::linear_prepack") \
+                   .check("quantized::linear") \
                    .run(model.graph)
 
     def test_finalize_debug(self):
@@ -4644,6 +4651,7 @@ graph(%Ra, %Rb):
                 super(Bar, self).__init__()
                 self.sub = Foo()
 
+            @torch.jit.script_method
             def forward(self, x):
                 # type: (Tensor) -> Tensor
                 return self.sub.forward(x)
@@ -4651,7 +4659,7 @@ graph(%Ra, %Rb):
         bar = Bar()
         ops = torch.jit.export_opnames(bar)
         expected = ['aten::add.Tensor', 'aten::mul.Scalar']
-        self.assertEqual(ops, expected)
+        self.assertTrue(set(expected).issubset(set(ops)))
 
     def test_pytorch_jit_env_off(self):
         import subprocess
@@ -6635,6 +6643,26 @@ a")
             return a + a + a
         s = Variable(torch.rand(2))
         self.assertEqual(s + s + s, foo(s))
+
+    def test_str_to_float(self):
+        @torch.jit.script
+        def foo(a):
+            return 0.5 == float('0.5 hello')
+        s = torch.rand(1)
+        with self.assertRaisesRegex(RuntimeError, "only accepts a string of single float number"):
+            self.assertTrue(foo(s))
+
+        @torch.jit.script
+        def foo(a):
+            return 0.5 == float('0.5')
+        s = torch.rand(1)
+        self.assertTrue(foo(s))
+
+        @torch.jit.script
+        def foo(a):
+            return 0. == float('0')
+        s = torch.rand(1)
+        self.assertTrue(foo(s))
 
     def test_inf(self):
         @torch.jit.script
@@ -16180,10 +16208,10 @@ a")
         tester(str_hash, ("", "hello", "a"))
 
     def test_id(self):
-        with self.assertRaisesRegex(RuntimeError, "Expected a value"): 
+        with self.assertRaisesRegex(RuntimeError, "Expected a value"):
             @torch.jit.script
             def test_id_scalars():
-                return id(2) == id(None) 
+                return id(2) == id(None)
 
         @torch.jit.script
         class FooTest(object):

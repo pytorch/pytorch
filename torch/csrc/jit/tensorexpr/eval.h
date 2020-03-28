@@ -4,6 +4,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include <c10/macros/Macros.h>
 #include <c10/util/Logging.h>
 #include <torch/csrc/jit/tensorexpr/buffer.h>
 #include <torch/csrc/jit/tensorexpr/codegen.h>
@@ -59,24 +60,24 @@ class Value {
   void* ptr;
 };
 
-#define VALUE_AS_DISPATCH(Type, Name)             \
-  template <>                                     \
-  inline Type Value::as<Type>() const {           \
-    if (dtype_ != k##Name) {                      \
-      throw unsupported_dtype();                  \
-    }                                             \
-    return Name##values[0];                       \
+#define VALUE_AS_DISPATCH(Type, Name)   \
+  template <>                           \
+  inline Type Value::as<Type>() const { \
+    if (dtype_ != k##Name) {            \
+      throw unsupported_dtype();        \
+    }                                   \
+    return Name##values[0];             \
   }
 AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, VALUE_AS_DISPATCH);
 #undef VALUE_AS_DISPATCH
 
-#define VALUE_AS_VEC_DISPATCH(Type, Name)                                \
-  template <>                                                            \
-  inline const std::vector<Type>& Value::as_vec<Type>() const {          \
-    if (dtype_.scalar_type() != ScalarType::Name) {                      \
-      throw unsupported_dtype();                                         \
-    }                                                                    \
-    return Name##values;                                                 \
+#define VALUE_AS_VEC_DISPATCH(Type, Name)                       \
+  template <>                                                   \
+  inline const std::vector<Type>& Value::as_vec<Type>() const { \
+    if (dtype_.scalar_type() != ScalarType::Name) {             \
+      throw unsupported_dtype();                                \
+    }                                                           \
+    return Name##values;                                        \
   }
 AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, VALUE_AS_VEC_DISPATCH);
 #undef VALUE_AS_VEC_DISPATCH
@@ -107,8 +108,9 @@ inline typename std::enable_if<std::is_integral<T>::value, T>::type div_value(
 }
 
 template <typename T>
-inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
-div_value(T lhs, T rhs) {
+inline typename std::enable_if<std::is_floating_point<T>::value, T>::
+    type __ubsan_ignore_float_divide_by_zero__
+    div_value(T lhs, T rhs) {
   return lhs / rhs;
 }
 
@@ -497,7 +499,6 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     if (src_dtype.lanes() != dst_dtype.lanes()) {
       throw malformed_input(v);
     }
-
 
     if (src_dtype != dst_dtype) {
       switch (src_dtype.scalar_type()) {

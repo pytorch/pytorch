@@ -1,9 +1,10 @@
 #include <algorithm>
 #include <sstream>
 #include <stdexcept>
-#include "test/cpp/tensorexpr/test_base.h"
 
+#include <c10/macros/Macros.h>
 #include "test/cpp/tensorexpr/padded_buffer.h"
+#include "test/cpp/tensorexpr/test_base.h"
 #include "torch/csrc/jit/tensorexpr/ir_printer.h"
 
 namespace torch {
@@ -689,7 +690,7 @@ void testATen_tanh_backward() {
   }
 }
 
-void testATenreciprocal() {
+void __ubsan_ignore_float_divide_by_zero__ testATenreciprocal() {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Buffer a_buf(VarHandle("A", kHandle), kFloat, {ExprHandle(kTotalSize)});

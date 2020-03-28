@@ -208,10 +208,12 @@ Tensor qnnpack_add(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
 #endif
     auto qc = at::_empty_affine_quantized(
         qa.sizes(),
-        at::device(kCPU).dtype(qa.scalar_type()),
+        at::device(kCPU)
+           .dtype(qa.scalar_type())
+           .memory_format(qa.suggest_memory_format()),
         scale,
         zero_point,
-        qa.suggest_memory_format());
+        c10::nullopt);
     return _add_out<ReLUFused>(qc, qa, qb);
   }
 };
@@ -250,6 +252,11 @@ class QAddScalarOut final : public c10::OperatorKernel {
 
 static auto registry = c10::RegisterOperators()
 .op("quantized::add(Tensor qa, Tensor qb, float scale, int zero_point)"
+     "-> Tensor qc",
+    c10::RegisterOperators::options()
+      .aliasAnalysis(at::AliasAnalysisKind::FROM_SCHEMA)
+      .kernel<QAdd</*ReLUFused=*/false>>(DispatchKey::QuantizedCPUTensorId))
+.op("_quantized::add(Tensor qa, Tensor qb, float scale, int zero_point)"
      "-> Tensor qc",
     c10::RegisterOperators::options()
       .aliasAnalysis(at::AliasAnalysisKind::FROM_SCHEMA)
