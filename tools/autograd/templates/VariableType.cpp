@@ -42,7 +42,7 @@ ${type_derived_method_definitions}
 
 namespace {
 
-auto registerer = torch::import()
+auto registerer = torch::RegisterOperators()
   ${wrapper_registrations};
 
 }
