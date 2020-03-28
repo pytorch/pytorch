@@ -74,6 +74,10 @@ std::vector<std::string> _single_input_general_call_funcs = {
     "adaptive_avg_pool2d",
     "_max_pool2d",
     "dropout",
+    "interpolate",
+    "upsample",
+    "upsample_bilinear",
+    "upsample_nearest",
 };
 
 std::vector<std::string> _quantizable_call_funcs = {
