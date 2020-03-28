@@ -643,9 +643,6 @@ PyObject* initModule() {
 #endif
 #endif
 
-#if PY_MAJOR_VERSION == 2
-  ASSERT_TRUE(module = Py_InitModule("torch._C", methods.data()));
-#else
   static struct PyModuleDef torchmodule = {
      PyModuleDef_HEAD_INIT,
      "torch._C",
@@ -654,7 +651,6 @@ PyObject* initModule() {
      methods.data()
   };
   ASSERT_TRUE(module = PyModule_Create(&torchmodule));
-#endif
   ASSERT_TRUE(THPWrapper_init(module));
   ASSERT_TRUE(THPGenerator_init(module));
   ASSERT_TRUE(THPException_init(module));
