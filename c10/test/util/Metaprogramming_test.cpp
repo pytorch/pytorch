@@ -1,5 +1,7 @@
 #include <c10/util/Metaprogramming.h>
+#include <c10/test/util/Macros.h>
 #include <gtest/gtest.h>
+
 
 using namespace c10::guts;
 
@@ -161,7 +163,8 @@ namespace test_filter_map {
         EXPECT_EQ(expected, result);
     }
 
-    TEST(MetaprogrammingTest, FilterMap_onlyCopiesIfNecessary) {
+    // See https://github.com/pytorch/pytorch/issues/35546
+    TEST(MetaprogrammingTest, DISABLED_ON_WINDOWS(FilterMap_onlyCopiesIfNecessary)) {
         struct map_copy_counting_by_copy {
           CopyCounting operator()(CopyCounting v) const {
             return v;
@@ -180,7 +183,7 @@ namespace test_filter_map {
         EXPECT_EQ(2, result[2].move_count);
     }
 
-    TEST(MetaprogrammingTest, FilterMap_onlyMovesIfNecessary_1) {
+    TEST(MetaprogrammingTest, DISABLED_ON_WINDOWS(FilterMap_onlyMovesIfNecessary_1)) {
         struct map_copy_counting_by_move {
           CopyCounting operator()(CopyCounting&& v) const {
             return std::move(v);
