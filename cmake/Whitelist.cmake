@@ -3,7 +3,7 @@ if(__caffe2_whitelist_included)
   return()
 endif()
 
-set (__caffe2_whitelist_included TRUE)
+set(__caffe2_whitelist_included TRUE)
 
 set(CAFFE2_WHITELISTED_FILES)
 if(NOT CAFFE2_WHITELIST)
