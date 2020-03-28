@@ -70,7 +70,7 @@ factory_common_args = merge_dicts(common_args, parse_kwargs("""
         returned tensor. Default: ``False``.
     pin_memory (bool, optional): If set, returned tensor would be allocated in
         the pinned memory. Works only for CPU tensors. Default: ``False``.
-    memory_format (:class:`torch.memory_format`, optional): the desired memory format of 
+    memory_format (:class:`torch.memory_format`, optional): the desired memory format of
         returned Tensor. Default: ``torch.contiguous_format``.
 """))
 
@@ -86,7 +86,7 @@ factory_like_common_args = parse_kwargs("""
         returned tensor. Default: ``False``.
     pin_memory (bool, optional): If set, returned tensor would be allocated in
         the pinned memory. Works only for CPU tensors. Default: ``False``.
-    memory_format (:class:`torch.memory_format`, optional): the desired memory format of 
+    memory_format (:class:`torch.memory_format`, optional): the desired memory format of
         returned Tensor. Default: ``torch.preserve_format``.
 """)
 
@@ -2199,8 +2199,9 @@ the tensor will be reflected in the :attr:`ndarray` and vice versa. The returned
 tensor is not resizable.
 
 It currently accepts :attr:`ndarray` with dtypes of ``numpy.float64``,
-``numpy.float32``, ``numpy.float16``, ``numpy.int64``, ``numpy.int32``,
-``numpy.int16``, ``numpy.int8``, ``numpy.uint8``, and ``numpy.bool``.
+``numpy.float32``, ``numpy.float16``, ``numpy.complex64``, ``numpy.complex128``,
+``numpy.int64``, ``numpy.int32``, ``numpy.int16``, ``numpy.int8``, ``numpy.uint8``,
+and ``numpy.bool``.
 
 Example::
 
