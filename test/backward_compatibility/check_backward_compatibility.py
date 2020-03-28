@@ -124,6 +124,8 @@ white_list = [
     ('_xnnpack::linear_packed', datetime.date(2020, 4, 2)),
     ('_xnnpack::linear_prepack', datetime.date(2020, 4, 2)),
     ('_aten', datetime.date(2020, 4, 15)),
+    ('aten::real.out', datetime.date(2020, 4, 15)),
+    ('aten::imag.out', datetime.date(2020, 4, 15)),
 ]
 
 
