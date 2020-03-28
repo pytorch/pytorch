@@ -92,8 +92,9 @@ class AveragedModel(Module):
         self.register_buffer('n_averaged',
                              torch.tensor(0, dtype=torch.long, device=device))
         if avg_fn is None:
-            def avg_fn(p_avg, p, n_avg):
-                return p_avg + (p - p_avg) / (n_avg + 1)
+            def avg_fn(averaged_model_parameter, model_parameter, num_averaged):
+                return averaged_model_parameter + \
+                    (model_parameter - averaged_model_parameter) / (num_averaged + 1)
         self.avg_fn = avg_fn
 
     def forward(self, *args, **kwargs):
@@ -107,7 +108,7 @@ class AveragedModel(Module):
                 p_swa.detach().copy_(p_model_)
             else:
                 p_swa.detach().copy_(self.avg_fn(p_swa.detach(), p_model_,
-                                                 self.n_averaged))
+                                                 self.n_averaged.to(device)))
         self.n_averaged += 1
 
 
