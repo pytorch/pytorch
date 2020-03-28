@@ -37,10 +37,9 @@ BATCH_SIZE = 2
 
 class TestModels(TestCase):
     def exportTest(self, model, inputs, rtol=1e-2, atol=1e-7):
-        with torch.onnx.select_model_mode_for_export(model, None):
-            graph = torch.onnx.utils._trace(model, inputs, OperatorExportTypes.ONNX)
-            torch._C._jit_pass_lint(graph)
-            verify(model, inputs, backend, rtol=rtol, atol=atol)
+        graph = torch.onnx.utils._trace(model, inputs, OperatorExportTypes.ONNX)
+        torch._C._jit_pass_lint(graph)
+        verify(model, inputs, backend, rtol=rtol, atol=atol)
 
     def test_ops(self):
         x = Variable(
