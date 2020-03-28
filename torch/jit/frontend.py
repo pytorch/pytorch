@@ -313,8 +313,7 @@ class StmtBuilder(Builder):
         if PY2:
             if stmt.tback:
                 raise NotSupportedError(r, "tracebacks with exceptions is not supported")
-            # TODO use stmt.type once instantiating exceptions is supported
-            expr = build_expr(ctx, stmt.inst) if stmt.inst else None
+            expr = build_expr(ctx, stmt.type)
         else:
             expr = build_expr(ctx, stmt.exc)
         return Raise(r, expr)
