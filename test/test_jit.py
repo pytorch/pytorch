@@ -2212,9 +2212,10 @@ graph(%input, %weight):
                 self.adaptive_avgpool = torch.nn.AdaptiveAvgPool2d((1, 1))
                 self.dropout = torch.nn.Dropout()
                 self.avgpool = torch.nn.AvgPool2d(3)
+                self.conv = torch.nn.Conv2d(3, 3, 3)
 
             def forward(self, x):
-                x = torch.dequantize(x)
+                x = self.conv(x)
                 x = self.maxpool(x)
                 x = self.adaptive_avgpool(x)
                 x = self.avgpool(x)
@@ -2235,45 +2236,27 @@ graph(%input, %weight):
                 x = F.upsample(x, (32, 32))
                 x = F.upsample_bilinear(x, (32, 32))
                 x = F.upsample_nearest(x, (32, 32))
+                x = self.conv(x)
                 return x
 
         m = torch.jit.script(M())
-        torch._C._jit_pass_inline(m.graph)
-        torch._C._jit_pass_constant_propagation(m.graph)
-        FileCheck().check("aten::dequantize") \
-                   .check("aten::max_pool2d") \
-                   .check("aten::adaptive_avg_pool2d") \
-                   .check("aten::avg_pool2d") \
-                   .check("aten::flatten") \
-                   .check("aten::max") \
-                   .check("aten::min") \
-                   .check("aten::mean") \
-                   .check("aten::reshape") \
-                   .check("aten::view") \
-                   .check("aten::transpose") \
-                   .check("aten::contiguous") \
-                   .check("aten::chunk") \
-                   .check("prim::ListUnpack") \
-                   .check("aten::dropout") \
-                   .check("aten::dropout") \
-                   .run(m.graph)
-        torch._C._jit_pass_swap_dequantize(m.graph)
-        FileCheck().check("aten::max_pool2d") \
-                   .check("aten::adaptive_avg_pool2d") \
-                   .check("aten::avg_pool2d") \
-                   .check("aten::flatten") \
-                   .check("aten::max") \
-                   .check("aten::min") \
-                   .check("aten::mean") \
-                   .check("aten::reshape") \
-                   .check("aten::view") \
-                   .check("aten::transpose") \
-                   .check("aten::contiguous") \
-                   .check("aten::chunk") \
-                   .check("prim::ListUnpack") \
-                   .check("aten::dropout") \
-                   .check("aten::dropout") \
-                   .check("dequantize") \
+        qconfig = script_qconfig(default_qconfig)
+        # dummy data to suppress warning
+        data = torch.rand((1, 3, 10, 10))
+        get_forward(qconfig.activation)(data)
+        get_forward(qconfig.weight)(data)
+
+        qconfig_dict = {'': qconfig}
+        m = prepare_script(m, qconfig_dict, inplace=False)
+        m = convert_script(m, True)
+        # This checks that the dequantize from the output of first conv
+        # is being propagated to the end, so that we don't insert extra
+        # observers and also successfully fused two quantized::conv2d
+        # patterns
+        # two quantize_per_tensor, one for input, one for weight
+        FileCheck().check_count("aten::quantize_per_tensor", 2, exactly=True) \
+                   .check_count("quantized::conv2d", 2, exactly=True) \
+                   .check("aten::dequantize") \
                    .run(m.graph)
 
     def test_swap_functional_linear(self):
