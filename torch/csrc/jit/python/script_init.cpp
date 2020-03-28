@@ -98,9 +98,7 @@ struct PythonResolver : public Resolver {
         py::hasattr(obj, "_fields");
   }
 
-  TypePtr resolveTypeFromObject(
-      const py::object& obj,
-      const SourceRange& loc) {
+  TypePtr resolveTypeFromObject(const py::object& obj, const SourceRange& loc) {
     if (py::isinstance<ScriptClass>(obj)) {
       auto script_class = py::cast<ScriptClass>(obj);
       return script_class.class_type_.type_;

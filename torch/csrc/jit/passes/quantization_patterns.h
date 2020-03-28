@@ -1,10 +1,10 @@
 #pragma once
 
-#include <string>
-#include <unordered_map>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
+#include <string>
+#include <unordered_map>
 
 namespace torch {
 namespace jit {
@@ -13,9 +13,12 @@ struct QuantFusionInfo {
   std::string quantized_op_name;
   std::string pattern;
   std::string replacement;
-  std::function<bool(const Match&, const std::unordered_map<std::string, Value*>&)> filter = [](const Match&, const std::unordered_map<std::string, Value*>&) {
-     return true;
-  };
+  std::function<
+      bool(const Match&, const std::unordered_map<std::string, Value*>&)>
+      filter =
+          [](const Match&, const std::unordered_map<std::string, Value*>&) {
+            return true;
+          };
 };
 
 std::vector<QuantFusionInfo> quant_fusion_pattern_and_replacements() {

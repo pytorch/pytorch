@@ -203,8 +203,7 @@ std::vector<Value*> getGeneralOpTensorInputs(Node* n) {
                  /* call_funcs = */ {},
                  /* aten_funcs = */ single_input_aten_funcs)) {
     return {n->input(0)};
-  } else if (n->kind() == prim::If &&
-             n->outputs().size() == 1) {
+  } else if (n->kind() == prim::If && n->outputs().size() == 1) {
     std::vector<Value*> inputs;
     for (Block* subblock : n->blocks()) {
       if (alwaysRaisesException(subblock)) {
@@ -2290,15 +2289,16 @@ void swapDeQuant(Block* block) {
       // for each use of the value
       for (auto* dequantized_val : inputs) {
         auto* dequantize_node = dequantized_val->node();
-        TORCH_INTERNAL_ASSERT(dequantized_val->uses().size() == 1,
-                              "Expect to have one dequantize node for each use");
+        TORCH_INTERNAL_ASSERT(
+            dequantized_val->uses().size() == 1,
+            "Expect to have one dequantize node for each use");
         // Replace useses of dequantized_val with the input of
         // dequantize node
         dequantized_val->replaceAllUsesWith(dequantize_node->inputs()[0]);
         dequantize_node->removeAllInputs();
         dequantize_node->destroy();
       }
-      for (auto* output: n->outputs()) {
+      for (auto* output : n->outputs()) {
         std::vector<Use> uses = output->uses();
         // Insert new dequantize node for each use of the output
         insertDeQuantCall(graph, output, output, uses);
