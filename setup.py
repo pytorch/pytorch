@@ -162,6 +162,11 @@
 #
 
 from __future__ import print_function
+
+import sys
+if sys.version_info < (3,):
+    raise Exception("Python 2 has reached end-of-life and is no longer supported by PyTorch.")
+
 from setuptools import setup, Extension, distutils, find_packages
 from collections import defaultdict
 from distutils import core
@@ -174,7 +179,6 @@ import distutils.sysconfig
 import filecmp
 import subprocess
 import shutil
-import sys
 import os
 import json
 import glob
