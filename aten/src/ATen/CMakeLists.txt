@@ -18,7 +18,7 @@ ENDIF()
 
 # this flag is used in Config but set externally, we must normalize it
 # to 0/1 otherwise `#if ON` will be evaluated to false.
-if (CAFFE2_STATIC_LINK_CUDA)
+if(CAFFE2_STATIC_LINK_CUDA)
   set(CAFFE2_STATIC_LINK_CUDA_INT 1)
 else()
   set(CAFFE2_STATIC_LINK_CUDA_INT 0)
@@ -128,14 +128,14 @@ list(APPEND ATen_CPU_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/..)
 # so the build can find the generated header files
 list(APPEND ATen_CPU_INCLUDE ${CMAKE_CURRENT_BINARY_DIR})
 
-IF (USE_TBB)
+IF(USE_TBB)
   message("ATen is compiled with TBB (${TBB_ROOT_DIR})")
   list(APPEND ATen_CPU_INCLUDE ${TBB_ROOT_DIR}/include)
   list(APPEND ATen_CPU_DEPENDENCY_LIBS tbb)
 ENDIF()
 
 IF(BLAS_FOUND)
-  IF ($ENV{TH_BINARY_BUILD})
+  IF($ENV{TH_BINARY_BUILD})
     MESSAGE(STATUS "TH_BINARY_BUILD detected. Enabling special linkage.")
     list(APPEND ATen_CPU_DEPENDENCY_LIBS
       "${BLAS_LIBRARIES};${BLAS_LIBRARIES};${BLAS_LIBRARIES}")
@@ -147,7 +147,7 @@ IF(BLAS_FOUND)
       list(APPEND ATen_HIP_DEPENDENCY_LIBS
         "${BLAS_LIBRARIES};${BLAS_LIBRARIES};${BLAS_LIBRARIES}")
     endif()
-  ELSE ($ENV{TH_BINARY_BUILD})
+  ELSE($ENV{TH_BINARY_BUILD})
     list(APPEND ATen_CPU_DEPENDENCY_LIBS ${BLAS_LIBRARIES})
     if(USE_CUDA)
       list(APPEND ATen_CUDA_DEPENDENCY_LIBS "${BLAS_LIBRARIES}")
@@ -155,7 +155,7 @@ IF(BLAS_FOUND)
     if(USE_ROCM)
       list(APPEND ATen_HIP_DEPENDENCY_LIBS "${BLAS_LIBRARIES}")
     endif()
-  ENDIF ($ENV{TH_BINARY_BUILD})
+  ENDIF($ENV{TH_BINARY_BUILD})
 ENDIF(BLAS_FOUND)
 
 IF(LAPACK_FOUND)
@@ -176,7 +176,7 @@ IF(LAPACK_FOUND)
   endif()
 ENDIF(LAPACK_FOUND)
 
-IF (UNIX AND NOT APPLE)
+IF(UNIX AND NOT APPLE)
    INCLUDE(CheckLibraryExists)
    # https://github.com/libgit2/libgit2/issues/2128#issuecomment-35649830
    CHECK_LIBRARY_EXISTS(rt clock_gettime "time.h" NEED_LIBRT)
@@ -275,7 +275,7 @@ if(NOT MSVC AND NOT EMSCRIPTEN AND NOT INTERN_BUILD_MOBILE)
 endif()
 
 IF(USE_CUDA AND NOT USE_ROCM)
-  IF ($ENV{ATEN_STATIC_CUDA})
+  IF($ENV{ATEN_STATIC_CUDA})
     # CuFFT has a complicated static story (especially around CUDA < 9) because it has device callback support
     # we first have to build a fake lib that links with no device callbacks,
     # and then we link against this object file.
@@ -330,12 +330,12 @@ IF(USE_CUDA AND NOT USE_ROCM)
 
   IF(USE_MAGMA)
     list(APPEND ATen_CUDA_DEPENDENCY_LIBS ${MAGMA_LIBRARIES})
-    IF ($ENV{TH_BINARY_BUILD})
+    IF($ENV{TH_BINARY_BUILD})
       list(APPEND ATen_CUDA_DEPENDENCY_LIBS
         "${BLAS_LIBRARIES};${BLAS_LIBRARIES};${BLAS_LIBRARIES}")
     ENDIF($ENV{TH_BINARY_BUILD})
   ENDIF(USE_MAGMA)
-  IF ($ENV{ATEN_STATIC_CUDA})
+  IF($ENV{ATEN_STATIC_CUDA})
     list(APPEND ATen_CUDA_DEPENDENCY_LIBS "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a")
     list(APPEND ATen_CUDA_DEPENDENCY_LIBS "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcudart_static.a")
   ENDIF($ENV{ATEN_STATIC_CUDA})

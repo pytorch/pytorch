@@ -18,11 +18,11 @@ void testConstantFoldSimple() {
   ExprHandle f = (a + b);
 
   ExprHandle newF = IRSimplifier::simplify(f);
-  EXPECT_NE(newF.AsNode<FloatImm>(), nullptr);
-  EXPECT_EQ(newF.AsNode<FloatImm>()->value(), 5);
+  ASSERT_NE(newF.AsNode<FloatImm>(), nullptr);
+  ASSERT_EQ(newF.AsNode<FloatImm>()->value(), 5);
 
   SimpleIRExprEval eval(newF);
-  EXPECT_EQ(eval.value<float>(), 5.f);
+  ASSERT_EQ(eval.value<float>(), 5.f);
 }
 
 void testConstantFoldTwoLayer() {
@@ -34,11 +34,11 @@ void testConstantFoldTwoLayer() {
   ExprHandle f = (a + b) - (c + d);
 
   ExprHandle newF = IRSimplifier::simplify(f);
-  EXPECT_NE(newF.AsNode<FloatImm>(), nullptr);
-  EXPECT_EQ(newF.AsNode<FloatImm>()->value(), -4);
+  ASSERT_NE(newF.AsNode<FloatImm>(), nullptr);
+  ASSERT_EQ(newF.AsNode<FloatImm>()->value(), -4);
 
   SimpleIRExprEval eval(newF);
-  EXPECT_EQ(eval.value<float>(), -4.f);
+  ASSERT_EQ(eval.value<float>(), -4.f);
 }
 
 void testConstantFoldShifts() {
@@ -49,11 +49,11 @@ void testConstantFoldShifts() {
   ExprHandle f = ((a << b) << b) >> c;
 
   ExprHandle newF = IRSimplifier::simplify(f);
-  EXPECT_NE(newF.AsNode<IntImm>(), nullptr);
-  EXPECT_EQ(newF.AsNode<IntImm>()->value(), 14);
+  ASSERT_NE(newF.AsNode<IntImm>(), nullptr);
+  ASSERT_EQ(newF.AsNode<IntImm>()->value(), 14);
 
   SimpleIRExprEval eval(newF);
-  EXPECT_EQ(eval.value<int>(), 7 << (4 - 3));
+  ASSERT_EQ(eval.value<int>(), 7 << (4 - 3));
 }
 
 void testConstantFoldBitwise() {
@@ -64,11 +64,11 @@ void testConstantFoldBitwise() {
   ExprHandle f = (a ^ b) & c;
 
   ExprHandle newF = IRSimplifier::simplify(f);
-  EXPECT_NE(newF.AsNode<IntImm>(), nullptr);
-  EXPECT_EQ(newF.AsNode<IntImm>()->value(), 37);
+  ASSERT_NE(newF.AsNode<IntImm>(), nullptr);
+  ASSERT_EQ(newF.AsNode<IntImm>()->value(), 37);
 
   SimpleIRExprEval eval(newF);
-  EXPECT_EQ(eval.value<int>(), (59 ^ 22) & 101);
+  ASSERT_EQ(eval.value<int>(), (59 ^ 22) & 101);
 }
 
 void testConstantFoldMultiOp() {
@@ -82,12 +82,12 @@ void testConstantFoldMultiOp() {
   ExprHandle fn = ((a / e) - (c + d)) * (f / b);
 
   ExprHandle newF = IRSimplifier::simplify(fn);
-  EXPECT_NE(newF.AsNode<FloatImm>(), nullptr);
+  ASSERT_NE(newF.AsNode<FloatImm>(), nullptr);
 
   SimpleIRExprEval eval(newF);
   SimpleIRExprEval ref(fn);
 
-  EXPECT_EQ(eval.value<float>(), ref.value<float>());
+  ASSERT_EQ(eval.value<float>(), ref.value<float>());
 }
 
 void testConstantFoldMinMax() {
@@ -100,13 +100,13 @@ void testConstantFoldMinMax() {
   ExprHandle minHandle = Min::make(b, c, true);
   ExprHandle fn = Max::make(a, minHandle, false);
 
-  EXPECT_EQ(fn.dtype().scalar_type(), ScalarType::Float);
+  ASSERT_EQ(fn.dtype().scalar_type(), ScalarType::Float);
 
   ExprHandle newF = IRSimplifier::simplify(fn);
-  EXPECT_NE(newF.AsNode<FloatImm>(), nullptr);
+  ASSERT_NE(newF.AsNode<FloatImm>(), nullptr);
 
   SimpleIRExprEval eval(newF);
-  EXPECT_EQ(eval.value<float>(), 15.f);
+  ASSERT_EQ(eval.value<float>(), 15.f);
 }
 
 void testConstantFoldIntrinsics() {
@@ -122,13 +122,13 @@ void testConstantFoldIntrinsics() {
   ExprHandle fn = Intrinsics::make(kFabs, rndHandle);
 
   ExprHandle newF = IRSimplifier::simplify(fn);
-  EXPECT_NE(newF.AsNode<FloatImm>(), nullptr);
-  EXPECT_EQ(newF.AsNode<FloatImm>()->value(), 1);
+  ASSERT_NE(newF.AsNode<FloatImm>(), nullptr);
+  ASSERT_EQ(newF.AsNode<FloatImm>()->value(), 1);
 
   SimpleIRExprEval eval(newF);
   SimpleIRExprEval ref(fn);
 
-  EXPECT_EQ(eval.value<float>(), ref.value<float>());
+  ASSERT_EQ(eval.value<float>(), ref.value<float>());
 }
 
 void testConstantFoldWithVar() {
@@ -138,12 +138,12 @@ void testConstantFoldWithVar() {
 
   ExprHandle newF = IRSimplifier::simplify(body);
   const Mul* root = newF.AsNode<Mul>();
-  EXPECT_NE(root, nullptr);
-  EXPECT_NE(dynamic_cast<const FloatImm*>(root->rhs()), nullptr);
+  ASSERT_NE(root, nullptr);
+  ASSERT_NE(dynamic_cast<const FloatImm*>(root->rhs()), nullptr);
 
   ExprHandle result = Let::make(x, ExprHandle(3.f), newF);
   SimpleIRExprEval eval(result);
-  EXPECT_EQ(eval.value<float>(), 3 * (2 + 4));
+  ASSERT_EQ(eval.value<float>(), 3 * (2 + 4));
 }
 
 void testUnFoldableExpr() {
@@ -154,14 +154,14 @@ void testUnFoldableExpr() {
 
   ExprHandle newF = IRSimplifier::simplify(body);
   const Add* root = newF.AsNode<Add>();
-  EXPECT_NE(root, nullptr);
-  EXPECT_EQ(dynamic_cast<const FloatImm*>(root->lhs()), nullptr);
-  EXPECT_EQ(dynamic_cast<const FloatImm*>(root->rhs()), nullptr);
+  ASSERT_NE(root, nullptr);
+  ASSERT_EQ(dynamic_cast<const FloatImm*>(root->lhs()), nullptr);
+  ASSERT_EQ(dynamic_cast<const FloatImm*>(root->rhs()), nullptr);
 
   ExprHandle result = Let::make(x, ExprHandle(3.f), newF);
   result = Let::make(y, ExprHandle(2.f), result);
   SimpleIRExprEval eval(result);
-  EXPECT_EQ(eval.value<float>(), 9 + 10);
+  ASSERT_EQ(eval.value<float>(), 9 + 10);
 }
 
 void testHashSimple() {
@@ -177,12 +177,12 @@ void testHashSimple() {
   auto hash_a = hasher.hash(a.node());
   auto hash_f = hasher.hash(f.node());
 
-  EXPECT_NE(hash_x, 0);
-  EXPECT_NE(hash_a, 0);
-  EXPECT_NE(hash_f, 0);
-  EXPECT_NE(hash_x, hash_a);
-  EXPECT_NE(hash_x, hash_f);
-  EXPECT_NE(hash_a, hash_f);
+  ASSERT_NE(hash_x, 0);
+  ASSERT_NE(hash_a, 0);
+  ASSERT_NE(hash_f, 0);
+  ASSERT_NE(hash_x, hash_a);
+  ASSERT_NE(hash_x, hash_f);
+  ASSERT_NE(hash_a, hash_f);
 }
 
 void testHashEquivalence() {
@@ -192,7 +192,7 @@ void testHashEquivalence() {
   ExprHandle f = (x * y) + (x * y);
 
   const Add* root = f.AsNode<Add>();
-  EXPECT_NE(root, nullptr);
+  ASSERT_NE(root, nullptr);
 
   HashProvider hasher;
   auto hash_f = hasher.hash(f.node());
@@ -200,26 +200,26 @@ void testHashEquivalence() {
   auto hash_r = hasher.hash(root->rhs());
 
   // Root not equal to either branch.
-  EXPECT_NE(hash_f, hash_l);
-  EXPECT_NE(hash_f, hash_r);
+  ASSERT_NE(hash_f, hash_l);
+  ASSERT_NE(hash_f, hash_r);
   // but branches are equal.
-  EXPECT_EQ(hash_l, hash_r);
+  ASSERT_EQ(hash_l, hash_r);
 
   // Still equivalent if separate.
   ExprHandle a(2);
   ExprHandle f2 = x + a / y;
   ExprHandle b(2);
   ExprHandle f3 = x + b / y;
-  EXPECT_EQ(hasher.hash(f2.node()), hasher.hash(f3.node()));
+  ASSERT_EQ(hasher.hash(f2.node()), hasher.hash(f3.node()));
 
   // Not equivalent if different vars (even with same name).
   VarHandle z("x", kFloat);
   ExprHandle f4 = z + b / y;
-  EXPECT_NE(hasher.hash(f2.node()), hasher.hash(f4.node()));
+  ASSERT_NE(hasher.hash(f2.node()), hasher.hash(f4.node()));
 
   // Intrinsics sanity check.
   ExprHandle f5 = Intrinsics::make(kSin, x) * Intrinsics::make(kCos, x);
-  EXPECT_NE(hasher.hash(f5.node()), 0);
+  ASSERT_NE(hasher.hash(f5.node()), 0);
 }
 
 void testHashEquivalenceAfterFolding() {
@@ -231,7 +231,7 @@ void testHashEquivalenceAfterFolding() {
   ExprHandle f = ((a + b) * x) * (c * x);
 
   const Mul* root = f.AsNode<Mul>();
-  EXPECT_NE(root, nullptr);
+  ASSERT_NE(root, nullptr);
 
   HashProvider hasher;
   auto hash_f = hasher.hash(f.node());
@@ -239,24 +239,24 @@ void testHashEquivalenceAfterFolding() {
   auto hash_r = hasher.hash(root->rhs());
 
   // Root not equal to either branch, and branches not equal.
-  EXPECT_NE(hash_f, hash_l);
-  EXPECT_NE(hash_f, hash_r);
-  EXPECT_NE(hash_l, hash_r);
+  ASSERT_NE(hash_f, hash_l);
+  ASSERT_NE(hash_f, hash_r);
+  ASSERT_NE(hash_l, hash_r);
 
   ExprHandle newF = IRSimplifier::simplify(f);
 
   const Mul* newRoot = newF.AsNode<Mul>();
-  EXPECT_NE(newRoot, nullptr);
+  ASSERT_NE(newRoot, nullptr);
 
   auto hash_f_n = hasher.hash(newF.node());
   auto hash_l_n = hasher.hash(newRoot->lhs());
   auto hash_r_n = hasher.hash(newRoot->rhs());
 
   // Root not equal to either branch.
-  EXPECT_NE(hash_f_n, hash_l_n);
-  EXPECT_NE(hash_f_n, hash_r_n);
+  ASSERT_NE(hash_f_n, hash_l_n);
+  ASSERT_NE(hash_f_n, hash_r_n);
   // but branches are now equal.
-  EXPECT_EQ(hash_l_n, hash_r_n);
+  ASSERT_EQ(hash_l_n, hash_r_n);
 }
 
 void testHashDifferenceTypes() {
@@ -278,7 +278,7 @@ void testHashDifferenceTypes() {
   // Immediates of different types are not equal.
   for (unsigned int i = 0; i < immediates.size(); ++i) {
     for (unsigned int j = i + 1; j < immediates.size(); ++j) {
-      EXPECT_NE(hasher.hash(immediates[i]), hasher.hash(immediates[j]));
+      ASSERT_NE(hasher.hash(immediates[i]), hasher.hash(immediates[j]));
     }
   }
 
@@ -289,7 +289,7 @@ void testHashDifferenceTypes() {
   ExprHandle ff1 = IRSimplifier::simplify(f1);
   ExprHandle ff2 = IRSimplifier::simplify(f2);
 
-  EXPECT_EQ(hasher.hash(ff1.node()), hasher.hash(ff2.node()));
+  ASSERT_EQ(hasher.hash(ff1.node()), hasher.hash(ff2.node()));
 }
 
 void testHashLargeExpression() {
@@ -332,15 +332,15 @@ void testHashLargeExpression() {
   HashProvider hasher;
   auto hash_r = hasher.hash(if_stmt);
   // We should not have to do any more work.
-  EXPECT_TRUE(hasher.cachedHash(memcpy_stmt));
+  ASSERT_TRUE(hasher.cachedHash(memcpy_stmt));
   auto hash_t = hasher.hash(memcpy_stmt);
-  EXPECT_TRUE(hasher.cachedHash(store_ramp_stmt));
+  ASSERT_TRUE(hasher.cachedHash(store_ramp_stmt));
   auto hash_f = hasher.hash(store_ramp_stmt);
 
   // Root not equal to either branch, and branches not equal.
-  EXPECT_NE(hash_r, hash_t);
-  EXPECT_NE(hash_r, hash_f);
-  EXPECT_NE(hash_t, hash_f);
+  ASSERT_NE(hash_r, hash_t);
+  ASSERT_NE(hash_r, hash_f);
+  ASSERT_NE(hash_t, hash_f);
 }
 
 /// (2.f + x) + 4.f => x + 6.f
@@ -351,13 +351,13 @@ void testSimplifyAdd() {
 
   ExprHandle simplified = IRSimplifier::simplify(body);
   const Add* root = simplified.AsNode<Add>();
-  EXPECT_NE(root, nullptr);
+  ASSERT_NE(root, nullptr);
   const Var* lhs = dynamic_cast<const Var*>(root->lhs());
-  EXPECT_NE(lhs, nullptr);
-  EXPECT_EQ(lhs->name_hint(), "x");
+  ASSERT_NE(lhs, nullptr);
+  ASSERT_EQ(lhs->name_hint(), "x");
   const FloatImm* rhs = dynamic_cast<const FloatImm*>(root->rhs());
-  EXPECT_NE(rhs, nullptr);
-  EXPECT_EQ(rhs->value(), 6.f);
+  ASSERT_NE(rhs, nullptr);
+  ASSERT_EQ(rhs->value(), 6.f);
 }
 
 /// (2.f - x) - 4.f => -2.f - x
@@ -368,13 +368,13 @@ void testSimplifySub() {
 
   ExprHandle simplified = IRSimplifier::simplify(body);
   const Sub* root = simplified.AsNode<Sub>();
-  EXPECT_NE(root, nullptr);
+  ASSERT_NE(root, nullptr);
   const FloatImm* lhs = dynamic_cast<const FloatImm*>(root->lhs());
-  EXPECT_NE(lhs, nullptr);
-  EXPECT_EQ(lhs->value(), -2.f);
+  ASSERT_NE(lhs, nullptr);
+  ASSERT_EQ(lhs->value(), -2.f);
   const Var* rhs = dynamic_cast<const Var*>(root->rhs());
-  EXPECT_NE(rhs, nullptr);
-  EXPECT_EQ(rhs->name_hint(), "x");
+  ASSERT_NE(rhs, nullptr);
+  ASSERT_EQ(rhs->name_hint(), "x");
 }
 
 /// 2.f * (1.f - x) - 4.f => -6.f - (x * 2.f)
@@ -385,18 +385,18 @@ void testSimplifyMultiLayer() {
 
   ExprHandle simplified = IRSimplifier::simplify(body);
   const Sub* root = simplified.AsNode<Sub>();
-  EXPECT_NE(root, nullptr);
+  ASSERT_NE(root, nullptr);
   const FloatImm* lhs = dynamic_cast<const FloatImm*>(root->lhs());
-  EXPECT_NE(lhs, nullptr);
-  EXPECT_EQ(lhs->value(), -6.f);
+  ASSERT_NE(lhs, nullptr);
+  ASSERT_EQ(lhs->value(), -6.f);
   const Mul* rhs = dynamic_cast<const Mul*>(root->rhs());
-  EXPECT_NE(rhs, nullptr);
+  ASSERT_NE(rhs, nullptr);
   const Var* varX = dynamic_cast<const Var*>(rhs->lhs());
-  EXPECT_NE(varX, nullptr);
-  EXPECT_EQ(varX->name_hint(), "x");
+  ASSERT_NE(varX, nullptr);
+  ASSERT_EQ(varX->name_hint(), "x");
   const FloatImm* mulRhs = dynamic_cast<const FloatImm*>(rhs->rhs());
-  EXPECT_NE(mulRhs, nullptr);
-  EXPECT_EQ(mulRhs->value(), 2.f);
+  ASSERT_NE(mulRhs, nullptr);
+  ASSERT_EQ(mulRhs->value(), 2.f);
 }
 
 /// 2 * (3 * x) - (x * 4) => x * 2
@@ -408,13 +408,13 @@ void testSimplifyMultiTerm() {
 
   ExprHandle simplified = IRSimplifier::simplify(body);
   const Mul* root = simplified.AsNode<Mul>();
-  EXPECT_NE(root, nullptr);
+  ASSERT_NE(root, nullptr);
   const Var* lhs = dynamic_cast<const Var*>(root->lhs());
-  EXPECT_NE(lhs, nullptr);
-  EXPECT_EQ(lhs->name_hint(), "x");
+  ASSERT_NE(lhs, nullptr);
+  ASSERT_EQ(lhs->name_hint(), "x");
   const IntImm* rhs = dynamic_cast<const IntImm*>(root->rhs());
-  EXPECT_NE(rhs, nullptr);
-  EXPECT_EQ(rhs->value(), 2);
+  ASSERT_NE(rhs, nullptr);
+  ASSERT_EQ(rhs->value(), 2);
 }
 
 /// 2 * (3 * (f)x) - (x * 4) => x * 2.f
@@ -426,13 +426,13 @@ void testSimplifyCasts() {
 
   ExprHandle simplified = IRSimplifier::simplify(body);
   const Mul* root = simplified.AsNode<Mul>();
-  EXPECT_NE(root, nullptr);
+  ASSERT_NE(root, nullptr);
   const Var* lhs = dynamic_cast<const Var*>(root->lhs());
-  EXPECT_NE(lhs, nullptr);
-  EXPECT_EQ(lhs->name_hint(), "x");
+  ASSERT_NE(lhs, nullptr);
+  ASSERT_EQ(lhs->name_hint(), "x");
   const FloatImm* rhs = dynamic_cast<const FloatImm*>(root->rhs());
-  EXPECT_NE(rhs, nullptr);
-  EXPECT_EQ(rhs->value(), 2);
+  ASSERT_NE(rhs, nullptr);
+  ASSERT_EQ(rhs->value(), 2);
 }
 
 /// (x + 0) * 1 => x
@@ -443,8 +443,8 @@ void testSimplifyEliminatesNoOps() {
 
   ExprHandle simplified = IRSimplifier::simplify(body);
   const Var* root = simplified.AsNode<Var>();
-  EXPECT_NE(root, nullptr);
-  EXPECT_EQ(root->name_hint(), "x");
+  ASSERT_NE(root, nullptr);
+  ASSERT_EQ(root->name_hint(), "x");
 }
 
 /// Cannot simplify this.
@@ -456,16 +456,16 @@ void testSimplifyMultiVar() {
 
   ExprHandle simplified = IRSimplifier::simplify(body);
   const Add* root = simplified.AsNode<Add>();
-  EXPECT_NE(root, nullptr);
+  ASSERT_NE(root, nullptr);
   const Mul* lhs = dynamic_cast<const Mul*>(root->lhs());
-  EXPECT_NE(lhs, nullptr);
+  ASSERT_NE(lhs, nullptr);
   const Var* varY = dynamic_cast<const Var*>(lhs->lhs());
-  EXPECT_EQ(varY->name_hint(), "y");
+  ASSERT_EQ(varY->name_hint(), "y");
   const Mul* rhs = dynamic_cast<const Mul*>(root->rhs());
-  EXPECT_NE(rhs, nullptr);
+  ASSERT_NE(rhs, nullptr);
   const Var* varX = dynamic_cast<const Var*>(rhs->lhs());
-  EXPECT_NE(varX, nullptr);
-  EXPECT_EQ(varX->name_hint(), "x");
+  ASSERT_NE(varX, nullptr);
+  ASSERT_EQ(varX->name_hint(), "x");
 }
 
 /// y + x * 0 => y
@@ -477,8 +477,8 @@ void testSimplifyEliminatesVar() {
 
   ExprHandle simplified = IRSimplifier::simplify(body);
   const Var* root = simplified.AsNode<Var>();
-  EXPECT_NE(root, nullptr);
-  EXPECT_EQ(root->name_hint(), "y");
+  ASSERT_NE(root, nullptr);
+  ASSERT_EQ(root->name_hint(), "y");
 }
 
 } // namespace jit

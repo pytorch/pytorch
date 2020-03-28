@@ -2356,7 +2356,11 @@ graph(%input, %weight):
         qconfig_dict = {'': default_qconfig}
         model = torch.jit.script(M()).eval()
         model = quantize_script(model, qconfig_dict, _test_only_eval_fn, [data], inplace=False)
-        FileCheck().check("quantized::conv2d") \
+        # make sure there is only one quantize_per_tensor for input
+        # and conv2d_prepack is folded
+        FileCheck().check_count("aten::quantize_per_tensor", 1, exactly=True) \
+                   .check_not("quantized::conv2d_prepack") \
+                   .check("quantized::conv2d") \
                    .run(model.graph)
 
     def test_finalize_for_linear(self):
@@ -2372,7 +2376,11 @@ graph(%input, %weight):
         qconfig_dict = {'': default_qconfig}
         model = torch.jit.script(M()).eval()
         model = quantize_script(model, qconfig_dict, _test_only_eval_fn, [data], inplace=False)
-        FileCheck().check("quantized::linear") \
+        # make sure there is only one quantize_per_tensor for input
+        # and linear_prepack is folded
+        FileCheck().check_count("aten::quantize_per_tensor", 1, exactly=True) \
+                   .check_not("quantized::linear_prepack") \
+                   .check("quantized::linear") \
                    .run(model.graph)
 
     def test_finalize_debug(self):
@@ -3065,6 +3073,22 @@ graph(%Ra, %Rb):
         tests_setup.setup()
         torch._C._jit_run_cpp_tests(run_cuda=True)
         tests_setup.shutdown()
+
+    @unittest.skipIf(IS_SANDCASTLE, "gtest runs these in sandcastle")
+    @unittest.skipIf(RUN_CUDA, "covered by test_tensorexpr_cuda")
+    @unittest.skipIf(IS_WINDOWS, "enable on windows")
+    @unittest.skipIf(not torch._C._has_tensorexpr_cpp_tests(), "Tests were not built, use BUILD_TEST=1")
+    @skipIfRocm
+    def test_tensorexpr_cpp(self):
+        torch._C._run_tensorexpr_cpp_tests(run_cuda=False)
+
+    @unittest.skipIf(IS_SANDCASTLE, "gtest runs these in sandcastle")
+    @unittest.skipIf(not RUN_CUDA, "covered by test_tensorexpr")
+    @unittest.skipIf(IS_WINDOWS, "enable on windows")
+    @unittest.skipIf(not torch._C._has_tensorexpr_cpp_tests(), "Tests were not built, use BUILD_TEST=1")
+    @skipIfRocm
+    def test_tensorexpr_cpp_cuda(self):
+        torch._C._run_tensorexpr_cpp_tests(run_cuda=True)
 
     def test_batchnorm(self):
         x = torch.ones(2, 2, 2, 2)
