@@ -2473,10 +2473,10 @@ void SwapDeQuant(std::shared_ptr<Graph>& graph) {
 }
 
 void QuantFusion(std::shared_ptr<Graph>& graph) {
-  for (const auto& item : quant_fusion_pattern_and_replacements()) {
+  for (const auto& info : quant_fusion_pattern_and_replacements()) {
     SubgraphRewriter rewriter;
-    rewriter.RegisterRewritePattern(item.first, item.second);
-    rewriter.runOnGraph(graph);
+    rewriter.RegisterRewritePattern(info.pattern, info.replacement);
+    rewriter.runOnGraph(graph, info.filter);
   }
 }
 
