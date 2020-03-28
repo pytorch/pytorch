@@ -1467,10 +1467,10 @@ Tensor& diag_out(Tensor &result, const Tensor& self, int64_t dimension) {
 
 template <typename scalar_t>
 void apply_renorm(Tensor &res, const Tensor& src, scalar_t value, int64_t dimension, scalar_t maxnorm) {
-  TORCH_CHECK(dimension >= 0 && dimension < src.dim(), "invalid dimension %d",
+  TORCH_CHECK(dimension >= 0 && dimension < src.dim(), "invalid dimension ",
       dimension);
   TORCH_CHECK(value > 0, "non-positive-norm not supported");
-  TORCH_CHECK(src.dim() > 1, "need at least 2 dimensions, got %d dimensions", src.dim());
+  TORCH_CHECK(src.dim() > 1, "need at least 2 dimensions, got ", src.dim(), " dimensions");
 
   Tensor rowR = at::empty({0}, src.options());
   Tensor rowS = at::empty({0}, src.options());
@@ -1506,7 +1506,7 @@ void apply_renorm(Tensor &res, const Tensor& src, scalar_t value, int64_t dimens
       new_norm = maxnorm / (norm + 1e-7);
 
       for (int64_t j = 0; j < rowR.numel(); j++) {
-        rowR_data[i] = rowS_data[i] * new_norm;
+        rowR_data[j] = rowS_data[j] * new_norm;
       }
     } else {
       rowR.copy_(rowS);
