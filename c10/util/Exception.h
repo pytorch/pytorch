@@ -110,19 +110,19 @@ C10_API WarningHandler* get_warning_handler() noexcept(true);
 // Used in ATen for out-of-bound indices that can reasonably only be detected
 // lazily inside a kernel (See: advanced indexing).  These turn into
 // IndexError when they cross to Python.
-class IndexError : public Error {
+class C10_API IndexError : public Error {
   using Error::Error;
 };
 
 // Used in ATen for invalid values.  These turn into
 // ValueError when they cross to Python.
-class ValueError : public Error {
+class C10_API ValueError : public Error {
   using Error::Error;
 };
 
 // Used in ATen for non finite indices.  These turn into
 // ExitException when they cross to Python.
-class EnforceFiniteError : public Error {
+class C10_API EnforceFiniteError : public Error {
   using Error::Error;
 };
 

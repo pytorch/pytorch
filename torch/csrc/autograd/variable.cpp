@@ -392,9 +392,12 @@ void handle_view_on_rebase(DifferentiableViewMeta* diff_view_meta, bool indirect
     } else {
       msg = "This view requires gradients and it's being modified inplace. ";
     }
-    msg = c10::str(msg, "Backward through inplace update on view tensors is WIP for XLA backwend. "
-                   "Gradient might be wrong in certain cases. Running forward alone is fine. "
-                   "To work around it, please replace the inplace operation by an out-of-place one.");
+    msg = c10::str(msg, "Running a backward pass through an inplace update on view tensors is a WIP "
+                   "for the XLA backend and may result in incorrect gradient computation in certain cases. "
+                   "Note this warning is being triggered on the inplace update (not the corresponding backward pass), "
+                   "and this update is safe if a backward pass is not run. "
+                   "To work around this limitation and to silence this warning, "
+                   "please replace the inplace operation by the corresponding out-of-place operation.");
     TORCH_WARN(msg);
   }
 
