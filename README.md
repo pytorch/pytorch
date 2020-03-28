@@ -234,10 +234,6 @@ CUDA and MSVC have strong version dependencies, so even if you use VS 2017 / 201
 
 ```cmd
 cmd
-:: [Optional] Only add the next two lines if you need Python 2.7. If you use Python 3, ignore these two lines.
-set MSSdk=1
-set FORCE_PY27_BUILD=1
-
 :: [Optional] If you want to build with VS 2019 generator, please change the value in the next line to `Visual Studio 16 2019`.
 :: Note: This value is useless if Ninja is detected. However, you can force that by using `set USE_NINJA=OFF`.
 set CMAKE_GENERATOR=Visual Studio 15 2017
