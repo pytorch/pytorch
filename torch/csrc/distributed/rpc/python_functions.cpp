@@ -149,21 +149,15 @@ std::shared_ptr<jit::PythonFutureWrapper> pyRpcBuiltin(
     const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf,
     const py::args& args,
     const py::kwargs& kwargs) {
-  DCHECK(PyGILState_Check());
   Stack stack;
   auto op = matchBuiltinOp(opName, args, kwargs, stack);
   // Release GIL since args and kwargs processing is done.
   py::gil_scoped_release release;
   auto scriptCall = std::make_unique<ScriptCall>(op, std::move(stack));
   auto agent = RpcAgent::getCurrentRpcAgent();
-  auto responseMessageFuture = sendMessageWithAutograd(
-      *agent, dst, std::move(*scriptCall).toMessage(), false, rf);
-
-  // Notice, even we can get the JIT type of the Python object from the op
-  // schema, there is no need to do that, because the return value will be
-  // passed back to Python land eventually.
   return std::make_shared<torch::jit::PythonFutureWrapper>(
-      wrapFutureMessageInJitFuture(responseMessageFuture));
+      wrapFutureMessageInJitFuture(sendMessageWithAutograd(
+          *agent, dst, std::move(*scriptCall).toMessage(), false, rf)));
 }
 
 std::shared_ptr<jit::PythonFutureWrapper> pyRpcPythonUdf(
@@ -177,25 +171,24 @@ std::shared_ptr<jit::PythonFutureWrapper> pyRpcPythonUdf(
   auto pythonCall = std::make_unique<PythonCall>(std::move(serializedPyObj));
 
   auto agent = RpcAgent::getCurrentRpcAgent();
-  auto responseMessageFuture = sendMessageWithAutograd(
-      *agent,
-      dst,
-      std::move(*pythonCall).toMessage(),
-      true /*forceGradRecording*/,
-      rf);
-
   return std::make_shared<torch::jit::PythonFutureWrapper>(
-      wrapFutureMessageInJitFuture(responseMessageFuture),
+      wrapFutureMessageInJitFuture(sendMessageWithAutograd(
+          *agent,
+          dst,
+          std::move(*pythonCall).toMessage(),
+          true /*forceGradRecording*/,
+          rf)),
       [](const py::object& value) {
         py::gil_scoped_release release;
         auto& pythonRpcHandler = PythonRpcHandler::getInstance();
         // This will unwrap RemoteException and raise the contained
-        // server-side Python exception on client side. A caveat here is that
-        // the exception must be raise in the client thread calling the pybind
-        // "wait" API, so that it can be correctly shown to user. A wrong way is
-        // to raise it in RPC server thread, where the exception would be
-        // swallowed in the ThreadPool task, and also no pybind handling code
-        // can help shown the Python exception.
+        // server-side Python exception on client side. A caveat here is
+        // that the exception must be raise in the client thread calling
+        // the pybind "wait" API, so that it can be correctly shown to
+        // user. A wrong way is to raise it in RPC server thread, where
+        // the exception would be swallowed in the ThreadPool task, and
+        // also no pybind handling code can help shown the Python
+        // exception.
         pythonRpcHandler.handleException(value);
       });
 }
