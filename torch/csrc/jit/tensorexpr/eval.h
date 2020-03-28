@@ -931,6 +931,28 @@ inline Stmt* Substitute(Stmt* stmt, const VarMapping& var_mapping) {
   return stmt->accept_mutator(&var_sub);
 }
 
+// Uses the evaluator to fold an Expression with constant terms.
+// E.g. evaluateOp(Add(3, 4)) => 7.
+// Expr v must not have any unbound Vars.
+static Expr* evaluateOp(const Expr* v) {
+  ExprHandle handle(v);
+  ExprEval<SimpleIREvaluator> eval(handle);
+
+  switch (v->dtype().scalar_type()) {
+#define TYPE_CASE(Type, Name)                                 \
+  case ScalarType::Name: {                                    \
+    Type val = eval.value<Type>();                            \
+    return getImmediateByType(v->dtype().scalar_type(), val); \
+  }
+    AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
+#undef TYPE_CASE
+    default:
+      LOG(FATAL) << "Unsupported datatype: " << v->dtype();
+      return nullptr;
+  }
+  return nullptr;
+}
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
