@@ -223,15 +223,15 @@ class class_ {
           typename c10::guts::infer_function_traits_t<Func>::return_type;
       detail::BoxedProxy<RetType, Func>()(stack, func);
     };
-    auto method = std::make_shared<jit::BuiltinOpFunction>(
+    auto method = std::make_unique<jit::BuiltinOpFunction>(
         qualMethodName, std::move(schema), std::move(wrapped_func));
 
     // Register the method here to keep the Method alive.
     // ClassTypes do not hold ownership of their methods (normally it
     // those are held by the CompilationUnit), so we need a proxy for
     // that behavior here.
-    registerCustomClassMethod(method);
     classTypePtr->addMethod(method.get());
+    registerCustomClassMethod(std::move(method));
   }
 
   std::string qualClassName;

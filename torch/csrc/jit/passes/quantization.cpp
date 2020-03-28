@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/passes/fuse_linear.h>
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
 #include <torch/csrc/jit/passes/inliner.h>
+#include <torch/csrc/jit/passes/prepack_folding.h>
 #include <torch/csrc/jit/passes/quantization_patterns.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 
@@ -73,6 +74,10 @@ std::vector<std::string> _single_input_general_call_funcs = {
     "adaptive_avg_pool2d",
     "_max_pool2d",
     "dropout",
+    "interpolate",
+    "upsample",
+    "upsample_bilinear",
+    "upsample_nearest",
 };
 
 std::vector<std::string> _quantizable_call_funcs = {
@@ -130,12 +135,31 @@ bool isFunctionNode(
   return is_quantizable;
 }
 
+// checks if a block will always raise an Exception
+bool alwaysRaisesException(Block* block) {
+  for (Node* n : block->nodes()) {
+    if (n->kind() == prim::RaiseException) {
+      return true;
+    }
+    if (n->kind() == prim::If) {
+      bool exception = true;
+      for (Block* b : n->blocks()) {
+        exception &= alwaysRaisesException(b);
+      }
+      if (exception) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 // If the op doesn't require observation, return
-// the the list of input indexes that we should check to see
+// the the list of input `Value`s that we should check to see
 // if they are observed/quantized, if so, we can say the output
 // of this op is observed/quantized as well, since for these ops we can derive
 // the quantization parameters for output given inputs
-std::vector<size_t> getGeneralOpTensorInputIndexes(Node* n) {
+std::vector<Value*> getGeneralOpTensorInputs(Node* n) {
   std::vector<std::string> single_input_aten_funcs = {
       "max_pool2d",
       "avg_pool2d",
@@ -159,6 +183,8 @@ std::vector<size_t> getGeneralOpTensorInputIndexes(Node* n) {
       "view",
       "transpose",
       "contiguous",
+      "permute",
+      "repeat_interleave",
       // TODO: sort returns a tuple of Tensors, we have
       // to extend the API to support that
       // "sort",
@@ -169,22 +195,33 @@ std::vector<size_t> getGeneralOpTensorInputIndexes(Node* n) {
           // after inline
           /* call_funcs = */ _single_input_general_call_funcs,
           /* aten_funcs = */ {})) {
-    return {1};
+    return {n->input(1)};
   } else if (isFunctionNode(
                  n,
                  // We don't have call functions
                  // after inline
                  /* call_funcs = */ {},
                  /* aten_funcs = */ single_input_aten_funcs)) {
-    return {0};
-  } else if (n->kind() == prim::ListUnpack) {
-    return {0};
-  } else if (n->kind() == prim::ListConstruct) {
-    std::vector<size_t> indexes;
-    for (auto i = 0; i < n->inputs().size(); ++i) {
-      indexes.push_back(i);
+    return {n->input(0)};
+  } else if (n->kind() == prim::If &&
+             n->outputs().size() == 1) {
+    std::vector<Value*> inputs;
+    for (Block* subblock : n->blocks()) {
+      if (alwaysRaisesException(subblock)) {
+        continue;
+      }
+      auto* output = subblock->outputs()[0];
+      inputs.push_back(output);
     }
-    return indexes;
+    return inputs;
+  } else if (n->kind() == prim::ListUnpack) {
+    return {n->input(0)};
+  } else if (n->kind() == prim::ListConstruct) {
+    std::vector<Value*> inputs;
+    for (auto* v : n->inputs()) {
+      inputs.push_back(v);
+    }
+    return inputs;
   }
   return {};
 }
@@ -813,10 +850,10 @@ void InsertObserversHelper::fillPassThroughValueMap(
         auto g = getCallFunctionGraph(n);
         blocks_to_visit.push(g->block());
       }
-      auto input_indexes = getGeneralOpTensorInputIndexes(n);
-      for (auto i : input_indexes) {
+      auto inputs = getGeneralOpTensorInputs(n);
+      for (auto* input : inputs) {
         for (auto* output : n->outputs()) {
-          pass_through_value_map_[output].push_back(n->input(i));
+          pass_through_value_map_[output].push_back(input);
         }
       }
       for (Block* subblock : n->blocks()) {
@@ -2220,6 +2257,56 @@ void addBiasForConv2dIfNone(Module& module) {
   }
 }
 
+void swapDeQuant(Block* block) {
+  auto graph = block->owningGraph();
+  for (Node* n : block->nodes()) {
+    if (n->kind() == prim::If) {
+      for (Block* subblock : n->blocks()) {
+        swapDeQuant(subblock);
+      }
+      if (n->outputs().size() == 0) {
+        continue;
+      }
+      if (n->outputs().size() > 1) {
+        // Factoring out dequantize for if blocks with multiple outputs
+        // is not supported right now
+        continue;
+      }
+    }
+    auto inputs = getGeneralOpTensorInputs(n);
+    if (inputs.size() > 0) {
+      bool is_dequantized = true;
+      for (auto* input : inputs) {
+        // note that we don't need to recursively check for prim::If
+        // here because if all inputs of a prim::If is dequantized
+        // the dequantize will be factored out before we get to this
+        // point
+        is_dequantized &= input->node()->kind() == Symbol::aten("dequantize");
+      }
+      if (!is_dequantized) {
+        continue;
+      }
+      // Delete dequantize node, we have one dequantize
+      // for each use of the value
+      for (auto* dequantized_val : inputs) {
+        auto* dequantize_node = dequantized_val->node();
+        TORCH_INTERNAL_ASSERT(dequantized_val->uses().size() == 1,
+                              "Expect to have one dequantize node for each use");
+        // Replace useses of dequantized_val with the input of
+        // dequantize node
+        dequantized_val->replaceAllUsesWith(dequantize_node->inputs()[0]);
+        dequantize_node->removeAllInputs();
+        dequantize_node->destroy();
+      }
+      for (auto* output: n->outputs()) {
+        std::vector<Use> uses = output->uses();
+        // Insert new dequantize node for each use of the output
+        insertDeQuantCall(graph, output, output, uses);
+      }
+    }
+  }
+}
+
 } // namespace
 
 TORCH_API Module InsertObservers(
@@ -2382,54 +2469,14 @@ void ReplicateDeQuant(std::shared_ptr<Graph>& graph) {
 // for example: flatten, average_pool, upsample
 // This is called after inline and before graph execution
 void SwapDeQuant(std::shared_ptr<Graph>& graph) {
-  std::stack<Block*> blocks_to_visit;
-  blocks_to_visit.push(graph->block());
-  while (!blocks_to_visit.empty()) {
-    Block* b = blocks_to_visit.top();
-    blocks_to_visit.pop();
-    for (Node* n : b->nodes()) {
-      auto input_indexes = getGeneralOpTensorInputIndexes(n);
-      if (input_indexes.size() > 0) {
-        bool is_dequantized = true;
-        for (auto i : input_indexes) {
-          is_dequantized &=
-              n->inputs()[i]->node()->kind() == Symbol::aten("dequantize");
-        }
-        if (!is_dequantized) {
-          continue;
-        }
-        // Delete dequantize node, we have one dequantize
-        // for each use of the value
-        for (auto i : input_indexes) {
-          auto* dequantized_val = n->inputs()[i];
-          auto* dequantize_node = dequantized_val->node();
-          TORCH_INTERNAL_ASSERT(
-              dequantized_val->uses().size() == 1,
-              "Expect to have one dequantize node for each use");
-          // Replace useses of dequantized_val with the input of
-          // dequantize node
-          dequantized_val->replaceAllUsesWith(dequantize_node->inputs()[0]);
-          dequantize_node->removeAllInputs();
-          dequantize_node->destroy();
-        }
-        for (auto* output : n->outputs()) {
-          std::vector<Use> uses = output->uses();
-          // Insert new dequantize node for each use of the output
-          insertDeQuantCall(graph.get(), output, output, uses);
-        }
-      }
-      for (Block* subblock : n->blocks()) {
-        blocks_to_visit.push(subblock);
-      }
-    }
-  }
+  swapDeQuant(graph->block());
 }
 
 void QuantFusion(std::shared_ptr<Graph>& graph) {
-  for (const auto& item : quant_fusion_pattern_and_replacements()) {
+  for (const auto& info : quant_fusion_pattern_and_replacements()) {
     SubgraphRewriter rewriter;
-    rewriter.RegisterRewritePattern(item.first, item.second);
-    rewriter.runOnGraph(graph);
+    rewriter.RegisterRewritePattern(info.pattern, info.replacement);
+    rewriter.runOnGraph(graph, info.filter);
   }
 }
 
@@ -2704,6 +2751,15 @@ void DedupModuleUses(Module& module) {
   d.dedup();
 }
 
+void FoldQuantizedPrepackingOps(Module& module) {
+  auto filter_fn = [](const Node* n) -> bool {
+    return (
+        (n->kind() == Symbol::fromQualString("quantized::linear_prepack")) ||
+        n->kind() == Symbol::fromQualString("quantized::conv2d_prepack"));
+  };
+  PrePackingOpsFolder(module, filter_fn, "quantized");
+}
+
 script::Module Finalize(script::Module& module) {
   SwapFunctionalLinear(module);
   auto graph = module.get_method("forward").graph();
@@ -2715,7 +2771,9 @@ script::Module Finalize(script::Module& module) {
   InsertPrepackUnpack(graph);
   ConstantPropagation(graph);
   QuantFusion(graph);
-  return freeze_module(module);
+  auto frozen = freeze_module(module);
+  FoldQuantizedPrepackingOps(frozen);
+  return frozen;
 }
 
 } // namespace jit

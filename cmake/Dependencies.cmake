@@ -886,13 +886,13 @@ if(USE_OPENMP)
 
   # macOS + GCC
   if(APPLE AND CMAKE_COMPILER_IS_GNUCC)
-    EXEC_PROGRAM (uname ARGS -v  OUTPUT_VARIABLE DARWIN_VERSION)
-    STRING (REGEX MATCH "[0-9]+" DARWIN_VERSION ${DARWIN_VERSION})
-    MESSAGE (STATUS "macOS Darwin version: ${DARWIN_VERSION}")
+    EXEC_PROGRAM(uname ARGS -v  OUTPUT_VARIABLE DARWIN_VERSION)
+    STRING(REGEX MATCH "[0-9]+" DARWIN_VERSION ${DARWIN_VERSION})
+    MESSAGE(STATUS "macOS Darwin version: ${DARWIN_VERSION}")
     if(DARWIN_VERSION GREATER 9)
       SET(APPLE_OPENMP_SUCKS 1)
     endif(DARWIN_VERSION GREATER 9)
-    EXECUTE_PROCESS (COMMAND ${CMAKE_C_COMPILER} -dumpversion
+    EXECUTE_PROCESS(COMMAND ${CMAKE_C_COMPILER} -dumpversion
       OUTPUT_VARIABLE GCC_VERSION)
     if(APPLE_OPENMP_SUCKS AND GCC_VERSION VERSION_LESS 4.6.2)
       MESSAGE(WARNING "Disabling OpenMP (unstable with this version of GCC). "
@@ -911,8 +911,8 @@ if(USE_OPENMP)
     SET(OPENMP_FOUND ON CACHE BOOL "OpenMP Support found")
     if(NOT MKL_FOUND)
       execute_process(COMMAND ${CMAKE_CXX_COMPILER} --version OUTPUT_VARIABLE clang_version_output)
-      string (REGEX REPLACE ".*InstalledDir: ([^\n]+).*" "\\1" CLANG_BINDIR ${clang_version_output})
-    
+      string(REGEX REPLACE ".*InstalledDir: ([^\n]+).*" "\\1" CLANG_BINDIR ${clang_version_output})
+
       get_filename_component(CLANG_ROOT ${CLANG_BINDIR} DIRECTORY)
       set(CLANG_OPENMP_LIBRARY "${CLANG_ROOT}/lib/libiomp5md.lib")
 
@@ -1248,7 +1248,7 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
 endif()
 
 # --[ TensorRT integration with onnx-trt
-function (add_onnx_tensorrt_subdir)
+function(add_onnx_tensorrt_subdir)
   # We pass the paths we found to onnx tensorrt.
   set(CUDNN_INCLUDE_DIR "${CUDNN_INCLUDE_PATH}")
   set(CUDNN_LIBRARY "${CUDNN_LIBRARY_PATH}")

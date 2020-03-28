@@ -383,15 +383,12 @@ struct NormalKernel {
 template<typename RNG>
 void uniform_kernel(TensorIterator& iter, double from_, double to_, RNG gen) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "uniform_kernel_cuda", [&] {
+    TORCH_CHECK((to_ - from_) <= std::numeric_limits<scalar_t>::max(),
+          "uniform_ expects to-from <= std::numeric_limits<", toString(iter.dtype()),
+          ">::max(), but found to=", to_, " and from=", from_,
+          " which result in to-from to exceed the limit");
     auto from = static_cast<scalar_t>(from_);
     auto to = static_cast<scalar_t>(to_);
-    TORCH_CHECK(from <= to,
-      "uniform_ expects to return a [from, to) range, but found from=", from,
-      " > to=", to);
-    TORCH_CHECK((to - from) <= std::numeric_limits<scalar_t>::max(),
-          "uniform_ expects to-from <= std::numeric_limits<", toString(iter.dtype()),
-          ">::max(), but found to=", to, " and from=", from,
-          " which result in to-from to exceed the limit");
 
     using accscalar_t = at::acc_type<scalar_t, true>;
     auto range = static_cast<accscalar_t>(to-from);
