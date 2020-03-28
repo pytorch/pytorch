@@ -32,12 +32,12 @@ bool isCustomClass(const c10::IValue& v) {
       getCustomClass(v.toObject()->type()->name()->qualifiedName());
 }
 
-std::vector<std::shared_ptr<jit::Function>>& customClassMethods() {
-  static std::vector<std::shared_ptr<jit::Function>> customClassMethods;
+std::vector<std::unique_ptr<jit::Function>>& customClassMethods() {
+  static std::vector<std::unique_ptr<jit::Function>> customClassMethods;
   return customClassMethods;
 }
 
-void registerCustomClassMethod(std::shared_ptr<jit::Function> fn) {
+void registerCustomClassMethod(std::unique_ptr<jit::Function> fn) {
   customClassMethods().emplace_back(std::move(fn));
 }
 
