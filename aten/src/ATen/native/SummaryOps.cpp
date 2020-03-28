@@ -64,40 +64,31 @@ _bincount_cpu(const Tensor& self, const Tensor& weights, int64_t minlength) {
   });
 }
 
-template <typename scalar_t>
-scalar_t minall(const Tensor& self) {
-  scalar_t the_min;
-  scalar_t value;
-
-  TORCH_CHECK(self.numel() > 0, 
-      "cannot perform reduction function min "
-      "on tensor with no elements because the "
-      "operation does not have an identity"
-  );
-
-
+Tensor histc(const Tensor& self, int64_t nbins, Scalar minvalue, Scalar maxvalue) {
+  Tensor hist = at::empty({0}, self.options());
+  at::hist_out(hist, self, nbins, minvalue, maxvalue);
+  return hist;
 }
 
-
-Tensor histc(const Tensor& self, int64_t nbins, Scalar_t minvalue, Scalar_t maxvalue) {
-  const Tensor& input = self.contiguous();
-
-  Tensor hist = at::empty({0}, input.options());
-
+Tensor& hist_out(Tensor &hist, const Tensor &self, int64_t nbins, Scalar minvalue, Scalar maxvalue) {
+  if (nbins <= 0) {
+    AT_ERROR("bins must be > 0");
+  }
   hist.resize_({nbins});
   hist.zero_();
 
-  AT_DISPATCH_ALL_TYPES(input.scalar_type(), "histc_cpu", [&]() -> void {
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "histc_cpu", [&]() -> void {
     scalar_t minval;
     scalar_t maxval;
     scalar_t *h_data;
+    scalar_t *self_data;
 
     minval = minvalue;
     maxval = maxvalue;
 
     if (minval == maxval) {
-      minval = input.min()[0];
-      maxval = input.max()[0];
+      minval = at::min(self).item();
+      maxval = at::max(self).item();
     }
     if (minval == maxval) {
       minval = minval - 1;
@@ -108,15 +99,17 @@ Tensor histc(const Tensor& self, int64_t nbins, Scalar_t minvalue, Scalar_t maxv
     TORCH_CHECK(minval < maxval, "max must be larger than min");
 
     h_data = hist.data_ptr<scalar_t>();
-    input_data = input.data_ptr<scalar_t>();
+    self_data = self.data_ptr<scalar_t>();
 
-    for(int64_t i=0; i < input.numel(); i++) {
-      if (input_data[i] >= minval && input_data[i] <= maxval) {
-        const int bin = (int)((input_data[i]-minval) / (maxval-minval) * nbins);
-        h_data[THMin(bin, nbins-1)] += 1;
+    for(int64_t i=0; i < self.numel(); i++) {
+      if (self_data[i] >= minval && self_data[i] <= maxval) {
+        const int bin = (int)((self_data[i]-minval) / (maxval-minval) * nbins);
+        h_data[std::min(bin, nbins-1)] += 1;
       }
     }
   });
+
+  return hist;
 }
 
 }} // namespace at::native

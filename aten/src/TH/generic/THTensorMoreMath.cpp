@@ -944,43 +944,6 @@ accreal THTensor_(std_all)(THTensor *tensor, bool unbiased)
   return sqrt(THTensor_(var_all)(tensor, unbiased));
 }
 
-void THTensor_(histc)(THTensor *hist, THTensor *tensor, int64_t nbins, scalar_t minvalue, scalar_t maxvalue)
-{
-  if (nbins <= 0) {
-      THError("bins must be > 0");
-  }
-  scalar_t minval;
-  scalar_t maxval;
-  scalar_t *h_data;
-
-  THTensor_(resize1d)(hist, nbins);
-  THTensor_(zero)(hist);
-  minval = minvalue;
-  maxval = maxvalue;
-  if (minval == maxval)
-  {
-    minval = THTensor_(minall)(tensor);
-    maxval = THTensor_(maxall)(tensor);
-  }
-  if (minval == maxval)
-  {
-    minval = minval - 1;
-    maxval = maxval + 1;
-  }
-
-  TORCH_CHECK(!(std::isinf(minval) || std::isinf(maxval) || std::isnan(minval) || std::isnan(maxval)), "range of [", minval, ", ", maxval, "] is not finite");
-  TORCH_CHECK(minval < maxval, "max must be larger than min");
-
-  h_data = hist->data<scalar_t>();
-
-  TH_TENSOR_APPLY(scalar_t, tensor,
-    if (*tensor_data >= minval && *tensor_data <= maxval) {
-      const int bin = (int)((*tensor_data-minval) / (maxval-minval) * nbins);
-      h_data[THMin(bin, nbins-1)] += 1;
-    }
-  );
-}
-
 #endif
 
 #undef TH_MATH_NAME
