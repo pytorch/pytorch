@@ -10,5 +10,5 @@ void setGraphExecutorOptimize(bool o) {
 bool getGraphExecutorOptimize() {
   return kOptimize;
 }
-}
-}
+} // namespace jit
+} // namespace torch

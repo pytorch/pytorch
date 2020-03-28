@@ -278,7 +278,14 @@ def load_op_list(path):
     return op_list
 
 
-def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False, selected_op_list_path=None):
+def  gen_jit_dispatch(
+    declarations,
+    out,
+    template_path,
+    disable_autograd=False,
+    selected_op_list_path=None,
+    selected_op_list=None,
+):
     REGISTER_ATEN_OPS_CPP = CodeTemplate.from_file(template_path + '/register_aten_ops.cpp')
 
     ops = []
@@ -452,7 +459,9 @@ def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False, s
             additional_jit_decls.append(hacked_twin(decl))
 
     jit_decls.extend(additional_jit_decls)
-    selected_op_list = load_op_list(selected_op_list_path) if selected_op_list_path else None
+    if not selected_op_list:
+        selected_op_list = []
+    selected_op_list += load_op_list(selected_op_list_path) if selected_op_list_path else []
     jit_decls = filter_decls(jit_decls, disable_autograd, selected_op_list)
 
     # generation is deterministic

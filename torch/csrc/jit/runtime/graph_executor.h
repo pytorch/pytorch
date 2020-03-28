@@ -3,11 +3,11 @@
 #include <atomic>
 #include <memory>
 
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/python/update_graph_executor_opt.h>
 #include <torch/csrc/jit/runtime/argument_spec.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
-#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/variable_tensor_list.h>
-#include <torch/csrc/jit/python/update_graph_executor_opt.h>
 
 namespace torch {
 namespace jit {
@@ -20,7 +20,8 @@ struct ExecutionPlan {
       std::shared_ptr<Graph> graph,
       std::string function_name,
       size_t remaining_bailout_depth = 0)
-      : code(graph, std::move(function_name), remaining_bailout_depth), graph(std::move(graph)) {}
+      : code(graph, std::move(function_name), remaining_bailout_depth),
+        graph(std::move(graph)) {}
 
   operator bool() const {
     return static_cast<bool>(graph);
@@ -74,7 +75,7 @@ TORCH_API void runRequiredPasses(const std::shared_ptr<Graph>& g);
 TORCH_API void debugSetAutodiffSubgraphInlining(bool state);
 TORCH_API std::shared_ptr<Graph> lastExecutedOptimizedGraph();
 
-TORCH_API std::atomic<bool> &getProfilingMode();
+TORCH_API std::atomic<bool>& getProfilingMode();
 TORCH_API std::atomic<bool>& getExecutorMode();
 TORCH_API std::atomic<size_t>& getNumProfiledRuns();
 TORCH_API std::atomic<size_t>& getBailoutDepth();

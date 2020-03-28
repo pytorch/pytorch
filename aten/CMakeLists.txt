@@ -1,9 +1,9 @@
-if (NOT INTERN_BUILD_ATEN_OPS)
+if(NOT INTERN_BUILD_ATEN_OPS)
   return()
 endif()
 
 # Find modules
-if (NOT INTERN_BUILD_MOBILE)
+if(NOT INTERN_BUILD_MOBILE)
   list(APPEND CMAKE_MODULE_PATH /usr/lib/x86_64-linux-gnu/)
   list(APPEND CMAKE_LIBRARY_PATH /usr/lib/x86_64-linux-gnu/ /usr/lib/aarch64-linux-gnu/)
 endif()
@@ -53,7 +53,7 @@ list(APPEND ATen_CPU_INCLUDE ${TH_CPU_INCLUDE})
 # Find the HIP package, set the HIP paths, load the HIP CMake.
 IF(USE_ROCM)
   include(LoadHIP)
-  if (NOT PYTORCH_FOUND_HIP)
+  if(NOT PYTORCH_FOUND_HIP)
     set(USE_ROCM OFF)
   endif()
 ENDIF()

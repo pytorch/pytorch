@@ -26,6 +26,7 @@ def generate_code(ninja_global=None,
                   subset=None,
                   disable_autograd=False,
                   selected_op_list_path=None,
+                  selected_op_list=None,
                   disable_trace=False):
     # cwrap depends on pyyaml, so we can't import it earlier
     root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -44,6 +45,7 @@ def generate_code(ninja_global=None,
         gen_autograd_python(declarations_path or DECLARATIONS_PATH, autograd_gen_dir, 'tools/autograd')
 
     if subset == "libtorch" or not subset:
+        # TODO: add selected op mechanism in augotrad to save learning size
         gen_autograd(
             declarations_path or DECLARATIONS_PATH,
             autograd_gen_dir,
@@ -56,7 +58,8 @@ def generate_code(ninja_global=None,
             jit_gen_dir,
             'tools/jit/templates',
             disable_autograd=disable_autograd,
-            selected_op_list_path=selected_op_list_path)
+            selected_op_list_path=selected_op_list_path,
+            selected_op_list=selected_op_list)
 
 
 def main():
@@ -80,6 +83,13 @@ def main():
         help='Path to the yaml file that contains the list of operators to include for custom build.',
     )
     parser.add_argument(
+        '--selected-op-list',
+        nargs="*",
+        type=str,
+        help="""List of operator names to include for custom build, in addition to those in selected-op-list-path.
+        For example, --selected-op-list aten::add.Tensor aten::_convolution.""",
+    )
+    parser.add_argument(
         '--disable_gen_tracing',
         default=False,
         action='store_true',
@@ -94,6 +104,7 @@ def main():
         options.subset,
         options.disable_autograd,
         options.selected_op_list_path,
+        options.selected_op_list,
         options.disable_gen_tracing,
     )
 

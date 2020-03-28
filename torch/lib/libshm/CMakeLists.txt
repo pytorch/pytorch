@@ -5,22 +5,22 @@ CMAKE_POLICY(VERSION 2.6)
 set(TORCH_ROOT ${CMAKE_CURRENT_LIST_DIR}/../../../)
 include(${TORCH_ROOT}/cmake/public/threads.cmake)
 
-IF(NOT LIBSHM_INSTALL_LIB_SUBDIR)
+if(NOT LIBSHM_INSTALL_LIB_SUBDIR)
   SET(LIBSHM_INSTALL_LIB_SUBDIR "lib" CACHE PATH "libshm install library directory")
-ENDIF()
+endif()
 
 # Flags
 # When using MSVC
-IF(MSVC)
+if(MSVC)
   # we want to respect the standard, and we are bored of those **** .
   ADD_DEFINITIONS(-D_CRT_SECURE_NO_DEPRECATE=1)
-ENDIF(MSVC)
+endif(MSVC)
 
-IF (CMAKE_VERSION VERSION_LESS "3.1")
+if(CMAKE_VERSION VERSION_LESS "3.1")
   SET(CMAKE_CXX_FLAGS "-std=c++14 ${CMAKE_CXX_FLAGS}")
-ELSE ()
+else()
   SET(CMAKE_CXX_STANDARD 14)
-ENDIF ()
+endif()
 
 ADD_LIBRARY(shm SHARED core.cpp)
 

@@ -1309,6 +1309,40 @@ graph(%x : Tensor,
                    .check('Observer = prim::GetAttr[name="_observer_') \
                    .run(m.graph)
 
+    def test_insert_observers_propagate_observed_for_function(self):
+        def channel_shuffle(x, groups):
+            # type: (torch.Tensor, int) -> torch.Tensor
+            batchsize, num_channels, height, width = x.data.size()
+            channels_per_group = num_channels // groups
+            # reshape
+            x = x.view(batchsize, groups,
+                       channels_per_group, height, width)
+            x = torch.transpose(x, 1, 2).contiguous()
+            # flatten
+            x = x.view(batchsize, -1, height, width)
+            return x
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.conv1 = torch.nn.Conv2d(3, 3, 1).float()
+                self.conv2 = torch.nn.Conv2d(3, 3, 1).float()
+
+            def forward(self, x):
+                x = self.conv1(x)
+                x = channel_shuffle(x, 1)
+                x = self.conv2(x)
+                return x
+
+        data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        qconfig_dict = {'': script_qconfig(default_qconfig)}
+        m = torch.jit.script(M()).eval()
+        m = prepare_script(m, qconfig_dict, inplace=False)
+        # we want to test that channel_shuffle is going to pass
+        # the observed property from the output of conv1 to input of conv2
+        # so that we don't insert observers for input of conv2
+        assert len(attrs_with_prefix(m, '_observer_',)) == 3
+
     def test_insert_observers_for_if(self):
         class Res(torch.nn.Module):
             def __init__(self, use_skip):
@@ -2178,9 +2212,10 @@ graph(%input, %weight):
                 self.adaptive_avgpool = torch.nn.AdaptiveAvgPool2d((1, 1))
                 self.dropout = torch.nn.Dropout()
                 self.avgpool = torch.nn.AvgPool2d(3)
+                self.conv = torch.nn.Conv2d(3, 3, 3)
 
             def forward(self, x):
-                x = torch.dequantize(x)
+                x = self.conv(x)
                 x = self.maxpool(x)
                 x = self.adaptive_avgpool(x)
                 x = self.avgpool(x)
@@ -2201,45 +2236,29 @@ graph(%input, %weight):
                 x = F.upsample(x, (32, 32))
                 x = F.upsample_bilinear(x, (32, 32))
                 x = F.upsample_nearest(x, (32, 32))
+                x = x.permute(0, 2, 3, 1)
+                x = torch.repeat_interleave(x, 3, 1)
+                x = self.conv(x)
                 return x
 
         m = torch.jit.script(M())
-        torch._C._jit_pass_inline(m.graph)
-        torch._C._jit_pass_constant_propagation(m.graph)
-        FileCheck().check("aten::dequantize") \
-                   .check("aten::max_pool2d") \
-                   .check("aten::adaptive_avg_pool2d") \
-                   .check("aten::avg_pool2d") \
-                   .check("aten::flatten") \
-                   .check("aten::max") \
-                   .check("aten::min") \
-                   .check("aten::mean") \
-                   .check("aten::reshape") \
-                   .check("aten::view") \
-                   .check("aten::transpose") \
-                   .check("aten::contiguous") \
-                   .check("aten::chunk") \
-                   .check("prim::ListUnpack") \
-                   .check("aten::dropout") \
-                   .check("aten::dropout") \
-                   .run(m.graph)
-        torch._C._jit_pass_swap_dequantize(m.graph)
-        FileCheck().check("aten::max_pool2d") \
-                   .check("aten::adaptive_avg_pool2d") \
-                   .check("aten::avg_pool2d") \
-                   .check("aten::flatten") \
-                   .check("aten::max") \
-                   .check("aten::min") \
-                   .check("aten::mean") \
-                   .check("aten::reshape") \
-                   .check("aten::view") \
-                   .check("aten::transpose") \
-                   .check("aten::contiguous") \
-                   .check("aten::chunk") \
-                   .check("prim::ListUnpack") \
-                   .check("aten::dropout") \
-                   .check("aten::dropout") \
-                   .check("dequantize") \
+        qconfig = script_qconfig(default_qconfig)
+        # dummy data to suppress warning
+        data = torch.rand((1, 3, 10, 10))
+        get_forward(qconfig.activation)(data)
+        get_forward(qconfig.weight)(data)
+
+        qconfig_dict = {'': qconfig}
+        m = prepare_script(m, qconfig_dict, inplace=False)
+        m = convert_script(m, True)
+        # This checks that the dequantize from the output of first conv
+        # is being propagated to the end, so that we don't insert extra
+        # observers and also successfully fused two quantized::conv2d
+        # patterns
+        # two quantize_per_tensor, one for input, one for weight
+        FileCheck().check_count("aten::quantize_per_tensor", 2, exactly=True) \
+                   .check_count("quantized::conv2d", 2, exactly=True) \
+                   .check("aten::dequantize") \
                    .run(m.graph)
 
     def test_swap_functional_linear(self):
@@ -2322,7 +2341,11 @@ graph(%input, %weight):
         qconfig_dict = {'': default_qconfig}
         model = torch.jit.script(M()).eval()
         model = quantize_script(model, qconfig_dict, _test_only_eval_fn, [data], inplace=False)
-        FileCheck().check("quantized::conv2d") \
+        # make sure there is only one quantize_per_tensor for input
+        # and conv2d_prepack is folded
+        FileCheck().check_count("aten::quantize_per_tensor", 1, exactly=True) \
+                   .check_not("quantized::conv2d_prepack") \
+                   .check("quantized::conv2d") \
                    .run(model.graph)
 
     def test_finalize_for_linear(self):
@@ -2338,7 +2361,11 @@ graph(%input, %weight):
         qconfig_dict = {'': default_qconfig}
         model = torch.jit.script(M()).eval()
         model = quantize_script(model, qconfig_dict, _test_only_eval_fn, [data], inplace=False)
-        FileCheck().check("quantized::linear") \
+        # make sure there is only one quantize_per_tensor for input
+        # and linear_prepack is folded
+        FileCheck().check_count("aten::quantize_per_tensor", 1, exactly=True) \
+                   .check_not("quantized::linear_prepack") \
+                   .check("quantized::linear") \
                    .run(model.graph)
 
     def test_finalize_debug(self):
@@ -3031,6 +3058,22 @@ graph(%Ra, %Rb):
         tests_setup.setup()
         torch._C._jit_run_cpp_tests(run_cuda=True)
         tests_setup.shutdown()
+
+    @unittest.skipIf(IS_SANDCASTLE, "gtest runs these in sandcastle")
+    @unittest.skipIf(RUN_CUDA, "covered by test_tensorexpr_cuda")
+    @unittest.skipIf(IS_WINDOWS, "enable on windows")
+    @unittest.skipIf(not torch._C._has_tensorexpr_cpp_tests(), "Tests were not built, use BUILD_TEST=1")
+    @skipIfRocm
+    def test_tensorexpr_cpp(self):
+        torch._C._run_tensorexpr_cpp_tests(run_cuda=False)
+
+    @unittest.skipIf(IS_SANDCASTLE, "gtest runs these in sandcastle")
+    @unittest.skipIf(not RUN_CUDA, "covered by test_tensorexpr")
+    @unittest.skipIf(IS_WINDOWS, "enable on windows")
+    @unittest.skipIf(not torch._C._has_tensorexpr_cpp_tests(), "Tests were not built, use BUILD_TEST=1")
+    @skipIfRocm
+    def test_tensorexpr_cpp_cuda(self):
+        torch._C._run_tensorexpr_cpp_tests(run_cuda=True)
 
     def test_batchnorm(self):
         x = torch.ones(2, 2, 2, 2)
@@ -4593,6 +4636,7 @@ graph(%Ra, %Rb):
                 super(Bar, self).__init__()
                 self.sub = Foo()
 
+            @torch.jit.script_method
             def forward(self, x):
                 # type: (Tensor) -> Tensor
                 return self.sub.forward(x)
@@ -4600,7 +4644,7 @@ graph(%Ra, %Rb):
         bar = Bar()
         ops = torch.jit.export_opnames(bar)
         expected = ['aten::add.Tensor', 'aten::mul.Scalar']
-        self.assertEqual(ops, expected)
+        self.assertTrue(set(expected).issubset(set(ops)))
 
     def test_pytorch_jit_env_off(self):
         import subprocess
@@ -6584,6 +6628,26 @@ a")
             return a + a + a
         s = Variable(torch.rand(2))
         self.assertEqual(s + s + s, foo(s))
+
+    def test_str_to_float(self):
+        @torch.jit.script
+        def foo(a):
+            return 0.5 == float('0.5 hello')
+        s = torch.rand(1)
+        with self.assertRaisesRegex(RuntimeError, "only accepts a string of single float number"):
+            self.assertTrue(foo(s))
+
+        @torch.jit.script
+        def foo(a):
+            return 0.5 == float('0.5')
+        s = torch.rand(1)
+        self.assertTrue(foo(s))
+
+        @torch.jit.script
+        def foo(a):
+            return 0. == float('0')
+        s = torch.rand(1)
+        self.assertTrue(foo(s))
 
     def test_inf(self):
         @torch.jit.script
@@ -16112,10 +16176,10 @@ a")
         tester(str_hash, ("", "hello", "a"))
 
     def test_id(self):
-        with self.assertRaisesRegex(RuntimeError, "Expected a value"): 
+        with self.assertRaisesRegex(RuntimeError, "Expected a value"):
             @torch.jit.script
             def test_id_scalars():
-                return id(2) == id(None) 
+                return id(2) == id(None)
 
         @torch.jit.script
         class FooTest(object):
