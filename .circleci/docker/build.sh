@@ -41,18 +41,6 @@ case "$image" in
     LLVMDEV=yes
     PROTOBUF=yes
     ;;
-  pytorch-linux-xenial-py2.7.9)
-    TRAVIS_PYTHON_VERSION=2.7.9
-    GCC_VERSION=7
-    # Do not install PROTOBUF, DB, and VISION as a test
-    ;;
-  pytorch-linux-xenial-py2.7)
-    TRAVIS_PYTHON_VERSION=2.7
-    GCC_VERSION=7
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    ;;
   pytorch-linux-xenial-py3.5)
     TRAVIS_PYTHON_VERSION=3.5
     GCC_VERSION=7
@@ -95,14 +83,6 @@ case "$image" in
   pytorch-linux-xenial-pynightly)
     TRAVIS_PYTHON_VERSION=nightly
     GCC_VERSION=7
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    ;;
-  pytorch-linux-xenial-cuda9-cudnn7-py2)
-    CUDA_VERSION=9.0
-    CUDNN_VERSION=7
-    ANACONDA_PYTHON_VERSION=2.7
     PROTOBUF=yes
     DB=yes
     VISION=yes
