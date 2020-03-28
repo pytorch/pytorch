@@ -15358,8 +15358,33 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     # NumPy has the same behavior.
     @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
     def test_float_to_int_undefined_conversion(self, device, dtype):
-        t = torch.tensor((-3.40282e+38, 3.40282e+38), device=device, dtype=torch.float)
+        min = torch.finfo(torch.float).min
+        max = torch.finfo(torch.float).max
+        t = torch.tensor((min, max), device=device, dtype=torch.float)
         self.assertEqual(t.to(dtype).dtype, dtype)
+
+    # Note: CUDA will fail this test on most dtypes, often dramatically.
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @onlyCPU
+    @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
+    def test_float_to_int_conversion_precision(self, device, dtype):
+        min = np.finfo(np.float32).min
+        max = np.finfo(np.float32).max
+        t = torch.tensor((float('-inf'), min, max, float('inf'), float('nan')), device=device, dtype=torch.float)
+        a = np.array((float('-inf'), min, max, float('inf'), float('nan')), dtype=np.float32)
+
+        torch_to_np = {
+            torch.bool  : np.bool,
+            torch.uint8 : np.uint8,
+            torch.int8  : np.int8,
+            torch.int16 : np.int16,
+            torch.int32 : np.int32,
+            torch.int64 : np.int64
+        }
+
+        torch_result = t.to(dtype)
+        numpy_result = torch.from_numpy(a.astype(torch_to_np[dtype]))
+        self.assertEqual(torch_result, numpy_result)
 
 
     @onlyOnCPUAndCUDA
