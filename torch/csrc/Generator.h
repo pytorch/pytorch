@@ -22,7 +22,7 @@ THP_API PyObject *THPGeneratorClass;
 
 bool THPGenerator_init(PyObject *module);
 
-PyObject * THPGenerator_Wrap(at::Generator gen);
+THP_API PyObject * THPGenerator_Wrap(at::Generator gen);
 
 // Creates a new Python object for a Generator. The Generator must not already
 // have a PyObject* associated with it.

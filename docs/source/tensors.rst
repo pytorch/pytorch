@@ -495,6 +495,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: tril_
    .. automethod:: triu
    .. automethod:: triu_
+   .. automethod:: true_divide
+   .. automethod:: true_divide_
    .. automethod:: trunc
    .. automethod:: trunc_
    .. automethod:: type

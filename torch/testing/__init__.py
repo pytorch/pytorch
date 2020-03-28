@@ -102,6 +102,9 @@ def get_all_math_dtypes(device):
 
     return dtypes
 
+def get_all_complex_dtypes():
+    dtypes = [torch.complex64, torch.complex128]
+    return dtypes
 
 def get_all_device_types():
     return ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
