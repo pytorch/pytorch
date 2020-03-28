@@ -95,6 +95,14 @@ def convert_script(model, inplace=False, debug=False):
         model = wrap_cpp_module(torch._C._jit_pass_quant_finalize(model._c))
     return model
 
+def convert_dynamic_script(model, debug=False):
+    _check_is_script_module(model)
+    model.eval()
+    model = wrap_cpp_module(torch._C._jit_pass_insert_quant_dequant(model._c, 'forward', False, True))
+    if not debug:
+        model = wrap_cpp_module(torch._C._jit_pass_quant_finalize(model._c, True))
+    return model
+
 # TODO: non-scriptable QConfig will be supported later
 def script_qconfig(qconfig):
     return QConfig(
@@ -114,4 +122,17 @@ def quantize_script(model, qconfig_dict, run_fn, run_args, inplace=False, debug=
     model = prepare_script(model, scripted_qconfig_dict, True)
     run_fn(model._c._get_method('forward'), *run_args)
     model = convert_script(model, True, debug)
+    return model
+
+def quantize_dynamic_script(model, qconfig_dict, run_fn, run_args, debug=False):
+    _check_is_script_module(model)
+    if not model._c._has_method('forward'):
+        raise ValueError('input script module does not have forward method')
+
+    scripted_qconfig_dict = {k: script_qconfig(v) for k, v in qconfig_dict.items()}
+    torch._C._jit_pass_dedup_module_uses(model._c)
+    model = wrap_cpp_module(torch._C._jit_pass_fold_convbn(model._c))
+    model = prepare_dynamic_script(model, scripted_qconfig_dict)
+    run_fn(model._c._get_method('forward'), *run_args)
+    model = convert_dynamic_script(model, debug)
     return model

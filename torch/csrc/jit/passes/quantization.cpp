@@ -2485,7 +2485,15 @@ void SwapDeQuant(std::shared_ptr<Graph>& graph) {
   }
 }
 
-void QuantFusion(std::shared_ptr<Graph>& graph) {
+void QuantFusion(std::shared_ptr<Graph>& graph, bool is_dynamic) {
+  if (is_dynamic) {
+    for (const auto& item : dynamic_quant_fusion_pattern_and_replacements()) {
+      SubgraphRewriter rewriter;
+      rewriter.RegisterRewritePattern(item.first, item.second);
+      rewriter.runOnGraph(graph);
+    }
+    return;
+  }
   for (const auto& item : quant_fusion_pattern_and_replacements()) {
     SubgraphRewriter rewriter;
     rewriter.RegisterRewritePattern(item.first, item.second);
@@ -2764,7 +2772,7 @@ void DedupModuleUses(Module& module) {
   d.dedup();
 }
 
-script::Module Finalize(script::Module& module) {
+script::Module Finalize(script::Module& module, bool is_dynamic) {
   SwapFunctionalLinear(module);
   auto graph = module.get_method("forward").graph();
   Inline(*graph);
@@ -2774,7 +2782,7 @@ script::Module Finalize(script::Module& module) {
   SwapDeQuant(graph);
   InsertPrepackUnpack(graph);
   ConstantPropagation(graph);
-  QuantFusion(graph);
+  QuantFusion(graph, is_dynamic);
   return freeze_module(module);
 }
 
