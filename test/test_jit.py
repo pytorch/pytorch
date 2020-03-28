@@ -2307,7 +2307,8 @@ graph(%input, %weight):
         get_forward(qconfig.activation)(data)
         get_forward(qconfig.weight)(data)
 
-        m = prepare_script(m, {'': qconfig}, inplace=False)
+        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(
+            m._c, 'forward', {'': qconfig}, inplace=False))
         m = convert_script(m, True)
         # This checks that the dequantize from the output of first conv
         # is being propagated to the end, so that we don't insert extra
@@ -3260,6 +3261,7 @@ graph(%Ra, %Rb):
             self.assertNotIn('bernoulli_', profile(scripted_eval, X))
 
     @unittest.skipIf(not RUN_CUDA, "test_dropout_cuda require CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.LEGACY, "fixme")
     def test_dropout_cuda(self):
         # Dropout AD is dispatched to _fused_dropout in CUDA case,
         # which is not included in TestJitGeneratedFunctional
