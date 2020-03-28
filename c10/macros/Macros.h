@@ -42,6 +42,9 @@
 
 #define C10_MACRO_EXPAND(args) args
 
+#define C10_STRINGIZE_IMPL(x) #x
+#define C10_STRINGIZE(x) C10_STRINGIZE_IMPL(x)
+
 /**
  * C10_ANONYMOUS_VARIABLE(str) introduces an identifier starting with
  * str and ending with a number that varies with the line.
