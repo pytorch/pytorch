@@ -108,6 +108,19 @@ namespace jit {
   _(SimplifyEliminatesNoOps)          \
   _(SimplifyMultiVar)                 \
   _(SimplifyEliminatesVar)            \
+  _(SimplifyAdds)                     \
+  _(SimplifyMuls)                     \
+  _(SimplifySubs)                     \
+  _(SimplifyMultiOp)                  \
+  _(SimplifyManyOps)                  \
+  _(SimplifyFactorization)            \
+  _(SimplifyFactorizeUneven)          \
+  _(SimplifyDeeperTerms)              \
+  _(SimplifyDeeperDifference)         \
+  _(SimplifyFoldComplexDifference)    \
+  _(SimplifyIfComponents)             \
+  _(SimplifyOpaqueTerms)              \
+  _(SimplifyWontReorderFloat)         \
   _(StmtClone)
 
 #define TH_FORALL_TENSOREXPR_TESTS_LLVM(_) \

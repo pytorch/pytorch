@@ -53,11 +53,6 @@ case "$image" in
     DB=yes
     VISION=yes
     ;;
-  pytorch-linux-xenial-py3.5)
-    TRAVIS_PYTHON_VERSION=3.5
-    GCC_VERSION=7
-    # Do not install PROTOBUF, DB, and VISION as a test
-    ;;
   pytorch-linux-xenial-py3.8)
     # TODO: This is a hack, get rid of this as soon as you get rid of the travis downloads
     TRAVIS_DL_URL_PREFIX="https://s3.amazonaws.com/travis-python-archives/binaries/ubuntu/16.04/x86_64"
