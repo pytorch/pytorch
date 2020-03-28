@@ -15803,6 +15803,7 @@ class TestViewOps(TestCase):
 
         return True
 
+    @onlyOnCPUAndCUDA
     def test_real_self(self, device):
         t = torch.ones((5, 5), device=device)
         s = torch.real(t)
@@ -15812,6 +15813,7 @@ class TestViewOps(TestCase):
         self.assertTrue(not hasattr(t, 'real'))
 
     # TODO: update after torch.real is implemented for complex tensors
+    @onlyOnCPUAndCUDA
     def test_real_view(self, device):
         t = torch.tensor((1 + 1j), device=device)
         with self.assertRaises(RuntimeError):
