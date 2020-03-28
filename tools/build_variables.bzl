@@ -401,9 +401,11 @@ def add_torch_libs():
         "torch/csrc/utils/tensor_numpy.cpp",
         "torch/csrc/utils/tensor_types.cpp",
         "test/cpp/jit/torch_python_test.cpp",
+        "test/cpp/tensorexpr/padded_buffer.cpp",
     ]
 
     libtorch_python_sources.extend(native.glob(["test/cpp/jit/test_*.cpp"]))
+    libtorch_python_sources.extend(native.glob(["test/cpp/tensorexpr/test_*.cpp"]))
 
     compiler_flags_cpu = [
         "-DUSE_C10D",
@@ -433,7 +435,7 @@ def add_torch_libs():
                 "-Wno-unknown-pragmas",
             ],
         },
-        "headers": native.glob(["torch/csrc/**/*.h", "torch/csrc/generic/*.cpp", "test/cpp/jit/*.h"]),
+        "headers": native.glob(["torch/csrc/**/*.h", "torch/csrc/generic/*.cpp", "test/cpp/jit/*.h", "test/cpp/tensorexpr/*.h"]),
     }
     propagated_pp_flags = [
         "-Icaffe2",
