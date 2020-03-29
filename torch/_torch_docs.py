@@ -6836,7 +6836,7 @@ The inverse of this function is :func:`~torch.ifft`.
     configuration. See :ref:`cufft-plan-cache` for more details on how to
     monitor and control the cache.
 
-    Training on CUDA with half precision may cause the first element of 
+    Training with half precision may cause the first element of 
     FFT result to overflow for certain inputs. 
 
 .. warning::
@@ -6934,7 +6934,7 @@ The inverse of this function is :func:`~torch.fft`.
     configuration. See :ref:`cufft-plan-cache` for more details on how to
     monitor and control the cache.
 
-    Training on CUDA with half precision may cause the first element of 
+    Training with half precision may cause the first element of 
     FFT result to overflow for certain inputs. 
 
 .. warning::
@@ -7021,7 +7021,7 @@ The inverse of this function is :func:`~torch.irfft`.
     configuration. See :ref:`cufft-plan-cache` for more details on how to
     monitor and control the cache.
 
-    Training on CUDA with half precision may cause the first element of 
+    Training with half precision may cause the first element of 
     FFT result to overflow for certain inputs. 
 
 .. warning::
@@ -7101,7 +7101,7 @@ The inverse of this function is :func:`~torch.rfft`.
     configuration. See :ref:`cufft-plan-cache` for more details on how to
     monitor and control the cache.
 
-    Training on CUDA with half precision may cause the first element of 
+    Training with half precision may cause the first element of 
     FFT result to overflow for certain inputs. 
 
 .. warning::
