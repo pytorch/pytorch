@@ -1,6 +1,6 @@
 ##############################################################################
 # Macro to update cached options.
-macro (caffe2_update_option variable value)
+macro(caffe2_update_option variable value)
   if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
     get_property(__help_string CACHE ${variable} PROPERTY HELPSTRING)
     set(${variable} ${value} CACHE BOOL ${__help_string} FORCE)
