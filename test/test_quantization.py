@@ -256,7 +256,8 @@ class EagerModePostTrainingQuantTest(QuantizationTestCase):
             self.checkQuantDequant(model.sub)
             self.checkQuantizedLinear(model.sub.module.fc1)
             self.checkQuantizedLinear(model.sub.module.fc2)
-            self.assertEqual(type(model.sub.module.relu), nnq.ReLU)
+            self.assertEqual(type(model.sub.module.relu1), nnq.ReLU)
+            self.assertEqual(type(model.sub.module.relu2), nnq.ReLU)
             self.checkScriptable(model, self.calib_data)
 
         checkQuantized(model)
