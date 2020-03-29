@@ -2,6 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
+#include <ATen/Parallel.h>
 
 #include <tuple>
 
@@ -68,21 +69,23 @@ Tensor& histc_out(Tensor& hist, const Tensor &self, int64_t nbins, Scalar minval
   if (nbins <= 0) {
     AT_ERROR("bins must be > 0");
   }
+
+  auto tensor = self.contiguous();
   hist.resize_({nbins});
   hist.zero_();
 
-  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "histc_cpu", [&]() -> void {
+  AT_DISPATCH_FLOATING_TYPES(tensor.scalar_type(), "histc_cpu", [&]() -> void {
     scalar_t minval;
     scalar_t maxval;
     scalar_t *h_data;
-    scalar_t *self_data;
+    scalar_t *tensor_data;
 
     minval = minvalue.to<scalar_t>();
     maxval = maxvalue.to<scalar_t>();
 
     if (minval == maxval) {
-      minval = at::min(self).item().to<scalar_t>();
-      maxval = at::max(self).item().to<scalar_t>();
+      minval = tensor.min().item().to<scalar_t>();
+      maxval = tensor.max().item().to<scalar_t>();
     }
     if (minval == maxval) {
       minval = minval - 1;
@@ -93,14 +96,16 @@ Tensor& histc_out(Tensor& hist, const Tensor &self, int64_t nbins, Scalar minval
     TORCH_CHECK(minval < maxval, "max must be larger than min");
 
     h_data = hist.data_ptr<scalar_t>();
-    self_data = self.data_ptr<scalar_t>();
+    tensor_data = tensor.data_ptr<scalar_t>();
 
-    for(int64_t i=0; i < self.numel(); i++) {
-      if (self_data[i] >= minval && self_data[i] <= maxval) {
-        const int64_t bin = (int64_t)((self_data[i]-minval) / (maxval-minval) * nbins);
-        h_data[std::min(bin, nbins-1)] += 1;
+    at::parallel_for(0, tensor.numel(), 1, [&](int64_t i_begin, int64_t i_end) {
+      for(int64_t i = i_begin; i < i_end; i++) {
+        if (tensor_data[i] >= minval && tensor_data[i] <= maxval) {
+          const int64_t bin = (int64_t)((tensor_data[i]-minval) / (maxval-minval) * nbins);
+          h_data[std::min(bin, nbins-1)] += 1;
+        }
       }
-    }
+    });
   });
 
   return hist;
