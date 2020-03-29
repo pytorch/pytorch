@@ -191,14 +191,15 @@ graph(%a_quant, %b_scalar, %alpha):
          return (%r) )";
 
   // filter that checks %alpha is constant 1 and %b_scalar is a scalar
-  auto add_scalar_filter = [](const Match& match,
-                   const std::unordered_map<std::string, Value*>& vmap) {
-    const auto& match_vmap = match.values_map;
-    auto alpha = toIValue(match_vmap.at(vmap.at("alpha")));
-    auto b_scalar = match_vmap.at(vmap.at("b_scalar"));
-    return alpha && alpha->isInt() && alpha->toInt() == 1 &&
-      b_scalar->type()->isSubtypeOf(NumberType::get());
-  };
+  auto add_scalar_filter =
+      [](const Match& match,
+         const std::unordered_map<std::string, Value*>& vmap) {
+        const auto& match_vmap = match.values_map;
+        auto alpha = toIValue(match_vmap.at(vmap.at("alpha")));
+        auto b_scalar = match_vmap.at(vmap.at("b_scalar"));
+        return alpha && alpha->isInt() && alpha->toInt() == 1 &&
+            b_scalar->type()->isSubtypeOf(NumberType::get());
+      };
 
   // quantized::add_scalar_out
   std::string add_scalar_out = R"(
@@ -225,10 +226,14 @@ graph(%a_quant, %b_scalar, %alpha):
       {"quantized::add", add, quantized_add},
       {"quantized::add", inplace_add, quantized_add},
       {"quantized::cat", cat, quantized_cat},
-      {"quantized::add_scalar", add_scalar,
-       quantized_add_scalar, add_scalar_filter},
-      {"quantized::add_scalar_out", add_scalar_out,
-       quantized_add_scalar_out, add_scalar_filter},
+      {"quantized::add_scalar",
+       add_scalar,
+       quantized_add_scalar,
+       add_scalar_filter},
+      {"quantized::add_scalar_out",
+       add_scalar_out,
+       quantized_add_scalar_out,
+       add_scalar_filter},
   };
 }
 
