@@ -9,6 +9,7 @@ from datetime import timedelta
 
 import torch
 import torch.distributed as dist
+from torch.jit import Future  # noqa
 
 from . import (
     RpcBackendOptions,

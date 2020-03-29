@@ -6,9 +6,7 @@
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
-#include <torch/csrc/distributed/rpc/torchscript_functions.h>
 #include <torch/csrc/distributed/rpc/types.h>
-#include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_compat.h>
@@ -242,23 +240,6 @@ PyObject* rpc_init(PyObject* /* unused */) {
           // not releasing GIL to avoid context switch
           .def("__str__", &PyRRef::str);
 
-  // future.wait() should not be called after shutdown(), e.g.,
-  // pythonRpcHandler is cleaned up in shutdown(), after
-  // shutdown(), python objects returned from rpc python call can not be
-  // resolved.
-  // TODO Once python object can be tagged as IValue and c10::ivalue::Future is
-  // implemented as generic Future<IValue>, we can consider all rpc call
-  // to return a future<IValue> later on.
-  auto future = shared_ptr_class_<FutureMessage>(module, "Future")
-                    .def(
-                        "wait",
-                        [&](FutureMessage& fut) { return toPyObj(fut.wait()); },
-                        py::call_guard<py::gil_scoped_release>(),
-                        R"(
-Wait on future to complete and return the object it completed with.
-If the future completes with an error, an exception is thrown.
-              )");
-
   shared_ptr_class_<ProcessGroupRpcBackendOptions>(
       module,
       "ProcessGroupRpcBackendOptions",
@@ -402,25 +383,12 @@ If the future completes with an error, an exception is thrown.
 
   module.def(
       "_invoke_rpc_builtin",
-      [](const WorkerInfo& dst,
-         const std::string& opName,
-         const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf,
-         const py::args& args,
-         const py::kwargs& kwargs) {
-        DCHECK(PyGILState_Check());
-        return pyRpcBuiltin(dst, opName, rf, args, kwargs);
-      },
+      &pyRpcBuiltin,
       py::call_guard<py::gil_scoped_acquire>());
 
   module.def(
       "_invoke_rpc_python_udf",
-      [](const WorkerInfo& dst,
-         std::string& pickledPythonUDF,
-         std::vector<torch::Tensor>& tensors,
-         const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf) {
-        DCHECK(!PyGILState_Check());
-        return pyRpcPythonUdf(dst, pickledPythonUDF, tensors, rf);
-      },
+      &pyRpcPythonUdf,
       py::call_guard<py::gil_scoped_release>(),
       py::arg("dst"),
       py::arg("pickledPythonUDF"),
@@ -429,89 +397,27 @@ If the future completes with an error, an exception is thrown.
 
   module.def(
       "_invoke_rpc_torchscript",
-      [](const std::string& dstWorkerName,
-         const std::string& qualifiedNameStr,
-         const py::tuple& argsTuple,
-         const py::dict& kwargsDict) {
-        // No need to catch exception here, if function can not be found,
-        // exception will be thrown in get_function() call; if args do not match
-        // with function schema, exception will be thrown in
-        // createStackForSchema() call.
-        DCHECK(!PyGILState_Check());
-        const c10::QualifiedName qualifiedName(qualifiedNameStr);
-        auto functionSchema = PythonRpcHandler::getInstance()
-                                  .jitCompilationUnit()
-                                  ->get_function(qualifiedName)
-                                  .getSchema();
-        Stack stack;
-        {
-          // Acquire GIL for py::args and py::kwargs processing.
-          py::gil_scoped_acquire acquire;
-          stack = torch::jit::createStackForSchema(
-              functionSchema,
-              argsTuple.cast<py::args>(),
-              kwargsDict.cast<py::kwargs>(),
-              c10::nullopt);
-        }
-        DCHECK(!PyGILState_Check());
-        c10::intrusive_ptr<c10::ivalue::Future> fut =
-            rpcTorchscript(dstWorkerName, qualifiedName, functionSchema, stack);
-        return torch::jit::PythonFutureWrapper(fut);
-      },
+      &pyRpcTorchscript,
       py::call_guard<py::gil_scoped_release>());
 
   module.def(
       "_invoke_remote_builtin",
-      [](const WorkerInfo& dst,
-         const std::string& opName,
-         const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf,
-         const py::args& args,
-         const py::kwargs& kwargs) {
-        DCHECK(PyGILState_Check());
-        return pyRemoteBuiltin(dst, opName, rf, args, kwargs);
-      },
+      &pyRemoteBuiltin,
       py::call_guard<py::gil_scoped_acquire>());
 
   module.def(
-      "_invoke_remote_torchscript",
-      [](const std::string& dstWorkerName,
-         const std::string& qualifiedNameStr,
-         const py::args& args,
-         const py::kwargs& kwargs) {
-        DCHECK(!PyGILState_Check());
-        auto qualifiedName = c10::QualifiedName(qualifiedNameStr);
-        auto functionSchema = PythonRpcHandler::getInstance()
-                                  .jitCompilationUnit()
-                                  ->get_function(qualifiedName)
-                                  .getSchema();
-        Stack stack;
-        // Acquire GIL for py::args and py::kwargs processing.
-        {
-          pybind11::gil_scoped_acquire ag;
-          stack = torch::jit::createStackForSchema(
-              functionSchema, args, kwargs, c10::nullopt);
-        }
-        DCHECK(!PyGILState_Check());
-        auto rrefPtr = remoteTorchscript(
-            dstWorkerName, qualifiedName, functionSchema, stack);
-        return PyRRef(rrefPtr);
-      },
-      py::call_guard<py::gil_scoped_release>());
-
-  module.def(
       "_invoke_remote_python_udf",
-      [](const WorkerInfo& dst,
-         std::string& pickledPythonUDF,
-         std::vector<torch::Tensor>& tensors,
-         const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf) {
-        DCHECK(!PyGILState_Check());
-        return pyRemotePythonUdf(dst, pickledPythonUDF, tensors, rf);
-      },
+      &pyRemotePythonUdf,
       py::call_guard<py::gil_scoped_release>(),
       py::arg("dst"),
       py::arg("pickledPythonUDF"),
       py::arg("tensors"),
       py::arg("rf") = nullptr);
+
+  module.def(
+      "_invoke_remote_torchscript",
+      &pyRemoteTorchscript,
+      py::call_guard<py::gil_scoped_release>());
 
   module.def(
       "get_rpc_timeout",

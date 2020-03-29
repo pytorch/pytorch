@@ -770,15 +770,7 @@ void initJITBindings(PyObject* module) {
   py::class_<PythonFutureWrapper>(m, "Future")
       .def(
           "wait",
-          [](PythonFutureWrapper& fut) {
-            auto res = fut.wait();
-            {
-              // acquiring GIL as toPyObject creates new py::object
-              // without grabbing the GIL.
-              pybind11::gil_scoped_acquire ag;
-              return toPyObject(std::move(res));
-            }
-          },
+          &PythonFutureWrapper::wait,
           py::call_guard<py::gil_scoped_release>());
 
   m.def("fork", [](py::args args) {
