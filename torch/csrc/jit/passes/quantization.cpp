@@ -78,12 +78,12 @@ std::vector<std::string> _single_input_general_call_funcs = {
     "upsample",
     "upsample_bilinear",
     "upsample_nearest",
+    "relu",
 };
 
 std::vector<std::string> _quantizable_call_funcs = {
     "conv2d",
     "linear",
-    "relu",
 };
 
 void fillQConfigMap(
@@ -154,6 +154,13 @@ bool alwaysRaisesException(Block* block) {
   return false;
 }
 
+bool isAddScalar(Node* n) {
+  return (n->kind() == Symbol::aten("add") ||
+          n->kind() == Symbol::aten("add_")) &&
+    n->input(0)->type()->isSubtypeOf(TensorType::get()) &&
+    n->input(1)->type()->isSubtypeOf(NumberType::get());
+}
+
 // If the op doesn't require observation, return
 // the the list of input `Value`s that we should check to see
 // if they are observed/quantized, if so, we can say the output
@@ -185,6 +192,7 @@ std::vector<Value*> getGeneralOpTensorInputs(Node* n) {
       "contiguous",
       "permute",
       "repeat_interleave",
+      "relu",
       // TODO: sort returns a tuple of Tensors, we have
       // to extend the API to support that
       // "sort",
@@ -203,8 +211,7 @@ std::vector<Value*> getGeneralOpTensorInputs(Node* n) {
                  /* call_funcs = */ {},
                  /* aten_funcs = */ single_input_aten_funcs)) {
     return {n->input(0)};
-  } else if (n->kind() == prim::If &&
-             n->outputs().size() == 1) {
+  } else if (n->kind() == prim::If && n->outputs().size() == 1) {
     std::vector<Value*> inputs;
     for (Block* subblock : n->blocks()) {
       if (alwaysRaisesException(subblock)) {
@@ -226,6 +233,10 @@ std::vector<Value*> getGeneralOpTensorInputs(Node* n) {
   return {};
 }
 
+bool mayRequireObservation(Value* v) {
+  return !isAddScalar(v->node());
+}
+
 bool nodeQuantizable(Node* n) {
   return isFunctionNode(
       n,
@@ -235,7 +246,6 @@ bool nodeQuantizable(Node* n) {
       {
           "conv2d",
           "linear",
-          "relu",
           "addmm",
           "matmul",
           "add_",
@@ -525,6 +535,9 @@ class InsertObserversHelper {
       std::unordered_set<Value*> graph_observed_values =
           std::unordered_set<Value*>());
 
+  void setDynamicFlag(bool is_dynamic_);
+
+ private:
   std::tuple<OptionalModuleVector, OptionalModuleVector, std::vector<size_t>>
   insertObserversFor(
       Block* block,
@@ -536,9 +549,12 @@ class InsertObserversHelper {
       bool is_entry_point = false,
       bool is_user_defined_function = false);
 
-  void setDynamicFlag(bool is_dynamic_);
+  void recordObserved(
+    Value* v,
+    Module observer_module,
+    std::unordered_map<Value*, Module>& values_to_observe,
+    std::unordered_set<Value*>& block_observed_values);
 
- private:
   ModuleMethodVector getInvokedMethods(
       Module& module,
       const std::string& method_name);
@@ -575,9 +591,11 @@ class InsertObserversHelper {
       Value* output,
       std::unordered_set<Value*>& block_observed_values);
 
-  void skipValuesInPattern(Graph& graph, const PatternInfo& pattern);
+  void delayObservingValuesInPattern(
+      Graph& graph,
+      const PatternInfo& pattern);
 
-  void addIntermediateValuesToSkipObserver(
+  void addValuesToDelayObservation(
       const Module& module,
       const std::string& method_name);
 
@@ -586,10 +604,12 @@ class InsertObserversHelper {
   void fillPassThroughValueMap(const std::shared_ptr<Graph>& graph);
 
   const ModuleQConfigMap& module_qconfig_map_;
-  // Values we want to skip observing, used to skip values in
-  // the middle of the ops that are supposed to be fused, e.g.
+  // Values we want to delay observation, used to delay the observation for
+  // values in the middle of the ops that are supposed to be fused, e.g.
   // the output value of conv in the conv - relu pattern
-  std::unordered_set<Value*> values_to_skip_;
+  // the key is the intermediate output, e.g. output of conv
+  // the value is the value we want to observe, e.g. output of relu
+  std::unordered_map<Value*, Value*> delay_observation_map_;
   std::unordered_set<Graph*> visited_graph_of_observer_map_;
   std::unordered_map<Value*, Module> observer_for_value_;
   // Map from values from callsite into the values in the CallMethod graph
@@ -656,7 +676,7 @@ graph(%self, %a, %b, %inplace):
      %second_output = prim::CallFunction(%relu, %first_output, %inplace)
      return (%second_output) )");
 
-  const std::vector<std::reference_wrapper<const PatternInfo>> skip_patterns = {
+  const std::vector<std::reference_wrapper<const PatternInfo>> delay_patterns = {
       conv_functional_relu,
       conv_relu,
       matmul_add,
@@ -812,7 +832,7 @@ void InsertObserversHelper::insertObserverFor(
   }
 }
 
-void InsertObserversHelper::skipValuesInPattern(
+void InsertObserversHelper::delayObservingValuesInPattern(
     Graph& graph,
     const PatternInfo& pattern) {
   const Graph& pattern_graph = *pattern.pattern_graph;
@@ -820,21 +840,24 @@ void InsertObserversHelper::skipValuesInPattern(
 
   const auto& matches = findPatternMatches(pattern_graph, graph);
   for (const auto& match : matches) {
-    auto output_value = match.values_map.at(vmap.at("first_output"));
-    GRAPH_DEBUG(
-        "Skipping value in function pattern:", output_value->debugName());
-    values_to_skip_.insert(output_value);
+    auto first_output = match.values_map.at(vmap.at("first_output"));
+    auto second_output = match.values_map.at(vmap.at("second_output"));
+    GRAPH_DEBUG("Delay observation for value in function pattern:",
+                first_output->debugName(),
+                " to ",
+                second_output->debugName());
+    delay_observation_map_[first_output] = second_output;
   }
 }
 
-void InsertObserversHelper::addIntermediateValuesToSkipObserver(
+void InsertObserversHelper::addValuesToDelayObservation(
     const Module& module,
     const std::string& method_name) {
   Method method = module.get_method(method_name);
   auto graph = method.graph();
 
-  for (const auto& pattern : skip_patterns) {
-    skipValuesInPattern(*graph, pattern);
+  for (const auto& pattern : delay_patterns) {
+    delayObservingValuesInPattern(*graph, pattern);
   }
 }
 
@@ -934,7 +957,7 @@ void InsertObserversHelper::preprocess(
   // fuse decomposed linear into aten::linear
   FuseLinear(graph);
 
-  addIntermediateValuesToSkipObserver(module, method_name);
+  addValuesToDelayObservation(module, method_name);
   fillValueObserverMap(module, method_name);
   fillBoundaryValueMap(module, method_name);
   fillPassThroughValueMap(graph);
@@ -957,7 +980,8 @@ bool InsertObserversHelper::valueNeedsToBeQuantized(Value* v) {
   // of the quantizable function.
   if (!is_dynamic) {
     // Check whether producer is quantizable
-    if (nodeQuantizable(v->node())) {
+    if (mayRequireObservation(v) &&
+        nodeQuantizable(v->node())) {
       return true;
     }
   }
@@ -1048,6 +1072,19 @@ InsertObserversHelper::insertObservers(
       graph->block(), module, graph_observed_values, is_entry_point);
 }
 
+void InsertObserversHelper::recordObserved(
+    Value* v,
+    Module observer_module,
+    std::unordered_map<Value*, Module>& values_to_observe,
+    std::unordered_set<Value*>& block_observed_values) {
+  Value* to_observe = v;
+  if (delay_observation_map_.count(v)) {
+    to_observe = delay_observation_map_.at(v);
+  }
+  values_to_observe[to_observe] = observer_module;
+  block_observed_values.insert(to_observe);
+}
+
 std::tuple<OptionalModuleVector, OptionalModuleVector, std::vector<size_t>>
 InsertObserversHelper::insertObserversFor(
     Block* block,
@@ -1122,7 +1159,7 @@ InsertObserversHelper::insertObserversFor(
   for (auto* v : block->inputs()) {
     if (!inputs_outputs.count(v) && !values_to_observe.count(v)) {
       if (auto observer_opt = getObserverFor(v)) {
-        values_to_observe[v] = *observer_opt;
+        recordObserved(v, *observer_opt, values_to_observe, block_observed_values);
       }
     }
   }
@@ -1169,15 +1206,15 @@ InsertObserversHelper::insertObserversFor(
           auto* node_input = n->input(i + input_offset);
           if (input_observers[i] && !inputs_outputs.count(node_input) &&
               !isObserved(node_input, block_observed_values)) {
-            values_to_observe[node_input] = *input_observers[i];
-            block_observed_values.insert(node_input);
+            recordObserved(node_input, *input_observers[i],
+                           values_to_observe, block_observed_values);
           }
         }
         for (auto i = 0U; i < n->outputs().size(); ++i) {
           if (output_observers[i] && !inputs_outputs.count(n->output(i)) &&
               !isObserved(n->output(i), block_observed_values)) {
-            values_to_observe[n->outputs()[i]] = *output_observers[i];
-            block_observed_values.insert(n->output(i));
+            recordObserved(n->output(i), *output_observers[i],
+                           values_to_observe, block_observed_values);
           }
         }
       } else if (n->kind() == prim::If) {
@@ -1214,8 +1251,8 @@ InsertObserversHelper::insertObserversFor(
               if (output_observers[i] && !inputs_outputs.count(n->output(i)) &&
                   !block_observed_values.count(n->output(i)) &&
                   !observed_values_.count(n->output(i))) {
-                values_to_observe[n->output(i)] = *output_observers[i];
-                block_observed_values.insert(n->output(i));
+                recordObserved(n->output(i), *output_observers[i],
+                               values_to_observe, block_observed_values);
               }
             }
             aggregated_output_observers = output_observers;
@@ -1227,8 +1264,7 @@ InsertObserversHelper::insertObserversFor(
           if (!inputs_outputs.count(v) &&
               !isObserved(v, block_observed_values)) {
             if (auto observer_opt = getObserverFor(v)) {
-              values_to_observe[v] = *observer_opt;
-              block_observed_values.insert(v);
+              recordObserved(v, *observer_opt, values_to_observe, block_observed_values);
             }
           }
         }
@@ -1249,13 +1285,10 @@ InsertObserversHelper::insertObserversFor(
     for (const auto& item : values_to_observe) {
       auto* v = item.first;
       auto observer = item.second;
-      if (!values_to_skip_.count(v)) {
-        TORCH_CHECK(
-            !is_user_defined_function,
-            "Inserting observers for user defined functions is not "
-            "supported right now");
-        insertObserverFor(v, module, observer, observer_name_and_modules);
-      }
+      TORCH_CHECK(!is_user_defined_function,
+                  "Inserting observers for user defined functions is not "
+                  "supported right now");
+      insertObserverFor(v, module, observer, observer_name_and_modules);
     }
     block_observer_map_[block] = observer_name_and_modules;
   }
@@ -2290,15 +2323,16 @@ void swapDeQuant(Block* block) {
       // for each use of the value
       for (auto* dequantized_val : inputs) {
         auto* dequantize_node = dequantized_val->node();
-        TORCH_INTERNAL_ASSERT(dequantized_val->uses().size() == 1,
-                              "Expect to have one dequantize node for each use");
+        TORCH_INTERNAL_ASSERT(
+            dequantized_val->uses().size() == 1,
+            "Expect to have one dequantize node for each use");
         // Replace useses of dequantized_val with the input of
         // dequantize node
         dequantized_val->replaceAllUsesWith(dequantize_node->inputs()[0]);
         dequantize_node->removeAllInputs();
         dequantize_node->destroy();
       }
-      for (auto* output: n->outputs()) {
+      for (auto* output : n->outputs()) {
         std::vector<Use> uses = output->uses();
         // Insert new dequantize node for each use of the output
         insertDeQuantCall(graph, output, output, uses);
@@ -2473,10 +2507,10 @@ void SwapDeQuant(std::shared_ptr<Graph>& graph) {
 }
 
 void QuantFusion(std::shared_ptr<Graph>& graph) {
-  for (const auto& item : quant_fusion_pattern_and_replacements()) {
+  for (const auto& info : quant_fusion_pattern_and_replacements()) {
     SubgraphRewriter rewriter;
-    rewriter.RegisterRewritePattern(item.first, item.second);
-    rewriter.runOnGraph(graph);
+    rewriter.RegisterRewritePattern(info.pattern, info.replacement);
+    rewriter.runOnGraph(graph, info.filter);
   }
 }
 

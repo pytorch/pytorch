@@ -52,9 +52,9 @@ def shape(a : Tensor) -> List[int]:
   return a.size()
 )SCRIPT";
 
-
-// This is only here for backwards-compatibility with the aten::_assert_int_or_pair
-// op which was removed once we were able to compile torch.nn.functional.assert_int_or_pair
+// This is only here for backwards-compatibility with the
+// aten::_assert_int_or_pair op which was removed once we were able to compile
+// torch.nn.functional.assert_int_or_pair
 auto aten_ops =
     R"SCRIPT(
 def _assert_int_or_pair(vals: List[int], name: str, message: str):

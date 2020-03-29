@@ -731,7 +731,7 @@
   self: zeros_like(grad, at::MemoryFormat::Preserve)
 
 - name: real(Tensor self) -> Tensor
-  self: grad.real()
+  self: at::real(grad)
 
 - name: reciprocal(Tensor self) -> Tensor
   self: -grad * result * result
@@ -1363,7 +1363,7 @@
   target: non_differentiable
 
 - name: rrelu_with_noise_backward(Tensor grad_output, Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training, bool self_is_result) -> Tensor
-  # self_is_result is always false here since double backward call is an out-of-place call, self is input itself 
+  # self_is_result is always false here since double backward call is an out-of-place call, self is input itself
   grad_output: rrelu_with_noise_backward(grad, self, noise, lower, upper, training, false)
   self: zeros_like(grad, at::MemoryFormat::Preserve)
 
