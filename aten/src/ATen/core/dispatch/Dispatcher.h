@@ -15,9 +15,6 @@ class CAFFE2_API OperatorHandle;
  * Implement this interface and register your instance with the dispatcher
  * to get notified when operators are registered or deregistered with
  * the dispatcher.
- *
- * NB: registration events only occur when a 'def' occurs; we don't trigger
- * on 'impl' or 'fallback' calls.
  */
 class CAFFE2_API OpRegistrationListener {
 public:
@@ -41,25 +38,10 @@ class CAFFE2_API Dispatcher final {
 private:
   struct OperatorDef final {
     explicit OperatorDef(FunctionSchema&& schema)
-    : op(std::move(schema)) {}
-
-    explicit OperatorDef(OperatorName&& op_name)
-    : op(std::move(op_name)) {}
+    : op(std::move(schema)), refcount(0) {}
 
     impl::OperatorEntry op;
-
-    // These refer to the number of outstanding RegistrationHandleRAII
-    // for this operator.  def_count reflects only def() registrations
-    // (in the new world, this should only ever be 1, but old style
-    // registrations may register the schema multiple times, which
-    // will increase this count).  def_and_impl_count reflects the number
-    // of combined def() and impl() registrations.  When the last def() gets
-    // unregistered, we must immediately call the Deregistered listeners, but we
-    // must not actually delete the handle as there are other outstanding RAII
-    // destructors which will try to destruct and they had better still have a
-    // working operator handle in this case
-    size_t def_count = 0;
-    size_t def_and_impl_count = 0;
+    size_t refcount;
   };
   friend class OperatorHandle;
 
@@ -80,7 +62,7 @@ public:
 
   /**
    * Looks for an operator schema with the given name and overload name
-   * and returns it if it is registered WITH A SCHEMA.
+   * and returns it if it is registered.
    * Returns nullopt otherwise.
    */
   c10::optional<OperatorHandle> findSchema(const OperatorName& operator_name);
@@ -99,9 +81,6 @@ public:
    * it does throw exceptions.
    */
   OperatorHandle findSchemaOrThrow(const char* name, const char* overload_name);
-
-  // Like findSchema, but also returns OperatorHandle even if there is no schema
-  c10::optional<OperatorHandle> findOp(const OperatorName& operator_name);
 
   // ------------------------------------------------------------------------
   //
@@ -131,8 +110,13 @@ public:
    *
    * If a schema with the same operator name and overload name already exists,
    * this function will check that both schemas are exactly identical.
+   *
+   * @return An OperatorHandle for the registered schema which can be used to
+   *         register kernels for the operator and a RegistrationHandleRAII RAII
+   *         object that manages the lifetime of the registration. Once that
+   *         object is destructed, the kernel will be deregistered.
    */
-  RegistrationHandleRAII registerDef(FunctionSchema schema);
+  std::pair<RegistrationHandleRAII, OperatorHandle> registerSchema(FunctionSchema schema);
 
   /**
    * Register a kernel to the dispatch table for an operator.
@@ -141,9 +125,7 @@ public:
    * @return A RAII object that manages the lifetime of the registration.
    *         Once that object is destructed, the kernel will be deregistered.
    */
-  // NB: steals the inferred function schema, as we may need to hold on to
-  // it for a bit until the real schema turns up
-  RegistrationHandleRAII registerImpl(OperatorName op_name, c10::optional<DispatchKey> dispatch_key, KernelFunction kernel, std::unique_ptr<FunctionSchema> inferred_function_schema, std::string debug);
+  RegistrationHandleRAII registerKernel(const OperatorHandle& op, c10::optional<DispatchKey> dispatch_key, KernelFunction kernel);
 
   /**
    * Register a fallback kernel for a backend.
@@ -151,7 +133,7 @@ public:
    * key of the given operator arguments, it will check if there is such a
    * fallback kernel for the given dispatch key and, if yes, call that one.
    */
-  RegistrationHandleRAII registerFallback(DispatchKey dispatch_key, KernelFunction kernel);
+  RegistrationHandleRAII registerBackendFallbackKernel(DispatchKey dispatch_key, KernelFunction kernel);
 
   // ------------------------------------------------------------------------
   //
@@ -167,24 +149,13 @@ public:
    */
   RegistrationHandleRAII addRegistrationListener(std::unique_ptr<OpRegistrationListener> listener);
 
-  void checkInvariants() const;
-
 private:
   Dispatcher();
 
   OperatorHandle findOrRegisterSchema_(FunctionSchema&& schema);
-  OperatorHandle findOrRegisterName_(const OperatorName& op_name);
 
-  void deregisterDef_(const OperatorHandle& op, const OperatorName& op_name);
-  void deregisterImpl_(
-    const OperatorHandle& op,
-    const OperatorName& op_name,
-    c10::optional<DispatchKey> dispatch_key,
-    std::list<impl::OperatorEntry::KernelEntry>::iterator kernel_handle);
-  void deregisterFallback_(DispatchKey dispatchKey);
-  void cleanup(const OperatorHandle& op, const OperatorName& op_name);
-  void checkSchemaCompatibility(const OperatorHandle& op, const FunctionSchema& schema);
-
+  void deregisterSchema_(const OperatorHandle& op, const OperatorName& op_name);
+  void deregisterBackendFallbackKernel_(DispatchKey dispatchKey);
   [[noreturn]] static void reportError(const DispatchTable& dispatchTable, DispatchKey dispatchKey);
 
   const KernelFunction& dispatch_(const DispatchTable& dispatchTable, DispatchKey dispatch_key) const;
@@ -212,24 +183,8 @@ public:
   OperatorHandle(const OperatorHandle&) = default;
   OperatorHandle& operator=(const OperatorHandle&) = default;
 
-  const OperatorName& operator_name() const {
-    return operatorIterator_->op.operator_name();
-  }
-
-  bool hasSchema() const {
-    return operatorIterator_->op.hasSchema();
-  }
-
   const FunctionSchema& schema() const {
     return operatorIterator_->op.schema();
-  }
-
-  std::string dumpState() const {
-    return operatorIterator_->op.dumpState();
-  }
-
-  void checkInvariants() const {
-    return operatorIterator_->op.checkInvariants();
   }
 
   template<class Return, class... Args>
