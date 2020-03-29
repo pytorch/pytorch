@@ -9742,7 +9742,8 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(1, len(z))
         self.assertEqual(torch.empty(0, dtype=torch.long), z[0])
 
-    @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
+    # TODO: add torch.complex64, torch.complex128
+    @dtypes(torch.float, torch.double)
     def test_normal(self, device, dtype):
 
         def helper(self, device, dtype, ptype, t_transform, std_transform):
@@ -9844,9 +9845,9 @@ class TestTorchDeviceType(TestCase):
 
         if dtype.is_complex:
             helper(self, device, dtype, lambda x: complex(x, x),
-                   lambda t: t.real().to(torch.float), lambda mean: mean / math.sqrt(2))
+                   lambda t: torch.real(t).to(torch.float), lambda mean: mean / math.sqrt(2))
             helper(self, device, dtype, lambda x: complex(x, x),
-                   lambda t: t.imag().to(torch.float), lambda mean: mean / math.sqrt(2))
+                   lambda t: torch.imag(t).to(torch.float), lambda mean: mean / math.sqrt(2))
             self.assertRaisesRegex(
                 RuntimeError, "normal expects standard deviation to be non-complex",
                 lambda: torch.normal(0, torch.empty(100, 100, dtype=dtype, device=device)))
@@ -15417,6 +15418,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         self.assertEqual(torch_result, numpy_result)
 
 
+    # TODO: re-enable this test
+    @unittest.skipIf(True, "real and imag not implemented for complex")
     @onlyOnCPUAndCUDA
     def test_complex_type_conversions(self, device):
         dtypes = [torch.float, torch.complex64, torch.complex128]
@@ -15425,10 +15428,10 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                 from_tensor = torch.randn(4, dtype=from_type, device=device)
                 to_tensor = from_tensor.to(to_type)
                 if from_type.is_complex and not to_type.is_complex:
-                    self.assertEqual(from_tensor.real(), to_tensor, exact_dtype=False)
+                    self.assertEqual(torch.real(from_tensor), to_tensor, exact_dtype=False)
                 elif not from_type.is_complex and to_type.is_complex:
-                    self.assertEqual(from_tensor, to_tensor.real(), exact_dtype=False)
-                    self.assertEqual(torch.zeros_like(to_tensor.imag()), to_tensor.imag(), exact_dtype=False)
+                    self.assertEqual(from_tensor, torch.real(to_tensor), exact_dtype=False)
+                    self.assertEqual(torch.zeros_like(torch.imag(to_tensor)), torch.imag(to_tensor), exact_dtype=False)
                 else:
                     self.assertEqual(from_tensor, to_tensor, exact_dtype=False)
 
@@ -15854,6 +15857,49 @@ class TestViewOps(TestCase):
                 return False
 
         return True
+
+    @onlyOnCPUAndCUDA
+    def test_real_self(self, device):
+        t = torch.ones((5, 5), device=device)
+        s = torch.real(t)
+        self.assertTrue(s is t)
+
+        # TODO: update when the imag attribute is implemented
+        self.assertTrue(not hasattr(t, 'real'))
+
+    # TODO: update after torch.real is implemented for complex tensors
+    @onlyOnCPUAndCUDA
+    def test_real_view(self, device):
+        t = torch.tensor((1 + 1j), device=device)
+        with self.assertRaises(RuntimeError):
+            v = torch.real(t)
+            self.assertTrue(self.is_view_of(t, v))
+
+            v[0] = 0
+            self.assertEqual(t.float()[0], v[0])
+            self.assertTrue(t[0] == complex(0, 1))
+
+    def test_imag_new(self, device):
+        t = torch.ones((5, 5), device=device)
+        i = torch.imag(t)
+
+        self.assertTrue(not i._is_view())
+        self.assertTrue(i.device == t.device)
+        self.assertTrue(i.dtype is t.dtype)
+        self.assertTrue(torch.equal(i, torch.zeros_like(t)))
+
+        # TODO: update when the imag attribute is implemented
+        self.assertTrue(not hasattr(t, 'imag'))
+
+    # TODO: update after torch.imag is implemented for complex tensors
+    def test_imag_view(self, device):
+        t = torch.tensor((1 + 1j), device=device)
+        with self.assertRaises(RuntimeError):
+            v = torch.imag(t)
+            self.assertTrue(self.is_view_of(t, v))
+
+            v[0] = 0
+            self.assertTrue(t[0] == complex(1, 0))
 
     def test_diagonal_view(self, device):
         t = torch.ones((5, 5), device=device)
