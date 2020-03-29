@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/LegacyTHFunctionsCUDA.h>
+#include <ATen/native/UnaryOps.h>
 #include <ATen/NamedTensorUtils.h>
 
 namespace at { namespace native {

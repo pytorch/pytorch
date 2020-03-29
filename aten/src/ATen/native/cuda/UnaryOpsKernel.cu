@@ -147,28 +147,61 @@ void erfinv_kernel_cuda(TensorIterator& iter) {
 
 void clamp_kernel_cuda(TensorIterator& iter, Scalar min_value, Scalar max_value) {
   AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "clamp_cuda", [&]() {
+    using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
     auto lower = min_value.to<scalar_t>();
     auto upper = max_value.to<scalar_t>();
-    gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t v) -> scalar_t {
+    gpu_kernel(iter, [=]GPU_LAMBDA(thrust_t v) -> thrust_t {
       return (v < lower) ? lower : (v > upper ? upper : v);
-    });
-  });
-}
-
-void clamp_min_kernel_cuda(TensorIterator& iter, Scalar min_value) {
-  AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "clamp_min_cuda", [&]() {
-    auto lower = min_value.to<scalar_t>();
-    gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t v) -> scalar_t {
-      return v < lower ? lower : v;
     });
   });
 }
 
 void clamp_max_kernel_cuda(TensorIterator& iter, Scalar max_value) {
   AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "clamp_max_cuda", [&]() {
+    using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
     auto upper = max_value.to<scalar_t>();
-    gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t v) -> scalar_t {
+    gpu_kernel(iter, [=]GPU_LAMBDA(thrust_t v) -> thrust_t {
       return v > upper ? upper : v;
+    });
+  });
+}
+
+void clamp_min_kernel_cuda(TensorIterator& iter, Scalar min_value) {
+  AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "clamp_min_cuda", [&]() {
+    using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
+    auto lower = min_value.to<scalar_t>();
+    gpu_kernel(iter, [=]GPU_LAMBDA(thrust_t v) -> thrust_t {
+      return v < lower ? lower : v;
+    });
+  });
+}
+
+void clamp_with_tensors_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_ALL_TYPES_AND(ScalarType::Half, iter.dtype(), "clamp_cuda", [&]() {
+    using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
+    gpu_kernel(iter,
+      [=]GPU_LAMBDA(thrust_t a, thrust_t min, thrust_t max) -> thrust_t {
+       return a < min ? min : (a > max ? max : a);
+    });
+  });
+}
+
+void clamp_max_with_tensor_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_ALL_TYPES_AND(ScalarType::Half, iter.dtype(), "clamp_max_cuda", [&]() {
+    using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
+    gpu_kernel(iter,
+      [=]GPU_LAMBDA(thrust_t a, thrust_t max) -> thrust_t {
+       return a > max ? max : a;
+    });
+  });
+}
+
+void clamp_min_with_tensor_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_ALL_TYPES_AND(ScalarType::Half, iter.dtype(), "clamp_min_cuda", [&]() {
+    using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
+    gpu_kernel(iter,
+      [=]GPU_LAMBDA(thrust_t a, thrust_t min) -> thrust_t {
+       return a < min ? min : a;
     });
   });
 }
@@ -184,8 +217,11 @@ REGISTER_DISPATCH(erf_stub, &erf_kernel_cuda);
 REGISTER_DISPATCH(erfc_stub, &erfc_kernel_cuda);
 REGISTER_DISPATCH(erfinv_stub, &erfinv_kernel_cuda);
 REGISTER_DISPATCH(clamp_stub, &clamp_kernel_cuda);
-REGISTER_DISPATCH(clamp_min_stub, &clamp_min_kernel_cuda);
 REGISTER_DISPATCH(clamp_max_stub, &clamp_max_kernel_cuda);
+REGISTER_DISPATCH(clamp_min_stub, &clamp_min_kernel_cuda);
+REGISTER_DISPATCH(clamp_with_tensors_stub, &clamp_with_tensors_kernel_cuda);
+REGISTER_DISPATCH(clamp_max_with_tensor_stub, &clamp_max_with_tensor_kernel_cuda);
+REGISTER_DISPATCH(clamp_min_with_tensor_stub, &clamp_min_with_tensor_kernel_cuda);
 
 } // namespace native
 } // namespace at
