@@ -399,15 +399,19 @@ static auto registry =
     torch::RegisterOperators()
         .op("quantized::linear_dynamic(Tensor X, Tensor W_prepack) -> Tensor Y",
             torch::RegisterOperators::options()
+                .aliasAnalysis(at::AliasAnalysisKind::FROM_SCHEMA)
                 .kernel<QLinearDynamicInt8<false>>(DispatchKey::CPUTensorId))
         .op("_quantized::linear_dynamic(Tensor X, Tensor W_prepack) -> Tensor Y",
             torch::RegisterOperators::options()
+                .aliasAnalysis(at::AliasAnalysisKind::FROM_SCHEMA)
                 .kernel<QLinearDynamicInt8<false>>(DispatchKey::CPUTensorId))
         .op("quantized::linear_relu_dynamic(Tensor X, Tensor W_prepack) -> Tensor Y",
             torch::RegisterOperators::options()
+                .aliasAnalysis(at::AliasAnalysisKind::FROM_SCHEMA)
                 .kernel<QLinearDynamicInt8<true>>(DispatchKey::CPUTensorId))
         .op("quantized::linear_dynamic_fp16(Tensor X, Tensor W_prepack) -> Tensor Y",
             torch::RegisterOperators::options()
+                .aliasAnalysis(at::AliasAnalysisKind::FROM_SCHEMA)
                 .kernel<QLinearDynamicFp16<false>>(DispatchKey::CPUTensorId));
 
 } // namespace
