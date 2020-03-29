@@ -64,13 +64,7 @@ _bincount_cpu(const Tensor& self, const Tensor& weights, int64_t minlength) {
   });
 }
 
-Tensor histc(const Tensor& self, int64_t nbins, Scalar minvalue, Scalar maxvalue) {
-  Tensor hist = at::empty({0}, self.options());
-  at::hist_out(hist, self, nbins, minvalue, maxvalue);
-  return hist;
-}
-
-Tensor& hist_out(Tensor &hist, const Tensor &self, int64_t nbins, Scalar minvalue, Scalar maxvalue) {
+Tensor& histc_out(Tensor& hist, const Tensor &self, int64_t nbins, Scalar minvalue, Scalar maxvalue) {
   if (nbins <= 0) {
     AT_ERROR("bins must be > 0");
   }
@@ -83,12 +77,12 @@ Tensor& hist_out(Tensor &hist, const Tensor &self, int64_t nbins, Scalar minvalu
     scalar_t *h_data;
     scalar_t *self_data;
 
-    minval = minvalue;
-    maxval = maxvalue;
+    minval = minvalue.to<scalar_t>();
+    maxval = maxvalue.to<scalar_t>();
 
     if (minval == maxval) {
-      minval = at::min(self).item();
-      maxval = at::max(self).item();
+      minval = at::min(self).item().to<scalar_t>();
+      maxval = at::max(self).item().to<scalar_t>();
     }
     if (minval == maxval) {
       minval = minval - 1;
@@ -103,12 +97,18 @@ Tensor& hist_out(Tensor &hist, const Tensor &self, int64_t nbins, Scalar minvalu
 
     for(int64_t i=0; i < self.numel(); i++) {
       if (self_data[i] >= minval && self_data[i] <= maxval) {
-        const int bin = (int)((self_data[i]-minval) / (maxval-minval) * nbins);
+        const int64_t bin = (int64_t)((self_data[i]-minval) / (maxval-minval) * nbins);
         h_data[std::min(bin, nbins-1)] += 1;
       }
     }
   });
 
+  return hist;
+}
+
+Tensor histc(const Tensor& self, int64_t nbins, Scalar minvalue, Scalar maxvalue) {
+  Tensor hist = at::empty({0}, self.options());
+  at::histc_out(hist, self, nbins, minvalue, maxvalue);
   return hist;
 }
 

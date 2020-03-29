@@ -534,25 +534,6 @@
     - real maxnorm
 ]]
 [[
-  name: _th_histc
-  cname: histc
-  types:
-    - Float
-    - Double
-  backends:
-    - CPU
-  variants:
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-    - long bins
-    - real min
-    - real max
-]]
-[[
   name: _th_cumsum
   cname: cumsum
   backends:
