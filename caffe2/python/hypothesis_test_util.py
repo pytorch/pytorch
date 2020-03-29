@@ -555,7 +555,7 @@ class HypothesisTestCase(test_util.TestCase):
             # Temporarily catch these assertion errors when validating
             # inferred shape and type info
             logging.warning(str(e))
-            if os.getenv('CAFFE2_ASSERT_SHAPEINFERENCE') == '1':
+            if os.getenv('CAFFE2_ASSERT_SHAPEINFERENCE') == '1' or ensure_output_is_inferred:
                 raise e
 
     def assertReferenceChecks(
@@ -619,7 +619,7 @@ class HypothesisTestCase(test_util.TestCase):
                 # Temporarily catch runtime errors when inferring shape
                 # and type info
                 logging.warning(str(e))
-                if os.getenv('CAFFE2_ASSERT_SHAPEINFERENCE') == '1':
+                if os.getenv('CAFFE2_ASSERT_SHAPEINFERENCE') == '1' or ensure_outputs_are_inferred:
                     raise e
             workspace.RunNetOnce(net)
             reference_outputs = reference(*inputs)
