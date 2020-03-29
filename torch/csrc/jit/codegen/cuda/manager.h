@@ -30,4 +30,6 @@ TORCH_CUDA_API void compileCudaFusionGroup(Node* fusion_node);
 // TODO: support shape inferencing. Right now we only handles static shape
 TORCH_CUDA_API void runCudaFusionGroup(const Node* const fusion_node, Stack& stack);
 
+TORCH_CUDA_API void CudaFuseGraph(std::shared_ptr<Graph>& graph);
+ 
 }}}} // namespace torch::jit::fuser::cuda

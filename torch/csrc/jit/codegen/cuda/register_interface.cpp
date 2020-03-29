@@ -15,10 +15,9 @@ namespace {
 struct RegisterInterface {
   RegisterInterface() {
     auto ptr = getFuserInterface();
-    ptr->fn_is_fusible_n_ = &isFusableCudaFusionGroup;
-    ptr->fn_is_fusible_n_n_ = &isFusableCudaFusionGroup;
     ptr->fn_compile_n_ = &compileCudaFusionGroup;
     ptr->fn_run_n_s_ = &runCudaFusionGroup;
+    ptr->fn_fuse_graph = &CudaFuseGraph;
   }
 };
 

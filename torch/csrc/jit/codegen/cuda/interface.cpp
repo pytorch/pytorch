@@ -10,24 +10,22 @@ CudaFuserInterface* getFuserInterface() {
   return &fuser_interface_;
 }
 
-bool isFusable(const Node* node) {
-  TORCH_CHECK(getFuserInterface()->fn_is_fusible_n_ != nullptr, "fn_is_fusible_n_ not initialized");
-  return getFuserInterface()->fn_is_fusible_n_(node);
-}
-
-bool isFusable(const Node* fusion, const Node* node) {
-  TORCH_CHECK(getFuserInterface()->fn_is_fusible_n_n_ != nullptr, "fn_is_fusible_n_n_ not initialized");
-  return getFuserInterface()->fn_is_fusible_n_n_(fusion, node);
-}
-
 void compileFusionGroup(Node* fusion_node) {
-  TORCH_CHECK(getFuserInterface()->fn_compile_n_ != nullptr, "fn_compile_n_ not initialized");
+  TORCH_CHECK(getFuserInterface()->fn_compile_n_ != nullptr,
+	      "Running the CUDA fuser requires a CUDA build.");
   getFuserInterface()->fn_compile_n_(fusion_node);
 }
 
 void runFusionGroup(const Node* fusion_node, Stack& stack) {
-  TORCH_CHECK(getFuserInterface()->fn_run_n_s_ != nullptr, "fn_run_n_s_ not initialized");
+  TORCH_CHECK(getFuserInterface()->fn_run_n_s_ != nullptr,
+	      "Running the CUDA fuser requires a CUDA build.");
   getFuserInterface()->fn_run_n_s_(fusion_node, stack);
+}
+
+void fuseGraph(std::shared_ptr<Graph>& graph){
+  TORCH_CHECK(getFuserInterface()->fn_fuse_graph != nullptr,
+	      "Running the CUDA fuser requires a CUDA build.");
+  getFuserInterface()->fn_fuse_graph(graph);
 }
 
 }}}} // namespace torch::jit::fuser::cuda
