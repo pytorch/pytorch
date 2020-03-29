@@ -6837,7 +6837,8 @@ The inverse of this function is :func:`~torch.ifft`.
     monitor and control the cache.
 
 .. warning::
-    Performing this operation in half precision may cause the first element of 
+    Due to limited dynamic range of half datatype, performing this operation 
+    in half precision may cause the first element of 
     result to overflow for certain inputs. 
 
 .. warning::
@@ -6936,8 +6937,8 @@ The inverse of this function is :func:`~torch.fft`.
     monitor and control the cache.
 
 .. warning::
-    Performing this operation in half precision may cause the first element of 
-    result to overflow for certain inputs. 
+    Due to limited dynamic range of half datatype, performing this operation in half 
+    precision may cause the first element of result to overflow for certain inputs. 
 
 .. warning::
     For CPU tensors, this method is currently only available with MKL. Use
@@ -7024,8 +7025,8 @@ The inverse of this function is :func:`~torch.irfft`.
     monitor and control the cache.
 
 .. warning::
-    Performing this operation in half precision may cause the first element of 
-    result to overflow for certain inputs. 
+    Due to limited dynamic range of half datatype, performing this operation in half 
+    precision may cause the first element of result to overflow for certain inputs. 
 
 .. warning::
     For CPU tensors, this method is currently only available with MKL. Use
@@ -7105,8 +7106,8 @@ The inverse of this function is :func:`~torch.rfft`.
     monitor and control the cache.
 
 .. warning::
-    Performing this operation in half precision may cause the first element of 
-    result to overflow for certain inputs. 
+    Due to limited dynamic range of half datatype, performing this operation in half 
+    precision may cause the first element of result to overflow for certain inputs. 
     
 .. warning::
     For CPU tensors, this method is currently only available with MKL. Use
