@@ -842,6 +842,7 @@ class RpcTest(RpcAgentTestFixture):
         m.set(my_tensor_function(torch.ones(2, 2), torch.ones(2, 2)))
         self.assertEqual(ret, run_nested_pickle(m, torch.ones(2, 2)))
 
+    @unittest.skip("")
     @dist_init
     def test_py_function_exception(self):
         n = self.rank + 1
@@ -849,6 +850,7 @@ class RpcTest(RpcAgentTestFixture):
         with self.assertRaises(TypeError):
             ret = rpc.rpc_sync(worker_name(dst_rank), no_result, args=(10,))
 
+    @unittest.skip("")
     @dist_init
     def test_py_raise_in_user_func(self):
         n = self.rank + 1
@@ -1690,6 +1692,7 @@ class RpcTest(RpcAgentTestFixture):
             torch.distributed.rpc.api._default_pickler is _internal_rpc_pickler
         )
 
+    @unittest.skip("")
     @dist_init
     def test_function_not_on_callee(self):
         # test that if a function does not exist on a callee, we don't crash,

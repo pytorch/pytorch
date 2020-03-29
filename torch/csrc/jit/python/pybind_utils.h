@@ -57,7 +57,7 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper {
       c10::optional<UnwrapFunc> unwrap_func = c10::nullopt)
       : fut(std::move(fut)), unwrap_func(std::move(unwrap_func)) {}
 
-  py::object wait() {
+  IValue wait() {
     fut->wait();
     if (jit::tracer::isTracing()) {
       auto graph = jit::tracer::getTracingState()->graph;
@@ -66,16 +66,7 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper {
       auto output = graph->insert(aten::wait, {fut_val});
       jit::tracer::setValueTrace(fut->value(), output);
     }
-    {
-      // acquiring GIL as toPyObject creates new py::object
-      // without grabbing the GIL.
-      py::gil_scoped_acquire acquire;
-      py::object py_obj = toPyObject(fut->value());
-      if (unwrap_func) {
-        (*unwrap_func)(py_obj);
-      }
-      return py_obj;
-    }
+    return fut->value();
   }
 
   c10::intrusive_ptr<c10::ivalue::Future> fut;
