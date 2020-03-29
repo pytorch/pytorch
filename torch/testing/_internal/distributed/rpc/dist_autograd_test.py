@@ -1207,6 +1207,7 @@ class DistAutogradTest(RpcAgentTestFixture):
                 # Run backwards, and validate we receive an error.
                 dist_autograd.backward(context_id, [val.sum()])
 
+    @unittest.skip("")
     @dist_init(clean_shutdown=False)
     @unittest.skipIf(
         IS_MACOS,
@@ -1412,6 +1413,7 @@ class DistAutogradTest(RpcAgentTestFixture):
         )
         return torch.chain_matmul(t1, t2, res)
 
+    @unittest.skip("")
     @dist_init
     def test_backward_python_udf_error(self):
         t1 = torch.rand((3, 3), requires_grad=True)
@@ -1438,6 +1440,7 @@ class DistAutogradTest(RpcAgentTestFixture):
         while not DistAutogradTest._backward_done:
             time.sleep(0.1)
 
+    @unittest.skip("")
     @dist_init(clean_shutdown=False)
     @unittest.skipIf(
         IS_MACOS,
@@ -1856,6 +1859,7 @@ class DistAutogradTest(RpcAgentTestFixture):
             for i in range(1000):
                 dist_autograd.backward(context_id, [loss], retain_graph=True)
 
+    @unittest.skip("")
     @dist_init(clean_shutdown=False)
     def test_multiple_backward_with_errors(self):
         initialize_pg(self.init_method, self.rank, self.world_size)

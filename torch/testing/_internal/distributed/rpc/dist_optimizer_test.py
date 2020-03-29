@@ -98,6 +98,7 @@ def rpc_async_method(method, obj_rref, *args, **kwargs):
     not torch._six.PY3, "Pytorch distributed optim does not support python2"
 )
 class DistOptimizerTest(RpcAgentTestFixture):
+    @unittest.skip("")
     @dist_init()
     def test_dist_optim_exception(self):
         # distributed version
@@ -126,6 +127,7 @@ class DistOptimizerTest(RpcAgentTestFixture):
             with self.assertRaisesRegex(Exception, "Error running optimizer"):
                 dist_optim.step(context_id)
 
+    @unittest.skip("")
     @dist_init()
     def test_dist_optim_exception_on_constructor(self):
         # distributed version

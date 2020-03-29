@@ -771,12 +771,17 @@ void initJITBindings(PyObject* module) {
       .def(
           "wait",
           [](PythonFutureWrapper& fut) {
+            LOG(ERROR) << "Before fut.wait()";
             auto res = fut.wait();
+            LOG(ERROR) << "After fut.wait()";
             {
+              LOG(ERROR) << "Before toPyObject";
               // acquiring GIL as toPyObject creates new py::object
               // without grabbing the GIL.
               pybind11::gil_scoped_acquire ag;
-              return toPyObject(std::move(res));
+              py::object obj = toPyObject(std::move(res));
+              LOG(ERROR) << "After toPyObject";
+              return obj;
             }
           },
           py::call_guard<py::gil_scoped_release>());

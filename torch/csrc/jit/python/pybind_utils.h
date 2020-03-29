@@ -46,16 +46,10 @@
 namespace torch {
 namespace jit {
 
-py::object toPyObject(IValue ivalue);
-
 // The PythonFutureWrapper for ivalue::Future
-struct VISIBILITY_HIDDEN PythonFutureWrapper {
-  using UnwrapFunc = std::function<void(py::object)>;
-
-  explicit PythonFutureWrapper(
-      c10::intrusive_ptr<c10::ivalue::Future> fut,
-      c10::optional<UnwrapFunc> unwrap_func = c10::nullopt)
-      : fut(std::move(fut)), unwrap_func(std::move(unwrap_func)) {}
+struct PythonFutureWrapper {
+  explicit PythonFutureWrapper(c10::intrusive_ptr<c10::ivalue::Future> fut)
+      : fut(std::move(fut)) {}
 
   IValue wait() {
     fut->wait();
@@ -70,8 +64,6 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper {
   }
 
   c10::intrusive_ptr<c10::ivalue::Future> fut;
-  // unwrap_func works like a callback for the value returned by PythonFutureWrapper::wait().
-  c10::optional<UnwrapFunc> unwrap_func;
 };
 
 // error reporting: when reporting user-caused errors, these functions should
