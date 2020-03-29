@@ -1186,8 +1186,7 @@ graph(%x : Tensor,
                 return x + y
 
         m = torch.jit.script(M()).eval()
-        qconfig_dict = {'' : script_qconfig(default_qconfig)}
-        m = prepare_script(m, qconfig_dict, False)
+        m = prepare_script(m, {'': default_qconfig}, False)
         # 3 for x, y, weight, one for output of each F.conv2d and one for output of add
         assert len(attrs_with_prefix(m, '_observer')) == 6
 
@@ -1335,9 +1334,8 @@ graph(%x : Tensor,
                 return x
 
         data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
-        qconfig_dict = {'': script_qconfig(default_qconfig)}
         m = torch.jit.script(M()).eval()
-        m = prepare_script(m, qconfig_dict, inplace=False)
+        m = prepare_script(m, {'': default_qconfig}, inplace=False)
         # we want to test that channel_shuffle is going to pass
         # the observed property from the output of conv1 to input of conv2
         # so that we don't insert observers for input of conv2
@@ -1368,9 +1366,8 @@ graph(%x : Tensor,
                 return x
 
         data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
-        qconfig_dict = {'': script_qconfig(default_qconfig)}
         m = torch.jit.script(M()).eval()
-        m = prepare_script(m, qconfig_dict, inplace=False)
+        m = prepare_script(m, {'': default_qconfig}, inplace=False)
         assert len(attrs_with_prefix(m, '_observer_',)) == 3
 
     def test_insert_quant_dequant(self):
@@ -1582,7 +1579,7 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
     @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
                          " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
                          " with instruction set support avx2 or newer.")
-    def test_quantized_conv_relu_fusion(self):
+    def test_quantized_conv_relu(self):
         class M(torch.nn.Module):
             def __init__(self):
                 super(M, self).__init__()
@@ -1593,7 +1590,7 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
                 return self.relu(self.conv(x))
 
         m = torch.jit.script(M().eval())
-        m = prepare_script(m, {'': script_qconfig(default_qconfig)}, True)
+        m = prepare_script(m, {'': default_qconfig}, True)
         data = torch.randn(1, 1, 10, 10, dtype=torch.float)
         m(data)
         m = convert_script(m, True)
@@ -1621,7 +1618,7 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
 
         for M in [Add, InplaceAdd]:
             m = torch.jit.script(M()).eval()
-            m = prepare_script(m, {'': script_qconfig(default_qconfig)}, True)
+            m = prepare_script(m, {'': default_qconfig}, True)
             # two for input tensor, one for output
             assert len(attrs_with_prefix(m, '_observer')) == 3
             data = torch.randn(1, 1, 10, 10, dtype=torch.float)
@@ -1650,7 +1647,7 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
 
         for M in [AddScalar, InplaceAddScalar]:
             m = torch.jit.script(M()).eval()
-            m = prepare_script(m, {'': script_qconfig(default_qconfig)}, True)
+            m = prepare_script(m, {'': default_qconfig}, True)
             # for input tensor
             assert len(attrs_with_prefix(m, '_observer')) == 1
             data = torch.randn(1, 1, 10, 10, dtype=torch.float)
@@ -1661,7 +1658,7 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
                        .check("quantized::add_scalar") \
                        .run(m.graph_for(data))
 
-    def test_quantized_add_relu_fusion(self):
+    def test_quantized_add_relu(self):
         class M(torch.nn.Module):
             def __init__(self, inplace):
                 super(M, self).__init__()
@@ -1673,7 +1670,7 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
 
         for inplace in [True, False]:
             m = torch.jit.script(M(inplace).eval())
-            m = prepare_script(m, {'': script_qconfig(default_qconfig)}, True)
+            m = prepare_script(m, {'': default_qconfig}, True)
             data = torch.randn(1, 1, 10, 10, dtype=torch.float)
             m(data, data)
             m = convert_script(m, True)
@@ -1703,7 +1700,7 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
                 return torch.cat([x, y], 1)
 
         m = torch.jit.script(M().eval())
-        m = prepare_script(m, {'': script_qconfig(default_qconfig)}, True)
+        m = prepare_script(m, {'': default_qconfig}, True)
         # four for input and output of conv and one for output of cat
         # this also tests the ListConstruct can preserve the observed property so that
         # torch.cat knows that inputs are observed
@@ -2279,8 +2276,8 @@ graph(%input, %weight):
         get_forward(qconfig.activation)(data)
         get_forward(qconfig.weight)(data)
 
-        qconfig_dict = {'': qconfig}
-        m = prepare_script(m, qconfig_dict, inplace=False)
+        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(
+            m._c, 'forward', {'': qconfig}, inplace=False))
         m = convert_script(m, True)
         # This checks that the dequantize from the output of first conv
         # is being propagated to the end, so that we don't insert extra
