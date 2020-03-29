@@ -6836,8 +6836,9 @@ The inverse of this function is :func:`~torch.ifft`.
     configuration. See :ref:`cufft-plan-cache` for more details on how to
     monitor and control the cache.
 
-    Training with half precision may cause the first element of 
-    FFT result to overflow for certain inputs. 
+.. warning::
+    Performing this operation in half precision may cause the first element of 
+    result to overflow for certain inputs. 
 
 .. warning::
     For CPU tensors, this method is currently only available with MKL. Use
@@ -6934,8 +6935,9 @@ The inverse of this function is :func:`~torch.fft`.
     configuration. See :ref:`cufft-plan-cache` for more details on how to
     monitor and control the cache.
 
-    Training with half precision may cause the first element of 
-    FFT result to overflow for certain inputs. 
+.. warning::
+    Performing this operation in half precision may cause the first element of 
+    result to overflow for certain inputs. 
 
 .. warning::
     For CPU tensors, this method is currently only available with MKL. Use
@@ -7021,8 +7023,9 @@ The inverse of this function is :func:`~torch.irfft`.
     configuration. See :ref:`cufft-plan-cache` for more details on how to
     monitor and control the cache.
 
-    Training with half precision may cause the first element of 
-    FFT result to overflow for certain inputs. 
+.. warning::
+    Performing this operation in half precision may cause the first element of 
+    result to overflow for certain inputs. 
 
 .. warning::
     For CPU tensors, this method is currently only available with MKL. Use
@@ -7101,9 +7104,10 @@ The inverse of this function is :func:`~torch.rfft`.
     configuration. See :ref:`cufft-plan-cache` for more details on how to
     monitor and control the cache.
 
-    Training with half precision may cause the first element of 
-    FFT result to overflow for certain inputs. 
-
+.. warning::
+    Performing this operation in half precision may cause the first element of 
+    result to overflow for certain inputs. 
+    
 .. warning::
     For CPU tensors, this method is currently only available with MKL. Use
     :func:`torch.backends.mkl.is_available` to check if MKL is installed.
