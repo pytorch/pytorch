@@ -464,7 +464,6 @@ void initJITBindings(PyObject* module) {
             using namespace torch::jit::tensorexpr;
             return getTECudaPointwiseBlockSize() = block_size;
           })
-      .def("_jit_set_texpr_fuser_enabled", &setTensorExprFuserEnabled)
       .def(
           "_jit_fuser_get_fused_kernel_code",
           [](Graph& g, std::vector<at::Tensor> inps) {

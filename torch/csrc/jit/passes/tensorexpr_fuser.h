@@ -22,7 +22,5 @@ struct TORCH_API RegisterTensorExprFuser
   }
 };
 
-TORCH_API void setTensorExprFuserEnabled(bool val);
-
 } // namespace jit
 } // namespace torch
