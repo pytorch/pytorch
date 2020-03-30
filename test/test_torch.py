@@ -11062,29 +11062,47 @@ class TestTorchDeviceType(TestCase):
     def test_masked_select(self, device):
         warn = 'masked_select received a mask with dtype torch.uint8,'
         for dt in torch.testing.get_all_dtypes():
-            with warnings.catch_warnings(record=True) as w:
-                for maskType in [torch.uint8, torch.bool]:
-                    num_src = 10
-                    src = torch.tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0], dtype=dt, device=device)
-                    mask = torch.rand(num_src, device=device).clamp(0, 1).mul(2).floor().to(maskType)
+            for maskType in [torch.uint8, torch.bool]:
+                num_src = 10
+                src = torch.tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0], dtype=dt, device=device)
+                mask = torch.rand(num_src, device=device).clamp(0, 1).mul(2).floor().to(maskType)
 
-                    if dt == torch.half and torch.device(device).type == 'cpu':
-                        self.assertRaises(RuntimeError, lambda: src.masked_select(mask))
-                        continue
+                if dt == torch.half and torch.device(device).type == 'cpu':
+                    self.assertRaises(RuntimeError, lambda: src.masked_select(mask))
+                    continue
 
+                with warnings.catch_warnings(record=True) as w:
                     dst = src.masked_select(mask)
-                    dst2 = []
-                    for i in range(num_src):
-                        if mask[i]:
-                            dst2 += [src[i]]
-                    self.assertEqual(dst, torch.tensor(dst2), 0)
-
-                    dst3 = torch.empty_like(src, device=device)
-                    torch.masked_select(src, mask, out=dst3)
-                    self.assertEqual(dst3, torch.tensor(dst2, dtype=dst3.dtype), 0)
                     if maskType is torch.uint8:
                         self.assertEqual(len(w), 1)
                         self.assertEqual(str(w[0].message)[0:53], str(warn))
+                dst2 = []
+                for i in range(num_src):
+                    if mask[i]:
+                        dst2 += [src[i]]
+                self.assertEqual(dst, torch.tensor(dst2), 0)
+
+                dst3 = torch.empty_like(src, device=device)
+                torch.masked_select(src, mask, out=dst3)
+                self.assertEqual(dst3, torch.tensor(dst2, dtype=dst3.dtype), 0)
+
+        # Ensure that masks are expanded to match tensor properly
+        a = torch.rand(100, 100, device=device)
+        mask_first_el_each_row = torch.zeros(100, device=device).bool()
+        mask_first_el_each_row[0] = True
+        a_masked = a.masked_select(mask_first_el_each_row)
+        self.assertEqual(a_masked, a[:, 0])
+
+        mask_first_row = torch.zeros(100, 1, device=device).bool()
+        mask_first_row[0][0] = True
+        a_masked = a.masked_select(mask_first_row)
+        self.assertEqual(a_masked, a[0, :])
+
+        # Ensure that tensor is expanded to match mask properly
+        a = torch.rand(100, device=device)
+        mask_copy_3_times = torch.tensor([[True], [True], [False], [True]], device=device)
+        a_masked = a.masked_select(mask_copy_3_times)
+        self.assertEqual(a_masked, a.unsqueeze(0).expand(3, 100).flatten())
 
     def test_masked_fill_bool_tensor(self, device):
         dst = torch.tensor([True, False, True], device=device)
