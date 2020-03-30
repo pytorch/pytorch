@@ -110,6 +110,7 @@ set(TORCH_PYTHON_SRCS
     ${TORCH_SRC_DIR}/csrc/utils/tensor_new.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_numpy.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_types.cpp
+    ${TORCH_SRC_DIR}/csrc/utils/python_dispatch.cpp
     )
 
 # NB: This has to match the condition under which the JIT test directory
@@ -118,6 +119,7 @@ if(BUILD_TEST AND NOT USE_ROCM)
     add_definitions(-DBUILDING_TESTS)
     list(APPEND TORCH_PYTHON_SRCS
       ${TORCH_ROOT}/test/cpp/jit/torch_python_test.cpp
+      ${TENSOREXPR_TEST_SRCS_WITH_PADDED}
       ${JIT_TEST_SRCS}
       )
 endif()
