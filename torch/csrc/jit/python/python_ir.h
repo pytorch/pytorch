@@ -48,5 +48,5 @@ struct ConcretePythonOp : public PythonOp {
   void lint_python() const override;
 };
 
-}
+} // namespace jit
 } // namespace torch

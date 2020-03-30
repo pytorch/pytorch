@@ -5,8 +5,8 @@
  */
 #pragma once
 
-#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/api/module.h>
+#include <torch/csrc/jit/ir/ir.h>
 
 namespace std {
 
@@ -17,15 +17,14 @@ struct hash<torch::jit::Module> {
   }
 };
 
-}
+} // namespace std
 
 namespace torch {
 namespace jit {
 
 using QConfig = std::tuple<Module, Module>;
-using QConfigDict = std::unordered_map<std::string, QConfig>;
-using ModuleQConfigMap =
-    std::unordered_map<ModulePtr, c10::optional<QConfig>>;
+using QConfigDict = std::unordered_map<std::string, c10::optional<QConfig>>;
+using ModuleQConfigMap = std::unordered_map<ModulePtr, c10::optional<QConfig>>;
 
 struct OptionalQConfigHash {
   inline size_t operator()(const c10::optional<QConfig>& qconfig_opt) const {
@@ -38,7 +37,8 @@ struct OptionalQConfigHash {
   }
 };
 
-using QConfigTypePtrMap = std::unordered_map<c10::optional<QConfig>, TypePtr, OptionalQConfigHash>;
+using QConfigTypePtrMap =
+    std::unordered_map<c10::optional<QConfig>, TypePtr, OptionalQConfigHash>;
 
 /** \brief Quantize model's inputs and outputs.
  *
@@ -65,9 +65,7 @@ TORCH_API void FoldQuantNodesIntoInputsOutputs(std::shared_ptr<Graph>& graph);
 TORCH_API Module InsertObservers(
     Module& module,
     const std::string& method_name,
-    const std::unordered_map<
-        std::string,
-        std::tuple<Module, Module>>& qconfig_dict,
+    const QConfigDict& qconfig_dict,
     bool inplace = false,
     bool is_dynamic = false);
 
@@ -195,6 +193,8 @@ TORCH_API void FoldPrepackedWeightIntoModule(
 TORCH_API void DedupModuleUses(Module& module);
 
 TORCH_API script::Module Finalize(script::Module& module);
+
+TORCH_API void FoldQuantizedPrepackingOps(Module& module);
 
 } // namespace jit
 } // namespace torch

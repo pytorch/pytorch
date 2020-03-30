@@ -3,15 +3,15 @@
 #include <ATen/core/ivalue.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/ir.h>
-#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/ir/node_hashing.h>
-#include <torch/csrc/jit/runtime/operator.h>
-#include <torch/csrc/jit/ir/alias_analysis.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
-#include <torch/csrc/utils/memory.h>
+#include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
+#include <torch/csrc/utils/memory.h>
 
 namespace torch {
 namespace jit {
@@ -116,7 +116,6 @@ struct ConstantPropagator {
       aliasDb_ = nullptr;
     }
   }
-
 
   void propagateNode(Node* n) {
     std::vector<IValue> outputs;
