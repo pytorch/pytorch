@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
+#include <c10/util/Exception.h>
 
 /*
  * dispatch.h prevents the need from adding manual dispatch in every class that
@@ -44,6 +45,8 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+
+struct Fusion;
 
 // Hierarchal dispatch functions for handle
 struct Statement;
@@ -115,36 +118,36 @@ struct TORCH_CUDA_API OptInConstDispatch {
 
   // Vals
   virtual void handle(const IterDomain* const) {
-    AT_ERROR("Handle not overriden for IterDomain.");
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for IterDomain.");
   }
   virtual void handle(const TensorDomain* const) {
-    AT_ERROR("Handle not overriden for TensorDomain.");
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for TensorDomain.");
   }
   virtual void handle(const TensorView* const) {
-    AT_ERROR("Handle not overriden for TensorView.");
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for TensorView.");
   }
   virtual void handle(const Float* const) {
-    AT_ERROR("Handle not overriden for Float.");
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Float.");
   }
   virtual void handle(const Int* const) {
-    AT_ERROR("Handle not overriden for Int.");
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Int.");
   }
 
   // Exprs
   virtual void handle(const Split* const) {
-    AT_ERROR("Handle not overriden for Split.");
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Split.");
   }
   virtual void handle(const Merge* const) {
-    AT_ERROR("Handle not overriden for Merge.");
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Merge.");
   }
   virtual void handle(const Reorder* const) {
-    AT_ERROR("Handle not overriden for Reorder.");
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Reorder.");
   }
   virtual void handle(const UnaryOp* const) {
-    AT_ERROR("Handle not overriden for UnaryOp.");
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for UnaryOp.");
   }
   virtual void handle(const BinaryOp* const) {
-    AT_ERROR("Handle not overriden for BinaryOp.");
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for BinaryOp.");
   }
 };
 
@@ -165,36 +168,36 @@ struct TORCH_CUDA_API OptInDispatch {
 
   // Vals
   virtual void handle(IterDomain*) {
-    AT_ERROR("Handle not overriden for IterDomain.");
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for IterDomain.");
   }
   virtual void handle(TensorDomain*) {
-    AT_ERROR("Handle not overriden for TensorDomain.");
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for TensorDomain.");
   }
   virtual void handle(TensorView*) {
-    AT_ERROR("Handle not overriden for TensorView.");
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for TensorView.");
   }
   virtual void handle(Float*) {
-    AT_ERROR("Handle not overriden for Float.");
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Float.");
   }
   virtual void handle(Int*) {
-    AT_ERROR("Handle not overriden for Int.");
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Int.");
   }
 
   // Exprs
   virtual void handle(Split*) {
-    AT_ERROR("Handle not overriden for Split.");
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Split.");
   }
   virtual void handle(Merge*) {
-    AT_ERROR("Handle not overriden for Merge.");
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Merge.");
   }
   virtual void handle(Reorder*) {
-    AT_ERROR("Handle not overriden for Reorder.");
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Reorder.");
   }
   virtual void handle(UnaryOp*) {
-    AT_ERROR("Handle not overriden for UnaryOp.");
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for UnaryOp.");
   }
   virtual void handle(BinaryOp*) {
-    AT_ERROR("Handle not overriden for BinaryOp.");
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for BinaryOp.");
   }
 };
 
@@ -248,36 +251,36 @@ struct TORCH_CUDA_API OptInMutator {
 
   // Vals
   virtual Statement* mutate(IterDomain*) {
-    AT_ERROR("Mutate not overriden for IterDomain.");
+    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for IterDomain.");
   }
   virtual Statement* mutate(TensorDomain*) {
-    AT_ERROR("Mutate not overriden for TensorDomain.");
+    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for TensorDomain.");
   }
   virtual Statement* mutate(TensorView*) {
-    AT_ERROR("Mutate not overriden for TensorView.");
+    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for TensorView.");
   }
   virtual Statement* mutate(Float*) {
-    AT_ERROR("Mutate not overriden for Float.");
+    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for Float.");
   }
   virtual Statement* mutate(Int*) {
-    AT_ERROR("Mutate not overriden for Int.");
+    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for Int.");
   }
 
   // Exprs
   virtual Statement* mutate(Split*) {
-    AT_ERROR("Mutate not overriden for Split.");
+    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for Split.");
   }
   virtual Statement* mutate(Merge*) {
-    AT_ERROR("Mutate not overriden for Merge.");
+    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for Merge.");
   }
   virtual Statement* mutate(Reorder*) {
-    AT_ERROR("Mutate not overriden for Reorder.");
+    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for Reorder.");
   }
   virtual Statement* mutate(UnaryOp*) {
-    AT_ERROR("Mutate not overriden for UnaryOp.");
+    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for UnaryOp.");
   }
   virtual Statement* mutate(BinaryOp*) {
-    AT_ERROR("Mutate not overriden for BinaryOp.");
+    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for BinaryOp.");
   }
 };
 
