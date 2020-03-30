@@ -2619,6 +2619,17 @@ Args:
     input (Tensor): the PyTorch tensor to test
 """)
 
+add_docstr(torch.is_complex,
+           r"""
+is_complex(input) -> (bool)
+
+Returns True if the data type of :attr:`input` is a complex data type i.e.,
+one of ``torch.complex64``, and ``torch.complex128``.
+
+Args:
+    input (Tensor): the PyTorch tensor to test
+""")
+
 add_docstr(torch.kthvalue,
            r"""
 kthvalue(input, k, dim=None, keepdim=False, out=None) -> (Tensor, LongTensor)
