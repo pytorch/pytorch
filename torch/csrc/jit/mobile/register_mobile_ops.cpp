@@ -402,6 +402,11 @@ static auto registry =
                 [](at::Scalar s) -> at::Tensor {
                   return at::scalar_to_tensor(s);
                 }))
+        .op("_prim::NumToTensor.Scalar",
+            torch::RegisterOperators::options().catchAllKernel(
+                [](at::Scalar s) -> at::Tensor {
+                  return at::scalar_to_tensor(s);
+                }))
         .op(
             // Dummy operator that does nothing. Used to reserve a location of
             // an operator table.

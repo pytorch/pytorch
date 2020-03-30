@@ -9,12 +9,6 @@ enum class OperatorExportTypes {
   RAW, // Raw export (no ONNX)
 };
 
-enum class TrainingMode {
-  EVAL, // Inference mode
-  PRESERVE, // Preserve model state (eval/training)
-  TRAINING, // Training mode
-};
-
 // we pin IR version to version 6 (12/11/2019) instead of using
 // onnx::IR_VERSION. with this change, the test_operators.py will be more
 // stable. only bump it when it's necessary

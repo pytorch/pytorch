@@ -1,5 +1,6 @@
 #include <c10/util/Exception.h>
 #include <test/cpp/jit/tests.h>
+#include <test/cpp/tensorexpr/tests.h>
 
 namespace torch {
 namespace jit {
@@ -25,5 +26,17 @@ JIT_TEST_API void runJITCPPTests(bool runCuda) {
   testTorchSaveError();
 }
 #undef JIT_TEST
+
+#define JIT_TEST(name) test##name();
+JIT_TEST_API void runTENSOREXPRCPPTests(bool runCuda) {
+  TH_FORALL_TENSOREXPR_TESTS(JIT_TEST)
+  if (runCuda) {
+#ifdef USE_CUDA
+    TH_FORALL_TENSOREXPR_TESTS_CUDA(JIT_TEST)
+#endif
+  }
+}
+#undef JIT_TEST
+
 } // namespace jit
 } // namespace torch

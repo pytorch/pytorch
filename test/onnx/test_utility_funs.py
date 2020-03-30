@@ -5,11 +5,8 @@ import torch
 import torch.onnx
 from torch.onnx import utils, OperatorExportTypes
 from torch.onnx.symbolic_helper import _set_opset_version, _set_operator_export_type
-from test_pytorch_common import skipIfUnsupportedOpsetVersion
 
 import onnx
-import onnxruntime  # noqa
-import numpy as np
 
 import io
 import copy
@@ -55,8 +52,6 @@ class TestUtilityFuns(TestCase):
         assert "Provided key invalid_name2 for dynamic axes is not a valid input/output name" in messages
         assert len(messages) == 2
 
-    # TODO : enable when constant folding is enabled for opset 12
-    @skipIfUnsupportedOpsetVersion([12])
     def test_constant_fold_transpose(self):
         class TransposeModule(torch.nn.Module):
             def forward(self, x):
@@ -77,8 +72,6 @@ class TestUtilityFuns(TestCase):
             assert node.kind() != "onnx::Constant"
         assert len(list(graph.nodes())) == 1
 
-    # TODO : enable when constant folding is enabled for opset 12
-    @skipIfUnsupportedOpsetVersion([12])
     def test_constant_fold_slice(self):
         class NarrowModule(torch.nn.Module):
             def forward(self, x):
@@ -99,8 +92,6 @@ class TestUtilityFuns(TestCase):
             assert node.kind() != "onnx::Constant"
         assert len(list(graph.nodes())) == 1
 
-    # TODO : enable when constant folding is enabled for opset 12
-    @skipIfUnsupportedOpsetVersion([12])
     def test_constant_fold_slice_index_exceeds_dim(self):
         class SliceIndexExceedsDimModule(torch.nn.Module):
             def forward(self, x):
@@ -122,8 +113,6 @@ class TestUtilityFuns(TestCase):
             assert node.kind() != "onnx::Constant"
         assert len(list(graph.nodes())) == 1
 
-    # TODO : enable when constant folding is enabled for opset 12
-    @skipIfUnsupportedOpsetVersion([12])
     def test_constant_fold_slice_negative_index(self):
         class SliceNegativeIndexModule(torch.nn.Module):
             def forward(self, x):
@@ -144,8 +133,6 @@ class TestUtilityFuns(TestCase):
             assert node.kind() != "onnx::Constant"
         assert len(list(graph.nodes())) == 1
 
-    # TODO : enable when constant folding is enabled for opset 12
-    @skipIfUnsupportedOpsetVersion([12])
     def test_constant_fold_unsqueeze(self):
         class UnsqueezeModule(torch.nn.Module):
             def forward(self, x):
@@ -166,8 +153,6 @@ class TestUtilityFuns(TestCase):
             assert node.kind() != "onnx::Constant"
         assert len(list(graph.nodes())) == 1
 
-    # TODO : enable when constant folding is enabled for opset 12
-    @skipIfUnsupportedOpsetVersion([12])
     def test_constant_fold_concat(self):
         class ConcatModule(torch.nn.Module):
             def forward(self, x):
@@ -205,8 +190,6 @@ class TestUtilityFuns(TestCase):
             assert node.kind() != "onnx::Constant"
         assert len(list(graph.nodes())) == 2
 
-    # TODO : enable when constant folding is enabled for opset 12
-    @skipIfUnsupportedOpsetVersion([12])
     def test_constant_fold_lstm(self):
         class GruNet(torch.nn.Module):
             def __init__(self):
@@ -229,8 +212,6 @@ class TestUtilityFuns(TestCase):
             assert node.kind() != "onnx::Unsqueeze"
         assert len(list(graph.nodes())) == 3
 
-    # TODO : enable when constant folding is enabled for opset 12
-    @skipIfUnsupportedOpsetVersion([12])
     def test_constant_fold_transpose_matmul(self):
         class MatMulNet(torch.nn.Module):
             def __init__(self):
@@ -252,8 +233,6 @@ class TestUtilityFuns(TestCase):
 
     # TODO we need to figure out the root cause and fix the problem
     @skip("causing segmentation fault")
-    # TODO : enable when constant folding is enabled for opset 12
-    @skipIfUnsupportedOpsetVersion([12])
     def test_constant_fold_reshape(self):
         class ReshapeModule(torch.nn.Module):
             def __init__(self, ):
@@ -273,8 +252,6 @@ class TestUtilityFuns(TestCase):
             assert node.kind() != "onnx::Reshape"
         assert len(list(graph.nodes())) == 1
 
-    # TODO : enable when constant folding is enabled for opset 12
-    @skipIfUnsupportedOpsetVersion([12])
     def test_constant_fold_div(self):
         class Module(torch.nn.Module):
             def __init__(self, ):
@@ -294,8 +271,6 @@ class TestUtilityFuns(TestCase):
             assert node.kind() != "onnx::Div"
         assert len(list(graph.nodes())) == 1
 
-    # TODO : enable when constant folding is enabled for opset 12
-    @skipIfUnsupportedOpsetVersion([12])
     def test_constant_fold_mul(self):
         class Module(torch.nn.Module):
             def __init__(self, ):
@@ -315,8 +290,6 @@ class TestUtilityFuns(TestCase):
             assert node.kind() != "onnx::Mul"
         assert len(list(graph.nodes())) == 1
 
-    # TODO : enable when constant folding is enabled for opset 12
-    @skipIfUnsupportedOpsetVersion([12])
     def test_constant_fold_sqrt(self):
         class Module(torch.nn.Module):
             def __init__(self, ):
@@ -369,95 +342,6 @@ class TestUtilityFuns(TestCase):
                                     'unwrap model from torch.nn.DataParallel. Try '):
             torch.onnx.export(model, x, f, opset_version=self.opset_version)
 
-    def test_export_mode(self):
-        class MyModule(torch.nn.Module):
-            def forward(self, x):
-                y = x + 1
-                return y
-
-        model = MyModule()
-        x = torch.randn(10, 3, 128, 128)
-        f = io.BytesIO()
-
-        # set mode to in inference mode and export in training mode
-        model.eval()
-        old_state = model.training
-        torch.onnx.export(model, (x,), f,
-                          opset_version=self.opset_version, training=torch.onnx.TrainingMode.TRAINING)
-        # verify that the model state is preserved
-        assert model.training == old_state
-
-        # set mode to training mode and export in inference mode
-        model.train()
-        old_state = model.training
-        torch.onnx.export(model, (x,), f,
-                          opset_version=self.opset_version, training=torch.onnx.TrainingMode.EVAL)
-        # verify that the model state is preserved
-        assert model.training == old_state
-
-    # TODO: Enable test when BatchNorm is implemented in ORT for opset 12.
-    @skipIfUnsupportedOpsetVersion([12])
-    def test_batchnorm_training(self):
-        class MyModule(torch.nn.Module):
-            def __init__(self):
-                super(MyModule, self).__init__()
-                self.bn = torch.nn.BatchNorm2d(3, affine=True)
-
-            def forward(self, x):
-                bn = self.bn(x)
-                return bn
-
-        model = MyModule()
-        x = torch.randn(10, 3, 128, 128)
-
-        model.train()
-        out = model(x)
-
-        # state after 1 train epoch
-        running_mean = model.bn.running_mean
-        running_var = model.bn.running_var
-        saved_mean = x.mean((0, 2, 3))
-        saved_var = x.var((0, 2, 3))
-
-        pytorch_out = [out.detach().numpy(),
-                       running_mean.cpu().numpy(), running_var.cpu().numpy(),
-                       saved_mean.cpu().numpy(), saved_var.cpu().numpy()]
-
-        model_export = MyModule()
-        f = io.BytesIO()
-        torch.onnx.export(model_export, (x,), f,
-                          opset_version=self.opset_version, training=torch.onnx.TrainingMode.TRAINING)
-        ort_sess = onnxruntime.InferenceSession(f.getvalue())
-
-        ort_inputs = {ort_sess.get_inputs()[0].name : x.cpu().numpy()}
-        ort_outs = ort_sess.run(None, ort_inputs)
-        [np.testing.assert_allclose(p_out, ort_out, atol=10e-3, rtol=10e-3) for p_out, ort_out in zip(pytorch_out, ort_outs)]
-
-    # TODO: Enable test when Dropout is implemented in ORT for opset 12.
-    @skipIfUnsupportedOpsetVersion([12])
-    def test_dropout_training(self):
-        class MyModule(torch.nn.Module):
-            def __init__(self):
-                super(MyModule, self).__init__()
-                self.dropout = torch.nn.Dropout(0.4)
-
-            def forward(self, x):
-                dropout = self.dropout(x)
-                return dropout
-
-        model = MyModule()
-        x = torch.randn(10, 3, 128, 128)
-
-        model.train()
-
-        f = io.BytesIO()
-        torch.onnx.export(model, (x,), f,
-                          opset_version=self.opset_version, training=torch.onnx.TrainingMode.TRAINING)
-        ort_sess = onnxruntime.InferenceSession(f.getvalue())
-        ort_inputs = {ort_sess.get_inputs()[0].name : x.cpu().numpy()}
-        ort_outs = ort_sess.run(None, ort_inputs)
-        assert x != ort_outs[0]
-
 
 # opset 10 tests
 TestUtilityFuns_opset10 = type(str("TestUtilityFuns_opset10"),
@@ -469,11 +353,6 @@ TestUtilityFuns_opset10 = type(str("TestUtilityFuns_opset10"),
 TestUtilityFuns_opset11 = type(str("TestUtilityFuns_opset11"),
                                (TestCase,),
                                dict(TestUtilityFuns.__dict__, opset_version=11))
-
-# opset 12 tests
-TestUtilityFuns_opset12 = type(str("TestUtilityFuns_opset12"),
-                               (TestCase,),
-                               dict(TestUtilityFuns.__dict__, opset_version=12))
 
 
 # opset 12tests
