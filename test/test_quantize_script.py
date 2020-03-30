@@ -1,7 +1,6 @@
 import torch
 import torch.jit
 
-from torch.quantization._quantize_script import script_qconfig
 from torch.quantization._quantize_script import prepare_dynamic_script
 from torch.quantization import default_dynamic_qconfig
 
@@ -22,7 +21,7 @@ class TestScript(JitTestCase):
                 return self.fc(x)
 
         m = torch.jit.script(M())
-        m = prepare_dynamic_script(m, {'': script_qconfig(default_dynamic_qconfig)})
+        m = prepare_dynamic_script(m, {'': default_dynamic_qconfig})
 
         # for input of FC for dynamic quant
         assert len(attrs_with_prefix(m, '_observer_')) == 1
@@ -55,7 +54,7 @@ class TestScript(JitTestCase):
 
         m = torch.jit.script(M())
         # only quantize child module.
-        m = prepare_dynamic_script(m, {'sub.fc': script_qconfig(default_dynamic_qconfig)})
+        m = prepare_dynamic_script(m, {'sub.fc': default_dynamic_qconfig})
 
         # input of sub for dynamic quant
         assert len(attrs_with_prefix(m, '_observer_')) == 1
@@ -73,7 +72,7 @@ class TestScript(JitTestCase):
                    .run(m.graph)
 
 
-    def test_insert_quant_dequant_dynamic(self):
+    def test_insert_quant_dequant_conv_dynamic(self):
         class M(torch.nn.Module):
             def __init__(self):
                 super(M, self).__init__()
@@ -83,11 +82,8 @@ class TestScript(JitTestCase):
                 return self.conv(x)
 
         m = torch.jit.script(M())
-        qconfig = default_dynamic_qconfig
-        qconfig_dict = {
-            '': script_qconfig(qconfig)
-        }
-        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False, True))
+
+        m = prepare_dynamic_script(m, {'': default_dynamic_qconfig})
         data = torch.randn(1, 3, 10, 10, dtype=torch.float)
 
         get_forward(m._c)(data)
@@ -133,11 +129,8 @@ class TestScript(JitTestCase):
                 return self.fc2(x)
 
         m = torch.jit.script(M())
-        qconfig = default_dynamic_qconfig
-        qconfig_dict = {
-            '': script_qconfig(qconfig)
-        }
-        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False, True))
+
+        m = prepare_dynamic_script(m, {'': default_dynamic_qconfig})
         data = torch.randn(5, 5, dtype=torch.float)
 
         get_forward(m._c)(data)
