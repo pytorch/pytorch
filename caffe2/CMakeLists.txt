@@ -53,9 +53,9 @@ endif()
 # For pthreadpool_new_if_impl. TODO: Remove when threadpools are unitied.
 if(NOT MSVC)
   if(NOT TARGET fxdiv)
-    SET(FXDIV_BUILD_TESTS OFF CACHE BOOL "")
-    SET(FXDIV_BUILD_BENCHMARKS OFF CACHE BOOL "")
-    ADD_SUBDIRECTORY(
+    set(FXDIV_BUILD_TESTS OFF CACHE BOOL "")
+    set(FXDIV_BUILD_BENCHMARKS OFF CACHE BOOL "")
+    add_subdirectory(
       "${FXDIV_SOURCE_DIR}"
       "${CMAKE_BINARY_DIR}/FXdiv")
   endif()
@@ -211,7 +211,7 @@ if(NOT INTERN_BUILD_MOBILE OR BUILD_CAFFE2_MOBILE)
   #     have the right protobuf version as well as linking to libprotobuf.a.
   target_link_libraries(caffe2_protos PUBLIC protobuf::libprotobuf)
   if(NOT BUILD_SHARED_LIBS)
-    INSTALL(TARGETS caffe2_protos ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}")
+    install(TARGETS caffe2_protos ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}")
   endif()
 endif()
 
@@ -715,7 +715,7 @@ endif()
 
 
 if(NOT MSVC)
-  TARGET_LINK_LIBRARIES(torch_cpu PRIVATE fxdiv)
+  target_link_libraries(torch_cpu PRIVATE fxdiv)
 endif()
 
 # ==========================================================
@@ -1178,7 +1178,7 @@ if(USE_ROCM)
   get_directory_property(MY_DEFINITIONS COMPILE_DEFINITIONS)
   if(MY_DEFINITIONS)
     foreach(_item ${MY_DEFINITIONS})
-      LIST(APPEND HIP_HCC_FLAGS "-D${_item}")
+      list(APPEND HIP_HCC_FLAGS "-D${_item}")
     endforeach()
   endif()
 
@@ -1283,9 +1283,9 @@ if(BUILD_PYTHON)
       print(sysconfig.get_python_lib(prefix=''))
   ")
   file(TO_CMAKE_PATH ${PYTHON_SITE_PACKAGES} PYTHON_SITE_PACKAGES)
-  SET(PYTHON_SITE_PACKAGES ${PYTHON_SITE_PACKAGES} PARENT_SCOPE) # for Summary
+  set(PYTHON_SITE_PACKAGES ${PYTHON_SITE_PACKAGES} PARENT_SCOPE) # for Summary
   # ---[ Options.
-  SET(PYTHON_LIB_REL_PATH "${PYTHON_SITE_PACKAGES}" CACHE STRING "Python installation path (relative to CMake installation prefix)")
+  set(PYTHON_LIB_REL_PATH "${PYTHON_SITE_PACKAGES}" CACHE STRING "Python installation path (relative to CMake installation prefix)")
   message(STATUS "Using ${PYTHON_LIB_REL_PATH} as python relative installation path")
   # Python extension suffix
   # Try to get from python through sysconfig.get_env_var('EXT_SUFFIX') first,

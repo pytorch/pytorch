@@ -33,9 +33,9 @@ set(ATen_CUDA_DEPENDENCY_LIBS)
 set(ATen_HIP_DEPENDENCY_LIBS)
 set(ATen_PUBLIC_CUDA_DEPENDENCY_LIBS)
 set(ATen_PUBLIC_HIP_DEPENDENCY_LIBS)
-SET(ATEN_INSTALL_BIN_SUBDIR "bin" CACHE PATH "ATen install binary subdirectory")
-SET(ATEN_INSTALL_LIB_SUBDIR "lib" CACHE PATH "ATen install library subdirectory")
-SET(ATEN_INSTALL_INCLUDE_SUBDIR "include" CACHE PATH "ATen install include subdirectory")
+set(ATEN_INSTALL_BIN_SUBDIR "bin" CACHE PATH "ATen install binary subdirectory")
+set(ATEN_INSTALL_LIB_SUBDIR "lib" CACHE PATH "ATen install library subdirectory")
+set(ATEN_INSTALL_INCLUDE_SUBDIR "include" CACHE PATH "ATen install include subdirectory")
 
 if(USE_CUDA)
   list(APPEND ATen_CUDA_INCLUDE ${CUDA_INCLUDE_DIRS})
@@ -51,43 +51,43 @@ list(APPEND ATen_CPU_INCLUDE ${TH_CPU_INCLUDE})
 
 
 # Find the HIP package, set the HIP paths, load the HIP CMake.
-IF(USE_ROCM)
+if(USE_ROCM)
   include(LoadHIP)
   if(NOT PYTORCH_FOUND_HIP)
     set(USE_ROCM OFF)
   endif()
-ENDIF()
+endif()
 
 # Both CUDA and ROCM are enabled and found. Report an error.
 if(USE_CUDA AND USE_ROCM)
   message(FATAL_ERROR "Both CUDA and ROCm are enabled and found. PyTorch can only be built with either of them. Please turn one off by using either USE_CUDA=OFF or USE_ROCM=OFF.")
 endif()
 
-IF(MSVC)
+if(MSVC)
   # we want to respect the standard, and we are bored of those **** .
-  ADD_DEFINITIONS(-D_CRT_SECURE_NO_DEPRECATE=1)
-  LIST(APPEND CUDA_NVCC_FLAGS "-Xcompiler /wd4819 -Xcompiler /wd4503 -Xcompiler /wd4190 -Xcompiler /wd4244 -Xcompiler /wd4251 -Xcompiler /wd4275 -Xcompiler /wd4522")
-ENDIF(MSVC)
+  add_definitions(-D_CRT_SECURE_NO_DEPRECATE=1)
+  list(APPEND CUDA_NVCC_FLAGS "-Xcompiler /wd4819 -Xcompiler /wd4503 -Xcompiler /wd4190 -Xcompiler /wd4244 -Xcompiler /wd4251 -Xcompiler /wd4275 -Xcompiler /wd4522")
+endif(MSVC)
 
 if(USE_ROCM)
   # TODO: AT_HIP_ENABLED (change this once we represent HIP as HIP in
   # ATen proper)
-  SET(AT_CUDA_ENABLED 1)
+  set(AT_CUDA_ENABLED 1)
   add_subdirectory(src/THH)
   add_subdirectory(src/THHUNN)
   message("ROCm is enabled.")
 elseif(USE_CUDA)
-  SET(AT_CUDA_ENABLED 1)
+  set(AT_CUDA_ENABLED 1)
   add_subdirectory(src/THC)
   add_subdirectory(src/THCUNN)
 else()
   message("disabling CUDA because USE_CUDA is set false")
-  SET(AT_CUDA_ENABLED 0)
+  set(AT_CUDA_ENABLED 0)
 endif()
 if(NOT USE_CUDA)
   # we still parse THCUNN even if cuda is disabled to make sure to
   # install it
-  INSTALL(FILES src/THCUNN/generic/THCUNN.h DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/THCUNN/generic")
+  install(FILES src/THCUNN/generic/THCUNN.h DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/THCUNN/generic")
 endif()
 
 if(NOT USE_NNPACK)
