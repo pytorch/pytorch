@@ -2,6 +2,7 @@
 #include <torch/csrc/jit/passes/inliner.h>
 
 #include <torch/csrc/jit/frontend/error_report.h>
+#include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/peephole.h>
 
@@ -71,6 +72,7 @@ void preoptimizeGraph(std::shared_ptr<Graph>& graph) {
   // // AliasDb construction can be slow, so run it just on immutable types
   // // to clean up constant Ifs & other easy wins
   ConstantPropagationImmutableTypes(graph);
+  ConstantPooling(graph);
 }
 
 } // namespace jit
