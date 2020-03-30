@@ -158,9 +158,11 @@ static Tensor & masked_select_out_cuda_impl(Tensor & result, const Tensor & self
 
   Tensor _mask, _self;
   std::tie(_mask, _self) = expand_outplace(mask, self);
+  _mask = _mask.flatten();
+  _self = _self.flatten();
 
   auto shape = _self.sizes().vec();
-  int64_t num_input_elements = _self.flatten().size(0);
+  int64_t num_input_elements = _self.size(0);
   Tensor mask_inclusive_scan = at::empty(shape, self.options().dtype(at::kLong)).copy_(_mask);
 
   auto stream = at::cuda::getCurrentCUDAStream();
