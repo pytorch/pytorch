@@ -33,13 +33,13 @@ MAYBE_GLOBAL void test_pod() {
 TEST(TestMemory, ReinterpretCast) {
   std::complex<float> z(1, 2);
   c10::complex<float> zz = *reinterpret_cast<c10::complex<float>*>(&z);
-  ASSERT_EQ(z.real(), float(1));
-  ASSERT_EQ(z.imag(), float(2));
+  ASSERT_EQ(zz.real(), float(1));
+  ASSERT_EQ(zz.imag(), float(2));
 
   std::complex<double> zzz(1, 2);
-  c10::complex<double> zzzz = *reinterpret_cast<c10::complex<float>*>(&z);
-  ASSERT_EQ(z.real(), double(1));
-  ASSERT_EQ(z.imag(), double(2));
+  c10::complex<double> zzzz = *reinterpret_cast<c10::complex<double>*>(&zzz);
+  ASSERT_EQ(zzzz.real(), double(1));
+  ASSERT_EQ(zzzz.imag(), double(2));
 }
 
 }  // memory
