@@ -16442,7 +16442,6 @@ tensor_op_tests = [
     ('is_same_size', 'positive', _medium_2d, lambda t, d: [_medium_2d(t, d)],
         1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('is_set_to', '', _medium_2d, lambda t, d: [_medium_2d(t, d)], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
-    ('imag', '', _small_3d, lambda t, d: [], 1e-5, 1e-2, 1e-5, _types, [torch.bfloat16], False),
     # TODO: positive case
     ('kthvalue', '', _small_3d_unique, lambda t, d: [3], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('kthvalue', 'dim', _small_3d_unique, lambda t, d: [3, 1], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
@@ -16517,7 +16516,6 @@ tensor_op_tests = [
     ('sum', '', _small_2d, lambda t, d: [], 1e-2, 1e-2, 1e-5, _types2, _cpu_types, False),
     ('sum', 'dim', _small_3d, lambda t, d: [1], 1e-2, 1e-2, 1e-5, _types2, _cpu_types, False),
     ('sum', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-2, 1e-5, 1e-5, _types, _cpu_types, False),
-    ('real', '', _small_3d, lambda t, d: [], 1e-5, 1e-2, 1e-5, _types, [torch.bfloat16], False),
     ('renorm', '2_norm', _small_3d, lambda t, d: [2, 1, 1], 1e-3, 1e-5, 1e-5, _float_types),
     ('renorm', '2_norm_neg_dim', _small_3d, lambda t, d: [2, -1, 1], 1e-3, 1e-5, 1e-5, _float_types),
     ('renorm', '1_5_norm', _small_3d, lambda t, d: [1.5, 1, 1], 1e-3, 1e-5, 1e-5, _float_types),
@@ -16712,7 +16710,7 @@ def generate_tensor_op_tests(cls):
                bfloat16_precision=1e-5,
                float_precision=1e-5,
                dtype_list=_types,
-               dtype_cpu_list=[],
+               dtype_cpu_list=_cpu_types,
                make_inplace_variant=True,
                decorators=None):
         if subtest_str:
