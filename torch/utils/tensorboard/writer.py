@@ -273,9 +273,9 @@ class SummaryWriter(object):
 
         Args:
             hparam_dict (dict): Each key-value pair in the dictionary is the
-              name of the hyper parameter and it's corresponding value.
+              name of the hyper parameter and its corresponding value.
             metric_dict (dict): Each key-value pair in the dictionary is the
-              name of the metric and it's corresponding value. Note that the key used
+              name of the metric and its corresponding value. Note that the key used
               here should be unique in the tensorboard record. Otherwise the value
               you added by ``add_scalar`` will be displayed in hparam plugin. In most
               cases, this is unwanted.
@@ -376,7 +376,7 @@ class SummaryWriter(object):
         walltime = time.time() if walltime is None else walltime
         fw_logdir = self._get_file_writer().get_logdir()
         for tag, scalar_value in tag_scalar_dict.items():
-            fw_tag = fw_logdir + "/" + main_tag.replace("/", "_") + "_" + tag
+            fw_tag = fw_logdir + "/" + main_tag.replace("/", "_") + "_" + str(tag)
             if fw_tag in self.all_writers.keys():
                 fw = self.all_writers[fw_tag]
             else:
