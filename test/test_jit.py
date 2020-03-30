@@ -1609,6 +1609,8 @@ graph(%x : Tensor,
             FileCheck().check_not("aten::add") \
                        .check_not("aten::relu") \
                        .check_not("aten::relu_") \
+                       .check_not("quantized::add") \
+                       .check_not("quantized::relu") \
                        .check("quantized::add_relu") \
                        .run(m.graph_for(data, data))
 
@@ -1639,6 +1641,8 @@ graph(%x : Tensor,
             FileCheck().check_not("aten::add") \
                        .check_not("aten::add_") \
                        .check_not("aten::relu") \
+                       .check_not("quantized::add_scalar") \
+                       .check_not("quantized::relu") \
                        .check("quantized::add_scalar_relu") \
                        .run(m.graph_for(data))
 
