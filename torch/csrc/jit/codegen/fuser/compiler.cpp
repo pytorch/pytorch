@@ -12,6 +12,7 @@
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/runtime/operator.h>
+#include <torch/csrc/jit/jit_log.h>
 
 #include <atomic>
 #include <iostream>
@@ -216,8 +217,7 @@ std::shared_ptr<FusedKernel> compileKernel(
     graph->inputs()[i]->setType(TensorType::create(
         desc.scalar_type,
         device,
-        c10::VaryingShape(desc.nDim()),
-        c10::VaryingShape(desc.nDim()),
+        {desc.nDim()},
         false)); // TODO: nDim is bad, as it is collapsed
   }
 
@@ -264,6 +264,7 @@ std::shared_ptr<FusedKernel> compileKernel(
     auto scalar_type = o->type()->expect<TensorType>()->scalarType();
     TORCH_INTERNAL_ASSERT(scalar_type);
     auto type = TensorType::createContiguous(*scalar_type, device, sizes);
+    GRAPH_DEBUG("type = ", *type);
     output_desc.emplace_back(type);
     const auto& desc = output_desc.back();
 
