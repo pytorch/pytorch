@@ -3499,6 +3499,17 @@ c10::QualifiedName CompilationUnit::mangle(
   // Otherwise add a mangle namespace right before the basename
   TORCH_INTERNAL_ASSERT(!atoms.empty());
   atoms.insert(atoms.end() - 1, manglePrefix + c10::to_string(mangleIndex_++));
+
+  // Even though this name is unmangled, we still need to make sure it is fresh.
+  // When cloning a module this situation can occur. For example,
+  // '__torch__.Linear.Linear' is mangled to
+  // '__torch__.Linear.___torch_mangle_9.Linear' but this name is already in
+  // use in the original module.
+  // Increment mangleIndex_ until the type is not defined
+  auto& atom = atoms[atoms.size() - 2];
+  while (get_type(QualifiedName(atoms))) {
+    atom = manglePrefix + c10::to_string(mangleIndex_++);
+  }
   return QualifiedName(atoms);
 }
 
