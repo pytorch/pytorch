@@ -52,6 +52,7 @@ from torch.quantization import default_observer
 from torch.quantization import default_weight_observer
 from torch.quantization import default_per_channel_weight_observer
 from torch.quantization import default_qconfig
+from torch.quantization import get_default_qconfig
 
 from torch.quantization import quantize
 from torch.testing._internal.common_quantization import SingleLayerLinearModel, AnnotatedSingleLayerLinearModel
@@ -1507,75 +1508,6 @@ graph(%x : Tensor,
                            .check("return") \
                            .run(conv._get_method('_conv_forward').graph)
 
-    def test_quant_fusion(self):
-        input_strs = [
-            # aten::conv2d --> quantized::conv2d
-            """
-graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype,
-%r_scale, %r_zero_point, %r_dtype, %stride, %padding, %dilation, %groups):
-        %a_quant = aten::quantize_per_tensor(%a, %a_scale, %a_zero_point, %a_dtype)
-        %a_dequant = aten::dequantize(%a_quant)
-        %packed_params = prim::GetAttr[name="_packed_params"](%packed_params_module)
-        %w_quant : Tensor, %b : Tensor? = quantized::conv2d_unpack(%packed_params)
-        %w_dequant = aten::dequantize(%w_quant)
-        # CHECK: quantized::conv2d
-        # CHECK-NOT: aten::conv2d
-        %r = aten::conv2d(%a_dequant, %w_dequant, %b, %stride, %padding, %dilation, %groups)
-        %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
-        %r_dequant = aten::dequantize(%r_quant)
-        return (%r_dequant)""",
-            # addmm -> quantized::linear
-            """
-graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r_zero_point, %r_dtype, %4):
-        %a_quant = aten::quantize_per_tensor(%a, %a_scale, %a_zero_point, %a_dtype)
-        %a_dequant = aten::dequantize(%a_quant)
-        %packed_params = prim::GetAttr[name="_packed_params"](%packed_params_module)
-        %w_quant : Tensor, %b : Tensor? = quantized::linear_unpack(%packed_params)
-        %w_dequant = aten::dequantize(%w_quant)
-        %w_dequant_t = aten::t(%w_dequant)
-        # CHECK: quantized::linear
-        # CHECK-NOT: aten::addmm
-        %r = aten::addmm(%b, %a_dequant, %w_dequant_t, %4, %4)
-        %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
-        %r_dequant = aten::dequantize(%r_quant)
-        return (%r_dequant)""",
-            # matmul(with bias) -> quantized::linear
-            """
-graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r_zero_point, %r_dtype, %4):
-        %a_quant = aten::quantize_per_tensor(%a, %a_scale, %a_zero_point, %a_dtype)
-        %a_dequant = aten::dequantize(%a_quant)
-        %packed_params = prim::GetAttr[name="_packed_params"](%packed_params_module)
-        %w_quant : Tensor, %b : Tensor? = quantized::linear_unpack(%packed_params)
-        %w_dequant = aten::dequantize(%w_quant)
-        %w_dequant_t = aten::t(%w_dequant)
-        # CHECK: quantized::linear
-        # CHECK-NOT: aten::addmm
-        %output = aten::matmul(%a_dequant, %w_dequant_t)
-        %r = aten::add_(%output, %b, %4)
-        %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
-        %r_dequant = aten::dequantize(%r_quant)
-        return (%r_dequant)""",
-            # matmul(without bias) -> quantized::linear
-            """
-graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r_zero_point, %r_dtype):
-        %a_quant = aten::quantize_per_tensor(%a, %a_scale, %a_zero_point, %a_dtype)
-        %a_dequant = aten::dequantize(%a_quant)
-        %packed_params = prim::GetAttr[name="_packed_params"](%packed_params_module)
-        %w_quant : Tensor, %b : Tensor? = quantized::linear_unpack(%packed_params)
-        %w_dequant = aten::dequantize(%w_quant)
-        %w_dequant_t = aten::t(%w_dequant)
-        # CHECK: quantized::linear
-        # CHECK-NOT: aten::matmul
-        %r = aten::matmul(%a_dequant, %w_dequant_t)
-        %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
-        %r_dequant = aten::dequantize(%r_quant)
-        return (%r_dequant)"""
-        ]
-        for input_str in input_strs:
-            graph = parse_ir(input_str)
-            torch._C._jit_pass_quant_fusion(graph)
-            FileCheck().run(input_str, graph)
-
     @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
                          " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
                          " with instruction set support avx2 or newer.")
@@ -2356,7 +2288,12 @@ graph(%input, %weight):
         FileCheck().check_count("quantized::conv2d(", 4, exactly=True) \
                    .run(m.graph)
 
-    def test_finalize_for_conv2d(self):
+    @unittest.skipUnless(
+        'fbgemm' in torch.backends.quantized.supported_engines,
+        " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+        " with instruction set support avx2 or newer.",
+    )
+    def test_quantized_conv2d(self):
         class M(torch.nn.Module):
             def __init__(self):
                 super(M, self).__init__()
@@ -2366,15 +2303,54 @@ graph(%input, %weight):
                 return self.conv(x)
 
         data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
-        qconfig_dict = {'': default_qconfig}
+        qconfig_dict = {'': get_default_qconfig('fbgemm')}
         model = torch.jit.script(M()).eval()
         model = quantize_script(model, qconfig_dict, _test_only_eval_fn, [data], inplace=False)
         # make sure there is only one quantize_per_tensor for input
         # and conv2d_prepack is folded
         FileCheck().check_count("aten::quantize_per_tensor", 1, exactly=True) \
-                   .check_not("quantized::conv2d_prepack") \
-                   .check("quantized::conv2d") \
                    .run(model.graph)
+
+        FileCheck().check_not("quantized::conv2d_prepack") \
+                   .run(model.graph)
+
+        FileCheck().check("quantized::conv2d") \
+                   .run(model.graph)
+
+        # make sure it runs
+        model(data[0][0])
+
+    @unittest.skipUnless(
+        'fbgemm' in torch.backends.quantized.supported_engines,
+        " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+        " with instruction set support avx2 or newer.",
+    )
+    def test_quantized_conv3d(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.conv = torch.nn.Conv3d(3, 3, 3).float()
+
+            def forward(self, x):
+                return self.conv(x)
+
+        data = [(torch.rand((1, 3, 10, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        qconfig_dict = {'': get_default_qconfig('fbgemm')}
+        model = torch.jit.script(M()).eval()
+        model = quantize_script(model, qconfig_dict, _test_only_eval_fn, [data], inplace=False)
+        # make sure there is only one quantize_per_tensor for input
+        # and conv3d_prepack is folded
+        FileCheck().check_count("aten::quantize_per_tensor", 1, exactly=True) \
+                   .run(model.graph)
+
+        FileCheck().check_not("quantized::conv3d_prepack") \
+                   .run(model.graph)
+
+        FileCheck().check("quantized::conv3d") \
+                   .run(model.graph)
+
+        # make sure it runs
+        model(data[0][0])
 
     def test_finalize_for_linear(self):
         class M(torch.nn.Module):

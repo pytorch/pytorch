@@ -73,7 +73,7 @@ def script_qconfig(qconfig):
 
 def prepare_script(model, qconfig_dict, inplace=False):
     _check_is_script_module(model)
-    scripted_qconfig_dict = {k: script_qconfig(v) for k, v in qconfig_dict.items()}
+    scripted_qconfig_dict = {k: script_qconfig(v) if v else None for k, v in qconfig_dict.items()}
     if not inplace:
         model = model.copy()
     model = wrap_cpp_module(torch._C._jit_pass_insert_observers(model._c,
