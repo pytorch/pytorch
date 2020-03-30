@@ -7,9 +7,8 @@
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
-#include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/codegen/cuda/interface.h>
-#include <torch/csrc/jit/runtime/graph_executor.h>
+#include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>

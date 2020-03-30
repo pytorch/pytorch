@@ -28,13 +28,12 @@ namespace fuser {
 // original tensor.
 struct IndexCompute : public TransformIter {
  protected:
-
   // Replay overrides which modify indices
   void replayBackward(Split* expr) override;
   void replayBackward(Merge* expr) override;
   void replayBackward(Reorder* expr) override;
 
-  //Axis_map for
+  // Axis_map for
   std::vector<Int*> indices;
 
   IndexCompute(const TensorView* tv, std::vector<Int*> _indices);
@@ -48,4 +47,3 @@ struct IndexCompute : public TransformIter {
 } // namespace fuser
 } // namespace jit
 } // namespace torch
-

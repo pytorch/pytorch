@@ -1,5 +1,5 @@
-#include <torch/csrc/jit/codegen/cuda/partition.h>
 #include <torch/csrc/jit/codegen/cuda/parser.h>
+#include <torch/csrc/jit/codegen/cuda/partition.h>
 
 namespace torch {
 namespace jit {
@@ -48,7 +48,7 @@ static bool isFusableDevice(const Node* node) {
   return isFusableDevice(node, device.value());
 }
 
-inline bool isFusableNode(const Node* const node)  {
+inline bool isFusableNode(const Node* const node) {
   // checks if node is compatible with parser:
   // 1. if we have a parsing rule; or 2. if the node is already a fusion group.
   return (isNodeParsible(node) || node->kind() == prim::CudaFusionGroup);
@@ -74,4 +74,7 @@ bool isFusableCudaFusionGroup(
   return false;
 }
 
-}}}}
+} // namespace cuda
+} // namespace fuser
+} // namespace jit
+} // namespace torch

@@ -5,7 +5,6 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
-
 static thread_local Fusion* ACTIVE_FUSION = nullptr;
 
 FusionGuard::FusionGuard(Fusion* fusion) {
@@ -36,13 +35,13 @@ std::vector<Expr*> ExprSort::getExprs(
 
 Fusion::~Fusion() {
   {
-  auto it = val_set_.begin();
-  while (it != val_set_.end()) {
-    auto del = it;
-    it = ++it;
-    delete (*del);
+    auto it = val_set_.begin();
+    while (it != val_set_.end()) {
+      auto del = it;
+      it = ++it;
+      delete (*del);
+    }
   }
-  }  
   auto it = expr_set_.begin();
   while (it != expr_set_.end()) {
     auto del = it;
@@ -120,7 +119,8 @@ bool Fusion::inFusion(const Statement* stmt) const {
   return infusion;
 }
 
-void Fusion::assertInFusion(const Statement* stmt, const std::string& msg) const {
+void Fusion::assertInFusion(const Statement* stmt, const std::string& msg)
+    const {
   if (inFusion(stmt))
     return;
   TORCH_CHECK(false, msg, " it was not found in the active fusion.");
@@ -220,7 +220,7 @@ const std::set<Expr*>& Fusion::unordered_exprs() const noexcept {
 
 std::set<Expr*> Fusion::uses(Val* val) const {
   assertInFusion(val, "Cannot detect where val was used, ");
-  if (uses_.find(val) != uses_.end()){
+  if (uses_.find(val) != uses_.end()) {
     auto ret = uses_.find(val)->second;
     return ret;
   }

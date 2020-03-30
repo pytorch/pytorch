@@ -33,8 +33,10 @@ static GraphPassNameType graphPassID = 1;
 using GraphPassEntry = std::pair<GraphPass, GraphPassNameType>;
 
 // Return currently registered passes. Passes are stored in a static vector
-TORCH_API std::vector<std::pair<GraphPass, GraphPassNameType>>& getCustomPostPasses();
-TORCH_API std::vector<std::pair<GraphPass, GraphPassNameType>>& getCustomPrePasses();
+TORCH_API std::vector<std::pair<GraphPass, GraphPassNameType>>&
+getCustomPostPasses();
+TORCH_API std::vector<std::pair<GraphPass, GraphPassNameType>>&
+getCustomPrePasses();
 
 TORCH_API GraphPassNameType registerPostPass(GraphPass p);
 TORCH_API GraphPassNameType registerPrePass(GraphPass p);

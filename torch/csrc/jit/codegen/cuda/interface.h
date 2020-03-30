@@ -30,4 +30,7 @@ C10_EXPORT void compileFusionGroup(Node* fusion_node);
 C10_EXPORT void runFusionGroup(const Node* fusion_node, Stack& stack);
 C10_EXPORT void fuseGraph(std::shared_ptr<Graph>&);
 
-}}}} // namespace torch::jit::fuser::cuda
+} // namespace cuda
+} // namespace fuser
+} // namespace jit
+} // namespace torch

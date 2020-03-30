@@ -12,8 +12,9 @@ void TransformIter::replayBackward(Merge* expr) {}
 void TransformIter::replayBackward(Reorder* expr) {}
 
 void TransformIter::replayBackward(Expr* expr) {
-  TORCH_INTERNAL_ASSERT(expr->isExpr(),
-  "Dispatch in transform iteration is expecting Exprs only.");
+  TORCH_INTERNAL_ASSERT(
+      expr->isExpr(),
+      "Dispatch in transform iteration is expecting Exprs only.");
   switch (*(expr->getExprType())) {
     case (ExprType::Split):
       replayBackward(static_cast<Split*>(expr));
@@ -25,7 +26,8 @@ void TransformIter::replayBackward(Expr* expr) {
       replayBackward(static_cast<Reorder*>(expr));
       break;
     default:
-      TORCH_INTERNAL_ASSERT(false, "Could not detect expr type in replayBackward.");
+      TORCH_INTERNAL_ASSERT(
+          false, "Could not detect expr type in replayBackward.");
   }
 }
 
@@ -45,7 +47,8 @@ TensorDomain* TransformIter::runBackward(
   // If I'm not back to the original td
   while (orig != nullptr) {
     if (visited_exprs.find(orig) != visited_exprs.end())
-      TORCH_INTERNAL_ASSERT(false, 
+      TORCH_INTERNAL_ASSERT(
+          false,
           "TransformReplay::runBackward is not traversing a correct history.");
 
     visited_exprs.emplace(orig);
@@ -55,7 +58,8 @@ TensorDomain* TransformIter::runBackward(
     for (Val* inp : orig->inputs())
       if (inp->getValType() == ValType::TensorDomain) {
         if (previous_td != nullptr)
-          TORCH_INTERNAL_ASSERT(false, 
+          TORCH_INTERNAL_ASSERT(
+              false,
               "TransformReplay::runBackward could not decifer transform history of a TensorDomain.");
 
         // Place transform op on top of stack.
@@ -77,7 +81,8 @@ TensorDomain* TransformIter::runBackward(
 }
 
 TensorView* TransformIter::replay(Split* expr, TensorView* tv) {
-  return tv->split(expr->axis(), static_cast<Int*>(expr->factor())->value().value());
+  return tv->split(
+      expr->axis(), static_cast<Int*>(expr->factor())->value().value());
 }
 
 TensorView* TransformIter::replay(Merge* expr, TensorView* tv) {
@@ -86,7 +91,7 @@ TensorView* TransformIter::replay(Merge* expr, TensorView* tv) {
 
 TensorView* TransformIter::replay(Reorder* expr, TensorView* tv) {
   std::unordered_map<int, int> axis2pos;
-  for(decltype(expr->pos2axis().size()) i{0}; i<expr->pos2axis().size(); i++)
+  for (decltype(expr->pos2axis().size()) i{0}; i < expr->pos2axis().size(); i++)
     axis2pos[expr->pos2axis()[i]] = i;
   return tv->reorder(axis2pos);
 }

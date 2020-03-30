@@ -22,6 +22,9 @@ struct RegisterInterface {
 };
 
 static RegisterInterface register_interface_;
-}
+} // namespace
 
-}}}} // namespace torch::jit::fuser::cuda::
+} // namespace cuda
+} // namespace fuser
+} // namespace jit
+} // namespace torch

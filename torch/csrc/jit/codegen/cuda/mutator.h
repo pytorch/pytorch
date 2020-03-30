@@ -2,9 +2,9 @@
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
+#include <torch/csrc/jit/codegen/cuda/dispatch.h>
 #include <torch/csrc/jit/codegen/cuda/ir_base_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/tensor.h>
-#include <torch/csrc/jit/codegen/cuda/dispatch.h>
 
 #include <iostream>
 
@@ -24,7 +24,6 @@ struct Fusion;
  * specialize those nodes which they want to have a particular transformation.
  */
 
-
 // Search through "within" and replace all instances of "instance" with the
 // value "with".
 struct TORCH_CUDA_API ReplaceAll : public OptOutMutator {
@@ -41,10 +40,7 @@ struct TORCH_CUDA_API ReplaceAll : public OptOutMutator {
 
  public:
   // Traverses Statement, and replaces all instances of _instance with _with.
-  static void instancesWithin(
-      Val* _instance,
-      Val* _with,
-      Expr* _within) {
+  static void instancesWithin(Val* _instance, Val* _with, Expr* _within) {
     if (_within == nullptr)
       return;
     FusionGuard fg(_within->fusion());

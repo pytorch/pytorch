@@ -26,4 +26,7 @@ TORCH_CUDA_API bool isFusableCudaFusionGroup(
     const Node* const fusion,
     const Node* const node);
 
-}}}}
+} // namespace cuda
+} // namespace fuser
+} // namespace jit
+} // namespace torch

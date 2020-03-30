@@ -1,14 +1,14 @@
 #pragma once
 
-#include <torch/csrc/WindowsTorchApiMacro.h> // TORCH_CUDA_API
 #include <c10/core/Device.h>
 #include <c10/core/DeviceType.h>
 #include <c10/util/Exception.h>
+#include <torch/csrc/WindowsTorchApiMacro.h> // TORCH_CUDA_API
 
 #include <torch/csrc/jit/codegen/cuda/utils.h>
 
-#include <vector>
 #include <cstdint>
+#include <vector>
 
 namespace torch {
 namespace jit {
@@ -20,9 +20,8 @@ namespace fuser {
  TODO: docs explaining the protocol; what is stored and how does merge work
  */
 struct TORCH_CUDA_API TensorContiguity {
-
   TensorContiguity(
-      const std::vector<int64_t>& size, 
+      const std::vector<int64_t>& size,
       const std::vector<int64_t>& stride);
 
   // gives broadcast information per axis;
@@ -45,12 +44,12 @@ struct TORCH_CUDA_API TensorContiguity {
   // I need feedback on this one. What do we check? order + broadcast rule?
   bool isCompatible(const TensorContiguity& tc) const;
 
-/*******************************************************************************
- * Future proof support
- *   we don't need these yet.
- * TODO: we probably won't need this until much later, but let's try solve
- * the problem that doesn't exist yet;
- ******************************************************************************/
+  /*******************************************************************************
+   * Future proof support
+   *   we don't need these yet.
+   * TODO: we probably won't need this until much later, but let's try solve
+   * the problem that doesn't exist yet;
+   ******************************************************************************/
 
   // [NOTE] the order of the argument matters:
   // canCollapseLowerHigher(x, y) differs from canCollapseLowerHigher(y, x)
@@ -73,7 +72,7 @@ struct TORCH_CUDA_API TensorContiguity {
 
   void merge(const TensorContiguity& tc);
 
-protected:
+ protected:
   // contiguity_  : contiguity and broadcast;
   std::vector<int> contiguity_;
 
@@ -81,4 +80,6 @@ protected:
   std::vector<int> sorted_axes_;
 };
 
-}}} // namespace torch::jit::fuser
+} // namespace fuser
+} // namespace jit
+} // namespace torch

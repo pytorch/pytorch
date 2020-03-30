@@ -7,8 +7,8 @@
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
 
 #include <set>
-#include <vector>
 #include <unordered_map>
+#include <vector>
 
 namespace torch {
 namespace jit {
@@ -45,11 +45,10 @@ struct Fusion;
 // Fusion Guard is our "context manager". It holds the actrive fusion and allows
 // it to be accessed anywhere through FusionGuard::getCurFusion().
 struct TORCH_CUDA_API FusionGuard {
-
-public:
+ public:
   Fusion* prev_fusion;
 
-  //Set the active fusion so it can be manipulated.
+  // Set the active fusion so it can be manipulated.
   FusionGuard(Fusion* fusion);
 
   ~FusionGuard();

@@ -10,7 +10,7 @@
  * graph. We compile the graph to generate CUDA function and cache them in a
  * registry. We cache & reuse kernels across nodes sharing identical graph.
  *
- * After compilation, we assign the key to cached kernel as an integer attribute 
+ * After compilation, we assign the key to cached kernel as an integer attribute
  * on the node `attr::cache_id`.
  */
 
@@ -28,8 +28,13 @@ TORCH_CUDA_API void compileCudaFusionGroup(Node* fusion_node);
 // Current protocol is that the function allocates output tensor append them to
 // `stack` after execution.
 // TODO: support shape inferencing. Right now we only handles static shape
-TORCH_CUDA_API void runCudaFusionGroup(const Node* const fusion_node, Stack& stack);
+TORCH_CUDA_API void runCudaFusionGroup(
+    const Node* const fusion_node,
+    Stack& stack);
 
 TORCH_CUDA_API void CudaFuseGraph(std::shared_ptr<Graph>& graph);
- 
-}}}} // namespace torch::jit::fuser::cuda
+
+} // namespace cuda
+} // namespace fuser
+} // namespace jit
+} // namespace torch

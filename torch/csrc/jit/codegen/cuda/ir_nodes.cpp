@@ -12,13 +12,11 @@ bool Float::sameAs(const Float* const other) const {
   return this == other;
 }
 
-
 bool Int::sameAs(const Int* const other) const {
   if (isConst() && other->isConst())
     return *value() == *(other->value());
   return this == other;
 }
-
 
 UnaryOp::UnaryOp(UnaryOpType _type, Val* _out, Val* _in)
     : Expr(ExprType::UnaryOp), unary_op_type_{_type}, out_{_out}, in_{_in} {
@@ -32,7 +30,6 @@ bool UnaryOp::sameAs(const UnaryOp* const other) const {
     return false;
   return static_cast<const Expr*>(this)->sameAs(other);
 }
-
 
 BinaryOp::BinaryOp(BinaryOpType _type, Val* _out, Val* _lhs, Val* _rhs)
     : Expr(ExprType::BinaryOp),
@@ -49,11 +46,10 @@ BinaryOp::BinaryOp(BinaryOpType _type, Val* _out, Val* _lhs, Val* _rhs)
 bool BinaryOp::sameAs(const BinaryOp* other) const {
   if (getBinaryOpType() != other->getBinaryOpType())
     return false;
-  if(!(lhs()->sameAs(other->lhs()) && rhs()->sameAs(other->rhs())))
+  if (!(lhs()->sameAs(other->lhs()) && rhs()->sameAs(other->rhs())))
     return false;
   return true;
 }
-
 
 IterDomain::IterDomain(
     Int* _size,
@@ -83,7 +79,6 @@ bool IterDomain::sameAs(const IterDomain* const other) const {
       size()->sameAs(other->size()));
 }
 
-
 bool TensorDomain::sameAs(const TensorDomain* const other) const {
   if (size() != other->size())
     return false;
@@ -102,7 +97,6 @@ TensorDomain* TensorDomain::noReductions() const {
       noReductionDomain.push_back(id);
   return new TensorDomain(noReductionDomain);
 }
-
 
 // i here is int, as we want to accept negative value and ::size_type can be a
 // uint.
@@ -130,7 +124,6 @@ bool Split::sameAs(const Split* const other) const {
       axis() == other->axis() && factor()->sameAs(other->factor()));
 }
 
-
 Merge::Merge(TensorDomain* _out, TensorDomain* _in, int _axis)
     : Expr(ExprType::Merge), out_{_out}, in_{_in}, axis_{_axis} {
   addOutput(_out);
@@ -144,12 +137,14 @@ bool Merge::sameAs(const Merge* const other) const {
       axis() == other->axis());
 }
 
-
 Reorder::Reorder(
     TensorDomain* _out,
     TensorDomain* _in,
     std::vector<int> _pos2axis)
-    : Expr(ExprType::Reorder), out_{_out}, in_{_in}, pos2axis_{std::move(_pos2axis)} {
+    : Expr(ExprType::Reorder),
+      out_{_out},
+      in_{_in},
+      pos2axis_{std::move(_pos2axis)} {
   addOutput(_out);
   addInput(_in);
   this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
@@ -163,4 +158,3 @@ bool Reorder::sameAs(const Reorder* const other) const {
 } // namespace fuser
 } // namespace jit
 } // namespace torch
-

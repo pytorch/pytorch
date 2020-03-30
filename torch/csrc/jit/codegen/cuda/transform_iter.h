@@ -12,7 +12,7 @@ namespace fuser {
 
 /*
  * TransformIter iterates on the split/merge/reorder graph of TensorDomain
- * 
+ *
  * Running backward will execute these Exprs in reverse order. If you record
  * these events (generate_record=true) you can then replay them on another
  * tensor domain.
@@ -26,9 +26,10 @@ struct TORCH_CUDA_API TransformIter : public IterVisitor {
   // dispatch
   void replayBackward(Expr* expr);
 
-  // Iterates td's history starting with td, then origin(td), origin(origin(td)) etc.
-  // Returns root TensorDomain once it iterates through history. If generate_record=true
-  // It will record the history of td in record. Record is order operations root->td.
+  // Iterates td's history starting with td, then origin(td), origin(origin(td))
+  // etc. Returns root TensorDomain once it iterates through history. If
+  // generate_record=true It will record the history of td in record. Record is
+  // order operations root->td.
   TensorDomain* runBackward(TensorDomain* td, bool generate_record);
 
   virtual TensorView* replay(Split* expr, TensorView* tv);
@@ -45,7 +46,6 @@ struct TORCH_CUDA_API TransformIter : public IterVisitor {
   std::vector<Expr*> record;
 
  public:
-
   static TensorDomain* getRoot(TensorDomain* td) {
     TransformIter ti;
     return ti.runBackward(td, false);

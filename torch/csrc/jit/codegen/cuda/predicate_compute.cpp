@@ -45,4 +45,3 @@ std::vector<Int*> PredicateCompute::computePredicates(
 } // namespace fuser
 } // namespace jit
 } // namespace torch
-

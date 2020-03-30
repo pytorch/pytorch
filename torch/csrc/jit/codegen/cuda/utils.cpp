@@ -13,7 +13,7 @@ namespace fuser {
 
 /*
  * Functions for printing ATen IR
-*/
+ */
 
 void printScalar(std::ostream& stream, const Value* const value) {
   if (value->node()->kind() == prim::Constant) {
@@ -53,7 +53,7 @@ void printSizes(std::ostream& stream, const c10::VaryingShape& sizes) {
   stream << "Sizes=(";
   for (size_t i = 0; i < *(sizes.size()); ++i) {
     stream << *(sizes[i]);
-    if (i != *(sizes.size())-1) {
+    if (i != *(sizes.size()) - 1) {
       stream << ", ";
     } else {
       stream << ")";
@@ -62,8 +62,8 @@ void printSizes(std::ostream& stream, const c10::VaryingShape& sizes) {
 }
 
 void printCompleteTensor(
-  std::ostream& stream
-, const std::shared_ptr<c10::TensorType>& tensor) {
+    std::ostream& stream,
+    const std::shared_ptr<c10::TensorType>& tensor) {
   stream << "Complete Tensor: ";
   stream << *(tensor->device()) << " ";
   stream << *(tensor->scalarType()) << " ";
@@ -87,10 +87,11 @@ void printValue(std::ostream& stream, const Value* const value) {
 
 /*
  * Functions for acquiring devices and device types from ATen IR nodes
-*/
+ */
 
 c10::Device getFusionDevice(const Node* const fusion) {
-  const std::shared_ptr<c10::TensorType> out_tensor = fusion->outputs()[0]->type()->expect<TensorType>();
+  const std::shared_ptr<c10::TensorType> out_tensor =
+      fusion->outputs()[0]->type()->expect<TensorType>();
   return *(out_tensor->device());
 }
 
@@ -100,9 +101,10 @@ c10::DeviceType getFusionDeviceType(const Node* const node) {
 
 /*
  * Functions for obtaining parts of complete tensors
-*/
+ */
 
-std::vector<int64_t> extractStrides(const std::shared_ptr<c10::TensorType>& tensor) {
+std::vector<int64_t> extractStrides(
+    const std::shared_ptr<c10::TensorType>& tensor) {
   const c10::VaryingStrides& strides = tensor->strides();
   const auto size = *(strides.size());
   std::vector<int64_t> extracted_strides;
@@ -114,7 +116,8 @@ std::vector<int64_t> extractStrides(const std::shared_ptr<c10::TensorType>& tens
   return extracted_strides;
 }
 
-std::vector<int64_t> extractSizes(const std::shared_ptr<c10::TensorType>& tensor) {
+std::vector<int64_t> extractSizes(
+    const std::shared_ptr<c10::TensorType>& tensor) {
   const c10::VaryingStrides& sizes = tensor->sizes();
   const auto size = *(sizes.size());
   std::vector<int64_t> extracted_sizes;
@@ -140,7 +143,7 @@ size_t getNumel(const std::shared_ptr<c10::TensorType>& tensor) {
 
 /*
  * Functions for working with scalar Values
-*/
+ */
 
 bool isScalar(const Value* const value) {
   return value->type()->isSubtypeOf(NumberType::get());
@@ -163,42 +166,39 @@ c10::optional<int> getInt(const Value* const value) {
 }
 
 float getAsFloat(const Value* const value) {
- if (value->type() == FloatType::get()) {
-   return value->node()->f(attr::value);
- }
- if (value->type() == IntType::get()) {
-   return static_cast<float>(value->node()->i(attr::value));
- }
+  if (value->type() == FloatType::get()) {
+    return value->node()->f(attr::value);
+  }
+  if (value->type() == IntType::get()) {
+    return static_cast<float>(value->node()->i(attr::value));
+  }
 
- TORCH_CHECK(false, "getAsFloat() found unknown scalar type!");
+  TORCH_CHECK(false, "getAsFloat() found unknown scalar type!");
 }
 
 /*
  * Functions for comparing complete tensors
-*/
+ */
 
 bool haveSameDevice(
-  const std::shared_ptr<c10::TensorType>& lhs
-, const std::shared_ptr<c10::TensorType>& rhs
-) {
+    const std::shared_ptr<c10::TensorType>& lhs,
+    const std::shared_ptr<c10::TensorType>& rhs) {
   const auto lhs_device = *(lhs->device());
   const auto rhs_device = *(rhs->device());
   return (lhs_device == rhs_device);
 }
 
 bool haveSameScalarType(
-  const std::shared_ptr<c10::TensorType>& lhs
-, const std::shared_ptr<c10::TensorType>& rhs
-) {
+    const std::shared_ptr<c10::TensorType>& lhs,
+    const std::shared_ptr<c10::TensorType>& rhs) {
   const auto lhs_scalar_type = *(lhs->scalarType());
   const auto rhs_scalar_type = *(rhs->scalarType());
   return (lhs_scalar_type == rhs_scalar_type);
 }
 
 bool haveSameSizes(
-  const std::shared_ptr<c10::TensorType>& lhs
-, const std::shared_ptr<c10::TensorType>& rhs
-) {
+    const std::shared_ptr<c10::TensorType>& lhs,
+    const std::shared_ptr<c10::TensorType>& rhs) {
   const auto& lhs_sizes = lhs->sizes();
   const auto& rhs_sizes = rhs->sizes();
 
@@ -216,9 +216,8 @@ bool haveSameSizes(
 }
 
 bool haveSameStrides(
-  const std::shared_ptr<c10::TensorType>& lhs
-, const std::shared_ptr<c10::TensorType>& rhs
-) {
+    const std::shared_ptr<c10::TensorType>& lhs,
+    const std::shared_ptr<c10::TensorType>& rhs) {
   const auto& lhs_strides = lhs->strides();
   const auto& strides = rhs->strides();
 
@@ -236,14 +235,13 @@ bool haveSameStrides(
 }
 
 bool haveSameShape(
-  const std::shared_ptr<c10::TensorType>& lhs
-, const std::shared_ptr<c10::TensorType>& rhs
-) {
+    const std::shared_ptr<c10::TensorType>& lhs,
+    const std::shared_ptr<c10::TensorType>& rhs) {
   return (
-     haveSameDevice(lhs, rhs)
-  && haveSameScalarType(lhs, rhs)
-  && haveSameSizes(lhs, rhs)
-  && haveSameStrides(lhs, rhs));
+      haveSameDevice(lhs, rhs) && haveSameScalarType(lhs, rhs) &&
+      haveSameSizes(lhs, rhs) && haveSameStrides(lhs, rhs));
 }
 
-}}} // namespace torch::jit::fuser
+} // namespace fuser
+} // namespace jit
+} // namespace torch

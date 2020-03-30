@@ -1,7 +1,7 @@
 #pragma once
 
-#include <c10/util/Exception.h>
 #include <c10/core/ScalarType.h>
+#include <c10/util/Exception.h>
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
@@ -13,7 +13,7 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
-//Order of strength
+// Order of strength
 enum class TORCH_CUDA_API ValType {
   TensorIndex,
   TensorDomain,
@@ -22,38 +22,33 @@ enum class TORCH_CUDA_API ValType {
   Scalar
 };
 
-enum class TORCH_CUDA_API DataType {
-  Float,
-  Int,
-  Null
-};
+enum class TORCH_CUDA_API DataType { Float, Int, Null };
 
 enum class TORCH_CUDA_API ExprType {
-    UnaryOp
-  , BinaryOp
-  , ForLoop
-  , IfThenElse
-  , Split
-  , Merge
-  , Reorder
-// , Swap
-// , Index
+  UnaryOp,
+  BinaryOp,
+  ForLoop,
+  IfThenElse,
+  Split,
+  Merge,
+  Reorder
+  // , Swap
+  // , Index
 };
 
-enum class TORCH_CUDA_API UnaryOpType {
-    Neg
-  , Cast
-};
+enum class TORCH_CUDA_API UnaryOpType { Neg, Cast };
 
 enum class TORCH_CUDA_API BinaryOpType {
-    Add
-  , Sub
-  , Mul
-  , Div
-  //Int operations, leave position oif Mod we depend on its location of first Int op
-  , Mod
-  , LT
-  , CeilDiv
+  Add,
+  Sub,
+  Mul,
+  Div
+  // Int operations, leave position oif Mod we depend on its location of first
+  // Int op
+  ,
+  Mod,
+  LT,
+  CeilDiv
 };
 
 enum class TORCH_CUDA_API ParallelType {
@@ -67,7 +62,6 @@ enum class TORCH_CUDA_API ParallelType {
   Unroll,
   Serial
 };
-
 
 ValType promote_type(const ValType& t1, const ValType& t2);
 DataType promote_type(const DataType& t1, const DataType& t2);

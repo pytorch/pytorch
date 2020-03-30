@@ -3,8 +3,8 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/transform_iter.h>
 #include <torch/csrc/jit/codegen/cuda/tensor.h>
+#include <torch/csrc/jit/codegen/cuda/transform_iter.h>
 
 #include <algorithm>
 #include <vector>
@@ -71,9 +71,8 @@ namespace fuser {
  *
  * SIMPLE REDUCTION EXAMPLE:
  *   T1[I, J, K] = ...
- *   T2[I, R, K] = T1[I, J, K] //.sum(axis = 1), we reduce on R/J to produce T2[I, K]
- * T2.split(axis = 0, factor = ...)
- *   T2[Io, Ii, R, K] = T1[I, J, K]
+ *   T2[I, R, K] = T1[I, J, K] //.sum(axis = 1), we reduce on R/J to produce
+ * T2[I, K] T2.split(axis = 0, factor = ...) T2[Io, Ii, R, K] = T1[I, J, K]
  * T1.compute_at(T2, axis=3)
  *   T2[Io, Ii, R, K] = T1[Io, Ii, J, K]
  *
@@ -90,8 +89,8 @@ namespace fuser {
  *
  *
  * REDUCTION EXAMPLE RESULTING IN AN ERROR:
- *   T1[I, R, K] = ... //R is reduction domain, we reduce on R to produce T1[I, K]
- *   T2[I, K] = T1[I, K]
+ *   T1[I, R, K] = ... //R is reduction domain, we reduce on R to produce T1[I,
+ * K] T2[I, K] = T1[I, K]
  *
  * for(i : I)
  *   for(k : K)
@@ -164,22 +163,20 @@ struct TORCH_CUDA_API TransformReplay : public TransformIter {
   // transform position Full transform position is relative to if we played all
   // transformations if full transform position is not in partial transform
   // position it will return -1
-  //axis_map[fake_pos] = real_pos
+  // axis_map[fake_pos] = real_pos
   std::vector<int> axis_map;
 
  public:
-
   static TensorView* replay(
       TensorView* replay_ref,
       TensorView* replay_target,
       int compute_at_axis);
 
   static TensorView* fullReplay(
-    TensorView* replay_ref,
-    TensorView* replay_target);
+      TensorView* replay_ref,
+      TensorView* replay_target);
 };
 
 } // namespace fuser
 } // namespace jit
 } // namespace torch
-

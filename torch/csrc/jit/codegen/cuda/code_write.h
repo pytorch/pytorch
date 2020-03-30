@@ -87,7 +87,7 @@ struct TORCH_CUDA_API CodeWrite : public IRPrinter {
   TensorView* consumer = nullptr;
 
   // Track the for loops
-  std::vector<std::pair<Int*, IterDomain*> >fors;
+  std::vector<std::pair<Int*, IterDomain*>> fors;
   // Track the indentation size for pretty printing
   int indent_size = 0;
 

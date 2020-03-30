@@ -2,8 +2,8 @@
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
-#include <torch/csrc/jit/codegen/cuda/ir_base_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
+#include <torch/csrc/jit/codegen/cuda/ir_base_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/tensor_meta.h>
 
 /*
@@ -17,7 +17,7 @@ namespace jit {
 namespace fuser {
 
 /*
- * TODO: improve implementation bool IterDomain::sameAs(const IterDomain*) const 
+ * TODO: improve implementation bool IterDomain::sameAs(const IterDomain*) const
  * TODO: Add testing of sameAs functions for these nodes
  */
 
@@ -39,10 +39,16 @@ struct TORCH_CUDA_API UnaryOp : public Expr {
   UnaryOp(UnaryOp&& other) = delete;
   UnaryOp& operator=(UnaryOp&& other) = delete;
 
-  Val* out() const noexcept { return out_; }
-  Val* in() const noexcept { return in_; }
+  Val* out() const noexcept {
+    return out_;
+  }
+  Val* in() const noexcept {
+    return in_;
+  }
 
-  UnaryOpType getUnaryOpType() const noexcept { return unary_op_type_; }
+  UnaryOpType getUnaryOpType() const noexcept {
+    return unary_op_type_;
+  }
 
   bool sameAs(const UnaryOp* const other) const;
 
@@ -68,11 +74,19 @@ struct TORCH_CUDA_API BinaryOp : public Expr {
   BinaryOp(BinaryOp&& other) = delete;
   BinaryOp& operator=(BinaryOp&& other) = delete;
 
-  Val* out() const noexcept { return out_; }
-  Val* lhs() const noexcept { return lhs_; }
-  Val* rhs() const noexcept { return rhs_; }
+  Val* out() const noexcept {
+    return out_;
+  }
+  Val* lhs() const noexcept {
+    return lhs_;
+  }
+  Val* rhs() const noexcept {
+    return rhs_;
+  }
 
-  BinaryOpType getBinaryOpType() const noexcept { return binary_op_type_; }
+  BinaryOpType getBinaryOpType() const noexcept {
+    return binary_op_type_;
+  }
 
   bool sameAs(const BinaryOp* other) const;
 
@@ -105,33 +119,43 @@ struct TORCH_CUDA_API IterDomain : public Val {
 
   bool sameAs(const IterDomain* const other) const;
 
-  bool isReduction() const noexcept { return is_reduction_domain_; }
-  
-  bool isParallelized() const { return parallel_method_ != ParallelType::Serial;}
+  bool isReduction() const noexcept {
+    return is_reduction_domain_;
+  }
+
+  bool isParallelized() const {
+    return parallel_method_ != ParallelType::Serial;
+  }
 
   bool isBlockDim() const {
-    return ( parallel_method_ == ParallelType::BIDz
-          || parallel_method_ == ParallelType::BIDy
-          ||parallel_method_ == ParallelType::BIDx);
+    return (
+        parallel_method_ == ParallelType::BIDz ||
+        parallel_method_ == ParallelType::BIDy ||
+        parallel_method_ == ParallelType::BIDx);
   }
 
   bool isThreadDim() const {
-    return ( parallel_method_ == ParallelType::TIDz
-          || parallel_method_ == ParallelType::TIDy
-          || parallel_method_ == ParallelType::TIDx);
+    return (
+        parallel_method_ == ParallelType::TIDz ||
+        parallel_method_ == ParallelType::TIDy ||
+        parallel_method_ == ParallelType::TIDx);
   }
 
   bool isThread() const {
-    return ( isBlockDim() || isThreadDim() );
+    return (isBlockDim() || isThreadDim());
   }
 
-  void parallelize(ParallelType t){parallel_method_ = t;}
+  void parallelize(ParallelType t) {
+    parallel_method_ = t;
+  }
 
   ParallelType parallel_method() const noexcept {
     return parallel_method_;
   }
 
-  Int* size() const noexcept { return size_; }
+  Int* size() const noexcept {
+    return size_;
+  }
 
   IterDomain(const IterDomain& other) = delete;
   IterDomain& operator=(const IterDomain& other) = delete;
@@ -166,12 +190,12 @@ struct TORCH_CUDA_API TensorDomain : public Val {
 
   TensorDomain* noReductions() const;
 
-  //i here is int, as we want to accept negative value and ::size_type can be a uint.
+  // i here is int, as we want to accept negative value and ::size_type can be a
+  // uint.
   IterDomain* axis(int i) const;
 
  private:
   std::vector<IterDomain*> domain;
-  
 };
 
 /*
@@ -188,26 +212,29 @@ struct TORCH_CUDA_API Split : public Expr {
   Split(Split&& other) = delete;
   Split& operator=(Split&& other) = delete;
 
-  Split(
-      TensorDomain* _out,
-      TensorDomain* _in,
-      int _axis,
-      Int* _factor);
+  Split(TensorDomain* _out, TensorDomain* _in, int _axis, Int* _factor);
 
-  TensorDomain* out() const noexcept { return out_; }
-  TensorDomain* in() const noexcept { return in_; }
+  TensorDomain* out() const noexcept {
+    return out_;
+  }
+  TensorDomain* in() const noexcept {
+    return in_;
+  }
 
-  int axis() const noexcept { return axis_; }
-  Int* factor() const noexcept { return factor_; }
+  int axis() const noexcept {
+    return axis_;
+  }
+  Int* factor() const noexcept {
+    return factor_;
+  }
   bool sameAs(const Split* const other) const;
 
-private:
+ private:
   TensorDomain* const out_;
   TensorDomain* const in_;
   const int axis_;
   Int* const factor_;
 };
-
 
 /*
  * Merge Iterdomain _axis in TensorDomain with the following IterDomain. Both
@@ -225,9 +252,15 @@ struct TORCH_CUDA_API Merge : public Expr {
   Merge(Merge&& other) = delete;
   Merge& operator=(Merge&& other) = delete;
 
-  TensorDomain* out() const noexcept { return out_; }
-  TensorDomain* in() const noexcept { return in_; }
-  int axis() const noexcept { return axis_; }
+  TensorDomain* out() const noexcept {
+    return out_;
+  }
+  TensorDomain* in() const noexcept {
+    return in_;
+  }
+  int axis() const noexcept {
+    return axis_;
+  }
 
   bool sameAs(const Merge* const other) const;
 
@@ -237,17 +270,13 @@ struct TORCH_CUDA_API Merge : public Expr {
   int axis_;
 };
 
-
 /*
  * Reorder the IterDomains of a tensor domain with the map
  * pos2axis[new_position] = old_position
  */
 struct TORCH_CUDA_API Reorder : public Expr {
   ~Reorder() = default;
-  Reorder(
-      TensorDomain* _out,
-      TensorDomain* _in,
-      std::vector<int> _pos2axis);
+  Reorder(TensorDomain* _out, TensorDomain* _in, std::vector<int> _pos2axis);
 
   Reorder(const Reorder& other) = delete;
   Reorder& operator=(const Reorder& other) = delete;
@@ -255,17 +284,24 @@ struct TORCH_CUDA_API Reorder : public Expr {
   Reorder(Reorder&& other) = delete;
   Reorder& operator=(Reorder&& other) = delete;
 
-  TensorDomain* out() const noexcept { return out_; }
-  TensorDomain* in() const noexcept { return in_; }
-  const std::vector<int>& pos2axis() const noexcept { return pos2axis_; }
+  TensorDomain* out() const noexcept {
+    return out_;
+  }
+  TensorDomain* in() const noexcept {
+    return in_;
+  }
+  const std::vector<int>& pos2axis() const noexcept {
+    return pos2axis_;
+  }
 
   bool sameAs(const Reorder* const other) const;
-  
+
  private:
   TensorDomain* const out_;
   TensorDomain* const in_;
   const std::vector<int> pos2axis_;
 };
 
-}}}
-
+} // namespace fuser
+} // namespace jit
+} // namespace torch

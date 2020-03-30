@@ -16,9 +16,9 @@ namespace jit {
 namespace fuser {
 
 /*
- * A Float32 value. For now we don't have any other type besides Float32.reorder_ This
- * value can be a symbolic value (defined after the kernel is compiled) or a
- * constant value (inlined into the kernel definition).
+ * A Float32 value. For now we don't have any other type besides
+ * Float32.reorder_ This value can be a symbolic value (defined after the kernel
+ * is compiled) or a constant value (inlined into the kernel definition).
  */
 struct TORCH_CUDA_API Float : public Val {
   ~Float() = default;
@@ -104,7 +104,7 @@ struct TORCH_CUDA_API TensorView : public Val {
   TensorView(const std::shared_ptr<c10::TensorType>& tensor_type);
 
   TensorView(const std::shared_ptr<Value>& jit_value)
-    : TensorView(jit_value->type()->cast<c10::TensorType>()) {}
+      : TensorView(jit_value->type()->cast<c10::TensorType>()) {}
 
   // Make a new tensor with the given dtype, and the same domain as this tensor
   // (minus reduction IterDomains).
@@ -147,7 +147,6 @@ struct TORCH_CUDA_API TensorView : public Val {
   // Return the TensorView to its original state, before all
   // transformations/computeAt calls.
   void resetView();
-  
 
   // Compute this TensorView relative to another tensor at axis
   TensorView* computeAt(TensorView* consumer, int axis);
@@ -171,7 +170,9 @@ struct TORCH_CUDA_API TensorView : public Val {
   // Implementations for split/merge/reorder
   friend TORCH_CUDA_API TensorView* split_(TensorView*, int axis, int factor);
   friend TORCH_CUDA_API TensorView* merge_(TensorView*, int axis);
-  friend TORCH_CUDA_API TensorView* reorder_(TensorView*, const std::unordered_map<int, int>&);
+  friend TORCH_CUDA_API TensorView* reorder_(
+      TensorView*,
+      const std::unordered_map<int, int>&);
   friend TORCH_CUDA_API TransformReplay;
 
  protected:
@@ -187,7 +188,6 @@ struct TORCH_CUDA_API TensorView : public Val {
   // Make a copy of the domain (used for Tensor based constructor), likely to be
   // removed soon.
   void copyDomain(const TensorDomain* td);
-  
 };
 
 } // namespace fuser

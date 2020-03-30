@@ -4,8 +4,8 @@
 
 #include <torch/csrc/jit/codegen/cuda/dispatch.h>
 
-#include <vector>
 #include <stack>
+#include <vector>
 
 namespace torch {
 namespace jit {
@@ -33,7 +33,7 @@ enum class ValType;
  * found to stop traversal. toVisitCallback is used to maintain a dependency
  * stack.
  */
-struct TORCH_CUDA_API IterVisitor : public OptOutDispatch{
+struct TORCH_CUDA_API IterVisitor : public OptOutDispatch {
   virtual ~IterVisitor() = default;
 
   IterVisitor() = default;
@@ -44,81 +44,87 @@ struct TORCH_CUDA_API IterVisitor : public OptOutDispatch{
   IterVisitor(IterVisitor&& other) = default;
   IterVisitor& operator=(IterVisitor&& other) = default;
 
-  //Functions return nodes in reverse order to be added to the to_visit queue
-  //These functions will start at outputs and propagate op through the DAG
-  //in depth first traversal. Next could be called on nodes multiple times,
-  //however, once handle is called on a node next will not be called.
+  // Functions return nodes in reverse order to be added to the to_visit queue
+  // These functions will start at outputs and propagate op through the DAG
+  // in depth first traversal. Next could be called on nodes multiple times,
+  // however, once handle is called on a node next will not be called.
   std::vector<Statement*> next(Statement* stmt);
   std::vector<Statement*> next(Expr* expr);
   std::vector<Statement*> next(Val* v);
 
-  void handle(Statement* s) { OptOutDispatch::handle(s); }
-  void handle(Expr* e) { OptOutDispatch::handle(e); }
-  void handle(Val* v) { OptOutDispatch::handle(v); }
+  void handle(Statement* s) {
+    OptOutDispatch::handle(s);
+  }
+  void handle(Expr* e) {
+    OptOutDispatch::handle(e);
+  }
+  void handle(Val* v) {
+    OptOutDispatch::handle(v);
+  }
 
+  // Stop condition allows users to stop iteration if a certain condition is met
+  virtual bool stopCondition() {
+    return false;
+  }
 
-  //Stop condition allows users to stop iteration if a certain condition is met
-  virtual bool stopCondition() { return false; }
-
-  //Callback function when a Stmt is added to the "to_visit" queue
+  // Callback function when a Stmt is added to the "to_visit" queue
   virtual void toVisitCallback(Statement* stmt) {}
 
-public:
+ public:
   // This version of traverse collects the points of the graph to start from
   // The "from_outputs_only" argument forces the graph to start from outputs
   // instead of search for Val typed nodes that have no uses.
   // The output type set limits further the set of Val nodes to search by type.
   void traverse(
-      Fusion* const fusion
-    , bool from_outputs_only = false
-    , bool breadth_first = false);
+      Fusion* const fusion,
+      bool from_outputs_only = false,
+      bool breadth_first = false);
 
   // Starts at from, traverses backwards through DAG, calls handle on nodes
   // in depth first topological sorted order.
   void traverseFrom(Fusion* const fusion, const std::vector<Val*>& from);
 };
 
+// Class to check if nodes are in the dependency chain of another node.
+struct TORCH_CUDA_API DependencyCheck : public IterVisitor {
+ private:
+  // Class constructor checking if _dependency is a dependency of _of.
+  DependencyCheck(Val* _dependency, Val* _of)
+      : dependency_{_dependency}, of_{_of}, is_dependency{false} {}
 
-//Class to check if nodes are in the dependency chain of another node.
-struct TORCH_CUDA_API DependencyCheck : public IterVisitor{
-private:
-  
-  //Class constructor checking if _dependency is a dependency of _of.
-  DependencyCheck(Val* _dependency, Val* _of):dependency_{_dependency}, of_{_of}, is_dependency{false}{}
-
-  //when handle is called on val, we know 2 things. Val is a dependency of of.
-  //and dep_chain contains the values in between of and dependency.
+  // when handle is called on val, we know 2 things. Val is a dependency of of.
+  // and dep_chain contains the values in between of and dependency.
   void handle(Val* val);
 
-  //When we handle an expr we pop off its outputs from the dep_chain
+  // When we handle an expr we pop off its outputs from the dep_chain
   void handle(Expr* expr);
 
-  //When we visit an Expr we place its outputs on the dep_chain
+  // When we visit an Expr we place its outputs on the dep_chain
   void toVisitCallback(Statement* stmt);
 
-  //Traverse the dep chain from of, return if dependency was found in it
+  // Traverse the dep chain from of, return if dependency was found in it
   bool check();
 
   Val* const dependency_;
   Val* const of_;
   bool is_dependency;
   std::stack<Val*> dep_chain;
- 
-  //Stop once we've found the dependency
-  bool stopCondition() { return is_dependency; }
 
-public:
+  // Stop once we've found the dependency
+  bool stopCondition() {
+    return is_dependency;
+  }
 
-  //Returns if dependency is a dependency of of.
-  static bool isDependencyOf(Val* dependency, Val* of){
+ public:
+  // Returns if dependency is a dependency of of.
+  static bool isDependencyOf(Val* dependency, Val* of) {
     DependencyCheck dp(dependency, of);
     return dp.check();
   }
 
-  //Return the dependency chain, including dependency and of. If no dependency
-  //was found, returns an empty stack.
+  // Return the dependency chain, including dependency and of. If no dependency
+  // was found, returns an empty stack.
   static std::stack<Val*> getDependencyChain(Val* dependency, Val* of);
-
 };
 
 } // namespace fuser

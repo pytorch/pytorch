@@ -1,9 +1,9 @@
+#include <torch/csrc/jit/codegen/cuda/kernel.h>
 #include <torch/csrc/jit/codegen/cuda/manager.h>
 #include <torch/csrc/jit/codegen/cuda/parser.h>
-#include <torch/csrc/jit/codegen/cuda/kernel.h>
 
-#include <torch/csrc/jit/codegen/cuda/tensor.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
+#include <torch/csrc/jit/codegen/cuda/tensor.h>
 #include <torch/csrc/jit/codegen/cuda/utils.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 
@@ -25,7 +25,7 @@ namespace {
 //
 // This allows CudaKernel reuse across nodes;
 class CudaFusionManager {
-public:
+ public:
   static CudaFusionManager& getManager() {
     static CudaFusionManager cuda_fusion_manager_;
     return cuda_fusion_manager_;
@@ -40,7 +40,7 @@ public:
     std::lock_guard<std::mutex> guard(mutex_);
     // prepare graph for lowering;
     Canonicalize(graph, false);
-    //EraseShapeInformation(graph);
+    // EraseShapeInformation(graph);
     auto repr = graph->toString(false);
 
     // create new graph_cache_ entry;
@@ -66,22 +66,21 @@ public:
       int32_t kernel_id,
       const at::ArrayRef<IValue> inputs,
       std::vector<at::Tensor> outputs) {
-    TORCH_CHECK(kernel_cache_.count(kernel_id) != 0, "kernel id not recognized");
+    TORCH_CHECK(
+        kernel_cache_.count(kernel_id) != 0, "kernel id not recognized");
 
     CudaKernel& cuda_kernel_entry = kernel_cache_[kernel_id];
 
     runKernel(cuda_kernel_entry, inputs, outputs);
   }
 
-private:
-
+ private:
   std::mutex mutex_;
 
   void runCudaKernel(
-    int32_t key,
-    const std::vector<int>& contiguity_tag,
-    const c10::Device) {
-  };
+      int32_t key,
+      const std::vector<int>& contiguity_tag,
+      const c10::Device){};
 
   int32_t getNextUniqueID() {
     return next_unique_id_++;
@@ -93,7 +92,6 @@ private:
   int32_t next_unique_id_ = 0;
 };
 
-
 } // namespace
 
 void compileCudaFusionGroup(Node* fusion_node) {
@@ -103,8 +101,9 @@ void compileCudaFusionGroup(Node* fusion_node) {
   if (fusion_node->hasAttribute(attr::cache_id)) {
     TORCH_WARN("Double registration of CudaFusionGroup on CudaFusionManager");
   }
-  int32_t fusion_cache_id = 
-      CudaFusionManager::getManager().registerOrGetCacheId(fusion_node->g(attr::Subgraph));
+  int32_t fusion_cache_id =
+      CudaFusionManager::getManager().registerOrGetCacheId(
+          fusion_node->g(attr::Subgraph));
   fusion_node->i_(attr::cache_id, fusion_cache_id);
 }
 
@@ -137,14 +136,14 @@ void runCudaFusionGroup(const Node* const fusion_node, Stack& stack) {
     const auto scalar_type = *(type->scalarType());
 
     auto options = at::TensorOptions()
-      .dtype(scalar_type)
-      .layout(at::kStrided)
-      .device(device)
-      .requires_grad(type->requires_grad());
+                       .dtype(scalar_type)
+                       .layout(at::kStrided)
+                       .device(device)
+                       .requires_grad(type->requires_grad());
 
     // TODO: We should infer output shape from `inputs`
     const auto sizes = extractSizes(type);
-    const auto strides= extractStrides(type);
+    const auto strides = extractStrides(type);
 
     auto tensor = at::empty_strided(sizes, strides, options);
     outputs.push_back(tensor);
@@ -153,9 +152,13 @@ void runCudaFusionGroup(const Node* const fusion_node, Stack& stack) {
   CudaFusionManager::getManager().runFusionNode(kernel_id, inputs, outputs);
 
   drop(stack, inputs.size());
-  stack.insert(stack.end(),
+  stack.insert(
+      stack.end(),
       std::make_move_iterator(outputs.begin()),
       std::make_move_iterator(outputs.end()));
 }
 
-}}}} // namespace torch::jit::fuser::cuda
+} // namespace cuda
+} // namespace fuser
+} // namespace jit
+} // namespace torch

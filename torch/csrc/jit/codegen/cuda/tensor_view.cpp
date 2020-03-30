@@ -1,6 +1,6 @@
-#include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
+#include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
 #include <torch/csrc/jit/codegen/cuda/mutator.h>
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
@@ -120,7 +120,9 @@ TensorView* merge_(TensorView* tv, int axis) {
  * Takes axis2pos map, axis2pos[old_pos] = new_pos, to modify the ordering of
  * the iter axes.
  */
-TensorView* reorder_(TensorView* tv, const std::unordered_map<int, int>& axis2pos) {
+TensorView* reorder_(
+    TensorView* tv,
+    const std::unordered_map<int, int>& axis2pos) {
   TensorDomain* td = tv->domain();
   auto ndims = td->size();
   // Map to save from previous order, to new order.
@@ -184,23 +186,22 @@ TensorView* reorder_(TensorView* tv, const std::unordered_map<int, int>& axis2po
   std::vector<IterDomain*> reordered_domain;
   for (int entry : pos2axis)
     reordered_domain.push_back(td->axis(entry));
-  
+
   TensorDomain* reordered_td = new TensorDomain(reordered_domain);
   Reorder* merge_node = new Reorder(reordered_td, td, pos2axis);
   tv->setDomain(reordered_td);
   return tv;
 }
 
-
 TensorView::TensorView(TensorDomain* _domain, DataType dtype)
-    : Val(ValType::TensorView, dtype),
-      domain_(_domain) {}
+    : Val(ValType::TensorView, dtype), domain_(_domain) {}
 
 TensorView::TensorView(const std::shared_ptr<c10::TensorType>& tensor_type)
     : Val(ValType::TensorView, aten_opt_type_map(tensor_type->scalarType())) {
   std::vector<IterDomain*> sizes;
-  TORCH_CHECK(tensor_type->dim().has_value(), "Requires static rank for Tensor");
-  for (int i = 0; i <tensor_type->dim().value(); i++) {
+  TORCH_CHECK(
+      tensor_type->dim().has_value(), "Requires static rank for Tensor");
+  for (int i = 0; i < tensor_type->dim().value(); i++) {
     sizes.push_back(new IterDomain(new Int()));
   }
   domain_ = new TensorDomain(sizes);

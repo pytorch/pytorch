@@ -1,10 +1,10 @@
 #include <torch/csrc/jit/codegen/cuda/parser.h>
 
-#include <torch/csrc/jit/ir/constants.h>
-#include <torch/csrc/jit/frontend/function_schema_parser.h>
 #include <torch/csrc/jit/codegen/cuda/arith.h>
-#include <torch/csrc/jit/codegen/cuda/tensor.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
+#include <torch/csrc/jit/codegen/cuda/tensor.h>
+#include <torch/csrc/jit/frontend/function_schema_parser.h>
+#include <torch/csrc/jit/ir/constants.h>
 
 #include <unordered_map>
 
@@ -22,14 +22,14 @@ namespace {
 typedef Val CgValue;
 typedef Expr CgOp;
 
-typedef void (*ParseFuncPtr)(const Node* const, std::unordered_map<size_t, CgValue*>&);
+typedef void (
+    *ParseFuncPtr)(const Node* const, std::unordered_map<size_t, CgValue*>&);
 
 // TODO: add a mutex to make it thread safe.
 class IrParser {
-public:
+ public:
   IrParser(std::shared_ptr<Graph> graph, Fusion& fusion)
-  : graph_(std::move(graph)),
-    fusion_(&fusion) {
+      : graph_(std::move(graph)), fusion_(&fusion) {
     if (init_registry_) {
       registerJitOperator();
       init_registry_ = false;
@@ -41,8 +41,8 @@ public:
     auto block = graph_->block();
 
     // register all inputs;
-    // shape propagation during parsing is effctively done in parsing rules, as we 
-    // only explicitly register inputs in the graph.
+    // shape propagation during parsing is effctively done in parsing rules, as
+    // we only explicitly register inputs in the graph.
     for (auto val : block->inputs()) {
       TORCH_CHECK(registerValue(val));
       fusion_->addInput(value_maps_[val->unique()]);
@@ -55,32 +55,33 @@ public:
 
     // mark output;
     for (auto jit_output : block->outputs()) {
-      TensorView* out = static_cast<TensorView*>(value_maps_[jit_output->unique()]);
+      TensorView* out =
+          static_cast<TensorView*>(value_maps_[jit_output->unique()]);
       fusion_->addOutput(out);
-      
-      //Merge all dimensions because we're only supporting pointwise
-      while(out->nDims() > 1)
+
+      // Merge all dimensions because we're only supporting pointwise
+      while (out->nDims() > 1)
         out->merge(0);
-      //Split into 128 so we can map blocks/threads
+      // Split into 128 so we can map blocks/threads
       out->split(0, 128);
 
-      //Map blocks/threads
+      // Map blocks/threads
       out->axis(0)->parallelize(ParallelType::BIDx);
       out->axis(-1)->parallelize(ParallelType::TIDx);
-      
     }
 
     for (auto jit_input : block->inputs()) {
-      TensorView* inp = static_cast<TensorView*>(value_maps_[jit_input->unique()]);
+      TensorView* inp =
+          static_cast<TensorView*>(value_maps_[jit_input->unique()]);
       for (auto jit_output : block->outputs()) {
-        TensorView* out = static_cast<TensorView*>(value_maps_[jit_output->unique()]);
-        if(DependencyCheck::isDependencyOf(inp, out)){
+        TensorView* out =
+            static_cast<TensorView*>(value_maps_[jit_output->unique()]);
+        if (DependencyCheck::isDependencyOf(inp, out)) {
           inp->computeAt(out, -1);
           break;
         }
       }
     }
-
   }
 
   static bool canParseNode(const Node* const node) {
@@ -103,16 +104,20 @@ public:
     return false;
   }
 
-  static void registerParseRule(std::shared_ptr<Operator>& op, ParseFuncPtr fn) {
-    jit_operator_registry_[Symbol::fromQualString(op->schema().name())].push_back(std::make_pair(op, fn));
+  static void registerParseRule(
+      std::shared_ptr<Operator>& op,
+      ParseFuncPtr fn) {
+    jit_operator_registry_[Symbol::fromQualString(op->schema().name())]
+        .push_back(std::make_pair(op, fn));
   }
 
-protected:
-
-  static void parseBinaryOpWithAlpha(const Node* const node, std::unordered_map<size_t, CgValue*>& value_maps) {
+ protected:
+  static void parseBinaryOpWithAlpha(
+      const Node* const node,
+      std::unordered_map<size_t, CgValue*>& value_maps) {
     static std::unordered_map<Symbol, BinaryOpType> op_mapping({
-      {aten::add, BinaryOpType::Add},
-      {aten::sub, BinaryOpType::Sub},
+        {aten::add, BinaryOpType::Add},
+        {aten::sub, BinaryOpType::Sub},
     });
     auto lhs = value_maps[node->inputs()[0]->unique()];
     auto rhs = value_maps[node->inputs()[1]->unique()];
@@ -121,10 +126,12 @@ protected:
     value_maps.emplace(node->output()->unique(), out);
   }
 
-  static void parseBinaryOp(const Node* const node, std::unordered_map<size_t, CgValue*>& value_maps) {
+  static void parseBinaryOp(
+      const Node* const node,
+      std::unordered_map<size_t, CgValue*>& value_maps) {
     static std::unordered_map<Symbol, BinaryOpType> op_mapping({
-      {aten::mul, BinaryOpType::Mul},
-      {aten::div, BinaryOpType::Div},
+        {aten::mul, BinaryOpType::Mul},
+        {aten::div, BinaryOpType::Div},
     });
     auto lhs = value_maps[node->inputs()[0]->unique()];
     auto rhs = value_maps[node->inputs()[1]->unique()];
@@ -134,7 +141,6 @@ protected:
   }
 
   static void registerJitOperator() {
-
     // Register parse-function for each JIT operator;
     // This is a one-time look up, our hash registry indexes on the pointer in
     // OperatorRegistry.
@@ -143,8 +149,7 @@ protected:
         "aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
         "aten::add(Tensor self, Scalar other, Scalar alpha) -> Tensor",
         "aten::sub(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
-        "aten::sub(Tensor self, Scalar other, Scalar alpha) -> Tensor"
-    };
+        "aten::sub(Tensor self, Scalar other, Scalar alpha) -> Tensor"};
     for (auto signature : BinaryOpWithAlpha) {
       auto ptr_op = getOperatorForLiteral(signature);
       registerParseRule(ptr_op, &parseBinaryOpWithAlpha);
@@ -154,8 +159,7 @@ protected:
         "aten::div(Tensor self, Tensor other) -> Tensor",
         "aten::div(Tensor self, Scalar other) -> Tensor",
         "aten::mul(Tensor self, Tensor other) -> Tensor",
-        "aten::mul(Tensor self, Scalar other) -> Tensor"
-    };
+        "aten::mul(Tensor self, Scalar other) -> Tensor"};
     for (auto signature : BinaryOp) {
       auto ptr_op = getOperatorForLiteral(signature);
       registerParseRule(ptr_op, &parseBinaryOp);
@@ -203,7 +207,8 @@ protected:
       }
       value_maps_.emplace(val->unique(), cg_val);
       return true;
-    } else if (val->type()->isSubtypeOf(static_cast<c10::TypePtr>(IntType::get()))) {
+    } else if (val->type()->isSubtypeOf(
+                   static_cast<c10::TypePtr>(IntType::get()))) {
       CgValue* cg_val;
       if (auto ival = constant_as<int>(val)) {
         cg_val = new Float(ival.value());
@@ -234,11 +239,17 @@ protected:
   // maps from JitValue::unique() to fusion Val;
   std::unordered_map<size_t, CgValue*> value_maps_;
   // parsing rule registry.
-  static std::unordered_map<Symbol, std::vector<std::pair<std::shared_ptr<Operator>, ParseFuncPtr>>> jit_operator_registry_;
+  static std::unordered_map<
+      Symbol,
+      std::vector<std::pair<std::shared_ptr<Operator>, ParseFuncPtr>>>
+      jit_operator_registry_;
   static bool init_registry_;
 };
 
-std::unordered_map<Symbol, std::vector<std::pair<std::shared_ptr<Operator>, ParseFuncPtr>>> IrParser::jit_operator_registry_;
+std::unordered_map<
+    Symbol,
+    std::vector<std::pair<std::shared_ptr<Operator>, ParseFuncPtr>>>
+    IrParser::jit_operator_registry_;
 bool IrParser::init_registry_ = true;
 
 } // namespace
@@ -252,4 +263,7 @@ void parseJitIR(std::shared_ptr<Graph>& graph, Fusion& fusion) {
   parser.parse();
 }
 
-}}}} // namespace torch::jit::fuser::cuda
+} // namespace cuda
+} // namespace fuser
+} // namespace jit
+} // namespace torch

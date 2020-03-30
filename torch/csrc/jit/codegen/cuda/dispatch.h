@@ -30,15 +30,15 @@
  *
  * OptOutMutator:
  *
- * This class is similar to OptOutDispatch except the functions provided are of type:
- * virtual Statement* mutate(Statement*)
- * this is useful for when we want to have an IR node result from our overloaded functions.
+ * This class is similar to OptOutDispatch except the functions provided are of
+ * type: virtual Statement* mutate(Statement*) this is useful for when we want
+ * to have an IR node result from our overloaded functions.
  *
  * OptInMutator:
  *
- * This class is similar to OptInDispatch except the functions provided are of type:
- * virtual Statement* mutate(Statement*)
- * this is useful for when we want to have an IR node result from our overloaded functions.
+ * This class is similar to OptInDispatch except the functions provided are of
+ * type: virtual Statement* mutate(Statement*) this is useful for when we want
+ * to have an IR node result from our overloaded functions.
  */
 
 namespace torch {
@@ -284,4 +284,3 @@ struct TORCH_CUDA_API OptInMutator {
 } // namespace fuser
 } // namespace jit
 } // namespace torch
-

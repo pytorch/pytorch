@@ -92,18 +92,21 @@ void IRPrinter::handle(const Int* const i) {
     os << *(i->value());
   }
 }
-namespace{
+namespace {
 // Make sure we can inline something, before we attempt to.
 void check_inlineable(const IRInputOutput* const irio) {
   for (auto inp : irio->inputs())
-    TORCH_CHECK(inp->getValType().value() == ValType::Scalar,
-    "Printing inline computations involving values other than scalars is not currently supported.");
-  TORCH_CHECK(irio->nOutputs() == 1,
-    "Cannot print inline computations if there's more than one output.");
-  TORCH_CHECK(irio->output(0)->getValType().value() == ValType::Scalar,
-    "Printing inline computations involving values other than scalars is not currently supported.");
+    TORCH_CHECK(
+        inp->getValType().value() == ValType::Scalar,
+        "Printing inline computations involving values other than scalars is not currently supported.");
+  TORCH_CHECK(
+      irio->nOutputs() == 1,
+      "Cannot print inline computations if there's more than one output.");
+  TORCH_CHECK(
+      irio->output(0)->getValType().value() == ValType::Scalar,
+      "Printing inline computations involving values other than scalars is not currently supported.");
 }
-}
+} // namespace
 
 void IRPrinter::handle(const UnaryOp* const uop) {
   if (print_inline_)
@@ -113,15 +116,15 @@ void IRPrinter::handle(const UnaryOp* const uop) {
     os << uop->out() << " = ";
   if (auto inline_uop = inline_op_str(uop->getUnaryOpType())) {
     os << inline_uop.value();
-    handle( uop->in() );
+    handle(uop->in());
   } else {
     os << uop->getUnaryOpType() << "(";
-    handle( uop->in() ); 
+    handle(uop->in());
     os << ")";
   }
-  
-  if(!print_inline_)
-    os<<"\n";
+
+  if (!print_inline_)
+    os << "\n";
 }
 
 void IRPrinter::handle(const BinaryOp* const bop) {
@@ -131,59 +134,58 @@ void IRPrinter::handle(const BinaryOp* const bop) {
   if (!print_inline_)
     os << bop->out() << " = ";
   if (auto inline_bop = inline_op_str(bop->getBinaryOpType())) {
-    handle( bop->lhs() );
+    handle(bop->lhs());
     os << " " << inline_bop.value() << " ";
-    handle( bop->rhs() );
+    handle(bop->rhs());
   } else {
     os << bop->getBinaryOpType() << "(";
-    handle( bop->lhs() );
-    os  << ", ";
-    handle( bop->rhs() );
+    handle(bop->lhs());
+    os << ", ";
+    handle(bop->rhs());
     os << ")";
   }
-  
-  if(!print_inline_)
-    os<<"\n";
+
+  if (!print_inline_)
+    os << "\n";
 }
 
 void IRPrinter::handle(const Split* const s) {
   os << "Split: ";
-  handle( s->in() );
-  os << " axis " << s->axis() << " by factor "
-     << s->factor() << " -> ";
-  handle( s->out() );
-  os<< "\n";
+  handle(s->in());
+  os << " axis " << s->axis() << " by factor " << s->factor() << " -> ";
+  handle(s->out());
+  os << "\n";
 }
 
 void IRPrinter::handle(const Merge* const m) {
   os << "Merge: " << m->in() << " axis " << m->axis()
      << " with the following -> ";
-  handle( m->out() );
+  handle(m->out());
   os << "\n";
 }
 
 void IRPrinter::handle(const Reorder* const ro) {
   os << "Reorder: ";
-  handle( ro->in() );
+  handle(ro->in());
   os << " -> ";
-  handle( ro->out() );
+  handle(ro->out());
   os << "\n";
 }
 
-std::ostream& operator<< (std::ostream& os, const Statement* const stmt){
+std::ostream& operator<<(std::ostream& os, const Statement* const stmt) {
   IRPrinter p(os);
   p.handle(stmt);
   return os;
 }
 
-std::ostream& operator<< (std::ostream& os, Fusion* f){
+std::ostream& operator<<(std::ostream& os, Fusion* f) {
   IRPrinter p(os);
   FusionGuard guard(f);
   p.handle(f);
   return os;
 }
 
-std::ostream& operator<< (std::ostream& os, Fusion& f){
+std::ostream& operator<<(std::ostream& os, Fusion& f) {
   return os << &f;
 }
 

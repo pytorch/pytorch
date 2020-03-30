@@ -1,6 +1,6 @@
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
-#include <torch/csrc/jit/codegen/cuda/mutator.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/mutator.h>
 
 #include <vector>
 
@@ -26,14 +26,13 @@ void OptOutMutator::mutate(Fusion* fusion) {
     mutate(stmt);
 }
 
-
 /*
  * TODO: All of the mutator functions below need to be reviewed and tested.
  */
 
 Statement* OptOutMutator::mutate(IterDomain* id) {
-   Int* s = static_cast< Int*>(mutate(id->size()));
-  if(!s->sameAs(id->size()))
+  Int* s = static_cast<Int*>(mutate(id->size()));
+  if (!s->sameAs(id->size()))
     return new IterDomain(s, id->parallel_method(), id->isReduction());
   return id;
 }
@@ -54,11 +53,11 @@ Statement* OptOutMutator::mutate(TensorDomain* td) {
 }
 
 Statement* OptOutMutator::mutate(TensorView* tv) {
-   TensorDomain* td = static_cast< TensorDomain*>( mutate(tv->domain()));
+  TensorDomain* td = static_cast<TensorDomain*>(mutate(tv->domain()));
 
-  if(!( tv->domain()->sameAs(td)))
-      return new TensorView(td, tv->getDataType().value());
- return tv;
+  if (!(tv->domain()->sameAs(td)))
+    return new TensorView(td, tv->getDataType().value());
+  return tv;
 }
 
 Statement* OptOutMutator::mutate(Float* n) {
@@ -69,39 +68,29 @@ Statement* OptOutMutator::mutate(Int* n) {
 }
 
 Statement* OptOutMutator::mutate(Split* s) {
-   TensorDomain* o = static_cast< TensorDomain*>(mutate(s->out()));
-   TensorDomain* i = static_cast< TensorDomain*>(mutate(s->in()));
-   Int* fact = static_cast< Int*>(mutate(s->factor()));
+  TensorDomain* o = static_cast<TensorDomain*>(mutate(s->out()));
+  TensorDomain* i = static_cast<TensorDomain*>(mutate(s->in()));
+  Int* fact = static_cast<Int*>(mutate(s->factor()));
 
-  if(!(
-       o->sameAs(s->out())
-    && i->sameAs(s->in())
-    && fact->sameAs(s->factor())
-  ))
+  if (!(o->sameAs(s->out()) && i->sameAs(s->in()) && fact->sameAs(s->factor())))
     return new Split(o, i, s->axis(), fact);
   return s;
 }
 
 Statement* OptOutMutator::mutate(Merge* m) {
-   TensorDomain* o = static_cast< TensorDomain*>(mutate(m->out()));
-   TensorDomain* i = static_cast< TensorDomain*>(mutate(m->in()));
+  TensorDomain* o = static_cast<TensorDomain*>(mutate(m->out()));
+  TensorDomain* i = static_cast<TensorDomain*>(mutate(m->in()));
 
-  if(!(
-       o->sameAs(m->out())
-    && i->sameAs(m->in())
-  ))
+  if (!(o->sameAs(m->out()) && i->sameAs(m->in())))
     return new Merge(o, i, m->axis());
   return m;
 }
 
 Statement* OptOutMutator::mutate(Reorder* ro) {
-   TensorDomain* o = static_cast< TensorDomain*>(mutate(ro->out()));
-   TensorDomain* i = static_cast< TensorDomain*>(mutate(ro->in()));
+  TensorDomain* o = static_cast<TensorDomain*>(mutate(ro->out()));
+  TensorDomain* i = static_cast<TensorDomain*>(mutate(ro->in()));
 
-  if(!(
-       o->sameAs(ro->out())
-    && i->sameAs(ro->in())
-  ))
+  if (!(o->sameAs(ro->out()) && i->sameAs(ro->in())))
     return new Reorder(o, i, ro->pos2axis());
   return ro;
 }
@@ -134,34 +123,31 @@ Statement* OptInMutator::mutate(Val* v) {
   return Val::mutatorDispatch(this, v);
 }
 
- Statement* ReplaceAll::mutate( Val*  val){
-  if(val->sameAs(instance_))
+Statement* ReplaceAll::mutate(Val* val) {
+  if (val->sameAs(instance_))
     return with_;
   return val;
 }
 
-void ReplaceAll::instancesOf( Val*  instance,  Val*  with){
+void ReplaceAll::instancesOf(Val* instance, Val* with) {
+  std::set<Expr*> exprs_containing_val;
 
-  std::set< Expr*> exprs_containing_val;
-
-  Fusion *fusion = FusionGuard::getCurFusion();
-   Expr* orig = fusion->origin(instance);
-  if(orig != nullptr)
+  Fusion* fusion = FusionGuard::getCurFusion();
+  Expr* orig = fusion->origin(instance);
+  if (orig != nullptr)
     exprs_containing_val.emplace(orig);
 
-   std::set< Expr*> exprs = fusion->uses(instance);
-  for( Expr* expr : exprs)
+  std::set<Expr*> exprs = fusion->uses(instance);
+  for (Expr* expr : exprs)
     exprs_containing_val.emplace(expr);
 
   ReplaceAll ra(instance, with);
 
-  for( Expr* expr : exprs_containing_val)
+  for (Expr* expr : exprs_containing_val)
     ra.mutate(expr);
 
   fusion->removeVal(instance);
-
 }
-
 
 } // namespace fuser
 } // namespace jit

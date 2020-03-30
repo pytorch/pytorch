@@ -11,16 +11,18 @@ namespace fuser {
  */
 void TransformReplay::replayBackward(Split* expr) {
   int axis = expr->axis();
-  TORCH_INTERNAL_ASSERT(axis+1 < influence.size(),
-  "Error during replay backwards, influence is not sized correctly.");
+  TORCH_INTERNAL_ASSERT(
+      axis + 1 < influence.size(),
+      "Error during replay backwards, influence is not sized correctly.");
   influence[axis] = influence[axis] | influence[axis + 1];
   influence.erase(influence.begin() + axis + 1);
 }
 
 void TransformReplay::replayBackward(Merge* expr) {
   int axis = expr->axis();
-  TORCH_INTERNAL_ASSERT(axis < influence.size(),
-  "Error during replay backwards, influence is not sized correctly.");
+  TORCH_INTERNAL_ASSERT(
+      axis < influence.size(),
+      "Error during replay backwards, influence is not sized correctly.");
   influence.insert(influence.begin() + axis + 1, influence[axis]);
 }
 
@@ -32,8 +34,9 @@ void TransformReplay::replayBackward(Reorder* expr) {
   for (decltype(pos2axis.size()) i = 0; i < pos2axis.size(); i++) {
     int new_pos = i;
     int old_pos = pos2axis[i];
-    TORCH_INTERNAL_ASSERT(new_pos < influence.size() && old_pos < reorder_influence.size(),
-      "Error during replay backwards, influence is not sized correctly.");
+    TORCH_INTERNAL_ASSERT(
+        new_pos < influence.size() && old_pos < reorder_influence.size(),
+        "Error during replay backwards, influence is not sized correctly.");
     reorder_influence[old_pos] = influence[new_pos];
   }
 
@@ -224,8 +227,7 @@ TensorView* TransformReplay::runReplay(
     compute_at_axis += int(replay_ref->nDims()) + 1;
 
   TORCH_CHECK(
-      compute_at_axis >= 0 &&
-          compute_at_axis < int(replay_ref->nDims()) + 1,
+      compute_at_axis >= 0 && compute_at_axis < int(replay_ref->nDims()) + 1,
       "Transform replay cannot be performed as the compute_at_axis is not in the valid range.");
 
   this->compute_at_axis = compute_at_axis;
@@ -273,7 +275,8 @@ TensorView* TransformReplay::runReplay(
   //   TORCH_CHECK(
   //       ref_root->axis(i)->size()->same_as(
   //           target_root->axis(axis_map[i])->size()),
-  //       "Transforms cannot be replayed as source and destinations do not have the same root sizes.");
+  //       "Transforms cannot be replayed as source and destinations do not have
+  //       the same root sizes.");
   // }
 
   /* STEP 3 */
@@ -316,4 +319,3 @@ TensorView* TransformReplay::fullReplay(
 } // namespace fuser
 } // namespace jit
 } // namespace torch
-

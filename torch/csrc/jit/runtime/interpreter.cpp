@@ -246,17 +246,17 @@ struct CanEmitInline {
   }
   bool canInline(Value* v) {
     return v->node()->kind() != prim::Param &&
-           // without this a BailOut may float downstream past some later
-           // BailOut
-           // and receive a higher jf_index. Then a GUARD instruction
-           // we generated for the floated BailOut will get popped up from the
-           // instruction stack
-           // by the later BailOut in createBailoutBlock and its jf_index
-           // will become invalid.
-           v->node()->kind() != prim::CudaFusionGroup &&
-           v->node()->kind() != prim::FusionGroup &&
-           v->node()->kind() != prim::BailOut && v->uses().size() == 1 &&
-           v->node()->outputs().size() == 1;
+        // without this a BailOut may float downstream past some later
+        // BailOut
+        // and receive a higher jf_index. Then a GUARD instruction
+        // we generated for the floated BailOut will get popped up from the
+        // instruction stack
+        // by the later BailOut in createBailoutBlock and its jf_index
+        // will become invalid.
+        v->node()->kind() != prim::CudaFusionGroup &&
+        v->node()->kind() != prim::FusionGroup &&
+        v->node()->kind() != prim::BailOut && v->uses().size() == 1 &&
+        v->node()->outputs().size() == 1;
   }
 
   Node* previousNonConstant(Node* n) {

@@ -144,14 +144,14 @@ struct TORCH_CUDA_API Val : public Statement {
   Val(Val&& other) = delete;
   Val& operator=(Val&& other) = delete;
 
-  c10::optional<ValType> getValType() const noexcept override{
+  c10::optional<ValType> getValType() const noexcept override {
     return vtype_;
   }
 
   // Throws if no DataType is found. Vals must have a DataType
   c10::optional<DataType> getDataType() const override;
 
-  bool isScalar(){
+  bool isScalar() {
     return vtype_ == ValType::Scalar;
   }
 

@@ -33,7 +33,7 @@ void CodeWrite::printIndexInto(
   if (inpOrOut) {
     bool first_index = true;
     for (decltype(indices.size()) i{0}; i < indices.size(); i++) {
-      if(!first_index)
+      if (!first_index)
         os << " + ";
       first_index = false;
       print_inline(indices[i]);
@@ -48,8 +48,7 @@ void CodeWrite::printIndexInto(
     // assuming we've printed something
     bool first_index = true;
 
-    for (size_t i{size_t(tv->getComputeAtAxis())};
-         i < fors.size(); i++) {
+    for (size_t i{size_t(tv->getComputeAtAxis())}; i < fors.size(); i++) {
       if (fors[i].second->isThread())
         continue;
 
@@ -274,7 +273,7 @@ void CodeWrite::bind(IterDomain* id, Val* iterator) {
 
 // Push Back a new for loop scope based on the IterDomain
 void CodeWrite::openFor(IterDomain* id) {
-  fors.push_back({ new Int(), id });
+  fors.push_back({new Int(), id});
 
   if (id->parallel_method() != ParallelType::Serial) {
     bind(id, fors.back().first);
@@ -393,10 +392,9 @@ void CodeWrite::setupOverrides() {
   // and map the size used for the root domain to T.size[...]
   for (Val* val : used_vals) {
     if (val->getValType().value() == ValType::TensorView) {
-      if(!(
-        FusionGuard::getCurFusion()->hasInput(val)
-      ||FusionGuard::getCurFusion()->hasOutput(val)
-      )) continue;
+      if (!(FusionGuard::getCurFusion()->hasInput(val) ||
+            FusionGuard::getCurFusion()->hasOutput(val)))
+        continue;
 
       TensorView* tv = static_cast<TensorView*>(val);
       TensorDomain* td = tv->domain();
@@ -414,7 +412,8 @@ void CodeWrite::setupOverrides() {
 }
 
 // Print the header for the kernel, the inputs/outputs
-// TODO: Push this out to another class so we don't need dispatch implemented here
+// TODO: Push this out to another class so we don't need dispatch implemented
+// here
 void CodeWrite::header() {
   os << "__global__ void " << kernel_name_ << "(";
 
@@ -477,7 +476,7 @@ void CodeWrite::traverse(Fusion* fusion) {
   producer = false;
   consumer = nullptr;
 
-  fors = std::vector<std::pair<Int*, IterDomain*> >();
+  fors = std::vector<std::pair<Int*, IterDomain*>>();
   indent_size = 0;
   active_view = nullptr;
   active_view_axis = 0;
