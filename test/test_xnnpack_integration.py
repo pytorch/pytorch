@@ -366,29 +366,30 @@ class TestXNNPACKSerDes(TestCase):
                      " Please build with USE_XNNPACK=1.")
 class TestXNNPACKRewritePass(TestCase):
     def test_linear(self):
-        def validate_transformed_module(module_name, pattern_count_map, data_shape, prepack_removal=False):
-            scripted_model = torch.jit.script(module_name())
+        def validate_transformed_module(module_instance, pattern_count_map, data_shape, prepack_removal=False, fuse_relu=False):
+            scripted_model = torch.jit.script(module_instance)
             scripted_model.eval()
             input_data = torch.rand(data_shape)
             ref_result = scripted_model(input_data)
             torch._C._jit_pass_insert_prepacked_ops(scripted_model._c)
             if (prepack_removal):
                 scripted_model._c = torch._C._freeze_module(scripted_model._c)
+                if fuse_relu:
+                    torch._C._jit_pass_fuse_relu_w_prepacked_linear_conv(scripted_model._c)
                 torch._C._jit_pass_fold_prepacking_ops(scripted_model._c)
 
             buffer = io.BytesIO()
             torch.jit.save(scripted_model, buffer)
             buffer.seek(0)
             deserialized_scripted_model = torch.jit.load(buffer)
-            file_check = FileCheck()
+            #print(deserialized_scripted_model.graph)
             for pattern, v in pattern_count_map.items():
                 if (v == 0):
-                    file_check.check(pattern)
+                    FileCheck().check(pattern).run(deserialized_scripted_model.graph)
                 elif (v == -1):
-                    file_check.check_not(pattern)
+                    FileCheck().check_not(pattern).run(deserialized_scripted_model.graph)
                 else:
-                    file_check.check_count(pattern, v, exactly=True)
-            file_check.run(deserialized_scripted_model.graph)
+                    FileCheck().check_count(pattern, v, exactly=True).run(deserialized_scripted_model.graph)
             xnnpack_result = deserialized_scripted_model(input_data)
             torch.testing.assert_allclose(ref_result, xnnpack_result, rtol=1e-2, atol=1e-3)
 
@@ -417,8 +418,8 @@ class TestXNNPACKRewritePass(TestCase):
         pattern_count_map = {"Tensor = prim::CallFunction": -1,
                              "prepacked::linear_clamp_prepack": 1,
                              "prepacked::linear_clamp_run": 1}
-        validate_transformed_module(Linear, pattern_count_map, data_shape)
-        validate_transformed_module(LinearNoBias, pattern_count_map, data_shape)
+        validate_transformed_module(Linear(), pattern_count_map, data_shape)
+        validate_transformed_module(LinearNoBias(), pattern_count_map, data_shape)
 
         # Conv params
         batch_size = 2
@@ -458,7 +459,7 @@ class TestXNNPACKRewritePass(TestCase):
         pattern_count_map = {"Tensor = aten::conv2d": -1,
                              "prepacked::conv2d_clamp_prepack": 1,
                              "prepacked::conv2d_clamp_run": 1}
-        validate_transformed_module(Conv2D, pattern_count_map, data_shape)
+        validate_transformed_module(Conv2D(), pattern_count_map, data_shape)
 
         input_data = torch.rand((batch_size, input_channels, height, width))
         conv_weight = torch.rand((output_channels, input_channels_per_group, kernel_h, kernel_w))
@@ -469,7 +470,7 @@ class TestXNNPACKRewritePass(TestCase):
         linear_weight_shape = (weight_output_dim, linear_input_shape)
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self, inplace=False):
                 super(M, self).__init__()
                 self.conv_weight = torch.nn.Parameter(torch.Tensor(torch.rand(conv_weight_shape)))
                 self.conv_bias = torch.nn.Parameter(torch.Tensor(torch.rand((conv_bias_shape))))
@@ -479,24 +480,52 @@ class TestXNNPACKRewritePass(TestCase):
                 self.paddings = paddings
                 self.dilations = dilations
                 self.groups = groups
+                self.activation_fn = F.relu
+                if (inplace):
+                    self.activation_fn = F.relu_
 
             def forward(self, x):
                 o = F.conv2d(x, self.conv_weight, self.conv_bias,
                              self.strides, self.paddings, self.dilations, self.groups)
+                o = self.activation_fn(o)
                 o = o.permute([0, 2, 3, 1])
                 o = F.linear(o, self.linear_weight, self.linear_bias)
-                return F.relu(o)
+                return self.activation_fn(o)
 
         pattern_count_map = {"Tensor = aten::conv2d": -1,
                              "prepacked::conv2d_clamp_prepack": 1,
                              "prepacked::conv2d_clamp_run": 1,
-                             "Tensor = prim::CallFunction": -1,
                              "prepacked::linear_clamp_prepack": 1,
                              "prepacked::linear_clamp_run": 1}
-        validate_transformed_module(M, pattern_count_map, data_shape)
+        validate_transformed_module(M(), pattern_count_map, data_shape)
+        pattern_count_map["prepacked::conv2d_clamp_prepack"] = -1
+        pattern_count_map["Tensor = prim::CallFunction"] = -1
+        pattern_count_map["prepacked::linear_clamp_prepack"] = -1
+        validate_transformed_module(M(), pattern_count_map, data_shape, True)
+
+        # Not inplace relu fusion test.
+        pattern_count_map = {"aten::relu": 2,
+                             "prepacked::conv2d_clamp_prepack": -1,
+                             "prepacked::conv2d_clamp_run": 1,
+                             "prepacked::linear_clamp_prepack": -1,
+                             "prepacked::linear_clamp_run": 1}
+        validate_transformed_module(M(), pattern_count_map, data_shape, True)
         pattern_count_map["prepacked::conv2d_clamp_prepack"] = -1
         pattern_count_map["prepacked::linear_clamp_prepack"] = -1
-        validate_transformed_module(M, pattern_count_map, data_shape, True)
+        pattern_count_map["aten::relu"] = -1
+        validate_transformed_module(M(), pattern_count_map, data_shape, True, True)
+
+        # Inplace relu fusion test.
+        pattern_count_map = {"aten::relu": 2,
+                             "prepacked::conv2d_clamp_prepack": -1,
+                             "prepacked::conv2d_clamp_run": 1,
+                             "prepacked::linear_clamp_prepack": -1,
+                             "prepacked::linear_clamp_run": 1}
+        validate_transformed_module(M(True), pattern_count_map, data_shape, True)
+        pattern_count_map["prepacked::conv2d_clamp_prepack"] = -1
+        pattern_count_map["prepacked::linear_clamp_prepack"] = -1
+        pattern_count_map["aten::relu"] = -1
+        validate_transformed_module(M(True), pattern_count_map, data_shape, True, True)
 
 
 if __name__ == "__main__":
