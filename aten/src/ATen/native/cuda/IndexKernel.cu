@@ -98,24 +98,43 @@ static void index_put_kernel(TensorIterator& iter, IntArrayRef index_size, IntAr
 }
 
 template<typename scalar_t, typename mask_t>
-void masked_select_out_cuda_kernel(
+__global__ void masked_select_out_cuda_kernel(
   scalar_t* result_ptr,
   scalar_t* self_ptr,
   mask_t* mask_ptr,
   int64_t* mask_inclusive_scan_ptr,
   int64_t num_input_elements
 ) {
-  legacy::launch_kernel<launch_size_nd, launch_bound2>(
-    num_input_elements,
-    [=]__device__(int64_t input_idx) {
-      mask_t mask = mask_ptr[input_idx];
+  mask_t mask[thread_work_size];
+  int64_t base_index = block_work_size * blockIdx.x;
+  int remaining = std::min<int64_t>(num_input_elements - base_index, block_work_size);
 
-      if (mask) {
-        int64_t result_idx = mask_inclusive_scan_ptr[input_idx]-1;
-        result_ptr[result_idx] = self_ptr[input_idx];
-      }
+  // load data into registers
+  int thread_idx = threadIdx.x;
+  #pragma unroll
+  for(int i = 0; i < thread_work_size; i++) {
+    if (thread_idx >= remaining) {
+      break;
     }
-  );
+    int64_t input_idx = thread_idx + base_index;
+    mask[i] = mask_ptr[input_idx];
+    thread_idx += num_threads;
+  }
+
+  // compute and store
+  thread_idx = threadIdx.x;
+  #pragma unroll
+  for(int i = 0; i < thread_work_size; i++) {
+    if (thread_idx >= remaining) {
+      break;
+    }
+    if (mask[i]) {
+      int64_t input_idx = thread_idx + base_index;
+      int64_t result_idx = mask_inclusive_scan_ptr[input_idx] - 1;
+      result_ptr[result_idx] = self_ptr[input_idx];
+    }
+    thread_idx += num_threads;
+  }
 }
 
 static Tensor & masked_select_out_cuda_impl(Tensor & result, const Tensor & self, const Tensor & mask) {
@@ -173,9 +192,10 @@ static Tensor & masked_select_out_cuda_impl(Tensor & result, const Tensor & self
       scalar_t* result_ptr = result.data_ptr<scalar_t>();
       scalar_t* self_ptr = _self.data_ptr<scalar_t>();
       int64_t* mask_inclusive_scan_ptr = mask_inclusive_scan.data_ptr<int64_t>();
-
+      auto stream = at::cuda::getCurrentCUDAStream();
+      int64_t grid = (_self.numel() + block_work_size - 1) / block_work_size;
       if (_mask.dtype() == ScalarType::Bool) {
-        masked_select_out_cuda_kernel<scalar_t, bool>(
+        masked_select_out_cuda_kernel<scalar_t, bool> <<<grid, num_threads, 0, stream>>>(
           result_ptr,
           self_ptr,
           _mask.data_ptr<bool>(),
@@ -183,7 +203,7 @@ static Tensor & masked_select_out_cuda_impl(Tensor & result, const Tensor & self
           num_input_elements
         );
       } else {
-        masked_select_out_cuda_kernel<scalar_t, uint8_t>(
+        masked_select_out_cuda_kernel<scalar_t, uint8_t> <<<grid, num_threads, 0, stream>>>(
           result_ptr,
           self_ptr,
           _mask.data_ptr<uint8_t>(),
