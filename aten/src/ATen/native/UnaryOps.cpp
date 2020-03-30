@@ -73,11 +73,15 @@ Tensor& abs_(Tensor& self) { return unary_op_impl_(self, at::abs_out); }
 Tensor& angle_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, angle_stub); }
 Tensor angle(const Tensor& self) { return unary_op_impl(self, at::angle_out); }
 
-Tensor& real_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, real_stub); }
-Tensor real(const Tensor& self) { return unary_op_impl(self, at::real_out); }
+Tensor real(const Tensor& self) {
+  TORCH_CHECK(!self.is_complex(), "Real is not yet implemented for complex tensors.");
+  return self;
+}
 
-Tensor& imag_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, imag_stub); }
-Tensor imag(const Tensor& self) { return unary_op_impl(self, at::imag_out); }
+Tensor imag(const Tensor& self) {
+  TORCH_CHECK(!self.is_complex(), "Imag is not yet implemented for complex tensors.");
+  return at::zeros_like(self);
+}
 
 Tensor& conj_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, conj_stub); }
 Tensor conj(const Tensor& self) { return unary_op_impl(self, at::conj_out); }
