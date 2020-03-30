@@ -95,7 +95,7 @@ Tensor& histc_out(Tensor& hist, const Tensor &self, int64_t nbins, Scalar minval
     TORCH_CHECK(!(std::isinf(minval) || std::isinf(maxval) || std::isnan(minval) || std::isnan(maxval)), "range of [", minval, ", ", maxval, "] is not finite");
     TORCH_CHECK(minval < maxval, "max must be larger than min");
 
-    h_data = hist.data_ptr<scalar_t>();
+    h_data = hist.data_ptr<int>();
     tensor_data = tensor.data_ptr<scalar_t>();
 
     at::parallel_for(0, tensor.numel(), 1, [&](int64_t i_begin, int64_t i_end) {
@@ -112,7 +112,7 @@ Tensor& histc_out(Tensor& hist, const Tensor &self, int64_t nbins, Scalar minval
 }
 
 Tensor histc(const Tensor& self, int64_t nbins, Scalar minvalue, Scalar maxvalue) {
-  Tensor hist = at::empty({0}, self.options());
+  Tensor hist = at::empty({0}, self.options().dtype(kInt));
   at::histc_out(hist, self, nbins, minvalue, maxvalue);
   return hist;
 }
