@@ -1,16 +1,16 @@
+#include <torch/csrc/jit/serialization/import.h>
 #include <ATen/core/functional.h>
 #include <c10/util/Exception.h>
-#include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/serialization/import_export_helpers.h>
 #ifndef C10_MOBILE
 #include <torch/csrc/jit/serialization/import_legacy.h>
 #endif
-#include <torch/csrc/jit/serialization/import_source.h>
-#include <torch/csrc/jit/ir/ir.h>
-#include <torch/csrc/jit/serialization/pickle.h>
-#include <torch/csrc/jit/serialization/unpickler.h>
 #include <torch/csrc/jit/frontend/script_type_parser.h>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/serialization/import_source.h>
+#include <torch/csrc/jit/serialization/pickle.h>
 #include <torch/csrc/jit/serialization/source_range_serialization.h>
+#include <torch/csrc/jit/serialization/unpickler.h>
 
 #include "caffe2/serialize/file_adapter.h"
 #include "caffe2/serialize/inline_container.h"
@@ -96,7 +96,6 @@ IValue readArchiveAndTensors(
 }
 
 namespace {
-
 
 // This is a deserializer class which loads script modules from pt files.
 // Content of the file is written using PyTorchStreamWriter, for details please
@@ -247,8 +246,7 @@ Module load(
     std::istream& in,
     c10::optional<at::Device> device,
     ExtraFilesMap& extra_files) {
-  std::unique_ptr<IStreamAdapter> rai =
-      std::make_unique<IStreamAdapter>(&in);
+  std::unique_ptr<IStreamAdapter> rai = std::make_unique<IStreamAdapter>(&in);
   auto module = load(std::move(rai), device, extra_files);
   return module;
 }
