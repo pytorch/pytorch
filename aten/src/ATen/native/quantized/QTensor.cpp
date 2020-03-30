@@ -5,6 +5,7 @@
 #include <ATen/native/quantized/cpu/quant_utils.h>
 #include <ATen/quantized/QTensorImpl.h>
 #include <ATen/quantized/Quantizer.h>
+#include <ATen/core/op_registration/op_registration.h>
 
 namespace at {
 namespace native {
@@ -158,7 +159,7 @@ Tensor make_per_channel_quantized_tensor_cpu(
   return dst;
 }
 
-Tensor& set_storage_quantized_cpu_(
+Tensor& set_storage_quantized_(
     Tensor& self,
     Storage storage,
     int64_t storage_offset,
@@ -170,6 +171,12 @@ Tensor& set_storage_quantized_cpu_(
   self_->set_sizes_and_strides(sizes, strides);
   return self;
 }
+
+static auto registry_set_storage_ = torch::RegisterOperators()
+  .op(torch::RegisterOperators::options()
+    .schema("aten::set_.source_Storage_storage_offset(Tensor(a!) self, Storage source, int storage_offset, int[] size, int[] stride=[]) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<decltype(set_storage_quantized_), &set_storage_quantized_>(DispatchKey::QuantizedCPUTensorId))
+  ;
 
 QScheme qscheme_quant(const Tensor& self) {
   auto quantizer = get_qtensorimpl(self)->quantizer();

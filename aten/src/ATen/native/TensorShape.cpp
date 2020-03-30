@@ -17,6 +17,7 @@
 #include <ATen/native/cpu/CatKernel.h>
 #include <ATen/native/Copy.h>
 #include <ATen/MemoryOverlap.h>
+#include <ATen/core/op_registration/op_registration.h>
 
 namespace at {
 namespace native {
@@ -42,6 +43,18 @@ Tensor& set_(Tensor& result, Storage source) {
   return result.set_(source, 0, static_cast<int64_t>(source.size()), {});
 }
 
+static auto registry_set_ = torch::RegisterOperators()
+  .op(torch::RegisterOperators::options()
+    .schema("aten::set_.source_Storage(Tensor(a!) self, Storage source) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<Tensor&(Tensor&, Storage), &set_>(DispatchKey::CPUTensorId))
+  ;
+
+static auto registry_set_cuda_ = torch::RegisterOperators()
+  .op(torch::RegisterOperators::options()
+    .schema("aten::set_.source_Storage(Tensor(a!) self, Storage source) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<Tensor&(Tensor&, Storage), &set_>(DispatchKey::CUDATensorId))
+  ;
+
 // unify with cuda implementation?  This is not done to avoid a dispatch in resize_impl_cpu_
 Tensor& set_storage_cpu_(Tensor& result, Storage storage, int64_t storage_offset, IntArrayRef size, IntArrayRef stride) { //Note-to-self all CPU set_ use this one
   checkSetStorage(result, storage, storage_offset, size, stride);
@@ -53,6 +66,12 @@ Tensor& set_storage_cpu_(Tensor& result, Storage storage, int64_t storage_offset
   return result;
 }
 
+static auto registry_set_storage_ = torch::RegisterOperators()
+  .op(torch::RegisterOperators::options()
+    .schema("aten::set_.source_Storage_storage_offset(Tensor(a!) self, Storage source, int storage_offset, int[] size, int[] stride=[]) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<decltype(set_storage_cpu_), &set_storage_cpu_>(DispatchKey::CPUTensorId))
+  ;
+
 Tensor& set_tensor_(Tensor& result, const Tensor& source) {
   if (result.unsafeGetTensorImpl() != source.unsafeGetTensorImpl()) {
     return result.set_(source.storage(), source.storage_offset(), source.sizes(), source.strides());
@@ -60,13 +79,31 @@ Tensor& set_tensor_(Tensor& result, const Tensor& source) {
   return result;
 }
 
+static auto registry_set_tensor_cpu = torch::RegisterOperators()
+  .op(torch::RegisterOperators::options()
+    .schema("aten::set_.source_Tensor(Tensor(a!) self, Tensor source) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<decltype(set_tensor_), &set_tensor_>(DispatchKey::CPUTensorId))
+  ;
+
+static auto registry_set_tensor_cuda = torch::RegisterOperators()
+  .op(torch::RegisterOperators::options()
+    .schema("aten::set_.source_Tensor(Tensor(a!) self, Tensor source) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<decltype(set_tensor_), &set_tensor_>(DispatchKey::CUDATensorId))
+  ;
+
 // this needs to be split along CPU/CUDA lines because we don't have a consistent
 // way of getting the allocator to use for a device (c10::GetAllocator is not
 // the same as at::cuda::getCUDADeviceAllocator().
-Tensor& set_cpu_(Tensor& result) {
+Tensor& set_empty_(Tensor& result) {
   Storage storage(result.dtype(), 0, c10::GetAllocator(kCPU), true);
   return result.set_(storage, 0, {0}, {});
 }
+
+static auto registry_set_cpu_ = torch::RegisterOperators()
+  .op(torch::RegisterOperators::options()
+    .schema("set_(Tensor(a!) self) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<decltype(set_empty_), &set_empty_>(DispatchKey::CPUTensorId))
+  ;
 
 std::vector<Tensor> broadcast_tensors(TensorList tensors) {
   return expand_outplace(tensors);

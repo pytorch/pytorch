@@ -343,6 +343,129 @@ Tensor & detach_(Tensor & self) {
   return self;
 }
 
+Tensor & set__source_Storage(Tensor & self, Storage source) {
+  RECORD_FUNCTION("set_", std::vector<c10::IValue>({self}), Node::peek_at_next_sequence_nr());
+  auto& self_ = unpack(self, "self", 0);
+  check_inplace(self);
+  std::shared_ptr<NotImplemented> grad_fn;
+  if (compute_requires_grad( self )) {
+    grad_fn = std::shared_ptr<NotImplemented>(new NotImplemented("set_"), deleteNode);
+    grad_fn->set_next_edges(collect_next_edges( self ));
+  }
+  {
+    at::AutoNonVariableTypeMode non_var_type_mode(true);
+    self_.set_(source);
+  }
+  increment_version(self);
+  if (grad_fn) {
+      rebase_history(flatten_tensor_args( self ), grad_fn);
+  }
+  return self;
+}
+Tensor & set__source_Storage_storage_offset(Tensor & self, Storage source, int64_t storage_offset, IntArrayRef size, IntArrayRef stride) {
+  RECORD_FUNCTION("set_", std::vector<c10::IValue>({self}), Node::peek_at_next_sequence_nr());
+  auto& self_ = unpack(self, "self", 0);
+  check_inplace(self);
+  std::shared_ptr<NotImplemented> grad_fn;
+  if (compute_requires_grad( self )) {
+    grad_fn = std::shared_ptr<NotImplemented>(new NotImplemented("set_"), deleteNode);
+    grad_fn->set_next_edges(collect_next_edges( self ));
+  }
+  {
+    at::AutoNonVariableTypeMode non_var_type_mode(true);
+    self_.set_(source, storage_offset, size, stride);
+  }
+  increment_version(self);
+  if (grad_fn) {
+      rebase_history(flatten_tensor_args( self ), grad_fn);
+  }
+  return self;
+}
+Tensor & set__source_Tensor(Tensor & self, const Tensor & source) {
+  RECORD_FUNCTION("set_", std::vector<c10::IValue>({self, source}), Node::peek_at_next_sequence_nr());
+  auto& self_ = unpack(self, "self", 0);
+  auto& source_ = unpack(source, "source", 1);
+  check_inplace(self);
+  std::shared_ptr<NotImplemented> grad_fn;
+  if (compute_requires_grad( self, source )) {
+    grad_fn = std::shared_ptr<NotImplemented>(new NotImplemented("set_"), deleteNode);
+    grad_fn->set_next_edges(collect_next_edges( self, source ));
+  }
+  torch::jit::Node* node = nullptr;
+  std::shared_ptr<jit::tracer::TracingState> tracer_state;
+  if (jit::tracer::isTracing()) {
+    tracer_state = jit::tracer::getTracingState();
+    at::Symbol op_name;
+    
+    if (tracer_state->force_outplace) {
+      op_name = jit::Symbol::fromQualString("aten::set");
+    } else {
+      op_name = jit::Symbol::fromQualString("aten::set_");
+    }
+    node = tracer_state->graph->create(op_name, /*num_outputs=*/0);
+    jit::tracer::recordSourceLocation(node);
+    jit::tracer::addInputs(node, "self", self);
+    jit::tracer::addInputs(node, "source", source);
+    tracer_state->graph->insertNode(node);
+    jit::tracer::ensureUniqueIfOutOfPlaced("set_", self);
+    jit::tracer::setTracingState(nullptr);
+  }
+  {
+    at::AutoNonVariableTypeMode non_var_type_mode(true);
+    self_.set_(source_);
+  }
+  increment_version(self);
+  if (grad_fn) {
+      rebase_history(flatten_tensor_args( self ), grad_fn);
+  }
+  if (tracer_state) {
+    jit::tracer::setTracingState(std::move(tracer_state));
+    jit::tracer::addOutput(node, self);
+  }
+  return self;
+}
+Tensor & set_(Tensor & self) {
+  RECORD_FUNCTION("set_", std::vector<c10::IValue>({self}), Node::peek_at_next_sequence_nr());
+  auto& self_ = unpack(self, "self", 0);
+  check_inplace(self);
+  std::shared_ptr<NotImplemented> grad_fn;
+  if (compute_requires_grad( self )) {
+    grad_fn = std::shared_ptr<NotImplemented>(new NotImplemented("set_"), deleteNode);
+    grad_fn->set_next_edges(collect_next_edges( self ));
+  }
+  torch::jit::Node* node = nullptr;
+  std::shared_ptr<jit::tracer::TracingState> tracer_state;
+  if (jit::tracer::isTracing()) {
+    tracer_state = jit::tracer::getTracingState();
+    at::Symbol op_name;
+    
+    if (tracer_state->force_outplace) {
+      op_name = jit::Symbol::fromQualString("aten::set");
+    } else {
+      op_name = jit::Symbol::fromQualString("aten::set_");
+    }
+    node = tracer_state->graph->create(op_name, /*num_outputs=*/0);
+    jit::tracer::recordSourceLocation(node);
+    jit::tracer::addInputs(node, "self", self);
+    tracer_state->graph->insertNode(node);
+    jit::tracer::ensureUniqueIfOutOfPlaced("set_", self);
+    jit::tracer::setTracingState(nullptr);
+  }
+  {
+    at::AutoNonVariableTypeMode non_var_type_mode(true);
+    self_.set_();
+  }
+  increment_version(self);
+  if (grad_fn) {
+      rebase_history(flatten_tensor_args( self ), grad_fn);
+  }
+  if (tracer_state) {
+    jit::tracer::setTracingState(std::move(tracer_state));
+    jit::tracer::addOutput(node, self);
+  }
+  return self;
+}
+
 // Some ops in the following registration list are registered as catch-all kernels,
 // some as catch-all kernels and additionally as backend kernels for VariableTensorId.
 // The reason for this is that ops that also use dispatch (e.g. register CPU/CUDA/QuantizedCPU
@@ -406,6 +529,18 @@ static auto registry = torch::RegisterOperators()
   .op(torch::RegisterOperators::options()
     .schema("aten::retain_grad(Tensor(a!) self) -> ()")
     .catchAllKernel<decltype(VariableType::retain_grad), &VariableType::retain_grad>())
+  .op(torch::RegisterOperators::options()
+    .schema("aten::set_.source_Storage(Tensor(a!) self, Storage source) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<decltype(set__source_Storage), &set__source_Storage>(DispatchKey::VariableTensorId))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::set_.source_Storage_storage_offset(Tensor(a!) self, Storage source, int storage_offset, int[] size, int[] stride=[]) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<decltype(set__source_Storage_storage_offset), &set__source_Storage_storage_offset>(DispatchKey::VariableTensorId))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::set_.source_Tensor(Tensor(a!) self, Tensor source) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<decltype(set__source_Tensor), &set__source_Tensor>(DispatchKey::VariableTensorId))
+  .op(torch::RegisterOperators::options()
+    .schema("set_(Tensor(a!) self) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<decltype(set_), &set_>(DispatchKey::VariableTensorId))
   ;
 
 }  // namespace
