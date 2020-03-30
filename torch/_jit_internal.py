@@ -190,7 +190,17 @@ def createResolutionCallbackForClassMethods(cls):
     for fn in fns:
         captures.update(get_closure(fn))
 
-    return lambda key: captures.get(key, None)
+    class closure_lookup(object):
+        # This is a class since `closure` is a dict and it's easier in
+        # `env_helper` if everything just works with `getattr` calls
+        def __getattr__(self, key):
+            if key in captures:
+                return captures[key]
+            elif hasattr(builtins, key):
+                return getattr(builtins, key)
+            return None
+
+    return createResolutionCallbackFromEnv(closure_lookup())
 
 
 def boolean_dispatch(arg_name, arg_index, default, if_true, if_false, module_name, func_name):
