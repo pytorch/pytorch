@@ -1540,7 +1540,8 @@ struct CAFFE2_API ClassType : public NamedType {
       const auto& lhs_name = name().value();
       const auto& rhs_name = user_rhs->name().value();
 
-      return lhs_name == rhs_name;
+      return lhs_name == rhs_name &&
+          this->compilation_unit() == user_rhs->compilation_unit();
     }
     return false;
   }
@@ -1850,7 +1851,8 @@ struct CAFFE2_API InterfaceType : public NamedType {
 
   bool operator==(const Type& rhs) const override {
     if (auto user_rhs = rhs.cast<InterfaceType>()) {
-      return name() == user_rhs->name();
+      return isSubTypeImpl(*this, *user_rhs, nullptr) &&
+          isSubTypeImpl(*user_rhs, *this, nullptr);
     }
     return false;
   }
@@ -1876,6 +1878,10 @@ struct CAFFE2_API InterfaceType : public NamedType {
   ~InterfaceType() override;
  private:
   InterfaceType(QualifiedName name, bool is_module);
+  static bool isSubTypeImpl(
+      const InterfaceType& lhs,
+      const InterfaceType& rhs,
+      std::ostream* why_not);
 
   std::string python_str_impl(TypePrinter printer = nullptr) const override {
     return name()->qualifiedName();
