@@ -29,6 +29,7 @@
 #include <c10/core/thread_pool.h>
 #include <c10/util/SmallVector.h>
 #include <c10/util/math_compat.h>
+#include <c10/util/string_utils.h>
 
 #include <algorithm>
 #include <bitset>
@@ -489,15 +490,14 @@ RegisterOperators reg(
          "aten::Float.str(str a) -> float",
          [](Stack& stack) {
            auto s = pop(stack).toString();
-           if (s->string() == "inf")
-             push(stack, std::numeric_limits<double>::infinity());
-           else if (s->string() == "-inf")
-             push(stack, -std::numeric_limits<double>::infinity());
-           else
-             AT_ERROR(
-                 "Only 'inf' or '-inf' can be cast to a float, but got '",
-                 s->string(),
-                 "'");
+           std::string::size_type sz;
+           double b = c10::stod(s->string(), &sz);
+           if (sz == s->string().size()) {
+             push(stack, b);
+           } else {
+             throw std::runtime_error(
+                 "float() only accepts a string of single float number");
+           }
            return 0;
          },
          aliasAnalysisFromSchema()),
@@ -597,15 +597,6 @@ RegisterOperators reg(
            at::Tensor a;
            pop(stack, a);
            push(stack, a.requires_grad());
-           return 0;
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
-         "prim::shape(Tensor a) -> int[]",
-         [](Stack& stack) {
-           at::Tensor a;
-           pop(stack, a);
-           push(stack, a.sizes());
            return 0;
          },
          aliasAnalysisFromSchema()),

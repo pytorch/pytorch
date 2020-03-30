@@ -75,7 +75,7 @@ void ProcessGroupAgent::collectNames() {
   pg_->allgather(outputNames, inputName)->wait();
 
   // convert collected name tensors into string names
-  for (int i = 0; i < worldSize; ++i) {
+  for (worker_id_t i = 0; i < worldSize; ++i) {
     torch::Tensor& tensor = outputNames[0][i];
     std::string peerName((const char*)tensor.storage().data<signed char>());
 
@@ -95,7 +95,7 @@ ProcessGroupAgent::ProcessGroupAgent(
     int numSendRecvThreads,
     std::chrono::milliseconds rpcTimeout)
     : RpcAgent(
-          WorkerInfo(std::move(workerName), pg->getRank()),
+          WorkerInfo(std::move(workerName), (int64_t)pg->getRank()),
           std::make_unique<RequestCallbackImpl>(),
           rpcTimeout),
       pg_(std::move(pg)),
@@ -129,13 +129,14 @@ ProcessGroupAgent::ProcessGroupAgent(
       pg_->getRank());
 
   // tmp vector to sort names in rank's order
-  std::vector<std::string> tmpWorkerIds(pg_->getSize());
+  const auto worldSize = pg_->getSize();
+  std::vector<std::string> tmpWorkerIds(worldSize);
   for (auto& entry : nameMap_) {
     tmpWorkerIds[entry.second] = entry.first;
   }
 
-  allWorkerInfo_.reserve(pg_->getSize());
-  for (int rank = 0; rank < (int)tmpWorkerIds.size(); ++rank) {
+  allWorkerInfo_.reserve(worldSize);
+  for (worker_id_t rank = 0; rank < worldSize; ++rank) {
     allWorkerInfo_.emplace_back(std::move(tmpWorkerIds[rank]), rank);
   }
 }
@@ -678,14 +679,14 @@ void ProcessGroupAgent::listenLoop() {
       listenLoopException_ = std::current_exception();
     }
   } catch (...) {
+    std::string unknownErrorMsg =
+        "Unknown exception occured in "
+        "ProcessGroupAgent::listenLoop. RPC Agent is in an unhealthy state and "
+        "unusable.";
+    LOG(ERROR) << unknownErrorMsg;
     {
       // Lock write to listenLoopException_ since ::send() reads from it.
       std::lock_guard<std::mutex> guard(listenLoopExceptionMutex_);
-      std::string unknownErrorMsg =
-          "Unknown exception occured in "
-          "ProcessGroupAgent::listenLoop. RPC Agent is in an unhealthy state and "
-          "unusable.";
-      LOG(ERROR) << unknownErrorMsg;
       listenLoopException_ =
           std::make_exception_ptr(std::runtime_error(unknownErrorMsg));
     }
