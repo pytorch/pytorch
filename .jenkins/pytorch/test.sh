@@ -220,11 +220,11 @@ test_custom_script_ops() {
 test_torch_function_benchmark() {
   echo "Testing __torch_function__ benchmarks"
   pushd benchmarks/overrides_benchmark
-  python bench.py -n 1 -m 1
-  python python pyspybench.py Tensor -n 1
-  python python pyspybench.py SubTensor -n 1
-  python python pyspybench.py WithTorchFunction -n 1
-  python python pyspybench.py SubWithTorchFunction -n 1
+  python bench.py -n 1 -m 2
+  python pyspybench.py Tensor -n 1
+  python pyspybench.py SubTensor -n 1
+  python pyspybench.py WithTorchFunction -n 1
+  python pyspybench.py SubWithTorchFunction -n 1
   popd
   assert_git_not_dirty
 }
