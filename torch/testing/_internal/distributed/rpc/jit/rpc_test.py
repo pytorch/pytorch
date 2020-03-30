@@ -5,6 +5,7 @@ import torch
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
 from torch import Tensor
+from torch.distributed.rpc import RRef
 from torch.testing._internal.common_utils import TemporaryFileName
 from torch.testing._internal.dist_utils import dist_init, initialize_pg, worker_name
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
@@ -17,8 +18,7 @@ def rpc_return_rref(dst):
 
 
 @torch.jit.script
-def rref_local_value(rref):
-    # type: (RRef[Tensor]) -> Tensor
+def rref_local_value(rref: RRef[Tensor]) -> Tensor:
     return rref.local_value()
 
 

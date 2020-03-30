@@ -6,6 +6,7 @@ import numbers
 import sys
 import threading
 from datetime import timedelta
+from typing import Generic, TypeVar
 
 import torch
 import torch.distributed as dist
@@ -25,6 +26,7 @@ from . import (
     _invoke_rpc_torchscript,
     _is_current_rpc_agent_set,
     _reset_current_rpc_agent,
+    _RRefImpl,
     _set_and_start_rpc_agent,
     _set_rpc_timeout,
     backend_registry,
@@ -337,6 +339,14 @@ def _validate_rpc_args(backend, store, name, rank, world_size, rpc_backend_optio
                     arg, arg_type, type(arg)
                 )
             )
+
+
+T = TypeVar("T")
+
+
+class RRef(_RRefImpl, Generic[T]):
+    # Combine the implementation class and the type class.
+    pass
 
 
 @_require_initialized

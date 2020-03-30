@@ -3,16 +3,22 @@ import ast
 import inspect
 import re
 import torch
+import torch.distributed.rpc
 from .._jit_internal import List, BroadcastingList1, BroadcastingList2, \
     BroadcastingList3, Tuple, is_tuple, is_list, Dict, is_dict, Optional, \
-    is_optional, _qualified_name, Any, RRef, is_rref, Future, is_future
+    is_optional, _qualified_name, Any, Future, is_future
 from torch._C import TensorType, TupleType, FloatType, IntType, \
     ListType, StringType, DictType, BoolType, OptionalType, ClassType, InterfaceType, AnyType, NoneType, \
-    DeviceObjType, RRefType, FutureType
+    DeviceObjType, FutureType
 
 from textwrap import dedent
 from torch._six import builtins, PY2
 from torch._utils_internal import get_source_lines_and_file
+
+
+if torch.distributed.rpc.is_available():
+    from .._jit_internal import RRef, is_rref
+    from torch._C import RRefType
 
 
 PY35 = sys.version_info >= (3, 5)
@@ -30,18 +36,24 @@ class Module(object):
             raise RuntimeError("Module {} has no member called {}".format(self.name, name))
 
 
+_ENV = {
+    'torch': Module('torch', {'Tensor': torch.Tensor}),
+    'Tensor': torch.Tensor,
+    'typing': Module('typing', {'Tuple': Tuple}),
+    'Tuple': Tuple,
+    'List': List,
+    'Dict': Dict,
+    'Optional': Optional,
+    'Future': Future,
+}
+
+
+if torch.distributed.rpc.is_available():
+    _ENV['RRef'] = RRef
+
+
 class EvalEnv(object):
-    env = {
-        'torch': Module('torch', {'Tensor': torch.Tensor}),
-        'Tensor': torch.Tensor,
-        'typing': Module('typing', {'Tuple': Tuple}),
-        'Tuple': Tuple,
-        'List': List,
-        'Dict': Dict,
-        'Optional': Optional,
-        'RRef': RRef,
-        'Future': Future,
-    }
+    env = _ENV
 
     def __init__(self, rcb):
         self.rcb = rcb
