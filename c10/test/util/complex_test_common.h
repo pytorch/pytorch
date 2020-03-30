@@ -126,7 +126,7 @@ namespace assignment {
 
 template<typename scalar_t>
 constexpr c10::complex<scalar_t> one() {
-  c10::complex<scalar_t> result;
+  c10::complex<scalar_t> result(3, 4);
   result = scalar_t(1);
   return result;
 }

@@ -136,6 +136,7 @@ struct alignas(sizeof(T) * 2) complex_common {
 
   constexpr complex<T> &operator =(T re) {
     storage[0] = re;
+    storage[1] = 0;
     return static_cast<complex<T> &>(*this);
   }
 
