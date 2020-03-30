@@ -32,23 +32,23 @@ class TestBundledInputs(TestCase):
             # Tensor with small numel and small storage.
             (torch.tensor([1]),),
             # Tensor with large numel and small storage.
-            (torch.tensor([[2, 3, 4]]).expand(1<<16, -1)[:,::2],),
+            (torch.tensor([[2, 3, 4]]).expand(1 << 16, -1)[:, ::2],),
             # Tensor with small numel and large storage.
-            (torch.tensor(range(1<<16))[-8:],),
+            (torch.tensor(range(1 << 16))[-8:],),
             # Large zero tensor.
-            (torch.zeros(1<<16),),
+            (torch.zeros(1 << 16),),
             # Special encoding of random tensor.
-            (torch.utils.bundled_inputs.bundle_randn(1<<16),),
+            (torch.utils.bundled_inputs.bundle_randn(1 << 16),),
         ]
         torch.utils.bundled_inputs.augment_model_with_bundled_inputs(
             sm, samples, get_expr)
-        #print(get_expr[0])
-        #print(sm._generate_bundled_inputs.code)
+        # print(get_expr[0])
+        # print(sm._generate_bundled_inputs.code)
 
         # Make sure the model only grew a little bit,
         # despite having nominally large bundled inputs.
         augmented_size = model_size(sm)
-        self.assertLess(augmented_size, original_size + (1<<12))
+        self.assertLess(augmented_size, original_size + (1 << 12))
 
         loaded = save_and_load(sm)
         inflated = loaded.get_all_bundled_inputs()
@@ -67,7 +67,7 @@ class TestBundledInputs(TestCase):
 
         # This tensor is random, but with 100,000 trials,
         # mean and std had ranges of (-0.0154, 0.0144) and (0.9907, 1.0105).
-        self.assertEqual(inflated[4][0].shape, (1<<16,))
+        self.assertEqual(inflated[4][0].shape, (1 << 16,))
         self.assertAlmostEqual(inflated[4][0].mean().item(), 0, delta=0.025)
         self.assertAlmostEqual(inflated[4][0].std().item(), 1, delta=0.02)
 
@@ -77,7 +77,7 @@ class TestBundledInputs(TestCase):
             def forward(self, arg):
                 return arg
         sm = torch.jit.script(SingleTensorModel())
-        sample = torch.randn(1<<16)
+        sample = torch.randn(1 << 16)
         # We can store tensors with custom inflation functions regardless
         # of size, even if inflation is just the identity.
         sample._bundled_input_inflate_format = "{}"
@@ -103,18 +103,18 @@ class TestBundledInputs(TestCase):
                     sm, [(sample,)])
 
         # Plain old big tensor.
-        check_tensor(torch.randn(1<<16))
+        check_tensor(torch.randn(1 << 16))
         # This tensor has two elements, but they're far apart in memory.
         # We currently cannot represent this compactly while preserving
         # the strides.
-        small_sparse = torch.randn(2, 1<<16)[:,0:1]
+        small_sparse = torch.randn(2, 1 << 16)[:, 0:1]
         self.assertEqual(small_sparse.numel(), 2)
         check_tensor(small_sparse)
 
 
     def test_non_tensors(self):
         class StringAndIntModel(torch.nn.Module):
-            def forward(self, fmt: str, num:int):
+            def forward(self, fmt: str, num: int):
                 return fmt.format(num)
 
         sm = torch.jit.script(StringAndIntModel())
