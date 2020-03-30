@@ -5,6 +5,8 @@
 namespace torch {
 namespace jit {
 
+
+void PreInlineCalls(Block* block);
 void PreInlineONNX(Graph& graph);
 
 }

@@ -21,24 +21,7 @@ using namespace ::c10::onnx;
 }
 
 
-std::vector<Value*> preinlineCallTo(Node* to_replace, Function* callee) {
-  WithInsertPoint guard(to_replace);
-  TORCH_INTERNAL_ASSERT(callee->isGraphFunction());
-  std::unordered_map<Value*, Value*> value_map;
-
-  std::cout << "iiiiiiiiiincoming " << callee->optimized_graph()->inputs().size() << "\n";
-
-  auto new_outputs = insertGraph(
-      *to_replace->owningGraph(),
-      *(callee->optimized_graph()),
-      to_replace->inputs());
-
-	std::cout << "siiiiiiiiiize " << to_replace->input()->node()->kind().toQualString();
-  return new_outputs;
-}
-
-
-void preinlineCalls(Block* block) {
+void PreInlineCalls(Block* block) {
   for (auto it = block->nodes().begin(), end = block->nodes().end();
        it != end;) {
     Node* cur = *it++;
@@ -48,71 +31,21 @@ void preinlineCalls(Block* block) {
         auto function_constant = cur->input(0)->node();
         auto fun_type =
             function_constant->output()->type()->expect<FunctionType>();
-        cur->removeInput(0);
-
-        std::cout<<"func name ============= " << fun_type->function()->name() << "\n";
 
 				if (fun_type->function()->name() == "interpolate") {
+          cur->removeInput(0);
+//          cur->input(0)->node()->destroy();
 			    Node* interpolate_node =  block->owningGraph()->create(Symbol::fromQualString("aten::__interpolate"), {cur->inputs()}, cur->outputs().size());
 		      interpolate_node->output()->copyMetadata(cur->output());
 		      interpolate_node->insertAfter(cur);
 		      cur->replaceAllUsesWith(interpolate_node);
-//		      cur->input(0)->node()->destroy();
 		      cur->removeAllInputs();
 		      cur->destroy();
+          return;
 	      }
-
-        GRAPH_UPDATE(
-            "Inlining function '", fun_type->function()->name(), "' to ", *cur);
-        GRAPH_UPDATE(
-            "Function body: ", *fun_type->function()->optimized_graph());
-
-//        preinlineCalls(fun_type->function()->optimized_graph()->block());
-
-//        preinlineCallTo(cur, fun_type->function());
-
-        auto to_replace = cur;
-        auto callee = fun_type->function();
-        WithInsertPoint guard(to_replace);
-			  TORCH_INTERNAL_ASSERT(callee->isGraphFunction());
-			  std::unordered_map<Value*, Value*> value_map;
-
-			  std::cout << "iiiiiiiiiincoming " << callee->optimized_graph()->toString() << "\n";
-
-				int i = 0;
-		    for (const auto& node : callee->optimized_graph()->nodes()) {
-		      if (i == 0){
-            std::cout<<"staaaaaaaaaaaaaaaaaaaaaart ^666666666666666666&&&&&&&&& " << i << "\n";
-            Node* cur = node;
-		        AT_ASSERT(cur->kind() == prim::Constant);
-		        auto fun_type =
-		            cur->output()->type()->expect<FunctionType>();
-//						cur->removeInput(0);
-
-	          std::cout<<"func name ============= " << fun_type->function()->name() << "\n";
-
-						if (fun_type->function()->name() == "interpolate") {
-					    Node* interpolate_node =  block->owningGraph()->create(Symbol::fromQualString("aten::__interpolate"), {cur->inputs()}, cur->outputs().size());
-				      interpolate_node->output()->copyMetadata(cur->output());
-				      interpolate_node->insertAfter(cur);
-				      cur->replaceAllUsesWith(interpolate_node);
-		//		      cur->input(0)->node()->destroy();
-				      cur->removeAllInputs();
-				      cur->destroy();
-			      }
-		      }
-		      i+=1;
-		    }
-//
-//				preinlineCalls(callee->optimized_graph()->block());
-//			  auto new_outputs = insertGraph(
-//			      *to_replace->owningGraph(),
-//			      *(callee->optimized_graph()),
-//			      to_replace->inputs());
-//
-//				std::cout << "siiiiiiiiiize " << to_replace->input()->node()->kind().toQualString();
-//			  return new_outputs;
-
+				Block* block = fun_type->function()->graph()->block();
+				PreInlineCalls(block);
+//        std::cout<<"callee->optimized_graph()->toString() ============= " << fun_type->function()->graph()->toString() << "\n";
       } break;
 //      case prim::CallMethod: {
 //        const std::string& name = cur->s(attr::name);
@@ -137,10 +70,8 @@ void preinlineCalls(Block* block) {
 }
 
 void PreInlineONNX(Graph& graph) {
-  std::cout<<"start ------------ " << "\n";
-
   GRAPH_DUMP("Before PreInlining: ", &graph);
-  preinlineCalls(graph.block());
+  PreInlineCalls(graph.block());
   GRAPH_DUMP("After PreInlining: ", &graph);
 }
 
