@@ -308,8 +308,7 @@ constexpr c10::complex<T> operator+(const c10::complex<T>& lhs, const T& rhs) {
 
 template<typename T>
 constexpr c10::complex<T> operator+(const T& lhs, const c10::complex<T>& rhs) {
-  c10::complex<T> result = rhs;
-  return result += lhs;
+  return c10::complex<T>(lhs + rhs.real(), rhs.imag());
 }
 
 template<typename T>
