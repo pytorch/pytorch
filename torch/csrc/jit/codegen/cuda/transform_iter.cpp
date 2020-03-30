@@ -1,5 +1,5 @@
-#include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/transform_iter.h>
+#include <torch/csrc/jit/codegen/cuda/fusion.h>
 
 namespace torch {
 namespace jit {

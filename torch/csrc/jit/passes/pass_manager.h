@@ -40,7 +40,6 @@ getCustomPrePasses();
 
 TORCH_API GraphPassNameType registerPostPass(GraphPass p);
 TORCH_API GraphPassNameType registerPrePass(GraphPass p);
-TORCH_API GraphPassNameType registerPass(GraphPass p);
 
 // Look up pass by name passed in, remove it from registered passes
 TORCH_API void clearPostPass(GraphPassNameType p);
@@ -49,6 +48,13 @@ TORCH_API void clearPrePass(GraphPassNameType p);
 // Remove all passes
 TORCH_API void clearAllPostPasses();
 TORCH_API void clearAllPrePasses();
+
+// LEGACY CALL
+struct TORCH_API RegisterPostPass {
+  RegisterPostPass(GraphPass p);
+};
+
+using RegisterPass = RegisterPostPass;
 
 /*
  * PassManager is a wrapper on the register/clear PostPass functions above. It

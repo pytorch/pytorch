@@ -89,32 +89,32 @@ namespace jit {
   _(TorchbindIValueAPI)
 
 #if defined(USE_CUDA) && !defined(USE_ROCM)
-#define TH_FORALL_TESTS_CUDA(_) \
-  _(ArgumentSpec)               \
-  _(CompleteArgumentSpec)       \
-  _(Fusion)                     \
-  _(GraphExecutor)              \
-  _(ModuleConversion)           \
-  _(Interp)                     \
-  _(GPU_FusionDispatch)         \
-  _(GPU_FusionSimpleArith)      \
-  _(GPU_FusionSimpleTypePromote)\
-  _(GPU_FusionCastOp)           \
-  _(GPU_FusionMutator)          \
-  _(GPU_FusionRegister)         \
-  _(GPU_FusionTopoSort)         \
-  _(GPU_FusionTensor)           \
-  _(GPU_FusionTensorContiguity) \
-  _(GPU_FusionTVSplit)          \
-  _(GPU_FusionTVMerge)          \
-  _(GPU_FusionTVReorder)        \
-  _(GPU_FusionEquality)         \
-  _(GPU_FusionReplaceAll)       \
-  _(GPU_FusionParser)           \
-  _(GPU_FusionDependency)       \
-  _(GPU_FusionCodeGen)          \
-  _(GPU_FusionCodeGen2)         \
-  _(GPU_FusionSimplePWise)      \
+#define TH_FORALL_TESTS_CUDA(_)  \
+  _(ArgumentSpec)                \
+  _(CompleteArgumentSpec)        \
+  _(Fusion)                      \
+  _(GraphExecutor)               \
+  _(ModuleConversion)            \
+  _(Interp)                      \
+  _(GPU_FusionDispatch)          \
+  _(GPU_FusionSimpleArith)       \
+  _(GPU_FusionSimpleTypePromote) \
+  _(GPU_FusionCastOp)            \
+  _(GPU_FusionMutator)           \
+  _(GPU_FusionRegister)          \
+  _(GPU_FusionTopoSort)          \
+  _(GPU_FusionTensor)            \
+  _(GPU_FusionTensorContiguity)  \
+  _(GPU_FusionTVSplit)           \
+  _(GPU_FusionTVMerge)           \
+  _(GPU_FusionTVReorder)         \
+  _(GPU_FusionEquality)          \
+  _(GPU_FusionReplaceAll)        \
+  _(GPU_FusionParser)            \
+  _(GPU_FusionDependency)        \
+  _(GPU_FusionCodeGen)           \
+  _(GPU_FusionCodeGen2)          \
+  _(GPU_FusionSimplePWise)       \
   _(GPU_FusionExecKernel)
 #else
 #define TH_FORALL_TESTS_CUDA(_) \

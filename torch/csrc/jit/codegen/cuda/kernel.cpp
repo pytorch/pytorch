@@ -1,5 +1,5 @@
-#include <torch/csrc/jit/codegen/cuda/code_write.h>
 #include <torch/csrc/jit/codegen/cuda/kernel.h>
+#include <torch/csrc/jit/codegen/cuda/code_write.h>
 #include <iostream>
 
 #include <ATen/cuda/CUDAContext.h>

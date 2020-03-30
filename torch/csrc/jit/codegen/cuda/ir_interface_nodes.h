@@ -1,10 +1,11 @@
 #pragma once
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/csrc/jit/ir/ir.h>
 
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_base_nodes.h>
+
+#include <torch/csrc/jit/ir/ir.h>
 
 /*
  * Nodes in here are intended to be "user facing" users in this sense being

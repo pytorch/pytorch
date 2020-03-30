@@ -1,5 +1,5 @@
-#include <torch/csrc/jit/codegen/cuda/kernel.h>
 #include <torch/csrc/jit/codegen/cuda/manager.h>
+#include <torch/csrc/jit/codegen/cuda/kernel.h>
 #include <torch/csrc/jit/codegen/cuda/parser.h>
 
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
