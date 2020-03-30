@@ -47,7 +47,7 @@ UPTOb( Tensor, mv                         , (const Tensor &A, const Tensor &B) )
 UPTOc( Tensor, linear                     , (const Tensor &A, const Tensor &B, const Tensor &C) )
 UPTOe( Tensor, addbmm                     , (const Tensor &A, const Tensor &B, const Tensor &C, Scalar        D, Scalar      E) )
 UPTOe( Tensor, baddbmm                    , (const Tensor &A, const Tensor &B, const Tensor &C, Scalar        D, Scalar      E) )
-UPTOb( Tensor, bmm                        , (const Tensor &A, const Tensor &B) )
+UPTOb( Tensor, bmm                        , (const Tensor &A, const Tensor &B, bool          C) )
 UPTOa( Tensor, chain_matmul               , (TensorList    A) )
 
 // fp32
