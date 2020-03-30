@@ -10137,6 +10137,14 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(input.grad, inputf.grad.to(dtype), atol=0)
 
     @onlyCUDA
+    @skipCUDAIfRocm
+    @dtypes(torch.half, torch.float)
+    def test_softmax_sparse(self, device, dtype):
+        from torch.testing._internal.common_utils import random_sparse_matrix
+        input = random_sparse_matrix(2, 3, dtype=dtype, device=device)
+        print(input)
+
+    @onlyCUDA
     def test_pool3d_size_one_feature_dim(self, device):
         # Tests crazy strides for feature dim of size 1
         x = torch.randn(7, 1, 5, 3, 2, device=device)

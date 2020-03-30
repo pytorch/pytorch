@@ -2686,6 +2686,7 @@
     CPU: softmax_cpu
     CUDA: softmax_cuda
     MkldnnCPU: mkldnn_softmax
+    SparseCPU: softmax_sparse_cpu
 
 - func: _softmax_backward_data(Tensor grad_output, Tensor output, int dim, Tensor self) -> Tensor
   use_c10_dispatcher: full
