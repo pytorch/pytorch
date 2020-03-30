@@ -15,6 +15,8 @@ OS="ubuntu"
 DOCKERFILE="${OS}/Dockerfile"
 if [[ "$image" == *-cuda* ]]; then
   DOCKERFILE="${OS}-cuda/Dockerfile"
+elif [[ "$image" == *-rocm* ]]; then
+  DOCKERFILE="${OS}-rocm/Dockerfile"
 fi
 
 if [[ "$image" == *-trusty* ]]; then
@@ -50,11 +52,6 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    ;;
-  pytorch-linux-xenial-py3.5)
-    TRAVIS_PYTHON_VERSION=3.5
-    GCC_VERSION=7
-    # Do not install PROTOBUF, DB, and VISION as a test
     ;;
   pytorch-linux-xenial-py3.8)
     # TODO: This is a hack, get rid of this as soon as you get rid of the travis downloads
@@ -176,6 +173,16 @@ case "$image" in
     DB=yes
     VISION=yes
     ;;
+  pytorch-linux-xenial-rocm-py3.6-clang7)
+    ANACONDA_PYTHON_VERSION=3.6
+    CLANG_VERSION=7
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    ROCM=yes
+    # newer cmake version required
+    CMAKE_VERSION=3.6.3
+    ;;
 esac
 
 # Set Jenkins UID and GID if running Jenkins
@@ -213,6 +220,7 @@ docker build \
        --build-arg "CMAKE_VERSION=${CMAKE_VERSION:-}" \
        --build-arg "NINJA_VERSION=${NINJA_VERSION:-}" \
        --build-arg "KATEX=${KATEX:-}" \
+       --build-arg "ROCM=${ROCM:-}" \
        -f $(dirname ${DOCKERFILE})/Dockerfile \
        -t "$tmp_tag" \
        "$@" \
