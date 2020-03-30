@@ -4,6 +4,7 @@ import sys
 import math
 import tempfile
 import time
+import threading
 import unittest
 import warnings
 from copy import deepcopy
@@ -181,27 +182,24 @@ class TestAutograd(TestCase):
                 'Legacy autograd function with non-static forward method is deprecated'):
             MyFunction()(torch.randn(3, 4))
 
+    class SimulateBackwardError(Function):
+
+        @staticmethod
+        def forward(ctx, input):
+            return input.clone()
+
+        @staticmethod
+        @once_differentiable
+        def backward(ctx, input):
+            raise Exception("Simulate error on backward pass")
+
     def test_custom_function_exception(self):
-        class SimulateBackwardError(Function):
-            _simulate_error = True
-
-            @staticmethod
-            def forward(ctx, input):
-                return input
-
-            @staticmethod
-            @once_differentiable
-            def backward(ctx, input):
-                if SimulateBackwardError._simulate_error:
-                    raise Exception("Simulate error on backward pass")
-                else:
-                    return input
 
         t1 = torch.rand((3, 3), requires_grad=True)
         t2 = torch.rand((3, 3), requires_grad=True)
 
         tmp = (t1 + t2) * (t1 + t2)
-        t3 = SimulateBackwardError.apply(tmp)
+        t3 = TestAutograd.SimulateBackwardError.apply(tmp)
         with self.assertRaisesRegex(RuntimeError, "Simulate error on backward pass"):
             t3.sum().backward()
 
@@ -2143,7 +2141,7 @@ class TestAutograd(TestCase):
             y = x * 2
         self.assertTrue(y.requires_grad)
 
-    def test_reentrant(self):
+    def test_simple_reentrant(self):
         y_data = torch.randn(2, 2)
 
         class Reenter(Function):
@@ -2161,19 +2159,11 @@ class TestAutograd(TestCase):
                     ctx.output_var.sum().backward()
                 return ctx.x.grad * grad_output
 
+        # Reentrant starts on CPU thread, finishs on GPU thread
         x = torch.randn(2, 2, requires_grad=True)
         out = Reenter.apply(x)
         out.sum().backward()
         self.assertEqual(x.grad, y_data)
-
-    class BackwardError(Function):
-        @staticmethod
-        def forward(ctx, inp):
-            return inp.clone()
-
-        @staticmethod
-        def backward(ctx, grad):
-            raise Exception('simulate error')
 
     def test_reentrant_child_error(self):
         # Parent graph.
@@ -2183,7 +2173,7 @@ class TestAutograd(TestCase):
         # Reentrant child graph.
         b = torch.rand(3, 3, requires_grad=True)
         e = b * b
-        f = TestAutograd.BackwardError.apply(e)
+        f = TestAutograd.SimulateBackwardError.apply(e)
         reentrant_root = f.sum()
 
         class ReentrantFunc(Function):
@@ -2199,7 +2189,7 @@ class TestAutograd(TestCase):
                 return grad
 
         d = ReentrantFunc.apply(c)
-        with self.assertRaisesRegex(RuntimeError, 'simulate error'):
+        with self.assertRaisesRegex(RuntimeError, 'Simulate error'):
             d.sum().backward()
 
     def test_broadcast_tensors(self):
@@ -3487,10 +3477,16 @@ for shape in [(1,), ()]:
                     DeepReentrant.apply(ctx.x).sum().backward()
                 return x
 
+        # Test stack overflow escape mechanism
         v = torch.tensor(2000.0, requires_grad=True)
         # This will cause stack overflow if reentrant calls are handled
         # in the same thread recursively
         DeepReentrant.apply(v).sum().backward()
+
+        # Test stack overflow escape mechanism multiple times
+        # to ensure reusing workers in the pool works fine
+        v2 = torch.tensor(200.0, requires_grad=True)
+        DeepReentrant.apply(v2).sum().backward()
 
     def test_reentrant_priority(self):
         order = []
@@ -3535,6 +3531,7 @@ for shape in [(1,), ()]:
         self.assertEqual(len(order), 11)
         self.assertEqual(order.count("Reentrant"), 10)
         self.assertEqual(order[-1], "MyFunction")
+
 
     @slowTest
     def test_checkpointing(self):
@@ -3629,6 +3626,53 @@ for shape in [(1,), ()]:
         ret = self._test_reentrant_with_callbacks([0, 1])
         self.assertEqual(1, ret["outer"])
         self.assertEqual(1, ret["inner"])
+
+    def test_reentrant_with_leaf_variable_hook(self):
+        handle = None
+        param = torch.rand(10, requires_grad=True)
+
+        def add_gradient_penalty_to_grad(grad):
+            handle.remove()
+            old_param_grad = grad
+            param.grad = None
+            # Add some sort of gradient penalty by directly updating the gradients
+            with torch.enable_grad():
+                g = grad.detach().requires_grad_()
+                new_param = param.detach().requires_grad_()
+                out = ((g * 2) + new_param).sum()
+                out.backward()
+            res = g.grad + grad
+            param.grad = old_param_grad
+            return res
+
+        handle = param.register_hook(add_gradient_penalty_to_grad)
+        # Forward pass
+        tmp = (param * param)
+        loss = tmp.sum()
+        # Compute the gradients
+        loss.backward()
+
+    def test_reentrant_with_non_leaf_variable_hook(self):
+        handle = None
+        param = torch.rand(10, requires_grad=True)
+
+        def manual_increase_gradient(grad):
+            handle.remove()
+            # Add some sort of gradient penalty by directly updating the gradients
+            with torch.enable_grad():
+                g = grad.detach().requires_grad_()
+                out = ((g * 2) + 5).sum()
+                out.backward()
+            res = g.grad + grad
+            return res
+
+        # Forward pass
+        tmp = (param * param)
+        handle = tmp.register_hook(manual_increase_gradient)
+        loss = tmp.sum()
+        # Compute the gradients
+        loss.backward()
+        self.assertEqual(param.grad, 6 * param)
 
     def test_autograd_views_codegen(self):
         # This is not necessarily the absolute correct behavior, but this is the current
@@ -5500,16 +5544,14 @@ class TestAutogradDeviceType(TestCase):
         a.sum().backward()
         self.assertEqual(x.grad, torch.ones(n, 1, device=device))
 
-    @onlyCUDA
-    def test_reentrant_parent_error_on_cpu(self, device):
-        before = CudaMemoryLeakCheck.get_cuda_memory_usage()
+    def _test_reentrant_parent_error_on_cpu(self, device):
         t1 = torch.rand([3, 3], requires_grad=True)
         t2 = torch.rand([3, 3], device=device, requires_grad=True)
         t3 = torch.rand([3, 3], device=device, requires_grad=True)
 
         # Parent graph cpu graph.
         t4 = t1 * t1
-        t5 = TestAutograd.BackwardError.apply(t4)
+        t5 = TestAutograd.SimulateBackwardError.apply(t4)
 
         # Child gpu graph (much longer than parent graph).
         prev = t2 * t2
@@ -5533,7 +5575,7 @@ class TestAutogradDeviceType(TestCase):
         t7 = t6 * t6
 
         # Parent graph will error out first, while child graph will continue executing.
-        with self.assertRaisesRegex(RuntimeError, "simulate error"):
+        with self.assertRaisesRegex(RuntimeError, "Simulate error"):
             torch.autograd.backward([t5.sum(), t7.sum()])
 
         # No grads should be accumulated since child graph will stop execution
@@ -5542,17 +5584,22 @@ class TestAutogradDeviceType(TestCase):
         self.assertIsNone(t1.grad)
         self.assertIsNone(t3.grad)
 
+    @onlyCUDA
+    def test_reentrant_parent_error_on_cpu(self, device):
+        before = CudaMemoryLeakCheck.get_cuda_memory_usage()
+
+        # Run as separate function so that gc can clean up everything when we
+        # check for memory usage.
+        self._test_reentrant_parent_error_on_cpu(device)
+
         # Wait for autograd thread to cleanup failed tasks.
         after = CudaMemoryLeakCheck.get_cuda_memory_usage()
         start = time.time()
         while before != after and time.time() - start < 30:
-            time.sleep(1)
+            time.sleep(0.1)
             after = CudaMemoryLeakCheck.get_cuda_memory_usage()
 
-        # If the autograd thread fails to cleanup the thread within the
-        # timeout specified in the loop above, the unit test would fail
-        # since CudaMemoryLeakCheck.__exit__ is executed after the unit
-        # test is done.
+        self.assertEqual(before, after)
 
     # test for backward in https://github.com/pytorch/pytorch/issues/15511
     def test_pdist_large(self, device):
@@ -5838,6 +5885,44 @@ class TestAutogradDeviceType(TestCase):
             self.assertTrue(z.requires_grad)
 
     @onlyCUDA
+    def test_simple_reentrant_cross_device(self, device):
+        class ReentrantFunc(Function):
+            _cpu_mode = True
+            @staticmethod
+            def forward(ctx, x):
+                return x * (x + 2)
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                with torch.enable_grad():
+                    if ReentrantFunc._cpu_mode:
+                        new_param = torch.randn(2, 2, requires_grad=True)
+                        (new_param ** 2).sum().backward()
+                    else:
+                        new_param = torch.randn(2, 2, device=device, requires_grad=True)
+                        (new_param ** 2).sum().backward()
+                return grad_output
+
+        # Reentrant starts on GPU thread, finishs on GPU thread
+        x = torch.randn(2, 2, device=device, requires_grad=True)
+        out = ReentrantFunc.apply(x)
+        out.sum().backward()
+
+        # Reentrant starts on CPU thread, finishs on GPU thread
+        x = torch.randn(2, 2, requires_grad=True)
+        # set ReentrantFunc node to GPU to emit tasks to GPU queue
+        ReentrantFunc._cpu_mode = False
+        out = ReentrantFunc.apply(x)
+        out.sum().backward()
+
+        # Reentrant starts on GPU thread, finishs on CPU thread
+        x = torch.randn(2, 2, device=device, requires_grad=True)
+        # set ReentrantFunc node to CPU to emit tasks to CPU queue
+        ReentrantFunc._cpu_mode = True
+        out = ReentrantFunc.apply(x)
+        out.sum().backward()
+
+    @onlyCUDA
     def test_cross_device_reentrant_autograd(self, device):
         # Output on gpu so that this task will be associated with the gpu thread
         def fn_on_gpu(inp):
@@ -5866,6 +5951,142 @@ class TestAutogradDeviceType(TestCase):
         # This will segfault if the empty NodeTask is not handled properly in the
         # gpu thread ReadyQueue
         out.sum().backward()
+
+class TestMultithreadAutograd(TestCase):
+    def _run_py_multithread_fn(self, fn, args=(), num_threads=10, kwargs=None):
+        threads = []
+        for _ in range(num_threads):
+            p = threading.Thread(target=fn, args=(args))
+            p.start()
+            threads.append(p)
+
+        for p in threads:
+            p.join()
+
+    def test_simple_backward(self):
+        # simple multithreaded backward that create threads in the beginning of training
+        # and everything else is training separately, i.e. inputs, operations, etc.
+        def train_fn():
+            x = torch.ones(5, 5, requires_grad=True)
+            y = (x + 3) * (x + 4) * 0.5
+            y.sum().backward()
+            self.assertEqual(x.grad, x + 3.5)
+
+        self._run_py_multithread_fn(train_fn)
+
+
+    def test_simple_backward_same_input(self):
+        # simple multithreaded backward with only shared inputs (i.e. This is common
+        # for things like Hogwild multithreaded training with multiple CPU threads)
+        def train_fn_backward(x):
+            y = (x + 3) * (x + 4) * 0.5
+            y.sum().backward()
+
+        x = torch.ones(5, 5, requires_grad=True)
+        self._run_py_multithread_fn(train_fn_backward, (x,))
+        # Since we are calling backward from multiple threads
+        # and all threads share the same input, when we do backward
+        # concurrently, different backwards will all accumulate to
+        # the same .grad for each input, and the gradients should
+        # be equal to num_threads * gradient
+        self.assertEqual(x.grad, 10 * (x + 3.5))
+
+        def train_fn_grad(x):
+            y = (x + 3) * (x + 4) * 0.5
+            grads = torch.autograd.grad(y.sum(), x)
+            self.assertEqual(len(grads), 1)
+            self.assertEqual(grads[0], x + 3.5)
+
+        # since we use functional grad() api, gradients will not
+        # be accumulate to the same place and should be the same
+        self._run_py_multithread_fn(train_fn_grad, (x,))
+
+
+    def test_python_thread_in_middle(self):
+        # User might write a network that starts on one CPU thread, then runs its second half
+        # concurrently with other threads (either via python threading or fork/join calls),
+        # then calls backward()/grad() on BOTH threads, like a Y pattern from input at the
+        # bottom to output at the top. This way part of the GraphTask is being shared across
+        # different threads and we need to ensure user specify retain_graph=True, otherwise
+        # error out with the correct error message
+
+        # Case 1: multiple backward with python threads, retain_graph=False
+        # should throw error in some threads with no retain_graph.
+        success_vs_raises = [0, 0]
+
+        def train_fn_no_retain_graph(x):
+            y = x + x ** 2
+            try:
+                y.sum().backward()
+                success_vs_raises[0] += 1
+            except RuntimeError as error:
+                success_vs_raises[1] += 1
+                self.assertRegex(str(error), "Specify retain_graph=True")
+
+        x_no_retain = torch.ones(5, 5, requires_grad=True)
+        y_no_retain = x_no_retain + x_no_retain ** 2
+        self._run_py_multithread_fn(train_fn_no_retain_graph, (y_no_retain,), num_threads=5)
+        # at least one thread will be success in this case, all other threads should raise
+        # with the error that throw to user to recommend them specify retain_graph=True
+        self.assertTrue(success_vs_raises[0] >= 1)
+
+        # multiple backward with python threads, no error with retain_graph=True
+        def train_fn_retain_graph(x):
+            y = x + x ** 2
+            y.sum().backward(retain_graph=True)
+
+        x_retain = torch.ones(5, 5, requires_grad=True)
+        y_retain = x_retain + x_retain ** 2
+        self._run_py_multithread_fn(train_fn_retain_graph, (y_retain,), num_threads=5)
+        # result should equal to num_thread * gradients
+        self.assertEqual(x_retain.grad, 5 * (4 * x_retain ** 3 + 6 * (x_retain ** 2) + 4 * x_retain + 1))
+
+
+    def test_fork_join_in_middle(self):
+        # multiple backward with jit threads (fork/join primitive)
+        # similar to test_python_thread_in_middle, we test with retain_graph=False/True
+
+        # Case 1: multiple grad() calls with jit threads, retain_graph=False
+        # should throw error in some threads with no retain_graph.
+        @torch.jit.script
+        def train_fn_jit_no_retain(middle, orig_x):
+            y = middle + middle ** 2
+            return torch.autograd.grad([y.sum()], [orig_x])
+
+        @torch.jit.script
+        def train_fn_fork_join_calls_no_retain(x):
+            y_no_retain = (x + 3) * (x + 4) * 0.5
+
+            fut = torch.jit._fork(train_fn_jit_no_retain, y_no_retain, x)
+            grad_hat = train_fn_jit_no_retain(y_no_retain, x)
+            grad = torch.jit._wait(fut)
+            return grad, grad_hat
+
+        try:
+            train_fn_fork_join_calls_no_retain(torch.randn(5, 5, requires_grad=True))
+        except RuntimeError as error:
+            self.assertRegex(str(error), "Specify retain_graph=True")
+
+        # Case 2: no error with retain_graph=True
+        @torch.jit.script
+        def train_fn_jit_retain(middle, orig_x):
+            y = middle + middle ** 2
+            return torch.autograd.grad([y.sum()], [orig_x], retain_graph=True)
+
+        @torch.jit.script
+        def train_fn_fork_join_calls_retain(x):
+            y_retain = (x + 3) * (x + 4) * 0.5
+            fut1 = torch.jit._fork(train_fn_jit_retain, y_retain, x)
+            fut2 = torch.jit._fork(train_fn_jit_retain, y_retain, x)
+            grad = train_fn_jit_retain(y_retain, x)
+            grad1 = torch.jit._wait(fut1)
+            grad2 = torch.jit._wait(fut2)
+            return grad, grad1, grad2
+
+        grad, grad1, grad2 = train_fn_fork_join_calls_retain(torch.randn(5, 5, requires_grad=True))
+        self.assertEqual(grad, grad1)
+        self.assertEqual(grad, grad2)
+
 
 
 for test in method_tests():
