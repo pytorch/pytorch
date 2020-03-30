@@ -9,14 +9,12 @@
 #include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/NamedTensor.h>
-#include <ATen/core/EnableNamedTensor.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 
 #ifdef USE_STATIC_DISPATCH
 #include <ATen/TypeDefault.h>
 #include <ATen/CPUType.h>
 #include <ATen/QuantizedCPUType.h>
-#include <ATen/SparseCPUType.h>
 #endif
 
 namespace at {
@@ -84,7 +82,6 @@ inline bool Tensor::is_cuda() const {
   return impl_->is_cuda();
 }
 
-#ifdef BUILD_NAMEDTENSOR
 inline NamedTensorMeta* Tensor::get_named_tensor_meta() {
   return static_cast<NamedTensorMeta*>(impl_->named_tensor_meta());
 }
@@ -94,9 +91,13 @@ inline const NamedTensorMeta* Tensor::get_named_tensor_meta() const {
 }
 
 inline bool Tensor::has_names() const {
+  // If a user is using unnamed tensors, then we can short-circuit right here.
+  // Otherwise, impl::has_names attempts to retrieve names.
+  if (!impl_->has_named_tensor_meta()) {
+    return false;
+  }
   return impl::has_names(unsafeGetTensorImpl());
 }
-#endif
 
 inline bool is_cuda(Tensor self) {
   return self.is_cuda();

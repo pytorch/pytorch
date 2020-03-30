@@ -18,7 +18,7 @@ class FloatFunctional(torch.nn.Module):
         >>> f_add = FloatFunctional()
         >>> a = torch.tensor(3.0)
         >>> b = torch.tensor(4.0)
-        >>> f_add.add(a, b)  # Equivalent to ``torch.add(3, 4)
+        >>> f_add.add(a, b)  # Equivalent to ``torch.add(a, b)``
 
     Valid operation names:
         - add
@@ -93,10 +93,10 @@ class QFunctional(torch.nn.Module):
 
     Examples::
 
-        >>> q_add = QFunctional('add')
+        >>> q_add = QFunctional()
         >>> a = torch.quantize_per_tensor(torch.tensor(3.0), 1.0, 0, torch.qint32)
         >>> b = torch.quantize_per_tensor(torch.tensor(4.0), 1.0, 0, torch.qint32)
-        >>> q_add.add(a, b)  # Equivalent to ``torch.ops.quantized.add(3, 4)
+        >>> q_add.add(a, b)  # Equivalent to ``torch.ops.quantized.add(a, b, 1.0, 0)``
 
     Valid operation names:
         - add
@@ -123,6 +123,14 @@ class QFunctional(torch.nn.Module):
         self.zero_point = int(state_dict.pop(prefix + 'zero_point'))
         super(QFunctional, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
                                                        missing_keys, unexpected_keys, error_msgs)
+
+    def _get_name(self):
+        return 'QFunctional'
+
+    def extra_repr(self):
+        return 'scale={}, zero_point={}'.format(
+            self.scale, self.zero_point
+        )
 
     def forward(self, x):
         raise RuntimeError("Functional is not intended to use the " +

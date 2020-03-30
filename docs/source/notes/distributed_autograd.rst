@@ -1,6 +1,3 @@
-.. warning::
-  The :ref:`distributed-rpc-framework` is experimental and subject to change.
-
 .. _distributed-autograd-design:
 
 Distributed Autograd Design
@@ -113,7 +110,12 @@ From the user's perspective the autograd context is setup as follows:
   import torch.distributed.autograd as dist_autograd
   with dist_autograd.context() as context_id:
     loss = model.forward()
-    dist_autograd.backward(loss)
+    dist_autograd.backward(context_id, loss)
+
+It is important to note that your model's forward pass must be invoked within
+the distributed autograd context manager, as a valid context is needed in
+order to ensure that all ``send`` and ``recv`` functions are stored properly
+to run the backward pass across all participating nodes.
 
 Distributed Backward Pass
 ^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -185,8 +187,9 @@ limitations. This algorithm is called the `FAST mode algorithm`_ and is
 described in detail below.
 
 In the general case it might not be necessary that every ``send`` and ``recv``
-function is valid as part of the backward pass. To address this, we also have
-a `SMART mode algorithm`_ which is described in a later section.
+function is valid as part of the backward pass. To address this, we have
+proposed a `SMART mode algorithm`_ which is described in a later section.
+Please note that currently, only the `FAST` mode algorithm is implemented.
 
 .. _fast-mode-algorithm:
 
@@ -242,7 +245,9 @@ As an example the complete code with distributed autograd would be as follows:
 
   # On worker 0:
 
-  # Setup the autograd context.
+  # Setup the autograd context. Computations that take
+  # part in the distributed backward pass must be within
+  # the distributed autograd context manager.
   with dist_autograd.context() as context_id:
     t1 = torch.rand((3, 3), requires_grad=True)
     t2 = torch.rand((3, 3), requires_grad=True)
@@ -258,7 +263,7 @@ As an example the complete code with distributed autograd would be as follows:
     loss = t5.sum()
 
     # Run the backward pass.
-    dist_autograd.backward([loss])
+    dist_autograd.backward(context_id, [loss])
 
     # Retrieve the gradients from the context.
     dist_autograd.get_gradients(context_id)
@@ -307,21 +312,26 @@ The :class:`~torch.distributed.optim.DistributedOptimizer` operates as follows:
    each of the worker nodes and holds an ``RRef`` to them.
 4. When :meth:`torch.distributed.optim.DistributedOptimizer.step` is invoked,
    the distributed optimizer uses RPC to remotely execute all the local
-   optimizers on the appropriate remote workers.
+   optimizers on the appropriate remote workers. A distributed autograd
+   ``context_id`` must be provided as input to
+   :meth:`torch.distributed.optim.DistributedOptimizer.step`. This is used
+   by local optimizers to apply gradients stored in the corresponding
+   context.
 5. If multiple concurrent distributed optimizers are updating the same
    parameters on a worker, these updates are serialized via a lock.
 
 Simple end to end example
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Putting it all together, a very simple end to end example using distributed
-autograd and distributed optimizer is as follows:
+Putting it all together, the following is a simple end to end example using
+distributed autograd and the distributed optimizer. If the code is placed into a
+file called "dist_autograd_simple.py", it can be run with the command
+:code:`MASTER_ADDR="localhost" MASTER_PORT=29500 python dist_autograd_simple.py`:
 
 .. code::
 
-  import multiprocessing as mp
-  from tempfile import NamedTemporaryFile
   import torch
+  import torch.multiprocessing as mp
   import torch.distributed.autograd as dist_autograd
   from torch.distributed import rpc
   from torch import optim
@@ -330,52 +340,45 @@ autograd and distributed optimizer is as follows:
   def random_tensor():
       return torch.rand((3, 3), requires_grad=True)
 
-  def _run_process(self_rank, dst_rank, file_name):
-      self_name = "worker{}".format(self_rank)
+  def _run_process(rank, dst_rank, world_size):
+      name = "worker{}".format(rank)
       dst_name = "worker{}".format(dst_rank)
 
       # Initialize RPC.
       rpc.init_rpc(
-          self_name=self_name,
-          self_rank=self_rank,
-          worker_name_to_id={"worker0": 0, "worker1": 1},
-          init_method="file://{}".format(file_name),
+          name=name,
+          rank=rank,
+          world_size=world_size
       )
 
       # Use a distributed autograd context.
       with dist_autograd.context() as context_id:
-         # Forward pass (create references on remote nodes).
-         rref1 = rpc.remote(dst_name, random_tensor)
-         rref2 = rpc.remote(dst_name, random_tensor)
-         loss = rref1.to_here() + rref2.to_here()
+          # Forward pass (create references on remote nodes).
+          rref1 = rpc.remote(dst_name, random_tensor)
+          rref2 = rpc.remote(dst_name, random_tensor)
+          loss = rref1.to_here() + rref2.to_here()
 
-         # Backward pass (run distributed autograd).
-         dist_autograd.backward([loss.sum()])
+          # Backward pass (run distributed autograd).
+          dist_autograd.backward(context_id, [loss.sum()])
 
-         # Build DistributedOptimizer.
-         dist_optim = DistributedOptimizer(
-           optim.SGD,
-           [rref1, rref2],
-           lr=0.05,
-         )
+          # Build DistributedOptimizer.
+          dist_optim = DistributedOptimizer(
+          optim.SGD,
+          [rref1, rref2],
+          lr=0.05,
+          )
 
-         # Run the distributed optimizer step.
-         dist_optim.step()
+          # Run the distributed optimizer step.
+          dist_optim.step(context_id)
 
-  def run_process(self_rank, dst_rank, file_name):
-      _run_process(self_rank, dst_rank, file_name)
-      rpc.wait_all_workers()
+  def run_process(rank, world_size):
+      dst_rank = (rank + 1) % world_size
+      _run_process(rank, dst_rank, world_size)
+      rpc.shutdown()
 
-  file_name = NamedTemporaryFile().name
-  processes = []
-
-  # Run two workers.
-  for i in range(2):
-      p = mp.Process(target=run_process, args=(i, (i + 1) % 2, file_name))
-      p.start()
-      processes.append(p)
-
-  for p in processes:
-      p.join()
+  if __name__ == '__main__':
+    # Run world_size workers
+    world_size = 2
+    mp.spawn(run_process, args=(world_size,), nprocs=world_size)
 
 .. _RFC: https://github.com/pytorch/pytorch/issues/23110

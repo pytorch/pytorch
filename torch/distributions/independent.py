@@ -96,3 +96,6 @@ class Independent(Distribution):
         if self.reinterpreted_batch_ndims > 0:
             raise NotImplementedError("Enumeration over cartesian product is not implemented")
         return self.base_dist.enumerate_support(expand=expand)
+
+    def __repr__(self):
+        return self.__class__.__name__ + '({}, {})'.format(self.base_dist, self.reinterpreted_batch_ndims)

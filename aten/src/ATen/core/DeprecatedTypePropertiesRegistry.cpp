@@ -11,7 +11,7 @@ void DeprecatedTypePropertiesDeleter::operator()(DeprecatedTypeProperties * ptr)
 DeprecatedTypePropertiesRegistry::DeprecatedTypePropertiesRegistry() {
   for (int b = 0; b < static_cast<int>(Backend::NumOptions); ++b) {
     for (int s = 0; s < static_cast<int>(ScalarType::NumOptions); ++s) {
-      registry[b][s] = c10::guts::make_unique<DeprecatedTypeProperties>(
+      registry[b][s] = std::make_unique<DeprecatedTypeProperties>(
               static_cast<Backend>(b),
               static_cast<ScalarType>(s));
     }

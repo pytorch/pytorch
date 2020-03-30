@@ -176,7 +176,7 @@ void ROIAlignForward(
       CAFFE_ENFORCE(
           roi_width >= 0 && roi_height >= 0,
           "ROIs in ROIAlign do not have non-negative size!");
-    } else { // backward compatiblity
+    } else { // backward compatibility
       // Force malformed ROIs to be 1x1
       roi_width = std::max(roi_width, (float)1.);
       roi_height = std::max(roi_height, (float)1.);

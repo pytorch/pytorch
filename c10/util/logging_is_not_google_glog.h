@@ -124,8 +124,10 @@ static_assert(
   CHECK(condition)
 #endif // NDEBUG
 
-#define CHECK_OP(val1, val2, op) \
-  FATAL_IF((val1 op val2)) << "Check failed: " #val1 " " #op " " #val2 " "
+#define CHECK_OP(val1, val2, op)                      \
+  FATAL_IF(((val1) op (val2)))                        \
+    << "Check failed: " #val1 " " #op " " #val2 " ("  \
+    << (val1) << " vs. " << (val2) << ") "
 
 // Check_op macro definitions
 #define CHECK_EQ(val1, val2) CHECK_OP(val1, val2, ==)
@@ -218,6 +220,12 @@ inline std::ostream& operator<<(
     std::ostream& out,
     const std::pair<First, Second>& p) {
   out << '(' << p.first << ", " << p.second << ')';
+  return out;
+}
+
+inline std::ostream& operator<<(
+    std::ostream& out, const std::nullptr_t&) {
+  out << "(null)";
   return out;
 }
 } // namespace std

@@ -1,7 +1,7 @@
 #pragma once
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/csrc/jit/script/module.h>
+#include <torch/csrc/jit/api/module.h>
 
 #include <string>
 #include <memory>
@@ -30,7 +30,7 @@ namespace jit {
 ///   )JIT");
 ///   IValue output = module->run_method("relu_script", a, b);
 /// \endrst
-TORCH_API std::shared_ptr<script::CompilationUnit> compile(const std::string& source);
+TORCH_API std::shared_ptr<CompilationUnit> compile(const std::string& source);
 
 } // namespace jit
 } // namespace torch

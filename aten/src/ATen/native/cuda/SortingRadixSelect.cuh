@@ -1,3 +1,5 @@
+#include <THC/THCAtomics.cuh>
+
 namespace at {
 namespace native {
 
@@ -142,6 +144,24 @@ struct TopKTypeConfig<at::Half> {
   }
 };
 
+template <>
+struct TopKTypeConfig<at::BFloat16> {
+  typedef uint32_t RadixType;
+
+  static inline __device__ RadixType convert(at::BFloat16 v) {
+    RadixType x = v.x;
+    RadixType mask = -((x >> 15)) | 0x8000;
+    return (v == v) ? (x ^ mask) : 0xffff;
+  }
+
+  static inline __device__ at::BFloat16 deconvert(RadixType v) {
+    RadixType mask = ((v >> 15) - 1) | 0x8000;
+    at::BFloat16 r;
+    r.x = (v ^ mask);
+    return r;
+  }
+};
+
 // This function counts the distribution of all input values in a
 // slice we are selecting by radix digit at `radixDigitPos`, but only
 // those that pass the filter `((v & desiredMask) == desired)`.
@@ -199,7 +219,7 @@ __device__ void countRadixUsingMask(
   if (getLaneId() == 0) {
 #pragma unroll
     for (uint32_t i = 0; i < RadixSize; ++i) {
-      atomicAdd(&smem[i], counts[i]);
+      gpuAtomicAdd(&smem[i], counts[i]);
     }
   }
 

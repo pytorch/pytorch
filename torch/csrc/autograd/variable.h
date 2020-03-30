@@ -17,6 +17,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <cstdint>
 
 namespace torch { namespace autograd {
 
@@ -65,10 +66,7 @@ struct Node;
 /// construction, the interface of a view is identical to that of a regular
 /// `Variable`. You can determine whether `Variable` is in fact a view by
 /// probing its `is_view()` method. Note that the *view* semantics are only
-/// meaningful for `Variable` relations that are relevant to autograd. For
-/// example, if you hide your code from autograd using `.no_grad()`, the
-/// `Variable`s will not be registered as having view relations, even if they
-/// share storage.
+/// meaningful for `Variable` relations that are relevant to autograd.
 /// See NOTE [ Autograd View Variables ] for more details.
 ///
 ///
@@ -189,6 +187,9 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
   // Only meaningful on leaf variables (must be false otherwise)
   bool requires_grad_;
 
+  // Only meaningful on non-leaf variables (must be false otherwise)
+  bool retains_grad_;
+
   bool is_view_;
 
   // The "output number" of this variable; e.g., if this variable
@@ -228,6 +229,7 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
   AutogradMeta(at::TensorImpl* self_impl = nullptr, bool requires_grad = false, Edge gradient_edge = Edge() ) {
     grad_fn_ = std::move(gradient_edge.function);
     requires_grad_ = false;
+    retains_grad_ = false;
     is_view_ = false;
     output_nr_ = gradient_edge.input_nr;
 
@@ -295,7 +297,32 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
 ///   + if an in-place op is done on view, in rebase_history() of view, which is
 ///     called after every in-place op in VariableType.cpp, the grad_fn of base
 ///     is updated.
+///   + if a single autograd Node returns multiple differentiable views, if any
+///     output is modified by an inplace operation, the autograd engine will make
+///     an equivalent graph (corresponding to the view operations) without using
+///     equivalent graph, where each output is treated as if it were produced by a
+///     distinct view operation. This discards the original (e.g., user provided)
+///     grad_fn. If the provided grad_fn does more than the backward of the view,
+///     then the DifferentiableViewMeta must be created with creation_meta=
+///     CreationMeta::MULTI_OUTPUT_NODE to prevent the engine from ignoring the
+///     provided grad_fn.
 ///
+/// Interaction with GradMode:
+/// The particular case that we consider here is:
+///
+///     # Have:
+///     #   base.requires_grad = True or False
+///     with torch.no_grad():
+///         view = base[1]
+///     base.requires_grad_()
+///     view.copy_(var)
+///     torch.autograd.grad(base.sum(), var)  <- what should it return?
+///
+/// Given that this particular code example is ambiguous and can easily be replace by
+/// either moving both inside the no_grad block or both outside, we explicitly forbid
+/// it. For now, it is deprecated by a warning. This is achieved by setting
+/// creation_meta=CreationMeta::NO_GRAD_MODE for all differentiable views created
+/// in no_grad mode.
 ///
 /// Non-Differentiable Views
 /// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -313,8 +340,36 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
 ///      function are non-differentiable.
 /// These are called non-differentiable views as the gradients do not flow
 /// through the view relation.
-/// Relevant logic for non-differentiable views is implemented in
-/// make_variable_view below, and wrap_output of gen_variable_type.py.
+///
+/// Relevant logic for both differentiable and non-differentiable views is implemented in
+/// make_variable_(non_)differentiable_view below, and wrap_output of gen_variable_type.py.
+
+
+/// NOTE [ View + Inplace detection ]
+///
+/// We want to detect views followed by inplace as they are often forbidden to ensure
+/// correctness of the computed gradients. But since we want to only notify the user
+/// when both happen, we tag the DifferentiableViewMeta when the view is created
+/// via the `make_variable_*_view()` functions. This tag is then checked by the
+/// `check_inplace()` function from `VariableTypeUtils.h` that should be called before
+/// every inplace operation and to detect cases where other views are modified and this
+/// one is rebased by side effect, we also check in the `VariableHooks::grad_fn()`.
+
+/// Flag that gives more information about when this view was created:
+/// - IN_CUSTOM_FUNCTION should be set when the view is created inside a custom
+///   autograd Function is returned.
+/// - NO_GRAD_MODE should be set when a view in created when GradMode is disabled
+/// - MULTI_OUTPUT_NODE should be set when a Node created by codegen code returns
+///   multiple differentiable views
+/// - DEFAULT is for all other cases
+enum class CreationMeta: uint8_t { DEFAULT, IN_CUSTOM_FUNCTION, MULTI_OUTPUT_NODE,
+                                   NO_GRAD_MODE };
+
+/// Unified function to handle error checking when rebase happens
+/// indirect=true means that the caller is not doing the inplace, but the inplace happened
+/// somewhere else.
+TORCH_API void handle_view_on_rebase(DifferentiableViewMeta* diff_view_meta, bool indirect=false);
+
 struct TORCH_API DifferentiableViewMeta : public AutogradMeta {
   /// The base `Variable` (never a view).
   Variable base_;
@@ -324,11 +379,14 @@ struct TORCH_API DifferentiableViewMeta : public AutogradMeta {
   /// version_counter.current_version().
   uint32_t attr_version;
 
+  CreationMeta creation_meta;
+
   bool requires_grad() const override {
     return requires_grad_ || grad_fn_ || (is_view_ && base_.requires_grad());
   }
 
-  DifferentiableViewMeta(at::TensorImpl* self_impl, Variable base);
+  DifferentiableViewMeta(at::TensorImpl* self_impl, Variable base,
+                         CreationMeta creation_meta=CreationMeta::DEFAULT);
   ~DifferentiableViewMeta();
 };
 
@@ -353,28 +411,35 @@ struct TORCH_API DifferentiableViewMeta : public AutogradMeta {
 /// prevent those changes from happening and is undesirable.
 
 // See NOTE [ Autograd View Variables ] for details.
-inline Variable make_variable_view(
+// Differentiable view. Track history with DifferentiableViewMeta.
+inline Variable make_variable_differentiable_view(
     Variable base,
     at::Tensor data,
-    bool is_differentiable = true,
+    CreationMeta creation_meta) {
+  if (data.defined()) {
+    auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
+      /*version_counter=*/0,
+      /*allow_tensor_metadata_change=*/true);
+    data_impl_copy->set_autograd_meta(std::make_unique<DifferentiableViewMeta>(
+      data_impl_copy.get(), std::move(base),
+      creation_meta));
+    return Variable(data_impl_copy);
+    }
+  return Variable();
+}
+
+// See NOTE [ Autograd View Variables ] for details.
+// Non-differentiable view. Just share version counter.
+inline Variable make_variable_non_differentiable_view(
+    Variable base,
+    at::Tensor data,
     bool allow_tensor_metadata_change = true) {
   if (data.defined()) {
-    if (is_differentiable) {
-      /// Differentiable view. Track history with DifferentiableViewMeta.
-      auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
-        /*version_counter=*/0,
-        /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
-      data_impl_copy->set_autograd_meta(c10::guts::make_unique<DifferentiableViewMeta>(
-        data_impl_copy.get(), std::move(base)));
-      return Variable(data_impl_copy);
-    } else {
-      /// Non-differentiable view. Just share version counter.
-      auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
-        /*version_counter=*/impl::version_counter(base),
-        /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
-      data_impl_copy->set_autograd_meta(nullptr);
-      return Variable(data_impl_copy);
-    }
+    auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
+      /*version_counter=*/impl::version_counter(base),
+      /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
+    data_impl_copy->set_autograd_meta(nullptr);
+    return Variable(data_impl_copy);
   }
   return Variable();
 }
@@ -397,7 +462,7 @@ inline Variable make_variable(
       auto data_impl = data.getIntrusivePtr();
       data_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
       if (requires_grad) {
-        data_impl->set_autograd_meta(c10::guts::make_unique<AutogradMeta>(data_impl.get(), requires_grad));
+        data_impl->set_autograd_meta(std::make_unique<AutogradMeta>(data_impl.get(), requires_grad));
       } else {
         data_impl->set_autograd_meta(nullptr);
       }
@@ -407,7 +472,7 @@ inline Variable make_variable(
         /*version_counter=*/0,
         /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
       if (requires_grad) {
-        data_impl_copy->set_autograd_meta(c10::guts::make_unique<AutogradMeta>(
+        data_impl_copy->set_autograd_meta(std::make_unique<AutogradMeta>(
           data_impl_copy.get(), requires_grad));
       } else {
         data_impl_copy->set_autograd_meta(nullptr);
@@ -430,7 +495,7 @@ inline Variable make_variable(
     auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
       /*version_counter=*/0,
       /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
-    data_impl_copy->set_autograd_meta(c10::guts::make_unique<AutogradMeta>(
+    data_impl_copy->set_autograd_meta(std::make_unique<AutogradMeta>(
       data_impl_copy.get(), false, std::move(gradient_edge)));
     return Variable(data_impl_copy);
   }

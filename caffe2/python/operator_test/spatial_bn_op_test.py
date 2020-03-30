@@ -30,9 +30,6 @@ class TestSpatialBN(serial.SerializedTestCase):
     def test_spatialbn_test_mode_3d(
             self, size, input_channels, batch_size, seed, order, epsilon,
             inplace, engine, gc, dc):
-        # Currently MIOPEN SpatialBN only supports 2D
-        if hiputl.run_in_hip(gc, dc):
-            assume(engine != "CUDNN")
         op = core.CreateOperator(
             "SpatialBN",
             ["X", "scale", "bias", "mean", "var"],

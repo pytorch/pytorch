@@ -18,13 +18,13 @@ ENDIF()
 
 # this flag is used in Config but set externally, we must normalize it
 # to 0/1 otherwise `#if ON` will be evaluated to false.
-if (CAFFE2_STATIC_LINK_CUDA)
+if(CAFFE2_STATIC_LINK_CUDA)
   set(CAFFE2_STATIC_LINK_CUDA_INT 1)
 else()
   set(CAFFE2_STATIC_LINK_CUDA_INT 0)
 endif()
 CONFIGURE_FILE(Config.h.in "${CMAKE_CURRENT_SOURCE_DIR}/Config.h")
-# TODO: Don't unconditionally generate CUDAConfig.h.in.  Unfortuantely,
+# TODO: Don't unconditionally generate CUDAConfig.h.in.  Unfortunately,
 # this file generates AT_ROCM_ENABLED() which is required by the miopen
 # files, which are compiled even if we are doing a vanilla CUDA build.
 # Once we properly split CUDA and HIP in ATen, we can remove this code.
@@ -34,7 +34,7 @@ if(USE_ROCM)
 endif()
 
 # NB: If you edit these globs, you'll have to update setup.py package_data as well
-FILE(GLOB base_h "*.h" "detail/*.h" "cpu/*.h")
+FILE(GLOB base_h "*.h" "detail/*.h" "cpu/*.h" "cpu/vec256/*.h" "quantized/*.h")
 FILE(GLOB base_cpp "*.cpp" "detail/*.cpp" "cpu/*.cpp")
 add_subdirectory(core)
 FILE(GLOB cuda_h "cuda/*.h" "cuda/detail/*.h" "cuda/*.cuh" "cuda/detail/*.cuh")
@@ -45,7 +45,7 @@ FILE(GLOB cuda_cu "cuda/*.cu" "cuda/detail/*.cu")
 FILE(GLOB cudnn_h "cudnn/*.h" "cudnn/*.cuh")
 FILE(GLOB cudnn_cpp "cudnn/*.cpp")
 
-FILE(GLOB hip_h "hip/*.h" "hip/detail/*.h" "hip/*.cuh" "hip/detail/*.cuh")
+FILE(GLOB hip_h "hip/*.h" "hip/detail/*.h" "hip/*.cuh" "hip/detail/*.cuh" "hip/impl/*.h")
 FILE(GLOB hip_cpp "hip/*.cpp" "hip/detail/*.cpp" "hip/impl/*.cpp")
 FILE(GLOB hip_hip "hip/*.hip" "hip/detail/*.hip" "hip/impl/*.hip")
 FILE(GLOB hip_nvrtc_stub_h "hip/nvrtc_stub/*.h")
@@ -63,7 +63,9 @@ FILE(GLOB native_sparse_cpp "native/sparse/*.cpp")
 FILE(GLOB native_quantized_cpp
             "native/quantized/*.cpp"
             "native/quantized/cpu/*.cpp")
+FILE(GLOB native_h "native/*.h")
 FILE(GLOB native_quantized_h "native/quantized/*.h" "native/quantized/cpu/*.h")
+FILE(GLOB native_cpu_h "native/cpu/*.h")
 
 FILE(GLOB native_cuda_cu "native/cuda/*.cu")
 FILE(GLOB native_cuda_cpp "native/cuda/*.cpp")
@@ -82,8 +84,11 @@ FILE(GLOB native_sparse_hip_cpp "native/sparse/hip/*.cpp")
 FILE(GLOB native_quantized_hip_hip "native/quantized/hip/*.hip")
 FILE(GLOB native_quantized_hip_cpp "native/quantized/hip/*.cpp")
 
+# XNNPACK
+FILE(GLOB native_xnnpack "native/xnnpack/*.cpp")
+
 add_subdirectory(quantized)
-set(all_cpu_cpp ${base_cpp} ${ATen_CORE_SRCS} ${native_cpp} ${native_sparse_cpp} ${native_quantized_cpp} ${native_mkl_cpp} ${native_mkldnn_cpp} ${generated_cpp} ${core_generated_cpp} ${ATen_CPU_SRCS} ${ATen_QUANTIZED_SRCS} ${cpu_kernel_cpp})
+set(all_cpu_cpp ${base_cpp} ${ATen_CORE_SRCS} ${native_cpp} ${native_sparse_cpp} ${native_quantized_cpp} ${native_mkl_cpp} ${native_mkldnn_cpp} ${native_xnnpack} ${generated_cpp} ${core_generated_cpp} ${ATen_CPU_SRCS} ${ATen_QUANTIZED_SRCS} ${cpu_kernel_cpp})
 if(AT_MKL_ENABLED)
   set(all_cpu_cpp ${all_cpu_cpp} ${mkl_cpp})
 endif()
@@ -100,7 +105,7 @@ IF(USE_CUDA)
   set(ATen_CUDA_SRCS ${ATen_CUDA_SRCS} ${cuda_cu} ${native_cuda_cu} ${native_sparse_cuda_cu} ${native_quantized_cuda_cu})
   set(all_cuda_cpp ${native_sparse_cuda_cpp} ${native_quantized_cuda_cpp} ${cuda_cpp} ${native_cuda_cpp} ${cuda_generated_cpp} ${ATen_CUDA_SRCS})
   SET(all_cuda_cpp ${native_cudnn_cpp} ${native_miopen_cpp} ${all_cuda_cpp})
-  IF(CUDNN_FOUND)
+  IF(CAFFE2_USE_CUDNN)
     SET(all_cuda_cpp ${all_cuda_cpp} ${cudnn_cpp})
   ENDIF()
 endif()
@@ -123,14 +128,14 @@ list(APPEND ATen_CPU_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/..)
 # so the build can find the generated header files
 list(APPEND ATen_CPU_INCLUDE ${CMAKE_CURRENT_BINARY_DIR})
 
-IF (USE_TBB)
+IF(USE_TBB)
   message("ATen is compiled with TBB (${TBB_ROOT_DIR})")
   list(APPEND ATen_CPU_INCLUDE ${TBB_ROOT_DIR}/include)
   list(APPEND ATen_CPU_DEPENDENCY_LIBS tbb)
 ENDIF()
 
 IF(BLAS_FOUND)
-  IF ($ENV{TH_BINARY_BUILD})
+  IF($ENV{TH_BINARY_BUILD})
     MESSAGE(STATUS "TH_BINARY_BUILD detected. Enabling special linkage.")
     list(APPEND ATen_CPU_DEPENDENCY_LIBS
       "${BLAS_LIBRARIES};${BLAS_LIBRARIES};${BLAS_LIBRARIES}")
@@ -142,7 +147,7 @@ IF(BLAS_FOUND)
       list(APPEND ATen_HIP_DEPENDENCY_LIBS
         "${BLAS_LIBRARIES};${BLAS_LIBRARIES};${BLAS_LIBRARIES}")
     endif()
-  ELSE ($ENV{TH_BINARY_BUILD})
+  ELSE($ENV{TH_BINARY_BUILD})
     list(APPEND ATen_CPU_DEPENDENCY_LIBS ${BLAS_LIBRARIES})
     if(USE_CUDA)
       list(APPEND ATen_CUDA_DEPENDENCY_LIBS "${BLAS_LIBRARIES}")
@@ -150,7 +155,7 @@ IF(BLAS_FOUND)
     if(USE_ROCM)
       list(APPEND ATen_HIP_DEPENDENCY_LIBS "${BLAS_LIBRARIES}")
     endif()
-  ENDIF ($ENV{TH_BINARY_BUILD})
+  ENDIF($ENV{TH_BINARY_BUILD})
 ENDIF(BLAS_FOUND)
 
 IF(LAPACK_FOUND)
@@ -171,7 +176,7 @@ IF(LAPACK_FOUND)
   endif()
 ENDIF(LAPACK_FOUND)
 
-IF (UNIX AND NOT APPLE)
+IF(UNIX AND NOT APPLE)
    INCLUDE(CheckLibraryExists)
    # https://github.com/libgit2/libgit2/issues/2128#issuecomment-35649830
    CHECK_LIBRARY_EXISTS(rt clock_gettime "time.h" NEED_LIBRT)
@@ -270,7 +275,7 @@ if(NOT MSVC AND NOT EMSCRIPTEN AND NOT INTERN_BUILD_MOBILE)
 endif()
 
 IF(USE_CUDA AND NOT USE_ROCM)
-  IF ($ENV{ATEN_STATIC_CUDA})
+  IF($ENV{ATEN_STATIC_CUDA})
     # CuFFT has a complicated static story (especially around CUDA < 9) because it has device callback support
     # we first have to build a fake lib that links with no device callbacks,
     # and then we link against this object file.
@@ -319,18 +324,18 @@ IF(USE_CUDA AND NOT USE_ROCM)
       ${CUDA_curand_LIBRARY})
   ENDIF()
 
-  if(CUDNN_FOUND)
+  if(CAFFE2_USE_CUDNN)
     list(APPEND ATen_CUDA_DEPENDENCY_LIBS ${CUDNN_LIBRARIES})
-  endif(CUDNN_FOUND)
+  endif()
 
   IF(USE_MAGMA)
     list(APPEND ATen_CUDA_DEPENDENCY_LIBS ${MAGMA_LIBRARIES})
-    IF ($ENV{TH_BINARY_BUILD})
+    IF($ENV{TH_BINARY_BUILD})
       list(APPEND ATen_CUDA_DEPENDENCY_LIBS
         "${BLAS_LIBRARIES};${BLAS_LIBRARIES};${BLAS_LIBRARIES}")
     ENDIF($ENV{TH_BINARY_BUILD})
   ENDIF(USE_MAGMA)
-  IF ($ENV{ATEN_STATIC_CUDA})
+  IF($ENV{ATEN_STATIC_CUDA})
     list(APPEND ATen_CUDA_DEPENDENCY_LIBS "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a")
     list(APPEND ATen_CUDA_DEPENDENCY_LIBS "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcudart_static.a")
   ENDIF($ENV{ATEN_STATIC_CUDA})
@@ -378,7 +383,7 @@ INSTALL(FILES "${CMAKE_CURRENT_BINARY_DIR}/cmake-exports/ATenConfig.cmake"
 if(INTERN_BUILD_MOBILE)
   set(INSTALL_HEADERS ${base_h} ${ATen_CORE_HEADERS})
 else()
-  set(INSTALL_HEADERS ${base_h} ${ATen_CORE_HEADERS} ${native_quantized_h} ${cuda_h} ${cudnn_h} ${hip_h} ${miopen_h})
+  set(INSTALL_HEADERS ${base_h} ${ATen_CORE_HEADERS} ${native_h} ${native_cpu_h} ${native_quantized_h} ${cuda_h} ${cudnn_h} ${hip_h} ${miopen_h})
 endif()
 
 # https://stackoverflow.com/questions/11096471/how-can-i-install-a-hierarchy-of-files-using-cmake

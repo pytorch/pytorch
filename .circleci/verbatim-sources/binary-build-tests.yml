@@ -12,9 +12,3 @@
 #    resource_class: gpu.medium
 #    <<: *binary_linux_test
 #
-#  binary_linux_libtorch_2.7m_cu100_test:
-#    environment:
-#      BUILD_ENVIRONMENT: "libtorch 2.7m cu100"
-#    resource_class: gpu.medium
-#    <<: *binary_linux_test
-

@@ -13,12 +13,12 @@ mkdir -p ${WORKSPACE_DIR}
 # If a local installation of conda doesn't exist, we download and install conda
 if [ ! -d "${WORKSPACE_DIR}/miniconda3" ]; then
   mkdir -p ${WORKSPACE_DIR}
-  retry curl https://repo.continuum.io/miniconda/Miniconda3-latest-MacOSX-x86_64.sh -o ${WORKSPACE_DIR}/miniconda3.sh
+  curl --retry 3 https://repo.continuum.io/miniconda/Miniconda3-latest-MacOSX-x86_64.sh -o ${WORKSPACE_DIR}/miniconda3.sh
   retry bash ${WORKSPACE_DIR}/miniconda3.sh -b -p ${WORKSPACE_DIR}/miniconda3
 fi
 export PATH="${WORKSPACE_DIR}/miniconda3/bin:$PATH"
 source ${WORKSPACE_DIR}/miniconda3/bin/activate
-retry conda install -y mkl mkl-include numpy pyyaml setuptools cmake cffi ninja
+retry conda install -y mkl mkl-include numpy pyyaml=5.3 setuptools=46.0.0 cmake cffi ninja
 
 # The torch.hub tests make requests to GitHub.
 #

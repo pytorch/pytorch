@@ -9,7 +9,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.testing import FileCheck
 
-from common_utils import run_tests, IS_SANDCASTLE, ProfilingMode, GRAPH_EXECUTOR, \
+from torch.testing._internal.common_utils import run_tests, IS_SANDCASTLE, ProfilingMode, GRAPH_EXECUTOR, \
     enable_profiling_mode
 from textwrap import dedent
 from itertools import product, permutations
@@ -64,14 +64,12 @@ class TestFuser(JitTestCase):
         self.assertTrue([node.kind() for node in graph.nodes()].count('prim::FusionGroup') == 1)
 
     def _test_fused_abs(self, device='cpu'):
-
-        @torch.jit.script
         def func(x):
             return x.abs() * 2
 
         a = torch.randn(5, device=device)
-        self.assertEqual(func(a), a.abs() * 2)
-        self.assertAllFused(func.graph_for(a))
+        scripted = self.checkScript(func, (a,))
+        self.assertAllFused(scripted.graph_for(a))
 
     @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
     @enable_cpu_fuser
@@ -162,7 +160,6 @@ class TestFuser(JitTestCase):
         # We shouldn't treat cat nodes as broadcasting. All their inputs
         # need to be checked for having the same map size, before we can
         # run the kernel.
-        @torch.jit.script
         def f(x, y):
             return torch.cat([x + 2 * x + x ** 2, y + 4 * y + y ** 3], dim=0)
 
@@ -171,8 +168,8 @@ class TestFuser(JitTestCase):
         x = torch.randn(2, 4, dtype=torch.float, device='cuda')
         y = torch.randn(1, 4, dtype=torch.float, device='cuda')
 
-        self.assertEqual(f(x, y).shape, (3, 4))
-        self.assertAllFused(f.graph_for(x, y))
+        scripted = self.checkScript(f, (x, y))
+        self.assertAllFused(scripted.graph_for(x, y))
 
     @unittest.skipIf(not RUN_CUDA, "No CUDA")
     def test_chunk_cuda(self):
@@ -283,6 +280,7 @@ class TestFuser(JitTestCase):
         self.assertAllFused(ge.graph_for(*inputs))
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.LEGACY, "borked on the legacy executor")
     def test_clamp(self):
         def func2(a, b):
             return torch.clamp(a + b, min=0, max=2)
@@ -309,7 +307,7 @@ class TestFuser(JitTestCase):
             with enable_profiling_mode():
                 warmup_backward(c.sum())
             graph = backward_graph(s)
-            self.assertAllFused(graph, except_for={'aten::Float'})
+            self.assertAllFused(graph, except_for={'aten::Float', 'aten::_grad_sum_to_size'})
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "no half support with profiling on")
@@ -319,7 +317,7 @@ class TestFuser(JitTestCase):
             return torch.nn.functional.relu(x)
 
         a = torch.randn(4, 4, dtype=torch.float, device='cuda', requires_grad=True)
-        s = torch.jit.script(func, (a,))
+        s = torch.jit.script(func)
         c = s(a)
         c = s(a)
         warmup_backward(c.sum())
@@ -522,9 +520,7 @@ class TestFuser(JitTestCase):
             return torch.threshold(x, 0, -10) + x + x + x
 
         x = torch.tensor([-1, -0.5, 0, 1, 2, 3], device='cuda')
-        scripted = torch.jit.script(f)
-
-        self.assertEqual(f(x), scripted(x))
+        scripted = self.checkScript(f, (x,))
         self.assertAllFused(scripted.graph_for(x))
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
@@ -535,8 +531,7 @@ class TestFuser(JitTestCase):
 
         x = torch.randn(4, 4, dtype=torch.float, device='cuda')
         p = 3
-        scripted = torch.jit.script(fn_test_scalar_arg, (x, p))
-        self.assertEqual(fn_test_scalar_arg(x, p), scripted(x, p))
+        scripted = self.checkScript(fn_test_scalar_arg, (x, p))
         self.assertAllFused(scripted.graph_for(x, p))
 
         x.requires_grad_(True)
@@ -547,13 +542,13 @@ class TestFuser(JitTestCase):
             # type: (Tensor, float) -> Tensor
             return p * (x * x + x)
 
-        scripted = torch.jit.script(fn_test_scalar_arg_requires_grad, (x, p))
+        scripted = torch.jit.script(fn_test_scalar_arg_requires_grad)
         out = scripted(x, p)
         self.assertAllFused(scripted.graph_for(x, p), except_for=("aten::size", "prim::BroadcastSizes",
                                                                   "aten::_size_if_not_equal"))
 
     @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
-    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "broken with profiling on")
+    @unittest.skip("deduplicating introduces aliasing in backward graph's outputs")
     @enable_cpu_fuser
     def test_fuser_deduplication(self):
         # See that fusion kernel outputs are deduplicated when removing  _grad_sum_to_size in the fuser's compilation
@@ -771,6 +766,7 @@ class TestFuser(JitTestCase):
         warmup_backward((hy + cy).sum())
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.LEGACY, "borked on the legacy executor")
     def test_rand_cuda(self):
         class M(torch.jit.ScriptModule):
             __constants__ = ['d']
@@ -820,6 +816,7 @@ class TestFuser(JitTestCase):
                                                          "aten::_size_if_not_equal"))
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.LEGACY, "borked on the legacy executor")
     def test_rand_broadcast_cuda(self):
         def fn_test_rand(x, y):
             r = torch.rand_like(y)
@@ -827,7 +824,7 @@ class TestFuser(JitTestCase):
 
         x = torch.randn(4, 4, dtype=torch.float, device='cuda')
         y = torch.randn(4, 4, dtype=torch.float, device='cuda')
-        script_f = torch.jit.script(fn_test_rand, (x, y))
+        script_f = torch.jit.script(fn_test_rand)
         out = script_f(x, y)
         self.assertAllFused(script_f.graph_for(x, y))
         x.requires_grad_(True)
@@ -894,15 +891,10 @@ class TestFuser(JitTestCase):
             res = torch.where(mask, x, y)
             return mask, res
 
-        script_f = torch.jit.script(f)
-
         x = torch.randn(4, 4, dtype=torch.double)
         y = torch.randn(4, 4, dtype=torch.double)
 
-        result1, result2 = script_f(x, y)
-        expected1, expected2 = f(x, y)
-        self.assertEqual(result1, expected1)
-        self.assertEqual(result2, expected2)
+        script_f = self.checkScript(f, (x, y))
         self.assertAllFused(script_f.graph_for(x, y), except_for={'prim::TupleConstruct'})
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")

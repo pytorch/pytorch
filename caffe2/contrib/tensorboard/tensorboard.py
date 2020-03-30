@@ -158,8 +158,11 @@ def tensorboard_events(c2_dir, tf_dir):
         return [(n, s) for (n, s) in summaries if s]
 
     def inferred_histo(summary, samples=1000):
-        np.random.seed(hash(
-            summary.std + summary.mean + summary.min + summary.max))
+        np.random.seed(
+            hash(
+                summary.std + summary.mean + summary.min + summary.max
+            ) % np.iinfo(np.int32).max
+        )
         samples = np.random.randn(samples) * summary.std + summary.mean
         samples = np.clip(samples, a_min=summary.min, a_max=summary.max)
         (hist, edges) = np.histogram(samples)

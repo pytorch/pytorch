@@ -632,7 +632,7 @@ search tree.
     .Arg("topN", "Number of nodes in outputs")
     .Input(0, "X", "Input data from previous layer")
     .Input(1, "W", "The matrix trained from Softmax Ops")
-    .Input(2, "b", "The bias traiend from Softmax Ops")
+    .Input(2, "b", "The bias trained from Softmax Ops")
     .Output(
         0,
         "Y_names",

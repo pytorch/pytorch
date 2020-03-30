@@ -15,8 +15,7 @@ void TestExpressionSpecification(DeprecatedTypeProperties& T) {
   ASSERT_TRUE(a.unsqueeze(4).equal(a.unsqueeze(-1)));
 
   // can unsqueeze scalar
-  auto b = randn(1, T);
-  b.unsafeGetTensorImpl()->maybe_zero_dim(true);
+  auto b = randn({}, T);
   ASSERT_TRUE(b.unsqueeze(0).equal(b.unsqueeze(-1)));
 }
 
@@ -28,7 +27,7 @@ void TestEmptyTensor(DeprecatedTypeProperties& T) {
 void TestScalarVs1Dim1Size(DeprecatedTypeProperties& T) {
   auto a = randn(1, T);
   ASSERT_TRUE(a.prod(0).equal(a.prod(-1)));
-  a.unsafeGetTensorImpl()->maybe_zero_dim(true);
+  a.resize_({});
   ASSERT_EQ(a.dim(), 0);
   ASSERT_TRUE(a.prod(0).equal(a.prod(-1)));
 }

@@ -9,15 +9,20 @@ class ParseError(Exception):
 class Report:
     """A report is a container of errors, and a summary on how many errors are found"""
 
-    HEAD = 'ERROR SUMMARY: '
-    TAIL = ' errors'
-
     def __init__(self, text, errors):
+        # text is something like
+        # ERROR SUMMARY: 1 error
+        # or
+        # ERROR SUMMARY: 2 errors
         self.text = text
-        self.num_errors = int(text[len(self.HEAD):len(text) - len(self.TAIL)])
+        self.num_errors = int(text.strip().split()[2])
         self.errors = errors
         if len(errors) != self.num_errors:
-            raise ParseError("Number of errors does not match")
+            if len(errors) == 10000 and self.num_errors > 10000:
+                # When there are more than 10k errors, cuda-memcheck only display 10k
+                self.num_errors = 10000
+            else:
+                raise ParseError("Number of errors does not match")
 
 
 class Error:

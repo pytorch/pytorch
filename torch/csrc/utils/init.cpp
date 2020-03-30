@@ -23,7 +23,7 @@ void initThroughputBenchmarkBindings(PyObject* module) {
       .def_readonly("num_iters", &BenchmarkExecutionStats::num_iters);
 
   py::class_<ThroughputBenchmark>(m, "ThroughputBenchmark", py::dynamic_attr())
-      .def(py::init<jit::script::Module>())
+      .def(py::init<jit::Module>())
       .def(py::init<py::object>())
       .def(
           "add_input",
@@ -41,7 +41,7 @@ void initThroughputBenchmarkBindings(PyObject* module) {
         // The benchmark always runs without the GIL. GIL will be used where
         // needed. This will happen only in the nn.Module mode when manipulating
         // inputs and running actual inference
-        AutoNoGIL no_gil_guard;
+        pybind11::gil_scoped_release no_gil_guard;
         return self.benchmark(config);
       });
 

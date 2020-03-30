@@ -131,7 +131,7 @@ class CAFFE2_API OpSchema {
   OpSchema& AllowInplace(std::function<bool(int, int)> inplace);
   OpSchema& AllowInplace(set<std::pair<int, int>> inplace);
   OpSchema& AllowOneToOneInplace();
-  // Sets the rule to enforce in-place opeartion.
+  // Sets the rule to enforce in-place operation.
   OpSchema& EnforceInplace(std::function<bool(int, int)> inplace);
   OpSchema& EnforceInplace(set<std::pair<int, int>> inplace);
   OpSchema& EnforceOneToOneInplace();

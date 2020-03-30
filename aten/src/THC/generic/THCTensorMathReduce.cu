@@ -117,6 +117,7 @@ void THCTensor_(prod)(THCState* state, THCTensor *self, THCTensor *src, int dime
 void THCTensor_(renorm)(THCState *state, THCTensor* self, THCTensor* src, scalar_t value, int dimension, scalar_t maxnorm)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self, src));
+  dimension = at::maybe_wrap_dim(dimension, src);
   THArgCheck(dimension >= 0 && dimension < THCTensor_(nDimensionLegacyNoScalars)(state, src), 3, "invalid dimension");
   THArgCheck(THCNumerics<scalar_t>::gt(value, scalar_cast<scalar_t>(0)), 2, "non-positive-norm not supported");
   THArgCheck(THCTensor_(nDimensionLegacyNoScalars)(state, src) > 1, 1, "need at least 2 dimensions");
@@ -133,7 +134,7 @@ void THCTensor_(renorm)(THCState *state, THCTensor* self, THCTensor* src, scalar
     dim3 threads(32);
 
     THCTensor_kernel_renorm<scalar_t, accreal>
-      <<<grid, threads, 0, THCState_getCurrentStream(state)>>>
+      <<<grid, threads, 0, c10::cuda::getCurrentCUDAStream()>>>
       (THCTensor_(data)(state, data), scalar_cast<accreal>(value), size, scalar_cast<accreal>(maxnorm));
 
     cudaError_t errcode = cudaGetLastError();
@@ -146,44 +147,6 @@ void THCTensor_(renorm)(THCState *state, THCTensor* self, THCTensor* src, scalar
   THCTensor_(resizeAs)(state, self, self_);
   THCTensor_(freeCopyTo)(state, self_, self);
   THCTensor_(free)(state, data);
-}
-
-void THCTensor_(std_single)(THCState *state, THCTensor *self_, THCTensor *src, int dimension, bool unbiased, int keepdim)
-{
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src));
-
-  WelfordData<accreal, scalar_t> init;
-  init.reset();
-  if (!THC_reduceDim<scalar_t>(state, self_, src,
-                           ModifyWelford<WelfordData<accreal, scalar_t>>{},
-                           ReduceWelford<accreal, scalar_t>{},
-                           VarianceWelford<accreal, scalar_t>{unbiased, true},
-                           init,
-                           dimension,
-                           keepdim)) {
-    THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-  }
-
-  THCudaCheck(cudaGetLastError());
-}
-
-void THCTensor_(var_single)(THCState *state, THCTensor *self_, THCTensor *src, int dimension, bool unbiased, int keepdim)
-{
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src));
-
-  WelfordData<accreal, scalar_t> init;
-  init.reset();
-  if (!THC_reduceDim<scalar_t>(state, self_, src,
-                           ModifyWelford<WelfordData<accreal, scalar_t>>{},
-                           ReduceWelford<accreal, scalar_t>{},
-                           VarianceWelford<accreal, scalar_t>{unbiased, false},
-                           init,
-                           dimension,
-                           keepdim)) {
-    THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-  }
-
-  THCudaCheck(cudaGetLastError());
 }
 
 accreal THCTensor_(std_all)(THCState *state, THCTensor *self, bool unbiased)
@@ -213,163 +176,6 @@ accreal THCTensor_(var_all)(THCState *state, THCTensor *self, bool unbiased)
 
   THCudaCheck(cudaGetLastError());
   return val;
-}
-
-void THCTensor_(norm)(THCState *state, THCTensor* self, THCTensor* src, scalar_t _value, int dimension, int keepdim)
-{
-  const accreal value = scalar_cast<accreal>(_value);
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self, src));
-  if (THCNumerics<accreal>::eq(value, scalar_cast<accreal>(0))) {
-    THC_reduceDim<scalar_t>(state, self, src,
-                        TensorNonZeroOp<accreal>{},
-                        ReduceAdd<accreal>{},
-                        thrust::identity<accreal>{},
-                        scalar_cast<accreal>(0),
-                        dimension, keepdim);
-  } else if (THCNumerics<accreal>::eq(value, scalar_cast<accreal>(1))) {
-    THC_reduceDim<scalar_t>(state, self, src,
-                        TensorNormOp<accreal, 1>{value},
-                        ReduceAdd<accreal>{},
-                        thrust::identity<accreal>{},
-                        scalar_cast<accreal>(0),
-                        dimension, keepdim);
-  } else if (THCNumerics<accreal>::eq(value, scalar_cast<accreal>(2))) {
-    THC_reduceDim<scalar_t>(state, self, src,
-                        TensorNormOp<accreal, 2>{value},
-                        ReduceAdd<accreal>{},
-                        ReducePow<accreal>{scalar_cast<accreal>(.5)},
-                        scalar_cast<accreal>(0),
-                        dimension, keepdim);
-  } else if (THCNumerics<accreal>::eq(value, scalar_cast<accreal>(INFINITY))) {
-    THC_reduceDim<scalar_t>(state, self, src,
-                        TensorNormOp<accreal, 1>{value},
-                        ReduceMax<accreal>{},
-                        thrust::identity<accreal>{},
-                        scalar_cast<accreal>(0),
-                        dimension, keepdim);
-  } else if (THCNumerics<accreal>::eq(value, scalar_cast<accreal>(-INFINITY))) {
-    THC_reduceDim<scalar_t>(state, self, src,
-                        TensorNormOp<accreal, 1>{value},
-                        ReduceMin<accreal>{},
-                        thrust::identity<accreal>{},
-                        scalar_cast<accreal>(INFINITY),
-                        dimension, keepdim);
-  } else {
-    THC_reduceDim<scalar_t>(state, self, src,
-                        TensorNormOp<accreal, -1>{value},
-                        ReduceAdd<accreal>{},
-                        ReducePow<accreal>{THCNumerics<accreal>::cinv(value)},
-                        scalar_cast<accreal>(0),
-                        dimension, keepdim);
-  }
-
-  THCudaCheck(cudaGetLastError());
-}
-
-accreal THCTensor_(normall)(THCState *state, THCTensor *self, scalar_t _value)
-{
-  const accreal value = scalar_cast<accreal>(_value);
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self));
-  accreal result;
-
-  if (THCNumerics<accreal>::eq(value, scalar_cast<accreal>(0))) {
-    THC_reduceAll<scalar_t>(state, self,
-                        TensorNonZeroOp<accreal>{},
-                        ReduceAdd<accreal>{},
-                        scalar_cast<accreal>(0),
-                        &result, 0);
-  } else if (THCNumerics<accreal>::eq(value, scalar_cast<accreal>(1))) {
-    THC_reduceAll<scalar_t>(state, self,
-                        TensorNormOp<accreal, 1>{value},
-                        ReduceAdd<accreal>{},
-                        scalar_cast<accreal>(0),
-                        &result, 0);
-  } else if (THCNumerics<accreal>::eq(value, scalar_cast<accreal>(2))) {
-    THC_reduceAll<scalar_t>(state, self,
-                        TensorNormOp<accreal, 2>{value},
-                        ReduceAdd<accreal>{},
-                        scalar_cast<accreal>(0),
-                        &result, 0);
-    result = THCNumerics<accreal>::sqrt(result);
-  } else if (THCNumerics<accreal>::eq(value, scalar_cast<accreal>(INFINITY))) {
-    THC_reduceAll<scalar_t>(state, self,
-                        TensorNormOp<accreal, 1>{value},
-                        ReduceMax<accreal>{},
-                        scalar_cast<accreal>(0),
-                        &result, 0);
-  } else if (THCNumerics<accreal>::eq(value, scalar_cast<accreal>(-INFINITY))) {
-    THC_reduceAll<scalar_t>(state, self,
-                        TensorNormOp<accreal, 1>{value},
-                        ReduceMin<accreal>{},
-                        scalar_cast<accreal>(INFINITY),
-                        &result, 0);
-  } else {
-    THC_reduceAll<scalar_t>(state, self,
-                        TensorNormOp<accreal, -1>{value},
-                        ReduceAdd<accreal>{},
-                        scalar_cast<accreal>(0),
-                        &result, 0);
-    result = THCNumerics<accreal>::pow(result,
-                                       THCNumerics<accreal>::cinv(value));
-  }
-
-  THCudaCheck(cudaGetLastError());
-  return result;
-}
-
-accreal THCTensor_(dist)(THCState *state, THCTensor *self,
-                         THCTensor *src, scalar_t _value)
-{
-  const accreal value = scalar_cast<accreal>(_value);
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self, src));
-  self = THCTensor_(newContiguous)(state, self);
-  ptrdiff_t size = THCTensor_(nElement)(state, self);
-  src = THCTensor_(newContiguous)(state, src);
-  thrust::device_ptr<scalar_t> self_data(THCTensor_(data)(state, self));
-  thrust::device_ptr<scalar_t> src_data(THCTensor_(data)(state, src));
-
-  THCThrustAllocator thrustAlloc(state);
-  accreal result;
-
-  if (THCNumerics<accreal>::eq(value, scalar_cast<accreal>(INFINITY))) {
-    result = thrust::inner_product(
-#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
-      thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
-#endif
-      self_data, self_data+size, src_data, scalar_cast<accreal>(0),
-      ReduceMax<accreal>(),
-      ThrustTensorDistOp<scalar_t, accreal>(scalar_cast<scalar_t>(1)));
-  } else if (THCNumerics<accreal>::eq(value, scalar_cast<accreal>(-INFINITY))) {
-    result = thrust::inner_product(
-#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
-      thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
-#endif
-      self_data, self_data+size, src_data, scalar_cast<accreal>(INFINITY),
-      ReduceMin<accreal>(),
-      ThrustTensorDistOp<scalar_t, accreal>(scalar_cast<scalar_t>(1)));
-  } else if (THCNumerics<accreal>::eq(value, scalar_cast<accreal>(0))) {
-    result = thrust::inner_product(
-#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
-      thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
-#endif
-      self_data, self_data+size, src_data, scalar_cast<accreal>(0),
-      thrust::plus<accreal>(),
-      ThrustTensorDistOp<scalar_t, accreal>(scalar_cast<scalar_t>(0)));
-  } else {
-    result = thrust::inner_product(
-#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
-      thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
-#endif
-      self_data, self_data+size, src_data, scalar_cast<accreal>(0),
-      thrust::plus<accreal>(),
-      ThrustTensorDistOp<scalar_t, accreal>(value));
-
-    result = THCNumerics<accreal>::pow(result, THCNumerics<accreal>::cinv(value));
-  }
-  THCTensor_(free)(state, src);
-  THCTensor_(free)(state, self);
-
-  return result;
 }
 
 #endif

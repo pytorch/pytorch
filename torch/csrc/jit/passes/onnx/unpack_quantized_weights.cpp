@@ -1,13 +1,13 @@
 #include <torch/csrc/jit/passes/onnx/unpack_quantized_weights.h>
-#include <torch/csrc/jit/constants.h>
-#include <torch/csrc/jit/irparser.h>
+#include <torch/csrc/jit/ir/constants.h>
+#include <torch/csrc/jit/ir/irparser.h>
+#include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
-#include <torch/csrc/jit/subgraph_matcher.h>
 #include <stack>
 
 using ::c10::Dispatcher;
-using ::c10::TensorTypeId;
+using ::c10::DispatchKey;
 namespace torch {
 namespace jit {
 namespace onnx {
@@ -30,6 +30,17 @@ inline Result callOpUnboxed(const c10::OperatorHandle& op, Args... args) {
 double getScaleFromInput(Node* input_node) {
   c10::optional<IValue> scale;
   std::string input_name = input_node->kind().toQualString();
+  std::unordered_set<std::string> noscale_ops = {"quantized::max_pool2d",
+                                                 "aten::max_pool2d",
+                                                 "aten::relu",
+                                                 "prim::ListUnpack",
+                                                 "aten::split_with_sizes",
+                                                 "quantized::nchw2nhwc",
+                                                 "quantized::nhwc2nchw",
+                                                 "aten::slice",
+                                                 "aten::avg_pool2d",
+                                                 "quantized::cat",
+                                                 "prim::ListConstruct"};
   if (input_name == "aten::quantize_per_tensor") {
     TORCH_CHECK(
         input_node->inputs().size() > 1,
@@ -69,21 +80,20 @@ double getScaleFromInput(Node* input_node) {
         "quantized::add expected scale to be 3rd input");
     scale = toIValue(input_node->inputs()[2]);
     return scale.value().toDouble();
+  } else if (input_name == "aten::sigmoid") {
+    // For the _caffe2::Int8Sigmoid op output scale is 1.0/256
+    // And output zero_point is set to 0 (quint8 type).
+    return 1.0L / 256;
   }
   // For the ops below the scale is not part of the op signature, so we traverse
   // up the graph to get the scale from its input when defined in the graph.
-  else if (input_name == "quantized::max_pool2d") {
-    auto tmp = input_node->inputs()[0]->node();
-    return getScaleFromInput(tmp);
-  } else if (input_name == "aten::relu") {
-    auto tmp = input_node->inputs()[0]->node();
-    return getScaleFromInput(tmp);
-  } else if (input_name == "prim::ListUnpack") {
-    return getScaleFromInput(input_node->inputs()[0]->node());
-  } else if (input_name == "aten::split_with_sizes") {
+  else if (noscale_ops.find(input_name) != noscale_ops.end()) {
     return getScaleFromInput(input_node->inputs()[0]->node());
   }
-  TORCH_INTERNAL_ASSERT(false, "Unrecognized quantized operator while trying to compute q_scale for operator ", input_name);
+  TORCH_INTERNAL_ASSERT(
+      false,
+      "Unrecognized quantized operator while trying to compute q_scale for operator ",
+      input_name);
 }
 
 Node* CreateQuantizedWeights(
@@ -126,7 +136,7 @@ void unpackQuantizedWeightsHelper(
     const std::string& unpack_fn) {
   Graph pattern_graph;
   std::unordered_map<std::string, Value*> vmap;
-  script::parseIR(pattern, &pattern_graph, vmap);
+  parseIR(pattern, &pattern_graph, vmap);
   const auto& matches = findPatternMatches(pattern_graph, *graph);
 
   for (const auto& match : matches) {
@@ -246,6 +256,57 @@ void UnpackQuantizedWeights(
       graph, paramsDict, qconv, "quantized::conv_unpack");
   unpackQuantizedWeightsHelper(
       graph, paramsDict, qconv_relu, "quantized::conv_unpack");
+}
+
+// Caffe2 expects quantized ops to be in NHWC format while pytorch inputs are in
+// NCHW. This pass inserts permutes to convert from NCHW to NHWC before each
+// conv op and add another permute from NHWC to NCHW after the conv op.
+void insertPermutesHelper(
+    std::shared_ptr<Graph>& graph,
+    std::map<std::string, at::Tensor>& paramsDict,
+    const std::string& pattern) {
+  Graph pattern_graph;
+  std::unordered_map<std::string, Value*> vmap;
+  parseIR(pattern, &pattern_graph, vmap);
+
+  const auto& matches = findPatternMatches(pattern_graph, *graph);
+
+  for (const auto& match : matches) {
+    auto match_vmap = match.values_map;
+    auto op_node = match_vmap.at(vmap.at("r"))->node();
+    auto input_node = match_vmap.at(vmap.at("r"))->node()->inputs()[0]->node();
+
+    Node* permute_node_before = graph->create(
+        Symbol::fromQualString("quantized::nchw2nhwc"), {input_node->output()});
+    permute_node_before->insertBefore(op_node);
+    op_node->removeInput(0);
+    op_node->insertInput(0, permute_node_before->output());
+
+    Node* permute_node_after = graph->create(
+        Symbol::fromQualString("quantized::nhwc2nchw"),
+        {op_node->outputs()[0]});
+    permute_node_after->insertAfter(op_node);
+    auto v = op_node->outputs().at(0);
+    v->replaceAllUsesWith(permute_node_after->outputs().at(0));
+    permute_node_after->removeInput(0);
+    permute_node_after->addInput(v);
+  }
+}
+
+void insertPermutes(
+    std::shared_ptr<Graph>& graph,
+    std::map<std::string, at::Tensor>& paramsDict) {
+  std::string qconv = R"(
+  graph(%input, %weight, %bias, %stride, %padding, %dilation, %groups, %w_scale, %w_zero_point):
+        %r = quantized::conv2d(%input, %weight, %bias, %stride, %padding, %dilation, %groups, %w_scale, %w_zero_point)
+        return (%r) )";
+  std::string qconv_relu = R"(
+  graph(%input, %weight, %bias, %stride, %padding, %dilation, %groups, %w_scale, %w_zero_point):
+        %r = quantized::conv2d_relu(%input, %weight, %bias, %stride, %padding, %dilation, %groups, %w_scale, %w_zero_point)
+        return (%r) )";
+
+  insertPermutesHelper(graph, paramsDict, qconv);
+  insertPermutesHelper(graph, paramsDict, qconv_relu);
 }
 
 } // namespace jit

@@ -23,6 +23,7 @@ def onnxifi_caffe2_net(
         max_seq_size=1,
         debug=False,
         use_onnx=True,
+        merge_fp32_inputs_into_fp16=False,
         adjust_batch=True,
         black_list=None,
         weight_names=None):
@@ -40,6 +41,7 @@ def onnxifi_caffe2_net(
                              max_seq_size,
                              adjust_batch,
                              debug,
+                             merge_fp32_inputs_into_fp16,
                              use_onnx)
     pred_net_cut = caffe2_pb2.NetDef()
     pred_net_cut.ParseFromString(pred_net_str)

@@ -1,10 +1,16 @@
 import numpy as np
-
+import math
 import torch
 import io
 from copy import deepcopy
+from hypothesis import given
+from hypothesis import strategies as st
 
-from common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests
+import torch.testing._internal.hypothesis_utils as hu
+
+hu.assert_deadline_disabled()
+
 import tempfile
 
 class Foo(torch.nn.Module):
@@ -12,6 +18,49 @@ class Foo(torch.nn.Module):
         super(Foo, self).__init__()
         self.qscheme = torch.per_tensor_symmetric
 
+def _calculate_dynamic_qparams(X, dtype, reduce_range=False):
+    """Calculate the dynamic quantization parameters (scale, zero_point)
+    according to the min and max element of the tensor"""
+    if isinstance(X, torch.Tensor):
+        X = X.numpy()
+    if dtype == torch.qint8:
+        if reduce_range:
+            qmin, qmax = -64, 63
+        else:
+            qmin, qmax = -128, 127
+    else:  # dtype == torch.quint8
+        if reduce_range:
+            qmin, qmax = 0, 127
+        else:
+            qmin, qmax = 0, 255
+
+    min_val = X.min().astype(dtype=np.float32)
+    max_val = X.max().astype(dtype=np.float32)
+    min_val = min(0.0, min_val)
+    max_val = max(0.0, max_val)
+    scale = (np.float64(max_val) - min_val) / (qmax - qmin)
+    if scale == 0.0 or math.isinf(1.0 / scale):
+        scale = np.float64(0.1)
+        zero_point = 0
+
+    zero_point_from_min = qmin - min_val / float(scale)
+    zero_point_from_max = qmax - max_val / float(scale)
+    zero_point_from_min_error = abs(qmin) - abs(min_val / float(scale))
+    zero_point_from_max_error = abs(qmax) - abs(max_val / float(scale))
+    if zero_point_from_min_error < zero_point_from_max_error:
+        initial_zero_point = zero_point_from_min
+    else:
+        initial_zero_point = zero_point_from_max
+    nudged_zero_point = 0
+
+    if initial_zero_point < qmin:
+        nudged_zero_point = qmin
+    elif initial_zero_point > qmax:
+        nudged_zero_point = qmax
+    else:
+        nudged_zero_point = int(round(initial_zero_point))
+
+    return [scale.astype(np.float32), int(nudged_zero_point)]
 
 class TestQuantizedTensor(TestCase):
     def test_qtensor(self):
@@ -69,6 +118,18 @@ class TestQuantizedTensor(TestCase):
         qr = torch.quantize_per_tensor(r, scale, zero_point, torch.quint8)
         rqr = qr.dequantize()
         self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
+
+    # legacy constructor/new doesn't support qtensors
+    def test_qtensor_legacy_new_failure(self):
+        r = torch.rand(3, 2, dtype=torch.float) * 4 - 2
+        scale = 0.02
+        zero_point = 2
+        qr = torch.quantize_per_tensor(r, scale, zero_point, torch.quint8)
+        self.assertRaises(RuntimeError, lambda: qr.new(device='cpu'))
+        self.assertRaises(RuntimeError, lambda: qr.new(r.storage()))
+        self.assertRaises(RuntimeError, lambda: qr.new(r))
+        self.assertRaises(RuntimeError, lambda: qr.new(torch.Size([2, 3])))
+        self.assertRaises(RuntimeError, lambda: qr.new([6]))
 
     def test_per_channel_qtensor_creation(self):
         numel = 10
@@ -155,7 +216,7 @@ class TestQuantizedTensor(TestCase):
         qr = torch.quantize_per_tensor(r, scale, zero_point, torch.qint8)
         qr = qr.transpose(0, 1)
         rqr = qr.dequantize()
-        # compare transpose + dequantized result with orignal transposed result
+        # compare transpose + dequantized result with original transposed result
         self.assertTrue(np.allclose(r.numpy().transpose([1, 0, 2, 3]), rqr.numpy(), atol=2 / scale))
 
         qr = torch.quantize_per_tensor(r, scale, zero_point, torch.qint8)
@@ -225,7 +286,7 @@ class TestQuantizedTensor(TestCase):
 
     def test_qtensor_per_channel_load_save(self):
         r = torch.rand(20, 10, dtype=torch.float) * 4 - 2
-        scales = torch.rand(10) * 0.02 + 0.01
+        scales = torch.rand(10, dtype=torch.double) * 0.02 + 0.01
         zero_points = torch.round(torch.rand(10) * 20 + 1).to(torch.long)
         # quint32 is not supported yet
         for dtype in [torch.quint8, torch.qint8]:
@@ -266,6 +327,12 @@ class TestQuantizedTensor(TestCase):
         q = torch._make_per_tensor_quantized_tensor(q_int, scale=scale, zero_point=zero_point)
         qc = deepcopy(q)
         self.assertEqual(qc, q)
+
+        # can't copy from quantized tensor to non-quantized tensor
+        r = torch.empty([numel], dtype=torch.float)
+        q = torch._empty_affine_quantized([numel], scale=scale, zero_point=zero_point, dtype=torch.quint8)
+        with self.assertRaisesRegex(RuntimeError, "please use dequantize"):
+            r.copy_(q)
 
     def test_qtensor_clone(self):
         numel = 10
@@ -345,6 +412,18 @@ class TestQuantizedTensor(TestCase):
 
         self.assertEqual(f2.qscheme, torch.per_tensor_symmetric)
 
+    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=2, max_dims=4,
+                                              min_side=1, max_side=10),
+                       qparams=hu.qparams()),
+           reduce_range=st.booleans()
+           )
+    def test_choose_qparams(self, X, reduce_range):
+        X, (scale, zero_point, torch_type) = X
+        X = torch.from_numpy(X)
+        X_scale, X_zp = _calculate_dynamic_qparams(X, torch.quint8, reduce_range=reduce_range)
+        qparams = torch._choose_qparams_per_tensor(X, reduce_range)
+        np.testing.assert_array_almost_equal(X_scale, qparams[0], decimal=3)
+        self.assertEqual(X_zp, qparams[1])
 
 if __name__ == "__main__":
     run_tests()

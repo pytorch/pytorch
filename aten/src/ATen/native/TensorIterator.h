@@ -3,16 +3,16 @@
 #include <ATen/ATen.h>
 #include <c10/util/FunctionRef.h>
 #include <c10/util/SmallVector.h>
+#include <c10/util/TypeCast.h>
 #include <ATen/core/Range.h>
-#include <ATen/detail/ScalarTypeConversions.h>
 #include <bitset>
 #include <c10/util/Optional.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/core/EnableNamedTensor.h>
+#include <ATen/Parallel.h>
 
 // TensorIterator is a helper class for element-wise operations, such as
-// arithmetic, comparisions, and trigonometric functions. It handles
+// arithmetic, comparisons, and trigonometric functions. It handles
 // broadcasting and type conversions of operands.
 //
 // This is inspired by NumPy's Array Iterator API (NpyIter).
@@ -133,6 +133,13 @@ struct CAFFE2_API OperandInfo {
 
 struct SplitUntil32Bit;
 
+enum class FastSetupType : uint8_t {
+  NONE,
+  CONTIGUOUS,
+  CHANNELS_LAST,
+  NON_OVERLAPPING_DENSE
+};
+
 enum class CommonDTypeStrategy : uint8_t {
   NONE, // Do not compute a common dtype
   CHECK, // Compute and validate a common dtype but don't promote.
@@ -180,6 +187,7 @@ struct CAFFE2_API TensorIterator {
   int ntensors() const { return operands_.size(); }
   int noutputs() const { return num_outputs_; }
   int ninputs() const { return ntensors() - noutputs(); }
+  IntArrayRef view_offsets() const { return view_offsets_; }
 
   /// number of elements in the output operand. this is the same as numel() for
   /// operations that are not reductions.
@@ -253,11 +261,11 @@ struct CAFFE2_API TensorIterator {
   template <typename T>
   T scalar_value(int arg) {
     auto& op = operands_[arg];
-    return at::detail::load<T>(op.data, op.tensor.scalar_type());
+    return c10::fetch_and_cast<T>(op.tensor.scalar_type(), op.data);
   }
 
-  void for_each(loop_t loop);
-  void for_each(loop2d_t loop);
+  void for_each(loop_t loop, int64_t grain_size = at::internal::GRAIN_SIZE);
+  void for_each(loop2d_t loop, int64_t grain_size = at::internal::GRAIN_SIZE);
 
   void parallel_reduce(loop2d_t loop);
 
@@ -300,8 +308,14 @@ struct CAFFE2_API TensorIterator {
   /// CUDA reductions.
   bool is_final_output() const { return final_output_; }
 
-  bool needs_dynamic_casting() const {
-    return (common_dtype_strategy_ != CommonDTypeStrategy::NONE) && have_differing_types_;
+  bool has_contiguous_first_dim() const {
+    int num_tensors = ntensors();
+    for (int i = 0; i < num_tensors; i++) {
+      if (strides(i)[0] != element_size(i)) {
+        return false;
+      }
+    }
+    return true;
   }
 
   void set_check_mem_overlap(bool check_mem_overlap) {
@@ -355,21 +369,19 @@ protected:
   void compute_types();
   std::tuple<Device, ScalarType, bool> compute_common_type();
   void allocate_outputs();
-  void fast_set_up();
-  bool can_use_fast_set_up();
-#ifdef BUILD_NAMEDTENSOR
+  bool fast_set_up();
+  FastSetupType compute_fast_setup_type();
   void compute_names();
   void propagate_names_to_outputs();
-#endif
   void coalesce_dimensions();
   void analyze_memory_format();
 
 protected:
   DimVector shape_;
   DimVector perm_;
-#ifdef BUILD_NAMEDTENSOR
+  /// The index offsets into the original tensors for each dimension
+  DimVector view_offsets_;
   NameVector names_;
-#endif
   SmallVector<OperandInfo, 4> operands_;
   int num_outputs_ = 0;
   CommonDTypeStrategy common_dtype_strategy_ = CommonDTypeStrategy::CHECK;
@@ -382,9 +394,9 @@ protected:
   bool promote_gpu_output_dtypes_ = false;
   bool final_output_ = true;
   bool check_mem_overlap_ = false;
-  bool have_differing_types_ = false;
   bool all_ops_same_shape_ = false;
   bool requires_channels_last_output_ = false;
+  bool requires_channels_last_3d_output_ = false;
 };
 /// A container-like struct that acts as if it contains splits of a
 /// TensorIterator that can use 32-bit indexing. Taken together the splits cover

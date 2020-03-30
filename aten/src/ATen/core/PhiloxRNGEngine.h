@@ -122,10 +122,10 @@ public:
     uint32_t nlo = static_cast<uint32_t>(n);
     uint32_t nhi = static_cast<uint32_t>(n >> 32);
     counter[0] += nlo;
-    // if overflow in x has occured, carry over to nhi
+    // if overflow in x has occurred, carry over to nhi
     if (counter[0] < nlo) {
       nhi++;
-      // if overflow in nhi has occured during carry over,
+      // if overflow in nhi has occurred during carry over,
       // propagate that overflow to y and exit to increment z
       // otherwise return
       counter[1] += nhi;
@@ -135,7 +135,7 @@ public:
         }
       }
     } else {
-      // if overflow in y has occured during addition,
+      // if overflow in y has occurred during addition,
       // exit to increment z
       // otherwise return
       counter[1] += nhi;

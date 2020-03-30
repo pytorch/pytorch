@@ -16,9 +16,10 @@
 
 namespace at {
 namespace native {
-namespace {
 
 DEFINE_DISPATCH(qmaxpool_2d_nhwc_stub);
+
+namespace {
 
 /* Computes the spatial 2D max pooling with dilation.
 
@@ -149,10 +150,12 @@ Tensor q_maxpool_2d(
     // vectorization.
     Tensor qy = at::_empty_affine_quantized(
         oSizes,
-        qx.options().dtype(toQIntType(qx.scalar_type())),
+        qx.options()
+          .dtype(toQIntType(qx.scalar_type()))
+          .memory_format(qx.suggest_memory_format()),
         qx.q_scale(),
         qx.q_zero_point(),
-        qx.suggest_memory_format());
+        c10::nullopt);
     qmaxpool_2d_nhwc_stub(qx.device().type(), qx, iC, iH, iW, oH, oW, kH, kW, sH, sW, pH, pW, dH, dW, qy);
     return qy;
   } else {
@@ -401,7 +404,7 @@ class QMaxPool2D_arr_args final : public torch::OperatorKernel {
       std::vector<int64_t> dilation,
       bool ceil_mode) {
     #ifdef USE_PYTORCH_QNNPACK
-    if (at::globalContext().qEngine() == at::QEngine::QNNPACK && qx.scalar_type() == kQUInt8) {
+    if (at::globalContext().qEngine() == at::QEngine::QNNPACK && qx.scalar_type() == kQUInt8 && !ceil_mode) {
       return qnnpack_maxpool(qx, kernel_size, stride, padding, dilation, ceil_mode);
     }
     #endif
@@ -417,7 +420,7 @@ static auto registry = torch::RegisterOperators().op(
     "int[] dilation,"
     "bool ceil_mode) -> Tensor",
     torch::RegisterOperators::options().kernel<QMaxPool2D_arr_args>(
-        TensorTypeId::QuantizedCPUTensorId));
+        DispatchKey::QuantizedCPUTensorId));
 
 } // namespace
 } // namespace native

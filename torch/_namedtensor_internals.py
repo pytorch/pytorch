@@ -1,4 +1,3 @@
-import torch
 from torch._six import PY2
 from collections import OrderedDict
 
@@ -9,14 +8,8 @@ subject to change or deletion.
 """
 
 
-def assert_namedtensor_build(api_name):
-    if not torch._C._BUILD_NAMEDTENSOR:
-        raise RuntimeError('NYI: {} is experimental and a part '
-                           'of our named tensors project.'.format(api_name))
-
-
 def check_serializing_named_tensor(tensor):
-    if torch._C._BUILD_NAMEDTENSOR and tensor.has_names():
+    if tensor.has_names():
         raise RuntimeError(
             "NYI: Named tensors don't support serialization. Please drop "
             "names via `tensor = tensor.rename(None)` before serialization.")
@@ -136,8 +129,6 @@ def update_names(tensor, names, rename_map, inplace):
 
     Finally, tensor.rename has an in-place version called tensor.rename_.
     """
-    assert_namedtensor_build(namer_api_name(inplace))
-
     has_names = len(names) > 0
     has_rename_pairs = bool(rename_map)
     if has_names and has_rename_pairs:

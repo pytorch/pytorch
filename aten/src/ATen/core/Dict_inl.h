@@ -1,7 +1,6 @@
 #pragma once
 
 #include <ATen/core/ivalue.h>
-#include <ATen/core/jit_type.h>
 
 namespace c10 {
 
@@ -20,14 +19,28 @@ inline bool shallowEquals(const IValue& lhs, const IValue& rhs) {
     return rhs.isDouble() && lhs.toDouble() == rhs.toDouble();
   } else if (lhs.isBool()) {
     return rhs.isBool() && lhs.toBool() == rhs.toBool();
-  } else if (lhs.isIntList()) {
-    return rhs.isIntList() && lhs.toIntListRef() == rhs.toIntListRef();
+  } else if (lhs.isList()) {
+    if (!rhs.isList()) {
+      return false;
+    }
+    auto l = lhs.toListRef();
+    auto r = rhs.toListRef();
+    if (l.size() != r.size()) {
+      return false;
+    }
+    for (size_t i = 0, N = l.size(); i < N; ++i) {
+      if (!shallowEquals(l[i], r[i])) {
+        return false;
+      }
+    }
+    return true;
   } else if (lhs.isTensor()) {
     return lhs.toTensor().is_same(rhs.toTensor());
   } else {
     AT_ERROR("shallowEquals(IValue, IValue) not implemented for type ", lhs.tagKind());
   }
 }
+
 
 template<class Key, class Value>
 Dict<Key, Value> toTypedDict(GenericDict dict) {
@@ -57,7 +70,8 @@ inline size_t DictKeyHash::operator()(const IValue& ivalue) const {
   } else if (ivalue.isTensor()) {
     return std::hash<TensorImpl*>()(ivalue.toTensor().unsafeGetTensorImpl());
   } else {
-    throw std::runtime_error("Can't hash IValues with this tag");
+    throw std::runtime_error(
+        "Can't hash IValues with tag '" + ivalue.tagKind() + "'");
   }
 }
 
@@ -201,4 +215,39 @@ void Dict<Key, Value>::unsafeSetValueType(TypePtr t) {
   impl_->elementTypes.valueType = std::move(t);
 }
 
+template <class Key_, class Value_>
+bool operator==(const Dict<Key_, Value_>& lhs, const Dict<Key_, Value_>& rhs) {
+  if (lhs.impl_ == rhs.impl_) {
+    // Dicts with the same identity trivially compare equal.
+    return true;
+  }
+
+  // TODO: when we define equality on IValue, we can just defer to the
+  // operator== implementation of the underlying map.
+  // For now, do the comparison manually to avoid invoking the template
+  // specialization for IValue equality
+  if (lhs.size() != rhs.size()) {
+    return false;
+  }
+  for (const auto& pr : lhs) {
+    auto it = rhs.find(pr.key());
+    if (it == rhs.end()) {
+      return false;
+    }
+    if (it->value() != pr.value()) {
+      return false;
+    }
+  }
+  return true;
+}
+
+template <class Key_, class Value_>
+bool operator!=(const Dict<Key_, Value_>& lhs, const Dict<Key_, Value_>& rhs) {
+  return !(lhs == rhs);
+}
+
+template <class Key, class Value>
+bool Dict<Key, Value>::is(const Dict& rhs) const {
+  return this->impl_ == rhs.impl_;
+}
 }

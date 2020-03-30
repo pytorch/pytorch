@@ -16,29 +16,31 @@ for use with CPU / CUDA tensors.
 MPI supports CUDA only if the implementation used to build PyTorch supports it.
 
 
-+------------+-----------+-----------+-----------+
-| Backend    | ``gloo``  | ``mpi``   | ``nccl``  |
-+------------+-----+-----+-----+-----+-----+-----+
-| Device     | CPU | GPU | CPU | GPU | CPU | GPU |
-+============+=====+=====+=====+=====+=====+=====+
-| send       | ✓   | ✘   | ✓   | ?   | ✘   | ✘   |
-+------------+-----+-----+-----+-----+-----+-----+
-| recv       | ✓   | ✘   | ✓   | ?   | ✘   | ✘   |
-+------------+-----+-----+-----+-----+-----+-----+
-| broadcast  | ✓   | ✓   | ✓   | ?   | ✘   | ✓   |
-+------------+-----+-----+-----+-----+-----+-----+
-| all_reduce | ✓   | ✓   | ✓   | ?   | ✘   | ✓   |
-+------------+-----+-----+-----+-----+-----+-----+
-| reduce     | ✓   | ✘   | ✓   | ?   | ✘   | ✓   |
-+------------+-----+-----+-----+-----+-----+-----+
-| all_gather | ✓   | ✘   | ✓   | ?   | ✘   | ✓   |
-+------------+-----+-----+-----+-----+-----+-----+
-| gather     | ✓   | ✘   | ✓   | ?   | ✘   | ✘   |
-+------------+-----+-----+-----+-----+-----+-----+
-| scatter    | ✓   | ✘   | ✓   | ?   | ✘   | ✘   |
-+------------+-----+-----+-----+-----+-----+-----+
-| barrier    | ✓   | ✘   | ✓   | ?   | ✘   | ✓   |
-+------------+-----+-----+-----+-----+-----+-----+
++----------------+-----------+-----------+-----------+
+| Backend        | ``gloo``  | ``mpi``   | ``nccl``  |
++----------------+-----+-----+-----+-----+-----+-----+
+| Device         | CPU | GPU | CPU | GPU | CPU | GPU |
++================+=====+=====+=====+=====+=====+=====+
+| send           | ✓   | ✘   | ✓   | ?   | ✘   | ✘   |
++----------------+-----+-----+-----+-----+-----+-----+
+| recv           | ✓   | ✘   | ✓   | ?   | ✘   | ✘   |
++----------------+-----+-----+-----+-----+-----+-----+
+| broadcast      | ✓   | ✓   | ✓   | ?   | ✘   | ✓   |
++----------------+-----+-----+-----+-----+-----+-----+
+| all_reduce     | ✓   | ✓   | ✓   | ?   | ✘   | ✓   |
++----------------+-----+-----+-----+-----+-----+-----+
+| reduce         | ✓   | ✘   | ✓   | ?   | ✘   | ✓   |
++----------------+-----+-----+-----+-----+-----+-----+
+| all_gather     | ✓   | ✘   | ✓   | ?   | ✘   | ✓   |
++----------------+-----+-----+-----+-----+-----+-----+
+| gather         | ✓   | ✘   | ✓   | ?   | ✘   | ✘   |
++----------------+-----+-----+-----+-----+-----+-----+
+| scatter        | ✓   | ✘   | ✓   | ?   | ✘   | ✘   |
++----------------+-----+-----+-----+-----+-----+-----+
+| reduce_scatter | ✘   | ✘   | ✘   | ✘   | ✘   | ✓   |
++----------------+-----+-----+-----+-----+-----+-----+
+| barrier        | ✓   | ✘   | ✓   | ?   | ✘   | ✓   |
++----------------+-----+-----+-----+-----+-----+-----+
 
 
 Backends that come with PyTorch
@@ -223,7 +225,7 @@ distributed package and ``group_name`` is deprecated as well.
     In other words, if the file is not removed/cleaned up and you call
     :func:`init_process_group` again on that file, failures are expected.
     The rule of thumb here is that, make sure that the file is non-existent or
-    empty everytime :func:`init_process_group` is called.
+    empty every time :func:`init_process_group` is called.
 
 ::
 
@@ -317,6 +319,8 @@ Collective functions
 
 .. autofunction:: scatter
 
+.. autofunction:: reduce_scatter
+
 .. autofunction:: barrier
 
 .. autoclass:: ReduceOp
@@ -335,8 +339,9 @@ Multi-GPU collective functions
 If you have more than one GPU on each node, when using the NCCL and Gloo backend,
 :func:`~torch.distributed.broadcast_multigpu`
 :func:`~torch.distributed.all_reduce_multigpu`
-:func:`~torch.distributed.reduce_multigpu` and
-:func:`~torch.distributed.all_gather_multigpu` support distributed collective
+:func:`~torch.distributed.reduce_multigpu`
+:func:`~torch.distributed.all_gather_multigpu` and
+:func:`~torch.distributed.reduce_scatter_multigpu` support distributed collective
 operations among multiple GPUs within each node. These functions can potentially
 improve the overall distributed training performance and be easily used by
 passing a list of tensors. Each Tensor in the passed tensor list needs
@@ -394,6 +399,10 @@ of 16
 
 .. autofunction:: all_gather_multigpu
 
+.. autofunction:: reduce_scatter_multigpu
+
+
+.. _distributed-launch:
 
 Launch utility
 --------------

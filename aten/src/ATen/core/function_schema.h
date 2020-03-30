@@ -6,6 +6,7 @@
 #include <ATen/core/ivalue.h>
 #include <ATen/core/alias_info.h>
 #include <ATen/core/operator_name.h>
+#include <ATen/core/dispatch/OperatorOptions.h>
 #include <unordered_map>
 
 namespace c10 {
@@ -69,6 +70,7 @@ struct Argument {
   bool is_inferred_type() const {
     return is_inferred_type_;
   }
+
   std::string formatTypeMismatchMsg(const std::string& actual_type) const {
     std::string inferred_type_hint;
     if (is_inferred_type()) {
@@ -141,7 +143,9 @@ struct FunctionSchema {
         arguments_(std::move(arguments)),
         returns_(std::move(returns)),
         is_vararg_(is_vararg),
-        is_varret_(is_varret) {}
+        is_varret_(is_varret) {
+    checkSchema();
+  }
 
   FunctionSchema(
       Symbol name,
@@ -156,7 +160,9 @@ struct FunctionSchema {
             std::move(arguments),
             std::move(returns),
             is_vararg,
-            is_varret) {}
+            is_varret) {
+    checkSchema();
+  }
 
   // check whether this schema is backward compatible with the old one.
   // the following conditions are considered as this schema is backward
@@ -172,21 +178,52 @@ struct FunctionSchema {
   //      this schema must provide default values.
   bool isBackwardCompatibleWith(
       const FunctionSchema& old,
-      std::ostream* why_not=nullptr) const;
+      std::ostream* why_not = nullptr) const;
 
-private:
+ private:
   OperatorName name_;
   std::vector<Argument> arguments_;
   std::vector<Argument> returns_;
   // if true then this schema takes an arbitrary number of additional arguments
   // after the argument specified in arguments
-  // currently this is used primarily to represent 'primtive' operators whose
+  // currently this is used primarily to represent 'primitive' operators whose
   // arguments are not checked by schema
   bool is_vararg_;
   bool is_varret_;
+
+  // if no alias information is directly specified, what kind of "default"
+  // alias information should we infer?
+  // NB: due to alias analysis kind merging, this may be nullopt.  Eventually
+  // this should always be set no matter what
+  c10::optional<AliasAnalysisKind> alias_kind_;
+
   void checkArg(const IValue& value, const Argument& argument, optional<size_t> pos) const;
 
+  void checkSchema() const {
+    bool seen_default_arg = false;
+    for (const auto& arg : arguments()) {
+      if (arg.default_value()) {
+        seen_default_arg = true;
+      } else {
+        // we have historically serialized broadcasting lists wo/default values,
+        // so to not break BC allow lists here
+        if (arg.type()->kind() == ListType::Kind) {
+          continue;
+        }
+        TORCH_INTERNAL_ASSERT(
+            !seen_default_arg || arg.kwarg_only(),
+            "Non-default positional argument follows default argument. Parameter ",
+            arg.name(),
+            " in ",
+            *this);
+      }
+    }
+  }
+
 public:
+
+  void dump() const;
+
   const OperatorName& operator_name() const {
     return name_;
   }
@@ -223,12 +260,31 @@ public:
     }
     return c10::nullopt;
   }
+  FunctionSchema cloneWithName(std::string name, std::string overload_name) const {
+    return FunctionSchema(
+      std::move(name),
+      std::move(overload_name),
+      arguments(),
+      returns(),
+      is_vararg(),
+      is_varret()
+      );
+  }
   FunctionSchema cloneWithArguments(std::vector<Argument> new_arguments) const {
     return FunctionSchema(
         name(),
         overload_name(),
         std::move(new_arguments),
         returns(),
+        is_vararg(),
+        is_varret());
+  }
+  FunctionSchema cloneWithReturns(std::vector<Argument> new_returns) const {
+    return FunctionSchema(
+        name(),
+        overload_name(),
+        arguments(),
+        std::move(new_returns),
         is_vararg(),
         is_varret());
   }
@@ -248,7 +304,7 @@ public:
       std::vector<IValue>& inputs,
       const std::unordered_map<std::string, IValue>& kwargs) const;
 
-  void findErrorInKwargs(const std::vector<std::string>& kwargs) const;
+  std::string findErrorInKwargs(const std::vector<std::string>& kwargs) const;
 
   bool hasAnyAliasInfo() const {
     for (const auto& arg : arguments_) {
@@ -262,6 +318,22 @@ public:
       }
     }
     return false;
+  }
+
+
+  // TODO remove the mutation here
+  bool isDefaultAliasAnalysisKind() const {
+    return !alias_kind_;
+  }
+  AliasAnalysisKind aliasAnalysis() const {
+    return alias_kind_.value_or(AliasAnalysisKind::CONSERVATIVE);
+  }
+  void setAliasAnalysis(AliasAnalysisKind v) {
+    alias_kind_ = v;
+  }
+
+  void setNamespaceIfNotSet(const char* ns) {
+    name_.setNamespaceIfNotSet(ns);
   }
 
   // can a function with this schema be substituted for a function of rhs's

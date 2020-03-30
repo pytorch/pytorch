@@ -158,7 +158,7 @@ TEST_F(ModuleListTest, SanityCheckForHoldingStandardModules) {
       Linear(10, 3),
       Conv2d(1, 2, 3),
       Dropout(0.5),
-      BatchNorm(5),
+      BatchNorm2d(5),
       Embedding(4, 10),
       LSTM(4, 5));
 }
@@ -210,7 +210,7 @@ TEST_F(ModuleListTest, HasReferenceSemantics) {
 }
 
 TEST_F(ModuleListTest, IsCloneable) {
-  ModuleList list(Linear(3, 4), Functional(torch::relu), BatchNorm(3));
+  ModuleList list(Linear(3, 4), Functional(torch::relu), BatchNorm1d(3));
   ModuleList clone = std::dynamic_pointer_cast<ModuleListImpl>(list->clone());
   ASSERT_EQ(list->size(), clone->size());
 
@@ -255,7 +255,7 @@ TEST_F(ModuleListTest, NestingIsPossible) {
 }
 
 TEST_F(ModuleListTest, CloneToDevice_CUDA) {
-  ModuleList list(Linear(3, 4), Functional(torch::relu), BatchNorm(3));
+  ModuleList list(Linear(3, 4), Functional(torch::relu), BatchNorm1d(3));
   torch::Device device(torch::kCUDA, 0);
   ModuleList clone =
       std::dynamic_pointer_cast<ModuleListImpl>(list->clone(device));
@@ -272,7 +272,7 @@ TEST_F(ModuleListTest, PrettyPrintModuleList) {
       Linear(10, 3),
       Conv2d(1, 2, 3),
       Dropout(0.5),
-      BatchNorm(5),
+      BatchNorm2d(5),
       Embedding(4, 10),
       LSTM(4, 5));
   ASSERT_EQ(
@@ -281,8 +281,21 @@ TEST_F(ModuleListTest, PrettyPrintModuleList) {
       "  (0): torch::nn::Linear(in_features=10, out_features=3, bias=true)\n"
       "  (1): torch::nn::Conv2d(1, 2, kernel_size=[3, 3], stride=[1, 1])\n"
       "  (2): torch::nn::Dropout(p=0.5, inplace=false)\n"
-      "  (3): torch::nn::BatchNorm(num_features=5, eps=1e-05, momentum=0.1, affine=true, track_running_stats=true)\n"
+      "  (3): torch::nn::BatchNorm2d(5, eps=1e-05, momentum=0.1, affine=true, track_running_stats=true)\n"
       "  (4): torch::nn::Embedding(num_embeddings=4, embedding_dim=10)\n"
-      "  (5): torch::nn::LSTM(input_size=4, hidden_size=5, layers=1, dropout=0)\n"
+      "  (5): torch::nn::LSTM(input_size=4, hidden_size=5, num_layers=1, bias=true, batch_first=false, dropout=0, bidirectional=false)\n"
       ")");
+}
+
+TEST_F(ModuleListTest, RangeBasedForLoop) {
+  torch::nn::ModuleList mlist(
+    torch::nn::Linear(3, 4),
+    torch::nn::BatchNorm1d(4),
+    torch::nn::Dropout(0.5)
+  );
+
+  std::stringstream buffer;
+  for (const auto &module : *mlist) {
+    module->pretty_print(buffer);
+  }
 }

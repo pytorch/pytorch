@@ -269,7 +269,7 @@ Tensor fbgemm_pack_quantized_matrix(const Tensor& weight) {
   const int64_t N = weight.size(0);
   const Tensor weight_contig = weight.contiguous();
   const int8_t* weight_ptr = weight_contig.data_ptr<int8_t>();
-  auto ptr = guts::make_unique<fbgemm::PackBMatrix<int8_t>>(
+  auto ptr = std::make_unique<fbgemm::PackBMatrix<int8_t>>(
       /*trans=*/fbgemm::matrix_op_t::Transpose,
       /*nRow=*/K,
       /*nCol=*/N,
@@ -301,7 +301,8 @@ float RawUint16ToFp16(unsigned short value) {
   const unsigned short significand_bits = value & 0x3ff;
 
   const float sign = sign_bits ? -1 : 1;
-  const float significand = 1 + significand_bits * 0x1p-10;
+  const float significand =
+      1 + significand_bits * 0.0009765625f; // 0.0009765625f = 0x1p-10 = 2^-10
   const float exponent = exponent_bits - 0xf;
 
   return sign * std::ldexp(significand, exponent);
@@ -357,7 +358,7 @@ Tensor fbgemm_pack_gemm_matrix_fp16(const Tensor& weight) {
   // this function. This is perfectly fine if the tensors are created and freed
   // within this translation unit. It might be very problematic if that tensor
   // flows across dll boundaries.
-  auto ptr = guts::make_unique<fbgemm::PackedGemmMatrixFP16>(
+  auto ptr = std::make_unique<fbgemm::PackedGemmMatrixFP16>(
       fbgemm::matrix_op_t::Transpose, K, N, 1, weight_contig_ptr);
   return cpp_custom_type_hack::create(std::move(ptr), weight.options());
 }

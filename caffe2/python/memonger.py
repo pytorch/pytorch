@@ -604,7 +604,7 @@ def compute_assignments_dp(ranges_sorted, init_assignment, counter=None):
             Return -1 if not found.
         '''
         def is_compatible_all(candidate_range, assignments):
-            ''' return true if compatiable for all assignments in assignments '''
+            ''' return true if compatible for all assignments in assignments '''
             return all([is_compatible(candidate_range[1], x, []) for x in assignments])
 
         ii = cur_idx - 1

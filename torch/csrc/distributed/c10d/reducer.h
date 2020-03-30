@@ -74,6 +74,23 @@ class Reducer {
 
   bool has_marked_unused_parameters_;
   std::vector<VariableIndex> unused_parameters_;
+  // Locally used parameter maps indicating if parameters are used locally
+  // during the current iteration or no_sync session if no_sync is on. One
+  // tensor for each model replica and each tensor is one-dim int32 tensor of
+  // number of parameters. These tensors are marked in autograd_hook to indicate
+  // the corresponding param has been used, and get allreduced in the end of
+  // backward of current iteration or no_sync session for figuring out the
+  // globally unused parameters.
+  //
+  // local_used_maps_:     CPU tensors for bookkeeping locally used params
+  // local_used_maps_dev_: dev tensors for reducing globally unused params
+  std::vector<at::Tensor> local_used_maps_;
+  std::vector<at::Tensor> local_used_maps_dev_;
+  // Indicate that reduction is done and D2H copy is done as well.
+  bool local_used_maps_reduced_;
+
+  // Work handle for allreduce on local_used_maps_
+  std::shared_ptr<c10d::ProcessGroup::Work> local_used_work_;
 
   void mark_variable_ready_dense(VariableIndex index);
 
@@ -133,6 +150,9 @@ class Reducer {
   //
   struct Bucket {
     std::vector<BucketReplica> replicas;
+
+    // Global indices of participating variables in the bucket
+    std::vector<size_t> variable_indices;
 
     // Number of replicas to be marked done before this bucket is ready.
     size_t pending;

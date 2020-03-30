@@ -49,7 +49,7 @@ class AdaptiveLogSoftmaxWithLoss(Module):
 
     * :attr:`div_value` is used to compute the size of each additional cluster,
       which is given as
-      :math:`\left\lfloor\frac{in\_features}{div\_value^{idx}}\right\rfloor`,
+      :math:`\left\lfloor\frac{\texttt{in\_features}}{\texttt{div\_value}^{idx}}\right\rfloor`,
       where :math:`idx` is the cluster index (with clusters
       for less frequent words having larger indices,
       and indices starting from :math:`1`).
@@ -59,7 +59,7 @@ class AdaptiveLogSoftmaxWithLoss(Module):
       implementation.
 
     .. warning::
-        Labels passed as inputs to this module should be sorted accoridng to
+        Labels passed as inputs to this module should be sorted according to
         their frequency. This means that the most frequent label should be
         represented by the index `0`, and the least frequent
         label should be represented by the index `n_classes - 1`.
@@ -89,8 +89,8 @@ class AdaptiveLogSoftmaxWithLoss(Module):
               log likelihood loss
 
     Shape:
-        - input: :math:`(N, in\_features)`
-        - target: :math:`(N)` where each value satisfies :math:`0 <= target[i] <= n\_classes`
+        - input: :math:`(N, \texttt{in\_features})`
+        - target: :math:`(N)` where each value satisfies :math:`0 <= \texttt{target[i]} <= \texttt{n\_classes}`
         - output1: :math:`(N)`
         - output2: ``Scalar``
 
@@ -222,19 +222,19 @@ class AdaptiveLogSoftmaxWithLoss(Module):
         return out
 
     def log_prob(self, input):
-        r""" Computes log probabilities for all :math:`n\_classes`
+        r""" Computes log probabilities for all :math:`\texttt{n\_classes}`
 
         Args:
             input (Tensor): a minibatch of examples
 
         Returns:
             log-probabilities of for each class :math:`c`
-            in range :math:`0 <= c <= n\_classes`, where :math:`n\_classes` is a
+            in range :math:`0 <= c <= \texttt{n\_classes}`, where :math:`\texttt{n\_classes}` is a
             parameter passed to ``AdaptiveLogSoftmaxWithLoss`` constructor.
 
         Shape:
-            - Input: :math:`(N, in\_features)`
-            - Output: :math:`(N, n\_classes)`
+            - Input: :math:`(N, \texttt{in\_features})`
+            - Output: :math:`(N, \texttt{n\_classes})`
 
         """
 
@@ -252,7 +252,7 @@ class AdaptiveLogSoftmaxWithLoss(Module):
             output (Tensor): a class with the highest probability for each example
 
         Shape:
-            - Input: :math:`(N, in\_features)`
+            - Input: :math:`(N, \texttt{in\_features})`
             - Output: :math:`(N)`
         """
 

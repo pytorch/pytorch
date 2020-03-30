@@ -5,16 +5,14 @@
 #include <ATen/TensorNames.h>
 #include <c10/util/Exception.h>
 #include <c10/util/C++17.h>
-#include <ATen/core/EnableNamedTensor.h>
 
-#ifdef BUILD_NAMEDTENSOR
 using at::Dimname;
 using at::DimnameList;
 using at::NamedTensorMeta;
 using at::Symbol;
 using at::namedinference::TensorName;
 using at::namedinference::TensorNames;
-using c10::guts::make_unique;
+using std::make_unique;
 
 TEST(NamedTensorTest, defaultMetadata) {
   int num_names = 4;
@@ -249,4 +247,3 @@ TEST(NamedTensorTest, TensorNamesCheckUnique) {
 }
 
 
-#endif

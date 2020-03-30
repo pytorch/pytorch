@@ -14,10 +14,10 @@ void THNN_(RReLU_updateOutput)(
            double upper,
            bool train,
            bool inplace,
-           void *generator)
+           at::Generator generator)
 {
   THCUNN_assertSameGPU(state, 3, input, output, noise);
-  auto gen = at::cuda::detail::getDefaultCUDAGenerator();
+  auto gen = at::get_generator_or_default<at::CUDAGenerator>(generator, at::cuda::detail::getDefaultCUDAGenerator());
   if (train)
   {
     input = THCTensor_(newContiguous)(state, input);
@@ -38,7 +38,7 @@ void THNN_(RReLU_updateOutput)(
     }
     if (inplace)
     {
-      rreluUpdateOutputTrain<<<grid, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
+      rreluUpdateOutputTrain<<<grid, BLOCK_SIZE, 0, c10::cuda::getCurrentCUDAStream()>>>(
         n, rng_engine_inputs, input_data, noise_data, input_data, lower, upper);
       THCTensor_(set)(state, output, input);
     }
@@ -46,7 +46,7 @@ void THNN_(RReLU_updateOutput)(
     {
       THCTensor_(resizeAs)(state, output, input);
       scalar_t *output_data = THCTensor_(data)(state, output);
-      rreluUpdateOutputTrain<<<grid, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
+      rreluUpdateOutputTrain<<<grid, BLOCK_SIZE, 0, c10::cuda::getCurrentCUDAStream()>>>(
         n, rng_engine_inputs, input_data, noise_data, output_data, lower, upper);
     }
     THCudaCheck(cudaGetLastError());

@@ -2,6 +2,7 @@
 
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Half.h>
+#include <c10/util/BFloat16.h>
 #include <c10/util/Optional.h>
 #include <c10/util/typeid.h>
 
@@ -108,6 +109,17 @@ struct ScalarTypeToCPPType<c10::ScalarType::Bool> {
 };
 
 template<>
+struct ScalarTypeToCPPType<c10::ScalarType::Byte> {
+  using type = uint8_t;
+
+  // This is a workaround for the CUDA bug which prevents ::detail::ScalarTypeToCType<T>::type being used directly
+  // due to ambiguous reference which can't to be resolved. For some reason it cant pick between at::detail and at::cuda::detail.
+  // For repro example, please see: https://gist.github.com/izdeby/952ae7cf256ddb740a73776d39a7e7ba
+  // TODO: remove once the bug is fixed.
+  static type t;
+};
+
+template<>
 struct ScalarTypeToCPPType<c10::ScalarType::Long> {
   using type = int64_t;
 
@@ -117,6 +129,24 @@ struct ScalarTypeToCPPType<c10::ScalarType::Long> {
   // TODO: remove once the bug is fixed.
   static type t;
 };
+
+// These are used to map C++ types to ScalarTypes.
+
+template <typename>
+struct CPPTypeToScalarType {
+  constexpr static c10::ScalarType value = c10::ScalarType::Undefined;
+};
+
+#define SPECIALIZE_CPPTypeToScalarType(cpp_type, scalar_type)                  \
+  template <>                                                                  \
+  struct CPPTypeToScalarType<cpp_type> {                                       \
+    constexpr static c10::ScalarType value = c10::ScalarType::scalar_type;     \
+  };
+
+AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SPECIALIZE_CPPTypeToScalarType)
+
+#undef SPECIALIZE_CPPTypeToScalarType
+
 }
 
 #define AT_FORALL_SCALAR_TYPES(_) \
@@ -312,11 +342,15 @@ static inline ScalarType toUnderlying(ScalarType t) {
 }
 
 static inline bool isSignedType(ScalarType t) {
+  TORCH_CHECK(!isQIntType(t), "isSignedType not supported for quantized types");
   #define CASE_SIGNED(ctype, name) \
-    case ScalarType::name:                       \
+    case ScalarType::name: \
       return std::numeric_limits<ctype>::is_signed;
 
-  switch (toUnderlying(t)) {
+  switch (t) {
+    case ScalarType::ComplexFloat: \
+    case ScalarType::ComplexDouble: \
+      return true; \
     AT_FORALL_SCALAR_TYPES_AND3(Half, Bool, BFloat16, CASE_SIGNED)
     default:
       AT_ERROR("Unknown ScalarType");
