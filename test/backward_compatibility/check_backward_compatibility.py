@@ -117,7 +117,7 @@ white_list = [
     ('aten::_conv2d_prepack', datetime.date(2020, 4, 1)),
     ('aten::dequantize', datetime.date(2020, 4, 1)),
     ('aten::confirmed_by_owner', datetime.date(2020, 3, 17)),
-    ('aten::owner', datetime.date(2020, 3, 27)),
+    ('aten::owner', datetime.date(2020, 4, 27)),
     ('aten::owner_name', datetime.date(2020, 3, 27)),
     ('_aten', datetime.date(2020, 4, 1)),
     ("prim::shape", datetime.date(2020, 4, 1)),
@@ -206,10 +206,6 @@ if __name__ == '__main__':
             line = f.readline()
             if not line:
                 break
-            if "torch.classes" in line:
-                # TODO Fix type __torch__.torch.classes.xxx
-                continue
-
             if dont_parse(line.strip()):
                 print("Not parsing schema line: ", line.strip())
                 continue
