@@ -244,6 +244,11 @@ class _TestTorchMixin(object):
         with self.assertRaisesRegex(RuntimeError, "support for msnpu"):
             torch.zeros(1, device=torch.device('msnpu'))
 
+    def test_polygamma_neg(self):
+        with self.assertRaisesRegex(RuntimeError, r'polygamma\(n, x\) does not support negative n\.'):
+            torch.polygamma(-1, torch.tensor([1.0, 2.0]))
+
+
     def test_has_storage(self):
         self.assertIsNotNone(torch.Tensor().storage())
         self.assertIsNotNone(torch.Tensor(0).storage())
