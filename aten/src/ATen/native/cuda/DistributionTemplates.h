@@ -349,7 +349,7 @@ struct RandomKernel {
 template<typename RNG>
 void normal_kernel(Tensor& self, double mean_, double std_, RNG gen) {
   auto iter = TensorIterator::nullary_op(self);
-  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "normal_kernel_cuda", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Half, iter.dtype(), "normal_kernel_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
     auto mean = static_cast<accscalar_t>(mean_);
     auto std = static_cast<accscalar_t>(std_);

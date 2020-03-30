@@ -1,7 +1,6 @@
 import torch
 import torch.jit
 
-from torch.quantization._quantize_script import script_qconfig
 from torch.quantization._quantize_script import prepare_dynamic_script
 from torch.quantization import default_dynamic_qconfig
 
@@ -21,7 +20,7 @@ class TestScript(JitTestCase):
                 return self.fc(x)
 
         m = torch.jit.script(M())
-        m = prepare_dynamic_script(m, {'': script_qconfig(default_dynamic_qconfig)})
+        m = prepare_dynamic_script(m, {'': default_dynamic_qconfig})
 
         # for input of FC for dynamic quant
         assert len(attrs_with_prefix(m, '_observer_')) == 1
@@ -54,7 +53,7 @@ class TestScript(JitTestCase):
 
         m = torch.jit.script(M())
         # only quantize child module.
-        m = prepare_dynamic_script(m, {'sub.fc': script_qconfig(default_dynamic_qconfig)})
+        m = prepare_dynamic_script(m, {'sub.fc': default_dynamic_qconfig})
 
         # input of sub for dynamic quant
         assert len(attrs_with_prefix(m, '_observer_')) == 1
