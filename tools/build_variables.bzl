@@ -160,6 +160,7 @@ libtorch_sources = [
     "torch/csrc/jit/runtime/register_special_ops.cpp",
     "torch/csrc/jit/ir/scope.cpp",
     "torch/csrc/jit/frontend/ir_emitter.cpp",
+    "torch/csrc/jit/frontend/name_mangler.cpp",
     "torch/csrc/jit/frontend/edit_distance.cpp",
     "torch/csrc/jit/runtime/logging.cpp",
     "torch/csrc/jit/frontend/convert_to_ssa.cpp",
