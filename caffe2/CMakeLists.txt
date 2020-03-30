@@ -766,7 +766,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       target_include_directories(torch_cuda PUBLIC "${NVTOOLEXT_HOME}/include")
       # -INCLUDE is used to ensure torch_cuda is linked against in a project that relies on it.
       # Related issue: https://github.com/pytorch/pytorch/issues/31611
-      target_link_libraries(torch_cuda INTERFACE "-INCLUDE:\"?warp_size@cuda@at@@YAHXZ\"")
+      target_link_libraries(torch_cuda INTERFACE "-INCLUDE:?warp_size@cuda@at@@YAHXZ")
 
     elseif(APPLE)
       set(TORCH_CUDA_LIBRARIES
