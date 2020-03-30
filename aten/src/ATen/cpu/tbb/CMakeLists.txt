@@ -1,8 +1,8 @@
 # Based on https://github.com/wjakob/tbb/blob/master/CMakeLists.txt
 # All credit goes to Wenzel Jakob!
 
-cmake_minimum_required (VERSION 2.8.12 FATAL_ERROR)
-project (tbb CXX)
+cmake_minimum_required(VERSION 2.8.12 FATAL_ERROR)
+project(tbb CXX)
 
 include(CheckCXXCompilerFlag)
 include(CheckCXXSourceRuns)
@@ -119,25 +119,25 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
 endif()
 
 if(UNIX)
-  add_definitions (-DUSE_PTHREAD)
+  add_definitions(-DUSE_PTHREAD)
 
-   check_cxx_compiler_flag ("-std=c++14" SUPPORTS_STDCXX14)
+   check_cxx_compiler_flag("-std=c++14" SUPPORTS_STDCXX14)
   if(SUPPORTS_STDCXX14)
-    set (CMAKE_CXX_FLAGS "-std=c++14 ${CMAKE_CXX_FLAGS}")
+    set(CMAKE_CXX_FLAGS "-std=c++14 ${CMAKE_CXX_FLAGS}")
   endif()
 
-   check_cxx_compiler_flag ("-mrtm -Werror" SUPPORTS_MRTM)
+   check_cxx_compiler_flag("-mrtm -Werror" SUPPORTS_MRTM)
   if(SUPPORTS_MRTM)
-    set (CMAKE_CXX_FLAGS "-mrtm ${CMAKE_CXX_FLAGS}")
+    set(CMAKE_CXX_FLAGS "-mrtm ${CMAKE_CXX_FLAGS}")
   endif()
 
 elseif(WIN32)
   if(MSVC)
-    cmake_minimum_required (VERSION 3.1)
+    cmake_minimum_required(VERSION 3.1)
     enable_language(ASM_MASM)
     set(CMAKE_CXX_FLAGS "/GS- /Zc:wchar_t /Zc:forScope /DUSE_WINTHREAD ${CMAKE_CXX_FLAGS}")
     set(CMAKE_CXX_FLAGS "/D_CRT_SECURE_NO_DEPRECATE /D_WIN32_WINNT=0x0600 ${CMAKE_CXX_FLAGS}")
-    check_cxx_compiler_flag ("/volatile:iso" SUPPORTS_VOLATILE_FLAG)
+    check_cxx_compiler_flag("/volatile:iso" SUPPORTS_VOLATILE_FLAG)
     if(SUPPORTS_VOLATILE_FLAG)
       set(CMAKE_CXX_FLAGS "/volatile:iso ${CMAKE_CXX_FLAGS}")
     endif()
@@ -191,7 +191,7 @@ endif()
 ##-------
 
 if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
-  check_cxx_compiler_flag ("-flifetime-dse=1" SUPPORTS_FLIFETIME)
+  check_cxx_compiler_flag("-flifetime-dse=1" SUPPORTS_FLIFETIME)
   if(SUPPORTS_FLIFETIME)
     add_definitions(-flifetime-dse=1)
   endif()
@@ -199,11 +199,11 @@ endif()
 
 # Linker export definitions
 if(APPLE)
-  set (ARCH_PREFIX "mac")
+  set(ARCH_PREFIX "mac")
 elseif(WIN32)
-  set (ARCH_PREFIX "win")
+  set(ARCH_PREFIX "win")
 else()
-  set (ARCH_PREFIX "lin")
+  set(ARCH_PREFIX "lin")
 endif()
 
 if(CMAKE_SIZEOF_VOID_P EQUAL 8)
@@ -213,9 +213,9 @@ else()
 endif()
 
 if(MINGW)
-  set (ARCH_PREFIX "${ARCH_PREFIX}-gcc")
+  set(ARCH_PREFIX "${ARCH_PREFIX}-gcc")
   # there's no win32-gcc-tbb-export.def, use lin32-tbb-export.def
-  execute_process (COMMAND ${CMAKE_COMMAND} -E copy ${TBB_ROOT_DIR}/src/tbb/lin32-tbb-export.def ${TBB_ROOT_DIR}/src/tbb/win32-gcc-tbb-export.def)
+  execute_process(COMMAND ${CMAKE_COMMAND} -E copy ${TBB_ROOT_DIR}/src/tbb/lin32-tbb-export.def ${TBB_ROOT_DIR}/src/tbb/win32-gcc-tbb-export.def)
 endif()
 
 if(MSVC)
@@ -377,15 +377,15 @@ install(DIRECTORY "${TBB_ROOT_DIR}/include/tbb" DESTINATION ${TBB_INSTALL_INCLUD
 
 # version_string.ver
 if(UNIX)
-  execute_process (COMMAND date "+%a, %d %b %Y %H:%M:%S %z"
-                   OUTPUT_VARIABLE _configure_date
-                   OUTPUT_STRIP_TRAILING_WHITESPACE)
+  execute_process(COMMAND date "+%a, %d %b %Y %H:%M:%S %z"
+                  OUTPUT_VARIABLE _configure_date
+                  OUTPUT_STRIP_TRAILING_WHITESPACE)
 elseif(WIN32)
-  execute_process (COMMAND cmd " /C date /T"
-                   OUTPUT_VARIABLE _configure_date
-                   OUTPUT_STRIP_TRAILING_WHITESPACE)
+  execute_process(COMMAND cmd " /C date /T"
+                  OUTPUT_VARIABLE _configure_date
+                  OUTPUT_STRIP_TRAILING_WHITESPACE)
 else()
-  set (_configure_date "Unknown")
+  set(_configure_date "Unknown")
 endif()
-include_directories (${CMAKE_BINARY_DIR})
-configure_file (extra/version_string.ver.in version_string.ver @ONLY)
+include_directories(${CMAKE_BINARY_DIR})
+configure_file(extra/version_string.ver.in version_string.ver @ONLY)

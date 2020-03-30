@@ -1,14 +1,11 @@
 #include <torch/csrc/utils/pybind.h>
 
-#include <torch/csrc/jit/runtime/argument_spec.h>
-#include <torch/csrc/jit/runtime/autodiff.h>
-#include <torch/csrc/jit/serialization/export.h>
+#include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/codegen/fuser/kernel_cache.h>
-#include <torch/csrc/jit/runtime/graph_executor.h>
-#include <torch/csrc/jit/serialization/import.h>
+#include <torch/csrc/jit/frontend/ir_emitter.h>
+#include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/irparser.h>
-#include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/canonicalize_ops.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
@@ -16,12 +13,13 @@
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/create_autodiff_subgraphs.h>
 #include <torch/csrc/jit/passes/create_functional_graphs.h>
+#include <torch/csrc/jit/passes/cuda_graph_fuser.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/decompose_ops.h>
 #include <torch/csrc/jit/passes/erase_number_types.h>
+#include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/fuse_linear.h>
 #include <torch/csrc/jit/passes/graph_fuser.h>
-#include <torch/csrc/jit/passes/cuda_graph_fuser.h>
 #include <torch/csrc/jit/passes/inline_fork_wait.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/loop_unrolling.h>
@@ -46,20 +44,22 @@
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/passes/utils/check_alias_annotation.h>
-#include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/xnnpack_rewrite.h>
-#include <torch/csrc/jit/runtime/print_handler.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/python/python_arg_flatten.h>
 #include <torch/csrc/jit/python/python_custom_class.h>
 #include <torch/csrc/jit/python/python_ir.h>
 #include <torch/csrc/jit/python/python_tracer.h>
-#include <torch/csrc/jit/python/script_init.h>
-#include <torch/csrc/jit/frontend/ir_emitter.h>
-#include <torch/csrc/jit/runtime/jit_exception.h>
-#include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/python/python_tree_views.h>
-#include <torch/csrc/jit/frontend/tracer.h>
+#include <torch/csrc/jit/python/script_init.h>
+#include <torch/csrc/jit/runtime/argument_spec.h>
+#include <torch/csrc/jit/runtime/autodiff.h>
+#include <torch/csrc/jit/runtime/graph_executor.h>
+#include <torch/csrc/jit/runtime/jit_exception.h>
+#include <torch/csrc/jit/runtime/operator.h>
+#include <torch/csrc/jit/runtime/print_handler.h>
+#include <torch/csrc/jit/serialization/export.h>
+#include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/tensorexpr/execution_counter.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 
@@ -103,6 +103,7 @@ bool loadPythonClasses() {
 
 #if !defined(__HIP_PLATFORM_HCC__)
 TORCH_API void runJITCPPTests(bool runCuda);
+TORCH_API void runTENSOREXPRCPPTests(bool runCuda);
 #endif
 
 void initJITBindings(PyObject* module) {
@@ -177,8 +178,9 @@ void initJITBindings(PyObject* module) {
              bool is_dynamic) {
             auto dict = py::cast<std::unordered_map<
                 std::string,
-                std::tuple<Module, Module>>>(qconfig_dict);
-            return InsertObservers(module, method_name, dict, inplace, is_dynamic);
+                c10::optional<std::tuple<Module, Module>>>>(qconfig_dict);
+            return InsertObservers(
+                module, method_name, dict, inplace, is_dynamic);
           },
           py::arg("module"),
           py::arg("method_name"),
@@ -187,9 +189,7 @@ void initJITBindings(PyObject* module) {
           py::arg("is_dynamic") = false)
       .def(
           "_jit_pass_insert_quant_dequant",
-          [](Module& module,
-             const std::string& method_name,
-             bool inplace) {
+          [](Module& module, const std::string& method_name, bool inplace) {
             return InsertQuantDeQuant(module, method_name, inplace);
           },
           py::arg("module"),
@@ -205,10 +205,9 @@ void initJITBindings(PyObject* module) {
           "_jit_pass_quant_fusion",
           [](std::shared_ptr<Graph>& g) { return QuantFusion(g); })
       .def("_jit_pass_fold_convbn", &FoldConvBatchNorm2d)
-      .def("_freeze_module",
-          [](Module& module) {
-            return freeze_module(module);
-          },
+      .def(
+          "_freeze_module",
+          [](Module& module) { return freeze_module(module); },
           py::arg("module"))
       .def("_jit_pass_fuse_linear", &FuseLinear)
       .def(
@@ -220,14 +219,12 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_dedup_module_uses", &DedupModuleUses)
       .def("_jit_pass_replicate_dequantize", &ReplicateDeQuant)
       .def("_jit_pass_swap_dequantize", &SwapDeQuant)
-      .def("_jit_pass_swap_functional_linear",
-           [](std::shared_ptr<Graph>& graph) {
-             SwapFunctionalLinear(graph);
-           })
-      .def("_jit_pass_swap_functional_linear",
-           [](Module& module) {
-             SwapFunctionalLinear(module);
-           })
+      .def(
+          "_jit_pass_swap_functional_linear",
+          [](std::shared_ptr<Graph>& graph) { SwapFunctionalLinear(graph); })
+      .def(
+          "_jit_pass_swap_functional_linear",
+          [](Module& module) { SwapFunctionalLinear(module); })
       .def("_jit_pass_quant_finalize", &Finalize)
       .def(
           "_jit_pass_pattern_based_rewrite",
@@ -332,9 +329,23 @@ void initJITBindings(PyObject* module) {
           },
           py::arg("run_cuda"))
       .def("_jit_has_cpp_tests", []() { return true; })
+      .def(
+          "_run_tensorexpr_cpp_tests",
+          [](bool runCuda) {
+            // We have to release the GIL inside this method, because if we
+            // happen to initialize the autograd engine in these tests, the
+            // newly spawned worker threads will try to initialize their
+            // PyThreadState*, and they need the GIL for this.
+            pybind11::gil_scoped_release _no_gil;
+            return runTENSOREXPRCPPTests(runCuda);
+          },
+          py::arg("run_cuda"))
+      .def("_has_tensorexpr_cpp_tests", []() { return true; })
 #else
       .def("_jit_run_cpp_tests", []() { throw std::exception(); })
       .def("_jit_has_cpp_tests", []() { return false; })
+      .def("_run_tensorexpr_cpp_tests", []() { throw std::exception(); })
+      .def("_has_tensorexpr_cpp_tests", []() { return false; })
 #endif
       .def(
           "_jit_flatten",
@@ -358,7 +369,6 @@ void initJITBindings(PyObject* module) {
       .def("_jit_override_can_fuse_on_gpu", &overrideCanFuseOnGPU)
       .def("_jit_can_fuse_on_cpu", &canFuseOnCPU)
       .def("_jit_can_fuse_on_gpu", &canFuseOnGPU)
-      .def("_jit_register_tensorexpr_fuser", &registerTensorExprFuser)
       .def(
           "_jit_differentiate",
           [](Graph& g) {
@@ -376,8 +386,7 @@ void initJITBindings(PyObject* module) {
             auto stack = toTraceableStack(args);
             checkAliasAnnotation(g, std::move(stack), unqualified_op_name);
           })
-      .def(
-          "_jit_register_cuda_fuser", &registerCudaFuseGraph)
+      .def("_jit_register_cuda_fuser", &registerCudaFuseGraph)
       .def(
           "_jit_set_profiling_mode",
           [](bool profiling_flag) {
@@ -478,19 +487,13 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "_jit_pass_insert_prepacked_ops",
-          [](script::Module& module) {
-            return insertPrePackedOps(module);
-          })
+          [](script::Module& module) { return insertPrePackedOps(module); })
       .def(
           "_jit_pass_fold_prepacking_ops",
-          [](script::Module& module) {
-            return FoldPrePackingOps(module);
-          })
+          [](script::Module& module) { return FoldPrePackingOps(module); })
       .def(
           "_jit_pass_optimize_for_mobile",
-          [](script::Module& module) {
-            return optimizeForMobile(module);
-          })
+          [](script::Module& module) { return optimizeForMobile(module); })
       .def(
           "_jit_pass_onnx_unpack_quantized_weights",
           [](std::shared_ptr<Graph>& graph,
@@ -563,26 +566,31 @@ void initJITBindings(PyObject* module) {
 
   py::class_<PyTorchStreamWriter>(m, "PyTorchFileWriter")
       .def(py::init<std::string>())
-      .def(py::init([](const py::object &buffer) {
-        auto writer_func = [=](const void *data, size_t size) {
-          auto bytes = py::bytes(reinterpret_cast<const char *>(data), size);
+      .def(py::init([](const py::object& buffer) {
+        auto writer_func = [=](const void* data, size_t size) {
+          auto bytes = py::bytes(reinterpret_cast<const char*>(data), size);
           buffer.attr("write")(std::move(bytes));
           return size;
         };
         return std::make_unique<PyTorchStreamWriter>(std::move(writer_func));
       }))
-      .def(py::init<const std::function<size_t(const void *, size_t)> &>())
-      .def("write_record",
-           [](PyTorchStreamWriter &self, const std::string &name,
-              const char *data,
-              size_t size) { return self.writeRecord(name, data, size); })
+      .def(py::init<const std::function<size_t(const void*, size_t)>&>())
+      .def(
+          "write_record",
+          [](PyTorchStreamWriter& self,
+             const std::string& name,
+             const char* data,
+             size_t size) { return self.writeRecord(name, data, size); })
       .def("write_end_of_file", &PyTorchStreamWriter::writeEndOfFile)
-      .def("write_record",
-           [](PyTorchStreamWriter &self, const std::string &name,
-              uintptr_t data, size_t size) {
-             return self.writeRecord(name, reinterpret_cast<const char *>(data),
-                                     size);
-           });
+      .def(
+          "write_record",
+          [](PyTorchStreamWriter& self,
+             const std::string& name,
+             uintptr_t data,
+             size_t size) {
+            return self.writeRecord(
+                name, reinterpret_cast<const char*>(data), size);
+          });
 
   // This allows PyTorchStreamReader to read from a Python buffer. It requires
   // that the buffer implement `seek()`, `tell()`, and `read()`.
@@ -657,12 +665,14 @@ void initJITBindings(PyObject* module) {
         auto adapter = std::make_unique<BufferAdapter>(std::move(buffer));
         return std::make_unique<PyTorchStreamReader>(std::move(adapter));
       }))
-      .def("get_record", [](PyTorchStreamReader& self, const std::string& key) {
-        at::DataPtr data;
-        size_t size;
-        std::tie(data, size) = self.getRecord(key);
-        return py::bytes(reinterpret_cast<const char*>(data.get()), size);
-      })
+      .def(
+          "get_record",
+          [](PyTorchStreamReader& self, const std::string& key) {
+            at::DataPtr data;
+            size_t size;
+            std::tie(data, size) = self.getRecord(key);
+            return py::bytes(reinterpret_cast<const char*>(data.get()), size);
+          })
       .def("get_all_records", [](PyTorchStreamReader& self) {
         return self.getAllRecords();
       });
@@ -712,14 +722,16 @@ void initJITBindings(PyObject* module) {
           "arguments", [](FunctionSchema& self) { return self.arguments(); })
       .def_property_readonly(
           "returns", [](FunctionSchema& self) { return self.returns(); })
-      .def("is_backward_compatible_with",
+      .def(
+          "is_backward_compatible_with",
           [](const FunctionSchema& self, const FunctionSchema& old_schema) {
             return self.isBackwardCompatibleWith(old_schema);
           })
-      .def("__eq__", [](const FunctionSchema& self,
-            const FunctionSchema& other) {
-          return self == other;
-        })
+      .def(
+          "__eq__",
+          [](const FunctionSchema& self, const FunctionSchema& other) {
+            return self == other;
+          })
       .def("__str__", [](FunctionSchema& self) {
         std::stringstream ss;
         ss << self;
@@ -734,14 +746,14 @@ void initJITBindings(PyObject* module) {
             return (self.N()) ? py::cast(*self.N()) : py::none();
           })
       .def_property_readonly("default_value", [](Argument& self) -> py::object {
-          if (!self.default_value())
-            return py::none();
-          IValue v = *self.default_value();
-          return toPyObject(std::move(v));
-        });
-  m.def(
-      "_jit_get_all_schemas", []() {
-    const std::vector<std::shared_ptr<Operator>>& operations = getAllOperators();
+        if (!self.default_value())
+          return py::none();
+        IValue v = *self.default_value();
+        return toPyObject(std::move(v));
+      });
+  m.def("_jit_get_all_schemas", []() {
+    const std::vector<std::shared_ptr<Operator>>& operations =
+        getAllOperators();
     return fmap(operations, [](const std::shared_ptr<Operator>& op) {
       return op->schema();
     });

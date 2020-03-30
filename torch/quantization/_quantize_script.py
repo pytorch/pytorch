@@ -66,21 +66,28 @@ def _check_is_script_module(model):
     if not isinstance(model, torch.jit.ScriptModule):
         raise ValueError('input must be a script module, got: ' + str(type(model)))
 
+def script_qconfig(qconfig):
+    return QConfig(
+        activation=torch.jit.script(qconfig.activation())._c,
+        weight=torch.jit.script(qconfig.weight())._c)
+
 def prepare_script(model, qconfig_dict, inplace=False):
     _check_is_script_module(model)
+    scripted_qconfig_dict = {k: script_qconfig(v) if v else None for k, v in qconfig_dict.items()}
     if not inplace:
         model = model.copy()
     model = wrap_cpp_module(torch._C._jit_pass_insert_observers(model._c,
                                                                 'forward',
-                                                                qconfig_dict,
+                                                                scripted_qconfig_dict,
                                                                 False))
     return model
 
 def prepare_dynamic_script(model, qconfig_dict):
     _check_is_script_module(model)
+    scripted_qconfig_dict = {k: script_qconfig(v) for k, v in qconfig_dict.items()}
     model = wrap_cpp_module(torch._C._jit_pass_insert_observers(model._c,
                                                                 'forward',
-                                                                qconfig_dict,
+                                                                scripted_qconfig_dict,
                                                                 False,
                                                                 True))
     return model
@@ -95,12 +102,6 @@ def convert_script(model, inplace=False, debug=False):
         model = wrap_cpp_module(torch._C._jit_pass_quant_finalize(model._c))
     return model
 
-# TODO: non-scriptable QConfig will be supported later
-def script_qconfig(qconfig):
-    return QConfig(
-        activation=torch.jit.script(qconfig.activation())._c,
-        weight=torch.jit.script(qconfig.weight())._c)
-
 def quantize_script(model, qconfig_dict, run_fn, run_args, inplace=False, debug=False):
     _check_is_script_module(model)
     if not model._c._has_method('forward'):
@@ -108,10 +109,9 @@ def quantize_script(model, qconfig_dict, run_fn, run_args, inplace=False, debug=
     assert not inplace, "We don't support inplace right now"
     if not inplace:
         model = model.copy()
-    scripted_qconfig_dict = {k: script_qconfig(v) for k, v in qconfig_dict.items()}
     torch._C._jit_pass_dedup_module_uses(model._c)
     model = wrap_cpp_module(torch._C._jit_pass_fold_convbn(model._c))
-    model = prepare_script(model, scripted_qconfig_dict, True)
+    model = prepare_script(model, qconfig_dict, True)
     run_fn(model._c._get_method('forward'), *run_args)
     model = convert_script(model, True, debug)
     return model

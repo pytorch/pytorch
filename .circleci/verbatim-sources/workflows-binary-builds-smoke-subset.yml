@@ -8,12 +8,6 @@
       # at https://github.com/ezyang/pytorch-ci-hud/blob/master/src/BuildHistoryDisplay.js
 
       - binary_linux_build:
-          name: binary_linux_manywheel_2_7mu_cpu_devtoolset7_build
-          build_environment: "manywheel 2.7mu cpu devtoolset7"
-          requires:
-            - setup
-          docker_image: "pytorch/manylinux-cuda102"
-      - binary_linux_build:
           name: binary_linux_manywheel_3_7m_cu102_devtoolset7_build
           build_environment: "manywheel 3.7m cu102 devtoolset7"
           requires:
@@ -23,14 +17,9 @@
             branches:
               only:
                 - master
-      - binary_linux_build:
-          name: binary_linux_conda_2_7_cpu_devtoolset7_build
-          build_environment: "conda 2.7 cpu devtoolset7"
-          requires:
-            - setup
-          docker_image: "pytorch/conda-cuda"
       # This binary build is currently broken, see https://github_com/pytorch/pytorch/issues/16710
       # - binary_linux_conda_3_6_cu90_devtoolset7_build
+      # TODO rename to remove python version for libtorch
       - binary_linux_build:
           name: binary_linux_libtorch_2_7m_cpu_devtoolset7_shared-with-deps_build
           build_environment: "libtorch 2.7m cpu devtoolset7"
@@ -56,33 +45,14 @@
             branches:
               only:
                 - master
-      - binary_mac_build:
-          name: binary_macos_conda_2_7_cpu_build
-          build_environment: "conda 2.7 cpu"
-          requires:
-            - setup
-          filters:
-            branches:
-              only:
-                - master
       # This job has an average run time of 3 hours o.O
       # Now only running this on master to reduce overhead
+      # TODO rename to remove python version for libtorch
       - binary_mac_build:
           name: binary_macos_libtorch_2_7_cpu_build
           build_environment: "libtorch 2.7 cpu"
           requires:
             - setup
-          filters:
-            branches:
-              only:
-                - master
-      - binary_linux_test:
-          name: binary_linux_manywheel_2_7mu_cpu_devtoolset7_test
-          build_environment: "manywheel 2.7mu cpu devtoolset7"
-          requires:
-            - setup
-            - binary_linux_manywheel_2_7mu_cpu_devtoolset7_build
-          docker_image: "pytorch/manylinux-cuda102"
           filters:
             branches:
               only:
@@ -100,15 +70,9 @@
             branches:
               only:
                 - master
-      - binary_linux_test:
-          name: binary_linux_conda_2_7_cpu_devtoolset7_test
-          build_environment: "conda 2.7 cpu devtoolset7"
-          requires:
-            - setup
-            - binary_linux_conda_2_7_cpu_devtoolset7_build
-          docker_image: "pytorch/conda-cuda"
       # This binary build is currently broken, see https://github_com/pytorch/pytorch/issues/16710
       # - binary_linux_conda_3_6_cu90_devtoolset7_test:
+      # TODO rename to remove python version for libtorch
       - binary_linux_test:
           name: binary_linux_libtorch_2_7m_cpu_devtoolset7_shared-with-deps_test
           build_environment: "libtorch 2.7m cpu devtoolset7"
