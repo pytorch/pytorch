@@ -3,7 +3,7 @@ namespace std {
 // Exponential functions
 
 template<typename T>
-c10::complex<T> exp(c10::complex<T> x) {
+C10_HOST_DEVICE c10::complex<T> exp(c10::complex<T> x) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
   return static_cast<c10::complex<T>>(thrust::exp(static_cast<thrust::complex<T>>(x)));
 #else
@@ -12,7 +12,7 @@ c10::complex<T> exp(c10::complex<T> x) {
 }
 
 template<typename T>
-c10::complex<T> log(c10::complex<T> x) {
+C10_HOST_DEVICE c10::complex<T> log(c10::complex<T> x) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
   return static_cast<c10::complex<T>>(thrust::log(static_cast<thrust::complex<T>>(x)));
 #else
@@ -21,7 +21,7 @@ c10::complex<T> log(c10::complex<T> x) {
 }
 
 template<typename T>
-c10::complex<T> log10(c10::complex<T> x) {
+C10_HOST_DEVICE c10::complex<T> log10(c10::complex<T> x) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
   return static_cast<c10::complex<T>>(thrust::log10(static_cast<thrust::complex<T>>(x)));
 #else
@@ -32,7 +32,7 @@ c10::complex<T> log10(c10::complex<T> x) {
 // Power functions
 
 template<typename T>
-c10::complex<T> sqrt(c10::complex<T> x) {
+C10_HOST_DEVICE c10::complex<T> sqrt(c10::complex<T> x) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
   return static_cast<c10::complex<T>>(thrust::sqrt(static_cast<thrust::complex<T>>(x)));
 #else
@@ -41,7 +41,7 @@ c10::complex<T> sqrt(c10::complex<T> x) {
 }
 
 template<typename T>
-c10::complex<T> pow(c10::complex<T> x, c10::complex<T> y) {
+C10_HOST_DEVICE c10::complex<T> pow(c10::complex<T> x, c10::complex<T> y) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
   return static_cast<c10::complex<T>>(thrust::pow(static_cast<thrust::complex<T>>(x), static_cast<thrust::complex<T>>(y)));
 #else
@@ -50,7 +50,7 @@ c10::complex<T> pow(c10::complex<T> x, c10::complex<T> y) {
 }
 
 template<typename T>
-c10::complex<T> pow(c10::complex<T> x, const T &y) {
+C10_HOST_DEVICE c10::complex<T> pow(c10::complex<T> x, const T &y) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
   return static_cast<c10::complex<T>>(thrust::pow(static_cast<thrust::complex<T>>(x), y));
 #else
@@ -59,7 +59,7 @@ c10::complex<T> pow(c10::complex<T> x, const T &y) {
 }
 
 template<typename T>
-c10::complex<T> pow(const T &x, c10::complex<T> y) {
+C10_HOST_DEVICE c10::complex<T> pow(const T &x, c10::complex<T> y) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
   return static_cast<c10::complex<T>>(thrust::pow(x, static_cast<thrust::complex<T>>(y)));
 #else
@@ -68,7 +68,7 @@ c10::complex<T> pow(const T &x, c10::complex<T> y) {
 }
 
 template<typename T, typename U>
-c10::complex<decltype(T() * U())> pow(c10::complex<T> x, c10::complex<U> y) {
+C10_HOST_DEVICE c10::complex<decltype(T() * U())> pow(c10::complex<T> x, c10::complex<U> y) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
   return static_cast<c10::complex<T>>(thrust::pow(static_cast<thrust::complex<T>>(x), static_cast<thrust::complex<T>>(y)));
 #else
@@ -77,7 +77,7 @@ c10::complex<decltype(T() * U())> pow(c10::complex<T> x, c10::complex<U> y) {
 }
 
 template<typename T, typename U>
-c10::complex<decltype(T() * U())> pow(c10::complex<T> x, const U &y) {
+C10_HOST_DEVICE c10::complex<decltype(T() * U())> pow(c10::complex<T> x, const U &y) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
   return static_cast<c10::complex<T>>(thrust::pow(static_cast<thrust::complex<T>>(x), y));
 #else
@@ -86,7 +86,7 @@ c10::complex<decltype(T() * U())> pow(c10::complex<T> x, const U &y) {
 }
 
 template<typename T, typename U>
-c10::complex<decltype(T() * U())> pow(const T &x, c10::complex<U> y) {
+C10_HOST_DEVICE c10::complex<decltype(T() * U())> pow(const T &x, c10::complex<U> y) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
   return static_cast<c10::complex<T>>(thrust::pow(x, static_cast<thrust::complex<T>>(y)));
 #else
@@ -97,7 +97,7 @@ c10::complex<decltype(T() * U())> pow(const T &x, c10::complex<U> y) {
 // Trigonometric functions
 
 template<typename T>
-c10::complex<T> sin(const c10::complex<T> &x) {
+C10_HOST_DEVICE c10::complex<T> sin(const c10::complex<T> &x) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
   return static_cast<c10::complex<T>>(thrust::sin(static_cast<thrust::complex<T>>(x)));
 #else
@@ -106,7 +106,7 @@ c10::complex<T> sin(const c10::complex<T> &x) {
 }
 
 template<typename T>
-c10::complex<T> cos(const c10::complex<T> &x) {
+C10_HOST_DEVICE c10::complex<T> cos(const c10::complex<T> &x) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
   return static_cast<c10::complex<T>>(thrust::cos(static_cast<thrust::complex<T>>(x)));
 #else
@@ -115,7 +115,7 @@ c10::complex<T> cos(const c10::complex<T> &x) {
 }
 
 template<typename T>
-c10::complex<T> tan(const c10::complex<T> &x) {
+C10_HOST_DEVICE c10::complex<T> tan(const c10::complex<T> &x) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
   return static_cast<c10::complex<T>>(thrust::tan(static_cast<thrust::complex<T>>(x)));
 #else
@@ -124,7 +124,7 @@ c10::complex<T> tan(const c10::complex<T> &x) {
 }
 
 template<typename T>
-c10::complex<T> asin(const c10::complex<T> &x) {
+C10_HOST_DEVICE c10::complex<T> asin(const c10::complex<T> &x) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
   return static_cast<c10::complex<T>>(thrust::asin(static_cast<thrust::complex<T>>(x)));
 #else
@@ -133,7 +133,7 @@ c10::complex<T> asin(const c10::complex<T> &x) {
 }
 
 template<typename T>
-c10::complex<T> acos(const c10::complex<T> &x) {
+C10_HOST_DEVICE c10::complex<T> acos(const c10::complex<T> &x) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
   return static_cast<c10::complex<T>>(thrust::acos(static_cast<thrust::complex<T>>(x)));
 #else
@@ -142,7 +142,7 @@ c10::complex<T> acos(const c10::complex<T> &x) {
 }
 
 template<typename T>
-c10::complex<T> atan(const c10::complex<T> &x) {
+C10_HOST_DEVICE c10::complex<T> atan(const c10::complex<T> &x) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
   return static_cast<c10::complex<T>>(thrust::atan(static_cast<thrust::complex<T>>(x)));
 #else
@@ -153,7 +153,7 @@ c10::complex<T> atan(const c10::complex<T> &x) {
 // Hyperbolic functions
 
 template<typename T>
-c10::complex<T> sinh(const c10::complex<T> &x) {
+C10_HOST_DEVICE c10::complex<T> sinh(const c10::complex<T> &x) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
   return static_cast<c10::complex<T>>(thrust::sinh(static_cast<thrust::complex<T>>(x)));
 #else
@@ -162,7 +162,7 @@ c10::complex<T> sinh(const c10::complex<T> &x) {
 }
 
 template<typename T>
-c10::complex<T> cosh(const c10::complex<T> &x) {
+C10_HOST_DEVICE c10::complex<T> cosh(const c10::complex<T> &x) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
   return static_cast<c10::complex<T>>(thrust::cosh(static_cast<thrust::complex<T>>(x)));
 #else
@@ -171,7 +171,7 @@ c10::complex<T> cosh(const c10::complex<T> &x) {
 }
 
 template<typename T>
-c10::complex<T> tanh(const c10::complex<T> &x) {
+C10_HOST_DEVICE c10::complex<T> tanh(const c10::complex<T> &x) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
   return static_cast<c10::complex<T>>(thrust::tanh(static_cast<thrust::complex<T>>(x)));
 #else
@@ -180,7 +180,7 @@ c10::complex<T> tanh(const c10::complex<T> &x) {
 }
 
 template<typename T>
-c10::complex<T> asinh(const c10::complex<T> &x) {
+C10_HOST_DEVICE c10::complex<T> asinh(const c10::complex<T> &x) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
   return static_cast<c10::complex<T>>(thrust::asinh(static_cast<thrust::complex<T>>(x)));
 #else
@@ -189,7 +189,7 @@ c10::complex<T> asinh(const c10::complex<T> &x) {
 }
 
 template<typename T>
-c10::complex<T> acosh(const c10::complex<T> &x) {
+C10_HOST_DEVICE c10::complex<T> acosh(const c10::complex<T> &x) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
   return static_cast<c10::complex<T>>(thrust::acosh(static_cast<thrust::complex<T>>(x)));
 #else
@@ -198,7 +198,7 @@ c10::complex<T> acosh(const c10::complex<T> &x) {
 }
 
 template<typename T>
-c10::complex<T> atanh(const c10::complex<T> &x) {
+C10_HOST_DEVICE c10::complex<T> atanh(const c10::complex<T> &x) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
   return static_cast<c10::complex<T>>(thrust::atanh(static_cast<thrust::complex<T>>(x)));
 #else

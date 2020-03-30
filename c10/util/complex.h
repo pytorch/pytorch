@@ -230,7 +230,7 @@ struct alignas(sizeof(T) * 2) complex_common {
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
   template<typename U>
-  explicit operator thrust::complex<U>() const {
+  C10_HOST_DEVICE explicit operator thrust::complex<U>() const {
     return thrust::complex<U>(thrust::complex<T>(real(), imag()));
   }
 #endif
