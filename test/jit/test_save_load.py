@@ -4,7 +4,6 @@ import sys
 
 import torch
 from torch import Tensor
-from typing import NamedTuple
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
