@@ -107,9 +107,14 @@ ADD ./common/install_jni.sh install_jni.sh
 ADD ./java/jni.h jni.h
 RUN bash ./install_jni.sh && rm install_jni.sh
 
+# Add tensorexpr_llvm
+USER jenkins
+ARG TENSOREXPR_LLVM
+ADD ./common/install_tensorexpr_llvm.sh install_tensorexpr_llvm.sh
+RUN bash ./install_tensorexpr_llvm.sh && rm install_tensorexpr_llvm.sh
+
 # Include BUILD_ENVIRONMENT environment variable in image
 ARG BUILD_ENVIRONMENT
 ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}
 
-USER jenkins
 CMD ["bash"]
