@@ -25,6 +25,23 @@ MAYBE_GLOBAL void test_align() {
   static_assert(alignof(c10::complex<double>) == 16, "");
 }
 
+MAYBE_GLOBAL void test_pod() {
+  static_assert(std::is_standard_layout<c10::complex<float>>::value, "");
+  static_assert(std::is_standard_layout<c10::complex<double>>::value, "");
+}
+
+TEST(TestMemory, ReinterpretCast) {
+  std::complex<float> z(1, 2);
+  c10::complex<float> zz = *reinterpret_cast<c10::complex<float>*>(&z);
+  ASSERT_EQ(z.real(), float(1));
+  ASSERT_EQ(z.imag(), float(2));
+
+  std::complex<double> zzz(1, 2);
+  c10::complex<double> zzzz = *reinterpret_cast<c10::complex<float>*>(&z);
+  ASSERT_EQ(z.real(), double(1));
+  ASSERT_EQ(z.imag(), double(2));
+}
+
 }  // memory
 
 namespace constructors {

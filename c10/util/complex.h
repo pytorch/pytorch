@@ -45,7 +45,7 @@ namespace c10 {
 // The APIs of operator = are mostly copied from C++ standard:
 //   https://en.cppreference.com/w/cpp/numeric/complex/operator%3D
 //
-// Since C++20, all operator= are constexpr. Although we are not bulding with
+// Since C++20, all operator= are constexpr. Although we are not building with
 // C++20, we also obey this behavior.
 //
 // There are three types of assign operator:
@@ -54,7 +54,7 @@ namespace c10 {
 //     with specialization `complex& operator=(T x)` for float/double/long double
 //     Since we only support float and double, on will use `complex& operator=(T x)`
 // - Copy assignment operator and converting assignment operator
-//   - There is no specialization of converting assignemnt operators, which type is
+//   - There is no specialization of converting assignment operators, which type is
 //     convertible is soly depend on whether the scalar type is convertable
 //
 // In addition to the standard assignment, we also provide assignment operators with std and thrust

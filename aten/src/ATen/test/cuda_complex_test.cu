@@ -33,6 +33,18 @@ __global__ void test_std_functions_kernel() {
   assert(std::abs(c10::polar(double(1), double(PI / 2)) - c10::complex<double>(0, 1)) < 1e-6);
 }
 
+__global__ void test_reinterpret_cast() {
+  std::complex<float> z(1, 2);
+  c10::complex<float> zz = *reinterpret_cast<c10::complex<float>*>(&z);
+  assert(z.real() == float(1));
+  assert(z.imag() == float(2));
+
+  std::complex<double> zzz(1, 2);
+  c10::complex<double> zzzz = *reinterpret_cast<c10::complex<float>*>(&z);
+  assert(z.real() == double(1));
+  assert(z.imag() == double(2));
+}
+
 TEST(DeviceTests, ThrustConversion) {
   cudaDeviceSynchronize();
   test_thrust_kernel<<<1, 1>>>();
@@ -46,3 +58,11 @@ TEST(DeviceTests, StdFunctions) {
   cudaDeviceSynchronize();
   ASSERT_EQ(cudaGetLastError(), cudaSuccess);
 }
+
+TEST(DeviceTests, ReinterpretCast) {
+  cudaDeviceSynchronize();
+  test_reinterpret_cast<<<1, 1>>>();
+  cudaDeviceSynchronize();
+  ASSERT_EQ(cudaGetLastError(), cudaSuccess);
+}
+
