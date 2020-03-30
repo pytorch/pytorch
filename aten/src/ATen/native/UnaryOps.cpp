@@ -147,9 +147,9 @@ Tensor& expm1_out(Tensor& result, const Tensor& self) { return unary_floating_uf
 Tensor expm1(const Tensor& self) { return unary_floating_ufunc_op_impl(self, at::expm1_out); }
 Tensor& expm1_(Tensor& self) { return unary_floating_ufunc_op_impl_(self, at::expm1_out); }
 
-Tensor& frac_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, frac_stub); }
-Tensor frac(const Tensor& self) { return unary_op_impl(self, at::frac_out); }
-Tensor& frac_(Tensor& self) { return unary_op_impl_(self, at::frac_out); }
+Tensor& frac_out(Tensor& result, const Tensor& self) { return unary_floating_ufunc_op_impl_out(result, self, frac_stub); }
+Tensor frac(const Tensor& self) { return unary_floating_ufunc_op_impl(self, at::frac_out); }
+Tensor& frac_(Tensor& self) { return unary_floating_ufunc_op_impl_(self, at::frac_out); }
 
 Tensor& floor_out(Tensor& result, const Tensor& self) { return unary_floating_ufunc_op_impl_out(result, self, floor_stub); }
 Tensor floor(const Tensor& self) { return unary_floating_ufunc_op_impl(self, at::floor_out); }
@@ -358,7 +358,10 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
 
 #define IMPLEMENT_UNARY_FLOATING_UFUNC_OP_CORE(op)                     \
   Tensor op(const Tensor& self) {                                      \
-    return unary_floating_ufunc_cast_op_impl(self, at::op##_out);      \
+    if(self.device().is_cpu())                                         \
+      return unary_floating_ufunc_op_impl(self, at::op##_out);         \
+    else                                                               \
+      return unary_floating_ufunc_cast_op_impl(self, at::op##_out);    \
   }
 
 #define IMPLEMENT_UNARY_FLOATING_UFUNC_OP_OUT_INPLACE(op, prefix, device) \

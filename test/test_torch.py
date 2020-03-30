@@ -16677,6 +16677,7 @@ unary_ufuncs = {
     'angle': ufunc_meta(is_floating=True, complex_on=('cpu')),
     'ceil': ufunc_meta(is_floating=True, complex_on=('cpu', 'cuda')),
     'floor': ufunc_meta(is_floating=True, complex_on=('cpu', 'cuda')),
+    'frac': ufunc_meta(is_floating=True, complex_on=()),
     'exp': ufunc_meta(is_floating=True, complex_on=('cpu')),
     'expm1': ufunc_meta(is_floating=True, complex_on=()),
     'log': ufunc_meta(is_floating=True, complex_on=('cpu', 'cuda')),
