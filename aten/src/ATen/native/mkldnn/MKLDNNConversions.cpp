@@ -46,16 +46,17 @@ Tensor dense_to_mkldnn(const Tensor& cpu_tensor) {
 // weight is not already in this optimized format. By the time I'm
 // writing this note, we are seeing ~20% perf cost of doing the
 // on-the-fly reorder.
-Tensor mkldnn_reorder_conv2d_weight(
+Tensor mkldnn_reorder_conv_weight(
     const Tensor& self,
     IntArrayRef padding,
     IntArrayRef stride,
     IntArrayRef dilation,
-    int64_t groups) {
+    int64_t groups,
+    int64_t dims) {
 
-  auto stride_vec = expand_param_if_needed(stride, "stride", 2);
-  auto padding_vec = expand_param_if_needed(padding, "padding", 2);
-  auto dilation_vec = expand_param_if_needed(dilation, "dilation", 2);
+  auto stride_vec = expand_param_if_needed(stride, "stride", dims);
+  auto padding_vec = expand_param_if_needed(padding, "padding", dims);
+  auto dilation_vec = expand_param_if_needed(dilation, "dilation", dims);
 
   auto w = itensor_from_mkldnn(self);
 
@@ -63,8 +64,8 @@ Tensor mkldnn_reorder_conv2d_weight(
   // dimension when groups > 1, having dimension [g, o/g, i, h, w] instead of
   // [o, i, h, w]. Ideally we should reorder the weight back in serialization.
   // For backward compatibility, we squash the first two dims (g * o/g) back to
-  // its original form.
-  if (w.ndims() == 5) {
+  // its original form. for conv3d, it always 5-d
+  if (w.ndims() == 5 && dims == 2) {
     auto wdims = w.get_dims();
     w.reshape({wdims[0] * wdims[1], wdims[2], wdims[3], wdims[4]});
   }
@@ -101,7 +102,8 @@ Tensor mkldnn_reorder_conv2d_weight(
     IntArrayRef padding,
     IntArrayRef stride,
     IntArrayRef dilation,
-    int64_t groups) {
+    int64_t groups,
+    int64_t dims) {
   AT_ERROR("mkldnn_reorder_conv2d_weight: MKL-DNN build is disabled");
 }
 

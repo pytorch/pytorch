@@ -3617,11 +3617,11 @@
   dispatch:
     CPU: dense_to_mkldnn
 
-- func: mkldnn_reorder_conv2d_weight(Tensor self, int[2] padding=0, int[2] stride=1, int[2] dilation=1, int groups=1) -> Tensor
+- func: mkldnn_reorder_conv_weight(Tensor self, int[2] padding=0, int[2] stride=1, int[2] dilation=1, int groups=1, int dims=2) -> Tensor
   variants: function
   python_module: nn
   dispatch:
-    MkldnnCPU: mkldnn_reorder_conv2d_weight
+    MkldnnCPU: mkldnn_reorder_conv_weight
 
 - func: to_mkldnn_backward(Tensor grad, Tensor input) -> Tensor
   use_c10_dispatcher: full
