@@ -4,6 +4,9 @@
 #include <TH/THGenerateAllTypes.h>
 
 #include <TH/generic/THTensor.cpp>
+#include <TH/THGenerateComplexTypes.h>
+
+#include <TH/generic/THTensor.cpp>
 #include <TH/THGenerateHalfType.h>
 
 #include <TH/generic/THTensor.cpp>

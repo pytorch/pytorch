@@ -16,6 +16,8 @@
 #define THCudaLongStorage       THCStorage
 #define THCudaBoolStorage       THCStorage
 #define THCudaBFloat16Storage   THCStorage
+#define THCudaComplexDoubleStorage     THCStorage
+#define THCudaComplexFloatStorage     THCStorage
 
 THC_API scalar_t* THCStorage_(data)(THCState *state, const THCStorage*);
 THC_API ptrdiff_t THCStorage_(size)(THCState *state, const THCStorage*);
