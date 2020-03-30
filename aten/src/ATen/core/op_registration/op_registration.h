@@ -874,9 +874,9 @@ public:
   Module& impl(const char* name, Dispatch&& key, Func&& raw_f) & {
     return impl(name, dispatch(std::forward<Dispatch>(key), std::forward<Func>(raw_f)));
   }
-  template <typename Func, typename Dispatch>
+  template <typename Dispatch, typename Func>
   Module&& impl(const char* name, Dispatch&& key, Func&& raw_f) && {
-    impl(name, dispatch(std::forward<Dispatch>(key), std::forward<Func>(raw_f)));
+    impl(name, std::forward<Dispatch>(key), std::forward<Func>(raw_f));
     return std::move(*this);
   }
 
@@ -892,7 +892,7 @@ public:
   }
   template <typename Dispatch, typename Func>
   Module&& fallback(Dispatch&& key, Func&& raw_f) && {
-    fallback(c10::dispatch(std::forward<Dispatch>(key), std::forward<Func>(raw_f)));
+    fallback(std::forward<Dispatch>(key), std::forward<Func>(raw_f));
     return std::move(*this);
   }
   // NB: these overloads are here for completeness, but you'll probably want to
