@@ -1235,6 +1235,7 @@ void OnnxifiTransformer::tieGatherAndSparseLengthsWeightedSumOps(
   onnxBackendID backend_id = backend_ids_[idx_];
 
   for (const auto& op : net.op()) {
+    std::string check;
     if (op.type() == "Gather") {
       int pos =
           ArgumentHelper::GetSingleArgument<OperatorDef, int>(op, kNetPos, -1);
@@ -1246,17 +1247,22 @@ void OnnxifiTransformer::tieGatherAndSparseLengthsWeightedSumOps(
           ? supportOpOnnx(op, &exporter, *blacklisted_ops, backend_id)
           : supportOpC2(op, shape_hints, *blacklisted_ops, backend_id);
       if (!supported && op.input_size() > 1) {
-        const auto it = output_pos.find(op.input(1));
-        if (it == output_pos.end()) {
-          continue;
-        }
-        blacklisted_ops->emplace(it->second);
-        // We know that current op is not going to be supported. Might as well
-        // blacklist it too
-        blacklisted_ops->emplace(
-            ArgumentHelper::GetSingleArgument<OperatorDef, int>(
-                op, kNetPos, -1));
+        check = op.input(1);
       }
+    } else if (
+        op.type() == "SparseLengthsSumSparseLookup" && op.input_size() > 3) {
+      check = op.input(3);
+    }
+    if (!check.empty()) {
+      const auto it = output_pos.find(check);
+      if (it == output_pos.end()) {
+        continue;
+      }
+      blacklisted_ops->emplace(it->second);
+      // We know that current op is not going to be supported. Might as well
+      // blacklist it too
+      blacklisted_ops->emplace(
+          ArgumentHelper::GetSingleArgument<OperatorDef, int>(op, kNetPos, -1));
     }
   }
 }
