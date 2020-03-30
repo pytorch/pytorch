@@ -206,10 +206,6 @@ if __name__ == '__main__':
             line = f.readline()
             if not line:
                 break
-            if "torch.classes" in line:
-                # TODO Fix type __torch__.torch.classes.xxx
-                continue
-
             if dont_parse(line.strip()):
                 print("Not parsing schema line: ", line.strip())
                 continue
