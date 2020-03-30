@@ -48,6 +48,7 @@ white_list = [
     ('aten::ones_like', datetime.date(2020, 3, 15)),
     ('aten::randint_like', datetime.date(2020, 3, 15)),
     ('aten::zeros_like', datetime.date(2020, 3, 15)),
+    ('aten::_assert_int_or_pair', datetime.date(9999, 1, 1)),
     ('aten::floor_divide', datetime.date(2020, 4, 1)),
     ('aten::Bool', datetime.date(2020, 4, 1)),
     ('aten::Float', datetime.date(2020, 4, 1)),
@@ -82,6 +83,7 @@ white_list = [
     ('aten::asinh', datetime.date(2020, 4, 1)),
     ('aten::floordiv', datetime.date(2020, 4, 1)),
     ('prim::NumToTensor', datetime.date(2020, 4, 1)),
+    ('prim::NumToTensor.Scalar', datetime.date(2020, 4, 1)),
     ('aten::sin', datetime.date(2020, 4, 1)),
     ('aten::round', datetime.date(2020, 4, 1)),
     ('aten::remainder', datetime.date(2020, 4, 1)),
@@ -124,6 +126,8 @@ white_list = [
     ('_xnnpack::linear_packed', datetime.date(2020, 4, 2)),
     ('_xnnpack::linear_prepack', datetime.date(2020, 4, 2)),
     ('_aten', datetime.date(2020, 4, 15)),
+    ('aten::real*', datetime.date(2020, 4, 15)),
+    ('aten::imag*', datetime.date(2020, 4, 15)),
 ]
 
 
