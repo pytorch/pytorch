@@ -324,25 +324,50 @@ inline c10::optional<T> merge_primitive(
   return c10::optional<T>{};
 }
 
-// `VaryingShape` tracks if individual dimensions or a rank vary across
-// profiled runs. A *varying* or *dynamic* dimension is expressed as
-// an empty c10::optional in `sizes_`. If a rank is dynamic, the entire
-// `sizes_` becomes the empty optional.
-struct CAFFE2_API VaryingShape {
-  using ListOfOptionalInts = std::vector<c10::optional<int64_t>>;
-  VaryingShape(const std::vector<int64_t>& vec)
-      : VaryingShape(ListOfOptionalInts(vec.begin(), vec.end())) {}
+struct CAFFE2_API ShapeSymbol {
+    ShapeSymbol(int64_t val, bool statik = true): value_(val), statik_(statik) {}
 
-  VaryingShape(c10::ArrayRef<int64_t> vec)
-      : VaryingShape(ListOfOptionalInts(vec.begin(), vec.end())){}
+    explicit operator int() const { return value_; }
+    ShapeSymbol(const ShapeSymbol& ss) {
+      statik_ = ss.statik_;
+      value_ = ss.value_;
+    }
+    ShapeSymbol(): value_(-1), statik_(false) {}
+    static ShapeSymbol getInvalidSymbol() {return ShapeSymbol(); }
+    int64_t value_;
+    bool statik_;  
+    bool operator ==(const ShapeSymbol &b) const { return value_ == b.value_ && statik_ == b.statik_; }
+    // dynamic shapes are typically negative
+    bool operator <(const ShapeSymbol &b) const { return static_cast<int>(statik_) < static_cast<int>(b.statik_) || value_ < b.value_; }
+};
+
+template <typename T>
+struct CAFFE2_API VaryingShape {
+  using ListOfOptionalElements = std::vector<c10::optional<T>>;
+  VaryingShape(const std::vector<T>& vec)
+      : VaryingShape(ListOfOptionalElements(vec.begin(), vec.end())) {}
+
+  VaryingShape(c10::ArrayRef<T> vec)
+      : VaryingShape(ListOfOptionalElements(vec.begin(), vec.end())){}
 
   VaryingShape(c10::optional<size_t> size = c10::nullopt) : dims_(c10::nullopt) {
     if (size) {
-      dims_ = ListOfOptionalInts(*size);
+      dims_ = ListOfOptionalElements(*size);
     }
   }
 
-  VaryingShape(ListOfOptionalInts dims)
+  // adds a c-tor VaryingShape<ShapeSymbol>(c10::IntArrayRef)
+  template<typename U = T,
+  typename = typename std::enable_if< std::is_same<U,ShapeSymbol>::value>::type>
+    inline VaryingShape(c10::IntArrayRef v) {
+        ListOfOptionalElements sv;
+        for (auto e : v) {
+            sv.push_back(c10::optional<ShapeSymbol>(ShapeSymbol(e, true)));
+        }
+        dims_ = c10::optional<ListOfOptionalElements>(sv);
+  }
+
+  VaryingShape(ListOfOptionalElements dims)
   : dims_(std::move(dims)) {}
 
   VaryingShape(size_t size) : VaryingShape(c10::optional<size_t>(size)) {}
@@ -351,7 +376,7 @@ struct CAFFE2_API VaryingShape {
     return dims_ == other.dims_;
   }
 
-  const c10::optional<int64_t>& operator[](int i) const {
+  const c10::optional<T>& operator[](int i) const {
     if (!dims_) {
       throw std::runtime_error("Rank isn't fixed");
     }
@@ -366,17 +391,17 @@ struct CAFFE2_API VaryingShape {
     return dims.size();
   }
 
-  const c10::optional<ListOfOptionalInts>& sizes() const {
+  const c10::optional<ListOfOptionalElements>& sizes() const {
     return dims_;
   }
 
   VaryingShape merge(const VaryingShape& other) const;
 
-  c10::optional<std::vector<int64_t>> concrete_sizes() const {
+  c10::optional<std::vector<T>> concrete_sizes() const {
     if (!dims_) {
       return c10::nullopt;
     }
-    std::vector<int64_t> sizes;
+    std::vector<T> sizes;
     for (auto d : *dims_) {
       if (!d) {
         return c10::nullopt;
@@ -399,67 +424,47 @@ struct CAFFE2_API VaryingShape {
   }
 
  private:
-  c10::optional<ListOfOptionalInts> dims_;
+  c10::optional<ListOfOptionalElements> dims_;
 };
-
-using VaryingStrides = VaryingShape;
 
 struct TensorType;
 using TensorTypePtr = std::shared_ptr<TensorType>;
 // This type represents a single Tensor with a specific size
 struct CAFFE2_API TensorType : public Type {
-  static TensorTypePtr create(const at::Tensor& t) {
-    return TensorTypePtr(new TensorType(t));
-  }
+  static TensorTypePtr create(const at::Tensor& t);
 
-  static TensorTypePtr create(c10::optional<at::ScalarType> scalar_type,
-                              c10::optional<Device> device,
-                              const VaryingShape &sizes,
-                              const VaryingStrides &strides,
-                              c10::optional<bool> requires_grad,
-                              c10::optional<bool> undefined = false) {
-    return TensorTypePtr(new TensorType(scalar_type, device, sizes, strides,
-                                        requires_grad, undefined));
-  }
+  // used by TensorType::create(size_t dim) which in turn used by shape_analysis.cpp
+  static TensorTypePtr create(
+      c10::optional<at::ScalarType> scalar_type,
+      c10::optional<Device> device,
+      const VaryingShape<int64_t>& sizes,
+      const VaryingShape<int64_t>& strides,
+      c10::optional<bool> requires_grad,
+      c10::optional<bool> undefined = false);
+
+  static TensorTypePtr create(
+      c10::optional<at::ScalarType> scalar_type,
+      c10::optional<Device> device,
+      const VaryingShape<ShapeSymbol>& sizes,
+      const VaryingShape<int64_t>& strides,
+      const VaryingShape<size_t>& stride_indices,
+      const VaryingShape<bool>& contiguity,
+      c10::optional<bool> requires_grad,
+      c10::optional<bool> undefined = false);
 
   static TensorTypePtr create(
       c10::optional<at::ScalarType> scalar_type,
       c10::optional<Device> device,
       c10::optional<size_t> dim,
-      c10::optional<bool> requires_grad) {
-    return TensorType::create(
-        scalar_type,
-        device,
-        VaryingShape(dim),
-        VaryingShape(dim),
-        requires_grad);
-  }
+      c10::optional<bool> requires_grad);
 
   // overloaded create variadic template argument as it could not distinguish
   // initializer list
   static TensorTypePtr createContiguous(
       at::ScalarType scalar_type,
       at::Device device,
-      at::IntArrayRef sizes) {
-    return create(
-        scalar_type,
-        device,
-        VaryingShape(sizes),
-        VaryingShape(contiguousStridesOf(sizes)),
-        c10::nullopt);
-  }
-  static TensorTypePtr create(
-      at::ScalarType scalar_type,
-      at::Device device,
-      at::IntArrayRef sizes,
-      at::IntArrayRef strides) {
-    return create(
-        scalar_type,
-        device,
-        VaryingShape(sizes),
-        c10::VaryingShape(strides),
-        c10::nullopt);
-  }
+      at::IntArrayRef sizes);
+
   static TypePtr fromNumberType(TypePtr typ);
   static TypePtr fromBoolType();
 
@@ -467,12 +472,20 @@ struct CAFFE2_API TensorType : public Type {
     return sizes().size();
   }
 
-  const VaryingShape& sizes() const {
-    return sizes_;
-  }
-  const VaryingStrides& strides() const {
+  VaryingShape<int64_t> sizes() const; 
+
+  const VaryingShape<int64_t>& strides() const {
     return strides_;
   }
+
+  const VaryingShape<bool>& contiguity() const {
+    return contiguity_;
+  }
+
+    const VaryingShape<size_t>& stride_indices() const {
+    return stride_indices_;
+  }
+
   c10::optional<at::Device> device() const {
     return device_;
   }
@@ -488,17 +501,7 @@ struct CAFFE2_API TensorType : public Type {
 
   bool isCompatibleWithInCurrentExecutionContext(at::Tensor& t) const;
 
-  bool operator==(const Type& rhs) const override {
-    if (rhs.kind() != kind()) {
-      return false;
-    }
-
-    auto rt = rhs.expect<TensorType>();
-    return scalar_type_ == rt->scalarType() && sizes() == rt->sizes() &&
-           strides() == rt->strides() && device() == rt->device() &&
-           requiresGrad() == rt->requiresGrad() &&
-           undefined() == rt->undefined();
-  }
+  bool operator==(const Type& rhs) const override;
   bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override;
 
   std::string str() const override;
@@ -531,8 +534,10 @@ struct CAFFE2_API TensorType : public Type {
 
   TensorTypePtr withDim(c10::optional<size_t> d) {
     auto copy = clone();
-    copy->sizes_ = VaryingShape(d);
-    copy->strides_ = VaryingShape(d);
+    //withDim is only used by the legacy executor
+    // that only cares about the rank, so create dummy symbols)) :
+    copy->sizes_ = d.has_value() ? VaryingShape<ShapeSymbol>(*d) : VaryingShape<ShapeSymbol>();
+    copy->strides_ = VaryingShape<int64_t>(d);
     return copy;
   }
 
@@ -540,8 +545,18 @@ struct CAFFE2_API TensorType : public Type {
       at::IntArrayRef sizes,
       at::IntArrayRef strides) const {
     auto cloned = clone();
-    cloned->sizes_ = VaryingShape(sizes);
-    cloned->strides_ = VaryingStrides(strides);
+    auto contNstrides = contiguityStrideIndices(sizes, strides);
+    auto ssizes = std::vector<ShapeSymbol>(fmap(sizes, [](int64_t s){return ShapeSymbol(s, true); }));
+    cloned->sizes_ = ssizes;
+    cloned->contiguity_ = VaryingShape<bool>(std::get<0>(contNstrides));
+    cloned->stride_indices_ = VaryingShape<size_t>(std::get<1>(contNstrides));
+    cloned->strides_ = VaryingShape<int64_t>(strides);
+    return cloned;
+  }
+
+  TensorTypePtr withSymbolicShapes(VaryingShape<ShapeSymbol> ssizes) const {
+    auto cloned = clone();
+    cloned->sizes_ = ssizes;
     return cloned;
   }
 
@@ -552,22 +567,23 @@ struct CAFFE2_API TensorType : public Type {
 
   TensorTypePtr dimensionedOnly() const {
     auto copy = clone();
-    copy->sizes_ = VaryingShape(sizes().size());
-    copy->strides_ = VaryingShape(sizes().size());
+    copy->sizes_ = VaryingShape<ShapeSymbol>(sizes().size());
+    copy->strides_ = VaryingShape<int64_t>(sizes().size());
+    copy->stride_indices_ = VaryingShape<size_t>(sizes().size());
+    copy->contiguity_ = VaryingShape<bool>(sizes().size());
     return copy;
   }
 
   TensorTypePtr contiguous() const {
     auto cloned = clone();
-    if (auto concrete_sizes = sizes().concrete_sizes()) {
-      cloned->strides_ = VaryingShape(contiguousStridesOf(*concrete_sizes));
-    } else  {
-      cloned->strides_ = VaryingShape(sizes().size());
-    }
+    TORCH_INTERNAL_ASSERT(sizes().concrete_sizes().has_value());
+    cloned->strides_ = VaryingShape<int64_t>(contiguousStridesOf(*sizes().concrete_sizes()));
     return cloned;
   }
 
-  TensorTypePtr merge(TensorTypePtr other) const;
+  const VaryingShape<ShapeSymbol>& symbolic_sizes() const;
+
+  TensorTypePtr merge(TensorTypePtr other, bool merge_sizes = true) const;
 
   // is all information about the type specified except for autograd?
   // This replaces the notion of a 'CompleteTensorType' that used to exist
@@ -603,41 +619,27 @@ struct CAFFE2_API TensorType : public Type {
   static const TypeKind Kind = TypeKind::TensorType;
 
  private:
-  TensorType(const at::Tensor& tensor)
-      : Type(TypeKind::TensorType),
-        scalar_type_(tensor.scalar_type()),
-        device_(tensor.device()),
-        sizes_(tensor.sizes().size()),
-        strides_(tensor.sizes().size()),
-        requires_grad_(tensor.requires_grad()),
-        undefined_(!tensor.defined()) {
-    // any updates to `isSubtypeOf`, TensorType c-tor or
-    // `isCompatibleWithInCurrentExecutionContext` need to maintain the
-    // following `TensorType::create(actual_tensor)->isSubtypeOf(expected_type)
-    //  == expected_type->isCompatibleWithInCurrentExecutionContext(t)`
-    if (!tensor.is_mkldnn() && !tensor.is_sparse()) {
-      sizes_ = tensor.sizes().vec();
-      strides_ = tensor.strides().vec();
-    }
-  }
+
   TensorType(
       c10::optional<at::ScalarType> scalar_type,
       c10::optional<Device> device,
-      const VaryingShape& sizes,
-      const VaryingStrides& strides,
+      const VaryingShape<ShapeSymbol>& sizes,
+      const VaryingShape<int64_t>& strides,
+      const VaryingShape<size_t>& stride_indices,
+      const VaryingShape<bool>& contiguity,
       c10::optional<bool> requires_grad,
-      c10::optional<bool> undefined = false)
-      : Type(TypeKind::TensorType),
-        scalar_type_(scalar_type),
-        device_(device),
-        sizes_(sizes),
-        strides_(strides),
-        requires_grad_(requires_grad),
-        undefined_(undefined) {}
+      c10::optional<bool> undefined = false);
 
   TensorTypePtr clone() const {
     return TensorTypePtr(new TensorType(
-        scalar_type_, device_, sizes_, strides_, requires_grad_, undefined_));
+        scalar_type_,
+        device_,
+        sizes_,
+        strides_,
+        stride_indices_,
+        contiguity_,
+        requires_grad_,
+        undefined_));
   }
 
   static std::vector<int64_t> contiguousStridesOf(at::IntArrayRef sizes) {
@@ -651,10 +653,15 @@ struct CAFFE2_API TensorType : public Type {
     return strides;
   }
 
+  static std::tuple<std::vector<bool>, std::vector<size_t>>
+  contiguityStrideIndices(at::IntArrayRef sizes, at::IntArrayRef strides);
+
   c10::optional<at::ScalarType> scalar_type_;
   c10::optional<at::Device> device_;
-  VaryingShape sizes_;
-  VaryingStrides strides_;
+  VaryingShape<ShapeSymbol> sizes_;
+  VaryingShape<int64_t> strides_;
+  VaryingShape<size_t> stride_indices_;
+  VaryingShape<bool> contiguity_;
   c10::optional<bool> requires_grad_;
   // we exploit the fact certain tensors must be zero in the autograd to
   // optimize gradient computation. Such zero tensors are currently implemented
@@ -1289,7 +1296,9 @@ private:
 };
 
 CAFFE2_API std::ostream& operator<<(std::ostream& out, const Type& t);
-CAFFE2_API std::ostream& operator<<(std::ostream& out, const VaryingShape& t);
+template <typename T>
+CAFFE2_API std::ostream& operator<<(std::ostream& out, const VaryingShape<T>& t);
+CAFFE2_API std::ostream& operator<<(std::ostream& os, const ShapeSymbol& s);
 // what is the type, ignoring extra size/shape information?
 // e.g. Tensor(2x3) -> Dynamic, and Tuple(Tensor(2x3),...) -> Tuple(Dynamic,...)
 

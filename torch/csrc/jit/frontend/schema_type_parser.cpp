@@ -160,8 +160,7 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
     ptr = at::TensorType::create(
         dtype,
         at::DeviceType::CPU,
-        c10::VaryingShape(num_dims),
-        c10::VaryingShape(num_dims),
+        num_dims,
         c10::nullopt);
   } else {
     std::vector<int64_t> dims;
@@ -176,7 +175,7 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
       dims.push_back(dim);
     });
     at::IntArrayRef dims_ref(dims);
-    ptr = at::TensorType::create(dtype, at::DeviceType::CPU, dims_ref, false);
+    ptr = at::TensorType::create(dtype, at::DeviceType::CPU, c10::VaryingShape<c10::ShapeSymbol>(dims_ref), c10::VaryingShape<int64_t>(dims_ref.size()), c10::VaryingShape<size_t>(dims_ref.size()), c10::VaryingShape<bool>(dims_ref.size()), false);
   }
   return ptr;
 }
