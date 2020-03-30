@@ -34,12 +34,12 @@ GRADLE_NOT_FOUND_MSG="Unable to find gradle, please add it to PATH or set GRADLE
 
 if [ ! -x "$(command -v gradle)" ]; then
   if [ -z "$GRADLE_HOME" ]; then
-    echo GRADLE_NOT_FOUND_MSG 
+    echo GRADLE_NOT_FOUND_MSG
     exit 1
   fi
   GRADLE_PATH=$GRADLE_HOME/bin/gradle
   if [ ! -f "$GRADLE_PATH" ]; then
-    echo GRADLE_NOT_FOUND_MSG 
+    echo GRADLE_NOT_FOUND_MSG
     exit 1
   fi
 fi
@@ -51,7 +51,7 @@ if [ $# -gt 0 ]; then
   ABIS_LIST=$1
   CUSTOM_ABIS_LIST=true
 fi
-  
+
 echo "ABIS_LIST:$ABIS_LIST"
 
 LIB_DIR=$PYTORCH_ANDROID_DIR/pytorch_android/src/main/jniLibs
@@ -71,12 +71,12 @@ mkdir -p $OUT_DIR
 pushd $PYTORCH_DIR
 python $PYTORCH_DIR/setup.py clean
 
-ANDROID_ABI=$abi BUILD_PYTORCH_MOBILE=1 $PYTORCH_DIR/scripts/build_android.sh -DANDROID_CCACHE=$(which ccache)
+ANDROID_ABI=$abi $PYTORCH_DIR/scripts/build_android.sh -DANDROID_CCACHE=$(which ccache)
 
 cp -R $PYTORCH_DIR/build_android/install/lib $OUT_DIR/
 cp -R $PYTORCH_DIR/build_android/install/include $OUT_DIR/
 
-echo "$abi build output lib,include copied to $OUT_DIR" 
+echo "$abi build output lib,include copied to $OUT_DIR"
 
 LIB_LINK_PATH=$LIB_DIR/$abi
 INCLUDE_LINK_PATH=$INCLUDE_DIR/$abi
@@ -103,4 +103,3 @@ fi
 
 find $PYTORCH_ANDROID_DIR -type f -name *aar | xargs ls -lah
 popd
-

@@ -28,14 +28,20 @@ void Tensor::enforce_invariants() {
 
 void Tensor::print() const {
   if (defined()) {
-    std::cerr << "[" << type().toString() << " " << sizes() << "]" << std::endl;
+    std::cerr << "[" << toString() << " " << sizes() << "]" << std::endl;
   } else {
     std::cerr << "[UndefinedTensor]" << std::endl;
   }
 }
 
 std::string Tensor::toString() const {
-  return type().toString();
+  std::string base_str;
+  if (scalar_type() == ScalarType::Undefined) {
+    base_str = "UndefinedType";
+  } else {
+    base_str = std::string(at::toString(options().backend())) + at::toString(scalar_type()) + "Type";
+  }
+  return base_str;
 }
 
 Tensor Tensor::variable_data() const {
@@ -53,7 +59,7 @@ bool Tensor::is_view() const {
   return impl::GetVariableHooks()->is_view(*this);
 }
 
-const Tensor& Tensor::base() const {
+const Tensor& Tensor::_base() const {
   return impl::GetVariableHooks()->base(*this);
 }
 

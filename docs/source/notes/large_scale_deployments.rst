@@ -120,8 +120,8 @@ usage might look like:
 
 .. code-block:: cpp
 
-    SetExportModuleExtraFilesHook([](const script::Module&) {
-        script::ExtraFilesMap files;
+    SetExportModuleExtraFilesHook([](const Module&) {
+        ExtraFilesMap files;
         files["producer_info.json"] = "{\"user\": \"" + getenv("USER") + "\"}";
         return files;
     });

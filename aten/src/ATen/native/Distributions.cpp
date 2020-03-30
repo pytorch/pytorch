@@ -6,7 +6,7 @@
 #include <ATen/NativeFunctions.h>
 #include <c10/util/Exception.h>
 #include <c10/util/math_compat.h>
-#include <ATen/core/EnableNamedTensor.h>
+#include <c10/util/Optional.h>
 
 #include <ATen/Utils.h>
 #include <ATen/CPUGenerator.h>
@@ -14,6 +14,8 @@
 #include <ATen/native/Distributions.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/UnaryOps.h>
+#include <ATen/native/TensorIterator.h>
+#include <ATen/native/DistributionTemplates.h>
 #include <ATen/NamedTensorUtils.h>
 
 #include <type_traits>
@@ -56,6 +58,7 @@ namespace {
 
 
 int64_t sample_poisson(double lambda, at::CPUGenerator* generator) {
+  TORCH_CHECK(lambda >= 0, "invalid Poisson rate, expected rate to be non-negative");
   at::uniform_real_distribution<double> standard_uniform(0.0, 1.0);
   if (lambda >= 10) {
     // transformed rejection method, (Hoermann, 1993)
@@ -111,29 +114,36 @@ int64_t sample_poisson(double lambda, at::CPUGenerator* generator) {
 namespace at {
 namespace native {
 
-Tensor bernoulli(const Tensor& self, Generator* gen) {
+DEFINE_DISPATCH(bernoulli_mkl_stub);
+DEFINE_DISPATCH(cauchy_stub);
+DEFINE_DISPATCH(exponential_stub);
+DEFINE_DISPATCH(multinomial_stub);
+DEFINE_DISPATCH(geometric_stub);
+DEFINE_DISPATCH(log_normal_stub);
+DEFINE_DISPATCH(normal_stub);
+DEFINE_DISPATCH(random_stub);
+DEFINE_DISPATCH(random_from_to_stub);
+DEFINE_DISPATCH(random_full_64_bits_range_stub);
+
+Tensor bernoulli(const Tensor& self, Generator gen) {
   return at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT).bernoulli_(self, gen);
 }
 
-Tensor bernoulli(const Tensor& self, double p, Generator* gen) {
+Tensor bernoulli(const Tensor& self, double p, Generator gen) {
   return at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT).bernoulli_(p, gen);
 }
 
-Tensor& bernoulli_out(Tensor& result, const Tensor& self, Generator* gen) {
+Tensor& bernoulli_out(Tensor& result, const Tensor& self, Generator gen) {
   // result.resize_as_(self) requires self to have same dtype as result, so we
   // use resize_ instead.
   // TODO: Fix resize_as_. See pytorch/pytorch#11665.
   result.resize_(self.sizes()).bernoulli_(self, gen);
-#ifdef BUILD_NAMEDTENSOR
   namedinference::propagate_names(result, self);
-#endif
   return result;
 }
 
-Tensor& bernoulli_tensor_cpu_(Tensor& self, const Tensor& p_, Generator* gen) {
-#ifdef BUILD_NAMEDTENSOR
+Tensor& bernoulli_tensor_cpu_(Tensor& self, const Tensor& p_, Generator gen) {
   NoNamesGuard guard;
-#endif
   AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool, self.scalar_type(), "bernoulli_tensor_cpu_self_", [&] {
     CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
     // See Note [Acquire lock when using random generators]
@@ -161,9 +171,7 @@ Tensor& bernoulli_tensor_cpu_(Tensor& self, const Tensor& p_, Generator* gen) {
   return self;
 }
 
-DEFINE_DISPATCH(bernoulli_mkl_stub);
-
-Tensor& bernoulli_scalar_cpu_(Tensor& self, double p, Generator* gen) {
+Tensor& bernoulli_scalar_cpu_(Tensor& self, double p, Generator gen) {
   TORCH_CHECK(0 <= p && p <= 1, "bernoulli_ expects p to be in [0, 1], but got p=", p);
 #if AT_MKL_ENABLED()
   if (cpuinfo_initialize() && cpuinfo_vendor_intel == cpuinfo_get_processor(0)->core->vendor) {
@@ -184,6 +192,102 @@ Tensor& bernoulli_scalar_cpu_(Tensor& self, double p, Generator* gen) {
   return self;
 }
 
+Tensor& log_normal_(Tensor& self, double mean, double std, Generator gen) {
+  TORCH_CHECK(std > 0.0, "log_normal_ expects std > 0.0, but found std=", std);
+  auto iter = TensorIterator::nullary_op(self);
+  log_normal_stub(iter.device_type(), iter, mean, std, gen);
+  return self;
+}
+
+Tensor& cauchy_(Tensor& self, double median, double sigma, Generator gen) {
+  auto iter = TensorIterator::nullary_op(self);
+  cauchy_stub(iter.device_type(), iter, median, sigma, gen);
+  return self;
+}
+
+Tensor& exponential_(Tensor& self, double lambda, Generator gen) {
+  TORCH_CHECK(lambda >= 0.0, "exponential_ expects lambda >= 0.0, but found lambda=", lambda);
+  auto iter = TensorIterator::nullary_op(self);
+  exponential_stub(iter.device_type(), iter, lambda, gen);
+  return self;
+}
+
+Tensor& geometric_(Tensor& self, double p, Generator gen) {
+  TORCH_CHECK(0 < p && p < 1, "geometric_ expects p to be in (0, 1), but got p=", p);
+  auto iter = TensorIterator::nullary_op(self);
+  geometric_stub(iter.device_type(), iter, p, gen);
+  return self;
+}
+
+// ==================================================== Normal ========================================================
+
+template<typename RNG>
+struct NormalStub {
+  void operator()(Tensor& self, double mean, double std, Generator gen) {
+    normal_stub(self.device().type(), self, mean, std, gen);
+  }
+};
+
+Tensor& normal_(Tensor& self, double mean, double std, Generator gen) {
+  return at::native::templates::normal_impl_<NormalStub, Generator>(self, mean, std, gen);
+}
+
+Tensor& normal_out(Tensor& output, const Tensor& mean, double std, Generator gen) {
+  return at::native::templates::normal_out_impl<NormalStub, Generator>(output, mean, std, gen);
+}
+
+Tensor& normal_out(Tensor& output, double mean, const Tensor& std, Generator gen) {
+  return at::native::templates::normal_out_impl<NormalStub, Generator>(output, mean, std, gen);
+}
+
+Tensor& normal_out(Tensor& output, const Tensor& mean, const Tensor& std, Generator gen) {
+  return at::native::templates::normal_out_impl<NormalStub, Generator>(output, mean, std, gen);
+}
+
+Tensor normal(const Tensor& mean, double std, Generator gen) {
+  return at::native::templates::normal_impl<NormalStub, Generator>(mean, std, gen);
+}
+
+Tensor normal(double mean, const Tensor& std, Generator gen) {
+  return at::native::templates::normal_impl<NormalStub, Generator>(mean, std, gen);
+}
+
+Tensor normal(const Tensor& mean, const Tensor& std, Generator gen) {
+  return at::native::templates::normal_impl<NormalStub, Generator>(mean, std, gen);
+}
+
+// ==================================================== Random ========================================================
+
+template<typename RNG>
+struct RandomStub {
+  void operator()(TensorIterator& iter, at::Generator gen) {
+    random_stub(iter.device_type(), iter, gen);
+  }
+};
+
+Tensor& random_(Tensor& self, Generator gen) {
+  return at::native::templates::random_impl<RandomStub, Generator>(self, gen);
+}
+
+template<typename RNG>
+struct RandomFromToStub {
+  void operator()(TensorIterator& iter, uint64_t range, int64_t from, at::Generator gen) {
+    random_from_to_stub(iter.device_type(), iter, range, from, gen);
+  }
+  void operator()(TensorIterator& iter, at::Generator gen) {
+    random_full_64_bits_range_stub(iter.device_type(), iter, gen);
+  }
+};
+
+Tensor& random_(Tensor& self, int64_t from, optional<int64_t> to, Generator gen) {
+  return at::native::templates::random_from_to_impl<RandomFromToStub, Generator>(self, from, to, gen);
+}
+
+Tensor& random_(Tensor& self, int64_t to, Generator gen) {
+  return random_(self, 0, to, gen);
+}
+
+// ====================================================================================================================
 
 Tensor _standard_gamma_grad_cpu(const Tensor& self, const Tensor& output) {
   Tensor ret = at::empty(self.sizes(), self.options());
@@ -213,7 +317,7 @@ Tensor _dirichlet_grad_cpu(const Tensor& x, const Tensor& alpha, const Tensor& t
  * This section is a counterpart to Distributions.cu
  */
 
-Tensor _s_poisson_cpu(const Tensor& lambda, Generator *gen) {
+Tensor _s_poisson_cpu(const Tensor& lambda, Generator gen) {
   Tensor ret = at::zeros(lambda.sizes(), lambda.options());
   AT_DISPATCH_FLOATING_TYPES(ret.scalar_type(), "poisson_cpu", [&] {
     CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
@@ -228,7 +332,7 @@ Tensor _s_poisson_cpu(const Tensor& lambda, Generator *gen) {
   return ret;
 }
 
-Tensor _s_gamma_cpu(const Tensor& alpha, Generator *gen) {
+Tensor _s_gamma_cpu(const Tensor& alpha, Generator gen) {
   Tensor ret = at::zeros(alpha.sizes(), alpha.options());
   AT_DISPATCH_FLOATING_TYPES(ret.scalar_type(), "gamma_cpu", [&] {
     CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
@@ -257,7 +361,7 @@ Tensor _s_gamma_cpu(const Tensor& alpha, Generator *gen) {
   return ret;
 }
 
-Tensor _s_dirichlet_cpu(const Tensor& alpha, Generator *gen) {
+Tensor _s_dirichlet_cpu(const Tensor& alpha, Generator gen) {
   Tensor ret = at::zeros(alpha.sizes(), alpha.options());
   AT_DISPATCH_FLOATING_TYPES(ret.scalar_type(), "dirichlet", [&] {
     Tensor gamma = at::zeros(alpha.sizes(), alpha.options().dtype(ScalarType::Double));
@@ -301,7 +405,7 @@ Tensor _s_dirichlet_cpu(const Tensor& alpha, Generator *gen) {
 /* The largest consecutive integer representable in float32 (2^24) */
 constexpr int64_t FLOAT32_MAX_CONSECUTIVE_INT = 1 << (FLT_MANT_DIG);
 
-Tensor& multinomial_out(Tensor& result, const Tensor& self, int64_t n_sample, bool with_replacement, Generator *gen) {
+Tensor& multinomial_out(Tensor& result, const Tensor& self, int64_t n_sample, bool with_replacement, Generator gen) {
   TORCH_CHECK(result.device() == self.device(), "multinomial arguments must have the same device");
   TORCH_CHECK(self.dim() > 0 && self.dim() <= 2, "prob_dist must be 1 or 2 dim");
   TORCH_CHECK(at::isFloatingType(self.scalar_type()),
@@ -321,16 +425,14 @@ Tensor& multinomial_out(Tensor& result, const Tensor& self, int64_t n_sample, bo
   } else {
     result.resize_({n_sample});
   }
-  multinomial_stub(result.type().device_type(), result, self, n_sample, with_replacement, gen);
+  multinomial_stub(result.device().type(), result, self, n_sample, with_replacement, gen);
   return result;
 }
 
-Tensor multinomial(const Tensor& self, int64_t n_sample, bool with_replacement, Generator *gen) {
+Tensor multinomial(const Tensor& self, int64_t n_sample, bool with_replacement, Generator gen) {
   Tensor result = at::empty({0}, self.options().dtype(kLong));
   native::multinomial_out(result, self, n_sample, with_replacement, gen);
   return result;
 }
-
-DEFINE_DISPATCH(multinomial_stub);
 
 }} // namespace at::native

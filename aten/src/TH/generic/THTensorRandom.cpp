@@ -12,62 +12,6 @@
 #include <ATen/Utils.h>
 #include <TH/THGenerator.hpp>
 
-void THTensor_(random)(THTensor *self, at::Generator *_generator)
-{
-  auto gen = at::get_generator_or_default<at::CPUGenerator>(_generator, at::detail::getDefaultCPUGenerator());
-  // See Note [Acquire lock when using random generators]
-  std::lock_guard<std::mutex> lock(gen->mutex_);
-#if defined(TH_REAL_IS_BYTE)
-  TH_TENSOR_APPLY(scalar_t, self, *self_data = (uint8_t)(gen->random() % (UINT8_MAX + 1)););
-#elif defined(TH_REAL_IS_CHAR)
-  TH_TENSOR_APPLY(scalar_t, self, *self_data = (int8_t)(gen->random() % (INT8_MAX + 1)););
-#elif defined(TH_REAL_IS_SHORT)
-  TH_TENSOR_APPLY(scalar_t, self, *self_data = (int16_t)(gen->random() % (INT16_MAX + 1)););
-#elif defined(TH_REAL_IS_INT)
-  TH_TENSOR_APPLY(scalar_t, self, *self_data = (int32_t)(gen->random() % (INT32_MAX + 1UL)););
-#elif defined(TH_REAL_IS_LONG)
-  TH_TENSOR_APPLY(scalar_t, self, *self_data = (uint64_t)(gen->random64() % (LONG_MAX + 1ULL)););
-#elif defined(TH_REAL_IS_FLOAT)
-  TH_TENSOR_APPLY(scalar_t, self, *self_data = (float)(gen->random() % ((1ULL << FLT_MANT_DIG) + 1)););
-#elif defined(TH_REAL_IS_DOUBLE)
-  TH_TENSOR_APPLY(scalar_t, self, *self_data = (double)(gen->random64() % ((1ULL << DBL_MANT_DIG) + 1)););
-#elif defined(TH_REAL_IS_BOOL)
-  TH_TENSOR_APPLY(scalar_t, self, *self_data = (bool)(gen->random() % 2););
-#else
-#error "Unknown type"
-#endif
-
-}
-
-void THTensor_(clampedRandom)(THTensor *self, int64_t min, int64_t max, at::Generator *_generator) {
-  THArgCheck(max > min, 2, "max must be greater than min, but got: min = %lld, max = %lld", min, max);
-  uint64_t range = max - min;
-  auto gen = at::get_generator_or_default<at::CPUGenerator>(_generator, at::detail::getDefaultCPUGenerator());
-  // See Note [Acquire lock when using random generators]
-  std::lock_guard<std::mutex> lock(gen->mutex_);
-#if defined(TH_REAL_IS_LONG) || defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-    if (range >= 1ULL << 32) {
-      TH_TENSOR_APPLY(scalar_t, self, *self_data = static_cast<scalar_t>(static_cast<int64_t>((gen->random64() % range) + min));)
-      return;
-    }
-#endif
-    TH_TENSOR_APPLY(scalar_t, self, *self_data = static_cast<scalar_t>(static_cast<int64_t>((gen->random() % range) + min));)
-}
-
-void THTensor_(cappedRandom)(THTensor *self, int64_t max, at::Generator *_generator) {
-  THArgCheck(max > 0, 1, "max must be positive, but got: max = %lld", max);
-  THTensor_(clampedRandom)(self, 0, max, _generator);
-}
-
-void THTensor_(geometric)(THTensor *self, double p, at::Generator *_generator)
-{
-  auto gen = at::get_generator_or_default<at::CPUGenerator>(_generator, at::detail::getDefaultCPUGenerator());
-  // See Note [Acquire lock when using random generators]
-  std::lock_guard<std::mutex> lock(gen->mutex_);
-  at::geometric_distribution<double> geometric(p);
-  TH_TENSOR_APPLY(scalar_t, self, *self_data = (scalar_t)geometric(gen););
-}
-
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
 
 #if defined(TH_REAL_IS_FLOAT)
@@ -76,7 +20,7 @@ void THTensor_(geometric)(THTensor *self, double p, at::Generator *_generator)
 #define TH_REAL_MIN DBL_MIN
 #endif
 
-void THTensor_(uniform)(THTensor *self, double a, double b, at::Generator *_generator)
+void THTensor_(uniform)(THTensor *self, double a, double b, at::Generator _generator)
 {
   auto gen = at::get_generator_or_default<at::CPUGenerator>(_generator, at::detail::getDefaultCPUGenerator());
   // See Note [Acquire lock when using random generators]
@@ -91,76 +35,7 @@ void THTensor_(uniform)(THTensor *self, double a, double b, at::Generator *_gene
   #endif
 }
 
-void THTensor_(normal)(THTensor *self, double mean, double stddev, at::Generator *_generator)
-{
-  const int64_t size = THTensor_(numel)(self);
-  if (size >= 16 && THTensor_(isContiguous)(self)) {
-    THVector_(normal_fill)(THStorage_(data)(THTensor_getStoragePtr(self)) + self->storage_offset(), size, _generator, mean, stddev);
-  } else {
-    auto gen = at::get_generator_or_default<at::CPUGenerator>(_generator, at::detail::getDefaultCPUGenerator());
-    // See Note [Acquire lock when using random generators]
-    std::lock_guard<std::mutex> lock(gen->mutex_);
-
-    at::normal_distribution<double> normal(mean, stddev);
-    TH_TENSOR_APPLY(scalar_t, self, *self_data = (scalar_t)normal(gen););
-  }
-}
-
-void THTensor_(normal_means)(THTensor *self, THTensor *means, double stddev, at::Generator *gen)
-{
-  THTensor_(resizeAs)(self, means);
-  THTensor_(normal)(self, 0, stddev, gen);
-  THTensor_(cadd)(self, self, 1, means);
-}
-
-void THTensor_(normal_stddevs)(THTensor *self, double mean, THTensor *stddevs, at::Generator *gen)
-{
-  THTensor_(resizeAs)(self, stddevs);
-  THTensor_(normal)(self, 0, 1, gen);
-  THTensor_(cmul)(self, self, stddevs);
-  at::Tensor self_wrap = THTensor_wrap(self);
-  self_wrap.add_(mean);
-}
-
-void THTensor_(normal_means_stddevs)(THTensor *self, THTensor *means, THTensor *stddevs, at::Generator *gen)
-{
-  THTensor_(resizeAs)(self, means);
-  THTensor_(normal)(self, 0, 1, gen);
-  THTensor_(cmul)(self, self, stddevs);
-  THTensor_(cadd)(self, self, 1, means);
-}
-
-void THTensor_(exponential)(THTensor *self, double lambda, at::Generator *_generator)
-{
-  auto gen = at::get_generator_or_default<at::CPUGenerator>(_generator, at::detail::getDefaultCPUGenerator());
-  // See Note [Acquire lock when using random generators]
-  std::lock_guard<std::mutex> lock(gen->mutex_);
-
-  at::exponential_distribution<double> exponential(lambda);
-  TH_TENSOR_APPLY(scalar_t, self, *self_data = (scalar_t)exponential(gen););
-}
-
 #undef TH_REAL_MIN
-
-void THTensor_(cauchy)(THTensor *self, double median, double sigma, at::Generator *_generator)
-{
-  auto gen = at::get_generator_or_default<at::CPUGenerator>(_generator, at::detail::getDefaultCPUGenerator());
-  // See Note [Acquire lock when using random generators]
-  std::lock_guard<std::mutex> lock(gen->mutex_);
-
-  at::cauchy_distribution<double> cauchy(median, sigma);
-  TH_TENSOR_APPLY(scalar_t, self, *self_data = (scalar_t)cauchy(gen););
-}
-
-void THTensor_(logNormal)(THTensor *self, double mean, double stdv, at::Generator *_generator)
-{
-  auto gen = at::get_generator_or_default<at::CPUGenerator>(_generator, at::detail::getDefaultCPUGenerator());
-  // See Note [Acquire lock when using random generators]
-  std::lock_guard<std::mutex> lock(gen->mutex_);
-
-  at::lognormal_distribution<double> logNormal(mean, stdv);
-  TH_TENSOR_APPLY(scalar_t, self, *self_data = (scalar_t)logNormal(gen););
-}
 
 void THTensor_(multinomialAliasSetup)(THTensor *probs, THLongTensor *J, THTensor *q)
 {
@@ -252,7 +127,7 @@ void THTensor_(multinomialAliasSetup)(THTensor *probs, THLongTensor *J, THTensor
   THLongTensor_free(smaller);
   THLongTensor_free(larger);
 }
-void THTensor_(multinomialAliasDraw)(THLongTensor *self, THTensor *q, THLongTensor *J, int n_sample, at::Generator *_generator)
+void THTensor_(multinomialAliasDraw)(THLongTensor *self, THTensor *q, THLongTensor *J, int n_sample, at::Generator _generator)
 {
   THArgCheck(q->dim() == 1, 1,
              "expected 1-D probability table, got %d-D probability table instead",
@@ -289,7 +164,7 @@ void THTensor_(multinomialAliasDraw)(THLongTensor *self, THTensor *q, THLongTens
 #endif
 
 #if defined(TH_REAL_IS_BYTE)
-void THTensor_(getRNGState)(at::Generator *_generator, THTensor *self)
+void THTensor_(getRNGState)(at::Generator _generator, THTensor *self)
 {
   // See Note [Acquire lock when using random generators]
   std::lock_guard<std::mutex> lock(_generator->mutex_);
@@ -303,7 +178,7 @@ void THTensor_(getRNGState)(at::Generator *_generator, THTensor *self)
   THGeneratorStateNew* rng_state = (THGeneratorStateNew*)self->data<scalar_t>();
 
   // accumulate generator data to be copied into byte tensor
-  auto accum_state = c10::guts::make_unique<THGeneratorStateNew>();
+  auto accum_state = std::make_unique<THGeneratorStateNew>();
   auto cast_generator = at::check_generator<at::CPUGenerator>(_generator);
   auto rng_data = cast_generator->engine().data();
   accum_state->legacy_pod.the_initial_seed = rng_data.seed_;
@@ -329,7 +204,7 @@ void THTensor_(getRNGState)(at::Generator *_generator, THTensor *self)
   memcpy(rng_state, accum_state.get(), size);
 }
 
-void THTensor_(setRNGState)(at::Generator *_generator, THTensor *self)
+void THTensor_(setRNGState)(at::Generator _generator, THTensor *self)
 {
   // See Note [Acquire lock when using random generators]
   std::lock_guard<std::mutex> lock(_generator->mutex_);

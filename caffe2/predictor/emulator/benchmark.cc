@@ -23,7 +23,7 @@ C10_DEFINE_string(
     input_dims,
     "",
     "The path of the file that "
-    "stores input dimesions of all the operators in the run net. "
+    "stores input dimensions of all the operators in the run net. "
     "Each element of the array is a mapping from "
     "operator index to its input dimension.");
 C10_DEFINE_string(

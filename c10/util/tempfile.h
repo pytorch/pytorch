@@ -69,7 +69,7 @@ struct TempFile {
 };
 
 /// Attempts to return a temporary file or returns `nullopt` if an error
-/// ocurred.
+/// occurred.
 ///
 /// The file returned follows the pattern
 /// `<tmp-dir>/<name-prefix><random-pattern>`, where `<tmp-dir>` is the value of

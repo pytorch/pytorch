@@ -92,7 +92,7 @@ class Fold(Module):
 
         When the ``divisor`` tensor contains no zero elements, then
         ``fold`` and ``unfold`` operations are inverses of each
-        other (upto constant divisor).
+        other (up to constant divisor).
 
     .. warning::
         Currently, only 4-D output tensors (batched image-like tensors) are
@@ -221,7 +221,7 @@ class Unfold(Module):
 
         When the ``divisor`` tensor contains no zero elements, then
         ``fold`` and ``unfold`` operations are inverses of each
-        other (upto constant divisor).
+        other (up to constant divisor).
 
     .. warning::
         Currently, only 4-D input tensors (batched image-like tensors) are

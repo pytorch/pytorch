@@ -50,10 +50,10 @@ struct CAFFE2_API VariableHooksInterface {
   virtual const std::string& name(const Tensor&) const = 0;
 };
 
-C10_API void SetVariableHooks(VariableHooksInterface* hooks);
-C10_API VariableHooksInterface* GetVariableHooks();
+CAFFE2_API void SetVariableHooks(VariableHooksInterface* hooks);
+CAFFE2_API VariableHooksInterface* GetVariableHooks();
 
-struct C10_API VariableHooksRegisterer {
+struct CAFFE2_API VariableHooksRegisterer {
   explicit VariableHooksRegisterer(VariableHooksInterface* hooks) {
     SetVariableHooks(hooks);
   }

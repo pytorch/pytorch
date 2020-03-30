@@ -8,3 +8,6 @@
 
 #include <THCUNN/generic/SpatialConvolutionMM.cu>
 #include <THC/THCGenerateFloatTypes.h>
+
+#include <THCUNN/generic/SpatialConvolutionMM.cu>
+#include <THC/THCGenerateBFloat16Type.h>

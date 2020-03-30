@@ -85,9 +85,12 @@ def trainbench(name, rnn_creator, nloops=100, warmup=10,
         return fwd_time, bwd_time
 
     assert device == 'cuda'
-    creator_args = dict(seqLength=seqLength, numLayers=numLayers,
-                        inputSize=inputSize, hiddenSize=hiddenSize,
-                        miniBatch=miniBatch, device=device, seed=seed)
+    creator_args = creator_args = {
+        'seqLength': seqLength, 'numLayers': numLayers,
+        'inputSize': inputSize, 'hiddenSize': hiddenSize,
+        'miniBatch': miniBatch, 'device': device, 'seed': seed
+    }
+
     modeldef = rnn_creator(**creator_args)
 
     [train_batch(modeldef) for _ in range(warmup)]
@@ -196,8 +199,24 @@ if __name__ == '__main__':
     parser.add_argument('--cnns', nargs='*',
                         help='What to run. resnet18, resnet18_jit, resnet50, etc')
     parser.add_argument('--group', nargs='*', default=default_groups, help='Which group to run. cnns, rnns, etc.')
+    parser.add_argument('--fuser', default='te', type=str,
+                        help='The fuser backend to use. One of: te, old, or none')
+    parser.add_argument('--cuda_pointwise_loop_level', default=None, type=int)
+    parser.add_argument('--cuda_pointwise_block_count', default=None, type=int)
+    parser.add_argument('--cuda_pointwise_block_size', default=None, type=int)
 
     args = parser.parse_args()
+    assert args.fuser in ['te', 'old', 'none']
+    torch._C._jit_set_texpr_fuser_enabled(args.fuser == 'te')
+    torch._C._jit_override_can_fuse_on_gpu(args.fuser == 'old')
+    torch._C._jit_set_bailout_depth(20)
+    if args.cuda_pointwise_loop_level:
+        torch._C._jit_set_te_cuda_pointwise_loop_levels(args.cuda_pointwise_loop_level)
+    if args.cuda_pointwise_block_count:
+        torch._C._jit_set_te_cuda_pointwise_block_count(args.cuda_pointwise_block_count)
+    if args.cuda_pointwise_block_size:
+        torch._C._jit_set_te_cuda_pointwise_block_size(args.cuda_pointwise_block_size)
+
     rnns = args.rnns or ['cudnn', 'aten', 'jit', 'jit_premul', 'jit_premul_bias', 'jit_simple',
                          'jit_multilayer', 'py']
     cnns = args.cnns or ['resnet18', 'resnet18_jit', 'resnet50', 'resnet50_jit']
@@ -216,8 +235,12 @@ if __name__ == '__main__':
     del bench_args['rnns']
     del bench_args['cnns']
     del bench_args['variable_lstms']
+    del bench_args['fuser']
+    del bench_args['cuda_pointwise_loop_level']
+    del bench_args['cuda_pointwise_block_count']
+    del bench_args['cuda_pointwise_block_size']
 
-    results = dict()
+    results = {}
     if should_bench_varlen_lstms:
         if args.nloops + args.warmup > 30:
             print_stderr(

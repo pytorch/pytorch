@@ -15,6 +15,8 @@ OS="ubuntu"
 DOCKERFILE="${OS}/Dockerfile"
 if [[ "$image" == *-cuda* ]]; then
   DOCKERFILE="${OS}-cuda/Dockerfile"
+elif [[ "$image" == *-rocm* ]]; then
+  DOCKERFILE="${OS}-rocm/Dockerfile"
 fi
 
 if [[ "$image" == *-trusty* ]]; then
@@ -26,6 +28,8 @@ elif [[ "$image" == *-artful* ]]; then
 elif [[ "$image" == *-bionic* ]]; then
   UBUNTU_VERSION=18.04
 fi
+
+TRAVIS_DL_URL_PREFIX="https://s3.amazonaws.com/travis-python-archives/binaries/ubuntu/14.04/x86_64"
 
 # It's annoying to rename jobs every time you want to rewrite a
 # configuration, so we hardcode everything here rather than do it
@@ -49,8 +53,10 @@ case "$image" in
     DB=yes
     VISION=yes
     ;;
-  pytorch-linux-xenial-py3.5)
-    TRAVIS_PYTHON_VERSION=3.5
+  pytorch-linux-xenial-py3.8)
+    # TODO: This is a hack, get rid of this as soon as you get rid of the travis downloads
+    TRAVIS_DL_URL_PREFIX="https://s3.amazonaws.com/travis-python-archives/binaries/ubuntu/16.04/x86_64"
+    TRAVIS_PYTHON_VERSION=3.8
     GCC_VERSION=7
     # Do not install PROTOBUF, DB, and VISION as a test
     ;;
@@ -67,6 +73,7 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
+    KATEX=yes
     ;;
   pytorch-linux-xenial-py3.6-gcc7.2)
     ANACONDA_PYTHON_VERSION=3.6
@@ -87,22 +94,6 @@ case "$image" in
     DB=yes
     VISION=yes
     ;;
-  pytorch-linux-xenial-cuda8-cudnn7-py2)
-    CUDA_VERSION=8.0
-    CUDNN_VERSION=7
-    ANACONDA_PYTHON_VERSION=2.7
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    ;;
-  pytorch-linux-xenial-cuda8-cudnn7-py3)
-    CUDA_VERSION=8.0
-    CUDNN_VERSION=7
-    ANACONDA_PYTHON_VERSION=3.6
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    ;;
   pytorch-linux-xenial-cuda9-cudnn7-py2)
     CUDA_VERSION=9.0
     CUDNN_VERSION=7
@@ -118,7 +109,6 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    KATEX=yes
     ;;
   pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7)
     CUDA_VERSION=9.2
@@ -146,6 +136,17 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
+    KATEX=yes
+    ;;
+  pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7)
+    CUDA_VERSION=10.2
+    CUDNN_VERSION=7
+    ANACONDA_PYTHON_VERSION=3.6
+    GCC_VERSION=7
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    KATEX=yes
     ;;
   pytorch-linux-xenial-py3-clang5-asan)
     ANACONDA_PYTHON_VERSION=3.6
@@ -157,6 +158,7 @@ case "$image" in
   pytorch-linux-xenial-py3-clang5-android-ndk-r19c)
     ANACONDA_PYTHON_VERSION=3.6
     CLANG_VERSION=5.0
+    LLVMDEV=yes
     PROTOBUF=yes
     ANDROID=yes
     ANDROID_NDK_VERSION=r19c
@@ -171,6 +173,16 @@ case "$image" in
     DB=yes
     VISION=yes
     ;;
+  pytorch-linux-xenial-rocm-py3.6-clang7)
+    ANACONDA_PYTHON_VERSION=3.6
+    CLANG_VERSION=7
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    ROCM=yes
+    # newer cmake version required
+    CMAKE_VERSION=3.6.3
+    ;;
 esac
 
 # Set Jenkins UID and GID if running Jenkins
@@ -184,6 +196,7 @@ tmp_tag="tmp-$(cat /dev/urandom | tr -dc 'a-z' | fold -w 32 | head -n 1)"
 # Build image
 docker build \
        --no-cache \
+       --build-arg "TRAVIS_DL_URL_PREFIX=${TRAVIS_DL_URL_PREFIX}" \
        --build-arg "BUILD_ENVIRONMENT=${image}" \
        --build-arg "PROTOBUF=${PROTOBUF:-}" \
        --build-arg "THRIFT=${THRIFT:-}" \
@@ -207,6 +220,7 @@ docker build \
        --build-arg "CMAKE_VERSION=${CMAKE_VERSION:-}" \
        --build-arg "NINJA_VERSION=${NINJA_VERSION:-}" \
        --build-arg "KATEX=${KATEX:-}" \
+       --build-arg "ROCM=${ROCM:-}" \
        -f $(dirname ${DOCKERFILE})/Dockerfile \
        -t "$tmp_tag" \
        "$@" \

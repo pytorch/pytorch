@@ -76,7 +76,7 @@ using strip_class_t = typename strip_class<T>::type;
 template<class Functor, class Enable = void>
 struct is_functor : std::false_type {};
 template<class Functor>
-struct is_functor<Functor, guts::enable_if_t<is_function_type<detail::strip_class_t<decltype(&Functor::operator())>>::value>> : std::true_type {};
+struct is_functor<Functor, std::enable_if_t<is_function_type<detail::strip_class_t<decltype(&Functor::operator())>>::value>> : std::true_type {};
 
 
 /**
@@ -101,11 +101,11 @@ struct is_stateless_lambda__<LambdaType, Result (C::*)(Args...)> : std::is_conve
 // case where LambdaType is not even a functor
 template<class LambdaType, class Enable = void> struct is_stateless_lambda_ final : std::false_type {};
 // case where LambdaType is a functor
-template<class LambdaType> struct is_stateless_lambda_<LambdaType, guts::enable_if_t<is_functor<LambdaType>::value>>
+template<class LambdaType> struct is_stateless_lambda_<LambdaType, std::enable_if_t<is_functor<LambdaType>::value>>
 : is_stateless_lambda__<LambdaType, decltype(&LambdaType::operator())> {};
 }
 template<class T>
-using is_stateless_lambda = detail::is_stateless_lambda_<guts::decay_t<T>>;
+using is_stateless_lambda = detail::is_stateless_lambda_<std::decay_t<T>>;
 
 
 
@@ -117,8 +117,17 @@ using is_stateless_lambda = detail::is_stateless_lambda_<guts::decay_t<T>>;
 template<template<class> class C, class Enable = void>
 struct is_type_condition : std::false_type {};
 template<template<class> class C>
-struct is_type_condition<C, guts::enable_if_t<std::is_same<bool, guts::remove_cv_t<decltype(C<int>::value)>>::value>> : std::true_type {};
+struct is_type_condition<C, std::enable_if_t<std::is_same<bool, std::remove_cv_t<decltype(C<int>::value)>>::value>> : std::true_type {};
 
 
+/**
+ * is_fundamental<T> is true_type iff the lambda type T is a fundamental type (that is, arithmetic type, void, or nullptr_t).
+ * Example:
+ *  is_fundamental<int> // true
+ * We define it here to resolve a MSVC bug.
+ * See https://github.com/pytorch/pytorch/issues/30932 for details.
+ */
+template <class T>
+struct is_fundamental : std::is_fundamental<T> {};
 }
 }

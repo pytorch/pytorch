@@ -8,12 +8,13 @@ import torch.nn.quantized.dynamic as nnqd
 import torch.nn.quantized.functional as qF
 import torch.quantization
 
-from common_quantization import QuantizationTestCase, prepare_dynamic
-from common_quantized import _calculate_dynamic_qparams, override_quantized_engine
-from common_utils import run_tests, IS_PPC, TEST_WITH_UBSAN
+from torch.testing._internal.common_quantization import QuantizationTestCase, prepare_dynamic
+from torch.testing._internal.common_quantized import _calculate_dynamic_qparams, override_quantized_engine
+from torch.testing._internal.common_utils import run_tests, IS_PPC, TEST_WITH_UBSAN
 from hypothesis import assume, given
 from hypothesis import strategies as st
-from hypothesis_utils import no_deadline
+import torch.testing._internal.hypothesis_utils as hu
+hu.assert_deadline_disabled()
 
 import io
 import numpy as np
@@ -127,7 +128,6 @@ class FunctionalAPITest(QuantizationTestCase):
 
 
 
-    @no_deadline
     @given(batch_size=st.integers(1, 3),
            in_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
            H=st.integers(4, 16),
@@ -181,7 +181,6 @@ class FunctionalAPITest(QuantizationTestCase):
                 W_scale, W_zero_point, Y_scale, Y_zero_point, use_bias,
                 use_channelwise)
 
-    @no_deadline
     @given(batch_size=st.integers(1, 3),
            in_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
            D=st.integers(4, 8),
@@ -207,7 +206,7 @@ class FunctionalAPITest(QuantizationTestCase):
            Y_zero_point=st.integers(0, 4),
            use_bias=st.booleans(),
            use_channelwise=st.booleans(),
-           qengine=st.sampled_from(("fbgemm")))
+           qengine=st.sampled_from(("fbgemm",)))
     def test_conv3d_api(
         self, batch_size, in_channels_per_group, D, H, W,
         out_channels_per_group, groups, kernel_d, kernel_h, kernel_w,
@@ -239,7 +238,6 @@ class FunctionalAPITest(QuantizationTestCase):
 
 
 class DynamicModuleAPITest(QuantizationTestCase):
-    @no_deadline
     @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
                          " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
                          " with instruction set support avx2 or newer.")
@@ -357,7 +355,6 @@ class ModuleAPITest(QuantizationTestCase):
                          message="ReLU6 module API failed")
 
 
-    @no_deadline
     @given(
         batch_size=st.integers(1, 5),
         in_features=st.integers(16, 32),
@@ -421,7 +418,6 @@ class ModuleAPITest(QuantizationTestCase):
             self.assertEqual(Z_ref, Z_q)
 
             # Test serialization of quantized Linear Module using state_dict
-
             model_dict = qlinear.state_dict()
             self.assertEqual(model_dict['_packed_params.weight'], W_q)
             if use_bias:
@@ -647,7 +643,6 @@ class ModuleAPITest(QuantizationTestCase):
         # Smoke test extra_repr
         self.assertTrue(module_name in str(converted_qconv_module))
 
-    @no_deadline
     @given(batch_size=st.integers(1, 3),
            in_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
            H=st.integers(4, 16),
@@ -721,21 +716,21 @@ class ModuleAPITest(QuantizationTestCase):
                 Y_zero_point, use_bias, use_fused, use_channelwise)
 
     @given(batch_size=st.integers(1, 3),
-           in_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
-           D=st.integers(4, 8),
-           H=st.integers(4, 8),
-           W=st.integers(4, 8),
-           out_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
+           in_channels_per_group=st.sampled_from([2, 4, 5, 8, 16]),
+           D=st.integers(3, 6),
+           H=st.integers(3, 6),
+           W=st.integers(3, 6),
+           out_channels_per_group=st.sampled_from([2, 4, 5, 8, 16]),
            groups=st.integers(1, 4),
-           kernel_d=st.integers(1, 4),
-           kernel_h=st.integers(1, 4),
-           kernel_w=st.integers(1, 4),
+           kernel_d=st.integers(1, 3),
+           kernel_h=st.integers(1, 3),
+           kernel_w=st.integers(1, 3),
            stride_d=st.integers(1, 2),
            stride_h=st.integers(1, 2),
            stride_w=st.integers(1, 2),
-           pad_d=st.integers(0, 2),
-           pad_h=st.integers(0, 2),
-           pad_w=st.integers(0, 2),
+           pad_d=st.integers(0, 1),
+           pad_h=st.integers(0, 1),
+           pad_w=st.integers(0, 1),
            dilation=st.integers(1, 2),
            X_scale=st.floats(1.2, 1.6),
            X_zero_point=st.integers(0, 4),
@@ -746,7 +741,7 @@ class ModuleAPITest(QuantizationTestCase):
            use_bias=st.booleans(),
            use_fused=st.booleans(),
            use_channelwise=st.booleans(),
-           qengine=st.sampled_from(("fbgemm")))
+           qengine=st.sampled_from(("fbgemm",)))
     def test_conv3d_api(
         self, batch_size, in_channels_per_group, D, H, W,
         out_channels_per_group, groups, kernel_d, kernel_h, kernel_w,
@@ -818,6 +813,42 @@ class ModuleAPITest(QuantizationTestCase):
 
         # JIT Testing
         self.checkScriptable(pool_under_test, list(zip([X], [qX_expect])))
+
+    def test_batch_norm(self):
+        """Tests the correctness of the batchnorm2d module.
+        The correctness is defined against the functional implementation.
+        """
+        x = torch.randn((2, 4, 6, 8), dtype=torch.float)
+        float_mod = torch.nn.BatchNorm2d(4)
+        float_mod.training = False
+
+        y_ref = float_mod(x)
+        quant_ref = torch.quantize_per_tensor(y_ref, 1.0, 0, dtype=torch.quint8)
+
+        quant_mod = nnq.BatchNorm2d(4)
+        qx = torch.quantize_per_tensor(x, 1.0, 0, dtype=torch.quint8)
+        qy = quant_mod(qx)
+
+        self.assertEqual(quant_ref.int_repr().numpy(), qy.int_repr().numpy(),
+                         message="BatchNorm2d module API failed")
+
+    def test_batch_norm3d(self):
+        """Tests the correctness of the batchnorm3d module.
+        The correctness is defined against the functional implementation.
+        """
+        x = torch.randn((2, 4, 6, 8, 10), dtype=torch.float)
+        float_mod = torch.nn.BatchNorm3d(4)
+        float_mod.training = False
+
+        y_ref = float_mod(x)
+        quant_ref = torch.quantize_per_tensor(y_ref, 1.0, 0, dtype=torch.quint8)
+
+        quant_mod = nnq.BatchNorm3d(4)
+        qx = torch.quantize_per_tensor(x, 1.0, 0, dtype=torch.quint8)
+        qy = quant_mod(qx)
+
+        self.assertEqual(quant_ref.int_repr().numpy(), qy.int_repr().numpy(),
+                         message="BatchNorm3d module API failed")
 
 if __name__ == '__main__':
     run_tests()

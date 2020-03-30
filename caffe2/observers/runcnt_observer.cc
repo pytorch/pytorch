@@ -10,7 +10,7 @@ RunCountOperatorObserver::RunCountOperatorObserver(
 }
 
 std::string RunCountNetObserver::debugInfo() {
-#if C10_ANDROID
+#ifdef C10_ANDROID
   // workaround
   int foo = cnt_;
   return "This operator runs " + c10::to_string(foo) + " times.";

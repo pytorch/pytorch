@@ -31,7 +31,7 @@ static auto registry = c10::RegisterOperators().op(
     c10::RegisterOperators::options()
       .kernel<
         decltype(flatten_op_cpu_impl<float, CPUContext>),
-        &flatten_op_cpu_impl<float, CPUContext>>(TensorTypeId::CPUTensorId));
+        &flatten_op_cpu_impl<float, CPUContext>>(DispatchKey::CPUTensorId));
 
 } // namespace
 

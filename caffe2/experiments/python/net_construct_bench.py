@@ -31,7 +31,7 @@ import caffe2.python.models.resnet as resnet
 
 '''
 Simple benchmark that creates a data-parallel resnet-50 model
-and measurs the time.
+and measures the time.
 '''
 
 

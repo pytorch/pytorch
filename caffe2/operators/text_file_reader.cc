@@ -70,7 +70,7 @@ inline void convert(
       static_cast<std::string*>(dst)->assign(src_start, src_end);
     } break;
     case TensorProto_DataType_FLOAT: {
-      // TODO(azzolini): avoid copy, use faster convertion
+      // TODO(azzolini): avoid copy, use faster conversion
       std::string str_copy(src_start, src_end);
       const char* src_copy = str_copy.c_str();
       char* src_copy_end;

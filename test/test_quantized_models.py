@@ -1,8 +1,9 @@
 import torch
 import torch.jit
-from common_utils import run_tests, TEST_WITH_UBSAN, IS_PPC
-from common_quantization import QuantizationTestCase, ModelMultipleOps, ModelMultipleOpsNoAvgPool
-from common_quantized import override_quantized_engine
+from torch.testing._internal.common_utils import run_tests, TEST_WITH_UBSAN, IS_PPC
+from torch.testing._internal.common_quantization import QuantizationTestCase, \
+    ModelMultipleOps, ModelMultipleOpsNoAvgPool
+from torch.testing._internal.common_quantized import override_quantized_engine
 
 class ModelNumerics(QuantizationTestCase):
     def test_float_quant_compare_per_tensor(self):

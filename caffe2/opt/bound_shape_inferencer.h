@@ -36,9 +36,16 @@ class BoundShapeInferencerBase {
 
   virtual ~BoundShapeInferencerBase() {}
 
+  // Initializes BoundShapeInferencer and infers bound shape and type.
+  // info: shape information of some tensors,
+  // e.g. shape information of external input / output tensors;
+  // extract_feature_len:
+  // indicating whether to extract feature length from SigridTransform
+  // and other related operators. When enabled,
+  // extracted feature length information will be used to infer tensor shapes.
   virtual void InferBoundShapeAndType(
       const NetDef& net,
-      const std::unordered_map<std::string, ShapeInfo>& info,
+      const ShapeInfoMap& info,
       caffe2::Workspace* ws,
       bool extract_feature_len = false) = 0;
 
@@ -62,7 +69,7 @@ class BoundShapeInferencerBase {
 
  protected:
   const BoundShapeSpec spec_;
-  std::unordered_map<std::string, ShapeInfo> shape_info_;
+  ShapeInfoMap shape_info_;
   bool extract_feature_len_;
 };
 
@@ -74,7 +81,7 @@ class CAFFE2_API BoundShapeInferencer : public BoundShapeInferencerBase {
   virtual ~BoundShapeInferencer() override {}
   void InferBoundShapeAndType(
       const NetDef& net,
-      const std::unordered_map<std::string, ShapeInfo>& info,
+      const ShapeInfoMap& info,
       caffe2::Workspace* ws,
       bool extract_feature_len = false) override;
 
@@ -97,6 +104,7 @@ class CAFFE2_API BoundShapeInferencer : public BoundShapeInferencerBase {
   virtual void InferOps(const OperatorDef& op, caffe2::Workspace* ws);
 
   void InferConcatInputs(const OperatorDef& op);
+  void InferInt8QuantizeInput(const OperatorDef& op);
 
   void InferGivenTensorFill(const OperatorDef& op);
   void InferSparseLengthsSum(const OperatorDef& op);
@@ -105,12 +113,17 @@ class CAFFE2_API BoundShapeInferencer : public BoundShapeInferencerBase {
   void InferShape(const OperatorDef& op);
   void InferReshape(const OperatorDef& op);
   void InferLengthsRangeFill(const OperatorDef& op);
+  void InferQuantizationTransformation(const OperatorDef& op);
 
   // Standard shape/type inference using op schema registered shape inference
   // function
   void InferCommonOp(const OperatorDef& op);
 
-  void EnsureShapeNames(std::unordered_map<std::string, ShapeInfo>* info) const;
+  // Initialize private parameters, such as shape_info, extract_feature_len_
+  // This is called at the beginning of InferBoundShapeAndType()
+  virtual void Initialize(const ShapeInfoMap& info, bool extract_feature_len);
+
+  void EnsureShapeNames(ShapeInfoMap* info) const;
 
   TensorBoundShape::DimType current_dim_type_{TensorBoundShape_DimType_BATCH};
   int64_t current_max_batch_size_{0};

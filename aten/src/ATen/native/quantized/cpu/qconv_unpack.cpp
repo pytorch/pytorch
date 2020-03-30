@@ -79,10 +79,10 @@ class QConvUnpackWeightsInt8 final : public c10::OperatorKernel {
       unpacked_weights = kSpatialDim == 2
           ? _empty_affine_quantized(
                 {output_channels, C_per_G, kernel_h, kernel_w},
-                device(kCPU).dtype(kQInt8),
+                device(kCPU).dtype(kQInt8).memory_format(MemoryFormat::ChannelsLast),
                 pack_ptr.w_scale[0],
                 pack_ptr.w_zp[0],
-                MemoryFormat::ChannelsLast)
+                c10::nullopt)
           : fbgemm_utils::MakeEmptyAffineQuantizedChannelsLast3dTensor(
                 output_channels,
                 C_per_G,
@@ -145,16 +145,16 @@ static auto registry =
         .op("quantized::conv_unpack(Tensor packed_weights)"
             " -> (Tensor unpacked_weights, Tensor? B_origin)",
             c10::RegisterOperators::options().kernel<QConvUnpackWeightsInt8<2>>(
-                TensorTypeId::CPUTensorId)) // conv_unpack is deprecated, please
+                DispatchKey::CPUTensorId)) // conv_unpack is deprecated, please
                                             // use conv2d_unpack for 2D conv.
         .op("quantized::conv2d_unpack(Tensor packed_weights)"
             " -> (Tensor unpacked_weights, Tensor? B_origin)",
             c10::RegisterOperators::options().kernel<QConvUnpackWeightsInt8<2>>(
-                TensorTypeId::CPUTensorId)) // We use  conv2d_unpack to be
+                DispatchKey::CPUTensorId)) // We use  conv2d_unpack to be
                                             // consistent with conv3d_unpack
         .op("quantized::conv3d_unpack",
             c10::RegisterOperators::options().kernel<QConvUnpackWeightsInt8<3>>(
-                TensorTypeId::CPUTensorId));
+                DispatchKey::CPUTensorId));
 
 } // namespace
 } // namespace native

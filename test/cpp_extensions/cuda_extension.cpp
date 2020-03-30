@@ -6,8 +6,8 @@
 void sigmoid_add_cuda(const float* x, const float* y, float* output, int size);
 
 torch::Tensor sigmoid_add(torch::Tensor x, torch::Tensor y) {
-  TORCH_CHECK(x.type().is_cuda(), "x must be a CUDA tensor");
-  TORCH_CHECK(y.type().is_cuda(), "y must be a CUDA tensor");
+  TORCH_CHECK(x.device().is_cuda(), "x must be a CUDA tensor");
+  TORCH_CHECK(y.device().is_cuda(), "y must be a CUDA tensor");
   auto output = torch::zeros_like(x);
   sigmoid_add_cuda(
       x.data_ptr<float>(), y.data_ptr<float>(), output.data_ptr<float>(), output.numel());

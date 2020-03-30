@@ -56,6 +56,13 @@ __MATH_FUNCTIONS_DECL__ double max(double x, double y) {
   return ::fmax(x, y);
 }
 
+__MATH_FUNCTIONS_DECL__ float min(float x, float y) {
+  return ::fminf(x, y);
+}
+__MATH_FUNCTIONS_DECL__ double min(double x, double y) {
+  return ::fmin(x, y);
+}
+
 __MATH_FUNCTIONS_DECL__ float pow(float x, float y) {
   return ::powf(x, y);
 }
@@ -89,6 +96,13 @@ __MATH_FUNCTIONS_DECL__ float tan(float x) {
 }
 __MATH_FUNCTIONS_DECL__ double tan(double x) {
   return ::tan(x);
+}
+
+__MATH_FUNCTIONS_DECL__ float tanh(float x) {
+  return ::tanhf(x);
+}
+__MATH_FUNCTIONS_DECL__ double tanh(double x) {
+  return ::tanh(x);
 }
 
 __MATH_FUNCTIONS_DECL__ float normcdf(float x) {

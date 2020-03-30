@@ -2,7 +2,7 @@
 #define THC_TENSOR_TOPK_CUH
 
 #include <c10/macros/Macros.h>
-#include <aten/src/ATen/native/cuda/SortingRadixSelect.cuh>
+#include <ATen/native/cuda/SortingRadixSelect.cuh>
 
 using namespace at::native;
 
@@ -52,6 +52,7 @@ __global__ void gatherTopK(TensorInfo<T, IndexType> input,
     inputSliceStart, outputSliceSize,
     inputSliceSize, inputWithinSliceStride,
     smem, &topKValue);
+  const auto topKConverted = at::native::TopKTypeConfig<T>::convert(topKValue);
 
   // Every value that is strictly less/greater than `pattern`
   // (depending on sort dir) in sorted int format is in the top-K.
@@ -74,11 +75,12 @@ __global__ void gatherTopK(TensorInfo<T, IndexType> input,
     bool inRange = (i < inputSliceSize);
     T v =
       inRange ? doLdg(&inputSliceStart[i * inputWithinSliceStride]) : ScalarConvert<int, T>::to(0);
+    const auto convertedV = at::native::TopKTypeConfig<T>::convert(v);
     bool hasTopK;
     if (Order) {
-      hasTopK = inRange && (THCNumerics<T>::gt(v, topKValue));
+      hasTopK = inRange && (convertedV > topKConverted);
     } else {
-      hasTopK = inRange && (THCNumerics<T>::lt(v, topKValue));
+      hasTopK = inRange && (convertedV < topKConverted);
     }
 
     int index;
@@ -87,7 +89,7 @@ __global__ void gatherTopK(TensorInfo<T, IndexType> input,
 
     if (hasTopK) {
       int writeIndex = writeIndexStart + index;
-      assert(writeIndex < outputSliceSize);
+      CUDA_KERNEL_ASSERT(writeIndex < outputSliceSize);
 
       IndexType topKOffset = writeIndex * topKWithinSliceStride;
       IndexType indexOffset = writeIndex * indicesWithinSliceStride;
@@ -104,14 +106,15 @@ __global__ void gatherTopK(TensorInfo<T, IndexType> input,
   // writeIndexStart. There might be more than that number available,
   // in which case we have to choose the first seen set. We do this
   // via a prefix sum to calculate indices for writing results.
-  assert(outputSliceSize >= writeIndexStart);
+  CUDA_KERNEL_ASSERT(outputSliceSize >= writeIndexStart);
   IndexType topKRemaining = (outputSliceSize - writeIndexStart);
 
   for (IndexType i = threadIdx.x; i < numIterations; i += blockDim.x) {
     bool inRange = (i < inputSliceSize);
     T v =
       inRange ? doLdg(&inputSliceStart[i * inputWithinSliceStride]) : ScalarConvert<int, T>::to(0);
-    bool hasTopK = inRange && (THCNumerics<T>::eq(v, topKValue));
+    const auto convertedV = at::native::TopKTypeConfig<T>::convert(v);
+    bool hasTopK = inRange && (convertedV == topKConverted);
 
     int index;
     int carry;
@@ -119,7 +122,7 @@ __global__ void gatherTopK(TensorInfo<T, IndexType> input,
 
     if (hasTopK && index < topKRemaining) {
       int writeIndex = writeIndexStart + index;
-      assert(writeIndex < outputSliceSize);
+      CUDA_KERNEL_ASSERT(writeIndex < outputSliceSize);
 
       IndexType topKOffset = writeIndex * topKWithinSliceStride;
       IndexType indexOffset = writeIndex * indicesWithinSliceStride;

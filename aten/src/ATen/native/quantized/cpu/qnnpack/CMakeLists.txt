@@ -147,11 +147,13 @@ SET(PYTORCH_QNNPACK_INIT_SRCS
   src/max-pooling.c
   src/sigmoid.c
   src/softargmax.c
+  src/tanh.c
   src/operator-delete.c)
 
 SET(PYTORCH_QNNPACK_EXEC_SRCS
   src/conv-run.cc
   src/fc-run.cc
+  src/fc-dynamic-run.cc
   src/indirection.c
   src/operator-run.c)
 
@@ -175,6 +177,7 @@ SET(PYTORCH_QNNPACK_ARM_NEON_UKERNELS
   src/q8gavgpool/up8xm-neon.c
   src/q8gemm/4x-sumrows-neon.c
   src/q8gemm/4x8-neon.c
+  src/q8gemm/4x8-dq-neon.c
   src/q8gemm/4x8c2-xzp-neon.c
   src/q8gemm/6x4-neon.c
   src/q8gemm/8x8-neon.c
@@ -195,11 +198,13 @@ SET(PYTORCH_QNNPACK_AARCH32_ASM_UKERNELS
   src/q8conv/4x8-aarch32-neon.S
   src/q8dwconv/up8x9-aarch32-neon.S
   src/q8gemm/4x8-aarch32-neon.S
+  src/q8gemm/4x8-dq-aarch32-neon.S
   src/q8gemm/4x8c2-xzp-aarch32-neon.S)
 
 SET(PYTORCH_QNNPACK_AARCH64_ASM_UKERNELS
   src/q8conv/8x8-aarch64-neon.S
-  src/q8gemm/8x8-aarch64-neon.S)
+  src/q8gemm/8x8-aarch64-neon.S
+  src/q8gemm/8x8-dq-aarch64-neon.S)
 
 SET(PYTORCH_QNNPACK_X86_SSE2_UKERNELS
   src/q8avgpool/mp8x9p8q-sse2.c
@@ -212,6 +217,7 @@ SET(PYTORCH_QNNPACK_X86_SSE2_UKERNELS
   src/q8gavgpool/up8x7-sse2.c
   src/q8gavgpool/up8xm-sse2.c
   src/q8gemm/2x4c8-sse2.c
+  src/q8gemm/4x4c2-dq-sse2.c
   src/q8gemm/4x4c2-sse2.c
   src/q8vadd/sse2.c
   src/u8clamp/sse2.c
@@ -246,8 +252,8 @@ ELSE()
   MESSAGE(FATAL_ERROR "Unsupported QNNPACK library type \"${PYTORCH_QNNPACK_LIBRARY_TYPE}\". Must be \"static\", \"shared\", or \"default\"")
 ENDIF()
 SET_TARGET_PROPERTIES(pytorch_qnnpack PROPERTIES
-  CXX_STANDARD 11
-  C_STANDARD 99
+  CXX_STANDARD 14
+  C_STANDARD 11
   C_EXTENSIONS YES)
 IF(CMAKE_SYSTEM_PROCESSOR MATCHES "^armv[5-8]" OR IOS_ARCH MATCHES "^armv7")
   SET_PROPERTY(SOURCE ${PYTORCH_QNNPACK_ARM_NEON_UKERNELS} APPEND_STRING PROPERTY COMPILE_FLAGS " -O2 -marm -mfpu=neon ")
@@ -367,7 +373,7 @@ IF(PYTORCH_QNNPACK_BUILD_TESTS)
   # ---[ Build unit tests for high-level functionality
   ADD_EXECUTABLE(convolution-test test/convolution.cc)
   SET_TARGET_PROPERTIES(convolution-test PROPERTIES
-    CXX_STANDARD 11
+    CXX_STANDARD 14
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   TARGET_INCLUDE_DIRECTORIES(convolution-test PRIVATE src test)
@@ -376,7 +382,7 @@ IF(PYTORCH_QNNPACK_BUILD_TESTS)
 
   ADD_EXECUTABLE(deconvolution-test test/deconvolution.cc)
   SET_TARGET_PROPERTIES(deconvolution-test PROPERTIES
-    CXX_STANDARD 11
+    CXX_STANDARD 14
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   TARGET_INCLUDE_DIRECTORIES(deconvolution-test PRIVATE src test)
@@ -385,7 +391,7 @@ IF(PYTORCH_QNNPACK_BUILD_TESTS)
 
   ADD_EXECUTABLE(fully-connected-test test/fully-connected.cc)
   SET_TARGET_PROPERTIES(fully-connected-test PROPERTIES
-    CXX_STANDARD 11
+    CXX_STANDARD 14
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   TARGET_INCLUDE_DIRECTORIES(fully-connected-test PRIVATE src test)
@@ -394,7 +400,7 @@ IF(PYTORCH_QNNPACK_BUILD_TESTS)
 
   ADD_EXECUTABLE(channel-shuffle-test test/channel-shuffle.cc)
   SET_TARGET_PROPERTIES(channel-shuffle-test PROPERTIES
-    CXX_STANDARD 11
+    CXX_STANDARD 14
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   TARGET_INCLUDE_DIRECTORIES(channel-shuffle-test PRIVATE src test)
@@ -403,7 +409,7 @@ IF(PYTORCH_QNNPACK_BUILD_TESTS)
 
   ADD_EXECUTABLE(add-test test/add.cc)
   SET_TARGET_PROPERTIES(add-test PROPERTIES
-    CXX_STANDARD 11
+    CXX_STANDARD 14
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   TARGET_INCLUDE_DIRECTORIES(add-test PRIVATE src test)
@@ -412,7 +418,7 @@ IF(PYTORCH_QNNPACK_BUILD_TESTS)
 
   ADD_EXECUTABLE(leaky-relu-test test/leaky-relu.cc)
   SET_TARGET_PROPERTIES(leaky-relu-test PROPERTIES
-    CXX_STANDARD 11
+    CXX_STANDARD 14
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   TARGET_INCLUDE_DIRECTORIES(leaky-relu-test PRIVATE src test)
@@ -421,7 +427,7 @@ IF(PYTORCH_QNNPACK_BUILD_TESTS)
 
   ADD_EXECUTABLE(sigmoid-test test/sigmoid.cc)
   SET_TARGET_PROPERTIES(sigmoid-test PROPERTIES
-    CXX_STANDARD 11
+    CXX_STANDARD 14
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   TARGET_INCLUDE_DIRECTORIES(sigmoid-test PRIVATE src test)
@@ -430,7 +436,7 @@ IF(PYTORCH_QNNPACK_BUILD_TESTS)
 
   ADD_EXECUTABLE(clamp-test test/clamp.cc)
   SET_TARGET_PROPERTIES(clamp-test PROPERTIES
-    CXX_STANDARD 11
+    CXX_STANDARD 14
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   TARGET_INCLUDE_DIRECTORIES(clamp-test PRIVATE src test)
@@ -439,16 +445,25 @@ IF(PYTORCH_QNNPACK_BUILD_TESTS)
 
   ADD_EXECUTABLE(softargmax-test test/softargmax.cc)
   SET_TARGET_PROPERTIES(softargmax-test PROPERTIES
-    CXX_STANDARD 11
+    CXX_STANDARD 14
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   TARGET_INCLUDE_DIRECTORIES(softargmax-test PRIVATE src test)
   TARGET_LINK_LIBRARIES(softargmax-test PRIVATE pytorch_qnnpack cpuinfo gtest gtest_main)
   ADD_TEST(softargmax-test softargmax-test)
 
+  ADD_EXECUTABLE(tanh-test test/tanh.cc)
+  SET_TARGET_PROPERTIES(tanh-test PROPERTIES
+    CXX_STANDARD 14
+    CXX_STANDARD_REQUIRED YES
+    CXX_EXTENSIONS NO)
+  TARGET_INCLUDE_DIRECTORIES(tanh-test PRIVATE src test)
+  TARGET_LINK_LIBRARIES(tanh-test PRIVATE pytorch_qnnpack cpuinfo gtest gtest_main)
+  ADD_TEST(tanh-test tanh-test)
+
   ADD_EXECUTABLE(max-pooling-test test/max-pooling.cc)
   SET_TARGET_PROPERTIES(max-pooling-test PROPERTIES
-    CXX_STANDARD 11
+    CXX_STANDARD 14
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   TARGET_INCLUDE_DIRECTORIES(max-pooling-test PRIVATE src test)
@@ -457,7 +472,7 @@ IF(PYTORCH_QNNPACK_BUILD_TESTS)
 
   ADD_EXECUTABLE(average-pooling-test test/average-pooling.cc)
   SET_TARGET_PROPERTIES(average-pooling-test PROPERTIES
-    CXX_STANDARD 11
+    CXX_STANDARD 14
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   TARGET_INCLUDE_DIRECTORIES(average-pooling-test PRIVATE src test)
@@ -466,7 +481,7 @@ IF(PYTORCH_QNNPACK_BUILD_TESTS)
 
   ADD_EXECUTABLE(global-average-pooling-test test/global-average-pooling.cc)
   SET_TARGET_PROPERTIES(global-average-pooling-test PROPERTIES
-    CXX_STANDARD 11
+    CXX_STANDARD 14
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   TARGET_INCLUDE_DIRECTORIES(global-average-pooling-test PRIVATE src test)
@@ -476,7 +491,7 @@ IF(PYTORCH_QNNPACK_BUILD_TESTS)
   # ---[ Build unit tests for micro-kernels
   ADD_EXECUTABLE(q8gemm-test test/q8gemm.cc)
   SET_TARGET_PROPERTIES(q8gemm-test PROPERTIES
-    CXX_STANDARD 11
+    CXX_STANDARD 14
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   TARGET_INCLUDE_DIRECTORIES(q8gemm-test PRIVATE src test)
@@ -485,7 +500,7 @@ IF(PYTORCH_QNNPACK_BUILD_TESTS)
 
   ADD_EXECUTABLE(q8conv-test test/q8conv.cc)
   SET_TARGET_PROPERTIES(q8conv-test PROPERTIES
-    CXX_STANDARD 11
+    CXX_STANDARD 14
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   TARGET_INCLUDE_DIRECTORIES(q8conv-test PRIVATE src test)
@@ -494,7 +509,7 @@ IF(PYTORCH_QNNPACK_BUILD_TESTS)
 
   ADD_EXECUTABLE(q8dwconv-test test/q8dwconv.cc)
   SET_TARGET_PROPERTIES(q8dwconv-test PROPERTIES
-    CXX_STANDARD 11
+    CXX_STANDARD 14
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   TARGET_INCLUDE_DIRECTORIES(q8dwconv-test PRIVATE src test)
@@ -503,7 +518,7 @@ IF(PYTORCH_QNNPACK_BUILD_TESTS)
 
   ADD_EXECUTABLE(q8vadd-test test/q8vadd.cc)
   SET_TARGET_PROPERTIES(q8vadd-test PROPERTIES
-    CXX_STANDARD 11
+    CXX_STANDARD 14
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   TARGET_INCLUDE_DIRECTORIES(q8vadd-test PRIVATE src test)
@@ -512,7 +527,7 @@ IF(PYTORCH_QNNPACK_BUILD_TESTS)
 
   ADD_EXECUTABLE(q8avgpool-test test/q8avgpool.cc)
   SET_TARGET_PROPERTIES(q8avgpool-test PROPERTIES
-    CXX_STANDARD 11
+    CXX_STANDARD 14
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   TARGET_INCLUDE_DIRECTORIES(q8avgpool-test PRIVATE src test)
@@ -521,7 +536,7 @@ IF(PYTORCH_QNNPACK_BUILD_TESTS)
 
   ADD_EXECUTABLE(q8gavgpool-test test/q8gavgpool.cc)
   SET_TARGET_PROPERTIES(q8gavgpool-test PROPERTIES
-    CXX_STANDARD 11
+    CXX_STANDARD 14
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   TARGET_INCLUDE_DIRECTORIES(q8gavgpool-test PRIVATE src test)
@@ -530,7 +545,7 @@ IF(PYTORCH_QNNPACK_BUILD_TESTS)
 
   ADD_EXECUTABLE(u8maxpool-test test/u8maxpool.cc)
   SET_TARGET_PROPERTIES(u8maxpool-test PROPERTIES
-    CXX_STANDARD 11
+    CXX_STANDARD 14
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   TARGET_INCLUDE_DIRECTORIES(u8maxpool-test PRIVATE src test)
@@ -539,7 +554,7 @@ IF(PYTORCH_QNNPACK_BUILD_TESTS)
 
   ADD_EXECUTABLE(u8clamp-test test/u8clamp.cc)
   SET_TARGET_PROPERTIES(u8clamp-test PROPERTIES
-    CXX_STANDARD 11
+    CXX_STANDARD 14
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   TARGET_INCLUDE_DIRECTORIES(u8clamp-test PRIVATE src test)
@@ -548,7 +563,7 @@ IF(PYTORCH_QNNPACK_BUILD_TESTS)
 
   ADD_EXECUTABLE(u8rmax-test test/u8rmax.cc)
   SET_TARGET_PROPERTIES(u8rmax-test PROPERTIES
-    CXX_STANDARD 11
+    CXX_STANDARD 14
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   TARGET_INCLUDE_DIRECTORIES(u8rmax-test PRIVATE src test)
@@ -557,7 +572,7 @@ IF(PYTORCH_QNNPACK_BUILD_TESTS)
 
   ADD_EXECUTABLE(u8lut32norm-test test/u8lut32norm.cc)
   SET_TARGET_PROPERTIES(u8lut32norm-test PROPERTIES
-    CXX_STANDARD 11
+    CXX_STANDARD 14
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   TARGET_INCLUDE_DIRECTORIES(u8lut32norm-test PRIVATE src test)
@@ -566,7 +581,7 @@ IF(PYTORCH_QNNPACK_BUILD_TESTS)
 
   ADD_EXECUTABLE(x8lut-test test/x8lut.cc)
   SET_TARGET_PROPERTIES(x8lut-test PROPERTIES
-    CXX_STANDARD 11
+    CXX_STANDARD 14
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   TARGET_INCLUDE_DIRECTORIES(x8lut-test PRIVATE src test)
@@ -575,7 +590,7 @@ IF(PYTORCH_QNNPACK_BUILD_TESTS)
 
   ADD_EXECUTABLE(x8zip-test test/x8zip.cc)
   SET_TARGET_PROPERTIES(x8zip-test PROPERTIES
-    CXX_STANDARD 11
+    CXX_STANDARD 14
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   TARGET_INCLUDE_DIRECTORIES(x8zip-test PRIVATE src test)
@@ -584,7 +599,7 @@ IF(PYTORCH_QNNPACK_BUILD_TESTS)
 
   ADD_EXECUTABLE(hgemm-test test/hgemm.cc)
   SET_TARGET_PROPERTIES(hgemm-test PROPERTIES
-    CXX_STANDARD 11
+    CXX_STANDARD 14
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   TARGET_INCLUDE_DIRECTORIES(hgemm-test PRIVATE src test)
@@ -593,7 +608,7 @@ IF(PYTORCH_QNNPACK_BUILD_TESTS)
 
   ADD_EXECUTABLE(sgemm-test test/sgemm.cc)
   SET_TARGET_PROPERTIES(sgemm-test PROPERTIES
-    CXX_STANDARD 11
+    CXX_STANDARD 14
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   TARGET_INCLUDE_DIRECTORIES(sgemm-test PRIVATE src test)
@@ -613,63 +628,70 @@ IF(PYTORCH_QNNPACK_BUILD_BENCHMARKS)
 
   ADD_EXECUTABLE(add-bench bench/add.cc)
   SET_TARGET_PROPERTIES(add-bench PROPERTIES
-    CXX_STANDARD 11
+    CXX_STANDARD 14
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   TARGET_LINK_LIBRARIES(add-bench PRIVATE pytorch_qnnpack benchmark)
 
   ADD_EXECUTABLE(average-pooling-bench bench/average-pooling.cc)
   SET_TARGET_PROPERTIES(average-pooling-bench PROPERTIES
-    CXX_STANDARD 11
+    CXX_STANDARD 14
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   TARGET_LINK_LIBRARIES(average-pooling-bench PRIVATE pytorch_qnnpack benchmark)
 
   ADD_EXECUTABLE(channel-shuffle-bench bench/channel-shuffle.cc)
   SET_TARGET_PROPERTIES(channel-shuffle-bench PROPERTIES
-    CXX_STANDARD 11
+    CXX_STANDARD 14
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   TARGET_LINK_LIBRARIES(channel-shuffle-bench PRIVATE pytorch_qnnpack benchmark)
 
   ADD_EXECUTABLE(convolution-bench bench/convolution.cc)
   SET_TARGET_PROPERTIES(convolution-bench PROPERTIES
-    CXX_STANDARD 11
+    CXX_STANDARD 14
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   TARGET_LINK_LIBRARIES(convolution-bench PRIVATE pytorch_qnnpack benchmark)
 
   ADD_EXECUTABLE(global-average-pooling-bench bench/global-average-pooling.cc)
   SET_TARGET_PROPERTIES(global-average-pooling-bench PROPERTIES
-    CXX_STANDARD 11
+    CXX_STANDARD 14
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   TARGET_LINK_LIBRARIES(global-average-pooling-bench PRIVATE pytorch_qnnpack benchmark)
 
   ADD_EXECUTABLE(max-pooling-bench bench/max-pooling.cc)
   SET_TARGET_PROPERTIES(max-pooling-bench PROPERTIES
-    CXX_STANDARD 11
+    CXX_STANDARD 14
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   TARGET_LINK_LIBRARIES(max-pooling-bench PRIVATE pytorch_qnnpack benchmark)
 
   ADD_EXECUTABLE(sigmoid-bench bench/sigmoid.cc)
   SET_TARGET_PROPERTIES(sigmoid-bench PROPERTIES
-    CXX_STANDARD 11
+    CXX_STANDARD 14
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   TARGET_LINK_LIBRARIES(sigmoid-bench PRIVATE pytorch_qnnpack benchmark)
 
   ADD_EXECUTABLE(softargmax-bench bench/softargmax.cc)
   SET_TARGET_PROPERTIES(softargmax-bench PROPERTIES
-    CXX_STANDARD 11
+    CXX_STANDARD 14
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   TARGET_LINK_LIBRARIES(softargmax-bench PRIVATE pytorch_qnnpack benchmark)
 
+  ADD_EXECUTABLE(tanh-bench bench/tanh.cc)
+  SET_TARGET_PROPERTIES(tanh-bench PROPERTIES
+    CXX_STANDARD 14
+    CXX_STANDARD_REQUIRED YES
+    CXX_EXTENSIONS NO)
+  TARGET_LINK_LIBRARIES(tanh-bench PRIVATE pytorch_qnnpack benchmark)
+
   ADD_EXECUTABLE(q8gemm-bench bench/q8gemm.cc)
   SET_TARGET_PROPERTIES(q8gemm-bench PROPERTIES
-    CXX_STANDARD 11
+    CXX_STANDARD 14
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   TARGET_INCLUDE_DIRECTORIES(q8gemm-bench PRIVATE src)
@@ -678,7 +700,7 @@ IF(PYTORCH_QNNPACK_BUILD_BENCHMARKS)
 
   ADD_EXECUTABLE(hgemm-bench bench/hgemm.cc)
   SET_TARGET_PROPERTIES(hgemm-bench PROPERTIES
-    CXX_STANDARD 11
+    CXX_STANDARD 14
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   TARGET_INCLUDE_DIRECTORIES(hgemm-bench PRIVATE src)
@@ -686,7 +708,7 @@ IF(PYTORCH_QNNPACK_BUILD_BENCHMARKS)
 
   ADD_EXECUTABLE(sgemm-bench bench/sgemm.cc)
   SET_TARGET_PROPERTIES(sgemm-bench PROPERTIES
-    CXX_STANDARD 11
+    CXX_STANDARD 14
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   TARGET_INCLUDE_DIRECTORIES(sgemm-bench PRIVATE src)

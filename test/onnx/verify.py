@@ -8,7 +8,6 @@ import onnx.helper
 import numpy as np
 
 import difflib
-import contextlib
 import io
 
 
@@ -226,26 +225,9 @@ class Errors(object):
         if exc_type == self.exc_class:
             raise RuntimeError("ShortCircuit was raised, but no errors were recorded")
 
-
-@contextlib.contextmanager
-def set_training(model, mode):
-    """
-    A context manager to temporarily set the training mode of 'model'
-    to 'mode', resetting it when we exit the with-block.
-    """
-    old_mode = model.training
-    if old_mode != mode:
-        model.train(mode)
-    try:
-        yield
-    finally:
-        if old_mode != mode:
-            model.train(old_mode)
-
-
-def verify(model, args, backend, verbose=False, training=False, rtol=1e-3, atol=1e-7,
-           test_args=2, do_constant_folding=False, example_outputs=None, opset_version=None,
-           keep_initializers_as_inputs=True):
+def verify(model, args, backend, verbose=False, training=torch.onnx.TrainingMode.EVAL, rtol=1e-3, atol=1e-7,
+           test_args=2, do_constant_folding=True, example_outputs=None, opset_version=None,
+           keep_initializers_as_inputs=True, add_node_names=False):
     """
     Export a model into ONNX, import it into a specified ONNX backend, and then
     on a few random inputs verify that PyTorch and the backend produced the same
@@ -359,13 +341,14 @@ def verify(model, args, backend, verbose=False, training=False, rtol=1e-3, atol=
     if isinstance(args, torch.Tensor):
         args = (args,)
 
-    with set_training(model, training):
+    with torch.onnx.select_model_mode_for_export(model, training):
         proto_bytes = io.BytesIO()
         torch_out = torch.onnx._export(model, args, proto_bytes, verbose=verbose,
                                        do_constant_folding=do_constant_folding,
                                        example_outputs=example_outputs,
                                        opset_version=opset_version,
-                                       keep_initializers_as_inputs=keep_initializers_as_inputs)
+                                       keep_initializers_as_inputs=keep_initializers_as_inputs,
+                                       add_node_names=add_node_names)
         if isinstance(model, torch.jit.ScriptModule):
             torch_out = model(*args)
         proto = load_bytes(proto_bytes)
@@ -377,7 +360,8 @@ def verify(model, args, backend, verbose=False, training=False, rtol=1e-3, atol=
                                            do_constant_folding=do_constant_folding,
                                            example_outputs=example_outputs,
                                            opset_version=opset_version,
-                                           keep_initializers_as_inputs=keep_initializers_as_inputs)
+                                           keep_initializers_as_inputs=keep_initializers_as_inputs,
+                                           add_node_names=add_node_names)
             if isinstance(model, torch.jit.ScriptModule):
                 torch_out = model(*args)
             alt_proto = load_bytes(alt_proto_bytes)

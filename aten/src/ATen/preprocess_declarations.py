@@ -91,7 +91,7 @@ def process_types_and_backends(option):
 
     # sort the result for easy reading
     for backend in backend_types.keys():
-        backend_types[backend] = sorted([type for type in backend_types[backend]])
+        backend_types[backend] = sorted(backend_types[backend])
     option['backend_types'] = backend_types
 
 

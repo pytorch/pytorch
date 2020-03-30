@@ -6,6 +6,7 @@ namespace {
 
 // NOTE: clang-format wants to use a different formatting but the
 // current formatting should be easier to read.
+// clang-format off
 alignas(64) const int ld_st_masks[8][8] = {
   {  0,  0,  0,  0,  0,  0,  0,  0, },
   { -1,  0,  0,  0,  0,  0,  0,  0, },
@@ -16,6 +17,7 @@ alignas(64) const int ld_st_masks[8][8] = {
   { -1, -1, -1, -1, -1, -1,  0,  0, },
   { -1, -1, -1, -1, -1, -1, -1,  0, },
 };
+// clang-format on
 
 } // anonymous namespace
 

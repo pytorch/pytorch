@@ -9,11 +9,14 @@ void THCTensor_(topk)(THCState* state,
                       THCudaLongTensor *indices,
                       THCTensor *input_,
                       int64_t k, int dim, int dir, int sorted) {
+  #if defined(THC_REAL_IS_BFLOAT16) && !defined(__HIP_PLATFORM_HCC__)
+  TORCH_CHECK(false, "topk not suppported with BFloat16");
+  #else
   THAssert(topK != NULL && indices != NULL && input_ != NULL);
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, topK, indices, input_));
-  THArgCheck(THCTensor_(nDimensionLegacyNoScalars)(state, topK) <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
-  int64_t dims = THCudaLongTensor_nDimensionLegacyNoScalars(state, indices);
-  THArgCheck(dims <= MAX_CUTORCH_DIMS, 3, CUTORCH_DIM_WARNING);
+  dim = at::maybe_wrap_dim(dim, input_);
+  THArgCheck(THCTensor_(nDimension)(state, topK) <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
+  THArgCheck(THCudaLongTensor_nDimension(state, indices) <= MAX_CUTORCH_DIMS, 3, CUTORCH_DIM_WARNING);
   int numDims = THCTensor_(nDimensionLegacyNoScalars)(state, input_);
   THArgCheck(numDims <= MAX_CUTORCH_DIMS, 4, CUTORCH_DIM_WARNING);
 
@@ -26,8 +29,10 @@ void THCTensor_(topk)(THCState* state,
 
   // Build the output size, which is the dim being selected set to
   // size k
-  std::vector<int64_t> topKSize = THTensor_sizesLegacyNoScalars(input);
-  topKSize[dim] = k;
+  std::vector<int64_t> topKSize = input->sizes().vec();
+  if (topKSize.size() > 0) {
+    topKSize[dim] = k;
+  }
   THCTensor_(resize)(state, topK, topKSize, {});
   THCudaLongTensor_resize(state, indices, topKSize, {});
 
@@ -36,7 +41,7 @@ void THCTensor_(topk)(THCState* state,
 
 #define RUN_K(INDEX_T, DIM, DIR)                                        \
   gatherTopK<scalar_t, INDEX_T, DIM, DIR>                                   \
-    <<<grid, block, 0, THCState_getCurrentStream(state)>>>(             \
+    <<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(             \
       inputInfo,                                                        \
       static_cast<INDEX_T>(sliceSize),                                  \
       static_cast<INDEX_T>(k),                                          \
@@ -114,6 +119,8 @@ void THCTensor_(topk)(THCState* state,
                                                                         \
   RUN_DIM(INDEX_T);
 
+  // the below is safe with 0-dimensional tensors because it is based on
+  // THCTensorInfo which implicitly expands to 1-dimensional.
   if (THCTensor_nElement(state, input) > 0) {
     // Based on required index size, run the algorithm with the
     // appropriate index type
@@ -132,7 +139,7 @@ void THCTensor_(topk)(THCState* state,
 
   // Sort the results if the user wants them sorted, since our
   // selection routine does not ensure sorting
-  if (sorted) {
+  if (sorted && THCTensor_(numel)(state, topK) > 1) {
     // FIXME: the k/v inplace sort along slice only works for size <=
     // 2048 at the moment
     // Workaround:
@@ -179,6 +186,7 @@ void THCTensor_(topk)(THCState* state,
   THCudaLongTensor_free(state, input);
 
   THCudaCheck(cudaGetLastError());
+  #endif // THC_REAL_IS_BFLOAT16 && !__HIP_PLATFORM_HCC__
 }
 
 #endif // THC_GENERIC_FILE

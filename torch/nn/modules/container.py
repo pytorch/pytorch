@@ -211,6 +211,9 @@ class ModuleList(Module):
             self.add_module(str(offset + i), module)
         return self
 
+    def forward(self):
+        raise NotImplementedError()
+
 
 class ModuleDict(Module):
     r"""Holds submodules in a dictionary.
@@ -446,10 +449,13 @@ class ParameterList(Module):
             size_str = 'x'.join(str(size) for size in p.size())
             device_str = '' if not p.is_cuda else ' (GPU {})'.format(p.get_device())
             parastr = 'Parameter containing: [{} of size {}{}]'.format(
-                torch.typename(p.data), size_str, device_str)
+                torch.typename(p), size_str, device_str)
             child_lines.append('  (' + str(k) + '): ' + parastr)
         tmpstr = '\n'.join(child_lines)
         return tmpstr
+
+    def __call__(self, input):
+        raise RuntimeError('ParameterList should not be called.')
 
 
 class ParameterDict(Module):
@@ -586,7 +592,10 @@ class ParameterDict(Module):
             size_str = 'x'.join(str(size) for size in p.size())
             device_str = '' if not p.is_cuda else ' (GPU {})'.format(p.get_device())
             parastr = 'Parameter containing: [{} of size {}{}]'.format(
-                torch.typename(p.data), size_str, device_str)
+                torch.typename(p), size_str, device_str)
             child_lines.append('  (' + k + '): ' + parastr)
         tmpstr = '\n'.join(child_lines)
         return tmpstr
+
+    def __call__(self, input):
+        raise RuntimeError('ParameterDict should not be called.')

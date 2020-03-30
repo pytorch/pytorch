@@ -34,7 +34,6 @@ def check_onnx_opset_operator(model, ops, opset_version=_export_onnx_opset_versi
     # At least the op_name should be specified,
     # but the op's attributes can optionally be
     # specified as well
-
     assert len(ops) == len(graph.node)
     for i in range(0, len(ops)):
         assert graph.node[i].op_type == ops[i]['op_name']
@@ -46,7 +45,7 @@ def check_onnx_opset_operator(model, ops, opset_version=_export_onnx_opset_versi
                     assert attributes[j][attribute_field] == getattr(graph.node[i].attribute[j], attribute_field)
 
 
-def check_onnx_opsets_operator(module, x, ops, opset_versions, training=False, example_outputs=None):
+def check_onnx_opsets_operator(module, x, ops, opset_versions, training=torch.onnx.TrainingMode.EVAL, example_outputs=None):
     for opset_version in opset_versions:
         f = io.BytesIO()
         torch.onnx.export(module, x, f,
@@ -74,12 +73,9 @@ class TestONNXOpset(TestCase):
             def forward(self, x):
                 return torch.topk(x, 3)
 
-        ops_9 = [{"op_name": "TopK", "attributes" : [{"name" : "axis", "i" : -1, "type" : 2},
-                 {"name": "k", "i" : 3, "type" : 2}]}]
-        ops_10 = [{"op_name": "Constant", "attributes": [{"name": "value", "type": 4}]},
-                  {"op_name": "Constant", "attributes": [{"name": "value", "type": 4}]},
-                  {"op_name": "Reshape"},
-                  {"op_name": "TopK", "attributes": [{"name": "axis", "i": -1, "type": 2}]}]
+        ops_9 = [{"op_name": "TopK", "attributes": [{"name": "axis", "i": -1, "type": 2},
+                 {"name": "k", "i": 3, "type": 2}]}]
+        ops_10 = [{"op_name": "TopK", "attributes": [{"name": "axis", "i": -1, "type": 2}]}]
         ops = {9: ops_9, 10: ops_10}
         x = torch.arange(1., 6., requires_grad=True)
         check_onnx_opsets_operator(MyModule(), x, ops, opset_versions=[9, 10])
@@ -195,19 +191,13 @@ class TestONNXOpset(TestCase):
             def forward(self, x):
                 return x[1:x.size(0)]
 
-        ops_10 = [{"op_name" : "Constant"},
+        ops_10 = [{"op_name" : "Shape"},
                   {"op_name" : "Constant"},
-                  {"op_name" : "Shape"},
-                  {"op_name": "Constant"},
                   {"op_name" : "Gather",
                    "attributes" : [{"name" : "axis", "i" : 0, "type" : 2}]},
                   {"op_name" : "Unsqueeze",
                    "attributes" : [{"name" : "axes", "i" : 0, "type" : 7}]},
-                  {"op_name" : "Unsqueeze",
-                   "attributes" : [{"name" : "axes", "i" : 0, "type" : 7}]},
-                  {"op_name" : "Unsqueeze",
-                   "attributes" : [{"name" : "axes", "i" : 0, "type" : 7}]},
-                  {"op_name" : "Constant"},
+                  {"op_name": "Constant"},
                   {"op_name" : "Slice",
                    "attributes" : []}]
         ops = {10 : ops_10}
@@ -248,12 +238,12 @@ class TestONNXOpset(TestCase):
         # test training mode
         ops = [{"op_name" : "Dropout", "attributes" : [{"name" : "ratio", "f" : 0.5, "type" : 1}]}]
         ops = {9 : ops, 10 : ops}
-        check_onnx_opsets_operator(MyModule(), x, ops, opset_versions=[9, 10], training=True)
+        check_onnx_opsets_operator(MyModule(), x, ops, opset_versions=[9, 10], training=torch.onnx.TrainingMode.TRAINING)
 
         # test eval mode
         ops = []
         ops = {9 : ops, 10 : ops}
-        check_onnx_opsets_operator(MyModule(), x, ops, opset_versions=[9, 10], training=False)
+        check_onnx_opsets_operator(MyModule(), x, ops, opset_versions=[9, 10], training=torch.onnx.TrainingMode.EVAL)
 
     def test_full(self):
         class MyModule(Module):

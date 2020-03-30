@@ -58,7 +58,6 @@ def assert_allclose(actual, expected, rtol=None, atol=None, equal_nan=True):
         rtol, atol, list(index), actual[index].item(), expected[index].item(),
         count - 1, 100 * count / actual.numel()))
 
-
 def make_non_contiguous(tensor):
     if tensor.numel() <= 1:  # can't make non-contiguous
         return tensor.clone()
@@ -83,7 +82,9 @@ def make_non_contiguous(tensor):
             input = input.narrow(i, bounds, tensor.size(i))
 
     input.copy_(tensor)
-    return input
+
+    # Use .data here to hide the view relation between input and other temporary Tensors
+    return input.data
 
 
 def get_all_dtypes():
@@ -101,6 +102,9 @@ def get_all_math_dtypes(device):
 
     return dtypes
 
+def get_all_complex_dtypes():
+    dtypes = [torch.complex64, torch.complex128]
+    return dtypes
 
 def get_all_device_types():
     return ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']

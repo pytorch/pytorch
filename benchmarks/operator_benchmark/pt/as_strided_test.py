@@ -14,6 +14,7 @@ import torch
 as_strided_configs_short = op_bench.config_list(
     attr_names=["M", "N", "size", "stride", "storage_offset"],
     attrs=[
+        [8, 8, (2, 2), (1, 1), 0],
         [256, 256, (32, 32), (1, 1), 0],
         [512, 512, (64, 64), (2, 2), 1],
     ],

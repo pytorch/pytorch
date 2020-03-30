@@ -3,6 +3,7 @@
 #include <caffe2/core/logging.h>
 #include <mutex>
 #include <random>
+#include <array>
 
 namespace caffe2 {
 
@@ -65,7 +66,7 @@ void VideoDecoder::getAudioSample(
       // resample the audio data
       out_samples = swr_convert(swr, &output, out_samples, input, in_samples);
       auto sample_size = out_samples * c->channels * sizeof(float);
-      auto buffer = caffe2::make_unique<float[]>(sample_size);
+      auto buffer = std::make_unique<float[]>(sample_size);
       memcpy(buffer.get(), output, sample_size);
       av_freep(&output);
 
@@ -437,10 +438,9 @@ void VideoDecoder::decodeLoop(
     // the decoder is still giving us frames.
     int ipacket = 0;
     while ((!eof || gotPicture) &&
-           /* either you must decode all frames or decode upto maxFrames
+           /* either you must decode all frames or decode up to maxFrames
             * based on status of the mustDecodeAll flag */
-           (mustDecodeAll ||
-            ((!mustDecodeAll) && (selectiveDecodedFrames < maxFrames))) &&
+           (mustDecodeAll || (selectiveDecodedFrames < maxFrames)) &&
            /* If on the last interval and not autodecoding keyframes and a
             * SpecialFps indicates no more frames are needed, stop decoding */
            !((itvlIter == params.intervals_.end() &&

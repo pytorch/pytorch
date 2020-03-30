@@ -303,8 +303,7 @@ matter, please write in at https://github.com/pytorch/pytorch/issues/14234
 supports_named_tensor: True
 ```
 
-Experimental: this option is ignored unless compiling with BUILD_NAMEDTENSOR=1.
-By default, (`supports_named_tensor: True`) ATen code generation will generate a check
+By default, (`supports_named_tensor: False`) ATen code generation will generate a check
 that all tensor inputs to the function are unnamed. This is used to incrementally
 implement named tensors; if a function supports named tensors, then it'll have
 `supports_named_tensor: True`; otherwise, passing it a named tensor will error out.
@@ -337,6 +336,16 @@ c10 operator library and be available there. If setting this to 'full' works for
 your operator, please do. For a few corner cases, enabling this might not compile
 successfully, so setting this to 'unboxed_only', or as last resort 'no' is a
 workaround. Also, 'no' is the default if you don't specify anything.
+
+### `manual_kernel_registration`
+
+```
+manual_kernel_registration: True
+```
+
+With this flag set, we will not generate code to automatically register the C++ operator
+implementation with the dispatcher. This is a workaround for ops that need manual
+Variable code (see VariableTypeManual.cpp) and should only be used rarely.
 
 ## Writing an implementation in C++
 

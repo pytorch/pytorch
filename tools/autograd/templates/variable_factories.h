@@ -6,19 +6,14 @@
 #include <ATen/core/grad_mode.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/core/MemoryFormat.h>
-#include <ATen/core/EnableNamedTensor.h>
 #include <torch/csrc/api/include/torch/detail/TensorDataContainer.h>
 #include <torch/csrc/autograd/variable.h>
-#include <torch/csrc/jit/tracer.h>
-#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/frontend/tracer.h>
+#include <torch/csrc/jit/ir/ir.h>
 
 #include <functional>
 #include <initializer_list>
 #include <utility>
-
-#ifdef BUILD_NAMEDTENSOR
-using at::DimnameList;
-#endif
 
 namespace torch {
 
@@ -28,15 +23,13 @@ namespace torch {
 /// the largest data type that can represent all of the elements, or by using
 /// variadic templates.
 ///
-/// NOTE: C++ `torch::tensor` by default gives a double tensor, which is
-/// different from Python `torch.tensor` that gives a float tensor by default.
-/// We are going to fix this discrepancy by making `torch::tensor` give
-/// a float tensor by default.
-/// Tracking issue: https://github.com/pytorch/pytorch/issues/28902
+/// NOTE: C++ `torch::tensor` with a floating-point type or an `at::ArrayRef` / `std::vector` /
+/// (nested) braced-init-list of floating-point types always produces a tensor of dtype
+/// `torch::get_default_dtype()`, matching Python `torch.tensor` behavior.
 ///
-/// NOTE: C++ `torch::tensor` with an integer literal or a braced-init-list of
-/// integer literals always produces a tensor of dtype `at::kLong` (aka. int64_t),
-/// matching Python `torch.tensor` behavior.
+/// NOTE: C++ `torch::tensor` with an integer type or an `at::ArrayRef` / `std::vector` /
+/// (nested) braced-init-list of integer types always produces a tensor of dtype `at::kLong`
+/// (aka. int64_t), matching Python `torch.tensor` behavior.
 ///
 /// NOTE: The following dtypes are not supported by `torch::tensor` currently:
 /// - `unsigned int`
@@ -83,12 +76,11 @@ inline at::Tensor from_blob(
     at::IntArrayRef sizes,
     at::IntArrayRef strides,
     const at::TensorOptions& options = at::TensorOptions()) {
-  return torch::from_blob(
-      data,
-      sizes,
-      strides,
-      /*deleter=*/[](void*) {},
-      options);
+  at::Tensor tensor = ([&]() {
+    at::AutoNonVariableTypeMode non_var_type_mode(true);
+    return at::from_blob(data, sizes, strides, options);
+  })();
+  return autograd::make_variable(tensor, options.requires_grad());
 }
 
 /// Exposes the given `data` as a `Tensor` without taking ownership of the
@@ -117,7 +109,11 @@ inline at::Tensor from_blob(
     void* data,
     at::IntArrayRef sizes,
     const at::TensorOptions& options = at::TensorOptions()) {
-  return torch::from_blob(data, sizes, /*deleter=*/[](void*) {}, options);
+  at::Tensor tensor = ([&]() {
+    at::AutoNonVariableTypeMode non_var_type_mode(true);
+    return at::from_blob(data, sizes, options);
+  })();
+  return autograd::make_variable(tensor, options.requires_grad());
 }
 
 ${function_definitions}

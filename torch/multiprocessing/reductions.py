@@ -175,7 +175,7 @@ def reduce_tensor(tensor):
     # the old ones alives.
     # See [https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__DEVICE.html]
     #
-    # This is fine, because all we need to do is to save our position in the allocaiton,
+    # This is fine, because all we need to do is to save our position in the allocation,
     # and reconstruct storage and tensor from it.
     # 0xA000 ->  -------CUDA Allocation------
     #           |                            |
@@ -208,7 +208,7 @@ def reduce_tensor(tensor):
     # On receiver side:
     #   1. Get the devPtr of the MemHandle to access the memory, reconstruct a storage
     #      of the same type using (basePtr, offset, size).
-    #   2. we can reconstruct the tensor on top of the recontructed storage
+    #   2. we can reconstruct the tensor on top of the reconstructed storage
     #   Tensor(size=0x040, offset=0x020, storage=Storage(data=basePtr+0xA100, size=0x0100))
     #
     # This strategy has a few implications:

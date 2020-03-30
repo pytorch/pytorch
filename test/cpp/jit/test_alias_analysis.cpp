@@ -1,18 +1,16 @@
 #include <torch/csrc/autograd/generated/variable_factories.h>
-#include <torch/csrc/jit/irparser.h>
+#include <torch/csrc/jit/ir/irparser.h>
 #include "test/cpp/jit/test_base.h"
-#include "torch/csrc/jit/custom_operator.h"
-#include "torch/csrc/jit/passes/alias_analysis.h"
-#include "torch/csrc/jit/script/compiler.h"
+#include "torch/csrc/jit/frontend/ir_emitter.h"
+#include "torch/csrc/jit/ir/alias_analysis.h"
+#include "torch/csrc/jit/runtime/custom_operator.h"
 #include "torch/csrc/utils/memory.h"
 
 namespace torch {
 namespace jit {
 
-inline c10::OperatorOptions aliasAnalysisFromSchema() {
-  c10::OperatorOptions result;
-  result.setAliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA);
-  return result;
+inline c10::AliasAnalysisKind aliasAnalysisFromSchema() {
+  return c10::AliasAnalysisKind::FROM_SCHEMA;
 }
 
 // Fixture to set up a graph and make assertions clearer
@@ -393,26 +391,68 @@ void testAliasAnalysis() {
   }
 
   // test none value does not have writers
-  {
-    {
-      auto graph = std::make_shared<Graph>();
-      std::unordered_map<std::string, Value*> vmap;
-      script::parseIR(
-          R"IR(
+  {{auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  parseIR(
+      R"IR(
     graph():
       %opt : Tensor? = prim::Constant()
       %out : Tensor = prim::unchecked_unwrap_optional(%opt)
       %ret.2 : Tensor = aten::div(%out, %out, %out)
       return (%opt, %out, %ret.2)
       )IR",
-          &*graph,
-          vmap);
+      &*graph,
+      vmap);
 
-      AliasDb aliasDb(graph);
-      AT_ASSERT(!aliasDb.hasWriters(vmap["opt"]->node()));
-    }
-  }
+  AliasDb aliasDb(graph);
+  AT_ASSERT(!aliasDb.hasWriters(vmap["opt"]->node()));
 }
+} // namespace jit
+
+// test safeToIntroduceAliasingRelationship
+{
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  parseIR(
+      R"IR(
+  graph(%x : Tensor):
+      %3 : int = prim::Constant[value=1]()
+      %2 : int = prim::Constant[value=0]()
+      %b : Tensor = aten::add(%x, %2, %3)
+      %c : Tensor = aten::add(%x, %2, %3)
+      %d : Tensor = aten::add(%x, %2, %3)
+      %e : Tensor = aten::add(%x, %2, %3)
+      %f : Tensor[] = prim::ListConstruct(%e)
+      %14 : (Tensor, Tensor) = prim::TupleConstruct(%b, %c)
+      return (%14)
+    )IR",
+      &*graph,
+      vmap);
+
+  AliasDb aliasDb(graph);
+  // x, b, c escape scope, so we can't introduce an aliasing relationship
+  TORCH_INTERNAL_ASSERT(
+      !aliasDb.safeToChangeAliasingRelationship(vmap["x"], vmap["b"]));
+  TORCH_INTERNAL_ASSERT(
+      !aliasDb.safeToChangeAliasingRelationship(vmap["b"], vmap["x"]));
+  TORCH_INTERNAL_ASSERT(
+      !aliasDb.safeToChangeAliasingRelationship(vmap["b"], vmap["c"]));
+  TORCH_INTERNAL_ASSERT(
+      !aliasDb.safeToChangeAliasingRelationship(vmap["c"], vmap["b"]));
+
+  // e aliases the wildcard set because it's contained in a list
+  TORCH_INTERNAL_ASSERT(
+      !aliasDb.safeToChangeAliasingRelationship(vmap["e"], vmap["x"]));
+  TORCH_INTERNAL_ASSERT(
+      !aliasDb.safeToChangeAliasingRelationship(vmap["x"], vmap["e"]));
+
+  // d is a temporary with no writers, safe to change aliasing relationship here
+  TORCH_INTERNAL_ASSERT(
+      aliasDb.safeToChangeAliasingRelationship(vmap["c"], vmap["d"]));
+  TORCH_INTERNAL_ASSERT(
+      aliasDb.safeToChangeAliasingRelationship(vmap["d"], vmap["c"]));
+}
+} // namespace torch
 
 void testWriteTracking() {
   RegisterOperators reg({Operator(
@@ -451,10 +491,10 @@ void testWriteTracking() {
   }
   {
     auto graph = std::make_shared<Graph>();
-    script::parseIR(
+    parseIR(
         R"IR(
   graph(%x: Tensor):
-    %b : (Tensor) = aten::relu_(%x)
+    %b : Tensor = aten::relu_(%x)
     return (%b)
     )IR",
         &*graph);
@@ -465,10 +505,10 @@ void testWriteTracking() {
   }
   {
     auto graph = std::make_shared<Graph>();
-    script::parseIR(
+    parseIR(
         R"IR(
   graph(%x: Tensor, %y : Tensor):
-    %b : (Tensor) = aten::mul(%x, %y)
+    %b : Tensor = aten::mul(%x, %y)
     return (%b)
     )IR",
         &*graph);
@@ -480,11 +520,11 @@ void testWriteTracking() {
   {
     auto graph = std::make_shared<Graph>();
     std::unordered_map<std::string, Value*> vmap;
-    script::parseIR(
+    parseIR(
         R"IR(
   graph(%x: Tensor, %y : Tensor):
     %c1 : int = prim::Constant[value=1]()
-    %b : (Tensor) = aten::add_(%x, %y, %c1)
+    %b : Tensor = aten::add_(%x, %y, %c1)
     return (%b)
     )IR",
         &*graph,
@@ -499,34 +539,42 @@ void testWriteTracking() {
 void testContainerAliasing() {
   {
     auto graph = std::make_shared<Graph>();
-    script::parseIR(
+    std::unordered_map<std::string, Value*> vmap;
+    parseIR(
         R"IR(
-  graph():
+  graph(%inp: Tensor[]):
     %x : str = prim::Constant[value="a"]()
     %y : Tensor = prim::Constant()
+    %z : Tensor = prim::Constant()
     %a : (Tensor) = prim::TupleConstruct(%y)
     %b : Dict(str, Tensor) = prim::DictConstruct(%x, %y)
     %c : Tensor[] = prim::ListConstruct(%y)
     return (%a, %b, %c)
     )IR",
-        &*graph);
+        &*graph,
+        vmap);
 
-    auto node_iter = graph->block()->nodes().begin();
-    auto str_node = node_iter++; // string
-    Node* ten_node = *node_iter++;
+    auto str_output = vmap["x"];
+    auto ten_output = vmap["y"];
+    auto local_var = vmap["z"];
     AliasDb aliasDb(graph);
 
     AT_ASSERT(graph->outputs().size() == 3);
     for (auto out : graph->outputs()) {
-      AT_ASSERT(aliasDb.mayContainAlias(ten_node->output(), out));
+      AT_ASSERT(aliasDb.mayContainAlias(ten_output, out));
+      AT_ASSERT(!aliasDb.mayContainAlias(local_var, out));
     }
-    AT_ASSERT(aliasDb.mayContainAlias({ten_node->output()}, graph->outputs()));
-    AT_ASSERT(!aliasDb.mayContainAlias(str_node->output(), graph->outputs()));
+
+    AT_ASSERT(aliasDb.mayContainAlias(ten_output, graph->inputs()));
+    AT_ASSERT(!aliasDb.mayContainAlias(local_var, graph->inputs()));
+
+    AT_ASSERT(aliasDb.mayContainAlias({ten_output}, graph->outputs()));
+    AT_ASSERT(!aliasDb.mayContainAlias(str_output, graph->outputs()));
   }
 
   {
     auto graph = std::make_shared<Graph>();
-    script::parseIR(
+    parseIR(
         R"IR(
   graph():
     %x : str = prim::Constant[value="a"]()
@@ -553,7 +601,7 @@ void testContainerAliasing() {
   // Test input aliasing
   {
     auto graph = std::make_shared<Graph>();
-    script::parseIR(
+    parseIR(
         R"IR(
   graph(%x: Tensor, %y: Tensor):
     %a : (Tensor) = prim::TupleConstruct(%x)
@@ -574,7 +622,7 @@ void testContainerAliasing() {
   // Test tuple that doesn't come from construct
   {
     auto graph = std::make_shared<Graph>();
-    script::parseIR(
+    parseIR(
         R"IR(
 graph(%x : int,
       %y : Tensor,
@@ -606,16 +654,12 @@ graph(%x : int,
   // test nested types
   {
     auto graph = std::make_shared<Graph>();
-    script::parseIR(
+    parseIR(
         R"IR(
 graph():
-  %4 : Device? = prim::Constant()
-  %2 : int? = prim::Constant()
-  %0 : float = prim::Constant[value=1]()
-  %20 : bool = prim::Constant[value=0]()
-  %a : Tensor = aten::tensor(%0, %2, %4, %20)
+  %a : Tensor = prim::MakeTestTensor()
   %a_list : Tensor[] = prim::ListConstruct(%a)
-  %b : Tensor = aten::tensor(%0, %2, %4, %20)
+  %b : Tensor = prim::MakeTestTensor()
   %b_list : Tensor[] = prim::ListConstruct(%b)
   %13 : (Tensor[], Tensor[]) = prim::TupleConstruct(%a_list, %b_list)
   return (%13)
@@ -637,7 +681,7 @@ graph():
   // simple example
   {
     auto graph = std::make_shared<Graph>();
-    script::parseIR(
+    parseIR(
         R"IR(
 graph():
   %0 : Tensor = prim::Constant()
@@ -665,25 +709,48 @@ graph():
     AT_ASSERT(!aliasDb.mayContainAlias(second_st, tup_st));
   }
   {
+    auto graph = std::make_shared<Graph>();
+    std::unordered_map<std::string, Value*> vmap;
+    parseIR(
+        R"IR(
+  graph():
+    %x : str = prim::Constant[value="a"]()
+    %y : Tensor = prim::Constant()
+    %c : Tensor[] = prim::ListConstruct(%y)
+    %d : Tensor[] = prim::ListConstruct(%y)
+    return (%c, %d)
+    )IR",
+        &*graph,
+        vmap);
+
+    AliasDb aliasDb(graph);
+    auto x = vmap["x"];
+    auto c = vmap["c"];
+    AT_ASSERT(!aliasDb.mayContainAlias(x, c));
+    AT_ASSERT(!aliasDb.mayContainAlias(c, x));
+
+    auto d = vmap["d"];
+
+    AT_ASSERT(aliasDb.mayContainAlias(d, c));
+    AT_ASSERT(aliasDb.mayContainAlias(c, d));
+  }
+  {
     // Test list container aliasing
     auto graph = std::make_shared<Graph>();
     std::unordered_map<std::string, Value*> vmap;
-    script::parseIR(
+    parseIR(
         R"IR(
 graph():
-  %10 : bool? = prim::Constant()
-  %8 : Device? = prim::Constant()
-  %4 : int? = prim::Constant()
   %0 : int = prim::Constant[value=2]()
   %1 : int = prim::Constant[value=3]()
   %2 : int[] = prim::ListConstruct(%0, %1)
-  %x : Tensor = aten::rand(%2, %4, %4, %8, %10)
+  %x : Tensor = prim::MakeTestTensor()
   %12 : int[] = prim::ListConstruct(%0, %1)
-  %y : Tensor = aten::rand(%12, %4, %4, %8, %10)
+  %y : Tensor = prim::MakeTestTensor()
   %22 : int[] = prim::ListConstruct(%0, %1)
-  %z : Tensor = aten::rand(%22, %4, %4, %8, %10)
+  %z : Tensor = prim::MakeTestTensor()
   %32 : int[] = prim::ListConstruct(%0, %1)
-  %fresh : Tensor = aten::rand(%32, %4, %4, %8, %10)
+  %fresh : Tensor = prim::MakeTestTensor()
   %foo : Tensor[] = prim::ListConstruct(%x, %y)
   %43 : Tensor[] = aten::append(%foo, %z)
   return ()
@@ -713,16 +780,13 @@ graph():
 
     auto graph = std::make_shared<Graph>();
     std::unordered_map<std::string, Value*> vmap;
-    script::parseIR(
+    parseIR(
         R"IR(
 graph():
-  %10 : bool? = prim::Constant()
-  %8 : Device? = prim::Constant()
-  %4 : int? = prim::Constant()
   %0 : int = prim::Constant[value=2]()
   %1 : int = prim::Constant[value=3]()
   %2 : int[] = prim::ListConstruct(%0, %1)
-  %11 : Tensor = aten::rand(%2, %4, %4, %8, %10)
+  %11 : Tensor = prim::MakeTestTensor()
   %12 : Tensor[] = prim::ListConstruct(%11)
   %out : Tensor[] = custom::conservative(%12)
   %ret.2 : Tensor = aten::div(%11, %11)
@@ -747,24 +811,21 @@ graph():
     // print across it.
     auto graph = std::make_shared<Graph>();
     std::unordered_map<std::string, Value*> vmap;
-    script::parseIR(
+    parseIR(
         R"IR(
 graph():
   %35 : int = prim::Constant[value=1]()
-  %10 : bool? = prim::Constant()
-  %8 : Device? = prim::Constant()
-  %4 : int? = prim::Constant()
   %0 : int = prim::Constant[value=2]()
   %1 : int = prim::Constant[value=3]()
   %23 : int = prim::Constant[value=0]()
   %2 : int[] = prim::ListConstruct(%0, %1)
-  %11 : Tensor = aten::rand(%2, %4, %4, %8, %10)
+  %11 : Tensor = prim::MakeTestTensor()
   %12 : int[] = prim::ListConstruct(%0, %1)
-  %21 : Tensor = aten::rand(%12, %4, %4, %8, %10)
+  %21 : Tensor = prim::MakeTestTensor()
   %l : Tensor[] = prim::ListConstruct(%11, %21)
   %24 : Tensor = aten::select(%l, %23)
   %25 : int[] = prim::ListConstruct(%0, %1)
-  %34 : Tensor = aten::rand(%25, %4, %4, %8, %10)
+  %34 : Tensor = prim::MakeTestTensor()
   %36 : Tensor = aten::add_(%24, %34, %35)
   %37 : Tensor = uses::list(%l)
   return (%37)
@@ -789,25 +850,22 @@ graph():
     // print across it.
     auto graph = std::make_shared<Graph>();
     std::unordered_map<std::string, Value*> vmap;
-    script::parseIR(
+    parseIR(
         R"IR(
 graph():
   %38 : int = prim::Constant[value=1]()
-  %10 : bool? = prim::Constant()
-  %8 : Device? = prim::Constant()
-  %4 : int? = prim::Constant()
   %0 : int = prim::Constant[value=2]()
   %1 : int = prim::Constant[value=3]()
   %24 : int = prim::Constant[value=0]()
   %2 : int[] = prim::ListConstruct(%0, %1)
-  %11 : Tensor = aten::rand(%2, %4, %4, %8, %10)
+  %11 : Tensor = prim::MakeTestTensor()
   %12 : int[] = prim::ListConstruct(%0, %1)
-  %21 : Tensor = aten::rand(%12, %4, %4, %8, %10)
+  %21 : Tensor = prim::MakeTestTensor()
   %l : Tensor[] = prim::ListConstruct(%11, %21)
   %25 : Tensor = aten::select(%l, %24)
   %27 : Tensor = aten::select(%25, %24, %24)
   %28 : int[] = prim::ListConstruct(%0, %1)
-  %37 : Tensor = aten::rand(%28, %4, %4, %8, %10)
+  %37 : Tensor = prim::MakeTestTensor()
   %39 : Tensor = aten::add_(%27, %37, %38)
   %40 : Tensor = uses::list(%l)
   return (%40)
@@ -872,6 +930,94 @@ void testWildcards() {
     ASSERT_TRUE(aliasDb.writesToAlias(
         wildcardWrite, std::unordered_set<const Value*>{a}));
     ASSERT_TRUE(aliasDb.hasWriters(wildcard->node()));
+  }
+
+  // test that wildcards are correctly divided by type
+  {
+    auto graph = std::make_shared<Graph>();
+    std::unordered_map<std::string, Value*> vmap;
+    parseIR(
+        R"IR(
+  graph(%ten_list : Tensor[], %int_list : int[], %opt_ten_list : Tensor[]?):
+    %ten : Tensor = prim::Constant()
+    %4 : Tensor[] = aten::append(%ten_list, %ten)
+    %ten_ten_list : Tensor[][] = prim::Constant()
+    %int_int_list : int[][] = prim::Constant()
+    return ()
+    )IR",
+        &*graph,
+        vmap);
+    AliasDb aliasDb(graph);
+    auto opt_ten_list = vmap["opt_ten_list"];
+    auto ten_list = vmap["ten_list"];
+    auto int_list = vmap["int_list"];
+    AT_ASSERT(!aliasDb.hasWriters(int_list));
+    AT_ASSERT(aliasDb.hasWriters(opt_ten_list));
+    AT_ASSERT(aliasDb.hasWriters(ten_list));
+    AT_ASSERT(!aliasDb.mayContainAlias(int_list, opt_ten_list));
+    AT_ASSERT(aliasDb.mayContainAlias(ten_list, opt_ten_list));
+    AT_ASSERT(aliasDb.mayAlias(ten_list, opt_ten_list));
+
+    auto list_of_tensor_lists = vmap["ten_ten_list"];
+    AT_ASSERT(aliasDb.mayContainAlias(ten_list, list_of_tensor_lists));
+    AT_ASSERT(aliasDb.mayContainAlias(ten_list, vmap["ten"]));
+
+    AT_ASSERT(
+        !aliasDb.mayContainAlias(vmap["int_int_list"], list_of_tensor_lists));
+  }
+
+  // test invariant container aliasing
+  // the containers of different type cannot alias each other,
+  // however they may contain elements which alias each other
+  {
+    auto graph = std::make_shared<Graph>();
+    std::unordered_map<std::string, Value*> vmap;
+    parseIR(
+        R"IR(
+  graph(%ten_list : Tensor[], %ten_opt_list : Tensor?[]):
+    %ten : Tensor = prim::Constant()
+    %4 : Tensor[] = aten::append(%ten_list, %ten)
+    return ()
+    )IR",
+        &*graph,
+        vmap);
+    AliasDb aliasDb(graph);
+    auto ten_opt_list = vmap["ten_opt_list"];
+    auto ten_list = vmap["ten_list"];
+    AT_ASSERT(!aliasDb.hasWriters(ten_opt_list));
+    AT_ASSERT(aliasDb.hasWriters(ten_list));
+    AT_ASSERT(aliasDb.mayContainAlias(ten_list, ten_opt_list));
+    AT_ASSERT(!aliasDb.mayAlias(ten_list, ten_opt_list));
+  }
+
+  {
+    auto graph = std::make_shared<Graph>();
+    std::unordered_map<std::string, Value*> vmap;
+    parseIR(
+        R"IR(
+  graph(%float_3D : Float(*, *, *), %float_2D : Float(*, *)):
+    return ()
+    )IR",
+        &*graph,
+        vmap);
+    AliasDb aliasDb(graph);
+    AT_ASSERT(aliasDb.mayAlias(vmap["float_3D"], vmap["float_2D"]));
+  }
+
+  {
+    auto graph = std::make_shared<Graph>();
+    std::unordered_map<std::string, Value*> vmap;
+    parseIR(
+        R"IR(
+  graph(%float_3D_list : Float(*, *, *)[], %float_2D_list : Float(*, *)[], %ten: Tensor):
+    return ()
+    )IR",
+        &*graph,
+        vmap);
+    AliasDb aliasDb(graph);
+    AT_ASSERT(aliasDb.mayAlias(vmap["float_3D_list"], vmap["float_2D_list"]));
+    AT_ASSERT(aliasDb.mayContainAlias(vmap["float_3D_list"], vmap["ten"]));
+    AT_ASSERT(aliasDb.mayContainAlias(vmap["float_2D_list"], vmap["ten"]));
   }
 }
 
@@ -1021,29 +1167,42 @@ void testAliasRegistration() {
     ASSERT_TRUE(aliasDb.mayAlias(a, b));
   }
   {
+    auto registry = torch::RegisterOperators().op(
+        "foo::rand3(Tensor(a) arg1) -> Tensor(b)",
+        torch::RegisterOperators::options()
+            .catchAllKernel([](at::Tensor) -> at::Tensor {
+              return at::rand({2, 2});
+            })
+            .aliasAnalysis(AliasAnalysisKind::CONSERVATIVE));
+
+    const auto rand_op = Symbol::fromQualString("foo::rand3");
+    auto graph = std::make_shared<Graph>();
+    auto a = graph->addInput();
+    graph->insert(rand_op, {a});
+
+    // Registration time is okay, but throw exception when fetch from
+    // registration.
     expectThrows<c10::Error>(
-        [] {
-          torch::RegisterOperators().op(
-              "foo::rand3(Tensor(a) arg1) -> Tensor(b)",
-              torch::RegisterOperators::options()
-                  .catchAllKernel([](at::Tensor) -> at::Tensor {
-                    return at::rand({2, 2});
-                  })
-                  .aliasAnalysis(AliasAnalysisKind::CONSERVATIVE));
-        },
+        [&graph] { AliasDb aliasDb(graph); },
         "Tried to register operator foo::rand3(Tensor(a) arg1) -> (Tensor(b)) with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA");
   }
   {
+    auto registry = torch::RegisterOperators().op(
+        "foo::rand4(Tensor(a) arg1) -> Tensor(a)",
+        torch::RegisterOperators::options()
+            .catchAllKernel([](at::Tensor) -> at::Tensor {
+              return at::rand({2, 2});
+            })
+            .aliasAnalysis(AliasAnalysisKind::CONSERVATIVE));
+    const auto rand_op = Symbol::fromQualString("foo::rand4");
+    auto graph = std::make_shared<Graph>();
+    auto a = graph->addInput();
+    graph->insert(rand_op, {a});
+
+    // Registration time is okay, but throw exception when fetch from
+    // registration.
     expectThrows<c10::Error>(
-        [] {
-          torch::RegisterOperators().op(
-              "foo::rand4(Tensor(a) arg1) -> Tensor(a)",
-              torch::RegisterOperators::options()
-                  .catchAllKernel([](at::Tensor) -> at::Tensor {
-                    return at::rand({2, 2});
-                  })
-                  .aliasAnalysis(AliasAnalysisKind::CONSERVATIVE));
-        },
+        [&graph] { AliasDb aliasDb(graph); },
         "Tried to register operator foo::rand4(Tensor(a) arg1) -> (Tensor(a)) with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA");
   }
   {
@@ -1138,27 +1297,37 @@ void testAliasRegistration() {
     ASSERT_FALSE(aliasDb.mayAlias(a, b));
   }
   {
+    auto registry = torch::RegisterOperators().op(
+        "foo::rand11(Tensor(a) arg1) -> Tensor(a)",
+        torch::RegisterOperators::options()
+            .catchAllKernel([](at::Tensor t) -> at::Tensor { return t * 2; })
+            .aliasAnalysis(AliasAnalysisKind::PURE_FUNCTION));
+    const auto rand_op = Symbol::fromQualString("foo::rand11");
+    auto graph = std::make_shared<Graph>();
+    auto a = graph->addInput();
+    graph->insert(rand_op, {a});
+
+    // Registration time is okay, but throw exception when fetch from
+    // registration.
     expectThrows<c10::Error>(
-        [] {
-          torch::RegisterOperators().op(
-              "foo::rand11(Tensor(a) arg1) -> Tensor(a)",
-              torch::RegisterOperators::options()
-                  .catchAllKernel(
-                      [](at::Tensor t) -> at::Tensor { return t * 2; })
-                  .aliasAnalysis(AliasAnalysisKind::PURE_FUNCTION));
-        },
+        [&graph] { AliasDb aliasDb(graph); },
         "Tried to register operator foo::rand11(Tensor(a) arg1) -> (Tensor(a)) with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA");
   }
   {
+    auto registry = torch::RegisterOperators().op(
+        "foo::rand12(Tensor(a) arg1) -> Tensor(b)",
+        torch::RegisterOperators::options()
+            .catchAllKernel([](at::Tensor t) -> at::Tensor { return t * 2; })
+            .aliasAnalysis(AliasAnalysisKind::PURE_FUNCTION));
+    const auto rand_op = Symbol::fromQualString("foo::rand12");
+    auto graph = std::make_shared<Graph>();
+    auto a = graph->addInput();
+    graph->insert(rand_op, {a});
+
+    // Registration time is okay, but throw exception when fetch from
+    // registration.
     expectThrows<c10::Error>(
-        [] {
-          torch::RegisterOperators().op(
-              "foo::rand12(Tensor(a) arg1) -> Tensor(b)",
-              torch::RegisterOperators::options()
-                  .catchAllKernel(
-                      [](at::Tensor t) -> at::Tensor { return t * 2; })
-                  .aliasAnalysis(AliasAnalysisKind::PURE_FUNCTION));
-        },
+        [&graph] { AliasDb aliasDb(graph); },
         "Tried to register operator foo::rand12(Tensor(a) arg1) -> (Tensor(b)) with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA");
   }
 }
