@@ -9859,7 +9859,7 @@ class TestTorchDeviceType(TestCase):
             helper(self, device, dtype, lambda x: x, lambda t: t, lambda mean: mean)
 
     @dtypes(torch.float, torch.double)
-    @dtypesIfCUDA(torch.float, torch.double, torch.half, torch.bfloat16)
+    @dtypesIfCUDA(torch.float, torch.double, torch.half)
     def test_uniform_from_to(self, device, dtype):
         size = 2000
         alpha = 0.1
