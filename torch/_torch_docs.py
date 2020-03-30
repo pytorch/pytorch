@@ -1029,11 +1029,6 @@ returns it.
 Args:
     {input}
     {out}
-
-Example::
-
-    >>> torch.real(torch.tensor([-1 + 1j, -2 + 2j, 3 - 3j]))
-    tensor([ -1,  -2,  3])
 """.format(**common_args))
 
 add_docstr(torch.reciprocal,
@@ -2491,8 +2486,8 @@ add_docstr(torch.imag,
 imag(input, out=None) -> Tensor
 
 Returns the imaginary values of the given :attr:`input` tensor. If
-:attr:`input` is a real (non-complex) tensor this is equivalent to
-``torch.zeros_like(input)``.
+:attr:`input` is a real (non-complex) tensor it has no imaginary part
+and an error is raised.
 
 .. math::
     \text{out}_{i} = imag(\text{input}_{i})
@@ -2500,11 +2495,6 @@ Returns the imaginary values of the given :attr:`input` tensor. If
 Args:
     {input}
     {out}
-
-Example::
-
-    >>> torch.imag(torch.tensor([-1 + 1j, -2 + 2j, 3 - 3j]))
-    tensor([ 1,  2,  -3])
 """.format(**common_args))
 
 add_docstr(torch.index_select,
@@ -6844,9 +6834,9 @@ The inverse of this function is :func:`~torch.ifft`.
     monitor and control the cache.
 
 .. warning::
-    Due to limited dynamic range of half datatype, performing this operation 
-    in half precision may cause the first element of 
-    result to overflow for certain inputs. 
+    Due to limited dynamic range of half datatype, performing this operation
+    in half precision may cause the first element of
+    result to overflow for certain inputs.
 
 .. warning::
     For CPU tensors, this method is currently only available with MKL. Use
@@ -6944,8 +6934,8 @@ The inverse of this function is :func:`~torch.fft`.
     monitor and control the cache.
 
 .. warning::
-    Due to limited dynamic range of half datatype, performing this operation in half 
-    precision may cause the first element of result to overflow for certain inputs. 
+    Due to limited dynamic range of half datatype, performing this operation in half
+    precision may cause the first element of result to overflow for certain inputs.
 
 .. warning::
     For CPU tensors, this method is currently only available with MKL. Use
@@ -7032,8 +7022,8 @@ The inverse of this function is :func:`~torch.irfft`.
     monitor and control the cache.
 
 .. warning::
-    Due to limited dynamic range of half datatype, performing this operation in half 
-    precision may cause the first element of result to overflow for certain inputs. 
+    Due to limited dynamic range of half datatype, performing this operation in half
+    precision may cause the first element of result to overflow for certain inputs.
 
 .. warning::
     For CPU tensors, this method is currently only available with MKL. Use
@@ -7113,9 +7103,9 @@ The inverse of this function is :func:`~torch.rfft`.
     monitor and control the cache.
 
 .. warning::
-    Due to limited dynamic range of half datatype, performing this operation in half 
-    precision may cause the first element of result to overflow for certain inputs. 
-    
+    Due to limited dynamic range of half datatype, performing this operation in half
+    precision may cause the first element of result to overflow for certain inputs.
+
 .. warning::
     For CPU tensors, this method is currently only available with MKL. Use
     :func:`torch.backends.mkl.is_available` to check if MKL is installed.

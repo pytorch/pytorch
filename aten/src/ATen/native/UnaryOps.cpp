@@ -80,6 +80,11 @@ Tensor real(const Tensor& self) {
 
 Tensor imag(const Tensor& self) {
   TORCH_CHECK(!self.is_complex(), "Imag is not yet implemented for complex tensors.");
+  TORCH_CHECK(self.is_complex(),
+    "ValueError: input must be a complex tensor. ",
+    "Real (non-complex) tensors have no imaginary part.");
+
+  // Note: unreachable
   return at::zeros_like(self);
 }
 
