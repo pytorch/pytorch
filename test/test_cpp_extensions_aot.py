@@ -12,6 +12,7 @@ try:
     import torch_test_cpp_extension.cpp as cpp_extension
     import torch_test_cpp_extension.msnpu as msnpu_extension
     import torch_test_cpp_extension.rng as rng_extension
+    import torch_test_cpp_extension.csprng as csprng_extension
 except ImportError:
     raise RuntimeError(
         "test_cpp_extensions_aot.py cannot be invoked directly. Run "
@@ -144,6 +145,10 @@ class TestMSNPUTensor(common.TestCase):
 
 class TestRNGExtension(common.TestCase):
 
+    def setUp(self):
+        super(TestRNGExtension, self).setUp()
+        rng_extension.registerOps()
+
     def test_rng(self):
         fourty_two = torch.full((10,), 42, dtype=torch.int64)
 
@@ -172,6 +177,32 @@ class TestRNGExtension(common.TestCase):
         self.assertEqual(rng_extension.getInstanceCount(), 1)
         del copy2
         self.assertEqual(rng_extension.getInstanceCount(), 0)
+
+
+class TestMT19937_AES_CUDAGenerator(common.TestCase):
+
+    def setUp(self):
+        super(TestMT19937_AES_CUDAGenerator, self).setUp()
+        csprng_extension.registerOps()
+
+    def test_csprng(self):
+        gen = csprng_extension.create_MT19937_AES_CUDAGenerator()
+        s = torch.zeros(20, 20, dtype=torch.uint8, device='cuda')
+        t = s[:, 7]
+        self.assertFalse(t.is_contiguous())
+        t.random_(generator=gen)
+        t = s[7, :]
+        self.assertTrue(t.is_contiguous())
+        t.random_(generator=gen)
+        print(s)
+
+    def test_csprng2(self):
+        gen = csprng_extension.create_MT19937_AES_CUDAGenerator()
+        for dtype in [torch.bool, torch.uint8, torch.int8, torch.int16, 
+                      torch.int32, torch.int64, torch.float, torch.double]:
+            t = torch.empty(10, dtype=dtype, device='cuda').random_(generator=gen)
+            print(t)
+
 
 if __name__ == "__main__":
     common.run_tests()
