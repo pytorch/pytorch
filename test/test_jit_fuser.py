@@ -300,6 +300,7 @@ class TestFuser(JitTestCase):
 
         funcs = (func2, funcInf, funcOptMin, funcOptMax)
         for f, inputs in product(funcs, [[a, b], [a, nan]]):
+            f.__disable_jit_function_caching__ = True
             inp1, inp2 = inputs
             s = self.checkScript(f, (inp1, inp2), profiling=ProfilingMode.PROFILING)
             self.assertAllFused(s.graph_for(inp1, inp2), except_for={'aten::size', 'aten::_size_if_not_equal'})
