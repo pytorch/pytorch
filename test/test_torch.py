@@ -16507,6 +16507,7 @@ torch_op_tests = [_TorchMathTestMeta('sin'),
                   _TorchMathTestMeta('sqrt'),
                   _TorchMathTestMeta('erf', reffn=scipy.special.erf, ref_decorator='scipy'),
                   _TorchMathTestMeta('erfc', reffn=scipy.special.erfc, ref_decorator='scipy'),
+                  # TODO inplace variants fail for these
                   _TorchMathTestMeta('exp', make_inplace=False),
                   _TorchMathTestMeta('expm1', make_inplace=False),
                   _TorchMathTestMeta('floor'),
