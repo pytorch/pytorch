@@ -62,14 +62,23 @@
     (PyBool_Check(object) ? object :                                           \
     (throw std::runtime_error("Could not parse real"), Py_False))
 
+#define THPUtils_unpackReal_COMPLEX(object)                                       \
+    (PyComplex_Check(object) ? object :                                           \
+    (throw std::runtime_error("Could not parse real"), PyComplex_FromDoubles(0,0)
+
 #define THPUtils_checkReal_BOOL(object)                                        \
     PyBool_Check(object)
+
+#define THPUtils_checkReal_COMPLEX(object)                                        \
+    PyComplex_Check(object)
 
 #define THPUtils_newReal_FLOAT(value) PyFloat_FromDouble(value)
 // TODO: handle int overflows for py2
 #define THPUtils_newReal_INT(value) PyInt_FromLong(value)
 
 #define THPUtils_newReal_BOOL(value) PyBool_FromLong(value)
+
+#define THPUtils_newReal_COMPLEX(value) PyComplex_AsCComplex(value)
 
 #define THPDoubleUtils_checkReal(object)      THPUtils_checkReal_FLOAT(object)
 #define THPDoubleUtils_unpackReal(object)     (double)THPUtils_unpackReal_FLOAT(object)

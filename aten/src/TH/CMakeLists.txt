@@ -61,12 +61,15 @@ install(FILES
   THGenerateDoubleType.h
   THGenerateFloatType.h
   THGenerateHalfType.h
+  THGenerateComplexFloatType.h
+  THGenerateComplexDoubleType.h
   THGenerateLongType.h
   THGenerateIntType.h
   THGenerateShortType.h
   THGenerateCharType.h
   THGenerateByteType.h
   THGenerateFloatTypes.h
+  THGenerateComplexTypes.h
   THGenerateIntTypes.h
   THGenerateQUInt8Type.h
   THGenerateQInt8Type.h
