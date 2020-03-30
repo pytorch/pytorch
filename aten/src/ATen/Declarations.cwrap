@@ -1,24 +1,4 @@
 [[
-  name: _th_set_
-  cname: set
-  variants: function
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
-  cpu_bfloat16: True
-  cuda_bfloat16: True
-  device_guard: False
-  return: argument 0
-  options:
-    - cname: setStorage
-      arguments:
-        - THTensor* self
-        - THStorage* source
-        - long storage_offset
-        - IntArrayRefSize size
-        - IntArrayRef stride
-]]
-[[
   name: _th_masked_fill_
   cuda_bool: True
   cuda_bfloat16: True
@@ -279,8 +259,9 @@
 ]]
 [[
   name: _th_min
-  cpu_bool: True
   cuda_bool: True
+  backends:
+    - CUDA
   variants: function
   options:
     - cname: min
@@ -309,8 +290,9 @@
 ]]
 [[
   name: _th_max
-  cpu_bool: True
   cuda_bool: True
+  backends:
+    - CUDA
   variants: function
   options:
     - cname: max
@@ -356,6 +338,7 @@
 [[
   name: _th_topk
   cname: topk
+  cuda_bfloat16: True
   backends:
     - CUDA
   variants:
@@ -723,6 +706,8 @@
       output: True
     - THTensor* self
     - long diagonal
+  backends:
+    - CUDA
 ]]
 [[
   name: _th_addmm
@@ -840,25 +825,6 @@
     - THTensor* vec
     - CONSTANT AS_REAL(0)
     - CONSTANT AS_REAL(1)
-]]
-[[
-  name: _th_mm
-  cuda_bfloat16: True
-  variants: function
-  backends:
-    - CUDA
-  return: argument 0
-  options:
-    - cname: addmm
-      arguments:
-        - arg: THTensor* result
-          output: True
-          resize: [ [self, 0], [mat2,1] ]
-        - argument 0
-        - THTensor* self
-        - THTensor* mat2
-        - CONSTANT AS_REAL(0)
-        - CONSTANT AS_REAL(1)
 ]]
 [[
   name: _th_bmm
@@ -1078,7 +1044,7 @@
     - THTensor* q
     - THIndexTensor* J
     - long num_samples
-    - THGenerator* generator
+    - Generator generator
 ]]
 [[
   name: _th_uniform_
@@ -1093,7 +1059,7 @@
     - THTensor* self
     - double from
     - double to
-    - THGenerator* generator
+    - Generator generator
 ]]
 
 [[

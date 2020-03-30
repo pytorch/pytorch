@@ -152,6 +152,9 @@ def SetPreLoadBlobs(meta_net_def, pre_load_blobs):
     for blob in pre_load_blobs:
         meta_net_def.preLoadBlobs.append(blob)
 
+def SetTensorBoundShapes(meta_net_def, tensor_bound_shapes):
+    meta_net_def.tensorBoundShapes.CopyFrom(tensor_bound_shapes)
+
 def GetArgumentByName(net_def, arg_name):
     for arg in net_def.arg:
         if arg.name == arg_name:

@@ -262,7 +262,7 @@ class TestAdam(hu.HypothesisTestCase):
            epsilon=st.floats(min_value=0.01, max_value=0.99,
                              allow_nan=False, allow_infinity=False),
            data_strategy=st.data(),
-           **hu.gcs)
+               **hu.gcs_cpu_only)
     def test_row_wise_sparse_adam(self, inputs, ITER, LR, beta1, beta2, epsilon,
                                   data_strategy, gc, dc):
         param, mom1, grad = inputs
@@ -321,12 +321,6 @@ class TestAdam(hu.HypothesisTestCase):
         # Iter lives on the CPU
         input_device_options = {'iter': hu.cpu_do}
 
-        self.assertDeviceChecks(
-            dc, op,
-            [param, mom1, mom2, indices, grad, LR, ITER],
-            [0, 1, 2],
-            input_device_options=input_device_options)
-
         self.assertReferenceChecks(
             gc, op,
             [param, mom1, mom2, indices, grad, LR, ITER],
@@ -344,7 +338,7 @@ class TestAdam(hu.HypothesisTestCase):
            epsilon=st.floats(min_value=0.01, max_value=0.99,
                              allow_nan=False, allow_infinity=False),
            data_strategy=st.data(),
-           **hu.gcs)
+               **hu.gcs_cpu_only)
     def test_row_wise_sparse_adam_output_grad(self, inputs, ITER, LR, beta1, beta2,
                                   epsilon, data_strategy, gc, dc):
         param, mom1, grad = inputs
@@ -405,12 +399,6 @@ class TestAdam(hu.HypothesisTestCase):
 
         # Iter lives on the CPU
         input_device_options = {'iter': hu.cpu_do}
-
-        self.assertDeviceChecks(
-            dc, op,
-            [param, mom1, mom2, indices, grad, LR, ITER],
-            [0, 1, 2, 3],
-            input_device_options=input_device_options)   
 
         self.assertReferenceChecks(
             gc, op,

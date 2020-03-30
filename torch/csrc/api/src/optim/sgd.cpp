@@ -98,22 +98,6 @@ Tensor SGD::step(LossClosure closure)  {
   return loss;
 }
 
-void SGD::add_parameters(const std::vector<Tensor>& parameters) {
-  return _add_parameters_new_design(parameters);
-}
-
-const std::vector<Tensor>& SGD::parameters() const noexcept {
-  return _parameters_new_design();
-}
-
-std::vector<Tensor>& SGD::parameters() noexcept {
-  return _parameters_new_design();
-}
-
-size_t SGD::size() const noexcept {
-  return _size_new_design();
-}
-
 void SGD::save(serialize::OutputArchive& archive) const {
   serialize(*this, archive);
 }

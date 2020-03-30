@@ -26,7 +26,7 @@ bool test_optimizer_xor(Options options) {
       Linear(8, 1),
       Functional(torch::sigmoid));
 
-  const int64_t kBatchSize = 4;
+  const int64_t kBatchSize = 50;
   const int64_t kMaximumNumberOfEpochs = 3000;
 
   OptimizerClass optimizer(model->parameters(), options);
@@ -40,13 +40,21 @@ bool test_optimizer_xor(Options options) {
       inputs[i] = torch::randint(2, {2}, torch::kInt64);
       labels[i] = inputs[i][0].item<int64_t>() ^ inputs[i][1].item<int64_t>();
     }
-    inputs.set_requires_grad(true);
-    optimizer.zero_grad();
-    auto x = model->forward(inputs);
-    torch::Tensor loss = torch::binary_cross_entropy(x, labels);
-    loss.backward();
 
-    optimizer.step();
+    inputs.set_requires_grad(true);
+
+    auto step = [&](OptimizerClass& optimizer, Sequential model, torch::Tensor inputs, torch::Tensor labels) {
+      auto closure = [&]() {
+        optimizer.zero_grad();
+        auto x = model->forward(inputs);
+        auto loss = torch::binary_cross_entropy(x, labels);
+        loss.backward();
+        return loss;
+      };
+      return optimizer.step(closure);
+    };
+
+    torch::Tensor loss = step(optimizer, model, inputs, labels);
 
     running_loss = running_loss * 0.99 + loss.item<float>() * 0.01;
     if (epoch > kMaximumNumberOfEpochs) {
@@ -166,36 +174,77 @@ TEST(OptimTest, OptimizerAccessors) {
   optimizer_.state();
 }
 
-TEST(OptimTest, BasicInterface) {
+#define OLD_INTERFACE_WARNING_CHECK(func) \
+{ \
+  std::stringstream buffer;\
+  torch::test::CerrRedirect cerr_redirect(buffer.rdbuf());\
+  func;\
+  ASSERT_EQ(\
+    torch::test::count_substr_occurrences(\
+      buffer.str(),\
+      "will be removed"\
+    ),\
+  1);\
+}
+
+struct MyOptimizerOptions : public OptimizerCloneableOptions<MyOptimizerOptions> {
+  MyOptimizerOptions(double lr = 1.0) : lr_(lr) {};
+  TORCH_ARG(double, lr) = 1.0;
+};
+
+TEST(OptimTest, OldInterface) {
   struct MyOptimizer : Optimizer {
     using Optimizer::Optimizer;
     torch::Tensor step(LossClosure closure = nullptr) override { return {};}
+    explicit MyOptimizer(
+        std::vector<at::Tensor> params, MyOptimizerOptions defaults = {}) :
+          Optimizer({std::move(OptimizerParamGroup(params))}, std::make_unique<MyOptimizerOptions>(defaults)) {}
   };
   std::vector<torch::Tensor> parameters = {
       torch::ones({2, 3}), torch::zeros({2, 3}), torch::rand({2, 3})};
   {
     MyOptimizer optimizer(parameters);
-    ASSERT_EQ(optimizer.size(), parameters.size());
+    size_t size;
+    OLD_INTERFACE_WARNING_CHECK(size = optimizer.size());
+    ASSERT_EQ(size, parameters.size());
   }
   {
-    MyOptimizer optimizer;
-    ASSERT_EQ(optimizer.size(), 0);
-    optimizer.add_parameters(parameters);
-    ASSERT_EQ(optimizer.size(), parameters.size());
-    for (size_t p = 0; p < parameters.size(); ++p) {
-      ASSERT_TRUE(optimizer.parameters()[p].allclose(parameters[p]));
+    std::vector<at::Tensor> params;
+    MyOptimizer optimizer(params);
+
+    size_t size;
+    OLD_INTERFACE_WARNING_CHECK(size = optimizer.size());
+    ASSERT_EQ(size, 0);
+
+    OLD_INTERFACE_WARNING_CHECK(optimizer.add_parameters(parameters));
+
+    OLD_INTERFACE_WARNING_CHECK(size = optimizer.size());
+    ASSERT_EQ(size, parameters.size());
+
+    std::vector<torch::Tensor> params_;
+    OLD_INTERFACE_WARNING_CHECK(params_ = optimizer.parameters());
+    for (size_t p = 0; p < size; ++p) {
+      ASSERT_TRUE(params_[p].allclose(parameters[p]));
     }
   }
   {
     Linear linear(3, 4);
     MyOptimizer optimizer(linear->parameters());
-    ASSERT_EQ(optimizer.size(), linear->parameters().size());
+
+    size_t size;
+    OLD_INTERFACE_WARNING_CHECK(size = optimizer.size());
+    ASSERT_EQ(size, linear->parameters().size());
   }
 }
 
 TEST(OptimTest, XORConvergence_SGD) {
   ASSERT_TRUE(test_optimizer_xor<SGD>(
       SGDOptions(0.1).momentum(0.9).nesterov(true).weight_decay(1e-6)));
+}
+
+TEST(OptimTest, XORConvergence_LBFGS) {
+  ASSERT_TRUE(test_optimizer_xor<LBFGS>(LBFGSOptions(1.0)));
+  ASSERT_TRUE(test_optimizer_xor<LBFGS>(LBFGSOptions(1.0).line_search_fn("strong_wolfe")));
 }
 
 TEST(OptimTest, XORConvergence_Adagrad) {
@@ -375,7 +424,7 @@ TEST(OptimTest, AddParameter_LBFGS) {
   }
 
   LBFGS optimizer(std::vector<torch::Tensor>{}, 1.0);
-  optimizer.add_parameters(parameters);
+  OLD_INTERFACE_WARNING_CHECK(optimizer.add_parameters(parameters));
 
   optimizer.step([]() { return torch::tensor(1); });
 
