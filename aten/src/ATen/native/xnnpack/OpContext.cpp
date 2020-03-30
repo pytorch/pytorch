@@ -7,7 +7,7 @@ namespace at {
 namespace native {
 namespace xnnpack {
 
-c10::intrusive_ptr<XNNPackLinearOpContext>
+c10::intrusive_ptr<LinearOpContext>
 XNNPackLinearOpContext::create_context(
     at::Tensor&& weight,
     c10::optional<at::Tensor>&& bias,
@@ -20,13 +20,19 @@ XNNPackLinearOpContext::create_context(
           xnnpack::internal::linear::create(
               weight,
               bias,
-              output_min ? *output_min : xnnpack::ContextLinear::kMin,
-              output_max ? *output_max : xnnpack::ContextLinear::kMax)
+              output_min ? static_cast<float>(*output_min)
+                         : xnnpack::ContextLinear::kMin,
+              output_max ? static_cast<float>(*output_max)
+                         : xnnpack::ContextLinear::kMax)
           );
   return linear_op_context;
 }
 
-c10::intrusive_ptr<XNNPackConv2dOpContext>
+Tensor XNNPackLinearOpContext::run(const Tensor& input) {
+  return xnnpack::internal::linear::run(op_context_, input);
+}
+
+c10::intrusive_ptr<Conv2dOpContext>
 XNNPackConv2dOpContext::create_context(at::Tensor&& weight,
     c10::optional<at::Tensor>&& bias,
     std::vector<int64_t>&& padding,
@@ -43,8 +49,10 @@ XNNPackConv2dOpContext::create_context(at::Tensor&& weight,
           stride,
           dilation,
           groups,
-          output_min ? *output_min : xnnpack::ContextConv2D::kMin,
-          output_max ? *output_max : xnnpack::ContextConv2D::kMax);
+          output_min ? static_cast<float>(*output_min)
+                     : xnnpack::ContextConv2D::kMin,
+          output_max ? static_cast<float>(*output_max)
+                     : xnnpack::ContextConv2D::kMax);
   auto conv2d_op_context =
       c10::make_intrusive<XNNPackConv2dOpContext>(
           std::move(weight),
@@ -57,8 +65,12 @@ XNNPackConv2dOpContext::create_context(at::Tensor&& weight,
   return conv2d_op_context;
 }
 
-} // xnnpack
-} // native
-} // at
+Tensor XNNPackConv2dOpContext::run(const Tensor& input) {
+  return xnnpack::internal::convolution2d::run(op_context_, input);
+}
+
+} // namespace xnnpack
+} // namespace native
+} // namespace at
 
 #endif /* USE_XNNPACK */

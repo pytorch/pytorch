@@ -268,9 +268,9 @@ namespace functional {
 /// Example:
 /// ```
 /// namespace F = torch::nn::functional;
-/// F::multilabel_margin_loss(input, target, F::MultiLabelMarginLossFuncOptions(torch::kNone));
+/// F::multilabel_margin_loss(input, target, F::MultilabelMarginLossFuncOptions(torch::kNone));
 /// ```
-using MultiLabelMarginLossFuncOptions = MultiLabelMarginLossOptions;
+using MultilabelMarginLossFuncOptions = MultiLabelMarginLossOptions;
 } // namespace functional
 
 // ============================================================================
@@ -339,9 +339,9 @@ namespace functional {
 /// Example:
 /// ```
 /// namespace F = torch::nn::functional;
-/// F::multilabel_soft_margin_loss(input, target, F::MultiLabelSoftMarginLossFuncOptions().reduction(torch::kNone).weight(weight));
+/// F::multilabel_soft_margin_loss(input, target, F::MultilabelSoftMarginLossFuncOptions().reduction(torch::kNone).weight(weight));
 /// ```
-using MultiLabelSoftMarginLossFuncOptions = MultiLabelSoftMarginLossOptions;
+using MultilabelSoftMarginLossFuncOptions = MultiLabelSoftMarginLossOptions;
 } // namespace functional
 
 // ============================================================================

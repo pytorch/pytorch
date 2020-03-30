@@ -11,6 +11,7 @@ namespace at {
 namespace native {
 
 DEFINE_DISPATCH(qbatch_norm_stub);
+DEFINE_DISPATCH(qbatch_norm_relu_stub);
 
 namespace {
 void compute_fused_params(
@@ -81,10 +82,12 @@ Tensor q_batch_norm_impl(
   auto qx_nhwc = qx.contiguous(MemoryFormat::ChannelsLast);
   Tensor qy = at::_empty_affine_quantized(
       oSizes,
-      at::device(kCPU).dtype(qx_nhwc.scalar_type()),
+      at::device(kCPU)
+        .dtype(qx_nhwc.scalar_type())
+        .memory_format(MemoryFormat::ChannelsLast),
       output_scale,
       output_zero_point,
-      MemoryFormat::ChannelsLast);
+      c10::nullopt);
 
   compute_fused_params(
       C,
@@ -97,18 +100,31 @@ Tensor q_batch_norm_impl(
       output_scale,
       alpha_data,
       beta_data);
-
-  qbatch_norm_stub(
-      qx.device().type(),
-      N,
-      C,
-      H * W,
-      qx.q_zero_point(),
-      output_zero_point,
-      qx_nhwc,
-      alpha,
-      beta,
-      qy);
+  if (ReluFused) {
+    qbatch_norm_relu_stub(
+        qx.device().type(),
+        N,
+        C,
+        H * W,
+        qx.q_zero_point(),
+        output_zero_point,
+        qx_nhwc,
+        alpha,
+        beta,
+        qy);
+  } else {
+    qbatch_norm_stub(
+        qx.device().type(),
+        N,
+        C,
+        H * W,
+        qx.q_zero_point(),
+        output_zero_point,
+        qx_nhwc,
+        alpha,
+        beta,
+        qy);
+  }
   return qy;
 }
 
@@ -156,10 +172,12 @@ Tensor q_batch_norm3d_impl(
   auto qx_nhwc = qx.contiguous(MemoryFormat::ChannelsLast3d);
   Tensor qy = at::_empty_affine_quantized(
       oSizes,
-      at::device(kCPU).dtype(qx_nhwc.scalar_type()),
+      at::device(kCPU)
+        .dtype(qx_nhwc.scalar_type())
+        .memory_format(MemoryFormat::ChannelsLast3d),
       output_scale,
       output_zero_point,
-      MemoryFormat::ChannelsLast3d);
+      c10::nullopt);
 
   compute_fused_params(
       C,
@@ -173,18 +191,31 @@ Tensor q_batch_norm3d_impl(
       alpha_data,
       beta_data);
 
-  qbatch_norm_stub(
-      qx.device().type(),
-      N,
-      C,
-      D * H * W,
-      qx.q_zero_point(),
-      output_zero_point,
-      qx_nhwc,
-      alpha,
-      beta,
-      qy);
-
+  if (ReluFused) {
+    qbatch_norm_relu_stub(
+        qx.device().type(),
+        N,
+        C,
+        D * H * W,
+        qx.q_zero_point(),
+        output_zero_point,
+        qx_nhwc,
+        alpha,
+        beta,
+        qy);
+  } else {
+    qbatch_norm_stub(
+        qx.device().type(),
+        N,
+        C,
+        D * H * W,
+        qx.q_zero_point(),
+        output_zero_point,
+        qx_nhwc,
+        alpha,
+        beta,
+        qy);
+  }
   return qy;
 }
 
