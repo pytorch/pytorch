@@ -9,7 +9,7 @@ def add_docstr_all(method, docstr):
     add_docstr(getattr(torch._C._TensorBase, method), docstr)
 
 common_args = parse_kwargs("""
-    memory_format (:class:`torch.memory_format`, optional): the desired memory format of 
+    memory_format (:class:`torch.memory_format`, optional): the desired memory format of
         returned Tensor. Default: ``torch.preserve_format``.
 """)
 
@@ -745,7 +745,7 @@ type as :attr:`self`.
     Unlike `copy_()`, this function is recorded in the computation graph. Gradients
     propagating to the cloned tensor will propagate to the original tensor.
 
-Args: 
+Args:
     {memory_format}
 """.format(**common_args))
 
@@ -754,11 +754,11 @@ add_docstr_all('contiguous',
 contiguous(memory_format=torch.contiguous_format) -> Tensor
 
 Returns a contiguous in memory tensor containing the same data as :attr:`self` tensor. If
-:attr:`self` tensor is already in the specified memory format, this function returns the 
+:attr:`self` tensor is already in the specified memory format, this function returns the
 :attr:`self` tensor.
 
-Args: 
-    memory_format (:class:`torch.memory_format`, optional): the desired memory format of 
+Args:
+    memory_format (:class:`torch.memory_format`, optional): the desired memory format of
         returned Tensor. Default: ``torch.contiguous_format``.
 """)
 
@@ -1182,13 +1182,6 @@ flip(dims) -> Tensor
 See :func:`torch.flip`
 """)
 
-add_docstr_all('real',
-               r"""
-real() -> Tensor
-
-See :func:`torch.real`
-""")
-
 add_docstr_all('roll',
                r"""
 roll(shifts, dims) -> Tensor
@@ -1283,13 +1276,6 @@ add_docstr_all('ger',
 ger(vec2) -> Tensor
 
 See :func:`torch.ger`
-""")
-
-add_docstr_all('imag',
-               r"""
-imag() -> Tensor
-
-See :func:`torch.imag`
 """)
 
 add_docstr_all('indices',
@@ -1538,11 +1524,11 @@ add_docstr_all('is_contiguous',
                r"""
 is_contiguous(memory_format=torch.contiguous_format) -> bool
 
-Returns True if :attr:`self` tensor is contiguous in memory in the order specified 
+Returns True if :attr:`self` tensor is contiguous in memory in the order specified
 by memory format.
 
-Args: 
-    memory_format (:class:`torch.memory_format`, optional): Specifies memory allocation 
+Args:
+    memory_format (:class:`torch.memory_format`, optional): Specifies memory allocation
         order. Default: ``torch.contiguous_format``.
 """)
 
@@ -2367,8 +2353,8 @@ memory is uninitialized.
 
 Args:
     sizes (torch.Size or int...): the desired size
-    memory_format (:class:`torch.memory_format`, optional): the desired memory format of 
-        Tensor. Default: ``torch.contiguous_format``. Note that memory format of 
+    memory_format (:class:`torch.memory_format`, optional): the desired memory format of
+        Tensor. Default: ``torch.contiguous_format``. Note that memory format of
         :attr:`self` is going to be unaffected if ``self.size()`` matches ``sizes``.
 
 Example::
@@ -2387,8 +2373,8 @@ Resizes the :attr:`self` tensor to be the same size as the specified
 :attr:`tensor`. This is equivalent to ``self.resize_(tensor.size())``.
 
 Args:
-    memory_format (:class:`torch.memory_format`, optional): the desired memory format of 
-        Tensor. Default: ``torch.contiguous_format``. Note that memory format of 
+    memory_format (:class:`torch.memory_format`, optional): the desired memory format of
+        Tensor. Default: ``torch.contiguous_format``. Note that memory format of
         :attr:`self` is going to be unaffected if ``self.size()`` matches ``tensor.size()``.
 
 """)
