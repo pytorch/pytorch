@@ -1019,7 +1019,9 @@ add_docstr(torch.real,
            r"""
 real(input, out=None) -> Tensor
 
-Computes the element-wise real value of the given :attr:`input` tensor.
+Returns the real values of the given :attr:`input` tensor. If
+:attr:`input` is a real (non-complex) tensor, this function just
+returns it.
 
 .. math::
     \text{out}_{i} = real(\text{input}_{i})
@@ -2488,7 +2490,9 @@ add_docstr(torch.imag,
            r"""
 imag(input, out=None) -> Tensor
 
-Computes the element-wise imag value of the given :attr:`input` tensor.
+Returns the imaginary values of the given :attr:`input` tensor. If
+:attr:`input` is a real (non-complex) tensor this is equivalent to
+``torch.zeros_like(input)``.
 
 .. math::
     \text{out}_{i} = imag(\text{input}_{i})
