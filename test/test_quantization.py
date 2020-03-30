@@ -14,7 +14,7 @@ from torch.quantization import \
     default_dynamic_qconfig, per_channel_dynamic_qconfig, HistogramObserver, MinMaxObserver, \
     PerChannelMinMaxObserver, RecordingObserver, MovingAverageMinMaxObserver, \
     MovingAveragePerChannelMinMaxObserver, QuantWrapper, default_eval_fn, \
-    float16_dynamic_qconfig
+    float16_dynamic_qconfig, MinMaxDynamicQuantObserver
 
 from torch.quantization import QConfig
 from torch.quantization import default_histogram_observer
@@ -38,6 +38,8 @@ from torch.testing._internal.common_quantization import QuantizationTestCase, \
 
 from torch.testing._internal.common_quantization import AnnotatedTwoLayerLinearModel, AnnotatedNestedModel, \
     AnnotatedSubNestedModel, AnnotatedCustomConfigNestedModel
+from torch.testing._internal.common_quantization import AnnotatedSkipQuantModel
+
 from torch.testing._internal.common_quantized import override_quantized_engine
 from hypothesis import given
 from hypothesis import strategies as st
@@ -242,7 +244,7 @@ class EagerModePostTrainingQuantTest(QuantizationTestCase):
         r"""The case when we want to skip quantizing some layers
         """
 
-        model = SkipQuantModel()
+        model = AnnotatedSkipQuantModel()
         model = prepare(model)
         self.checkObservers(model)
 
@@ -254,13 +256,14 @@ class EagerModePostTrainingQuantTest(QuantizationTestCase):
             self.checkQuantDequant(model.sub)
             self.checkQuantizedLinear(model.sub.module.fc1)
             self.checkQuantizedLinear(model.sub.module.fc2)
-            self.assertEqual(type(model.sub.module.relu), nnq.ReLU)
+            self.assertEqual(type(model.sub.module.relu1), nnq.ReLU)
+            self.assertEqual(type(model.sub.module.relu2), nnq.ReLU)
             self.checkScriptable(model, self.calib_data)
 
         checkQuantized(model)
 
         # test one line API
-        model = quantize(SkipQuantModel(), test_only_eval_fn, self.calib_data)
+        model = quantize(AnnotatedSkipQuantModel(), test_only_eval_fn, self.calib_data)
         checkQuantized(model)
 
 
@@ -1045,6 +1048,38 @@ class GraphModePostTrainingQuantTest(QuantizationTestCase):
                 inplace=False)
             self.assertEqual(model_quantized(self.calib_data[0][0]), result_eager)
 
+    def test_skip_quant(self):
+        """ Test None qconfig
+        """
+        # Eager mode
+        eager_model = AnnotatedSkipQuantModel().eval()
+
+        # Graph mode
+        script_model = SkipQuantModel().eval()
+        # Copy weights for eager_model
+        script_model.sub.fc1.weight = torch.nn.Parameter(eager_model.sub.module.fc1.weight.detach())
+        script_model.sub.fc1.bias = torch.nn.Parameter(eager_model.sub.module.fc1.bias.detach())
+        script_model.sub.fc2.weight = torch.nn.Parameter(eager_model.sub.module.fc2.weight.detach())
+        script_model.sub.fc2.bias = torch.nn.Parameter(eager_model.sub.module.fc2.bias.detach())
+        script_model.fc.weight = torch.nn.Parameter(eager_model.fc.weight.detach())
+        script_model.fc.bias = torch.nn.Parameter(eager_model.fc.bias.detach())
+
+        model_eager = quantize(eager_model, test_only_eval_fn, self.calib_data)
+        qconfig_dict = {
+            '': default_qconfig,
+            'fc': None
+        }
+        model_traced = torch.jit.trace(script_model, self.calib_data[0][0])
+        model_script = torch.jit.script(script_model)
+        result_eager = model_eager(self.calib_data[0][0])
+        for model_under_test in [model_traced, model_script]:
+            model_quantized = quantize_script(
+                model_under_test,
+                qconfig_dict,
+                test_only_eval_fn,
+                [self.calib_data],
+                inplace=False)
+            self.assertEqual(model_quantized(self.calib_data[0][0]), result_eager)
 
 class FunctionalModuleTest(QuantizationTestCase):
     # Histogram Observers are slow, so have no-deadline to ensure test doesn't time out
@@ -1353,6 +1388,26 @@ class ObserverTest(QuantizationTestCase):
             self.assertEqual(myobs.max_val, loaded_obs.max_val)
             self.assertEqual(myobs.calculate_qparams(), loaded_obs.calculate_qparams())
 
+
+    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=2, max_dims=4,
+                                              min_side=1, max_side=10),
+                       qparams=hu.qparams()),
+           reduce_range=st.booleans())
+    def test_per_tensor_dynamic_quant_observers(self, X, reduce_range):
+
+        X, (scale, zero_point, torch_type) = X
+        x = torch.from_numpy(X)
+
+        obs = MinMaxDynamicQuantObserver(dtype=torch.quint8, reduce_range=reduce_range)
+
+        result = obs(x)
+        qparams = obs.calculate_qparams()
+        ref = torch._choose_qparams_per_tensor(x, reduce_range)
+
+        self.assertEqual(ref[0], qparams[0])
+        self.assertEqual(ref[1], qparams[1])
+
+
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
            qscheme=st.sampled_from((torch.per_channel_affine, torch.per_channel_symmetric)),
            ch_axis=st.sampled_from((0, 1, 2, 3)), reduce_range=st.booleans())
@@ -1448,7 +1503,7 @@ class ObserverTest(QuantizationTestCase):
             self.assertEqual(myobs.calculate_qparams(), loaded_obs.calculate_qparams())
 
     def test_observer_scriptable(self):
-        obs_list = [MinMaxObserver(), MovingAverageMinMaxObserver()]
+        obs_list = [MinMaxObserver(), MovingAverageMinMaxObserver(), MinMaxDynamicQuantObserver()]
         for obs in obs_list:
             scripted = torch.jit.script(obs)
 
