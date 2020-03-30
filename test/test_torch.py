@@ -9858,6 +9858,58 @@ class TestTorchDeviceType(TestCase):
         else:
             helper(self, device, dtype, lambda x: x, lambda t: t, lambda mean: mean)
 
+    @dtypes(torch.float, torch.double)
+    @dtypesIfCUDA(torch.float, torch.double, torch.half, torch.bfloat16)
+    def test_uniform_from_to(self, device, dtype):
+        size = 2000
+        alpha = 0.1
+
+        float_min = torch.finfo(torch.float).min
+        float_max = torch.finfo(torch.float).max
+        double_min = torch.finfo(torch.double).min
+        double_max = torch.finfo(torch.double).max
+
+        if dtype == torch.bfloat16:
+            dtype_min = -3.389531389251535e+38
+            dtype_max = 3.389531389251535e+38
+        else:
+            dtype_min = torch.finfo(dtype).min
+            dtype_max = torch.finfo(dtype).max
+
+        values = [
+            double_min, float_min,
+            -42, 0, 42,
+            float_max, double_max
+        ]
+
+        for from_ in values:
+            for to_ in values:
+                t = torch.empty(size, dtype=dtype, device=device)
+                if to_ >= from_:
+                    range_ = to_ - from_
+                    if range_ <= dtype_max:
+                        if from_ >= dtype_min and to_ <= dtype_max:
+                            t.uniform_(from_, to_)
+                            if not dtype == torch.bfloat16 and not (
+                                    dtype == torch.half and device == 'cpu') and not torch.isnan(t).all():
+                                delta = alpha * range_
+                                double_t = t.to(torch.double)
+                                if range_ == 0:
+                                    self.assertTrue(double_t.min() == from_)
+                                    self.assertTrue(double_t.max() == to_)
+                                elif dtype == torch.half:
+                                    self.assertTrue(from_ <= double_t.min() <= (from_ + delta))
+                                    self.assertTrue((to_ - delta) <= double_t.max() <= to_)
+                                else:
+                                    self.assertTrue(from_ <= double_t.min() <= (from_ + delta))
+                                    self.assertTrue((to_ - delta) <= double_t.max() < to_)
+                        elif device == 'cpu':
+                            pass
+                    else:
+                        pass
+                else:
+                    pass
+
     @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
     def test_randn(self, device, dtype):
         torch.manual_seed(123456)
