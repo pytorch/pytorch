@@ -2,10 +2,11 @@ set(JIT_TEST_ROOT ${TORCH_ROOT}/test/cpp/jit)
 
 file(GLOB JIT_TEST_SRCS "${JIT_TEST_ROOT}/test*\.cpp")
 
-if (NOT USE_CUDA OR USE_ROCM)
+if (USE_CUDA)
+else()
   file(GLOB JIT_GPU_TEST_SRCS "${JIT_TEST_ROOT}/test_gpu*\.cpp")
   list(REMOVE_ITEM JIT_TEST_SRCS ${JIT_GPU_TEST_SRCS})
-endif() #USE_CUDA
+endif()
 
 set(JIT_TEST_SRCS ${JIT_TEST_SRCS} PARENT_SCOPE)
 
