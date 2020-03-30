@@ -52,6 +52,7 @@ from torch.quantization import default_observer
 from torch.quantization import default_weight_observer
 from torch.quantization import default_per_channel_weight_observer
 from torch.quantization import default_qconfig
+from torch.quantization import get_default_qconfig
 
 from torch.quantization import quantize
 from torch.testing._internal.common_quantization import SingleLayerLinearModel, AnnotatedSingleLayerLinearModel
@@ -2356,7 +2357,12 @@ graph(%input, %weight):
         FileCheck().check_count("quantized::conv2d(", 4, exactly=True) \
                    .run(m.graph)
 
-    def test_finalize_for_conv2d(self):
+    @unittest.skipUnless(
+        'fbgemm' in torch.backends.quantized.supported_engines,
+        " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+        " with instruction set support avx2 or newer.",
+    )
+    def test_quantized_conv2d(self):
         class M(torch.nn.Module):
             def __init__(self):
                 super(M, self).__init__()
@@ -2366,15 +2372,54 @@ graph(%input, %weight):
                 return self.conv(x)
 
         data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
-        qconfig_dict = {'': default_qconfig}
+        qconfig_dict = {'': get_default_qconfig('fbgemm')}
         model = torch.jit.script(M()).eval()
         model = quantize_script(model, qconfig_dict, _test_only_eval_fn, [data], inplace=False)
         # make sure there is only one quantize_per_tensor for input
         # and conv2d_prepack is folded
         FileCheck().check_count("aten::quantize_per_tensor", 1, exactly=True) \
-                   .check_not("quantized::conv2d_prepack") \
-                   .check("quantized::conv2d") \
                    .run(model.graph)
+
+        FileCheck().check_not("quantized::conv2d_prepack") \
+                   .run(model.graph)
+
+        FileCheck().check("quantized::conv2d") \
+                   .run(model.graph)
+
+        # make sure it runs
+        model(data[0][0])
+
+    @unittest.skipUnless(
+        'fbgemm' in torch.backends.quantized.supported_engines,
+        " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+        " with instruction set support avx2 or newer.",
+    )
+    def test_quantized_conv3d(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.conv = torch.nn.Conv3d(3, 3, 3).float()
+
+            def forward(self, x):
+                return self.conv(x)
+
+        data = [(torch.rand((1, 3, 10, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        qconfig_dict = {'': get_default_qconfig('fbgemm')}
+        model = torch.jit.script(M()).eval()
+        model = quantize_script(model, qconfig_dict, _test_only_eval_fn, [data], inplace=False)
+        # make sure there is only one quantize_per_tensor for input
+        # and conv3d_prepack is folded
+        FileCheck().check_count("aten::quantize_per_tensor", 1, exactly=True) \
+                   .run(model.graph)
+
+        FileCheck().check_not("quantized::conv3d_prepack") \
+                   .run(model.graph)
+
+        FileCheck().check("quantized::conv3d") \
+                   .run(model.graph)
+
+        # make sure it runs
+        model(data[0][0])
 
     def test_finalize_for_linear(self):
         class M(torch.nn.Module):
