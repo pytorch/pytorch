@@ -1,13 +1,12 @@
 #include <test/cpp/jit/test_base.h>
 #include <test/cpp/jit/test_utils.h>
 
+#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/passes/peephole.h>
-#include <torch/csrc/jit/ir/ir.h>
 
 namespace torch {
 namespace jit {
-
 
 void testPeepholeOptimize() {
   // test is / is not none optimization
@@ -98,7 +97,8 @@ graph(%1 : Float(*, *, *)?):
   // Note: addmm fusion is disabled by default
   {
     auto graph = std::make_shared<Graph>();
-    parseIR(R"IR(
+    parseIR(
+        R"IR(
       graph(
         %0 : Float(2, 3, 4),
         %1 : Float(2, 3, 4),
@@ -108,7 +108,8 @@ graph(%1 : Float(*, *, *)?):
         %5 : Tensor = aten::add(%4, %2, %3)
         %6 : Tensor = aten::add(%5, %2, %3)
         return (%6)
-        )IR", graph.get());
+        )IR",
+        graph.get());
     PeepholeOptimize(graph, true);
     testing::FileCheck().check("addmm")->run(*graph);
   }
