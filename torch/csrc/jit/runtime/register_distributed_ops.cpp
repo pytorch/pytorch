@@ -17,6 +17,11 @@ namespace torch {
 namespace jit {
 
 namespace {
+
+static auto workerInfo =
+    torch::class_<dist_rpc::WorkerInfo>("dist_rpc", "WorkerInfo")
+        .def(torch::init<std::string, int64_t>());
+
 at::Tensor toOptionalTensor(const c10::IValue& v) {
   if (v.isNone()) {
     return at::Tensor();
@@ -55,6 +60,20 @@ RegisterOperators reg_rpc_ops(
          },
          aliasAnalysisFromSchema()),
      Operator(
+         "aten::local_value(RRef(t) self) -> t",
+         [](Stack& stack) {
+           auto rref = pop(stack).toRRef();
+           TORCH_CHECK(
+               rref->isOwner(),
+               "Can't call RRef.local_value() on a non-owner RRef.");
+           IValue res =
+               c10::static_intrusive_pointer_cast<dist_rpc::OwnerRRef>(rref)
+                   ->getValue();
+           push(stack, std::move(res));
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
          "aten::is_owner(RRef(t) self) -> bool",
          [](Stack& stack) {
            auto rref = pop(stack).toRRef();
@@ -63,10 +82,13 @@ RegisterOperators reg_rpc_ops(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         "aten::owner(RRef(t) self) -> int",
+         "aten::owner(RRef(t) self) -> __torch__.torch.classes.dist_rpc.WorkerInfo",
          [](Stack& stack) {
            auto rref = pop(stack).toRRef();
-           push(stack, rref->owner());
+           push(
+               stack,
+               torch::make_custom_class<distributed::rpc::WorkerInfo>(
+                   rref->ownerName(), rref->owner()));
            return 0;
          },
          aliasAnalysisFromSchema()),
@@ -106,7 +128,10 @@ RegisterOperators reg_rpc_ops(
              auto& kwargsDictIValue =
                  num_inputs >= 4 ? *stackIter++ : emptyDict;
              TORCH_INTERNAL_ASSERT(
-                 dstWorkerIValue.isString() || dstWorkerIValue.isInt());
+                 dstWorkerIValue.isString() ||
+                 c10::getCustomClassType<
+                     c10::intrusive_ptr<dist_rpc::WorkerInfo>>() ==
+                     dstWorkerIValue.type());
              TORCH_INTERNAL_ASSERT(qualifiedNameIValue.isString());
              TORCH_INTERNAL_ASSERT(argsTupleIValue.isTuple());
              TORCH_INTERNAL_ASSERT(kwargsDictIValue.isGenericDict());
@@ -177,9 +202,8 @@ RegisterOperators reg_rpc_ops(
                // moved, copy it here.
                dstWorkerNameStr = dstWorkerIValue.toStringRef();
              } else {
-               dstWorkerNameStr = dist_rpc::RpcAgent::getCurrentRpcAgent()
-                                      ->getWorkerInfo(dstWorkerIValue.toInt())
-                                      .name_;
+               dstWorkerNameStr =
+                   dstWorkerIValue.toCustomClass<dist_rpc::WorkerInfo>()->name_;
              }
 
              // Send RPC request.
