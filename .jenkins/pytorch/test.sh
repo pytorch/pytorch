@@ -251,7 +251,15 @@ test_backward_compatibility() {
   assert_git_not_dirty
 }
 
-if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
+test_bazel() {
+  set -e
+
+  get_bazel
+
+  tools/bazel test --test_tag_filters=-gpu-required --test_filter=-*_CUDA :all_tests
+}
+
+if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
 fi
@@ -277,6 +285,9 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 ]]; t
   test_aten
   test_libtorch
   test_custom_script_ops
+  test_torch_function_benchmark
+elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
+  test_bazel
 else
   test_torchvision
   test_python_nn
