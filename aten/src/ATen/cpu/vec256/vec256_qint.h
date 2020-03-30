@@ -154,6 +154,223 @@ inline void __attribute__((always_inline)) QuantizeAvx2(
 #endif
 }
 
+#if defined(__AVX2__)
+
+// utility functions for horizontal sums and sums of squares
+
+// horizontal sums signed i64, overflow unsafe
+// x = (y3, y2, y1, y0)
+int64_t custom_mm256_hsum_epi64_ignore_overflow(__m256i x) {
+  // ( -, -, y1, y0)
+  const __m256i loDual = x;
+  // ( -, -, y3, y2)
+  const __m256i hiDual =
+    _mm256_permute2f128_si256(x, x, _MM_SHUFFLE(0, 1, 0, 1));
+  // ( -, -, y1 + y3, y0 + y2)
+  const __m256i sumDual = _mm256_add_epi64(loDual, hiDual);
+  // ( -, -, -, y0 + y2)
+  const __m256i lo = sumDual;
+  // ( -, -, -, y1 + y3)
+  const __m256i hi = _mm256_permute4x64_epi64(sumDual, _MM_SHUFFLE(1, 1, 1, 1));
+  // ( -, -, -, y1 + y3 + y0 + y2)
+  const __m256i sum = _mm256_add_epi64(lo, hi);
+  const int64_t res = _mm256_extract_epi64(sum, 0);
+  return res;
+}
+
+// horizontal sums signed i32
+// x = (x7, x6, x5, x4, x3, x2, x1, x0)
+int64_t custom_mm256_hsum_epi32(__m256i x) {
+  // upsample to int64 to avoid overflow
+  // (x7, x6, x5, x4), int32
+  const __m128i xHalf1 = _mm256_extractf128_si256(x, 1);
+  // (x3, x2, x1, x0), int32
+  const __m128i xHalf2 = _mm256_castsi256_si128(x);
+  // (x7, x6, x5, x4), int64
+  const __m256i xHalf1_64 = _mm256_cvtepi32_epi64(xHalf1);
+  // (x3, x2, x1, x0), int64
+  const __m256i xHalf2_64 = _mm256_cvtepi32_epi64(xHalf2);
+  // (x7 + x3, x6 + x2, x5 + x1, x4 + x0) == (y3, y2, y1, y0)
+  const __m256i xHalfSum = _mm256_add_epi64(xHalf1_64, xHalf2_64);
+  return custom_mm256_hsum_epi64_ignore_overflow(xHalfSum);
+}
+
+// horizontal sums signed i16
+// x = (x15, ..., x0)
+int64_t custom_mm256_hsum_epi16(__m256i x) {
+  // (x15, ..., x8), int16
+  const __m128i xHalf1 = _mm256_extractf128_si256(x, 1);
+  // (x7, ..., x0), int16
+  const __m128i xHalf2 = _mm256_castsi256_si128(x);
+  // (x15, ..., x8), int32
+  const __m256i xHalf1_32 = _mm256_cvtepi16_epi32(xHalf1);
+  // (x7, ..., x0), int32
+  const __m256i xHalf2_32 = _mm256_cvtepi16_epi32(xHalf2);
+  // (x15 + x7, ..., x8 + x0) = (y7, ..., y0)
+  const __m256i xSum = _mm256_add_epi32(xHalf1_32, xHalf2_32);
+  // ( -, -, -, -, y3, y2, y1, y0)
+  const __m256i xHalfLo = xSum;
+  // ( -, -, -, -, y7, y6, y5, y4)
+  const __m256i xHalfHi = _mm256_permute2f128_si256(xSum, xSum, _MM_SHUFFLE(0, 1, 0, 1));
+  // ( -, -, -, -, y3 + y7, y2 + y6, y1 + y5, y0 + y4)
+  const __m256i xHalfSum = _mm256_add_epi32(xHalfLo, xHalfHi);
+  // ( -, -, -, -, -, -, y1 + y5, y0 + y4)
+  const __m256i xQuadLo = xHalfSum;
+  // ( -, -, -, -, -, -, y3 + y7, y2 + y6)
+  const __m256i xQuadHi = _mm256_permute4x64_epi64(xHalfSum, _MM_SHUFFLE(1, 1, 1, 1));
+  // ( -, -, -, -, -, -, y1 + y5 + y3 + y7, y0 + y4 + y2 + y6)
+  const __m256i sumQuad = _mm256_add_epi32(xQuadLo, xQuadHi);
+  // ( -, -, -, -, -, -, -, y0 + y4 + y2 + y6)
+  const __m256i lo = sumQuad;
+  // ( -, -, -, -, -, -, -, y1 + y5 + y3 + y7)
+  const __m256i hi = _mm256_shuffle_epi32(sumQuad, _MM_SHUFFLE(1, 1, 1, 1));
+  const __m256i sum = _mm256_add_epi32(lo, hi);
+  int32_t res = _mm256_extract_epi32(sum, 0);
+  return static_cast<int64_t>(res);
+}
+
+// horizontal sums signed i8
+// x = (x31, ..., x0)
+int custom_mm256_hsum_epi8(__m256i x) {
+  // upsample to int16 to avoid overflow
+  // (x31, ..., x16), int8
+  const __m128i xHalf1 = _mm256_extractf128_si256(x, 1);
+  // (x15, ..., x0), int8
+  const __m128i xHalf2 = _mm256_castsi256_si128(x);
+  // (x31, ... x16), int16
+  const __m256i xHalf1_64 = _mm256_cvtepi8_epi16(xHalf1);
+  // (x15, ..., x0), int16
+  const __m256i xHalf2_64 = _mm256_cvtepi8_epi16(xHalf2);
+  // (x31 + x15, ..., x16 + x0) = (y15, ..., y0), int16
+  const __m256i xHalfSum = _mm256_add_epi16(xHalf1_64, xHalf2_64);
+  // (y7 - y0)
+  const __m128i xEight1 = _mm256_extractf128_si256(xHalfSum, 1);
+  // (y15 - y8)
+  const __m128i xEight2 = _mm256_castsi256_si128(xHalfSum);
+  // (y15 + y7, ..., y8 + y0) = (z7, ..., z0)
+  const __m128i xEightSum = _mm_add_epi16(xEight1, xEight2);
+  // ( -, -, -, -, z3, z2, z1, z0)
+  const __m128i xEightLo = xEightSum;
+  // ( -, -, -, -, z7, z6, z5, z4)
+  const __m128i xEightHi = _mm_shuffle_epi32(xEightSum, _MM_SHUFFLE(3, 2, 3, 2));
+  // ( -, -, -, -, z7 + z3, z6 + z2, z5 + z1, z4 + z0)
+  const __m128i xEightHalfSum = _mm_add_epi16(xEightLo, xEightHi);
+  // ( -, -, -, -, -, -, z5 + z1, z4 + z0)
+  const __m128i xEightDualLo = xEightHalfSum;
+  // ( -, -, -, -, -, -, z7 + z3, z6 + z2)
+  const __m128i xEightDualHi = _mm_shuffle_epi32(xEightHalfSum, _MM_SHUFFLE(1, 1, 1, 1));
+  // ( -, -, -, -, -, -, z5 + z1 + z7 + z3, z4 + z0 + z6 + z2)
+  const __m128i xEightDualSum = _mm_add_epi16(xEightDualLo, xEightDualHi);
+  // ( -, -, -, -, -, -, -, z4 + z0 + z6 + z2)
+  const __m128i xLo = xEightDualSum;
+  // ( -, -, -, -, -, -, -, z5 + z1 + z7 + z3)
+  const __m128i xHi = _mm_shufflelo_epi16(xEightDualSum, _MM_SHUFFLE(1, 1, 1, 1));
+  // sum
+  const __m128i sum = _mm_add_epi16(xLo, xHi);
+  // casting is necessary to handle the negative cases properly
+  int16_t res = _mm_extract_epi16(sum, 0);
+  return res;
+}
+
+// horizontal sums unsigned i16
+// x = (x15, ..., x0)
+int64_t custom_mm256_hsum_epu16(__m256i x) {
+  // (x15, ..., x8), int16
+  const __m128i xHalf1 = _mm256_extractf128_si256(x, 1);
+  // (x7, ..., x0), int16
+  const __m128i xHalf2 = _mm256_castsi256_si128(x);
+  // (x15, ..., x8), int32
+  const __m256i xHalf1_32 = _mm256_cvtepu16_epi32(xHalf1);
+  // (x7, ..., x0), int32
+  const __m256i xHalf2_32 = _mm256_cvtepu16_epi32(xHalf2);
+  // (x15 + x7, ..., x8 + x0) = (y7, ..., y0)
+  const __m256i xSum = _mm256_add_epi32(xHalf1_32, xHalf2_32);
+  // ( -, -, -, -, y3, y2, y1, y0)
+  const __m256i xHalfLo = xSum;
+  // ( -, -, -, -, y7, y6, y5, y4)
+  const __m256i xHalfHi = _mm256_permute2f128_si256(xSum, xSum, _MM_SHUFFLE(0, 1, 0, 1));
+  // ( -, -, -, -, y3 + y7, y2 + y6, y1 + y5, y0 + y4)
+  const __m256i xHalfSum = _mm256_add_epi32(xHalfLo, xHalfHi);
+  // ( -, -, -, -, -, -, y1 + y5, y0 + y4)
+  const __m256i xQuadLo = xHalfSum;
+  // ( -, -, -, -, -, -, y3 + y7, y2 + y6)
+  const __m256i xQuadHi = _mm256_permute4x64_epi64(xHalfSum, _MM_SHUFFLE(1, 1, 1, 1));
+  // ( -, -, -, -, -, -, y1 + y5 + y3 + y7, y0 + y4 + y2 + y6)
+  const __m256i sumQuad = _mm256_add_epi32(xQuadLo, xQuadHi);
+  // ( -, -, -, -, -, -, -, y0 + y4 + y2 + y6)
+  const __m256i lo = sumQuad;
+  // ( -, -, -, -, -, -, -, y1 + y5 + y3 + y7)
+  const __m256i hi = _mm256_shuffle_epi32(sumQuad, _MM_SHUFFLE(1, 1, 1, 1));
+  const __m256i sum = _mm256_add_epi32(lo, hi);
+  uint32_t res = _mm256_extract_epi32(sum, 0);
+  return static_cast<int64_t>(res);
+}
+
+// horizontal sums unsigned i8
+// x = (x31, ..., x0)
+int custom_mm256_hsum_epu8(__m256i x) {
+  // upsample to int16 to avoid overflow
+  // (x31, ..., x16), int8
+  const __m128i xHalf1 = _mm256_extractf128_si256(x, 1);
+  // (x15, ..., x0), int8
+  const __m128i xHalf2 = _mm256_castsi256_si128(x);
+  // (x31, ... x16), int16
+  const __m256i xHalf1_64 = _mm256_cvtepu8_epi16(xHalf1);
+  // (x15, ..., x0), int16
+  const __m256i xHalf2_64 = _mm256_cvtepu8_epi16(xHalf2);
+  // (x31 + x15, ..., x16 + x0) = (y15, ..., y0), int16
+  const __m256i xHalfSum = _mm256_add_epi16(xHalf1_64, xHalf2_64);
+  // (y7 - y0)
+  const __m128i xEight1 = _mm256_extractf128_si256(xHalfSum, 1);
+  // (y15 - y8)
+  const __m128i xEight2 = _mm256_castsi256_si128(xHalfSum);
+  // (y15 + y7, ..., y8 + y0) = (z7, ..., z0)
+  const __m128i xEightSum = _mm_add_epi16(xEight1, xEight2);
+  // ( -, -, -, -, z3, z2, z1, z0)
+  const __m128i xEightLo = xEightSum;
+  // ( -, -, -, -, z7, z6, z5, z4)
+  const __m128i xEightHi = _mm_shuffle_epi32(xEightSum, _MM_SHUFFLE(3, 2, 3, 2));
+  // ( -, -, -, -, z7 + z3, z6 + z2, z5 + z1, z4 + z0)
+  const __m128i xEightHalfSum = _mm_add_epi16(xEightLo, xEightHi);
+  // ( -, -, -, -, -, -, z5 + z1, z4 + z0)
+  const __m128i xEightDualLo = xEightHalfSum;
+  // ( -, -, -, -, -, -, z7 + z3, z6 + z2)
+  const __m128i xEightDualHi = _mm_shuffle_epi32(xEightHalfSum, _MM_SHUFFLE(1, 1, 1, 1));
+  // ( -, -, -, -, -, -, z5 + z1 + z7 + z3, z4 + z0 + z6 + z2)
+  const __m128i xEightDualSum = _mm_add_epi16(xEightDualLo, xEightDualHi);
+  // ( -, -, -, -, -, -, -, z4 + z0 + z6 + z2)
+  const __m128i xLo = xEightDualSum;
+  // ( -, -, -, -, -, -, -, z5 + z1 + z7 + z3)
+  const __m128i xHi = _mm_shufflelo_epi16(xEightDualSum, _MM_SHUFFLE(1, 1, 1, 1));
+  // sum
+  const __m128i sum = _mm_add_epi16(xLo, xHi);
+  uint16_t res = _mm_extract_epi16(sum, 0);
+  return res;
+}
+
+// sign extend int8_t's in a and b to 16 bits and return the product
+__m256i custom_mm_mul_epi8_overflow(__m128i a, __m128i b) {
+  __m256i a2 = _mm256_cvtepi8_epi16(a);
+  __m256i b2 = _mm256_cvtepi8_epi16(b);
+  return _mm256_mullo_epi16(a2, b2);
+}
+
+// sign extend int32_t's a and b to 64 bits and return the product
+__m256i custom_mm_mul_epi32_overflow(__m128i a, __m128i b) {
+  __m256i a2 = _mm256_cvtepi32_epi64(a);
+  __m256i b2 = _mm256_cvtepi32_epi64(b);
+  return _mm256_mul_epi32(a2, b2);
+}
+
+// zero extend uint8_t's in a and b to 16 bits and return the product
+__m256i custom_mm_mul_epu8_overflow(__m128i a, __m128i b) {
+  __m256i a2 = _mm256_cvtepu8_epi16(a);
+  __m256i b2 = _mm256_cvtepu8_epi16(b);
+  return _mm256_mullo_epi16(a2, b2);
+}
+
+#endif
+
 template<>
 struct Vec256<c10::qint32> : public Vec256qi {
     static constexpr int size() {
@@ -321,6 +538,44 @@ struct Vec256<c10::qint32> : public Vec256qi {
             zero_point;
       }
       return loadu(result_vals);
+#endif
+    }
+
+    int64_t h_sum() const {
+      // horizontal sum of the quantized int values, overflow safe
+#ifdef __AVX2__
+      return custom_mm256_hsum_epi32(vals);
+#else
+      // Pray the compiler can autovectorize this
+      int64_t h_sum;
+      int32_t int_vals[size()];
+      _mm256_storeu_si256(reinterpret_cast<__m256i*>(&int_vals), vals);
+      for (int i = 0; i < size(); ++i) {
+        h_sum += int_vals[i];
+      }
+      return h_sum;
+#endif
+    }
+
+    int64_t h_sum_sq() const {
+      // horizontal sum of squares of the quantized int values, overflow safe
+#ifdef __AVX2__
+      const __m128i i32s_half1 = _mm256_extractf128_si256(vals, 1);
+      const __m128i i32s_half2 = _mm256_castsi256_si128(vals);
+      const __m256i mul1 = custom_mm_mul_epi32_overflow(i32s_half1, i32s_half1);
+      const __m256i mul2 = custom_mm_mul_epi32_overflow(i32s_half2, i32s_half2);
+      __m256i sum = _mm256_add_epi64(mul1, mul2);
+      return custom_mm256_hsum_epi64_ignore_overflow(sum);
+#else
+      // Pray the compiler can autovectorize this
+      int64_t h_sum;
+      int32_t int_vals[size()];
+      _mm256_storeu_si256(reinterpret_cast<__m256i*>(&int_vals), vals);
+      for (int i = 0; i < size(); ++i) {
+        int64_t int_val = static_cast<int64_t>(int_vals[i]);
+        h_sum += int_val * int_val;
+      }
+      return h_sum;
 #endif
     }
 
@@ -686,6 +941,44 @@ struct Vec256<c10::qint8> : public Vec256qi {
 #endif
     }
 
+    int64_t h_sum() const {
+      // horizontal sum of the quantized int values, overflow safe
+#ifdef __AVX2__
+      return custom_mm256_hsum_epi8(vals);
+#else
+      // Pray the compiler can autovectorize this
+      int64_t h_sum;
+      int8_t int_vals[size()];
+      _mm256_storeu_si256(reinterpret_cast<__m256i*>(&int_vals), vals);
+      for (int i = 0; i < size(); ++i) {
+        h_sum += int_vals[i];
+      }
+      return h_sum;
+#endif
+    }
+
+    int64_t h_sum_sq() const {
+      // horizontal sum of squares of the quantized int values, overflow safe
+#ifdef __AVX2__
+      const __m128i i8s_half1 = _mm256_extractf128_si256(vals, 1);
+      const __m128i i8s_half2 = _mm256_castsi256_si128(vals);
+      const __m256i mul1 = custom_mm_mul_epi8_overflow(i8s_half1, i8s_half1);
+      const __m256i mul2 = custom_mm_mul_epi8_overflow(i8s_half2, i8s_half2);
+      __m256i sum = _mm256_add_epi16(mul1, mul2);
+      return custom_mm256_hsum_epi16(sum);
+#else
+      // Pray the compiler can autovectorize this
+      int64_t h_sum;
+      int8_t int_vals[size()];
+      _mm256_storeu_si256(reinterpret_cast<__m256i*>(&int_vals), vals);
+      for (int i = 0; i < size(); ++i) {
+        int16_t int_val = static_cast<int16_t>(int_vals[i]);
+        h_sum += int_val * int_val;
+      }
+      return h_sum;
+#endif
+    }
+
     void dump() const {
         for (size_t i = 0; i < size(); ++i) {
             std::cout << (int)((value_type*)&vals)[i] << " ";
@@ -956,6 +1249,44 @@ struct Vec256<c10::quint8> : public Vec256qi {
 #endif
     }
 
+    int64_t h_sum() const {
+      // horizontal sum of the quantized int values, overflow safe
+#ifdef __AVX2__
+      return custom_mm256_hsum_epu8(vals);
+#else
+      // Pray the compiler can autovectorize this
+      int64_t h_sum;
+      uint8_t int_vals[size()];
+      _mm256_storeu_si256(reinterpret_cast<__m256i*>(&int_vals), vals);
+      for (int i = 0; i < size(); ++i) {
+        h_sum += int_vals[i];
+      }
+      return h_sum;
+#endif
+    }
+
+    int64_t h_sum_sq() const {
+      // horizontal sum of squares of the quantized int values, overflow safe
+#ifdef __AVX2__
+      const __m128i i8s_half1 = _mm256_extractf128_si256(vals, 1);
+      const __m128i i8s_half2 = _mm256_castsi256_si128(vals);
+      const __m256i mul1 = custom_mm_mul_epu8_overflow(i8s_half1, i8s_half1);
+      const __m256i mul2 = custom_mm_mul_epu8_overflow(i8s_half2, i8s_half2);
+      __m256i sum = _mm256_add_epi16(mul1, mul2);
+      return custom_mm256_hsum_epu16(sum);
+#else
+      // Pray the compiler can autovectorize this
+      int64_t h_sum;
+      uint8_t int_vals[size()];
+      _mm256_storeu_si256(reinterpret_cast<__m256i*>(&int_vals), vals);
+      for (int i = 0; i < size(); ++i) {
+        uint16_t int_val = static_cast<uint16_t>(int_vals[i]);
+        h_sum += int_val * int_val;
+      }
+      return h_sum;
+#endif
+    }
+
     void dump() const {
         for (size_t i = 0; i < size(); ++i) {
             std::cout << (int)((value_type*)&vals)[i] << " ";
@@ -1035,6 +1366,27 @@ struct Vec256QuantizedConverter {
       }
     }
     return rv;
+  }
+
+  int64_t h_sum() const {
+    // horizontal sum of the quantized int values, overflow safe
+    // Pray the compiler can autovectorize this
+    int64_t h_sum;
+    for (int i = 0; i < size(); ++i) {
+      h_sum += vals[i];
+    }
+    return h_sum;
+  }
+
+  int64_t h_sum_sq() const {
+    // horizontal sum of squares of the quantized int values, overflow safe
+    // Pray the compiler can autovectorize this
+    int64_t h_sum;
+    for (int i = 0; i < size(); ++i) {
+      int64_t int_val = static_cast<int64_t>(vals[i]);
+      h_sum += int_val * int_val;
+    }
+    return h_sum;
   }
 
   void dump() const {

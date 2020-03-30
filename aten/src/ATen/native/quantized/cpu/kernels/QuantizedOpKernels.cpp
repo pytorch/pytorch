@@ -404,6 +404,46 @@ void qclamp_kernel(
   });
 }
 
+void qhardswish_kernel(const Tensor& qx, Tensor& qy) {
+  const auto i_scale = qx.q_scale();
+  const auto i_zero_point = qx.q_zero_point();
+
+  const auto o_scale = qy.q_scale();
+  const auto o_zero_point = qy.q_zero_point();
+  const float o_inv_scale = 1.0 / o_scale;
+
+  using fVec = Vec256<float>;
+  fVec i_scale_vec(i_scale);
+  fVec i_zero_point_vec(i_zero_point);
+  fVec i_scale_neg_zp_premul_vec = i_scale_vec * i_zero_point_vec.neg();
+  fVec zero_vec(0.0f);
+  fVec three_vec(3.0f);
+  fVec six_vec(6.0f);
+
+  AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qhardswish", [&]() {
+    using qVec = Vec256<scalar_t>;
+    auto iter = TensorIterator::unary_op(qy, qx);
+    cpu_kernel_vec(
+        iter,
+        [&](scalar_t value) -> scalar_t {
+          const auto x = at::dequantize_val(i_scale, i_zero_point, value);
+          const auto y = x * std::min(std::max(x + 3.0f, 0.0f), 6.0f) / 6.0f;
+          return at::quantize_val<scalar_t>(o_scale, o_zero_point, y);
+        },
+        [&](qVec value) -> qVec {
+          auto value_dx = value.dequantize(i_scale_vec, i_zero_point_vec,
+                                           i_scale_neg_zp_premul_vec);
+          for (int idx = 0; idx < value_dx.size(); idx++) {
+            value_dx[idx] = value_dx[idx] * vec256::minimum(
+              vec256::maximum(value_dx[idx] + three_vec, zero_vec),
+              six_vec
+            ) / six_vec;
+          }
+          return qVec::quantize(value_dx, o_scale, o_zero_point, o_inv_scale);
+        });
+  });
+}
+
 
 void qtanh_kernel(const Tensor& qx, Tensor& qy) {
   int64_t zero_point = qx.q_zero_point();
@@ -1534,10 +1574,6 @@ void quantized_layer_norm_kernel_impl(
   fVec x_fake_scale_vec = fVec(x_fake_scale);
   fVec x_fake_scale_zp_neg_premul_vec = x_fake_scale_vec * x_zp_vec.neg();
 
-  float x_fake_zp = 0.0f;
-  fVec x_fake_zp_vec(x_fake_zp);
-  fVec x_fake_scale_fake_zp_neg_premul_vec = x_fake_scale_vec * x_fake_zp_vec.neg();
-
   int64_t y_zp = Y->q_zero_point();
   float y_scale = Y->q_scale();
   float y_inv_scale = 1.0f / y_scale;
@@ -1559,17 +1595,13 @@ void quantized_layer_norm_kernel_impl(
 
       // First pass: calculate mean and variance.
 
-      float layerSumShifted = 0.0f;
-      float layerSumSquaresShifted = 0.0f;
+      int64_t layerSumShifted = 0.0f;
+      int64_t layerSumSquaresShifted = 0.0f;
       for (int64_t vecIdx = 0; vecIdx < kNumIntVecInLayer; vecIdx++) {
         int64_t vecStartIdx = vecIdx * kIntVLen;
         auto qXVec = qVec::loadu(X_ptr + vecStartIdx);
-        auto dqXVec = qXVec.dequantize(x_fake_scale_vec, x_fake_zp_vec,
-            x_fake_scale_fake_zp_neg_premul_vec);
-        for (int dqXVecIdx = 0; dqXVecIdx < dqXVec.size(); dqXVecIdx++) {
-          layerSumShifted += dqXVec[dqXVecIdx].hsum();
-          layerSumSquaresShifted += (dqXVec[dqXVecIdx] * dqXVec[dqXVecIdx]).hsum();
-        }
+        layerSumShifted += qXVec.h_sum();
+        layerSumSquaresShifted += qXVec.h_sum_sq();
       }
       for (int64_t remIdx = N - kNonVecRemInLayer; remIdx < N; remIdx++) {
         auto qXVal = X_ptr[remIdx].val_;
@@ -1577,12 +1609,12 @@ void quantized_layer_norm_kernel_impl(
         layerSumSquaresShifted += qXVal * qXVal;
       }
 
-      float layerMeanShiftedDivScaleX = layerSumShifted / N;
+      float layerMeanShiftedDivScaleX = static_cast<float>(layerSumShifted) / N;
       // mean(dqX) / scale_x
       float layerMeanDivScaleX = layerMeanShiftedDivScaleX - x_zp;
       // var(dqX) / scale_x^2
       float layerVarDivScaleXSq =
-        std::max(layerSumSquaresShifted / N -
+        std::max(static_cast<float>(layerSumSquaresShifted) / N -
             layerMeanShiftedDivScaleX * layerMeanShiftedDivScaleX, 0.0f);
       // scale_x / std(dqX), scale epsilon properly
       float scaleXDivLayerStd = 1.0f /
@@ -1650,6 +1682,7 @@ REGISTER_DISPATCH(qsigmoid_stub, &qsigmoid_kernel);
 REGISTER_DISPATCH(qhardsigmoid_stub, &qhardsigmoid_kernel);
 REGISTER_DISPATCH(qclamp_stub, &qclamp_kernel);
 REGISTER_DISPATCH(qtanh_stub, &qtanh_kernel);
+REGISTER_DISPATCH(qhardswish_stub, &qhardswish_kernel);
 REGISTER_DISPATCH(qelu_stub, &qelu_kernel);
 REGISTER_DISPATCH(qadd_relu_stub, &qadd_kernel<true>);
 REGISTER_DISPATCH(qadd_stub, &qadd_kernel<false>);
