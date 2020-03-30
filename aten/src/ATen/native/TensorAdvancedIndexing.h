@@ -17,8 +17,8 @@ using index_put_accum_fn = void(*)(Tensor &, TensorList , const Tensor &, bool u
 using masked_fill_fn = void(*)(TensorIterator &, Scalar scalar);
 
 using gather_fn = void (*)(Tensor & result, const Tensor & self, int64_t dim, const Tensor & index);
-using scatter_fn = void(*)(Tensor& self, int dim, const Tensor& index, const Tensor& src);
-using scatter_fill_fn = void(*)(Tensor& self, int dim, const Tensor& index, Scalar src);
+using scatter_fn = void(*)(Tensor& self, int64_t dim, const Tensor& index, const Tensor& src);
+using scatter_fill_fn = void(*)(Tensor& self, int64_t dim, const Tensor& index, Scalar src);
 using scatter_add_fn = void(*)(Tensor& self, int64_t dim, const Tensor& index, const Tensor& src);
 
 DECLARE_DISPATCH(index_fn, index_stub);

@@ -20,7 +20,7 @@ using at::cuda::detail::TensorInfo;
 template <typename IndexType, typename Real, int Dims>
 struct IndexToScatterGatherOffsets {
   static __device__ void compute(
-      IndexType linearId, const int dim,
+      IndexType linearId, const int64_t dim,
       const TensorInfo<int64_t, IndexType>& index, IndexType* indexOffset,
       const TensorInfo<Real, IndexType>& t1, IndexType* t1Offset,
       const TensorInfo<Real, IndexType>& t2, IndexType* t2Offset) {
@@ -36,10 +36,10 @@ struct IndexToScatterGatherOffsets {
   }
 
   static __device__ void compute(
-      IndexType linearId, const int dim,
+      IndexType linearId, const int64_t dim,
       const TensorInfo<int64_t, IndexType>& index, IndexType* indexOffset,
       const TensorInfo<Real, IndexType>& t2, IndexType* t2Offset) {
-    for (int d = Dims - 1; d >= 0; d--) {
+    for (int64_t d = Dims - 1; d >= 0; d--) {
       IndexType curDimIndex = linearId % index.sizes[d];
       *indexOffset += curDimIndex * index.strides[d];
       if (d != dim) {
@@ -54,11 +54,11 @@ struct IndexToScatterGatherOffsets {
 template <typename IndexType, typename Real>
 struct IndexToScatterGatherOffsets<IndexType, Real, -1> {
   static __device__ void compute(
-      IndexType linearId, const int dim,
+      IndexType linearId, const int64_t dim,
       const TensorInfo<int64_t, IndexType>& index, IndexType* indexOffset,
       const TensorInfo<Real, IndexType>& t1, IndexType* t1Offset,
       const TensorInfo<Real, IndexType>& t2, IndexType* t2Offset) {
-    for (int d = index.dims - 1; d >= 0; d--) {
+    for (int64_t d = index.dims - 1; d >= 0; d--) {
       IndexType curDimIndex = linearId % index.sizes[d];
       *indexOffset += curDimIndex * index.strides[d];
       *t1Offset += curDimIndex * t1.strides[d];
@@ -70,10 +70,10 @@ struct IndexToScatterGatherOffsets<IndexType, Real, -1> {
   }
 
   static __device__ void compute(
-      IndexType linearId, const int dim,
+      IndexType linearId, const int64_t dim,
       const TensorInfo<int64_t, IndexType>& index, IndexType* indexOffset,
       const TensorInfo<Real, IndexType>& t2, IndexType* t2Offset) {
-    for (int d = index.dims - 1; d >= 0; d--) {
+    for (int64_t d = index.dims - 1; d >= 0; d--) {
       IndexType curDimIndex = linearId % index.sizes[d];
       *indexOffset += curDimIndex * index.strides[d];
       if (d != dim) {
@@ -92,7 +92,7 @@ __global__ void scatter_kernel(
   TensorInfo<scalar_t, index_t> self,
   TensorInfo<scalar_t, index_t> src,
   TensorInfo<int64_t, index_t> index,
-  const int dim,
+  const int64_t dim,
   const index_t total_elements) {
 
   for (index_t linearId = blockIdx.x * blockDim.x + threadIdx.x;
@@ -123,7 +123,7 @@ __global__ void scatter_fill_kernel(
     TensorInfo<scalar_t, index_t> self,
     scalar_t value,
     TensorInfo<int64_t, index_t> index,
-    const int dim,
+    const int64_t dim,
     const index_t totalElements) {
   for (index_t linearId = blockIdx.x * blockDim.x + threadIdx.x;
        linearId < totalElements;
