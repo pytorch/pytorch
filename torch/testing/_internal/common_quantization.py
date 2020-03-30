@@ -374,11 +374,12 @@ class InnerModule(torch.nn.Module):
     def __init__(self):
         super(InnerModule, self).__init__()
         self.fc1 = torch.nn.Linear(5, 8).to(dtype=torch.float)
-        self.relu = torch.nn.ReLU()
+        self.relu1 = torch.nn.ReLU()
         self.fc2 = torch.nn.Linear(8, 5).to(dtype=torch.float)
+        self.relu2 = torch.nn.ReLU()
 
     def forward(self, x):
-        return self.relu(self.fc2(self.relu(self.fc1(x))))
+        return self.relu2(self.fc2(self.relu1(self.fc1(x))))
 
 class SkipQuantModel(torch.nn.Module):
     r"""We can skip quantization by explicitly
@@ -386,6 +387,18 @@ class SkipQuantModel(torch.nn.Module):
     """
     def __init__(self):
         super(SkipQuantModel, self).__init__()
+        self.sub = InnerModule()
+        self.fc = torch.nn.Linear(5, 5).to(dtype=torch.float)
+
+    def forward(self, x):
+        return self.fc(self.sub(x))
+
+class AnnotatedSkipQuantModel(torch.nn.Module):
+    r"""We can skip quantization by explicitly
+    setting qconfig of a submodule to None
+    """
+    def __init__(self):
+        super(AnnotatedSkipQuantModel, self).__init__()
         self.qconfig = default_qconfig
         self.sub = QuantWrapper(InnerModule())
         self.fc = torch.nn.Linear(5, 5).to(dtype=torch.float)
