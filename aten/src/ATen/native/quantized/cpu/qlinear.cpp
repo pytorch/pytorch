@@ -357,6 +357,9 @@ static auto registry =
         .op("quantized::linear(Tensor X, Tensor W_prepack, float Y_scale_i, int Y_zero_point_i) -> Tensor Y",
             torch::RegisterOperators::options().kernel<QLinearInt8<false>>(
                 DispatchKey::QuantizedCPUTensorId))
+        .op("_quantized::linear(Tensor X, Tensor W_prepack, float Y_scale_i, int Y_zero_point_i) -> Tensor Y",
+            torch::RegisterOperators::options().kernel<QLinearInt8<false>>(
+                DispatchKey::QuantizedCPUTensorId))
         .op("quantized::linear_relu(Tensor X, Tensor W_prepack, float Y_scale_i, int Y_zero_point_i) -> Tensor Y",
             torch::RegisterOperators::options().kernel<QLinearInt8<true>>(
                 DispatchKey::QuantizedCPUTensorId));
