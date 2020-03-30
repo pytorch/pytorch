@@ -112,7 +112,7 @@ struct CAFFE2_API Type : std::enable_shared_from_this<Type> {
   //
   // Takes a custom printer that users can pass in to customize the output of
   // this method.
-  std::string python_str(TypePrinter printer = nullptr) const {
+  std::string python_str(TypePrinter printer) const {
     if (printer) {
       // the printer can return nullopt to fall through to the default impl
       if (auto renamed = printer(shared_from_this())) {
@@ -120,6 +120,11 @@ struct CAFFE2_API Type : std::enable_shared_from_this<Type> {
       }
     }
     return python_str_impl(printer);
+  }
+  std::string python_str() const {
+    // Overload instead of define a default value for `printer` to help
+    // debuggers out.
+    return python_str(nullptr);
   }
 
   TypeKind kind() const {
