@@ -55,7 +55,6 @@ class TestFuser(JitTestCase):
         self.old_gpu_fuser_state = torch._C._jit_can_fuse_on_gpu()
         torch._C._jit_override_can_fuse_on_cpu(False)
         torch._C._jit_override_can_fuse_on_gpu(False)
-        torch._C._jit_register_tensorexpr_fuser()
         torch._C._jit_set_texpr_fuser_enabled(True)
 
         self.old_profiling_executor = torch._C._jit_set_profiling_executor(True)
