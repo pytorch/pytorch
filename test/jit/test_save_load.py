@@ -4,6 +4,7 @@ import sys
 
 import torch
 from torch import Tensor
+from typing import NamedTuple
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -221,3 +222,117 @@ class TestSaveLoad(JitTestCase):
         torch.jit.save(sm, contains_both)
         contains_both.seek(0)
         sm = torch.jit.load(contains_both)
+
+    def test_many_collisions(self):
+        class MyCoolNamedTuple(NamedTuple):
+            a: int
+
+        @torch.jit.interface
+        class MyInterface(object):
+            def bar(self, x):
+                # type: (Tensor) -> Tensor
+                pass
+
+        @torch.jit.script
+        class ImplementInterface(object):
+            def __init__(self):
+                pass
+
+            def bar(self, x):
+                return x
+
+        def lol(x):
+            return x
+
+        class Foo(torch.nn.Module):
+            interface: MyInterface
+
+            def __init__(self):
+                super().__init__()
+                self.foo = torch.nn.Linear(2, 2)
+                self.bar = torch.nn.Linear(2, 2)
+                self.interface = ImplementInterface()
+
+            def forward(self, x):
+                x = self.foo(x)
+                x = self.bar(x)
+                x = lol(x)
+                x = self.interface.bar(x)
+
+                return x, MyCoolNamedTuple(a=5)
+
+
+        first_script_module = torch.jit.script(Foo())
+        first_saved_module = io.BytesIO()
+        torch.jit.save(first_script_module, first_saved_module)
+        first_saved_module.seek(0)
+
+        clear_class_registry()
+
+        @torch.jit.interface
+        class MyInterface(object):
+            def not_bar(self, x):
+                # type: (Tensor) -> Tensor
+                pass
+
+
+        @torch.jit.script
+        class ImplementInterface(object):
+            def __init__(self):
+                pass
+
+            def not_bar(self, x):
+                return x
+
+
+        def lol(x):
+            return "asdofij"
+
+
+        class MyCoolNamedTuple(NamedTuple):
+            a: str
+
+        class Foo(torch.nn.Module):
+            interface: MyInterface
+            def __init__(self):
+                super().__init__()
+                self.foo = torch.nn.Linear(2, 2)
+                self.interface = ImplementInterface()
+
+            def forward(self, x):
+                x = self.foo(x)
+                self.interface.not_bar(x)
+                x = lol(x)
+                return x, MyCoolNamedTuple(a="hello")
+
+
+        second_script_module = torch.jit.script(Foo())
+        second_saved_module = io.BytesIO()
+        torch.jit.save(second_script_module, second_saved_module)
+        second_saved_module.seek(0)
+
+        clear_class_registry()
+
+        self.assertEqual(
+            first_script_module._c.qualified_name, second_script_module._c.qualified_name
+        )
+
+        class ContainsBoth(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.add_module("second", torch.jit.load(second_saved_module))
+                self.add_module("first", torch.jit.load(first_saved_module))
+
+            def forward(self, x):
+                x, named_tuple_1 = self.first(x)
+                x, named_tuple_2 = self.second(x)
+                return len(x + named_tuple_2.a) + named_tuple_1.a
+
+        sm = torch.jit.script(ContainsBoth())
+        contains_both = io.BytesIO()
+        torch.jit.save(sm, contains_both)
+        contains_both.seek(0)
+        sm = torch.jit.load(contains_both)
+
+
+
