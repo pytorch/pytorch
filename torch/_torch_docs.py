@@ -2619,10 +2619,6 @@ Args:
     input (Tensor): the PyTorch tensor to test
 """)
 
-Args:
-    input (Tensor): the PyTorch tensor to test
-""")
-
 add_docstr(torch.kthvalue,
            r"""
 kthvalue(input, k, dim=None, keepdim=False, out=None) -> (Tensor, LongTensor)
