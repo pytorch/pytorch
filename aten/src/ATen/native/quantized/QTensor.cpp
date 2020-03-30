@@ -159,6 +159,7 @@ Tensor make_per_channel_quantized_tensor_cpu(
   return dst;
 }
 
+namespace {
 Tensor& set_storage_quantized_(
     Tensor& self,
     Storage storage,
@@ -177,6 +178,7 @@ static auto registry_set_storage_ = torch::RegisterOperators()
     .schema("aten::set_.source_Storage_storage_offset(Tensor(a!) self, Storage source, int storage_offset, int[] size, int[] stride=[]) -> Tensor(a!)")
     .impl_unboxedOnlyKernel<decltype(set_storage_quantized_), &set_storage_quantized_>(DispatchKey::QuantizedCPUTensorId))
   ;
+}
 
 QScheme qscheme_quant(const Tensor& self) {
   auto quantizer = get_qtensorimpl(self)->quantizer();

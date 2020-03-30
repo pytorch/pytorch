@@ -8,6 +8,7 @@
 namespace at {
 namespace native {
 
+namespace {
 // this needs to be split along CPU/CUDA lines because we don't have a consistent
 // way of getting the allocator to use for a device (c10::GetAllocator is not
 // the same as at::cuda::getCUDADeviceAllocator().
@@ -39,5 +40,6 @@ static auto registry_set_storage_ = torch::RegisterOperators()
     .impl_unboxedOnlyKernel<decltype(set_storage_cuda_), &set_storage_cuda_>(DispatchKey::CUDATensorId))
   ;
 
+}
 }
 }
