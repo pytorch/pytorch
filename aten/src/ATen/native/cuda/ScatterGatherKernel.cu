@@ -6,8 +6,10 @@
 #include <ATen/native/ScatterGatherShapeChecks.h>
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/TensorIterator.h>
+
 #include <ATen/native/cuda/Loops.cuh>
-#include <ATen/core/Array.h>
+#include <ATen/cuda/detail/OffsetCalculator.cuh>
+#include <ATen/cuda/CUDAContext.h>
 
 namespace at { namespace native {
 
@@ -16,16 +18,6 @@ namespace at { namespace native {
 // to avoid redundant kernels for different types
 // of the same size.
 template <int N> struct alignas(N) OpaqueType { char data[N]; };
-
-template <int N>
-static OffsetCalculator<N> sg_make_offset_calculator(const TensorIterator& iter) {
-  AT_ASSERT(N <= iter.ntensors());
-  std::array<const int64_t*, N> strides;
-  for (int i = 0; i < N; ++i) {
-    strides[i] = iter.strides(i).data();
-  }
-  return OffsetCalculator<N>(iter.ndim(), iter.shape().data(), strides.data());
-}
 
 template <bool is_scatter_like, typename scalar_t>
 struct _cuda_scatter_gather_internal_kernel {
@@ -53,7 +45,7 @@ struct _cuda_scatter_gather_internal_kernel {
     char* src_ptr = (char*)iter.data_ptr(1);
     char* index_ptr = (char*)iter.data_ptr(2);
 
-    auto offset_calc = sg_make_offset_calculator<3>(iter);
+    auto offset_calc = make_offset_calculator<3>(iter);
     legacy::launch_kernel<launch_size_nd, launch_bound2>(iter.numel(), [=]__device__(int i) {
       auto offsets = offset_calc.get(i);
 
