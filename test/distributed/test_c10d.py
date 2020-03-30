@@ -1683,6 +1683,8 @@ class ProcessGroupNCCLTest(TestCase):
                 torch.tensor([float(self.num_gpus * (self.num_gpus + 1) / 2)]),
                 tensors[rt])
 
+    # See https://github.com/pytorch/pytorch/issues/35689
+    @skip_if_rocm
     def test_allgather_ops(self):
         store = c10d.FileStore(self.file.name, self.world_size)
         pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)

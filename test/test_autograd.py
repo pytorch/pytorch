@@ -29,7 +29,7 @@ from torch.autograd.profiler import (profile, format_time, EventList,
 import torch.autograd.functional as autogradF
 from torch.utils.checkpoint import checkpoint
 from torch.testing._internal.common_utils import (TEST_MKL, TEST_WITH_ROCM, TestCase, run_tests, skipIfNoLapack,
-                                                  suppress_warnings, slowTest,
+                                                  skipIfRocm, suppress_warnings, slowTest,
                                                   load_tests, random_symmetric_pd_matrix, random_symmetric_matrix,
                                                   IS_WINDOWS, IS_MACOS, CudaMemoryLeakCheck)
 from torch.autograd import Variable, Function, detect_anomaly
@@ -4111,6 +4111,8 @@ for shape in [(1,), ()]:
         with self.assertRaisesRegex(RuntimeError, "must implement the backward"):
             BadBw.apply(inp).sum().backward()
 
+    # Test is unstable on Rocm, see https://github.com/pytorch/pytorch/issues/35689
+    @skipIfRocm
     def test_leaky_relu_inplace_with_neg_slope(self):
         for device in torch.testing.get_all_device_types():
             a = torch.tensor([-1., 1.], device=device, requires_grad=True)
