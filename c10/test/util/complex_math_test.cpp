@@ -78,7 +78,7 @@ TEST(TestLog10, Rev) {
 
 // Power functions
 
-TEST(TestPowSqrt, equal) {
+TEST(TestPowSqrt, Equal) {
   {
   c10::complex<float> x(0.1, 1.2);
   c10::complex<float> y = std::pow(x, float(0.5));
@@ -95,7 +95,7 @@ TEST(TestPowSqrt, equal) {
   }
 }
 
-TEST(TestPow, square) {
+TEST(TestPow, Square) {
   {
   c10::complex<float> x(0.1, 1.2);
   c10::complex<float> y = std::pow(x, float(2));
@@ -109,5 +109,148 @@ TEST(TestPow, square) {
   c10::complex<double> z = x * x;
   ASSERT_NEAR(y.real(), z.real(), tol);
   ASSERT_NEAR(y.imag(), z.imag(), tol);
+  }
+}
+
+// Trigonometric functions and hyperbolic functions
+
+TEST(TestSinCosSinhCosh, Identity) {
+  // sin(x + i * y) = sin(x) * cosh(y) + i * cos(x) * sinh(y)
+  // cos(x + i * y) = cos(x) * cosh(y) - i * sin(x) * sinh(y)
+  {
+  c10::complex<float> x(0.1, 1.2);
+  c10::complex<float> y = std::sin(x);
+  float expected_real = std::sin(x.real()) * std::cosh(x.imag());
+  float expected_imag = std::cos(x.real()) * std::sinh(x.imag());
+  ASSERT_NEAR(y.real(), expected_real, tol);
+  ASSERT_NEAR(y.imag(), expected_imag, tol);
+  }
+  {
+  c10::complex<float> x(0.1, 1.2);
+  c10::complex<float> y = std::cos(x);
+  float expected_real = std::cos(x.real()) * std::cosh(x.imag());
+  float expected_imag = - std::sin(x.real()) * std::sinh(x.imag());
+  ASSERT_NEAR(y.real(), expected_real, tol);
+  ASSERT_NEAR(y.imag(), expected_imag, tol);
+  }
+  {
+  c10::complex<double> x(0.1, 1.2);
+  c10::complex<double> y = std::sin(x);
+  float expected_real = std::sin(x.real()) * std::cosh(x.imag());
+  float expected_imag = std::cos(x.real()) * std::sinh(x.imag());
+  ASSERT_NEAR(y.real(), expected_real, tol);
+  ASSERT_NEAR(y.imag(), expected_imag, tol);
+  }
+  {
+  c10::complex<double> x(0.1, 1.2);
+  c10::complex<double> y = std::cos(x);
+  float expected_real = std::cos(x.real()) * std::cosh(x.imag());
+  float expected_imag = - std::sin(x.real()) * std::sinh(x.imag());
+  ASSERT_NEAR(y.real(), expected_real, tol);
+  ASSERT_NEAR(y.imag(), expected_imag, tol);
+  }
+}
+
+TEST(TestTan, Identity) {
+  {
+  c10::complex<float> x(0.1, 1.2);
+  c10::complex<float> y = std::tan(x);
+  c10::complex<float> z = std::sin(x) / std::cos(x);
+  ASSERT_NEAR(y.real(), z.real(), tol);
+  ASSERT_NEAR(y.imag(), z.imag(), tol);
+  }
+  {
+  c10::complex<double> x(0.1, 1.2);
+  c10::complex<double> y = std::tan(x);
+  c10::complex<double> z = std::sin(x) / std::cos(x);
+  ASSERT_NEAR(y.real(), z.real(), tol);
+  ASSERT_NEAR(y.imag(), z.imag(), tol);
+  }
+}
+
+TEST(TestTanh, Identity) {
+  {
+  c10::complex<float> x(0.1, 1.2);
+  c10::complex<float> y = std::tanh(x);
+  c10::complex<float> z = std::sinh(x) / std::cosh(x);
+  ASSERT_NEAR(y.real(), z.real(), tol);
+  ASSERT_NEAR(y.imag(), z.imag(), tol);
+  }
+  {
+  c10::complex<double> x(0.1, 1.2);
+  c10::complex<double> y = std::tanh(x);
+  c10::complex<double> z = std::sinh(x) / std::cosh(x);
+  ASSERT_NEAR(y.real(), z.real(), tol);
+  ASSERT_NEAR(y.imag(), z.imag(), tol);
+  }
+}
+
+// Rev trigonometric functions
+
+TEST(TestRevTrigonometric, Rev) {
+  {
+  c10::complex<float> x(0.5, 0.6);
+  c10::complex<float> s = std::sin(x);
+  c10::complex<float> ss = std::asin(s);
+  c10::complex<float> c = std::cos(x);
+  c10::complex<float> cc = std::acos(c);
+  c10::complex<float> t = std::tan(x);
+  c10::complex<float> tt = std::atan(t);
+  ASSERT_NEAR(x.real(), ss.real(), tol);
+  ASSERT_NEAR(x.imag(), ss.imag(), tol);
+  ASSERT_NEAR(x.real(), cc.real(), tol);
+  ASSERT_NEAR(x.imag(), cc.imag(), tol);
+  ASSERT_NEAR(x.real(), tt.real(), tol);
+  ASSERT_NEAR(x.imag(), tt.imag(), tol);
+  }
+  {
+  c10::complex<double> x(0.5, 0.6);
+  c10::complex<double> s = std::sin(x);
+  c10::complex<double> ss = std::asin(s);
+  c10::complex<double> c = std::cos(x);
+  c10::complex<double> cc = std::acos(c);
+  c10::complex<double> t = std::tan(x);
+  c10::complex<double> tt = std::atan(t);
+  ASSERT_NEAR(x.real(), ss.real(), tol);
+  ASSERT_NEAR(x.imag(), ss.imag(), tol);
+  ASSERT_NEAR(x.real(), cc.real(), tol);
+  ASSERT_NEAR(x.imag(), cc.imag(), tol);
+  ASSERT_NEAR(x.real(), tt.real(), tol);
+  ASSERT_NEAR(x.imag(), tt.imag(), tol);
+  }
+}
+
+// Rev hyperbolic functions
+
+TEST(TestRevHyperbolic, Rev) {
+  {
+  c10::complex<float> x(0.5, 0.6);
+  c10::complex<float> s = std::sinh(x);
+  c10::complex<float> ss = std::asinh(s);
+  c10::complex<float> c = std::cosh(x);
+  c10::complex<float> cc = std::acosh(c);
+  c10::complex<float> t = std::tanh(x);
+  c10::complex<float> tt = std::atanh(t);
+  ASSERT_NEAR(x.real(), ss.real(), tol);
+  ASSERT_NEAR(x.imag(), ss.imag(), tol);
+  ASSERT_NEAR(x.real(), cc.real(), tol);
+  ASSERT_NEAR(x.imag(), cc.imag(), tol);
+  ASSERT_NEAR(x.real(), tt.real(), tol);
+  ASSERT_NEAR(x.imag(), tt.imag(), tol);
+  }
+  {
+  c10::complex<double> x(0.5, 0.6);
+  c10::complex<double> s = std::sinh(x);
+  c10::complex<double> ss = std::asinh(s);
+  c10::complex<double> c = std::cosh(x);
+  c10::complex<double> cc = std::acosh(c);
+  c10::complex<double> t = std::tanh(x);
+  c10::complex<double> tt = std::atanh(t);
+  ASSERT_NEAR(x.real(), ss.real(), tol);
+  ASSERT_NEAR(x.imag(), ss.imag(), tol);
+  ASSERT_NEAR(x.real(), cc.real(), tol);
+  ASSERT_NEAR(x.imag(), cc.imag(), tol);
+  ASSERT_NEAR(x.real(), tt.real(), tol);
+  ASSERT_NEAR(x.imag(), tt.imag(), tol);
   }
 }
