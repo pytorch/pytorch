@@ -22,6 +22,7 @@ struct QuantFusionInfo {
 };
 
 std::vector<QuantFusionInfo> quant_fusion_pattern_and_replacements() {
+  // aten::conv2d
   std::string conv2d = R"(
 graph(%a_quant, %packed_params, %r_scale, %r_zero_point, %r_dtype, %stride, %padding, %dilation, %groups):
         %a_dequant = aten::dequantize(%a_quant)
@@ -31,9 +32,26 @@ graph(%a_quant, %packed_params, %r_scale, %r_zero_point, %r_dtype, %stride, %pad
         %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
         return (%r_quant) )";
 
+  // quantized::conv2d
   std::string quantized_conv2d = R"(
 graph(%a_quant, %packed_params, %r_scale, %r_zero_point, %r_dtype, %stride, %padding, %dilation, %groups):
         %r_quant = quantized::conv2d(%a_quant, %packed_params, %stride, %padding, %dilation, %groups, %r_scale, %r_zero_point)
+        return (%r_quant) )";
+
+  // aten::conv3d
+  std::string conv3d = R"(
+graph(%a_quant, %packed_params, %r_scale, %r_zero_point, %r_dtype, %stride, %padding, %dilation, %groups):
+        %a_dequant = aten::dequantize(%a_quant)
+        %w_quant : Tensor, %b : Tensor? = quantized::conv3d_unpack(%packed_params)
+        %w_dequant = aten::dequantize(%w_quant)
+        %r = aten::conv3d(%a_dequant, %w_dequant, %b, %stride, %padding, %dilation, %groups)
+        %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
+        return (%r_quant) )";
+
+  // quantized::conv3d
+  std::string quantized_conv3d = R"(
+graph(%a_quant, %packed_params, %r_scale, %r_zero_point, %r_dtype, %stride, %padding, %dilation, %groups):
+        %r_quant = quantized::conv3d(%a_quant, %packed_params, %stride, %padding, %dilation, %groups, %r_scale, %r_zero_point)
         return (%r_quant) )";
 
   std::string addmm = R"(
@@ -223,6 +241,7 @@ graph(%a_quant, %b_scalar, %alpha):
 
   return {
       {"quantized::conv2d", conv2d, quantized_conv2d},
+      {"quantized::conv3d", conv3d, quantized_conv3d},
       {"quantized::conv2d_relu", conv2d_relu, quantized_conv2d_relu},
       {"quantized::conv2d_relu", conv2d_inplace_relu, quantized_conv2d_relu},
       {"quantized::linear", addmm, quantized_linear},
