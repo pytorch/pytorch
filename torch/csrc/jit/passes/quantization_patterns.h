@@ -203,7 +203,8 @@ graph(%a_quant, %b_scalar, %alpha):
   // quanntized::add_scalar_relu
   std::string add_scalar_relu = R"(
 graph(%a_quant, %b_scalar, %alpha):
-         %r_add = aten::add(%a_quant, %b_scalar, %alpha)
+         %a_dequant = aten::dequantize(%a_quant)
+         %r_add = aten::add(%a_dequant, %b_scalar, %alpha)
          %r = aten::relu(%r_add)
          return (%r) )";
 
@@ -215,7 +216,8 @@ graph(%a_quant, %b_scalar, %alpha):
   // quanntized::add_scalar_relu_out
   std::string add_scalar_relu_out = R"(
 graph(%a_quant, %b_scalar, %alpha):
-         %r_add = aten::add_(%a_quant, %b_scalar, %alpha)
+         %a_dequant = aten::dequantize(%a_quant)
+         %r_add = aten::add_(%a_dequant, %b_scalar, %alpha)
          %r = aten::relu(%r_add)
          return (%r) )";
 
