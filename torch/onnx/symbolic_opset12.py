@@ -30,6 +30,10 @@ def nll_loss(g, self, target, weight, reduction, ignore_index):
         else:
             return g.op("NegativeLogLikelihoodLoss", self, target, weight, reduction_s=reduction)
 
+    if ignore_index < 0:
+        c = self.type().sizes()[1]
+        ignore_index += c
+
     # if ignore_index is specified, compute nllloss with no reduction and apply the reduction afterwards
     if weight.node().mustBeNone():
         nllloss = g.op("NegativeLogLikelihoodLoss", self, target, reduction_s='none', ignore_index_i=ignore_index)
