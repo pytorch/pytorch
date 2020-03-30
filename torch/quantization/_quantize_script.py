@@ -67,7 +67,7 @@ def _check_is_script_module(model):
         raise ValueError('input must be a script module, got: ' + str(type(model)))
 
 def _check_forward_method(model):
-   if not model._c._has_method('forward'):
+    if not model._c._has_method('forward'):
         raise ValueError('input script module does not have forward method')
 
 def script_qconfig(qconfig):
@@ -78,26 +78,22 @@ def script_qconfig(qconfig):
 def get_scripted_qconfig_dict(qconfig_dict):
     return {k: script_qconfig(v) if v else None for k, v in qconfig_dict.items()}
 
-def prepare_script(model, qconfig_dict, inplace=False):
+def _prepare_script(model, qconfig_dict, is_dynamic):
     _check_is_script_module(model)
     scripted_qconfig_dict = get_scripted_qconfig_dict(qconfig_dict)
+    return wrap_cpp_module(torch._C._jit_pass_insert_observers(model._c,
+                                                               'forward',
+                                                               scripted_qconfig_dict,
+                                                               False,
+                                                               is_dynamic)) 
+
+def prepare_script(model, qconfig_dict, inplace=False):
     if not inplace:
         model = model.copy()
-    model = wrap_cpp_module(torch._C._jit_pass_insert_observers(model._c,
-                                                                'forward',
-                                                                scripted_qconfig_dict,
-                                                                False))
-    return model
+    return _prepare_script(model, qconfig_dict, is_dynamic=False)
 
 def prepare_dynamic_script(model, qconfig_dict):
-    _check_is_script_module(model)
-    scripted_qconfig_dict = get_scripted_qconfig_dict(qconfig_dict)
-    model = wrap_cpp_module(torch._C._jit_pass_insert_observers(model._c,
-                                                                'forward',
-                                                                scripted_qconfig_dict,
-                                                                False,
-                                                                True))
-    return model
+    return _prepare_script(model, qconfig_dict, is_dynamic=True)
 
 def _convert_script(model, is_dynamic, debug=False):
     _check_is_script_module(model)
@@ -123,7 +119,7 @@ def _quantize_script(model, qconfig_dict, run_fn, run_args, is_dynamic, debug):
     if is_dynamic:
         model = prepare_dynamic_script(model, qconfig_dict)
     else:
-       model = prepare_script(model, qconfig_dict, True)
+        model = prepare_script(model, qconfig_dict, True)
     run_fn(model._c._get_method('forward'), *run_args)
 
     if is_dynamic:
