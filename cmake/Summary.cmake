@@ -1,5 +1,5 @@
 # Prints accumulated Caffe2 configuration summary
-function (caffe2_print_configuration_summary)
+function(caffe2_print_configuration_summary)
   message(STATUS "")
   message(STATUS "******** Summary ********")
   message(STATUS "General:")
