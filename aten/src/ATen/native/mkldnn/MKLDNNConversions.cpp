@@ -97,14 +97,14 @@ Tensor dense_to_mkldnn(const Tensor& cpu_tensor) {
   AT_ERROR("MKL-DNN build is disabled");
 }
 
-Tensor mkldnn_reorder_conv2d_weight(
+Tensor mkldnn_reorder_conv_weight(
     const Tensor& self,
     IntArrayRef padding,
     IntArrayRef stride,
     IntArrayRef dilation,
     int64_t groups,
     int64_t dims) {
-  AT_ERROR("mkldnn_reorder_conv2d_weight: MKL-DNN build is disabled");
+  AT_ERROR("mkldnn_reorder_conv_weight: MKL-DNN build is disabled");
 }
 
 #endif // AT_MKLDNN_ENABLED()
