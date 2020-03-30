@@ -38,9 +38,9 @@ using LLVMExprEval = ExprEval<LLVMCodeGen>;
     auto a = Name##Imm::make(Val);                 \
     LLVMExprEval cg(a);                            \
     if (std::is_floating_point<decltype(Val)>()) { \
-      EXPECT_NEAR(cg.value<Type>(), Val, 0.1);     \
+      ASSERT_NEAR(cg.value<Type>(), Val, 0.1);     \
     } else {                                       \
-      EXPECT_EQ(cg.value<Type>(), Val);            \
+      ASSERT_EQ(cg.value<Type>(), Val);            \
     }                                              \
   }
 TEST_LLVM_SCALAR_TYPES(IMM_TEST)
@@ -54,9 +54,9 @@ TEST_LLVM_SCALAR_TYPES(IMM_TEST)
     auto c = Add::make(a, b);                      \
     LLVMExprEval cg(c);                            \
     if (std::is_floating_point<decltype(Val)>()) { \
-      EXPECT_NEAR(cg.value<Type>(), Val * 3, 0.1); \
+      ASSERT_NEAR(cg.value<Type>(), Val * 3, 0.1); \
     } else {                                       \
-      EXPECT_EQ(cg.value<Type>(), Val * 3);        \
+      ASSERT_EQ(cg.value<Type>(), Val * 3);        \
     }                                              \
   }
 TEST_LLVM_SCALAR_TYPES(ADD_TEST)
@@ -70,9 +70,9 @@ TEST_LLVM_SCALAR_TYPES(ADD_TEST)
     auto c = Sub::make(a, b);                      \
     LLVMExprEval cg(c);                            \
     if (std::is_floating_point<decltype(Val)>()) { \
-      EXPECT_NEAR(cg.value<Type>(), Val, 0.1);     \
+      ASSERT_NEAR(cg.value<Type>(), Val, 0.1);     \
     } else {                                       \
-      EXPECT_EQ(cg.value<Type>(), Val);            \
+      ASSERT_EQ(cg.value<Type>(), Val);            \
     }                                              \
   }
 TEST_LLVM_SCALAR_TYPES(SUB_TEST)
@@ -86,9 +86,9 @@ TEST_LLVM_SCALAR_TYPES(SUB_TEST)
     auto c = Mul::make(a, b);                      \
     LLVMExprEval cg(c);                            \
     if (std::is_floating_point<decltype(Val)>()) { \
-      EXPECT_NEAR(cg.value<Type>(), Val * 4, 0.1); \
+      ASSERT_NEAR(cg.value<Type>(), Val * 4, 0.1); \
     } else {                                       \
-      EXPECT_EQ(cg.value<Type>(), Val * 4);        \
+      ASSERT_EQ(cg.value<Type>(), Val * 4);        \
     }                                              \
   }
 TEST_LLVM_SCALAR_TYPES(MUL_TEST)
@@ -102,9 +102,9 @@ TEST_LLVM_SCALAR_TYPES(MUL_TEST)
     auto c = Div::make(a, b);                      \
     LLVMExprEval cg(c);                            \
     if (std::is_floating_point<decltype(Val)>()) { \
-      EXPECT_NEAR(cg.value<Type>(), 2, 0.1);       \
+      ASSERT_NEAR(cg.value<Type>(), 2, 0.1);       \
     } else {                                       \
-      EXPECT_EQ(cg.value<Type>(), 2);              \
+      ASSERT_EQ(cg.value<Type>(), 2);              \
     }                                              \
   }
 TEST_LLVM_SCALAR_TYPES(DIV_TEST)
@@ -115,7 +115,7 @@ void testLLVMIntToFloatCastTest() {
   auto a = IntImm::make(2);
   auto b = Cast::make(kFloat, a);
   LLVMExprEval cg(b, {});
-  EXPECT_EQ(cg.value<float>(), 2.0);
+  ASSERT_EQ(cg.value<float>(), 2.0);
 }
 
 void testLLVMFloatToIntCastTest() {
@@ -123,7 +123,7 @@ void testLLVMFloatToIntCastTest() {
   auto a = FloatImm::make(2.0);
   auto b = Cast::make(kInt, a);
   LLVMExprEval cg(b);
-  EXPECT_EQ(cg.value<int>(), 2);
+  ASSERT_EQ(cg.value<int>(), 2);
 }
 
 void testLLVMIntToLongCastTest() {
@@ -131,7 +131,7 @@ void testLLVMIntToLongCastTest() {
   auto a = IntImm::make(12345);
   auto b = Cast::make(kLong, a);
   LLVMExprEval cg(b);
-  EXPECT_EQ(cg.value<int64_t>(), 12345);
+  ASSERT_EQ(cg.value<int64_t>(), 12345);
 }
 
 void testLLVMByteToCharCastTest() {
@@ -139,7 +139,7 @@ void testLLVMByteToCharCastTest() {
   auto a = ByteImm::make(250);
   auto b = Cast::make(kChar, a);
   LLVMExprEval cg(b);
-  EXPECT_EQ(cg.value<int8_t>(), (int8_t)250);
+  ASSERT_EQ(cg.value<int8_t>(), (int8_t)250);
 }
 
 void testLLVMHalfToLongCastTest() {
@@ -147,7 +147,7 @@ void testLLVMHalfToLongCastTest() {
   auto a = HalfImm::make(2.0);
   auto b = Cast::make(kLong, a);
   LLVMExprEval cg(b);
-  EXPECT_EQ(cg.value<int64_t>(), 2);
+  ASSERT_EQ(cg.value<int64_t>(), 2);
 }
 
 void testLLVMByteToDoubleCastTest() {
@@ -155,7 +155,7 @@ void testLLVMByteToDoubleCastTest() {
   auto a = ByteImm::make(2);
   auto b = Cast::make(kDouble, a);
   LLVMExprEval cg(b);
-  EXPECT_EQ(cg.value<double>(), 2);
+  ASSERT_EQ(cg.value<double>(), 2);
 }
 
 void testLLVMLetTest01() {
@@ -165,7 +165,7 @@ void testLLVMLetTest01() {
   ExprHandle body = ExprHandle(2.f) + (x * ExprHandle(3.f) + ExprHandle(4.f));
   ExprHandle result = Let::make(x, ExprHandle(3.f), body);
   LLVMExprEval cg(result, {});
-  EXPECT_EQ(cg.value<float>(), 2.f + (3.f * 3.f + 4.f));
+  ASSERT_EQ(cg.value<float>(), 2.f + (3.f * 3.f + 4.f));
 }
 
 void testLLVMLetTest02() {
@@ -178,7 +178,7 @@ void testLLVMLetTest02() {
   ExprHandle e1 = Let::make(x, ExprHandle(3.f), body);
   ExprHandle e2 = Let::make(y, ExprHandle(6.f), e1);
   LLVMExprEval cg(e2, {});
-  EXPECT_EQ(cg.value<float>(), 2.f + (3.f * 3.f + 4.f * 6.f));
+  ASSERT_EQ(cg.value<float>(), 2.f + (3.f * 3.f + 4.f * 6.f));
 }
 
 void testLLVMLetTestMultitype() {
@@ -191,7 +191,7 @@ void testLLVMLetTestMultitype() {
   ExprHandle e1 = Let::make(x, ExprHandle((uint8_t)3), body);
   ExprHandle e2 = Let::make(y, ExprHandle((at::Half)6.f), e1);
   LLVMExprEval cg(e2, {});
-  EXPECT_EQ(cg.value<double>(), 2.f + (3 * 3 + 4 * 6.f));
+  ASSERT_EQ(cg.value<double>(), 2.f + (3 * 3 + 4 * 6.f));
 }
 
 void testLLVMBufferTest() {
@@ -201,7 +201,7 @@ void testLLVMBufferTest() {
   std::vector<void*> args({v.data()});
   auto rv = IntImm::make(0);
   LLVMExprEval cg(rv, {a});
-  EXPECT_EQ(cg.value<int>(args), 0);
+  ASSERT_EQ(cg.value<int>(args), 0);
 }
 
 void testLLVMBlockTest() {
@@ -217,9 +217,9 @@ void testLLVMBlockTest() {
   });
 
   LLVMCodeGen cg(block, {a});
-  EXPECT_EQ(cg.value<int>(args), 0);
-  EXPECT_EQ(v[0], 4);
-  EXPECT_EQ(v[1], 4);
+  ASSERT_EQ(cg.value<int>(args), 0);
+  ASSERT_EQ(v[0], 4);
+  ASSERT_EQ(v[1], 4);
 }
 
 void testLLVMLoadStoreTest() {
@@ -236,9 +236,9 @@ void testLLVMLoadStoreTest() {
       IntImm::make(1));
   LLVMCodeGen cg(store, {a, b});
   std::vector<void*> args({a_buffer.data(), b_buffer.data()});
-  EXPECT_EQ(cg.value<int>(args), 0);
-  EXPECT_EQ(a_buffer[0], 42);
-  EXPECT_EQ(b_buffer[0], 42);
+  ASSERT_EQ(cg.value<int>(args), 0);
+  ASSERT_EQ(a_buffer[0], 42);
+  ASSERT_EQ(b_buffer[0], 42);
 }
 
 void testLLVMIfThenElseTest() {
@@ -260,9 +260,9 @@ void testLLVMIfThenElseTest() {
       IntImm::make(1));
   LLVMCodeGen cg(store, {a, b, c});
   std::vector<void*> args({a_buffer.data(), b_buffer.data(), c_buffer.data()});
-  EXPECT_EQ(cg.value<int>(args), 0);
-  EXPECT_EQ(a_buffer[0], 42);
-  EXPECT_EQ(b_buffer[0], 42);
+  ASSERT_EQ(cg.value<int>(args), 0);
+  ASSERT_EQ(a_buffer[0], 42);
+  ASSERT_EQ(b_buffer[0], 42);
 }
 
 void testLLVMVecLoadStoreTest() {
@@ -279,22 +279,22 @@ void testLLVMVecLoadStoreTest() {
       Broadcast::make(IntImm::make(1), 4));
   LLVMCodeGen cg(store, {a, b});
   std::vector<void*> args({a_buffer.data(), b_buffer.data()});
-  EXPECT_EQ(cg.value<int>(args), 0);
-  EXPECT_EQ(a_buffer[0], 1);
-  EXPECT_EQ(a_buffer[1], 1);
-  EXPECT_EQ(a_buffer[2], 1);
-  EXPECT_EQ(a_buffer[3], 1);
-  EXPECT_EQ(b_buffer[0], 1);
-  EXPECT_EQ(b_buffer[1], 1);
-  EXPECT_EQ(b_buffer[2], 1);
-  EXPECT_EQ(b_buffer[3], 1);
+  ASSERT_EQ(cg.value<int>(args), 0);
+  ASSERT_EQ(a_buffer[0], 1);
+  ASSERT_EQ(a_buffer[1], 1);
+  ASSERT_EQ(a_buffer[2], 1);
+  ASSERT_EQ(a_buffer[3], 1);
+  ASSERT_EQ(b_buffer[0], 1);
+  ASSERT_EQ(b_buffer[1], 1);
+  ASSERT_EQ(b_buffer[2], 1);
+  ASSERT_EQ(b_buffer[3], 1);
 }
 
 #define FLOAT_INTRINSICS_TEST(Name, Lanes)                       \
-  void testLLVMVecFloat_##Name##Lane##Lanes##Test() {         \
+  void testLLVMVecFloat_##Name##Lane##Lanes##Test() {            \
     KernelScope kernel_scope;                                    \
-    Buffer a(VarHandle("A", kHandle), kFloat, {1});                \
-    Buffer b(VarHandle("B", kHandle), kFloat, {1});                \
+    Buffer a(VarHandle("A", kHandle), kFloat, {1});              \
+    Buffer b(VarHandle("B", kHandle), kFloat, {1});              \
     float val = 0.5f;                                            \
     std::vector<float> a_buffer(Lanes, val);                     \
     std::vector<float> b_buffer(Lanes, val);                     \
@@ -309,9 +309,9 @@ void testLLVMVecLoadStoreTest() {
     LLVMCodeGen cg(store, {a, b});                               \
     std::vector<void*> args({a_buffer.data(), b_buffer.data()}); \
     float ref = std::Name(0.5f);                                 \
-    EXPECT_EQ(cg.value<int>(args), 0);                           \
+    ASSERT_EQ(cg.value<int>(args), 0);                           \
     for (int i = 0; i < Lanes; i++) {                            \
-      EXPECT_FLOAT_EQ(a_buffer[i], val);                               \
+      ASSERT_FLOAT_EQ(a_buffer[i], val);                         \
     }                                                            \
   } // namespace jit
 FLOAT_INTRINSICS_TEST(erf, 4)
@@ -336,14 +336,14 @@ FLOAT_INTRINSICS_TEST(expm1, 8)
 FLOAT_INTRINSICS_TEST(lgamma, 8)
 #undef FLOAT_INTRINSICS_TEST
 
-#define DOUBLE_INTRINSICS_TEST(Name, Lanes)                       \
-  void testLLVMVecDouble_##Name##Lane##Lanes##Test() {         \
+#define DOUBLE_INTRINSICS_TEST(Name, Lanes)                      \
+  void testLLVMVecDouble_##Name##Lane##Lanes##Test() {           \
     KernelScope kernel_scope;                                    \
-    Buffer a(VarHandle("A", kHandle), kDouble, {1});                \
-    Buffer b(VarHandle("B", kHandle), kDouble, {1});                \
+    Buffer a(VarHandle("A", kHandle), kDouble, {1});             \
+    Buffer b(VarHandle("B", kHandle), kDouble, {1});             \
     float val = 0.5f;                                            \
-    std::vector<double> a_buffer(Lanes, val);                     \
-    std::vector<double> b_buffer(Lanes, val);                     \
+    std::vector<double> a_buffer(Lanes, val);                    \
+    std::vector<double> b_buffer(Lanes, val);                    \
     auto store = Store::make(                                    \
         b,                                                       \
         Ramp::make(0, 1, Lanes),                                 \
@@ -355,9 +355,9 @@ FLOAT_INTRINSICS_TEST(lgamma, 8)
     LLVMCodeGen cg(store, {a, b});                               \
     std::vector<void*> args({a_buffer.data(), b_buffer.data()}); \
     float ref = std::Name(0.5f);                                 \
-    EXPECT_EQ(cg.value<int>(args), 0);                           \
+    ASSERT_EQ(cg.value<int>(args), 0);                           \
     for (int i = 0; i < Lanes; i++) {                            \
-      EXPECT_FLOAT_EQ(a_buffer[i], val);                               \
+      ASSERT_FLOAT_EQ(a_buffer[i], val);                         \
     }                                                            \
   } // namespace jit
 DOUBLE_INTRINSICS_TEST(erf, 2)
@@ -395,7 +395,8 @@ void testLLVMVectorizerLoadStoreTest() {
   Stmt* s = l.root_stmt();
   l.vectorize(*dynamic_cast<Block*>(s)->stmts().begin());
 
-  EXPECT_TRUE(dynamic_cast<For*>(*dynamic_cast<Block*>(s)->stmts().begin()) == nullptr);
+  ASSERT_TRUE(
+      dynamic_cast<For*>(*dynamic_cast<Block*>(s)->stmts().begin()) == nullptr);
 
   LLVMCodeGen cg(s, {a, c_buf});
 
@@ -992,7 +993,7 @@ void testLLVMStoreFloat() {
   LLVMCodeGen cg(expr, {result});
   std::vector<void*> args({result_buffer.data()});
   ASSERT_EQ(cg.value<int>(args), 0);
-  EXPECT_EQ(result_buffer[0], 3.14f);
+  ASSERT_EQ(result_buffer[0], 3.14f);
 }
 
 void testLLVMSimpleMath01() {
@@ -1083,7 +1084,7 @@ void testLLVMBitwiseOps() {
   ExprHandle f = (((a ^ (b << 1)) & c) >> 2) | d;
   LLVMExprEval cg(f);
 
-  EXPECT_EQ(cg.value<int>(), 11);
+  ASSERT_EQ(cg.value<int>(), 11);
 }
 
 void testLLVMDynamicShapeAdd() {

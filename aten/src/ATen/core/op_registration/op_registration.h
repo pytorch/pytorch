@@ -634,7 +634,7 @@ public:
     : func_(c10::KernelFunction::makeFromUnboxedRuntimeFunction(f))
     // TODO: Don't go through WrapRuntimeKernelFunctor
     , schema_(detail::FunctionSchemaInferer<detail::WrapRuntimeKernelFunctor<std::decay_t<Func>>>()())
-    , debug_(std::string(c10::util::get_fully_qualified_type_name<Func>()))
+    , debug_("Func")
     {}
 
   // This overload accepts lambdas, e.g., CppFunction([](const Tensor& self) { ... })
@@ -643,7 +643,7 @@ public:
     : func_(c10::KernelFunction::makeFromUnboxedLambda(std::forward<Lambda>(f)))
     // TODO: Don't go through WrapRuntimeKernelFunctor
     , schema_(detail::FunctionSchemaInferer<detail::WrapRuntimeKernelFunctor<std::decay_t<Lambda>>>()())
-    , debug_(std::string(c10::util::get_fully_qualified_type_name<Lambda>()))
+    , debug_("Lambda")
     {}
 
   // This static factory lets you create CppFunctions that (1) don't have boxing
@@ -656,7 +656,7 @@ public:
     return CppFunction(
       c10::KernelFunction::makeFromUnboxedOnlyRuntimeFunction(f),
       /* schema */ nullptr,
-      std::string(c10::util::get_fully_qualified_type_name<Func>())
+      "UnboxedOnly"
     );
   }
 
@@ -675,7 +675,7 @@ public:
     return CppFunction(
       c10::KernelFunction::makeFromBoxedFunction<func>(),
       /* schema */ nullptr,
-      "BoxedFunction" // TODO: make this more descriptive
+      "BoxedFunction"
     );
   }
 
