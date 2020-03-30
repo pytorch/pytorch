@@ -23,7 +23,7 @@ namespace torch {
 namespace jit {
 
 using QConfig = std::tuple<Module, Module>;
-using QConfigDict = std::unordered_map<std::string, QConfig>;
+using QConfigDict = std::unordered_map<std::string, c10::optional<QConfig>>;
 using ModuleQConfigMap = std::unordered_map<ModulePtr, c10::optional<QConfig>>;
 
 struct OptionalQConfigHash {
@@ -65,8 +65,7 @@ TORCH_API void FoldQuantNodesIntoInputsOutputs(std::shared_ptr<Graph>& graph);
 TORCH_API Module InsertObservers(
     Module& module,
     const std::string& method_name,
-    const std::unordered_map<std::string, std::tuple<Module, Module>>&
-        qconfig_dict,
+    const QConfigDict& qconfig_dict,
     bool inplace = false,
     bool is_dynamic = false);
 
