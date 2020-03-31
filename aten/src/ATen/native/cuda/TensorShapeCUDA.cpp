@@ -24,7 +24,7 @@ static auto registry_set_cuda_ = torch::RegisterOperators()
   ;
 
 // unify with cuda implementation?  This is not done to avoid a dispatch in resize_impl_cpu_
-Tensor& set_storage_cuda_(Tensor& result, Storage storage, int64_t storage_offset, IntArrayRef size, IntArrayRef stride) { // Note-to-self: This handles all CUDA-only implementations
+Tensor& set_storage_cuda_(Tensor& result, Storage storage, int64_t storage_offset, IntArrayRef size, IntArrayRef stride) {
   checkSetStorage(result, storage, storage_offset, size, stride);
 
   result.unsafeGetTensorImpl()->set_storage_offset(storage_offset);
