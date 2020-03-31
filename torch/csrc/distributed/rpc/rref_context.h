@@ -17,7 +17,8 @@ namespace callback {
 // It's the callback for RemoteCall.
 void TORCH_API confirmPendingUser(
     const rpc::Message& message,
-    const c10::optional<utils::FutureError>& futErr);
+    const c10::optional<utils::FutureError>& futErr,
+    const ForkId& expectedForkId);
 
 // It's the callback for finishing creating owner rref, it returned deletedRRef,
 // so that the deletedRRef can be handled under GIL in python_functions.cpp if
