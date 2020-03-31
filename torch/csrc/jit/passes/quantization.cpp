@@ -766,10 +766,13 @@ bool isWeight(Module& module, Value* v) {
       auto g = m.get_method(n->s(attr::name)).graph();
       auto call_method_result = isWeight(m, g->inputs()[u.offset]);
       if (result.has_value()) {
-        // Check to make sure all the CallMethods in the graph produce the same output.
-        TORCH_CHECK(call_method_result == result.value(),
-                    "Expected all CallMethods to use either weight "
-                    "or non-weight value.", v->debugName());
+        // Check to make sure all the CallMethods in the graph produce the same
+        // output.
+        TORCH_CHECK(
+            call_method_result == result.value(),
+            "Expected all CallMethods to use either weight "
+            "or non-weight value.",
+            v->debugName());
       } else {
         result = call_method_result;
       }
@@ -1379,7 +1382,7 @@ void insertQuantDeQuantCall(
     Node* observer,
     bool is_per_channel,
     const std::vector<std::string>& qparam_names,
-    bool is_dynamic=false) {
+    bool is_dynamic = false) {
   Graph* g = observer->owningGraph();
   // Observer output
   Value* v = observer->output();
@@ -1397,7 +1400,10 @@ void insertQuantDeQuantCall(
     std::string choose_qparams_func = "_choose_qparams_per_tensor";
     auto reduce_range = g->insertConstant(false);
     // choose_qparams_per_tensor has 2 outputs, (scale, zero_point).
-    choose_qparams = g->create(at::Symbol::aten(choose_qparams_func), {v, reduce_range}, /* num_outputs = */ 2);
+    choose_qparams = g->create(
+        at::Symbol::aten(choose_qparams_func),
+        {v, reduce_range},
+        /* num_outputs = */ 2);
 
     choose_qparams->output(0)->setDebugName(v->debugName() + ".scale");
     choose_qparams->output(0)->setType(FloatType::get());
@@ -1435,7 +1441,8 @@ void insertQuantDeQuantCall(
     // Skip quant node and observer node (we need to keep
     // observer nodes around since we need them to
     // find the quantization parameters)
-    if (use.user != quant && use.user != observer && use.user != choose_qparams) {
+    if (use.user != quant && use.user != observer &&
+        use.user != choose_qparams) {
       uses.push_back(use);
     }
   }
@@ -1649,7 +1656,8 @@ void InsertQuantDeQuantHelper::quantizeTensors(
       module.register_attribute(qparam_name, qparam.type(), qparam);
       qparam_names.push_back(qparam_name);
     }
-    insertQuantDeQuantCall(module, self, n, isPerChannel(qscheme), qparam_names, is_dynamic_);
+    insertQuantDeQuantCall(
+        module, self, n, isPerChannel(qscheme), qparam_names, is_dynamic_);
   }
 }
 
