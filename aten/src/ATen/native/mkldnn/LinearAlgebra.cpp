@@ -314,6 +314,61 @@ Tensor& mkldnn_addbmm_(
   return mkldnn_addbmm_out(self, result, batch1, batch2, beta, alpha);
 }
 
+Tensor mkldnn_maybe_multiply(const Tensor& grad_output, Scalar alpha=1) {
+  if (alpha.toFloat() == 1) {
+    return grad_output;
+  }
+  const ideep::tensor grady = itensor_from_mkldnn(grad_output);
+  ideep::tensor gradx;
+  ideep::eltwise_forward::compute(grady, gradx, 
+      ideep::algorithm::eltwise_linear, 
+      ideep::prop_kind::forward_inference, alpha.toFloat());
+  return new_with_itensor_mkldnn(std::move(gradx), grad_output.options());
+}
+
+std::tuple<Tensor, Tensor> mkldnn_matmul_backward(const Tensor& grad_output, const Tensor& mat1,  const Tensor& mat2, Scalar alpha=1) {
+  auto grady = itensor_from_mkldnn(grad_output);
+  auto ndim = mat1.dim();
+  auto m1 = itensor_from_mkldnn(mat1).transpose_(ndim-2, ndim-1);
+  auto m2 = itensor_from_mkldnn(mat2).transpose_(ndim-2, ndim-1);
+  ideep::tensor gradx, gradw;
+  ideep::matmul_forward::compute(grady, m2, gradx, alpha.toFloat());
+  ideep::matmul_forward::compute(m1, grady, gradw, alpha.toFloat());
+  return std::tuple<Tensor, Tensor>{
+      new_with_itensor_mkldnn(std::move(gradx), grad_output.options()), 
+      new_with_itensor_mkldnn(std::move(gradw), grad_output.options())};
+}
+
+std::tuple<Tensor, Tensor> mkldnn_mm_backward(const Tensor& grad_output, const Tensor& self, const Tensor& mat2) {
+  return mkldnn_matmul_backward(grad_output, self, mat2);
+}
+
+std::tuple<Tensor, Tensor, Tensor> mkldnn_addmm_backward(const Tensor& grad_output, const Tensor& mat1, const Tensor& mat2, Scalar beta, Scalar alpha) {
+  Tensor grad1 = mkldnn_maybe_multiply(grad_output, beta);
+  Tensor grad2, grad3;
+  std::tie(grad2, grad3) = mkldnn_matmul_backward(grad_output, mat1, mat2, alpha);
+  return std::tuple<Tensor, Tensor, Tensor>{grad1, grad2, grad3}; 
+}
+
+std::tuple<Tensor, Tensor, Tensor> mkldnn_addbmm_backward(const Tensor& grad_output, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
+  Tensor grad1 = mkldnn_maybe_multiply(grad_output, beta);
+  
+  // Workaround: MkldnnTensor not support unsqueeze and expand operations now
+  auto grad_dense = at::native::mkldnn_to_dense(grad_output, grad_output.scalar_type());
+  grad_dense = grad_dense.unsqueeze(0).expand({batch1.size(0), batch1.size(1), batch2.size(2)});
+  auto grad_expand = at::native::dense_to_mkldnn(grad_dense, grad_output.scalar_type());
+  Tensor grad2, grad3;
+  std::tie(grad2, grad3) = mkldnn_matmul_backward(grad_expand, batch1, batch2, alpha);
+  return std::tuple<Tensor, Tensor, Tensor>{grad1, grad2, grad3}; 
+}
+
+std::tuple<Tensor, Tensor, Tensor> mkldnn_baddbmm_backward(const Tensor& grad_output, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
+  Tensor grad1 = mkldnn_maybe_multiply(grad_output, beta);
+  Tensor grad2, grad3;
+  std::tie(grad2, grad3) = mkldnn_matmul_backward(grad_output, batch1, batch2, alpha);
+  return std::tuple<Tensor, Tensor, Tensor>{grad1, grad2, grad3}; 
+}
+
 } // namespace native
 } // namespace at
 

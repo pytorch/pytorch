@@ -717,25 +717,35 @@ class TestMkldnn(TestCase):
         in_features = torch.randint(3, 10, (1,)).item()
         out_features = torch.randint(3, 100, (1,)).item()
         x = torch.randn(3, in_features, dtype=torch.float32) * 10
-        for bias in [True, False]:
-            x1 = x.clone().requires_grad_()
-            x2 = x.clone().to_mkldnn().requires_grad_()
-            linear = torch.nn.Linear(in_features, out_features).float()
-            mkldnn_linear = copy.deepcopy(linear)
-            y1 = linear(x1).sum()
-            y2 = mkldnn_linear(x2).to_dense().sum()
-            y1.backward()
-            y2.backward()
-            self.assertEqual(x1.grad, x2.grad.to_dense())
-            self.assertEqual(linear.weight.grad, mkldnn_linear.weight.grad)
-            if bias:
-                self.assertEqual(linear.bias.grad, mkldnn_linear.bias.grad)
+        
+        x1 = x.clone().requires_grad_()
+        linear = torch.nn.Linear(in_features, out_features)
+        y1 = linear(x1).sum()
+        y1.backward()
+        for dtype in [torch.bfloat16, torch.float]:
+            for bias in [True, False]:
+                x2 = x.clone().to(dtype).to_mkldnn().requires_grad_()
+                mkldnn_linear = copy.deepcopy(linear)
+                y2 = mkldnn_linear(x2).to_dense().sum()
+                y2.backward()
+
+                self.assertEqual(x2.dtype, dtype)
+                self.assertEqual(x1.grad, x2.grad.float().to_dense(), prec=5e-2)
+                # for current bf16 design, the weight/weight.grad are in fp32 datatype  
+                self.assertEqual(mkldnn_linear.weight.grad.dtype, torch.float)
+                self.assertEqual(linear.weight.grad, mkldnn_linear.weight.grad, prec=6e-2)
+                if bias:
+                    self.assertEqual(mkldnn_linear.bias.grad.dtype, torch.float)
+                    self.assertEqual(linear.bias.grad, mkldnn_linear.bias.grad, prec=5e-2)
 
     def test_mm(self):
         M, N, O = 23, 8, 12
         b1 = torch.randn(M, N, dtype=torch.float32)
         b2 = torch.randn(N, O, dtype=torch.float32)
         mm = torch.mm(b1, b2)
+        
+        b1_in = b1.clone()
+        b1_in.mm(b2)
         for dtype in [torch.bfloat16, torch.float]:
             b1_ = b1.clone().to_mkldnn().to(dtype)
             b2_ = b2.clone().to_mkldnn().to(dtype)
@@ -749,12 +759,40 @@ class TestMkldnn(TestCase):
             self.assertEqual(mkldnn_y.dtype, dtype)
             self.assertEqual(mm, mkldnn_y.float().to_dense(), prec=5e-02)
 
+            b1_in_ = b1.clone().to_mkldnn().to(dtype)
+            b1_in_.mm(b2_)
+            self.assertEqual(b1_in_.dtype, dtype)
+            self.assertEqual(b1_in, b1_in_.float().to_dense(), prec=5e-02)
+
+    def test_mm_backward(self):
+        M, N, O = 23, 8, 12
+        b1 = torch.randn(M, N, dtype=torch.float32)
+        b2 = torch.randn(N, O, dtype=torch.float32)
+
+        b1_ = b1.clone().requires_grad_()
+        b2_ = b2.clone().requires_grad_()
+        mm = torch.mm(b1_, b2_)
+        y1 = mm.sum()
+        y1.backward()
+        for dtype in [torch.bfloat16, torch.float]:
+            b1_m = b1.clone().to_mkldnn().to(dtype).requires_grad_()
+            b2_m = b2.clone().to_mkldnn().to(dtype).requires_grad_()
+            mkldnn_mm = torch.mm(b1_m, b2_m)
+            y2 = mkldnn_mm.to_dense().sum()
+            y2.backward()
+                    
+            self.assertEqual(b1_.grad, b1_m.grad.to(dtype).to_dense(), prec=5e-02)
+            self.assertEqual(b2_.grad, b2_m.grad.to(dtype).to_dense(), prec=5e-02)
+
     def test_bmm(self):
         num_batches = 10
         M, N, O = 23, 8, 12
         b1 = torch.randn(num_batches, M, N, dtype=torch.float32)
         b2 = torch.randn(num_batches, N, O, dtype=torch.float32)
         bmm = torch.bmm(b1, b2)
+        
+        b1_in = b1.clone()
+        b1_in.bmm(b2)
         for dtype in [torch.bfloat16, torch.float]:
             b1_ = b1.clone().to_mkldnn().to(dtype)
             b2_ = b2.clone().to_mkldnn().to(dtype)
@@ -767,7 +805,33 @@ class TestMkldnn(TestCase):
             torch.bmm(b1_, b2_, out=mkldnn_y)
             self.assertEqual(mkldnn_y.dtype, dtype)
             self.assertEqual(bmm, mkldnn_y.float().to_dense(), prec=6e-02)
-    ''' 
+            
+            b1_in_ = b1.clone().to_mkldnn().to(dtype)
+            b1_in_.bmm(b2_)
+            self.assertEqual(b1_in_.dtype, dtype)
+            self.assertEqual(b1_in, b1_in_.float().to_dense(), prec=5e-02)
+     
+    def test_bmm_backward(self):
+        num_batches = 10
+        M, N, O = 23, 8, 12
+        b1 = torch.randn(num_batches, M, N, dtype=torch.float32)
+        b2 = torch.randn(num_batches, N, O, dtype=torch.float32)
+
+        b1_ = b1.clone().requires_grad_()
+        b2_ = b2.clone().requires_grad_()
+        bmm = torch.bmm(b1_, b2_)
+        y1 = bmm.sum()
+        y1.backward()
+        for dtype in [torch.bfloat16, torch.float]:
+            b1_m = b1.clone().to_mkldnn().to(dtype).requires_grad_()
+            b2_m = b2.clone().to_mkldnn().to(dtype).requires_grad_()
+            mkldnn_bmm = torch.bmm(b1_m, b2_m)
+            y2 = mkldnn_bmm.to_dense().sum()
+            y2.backward()
+            self.assertEqual(mkldnn_bmm.dtype, dtype)
+            self.assertEqual(b1_.grad, b1_m.grad.float().to_dense(), prec=5e-02)
+            self.assertEqual(b2_.grad, b2_m.grad.float().to_dense(), prec=5e-02)
+    
     def test_addmm(self):
         for i in range(8, 14, 2):
             for j in range(8, 14, 2):
@@ -779,6 +843,8 @@ class TestMkldnn(TestCase):
                 res = torch.randn(M, O, dtype=torch.float32)
 
                 addmm = torch.addmm(input=res, mat1=b1, mat2=b2, alpha=alpha, beta=beta)
+                res1 = res.clone()
+                res1.addmm_(b1, b2, alpha=alpha, beta=beta)
                 for dtype in [torch.bfloat16, torch.float]:
                     b1_ = b1.clone().to_mkldnn().to(dtype)
                     b2_ = b2.clone().to_mkldnn().to(dtype)
@@ -794,7 +860,39 @@ class TestMkldnn(TestCase):
                                 out=mkldnn_y),
                     self.assertEqual(mkldnn_y.dtype, dtype)
                     self.assertEqual(addmm, mkldnn_y.float().to_dense(), prec=5e-02)
-    '''
+                    
+                    res1_ = res.clone().to_mkldnn().to(dtype)
+                    res1_.addmm_(b1_, b2_, alpha=alpha, beta=beta)
+                    self.assertEqual(res1, res1_.float().to_dense(), prec=5e-02)
+    
+    def test_addmm_backward(self):
+        for i in range(8, 14, 2):
+            for j in range(8, 14, 2):
+                alpha = i / 10
+                beta = j / 10
+                M, N, O = 23, 8, 12
+                b1 = torch.randn(M, N, dtype=torch.float32)
+                b2 = torch.randn(N, O, dtype=torch.float32)
+                res = torch.randn(M, O, dtype=torch.float32)
+
+                b1_ = b1.clone().requires_grad_()
+                b2_ = b2.clone().requires_grad_()
+                res_ = res.clone().requires_grad_()
+                addmm = torch.addmm(input=res_, mat1=b1_, mat2=b2_, alpha=alpha, beta=beta)
+                y1 = addmm.sum()
+                y1.backward()
+                for dtype in [torch.bfloat16, torch.float]:
+                    b1_m = b1.clone().to_mkldnn().to(dtype).requires_grad_()
+                    b2_m = b2.clone().to_mkldnn().to(dtype).requires_grad_()
+                    res_m = res.clone().to_mkldnn().to(dtype).requires_grad_()
+                    mkldnn_addmm = torch.addmm(input=res_m, mat1=b1_m, mat2=b2_m, \
+                                   alpha=alpha, beta=beta)
+                    y2 = mkldnn_addmm.to_dense().sum()
+                    y2.backward()
+                    
+                    self.assertEqual(b1_.grad, b1_m.grad.to(dtype).to_dense(), prec=5e-02)
+                    self.assertEqual(b2_.grad, b2_m.grad.to(dtype).to_dense(), prec=5e-02)
+                    self.assertEqual(res_.grad, res_m.grad.to(dtype).to_dense(), prec=5e-02)
 
     def test_addbmm(self):
         dtype2prec = {torch.float: 2e-5, torch.bfloat16: 5e-1}
@@ -824,11 +922,42 @@ class TestMkldnn(TestCase):
                     torch.addbmm(res_, b1_, b2_, beta=beta, alpha=alpha, out=mkldnn_y)
                     self.assertEqual(mkldnn_y.dtype, dtype)
                     self.assertEqual(addbmm, mkldnn_y.float().to_dense(), prec=dtype2prec[dtype])
-                    
+    
                     res1_ = res.clone().to_mkldnn().to(dtype)
                     res1_.addbmm_(b1_, b2_, alpha=alpha, beta=beta)
                     self.assertEqual(res1, res1_.float().to_dense(), prec=dtype2prec[dtype])
+    
+    def test_addbmm_backward(self):
+        dtype2prec = {torch.float: 5e-2, torch.bfloat16: 7e-2}
+        for i in range(8, 14, 2):
+            for j in range(8, 14, 2):
+                alpha = i / 10
+                beta = j / 10 
+                num_batches = 10 
+                M, N, O = 23, 8, 12
+                b1 = torch.randn(num_batches, M, N, dtype=torch.float32)
+                b2 = torch.randn(num_batches, N, O, dtype=torch.float32)
+                res = torch.randn(M, O, dtype=torch.float32)
 
+                b1_ = b1.clone().requires_grad_()
+                b2_ = b2.clone().requires_grad_()
+                res_ = res.clone().requires_grad_()
+                addbmm = torch.addbmm(res_, b1_, b2_, beta=beta, alpha=alpha)
+                y1 = addbmm.sum()
+                y1.backward()
+                for dtype in [torch.bfloat16, torch.float]:
+                    b1_m = b1.clone().to_mkldnn().to(dtype).requires_grad_()
+                    b2_m = b2.clone().to_mkldnn().to(dtype).requires_grad_()
+                    res_m = res.clone().to_mkldnn().to(dtype).requires_grad_()
+                    mkldnn_addbmm = torch.addbmm(res_m, b1_m, b2_m, beta=beta, alpha=alpha)
+                    y2 = mkldnn_addbmm.to_dense().sum()
+                    y2.backward()
+                    self.assertEqual(b1_.grad, b1_m.grad.to(dtype).to_dense(), prec=dtype2prec[dtype])
+                    self.assertEqual(b2_.grad, b2_m.grad.to(dtype).to_dense(), prec=dtype2prec[dtype])
+                    self.assertEqual(res_.grad, res_m.grad.to(dtype).to_dense(), prec=dtype2prec[dtype])
+
+    # mkldnn baddbmm now doesn't support broadcast
+    # self tensor should be in 3 dims
     def test_baddbmm(self):
         dtype2prec = {torch.float: 2e-5, torch.bfloat16: 5e-1}
         for i in range(8, 14, 2):
@@ -861,6 +990,36 @@ class TestMkldnn(TestCase):
                     res1_ = res.clone().to_mkldnn().to(dtype)
                     res1_.baddbmm_(b1_, b2_, alpha=alpha, beta=beta)
                     self.assertEqual(res1, res1_.float().to_dense(), prec=dtype2prec[dtype])
+
+    def test_baddbmm_backward(self):
+        for i in range(8, 14, 2):
+            for j in range(8, 14, 2):
+                alpha = i / 10
+                beta = j / 10 
+                M, N, O = 23, 8, 12
+                num_batches = 10 
+                b1 = torch.randn(num_batches, M, N, dtype=torch.float32)
+                b2 = torch.randn(num_batches, N, O, dtype=torch.float32)
+                res = torch.randn(num_batches, M, O, dtype=torch.float32)
+
+                b1_ = b1.clone().requires_grad_()
+                b2_ = b2.clone().requires_grad_()
+                res_ = res.clone().requires_grad_()
+                baddbmm = torch.baddbmm(res_, b1_, b2_, alpha=alpha, beta=beta)
+                y1 = baddbmm.sum()
+                y1.backward()
+                
+                for dtype in [torch.bfloat16, torch.float]:
+                    b1_m = b1.clone().to_mkldnn().to(dtype).requires_grad_()
+                    b2_m = b2.clone().to_mkldnn().to(dtype).requires_grad_()
+                    res_m = res.clone().to_mkldnn().to(dtype).requires_grad_()
+                    mkldnn_baddbmm = torch.baddbmm(res_m, b1_m, b2_m, alpha=alpha, beta=beta)
+                    y2 = mkldnn_baddbmm.to_dense().sum()
+                    y2.backward()
+                     
+                    self.assertEqual(b1_.grad, b1_m.grad.to(dtype).to_dense(), prec=5e-02)
+                    self.assertEqual(b2_.grad, b2_m.grad.to(dtype).to_dense(), prec=5e-02)
+                    self.assertEqual(res_.grad, res_m.grad.to(dtype).to_dense(), prec=5e-02)
 
     def test_softmax(self):
         x = torch.randn(3, 4, 5, dtype=torch.float32) * 10

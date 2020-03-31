@@ -577,22 +577,59 @@ Tensor mm_mat2_backward(const Tensor & grad, const Tensor & mat1, IntArrayRef si
   }
 }
 
-std::tuple<Tensor, Tensor, Tensor> addmm_backward(const Tensor& grad_output, const Tensor& mat1, const Tensor& mat2,
-    const Scalar& beta, const Scalar& alpha, std::array<bool, 3> output_mask) {
-  Tensor grad1, grad2, grad3;
+std::tuple<Tensor, Tensor> mm_backward(const Tensor& grad_output, const Tensor& self, const Tensor& mat2) {
+  Tensor grad1, grad2;
   if (grad_output.is_mkldnn()) {
-    if (output_mask[1]) {
-      grad2 = at::mkldnn_linear_backward_input(mat1.sizes(), grad_output, mat2.t());
-    }
-    if (output_mask[0] || output_mask[2]) {
-      std::tie(grad3, grad1) = at::mkldnn_linear_backward_weights(grad_output, mat1, mat2.t(), output_mask[0]);
-      grad3 = grad3.t();
-    }
-  } else {
-    grad1 = maybe_multiply(grad_output, beta);
-    grad2 = mm_mat1_backward(grad_output, mat2, mat1, alpha);
-    grad3 = mm_mat2_backward(grad_output, mat1, mat2.sizes(), mat2.strides(), alpha);
+    return at::mkldnn_mm_backward(grad_output, self, mat2);
   }
+
+  grad1 = mm_mat1_backward(grad_output, mat2, self, 1);
+  grad2 = mm_mat2_backward(grad_output, self, mat2.sizes(), mat2.strides(), 1);
+  return std::tuple<Tensor, Tensor>{grad1, grad2};
+}
+
+std::tuple<Tensor, Tensor> bmm_backward(const Tensor& grad_output, const Tensor& self, const Tensor& mat2) {
+  Tensor grad1, grad2;
+  if (grad_output.is_mkldnn()) {
+    return at::mkldnn_mm_backward(grad_output, self, mat2);
+  }
+
+  grad1 = grad_output.bmm(mat2.transpose(1, 2));
+  grad2 = self.transpose(1, 2).bmm(grad_output);
+  return std::tuple<Tensor, Tensor>{grad1, grad2};
+}
+
+std::tuple<Tensor, Tensor, Tensor> addmm_backward(const Tensor& grad_output, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha) {
+  if (grad_output.is_mkldnn()) {
+    return at::mkldnn_addmm_backward(grad_output, mat1, mat2, beta, alpha); 
+  }
+
+  Tensor grad1 = maybe_multiply(grad_output, beta);
+  Tensor grad2 = mm_mat1_backward(grad_output, mat2, mat1, alpha);
+  Tensor grad3 = mm_mat2_backward(grad_output, mat1, mat2.sizes(), mat2.strides(), alpha);
+  return std::tuple<Tensor, Tensor, Tensor>{grad1, grad2, grad3};
+}
+
+std::tuple<Tensor, Tensor, Tensor> addbmm_backward(const Tensor& grad_output, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) {
+  if (grad_output.is_mkldnn()) {
+    return at::mkldnn_addbmm_backward(grad_output, batch1, batch2, beta, alpha);
+  } 
+  
+  Tensor grad1 = maybe_multiply(grad_output, beta);
+  auto grad_expand = grad_output.unsqueeze(0).expand({ batch1.size(0), batch1.size(1), batch2.size(2)});
+  Tensor grad2 = grad_expand.bmm(batch2.transpose(1, 2)) * alpha;
+  Tensor grad3 = batch1.transpose(1, 2).bmm(grad_expand) * alpha;
+  return std::tuple<Tensor, Tensor, Tensor>{grad1, grad2, grad3};
+}
+
+std::tuple<Tensor, Tensor, Tensor> baddbmm_backward(const Tensor& grad_output, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) {
+  if (grad_output.is_mkldnn()) { 
+    return at::mkldnn_baddbmm_backward(grad_output, batch1, batch2, beta, alpha);
+  }
+
+  Tensor grad1 = maybe_multiply(grad_output, beta);
+  Tensor grad2 = grad_output.bmm(batch2.transpose(1, 2)) * alpha;
+  Tensor grad3 = batch1.transpose(1, 2).bmm(grad_output) * alpha;
   return std::tuple<Tensor, Tensor, Tensor>{grad1, grad2, grad3};
 }
 

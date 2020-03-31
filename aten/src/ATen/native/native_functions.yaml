@@ -1630,6 +1630,18 @@
   dispatch:
     MkldnnCPU: mkldnn_linear_backward
 
+- func: mkldnn_mm_backward(Tensor grad_output, Tensor self, Tensor mat2) -> (Tensor, Tensor)
+  requires_tensor: True
+
+- func: mkldnn_addmm_backward(Tensor grad_output, Tensor mat1, Tensor mat2, Scalar beta=1, Scalar alpha=1) -> (Tensor, Tensor, Tensor)
+  requires_tensor: True
+
+- func: mkldnn_addbmm_backward(Tensor grad_output, Tensor batch1, Tensor batch2, Scalar beta=1, Scalar alpha=1) -> (Tensor, Tensor, Tensor)
+  requires_tensor: True
+
+- func: mkldnn_baddbmm_backward(Tensor grad_output, Tensor batch1, Tensor batch2, Scalar beta=1, Scalar alpha=1) -> (Tensor, Tensor, Tensor)
+  requires_tensor: True
+
 - func: fbgemm_linear_int8_weight_fp32_activation(Tensor input, Tensor weight, Tensor packed, Tensor col_offsets, Scalar weight_scale, Scalar weight_zero_point, Tensor bias) -> Tensor
 
 - func: fbgemm_linear_int8_weight(Tensor input, Tensor weight, Tensor packed, Tensor col_offsets, Scalar weight_scale, Scalar weight_zero_point, Tensor bias) -> Tensor
@@ -3302,7 +3314,7 @@
     CUDA: legacy::cuda::_th_addmm_out
     SparseCPU: addmm_out_sparse_dense_cpu
     SparseCUDA: addmm_out_sparse_dense_cuda
-    MkldnnCPU: mkldnn_linear_wraper_out
+    MkldnnCPU: mkldnn_addmm_out
   supports_named_tensor: True
 
 - func: addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
@@ -3313,7 +3325,7 @@
     CUDA: legacy::cuda::_th_addmm
     SparseCPU: addmm_sparse_dense_cpu
     SparseCUDA: addmm_sparse_dense_cuda
-    MkldnnCPU: mkldnn_linear_wraper
+    MkldnnCPU: mkldnn_addmm
   supports_named_tensor: True
 
 - func: addmm_(Tensor(a!) self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
@@ -3325,6 +3337,7 @@
     # broadcasting
     SparseCPU: s_addmm_sparse_dense_cpu_
     SparseCUDA: s_addmm_sparse_dense_cuda_
+    MkldnnCPU: mkldnn_addmm_ 
   supports_named_tensor: True
 
 
