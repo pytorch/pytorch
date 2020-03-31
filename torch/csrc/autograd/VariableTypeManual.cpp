@@ -343,6 +343,13 @@ Tensor & detach_(Tensor & self) {
   return self;
 }
 
+void reset_grad_accumulator(Variable & self) {
+  AutogradMeta* meta = torch::autograd::impl::get_autograd_meta(self);
+  if (meta != nullptr) {
+    meta->grad_accumulator_.reset();
+  }
+}
+
 Tensor & set__source_Storage(Tensor & self, Storage source) {
   RECORD_FUNCTION("set_", std::vector<c10::IValue>({self}), Node::peek_at_next_sequence_nr());
   auto& self_ = unpack(self, "self", 0);
@@ -356,6 +363,7 @@ Tensor & set__source_Storage(Tensor & self, Storage source) {
     at::AutoNonVariableTypeMode non_var_type_mode(true);
     self_.set_(source);
   }
+  reset_grad_accumulator(self);
   increment_version(self);
   if (grad_fn) {
       rebase_history(flatten_tensor_args( self ), grad_fn);
@@ -375,6 +383,7 @@ Tensor & set__source_Storage_storage_offset(Tensor & self, Storage source, int64
     at::AutoNonVariableTypeMode non_var_type_mode(true);
     self_.set_(source, storage_offset, size, stride);
   }
+  reset_grad_accumulator(self);
   increment_version(self);
   if (grad_fn) {
       rebase_history(flatten_tensor_args( self ), grad_fn);
@@ -414,6 +423,7 @@ Tensor & set__source_Tensor(Tensor & self, const Tensor & source) {
     at::AutoNonVariableTypeMode non_var_type_mode(true);
     self_.set_(source_);
   }
+  reset_grad_accumulator(self);
   increment_version(self);
   if (grad_fn) {
       rebase_history(flatten_tensor_args( self ), grad_fn);
@@ -455,6 +465,7 @@ Tensor & set_(Tensor & self) {
     at::AutoNonVariableTypeMode non_var_type_mode(true);
     self_.set_();
   }
+  reset_grad_accumulator(self);
   increment_version(self);
   if (grad_fn) {
       rebase_history(flatten_tensor_args( self ), grad_fn);

@@ -3895,17 +3895,20 @@
   manual_kernel_registration: True
   device_guard: False
   use_c10_dispatcher: full
+  dispatch: set_storage_cpu_
 
 - func: set_.source_Tensor(Tensor(a!) self, Tensor source) -> Tensor(a!)
   variants: method
   manual_kernel_registration: True
   device_guard: False
   use_c10_dispatcher: full
+  dispatch: set_tensor_
 
 - func: set_(Tensor(a!) self) -> Tensor(a!)
   variants: method
   manual_kernel_registration: True
   use_c10_dispatcher: full
+  dispatch: set_empty_
 
 - func: set_quantizer_(Tensor(a!) self, ConstQuantizerPtr quantizer) -> Tensor(a!)
   variants: method

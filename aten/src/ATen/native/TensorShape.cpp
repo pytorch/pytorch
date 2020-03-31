@@ -39,8 +39,6 @@ Tensor _shape_as_tensor(const Tensor& self) {
   return at::tensor(self.sizes(), options);
 }
 
-namespace {
-
 Tensor& set_(Tensor& result, Storage source) {
   return result.set_(source, 0, static_cast<int64_t>(source.size()), {});
 }
@@ -106,7 +104,6 @@ static auto registry_set_cpu_ = torch::RegisterOperators()
     .schema("set_(Tensor(a!) self) -> Tensor(a!)")
     .impl_unboxedOnlyKernel<decltype(set_empty_), &set_empty_>(DispatchKey::CPUTensorId))
   ;
-}
 
 std::vector<Tensor> broadcast_tensors(TensorList tensors) {
   return expand_outplace(tensors);
