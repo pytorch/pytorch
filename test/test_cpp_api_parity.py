@@ -10,7 +10,7 @@ from cpp_api_parity.parity_table_parser import parse_parity_tracker_table
 from cpp_api_parity import module_impl_check, functional_impl_check, sample_module, sample_functional
 
 # NOTE: turn this on if you want to print source code of all C++ tests (e.g. for debugging purpose)
-print_cpp_source = False
+PRINT_CPP_SOURCE = False
 
 devices = ['cpu', 'cuda']
 
@@ -39,6 +39,6 @@ assert len([name for name in TestCppApiParity.__dict__ if 'sample_functional' in
     len(sample_functional.functional_tests) * len(devices)
 
 if __name__ == "__main__":
-    module_impl_check.build_cpp_tests(TestCppApiParity, print_cpp_source=print_cpp_source)
-    functional_impl_check.build_cpp_tests(TestCppApiParity, print_cpp_source=print_cpp_source)
+    module_impl_check.build_cpp_tests(TestCppApiParity, print_cpp_source=PRINT_CPP_SOURCE)
+    functional_impl_check.build_cpp_tests(TestCppApiParity, print_cpp_source=PRINT_CPP_SOURCE)
     common.run_tests()

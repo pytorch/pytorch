@@ -86,10 +86,9 @@ def run_python_forward_backward(unit_test_class, test_params):
     device = test_params.device
     module = test_params.test_instance.constructor(*test_params.test_instance.constructor_args).to(device)
 
-    inputs = set_python_tensors_requires_grad([arg_value for _, arg_value in test_params.arg_dict['input']])
-    inputs = inputs + [arg_value for _, arg_value in test_params.arg_dict['target']]
-    inputs = inputs + [arg_value for _, arg_value in test_params.arg_dict['extra_args']]
-    inputs = move_python_tensors_to_device(inputs, device)
+    inputs = set_python_tensors_requires_grad(move_python_tensors_to_device([arg_value for _, arg_value in test_params.arg_dict['input']], device))
+    inputs = inputs + move_python_tensors_to_device([arg_value for _, arg_value in test_params.arg_dict['target']], device)
+    inputs = inputs + move_python_tensors_to_device([arg_value for _, arg_value in test_params.arg_dict['extra_args']], device)
 
     # Some modules (such as `RReLU`) create random tensors in their forward pass.
     # To make sure the random tensors created are the same in Python/C++, we need
@@ -163,9 +162,12 @@ def test_forward_backward(unit_test_class, test_params):
 
     run_cpp_test_fn_and_check_output()
 
-    # Remove temporary folder that stores C++ outputs
-    assert os.path.exists(cpp_tmp_folder)
-    shutil.rmtree(cpp_tmp_folder)
+    # Remove temporary folder that stores C++ outputs, but don't block the process
+    # if this fails.
+    try:
+        shutil.rmtree(cpp_tmp_folder)
+    except:
+        pass
 
 def test_torch_nn_module_variant(unit_test_class, test_params):
     test_forward_backward(unit_test_class, test_params)

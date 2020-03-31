@@ -123,7 +123,7 @@ def compute_cpp_args_construction_stmts_and_forward_arg_symbols(test_params):
             cpp_forward_args_symbols.append(arg_name)
         return args_stmts
 
-    cpp_forward_input_args_stmts = move_cpp_tensors_to_device(set_cpp_tensors_requires_grad(add_cpp_forward_args(test_params.arg_dict['input']), test_params.arg_dict['input']), device)
+    cpp_forward_input_args_stmts = set_cpp_tensors_requires_grad(move_cpp_tensors_to_device(add_cpp_forward_args(test_params.arg_dict['input']), device), test_params.arg_dict['input'])
     cpp_forward_target_args_stmts = move_cpp_tensors_to_device(add_cpp_forward_args(test_params.arg_dict['target']), device)
     cpp_forward_extra_args_stmts = move_cpp_tensors_to_device(add_cpp_forward_args(test_params.arg_dict['extra_args']), device)
 
