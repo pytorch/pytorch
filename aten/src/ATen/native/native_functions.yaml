@@ -140,6 +140,9 @@
   dispatch:
     CUDA: _cudnn_ctc_loss
 
+- func: _use_cudnn_rnn_flatten_weight() -> bool
+  use_c10_dispatcher: full
+
 - func: _cudnn_rnn_flatten_weight(Tensor[] weight_arr, int weight_stride0, int input_size, int mode, int hidden_size, int num_layers, bool batch_first, bool bidirectional, bool type_2) -> Tensor
   dispatch:
     CUDA: _cudnn_rnn_flatten_weight
@@ -775,10 +778,6 @@
 
 - func: conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor
 
-- func: _conv2d_prepack(Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1, float? output_min=None, float? output_max=None) -> Tensor
-
-- func: _conv2d_packed(Tensor packed_weight, Tensor input) -> Tensor
-
 - func: conv3d(Tensor input, Tensor weight, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] dilation=1, int groups=1) -> Tensor
 
 - func: conv_tbc(Tensor self, Tensor weight, Tensor bias, int pad=0) -> Tensor
@@ -1307,10 +1306,38 @@
     CPU: floor_out
     CUDA: floor_out
 
-- func: floor_divide(Tensor input, Tensor other) -> Tensor
+- func: floor_divide(Tensor self, Tensor other) -> Tensor
+  variants: function, method
+  dispatch:
+    CPU: floor_divide
+    CUDA: floor_divide
+    SparseCPU: floor_divide_sparse
+    SparseCUDA: floor_divide_sparse
   supports_named_tensor: True
 
-- func: floor_divide.Scalar(Tensor input, Scalar other) -> Tensor
+- func: floor_divide_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  variants: method
+  dispatch:
+    CPU: floor_divide_
+    CUDA: floor_divide_
+    SparseCPU: floor_divide_sparse_
+    SparseCUDA: floor_divide_sparse_
+  supports_named_tensor: True
+
+- func: floor_divide.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: floor_divide_out
+    CUDA: floor_divide_out
+    SparseCPU: floor_divide_out_sparse_zerodim
+    SparseCUDA: floor_divide_out_sparse_zerodim
+  supports_named_tensor: True
+
+- func: floor_divide.Scalar(Tensor self, Scalar other) -> Tensor
+  variants: function, method
+  supports_named_tensor: True
+
+- func: floor_divide_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  variants: method
   supports_named_tensor: True
 
 - func: frac(Tensor self) -> Tensor
@@ -1573,10 +1600,6 @@
 
 - func: linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor
   python_module: nn
-
-- func: _linear_prepack(Tensor weight, Tensor? bias=None, float? output_min=None, float? output_max=None) -> Tensor
-
-- func: _linear_packed(Tensor packed_weight, Tensor input) -> Tensor
 
 - func: mkldnn_linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor
   python_module: nn
@@ -1938,7 +1961,7 @@
   variants: function, method
   dispatch:
     CPU: mm_cpu
-    CUDA: legacy::cuda::_th_mm
+    CUDA: mm_cuda
     SparseCPU: _sparse_mm
     SparseCUDA: _sparse_mm
   supports_named_tensor: True
@@ -1946,7 +1969,7 @@
 - func: mm.out(Tensor self, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: mm_cpu_out
-    CUDA: legacy::cuda::_th_mm_out
+    CUDA: mm_out_cuda
     SparseCPU: _sparse_mm_out
     SparseCUDA: _sparse_mm_out
   supports_named_tensor: True
@@ -2037,6 +2060,11 @@
     SparseCUDA: narrow_copy_sparse
 
 - func: narrow(Tensor(a) self, int dim, int start, int length) -> Tensor(a)
+  variants: function, method
+  device_guard: False
+  supports_named_tensor: True
+
+- func: narrow.Tensor(Tensor(a) self, int dim, Tensor start, int length) -> Tensor(a)
   variants: function, method
   device_guard: False
   supports_named_tensor: True
@@ -2844,12 +2872,21 @@
 
 - func: true_divide.Tensor(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
-  variants: function
+  variants: function, method
   dispatch:
     CPU: true_divide
     CUDA: true_divide
     SparseCPU: true_divide_sparse
     SparseCUDA: true_divide_sparse
+  supports_named_tensor: True
+
+- func: true_divide_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  variants: method
+  dispatch:
+    CPU: true_divide_
+    CUDA: true_divide_
+    SparseCPU: true_divide_sparse_
+    SparseCUDA: true_divide_sparse_
   supports_named_tensor: True
 
 - func: true_divide.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
@@ -2862,7 +2899,11 @@
 
 - func: true_divide.Scalar(Tensor self, Scalar other) -> Tensor
   use_c10_dispatcher: full
-  variants: function
+  variants: function, method
+  supports_named_tensor: True
+
+- func: true_divide_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  variants: method
   supports_named_tensor: True
 
 - func: trunc(Tensor self) -> Tensor
@@ -3601,11 +3642,16 @@
   dispatch:
     CPU: quantize_per_channel_cpu
 
-- func: dequantize(Tensor self) -> Tensor
+- func: dequantize.self(Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
     QuantizedCPU: dequantize_quant
+
+- func: dequantize.tensors(Tensor[] tensors) -> Tensor[]
+  variants: function
+  dispatch:
+    QuantizedCPU: dequantize_tensors_quant
 
 - func: q_scale(Tensor self) -> float
   use_c10_dispatcher: full
@@ -3668,6 +3714,10 @@
   variants: function
 
 - func: fake_quantize_per_channel_affine_backward(Tensor grad, Tensor self, Tensor scale, Tensor zero_point, int axis, int quant_min, int quant_max) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+
+- func: _choose_qparams_per_tensor(Tensor self, bool reduce_range=False) -> (float, int)
   use_c10_dispatcher: full
   variants: function
 
@@ -3822,9 +3872,9 @@
   variants: method
   device_guard: False
   dispatch:
-    CPU: legacy::cpu::_th_set_
-    CUDA: legacy::cuda::_th_set_
-    QuantizedCPU: set_storage
+    CPU: set_storage_cpu_
+    CUDA: set_storage_cuda_
+    QuantizedCPU: set_storage_quantized_cpu_
 
 - func: set_.source_Tensor(Tensor(a!) self, Tensor source) -> Tensor(a!)
   variants: method
@@ -4273,14 +4323,14 @@
 - func: remainder_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
   dispatch:
-    CPU: legacy::cpu::_th_remainder_
-    CUDA: legacy::cuda::_th_remainder_
+    CPU: remainder_
+    CUDA: remainder_
 
 - func: remainder_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
   dispatch:
-    CPU: legacy::cpu::_th_remainder_
-    CUDA: legacy::cuda::_th_remainder_
+    CPU: remainder_
+    CUDA: remainder_
 
 - func: addbmm_(Tensor(a!) self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
   variants: method
@@ -4343,14 +4393,14 @@
 
 - func: diag.out(Tensor self, int diagonal=0, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_diag_out
+    CPU: diag_out
     CUDA: legacy::cuda::_th_diag_out
 
 - func: diag(Tensor self, int diagonal=0) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_diag
+    CPU: diag
     CUDA: legacy::cuda::_th_diag
 
 - func: cross.out(Tensor self, Tensor other, int? dim=None, *, Tensor(a!) out) -> Tensor(a!)
@@ -5014,27 +5064,27 @@
 
 - func: remainder.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_remainder_out
-    CUDA: legacy::cuda::_th_remainder_out
+    CPU: remainder_out
+    CUDA: remainder_out
 
 - func: remainder.Scalar(Tensor self, Scalar other) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_remainder
-    CUDA: legacy::cuda::_th_remainder
+    CPU: remainder
+    CUDA: remainder
 
 - func: remainder.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_remainder_out
-    CUDA: legacy::cuda::_th_remainder_out
+    CPU: remainder_out
+    CUDA: remainder_out
 
 - func: remainder.Tensor(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_remainder
-    CUDA: legacy::cuda::_th_remainder
+    CPU: remainder
+    CUDA: remainder
 
 - func: min.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
 
@@ -5046,7 +5096,7 @@
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_min
+    CPU: min
     CUDA: legacy::cuda::_th_min
     QuantizedCPU: min_quant
   supports_named_tensor: True
@@ -5061,7 +5111,7 @@
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_max
+    CPU: max
     CUDA: legacy::cuda::_th_max
     QuantizedCPU: max_quant
   supports_named_tensor: True
@@ -5182,40 +5232,19 @@
 
 - func: normal_(Tensor(a!) self, float mean=0, float std=1, *, Generator? generator=None) -> Tensor(a!)
   variants: method
-  dispatch:
-    CPU: normal_cpu_
-    CUDA: normal_cuda_
   supports_named_tensor: True
 
 - func: normal.Tensor_float_out(Tensor mean, float std=1, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU: normal_out_cpu
-    CUDA: normal_out_cuda
 
 - func: normal.Tensor_float(Tensor mean, float std=1, *, Generator? generator=None) -> Tensor
-  dispatch:
-    CPU: normal_cpu
-    CUDA: normal_cuda
 
 - func: normal.float_Tensor_out(float mean, Tensor std, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU: normal_out_cpu
-    CUDA: normal_out_cuda
 
 - func: normal.float_Tensor(float mean, Tensor std, *, Generator? generator=None) -> Tensor
-  dispatch:
-    CPU: normal_cpu
-    CUDA: normal_cuda
 
 - func: normal.Tensor_Tensor_out(Tensor mean, Tensor std, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU: normal_out_cpu
-    CUDA: normal_out_cuda
 
 - func: normal.Tensor_Tensor(Tensor mean, Tensor std, *, Generator? generator=None) -> Tensor
-  dispatch:
-    CPU: normal_cpu
-    CUDA: normal_cuda
 
 - func: normal.float_float(float mean, float std, int[] size, *, Generator? generator=None, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
@@ -5316,22 +5345,22 @@
 
 - func: _max(Tensor self, int dim, bool keepdim=False) -> (Tensor, Tensor)
   dispatch:
-    CPU: legacy::cpu::_th_max
+    CPU: _max_cpu
     CUDA: legacy::cuda::_th_max
 
 - func: _max.max(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) max, Tensor(b!) max_indices) -> (Tensor(a!), Tensor(b!))
   dispatch:
-    CPU: legacy::cpu::_th_max_out
+    CPU: _max_out_cpu
     CUDA: legacy::cuda::_th_max_out
 
 - func: _min(Tensor self, int dim, bool keepdim=False) -> (Tensor, Tensor)
   dispatch:
-    CPU: legacy::cpu::_th_min
+    CPU: _min_cpu
     CUDA: legacy::cuda::_th_min
 
 - func: _min.min(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) min, Tensor(b!) min_indices) -> (Tensor(a!), Tensor(b!))
   dispatch:
-    CPU: legacy::cpu::_th_min_out
+    CPU: _min_out_cpu
     CUDA: legacy::cuda::_th_min_out
 
 ## NN wrappers
@@ -5525,10 +5554,18 @@
 
 - func: elu.out(Tensor self, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: elu_out
+    CUDA: elu_out
+    QuantizedCPU: quantized_elu_out
 
 - func: elu(Tensor self, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1) -> Tensor
   use_c10_dispatcher: full
   python_module: nn
+  dispatch:
+    CPU: elu
+    CUDA: elu
+    QuantizedCPU: quantized_elu
 
 - func: elu_backward.grad_input(Tensor grad_output, Scalar alpha, Scalar scale, Scalar input_scale, Tensor output, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
@@ -5542,6 +5579,10 @@
 
 - func: elu_(Tensor(a!) self, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: elu_
+    CUDA: elu_
+    QuantizedCPU: quantized_elu_
 
 - func: glu.out(Tensor self, int dim=-1, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
@@ -5569,12 +5610,37 @@
     CPU: glu_backward
     CUDA: legacy::cuda::_thnn_glu_backward
 
+- func: hardsigmoid.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: nn
+
+- func: hardsigmoid(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  python_module: nn
+  dispatch:
+    CPU: hardsigmoid
+    QuantizedCPU: quantized_hardsigmoid
+
+- func: hardsigmoid_(Tensor(a!) self) -> Tensor(a!)
+  python_module: nn
+
+- func: hardsigmoid_backward(Tensor grad_output, Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  python_module: nn
+
 - func: hardtanh.out(Tensor self, Scalar min_val=-1, Scalar max_val=1, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: hardtanh_out
+    CUDA: hardtanh_out
+    QuantizedCPU: quantized_hardtanh_out
 
 - func: hardtanh(Tensor self, Scalar min_val=-1, Scalar max_val=1) -> Tensor
   use_c10_dispatcher: full
   python_module: nn
+  dispatch:
+    CPU: hardtanh
+    CUDA: hardtanh
+    QuantizedCPU: quantized_hardtanh
 
 - func: hardtanh_backward.grad_input(Tensor grad_output, Tensor self, Scalar min_val, Scalar max_val, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
@@ -5587,6 +5653,30 @@
   python_module: nn
 
 - func: hardtanh_(Tensor(a!) self, Scalar min_val=-1, Scalar max_val=1) -> Tensor(a!)
+  python_module: nn
+  dispatch:
+    CPU: hardtanh_
+    CUDA: hardtanh_
+    QuantizedCPU: quantized_hardtanh_
+
+- func: hardswish.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: nn
+
+- func: hardswish(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  python_module: nn
+  dispatch:
+    CPU: hardswish
+    QuantizedCPU: quantized_hardswish
+
+- func: hardswish_(Tensor(a!) self) -> Tensor(a!)
+  python_module: nn
+  dispatch:
+    CPU: hardswish_
+    QuantizedCPU: quantized_hardswish_
+
+- func: hardswish_backward(Tensor grad_output, Tensor self) -> Tensor
+  use_c10_dispatcher: full
   python_module: nn
 
 - func: leaky_relu.out(Tensor self, Scalar negative_slope=0.01, *, Tensor(a!) out) -> Tensor(a!)
@@ -6293,6 +6383,7 @@
   dispatch:
     CPU: upsample_nearest3d_cpu
     CUDA: upsample_nearest3d_cuda
+    QuantizedCPU: quantized_upsample_nearest3d_cpu
 
 - func: upsample_nearest3d_backward.grad_input(Tensor grad_output, int[3] output_size, int[5] input_size, float? scales_d=None, float? scales_h=None, float? scales_w=None, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn

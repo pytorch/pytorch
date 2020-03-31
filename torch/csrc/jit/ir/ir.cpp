@@ -873,8 +873,8 @@ bool Node::matches(const FunctionSchema& schema) const {
   TypeEnv type_env;
   for (size_t i = 0; i < formals.size(); ++i) {
     auto formal = formals[i].type();
-    const MatchTypeReturn matched_type = matchTypeVariables(
-        formal, actuals[i]->type(), type_env);
+    const MatchTypeReturn matched_type =
+        matchTypeVariables(formal, actuals[i]->type(), type_env);
     if (!matched_type.success()) {
       return false;
     }
@@ -963,7 +963,7 @@ const Operator& Node::getOperator() const {
   if (maybe)
     return *maybe;
 
-  auto er = script::ErrorReport(sourceRange());
+  auto er = ErrorReport(sourceRange());
   er << "Schema not found for node. File a bug report.\n";
   er << "Node: " << *this << "\n";
   er << "Input types:";
@@ -987,9 +987,9 @@ const Operator& Node::getOperator() const {
 }
 
 Operation Node::getOperation() const {
-  // note: some operators require the node to produce a runnable operation, which
-  // is why 'this' is passed here. getOperator() ensures that 'this' matches the schema
-  // of the returned operator.
+  // note: some operators require the node to produce a runnable operation,
+  // which is why 'this' is passed here. getOperator() ensures that 'this'
+  // matches the schema of the returned operator.
   return getOperator().getOperation(this);
 }
 
@@ -1491,7 +1491,7 @@ Value* Graph::insert(
     at::ArrayRef<NamedValue> args,
     at::ArrayRef<NamedValue> kwargs,
     const c10::optional<SourceRange>& range) {
-  return script::emitBuiltinCall(
+  return emitBuiltinCall(
       range.value_or(fakeRange()), *this, opname, args, kwargs);
 }
 
@@ -1671,9 +1671,7 @@ Node* Graph::createLoad(const std::string& name, const TypePtr& type) {
   return n;
 }
 
-Node* Graph::createIsInstance(
-    Value* v,
-    at::ArrayRef<TypePtr> types) {
+Node* Graph::createIsInstance(Value* v, at::ArrayRef<TypePtr> types) {
   auto n = create(prim::isinstance, {v}, /*num_outputs*/ 1);
   n->tys_(attr::types, types.vec());
   n->output()->setType(BoolType::get());
@@ -1721,7 +1719,7 @@ Value* Graph::insertToList(Value* v, TypePtr type) {
 
 Value* Graph::insertFunctionCall(
     Function* callee,
-    const script::MatchedSchema& matched) {
+    const MatchedSchema& matched) {
   std::string func_name = callee->name();
   Value* fn_constant = insertNode(create(prim::Constant))
                            ->s_(attr::name, func_name)
@@ -1737,7 +1735,7 @@ Value* Graph::insertFunctionCall(
 
 Value* Graph::insertMethodCall(
     std::string method_name,
-    const script::MatchedSchema& matched) {
+    const MatchedSchema& matched) {
   Value* result = insertNode(create(prim::CallMethod, matched.inputs))
                       ->s_(attr::name, std::move(method_name))
                       ->output()
@@ -1946,14 +1944,12 @@ TypePtr NamedValue::type() const {
 
 constexpr Symbol ProfileOp::Kind;
 
-
 OperatorSet::OperatorSet(std::initializer_list<const char*> sig_literals) {
   for (const char* sig : sig_literals) {
     auto op = getOperatorForLiteral(sig);
     ops[Symbol::fromQualString(op->schema().name())].push_back(op);
   }
 }
-
 
 bool Node::isMemberOf(const OperatorSet& os) const {
   auto it = os.ops.find(kind());
@@ -1967,7 +1963,6 @@ bool Node::isMemberOf(const OperatorSet& os) const {
   }
   return false;
 }
-
 
 } // namespace jit
 } // namespace torch

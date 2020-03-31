@@ -13,6 +13,11 @@ namespace jit {
 
 using ::c10::IValue;
 
+thread_local bool add_type_tags = false;
+bool getTypeTags() {
+  return add_type_tags;
+}
+
 // Protocol 2 is the highest that can be decoded by Python 2
 // See https://docs.python.org/3/library/pickle.html#data-stream-format
 constexpr static uint8_t PROTOCOL_VERSION = 2;
@@ -60,35 +65,31 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
   } else if (ivalue.isNone()) {
     push<PickleOpCode>(PickleOpCode::NONE);
   } else if (ivalue.isIntList()) {
-    pushSpecializedList(
-        ivalue, "build_intlist", [=](const IValue& ivalue) {
-          for (const int64_t item : ivalue.toIntVector()) {
-            pushInt(item);
-          }
-        });
+    pushSpecializedList(ivalue, "build_intlist", [=](const IValue& ivalue) {
+      for (const int64_t item : ivalue.toIntVector()) {
+        pushInt(item);
+      }
+    });
   } else if (ivalue.isTensorList()) {
-    pushSpecializedList(
-        ivalue, "build_tensorlist", [=](const IValue& ivalue) {
-          for (const at::Tensor& item : ivalue.toTensorVector()) {
-            pushIValue(item);
-          }
-        });
+    pushSpecializedList(ivalue, "build_tensorlist", [=](const IValue& ivalue) {
+      for (const at::Tensor& item : ivalue.toTensorVector()) {
+        pushIValue(item);
+      }
+    });
   } else if (ivalue.isDoubleList()) {
-    pushSpecializedList(
-        ivalue, "build_doublelist", [=](const IValue& ivalue) {
-          for (double item : ivalue.toDoubleVector()) {
-            pushDouble(item);
-          }
-        });
+    pushSpecializedList(ivalue, "build_doublelist", [=](const IValue& ivalue) {
+      for (double item : ivalue.toDoubleVector()) {
+        pushDouble(item);
+      }
+    });
   } else if (ivalue.isBoolList()) {
-    pushSpecializedList(
-        ivalue, "build_boollist", [=](const IValue& ivalue) {
-          for (bool item : ivalue.toBoolList()) {
-            pushBool(item);
-          }
-        });
-  // note: isList must be after isIntList and friends because
-  // isList is true for all lists.
+    pushSpecializedList(ivalue, "build_boollist", [=](const IValue& ivalue) {
+      for (bool item : ivalue.toBoolList()) {
+        pushBool(item);
+      }
+    });
+    // note: isList must be after isIntList and friends because
+    // isList is true for all lists.
   } else if (ivalue.isList()) {
     pushGenericList(ivalue);
   } else if (ivalue.isObject()) {
@@ -126,11 +127,14 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
         err << " " << qualname->qualifiedName();
       }
     }
-    err << ". Please define serialization methods via torch::jit::pickle_ for "
+    err << ". Please define serialization methods via def_pickle() for "
            "this class.";
     AT_ERROR(err.str());
   } else if (ivalue.isRRef()) {
 #ifdef USE_DISTRIBUTED
+    TORCH_CHECK(
+        torch::distributed::rpc::getAllowJitRRefPickle() == true,
+        "RRef jit pickling is only allowed inside RPC calls.");
     pushRRef(ivalue);
 #else
     TORCH_CHECK(
@@ -180,11 +184,11 @@ void Pickler::pushRRef(const IValue& ivalue) {
 
 void Pickler::pushIValue(const IValue& ivalue) {
   bool shouldMemoizeByPointer =
-    ivalue.isPtrType() && !ivalue.isString() && ivalue.use_count() > 1;
+      ivalue.isPtrType() && !ivalue.isString() && ivalue.use_count() > 1;
 
-  // Mutable ivalues are memoized by pointer equality, which we handle at this outer
-  // granularity.  Immutable ivalues are memoized by value equality which is handled in
-  // the type-specific handlers inside pushIValueImpl.
+  // Mutable ivalues are memoized by pointer equality, which we handle at this
+  // outer granularity.  Immutable ivalues are memoized by value equality which
+  // is handled in the type-specific handlers inside pushIValueImpl.
   if (shouldMemoizeByPointer) {
     const void* ptr = ivalue.internalToPointer();
     TORCH_CHECK(
@@ -279,7 +283,7 @@ void Pickler::pushStorageOfTensor(const at::Tensor& tensor) {
   pushString("storage");
   // data_type
   std::string data_type =
-    std::string(toString(tensor.scalar_type())).append("Storage");
+      std::string(toString(tensor.scalar_type())).append("Storage");
   pushGlobal("torch", data_type);
   // root_key
   pushString(c10::to_string(tensor_data_.size()));
@@ -460,8 +464,8 @@ void Pickler::pushLong(const std::string& data) {
   uint64_t size = data.size();
 
   TORCH_INTERNAL_ASSERT(
-    size <= std::numeric_limits<uint8_t>::max(),
-    "Cannot pickle a long larger than 255 bytes");
+      size <= std::numeric_limits<uint8_t>::max(),
+      "Cannot pickle a long larger than 255 bytes");
   push<PickleOpCode>(PickleOpCode::LONG1);
   push<uint8_t>(size);
   pushBytes(data);
@@ -480,25 +484,53 @@ void Pickler::pushTensorReference(const IValue& ivalue) {
   push<PickleOpCode>(PickleOpCode::REDUCE);
 }
 
-void Pickler::pushEmptyDict() {
-  push<PickleOpCode>(PickleOpCode::EMPTY_DICT);
+// startTypeTag() and endTypeTag() must be called in a pair, with 1 argument
+// pushed on the stack in between them. They will add the type of a container
+// ivalue to the stack as a string so we can preserve type tags across
+// serialization
+void Pickler::startTypeTag() {
+  if (getTypeTags()) {
+    pushGlobal("torch.jit._pickle", "restore_type_tag");
+  }
 }
+
+// See startTypeTag
+void Pickler::endTypeTag(const IValue& ivalue) {
+  if (getTypeTags()) {
+    TORCH_INTERNAL_ASSERT(ivalue.isGenericDict() || ivalue.isList());
+
+    // Push the dict type
+    TORCH_INTERNAL_ASSERT(ivalue.type());
+    pushString(ivalue.type()->python_str());
+
+    // Pop the dict and type into a tuple
+    push<PickleOpCode>(PickleOpCode::TUPLE2);
+
+    // Call function via reduce
+    push<PickleOpCode>(PickleOpCode::REDUCE);
+  }
+}
+
 void Pickler::pushDict(const IValue& ivalue) {
-  pushEmptyDict();
   auto dict_items = iterationOrder(ivalue.toGenericDict());
-  if (dict_items.size() == 0) {
-    return;
+
+  startTypeTag();
+
+  push<PickleOpCode>(PickleOpCode::EMPTY_DICT);
+
+  if (dict_items.size() >= 0) {
+    push<PickleOpCode>(PickleOpCode::MARK);
+
+    // Sort the dict for deterministic keys
+    for (const auto& pair : dict_items) {
+      pushIValue(pair.first);
+      pushIValue(pair.second);
+    }
+
+    push<PickleOpCode>(PickleOpCode::SETITEMS);
   }
 
-  push<PickleOpCode>(PickleOpCode::MARK);
-
-  // Sort the dict for deterministic keys
-  for (const auto& pair : dict_items) {
-    pushIValue(pair.first);
-    pushIValue(pair.second);
-  }
-
-  push<PickleOpCode>(PickleOpCode::SETITEMS);
+  endTypeTag(ivalue);
 }
 
 size_t Pickler::pushNextBinPut() {
@@ -517,15 +549,17 @@ size_t Pickler::pushNextBinPut() {
 
 void Pickler::pushGenericList(const IValue& ivalue) {
   auto list = ivalue.toListRef();
+  startTypeTag();
+
+  // Push the list items
   push<PickleOpCode>(PickleOpCode::EMPTY_LIST);
-
   push<PickleOpCode>(PickleOpCode::MARK);
-
   for (const IValue& item : list) {
     pushIValue(item);
   }
-
   push<PickleOpCode>(PickleOpCode::APPENDS);
+
+  endTypeTag(ivalue);
 }
 
 void Pickler::pushTuple(const IValue& ivalue) {
@@ -533,31 +567,31 @@ void Pickler::pushTuple(const IValue& ivalue) {
   auto tuple_size = tuple->elements().size();
 
   switch (tuple_size) {
-  case 0: {
-    push<PickleOpCode>(PickleOpCode::EMPTY_TUPLE);
-  } break;
-  case 1: {
-    pushIValue(tuple->elements()[0]);
-    push<PickleOpCode>(PickleOpCode::TUPLE1);
-  } break;
-  case 2: {
-    pushIValue(tuple->elements()[0]);
-    pushIValue(tuple->elements()[1]);
-    push<PickleOpCode>(PickleOpCode::TUPLE2);
-  } break;
-  case 3: {
-    pushIValue(tuple->elements()[0]);
-    pushIValue(tuple->elements()[1]);
-    pushIValue(tuple->elements()[2]);
-    push<PickleOpCode>(PickleOpCode::TUPLE3);
-  } break;
-  default: {
-    push<PickleOpCode>(PickleOpCode::MARK);
-    for (const IValue& item : tuple->elements()) {
-      pushIValue(item);
-    }
-    push<PickleOpCode>(PickleOpCode::TUPLE);
-  } break;
+    case 0: {
+      push<PickleOpCode>(PickleOpCode::EMPTY_TUPLE);
+    } break;
+    case 1: {
+      pushIValue(tuple->elements()[0]);
+      push<PickleOpCode>(PickleOpCode::TUPLE1);
+    } break;
+    case 2: {
+      pushIValue(tuple->elements()[0]);
+      pushIValue(tuple->elements()[1]);
+      push<PickleOpCode>(PickleOpCode::TUPLE2);
+    } break;
+    case 3: {
+      pushIValue(tuple->elements()[0]);
+      pushIValue(tuple->elements()[1]);
+      pushIValue(tuple->elements()[2]);
+      push<PickleOpCode>(PickleOpCode::TUPLE3);
+    } break;
+    default: {
+      push<PickleOpCode>(PickleOpCode::MARK);
+      for (const IValue& item : tuple->elements()) {
+        pushIValue(item);
+      }
+      push<PickleOpCode>(PickleOpCode::TUPLE);
+    } break;
   }
 }
 

@@ -252,7 +252,11 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
   if (self_or_result.numel() == 0) {
     return self_or_result;
   } else if (contraction_size == 0) {
-    return self_or_result.zero_();
+    if (is_bmm_out) {
+      return self_or_result.zero_();
+    } else {
+      return self_or_result.mul_(beta);
+    }
   }
 
   auto batch_items_contiguous_or_transposed = [&](const Tensor& t) {

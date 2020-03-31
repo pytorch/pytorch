@@ -2,12 +2,12 @@
 #include <ATen/core/qualified_name.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
+#include <torch/csrc/jit/api/module.h>
+#include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/ir/attributes.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/resource_guard.h>
-#include <torch/csrc/jit/frontend/error_report.h>
-#include <torch/csrc/jit/api/module.h>
 
 using c10::QualifiedName;
 
@@ -296,7 +296,8 @@ struct PythonPrintImpl {
     // because it doesn't hash any information about the tensors.
     // We will probably need to optimize this at some point using hashing.
     for (size_t i = 0; i < tensor_table_.size(); ++i) {
-      if (t.options().type_equal(tensor_table_[i].options()) && t.equal(tensor_table_[i])) {
+      if (t.options().type_equal(tensor_table_[i].options()) &&
+          t.equal(tensor_table_[i])) {
         return i;
       }
     }
@@ -529,7 +530,7 @@ struct PythonPrintImpl {
 
     auto loop_type = stmt.loopType();
     if (loop_type == LoopView::ModifiedLoop) {
-      throw script::ErrorReport(stmt.node()->sourceRange())
+      throw ErrorReport(stmt.node()->sourceRange())
           << "loop cannot be printed as python "
           << "because it has gone through an optimization "
           << "that combined while and for loops. File a bug";
@@ -685,7 +686,7 @@ struct PythonPrintImpl {
     switch (node->kind()) {
       case prim::Return:
         if (enforce_importable_ && node->inputs().size() != 1) {
-          throw script::ErrorReport(node->sourceRange())
+          throw ErrorReport(node->sourceRange())
               << "Exportable methods must have a single return value. "
               << "Normal use of ScriptMethods should enforce this";
         }
@@ -740,7 +741,7 @@ struct PythonPrintImpl {
       } break;
       case prim::Function: {
         if (enforce_importable_) {
-          throw script::ErrorReport(node->sourceRange())
+          throw ErrorReport(node->sourceRange())
               << "closures are not exportable";
         }
         assignValuesToTheirUniqueNames(node->outputs());
@@ -825,7 +826,7 @@ struct PythonPrintImpl {
       case prim::PythonOp: {
         auto value = static_cast<const PythonOp*>(node);
         if (enforce_importable_) {
-          throw script::ErrorReport(node->sourceRange())
+          throw ErrorReport(node->sourceRange())
               << "Could not export Python function call '" << value->name()
               << "'. Remove calls to Python functions before export. "
               << "Did you forget add @script or @script_method annotation? "
@@ -923,8 +924,7 @@ struct PythonPrintImpl {
         //   - the dict is empty
         //   - the dict has potentially ambiguous element types
         //       (e.g. Tensor vs. Optional[Tensor])
-        if (
-            node->inputs().size() == 0 ||
+        if (node->inputs().size() == 0 ||
             !elementTypeCanBeInferredFromMembers(dict_type->getKeyType()) ||
             !elementTypeCanBeInferredFromMembers(dict_type->getValueType())) {
           stmt << "annotate(" << node->output()->type()->python_str() << ", ";

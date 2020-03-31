@@ -14,6 +14,7 @@ DEFINE_DISPATCH(add_stub);
 DEFINE_DISPATCH(sub_stub);
 DEFINE_DISPATCH(mul_stub);
 DEFINE_DISPATCH(div_stub);
+DEFINE_DISPATCH(remainder_stub);
 DEFINE_DISPATCH(atan2_stub);
 DEFINE_DISPATCH(bitwise_and_stub);
 DEFINE_DISPATCH(bitwise_or_stub);
@@ -58,6 +59,13 @@ Tensor& add_(Tensor& self, const Tensor& other, Scalar alpha) {
 }
 
 Tensor& div_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  if (isIntegralType(result.scalar_type(), /*includeBool=*/ true)) {
+    TORCH_WARN_ONCE(
+      "Integer division of tensors using div or / is deprecated, ",
+      "and in a future release div will perform true division as in Python 3. ",
+      "Use true_divide or floor_divide (// in Python) instead.");
+  }
+
   auto iter = TensorIterator::binary_op(result, self, other,
     /*check_mem_overlap=*/true);
   div_stub(iter.device_type(), iter);
@@ -65,6 +73,13 @@ Tensor& div_out(Tensor& result, const Tensor& self, const Tensor& other) {
 }
 
 Tensor div(const Tensor& self, const Tensor& other) {
+  if (isIntegralType(self.scalar_type(), /*includeBool=*/ true)
+      && isIntegralType(other.scalar_type(), /*includeBool=*/ true)) {
+    TORCH_WARN_ONCE(
+      "Integer division of tensors using div or / is deprecated, ",
+      "and in a future release div will perform true division as in Python 3. ",
+      "Use true_divide or floor_divide (// in Python) instead.");
+  }
   Tensor result;
   auto iter = TensorIterator::binary_op(result, self, other);
   div_stub(iter.device_type(), iter);
@@ -75,11 +90,22 @@ Tensor& div_(Tensor& self, const Tensor& other) {
   return native::div_out(self, self, other);
 }
 
-Tensor truncate(const Tensor& tensor) {
-  if (tensor.is_floating_point()) {
-    return tensor.trunc();
-  }
-  return tensor;
+Tensor& remainder_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  auto iter = TensorIterator::binary_op(result, self, other,
+    /*check_mem_overlap=*/true);
+  remainder_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor remainder(const Tensor& self, const Tensor& other) {
+  Tensor result;
+  auto iter = TensorIterator::binary_op(result, self, other);
+  remainder_stub(iter.device_type(), iter);
+  return iter.output();
+}
+
+Tensor& remainder_(Tensor& self, const Tensor& other) {
+  return native::remainder_out(self, self, other);
 }
 
 Tensor& true_divide_out(Tensor& result, const Tensor& self, const Tensor& divisor) {
@@ -112,14 +138,38 @@ Tensor true_divide(const Tensor& self, const Tensor& divisor) {
   return iter.output();
 }
 
-Tensor floor_divide(const Tensor& input, const Tensor& other) {
-  Tensor out = input / other;
-  return truncate(out);
+Tensor& true_divide_(Tensor& self, const Tensor& divisor) {
+  return native::true_divide_out(self, self, divisor);
 }
 
-Tensor floor_divide(const Tensor& input, Scalar other) {
-  Tensor out = input / other;
-  return truncate(out);
+Tensor& floor_divide_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  auto iter = TensorIterator::binary_op(result, self, other,
+    /*check_mem_overlap=*/true);
+  div_stub(iter.device_type(), iter);
+
+  if (result.is_floating_point()) {
+    result.trunc_();
+  }
+
+  return result;
+}
+
+Tensor floor_divide(const Tensor& self, const Tensor& other) {
+  Tensor result;
+  auto iter = TensorIterator::binary_op(result, self, other);
+
+  div_stub(iter.device_type(), iter);
+
+  auto out = iter.output();
+  if (out.is_floating_point()) {
+    out.trunc_();
+  }
+
+  return out;
+}
+
+Tensor& floor_divide_(Tensor& self, const Tensor& other) {
+  return native::floor_divide_out(self, self, other);
 }
 
 Tensor& mul_out(Tensor& result, const Tensor& self, const Tensor& other) {
@@ -250,6 +300,30 @@ Tensor div(const Tensor& self, Scalar other) {
 // used for Python)
 Tensor& div_(Tensor& self, Scalar other) {
   return self.div_(wrapped_scalar_tensor(other)); // redispatch!
+}
+
+Tensor remainder(const Tensor& self, Scalar other) {
+  Tensor other_tensor = wrapped_scalar_tensor(other);
+  // FIXME: 'other' is converted to match the dtype of 'self' to retain
+  //   BC with TH, but in the future, we should use normal type promotion,
+  //   like in numpy
+  return native::remainder(self, other_tensor.toType(self.scalar_type()));
+}
+
+Tensor& remainder_(Tensor& self, Scalar other) {
+  Tensor other_tensor = wrapped_scalar_tensor(other);
+  // FIXME: 'other' is converted to match the dtype of 'self' to retain
+  //   BC with TH, but in the future, we should use normal type promotion,
+  //   like in numpy
+  return native::remainder_(self, other_tensor.toType(self.scalar_type()));
+}
+
+Tensor& remainder_out(Tensor& result, const Tensor& self, Scalar other) {
+  Tensor other_tensor = wrapped_scalar_tensor(other);
+  // FIXME: 'other' is converted to match the dtype of 'self' to retain
+  //   BC with TH, but in the future, we should use normal type promotion,
+  //   like in numpy
+  return native::remainder_out(result, self, other_tensor.toType(self.scalar_type()));
 }
 
 Tensor mul(const Tensor& self, Scalar other) {
@@ -618,6 +692,14 @@ Tensor min(const Tensor& self, const Tensor& other) {
 
 Tensor& min_(Tensor& self, const Tensor& other) { return at::min_out(self, self, other); }
 
+Tensor floor_divide(const Tensor& self, Scalar other) {
+  return at::floor_divide(self, wrapped_scalar_tensor(other));
+}
+
+Tensor& floor_divide_(Tensor& self, Scalar other) {
+  return at::floor_divide_out(self, self, wrapped_scalar_tensor(other));
+}
+
 Tensor& fmod_out(Tensor & result, const Tensor& self, const Tensor& other) {
   auto iter = TensorIterator::binary_op(result, self, other,
                                         /*check_mem_overlap=*/true);
@@ -653,8 +735,11 @@ Tensor& fmod_(Tensor& self, Scalar other) {
 }
 
 Tensor true_divide(const Tensor& self, Scalar divisor) {
-  return at::true_divide(self, wrapped_scalar_tensor(divisor)); // redispatch!
+  return self.true_divide(wrapped_scalar_tensor(divisor)); // redispatch!
 }
 
+Tensor& true_divide_(Tensor& self, Scalar divisor) {
+  return self.true_divide_(wrapped_scalar_tensor(divisor)); // redispatch!
 }
-}  // namespace at
+
+}}  // at::native

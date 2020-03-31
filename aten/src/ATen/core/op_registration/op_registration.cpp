@@ -12,8 +12,8 @@ static_assert(std::is_nothrow_move_assignable<c10::optional<RegistrationHandleRA
 // table deregisters it in the destructor.
 class RegisterOperators::OperatorRegistrar final {
 public:
-  explicit OperatorRegistrar(FunctionSchema&& schema, OperatorOptions&& operatorOptions, c10::optional<DispatchKey> dispatch_key, c10::optional<KernelFunction> kernel)
-  : op_(Dispatcher::singleton().registerSchema(std::move(schema), std::move(operatorOptions))), kernel_registration_handle_(c10::nullopt) {
+  explicit OperatorRegistrar(FunctionSchema&& schema, c10::optional<DispatchKey> dispatch_key, c10::optional<KernelFunction> kernel)
+  : op_(Dispatcher::singleton().registerSchema(std::move(schema))), kernel_registration_handle_(c10::nullopt) {
     if (kernel.has_value()) {
       TORCH_INTERNAL_ASSERT(kernel->isValid());
       kernel_registration_handle_ = Dispatcher::singleton().registerKernel(op_.second, dispatch_key, std::move(*kernel));
@@ -123,37 +123,34 @@ void RegisterOperators::checkNoDuplicateKernels_(const Options& options) {
 
 void RegisterOperators::registerOp_(Options&& options) {
   FunctionSchema schema = std::move(*options.schemaOrName_).right();
+
+  // HACK: bong in the alias analysis kind from the legacy API directly
+  // into schema
+  if (options.aliasAnalysisKind_.has_value()) {
+    schema.setAliasAnalysis(*options.aliasAnalysisKind_);
+  }
+
   OperatorName op_name = schema.operator_name();
 
-  auto operatorOptions = makeOperatorOptions_(options);
-
   if (0 == options.kernels.size()) {
-    registerSchemaOnly_(std::move(schema), std::move(operatorOptions));
+    registerSchemaOnly_(std::move(schema));
   } else {
     for (auto& kernel : options.kernels) {
-      registerSchemaAndKernel_(schema, std::move(kernel), std::move(operatorOptions));
+      registerSchemaAndKernel_(schema, std::move(kernel));
     }
   }
 
   TORCH_INTERNAL_ASSERT(c10::Dispatcher::singleton().findSchema(op_name).has_value());
 }
 
-OperatorOptions RegisterOperators::makeOperatorOptions_(const RegisterOperators::Options& options) {
-  OperatorOptions result;
-  if (options.aliasAnalysisKind_.has_value()) {
-    result.setAliasAnalysis(*options.aliasAnalysisKind_);
-  }
-  return result;
-}
-
-void RegisterOperators::registerSchemaAndKernel_(FunctionSchema schema, Options::KernelRegistrationConfig&& kernel, OperatorOptions&& operatorOptions) {
+void RegisterOperators::registerSchemaAndKernel_(FunctionSchema schema, Options::KernelRegistrationConfig&& kernel) {
   TORCH_INTERNAL_ASSERT(kernel.func.isValid(), "Kernel must be set");
 
-  registrars_.emplace_back(std::move(schema), std::move(operatorOptions), kernel.dispatch_key, std::move(kernel.func));
+  registrars_.emplace_back(std::move(schema), kernel.dispatch_key, std::move(kernel.func));
 }
 
-void RegisterOperators::registerSchemaOnly_(FunctionSchema&& schema, OperatorOptions&& operatorOptions) {
-  registrars_.emplace_back(std::move(schema), std::move(operatorOptions), c10::nullopt, c10::nullopt);
+void RegisterOperators::registerSchemaOnly_(FunctionSchema&& schema) {
+  registrars_.emplace_back(std::move(schema), c10::nullopt, c10::nullopt);
 }
 
 RegisterOperators::RegisterOperators() = default;

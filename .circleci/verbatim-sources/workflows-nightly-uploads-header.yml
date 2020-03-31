@@ -4,8 +4,5 @@
       #- binary_linux_libtorch_2.7m_cu90_test:
       #    requires:
       #      - binary_linux_libtorch_2.7m_cu90_build
-      #- binary_linux_libtorch_2.7m_cu100_test:
-      #    requires:
-      #      - binary_linux_libtorch_2.7m_cu100_build
 
       # Nightly uploads

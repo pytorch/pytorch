@@ -8,6 +8,19 @@
 namespace c10 {
 namespace ivalue {
 
+// This is in ivalue.cpp because we need to access Type::python_str, which
+// is declared in jit_type.h
+void checkCustomClassType(TypePtr expected_type, TypePtr actual_type) {
+  // NB: doing pointer comparison here
+  // If in the future there ever arises a need to call operator== on custom class
+  // Type's, this needs to be changed!
+  TORCH_CHECK(actual_type == expected_type,
+              "Tried to convert an IValue of type ",
+              actual_type->python_str(),
+              " to custom class type ",
+              expected_type->python_str());
+}
+
 CAFFE2_API c10::intrusive_ptr<ConstantString> ConstantString::create(
     std::string str_) {
   return c10::make_intrusive<ConstantString>(std::move(str_));
@@ -92,9 +105,20 @@ void IValue::getSubValues(HashAliasedIValues& subValues) const {
         pair.key().getSubValues(subValues);
       }
       break;
+    case Tag::Object: {
+      // Record Object IValue and its attributes.
+      subValues.insert(*this);
+      auto obj_type = type()->expect<ClassType>();
+      auto obj_value = toObject();
+      auto attribute_names = obj_type->attributeNames();
+      for (const auto& name: attribute_names) {
+        auto attribute = obj_value->getAttr(name);
+        attribute.getSubValues(subValues);
+      }
+      break;
+    }
     case Tag::Future:
     case Tag::Device:
-    case Tag::Object:
     case Tag::PyObject:
     case Tag::Uninitialized:
     case Tag::Capsule:
@@ -378,7 +402,7 @@ std::vector<std::pair<IValue, IValue>> iterationOrder(const c10::Dict<IValue, IV
 }
 
 StrongTypePtr::StrongTypePtr(
-    std::shared_ptr<torch::jit::script::CompilationUnit> cu,
+    std::shared_ptr<torch::jit::CompilationUnit> cu,
     std::shared_ptr<Type> type) {
   cu_ = std::move(cu);
   type_ = type;

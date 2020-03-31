@@ -1,15 +1,14 @@
 #include <torch/csrc/jit/frontend/convert_to_ssa.h>
-#include <torch/csrc/jit/ir/ir.h>
-#include <torch/csrc/jit/ir/ir_views.h>
-#include <torch/csrc/jit/passes/inline_forked_closures.h>
 #include <torch/csrc/jit/frontend/exit_transforms.h>
 #include <torch/csrc/jit/frontend/inline_loop_condition.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/frontend/mini_environment.h>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/ir/ir_views.h>
+#include <torch/csrc/jit/passes/inline_forked_closures.h>
 
 namespace torch {
 namespace jit {
-namespace script {
 
 // At the beginning of the pass the Graph has already undergone type checking,
 // and writes or reads to a variable are emitted as Loads and Stores in the
@@ -328,6 +327,5 @@ void ConvertToSSA(std::shared_ptr<Graph>& graph) {
   TransformExits(graph);
 }
 
-} // namespace script
 } // namespace jit
 } // namespace torch
