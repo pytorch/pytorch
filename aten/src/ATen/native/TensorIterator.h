@@ -131,6 +131,23 @@ struct CAFFE2_API OperandInfo {
   }
 };
 
+struct DimApplyInfo {
+  // Negtive dim should be wrapped before passing in.
+  void set_dimension(int64_t dim) {
+    dimension = dim;
+  };
+  bool is_enabled() const {
+    return dimension >= 0;
+  }
+  // The dimension that tensor iterator will do dim apply along with
+  // The dimension should be the dimension after broadcasting if any
+  int64_t dimension = -1;
+  // The size of all tensors in tensor iterator at dim apply dimension
+  int64_t dimension_size = 1;
+  // The original stride of each tensor in operand_ at dim apply dimension
+  SmallVector<int64_t, 4> dim_original_strides;
+};
+
 struct SplitUntil32Bit;
 
 enum class FastSetupType : uint8_t {
@@ -322,6 +339,10 @@ struct CAFFE2_API TensorIterator {
     check_mem_overlap_ = check_mem_overlap;
   }
 
+  const DimApplyInfo& get_dim_apply_info() {
+    return dim_apply_info_;
+  }
+
   /// Construction
   void add_output(const Tensor& output) {
     operands_.emplace_back(output);
@@ -357,6 +378,10 @@ struct CAFFE2_API TensorIterator {
     resize_outputs_ = false;
   }
 
+  void set_dim_apply_dimension(int dim) {
+    dim_apply_info_.set_dimension(dim);
+  }
+
   void build();
 
 protected:
@@ -375,6 +400,7 @@ protected:
   void propagate_names_to_outputs();
   void coalesce_dimensions();
   void analyze_memory_format();
+  void setup_dim_apply();
 
 protected:
   DimVector shape_;
@@ -384,6 +410,7 @@ protected:
   NameVector names_;
   SmallVector<OperandInfo, 4> operands_;
   int num_outputs_ = 0;
+  DimApplyInfo dim_apply_info_;
   CommonDTypeStrategy common_dtype_strategy_ = CommonDTypeStrategy::CHECK;
   ScalarType common_dtype_ = ScalarType::Undefined;
   bool has_coalesced_dimensions_ = false;

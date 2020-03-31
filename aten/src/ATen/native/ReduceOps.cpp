@@ -5,6 +5,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
+#include <ATen/AccumulateType.h>
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/NamedTensorUtils.h>
@@ -35,7 +36,6 @@ DEFINE_DISPATCH(min_values_stub);
 DEFINE_DISPATCH(max_values_stub);
 DEFINE_DISPATCH(argmax_stub);
 DEFINE_DISPATCH(argmin_stub);
-DEFINE_DISPATCH(cumsum_stub);
 DEFINE_DISPATCH(cumprod_stub);
 
 #define OPTION_TYPE_EQUALITY_CHECK(option, out, self) \
@@ -188,12 +188,35 @@ static TensorIterator make_reduction(
 
 Tensor _cumsum_cpu(const Tensor& self, int64_t dim) {
   Tensor result = at::empty_like(self, MemoryFormat::Contiguous);
-  cumsum_stub(self.device().type(), result, self, dim);
+  _cumsum_out_cpu(result, self, dim);
   return result;
 }
 
 Tensor& _cumsum_out_cpu(Tensor& result, const Tensor& self, int64_t dim) {
-  cumsum_stub(self.device().type(), result, self, dim);
+  if (result.numel() == 0) {
+    result.resize_(self.sizes());
+  }
+  if (self.dim() == 0) {
+    result.fill_(self);
+    return result;
+  }
+  if (self.numel() == 0) {
+    return result;
+  }
+
+  TensorIterator iter = dim_apply_op(result, self, maybe_wrap_dim(dim, self.dim()));
+  AT_DISPATCH_ALL_TYPES(iter.dtype(), "cumsum_out_cpu", [&]{
+    dim_apply_cpu(iter, [&](
+      char** data, const int64_t* dim_strides, int64_t dim_size) {
+      scalar_t* result_data = (scalar_t*)data[0];
+      scalar_t* self_data = (scalar_t*)data[1];
+      auto cumnum = (at::acc_type<scalar_t, false>)(0);
+      for (int64_t i = 0; i < dim_size; ++i) {
+        cumnum += self_data[i * dim_strides[1]];
+        result_data[i * dim_strides[0]] = (scalar_t)cumnum;
+      }
+    });
+  });
   return result;
 }
 

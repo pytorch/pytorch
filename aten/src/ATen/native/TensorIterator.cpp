@@ -858,6 +858,35 @@ void TensorIterator::analyze_memory_format() {
   }
 }
 
+void TensorIterator::setup_dim_apply() {
+  if (!dim_apply_info_.is_enabled()) return;
+  TORCH_INTERNAL_ASSERT(!is_reduction_);
+  TORCH_INTERNAL_ASSERT(all_ops_same_shape_);
+  TORCH_INTERNAL_ASSERT(!has_coalesced_dimensions_);
+
+  int64_t dim_apply_dim = dim_apply_info_.dimension;
+  // allow all inputs/outputs are scalars or dim apply dimension is in a right range
+  TORCH_CHECK(ndim() == 0 || (dim_apply_dim >= 0 && dim_apply_dim < ndim()),
+      "Dim apply dimension out of range (expected to be in range of [0, ", ndim(), ") ",
+      "but got ", dim_apply_dim, ")");
+
+  // find actual dim from perm_ since this function is called after output allocation
+  auto& dim_original_strides = dim_apply_info_.dim_original_strides;
+  dim_original_strides.resize(ntensors(), 1);
+  for (int dim = 0; dim < ndim(); ++dim) {
+    if (perm_[dim] == dim_apply_dim) {
+      dim_apply_info_.dimension_size = shape_[dim];
+      shape_[dim] = 1;
+      for (int64_t i = 0; i < ntensors(); ++i) {
+        auto& op = operands_[i];
+        dim_original_strides[i] = op.stride_bytes[dim] / op.tensor.element_size();
+        operands_[i].stride_bytes[dim] = 0;
+      }
+      break;
+    }
+  }
+}
+
 bool TensorIterator::can_use_32bit_indexing() const {
   int64_t max_value = std::numeric_limits<int32_t>::max();
   if (numel() > max_value) {
@@ -980,8 +1009,19 @@ bool TensorIterator::fast_set_up() {
   if (ndim() > 1){
     has_coalesced_dimensions_ = true;
   }
+  //dim apply here is either for scalars or for the case that dim apply dimension is the inner most dimension of tensors
+  bool has_dim_apply = dim_apply_info_.is_enabled();
+  if (has_dim_apply) {
+    dim_apply_info_.dim_original_strides.resize(ntensors(), 1);
+  }
   if (ndim() >= 1) {
-    shape_[0] = numel();
+    if (has_dim_apply) {
+      dim_apply_info_.dimension_size = shape_.back();
+      shape_[0] = shape_.back() == 0 ? 0 : numel() / shape_.back();
+    }
+    else {
+      shape_[0] = numel();
+    }
     shape_.resize(1);
   }
   for (auto& op : operands_ ) {
@@ -989,6 +1029,9 @@ bool TensorIterator::fast_set_up() {
     op.stride_bytes.resize(ndim());
     if (ndim()>0) {
       op.stride_bytes[0] = element_size_in_bytes;
+      if (has_dim_apply) {
+        op.stride_bytes[0] *= dim_apply_info_.dimension_size;
+      }
     }
   }
   return true;
@@ -1010,8 +1053,17 @@ FastSetupType TensorIterator::compute_fast_setup_type() {
     }
   }
 
+  bool no_dim_apply = !dim_apply_info_.is_enabled();
+  is_channels_last &= no_dim_apply;
+  is_non_overlapping_and_dense &= no_dim_apply;
+
   if (is_contiguous) {
-    return FastSetupType::CONTIGUOUS;
+    // fast setup is allowed for contiguous tensors' dim apply if all tensors are scalar
+    // or dim apply dimension is the inner most dimension
+    if (no_dim_apply || ndim() == 0 || dim_apply_info_.dimension == ndim() - 1) {
+      return FastSetupType::CONTIGUOUS;
+    }
+    return FastSetupType::NONE;
   }
   if (is_channels_last) {
     return FastSetupType::CHANNELS_LAST;
@@ -1062,6 +1114,8 @@ void TensorIterator::build() {
     reorder_dimensions();
     // allocate the output tensor if it's not provided
     allocate_outputs();
+    // setup dim apply if dim apply dimension is provided
+    setup_dim_apply();
     // coalesce adjacent dimensions when possible
     coalesce_dimensions();
   }
