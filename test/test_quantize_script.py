@@ -2,12 +2,14 @@ import torch
 import torch.jit
 
 from torch.quantization._quantize_script import prepare_dynamic_script
+from torch.quantization._quantize_script import quantize_dynamic_script
 from torch.quantization import default_dynamic_qconfig
 
 from torch.testing._internal.common_utils import run_tests
 from torch.testing import FileCheck
 from torch.testing._internal.jit_utils import attrs_with_prefix
 from torch.testing._internal.jit_utils import JitTestCase, get_forward_graph, get_module_method
+from torch.testing._internal.common_quantization import test_only_eval_fn as _test_only_eval_fn
 
 from torch.jit._recursive import wrap_cpp_module
 class TestScript(JitTestCase):
@@ -159,6 +161,22 @@ class TestScript(JitTestCase):
                    .check_not(quant_func) \
                    .check("return") \
                    .run(str(get_forward_graph(m.fc1._c)))
+
+    def test_finalize_for_linear_dynamic(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.fc = torch.nn.Linear(5, 5).float()
+
+            def forward(self, x):
+                return self.fc(x)
+
+        data = [(torch.rand((1, 5), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        qconfig_dict = {'': default_dynamic_qconfig}
+        model = torch.jit.script(M()).eval()
+        model = quantize_dynamic_script(model, qconfig_dict, _test_only_eval_fn, [data])
+        FileCheck().check("quantized::linear_dynamic") \
+                   .run(model.graph)
 
 if __name__ == "__main__":
     run_tests()
