@@ -61,9 +61,9 @@ void PreInlineCalls(Block* block) {
 //        }
 //      } break;
       default: {
-//        for (auto b : cur->blocks()) {
-//          preinlineCalls(b);
-//        }
+        for (auto b : cur->blocks()) {
+          PreInlineCalls(b);
+        }
       } break;
     }
   }
