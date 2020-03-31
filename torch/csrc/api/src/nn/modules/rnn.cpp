@@ -293,7 +293,8 @@ void RNNImplBase<Derived>::flatten_parameters() {
               /*bidirectional=*/false,
               options.cat_layer_fwd_bwd_states());
           std::tie(flat_weights_, flat_weights_names_) =
-              merge_direction_weights({flat_weights_fwd, flat_weights_bwd});
+              merge_direction_weights(flat_weights_fwd, flat_weights_bwd,
+                                      weights_fwd_names, weights_fwd_names);
         } else {
           torch::_cudnn_rnn_flatten_weight(
               flat_weights_,

@@ -258,8 +258,7 @@ class TORCH_API GRUImpl : public detail::RNNImplBase<GRUImpl> {
 /// module storage semantics.
 TORCH_MODULE(GRU);
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ RNNCellImplBase
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ RNNCellImplBase ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 namespace detail {
 /// Base class for all RNNCell implementations (intended for code sharing).
