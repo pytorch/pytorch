@@ -22,6 +22,8 @@ def clip_grad_norm_(parameters, max_norm, norm_type=2):
     if isinstance(parameters, torch.Tensor):
         parameters = [parameters]
     parameters = list(filter(lambda p: p.grad is not None, parameters))
+    if len(parameters) == 0:
+        raise ValueError('No parameter with grad found')
     max_norm = float(max_norm)
     norm_type = float(norm_type)
     if norm_type == inf:
