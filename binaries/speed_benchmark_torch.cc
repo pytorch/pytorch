@@ -177,7 +177,7 @@ int main(int argc, char** argv) {
   millis = timer.MilliSeconds();
   if (FLAGS_report_pep) {
     for (auto t : times) {
-      std::cout << "PyTorchObserver {\"type\": \"NET\", \"unit\": \"us\", \"metric\": \"latency\", \"value\": \"" << t << "\"}" << std::endl;
+      std::cout << "PyTorchObserver {\"type\": \"NET\", \"unit\": \"ms\", \"metric\": \"latency\", \"value\": \"" << t << "\"}" << std::endl;
     }
   }
   std::cout << "Main run finished. Milliseconds per iter: "
