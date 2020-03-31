@@ -1,24 +1,9 @@
 #include <torch/csrc/jit/passes/onnx/preinline_onnx.h>
-#include <c10/util/Exception.h>
-#include <torch/csrc/jit/api/module.h>
-#include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
 
-#include <c10/util/Optional.h>
-#include <algorithm>
-
-#if defined(_MSC_VER)
-#include <BaseTsd.h>
-typedef SSIZE_T ssize_t;
-#endif
-
 namespace torch {
 namespace jit {
-
-namespace onnx {
-using namespace ::c10::onnx;
-}
 
 void replaceFunctions(Node* to_replace, Function* callee) {
   if (callee->name() == "interpolate") {
@@ -58,9 +43,9 @@ void PreInlineCalls(Block* block) {
 }
 
 void PreInlineONNX(Graph& graph) {
-  GRAPH_DUMP("Before PreInlining: ", &graph);
+  GRAPH_DUMP("Before Pre-inlining: ", &graph);
   PreInlineCalls(graph.block());
-  GRAPH_DUMP("After PreInlining: ", &graph);
+  GRAPH_DUMP("After Pre-inlining: ", &graph);
 }
 
 } // namespace jit
