@@ -189,7 +189,7 @@ if __name__ == '__main__':
             line = f.readline()
             if not line:
                 break
-            if any(w for w in blacklist if w in line)
+            if any(w for w in blacklist if w in line):
                 # TODO Fix type __torch__.torch.classes.xxx
                 continue
 
