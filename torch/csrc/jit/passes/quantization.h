@@ -83,7 +83,8 @@ TORCH_API Module InsertObservers(
 TORCH_API Module InsertQuantDeQuant(
     Module& module,
     const std::string& method_name,
-    bool inplace = false);
+    bool inplace = false,
+    bool is_dynamic = false);
 
 /** Swap functional linear CallFunctions to aten::linear
  *  so that it can survive inline, since quant fusion need to
