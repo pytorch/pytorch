@@ -74,7 +74,7 @@ Tensor& angle_out(Tensor& result, const Tensor& self) { return unary_op_impl_out
 Tensor angle(const Tensor& self) { return unary_op_impl(self, at::angle_out); }
 
 Tensor real(const Tensor& self) {
-  TORCH_CHECK(!self.is_complex(), "Real is not yet implemented for complex tensors.");
+  TORCH_CHECK(!self.is_complex(), "real is not yet implemented for complex tensors.");
   return self;
 }
 
