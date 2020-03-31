@@ -142,22 +142,8 @@ if(BLAS_FOUND)
     message(STATUS "TH_BINARY_BUILD detected. Enabling special linkage.")
     list(APPEND ATen_CPU_DEPENDENCY_LIBS
       "${BLAS_LIBRARIES};${BLAS_LIBRARIES};${BLAS_LIBRARIES}")
-    if(USE_CUDA)
-      list(APPEND ATen_CUDA_DEPENDENCY_LIBS
-        "${BLAS_LIBRARIES};${BLAS_LIBRARIES};${BLAS_LIBRARIES}")
-    endif()
-    if(USE_ROCM)
-      list(APPEND ATen_HIP_DEPENDENCY_LIBS
-        "${BLAS_LIBRARIES};${BLAS_LIBRARIES};${BLAS_LIBRARIES}")
-    endif()
   else($ENV{TH_BINARY_BUILD})
     list(APPEND ATen_CPU_DEPENDENCY_LIBS ${BLAS_LIBRARIES})
-    if(USE_CUDA)
-      list(APPEND ATen_CUDA_DEPENDENCY_LIBS "${BLAS_LIBRARIES}")
-    endif()
-    if(USE_ROCM)
-      list(APPEND ATen_HIP_DEPENDENCY_LIBS "${BLAS_LIBRARIES}")
-    endif()
   endif($ENV{TH_BINARY_BUILD})
 endif(BLAS_FOUND)
 
