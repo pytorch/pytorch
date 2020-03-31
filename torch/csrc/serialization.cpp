@@ -181,6 +181,9 @@ void doWrite(io fildes, void* raw_buf, size_t nbytes) {
 #include <TH/THGenerateAllTypes.h>
 
 #include <torch/csrc/generic/serialization.cpp>
+#include <TH/THGenerateComplexTypes.h>
+
+#include <torch/csrc/generic/serialization.cpp>
 #include <TH/THGenerateHalfType.h>
 
 #include <torch/csrc/generic/serialization.cpp>

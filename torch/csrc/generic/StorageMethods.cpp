@@ -182,6 +182,12 @@ static PyObject * THPStorage_(fromBuffer)(PyObject *_unused, PyObject *args, PyO
 #elif defined(TH_REAL_IS_DOUBLE)
   torch::utils::THP_decodeDoubleBuffer(
       THWStorage_(data)(storage), src + offset, byte_order, count);
+#elif defined(TH_REAL_IS_COMPLEXFLOAT)
+  torch::utils::THP_decodeComplexFloatBuffer(
+      THWStorage_(data)(storage), src + offset, byte_order, count);
+#elif defined(TH_REAL_IS_COMPLEXDOUBLE)
+  torch::utils::THP_decodeComplexDoubleBuffer(
+      THWStorage_(data)(storage), src + offset, byte_order, count);
 #else
 #error "Unknown type"
 #endif
