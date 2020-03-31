@@ -15,7 +15,6 @@ from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
 def rpc_return_rref(dst):
     return rpc.remote(dst, torch.add, args=(torch.ones(2, 2), 1))
 
-
 @torch.jit.script
 def rref_local_value(rref):
     # type: (RRef[Tensor]) -> Tensor
@@ -601,7 +600,6 @@ class JitRpcAsyncOpTest:
             self.assertEqual(ret, 0)
 
 
-
 @torch.jit.script
 def rref_to_here(rref_var):
     # type: (RRef[Tensor]) -> Tensor
@@ -851,6 +849,14 @@ class JitRpcTest(RRefAPITest, LocalRRefTest, JitRpcAsyncOpTest, RpcAgentTestFixt
 
         fut_res = future_return_to_python(dst_rank, inputs)
         self.assertEqual(fut_res.wait(), expected_res)
+
+    @dist_init
+    def test_remote_script_throw(self):
+        rref = rpc.remote("worker{}".format((self.rank + 1) % self.world_size),
+                          script_raise_func,
+                          args=(torch.ones(2),))
+        with self.assertRaisesRegex(Exception, ".*Expected error.*"):
+            rref.to_here()
 
     @dist_init
     def test_remote_script_udf(self):

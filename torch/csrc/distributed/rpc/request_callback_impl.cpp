@@ -197,63 +197,73 @@ void RequestCallbackImpl::processRpc(
       }
 
       auto ownerRRef = ctx.getOrCreateOwnerRRef(rrefId, returnType);
+      auto postProcessing = [rrefId, forkId, messageId, responseFuture]() {
+        if (rrefId != forkId) {
+          // Caller is a user and callee is the owner, add fork
+          //
+          // NB: rrefId == forkId is true if and only if calling remote to
+          // self. In that case both the caller and the callee will access
+          // the OwnerRRef. Hence, on the callee side (here), it should not
+          // call addForkOfOwner as it is not a fork. To allow callee to
+          // distinguish when this request is sent to self, the caller will
+          // set forkId using rrefId (OwnerRRef does not have a forkId
+          // anyway).
+          RRefContext::getInstance().addForkOfOwner(rrefId, forkId);
+        }
+        Message m = RemoteRet(rrefId, forkId).toMessage();
+        m.setId(messageId);
+        responseFuture->markCompleted(std::move(m));
+      };
 
-      auto scriptRemoteCallDone =
-          [ownerRRef, rrefId, forkId, messageId, responseFuture](IValue res) {
-            ownerRRef->setValue(std::move(res));
-            if (rrefId != forkId) {
-              // Caller is a user and callee is the owner, add fork
-              //
-              // NB: rrefId == forkId is true if and only if calling remote to
-              // self. In that case both the caller and the callee will access
-              // the OwnerRRef. Hence, on the callee side (here), it should not
-              // call addForkOfOwner as it is not a fork. To allow callee to
-              // distinguish when this request is sent to self, the caller will
-              // set forkId using rrefId (OwnerRRef does not have a forkId
-              // anyway).
-              RRefContext::getInstance().addForkOfOwner(rrefId, forkId);
-            }
-            Message m = RemoteRet(rrefId, forkId).toMessage();
-            m.setId(messageId);
-            responseFuture->markCompleted(std::move(m));
-          };
-
-      // ScriptRemoteCall is only alive within this block, use reference to
-      // avoid copy
+      // scriptRemoteCall is only alive within this block, use reference to
+      // avoid copy. If the underlying code runs with a continuation, runAsync()
+      // below will std::move the appropriate portion of the stack.
       auto& stack = scriptRemoteCall.stackRef();
       if (scriptRemoteCall.hasOp()) {
-        scriptRemoteCall.op()->getOperation()(stack);
+        try {
+          scriptRemoteCall.op()->getOperation()(stack);
+        } catch (const std::exception& e) {
+          // Don't throw in this call, but rather transfer the exception
+          // to the rref.
+          ownerRRef->setError(e.what());
+          postProcessing();
+          return;
+        }
         TORCH_INTERNAL_ASSERT(
             stack.size() == 1,
             "Return value of a builtin operator or a "
             "TorchScript function should be a single IValue, got a vector of "
             "size ",
             stack.size());
-        scriptRemoteCallDone(std::move(stack.front()));
+        ownerRRef->setValue(std::move(stack.front()));
+        postProcessing();
         return;
       }
 
-      auto jitFuture = PythonRpcHandler::getInstance()
-                           .jitCompilationUnit()
-                           ->get_function(scriptRemoteCall.qualifiedName())
-                           .runAsync(stack);
-      if (jitFuture->completed()) {
-        scriptRemoteCallDone(jitFuture->value());
-      } else {
-        jitFuture->addCallback(
-            [scriptRemoteCallDone, jitFuture, responseFuture]() {
-              try {
-                scriptRemoteCallDone(jitFuture->value());
-              } catch (const std::exception& e) {
-                // TODO: the better approach here would be to allow ownerRRef to
-                // store an error (e.g. ownerRRef->setError(...), and propagate
-                // that back when the user fetches the rref contents. The client
-                // doesn't currently interpret an exception returned via this
-                // mechanism in the expected manner.
-                responseFuture->setError(e.what());
-              }
-            });
+      c10::intrusive_ptr<c10::ivalue::Future> jitFuture;
+      try {
+        jitFuture = PythonRpcHandler::getInstance()
+                        .jitCompilationUnit()
+                        ->get_function(scriptRemoteCall.qualifiedName())
+                        .runAsync(stack);
+        if (jitFuture->completed()) { // short-cut.
+          ownerRRef->setValue(jitFuture->value());
+          postProcessing();
+          return;
+        }
+      } catch (const std::exception& e) {
+        ownerRRef->setError(e.what());
+        postProcessing();
+        return;
       }
+      jitFuture->addCallback([ownerRRef, postProcessing, jitFuture]() {
+        try {
+          ownerRRef->setValue(jitFuture->value());
+        } catch (const std::exception& e) {
+          ownerRRef->setError(e.what());
+        }
+        postProcessing();
+      });
       return;
     }
     case MessageType::PYTHON_REMOTE_CALL: {
@@ -267,14 +277,23 @@ void RequestCallbackImpl::processRpc(
 
       auto& pythonRpcHandler = PythonRpcHandler::getInstance();
       IValue py_ivalue;
-      {
-        pybind11::gil_scoped_acquire ag;
-        py_ivalue = jit::toIValue(
-            pythonRpcHandler.runPythonUdf(std::move(uprc).movePythonUdf()),
-            PyObjectType::get());
+      try {
+        {
+          pybind11::gil_scoped_acquire ag;
+          py_ivalue = jit::toIValue(
+              pythonRpcHandler.runPythonUdf(std::move(uprc).movePythonUdf()),
+              PyObjectType::get());
+        }
+        ownerRRef->setValue(std::move(py_ivalue));
+      } catch (py::error_already_set& e) {
+        // py::error_already_set requires GIL to destruct, take special care.
+        ownerRRef->setError(e.what());
+        py::gil_scoped_acquire acquire;
+        e.restore();
+        PyErr_Clear();
+      } catch (std::exception& e) {
+        ownerRRef->setError(e.what());
       }
-
-      ownerRRef->setValue(std::move(py_ivalue));
 
       if (rrefId != forkId) {
         // Caller is a user and callee is the owner, add fork
@@ -304,12 +323,16 @@ void RequestCallbackImpl::processRpc(
             [responseFuture, messageId, rref](
                 const rpc::Message& /* unused */,
                 const c10::optional<utils::FutureError>& error) {
-              if (!error) {
+              if (error) {
+                responseFuture->setError(error->what());
+                return;
+              }
+              try {
                 Message m = ScriptRRefFetchRet({rref->getValue()}).toMessage();
                 m.setId(messageId);
                 responseFuture->markCompleted(std::move(m));
-              } else {
-                responseFuture->setError(error->what());
+              } catch (const std::exception& e) {
+                responseFuture->setError(e.what());
               }
             });
       }
@@ -340,8 +363,12 @@ void RequestCallbackImpl::processRpc(
           [responseFuture, messageId, rref](
               const rpc::Message& /* unused */,
               const c10::optional<utils::FutureError>& error) {
-            if (!error) {
-              auto value = rref->getValue();
+            if (error) {
+              responseFuture->setError(error->what());
+              return;
+            }
+            try {
+              IValue value = rref->getValue();
               py::object pyValue;
               {
                 pybind11::gil_scoped_acquire ag;
@@ -353,8 +380,8 @@ void RequestCallbackImpl::processRpc(
                   PythonRRefFetchRet(std::move(result).toIValues()).toMessage();
               m.setId(messageId);
               responseFuture->markCompleted(std::move(m));
-            } else {
-              responseFuture->setError(error->what());
+            } catch (const std::exception& e) {
+              responseFuture->setError(e.what());
             }
           });
       return;
