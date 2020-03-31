@@ -612,16 +612,18 @@ class InsertObserversHelper {
   std::unordered_set<Graph*> visited_graph_of_observer_map_;
   std::unordered_map<Value*, Module> observer_for_value_;
   // Map from values from callsite into the values in the CallMethod graph
-  std::unordered_map<Value*, std::unordered_set<Value*>> boundary_value_map_;
-  std::unordered_set<Value*> observed_values_;
-  // This is used for the observed values to pass through the ops like flatten,
-  // so that output value of platten do not need to be observed
   // key of the map is the value from caller graph, and the value of the map
   // is the list of values in the callee graph (the graph
   // corresponding to the called method),
-  // the reason it is a vector is that a value in the caller graph
+  // the reason it is a set is that a value in the caller graph
   // can both correspond to the output of one callee graph and input of another
   // callee graph.
+  std::unordered_map<Value*, std::unordered_set<Value*>> boundary_value_map_;
+  std::unordered_set<Value*> observed_values_;
+  // This is used for the observed values to pass through the ops like flatten,
+  // so that output value of flatten do not need to be observed
+  // key is the output of the op, value is a vector of values that need
+  // to be observed in order to pass the observed property to the output
   std::unordered_map<Value*, std::vector<Value*>> pass_through_value_map_;
   // Unique id generator for observer module, used for generating
   // unique observer names when we insert observer module, we
