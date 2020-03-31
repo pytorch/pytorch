@@ -56,6 +56,16 @@ TORCH_API void THP_decodeBFloat16Buffer(
     const uint8_t* src,
     THPByteOrder order,
     size_t len);
+TORCH_API void THP_decodeComplexFloatBuffer(
+    std::complex<float>* dst,
+    const uint8_t* src,
+    THPByteOrder order,
+    size_t len);
+TORCH_API void THP_decodeComplexDoubleBuffer(
+    std::complex<double>* dst,
+    const uint8_t* src,
+    THPByteOrder order,
+    size_t len);
 
 TORCH_API void THP_encodeInt16Buffer(
     uint8_t* dst,
@@ -80,6 +90,16 @@ TORCH_API void THP_encodeFloatBuffer(
 TORCH_API void THP_encodeDoubleBuffer(
     uint8_t* dst,
     const double* src,
+    THPByteOrder order,
+    size_t len);
+TORCH_API void THP_encodeComplexloatBuffer(
+    uint8_t* dst,
+    const std::complex<float>* src,
+    THPByteOrder order,
+    size_t len);
+TORCH_API void THP_encodeComplexDoubleBuffer(
+    uint8_t* dst,
+    const std::complex<double>* src,
     THPByteOrder order,
     size_t len);
 
