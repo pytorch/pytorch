@@ -12671,16 +12671,25 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(top1, top2)
         self.assertEqual(idx1, idx2)
 
+    @dtypes(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64)
+    def test_topk_integral(self, device, dtype):
+        a = torch.randint(torch.iinfo(dtype).min, torch.iinfo(dtype).max, size=(10,),
+                          dtype=dtype, device=device)
+        sort_topk = a.sort()[0][-5:].flip(0)
+        topk = a.topk(5)
+        self.assertEqual(sort_topk, topk[0])      # check values
+        self.assertEqual(sort_topk, a[topk[1]])   # check indices
+
     def test_topk_nonfinite(self, device):
         for dtype in (torch.half, torch.float, torch.double):
-            x = torch.tensor([float('nan'), float('inf'), 1e4, 0, -1e4, -float('inf')], device=device)
+            x = torch.tensor([float('nan'), float('inf'), 1e4, 0, -1e4, -float('inf')], device=device, dtype=dtype)
             val, idx = x.topk(4)
-            expect = torch.tensor([float('nan'), float('inf'), 1e4, 0], device=device)
+            expect = torch.tensor([float('nan'), float('inf'), 1e4, 0], device=device, dtype=dtype)
             self.assertEqual(val, expect, allow_inf=True)
             self.assertEqual(idx, [0, 1, 2, 3])
 
             val, idx = x.topk(4, largest=False)
-            expect = torch.tensor([-float('inf'), -1e4, 0, 1e4], device=device)
+            expect = torch.tensor([-float('inf'), -1e4, 0, 1e4], device=device, dtype=dtype)
             self.assertEqual(val, expect, allow_inf=True)
             self.assertEqual(idx, [5, 4, 3, 2])
 
