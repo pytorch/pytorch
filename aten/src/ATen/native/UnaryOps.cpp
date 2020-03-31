@@ -79,7 +79,7 @@ Tensor real(const Tensor& self) {
 }
 
 Tensor imag(const Tensor& self) {
-  TORCH_CHECK(false, "Imag is not yet implemented.");
+  TORCH_CHECK(false, "imag is not yet implemented.");
 
   // Note: unreachable
   return at::zeros_like(self);

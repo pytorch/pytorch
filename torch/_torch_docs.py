@@ -1023,6 +1023,9 @@ Returns the real part of the :attr:`input` tensor. If
 :attr:`input` is a real (non-complex) tensor, this function just
 returns it.
 
+.. warning::
+    Not yet implemented for complex tensors.
+
 .. math::
     \text{out}_{i} = real(\text{input}_{i})
 """ + r"""
