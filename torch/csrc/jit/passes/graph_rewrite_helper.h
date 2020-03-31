@@ -31,7 +31,8 @@ struct PatternInfo {
 
   static PatternInfo parse_from_str(std::string pattern_string) {
     PatternInfo rv{
-        std::move(pattern_string), std::make_unique<Graph>(), decltype(vmap){}};
+        std::move(pattern_string),
+        std::make_unique<Graph>(), decltype(vmap){}};
     parseIR(rv.pattern_string, rv.pattern_graph.get(), rv.vmap);
     return rv;
   }

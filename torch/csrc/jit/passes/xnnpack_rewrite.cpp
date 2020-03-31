@@ -81,28 +81,9 @@ void insertPrePackedConv2dOp(std::shared_ptr<Graph>& graph) {
         return (%r) )";
 
   SubgraphRewriter rewriter;
-  rewriter.RegisterRewritePattern(conv_2d_pattern, prepacked_ops_conv2d_pattern);
+  rewriter.RegisterRewritePattern(
+      conv_2d_pattern, prepacked_ops_conv2d_pattern);
   rewriter.runOnGraph(graph);
-}
-
-bool isReluFusable(const std::shared_ptr<Graph>& graph) {
-  using graph_rewrite_helper::PatternInfo;
-  const PatternInfo& pattern_relu = PatternInfo::parse_from_str(R"(
-      graph(%input):
-        %r = aten::relu(%input)
-        return (%r) )");
-  const Graph& pattern_relu_graph = *pattern_relu.pattern_graph;
-  const auto& relu_vmap = pattern_relu.vmap;
-  const auto& matches = findPatternMatches(pattern_relu_graph, *graph);
-  for (const auto& match : matches) {
-    auto relu_input_value = match.values_map.at(relu_vmap.at("input"));
-    // If the input to relu is used by something other than relu then such
-    // a relu cannot be fused.
-    if (relu_input_value->uses().size() > 1) {
-      return false;
-    }
-  }
-  return true;
 }
 
 // Fusing Relu with Linear/Conv already implies that relu will
@@ -132,31 +113,29 @@ void fuseReluWithPackedOps(std::shared_ptr<Graph>& graph) {
         %r = prepacked::conv2d_clamp_run(%input, %packed_weight_bias)
         return (%r) )";
 
-  if (isReluFusable(graph)) {
-    std::string linear_prepack_run_relu = R"(
-      graph(%input, %weight, %bias, %output_min_max):
-          %packed_weight_bias = prepacked::linear_clamp_prepack(
-              %weight, %bias, %output_min_max, %output_min_max)
-          %linear_res = prepacked::linear_clamp_run(%input, %packed_weight_bias)
-          %res = aten::relu(%linear_res)
-          return (%res))";
+  std::string linear_prepack_run_relu = R"(
+    graph(%input, %weight, %bias, %output_min_max):
+        %packed_weight_bias = prepacked::linear_clamp_prepack(
+            %weight, %bias, %output_min_max, %output_min_max)
+        %linear_res = prepacked::linear_clamp_run(%input, %packed_weight_bias)
+        %res = aten::relu(%linear_res)
+        return (%res))";
 
-    rewriter.RegisterRewritePattern(linear_prepack_run_relu,
-        linear_prepack_run_relu_fused);
+  rewriter.RegisterRewritePattern(linear_prepack_run_relu,
+      linear_prepack_run_relu_fused);
 
-    std::string conv2d_prepack_run_relu = R"(
-      graph(%input, %weight, %bias, %stride:int[], %padding:int[],
-            %dilation:int[], %groups:int, %output_min_max):
-          %packed_weight_bias = prepacked::conv2d_clamp_prepack(
-              %weight, %bias, %stride, %padding, %dilation, %groups,
-              %output_min_max, %output_min_max)
-          %conv2d_res = prepacked::conv2d_clamp_run(%input, %packed_weight_bias)
-          %r = aten::relu(%conv2d_res)
-          return (%r) )";
+  std::string conv2d_prepack_run_relu = R"(
+    graph(%input, %weight, %bias, %stride:int[], %padding:int[],
+          %dilation:int[], %groups:int, %output_min_max):
+        %packed_weight_bias = prepacked::conv2d_clamp_prepack(
+            %weight, %bias, %stride, %padding, %dilation, %groups,
+            %output_min_max, %output_min_max)
+        %conv2d_res = prepacked::conv2d_clamp_run(%input, %packed_weight_bias)
+        %r = aten::relu(%conv2d_res)
+        return (%r) )";
 
-    rewriter.RegisterRewritePattern(conv2d_prepack_run_relu,
-        conv2d_prepack_run_relu_fused);
-  }
+  rewriter.RegisterRewritePattern(conv2d_prepack_run_relu,
+      conv2d_prepack_run_relu_fused);
 
   std::string linear_prepack_run_relu_inplace = R"(
     graph(%input, %weight, %bias, %output_min_max):

@@ -382,7 +382,6 @@ class TestXNNPACKRewritePass(TestCase):
             torch.jit.save(scripted_model, buffer)
             buffer.seek(0)
             deserialized_scripted_model = torch.jit.load(buffer)
-            #print(deserialized_scripted_model.graph)
             for pattern, v in pattern_count_map.items():
                 if (v == 0):
                     FileCheck().check(pattern).run(deserialized_scripted_model.graph)
