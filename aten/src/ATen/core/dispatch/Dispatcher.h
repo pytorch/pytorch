@@ -117,7 +117,7 @@ public:
   template<class Return, class... Args>
   Return callUnboxedWithDispatchKey(const OperatorHandle& op, DispatchKey dispatchKey, Args... args) const;
 
-  // Like callUnboxed, but intended for use in a redispatch: you currently
+  // Like callUnboxed, but intended for use in a redispatch: you are currently
   // in some currentDispatchKey, you have finished processing the key and
   // you now want to redispatch to the next dispatch key in the chain.
   // This will mask out the current key and all previous keys from the

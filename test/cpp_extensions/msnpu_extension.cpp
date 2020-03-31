@@ -47,8 +47,6 @@ std::tuple<Tensor,Tensor,Tensor> fake_convolution_backward(
             get_tensor(input.dtype(), {}));
 }
 
-constexpr auto kMSNPU = DispatchKey::MSNPUTensorId;
-
 void init_msnpu_extension() {
   static auto registry = torch::import()
     .impl("aten::empty.memory_format",                kMSNPU, CppFunction::makeUnboxedOnly(empty_override))
