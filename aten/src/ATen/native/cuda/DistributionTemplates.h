@@ -382,7 +382,7 @@ struct NormalKernel {
 
 template<typename RNG>
 void uniform_kernel(TensorIterator& iter, double from_, double to_, RNG gen) {
-  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Half, iter.dtype(), "uniform_kernel_cuda", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "uniform_kernel_cuda", [&] {
     TORCH_CHECK((to_ - from_) <= std::numeric_limits<scalar_t>::max(),
           "uniform_ expects to-from <= std::numeric_limits<", toString(iter.dtype()),
           ">::max(), but found to=", to_, " and from=", from_,
