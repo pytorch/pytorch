@@ -2641,12 +2641,9 @@ class TestAutograd(TestCase):
     def test_record_function_callbacks(self):
         x = torch.randn(10, 10)
         with profile() as p:
-            rf = torch.autograd._RecordFunction()
-            torch.autograd._run_before_callbacks(rf, "foo")
-            y = x * 2 + 4
-            # ensure that we run destructor for RecordFunction, which invokes
-            # end callbacks
-            del rf
+            with record_function("foo"):
+                y = x * 2 + 4
+
         function_events = p.function_events
         foo_event = [event for event in function_events if "foo" in event.name][0]
         self.assertEqual(foo_event.count, 1)
@@ -2841,14 +2838,14 @@ class TestAutograd(TestCase):
     def test_record_function_multithreaded(self):
         rf = record_function("outer")
         rf.__enter__()
-        with profile():
-            # test that exiting the record function after starting a profile
+        with record_function("inner"):
+            # test that exiting the record function after starting another one
             # doesn't throw.
             rf.__exit__()
 
-        with profile():
+        with record_function("inner"):
             rf.__enter__()
-        # test that exiting the record function after the profile has ended
+        # test that exiting the record function after ending another one
         # doesn't throw.
         rf.__exit__()
 
