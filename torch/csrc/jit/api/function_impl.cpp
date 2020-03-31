@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/passes/inliner.h>
+#include <torch/csrc/jit/passes/onnx/preinline_onnx.h>
 
 #include <torch/csrc/jit/frontend/error_report.h>
 
@@ -64,6 +65,7 @@ const c10::FunctionSchema& GraphFunction::getSchema() const {
 void preoptimizeGraph(std::shared_ptr<Graph>& graph) {
   // TODO: Invoke cleanup passes before and after inlining to reduce amount of
   // code we're copying.
+  PreInlineONNX(*graph);
   Inline(*graph);
 }
 

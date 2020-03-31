@@ -362,7 +362,6 @@ def _model_to_graph(model, args, verbose=False,
             for i, inp in enumerate(graph_inputs):
                 if i >= user_input_num:
                     inp.setDebugName(param_names[i - user_input_num])
-        torch._C._jit_pass_onnx_preinline(graph)
 
     input_and_param_names = [val.debugName() for val in graph.inputs()]
     param_names = input_and_param_names[len(input_and_param_names) - len(params):]

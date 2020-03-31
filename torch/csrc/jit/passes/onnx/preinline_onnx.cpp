@@ -20,6 +20,19 @@ namespace onnx {
 using namespace ::c10::onnx;
 }
 
+void replaceFunctions(Node* to_replace, Function* callee) {
+  if (callee->name() == "interpolate") {
+    to_replace->removeInput(0);
+    Node* interpolate_node =  to_replace->owningGraph()->create(Symbol::fromQualString("aten::__interpolate"), {to_replace->inputs()}, to_replace->outputs().size());
+    interpolate_node->output()->copyMetadata(to_replace->output());
+    interpolate_node->insertAfter(to_replace);
+    to_replace->replaceAllUsesWith(interpolate_node);
+    to_replace->removeAllInputs();
+    to_replace->destroy();
+    return;
+  }
+}
+
 
 void PreInlineCalls(Block* block) {
   for (auto it = block->nodes().begin(), end = block->nodes().end();
@@ -31,35 +44,8 @@ void PreInlineCalls(Block* block) {
         auto function_constant = cur->input(0)->node();
         auto fun_type =
             function_constant->output()->type()->expect<FunctionType>();
-
-				if (fun_type->function()->name() == "interpolate") {
-          cur->removeInput(0);
-//          cur->input(0)->node()->destroy();
-			    Node* interpolate_node =  block->owningGraph()->create(Symbol::fromQualString("aten::__interpolate"), {cur->inputs()}, cur->outputs().size());
-		      interpolate_node->output()->copyMetadata(cur->output());
-		      interpolate_node->insertAfter(cur);
-		      cur->replaceAllUsesWith(interpolate_node);
-		      cur->removeAllInputs();
-		      cur->destroy();
-          return;
-	      }
-				Block* block = fun_type->function()->graph()->block();
-				PreInlineCalls(block);
-//        std::cout<<"callee->optimized_graph()->toString() ============= " << fun_type->function()->graph()->toString() << "\n";
+        replaceFunctions(cur, fun_type->function());
       } break;
-//      case prim::CallMethod: {
-//        const std::string& name = cur->s(attr::name);
-//        std::cout<<"method name ============== " << name << "\n";
-//        if (auto class_type = cur->input(0)->type()->cast<ClassType>()) {
-//          auto function = class_type->getMethod(name);
-//          if (!function->isGraphFunction()) {
-//            continue;
-//          }
-//          GRAPH_UPDATE("Inlining method '", function->name(), "' to ", *cur);
-//          GRAPH_UPDATE("Function body: ", *function->optimized_graph());
-//          preinlineCallTo(cur, function);
-//        }
-//      } break;
       default: {
         for (auto b : cur->blocks()) {
           PreInlineCalls(b);
@@ -74,7 +60,6 @@ void PreInlineONNX(Graph& graph) {
   PreInlineCalls(graph.block());
   GRAPH_DUMP("After PreInlining: ", &graph);
 }
-
 
 } // namespace jit
 } // namespace torch

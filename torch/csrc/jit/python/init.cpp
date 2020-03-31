@@ -123,11 +123,7 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_onnx_preprocess_caffe2", PreprocessCaffe2Ops)
       .def("_jit_pass_onnx", ToONNX)
       .def("_jit_pass_lower_all_tuples", LowerAllTuples)
-      .def(
-          "_jit_pass_onnx_preinline",
-          [](std::shared_ptr<Graph>& graph) {
-            return PreInlineONNX(*graph);
-          })
+      .def("_jit_pass_onnx_preinline", PreInlineONNX)
       .def(
           "_jit_pass_onnx_peephole",
           [](std::shared_ptr<Graph>& graph,
