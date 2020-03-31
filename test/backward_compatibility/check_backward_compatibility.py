@@ -168,6 +168,13 @@ def check_bc(new_schema_dict):
     return is_bc
 
 
+blacklist = [
+    "torch.classes",
+    "RRef",
+    "aten::setdefault",
+]
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Process some integers.')
     parser.add_argument(
@@ -182,7 +189,7 @@ if __name__ == '__main__':
             line = f.readline()
             if not line:
                 break
-            if "torch.classes" in line or "RRef" in line:
+            if any(w for w in blacklist if w in line)
                 # TODO Fix type __torch__.torch.classes.xxx
                 continue
 
