@@ -157,7 +157,7 @@ def test_torch_nn_functional_variant(unit_test_class, test_params):
 def add_torch_nn_functional_impl_parity_tests(parity_table, unit_test_class, test_params_dicts, test_instance_class, devices):
     for test_params_dict in test_params_dicts:
         # Skip all `torch.nn` module tests, since they are handled by another test suite.
-        if 'FunctionalModule' not in str(test_params_dict.get('constructor', '')):
+        if 'wrap_functional' not in str(test_params_dict.get('constructor', '')):
             continue
 
         assert 'cpp_options_args' in test_params_dict or 'cpp_function_call' in test_params_dict, \

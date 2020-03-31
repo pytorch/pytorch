@@ -207,7 +207,7 @@ torch_nn_test_params_map = {}
 def add_torch_nn_module_impl_parity_tests(parity_table, unit_test_class, test_params_dicts, test_instance_class, devices):
     for test_params_dict in test_params_dicts:
         # Skip all `torch.nn.functional` tests, since they are handled by another test suite.
-        if 'FunctionalModule' in str(test_params_dict.get('constructor', '')):
+        if 'wrap_functional' in str(test_params_dict.get('constructor', '')):
             continue
 
         module_name = compute_module_name(test_params_dict)
