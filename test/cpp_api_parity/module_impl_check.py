@@ -18,7 +18,6 @@ import tempfile
 import shutil
 from string import Template
 import types
-import os
 
 import torch
 from cpp_api_parity.utils import TorchNNModuleTestParams, TORCH_NN_COMMON_TEST_HARNESS, \
@@ -166,7 +165,7 @@ def test_forward_backward(unit_test_class, test_params):
     # if this fails.
     try:
         shutil.rmtree(cpp_tmp_folder)
-    except:
+    except: # noqa: E722
         pass
 
 def test_torch_nn_module_variant(unit_test_class, test_params):

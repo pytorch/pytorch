@@ -18,7 +18,6 @@ import tempfile
 import shutil
 from string import Template
 import re
-import os
 
 import torch
 from cpp_api_parity.utils import TorchNNFunctionalTestParams, TORCH_NN_COMMON_TEST_HARNESS, \
@@ -103,7 +102,7 @@ def test_forward(unit_test_class, test_params):
     # if this fails.
     try:
         shutil.rmtree(cpp_tmp_folder)
-    except:
+    except: # noqa: E722
         pass
 
 def compute_functional_name(test_params_dict):
