@@ -516,8 +516,16 @@ class _TestTorchMixin(object):
     def test_floor(self):
         self._test_math_by_name('floor')
 
+        # Note: this is consistent with NumPy
+        with self.assertRaises(RuntimeError):
+            torch.floor(torch.tensor((1 + 1j)))
+
     def test_ceil(self):
         self._test_math_by_name('ceil')
+
+        # Note: this is consistent with NumPy
+        with self.assertRaises(RuntimeError):
+            torch.ceil(torch.tensor((1 + 1j)))
 
     def test_rsqrt(self):
         def rsqrt(x):
@@ -534,6 +542,10 @@ class _TestTorchMixin(object):
 
     def test_trunc(self):
         self._test_math(torch.trunc, lambda x: x - math.fmod(x, 1))
+
+        # Note: this is consistent with NumPy
+        with self.assertRaises(RuntimeError):
+            torch.trunc(torch.tensor((1 + 1j)))
 
     def test_round(self):
         self._test_math(torch.round, round)
@@ -9858,7 +9870,8 @@ class TestTorchDeviceType(TestCase):
         else:
             helper(self, device, dtype, lambda x: x, lambda t: t, lambda mean: mean)
 
-    @dtypes(torch.float, torch.double, torch.half)
+    @dtypes(torch.float, torch.double)
+    @dtypesIfCUDA(torch.float, torch.double, torch.half)
     def test_uniform_from_to(self, device, dtype):
         size = 2000
         alpha = 0.1
@@ -14687,6 +14700,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         self.assertEqual(r.dtype, a.dtype)
 
     @slowTest
+    @onlyOnCPUAndCUDA
     @dtypes(torch.float32, torch.float64, torch.bfloat16, torch.int32, torch.int64)
     @dtypesIfCUDA(torch.float32, torch.float64)
     def test_mm(self, device, dtype):
