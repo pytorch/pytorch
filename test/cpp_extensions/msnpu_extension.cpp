@@ -48,11 +48,11 @@ std::tuple<Tensor,Tensor,Tensor> fake_convolution_backward(
 }
 
 void init_msnpu_extension() {
-  static auto registry = torch::import("aten")
-    .impl("empty.memory_format",                torch::dispatch(DispatchKey::MSNPUTensorId, CppFunction::makeUnboxedOnly(empty_override)))
-    .impl("add.Tensor",                         torch::dispatch(DispatchKey::MSNPUTensorId, CppFunction::makeUnboxedOnly(add_override)))
-    .impl("convolution_overrideable",           torch::dispatch(DispatchKey::MSNPUTensorId, CppFunction::makeUnboxedOnly(fake_convolution)))
-    .impl("convolution_backward_overrideable",  torch::dispatch(DispatchKey::MSNPUTensorId, CppFunction::makeUnboxedOnly(fake_convolution_backward)))
+  static auto registry = torch::import()
+    .impl("aten::empty.memory_format",                torch::dispatch(DispatchKey::MSNPUTensorId, CppFunction::makeUnboxedOnly(empty_override)))
+    .impl("aten::add.Tensor",                         torch::dispatch(DispatchKey::MSNPUTensorId, CppFunction::makeUnboxedOnly(add_override)))
+    .impl("aten::convolution_overrideable",           torch::dispatch(DispatchKey::MSNPUTensorId, CppFunction::makeUnboxedOnly(fake_convolution)))
+    .impl("aten::convolution_backward_overrideable",  torch::dispatch(DispatchKey::MSNPUTensorId, CppFunction::makeUnboxedOnly(fake_convolution_backward)))
     ;
 }
 
