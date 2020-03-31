@@ -118,14 +118,13 @@ def _quantize_script(model, qconfig_dict, run_fn, run_args, is_dynamic, debug):
     model = wrap_cpp_module(torch._C._jit_pass_fold_convbn(model._c))
     if is_dynamic:
         model = prepare_dynamic_script(model, qconfig_dict)
-    else:
-        model = prepare_script(model, qconfig_dict, True)
-    run_fn(model._c._get_method('forward'), *run_args)
-
-    if is_dynamic:
+        run_fn(model._c._get_method('forward'), *run_args)
         model = convert_dynamic_script(model, debug)
     else:
+        model = prepare_script(model, qconfig_dict, True)
+        run_fn(model._c._get_method('forward'), *run_args)
         model = convert_script(model, True, debug)
+
     return model
 
 def quantize_script(model, qconfig_dict, run_fn, run_args, inplace=False, debug=False):
