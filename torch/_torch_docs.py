@@ -1019,7 +1019,7 @@ add_docstr(torch.real,
            r"""
 real(input, out=None) -> Tensor
 
-Returns the real values of the given :attr:`input` tensor. If
+Returns the real part of the :attr:`input` tensor. If
 :attr:`input` is a real (non-complex) tensor, this function just
 returns it.
 
@@ -2485,9 +2485,10 @@ add_docstr(torch.imag,
            r"""
 imag(input, out=None) -> Tensor
 
-Returns the imaginary values of the given :attr:`input` tensor. If
-:attr:`input` is a real (non-complex) tensor it has no imaginary part
-and an error is raised.
+Returns the imaginary part of the :attr:`input` tensor.
+
+.. warning::
+    Not yet implemented.
 
 .. math::
     \text{out}_{i} = imag(\text{input}_{i})
