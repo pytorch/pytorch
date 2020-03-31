@@ -998,7 +998,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         newDims.end(),
         static_cast<int64_t>(1),
         std::multiplies<int64_t>());
-    if (newNumel * storage_.itemsize() <= storage_.capacity()) {
+    if (newNumel * data_type_.itemsize() <= storage_.nbytes()) {
       sizes_ = newDims;
       numel_ = newNumel;
       return;
@@ -1059,7 +1059,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         newCapacity.end(),
         static_cast<int64_t>(1),
         std::multiplies<int64_t>());
-    if (newNumel * storage_.itemsize() <= storage_.capacity()) {
+    if (newNumel * data_type_.itemsize() <= storage_.nbytes()) {
       return;
     }
     // Old data is discarded
@@ -1098,15 +1098,16 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       // will create the data storage.
       bool reset_tensor = false;
       if (reserved_) {
-        // If tensor is reserved then don't claim its memeory unless capacity()
+        // If tensor is reserved then don't claim its memeory unless nbytes()
         // is smaller than new size
-        reset_tensor = storage_.capacity() < (storage_offset_ + numel_) * storage_.itemsize();
+        reset_tensor = storage_.nbytes() <
+            (storage_offset_ + numel_) * data_type_.itemsize();
       } else {
-        reset_tensor = storage_.capacity() <
-                (storage_offset_ + numel_) * storage_.itemsize() ||
+        reset_tensor = storage_.nbytes() <
+                (storage_offset_ + numel_) * data_type_.itemsize() ||
             !FLAGS_caffe2_keep_on_shrink ||
-            storage_.capacity() -
-                    (storage_offset_ + numel_) * storage_.itemsize() >
+            storage_.nbytes() -
+                    (storage_offset_ + numel_) * data_type_.itemsize() >
                 static_cast<size_t>(FLAGS_caffe2_max_keep_on_shrink_memory);
       }
 
@@ -1187,7 +1188,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         src.storage_initialized(),
         "Source tensor has no content and has size > 0");
     // Finally, do sharing.
-    /* Since we create new Storage whenever we need to change data_type/capacity
+    /* Since we create new Storage whenever we need to change data_type/nbytes
      * this still keeps the original semantics
      */
     storage_ = src.storage();
@@ -1199,26 +1200,26 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   void ShareExternalPointer(
       DataPtr&& data_ptr,
       const caffe2::TypeMeta& data_type,
-      size_t capacity) {
+      size_t size_bytes) {
     TORCH_CHECK(
         data_type.id() != caffe2::TypeIdentifier::uninitialized(),
         "To share with a raw external pointer you need to pass in an "
         "initialized data_type(TypeMeta).");
-    if (!capacity) {
-      capacity = numel_ * data_type.itemsize();
+    if (!size_bytes) {
+      size_bytes = numel_ * data_type.itemsize();
     }
     if (storage_.unique()) {
       storage_.UniqueStorageShareExternalPointer(
-          std::move(data_ptr), data_type, capacity);
+          std::move(data_ptr), data_type, size_bytes);
       data_type_ = data_type;
       device_opt_ = storage_.device();
       storage_offset_ = 0;
     } else {
-      int64_t numel = capacity / data_type.itemsize();
       // Create a new Storage
       storage_ = Storage(
+          Storage::use_byte_size_t(),
           data_type,
-          numel,
+          size_bytes,
           std::move(data_ptr),
           /*allocator=*/nullptr,
           /*resizable=*/false);
@@ -1261,7 +1262,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       // constructor.
       if (numel_ == 0 ||
           (meta.placementNew() == nullptr && !had_special_dtor &&
-           storage_.numel() >= numel_)) {
+           (storage_.nbytes() >= (numel_ * data_type_.itemsize())))) {
         TORCH_INTERNAL_ASSERT(storage_offset_ == 0); // because we just reallocated
         return storage_.data();
       }
@@ -1279,16 +1280,16 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         // destruction procedure.
         auto size = numel_;
         auto dtor = data_type_.placementDelete();
-        auto data_ptr = allocator->allocate(numel_ * storage_.itemsize());
+        auto data_ptr = allocator->allocate(numel_ * data_type_.itemsize());
         storage_.set_data_ptr(PlacementDeleteContext::makeDataPtr(
             std::move(data_ptr), dtor, size, storage_.device()));
         data_type_.placementNew()(storage_.data(), numel_);
       } else {
         // For fundamental type, new and delete is easier.
         storage_.set_data_ptr(
-            allocator->allocate(numel_ * storage_.itemsize()));
+            allocator->allocate(numel_ * data_type_.itemsize()));
       }
-      storage_.set_numel(numel_);
+      storage_.set_nbytes(numel_ * data_type_.itemsize());
       TORCH_INTERNAL_ASSERT(storage_offset_ == 0); // because we just reallocated
       device_opt_ = storage_.device();
       return storage_.data();

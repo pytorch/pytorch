@@ -22,11 +22,12 @@ Tensor pin_memory(const Tensor& self) {
   }
   auto* allocator = detail::getCUDAHooks().getPinnedMemoryAllocator();
   auto storage = Storage(
+      Storage::use_byte_size_t(),
       self.dtype(),
-      detail::computeStorageSize(self.sizes(), self.strides()),
+      detail::computeStorageNbytes(
+          self.sizes(), self.strides(), self.dtype().itemsize()),
       allocator,
-      /*resizable=*/false
-  );
+      /*resizable=*/false);
   auto tensor = at::empty({0}, self.options()).set_(storage, 0, self.sizes(), self.strides());
   tensor.copy_(self);
   return tensor;

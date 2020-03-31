@@ -39,7 +39,9 @@ Tensor _shape_as_tensor(const Tensor& self) {
 }
 
 Tensor& set_(Tensor& result, Storage source) {
-  return result.set_(source, 0, static_cast<int64_t>(source.size()), {});
+  int64_t new_size =
+      static_cast<int64_t>(source.nbytes() / result.dtype().itemsize());
+  return result.set_(source, 0, new_size, {});
 }
 
 // unify with cuda implementation?  This is not done to avoid a dispatch in resize_impl_cpu_
@@ -64,7 +66,12 @@ Tensor& set_tensor_(Tensor& result, const Tensor& source) {
 // way of getting the allocator to use for a device (c10::GetAllocator is not
 // the same as at::cuda::getCUDADeviceAllocator().
 Tensor& set_cpu_(Tensor& result) {
-  Storage storage(result.dtype(), 0, c10::GetAllocator(kCPU), true);
+  Storage storage(
+      Storage::use_byte_size_t(),
+      result.dtype(),
+      0,
+      c10::GetAllocator(kCPU),
+      true);
   return result.set_(storage, 0, {0}, {});
 }
 
