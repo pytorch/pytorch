@@ -16479,23 +16479,24 @@ class _TorchMathTestMeta(object):
                  substr='',
                  make_inplace=True,
                  decorators=None,
-                 ref_decorator='numpy',
+                 ref_backend='numpy',
                  rtol=None,
                  atol=None,
                  dtypes=_float_types_no_half,
                  replace_inf_with_nan=False):
         self.opstr = opstr
         self.args = args
-        self.reffn = reffn
+        self.reffn = reffn  # reffn is either callable or ref_backend attribute, set to opstr if not specified
         self.refargs = refargs
         self.input_fn = input_fn
         self.inputargs = inputargs
         self.substr = substr
         self.make_inplace = make_inplace
-        assert ref_decorator == 'numpy' or ref_decorator == 'scipy'
-        if ref_decorator == 'numpy':
+        assert ref_backend == 'numpy' or ref_backend == 'scipy'
+        self.ref_backend = ref_backend
+        if ref_backend == 'numpy':
             self.ref_decorator = [unittest.skipIf(not TEST_NUMPY, "Numpy not found")]
-        elif ref_decorator == 'scipy':
+        elif ref_backend == 'scipy':
             self.ref_decorator = [unittest.skipIf(not TEST_SCIPY, "Scipy not found")]
         self.decorators = decorators
         self.rtol = rtol
@@ -16504,38 +16505,38 @@ class _TorchMathTestMeta(object):
         self.replace_inf_with_nan = replace_inf_with_nan
 
 torch_op_tests = [_TorchMathTestMeta('sin'),
-                  _TorchMathTestMeta('asin', reffn=np.arcsin),
+                  _TorchMathTestMeta('asin', reffn='arcsin'),
                   _TorchMathTestMeta('sinh'),
                   _TorchMathTestMeta('cos'),
-                  _TorchMathTestMeta('acos', reffn=np.arccos),
+                  _TorchMathTestMeta('acos', reffn='arccos'),
                   _TorchMathTestMeta('cosh'),
                   _TorchMathTestMeta('tan'),
-                  _TorchMathTestMeta('atan', reffn=np.arctan),
+                  _TorchMathTestMeta('atan', reffn='arctan'),
                   _TorchMathTestMeta('tanh'),
                   _TorchMathTestMeta('log'),
                   _TorchMathTestMeta('log10'),
                   _TorchMathTestMeta('log1p'),
                   _TorchMathTestMeta('log2'),
                   _TorchMathTestMeta('sqrt'),
-                  _TorchMathTestMeta('erf', reffn=scipy.special.erf, ref_decorator='scipy'),
-                  _TorchMathTestMeta('erfc', reffn=scipy.special.erfc, ref_decorator='scipy'),
+                  _TorchMathTestMeta('erf', ref_backend='scipy'),
+                  _TorchMathTestMeta('erfc', ref_backend='scipy'),
                   _TorchMathTestMeta('exp'),
                   _TorchMathTestMeta('expm1'),
                   _TorchMathTestMeta('floor'),
                   _TorchMathTestMeta('ceil'),
                   _TorchMathTestMeta('rsqrt', reffn=lambda x: np.reciprocal(np.sqrt(x))),
-                  _TorchMathTestMeta('frac', reffn=np.fmod, refargs=lambda x: (x.numpy(), 1)),
+                  _TorchMathTestMeta('frac', reffn='fmod', refargs=lambda x: (x.numpy(), 1)),
                   _TorchMathTestMeta('trunc'),
                   _TorchMathTestMeta('round'),
-                  _TorchMathTestMeta('lgamma', reffn=scipy.special.gammaln, ref_decorator='scipy'),
-                  _TorchMathTestMeta('polygamma', args=[0], substr='_0', reffn=scipy.special.polygamma,
+                  _TorchMathTestMeta('lgamma', reffn='gammaln', ref_backend='scipy'),
+                  _TorchMathTestMeta('polygamma', args=[0], substr='_0', reffn='polygamma',
                   refargs=lambda x: (0, x.numpy()), input_fn=_generate_gamma_input, inputargs=[False],
-                  ref_decorator='scipy'),
-                  _TorchMathTestMeta('polygamma', args=[1], substr='_1', reffn=scipy.special.polygamma,
+                  ref_backend='scipy'),
+                  _TorchMathTestMeta('polygamma', args=[1], substr='_1', reffn='polygamma',
                   refargs=lambda x: (1, x.numpy()), input_fn=_generate_gamma_input, inputargs=[False],
-                  ref_decorator='scipy', rtol=0.0008, atol=1e-5),
-                  _TorchMathTestMeta('digamma', reffn=scipy.special.digamma,
-                  input_fn=_generate_gamma_input, inputargs=[True], ref_decorator='scipy',
+                  ref_backend='scipy', rtol=0.0008, atol=1e-5),
+                  _TorchMathTestMeta('digamma',
+                  input_fn=_generate_gamma_input, inputargs=[True], ref_backend='scipy',
                   replace_inf_with_nan=True)]
 
 
@@ -16547,7 +16548,17 @@ def generate_torch_test_functions(cls, testmeta, inplace):
 
     def fn_check_reference(self, device, dtype):
         def reffn(x):
-            fn = getattr(np, testmeta.opstr) if testmeta.reffn is None else testmeta.reffn
+            backend = np if testmeta.ref_backend == 'numpy' else scipy.special
+            opstr = None
+            if testmeta.reffn is None:
+                opstr = testmeta.opstr
+            elif isinstance(testmeta.reffn, str):
+                opstr = testmeta.reffn
+            if callable(testmeta.reffn):
+                fn = testmeta.reffn
+            else:
+                assert opstr is not None, "invalid reffn"
+                fn = getattr(backend, opstr)
             return fn(*testmeta.refargs(x))
 
         inp = testmeta.input_fn(dtype, device, *testmeta.inputargs)
