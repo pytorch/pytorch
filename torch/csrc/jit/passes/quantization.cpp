@@ -768,7 +768,7 @@ bool isWeight(Module& module, Value* v) {
       if (result.has_value()) {
         // Check to make sure all the CallMethods in the graph produce the same output.
         TORCH_CHECK(call_method_result == result.value(),
-                    "Expected all CallMethods to produce either weight "
+                    "Expected all CallMethods to use either weight "
                     "or non-weight value.", v->debugName());
       } else {
         result = call_method_result;

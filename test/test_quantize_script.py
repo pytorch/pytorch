@@ -7,7 +7,7 @@ from torch.quantization import default_dynamic_qconfig
 from torch.testing._internal.common_utils import run_tests
 from torch.testing import FileCheck
 from torch.testing._internal.jit_utils import attrs_with_prefix
-from torch.testing._internal.jit_utils import JitTestCase, get_forward, get_forward_graph, get_module_method
+from torch.testing._internal.jit_utils import JitTestCase, get_forward_graph, get_module_method
 
 from torch.jit._recursive import wrap_cpp_module
 class TestScript(JitTestCase):
@@ -86,14 +86,14 @@ class TestScript(JitTestCase):
         m = prepare_dynamic_script(m, {'': default_dynamic_qconfig})
         data = torch.randn(1, 3, 10, 10, dtype=torch.float)
 
-        get_forward(m._c)(data)
+        m(data)
 
         m = wrap_cpp_module(torch._C._jit_pass_insert_quant_dequant(m._c, "forward", False, True))
 
         assert len(m._modules._c.items()) == 1, \
             'Expected to have single submodule of conv'
 
-        get_forward(m._c)(data)
+        m(data)
         quant_func = "aten::quantize_per_tensor"
 
         # quantizing activations
@@ -133,14 +133,13 @@ class TestScript(JitTestCase):
         m = prepare_dynamic_script(m, {'': default_dynamic_qconfig})
         data = torch.randn(5, 5, dtype=torch.float)
 
-        get_forward(m._c)(data)
-
+        m(data)
         m = wrap_cpp_module(torch._C._jit_pass_insert_quant_dequant(m._c, "forward", False, True))
 
         assert len(m._modules._c.items()) == 2, \
             'Expected to have two submodule of linear'
 
-        get_forward(m._c)(data)
+        m(data)
         quant_func = "aten::quantize_per_tensor"
 
         # quantizing activations
