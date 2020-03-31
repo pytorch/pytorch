@@ -115,7 +115,6 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
 
     torch._C._jit_pass_peephole(graph, True)
     torch._C._jit_pass_lint(graph)
-
     if operator_export_type != OperatorExportTypes.RAW:
         torch._C._jit_pass_onnx_prepare_inplace_ops_for_onnx(graph)
 
@@ -158,7 +157,9 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
         torch._C._jit_pass_lint(graph)
 
         from torch.onnx.symbolic_helper import _export_onnx_opset_version
+        print(graph)
         torch._C._jit_pass_onnx_peephole(graph, _export_onnx_opset_version, fixed_batch_size)
+        print(graph)
         torch._C._jit_pass_lint(graph)
 
     # graph is not a valid jit graph anymore because types have been replaced
