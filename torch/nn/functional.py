@@ -1587,7 +1587,9 @@ def linear(input, weight, bias=None):
     if not torch.jit.is_scripting():
         if any([type(t) is not Tensor for t in tens_ops]) and has_torch_function(tens_ops):
             return handle_torch_function(linear, tens_ops, input, weight, bias=bias)
-    if input.dim() == 2 and bias is not None:
+    if (input.layout == torch._mkldnn):
+        ret = torch._C._nn.mkldnn_linear(input, weight, bias)
+    elif input.dim() == 2 and bias is not None:
         # fused op is marginally faster
         ret = torch.addmm(bias, input, weight.t())
     else:
