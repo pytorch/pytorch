@@ -17,6 +17,7 @@
 #include <ATen/native/cpu/CatKernel.h>
 #include <ATen/native/Copy.h>
 #include <ATen/MemoryOverlap.h>
+#include <ATen/Parallel.h>
 
 namespace at {
 namespace native {
@@ -1486,18 +1487,21 @@ void apply_renorm(Tensor &res, const Tensor& src, scalar_t value, int64_t dimens
     rowR = res.select(dimension, i);
     scalar_t* rowS_data = rowS.data_ptr<scalar_t>();
     scalar_t* rowR_data = rowR.data_ptr<scalar_t>();
-    for (int64_t j = 0; j < rowS.numel(); j++) {
-      if (value == 1) {
-        norm += std::abs(rowS_data[j]);
-      } else if (value == 2) {
-        scalar_t z = rowS_data[j];
-        norm += z * z;
-      } else if (value == INFINITY) {
-        norm = std::max(norm, std::abs(rowS_data[j]));
-      } else {
-        norm += std::pow(std::abs(rowS_data[j]), value);
+
+    at::parallel_for(0, rowS.numel(), 1, [&](int64_t j_begin, int64_t j_end) {
+      for(int64_t j = j_begin; j < j_end; j++) {
+        if (value == 1) {
+          norm += std::abs(rowS_data[j]);
+        } else if (value == 2) {
+          scalar_t z = rowS_data[j];
+          norm += z * z;
+        } else if (value == INFINITY) {
+          norm = std::max(norm, std::abs(rowS_data[j]));
+        } else {
+          norm += std::pow(std::abs(rowS_data[j]), value);
+        }
       }
-    }
+    });
 
     if (value != INFINITY) {
       norm = std::pow(norm, 1 / value);
@@ -1505,10 +1509,11 @@ void apply_renorm(Tensor &res, const Tensor& src, scalar_t value, int64_t dimens
 
     if (norm > maxnorm) {
       new_norm = maxnorm / (norm + 1e-7);
-
-      for (int64_t j = 0; j < rowR.numel(); j++) {
-        rowR_data[j] = rowS_data[j] * new_norm;
-      }
+      at::parallel_for(0, rowR.numel(), 1, [&](int64_t j_begin, int64_t j_end) {
+        for(int64_t j = j_begin; j < j_end; j++) {
+          rowR_data[j] = rowS_data[j] * new_norm;
+        }
+      });
     } else {
       rowR.copy_(rowS);
     }
@@ -1528,7 +1533,7 @@ Tensor& renorm_(Tensor& self, Scalar p, int64_t dim, Scalar maxnorm) {
 
 Tensor& renorm_out(Tensor &result, const Tensor& self, Scalar p, int64_t dim, Scalar maxnorm) {
   AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "renorm", [&] {
-    apply_renorm<scalar_t>(result, self, p.to<scalar_t>(), dim, maxnorm.to<scalar_t>());
+    apply_renorm<scalar_t>(result.contiguous(), self.contiguous(), p.to<scalar_t>(), dim, maxnorm.to<scalar_t>());
   });
   return result;
 }
