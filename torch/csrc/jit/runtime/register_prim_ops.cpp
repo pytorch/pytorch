@@ -2061,10 +2061,7 @@ RegisterOperators reg2({
         aliasAnalysisFromSchema()),
 
     // registered as Any[] so that heterogenous tuples can be called with len()
-    Operator(
-        "aten::len.t(Any[] a) -> int",
-        listLen,
-        aliasAnalysisFromSchema()),
+    Operator("aten::len.t(Any[] a) -> int", listLen, aliasAnalysisFromSchema()),
 
 // these ops have a specialized implementation for the list element type
 #define CREATE_SPECIALIZED_LIST_OPS(decl_type, value_type) \
