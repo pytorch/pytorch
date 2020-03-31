@@ -13,6 +13,13 @@ use ``torch.float16`` (``half``). Some operations, like linear layers and convol
 are much faster in ``float16``. Other operations, like reductions, often require the dynamic
 range of ``float32``. Networks running in mixed precision try to match each operation to its appropriate datatype.
 
+.. warning::
+    :class:`torch.cuda.amp.GradScaler` is not a complete implementation of automatic mixed precision.
+    :class:`GradScaler` is only useful if you manually run regions of your model in ``float16``.
+    If you aren't sure how to choose op precision manually, the master branch and nightly pip/conda
+    builds include a context manager that chooses op precision automatically wherever it's enabled.
+    See the `master documentation<https://pytorch.org/docs/master/amp.html>`_ for details.
+
 .. contents:: :local:
 
 .. _gradient-scaling:
