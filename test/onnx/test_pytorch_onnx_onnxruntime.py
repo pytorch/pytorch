@@ -1199,7 +1199,7 @@ class TestONNXRuntime(unittest.TestCase):
 
     def _interpolate_script(self, x, mode, use_size, is_upsample, align_corners=False):
         # test disabled
-        return 
+        return
 
         class MyModel(torch.jit.ScriptModule):
             __constants__ = ['mode', 'use_size', 'is_upsample', 'size', 'scale', 'size_array', 'scale_array', 'align_corners']
@@ -2677,8 +2677,8 @@ class TestONNXRuntime(unittest.TestCase):
                 out = input * 2
                 out *= out.dim()
                 return out
-        empty_input = torch.randn(0, requires_grad=True)
-        multi_dim_input = torch.randn(1, 2, 3, requires_grad=True)
+        empty_input = torch.ones(0, requires_grad=True)
+        multi_dim_input = torch.ones(1, 2, 3, requires_grad=True)
         self.run_test(DimModel(), empty_input)
         self.run_test(DimModel(), multi_dim_input)
 
