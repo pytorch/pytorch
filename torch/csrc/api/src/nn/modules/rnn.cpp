@@ -273,22 +273,22 @@ void RNNImplBase<Derived>::flatten_parameters() {
           // Flatten Forward direction weights
           torch::_cudnn_rnn_flatten_weight(
               flat_weights_fwd,
-              options_base.with_bias() ? 4 : 2,
+              options_base.bias() ? 4 : 2,
               options_base.input_size(),
               static_cast<int64_t>(get_cudnn_mode_for_rnn(options_base.mode())),
               options_base.hidden_size(),
-              options_base.layers(),
+              options_base.num_layers(),
               options_base.batch_first(),
               /*bidirectional=*/false,
               options_base.cat_layer_fwd_bwd_states());
           // Flatten Backward direction weights
           torch::_cudnn_rnn_flatten_weight(
               flat_weights_bwd,
-              options_base.with_bias() ? 4 : 2,
+              options_base.bias() ? 4 : 2,
               options_base.input_size(),
               static_cast<int64_t>(get_cudnn_mode_for_rnn(options_base.mode())),
               options_base.hidden_size(),
-              options_base.layers(),
+              options_base.num_layers(),
               options_base.batch_first(),
               /*bidirectional=*/false,
               options_base.cat_layer_fwd_bwd_states());
