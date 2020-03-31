@@ -753,7 +753,7 @@ bool isWeightOfConvOrLinear(Value* v) {
 }
 
 // Go through the CallMethod graph to check if the value is Weight.
-c10::optional<bool> isWeight(Module& module, Value* v) {
+bool isWeight(Module& module, Value* v) {
   if (isWeightOfConvOrLinear(v)) {
     return true;
   }
@@ -765,16 +765,17 @@ c10::optional<bool> isWeight(Module& module, Value* v) {
       auto m = getInvokedModule(module, n, self);
       auto g = m.get_method(n->s(attr::name)).graph();
       auto call_method_result = isWeight(m, g->inputs()[u.offset]);
-      if (result) {
+      if (result.has_value()) {
         // Check to make sure all the CallMethods in the graph produce the same output.
-        TORCH_CHECK(*call_method_result == *result,
-                      "Expected all CallMethods in the graph to produce same result.")
+        TORCH_CHECK(call_method_result == result.value(),
+                    "Expected all CallMethods to produce either weight "
+                    "or non-weight value.", v->debugName());
       } else {
         result = call_method_result;
       }
     }
   }
-  return result;
+  return result.has_value() ? result.value() : false;
 }
 
 Module getObserverModuleFor(Value* v, const QConfig& qconfig) {
