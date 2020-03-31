@@ -495,7 +495,7 @@ RNNImpl::RNNImpl(const RNNOptions& options_)
               .batch_first(options_.batch_first())
               .dropout(options_.dropout())
               .bidirectional(options_.bidirectional())
-              .cat_layer_fwd_bwd_states(options_.cat_layer_fwd_bwd_states)),
+              .cat_layer_fwd_bwd_states(options_.cat_layer_fwd_bwd_states())),
       options(options_) {}
 
 std::tuple<Tensor, Tensor> RNNImpl::forward_helper(
@@ -773,7 +773,8 @@ GRUImpl::GRUImpl(const GRUOptions& options_)
               .bias(options_.bias())
               .batch_first(options_.batch_first())
               .dropout(options_.dropout())
-              .bidirectional(options_.bidirectional())),
+              .bidirectional(options_.bidirectional())
+              .cat_layer_fwd_bwd_states(options_.cat_layer_fwd_bwd_states())),
       options(options_) {}
 
 std::tuple<Tensor, Tensor> GRUImpl::forward_helper(
