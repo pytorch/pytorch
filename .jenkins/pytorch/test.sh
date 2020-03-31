@@ -244,7 +244,7 @@ test_backward_compatibility() {
   pushd test/backward_compatibility
   python dump_all_function_schemas.py --filename new_schemas.txt
   pip_uninstall torch
-  pip_install --pre torch -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html
+  pip_install torch==1.4.0+cpu torchvision==0.5.0+cpu -f https://download.pytorch.org/whl/torch_stable.html
   python check_backward_compatibility.py --new-schemas new_schemas.txt
   popd
   set +x
