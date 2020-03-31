@@ -527,9 +527,6 @@ class JitRpcAsyncOpTest:
 
         dst_worker_name = "worker{}".format((self.rank + 1) % self.world_size)
 
-        # Notice, TorchScript always translates(emits) Python `raise` statement,
-        # as the exception message string, "Exception",
-        # no matter what exception type and excetpion message are in the statement,
         @torch.jit.script
         def rpc_async_call_remote_raising_torchscript_in_torchscript(
             dst_worker_name: str
@@ -540,7 +537,7 @@ class JitRpcAsyncOpTest:
             ret = fut.wait()
             return ret
 
-        with self.assertRaisesRegex(RuntimeError, "Exception"):
+        with self.assertRaisesRegex(RuntimeError, "Expected error"):
             ret = rpc_async_call_remote_raising_torchscript_in_torchscript(
                 dst_worker_name
             )
