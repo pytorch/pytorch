@@ -13,7 +13,7 @@
 #include <torch/csrc/jit/runtime/jit_exception.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <c10/util/StringUtil.h>
-#include <ATen/detail/FunctionTraits.h>
+#include <c10/util/Metaprogramming.h>
 
 /// NOTE [ Conversion Cpp Python Warning ]
 /// The warning handler cannot set python warnings immediately
@@ -297,15 +297,15 @@ private:
 
 namespace detail {
 template <typename Func, size_t i>
-using Arg = typename function_traits<Func>::template arg<i>::type;
+using Arg = typename c10::guts::function_traits<Func>::template arg<i>::type;
 
 template <typename Func, size_t ...Is>
 auto wrap_pybind_function_impl_(Func&& f, std::index_sequence<Is...>) {
-  using traits = function_traits<Func>;
+  using traits = c10::guts::function_traits<Func>;
   namespace py = pybind11;
 
   // f=f is needed to handle function references on older compilers
-  return [f=f](Arg<Func, Is> ...args) -> typename traits::result_type {
+  return [f=f](Arg<Func, Is> ...args) -> typename traits::return_type {
     HANDLE_TH_ERRORS
     return f(std::forward<Arg<Func, Is>>(args)...);
     END_HANDLE_TH_ERRORS_PYBIND
@@ -317,7 +317,7 @@ auto wrap_pybind_function_impl_(Func&& f, std::index_sequence<Is...>) {
 // Returns a function object suitable for registering with pybind11.
 template <typename Func>
 auto wrap_pybind_function(Func&& f) {
-  using traits = function_traits<Func>;
+  using traits = c10::guts::function_traits<Func>;
   return torch::detail::wrap_pybind_function_impl_(
     std::forward<Func>(f), std::make_index_sequence<traits::arity>{});
 }

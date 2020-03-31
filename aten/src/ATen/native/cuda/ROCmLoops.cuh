@@ -34,7 +34,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/core/Array.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
-#include <ATen/detail/FunctionTraits.h>
+#include <c10/util/Metaprogramming.h>
 #include <ATen/native/TensorIterator.h>
 #include <c10/macros/Macros.h>
 #include <c10/core/ScalarType.h>
@@ -109,28 +109,28 @@ static void launch_kernel(int64_t N, const func_t& f) {
 }
 
 template <typename traits, typename func_t, typename index_t, size_t... INDEX>
-C10_HOST_DEVICE typename traits::result_type
+C10_HOST_DEVICE typename traits::return_type
 invoke_impl(const func_t &f, char *const C10_RESTRICT data[], const index_t strides[], int i,
             std::index_sequence<INDEX...>) {
   return f(*(typename traits::template arg<INDEX>::type*)(data[INDEX] + i * strides[INDEX])...);
 }
 
-template <typename func_t, typename index_t, typename traits = function_traits<func_t>>
-C10_HOST_DEVICE typename traits::result_type
+template <typename func_t, typename index_t, typename traits = c10::guts::function_traits<func_t>>
+C10_HOST_DEVICE typename traits::return_type
 invoke(const func_t &f, char *const C10_RESTRICT data[], const index_t strides[], int i) {
   using Indices = std::make_index_sequence<traits::arity>;
   return invoke_impl<traits>(f, data, strides, i, Indices{});
 }
 
 template <typename traits, typename func_t, typename index_t, size_t... I>
-C10_HOST_DEVICE typename traits::result_type
+C10_HOST_DEVICE typename traits::return_type
 invoke_impl(const func_t &f, char *const C10_RESTRICT data[], const index_t strides[], const ScalarType dtypes[], int i,
             std::index_sequence<I...>) {
   return f(c10::fetch_and_cast<typename traits::template arg<I>::type>(dtypes[I], data[I] + i * strides[I])...);
 }
 
-template <typename func_t, typename index_t, typename traits = function_traits<func_t>>
-C10_HOST_DEVICE typename traits::result_type
+template <typename func_t, typename index_t, typename traits = c10::guts::function_traits<func_t>>
+C10_HOST_DEVICE typename traits::return_type
 invoke(const func_t &f, char *const C10_RESTRICT data[], const index_t strides[], const ScalarType dtypes[], int i) {
   using Indices = std::make_index_sequence<traits::arity>;
   return invoke_impl<traits>(f, data, strides, dtypes, i, Indices{});
@@ -150,7 +150,7 @@ __device__ inline constexpr decltype(auto) invoke_with_array_impl(func_t f, arra
 }
 template <typename func_t, typename array_t>
 __device__ inline constexpr decltype(auto) invoke_with_array(func_t f, array_t a) {
-  constexpr auto arity = function_traits<func_t>::arity;
+  constexpr auto arity = c10::guts::function_traits<func_t>::arity;
   return invoke_with_array_impl(f, a, std::make_index_sequence<arity>{});
 }
 
@@ -165,7 +165,7 @@ struct dont_care {};
 
 template <typename func_t, std::size_t arity>
 struct arg_type_helper {
-  using type = typename function_traits<func_t>::template arg<0>::type;
+  using type = typename c10::guts::function_traits<func_t>::template arg<0>::type;
 };
 
 template <typename func_t>
@@ -174,13 +174,13 @@ struct arg_type_helper<func_t, 0> {
 };
 
 template <typename func_t>
-using type = typename arg_type_helper<func_t, function_traits<func_t>::arity>::type;
+using type = typename arg_type_helper<func_t, c10::guts::function_traits<func_t>::arity>::type;
 
 }  // namespace arg_type
 
-template<typename func_t, int remaining=function_traits<func_t>::arity-1>
+template<typename func_t, int remaining=c10::guts::function_traits<func_t>::arity-1>
 struct has_same_arg_types {
-  using traits = function_traits<func_t>;
+  using traits = c10::guts::function_traits<func_t>;
   static constexpr bool value = std::is_same<
       typename traits::template arg<remaining>::type,
       typename traits::template arg<remaining-1>::type
@@ -206,8 +206,8 @@ __global__ void elementwise_kernel(int N, func_t f, array_t data) {
   // 1. all arguments of `f` have the same type, which could be different from the return type of `f`
   // 2. all tensors are contiguous, that is: stride == sizeof(type) for all tensors
 
-  using traits = function_traits<func_t>;
-  using return_t = typename traits::result_type;
+  using traits = c10::guts::function_traits<func_t>;
+  using return_t = typename traits::return_type;
   using arg_t = detail::arg_type::type<func_t>;
   constexpr int arity = traits::arity;
 
@@ -278,8 +278,8 @@ static void launch_kernel(int64_t N, const func_t& f, array_t data) {}
 
 template <typename func_t>
 void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
-  using traits = function_traits<func_t>;
-  using arg0_t = typename traits::result_type;
+  using traits = c10::guts::function_traits<func_t>;
+  using arg0_t = typename traits::return_type;
   constexpr int ntensors = traits::arity + 1;
 
   TORCH_INTERNAL_ASSERT(iter.can_use_32bit_indexing());

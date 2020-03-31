@@ -50,7 +50,7 @@ struct Functor final {
 static_assert(
     get_type_index<int64_t(uint32_t, Dummy&&, const Dummy&)>() ==
         get_type_index<
-            c10::guts::infer_function_traits_t<Functor>::func_type>(),
+            c10::guts::function_traits<Functor>::func_type>(),
     "");
 
 namespace test_top_level_name {
@@ -182,14 +182,14 @@ struct Functor final {
 static_assert(
     get_fully_qualified_type_name<std::string(int64_t, const Type<int>&)>() ==
         get_fully_qualified_type_name<
-            typename c10::guts::infer_function_traits_t<Functor>::func_type>(),
+            typename c10::guts::function_traits<Functor>::func_type>(),
     "");
 #endif
 TEST(TypeIndex, FunctionTypeComputationsAreResolved) {
     EXPECT_EQ(
         get_fully_qualified_type_name<std::string(int64_t, const Type<int>&)>(),
         get_fully_qualified_type_name<
-            typename c10::guts::infer_function_traits_t<Functor>::func_type>()
+            typename c10::guts::function_traits<Functor>::func_type>()
     );
 }
 } // namespace test_type_computations_are_resolved

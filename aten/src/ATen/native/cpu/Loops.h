@@ -28,7 +28,7 @@
 
 #include <stdint.h>
 #include <c10/util/C++17.h>
-#include <ATen/detail/FunctionTraits.h>
+#include <c10/util/Metaprogramming.h>
 #include <ATen/native/cpu/IsContiguous.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/cpu/vec256/vec256.h>
@@ -61,11 +61,11 @@ dereference(char* C10_RESTRICT data[], const int64_t* strides, int64_t i) {
 template <typename traits, std::size_t... INDEX>
 typename traits::ArgsTuple
 dereference_vec_impl(char* C10_RESTRICT data[],
-                     const typename traits::result_type& opt_scalar,
+                     const typename traits::return_type& opt_scalar,
                      size_t S,
                      int64_t i,
                      std::index_sequence<INDEX...>) {
-  using Vec = typename traits::result_type;
+  using Vec = typename traits::return_type;
   using scalar_t = typename Vec::value_type;
   return std::make_tuple(
       S == INDEX + 1 ?
@@ -75,17 +75,17 @@ dereference_vec_impl(char* C10_RESTRICT data[],
 
 template <typename traits>
 typename traits::ArgsTuple
-dereference_vec(char* C10_RESTRICT data[], const typename traits::result_type& opt_scalar, size_t S, int64_t i) {
+dereference_vec(char* C10_RESTRICT data[], const typename traits::return_type& opt_scalar, size_t S, int64_t i) {
   using Indices = std::make_index_sequence<traits::arity>;
   return dereference_vec_impl<traits>(data, opt_scalar, S, i, Indices{});
 }
 
 template <typename func_t,
-    typename std::enable_if<!std::is_void<typename function_traits<func_t>::result_type>::value>::type* = nullptr>
+    typename std::enable_if<!std::is_void<typename c10::guts::function_traits<func_t>::return_type>::value>::type* = nullptr>
 static inline void
 execute_op(char* C10_RESTRICT data[], const int64_t* strides, int64_t i, int64_t n, func_t&& op) {
-  using traits = function_traits<func_t>;
-  using result_type = typename traits::result_type;
+  using traits = c10::guts::function_traits<func_t>;
+  using result_type = typename traits::return_type;
   for (; i < n; i++) {
     result_type* out_ptr = (result_type*)(data[0] + i * strides[0]);
     *out_ptr = c10::guts::apply(std::forward<func_t>(op), dereference<traits>(
@@ -96,10 +96,10 @@ execute_op(char* C10_RESTRICT data[], const int64_t* strides, int64_t i, int64_t
 }
 
 template <typename func_t,
-    typename std::enable_if<std::is_void<typename function_traits<func_t>::result_type>::value>::type* = nullptr>
+    typename std::enable_if<std::is_void<typename c10::guts::function_traits<func_t>::return_type>::value>::type* = nullptr>
 static inline void
 execute_op(char* C10_RESTRICT data[], const int64_t* strides, int64_t i, int64_t n, func_t&& op) {
-  using traits = function_traits<func_t>;
+  using traits = c10::guts::function_traits<func_t>;
   for (; i < n; i++) {
     c10::guts::apply(std::forward<func_t>(op), dereference<traits>(
         &data[0],
@@ -113,7 +113,7 @@ execute_op(char* C10_RESTRICT data[], const int64_t* strides, int64_t i, int64_t
 template <typename func_t>
 static inline void
 basic_loop(char* C10_RESTRICT data[], const int64_t* strides_, int64_t i, int64_t n, func_t&& op) {
-  using traits = function_traits<func_t>;
+  using traits = c10::guts::function_traits<func_t>;
   constexpr int ntensors = traits::arity + 1;
 
   // Copying strides to temporary array helps auto vectorization in older GCC
@@ -133,8 +133,8 @@ basic_loop(char* C10_RESTRICT data[], const int64_t* strides_, int64_t i, int64_
 template <typename func_t, typename vec_func_t>
 static inline void
 vectorized_loop(char** C10_RESTRICT data_, int64_t n, int64_t S, func_t&& op, vec_func_t&& vop) {
-  using traits = function_traits<vec_func_t>;
-  using scalar_t = typename function_traits<func_t>::result_type;
+  using traits = c10::guts::function_traits<vec_func_t>;
+  using scalar_t = typename c10::guts::function_traits<func_t>::return_type;
   using Vec = Vec256<scalar_t>;
   constexpr int ntensors = traits::arity + 1;
 
@@ -185,7 +185,7 @@ static inline void unroll_contiguous_scalar_checks(
 
 template <typename func_t>
 void cpu_kernel(TensorIterator& iter, func_t&& op) {
-  using traits = function_traits<func_t>;
+  using traits = c10::guts::function_traits<func_t>;
   TORCH_INTERNAL_ASSERT(iter.ntensors() >= traits::arity + 1);
 
   iter.for_each([&](char** data, const int64_t* strides, int64_t n) {
@@ -203,7 +203,7 @@ void cpu_kernel(TensorIterator& iter, func_t&& op) {
 
 template <typename func_t, typename vec_func_t>
 void cpu_kernel_vec(TensorIterator& iter, func_t&& op, vec_func_t&& vop) {
-  using traits = function_traits<func_t>;
+  using traits = c10::guts::function_traits<func_t>;
   TORCH_INTERNAL_ASSERT(iter.ntensors() >= traits::arity + 1);
 
   iter.for_each([&](char** data, const int64_t* strides, int64_t n) {
@@ -225,8 +225,8 @@ void cpu_kernel_vec(TensorIterator& iter, func_t&& op, vec_func_t&& vop) {
 
 template <typename func_t>
 void cpu_serial_kernel(TensorIterator& iter, func_t&& op) {
-  using traits = function_traits<func_t>;
-  TORCH_INTERNAL_ASSERT((std::is_void<typename traits::result_type>::value &&
+  using traits = c10::guts::function_traits<func_t>;
+  TORCH_INTERNAL_ASSERT((std::is_void<typename traits::return_type>::value &&
     iter.noutputs() == 0 && iter.ntensors() == traits::arity) || (iter.ntensors() >= traits::arity + 1));
 
   iter.serial_for_each([&](char** data, const int64_t* strides, int64_t n) {
@@ -244,7 +244,7 @@ void cpu_serial_kernel(TensorIterator& iter, func_t&& op) {
 
 template <typename func_t, typename vec_func_t>
 void cpu_serial_kernel_vec(TensorIterator& iter, func_t&& op, vec_func_t&& vop) {
-  using traits = function_traits<func_t>;
+  using traits = c10::guts::function_traits<func_t>;
   TORCH_INTERNAL_ASSERT(iter.ntensors() >= traits::arity + 1);
 
   iter.serial_for_each([&](char** data, const int64_t* strides, int64_t n) {

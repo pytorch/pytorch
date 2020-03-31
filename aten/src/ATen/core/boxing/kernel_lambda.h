@@ -29,8 +29,8 @@ namespace detail {
   template<class FuncType>
   using WrapRuntimeKernelFunctor = WrapRuntimeKernelFunctor_<
       FuncType,
-      typename guts::infer_function_traits_t<FuncType>::return_type,
-      typename guts::infer_function_traits_t<FuncType>::parameter_types
+      typename guts::function_traits<FuncType>::return_type,
+      typename guts::function_traits<FuncType>::parameter_types
   >;
 }
 

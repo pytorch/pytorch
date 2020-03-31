@@ -201,20 +201,20 @@ namespace detail {
   }
 
   template<class Functor, bool AllowDeprecatedTypes, size_t... ivalue_arg_indices>
-  typename guts::infer_function_traits_t<Functor>::return_type call_functor_with_args_from_stack_(Functor* functor, Stack* stack, std::index_sequence<ivalue_arg_indices...>) {
+  typename guts::function_traits<Functor>::return_type call_functor_with_args_from_stack_(Functor* functor, Stack* stack, std::index_sequence<ivalue_arg_indices...>) {
     (void)(stack); // when sizeof...(ivalue_arg_indices) == 0, this argument would be unused and we have to silence the compiler warning.
 
     constexpr size_t num_ivalue_args = sizeof...(ivalue_arg_indices);
 
-    using IValueArgTypes = typename guts::infer_function_traits_t<Functor>::parameter_types;
+    using IValueArgTypes = typename guts::function_traits<Functor>::parameter_types;
     return (*functor)(ivalue_to_arg<std::remove_cv_t<std::remove_reference_t<guts::typelist::element_t<ivalue_arg_indices, IValueArgTypes>>>, AllowDeprecatedTypes>(
       std::move(torch::jit::peek(*stack, ivalue_arg_indices, num_ivalue_args))
     )...);
   }
 
   template<class Functor, bool AllowDeprecatedTypes>
-  typename guts::infer_function_traits_t<Functor>::return_type call_functor_with_args_from_stack(Functor* functor, Stack* stack) {
-    constexpr size_t num_ivalue_args = guts::infer_function_traits_t<Functor>::number_of_parameters;
+  typename guts::function_traits<Functor>::return_type call_functor_with_args_from_stack(Functor* functor, Stack* stack) {
+    constexpr size_t num_ivalue_args = guts::function_traits<Functor>::arity;
     return call_functor_with_args_from_stack_<Functor, AllowDeprecatedTypes>(functor, stack, std::make_index_sequence<num_ivalue_args>());
   }
 
@@ -241,25 +241,25 @@ namespace detail {
 
   // SFINAE version for kernels that return an output
   template<class KernelFunctor, bool AllowDeprecatedTypes>
-  struct make_boxed_from_unboxed_functor<KernelFunctor, AllowDeprecatedTypes, std::enable_if_t<!std::is_same<void, typename guts::infer_function_traits_t<KernelFunctor>::return_type>::value>> final {
+  struct make_boxed_from_unboxed_functor<KernelFunctor, AllowDeprecatedTypes, std::enable_if_t<!std::is_same<void, typename guts::function_traits<KernelFunctor>::return_type>::value>> final {
     static_assert(std::is_base_of<OperatorKernel, KernelFunctor>::value, "Tried to register a kernel functor using the kernel<Functor>() API, but it doesn't inherit from c10::OperatorKernel. Please have the functor inherit from it.");
 
     static void call(OperatorKernel* functor, const OperatorHandle&, Stack* stack) {
-      constexpr size_t num_inputs = guts::infer_function_traits_t<KernelFunctor>::number_of_parameters;
+      constexpr size_t num_inputs = guts::function_traits<KernelFunctor>::arity;
       KernelFunctor* functor_ = static_cast<KernelFunctor*>(functor);
       auto output = call_functor_with_args_from_stack<KernelFunctor, AllowDeprecatedTypes>(functor_, stack);
       torch::jit::drop(*stack, num_inputs);
-      push_outputs<typename guts::infer_function_traits_t<KernelFunctor>::return_type, AllowDeprecatedTypes>::call(std::move(output), stack);
+      push_outputs<typename guts::function_traits<KernelFunctor>::return_type, AllowDeprecatedTypes>::call(std::move(output), stack);
     }
   };
 
   // SFINAE version for kernels that don't return an output
   template<class KernelFunctor, bool AllowDeprecatedTypes>
-  struct make_boxed_from_unboxed_functor<KernelFunctor, AllowDeprecatedTypes, std::enable_if_t<std::is_same<void, typename guts::infer_function_traits_t<KernelFunctor>::return_type>::value>> final {
+  struct make_boxed_from_unboxed_functor<KernelFunctor, AllowDeprecatedTypes, std::enable_if_t<std::is_same<void, typename guts::function_traits<KernelFunctor>::return_type>::value>> final {
     static_assert(std::is_base_of<OperatorKernel, KernelFunctor>::value, "Tried to register a kernel functor using the kernel<Functor>() API, but it doesn't inherit from c10::OperatorKernel. Please have the functor inherit from it.");
 
     static void call(OperatorKernel* functor, const OperatorHandle&, Stack* stack) {
-      constexpr size_t num_inputs = guts::infer_function_traits_t<KernelFunctor>::number_of_parameters;
+      constexpr size_t num_inputs = guts::function_traits<KernelFunctor>::arity;
       KernelFunctor* functor_ = static_cast<KernelFunctor*>(functor);
       call_functor_with_args_from_stack<KernelFunctor, AllowDeprecatedTypes>(functor_, stack);
       torch::jit::pop(*stack, num_inputs);
@@ -268,15 +268,15 @@ namespace detail {
 
   template<class KernelFunctor, class OpSignature> struct wrap_kernel_functor_unboxed_ final {};
   template<class KernelFunctor, class ReturnType, class... ParameterTypes> struct wrap_kernel_functor_unboxed_<KernelFunctor, ReturnType(ParameterTypes...)> final {
-    static_assert(std::is_same<ReturnType, typename guts::infer_function_traits_t<KernelFunctor>::return_type>::value, "Return type mismatch");
-    static_assert(std::is_same<guts::typelist::typelist<ParameterTypes...>, typename guts::infer_function_traits_t<KernelFunctor>::parameter_types>::value, "Parameter types mismatch");
+    static_assert(std::is_same<ReturnType, typename guts::function_traits<KernelFunctor>::return_type>::value, "Return type mismatch");
+    static_assert(std::is_same<guts::typelist::typelist<ParameterTypes...>, typename guts::function_traits<KernelFunctor>::parameter_types>::value, "Parameter types mismatch");
 
     static ReturnType call(OperatorKernel* functor, ParameterTypes... args) {
       KernelFunctor* functor_ = static_cast<KernelFunctor*>(functor);
       return (*functor_)(std::forward<ParameterTypes>(args)...);
     }
   };
-  template<class KernelFunctor> using wrap_kernel_functor_unboxed = wrap_kernel_functor_unboxed_<KernelFunctor, typename guts::infer_function_traits_t<KernelFunctor>::func_type>;
+  template<class KernelFunctor> using wrap_kernel_functor_unboxed = wrap_kernel_functor_unboxed_<KernelFunctor, typename guts::function_traits<KernelFunctor>::func_type>;
 
   template<class KernelFunctor, class... Args>
   class KernelFactory final {
@@ -304,7 +304,7 @@ namespace detail {
   template<class KernelFunctor>
   class FunctionSchemaInferer final {
   public:
-    using func_type = typename c10::guts::infer_function_traits_t<KernelFunctor>::func_type;
+    using func_type = typename c10::guts::function_traits<KernelFunctor>::func_type;
     std::unique_ptr<FunctionSchema> operator()() const {
       return inferFunctionSchemaFlattenedReturns_<func_type>();
     }

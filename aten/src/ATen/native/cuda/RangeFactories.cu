@@ -4,7 +4,7 @@
 #include <ATen/AccumulateType.h>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/detail/FunctionTraits.h>
+#include <c10/util/Metaprogramming.h>
 #include <cmath>
 #include <limits>
 
@@ -18,7 +18,7 @@ constexpr int block_work_size = thread_work_size * num_threads;
 
 template<typename index_t, typename func_t>
 C10_LAUNCH_BOUNDS_1(num_threads)
-__global__ void elementwise_kernel_with_index(index_t N, func_t f, typename function_traits<func_t>::result_type *data) {
+__global__ void elementwise_kernel_with_index(index_t N, func_t f, typename c10::guts::function_traits<func_t>::return_type *data) {
   #pragma unroll
   for (int i = 0; i < thread_work_size; i++) {
     index_t idx = block_work_size * blockIdx.x + num_threads * i + threadIdx.x;
@@ -36,7 +36,7 @@ void gpu_kernel_with_index(at::Tensor &output, func_t f) {
   }
   int64_t grid = (N + block_work_size - 1) / block_work_size;
   auto stream = at::cuda::getCurrentCUDAStream();
-  using scalar_t = typename function_traits<func_t>::result_type;
+  using scalar_t = typename c10::guts::function_traits<func_t>::return_type;
   if (N <= std::numeric_limits<int>::max()) {
     elementwise_kernel_with_index<int><<<grid, num_threads, 0, stream>>>(N, f, output.data_ptr<scalar_t>());
   } else {

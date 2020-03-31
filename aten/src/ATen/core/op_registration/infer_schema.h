@@ -157,12 +157,12 @@ FunctionSchema createFunctionSchemaFromTraitsSingleReturn(std::string&& name, st
 
 template<class FuncType>
 FunctionSchema inferFunctionSchemaFlattenedReturns(std::string&& name, std::string&& overload_name) {
-  return detail::infer_schema::createFunctionSchemaFromTraitsFlattenedReturns<guts::infer_function_traits_t<FuncType>>(std::move(name), std::move(overload_name));
+  return detail::infer_schema::createFunctionSchemaFromTraitsFlattenedReturns<guts::function_traits<FuncType>>(std::move(name), std::move(overload_name));
 }
 
 template<class FuncType>
 FunctionSchema inferFunctionSchemaSingleReturn(std::string&& name, std::string&& overload_name) {
-  return detail::infer_schema::createFunctionSchemaFromTraitsSingleReturn<guts::infer_function_traits_t<FuncType>>(std::move(name), std::move(overload_name));
+  return detail::infer_schema::createFunctionSchemaFromTraitsSingleReturn<guts::function_traits<FuncType>>(std::move(name), std::move(overload_name));
 }
 
 CAFFE2_API c10::optional<std::string> findSchemaDifferences(const FunctionSchema& inferred, const FunctionSchema& specified);

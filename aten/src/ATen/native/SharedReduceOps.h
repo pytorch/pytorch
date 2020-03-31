@@ -3,7 +3,7 @@
 // used across both CPU and GPU.
 
 #include <c10/macros/Macros.h>
-#include <ATen/detail/FunctionTraits.h>
+#include <c10/util/Metaprogramming.h>
 #include <ATen/NumericUtils.h>
 #if defined(__CUDACC__)
 #include <THC/THCDeviceUtils.cuh>
@@ -334,7 +334,7 @@ struct GreaterOrNan {
 
 template <typename comp_t>
 struct ArgReductionOps {
-  using scalar_t = typename binary_function_traits<comp_t>::arg1_t;
+  using scalar_t = typename c10::guts::binary_function_traits<comp_t>::arg1_t;
   using index_t = int64_t;
   using arg_t = detail::pair<scalar_t, index_t>;
 

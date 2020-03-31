@@ -4,7 +4,7 @@
 #include <type_traits>
 #include <c10/util/Exception.h>
 #include <c10/macros/Macros.h>
-#include <ATen/detail/FunctionTraits.h>
+#include <c10/util/Metaprogramming.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 
 // References:
@@ -224,8 +224,8 @@ struct can_vectorize_up_to_helper {
 
 template<typename func_t, typename array_t>
 inline int can_vectorize_up_to(array_t pointers) {
-  using traits = function_traits<func_t>;
-  using return_t = typename traits::result_type;
+  using traits = c10::guts::function_traits<func_t>;
+  using return_t = typename traits::return_type;
   constexpr int arity = traits::arity;
   int result = can_vectorize_up_to<return_t>(pointers[0]);
   // We need to get the type for each argument of `func_t`, this can only

@@ -336,7 +336,7 @@ public:
     // enable_if: only enable it if Lambda is a functor (note: lambdas are functors)
     std::enable_if_t<
         guts::is_functor<std::decay_t<Lambda>>::value
-        && !std::is_same<typename guts::infer_function_traits_t<std::decay_t<Lambda>>::func_type, KernelFunction::BoxedKernelFunction>::value,
+        && !std::is_same<typename guts::function_traits<std::decay_t<Lambda>>::func_type, KernelFunction::BoxedKernelFunction>::value,
         Options&&> kernel(DispatchKey dispatch_key, Lambda&& functor) && {
       static_assert(!std::is_base_of<OperatorKernel, std::decay_t<Lambda>>::value, "The kernel(x) API for registering a kernel is only meant to be used with lambdas. Your kernel is a functor. Please use the kernel<Functor>() API instead.");
 
@@ -376,7 +376,7 @@ public:
     // enable_if: only enable it if Lambda is a functor (note: lambdas are functors)
     std::enable_if_t<
         guts::is_functor<std::decay_t<Lambda>>::value
-        && !std::is_same<typename guts::infer_function_traits_t<std::decay_t<Lambda>>::func_type, KernelFunction::BoxedKernelFunction>::value,
+        && !std::is_same<typename guts::function_traits<std::decay_t<Lambda>>::func_type, KernelFunction::BoxedKernelFunction>::value,
         Options&&> catchAllKernel(Lambda&& lambda) && {
       static_assert(!std::is_base_of<OperatorKernel, std::decay_t<Lambda>>::value, "The kernel(x) API for registering a kernel is only meant to be used with lambdas. Your kernel is a functor. Please use the kernel<Functor>() API instead.");
 

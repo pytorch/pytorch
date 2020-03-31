@@ -35,7 +35,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/core/Array.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
-#include <ATen/detail/FunctionTraits.h>
+#include <c10/util/Metaprogramming.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/MemoryAccess.cuh>
 #include <ATen/native/cuda/CUDA9Workarounds.cuh>
@@ -134,28 +134,28 @@ static void launch_kernel(int64_t N, const func_t& f) {
 }
 
 template <typename traits, typename func_t, typename index_t, size_t... INDEX>
-C10_HOST_DEVICE typename traits::result_type
+C10_HOST_DEVICE typename traits::return_type
 invoke_impl(const func_t &f, char *const C10_RESTRICT data[], const index_t strides[], int i,
             std::index_sequence<INDEX...>) {
   return f(*(typename traits::template arg<INDEX>::type*)(data[INDEX] + i * strides[INDEX])...);
 }
 
-template <typename func_t, typename index_t, typename traits = function_traits<func_t>>
-C10_HOST_DEVICE typename traits::result_type
+template <typename func_t, typename index_t, typename traits = c10::guts::function_traits<func_t>>
+C10_HOST_DEVICE typename traits::return_type
 invoke(const func_t &f, char *const C10_RESTRICT data[], const index_t strides[], int i) {
   using Indices = std::make_index_sequence<traits::arity>;
   return invoke_impl<traits>(f, data, strides, i, Indices{});
 }
 
 template <typename traits, typename func_t, typename index_t, size_t... I>
-C10_HOST_DEVICE typename traits::result_type
+C10_HOST_DEVICE typename traits::return_type
 invoke_impl(const func_t &f, char *const C10_RESTRICT data[], const index_t strides[], const ScalarType dtypes[], int i,
             std::index_sequence<I...>) {
   return f(c10::fetch_and_cast<typename traits::template arg<I>::type>(dtypes[I], data[I] + i * strides[I])...);
 }
 
-template <typename func_t, typename index_t, typename traits = function_traits<func_t>>
-C10_HOST_DEVICE typename traits::result_type
+template <typename func_t, typename index_t, typename traits = c10::guts::function_traits<func_t>>
+C10_HOST_DEVICE typename traits::return_type
 invoke(const func_t &f, char *const C10_RESTRICT data[], const index_t strides[], const ScalarType dtypes[], int i) {
   using Indices = std::make_index_sequence<traits::arity>;
   return invoke_impl<traits>(f, data, strides, dtypes, i, Indices{});
@@ -168,8 +168,8 @@ namespace modern {
 
 template<typename func_t, typename policy_t>
 __device__ inline void elementwise_kernel_helper(func_t f, policy_t policy) {
-  using traits = function_traits<func_t>;
-  using return_t = typename traits::result_type;
+  using traits = c10::guts::function_traits<func_t>;
+  using return_t = typename traits::return_type;
   using args_t = typename traits::ArgsTuple;
 
   int idx = blockIdx.x;
@@ -196,7 +196,7 @@ __device__ inline void elementwise_kernel_helper(func_t f, policy_t policy) {
 template<int vec_size, typename func_t, typename array_t>
 C10_LAUNCH_BOUNDS_1(num_threads)
 __global__ void vectorized_elementwise_kernel(int N, func_t f, array_t data) {
-  using traits = function_traits<func_t>;
+  using traits = c10::guts::function_traits<func_t>;
   int remaining = N - block_work_size * blockIdx.x;
 
   if (remaining < block_work_size) {  // if this block handles the reminder, just do a naive unrolled loop
@@ -220,7 +220,7 @@ __global__ void unrolled_elementwise_kernel(int N, func_t f, array_t data, inp_c
 template<typename func_t, typename array_t>
 static inline void launch_vectorized_kernel(int64_t N, const func_t& f, array_t data) {
   TORCH_INTERNAL_ASSERT(N > 0 && N <= std::numeric_limits<int32_t>::max());
-  using traits = function_traits<func_t>;
+  using traits = c10::guts::function_traits<func_t>;
   int64_t grid = (N + block_work_size - 1) / block_work_size;
   auto stream = at::cuda::getCurrentCUDAStream();
   int vec_size = memory::can_vectorize_up_to<func_t>(data);
@@ -257,8 +257,8 @@ static inline void launch_unrolled_kernel(int64_t N, const func_t& f, array_t da
 
 template <typename func_t>
 void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
-  using traits = function_traits<func_t>;
-  using arg0_t = typename traits::result_type;
+  using traits = c10::guts::function_traits<func_t>;
+  using arg0_t = typename traits::return_type;
   constexpr int ntensors = traits::arity + 1;
 
   TORCH_INTERNAL_ASSERT(iter.can_use_32bit_indexing());

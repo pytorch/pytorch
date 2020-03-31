@@ -5,49 +5,97 @@
 #include <functional>
 #include <c10/util/TypeList.h>
 #include <c10/util/Array.h>
+#include <tuple>
 
 namespace c10 { namespace guts {
 
 /**
+ **** function_traits ****
+ * 
  * Access information about result type or arguments from a function type.
  * Example:
  * using A = function_traits<int (float, double)>::return_type // A == int
  * using A = function_traits<int (float, double)>::parameter_types::tuple_type // A == tuple<float, double>
  */
-template<class Func> struct function_traits {
-  static_assert(!std::is_same<Func, Func>::value, "In function_traits<Func>, Func must be a plain function type.");
+
+// Modified from https://stackoverflow.com/questions/7943525/is-it-possible-to-figure-out-the-parameter-type-and-return-type-of-a-lambda
+
+// Fallback, anything with an operator()
+template <typename T>
+struct function_traits : public function_traits<decltype(&T::operator())> {
 };
-template<class Result, class... Args>
-struct function_traits<Result (Args...)> {
-  using func_type = Result (Args...);
-  using return_type = Result;
+
+// Pointers to class members that are themselves functors.
+// For example, in the following code:
+// template <typename func_t>
+// struct S {
+//     func_t f;
+// };
+// template <typename func_t>
+// S<func_t> make_s(func_t f) {
+//     return S<func_t> { .f = f };
+// }
+//
+// auto s = make_s([] (int, float) -> double { /* ... */ });
+//
+// function_traits<decltype(&s::f)> traits;
+template <typename ClassType, typename T>
+struct function_traits<T ClassType::*> : public function_traits<T> {
+};
+
+// Const class member functions
+template <typename ClassType, typename ReturnType, typename... Args>
+struct function_traits<ReturnType(ClassType::*)(Args...) const> : public function_traits<ReturnType(Args...)> {
+};
+
+// Reference types
+template <typename T>
+struct function_traits<T&> : public function_traits<T> {};
+template <typename T>
+struct function_traits<T*> : public function_traits<T> {};
+
+// Free functions
+template <typename ReturnType, typename... Args>
+struct function_traits<ReturnType(Args...)> {
+  using func_type = ReturnType (Args...);
+  using return_type = ReturnType;
   using parameter_types = typelist::typelist<Args...>;
-  static constexpr auto number_of_parameters = sizeof...(Args);
-};
 
-/**
- * infer_function_traits: creates a `function_traits` type for a simple
- * function (pointer) or functor (lambda/struct). Currently does not support
- * class methods.
- */
+  // arity is the number of arguments.
+  enum { arity = sizeof...(Args) };
 
-template <typename Functor>
-struct infer_function_traits {
-  using type = function_traits<c10::guts::detail::strip_class_t<decltype(&Functor::operator())>>;
-};
+  typedef std::tuple<Args...> ArgsTuple;
 
-template <typename Result, typename... Args>
-struct infer_function_traits<Result (*)(Args...)> {
-  using type = function_traits<Result(Args...)>;
-};
-
-template <typename Result, typename... Args>
-struct infer_function_traits<Result (Args...)> {
-  using type = function_traits<Result(Args...)>;
+  template <size_t i>
+  struct arg
+  {
+      typedef typename std::tuple_element<i, std::tuple<Args...>>::type type;
+      // the i-th argument is equivalent to the i-th tuple element of a tuple
+      // composed of those arguments.
+  };
 };
 
 template <typename T>
-using infer_function_traits_t = typename infer_function_traits<T>::type;
+struct nullary_function_traits {
+  using traits = function_traits<T>;
+  using return_type = typename traits::return_type;
+};
+
+template <typename T>
+struct unary_function_traits {
+  using traits = function_traits<T>;
+  using return_type = typename traits::return_type;
+  using arg1_t = typename traits::template arg<0>::type;
+};
+
+template <typename T>
+struct binary_function_traits {
+  using traits = function_traits<T>;
+  using return_type = typename traits::return_type;
+  using arg1_t = typename traits::template arg<0>::type;
+  using arg2_t = typename traits::template arg<1>::type;
+};
+
 
 /**
  * Use extract_arg_by_filtered_index to return the i-th argument whose

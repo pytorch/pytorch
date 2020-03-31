@@ -159,7 +159,7 @@ class class_ {
     // such that we take the return value (i.e. c10::intrusive_ptr<CurrClass>)
     // and assign it to the `capsule` attribute.
     using SetStateTraits =
-        c10::guts::infer_function_traits_t<std::decay_t<SetStateFn>>;
+        c10::guts::function_traits<std::decay_t<SetStateFn>>;
     using SetStateArg = typename c10::guts::typelist::head_t<
         typename SetStateTraits::parameter_types>;
     auto setstate_wrapper = [set_state = std::move(set_state)](
@@ -220,7 +220,7 @@ class class_ {
       // like this! Currently can't do it because the profiler stuff is in
       // libtorch and not ATen
       using RetType =
-          typename c10::guts::infer_function_traits_t<Func>::return_type;
+          typename c10::guts::function_traits<Func>::return_type;
       detail::BoxedProxy<RetType, Func>()(stack, func);
     };
     auto method = std::make_shared<jit::BuiltinOpFunction>(

@@ -11,7 +11,7 @@ namespace at { namespace native { namespace {
 using namespace vec256;
 
 #define VEC_LOOP_HEADER(func_t, data) \
-  using scalar_t = typename function_traits<func_t>::result_type; \
+  using scalar_t = typename c10::guts::function_traits<func_t>::return_type; \
   using Vec = Vec256<scalar_t>; \
   char* out_ptr = data[0]; \
   (void) out_ptr;
@@ -27,7 +27,7 @@ static inline bool is_contiguous_reduction(const int64_t* strides) {
 template <typename traits>
 static inline bool is_outer_reduction(const int64_t* strides) {
   return strides[0] == 0 &&
-         strides[2] == sizeof(typename traits::result_type) &&
+         strides[2] == sizeof(typename traits::return_type) &&
          strides[3] == sizeof(typename traits::arg2_t);
 }
 
@@ -182,9 +182,9 @@ void binary_kernel_reduce(TensorIterator& iter, ops_t ops, init_t init) {
   using rf_t = decltype(&ops_t::reduce);
   using cf_t = decltype(&ops_t::combine);
   using pf_t = decltype(&ops_t::project);
-  using r_traits = binary_function_traits<rf_t>;
-  using c_traits = binary_function_traits<cf_t>;
-  using p_traits = unary_function_traits<pf_t>;
+  using r_traits = c10::guts::binary_function_traits<rf_t>;
+  using c_traits = c10::guts::binary_function_traits<cf_t>;
+  using p_traits = c10::guts::unary_function_traits<pf_t>;
   using acc_t = typename p_traits::arg1_t;
   using data_t = typename r_traits::arg2_t;
   static_assert(
@@ -192,10 +192,10 @@ void binary_kernel_reduce(TensorIterator& iter, ops_t ops, init_t init) {
       acc_t,
       init_t,
       typename r_traits::arg1_t,
-      typename r_traits::result_type,
+      typename r_traits::return_type,
       typename c_traits::arg1_t,
       typename c_traits::arg2_t,
-      typename c_traits::result_type>::value,
+      typename c_traits::return_type>::value,
     "all accumulate types must match");
   static_assert(
     std::is_default_constructible<acc_t>::value,
@@ -245,10 +245,10 @@ void binary_kernel_reduce(TensorIterator& iter, ops_t ops, init_t init) {
 
 template <typename func_t, typename vec_func_t>
 void binary_kernel_reduce_vec(TensorIterator& iter, func_t op, vec_func_t vop, double ident = 0) {
-  using traits = binary_function_traits<func_t>;
+  using traits = c10::guts::binary_function_traits<func_t>;
   static_assert(
     all_same<
-      typename traits::result_type,
+      typename traits::return_type,
       typename traits::arg1_t,
       typename traits::arg2_t>::value,
     "all types must match");

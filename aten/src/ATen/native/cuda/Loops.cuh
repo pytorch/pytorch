@@ -1,7 +1,7 @@
 
 #pragma once
 
-#include <ATen/detail/FunctionTraits.h>
+#include <c10/util/Metaprogramming.h>
 #include <ATen/native/TensorIterator.h>
 
 namespace at { namespace native {
@@ -13,10 +13,10 @@ constexpr int block_work_size = thread_work_size * num_threads;
 // `needs_dynamic_casting` compares the types expected by iterator
 // (i.e. dtypes of the operands) with the actual type of the arguments
 // of func_t
-template<typename func_t, int nargs=function_traits<func_t>::arity>
+template<typename func_t, int nargs=c10::guts::function_traits<func_t>::arity>
 struct needs_dynamic_casting {
   static bool check(TensorIterator& iter) {
-    using traits = function_traits<func_t>;
+    using traits = c10::guts::function_traits<func_t>;
     if (iter.dtype(nargs) != c10::impl::CPPTypeToScalarType<typename traits::template arg<nargs - 1>::type>::value) {
       return true;
     }
@@ -27,8 +27,8 @@ struct needs_dynamic_casting {
 template<typename func_t>
 struct needs_dynamic_casting<func_t, 0> {
   static bool check(TensorIterator& iter) {
-    using traits = function_traits<func_t>;
-    return iter.dtype(0) != c10::impl::CPPTypeToScalarType<typename traits::result_type>::value;
+    using traits = c10::guts::function_traits<func_t>;
+    return iter.dtype(0) != c10::impl::CPPTypeToScalarType<typename traits::return_type>::value;
   }
 };
 
@@ -75,7 +75,7 @@ void gpu_kernel_with_scalars(TensorIterator& iter, const func_t& f) {
   ASSERT_HOST_DEVICE_LAMBDA(func_t);
   TORCH_INTERNAL_ASSERT(iter.ntensors() == 3);
 
-  using traits = function_traits<func_t>;
+  using traits = c10::guts::function_traits<func_t>;
   static_assert(
       traits::arity == 2,
       "gpu_kernel_with_scalars only supports two input arguments");

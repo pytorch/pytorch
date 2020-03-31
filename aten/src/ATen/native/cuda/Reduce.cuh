@@ -5,7 +5,7 @@
 #include <ATen/core/Array.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
-#include <ATen/detail/FunctionTraits.h>
+#include <c10/util/Metaprogramming.h>
 #include <THC/THCDeviceUtils.cuh>
 #include <THC/THCGeneral.hpp>
 #include <ATen/native/TensorIterator.h>
@@ -242,8 +242,8 @@ __device__ void strided_iterate(func_t f, index_t begin, index_t end, index_t st
 
 template <typename out_scalar_t, typename func_t>
 struct func_wrapper_t {
-  using arg_t = typename binary_function_traits<func_t>::arg1_t;
-  using scalar_t = typename binary_function_traits<func_t>::arg2_t;
+  using arg_t = typename c10::guts::binary_function_traits<func_t>::arg1_t;
+  using scalar_t = typename c10::guts::binary_function_traits<func_t>::arg2_t;
 
   func_t combine;
   static inline __device__ out_scalar_t project(arg_t arg) {
@@ -273,7 +273,7 @@ func_wrapper_t<scalar_t, func_t> func_wrapper(const func_t& op) {
 
 template <typename scalar_t, typename ops_t, typename index_t, typename out_scalar_t=scalar_t, int vt0=4>
 struct ReduceOp {
-  using traits = function_traits<decltype(&ops_t::reduce)>;
+  using traits = c10::guts::function_traits<decltype(&ops_t::reduce)>;
   using arg_t = typename std::decay<typename traits::template arg<0>::type>::type;
 
   using InputCalculator = OffsetCalculator<1, index_t>;
@@ -672,7 +672,7 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
                               AccumulationBuffer* acc_buf_ptr=nullptr, int64_t base_idx=0) {
   AT_ASSERT(iter.numel() > 0 && iter.ntensors() - iter.noutputs() == 1 && iter.noutputs() >= 1);
 
-  using traits = function_traits<decltype(&ops_t::reduce)>;
+  using traits = c10::guts::function_traits<decltype(&ops_t::reduce)>;
   using arg_t = typename traits::template arg<0>::type;
   static constexpr bool can_accumulate_in_output =
     std::is_convertible<arg_t, out_scalar_t>::value;
