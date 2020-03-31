@@ -16,7 +16,6 @@ namespace {
 template <> class Vec256<std::complex<double>> {
 private:
   __m256d values;
-  static const Vec256<std::complex<double>> ones;
 public:
   using value_type = std::complex<double>;
   static constexpr int size() {
@@ -57,7 +56,8 @@ public:
     return _mm256_blendv_pd(a.values, b.values, mask_);
 
   }
-  static Vec256<std::complex<double>> arange(std::complex<double> base = 0., std::complex<double> step = 1.) {
+  template<typename step_t>
+  static Vec256<std::complex<double>> arange(std::complex<double> base = 0., step_t step = static_cast<step_t>(1)) {
     return Vec256<std::complex<double>>(base,
                                         base + step);
   }
@@ -299,13 +299,6 @@ public:
   Vec256<std::complex<double>> operator>=(const Vec256<std::complex<double>>& other) const {
     AT_ERROR("not supported for complex numbers");
   }
-
-  Vec256<std::complex<double>> eq(const Vec256<std::complex<double>>& other) const;
-  Vec256<std::complex<double>> ne(const Vec256<std::complex<double>>& other) const;
-  Vec256<std::complex<double>> lt(const Vec256<std::complex<double>>& other) const;
-  Vec256<std::complex<double>> le(const Vec256<std::complex<double>>& other) const;
-  Vec256<std::complex<double>> gt(const Vec256<std::complex<double>>& other) const;
-  Vec256<std::complex<double>> ge(const Vec256<std::complex<double>>& other) const;
 };
 
 template <> Vec256<std::complex<double>> inline operator+(const Vec256<std::complex<double>> &a, const Vec256<std::complex<double>> &b) {
@@ -426,16 +419,6 @@ Vec256<std::complex<double>> inline operator|(const Vec256<std::complex<double>>
 template <>
 Vec256<std::complex<double>> inline operator^(const Vec256<std::complex<double>>& a, const Vec256<std::complex<double>>& b) {
   return _mm256_xor_pd(a, b);
-}
-
-const Vec256<std::complex<double>> Vec256<std::complex<double>>::ones(_mm256_set1_pd(1.0));
-
-Vec256<std::complex<double>> Vec256<std::complex<double>>::eq(const Vec256<std::complex<double>>& other) const {
-  return (*this == other) & Vec256<std::complex<double>>::ones;
-}
-
-Vec256<std::complex<double>> Vec256<std::complex<double>>::ne(const Vec256<std::complex<double>>& other) const {
-  return (*this != other) & Vec256<std::complex<double>>::ones;
 }
 
 #ifdef __AVX2__

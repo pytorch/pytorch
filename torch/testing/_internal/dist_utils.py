@@ -27,12 +27,19 @@ TEST_CONFIG = TestConfig()
 INIT_METHOD_TEMPLATE = "file://{file_name}"
 
 
-def dist_init(old_test_method=None, setup_rpc=True, clean_shutdown=True):
+def dist_init(old_test_method=None, setup_rpc=True, clean_shutdown=True,
+              faulty_messages=None):
     """
     We use this decorator for setting up and tearing down state since
     MultiProcessTestCase runs each `test*` method in a separate process and
     each process just runs the `test*` method without actually calling
     'setUp' and 'tearDown' methods of unittest.
+
+    Note: pass the string representation of MessageTypes that should be used
+    with the faulty agent's send function. By default, all retriable messages
+    ("RREF_FORK_REQUEST", "RREF_CHILD_ACCEPT", "RREF_USER_DELETE",
+    "CLEANUP_AUTOGRAD_CONTEXT_REQ") will use the faulty send (this default is
+    set from faulty_rpc_agent_test_fixture.py).
     """
 
     # If we use dist_init without arguments (ex: @dist_init), old_test_method is
@@ -46,6 +53,7 @@ def dist_init(old_test_method=None, setup_rpc=True, clean_shutdown=True):
             dist_init,
             setup_rpc=setup_rpc,
             clean_shutdown=clean_shutdown,
+            faulty_messages=faulty_messages,
         )
 
     @wraps(old_test_method)
@@ -56,6 +64,9 @@ def dist_init(old_test_method=None, setup_rpc=True, clean_shutdown=True):
         api._ignore_rref_leak = False
 
         self.worker_id = self.rank
+
+        if faulty_messages:
+            _build_faulty_backend_options(faulty_messages)
 
         if setup_rpc:
             rpc.init_rpc(
@@ -84,6 +95,19 @@ TEST_CONFIG.build_rpc_backend_options = lambda test_object: rpc.backend_registry
     # Some tests need additional threads (ex: test_trainer_ps)
     num_send_recv_threads=8,
 )
+
+def _build_faulty_backend_options(faulty_messages):
+    '''
+    Constructs the backend options object for the faulty process group agent
+    based on the faulty_messages input to dist_init.
+    '''
+    TEST_CONFIG.build_rpc_backend_options = lambda test_object: rpc.backend_registry.construct_rpc_backend_options(
+        test_object.rpc_backend,
+        init_method=test_object.init_method,
+        num_send_recv_threads=8,
+        num_fail_sends=1,
+        messages_to_fail=faulty_messages,
+    )
 
 def noop():
     pass

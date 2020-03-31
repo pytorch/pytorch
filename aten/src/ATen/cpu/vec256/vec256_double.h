@@ -16,7 +16,6 @@ namespace {
 template <> class Vec256<double> {
 private:
   __m256d values;
-  static const Vec256<double> ones;
 public:
   using value_type = double;
   static constexpr int size() {
@@ -41,7 +40,8 @@ public:
                                const Vec256<double>& mask) {
     return _mm256_blendv_pd(a.values, b.values, mask.values);
   }
-  static Vec256<double> arange(double base = 0., double step = 1.) {
+  template<typename step_t>
+  static Vec256<double> arange(double base = 0., step_t step = static_cast<step_t>(1)) {
     return Vec256<double>(base, base + step, base + 2 * step, base + 3 * step);
   }
   static Vec256<double> set(const Vec256<double>& a, const Vec256<double>& b,
@@ -233,13 +233,6 @@ public:
   Vec256<double> operator>=(const Vec256<double>& other) const {
     return _mm256_cmp_pd(values, other.values, _CMP_GE_OQ);
   }
-
-  Vec256<double> eq(const Vec256<double>& other) const;
-  Vec256<double> ne(const Vec256<double>& other) const;
-  Vec256<double> lt(const Vec256<double>& other) const;
-  Vec256<double> le(const Vec256<double>& other) const;
-  Vec256<double> gt(const Vec256<double>& other) const;
-  Vec256<double> ge(const Vec256<double>& other) const;
 };
 
 template <>
@@ -315,32 +308,6 @@ Vec256<double> inline operator|(const Vec256<double>& a, const Vec256<double>& b
 template <>
 Vec256<double> inline operator^(const Vec256<double>& a, const Vec256<double>& b) {
   return _mm256_xor_pd(a, b);
-}
-
-const Vec256<double> Vec256<double>::ones(1.0);
-
-Vec256<double> Vec256<double>::eq(const Vec256<double>& other) const {
-  return (*this == other) & Vec256<double>::ones;
-}
-
-Vec256<double> Vec256<double>::ne(const Vec256<double>& other) const {
-  return (*this != other) & Vec256<double>::ones;
-}
-
-Vec256<double> Vec256<double>::gt(const Vec256<double>& other) const {
-  return (*this > other) & Vec256<double>::ones;
-}
-
-Vec256<double> Vec256<double>::ge(const Vec256<double>& other) const {
-  return (*this >= other) & Vec256<double>::ones;
-}
-
-Vec256<double> Vec256<double>::lt(const Vec256<double>& other) const {
-  return (*this < other) & Vec256<double>::ones;
-}
-
-Vec256<double> Vec256<double>::le(const Vec256<double>& other) const {
-  return (*this <= other) & Vec256<double>::ones;
 }
 
 template <>

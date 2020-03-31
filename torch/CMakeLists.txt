@@ -1,7 +1,7 @@
 # This file used to build libtorch.so.
 # Now it only builds the Torch python bindings.
 
-if (NOT CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
+if(NOT CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
   project(torch CXX C)
   find_package(torch REQUIRED)
@@ -9,11 +9,11 @@ if (NOT CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 endif()
 
-if (NOT BUILD_PYTHON)
+if(NOT BUILD_PYTHON)
   return()
 endif()
 
-if (USE_TBB)
+if(USE_TBB)
 include_directories(${TBB_ROOT_DIR}/include)
 endif()
 
@@ -24,7 +24,7 @@ if(NOT TORCH_INSTALL_LIB_DIR)
   set(TORCH_INSTALL_LIB_DIR lib)
 endif()
 
-if (MSVC)
+if(MSVC)
     set(LIBSHM_SUBDIR libshm_windows)
 else()
     set(LIBSHM_SUBDIR libshm)
@@ -110,14 +110,16 @@ set(TORCH_PYTHON_SRCS
     ${TORCH_SRC_DIR}/csrc/utils/tensor_new.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_numpy.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_types.cpp
+    ${TORCH_SRC_DIR}/csrc/utils/python_dispatch.cpp
     )
 
 # NB: This has to match the condition under which the JIT test directory
 #     is included (at the time of writing that's in caffe2/CMakeLists.txt).
-if (BUILD_TEST AND NOT USE_ROCM)
+if(BUILD_TEST AND NOT USE_ROCM)
     add_definitions(-DBUILDING_TESTS)
     list(APPEND TORCH_PYTHON_SRCS
       ${TORCH_ROOT}/test/cpp/jit/torch_python_test.cpp
+      ${TENSOREXPR_TEST_SRCS_WITH_PADDED}
       ${JIT_TEST_SRCS}
       )
 endif()
@@ -157,16 +159,16 @@ set(TORCH_PYTHON_COMPILE_OPTIONS)
 
 set(TORCH_PYTHON_LINK_FLAGS "")
 
-if (MSVC)
+if(MSVC)
     string(APPEND TORCH_PYTHON_LINK_FLAGS " /NODEFAULTLIB:LIBCMT.LIB")
     list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${PYTHON_LIBRARIES})
-    if (BUILD_TEST)
+    if(BUILD_TEST)
       list(APPEND TORCH_PYTHON_LINK_LIBRARIES onnx_library)
     endif(BUILD_TEST)
-    if (NOT ${CMAKE_BUILD_TYPE} MATCHES "Release")
+    if(NOT ${CMAKE_BUILD_TYPE} MATCHES "Release")
       string(APPEND TORCH_PYTHON_LINK_FLAGS " /DEBUG:FULL")
     endif()
-elseif (APPLE)
+elseif(APPLE)
     string(APPEND TORCH_PYTHON_LINK_FLAGS " -undefined dynamic_lookup")
 else()
     list(APPEND TORCH_PYTHON_COMPILE_OPTIONS
@@ -175,7 +177,7 @@ else()
       -Wno-strict-aliasing)
 endif()
 
-if (USE_CUDA)
+if(USE_CUDA)
     list(APPEND TORCH_PYTHON_SRCS
       ${TORCH_SRC_DIR}/csrc/cuda/Module.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/Storage.cpp
@@ -202,7 +204,7 @@ if (USE_CUDA)
 
 endif()
 
-if (USE_CUDNN)
+if(USE_CUDNN)
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_CUDNN)
 
     # NOTE: these are at the front, in case there's another cuDNN in
@@ -217,11 +219,11 @@ if (USE_CUDNN)
       )
 endif()
 
-if (USE_NUMPY)
+if(USE_NUMPY)
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_NUMPY)
 endif()
 
-if (USE_ROCM)
+if(USE_ROCM)
     list(APPEND TORCH_PYTHON_SRCS
       ${TORCH_SRC_DIR}/csrc/cuda/Module.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/Storage.cpp
@@ -244,9 +246,9 @@ if (USE_ROCM)
     list(APPEND TORCH_PYTHON_INCLUDE_DIRECTORIES ${roctracer_INCLUDE_DIRS})
 endif()
 
-if (USE_DISTRIBUTED)
+if(USE_DISTRIBUTED)
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_DISTRIBUTED)
-    if (NOT MSVC)
+    if(NOT MSVC)
       list(APPEND TORCH_PYTHON_SRCS
         ${TORCH_SRC_DIR}/csrc/distributed/autograd/init.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/comm.cpp
@@ -258,19 +260,21 @@ if (USE_DISTRIBUTED)
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_functions.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_rpc_handler.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/request_callback_impl.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/testing/faulty_process_group_agent.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/testing/init.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/unpickled_python_call.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/unpickled_python_remote_call.cpp
         ${TORCH_SRC_DIR}/csrc/jit/runtime/register_distributed_ops.cpp
         )
       list(APPEND TORCH_PYTHON_LINK_LIBRARIES c10d)
       list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10D)
-      if (USE_CUDA OR USE_ROCM)
+      if(USE_CUDA OR USE_ROCM)
         list(APPEND TORCH_PYTHON_SRCS ${TORCH_SRC_DIR}/csrc/distributed/c10d/ddp.cpp)
       endif()
     endif()
 endif()
 
-if (USE_NCCL)
+if(USE_NCCL)
     list(APPEND TORCH_PYTHON_SRCS
       ${TORCH_SRC_DIR}/csrc/cuda/python_nccl.cpp)
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_NCCL)
@@ -401,7 +405,7 @@ target_compile_options(torch_python PRIVATE ${TORCH_PYTHON_COMPILE_OPTIONS})
 target_include_directories(torch_python PUBLIC ${TORCH_PYTHON_INCLUDE_DIRECTORIES})
 
 
-if (NOT TORCH_PYTHON_LINK_FLAGS STREQUAL "")
+if(NOT TORCH_PYTHON_LINK_FLAGS STREQUAL "")
     set_target_properties(torch_python PROPERTIES LINK_FLAGS ${TORCH_PYTHON_LINK_FLAGS})
 endif()
 
