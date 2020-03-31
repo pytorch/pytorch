@@ -17,6 +17,13 @@ Ordinarily, "automatic mixed precision training" uses :class:`torch.cuda.amp.aut
 :class:`torch.cuda.amp.GradScaler` together, as shown in the :ref:`Automatic Mixed Precision examples<amp-examples>`.
 However, :class:`autocast` and :class:`GradScaler` are modular, and may be used separately if desired.
 
+.. warning::
+    :class:`torch.cuda.amp.GradScaler` is not a complete implementation of automatic mixed precision.
+    :class:`GradScaler` is only useful if you manually run regions of your model in ``float16``.
+    If you aren't sure how to choose op precision manually, the master branch and nightly pip/conda
+    builds include a context manager that chooses op precision automatically wherever it's enabled.
+    See the `master documentation<https://pytorch.org/docs/master/amp.html>`_ for details.
+
 .. contents:: :local:
 
 .. _autocasting:
