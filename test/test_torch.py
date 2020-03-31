@@ -16466,7 +16466,7 @@ class _TorchMathTestMeta(object):
                  inputargs=(),
                  substr='',
                  make_inplace=True,
-                 decorators=(onlyCPU,),
+                 decorators=None,
                  ref_decorator='numpy',
                  rtol=None,
                  atol=None,
@@ -16485,7 +16485,7 @@ class _TorchMathTestMeta(object):
             self.ref_decorator = [unittest.skipIf(not TEST_NUMPY, "Numpy not found")]
         elif ref_decorator == 'scipy':
             self.ref_decorator = [unittest.skipIf(not TEST_SCIPY, "Scipy not found")]
-        self.decorators = list(decorators)
+        self.decorators = decorators
         self.rtol = rtol
         self.atol = atol
         self.dtypes = dtypes
@@ -16596,7 +16596,7 @@ def generate_torch_test_functions(cls, testmeta, inplace):
 
     def fn_large(self, device, dtype):
         input = _make_tensor((1024, 512), dtype=dtype, device=device)
-        #clone input to properly test inplace functions
+        # clone input to properly test inplace functions
         actual = torchfn(input.clone())
         expected = torch.stack([torchfn(slice) for slice in input])
         self.assertEqual(actual, expected, 'large')
