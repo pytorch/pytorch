@@ -15609,6 +15609,13 @@ class TestViewOps(TestCase):
 
         return True
 
+    def test_imag_noncomplex(self, device):
+        t = torch.ones((5, 5), device=device)
+        with self.assertRaises(RuntimeError):
+            torch.imag(t)
+
+        self.assertTrue(not hasattr(t, 'imag'))
+
     def test_diagonal_view(self, device):
         t = torch.ones((5, 5), device=device)
         v = torch.diagonal(t)
