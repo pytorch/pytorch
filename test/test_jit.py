@@ -14332,7 +14332,7 @@ a")
     @skipIfRocm
     @unittest.skipIf(IS_WINDOWS, "TODO: Fix this test case")
     def test_hasattr(self):
-        nt = torch.classes._TorchScriptTesting_PickleTester([3, 4])
+        nt = torch.classes._TorchScriptTesting._PickleTester([3, 4])
         hasattr(nt, "non_existent_attr")  # should not throw
         with self.assertRaisesRegex(AttributeError, "field_name"):
             nt.field_name
