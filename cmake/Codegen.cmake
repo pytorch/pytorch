@@ -54,43 +54,43 @@ install(FILES ${CMAKE_BINARY_DIR}/caffe2/core/macros.h
 # ---[ ATen specific
 if(INTERN_BUILD_ATEN_OPS)
   if(MSVC)
-    SET(OPT_FLAG "/fp:strict ")
+    set(OPT_FLAG "/fp:strict ")
   else(MSVC)
-    SET(OPT_FLAG "-O3 ")
+    set(OPT_FLAG "-O3 ")
     if("${CMAKE_BUILD_TYPE}" MATCHES "Debug")
-      SET(OPT_FLAG " ")
+      set(OPT_FLAG " ")
     endif()
   endif(MSVC)
 
   if(C_AVX_FOUND)
     if(MSVC)
-      SET_SOURCE_FILES_PROPERTIES(${CMAKE_CURRENT_LIST_DIR}/../aten/src/TH/vector/AVX.cpp PROPERTIES COMPILE_FLAGS "${OPT_FLAG}/arch:AVX ${CXX_AVX_FLAGS}")
+      set_source_files_properties(${CMAKE_CURRENT_LIST_DIR}/../aten/src/TH/vector/AVX.cpp PROPERTIES COMPILE_FLAGS "${OPT_FLAG}/arch:AVX ${CXX_AVX_FLAGS}")
     else(MSVC)
-      SET_SOURCE_FILES_PROPERTIES(${CMAKE_CURRENT_LIST_DIR}/../aten/src/TH/vector/AVX.cpp PROPERTIES COMPILE_FLAGS "${OPT_FLAG} ${CXX_AVX_FLAGS}")
+      set_source_files_properties(${CMAKE_CURRENT_LIST_DIR}/../aten/src/TH/vector/AVX.cpp PROPERTIES COMPILE_FLAGS "${OPT_FLAG} ${CXX_AVX_FLAGS}")
     endif(MSVC)
   endif(C_AVX_FOUND)
 
   if(NOT MSVC AND NOT "${CMAKE_C_COMPILER_ID}" MATCHES "Clang")
-    SET_SOURCE_FILES_PROPERTIES(${CMAKE_CURRENT_LIST_DIR}/../aten/src/TH/THAllocator.cpp PROPERTIES COMPILE_FLAGS "-fno-openmp")
+    set_source_files_properties(${CMAKE_CURRENT_LIST_DIR}/../aten/src/TH/THAllocator.cpp PROPERTIES COMPILE_FLAGS "-fno-openmp")
   endif()
 
-  FILE(GLOB cpu_kernel_cpp_in "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cpu/*.cpp" "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/quantized/cpu/kernels/*.cpp")
+  file(GLOB cpu_kernel_cpp_in "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cpu/*.cpp" "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/quantized/cpu/kernels/*.cpp")
 
-  LIST(APPEND CPU_CAPABILITY_NAMES "DEFAULT")
-  LIST(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG}")
+  list(APPEND CPU_CAPABILITY_NAMES "DEFAULT")
+  list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG}")
 
   if(CXX_AVX_FOUND)
-    SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DHAVE_AVX_CPU_DEFINITION")
-    LIST(APPEND CPU_CAPABILITY_NAMES "AVX")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DHAVE_AVX_CPU_DEFINITION")
+    list(APPEND CPU_CAPABILITY_NAMES "AVX")
     if(MSVC)
-      LIST(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG}/arch:AVX")
+      list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG}/arch:AVX")
     else(MSVC)
-      LIST(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG} -mavx")
+      list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG} -mavx")
     endif(MSVC)
   endif(CXX_AVX_FOUND)
 
   if(CXX_AVX2_FOUND)
-    SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DHAVE_AVX2_CPU_DEFINITION")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DHAVE_AVX2_CPU_DEFINITION")
 
     # Some versions of GCC pessimistically split unaligned load and store
     # instructions when using the default tuning. This is a bad choice on
@@ -98,36 +98,36 @@ if(INTERN_BUILD_ATEN_OPS)
     # See https://stackoverflow.com/questions/52626726/why-doesnt-gcc-resolve-mm256-loadu-pd-as-single-vmovupd#tab-top
     check_cxx_compiler_flag("-mno-avx256-split-unaligned-load -mno-avx256-split-unaligned-store" COMPILER_SUPPORTS_NO_AVX256_SPLIT)
     if(COMPILER_SUPPORTS_NO_AVX256_SPLIT)
-      SET(CPU_NO_AVX256_SPLIT_FLAGS "-mno-avx256-split-unaligned-load -mno-avx256-split-unaligned-store")
+      set(CPU_NO_AVX256_SPLIT_FLAGS "-mno-avx256-split-unaligned-load -mno-avx256-split-unaligned-store")
     endif(COMPILER_SUPPORTS_NO_AVX256_SPLIT)
 
-    LIST(APPEND CPU_CAPABILITY_NAMES "AVX2")
+    list(APPEND CPU_CAPABILITY_NAMES "AVX2")
     if(MSVC)
-      LIST(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG}/arch:AVX2")
+      list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG}/arch:AVX2")
     else(MSVC)
-      LIST(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG} -mavx2 -mfma ${CPU_NO_AVX256_SPLIT_FLAGS}")
+      list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG} -mavx2 -mfma ${CPU_NO_AVX256_SPLIT_FLAGS}")
     endif(MSVC)
   endif(CXX_AVX2_FOUND)
 
   list(LENGTH CPU_CAPABILITY_NAMES NUM_CPU_CAPABILITY_NAMES)
   math(EXPR NUM_CPU_CAPABILITY_NAMES "${NUM_CPU_CAPABILITY_NAMES}-1")
 
-  FOREACH(i RANGE ${NUM_CPU_CAPABILITY_NAMES})
-    FOREACH(IMPL ${cpu_kernel_cpp_in})
+  foreach(i RANGE ${NUM_CPU_CAPABILITY_NAMES})
+    foreach(IMPL ${cpu_kernel_cpp_in})
       string(REPLACE "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/" "" NAME ${IMPL})
-      LIST(GET CPU_CAPABILITY_NAMES ${i} CPU_CAPABILITY)
-      SET(NEW_IMPL ${CMAKE_BINARY_DIR}/aten/src/ATen/${NAME}.${CPU_CAPABILITY}.cpp)
-      CONFIGURE_FILE(${IMPL} ${NEW_IMPL} COPYONLY)
-      SET(cpu_kernel_cpp ${NEW_IMPL} ${cpu_kernel_cpp}) # Create list of copies
-      LIST(GET CPU_CAPABILITY_FLAGS ${i} FLAGS)
+      list(GET CPU_CAPABILITY_NAMES ${i} CPU_CAPABILITY)
+      set(NEW_IMPL ${CMAKE_BINARY_DIR}/aten/src/ATen/${NAME}.${CPU_CAPABILITY}.cpp)
+      configure_file(${IMPL} ${NEW_IMPL} COPYONLY)
+      set(cpu_kernel_cpp ${NEW_IMPL} ${cpu_kernel_cpp}) # Create list of copies
+      list(GET CPU_CAPABILITY_FLAGS ${i} FLAGS)
       if(MSVC)
-        SET(MACRO_FLAG "/DCPU_CAPABILITY=${CPU_CAPABILITY} /DCPU_CAPABILITY_${CPU_CAPABILITY}")
+        set(MACRO_FLAG "/DCPU_CAPABILITY=${CPU_CAPABILITY} /DCPU_CAPABILITY_${CPU_CAPABILITY}")
       else(MSVC)
-        SET(MACRO_FLAG "-DCPU_CAPABILITY=${CPU_CAPABILITY} -DCPU_CAPABILITY_${CPU_CAPABILITY}")
+        set(MACRO_FLAG "-DCPU_CAPABILITY=${CPU_CAPABILITY} -DCPU_CAPABILITY_${CPU_CAPABILITY}")
       endif(MSVC)
-      SET_SOURCE_FILES_PROPERTIES(${NEW_IMPL} PROPERTIES COMPILE_FLAGS "${FLAGS} ${MACRO_FLAG}")
-    ENDFOREACH()
-  ENDFOREACH()
+      set_source_files_properties(${NEW_IMPL} PROPERTIES COMPILE_FLAGS "${FLAGS} ${MACRO_FLAG}")
+    endforeach()
+  endforeach()
   list(APPEND ATen_CPU_SRCS ${cpu_kernel_cpp})
 
   set(cwrap_files
@@ -136,7 +136,7 @@ if(INTERN_BUILD_ATEN_OPS)
     ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/nn.yaml
     ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/native_functions.yaml)
 
-  FILE(GLOB all_python "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/*.py")
+  file(GLOB all_python "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/*.py")
 
   set(GEN_ROCM_FLAG)
   if(USE_ROCM)
@@ -148,7 +148,7 @@ if(INTERN_BUILD_ATEN_OPS)
     if(NOT USE_STATIC_DISPATCH AND NOT OP_DEPENDENCY)
       message(FATAL_ERROR "Must provide op dependency graph .yaml file for custom build with dynamic dispatch!")
     endif()
-    EXECUTE_PROCESS(
+    execute_process(
       COMMAND
       "${PYTHON_EXECUTABLE}" ${CMAKE_CURRENT_LIST_DIR}/../tools/code_analyzer/gen_op_registration_whitelist.py
       --op-dependency "${OP_DEPENDENCY}"
@@ -162,7 +162,7 @@ if(INTERN_BUILD_ATEN_OPS)
       --op_registration_whitelist ${OP_REGISTRATION_WHITELIST})
   endif()
 
-  SET(GEN_COMMAND
+  set(GEN_COMMAND
       "${PYTHON_EXECUTABLE}" ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/gen.py
       --source-path ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen
       --install_dir ${CMAKE_BINARY_DIR}/aten/src/ATen
@@ -171,7 +171,7 @@ if(INTERN_BUILD_ATEN_OPS)
       ${CUSTOM_BUILD_FLAGS}
   )
 
-  EXECUTE_PROCESS(
+  execute_process(
       COMMAND ${GEN_COMMAND}
         --output-dependencies ${CMAKE_BINARY_DIR}/aten/src/ATen/generated_cpp.txt
       RESULT_VARIABLE RETURN_VALUE

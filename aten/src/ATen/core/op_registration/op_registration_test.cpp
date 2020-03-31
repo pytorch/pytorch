@@ -1287,20 +1287,17 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
 }
 
 TEST(NewOperatorRegistrationTest, testBasics) {
-  auto registrar = c10::import("_test")
-    .def("dummy(Tensor self) -> Tensor")
-    .def("dummy1(Tensor self) -> Tensor")
-    .def("dummy2(Tensor self) -> Tensor")
-    .def("dummy3(Tensor self, Tensor other) -> Tensor", [](const Tensor& self, const Tensor& other) { return self; })
-    .def("dummy4", [](const Tensor& self, const Tensor& other) { return other; })
-    .impl("dummy", c10::dispatch(c10::DeviceType::CPU, [](const Tensor& self) { return self; }))
-    .impl("dummy", c10::dispatch(c10::DeviceType::XLA, [](const Tensor& self) { return self; }))
+  auto registrar = c10::import()
+    .def("_test::dummy(Tensor self) -> Tensor")
+    .def("_test::dummy1(Tensor self) -> Tensor")
+    .def("_test::dummy2(Tensor self) -> Tensor")
+    .def("_test::dummy3(Tensor self, Tensor other) -> Tensor", [](const Tensor& self, const Tensor& other) { return self; })
+    .def("_test::dummy4", [](const Tensor& self, const Tensor& other) { return other; })
+    .impl("_test::dummy", c10::dispatch(c10::DeviceType::CPU, [](const Tensor& self) { return self; }))
+    .impl("_test::dummy", c10::dispatch(c10::DeviceType::XLA, [](const Tensor& self) { return self; }))
     // Internal API
-    .impl("dummy2", c10::dispatch(c10::DispatchKey::CPUTensorId, [](const Tensor& self) { return self; }))
-    .impl("dummy2", c10::dispatch(c10::DispatchKey::XLATensorId, [](const Tensor& self) { return self; }));
-
-  auto registrar2 = c10::import()
-    .def("_test::dummy5(Tensor self) -> Tensor");
+    .impl("_test::dummy2", c10::dispatch(c10::DispatchKey::CPUTensorId, [](const Tensor& self) { return self; }))
+    .impl("_test::dummy2", c10::dispatch(c10::DispatchKey::XLATensorId, [](const Tensor& self) { return self; }));
 
   ASSERT_TRUE(Dispatcher::singleton().findSchema({"_test::dummy", ""}).has_value());
   // Should have a schema even if there are no impls
@@ -1308,7 +1305,6 @@ TEST(NewOperatorRegistrationTest, testBasics) {
   ASSERT_TRUE(Dispatcher::singleton().findSchema({"_test::dummy2", ""}).has_value());
   ASSERT_TRUE(Dispatcher::singleton().findSchema({"_test::dummy3", ""}).has_value());
   ASSERT_TRUE(Dispatcher::singleton().findSchema({"_test::dummy4", ""}).has_value());
-  ASSERT_TRUE(Dispatcher::singleton().findSchema({"_test::dummy5", ""}).has_value());
 }
 
 TEST(NewOperatorRegistrationTest, importTopLevel) {
@@ -1327,17 +1323,18 @@ TEST(NewOperatorRegistrationTest, importTopLevel) {
 }
 
 TEST(NewOperatorRegistrationTest, overload) {
-  auto registrar = c10::import("test")
-    .def("fn(Tensor self) -> Tensor")
-    .def("fn.overload1(Tensor self, Tensor other) -> Tensor")
-    .def("fn.overload2(Tensor self, Tensor other, Tensor alpha) -> Tensor");
+  auto registrar = c10::import()
+    .def("test::fn(Tensor self) -> Tensor")
+    .def("test::fn.overload1(Tensor self, Tensor other) -> Tensor")
+    .def("test::fn.overload2(Tensor self, Tensor other, Tensor alpha) -> Tensor");
   ASSERT_TRUE(Dispatcher::singleton().findSchema({"test::fn", ""}).has_value());
   ASSERT_TRUE(Dispatcher::singleton().findSchema({"test::fn", "overload1"}).has_value());
   ASSERT_TRUE(Dispatcher::singleton().findSchema({"test::fn", "overload2"}).has_value());
 }
 
+// See https://github.com/pytorch/pytorch/issues/35397
 TEST(NewOperatorRegistrationTest, importNamespace) {
-  auto registrar = c10::import("test")
+  auto registrar = c10::_import_DOES_NOT_WORK_WITH_MOBILE_CUSTOM_BUILD("test")
     .def("def1(Tensor self) -> Tensor")
     .def("def2(Tensor self) -> Tensor", [](const Tensor& x) { return x; })
     .def("def3", [](const Tensor& x) { return x; })
@@ -1357,11 +1354,11 @@ TEST(NewOperatorRegistrationTest, importNamespace) {
 }
 
 TEST(NewOperatorRegistrationTest, schema) {
-  auto registrar = c10::import("test")
-    .def("def1(Tensor self) -> Tensor")
-    .def(torch::schema("def2(Tensor self) -> Tensor"))
-    .def(torch::schema("def3(Tensor self) -> Tensor", c10::AliasAnalysisKind::PURE_FUNCTION))
-    .def(torch::jit::parseSchema("def4(Tensor self) -> Tensor"));
+  auto registrar = c10::import()
+    .def("test::def1(Tensor self) -> Tensor")
+    .def(torch::schema("test::def2(Tensor self) -> Tensor"))
+    .def(torch::schema("test::def3(Tensor self) -> Tensor", c10::AliasAnalysisKind::PURE_FUNCTION))
+    .def(torch::jit::parseSchema("test::def4(Tensor self) -> Tensor"));
 
   ASSERT_TRUE(Dispatcher::singleton().findSchema({"test::def1", ""}).has_value());
   ASSERT_TRUE(Dispatcher::singleton().findSchema({"test::def2", ""}).has_value());
@@ -1378,10 +1375,10 @@ TEST(NewOperatorRegistrationTest, dispatch) {
   bool cpu_called = false;
   bool cuda_called = false;
   bool autograd_called = false;
-  auto registrar = c10::import("test")
-    .def("fn_cpu", torch::dispatch(c10::DispatchKey::CPUTensorId, [&](const Tensor& x) { cpu_called = true; return x; }))
-    .def("fn_cuda", torch::dispatch(c10::kCUDA, [&](const Tensor& x) { cuda_called = true; return x; }))
-    .def("fn_autograd", torch::dispatch_autograd([&](const Tensor& x) { autograd_called = true; return x; }));
+  auto registrar = c10::import()
+    .def("test::fn_cpu", torch::dispatch(c10::DispatchKey::CPUTensorId, [&](const Tensor& x) { cpu_called = true; return x; }))
+    .def("test::fn_cuda", torch::dispatch(c10::kCUDA, [&](const Tensor& x) { cuda_called = true; return x; }))
+    .def("test::fn_autograd", torch::dispatch_autograd([&](const Tensor& x) { autograd_called = true; return x; }));
 
   {
     auto op = Dispatcher::singleton().findSchema({"test::fn_cpu", ""});
@@ -1412,11 +1409,11 @@ TEST(NewOperatorRegistrationTest, dispatchMultiple) {
   bool cpu_called = false;
   bool cuda_called = false;
   bool autograd_called = false;
-  auto registrar = c10::import("test")
-    .def("fn(Tensor self) -> Tensor")
-    .impl("fn", torch::dispatch(c10::DispatchKey::CPUTensorId, [&](const Tensor& x) { cpu_called = true; return x; }))
-    .impl("fn", torch::dispatch(c10::kCUDA, [&](const Tensor& x) { cuda_called = true; return x; }))
-    .impl("fn", torch::dispatch_autograd([&](const Tensor& x) { autograd_called = true; return x; }));
+  auto registrar = c10::import()
+    .def("test::fn(Tensor self) -> Tensor")
+    .impl("test::fn", torch::dispatch(c10::DispatchKey::CPUTensorId, [&](const Tensor& x) { cpu_called = true; return x; }))
+    .impl("test::fn", torch::dispatch(c10::kCUDA, [&](const Tensor& x) { cuda_called = true; return x; }))
+    .impl("test::fn", torch::dispatch_autograd([&](const Tensor& x) { autograd_called = true; return x; }));
 
   auto op = Dispatcher::singleton().findSchema({"test::fn", ""});
   ASSERT_TRUE(op.has_value());
@@ -1454,16 +1451,16 @@ Tensor dummy_fn(const Tensor& x) {
 
 TEST(NewOperatorRegistrationTest, CppFunction) {
   // Just show off the possible ways to register functions
-  auto registrar = c10::import("test")
-    .def("fn1", &dummy_fn)
+  auto registrar = c10::import()
+    .def("test::fn1", &dummy_fn)
     // C++ will implicitly convert function to function pointer
     // c.f. https://en.cppreference.com/w/cpp/language/implicit_conversion#Function_to_pointer
-    .def("fn2", dummy_fn)
-    .def("fn3", [](const Tensor& x) { return x; })
+    .def("test::fn2", dummy_fn)
+    .def("test::fn3", [](const Tensor& x) { return x; })
     // These require explicit schema
-    .def("fn4(Tensor x) -> Tensor", c10::CppFunction::makeFallthrough())
-    .def("fn5(Tensor x) -> Tensor", c10::CppFunction::makeUnboxedOnly(dummy_fn))
-    .def("fn6(Tensor x) -> Tensor", c10::CppFunction::makeFromBoxedFunction<&backend_fallback_kernel>());
+    .def("test::fn4(Tensor x) -> Tensor", c10::CppFunction::makeFallthrough())
+    .def("test::fn5(Tensor x) -> Tensor", c10::CppFunction::makeUnboxedOnly(dummy_fn))
+    .def("test::fn6(Tensor x) -> Tensor", c10::CppFunction::makeFromBoxedFunction<&backend_fallback_kernel>());
 }
 
 // Some internal tests that have to be done from C++
@@ -1490,7 +1487,7 @@ TEST(NewOperatorRegistrationTest, testDelayedListener) {
   auto reg1 = c10::import().impl("_test::dummy", [](const Tensor& self) { return self; });
   EXPECT_EQ(initial_num_registers, listener_ptr->num_registers_);
   {
-    auto reg2 = c10::import("_test").def("dummy(Tensor self) -> Tensor");
+    auto reg2 = c10::import().def("_test::dummy(Tensor self) -> Tensor");
     EXPECT_EQ(initial_num_registers + 1, listener_ptr->num_registers_);
   }
   EXPECT_EQ(initial_num_deregisters + 1, listener_ptr->num_deregisters_);
