@@ -42,13 +42,12 @@ be useful for passing some extra information about execution environment
 callbacks.
 
 Invoking callbacks adds some overhead, so usually it's useful to just randomly
-sample operator invocations. This can be enabled on per-callback basis with a
-global sampling rate specified by
-`torch::autograd::profiler::setSamplingProbability`.
+sample operator invocations. This can be enabled on per-callback basis with an
+optional sampling rate passed into ``torch::autograd::profiler::pushCallback``.
 
-Note, that ``pushCallback`` and ``setSamplingProbability`` are not thread-safe
-and can be called only when no PyTorch operator is running. Usually, it's a good
-idea to call them once during initialization.
+Note, that ``pushCallback`` is not thread-safe and can be called only when no
+PyTorch operator is running. Usually, it's a good idea to call them once during
+initialization.
 
 Here's an example:
 
@@ -57,18 +56,20 @@ Here's an example:
     // Called somewhere in the program beginning
     void init() {
         // Sample one in a hundred operator runs randomly
-        torch::autograd::setSamplingProbability(0.01);
         pushCallback(
             &onFunctionEnter,
             &onFunctionExit,
             /* needs_inputs */ true,
-            /* sampled */ true
+            /* sampling_prob */ 0.01
         );
     }
 
-    void onFunctionEnter(const RecordFunction& fn) {
-        std::cerr << "Before function " << fn.name() 
+    bool onFunctionEnter(const RecordFunction& fn) {
+        std::cerr << "Before function " << fn.name()
                   << " with " << fn.inputs().size() << " inputs" << std::endl;
+        // Returning false would mean that the callback is not interested
+        // in this RecordFunction and onFunctionExit won't be called
+        return true;
     }
 
     void onFunctionExit(const RecordFunction& fn) {
