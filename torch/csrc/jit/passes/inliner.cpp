@@ -48,7 +48,6 @@ void inlineCalls(Block* block) {
   }
 }
 
-
 void Inline(Graph& graph) {
   GRAPH_DUMP("Before Inlining: ", &graph);
   inlineCalls(graph.block());
