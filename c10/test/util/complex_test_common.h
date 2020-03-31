@@ -11,7 +11,7 @@
 #define MAYBE_GLOBAL
 #endif
 
-const double PI = 3.141592653589793238463;
+#define PI 3.141592653589793238463;
 
 namespace memory {
 
