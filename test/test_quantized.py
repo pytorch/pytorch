@@ -2705,6 +2705,32 @@ class TestQNNPackOps(TestCase):
             qY = torch.mean(qX, dim)
             np.testing.assert_array_almost_equal(Y.int_repr().numpy(), qY.int_repr().numpy(), decimal=0)
 
+    """Tests the correctness of the quantized::hardtanh op."""
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 8, 1, 8),
+                       elements=hu.floats(-1e6, 1e6, allow_nan=False, allow_infinity=False),
+                       qparams=hu.qparams(dtypes=torch.quint8)),
+           min_val=hu.floats(-1e6, -9.999999974752427e-07, allow_nan=False, allow_infinity=False),
+           max_val=hu.floats(9.999999974752427e-07, 1e6, allow_nan=False, allow_infinity=False))
+    def test_hardtanh(self, X, min_val, max_val):
+        with override_quantized_engine('qnnpack'):
+            X, (scale, zero_point, torch_type) = X
+
+            assume(min_val <= max_val)
+            Y = X.copy()
+            Y[Y < min_val] = min_val
+            Y[Y > max_val] = max_val
+            qY = torch.quantize_per_tensor(torch.from_numpy(Y), scale=scale,
+                                           zero_point=zero_point, dtype=torch_type)
+            X = torch.from_numpy(X)
+            qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
+                                           dtype=torch_type)
+
+            qY_hat = torch.nn.quantized.functional.hardtanh(qX, min_val, max_val)
+            self.assertEqual(
+                qY, qY_hat,
+                message="hardtanh failed:\nactual {}\nexpected {}".format(qY_hat, qY))
+
+
 """Tests the correctness of the tensor comparators."""
 class TestComparatorOps(TestCase):
     """Tests the element-wise equality ops."""
