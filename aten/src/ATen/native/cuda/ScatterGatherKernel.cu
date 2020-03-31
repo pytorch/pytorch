@@ -63,9 +63,9 @@ struct _cuda_scatter_gather_internal_kernel {
 
     });
   }
-};
+}; // struct _cuda_scatter_fill_internal_kernel
 
-template <bool is_scatter_like = true>
+template <bool is_scatter_like = true, bool cast_to_opaque = true>
 struct cuda_scatter_gather_base_kernel {
   template <typename func_t>
   void operator()(
@@ -124,8 +124,9 @@ struct cuda_scatter_gather_base_kernel {
       at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
       iter.dtype(),
       method_name, [&] {
-        //using dtype = OpaqueType<sizeof(scalar_t)>;
-        using dtype = scalar_t;
+        using dtype = typename std::conditional<cast_to_opaque,
+          OpaqueType<sizeof(scalar_t)>, scalar_t>::type;
+
         _cuda_scatter_gather_internal_kernel<is_scatter_like, dtype>()(
           iter, index_size, index_stride, f
         );
@@ -133,6 +134,105 @@ struct cuda_scatter_gather_base_kernel {
     );
   }
 }; // struct cuda_scatter_gather_base_kernel
+
+template <typename scalar_t>
+struct _cuda_scatter_fill_internal_kernel {
+  template <typename func_t>
+  void operator()(
+    TensorIterator& iter,
+    scalar_t src_val,
+    int64_t index_size,
+    int64_t index_stride,
+    const func_t& f
+  ) {
+    if (iter.numel() == 0) {
+      return;
+    }
+
+    if (!iter.can_use_32bit_indexing()) {
+      for (auto& sub_iter : iter.with_32bit_indexing()) {
+        _cuda_scatter_fill_internal_kernel<scalar_t>()(
+          sub_iter, src_val, index_size, index_stride, f
+        );
+      }
+      return;
+    }
+
+    char* self_ptr = (char*)iter.data_ptr(0);
+    char* index_ptr = (char*)iter.data_ptr(1);
+
+    auto offset_calc = make_offset_calculator<2>(iter);
+    legacy::launch_kernel<launch_size_nd, launch_bound2>(iter.numel(), [=]__device__(int i) {
+      auto offsets = offset_calc.get(i);
+
+      int64_t idx_dim = *(int64_t*)(index_ptr + offsets[1]);
+      CUDA_KERNEL_ASSERT(idx_dim >= 0 && idx_dim < index_size
+        && "index out of bounds"
+      );
+
+      char* self_data = self_ptr + offsets[0];
+
+      f(
+        (scalar_t*)self_data + idx_dim * index_stride,
+        src_val
+      );
+
+    });
+  }
+}; // struct _cuda_scatter_fill_internal_kernel
+
+template <bool cast_to_opaque = false>
+struct cuda_scatter_fill_base_kernel {
+  template <typename func_t>
+  void operator()(
+    Tensor& self, int64_t dim,
+    const Tensor& index, Scalar src,
+    const std::string& method_name,
+    const func_t& f
+  ) {
+    // no-op if index is empty
+    if (index.numel() == 0) {
+      return;
+    }
+
+    dim = maybe_wrap_dim(dim, self.dim());
+
+    scatter_shape_check(self, dim, index);
+
+    auto index_sizes = ensure_nonempty_vec(index.sizes().vec());
+
+    // restride self such that
+    // self.shape = index.shape and
+    // self.stride[dim] = 0
+    auto self_restrided = restride_dim(self, dim, index_sizes);
+
+    auto iter = TensorIterator();
+    iter.dont_compute_common_dtype();
+    iter.dont_resize_outputs();
+    iter.add_output(self_restrided, self.device(), self.scalar_type());
+    iter.add_input(index);
+    iter.build();
+
+    auto index_size = ensure_nonempty_size(self, dim);
+    auto index_stride = ensure_nonempty_stride(self, dim);
+
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+      at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
+      iter.dtype(),
+      method_name, [&] {
+        using dtype = typename std::conditional<cast_to_opaque,
+          OpaqueType<sizeof(scalar_t)>, scalar_t>::type;
+
+        auto src_val = src.to<dtype>();
+
+        _cuda_scatter_fill_internal_kernel<dtype>()(
+          iter, src_val, index_size, index_stride, f
+        );
+      }
+    );
+
+  }
+}; // struct cuda_scatter_fill_base_kernel
 
 void scatter_cuda_kernel(Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
   cuda_scatter_gather_base_kernel<>()(
@@ -144,11 +244,10 @@ void scatter_cuda_kernel(Tensor& self, int64_t dim, const Tensor& index, const T
 }
 
 void scatter_fill_cuda_kernel(Tensor& self, int64_t dim, const Tensor& index, Scalar src) {
-  cuda_scatter_gather_base_kernel<>()(
-    self, dim, index, self,
-    "scatter_fill_cuda_", [src]C10_DEVICE(auto* lhs, const auto* rhs) {
-      using scalar_t = typename std::remove_pointer<decltype(lhs)>::type;
-      //*lhs = src.to<scalar_t>();
+  cuda_scatter_fill_base_kernel<>()(
+    self, dim, index, src,
+    "scatter_fill_cuda_", [src]C10_DEVICE(auto* lhs, auto rhs_val) {
+      *lhs = rhs_val;
     }
   );
 }
