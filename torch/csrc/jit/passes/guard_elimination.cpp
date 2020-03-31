@@ -1,7 +1,7 @@
+#include <torch/csrc/jit/passes/guard_elimination.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
-#include <torch/csrc/jit/passes/guard_elimination.h>
 #include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <memory>
@@ -222,6 +222,7 @@ struct GuardElimination {
     const static auto no_exceptions = std::unordered_set<size_t>{};
     switch (n->kind()) {
       case aten::add:
+      case aten::add_:
       case aten::sub:
       case aten::mul:
       case aten::div:
@@ -279,6 +280,7 @@ struct GuardElimination {
       case aten::addcmul:
       case aten::where:
       case aten::_cast_Float:
+      case aten::_cast_Long:
       case aten::_sigmoid_backward:
       case aten::_tanh_backward:
       case aten::__and__:
@@ -286,9 +288,24 @@ struct GuardElimination {
       case aten::__xor__:
       case aten::__lshift__:
       case aten::__rshift__:
+      case aten::bitwise_not:
+      case aten::bitwise_and:
+      case aten::bitwise_or:
+      case aten::bitwise_xor:
         return checkInputs(n, no_exceptions, true);
+      case aten::softmax:
+        return checkInputs(n, std::unordered_set<size_t>{1}, true);
+      case aten::multinomial:
+        return checkInputs(n, std::unordered_set<size_t>{2, 3}, false);
+      case aten::flatten:
+      case aten::argmax:
+      case aten::squeeze:
       case aten::avg_pool2d:
         return checkInputs(n, no_exceptions, false);
+      case aten::conv1d:
+      case aten::conv2d:
+      case aten::conv3d:
+        return checkInputs(n, std::unordered_set<size_t>{2, 6}, false);
       case aten::slice:
         return !n->input(0)->type()->expect<TensorType>()->isSummarized() &&
             // check that the dimension argument is constant

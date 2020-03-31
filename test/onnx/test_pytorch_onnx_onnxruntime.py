@@ -830,6 +830,7 @@ class TestONNXRuntime(unittest.TestCase):
                       'output_1': [0, 1, 2]})
 
     @skipIfUnsupportedMinOpsetVersion(9)
+    @unittest.skip("relies on not constant folding size calls, but other tests rely on constant folding")
     def test_arange_dynamic(self):
         class ArangeModel(torch.nn.Module):
             def forward(self, input):
@@ -2219,6 +2220,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(TensorFactory(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
+    @unittest.skip("peephole removed")
     def test_tensor_factories_script(self):
         class TensorFactory(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -2865,6 +2867,16 @@ class TestONNXRuntime(unittest.TestCase):
         input = torch.randn(N, 16, 10, 10)
         target = torch.empty(N, 8, 8, dtype=torch.long).random_(0, C)
         self.run_test(NLLModel(), (input, target))
+
+    def test_torch_mm(self):
+        class M(torch.nn.Module):
+            def forward(self, mat1, mat2):
+                mm = torch.mm(mat1, mat2)
+                return mm
+
+        mat1 = torch.randn(2, 3)
+        mat2 = torch.randn(3, 3)
+        self.run_test(M(), input=(mat1, mat2))
 
     def test_onnx_proto_checker(self):
         class Model(torch.nn.Module):

@@ -142,19 +142,19 @@ TEST(IValueTest, FutureExceptions) {
 }
 
 TEST(IValueTest, ValueEquality) {
-  ASSERT_EQ(IValue("asdf"), IValue("asdf"));
-  ASSERT_NE(IValue("asdf"), IValue("ASDF"));
-  ASSERT_NE(IValue("2"), IValue(2));
-  ASSERT_EQ(IValue(1), IValue(1));
+  EXPECT_EQ(IValue("asdf"), IValue("asdf"));
+  EXPECT_NE(IValue("asdf"), IValue("ASDF"));
+  EXPECT_NE(IValue("2"), IValue(2));
+  EXPECT_EQ(IValue(1), IValue(1));
 
   // Check the equals() variant that returns an IValue
   auto res = IValue("asdf").equals("asdf");
-  ASSERT_TRUE(res.isBool());
-  ASSERT_TRUE(res.toBool());
+  EXPECT_TRUE(res.isBool());
+  EXPECT_TRUE(res.toBool());
 
   res = IValue("asdf").equals(1);
-  ASSERT_TRUE(res.isBool());
-  ASSERT_FALSE(res.toBool());
+  EXPECT_TRUE(res.isBool());
+  EXPECT_FALSE(res.toBool());
 }
 
 TEST(IValueTest, TensorEquality) {
@@ -168,30 +168,30 @@ TEST(IValueTest, TensorEquality) {
   auto testEquality = []() {
     return IValue(torch::ones({2, 3})) == IValue(torch::rand({2, 3}));
   };
-  ASSERT_ANY_THROW(testEquality());
+  EXPECT_ANY_THROW(testEquality());
 
   // equals() should return a tensor of all `true`.
   IValue eqTensor = t.equals(tCopy);
-  ASSERT_TRUE(eqTensor.isTensor());
+  EXPECT_TRUE(eqTensor.isTensor());
   auto booleanTrue = torch::ones({2, 3}).to(torch::kBool);
-  ASSERT_TRUE(eqTensor.toTensor().equal(booleanTrue));
+  EXPECT_TRUE(eqTensor.toTensor().equal(booleanTrue));
 
   // Test identity checking
-  ASSERT_TRUE(t.is(t));
-  ASSERT_FALSE(t.is(tCopy));
+  EXPECT_TRUE(t.is(t));
+  EXPECT_FALSE(t.is(tCopy));
   IValue tReference = t;
-  ASSERT_TRUE(t.is(tReference));
+  EXPECT_TRUE(t.is(tReference));
 }
 
 TEST(IValueTest, ListEquality) {
   IValue c1 = std::vector<int64_t>{0, 1, 2, 3};
   IValue c2 = std::vector<int64_t>{0, 1, 2, 3};
   IValue c3 = std::vector<int64_t>{0, 1, 2, 3, 4};
-  ASSERT_EQ(c1, c1);
-  ASSERT_EQ(c1, c2);
-  ASSERT_FALSE(c1.is(c2));
-  ASSERT_NE(c1, c3);
-  ASSERT_NE(c2, c3);
+  EXPECT_EQ(c1, c1);
+  EXPECT_EQ(c1, c2);
+  EXPECT_FALSE(c1.is(c2));
+  EXPECT_NE(c1, c3);
+  EXPECT_NE(c2, c3);
 }
 
 TEST(IValueTest, DictEquality) {
@@ -225,22 +225,33 @@ TEST(IValueTest, DictEquality) {
   d4.insert("three", innerDictNotEqual);
   auto c4 = IValue(d4);
 
-  ASSERT_EQ(c1, c1);
-  ASSERT_EQ(c1, c2);
-  ASSERT_FALSE(c1.is(c2));
-  ASSERT_NE(c1, c3);
-  ASSERT_NE(c2, c3);
-  ASSERT_NE(c1, c4);
-  ASSERT_NE(c2, c4);
+  EXPECT_EQ(c1, c1);
+  EXPECT_EQ(c1, c2);
+  EXPECT_FALSE(c1.is(c2));
+  EXPECT_NE(c1, c3);
+  EXPECT_NE(c2, c3);
+  EXPECT_NE(c1, c4);
+  EXPECT_NE(c2, c4);
+}
+
+TEST(IValueTest, DictEqualityDifferentOrder) {
+  auto d1 = c10::Dict<std::string, int64_t>();
+  d1.insert("one", 1);
+  d1.insert("two", 2);
+  auto d2 = c10::Dict<std::string, int64_t>();
+  d2.insert("two", 2);
+  d2.insert("one", 1);
+
+  EXPECT_EQ(d1, d2);
 }
 
 TEST(IValueTest, ListNestedEquality) {
   IValue c1 = std::vector<std::vector<int64_t>>({{0}, {0, 1}, {0, 1, 2}});
   IValue c2 = std::vector<std::vector<int64_t>>({{0}, {0, 1}, {0, 1, 2}});
   IValue c3 = std::vector<std::vector<int64_t>>({{1}, {0, 1}, {0, 1, 2}});
-  ASSERT_EQ(c1, c1);
-  ASSERT_EQ(c1, c2);
-  ASSERT_NE(c1, c3);
-  ASSERT_NE(c2, c3);
+  EXPECT_EQ(c1, c1);
+  EXPECT_EQ(c1, c2);
+  EXPECT_NE(c1, c3);
+  EXPECT_NE(c2, c3);
 }
 } // namespace c10

@@ -26,7 +26,7 @@ bool test_optimizer_xor(Options options) {
       Linear(8, 1),
       Functional(torch::sigmoid));
 
-  const int64_t kBatchSize = 6;
+  const int64_t kBatchSize = 50;
   const int64_t kMaximumNumberOfEpochs = 3000;
 
   OptimizerClass optimizer(model->parameters(), options);
@@ -187,12 +187,12 @@ TEST(OptimTest, OptimizerAccessors) {
   1);\
 }
 
-TEST(OptimTest, OldInterface) {
-  struct MyOptimizerOptions : public OptimizerCloneableOptions<MyOptimizerOptions> {
-    MyOptimizerOptions(double lr = 1.0) : lr_(lr) {};
-    TORCH_ARG(double, lr) = 1.0;
-  };
+struct MyOptimizerOptions : public OptimizerCloneableOptions<MyOptimizerOptions> {
+  MyOptimizerOptions(double lr = 1.0) : lr_(lr) {};
+  TORCH_ARG(double, lr) = 1.0;
+};
 
+TEST(OptimTest, OldInterface) {
   struct MyOptimizer : Optimizer {
     using Optimizer::Optimizer;
     torch::Tensor step(LossClosure closure = nullptr) override { return {};}

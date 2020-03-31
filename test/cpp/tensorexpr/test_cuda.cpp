@@ -9,7 +9,7 @@
 #include "test/cpp/tensorexpr/padded_buffer.h"
 #include "torch/csrc/jit/tensorexpr/buffer.h"
 #include "torch/csrc/jit/tensorexpr/cuda_codegen.h"
-#include "torch/csrc/jit/tensorexpr/schedule.h"
+#include "torch/csrc/jit/tensorexpr/loopnest.h"
 #include "torch/csrc/jit/tensorexpr/tensor.h"
 
 #include <c10/cuda/CUDACachingAllocator.h>
@@ -18,7 +18,7 @@
 namespace torch {
 namespace jit {
 using namespace torch::jit::tensorexpr;
-using namespace torch::jit::tensorexpr::schedule;
+using namespace torch::jit::tensorexpr;
 
 template <typename ctype>
 void testCudaTestVectorAdd01_impl() {
@@ -41,8 +41,8 @@ void testCudaTestVectorAdd01_impl() {
       });
   LoopNest l({c});
   std::vector<For*> loops = l.getLoopStmtsFor(c);
-  l.SetGPUBlockIndex(loops[1], 0);
-  l.SetGPUThreadIndex(loops[2], 0);
+  l.setGPUBlockIndex(loops[1], 0);
+  l.setGPUThreadIndex(loops[2], 0);
   Stmt* stmt = l.root_stmt();
   CudaCodeGen cuda_cg(stmt, c, a_buf, b_buf);
   const int N = block_count * block_size * num_iter;
@@ -110,9 +110,9 @@ static void testCudaTestVectorAdd02_impl(int N, int block_size) {
   For* n_outer;
   For* n_inner;
   std::vector<For*> loops = l.getLoopStmtsFor(c);
-  l.SplitWithMask(loops[0], block_size, &n_outer, &n_inner);
-  l.SetGPUBlockIndex(n_outer, 0);
-  l.SetGPUThreadIndex(n_inner, 0);
+  l.splitWithMask(loops[0], block_size, &n_outer, &n_inner);
+  l.setGPUBlockIndex(n_outer, 0);
+  l.setGPUThreadIndex(n_inner, 0);
   Stmt* stmt = l.root_stmt();
   CudaCodeGen cuda_cg(stmt, c, a_buf, b_buf);
   PaddedBuffer<float> a_v(N);
@@ -235,8 +235,8 @@ void testCudaTestRand01() {
       });
   LoopNest l({c});
   std::vector<For*> loops = l.getLoopStmtsFor(c);
-  l.SetGPUBlockIndex(loops[1], 0);
-  l.SetGPUThreadIndex(loops[2], 0);
+  l.setGPUBlockIndex(loops[1], 0);
+  l.setGPUThreadIndex(loops[2], 0);
   Stmt* stmt = l.root_stmt();
   CudaCodeGen cuda_cg(stmt, c);
   const int N = block_count * block_size * num_iter;
@@ -261,7 +261,7 @@ void testCudaTestRand01() {
     sum1 += v;
     sum2 += v * v;
     sum3 += v * v * v;
-    EXPECT_TRUE(v >= 0 && v < 1) << "invalid value: " << i << ", " << v;
+    ASSERT_TRUE(v >= 0 && v < 1, "invalid value: ", i, ", ", v);
   }
   sum1 /= N;
   sum2 /= N;
@@ -270,9 +270,9 @@ void testCudaTestRand01() {
   float sum2_mean = 1.f / 3;
   float sum3_mean = 1.f / 4;
 
-  EXPECT_NEAR(sum1, sum1_mean, 2e-2);
-  EXPECT_NEAR(sum2, sum2_mean, 2e-2);
-  EXPECT_NEAR(sum3, sum3_mean, 2e-2);
+  ASSERT_NEAR(sum1, sum1_mean, 2e-2);
+  ASSERT_NEAR(sum2, sum2_mean, 2e-2);
+  ASSERT_NEAR(sum3, sum3_mean, 2e-2);
   cudaFree(c_dev);
 }
 
@@ -287,9 +287,9 @@ void testCudaDynamicShapeSplit() {
   For* outer;
   For* inner;
   std::vector<For*> loops = l.getLoopStmtsFor(b);
-  l.SplitWithMask(loops[0], 1024, &outer, &inner);
-  l.SetGPUBlockIndex(outer, 0);
-  l.SetGPUThreadIndex(inner, 0);
+  l.splitWithMask(loops[0], 1024, &outer, &inner);
+  l.setGPUBlockIndex(outer, 0);
+  l.setGPUThreadIndex(inner, 0);
   Stmt* s = l.root_stmt();
   CudaCodeGen cg(s, {a, b, n});
 
