@@ -14625,6 +14625,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         self.assertEqual(r.dtype, a.dtype)
 
     @slowTest
+    @onlyOnCPUAndCUDA
     @dtypes(torch.float32, torch.float64, torch.bfloat16, torch.int32, torch.int64)
     @dtypesIfCUDA(torch.float32, torch.float64)
     def test_mm(self, device, dtype):
