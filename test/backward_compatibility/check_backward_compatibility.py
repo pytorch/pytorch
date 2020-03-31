@@ -182,7 +182,7 @@ if __name__ == '__main__':
             line = f.readline()
             if not line:
                 break
-            if "torch.classes" in line:
+            if "torch.classes" in line or "RRef" in line:
                 # TODO Fix type __torch__.torch.classes.xxx
                 continue
 
