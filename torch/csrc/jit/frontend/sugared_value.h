@@ -683,7 +683,7 @@ struct TORCH_API ExceptionValue : public SugaredValue {
       Function& m,
       at::ArrayRef<NamedValue> inputs,
       at::ArrayRef<NamedValue> attributes,
-      size_t n_binders) {
+      size_t n_binders) override {
     return std::make_shared<ExceptionMessageValue>(
         insertConstant(*m.graph(), message_, loc));
   }
