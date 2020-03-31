@@ -69,19 +69,16 @@ TESTS = [
     'test_jit_disabled',
     'test_function_schema',
     'test_overrides',
-    'test_jit_fuser_te',
 ]
 
 # skip < 3.3 because mock is added in 3.3 and is used in rpc_spawn
 # skip python2 for rpc and dist_autograd tests that do not support python2
 if PY33:
     TESTS.extend([
-        'distributed/rpc/faulty_agent/test_dist_autograd_spawn',
-        'distributed/rpc/faulty_agent/test_rpc_spawn',
-        'distributed/rpc/jit/test_dist_autograd_spawn',
+        'distributed/rpc/test_rpc_spawn',
         'distributed/rpc/test_dist_autograd_spawn',
         'distributed/rpc/test_dist_optimizer_spawn',
-        'distributed/rpc/test_rpc_spawn',
+        'distributed/rpc/jit/test_dist_autograd_spawn',
     ])
 
 # skip < 3.6 b/c fstrings added in 3.6
@@ -90,32 +87,27 @@ if PY36:
         'test_jit_py3',
         'test_determination',
         'distributed/rpc/jit/test_rpc_spawn',
-        'distributed/rpc/faulty_agent/test_rpc_spawn',
     ])
 
 WINDOWS_BLACKLIST = [
-    'distributed/rpc/faulty_agent/test_dist_autograd_spawn',
-    'distributed/rpc/faulty_agent/test_rpc_spawn',
-    'distributed/rpc/jit/test_dist_autograd_spawn',
-    'distributed/rpc/jit/test_rpc_spawn',
+    'distributed/test_distributed',
+    'distributed/rpc/test_rpc_spawn',
     'distributed/rpc/test_dist_autograd_spawn',
     'distributed/rpc/test_dist_optimizer_spawn',
-    'distributed/rpc/test_rpc_spawn',
-    'distributed/test_distributed',
+    'distributed/rpc/jit/test_rpc_spawn',
+    'distributed/rpc/jit/test_dist_autograd_spawn',
 ]
 
 ROCM_BLACKLIST = [
-    'distributed/rpc/faulty_agent/test_dist_autograd_spawn',
-    'distributed/rpc/faulty_agent/test_rpc_spawn',
-    'distributed/rpc/jit/test_dist_autograd_spawn',
-    'distributed/rpc/jit/test_rpc_spawn',
-    'distributed/rpc/test_dist_autograd_spawn',
-    'distributed/rpc/test_dist_optimizer_spawn',
-    'distributed/rpc/test_rpc_spawn',
     'test_cpp_extensions_aot_ninja',
     'test_cpp_extensions_jit',
-    'test_determination',
     'test_multiprocessing',
+    'distributed/rpc/test_rpc_spawn',
+    'distributed/rpc/test_dist_autograd_spawn',
+    'distributed/rpc/test_dist_optimizer_spawn',
+    'distributed/rpc/jit/test_rpc_spawn',
+    'distributed/rpc/jit/test_dist_autograd_spawn',
+    'test_determination',
 ]
 
 # These tests are slow enough that it's worth calculating whether the patch
