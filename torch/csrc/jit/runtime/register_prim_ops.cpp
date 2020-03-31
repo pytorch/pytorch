@@ -988,7 +988,7 @@ RegisterOperators reg(
          noop,
          aliasAnalysisSpecialCase()),
      Operator(
-         "aten::wait(Future(t)! self) -> t",
+         "aten::wait(Future(t) self) -> t",
          [](Stack& stack) {
            TORCH_CHECK(
                false, "wait is implemented directly in the interpreter");
