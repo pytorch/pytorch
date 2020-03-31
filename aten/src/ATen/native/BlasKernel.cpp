@@ -3,12 +3,12 @@
 #include <ATen/ATen.h>
 #include <ATen/Config.h>
 
-#if AT_BLAS_ENABLED()
+#if AT_BUILD_WITH_BLAS()
 extern "C" void dscal_(int *n, double *a, double *x, int *incx);
 extern "C" void sscal_(int *n, float *a, float *x, int *incx);
 extern "C" void dgemv_(char *trans, int *m, int *n, double *alpha, double *a, int *lda, double *x, int *incx, double *beta, double *y, int *incy);
 extern "C" void sgemv_(char *trans, int *m, int *n, float *alpha, float *a, int *lda, float *x, int *incx, float *beta, float *y, int *incy);
-#endif // AT_BLAS_ENABLED
+#endif // AT_BUILD_WITH_BLAS
 
 namespace at { namespace native {
 
@@ -34,7 +34,7 @@ void gemv_fast_path(char *trans, int *m, int *n, scalar_t *alpha, scalar_t *a, i
   TORCH_INTERNAL_ASSERT(false, "gemv_fast_path shouldn't be called for this configuration");
 }
 
-#if AT_BLAS_ENABLED()
+#if AT_BUILD_WITH_BLAS()
 template <>
 bool scal_use_fast_path<double>(int64_t n, int64_t incx) {
   auto intmax = std::numeric_limits<int>::max();
@@ -77,7 +77,7 @@ template <>
 void gemv_fast_path<float>(char *trans, int *m, int *n, float *alpha, float *a, int *lda, float *x, int *incx, float *beta, float *y, int *incy) {
   sgemv_(trans, m, n, alpha, a, lda, x, incx, beta, y, incy);
 }
-#endif // AT_BLAS_ENABLED
+#endif // AT_BUILD_WITH_BLAS
 
 #define INSTANTIATE(scalar_t, _)                                                                                                                                                  \
 template bool scal_use_fast_path<scalar_t>(int64_t n, int64_t incx);                                                                                                              \
