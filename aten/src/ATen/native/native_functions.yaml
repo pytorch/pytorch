@@ -238,18 +238,12 @@
 
 - func: real(Tensor self) -> Tensor
   use_c10_dispatcher: full
-  variants: function, method
-  supports_named_tensor: True
-
-- func: real.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
   supports_named_tensor: True
 
 - func: imag(Tensor self) -> Tensor
   use_c10_dispatcher: full
-  variants: function, method
-  supports_named_tensor: True
-
-- func: imag.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
   supports_named_tensor: True
 
 - func: conj(Tensor self) -> Tensor

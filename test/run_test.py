@@ -117,6 +117,9 @@ ROCM_BLACKLIST = [
     'test_cpp_extensions_jit',
     'test_determination',
     'test_multiprocessing',
+    'test_jit_simple',
+    'test_jit_legacy',
+    'test_jit_fuser_legacy',
 ]
 
 # These tests are slow enough that it's worth calculating whether the patch
