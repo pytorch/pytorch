@@ -54,8 +54,13 @@ __global__ void ReluCUDAKernel<half2>(const int N, const half2* X, half2* Y) {
     Y[i] = __hmul2(__hgt2(__ldg(X + i), kZero), __ldg(X + i));
 #else
     const float2 xx = __half22float2(X[i]);
-    Y[i] =
-        __floats2half2_rn(xx.x > 0.0f ? xx.x : 0.0f, xx.y > 0.0f ? xx.y : 0.0f);
+    // There are explicit cast to float here, because it may otherwise cause ambiguity on ROCm and can be triggered
+    // sometimes:
+    //
+    //   error: conditional expression is ambiguous; 'const hip_impl::Scalar_accessor<float, Native_vec_, 0>' can be
+    //   converted to 'float' and vice versa
+    Y[i] = __floats2half2_rn(xx.x > 0.0f ? static_cast<float>(xx.x) : 0.0f,
+                             xx.y > 0.0f ? static_cast<float>(xx.y) : 0.0f);
 #endif
   }
 }
