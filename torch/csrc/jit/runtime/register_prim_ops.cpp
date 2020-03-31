@@ -1461,9 +1461,8 @@ int listSelect(Stack& stack) {
   return 0;
 }
 
-template <typename T>
 int listLen(Stack& stack) {
-  c10::List<T> a = pop(stack).to<c10::List<T>>();
+  c10::List<IValue> a = pop(stack).to<c10::List<IValue>>();
 
   const int64_t size = a.size();
   push(stack, size);
@@ -2064,7 +2063,7 @@ RegisterOperators reg2({
     // registered as Any[] so that heterogenous tuples can be called with len()
     Operator(
         "aten::len.t(Any[] a) -> int",
-        listLen<IValue>,
+        listLen,
         aliasAnalysisFromSchema()),
 
 // these ops have a specialized implementation for the list element type
