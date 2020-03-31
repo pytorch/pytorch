@@ -4,20 +4,6 @@
 #include <ATen/core/jit_type.h>
 
 namespace c10 {
-namespace detail {
-inline bool operator==(const ListImpl& lhs, const ListImpl& rhs) {
-  return lhs.elementType == rhs.elementType &&
-      lhs.list.size() == rhs.list.size() &&
-      // see: [container equality]
-      std::equal(
-             lhs.list.cbegin(),
-             lhs.list.cend(),
-             rhs.list.cbegin(),
-             [](const auto& lhs, const auto& rhs) {
-               return _fastEqualsForContainer(lhs, rhs);
-             });
-}
-}
 
 template<class T> TypePtr getTypePtr();
 std::string toString(TypePtr typePtr);

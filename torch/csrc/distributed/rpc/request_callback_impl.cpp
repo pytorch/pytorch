@@ -6,8 +6,6 @@
 #include <torch/csrc/distributed/autograd/engine/dist_engine.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_req.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_resp.h>
-#include <torch/csrc/distributed/autograd/rpc_messages/dist_autograd_failure_req.h>
-#include <torch/csrc/distributed/autograd/rpc_messages/dist_autograd_failure_resp.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/propagate_gradients_req.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/propagate_gradients_resp.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
@@ -339,7 +337,7 @@ void RequestCallbackImpl::processRpc(
     case MessageType::RREF_FORK_REQUEST: {
       auto& rfr = static_cast<RRefForkRequest&>(rpc);
       auto& ctx = RRefContext::getInstance();
-      ctx.addForkOfOwner(rfr.rrefId(), rfr.forkId());
+      ctx.addForkOfOwnerIfNotPresent(rfr.rrefId(), rfr.forkId());
       markComplete(RRefAck().toMessage());
       return;
     }
@@ -398,22 +396,11 @@ void RequestCallbackImpl::processRpc(
     case MessageType::BACKWARD_AUTOGRAD_REQ: {
       auto& gradientsCall = static_cast<PropagateGradientsReq&>(rpc);
       const auto& autogradMetadata = gradientsCall.getAutogradMetadata();
-      std::shared_ptr<DistAutogradContext> autogradContext;
 
-      // In rare cases, a BACKWARD_AUTOGRAD_REQ may arrive after the
-      // context has been cleaned up due to an error during the backward pass.
-      // In such situations, we can ignore this message since no further
-      // gradient computations should take place on this context.
-      autogradContext =
-          DistAutogradContainer::getInstance().retrieveContextIfPresent(
+      // Retrieve the appropriate autograd context.
+      auto autogradContext =
+          DistAutogradContainer::getInstance().retrieveContext(
               autogradMetadata.autogradContextId);
-      if (!autogradContext) {
-        LOG(INFO) << "Ignoring Backward Autograd Request. Context "
-                  << autogradMetadata.autogradContextId
-                  << " already cleaned up due to autograd error";
-        markComplete(std::move(PropagateGradientsResp()).toMessage());
-        return;
-      }
 
       // Lookup the appropriate 'send' function to enqueue.
       std::shared_ptr<SendRpcBackward> sendFunction =
@@ -454,33 +441,6 @@ void RequestCallbackImpl::processRpc(
       markComplete(std::move(CleanupAutogradContextResp()).toMessage());
       return;
     }
-    case MessageType::DIST_AUTOGRAD_FAILURE_REQ: {
-      auto& backwardFailureReq = static_cast<DistAutogradFailureReq&>(rpc);
-      auto errorContextId = backwardFailureReq.getContextId();
-      auto errorMsg = backwardFailureReq.getErrorMsg();
-      // Mark the given context's graphTask with an error if the context has
-      // not been cleaned up yet. Then use the given error message and
-      // propagate it to all known neighbor workers.
-      std::shared_ptr<DistAutogradContext> autogradContext;
-      autogradContext =
-          DistAutogradContainer::getInstance().retrieveContextIfPresent(
-              errorContextId);
-      if (!autogradContext) {
-        LOG(INFO) << "Ignoring Dist Autograd Failure Request. Context "
-                  << errorContextId
-                  << " already cleaned up due to autograd error";
-        markComplete(std::move(DistAutogradFailureResp()).toMessage());
-        return;
-      }
-      // Mark the graphTask with an exception.
-      bool graphTaskHadError = autogradContext->setGraphTaskException(errorMsg);
-      // Propagate the dist autograd failure message to known workers.
-      if (!graphTaskHadError) {
-        autogradContext->propagateAutogradError(errorMsg);
-      }
-      markComplete(std::move(DistAutogradFailureResp()).toMessage());
-      return;
-    }
     default: {
       TORCH_INTERNAL_ASSERT(
           false, "Request type ", messageType, " not supported.");
@@ -517,6 +477,16 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processMessage(
             // processMessage().
             ClearAutogradContextGuard guard;
             processRpc(*rpc, messageType, id, retFuture);
+          } catch (py::error_already_set& e) {
+            retFuture->markCompleted(handleError(e, messageType, id));
+            // There are request callback impls in Python, where Python
+            // exceptions could be thrown. For releasing Python exception
+            // py::objects, GIL must be held.
+            py::gil_scoped_acquire acquire;
+            e.restore(); // Release ownership on py::objects and also restore
+                         // Python Error Indicator.
+            PyErr_Clear(); // Clear the Python Error Indicator as we has
+                           // recorded the exception in the response message.
           } catch (std::exception& e) {
             retFuture->markCompleted(handleError(e, messageType, id));
           }

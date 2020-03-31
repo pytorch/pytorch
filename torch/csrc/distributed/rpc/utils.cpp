@@ -2,8 +2,6 @@
 
 #include <torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_req.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_resp.h>
-#include <torch/csrc/distributed/autograd/rpc_messages/dist_autograd_failure_req.h>
-#include <torch/csrc/distributed/autograd/rpc_messages/dist_autograd_failure_resp.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/propagate_gradients_req.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/propagate_gradients_resp.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
@@ -60,9 +58,6 @@ std::unique_ptr<RpcCommandBase> deserializeRequest(const Message& request) {
     case MessageType::CLEANUP_AUTOGRAD_CONTEXT_REQ: {
       return autograd::CleanupAutogradContextReq::fromMessage(request);
     }
-    case MessageType::DIST_AUTOGRAD_FAILURE_REQ: {
-      return autograd::DistAutogradFailureReq::fromMessage(request);
-    }
     default: {
       TORCH_INTERNAL_ASSERT(
           false, "Request type ", request.type(), " not supported.");
@@ -113,9 +108,6 @@ std::unique_ptr<RpcCommandBase> deserializeResponse(
     }
     case MessageType::CLEANUP_AUTOGRAD_CONTEXT_RESP: {
       return autograd::CleanupAutogradContextResp::fromMessage(response);
-    }
-    case MessageType::DIST_AUTOGRAD_FAILURE_RESP: {
-      return autograd::DistAutogradFailureResp::fromMessage(response);
     }
     default: {
       TORCH_INTERNAL_ASSERT(

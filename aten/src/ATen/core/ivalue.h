@@ -587,30 +587,25 @@ struct CAFFE2_API IValue final {
 
   TypePtr type() const;
 
-  size_t hash() const {
-    return payload.as_int;
-  }
-
-  // Detection Aliased tensors.
-  struct HashIValue {
+  // Detect aliased tensors.
+  struct HashAliasedIValue {
     size_t operator()(const IValue& val) const {
       if (val.isTensor()) {
-        return 0;
+        return reinterpret_cast<size_t>(val.toTensor().storage().unsafeGetStorageImpl());
       }
-      return val.hash();
+      // If it is not a Tensor, then two mutable IValues alias each other only
+      // if they are the same pointer.
+      return val.payload.as_int;
     }
   };
 
-  struct CompIValues {
+  struct CompAliasedIValues {
     bool operator()(const IValue& lhs, const IValue& rhs) const {
-      if (lhs.isTensor() && rhs.isTensor()) {
         return lhs.isAliasOf(rhs);
-      }
-      return lhs.hash() == rhs.hash();
     }
   };
 
-  using HashAliasedIValues = std::unordered_set<IValue, HashIValue, CompIValues>;
+  using HashAliasedIValues = std::unordered_set<IValue, HashAliasedIValue, CompAliasedIValues>;
 
   // Chechs if this and rhs has a subvalues in common.
   // [t1,t2] and [t2, t3] returns true.
@@ -620,6 +615,7 @@ struct CAFFE2_API IValue final {
   void getSubValues(HashAliasedIValues& subValues) const;
 
  private:
+  static bool ptrEqual(const IValue& lhs, const IValue& rhs);
   // NOTE: IValue tags are intentionally private. In the future we may encode
   // this value different (e.g. using NaN boxing), and this would make it more
   // costly to determine the tag for all types vs just determining if something

@@ -230,84 +230,109 @@ void mergeFp32InputsAndConvertToFp16(
     user_input_set.emplace(i);
   }
 
-  if (!user_inputs.empty()) {
-    std::vector<OperatorDef> ops;
-    for (const auto& op : pred_net->op()) {
-      ops.emplace_back(op);
-    }
-    pred_net->clear_op();
-
-    OperatorDef op1;
-    op1.set_type("Concat");
-    for (const auto& i : user_inputs) {
-      op1.add_input(i.first);
-    }
-    op1.add_output("fp32_input_concated");
-    op1.add_output("fp32_input_concated_split_info");
-    auto shape_info = user_inputs.front().second;
-    int total = 0;
-    for (const auto& u : user_inputs) {
-      total += u.second.shape.dims(1);
-    }
-    shape_info.shape.set_dims(1, total);
-    auto* arg = op1.add_arg();
-    arg->set_name("axis");
-    arg->set_i(1);
-    pred_net->add_op()->CopyFrom(op1);
-
-    // TODO: a possible optimization is to fuse the fp16 conversion into Concat
-    OperatorDef op2;
-    op2.set_type("FloatToHalf");
-    op2.add_input("fp32_input_concated");
-    op2.add_output("fp16_input_concated");
-    arg = op2.add_arg();
-    arg->set_name("clip");
-    arg->set_i(1);
-    shape_hints->emplace("fp16_input_concated", shape_info);
-    pred_net->add_op()->CopyFrom(op2);
-
-    OperatorDef op3;
-    op3.set_type("Split");
-    op3.add_input("fp16_input_concated");
-    std::vector<OperatorDef> converts;
-    for (const auto& i : user_inputs) {
-      std::string new_name = i.first + "_split_fp16";
-      op3.add_output(new_name);
-      shape_hints->emplace(new_name, i.second);
-      converts.emplace_back(CreateOperatorDef(
-          "HalfToFloat",
-          "",
-          {i.first + "_split_fp16"},
-          {i.first + "_split"},
-          {}));
-      auto converted_shape = i.second;
-      converted_shape.shape.set_data_type(TensorProto_DataType_FLOAT);
-      shape_hints->emplace(i.first + "_split", converted_shape);
-    }
-    arg = op3.add_arg();
-    arg->set_name("axis");
-    arg->set_i(1);
-    arg = op3.add_arg();
-    arg->set_name("split");
-    for (const auto& u : user_inputs) {
-      arg->add_ints(u.second.shape.dims(1));
-    }
-    pred_net->add_op()->CopyFrom(op3);
-    for (const auto& op : converts) {
-      pred_net->add_op()->CopyFrom(op);
-    }
-
-    for (auto& op : ops) {
-      for (auto& i : *op.mutable_input()) {
-        if (user_input_set.count(i)) {
-          i = i + "_split";
+  if (user_inputs.empty()) {
+    return;
+  }
+  std::string partition;
+  std::set<std::string> partition_set;
+  for (const auto& op : pred_net->op()) {
+    for (const auto& i : op.input()) {
+      if (user_input_set.count(i)) {
+        if (!op.device_option().node_name().empty()) {
+          partition_set.emplace(op.device_option().node_name());
+          break;
         }
       }
     }
+  }
+  if (partition_set.size() == 1) {
+    partition = *partition_set.begin();
+    LOG(INFO) << "Assigning Split and Float2Half ops to partition "
+              << partition;
+  } else {
+    LOG(INFO)
+        << "Won't assign Split and Float2Half ops to partition because their outputs belong to "
+        << partition_set.size() << " partitions.";
+  }
 
-    for (const auto& op : ops) {
-      pred_net->add_op()->CopyFrom(op);
+  std::vector<OperatorDef> ops;
+  for (const auto& op : pred_net->op()) {
+    ops.emplace_back(op);
+  }
+  pred_net->clear_op();
+
+  OperatorDef op1;
+  op1.set_type("Concat");
+  for (const auto& i : user_inputs) {
+    op1.add_input(i.first);
+  }
+  op1.add_output("fp32_input_concated");
+  op1.add_output("fp32_input_concated_split_info");
+  auto shape_info = user_inputs.front().second;
+  int total = 0;
+  for (const auto& u : user_inputs) {
+    total += u.second.shape.dims(1);
+  }
+  shape_info.shape.set_dims(1, total);
+  auto* arg = op1.add_arg();
+  arg->set_name("axis");
+  arg->set_i(1);
+  pred_net->add_op()->CopyFrom(op1);
+
+  // TODO: a possible optimization is to fuse the fp16 conversion into Concat
+  OperatorDef op2;
+  op2.set_type("FloatToHalf");
+  op2.add_input("fp32_input_concated");
+  op2.add_output("fp16_input_concated");
+  arg = op2.add_arg();
+  arg->set_name("clip");
+  arg->set_i(1);
+  shape_hints->emplace("fp16_input_concated", shape_info);
+  pred_net->add_op()->CopyFrom(op2);
+
+  OperatorDef op3;
+  op3.set_type("Split");
+  op3.add_input("fp16_input_concated");
+  op3.mutable_device_option()->set_node_name(partition);
+  std::vector<OperatorDef> converts;
+  for (const auto& i : user_inputs) {
+    std::string new_name = i.first + "_split_fp16";
+    op3.add_output(new_name);
+    shape_hints->emplace(new_name, i.second);
+    converts.emplace_back(CreateOperatorDef(
+        "HalfToFloat",
+        "",
+        {i.first + "_split_fp16"},
+        {i.first + "_split"},
+        {}));
+    converts.back().mutable_device_option()->set_node_name(partition);
+    auto converted_shape = i.second;
+    converted_shape.shape.set_data_type(TensorProto_DataType_FLOAT);
+    shape_hints->emplace(i.first + "_split", converted_shape);
+  }
+  arg = op3.add_arg();
+  arg->set_name("axis");
+  arg->set_i(1);
+  arg = op3.add_arg();
+  arg->set_name("split");
+  for (const auto& u : user_inputs) {
+    arg->add_ints(u.second.shape.dims(1));
+  }
+  pred_net->add_op()->CopyFrom(op3);
+  for (const auto& op : converts) {
+    pred_net->add_op()->CopyFrom(op);
+  }
+
+  for (auto& op : ops) {
+    for (auto& i : *op.mutable_input()) {
+      if (user_input_set.count(i)) {
+        i = i + "_split";
+      }
     }
+  }
+
+  for (const auto& op : ops) {
+    pred_net->add_op()->CopyFrom(op);
   }
 }
 
@@ -542,6 +567,84 @@ NetDef buildLoopTestNet(
 
 } // namespace
 
+void splitSparseLengthsSumSparse(NetDef* net, const Workspace& ws) {
+  const static std::unordered_map<string, string> slss = {
+      {"SparseLengthsSum4BitRowwiseSparse", "SparseLengthsSumFused4BitRowwise"},
+      {"SparseLengthsWeightedSum4BitRowwiseSparse",
+       "SparseLengthsWeightedSumFused4BitRowwise"},
+      {"SparseLengthsSum8BitRowwiseSparse", "SparseLengthsSum8FusedBitRowwise"},
+      {"SparseLengthsWeightedSum8BitRowwiseSparse",
+       "SparseLengthsWeightedSumFused8BitRowwise"},
+      {"SparseLengthsSum2BitRowwiseSparse", "SparseLengthsSumFused2BitRowwise"},
+      {"SparseLengthsWeightedSum2BitRowwiseSparse",
+       "SparseLengthsWeightedSumFused2BitRowwise"}};
+  NetDef new_net;
+  new_net.CopyFrom(*net);
+  new_net.mutable_op()->Clear();
+  for (const auto& op : net->op()) {
+    const auto it = slss.find(op.type());
+    if (it == slss.end()) {
+      new_net.add_op()->CopyFrom(op);
+    } else {
+      const bool is_weighted =
+          (op.type().find("Weighted") != std::string::npos);
+      const auto& compressed_mapping = op.input(is_weighted ? 4 : 3);
+      const auto* b = ws.GetBlob(compressed_mapping);
+      bool fallback = false;
+      if (b && b->IsType<Tensor>()) {
+        const auto& t = BlobGetTensor(*b, CPU);
+        fallback = ((t.numel() == 1) && (t.template data<int32_t>()[0] == 0));
+      }
+
+      if (fallback) {
+        // If fallback, we just replace the original slss op with a normal sls
+        // op
+        OperatorDef new_op;
+        new_op.CopyFrom(op);
+        new_op.set_type(it->second);
+        new_op.mutable_input()->RemoveLast();
+        new_net.add_op()->CopyFrom(new_op);
+      } else {
+        // Otherwise, we replace slss with slss_lookup followed by a normal sls
+        OperatorDef new_op;
+        new_op.CopyFrom(op);
+        new_op.set_type("SparseLengthsSumSparseLookup");
+        new_op.clear_input();
+        const auto& indices_in = is_weighted ? op.input(2) : op.input(1);
+        const auto& lengths_in = is_weighted ? op.input(3) : op.input(2);
+        const auto& compress_mapping = is_weighted ? op.input(4) : op.input(3);
+        const auto& weights_in = is_weighted ? op.input(1) : "";
+        new_op.add_input(indices_in);
+        new_op.add_input(lengths_in);
+        new_op.add_input(compress_mapping);
+        const auto indices_out = indices_in + "_decomp";
+        const auto lengths_out = lengths_in + "_decomp";
+        const auto weights_out = weights_in + "_decomp";
+        new_op.clear_output();
+        new_op.add_output(indices_out);
+        new_op.add_output(lengths_out);
+        if (is_weighted) {
+          new_op.add_input(weights_in);
+          new_op.add_output(weights_out);
+        }
+        new_net.add_op()->CopyFrom(new_op);
+
+        new_op.CopyFrom(op);
+        new_op.set_type(it->second);
+        new_op.mutable_input()->RemoveLast();
+        *new_op.mutable_input()->Mutable(is_weighted ? 2 : 1) = indices_out;
+        *new_op.mutable_input()->Mutable(is_weighted ? 3 : 2) = lengths_out;
+        if (is_weighted) {
+          *new_op.mutable_input()->Mutable(1) = weights_out;
+        }
+        new_net.add_op()->CopyFrom(new_op);
+      }
+    }
+  }
+
+  new_net.Swap(net);
+}
+
 OnnxifiTransformer::OnnxifiTransformer(const OnnxifiTransformerOptions& opts)
     : BackendTransformerBase(), opts_(opts) {
   lib_ = onnx::initOnnxifiLibrary();
@@ -677,8 +780,9 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaC2(
   // We already have all the ops and external inputs and outputs!
   NetDef onnxifi_net(net);
 
-  // Remove the second output of Concat/Reshape from external_output. In
-  // addition, we remove those outputs from the Onnxifi op too.
+  // Remove the second output of Concat/Reshape from external_output. Remove
+  // rest of the outputs of LayerNorm too. In addition, we remove those outputs
+  // from the Onnxifi op too.
   // TODO: This approach is a bit hacky as we assume that the second output is
   // never used. A more appropriate approach can be learned from the ONNX path,
   // where we statically computes the split_info given input shape and insert a
@@ -711,6 +815,10 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaC2(
           indices_shape.dims_size() == 1 && lengths_shape.dims_size() == 1 &&
           indices_shape.dims(0) == lengths_shape.dims(0)) {
         op.add_arg()->CopyFrom(MakeArgument<int>("length1", 1));
+      }
+    } else if (op.type() == "LayerNorm" && op.output_size() > 1) {
+      for (int i = 1; i < op.output_size(); ++i) {
+        split_infos.emplace(op.output(i));
       }
     }
   }
@@ -767,6 +875,11 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaC2(
         &new_shape_hints,
         opts_.bound_shape_spec.max_batch_size);
     initialization_list.clear();
+  }
+
+  // Add parition info
+  for (const auto& p : partition_infos_) {
+    onnxifi_net.add_partition_info()->CopyFrom(p);
   }
 
   // Build ONNXIFI Op
@@ -1048,6 +1161,11 @@ bool OnnxifiTransformer::supportOpC2(
     if ((op.type() == "Concat" || op.type() == "Reshape") &&
         op.output_size() == 2) {
       net.mutable_external_output()->RemoveLast();
+    } else if (op.type() == "LayerNorm" && op.output_size() > 1) {
+      int remove = op.output_size() - 1;
+      for (int i = 0; i < remove; ++i) {
+        net.mutable_external_output()->RemoveLast();
+      }
     }
 
     // Encode the input/output shapes to an argument
@@ -1117,6 +1235,7 @@ void OnnxifiTransformer::tieGatherAndSparseLengthsWeightedSumOps(
   onnxBackendID backend_id = backend_ids_[idx_];
 
   for (const auto& op : net.op()) {
+    std::string check;
     if (op.type() == "Gather") {
       int pos =
           ArgumentHelper::GetSingleArgument<OperatorDef, int>(op, kNetPos, -1);
@@ -1128,17 +1247,40 @@ void OnnxifiTransformer::tieGatherAndSparseLengthsWeightedSumOps(
           ? supportOpOnnx(op, &exporter, *blacklisted_ops, backend_id)
           : supportOpC2(op, shape_hints, *blacklisted_ops, backend_id);
       if (!supported && op.input_size() > 1) {
-        const auto it = output_pos.find(op.input(1));
-        if (it == output_pos.end()) {
-          continue;
-        }
-        blacklisted_ops->emplace(it->second);
-        // We know that current op is not going to be supported. Might as well
-        // blacklist it too
-        blacklisted_ops->emplace(
-            ArgumentHelper::GetSingleArgument<OperatorDef, int>(
-                op, kNetPos, -1));
+        check = op.input(1);
       }
+    } else if (
+        op.type() == "SparseLengthsSumSparseLookup" && op.input_size() > 3) {
+      check = op.input(3);
+    }
+    if (!check.empty()) {
+      const auto it = output_pos.find(check);
+      if (it == output_pos.end()) {
+        continue;
+      }
+      blacklisted_ops->emplace(it->second);
+      // We know that current op is not going to be supported. Might as well
+      // blacklist it too
+      blacklisted_ops->emplace(
+          ArgumentHelper::GetSingleArgument<OperatorDef, int>(op, kNetPos, -1));
+    }
+  }
+}
+
+void OnnxifiTransformer::blacklistCpuPartition(
+    const NetDef& net,
+    std::unordered_set<int>* blacklisted_ops) const {
+  std::unordered_set<std::string> cpu_partitions;
+  for (const auto& p : partition_infos_) {
+    if (p.device_id_size() == 0) {
+      cpu_partitions.emplace(p.name());
+    }
+  }
+  for (const auto& op : net.op()) {
+    const auto& pname = op.device_option().node_name();
+    if (cpu_partitions.count(pname)) {
+      blacklisted_ops->emplace(
+          ArgumentHelper::GetSingleArgument<OperatorDef, int>(op, kNetPos, -1));
     }
   }
 }
@@ -1148,6 +1290,7 @@ void OnnxifiTransformer::applyFilteringRules(
     const ShapeInfoMap& shape_hints,
     std::unordered_set<int>* blacklisted_ops) const {
   tieGatherAndSparseLengthsWeightedSumOps(net, shape_hints, blacklisted_ops);
+  blacklistCpuPartition(net, blacklisted_ops);
 }
 
 void OnnxifiTransformer::getBackendId() {
@@ -1220,6 +1363,13 @@ NetDef OnnxifiTransformer::TransformViaOnnx(
       *pred_net, onnx_supports, onnx_converter, opts_.debug);
 }
 
+void OnnxifiTransformer::extractPartitionInfo(const NetDef& net) {
+  partition_infos_.clear();
+  for (const auto& p : net.partition_info()) {
+    partition_infos_.emplace_back(p);
+  }
+}
+
 // Cutting off the runnable part and replace with ONNXIFI ops. Asssume the nets
 // were topologically sorted
 void OnnxifiTransformer::transform(
@@ -1241,9 +1391,15 @@ void OnnxifiTransformer::transform(
   std::unordered_set<std::string> weights(
       weight_names.begin(), weight_names.end());
 
-  // SSA Rewrite the net
-  auto shape_hints_mapped =
-      ssaRewriteAndMapNames(ws, pred_net, input_shape_hints);
+  // SSA Rewrite the net if it has not been rewritten
+  ShapeInfoMap shape_hints_mapped;
+  if (opts_.predictor_net_ssa_rewritten) {
+    LOG(INFO) << "predictor net has been ssaRewritten, skip rewritting here";
+    annotateOpIndex(pred_net);
+    shape_hints_mapped = input_shape_hints;
+  } else {
+    shape_hints_mapped = ssaRewriteAndMapNames(ws, pred_net, input_shape_hints);
+  }
 
   // Populate shape info
   // TODO(yingz): We should not need to create mapped_ws since we did not change
@@ -1266,6 +1422,7 @@ void OnnxifiTransformer::transform(
   if (opts_.debug) {
     dumpNet(*pred_net, shape_hints, "debug_ssa_net.pb_txt");
   }
+  extractPartitionInfo(*pred_net);
 
   // Get backend id
   getBackendId();
