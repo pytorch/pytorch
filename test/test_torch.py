@@ -16507,9 +16507,8 @@ torch_op_tests = [_TorchMathTestMeta('sin'),
                   _TorchMathTestMeta('sqrt'),
                   _TorchMathTestMeta('erf', reffn=scipy.special.erf, ref_decorator='scipy'),
                   _TorchMathTestMeta('erfc', reffn=scipy.special.erfc, ref_decorator='scipy'),
-                  # TODO inplace variants fail for these
-                  _TorchMathTestMeta('exp', make_inplace=False),
-                  _TorchMathTestMeta('expm1', make_inplace=False),
+                  _TorchMathTestMeta('exp'),
+                  _TorchMathTestMeta('expm1'),
                   _TorchMathTestMeta('floor'),
                   _TorchMathTestMeta('ceil'),
                   _TorchMathTestMeta('rsqrt', reffn=lambda x: np.reciprocal(np.sqrt(x))),
@@ -16597,7 +16596,8 @@ def generate_torch_test_functions(cls, testmeta, inplace):
 
     def fn_large(self, device, dtype):
         input = _make_tensor((1024, 512), dtype=dtype, device=device)
-        actual = torchfn(input)
+        #clone input to properly test inplace functions
+        actual = torchfn(input.clone())
         expected = torch.stack([torchfn(slice) for slice in input])
         self.assertEqual(actual, expected, 'large')
 
