@@ -32,7 +32,9 @@ if(INTERN_BUILD_ATEN_OPS)
   # Add source, includes, and libs to lists
   list(APPEND Caffe2_CPU_SRCS ${ATen_CPU_SRCS})
   list(APPEND Caffe2_GPU_SRCS ${ATen_CUDA_SRCS})
+  list(APPEND Caffe2_GPU_SRCS_W_SORT_BY_KEY ${ATen_CUDA_SRCS_W_SORT_BY_KEY})
   list(APPEND Caffe2_HIP_SRCS ${ATen_HIP_SRCS})
+  list(APPEND Caffe2_HIP_SRCS ${ATen_HIP_SRCS_W_SORT_BY_KEY})
   list(APPEND Caffe2_CPU_TEST_SRCS ${ATen_CPU_TEST_SRCS})
   list(APPEND Caffe2_GPU_TEST_SRCS ${ATen_CUDA_TEST_SRCS})
   list(APPEND Caffe2_HIP_TEST_SRCS ${ATen_HIP_TEST_SRCS})
@@ -53,9 +55,9 @@ endif()
 # For pthreadpool_new_if_impl. TODO: Remove when threadpools are unitied.
 if(NOT MSVC)
   if(NOT TARGET fxdiv)
-    SET(FXDIV_BUILD_TESTS OFF CACHE BOOL "")
-    SET(FXDIV_BUILD_BENCHMARKS OFF CACHE BOOL "")
-    ADD_SUBDIRECTORY(
+    set(FXDIV_BUILD_TESTS OFF CACHE BOOL "")
+    set(FXDIV_BUILD_BENCHMARKS OFF CACHE BOOL "")
+    add_subdirectory(
       "${FXDIV_SOURCE_DIR}"
       "${CMAKE_BINARY_DIR}/FXdiv")
   endif()
@@ -211,7 +213,7 @@ if(NOT INTERN_BUILD_MOBILE OR BUILD_CAFFE2_MOBILE)
   #     have the right protobuf version as well as linking to libprotobuf.a.
   target_link_libraries(caffe2_protos PUBLIC protobuf::libprotobuf)
   if(NOT BUILD_SHARED_LIBS)
-    INSTALL(TARGETS caffe2_protos ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}")
+    install(TARGETS caffe2_protos ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}")
   endif()
 endif()
 
@@ -479,9 +481,11 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/eval.cpp
     ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/expr.cpp
     ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/function.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/hash_provider.cpp
     ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/ir.cpp
     ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/ir_mutator.cpp
     ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/ir_printer.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/ir_simplifier.cpp
     ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/ir_visitor.cpp
     ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/kernel.cpp
     ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_codegen.cpp
@@ -495,15 +499,15 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     )
 
   if(NOT INTERN_DISABLE_MOBILE_INTERP)
-    set (MOBILE_SRCS
-        ${TORCH_SRC_DIR}/csrc/jit/mobile/function.cpp
-        ${TORCH_SRC_DIR}/csrc/jit/mobile/import.cpp
-        ${TORCH_SRC_DIR}/csrc/jit/mobile/module.cpp
-        ${TORCH_SRC_DIR}/csrc/jit/mobile/register_mobile_ops.cpp
-        ${TORCH_SRC_DIR}/csrc/jit/mobile/register_mobile_autograd.cpp
-        ${TORCH_SRC_DIR}/csrc/jit/mobile/interpreter.cpp
-        )
-    list (APPEND TORCH_SRCS ${MOBILE_SRCS})
+    set(MOBILE_SRCS
+       ${TORCH_SRC_DIR}/csrc/jit/mobile/function.cpp
+       ${TORCH_SRC_DIR}/csrc/jit/mobile/import.cpp
+       ${TORCH_SRC_DIR}/csrc/jit/mobile/module.cpp
+       ${TORCH_SRC_DIR}/csrc/jit/mobile/register_mobile_ops.cpp
+       ${TORCH_SRC_DIR}/csrc/jit/mobile/register_mobile_autograd.cpp
+       ${TORCH_SRC_DIR}/csrc/jit/mobile/interpreter.cpp
+       )
+    list(APPEND TORCH_SRCS ${MOBILE_SRCS})
   endif()
 
   if(NOT INTERN_DISABLE_AUTOGRAD)
@@ -702,7 +706,19 @@ if(USE_ROCM)
   endif()
 elseif(USE_CUDA)
   set(CUDA_LINK_LIBRARIES_KEYWORD PRIVATE)
-  cuda_add_library(torch_cuda ${Caffe2_GPU_SRCS})
+  if(CUDA_SEPARABLE_COMPILATION)
+    # Separate compilation fails when kernels using `thrust::sort_by_key`
+    # are linked with the rest of CUDA code. Workaround by linking the separateley
+    set(_generated_name "torch_cuda_w_sort_by_key_intermediate_link${CMAKE_C_OUTPUT_EXTENSION}")
+    set(torch_cuda_w_sort_by_key_link_file "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/torch_cuda.dir/${CMAKE_CFG_INTDIR}/${_generated_name}")
+    cuda_wrap_srcs(torch_cuda OBJ Caffe2_GPU_W_SORT_BY_KEY_OBJ ${Caffe2_GPU_SRCS_W_SORT_BY_KEY})
+    CUDA_LINK_SEPARABLE_COMPILATION_OBJECTS("${torch_cuda_w_sort_by_key_link_file}" torch_cpu "${_options}" "${torch_cuda_SEPARABLE_COMPILATION_OBJECTS}")
+    set( torch_cuda_SEPARABLE_COMPILATION_OBJECTS )
+    # Pass compiled sort-by-key object + device-linked fatbin as extra dependencies of torch_cuda
+    cuda_add_library(torch_cuda ${Caffe2_GPU_SRCS} ${torch_cuda_w_sort_by_key_link_file} ${Caffe2_GPU_W_SORT_BY_KEY_OBJ})
+  else()
+    cuda_add_library(torch_cuda ${Caffe2_GPU_SRCS} ${Caffe2_GPU_SRCS_W_SORT_BY_KEY})
+  endif()
   set(CUDA_LINK_LIBRARIES_KEYWORD)
   torch_compile_options(torch_cuda)  # see cmake/public/utils.cmake
   if(USE_NCCL)
@@ -713,7 +729,7 @@ endif()
 
 
 if(NOT MSVC)
-  TARGET_LINK_LIBRARIES(torch_cpu PRIVATE fxdiv)
+  target_link_libraries(torch_cpu PRIVATE fxdiv)
 endif()
 
 # ==========================================================
@@ -750,7 +766,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       target_include_directories(torch_cuda PUBLIC "${NVTOOLEXT_HOME}/include")
       # -INCLUDE is used to ensure torch_cuda is linked against in a project that relies on it.
       # Related issue: https://github.com/pytorch/pytorch/issues/31611
-      target_link_libraries(torch_cuda INTERFACE "-INCLUDE:\"?warp_size@cuda@at@@YAHXZ\"")
+      target_link_libraries(torch_cuda INTERFACE "-INCLUDE:?warp_size@cuda@at@@YAHXZ")
 
     elseif(APPLE)
       set(TORCH_CUDA_LIBRARIES
@@ -1176,7 +1192,7 @@ if(USE_ROCM)
   get_directory_property(MY_DEFINITIONS COMPILE_DEFINITIONS)
   if(MY_DEFINITIONS)
     foreach(_item ${MY_DEFINITIONS})
-      LIST(APPEND HIP_HCC_FLAGS "-D${_item}")
+      list(APPEND HIP_HCC_FLAGS "-D${_item}")
     endforeach()
   endif()
 
@@ -1281,9 +1297,9 @@ if(BUILD_PYTHON)
       print(sysconfig.get_python_lib(prefix=''))
   ")
   file(TO_CMAKE_PATH ${PYTHON_SITE_PACKAGES} PYTHON_SITE_PACKAGES)
-  SET(PYTHON_SITE_PACKAGES ${PYTHON_SITE_PACKAGES} PARENT_SCOPE) # for Summary
+  set(PYTHON_SITE_PACKAGES ${PYTHON_SITE_PACKAGES} PARENT_SCOPE) # for Summary
   # ---[ Options.
-  SET(PYTHON_LIB_REL_PATH "${PYTHON_SITE_PACKAGES}" CACHE STRING "Python installation path (relative to CMake installation prefix)")
+  set(PYTHON_LIB_REL_PATH "${PYTHON_SITE_PACKAGES}" CACHE STRING "Python installation path (relative to CMake installation prefix)")
   message(STATUS "Using ${PYTHON_LIB_REL_PATH} as python relative installation path")
   # Python extension suffix
   # Try to get from python through sysconfig.get_env_var('EXT_SUFFIX') first,

@@ -23,7 +23,7 @@ namespace torch {
 namespace jit {
 
 using QConfig = std::tuple<Module, Module>;
-using QConfigDict = std::unordered_map<std::string, QConfig>;
+using QConfigDict = std::unordered_map<std::string, c10::optional<QConfig>>;
 using ModuleQConfigMap = std::unordered_map<ModulePtr, c10::optional<QConfig>>;
 
 struct OptionalQConfigHash {
@@ -65,8 +65,7 @@ TORCH_API void FoldQuantNodesIntoInputsOutputs(std::shared_ptr<Graph>& graph);
 TORCH_API Module InsertObservers(
     Module& module,
     const std::string& method_name,
-    const std::unordered_map<std::string, std::tuple<Module, Module>>&
-        qconfig_dict,
+    const QConfigDict& qconfig_dict,
     bool inplace = false,
     bool is_dynamic = false);
 
@@ -84,7 +83,8 @@ TORCH_API Module InsertObservers(
 TORCH_API Module InsertQuantDeQuant(
     Module& module,
     const std::string& method_name,
-    bool inplace = false);
+    bool inplace = false,
+    bool is_dynamic = false);
 
 /** Swap functional linear CallFunctions to aten::linear
  *  so that it can survive inline, since quant fusion need to
@@ -124,7 +124,9 @@ TORCH_API void SwapDeQuant(std::shared_ptr<Graph>& graph);
  *
  * \param graph the graph we want to apply fusion
  */
-TORCH_API void QuantFusion(std::shared_ptr<Graph>& graph);
+TORCH_API void QuantFusion(
+    std::shared_ptr<Graph>& graph,
+    bool is_dynamic = false);
 
 /** \brief Fold Conv2d-BatchNorm2d into Conv2d in forward method of this module
  * and all its submodules.
@@ -193,7 +195,11 @@ TORCH_API void FoldPrepackedWeightIntoModule(
  */
 TORCH_API void DedupModuleUses(Module& module);
 
-TORCH_API script::Module Finalize(script::Module& module);
+TORCH_API script::Module Finalize(
+    script::Module& module,
+    bool is_dynamic = false);
+
+TORCH_API void FoldQuantizedPrepackingOps(Module& module);
 
 } // namespace jit
 } // namespace torch
