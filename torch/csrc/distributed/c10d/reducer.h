@@ -13,6 +13,10 @@
 
 namespace c10d {
 
+constexpr int DEFAULT_FIRST_BUCKET_BYTES = int(1024 * 1024);
+constexpr int DEFAULT_BUCKET_BYTES_CAP = int(25 * 1024 * 1024);
+constexpr int DEFAULT_BROADCAST_BUCKET_BYTES = int(250 * 1024 * 1024);
+
 class Reducer {
  public:
   // The constructor takes a list of variables for every model replica.
@@ -109,6 +113,18 @@ class Reducer {
 
   void finalize_backward();
 
+  // Broadcast rebuilt buckets from rank 0 to other ranks before initializing
+  // the buckets
+  void sync_bucket_indices(std::vector<std::vector<size_t>>& bucket_indices);
+  // Rebuild buckets based on rebuilt_tensors_ and rebuilt_param_indices_
+  // TODO this function makes broadcast communication call and
+  // could be overlapped with next forward() call, thus
+  // it could be async. Will make it async when rebuilding buckets for
+  // find_unused_parameters = true case, as we could rebuild buckets more than
+  // once for find_unused_parameters = true case, where subgraphs are trained
+  // and parameter indices order may change more frequently.
+  // For find_unused_parameters = false case, buckets are only rebuilt once,
+  // the performance cost is negligible.
   void rebuildBuckets();
 
   // A bucket replica represents [1..N] gradients to be reduced,
@@ -194,7 +210,7 @@ class Reducer {
   bool was_rebuilt_bucket_;
   std::vector<at::Tensor> rebuilt_tensors_;
   std::vector<int64_t> rebuilt_param_indices_;
-  int64_t bucket_bytes_cap_;
+  const int64_t bucket_bytes_cap_;
 };
 
 // tensor_indices stores the parameter tensor indices of "tensors" in

@@ -14,9 +14,6 @@
 
 namespace c10d {
 
-constexpr int DEFAULT_FIRST_BUCKET_BYTES = int(1024 * 1024);
-constexpr int DEFAULT_BROADCAST_BUCKET_BYTES = int(250 * 1024 * 1024);
-
 namespace {
 
 // Turns lambda without input/output into a torch::autograd::FunctionPostHook.
@@ -290,13 +287,13 @@ void Reducer::autograd_hook(VariableIndex index) {
     return;
   }
 
-  // Rebuilt bucket only if 1) it is first time rebuilt 2) unused_parameters_
+  // Rebuild bucket only if 1) it is first time rebuilt 2) unused_parameters_
   // is empty, currently it does not support when there is unused parameters
   // 3) this backward pass needs to run all reduce.
   // Here, we just dump tensors and their parameter indices into
   // rebuilt_tensors_ and rebuilt_param_indices_, and then at the end of
   // finalize_backward(), buckets will be rebuilt based on rebuilt_tensors_
-  // and rebuilt_param_indices_, and then will be intialized and broadcasted.
+  // and rebuilt_param_indices_, and then will be broadcasted and intialized.
   // Also we only need to dump tensors and parameter indcies of one replica.
   if (!was_rebuilt_bucket_ && unused_parameters_.empty() &&
       index.replica_index == 0) {
@@ -760,6 +757,42 @@ void Reducer::finalize_backward() {
   }
 }
 
+void Reducer::sync_bucket_indices(
+    std::vector<std::vector<size_t>>& bucket_indices) {
+  int64_t broadcast_bucket_size = DEFAULT_BROADCAST_BUCKET_BYTES;
+  auto num_buckets = bucket_indices.size();
+  int64_t total_size = 0;
+  for (size_t i = 0; i < num_buckets; i++) {
+    total_size += bucket_indices.at(i).size();
+  }
+  at::TensorOptions options;
+  options = options.dtype(at::kInt);
+  options = options.device(replicas_[0][0].device());
+  auto broadcast_tensor = at::empty({total_size}, at::kInt);
+  auto accessor = broadcast_tensor.accessor<int, 1>();
+  auto accessorIndex = 0;
+  for (size_t i = 0; i < num_buckets; i++) {
+    const auto& bucket_size = bucket_indices.at(i).size();
+    for (size_t j = 0; j < bucket_size; j++) {
+      accessor[accessorIndex++] = bucket_indices[i][j];
+    }
+  }
+  auto broadcast_tensor_device = at::empty({total_size}, options);
+  broadcast_tensor_device.copy_(broadcast_tensor, true);
+  // Copy CPU tensor to device tensor, as the process_group_ could be NCCL and
+  // it can only broadcast device tensors.
+  broadcast_coalesced(
+      process_group_, broadcast_tensor_device, broadcast_bucket_size);
+  broadcast_tensor.copy_(broadcast_tensor_device);
+  accessorIndex = 0;
+  for (size_t i = 0; i < num_buckets; i++) {
+    const auto& bucket_size = bucket_indices.at(i).size();
+    for (size_t j = 0; j < bucket_size; j++) {
+      bucket_indices[i][j] = accessor[accessorIndex++];
+    }
+  }
+}
+
 void Reducer::rebuildBuckets() {
   TORCH_INTERNAL_ASSERT(
       rebuilt_tensors_.size() == rebuilt_param_indices_.size(),
@@ -777,33 +810,13 @@ void Reducer::rebuildBuckets() {
   // For rebuilt bucket indices, it needs to be synced across all ranks.
   // broadcast the newly rebuilt bucket indices from rank 0 in default.
   // After sync rebuilt bucket indices, initialize buckets for reducer.
-  int64_t broadcast_bucket_size = DEFAULT_BROADCAST_BUCKET_BYTES;
-  auto num_buckets = rebuilt_bucket_indices.size();
-  auto num_elem_per_bucket = rebuilt_bucket_indices[0].size();
-  int64_t total_size = num_buckets * num_elem_per_bucket;
-  at::TensorOptions options;
-  options = options.dtype(at::kInt);
-  options = options.device(replicas_[0][0].device());
-  auto broadcast_tensor = at::empty({total_size}, at::kInt);
-  auto accessor = broadcast_tensor.accessor<int, 1>();
-  for (size_t i = 0; i < num_buckets; i++) {
-    for (size_t j = 0; j < num_elem_per_bucket; j++) {
-      accessor[i * num_elem_per_bucket + j] = rebuilt_bucket_indices[i][j];
-    }
-  }
-  auto broadcast_tensor_device = at::empty({total_size}, options);
-  broadcast_tensor_device.copy_(broadcast_tensor, true);
-  broadcast_coalesced(
-      process_group_, broadcast_tensor_device, broadcast_bucket_size);
-  broadcast_tensor.copy_(broadcast_tensor_device);
-  for (size_t i = 0; i < num_buckets; i++) {
-    for (size_t j = 0; j < num_elem_per_bucket; j++) {
-      rebuilt_bucket_indices[i][j] = accessor[i * num_elem_per_bucket + j];
-    }
-  }
+  sync_bucket_indices(rebuilt_bucket_indices);
+
   was_rebuilt_bucket_ = true;
   rebuilt_tensors_.clear();
   rebuilt_param_indices_.clear();
+  // Unlock before initialize_buckets() as initialize_buckets() requires a lock,
+  // it could result in self deadlock without unlocking here.
   mutex_.unlock();
   initialize_buckets(std::move(rebuilt_bucket_indices));
 }
@@ -872,21 +885,21 @@ std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
     const auto& tensor = tensors[i];
     TORCH_CHECK(!tensor.is_sparse(), "No support for sparse tensors.");
 
-    auto param_indice = i;
+    auto param_index = i;
     if (!tensor_indices.empty()) {
-      param_indice = tensor_indices[i];
+      param_index = tensor_indices[i];
     }
     // If we expect a sparse gradient to be produced for this tensor, it cannot
     // be grouped together with other gradients and gets its own bucket.
     if (!expect_sparse_gradient.empty() &&
-        expect_sparse_gradient[param_indice]) {
-      result.push_back({param_indice});
+        expect_sparse_gradient[param_index]) {
+      result.push_back({param_index});
       continue;
     }
 
     auto key = BucketKey(tensor.scalar_type(), tensor.device());
     auto& bucket = buckets[key];
-    bucket.indices.push_back(param_indice);
+    bucket.indices.push_back(param_index);
     bucket.size += tensor.numel() * tensor.element_size();
 
     // Initialize bucket size limit iterator if necessary.
