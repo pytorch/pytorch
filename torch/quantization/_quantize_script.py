@@ -71,9 +71,12 @@ def script_qconfig(qconfig):
         activation=torch.jit.script(qconfig.activation())._c,
         weight=torch.jit.script(qconfig.weight())._c)
 
+def get_scripted_qconfig_dict(qconfig_dict):
+    return {k: script_qconfig(v) if v else None for k, v in qconfig_dict.items()}
+
 def prepare_script(model, qconfig_dict, inplace=False):
     _check_is_script_module(model)
-    scripted_qconfig_dict = {k: script_qconfig(v) if v else None for k, v in qconfig_dict.items()}
+    scripted_qconfig_dict = get_scripted_qconfig_dict(qconfig_dict)
     if not inplace:
         model = model.copy()
     model = wrap_cpp_module(torch._C._jit_pass_insert_observers(model._c,
@@ -84,7 +87,7 @@ def prepare_script(model, qconfig_dict, inplace=False):
 
 def prepare_dynamic_script(model, qconfig_dict):
     _check_is_script_module(model)
-    scripted_qconfig_dict = {k: script_qconfig(v) for k, v in qconfig_dict.items()}
+    scripted_qconfig_dict = get_scripted_qconfig_dict(qconfig_dict)
     model = wrap_cpp_module(torch._C._jit_pass_insert_observers(model._c,
                                                                 'forward',
                                                                 scripted_qconfig_dict,

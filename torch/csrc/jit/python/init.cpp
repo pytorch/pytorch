@@ -189,12 +189,16 @@ void initJITBindings(PyObject* module) {
           py::arg("is_dynamic") = false)
       .def(
           "_jit_pass_insert_quant_dequant",
-          [](Module& module, const std::string& method_name, bool inplace) {
-            return InsertQuantDeQuant(module, method_name, inplace);
+          [](Module& module,
+             const std::string& method_name,
+             bool inplace,
+             bool is_dynamic) {
+            return InsertQuantDeQuant(module, method_name, inplace, is_dynamic);
           },
           py::arg("module"),
           py::arg("method_name"),
-          py::arg("inplace") = false)
+          py::arg("inplace") = false,
+          py::arg("is_dynamic") = false)
       .def(
           "_jit_pass_insert_prepack_unpack",
           [](std::shared_ptr<Graph>& g) { return InsertPrepackUnpack(g); })
