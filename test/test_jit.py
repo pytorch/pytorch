@@ -5089,7 +5089,7 @@ def foo(x):
         with self.capture_stdout():
             traced = torch.jit.trace(fn, [torch.ones(2, 2)])
 
-        FileCheck().check("goodbye").check("hello").run(traced.graph)
+        FileCheck().check("goodbye").run(traced.graph)
 
     def test_big_int_literals(self):
         def ok():
