@@ -1535,6 +1535,14 @@ class TestSparse(TestCase):
         test_shape(10, 100, 100, 0)
         test_shape(10, 100, 100, 20)
 
+        with self.assertRaisesRegex(RuntimeError, "expected self.size(-1) == vec.size(-1)"):
+            test_shape(10, 100, 10, 20)
+
+        with self.assertRaisesRegex(RuntimeError, "mv: two tensor dim should be 2 and 1"):
+            x, _, _ = self._gen_sparse(2, 20, [10, 100])
+            y, _, _ = self._gen_sparse(2, 20, [10, 100])
+            res = x.mv(y)
+
     def test_sparse_add_coalesce(self):
         i = self.index_tensor([[1, 2, 1]])
         v = self.value_tensor([3, 4, 5])
