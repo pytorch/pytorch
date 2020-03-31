@@ -131,7 +131,6 @@ class TestSaveLoad(JitTestCase):
         sm = torch.jit.script(ContainsBoth())
         contains_both = io.BytesIO()
         torch.jit.save(sm, contains_both)
-        torch.jit.save(sm, "/scratch/suo/both.pt")
         contains_both.seek(0)
         sm = torch.jit.load(contains_both)
 
@@ -275,25 +274,23 @@ class TestSaveLoad(JitTestCase):
                 # type: (Tensor) -> Tensor
                 pass
 
-
-        @torch.jit.script
-        class ImplementInterface(object):
+        @torch.jit.script   # noqa F811
+        class ImplementInterface(object):  # noqa F811
             def __init__(self):
                 pass
 
             def not_bar(self, x):
                 return x
 
-
-        def lol(x):
+        def lol(x):  # noqa F811
             return "asdofij"
 
-
-        class MyCoolNamedTuple(NamedTuple):
+        class MyCoolNamedTuple(NamedTuple):  # noqa F811
             a: str
 
         class Foo(torch.nn.Module):
             interface: MyInterface
+
             def __init__(self):
                 super().__init__()
                 self.foo = torch.nn.Linear(2, 2)
@@ -304,7 +301,6 @@ class TestSaveLoad(JitTestCase):
                 self.interface.not_bar(x)
                 x = lol(x)
                 return x, MyCoolNamedTuple(a="hello")
-
 
         second_script_module = torch.jit.script(Foo())
         second_saved_module = io.BytesIO()
@@ -333,6 +329,3 @@ class TestSaveLoad(JitTestCase):
         torch.jit.save(sm, contains_both)
         contains_both.seek(0)
         sm = torch.jit.load(contains_both)
-
-
-

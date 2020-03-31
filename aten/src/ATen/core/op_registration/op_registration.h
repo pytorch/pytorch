@@ -597,20 +597,20 @@ private:
 //
 // A quick tour of a few usage examples:
 //
-//  auto register = torch::import("aten")
+//  auto register = torch::import()
 //
 //    // Define a schema for an operator, but provide no implementation
-//    .def("mul(Tensor self, Tensor other) -> Tensor")
+//    .def("aten::mul(Tensor self, Tensor other) -> Tensor")
 //
 //    // Define a operator with exactly one implementation for all backends.
-//    .def("add(Tensor self, Tensor other) -> Tensor", &add_impl)
+//    .def("aten::add(Tensor self, Tensor other) -> Tensor", &add_impl)
 //
 //    // Provide an implementation for a defined operator (you can
 //    // provide multiple; one per backend).  We'll take care of calling
 //    // the correct implementation depending on if we get a CPU
 //    // tensor or a CUDA tensor
-//    .impl("mul", torch::dispatch(torch::kCPU, &mul_cpu_impl))
-//    .impl("mul", torch::dispatch(torch::kCUDA, &mul_cuda_impl))
+//    .impl("aten::mul", torch::dispatch(torch::kCPU, &mul_cpu_impl))
+//    .impl("aten::mul", torch::dispatch(torch::kCUDA, &mul_cuda_impl))
 //
 // Also, you can omit the top level namespace and specify it explicitly in
 // the sub-definitions, e.g.,  torch::import().impl("aten::mul", ...)
@@ -768,14 +768,7 @@ namespace detail {
 }
 
 // Represents a namespace in which we can define operators.  Conventionally
-// constructed using "torch::import".  This object lets you avoid repeatedly
-// having to specify a namespace, instead you specify it once with:
-//
-//      torch::import("aten")
-//        .def("add", [](const Tensor& a, const Tensor& b) { return a + b; })
-//        .def("mul", torch::dispatch(torch::kCPU, &cpu_add))
-//
-// versus
+// constructed using "torch::import".
 //
 //      torch::import()
 //        .def("aten::add", ...)
@@ -790,7 +783,7 @@ class CAFFE2_API Module final {
   Module();
 
   // Use these as the constructors
-  friend Module import(std::string ns);
+  friend Module _import_DOES_NOT_WORK_WITH_MOBILE_CUSTOM_BUILD(std::string ns);
   friend Module import();
 
 public:
@@ -893,8 +886,16 @@ public:
   }
 };
 
+// TODO: We'd like to support this, but custom mobile build doesn't
+// understand how to interpret registration calls that have a namespace
+// call (as this requires some non-local reasoning.)  Tracked in
+// https://github.com/pytorch/pytorch/issues/35397
+//
+// So for now, we give this a scary internal name to discourage people
+// from using it
+
 // Return the namespace corresponding to the string 'ns'
-inline Module import(std::string ns) {
+inline Module _import_DOES_NOT_WORK_WITH_MOBILE_CUSTOM_BUILD(std::string ns) {
   return Module(std::move(ns));
 }
 
