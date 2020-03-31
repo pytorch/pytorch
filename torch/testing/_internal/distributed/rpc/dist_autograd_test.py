@@ -23,6 +23,9 @@ from torch.testing._internal.dist_utils import (
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
 )
+from torch.testing._internal.distributed.rpc.faulty_rpc_agent_test_fixture import (
+    FaultyRpcAgentTestFixture,
+)
 
 
 # Right now we test up to 3-layer nested rpc calls.
@@ -231,7 +234,7 @@ class DistAutogradTest(RpcAgentTestFixture):
         )
 
         context_ids = []
-        for i in range(1000):
+        for i in range(200):
             with dist_autograd.context() as context_id:
                 self.assertEqual(
                     context_id,
@@ -817,6 +820,31 @@ class DistAutogradTest(RpcAgentTestFixture):
             self.assertEqual(worker_ids, dst_ranks)
 
     @dist_init
+    def test_dist_autograd_profiling(self):
+        with dist_autograd.context() as context_id:
+            t1 = torch.rand(3, 3, requires_grad=True)
+            t2 = torch.rand(3, 3, requires_grad=True)
+            loss = rpc.rpc_sync(worker_name(self._next_rank()), torch.add, args=(t1, t2)).sum()
+            with torch.autograd.profiler.profile() as p:
+                dist_autograd.backward(context_id, [loss])
+
+        function_events = p.function_events
+
+        def get_event(partial_key):
+            return [event for event in function_events if partial_key in event.name][0]
+
+        send_event = get_event("SendRpcBackward")
+        recv_event = get_event("RecvRpcBackward")
+        backward_event = get_event("torch::distributed::autograd::backward")
+        # There should be at least 1 send and recv_events each, corresponding to send/recv functions executed.
+        self.assertEqual(send_event.count, 1)
+        self.assertEqual(recv_event.count, 1)
+        # The CPU total for backward event should be great than send and recv, since
+        # applying those functions in the backwards pass is a subset of the entire backward pass.
+        self.assertGreater(backward_event.cpu_time_total, send_event.cpu_time_total)
+        self.assertGreater(backward_event.cpu_time_total, recv_event.cpu_time_total)
+
+    @dist_init
     def test_error_in_context(self):
         with dist_autograd.context() as context_id:
             t1 = torch.rand(3, 3, requires_grad=True)
@@ -1178,37 +1206,6 @@ class DistAutogradTest(RpcAgentTestFixture):
             ):
                 # Run backwards, and validate we receive an error.
                 dist_autograd.backward(context_id, [val.sum()])
-
-    @dist_init
-    def test_backward_intermediate_autograd_engine_error(self):
-        with dist_autograd.context() as context_id:
-            t1 = torch.rand((3, 3), requires_grad=True)
-            t2 = torch.rand((3, 3), requires_grad=True)
-            # Perform some ops before error simulation.
-            tmp = (t1 + t2) * (t1 + t2)
-            t3 = SimulateBackwardError.apply(tmp)
-
-            # Run multiple round trips across different nodes and verify the
-            # original node receives an error thrown at some intermediate node
-            # in the chain.
-            val = rpc.rpc_sync(
-                "worker{}".format(self._next_rank()), torch.add, args=(t2, t1)
-            )
-            val = rpc.rpc_sync(
-                "worker{}".format(self._next_rank()), torch.mul, args=(val, t3)
-            )
-            val = rpc.rpc_sync(
-                "worker{}".format(self._next_rank()), torch.matmul, args=(val, t2)
-            )
-            val = rpc.rpc_sync(
-                "worker{}".format(self._next_rank()), torch.div, args=(val, t2)
-            )
-
-            with self.assertRaises(RuntimeError):
-                # Run backwards, and validate we receive an error.
-                dist_autograd.backward(context_id, [val.sum()])
-
-            self.assertTrue(_all_contexts_cleaned_up())
 
     @dist_init(clean_shutdown=False)
     @unittest.skipIf(
@@ -1601,6 +1598,17 @@ class DistAutogradTest(RpcAgentTestFixture):
         ):
             dist_autograd.backward(context_id, [t1.sum()])
 
+        # HACK: Killing workers since otherwise the autograd engine gets stuck on
+        # other nodes. The proper fix would be addressing:
+        # https://github.com/pytorch/pytorch/issues/27643, which would inform
+        # other nodes about the failure.
+        # The autograd engine gets stuck on other nodes since they're waiting to
+        # receive gradients from the node that received an error (and as a
+        # result it didn't execute the rest of the graph).
+        dist.barrier()
+        rpc.shutdown(graceful=False)
+        sys.exit(0)
+
     @classmethod
     def _call_remote_embedding(cls, embedding_rref, input, offsets, per_sample_weights):
         embedding = embedding_rref.local_value()
@@ -1747,7 +1755,8 @@ class DistAutogradTest(RpcAgentTestFixture):
         debug_info = dist_autograd._get_debug_info()
         assert debug_info is not None
         self.assertEqual(0, int(debug_info["num_current_backward_passes"]))
-        self.assertEqual(0, int(debug_info["local_autograd_engine_cpu_queue_size"]))
+        # only have `num_current_backward_passes` and `num_autograd contexts`
+        self.assertTrue(len(debug_info) == 2)
 
         self.assertTrue(_all_contexts_cleaned_up())
 
@@ -2081,3 +2090,51 @@ class DistAutogradTest(RpcAgentTestFixture):
             # static_grad_values_ref are holding onto views and don't bump the
             # refcount.
             self.assertTrue(p_g == p_a)
+
+@unittest.skipIf(
+    not torch._six.PY3,
+    "Pytorch distributed autograd package does not support python2",
+)
+class FaultyAgentDistAutogradTest(FaultyRpcAgentTestFixture):
+    # Reusing a simplified helper function from DistAutogradTest to ensure
+    # autograd context is successfully cleaned up even when RPCs are failing.
+    def context_cleanup_test_helper(self, rpc_args, func):
+        initialize_pg(self.init_method, self.rank, self.world_size)
+
+        # test that in dist autograd, in the case that tensors communicated over RPC do
+        # NOT require grad, we still cleanup the dist autograd contexts created
+        # on other nodes. This is because the autograd context is still
+        # communicated over RPC even if tensor arguments do not require grad, as
+        # it is possible that the response could.
+        dst_ranks = {rank for rank in range(self.world_size) if rank != self.rank}
+
+        with dist_autograd.context() as context_id:
+            for dst_rank in dst_ranks:
+                rpc.rpc_sync("worker{}".format(dst_rank), func, args=rpc_args)
+                rpc.rpc_sync(
+                    "worker{}".format(dst_rank), _set_rpc_done, args=(context_id, 1)
+                )
+        # the thread's context id should be cleaned up
+        with self.assertRaises(RuntimeError):
+            dist_autograd._retrieve_context(context_id)
+        # Ensure all peers have finished mutating the
+        # `known_context_ids` set.
+        dist.barrier()
+        # check that all contexts have been cleaned up.
+        success = _all_contexts_cleaned_up()
+        self.assertTrue(success)
+
+    # no faulty_messages defined so this fails all retryable messages - see
+    # faulty_rpc_agent_test_fixture.py for the list of retryable messages.
+    @dist_init
+    def test_context_cleanup_tensor_with_grad(self):
+        t1 = torch.ones(3, 3, requires_grad=True)
+        t2 = torch.zeros(3, 3, requires_grad=True)
+        self.context_cleanup_test_helper(rpc_args=(t1, t2), func=torch.add)
+
+    @dist_init
+    def test_verify_backend_options(self):
+        self.assertEqual(self.rpc_backend, rpc.backend_registry.BackendType.FAULTY_PROCESS_GROUP)
+        self.assertEqual(self.rpc_backend_options.num_send_recv_threads, 8)
+        self.assertEqual(self.rpc_backend_options.num_fail_sends, 3)
+        self.assertEqual(len(self.rpc_backend_options.messages_to_fail), 4)

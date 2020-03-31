@@ -16,6 +16,10 @@ namespace onnx {
 class OnnxExporter;
 }
 
+// Split SparseLengthsSumSparse into SparseLengthsSumSparseLookup +
+// SparseLengthsSum
+CAFFE2_API void splitSparseLengthsSumSparse(NetDef* net, const Workspace& ws);
+
 struct OnnxifiTransformerOptions final : public BackendTransformOptions {
   explicit OnnxifiTransformerOptions() : BackendTransformOptions() {}
 
@@ -34,6 +38,9 @@ struct OnnxifiTransformerOptions final : public BackendTransformOptions {
 
   // Enter loop test mode
   bool loop_test{false};
+
+  // Whether the net has been ssaRewritten
+  bool predictor_net_ssa_rewritten{false};
 };
 
 class CAFFE2_API OnnxifiTransformer final : public BackendTransformerBase {
@@ -106,11 +113,18 @@ class CAFFE2_API OnnxifiTransformer final : public BackendTransformerBase {
       onnxBackendID backend_id) const;
 
   // Tie the output of Gather to the scalar weight input of the
-  // SparseLengthsWeighted* op. If the latter is disabled, disable the former
-  // too.
+  // SparseLengthsWeighted* and SparseLengthsSumSparseLookup (which is split
+  // from the SparseLengthsWeighted*Sparse) ops. If the latter is disabled,
+  // disable the former too.
   void tieGatherAndSparseLengthsWeightedSumOps(
       const NetDef& net,
       const ShapeInfoMap& shape_hints,
+      std::unordered_set<int>* blacklisted_ops) const;
+
+  // For net with partitioning info, blacklist ops that are supposed to run on
+  // CPU, whose partition info will contain empty device_id list.
+  void blacklistCpuPartition(
+      const NetDef& net,
       std::unordered_set<int>* blacklisted_ops) const;
 
   // Rule based filtering
@@ -121,6 +135,9 @@ class CAFFE2_API OnnxifiTransformer final : public BackendTransformerBase {
 
   // Determine backend id
   void getBackendId();
+
+  // Extract partition info from the original net
+  void extractPartitionInfo(const NetDef& net);
 
   // Options
   OnnxifiTransformerOptions opts_;
@@ -145,5 +162,8 @@ class CAFFE2_API OnnxifiTransformer final : public BackendTransformerBase {
 
   // A cache for ONNX shape hints
   std::unordered_map<std::string, TensorShape> shape_hints_onnx_;
+
+  // Partition info
+  std::vector<PartitionInfo> partition_infos_;
 };
 } // namespace caffe2
