@@ -7,7 +7,6 @@
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
-#include <torch/csrc/jit/codegen/cuda/interface.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -287,75 +286,6 @@ int64_t normalizeIndex(int64_t idx, int64_t list_size) {
 
 RegisterOperators reg(
     {Operator(
-         prim::profile,
-         [](const Node* node) -> Operation {
-           auto callback = node->cast<ProfileOp>()->getCallback();
-           return [callback](Stack& stack) {
-             callback(stack);
-             return 0;
-           };
-         },
-         aliasAnalysisSpecialCase()),
-     Operator(
-         prim::CudaFusionGroup,
-         [](const Node* node) -> Operation {
-#ifndef C10_MOBILE
-           return [node](Stack& stack) {
-             fuser::cuda::runFusionGroup(node, stack);
-             return 0;
-           };
-#else
-           // WAR for linker error for runFusionGroup on MOBILE build.
-           // We suspect the issue is name mangling, but we haven't got a fix
-           // yet. As CudaFusionGroup is not supposed to be on mobile build,
-           // this should be safe.
-           return [](Stack& stack) {
-             TORCH_INTERNAL_ASSERT(false);
-             return 0;
-           };
-#endif
-         },
-         aliasAnalysisSpecialCase()),
-     Operator(
-         prim::FusionGroup,
-         [](const Node* node) -> Operation {
-           const auto key = registerFusion(node);
-           return [key](Stack& stack) {
-             RECORD_FUNCTION("FusionGroup", std::vector<c10::IValue>());
-             runFusion(key, stack);
-             return 0;
-           };
-         },
-         aliasAnalysisSpecialCase()),
-     Operator(
-         "prim::Guard(Tensor(a) t) -> Tensor(a)",
-         [](Stack& stack) {
-           AT_ERROR("Should be replaced by prim::BailOut");
-           return 0;
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
-         "prim::BailOut(...) -> Tensor(a)",
-         [](Stack& /* stack */) {
-           AT_ERROR("prim::BailOut not yet implemented"); // NOLINT
-           return 0;
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
-         "prim::BailoutTemplate() -> int",
-         [](Stack& stack) {
-           // TODO: today, we put a single bailout template at the front to
-           // carry the un-optimized graph for bailout nodes to use. Ideally
-           // this should never run, but we haven't written the code to remove
-           // it yet.
-           // TORCH_INTERNAL_ASSERT(false);
-
-           // Returns an int so that we have an easy way to do graph traversal
-           push(stack, 1);
-           return 0;
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
          "prim::rangelist(int n) -> int[]",
          [](Stack& stack) {
            int64_t n;

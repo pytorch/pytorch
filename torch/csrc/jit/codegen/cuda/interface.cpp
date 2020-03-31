@@ -1,4 +1,6 @@
+#include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/codegen/cuda/interface.h>
+#include <ATen/core/dispatch/OperatorOptions.h>
 
 namespace torch {
 namespace jit {
@@ -33,5 +35,20 @@ void fuseGraph(std::shared_ptr<Graph>& graph) {
 
 } // namespace cuda
 } // namespace fuser
-} // namespace jit
+
+
+RegisterOperators reg(
+    {Operator(
+         prim::CudaFusionGroup,
+         [](const Node* node) -> Operation {
+           return [node](Stack& stack) {
+             fuser::cuda::runFusionGroup(node, stack);
+             return 0;
+           };
+         },
+         c10::AliasAnalysisKind::INTERNAL_SPECIAL_CASE),
+	}
+);
+
+    } // namespace jit
 } // namespace torch

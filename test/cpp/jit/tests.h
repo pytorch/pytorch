@@ -88,7 +88,7 @@ namespace jit {
   _(LiteInterpreterSetState)           \
   _(TorchbindIValueAPI)
 
-#if defined(USE_CUDA) && !defined(USE_ROCM)
+#if defined(USE_CUDA)
 #define TH_FORALL_TESTS_CUDA(_)  \
   _(ArgumentSpec)                \
   _(CompleteArgumentSpec)        \

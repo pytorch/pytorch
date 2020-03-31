@@ -3,10 +3,10 @@ set(JIT_TEST_ROOT ${TORCH_ROOT}/test/cpp/jit)
 file(GLOB JIT_TEST_SRCS "${JIT_TEST_ROOT}/test*\.cpp")
 
 if (USE_CUDA)
-  file(GLOB JIT_GPU_TEST_SRCS "${JIT_TEST_ROOT}/test_gpu/test*\.cpp")
-  list(APPEND JIT_TEST_SRCS ${JIT_GPU_TEST_SRCS})
 endif()
 
+list(APPEND JIT_TEST_SRCS ${JIT_TEST_ROOT}/gpu/test_gpu.cpp)
+message(${JIT_TEST_SRCS})
 set(JIT_TEST_SRCS ${JIT_TEST_SRCS} PARENT_SCOPE)
 
 add_executable(test_jit
