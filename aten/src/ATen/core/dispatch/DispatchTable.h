@@ -106,7 +106,7 @@ class DispatchTable final {
    * @param kernel Concrete kernel function implementation to register
    */
   void setKernel(DispatchKey dispatchKey, KernelFunction kernel) {
-    auto result = kernels_.setKernel(dispatchKey, std::move(kernel));
+    kernels_.setKernel(dispatchKey, std::move(kernel));
     dispatchKeyExtractor_.setOperatorHasKernelForBackend(dispatchKey, true);
   }
 
