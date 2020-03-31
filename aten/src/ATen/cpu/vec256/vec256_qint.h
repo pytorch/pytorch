@@ -180,7 +180,7 @@ int64_t custom_mm256_hsum_epi64_ignore_overflow(__m256i x) {
 
 // horizontal sums signed i32
 // x = (x7, x6, x5, x4, x3, x2, x1, x0)
-int64_t custom_mm256_hsum_epi32(__m256i x) {
+int64_t custom_mm256_hsum_epi32_overlow(__m256i x) {
   // upsample to int64 to avoid overflow
   // (x7, x6, x5, x4), int32
   const __m128i xHalf1 = _mm256_extractf128_si256(x, 1);
@@ -197,7 +197,7 @@ int64_t custom_mm256_hsum_epi32(__m256i x) {
 
 // horizontal sums signed i16
 // x = (x15, ..., x0)
-int64_t custom_mm256_hsum_epi16(__m256i x) {
+int64_t custom_mm256_hsum_epi16_overflow(__m256i x) {
   // (x15, ..., x8), int16
   const __m128i xHalf1 = _mm256_extractf128_si256(x, 1);
   // (x7, ..., x0), int16
@@ -231,7 +231,7 @@ int64_t custom_mm256_hsum_epi16(__m256i x) {
 
 // horizontal sums signed i8
 // x = (x31, ..., x0)
-int custom_mm256_hsum_epi8(__m256i x) {
+int64_t custom_mm256_hsum_epi8_overflow(__m256i x) {
   // upsample to int16 to avoid overflow
   // (x31, ..., x16), int8
   const __m128i xHalf1 = _mm256_extractf128_si256(x, 1);
@@ -269,12 +269,12 @@ int custom_mm256_hsum_epi8(__m256i x) {
   const __m128i sum = _mm_add_epi16(xLo, xHi);
   // casting is necessary to handle the negative cases properly
   int16_t res = _mm_extract_epi16(sum, 0);
-  return res;
+  return static_cast<int64_t>(res);
 }
 
 // horizontal sums unsigned i16
 // x = (x15, ..., x0)
-int64_t custom_mm256_hsum_epu16(__m256i x) {
+int64_t custom_mm256_hsum_epu16_overflow(__m256i x) {
   // (x15, ..., x8), int16
   const __m128i xHalf1 = _mm256_extractf128_si256(x, 1);
   // (x7, ..., x0), int16
@@ -308,7 +308,7 @@ int64_t custom_mm256_hsum_epu16(__m256i x) {
 
 // horizontal sums unsigned i8
 // x = (x31, ..., x0)
-int custom_mm256_hsum_epu8(__m256i x) {
+int64_t custom_mm256_hsum_epu8_overflow(__m256i x) {
   // upsample to int16 to avoid overflow
   // (x31, ..., x16), int8
   const __m128i xHalf1 = _mm256_extractf128_si256(x, 1);
@@ -345,7 +345,7 @@ int custom_mm256_hsum_epu8(__m256i x) {
   // sum
   const __m128i sum = _mm_add_epi16(xLo, xHi);
   uint16_t res = _mm_extract_epi16(sum, 0);
-  return res;
+  return static_cast<int64_t>(res);
 }
 
 // sign extend int8_t's in a and b to 16 bits and return the product
@@ -544,7 +544,7 @@ struct Vec256<c10::qint32> : public Vec256qi {
     int64_t h_sum() const {
       // horizontal sum of the quantized int values, overflow safe
 #ifdef __AVX2__
-      return custom_mm256_hsum_epi32(vals);
+      return custom_mm256_hsum_epi32_overlow(vals);
 #else
       // Pray the compiler can autovectorize this
       int64_t h_sum;
@@ -944,7 +944,7 @@ struct Vec256<c10::qint8> : public Vec256qi {
     int64_t h_sum() const {
       // horizontal sum of the quantized int values, overflow safe
 #ifdef __AVX2__
-      return custom_mm256_hsum_epi8(vals);
+      return custom_mm256_hsum_epi8_overflow(vals);
 #else
       // Pray the compiler can autovectorize this
       int64_t h_sum;
@@ -965,7 +965,7 @@ struct Vec256<c10::qint8> : public Vec256qi {
       const __m256i mul1 = custom_mm_mul_epi8_overflow(i8s_half1, i8s_half1);
       const __m256i mul2 = custom_mm_mul_epi8_overflow(i8s_half2, i8s_half2);
       __m256i sum = _mm256_add_epi16(mul1, mul2);
-      return custom_mm256_hsum_epi16(sum);
+      return custom_mm256_hsum_epi16_overflow(sum);
 #else
       // Pray the compiler can autovectorize this
       int64_t h_sum;
@@ -1252,7 +1252,7 @@ struct Vec256<c10::quint8> : public Vec256qi {
     int64_t h_sum() const {
       // horizontal sum of the quantized int values, overflow safe
 #ifdef __AVX2__
-      return custom_mm256_hsum_epu8(vals);
+      return custom_mm256_hsum_epu8_overflow(vals);
 #else
       // Pray the compiler can autovectorize this
       int64_t h_sum;
@@ -1273,7 +1273,7 @@ struct Vec256<c10::quint8> : public Vec256qi {
       const __m256i mul1 = custom_mm_mul_epu8_overflow(i8s_half1, i8s_half1);
       const __m256i mul2 = custom_mm_mul_epu8_overflow(i8s_half2, i8s_half2);
       __m256i sum = _mm256_add_epi16(mul1, mul2);
-      return custom_mm256_hsum_epu16(sum);
+      return custom_mm256_hsum_epu16_overflow(sum);
 #else
       // Pray the compiler can autovectorize this
       int64_t h_sum;
