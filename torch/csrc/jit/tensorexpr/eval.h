@@ -4,6 +4,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include <c10/macros/Macros.h>
 #include <c10/util/Logging.h>
 #include <torch/csrc/jit/tensorexpr/buffer.h>
 #include <torch/csrc/jit/tensorexpr/codegen.h>
@@ -59,24 +60,24 @@ class Value {
   void* ptr;
 };
 
-#define VALUE_AS_DISPATCH(Type, Name)             \
-  template <>                                     \
-  inline Type Value::as<Type>() const {           \
-    if (dtype_ != k##Name) {                      \
-      throw unsupported_dtype();                  \
-    }                                             \
-    return Name##values[0];                       \
+#define VALUE_AS_DISPATCH(Type, Name)   \
+  template <>                           \
+  inline Type Value::as<Type>() const { \
+    if (dtype_ != k##Name) {            \
+      throw unsupported_dtype();        \
+    }                                   \
+    return Name##values[0];             \
   }
 AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, VALUE_AS_DISPATCH);
 #undef VALUE_AS_DISPATCH
 
-#define VALUE_AS_VEC_DISPATCH(Type, Name)                                \
-  template <>                                                            \
-  inline const std::vector<Type>& Value::as_vec<Type>() const {          \
-    if (dtype_.scalar_type() != ScalarType::Name) {                      \
-      throw unsupported_dtype();                                         \
-    }                                                                    \
-    return Name##values;                                                 \
+#define VALUE_AS_VEC_DISPATCH(Type, Name)                       \
+  template <>                                                   \
+  inline const std::vector<Type>& Value::as_vec<Type>() const { \
+    if (dtype_.scalar_type() != ScalarType::Name) {             \
+      throw unsupported_dtype();                                \
+    }                                                           \
+    return Name##values;                                        \
   }
 AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, VALUE_AS_VEC_DISPATCH);
 #undef VALUE_AS_VEC_DISPATCH
@@ -96,6 +97,26 @@ mod_value(T lhs, T rhs) {
 
 inline bool mod_value(bool lhs, bool rhs) {
   throw std::runtime_error("Attempted modulus of bool");
+}
+
+template <typename T>
+inline typename std::enable_if<std::is_integral<T>::value, T>::type div_value(
+    T lhs,
+    T rhs) {
+  TORCH_CHECK(rhs != 0, "Division by zero");
+  return lhs / rhs;
+}
+
+template <typename T>
+inline typename std::enable_if<std::is_floating_point<T>::value, T>::
+    type __ubsan_ignore_float_divide_by_zero__
+    div_value(T lhs, T rhs) {
+  return lhs / rhs;
+}
+
+inline bool div_value(bool lhs, bool rhs) {
+  LOG(FATAL) << "Attempted division of bool";
+  return false;
 }
 
 class SimpleIREvaluator : public CodeGen, public IRVisitor {
@@ -205,7 +226,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
           result_v[i] = lhs_v[i] * rhs_v[i];
           break;
         case IRNodeType::kDiv:
-          result_v[i] = lhs_v[i] / rhs_v[i];
+          result_v[i] = div_value(lhs_v[i], rhs_v[i]);
           break;
         case IRNodeType::kMod:
           result_v[i] = mod_value(lhs_v[i], rhs_v[i]);
@@ -478,7 +499,6 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     if (src_dtype.lanes() != dst_dtype.lanes()) {
       throw malformed_input(v);
     }
-
 
     if (src_dtype != dst_dtype) {
       switch (src_dtype.scalar_type()) {
@@ -909,6 +929,28 @@ inline const Expr* Substitute(const Expr* expr, const VarMapping& var_mapping) {
 inline Stmt* Substitute(Stmt* stmt, const VarMapping& var_mapping) {
   VarSubMutator var_sub(var_mapping);
   return stmt->accept_mutator(&var_sub);
+}
+
+// Uses the evaluator to fold an Expression with constant terms.
+// E.g. evaluateOp(Add(3, 4)) => 7.
+// Expr v must not have any unbound Vars.
+static Expr* evaluateOp(const Expr* v) {
+  ExprHandle handle(v);
+  ExprEval<SimpleIREvaluator> eval(handle);
+
+  switch (v->dtype().scalar_type()) {
+#define TYPE_CASE(Type, Name)                                 \
+  case ScalarType::Name: {                                    \
+    Type val = eval.value<Type>();                            \
+    return getImmediateByType(v->dtype().scalar_type(), val); \
+  }
+    AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
+#undef TYPE_CASE
+    default:
+      LOG(FATAL) << "Unsupported datatype: " << v->dtype();
+      return nullptr;
+  }
+  return nullptr;
 }
 
 } // namespace tensorexpr
