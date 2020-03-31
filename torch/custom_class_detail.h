@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/core/boxing/impl/unboxing_functor.h>
+#include <ATen/core/boxing/impl/make_boxed_from_unboxed_functor.h>
 #include <ATen/core/function.h>
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/TypeTraits.h>

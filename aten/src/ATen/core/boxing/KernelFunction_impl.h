@@ -1,5 +1,5 @@
 #include <ATen/core/boxing/impl/boxing.h>
-#include <ATen/core/boxing/impl/unboxing_functor.h>
+#include <ATen/core/boxing/impl/make_boxed_from_unboxed_functor.h>
 #include <ATen/core/boxing/impl/wrap_function_into_functor.h>
 #include <ATen/core/boxing/impl/wrap_function_into_runtime_functor.h>
 
