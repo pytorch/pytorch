@@ -73,7 +73,10 @@ class TORCH_API RNNImplBase : public torch::nn::Cloneable<Derived> {
   split_direction_weights() const;
 
   std::tuple<std::vector<Tensor>, std::vector<std::string>>
-  merge_direction_weights() const;
+  merge_direction_weights(std::vector<Tensor> forward_weights,
+      std::vector<Tensor> backward_weights,
+      std::vector<std::string> forward_weight_names,
+      std::vector<std::string> backward_weight_names) const;
 
   void check_input(const Tensor& input, const Tensor& batch_sizes) const;
 
