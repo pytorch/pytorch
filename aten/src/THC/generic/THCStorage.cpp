@@ -79,33 +79,6 @@ THCStorage* THCStorage_(newWithSize1)(THCState *state, scalar_t data0)
   return self;
 }
 
-THCStorage* THCStorage_(newWithSize2)(THCState *state, scalar_t data0, scalar_t data1)
-{
-  THCStorage *self = THCStorage_(newWithSize)(state, 2);
-  THCStorage_(set)(state, self, 0, data0);
-  THCStorage_(set)(state, self, 1, data1);
-  return self;
-}
-
-THCStorage* THCStorage_(newWithSize3)(THCState *state, scalar_t data0, scalar_t data1, scalar_t data2)
-{
-  THCStorage *self = THCStorage_(newWithSize)(state, 3);
-  THCStorage_(set)(state, self, 0, data0);
-  THCStorage_(set)(state, self, 1, data1);
-  THCStorage_(set)(state, self, 2, data2);
-  return self;
-}
-
-THCStorage* THCStorage_(newWithSize4)(THCState *state, scalar_t data0, scalar_t data1, scalar_t data2, scalar_t data3)
-{
-  THCStorage *self = THCStorage_(newWithSize)(state, 4);
-  THCStorage_(set)(state, self, 0, data0);
-  THCStorage_(set)(state, self, 1, data1);
-  THCStorage_(set)(state, self, 2, data2);
-  THCStorage_(set)(state, self, 3, data3);
-  return self;
-}
-
 THCStorage* THCStorage_(newWithMapping)(THCState *state, const char *fileName, ptrdiff_t size, int isShared)
 {
   THError("not available yet for THCStorage");

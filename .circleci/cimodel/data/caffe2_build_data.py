@@ -6,7 +6,8 @@ CONFIG_TREE_DATA = [
     (Ver("ubuntu", "16.04"), [
         ([Ver("gcc", "5")], [XImportant("onnx_py2")]),
         ([Ver("clang", "7")], [XImportant("onnx_main_py3.6"),
-                               XImportant("onnx_ort1_py3.6"), XImportant("onnx_ort2_py3.6")]),
+                               XImportant("onnx_ort1_py3.6"),
+                               XImportant("onnx_ort2_py3.6")]),
     ]),
 ]
 

@@ -77,25 +77,21 @@ class TORCH_API Future final {
     }
   }
 
+  // Sets error only if the future hasn't been marked completed already.
+  // Useful in avoiding races where multiple threads try to setError
+  // on a future.
+  void setErrorIfNeeded(std::string errorMsg) {
+    std::unique_lock<std::mutex> lock(mutex_);
+    if (completed_) {
+      return;
+    } else {
+      setErrorInternal(std::move(errorMsg), lock);
+    }
+  }
+
   void setError(std::string errorMsg) {
     std::unique_lock<std::mutex> lock(mutex_);
-    TORCH_CHECK(!completed_);
-    // Set error first as completed_ is accessed without lock
-    error_ = FutureError(std::move(errorMsg));
-    completed_ = true;
-
-    // Move callbacks to a vector on the stack so we can access it without
-    // holding a lock
-    std::vector<Callback> cbs;
-    cbs.swap(callbacks_);
-    lock.unlock();
-    finished_cv_.notify_all();
-    // There is no need to protect callbacks_ with the lock.
-    // Once completed_ is set to true, no one can add new callback to the
-    // list. pass value_, error_ for callback to easily check state.
-    for (auto& callback : cbs) {
-      callback(value_, error_);
-    }
+    setErrorInternal(std::move(errorMsg), lock);
   }
 
   bool completed() const {
@@ -124,6 +120,26 @@ class TORCH_API Future final {
   }
 
  private:
+  void setErrorInternal(
+      std::string errorMsg,
+      std::unique_lock<std::mutex>& lock) {
+    TORCH_CHECK(!completed_);
+    error_ = FutureError(std::move(errorMsg));
+    completed_ = true;
+
+    // Move callbacks to a vector on the stack so we can access it without
+    // holding a lock
+    std::vector<Callback> cbs(std::move(callbacks_));
+    lock.unlock();
+    finished_cv_.notify_all();
+    // There is no need to protect callbacks_ with the lock.
+    // Once completed_ is set to true, no one can add new callback to the
+    // list. pass value_, error_ for callback to easily check state.
+    for (auto& callback : cbs) {
+      callback(value_, error_);
+    }
+  }
+
   mutable std::mutex mutex_;
   std::atomic_bool completed_{false}; // is this future complete
   std::condition_variable finished_cv_;

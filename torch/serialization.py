@@ -8,14 +8,15 @@ import torch
 import tarfile
 import tempfile
 import warnings
-import copyreg
 from contextlib import closing, contextmanager
 from ._utils import _import_dotted_name
-from ._six import string_classes as _string_classes
+from ._six import string_classes as _string_classes, PY2
 from torch._utils_internal import get_source_lines_and_file
-if sys.version_info[0] == 2:
+if PY2:
+    import copy_reg as copyreg
     import cPickle as pickle
 else:
+    import copyreg
     import pickle
     import pathlib
 

@@ -1,18 +1,16 @@
 #include <torch/csrc/jit/ir/constants.h>
 #include <ATen/core/functional.h>
 #include <torch/csrc/autograd/variable.h>
-#include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
 namespace torch {
 namespace jit {
 
 namespace {
-c10::OperatorOptions aliasAnalysisInternalSpecialCase() {
-  c10::OperatorOptions options;
-  options.setAliasAnalysis(AliasAnalysisKind::INTERNAL_SPECIAL_CASE);
-  return options;
+c10::AliasAnalysisKind aliasAnalysisInternalSpecialCase() {
+  return AliasAnalysisKind::INTERNAL_SPECIAL_CASE;
 }
 } // namespace
 
@@ -39,6 +37,14 @@ bool insertableIValue(const IValue& ivalue) {
       return insertableIValue(tup_elem);
     });
   }
+
+  if (ivalue.isGenericDict()) {
+    const auto& dict = ivalue.toGenericDict();
+    return std::all_of(dict.begin(), dict.end(), [](const auto& entry) {
+      return insertableIValue(entry.key()) && insertableIValue(entry.value());
+    });
+  }
+
   return false;
 }
 
@@ -90,12 +96,10 @@ c10::optional<Value*> tryInsertConstant(
     n->is_(attr::value, val.toIntVector());
     n->output()->setType(ListType::ofInts());
   } else if (val.isTensorList()) {
-    n->ts_(
-        attr::value,
-        fmap(val.toTensorVector(), [](const at::Tensor& t) {
-          AT_ASSERT(!t.requires_grad());
-          return t;
-        }));
+    n->ts_(attr::value, fmap(val.toTensorVector(), [](const at::Tensor& t) {
+             AT_ASSERT(!t.requires_grad());
+             return t;
+           }));
     n->output()->setType(ListType::ofTensors());
   } else if (val.isDoubleList()) {
     auto double_list = val.toDoubleList();
@@ -129,6 +133,9 @@ c10::optional<Value*> tryInsertConstant(
       n->destroy();
       return c10::nullopt;
     };
+  } else if (val.isGenericDict() && insertableIValue(val)) {
+    n->ival_(attr::value, val);
+    n->output()->setType(val.type());
   } else {
     n->destroy();
     return c10::nullopt;
@@ -149,7 +156,7 @@ c10::optional<IValue> toIValue(const Value* v) {
   if (type->isSubtypeOf(TensorType::get())) {
     return node->t(attr::value);
   } else if (type->isSubtypeOf(BoolType::get())) {
-    return (bool) node->i(attr::value);
+    return (bool)node->i(attr::value);
   } else if (
       type->isSubtypeOf(NumberType::get()) &&
       node->kindOf(attr::value) == AttributeKind::i) {
@@ -158,6 +165,12 @@ c10::optional<IValue> toIValue(const Value* v) {
       type->isSubtypeOf(NumberType::get()) &&
       node->kindOf(attr::value) == AttributeKind::f) {
     return node->f(attr::value);
+  } else if (
+      type->cast<DictType>() &&
+      node->kindOf(attr::value) == AttributeKind::ival) {
+    const auto& dict = node->ival(attr::value);
+    TORCH_INTERNAL_ASSERT(dict.isGenericDict());
+    return dict;
   } else if (
       type->cast<TupleType>() &&
       node->kindOf(attr::value) == AttributeKind::ival) {

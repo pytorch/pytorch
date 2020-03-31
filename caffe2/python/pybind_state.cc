@@ -94,12 +94,12 @@ REGISTER_BLOB_FETCHER((TypeMeta::Id<string>()), StringFetcher);
 class ScriptModuleFetcher : public BlobFetcherBase {
  public:
   pybind11::object Fetch(const Blob& blob) override {
-    return py::cast(*blob.Get<std::unique_ptr<torch::jit::script::Module>>());
+    return py::cast(*blob.Get<std::unique_ptr<torch::jit::Module>>());
   }
 };
 
 REGISTER_BLOB_FETCHER(
-    (TypeMeta::Id<std::unique_ptr<torch::jit::script::Module>>()),
+    (TypeMeta::Id<std::unique_ptr<torch::jit::Module>>()),
     caffe2::python::ScriptModuleFetcher);
 #endif
 
@@ -247,9 +247,9 @@ bool feedBlob(
     return true;
   }
 #ifdef FBCODE_CAFFE2
-  if (auto module = torch::jit::script::as_module(arg)) {
-    blob->GetMutable<std::unique_ptr<torch::jit::script::Module>>()->reset(
-        new torch::jit::script::Module(*module));
+  if (auto module = torch::jit::as_module(arg)) {
+    blob->GetMutable<std::unique_ptr<torch::jit::Module>>()->reset(
+        new torch::jit::Module(*module));
     return true;
   }
 #endif
@@ -1524,6 +1524,14 @@ void addGlobalMethods(py::module& m) {
         CAFFE_ENFORCE(blob_info.SerializeToString(&protob));
         return py::bytes(protob);
       });
+  m.def("ssa_rewrite", [](const py::bytes& net_proto) {
+    auto net_def = std::make_unique<NetDef>();
+    CAFFE_ENFORCE(net_def->ParseFromString(net_proto));
+    onnx::SsaRewrite(nullptr, net_def.get());
+    std::string output_net_proto;
+    CAFFE_ENFORCE(net_def->SerializeToString(&output_net_proto));
+    return py::bytes(output_net_proto);
+  });
   m.def("create_blob", [](const std::string& name) {
     CAFFE_ENFORCE(gWorkspace);
     CAFFE_ENFORCE(gWorkspace->CreateBlob(name));

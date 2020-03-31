@@ -164,7 +164,7 @@ Disable automatic batching
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 In certain cases, users may want to handle batching manually in dataset code,
-or simply load individual samples. For example, it could cheaper to directly
+or simply load individual samples. For example, it could be cheaper to directly
 load batched data (e.g., bulk reads from a database or reading continuous
 chunks of memory), or the batch size is data dependent, or the program is
 designed to work on individual samples.  Under these scenarios, it's likely

@@ -139,15 +139,17 @@ class RNNBase(Module):
             import torch.backends.cudnn.rnn as rnn
 
             if self.cat_layer_fwd_bwd_states:
-                # Note: no_grad() is necessary since _cudnn_rnn_flatten_weight is
-                # an inplace operation on self._flat_weights
-                with torch.no_grad():
-                    torch._cudnn_rnn_flatten_weight(
-                        self._flat_weights, (4 if self.bias else 2),
-                        self.input_size, rnn.get_cudnn_mode(self.mode),
-                        self.hidden_size, self.num_layers,
-                        self.batch_first, bool(self.bidirectional),
-                        bool(self.cat_layer_fwd_bwd_states))
+                if torch._use_cudnn_rnn_flatten_weight():
+                    # Note: no_grad() is necessary since
+                    # _cudnn_rnn_flatten_weight is an inplace operation
+                    # on self._flat_weights
+                    with torch.no_grad():
+                        torch._cudnn_rnn_flatten_weight(
+                            self._flat_weights, (4 if self.bias else 2),
+                            self.input_size, rnn.get_cudnn_mode(self.mode),
+                            self.hidden_size, self.num_layers,
+                            self.batch_first, bool(self.bidirectional),
+                            bool(self.cat_layer_fwd_bwd_states))
             else:
                 # Rearrange weights in order to have them in
                 # (forward_weights, backward_weights) order
@@ -191,6 +193,7 @@ class RNNBase(Module):
         # Note: be v. careful before removing this, as 3rd party device types
         # likely rely on this behavior to properly .to() modules like LSTM.
         self._flat_weights = [(lambda wn: getattr(self, wn) if hasattr(self, wn) else None)(wn) for wn in self._original_flat_names]
+        self._flat_weights_names = list(self._original_flat_names)
         # Flattens params (on CUDA)
         self.flatten_parameters()
 

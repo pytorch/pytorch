@@ -55,7 +55,7 @@ void testBlocks() {
       %12 : int = prim::Constant[value=1]()
       %13 : Tensor = aten::add(%5, %3, %12)
       return (%13))IR";
-  torch::jit::script::parseIR(graph_string, g.get());
+  torch::jit::parseIR(graph_string, g.get());
 
   g->lint();
   testing::FileCheck()
@@ -122,7 +122,7 @@ graph(%x : Tensor,
 
   torch::jit::Graph g;
   std::unordered_map<std::string, torch::jit::Value*> name_to_value;
-  torch::jit::script::parseIR(input_str, &g, name_to_value);
+  torch::jit::parseIR(input_str, &g, name_to_value);
 
   std::vector<std::string> value_names{"6", "7", "9", "10"};
   std::unordered_set<std::string> value_names_set(

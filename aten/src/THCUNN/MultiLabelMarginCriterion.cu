@@ -156,4 +156,7 @@ __global__ void cunn_MultiLabelMarginCriterion_updateGradInput_kernel(Dtype *gra
 #include <THCUNN/generic/MultiLabelMarginCriterion.cu>
 #include <THC/THCGenerateFloatTypes.h>
 
+#include <THCUNN/generic/MultiLabelMarginCriterion.cu>
+#include <THC/THCGenerateBFloat16Type.h>
+
 #undef MULTILABELMARGIN_THREADS

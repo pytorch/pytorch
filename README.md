@@ -334,6 +334,7 @@ Three pointers to get you started:
 * GitHub issues: bug reports, feature requests, install issues, RFCs, thoughts, etc.
 * Slack: The [PyTorch Slack](https://pytorch.slack.com/) hosts a primary audience of moderate to experienced PyTorch users and developers for general chat, online discussions, collaboration etc. If you are a beginner looking for help, the primary medium is [PyTorch Forums](https://discuss.pytorch.org). If you need a slack invite, please fill this form: https://goo.gl/forms/PP1AGvNHpSaJP8to1
 * newsletter: no-noise, one-way email newsletter with important announcements about pytorch. You can sign-up here: https://eepurl.com/cbG0rv
+* for brand guidelines, please visit our website at [pytorch.org](https://pytorch.org/)
 
 ## Releases and Contributing
 

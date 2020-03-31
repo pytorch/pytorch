@@ -3,9 +3,6 @@
 Remote Reference Protocol
 =========================
 
-.. warning::
-  The :ref:`rref` API is experimental and subject to change.
-
 This note describes the design details of Remote Reference protocol and walks
 through message flows in different scenarios. Make sure you're familiar with the
 :ref:`distributed-rpc-framework` before proceeding.
