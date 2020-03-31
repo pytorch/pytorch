@@ -229,7 +229,7 @@ class DistributedDataParallel(Module):
     def __init__(self, module, device_ids=None,
                  output_device=None, dim=0, broadcast_buffers=True,
                  process_group=None,
-                 bucket_cap_mb=dist.default_bucket_bytes_cap() / (1024 * 1024),
+                 bucket_cap_mb=dist._default_bucket_bytes_cap() / (1024 * 1024),
                  find_unused_parameters=False,
                  check_reduction=False):
 
@@ -289,7 +289,7 @@ class DistributedDataParallel(Module):
             pass
 
         # used for intra-node param sync and inter-node sync as well
-        self.broadcast_bucket_size = dist.default_broadcast_bucket_bytes()
+        self.broadcast_bucket_size = dist._default_broadcast_bucket_bytes()
 
         # reduction bucket size
         self.bucket_bytes_cap = int(bucket_cap_mb * 1024 * 1024)
@@ -368,7 +368,7 @@ class DistributedDataParallel(Module):
         # computation finishes. Experiments showed 1MB is a reasonable value.
         bucket_indices = dist._compute_bucket_assignment_by_size(
             parameters[0],
-            [dist.default_first_bucket_bytes(), self.bucket_bytes_cap],
+            [dist._default_first_bucket_bytes(), self.bucket_bytes_cap],
             expect_sparse_gradient[0])
 
         # Note: reverse list of buckets because we want to approximate the

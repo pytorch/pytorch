@@ -740,15 +740,15 @@ They are used in specifying strategies for reduction collectives, e.g.,
       },
       py::call_guard<py::gil_scoped_release>());
 
-  module.def("default_first_bucket_bytes", []() {
+  module.def("_default_first_bucket_bytes", []() {
     return ::c10d::DEFAULT_FIRST_BUCKET_BYTES;
   });
 
-  module.def("default_bucket_bytes_cap", []() {
+  module.def("_default_bucket_bytes_cap", []() {
     return ::c10d::DEFAULT_BUCKET_BYTES_CAP;
   });
 
-  module.def("default_broadcast_bucket_bytes", []() {
+  module.def("_default_broadcast_bucket_bytes", []() {
     return ::c10d::DEFAULT_BROADCAST_BUCKET_BYTES;
   });
 
