@@ -4079,10 +4079,12 @@ graph(%Ra, %Rb):
         # generate dicts with built-in types (excluding torch.Tensor)
         xprod = itertools.product(constants, constants)
 
-        def keys_pred(t):
-            return isinstance(eval(t[0]), (list, bool)) or eval(t[0]) is None
+        def is_key_disallowed(t):
+            key_value = eval(t[0])
+            return isinstance(key_value, (list, bool, torch.Tensor)) or key_value is None
 
-        filt = [x for x in xprod if not keys_pred(x)]
+        filt = [x for x in xprod if not is_key_disallowed(x)]
+        print(filt)
         dict_strs = map(lambda t: '{' + t[0] + ':' + t[1] + '}', filt)
 
         # test that equal tuples and dicts correctly work with node hashing

@@ -41,8 +41,6 @@ bool attributesEqual(const at::Tensor& a1, const at::Tensor& a2) {
   return tensorEqual(a1, a2);
 }
 
-bool ivaluesEqual(const IValue& a1, const IValue& a2);
-
 bool attributesEqual(
     const std::vector<at::Tensor>& lhs,
     const std::vector<at::Tensor>& rhs) {
@@ -51,79 +49,8 @@ bool attributesEqual(
   return std::equal(lhs.begin(), lhs.end(), rhs.begin(), tensorEqual);
 }
 
-bool attributesEqual(at::ArrayRef<IValue> a1, at::ArrayRef<IValue> a2) {
-  if (a1.size() != a2.size()) {
-    return false;
-  }
-  for (size_t i = 0; i < a1.size(); ++i) {
-    if (!ivaluesEqual(a1[i], a2[i])) {
-      return false;
-    }
-  }
-  return true;
-}
-
 bool attributesEqual(const IValue& a1, const IValue& a2) {
-  return ivaluesEqual(a1, a2);
-}
-
-// this is not a general-purpose comparison of IValues, it only covers the
-// ivalues that are allowed as attributes, and it does not check type
-// equivalence of containers.
-bool ivaluesEqual(const IValue& a1, const IValue& a2) {
-  if (a1.tagKind() != a2.tagKind()) {
-    return false;
-  }
-  if (a1.isInt()) {
-    return a1.toInt() == a2.toInt();
-  }
-  if (a1.isBool()) {
-    return a1.toBool() == a2.toBool();
-  }
-  if (a1.isDouble()) {
-    return a1.toDouble() == a2.toDouble();
-  }
-  if (a1.isTensor()) {
-    return attributesEqual(a1.toTensor(), a2.toTensor());
-  }
-  if (a1.isNone()) {
-    return true;
-  }
-  if (a1.isString()) {
-    return a1.toStringRef() == a2.toStringRef();
-  }
-  if (a1.isList()) {
-    return attributesEqual(a1.toListRef(), a2.toListRef());
-  }
-  if (a1.isTuple()) {
-    at::ArrayRef<IValue> a1_elem = a1.toTuple()->elements();
-    at::ArrayRef<IValue> a2_elem = a2.toTuple()->elements();
-    return attributesEqual(a1_elem, a2_elem);
-  }
-  if (a1.isGenericDict()) {
-    auto a1_dict = a1.toGenericDict();
-    auto a2_dict = a2.toGenericDict();
-    if (a1_dict.size() != a2_dict.size()) {
-      return false;
-    }
-
-    auto it_a1 = a1_dict.begin();
-    auto it_a2 = a2_dict.begin();
-
-    while (it_a1 != a1_dict.end()) {
-      const auto& e_a1 = *it_a1;
-      const auto& e_a2 = *it_a2;
-
-      if (!ivaluesEqual(e_a1.key(), e_a2.key()) &&
-          !ivaluesEqual(e_a1.value(), e_a2.value())) {
-        return false;
-      }
-      it_a1++;
-      it_a2++;
-    }
-    return true;
-  }
-  TORCH_INTERNAL_ASSERT(false);
+  return a1 == a2;
 }
 
 // Check whether two nodes have the same attributes in CSE.
