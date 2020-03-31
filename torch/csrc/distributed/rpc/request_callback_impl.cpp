@@ -182,23 +182,28 @@ void RequestCallbackImpl::processRpc(
       // scriptRemoteCall is only alive within this block, use reference to
       // avoid copy
       auto& stack = scriptRemoteCall.stackRef();
-      if (scriptRemoteCall.hasOp()) {
-        scriptRemoteCall.op()->getOperation()(stack);
-      } else {
-        PythonRpcHandler::getInstance()
-            .jitCompilationUnit()
-            ->get_function(scriptRemoteCall.qualifiedName())
-            .run(stack);
+      try {
+        if (scriptRemoteCall.hasOp()) {
+          scriptRemoteCall.op()->getOperation()(stack);
+        } else {
+          PythonRpcHandler::getInstance()
+              .jitCompilationUnit()
+              ->get_function(scriptRemoteCall.qualifiedName())
+              .run(stack);
+        }
+        TORCH_INTERNAL_ASSERT(
+            stack.size() == 1,
+            "Return value of a builtin operator or a "
+            "TorchScript function should be a single IValue, got a vector of "
+            "size ",
+            stack.size());
+        ownerRRef->setValue(std::move(stack.front()));
+      } catch (const std::exception& e) {
+        // Don't throw in this call, but rather transfer the exception
+        // to the rref.
+        ownerRRef->setError(e.what());
       }
 
-      TORCH_INTERNAL_ASSERT(
-          stack.size() == 1,
-          "Return value of a builtin operator or a "
-          "TorchScript function should be a single IValue, got a vector of "
-          "size ",
-          stack.size());
-
-      ownerRRef->setValue(std::move(stack.front()));
       if (rrefId != forkId) {
         // Caller is a user and callee is the owner, add fork
         //
@@ -224,14 +229,23 @@ void RequestCallbackImpl::processRpc(
 
       auto& pythonRpcHandler = PythonRpcHandler::getInstance();
       IValue py_ivalue;
-      {
-        pybind11::gil_scoped_acquire ag;
-        py_ivalue = jit::toIValue(
-            pythonRpcHandler.runPythonUdf(std::move(uprc).movePythonUdf()),
-            PyObjectType::get());
+      try {
+        {
+          pybind11::gil_scoped_acquire ag;
+          py_ivalue = jit::toIValue(
+              pythonRpcHandler.runPythonUdf(std::move(uprc).movePythonUdf()),
+              PyObjectType::get());
+        }
+        ownerRRef->setValue(std::move(py_ivalue));
+      } catch (py::error_already_set& e) {
+        // py::error_already_set requires GIL to destruct, take special care.
+        ownerRRef->setError(e.what());
+        py::gil_scoped_acquire acquire;
+        e.restore();
+        PyErr_Clear();
+      } catch (std::exception& e) {
+        ownerRRef->setError(e.what());
       }
-
-      ownerRRef->setValue(std::move(py_ivalue));
 
       if (rrefId != forkId) {
         // Caller is a user and callee is the owner, add fork
@@ -261,12 +275,16 @@ void RequestCallbackImpl::processRpc(
             [responseFuture, messageId, rref](
                 const rpc::Message& /* unused */,
                 const c10::optional<utils::FutureError>& error) {
-              if (!error) {
+              if (error) {
+                responseFuture->setError(error->what());
+                return;
+              }
+              try {
                 Message m = ScriptRRefFetchRet({rref->getValue()}).toMessage();
                 m.setId(messageId);
                 responseFuture->markCompleted(std::move(m));
-              } else {
-                responseFuture->setError(error->what());
+              } catch (const std::exception& e) {
+                responseFuture->setError(e.what());
               }
             });
       }
@@ -297,8 +315,12 @@ void RequestCallbackImpl::processRpc(
           [responseFuture, messageId, rref](
               const rpc::Message& /* unused */,
               const c10::optional<utils::FutureError>& error) {
-            if (!error) {
-              auto value = rref->getValue();
+            if (error) {
+              responseFuture->setError(error->what());
+              return;
+            }
+            try {
+              IValue value = rref->getValue();
               py::object pyValue;
               {
                 pybind11::gil_scoped_acquire ag;
@@ -310,8 +332,8 @@ void RequestCallbackImpl::processRpc(
                   PythonRRefFetchRet(std::move(result).toIValues()).toMessage();
               m.setId(messageId);
               responseFuture->markCompleted(std::move(m));
-            } else {
-              responseFuture->setError(error->what());
+            } catch (const std::exception& e) {
+              responseFuture->setError(e.what());
             }
           });
       return;
@@ -337,7 +359,7 @@ void RequestCallbackImpl::processRpc(
     case MessageType::RREF_FORK_REQUEST: {
       auto& rfr = static_cast<RRefForkRequest&>(rpc);
       auto& ctx = RRefContext::getInstance();
-      ctx.addForkOfOwner(rfr.rrefId(), rfr.forkId());
+      ctx.addForkOfOwnerIfNotPresent(rfr.rrefId(), rfr.forkId());
       markComplete(RRefAck().toMessage());
       return;
     }
@@ -477,6 +499,16 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processMessage(
             // processMessage().
             ClearAutogradContextGuard guard;
             processRpc(*rpc, messageType, id, retFuture);
+          } catch (py::error_already_set& e) {
+            retFuture->markCompleted(handleError(e, messageType, id));
+            // There are request callback impls in Python, where Python
+            // exceptions could be thrown. For releasing Python exception
+            // py::objects, GIL must be held.
+            py::gil_scoped_acquire acquire;
+            e.restore(); // Release ownership on py::objects and also restore
+                         // Python Error Indicator.
+            PyErr_Clear(); // Clear the Python Error Indicator as we has
+                           // recorded the exception in the response message.
           } catch (std::exception& e) {
             retFuture->markCompleted(handleError(e, messageType, id));
           }

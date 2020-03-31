@@ -505,7 +505,6 @@ class dtypes(object):
     # Note: *args, **kwargs for Python2 compat.
     # Python 3 allows (self, *args, device_type='all').
     def __init__(self, *args, **kwargs):
-        assert args is not None and len(args) != 0, "No dtypes given"
         assert all(isinstance(arg, torch.dtype) for arg in args), "Unknown dtype in {0}".format(str(args))
         self.args = args
         self.device_type = kwargs.get('device_type', 'all')

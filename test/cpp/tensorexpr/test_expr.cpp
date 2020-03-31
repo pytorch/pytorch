@@ -7,7 +7,7 @@
 #include "torch/csrc/jit/tensorexpr/function.h"
 #include "torch/csrc/jit/tensorexpr/ir.h"
 #include "torch/csrc/jit/tensorexpr/ir_printer.h"
-#include "torch/csrc/jit/tensorexpr/schedule.h"
+#include "torch/csrc/jit/tensorexpr/loopnest.h"
 #include "torch/csrc/jit/tensorexpr/tensor.h"
 
 #include <cmath>
@@ -27,7 +27,7 @@ void testExprBasicValueTest() {
   ExprHandle a = IntImm::make(2), b = IntImm::make(3);
   ExprHandle c = Add::make(a, b);
   SimpleIRExprEval eval(c);
-  EXPECT_EQ(eval.value<int>(), 5);
+  ASSERT_EQ(eval.value<int>(), 5);
 }
 
 void testExprBasicValueTest02() {
@@ -38,7 +38,7 @@ void testExprBasicValueTest02() {
   ExprHandle d(5.0f);
   ExprHandle f = (a + b) - (c + d);
   SimpleIRExprEval eval(f);
-  EXPECT_EQ(eval.value<float>(), -4.0f);
+  ASSERT_EQ(eval.value<float>(), -4.0f);
 }
 
 void testExprLetTest01() {
@@ -48,7 +48,7 @@ void testExprLetTest01() {
   ExprHandle body = ExprHandle(2.f) + (x * ExprHandle(3.f) + ExprHandle(4.f));
   ExprHandle result = Let::make(x, ExprHandle(3.f), body);
   SimpleIRExprEval eval(result);
-  EXPECT_EQ(eval.value<float>(), 2 + (3 * 3 + 4));
+  ASSERT_EQ(eval.value<float>(), 2 + (3 * 3 + 4));
 }
 
 void testExprLetTest02() {
@@ -61,7 +61,7 @@ void testExprLetTest02() {
   ExprHandle e1 = Let::make(x, ExprHandle(3.f), body);
   ExprHandle e2 = Let::make(y, ExprHandle(6.f), e1);
   SimpleIRExprEval eval(e2);
-  EXPECT_EQ(eval.value<float>(), 2 + (3 * 3 + 4 * 6));
+  ASSERT_EQ(eval.value<float>(), 2 + (3 * 3 + 4 * 6));
 }
 
 void testExprLetStmtTest01() {
@@ -97,7 +97,7 @@ void testExprIntTest() {
   ExprHandle body = ExprHandle(2) + (x * ExprHandle(3) + ExprHandle(4));
   ExprHandle result = Let::make(x, ExprHandle(3), body);
   SimpleIRExprEval eval(result);
-  EXPECT_EQ(eval.value<int>(), 2 + (3 * 3 + 4));
+  ASSERT_EQ(eval.value<int>(), 2 + (3 * 3 + 4));
 }
 
 void testExprFloatTest() {
@@ -108,7 +108,7 @@ void testExprFloatTest() {
       ExprHandle((float)2) + (x * ExprHandle((float)3) + ExprHandle((float)4));
   ExprHandle result = Let::make(x, ExprHandle((float)3), body);
   SimpleIRExprEval eval(result);
-  EXPECT_EQ(eval.value<float>(), 2 + (3 * 3 + 4));
+  ASSERT_EQ(eval.value<float>(), 2 + (3 * 3 + 4));
 }
 
 void testExprByteTest() {
@@ -119,7 +119,7 @@ void testExprByteTest() {
       (x * ExprHandle((uint8_t)3) + ExprHandle((uint8_t)4));
   ExprHandle result = Let::make(x, ExprHandle((uint8_t)3), body);
   SimpleIRExprEval eval(result);
-  EXPECT_EQ(eval.value<uint8_t>(), 2 + (3 * 3 + 4));
+  ASSERT_EQ(eval.value<uint8_t>(), 2 + (3 * 3 + 4));
 }
 
 void testExprCharTest() {
@@ -130,7 +130,7 @@ void testExprCharTest() {
       (x * ExprHandle((int8_t)3) + ExprHandle((int8_t)4));
   ExprHandle result = Let::make(x, ExprHandle((int8_t)3), body);
   SimpleIRExprEval eval(result);
-  EXPECT_EQ(eval.value<int8_t>(), 2 + (3 * 3 + 4));
+  ASSERT_EQ(eval.value<int8_t>(), 2 + (3 * 3 + 4));
 }
 
 void testExprShortTest() {
@@ -141,7 +141,7 @@ void testExprShortTest() {
       (x * ExprHandle((int16_t)3) + ExprHandle((int16_t)4));
   ExprHandle result = Let::make(x, ExprHandle((int16_t)3), body);
   SimpleIRExprEval eval(result);
-  EXPECT_EQ(eval.value<int16_t>(), 2 + (3 * 3 + 4));
+  ASSERT_EQ(eval.value<int16_t>(), 2 + (3 * 3 + 4));
 }
 
 void testExprLongTest() {
@@ -152,7 +152,7 @@ void testExprLongTest() {
       (x * ExprHandle((int64_t)3) + ExprHandle((int64_t)4));
   ExprHandle result = Let::make(x, ExprHandle((int64_t)3), body);
   SimpleIRExprEval eval(result);
-  EXPECT_EQ(eval.value<int64_t>(), 2 + (3 * 3 + 4));
+  ASSERT_EQ(eval.value<int64_t>(), 2 + (3 * 3 + 4));
 }
 
 void testExprHalfTest() {
@@ -163,7 +163,7 @@ void testExprHalfTest() {
       (x * ExprHandle((at::Half)3) + ExprHandle((at::Half)4));
   ExprHandle result = Let::make(x, ExprHandle((at::Half)3), body);
   SimpleIRExprEval eval(result);
-  EXPECT_EQ(eval.value<at::Half>(), 2 + (3 * 3 + 4));
+  ASSERT_EQ(eval.value<at::Half>(), 2 + (3 * 3 + 4));
 }
 
 void testExprDoubleTest() {
@@ -174,7 +174,7 @@ void testExprDoubleTest() {
       (x * ExprHandle((double)3) + ExprHandle((double)4));
   ExprHandle result = Let::make(x, ExprHandle((double)3), body);
   SimpleIRExprEval eval(result);
-  EXPECT_EQ(eval.value<double>(), 2 + (3 * 3 + 4));
+  ASSERT_EQ(eval.value<double>(), 2 + (3 * 3 + 4));
 }
 void testExprVectorAdd01() {
   KernelScope kernel_scope;
@@ -211,9 +211,9 @@ void testExprVectorAdd01() {
       Broadcast::make(1, kVectorSize));
   Stmt* stmt = For::make(index, 0, kVectorCount, store_c);
 
-  EXPECT_EQ(load_a.dtype(), Dtype(kFloat, kVectorSize));
-  EXPECT_EQ(load_b.dtype(), Dtype(kFloat, kVectorSize));
-  EXPECT_EQ(value.dtype(), Dtype(kFloat, kVectorSize));
+  ASSERT_EQ(load_a.dtype(), Dtype(kFloat, kVectorSize));
+  ASSERT_EQ(load_b.dtype(), Dtype(kFloat, kVectorSize));
+  ASSERT_EQ(value.dtype(), Dtype(kFloat, kVectorSize));
 
   PaddedBuffer<float> a_v(kTotalSize);
   PaddedBuffer<float> b_v(kTotalSize);
@@ -269,19 +269,21 @@ void testExprCompareSelectEQ() {
 
 void testExprSubstitute01() {
   KernelScope kernel_scope;
-  ExprHandle x = Var::make("x", kFloat);
-  ExprHandle y = Var::make("y", kFloat);
-  ExprHandle e = (x - 1.0f) * (x + y + 2.0f);
+  const Var* x = new Var("x", kFloat);
+  const Var* y = new Var("y", kFloat);
+  const Expr* e = new Mul(new Sub(x, new FloatImm(1.0f)), new Add(x, y));
 
-  ExprHandle z = Var::make("z", kFloat);
-  ExprHandle e2(Substitute(e.node(), {{x, z + 1.0f}}));
-  ExprHandle e2_ref = ((z + 1.0f) - 1.0f) * ((z + 1.0f) + y + 2.0f);
+  const Var* z = new Var("z", kFloat);
+  const Expr* e2 = Substitute(e, {{x, new Add(z, new FloatImm(5.0f))}});
+  const Expr* e2_ref = new Mul(
+      new Sub(new Add(z, new FloatImm(5.0f)), new FloatImm(1.0f)),
+      new Add(new Add(z, new FloatImm(5.0f)), y));
   std::ostringstream oss;
-  oss << e2;
+  oss << *e2;
   std::string e2_str = oss.str();
 
   oss.str("");
-  oss << e2_ref;
+  oss << *e2_ref;
   std::string e2_ref_str = oss.str();
   ASSERT_EQ(e2_str, e2_ref_str);
 }
@@ -357,7 +359,7 @@ void testExprUnaryMath01() {
     ExprHandle v = test_config.func(ExprHandle(input_v));
     float v_ref = test_config.ref_func(input_v);
     SimpleIRExprEval eval(v);
-    EXPECT_NEAR(eval.value<float>(), v_ref, 1e-6) << "fail: " << v;
+    ASSERT_NEAR(eval.value<float>(), v_ref, 1e-6, "fail: ", v);
   }
 }
 
@@ -381,7 +383,7 @@ void testExprBinaryMath01() {
     ExprHandle v_expr = test_config.func(ExprHandle(v1), ExprHandle(v2));
     float v_ref = test_config.ref_func(v1, v2);
     SimpleIRExprEval eval(v_expr);
-    EXPECT_NEAR(eval.value<float>(), v_ref, 1e-6) << "fail: " << v_expr;
+    ASSERT_NEAR(eval.value<float>(), v_ref, 1e-6, "fail: ", v_expr);
   }
 }
 
@@ -394,7 +396,7 @@ void testExprBitwiseOps() {
   ExprHandle f = (((a ^ (b << 1)) & c) >> 2) | d;
 
   SimpleIRExprEval eval(f);
-  EXPECT_EQ(eval.value<int>(), 11);
+  ASSERT_EQ(eval.value<int>(), 11);
 }
 
 void testExprDynamicShapeAdd() {
