@@ -31,30 +31,21 @@ public:
   : kernels_()
   , kernelCount_(0) {}
 
-  enum class SetKernelResult : uint8_t {ADDED_NEW_KERNEL, OVERWROTE_EXISTING_KERNEL};
-  C10_NODISCARD SetKernelResult setKernel(DispatchKey dispatchKey, KernelFunction kernel) {
+  void setKernel(DispatchKey dispatchKey, KernelFunction kernel) {
     TORCH_INTERNAL_ASSERT(dispatchKey != DispatchKey::Undefined);
     auto& slot = kernels_[static_cast<uint8_t>(dispatchKey)];
-    SetKernelResult result;;
-    if (slot.isValid()) {
-      result = SetKernelResult::OVERWROTE_EXISTING_KERNEL;
-    } else {
-      result = SetKernelResult::ADDED_NEW_KERNEL;
+    if (!slot.isValid()) {
       ++kernelCount_;
     }
     slot = std::move(kernel);
-    return result;
   }
 
-  enum class RemoveKernelIfExistsResult : uint8_t {REMOVED_KERNEL, KERNEL_DIDNT_EXIST};
-  RemoveKernelIfExistsResult removeKernelIfExists(DispatchKey dispatchKey) {
+  void removeKernelIfExists(DispatchKey dispatchKey) {
     auto& slot = kernels_[static_cast<uint8_t>(dispatchKey)];
     if (slot.isValid()) {
       --kernelCount_;
       slot = {};
-      return RemoveKernelIfExistsResult::REMOVED_KERNEL;
     } else {
-      return RemoveKernelIfExistsResult::KERNEL_DIDNT_EXIST;
     }
   }
 
