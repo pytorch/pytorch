@@ -2,9 +2,7 @@
 #error "You must define THC_GENERIC_FILE before including THGenerateComplexDoubleType.h"
 #endif
 
-#define scalar_t float
-/* FIXME: fp64 has bad performance on some platforms; avoid using it unless
-   we opt into it? */
+#define scalar_t thust::complex<double>
 #define accreal thust::complex<double>
 #define Real ComplexDouble
 #define CReal Cuda

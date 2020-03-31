@@ -32,9 +32,9 @@
 #define THPBFloat16Storage_Check(obj) \
     PyObject_IsInstance(obj, THPBFloat16StorageClass)
 #define THPComplexDoubleStorage_Check(obj) \
-    PyObject_IsInstance(obj, THPDoubleStorageClass)
+    PyObject_IsInstance(obj, THPComplexDoubleStorageClass)
 #define THPComplexFloatStorage_Check(obj) \
-    PyObject_IsInstance(obj, THPFloatStorageClass)
+    PyObject_IsInstance(obj, THPComplexFloatStorageClass)
 
 
 #define THPDoubleStorage_CData(obj)  (obj)->cdata
