@@ -6838,11 +6838,6 @@ The inverse of this function is :func:`~torch.ifft`.
     monitor and control the cache.
 
 .. warning::
-    Due to limited dynamic range of half datatype, performing this operation
-    in half precision may cause the first element of
-    result to overflow for certain inputs.
-
-.. warning::
     For CPU tensors, this method is currently only available with MKL. Use
     :func:`torch.backends.mkl.is_available` to check if MKL is installed.
 
@@ -6938,10 +6933,6 @@ The inverse of this function is :func:`~torch.fft`.
     monitor and control the cache.
 
 .. warning::
-    Due to limited dynamic range of half datatype, performing this operation in half
-    precision may cause the first element of result to overflow for certain inputs.
-
-.. warning::
     For CPU tensors, this method is currently only available with MKL. Use
     :func:`torch.backends.mkl.is_available` to check if MKL is installed.
 
@@ -7026,10 +7017,6 @@ The inverse of this function is :func:`~torch.irfft`.
     monitor and control the cache.
 
 .. warning::
-    Due to limited dynamic range of half datatype, performing this operation in half
-    precision may cause the first element of result to overflow for certain inputs.
-
-.. warning::
     For CPU tensors, this method is currently only available with MKL. Use
     :func:`torch.backends.mkl.is_available` to check if MKL is installed.
 
@@ -7105,10 +7092,6 @@ The inverse of this function is :func:`~torch.rfft`.
     repeatedly running FFT methods on tensors of same geometry with same
     configuration. See :ref:`cufft-plan-cache` for more details on how to
     monitor and control the cache.
-
-.. warning::
-    Due to limited dynamic range of half datatype, performing this operation in half
-    precision may cause the first element of result to overflow for certain inputs.
 
 .. warning::
     For CPU tensors, this method is currently only available with MKL. Use
