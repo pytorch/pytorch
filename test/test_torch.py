@@ -26,7 +26,7 @@ from torch.testing._internal.common_utils import TestCase, iter_indices, TEST_NU
     TEST_LIBROSA, TEST_WITH_ROCM, run_tests, skipIfNoLapack, suppress_warnings, \
     IS_WINDOWS, PY3, NO_MULTIPROCESSING_SPAWN, do_test_dtypes, do_test_empty_full, \
     IS_SANDCASTLE, load_tests, slowTest, skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, \
-    BytesIOContext, skipIfRocm
+    BytesIOContext, skipIfRocm, numpy_dtype
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
     skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm, skipCUDAIfNotRocm, onlyCUDA, onlyCPU, \
@@ -516,8 +516,16 @@ class _TestTorchMixin(object):
     def test_floor(self):
         self._test_math_by_name('floor')
 
+        # Note: this is consistent with NumPy
+        with self.assertRaises(RuntimeError):
+            torch.floor(torch.tensor((1 + 1j)))
+
     def test_ceil(self):
         self._test_math_by_name('ceil')
+
+        # Note: this is consistent with NumPy
+        with self.assertRaises(RuntimeError):
+            torch.ceil(torch.tensor((1 + 1j)))
 
     def test_rsqrt(self):
         def rsqrt(x):
@@ -534,6 +542,10 @@ class _TestTorchMixin(object):
 
     def test_trunc(self):
         self._test_math(torch.trunc, lambda x: x - math.fmod(x, 1))
+
+        # Note: this is consistent with NumPy
+        with self.assertRaises(RuntimeError):
+            torch.trunc(torch.tensor((1 + 1j)))
 
     def test_round(self):
         self._test_math(torch.round, round)
@@ -9742,7 +9754,8 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(1, len(z))
         self.assertEqual(torch.empty(0, dtype=torch.long), z[0])
 
-    @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
+    # TODO: add torch.complex64, torch.complex128
+    @dtypes(torch.float, torch.double)
     def test_normal(self, device, dtype):
 
         def helper(self, device, dtype, ptype, t_transform, std_transform):
@@ -9844,9 +9857,9 @@ class TestTorchDeviceType(TestCase):
 
         if dtype.is_complex:
             helper(self, device, dtype, lambda x: complex(x, x),
-                   lambda t: t.real().to(torch.float), lambda mean: mean / math.sqrt(2))
+                   lambda t: torch.real(t).to(torch.float), lambda mean: mean / math.sqrt(2))
             helper(self, device, dtype, lambda x: complex(x, x),
-                   lambda t: t.imag().to(torch.float), lambda mean: mean / math.sqrt(2))
+                   lambda t: torch.imag(t).to(torch.float), lambda mean: mean / math.sqrt(2))
             self.assertRaisesRegex(
                 RuntimeError, "normal expects standard deviation to be non-complex",
                 lambda: torch.normal(0, torch.empty(100, 100, dtype=dtype, device=device)))
@@ -10989,6 +11002,36 @@ class TestTorchDeviceType(TestCase):
         x = torch.zeros(2, 3, device=device, dtype=dtype)
         y = torch.linspace(0, 3, 4, out=x.narrow(1, 1, 2), dtype=dtype)
         self.assertEqual(x, torch.tensor(((0, 0, 1), (0, 2, 3)), device=device, dtype=dtype), 0)
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @precisionOverride({torch.float: 1e-8, torch.double: 1e-10})
+    @dtypes(torch.float, torch.double)
+    def test_linspace_vs_numpy(self, device, dtype):
+        start = -0.0316082797944545745849609375
+        end = .0315315723419189453125
+
+        for steps in [1, 2, 3, 5, 11, 256, 257, 2**22]:
+            t = torch.linspace(start, end, steps, device=device, dtype=dtype)
+            a = np.linspace(start, end, steps, dtype=numpy_dtype(dtype))
+            t = t.cpu()
+            self.assertEqual(t, torch.from_numpy(a))
+            self.assertTrue(t[0] == a[0])
+            self.assertTrue(t[steps - 1] == a[steps - 1])
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @precisionOverride({torch.float: 1e-6, torch.double: 1e-10})
+    @dtypes(torch.float, torch.double)
+    def test_logspace_vs_numpy(self, device, dtype):
+        start = -0.0316082797944545745849609375
+        end = .0315315723419189453125
+
+        for steps in [1, 2, 3, 5, 11, 256, 257, 2**22]:
+            t = torch.logspace(start, end, steps, device=device, dtype=dtype)
+            a = np.logspace(start, end, steps, dtype=numpy_dtype(dtype))
+            t = t.cpu()
+            self.assertEqual(t, torch.from_numpy(a))
+            self.assertEqual(t[0], a[0])
+            self.assertEqual(t[steps - 1], a[steps - 1])
 
     @largeCUDATensorTest('16GB')
     def test_range_factories_64bit_indexing(self, device):
@@ -14594,6 +14637,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         self.assertEqual(r.dtype, a.dtype)
 
     @slowTest
+    @onlyOnCPUAndCUDA
     @dtypes(torch.float32, torch.float64, torch.bfloat16, torch.int32, torch.int64)
     @dtypesIfCUDA(torch.float32, torch.float64)
     def test_mm(self, device, dtype):
@@ -15358,10 +15402,37 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     # NumPy has the same behavior.
     @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
     def test_float_to_int_undefined_conversion(self, device, dtype):
-        t = torch.tensor((-3.40282e+38, 3.40282e+38), device=device, dtype=torch.float)
+        min = torch.finfo(torch.float).min
+        max = torch.finfo(torch.float).max
+        t = torch.tensor((min, max), device=device, dtype=torch.float)
         self.assertEqual(t.to(dtype).dtype, dtype)
 
+    # Note: CUDA will fail this test on most dtypes, often dramatically.
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @onlyCPU
+    @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
+    def test_float_to_int_conversion_precision(self, device, dtype):
+        min = np.finfo(np.float32).min
+        max = np.finfo(np.float32).max
+        t = torch.tensor((float('-inf'), min, max, float('inf'), float('nan')), device=device, dtype=torch.float)
+        a = np.array((float('-inf'), min, max, float('inf'), float('nan')), dtype=np.float32)
 
+        torch_to_np = {
+            torch.bool  : np.bool,
+            torch.uint8 : np.uint8,
+            torch.int8  : np.int8,
+            torch.int16 : np.int16,
+            torch.int32 : np.int32,
+            torch.int64 : np.int64
+        }
+
+        torch_result = t.to(dtype)
+        numpy_result = torch.from_numpy(a.astype(torch_to_np[dtype]))
+        self.assertEqual(torch_result, numpy_result)
+
+
+    # TODO: re-enable this test
+    @unittest.skipIf(True, "real and imag not implemented for complex")
     @onlyOnCPUAndCUDA
     def test_complex_type_conversions(self, device):
         dtypes = [torch.float, torch.complex64, torch.complex128]
@@ -15370,10 +15441,10 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                 from_tensor = torch.randn(4, dtype=from_type, device=device)
                 to_tensor = from_tensor.to(to_type)
                 if from_type.is_complex and not to_type.is_complex:
-                    self.assertEqual(from_tensor.real(), to_tensor, exact_dtype=False)
+                    self.assertEqual(torch.real(from_tensor), to_tensor, exact_dtype=False)
                 elif not from_type.is_complex and to_type.is_complex:
-                    self.assertEqual(from_tensor, to_tensor.real(), exact_dtype=False)
-                    self.assertEqual(torch.zeros_like(to_tensor.imag()), to_tensor.imag(), exact_dtype=False)
+                    self.assertEqual(from_tensor, torch.real(to_tensor), exact_dtype=False)
+                    self.assertEqual(torch.zeros_like(torch.imag(to_tensor)), torch.imag(to_tensor), exact_dtype=False)
                 else:
                     self.assertEqual(from_tensor, to_tensor, exact_dtype=False)
 
@@ -15799,6 +15870,49 @@ class TestViewOps(TestCase):
                 return False
 
         return True
+
+    @onlyOnCPUAndCUDA
+    def test_real_self(self, device):
+        t = torch.ones((5, 5), device=device)
+        s = torch.real(t)
+        self.assertTrue(s is t)
+
+        # TODO: update when the imag attribute is implemented
+        self.assertTrue(not hasattr(t, 'real'))
+
+    # TODO: update after torch.real is implemented for complex tensors
+    @onlyOnCPUAndCUDA
+    def test_real_view(self, device):
+        t = torch.tensor((1 + 1j), device=device)
+        with self.assertRaises(RuntimeError):
+            v = torch.real(t)
+            self.assertTrue(self.is_view_of(t, v))
+
+            v[0] = 0
+            self.assertEqual(t.float()[0], v[0])
+            self.assertTrue(t[0] == complex(0, 1))
+
+    def test_imag_new(self, device):
+        t = torch.ones((5, 5), device=device)
+        i = torch.imag(t)
+
+        self.assertTrue(not i._is_view())
+        self.assertTrue(i.device == t.device)
+        self.assertTrue(i.dtype is t.dtype)
+        self.assertTrue(torch.equal(i, torch.zeros_like(t)))
+
+        # TODO: update when the imag attribute is implemented
+        self.assertTrue(not hasattr(t, 'imag'))
+
+    # TODO: update after torch.imag is implemented for complex tensors
+    def test_imag_view(self, device):
+        t = torch.tensor((1 + 1j), device=device)
+        with self.assertRaises(RuntimeError):
+            v = torch.imag(t)
+            self.assertTrue(self.is_view_of(t, v))
+
+            v[0] = 0
+            self.assertTrue(t[0] == complex(1, 0))
 
     def test_diagonal_view(self, device):
         t = torch.ones((5, 5), device=device)

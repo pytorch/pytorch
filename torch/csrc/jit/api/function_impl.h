@@ -38,7 +38,9 @@ struct TORCH_API GraphFunction : public Function {
       return *optimized_graph_;
     }
     optimized_graph_ = graph_->copy();
-    preoptimizeGraph(*optimized_graph_);
+    if (getGraphExecutorOptimize()) {
+      preoptimizeGraph(*optimized_graph_);
+    }
     return *optimized_graph_;
   }
 
