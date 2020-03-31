@@ -31,9 +31,9 @@ string(
 # changes PROTOBUF_CONSTEXPR to constexpr, which breaks windows
 # build.
 string(
-  REPLACE
-  "static constexpr int kIndexInFileMessages ="
-  "static int const kIndexInFileMessages ="
+  REGEX REPLACE
+  "static constexpr ([^ ]+) ([^ ]+) ="
+  "static \\1 const \\2 ="
   content
   "${content}")
 
@@ -46,7 +46,7 @@ foreach(ns ${NAMESPACES})
   set(search "namespace ${ns} {")
   string(LENGTH "${search}" search_len)
   string(FIND "${content}" "${search}" pos)
-  if (${pos} GREATER -1)
+  if(${pos} GREATER -1)
     math(EXPR pos "${pos}+${search_len}")
     string(SUBSTRING "${content}" 0 ${pos} content_pre)
     string(SUBSTRING "${content}" ${pos} -1 content_post)
@@ -63,7 +63,7 @@ endforeach()
 # a link error that claims that the vftable is not found. Luckily, we
 # could move the definition into the source file to solve the problem.
 list(LENGTH NAMESPACES ns_count)
-if ("${FILENAME}" MATCHES ".pb.h" AND ns_count EQUAL 1)
+if("${FILENAME}" MATCHES ".pb.h" AND ns_count EQUAL 1)
   string(REPLACE ".pb.h" ".pb.cc" SOURCE_FILENAME ${FILENAME})
   file(READ ${SOURCE_FILENAME} content_cc_origin)
 

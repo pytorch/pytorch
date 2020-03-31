@@ -40,6 +40,7 @@
 #include <torch/csrc/utils/tensor_memoryformats.h>
 #include <torch/csrc/utils/tensor_qschemes.h>
 #include <torch/csrc/utils/tensor_numpy.h>
+#include <torch/csrc/utils/python_dispatch.h>
 #include <torch/csrc/jit/python/python_tracer.h>
 #include <torch/csrc/jit/python/init.h>
 #include <torch/csrc/jit/python/python_ir.h>
@@ -52,6 +53,7 @@
 #include <torch/csrc/distributed/autograd/autograd.h>
 #include <torch/csrc/distributed/c10d/c10d.h>
 #include <torch/csrc/distributed/rpc/rpc.h>
+#include <torch/csrc/distributed/rpc/testing/testing.h>
 #endif
 #endif
 
@@ -638,6 +640,7 @@ PyObject* initModule() {
   THPUtils_addPyMethodDefs(methods, torch::distributed::rpc::python_functions());
   THPUtils_addPyMethodDefs(
       methods, torch::distributed::autograd::python_functions());
+  THPUtils_addPyMethodDefs(methods, torch::distributed::rpc::testing::python_functions());
 #endif
 #endif
 
@@ -671,6 +674,7 @@ PyObject* initModule() {
   // init.
   torch::onnx::initONNXBindings(module);
   torch::jit::initJITBindings(module);
+  torch::impl::dispatch::initDispatchBindings(module);
   torch::throughput_benchmark::initThroughputBenchmarkBindings(module);
   torch::autograd::initNNFunctions(module);
   torch::autograd::init_legacy_variable(module);

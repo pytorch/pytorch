@@ -42,9 +42,7 @@ bool operator==(const ivalue::Tuple& lhs, const ivalue::Tuple& rhs) {
              lhs.elements_.cbegin(),
              lhs.elements_.cend(),
              rhs.elements_.cbegin(),
-             [](const auto& lhs, const auto& rhs) {
-               return _fastEqualsForContainer(lhs, rhs);
-             });
+             _fastEqualsForContainer);
 }
 
 TupleTypePtr Tuple::type() const {
@@ -126,9 +124,20 @@ void IValue::getSubValues(HashAliasedIValues& subValues) const {
         pair.key().getSubValues(subValues);
       }
       break;
+    case Tag::Object: {
+      // Record Object IValue and its attributes.
+      subValues.insert(*this);
+      auto obj_type = type()->expect<ClassType>();
+      auto obj_value = toObject();
+      auto attribute_names = obj_type->attributeNames();
+      for (const auto& name: attribute_names) {
+        auto attribute = obj_value->getAttr(name);
+        attribute.getSubValues(subValues);
+      }
+      break;
+    }
     case Tag::Future:
     case Tag::Device:
-    case Tag::Object:
     case Tag::PyObject:
     case Tag::Uninitialized:
     case Tag::Capsule:
@@ -169,6 +178,13 @@ bool operator==(const IValue& lhs, const IValue& rhs) {
   return eq.toTensor().is_nonzero();
 }
 
+bool IValue::ptrEqual(const IValue& lhs, const IValue& rhs) {
+  TORCH_INTERNAL_ASSERT(lhs.is_intrusive_ptr);
+  TORCH_INTERNAL_ASSERT(rhs.is_intrusive_ptr);
+  return lhs.tag == rhs.tag &&
+      lhs.payload.as_intrusive_ptr == rhs.payload.as_intrusive_ptr;
+}
+
 IValue IValue::equals(const IValue& rhs) const {
   const IValue& lhs = *this;
   switch (lhs.tag) {
@@ -177,7 +193,9 @@ IValue IValue::equals(const IValue& rhs) const {
       // sure if we should warn here or what
       return rhs.isNone();
     case Tag::Tensor:
-      if (!rhs.isTensor()){return false;}
+      if (!rhs.isTensor()) {
+        return false;
+      }
       return lhs.toTensor().eq(rhs.toTensor());
     case Tag::Double:
       return rhs.isDouble() && lhs.toDouble() == rhs.toDouble();
@@ -190,37 +208,31 @@ IValue IValue::equals(const IValue& rhs) const {
     case Tag::GenericDict:
       return rhs.isGenericDict() && lhs.toGenericDict() == rhs.toGenericDict();
     case Tag::Tuple:
-      return rhs.isTuple() && lhs.toTuple() == rhs.toTuple();
+      return rhs.isTuple() && *lhs.toTuple() == *rhs.toTuple();
     case Tag::Device:
       return rhs.isDevice() && lhs.toDevice() == rhs.toDevice();
     case Tag::GenericList:
       return rhs.isList() && lhs.toList() == rhs.toList();
     case Tag::Blob:
-      return rhs.isBlob() && lhs.isAliasOf(rhs);
     case Tag::Future:
-      return rhs.isFuture() && lhs.isAliasOf(rhs);
     case Tag::RRef:
-      return rhs.isRRef() && lhs.isAliasOf(rhs);
     case Tag::Object:
-      return rhs.isObject() && lhs.isAliasOf(rhs);
     case Tag::PyObject:
-      return rhs.isPyObject() && lhs.isAliasOf(rhs);
     case Tag::Capsule:
-      return rhs.isCapsule() && lhs.isAliasOf(rhs);
+      return ptrEqual(lhs, rhs);
     case Tag::Uninitialized:
-      TORCH_INTERNAL_ASSERT(
-          false,
-          "Uninitialized IValues are internal-only,",
-          "they should never participate in equality comparison");
+      // Unitialized ivalues show up in no-ops when the compiler can prove a
+      // value will never be used. Just return false on any equality comparison.
+      return false;
   }
   // the above switch should be exhaustive
   TORCH_INTERNAL_ASSERT(false, "we should never reach here")
 }
 
-
 static bool isUndefinedTensor(const IValue& iv) {
   return iv.isTensor() && !iv.toTensor().defined();
 }
+
 bool IValue::is(const IValue& rhs) const {
   const IValue& lhs = *this;
   // Special handling for undefined tensors:
@@ -241,10 +253,8 @@ bool IValue::is(const IValue& rhs) const {
   }
 
   if (lhs.is_intrusive_ptr) {
-    TORCH_INTERNAL_ASSERT(rhs.is_intrusive_ptr);
-    return lhs.payload.as_intrusive_ptr == rhs.payload.as_intrusive_ptr;
+    return ptrEqual(lhs, rhs);
   }
-  // TODO should we do this?
   return lhs == rhs;
 }
 

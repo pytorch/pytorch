@@ -13,20 +13,6 @@ inline bool DictKeyEqualTo::operator()(const IValue& lhs, const IValue& rhs) con
   // [container equality])
   return _fastEqualsForContainer(lhs, rhs);
 }
-inline bool operator==(const DictImpl& lhs, const DictImpl& rhs) {
-  return lhs.elementTypes.keyType == rhs.elementTypes.keyType &&
-      lhs.elementTypes.valueType == rhs.elementTypes.valueType &&
-      lhs.dict.size() == rhs.dict.size() &&
-      // see: [container equality]
-      std::equal(
-             lhs.dict.cbegin(),
-             lhs.dict.cend(),
-             rhs.dict.cbegin(),
-             [](const auto& lhs, const auto& rhs) {
-               return _fastEqualsForContainer(lhs.first, rhs.first) &&
-                   _fastEqualsForContainer(lhs.second, rhs.second);
-             });
-}
 }
 
 template<class T> TypePtr getTypePtr();

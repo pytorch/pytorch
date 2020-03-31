@@ -1,8 +1,8 @@
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <ATen/core/interned_strings.h>
+#include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/node_hashing.h>
-#include <torch/csrc/jit/ir/alias_analysis.h>
 #include <unordered_set>
 
 namespace torch {
@@ -44,7 +44,7 @@ void ConstantPooling(
       // changing the aliasing relationship
       bool same_identity =
           (old_ivalue && new_ivalue &&
-           (old_ivalue->is(new_ivalue)));
+           (old_ivalue->isSameIdentity(new_ivalue)));
 
       if (!same_identity &&
           !aliasDb.safeToChangeAliasingRelationship(

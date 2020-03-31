@@ -59,6 +59,13 @@ Tensor& add_(Tensor& self, const Tensor& other, Scalar alpha) {
 }
 
 Tensor& div_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  if (isIntegralType(result.scalar_type(), /*includeBool=*/ true)) {
+    TORCH_WARN_ONCE(
+      "Integer division of tensors using div or / is deprecated, ",
+      "and in a future release div will perform true division as in Python 3. ",
+      "Use true_divide or floor_divide (// in Python) instead.");
+  }
+
   auto iter = TensorIterator::binary_op(result, self, other,
     /*check_mem_overlap=*/true);
   div_stub(iter.device_type(), iter);
@@ -66,6 +73,13 @@ Tensor& div_out(Tensor& result, const Tensor& self, const Tensor& other) {
 }
 
 Tensor div(const Tensor& self, const Tensor& other) {
+  if (isIntegralType(self.scalar_type(), /*includeBool=*/ true)
+      && isIntegralType(other.scalar_type(), /*includeBool=*/ true)) {
+    TORCH_WARN_ONCE(
+      "Integer division of tensors using div or / is deprecated, ",
+      "and in a future release div will perform true division as in Python 3. ",
+      "Use true_divide or floor_divide (// in Python) instead.");
+  }
   Tensor result;
   auto iter = TensorIterator::binary_op(result, self, other);
   div_stub(iter.device_type(), iter);
@@ -122,6 +136,10 @@ Tensor true_divide(const Tensor& self, const Tensor& divisor) {
   auto iter = TensorIterator::binary_op(result, self, divisor);
   div_stub(iter.device_type(), iter);
   return iter.output();
+}
+
+Tensor& true_divide_(Tensor& self, const Tensor& divisor) {
+  return native::true_divide_out(self, self, divisor);
 }
 
 Tensor& floor_divide_out(Tensor& result, const Tensor& self, const Tensor& other) {
@@ -717,8 +735,11 @@ Tensor& fmod_(Tensor& self, Scalar other) {
 }
 
 Tensor true_divide(const Tensor& self, Scalar divisor) {
-  return at::true_divide(self, wrapped_scalar_tensor(divisor)); // redispatch!
+  return self.true_divide(wrapped_scalar_tensor(divisor)); // redispatch!
 }
 
+Tensor& true_divide_(Tensor& self, Scalar divisor) {
+  return self.true_divide_(wrapped_scalar_tensor(divisor)); // redispatch!
 }
-}  // namespace at
+
+}}  // at::native
