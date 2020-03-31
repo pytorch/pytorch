@@ -18,13 +18,11 @@ class MyModule:
     lock = threading.Lock()
 
     def __init__(self):
-        # cannot directly use torch.manual_seed(0) as all threads share the same
-        # default generator. The race from multiple RPC threads could mess up
-        # the draw order from the default RNG instance, leading to
-        # non-deterministic behavior. Hence, create a dedicated RNG here.
-        g_cpu = torch.Generator()
-        g_cpu.manual_seed(0)
-        self.w = torch.rand((3, 3), requires_grad=True, generator=g_cpu)
+        # avoid race where 2 modules could be initialized
+        # concurrently thus changing the order random numbers are drawn.
+        with MyModule.lock:
+            torch.manual_seed(0)
+            self.w = torch.rand((3, 3), requires_grad=True)
 
     def forward(self, t1):
         return torch.mm(self.w, t1)
@@ -114,10 +112,9 @@ class DistOptimizerTest(RpcAgentTestFixture):
         )
 
         with dist_autograd.context() as context_id:
-            g_cpu = torch.Generator()
-            g_cpu.manual_seed(0)
-            t1 = torch.rand((3, 3), requires_grad=True, generator=g_cpu)
-            t2 = torch.rand((3, 3), requires_grad=True, generator=g_cpu)
+            torch.manual_seed(0)
+            t1 = torch.rand((3, 3), requires_grad=True)
+            t2 = torch.rand((3, 3), requires_grad=True)
             output1 = rpc_async_method(MyModule.forward, remote_module1, t2)
             output2 = rpc_async_method(MyModule.forward, remote_module2, output1.wait())
             loss = torch.add(output2.wait(), t1).sum()
@@ -153,10 +150,9 @@ class DistOptimizerTest(RpcAgentTestFixture):
         old_w1 = module1.w.clone().detach()
         old_w2 = module2.w.clone().detach()
 
-        g_cpu = torch.Generator()
-        g_cpu.manual_seed(0)
-        t1 = torch.rand((3, 3), requires_grad=True, generator=g_cpu)
-        t2 = torch.rand((3, 3), requires_grad=True, generator=g_cpu)
+        torch.manual_seed(0)
+        t1 = torch.rand((3, 3), requires_grad=True)
+        t2 = torch.rand((3, 3), requires_grad=True)
         output1 = module1.forward(t2)
         output2 = module2.forward(output1)
         loss = torch.add(output2, t1).sum()
@@ -184,9 +180,9 @@ class DistOptimizerTest(RpcAgentTestFixture):
         )
 
         with dist_autograd.context() as context_id:
-            g_cpu.manual_seed(0)
-            t1 = torch.rand((3, 3), requires_grad=True, generator=g_cpu)
-            t2 = torch.rand((3, 3), requires_grad=True, generator=g_cpu)
+            torch.manual_seed(0)
+            t1 = torch.rand((3, 3), requires_grad=True)
+            t2 = torch.rand((3, 3), requires_grad=True)
             output1 = rpc_async_method(MyModule.forward, remote_module1, t2)
             output2 = rpc_async_method(MyModule.forward, remote_module2, output1.wait())
             loss = torch.add(output2.wait(), t1)
