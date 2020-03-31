@@ -9,8 +9,6 @@ set -eux -o pipefail
 if [[ "$PACKAGE_TYPE" == conda ]]; then
   retry conda create -qyn testenv python="$DESIRED_PYTHON"
   source activate testenv >/dev/null
-elif [[ "$DESIRED_PYTHON" == 2.7mu ]]; then
-  export PATH="/opt/python/cp27-cp27mu/bin:\$PATH"
 elif [[ "$PACKAGE_TYPE" != libtorch ]]; then
   python_nodot="\$(echo $DESIRED_PYTHON | tr -d m.u)"
   python_path="/opt/python/cp\$python_nodot-cp\${python_nodot}"

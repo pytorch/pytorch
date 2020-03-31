@@ -632,7 +632,8 @@ static void launch_reduce_kernel(const ReduceConfig& config, const R& reduction)
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
-struct AccumulationBuffer {
+class AccumulationBuffer {
+ public:
   AccumulationBuffer() {}
 
   AccumulationBuffer(size_t acc_t_size, size_t out_t_size, char* out_ptr, int64_t size) {
@@ -653,17 +654,17 @@ struct AccumulationBuffer {
   }
 
   char* get_acc_slice(char* out_ptr) {
-    if (numerator_ == -1 || acc_ptr_ == nullptr) {
+    if (acc_ptr_ == nullptr) {
       return nullptr;
     }
     return acc_ptr_ + ((out_ptr - out_ptr_) * numerator_ / denominator_);
   }
 
+ private:
   char* acc_ptr_ = nullptr;
   char* out_ptr_ = nullptr;
-  float size_factor_ = -1;
-  size_t numerator_ = -1;
-  size_t denominator_ = -1;
+  size_t numerator_;
+  size_t denominator_;
   at::DataPtr buffer_;
 };
 
