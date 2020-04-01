@@ -145,7 +145,11 @@ class _Formatter(object):
                 ret = ('{{:.{}f}}').format(PRINT_OPTS.precision).format(value)
         elif self.complex_dtype:
             p = PRINT_OPTS.precision
-            ret = '({{:.{}f}} {{}} {{:.{}f}}j)'.format(p, p).format(value.real, '+-'[value.imag < 0], abs(value.imag))
+            # format real and imaginary values according to type
+            real_val = '({{:.0f}}.    '.format(p).format(value.real) if value.real.is_integer() else '({{:.{}f}}'.format(p).format(value.real)
+            imag_val = '{{:.0f}}.j    )'.format(p).format(value.imag) if value.imag.is_integer() else '{{:.{}f}}j)'.format(p).format(value.imag)
+            # add sign of imaginary part
+            ret = "{{}} {{}} {{}}".format(p, p).format(real_val, '+-'[value.imag < 0], imag_val)
         else:
             ret = '{}'.format(value)
         return (self.max_width - len(ret)) * ' ' + ret
