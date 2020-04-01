@@ -44,7 +44,6 @@ cc_library(
     copts = [
         "-Iexternal/tbb/src/rml/include",
         "-Iexternal/tbb/src",
-        "-Wno-everything",
         "-pthread",
         "-DDO_ITT_NOTIFY=1",
         "-DUSE_PTHREAD=1",

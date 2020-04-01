@@ -74,7 +74,6 @@ cc_library(
         ],
     ),
     copts = [
-        "-Wno-everything",
         "-std=gnu++11",
         "-std=c++11",
     ],

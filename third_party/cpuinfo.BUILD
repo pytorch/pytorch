@@ -8,9 +8,6 @@ cc_library(
     hdrs = glob([
         "deps/clog/include/*.h",
     ]),
-    copts = [
-        "-Wno-everything",
-    ],
     includes = [
         "deps/clog/include/",
     ],
@@ -43,7 +40,6 @@ cc_library(
         "src/linux/*.h",
     ]),
     copts = [
-        "-Wno-everything",
         "-DCPUINFO_LOG_LEVEL=2",
         "-DTH_BLAS_MKL",
         "-D_GNU_SOURCE=1",
