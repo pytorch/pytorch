@@ -9,7 +9,7 @@ class ExecutionCounter(object):
     def try_get_trigger_value(self):
         try:
             return torch._C._jit_get_trigger_value(self.name)
-        except:
+        except Exception:
             return 0
 
     def __init__(self, name):
