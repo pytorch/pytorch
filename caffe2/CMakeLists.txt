@@ -449,6 +449,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/runtime/register_special_ops.cpp
     ${TORCH_SRC_DIR}/csrc/jit/ir/scope.cpp
     ${TORCH_SRC_DIR}/csrc/jit/frontend/ir_emitter.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/frontend/name_mangler.cpp
     ${TORCH_SRC_DIR}/csrc/jit/testing/file_check.cpp
     ${TORCH_SRC_DIR}/csrc/jit/frontend/convert_to_ssa.cpp
     ${TORCH_SRC_DIR}/csrc/jit/frontend/exit_transforms.cpp
