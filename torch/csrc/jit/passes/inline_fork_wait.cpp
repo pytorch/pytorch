@@ -23,7 +23,7 @@ void InlineForkWait(
     future_remap[node->output()] = output.at(0);
   }
 
-  // Remove aten::wait if it's input Future is returned by prim::fork.
+  // Remove aten::wait if it's input future is returned by prim::fork.
   auto reversed = b->nodes().reverse();
   for (auto it = reversed.begin(); it != reversed.end(); it++) {
     auto node = *it;
@@ -32,11 +32,17 @@ void InlineForkWait(
     } else if (node->kind() == aten::wait) {
       AT_ASSERT(node->inputs().size() == 1);
       AT_ASSERT(node->outputs().size() == 1);
-      node->output()->replaceAllUsesWith(future_remap.at(node->input()));
-      it.destroyCurrent();
+      // If the future does not map to a prim::fork, it could be
+      // returned from prim::rpc_async, which has side effect, so it shouldn't be
+      // dead code eliminated.
+      if (future_remap.count(node->input())) {
+        node->output()->replaceAllUsesWith(future_remap.at(node->input()));
+        it.destroyCurrent();
+      }
     }
   }
 
+  // Recursively inline fork/wait.
   for (auto it = nodes.begin(); it != nodes.end(); it++) {
     auto node = *it;
     for (auto sub_b : node->blocks()) {
