@@ -24,6 +24,7 @@ from jit.test_builtins import TestBuiltins, TestTensorBuiltins  # noqa: F401
 from jit.test_unsupported_ops import TestUnsupportedOps  # noqa: F401
 from jit.test_freezing import TestFreezing  # noqa: F401
 from jit.test_functional_blocks import TestFunctionalBlocks  # noqa: F401
+from jit.test_save_load import TestSaveLoad  # noqa: F401
 
 # Torch
 from torch import Tensor
@@ -15130,6 +15131,13 @@ a")
             def g2(x):
                 print((x, x, x).__doc__)
                 return x
+
+    def test_tuple_len(self):
+        @torch.jit.script
+        def foo():
+            return len((1, "str", None))
+
+        self.assertEqual(foo(), 3)
 
     def test_tuple_slicing(self):
         def tuple_slice(a):

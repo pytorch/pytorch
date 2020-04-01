@@ -891,9 +891,9 @@ class TestCase(expecttest.TestCase):
                         if a.is_complex():
                             # todo: assert_allclose should handle complex types directly.
                             float_dtype = torch.float if a.dtype == torch.complex64 else torch.double
-                            self.assertEqual(a.real().to(float_dtype), b.real().to(float_dtype),
+                            self.assertEqual(a.abs().to(float_dtype), b.abs().to(float_dtype),
                                              atol=atol, rtol=rtol, message=message)
-                            self.assertEqual(a.imag().to(float_dtype), b.imag().to(float_dtype),
+                            self.assertEqual(a.angle().to(float_dtype), b.angle().to(float_dtype),
                                              atol=atol, rtol=rtol, message=message)
                         elif a.is_floating_point():
                             torch.testing.assert_allclose(a, b, atol=atol, rtol=rtol, equal_nan=True, msg=message)
