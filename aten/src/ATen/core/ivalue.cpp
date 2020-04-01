@@ -247,13 +247,12 @@ bool IValue::is(const IValue& rhs) const {
   }
 
   if (lhs.isTensor()) {
-    // Compare the underlying tensor implementations, as we may have two
-    // distinct `at::Tensor` objects pointing to the same impl.
+    // Use the standard way of comparing two tensors for identity
     return rhs.isTensor() && lhs.toTensor().is_same(rhs.toTensor());
   }
 
   if (lhs.is_intrusive_ptr) {
-    return ptrEqual(lhs, rhs);
+    return rhs.is_intrusive_ptr && ptrEqual(lhs, rhs);
   }
   return lhs == rhs;
 }
