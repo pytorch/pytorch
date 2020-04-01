@@ -257,5 +257,25 @@ graph(%a_quant, %b_scalar, %alpha):
   };
 }
 
+std::vector<QuantFusionInfo> dynamic_quant_fusion_pattern_and_replacements() {
+  std::string linear_dynamic = R"(
+graph(%packed_params, %a, %reduce_range, %a_dtype):
+        %a_scale : float, %a_zero_point : int = aten::_choose_qparams_per_tensor(%a, %reduce_range)
+        %a_quant = aten::quantize_per_tensor(%a, %a_scale, %a_zero_point, %a_dtype)
+        %a_dequant = aten::dequantize(%a_quant)
+        %w_quant : Tensor, %b : Tensor? = quantized::linear_unpack(%packed_params)
+        %w_dequant = aten::dequantize(%w_quant)
+        %r = aten::linear(%a_dequant, %w_dequant, %b)
+        return (%r) )";
+
+  std::string quantized_linear_dynamic = R"(
+graph(%packed_params, %a, %reduce_range, %a_dtype):
+        %r = quantized::linear_dynamic(%a, %packed_params)
+        return (%r) )";
+  return {
+      {"quantized::linear_dynamic", linear_dynamic, quantized_linear_dynamic},
+  };
+}
+
 } // namespace jit
 } // namespace torch
