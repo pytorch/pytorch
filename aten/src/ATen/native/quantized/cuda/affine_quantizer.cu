@@ -1,7 +1,7 @@
 #include <math.h> 
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/native/cuda/Loops.cuh>
-#include <ATen/native/quantized/quant_affine.h>
+#include <ATen/native/quantized/affine_quantizer.h>
 #include <ATen/native/TensorIterator.h>
 
 namespace at {

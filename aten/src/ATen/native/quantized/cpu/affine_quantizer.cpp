@@ -1,7 +1,7 @@
 #include <ATen/Parallel.h>
 #include <ATen/Dispatch.h>
 #include <ATen/quantized/Quantizer.h>
-#include <ATen/native/quantized/quant_affine.h>
+#include <ATen/native/quantized/affine_quantizer.h>
 
 #ifdef USE_FBGEMM
 #include <fbgemm/QuantUtils.h>

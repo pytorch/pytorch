@@ -4,7 +4,7 @@
 #include <ATen/native/UpSample.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
-#include <ATen/quantized/Quantizer.h>
+#include <ATen/native/quantized/affine_quantizer.h>
 #include <ATen/native/SortingUtils.h>
 
 #include <cmath>
@@ -132,7 +132,7 @@ Tensor qcat_nhwc_kernel(
 
             // Scalar loop
             for (; c < curr_C; ++c) {
-              auto float_val = at::dequantize_val(
+              auto float_val = at::native::dequantize_val(
                   curr_scale,
                   curr_zero_pt,
                   reinterpret_cast<scalar_t*>(iptr)[c]);
@@ -140,7 +140,7 @@ Tensor qcat_nhwc_kernel(
                 float_val = std::max(0.0f, float_val);
               }
               optr[c] =
-                  at::quantize_val<scalar_t>(scale, zero_point, float_val).val_;
+                  at::native::quantize_val<scalar_t>(scale, zero_point, float_val).val_;
             } // for c
 
           } // for tidx
@@ -185,7 +185,7 @@ void qrelu6_kernel(const Tensor& qx, Tensor& qy) {
     using Vec = Vec256<scalar_t>;
     auto iter = TensorIterator::unary_op(qy, qx);
     scalar_t six =
-        at::quantize_val<scalar_t>(qx.q_scale(), qx.q_zero_point(), 6.0);
+        at::native::quantize_val<scalar_t>(qx.q_scale(), qx.q_zero_point(), 6.0);
     auto zero_point_vec = Vec(scalar_t(zero_point));
     auto six_vec = Vec(six);
     cpu_kernel_vec(
@@ -227,9 +227,9 @@ static void leaky_qrelu_out_kernel(Tensor& out, const Tensor& qx,
     cpu_kernel_vec(
         iter,
         [&](scalar_t value_qx) -> scalar_t {
-          auto value_dx = at::dequantize_val(i_scale, i_zp, value_qx);
+          auto value_dx = at::native::dequantize_val(i_scale, i_zp, value_qx);
           auto value_dy = value_dx > 0 ? value_dx : value_dx * negval;
-          return at::quantize_val<scalar_t>(o_scale, o_zp, value_dy);
+          return at::native::quantize_val<scalar_t>(o_scale, o_zp, value_dy);
         },
         [&](qVec qx_vec) -> qVec {
           /* Vectorized implementation creates a multiplicand vector, which has
@@ -285,10 +285,10 @@ void qsigmoid_kernel(const Tensor& qx, Tensor& qy) {
     cpu_kernel_vec(
       iter,
       [&](scalar_t value_qx) -> scalar_t {
-        const auto value_dx = at::dequantize_val(scale, zero_point, value_qx);
+        const auto value_dx = at::native::dequantize_val(scale, zero_point, value_qx);
         const auto value_dy = 1.0f / (1.0 + std::exp((-value_dx)));
-        return at::quantize_val<scalar_t>(output_scale, output_zero_point,
-                                          value_dy);
+        return at::native::quantize_val<scalar_t>(output_scale, output_zero_point,
+                                                  value_dy);
       },
       [&](Vec value_qx) -> Vec {
         auto value_dx = value_qx.dequantize(scale_vec, zero_point_vec,
@@ -348,9 +348,9 @@ void qhardsigmoid_kernel(const Tensor& qx, Tensor& qy) {
     cpu_kernel_vec(
       iter,
       [&](scalar_t qx) -> scalar_t {
-        auto x = at::dequantize_val(scale, zero_point, qx);
+        auto x = at::native::dequantize_val(scale, zero_point, qx);
         const auto y = std::min(std::max(x + 3.0f, 0.0f), 6.0f) / 6.0f;
-        return at::quantize_val<scalar_t>(output_scale, output_zero_point, y);
+        return at::native::quantize_val<scalar_t>(output_scale, output_zero_point, y);
       },
       [&](qVec value_qx) -> qVec {
         auto value_dx = value_qx.dequantize(scale_vec, zero_point_vec,
@@ -385,9 +385,9 @@ void qclamp_kernel(
     auto min = min_scalar.to<float>();
     auto max = max_scalar.to<float>();
     scalar_t min_q =
-        at::quantize_val<scalar_t>(qx.q_scale(), qx.q_zero_point(), min);
+        at::native::quantize_val<scalar_t>(qx.q_scale(), qx.q_zero_point(), min);
     scalar_t max_q =
-        at::quantize_val<scalar_t>(qx.q_scale(), qx.q_zero_point(), max);
+        at::native::quantize_val<scalar_t>(qx.q_scale(), qx.q_zero_point(), max);
     auto min_vec = Vec(min_q);
     auto max_vec = Vec(max_q);
     cpu_kernel_vec(
@@ -426,9 +426,9 @@ void qhardswish_kernel(const Tensor& qx, Tensor& qy) {
     cpu_kernel_vec(
         iter,
         [&](scalar_t value) -> scalar_t {
-          const auto x = at::dequantize_val(i_scale, i_zero_point, value);
+          const auto x = at::native::dequantize_val(i_scale, i_zero_point, value);
           const auto y = x * std::min(std::max(x + 3.0f, 0.0f), 6.0f) / 6.0f;
-          return at::quantize_val<scalar_t>(o_scale, o_zero_point, y);
+          return at::native::quantize_val<scalar_t>(o_scale, o_zero_point, y);
         },
         [&](qVec value) -> qVec {
           auto value_dx = value.dequantize(i_scale_vec, i_zero_point_vec,
@@ -478,9 +478,9 @@ void qtanh_kernel(const Tensor& qx, Tensor& qy) {
     cpu_kernel_vec(
       iter,
       [&](scalar_t value_qx) -> scalar_t {
-        const auto value_dx = at::dequantize_val(scale, zero_point, value_qx);
-        return at::quantize_val<scalar_t>(output_scale, output_zero_point,
-                                          std::tanh(value_dx));
+        const auto value_dx = at::native::dequantize_val(scale, zero_point, value_qx);
+        return at::native::quantize_val<scalar_t>(output_scale, output_zero_point,
+                                                  std::tanh(value_dx));
       },
       [&](Vec value_qx) -> Vec {
         const auto value_dx = value_qx.dequantize(scale_vec, zero_point_vec,
@@ -528,13 +528,13 @@ void qelu_kernel(const Tensor& qx, Scalar alpha, Tensor& qy) {
       iter,
       [&](scalar_t value_qx) -> scalar_t {
         // dequantize
-        const auto x = at::dequantize_val(i_scale, i_zp, value_qx);
+        const auto x = at::native::dequantize_val(i_scale, i_zp, value_qx);
         // ELU
         const auto y = x >= 0
           ? x
           : (alpha_float * (std::exp(x) - 1));
         // quantize
-        return at::quantize_val<scalar_t>(o_scale, o_zp, y);
+        return at::native::quantize_val<scalar_t>(o_scale, o_zp, y);
       },
       [&](qVec value_qx) -> qVec {
         // dequantize
@@ -591,7 +591,7 @@ void qadd_scalar_kernel(Tensor& out, const Tensor& self, Scalar other) {
               static_cast<int32_t>(self_zero_point);
           int32_t c = a_sub_z + other_val;
           scalar_t res =
-              at::requantize_from_int<scalar_t>(multiplier, zero_point, c);
+              at::native::requantize_from_int<scalar_t>(multiplier, zero_point, c);
           if (ReLUFused) {
             res.val_ = std::max<scalar_t::underlying>(res.val_, zero_point);
           }
@@ -643,13 +643,13 @@ void qadd_kernel(Tensor& out, const Tensor& self, const Tensor& other) {
     cpu_kernel_vec(
         iter,
         [&](scalar_t a, scalar_t b) -> scalar_t {
-          const auto da = at::dequantize_val(self_scale, self_zero_point, a);
-          const auto db = at::dequantize_val(other_scale, other_zero_point, b);
+          const auto da = at::native::dequantize_val(self_scale, self_zero_point, a);
+          const auto db = at::native::dequantize_val(other_scale, other_zero_point, b);
           float c = da + db;
           if (ReLUFused) {
             c = std::max<float>(c, 0.0);
           }
-          return at::quantize_val<scalar_t>(scale, zero_point, c);
+          return at::native::quantize_val<scalar_t>(scale, zero_point, c);
         },
         [&](Vec a, Vec b) -> Vec {
           const auto da = a.dequantize(
@@ -704,7 +704,7 @@ void qmul_kernel(Tensor& out, const Tensor& self, const Tensor& other) {
               static_cast<int32_t>(other_zero_point);
           int32_t c = a_sub_z * b_sub_z;
           scalar_t res =
-              at::requantize_from_int<scalar_t>(multiplier, zero_point, c);
+              at::native::requantize_from_int<scalar_t>(multiplier, zero_point, c);
           if (ReLUFused) {
             res.val_ = std::max<scalar_t::underlying>(res.val_, zero_point);
           }
@@ -872,7 +872,7 @@ void do_avg_pool_on_AVX2(
       float acc_fp[vec_width];
       acc.store(acc_int);
       vec256::convert(acc_int, acc_fp, vec_width);
-      at::quantize_vec<T>(
+      at::native::quantize_vec<T>(
           1.0f / multiplier,
           output_zero_point,
           acc_fp,
@@ -954,9 +954,9 @@ void qadaptive_avg_pool2d_nhwc_kernel(
             }
           }
           // clamp
-          o_p[c] = at::quantize_val<scalar_t>(
-                       1.0f / multiplier, qy.q_zero_point(), acc_int32)
-                       .val_;
+          o_p[c] = at::native::quantize_val<scalar_t>(
+                               1.0f / multiplier, qy.q_zero_point(), acc_int32)
+                               .val_;
         } // c
       } // oh
     } // ow
@@ -1054,9 +1054,9 @@ void qavg_pool2d_nhwc_kernel(
           }
           double acc_fp = acc_int32 * 1.0;
           // clamp
-          o_p[c] = at::quantize_val<scalar_t>(
-                       1.0f / multiplier, qy.q_zero_point(), acc_fp)
-                       .val_;
+          o_p[c] = at::native::quantize_val<scalar_t>(
+                               1.0f / multiplier, qy.q_zero_point(), acc_fp)
+                               .val_;
         } // c
       } // ow
     } // oh
@@ -1168,9 +1168,9 @@ void qavg_pool3d_nhwc_kernel(
             }
             double acc_fp = acc_int32 * 1.0;
             // clamp
-            o_p[c] = at::quantize_val<scalar_t>(
-                         1.0f / multiplier, qy.q_zero_point(), acc_fp)
-                         .val_;
+            o_p[c] = at::native::quantize_val<scalar_t>(
+                                 1.0f / multiplier, qy.q_zero_point(), acc_fp)
+                                 .val_;
           } // c
         } // ow
       } // oh
@@ -1228,7 +1228,7 @@ int64_t do_quantized_bilinear_on_AVX2(
           input_zero_point_v;
       float result_fp[vec_width];
       result.store(result_fp);
-      at::quantize_vec<T>(
+      at::native::quantize_vec<T>(
           inverse_scale,
           output_zero_point,
           result_fp,
@@ -1321,11 +1321,11 @@ void qupsample_bilinear2d_nhwc_kernel(
                     h1lambda *
                         (w0lambda * pos1[h1p * input_width * channels] +
                          w1lambda * pos1[(h1p * input_width + w1p) * channels]);
-                pos2[0] = at::quantize_val<scalar_t>(
-                              inverse_scale,
-                              output.q_zero_point(),
-                              result - input.q_zero_point())
-                              .val_;
+                pos2[0] = at::native::quantize_val<scalar_t>(
+                                      inverse_scale,
+                                      output.q_zero_point(),
+                                      result - input.q_zero_point())
+                                      .val_;
                 pos1 += 1;
                 pos2 += 1;
               } // c
