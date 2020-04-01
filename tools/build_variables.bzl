@@ -32,7 +32,6 @@ libtorch_sources = [
     ":generate-code=VariableType_2.cpp",
     ":generate-code=VariableType_3.cpp",
     ":generate-code=VariableType_4.cpp",
-    "torch/csrc/ThreadLocalState.cpp",
     "torch/csrc/autograd/VariableTypeManual.cpp",
     "torch/csrc/autograd/anomaly_mode.cpp",
     "torch/csrc/autograd/autograd.cpp",
@@ -87,6 +86,7 @@ libtorch_sources = [
     "torch/csrc/jit/ir/type_hashing.cpp",
     "torch/csrc/jit/serialization/export.cpp",
     "torch/csrc/jit/serialization/export_module.cpp",
+    "torch/csrc/jit/serialization/type_name_uniquer.cpp",
     "torch/csrc/jit/passes/pass_manager.cpp",
     "torch/csrc/jit/serialization/pickler.cpp",
     "torch/csrc/jit/serialization/unpickler.cpp",
@@ -160,6 +160,7 @@ libtorch_sources = [
     "torch/csrc/jit/runtime/register_special_ops.cpp",
     "torch/csrc/jit/ir/scope.cpp",
     "torch/csrc/jit/frontend/ir_emitter.cpp",
+    "torch/csrc/jit/frontend/name_mangler.cpp",
     "torch/csrc/jit/frontend/edit_distance.cpp",
     "torch/csrc/jit/runtime/logging.cpp",
     "torch/csrc/jit/frontend/convert_to_ssa.cpp",
@@ -204,9 +205,11 @@ libtorch_sources = [
     "torch/csrc/jit/tensorexpr/eval.cpp",
     "torch/csrc/jit/tensorexpr/expr.cpp",
     "torch/csrc/jit/tensorexpr/function.cpp",
+    "torch/csrc/jit/tensorexpr/hash_provider.cpp",
     "torch/csrc/jit/tensorexpr/ir.cpp",
     "torch/csrc/jit/tensorexpr/ir_mutator.cpp",
     "torch/csrc/jit/tensorexpr/ir_printer.cpp",
+    "torch/csrc/jit/tensorexpr/ir_simplifier.cpp",
     "torch/csrc/jit/tensorexpr/ir_visitor.cpp",
     "torch/csrc/jit/tensorexpr/kernel.cpp",
     "torch/csrc/jit/tensorexpr/llvm_codegen.cpp",
@@ -301,12 +304,7 @@ libtorch_python_cuda_sources = [
 def add_torch_libs():
     r = {}
 
-    torch_cpp_headers = {
-        header[len("torch/csrc/api/include/torch/"):]: header
-        for header in native.glob(["torch/csrc/api/include/**/*.h"])
-    }
-
-    torch_cpp_headers["script.h"] = "torch/script.h"
+    torch_cpp_headers = native.glob(["torch/csrc/api/include/**/*.h"]) + ["torch/script.h"]
 
     libtorch_python_sources = [
         ":generate-code=python_functions.cpp",
@@ -390,6 +388,7 @@ def add_torch_libs():
         "torch/csrc/utils/invalid_arguments.cpp",
         "torch/csrc/utils/object_ptr.cpp",
         "torch/csrc/utils/python_arg_parser.cpp",
+        "torch/csrc/utils/python_dispatch.cpp",
         "torch/csrc/utils/structseq.cpp",
         "torch/csrc/utils/tensor_apply.cpp",
         "torch/csrc/utils/tensor_dtypes.cpp",
@@ -401,9 +400,11 @@ def add_torch_libs():
         "torch/csrc/utils/tensor_numpy.cpp",
         "torch/csrc/utils/tensor_types.cpp",
         "test/cpp/jit/torch_python_test.cpp",
+        "test/cpp/tensorexpr/padded_buffer.cpp",
     ]
 
     libtorch_python_sources.extend(native.glob(["test/cpp/jit/test_*.cpp"]))
+    libtorch_python_sources.extend(native.glob(["test/cpp/tensorexpr/test_*.cpp"]))
 
     compiler_flags_cpu = [
         "-DUSE_C10D",
@@ -433,28 +434,22 @@ def add_torch_libs():
                 "-Wno-unknown-pragmas",
             ],
         },
-        "headers": native.glob(["torch/csrc/**/*.h", "torch/csrc/generic/*.cpp", "test/cpp/jit/*.h"]),
+        "headers": native.glob(["torch/csrc/**/*.h", "torch/csrc/generic/*.cpp", "test/cpp/jit/*.h", "test/cpp/tensorexpr/*.h"]),
     }
-    propagated_pp_flags = [
-        "-Icaffe2",
-        "-Icaffe2/torch/csrc/api/include",
-        "-Icaffe2/torch/csrc",
-        "-Icaffe2/torch/csrc/nn",
-        "-Icaffe2/torch/lib",
-        # T59288529: Temporary hack to support building from xplat.
-        # Remove with a proper fix.
-        "-Ifbcode/caffe2",
-        "-Ifbcode/caffe2/torch/csrc/api/include",
-        "-Ifbcode/caffe2/torch/csrc",
-        "-Ifbcode/caffe2/torch/csrc/nn",
-        "-Ifbcode/caffe2/torch/lib",
+    include_directories = [
+        "..",
+        ".",
+        "torch/csrc/api/include",
+        "torch/csrc",
+        "torch/csrc/nn",
+        "torch/lib",
     ]
 
     cpp_library(
         name = "libtorch",
         srcs = libtorch_sources,
         link_whole = True,
-        propagated_pp_flags = propagated_pp_flags,
+        include_directories = include_directories,
         deps = [
             ":generated-autograd-headers",
             ":generated-autograd-headers-bare",
@@ -476,8 +471,9 @@ def add_torch_libs():
         name = "libtorch_cuda",
         srcs = libtorch_cuda_sources,
         link_whole = True,
+        include_directories = include_directories,
         # TODO: putting USE_CUDA in propagated_pp_flags is error-prone
-        propagated_pp_flags = propagated_pp_flags + [
+        propagated_pp_flags = [
             "-DUSE_CUDA",
         ],
         deps = [
@@ -516,7 +512,10 @@ def add_torch_libs():
         name = "torch-cpp-cuda",
         srcs = torch_cpp_srcs,
         headers = torch_cpp_headers,
-        header_namespace = "torch",
+        include_directories = [
+            ".",
+            "torch/csrc/api/include/",
+        ],
         deps = [
             ":libtorch_cuda",
             "//caffe2/torch/fb/init:init",
@@ -531,7 +530,10 @@ def add_torch_libs():
         name = "torch-cpp-cpu",
         srcs = torch_cpp_srcs,
         headers = torch_cpp_headers,
-        header_namespace = "torch",
+        include_directories = [
+            ".",
+            "torch/csrc/api/include/",
+        ],
         deps = [
             ":libtorch",
             "//caffe2/torch/fb/init:init",
