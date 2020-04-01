@@ -189,12 +189,16 @@ void initJITBindings(PyObject* module) {
           py::arg("is_dynamic") = false)
       .def(
           "_jit_pass_insert_quant_dequant",
-          [](Module& module, const std::string& method_name, bool inplace) {
-            return InsertQuantDeQuant(module, method_name, inplace);
+          [](Module& module,
+             const std::string& method_name,
+             bool inplace,
+             bool is_dynamic) {
+            return InsertQuantDeQuant(module, method_name, inplace, is_dynamic);
           },
           py::arg("module"),
           py::arg("method_name"),
-          py::arg("inplace") = false)
+          py::arg("inplace") = false,
+          py::arg("is_dynamic") = false)
       .def(
           "_jit_pass_insert_prepack_unpack",
           [](std::shared_ptr<Graph>& g) { return InsertPrepackUnpack(g); })
@@ -225,7 +229,13 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_swap_functional_linear",
           [](Module& module) { SwapFunctionalLinear(module); })
-      .def("_jit_pass_quant_finalize", &Finalize)
+      .def(
+          "_jit_pass_quant_finalize",
+          [](Module& module, bool is_dynamic) {
+            return Finalize(module, is_dynamic);
+          },
+          py::arg("module"),
+          py::arg("is_dynamic") = false)
       .def(
           "_jit_pass_pattern_based_rewrite",
           [](const Module& m) { return PatternBasedRewrite(m); })
