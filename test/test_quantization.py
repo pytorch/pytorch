@@ -21,7 +21,7 @@ from torch.quantization import default_histogram_observer
 from torch.quantization import default_observer
 from torch.quantization import default_per_channel_weight_observer
 from torch.quantization import default_per_channel_qconfig
-from torch.quantization._quantize_script import quantize_script, quantize_dynamic_script
+from torch.quantization._quantize_script import quantize_script, quantize_dynamic_script, prepare_dynamic_script
 
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_UBSAN, IS_WINDOWS
 from torch.testing._internal.common_quantization import QuantizationTestCase, \
@@ -1098,8 +1098,14 @@ class GraphModePostTrainingQuantTest(QuantizationTestCase):
         model_traced = torch.jit.trace(linear_model, self.calib_data[0][0])
         model_script = torch.jit.script(linear_model)
         result_eager = model_eager(self.calib_data[0][0])
-
-        for model_under_test in [model_traced, model_script]:
+        print(model_script.graph)
+        eager_script = torch.jit.script(model_eager)
+        print(eager_script)
+        from torch.testing._internal.jit_utils import get_forward_graph
+        print(get_forward_graph(model_script.fc1._c))
+        for model_under_test in [model_script]:
+            m = prepare_dynamic_script(model_script, {'': default_dynamic_qconfig})
+            print("Graph after observers", m.graph)
             model_quantized = quantize_dynamic_script(
                 model_under_test,
                 qconfig_dict,
@@ -1117,6 +1123,18 @@ class GraphModePostTrainingQuantTest(QuantizationTestCase):
                 debug=True)
             self.assertEqual(model_fake_quantized(self.calib_data[0][0]), result_eager)
 
+    def test_single_lstm_dynamic(self):
+        model = LSTMDynamicModel().eval()
+        qconfig_dict = {'': default_dynamic_qconfig}
+        model_int8 = quantize_dynamic(model=model, dtype=torch.qint8)
+        model_script = torch.jit.script(model).eval()
+        print(model_script.graph)
+        from torch.testing._internal.jit_utils import get_module_method
+        #print(get_module_method(model_script, 'lstm', 'forward_tensor').graph)
+        from torch.quantization import default_dynamic_lstm_qconfig
+        m = prepare_dynamic_script(model_script, {'': default_dynamic_qconfig})
+        print(m.graph)
+        print(get_module_method(model_script, 'lstm', 'forward__0').graph)
 
 class FunctionalModuleTest(QuantizationTestCase):
     # Histogram Observers are slow, so have no-deadline to ensure test doesn't time out

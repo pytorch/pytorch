@@ -333,18 +333,20 @@ class MinMaxObserver(_ObserverBase):
                                        quantization for quint8")
 
     def forward(self, x_orig):
+        # type: (List[Tensor]) -> (List[Tensor])
         r"""Records the running minimum and maximum of ``x``."""
-        x = x_orig.detach()  # avoid keeping autograd tape
-        min_val = self.min_val
-        max_val = self.max_val
-        if min_val.numel() == 0 or max_val.numel() == 0:
-            min_val = torch.min(x)
-            max_val = torch.max(x)
-        else:
-            min_val = torch.min(torch.min(x), min_val)
-            max_val = torch.max(torch.max(x), max_val)
-        self.min_val = min_val
-        self.max_val = max_val
+        for t in x_orig:
+            x = t.detach()  # avoid keeping autograd tape
+            min_val = self.min_val
+            max_val = self.max_val
+            if min_val.numel() == 0 or max_val.numel() == 0:
+                min_val = torch.min(x)
+                max_val = torch.max(x)
+            else:
+                min_val = torch.min(torch.min(x), min_val)
+                max_val = torch.max(torch.max(x), max_val)
+            self.min_val = min_val
+            self.max_val = max_val
         return x_orig
 
     @torch.jit.export
@@ -1003,6 +1005,28 @@ class NoopObserver(ObserverBase):
     def get_qparams(self):
         return self.calculate_qparams()
 
+class TensorListObserver(_ObserverBase):
+
+    def __init__(self, cls, dtype=torch.quint8, qscheme=torch.per_tensor_affine, reduce_range=False):
+        super(TensorListObserver, self).__init__(dtype=dtype,
+                                                 qscheme=qscheme,
+                                                 reduce_range=reduce_range)
+        self._cls = cls
+        self._observers = []
+
+    def forward(self, input):
+        # type (List[Tensor]) -> List[Tensor]
+        for t in input:
+            new_obs = self._cls(dtype=dtype, qscheme=qscheme, reduce_range=reduce_range)
+            new_obs.forward(t)
+            self._observers.append(new_obs)
+
+    def calculate_qparams(self):
+        raise Exception("calculate_qparams should not be called for TensorListObserver")
+
+    def get_qparams(self):
+        return self.calculate_qparams()
+
 
 # Restrict activations to be in the range (0,127)
 default_observer = MinMaxObserver.with_args(reduce_range=True)
@@ -1011,3 +1035,4 @@ default_weight_observer = MinMaxObserver.with_args(dtype=torch.qint8, qscheme=to
 default_histogram_observer = HistogramObserver.with_args(reduce_range=True)
 default_per_channel_weight_observer = PerChannelMinMaxObserver.with_args(dtype=torch.qint8, qscheme=torch.per_channel_symmetric)
 default_dynamic_quant_observer = MinMaxDynamicQuantObserver
+default_tensorlist_observer = TensorListObserver.with_args(cls=MinMaxObserver, dtype=torch.qint8, qscheme=torch.per_tensor_symmetric)
