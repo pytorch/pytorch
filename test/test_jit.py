@@ -5910,6 +5910,7 @@ def foo(x):
         with self.assertRaisesRegex(RuntimeError, 'Tried to instantiate class foo.IDontExist but it does not exist!'):
             torch.classes.foo.IDontExist(3, 4, 5)
 
+
     def test_torchbind_lower_graph(self):
         class LinearModel(torch.nn.Module):
             def __init__(self):
