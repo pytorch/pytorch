@@ -12,6 +12,7 @@
 
 namespace torch {
 namespace optim {
+
 AdamOptions::AdamOptions(double lr) : lr_(lr) {}
 
 bool operator==(const AdamOptions& lhs, const AdamOptions& rhs) {
@@ -43,8 +44,7 @@ bool operator==(const AdamParamState& lhs, const AdamParamState& rhs) {
   return (lhs.step() == rhs.step()) &&
           torch::equal(lhs.exp_avg(), rhs.exp_avg()) &&
           torch::equal(lhs.exp_avg_sq(), rhs.exp_avg_sq()) &&
-          ((!lhs.max_exp_avg_sq().defined() && !rhs.max_exp_avg_sq().defined()) ||
-           (lhs.max_exp_avg_sq().defined() && rhs.max_exp_avg_sq().defined() && torch::equal(lhs.max_exp_avg_sq(), rhs.max_exp_avg_sq())));
+          torch::equal_if_defined(lhs.max_exp_avg_sq(), rhs.max_exp_avg_sq());
 }
 
 void AdamParamState::serialize(torch::serialize::OutputArchive& archive) const {
@@ -128,22 +128,6 @@ Tensor Adam::step(LossClosure closure)  {
     }
   }
   return loss;
-}
-
-void Adam::add_parameters(const std::vector<Tensor>& parameters) {
-  return _add_parameters_new_design(parameters);
-}
-
-const std::vector<Tensor>& Adam::parameters() const noexcept {
-  return _parameters_new_design();
-}
-
-std::vector<Tensor>& Adam::parameters() noexcept {
-  return _parameters_new_design();
-}
-
-size_t Adam::size() const noexcept {
-  return _size_new_design();
 }
 
 void Adam::save(serialize::OutputArchive& archive) const {

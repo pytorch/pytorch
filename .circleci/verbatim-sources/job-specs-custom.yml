@@ -8,7 +8,7 @@
       image: ubuntu-1604:201903-01
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-    - should_run_job
+    - attach_scripts
     - setup_linux_system_environment
     - setup_ci_environment
     - run:
@@ -53,7 +53,7 @@
       image: ubuntu-1604:201903-01
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-    - should_run_job
+    - attach_scripts
     - setup_linux_system_environment
     - setup_ci_environment
     - run:
@@ -96,7 +96,7 @@
       xcode: "9.4.1"
     steps:
       # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-      - should_run_job
+      - attach_scripts
       - checkout
       - run_brew_for_macos_build
       - run:
@@ -137,7 +137,7 @@
     steps:
       # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
       # This workspace also carries binaries from the build job
-      - should_run_job
+      - attach_scripts
       - run_brew_for_macos_build
       - run:
           name: Test
@@ -163,7 +163,7 @@
     machine:
       image: ubuntu-1604:201903-01
     steps:
-    - should_run_job
+    - attach_scripts
     - setup_linux_system_environment
     - checkout
     - setup_ci_environment
@@ -249,7 +249,7 @@
     machine:
       image: ubuntu-1604:201903-01
     steps:
-    - should_run_job
+    - attach_scripts
     - setup_linux_system_environment
     - checkout
     - setup_ci_environment
@@ -285,7 +285,7 @@
     machine:
       image: ubuntu-1604:201903-01
     steps:
-    - should_run_job
+    - attach_scripts
     - run:
         name: filter out not PR runs
         no_output_timeout: "5m"
@@ -328,7 +328,7 @@
       xcode: "11.2.1"
     steps:
       # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-      - should_run_job
+      - attach_scripts
       - checkout
       - run_brew_for_ios_build
       - run:

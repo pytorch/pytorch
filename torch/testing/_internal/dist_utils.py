@@ -2,6 +2,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 import time
 from functools import partial, wraps
+import re
 
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
@@ -26,12 +27,19 @@ TEST_CONFIG = TestConfig()
 INIT_METHOD_TEMPLATE = "file://{file_name}"
 
 
-def dist_init(old_test_method=None, setup_rpc=True, clean_shutdown=True):
+def dist_init(old_test_method=None, setup_rpc=True, clean_shutdown=True,
+              faulty_messages=None):
     """
     We use this decorator for setting up and tearing down state since
     MultiProcessTestCase runs each `test*` method in a separate process and
     each process just runs the `test*` method without actually calling
     'setUp' and 'tearDown' methods of unittest.
+
+    Note: pass the string representation of MessageTypes that should be used
+    with the faulty agent's send function. By default, all retriable messages
+    ("RREF_FORK_REQUEST", "RREF_CHILD_ACCEPT", "RREF_USER_DELETE",
+    "CLEANUP_AUTOGRAD_CONTEXT_REQ") will use the faulty send (this default is
+    set from faulty_rpc_agent_test_fixture.py).
     """
 
     # If we use dist_init without arguments (ex: @dist_init), old_test_method is
@@ -45,6 +53,7 @@ def dist_init(old_test_method=None, setup_rpc=True, clean_shutdown=True):
             dist_init,
             setup_rpc=setup_rpc,
             clean_shutdown=clean_shutdown,
+            faulty_messages=faulty_messages,
         )
 
     @wraps(old_test_method)
@@ -55,6 +64,9 @@ def dist_init(old_test_method=None, setup_rpc=True, clean_shutdown=True):
         api._ignore_rref_leak = False
 
         self.worker_id = self.rank
+
+        if faulty_messages:
+            _build_faulty_backend_options(faulty_messages)
 
         if setup_rpc:
             rpc.init_rpc(
@@ -84,31 +96,59 @@ TEST_CONFIG.build_rpc_backend_options = lambda test_object: rpc.backend_registry
     num_send_recv_threads=8,
 )
 
+def _build_faulty_backend_options(faulty_messages):
+    '''
+    Constructs the backend options object for the faulty process group agent
+    based on the faulty_messages input to dist_init.
+    '''
+    TEST_CONFIG.build_rpc_backend_options = lambda test_object: rpc.backend_registry.construct_rpc_backend_options(
+        test_object.rpc_backend,
+        init_method=test_object.init_method,
+        num_send_recv_threads=8,
+        num_fail_sends=1,
+        messages_to_fail=faulty_messages,
+    )
+
 def noop():
     pass
 
-def wait_until_node_failure(rank):
+def wait_until_node_failure(rank, expected_error_regex=".*"):
     '''
     Loops until an RPC to the given rank fails. This is used to
     indicate that the node has failed in unit tests.
+    Args:
+    rank (int): Rank of the node expected to fail
+    expected_error_regex (optional, str): Regex of exception message expected. Useful to ensure a specific failure
+    occurs, not just any.
     '''
     while True:
         try:
             rpc.rpc_sync("worker{}".format(rank), noop, args=())
-            time.sleep(0.5)
-        except Exception:
-            break
+            time.sleep(0.1)
+        except Exception as e:
+            if re.match(pattern=expected_error_regex, string=str(e)):
+                return str(e)
 
 # Shutdown sequence is not well defined, so we may see any of the following errors
 # When running tests that simulate errors via a shutdown on the remote end.
-def get_shutdown_error_regex():
-    error_regexes = [
-        "Request aborted during client shutdown",
-        "worker.: Error in reponse from worker.: server shutting down",
-        "worker.: Error in response from worker.: Failed to write to remote endpoint",
-        "worker.: Error in response from worker.: AsyncSocketException: recv() failed",
-    ]
+def get_shutdown_error_regex(rpc_backend):
+    """
+    Return various error message we may see from RPC agents while running tests that check for failures. This function
+    is used to match against possible errors to ensure failures were raised properly.
+    """
+    if rpc_backend == "PROCESS_GROUP":
+        error_regexes = ["Encountered exception in ProcessGroupAgent::enqueueSend"]
+    else:
+        error_regexes = [
+            "Request aborted during client shutdown",
+            "worker.: Error in reponse from worker.: server shutting down",
+            "worker.: Error in response from worker.: Failed to write to remote endpoint",
+            "worker.: Error in response from worker.: AsyncSocketException: recv() failed",
+            "worker.: Error in response from worker.: Dropping unsent request"
+        ]
     error_regex = "".join(["({})|".format(error_str) for error_str in error_regexes])
+    # Strip out the last | or else it will match anything
+    error_regex = error_regex[:-1]
     return error_regex
 
 def wait_until_pending_users_flushed():

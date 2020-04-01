@@ -1,6 +1,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/cuda/Loops.cuh>
+#include <ATen/native/cuda/zmath.cuh>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/BinaryOps.h>
 
@@ -39,8 +40,28 @@ void mse_kernel_cuda(TensorIterator& iter) {
   });
 }
 
+void fmod_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "fmod_cuda", [&]() {
+    gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+      return ::fmod(a, b);
+    });
+  });
+}
+
+void fmod_scalar_kernel_cuda(TensorIterator& iter, Scalar divisor) {
+  AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "fmod_scalar_cuda", [&]() {
+    using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
+    auto div = thrust_t(divisor.to<scalar_t>());
+    gpu_kernel(iter, [div]GPU_LAMBDA(thrust_t a) -> thrust_t {
+      return ::fmod(a, div);
+    });
+  });
+}
+
 REGISTER_DISPATCH(atan2_stub, &atan2_kernel_cuda);
 REGISTER_DISPATCH(smooth_l1_stub, &smooth_l1_kernel_cuda);
 REGISTER_DISPATCH(mse_stub, &mse_kernel_cuda);
+REGISTER_DISPATCH(fmod_stub, &fmod_kernel_cuda);
+REGISTER_DISPATCH(fmod_scalar_stub, &fmod_scalar_kernel_cuda)
 
 }} // namespace at::native

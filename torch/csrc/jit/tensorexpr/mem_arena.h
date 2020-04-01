@@ -1,6 +1,6 @@
 #pragma once
+#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <vector>
-#include "torch/csrc/WindowsTorchApiMacro.h"
 
 namespace torch {
 namespace jit {
