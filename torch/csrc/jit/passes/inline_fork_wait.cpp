@@ -23,7 +23,7 @@ void InlineForkWait(
     future_remap[node->output()] = output.at(0);
   }
 
-  // Remove aten::wait if it's input future is returned by prim::fork.
+  // Remove aten::wait if its input future is returned by prim::fork.
   auto reversed = b->nodes().reverse();
   for (auto it = reversed.begin(); it != reversed.end(); it++) {
     auto node = *it;
