@@ -223,137 +223,6 @@ class _TestTorchMixin(object):
         self.assertRaises(RuntimeError, lambda: torch.addr(m, v, s))
         self.assertRaises(RuntimeError, lambda: torch.addr(m, s, v))
 
-    def _test_math(self, torchfn, mathfn, input=None, test_expand=False, rtol=None, atol=None):
-        if input is None:
-            input = []
-            input.append(list(range(-5, 5)))
-            input.append([0 for x in range(-5, 5)])
-            input.append([x + 1e-6 for x in range(-5, 5)])
-            # Some vectorized implementations don't support large ranges
-            input.append([x + 1e10 for x in range(-5, 5)])
-            input.append([x - 1e10 for x in range(-5, 5)])
-            input.append(torch.randn(10).tolist())
-            input.append((torch.randn(10) + 1e6).tolist())
-            input.append([math.pi * (x / 2) for x in range(-5, 5)])
-
-        def compare_reference(input, dtype):
-            input = torch.tensor(input, dtype=dtype)
-            res1 = torchfn(input.clone())
-            res2 = input.clone().apply_(mathfn)
-            torch.testing.assert_allclose(res1, res2, rtol=rtol, atol=atol)
-
-        # compare against the reference math function
-        compare_reference(input, torch.double)
-        compare_reference(input, torch.float)
-
-        def check_non_contiguous(shape, dtype):
-            contig = torch.randn(shape, dtype=dtype)
-            non_contig = torch.empty(shape + (2,), dtype=dtype)[..., 0]
-            non_contig.copy_(contig)
-            self.assertFalse(non_contig.is_contiguous())
-            self.assertEqual(torchfn(contig), torchfn(non_contig), 'non-contiguous')
-
-        # compare application against contiguous vs. non-contiguous
-        check_non_contiguous((5, 7), torch.double)
-        check_non_contiguous((1024,), torch.double)
-        check_non_contiguous((5, 7), torch.float)
-        check_non_contiguous((1024,), torch.float)
-
-        def check_non_contiguous_index(dtype):
-            contig = torch.randn((2, 2, 1, 2), dtype=dtype)
-            non_contig = contig[:, 1, ...]
-            contig = non_contig.clone()
-            self.assertFalse(non_contig.is_contiguous())
-            self.assertEqual(torchfn(contig), torchfn(non_contig), 'non-contiguous index')
-
-        check_non_contiguous_index(torch.float)
-        check_non_contiguous_index(torch.double)
-
-        def check_non_contiguous_expand(shape, dtype):
-            contig = torch.randn(shape, dtype=dtype)
-            non_contig = contig.clone().expand(3, -1, -1)
-            self.assertFalse(non_contig.is_contiguous())
-            contig = torchfn(contig)
-            non_contig = torchfn(non_contig)
-            for i in range(3):
-                self.assertEqual(contig, non_contig[i], 'non-contiguous expand[' + str(i) + ']')
-
-        # Expand is not defined for in-place operations
-        if test_expand:
-            # The size 1 case is special as it leads to 0 stride and needs to persists
-            check_non_contiguous_expand((1, 3), torch.double)
-            check_non_contiguous_expand((1, 7), torch.double)
-            check_non_contiguous_expand((5, 7), torch.float)
-
-        # If size(dim) == 1, stride(dim) is not defined.
-        # The code needs to be able to handle this
-        def check_contiguous_size1(dtype):
-            contig = torch.randn((5, 100), dtype=dtype)
-            contig = contig[:1, :50]
-            contig2 = torch.empty(contig.size(), dtype=dtype)
-            contig2.copy_(contig)
-            self.assertTrue(contig.is_contiguous())
-            self.assertTrue(contig2.is_contiguous())
-            self.assertEqual(torchfn(contig), torchfn(contig2), 'contiguous size1')
-
-        check_contiguous_size1(torch.double)
-        check_contiguous_size1(torch.float)
-
-        def check_contiguous_size1_largedim(dtype):
-            contig = torch.randn((5, 2, 3, 1, 4, 5, 3, 2, 1, 2, 3, 4), dtype=dtype)
-            contig = contig[:1, :, :, :, :, :, :, :, :, :, :, :]
-            contig2 = torch.empty(contig.size(), dtype=dtype)
-            contig2.copy_(contig)
-            self.assertTrue(contig.is_contiguous())
-            self.assertTrue(contig2.is_contiguous())
-            self.assertEqual(torchfn(contig), torchfn(contig2), 'contiguous size1')
-
-        check_contiguous_size1_largedim(torch.double)
-        check_contiguous_size1_largedim(torch.float)
-
-        def check_large(dtype):
-            input = torch.randn(1024, 512, dtype=dtype)
-            actual = torchfn(input)
-            expected = torch.stack([torchfn(slice) for slice in input])
-            self.assertEqual(actual, expected, 'large')
-
-        # compare large tensor vs. repeated small applications to expose
-        # possible parallelism bugs.
-        check_large(torch.double)
-        check_large(torch.float)
-
-    def __test_math_by_name(self, function_name, mathfn, selffn):
-        mathfn = getattr(math, mathfn)
-        if selffn:
-            def torchfn(x):
-                return getattr(x, function_name)()
-        else:
-            torchfn = getattr(torch, function_name)
-        self._test_math(torchfn, mathfn, test_expand=(not selffn))
-
-    def _test_math_by_name(self, function_name, test_self=True):
-        if test_self:
-            self.__test_math_by_name(function_name + "_", function_name, True)
-        self.__test_math_by_name(function_name, function_name, False)
-
-    def test_sin(self):
-        self._test_math_by_name('sin')
-
-    def test_sinh(self):
-        def sinh(x):
-            try:
-                return math.sinh(x)
-            except OverflowError:
-                return inf if x > 0 else -inf
-        self._test_math(torch.sinh, sinh)
-
-    def test_lgamma(self):
-        def lgamma(x):
-            if x <= 0 and x == int(x):
-                return inf
-            return math.lgamma(x)
-        self._test_math(torch.lgamma, lgamma)
-
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     def test_mvlgamma(self):
         from scipy.special import multigammaln
@@ -375,180 +244,10 @@ class _TestTorchMixin(object):
         with self.assertRaisesRegex(RuntimeError, "support for msnpu"):
             torch.zeros(1, device=torch.device('msnpu'))
 
-    def _digamma_input(self, test_poles=True):
-        input = []
-        input.append((torch.randn(10).abs() + 1e-4).tolist())
-        input.append((torch.randn(10).abs() + 1e6).tolist())
-        zeros = torch.linspace(-9.5, -0.5, 10)
-        input.append(zeros.tolist())
-        input.append((zeros - 0.49).tolist())
-        input.append((zeros + 0.49).tolist())
-        input.append((zeros + (torch.rand(10) * 0.99) - 0.5).tolist())
-
-        if test_poles:
-            input.append([-0.999999994, -1.999999994, -2.0000000111,
-                          -100.99999994, -1931.99999994, 0.000000111,
-                          -0.000000111, 0, -2, -329])
-        return input
-
-    @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
-    def test_digamma(self):
-        from scipy.special import digamma
-
-        # scipy 1.1.0 changed when it returns +/-inf vs. NaN
-        def torch_digamma_without_inf(inp):
-            res = torch.digamma(inp)
-            res[(res == -inf) | (res == inf)] = nan
-            return res
-
-        def scipy_digamma_without_inf(inp):
-            res = digamma(inp)
-            if np.isscalar(res):
-                return res if np.isfinite(res) else nan
-            res[np.isinf(res)] = nan
-            return res
-
-        self._test_math(torch_digamma_without_inf, scipy_digamma_without_inf, self._digamma_input())
-
-    @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
-    def test_polygamma(self):
-        from scipy.special import polygamma
-        for n in [0, 1]:
-            self._test_math(lambda x: torch.polygamma(n, x),
-                            lambda x: polygamma(n, x).item(),
-                            self._digamma_input(test_poles=False))
-
+    def test_polygamma_neg(self):
         with self.assertRaisesRegex(RuntimeError, r'polygamma\(n, x\) does not support negative n\.'):
             torch.polygamma(-1, torch.tensor([1.0, 2.0]))
 
-    def test_asin(self):
-        self._test_math(torch.asin, lambda x: math.asin(x) if abs(x) <= 1 else nan)
-
-    def test_cos(self):
-        self._test_math_by_name('cos')
-
-    def test_cosh(self):
-        def cosh(x):
-            try:
-                return math.cosh(x)
-            except OverflowError:
-                # Return inf on overflow.
-                # See http://en.cppreference.com/w/cpp/numeric/math/cosh
-                return inf
-        self._test_math(torch.cosh, cosh)
-
-    def test_acos(self):
-        self._test_math(torch.acos, lambda x: math.acos(x) if abs(x) <= 1 else nan)
-
-    def test_tan(self):
-        self._test_math_by_name('tan')
-
-    def test_tanh(self):
-        self._test_math_by_name('tanh')
-
-    def test_atan(self):
-        self._test_math_by_name('atan')
-
-    def test_log(self):
-        def log(x):
-            if x == 0:
-                return -inf
-            elif x < 0:
-                return nan
-            return math.log(x)
-        self._test_math(torch.log, log)
-
-    def test_log10(self):
-        def log10(x):
-            if x == 0:
-                return -inf
-            elif x < 0:
-                return nan
-            return math.log10(x)
-        self._test_math(torch.log10, log10)
-
-    def test_log1p(self):
-        def log1p(x):
-            if x == -1:
-                return -inf
-            elif x < -1:
-                return nan
-            return math.log1p(x)
-        self._test_math(torch.log1p, log1p)
-
-    def test_log2(self):
-        def log2(x):
-            if x == 0:
-                return -inf
-            elif x < 0:
-                return nan
-            try:
-                return math.log2(x)
-            except AttributeError:
-                return math.log(x, 2)
-        self._test_math(torch.log2, log2)
-
-    def test_sqrt(self):
-        self._test_math(torch.sqrt, lambda x: math.sqrt(x) if x >= 0 else nan)
-
-    def test_erf(self):
-        self._test_math_by_name('erf')
-
-    def test_erfc(self):
-        self._test_math_by_name('erfc')
-
-    def test_exp(self):
-        def exp(x):
-            try:
-                return math.exp(x)
-            except OverflowError:
-                return inf
-        self._test_math(torch.exp, exp)
-
-    def test_expm1(self):
-        def expm1(x):
-            try:
-                return math.expm1(x)
-            except OverflowError:
-                return inf
-        self._test_math(torch.expm1, expm1)
-
-    def test_floor(self):
-        self._test_math_by_name('floor')
-
-        # Note: this is consistent with NumPy
-        with self.assertRaises(RuntimeError):
-            torch.floor(torch.tensor((1 + 1j)))
-
-    def test_ceil(self):
-        self._test_math_by_name('ceil')
-
-        # Note: this is consistent with NumPy
-        with self.assertRaises(RuntimeError):
-            torch.ceil(torch.tensor((1 + 1j)))
-
-    def test_rsqrt(self):
-        def rsqrt(x):
-            if x == 0:
-                return inf
-            elif x < 0:
-                return nan
-            return 1.0 / math.sqrt(x)
-
-        self._test_math(torch.rsqrt, rsqrt)
-
-    def test_frac(self):
-        self._test_math(torch.frac, lambda x: math.fmod(x, 1))
-
-    def test_trunc(self):
-        self._test_math(torch.trunc, lambda x: x - math.fmod(x, 1))
-
-        # Note: this is consistent with NumPy
-        with self.assertRaises(RuntimeError):
-            torch.trunc(torch.tensor((1 + 1j)))
-
-    def test_round(self):
-        self._test_math(torch.round, round)
 
     def test_has_storage(self):
         self.assertIsNotNone(torch.Tensor().storage())
@@ -15448,6 +15147,18 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                 else:
                     self.assertEqual(from_tensor, to_tensor, exact_dtype=False)
 
+    @onlyCPU
+    @dtypes(torch.complex64, torch.complex128)
+    def test_complex_unsupported(self, device, dtype):
+        inp = torch.tensor((1 + 1j), device=device, dtype=dtype)
+        # Note: this is consistent with NumPy
+        with self.assertRaises(RuntimeError):
+            torch.floor(inp)
+        with self.assertRaises(RuntimeError):
+            torch.ceil(inp)
+        with self.assertRaises(RuntimeError):
+            torch.trunc(inp)
+
 # NOTE [Linspace+Logspace precision override]
 # Our Linspace and logspace torch.half CUDA kernels are not very precise.
 # Since linspace/logspace are deterministic, we can compute an expected
@@ -16723,6 +16434,229 @@ def generate_tensor_op_tests(cls):
     for test in tensor_op_tests:
         caller(cls, *test)
 
+def _generate_reference_input(dtype, device):
+    input = []
+    input.append(list(range(-5, 5)))
+    input.append([0 for x in range(-5, 5)])
+    input.append([x + 1e-6 for x in range(-5, 5)])
+    # Some vectorized implementations don't support large values
+    input.append([x + 1e10 for x in range(-5, 5)])
+    input.append([x - 1e10 for x in range(-5, 5)])
+    input.append(torch.randn(10).tolist())
+    input.append((torch.randn(10) * 1e6).tolist())
+    input.append([math.pi * (x / 2) for x in range(-5, 5)])
+    return torch.tensor(input, dtype=dtype, device=device)
+
+def _generate_gamma_input(dtype, device, test_poles=True):
+    input = []
+    input.append((torch.randn(10).abs() + 1e-4).tolist())
+    input.append((torch.randn(10).abs() + 1e6).tolist())
+    zeros = torch.linspace(-9.5, -0.5, 10)
+    input.append(zeros.tolist())
+    input.append((zeros - 0.49).tolist())
+    input.append((zeros + 0.49).tolist())
+    input.append((zeros + (torch.rand(10) * 0.99) - 0.5).tolist())
+    if test_poles:
+        input.append([-0.999999994, -1.999999994, -2.0000000111,
+                      -100.99999994, -1931.99999994, 0.000000111,
+                      -0.000000111, 0, -2, -329])
+    return torch.tensor(input, dtype=dtype, device=device)
+
+# this class contains information needed to generate tests for torch math functions
+# the generated tests compare torch implementation with the reference numpy/scipy implementation,
+# and also check proper behavior for contiguous/discontiguous/inplace outputs.
+class _TorchMathTestMeta(object):
+    def __init__(self,
+                 opstr,
+                 args=(),
+                 reffn=None,
+                 refargs=lambda x: (x.numpy(),),
+                 input_fn=_generate_reference_input,
+                 inputargs=(),
+                 substr='',
+                 make_inplace=True,
+                 decorators=None,
+                 ref_backend='numpy',
+                 rtol=None,
+                 atol=None,
+                 dtypes=_float_types_no_half,
+                 replace_inf_with_nan=False):
+        self.opstr = opstr
+        self.args = args
+        self.reffn = reffn  # reffn is either callable or ref_backend attribute, set to opstr if not specified
+        self.refargs = refargs
+        self.input_fn = input_fn
+        self.inputargs = inputargs
+        self.substr = substr
+        self.make_inplace = make_inplace
+        assert ref_backend == 'numpy' or ref_backend == 'scipy'
+        self.ref_backend = ref_backend
+        if ref_backend == 'numpy':
+            self.ref_decorator = [unittest.skipIf(not TEST_NUMPY, "Numpy not found")]
+        elif ref_backend == 'scipy':
+            self.ref_decorator = [unittest.skipIf(not TEST_SCIPY, "Scipy not found")]
+        self.decorators = decorators
+        self.rtol = rtol
+        self.atol = atol
+        self.dtypes = dtypes
+        self.replace_inf_with_nan = replace_inf_with_nan
+
+torch_op_tests = [_TorchMathTestMeta('sin'),
+                  _TorchMathTestMeta('asin', reffn='arcsin'),
+                  _TorchMathTestMeta('sinh'),
+                  _TorchMathTestMeta('cos'),
+                  _TorchMathTestMeta('acos', reffn='arccos'),
+                  _TorchMathTestMeta('cosh'),
+                  _TorchMathTestMeta('tan'),
+                  _TorchMathTestMeta('atan', reffn='arctan'),
+                  _TorchMathTestMeta('tanh'),
+                  _TorchMathTestMeta('log'),
+                  _TorchMathTestMeta('log10'),
+                  _TorchMathTestMeta('log1p'),
+                  _TorchMathTestMeta('log2'),
+                  _TorchMathTestMeta('sqrt'),
+                  _TorchMathTestMeta('erf', ref_backend='scipy'),
+                  _TorchMathTestMeta('erfc', ref_backend='scipy'),
+                  _TorchMathTestMeta('exp'),
+                  _TorchMathTestMeta('expm1'),
+                  _TorchMathTestMeta('floor'),
+                  _TorchMathTestMeta('ceil'),
+                  _TorchMathTestMeta('rsqrt', reffn=lambda x: np.reciprocal(np.sqrt(x))),
+                  _TorchMathTestMeta('frac', reffn='fmod', refargs=lambda x: (x.numpy(), 1)),
+                  _TorchMathTestMeta('trunc'),
+                  _TorchMathTestMeta('round'),
+                  _TorchMathTestMeta('lgamma', reffn='gammaln', ref_backend='scipy'),
+                  _TorchMathTestMeta('polygamma', args=[0], substr='_0', reffn='polygamma',
+                  refargs=lambda x: (0, x.numpy()), input_fn=_generate_gamma_input, inputargs=[False],
+                  ref_backend='scipy'),
+                  _TorchMathTestMeta('polygamma', args=[1], substr='_1', reffn='polygamma',
+                  refargs=lambda x: (1, x.numpy()), input_fn=_generate_gamma_input, inputargs=[False],
+                  ref_backend='scipy', rtol=0.0008, atol=1e-5),
+                  _TorchMathTestMeta('digamma',
+                  input_fn=_generate_gamma_input, inputargs=[True], ref_backend='scipy',
+                  replace_inf_with_nan=True)]
+
+
+def generate_torch_test_functions(cls, testmeta, inplace):
+    opstr = testmeta.opstr if not inplace else testmeta.opstr + "_"
+
+    def torchfn(x):
+        return getattr(x, opstr)(*testmeta.args)
+
+    def fn_check_reference(self, device, dtype):
+        def reffn(x):
+            backend = np if testmeta.ref_backend == 'numpy' else scipy.special
+            opstr = None
+            if testmeta.reffn is None:
+                opstr = testmeta.opstr
+            elif isinstance(testmeta.reffn, str):
+                opstr = testmeta.reffn
+            if callable(testmeta.reffn):
+                fn = testmeta.reffn
+            else:
+                assert opstr is not None, "invalid reffn"
+                fn = getattr(backend, opstr)
+            return fn(*testmeta.refargs(x))
+
+        inp = testmeta.input_fn(dtype, device, *testmeta.inputargs)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            expected = torch.from_numpy(reffn(inp))
+        actual = torchfn(inp)
+        if testmeta.replace_inf_with_nan:
+            actual[(actual == -inf) | (actual == inf)] = nan
+            expected[(expected == -inf) | (expected == inf)] = nan
+
+        torch.testing.assert_allclose(actual, expected, rtol=testmeta.rtol, atol=testmeta.atol)
+
+    def fn_non_contig(self, device, dtype):
+        shapes = [(5, 7), (1024,)]
+        for shape in shapes:
+            contig = _make_tensor(shape, dtype=dtype, device=device)
+            non_contig = torch.empty(shape + (2,), dtype=dtype)[..., 0]
+            non_contig.copy_(contig)
+            self.assertFalse(non_contig.is_contiguous())
+            self.assertEqual(torchfn(contig), torchfn(non_contig), 'non-contiguous')
+
+    def fn_non_contig_index(self, device, dtype):
+        contig = _make_tensor((2, 2, 1, 2), dtype=dtype, device=device)
+        non_contig = contig[:, 1, ...]
+        contig = non_contig.clone()
+        self.assertFalse(non_contig.is_contiguous())
+        self.assertEqual(torchfn(contig), torchfn(non_contig), 'non-contiguous index')
+
+    def fn_non_contig_expand(self, device, dtype):
+        shapes = [(1, 3), (1, 7), (5, 7)]
+        for shape in shapes:
+            contig = _make_tensor(shape, dtype=dtype, device=device)
+            non_contig = contig.clone().expand(3, -1, -1)
+            self.assertFalse(non_contig.is_contiguous())
+            contig = torchfn(contig)
+            non_contig = torchfn(non_contig)
+            for i in range(3):
+                self.assertEqual(contig, non_contig[i], 'non-contiguous expand[' + str(i) + ']')
+
+    def fn_contig_size1(self, device, dtype):
+        contig = _make_tensor((5, 100), dtype=dtype, device=device)
+        contig = contig[:1, :50]
+        contig2 = torch.empty(contig.size(), dtype=dtype)
+        contig2.copy_(contig)
+        self.assertTrue(contig.is_contiguous())
+        self.assertTrue(contig2.is_contiguous())
+        self.assertEqual(torchfn(contig), torchfn(contig2), 'contiguous size1')
+
+    def fn_contig_size1_large_dim(self, device, dtype):
+        contig = _make_tensor((5, 2, 3, 1, 4, 5, 3, 2, 1, 2, 3, 4), dtype=dtype, device=device)
+        contig = contig[:1, :, :, :, :, :, :, :, :, :, :, :]
+        contig2 = torch.empty(contig.size(), dtype=dtype)
+        contig2.copy_(contig)
+        self.assertTrue(contig.is_contiguous())
+        self.assertTrue(contig2.is_contiguous())
+        self.assertEqual(torchfn(contig), torchfn(contig2), 'contiguous size1')
+
+    def fn_large(self, device, dtype):
+        input = _make_tensor((1024, 512), dtype=dtype, device=device)
+        # clone input to properly test inplace functions
+        actual = torchfn(input.clone())
+        expected = torch.stack([torchfn(slice) for slice in input])
+        self.assertEqual(actual, expected, 'large')
+
+    test_functions = {"test_reference_": fn_check_reference,
+                      "test_non_contig_": fn_non_contig,
+                      "test_non_contig_index_": fn_non_contig_index,
+                      "test_non_contig_expand_": fn_non_contig_expand,
+                      "test_contig_size1_": fn_contig_size1,
+                      "test_check_contig_size1_large_dim_": fn_contig_size1_large_dim,
+                      "test_large_": fn_large}
+    for name in test_functions:
+        if inplace and 'expand' in name:
+            continue
+        test_name = name + testmeta.opstr + testmeta.substr
+        if inplace:
+            test_name += "_inplace"
+        assert not hasattr(cls, test_name), "{0} already in TestTorchMathOps".format(test_name)
+
+        decorators = [] if testmeta.decorators is None else testmeta.decorators
+        if 'reference' in name:
+            decorators = decorators + testmeta.ref_decorator
+        decorators = decorators + [dtypes(*testmeta.dtypes)]
+        fn_test = test_functions[name]
+        for dec in decorators:
+            fn_test = dec(fn_test)
+        setattr(cls, test_name, fn_test)
+
+
+
+
+def generate_torch_op_tests(cls):
+    for t in torch_op_tests:
+        generate_torch_test_functions(cls, t, False)
+        if t.make_inplace:
+            generate_torch_test_functions(cls, t, True)
+
+
+
+
 
 tensor_binary_ops = [
     '__lt__', '__le__',
@@ -16819,6 +16753,9 @@ class TestTensorDeviceOps(TestCase):
     def test_svd_tall_all_col_maj(self, device, dtype):
         self._test_svd_helper((5, 20), False, True, device, dtype)
 
+class TestTorchMathOps(TestCase):
+    exact_dtype = True
+
 class TestTorch(TestCase, _TestTorchMixin):
     exact_dtype = True
 
@@ -16829,10 +16766,12 @@ class TestTorch(TestCase, _TestTorchMixin):
 add_neg_dim_tests()
 generate_tensor_op_tests(TestTensorDeviceOps)
 generate_not_implemented_tests(TestTorchDeviceType)
+generate_torch_op_tests(TestTorchMathOps)
 instantiate_device_type_tests(TestTorchDeviceType, globals())
 instantiate_device_type_tests(TestViewOps, globals())
 instantiate_device_type_tests(TestDevicePrecision, globals(), except_for='cpu')
 instantiate_device_type_tests(TestTensorDeviceOps, globals())
+instantiate_device_type_tests(TestTorchMathOps, globals(), only_for='cpu')
 
 if __name__ == '__main__':
     run_tests()
