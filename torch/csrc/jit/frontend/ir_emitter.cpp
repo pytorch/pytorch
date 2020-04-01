@@ -1239,7 +1239,8 @@ struct to_ir {
     if (is_or) {
       new_result = emitIfExpr(loc, lhs, get_const_expr, get_continue_expr);
       refinements = lhs.refinements().Or(rhs->refinements());
-      if ((lhs.staticIf() && *lhs.staticIf()) || (rhs->staticIf() && *rhs->staticIf())) { 
+      if ((lhs.staticIf() && *lhs.staticIf()) ||
+          (rhs->staticIf() && *rhs->staticIf())) {
         static_if = true;
       } else if (lhs.staticIf() && rhs->staticIf()) {
         static_if = *lhs.staticIf() || *rhs->staticIf();
@@ -1247,7 +1248,8 @@ struct to_ir {
     } else {
       new_result = emitIfExpr(loc, lhs, get_continue_expr, get_const_expr);
       refinements = lhs.refinements().And(rhs->refinements());
-      if (((lhs.staticIf() && !*lhs.staticIf()) || (rhs->staticIf() && !*rhs->staticIf()))) {
+      if (((lhs.staticIf() && !*lhs.staticIf()) ||
+           (rhs->staticIf() && !*rhs->staticIf()))) {
         static_if = false;
       } else if (lhs.staticIf() && rhs->staticIf()) {
         static_if = *lhs.staticIf() && *rhs->staticIf();
