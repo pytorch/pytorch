@@ -182,6 +182,10 @@ def my_rref_function(rref_a, rref_b):
 def no_result():
     print("do nothing")
 
+def raise_or_inc(value):
+    if value.numel() == 2:
+        raise ValueError("Expected error")
+    return value + 1
 
 def nested_rpc(dst):
     return rpc.rpc_sync(dst, torch.add, args=(torch.ones(2, 2), 1))
@@ -1843,6 +1847,14 @@ class RpcTest(RpcAgentTestFixture):
         with TemporaryFileName() as fname:
             with self.assertRaisesRegex(RuntimeError, "Can not pickle rref in python pickler"):
                 torch.save(local_rref, fname)
+
+    @dist_init
+    def test_remote_throw(self):
+        rref = rpc.remote("worker{}".format((self.rank + 1) % self.world_size),
+                          raise_or_inc,
+                          args=(torch.ones(2),))
+        with self.assertRaisesRegex(Exception, ".*Expected error.*"):
+            rref.to_here()
 
 @unittest.skipIf(
     not torch._six.PY3,
