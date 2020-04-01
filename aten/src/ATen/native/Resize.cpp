@@ -58,6 +58,8 @@ Tensor& resize_as_(
   return result;
 }
 
+namespace {
+
 Tensor& resize_(
     Tensor& self,
     IntArrayRef size,
@@ -87,6 +89,7 @@ static auto registry = torch::RegisterOperators()
     .schema("aten::resize_as_(Tensor(a!) self, Tensor the_template, *, MemoryFormat? memory_format=None) -> Tensor(a!)")
     .impl_unboxedOnlyCatchAllKernel<decltype(resize_as_), &resize_as_>())
   ;
+}
 
 } // namespace native
 } // namespace at
