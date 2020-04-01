@@ -676,7 +676,7 @@ std::string TupleType::str() const {
   }
   return ss.str();
 }
-std::string TupleType::python_str() const {
+std::string TupleType::python_str_impl(TypePrinter printer) const {
   std::stringstream ss;
   if (schema_ && name()) {
     ss << name()->qualifiedName();
@@ -685,7 +685,7 @@ std::string TupleType::python_str() const {
     for(size_t i = 0; i < elements().size(); ++i) {
       if(i > 0)
         ss << ", ";
-      ss << elements()[i]->python_str();
+      ss << elements()[i]->python_str(printer);
     }
     ss << "]";
   }
