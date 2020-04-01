@@ -26,7 +26,7 @@ class TestComplexTensor(TestCase):
             expected = np.exp(a.numpy())
             actual = torch.exp(a)
             self.assertEqual(actual, torch.from_numpy(expected))
-        
+
         exp_fn(torch.complex64)
         exp_fn(torch.complex128)
 
