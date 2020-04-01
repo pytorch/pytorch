@@ -20,40 +20,6 @@ std::string toString(TypePtr typePtr);
 
 namespace impl {
 
-inline bool shallowEquals(const IValue& lhs, const IValue& rhs) {
-  if (lhs.isNone()) {
-    return rhs.isNone();
-  } else if (lhs.isInt()) {
-    return rhs.isInt() && lhs.toInt() == rhs.toInt();
-  } else if (lhs.isString()) {
-    return rhs.isString() && lhs.toStringRef() == rhs.toStringRef();
-  } else if (lhs.isDouble()) {
-    return rhs.isDouble() && lhs.toDouble() == rhs.toDouble();
-  } else if (lhs.isBool()) {
-    return rhs.isBool() && lhs.toBool() == rhs.toBool();
-  } else if (lhs.isList()) {
-    if (!rhs.isList()) {
-      return false;
-    }
-    auto l = lhs.toListRef();
-    auto r = rhs.toListRef();
-    if (l.size() != r.size()) {
-      return false;
-    }
-    for (size_t i = 0, N = l.size(); i < N; ++i) {
-      if (!shallowEquals(l[i], r[i])) {
-        return false;
-      }
-    }
-    return true;
-  } else if (lhs.isTensor()) {
-    return lhs.toTensor().is_same(rhs.toTensor());
-  } else {
-    AT_ERROR("shallowEquals(IValue, IValue) not implemented for type ", lhs.tagKind());
-  }
-}
-
-
 template<class Key, class Value>
 Dict<Key, Value> toTypedDict(GenericDict dict) {
   TORCH_INTERNAL_ASSERT(*getTypePtr<Key>() == *dict.impl_->elementTypes.keyType, "Tried to cast a Dict<", toString(dict.impl_->elementTypes.keyType), ", ", toString(dict.impl_->elementTypes.valueType) ,"> to a Dict<", toString(getTypePtr<Key>()), ", ", toString(getTypePtr<Value>()), ">. Key types mismatch.");

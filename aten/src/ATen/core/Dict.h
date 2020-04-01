@@ -16,7 +16,6 @@ struct Type;
 using TypePtr = std::shared_ptr<Type>;
 
 namespace impl {
-bool shallowEquals(const IValue& lhs, const IValue& rhs);
 
 using valid_dict_key_types = guts::typelist::typelist<
   int64_t,
