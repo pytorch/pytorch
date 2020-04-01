@@ -66,52 +66,72 @@ def _check_is_script_module(model):
     if not isinstance(model, torch.jit.ScriptModule):
         raise ValueError('input must be a script module, got: ' + str(type(model)))
 
+def _check_forward_method(model):
+    if not model._c._has_method('forward'):
+        raise ValueError('input script module does not have forward method')
+
 def script_qconfig(qconfig):
     return QConfig(
         activation=torch.jit.script(qconfig.activation())._c,
         weight=torch.jit.script(qconfig.weight())._c)
 
-def prepare_script(model, qconfig_dict, inplace=False):
+def get_scripted_qconfig_dict(qconfig_dict):
+    return {k: script_qconfig(v) if v else None for k, v in qconfig_dict.items()}
+
+def _prepare_script(model, qconfig_dict, is_dynamic):
     _check_is_script_module(model)
-    scripted_qconfig_dict = {k: script_qconfig(v) if v else None for k, v in qconfig_dict.items()}
+    scripted_qconfig_dict = get_scripted_qconfig_dict(qconfig_dict)
+    return wrap_cpp_module(torch._C._jit_pass_insert_observers(model._c,
+                                                               'forward',
+                                                               scripted_qconfig_dict,
+                                                               False,
+                                                               is_dynamic)) 
+
+def prepare_script(model, qconfig_dict, inplace=False):
     if not inplace:
         model = model.copy()
-    model = wrap_cpp_module(torch._C._jit_pass_insert_observers(model._c,
-                                                                'forward',
-                                                                scripted_qconfig_dict,
-                                                                False))
-    return model
+    return _prepare_script(model, qconfig_dict, is_dynamic=False)
 
 def prepare_dynamic_script(model, qconfig_dict):
+    return _prepare_script(model, qconfig_dict, is_dynamic=True)
+
+def _convert_script(model, is_dynamic, debug=False):
     _check_is_script_module(model)
-    scripted_qconfig_dict = {k: script_qconfig(v) for k, v in qconfig_dict.items()}
-    model = wrap_cpp_module(torch._C._jit_pass_insert_observers(model._c,
-                                                                'forward',
-                                                                scripted_qconfig_dict,
-                                                                False,
-                                                                True))
+    model.eval()
+    model = wrap_cpp_module(torch._C._jit_pass_insert_quant_dequant(model._c, 'forward', False, is_dynamic))
+    if not debug:
+        model = wrap_cpp_module(torch._C._jit_pass_quant_finalize(model._c, is_dynamic))
     return model
 
 def convert_script(model, inplace=False, debug=False):
-    _check_is_script_module(model)
     if not inplace:
         model = model.copy()
-    model.eval()
-    model = wrap_cpp_module(torch._C._jit_pass_insert_quant_dequant(model._c, 'forward', False))
-    if not debug:
-        model = wrap_cpp_module(torch._C._jit_pass_quant_finalize(model._c))
+    return _convert_script(model, is_dynamic=False, debug=debug)
+
+def convert_dynamic_script(model, debug=False):
+    return _convert_script(model, is_dynamic=True, debug=debug)
+
+def _quantize_script(model, qconfig_dict, run_fn, run_args, is_dynamic, debug):
+    _check_is_script_module(model)
+    _check_forward_method(model)
+    torch._C._jit_pass_dedup_module_uses(model._c)
+    model = wrap_cpp_module(torch._C._jit_pass_fold_convbn(model._c))
+    if is_dynamic:
+        model = prepare_dynamic_script(model, qconfig_dict)
+        run_fn(model._c._get_method('forward'), *run_args)
+        model = convert_dynamic_script(model, debug)
+    else:
+        model = prepare_script(model, qconfig_dict, True)
+        run_fn(model._c._get_method('forward'), *run_args)
+        model = convert_script(model, True, debug)
+
     return model
 
 def quantize_script(model, qconfig_dict, run_fn, run_args, inplace=False, debug=False):
-    _check_is_script_module(model)
-    if not model._c._has_method('forward'):
-        raise ValueError('input script module does not have forward method')
     assert not inplace, "We don't support inplace right now"
     if not inplace:
         model = model.copy()
-    torch._C._jit_pass_dedup_module_uses(model._c)
-    model = wrap_cpp_module(torch._C._jit_pass_fold_convbn(model._c))
-    model = prepare_script(model, qconfig_dict, True)
-    run_fn(model._c._get_method('forward'), *run_args)
-    model = convert_script(model, True, debug)
-    return model
+    return _quantize_script(model, qconfig_dict, run_fn, run_args, is_dynamic=False, debug=debug)
+
+def quantize_dynamic_script(model, qconfig_dict, run_fn, run_args, debug=False):
+    return _quantize_script(model, qconfig_dict, run_fn, run_args, is_dynamic=True, debug=debug)
