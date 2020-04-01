@@ -2,6 +2,7 @@
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
+#include <torch/csrc/jit/passes/clear_profiling.h>
 
 namespace torch {
 namespace jit {
@@ -88,8 +89,7 @@ std::unique_ptr<ProfilingRecord> ProfilingRecord::instrumentGraph(
   auto new_g = graph->copy();
   auto pr = std::unique_ptr<ProfilingRecord>(new ProfilingRecord(new_g));
   auto raw_pr = pr.get();
-  unprofileGraphInputs(new_g);
-  unprofileBlock(new_g->block());
+  ClearProfilingInformation(new_g);
   pr->instrumentBlock(new_g->block());
 
   std::function<void(Stack&)> counter = [raw_pr](Stack&) {
