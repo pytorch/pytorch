@@ -363,7 +363,7 @@ Tensor mv_sparse(const SparseTensor& self, const Tensor& vec)
               "SparseTensor Dim: ", self.ndimension(), "Tensor Dim: ", vec.ndimension());
 
   TORCH_CHECK(vec.size(-1) == self.size(-1),
-              "expected self.size(-1) == vec.size(-1)");
+              "mv: expected self.size(-1) == vec.size(-1)");
 
   auto result = self.matmul(vec.unsqueeze(-1));
 

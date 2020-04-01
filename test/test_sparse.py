@@ -1535,7 +1535,7 @@ class TestSparse(TestCase):
         test_shape(10, 100, 100, 0)
         test_shape(10, 100, 100, 20)
 
-        with self.assertRaisesRegex(RuntimeError, "expected self.size(-1) == vec.size(-1)"):
+        with self.assertRaisesRegex(RuntimeError, r"mv: expected self\.size\(-1\) == vec\.size\(-1\)"):
             test_shape(10, 100, 10, 20)
 
         with self.assertRaisesRegex(RuntimeError, "mv: two tensor dim should be 2 and 1"):
