@@ -138,17 +138,6 @@ __global__ void masked_select_out_cuda_kernel(
 }
 
 static Tensor & masked_select_out_cuda_impl(Tensor & result, const Tensor & self, const Tensor & mask) {
-  if (mask.dtype() == at::ScalarType::Byte) {
-    // TODO: would be much better to put this warning inside AT_WARN(), but for
-    //    some reason using the __FILE__ macro in nvcc causes the message to be
-    //    displayed incorrectly
-    c10::Warning::warn(
-      {"", "IndexKernel.cu", static_cast<uint32_t>(__LINE__)},
-      "masked_select received a mask with dtype torch.uint8, this behavior is now deprecated, "
-      "please use a mask with dtype torch.bool instead."
-    );
-  }
-
   NoNamesGuard guard;
 
   TORCH_CHECK(mask.scalar_type() == ScalarType::Byte || mask.scalar_type() == ScalarType::Bool,
@@ -158,63 +147,11 @@ static Tensor & masked_select_out_cuda_impl(Tensor & result, const Tensor & self
 
   Tensor _mask, _self;
   std::tie(_mask, _self) = expand_outplace(mask, self);
-  _mask = _mask.flatten();
-  _self = _self.flatten();
 
-  auto shape = _self.sizes().vec();
-  int64_t num_input_elements = _self.size(0);
-  Tensor mask_inclusive_scan = at::empty(shape, self.options().dtype(at::kLong)).copy_(_mask);
+  Tensor _result = _self.index(_mask);
 
-  auto stream = at::cuda::getCurrentCUDAStream();
-  auto policy = thrust::cuda::par.on(stream);
-  thrust::inclusive_scan(
-    policy,
-    thrust::device_ptr<int64_t>(mask_inclusive_scan.data_ptr<int64_t>()),
-    thrust::device_ptr<int64_t>(mask_inclusive_scan.data_ptr<int64_t>() + num_input_elements),
-    thrust::device_ptr<int64_t>(mask_inclusive_scan.data_ptr<int64_t>())
-  );
-
-  int64_t num_output_elements = mask_inclusive_scan.flatten()[num_input_elements-1].item().toLong();
-
-  result.resize_({num_output_elements});
-  if (num_output_elements == 0) {
-    return result;
-  }
-
-  AT_DISPATCH_ALL_TYPES_AND3(
-    at::ScalarType::Half,
-    at::ScalarType::Bool,
-    at::ScalarType::BFloat16,
-    _self.scalar_type(),
-    "masked_select",
-    [&] {
-      if (num_input_elements == 0) {
-        return;
-      }
-      scalar_t* result_ptr = result.data_ptr<scalar_t>();
-      scalar_t* self_ptr = _self.data_ptr<scalar_t>();
-      int64_t* mask_inclusive_scan_ptr = mask_inclusive_scan.data_ptr<int64_t>();
-      auto stream = at::cuda::getCurrentCUDAStream();
-      int64_t grid = (_self.numel() + block_work_size - 1) / block_work_size;
-      if (_mask.dtype() == ScalarType::Bool) {
-        masked_select_out_cuda_kernel<scalar_t, bool> <<<grid, num_threads, 0, stream>>>(
-          result_ptr,
-          self_ptr,
-          _mask.data_ptr<bool>(),
-          mask_inclusive_scan_ptr,
-          num_input_elements
-        );
-      } else {
-        masked_select_out_cuda_kernel<scalar_t, uint8_t> <<<grid, num_threads, 0, stream>>>(
-          result_ptr,
-          self_ptr,
-          _mask.data_ptr<uint8_t>(),
-          mask_inclusive_scan_ptr,
-          num_input_elements
-        );
-      }
-    }
-  );
+  result.resize_as_(_result);
+  result.copy_(_result);
 
   return result;
 }

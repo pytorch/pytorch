@@ -11060,7 +11060,7 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(dst, torch.tensor([True, True, True], device=device))
 
     def test_masked_select(self, device):
-        warn = 'masked_select received a mask with dtype torch.uint8,'
+        warn = 'masked_select received a mask with dtype torch.uint8,' if (device == 'cpu') else 'indexing with dtype torch.uint8 is now deprecated, pl'
         for dt in torch.testing.get_all_dtypes():
             for maskType in [torch.uint8, torch.bool]:
                 num_src = 10
