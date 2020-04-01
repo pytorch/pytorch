@@ -487,6 +487,10 @@ CAFFE2_API bool elementTypeCanBeInferredFromMembers(const TypePtr& elem_type) {
     // construct which interface the list holds from the members alone
     return false;
   }
+  if (elem_type->kind() == AnyType::Kind) {
+    // List of Any can contains heterogenous types
+    return false;
+  }
   return true;
 }
 
