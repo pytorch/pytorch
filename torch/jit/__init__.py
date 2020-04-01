@@ -2000,10 +2000,11 @@ def _set_jit_overload_cache(key, compiled_fns):
 
 def _try_get_jit_cached_function(key):
     qual_name = _jit_caching_layer.get(key, None)
-    if qual_name:
-        return _python_cu.find_function(qual_name)
-    else:
-        return None
+    return None
+    # if qual_name:
+    #     return _python_cu.find_function(qual_name)
+    # else:
+    #     return None
 
 def _set_jit_function_cache(key, value):
     # only free functions currently supported
