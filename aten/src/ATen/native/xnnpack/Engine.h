@@ -7,7 +7,29 @@ namespace native {
 namespace xnnpack {
 
 //
-// Pooling
+// Convolution
+//
+
+bool use_convolution2d(
+    const Tensor& input,
+    const Tensor& weight,
+    const Tensor& bias,
+    const IntArrayRef padding,
+    const IntArrayRef stride,
+    const IntArrayRef dilation,
+    const int64_t groups);
+
+Tensor convolution2d(
+    const Tensor& input,
+    const Tensor& weight,
+    const Tensor& bias,
+    const IntArrayRef padding,
+    const IntArrayRef stride,
+    const IntArrayRef dilation,
+    const int64_t groups);
+
+//
+// Max Pooling
 //
 
 bool use_max_pool2d(

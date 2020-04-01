@@ -3,6 +3,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/cpu/DepthwiseConvKernel.h>
 #include <ATen/native/utils/ParamUtils.h>
+#include <ATen/native/xnnpack/Engine.h>
 #include <ATen/native/ConvUtils.h>
 
 #include <ATen/Config.h>
@@ -42,6 +43,7 @@ struct ConvParams {
   bool use_miopen(const at::Tensor& input, bool bias_defined) const;
   bool use_mkldnn(const at::Tensor& input) const;
   bool use_nnpack(const at::Tensor& input) const;
+  bool use_xnnpack(const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias) const;
   bool is_depthwise(const at::Tensor& input, const at::Tensor& weight) const;
 };
 
@@ -223,6 +225,7 @@ auto ConvParams::use_mkldnn(const at::Tensor& input) const -> bool {
 #endif
   return false;
 }
+
 auto ConvParams::use_nnpack(const at::Tensor& input) const -> bool {
 #if AT_NNPACK_ENABLED()
   return at::_nnpack_available() &&
@@ -237,6 +240,12 @@ auto ConvParams::use_nnpack(const at::Tensor& input) const -> bool {
      ;
 #endif
   return false;
+}
+
+auto ConvParams::use_xnnpack(
+    const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias) const -> bool {
+  return MemoryFormat::ChannelsLast == input.suggest_memory_format() &&
+         xnnpack::use_convolution2d(input, weight, bias, padding, stride, dilation, groups);
 }
 
 // We currently only have depthwise support for the case where groups ==
@@ -566,7 +575,7 @@ at::Tensor _convolution(
   auto k = weight.ndimension();
   c10::IntArrayRef weight_sizes = weight.sizes();
   int64_t dim = k - 2;
-  
+
 
   TORCH_CHECK(dim > 0, "weight should have at least three dimensions");
 
@@ -583,7 +592,7 @@ at::Tensor _convolution(
 
   check_shape_forward(input, weight_sizes, bias, params);
 
-  if (input.size(0) == 0) {    
+  if (input.size(0) == 0) {
     // don't send empty inputs through backends
     // but need to compute correct output size first and set up history for params
     std::vector<int64_t> o;
@@ -696,7 +705,15 @@ at::Tensor _convolution(
     }
 #endif
   } else if (input.device().type() == c10::DeviceType::CPU || input.device().type() == c10::DeviceType::CUDA) {
-    if (params.use_cpu_depthwise3x3_winograd(input, weight)) {
+    if (params.use_xnnpack(input, weight, bias)) {
+      // This is NOT the preferred usage pattern as it forces expensive and
+      // unnecessary weight prepacking per invocation.  Still if we end up here,
+      // which we shouldn't if we have correctly intercepted and replaced this
+      // usage through JIT, still this code path is more efficient for NHWC
+      // tensors than the alternatives.
+      output = xnnpack::convolution2d(
+        input, weight, bias, params.padding, params.stride, params.dilation, params.groups);
+    } else if (params.use_cpu_depthwise3x3_winograd(input, weight)) {
       output = convolution_depthwise3x3_winograd_stub(
         input.device().type(), input, weight, bias, params.stride, params.padding, params.groups);
     } else if (params.groups == 1) {
