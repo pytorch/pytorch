@@ -847,14 +847,16 @@ class MultiheadAttention(Module):
         - value: :math:`(S, N, E)` where S is the source sequence length, N is the batch size, E is
           the embedding dimension.
         - key_padding_mask: :math:`(N, S)` where N is the batch size, S is the source sequence length.
-          If a ByteTensor is provided, ``1`` is filled with ``-inf`` while ``0`` is filled with ``0.0``.
-          If a bool Tensor is provided, ``True`` is filled with ``-inf`` while ``False`` is filled with ``0.0``.
+          If a ByteTensor is provided, the positions with the value of ``1`` will be ignored while the position
+          with the value of ``0`` will be unchanged. If a bool tensor is provided, the positions with the
+          value of ``True`` will be ignored while the position with the value of ``False`` will be unchanged.
         - attn_mask: 2D mask :math:`(L, S)` where L is the target sequence length, S is the source sequence length.
           3D mask :math:`(N*num_heads, L, S)` where N is the batch size, L is the target sequence length,
-          S is the source sequence length. The attn_output_weights value is changed according to attn_mask.
-          If a ByteTensor is provided, ``1`` is filled with ``-inf`` while ``0`` is filled with ``0.0``.
-          If a bool Tensor is provided, ``True`` is filled with ``-inf`` while ``False`` is filled with ``0.0``.
-          If a float Tensor is provided, the attn_mask is added to attn_output_weights.
+          S is the source sequence length. attn_mask ensure that position i is allowed to attend the unmasked
+          positions. If a ByteTensor is provided, positions with ``1`` is not allowed to attend
+          while ``0`` values will be unchanged. If a bool Tensor is provided, positions with ``True``
+          is not allowed to attend while ``False`` values will be unchanged. If a float tensor
+          is provided, it will be added to the attention weight.
 
         - Outputs:
         - attn_output: :math:`(L, N, E)` where L is the target sequence length, N is the batch size,

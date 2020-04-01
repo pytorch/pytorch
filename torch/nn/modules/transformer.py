@@ -94,10 +94,10 @@ class Transformer(Module):
             while ``0`` values will be unchanged. If a bool Tensor is provided, positions with ``True``
             is not allowed to attend while ``False`` values will be unchanged. If a float tensor
             is provided, it will be added to the attention weight. 
-            [src/tgt/memory]_key_padding_mask should be a ByteTensor where True values are positions
-            that should be masked with float('-inf') and False values will be unchanged.
-            This mask ensures that no information will be taken from position i if
-            it is masked, and has a separate mask for each sequence in a batch.
+            [src/tgt/memory]_key_padding_mask provides specified elements in the key to be ignored by
+            the attention. If a ByteTensor is provided, the positions with the value of ``1`` will be ignored while the position
+            with the value of ``0`` will be unchanged. If a bool tensor is provided, the positions with the
+            value of ``True`` will be ignored while the position with the value of ``False`` will be unchanged.
 
             - output: :math:`(T, N, E)`.
 

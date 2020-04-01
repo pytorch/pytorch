@@ -3782,9 +3782,9 @@ def multi_head_attention_forward(query,                           # type: Tensor
         - value: :math:`(S, N, E)` where S is the source sequence length, N is the batch size, E is
           the embedding dimension.
         - key_padding_mask: :math:`(N, S)` where N is the batch size, S is the source sequence length.
-          If a ByteTensor is provided, ``1`` values are positions that should be masked with float('-inf')
-          and ``0`` values will be unchanged. If a bool tensor is provided, ``True`` values are positions
-          that should be masked with float('-inf') and ``False`` values will be unchanged.
+          If a ByteTensor is provided, the positions with the value of ``1`` will be ignored while the position
+          with the value of ``0`` will be unchanged. If a bool tensor is provided, the positions with the
+          value of ``True`` will be ignored while the position with the value of ``False`` will be unchanged.
         - attn_mask: 2D mask :math:`(L, S)` where L is the target sequence length, S is the source sequence length.
           3D mask :math:`(N*num_heads, L, S)` where N is the batch size, L is the target sequence length,
           S is the source sequence length. attn_mask ensure that position i is allowed to attend the unmasked
