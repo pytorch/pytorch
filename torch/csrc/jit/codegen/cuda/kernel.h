@@ -24,10 +24,15 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-// include IO data structure for host code
-#define STRINGIFY(...) __VA_ARGS__
-#include <torch/csrc/jit/codegen/cuda/data_struct_str.h>
-#undef STRINGIFY
+// Not checking explicit broadcasting yet.
+// check only shape falls in the range;
+struct KernelArgsReq {
+  // We are checking accumulated output shape for now, this is a restricting
+  // aproach, we should check applicability on input tensor shapes instead.
+  bool matchKernelSize(const c10::IntArrayRef inputs);
+  std::vector<size_t> low_;
+  std::vector<size_t> hi_;
+};
 
 class CudaKernel {
  public:
@@ -61,23 +66,16 @@ class CudaKernel {
   dim3 grid_;
 };
 
-// include IO data structure for stringification
-#define STRINGIFY(...) #__VA_ARGS__
-static auto typeinfo =
-#include "data_struct_str.h"
-    ;
-#undef STRINGIFY
-
 // compile Fusion to CUDA functions:
 // 1. JIT compilation via nvrtc to generate CUDA c++ kernel code;
 // 2. CUDA Drive API to load CUDA c++ kernel code as function_;
-TORCH_CUDA_API void compileKernel(Fusion& fusion, CudaKernel& entry);
+TORCH_CUDA_API void compileKernel(Fusion& fusion, CudaKernel* entry);
 
 // run loaded kernel through Function.
 // inputs/outputs is given in the sense of a PyTorch JIT ir node. This function
 // wraps IO data structure for tensors on host.
 TORCH_CUDA_API void runKernel(
-    CudaKernel& entry,
+    CudaKernel* entry,
     const at::ArrayRef<IValue>& inputs,
     std::vector<at::Tensor>& outputs);
 

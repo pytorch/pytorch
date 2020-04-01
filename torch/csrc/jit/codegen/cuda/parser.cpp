@@ -41,11 +41,18 @@ class IrParser {
     FusionGuard fg(fusion_);
     auto block = graph_->block();
 
+    // in case of broadcast, we don't support explicit broadcast, so we need to
+    // convert/expand all inputs tensors to comply to the broadcasted size.
+    // This supports very limited case, which we try to accomodate in graph
+    // partition, that we only merge nodes with identical output shapes.
+    int broadcast_dim =
+        block->outputs()[0]->type()->cast<TensorType>()->dim().value();
+
     // register all inputs;
     // shape propagation during parsing is effctively done in parsing rules, as
     // we only explicitly register inputs in the graph.
     for (auto val : block->inputs()) {
-      TORCH_CHECK(registerValue(val));
+      TORCH_CHECK(registerValue(val, broadcast_dim));
       fusion_->addInput(value_maps_[val->unique()]);
     }
 
@@ -194,8 +201,8 @@ class IrParser {
     }
   }
 
-  bool registerValue(const JitValue* val) {
-    return registerTensor(val) || registerScalar(val);
+  bool registerValue(const JitValue* val, int broadcast_dim=-1) {
+    return registerTensor(val, broadcast_dim) || registerScalar(val);
   }
 
   bool registerScalar(const JitValue* val) {
@@ -222,12 +229,16 @@ class IrParser {
     return false;
   }
 
-  bool registerTensor(const JitValue* val) {
+  bool registerTensor(const JitValue* val, int broadcast_dim=-1) {
     CgValue* cg_val;
     if (val->isCompleteTensor()) {
+      auto tensor_type = val->type()->cast<TensorType>();
+      if (broadcast_dim >= 0) {
+        tensor_type = tensor_type->withDim(broadcast_dim);
+      }
       // TODO: make this a static function in Tensor class;
       // create tensor;
-      cg_val = new TensorView(val->type()->cast<TensorType>());
+      cg_val = new TensorView(tensor_type);
       value_maps_.emplace(val->unique(), cg_val);
       return true;
     }

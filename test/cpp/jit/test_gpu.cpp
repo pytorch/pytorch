@@ -826,7 +826,7 @@ void testGPU_FusionCodeGen2() {
   std::vector<at::Tensor> inputs{{input1, input2}};
   std::vector<at::Tensor> outputs{{output}};
 
-  torch::jit::fuser::cuda::compileKernel(fusion, prog);
+  torch::jit::fuser::cuda::compileKernel(fusion, &prog);
   torch::jit::fuser::cuda::runTestKernel(prog, inputs, outputs);
 
   at::Tensor tv2_ref = input2 + 2.0;
@@ -895,7 +895,7 @@ void testGPU_FusionSimplePWise() {
   std::vector<at::Tensor> inputs{{input1, input2}};
   std::vector<at::Tensor> outputs{{output}};
 
-  torch::jit::fuser::cuda::compileKernel(fusion, prog);
+  torch::jit::fuser::cuda::compileKernel(fusion, &prog);
   torch::jit::fuser::cuda::runTestKernel(prog, inputs, outputs);
 
   at::Tensor tv2_ref = input2 + 2.0;
@@ -952,7 +952,7 @@ void testGPU_FusionExecKernel() {
   std::vector<at::Tensor> inputs{{input1, input2}};
   std::vector<at::Tensor> outputs{{output}};
 
-  torch::jit::fuser::cuda::compileKernel(fusion, prog);
+  torch::jit::fuser::cuda::compileKernel(fusion, &prog);
   torch::jit::fuser::cuda::runTestKernel(prog, inputs, outputs);
 
   at::Tensor check = at::full({1, 128}, 4, options);
