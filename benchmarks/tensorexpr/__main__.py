@@ -4,16 +4,16 @@ from . import benchmark
 import os
 from . import tensor_engine
 
-from . import attention
-from . import broadcast
-from . import conv
-from . import elementwise
-from . import matmul
-from . import normalization
-from . import pooling
-from . import reduction
-from . import softmax
-from . import swish
+from . import attention      # noqa: F401
+from . import broadcast      # noqa: F401
+from . import conv           # noqa: F401
+from . import elementwise    # noqa: F401
+from . import matmul         # noqa: F401
+from . import normalization  # noqa: F401
+from . import pooling        # noqa: F401
+from . import reduction      # noqa: F401
+from . import softmax        # noqa: F401
+from . import swish          # noqa: F401
 
 
 def main():
