@@ -11,6 +11,7 @@ except ImportError:
 
 devices = (torch.device('cpu'), torch.device('cuda:0'))
 
+
 class TestComplexTensor(TestCase):
     def test_to_list_with_complex_64(self):
         # test that the complex float tensor has expected values and
