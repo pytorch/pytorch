@@ -82,7 +82,7 @@ UPTOe( Tensor, cosine_embedding_loss           , (const Tensor &A, const Tensor 
 UPTOe( Tensor, nll_loss                        , (const Tensor &A, const Tensor &B, const Tensor &C, int64_t                D, int64_t       E) )
 UPTOe( Tensor, nll_loss2d                      , (const Tensor &A, const Tensor &B, const Tensor &C, int64_t                D, int64_t       E) )
 UPTOd( Tensor, hinge_embedding_loss            , (const Tensor &A, const Tensor &B, double        C, int64_t                D) )
-UPTOc( Tensor, kl_div                          , (const Tensor &A, const Tensor &B, int64_t       C) )
+UPTOc( Tensor, kl_div                          , (const Tensor &A, const Tensor &B, int64_t       C, bool                   D) )
 UPTOc( Tensor, l1_loss                         , (const Tensor &A, const Tensor &B, int64_t       C) )
 UPTOc( Tensor, smooth_l1_loss                  , (const Tensor &A, const Tensor &B, int64_t       C) )
 UPTOc( Tensor, mse_loss                        , (const Tensor &A, const Tensor &B, int64_t       C) )

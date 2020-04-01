@@ -47,7 +47,7 @@ bool use_max_pool2d(
   // Here are the list of conditions required for this code path to be taken:
   // * Input must be 4D CPU float tensor with no gradients.
   // * Kernel must be a 2D IntArrayRef containing two positive numbers.
-  //   Furthermore, 1x1 kernels are neither valid nor meaningful.
+  //   Furthermore, 1x1 kernels are not valid as XNNPACK prohibits their use.
   // * Padding must be a 2D IntArrayRef containing two non-negative numbers.
   // * Stride must be a 2D IntArrayRef containing two positive numbers.
   // * Dilation must be a 2D IntArrayRef containing two positive numbers.

@@ -65,6 +65,36 @@ class RRefAPITest:
         ret = rref_local_value(rref)
         self.assertEqual(ret, 5)
 
+# Define Script functions on both client and server sides.
+@torch.jit.script
+def no_arg():
+    return 0
+
+@torch.jit.script
+def one_arg(value):
+    return value + 1
+
+@torch.jit.script
+def script_add_ones(x):
+    return torch.add(x, torch.ones(1))
+
+@torch.jit.script
+def script_fork_wait_udf(tensor):
+    fut = torch.jit._fork(script_add_ones, tensor)
+    x = torch.jit._wait(fut)
+    return x
+
+@torch.jit.script
+def script_raise_func(value):
+    if value.numel() == 2:
+        raise ValueError("Expected error")
+    return value + 1
+
+@torch.jit.script
+def script_fork_wait_throw(invalue):
+    fut = torch.jit._fork(script_raise_func, invalue)
+    value = torch.jit._wait(fut)
+    return value
 
 class MyScriptModuleWithRRefs(torch.jit.ScriptModule):
     def __init__(self, dst_worker):
@@ -230,11 +260,6 @@ class LocalRRefTest:
 
 
 def python_function():
-    return 0
-
-
-@torch.jit.script
-def no_arg():
     return 0
 
 
@@ -576,16 +601,6 @@ class JitRpcAsyncOpTest:
 
 
 @torch.jit.script
-def one_arg(value):
-    return value + 1
-
-@torch.jit.script
-def script_raise_func(value):
-    if value.numel() == 2:
-        raise ValueError("Expected error")
-    return value + 1
-
-@torch.jit.script
 def rref_to_here(rref_var):
     # type: (RRef[Tensor]) -> Tensor
     return rref_var.to_here()
@@ -842,3 +857,27 @@ class JitRpcTest(RRefAPITest, LocalRRefTest, JitRpcAsyncOpTest, RpcAgentTestFixt
                           args=(torch.ones(2),))
         with self.assertRaisesRegex(Exception, ".*Expected error.*"):
             rref.to_here()
+
+    @dist_init
+    def test_remote_script_udf(self):
+        rref = rpc.remote("worker{}".format((self.rank + 1) % self.world_size),
+                          script_fork_wait_udf,
+                          args=(torch.ones(2),))
+        self.assertEqual(rref.to_here(), torch.ones(2) * 2)
+
+    @dist_init
+    def test_async_script_udf(self):
+        future = rpc.rpc_async(
+            "worker{}".format((self.rank + 1) % self.world_size),
+            script_fork_wait_udf,
+            args=(torch.ones(2),))
+        self.assertEqual(future.wait(), torch.ones(2) * 2)
+
+    @dist_init
+    def test_async_script_throw(self):
+        future = rpc.rpc_async(
+            "worker{}".format((self.rank + 1) % self.world_size),
+            script_fork_wait_throw,
+            args=(torch.ones(2),))
+        with self.assertRaisesRegex(Exception, ".*Expected error.*"):
+            future.wait()
