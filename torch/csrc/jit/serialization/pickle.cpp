@@ -12,7 +12,7 @@ void pickle(
     std::function<void(const char* data_start, size_t data_len)> writer,
     const IValue& ivalue,
     std::vector<at::Tensor>* tensor_table) {
-  Pickler pickler(std::move(writer), tensor_table);
+  Pickler pickler(std::move(writer), tensor_table, nullptr, nullptr);
   pickler.protocol();
   pickler.pushIValue(ivalue);
   pickler.stop();
@@ -39,12 +39,9 @@ std::vector<char> pickle_save(const at::IValue& ivalue) {
 #ifndef C10_MOBILE
   // Pickle the IValue into an array of bytes
   std::vector<char> pickle_data;
-  Pickler pickler(
-      [&](const char* buf, size_t size) {
-        pickle_data.insert(pickle_data.end(), buf, buf + size);
-      },
-      /*tensor_table=*/nullptr,
-      /*class_table=*/nullptr);
+  Pickler pickler([&](const char* buf, size_t size) {
+    pickle_data.insert(pickle_data.end(), buf, buf + size);
+  });
   pickler.protocol();
   pickler.pushIValue(ivalue);
   pickler.stop();

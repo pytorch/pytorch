@@ -243,9 +243,14 @@ auto ConvParams::use_nnpack(const at::Tensor& input) const -> bool {
 }
 
 auto ConvParams::use_xnnpack(
-    const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias) const -> bool {
-  return MemoryFormat::ChannelsLast == input.suggest_memory_format() &&
-         xnnpack::use_convolution2d(input, weight, bias, padding, stride, dilation, groups);
+    const at::Tensor& input,
+    const at::Tensor& weight,
+    const at::Tensor& bias) const -> bool {
+#if defined(C10_MOBILE)
+  return xnnpack::use_convolution2d(input, weight, bias, padding, stride, dilation, groups);
+#else
+  return false;
+#endif
 }
 
 // We currently only have depthwise support for the case where groups ==
@@ -706,11 +711,7 @@ at::Tensor _convolution(
 #endif
   } else if (input.device().type() == c10::DeviceType::CPU || input.device().type() == c10::DeviceType::CUDA) {
     if (params.use_xnnpack(input, weight, bias)) {
-      // This is NOT the preferred usage pattern as it forces expensive and
-      // unnecessary weight prepacking per invocation.  Still if we end up here,
-      // which we shouldn't if we have correctly intercepted and replaced this
-      // usage through JIT, still this code path is more efficient for NHWC
-      // tensors than the alternatives.
+      // Using prepacked conv is preferred, but XNNPACK is still the fastest option for NHWC.
       output = xnnpack::convolution2d(
         input, weight, bias, params.padding, params.stride, params.dilation, params.groups);
     } else if (params.use_cpu_depthwise3x3_winograd(input, weight)) {
