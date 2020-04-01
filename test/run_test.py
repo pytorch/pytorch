@@ -37,7 +37,6 @@ TESTS = [
     'test_distributions',
     'test_docs_coverage',
     'test_expecttest',
-    'test_fake_quant',
     'test_indexing',
     'test_jit',
     'test_logging',
