@@ -1010,6 +1010,7 @@ class TestTensorExprFuser(BaseTestClass):
             r = test(x, y, z, a, b)
             xn, yn, zn = [t.numpy() for t in (x, y, z)]
             np.testing.assert_allclose(r.numpy(), xn + yn * a + zn * b)
+            # FIXME: interp.elapsed_value() also increments due to simplifier
             assert llvm.elapsed_value() == 1 or interp.elapsed_value() > 1
 
 # FIXME: Blocked on profiling executor changes
@@ -1046,6 +1047,7 @@ class TestTensorExprFuser(BaseTestClass):
         npr = a[0:512:2]
         npr = npr + npr
         np.testing.assert_allclose(npr.numpy(), x.numpy())
+        # FIXME: interp.elapsed_value() also increments due to simplifier
         assert llvm.elapsed_value() == 1 or interp.elapsed_value() > 1
 
 
@@ -1065,6 +1067,7 @@ class TestTensorExprFuser(BaseTestClass):
         npr = np.expand_dims(a, 0)
         npr = npr + npr
         np.testing.assert_allclose(npr, x.numpy())
+        # FIXME: interp.elapsed_value() also increments due to simplifier
         assert llvm.elapsed_value() == 1 or interp.elapsed_value() > 1
 
 
@@ -1080,6 +1083,7 @@ class TestTensorExprFuser(BaseTestClass):
         ref = test(x, y, z)
         res = test(x, y, z)
         np.testing.assert_allclose(ref.numpy(), res.numpy())
+        # FIXME: interp.elapsed_value() also increments due to simplifier
         assert llvm.elapsed_value() == 1 or interp.elapsed_value() > 1
 
 
@@ -1095,6 +1099,7 @@ class TestTensorExprFuser(BaseTestClass):
         ref = test(x, y, z)
         res = test(x, y, z)
         np.testing.assert_allclose(ref.numpy(), res.numpy())
+        # FIXME: interp.elapsed_value() also increments due to simplifier
         assert llvm.elapsed_value() == 1 or interp.elapsed_value() > 1
 
 
