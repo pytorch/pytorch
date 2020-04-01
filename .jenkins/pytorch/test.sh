@@ -21,7 +21,7 @@ if [ -n "${IN_CIRCLECI}" ]; then
     sudo apt-get -qq install --allow-downgrades --allow-change-held-packages libnccl-dev=2.5.6-1+cuda10.1 libnccl2=2.5.6-1+cuda10.1
   fi
 
-  if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9-cudnn7-py2* ]]; then
+  if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda10.1-cudnn7-py3* ]]; then
     # TODO: move this to Docker
     sudo apt-get -qq update
     sudo apt-get -qq install --allow-downgrades --allow-change-held-packages openmpi-bin libopenmpi-dev
@@ -37,7 +37,6 @@ fi
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # TODO: Move this to Docker
-  sudo apt-get -qq install --no-install-recommends apt-transport-https ca-certificates
   sudo apt-get -qq update
   sudo apt-get -qq install --no-install-recommends libsndfile1
 fi
@@ -188,15 +187,16 @@ test_torchvision() {
 test_libtorch() {
   if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
     echo "Testing libtorch"
+    mkdir -p test/test-reports/cpp-unittest
     python test/cpp/jit/tests_setup.py setup
     if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
-      build/bin/test_jit
+      build/bin/test_jit  --gtest_output=xml:test/test-reports/cpp-unittest/test_jit.xml
     else
-      build/bin/test_jit "[cpu]"
+      build/bin/test_jit  --gtest_filter='-*CUDA' --gtest_output=xml:test/test-reports/cpp-unittest/test_jit.xml
     fi
     python test/cpp/jit/tests_setup.py shutdown
     python tools/download_mnist.py --quiet -d test/cpp/api/mnist
-    OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" build/bin/test_api
+    OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" build/bin/test_api --gtest_output=xml:test/test-reports/cpp-unittest/test_api.xml
     assert_git_not_dirty
   fi
 }
@@ -215,6 +215,18 @@ test_custom_script_ops() {
     popd
     assert_git_not_dirty
   fi
+}
+
+test_torch_function_benchmark() {
+  echo "Testing __torch_function__ benchmarks"
+  pushd benchmarks/overrides_benchmark
+  python bench.py -n 1 -m 1
+  python python pyspybench.py Tensor -n 1
+  python python pyspybench.py SubTensor -n 1
+  python python pyspybench.py WithTorchFunction -n 1
+  python python pyspybench.py SubWithTorchFunction -n 1
+  popd
+  assert_git_not_dirty
 }
 
 test_xla() {
@@ -277,6 +289,7 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 ]]; t
   test_aten
   test_libtorch
   test_custom_script_ops
+  test_torch_function_benchmark
 else
   test_torchvision
   test_python_nn
@@ -284,4 +297,5 @@ else
   test_aten
   test_libtorch
   test_custom_script_ops
+  test_torch_function_benchmark
 fi

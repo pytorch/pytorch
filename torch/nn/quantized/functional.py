@@ -368,6 +368,34 @@ def hardtanh(input, min_val=-1., max_val=1., inplace=False):
         return torch._C._nn.hardtanh_(input, min_val, max_val)
     return torch._C._nn.hardtanh(input, min_val, max_val)
 
+def hardswish(input, inplace=False):
+    r"""Applies the quantized version of the hardswish function, element-wise,
+    as described in the paper:
+
+    `Searching for MobileNetV3`_.
+
+    .. math::
+        \text{Hardswish}(x) = \begin{cases}
+            0 & \text{if~} x \le -3, \\
+            x & \text{if~} x \ge +3, \\
+            x^2/6 & \text{otherwise}
+        \end{cases}
+
+    Args:
+        input: quantized input
+        inplace: Inplace modification of the input tensor
+
+    See :class:`~torch.nn.Hardswish` for more details.
+
+    .. _`Searching for MobileNetV3`:
+        https://arxiv.org/abs/1905.02244
+    """
+    if not input.is_quantized:
+        raise ValueError("Input to 'quantized.hardswish' must be quantized!")
+    if inplace:
+        return torch._C._nn.hardswish_(input)
+    return torch._C._nn.hardswish(input)
+
 def elu(input, alpha=1., inplace=False, scale=None, zero_point=None):
     r"""
     Applies the quantized ELU function element-wise:
@@ -400,7 +428,14 @@ def elu(input, alpha=1., inplace=False, scale=None, zero_point=None):
 def hardsigmoid(input):
     # type: (Tensor) -> Tensor
     r"""
-    Applies the quantized element-wise function :math:`\text{Hardsigmoid}(x) = \frac{ReLU6(x + 3)}{6}`
+    Applies the quantized element-wise function
+
+    .. math::
+        \text{Hardsigmoid}(x) = \begin{cases}
+            0 & \text{if~} x \le -3, \\
+            1 & \text{if~} x \ge +3, \\
+            x / 6 & \text{otherwise}
+        \end{cases}
 
     See :class:`~torch.nn.Hardsigmoid` for more details.
     """

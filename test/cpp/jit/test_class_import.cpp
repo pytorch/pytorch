@@ -2,8 +2,8 @@
 #include <test/cpp/jit/test_utils.h>
 
 #include <ATen/core/qualified_name.h>
-#include <torch/csrc/jit/serialization/import_source.h>
 #include <torch/csrc/jit/frontend/resolver.h>
+#include <torch/csrc/jit/serialization/import_source.h>
 #include <torch/torch.h>
 
 namespace torch {
@@ -40,9 +40,7 @@ static void import_libs(
   SourceImporter si(
       cu,
       &tensor_table,
-      [&](const std::string& name) -> std::shared_ptr<Source> {
-        return src;
-      },
+      [&](const std::string& name) -> std::shared_ptr<Source> { return src; },
       /*version=*/2);
   si.loadNamedType(QualifiedName(class_name));
 }
@@ -138,7 +136,7 @@ void testClassDerive() {
 static const auto torchbindSrc = R"JIT(
 class FooBar1234(Module):
   __parameters__ = []
-  f : __torch__.torch.classes._TorchScriptTesting_StackString
+  f : __torch__.torch.classes._TorchScriptTesting._StackString
   training : bool
   def forward(self: __torch__.FooBar1234) -> str:
     return (self.f).top()
