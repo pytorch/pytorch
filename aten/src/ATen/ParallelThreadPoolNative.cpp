@@ -69,12 +69,12 @@ int get_num_interop_threads() {
 
 void launch(std::function<void()> func) {
   auto fn = std::bind([](
-    std::function<void()> f, std::shared_ptr<ThreadLocalDebugInfoBase> info) {
+    std::function<void()> f, std::shared_ptr<ThreadLocalDebugInfo> info) {
       DebugInfoGuard guard(std::move(info));
       f();
     },
     std::move(func),
-    getThreadLocalDebugInfo()
+    ThreadLocalDebugInfo::_current()
   );
 
 #if AT_EXPERIMENTAL_SINGLE_THREAD_POOL
