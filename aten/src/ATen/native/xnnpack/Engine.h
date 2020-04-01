@@ -29,6 +29,20 @@ Tensor convolution2d(
     const int64_t groups);
 
 //
+// Linear
+//
+
+bool use_linear(
+  const Tensor& input,
+  const Tensor& weight,
+  const Tensor& bias);
+
+Tensor linear(
+  const Tensor& input,
+  const Tensor& weight,
+  const Tensor& bias);
+
+//
 // Max Pooling
 //
 
