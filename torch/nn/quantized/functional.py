@@ -375,7 +375,11 @@ def hardswish(input, inplace=False):
     `Searching for MobileNetV3`_.
 
     .. math::
-        \text{Hardswish}(x) = x * \frac{ReLU6(x + 3)}{6}
+        \text{Hardswish}(x) = \begin{cases}
+            0 & \text{if~} x \le -3, \\
+            x & \text{if~} x \ge +3, \\
+            x^2/6 & \text{otherwise}
+        \end{cases}
 
     Args:
         input: quantized input
@@ -424,7 +428,14 @@ def elu(input, alpha=1., inplace=False, scale=None, zero_point=None):
 def hardsigmoid(input):
     # type: (Tensor) -> Tensor
     r"""
-    Applies the quantized element-wise function :math:`\text{Hardsigmoid}(x) = \frac{ReLU6(x + 3)}{6}`
+    Applies the quantized element-wise function
+
+    .. math::
+        \text{Hardsigmoid}(x) = \begin{cases}
+            0 & \text{if~} x \le -3, \\
+            1 & \text{if~} x \ge +3, \\
+            x / 6 & \text{otherwise}
+        \end{cases}
 
     See :class:`~torch.nn.Hardsigmoid` for more details.
     """
