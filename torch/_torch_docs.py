@@ -1019,9 +1019,12 @@ add_docstr(torch.real,
            r"""
 real(input, out=None) -> Tensor
 
-Returns the real values of the given :attr:`input` tensor. If
+Returns the real part of the :attr:`input` tensor. If
 :attr:`input` is a real (non-complex) tensor, this function just
 returns it.
+
+.. warning::
+    Not yet implemented for complex tensors.
 
 .. math::
     \text{out}_{i} = real(\text{input}_{i})
@@ -1029,11 +1032,6 @@ returns it.
 Args:
     {input}
     {out}
-
-Example::
-
-    >>> torch.real(torch.tensor([-1 + 1j, -2 + 2j, 3 - 3j]))
-    tensor([ -1,  -2,  3])
 """.format(**common_args))
 
 add_docstr(torch.reciprocal,
@@ -2490,9 +2488,10 @@ add_docstr(torch.imag,
            r"""
 imag(input, out=None) -> Tensor
 
-Returns the imaginary values of the given :attr:`input` tensor. If
-:attr:`input` is a real (non-complex) tensor this is equivalent to
-``torch.zeros_like(input)``.
+Returns the imaginary part of the :attr:`input` tensor.
+
+.. warning::
+    Not yet implemented.
 
 .. math::
     \text{out}_{i} = imag(\text{input}_{i})
@@ -2500,11 +2499,6 @@ Returns the imaginary values of the given :attr:`input` tensor. If
 Args:
     {input}
     {out}
-
-Example::
-
-    >>> torch.imag(torch.tensor([-1 + 1j, -2 + 2j, 3 - 3j]))
-    tensor([ 1,  2,  -3])
 """.format(**common_args))
 
 add_docstr(torch.index_select,

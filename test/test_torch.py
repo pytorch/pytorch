@@ -15892,20 +15892,17 @@ class TestViewOps(TestCase):
             self.assertEqual(t.float()[0], v[0])
             self.assertTrue(t[0] == complex(0, 1))
 
-    def test_imag_new(self, device):
+    def test_imag_noncomplex(self, device):
         t = torch.ones((5, 5), device=device)
-        i = torch.imag(t)
 
-        self.assertTrue(not i._is_view())
-        self.assertTrue(i.device == t.device)
-        self.assertTrue(i.dtype is t.dtype)
-        self.assertTrue(torch.equal(i, torch.zeros_like(t)))
+        with self.assertRaises(RuntimeError):
+            torch.imag(t)
 
         # TODO: update when the imag attribute is implemented
         self.assertTrue(not hasattr(t, 'imag'))
 
     # TODO: update after torch.imag is implemented for complex tensors
-    def test_imag_view(self, device):
+    def test_imag_complex(self, device):
         t = torch.tensor((1 + 1j), device=device)
         with self.assertRaises(RuntimeError):
             v = torch.imag(t)
