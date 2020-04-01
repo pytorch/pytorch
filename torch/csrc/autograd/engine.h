@@ -3,7 +3,7 @@
 // Engine implements backpropagation from output variables and their gradients
 // to "root" variables (variables created by the user with requires_grad=True).
 
-#include <ATen/ThreadLocalDebugInfo.h>
+#include <ATen/ThreadLocalState.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/autograd/anomaly_mode.h>
 #include <torch/csrc/autograd/function.h>
@@ -79,8 +79,10 @@ struct GraphTask {
   // execution of the GraphTask is completed, the captured_vars_ are moved
   // out of the GraphTask and are no longer valid.
   std::vector<Variable> captured_vars_;
-  std::shared_ptr<at::ThreadLocalDebugInfo> debug_info_ =
-      at::ThreadLocalDebugInfo::_current();
+
+  at::ThreadLocalState thread_locals_ =
+      at::ThreadLocalState(/* keep_grad_mode */ false);
+
   std::unordered_set<c10::Stream> leaf_streams;
 
   void init_to_execute(Node& graph_root, const edge_list& outputs);

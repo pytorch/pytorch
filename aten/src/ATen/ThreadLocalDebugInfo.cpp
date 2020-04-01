@@ -24,6 +24,11 @@ std::shared_ptr<ThreadLocalDebugInfo> ThreadLocalDebugInfo::_current() {
   return debug_info;
 }
 
+/* static */
+void ThreadLocalDebugInfo::_forceCurrentDebugInfo(
+    const std::shared_ptr<ThreadLocalDebugInfo>& info) {
+  debug_info = info;
+}
 
 DebugInfoGuard::DebugInfoGuard(
     DebugInfoKind kind, std::shared_ptr<DebugInfoBase> info) {
