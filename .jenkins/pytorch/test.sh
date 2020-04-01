@@ -217,18 +217,6 @@ test_custom_script_ops() {
   fi
 }
 
-test_torch_function_benchmark() {
-  echo "Testing __torch_function__ benchmarks"
-  pushd benchmarks/overrides_benchmark
-  python bench.py -n 1 -m 1
-  python python pyspybench.py Tensor -n 1
-  python python pyspybench.py SubTensor -n 1
-  python python pyspybench.py WithTorchFunction -n 1
-  python python pyspybench.py SubWithTorchFunction -n 1
-  popd
-  assert_git_not_dirty
-}
-
 test_xla() {
   export XLA_USE_XRT=1 XRT_DEVICE_MAP="CPU:0;/job:localservice/replica:0/task:0/device:XLA_CPU:0"
   # Issue #30717: randomize the port of XLA/gRPC workers is listening on to reduce flaky tests.
@@ -297,7 +285,6 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 ]]; t
   test_aten
   test_libtorch
   test_custom_script_ops
-  test_torch_function_benchmark
 elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   test_bazel
 else
@@ -307,5 +294,4 @@ else
   test_aten
   test_libtorch
   test_custom_script_ops
-  test_torch_function_benchmark
 fi
