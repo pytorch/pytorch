@@ -1481,7 +1481,7 @@ Tensor trace_cpu(const Tensor& self) {
     t_stride_1 = self.stride(1);
 
     t_diag_size = std::min(self.size(0), self.size(1));
-    for (int64_t i = 0; i < t_diag_size, i++) {
+    for (int64_t i = 0; i < t_diag_size; i++) {
       sum += t_data[i * (t_stride_0 + t_stride_1)];
     }
 
