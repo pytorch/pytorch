@@ -1984,7 +1984,7 @@ struct CAFFE2_API AnyTupleType : public Type {
     return "tuple";
   }
   static const TypeKind Kind = TypeKind::AnyTupleType;
-;
+
   // global singleton
   static AnyTupleTypePtr get();
 private:
