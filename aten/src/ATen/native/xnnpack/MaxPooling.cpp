@@ -44,11 +44,25 @@ bool use_max_pool2d(
     dilation_,
   };
 
+  // Here are the list of conditions required for this code path to be taken:
+  // * Input must be 4D CPU float tensor with no gradients.
+  // * Kernel must be a 2D IntArrayRef containing two positive numbers.
+  //   Furthermore, 1x1 kernels are neither valid nor meaningful.
+  // * Padding must be a 2D IntArrayRef containing two non-negative numbers.
+  // * Stride must be a 2D IntArrayRef containing two positive numbers.
+  // * Dilation must be a 2D IntArrayRef containing two positive numbers.
+  // * Ceil mode is not supported and must be disabled.
+  // * output_max must be greater than output_min.
+  //   Namely, setting both output_min and output_max to 0 is not valid usage.
+  // * Finally, application of this operator to the input tensor with the given
+  //   max pool 2d parameters must result in an output tensor with a valid shape.
+
   return xnnpack::internal::available() &&
       // Input
       (4 == input.dim()) &&
       (c10::DeviceType::CPU == input.device().type()) &&
       (kFloat == input.scalar_type()) &&
+      !input.requires_grad() &&
       // Kernel
       (2 == parameters.kernel.size()) &&
       (parameters.kernel[Layout::Parameter::height] > 0) &&
