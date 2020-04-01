@@ -14,6 +14,11 @@ def apply_permutation(tensor, permutation, dim=1):
     # type: (Tensor, Tensor, int) -> Tensor
     return tensor.index_select(dim, permutation)
 
+class PackedParameter(torch.nn.Module):
+    def __init__(self, param):
+        super(PackedParameter, self).__init__()
+        self.param = param
+
 class RNNBase(torch.nn.Module):
 
     _FLOAT_MODULE = nn.RNNBase
@@ -50,7 +55,7 @@ class RNNBase(torch.nn.Module):
         else:
             raise ValueError("Unrecognized RNN mode: " + mode)
 
-        self._all_weight_values = []
+        _all_weight_values = []
         for layer in range(num_layers):
             for direction in range(num_directions):
                 layer_input_size = input_size if layer == 0 else hidden_size * num_directions
@@ -84,7 +89,9 @@ class RNNBase(torch.nn.Module):
                             w_hh)
                     cell_params = torch.ops.quantized.make_quantized_cell_params_fp16(packed_ih, packed_hh, b_ih, b_hh)
 
-                self._all_weight_values.append(cell_params)
+                _all_weight_values.append(PackedParameter(cell_params))
+        self._all_weight_values = torch.nn.ModuleList(_all_weight_values)
+        self._all_params = ([m.param for m in self._all_weight_values])
 
     def _get_name(self):
         return 'DynamicQuantizedRNN'
@@ -176,12 +183,13 @@ class RNNBase(torch.nn.Module):
             return hx
         return apply_permutation(hx, permutation)
 
-    @property
-    def all_weights(self):
-        result = OrderedDict()
-        for idx, name in enumerate(self._all_weight_names):
-            result[name] = self._all_weight_values[idx].unpack()
-        return result
+    # TODOJAMES
+    # @property
+    # def all_weights(self):
+    #     result = OrderedDict()
+    #     for idx, name in enumerate(self._all_weight_names):
+    #         result[name] = self._all_weight_values[idx].unpack()
+    #     return result
 
     @classmethod
     def from_float(cls, mod):
@@ -213,8 +221,7 @@ class RNNBase(torch.nn.Module):
 
         assert mod.bias
 
-        qRNNBase._all_weight_names = []
-        qRNNBase._all_weight_values = []
+        _all_weight_values = []
         for layer in range(qRNNBase.num_layers):
             for direction in range(num_directions):
                 layer_input_size = qRNNBase.input_size if layer == 0 else qRNNBase.hidden_size * num_directions
@@ -252,7 +259,9 @@ class RNNBase(torch.nn.Module):
 
                     cell_params = torch.ops.quantized.make_quantized_cell_params_fp16(packed_ih, packed_hh, bias_ih, bias_hh)
 
-                qRNNBase._all_weight_values.append(cell_params)
+                _all_weight_values.append(PackedParameter(cell_params))
+        qRNNBase._all_weight_values = torch.nn.ModuleList(_all_weight_values)
+        qRNNBase._all_params = ([m.param for m in qRNNBase._all_weight_values])
 
         return qRNNBase
 
@@ -285,11 +294,11 @@ class LSTM(RNNBase):
         self.check_forward_args(input, hx, batch_sizes)
 
         if batch_sizes is None:
-            result = torch.ops.aten.quantized_lstm(input, hx, self._all_weight_values, self.bias, self.num_layers,
+            result = torch.ops.aten.quantized_lstm(input, hx, self._all_params, self.bias, self.num_layers,
                                                    float(self.dropout), self.training, self.bidirectional,
                                                    self.batch_first, dtype=self.dtype, use_dynamic=True)
         else:
-            result = torch.ops.aten.quantized_lstm(input, batch_sizes, hx, self._all_weight_values, self.bias,
+            result = torch.ops.aten.quantized_lstm(input, batch_sizes, hx, self._all_params, self.bias,
                                                    self.num_layers, float(self.dropout), self.training,
                                                    self.bidirectional, dtype=self.dtype, use_dynamic=True)
         output = result[0]
