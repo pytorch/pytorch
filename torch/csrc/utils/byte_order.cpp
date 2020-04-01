@@ -284,7 +284,7 @@ std::vector<std::complex<T>> complex_to_float(const std::complex<T>* src, size_t
   std::vector<std::complex<T>> new_src;
   new_src.reserve(2 * len);
   for (int i = 0; i < len; i++) {
-    auto elem = *src[i];
+    auto elem = src[i];
     new_src.emplace_back(elem.real());
     new_src.emplace_back(elem.imag());
   }
@@ -293,8 +293,8 @@ std::vector<std::complex<T>> complex_to_float(const std::complex<T>* src, size_t
 
 void THP_encodeComplexFloatBuffer(uint8_t* dst, const std::complex<float>* src, THPByteOrder order, size_t len)
 {
-  auto new_src = (void*)(complex_to_float(src, len));
-  memcpy(dst, new_src, 2 * sizeof(float) * len);
+  auto new_src = complex_to_float(src, len);
+  memcpy(dst, static_cast<void*>(&new_src), 2 * sizeof(float) * len);
   if (order != THP_nativeByteOrder()) {
     for (size_t i = 0; i < (2 * len); i++) {
       swapBytes32(dst);
@@ -305,8 +305,8 @@ void THP_encodeComplexFloatBuffer(uint8_t* dst, const std::complex<float>* src, 
 
 void THP_encodeCompelxDoubleBuffer(uint8_t* dst, const std::complex<double>* src, THPByteOrder order, size_t len)
 {
-  auto new_src = (void*)(complex_to_float(src, len));
-  memcpy(dst, new_src, 2 * sizeof(double) * len);
+  auto new_src = complex_to_float(src, len);
+  memcpy(dst, static_cast<void*>(&new_src), 2 * sizeof(double) * len);
   if (order != THP_nativeByteOrder()) {
     for (size_t i = 0; i < (2 * len); i++) {
       swapBytes64(dst);
