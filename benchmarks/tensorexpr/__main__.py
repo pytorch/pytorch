@@ -4,14 +4,16 @@ from . import benchmark
 import os
 from . import tensor_engine
 
-# import normalization
-
-# import reduction
-
-# import softmax
-# import pooling
-# import conv
-# import matmul
+from . import attention
+from . import broadcast
+from . import conv
+from . import elementwise
+from . import matmul
+from . import normalization
+from . import pooling
+from . import reduction
+from . import softmax
+from . import swish
 
 
 def main():
