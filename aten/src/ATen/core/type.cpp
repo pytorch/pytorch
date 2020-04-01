@@ -653,12 +653,22 @@ bool ListType::isSubtypeOfExt(const TypePtr rhs_, std::ostream* why_not) const {
   return false;
 }
 
-bool TupleType::operator==(const Type& rhs) const {
-  return compare(rhs, [](const TypePtr a, const TypePtr b) {
-    return *a == *b;
-  }) && schema_ == rhs.expect<TupleType>()->schema_;
-  // `compare` guarantees that rhs is always a TupleType, so the
-  // dynamic_cast above always success.
+ bool TupleType::operator==(const Type& rhs) const {
+   bool typesSame =
+       compare(rhs, [](const TypePtr a, const TypePtr b) { return *a == *b; });
+   if (!typesSame) {
+     return false;
+  }
+
+  // `compare` guarantees that rhs is always a TupleType.
+  auto rhsTuple = rhs.expect<TupleType>();
+  if (schema_ == nullptr && rhsTuple->schema_ == nullptr) {
+    return typesSame;
+  }
+  if (schema_ == nullptr || rhsTuple->schema_ == nullptr) {
+    return false;
+  }
+  return *schema_ == *rhsTuple->schema_;
 }
 
 std::string TupleType::str() const {
@@ -806,31 +816,32 @@ FunctionType::FunctionType(torch::jit::Function* function)
   : NamedType(TypeKind::FunctionType, function->qualname()),
     function_(function) {}
 
-bool InterfaceType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
-  // to improve performance this check can be cached
-  if (auto iface = rhs->cast<InterfaceType>()) {
-    if (!is_module() && iface->is_module()) {
-      if (why_not) {
-        *why_not << "Interface '" << python_str() << "' is not a subtype of "
-                  << "the module interface '" << rhs->python_str() << "'.\n";
-      }
-      return false;
+bool InterfaceType::isSubTypeImpl(
+    const InterfaceType& lhs,
+    const InterfaceType& rhs,
+    std::ostream* why_not) {
+  if (!lhs.is_module() && rhs.is_module()) {
+    if (why_not) {
+      *why_not << "Interface '" << lhs.python_str() << "' is not a subtype of "
+               << "the module interface '" << rhs.python_str() << "'.\n";
     }
-    for (const FunctionSchema& schema : *iface->methods_) {
-      auto self_schema = getMethod(schema.name());
+    return false;
+  }
+    for (const FunctionSchema& schema : *rhs.methods_) {
+      auto self_schema = lhs.getMethod(schema.name());
       if (!self_schema) {
         if (why_not) {
-          *why_not << "Interface '" << python_str()
+          *why_not << "Interface '" << lhs.python_str()
                    << "' does not have method '" << schema.name() << "' but interface '"
-                   << rhs->python_str() << "' does.\n";
+                   << rhs.python_str() << "' does.\n";
         }
         return false;
       }
       if (!self_schema->isSubtypeOf(schema, /*is_method=*/true, why_not)) {
         if (why_not) {
-          *why_not << "Method on interface '" << python_str()
+          *why_not << "Method on interface '" << lhs.python_str()
                    << "' (1) is not compatible with interface '"
-                   << rhs->python_str() << "' (2)\n"
+                   << rhs.python_str() << "' (2)\n"
                    << "  (1) " << *self_schema << "\n"
                    << "  (2) " << schema << "\n";
           return false;
@@ -839,6 +850,12 @@ bool InterfaceType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) con
       }
     }
     return true;
+}
+
+bool InterfaceType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
+  // to improve performance this check can be cached
+  if (auto iface = rhs->cast<InterfaceType>()) {
+    return isSubTypeImpl(*this, *iface, why_not);
   }
   return Type::isSubtypeOfExt(rhs, why_not);
 }
