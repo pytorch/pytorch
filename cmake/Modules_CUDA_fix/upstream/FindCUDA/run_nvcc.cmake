@@ -66,6 +66,8 @@ set(CUDA_make2cmake "@CUDA_make2cmake@") # path
 set(CUDA_parse_cubin "@CUDA_parse_cubin@") # path
 set(build_cubin @build_cubin@) # bool
 set(CUDA_HOST_COMPILER "@CUDA_HOST_COMPILER@") # path
+set(CUDA_strip_relfatbin @CUDA_strip_relfatbin@) # bool
+set(CUDA_OBJCOPY "@CUDA_OBJCOPY@") # path
 # We won't actually use these variables for now, but we need to set this, in
 # order to force this file to be run again if it changes.
 set(generated_file_path "@generated_file_path@") # path
@@ -177,6 +179,12 @@ cuda_execute_process(
   "Removing ${generated_file}"
   COMMAND "${CMAKE_COMMAND}" -E remove "${generated_file}"
   )
+if(CUDA_strip_relfatbin)
+cuda_execute_process(
+  "Removing ${generated_strip_file}"
+  COMMAND "${CMAKE_COMMAND}" -E remove "${generated_strip_file}"
+  )
+endif()
 
 # For CUDA 2.3 and below, -G -M doesn't work, so remove the -G flag
 # for dependency generation and hope for the best.
@@ -275,6 +283,17 @@ else()
   if(verbose)
     message("Generated ${generated_file} successfully.")
   endif()
+endif()
+
+if(CUDA_strip_relfatbin)
+  # Strip relocatable FATBINS
+  cuda_execute_process(
+    "Stripping nv_relfatbin ${generated_strip_file}"
+    COMMAND "${CUDA_OBJCOPY}"
+    --remove-relocations .nvFatBinSegment --remove-section __nv_relfatbin
+    "${generated_file}"
+    "${generated_strip_file}"
+  )
 endif()
 
 # Cubin resource report commands.
