@@ -77,7 +77,7 @@ void testExprSimple02() {
     VarHandle x_inner("x_inner", kInt);
     VarHandle y("y", kInt);
     VarHandle x_tail("x_tail", kInt);
-    BufHandle f("f", kHandle, {26, 5});
+    BufHandle f("f", {26, 5});
     ExprHandle x_1 = x_outer * 4 + x_inner;
     ExprHandle x_outer_end = (ExprHandle(26) - 0) / 4;
     For* stmt1 = For::make(
@@ -146,7 +146,7 @@ void testExprSplitWithTailNone() {
     VarHandle x_inner("x_inner", kInt);
     VarHandle y("y", kInt);
     VarHandle x_tail("x_tail", kInt);
-    BufHandle f("f", kHandle, {24, 5});
+    BufHandle f("f", {24, 5});
     ExprHandle x_1 = x_outer * 4 + x_inner;
     ExprHandle x_outer_end = (ExprHandle(24) - 0) / 4;
     For* stmt = For::make(
@@ -455,7 +455,7 @@ void testScheduleFuserStyle() {
   const int kVectorCount = 128;
   const int kTotalSize = kVectorSize * kVectorCount;
 
-  Buffer a_buf(BufHandle("A", kHandle, {ExprHandle(kTotalSize)}), kFloat);
+  Buffer a_buf(BufHandle("A", {ExprHandle(kTotalSize)}), kFloat);
 
   Tensor* b = Compute(
       "f", {{kTotalSize, "i"}}, [&](const std::vector<VarHandle>& axes) {
@@ -488,10 +488,10 @@ void testScheduleFuserThreeArg() {
   const int kVectorCount = 128;
   const int kTotalSize = kVectorSize * kVectorCount;
 
-  Buffer a(BufHandle("A", kHandle, {ExprHandle(kTotalSize)}), kFloat);
-  Buffer b(BufHandle("B", kHandle, {ExprHandle(kTotalSize)}), kFloat);
-  Buffer c(BufHandle("C", kHandle, {ExprHandle(kTotalSize)}), kFloat);
-  Buffer d(BufHandle("D", kHandle, {ExprHandle(kTotalSize)}), kFloat);
+  Buffer a(BufHandle("A", {ExprHandle(kTotalSize)}), kFloat);
+  Buffer b(BufHandle("B", {ExprHandle(kTotalSize)}), kFloat);
+  Buffer c(BufHandle("C", {ExprHandle(kTotalSize)}), kFloat);
+  Buffer d(BufHandle("D", {ExprHandle(kTotalSize)}), kFloat);
 
   Tensor* e = Compute("e", {{kTotalSize, "i"}}, [&](const VarHandle& i) {
     return a(i) + b(i);
@@ -526,8 +526,8 @@ void testScheduleDynamicShape2D() {
   auto testWithSize = [](int32_t M, int32_t N) {
     VarHandle m("m", kInt);
     VarHandle n("n", kInt);
-    Buffer a(BufHandle("a", kHandle, {m, n}), kFloat);
-    Buffer b(BufHandle("b", kHandle, {m, n}), kFloat);
+    Buffer a(BufHandle("a", {m, n}), kFloat);
+    Buffer b(BufHandle("b", {m, n}), kFloat);
     Tensor* c = Compute(
         "c", {{m, "m"}, {n, "n"}}, [&](const VarHandle& i, const VarHandle& j) {
           return a(i, j) + b(i, j);

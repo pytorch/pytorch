@@ -205,14 +205,13 @@ ExprHandle ifThenElse(
 
 ExprHandle Buf::make(
     const std::string& name_hint,
-    Dtype dtype,
     const std::vector<ExprHandle>& dims) {
   return ExprHandle(
-      new Buf(new Var(name_hint, dtype), ExprHandleVectorToExprVector(dims)));
+      new Buf(new Var(name_hint, kHandle), ExprHandleVectorToExprVector(dims)));
 }
 
-ExprHandle Buf::make(Dtype dtype, const std::vector<ExprHandle>& dims) {
-  return Buf::make("", dtype, dims);
+ExprHandle Buf::make(const std::vector<ExprHandle>& dims) {
+  return Buf::make("", dims);
 }
 
 } // namespace tensorexpr

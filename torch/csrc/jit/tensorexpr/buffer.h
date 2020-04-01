@@ -28,7 +28,7 @@ class Buffer {
       const std::string& name,
       const Dtype& dtype,
       const std::vector<ExprHandle>& dims)
-      : Buffer(BufHandle(name, kHandle, dims), dtype) {}
+      : Buffer(BufHandle(name, dims), dtype) {}
 
   const Buf* data() const {
     return data_;

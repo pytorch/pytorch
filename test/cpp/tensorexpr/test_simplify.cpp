@@ -346,9 +346,9 @@ void testHashDifferenceTypes() {
 void testHashLargeExpression() {
   KernelScope kernel_scope;
   constexpr int N = 1024;
-  Buffer a(BufHandle("A", kHandle, {N}), kInt);
-  Buffer b(BufHandle("B", kHandle, {N}), kInt);
-  Buffer c(BufHandle("C", kHandle, {N}), kInt);
+  Buffer a(BufHandle("A", {N}), kInt);
+  Buffer b(BufHandle("B", {N}), kInt);
+  Buffer c(BufHandle("C", {N}), kInt);
   auto mask = IntImm::make(1);
   VarHandle i("i", kInt);
   auto memcpy_stmt = For::make(
@@ -364,8 +364,8 @@ void testHashLargeExpression() {
               CompareSelectOperation::kEQ),
           mask));
 
-  Buffer d(BufHandle("D", kHandle, {1}), kInt);
-  Buffer e(BufHandle("E", kHandle, {1}), kInt);
+  Buffer d(BufHandle("D", {1}), kInt);
+  Buffer e(BufHandle("E", {1}), kInt);
   auto store_ramp_stmt = Store::make(
       e,
       {Ramp::make(0, 1, 4)},

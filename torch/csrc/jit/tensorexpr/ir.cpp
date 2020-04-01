@@ -169,29 +169,22 @@ const Expr* flattened_index(
   if (ndim != indices.size()) {
     throw malformed_input();
   }
-  std::vector<ExprHandle> strides(ndim);
-  for (size_t i = 0; i < ndim; i++) {
-    if (i == ndim - 1) {
-      strides[i] = ExprHandle(1);
-      continue;
-    }
-    ExprHandle stride = ExprHandle(dims[i + 1]);
-    for (size_t j = i + 2; j < ndim; j++) {
-      stride = stride * ExprHandle(dims[j]);
-    }
-    strides[i] = stride;
+  if (ndim == 0) {
+    return new IntImm(0);
+  }
+  std::vector<const Expr*> strides(ndim);
+  // stride[i] = stride[i+1]*dims[i+1], i < ndim-1
+  // stride[i] = 1,                     i = ndim-1
+  strides[ndim - 1] = new IntImm(1);
+  for (size_t i = 1; i < ndim; i++) {
+    strides[ndim - 1 - i] = new Mul(strides[ndim - i], dims[ndim - i]);
   }
 
-  ExprHandle total_index = int32_t{0};
+  const Expr* total_index = new IntImm(0);
   for (size_t i = 0; i < ndim; i++) {
-    if (i == ndim - 1) {
-      total_index = total_index + ExprHandle(indices[ndim - 1]);
-    } else {
-      total_index =
-          total_index + ExprHandle(indices[i]) * ExprHandle(strides[i]);
-    }
+    total_index = new Add(total_index, new Mul(indices[i], strides[i]));
   }
-  return total_index.node();
+  return total_index;
 }
 
 Dtype Intrinsics::IntrinsicsDtype(IntrinsicsOp op_type, Dtype dt1) {
