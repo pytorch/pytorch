@@ -79,8 +79,8 @@ struct GraphTask {
   // execution of the GraphTask is completed, the captured_vars_ are moved
   // out of the GraphTask and are no longer valid.
   std::vector<Variable> captured_vars_;
-  std::shared_ptr<at::ThreadLocalDebugInfoBase> debug_info_ =
-      at::getThreadLocalDebugInfo();
+  std::shared_ptr<at::ThreadLocalDebugInfo> debug_info_ =
+      at::ThreadLocalDebugInfo::_current();
   std::unordered_set<c10::Stream> leaf_streams;
 
   void init_to_execute(Node& graph_root, const edge_list& outputs);
