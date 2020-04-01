@@ -71,59 +71,6 @@ class Buffer {
   }
 
  private:
-  ExprHandle Index(const ExprHandle& x) const {
-    if (ndim() != 1) {
-      throw malformed_input();
-    }
-    return x;
-  }
-  ExprHandle Index(const ExprHandle& x, const ExprHandle& y) const {
-    if (ndim() != 2) {
-      throw malformed_input();
-    }
-    return x * ExprHandle(strides_[0]) + y;
-  }
-  ExprHandle Index(
-      const ExprHandle& x,
-      const ExprHandle& y,
-      const ExprHandle& z) const {
-    if (ndim() != 3) {
-      throw malformed_input();
-    }
-    return x * ExprHandle(strides_[0]) + y * ExprHandle(strides_[1]) + z;
-  }
-  ExprHandle Index(
-      const ExprHandle& x,
-      const ExprHandle& y,
-      const ExprHandle& z,
-      const ExprHandle& w) const {
-    if (ndim() != 4) {
-      throw malformed_input();
-    }
-    return x * ExprHandle(strides_[0]) + y * ExprHandle(strides_[1]) +
-        z * ExprHandle(strides_[2]) + w;
-  }
-  ExprHandle Index(const std::vector<ExprHandle>& indices) const {
-    if (ndim() != (int)indices.size()) {
-      throw malformed_input();
-    }
-    ExprHandle total_index;
-    for (size_t i = 0; i < indices.size(); i++) {
-      ExprHandle index;
-      if (i == indices.size() - 1) {
-        index = indices[i];
-      } else {
-        index = indices[i] * ExprHandle(strides_[i]);
-      }
-      if (i == 0) {
-        total_index = index;
-      } else {
-        total_index = total_index + index;
-      }
-    }
-    return total_index;
-  }
-
   ExprHandle LoadValue(const std::vector<ExprHandle>& indices) const;
 
   const Buf* data_;
